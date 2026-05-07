@@ -191,7 +191,6 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
             peerId: dto.PeerId,
             selfIdentityId: dto.SelfIdentityId,
             displayName: dto.DisplayName,
-            isOnline: dto.IsOnline,
             isRelayCapable: dto.Relay?.IsRelayCapable == true,
             identitySigningKeySpki: dto.ReverseSignalKeys.IdentitySigningKeySpki,
             identitySigningKeyPrivateKeyEcPrivateKey: dto.ReverseSignalKeys.IdentitySigningKeyPrivateKeyEcPrivateKey,
@@ -242,7 +241,6 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
             PeerId = model.PeerId,
             SelfIdentityId = model.SelfIdentityId,
             DisplayName = model.DisplayName,
-            IsOnline = model.IsOnline,
             IdentityPublicKeyHash = SHA256.HashData(model.IdentitySigningKeySpki),
             Connection = new SimulatedPeerConnectionDto
             {
@@ -588,11 +586,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
         peer.ReverseSignalKeys ??= new();
         peer.IdentityPublicKeyHash ??= Array.Empty<byte>();
 
-        if (!peer.IsOnline)
-        {
-            peer.UiState = SimulatorPeerUiState.Offline;
-        }
-        else if (peer.UiState == SimulatorPeerUiState.Offline)
+        if (peer.UiState == SimulatorPeerUiState.Offline)
         {
             peer.UiState = SimulatorPeerUiState.Ready;
             peer.PendingCorrelationId = null;

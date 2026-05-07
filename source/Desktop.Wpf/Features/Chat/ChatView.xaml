@@ -27,7 +27,7 @@
         <ColumnDefinition Width="Auto"/>
       </Grid.ColumnDefinitions>
       <StackPanel Orientation="Horizontal">
-        <controls:InitialsAvatar Diameter="28" CornerRadius="14" Text="{Binding Initials.Value}" IsOnline="{Binding IsOnline.Value}"/>
+        <controls:InitialsAvatar Diameter="28" CornerRadius="14" Text="{Binding Initials.Value}"/>
         <StackPanel Margin="10,0,0,0">
           <TextBlock Text="{Binding Title.Value}" FontWeight="SemiBold"/>
         </StackPanel>

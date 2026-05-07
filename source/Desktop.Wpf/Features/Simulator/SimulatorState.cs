@@ -23,7 +23,6 @@ public sealed class SimulatedPeerDto
     public PeerId PeerId { get; set; }
     public int SelfIdentityId { get; set; }
     public string? DisplayName { get; set; }
-    public bool IsOnline { get; set; } = true;
     public byte[] IdentityPublicKeyHash { get; set; } = Array.Empty<byte>();
     public SimulatedPeerConnectionDto Connection { get; set; } = new();
     public List<Guid> KnownPeerIds { get; set; } = new();

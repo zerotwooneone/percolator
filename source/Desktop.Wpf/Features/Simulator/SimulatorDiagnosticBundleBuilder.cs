@@ -32,7 +32,6 @@ public sealed class SimulatorDiagnosticBundleBuilder : ISimulatorDiagnosticBundl
                 {
                     p.PeerId,
                     DisplayName = p.DisplayName.CurrentValue ?? p.PeerId.ToString()[..8],
-                    IsOnline = p.IsOnline.CurrentValue,
                     IsRelayCapable = p.IsRelayCapable.CurrentValue,
                     ConnectionMode = p.ConnectionMode.CurrentValue.ToString(),
                     RelayPeerId = p.RelayPeerId.CurrentValue

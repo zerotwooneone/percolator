@@ -10,7 +10,6 @@ public sealed record PeerStateSnapshot(
    Percolator.Network.PeerId PeerId,
     int SelfIdentityId,
     string? DisplayName,
-    bool IsOnline,
     bool IsRelayCapable,
     byte[] IdentitySigningKeySpki,
     byte[] IdentitySigningKeyPrivateKeyEcPrivateKey,

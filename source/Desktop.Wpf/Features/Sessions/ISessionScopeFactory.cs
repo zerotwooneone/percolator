@@ -18,6 +18,5 @@ namespace Desktop.Wpf.Features.Sessions
     {
         public string? DisplayName { get; init; }
         public string? Initials { get; init; }
-        public bool? IsOnline { get; init; }
     }
 }

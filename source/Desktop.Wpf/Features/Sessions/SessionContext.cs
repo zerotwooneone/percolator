@@ -9,7 +9,6 @@ public sealed class SessionContext
     public DirectSessionId SessionId { get; private set; } = UninitializedId;
     public ReactiveProperty<string> PeerName { get; } = new("");
     public ReactiveProperty<string> Initials { get; } = new("?");
-    public ReactiveProperty<bool> IsOnline { get; } = new(false);
     // Per-session composer draft text
     public ReactiveProperty<string> Draft { get; } = new("");
 

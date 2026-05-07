@@ -51,7 +51,7 @@
                   <ColumnDefinition Width="*"/>
                   <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <controls:InitialsAvatar Diameter="36" CornerRadius="18" Text="{Binding Initials.Value}" IsOnline="{Binding IsOnline.Value}"/>
+                <controls:InitialsAvatar Diameter="36" CornerRadius="18" Text="{Binding Initials.Value}"/>
                 <StackPanel Grid.Column="1" Margin="10,0,0,0">
                   <TextBlock Text="{Binding DisplayName.Value}"/>
                   <TextBlock Text="{Binding LastSnippet.Value}" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>

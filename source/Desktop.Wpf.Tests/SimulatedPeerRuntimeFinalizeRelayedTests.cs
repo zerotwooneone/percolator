@@ -88,7 +88,6 @@ public sealed class SimulatedPeerRuntimeFinalizeRelayedTests
                     peerId: inviterPeerId,
                     selfIdentityId: 99000,
                     displayName: "inviter",
-                    isOnline: true,
                     isRelayCapable: false,
                     identitySigningKeySpki: inviterIdentitySpki,
                     identitySigningKeyPrivateKeyEcPrivateKey: inviterIdentityPriv),
@@ -96,7 +95,6 @@ public sealed class SimulatedPeerRuntimeFinalizeRelayedTests
                     peerId: acceptorPeerId,
                     selfIdentityId: 99001,
                     displayName: "acceptor",
-                    isOnline: true,
                     isRelayCapable: false,
                     identitySigningKeySpki: acceptorIdentitySpki,
                     identitySigningKeyPrivateKeyEcPrivateKey: acceptorIdentityPriv)

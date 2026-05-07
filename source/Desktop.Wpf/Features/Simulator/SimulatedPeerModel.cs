@@ -52,7 +52,6 @@ public sealed class SimulatedPeerModel : IDisposable
         Percolator.Network.PeerId peerId,
         int selfIdentityId,
         string? displayName,
-        bool isOnline,
         bool isRelayCapable,
         byte[] identitySigningKeySpki,
         byte[] identitySigningKeyPrivateKeyEcPrivateKey,
@@ -82,16 +81,11 @@ public sealed class SimulatedPeerModel : IDisposable
         IdentitySigningKeyPrivateKeyEcPrivateKey = identitySigningKeyPrivateKeyEcPrivateKey;
 
         _displayName = new ReactiveProperty<string?>(NormalizeDisplayName(displayName));
-        IsOnline = new ReactiveProperty<bool>(isOnline);
         IsRelayCapable = new ReactiveProperty<bool>(isRelayCapable);
 
         var ui = uiState;
         var pending = pendingCorrelationId;
-        if (!isOnline)
-        {
-            ui = SimulatorPeerUiState.Offline;
-        }
-        else if (ui == SimulatorPeerUiState.Offline)
+        if (ui == SimulatorPeerUiState.Offline)
         {
             ui = SimulatorPeerUiState.Ready;
             pending = null;
@@ -143,7 +137,6 @@ public sealed class SimulatedPeerModel : IDisposable
     internal byte[] IdentitySigningKeyPrivateKeyEcPrivateKey { get; }
 
     public ReadOnlyReactiveProperty<string?> DisplayName => _displayName;
-    public ReactiveProperty<bool> IsOnline { get; }
     public ReactiveProperty<bool> IsRelayCapable { get; }
 
     public ReadOnlyReactiveProperty<SimulatorPeerUiState> UiState => _uiState;
@@ -293,7 +286,7 @@ public sealed class SimulatedPeerModel : IDisposable
 
     public void ClearRuntimeState()
     {
-        _uiState.Value = IsOnline.Value ? SimulatorPeerUiState.Ready : SimulatorPeerUiState.Offline;
+        _uiState.Value = SimulatorPeerUiState.Ready;
         _inboundReverseSignalPendingCorrelationId.Value = null;
         _targetPublicKeyHash.Value = null;
         _selectedRouteMode.Value = null;
@@ -370,7 +363,6 @@ public sealed class SimulatedPeerModel : IDisposable
             PeerId: PeerId,
             SelfIdentityId: SelfIdentityId,
             DisplayName: _displayName.Value,
-            IsOnline: IsOnline.Value,
             IsRelayCapable: IsRelayCapable.Value,
             IdentitySigningKeySpki: IdentitySigningKeySpki.ToArray(),
             IdentitySigningKeyPrivateKeyEcPrivateKey: IdentitySigningKeyPrivateKeyEcPrivateKey.ToArray(),
@@ -480,7 +472,6 @@ public sealed class SimulatedPeerModel : IDisposable
     {
         _bag.Dispose();
         _displayName.Dispose();
-        IsOnline.Dispose();
         IsRelayCapable.Dispose();
 
         _uiState.Dispose();

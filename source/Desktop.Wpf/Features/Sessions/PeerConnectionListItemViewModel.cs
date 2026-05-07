@@ -15,7 +15,7 @@ public sealed class PeerConnectionListItemViewModel : IDisposable
     public BindableReactiveProperty<string?> LastSnippet { get; }
     public BindableReactiveProperty<int> UnreadCount { get; }
     public BindableReactiveProperty<string> UnreadDisplay { get; }
-    public BindableReactiveProperty<bool> IsOnline { get; }
+    public BindableReactiveProperty<bool> IsConnectionEstablished { get; }
     public BindableReactiveProperty<DateTimeOffset> LastUpdate { get; }
     public BindableReactiveProperty<string> TimestampText { get; }
 
@@ -45,7 +45,7 @@ public sealed class PeerConnectionListItemViewModel : IDisposable
             .ToBindableReactiveProperty()
             .AddTo(ref _bag);
 
-        IsOnline = model.Status
+        IsConnectionEstablished = model.Status
             .Select(s => s is PeerConnectionStatus.Direct or PeerConnectionStatus.Relay or PeerConnectionStatus.Group)
             .DistinctUntilChanged()
             .ObserveOnCurrentSynchronizationContext()

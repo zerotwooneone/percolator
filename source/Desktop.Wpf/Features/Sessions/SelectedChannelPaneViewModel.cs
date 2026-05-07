@@ -127,8 +127,7 @@ public sealed class SelectedChannelPaneViewModel : ViewModelBase
         var header = new SessionHeader
         {
             DisplayName = model.DisplayName.CurrentValue,
-            Initials = model.Initials.CurrentValue,
-            IsOnline = true
+            Initials = model.Initials.CurrentValue
         };
 
         var resolved = _sessionFactory.GetOrCreate(sessionId, header);

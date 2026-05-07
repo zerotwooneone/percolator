@@ -49,7 +49,6 @@ namespace Desktop.Wpf.Features.Sessions
             {
                 if (header.DisplayName is not null) ctx.PeerName.Value = header.DisplayName;
                 if (header.Initials is not null) ctx.Initials.Value = header.Initials;
-                if (header.IsOnline.HasValue) ctx.IsOnline.Value = header.IsOnline.Value;
             }
 
             var chatVm = scope.ServiceProvider.GetRequiredService<ChatViewModel>();

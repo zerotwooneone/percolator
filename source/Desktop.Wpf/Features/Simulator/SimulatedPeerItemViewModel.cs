@@ -98,12 +98,6 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
             .ToBindableReactiveProperty(true)
             .AddTo(ref _bag);
 
-        var toggleOnline = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
-        toggleOnline.AsObservable()
-            .Subscribe(_ => _model.IsOnline.Value = !_model.IsOnline.CurrentValue)
-            .AddTo(ref _bag);
-        ToggleOnlineCommand = toggleOnline.AddTo(ref _bag);
-
         var toggleRelayCapable = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
         toggleRelayCapable.AsObservable()
             .Subscribe(_ => _model.IsRelayCapable.Value = !_model.IsRelayCapable.CurrentValue)
@@ -208,7 +202,6 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
     public BindableReactiveProperty<bool> ShowClearRuntimeState { get; }
     public BindableReactiveProperty<bool> ShowAcceptRejectInboundPending { get; }
 
-    public ReactiveCommand<Unit> ToggleOnlineCommand { get; }
     public ReactiveCommand<Unit> ToggleRelayCapableCommand { get; }
     public ReactiveCommand<Unit> RemoveCommand { get; }
 

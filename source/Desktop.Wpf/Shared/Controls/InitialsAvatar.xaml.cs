@@ -20,15 +20,6 @@ public partial class InitialsAvatar : UserControl
         set => SetValue(TextProperty, value);
     }
 
-    public static readonly DependencyProperty IsOnlineProperty = DependencyProperty.Register(
-        nameof(IsOnline), typeof(bool), typeof(InitialsAvatar), new PropertyMetadata(false));
-
-    public bool IsOnline
-    {
-        get => (bool)GetValue(IsOnlineProperty);
-        set => SetValue(IsOnlineProperty, value);
-    }
-
     public static readonly DependencyProperty DiameterProperty = DependencyProperty.Register(
         nameof(Diameter), typeof(double), typeof(InitialsAvatar), new PropertyMetadata(36d));
 

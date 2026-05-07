@@ -72,7 +72,6 @@ public sealed class SimulatedPeerRuntimeServiceDecryptFailureDiagnosticsTests
                     peerId: peerId,
                     selfIdentityId: 99000,
                     displayName: "peer",
-                    isOnline: true,
                     isRelayCapable: false,
                     identitySigningKeySpki: identitySpki,
                     identitySigningKeyPrivateKeyEcPrivateKey: identityPriv)

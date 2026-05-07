@@ -48,12 +48,6 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
             .ToBindableReactiveProperty(_model.PeerId.ToString()[..8])
             .AddTo(ref _bag);
 
-        IsOnline = _model.IsOnline
-            .ToBindableReactiveProperty()
-            .AddTo(ref _bag);
-        
-        _bag.Add(IsOnline.Subscribe(newValue=> _model.IsOnline.Value = newValue));
-        
         IsRelayCapable = _model.IsRelayCapable
             .ToBindableReactiveProperty()
             .AddTo(ref _bag);
@@ -82,14 +76,6 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
         OneTimeKeyCount = new BindableReactiveProperty<int>(5).AddTo(ref _bag);
 
         PublishTargetPeerId = new BindableReactiveProperty<Guid?>(null).AddTo(ref _bag);
-
-        var toggleOnline = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
-        toggleOnline.AsObservable().Subscribe(_ => IsOnline.Value = !IsOnline.CurrentValue).AddTo(ref _bag);
-        ToggleOnlineCommand = toggleOnline.AddTo(ref _bag);
-
-        var togglePower = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
-        togglePower.AsObservable().Subscribe(_ => IsOnline.Value = !IsOnline.CurrentValue).AddTo(ref _bag);
-        TogglePowerCommand = togglePower.AddTo(ref _bag);
 
         var toggleRelay = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
         toggleRelay.AsObservable()
@@ -161,8 +147,6 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
 
     public BindableReactiveProperty<string> DisplayName { get; }
 
-    public BindableReactiveProperty<bool> IsOnline { get; }
-
     public BindableReactiveProperty<bool> IsRelayCapable { get; }
 
     public BindableReactiveProperty<string> PublicKeyHashHex { get; }
@@ -188,10 +172,6 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
     public NotifyCollectionChangedSynchronizedViewList<PublishTargetOption> AvailablePublishTargets { get; }
 
     public SimulatorChatViewModel ChatViewModel { get; }
-
-    public ReactiveCommand<Unit> ToggleOnlineCommand { get; }
-
-    public ReactiveCommand<Unit> TogglePowerCommand { get; }
 
     public ReactiveCommand<Unit> ToggleRelayCapableCommand { get; }
 
@@ -406,7 +386,6 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
 
         _bag.Dispose();
         DisplayName.Dispose();
-        IsOnline.Dispose();
         IsRelayCapable.Dispose();
         PublicKeyHashHex.Dispose();
         PublishTargetPeerId.Dispose();

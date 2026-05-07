@@ -58,9 +58,6 @@
 
                   <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top">
                     <CheckBox VerticalAlignment="Center" Margin="0,2,10,0" IsChecked="{Binding IsRelayCapable.Value}" Content="Enable Relay" />
-                    <controls:MatButton IsIcon="True" Variant="Filled" IsRound="True" Command="{Binding TogglePowerCommand}" ToolTip="Toggle Online">
-                      <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconPower}"/>
-                    </controls:MatButton>
                   </StackPanel>
                 </Grid>
 

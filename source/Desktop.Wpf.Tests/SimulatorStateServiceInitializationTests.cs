@@ -99,7 +99,6 @@ public sealed class SimulatorStateServiceInitializationTests
             peerId: peerId,
             selfIdentityId: 99000,
             displayName: "Alice",
-            isOnline: true,
             isRelayCapable: false,
             identitySigningKeySpki: spki,
             identitySigningKeyPrivateKeyEcPrivateKey: priv);

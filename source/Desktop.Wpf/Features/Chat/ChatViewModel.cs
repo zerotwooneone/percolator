@@ -19,7 +19,6 @@ public sealed class ChatViewModel : ViewModelBase
     public BindableReactiveProperty<bool> CanSend { get; }
     public BindableReactiveProperty<string> Title { get; }
     public BindableReactiveProperty<string> Initials { get; }
-    public BindableReactiveProperty<bool> IsOnline { get; }
     public AsyncRelayCommand SendCommand { get; }
     public BindableReactiveProperty<bool> IsNetworkOpen { get; }
     public BindableReactiveProperty<bool> IsRelayed { get; }
@@ -54,7 +53,6 @@ public sealed class ChatViewModel : ViewModelBase
         // Header binds to SessionContext
         Title = _sessionContext.PeerName.ToBindableReactiveProperty("");
         Initials = _sessionContext.Initials.ToBindableReactiveProperty("?");
-        IsOnline = _sessionContext.IsOnline.ToBindableReactiveProperty(false);
 
         IsNetworkOpen = new BindableReactiveProperty<bool>(false);
         IsRelayed = new BindableReactiveProperty<bool>(false); // seed: direct
@@ -121,7 +119,7 @@ public sealed class ChatViewModel : ViewModelBase
     protected override void DisposeCore()
     {
         _bag.Dispose();
-        Disposable.Dispose(MessageInput, CanSend, Title, Initials, IsOnline, IsNetworkOpen, IsRelayed, AutoDiscoveryEnabled, RouteIcon, RouteText);
+        Disposable.Dispose(MessageInput, CanSend, Title, Initials, IsNetworkOpen, IsRelayed, AutoDiscoveryEnabled, RouteIcon, RouteText);
     }
 
     private static string ComputeInitials(string? name)

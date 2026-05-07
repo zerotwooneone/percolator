@@ -13,7 +13,6 @@ public sealed class SimulatedPeerRuntimeTracker : IDisposable
         Peer = peer ?? throw new ArgumentNullException(nameof(peer));
 
         peer.DisplayName.Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
-        peer.IsOnline.Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
         peer.IsRelayCapable.Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
 
         peer.ConnectionMode.Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
