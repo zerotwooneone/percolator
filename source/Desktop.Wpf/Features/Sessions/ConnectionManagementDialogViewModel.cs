@@ -1,6 +1,6 @@
 using Desktop.Wpf.Features.Sessions.Commands;
+using Desktop.Wpf.Features.Self;
 using Desktop.Wpf.Features.Sessions.Models;
-using Desktop.Wpf.Features.Sessions.Queries;
 using Desktop.Wpf.Shared.Mvvm;
 using ObservableCollections;
 using Percolator.Application.Identity;
@@ -9,6 +9,7 @@ using Percolator.Cryptography;
 using R3;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
+using Desktop.Wpf.Features.Sessions.Queries;
 using MediatR;
 using Percolator.Network;
 
@@ -56,10 +57,9 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
 {
     private readonly DisposableBag _bag;
 
-    private readonly IMainInvitationInbox _inbox;
-    private readonly IMainInvitationInboxEvents _inboxEvents;
     private readonly ActiveIdentityContext _active;
     private readonly PeerConnectionStateService _stateService;
+    private readonly IIdentityStateService _identityStateService;
     private readonly IMediator _mediator;
 
     private readonly object _relayHostRefreshLock = new();
@@ -67,9 +67,7 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
 
     private readonly ISynchronizedView<PeerConnectionModel, PeerConnectionModel> _connectionsView;
     private readonly NotifyCollectionChangedSynchronizedViewList<PeerConnectionModel> _connectionsNotify;
-
-    private readonly ObservableList<PendingInvitationItemViewModel> _pendingInvitations = new();
-    private readonly ISynchronizedView<PendingInvitationItemViewModel, PendingInvitationItemViewModel> _pendingInvitationsView;
+    private readonly ISynchronizedView<PeerPendingInvitationModel, PendingInvitationItemViewModel> _pendingInvitationsView;
     private readonly ObservableCollection<RouteModeOption> _routeModeOptions = new();
     private readonly ObservableList<RelayHostOption> _relayHostOptions = new();
     private readonly ISynchronizedView<RelayHostOption, RelayHostOption> _relayHostView;
@@ -95,26 +93,25 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
 
     public INotifyCollectionChangedSynchronizedViewList<PendingInvitationItemViewModel> PendingInvitations { get; }
 
+    public ReadOnlyReactiveProperty<string> IdentityDisplayName => _identityStateService.DisplayName;
+
     public AsyncRelayCommand AcceptInvitationCommand { get; }
     public AsyncRelayCommand BurnInvitationCommand { get; }
-    public AsyncRelayCommand RefreshInboxCommand { get; }
 
     public AsyncRelayCommand SearchAndConnectCommand { get; }
 
     public AsyncRelayCommand DecodeAndInitiateCommand { get; }
 
     public ConnectionManagementDialogViewModel(
-        IMainInvitationInbox inbox,
-        IMainInvitationInboxEvents inboxEvents,
         ActiveIdentityContext active,
         PeerConnectionStateService stateService,
+        IIdentityStateService identityStateService,
         IUiDispatcher ui,
         IMediator mediator)
     {
-        _inbox = inbox;
-        _inboxEvents = inboxEvents;
         _active = active;
         _stateService = stateService;
+        _identityStateService = identityStateService;
         _mediator = mediator;
 
         // Create synchronized view of connections for relay host refresh
@@ -129,8 +126,10 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
         _relayHostView = _relayHostOptions.CreateView(x => x).AddTo(ref _bag);
         RelayHostOptions = _relayHostView.ToNotifyCollectionChanged(ui.CollectionEventDispatcher);
 
-        // Create synchronized view for pending invitations
-        _pendingInvitationsView = _pendingInvitations.CreateView(x => x).AddTo(ref _bag);
+        // Create synchronized view for pending invitations from state service
+        _pendingInvitationsView = _stateService.PendingInbound
+            .CreateView(model => new PendingInvitationItemViewModel(model, ui))
+            .AddTo(ref _bag);
         _pendingInvitationsView.ObserveRemove().Subscribe(evt => evt.Value.View.Dispose()).AddTo(ref _bag);
         PendingInvitations = _pendingInvitationsView.ToNotifyCollectionChanged(ui.CollectionEventDispatcher);
 
@@ -152,17 +151,12 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
 
         InviteTokenText = new BindableReactiveProperty<string?>(null).AddTo(ref _bag);
 
-        RefreshInboxCommand = new AsyncRelayCommand(async _ => await RefreshInboxAsync());
         AcceptInvitationCommand = new AsyncRelayCommand(async obj => await ExecuteAcceptAsync(obj));
         BurnInvitationCommand = new AsyncRelayCommand(async obj => await ExecuteBurnAsync(obj));
 
         SearchAndConnectCommand = new AsyncRelayCommand(async _ => await ExecuteNetworkSearchAsync());
 
         DecodeAndInitiateCommand = new AsyncRelayCommand(async _ => await ExecuteImportTokenAsync());
-
-        _inboxEvents.Changed
-            .SubscribeAwait(async (_, ct) => await RefreshInboxAsync(ct).ConfigureAwait(false), AwaitOperation.Drop)
-            .AddTo(ref _bag);
 
         _ = InitializeAsync().ContinueWith(static t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
     }
@@ -202,7 +196,6 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
         }
 
         PhaseText.Value = null;
-        await RefreshInboxAsync(ct);
         SelectedTabIndex.Value = 0;
     }
 
@@ -210,8 +203,6 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
     {
         InitializeRouteModeOptions();
         await RefreshRelayHostOptionsAsync(ct);
-
-        await RefreshInboxAsync(ct);
 
         var desired = ((ICollection<PendingInvitationItemViewModel>)PendingInvitations).Count > 0 ? 0 : 1;
         SelectedTabIndex.Value = desired;
@@ -250,45 +241,16 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
         SelectedRelayHost.Value ??= _relayHostOptions.FirstOrDefault();
     }
 
-    public async Task RefreshInboxAsync(CancellationToken ct = default)
-    {
-        IReadOnlyList<PendingInvitationDto> open;
-        try
-        {
-            open = await _inbox.GetOpenAsync(ct).ConfigureAwait(false);
-        }
-        catch
-        {
-            return;
-        }
-
-        var items = open
-            .OrderByDescending(x => x.CreatedAtUtc)
-            .Select(p => new PendingInvitationItemViewModel(
-                new PendingSessionId(p.PendingSessionId),
-                p.PeerName,
-                ComputeInitials(p.PeerName),
-                p.IsRelayed,
-                p.IsRelayed
-                    ? $"Via relay: {p.RelayPeerName}{(string.IsNullOrWhiteSpace(p.RelayEndpoint) ? "" : $" ({p.RelayEndpoint})")}"
-                    : null))
-            .ToList();
-
-        foreach (var it in _pendingInvitations)
-            it.Dispose();
-        _pendingInvitations.Clear();
-        foreach (var it in items)
-            _pendingInvitations.Add(it);
-    }
 
     private async Task ExecuteAcceptAsync(object? obj)
     {
         if (obj is not PendingInvitationItemViewModel item) return;
+        if (_active.Identity is null) return;
 
         ApprovePendingSessionResult result;
         try
         {
-            result = await _mediator.Send(new ApprovePendingSessionCommand(item.PendingSessionId));
+            result = await _mediator.Send(new ApprovePendingSessionCommand(item.PendingSessionId, _active.Identity.SelfIdentityId));
         }
         catch (Exception ex)
         {
@@ -303,7 +265,6 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
                 item.SendPath = accepted.SendPath;
                 item.RequestCorrelationId = accepted.RequestCorrelationId.Value.ToString();
                 item.IsExpired.Value = false;
-                await RefreshInboxAsync();
                 break;
             case ApprovePendingSessionResult.RejectedNotReady:
                 item.StatusText.Value = "Rejected: Not Ready";
@@ -314,7 +275,6 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
             case ApprovePendingSessionResult.RejectedExpired:
                 item.StatusText.Value = "Rejected: Expired";
                 item.IsExpired.Value = true;
-                await RefreshInboxAsync();
                 break;
             case ApprovePendingSessionResult.Failed failed:
                 item.StatusText.Value = $"Failed: {failed.ErrorMessage}";
@@ -328,6 +288,7 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
     private async Task ExecuteBurnAsync(object? obj)
     {
         if (obj is not PendingInvitationItemViewModel item) return;
+        if (_active.Identity is null) return;
 
         try
         {
@@ -337,8 +298,6 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
         {
             return;
         }
-
-        await RefreshInboxAsync();
     }
 
     private async Task ExecuteNetworkSearchAsync(CancellationToken ct = default)
@@ -396,14 +355,6 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
         ErrorText.Value = null;
     }
 
-    private static string ComputeInitials(string? name)
-    {
-        if (string.IsNullOrWhiteSpace(name)) return "?";
-        var parts = name.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length == 1)
-            return parts[0].Substring(0, Math.Min(2, parts[0].Length)).ToUpperInvariant();
-        return (parts[0][0].ToString() + parts[^1][0].ToString()).ToUpperInvariant();
-    }
 
     protected override void DisposeCore()
     {

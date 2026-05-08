@@ -1,4 +1,6 @@
-namespace Desktop.Wpf.Features.Sessions.Queries;
+using Percolator.Identity;
+
+namespace Percolator.Application.Sessions;
 
 public sealed record PendingInboundSnapshot(
     Guid PendingSessionId,
@@ -11,5 +13,6 @@ public sealed record PendingInboundSnapshot(
     bool IsRelayed,
     Guid? RelayPeerId,
     string? RelayPeerName,
-    string? RelayEndpoint
+    string? RelayEndpoint,
+    SelfId SelfIdentityId
 );

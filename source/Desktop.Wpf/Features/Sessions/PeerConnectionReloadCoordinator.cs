@@ -61,10 +61,8 @@ public sealed class PeerConnectionReloadCoordinator : IDisposable
 
         _state.UpdateConnections(snapshots);
 
-        // Inbound pending remains separate - load via existing query
-        var inboundQueries = scope.ServiceProvider.GetRequiredService<IPeerConnectionQueries>();
-        var pending = await inboundQueries.LoadPendingInboundAsync(cancellationToken).ConfigureAwait(false);
-        _state.UpdatePendingInbound(pending);
+        // Use identity-scoped reload API for pending inbound
+        await _state.ReloadPendingInboundAsync(_state.ActiveSelfIdentityId.Value, cancellationToken).ConfigureAwait(false);
     }
 
     public void Dispose()

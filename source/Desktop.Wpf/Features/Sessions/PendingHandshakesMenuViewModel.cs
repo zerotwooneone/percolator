@@ -3,6 +3,7 @@ using Desktop.Wpf.Shared.Mvvm;
 using Desktop.Wpf.Shared.Windowing;
 using MediatR;
 using ObservableCollections;
+using Percolator.Application.Identity;
 using Percolator.Application.Network;
 using Percolator.Cryptography;
 using R3;
@@ -19,6 +20,7 @@ public sealed class PendingHandshakesMenuViewModel : System.IDisposable
 
     private readonly IMediator _mediator;
     private readonly PeerConnectionStateService _stateService;
+    private readonly ActiveIdentityContext _active;
     private readonly DisposableBag _bag;
     private readonly ISynchronizedView<PeerPendingInvitationModel, PendingHandshakeItemViewModel> _pendingView;
 
@@ -26,10 +28,12 @@ public sealed class PendingHandshakesMenuViewModel : System.IDisposable
         IWindowManager windowManager,
         IMediator mediator,
         PeerConnectionStateService stateService,
+        ActiveIdentityContext active,
         IUiDispatcher ui)
     {
         _mediator = mediator;
         _stateService = stateService;
+        _active = active;
         _bag = new DisposableBag();
 
         OpenNewHandshakeCommand = new AsyncRelayCommand(_ =>
@@ -40,9 +44,9 @@ public sealed class PendingHandshakesMenuViewModel : System.IDisposable
 
         AcceptHandshakeCommand = new AsyncRelayCommand(async obj =>
         {
-            if (obj is PendingHandshakeItemViewModel item)
+            if (obj is PendingHandshakeItemViewModel item && _active.Identity is not null)
             {
-                var result = await _mediator.Send(new ApprovePendingSessionCommand(item.PendingId)).ConfigureAwait(false);
+                var result = await _mediator.Send(new ApprovePendingSessionCommand(item.PendingId, _active.Identity.SelfIdentityId)).ConfigureAwait(false);
                 switch (result)
                 {
                     case ApprovePendingSessionResult.Accepted accepted:
@@ -72,7 +76,7 @@ public sealed class PendingHandshakesMenuViewModel : System.IDisposable
         });
         BurnHandshakeCommand = new AsyncRelayCommand(async obj =>
         {
-            if (obj is PendingHandshakeItemViewModel item)
+            if (obj is PendingHandshakeItemViewModel item && _active.Identity is not null)
             {
                 await _mediator.Send(new RejectPendingSessionCommand(item.PendingId)).ConfigureAwait(false);
             }

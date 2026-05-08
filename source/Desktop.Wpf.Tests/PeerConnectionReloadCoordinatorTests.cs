@@ -22,15 +22,20 @@ public sealed class PeerConnectionReloadCoordinatorTests
         // ARRANGE
         var fakeTime = new FakeTimeProvider();
 
+        var sidebarCallCount = 0;
+        var inboundCallCount = 0;
+
         var sidebarQueries = new Mock<IPeerConnectionSidebarQueries>(MockBehavior.Strict);
         sidebarQueries
             .Setup(q => q.LoadSidebarConnectionsAsync(123, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Array.Empty<SidebarPeerConnectionDto>());
+            .ReturnsAsync(Array.Empty<SidebarPeerConnectionDto>())
+            .Callback(() => sidebarCallCount++);
 
         var queries = new Mock<IPeerConnectionQueries>(MockBehavior.Strict);
         queries
-            .Setup(q => q.LoadPendingInboundAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Array.Empty<PendingInboundSnapshot>());
+            .Setup(q => q.LoadPendingInboundAsync(It.IsAny<SelfId>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<PendingInboundSnapshot>())
+            .Callback(() => inboundCallCount++);
 
         var sp = new Mock<IServiceProvider>(MockBehavior.Loose);
         sp.Setup(p => p.GetService(typeof(IPeerConnectionSidebarQueries))).Returns(sidebarQueries.Object);
@@ -46,11 +51,11 @@ public sealed class PeerConnectionReloadCoordinatorTests
         var sut = new PeerConnectionReloadCoordinator(scopeFactory.Object, state, fakeTime);
 
         // Seed identity so reload will execute
-        // (InitializeAsync queries the same mocked queries instance and sets ActiveSelfIdentityId)
         state.InitializeAsync(new SelfId(123)).GetAwaiter().GetResult();
 
-        Mock.Get(sidebarQueries.Object).Invocations.Clear();
-        Mock.Get(queries.Object).Invocations.Clear();
+        // Reset counters to focus on debouncing behavior after initialization
+        var callsAfterInitSidebar = sidebarCallCount;
+        var callsAfterInitInbound = inboundCallCount;
 
         // ACT: fire a burst of triggers
         sut.TriggerReload();
@@ -59,14 +64,16 @@ public sealed class PeerConnectionReloadCoordinatorTests
 
         // Advance just under debounce
         fakeTime.Advance(TimeSpan.FromMilliseconds(249));
-        sidebarQueries.Verify(q => q.LoadSidebarConnectionsAsync(123, It.IsAny<CancellationToken>()), Times.Never);
-        queries.Verify(q => q.LoadPendingInboundAsync(It.IsAny<CancellationToken>()), Times.Never);
+
+        // ASSERT: queries not called after initialization
+        (sidebarCallCount - callsAfterInitSidebar).Should().Be(0);
+        (inboundCallCount - callsAfterInitInbound).Should().Be(0);
 
         // Advance past debounce
         fakeTime.Advance(TimeSpan.FromMilliseconds(2));
 
-        // ASSERT
-        sidebarQueries.Verify(q => q.LoadSidebarConnectionsAsync(123, It.IsAny<CancellationToken>()), Times.AtLeastOnce);
-        queries.Verify(q => q.LoadPendingInboundAsync(It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+        // ASSERT: queries called exactly once after debounce
+        (sidebarCallCount - callsAfterInitSidebar).Should().Be(1);
+        (inboundCallCount - callsAfterInitInbound).Should().Be(1);
     }
 }

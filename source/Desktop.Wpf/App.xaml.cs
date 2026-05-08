@@ -144,12 +144,7 @@ public partial class App : Application
                 services.AddSingleton<Desktop.Wpf.Features.Chat.State.ChatStateService>();
                 services.AddSingleton<ChatReloadCoordinator>();
                 services.AddSingleton<IChatReloadCoordinator>(sp => sp.GetRequiredService<ChatReloadCoordinator>());
-                services.AddScoped<Desktop.Wpf.Features.Sessions.IMainInvitationInbox, Desktop.Wpf.Features.Sessions.MainInvitationInbox>();
-                services.AddScoped<Desktop.Wpf.Features.Sessions.IMainInvitationOutbox, Desktop.Wpf.Features.Sessions.MainInvitationOutbox>();
-                services.AddScoped<Desktop.Wpf.Features.Sessions.IMainInvitationActions, Desktop.Wpf.Features.Sessions.MainInvitationActions>();
-                services.AddSingleton<Desktop.Wpf.Features.Sessions.IMainInvitationInboxEvents, Desktop.Wpf.Features.Sessions.MainInvitationInboxEvents>();
                 services.AddScoped<Percolator.Application.Sessions.IPeerConnectionSidebarQueries, Percolator.Infrastructure.Sessions.PeerConnectionSidebarQueries>();
-                services.AddScoped<Desktop.Wpf.Features.Sessions.Queries.IPeerConnectionQueries, Desktop.Wpf.Features.Sessions.Queries.PeerConnectionQueries>();
                 services.AddSingleton<Desktop.Wpf.Features.Sessions.PeerConnectionStateService>();
                 services.AddSingleton<Desktop.Wpf.Features.Sessions.PeerConnectionReloadCoordinator>();
                 services.AddSingleton<SelectedChannelModel>();
@@ -184,6 +179,9 @@ public partial class App : Application
 
                 // Self identity
                 services.AddSingleton<SelfIdentityModel>();
+                services.AddSingleton<Desktop.Wpf.Features.Self.IdentityStateService>();
+                services.AddSingleton<Desktop.Wpf.Features.Self.IIdentityStateService>(sp => sp.GetRequiredService<Desktop.Wpf.Features.Self.IdentityStateService>());
+                services.AddSingleton<Desktop.Wpf.Features.Self.IIdentityBootstrap>(sp => sp.GetRequiredService<Desktop.Wpf.Features.Self.IdentityStateService>());
                 services.AddScoped<IStartupIdentityService, StartupIdentityService>();
                 // Identity repositories (in-memory fakes for desktop)
                 services.AddScoped<Percolator.Identity.IPeerIdentityRepository, Percolator.Infrastructure.Repositories.SqlitePeerIdentityRepository>();

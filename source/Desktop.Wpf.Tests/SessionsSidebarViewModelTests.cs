@@ -1,5 +1,6 @@
 using System;
 using System.Collections.ObjectModel;
+using System.Linq;
 using Desktop.Wpf.Features.Self;
 using Desktop.Wpf.Features.Sessions;
 using Desktop.Wpf.Features.Sessions.Models;
@@ -9,6 +10,7 @@ using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using NUnit.Framework;
+using Percolator.Application.Identity;
 
 namespace Desktop.Wpf.Tests;
 
@@ -22,7 +24,8 @@ public sealed class SessionsSidebarViewModelTests
         var state = new PeerConnectionStateService(Mock.Of<IServiceScopeFactory>(MockBehavior.Loose));
         var pendingWindowManager = new Mock<Desktop.Wpf.Shared.Windowing.IWindowManager>(MockBehavior.Loose);
         var ui = new TestUiDispatcher();
-        var pendingMenu = new PendingHandshakesMenuViewModel(pendingWindowManager.Object, Mock.Of<MediatR.IMediator>(), state, ui);
+        var activeIdentity = new ActiveIdentityContext();
+        var pendingMenu = new PendingHandshakesMenuViewModel(pendingWindowManager.Object, Mock.Of<MediatR.IMediator>(), state, activeIdentity, ui);
         var selection = new SelectedChannelModel();
 
         var sut = new SessionsSidebarViewModel(
@@ -32,8 +35,8 @@ public sealed class SessionsSidebarViewModelTests
             selection,
             ui);
 
-        var itemsCollection = (System.Collections.IList)sut.Items.SourceCollection;
-        itemsCollection.Count.Should().Be(0);
+        // ASSERT: Initially empty
+        sut.Items.Cast<object>().Count().Should().Be(0);
 
         // ACT
         var a1 = new PeerConnectionStateSnapshot(
@@ -46,11 +49,10 @@ public sealed class SessionsSidebarViewModelTests
             LastActivityUtc: System.DateTimeOffset.UtcNow);
         state.UpdateConnections(new[] { a1 });
 
-        // ASSERT
-        itemsCollection = (System.Collections.IList)sut.Items.SourceCollection;
-        itemsCollection.Count.Should().Be(1);
-        itemsCollection[0].Should().BeOfType<PeerConnectionListItemViewModel>();
-        ((PeerConnectionListItemViewModel)itemsCollection[0]).DisplayName.Value.Should().Be("Alice");
+        // ASSERT: One item added
+        sut.Items.Cast<object>().Count().Should().Be(1);
+        var item = sut.Items.Cast<PeerConnectionListItemViewModel>().Single();
+        item.DisplayName.Value.Should().Be("Alice");
     }
 
     [Test]

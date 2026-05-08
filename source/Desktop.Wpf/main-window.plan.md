@@ -466,3 +466,6 @@ After implementing A1–A8 and confirming behavior, perform a dead-code audit an
   - `Desktop.Wpf/Features/Sessions/Queries/PendingInboundSnapshot.cs`
   - `Desktop.Wpf/Features/Sessions/Queries/PeerConnectionQueries.cs`
   - `Desktop.Wpf/Features/Sessions/Queries/PeerConnectionStateSnapshot.cs` (if it exists)
+
+---
+

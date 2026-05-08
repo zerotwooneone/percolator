@@ -85,7 +85,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
                 Mock.Of<IMessageTransportService>(),
                 Mock.Of<IMediator>());
 
-            var result = await sut.Handle(new ApprovePendingSessionCommand(PendingSessionId.NewId()), CancellationToken.None);
+            var result = await sut.Handle(new ApprovePendingSessionCommand(PendingSessionId.NewId(), new SelfId(1)), CancellationToken.None);
             result.Should().BeOfType<ApprovePendingSessionResult.RejectedNotReady>();
             pendingRepo.VerifyNoOtherCalls();
         }
@@ -197,7 +197,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
                 Mock.Of<IMessageTransportService>(),
                 mediator.Object);
 
-            var result = await sut.Handle(new ApprovePendingSessionCommand(pendingId), CancellationToken.None);
+            var result = await sut.Handle(new ApprovePendingSessionCommand(pendingId, identity.SelfIdentityId), CancellationToken.None);
             result.Should().BeOfType<ApprovePendingSessionResult.Failed>();
             pendingRepo.Verify(r => r.DeleteAsync(It.IsAny<PendingSessionId>(), It.IsAny<CancellationToken>()), Times.Never);
         }
@@ -313,7 +313,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
                 Mock.Of<IMessageTransportService>(),
                 mediator.Object);
 
-            var result = await sut.Handle(new ApprovePendingSessionCommand(pendingId), CancellationToken.None);
+            var result = await sut.Handle(new ApprovePendingSessionCommand(pendingId, identity.SelfIdentityId), CancellationToken.None);
             result.Should().BeOfType<ApprovePendingSessionResult.Accepted>();
             pendingRepo.Verify(r => r.DeleteAsync(pendingId, It.IsAny<CancellationToken>()), Times.Once);
         }
@@ -445,7 +445,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
                 transport.Object,
                 mediator.Object);
 
-            var result = await sut.Handle(new ApprovePendingSessionCommand(pendingId), CancellationToken.None);
+            var result = await sut.Handle(new ApprovePendingSessionCommand(pendingId, identity.SelfIdentityId), CancellationToken.None);
             result.Should().BeOfType<ApprovePendingSessionResult.Accepted>();
 
             pendingRepo.Verify(r => r.DeleteAsync(pendingId, It.IsAny<CancellationToken>()), Times.Once);

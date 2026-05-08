@@ -4,6 +4,8 @@ using Microsoft.Extensions.DependencyInjection;
 using ObservableCollections;
 using Percolator.Identity;
 using R3;
+using IPeerConnectionQueries = Percolator.Application.Sessions.IPeerConnectionQueries;
+using PendingInboundSnapshot = Percolator.Application.Sessions.PendingInboundSnapshot;
 
 namespace Desktop.Wpf.Features.Sessions;
 
@@ -11,12 +13,15 @@ public sealed class PeerConnectionStateService : IDisposable
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ObservableList<PeerConnectionModel> _connections = new();
-    private readonly ObservableList<PeerPendingInvitationModel> _pendingInbound = new();
+    // Per-identity buckets for future multi-identity support (currently single-active-identity)
+    private readonly Dictionary<SelfId, ObservableList<PeerPendingInvitationModel>> _pendingInboundBuckets = new();
     private readonly object _stateGate = new();
     private readonly Subject<Unit> _stateMutated = new();
 
     public IReadOnlyObservableList<PeerConnectionModel> Connections => _connections;
-    public IReadOnlyObservableList<PeerPendingInvitationModel> PendingInbound => _pendingInbound;
+    public IReadOnlyObservableList<PeerPendingInvitationModel> PendingInbound => ActiveSelfIdentityId.HasValue 
+        ? _pendingInboundBuckets[ActiveSelfIdentityId.Value] 
+        : new ObservableList<PeerPendingInvitationModel>();
     public SelfId? ActiveSelfIdentityId { get; private set; }
     public Observable<Unit> StateMutated => _stateMutated;
 
@@ -28,6 +33,16 @@ public sealed class PeerConnectionStateService : IDisposable
     public async Task InitializeAsync(SelfId selfIdentityId, CancellationToken cancellationToken = default)
     {
         ActiveSelfIdentityId = selfIdentityId;
+        
+        // Create a bucket for this identity (for future multi-identity support)
+        lock (_stateGate)
+        {
+            if (!_pendingInboundBuckets.ContainsKey(selfIdentityId))
+            {
+                _pendingInboundBuckets[selfIdentityId] = new ObservableList<PeerPendingInvitationModel>();
+            }
+        }
+
         using var scope = _scopeFactory.CreateScope();
         var sidebarQueries = scope.ServiceProvider.GetRequiredService<Percolator.Application.Sessions.IPeerConnectionSidebarQueries>();
 
@@ -57,8 +72,16 @@ public sealed class PeerConnectionStateService : IDisposable
 
         // Inbound pending remains separate - load via existing query
         var inboundQueries = scope.ServiceProvider.GetRequiredService<IPeerConnectionQueries>();
-        var pendingSnapshots = await inboundQueries.LoadPendingInboundAsync(cancellationToken).ConfigureAwait(false);
-        UpdatePendingInbound(pendingSnapshots);
+        var pendingSnapshots = await inboundQueries.LoadPendingInboundAsync(selfIdentityId, cancellationToken).ConfigureAwait(false);
+        UpdatePendingInbound(selfIdentityId, pendingSnapshots);
+    }
+
+    public async Task ReloadPendingInboundAsync(SelfId selfIdentityId, CancellationToken cancellationToken = default)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var inboundQueries = scope.ServiceProvider.GetRequiredService<IPeerConnectionQueries>();
+        var pendingSnapshots = await inboundQueries.LoadPendingInboundAsync(selfIdentityId, cancellationToken).ConfigureAwait(false);
+        UpdatePendingInbound(selfIdentityId, pendingSnapshots);
     }
 
     public void UpdateConnections(IReadOnlyList<PeerConnectionStateSnapshot> snapshots)
@@ -100,11 +123,18 @@ public sealed class PeerConnectionStateService : IDisposable
         _stateMutated.OnNext(Unit.Default);
     }
 
-    public void UpdatePendingInbound(IReadOnlyList<PendingInboundSnapshot> snapshots)
+    public void UpdatePendingInbound(SelfId selfIdentityId, IReadOnlyList<PendingInboundSnapshot> snapshots)
     {
         lock (_stateGate)
         {
-            var existingById = _pendingInbound.ToDictionary(p => p.PendingSessionId);
+            // Ensure the bucket exists for this identity
+            if (!_pendingInboundBuckets.TryGetValue(selfIdentityId, out var bucket))
+            {
+                bucket = new ObservableList<PeerPendingInvitationModel>();
+                _pendingInboundBuckets[selfIdentityId] = bucket;
+            }
+
+            var existingById = bucket.ToDictionary(p => p.PendingSessionId);
 
             var toRemove = existingById.Keys.Except(snapshots.Select(s => s.PendingSessionId)).ToList();
             foreach (var id in toRemove)
@@ -112,7 +142,7 @@ public sealed class PeerConnectionStateService : IDisposable
                 if (existingById.TryGetValue(id, out var model))
                 {
                     // FIX: Remove from the collection BEFORE disposing to prevent UI glitching
-                    _pendingInbound.Remove(model);
+                    bucket.Remove(model);
                     model.Dispose();
                 }
             }
@@ -132,7 +162,8 @@ public sealed class PeerConnectionStateService : IDisposable
                         snapshot.PeerName,
                         snapshot.IsRelayed,
                         snapshot.CreatedAtUtc);
-                    _pendingInbound.Add(model);
+                    model.UpdateFromSnapshot(snapshot);
+                    bucket.Add(model);
                 }
             }
         }
@@ -148,9 +179,14 @@ public sealed class PeerConnectionStateService : IDisposable
             _connections.Clear();
             foreach (var c in cons) c.Dispose();
 
-            var pends = _pendingInbound.ToArray();
-            _pendingInbound.Clear();
-            foreach (var p in pends) p.Dispose();
+            // Clean up per-identity buckets
+            foreach (var bucket in _pendingInboundBuckets.Values)
+            {
+                var bucketItems = bucket.ToArray();
+                bucket.Clear();
+                foreach (var item in bucketItems) item.Dispose();
+            }
+            _pendingInboundBuckets.Clear();
         }
         _stateMutated.Dispose();
     }

@@ -9,6 +9,7 @@ using Percolator.Application.Services;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
+using Percolator.Identity;
 using Percolator.Network;
 using Percolator.Network.ValueObjects;
 
@@ -23,7 +24,7 @@ namespace Percolator.Application.Network
         public sealed record Failed(string ErrorMessage) : ApprovePendingSessionResult;
     }
 
-    public sealed record ApprovePendingSessionCommand(PendingSessionId PendingSessionId) : IRequest<ApprovePendingSessionResult>;
+    public sealed record ApprovePendingSessionCommand(PendingSessionId PendingSessionId, SelfId SelfIdentityId) : IRequest<ApprovePendingSessionResult>;
 
     internal sealed class ApprovePendingSessionHandler : IRequestHandler<ApprovePendingSessionCommand, ApprovePendingSessionResult>
     {
@@ -82,7 +83,13 @@ namespace Percolator.Application.Network
 
         public async Task<ApprovePendingSessionResult> Handle(ApprovePendingSessionCommand request, CancellationToken cancellationToken)
         {
+            // Validate that the requested SelfId matches the active identity
             if (!_activeIdentityAccessor.IsActive || _active.Identity is null || _active.Keys is null)
+            {
+                return new ApprovePendingSessionResult.RejectedNotReady();
+            }
+
+            if (_active.Identity.SelfIdentityId != request.SelfIdentityId)
             {
                 return new ApprovePendingSessionResult.RejectedNotReady();
             }

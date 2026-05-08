@@ -190,7 +190,7 @@ public sealed class ApprovePendingSessionCommandTests
             mediator.Object);
 
         var result = await handler.Handle(
-            new ApprovePendingSessionCommand(pendingId),
+            new ApprovePendingSessionCommand(pendingId, new SelfId(selfIdentityId)),
             CancellationToken.None);
 
         // Assert

@@ -1,5 +1,6 @@
 using MediatR;
 using Percolator.Cryptography;
+using Percolator.Identity;
 
 namespace Percolator.Application.Network;
 

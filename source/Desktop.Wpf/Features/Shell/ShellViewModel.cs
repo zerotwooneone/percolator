@@ -17,28 +17,25 @@ public sealed class ShellViewModel : ViewModelBase
     public BindableReactiveProperty<bool> IsLoading { get; }
 
     private readonly INavigationService _navigation;
-    private readonly IStartupIdentityService _startupIdentity;
+    private readonly IIdentityBootstrap _identityBootstrap;
     private readonly SelfIdentityModel _self;
     private IServiceScope? _identityScope;
     private readonly IIdentityScopeAccessor _identityScopeAccessor;
     private readonly IWindowManager _windowManager;
-    private readonly PeerConnectionStateService _peerConnectionStateService;
 
     public ICommand OpenHandshakeSimulatorCommand { get; }
 
     public ShellViewModel(INavigationService navigation,
-                          IStartupIdentityService startupIdentity,
+                          IIdentityBootstrap identityBootstrap,
                           SelfIdentityModel self,
                           IIdentityScopeAccessor identityScopeAccessor,
-                          IWindowManager windowManager,
-                          PeerConnectionStateService peerConnectionStateService)
+                          IWindowManager windowManager)
     {
         _navigation = navigation;
-        _startupIdentity = startupIdentity;
+        _identityBootstrap = identityBootstrap;
         _self = self;
         _identityScopeAccessor = identityScopeAccessor;
         _windowManager = windowManager;
-        _peerConnectionStateService = peerConnectionStateService;
 
         if (_identityScopeAccessor.Current is null)
         {
@@ -71,31 +68,8 @@ public sealed class ShellViewModel : ViewModelBase
     {
         try
         {
-            // Resolve or create the domain identity via startup service
-            var domainIdentity = await _startupIdentity.ResolveOrCreateAsync();
-            
-            // if (dto is null)
-            // {
-            //     // Navigate to new-user screen (VM-first)
-            //     var newUserVm = _identityScopeAccessor.Current.GetRequiredService<Desktop.Wpf.Features.Shell.NewUserViewModel>();
-            //     _navigation.Navigate(newUserVm);
-            //     return;
-            // }
-
-            // Populate SelfIdentity model
-            
-            //todo: figure out what to use for display name
-            var displayName = domainIdentity.DisplayName?.Value ?? domainIdentity.Id.ToString();
-            _self.DisplayName.Value = displayName;
-            _self.Initials.Value = ComputeInitials(displayName);
-            _self.Id.Value = domainIdentity.Id.ToString();
-
-            // Resolve application identity + keys and populate ActiveIdentityContext.
-            var orchestrator = _identityScopeAccessor.Current.GetRequiredService<IIdentityOrchestrator>();
-            await orchestrator.ResolveIdentityAsync(domainIdentity.Id, CancellationToken.None);
-
-            // Initialize the peer connection state service with the self identity ID
-            await _peerConnectionStateService.InitializeAsync(domainIdentity.Id, CancellationToken.None);
+            // Bootstrap the identity using the IdentityStateService
+            await _identityBootstrap.BootstrapAsync(CancellationToken.None);
 
             // Build the SessionShell from the identity-scoped provider
             var sidebarVm = _identityScopeAccessor.Current.GetRequiredService<SessionsSidebarViewModel>();

@@ -5,6 +5,7 @@ using Percolator.Application.Network;
 using Percolator.ApplicationTests.Services;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
+using Percolator.Identity;
 
 namespace Percolator.ApplicationTests.Network;
 
