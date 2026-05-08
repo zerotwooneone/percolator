@@ -162,6 +162,7 @@ public partial class App : Application
                 services.AddSingleton<Desktop.Wpf.Features.Simulator.ISimulatorDiagnosticBundleBuilder, Desktop.Wpf.Features.Simulator.SimulatorDiagnosticBundleBuilder>();
                 services.AddSingleton<ISimulatorInitializer, SimulatorInitializer>();
                 services.AddSingleton<Desktop.Wpf.Features.Simulator.ISimulatedPeerPendingInbox, Desktop.Wpf.Features.Simulator.SimulatedPeerPendingInbox>();
+                services.AddHostedService<Desktop.Wpf.Features.Simulator.SimulatorStateWarmupHostedService>();
                 services.AddScoped<Desktop.Wpf.Features.Simulator.ISimulatorMainIngressService, Desktop.Wpf.Features.Simulator.SimulatorMainIngressService>();
                 services.AddScoped<Desktop.Wpf.Features.Simulator.ISimulatorRelayDeliveryService>(sp =>
                     new Desktop.Wpf.Features.Simulator.SimulatorRelayDeliveryService(
