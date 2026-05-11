@@ -469,3 +469,161 @@ After implementing A1–A8 and confirming behavior, perform a dead-code audit an
 
 ---
 
+## Chunk B
+
+### Goal
+
+Serialize simulator persistence writes and make interceptor resolution safe/fast without introducing a simulator-wide runtime that would be hard to lift-and-shift into a standalone simulator application.
+
+Key simplifications:
+
+- **Authoritative mapping:** `SimulatorStateService.Peers` remains the source of truth for endpoint -> simulated peer.
+- **Peers can change host/port at runtime:** we maintain an in-memory index that tracks changes.
+- **No startup warmup requirement:** simulator state is best-effort and should not block app startup.
+
+### B0) Persistence: single-writer queue for JSON state
+
+1) Implement a persistence wrapper dedicated to write serialization:
+
+- `QueuedSimulatorStateRepository : ISimulatorStateRepository`
+
+Behavior:
+
+- `LoadStateAsync` and `SaveStateAsync` are both scheduled onto a single background consumer (FIFO).
+- This wrapper is the *only* concurrency boundary for simulator JSON file access.
+- Optional: coalesce “save requested” events by keeping only the most recent snapshot (best-effort persistence).
+
+Invariants:
+
+- At most one file write in-flight.
+- No `.tmp` file lock contention caused by concurrent writes.
+
+Notes:
+
+- This wrapper is portable to a future standalone simulator app.
+- Remove `_ioGate` from `JsonSimulatorStateRepository` (queue owns all IO serialization).
+
+Research notes / impacted call sites:
+
+- **DI registration** currently registers the JSON repo directly:
+  - **File:** `Desktop.Wpf/App.xaml.cs`
+  - **Current:** `services.AddSingleton<Desktop.Wpf.Features.Simulator.ISimulatorStateRepository, Desktop.Wpf.Features.Simulator.JsonSimulatorStateRepository>();`
+  - **Change:** register `JsonSimulatorStateRepository` as the inner implementation and register `QueuedSimulatorStateRepository` as the `ISimulatorStateRepository`.
+- **Startup warmup** is currently registered:
+  - **File:** `Desktop.Wpf/App.xaml.cs`
+  - `services.AddHostedService<Desktop.Wpf.Features.Simulator.SimulatorStateWarmupHostedService>();`
+  - This conflicts with “best-effort, do not block app startup”; remove it as part of Chunk B.
+- **Save trigger** already exists and will benefit immediately from queued IO:
+  - **File:** `Desktop.Wpf/Features/Simulator/SimulatorStateService.cs`
+  - `_saveTrigger ... SubscribeAwait(async (snap, ct) => await _store.SaveStateAsync(snap, ct)`
+  - With queued IO, this no longer risks concurrent `.tmp` writes.
+
+### B1) Endpoint resolution: maintain an in-memory index derived from `SimulatorStateService.Peers`
+
+1) Add a small index inside `SimulatorStateService`:
+
+- Example shape: `ConcurrentDictionary<DnsEndPoint, PeerId>` keyed by endpoint.
+
+Model:
+
+- Replace separate host/port properties on `SimulatedPeerModel` with a single reactive endpoint:
+  - `BindableReactiveProperty<DnsEndPoint> Endpoint`
+- Any UI concerns (host/port editing) should be handled by viewmodels that project `Endpoint`.
+
+2) Build/refresh the index:
+
+- On `InitializeAsync` after loading peers.
+- On peer add/remove.
+- On endpoint changes for any peer.
+
+3) Host/port change tracking:
+
+- Subscribe to each peer model’s endpoint reactive property.
+- When the endpoint changes, update the index entry (remove old endpoint, add new endpoint).
+
+4) Expose a query method on the state service:
+
+- `bool TryResolvePeerId(DnsEndPoint endpoint, out PeerId peerId)`
+
+Contract:
+
+- Add `TryResolvePeerId` to `ISimulatorStateService` so interceptor code stays interface-based.
+
+Notes:
+
+- Reads must be safe from any thread.
+- Mutations (index updates) are centralized in `SimulatorStateService` and occur as a consequence of state changes.
+
+Research notes / impacted call sites:
+
+- **Model currently stores host/port separately**:
+  - **File:** `Desktop.Wpf/Features/Simulator/SimulatedPeerModel.cs`
+  - `ReadOnlyReactiveProperty<string?> Host` and `ReadOnlyReactiveProperty<int> Port`
+  - `SetConnection(ConnectionMode mode, string? host, int port, PeerId relayPeerId)` mutates host/port
+  - `Freeze()` stores `Host` and `Port` into `PeerStateSnapshot`
+- **Snapshot currently stores host/port**:
+ - **Snapshot currently stores host/port**:
+  - **File:** `Desktop.Wpf/Features/Simulator/PeerStateSnapshot.cs`
+  - Fields: `string? Host`, `int Port`
+  - Change: store `DnsEndPoint` in the snapshot.
+  - Persistence: JSON schema remains host/port; repository maps host/port <-> `DnsEndPoint`.
+- **State initialization creates peer from snapshot using host/port**:
+  - **File:** `Desktop.Wpf/Features/Simulator/SimulatorStateService.cs`
+  - `CreatePeerFromSnapshot(... host: snap.Host, port: snap.Port ...)`
+- **Peer creation allocates host + port today**:
+  - **File:** `Desktop.Wpf/Features/Simulator/SimulatorStateService.cs`
+  - `AllocateNextLoopbackHostOnPeerGate()` returns `127.77.x.y`
+  - `SimulatorPort` defaulting to `5002`
+  - This will become allocation of a `DnsEndPoint`.
+- **Runtime persistence tracker marks peer dirty on Host/Port changes**:
+  - **File:** `Desktop.Wpf/Features/Simulator/Tracking/SimulatedPeerRuntimeTracker.cs`
+  - Subscribes to `peer.Host` and `peer.Port`
+  - Must be updated to subscribe to `peer.Endpoint` (single property) so endpoint changes trigger persistence.
+- **UI viewmodels read host/port directly**:
+  - **File:** `Desktop.Wpf/Features/Simulator/SimulatedPeerCardViewModel.cs`
+    - `TryResolveEndpoint()` / `TryResolveEndpointParts()` use `_model.Host.CurrentValue` / `_model.Port.CurrentValue`
+  - Similar patterns exist in other simulator VMs.
+  - With the plan’s model change, these VMs must project `Endpoint.Host` / `Endpoint.Port` for UI.
+
+Open questions / decisions to remove ambiguity:
+
+- **Endpoint type in persistence DTOs:** the JSON state uses `SimulatedPeerConnectionDto.Host`/`.Port` today.
+  - Decision: keep JSON schema as host+port for stability, and map to/from `DnsEndPoint` in the repository.
+- **`DnsEndPoint` normalization:** the index assumes that endpoints used in interception match endpoints stored on peers.
+  - Decision: always store endpoints with a canonical host string (e.g., the literal string value used in DTO, typically `127.77.x.y`).
+
+### B2) Interceptor: fast-path lookup, no IO, treat “not found” as non-existent peer
+
+1) `SimulatorOutboundInterceptor` should resolve simulated peers via the state service query method.
+
+2) If `TryResolvePeerId` fails:
+
+- return false and allow the normal non-simulator behavior.
+
+Rules:
+
+- Do not initialize simulator state from the interceptor.
+- Do not perform filesystem IO on the interceptor path.
+
+Research notes / impacted call sites:
+
+- **Interceptor currently enumerates peers and compares host/port**:
+  - **File:** `Desktop.Wpf/Features/Simulator/SimulatorOutboundInterceptor.cs`
+  - `TryResolveSimulatedPeerId(...)` and `InterceptDeliverOpaqueMessageAsync(...)` both use `_state.Peers.FirstOrDefault(...)` over `Host.CurrentValue` + `Port.CurrentValue`.
+  - This must be replaced with `_state.TryResolvePeerId(endpoint, out peerId)` (new API) to avoid enumeration and to align with endpoint indexing.
+
+### B3) Testing / validation
+
+1) Add a test that triggers multiple concurrent save requests and asserts:
+
+- no deadlock/hang
+- only one writer executes at a time
+
+2) Add a test that changes a peer’s endpoint and asserts:
+
+- `TryResolvePeerId` reflects the new endpoint
+- old endpoint no longer resolves
+
+Test location:
+
+- Add these tests to `Desktop.Wpf.Tests`.
