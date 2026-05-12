@@ -627,3 +627,171 @@ Research notes / impacted call sites:
 Test location:
 
 - Add these tests to `Desktop.Wpf.Tests`.
+
+---
+
+## Chunk C
+
+### Goal
+
+Reduce duplicated test-only implementations of `ISimulatorStateRepository` down to a single reusable test repo (with opt-in overrides) and bring simulator tests closer to the standards in `source/unit-testing.md`.
+
+### C0) Inventory: test implementations of `ISimulatorStateRepository`
+
+Current test implementations (as of this plan):
+
+- **`Desktop.Wpf.Tests/SimulatedPeerRuntimeFinalizeRelayedTests.cs`**
+  - `InMemoryRepository : ISimulatorStateRepository`
+  - Stores `SavedSnapshot`; returns `Peers/Relationships/Relays` snapshots.
+
+- **`Desktop.Wpf.Tests/SimulatedPeerRuntimeFinalizeTests.cs`**
+  - `InMemoryRepository : ISimulatorStateRepository`
+  - Same pattern as above.
+
+- **`Desktop.Wpf.Tests/SimulatedPeerRuntimeServiceDecryptFailureDiagnosticsTests.cs`**
+  - `InMemoryRepository : ISimulatorStateRepository`
+  - Same pattern as above.
+
+- **`Desktop.Wpf.Tests/SimulatedPeerRuntimeStandardHandshakeRelayedTests.cs`**
+  - `InMemoryRepository : ISimulatorStateRepository`
+  - Same pattern as above.
+
+- **`Desktop.Wpf.Tests/SimulatorStateServiceEndpointResolutionTests.cs`**
+  - `InMemorySimulatorStateRepository : ISimulatorStateRepository`
+  - Stores a single `_snapshot` and returns it on load.
+
+- **`Desktop.Wpf.Tests/SimulatorStateServiceInitializationTests.cs`**
+  - `RepositoryStub : ISimulatorStateRepository`
+  - Uses a `TaskCompletionSource` to gate `LoadStateAsync` and simulate “blocked initialization”.
+
+Notes:
+
+- The four `InMemoryRepository` classes are effectively the same implementation (snapshot from `Peers/Relationships/Relays` + capture last saved snapshot).
+- The initialization tests need *gating* semantics; that is legitimately different and should remain explicit.
+- Endpoint resolution tests currently use a different pattern (snapshot-backed store) but can still be expressed as the same shared repo with a seeded snapshot.
+
+### C1) Consolidation plan: one shared repo + small targeted wrappers
+
+1) Create a single shared test repo implementation in `Desktop.Wpf.Tests/SimulatorTestHelpers.cs` (preferred; do not proliferate files), with a concrete, non-ambiguous API:
+
+- `internal sealed class InMemorySimulatorStateRepository : ISimulatorStateRepository`
+
+Core behavior:
+
+- Stores a single `SimulatorStateSnapshot` in-memory.
+- `LoadStateAsync` returns that snapshot; if none is set, returns an *empty snapshot* with `Version = 1` and empty lists.
+- `SaveStateAsync` overwrites the stored snapshot and tracks:
+  - `LastSavedSnapshot` (exact reference/value saved)
+  - `SaveCallCount`
+  - `LoadCallCount`
+
+Required members (explicit):
+
+- `public SimulatorStateSnapshot? LastSavedSnapshot { get; private set; }`
+- `public int SaveCallCount { get; private set; }`
+- `public int LoadCallCount { get; private set; }`
+- `public void Seed(SimulatorStateSnapshot snapshot)`
+- `public SimulatorStateSnapshot Current { get; }` (returns seeded/current snapshot, never null)
+
+Optional convenience helpers (keep minimal, avoid overfitting tests):
+
+- Avoid `SeedPeers(params SimulatedPeerModel[])` because it bakes in `Freeze()` behavior and encourages tests to “know” how persistence snapshots are built.
+- Prefer `Seed(snapshot)` and create the `SimulatorStateSnapshot` explicitly in the test when persistence shape matters.
+
+2) Provide *one* thin wrapper for initialization gating (removes ambiguity about “keep a dedicated gated repo”):
+
+- `internal sealed class GatedLoadSimulatorStateRepository : ISimulatorStateRepository`
+  - Constructor takes an `InMemorySimulatorStateRepository inner`.
+  - `LoadStateAsync` awaits a `TaskCompletionSource` before delegating to `inner.LoadStateAsync`.
+  - `SaveStateAsync` delegates directly.
+  - Explicit control surface:
+    - `public void ReleaseLoad()` OR `public void ReleaseLoadWith(SimulatorStateSnapshot snapshot)` (pick one)
+
+This preserves the explicit “blocked load” behavior and prevents copy/paste `TaskCompletionSource` logic across tests.
+
+3) Replace the repeated `InMemoryRepository` classes in:
+
+- `SimulatedPeerRuntimeFinalizeRelayedTests`
+- `SimulatedPeerRuntimeFinalizeTests`
+- `SimulatedPeerRuntimeServiceDecryptFailureDiagnosticsTests`
+- `SimulatedPeerRuntimeStandardHandshakeRelayedTests`
+
+with the shared `InMemorySimulatorStateRepository`.
+
+Concrete change per file:
+
+- Delete the nested `InMemoryRepository` type.
+- Replace construction sites with:
+  - `var repo = new InMemorySimulatorStateRepository();`
+  - Seed with `repo.Seed(new SimulatorStateSnapshot(...))` OR keep the current pattern by building a snapshot from `SimulatedPeerModel.Freeze()` inside the test (explicitly in Arrange).
+
+Rationale: the repository double should be a reusable boundary, while the test remains explicit about the input state.
+
+4) Migrate the endpoint-resolution test repository:
+
+- **File:** `Desktop.Wpf.Tests/SimulatorStateServiceEndpointResolutionTests.cs`
+- Replace `InMemorySimulatorStateRepository` with the shared `InMemorySimulatorStateRepository`.
+- In `CreateSut()`, do:
+  - `var store = new InMemorySimulatorStateRepository();`
+  - (Optional) `store.Seed(emptySnapshot)` if needed for clarity (but it should already default to empty).
+
+5) Migrate initialization tests to the gated wrapper:
+
+- **File:** `Desktop.Wpf.Tests/SimulatorStateServiceInitializationTests.cs`
+  - Replace `RepositoryStub` with:
+    - `var inner = new InMemorySimulatorStateRepository();`
+    - `var store = new GatedLoadSimulatorStateRepository(inner);`
+  - Where the tests currently call `store.Release(snapshot)`, replace with:
+    - `inner.Seed(snapshot); store.ReleaseLoad();`
+
+This removes ambiguity: there is exactly one way to do “blocked load” across the suite.
+
+6) Do NOT introduce additional repository test doubles unless a test has a clearly different contract to simulate (e.g., load cancellation).
+
+### C2) Test quality improvements (aligned with `source/unit-testing.md`)
+
+Guidance to apply while consolidating:
+
+1) AAA pattern and intention-revealing names
+
+- Ensure each test has visually separated **Arrange / Act / Assert**.
+- Prefer behavior naming, e.g. `TryResolvePeerId_WhenEndpointChanges_UpdatesIndex`.
+
+2) Prefer black-box assertions
+
+- Assert via public surface area:
+  - return values
+  - observable state on public models (`Peers`, `Relationships`, etc.)
+  - repository side effects (`LastSavedSnapshot`)
+- Avoid asserting internal sequencing unless it’s a business requirement.
+
+3) Avoid over-mocking
+
+- `ISimulatorStateRepository` is an external dependency (IO boundary), so a fake/in-memory implementation is appropriate.
+- Prefer using real models (`SimulatedPeerModel`, snapshots) rather than mocks.
+
+4) Reduce copy/paste “repo + sut wiring”
+
+- Centralize common SUT construction helpers (already partially present in tests).
+- Ensure helpers don’t hide important per-test intent; keep per-test setup explicit for what matters.
+
+Specific constraints (remove ambiguity):
+
+- Do not add “assert helper” methods that assert internal details (e.g., specific intermediate messages enqueued), unless those are part of the public contract.
+- Prefer asserting observable outcomes:
+  - method return values
+  - changes on `sut.Peers` / `sut.Relays`
+  - `store.LastSavedSnapshot` and its contents
+
+### Expected outcome
+
+- Replace 4 “clone” repositories with a single shared `InMemorySimulatorStateRepository`.
+- Keep 1 specialized gated repo for initialization tests.
+- Lower maintenance cost and fewer compilation breakages when `SimulatorStateSnapshot` or peer models evolve.
+
+Definition of done:
+
+- Exactly one “general purpose” `ISimulatorStateRepository` test double exists in `Desktop.Wpf.Tests`.
+- Exactly one “gated load” wrapper exists (and is only used by initialization tests).
+- No test file contains a nested `: ISimulatorStateRepository` class.
+- `dotnet test Desktop.Wpf.Tests/Desktop.Wpf.Tests.csproj` passes.
