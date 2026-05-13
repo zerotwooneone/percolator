@@ -1,797 +1,508 @@
 ## Chunk A
 
-### Connection Management Dialog (Incoming Signals) – Big-bang redesign plan (concrete changes)
+### Problem statement
 
-**Intent:** Make the Incoming Signals tab a projection of the *existing canonical pending inbound state* (`PeerConnectionStateService.PendingInbound`) and its reload mechanism (`PeerConnectionReloadCoordinator` + MediatR notifications), instead of maintaining its own private list and private refresh/event-bus.
+When a handshake is **initiated by the simulator** (simulated peer invites Main) and the user clicks **Accept** in the Main window:
 
-This is a convergence plan:
+- Main creates the session and sends an `InviteHandshakeResponse` back to the simulator (via `ApprovePendingSessionCommand` -> `InviteHandshakeResponseDeliveryService`).
+- That response is intercepted on the desktop side (`SimulatorOutboundInterceptor.TryDeliverInviteHandshakeResponse`).
+- The interceptor currently forwards the response to `SimulatorStateService.ReceiveInviteHandshakeResponseFromMainAsync`.
+- `ReceiveInviteHandshakeResponseFromMainAsync` queues the response into `_pending` and marks the simulated peer as `AwaitingUserAcceptance` (via `MarkInboundPending`).
 
-- The app already has a canonical “pending inbound” concept:
-  - Query: `Percolator.Application.Sessions.IPeerConnectionQueries.LoadPendingInboundAsync(...)`
-  - State: `Desktop.Wpf.Features.Sessions.PeerConnectionStateService.PendingInbound`
-  - Reload: `Desktop.Wpf.Features.Sessions.PeerConnectionReloadCoordinator`
-  - Signals: `Desktop.Wpf.Features.Sessions.Handlers.PeerConnectionStateUpdateHandlers` handles
-    - `PendingSessionCreatedNotification`
-    - `PendingSessionRemovedNotification`
+This behavior conflates **two different concepts**:
 
-The dialog should use that, and we should delete the parallel system (`IMainInvitationInbox`, `IMainInvitationInboxEvents`, ad-hoc list rebuild).
+- **Inbound invite request** (requires user acceptance before creating a session)
+- **Inbound invite response** (is the acceptance/ack; should immediately finalize and create a session for the original inviter)
 
----
+The observable failure mode is that the simulator does **not** complete its session, so subsequent chat send attempts fail with “No session found …”.
 
-## A1) Define the UI data contract by mapping it to existing snapshots (no new query interface)
+### Desired end state
 
-**Decision:** Do *not* introduce a new `IIncomingSignalsQueries` right now.
-
-Reason: The dialog’s data needs are already covered by `PendingInboundSnapshot` (relay metadata, inviter fingerprint, expiry, etc.) loaded by `IPeerConnectionQueries.LoadPendingInboundAsync()`. The missing piece is: the **model** exposed by `PeerConnectionStateService.PendingInbound` currently throws away most of that snapshot.
-
-**Layering decision:** `IPeerConnectionQueries` is a cross-domain read model query and therefore belongs in `Percolator.Application`. Its implementation belongs in `Percolator.Infrastructure`. WPF is responsible for presentation concerns (e.g., computing initials), and those do not need to move into `Percolator.Application`.
-
-#### Concrete change (required): move `IPeerConnectionQueries` + snapshots out of WPF
-
-1) Create the application-layer query contract.
-
-- **File:** `Percolator.Application/Sessions/IPeerConnectionQueries.cs` (new)
-  - Move the existing WPF `IPeerConnectionQueries` interface here.
-  - Update namespaces to `Percolator.Application.Sessions`.
-
-2) Move the read model record(s) used by the contract.
-
-- **File:** `Percolator.Application/Sessions/PendingInboundSnapshot.cs` (new)
-  - Move the existing WPF `PendingInboundSnapshot` record here.
-  - Keep this as a pure immutable record.
-
-- **File:** `Percolator.Application/Sessions/PeerConnectionStateSnapshot.cs` (new)
-  - Move the existing WPF `PeerConnectionStateSnapshot` record here (if `LoadAllConnectionsAsync(...)` remains part of the contract).
-  - Keep this as a pure immutable record.
-
-3) Create the infrastructure implementation.
-
-- **File:** `Percolator.Infrastructure/Sessions/PeerConnectionQueries.cs` (new)
-  - Move the existing WPF `PeerConnectionQueries` implementation here.
-  - Update namespaces to `Percolator.Infrastructure.Sessions`.
-  - Implement `Percolator.Application.Sessions.IPeerConnectionQueries`.
-
-4) Update DI wiring.
-
-- **File:** `Percolator.Infrastructure/ServiceCollectionExtensions.cs` (or `Percolator.Infrastructure/Sessions/...` if sessions has its own extensions)
-  - Register `IPeerConnectionQueries` -> `PeerConnectionQueries`.
-- **File:** `Desktop.Wpf/App.xaml.cs`
-  - Remove any WPF registrations for the old `Desktop.Wpf.Features.Sessions.Queries.IPeerConnectionQueries`.
-    - Expected existing registration to remove/replace:
-      - `services.AddScoped<Desktop.Wpf.Features.Sessions.Queries.IPeerConnectionQueries, Desktop.Wpf.Features.Sessions.Queries.PeerConnectionQueries>();`
-  - Ensure WPF references `Percolator.Application.Sessions` for the interface.
-
-5) Delete/retire the old WPF query artifacts.
-
-- **Files:**
-  - `Desktop.Wpf/Features/Sessions/Queries/IPeerConnectionQueries.cs` (delete)
-  - `Desktop.Wpf/Features/Sessions/Queries/PendingInboundSnapshot.cs` (delete)
-  - `Desktop.Wpf/Features/Sessions/Queries/PeerConnectionQueries.cs` (delete)
-  - `Desktop.Wpf/Features/Sessions/Queries/PeerConnectionStateSnapshot.cs` (delete, if it exists)
-
-6) Update all call sites.
-
-- Anywhere injecting or referencing these types must update `using` statements and namespaces from:
-  - `Desktop.Wpf.Features.Sessions.Queries.*`
-  - to:
-    - `Percolator.Application.Sessions` (contract + snapshots)
-    - `Percolator.Infrastructure.Sessions` (implementation only where needed; usually only DI)
-
-### Concrete changes
-
-1) Extend `Desktop.Wpf/Features/Sessions/Models/PeerPendingInvitationModel.cs` to store all fields from `PendingInboundSnapshot` that the dialog UI needs.
-
-- **File:** `Desktop.Wpf/Features/Sessions/Models/PeerPendingInvitationModel.cs`
-- **Change constructor signature** to accept the full `PendingInboundSnapshot` (or individual fields):
-  - Must include:
-    - `CreatedAtUtc`, `ExpiresAtUtc`, `InviterFingerprintHex`
-    - `IsRelayed`, `RelayPeerId`, `RelayPeerName`, `RelayEndpoint`
-    - and the existing ids + peer name
-- **Add reactive properties** for fields that can change on reload:
-  - At minimum:
-    - `PeerName`
-    - `IsRelayed`
-    - `ExpiresAtUtc`
-    - `RelayPeerName`, `RelayEndpoint` (relay identity/routing can change)
-  - Keep ids as plain get-only properties.
-- **Update** `UpdateFromSnapshot(PendingInboundSnapshot snapshot)` to update all mutable fields.
-
-2) Extend `Percolator.Application/Sessions/PendingInboundSnapshot.cs` only if the UI truly needs more than is already present.
-
-- **File:** `Percolator.Application/Sessions/PendingInboundSnapshot.cs`
-  - Only extend the application-layer snapshot if the UI truly needs more than is already present.
-  - **Question:** Do we also need `CallbackEndpointHost/Port`? (It’s on `PendingSession` domain model but not in this snapshot.)
-    - If yes, add it to the application-layer snapshot and map it in `Percolator.Infrastructure/Sessions/PeerConnectionQueries.cs`.
+- The simulator maintains a clear, explicit state machine for invite-based handshakes.
+- When the simulator receives an `InviteHandshakeResponse` for a correlation ID that matches an **outbound invite**, it immediately finalizes the session and transitions to `Established` (no extra click required).
+- API surface (public methods) reflects intent and direction:
+  - Receiving an invite request is different from receiving an invite response.
+  - Queuing for UI acceptance is different from completing a handshake.
+- Dead/duplicative methods are removed, and remaining methods are clearly named.
 
 ---
 
-## A2) Make `PeerConnectionStateService.PendingInbound` the source of truth for the dialog
+### Plan
 
-### Concrete changes
+#### A1. Document the two invite flows and enforce invariants
 
-1) Update the pending inbound creation path to pass the full snapshot into the model.
+- **Flow 1: Main -> Simulator (Main inviter, simulator acceptor)**
+  - Simulator receives `EstablishDirectSessionRequest`.
+  - This flow currently has two competing behavioral models in the codebase:
+    - **Flow 1a (auto-accept on ingress)**: simulator creates the session immediately and can optionally defer *delivery* of the `InviteHandshakeResponse`.
+    - **Flow 1b (persist pending request + user accepts)**: simulator persists the inbound invite request, and only creates the session + delivers `InviteHandshakeResponse` after explicit user acceptance.
+  - **Chunk B** defines the target model for Flow 1b and removes the misleading “already accepted but waiting to deliver” behavior.
+  - Main-side behavior note (from `PercolatorMessageService.EstablishDirectSession`): the RPC always returns `EstablishDirectSessionResponse.Queued` after enqueuing a pending session on Main; there is no “accepted immediately” response type in the contract.
 
-- **File:** `Desktop.Wpf/Features/Sessions/PeerConnectionStateService.cs`
-- **Method:** `UpdatePendingInbound(IReadOnlyList<PendingInboundSnapshot> snapshots)`
-- **Change:** Replace the current `new PeerPendingInvitationModel(...)` call (currently passes only a subset) to pass the additional snapshot fields.
+- **Flow 2: Simulator -> Main (Simulator inviter, main acceptor)**
+  - Simulator sends `EstablishDirectSessionRequest`.
+  - Main accepts and creates session, then sends `InviteHandshakeResponse` back to simulator.
+  - Simulator must finalize session immediately on receipt.
 
-2) Make pending inbound query identity-scoped (even though identity scoping is not implemented yet).
+- **Invariants to encode**
+  - An `InviteHandshakeResponse` must always have a valid `RequestCorrelationId` (already enforced on simulator side).
+  - A response must match either:
+    - an outbound invite (inviter finalization path), or
+    - a pending inbound “main-initiated” flow (if we support that), but never silently become “pending acceptance”.
 
-- **File:** `Percolator.Application/Sessions/IPeerConnectionQueries.cs`
-  - Change signature to `LoadPendingInboundAsync(SelfId selfIdentityId, CancellationToken ct = default)`.
-- **File:** `Percolator.Infrastructure/Sessions/PeerConnectionQueries.cs`
-  - Implement the new parameter.
-  - **Temporary multi-identity guardrail:** add `_logger.LogWarning(...)` every time this query runs stating that `selfIdentityId` is currently ignored due to implicit EF global query filters / single-active-identity scoping.
-    - Example wording: "LoadPendingInboundAsync(selfIdentityId=...) currently ignores identity scoping due to implicit query filters; multi-identity is not implemented yet."
-  - **Additional guardrail:** if `ActiveIdentityContext.Identity` is available and its `SelfIdentityId` differs from the requested `selfIdentityId`, log a warning indicating the mismatch.
+Deliverable: a short written truth table mapping `(message type, correlation id source)` -> `(state transition + storage)`.
 
-3) Ensure `PeerConnectionStateService.InitializeAsync(SelfId selfIdentityId, ...)` remains the single “bootstrap” for pending inbound.
+#### A2. Split simulator ingress APIs by message semantics (rename + new methods)
 
-- **File:** `Desktop.Wpf/Features/Shell/ShellViewModel.cs`
-- **Already:** calls `_peerConnectionStateService.InitializeAsync(domainIdentity.Id, ...)`.
-- **No additional dialog init** should be needed.
+Goal: remove ambiguity in method naming and responsibilities.
 
----
+- Introduce explicit simulator ingress methods (names are suggestions; pick final names during implementation):
+  - `HandleInboundInviteRequestFromMainAsync(...)`  (currently: `ReceiveEstablishDirectSessionFromMainAsync` / `AcceptReverseSignalInviteAsync` path)
+  - `HandleInboundInviteResponseFromMainAsync(...)` (currently: `ReceiveInviteHandshakeResponseFromMainAsync`)
 
-## A3) Replace ConnectionManagementDialog’s private inbox + events + local list with a projection of the state service
+- Replace the generic “Receive*” naming with verbs that express intent:
+  - `Handle...` for deterministic processing
+  - `Queue...` only when intentionally deferring to UI/user action
 
-### Concrete changes
+- Rename misleading state mutations:
+  - `MarkInboundPending` is currently used for both “I got a request” and “I got a response”.
+  - Create separate UI/state helpers:
+    - `MarkInviteRequestPendingUserDecision(corr)`
+    - `MarkInviteResponseReceived(corr)` (or skip entirely if response finalizes immediately)
 
-1) Delete dialog-only “pending invitations” list rebuild.
+Deliverable: compile-time-safe API where the interceptor cannot “accidentally” route a response into a request-pending path.
 
-- **File:** `Desktop.Wpf/Features/Sessions/ConnectionManagementDialogViewModel.cs`
-- **Remove fields:**
-  - `_inbox : IMainInvitationInbox`
-  - `_inboxEvents : IMainInvitationInboxEvents`
-  - `_pendingInvitations : ObservableList<PendingInvitationItemViewModel>`
-  - `_pendingInvitationsView : ISynchronizedView<...>`
-- **Remove methods:**
-  - `RefreshInboxAsync(...)`
-  - `RefreshInboxCommand` and its wiring
-- **Remove subscription:**
-  - `_inboxEvents.Changed.SubscribeAwait(...)`
+#### A2.1 Target public API surface (simulator invite *responses*)
 
-2) Replace `PendingInvitations` property to be a projection from `_stateService.PendingInbound`.
+As part of Chunk A, define (and enforce via naming + types) a minimal public surface for simulator-side processing of invite handshake *responses* from Main:
 
-- **File:** `Desktop.Wpf/Features/Sessions/ConnectionManagementDialogViewModel.cs`
-- **Add fields:**
-  - `ISynchronizedView<PeerPendingInvitationModel, PendingInvitationItemViewModel> _pendingInboundView;`
-- **In constructor:**
-  - Create view from `_stateService.PendingInbound.CreateView(model => new PendingInvitationItemViewModel(model, ...))`
-  - Bridge with `.ToNotifyCollectionChanged(ui.CollectionEventDispatcher)`
-  - Ensure disposal on remove:
-    - `_pendingInboundView.ObserveRemove().Subscribe(evt => evt.Value.View.Dispose())`
+- `HandleInboundInviteHandshakeResponseFromMainAsync(simulatedPeerId, InviteHandshakeResponse response, ct)`
+  - Pure response processing. Must not enqueue UI acceptance.
 
-3) Refactor `PendingInvitationItemViewModel` to be a projection wrapper over `PeerPendingInvitationModel`.
+- `TryFinalizeOutboundInviteFromHandshakeResponseAsync(simulatedPeerId, acceptorPeerId, correlationId, ct)`
+  - Optional: internal helper used by the handler above.
 
-- **File:** `Desktop.Wpf/Features/Sessions/PendingInvitationItemViewModel.cs`
-- **Replace constructor signature** from raw primitives to `PendingInvitationItemViewModel(PeerPendingInvitationModel model, IUiDispatcher ui, TimeProvider? maybe)`.
-- **Replace properties:**
-  - `DisplayName`, `IsRelayed`, `RelayInfoText`, `IsExpired` should be *derived reactively* from the model.
-- **Follow `r3.readme.md` for properties:**
-  - `model.PeerName.DistinctUntilChanged().ObserveOnCurrentSynchronizationContext().ToBindableReactiveProperty()`
-  - For computed strings like relay info, use `Observable.CombineLatest` and the same marshal rule.
+The existing method `ReceiveInviteHandshakeResponseFromMainAsync` should either be renamed to the handler above, or deleted once call sites are migrated.
 
-4) Update XAML bindings only as necessary.
+#### A3. Implement deterministic simulator-side finalization on response receipt
 
-- **File:** `Desktop.Wpf/Features/Sessions/ConnectionManagementDialogWindow.xaml`
-- Ensure bindings match the refactored `PendingInvitationItemViewModel` surface (keep names stable if possible).
+Design target:
 
----
+- `HandleInboundInviteHandshakeResponseFromMainAsync(simulatedPeerId, response)` should:
+  - Validate fields.
+  - Resolve correlation id.
+  - Look up matching **outbound invite** record (signed pre-key private, etc.).
+  - Finalize using the existing crypto steps (currently in `TryFinalizeInviteHandshakeResponseFromMainAsync`).
+  - Persist session into `model.SessionsMutable`.
+  - Clear any transient pending markers for that correlation id.
+  - Transition UI state to `Established`.
 
-## A4) Align actions (Accept/Burn) with the new architecture
+This implies `TryFinalizeInviteHandshakeResponseFromMainAsync` likely becomes:
 
-### Concrete changes
+- `FinalizeOutboundInviteFromHandshakeResponse(...)` (pure finalization, no UI or pending queue)
+  - Optionally internal/private helper
 
-1) Keep using MediatR commands for Accept/Burn, but remove UI-level “requery” calls.
+Deliverable: simulator does not require an extra manual “accept” after Main already accepted.
 
-- **File:** `Desktop.Wpf/Features/Sessions/ConnectionManagementDialogViewModel.cs`
-- **Update methods:** `ExecuteAcceptAsync` and `ExecuteBurnAsync`
-  - Update to send identity-scoped commands:
-    - `ApprovePendingSessionCommand(SelfId selfIdentityId, PendingSessionId pendingSessionId)`
-    - `RejectPendingSessionCommand(SelfId selfIdentityId, PendingSessionId pendingSessionId)`
-  - After a successful command, **do not** call refresh methods and do not attempt to display "Accepted".
-  - On success, the item vanishes after reload.
+#### A4. Fix routing in `SimulatorOutboundInterceptor`
 
-2) `PendingInvitationItemViewModel.StatusText`
+- Update `TryDeliverInviteHandshakeResponse` path to call the *response* handler (not the request-pending handler).
+- Add structured logging around:
+  - correlation id
+  - simulated peer id
+  - whether an outbound invite was found
+  - final session id
 
-- Keep `StatusText` purely UI-ephemeral for error feedback only.
+Deliverable: a single breakpoint in the interceptor shows the correct codepath for simulator-initiated handshakes.
 
----
+#### A5. Simplify and delete obsolete codepaths
 
-## A5) Fix and simplify signals: delete `IMainInvitationInboxEvents` and use the existing reload coordinator
+Once the flows are separated:
 
-### Concrete changes
+- Re-evaluate whether the following remain necessary:
+  - `_pending.AddInviteHandshakeResponse(...)` for simulator inbound responses
+  - UI “Accept” path that currently tries finalization then falls back to deliver-to-main
+  - `TryDeliverQueuedInviteHandshakeResponseToMainAsync` usage for simulator-initiated flows
 
-1) Remove the custom inbox event bus entirely.
+If still needed for a test/debug UI, keep them but rename to emphasize they are **debug controls**, not protocol steps.
 
-- **Files to delete (or leave unused, but big-bang suggests delete):**
-  - `Desktop.Wpf/Features/Sessions/MainInvitationInboxEvents.cs`
-  - `Desktop.Wpf/Features/Sessions/ConnectionManagementInboxEventListener.cs`
-- **Remove DI registrations:**
-  - **File:** `Desktop.Wpf/App.xaml.cs`
-    - Remove `services.AddSingleton<IMainInvitationInboxEvents, MainInvitationInboxEvents>();`
+Deliverable: fewer methods, each with a single responsibility, and no “magic fallback” behavior.
 
-2) Remove `IMainInvitationInbox` and `MainInvitationInbox` if they become unused.
+#### A6. Add tests / harness validations (no quick fix; correctness + clarity)
 
-- **File:** `Desktop.Wpf/Features/Sessions/MainInvitationContracts.cs`
-  - Remove `IMainInvitationInbox` and `PendingInvitationDto` if nothing else references them.
-- **File:** `Desktop.Wpf/Features/Sessions/MainInvitationServices.cs`
-  - Remove `MainInvitationInbox`.
-- **File:** `Desktop.Wpf/App.xaml.cs`
-  - Remove DI registrations for `IMainInvitationInbox`.
+- Add integration-style tests (or deterministic harness tests in `Desktop.Wpf.Tests`) that assert **public behavior** (black-box), using AAA (Arrange/Act/Assert):
+  - Simulator creates outbound invite
+  - Main accepts -> main sends `InviteHandshakeResponse`
+  - Simulator receives response -> session exists -> sending a chat message succeeds
+  - Assertions must be on observable outcomes (e.g., service public APIs succeed, UI state transitions exposed via reactive properties, or session existence via public query methods), not on private fields or internal helper call ordering.
 
-3) Reuse the existing signal path for correctness.
+- Add negative behavior tests:
+  - Response with unknown correlation id is rejected with a clear error and does not transition the simulator peer into an established/accepted state
+  - Response with missing required fields fails deterministically
 
-- **Existing:** `PeerConnectionStateUpdateHandlers` triggers `PeerConnectionReloadCoordinator.TriggerReload(selfId)` on:
-  - `PendingSessionCreatedNotification`
-  - `PendingSessionRemovedNotification`
-- **Result:** the dialog’s list updates automatically because it projects from `PeerConnectionStateService.PendingInbound`.
+- Mocking guidelines:
+  - Mock external dependencies (disk persistence repository, network delivery abstractions) but use real value objects / protobuf messages.
+  - Avoid strict interaction verification unless the side-effect itself is the requirement.
+
+Deliverable: regression coverage proving the simulator-initiated handshake produces a session on the simulator side.
 
 ---
 
-## A6) Optional convergence: remove `PendingHandshakesMenuViewModel` duplication
-
-This is a “nice to have” after the dialog is fixed.
-
-### Concrete changes (optional)
-
-- Update `Desktop.Wpf/Features/Sessions/PendingHandshakesMenuViewModel.cs` to project from `_stateService.PendingInbound` (it already does) *and* update its item VM to use the same underlying `PeerPendingInvitationModel` fields as the dialog.
-- Consider extracting a shared item VM factory/projection to avoid two different list-item VMs with subtly different behavior.
-
----
-
-## A7) Tests (research questions turned into concrete test cases)
-
-### Concrete changes
-
-1) Add/extend unit tests proving that the dialog list updates when `PeerConnectionStateService.UpdatePendingInbound(...)` removes an item.
-
-- **File:** likely new tests in `Desktop.Wpf.Tests` alongside existing state service tests.
-- Pattern:
-  - Instantiate `PeerConnectionStateService`
-  - Seed with one pending inbound snapshot
-  - Create dialog VM with a test `IUiDispatcher`
-  - Call `UpdatePendingInbound(Array.Empty<...>())`
-  - Assert the projected `PendingInvitations` count becomes 0.
-
-2) Extend existing `PeerConnectionStateServiceTests.UpdatePendingInbound_adds_updates_and_removes_models_based_on_snapshot` to assert that the newly-added fields are updated correctly (relay info, expiry, fingerprint).
-
----
-
-## A8) Identity grouping (forward-compatible, required by architecture)
-
-**Decision:** Assume multiple self-identities can be active concurrently (feature not implemented yet). Peer connection + pending inbound state must therefore be **grouped by `SelfId`**.
-
-**Additional decision:** Grouping implementation uses **per-identity buckets** (no grouping computed from a flat list).
-
----
-
-## A8.0) Introduce `IdentityStateService` as the canonical list of active identities
-
-### Concrete changes
-
-1) Add a singleton state service that represents the set of active identities.
-
-- **File:** `Desktop.Wpf/Features/Shell/IdentityStateService.cs` (new)
- - Owns:
-  - `ObservableList<ActiveIdentityModel>`
- - Exposes:
-  - `IReadOnlyObservableList<ActiveIdentityModel> Identities`
-
-**R3 constraint:** Services do **not** filter or sort collections (`r3.readme.md`). `IdentityStateService` therefore exposes the full identity list; any view that needs “active identities” must create its own filtered reactive view.
-
-**Additional design constraint:** ViewModels should not directly mutate Service-owned collections. Move identity bootstrap/upsert logic into `IdentityStateService` behind a dedicated bootstrap interface.
-
-**Concrete model shape (decision):**
-
-- **File:** `Desktop.Wpf/Features/Shell/ActiveIdentityModel.cs` (new)
-- Fields:
-  - `SelfId Id`
-  - `ReactiveProperty<string> DisplayName`
-  - `ReactiveProperty<bool> Active`
-
-2) Initial implementation: load the single identity supported today.
-
-- **File:** `Desktop.Wpf/Features/Shell/IIdentityBootstrapper.cs` (new)
-  - Add an interface responsible for initializing/upserting identities into the canonical state service.
-  - Shape (suggested): `Task UpsertAsync(SelfId id, string displayName, bool active, CancellationToken ct = default)`.
-- **File:** `Desktop.Wpf/Features/Shell/IdentityStateService.cs`
-  - Implement `IIdentityBootstrapper`.
-  - `UpsertAsync(...)` takes the domain lock for the identity list and adds/updates the `ActiveIdentityModel` in `Identities`.
-- **File:** `Desktop.Wpf/Features/Shell/ShellViewModel.cs`
-  - After resolving the domain identity, call `_identityBootstrapper.UpsertAsync(domainIdentity.Id, domainIdentity.DisplayName, active: true, ct)`.
-- **File:** `Desktop.Wpf/App.xaml.cs`
-  - Register `IdentityStateService` as `Singleton`.
-  - Register `IIdentityBootstrapper` to resolve to the same singleton.
-
-3) This becomes the sole source used by the Connection Management dialog to decide which identity groups to display.
-
-- **Important:** The dialog ViewModel must filter identities locally by `ActiveIdentityModel.Active.Value == true` by creating a reactive view over `IdentityStateService.Identities`.
-
-### Concrete changes
-
-1) Refactor `PeerConnectionStateService` to store state per identity.
-
-- **File:** `Desktop.Wpf/Features/Sessions/PeerConnectionStateService.cs`
-- Replace:
-  - `ObservableList<PeerConnectionModel> _connections`
-  - `ObservableList<PeerPendingInvitationModel> _pendingInbound`
-  - `SelfId? ActiveSelfIdentityId`
-- With:
- - With per-identity buckets:
-  - `ObservableDictionary<SelfId, PeerIdentityConnectionState> _bySelf`
-  - `PeerIdentityConnectionState` owns:
-    - `ObservableList<PeerConnectionModel> Connections`
-    - `ObservableList<PeerPendingInvitationModel> PendingInbound`
-    - `object Gate`
-  - Add API:
-    - `PeerIdentityConnectionState GetOrCreate(SelfId selfIdentityId)`
-    - `bool TryGet(SelfId selfIdentityId, out PeerIdentityConnectionState state)`
-
-2) Make reload APIs explicit about which identity they target.
-
-- **File:** `Desktop.Wpf/Features/Sessions/PeerConnectionReloadCoordinator.cs`
-- Replace `TriggerReload()` with:
-  - `TriggerReload(SelfId selfId)`
-- Replace `ReloadCoreAsync()` with:
-  - `ReloadCoreAsync(SelfId selfId, CancellationToken ct)`
-- In reload core:
-  - Call `IPeerConnectionSidebarQueries.LoadSidebarConnectionsAsync(selfId.Value, ct)`
-  - Call `IPeerConnectionQueries.LoadPendingInboundAsync(selfId, ct)` (see next item)
-  - Update only that identity’s bucket in state service.
-
-3) Update `IPeerConnectionQueries.LoadPendingInboundAsync` to be identity-scoped.
-
-- **File:** `Percolator.Application/Sessions/IPeerConnectionQueries.cs`
-  - Signature is identity-scoped (see A2).
-- **File:** `Percolator.Infrastructure/Sessions/PeerConnectionQueries.cs`
-  - For now the identity parameter is ignored due to implicit EF global query filters / single-active-identity scoping.
-  - Add the same warning/guardrails described in A2.
-
-4) Update MediatR notification handlers to reload the correct identity.
-
-- **File:** `Desktop.Wpf/Features/Sessions/Handlers/PeerConnectionStateUpdateHandlers.cs`
-- Change the handlers to call `TriggerReload(selfId)`.
-
-**Technical constraint (must be addressed for multi-identity):**
-
-- `PendingSessions` are currently globally scoped by EF query filter:
-  - **File:** `Percolator.Infrastructure/Persistence/PercolatorDbContext.cs`
-  - `PendingSessionDbo` has `SelfIdentityId` and `HasQueryFilter(... e.SelfIdentityId == _active.Identity.SelfIdentityId.Value)`.
-- This is compatible with a *single* active identity, but not with “multiple identities active concurrently” unless we:
-  - run separate identity-scoped `DbContext` instances where `_active.Identity` is set per-scope, or
-  - remove the query filter and require explicit `where SelfIdentityId == ...` in queries.
-
-**Plan choice (scope constraint):** do **not** remove reliance on implicit global query filters for this big-bang change. Multi-identity correctness at the persistence layer is explicitly out-of-scope for Chunk A; instead we add identity parameters + warnings/guardrails so the architecture is forward-compatible.
-
-5) Update dialog ViewModel to project pending inbound for all active identities (grouped).
-
-- **File:** `Desktop.Wpf/Features/Sessions/ConnectionManagementDialogViewModel.cs`
-- **Decision:** The dialog lists *all incoming signals for all active identities*, grouped by identity display name.
-
-### Concrete changes
-
-1) Ensure pending inbound snapshots/models carry `SelfId` (and identity display name is resolvable).
-
-- **Add to snapshot:**
-  - **File:** `Percolator.Application/Sessions/PendingInboundSnapshot.cs`
-  - Add: `SelfId SelfIdentityId` (and optionally `string SelfIdentityDisplayName`)
-- **Map it:**
-  - **File:** `Percolator.Infrastructure/Sessions/PeerConnectionQueries.cs`
-  - Ensure `LoadPendingInboundAsync(SelfId selfId, ...)` sets the snapshot `SelfIdentityId = selfId`.
-  - If we decide to include display name in the snapshot, join via self identity table or resolve via an identity lookup query.
-
-2) Update `PeerPendingInvitationModel` to expose `SelfIdentityId`.
-
-- **File:** `Desktop.Wpf/Features/Sessions/Models/PeerPendingInvitationModel.cs`
-- Add `SelfId SelfIdentityId { get; }`.
-
-3) Replace `PendingInvitations` with a grouped projection.
-
-- **File:** `Desktop.Wpf/Features/Sessions/ConnectionManagementDialogViewModel.cs`
-- Replace the flat `PendingInvitations` surface with one of:
-  - **Option A (recommended):** `INotifyCollectionChangedSynchronizedViewList<IncomingSignalsGroupViewModel> IncomingSignalGroups`
-    - Each group holds:
-      - `string IdentityDisplayName`
-      - `INotifyCollectionChangedSynchronizedViewList<PendingInvitationItemViewModel> Items`
-  - **Option B:** flatten into a single list with “header rows” (more hacky; avoid).
-
-4) Use `IdentityStateService` as the stable identity-name source.
-
-- For now, `IdentityStateService.Identities` will contain exactly one identity.
-- For multi-identity later, `IdentityStateService.Identities` will hold N identities.
-- The dialog creates its own filtered view of active identities and uses `DisplayName` as the group header.
-
-5) Update the XAML to show grouping.
-
-- **File:** `Desktop.Wpf/Features/Sessions/ConnectionManagementDialogWindow.xaml`
-- Replace the `ListBox` of items with an `ItemsControl` (or `ListBox`) of groups:
-  - Group template:
-    - Header: identity display name
-    - Inner items: the pending invitation cards with Burn/Accept buttons.
-
----
-
-## A9) Post-change dead code audit (conditional cleanup)
-
-After implementing A1–A8 and confirming behavior, perform a dead-code audit and conditionally remove unused code paths to keep the architecture clean.
-
-### Verification steps
-
-1) Grep for remaining references to legacy paths.
-
-- Search terms:
-  - `IMainInvitationInbox`
-  - `IMainInvitationInboxEvents`
-  - `MainInvitationInbox`
-  - `MainInvitationInboxEvents`
-  - `ConnectionManagementInboxEventListener`
-  - `PendingInvitationDto`
-  - `RefreshInboxCommand`
-  - `RefreshInboxAsync`
-
-2) Build the solution.
-
-- Ensure all projects compile after removals.
-
-### Expected dead code (remove if unused)
-
-#### Legacy inbox/event-bus system (WPF-only)
-
-- **Files:**
-  - `Desktop.Wpf/Features/Sessions/MainInvitationInboxEvents.cs`
-  - `Desktop.Wpf/Features/Sessions/ConnectionManagementInboxEventListener.cs`
-  - `Desktop.Wpf/Features/Sessions/MainInvitationServices.cs` (at least `MainInvitationInbox`)
-  - `Desktop.Wpf/Features/Sessions/MainInvitationContracts.cs` (at least `IMainInvitationInbox`, `IMainInvitationInboxEvents`, `PendingInvitationDto`)
-- **DI removals:**
-  - **File:** `Desktop.Wpf/App.xaml.cs`
-    - Remove registrations for:
-      - `IMainInvitationInbox`
-      - `IMainInvitationInboxEvents`
-
-#### Dialog-local refresh/list rebuild
-
-- **File:** `Desktop.Wpf/Features/Sessions/ConnectionManagementDialogViewModel.cs`
-  - Remove (once the dialog projects from `PeerConnectionStateService.PendingInbound`):
-    - `RefreshInboxCommand`
-    - `RefreshInboxAsync`
-    - `_pendingInvitations` local list rebuild code
-    - `_inbox` / `_inboxEvents` fields and subscriptions
-
-#### WPF query artifacts (after moving to Application/Infrastructure)
-
-- Remove if they still exist after the migration:
-  - `Desktop.Wpf/Features/Sessions/Queries/IPeerConnectionQueries.cs`
-  - `Desktop.Wpf/Features/Sessions/Queries/PendingInboundSnapshot.cs`
-  - `Desktop.Wpf/Features/Sessions/Queries/PeerConnectionQueries.cs`
-  - `Desktop.Wpf/Features/Sessions/Queries/PeerConnectionStateSnapshot.cs` (if it exists)
-
----
+### Acceptance criteria
+
+- When simulator initiates handshake and Main accepts:
+  - simulator ends in `Established`
+  - simulator can perform a public behavior that requires a session (e.g., encrypt/send a chat message) without “No session found”
+
+- Public APIs in simulator state service are semantically clear:
+  - requests vs responses are handled by different methods
+  - queuing/defer-to-UI is explicit and not used for protocol-required steps
 
 ## Chunk B
 
-### Goal
+### Problem statement
 
-Serialize simulator persistence writes and make interceptor resolution safe/fast without introducing a simulator-wide runtime that would be hard to lift-and-shift into a standalone simulator application.
+For **Main -> Simulator** direct invite requests (`EstablishDirectSessionRequest` intercepted by `SimulatorOutboundInterceptor.TryEstablishDirectSession`), the simulator currently:
 
-Key simplifications:
+- Calls `SimulatorStateService.ReceiveEstablishDirectSessionFromMainAsync(...)`.
+- Which immediately calls `AcceptReverseSignalInviteAsync(...)`.
+- `AcceptReverseSignalInviteAsync(...)` performs cryptographic acceptance and **creates a real session immediately** (`model.SessionsMutable[sessionId] = session`).
+- Only *delivery* of the resulting `InviteHandshakeResponse` is deferred by queuing it via `QueueInviteHandshakeResponseForDeliveryToMainAsync(...)`.
 
-- **Authoritative mapping:** `SimulatorStateService.Peers` remains the source of truth for endpoint -> simulated peer.
-- **Peers can change host/port at runtime:** we maintain an in-memory index that tracks changes.
-- **No startup warmup requirement:** simulator state is best-effort and should not block app startup.
+This makes the simulator “Accept” button misleading:
 
-### B0) Persistence: single-writer queue for JSON state
+- The user is not accepting a pending request.
+- The request has already been accepted (session created); the button merely triggers delivery of an already-generated response.
 
-1) Implement a persistence wrapper dedicated to write serialization:
+It also creates API ambiguity because the simulator’s current pending mechanisms are oriented around **pending invite handshake responses**:
 
-- `QueuedSimulatorStateRepository : ISimulatorStateRepository`
+- `ISimulatedPeerPendingInbox` stores `InviteHandshakeResponse` keyed by `(PeerId, CorrelationId)`.
+- Persistence snapshots (`SimulatorStateDto` / `SimulatedPeerRuntimeStoreDto`) include `PendingInviteHandshakeResponses`.
+- There is **no persisted representation** of a pending inbound `EstablishDirectSessionRequest` (invite request) waiting for user decision.
 
-Behavior:
+### Desired end state
 
-- `LoadStateAsync` and `SaveStateAsync` are both scheduled onto a single background consumer (FIFO).
-- This wrapper is the *only* concurrency boundary for simulator JSON file access.
-- Optional: coalesce “save requested” events by keeping only the most recent snapshot (best-effort persistence).
-
-Invariants:
-
-- At most one file write in-flight.
-- No `.tmp` file lock contention caused by concurrent writes.
-
-Notes:
-
-- This wrapper is portable to a future standalone simulator app.
-- Remove `_ioGate` from `JsonSimulatorStateRepository` (queue owns all IO serialization).
-
-Research notes / impacted call sites:
-
-- **DI registration** currently registers the JSON repo directly:
-  - **File:** `Desktop.Wpf/App.xaml.cs`
-  - **Current:** `services.AddSingleton<Desktop.Wpf.Features.Simulator.ISimulatorStateRepository, Desktop.Wpf.Features.Simulator.JsonSimulatorStateRepository>();`
-  - **Change:** register `JsonSimulatorStateRepository` as the inner implementation and register `QueuedSimulatorStateRepository` as the `ISimulatorStateRepository`.
-- **Startup warmup** is currently registered:
-  - **File:** `Desktop.Wpf/App.xaml.cs`
-  - `services.AddHostedService<Desktop.Wpf.Features.Simulator.SimulatorStateWarmupHostedService>();`
-  - This conflicts with “best-effort, do not block app startup”; remove it as part of Chunk B.
-- **Save trigger** already exists and will benefit immediately from queued IO:
-  - **File:** `Desktop.Wpf/Features/Simulator/SimulatorStateService.cs`
-  - `_saveTrigger ... SubscribeAwait(async (snap, ct) => await _store.SaveStateAsync(snap, ct)`
-  - With queued IO, this no longer risks concurrent `.tmp` writes.
-
-### B1) Endpoint resolution: maintain an in-memory index derived from `SimulatorStateService.Peers`
-
-1) Add a small index inside `SimulatorStateService`:
-
-- Example shape: `ConcurrentDictionary<DnsEndPoint, PeerId>` keyed by endpoint.
-
-Model:
-
-- Replace separate host/port properties on `SimulatedPeerModel` with a single reactive endpoint:
-  - `BindableReactiveProperty<DnsEndPoint> Endpoint`
-- Any UI concerns (host/port editing) should be handled by viewmodels that project `Endpoint`.
-
-2) Build/refresh the index:
-
-- On `InitializeAsync` after loading peers.
-- On peer add/remove.
-- On endpoint changes for any peer.
-
-3) Host/port change tracking:
-
-- Subscribe to each peer model’s endpoint reactive property.
-- When the endpoint changes, update the index entry (remove old endpoint, add new endpoint).
-
-4) Expose a query method on the state service:
-
-- `bool TryResolvePeerId(DnsEndPoint endpoint, out PeerId peerId)`
-
-Contract:
-
-- Add `TryResolvePeerId` to `ISimulatorStateService` so interceptor code stays interface-based.
-
-Notes:
-
-- Reads must be safe from any thread.
-- Mutations (index updates) are centralized in `SimulatorStateService` and occur as a consequence of state changes.
-
-Research notes / impacted call sites:
-
-- **Model currently stores host/port separately**:
-  - **File:** `Desktop.Wpf/Features/Simulator/SimulatedPeerModel.cs`
-  - `ReadOnlyReactiveProperty<string?> Host` and `ReadOnlyReactiveProperty<int> Port`
-  - `SetConnection(ConnectionMode mode, string? host, int port, PeerId relayPeerId)` mutates host/port
-  - `Freeze()` stores `Host` and `Port` into `PeerStateSnapshot`
-- **Snapshot currently stores host/port**:
- - **Snapshot currently stores host/port**:
-  - **File:** `Desktop.Wpf/Features/Simulator/PeerStateSnapshot.cs`
-  - Fields: `string? Host`, `int Port`
-  - Change: store `DnsEndPoint` in the snapshot.
-  - Persistence: JSON schema remains host/port; repository maps host/port <-> `DnsEndPoint`.
-- **State initialization creates peer from snapshot using host/port**:
-  - **File:** `Desktop.Wpf/Features/Simulator/SimulatorStateService.cs`
-  - `CreatePeerFromSnapshot(... host: snap.Host, port: snap.Port ...)`
-- **Peer creation allocates host + port today**:
-  - **File:** `Desktop.Wpf/Features/Simulator/SimulatorStateService.cs`
-  - `AllocateNextLoopbackHostOnPeerGate()` returns `127.77.x.y`
-  - `SimulatorPort` defaulting to `5002`
-  - This will become allocation of a `DnsEndPoint`.
-- **Runtime persistence tracker marks peer dirty on Host/Port changes**:
-  - **File:** `Desktop.Wpf/Features/Simulator/Tracking/SimulatedPeerRuntimeTracker.cs`
-  - Subscribes to `peer.Host` and `peer.Port`
-  - Must be updated to subscribe to `peer.Endpoint` (single property) so endpoint changes trigger persistence.
-- **UI viewmodels read host/port directly**:
-  - **File:** `Desktop.Wpf/Features/Simulator/SimulatedPeerCardViewModel.cs`
-    - `TryResolveEndpoint()` / `TryResolveEndpointParts()` use `_model.Host.CurrentValue` / `_model.Port.CurrentValue`
-  - Similar patterns exist in other simulator VMs.
-  - With the plan’s model change, these VMs must project `Endpoint.Host` / `Endpoint.Port` for UI.
-
-Open questions / decisions to remove ambiguity:
-
-- **Endpoint type in persistence DTOs:** the JSON state uses `SimulatedPeerConnectionDto.Host`/`.Port` today.
-  - Decision: keep JSON schema as host+port for stability, and map to/from `DnsEndPoint` in the repository.
-- **`DnsEndPoint` normalization:** the index assumes that endpoints used in interception match endpoints stored on peers.
-  - Decision: always store endpoints with a canonical host string (e.g., the literal string value used in DTO, typically `127.77.x.y`).
-
-### B2) Interceptor: fast-path lookup, no IO, treat “not found” as non-existent peer
-
-1) `SimulatorOutboundInterceptor` should resolve simulated peers via the state service query method.
-
-2) If `TryResolvePeerId` fails:
-
-- return false and allow the normal non-simulator behavior.
-
-Rules:
-
-- Do not initialize simulator state from the interceptor.
-- Do not perform filesystem IO on the interceptor path.
-
-Research notes / impacted call sites:
-
-- **Interceptor currently enumerates peers and compares host/port**:
-  - **File:** `Desktop.Wpf/Features/Simulator/SimulatorOutboundInterceptor.cs`
-  - `TryResolveSimulatedPeerId(...)` and `InterceptDeliverOpaqueMessageAsync(...)` both use `_state.Peers.FirstOrDefault(...)` over `Host.CurrentValue` + `Port.CurrentValue`.
-  - This must be replaced with `_state.TryResolvePeerId(endpoint, out peerId)` (new API) to avoid enumeration and to align with endpoint indexing.
-
-### B3) Testing / validation
-
-1) Add a test that triggers multiple concurrent save requests and asserts:
-
-- no deadlock/hang
-- only one writer executes at a time
-
-2) Add a test that changes a peer’s endpoint and asserts:
-
-- `TryResolvePeerId` reflects the new endpoint
-- old endpoint no longer resolves
-
-Test location:
-
-- Add these tests to `Desktop.Wpf.Tests`.
+- A direct invite request from Main can be persisted as a **pending inbound invite request**, without creating a session.
+- The simulator UI “Accept” / “Reject” semantics are truthful:
+  - **Accept**: create session + generate response + deliver response to Main.
+  - **Reject**: discard pending request (no session created).
+- APIs clearly separate:
+  - “Receive/queue inbound invite request” vs “accept inbound invite request”.
+  - “queue outbound response for delivery” remains possible, but is not used to simulate user acceptance.
+- Persistence supports process restart / snapshot restore without losing pending inbound requests.
 
 ---
 
-## Chunk C
+### Plan
 
-### Goal
+#### B1. Add a persisted model for pending inbound direct invite requests
 
-Reduce duplicated test-only implementations of `ISimulatorStateRepository` down to a single reusable test repo (with opt-in overrides) and bring simulator tests closer to the standards in `source/unit-testing.md`.
+Introduce a runtime/persistence record representing a pending invite request from Main:
 
-### C0) Inventory: test implementations of `ISimulatorStateRepository`
+- Required fields (minimum):
+  - `CorrelationId` (from `InviteHandshakeRequestPayload.RequestCorrelationId`)
+  - Original request bytes (`EstablishDirectSessionRequest` raw bytes or the payload bytes)
+  - `ReceivedAtUtc`
+  - `InviterIdentityKeySpki` (optional redundancy; can be derived from request)
+  - Optional routing metadata for diagnostics (e.g., direct endpoint / `context.Peer` string if available)
 
-Current test implementations (as of this plan):
+Update persistence DTOs and snapshots:
 
-- **`Desktop.Wpf.Tests/SimulatedPeerRuntimeFinalizeRelayedTests.cs`**
-  - `InMemoryRepository : ISimulatorStateRepository`
-  - Stores `SavedSnapshot`; returns `Peers/Relationships/Relays` snapshots.
+- Add `PendingInboundDirectInvites` (or similar) to `SimulatedPeerRuntimeStoreDto`.
+- Add corresponding DTO(s) in `SimulatorState.cs`.
+- Update `JsonSimulatorStateRepository` hydration + save.
+- Update `PeerStateSnapshot` (if used by UI) to include the new pending inbound invite requests.
 
-- **`Desktop.Wpf.Tests/SimulatedPeerRuntimeFinalizeTests.cs`**
-  - `InMemoryRepository : ISimulatorStateRepository`
-  - Same pattern as above.
+- Domain placement (to reduce ambiguity):
+  - Pending inbound direct invite requests should live as a domain collection on `SimulatedPeerModel` (similar to `PendingInviteHandshakeResponsesMutable`), and be included in `SimulatedPeerModel.Freeze()`.
+  - `JsonSimulatorStateRepository` must hydrate/save this new collection via `SimulatedPeerRuntimeStoreDto`.
 
-- **`Desktop.Wpf.Tests/SimulatedPeerRuntimeServiceDecryptFailureDiagnosticsTests.cs`**
-  - `InMemoryRepository : ISimulatorStateRepository`
-  - Same pattern as above.
+Deliverable: simulator restart does not lose pending inbound direct invites.
 
-- **`Desktop.Wpf.Tests/SimulatedPeerRuntimeStandardHandshakeRelayedTests.cs`**
-  - `InMemoryRepository : ISimulatorStateRepository`
-  - Same pattern as above.
+#### B2. Split simulator pending inbox responsibilities (requests vs responses)
 
-- **`Desktop.Wpf.Tests/SimulatorStateServiceEndpointResolutionTests.cs`**
-  - `InMemorySimulatorStateRepository : ISimulatorStateRepository`
-  - Stores a single `_snapshot` and returns it on load.
+Current:
 
-- **`Desktop.Wpf.Tests/SimulatorStateServiceInitializationTests.cs`**
-  - `RepositoryStub : ISimulatorStateRepository`
-  - Uses a `TaskCompletionSource` to gate `LoadStateAsync` and simulate “blocked initialization”.
+- `ISimulatedPeerPendingInbox` is *response-only* (`InviteHandshakeResponse`).
 
-Notes:
+Target:
 
-- The four `InMemoryRepository` classes are effectively the same implementation (snapshot from `Peers/Relationships/Relays` + capture last saved snapshot).
-- The initialization tests need *gating* semantics; that is legitimately different and should remain explicit.
-- Endpoint resolution tests currently use a different pattern (snapshot-backed store) but can still be expressed as the same shared repo with a seeded snapshot.
+- Add a new pending store abstraction (or extend with new methods) for inbound **invite requests**.
+  - Example shape:
+    - `AddInboundDirectInviteRequest(simPeerId, corrId, requestBytes)`
+    - `TryGetInboundDirectInviteRequest(...)`
+    - `TryTakeInboundDirectInviteRequest(...)`
 
-### C1) Consolidation plan: one shared repo + small targeted wrappers
+Avoid overloading “InviteHandshakeResponse” pending structures to store requests.
 
-1) Create a single shared test repo implementation in `Desktop.Wpf.Tests/SimulatorTestHelpers.cs` (preferred; do not proliferate files), with a concrete, non-ambiguous API:
+Deliverable: request-pending state and response-pending state cannot be confused at the type level.
 
-- `internal sealed class InMemorySimulatorStateRepository : ISimulatorStateRepository`
+#### B3. Change interception handling: queue request instead of accepting
 
-Core behavior:
+Update the behavior of `SimulatorStateService.ReceiveEstablishDirectSessionFromMainAsync`:
 
-- Stores a single `SimulatorStateSnapshot` in-memory.
-- `LoadStateAsync` returns that snapshot; if none is set, returns an *empty snapshot* with `Version = 1` and empty lists.
-- `SaveStateAsync` overwrites the stored snapshot and tracks:
-  - `LastSavedSnapshot` (exact reference/value saved)
-  - `SaveCallCount`
-  - `LoadCallCount`
+- Parse correlation id from `InviteHandshakeRequestPayload`.
+- Persist/record the inbound request as pending.
+- Transition UI state to an explicit “pending inbound invite request” state.
+- Return `EstablishDirectSessionResponse.Queued` (or similar) without creating a session.
 
-Required members (explicit):
+Contract alignment note:
 
-- `public SimulatorStateSnapshot? LastSavedSnapshot { get; private set; }`
-- `public int SaveCallCount { get; private set; }`
-- `public int LoadCallCount { get; private set; }`
-- `public void Seed(SimulatorStateSnapshot snapshot)`
-- `public SimulatorStateSnapshot Current { get; }` (returns seeded/current snapshot, never null)
+- This is aligned with the Main implementation: `PercolatorMessageService.EstablishDirectSession` also returns `Queued` after enqueueing a pending session.
+- The system is already designed such that “queued” is a valid/expected response; do not add polling or busy-wait behavior.
 
-Optional convenience helpers (keep minimal, avoid overfitting tests):
+This makes `ReceiveEstablishDirectSessionFromMainAsync` a pure ingress method, not an acceptor.
 
-- Avoid `SeedPeers(params SimulatedPeerModel[])` because it bakes in `Freeze()` behavior and encourages tests to “know” how persistence snapshots are built.
-- Prefer `Seed(snapshot)` and create the `SimulatorStateSnapshot` explicitly in the test when persistence shape matters.
+Deliverable: receiving a direct invite does not create a session until user accepts.
 
-2) Provide *one* thin wrapper for initialization gating (removes ambiguity about “keep a dedicated gated repo”):
+#### B4. Introduce explicit accept/reject APIs for pending inbound direct invites
 
-- `internal sealed class GatedLoadSimulatorStateRepository : ISimulatorStateRepository`
-  - Constructor takes an `InMemorySimulatorStateRepository inner`.
-  - `LoadStateAsync` awaits a `TaskCompletionSource` before delegating to `inner.LoadStateAsync`.
-  - `SaveStateAsync` delegates directly.
-  - Explicit control surface:
-    - `public void ReleaseLoad()` OR `public void ReleaseLoadWith(SimulatorStateSnapshot snapshot)` (pick one)
+Add explicit public methods on `ISimulatorStateService`:
 
-This preserves the explicit “blocked load” behavior and prevents copy/paste `TaskCompletionSource` logic across tests.
+- `AcceptPendingInboundDirectInviteFromMainAsync(simulatedPeerId, correlationId, mainPeerId, ct)`
+  - Loads pending request
+  - Calls the cryptographic acceptance routine (likely refactor `AcceptReverseSignalInviteAsync` into an internal helper)
+  - Creates session
+  - Generates `InviteHandshakeResponse`
+  - Delivers response to Main
+  - Clears pending request
+  - Marks peer established
 
-3) Replace the repeated `InMemoryRepository` classes in:
+- `RejectPendingInboundDirectInviteFromMainAsync(simulatedPeerId, correlationId, ct)`
+  - Clears pending request
+  - Updates UI state appropriately
 
-- `SimulatedPeerRuntimeFinalizeRelayedTests`
-- `SimulatedPeerRuntimeFinalizeTests`
-- `SimulatedPeerRuntimeServiceDecryptFailureDiagnosticsTests`
-- `SimulatedPeerRuntimeStandardHandshakeRelayedTests`
+Deliverable: UI accept/reject maps 1:1 to protocol semantics.
 
-with the shared `InMemorySimulatorStateRepository`.
+#### B4.1 Target public API surface (pending inbound direct invite *requests*)
 
-Concrete change per file:
+Define a minimal, intention-revealing public API for inbound direct invite requests from Main:
 
-- Delete the nested `InMemoryRepository` type.
-- Replace construction sites with:
-  - `var repo = new InMemorySimulatorStateRepository();`
-  - Seed with `repo.Seed(new SimulatorStateSnapshot(...))` OR keep the current pattern by building a snapshot from `SimulatedPeerModel.Freeze()` inside the test (explicitly in Arrange).
+- `QueueInboundDirectInviteRequestFromMainAsync(simulatedPeerId, mainPeerId, EstablishDirectSessionRequest request, ct)`
+  - Ingress-only. Stores request as pending. Does not create session.
 
-Rationale: the repository double should be a reusable boundary, while the test remains explicit about the input state.
+- `AcceptPendingInboundDirectInviteRequestFromMainAsync(simulatedPeerId, correlationId, mainPeerId, ct)`
+  - Acceptance action. Creates session, generates response, delivers response, clears pending.
 
-4) Migrate the endpoint-resolution test repository:
+- `RejectPendingInboundDirectInviteRequestFromMainAsync(simulatedPeerId, correlationId, ct)`
+  - Rejection action. Clears pending.
 
-- **File:** `Desktop.Wpf.Tests/SimulatorStateServiceEndpointResolutionTests.cs`
-- Replace `InMemorySimulatorStateRepository` with the shared `InMemorySimulatorStateRepository`.
-- In `CreateSut()`, do:
-  - `var store = new InMemorySimulatorStateRepository();`
-  - (Optional) `store.Seed(emptySnapshot)` if needed for clarity (but it should already default to empty).
+Note: `ReceiveEstablishDirectSessionFromMainAsync` should become either a thin wrapper around `QueueInboundDirectInviteRequestFromMainAsync` or be deleted to avoid duplicated ingress entry points.
 
-5) Migrate initialization tests to the gated wrapper:
+#### B5. Refactor/rename `AcceptReverseSignalInviteAsync` to reflect new meaning
 
-- **File:** `Desktop.Wpf.Tests/SimulatorStateServiceInitializationTests.cs`
-  - Replace `RepositoryStub` with:
-    - `var inner = new InMemorySimulatorStateRepository();`
-    - `var store = new GatedLoadSimulatorStateRepository(inner);`
-  - Where the tests currently call `store.Release(snapshot)`, replace with:
-    - `inner.Seed(snapshot); store.ReleaseLoad();`
+After B3/B4, `AcceptReverseSignalInviteAsync` should no longer be callable as a general-purpose public API from multiple directions.
 
-This removes ambiguity: there is exactly one way to do “blocked load” across the suite.
+Options:
 
-6) Do NOT introduce additional repository test doubles unless a test has a clearly different contract to simulate (e.g., load cancellation).
+- Make it `internal` and rename to `CreateSessionAndHandshakeResponseForInboundDirectInvite(...)`.
+- Or keep as public but rename to reflect it is the *acceptance action* (not ingress), and ensure ingress never calls it.
 
-### C2) Test quality improvements (aligned with `source/unit-testing.md`)
+Also reconcile the UI command paths:
 
-Guidance to apply while consolidating:
+- `SimulatedPeerItemViewModel.ExecuteMainInviteDirectAsync` currently calls `AcceptReverseSignalInviteAsync` directly (immediate accept+deliver). Decide whether that command should:
+  - remain a “debug shortcut” (clearly named/labeled), or
+  - be migrated to the same pending/accept mechanism for consistency.
 
-1) AAA pattern and intention-revealing names
+Deliverable: a single authoritative acceptance API, with optional explicit debug shortcuts.
 
-- Ensure each test has visually separated **Arrange / Act / Assert**.
-- Prefer behavior naming, e.g. `TryResolvePeerId_WhenEndpointChanges_UpdatesIndex`.
+#### B6. Update UI state model to represent pending inbound invite request explicitly
 
-2) Prefer black-box assertions
+Research validation:
 
-- Assert via public surface area:
-  - return values
-  - observable state on public models (`Peers`, `Relationships`, etc.)
-  - repository side effects (`LastSavedSnapshot`)
-- Avoid asserting internal sequencing unless it’s a business requirement.
+- The simulator already shows a unified “Handshake State Machines” list (`SimulatorHandshakesTabView` + `SimulatorHandshakesTabViewModel`). It renders one `SimulatedHandshakeStateMachineCardViewModel` per peer.
+- Each card exposes a single `AcceptHandshakeCommand` button when `UiState == AwaitingUserAcceptance` and `InboundReverseSignalPendingCorrelationId != null`.
+- `SimulatedHandshakeStateMachineCardViewModel.ExecuteAcceptHandshakeAsync` currently uses *protocol guessing*:
+  - first `TryFinalizeInviteHandshakeResponseFromMainAsync(...)`
+  - if that returns `null`, then `TryDeliverQueuedInviteHandshakeResponseToMainAsync(...)`
 
-3) Avoid over-mocking
+Target model (keep the unified UI surface, remove guessing):
 
-- `ISimulatorStateRepository` is an external dependency (IO boundary), so a fake/in-memory implementation is appropriate.
-- Prefer using real models (`SimulatedPeerModel`, snapshots) rather than mocks.
+- Keep the unified “Handshake State Machines” list and a single Accept button per peer, **but** make the Accept path deterministic.
+- Replace the current “one slot” (`UiState` + `InboundReverseSignalPendingCorrelationId`) with explicit pending handshake metadata keyed by correlation id:
+  - e.g., `PendingHandshakeKind` = `InboundInviteRequestFromMain` | `InboundInviteResponseFromMain` | `OutboundInviteAwaitingResponse` (names can be refined)
+  - stored in domain (`SimulatedPeerModel`) and included in `Freeze()` / persistence.
+- Update the card VM to map `ShowAccept*` from the presence of a pending handshake item (by kind), not from overloaded `UiState` alone.
+- Update `AcceptHandshakeCommand` to dispatch by kind:
+  - `InboundInviteResponseFromMain` -> finalize session (Chunk A)
+  - `InboundInviteRequestFromMain` -> accept pending inbound direct invite request (Chunk B)
+  - any other kind -> no-op / diagnostic event
 
-4) Reduce copy/paste “repo + sut wiring”
+This preserves your “single list / single accept button” UX while making the behavior semantically correct.
 
-- Centralize common SUT construction helpers (already partially present in tests).
-- Ensure helpers don’t hide important per-test intent; keep per-test setup explicit for what matters.
+Deliverable: deterministic UI logic with no protocol-guessing fallbacks.
 
-Specific constraints (remove ambiguity):
+#### B6.1 Cleanup: split persisted pending handshake stores by handshake family + direction
 
-- Do not add “assert helper” methods that assert internal details (e.g., specific intermediate messages enqueued), unless those are part of the public contract.
-- Prefer asserting observable outcomes:
-  - method return values
-  - changes on `sut.Peers` / `sut.Relays`
-  - `store.LastSavedSnapshot` and its contents
+Motivation (from current `SimulatedPeerModel` + JSON DTOs): there are already multiple “pending” concepts stored in different shapes, some persisted as runtime store lists and some persisted as ad-hoc UI fields:
 
-### Expected outcome
+- Reverse-signal (direct) related:
+  - `SimulatedPeerModel.OutboundInvites` (persisted in `RuntimeStore.OutboundInvites`)
+  - `SimulatedPeerModel.PendingInviteHandshakeResponses` (persisted in `RuntimeStore.PendingInviteHandshakeResponses`)
+  - `SimulatedPeerModel.UiState` + `InboundReverseSignalPendingCorrelationId` (persisted today via `SimulatedPeerDto.UiState` + `SimulatedPeerDto.PendingCorrelationId`)
 
-- Replace 4 “clone” repositories with a single shared `InMemorySimulatorStateRepository`.
-- Keep 1 specialized gated repo for initialization tests.
-- Lower maintenance cost and fewer compilation breakages when `SimulatorStateSnapshot` or peer models evolve.
+- Standard-signal related:
+  - `SimulatedPeerModel.PendingInboundStandardSignalHellos` (currently runtime-only; cleared on `MarkEstablished()` / `ClearRuntimeState()` and not represented in JSON DTOs)
+  - `SimulatedPeerModel.PendingStandardHandshakeToMainResponderPublicKeyHash` + `PendingStandardHandshakeToMainTemporarySessionId` (persisted today as top-level fields on `SimulatedPeerDto`)
 
-Definition of done:
+Target outcome:
 
-- Exactly one “general purpose” `ISimulatorStateRepository` test double exists in `Desktop.Wpf.Tests`.
-- Exactly one “gated load” wrapper exists (and is only used by initialization tests).
-- No test file contains a nested `: ISimulatorStateRepository` class.
-- `dotnet test Desktop.Wpf.Tests/Desktop.Wpf.Tests.csproj` passes.
+- Persistence is cleanly separated by:
+  - handshake family (**reverse-signal** vs **standard-signal**)
+  - direction (**inbound-from-main**, **outbound-to-main**, and optionally “inbound-from-peers” for standard-signal hellos)
+- The ViewModel layer is responsible for merging “awaiting user approval” items into a single UI projection (consistent with MVVM/R3 rules).
+
+Proposed restructuring (DTO + model):
+
+1) **Move ad-hoc pending handshake persistence out of `SimulatedPeerDto` UI fields**
+
+- Stop persisting pending correlation id via `SimulatedPeerDto.PendingCorrelationId`.
+- `SimulatedPeerDto.UiState` becomes **derived only** (not persisted). The persisted truth for handshake state is the set of explicit pending stores + sessions.
+- Persist pending handshakes exclusively in explicit runtime store collections.
+
+Decision (no backwards compatibility):
+
+- There is no need to load/translate legacy fields. Assume new JSON files only.
+- It is acceptable to remove `PendingCorrelationId` persistence immediately and rely on the new explicit stores.
+
+2) **Split `SimulatedPeerRuntimeStoreDto` into sub-stores**
+
+- Add nested DTOs under `SimulatedPeerRuntimeStoreDto` (or adjacent properties) such as:
+  - `ReverseSignalStore`:
+    - `OutboundInvitesToMain` (existing `OutboundInvites`)
+    - `InboundInviteHandshakeResponsesFromMain` (existing `PendingInviteHandshakeResponses` *until Chunk A finalization becomes immediate and this list is no longer needed*)
+    - `InboundDirectInviteRequestsFromMain` (new for Chunk B; this is the real “pending acceptance” store for Main->Simulator direct invites)
+  - `StandardSignalStore`:
+    - `PendingInboundHellos` (**runtime-only; do not persist**). These are transient inbound discovery/hello items and can be cleared on restart.
+    - `PendingHandshakeToMain` (re-home the existing responder PKH + temporary session id into this store)
+
+This keeps reverse-signal and standard-signal state from being conflated.
+
+3) **Update `SimulatedPeerModel` to match the split stores**
+
+- Keep existing collections, but rename and group them so their purpose is explicit:
+  - reverse-signal outbound-to-main
+  - reverse-signal inbound-from-main
+  - standard-signal pending-to-main
+  - standard-signal pending-from-peers
+
+4) **ViewModel merges “awaiting approval” items**
+
+- `SimulatedHandshakeStateMachineCardViewModel` (or a new child VM) creates a single, merged read-only projection:
+  - `IReadOnlyList<PendingApprovalItem>` derived from the per-family stores.
+
+Define `PendingApprovalItem` as a pure UI projection (not persisted) that includes:
+
+- `CorrelationId`
+- `Family` (`ReverseSignal` | `StandardSignal`)
+- `Direction` (`InboundFromMain` | `OutboundToMain` | `InboundFromPeers`)
+- `Kind` (fine-grained, e.g. `DirectInviteRequestFromMain`, `InviteHandshakeResponseFromMain`, etc.)
+- `ReceivedUtc` (if applicable)
+
+Cardinality/invariants:
+
+- The model may contain multiple pending items across families.
+- The UI **must not** rely on a single correlation id slot to decide which item is “current”.
+- If the UX remains “one Accept button per peer”, the ViewModel must select a single `PendingApprovalItem` deterministically (documented ordering rule) and expose that as the “active” item.
+
+Approval relevance inventory (what appears in the merged approval list):
+
+- **Approval-relevant** (require simulator user acceptance):
+  - Simulator **inbound-from-main** direct/reverse-signal invite requests (`ReverseSignalStore.InboundDirectInviteRequestsFromMain`).
+  - Simulator **inbound-from-main** standard-signal requests (whatever store represents this flow after cleanup; if represented as “pending inbound standard-signal request from main”, it is approval-relevant).
+
+- **Not approval-relevant** (no simulator confirmation needed; initiated by simulator button clicks):
+  - Simulator outbound-to-main reverse-signal invites (`ReverseSignalStore.OutboundInvitesToMain`).
+  - Simulator outbound-to-main standard-signal handshakes (the `StandardSignalStore.PendingHandshakeToMain` tracking state).
+
+Deterministic ordering rule (only needed if you keep a single Accept button per peer):
+
+- Highest priority active approval item: `ReverseSignal.InboundDirectInviteRequestFromMain` (needs user acceptance).
+- If there are multiple inbound-from-main approval items, prefer the oldest `ReceivedUtc` first (FIFO), with a stable tie-breaker of `CorrelationId`.
+- Preferred long-term UX: render the merged list and provide Accept/Reject per item.
+
+5) **DTO versioning (forward-only)**
+
+- Keep DTO `Version` bumps localized (e.g., bump `SimulatedPeerRuntimeStoreDto.Version`).
+- Only support reading the new version(s).
+
+Deliverable: JSON clearly shows separate stores for reverse-signal vs standard-signal, and inbound vs outbound to/from Main; UI derives pending-approval list by merging stores; no protocol guessing.
+
+#### B7. Delete dead code / obsolete paths once Chunk B is complete
+
+After Chunk B is fully implemented and the simulator has a first-class persisted pending inbound direct invite request model, the following code paths should become unnecessary and should be deleted (or converted into explicitly labeled debug-only utilities):
+
+- `SimulatorStateService.ReceiveEstablishDirectSessionFromMainAsync` calling `AcceptReverseSignalInviteAsync`.
+  - Replace with “queue inbound invite request” behavior; remove the auto-accept call.
+
+- “Queued response as pending acceptance” mechanism for Main->Simulator direct invites:
+  - `QueueInviteHandshakeResponseForDeliveryToMainAsync` usage from `ReceiveEstablishDirectSessionFromMainAsync`.
+  - `TryDeliverQueuedInviteHandshakeResponseToMainAsync` usage as part of the simulator accepting an inbound direct invite.
+
+- UI fallback logic that guesses which protocol direction is happening:
+  - In `SimulatedHandshakeStateMachineCardViewModel.ExecuteAcceptHandshakeAsync`, remove the fallback branch:
+    - The “try finalize; if null then deliver queued response” guessing logic should be deleted.
+    - Replace it with deterministic dispatch based on `PendingHandshakeKind`.
+  - Keep a unified Accept command, but make it deterministic.
+
+- Ambiguous naming that encourages misuse:
+  - If `AcceptReverseSignalInviteAsync` is kept public, ensure there is no longer any ingress method that calls it.
+  - Prefer making the crypto/session creation routine internal and reachable only from explicit “AcceptPending…” methods.
+
+Deliverable: no remaining code that uses “response queueing” to emulate user acceptance, and no “try X then fallback to Y” acceptance logic.
+
+#### B8. Tests / verification (unit-testing.md compliant)
+
+Add deterministic tests (Desktop.Wpf.Tests or integration harness) that follow AAA and the black-box rule:
+
+- **Inbound direct invite is pending**
+  - Main sends `EstablishDirectSessionRequest`
+  - Simulator does not create a session yet
+  - Assert pending-ness via **publicly exposed domain/service state** (read-only observable collection of pending inbound direct invites), not via UI implementation details
+  - Assert attempting to perform a session-required action fails deterministically
+
+- **Accept creates session + delivers response**
+  - User accepts pending invite
+  - Session exists and simulator can now perform a public behavior that requires a session (e.g., encrypt/send a message)
+  - Response delivery to Main is observed via the public network abstraction/harness result, not by inspecting private queues
+
+- **Accept routing is deterministic (no guessing)**
+  - Given a pending handshake item of kind `InboundInviteResponseFromMain`, Accept finalizes and does not attempt delivery-to-main.
+  - Given a pending handshake item of kind `InboundInviteRequestFromMain`, Accept generates+delivers `InviteHandshakeResponse` and does not attempt “finalize response from main”.
+
+- **Reject does not create session**
+  - Pending cleared
+  - Simulator still cannot perform session-required actions for that peer
+  - Assert pending collection no longer contains that correlation id (via public read-only collection)
+
+- **Persistence**
+  - Pending invite requests survive snapshot save/restore
+
+- Mocking guidelines:
+  - Mock only external dependencies (repository/network). Use real DTOs/protobuf messages and real crypto keys as needed.
+  - Avoid asserting internal collection contents directly unless it’s part of the public contract.
+
+---
+
+### Reactive MVVM / R3 architecture constraints (must hold for Chunk A + B)
+
+- **Service/UI separation**:
+  - `SimulatorStateService` remains UI-agnostic (no `IUiDispatcher`, no WPF types). It owns canonical domain state (`ObservableList`, `ObservableDictionary`, `ReactiveProperty`) protected by its gates.
+  - ViewModels are responsible for marshaling to UI thread using `CreateView(...).ToNotifyCollectionChanged(_ui.CollectionEventDispatcher)` and `ObserveOnCurrentSynchronizationContext()` for scalar projections.
+
+- **No sorting/filtering in services**:
+  - Services should not sort/filter; use XAML `CollectionViewSource` and view filters.
+
+- **Collection projection rules**:
+  - Do not replace list instances in `BindableReactiveProperty<IReadOnlyList<T>>` for UI lists.
+  - Project domain collections via `CreateView` and bind to the notify adapter.
+  - Dispose child ViewModels explicitly on removals to avoid leaks.
+
+---
+
+### Acceptance criteria
+
+- Receiving a direct invite request from Main does not create a session until simulator user accepts.
+- After simulator accepts, simulator can perform a public behavior that requires a session, and Main receives `InviteHandshakeResponse`.
+- Pending inbound direct invites are persisted and restored correctly.
+- Public simulator APIs clearly separate ingress (receive/queue) from actions (accept/reject).
