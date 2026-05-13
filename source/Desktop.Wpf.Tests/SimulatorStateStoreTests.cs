@@ -56,7 +56,8 @@ public sealed class SimulatorStateStoreTests
                 displayName: "Alice",
                 isRelayCapable: false,
                 identitySigningKeySpki: spki,
-                identitySigningKeyPrivateKeyEcPrivateKey: priv);
+                identitySigningKeyPrivateKeyEcPrivateKey: priv,
+                endpoint: new System.Net.DnsEndPoint("127.77.1.1", 5002));
 
             var host1 = new Percolator.Network.PeerId(Guid.NewGuid());
             var host2 = new Percolator.Network.PeerId(Guid.NewGuid());

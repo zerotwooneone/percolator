@@ -10,6 +10,8 @@ using R3;
 using Desktop.Wpf.Features.Simulator.Models;
 using System.Security.Cryptography;
 using Desktop.Wpf.Features.Simulator.Tracking;
+using System.Collections.Concurrent;
+using System.Net;
 
 namespace Desktop.Wpf.Features.Simulator;
 
@@ -37,6 +39,8 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     private readonly Dictionary<Percolator.Network.PeerId, SimulatedRelayModel> _relayByHostPeerId = new();
 
     private readonly Dictionary<Percolator.Network.PeerId, SimulatedPeerModel> _peerById = new();
+
+    private readonly ConcurrentDictionary<DnsEndPoint, Percolator.Network.PeerId> _endpointIndex = new();
 
     private readonly Dictionary<Percolator.Network.PeerId, IDisposable> _runtimePersistenceByPeerId = new();
 
@@ -1106,11 +1110,10 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 if (model is not null)
                 {
                     // Set connection mode to ViaRelay with the relay host peer ID
-                    // Preserve existing Host and Port values
+                    // Preserve existing Endpoint value
                     model.SetConnection(
                         ConnectionMode.ViaRelay,
-                        host: model.Host.CurrentValue,
-                        port: model.Port.CurrentValue,
+                        endpoint: model.Endpoint.CurrentValue,
                         relayPeerId: relayHostPeerId);
                 }
             }
@@ -1839,11 +1842,10 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                     if (relayHostPeerId is not null && relayHostPeerId.Value != Guid.Empty)
                     {
                         // Set connection mode to ViaRelay with the relay host peer ID
-                        // Preserve existing Host and Port values
+                        // Preserve existing Endpoint value
                         model.SetConnection(
                             ConnectionMode.ViaRelay,
-                            host: model.Host.CurrentValue,
-                            port: model.Port.CurrentValue,
+                            endpoint: model.Endpoint.CurrentValue,
                             relayPeerId: relayHostPeerId);
                     }
 
@@ -2116,6 +2118,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                     _peers.Add(model);
                     _peerById[model.PeerId] = model;
                     AttachRuntimePersistence(model);
+                    AttachEndpointIndex(model);
                 }
 
                 _relationships.Clear();
@@ -2159,8 +2162,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             identitySigningKeySpki: snap.IdentitySigningKeySpki,
             identitySigningKeyPrivateKeyEcPrivateKey: snap.IdentitySigningKeyPrivateKeyEcPrivateKey,
             connectionMode: snap.ConnectionMode,
-            host: snap.Host,
-            port: snap.Port,
+            endpoint: snap.Endpoint,
             relayPeerId: snap.RelayPeerId.Value == Guid.Empty ? null : snap.RelayPeerId,
             uiState: snap.UiState,
             pendingCorrelationId: snap.InboundReverseSignalPendingCorrelationId,
@@ -2297,9 +2299,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var host = AllocateNextLoopbackHostOnPeerGate();
-            var port = _transportOptions.Value.SimulatorPort;
-            if (port == 0) port = 5002;
+            var endpoint = AllocateNextLoopbackEndpointOnPeerGate();
 
             var selfIdentityId = Interlocked.Increment(ref _nextSelfIdentityId);
 
@@ -2311,13 +2311,13 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 identitySigningKeySpki: spki,
                 identitySigningKeyPrivateKeyEcPrivateKey: priv,
                 connectionMode: ConnectionMode.Direct,
-                host: host,
-                port: port,
+                endpoint: endpoint,
                 relayPeerId: null);
 
             _peerById[peerId] = model;
             _peers.Add(model);
             AttachRuntimePersistence(model);
+            AttachEndpointIndex(model);
         }
         finally
         {
@@ -2334,18 +2334,21 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         return peerId;
     }
 
-    private string AllocateNextLoopbackHostOnPeerGate()
+    private DnsEndPoint AllocateNextLoopbackEndpointOnPeerGate()
     {
         // Must be called under _stateGate.
         var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var p in _peers)
         {
-            var host = p.Host.CurrentValue;
-            if (!string.IsNullOrWhiteSpace(host))
+            var endpoint = p.Endpoint.CurrentValue;
+            if (endpoint is not null && !string.IsNullOrWhiteSpace(endpoint.Host))
             {
-                used.Add(host);
+                used.Add(endpoint.Host);
             }
         }
+
+        var port = _transportOptions.Value.SimulatorPort;
+        if (port == 0) port = 5002;
 
         for (var x = 1; x <= 254; x++)
         {
@@ -2354,7 +2357,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 var candidate = $"127.77.{x}.{y}";
                 if (!used.Contains(candidate))
                 {
-                    return candidate;
+                    return new DnsEndPoint(candidate, port);
                 }
             }
         }
@@ -2364,7 +2367,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         var hash = sha.ComputeHash(Guid.NewGuid().ToByteArray());
         var fx = (byte)((hash[0] % 254) + 1);
         var fy = (byte)((hash[1] % 254) + 1);
-        return $"127.77.{fx}.{fy}";
+        return new DnsEndPoint($"127.77.{fx}.{fy}", port);
     }
 
     public async Task<Percolator.Network.PeerId?> TryGetPeerIdByIdentityPublicKeyHashAsync(Percolator.Identity.IdentityPublicKeyHash recipientPublicKeyHash, CancellationToken cancellationToken = default)
@@ -2396,12 +2399,14 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 
         string name;
         SimulatedPeerModel? removedModel = null;
+        DnsEndPoint? removedEndpoint = null;
 
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             if (!_peerById.Remove(peerId, out removedModel)) return;
             name = string.IsNullOrWhiteSpace(removedModel.DisplayName.CurrentValue) ? removedModel.PeerId.ToString()[..8] : removedModel.DisplayName.CurrentValue;
+            removedEndpoint = removedModel.Endpoint.CurrentValue;
 
             for (var i = _relationships.Count - 1; i >= 0; i--)
             {
@@ -2429,6 +2434,9 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 _stateGate.Release();
             }
         }
+
+        // Remove from endpoint index
+        _endpointIndex.TryRemove(removedEndpoint!, out _);
 
         await RemoveRelayIfExistsAsync(peerId, cancellationToken).ConfigureAwait(false);
 
@@ -2672,6 +2680,33 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             .SubscribeAwait(async (enabled, ct) => await OnRelayCapabilityChangedAsync(model.PeerId, enabled, ct).ConfigureAwait(false), AwaitOperation.Sequential);
 
         _runtimePersistenceByPeerId[model.PeerId] = new CompositeDisposable(tracker, saveSub, lifecycleSub);
+    }
+
+    private void AttachEndpointIndex(SimulatedPeerModel model)
+    {
+        // Subscribe to endpoint changes and update the index
+        var oldEndpoint = model.Endpoint.CurrentValue;
+        var endpointSub = model.Endpoint
+            .DistinctUntilChanged()
+            .Subscribe(endpoint =>
+            {
+                // Remove old endpoint from index if it exists
+                _endpointIndex.TryRemove(oldEndpoint, out _);
+                _endpointIndex[endpoint] = model.PeerId;
+                oldEndpoint = endpoint;
+            });
+
+        // Initialize the index with the current endpoint
+        _endpointIndex[oldEndpoint] = model.PeerId;
+
+        // Store the subscription to dispose it when the peer is removed
+        // We'll attach this to the peer's lifecycle
+        model.Track(endpointSub);
+    }
+
+    public bool TryResolvePeerId(DnsEndPoint endpoint, out Percolator.Network.PeerId peerId)
+    {
+        return _endpointIndex.TryGetValue(endpoint, out peerId);
     }
 
     private async Task OnRelayCapabilityChangedAsync(Percolator.Network.PeerId peerId, bool enabled, CancellationToken cancellationToken)

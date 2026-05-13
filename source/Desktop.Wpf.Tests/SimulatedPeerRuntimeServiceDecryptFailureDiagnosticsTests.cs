@@ -21,62 +21,24 @@ namespace Desktop.Wpf.Tests;
 [TestFixture]
 public sealed class SimulatedPeerRuntimeServiceDecryptFailureDiagnosticsTests
 {
-    private sealed class InMemoryRepository : ISimulatorStateRepository
-    {
-        public IReadOnlyList<SimulatedPeerModel> Peers { get; set; } = Array.Empty<SimulatedPeerModel>();
-
-        public IReadOnlyList<PeerRelationship> Relationships { get; set; } = Array.Empty<PeerRelationship>();
-
-        public IReadOnlyList<SimulatedRelayModel> Relays { get; set; } = Array.Empty<SimulatedRelayModel>();
-
-        public SimulatorStateSnapshot? SavedSnapshot { get; private set; }
-
-        public Task<SimulatorStateSnapshot> LoadStateAsync(CancellationToken cancellationToken = default)
-        {
-            var peerSnaps = Peers.Select(p => p.Freeze()).ToList();
-            var relSnaps = Relationships.Select(r => new PeerRelationshipSnapshot(r.SourcePeerId, r.TargetPeerId, r.Type)).ToList();
-            var relaySnaps = Relays.Select(r => r.Freeze()).ToList();
-
-            return Task.FromResult(new SimulatorStateSnapshot(
-                Version: 1,
-                Peers: peerSnaps,
-                Relationships: relSnaps,
-                Relays: relaySnaps,
-                Groups: Array.Empty<GroupConversationDto>()));
-        }
-
-        public Task SaveStateAsync(SimulatorStateSnapshot snapshot, CancellationToken cancellationToken = default)
-        {
-            SavedSnapshot = snapshot;
-            return Task.CompletedTask;
-        }
-    }
-
     [Test]
     public async Task DecryptSessionMessageAsync_WhenDecryptThrows_EmitsDecryptFailureDiagnosticEvent()
     {
         // Arrange
         var peerId = new PeerId(Guid.NewGuid());
-        using var identityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var identityPriv = identityEcdh.ExportECPrivateKey();
-        using var identityEcdsa = ECDsa.Create(identityEcdh.ExportParameters(true));
-        var identitySpki = identityEcdsa.ExportSubjectPublicKeyInfo();
+        var peer = CryptoTestHelpers.CreateTestPeer(
+            peerId, 99000, "peer", false,
+            new System.Net.DnsEndPoint("127.77.1.1", 5002));
 
         var diagnostics = new SimulatorDiagnosticsService();
 
-        var repo = new InMemoryRepository
-        {
-            Peers = new[]
-            {
-                new SimulatedPeerModel(
-                    peerId: peerId,
-                    selfIdentityId: 99000,
-                    displayName: "peer",
-                    isRelayCapable: false,
-                    identitySigningKeySpki: identitySpki,
-                    identitySigningKeyPrivateKeyEcPrivateKey: identityPriv)
-            }
-        };
+        var repo = new InMemorySimulatorStateRepository();
+        repo.Seed(new SimulatorStateSnapshot(
+            Version: 1,
+            Peers: new[] { peer.Freeze() },
+            Relationships: Array.Empty<PeerRelationshipSnapshot>(),
+            Relays: Array.Empty<RelayStateSnapshot>(),
+            Groups: Array.Empty<GroupConversationDto>()));
 
         var services = new ServiceCollection();
         services.AddSingleton<IClock, SystemClock>();
@@ -96,7 +58,7 @@ public sealed class SimulatedPeerRuntimeServiceDecryptFailureDiagnosticsTests
         // Act
         var act = async () => await sut.DecryptSessionMessageAsync(peerId, sessionId, badMessage, CancellationToken.None);
 
-        // Assert
+        // Assert: Exception is thrown and diagnostic event is emitted
         await act.Should().ThrowAsync<Exception>();
         diagnostics.Events.Should().Contain(e =>
             e.EventType == SimulatorDiagnosticEventType.DecryptFailure

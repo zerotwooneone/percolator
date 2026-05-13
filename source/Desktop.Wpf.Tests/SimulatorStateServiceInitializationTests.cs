@@ -22,29 +22,12 @@ namespace Desktop.Wpf.Tests;
 [TestFixture]
 public sealed class SimulatorStateServiceInitializationTests
 {
-    private sealed class RepositoryStub : ISimulatorStateRepository
-    {
-        private readonly TaskCompletionSource<SimulatorStateSnapshot> _gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        public int LoadCalls;
-
-        public Task<SimulatorStateSnapshot> LoadStateAsync(CancellationToken cancellationToken = default)
-        {
-            Interlocked.Increment(ref LoadCalls);
-            return _gate.Task;
-        }
-
-        public Task SaveStateAsync(SimulatorStateSnapshot snapshot, CancellationToken cancellationToken = default)
-            => Task.CompletedTask;
-
-        public void Release(SimulatorStateSnapshot snapshot) => _gate.TrySetResult(snapshot);
-    }
-
     [Test]
     public async Task InitializeAsync_CoalescesConcurrentCalls()
     {
         // Arrange
-        var store = new RepositoryStub();
+        var innerStore = new InMemorySimulatorStateRepository();
+        var store = new GatedLoadSimulatorStateRepository(innerStore);
         var diagnostics = new SimulatorDiagnosticsService();
 
         var services = new ServiceCollection();
@@ -58,20 +41,21 @@ public sealed class SimulatorStateServiceInitializationTests
 
         var sut = new SimulatorStateService(store, diagnostics, pending, scopeFactory, transportOptions, engine);
 
-        // Act
+        // Act: Call InitializeAsync concurrently
         var initializer = (ISimulatorStateInitializer)sut;
         var t1 = initializer.InitializeAsync();
         var t2 = initializer.InitializeAsync();
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
-        while (Volatile.Read(ref store.LoadCalls) == 0 && !cts.IsCancellationRequested)
+        // Wait for the load to be called (checking LoadCallCount to verify coalescing behavior)
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        while (Volatile.Read(ref innerStore.LoadCallCount) == 0 && !cts.IsCancellationRequested)
         {
-            await Task.Delay(5, cts.Token);
+            await Task.Delay(10, cts.Token);
         }
 
-        store.LoadCalls.Should().Be(1);
+        Volatile.Read(ref innerStore.LoadCallCount).Should().Be(1);
 
-        store.Release(new SimulatorStateSnapshot(
+        store.ReleaseLoadWith(new SimulatorStateSnapshot(
             Version: 1,
             Peers: Array.Empty<PeerStateSnapshot>(),
             Relationships: Array.Empty<PeerRelationshipSnapshot>(),
@@ -79,8 +63,8 @@ public sealed class SimulatorStateServiceInitializationTests
             Groups: Array.Empty<GroupConversationDto>()));
         await Task.WhenAll(t1, t2);
 
-        // Assert
-        store.LoadCalls.Should().Be(1);
+        // Assert: Only one load call occurred (coalescing worked)
+        innerStore.LoadCallCount.Should().Be(1);
     }
 
     [Test]
@@ -101,9 +85,10 @@ public sealed class SimulatorStateServiceInitializationTests
             displayName: "Alice",
             isRelayCapable: false,
             identitySigningKeySpki: spki,
-            identitySigningKeyPrivateKeyEcPrivateKey: priv);
+            identitySigningKeyPrivateKeyEcPrivateKey: priv,
+            endpoint: new System.Net.DnsEndPoint("127.77.1.1", 5002));
 
-        // Add signed prekey
+        // Setup: Add test data to model (using mutable collections since snapshot creation requires frozen state)
         model.SignedPreKeysMutable.Add(new SimulatedSignedPreKeyModel(
             SignedPreKeyId: signedPreKeyId,
             PrivateEcPrivateKey: new byte[] { 1, 2, 3 },
@@ -150,8 +135,9 @@ public sealed class SimulatorStateServiceInitializationTests
             Relays: Array.Empty<RelayStateSnapshot>(),
             Groups: Array.Empty<GroupConversationDto>());
 
-        var store = new RepositoryStub();
-        store.Release(snapshot);
+        var innerStore = new InMemorySimulatorStateRepository();
+        var store = new GatedLoadSimulatorStateRepository(innerStore);
+        store.ReleaseLoadWith(snapshot);
 
         var diagnostics = new SimulatorDiagnosticsService();
         var services = new ServiceCollection();
@@ -168,23 +154,19 @@ public sealed class SimulatorStateServiceInitializationTests
         var initializer = (ISimulatorStateInitializer)sut;
         await initializer.InitializeAsync();
 
-        // Assert
+        // Assert: Verify state was restored correctly (checking internal collections to verify restoration)
         var restoredPeer = sut.Peers.FirstOrDefault(p => p.PeerId == peerId);
         restoredPeer.Should().NotBeNull();
 
-        // Verify signed prekeys were restored
         restoredPeer.SignedPreKeysMutable.Should().HaveCount(1);
         restoredPeer.SignedPreKeysMutable.First().SignedPreKeyId.Should().Be(signedPreKeyId);
 
-        // Verify session was restored
         restoredPeer.SessionsMutable.Should().HaveCount(1);
         restoredPeer.SessionsMutable.ContainsKey(session.Id).Should().BeTrue();
 
-        // Verify outbound invite was restored
         restoredPeer.OutboundInvitesMutable.Should().HaveCount(1);
         restoredPeer.OutboundInvitesMutable.First().CorrelationId.Should().Be(inviteCorrelationId);
 
-        // Verify pending handshake response was restored
         restoredPeer.PendingInviteHandshakeResponsesMutable.Should().HaveCount(1);
         restoredPeer.PendingInviteHandshakeResponsesMutable.First().CorrelationId.Should().Be(responseCorrelationId);
     }
@@ -205,7 +187,8 @@ public sealed class SimulatorStateServiceInitializationTests
         var transportOptions = Options.Create(new TransportOptions { SimulatorPort = 5002 });
         var engine = new SignalProtocolEngine(new SystemClock());
 
-        var store = new RepositoryStub();
+        var innerStore = new InMemorySimulatorStateRepository();
+        var store = new GatedLoadSimulatorStateRepository(innerStore);
 
         var sut = new SimulatorStateService(
             store,
@@ -216,7 +199,7 @@ public sealed class SimulatorStateServiceInitializationTests
             engine);
 
         // Release empty snapshot so InitializeAsync can complete
-        store.Release(new SimulatorStateSnapshot(
+        store.ReleaseLoadWith(new SimulatorStateSnapshot(
             Version: 1,
             Peers: Array.Empty<PeerStateSnapshot>(),
             Relationships: Array.Empty<PeerRelationshipSnapshot>(),
@@ -246,7 +229,7 @@ public sealed class SimulatorStateServiceInitializationTests
         var simulatedPeer = sut.Peers.Single(p => p.PeerId == simulatedPeerId);
         var simulatedPkh = Percolator.Identity.IdentityPublicKeyHash.FromSpki(simulatedPeer.IdentitySigningKeySpki);
 
-        // Act: pop the bundle 4 times
+        // Act: Pop the bundle 4 times
         var pop1 = await sut.TryPopPreKeyBundleByRecipientPkhAsync(
             relayHostPeerId,
             simulatedPkh,
@@ -264,7 +247,7 @@ public sealed class SimulatorStateServiceInitializationTests
             simulatedPkh,
             cancellationToken: CancellationToken.None);
 
-        // Assert
+        // Assert: Verify onetime keys are popped one at a time (checking internal state to verify behavior)
         pop1.Should().NotBeNull();
         pop2.Should().NotBeNull();
         pop3.Should().NotBeNull();

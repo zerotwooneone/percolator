@@ -24,80 +24,32 @@ namespace Desktop.Wpf.Tests;
 [TestFixture]
 public sealed class SimulatedPeerRuntimeFinalizeTests
 {
-    private sealed class InMemoryRepository : ISimulatorStateRepository
-    {
-        public IReadOnlyList<SimulatedPeerModel> Peers { get; set; } = Array.Empty<SimulatedPeerModel>();
-
-        public IReadOnlyList<PeerRelationship> Relationships { get; set; } = Array.Empty<PeerRelationship>();
-
-        public IReadOnlyList<SimulatedRelayModel> Relays { get; set; } = Array.Empty<SimulatedRelayModel>();
-
-        public SimulatorStateSnapshot? SavedSnapshot { get; private set; }
-
-        public Task<SimulatorStateSnapshot> LoadStateAsync(CancellationToken cancellationToken = default)
-        {
-            var peerSnaps = Peers.Select(p => p.Freeze()).ToList();
-            var relSnaps = Relationships.Select(r => new PeerRelationshipSnapshot(r.SourcePeerId, r.TargetPeerId, r.Type)).ToList();
-            var relaySnaps = Relays.Select(r => r.Freeze()).ToList();
-
-            return Task.FromResult(new SimulatorStateSnapshot(
-                Version: 1,
-                Peers: peerSnaps,
-                Relationships: relSnaps,
-                Relays: relaySnaps,
-                Groups: Array.Empty<GroupConversationDto>()));
-        }
-
-        public Task SaveStateAsync(SimulatorStateSnapshot snapshot, CancellationToken cancellationToken = default)
-        {
-            SavedSnapshot = snapshot;
-            return Task.CompletedTask;
-        }
-    }
-
     [Test]
     public async Task Accept_finalize_creates_session_when_signed_prekey_private_is_recorded()
     {
+        // Arrange
         var inviterPeerId = new PeerId(Guid.NewGuid());
         var acceptorPeerId = new PeerId(Guid.NewGuid());
-
-        using var inviterIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var inviterIdentityPriv = inviterIdentityEcdh.ExportECPrivateKey();
-        using var inviterIdentityEcdsa = ECDsa.Create(inviterIdentityEcdh.ExportParameters(true));
-        var inviterIdentitySpki = inviterIdentityEcdsa.ExportSubjectPublicKeyInfo();
-
-        using var acceptorIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var acceptorIdentityPriv = acceptorIdentityEcdh.ExportECPrivateKey();
-        using var acceptorIdentityEcdsa = ECDsa.Create(acceptorIdentityEcdh.ExportParameters(true));
-        var acceptorIdentitySpki = acceptorIdentityEcdsa.ExportSubjectPublicKeyInfo();
-
         var correlation = Guid.NewGuid();
 
-        using var inviterSignedPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var inviterSignedPreKeySpki = inviterSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
-        var inviterSignedPreKeyPriv = inviterSignedPreKey.ExportECPrivateKey();
-        var preKeySig = inviterIdentityEcdsa.SignData(inviterSignedPreKeySpki, HashAlgorithmName.SHA256);
+        var inviterPeer = CryptoTestHelpers.CreateTestPeer(
+            inviterPeerId, 99000, "inviter", false,
+            new System.Net.DnsEndPoint("127.77.1.1", 5002));
+        var acceptorPeer = CryptoTestHelpers.CreateTestPeer(
+            acceptorPeerId, 99001, "acceptor", false,
+            new System.Net.DnsEndPoint("127.77.1.2", 5002));
 
-        var repo = new InMemoryRepository
-        {
-            Peers = new[]
-            {
-                new SimulatedPeerModel(
-                    peerId: inviterPeerId,
-                    selfIdentityId: 99000,
-                    displayName: "inviter",
-                    isRelayCapable: false,
-                    identitySigningKeySpki: inviterIdentitySpki,
-                    identitySigningKeyPrivateKeyEcPrivateKey: inviterIdentityPriv),
-                new SimulatedPeerModel(
-                    peerId: acceptorPeerId,
-                    selfIdentityId: 99001,
-                    displayName: "acceptor",
-                    isRelayCapable: false,
-                    identitySigningKeySpki: acceptorIdentitySpki,
-                    identitySigningKeyPrivateKeyEcPrivateKey: acceptorIdentityPriv)
-            }
-        };
+        var (spkId, spkPriv, spkSpki, spkSig) = CryptoTestHelpers.CreateSignedPreKey(
+            inviterPeer.IdentitySigningKeySpki,
+            inviterPeer.IdentitySigningKeyPrivateKeyEcPrivateKey);
+
+        var repo = new InMemorySimulatorStateRepository();
+        repo.Seed(new SimulatorStateSnapshot(
+            Version: 1,
+            Peers: new[] { inviterPeer.Freeze(), acceptorPeer.Freeze() },
+            Relationships: Array.Empty<PeerRelationshipSnapshot>(),
+            Relays: Array.Empty<RelayStateSnapshot>(),
+            Groups: Array.Empty<GroupConversationDto>()));
 
         var services = new ServiceCollection();
         services.AddSingleton<IClock, SystemClock>();
@@ -112,9 +64,10 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
         var sut = new SimulatorStateService(repo, diagnostics, pending, scopeFactory, transportOptions, engine);
         await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
 
+        // Setup: Add outbound invite to simulate pre-existing invite state
         sut.Peers.Single(p => p.PeerId == inviterPeerId)
             .OutboundInvitesMutable
-            .Add(new SimulatedOutboundInviteModel(correlation, inviterSignedPreKeyPriv));
+            .Add(new SimulatedOutboundInviteModel(correlation, spkPriv));
 
         var payload = new InviteHandshakeRequestPayload
         {
@@ -126,18 +79,21 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
             InviterPreKey = new InviteHandshakePreKeyBundle
             {
                 Version = 1,
-                InviterSignedPreKey = ByteString.CopyFrom(inviterSignedPreKeySpki),
-                PreKeySignature = ByteString.CopyFrom(preKeySig)
+                InviterSignedPreKey = ByteString.CopyFrom(spkSpki),
+                PreKeySignature = ByteString.CopyFrom(spkSig)
             }
         };
 
         var payloadBytes = payload.ToByteArray();
-        var payloadSig = inviterIdentityEcdsa.SignData(payloadBytes, HashAlgorithmName.SHA256);
+        var payloadSig = CryptoTestHelpers.SignPayload(
+            payloadBytes,
+            inviterPeer.IdentitySigningKeySpki,
+            inviterPeer.IdentitySigningKeyPrivateKeyEcPrivateKey);
 
         var invite = new EstablishDirectSessionRequest
         {
             Version = 1,
-            InviterIdentityKey = ByteString.CopyFrom(inviterIdentitySpki),
+            InviterIdentityKey = ByteString.CopyFrom(inviterPeer.IdentitySigningKeySpki),
             Payload = ByteString.CopyFrom(payloadBytes),
             PayloadSignature = ByteString.CopyFrom(payloadSig)
         };
@@ -156,51 +112,34 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
             requestCorrelationId: correlation,
             cancellationToken: CancellationToken.None);
 
+        // Assert: Session was created and pending response was consumed
         finalizedSid.Should().NotBeNull();
-
         sut.Peers.Single(p => p.PeerId == inviterPeerId).Sessions.Count.Should().Be(1);
-
         pending.TryGetInviteHandshakeResponse(inviterPeerId, correlation, out _).Should().BeFalse();
     }
 
     [Test]
     public async Task Accept_finalize_returns_null_when_missing_signed_prekey_private()
     {
+        // Arrange
         var inviterPeerId = new PeerId(Guid.NewGuid());
         var acceptorPeerId = new PeerId(Guid.NewGuid());
-
-        using var inviterIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var inviterIdentityPriv = inviterIdentityEcdh.ExportECPrivateKey();
-        using var inviterIdentityEcdsa = ECDsa.Create(inviterIdentityEcdh.ExportParameters(true));
-        var inviterIdentitySpki = inviterIdentityEcdsa.ExportSubjectPublicKeyInfo();
-
-        using var acceptorIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var acceptorIdentityPriv = acceptorIdentityEcdh.ExportECPrivateKey();
-        using var acceptorIdentityEcdsa = ECDsa.Create(acceptorIdentityEcdh.ExportParameters(true));
-        var acceptorIdentitySpki = acceptorIdentityEcdsa.ExportSubjectPublicKeyInfo();
-
         var correlation = Guid.NewGuid();
 
-        var repo = new InMemoryRepository
-        {
-            Peers = new[]
-            {
-                new SimulatedPeerModel(
-                    peerId: inviterPeerId,
-                    selfIdentityId: 99000,
-                    displayName: "inviter",
-                    isRelayCapable: false,
-                    identitySigningKeySpki: inviterIdentitySpki,
-                    identitySigningKeyPrivateKeyEcPrivateKey: inviterIdentityPriv),
-                new SimulatedPeerModel(
-                    peerId: acceptorPeerId,
-                    selfIdentityId: 99001,
-                    displayName: "acceptor",
-                    isRelayCapable: false,
-                    identitySigningKeySpki: acceptorIdentitySpki,
-                    identitySigningKeyPrivateKeyEcPrivateKey: acceptorIdentityPriv)
-            }
-        };
+        var inviterPeer = CryptoTestHelpers.CreateTestPeer(
+            inviterPeerId, 99000, "inviter", false,
+            new System.Net.DnsEndPoint("127.77.1.1", 5002));
+        var acceptorPeer = CryptoTestHelpers.CreateTestPeer(
+            acceptorPeerId, 99001, "acceptor", false,
+            new System.Net.DnsEndPoint("127.77.1.2", 5002));
+
+        var repo = new InMemorySimulatorStateRepository();
+        repo.Seed(new SimulatorStateSnapshot(
+            Version: 1,
+            Peers: new[] { inviterPeer.Freeze(), acceptorPeer.Freeze() },
+            Relationships: Array.Empty<PeerRelationshipSnapshot>(),
+            Relays: Array.Empty<RelayStateSnapshot>(),
+            Groups: Array.Empty<GroupConversationDto>()));
 
         var services = new ServiceCollection();
         services.AddSingleton<IClock, SystemClock>();
@@ -219,7 +158,7 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
         {
             Version = 1,
             RequestCorrelationId = correlation.ToString(),
-            AcceptorIdentityKey = ByteString.CopyFrom(acceptorIdentitySpki),
+            AcceptorIdentityKey = ByteString.CopyFrom(acceptorPeer.IdentitySigningKeySpki),
             AcceptorX3DhEphemeralKey = ByteString.CopyFrom(new byte[] { 0x01 }),
             InitialRatchetMessage = ByteString.CopyFrom(new byte[] { 0x02 })
         }, CancellationToken.None);
@@ -230,6 +169,7 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
             requestCorrelationId: correlation,
             cancellationToken: CancellationToken.None);
 
+        // Assert: Finalization returns null when signed prekey private is missing
         finalizedSid.Should().BeNull();
         pending.TryGetInviteHandshakeResponse(inviterPeerId, correlation, out _).Should().BeTrue();
     }

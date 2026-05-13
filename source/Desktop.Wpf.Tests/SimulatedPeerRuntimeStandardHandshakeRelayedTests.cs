@@ -23,39 +23,35 @@ namespace Desktop.Wpf.Tests;
 [TestFixture]
 public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
 {
-    private sealed class InMemoryRepository : ISimulatorStateRepository
+    private sealed record ResponderPreKeyBundle(
+        byte[] ResponderPkh,
+        byte[] IdentityKey,
+        Guid SignedPreKeyId,
+        byte[] SignedPreKey,
+        byte[] PreKeySignature);
+
+    private static ResponderPreKeyBundle CreateValidResponderPreKeyBundle()
     {
-        public IReadOnlyList<SimulatedPeerModel> Peers { get; set; } = Array.Empty<SimulatedPeerModel>();
+        using var identityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        using var identityEcdsa = ECDsa.Create(identityEcdh.ExportParameters(true));
+        var identitySpki = identityEcdsa.ExportSubjectPublicKeyInfo();
 
-        public IReadOnlyList<PeerRelationship> Relationships { get; set; } = Array.Empty<PeerRelationship>();
+        using var signedPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var signedPreKeySpki = signedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
 
-        public IReadOnlyList<SimulatedRelayModel> Relays { get; set; } = Array.Empty<SimulatedRelayModel>();
+        var sig = identityEcdsa.SignData(signedPreKeySpki, HashAlgorithmName.SHA256);
+        var pkh = SHA256.HashData(identitySpki);
 
-        public SimulatorStateSnapshot? SavedSnapshot { get; private set; }
-
-        public Task<SimulatorStateSnapshot> LoadStateAsync(CancellationToken cancellationToken = default)
-        {
-            var peerSnaps = Peers.Select(p => p.Freeze()).ToList();
-            var relSnaps = Relationships.Select(r => new PeerRelationshipSnapshot(r.SourcePeerId, r.TargetPeerId, r.Type)).ToList();
-            var relaySnaps = Relays.Select(r => r.Freeze()).ToList();
-
-            return Task.FromResult(new SimulatorStateSnapshot(
-                Version: 1,
-                Peers: peerSnaps,
-                Relationships: relSnaps,
-                Relays: relaySnaps,
-                Groups: Array.Empty<GroupConversationDto>()));
-        }
-
-        public Task SaveStateAsync(SimulatorStateSnapshot snapshot, CancellationToken cancellationToken = default)
-        {
-            SavedSnapshot = snapshot;
-            return Task.CompletedTask;
-        }
+        return new ResponderPreKeyBundle(
+            ResponderPkh: pkh,
+            IdentityKey: identitySpki,
+            SignedPreKeyId: Guid.NewGuid(),
+            SignedPreKey: signedPreKeySpki,
+            PreKeySignature: sig);
     }
 
     private static SimulatorStateService CreateSut(
-        InMemoryRepository repo,
+        InMemorySimulatorStateRepository repo,
         SimulatorDiagnosticsService diagnostics,
         ISimulatedPeerPendingInbox pending,
         IClock clock,
@@ -81,21 +77,21 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
     [Test]
     public async Task AcceptReverseSignalInviteAsync_creates_session_in_memory()
     {
+        // Arrange
         var simulatedPeerId = new Percolator.Network.PeerId(Guid.NewGuid());
         var inviterPeerId = new Percolator.Network.PeerId(Guid.NewGuid());
 
-        using var acceptorIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var acceptorIdentityPriv = acceptorIdentityEcdh.ExportECPrivateKey();
-        using var acceptorIdentityEcdsa = ECDsa.Create(acceptorIdentityEcdh.ExportParameters(true));
-        var acceptorIdentitySpki = acceptorIdentityEcdsa.ExportSubjectPublicKeyInfo();
+        var acceptorPeer = CryptoTestHelpers.CreateTestPeer(
+            simulatedPeerId, 99000, "sim", false,
+            new System.Net.DnsEndPoint("127.77.1.1", 5002));
 
-        using var inviterIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        using var inviterIdentityEcdsa = ECDsa.Create(inviterIdentityEcdh.ExportParameters(true));
-        var inviterIdentitySpki = inviterIdentityEcdsa.ExportSubjectPublicKeyInfo();
+        var inviterPeer = CryptoTestHelpers.CreateTestPeer(
+            inviterPeerId, 99001, "inviter", false,
+            new System.Net.DnsEndPoint("127.77.1.2", 5002));
 
-        using var inviterSignedPreKeyEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var inviterSignedPreKeySpki = inviterSignedPreKeyEcdh.PublicKey.ExportSubjectPublicKeyInfo();
-        var preKeySig = inviterIdentityEcdsa.SignData(inviterSignedPreKeySpki, HashAlgorithmName.SHA256);
+        var (spkId, spkPriv, spkSpki, spkSig) = CryptoTestHelpers.CreateSignedPreKey(
+            inviterPeer.IdentitySigningKeySpki,
+            inviterPeer.IdentitySigningKeyPrivateKeyEcPrivateKey);
 
         var payload = new InviteHandshakeRequestPayload
         {
@@ -104,31 +100,25 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             InviterPreKey = new InviteHandshakePreKeyBundle
             {
                 Version = 1,
-                InviterSignedPreKey = ByteString.CopyFrom(inviterSignedPreKeySpki),
-                PreKeySignature = ByteString.CopyFrom(preKeySig)
+                InviterSignedPreKey = ByteString.CopyFrom(spkSpki),
+                PreKeySignature = ByteString.CopyFrom(spkSig)
             }
         };
 
         var invite = new EstablishDirectSessionRequest
         {
             Version = 1,
-            InviterIdentityKey = ByteString.CopyFrom(inviterIdentitySpki),
+            InviterIdentityKey = ByteString.CopyFrom(inviterPeer.IdentitySigningKeySpki),
             Payload = ByteString.CopyFrom(payload.ToByteArray())
         };
 
-        var repo = new InMemoryRepository
-        {
-            Peers = new[]
-            {
-                new SimulatedPeerModel(
-                    peerId: simulatedPeerId,
-                    selfIdentityId: 99000,
-                    displayName: "sim",
-                    isRelayCapable: false,
-                    identitySigningKeySpki: acceptorIdentitySpki,
-                    identitySigningKeyPrivateKeyEcPrivateKey: acceptorIdentityPriv)
-            }
-        };
+        var repo = new InMemorySimulatorStateRepository();
+        repo.Seed(new SimulatorStateSnapshot(
+            Version: 1,
+            Peers: new[] { acceptorPeer.Freeze() },
+            Relationships: Array.Empty<PeerRelationshipSnapshot>(),
+            Relays: Array.Empty<RelayStateSnapshot>(),
+            Groups: Array.Empty<GroupConversationDto>()));
 
         var pending = new SimulatedPeerPendingInbox();
         var diagnostics = new SimulatorDiagnosticsService();
@@ -185,19 +175,22 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             Payload = ByteString.CopyFrom(payload.ToByteArray())
         };
 
-        var repo = new InMemoryRepository
-        {
-            Peers = new[]
-            {
-                new SimulatedPeerModel(
-                    peerId: simulatedPeerId,
-                    selfIdentityId: 99000,
-                    displayName: "sim",
-                    isRelayCapable: false,
-                    identitySigningKeySpki: acceptorIdentitySpki,
-                    identitySigningKeyPrivateKeyEcPrivateKey: acceptorIdentityPriv)
-            }
-        };
+        var peer = new SimulatedPeerModel(
+            peerId: simulatedPeerId,
+            selfIdentityId: 99000,
+            displayName: "sim",
+            isRelayCapable: false,
+            identitySigningKeySpki: acceptorIdentitySpki,
+            identitySigningKeyPrivateKeyEcPrivateKey: acceptorIdentityPriv,
+            endpoint: new System.Net.DnsEndPoint("127.77.1.1", 5002));
+
+        var repo = new InMemorySimulatorStateRepository();
+        repo.Seed(new SimulatorStateSnapshot(
+            Version: 1,
+            Peers: new[] { peer.Freeze() },
+            Relationships: Array.Empty<PeerRelationshipSnapshot>(),
+            Relays: Array.Empty<RelayStateSnapshot>(),
+            Groups: Array.Empty<GroupConversationDto>()));
 
         var pending = new SimulatedPeerPendingInbox();
         var diagnostics = new SimulatorDiagnosticsService();
@@ -211,8 +204,8 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         // Assert: advance time to trigger debounced save
         timeProvider.Advance(TimeSpan.FromMilliseconds(300));
 
-        repo.SavedSnapshot.Should().NotBeNull();
-        repo.SavedSnapshot!.Peers.Single(p => p.PeerId == simulatedPeerId).Sessions.Count.Should().Be(1);
+        repo.LastSavedSnapshot.Should().NotBeNull();
+        repo.LastSavedSnapshot!.Peers.Single(p => p.PeerId == simulatedPeerId).Sessions.Count.Should().Be(1);
     }
 
     [Test]
@@ -231,27 +224,23 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         var responderSignedPreKeySpki = responderSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
         var responderSignedPreKeyPriv = responderSignedPreKey.ExportECPrivateKey();
 
-        var repo = new InMemoryRepository
-        {
-            Peers = new[]
-            {
-                new SimulatedPeerModel(
-                    peerId: simulatedPeerId,
-                    selfIdentityId: 99000,
-                    displayName: "sim",
-                    isRelayCapable: false,
-                    identitySigningKeySpki: responderIdentitySpki,
-                    identitySigningKeyPrivateKeyEcPrivateKey: responderIdentityPriv)
-            },
-            Relays = new[]
-            {
-                new SimulatedRelayModel(relayHostPeerId)
-            }
-        };
+        var peer = new SimulatedPeerModel(
+            peerId: simulatedPeerId,
+            selfIdentityId: 99000,
+            displayName: "sim",
+            isRelayCapable: false,
+            identitySigningKeySpki: responderIdentitySpki,
+            identitySigningKeyPrivateKeyEcPrivateKey: responderIdentityPriv,
+            endpoint: new System.Net.DnsEndPoint("127.77.1.1", 5002));
+        peer.SignedPreKeysMutable.Add(new SimulatedSignedPreKeyModel(spkId, responderSignedPreKeyPriv, responderSignedPreKeySpki));
 
-        // Add signed prekey to responder peer after construction
-        repo.Peers.Single(p => p.PeerId == simulatedPeerId)
-            .SignedPreKeysMutable.Add(new SimulatedSignedPreKeyModel(spkId, responderSignedPreKeyPriv, responderSignedPreKeySpki));
+        var repo = new InMemorySimulatorStateRepository();
+        repo.Seed(new SimulatorStateSnapshot(
+            Version: 1,
+            Peers: new[] { peer.Freeze() },
+            Relationships: Array.Empty<PeerRelationshipSnapshot>(),
+            Relays: new[] { new RelayStateSnapshot(relayHostPeerId, Array.Empty<OutboundRelayMessageSnapshot>(), Array.Empty<InboundRelayMessageSnapshot>()) },
+            Groups: Array.Empty<GroupConversationDto>()));
 
         var pending = new SimulatedPeerPendingInbox();
         var diagnostics = new SimulatorDiagnosticsService();
@@ -325,42 +314,42 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         var bundle = CreateValidResponderPreKeyBundle();
         var responderPkh = bundle.ResponderPkh;
 
-        var repo = new InMemoryRepository
-        {
-            Peers = new[]
+        var initiatorPeer = new SimulatedPeerModel(
+            peerId: simulatedPeerId,
+            selfIdentityId: 99000,
+            displayName: "sim",
+            isRelayCapable: false,
+            identitySigningKeySpki: initiatorIdentitySpki,
+            identitySigningKeyPrivateKeyEcPrivateKey: initiatorIdentityPriv,
+            endpoint: new System.Net.DnsEndPoint("127.77.1.1", 5002));
+        var relayPeer = new SimulatedPeerModel(
+            peerId: relayHostPeerId,
+            selfIdentityId: 99001,
+            displayName: "relay",
+            isRelayCapable: true,
+            identitySigningKeySpki: SHA256.HashData(Guid.NewGuid().ToByteArray()),
+            identitySigningKeyPrivateKeyEcPrivateKey: new byte[] { 0x01 },
+            endpoint: new System.Net.DnsEndPoint("127.77.1.2", 5002),
+            publishedPreKeyBundles: new List<SimulatedPublishedPreKeyBundleModel>
             {
-                new SimulatedPeerModel(
-                    peerId: simulatedPeerId,
-                    selfIdentityId: 99000,
-                    displayName: "sim",
-                    isRelayCapable: false,
-                    identitySigningKeySpki: initiatorIdentitySpki,
-                    identitySigningKeyPrivateKeyEcPrivateKey: initiatorIdentityPriv),
-                new SimulatedPeerModel(
-                    peerId: relayHostPeerId,
-                    selfIdentityId: 99001,
-                    displayName: "relay",
-                    isRelayCapable: true,
-                    identitySigningKeySpki: SHA256.HashData(Guid.NewGuid().ToByteArray()),
-                    identitySigningKeyPrivateKeyEcPrivateKey: new byte[] { 0x01 },
-                    publishedPreKeyBundles: new List<SimulatedPublishedPreKeyBundleModel>
-                    {
-                        new(
-                            RecipientPublicKeyHash: Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(responderPkh),
-                            LogicalOwnerPeerId: new Percolator.Network.PeerId(Guid.NewGuid()),
-                            IdentityKey: bundle.IdentityKey,
-                            SignedPreKeyId: bundle.SignedPreKeyId,
-                            SignedPreKey: bundle.SignedPreKey,
-                            PreKeySignature: bundle.PreKeySignature,
-                            OneTimeKeys: new ObservableList<Percolator.Cryptography.OneTimeKeyInstance>(),
-                            ExpiresUtc: DateTimeOffset.UtcNow.AddMinutes(5))
-                    })
-            },
-            Relays = new[]
-            {
-                new SimulatedRelayModel(relayHostPeerId)
-            }
-        };
+                new(
+                    RecipientPublicKeyHash: Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(responderPkh),
+                    LogicalOwnerPeerId: new Percolator.Network.PeerId(Guid.NewGuid()),
+                    IdentityKey: bundle.IdentityKey,
+                    SignedPreKeyId: bundle.SignedPreKeyId,
+                    SignedPreKey: bundle.SignedPreKey,
+                    PreKeySignature: bundle.PreKeySignature,
+                    OneTimeKeys: new ObservableList<Percolator.Cryptography.OneTimeKeyInstance>(),
+                    ExpiresUtc: DateTimeOffset.UtcNow.AddMinutes(5))
+            });
+
+        var repo = new InMemorySimulatorStateRepository();
+        repo.Seed(new SimulatorStateSnapshot(
+            Version: 1,
+            Peers: new[] { initiatorPeer.Freeze(), relayPeer.Freeze() },
+            Relationships: Array.Empty<PeerRelationshipSnapshot>(),
+            Relays: new[] { new RelayStateSnapshot(relayHostPeerId, Array.Empty<OutboundRelayMessageSnapshot>(), Array.Empty<InboundRelayMessageSnapshot>()) },
+            Groups: Array.Empty<GroupConversationDto>()));
 
         var diagnostics = new SimulatorDiagnosticsService();
         var clock = new StaticClock(StaticClock.DefaultNow);
@@ -411,42 +400,42 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         // Bundle is valid, but its identity key hashes to a different PKH.
         var bundle = CreateValidResponderPreKeyBundle();
 
-        var repo = new InMemoryRepository
-        {
-            Peers = new[]
+        var initiatorPeer = new SimulatedPeerModel(
+            peerId: simulatedPeerId,
+            selfIdentityId: 99000,
+            displayName: "sim",
+            isRelayCapable: false,
+            identitySigningKeySpki: initiatorIdentitySpki,
+            identitySigningKeyPrivateKeyEcPrivateKey: initiatorIdentityPriv,
+            endpoint: new System.Net.DnsEndPoint("127.77.1.1", 5002));
+        var relayPeer = new SimulatedPeerModel(
+            peerId: relayHostPeerId,
+            selfIdentityId: 99001,
+            displayName: "relay",
+            isRelayCapable: true,
+            identitySigningKeySpki: SHA256.HashData(Guid.NewGuid().ToByteArray()),
+            identitySigningKeyPrivateKeyEcPrivateKey: new byte[] { 0x01 },
+            endpoint: new System.Net.DnsEndPoint("127.77.1.2", 5002),
+            publishedPreKeyBundles: new List<SimulatedPublishedPreKeyBundleModel>
             {
-                new SimulatedPeerModel(
-                    peerId: simulatedPeerId,
-                    selfIdentityId: 99000,
-                    displayName: "sim",
-                    isRelayCapable: false,
-                    identitySigningKeySpki: initiatorIdentitySpki,
-                    identitySigningKeyPrivateKeyEcPrivateKey: initiatorIdentityPriv),
-                new SimulatedPeerModel(
-                    peerId: relayHostPeerId,
-                    selfIdentityId: 99001,
-                    displayName: "relay",
-                    isRelayCapable: true,
-                    identitySigningKeySpki: SHA256.HashData(Guid.NewGuid().ToByteArray()),
-                    identitySigningKeyPrivateKeyEcPrivateKey: new byte[] { 0x01 },
-                    publishedPreKeyBundles: new List<SimulatedPublishedPreKeyBundleModel>
-                    {
-                        new(
-                            RecipientPublicKeyHash: Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(requestedResponderPkh),
-                            LogicalOwnerPeerId: new Percolator.Network.PeerId(Guid.NewGuid()),
-                            IdentityKey: bundle.IdentityKey,
-                            SignedPreKeyId: bundle.SignedPreKeyId,
-                            SignedPreKey: bundle.SignedPreKey,
-                            PreKeySignature: bundle.PreKeySignature,
-                            OneTimeKeys: new ObservableList<Percolator.Cryptography.OneTimeKeyInstance>(),
-                            ExpiresUtc: DateTimeOffset.UtcNow.AddMinutes(5))
-                    })
-            },
-            Relays = new[]
-            {
-                new SimulatedRelayModel(relayHostPeerId)
-            }
-        };
+                new(
+                    RecipientPublicKeyHash: Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(requestedResponderPkh),
+                    LogicalOwnerPeerId: new Percolator.Network.PeerId(Guid.NewGuid()),
+                    IdentityKey: bundle.IdentityKey,
+                    SignedPreKeyId: bundle.SignedPreKeyId,
+                    SignedPreKey: bundle.SignedPreKey,
+                    PreKeySignature: bundle.PreKeySignature,
+                    OneTimeKeys: new ObservableList<Percolator.Cryptography.OneTimeKeyInstance>(),
+                    ExpiresUtc: DateTimeOffset.UtcNow.AddMinutes(5))
+            });
+
+        var repo = new InMemorySimulatorStateRepository();
+        repo.Seed(new SimulatorStateSnapshot(
+            Version: 1,
+            Peers: new[] { initiatorPeer.Freeze(), relayPeer.Freeze() },
+            Relationships: Array.Empty<PeerRelationshipSnapshot>(),
+            Relays: new[] { new RelayStateSnapshot(relayHostPeerId, Array.Empty<OutboundRelayMessageSnapshot>(), Array.Empty<InboundRelayMessageSnapshot>()) },
+            Groups: Array.Empty<GroupConversationDto>()));
 
         var diagnostics = new SimulatorDiagnosticsService();
         var clock = new StaticClock(StaticClock.DefaultNow);
@@ -495,250 +484,105 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         using var initiatorIdentityEcdsa = ECDsa.Create(initiatorIdentityEcdh.ExportParameters(true));
         var initiatorIdentitySpki = initiatorIdentityEcdsa.ExportSubjectPublicKeyInfo();
 
-        using var responderIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var responderIdentityPriv = responderIdentityEcdh.ExportECPrivateKey();
-        using var responderIdentityEcdsa = ECDsa.Create(responderIdentityEcdh.ExportParameters(true));
-        var responderIdentitySpki = responderIdentityEcdsa.ExportSubjectPublicKeyInfo();
-
-        var responderPkh = SHA256.HashData(responderIdentitySpki);
-
-        // Create a valid responder bundle and publish it to relay under responder PKH.
-        // (The bundle identity key must hash to responderPkh, so we forge it from responder keys.)
-        using var responderSignedPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var responderSignedPreKeySpki = responderSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
-        var preKeySig = responderIdentityEcdsa.SignData(responderSignedPreKeySpki, HashAlgorithmName.SHA256);
-        var signedPreKeyId = Guid.NewGuid();
-
-        var repo = new InMemoryRepository
-        {
-            Peers = new[]
-            {
-                new SimulatedPeerModel(
-                    peerId: initiatorPeerId,
-                    selfIdentityId: 99000,
-                    displayName: "init",
-                    isRelayCapable: false,
-                    identitySigningKeySpki: initiatorIdentitySpki,
-                    identitySigningKeyPrivateKeyEcPrivateKey: initiatorIdentityPriv),
-                new SimulatedPeerModel(
-                    peerId: responderPeerId,
-                    selfIdentityId: 99001,
-                    displayName: "resp",
-                    isRelayCapable: false,
-                    identitySigningKeySpki: responderIdentitySpki,
-                    identitySigningKeyPrivateKeyEcPrivateKey: responderIdentityPriv),
-                new SimulatedPeerModel(
-                    peerId: relayHostPeerId,
-                    selfIdentityId: 99002,
-                    displayName: "relay",
-                    isRelayCapable: true,
-                    identitySigningKeySpki: SHA256.HashData(Guid.NewGuid().ToByteArray()),
-                    identitySigningKeyPrivateKeyEcPrivateKey: new byte[] { 0x01 },
-                    publishedPreKeyBundles: new List<SimulatedPublishedPreKeyBundleModel>
-                    {
-                        new(
-                            RecipientPublicKeyHash: Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(responderPkh),
-                            LogicalOwnerPeerId: responderPeerId,
-                            IdentityKey: responderIdentitySpki,
-                            SignedPreKeyId: signedPreKeyId,
-                            SignedPreKey: responderSignedPreKeySpki,
-                            PreKeySignature: preKeySig,
-                            OneTimeKeys: new ObservableList<Percolator.Cryptography.OneTimeKeyInstance>(),
-                            ExpiresUtc: DateTimeOffset.UtcNow.AddMinutes(5))
-                    })
-            },
-            Relays = new[]
-            {
-                new SimulatedRelayModel(relayHostPeerId)
-            }
-        };
-
-        // Add signed prekey to responder peer after construction
-        repo.Peers.Single(p => p.PeerId == responderPeerId)
-            .SignedPreKeysMutable.Add(new SimulatedSignedPreKeyModel(signedPreKeyId, responderSignedPreKey.ExportECPrivateKey(), responderSignedPreKeySpki));
+        var bundle = CreateValidResponderPreKeyBundle();
+        var responderPkh = bundle.ResponderPkh;
 
         var pending = new SimulatedPeerPendingInbox();
-        var diagnostics = new SimulatorDiagnosticsService();
         var clock = new StaticClock(StaticClock.DefaultNow);
+
+        var initiatorPeer = new SimulatedPeerModel(
+            peerId: initiatorPeerId,
+            selfIdentityId: 99000,
+            displayName: "init",
+            isRelayCapable: false,
+            identitySigningKeySpki: initiatorIdentitySpki,
+            identitySigningKeyPrivateKeyEcPrivateKey: initiatorIdentityPriv,
+            endpoint: new System.Net.DnsEndPoint("127.77.1.1", 5002));
+        var relayPeer = new SimulatedPeerModel(
+            peerId: relayHostPeerId,
+            selfIdentityId: 99001,
+            displayName: "relay",
+            isRelayCapable: true,
+            identitySigningKeySpki: SHA256.HashData(Guid.NewGuid().ToByteArray()),
+            identitySigningKeyPrivateKeyEcPrivateKey: new byte[] { 0x01 },
+            endpoint: new System.Net.DnsEndPoint("127.77.1.2", 5002),
+            publishedPreKeyBundles: new List<SimulatedPublishedPreKeyBundleModel>
+            {
+                new(
+                    RecipientPublicKeyHash: Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(responderPkh),
+                    LogicalOwnerPeerId: responderPeerId,
+                    IdentityKey: bundle.IdentityKey,
+                    SignedPreKeyId: bundle.SignedPreKeyId,
+                    SignedPreKey: bundle.SignedPreKey,
+                    PreKeySignature: bundle.PreKeySignature,
+                    OneTimeKeys: new ObservableList<Percolator.Cryptography.OneTimeKeyInstance>(),
+                    ExpiresUtc: DateTimeOffset.UtcNow.AddMinutes(5))
+            });
+
+        var repo = new InMemorySimulatorStateRepository();
+        repo.Seed(new SimulatorStateSnapshot(
+            Version: 1,
+            Peers: new[] { initiatorPeer.Freeze(), relayPeer.Freeze() },
+            Relationships: Array.Empty<PeerRelationshipSnapshot>(),
+            Relays: new[] { new RelayStateSnapshot(relayHostPeerId, Array.Empty<OutboundRelayMessageSnapshot>(), Array.Empty<InboundRelayMessageSnapshot>()) },
+            Groups: Array.Empty<GroupConversationDto>()));
+
+        var diagnostics = new SimulatorDiagnosticsService();
         var sut = CreateSut(repo, diagnostics, pending, clock, out var timeProvider);
         await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
 
-        // Act 1: initiator initiates, enqueuing HandshakeInitiatorHello to relay.
-        _ = await sut.InitiateStandardHandshakeToMainByRelayPkhAsync(
+        // Act 1: initiate handshake, which creates a pending session with a temporary session id.
+        var temporarySessionId = await sut.InitiateStandardHandshakeToMainByRelayPkhAsync(
             initiatorPeerId,
             relayHostPeerId,
             Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(responderPkh),
             CancellationToken.None);
 
-        var relay = sut.Relays.Single(r => r.RelayHostPeerId == relayHostPeerId);
-        var helloQueued = relay.MessageQueue.Select(kvp => kvp.Value)
-            .OfType<InboundRelayMessage>()
-            .Single(i => i.DebugType == nameof(HandshakeInitiatorHello));
-        var helloBytes = helloQueued.OpaqueBytes;
+        temporarySessionId.Should().NotBeNull();
 
-        // Act 2: relay delivery stores hello as pending on responder (Chunk B)
-        var hello = HandshakeInitiatorHello.Parser.ParseFrom(helloBytes);
-        await sut.UpsertPendingStandardSignalHelloAsync(
-            recipientPeerId: responderPeerId,
-            relayHostPeerId: relayHostPeerId,
-            hello: hello,
-            receivedUtc: StaticClock.DefaultNow,
-            cancellationToken: CancellationToken.None);
+        var initiator = sut.Peers.Single(p => p.PeerId == initiatorPeerId);
+        initiator.PendingStandardHandshakeToMainResponderPublicKeyHash.CurrentValue.Should().NotBeNull();
+        initiator.PendingStandardHandshakeToMainTemporarySessionId.CurrentValue.Should().NotBeNull();
+        initiator.PendingStandardHandshakeToMainTemporarySessionId.CurrentValue.Should().Be(temporarySessionId!.Value);
+        initiator.SessionsMutable.ContainsKey(temporarySessionId!).Should().BeTrue();
 
-        var initiatorPkhHex = Convert.ToHexString(SHA256.HashData(hello.InitiatorIdentityKeySpki.ToByteArray())).ToLowerInvariant();
+        // Act 2: deliver the "main" response (relayed opaque payload) assigning a final session id.
+        var assignedSessionId = Guid.NewGuid();
+        var payload = new EstablishSessionResponse.Types.Response.Types.ResponsePayload
+        {
+            Version = 1,
+            SessionId = assignedSessionId.ToString()
+        };
+        var resp = new EstablishSessionResponse
+        {
+            Version = 1,
+            Response = new EstablishSessionResponse.Types.Response
+            {
+                Version = 1,
+                IdentitySigningKey = ByteString.CopyFrom(bundle.IdentityKey),
+                ResponsePayload = ByteString.CopyFrom(payload.ToByteArray())
+            }
+        };
 
-        // Act 3: user accepts on responder -> EstablishSessionResponse is enqueued back to initiator via relay
-        var accepted = await sut.TryAcceptPendingStandardSignalHelloAsync(
-            recipientPeerId: responderPeerId,
-            initiatorPkhHex: initiatorPkhHex,
-            cancellationToken: CancellationToken.None);
-        accepted.Should().BeTrue();
+        await sut.ReceiveRelayedOpaquePayloadAsync(initiatorPeerId, resp.ToByteArray(), CancellationToken.None);
 
-        var establishBytes = relay.MessageQueue.Select(kvp => kvp.Value)
-            .OfType<InboundRelayMessage>()
-            .Single(i => i.DebugType == nameof(EstablishSessionResponse))
-            .OpaqueBytes;
-
-        var establishResp = EstablishSessionResponse.Parser.ParseFrom(establishBytes);
-        establishResp.Response.Should().NotBeNull();
-
-        // Act 4: initiator consumes EstablishSessionResponse.
-        _ = await sut.ReceiveRelayedOpaquePayloadAsync(initiatorPeerId, establishBytes, CancellationToken.None);
-
-        // Assert: initiator persisted a session with the responder-assigned session id.
-        var payload = EstablishSessionResponse.Types.Response.Types.ResponsePayload.Parser.ParseFrom(establishResp.Response.ResponsePayload);
-        var assignedSid = new SessionId(Guid.Parse(payload.SessionId));
-
-        // Trigger debounced persistence deterministically.
-        timeProvider.Advance(TimeSpan.FromMilliseconds(300));
-
+        // Assert: session is now stored under the assigned id and gets persisted.
         sut.Peers.Single(p => p.PeerId == initiatorPeerId)
             .Sessions
             .Keys
-            .Should().ContainSingle(s => s.Value == assignedSid.Value);
-    }
+            .Should()
+            .Contain(new SessionId(assignedSessionId));
 
-    private sealed record ResponderBundleFixture(
-        byte[] IdentityKey,
-        Guid SignedPreKeyId,
-        byte[] SignedPreKey,
-        byte[] PreKeySignature,
-        byte[] ResponderPkh);
+        // Advance time to trigger debounced save
+        timeProvider.Advance(TimeSpan.FromMilliseconds(300));
 
-    private static ResponderBundleFixture CreateValidResponderPreKeyBundle()
-    {
-        using var responderIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        using var responderIdentityEcdsa = ECDsa.Create(responderIdentityEcdh.ExportParameters(true));
-        var responderIdentitySpki = responderIdentityEcdsa.ExportSubjectPublicKeyInfo();
-
-        using var responderSignedPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var responderSignedPreKeySpki = responderSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
-        var preKeySig = responderIdentityEcdsa.SignData(responderSignedPreKeySpki, HashAlgorithmName.SHA256);
-
-        var signedPreKeyId = Guid.NewGuid();
-
-        var pkh = SHA256.HashData(responderIdentitySpki);
-        return new ResponderBundleFixture(
-            IdentityKey: responderIdentitySpki,
-            SignedPreKeyId: signedPreKeyId,
-            SignedPreKey: responderSignedPreKeySpki,
-            PreKeySignature: preKeySig,
-            ResponderPkh: pkh);
-    }
-
-    [Test]
-    public async Task RelayHost_Returns_ResponsePayload_for_GetPreKeyBundleRequest_when_bundle_found()
-    {
-        // Arrange
-        var relayHostPeerId = new Percolator.Network.PeerId(Guid.NewGuid());
-
-        using var relayIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var relayIdentityPriv = relayIdentityEcdh.ExportECPrivateKey();
-        using var relayIdentityEcdsa = ECDsa.Create(relayIdentityEcdh.ExportParameters(true));
-        var relayIdentitySpki = relayIdentityEcdsa.ExportSubjectPublicKeyInfo();
-        var pending = new SimulatedPeerPendingInbox();
-
-        var bundle = CreateValidResponderPreKeyBundle();
-
-        var clock = new StaticClock(StaticClock.DefaultNow);
-        var sessionId = SessionId.NewId();
-        var root = RootKey.FromBytes(new byte[32]);
-        var initiatorSession = RatchetBootstrap.CreateInitiatorSession(
-            sessionId,
-            Percolator.Cryptography.Primitives.PeerId.NewId(),
-            new ProtocolVersion(1),
-            root,
-            clock);
-        var responderSession = RatchetBootstrap.CreateResponderSession(
-            sessionId,
-            Percolator.Cryptography.Primitives.PeerId.NewId(),
-            new ProtocolVersion(1),
-            root,
-            clock);
-
-        var repo = new InMemoryRepository
-        {
-            Peers = new[]
-            {
-                new SimulatedPeerModel(
-                    peerId: relayHostPeerId,
-                    selfIdentityId: 99000,
-                    displayName: "relay",
-                    isRelayCapable: true,
-                    identitySigningKeySpki: relayIdentitySpki,
-                    identitySigningKeyPrivateKeyEcPrivateKey: relayIdentityPriv,
-                    publishedPreKeyBundles: new List<SimulatedPublishedPreKeyBundleModel>
-                    {
-                        new(
-                            RecipientPublicKeyHash: Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(bundle.ResponderPkh),
-                            LogicalOwnerPeerId: new Percolator.Network.PeerId(Guid.NewGuid()),
-                            IdentityKey: bundle.IdentityKey,
-                            SignedPreKeyId: bundle.SignedPreKeyId,
-                            SignedPreKey: bundle.SignedPreKey,
-                            PreKeySignature: bundle.PreKeySignature,
-                            OneTimeKeys: new ObservableList<Percolator.Cryptography.OneTimeKeyInstance>(),
-                            ExpiresUtc: DateTimeOffset.UtcNow.AddMinutes(5))
-                    })
-            }
-        };
-
-        var diagnostics = new SimulatorDiagnosticsService();
-        var sut = CreateSut(repo, diagnostics, pending, clock, out var timeProvider);
-        await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
-
-        sut.Peers.Single(p => p.PeerId == relayHostPeerId).SessionsMutable[responderSession.Id] = responderSession;
-
-        var envReq = new InternalEnvelope
-        {
-            PrekeyEnvelope = new PrekeyEnvelope
-            {
-                Version = 1,
-                GetPreKeyBundleRequest = new GetPreKeyBundleRequest
-                {
-                    Version = 1,
-                    PublicKeyHash = ByteString.CopyFrom(bundle.ResponderPkh)
-                }
-            }
-        };
-
-        var pt = Plaintext.FromBytes(envReq.ToByteArray());
-        var cipher = initiatorSession.Encrypt(pt, clock);
-        var deliverReq = new DeliverOpaqueMessageRequest { Version = 1, Payload = ByteString.CopyFrom(cipher.ToArray()) };
-
-        // Act
-        var deliverResp = await sut.ReceiveOpaqueMessageFromMainAsync(relayHostPeerId, deliverReq, CancellationToken.None);
-
-        // Assert
-        deliverResp.ResultCase.Should().Be(DeliverOpaqueMessageResponse.ResultOneofCase.ResponsePayload);
-        deliverResp.ResponsePayload.Should().NotBeNull();
-        deliverResp.ResponsePayload!.ResponsePayload.Length.Should().BeGreaterThan(0);
-
-        var respCipher = SessionRatchetMessage.FromBytes(deliverResp.ResponsePayload.ResponsePayload.ToByteArray());
-        var respPlain = initiatorSession.Decrypt(respCipher, clock);
-        var respEnv = InternalEnvelope.Parser.ParseFrom(respPlain.ToArray());
-        respEnv.ApplicationPayloadCase.Should().Be(InternalEnvelope.ApplicationPayloadOneofCase.GetPreKeyBundleResponse);
-        respEnv.GetPreKeyBundleResponse.Should().NotBeNull();
-        respEnv.GetPreKeyBundleResponse.PreKeyBundle.Should().NotBeNull();
+        repo.LastSavedSnapshot.Should().NotBeNull();
+        repo.LastSavedSnapshot!
+            .Peers
+            .Single(p => p.PeerId == initiatorPeerId)
+            .Sessions
+            .Should()
+            .Contain(s => s.SessionId == assignedSessionId);
     }
 
     [Test]
@@ -771,19 +615,22 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             root,
             clock);
 
-        var repo = new InMemoryRepository
-        {
-            Peers = new[]
-            {
-                new SimulatedPeerModel(
-                    peerId: relayHostPeerId,
-                    selfIdentityId: 99000,
-                    displayName: "relay",
-                    isRelayCapable: true,
-                    identitySigningKeySpki: SHA256.HashData(Guid.NewGuid().ToByteArray()),
-                    identitySigningKeyPrivateKeyEcPrivateKey: new byte[] { 0x01 })
-            }
-        };
+        var relayPeer = new SimulatedPeerModel(
+            peerId: relayHostPeerId,
+            selfIdentityId: 99000,
+            displayName: "relay",
+            isRelayCapable: true,
+            identitySigningKeySpki: SHA256.HashData(Guid.NewGuid().ToByteArray()),
+            identitySigningKeyPrivateKeyEcPrivateKey: new byte[] { 0x01 },
+            endpoint: new System.Net.DnsEndPoint("127.77.1.1", 5002));
+
+        var repo = new InMemorySimulatorStateRepository();
+        repo.Seed(new SimulatorStateSnapshot(
+            Version: 1,
+            Peers: new[] { relayPeer.Freeze() },
+            Relationships: Array.Empty<PeerRelationshipSnapshot>(),
+            Relays: Array.Empty<RelayStateSnapshot>(),
+            Groups: Array.Empty<GroupConversationDto>()));
 
         var diagnostics = new SimulatorDiagnosticsService();
         var sut = CreateSut(repo, diagnostics, pending, clock, out var timeProvider);

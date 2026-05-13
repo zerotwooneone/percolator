@@ -1,5 +1,3 @@
-using System;
-using System.Linq;
 using System.Net;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Identity;
@@ -109,12 +107,15 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
             return new SimulatorOutboundInterceptResult.NotForSimulator();
         }
 
-        // Routing rule: check if endpoint matches a simulated peer (host+port)
-        var match = _state.Peers.FirstOrDefault(p =>
-            !string.IsNullOrWhiteSpace(p.Host.CurrentValue)
-            && string.Equals(p.Host.CurrentValue, endpoint.Host, StringComparison.OrdinalIgnoreCase)
-            && p.Port.CurrentValue == endpoint.Port);
+        // Routing rule: check if endpoint matches a simulated peer using fast index lookup
+        if (!_state.TryResolvePeerId(endpoint, out var simulatedPeerId))
+        {
+            return new SimulatorOutboundInterceptResult.Undeliverable(
+                endpoint,
+                $"No simulated peer listening at {endpoint.Host}:{endpoint.Port}");
+        }
 
+        var match = _state.Peers.FirstOrDefault(p => p.PeerId == simulatedPeerId);
         if (match is null)
         {
             return new SimulatorOutboundInterceptResult.Undeliverable(
@@ -188,18 +189,6 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
             return false;
         }
 
-        var match = _state.Peers.FirstOrDefault(p =>
-            !string.IsNullOrWhiteSpace(p.Host.CurrentValue)
-            && string.Equals(p.Host.CurrentValue, endpoint.Host, StringComparison.OrdinalIgnoreCase)
-            && p.Port.CurrentValue == endpoint.Port);
-
-        if (match is null)
-        {
-            return false;
-        }
-
-        simulatedPeerId = match.PeerId;
-        return true;
+        return _state.TryResolvePeerId(endpoint, out simulatedPeerId);
     }
-
 }

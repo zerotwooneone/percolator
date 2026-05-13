@@ -16,8 +16,7 @@ public sealed class SimulatedPeerRuntimeTracker : IDisposable
         peer.IsRelayCapable.Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
 
         peer.ConnectionMode.Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
-        peer.Host.Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
-        peer.Port.Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
+        peer.Endpoint.Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
         peer.RelayPeerId.Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
 
         peer.UiState.Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);

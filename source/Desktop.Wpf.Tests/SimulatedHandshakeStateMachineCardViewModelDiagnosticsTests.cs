@@ -35,7 +35,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModelDiagnosticsTests
         var priv = ecdh.ExportECPrivateKey();
         var spki = ecdh.PublicKey.ExportSubjectPublicKeyInfo();
 
-        var model = new SimulatedPeerModel(peerId, selfIdentityId: 99000, "peer", isRelayCapable: false, spki, priv);
+        var model = new SimulatedPeerModel(peerId, selfIdentityId: 99000, "peer", isRelayCapable: false, spki, priv, endpoint: new System.Net.DnsEndPoint("127.77.1.1", 5002));
 
         var diagnostics = new SimulatorDiagnosticsService();
         var options = Options.Create(new TransportOptions { GrpcPort = 5002 });
@@ -46,7 +46,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModelDiagnosticsTests
         var relayHostId = new PeerId(Guid.NewGuid());
         var state = new Mock<ISimulatorStateService>(MockBehavior.Loose);
 
-        var relayHostModel = new SimulatedPeerModel(relayHostId, selfIdentityId: 99001, "relay", isRelayCapable: true, spki, priv);
+        var relayHostModel = new SimulatedPeerModel(relayHostId, selfIdentityId: 99001, "relay", isRelayCapable: true, spki, priv, endpoint: new System.Net.DnsEndPoint("127.77.1.2", 5002));
         var peers = new ObservableCollections.ObservableList<SimulatedPeerModel>();
         peers.Add(relayHostModel);
         state.SetupGet(s => s.Peers).Returns(peers);
@@ -81,7 +81,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModelDiagnosticsTests
         var priv = ecdh.ExportECPrivateKey();
         var spki = ecdh.PublicKey.ExportSubjectPublicKeyInfo();
 
-        var model = new SimulatedPeerModel(peerId, selfIdentityId: 99000, "peer", isRelayCapable: false, spki, priv);
+        var model = new SimulatedPeerModel(peerId, selfIdentityId: 99000, "peer", isRelayCapable: false, spki, priv, endpoint: new System.Net.DnsEndPoint("127.77.1.1", 5002));
 
         var relayHostId = new PeerId(Guid.NewGuid());
 
@@ -93,7 +93,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModelDiagnosticsTests
 
         var state = new Mock<ISimulatorStateService>(MockBehavior.Loose);
 
-        var relayHostModel = new SimulatedPeerModel(relayHostId, selfIdentityId: 99001, "relay", isRelayCapable: true, spki, priv);
+        var relayHostModel = new SimulatedPeerModel(relayHostId, selfIdentityId: 99001, "relay", isRelayCapable: true, spki, priv, endpoint: new System.Net.DnsEndPoint("127.77.1.2", 5002));
         var peers = new ObservableCollections.ObservableList<SimulatedPeerModel>();
         peers.Add(relayHostModel);
         state.SetupGet(s => s.Peers).Returns(peers);

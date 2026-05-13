@@ -35,9 +35,9 @@ public sealed class SimulatorDiagnosticsTabViewModelFilteringTests
         var priv = ecdh.ExportECPrivateKey();
         var spki = ecdh.PublicKey.ExportSubjectPublicKeyInfo();
         var peersList = new ObservableList<SimulatedPeerModel>();
-        peersList.Add(new SimulatedPeerModel(peerA, selfIdentityId: 99000, "A", isRelayCapable: false, spki, priv));
-        peersList.Add(new SimulatedPeerModel(relay, selfIdentityId: 99001, "Relay", isRelayCapable: true, spki, priv));
-        peersList.Add(new SimulatedPeerModel(peerB, selfIdentityId: 99002, "B", isRelayCapable: false, spki, priv));
+        peersList.Add(new SimulatedPeerModel(peerA, selfIdentityId: 99000, "A", isRelayCapable: false, spki, priv, endpoint: new System.Net.DnsEndPoint("127.77.1.1", 5002)));
+        peersList.Add(new SimulatedPeerModel(relay, selfIdentityId: 99001, "Relay", isRelayCapable: true, spki, priv, endpoint: new System.Net.DnsEndPoint("127.77.1.2", 5002)));
+        peersList.Add(new SimulatedPeerModel(peerB, selfIdentityId: 99002, "B", isRelayCapable: false, spki, priv, endpoint: new System.Net.DnsEndPoint("127.77.1.3", 5002)));
         state.SetupGet(s => s.Peers).Returns(peersList);
         state.Setup(s => s.TryGetPeerIdByIdentityPublicKeyHashAsync(It.IsAny<IdentityPublicKeyHash>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Percolator.Network.PeerId?)null);

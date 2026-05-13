@@ -3,7 +3,7 @@ using ObservableCollections;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
-using Percolator.Network;
+using System.Net;
 
 namespace Desktop.Wpf.Features.Simulator;
 
@@ -156,4 +156,6 @@ public interface ISimulatorStateService
         CancellationToken cancellationToken = default);
 
     Task SendChatMessageToMainAsync(Percolator.Network.PeerId simulatedPeerId, string content, CancellationToken cancellationToken = default);
+
+    bool TryResolvePeerId(DnsEndPoint endpoint, out Percolator.Network.PeerId peerId);
 }

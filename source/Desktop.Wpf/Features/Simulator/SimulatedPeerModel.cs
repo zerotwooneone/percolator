@@ -7,6 +7,7 @@ using R3;
 using System;
 using System.Linq;
 using Desktop.Wpf.Features.Chat;
+using System.Net;
 
 namespace Desktop.Wpf.Features.Simulator;
 
@@ -23,8 +24,7 @@ public sealed class SimulatedPeerModel : IDisposable
     private readonly ReactiveProperty<Percolator.Network.PeerId?> _relayHostPeerId;
 
     private readonly ReactiveProperty<ConnectionMode> _connectionMode;
-    private readonly ReactiveProperty<string?> _host;
-    private readonly ReactiveProperty<int> _port;
+    private readonly ReactiveProperty<DnsEndPoint> _endpoint;
     private readonly ReactiveProperty<Percolator.Network.PeerId> _relayPeerId;
     private readonly ReactiveProperty<string?> _phase;
     private readonly ReactiveProperty<DateTimeOffset?> _notUntilUtc;
@@ -56,8 +56,7 @@ public sealed class SimulatedPeerModel : IDisposable
         byte[] identitySigningKeySpki,
         byte[] identitySigningKeyPrivateKeyEcPrivateKey,
         ConnectionMode connectionMode = Desktop.Wpf.Features.Simulator.ConnectionMode.Direct,
-        string? host = null,
-        int port = 0,
+        DnsEndPoint endpoint = null!,
         Percolator.Network.PeerId? relayPeerId = null,
         SimulatorPeerUiState uiState = SimulatorPeerUiState.Ready,
         Guid? pendingCorrelationId = null,
@@ -99,8 +98,8 @@ public sealed class SimulatedPeerModel : IDisposable
         _relayHostPeerId = new ReactiveProperty<Percolator.Network.PeerId?>(relayHostPeerId);
 
         _connectionMode = new ReactiveProperty<ConnectionMode>(connectionMode);
-        _host = new ReactiveProperty<string?>(host);
-        _port = new ReactiveProperty<int>(port);
+        if (endpoint is null) throw new ArgumentNullException(nameof(endpoint));
+        _endpoint = new ReactiveProperty<DnsEndPoint>(endpoint);
         _relayPeerId = new ReactiveProperty<Percolator.Network.PeerId>(relayPeerId ?? new Percolator.Network.PeerId(Guid.Empty));
         _phase = new ReactiveProperty<string?>(phase);
         _notUntilUtc = new ReactiveProperty<DateTimeOffset?>(notUntilUtc);
@@ -147,8 +146,7 @@ public sealed class SimulatedPeerModel : IDisposable
     public ReadOnlyReactiveProperty<Percolator.Network.PeerId?> RelayHostPeerId => _relayHostPeerId;
 
     public ReadOnlyReactiveProperty<ConnectionMode> ConnectionMode => _connectionMode;
-    public ReadOnlyReactiveProperty<string?> Host => _host;
-    public ReadOnlyReactiveProperty<int> Port => _port;
+    public ReadOnlyReactiveProperty<DnsEndPoint> Endpoint => _endpoint;
     public ReadOnlyReactiveProperty<Percolator.Network.PeerId> RelayPeerId => _relayPeerId;
     public ReadOnlyReactiveProperty<string?> Phase => _phase;
     public ReadOnlyReactiveProperty<DateTimeOffset?> NotUntilUtc => _notUntilUtc;
@@ -219,11 +217,11 @@ public sealed class SimulatedPeerModel : IDisposable
     public void SetRelayHostPeerId(Percolator.Network.PeerId? relayHostPeerId)
         => _relayHostPeerId.Value = relayHostPeerId;
 
-    public void SetConnection(ConnectionMode mode, string? host, int port, Percolator.Network.PeerId relayPeerId)
+    public void SetConnection(ConnectionMode mode, DnsEndPoint endpoint, Percolator.Network.PeerId relayPeerId)
     {
         _connectionMode.Value = mode;
-        _host.Value = host;
-        _port.Value = port;
+        if (endpoint is null) throw new ArgumentNullException(nameof(endpoint));
+        _endpoint.Value = endpoint;
         _relayPeerId.Value = relayPeerId;
     }
 
@@ -367,8 +365,7 @@ public sealed class SimulatedPeerModel : IDisposable
             IdentitySigningKeySpki: IdentitySigningKeySpki.ToArray(),
             IdentitySigningKeyPrivateKeyEcPrivateKey: IdentitySigningKeyPrivateKeyEcPrivateKey.ToArray(),
             ConnectionMode: _connectionMode.Value,
-            Host: _host.Value,
-            Port: _port.Value,
+            Endpoint: _endpoint.Value,
             RelayPeerId: _relayPeerId.Value,
             UiState: _uiState.Value,
             InboundReverseSignalPendingCorrelationId: _inboundReverseSignalPendingCorrelationId.Value,
@@ -482,8 +479,6 @@ public sealed class SimulatedPeerModel : IDisposable
         _relayHostPeerId.Dispose();
 
         _connectionMode.Dispose();
-        _host.Dispose();
-        _port.Dispose();
         _relayPeerId.Dispose();
         _phase.Dispose();
         _notUntilUtc.Dispose();

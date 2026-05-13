@@ -151,7 +151,10 @@ public partial class App : Application
                 services.AddSingleton<SelectedPeerConnectionStateCache>();
                 services.AddScoped<SelectedChannelPaneViewModel>();
                 services.AddScoped<IPendingHandshakeSimulatorService, PendingHandshakeSimulatorService>();
-                services.AddSingleton<Desktop.Wpf.Features.Simulator.ISimulatorStateRepository, Desktop.Wpf.Features.Simulator.JsonSimulatorStateRepository>();
+                services.AddSingleton<Desktop.Wpf.Features.Simulator.JsonSimulatorStateRepository>();
+                services.AddSingleton<Desktop.Wpf.Features.Simulator.ISimulatorStateRepository>(sp =>
+                    new Desktop.Wpf.Features.Simulator.QueuedSimulatorStateRepository(
+                        sp.GetRequiredService<Desktop.Wpf.Features.Simulator.JsonSimulatorStateRepository>()));
                 services.AddSingleton<ISimulatedPeerKeyFactory, SimulatedPeerKeyFactory>();
                 services.AddSingleton<SimulatorStateService>();
                 services.AddSingleton<ISimulatorStateService>(sp => sp.GetRequiredService<SimulatorStateService>());
@@ -162,7 +165,6 @@ public partial class App : Application
                 services.AddSingleton<Desktop.Wpf.Features.Simulator.ISimulatorDiagnosticBundleBuilder, Desktop.Wpf.Features.Simulator.SimulatorDiagnosticBundleBuilder>();
                 services.AddSingleton<ISimulatorInitializer, SimulatorInitializer>();
                 services.AddSingleton<Desktop.Wpf.Features.Simulator.ISimulatedPeerPendingInbox, Desktop.Wpf.Features.Simulator.SimulatedPeerPendingInbox>();
-                services.AddHostedService<Desktop.Wpf.Features.Simulator.SimulatorStateWarmupHostedService>();
                 services.AddScoped<Desktop.Wpf.Features.Simulator.ISimulatorMainIngressService, Desktop.Wpf.Features.Simulator.SimulatorMainIngressService>();
                 services.AddScoped<Desktop.Wpf.Features.Simulator.ISimulatorRelayDeliveryService>(sp =>
                     new Desktop.Wpf.Features.Simulator.SimulatorRelayDeliveryService(

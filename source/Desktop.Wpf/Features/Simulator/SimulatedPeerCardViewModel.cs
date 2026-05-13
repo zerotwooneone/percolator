@@ -1,9 +1,4 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Security.Cryptography;
-using System.Threading;
-using System.Threading.Tasks;
 using System.Windows;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
@@ -213,16 +208,15 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
 
         try
         {
-            var host = _model.Host.CurrentValue;
-            var port = _model.Port.CurrentValue;
-            var endpoint = string.IsNullOrWhiteSpace(host) || port <= 0 ? null : $"{host}:{port}";
-            if (endpoint is not null)
+            var endpoint = _model.Endpoint.CurrentValue;
+            var endpointStr = endpoint is null ? null : $"{endpoint.Host}:{endpoint.Port}";
+            if (endpointStr is not null)
             {
                 if (_disposed) return;
                 await _ui.InvokeAsync(() =>
                 {
                     if (_disposed) return;
-                    EndpointText.Value = endpoint;
+                    EndpointText.Value = endpointStr;
                 }, CancellationToken.None).ConfigureAwait(false);
             }
         }
@@ -263,9 +257,8 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
     private EstablishDirectSessionRequest CreatePeerToMainInvite()
     {
         // Peer inviter must advertise its simulator endpoint so the main app can route responses back in-process.
-        var endpoint = TryResolveEndpointParts();
-        var inviterHost = endpoint.host;
-        var inviterPort = endpoint.port;
+        var inviterHost = _model.Endpoint.CurrentValue.Host;
+        var inviterPort = _model.Endpoint.CurrentValue.Port;
 
         using var identityEcdh = ECDiffieHellman.Create();
         identityEcdh.ImportECPrivateKey(_model.IdentitySigningKeyPrivateKeyEcPrivateKey, out _);
@@ -314,32 +307,9 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
 
     private string? TryResolveEndpoint()
     {
-        var host = _model.Host.CurrentValue;
-        var port = _model.Port.CurrentValue;
-        if (string.IsNullOrWhiteSpace(host) || port <= 0) return null;
-        return $"{host}:{port}";
-    }
-
-    private (string host, int port) TryResolveEndpointParts()
-    {
-        var host = _model.Host.CurrentValue;
-        var port = _model.Port.CurrentValue;
-        if (string.IsNullOrWhiteSpace(host) || port <= 0)
-        {
-            return (AllocateSimulatorLoopbackHost(_model.PeerId), 5002);
-        }
-
-        return (host, port);
-    }
-
-    private static string AllocateSimulatorLoopbackHost(PeerId peerId)
-    {
-        // Stable mapping of Guid -> 127.77.X.Y. Keep within 1..254 to avoid network/broadcast edge cases.
-        using var sha = SHA256.Create();
-        var hash = sha.ComputeHash(peerId.Value.ToByteArray());
-        var x = (byte)((hash[0] % 254) + 1);
-        var y = (byte)((hash[1] % 254) + 1);
-        return $"127.77.{x}.{y}";
+        var endpoint = _model.Endpoint.CurrentValue;
+        if (endpoint is null) return null;
+        return $"{endpoint.Host}:{endpoint.Port}";
     }
 
     private async Task ExecutePublishAsync(CancellationToken ct)

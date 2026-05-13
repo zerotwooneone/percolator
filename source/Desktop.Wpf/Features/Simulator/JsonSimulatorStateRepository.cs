@@ -5,14 +5,10 @@ using ObservableCollections;
 using Percolator.Application.Configuration;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
-using System;
-using System.Collections.Generic;
 using System.IO;
-using System.Linq;
+using System.Net;
 using System.Security.Cryptography;
 using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace Desktop.Wpf.Features.Simulator;
 
@@ -23,8 +19,6 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
     private readonly IOptions<TransportOptions> _transportOptions;
     private readonly ISimulatedPeerKeyFactory _keys;
     private readonly IServiceScopeFactory _scopeFactory;
-
-    private readonly SemaphoreSlim _ioGate = new(1, 1);
 
     public JsonSimulatorStateRepository(
         IOptions<TransportOptions> transportOptions,
@@ -105,43 +99,35 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
         cancellationToken.ThrowIfCancellationRequested();
         if (snapshot is null) throw new ArgumentNullException(nameof(snapshot));
 
-        await _ioGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
+        var peers = snapshot.Peers ?? Array.Empty<PeerStateSnapshot>();
+        var relationships = snapshot.Relationships ?? Array.Empty<PeerRelationshipSnapshot>();
+
+        var state = new SimulatorStateDto
         {
-            var peers = snapshot.Peers ?? Array.Empty<PeerStateSnapshot>();
-            var relationships = snapshot.Relationships ?? Array.Empty<PeerRelationshipSnapshot>();
+            Version = snapshot.Version <= 0 ? 1 : snapshot.Version,
+            Groups = snapshot.Groups?.ToList() ?? new(),
+            Peers = new List<SimulatedPeerDto>(peers.Count),
+            Relays = snapshot.Relays
+                ?.Select(CreateRelayDto)
+                .ToList()
+                ?? new()
+        };
 
-            var state = new SimulatorStateDto
-            {
-                Version = snapshot.Version <= 0 ? 1 : snapshot.Version,
-                Groups = snapshot.Groups?.ToList() ?? new(),
-                Peers = new List<SimulatedPeerDto>(peers.Count),
-                Relays = snapshot.Relays
-                    ?.Select(CreateRelayDto)
-                    .ToList()
-                    ?? new()
-            };
-
-            foreach (var p in peers)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (p.PeerId.Value == Guid.Empty) continue;
-
-                var dto = CreateDto(p);
-                NormalizePeer(dto, _transportOptions.Value);
-                _ = _keys.EnsureReverseSignalKeys(dto.ReverseSignalKeys);
-                _ = EnsureIdentityPublicKeyHash(dto);
-                state.Peers.Add(dto);
-            }
-
-            ApplyRelationshipsToPeers(state.Peers, relationships);
-
-            await WritePeersFileAsync(state, cancellationToken).ConfigureAwait(false);
-        }
-        finally
+        foreach (var p in peers)
         {
-            _ioGate.Release();
+            cancellationToken.ThrowIfCancellationRequested();
+            if (p.PeerId.Value == Guid.Empty) continue;
+
+            var dto = CreateDto(p);
+            NormalizePeer(dto, _transportOptions.Value);
+            _ = _keys.EnsureReverseSignalKeys(dto.ReverseSignalKeys);
+            _ = EnsureIdentityPublicKeyHash(dto);
+            state.Peers.Add(dto);
         }
+
+        ApplyRelationshipsToPeers(state.Peers, relationships);
+
+        await WritePeersFileAsync(state, cancellationToken).ConfigureAwait(false);
     }
 
     private IClock ResolveClock()
@@ -155,16 +141,8 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
         var path = GetStatePath();
         if (!File.Exists(path)) return null;
 
-        await _ioGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            await using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-            return await JsonSerializer.DeserializeAsync<SimulatorStateDto>(fs, _json, cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            _ioGate.Release();
-        }
+        await using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        return await JsonSerializer.DeserializeAsync<SimulatorStateDto>(fs, _json, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task WritePeersFileAsync(SimulatorStateDto state, CancellationToken cancellationToken)
@@ -187,6 +165,15 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
     {
         var clock = ResolveClock();
 
+        var host = dto.Connection?.Host;
+        var port = dto.Connection?.Port ?? 0;
+        if (string.IsNullOrWhiteSpace(host) || port <= 0)
+        {
+            throw new InvalidDataException($"Simulated peer DTO is missing endpoint (PeerId={dto.PeerId}).");
+        }
+
+        var endpoint = new DnsEndPoint(host, port);
+
         var model = new SimulatedPeerModel(
             peerId: dto.PeerId,
             selfIdentityId: dto.SelfIdentityId,
@@ -195,8 +182,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
             identitySigningKeySpki: dto.ReverseSignalKeys.IdentitySigningKeySpki,
             identitySigningKeyPrivateKeyEcPrivateKey: dto.ReverseSignalKeys.IdentitySigningKeyPrivateKeyEcPrivateKey,
             connectionMode: dto.Connection?.Mode ?? ConnectionMode.Direct,
-            host: dto.Connection?.Host,
-            port: dto.Connection?.Port ?? 0,
+            endpoint: endpoint,
             relayPeerId: dto.Connection?.RelayPeerId,
             uiState: dto.UiState,
             pendingCorrelationId: dto.PendingCorrelationId,
@@ -245,8 +231,8 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
             Connection = new SimulatedPeerConnectionDto
             {
                 Mode = model.ConnectionMode,
-                Host = model.Host ?? "localhost",
-                Port = model.Port,
+                Host = model.Endpoint.Host,
+                Port = model.Endpoint.Port,
                 RelayPeerId = model.RelayPeerId
             },
             KnownPeerIds = model.KnownPeerIds.ToList(),

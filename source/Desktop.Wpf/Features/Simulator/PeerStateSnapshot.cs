@@ -1,8 +1,5 @@
-using Desktop.Wpf.Features.Chat;
-using Desktop.Wpf.Features.Simulator.Models;
-using Percolator.Cryptography;
 using Percolator.Identity;
-using Percolator.Network;
+using System.Net;
 
 namespace Desktop.Wpf.Features.Simulator;
 
@@ -14,8 +11,7 @@ public sealed record PeerStateSnapshot(
     byte[] IdentitySigningKeySpki,
     byte[] IdentitySigningKeyPrivateKeyEcPrivateKey,
     ConnectionMode ConnectionMode,
-    string? Host,
-    int Port,
+    DnsEndPoint Endpoint,
    Percolator.Network.PeerId RelayPeerId,
     SimulatorPeerUiState UiState,
     Guid? InboundReverseSignalPendingCorrelationId,
