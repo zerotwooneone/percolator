@@ -272,7 +272,11 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             var model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
                 ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
 
-            var corr = Guid.TryParse(response.RequestCorrelationId, out var parsed) ? parsed : Guid.NewGuid();
+            if (!Guid.TryParse(response.RequestCorrelationId, out var corr))
+            {
+                throw new InvalidOperationException("InviteHandshakeResponse missing or invalid request_correlation_id");
+            }
+
             _pending.AddInviteHandshakeResponse(simulatedPeerId, corr, response);
             model.MarkInboundPending(corr);
             return;
