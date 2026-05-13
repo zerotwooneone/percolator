@@ -50,7 +50,16 @@ The observable failure mode is that the simulator does **not** complete its sess
     - an outbound invite (inviter finalization path), or
     - a pending inbound “main-initiated” flow (if we support that), but never silently become “pending acceptance”.
 
-Deliverable: a short written truth table mapping `(message type, correlation id source)` -> `(state transition + storage)`.
+Truth table:
+
+| Message Type | Correlation ID Source | State Transition | Storage |
+|-------------|---------------------|------------------|---------|
+| `InviteHandshakeResponse` | Matches outbound invite (simulator initiated) | `AwaitingUserAcceptance` → `Established` (immediate) | Session created in `model.SessionsMutable`; outbound invite removed; response NOT queued |
+| `InviteHandshakeResponse` | No matching outbound invite (unexpected) | No transition; error logged | Response dropped or stored for diagnostics only |
+| `EstablishDirectSessionRequest` (Main → Simulator) | N/A (new correlation) | `Ready` → `AwaitingUserAcceptance` (pending user decision) | Request queued in pending inbound invite store (Chunk B) |
+| `EstablishDirectSessionRequest` (Simulator → Main) | N/A (new correlation) | `Ready` → `OutboundPending` | Outbound invite stored in `model.OutboundInvitesMutable` |
+
+Deliverable: truth table documented above; invariants encoded in implementation.
 
 #### A2. Split simulator ingress APIs by message semantics (rename + new methods)
 
@@ -331,6 +340,22 @@ Target model (keep the unified UI surface, remove guessing):
 This preserves your “single list / single accept button” UX while making the behavior semantically correct.
 
 Deliverable: deterministic UI logic with no protocol-guessing fallbacks.
+
+#### B6.0 Revisit Chunk A temporary no-op stubs (must be removed)
+
+Chunk A intentionally replaced some UI acceptance paths with temporary no-op behavior to avoid breaking the UI while the correct Chunk B model is implemented.
+
+These temporary behaviors are **dangerous** if left in place because they can silently mask correctness issues and create “green but wrong” UI flows.
+
+**Required revisit list (explicit):**
+
+- `Desktop.Wpf/Features/Simulator/SimulatedHandshakeStateMachineCardViewModel.cs`
+  - `ExecuteAcceptHandshakeAsync`
+  - Chunk B requirement: this must become deterministic dispatch based on explicit pending handshake kind, and must call the real accept/finalize APIs (not log-and-return).
+
+- `Desktop.Wpf/Features/Simulator/SimulatedPeerItemViewModel.cs`
+  - `ExecuteAcceptInboundPendingAsync`
+  - Chunk B requirement: this must either be removed from the UX surface or wired to the new pending inbound invite request acceptance API (not log-and-return).
 
 #### B6.1 Cleanup: split persisted pending handshake stores by handshake family + direction
 
