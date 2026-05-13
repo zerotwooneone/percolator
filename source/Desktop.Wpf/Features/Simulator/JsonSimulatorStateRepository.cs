@@ -580,7 +580,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
 
         if (string.IsNullOrWhiteSpace(peer.Connection.Host) || string.Equals(peer.Connection.Host, "localhost", StringComparison.OrdinalIgnoreCase))
         {
-            peer.Connection.Host = AllocateSimulatorLoopbackHost(new Percolator.Cryptography.Primitives.PeerId(peer.PeerId.Value));
+            throw new InvalidOperationException("Peer connection host and port must be set");
         }
         if (peer.Connection.Port == 0)
         {
@@ -608,15 +608,6 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
 
         peer.IdentityPublicKeyHash = computed;
         return true;
-    }
-
-    private static string AllocateSimulatorLoopbackHost(PeerId peerId)
-    {
-        using var sha = SHA256.Create();
-        var hash = sha.ComputeHash(peerId.Value.ToByteArray());
-        var x = (byte)((hash[0] % 254) + 1);
-        var y = (byte)((hash[1] % 254) + 1);
-        return $"127.77.{x}.{y}";
     }
 
     private static string GetDefaultStatePath()

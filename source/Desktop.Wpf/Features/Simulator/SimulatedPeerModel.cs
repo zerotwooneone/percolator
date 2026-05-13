@@ -337,7 +337,7 @@ public sealed class SimulatedPeerModel : IDisposable
             TargetPublicKeyHash = _targetPublicKeyHash.Value,
             SelectedRouteMode = _selectedRouteMode.Value,
             DirectEndpoint = _directEndpoint.Value,
-            RelayHostPeerId = _relayHostPeerId.Value.Value != Guid.Empty ? _relayHostPeerId.Value.Value : null,
+            RelayHostPeerId = (_relayHostPeerId.Value is null || _relayHostPeerId.Value.Value == Guid.Empty) ? null : _relayHostPeerId.Value.Value,
             Phase = _phase.Value,
             NotUntilUtc = _notUntilUtc.Value,
             LastError = _lastError.Value,

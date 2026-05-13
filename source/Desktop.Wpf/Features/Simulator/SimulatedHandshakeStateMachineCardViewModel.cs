@@ -486,10 +486,10 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
     private EstablishDirectSessionRequest CreatePeerToMainInvite()
     {
         // Simulated peer inviter must advertise its simulator endpoint so the main app can route responses back in-process.
-        var port = _transportOptions.Value.SimulatorPort;
+        var port = _model.Endpoint.CurrentValue.Port;
         if (port == 0) port = 5002;
 
-        var inviterHost = AllocateSimulatorLoopbackHost(_model.PeerId);
+        var inviterHost = _model.Endpoint.CurrentValue.Host;
 
         using var identityEcdh = ECDiffieHellman.Create();
         identityEcdh.ImportECPrivateKey(_model.IdentitySigningKeyPrivateKeyEcPrivateKey, out _);
@@ -529,16 +529,6 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
             Payload = ByteString.CopyFrom(payloadBytes),
             PayloadSignature = ByteString.CopyFrom(payloadSig)
         };
-    }
-
-    private static string AllocateSimulatorLoopbackHost(PeerId peerId)
-    {
-        // Stable mapping of Guid -> 127.77.X.Y. Keep within 1..254 to avoid network/broadcast edge cases.
-        using var sha = SHA256.Create();
-        var hash = sha.ComputeHash(peerId.Value.ToByteArray());
-        var x = (byte)((hash[0] % 254) + 1);
-        var y = (byte)((hash[1] % 254) + 1);
-        return $"127.77.{x}.{y}";
     }
 
     private static string MapState(SimulatorPeerUiState state)
