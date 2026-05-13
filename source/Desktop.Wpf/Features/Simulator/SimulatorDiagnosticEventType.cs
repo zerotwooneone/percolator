@@ -20,5 +20,6 @@ public enum SimulatorDiagnosticEventType
     RelayRoutingFailure = 15,
     RelayActiveSessionAdded = 16,
     RelayActiveSessionRemoved = 17,
-    PreKeyPublishBlockedMissingActiveSession = 18
+    PreKeyPublishBlockedMissingActiveSession = 18,
+    HandshakeError = 19
 }

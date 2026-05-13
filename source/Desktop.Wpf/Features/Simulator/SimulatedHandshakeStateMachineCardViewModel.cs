@@ -392,42 +392,15 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
 
     private async Task ExecuteAcceptHandshakeAsync(CancellationToken ct)
     {
-        var corr = _model.InboundReverseSignalPendingCorrelationId.CurrentValue;
-        if (corr is null) return;
-        if (_active.Identity is null) return;
-
-        var acceptorPeerId = _active.Identity is not null ? new PeerId(_active.Identity.Id) : new PeerId(Guid.Empty);
-        var finalized = await _state.TryFinalizeInviteHandshakeResponseFromMainAsync(
-                simulatedPeerId: _model.PeerId,
-                acceptorPeerId: acceptorPeerId,
-                requestCorrelationId: corr.Value,
-                cancellationToken: ct)
-            .ConfigureAwait(false);
-
-        // Chunk H.2: If finalization fails, this pending was likely initiated by Main -> Simulator.
-        // In that case we need to deliver the queued InviteHandshakeResponse to Main, and the
-        // simulated peer can transition to Established immediately (it already created the session
-        // during invite receipt).
-        if (finalized is null)
-        {
-            var delivered = await _state.TryDeliverQueuedInviteHandshakeResponseToMainAsync(
-                    simulatedPeerId: _model.PeerId,
-                    requestCorrelationId: corr.Value,
-                    cancellationToken: ct)
-                .ConfigureAwait(false);
-
-            if (!delivered)
-            {
-                return;
-            }
-        }
-
-        await InvokeOnUiAsync(() => _model.MarkEstablished()).ConfigureAwait(false);
+        // Chunk A: Simulator-initiated handshakes are now finalized immediately on response receipt.
+        // This Accept command is no longer needed for that flow. It may be repurposed for Chunk B
+        // (Main-initiated handshakes requiring user acceptance).
+        // For now, this is a no-op to avoid breaking the UI while Chunk B is implemented.
         _diagnostics.Emit(
-            SimulatorDiagnosticEventType.HandshakeStateTransition,
-            $"Handshake: established corr={corr.Value.ToString()[..8]}",
+            SimulatorDiagnosticEventType.HandshakeError,
+            "AcceptHandshake called but simulator-initiated handshakes are auto-finalized in Chunk A",
             peerId: _model.PeerId,
-            contextTag: "Established");
+            contextTag: "AcceptHandshakeNoOp");
     }
 
     private async Task ExecuteAcceptPendingStandardSignalHelloAsync(string initiatorPkhHex, CancellationToken ct)

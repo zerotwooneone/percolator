@@ -26,7 +26,7 @@ namespace Desktop.Wpf.Tests;
 public sealed class SimulatedPeerRuntimeFinalizeRelayedTests
 {
     [Test]
-    public async Task Relayed_invite_and_response_can_be_accepted_and_finalized()
+    public async Task RelayedSimulatorInitiatedHandshake_CreatesSession_WhenMainAccepts()
     {
         // Arrange
         var inviterPeerId = new Percolator.Network.PeerId(Guid.NewGuid());
@@ -72,11 +72,14 @@ public sealed class SimulatedPeerRuntimeFinalizeRelayedTests
 
         await ((ISimulatorStateInitializer)state).InitializeAsync(CancellationToken.None);
 
-        // Setup: Add outbound invite to simulate pre-existing invite state
+        // Setup: Add outbound invite to simulate relayed simulator-initiated handshake state
+        // Note: This is internal state manipulation, which is necessary to test the service layer
+        // in isolation. In production, outbound invites are created by ViewModels via UI commands.
         state.Peers.Single(p => p.PeerId == inviterPeerId)
             .OutboundInvitesMutable
             .Add(new SimulatedOutboundInviteModel(correlation, spkPriv));
 
+        // Act: Generate a valid response using the crypto engine, then handle it (relayed scenario)
         var payload = new InviteHandshakeRequestPayload
         {
             Version = 1,
@@ -106,23 +109,20 @@ public sealed class SimulatedPeerRuntimeFinalizeRelayedTests
             PayloadSignature = ByteString.CopyFrom(payloadSig)
         };
 
+        // Use AcceptReverseSignalInviteAsync to generate a valid response via crypto engine
+        // This simulates Main accepting the invite and generating the response
         var acceptance = await state.AcceptReverseSignalInviteAsync(
             simulatedPeerId: acceptorPeerId,
             inviterPeerId: inviterPeerId,
             invite: invite,
             cancellationToken: CancellationToken.None);
 
-        await state.ReceiveInviteHandshakeResponseFromMainAsync(inviterPeerId, acceptance.Response, CancellationToken.None);
+        // Chunk A: Response is now finalized immediately on receipt
+        await state.HandleInboundInviteHandshakeResponseFromMainAsync(inviterPeerId, acceptance.Response, CancellationToken.None);
 
-        var finalizedSid = await state.TryFinalizeInviteHandshakeResponseFromMainAsync(
-            simulatedPeerId: inviterPeerId,
-            acceptorPeerId: acceptorPeerId,
-            requestCorrelationId: correlation,
-            cancellationToken: CancellationToken.None);
-
-        // Assert: Session was created and pending response was consumed
-        finalizedSid.Should().NotBeNull();
+        // Assert: Session was created immediately (Chunk A behavior)
         state.Peers.Single(p => p.PeerId == inviterPeerId).Sessions.Count.Should().Be(1);
-        pending.TryGetInviteHandshakeResponse(inviterPeerId, correlation, out _).Should().BeFalse();
+        // Outbound invite should be removed
+        state.Peers.Single(p => p.PeerId == inviterPeerId).OutboundInvitesMutable.Count.Should().Be(0);
     }
 }

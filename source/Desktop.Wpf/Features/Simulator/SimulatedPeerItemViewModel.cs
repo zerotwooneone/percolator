@@ -225,29 +225,11 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
 
     private async Task ExecuteAcceptInboundPendingAsync(System.Threading.CancellationToken ct)
     {
-        var corr = _model.InboundReverseSignalPendingCorrelationId.CurrentValue;
-        if (corr is null) return;
-
-        if (_active.Identity is null)
-        {
-            return;
-        }
-
-        var acceptorPeerId = _active.Identity is not null ? new PeerId(_active.Identity.Id) : new PeerId(Guid.Empty);
-        var finalized = await _state.TryFinalizeInviteHandshakeResponseFromMainAsync(
-                simulatedPeerId: _model.PeerId,
-                acceptorPeerId: acceptorPeerId,
-                requestCorrelationId: corr.Value,
-                cancellationToken: ct)
-            .ConfigureAwait(false);
-
-        if (finalized is null)
-        {
-            return;
-        }
-
-        _sessionToMain = finalized;
-        _model.MarkEstablished();
+        // Chunk A: Simulator-initiated handshakes are now finalized immediately on response receipt.
+        // This Accept command is no longer needed for that flow. It may be repurposed for Chunk B
+        // (Main-initiated handshakes requiring user acceptance).
+        // For now, this is a no-op to avoid breaking the UI while Chunk B is implemented.
+        await Task.CompletedTask.ConfigureAwait(false);
     }
 
     private void ExecuteRejectInboundPending()

@@ -138,8 +138,10 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
 
     private async Task<DeliverInviteHandshakeResponseAck> DeliverInviteHandshakeResponseAsync(PeerId simulatedPeerId, InviteHandshakeResponse response)
     {
-        _logger.LogInformation("[simulator] Intercepted DeliverInviteHandshakeResponse to {SimPeer}", simulatedPeerId);
-        await _state.ReceiveInviteHandshakeResponseFromMainAsync(simulatedPeerId, response).ConfigureAwait(false);
+        var correlationId = response.RequestCorrelationId ?? "(missing)";
+        _logger.LogInformation("[simulator] Intercepted DeliverInviteHandshakeResponse to {SimPeer} with correlation {CorrelationId}", simulatedPeerId, correlationId);
+        await _state.HandleInboundInviteHandshakeResponseFromMainAsync(simulatedPeerId, response).ConfigureAwait(false);
+        _logger.LogInformation("[simulator] Handshake response processed for {SimPeer} correlation {CorrelationId}", simulatedPeerId, correlationId);
         return new DeliverInviteHandshakeResponseAck { Version = 1 };
     }
 

@@ -258,7 +258,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         }
     }
 
-    public async Task ReceiveInviteHandshakeResponseFromMainAsync(
+    public async Task HandleInboundInviteHandshakeResponseFromMainAsync(
         Percolator.Network.PeerId simulatedPeerId,
         InviteHandshakeResponse response,
         CancellationToken cancellationToken = default)
@@ -266,20 +266,187 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         cancellationToken.ThrowIfCancellationRequested();
         if (response is null) throw new ArgumentNullException(nameof(response));
 
+        if (!Guid.TryParse(response.RequestCorrelationId, out var correlationId))
+        {
+            throw new InvalidOperationException("InviteHandshakeResponse missing or invalid request_correlation_id");
+        }
+
+        // Validate required fields
+        if (!response.HasAcceptorIdentityKey || response.AcceptorIdentityKey.Length == 0)
+            throw new InvalidOperationException("InviteHandshakeResponse missing acceptor_identity_key");
+        if (!response.HasAcceptorX3DhEphemeralKey || response.AcceptorX3DhEphemeralKey.Length == 0)
+            throw new InvalidOperationException("InviteHandshakeResponse missing acceptor_x3dh_ephemeral_key");
+        if (!response.HasInitialRatchetMessage || response.InitialRatchetMessage.Length == 0)
+            throw new InvalidOperationException("InviteHandshakeResponse missing initial_ratchet_message");
+
+        SimulatedPeerModel model;
+        SimulatedOutboundInviteModel? outbound;
+
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
+            model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
                 ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
 
-            if (!Guid.TryParse(response.RequestCorrelationId, out var corr))
+            outbound = model.OutboundInvitesMutable.FirstOrDefault(x => x.CorrelationId == correlationId);
+            if (outbound is null)
             {
-                throw new InvalidOperationException("InviteHandshakeResponse missing or invalid request_correlation_id");
+                // Response does not match any outbound invite - this is unexpected
+                _diagnostics.Emit(
+                    SimulatorDiagnosticEventType.HandshakeError,
+                    $"InviteHandshakeResponse with correlation {correlationId} does not match any outbound invite",
+                    peerId: simulatedPeerId,
+                    contextTag: "ResponseNoMatchingOutboundInvite");
+                return;
             }
+        }
+        finally
+        {
+            _stateGate.Release();
+        }
 
-            _pending.AddInviteHandshakeResponse(simulatedPeerId, corr, response);
-            model.MarkInboundPending(corr);
+        // Perform X3DH_Respond and finalize session
+        var acceptorIdentityPublic = RatchetIdentityKey.FromBytesOwned(response.AcceptorIdentityKey.ToByteArray());
+        var acceptorEphemeralPublic = RatchetEphemeralKey.FromBytesOwned(response.AcceptorX3DhEphemeralKey.ToByteArray());
+
+        var crypto = new AeadSessionCrypto();
+        var localIkPriv = PrivatePreKey.FromBytes(model.IdentitySigningKeyPrivateKeyEcPrivateKey);
+        var localSpkPriv = PrivatePreKey.FromBytes(outbound.SignedPreKeyPrivateEcPrivateKey);
+
+        SharedSecret shared;
+        try
+        {
+            shared = crypto.X3DH_Respond(
+                acceptorIdentityPublic,
+                acceptorEphemeralPublic,
+                localIkPriv,
+                localSpkPriv,
+                localOtkPrivate: null);
+        }
+        catch (Exception ex)
+        {
+            _diagnostics.Emit(
+                SimulatorDiagnosticEventType.HandshakeError,
+                $"X3DH_Respond failed for correlation {correlationId}: {ex.Message}",
+                peerId: simulatedPeerId,
+                contextTag: "X3DHRespondFailed");
             return;
+        }
+
+        var root = RootKey.FromSpan(shared.Span);
+
+        SessionRatchetMessage ratchetMessage;
+        try
+        {
+            ratchetMessage = SessionRatchetMessage.FromBytesOwned(response.InitialRatchetMessage.ToByteArray());
+        }
+        catch (Exception ex)
+        {
+            _diagnostics.Emit(
+                SimulatorDiagnosticEventType.HandshakeError,
+                $"Failed to parse ratchet message for correlation {correlationId}: {ex.Message}",
+                peerId: simulatedPeerId,
+                contextTag: "RatchetMessageParseFailed");
+            return;
+        }
+
+        var clock = ResolveClock();
+        var tmp = RatchetBootstrap.CreateResponderSession(
+            SessionId.NewId(),
+            new Percolator.Cryptography.Primitives.PeerId(simulatedPeerId.Value),
+            new ProtocolVersion(1),
+            root,
+            clock);
+
+        Plaintext pt;
+        try
+        {
+            pt = tmp.Decrypt(ratchetMessage, clock);
+        }
+        catch (Exception ex)
+        {
+            _diagnostics.Emit(
+                SimulatorDiagnosticEventType.HandshakeError,
+                $"Failed to decrypt ratchet message for correlation {correlationId}: {ex.Message}",
+                peerId: simulatedPeerId,
+                contextTag: "RatchetMessageDecryptFailed");
+            return;
+        }
+
+        ResponderInnerHello inner;
+        try
+        {
+            inner = ResponderInnerHello.Parser.ParseFrom(pt.ToArray());
+        }
+        catch (Exception ex)
+        {
+            _diagnostics.Emit(
+                SimulatorDiagnosticEventType.HandshakeError,
+                $"Failed to parse ResponderInnerHello for correlation {correlationId}: {ex.Message}",
+                peerId: simulatedPeerId,
+                contextTag: "ResponderInnerHelloParseFailed");
+            return;
+        }
+
+        if (!inner.HasVersion || inner.Version != 1)
+        {
+            _diagnostics.Emit(
+                SimulatorDiagnosticEventType.HandshakeError,
+                $"Invalid ResponderInnerHello version for correlation {correlationId}",
+                peerId: simulatedPeerId,
+                contextTag: "InvalidResponderInnerHelloVersion");
+            return;
+        }
+        if (!inner.HasDirectSessionId || string.IsNullOrWhiteSpace(inner.DirectSessionId))
+        {
+            _diagnostics.Emit(
+                SimulatorDiagnosticEventType.HandshakeError,
+                $"Missing DirectSessionId in ResponderInnerHello for correlation {correlationId}",
+                peerId: simulatedPeerId,
+                contextTag: "MissingDirectSessionId");
+            return;
+        }
+
+        SessionId sessionId;
+        try
+        {
+            sessionId = new SessionId(Guid.Parse(inner.DirectSessionId));
+        }
+        catch (Exception ex)
+        {
+            _diagnostics.Emit(
+                SimulatorDiagnosticEventType.HandshakeError,
+                $"Invalid DirectSessionId format for correlation {correlationId}: {ex.Message}",
+                peerId: simulatedPeerId,
+                contextTag: "InvalidDirectSessionIdFormat");
+            return;
+        }
+
+        var final = SecureSession.Create(
+            sessionId,
+            tmp.RemotePeerId,
+            tmp.ProtocolVersion,
+            tmp.State,
+            crypto,
+            clock);
+
+        await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            // Remove the outbound invite (it's now completed)
+            model.OutboundInvitesMutable.Remove(outbound);
+
+            // Store the session
+            model.SessionsMutable[sessionId] = final;
+
+            // Transition UI state to Established
+            model.MarkEstablished();
+
+            _diagnostics.Emit(
+                SimulatorDiagnosticEventType.HandshakeStateTransition,
+                $"Handshake: established corr={correlationId.ToString()[..8]} sessionId={sessionId.Value.ToString()[..8]}",
+                peerId: simulatedPeerId,
+                contextTag: "Established");
         }
         finally
         {
@@ -326,142 +493,6 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 
         await DeliverInviteHandshakeResponseToMainAsync(response, cancellationToken).ConfigureAwait(false);
         return true;
-    }
-
-    public async Task<SessionId?> TryFinalizeInviteHandshakeResponseFromMainAsync(
-        Percolator.Network.PeerId simulatedPeerId,
-        Percolator.Network.PeerId acceptorPeerId,
-        Guid requestCorrelationId,
-        CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        if (!_pending.TryGetInviteHandshakeResponse(simulatedPeerId, requestCorrelationId, out var response))
-        {
-            return null;
-        }
-
-        SimulatedPeerModel model;
-        SimulatedOutboundInviteModel? outbound;
-
-        await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
-                ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
-
-            outbound = model.OutboundInvitesMutable.FirstOrDefault(x => x.CorrelationId == requestCorrelationId);
-            if (outbound is null)
-            {
-                return null;
-            }
-        }
-        finally
-        {
-            _stateGate.Release();
-        }
-
-        if (!response.HasAcceptorIdentityKey || response.AcceptorIdentityKey.Length == 0)
-            throw new InvalidOperationException("InviteHandshakeResponse missing acceptor_identity_key");
-        if (!response.HasAcceptorX3DhEphemeralKey || response.AcceptorX3DhEphemeralKey.Length == 0)
-            throw new InvalidOperationException("InviteHandshakeResponse missing acceptor_x3dh_ephemeral_key");
-        if (!response.HasInitialRatchetMessage || response.InitialRatchetMessage.Length == 0)
-            throw new InvalidOperationException("InviteHandshakeResponse missing initial_ratchet_message");
-
-        var acceptorIdentityPublic = RatchetIdentityKey.FromBytesOwned(response.AcceptorIdentityKey.ToByteArray());
-        var acceptorEphemeralPublic = RatchetEphemeralKey.FromBytesOwned(response.AcceptorX3DhEphemeralKey.ToByteArray());
-
-        var crypto = new AeadSessionCrypto();
-        var localIkPriv = PrivatePreKey.FromBytes(model.IdentitySigningKeyPrivateKeyEcPrivateKey);
-        var localSpkPriv = PrivatePreKey.FromBytes(outbound.SignedPreKeyPrivateEcPrivateKey);
-
-        SharedSecret shared;
-        try
-        {
-            shared = crypto.X3DH_Respond(
-                acceptorIdentityPublic,
-                acceptorEphemeralPublic,
-                localIkPriv,
-                localSpkPriv,
-                localOtkPrivate: null);
-        }
-        catch
-        {
-            return null;
-        }
-
-        var root = RootKey.FromSpan(shared.Span);
-
-        SessionRatchetMessage ratchetMessage;
-        try
-        {
-            ratchetMessage = SessionRatchetMessage.FromBytesOwned(response.InitialRatchetMessage.ToByteArray());
-        }
-        catch
-        {
-            return null;
-        }
-
-        var clock = ResolveClock();
-        var tmp = RatchetBootstrap.CreateResponderSession(
-            SessionId.NewId(),
-            new Percolator.Cryptography.Primitives.PeerId(acceptorPeerId.Value),
-            new ProtocolVersion(1),
-            root,
-            clock);
-
-        Plaintext pt;
-        try
-        {
-            pt = tmp.Decrypt(ratchetMessage, clock);
-        }
-        catch
-        {
-            return null;
-        }
-
-        ResponderInnerHello inner;
-        try
-        {
-            inner = ResponderInnerHello.Parser.ParseFrom(pt.ToArray());
-        }
-        catch
-        {
-            return null;
-        }
-
-        if (!inner.HasVersion || inner.Version != 1) return null;
-        if (!inner.HasDirectSessionId || string.IsNullOrWhiteSpace(inner.DirectSessionId)) return null;
-
-        SessionId sid;
-        try
-        {
-            sid = new SessionId(Guid.Parse(inner.DirectSessionId));
-        }
-        catch
-        {
-            return null;
-        }
-
-        var final = SecureSession.Create(
-            sid,
-            tmp.RemotePeerId,
-            tmp.ProtocolVersion,
-            tmp.State,
-            crypto,
-            clock);
-
-        await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            model.SessionsMutable[sid] = final;
-            _ = _pending.TryTakeInviteHandshakeResponse(simulatedPeerId, requestCorrelationId, out _);
-            return sid;
-        }
-        finally
-        {
-            _stateGate.Release();
-        }
     }
 
     public async Task<EstablishSessionResponse> ReceiveEstablishSessionFromMainAsync(
