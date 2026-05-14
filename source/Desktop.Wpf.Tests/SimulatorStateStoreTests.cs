@@ -90,6 +90,14 @@ public sealed class SimulatorStateStoreTests
             model.SignedPreKeysMutable.Add(new SimulatedSignedPreKeyModel(Guid.NewGuid(), RandomNumberGenerator.GetBytes(32), RandomNumberGenerator.GetBytes(32)));
             model.SessionsMutable[session.Id] = session;
 
+            var inviterPeerId = new Percolator.Network.PeerId(Guid.NewGuid());
+            model.PendingInboundDirectInvitesMutable.Add(new SimulatedPendingInboundDirectInviteModel(
+                CorrelationId: Guid.NewGuid(),
+                RequestBytes: new byte[] { 0x10, 0x11, 0x12 },
+                ReceivedAtUtc: DateTimeOffset.UtcNow,
+                InviterIdentityKeySpki: new byte[] { 0x20, 0x21 },
+                InviterPeerId: inviterPeerId));
+
             var relationships = new[]
             {
                 new PeerRelationshipSnapshot(model.PeerId, host1, RelationshipType.PublishedKey),
@@ -154,6 +162,9 @@ public sealed class SimulatorStateStoreTests
             loadedPeer.DisplayName.Should().Be("Alice");
             loadedPeer.SignedPreKeys.Should().HaveCount(2);
             loadedPeer.Sessions.Should().HaveCount(1);
+
+            loadedPeer.PendingInboundDirectInvites.Should().HaveCount(1);
+            loadedPeer.PendingInboundDirectInvites.Single().InviterPeerId.Should().Be(inviterPeerId);
 
             loadedSnapshot.Relationships
                 .Count(r => r.SourcePeerId == model.PeerId && r.Type == RelationshipType.PublishedKey)

@@ -59,12 +59,9 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
             .ToBindableReactiveProperty(_model.PeerId.ToString()[..8])
             .AddTo(ref _bag);
 
-        RuntimeStateText = Observable
-            .CombineLatest(_model.UiState, _model.InboundReverseSignalPendingCorrelationId, static (s, corr) => (s, corr))
+        RuntimeStateText = _model.UiState
             .ObserveOnCurrentSynchronizationContext()
-            .Select(t => t.corr is null
-                ? t.s.ToString()
-                : $"{t.s} ({t.corr.Value.ToString()[..8]})")
+            .Select(s => s.ToString())
             .ToBindableReactiveProperty(_model.UiState.CurrentValue.ToString())
             .AddTo(ref _bag);
 
@@ -137,7 +134,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
             .ToReactiveCommand<Unit>(_ => { })
             .AddTo(ref _bag);
         RejectInboundPendingCommand.AsObservable()
-            .Subscribe(_ => ExecuteRejectInboundPending())
+            .SubscribeAwait(async (_, ct) => await ExecuteRejectInboundPendingAsync(ct), AwaitOperation.Drop)
             .AddTo(ref _bag);
 
         MainInviteDirectCommand = Observable.Return(true)
@@ -225,20 +222,28 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
 
     private async Task ExecuteAcceptInboundPendingAsync(System.Threading.CancellationToken ct)
     {
-        // Chunk A: Simulator-initiated handshakes are now finalized immediately on response receipt.
-        // This Accept command is no longer needed for that flow. It may be repurposed for Chunk B
-        // (Main-initiated handshakes requiring user acceptance).
-        // For now, this is a no-op to avoid breaking the UI while Chunk B is implemented.
-        await Task.CompletedTask.ConfigureAwait(false);
+        // Chunk B: Accept pending inbound direct invite from Main
+        var corr = _model.PendingInboundDirectInvites.FirstOrDefault()?.CorrelationId;
+        if (corr is null || corr.Value == Guid.Empty) return;
+
+        await _state.AcceptPendingInboundDirectInviteAsync(
+            simulatedPeerId: _model.PeerId,
+            correlationId: corr.Value,
+            cancellationToken: ct)
+            .ConfigureAwait(false);
     }
 
-    private void ExecuteRejectInboundPending()
+    private async Task ExecuteRejectInboundPendingAsync(System.Threading.CancellationToken ct)
     {
-        var corr = _model.InboundReverseSignalPendingCorrelationId.CurrentValue;
-        if (corr is null) return;
+        // Chunk B: Reject pending inbound direct invite from Main
+        var corr = _model.PendingInboundDirectInvites.FirstOrDefault()?.CorrelationId;
+        if (corr is null || corr.Value == Guid.Empty) return;
 
-        _ = _pending.TryTakeInviteHandshakeResponse(_model.PeerId, corr.Value, out _);
-        _model.ClearRuntimeState();
+        await _state.RejectPendingInboundDirectInviteAsync(
+            simulatedPeerId: _model.PeerId,
+            correlationId: corr.Value,
+            cancellationToken: ct)
+            .ConfigureAwait(false);
     }
 
     private async Task ExecuteMainInviteDirectAsync(System.Threading.CancellationToken ct)
@@ -251,7 +256,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         var invite = _inviteFactory.CreateInvite();
         var inviterPeerId = _active.Identity is not null ? new PeerId(_active.Identity.Id) : new PeerId(Guid.Empty);
 
-        var acceptance = await _state.AcceptReverseSignalInviteAsync(
+        var acceptance = await _state.AcceptInboundDirectInviteAsync(
                 simulatedPeerId: _model.PeerId,
                 inviterPeerId: inviterPeerId,
                 invite: invite,
@@ -301,7 +306,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         var req = EstablishDirectSessionRequest.Parser.ParseFrom(dequeued[0].OpaqueBytes);
         var inviterPeerId = _active.Identity is not null ? new PeerId(_active.Identity.Id) : new PeerId(Guid.Empty);
 
-        var acceptance = await _state.AcceptReverseSignalInviteAsync(
+        var acceptance = await _state.AcceptInboundDirectInviteAsync(
                 simulatedPeerId: _model.PeerId,
                 inviterPeerId: inviterPeerId,
                 invite: req,

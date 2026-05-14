@@ -43,6 +43,7 @@ public sealed class SimulatedPeerModel : IDisposable
     private readonly ObservableList<SimulatedSignedPreKeyModel> _signedPreKeys;
     private readonly ObservableList<SimulatedOutboundInviteModel> _outboundInvites;
     private readonly ObservableList<SimulatedPendingInviteHandshakeResponseModel> _pendingInviteHandshakeResponses;
+    private readonly ObservableList<SimulatedPendingInboundDirectInviteModel> _pendingInboundDirectInvites;
     private readonly ObservableList<SimulatedChatMessageSnapshot> _recentChatMessages;
     private readonly ObservableList<SimulatedOneTimePreKeyPrivateRecord> _oneTimePreKeysPrivate;
 
@@ -122,6 +123,7 @@ public sealed class SimulatedPeerModel : IDisposable
         _signedPreKeys = new ObservableList<SimulatedSignedPreKeyModel>();
         _outboundInvites = new ObservableList<SimulatedOutboundInviteModel>();
         _pendingInviteHandshakeResponses = new ObservableList<SimulatedPendingInviteHandshakeResponseModel>();
+        _pendingInboundDirectInvites = new ObservableList<SimulatedPendingInboundDirectInviteModel>();
         _recentChatMessages = new ObservableList<SimulatedChatMessageSnapshot>();
         _oneTimePreKeysPrivate = new ObservableList<SimulatedOneTimePreKeyPrivateRecord>();
 
@@ -162,6 +164,7 @@ public sealed class SimulatedPeerModel : IDisposable
     public IReadOnlyObservableList<SimulatedSignedPreKeyModel> SignedPreKeys => _signedPreKeys;
     public IReadOnlyObservableList<SimulatedOutboundInviteModel> OutboundInvites => _outboundInvites;
     public IReadOnlyObservableList<SimulatedPendingInviteHandshakeResponseModel> PendingInviteHandshakeResponses => _pendingInviteHandshakeResponses;
+    public IReadOnlyObservableList<SimulatedPendingInboundDirectInviteModel> PendingInboundDirectInvites => _pendingInboundDirectInvites;
     public IReadOnlyObservableList<SimulatedChatMessageSnapshot> RecentChatMessages => _recentChatMessages;
     public IReadOnlyObservableList<SimulatedOneTimePreKeyPrivateRecord> OneTimePreKeysPrivate => _oneTimePreKeysPrivate;
 
@@ -171,16 +174,48 @@ public sealed class SimulatedPeerModel : IDisposable
     internal ObservableList<SimulatedSignedPreKeyModel> SignedPreKeysMutable => _signedPreKeys;
     internal ObservableList<SimulatedOutboundInviteModel> OutboundInvitesMutable => _outboundInvites;
     internal ObservableList<SimulatedPendingInviteHandshakeResponseModel> PendingInviteHandshakeResponsesMutable => _pendingInviteHandshakeResponses;
+    internal ObservableList<SimulatedPendingInboundDirectInviteModel> PendingInboundDirectInvitesMutable => _pendingInboundDirectInvites;
     internal ObservableList<SimulatedChatMessageSnapshot> RecentChatMessagesMutable => _recentChatMessages;
     internal ObservableList<SimulatedOneTimePreKeyPrivateRecord> OneTimePreKeysPrivateMutable => _oneTimePreKeysPrivate;
 
     internal ObservableDictionary<string, SimulatedPendingStandardSignalHelloModel> PendingInboundStandardSignalHellosMutable => _pendingInboundStandardSignalHellos;
+
+    internal void AddPendingInboundDirectInvite(Guid correlationId, byte[] requestBytes, byte[] inviterIdentityKeySpki, Percolator.Network.PeerId inviterPeerId)
+    {
+        _pendingInboundDirectInvites.Add(new SimulatedPendingInboundDirectInviteModel(
+            correlationId,
+            requestBytes,
+            DateTimeOffset.UtcNow,
+            inviterIdentityKeySpki,
+            inviterPeerId));
+    }
+
+    internal bool TryTakePendingInboundDirectInvite(Guid correlationId, out SimulatedPendingInboundDirectInviteModel? invite)
+    {
+        for (int i = 0; i < _pendingInboundDirectInvites.Count; i++)
+        {
+            if (_pendingInboundDirectInvites[i].CorrelationId == correlationId)
+            {
+                invite = _pendingInboundDirectInvites[i];
+                _pendingInboundDirectInvites.RemoveAt(i);
+                return true;
+            }
+        }
+        invite = null;
+        return false;
+    }
 
     internal void Track(IDisposable disposable)
         => disposable.AddTo(ref _bag);
 
     public void SetDisplayName(string? displayName)
         => _displayName.Value = NormalizeDisplayName(displayName);
+
+    public void SetUiState(SimulatorPeerUiState uiState)
+        => _uiState.Value = uiState;
+
+    public void SetInboundReverseSignalPendingCorrelationId(Guid? correlationId)
+        => _inboundReverseSignalPendingCorrelationId.Value = correlationId;
 
     public void AddChatMessage(bool isFromMain, string content, DateTimeOffset receivedUtc)
     {
@@ -418,6 +453,9 @@ public sealed class SimulatedPeerModel : IDisposable
             PendingInviteHandshakeResponses: _pendingInviteHandshakeResponses
                 .Select(r => new PendingInviteHandshakeResponseSnapshot(r.CorrelationId, r.ResponseBytes.ToArray()))
                 .ToList(),
+            PendingInboundDirectInvites: _pendingInboundDirectInvites
+                .Select(r => new PendingInboundDirectInviteSnapshot(r.CorrelationId, r.RequestBytes.ToArray(), r.ReceivedAtUtc, r.InviterIdentityKeySpki.ToArray(), r.InviterPeerId))
+                .ToList(),
             RecentChatMessages: _recentChatMessages.ToList(),
             OneTimePreKeysPrivate: _oneTimePreKeysPrivate
                 .Select(r => new SimulatedOneTimePreKeyPrivateSnapshot(
@@ -496,6 +534,8 @@ public sealed record SimulatedSignedPreKeyModel(Guid SignedPreKeyId, byte[] Priv
 public sealed record SimulatedOutboundInviteModel(Guid CorrelationId, byte[] SignedPreKeyPrivateEcPrivateKey);
 
 public sealed record SimulatedPendingInviteHandshakeResponseModel(Guid CorrelationId, byte[] ResponseBytes);
+
+public sealed record SimulatedPendingInboundDirectInviteModel(Guid CorrelationId, byte[] RequestBytes, DateTimeOffset ReceivedAtUtc, byte[] InviterIdentityKeySpki, Percolator.Network.PeerId InviterPeerId);
 
 public sealed record SimulatedPublishedPreKeyBundleModel(
     IdentityPublicKeyHash RecipientPublicKeyHash,

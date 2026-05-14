@@ -69,7 +69,17 @@ public interface ISimulatorStateService
         EstablishDirectSessionRequest request,
         CancellationToken cancellationToken = default);
 
-    Task<SimulatedPeerInviteAcceptance> AcceptReverseSignalInviteAsync(
+    Task AcceptPendingInboundDirectInviteAsync(
+        Percolator.Network.PeerId simulatedPeerId,
+        Guid correlationId,
+        CancellationToken cancellationToken = default);
+
+    Task RejectPendingInboundDirectInviteAsync(
+        Percolator.Network.PeerId simulatedPeerId,
+        Guid correlationId,
+        CancellationToken cancellationToken = default);
+
+    Task<SimulatedPeerInviteAcceptance> AcceptInboundDirectInviteAsync(
         Percolator.Network.PeerId simulatedPeerId,
         Percolator.Network.PeerId inviterPeerId,
         EstablishDirectSessionRequest invite,

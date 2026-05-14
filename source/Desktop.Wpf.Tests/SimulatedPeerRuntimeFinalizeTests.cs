@@ -101,9 +101,9 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
             PayloadSignature = ByteString.CopyFrom(payloadSig)
         };
 
-        // Use AcceptReverseSignalInviteAsync to generate a valid response via crypto engine
+        // Use AcceptInboundDirectInviteAsync to generate a valid response via crypto engine
         // This simulates Main accepting the invite and generating the response
-        var acceptance = await sut.AcceptReverseSignalInviteAsync(
+        var acceptance = await sut.AcceptInboundDirectInviteAsync(
             simulatedPeerId: acceptorPeerId,
             inviterPeerId: inviterPeerId,
             invite: invite,

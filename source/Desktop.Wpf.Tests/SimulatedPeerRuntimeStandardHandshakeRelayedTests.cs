@@ -75,7 +75,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
     }
 
     [Test]
-    public async Task AcceptReverseSignalInviteAsync_creates_session_in_memory()
+    public async Task AcceptInboundDirectInviteAsync_creates_session_in_memory()
     {
         // Arrange
         var simulatedPeerId = new Percolator.Network.PeerId(Guid.NewGuid());
@@ -126,7 +126,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         var sut = CreateSut(repo, diagnostics, pending, clock, out var timeProvider);
         await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
 
-        var acceptance = await sut.AcceptReverseSignalInviteAsync(simulatedPeerId, inviterPeerId, invite, CancellationToken.None);
+        var acceptance = await sut.AcceptInboundDirectInviteAsync(simulatedPeerId, inviterPeerId, invite, CancellationToken.None);
 
         acceptance.SessionId.Should().NotBeNull();
         acceptance.Response.Should().NotBeNull();
@@ -137,7 +137,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
     }
 
     [Test]
-    public async Task AcceptReverseSignalInviteAsync_eventually_persists_runtime_store()
+    public async Task AcceptInboundDirectInviteAsync_eventually_persists_runtime_store()
     {
         // Arrange
         var simulatedPeerId = new Percolator.Network.PeerId(Guid.NewGuid());
@@ -199,7 +199,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
 
         // Act
-        _ = await sut.AcceptReverseSignalInviteAsync(simulatedPeerId, inviterPeerId, invite, CancellationToken.None);
+        _ = await sut.AcceptInboundDirectInviteAsync(simulatedPeerId, inviterPeerId, invite, CancellationToken.None);
 
         // Assert: advance time to trigger debounced save
         timeProvider.Advance(TimeSpan.FromMilliseconds(300));

@@ -55,6 +55,7 @@ public sealed class SimulatedPeerRuntimeStoreDto
     public List<SimulatedSignedPreKeyDto> SignedPreKeys { get; set; } = new();
     public List<SimulatedOutboundInviteDto> OutboundInvites { get; set; } = new();
     public List<SimulatedPendingInviteHandshakeResponseDto> PendingInviteHandshakeResponses { get; set; } = new();
+    public List<SimulatedPendingInboundDirectInviteDto> PendingInboundDirectInvites { get; set; } = new();
     public List<OneTimePreKeyPrivateDto> OneTimePreKeysPrivate { get; set; } = new();
     public List<SimulatedChatMessageDto> RecentChatMessages { get; set; } = new();
 }
@@ -69,6 +70,15 @@ public sealed class SimulatedPendingInviteHandshakeResponseDto
 {
     public Guid CorrelationId { get; set; }
     public byte[] ResponseBytes { get; set; } = Array.Empty<byte>();
+}
+
+public sealed class SimulatedPendingInboundDirectInviteDto
+{
+    public Guid CorrelationId { get; set; }
+    public byte[] RequestBytes { get; set; } = Array.Empty<byte>();
+    public DateTimeOffset ReceivedAtUtc { get; set; }
+    public byte[] InviterIdentityKeySpki { get; set; } = Array.Empty<byte>();
+    public string InviterPeerId { get; set; } = string.Empty;
 }
 
 public sealed class SimulatedSecureSessionDto

@@ -143,25 +143,111 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         cancellationToken.ThrowIfCancellationRequested();
         if (request is null) throw new ArgumentNullException(nameof(request));
 
-        var acceptance = await AcceptReverseSignalInviteAsync(simulatedPeerId, mainPeerId, request, cancellationToken)
-            .ConfigureAwait(false);
+        // Chunk B8.4: Validate request fields before parsing
+        if (!request.HasPayload || request.Payload.Length == 0)
+            throw new InvalidOperationException("Invite missing payload");
+        if (!request.HasInviterIdentityKey || request.InviterIdentityKey.Length == 0)
+            throw new InvalidOperationException("Invite missing inviter_identity_key");
 
-        var corr = Guid.TryParse(acceptance.Response.RequestCorrelationId, out var parsed) ? parsed : Guid.NewGuid();
+        // Chunk B: Parse correlation id and inviter identity key from request
+        var payload = InviteHandshakeRequestPayload.Parser.ParseFrom(request.Payload);
+        if (!Guid.TryParse(payload.RequestCorrelationId, out var correlationId))
+        {
+            throw new InvalidOperationException("Invalid correlation id in request");
+        }
 
-        // Chunk H.2: do NOT auto-deliver the response to Main. Queue it so the simulator UI
-        // can present an explicit Accept button to trigger delivery.
-        await QueueInviteHandshakeResponseForDeliveryToMainAsync(simulatedPeerId, corr, acceptance.Response, cancellationToken)
-            .ConfigureAwait(false);
+        var inviterIdentityKeySpki = request.InviterIdentityKey.ToByteArray();
 
+        // Chunk B: Persist the inbound request as pending (do NOT create session yet)
+        await WithStateGateAsync(() =>
+        {
+            var peer = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId);
+            if (peer is null)
+            {
+                throw new InvalidOperationException($"Simulated peer {simulatedPeerId} not found");
+            }
+
+            peer.AddPendingInboundDirectInvite(correlationId, request.ToByteArray(), inviterIdentityKeySpki, mainPeerId);
+
+            // Transition UI state to indicate pending inbound invite request
+            peer.SetUiState(SimulatorPeerUiState.AwaitingUserAcceptance);
+            return Task.CompletedTask;
+        }, cancellationToken).ConfigureAwait(false);
+
+        // Chunk B: Return Queued without creating a session
         return new EstablishDirectSessionResponse
         {
             Version = 1,
             Queued = new EstablishDirectSessionResponse.Types.Queued
             {
                 Version = 1,
-                RequestCorrelationId = corr.ToString()
+                RequestCorrelationId = correlationId.ToString()
             }
         };
+    }
+
+    public async Task AcceptPendingInboundDirectInviteAsync(
+        Percolator.Network.PeerId simulatedPeerId,
+        Guid correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var (request, inviterPeerId) = await WithStateGateAsync(() =>
+        {
+            var peer = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
+                ?? throw new InvalidOperationException($"Simulated peer {simulatedPeerId} not found");
+
+            if (!peer.TryTakePendingInboundDirectInvite(correlationId, out var pendingInvite))
+            {
+                throw new InvalidOperationException($"No pending inbound direct invite found with correlation id {correlationId}");
+            }
+
+            var req = EstablishDirectSessionRequest.Parser.ParseFrom(pendingInvite.RequestBytes);
+            var inviter = pendingInvite.InviterPeerId; // Use persisted inviter peer id (Main)
+            return Task.FromResult((req, inviter));
+        }, cancellationToken).ConfigureAwait(false);
+
+        // Accept the invite using the existing logic
+        var acceptance = await AcceptInboundDirectInviteAsync(simulatedPeerId, inviterPeerId, request, cancellationToken)
+            .ConfigureAwait(false);
+
+        // Queue the response for delivery
+        await QueueInviteHandshakeResponseForDeliveryToMainAsync(simulatedPeerId, correlationId, acceptance.Response, cancellationToken)
+            .ConfigureAwait(false);
+
+        // Clear the pending state and select next oldest if any
+        await WithStateGateAsync(() =>
+        {
+            var peer = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
+                ?? throw new InvalidOperationException($"Simulated peer {simulatedPeerId} not found");
+
+            peer.SetUiState(peer.PendingInboundDirectInvites.Count > 0
+                ? SimulatorPeerUiState.AwaitingUserAcceptance
+                : SimulatorPeerUiState.Ready);
+            return Task.CompletedTask;
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task RejectPendingInboundDirectInviteAsync(
+        Percolator.Network.PeerId simulatedPeerId,
+        Guid correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        await WithStateGateAsync(() =>
+        {
+            var peer = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
+                ?? throw new InvalidOperationException($"Simulated peer {simulatedPeerId} not found");
+
+            peer.TryTakePendingInboundDirectInvite(correlationId, out _);
+
+            peer.SetUiState(peer.PendingInboundDirectInvites.Count > 0
+                ? SimulatorPeerUiState.AwaitingUserAcceptance
+                : SimulatorPeerUiState.Ready);
+            return Task.CompletedTask;
+        }, cancellationToken).ConfigureAwait(false);
     }
 
     public Task DeliverInviteHandshakeResponseToMainAsync(
@@ -169,7 +255,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         CancellationToken cancellationToken = default)
         => DeliverInviteHandshakeResponseToMainAsyncCore(response, cancellationToken);
 
-    public async Task<SimulatedPeerInviteAcceptance> AcceptReverseSignalInviteAsync(
+    public async Task<SimulatedPeerInviteAcceptance> AcceptInboundDirectInviteAsync(
         Percolator.Network.PeerId simulatedPeerId,
         Percolator.Network.PeerId inviterPeerId,
         EstablishDirectSessionRequest invite,
@@ -2256,6 +2342,16 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             peer.PendingInviteHandshakeResponsesMutable.Add(new SimulatedPendingInviteHandshakeResponseModel(
                 response.CorrelationId,
                 response.ResponseBytes));
+        }
+
+        foreach (var invite in snap.PendingInboundDirectInvites)
+        {
+            peer.PendingInboundDirectInvitesMutable.Add(new SimulatedPendingInboundDirectInviteModel(
+                invite.CorrelationId,
+                invite.RequestBytes,
+                invite.ReceivedAtUtc,
+                invite.InviterIdentityKeySpki,
+                invite.InviterPeerId));
         }
 
         // Hydrate sessions

@@ -323,6 +323,16 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
                         ResponseBytes = r.ResponseBytes
                     })
                     .ToList(),
+                PendingInboundDirectInvites = model.PendingInboundDirectInvites
+                    .Select(r => new SimulatedPendingInboundDirectInviteDto
+                    {
+                        CorrelationId = r.CorrelationId,
+                        RequestBytes = r.RequestBytes,
+                        ReceivedAtUtc = r.ReceivedAtUtc,
+                        InviterIdentityKeySpki = r.InviterIdentityKeySpki,
+                        InviterPeerId = r.InviterPeerId.Value.ToString()
+                    })
+                    .ToList(),
                 OneTimePreKeysPrivate = model.OneTimePreKeysPrivate
                     .Select(r => new OneTimePreKeyPrivateDto
                     {
@@ -530,6 +540,13 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
         {
             if (dto.CorrelationId == Guid.Empty) continue;
             model.PendingInviteHandshakeResponsesMutable.Add(new SimulatedPendingInviteHandshakeResponseModel(dto.CorrelationId, dto.ResponseBytes));
+        }
+
+        foreach (var dto in store.PendingInboundDirectInvites)
+        {
+            if (dto.CorrelationId == Guid.Empty) continue;
+            var inviterPeerId = Guid.TryParse(dto.InviterPeerId, out var parsed) ? new Percolator.Network.PeerId(parsed) : throw new InvalidOperationException("Invalid inviter peer id");
+            model.PendingInboundDirectInvitesMutable.Add(new SimulatedPendingInboundDirectInviteModel(dto.CorrelationId, dto.RequestBytes, dto.ReceivedAtUtc, dto.InviterIdentityKeySpki, inviterPeerId));
         }
 
         foreach (var dto in store.OneTimePreKeysPrivate)

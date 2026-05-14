@@ -75,11 +75,8 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
             .ToBindableReactiveProperty(false)
             .AddTo(ref _bag);
 
-        ShowAcceptReverseSignal = Observable
-            .CombineLatest(
-                _model.UiState,
-                _model.InboundReverseSignalPendingCorrelationId,
-                static (s, corr) => s == SimulatorPeerUiState.AwaitingUserAcceptance && corr is not null)
+        ShowAcceptReverseSignal = _model.UiState
+            .Select(s => s == SimulatorPeerUiState.AwaitingUserAcceptance)
             .ObserveOnCurrentSynchronizationContext()
             .ToBindableReactiveProperty(false)
             .AddTo(ref _bag);
@@ -392,15 +389,15 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
 
     private async Task ExecuteAcceptHandshakeAsync(CancellationToken ct)
     {
-        // Chunk A: Simulator-initiated handshakes are now finalized immediately on response receipt.
-        // This Accept command is no longer needed for that flow. It may be repurposed for Chunk B
-        // (Main-initiated handshakes requiring user acceptance).
-        // For now, this is a no-op to avoid breaking the UI while Chunk B is implemented.
-        _diagnostics.Emit(
-            SimulatorDiagnosticEventType.HandshakeError,
-            "AcceptHandshake called but simulator-initiated handshakes are auto-finalized in Chunk A",
-            peerId: _model.PeerId,
-            contextTag: "AcceptHandshakeNoOp");
+        // Chunk B: Accept pending inbound direct invite from Main
+        var corr = _model.PendingInboundDirectInvites.FirstOrDefault()?.CorrelationId;
+        if (corr is null || corr.Value == Guid.Empty) return;
+
+        await _state.AcceptPendingInboundDirectInviteAsync(
+            simulatedPeerId: _model.PeerId,
+            correlationId: corr.Value,
+            cancellationToken: ct)
+            .ConfigureAwait(false);
     }
 
     private async Task ExecuteAcceptPendingStandardSignalHelloAsync(string initiatorPkhHex, CancellationToken ct)

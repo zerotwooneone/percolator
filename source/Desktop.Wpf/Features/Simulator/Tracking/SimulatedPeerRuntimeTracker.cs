@@ -40,6 +40,7 @@ public sealed class SimulatedPeerRuntimeTracker : IDisposable
         peer.OutboundInvitesMutable.ObserveChanged().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
 
         peer.PendingInviteHandshakeResponsesMutable.ObserveChanged().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
+        peer.PendingInboundDirectInvitesMutable.ObserveChanged().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
 
         peer.PendingInboundStandardSignalHellosMutable.ObserveChanged().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
 
