@@ -568,3 +568,190 @@ Add deterministic tests (Desktop.Wpf.Tests or integration harness) that follow A
 - After simulator accepts, simulator can perform a public behavior that requires a session, and Main receives `InviteHandshakeResponse`.
 - Pending inbound direct invites are persisted and restored correctly.
 - Public simulator APIs clearly separate ingress (receive/queue) from actions (accept/reject).
+
+## Chunk C
+
+### Problem statement
+
+The simulator currently persists a single correlation id slot (`SimulatedPeerDto.PendingCorrelationId` / `SimulatedPeerModel.InboundReverseSignalPendingCorrelationId`) and uses it as an implicit “current handshake attempt” pointer.
+
+This is incompatible with realistic simulator behavior where multiple items can be active concurrently:
+
+- multiple outbound invite attempts to Main
+- multiple inbound approval items from Main
+- multiple pending standard-signal hellos
+
+It also encourages UI logic that overwrites global state, loses context, and mis-associates errors/phases with the wrong attempt.
+
+### Desired end state
+
+- The simulator models handshake/approval items explicitly as a collection (multiple may be active at once).
+- The UI renders these items and provides explicit per-item actions.
+- No persisted field represents a “selected” item.
+- All state updates (phase/error/not-until) target a specific item by correlation id.
+- Persistence round-trips all pending/attempt items and their state.
+
+---
+
+### Plan
+
+#### C1. Create a first-class model for pending/attempt items
+
+Use the existing persisted attempt model as the “first-class handshake/approval item”:
+
+- `Desktop.Wpf/Features/Simulator/SimulatorHandshakeAttemptState.cs` (`SimulatorHandshakeAttemptState`)
+- `Desktop.Wpf/Features/Simulator/SimulatedPeerModel.cs` (`HandshakeAttempts`, `UpsertAttempt`, `SetAttemptPhase/Error/NotUntil`)
+- Persisted today via `Desktop.Wpf/Features/Simulator/SimulatorState.cs` (`SimulatedPeerDto.HandshakeAttempts`)
+
+Extend `SimulatorHandshakeAttemptState` to be intention-revealing and UI-friendly (so we can render a list and drive per-item actions) by adding:
+
+- `CorrelationId`
+- `Family` enum (at minimum: `ReverseSignal`, `StandardSignal`)
+- `Direction` enum (at minimum: `OutboundToMain`, `InboundFromMain`, `InboundFromPeers`)
+- `Kind` enum (at minimum: `OutboundDirectInviteToMain`, `InboundDirectInviteFromMain`, `InboundStandardSignalHello`)
+- `CreatedAtUtc` (already present)
+- Optional `ReceivedAtUtc` (for inbound items)
+
+Attach per-item state:
+
+- `Phase` (string or enum)
+- `LastError` (string?)
+- `NotUntilUtc` (DateTimeOffset?)
+- Optional route metadata (`SelectedRouteMode`, `RelayHostPeerId`, `DirectEndpoint`) where applicable
+
+Scope decision for Chunk C:
+
+- Keep `PendingInboundDirectInvites` as the authoritative inbound-approval queue (`SimulatedPeerModel.PendingInboundDirectInvites` persisted under `SimulatedPeerRuntimeStoreDto.PendingInboundDirectInvites`).
+- Ensure an attempt entry exists for the same `CorrelationId` when:
+  - an inbound direct invite is received (kind=`InboundDirectInviteFromMain`)
+  - an outbound direct invite is sent/enqueued (kind=`OutboundDirectInviteToMain`)
+  - a standard-signal hello arrives (kind=`InboundStandardSignalHello`)
+
+Invariants:
+
+- Multiple items may exist simultaneously.
+- No single global “current correlation id” is authoritative.
+
+#### C2. Deprecate and remove single-slot semantics
+
+Eliminate dependence on these fields as a pointer to the “current” attempt:
+
+- `SimulatedPeerDto.PendingCorrelationId`
+- `PeerStateSnapshot.InboundReverseSignalPendingCorrelationId`
+- `_model.InboundReverseSignalPendingCorrelationId`
+
+Concrete code locations:
+
+- `Desktop.Wpf/Features/Simulator/SimulatorState.cs` (`SimulatedPeerDto.PendingCorrelationId`)
+- `Desktop.Wpf/Features/Simulator/PeerStateSnapshot.cs` (`InboundReverseSignalPendingCorrelationId`)
+- `Desktop.Wpf/Features/Simulator/JsonSimulatorStateRepository.cs` mapping:
+  - hydration: `CreatePeerSnapshot(... pendingCorrelationId: dto.PendingCorrelationId, ...)`
+  - persistence: `dto.PendingCorrelationId = model.InboundReverseSignalPendingCorrelationId`
+
+Migration strategy (pick one explicitly during implementation):
+
+- Option A (breaking): remove these fields and stop loading legacy JSON.
+- Option B (non-breaking): keep fields for load only, but never use for behavior and stop writing on save.
+
+Transitional rule (applies to both options):
+
+- If the slot is kept temporarily for back-compat, it must not be used for routing, acceptance, or attempt association.
+
+#### C3. Service changes: all updates target explicit items
+
+Rules:
+
+- All phase/error/not-until updates must target a specific item by `CorrelationId`.
+- Ingress creates/updates attempts explicitly (using correlation id from payload).
+- Accept/reject/finalize methods remove or transition the specific item.
+
+Known problematic call sites to fix (currently associates failures with the wrong item):
+
+- `Desktop.Wpf/Features/Simulator/SimulatedHandshakeStateMachineCardViewModel.cs`
+  - In outbound send/enqueue error handling, code currently reads `var corr = _model.InboundReverseSignalPendingCorrelationId.CurrentValue;`.
+  - Replace this with “the correlation id for this outbound operation” (the one parsed from payload / generated fallback) and update attempt state using that id.
+
+Implementation approach:
+
+- Anytime we parse or generate a correlation id for an operation, store it in a local variable and use it consistently for:
+  - `_model.MarkOutboundPending(corr)`
+  - `_model.SetAttemptPhase(corr, ...)`
+  - `_model.SetAttemptError(corr, ...)`
+  - `_model.SetAttemptNotUntil(corr, ...)`
+
+Deliverable:
+
+- No code path reads a global “current corr” to decide what to update.
+
+#### C4. UI changes: render a list and provide per-item actions
+
+Update simulator UI to render a list of active items per peer. Prefer using the existing "Handshake State Machines" surface and make it show the list of attempts.
+
+Concrete data source:
+
+- `SimulatedPeerModel.HandshakeAttempts` + `SimulatedPeerModel.HandshakeAttemptsVersion`
+
+Concrete ViewModel work:
+
+- In `Desktop.Wpf/Features/Simulator/SimulatedHandshakeStateMachineCardViewModel.cs`, add a projected property like:
+  - `BindableReactiveProperty<IReadOnlyList<SimulatorHandshakeAttemptState>> HandshakeAttempts`
+  - project from `_model.HandshakeAttempts` and refresh on `_model.HandshakeAttemptsVersion`
+  - sort by `CreatedAtUtc` (descending) for display only
+
+Per-item actions:
+
+- Inbound approval items: `Accept`, `Reject`
+- Outbound attempts: `Retry` / `Cancel` / `Clear` (exact set based on what operations exist)
+
+Minimum viable actions for Chunk C:
+
+- Keep existing accept/reject for inbound direct invites via `ISimulatorStateService.AcceptPendingInboundDirectInviteAsync(simulatedPeerId, correlationId)` and `RejectPendingInboundDirectInviteAsync(...)`.
+- Drive actions from explicit item correlation id (button passes corr), never from a global slot.
+
+Remove reliance on:
+
+- `UiState == AwaitingUserAcceptance` + a single “Accept” button that implicitly targets one correlation id
+
+If keeping a single Accept button temporarily:
+
+- The ViewModel selects an active item by a documented rule.
+- Selection is derived from the collection (not persisted).
+
+#### C5. Persistence
+
+Persistence already exists for attempts:
+
+- `SimulatedPeerDto.HandshakeAttempts` (JSON)
+- Hydrated via `JsonSimulatorStateRepository.CreatePeerSnapshot(... handshakeAttempts: dto.HandshakeAttempts, ...)`
+
+Update persistence for new attempt fields:
+
+- Extend `SimulatorHandshakeAttemptState` with the new fields; the serializer will include them.
+- Add strict hydration defaults where required (e.g., missing enum -> safe default or throw, choose explicitly).
+
+Stop writing legacy slot fields once migrated (see C2 strategy):
+
+- Remove/ignore `SimulatedPeerDto.PendingCorrelationId`.
+- Remove/ignore `PeerStateSnapshot.InboundReverseSignalPendingCorrelationId`.
+
+#### C6. Tests
+
+Add tests validating multi-item behavior:
+
+- Multiple outbound attempts can be active concurrently; updates apply to the correct correlation id.
+- Multiple inbound approval items can be queued concurrently; accept/reject applies to the chosen item.
+- Persistence round-trip retains the full collection and per-item state.
+
+Concrete test placement:
+
+- Persistence: extend `Desktop.Wpf.Tests/SimulatorStateStoreTests.cs` to add multiple `HandshakeAttempts` entries with distinct ids and assert round-trip.
+- Behavior: add/extend tests in `Desktop.Wpf.Tests` validating that per-correlation updates do not depend on `InboundReverseSignalPendingCorrelationId`.
+
+---
+
+### Acceptance criteria
+
+- Simulator UI can display multiple active handshake/approval items per peer.
+- Each item can be acted on explicitly (no hidden global “current attempt” semantics).
+- Errors/phases are associated with the correct correlation id.
+- Persistence round-trips the collection.
