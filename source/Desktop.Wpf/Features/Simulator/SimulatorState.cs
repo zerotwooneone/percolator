@@ -30,8 +30,7 @@ public sealed class SimulatedPeerDto
     public SimulatedPeerPreKeyStateDto PreKeys { get; set; } = new();
     public SimulatedPeerRuntimeStoreDto RuntimeStore { get; set; } = new();
 
-    // UiState is derived from sessions + pending stores; not persisted as authoritative truth
-    public SimulatorPeerUiState UiState { get; set; } = SimulatorPeerUiState.Ready;
+    // UiState is derived from sessions + pending stores; no longer persisted (Chunk C Option A)
     public byte[]? TargetPublicKeyHash { get; set; }
     public ConnectionMode? SelectedRouteMode { get; set; }
     public string? DirectEndpoint { get; set; }

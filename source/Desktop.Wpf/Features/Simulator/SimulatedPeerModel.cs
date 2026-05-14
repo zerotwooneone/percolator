@@ -203,6 +203,35 @@ public sealed class SimulatedPeerModel : IDisposable
     public void SetUiState(SimulatorPeerUiState uiState)
         => _uiState.Value = uiState;
 
+    /// <summary>
+    /// Computes derived UiState based on current domain state (sessions, pending stores, attempts).
+    /// This is used after hydration to ensure UiState reflects the actual handshake state rather than persisted UI projection.
+    /// </summary>
+    public void RecomputeDerivedUiState()
+    {
+        if (_sessions.Count > 0)
+        {
+            _uiState.Value = SimulatorPeerUiState.Established;
+            return;
+        }
+
+        if (_pendingInboundDirectInvites.Count > 0 || _pendingInboundStandardSignalHellos.Count > 0)
+        {
+            _uiState.Value = SimulatorPeerUiState.AwaitingUserAcceptance;
+            return;
+        }
+
+        if (_outboundInvites.Count > 0 ||
+            _pendingStandardHandshakeToMainResponderPublicKeyHash.Value is not null ||
+            _pendingStandardHandshakeToMainTemporarySessionId.Value is not null)
+        {
+            _uiState.Value = SimulatorPeerUiState.OutboundPending;
+            return;
+        }
+
+        _uiState.Value = SimulatorPeerUiState.Ready;
+    }
+
     public void AddChatMessage(bool isFromMain, string content, DateTimeOffset receivedUtc)
     {
         var m = new SimulatedChatMessageSnapshot(isFromMain, content, receivedUtc);
@@ -380,7 +409,6 @@ public sealed class SimulatedPeerModel : IDisposable
             ConnectionMode: _connectionMode.Value,
             Endpoint: _endpoint.Value,
             RelayPeerId: _relayPeerId.Value,
-            UiState: _uiState.Value,
             TargetPublicKeyHash: _targetPublicKeyHash.Value?.ToArray(),
             SelectedRouteMode: _selectedRouteMode.Value,
             DirectEndpoint: _directEndpoint.Value,

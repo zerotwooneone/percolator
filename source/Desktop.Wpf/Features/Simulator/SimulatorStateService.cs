@@ -2149,7 +2149,6 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             connectionMode: snap.ConnectionMode,
             endpoint: snap.Endpoint,
             relayPeerId: snap.RelayPeerId.Value == Guid.Empty ? null : snap.RelayPeerId,
-            uiState: snap.UiState,
             targetPublicKeyHash: snap.TargetPublicKeyHash,
             selectedRouteMode: snap.SelectedRouteMode,
             directEndpoint: snap.DirectEndpoint,
@@ -2242,6 +2241,9 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 
             peer.SessionsMutable[session.Id] = session;
         }
+
+        // Compute derived UiState after hydration (Chunk C Option A)
+        peer.RecomputeDerivedUiState();
 
         return peer;
     }

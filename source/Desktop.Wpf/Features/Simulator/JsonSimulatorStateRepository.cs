@@ -184,7 +184,6 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
             connectionMode: dto.Connection?.Mode ?? ConnectionMode.Direct,
             endpoint: endpoint,
             relayPeerId: dto.Connection?.RelayPeerId,
-            uiState: dto.UiState,
             targetPublicKeyHash: dto.TargetPublicKeyHash,
             selectedRouteMode: dto.SelectedRouteMode,
             directEndpoint: dto.DirectEndpoint,
@@ -210,6 +209,9 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
                 .ToList());
 
         HydrateRuntimeStore(model, dto.RuntimeStore, clock);
+
+        // Compute derived UiState after hydration (Chunk C Option A)
+        model.RecomputeDerivedUiState();
         var snap = model.Freeze();
         model.Dispose();
         return snap;
@@ -231,7 +233,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
                 RelayPeerId = model.RelayPeerId
             },
             KnownPeerIds = model.KnownPeerIds.ToList(),
-            UiState = model.UiState,
+            // UiState is derived from sessions + pending stores; no longer persisted (Chunk C Option A)
             TargetPublicKeyHash = model.TargetPublicKeyHash,
             SelectedRouteMode = model.SelectedRouteMode,
             DirectEndpoint = model.DirectEndpoint,
@@ -586,10 +588,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
         peer.ReverseSignalKeys ??= new();
         peer.IdentityPublicKeyHash ??= Array.Empty<byte>();
 
-        if (peer.UiState == SimulatorPeerUiState.Offline)
-        {
-            peer.UiState = SimulatorPeerUiState.Ready;
-        }
+        // UiState normalization removed (Chunk C Option A - UiState no longer persisted)
 
         if (string.IsNullOrWhiteSpace(peer.Connection.Host) || string.Equals(peer.Connection.Host, "localhost", StringComparison.OrdinalIgnoreCase))
         {

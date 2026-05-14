@@ -1,4 +1,5 @@
 using Grpc.Core;
+using Microsoft.Extensions.DependencyInjection;
 using Percolator.Application.Network;
 using Percolator.Contracts;
 
@@ -6,14 +7,14 @@ namespace Desktop.Wpf.Features.Simulator;
 
 public sealed class SimulatorToMainTransportService : ISimulatorToMainTransportService
 {
-    private readonly PercolatorMessageService _messageService;
+    private readonly IServiceScopeFactory _scopeFactory;
 
-    public SimulatorToMainTransportService(PercolatorMessageService messageService)
+    public SimulatorToMainTransportService(IServiceScopeFactory scopeFactory)
     {
-        _messageService = messageService;
+        _scopeFactory = scopeFactory;
     }
 
-    public Task SendEstablishDirectSessionToMainAsync(
+    public async Task SendEstablishDirectSessionToMainAsync(
         EstablishDirectSessionRequest request,
         CancellationToken cancellationToken = default)
     {
@@ -27,10 +28,13 @@ public sealed class SimulatorToMainTransportService : ISimulatorToMainTransportS
             cancellationToken: cancellationToken);
 
         _ = request.CalculateSize();
-        return _messageService.EstablishDirectSession(request, ctx);
+
+        using var scope = _scopeFactory.CreateScope();
+        var messageService = scope.ServiceProvider.GetRequiredService<PercolatorMessageService>();
+        await messageService.EstablishDirectSession(request, ctx).ConfigureAwait(false);
     }
 
-    public Task<EstablishSessionResponse> SendEstablishSessionToMainAsync(
+    public async Task<EstablishSessionResponse> SendEstablishSessionToMainAsync(
         EstablishSessionRequest request,
         CancellationToken cancellationToken = default)
     {
@@ -44,10 +48,13 @@ public sealed class SimulatorToMainTransportService : ISimulatorToMainTransportS
             cancellationToken: cancellationToken);
 
         _ = request.CalculateSize();
-        return _messageService.EstablishSession(request, ctx);
+
+        using var scope = _scopeFactory.CreateScope();
+        var messageService = scope.ServiceProvider.GetRequiredService<PercolatorMessageService>();
+        return await messageService.EstablishSession(request, ctx).ConfigureAwait(false);
     }
 
-    public Task<DeliverOpaqueMessageResponse> SendOpaqueMessageToMainAsync(
+    public async Task<DeliverOpaqueMessageResponse> SendOpaqueMessageToMainAsync(
         DeliverOpaqueMessageRequest request,
         CancellationToken cancellationToken = default)
     {
@@ -61,10 +68,13 @@ public sealed class SimulatorToMainTransportService : ISimulatorToMainTransportS
             cancellationToken: cancellationToken);
 
         _ = request.CalculateSize();
-        return _messageService.DeliverOpaqueMessage(request, ctx);
+
+        using var scope = _scopeFactory.CreateScope();
+        var messageService = scope.ServiceProvider.GetRequiredService<PercolatorMessageService>();
+        return await messageService.DeliverOpaqueMessage(request, ctx).ConfigureAwait(false);
     }
 
-    public Task<DeliverInviteHandshakeResponseAck> DeliverInviteHandshakeResponseToMainAsync(
+    public async Task<DeliverInviteHandshakeResponseAck> DeliverInviteHandshakeResponseToMainAsync(
         InviteHandshakeResponse response,
         CancellationToken cancellationToken = default)
     {
@@ -77,7 +87,9 @@ public sealed class SimulatorToMainTransportService : ISimulatorToMainTransportS
             requestHeaders: new Metadata(),
             cancellationToken: cancellationToken);
 
-        return _messageService.DeliverInviteHandshakeResponse(response, ctx);
+        using var scope = _scopeFactory.CreateScope();
+        var messageService = scope.ServiceProvider.GetRequiredService<PercolatorMessageService>();
+        return await messageService.DeliverInviteHandshakeResponse(response, ctx).ConfigureAwait(false);
     }
 
     private sealed class ServerCallContextStub : ServerCallContext

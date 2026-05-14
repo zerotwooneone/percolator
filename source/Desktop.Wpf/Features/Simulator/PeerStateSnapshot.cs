@@ -13,7 +13,6 @@ public sealed record PeerStateSnapshot(
     ConnectionMode ConnectionMode,
     DnsEndPoint Endpoint,
    Percolator.Network.PeerId RelayPeerId,
-    SimulatorPeerUiState UiState,
     byte[]? TargetPublicKeyHash,
     ConnectionMode? SelectedRouteMode,
     string? DirectEndpoint,
