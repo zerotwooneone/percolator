@@ -476,7 +476,44 @@ After Chunk B is fully implemented and the simulator has a first-class persisted
 
 Deliverable: no remaining code that uses “response queueing” to emulate user acceptance, and no “try X then fallback to Y” acceptance logic.
 
-#### B8. Tests / verification (unit-testing.md compliant)
+#### B8. Chunk B correctness + determinism hardening (recommended follow-ups)
+
+The initial Chunk B implementation can be made semantically correct and deterministic by addressing the following gaps.
+
+- **Persist the inviter peer id (Main) for pending inbound direct invites**
+  - Extend the persisted pending inbound direct invite model/DTO to store the inviter `PeerId` (or store `mainPeerId`).
+  - When `ReceiveEstablishDirectSessionFromMainAsync(simulatedPeerId, mainPeerId, request)` queues the inbound invite request, persist `mainPeerId` alongside the request bytes.
+  - In `AcceptPendingInboundDirectInviteAsync`, use the persisted inviter peer id instead of generating a new `Guid`.
+
+- **Tighten request validation on ingress**
+  - In `ReceiveEstablishDirectSessionFromMainAsync`, validate `request.HasPayload`/`Payload.Length > 0` and `request.HasInviterIdentityKey`/`InviterIdentityKey.Length > 0` before parsing.
+  - Validate presence of `payload.RequestCorrelationId` before using it.
+
+- **Make UI selection deterministic when multiple inbound invites are pending**
+  - Stop relying on a single “pending correlation id slot” as the authoritative selector.
+  - If the UX remains “one Accept button per peer”, select the pending item deterministically:
+    - Oldest `ReceivedAtUtc` first (FIFO), then stable tie-breaker by `CorrelationId`.
+  - Preferred: render the pending inbound invites as an explicit list with accept/reject per item.
+
+- **Clarify/remove persisted pending-correlation selection slot**
+  - `InboundReverseSignalPendingCorrelationId` / `SimulatedPeerDto.PendingCorrelationId` must not imply “selected inbound pending invite”.
+  - Either remove it for the inbound pending-direct-invite flow (derive selection in ViewModel), or rename/scope it to the outbound/attempt-tracking scenario it represents.
+  - Ensure ViewModels accept/reject pending inbound direct invites by choosing from `PendingInboundDirectInvites` (not by reading a persisted “selected” correlation id).
+
+- **Introduce explicit pending handshake kind (to remove accept-guessing)**
+  - Update the ViewModel accept path to dispatch based on an explicit pending handshake kind (request vs response) rather than using fallback/guessing behavior.
+  - Keep the “single Accept command” UX only if its selection + dispatch rules are deterministic.
+
+- **API surface cleanup (clarity)**
+  - Keep `AcceptInboundDirectInviteAsync` as a crypto/session-building primitive.
+  - Ensure the primary public workflow for inbound direct invites is:
+    - receive/queue (ingress)
+    - accept/reject (explicit user action)
+    - deliver response (explicit user action, if required)
+
+Deliverable: accepting a pending inbound invite creates a session with the correct remote peer id, ordering is deterministic with multiple pending items, and there is no protocol-direction guessing.
+
+#### B9. Tests / verification (unit-testing.md compliant)
 
 Add deterministic tests (Desktop.Wpf.Tests or integration harness) that follow AAA and the black-box rule:
 
