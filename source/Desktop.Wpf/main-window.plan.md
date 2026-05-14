@@ -325,21 +325,39 @@ Research validation:
   - first `TryFinalizeInviteHandshakeResponseFromMainAsync(...)`
   - if that returns `null`, then `TryDeliverQueuedInviteHandshakeResponseToMainAsync(...)`
 
-Target model (keep the unified UI surface, remove guessing):
+Target model (keep the unified UI surface, remove guessing, remove implicit selection):
 
-- Keep the unified “Handshake State Machines” list and a single Accept button per peer, **but** make the Accept path deterministic.
-- Replace the current “one slot” (`UiState` + `InboundReverseSignalPendingCorrelationId`) with explicit pending handshake metadata keyed by correlation id:
-  - e.g., `PendingHandshakeKind` = `InboundInviteRequestFromMain` | `InboundInviteResponseFromMain` | `OutboundInviteAwaitingResponse` (names can be refined)
-  - stored in domain (`SimulatedPeerModel`) and included in `Freeze()` / persistence.
-- Update the card VM to map `ShowAccept*` from the presence of a pending handshake item (by kind), not from overloaded `UiState` alone.
-- Update `AcceptHandshakeCommand` to dispatch by kind:
-  - `InboundInviteResponseFromMain` -> finalize session (Chunk A)
-  - `InboundInviteRequestFromMain` -> accept pending inbound direct invite request (Chunk B)
-  - any other kind -> no-op / diagnostic event
+- Keep the unified “Handshake State Machines” surface, **but** make “accept” and “reject” operate on a specific pending item (no implicit selection, no `FirstOrDefault()`).
+- Replace the single per-peer Accept button with a per-item list of pending approvals:
+  - For **reverse-signal inbound direct invite requests**: source is `SimulatedPeerModel.PendingInboundDirectInvites` (already keyed by `CorrelationId`).
+  - For **standard-signal inbound hellos**: source is the existing pending standard-signal collection already shown in the UI.
+- Introduce a small UI projection model for the list (ViewModel-only):
+  - Example: `PendingApprovalItem(CorrelationId, Kind, ReceivedAtUtc, DisplayText, ...)`
+  - `Kind` must be explicit and intention-revealing.
+  - Pending approval kinds (explicit list): `InboundDirectInviteRequestFromMain`, `InboundStandardSignalHello`.
+- In `SimulatedHandshakeStateMachineCardViewModel`:
+  - Expose `PendingApprovals` as a projected read-only list suitable for binding.
+  - Add commands that take a parameter:
+    - `AcceptPendingApprovalCommand : ReactiveCommand<PendingApprovalItem>`
+    - `RejectPendingApprovalCommand : ReactiveCommand<PendingApprovalItem>`
+  - Command implementations must dispatch by `PendingApprovalItem.Kind` and must pass the specific `CorrelationId` through to service APIs.
 
-This preserves your “single list / single accept button” UX while making the behavior semantically correct.
+XAML wiring:
 
-Deliverable: deterministic UI logic with no protocol-guessing fallbacks.
+- Render `PendingApprovals` via an `ItemsControl`.
+- Bind per-row buttons with `CommandParameter="{Binding}"` (or `CorrelationId` if you prefer).
+
+Service routing rules (deterministic):
+
+- `InboundDirectInviteRequestFromMain` -> call `ISimulatorStateService.AcceptPendingInboundDirectInviteAsync(simulatedPeerId, correlationId, ...)`.
+- `InboundStandardSignalHello` -> call the existing standard-signal accept API (already parameterized).
+- Any unsupported `Kind` -> throw or surface a diagnostic event (do not guess).
+
+Notes:
+
+- `UiState == AwaitingUserAcceptance` becomes a *derived UI concern* (e.g., `PendingApprovals.Count > 0`) and must not be the source of truth.
+
+Deliverable: UI provides explicit per-item accept/reject actions, with correct `CorrelationId` routing and no protocol-guessing fallbacks.
 
 #### B6.0 Revisit Chunk A temporary no-op stubs (must be removed)
 
@@ -351,11 +369,11 @@ These temporary behaviors are **dangerous** if left in place because they can si
 
 - `Desktop.Wpf/Features/Simulator/SimulatedHandshakeStateMachineCardViewModel.cs`
   - `ExecuteAcceptHandshakeAsync`
-  - Chunk B requirement: this must become deterministic dispatch based on explicit pending handshake kind, and must call the real accept/finalize APIs (not log-and-return).
+  - Chunk B requirement: this must be replaced by per-item accept/reject commands that take an explicit `CommandParameter` representing the target pending item (correlation id + kind) and call the real accept/reject APIs (not log-and-return).
 
 - `Desktop.Wpf/Features/Simulator/SimulatedPeerItemViewModel.cs`
   - `ExecuteAcceptInboundPendingAsync`
-  - Chunk B requirement: this must either be removed from the UX surface or wired to the new pending inbound invite request acceptance API (not log-and-return).
+  - Chunk B requirement: this must either be removed from the UX surface or wired to `AcceptPendingInboundDirectInviteAsync(simulatedPeerId, correlationId, ...)` (not log-and-return).
 
 #### B6.1 Cleanup: split persisted pending handshake stores by handshake family + direction
 
@@ -428,13 +446,16 @@ Cardinality/invariants:
 
 - The model may contain multiple pending items across families.
 - The UI **must not** rely on a single correlation id slot to decide which item is “current”.
-- If the UX remains “one Accept button per peer”, the ViewModel must select a single `PendingApprovalItem` deterministically (documented ordering rule) and expose that as the “active” item.
+
+Preferred UX invariant:
+
+- Render the merged list and provide Accept/Reject per item. Do not implement a per-peer implicit selection fallback.
 
 Approval relevance inventory (what appears in the merged approval list):
 
 - **Approval-relevant** (require simulator user acceptance):
   - Simulator **inbound-from-main** direct/reverse-signal invite requests (`ReverseSignalStore.InboundDirectInviteRequestsFromMain`).
-  - Simulator **inbound-from-main** standard-signal requests (whatever store represents this flow after cleanup; if represented as “pending inbound standard-signal request from main”, it is approval-relevant).
+  - Simulator **inbound-from-peers** standard-signal hellos (current UI already treats these as per-item accept actions).
 
 - **Not approval-relevant** (no simulator confirmation needed; initiated by simulator button clicks):
   - Simulator outbound-to-main reverse-signal invites (`ReverseSignalStore.OutboundInvitesToMain`).
@@ -442,9 +463,7 @@ Approval relevance inventory (what appears in the merged approval list):
 
 Deterministic ordering rule (only needed if you keep a single Accept button per peer):
 
-- Highest priority active approval item: `ReverseSignal.InboundDirectInviteRequestFromMain` (needs user acceptance).
-- If there are multiple inbound-from-main approval items, prefer the oldest `ReceivedUtc` first (FIFO), with a stable tie-breaker of `CorrelationId`.
-- Preferred long-term UX: render the merged list and provide Accept/Reject per item.
+- Not applicable: the plan uses per-item actions and does not keep a per-peer implicit selection.
 
 5) **DTO versioning (forward-only)**
 
@@ -465,10 +484,8 @@ After Chunk B is fully implemented and the simulator has a first-class persisted
   - `TryDeliverQueuedInviteHandshakeResponseToMainAsync` usage as part of the simulator accepting an inbound direct invite.
 
 - UI fallback logic that guesses which protocol direction is happening:
-  - In `SimulatedHandshakeStateMachineCardViewModel.ExecuteAcceptHandshakeAsync`, remove the fallback branch:
-    - The “try finalize; if null then deliver queued response” guessing logic should be deleted.
-    - Replace it with deterministic dispatch based on `PendingHandshakeKind`.
-  - Keep a unified Accept command, but make it deterministic.
+  - In `SimulatedHandshakeStateMachineCardViewModel`, delete `ExecuteAcceptHandshakeAsync` and the “try finalize; if null then deliver queued response” guessing logic.
+  - Replace it with per-item accept/reject commands bound from an `ItemsControl`, with routing driven by the pending item `Kind`.
 
 - Ambiguous naming that encourages misuse:
   - If `AcceptReverseSignalInviteAsync` is kept public, ensure there is no longer any ingress method that calls it.
@@ -489,20 +506,12 @@ The initial Chunk B implementation can be made semantically correct and determin
   - In `ReceiveEstablishDirectSessionFromMainAsync`, validate `request.HasPayload`/`Payload.Length > 0` and `request.HasInviterIdentityKey`/`InviterIdentityKey.Length > 0` before parsing.
   - Validate presence of `payload.RequestCorrelationId` before using it.
 
-- **Make UI selection deterministic when multiple inbound invites are pending**
-  - Stop relying on a single “pending correlation id slot” as the authoritative selector.
-  - If the UX remains “one Accept button per peer”, select the pending item deterministically:
-    - Oldest `ReceivedAtUtc` first (FIFO), then stable tie-breaker by `CorrelationId`.
-  - Preferred: render the pending inbound invites as an explicit list with accept/reject per item.
-
-- **Clarify/remove persisted pending-correlation selection slot**
-  - `InboundReverseSignalPendingCorrelationId` / `SimulatedPeerDto.PendingCorrelationId` must not imply “selected inbound pending invite”.
-  - Either remove it for the inbound pending-direct-invite flow (derive selection in ViewModel), or rename/scope it to the outbound/attempt-tracking scenario it represents.
-  - Ensure ViewModels accept/reject pending inbound direct invites by choosing from `PendingInboundDirectInvites` (not by reading a persisted “selected” correlation id).
+- **Render pending inbound invites as an explicit list (no selection slot)**
+  - Ensure the UI uses per-item accept/reject with `CommandParameter` set to the target item.
+  - Do not implement or persist any “selected pending correlation id” pointer for inbound invites.
 
 - **Introduce explicit pending handshake kind (to remove accept-guessing)**
-  - Update the ViewModel accept path to dispatch based on an explicit pending handshake kind (request vs response) rather than using fallback/guessing behavior.
-  - Keep the “single Accept command” UX only if its selection + dispatch rules are deterministic.
+  - Update the ViewModel accept/reject actions to dispatch based on an explicit pending item kind, rather than using fallback/guessing behavior.
 
 - **API surface cleanup (clarity)**
   - Keep `AcceptInboundDirectInviteAsync` as a crypto/session-building primitive.
@@ -529,8 +538,8 @@ Add deterministic tests (Desktop.Wpf.Tests or integration harness) that follow A
   - Response delivery to Main is observed via the public network abstraction/harness result, not by inspecting private queues
 
 - **Accept routing is deterministic (no guessing)**
-  - Given a pending handshake item of kind `InboundInviteResponseFromMain`, Accept finalizes and does not attempt delivery-to-main.
-  - Given a pending handshake item of kind `InboundInviteRequestFromMain`, Accept generates+delivers `InviteHandshakeResponse` and does not attempt “finalize response from main”.
+  - Given a pending approval item of kind `InboundDirectInviteRequestFromMain`, Accept generates+delivers `InviteHandshakeResponse` and does not attempt “finalize response from main”.
+  - Given a pending approval item of kind `InboundStandardSignalHello`, Accept uses the standard-signal accept API and does not attempt any reverse-signal delivery.
 
 - **Reject does not create session**
   - Pending cleared
