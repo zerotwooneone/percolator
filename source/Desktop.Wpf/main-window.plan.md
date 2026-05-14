@@ -582,7 +582,15 @@ Add deterministic tests (Desktop.Wpf.Tests or integration harness) that follow A
 
 ### Problem statement
 
-The simulator currently persists a single correlation id slot (`SimulatedPeerDto.PendingCorrelationId` / `SimulatedPeerModel.InboundReverseSignalPendingCorrelationId`) and uses it as an implicit “current handshake attempt” pointer.
+Chunk B removed the legacy single-slot correlation id pointer and replaced queued-response behavior with explicit persisted pending stores.
+
+However, the simulator UI still uses `SimulatedPeerModel.UiState` as a primary gate for “what actions are available”, and `SimulatedPeerDto.UiState` is still serialized/deserialized by `JsonSimulatorStateRepository`.
+
+This creates ambiguity because `UiState` is **not authoritative handshake truth**; it is a derived/projection concern that should be computed from:
+
+- pending stores (e.g. inbound direct invites)
+- sessions
+- explicit per-item attempt state (handshake attempts)
 
 This is incompatible with realistic simulator behavior where multiple items can be active concurrently:
 
@@ -630,7 +638,7 @@ Attach per-item state:
 
 Scope decision for Chunk C:
 
-- Keep `PendingInboundDirectInvites` as the authoritative inbound-approval queue (`SimulatedPeerModel.PendingInboundDirectInvites` persisted under `SimulatedPeerRuntimeStoreDto.PendingInboundDirectInvites`).
+- Keep `PendingInboundDirectInvites` as the authoritative inbound-approval queue (`SimulatedPeerModel.PendingInboundDirectInvites` persisted under `SimulatedPeerRuntimeStoreDto.ReverseSignalStore.InboundDirectInviteRequestsFromMain`).
 - Ensure an attempt entry exists for the same `CorrelationId` when:
   - an inbound direct invite is received (kind=`InboundDirectInviteFromMain`)
   - an outbound direct invite is sent/enqueued (kind=`OutboundDirectInviteToMain`)
@@ -643,28 +651,30 @@ Invariants:
 
 #### C2. Deprecate and remove single-slot semantics
 
-Eliminate dependence on these fields as a pointer to the “current” attempt:
+This work item is now primarily about removing *implicit global selection* and *persisted UI projection* semantics.
 
-- `SimulatedPeerDto.PendingCorrelationId`
-- `PeerStateSnapshot.InboundReverseSignalPendingCorrelationId`
-- `_model.InboundReverseSignalPendingCorrelationId`
+Eliminate dependence on:
 
-Concrete code locations:
+- `SimulatedPeerDto.UiState` as an authoritative persisted truth.
+- `SimulatedPeerModel.UiState` as a proxy for “what items exist” (the collections/attempts are the truth).
 
-- `Desktop.Wpf/Features/Simulator/SimulatorState.cs` (`SimulatedPeerDto.PendingCorrelationId`)
-- `Desktop.Wpf/Features/Simulator/PeerStateSnapshot.cs` (`InboundReverseSignalPendingCorrelationId`)
-- `Desktop.Wpf/Features/Simulator/JsonSimulatorStateRepository.cs` mapping:
-  - hydration: `CreatePeerSnapshot(... pendingCorrelationId: dto.PendingCorrelationId, ...)`
-  - persistence: `dto.PendingCorrelationId = model.InboundReverseSignalPendingCorrelationId`
+Concrete code locations (as of post-Chunk B):
+
+- `Desktop.Wpf/Features/Simulator/JsonSimulatorStateRepository.cs`
+  - hydration currently uses `uiState: dto.UiState`
+  - persistence currently writes `UiState = model.UiState`
 
 Migration strategy (pick one explicitly during implementation):
 
-- Option A (breaking): remove these fields and stop loading legacy JSON.
-- Option B (non-breaking): keep fields for load only, but never use for behavior and stop writing on save.
+- Option A (breaking, simplest): stop writing `UiState` to JSON and ignore any value read from JSON (compute derived `UiState` after hydration).
+- Option B (non-breaking): continue to read/write `UiState` for UI convenience, but add an invariant that it must be overwritten on load by the computed derived value.
 
-Transitional rule (applies to both options):
+Audit checklist (must be done before removing/ignoring persisted `UiState`):
 
-- If the slot is kept temporarily for back-compat, it must not be used for routing, acceptance, or attempt association.
+- Verify reverse-signal pending inbound truth is fully represented via `PendingInboundDirectInvites`.
+- Verify reverse-signal outbound truth is fully represented via `OutboundInvites`.
+- Verify standard-signal pending-to-main truth is fully represented via `PendingStandardHandshakeToMain*` fields.
+- Verify pending-from-peers standard-signal hellos are intentionally runtime-only.
 
 #### C3. Service changes: all updates target explicit items
 
@@ -740,8 +750,7 @@ Update persistence for new attempt fields:
 
 Stop writing legacy slot fields once migrated (see C2 strategy):
 
-- Remove/ignore `SimulatedPeerDto.PendingCorrelationId`.
-- Remove/ignore `PeerStateSnapshot.InboundReverseSignalPendingCorrelationId`.
+- Ensure `UiState` is computed from collections/attempts and does not act as persisted handshake truth.
 
 #### C6. Tests
 
