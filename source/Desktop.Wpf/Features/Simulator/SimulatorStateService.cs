@@ -1,5 +1,4 @@
 using Google.Protobuf;
-using Grpc.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using ObservableCollections;
@@ -19,10 +18,10 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 {
     private readonly ISimulatorStateRepository _store;
     private readonly ISimulatorDiagnosticsService _diagnostics;
-    private readonly ISimulatedPeerPendingInbox _pending;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly Desktop.Wpf.Features.Simulator.Protocol.ISignalProtocolEngine _engine;
     private readonly IOptions<TransportOptions> _transportOptions;
+    private readonly ISimulatorToMainTransportService _toMain;
 
     private readonly Subject<Unit> _saveTrigger = new();
     private DisposableBag _bag;
@@ -60,16 +59,16 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     public SimulatorStateService(
         ISimulatorStateRepository store,
         ISimulatorDiagnosticsService diagnostics,
-        ISimulatedPeerPendingInbox pending,
         IServiceScopeFactory scopeFactory,
+        ISimulatorToMainTransportService toMain,
         IOptions<TransportOptions> transportOptions,
         Desktop.Wpf.Features.Simulator.Protocol.ISignalProtocolEngine engine,
         TimeProvider? timeProvider = null)
     {
         _store = store;
         _diagnostics = diagnostics;
-        _pending = pending;
         _scopeFactory = scopeFactory;
+        _toMain = toMain;
         _transportOptions = transportOptions;
         _engine = engine;
 
@@ -212,8 +211,9 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         var acceptance = await AcceptInboundDirectInviteAsync(simulatedPeerId, inviterPeerId, request, cancellationToken)
             .ConfigureAwait(false);
 
-        // Queue the response for delivery
-        await QueueInviteHandshakeResponseForDeliveryToMainAsync(simulatedPeerId, correlationId, acceptance.Response, cancellationToken)
+        // B7: Deliver response immediately instead of queuing (remove queued response mechanism)
+        _ = await _toMain
+            .DeliverInviteHandshakeResponseToMainAsync(acceptance.Response, cancellationToken)
             .ConfigureAwait(false);
 
         // Clear the pending state and select next oldest if any
@@ -249,11 +249,6 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             return Task.CompletedTask;
         }, cancellationToken).ConfigureAwait(false);
     }
-
-    public Task DeliverInviteHandshakeResponseToMainAsync(
-        InviteHandshakeResponse response,
-        CancellationToken cancellationToken = default)
-        => DeliverInviteHandshakeResponseToMainAsyncCore(response, cancellationToken);
 
     public async Task<SimulatedPeerInviteAcceptance> AcceptInboundDirectInviteAsync(
         Percolator.Network.PeerId simulatedPeerId,
@@ -538,47 +533,6 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         {
             _stateGate.Release();
         }
-    }
-
-    public async Task QueueInviteHandshakeResponseForDeliveryToMainAsync(
-        Percolator.Network.PeerId simulatedPeerId,
-        Guid requestCorrelationId,
-        InviteHandshakeResponse response,
-        CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        if (response is null) throw new ArgumentNullException(nameof(response));
-
-        await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            var model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
-                ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
-
-            _pending.AddInviteHandshakeResponse(simulatedPeerId, requestCorrelationId, response);
-            model.MarkInboundPending(requestCorrelationId);
-            return;
-        }
-        finally
-        {
-            _stateGate.Release();
-        }
-    }
-
-    public async Task<bool> TryDeliverQueuedInviteHandshakeResponseToMainAsync(
-        Percolator.Network.PeerId simulatedPeerId,
-        Guid requestCorrelationId,
-        CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        if (!_pending.TryTakeInviteHandshakeResponse(simulatedPeerId, requestCorrelationId, out var response))
-        {
-            return false;
-        }
-
-        await DeliverInviteHandshakeResponseToMainAsync(response, cancellationToken).ConfigureAwait(false);
-        return true;
     }
 
     public async Task<EstablishSessionResponse> ReceiveEstablishSessionFromMainAsync(
@@ -1135,7 +1089,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             //
             // For now: clear to match the plan's deterministic routing.
             //
-            model.ClearInboundReverseSignalPendingCorrelationId();
+            // B6.1: Single-slot semantics removed; no longer clearing InboundReverseSignalPendingCorrelationId
         }
         finally
         {
@@ -1175,7 +1129,8 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             relayHostPeerId = pending.RelayHostPeerId;
             model.PendingInboundStandardSignalHellosMutable.Remove(initiatorPkhHex);
 
-            var hasAnyPending = model.InboundReverseSignalPendingCorrelationId.CurrentValue is not null
+            // B6.1: Check pending collections instead of single-slot correlation id
+            var hasAnyPending = model.PendingInboundDirectInvites.Count > 0
                 || model.PendingInboundStandardSignalHellosMutable.Count > 0;
 
             if (hasAnyPending)
@@ -1284,17 +1239,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     {
         if (request is null) throw new ArgumentNullException(nameof(request));
 
-        using var scope = _scopeFactory.CreateScope();
-        var messageService = scope.ServiceProvider.GetRequiredService<Percolator.Application.Network.PercolatorMessageService>();
-
-        var ctx = new ServerCallContextStub(
-            method: "/percolator.contracts.TransportService/EstablishSession",
-            peer: "ipv4:127.0.0.1:0",
-            deadline: DateTime.UtcNow.AddMinutes(1),
-            requestHeaders: new Metadata(),
-            cancellationToken: cancellationToken);
-
-        return messageService.EstablishSession(request, ctx);
+        return _toMain.SendEstablishSessionToMainAsync(request, cancellationToken);
     }
 
     public async Task<byte[]> ComputePublicKeyHashAsync(Percolator.Network.PeerId simulatedPeerId, CancellationToken cancellationToken = default)
@@ -1680,9 +1625,6 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         cancellationToken.ThrowIfCancellationRequested();
         if (max <= 0) return 0;
 
-        using var scope = _scopeFactory.CreateScope();
-        var messageService = scope.ServiceProvider.GetRequiredService<Percolator.Application.Network.PercolatorMessageService>();
-
         var forwarded = 0;
         while (forwarded < max)
         {
@@ -1737,14 +1679,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                     Payload = ByteString.CopyFrom(cipher.ToArray())
                 };
 
-                var ctx = new ServerCallContextStub(
-                    method: "/percolator.contracts.TransportService/DeliverOpaqueMessage",
-                    peer: "ipv4:127.0.0.1:0",
-                    deadline: DateTime.UtcNow.AddMinutes(1),
-                    requestHeaders: new Metadata(),
-                    cancellationToken: cancellationToken);
-
-                var resp = await messageService.DeliverOpaqueMessage(request, ctx).ConfigureAwait(false);
+                var resp = await _toMain.SendOpaqueMessageToMainAsync(request, cancellationToken).ConfigureAwait(false);
 
                 if (resp.ResultCase != DeliverOpaqueMessageResponse.ResultOneofCase.ResponsePayload
                     || resp.ResponsePayload is null
@@ -1828,23 +1763,13 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             var cipher = await EncryptInternalEnvelopeAsync(relayHostPeerId, relayHostToMainSessionId, env, cancellationToken)
                 .ConfigureAwait(false);
 
-            using var scope = _scopeFactory.CreateScope();
-            var messageService = scope.ServiceProvider.GetRequiredService<Percolator.Application.Network.PercolatorMessageService>();
-
             var request = new DeliverOpaqueMessageRequest
             {
                 Version = 1,
                 Payload = ByteString.CopyFrom(cipher.ToArray())
             };
 
-            var ctx = new ServerCallContextStub(
-                method: "/percolator.contracts.TransportService/DeliverOpaqueMessage",
-                peer: "ipv4:127.0.0.1:0",
-                deadline: DateTime.UtcNow.AddMinutes(1),
-                requestHeaders: new Metadata(),
-                cancellationToken: cancellationToken);
-
-            var resp = await messageService.DeliverOpaqueMessage(request, ctx).ConfigureAwait(false);
+            var resp = await _toMain.SendOpaqueMessageToMainAsync(request, cancellationToken).ConfigureAwait(false);
             if (resp.ResultCase != DeliverOpaqueMessageResponse.ResultOneofCase.ResponsePayload
                 || resp.ResponsePayload is null
                 || !resp.ResponsePayload.HasResponsePayload
@@ -2120,76 +2045,15 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         }
         else if (useDirect)
         {
-            using var scope = _scopeFactory.CreateScope();
-            var messageService = scope.ServiceProvider.GetRequiredService<Percolator.Application.Network.PercolatorMessageService>();
-
             var request = new DeliverOpaqueMessageRequest
             {
                 Version = 1,
                 Payload = Google.Protobuf.ByteString.CopyFrom(cipherBytes!)
             };
 
-            var ctx = new ServerCallContextStub(
-                method: "/percolator.contracts.TransportService/DeliverOpaqueMessage",
-                peer: "ipv4:127.0.0.1:0",
-                deadline: DateTime.UtcNow.AddMinutes(1),
-                requestHeaders: new Metadata(),
-                cancellationToken: cancellationToken);
-
-            _ = await messageService.DeliverOpaqueMessage(request, ctx).ConfigureAwait(false);
+            _ = await _toMain.SendOpaqueMessageToMainAsync(request, cancellationToken).ConfigureAwait(false);
         }
         _saveTrigger.OnNext(Unit.Default);
-    }
-
-    private async Task DeliverInviteHandshakeResponseToMainAsyncCore(
-        InviteHandshakeResponse response,
-        CancellationToken cancellationToken)
-    {
-        if (response is null) throw new ArgumentNullException(nameof(response));
-
-        using var scope = _scopeFactory.CreateScope();
-        var messageService = scope.ServiceProvider.GetRequiredService<Percolator.Application.Network.PercolatorMessageService>();
-
-        var ctx = new ServerCallContextStub(
-            method: "/percolator.contracts.TransportService/DeliverInviteHandshakeResponse",
-            peer: "ipv4:127.0.0.1:0",
-            deadline: DateTime.UtcNow.AddMinutes(1),
-            requestHeaders: new Metadata(),
-            cancellationToken: cancellationToken);
-
-        await messageService.DeliverInviteHandshakeResponse(response, ctx).ConfigureAwait(false);
-    }
-
-    private sealed class ServerCallContextStub : ServerCallContext
-    {
-        private readonly string _method;
-        private readonly string _peer;
-        private readonly DateTime _deadline;
-        private readonly Metadata _requestHeaders;
-        private readonly CancellationToken _cancellationToken;
-
-        public ServerCallContextStub(string method, string peer, DateTime deadline, Metadata requestHeaders, CancellationToken cancellationToken)
-        {
-            _method = method;
-            _peer = peer;
-            _deadline = deadline;
-            _requestHeaders = requestHeaders;
-            _cancellationToken = cancellationToken;
-        }
-
-        protected override string MethodCore => _method;
-        protected override string HostCore => "localhost";
-        protected override string PeerCore => _peer;
-        protected override DateTime DeadlineCore => _deadline;
-        protected override Metadata RequestHeadersCore => _requestHeaders;
-        protected override CancellationToken CancellationTokenCore => _cancellationToken;
-        protected override Metadata ResponseTrailersCore { get; } = new Metadata();
-        protected override Status StatusCore { get; set; }
-        protected override WriteOptions? WriteOptionsCore { get; set; }
-        protected override AuthContext AuthContextCore { get; } = new AuthContext(null, new System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<AuthProperty>>());
-
-        protected override ContextPropagationToken CreatePropagationTokenCore(ContextPropagationOptions? options) => throw new NotImplementedException();
-        protected override Task WriteResponseHeadersAsyncCore(Metadata responseHeaders) => Task.CompletedTask;
     }
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -2286,7 +2150,6 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             endpoint: snap.Endpoint,
             relayPeerId: snap.RelayPeerId.Value == Guid.Empty ? null : snap.RelayPeerId,
             uiState: snap.UiState,
-            pendingCorrelationId: snap.InboundReverseSignalPendingCorrelationId,
             targetPublicKeyHash: snap.TargetPublicKeyHash,
             selectedRouteMode: snap.SelectedRouteMode,
             directEndpoint: snap.DirectEndpoint,
@@ -2295,8 +2158,6 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             notUntilUtc: snap.NotUntilUtc,
             lastError: snap.LastError,
             handshakeAttempts: snap.HandshakeAttempts.ToList(),
-            pendingStandardHandshakeToMainResponderPublicKeyHash: snap.PendingStandardHandshakeToMainResponderPublicKeyHash,
-            pendingStandardHandshakeToMainTemporarySessionId: snap.PendingStandardHandshakeToMainTemporarySessionId,
             knownPeerIds: snap.KnownPeerIds.ToList(),
             publishedPreKeyBundles: snap.PublishedPreKeyBundles
                 .Select(b => new SimulatedPublishedPreKeyBundleModel(
@@ -2335,15 +2196,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 invite.CorrelationId,
                 invite.SignedPreKeyPrivateEcPrivateKey));
         }
-
-        // Hydrate pending invite handshake responses
-        foreach (var response in snap.PendingInviteHandshakeResponses)
-        {
-            peer.PendingInviteHandshakeResponsesMutable.Add(new SimulatedPendingInviteHandshakeResponseModel(
-                response.CorrelationId,
-                response.ResponseBytes));
-        }
-
+        
         foreach (var invite in snap.PendingInboundDirectInvites)
         {
             peer.PendingInboundDirectInvitesMutable.Add(new SimulatedPendingInboundDirectInviteModel(

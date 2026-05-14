@@ -45,11 +45,10 @@ public sealed class SimulatedPeerRuntimeServiceDecryptFailureDiagnosticsTests
         var sp = services.BuildServiceProvider();
         var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
 
-        var pending = new SimulatedPeerPendingInbox();
         var transportOptions = Options.Create(new TransportOptions { SimulatorPort = 5002 });
         var engine = new SignalProtocolEngine(new SystemClock());
 
-        var sut = new SimulatorStateService(repo, diagnostics, pending, scopeFactory, transportOptions, engine);
+        var sut = new SimulatorStateService(repo, diagnostics, scopeFactory, new NoopSimulatorToMainTransportService(), transportOptions, engine);
         await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
 
         var sessionId = new SessionId(Guid.NewGuid());

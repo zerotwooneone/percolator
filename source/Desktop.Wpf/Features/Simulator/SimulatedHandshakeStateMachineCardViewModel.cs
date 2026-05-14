@@ -15,7 +15,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
 {
     private readonly SimulatedPeerModel _model;
     private readonly ISimulatorStateService _state;
-    private readonly ISimulatorMainIngressService _mainIngress;
+    private readonly ISimulatorToMainTransportService _mainIngress;
     private readonly ISimulatorDiagnosticsService _diagnostics;
     private readonly IOptions<TransportOptions> _transportOptions;
     private readonly Percolator.Application.Identity.ActiveIdentityContext _active;
@@ -26,7 +26,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
     public SimulatedHandshakeStateMachineCardViewModel(
         SimulatedPeerModel model,
         ISimulatorStateService state,
-        ISimulatorMainIngressService mainIngress,
+        ISimulatorToMainTransportService mainIngress,
         ISimulatorDiagnosticsService diagnostics,
         IOptions<TransportOptions> transportOptions,
         Percolator.Application.Identity.ActiveIdentityContext active,
@@ -91,6 +91,43 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
             .ToBindableReactiveProperty(Array.Empty<PendingStandardSignalHelloItem>())
             .AddTo(ref _bag);
 
+        PendingApprovals = Observable
+            .Merge(
+                _model.PendingInboundDirectInvites.ObserveChanged().Select(_ => Unit.Default),
+                _model.PendingInboundStandardSignalHellosMutable.ObserveChanged().Select(_ => Unit.Default))
+            .ObserveOnCurrentSynchronizationContext()
+            .Select(_ =>
+            {
+                var items = new List<PendingApprovalItem>();
+
+                // Reverse-signal inbound direct invite requests from Main
+                foreach (var invite in _model.PendingInboundDirectInvites)
+                {
+                    items.Add(new PendingApprovalItem(
+                        invite.CorrelationId,
+                        PendingHandshakeKind.InboundDirectInviteRequestFromMain,
+                        invite.ReceivedAtUtc,
+                        $"Direct Invite from Main (corr: {invite.CorrelationId.ToString()[..8]})"));
+                }
+
+                // Standard-signal inbound hellos from peers
+                foreach (var kvp in _model.PendingInboundStandardSignalHellos)
+                {
+                    var corr = Guid.TryParse(kvp.Key, out var g) ? g : Guid.Empty;
+                    items.Add(new PendingApprovalItem(
+                        corr,
+                        PendingHandshakeKind.InboundStandardSignalHello,
+                        kvp.Value.ReceivedUtc,
+                        $"Standard Signal Hello from {kvp.Key[..8]}"));
+                }
+
+                return (IReadOnlyList<PendingApprovalItem>)items
+                    .OrderByDescending(x => x.ReceivedUtc)
+                    .ToArray();
+            })
+            .ToBindableReactiveProperty(Array.Empty<PendingApprovalItem>())
+            .AddTo(ref _bag);
+
         ShowForceExpire = _model.UiState
             .ObserveOnCurrentSynchronizationContext()
             .Select(s => s == SimulatorPeerUiState.OutboundPending)
@@ -111,13 +148,17 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
         sendRelayed.AsObservable().SubscribeAwait(async (_, ct) => await ExecuteSendRelayedRequestToMainAsync(ct), AwaitOperation.Drop).AddTo(ref _bag);
         SendRelayedRequestToMainCommand = sendRelayed.AddTo(ref _bag);
 
-        var accept = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
-        accept.AsObservable().SubscribeAwait(async (_, ct) => await ExecuteAcceptHandshakeAsync(ct), AwaitOperation.Drop).AddTo(ref _bag);
-        AcceptHandshakeCommand = accept.AddTo(ref _bag);
-
         var acceptStandard = Observable.Return(true).ToReactiveCommand<string>(_ => { });
         acceptStandard.AsObservable().SubscribeAwait(async (initiatorPkhHex, ct) => await ExecuteAcceptPendingStandardSignalHelloAsync(initiatorPkhHex, ct), AwaitOperation.Drop).AddTo(ref _bag);
         AcceptPendingStandardSignalHelloCommand = acceptStandard.AddTo(ref _bag);
+
+        var acceptPending = Observable.Return(true).ToReactiveCommand<PendingApprovalItem>(_ => { });
+        acceptPending.AsObservable().SubscribeAwait(async (item, ct) => await ExecuteAcceptPendingApprovalAsync(item, ct), AwaitOperation.Drop).AddTo(ref _bag);
+        AcceptPendingApprovalCommand = acceptPending.AddTo(ref _bag);
+
+        var rejectPending = Observable.Return(true).ToReactiveCommand<PendingApprovalItem>(_ => { });
+        rejectPending.AsObservable().SubscribeAwait(async (item, ct) => await ExecuteRejectPendingApprovalAsync(item, ct), AwaitOperation.Drop).AddTo(ref _bag);
+        RejectPendingApprovalCommand = rejectPending.AddTo(ref _bag);
 
         ForceExpireCommand = Observable.Return(true)
             .ToReactiveCommand<Unit>(_ => ExecuteForceExpire())
@@ -150,6 +191,8 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
 
     public BindableReactiveProperty<IReadOnlyList<PendingStandardSignalHelloItem>> PendingStandardSignalHellos { get; }
 
+    public BindableReactiveProperty<IReadOnlyList<PendingApprovalItem>> PendingApprovals { get; }
+
     public BindableReactiveProperty<bool> ShowForceExpire { get; }
 
     public BindableReactiveProperty<bool> ShowReset { get; }
@@ -162,15 +205,29 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
 
     public ReactiveCommand<Unit> SendRelayedRequestToMainCommand { get; }
 
-    public ReactiveCommand<Unit> AcceptHandshakeCommand { get; }
-
     public ReactiveCommand<string> AcceptPendingStandardSignalHelloCommand { get; }
+
+    public ReactiveCommand<PendingApprovalItem> AcceptPendingApprovalCommand { get; }
+
+    public ReactiveCommand<PendingApprovalItem> RejectPendingApprovalCommand { get; }
 
     public ReactiveCommand<Unit> ForceExpireCommand { get; }
 
     public ReactiveCommand<Unit> ResetStateCommand { get; }
 
     public sealed record PendingStandardSignalHelloItem(string InitiatorPkhHex, DateTimeOffset ReceivedUtc);
+
+    public enum PendingHandshakeKind
+    {
+        InboundDirectInviteRequestFromMain,
+        InboundStandardSignalHello
+    }
+
+    public sealed record PendingApprovalItem(
+        Guid CorrelationId,
+        PendingHandshakeKind Kind,
+        DateTimeOffset ReceivedUtc,
+        string DisplayText);
 
     private async Task ExecuteSendRequestToMainAsync(CancellationToken ct)
     {
@@ -261,14 +318,22 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
         }
         catch (Exception ex)
         {
-            var corr = _model.InboundReverseSignalPendingCorrelationId.CurrentValue;
-            if (corr is not null)
+            // Use the correlation id from the invite payload that was just generated
+            if (invite.HasPayload && invite.Payload.Length > 0)
             {
-                await InvokeOnUiAsync(() =>
+                try
                 {
-                    _model.SetAttemptError(corr.Value, ex.Message);
-                    _model.SetAttemptPhase(corr.Value, "SendFailed");
-                }).ConfigureAwait(false);
+                    var payload = InviteHandshakeRequestPayload.Parser.ParseFrom(invite.Payload);
+                    if (!string.IsNullOrWhiteSpace(payload.RequestCorrelationId) && Guid.TryParse(payload.RequestCorrelationId, out var corr))
+                    {
+                        await InvokeOnUiAsync(() =>
+                        {
+                            _model.SetAttemptError(corr, ex.Message);
+                            _model.SetAttemptPhase(corr, "SendFailed");
+                        }).ConfigureAwait(false);
+                    }
+                }
+                catch { /* If parsing fails, we can't set error on a specific correlation id */ }
             }
             throw;
         }
@@ -374,30 +439,25 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
         }
         catch (Exception ex)
         {
-            var corr = _model.InboundReverseSignalPendingCorrelationId.CurrentValue;
-            if (corr is not null)
+            // Use the correlation id from the invite payload that was just generated
+            if (invite.HasPayload && invite.Payload.Length > 0)
             {
-                await InvokeOnUiAsync(() =>
+                try
                 {
-                    _model.SetAttemptError(corr.Value, ex.Message);
-                    _model.SetAttemptPhase(corr.Value, "RelayEnqueueFailed");
-                }).ConfigureAwait(false);
+                    var payload = InviteHandshakeRequestPayload.Parser.ParseFrom(invite.Payload);
+                    if (!string.IsNullOrWhiteSpace(payload.RequestCorrelationId) && Guid.TryParse(payload.RequestCorrelationId, out var corr))
+                    {
+                        await InvokeOnUiAsync(() =>
+                        {
+                            _model.SetAttemptError(corr, ex.Message);
+                            _model.SetAttemptPhase(corr, "RelayEnqueueFailed");
+                        }).ConfigureAwait(false);
+                    }
+                }
+                catch { /* If parsing fails, we can't set error on a specific correlation id */ }
             }
             throw;
         }
-    }
-
-    private async Task ExecuteAcceptHandshakeAsync(CancellationToken ct)
-    {
-        // Chunk B: Accept pending inbound direct invite from Main
-        var corr = _model.PendingInboundDirectInvites.FirstOrDefault()?.CorrelationId;
-        if (corr is null || corr.Value == Guid.Empty) return;
-
-        await _state.AcceptPendingInboundDirectInviteAsync(
-            simulatedPeerId: _model.PeerId,
-            correlationId: corr.Value,
-            cancellationToken: ct)
-            .ConfigureAwait(false);
     }
 
     private async Task ExecuteAcceptPendingStandardSignalHelloAsync(string initiatorPkhHex, CancellationToken ct)
@@ -418,6 +478,85 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
                 $"Handshake: standard-signal accept failed initiator={initiatorPkhHex}",
                 peerId: _model.PeerId,
                 contextTag: "StandardSignalAcceptFailed");
+        }
+    }
+
+    private async Task ExecuteAcceptPendingApprovalAsync(PendingApprovalItem item, CancellationToken ct)
+    {
+        if (item is null) return;
+
+        switch (item.Kind)
+        {
+            case PendingHandshakeKind.InboundDirectInviteRequestFromMain:
+                await _state.AcceptPendingInboundDirectInviteAsync(
+                    simulatedPeerId: _model.PeerId,
+                    correlationId: item.CorrelationId,
+                    cancellationToken: ct)
+                    .ConfigureAwait(false);
+                break;
+
+            case PendingHandshakeKind.InboundStandardSignalHello:
+                var accepted = await _state
+                    .TryAcceptPendingStandardSignalHelloAsync(
+                        recipientPeerId: _model.PeerId,
+                        initiatorPkhHex: item.CorrelationId.ToString(),
+                        cancellationToken: ct)
+                    .ConfigureAwait(false);
+
+                if (!accepted)
+                {
+                    _diagnostics.Emit(
+                        SimulatorDiagnosticEventType.HandshakeStateTransition,
+                        $"Handshake: standard-signal accept failed corr={item.CorrelationId}",
+                        peerId: _model.PeerId,
+                        contextTag: "StandardSignalAcceptFailed");
+                }
+                break;
+
+            default:
+                _diagnostics.Emit(
+                    SimulatorDiagnosticEventType.HandshakeStateTransition,
+                    $"Handshake: unsupported pending approval kind={item.Kind}",
+                    peerId: _model.PeerId,
+                    contextTag: "UnsupportedKind");
+                break;
+        }
+    }
+
+    private async Task ExecuteRejectPendingApprovalAsync(PendingApprovalItem item, CancellationToken ct)
+    {
+        if (item is null) return;
+
+        switch (item.Kind)
+        {
+            case PendingHandshakeKind.InboundDirectInviteRequestFromMain:
+                await _state.RejectPendingInboundDirectInviteAsync(
+                    simulatedPeerId: _model.PeerId,
+                    correlationId: item.CorrelationId,
+                    cancellationToken: ct)
+                    .ConfigureAwait(false);
+                break;
+
+            case PendingHandshakeKind.InboundStandardSignalHello:
+                // Standard-signal hellos are runtime-only; rejection is implicit by clearing
+                await InvokeOnUiAsync(() =>
+                {
+                    _model.PendingInboundStandardSignalHellosMutable.Remove(item.CorrelationId.ToString());
+                }).ConfigureAwait(false);
+                _diagnostics.Emit(
+                    SimulatorDiagnosticEventType.HandshakeStateTransition,
+                    $"Handshake: standard-signal hello rejected corr={item.CorrelationId}",
+                    peerId: _model.PeerId,
+                    contextTag: "StandardSignalRejected");
+                break;
+
+            default:
+                _diagnostics.Emit(
+                    SimulatorDiagnosticEventType.HandshakeStateTransition,
+                    $"Handshake: unsupported pending approval kind={item.Kind}",
+                    peerId: _model.PeerId,
+                    contextTag: "UnsupportedKind");
+                break;
         }
     }
 

@@ -85,24 +85,9 @@ public interface ISimulatorStateService
         EstablishDirectSessionRequest invite,
         CancellationToken cancellationToken = default);
 
-    Task DeliverInviteHandshakeResponseToMainAsync(
-        InviteHandshakeResponse response,
-        CancellationToken cancellationToken = default);
-
     Task HandleInboundInviteHandshakeResponseFromMainAsync(
         Percolator.Network.PeerId simulatedPeerId,
         InviteHandshakeResponse response,
-        CancellationToken cancellationToken = default);
-
-    Task QueueInviteHandshakeResponseForDeliveryToMainAsync(
-        Percolator.Network.PeerId simulatedPeerId,
-        Guid requestCorrelationId,
-        InviteHandshakeResponse response,
-        CancellationToken cancellationToken = default);
-
-    Task<bool> TryDeliverQueuedInviteHandshakeResponseToMainAsync(
-        Percolator.Network.PeerId simulatedPeerId,
-        Guid requestCorrelationId,
         CancellationToken cancellationToken = default);
 
     Task<EstablishSessionResponse> ReceiveEstablishSessionFromMainAsync(

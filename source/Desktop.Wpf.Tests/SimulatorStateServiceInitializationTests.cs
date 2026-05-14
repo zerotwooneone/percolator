@@ -35,11 +35,10 @@ public sealed class SimulatorStateServiceInitializationTests
         var sp = services.BuildServiceProvider();
         var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
 
-        var pending = new SimulatedPeerPendingInbox();
         var transportOptions = Options.Create(new TransportOptions { SimulatorPort = 5002 });
         var engine = new SignalProtocolEngine(new SystemClock());
 
-        var sut = new SimulatorStateService(store, diagnostics, pending, scopeFactory, transportOptions, engine);
+        var sut = new SimulatorStateService(store, diagnostics, scopeFactory, new NoopSimulatorToMainTransportService(), transportOptions, engine);
 
         // Act: Call InitializeAsync concurrently
         var initializer = (ISimulatorStateInitializer)sut;
@@ -121,13 +120,7 @@ public sealed class SimulatorStateServiceInitializationTests
         model.OutboundInvitesMutable.Add(new SimulatedOutboundInviteModel(
             inviteCorrelationId,
             new byte[] { 10, 11, 12 }));
-
-        // Add pending handshake response
-        var responseCorrelationId = Guid.NewGuid();
-        model.PendingInviteHandshakeResponsesMutable.Add(new SimulatedPendingInviteHandshakeResponseModel(
-            responseCorrelationId,
-            new byte[] { 20, 21, 22 }));
-
+        
         var snapshot = new SimulatorStateSnapshot(
             Version: 1,
             Peers: new[] { model.Freeze() },
@@ -144,11 +137,16 @@ public sealed class SimulatorStateServiceInitializationTests
         services.AddSingleton<IClock, SystemClock>();
         var sp = services.BuildServiceProvider();
         var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
-        var pending = new SimulatedPeerPendingInbox();
         var transportOptions = Options.Create(new TransportOptions { SimulatorPort = 5002 });
         var engine = new SignalProtocolEngine(new SystemClock());
 
-        var sut = new SimulatorStateService(store, diagnostics, pending, scopeFactory, transportOptions, engine);
+        var sut = new SimulatorStateService(
+            store,
+            diagnostics,
+            scopeFactory,
+            new NoopSimulatorToMainTransportService(),
+            transportOptions,
+            engine);
 
         // Act
         var initializer = (ISimulatorStateInitializer)sut;
@@ -166,9 +164,6 @@ public sealed class SimulatorStateServiceInitializationTests
 
         restoredPeer.OutboundInvitesMutable.Should().HaveCount(1);
         restoredPeer.OutboundInvitesMutable.First().CorrelationId.Should().Be(inviteCorrelationId);
-
-        restoredPeer.PendingInviteHandshakeResponsesMutable.Should().HaveCount(1);
-        restoredPeer.PendingInviteHandshakeResponsesMutable.First().CorrelationId.Should().Be(responseCorrelationId);
     }
 
     [Test]
@@ -182,7 +177,6 @@ public sealed class SimulatorStateServiceInitializationTests
         var sp = services.BuildServiceProvider();
         var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
 
-        var pending = new SimulatedPeerPendingInbox();
         var diagnostics = new SimulatorDiagnosticsService();
         var transportOptions = Options.Create(new TransportOptions { SimulatorPort = 5002 });
         var engine = new SignalProtocolEngine(new SystemClock());
@@ -193,8 +187,8 @@ public sealed class SimulatorStateServiceInitializationTests
         var sut = new SimulatorStateService(
             store,
             diagnostics,
-            pending,
             scopeFactory,
+            new NoopSimulatorToMainTransportService(),
             transportOptions,
             engine);
 

@@ -4,11 +4,11 @@ using Percolator.Contracts;
 
 namespace Desktop.Wpf.Features.Simulator;
 
-public sealed class SimulatorMainIngressService : ISimulatorMainIngressService
+public sealed class SimulatorToMainTransportService : ISimulatorToMainTransportService
 {
     private readonly PercolatorMessageService _messageService;
 
-    public SimulatorMainIngressService(PercolatorMessageService messageService)
+    public SimulatorToMainTransportService(PercolatorMessageService messageService)
     {
         _messageService = messageService;
     }
@@ -28,6 +28,56 @@ public sealed class SimulatorMainIngressService : ISimulatorMainIngressService
 
         _ = request.CalculateSize();
         return _messageService.EstablishDirectSession(request, ctx);
+    }
+
+    public Task<EstablishSessionResponse> SendEstablishSessionToMainAsync(
+        EstablishSessionRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (request is null) throw new ArgumentNullException(nameof(request));
+
+        var ctx = new ServerCallContextStub(
+            method: "/percolator.contracts.TransportService/EstablishSession",
+            peer: "ipv4:127.0.0.1:0",
+            deadline: DateTime.UtcNow.AddMinutes(1),
+            requestHeaders: new Metadata(),
+            cancellationToken: cancellationToken);
+
+        _ = request.CalculateSize();
+        return _messageService.EstablishSession(request, ctx);
+    }
+
+    public Task<DeliverOpaqueMessageResponse> SendOpaqueMessageToMainAsync(
+        DeliverOpaqueMessageRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (request is null) throw new ArgumentNullException(nameof(request));
+
+        var ctx = new ServerCallContextStub(
+            method: "/percolator.contracts.TransportService/DeliverOpaqueMessage",
+            peer: "ipv4:127.0.0.1:0",
+            deadline: DateTime.UtcNow.AddMinutes(1),
+            requestHeaders: new Metadata(),
+            cancellationToken: cancellationToken);
+
+        _ = request.CalculateSize();
+        return _messageService.DeliverOpaqueMessage(request, ctx);
+    }
+
+    public Task<DeliverInviteHandshakeResponseAck> DeliverInviteHandshakeResponseToMainAsync(
+        InviteHandshakeResponse response,
+        CancellationToken cancellationToken = default)
+    {
+        if (response is null) throw new ArgumentNullException(nameof(response));
+
+        var ctx = new ServerCallContextStub(
+            method: "/percolator.contracts.TransportService/DeliverInviteHandshakeResponse",
+            peer: "ipv4:127.0.0.1:0",
+            deadline: DateTime.UtcNow.AddMinutes(1),
+            requestHeaders: new Metadata(),
+            cancellationToken: cancellationToken);
+
+        return _messageService.DeliverInviteHandshakeResponse(response, ctx);
     }
 
     private sealed class ServerCallContextStub : ServerCallContext

@@ -44,7 +44,6 @@ public sealed class SimulatedPeerRuntimeFinalizeRelayedTests
             inviterPeer.IdentitySigningKeySpki,
             inviterPeer.IdentitySigningKeyPrivateKeyEcPrivateKey);
 
-        var pending = new SimulatedPeerPendingInbox();
         var repo = new InMemorySimulatorStateRepository();
         repo.Seed(new SimulatorStateSnapshot(
             Version: 1,
@@ -65,8 +64,8 @@ public sealed class SimulatedPeerRuntimeFinalizeRelayedTests
         var state = new SimulatorStateService(
             store: repo,
             diagnostics: diagnostics,
-            pending: pending,
             scopeFactory: scopeFactory,
+            toMain: new NoopSimulatorToMainTransportService(),
             transportOptions: transportOptions,
             engine: engine);
 

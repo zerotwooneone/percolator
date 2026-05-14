@@ -185,7 +185,6 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
             endpoint: endpoint,
             relayPeerId: dto.Connection?.RelayPeerId,
             uiState: dto.UiState,
-            pendingCorrelationId: dto.PendingCorrelationId,
             targetPublicKeyHash: dto.TargetPublicKeyHash,
             selectedRouteMode: dto.SelectedRouteMode,
             directEndpoint: dto.DirectEndpoint,
@@ -195,10 +194,6 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
             lastError: dto.LastError,
             knownPeerIds: dto.KnownPeerIds,
             handshakeAttempts: dto.HandshakeAttempts,
-            pendingStandardHandshakeToMainResponderPublicKeyHash: dto.PendingStandardHandshakeToMainResponderPublicKeyHash is null
-                ? null
-                : Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(dto.PendingStandardHandshakeToMainResponderPublicKeyHash),
-            pendingStandardHandshakeToMainTemporarySessionId: dto.PendingStandardHandshakeToMainTemporarySessionId,
             publishedPreKeyBundles: dto.Relay?.PreKeyStore?.PublishedBundles
                 ?.Select(b => new SimulatedPublishedPreKeyBundleModel(
                     Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(b.RecipientPublicKeyHash),
@@ -237,7 +232,6 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
             },
             KnownPeerIds = model.KnownPeerIds.ToList(),
             UiState = model.UiState,
-            PendingCorrelationId = model.InboundReverseSignalPendingCorrelationId,
             TargetPublicKeyHash = model.TargetPublicKeyHash,
             SelectedRouteMode = model.SelectedRouteMode,
             DirectEndpoint = model.DirectEndpoint,
@@ -246,8 +240,6 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
             NotUntilUtc = model.NotUntilUtc,
             LastError = model.LastError,
             HandshakeAttempts = model.HandshakeAttempts.ToList(),
-            PendingStandardHandshakeToMainResponderPublicKeyHash = model.PendingStandardHandshakeToMainResponderPublicKeyHash?.ToArray(),
-            PendingStandardHandshakeToMainTemporarySessionId = model.PendingStandardHandshakeToMainTemporarySessionId,
             Relay = new SimulatedPeerRelayStateDto
             {
                 IsRelayCapable = model.IsRelayCapable,
@@ -281,7 +273,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
             },
             RuntimeStore = new SimulatedPeerRuntimeStoreDto
             {
-                Version = 1,
+                Version = 2,
                 Sessions = model.Sessions
                     .Select(s => new SimulatedSecureSessionDto
                     {
@@ -309,30 +301,31 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
                         PublicSpki = s.PublicSpki
                     })
                     .ToList(),
-                OutboundInvites = model.OutboundInvites
-                    .Select(i => new SimulatedOutboundInviteDto
-                    {
-                        CorrelationId = i.CorrelationId,
-                        SignedPreKeyPrivateEcPrivateKey = i.SignedPreKeyPrivateEcPrivateKey
-                    })
-                    .ToList(),
-                PendingInviteHandshakeResponses = model.PendingInviteHandshakeResponses
-                    .Select(r => new SimulatedPendingInviteHandshakeResponseDto
-                    {
-                        CorrelationId = r.CorrelationId,
-                        ResponseBytes = r.ResponseBytes
-                    })
-                    .ToList(),
-                PendingInboundDirectInvites = model.PendingInboundDirectInvites
-                    .Select(r => new SimulatedPendingInboundDirectInviteDto
-                    {
-                        CorrelationId = r.CorrelationId,
-                        RequestBytes = r.RequestBytes,
-                        ReceivedAtUtc = r.ReceivedAtUtc,
-                        InviterIdentityKeySpki = r.InviterIdentityKeySpki,
-                        InviterPeerId = r.InviterPeerId.Value.ToString()
-                    })
-                    .ToList(),
+                ReverseSignalStore = new ReverseSignalStoreDto
+                {
+                    OutboundInvitesToMain = model.OutboundInvites
+                        .Select(i => new SimulatedOutboundInviteDto
+                        {
+                            CorrelationId = i.CorrelationId,
+                            SignedPreKeyPrivateEcPrivateKey = i.SignedPreKeyPrivateEcPrivateKey
+                        })
+                        .ToList(),
+                    InboundDirectInviteRequestsFromMain = model.PendingInboundDirectInvites
+                        .Select(r => new SimulatedPendingInboundDirectInviteDto
+                        {
+                            CorrelationId = r.CorrelationId,
+                            RequestBytes = r.RequestBytes,
+                            ReceivedAtUtc = r.ReceivedAtUtc,
+                            InviterIdentityKeySpki = r.InviterIdentityKeySpki,
+                            InviterPeerId = r.InviterPeerId.Value.ToString()
+                        })
+                        .ToList()
+                },
+                StandardSignalStore = new StandardSignalStoreDto
+                {
+                    PendingHandshakeToMainResponderPublicKeyHash = model.PendingStandardHandshakeToMainResponderPublicKeyHash?.ToArray(),
+                    PendingHandshakeToMainTemporarySessionId = model.PendingStandardHandshakeToMainTemporarySessionId
+                },
                 OneTimePreKeysPrivate = model.OneTimePreKeysPrivate
                     .Select(r => new OneTimePreKeyPrivateDto
                     {
@@ -530,24 +523,28 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
             model.SignedPreKeysMutable.Add(new SimulatedSignedPreKeyModel(dto.SignedPreKeyId, dto.PrivateEcPrivateKey, dto.PublicSpki));
         }
 
-        foreach (var dto in store.OutboundInvites)
+        // Read from split stores
+        var reverseStore = store.ReverseSignalStore ?? new ReverseSignalStoreDto();
+        var standardStore = store.StandardSignalStore ?? new StandardSignalStoreDto();
+
+        foreach (var dto in reverseStore.OutboundInvitesToMain)
         {
             if (dto.CorrelationId == Guid.Empty) continue;
             model.OutboundInvitesMutable.Add(new SimulatedOutboundInviteModel(dto.CorrelationId, dto.SignedPreKeyPrivateEcPrivateKey));
         }
 
-        foreach (var dto in store.PendingInviteHandshakeResponses)
-        {
-            if (dto.CorrelationId == Guid.Empty) continue;
-            model.PendingInviteHandshakeResponsesMutable.Add(new SimulatedPendingInviteHandshakeResponseModel(dto.CorrelationId, dto.ResponseBytes));
-        }
-
-        foreach (var dto in store.PendingInboundDirectInvites)
+        foreach (var dto in reverseStore.InboundDirectInviteRequestsFromMain)
         {
             if (dto.CorrelationId == Guid.Empty) continue;
             var inviterPeerId = Guid.TryParse(dto.InviterPeerId, out var parsed) ? new Percolator.Network.PeerId(parsed) : throw new InvalidOperationException("Invalid inviter peer id");
             model.PendingInboundDirectInvitesMutable.Add(new SimulatedPendingInboundDirectInviteModel(dto.CorrelationId, dto.RequestBytes, dto.ReceivedAtUtc, dto.InviterIdentityKeySpki, inviterPeerId));
         }
+
+        // Hydrate standard-signal pending handshake state
+        var pendingPkh = (standardStore.PendingHandshakeToMainResponderPublicKeyHash is not null && standardStore.PendingHandshakeToMainResponderPublicKeyHash.Length > 0)
+            ? Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(standardStore.PendingHandshakeToMainResponderPublicKeyHash)
+            : null;
+        model.SetPendingStandardHandshakeToMain(pendingPkh, standardStore.PendingHandshakeToMainTemporarySessionId);
 
         foreach (var dto in store.OneTimePreKeysPrivate)
         {
@@ -592,7 +589,6 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
         if (peer.UiState == SimulatorPeerUiState.Offline)
         {
             peer.UiState = SimulatorPeerUiState.Ready;
-            peer.PendingCorrelationId = null;
         }
 
         if (string.IsNullOrWhiteSpace(peer.Connection.Host) || string.Equals(peer.Connection.Host, "localhost", StringComparison.OrdinalIgnoreCase))

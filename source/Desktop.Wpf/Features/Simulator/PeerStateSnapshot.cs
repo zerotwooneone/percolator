@@ -14,7 +14,6 @@ public sealed record PeerStateSnapshot(
     DnsEndPoint Endpoint,
    Percolator.Network.PeerId RelayPeerId,
     SimulatorPeerUiState UiState,
-    Guid? InboundReverseSignalPendingCorrelationId,
     byte[]? TargetPublicKeyHash,
     ConnectionMode? SelectedRouteMode,
     string? DirectEndpoint,
@@ -30,7 +29,6 @@ public sealed record PeerStateSnapshot(
     IReadOnlyList<SessionSnapshot> Sessions,
     IReadOnlyList<SignedPreKeySnapshot> SignedPreKeys,
     IReadOnlyList<OutboundInviteSnapshot> OutboundInvites,
-    IReadOnlyList<PendingInviteHandshakeResponseSnapshot> PendingInviteHandshakeResponses,
     IReadOnlyList<PendingInboundDirectInviteSnapshot> PendingInboundDirectInvites,
     IReadOnlyList<SimulatedChatMessageSnapshot> RecentChatMessages,
     IReadOnlyList<SimulatedOneTimePreKeyPrivateSnapshot> OneTimePreKeysPrivate);
@@ -68,8 +66,6 @@ public sealed record SessionSnapshot(
 public sealed record SignedPreKeySnapshot(Guid SignedPreKeyId, byte[] PrivateEcPrivateKey, byte[] PublicSpki);
 
 public sealed record OutboundInviteSnapshot(Guid CorrelationId, byte[] SignedPreKeyPrivateEcPrivateKey);
-
-public sealed record PendingInviteHandshakeResponseSnapshot(Guid CorrelationId, byte[] ResponseBytes);
 
 public sealed record PendingInboundDirectInviteSnapshot(Guid CorrelationId, byte[] RequestBytes, DateTimeOffset ReceivedAtUtc, byte[] InviterIdentityKeySpki, Percolator.Network.PeerId InviterPeerId);
 

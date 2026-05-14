@@ -187,4 +187,76 @@ public sealed class SimulatorStateStoreTests
             try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
         }
     }
+
+    [Test]
+    public async Task PendingInboundDirectInvite_WithInviterPeerId_PersistsCorrectly()
+    {
+        // B6.1/B8: Verify that pending inbound direct invites persist inviter peer id correctly
+        var tmp = Path.Combine(Path.GetTempPath(), $"percolator-sim-{Guid.NewGuid():N}.json");
+        try
+        {
+            var peerId = new Percolator.Network.PeerId(Guid.NewGuid());
+            var inviterPeerId = new Percolator.Network.PeerId(Guid.NewGuid());
+            var correlationId = Guid.NewGuid();
+
+            var services = new ServiceCollection();
+            services.AddSingleton<IClock>(new TestClock(DateTimeOffset.UtcNow));
+            var sp = services.BuildServiceProvider();
+            var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
+
+            var options = Options.Create(new TransportOptions { SimulatorPort = 5002 });
+            var keys = new SimulatedPeerKeyFactory();
+
+            var store = new JsonSimulatorStateRepository(
+                overridePath: tmp,
+                transportOptions: options,
+                keys: keys,
+                scopeFactory: scopeFactory);
+
+            using var identity = System.Security.Cryptography.ECDiffieHellman.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
+            var priv = identity.ExportECPrivateKey();
+            var spki = identity.ExportSubjectPublicKeyInfo();
+
+            var model = new SimulatedPeerModel(
+                peerId: peerId,
+                selfIdentityId: 99000,
+                displayName: "TestPeer",
+                isRelayCapable: false,
+                identitySigningKeySpki: spki,
+                identitySigningKeyPrivateKeyEcPrivateKey: priv,
+                endpoint: new System.Net.DnsEndPoint("127.0.0.1", 5002));
+
+            // Add a pending inbound direct invite with inviter peer id
+            model.PendingInboundDirectInvitesMutable.Add(new SimulatedPendingInboundDirectInviteModel(
+                CorrelationId: correlationId,
+                RequestBytes: new byte[] { 0x01, 0x02, 0x03 },
+                ReceivedAtUtc: DateTimeOffset.UtcNow,
+                InviterIdentityKeySpki: new byte[] { 0x10, 0x11 },
+                InviterPeerId: inviterPeerId));
+
+            var snapshot = new SimulatorStateSnapshot(
+                Version: 1,
+                Peers: new[] { model.Freeze() },
+                Relationships: Array.Empty<PeerRelationshipSnapshot>(),
+                Relays: Array.Empty<RelayStateSnapshot>(),
+                Groups: Array.Empty<GroupConversationDto>());
+
+            await store.SaveStateAsync(snapshot, CancellationToken.None);
+
+            var loadedSnapshot = await store.LoadStateAsync(CancellationToken.None);
+            loadedSnapshot.Peers.Should().HaveCount(1);
+            var loadedPeer = loadedSnapshot.Peers.Single();
+
+            loadedPeer.PendingInboundDirectInvites.Should().HaveCount(1);
+            var loadedInvite = loadedPeer.PendingInboundDirectInvites.Single();
+            loadedInvite.CorrelationId.Should().Be(correlationId);
+            loadedInvite.InviterPeerId.Should().Be(inviterPeerId);
+            loadedInvite.InviterIdentityKeySpki.Should().BeEquivalentTo(new byte[] { 0x10, 0x11 });
+            loadedInvite.RequestBytes.Should().BeEquivalentTo(new byte[] { 0x01, 0x02, 0x03 });
+        }
+        finally
+        {
+            try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
+        }
+    }
 }

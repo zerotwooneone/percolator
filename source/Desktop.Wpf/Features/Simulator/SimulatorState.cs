@@ -30,8 +30,8 @@ public sealed class SimulatedPeerDto
     public SimulatedPeerPreKeyStateDto PreKeys { get; set; } = new();
     public SimulatedPeerRuntimeStoreDto RuntimeStore { get; set; } = new();
 
+    // UiState is derived from sessions + pending stores; not persisted as authoritative truth
     public SimulatorPeerUiState UiState { get; set; } = SimulatorPeerUiState.Ready;
-    public Guid? PendingCorrelationId { get; set; }
     public byte[]? TargetPublicKeyHash { get; set; }
     public ConnectionMode? SelectedRouteMode { get; set; }
     public string? DirectEndpoint { get; set; }
@@ -41,23 +41,31 @@ public sealed class SimulatedPeerDto
     public string? LastError { get; set; }
     public List<SimulatorHandshakeAttemptState> HandshakeAttempts { get; set; } = new();
 
-    public byte[]? PendingStandardHandshakeToMainResponderPublicKeyHash { get; set; }
-    public Guid? PendingStandardHandshakeToMainTemporarySessionId { get; set; }
-
     public SimulatedPeerRelayStateDto Relay { get; set; } = new();
     public SimulatedPeerReverseSignalKeysDto ReverseSignalKeys { get; set; } = new();
 }
 
 public sealed class SimulatedPeerRuntimeStoreDto
 {
-    public int Version { get; set; } = 1;
+    public int Version { get; set; } = 2;
     public List<SimulatedSecureSessionDto> Sessions { get; set; } = new();
     public List<SimulatedSignedPreKeyDto> SignedPreKeys { get; set; } = new();
-    public List<SimulatedOutboundInviteDto> OutboundInvites { get; set; } = new();
-    public List<SimulatedPendingInviteHandshakeResponseDto> PendingInviteHandshakeResponses { get; set; } = new();
-    public List<SimulatedPendingInboundDirectInviteDto> PendingInboundDirectInvites { get; set; } = new();
+    public ReverseSignalStoreDto ReverseSignalStore { get; set; } = new();
+    public StandardSignalStoreDto StandardSignalStore { get; set; } = new();
     public List<OneTimePreKeyPrivateDto> OneTimePreKeysPrivate { get; set; } = new();
     public List<SimulatedChatMessageDto> RecentChatMessages { get; set; } = new();
+}
+
+public sealed class ReverseSignalStoreDto
+{
+    public List<SimulatedOutboundInviteDto> OutboundInvitesToMain { get; set; } = new();
+    public List<SimulatedPendingInboundDirectInviteDto> InboundDirectInviteRequestsFromMain { get; set; } = new();
+}
+
+public sealed class StandardSignalStoreDto
+{
+    public byte[]? PendingHandshakeToMainResponderPublicKeyHash { get; set; }
+    public Guid? PendingHandshakeToMainTemporarySessionId { get; set; }
 }
 
 public sealed class SimulatedOutboundInviteDto

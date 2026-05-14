@@ -15,12 +15,12 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
 {
     private readonly ISimulatorInitializer _directory;
     private readonly SimulatedPeerModel _model;
-    private readonly ISimulatedPeerPendingInbox _pending;
     private readonly ISimulatorStateService _state;
     private readonly ISimulatorDiagnosticsService _diagnostics;
     private readonly Percolator.Application.Network.IMainReverseSignalInviteFactory _inviteFactory;
     private readonly Percolator.Application.Network.IAdvertisedHostLookup _advertisedHostLookup;
     private readonly Percolator.Application.Network.PercolatorMessageService _messageService;
+    private readonly ISimulatorToMainTransportService _toMain;
     private readonly IOptions<TransportOptions> _transportOptions;
     private readonly Percolator.Application.Identity.ActiveIdentityContext _active;
     private readonly Func<Percolator.Network.PeerId?> _getSelectedRelayPeerId;
@@ -32,19 +32,19 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         ISimulatorInitializer directory,
         SimulatedPeerModel model,
         ISimulatorStateService state,
+        ISimulatorToMainTransportService toMain,
         ISimulatorDiagnosticsService diagnostics,
         Percolator.Application.Network.IMainReverseSignalInviteFactory inviteFactory,
         Percolator.Application.Network.IAdvertisedHostLookup advertisedHostLookup,
         Percolator.Application.Network.PercolatorMessageService messageService,
         IOptions<TransportOptions> transportOptions,
         Percolator.Application.Identity.ActiveIdentityContext active,
-        Func<Percolator.Network.PeerId?> getSelectedRelayPeerId,
-        ISimulatedPeerPendingInbox pending)
+        Func<Percolator.Network.PeerId?> getSelectedRelayPeerId)
     {
         _directory = directory;
         _model = model;
-        _pending = pending;
         _state = state;
+        _toMain = toMain;
         _diagnostics = diagnostics;
         _inviteFactory = inviteFactory;
         _advertisedHostLookup = advertisedHostLookup;
@@ -123,20 +123,6 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
             .ToReactiveCommand<Unit>(_ => _model.ClearRuntimeState())
             .AddTo(ref _bag);
 
-        AcceptInboundPendingCommand = Observable.Return(true)
-            .ToReactiveCommand<Unit>(_ => { })
-            .AddTo(ref _bag);
-        AcceptInboundPendingCommand.AsObservable()
-            .SubscribeAwait(async (_, ct) => await ExecuteAcceptInboundPendingAsync(ct), AwaitOperation.Drop)
-            .AddTo(ref _bag);
-
-        RejectInboundPendingCommand = Observable.Return(true)
-            .ToReactiveCommand<Unit>(_ => { })
-            .AddTo(ref _bag);
-        RejectInboundPendingCommand.AsObservable()
-            .SubscribeAwait(async (_, ct) => await ExecuteRejectInboundPendingAsync(ct), AwaitOperation.Drop)
-            .AddTo(ref _bag);
-
         MainInviteDirectCommand = Observable.Return(true)
             .ToReactiveCommand<Unit>(_ => { })
             .AddTo(ref _bag);
@@ -207,9 +193,6 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
     public ReactiveCommand<Unit> MarkEstablishedCommand { get; }
     public ReactiveCommand<Unit> ClearRuntimeStateCommand { get; }
 
-    public ReactiveCommand<Unit> AcceptInboundPendingCommand { get; }
-    public ReactiveCommand<Unit> RejectInboundPendingCommand { get; }
-
     public ReactiveCommand<Unit> MainInviteDirectCommand { get; }
     public ReactiveCommand<Unit> MainInviteRelayedCommand { get; }
     public ReactiveCommand<Unit> RelayForwardToMainCommand { get; }
@@ -219,32 +202,6 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
 
     public ReactiveCommand<Unit> PublishStandardPreKeysToRelayCommand { get; }
     public ReactiveCommand<Unit> PeerStandardHandshakeToMainRelayedCommand { get; }
-
-    private async Task ExecuteAcceptInboundPendingAsync(System.Threading.CancellationToken ct)
-    {
-        // Chunk B: Accept pending inbound direct invite from Main
-        var corr = _model.PendingInboundDirectInvites.FirstOrDefault()?.CorrelationId;
-        if (corr is null || corr.Value == Guid.Empty) return;
-
-        await _state.AcceptPendingInboundDirectInviteAsync(
-            simulatedPeerId: _model.PeerId,
-            correlationId: corr.Value,
-            cancellationToken: ct)
-            .ConfigureAwait(false);
-    }
-
-    private async Task ExecuteRejectInboundPendingAsync(System.Threading.CancellationToken ct)
-    {
-        // Chunk B: Reject pending inbound direct invite from Main
-        var corr = _model.PendingInboundDirectInvites.FirstOrDefault()?.CorrelationId;
-        if (corr is null || corr.Value == Guid.Empty) return;
-
-        await _state.RejectPendingInboundDirectInviteAsync(
-            simulatedPeerId: _model.PeerId,
-            correlationId: corr.Value,
-            cancellationToken: ct)
-            .ConfigureAwait(false);
-    }
 
     private async Task ExecuteMainInviteDirectAsync(System.Threading.CancellationToken ct)
     {
@@ -265,7 +222,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
 
         _sessionToMain = acceptance.SessionId;
 
-        await _state.DeliverInviteHandshakeResponseToMainAsync(acceptance.Response, ct).ConfigureAwait(false);
+        _ = await _toMain.DeliverInviteHandshakeResponseToMainAsync(acceptance.Response, ct).ConfigureAwait(false);
     }
 
     private async Task ExecuteMainInviteRelayedAsync(System.Threading.CancellationToken ct)

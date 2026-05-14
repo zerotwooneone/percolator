@@ -14,11 +14,11 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
     private readonly IUiDispatcher _ui;
 
     private readonly ISimulatorInitializer _simulatorInitializer;
+    private readonly ISimulatorToMainTransportService _mainIngress;
     private readonly IOptions<TransportOptions> _transportOptions;
     private readonly Percolator.Application.Identity.ActiveIdentityContext _active;
     private readonly ISimulatorStateService _state;
     private readonly ISimulatorDiagnosticsService _diagnostics;
-    private readonly ISimulatorMainIngressService _mainIngress;
 
     private ISynchronizedView<SimulatedPeerModel, SimulatedHandshakeStateMachineCardViewModel>? _cards;
     private readonly NotifyCollectionChangedSynchronizedViewList<SimulatedHandshakeStateMachineCardViewModel> _cardsNotify;
@@ -33,7 +33,7 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
 
     public SimulatorHandshakesTabViewModel(
         ISimulatorInitializer simulatorInitializer,
-        ISimulatorMainIngressService mainIngress,
+        ISimulatorToMainTransportService mainIngress,
         IOptions<TransportOptions> transportOptions,
         Percolator.Application.Identity.ActiveIdentityContext active,
         ISimulatorStateService state,

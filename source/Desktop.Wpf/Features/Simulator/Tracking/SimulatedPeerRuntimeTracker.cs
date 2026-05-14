@@ -20,7 +20,6 @@ public sealed class SimulatedPeerRuntimeTracker : IDisposable
         peer.RelayPeerId.Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
 
         peer.UiState.Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
-        peer.InboundReverseSignalPendingCorrelationId.Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
         peer.TargetPublicKeyHash.Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
         peer.SelectedRouteMode.Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
         peer.DirectEndpoint.Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
@@ -39,7 +38,6 @@ public sealed class SimulatedPeerRuntimeTracker : IDisposable
 
         peer.OutboundInvitesMutable.ObserveChanged().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
 
-        peer.PendingInviteHandshakeResponsesMutable.ObserveChanged().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
         peer.PendingInboundDirectInvitesMutable.ObserveChanged().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
 
         peer.PendingInboundStandardSignalHellosMutable.ObserveChanged().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);

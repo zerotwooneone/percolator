@@ -48,12 +48,11 @@ public sealed class SimulatedPeerPendingInboundDirectInviteTests
         var sp = services.BuildServiceProvider();
         var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
 
-        var pending = new SimulatedPeerPendingInbox();
         var diagnostics = new SimulatorDiagnosticsService();
         var transportOptions = Options.Create(new TransportOptions { SimulatorPort = 5002 });
         var engine = new SignalProtocolEngine(new SystemClock());
 
-        var sut = new SimulatorStateService(repo, diagnostics, pending, scopeFactory, transportOptions, engine);
+        var sut = new SimulatorStateService(repo, diagnostics, scopeFactory, new NoopSimulatorToMainTransportService(), transportOptions, engine);
         await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
 
         // Create a valid EstablishDirectSessionRequest
@@ -144,12 +143,11 @@ public sealed class SimulatedPeerPendingInboundDirectInviteTests
         var sp = services.BuildServiceProvider();
         var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
 
-        var pending = new SimulatedPeerPendingInbox();
         var diagnostics = new SimulatorDiagnosticsService();
         var transportOptions = Options.Create(new TransportOptions { SimulatorPort = 5002 });
         var engine = new SignalProtocolEngine(new SystemClock());
 
-        var sut = new SimulatorStateService(repo, diagnostics, pending, scopeFactory, transportOptions, engine);
+        var sut = new SimulatorStateService(repo, diagnostics, scopeFactory, new NoopSimulatorToMainTransportService(), transportOptions, engine);
         await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
 
         // Create and add a pending inbound direct invite
@@ -235,12 +233,11 @@ public sealed class SimulatedPeerPendingInboundDirectInviteTests
         var sp = services.BuildServiceProvider();
         var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
 
-        var pendingInbox = new SimulatedPeerPendingInbox();
         var diagnostics = new SimulatorDiagnosticsService();
         var transportOptions = Options.Create(new TransportOptions { SimulatorPort = 5002 });
         var engine = new SignalProtocolEngine(new SystemClock());
 
-        var sut = new SimulatorStateService(repo, diagnostics, pendingInbox, scopeFactory, transportOptions, engine);
+        var sut = new SimulatorStateService(repo, diagnostics, scopeFactory, new NoopSimulatorToMainTransportService(), transportOptions, engine);
         await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
 
         // Create and add a pending inbound direct invite

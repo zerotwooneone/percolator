@@ -51,7 +51,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModelDiagnosticsTests
         peers.Add(relayHostModel);
         state.SetupGet(s => s.Peers).Returns(peers);
 
-        var mainIngress = new Mock<ISimulatorMainIngressService>(MockBehavior.Loose);
+        var mainIngress = new Mock<ISimulatorToMainTransportService>(MockBehavior.Loose);
         using var sut = new SimulatedHandshakeStateMachineCardViewModel(
             model,
             state.Object,

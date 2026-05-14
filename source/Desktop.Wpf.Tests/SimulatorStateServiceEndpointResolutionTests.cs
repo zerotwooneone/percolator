@@ -126,10 +126,9 @@ public sealed class SimulatorStateServiceEndpointResolutionTests
         var sp = services.BuildServiceProvider();
         var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
 
-        var pending = new SimulatedPeerPendingInbox();
         var transportOptions = Options.Create(new TransportOptions { SimulatorPort = 5002 });
         var engine = new SignalProtocolEngine(new TestClock(DateTimeOffset.UtcNow));
 
-        return new SimulatorStateService(store, diagnostics, pending, scopeFactory, transportOptions, engine);
+        return new SimulatorStateService(store, diagnostics, scopeFactory, new NoopSimulatorToMainTransportService(), transportOptions, engine);
     }
 }

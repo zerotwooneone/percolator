@@ -13,6 +13,21 @@ using PeerId = Percolator.Network.PeerId;
 
 namespace Desktop.Wpf.Tests;
 
+internal sealed class NoopSimulatorToMainTransportService : ISimulatorToMainTransportService
+{
+    public Task SendEstablishDirectSessionToMainAsync(Percolator.Contracts.EstablishDirectSessionRequest request, CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
+
+    public Task<Percolator.Contracts.EstablishSessionResponse> SendEstablishSessionToMainAsync(Percolator.Contracts.EstablishSessionRequest request, CancellationToken cancellationToken = default)
+        => Task.FromResult(new Percolator.Contracts.EstablishSessionResponse { Version = 1 });
+
+    public Task<Percolator.Contracts.DeliverOpaqueMessageResponse> SendOpaqueMessageToMainAsync(Percolator.Contracts.DeliverOpaqueMessageRequest request, CancellationToken cancellationToken = default)
+        => Task.FromResult(new Percolator.Contracts.DeliverOpaqueMessageResponse { Version = 1 });
+
+    public Task<Percolator.Contracts.DeliverInviteHandshakeResponseAck> DeliverInviteHandshakeResponseToMainAsync(Percolator.Contracts.InviteHandshakeResponse response, CancellationToken cancellationToken = default)
+        => Task.FromResult(new Percolator.Contracts.DeliverInviteHandshakeResponseAck { Version = 1 });
+}
+
 public sealed class StateStub : TestSimulatorStateServiceBase
 {
 }
@@ -73,10 +88,7 @@ public abstract class TestSimulatorStateServiceBase : ISimulatorStateService
     public Task AcceptPendingInboundDirectInviteAsync(PeerId simulatedPeerId, Guid correlationId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
     public Task RejectPendingInboundDirectInviteAsync(PeerId simulatedPeerId, Guid correlationId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
     public Task<SimulatedPeerInviteAcceptance> AcceptInboundDirectInviteAsync(PeerId simulatedPeerId, PeerId inviterPeerId, Percolator.Contracts.EstablishDirectSessionRequest invite, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-    public Task DeliverInviteHandshakeResponseToMainAsync(Percolator.Contracts.InviteHandshakeResponse response, CancellationToken cancellationToken = default) => throw new NotImplementedException();
     public Task HandleInboundInviteHandshakeResponseFromMainAsync(PeerId simulatedPeerId, Percolator.Contracts.InviteHandshakeResponse response, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-    public Task QueueInviteHandshakeResponseForDeliveryToMainAsync(PeerId simulatedPeerId, Guid requestCorrelationId, Percolator.Contracts.InviteHandshakeResponse response, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-    public Task<bool> TryDeliverQueuedInviteHandshakeResponseToMainAsync(PeerId simulatedPeerId, Guid requestCorrelationId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
     public Task<Percolator.Contracts.EstablishSessionResponse> ReceiveEstablishSessionFromMainAsync(PeerId simulatedPeerId, Percolator.Contracts.EstablishSessionRequest request, CancellationToken cancellationToken = default) => throw new NotImplementedException();
     public Task<Percolator.Contracts.DeliverOpaqueMessageResponse> ReceiveOpaqueMessageFromMainAsync(PeerId simulatedPeerId, Percolator.Contracts.DeliverOpaqueMessageRequest request, CancellationToken cancellationToken = default) => throw new NotImplementedException();
     public Task PublishStandardPreKeyBundleToRelayAsync(PeerId simulatedPeerId, PeerId relayHostPeerId, DateTimeOffset expiresUtc, int oneTimeKeyCount, CancellationToken cancellationToken = default) => throw new NotImplementedException();

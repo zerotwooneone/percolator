@@ -53,7 +53,6 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
     private static SimulatorStateService CreateSut(
         InMemorySimulatorStateRepository repo,
         SimulatorDiagnosticsService diagnostics,
-        ISimulatedPeerPendingInbox pending,
         IClock clock,
         out FakeTimeProvider timeProvider)
     {
@@ -67,8 +66,8 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         return new SimulatorStateService(
             repo,
             diagnostics,
-            pending,
             services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
+            new NoopSimulatorToMainTransportService(),
             transportOptions,
             engine,
             timeProvider);
@@ -120,10 +119,9 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             Relays: Array.Empty<RelayStateSnapshot>(),
             Groups: Array.Empty<GroupConversationDto>()));
 
-        var pending = new SimulatedPeerPendingInbox();
         var diagnostics = new SimulatorDiagnosticsService();
         var clock = new StaticClock(StaticClock.DefaultNow);
-        var sut = CreateSut(repo, diagnostics, pending, clock, out var timeProvider);
+        var sut = CreateSut(repo, diagnostics, clock, out var timeProvider);
         await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
 
         var acceptance = await sut.AcceptInboundDirectInviteAsync(simulatedPeerId, inviterPeerId, invite, CancellationToken.None);
@@ -192,10 +190,9 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             Relays: Array.Empty<RelayStateSnapshot>(),
             Groups: Array.Empty<GroupConversationDto>()));
 
-        var pending = new SimulatedPeerPendingInbox();
         var diagnostics = new SimulatorDiagnosticsService();
         var clock = new StaticClock(StaticClock.DefaultNow);
-        var sut = CreateSut(repo, diagnostics, pending, clock, out var timeProvider);
+        var sut = CreateSut(repo, diagnostics, clock, out var timeProvider);
         await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
 
         // Act
@@ -242,10 +239,9 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             Relays: new[] { new RelayStateSnapshot(relayHostPeerId, Array.Empty<OutboundRelayMessageSnapshot>(), Array.Empty<InboundRelayMessageSnapshot>()) },
             Groups: Array.Empty<GroupConversationDto>()));
 
-        var pending = new SimulatedPeerPendingInbox();
         var diagnostics = new SimulatorDiagnosticsService();
         var clock = new StaticClock(StaticClock.DefaultNow);
-        var sut = CreateSut(repo, diagnostics, pending, clock, out var timeProvider);
+        var sut = CreateSut(repo, diagnostics, clock, out var timeProvider);
         await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
 
         using var initiatorIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
@@ -309,8 +305,6 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         using var initiatorIdentityEcdsa = ECDsa.Create(initiatorIdentityEcdh.ExportParameters(true));
         var initiatorIdentitySpki = initiatorIdentityEcdsa.ExportSubjectPublicKeyInfo();
 
-        var pending = new SimulatedPeerPendingInbox();
-
         var bundle = CreateValidResponderPreKeyBundle();
         var responderPkh = bundle.ResponderPkh;
 
@@ -353,7 +347,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
 
         var diagnostics = new SimulatorDiagnosticsService();
         var clock = new StaticClock(StaticClock.DefaultNow);
-        var sut = CreateSut(repo, diagnostics, pending, clock, out var timeProvider);
+        var sut = CreateSut(repo, diagnostics, clock, out var timeProvider);
         await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
 
         // Act
@@ -392,8 +386,6 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         var initiatorIdentityPriv = initiatorIdentityEcdh.ExportECPrivateKey();
         using var initiatorIdentityEcdsa = ECDsa.Create(initiatorIdentityEcdh.ExportParameters(true));
         var initiatorIdentitySpki = initiatorIdentityEcdsa.ExportSubjectPublicKeyInfo();
-
-        var pending = new SimulatedPeerPendingInbox();
 
         var requestedResponderPkh = SHA256.HashData(Guid.NewGuid().ToByteArray());
 
@@ -439,7 +431,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
 
         var diagnostics = new SimulatorDiagnosticsService();
         var clock = new StaticClock(StaticClock.DefaultNow);
-        var sut = CreateSut(repo, diagnostics, pending, clock, out var timeProvider);
+        var sut = CreateSut(repo, diagnostics, clock, out var timeProvider);
         await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
 
         // Act
@@ -487,7 +479,6 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         var bundle = CreateValidResponderPreKeyBundle();
         var responderPkh = bundle.ResponderPkh;
 
-        var pending = new SimulatedPeerPendingInbox();
         var clock = new StaticClock(StaticClock.DefaultNow);
 
         var initiatorPeer = new SimulatedPeerModel(
@@ -528,7 +519,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             Groups: Array.Empty<GroupConversationDto>()));
 
         var diagnostics = new SimulatorDiagnosticsService();
-        var sut = CreateSut(repo, diagnostics, pending, clock, out var timeProvider);
+        var sut = CreateSut(repo, diagnostics, clock, out var timeProvider);
         await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
 
         // Act 1: initiate handshake, which creates a pending session with a temporary session id.
@@ -592,11 +583,8 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         var relayHostPeerId = new Percolator.Network.PeerId(Guid.NewGuid());
 
         using var relayIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var relayIdentityPriv = relayIdentityEcdh.ExportECPrivateKey();
         using var relayIdentityEcdsa = ECDsa.Create(relayIdentityEcdh.ExportParameters(true));
-        var relayIdentitySpki = relayIdentityEcdsa.ExportSubjectPublicKeyInfo();
-        var pending = new SimulatedPeerPendingInbox();
-
+        
         var requestedPkh = SHA256.HashData(Guid.NewGuid().ToByteArray());
 
         var clock = new StaticClock(StaticClock.DefaultNow);
@@ -633,7 +621,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             Groups: Array.Empty<GroupConversationDto>()));
 
         var diagnostics = new SimulatorDiagnosticsService();
-        var sut = CreateSut(repo, diagnostics, pending, clock, out var timeProvider);
+        var sut = CreateSut(repo, diagnostics, clock, out var timeProvider);
         await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
 
         sut.Peers.Single(p => p.PeerId == relayHostPeerId).SessionsMutable[responderSession.Id] = responderSession;
