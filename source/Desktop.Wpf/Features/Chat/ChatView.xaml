@@ -33,16 +33,6 @@
         </StackPanel>
       </StackPanel>
       <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
-        <!-- Phone -->
-        <controls:MatButton IsIcon="True" IsRound="True" Variant="Filled" Margin="0,0,8,0">
-          <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconPhone}"/>
-        </controls:MatButton>
-        <!-- Video -->
-        <controls:MatButton IsIcon="True" IsRound="True" Variant="Filled" Margin="0,0,8,0">
-          <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconVideo}"/>
-        </controls:MatButton>
-        <!-- Vertical separator bar -->
-        <Border Width="1" Height="24" Background="#263246" CornerRadius="1" Margin="0,0,8,0" VerticalAlignment="Center"/>
         <!-- Network status button toggles side panel -->
         <controls:MatButton IsIcon="True" IsRound="True" Variant="Filled"
                             Command="{Binding ToggleNetworkCommand}">
