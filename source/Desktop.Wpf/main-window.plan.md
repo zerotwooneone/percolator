@@ -227,7 +227,7 @@ This plan intentionally names the primitives at the architectural level (exact n
 
 - **GroupMasterKey**
   - A stable 32-byte root secret.
-  - Persisted at rest (encrypted).
+  - Persisted at rest.
   - The source of truth for rehydrating all other zkgroup material.
 
 - **GroupSecretParams (ephemeral)**
@@ -342,7 +342,7 @@ Schema decision for Group V2:
 - Add a new persistence table dedicated to Group V2 root key material:
   - `GroupCryptoStateDbo`
     - `ConversationId` (PK, FK to `ConversationDbo.Id`)
-    - `EncryptedGroupMasterKeyBytes` (BLOB, required; encrypted-at-rest wrapper over exactly 32 bytes)
+    - `GroupMasterKeyBytes` (BLOB, required; exactly 32 bytes)
     - `CreatedAtUtc`, `UpdatedAtUtc` (optional but recommended for auditing/migrations)
 
 Rationale:
@@ -358,9 +358,9 @@ Migration note:
 
 Required persistence (authoritative):
 
-- For each group conversation, persist exactly one encrypted 32-byte master key blob:
-  - `GroupCryptoStateDbo.EncryptedGroupMasterKeyBytes`
-    - This is the encrypted-at-rest wrapper over the 32-byte serialized `GroupMasterKey`.
+- For each group conversation, persist exactly one 32-byte master key blob:
+  - `GroupCryptoStateDbo.GroupMasterKeyBytes`
+    - This is exactly 32 bytes containing the serialized `GroupMasterKey`.
     - No zkgroup-derived sub-keys (`GroupSecretParams`, `group_id`, `blob_key`, keypairs) are persisted.
 
 Explicit lifecycle:
@@ -368,12 +368,10 @@ Explicit lifecycle:
 - **Create**
   - Infrastructure generates a new `GroupMasterKey` via zkgroup.
   - Extract/serialize `GroupMasterKey` into a managed 32-byte array.
-  - Encrypt at rest.
-  - Store into `GroupCryptoStateDbo.EncryptedGroupMasterKeyBytes` for the conversation.
+  - Store into `GroupCryptoStateDbo.GroupMasterKeyBytes` for the conversation.
 
 - **Load**
-  - Read `GroupCryptoStateDbo.EncryptedGroupMasterKeyBytes` for the conversation.
-  - Decrypt at rest into a managed 32-byte array.
+  - Read `GroupCryptoStateDbo.GroupMasterKeyBytes` for the conversation.
   - Validate exact length (must be 32 bytes) in managed code.
   - Only then call infrastructure FFI to rehydrate:
     - `GroupMasterKeySafeHandle` (or equivalent)
@@ -381,7 +379,7 @@ Explicit lifecycle:
     - derived values (`group_id`, `blob_key`, encryption keypairs) for runtime use
 
 - **Rotation / updates**
-  - Any protocol-driven update that changes root key material must be represented as a deterministic update of `GroupCryptoStateDbo.EncryptedGroupMasterKeyBytes`.
+  - Any protocol-driven update that changes root key material must be represented as a deterministic update of `GroupCryptoStateDbo.GroupMasterKeyBytes`.
   - No derived keys are stored; only rederived.
 
 Deliverable:
@@ -410,7 +408,7 @@ Infrastructure-focused tests (must exist before Chunk A):
   - No native call is made with invalid buffers.
 
 - **At-rest encryption round-trip**
-  - Persist encrypted master key bytes -> decrypt -> rehydrate params -> encrypt/decrypt a test message successfully.
+  - Persist raw master key bytes -> rehydrate params -> encrypt/decrypt a test message successfully.
 
 ### 0.6 Coverage check (end-of-chunk gate)
 
@@ -421,6 +419,8 @@ Infrastructure-focused tests (must exist before Chunk A):
 ### 0.7 Dead code to remove (breaking cleanup list)
 
 This section is an explicit checklist of code that becomes obsolete once Group V2 (zkgroup) is the only supported group messaging protocol.
+
+**IMPORTANT: This is a big-bang rollout with no backwards compatibility. Database files will be new. Delete all legacy code entirely - do not mark as deprecated.**
 
 #### Contracts (protobuf)
 
@@ -467,23 +467,282 @@ Notes:
 
 ---
 
-## Chunk A — WPF group UX (blocked on Chunk 0)
+## Chunk A — Application + crypto plumbing for real group chats (post-Chunk 0)
+ 
+ Chunk A is the bridging chunk between the cryptographic foundations (Chunk 0) and WPF UX work.
+ The goal is to make the application pipeline capable of sending/receiving real group messages using the new `ChatEnvelope.group_v2_message` wire type.
+ 
+ ### A.0 Current state (what already exists)
+ 
+ - Group conversation identity:
+   - `CreateGroup` exists and is handled in `Percolator.Application.Network.ProcessInternalEnvelopeHandler`.
+   - Group conversations are created by `Percolator.Application.Apps.Chat.CreateGroupFromIdentityKeysHandler`.
+ - Outbound message dispatch:
+   - Direct chat and group chat both use `DispatchTextMessageHandler` to send `ChatEnvelope.text_message` via `IRemoteEnvelopeSender`.
+ - Crypto integration point (legacy):
+   - `Percolator.Application.Apps.Chat.IEnvelopeCrypto` exists but is currently shaped for the deleted key-rotation plane.
+   - `DummyEnvelopeCrypto` is a stub and should be replaced/removed.
+ - New protocol surface:
+   - `Percolator.Contracts` now includes `GroupV2Message` and `ChatEnvelope.group_v2_message`.
+ - Persistence foundation:
+   - `GroupCryptoStateDbo` exists and is migrated.
+ 
+ ### A.1 Define the minimum viable Group V2 cryptography contract for the app layer
+ 
+ Goal: the application layer must have a single dependency on `Percolator.Cryptography` abstractions for group encryption/decryption.
+ 
+ - Introduce a new domain-facing service interface dedicated to Group V2 message transforms:
+   - `IGroupV2MessageCryptographyService`
+ - Required operations (minimum for a vertical slice):
+   - Encrypt: `(GroupId, BlobKey, GroupV2Content) -> Ciphertext` (Ciphertext is stored into `GroupV2Message.ciphertext`)
+   - Decrypt: `(GroupId, BlobKey, Ciphertext) -> GroupV2Content`
+ - Payload format:
+   - The plaintext wrapped inside the ciphertext MUST be a tiny internal protobuf message:
+     - `message GroupV2Content { string text_message = 1; }`
+ - Non-goals in Chunk A:
+   - Full membership/credential semantics, eviction proofs, or server-mediated ZK verification (pushed to later chunks).
+ 
+ ### A.2 Implement GroupMasterKey persistence accessors (read/write)
+ 
+ Goal: make the persisted `GroupMasterKey` available to the send/receive pipelines.
+ 
+ - Add an infrastructure repository/service in `Percolator.Infrastructure`:
+   - `IGroupCryptoStateRepository`
+   - Keyed by `ConversationId` (the same GUID stored as `GroupCryptoStateDbo.ConversationId`)
+   - Reads/writes `GroupMasterKey` (32 bytes) directly.
+ - At-rest encryption note:
+   - The entire SQLite database file is already encrypted at rest.
+   - No column-level encryption is performed for `GroupMasterKeyBytes`.
+ - Enforce invariants:
+  - Stored blob must be exactly 32 bytes.
+  - Length validation occurs before calling any interop.
 
-Chunk A will be rewritten after Chunk 0 is reviewed and accepted.
+### A.2.1 Ensure group conversation metadata + membership exists as a queryable read model
 
-For now, Chunk A is explicitly blocked on:
+Goal: Chunk B and C must be able to show groups and group details without touching domain repositories.
 
-- `IGroupCryptographyService` existing in `Percolator.Cryptography`.
-- Infrastructure implementation and persistence schema being complete.
-- End-to-end send/receive group messages working through the application pipeline.
+- Ensure the existing conversation/sidebar query surfaces expose (or can be extended to expose):
+  - group display name
+  - conversation kind (direct vs group)
+  - group membership list for send + UI (member peer ids / identity keys)
+- Ensure the message-history query surface can load messages for a group `ConversationId`.
+
+Explicit rule:
+
+- WPF reads use query/read-model interfaces only.
+- The domain repository added in A.2 is only for write-side state changes (persisting the GroupMasterKey).
+ 
+ ### A.3 Wire inbound processing for `ChatEnvelope.group_v2_message`
+ 
+ Goal: receiving a `GroupV2Message` results in a stored plaintext message in the existing conversation store.
+ 
+ - Add a new switch case in `ProcessInternalEnvelopeHandler`:
+   - `ChatEnvelope.MessageOneofCase.GroupV2Message`
+ - Resolve:
+   - `GroupV2Message.conversation_id` -> `ConversationId`
+   - load the master key bytes via `IGroupCryptoStateRepository` and rehydrate to `GroupMasterKey`
+   - derive `GroupId` (and validate `GroupV2Message.group_id` if present)
+ - Decrypt:
+   - derive `BlobKey` from `GroupMasterKey`
+   - decrypt `GroupV2Message.ciphertext` to `GroupV2Content`
+ - Persist:
+  - store `GroupV2Content.text_message` into the existing `MessageDbo` pipeline (parallel to `ReceiveTextMessageCommand`)
+
+Missing-state behavior (must be defined in Chunk A):
+
+- If the `GroupMasterKey` is not present for the `conversation_id`:
+  - reject/defer the message with a clear error (do not persist ciphertext)
+  - this is expected until `GroupV2KeyBootstrap` is received
+
+ Conversion/validation rule (MUST be applied consistently in all handlers):
+
+ - `conversation_id` protobuf field MUST be exactly 16 bytes (GUID bytes)
+ - Convert via `new Guid(bytes)` and then wrap as `new ConversationId(guid)` (reject `Guid.Empty`)
+ 
+ ### A.4 Wire outbound processing for group messages (send)
+ 
+ Goal: sending a message to a group produces `GroupV2Message` envelopes to each recipient using existing delivery abstractions.
+ 
+ - Add a new command/handler pair for dispatching group messages:
+  - Resolve conversation -> members via existing query/read-model interfaces (not via domain repositories)
+  - Load `GroupMasterKey` via `IGroupCryptoStateRepository`
+  - Derive `GroupId` and `BlobKey`
+  - Build `GroupV2Content` and encrypt -> ciphertext
+  - Send `ChatEnvelope { GroupV2Message = ... }` per recipient via `IRemoteEnvelopeSender`
+
+Send preconditions (must be enforced in the handler):
+
+- Conversation must be a group conversation.
+- Member list must be non-empty.
+- `GroupMasterKey` must exist locally for the conversation.
+ 
+ ### A.5 Update/CreateGroup flow to generate and persist GroupMasterKey
+ 
+ Goal: group creation must seed a `GroupMasterKey` at the same time the conversation row is created.
+ 
+ - In `CreateGroupFromIdentityKeysHandler`:
+  - generate a new `GroupMasterKey` (already supported)
+  - persist it in `GroupCryptoStates` for the created conversation
+  - distribute the root key to recipients using an explicit bootstrap message sent via existing 1:1 tunnels
+ 
+ Note:
+ 
+ - The current `CreateGroup` wire message does not carry root key material.
+ - Bootstrap strategy decision:
+  - Introduce `ChatEnvelope.group_v2_key_bootstrap` (protobuf message `GroupV2KeyBootstrap`) to deliver the 32-byte `GroupMasterKey` via existing 1:1 tunnels.
+  - `GroupV2KeyBootstrap` carries `conversation_id` (GUID bytes) and `group_master_key_bytes` (32 bytes).
+
+### A.5.1 Wire inbound processing for `ChatEnvelope.group_v2_key_bootstrap`
+
+Goal: recipients must be able to receive a group key bootstrap and become able to decrypt/send group messages.
+
+- Add a new switch case in `ProcessInternalEnvelopeHandler`:
+  - `ChatEnvelope.MessageOneofCase.GroupV2KeyBootstrap`
+- Resolve:
+  - `conversation_id` -> `ConversationId`
+  - validate `group_master_key_bytes` is exactly 32 bytes
+- Persist:
+  - store `group_master_key_bytes` into `GroupCryptoStates` via `IGroupCryptoStateRepository`
+
+Important ordering note:
+
+- The create-group UX requires that a recipient has a conversation row and membership row(s) before the group shows up in Chunk B.
+  - If that is not already guaranteed by the existing `CreateGroup` distribution, Chunk A must add the missing propagation so the query surfaces can show the group.
+ 
+ ### A.6 Build + test gates
+ 
+ - Build must succeed after big-bang deletions.
+ - Add at least one integration-level test proving:
+   - group create persists master key
+   - outbound encrypt -> inbound decrypt round-trip stores plaintext
+---
+
+## Chunk B — WPF: groups appear in the main connection list and are selectable
+
+Goal:
+
+- Group conversations must show up in the main window’s “connections” list in the same way as direct chats.
+- A group conversation can be selected, and selecting it drives the same “active conversation” UX as a direct chat.
+
+Constraints:
+
+- Follow the existing reactive MVVM patterns already used in:
+  - `PeerConnectionStateService`
+  - `ConnectionManagementDialogViewModel`
+- UI read-only data must come from query/read-model interfaces (extend existing query surfaces); do not use domain repositories for reads.
+- Domain repositories are reserved for write-side state changes only and should be invoked behind application commands/handlers.
+- Prefer a state service that owns observable collections and exposes read-only views to VMs.
+- No imperative UI mutation from background threads; use synchronized views + UI dispatcher.
+
+### B.0 Data model and query surface
+
+- Ensure the sidebar/connection list query already used by `PeerConnectionStateService` includes group conversations (query/read model).
+  - The existing `SidebarPeerConnectionStatus.Group` mapping indicates the query surface likely already supports groups.
+  - If group conversations aren’t present yet, update the query implementation so `LoadSidebarConnectionsAsync(...)` returns group rows.
+
+### B.1 UI state service (pattern match: `PeerConnectionStateService`)
+
+- Introduce a dedicated state service for chat sidebar selection and conversation previews (name TBD; example):
+  - `ChatSidebarStateService`
+- Responsibilities:
+  - Own an `ObservableList<...>` for sidebar items (direct + group).
+  - Expose `IReadOnlyObservableList<...>` for binding.
+  - Expose `BindableReactiveProperty<...?> SelectedItem` (or `SelectedConversationId`).
+  - Emit `StateMutated` / change observables for view models to react.
+
+Sidebar item shape (minimum):
+
+- `ConversationId`
+- `DisplayName` (direct peer name OR group name)
+- `Initials`
+- `LastActivityUtc`
+- `Kind` / `Status` (Direct, Relay, Group)
+
+### B.2 Main window view model wiring
+
+- Update the main window view model to:
+  - Create a synchronized view of the sidebar list (pattern: `CreateView(...).ToNotifyCollectionChanged(...)`).
+  - Bind selection to a reactive property (`BindableReactiveProperty<...>`).
+  - On selection change, publish a single “active conversation changed” signal used by the message pane.
+
+Selection behavior:
+
+- Selecting a group item:
+  - sets the active `ConversationId`
+  - loads message history for that conversation
+  - shows the message composer enabled/disabled appropriately
+
+### B.3 Conversation message pane integration
+
+- Ensure the message pane can load messages based on `ConversationId` regardless of direct/group.
+- For Chunk B, plaintext display is sufficient (ciphertext never shown in UI).
+
+### B.4 UX acceptance criteria
+
+- Group conversations appear in the same list as direct chats.
+- Group conversations have a stable display name (fallback: “Group <short-guid>” if no name).
+- Selecting a group updates the active conversation and shows its message history.
 
 ---
 
-## Chunk B — Group management UX (blocked on Chunk 0)
+## Chunk C — WPF: group admin and membership UI
 
-Chunk B will be rewritten after Chunk 0 is reviewed and accepted.
+Goal:
 
-For now, Chunk B is explicitly blocked on:
+- Provide UI affordances for group admin actions and membership management.
+- The UI must be reactive and consistent with the existing patterns.
 
-- Group V2 membership/admin semantics being mapped to domain/application operations.
-- Persistence schema supporting any required group state for membership changes.
+Non-goals (for Chunk C):
+
+- Perfect parity with Signal’s full Group V2 membership semantics.
+- Advanced moderation, audit logs, or complex role hierarchies.
+
+### C.0 State + query shape
+
+- Add / extend a group-details query surface to power the UI (read model), returning:
+  - group name
+  - current members
+  - which members are admins
+  - the current user’s admin capability for the group
+
+Represent this as a snapshot DTO and map into view models, similar to `PeerConnectionStateSnapshot`.
+
+Explicit rule:
+
+- UI must not call domain repositories for read-only access.
+- All UI reads flow through query interfaces / read models.
+- All mutations (rename, add/remove member, admin changes) flow through application commands/handlers (which may use domain repositories internally).
+
+### C.1 Group details panel / dialog
+
+- Add a `GroupDetailsViewModel` (or dialog VM) that:
+  - exposes group metadata as `ReadOnlyReactiveProperty<...>` / `BindableReactiveProperty<...>`
+  - exposes `ObservableList<MemberItemViewModel>` with a synchronized view for the UI
+
+### C.2 Admin commands (reactive command pattern)
+
+- Add `AsyncRelayCommand`s for admin actions:
+  - Rename group
+  - Add member (by identity key / by selection from known peers)
+  - Remove member
+  - Grant admin
+  - Revoke admin
+
+Command behavior pattern (match `ConnectionManagementDialogViewModel`):
+
+- Maintain `PhaseText` and `ErrorText` reactive properties.
+- On command execution:
+  - optimistic UI updates are optional; prefer reload-from-source after success.
+  - failures surface as user-visible error text.
+
+### C.3 Live updates
+
+- When admin/membership operations complete (local or remote):
+  - refresh the group details snapshot
+  - refresh sidebar preview (name, last activity)
+
+### C.4 UX acceptance criteria
+
+- From a selected group conversation, the user can open “Group details”.
+- If the user is an admin, admin actions are enabled; otherwise disabled.
+- Membership changes are reflected in the UI after completion.
