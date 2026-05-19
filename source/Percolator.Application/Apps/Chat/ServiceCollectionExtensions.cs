@@ -13,7 +13,6 @@ public static class ServiceCollectionExtensions
         services.AddTransient<IAdminOperationDispatcher, AdminOperationDispatcher>();
         services.AddTransient<IAdminOperationSigner, AdminOperationSigner>();
         services.AddScoped<IAdminSequenceProvider, AdminSequenceProvider>();
-        services.AddScoped<IGroupSenderKeyService, GroupSenderKeyService>();
         services.AddScoped<IEnvelopeCrypto, DummyEnvelopeCrypto>();
         services.AddScoped<IPkhPeerResolver, PkhPeerResolver>();
 

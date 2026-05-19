@@ -52,11 +52,12 @@ message ChatEnvelope {
     GroupMembershipChangedNotification group_membership_changed_notification = 6;
     GroupInfoChangedNotification group_info_changed_notification = 7;
     DeliveredReceipt delivered_receipt = 8;
-    // New administrative and key-rotation messages
+    // Bootstrap: delivers the encrypted GroupMasterKey over existing 1:1 tunnels
+    GroupV2KeyBootstrap group_v2_key_bootstrap = 15;
+    // Signal Group V2 ciphertext message
+    GroupV2Message group_v2_message = 14;
+    // Administrative messages (keep SignedAdminOperation for non-crypto group management)
     SignedAdminOperation signed_admin_operation = 9;
-    SignedKeyAdoptionConfirmation key_adoption_confirmation = 10;
-    SignedAdminCommitOperation admin_commit_operation = 11;
-    KeyDistributionPayload key_distribution = 12; // sent 1:1 from acting admin to each member
   }
 }
 
@@ -101,6 +102,38 @@ message DeliveredReceipt {
   optional bytes group_conversation_guid = 4;
   // Optional PKH for 1:1 routing when no direct session exists
   optional bytes public_key_hash = 5;
+}
+
+// Signal Group V2 ciphertext message
+message GroupV2Message {
+  optional uint32 version = 100;
+  bytes message_id = 1; // Unique identifier for the message
+  optional bytes author_identity_key = 2; // Sender's identity key
+  google.protobuf.Timestamp sent_timestamp_utc = 3;
+  // ConversationId (GUID bytes) for DB lookup / routing within the app
+  optional bytes conversation_id = 4;
+  // The 32-byte zkgroup-derived group identifier (for cryptographic validation)
+  optional bytes group_id = 5;
+  // The ciphertext bytes (encrypted using Signal Group V2 protocol)
+  optional bytes ciphertext = 6;
+  // Optional epoch number for key rotation tracking
+  optional uint32 epoch = 7;
+}
+
+// Bootstrap message carrying the GroupMasterKey for a conversation.
+// This is sent over existing 1:1 tunnels and is required before members can
+// decrypt or encrypt GroupV2Message payloads.
+message GroupV2KeyBootstrap {
+  optional uint32 version = 100;
+  // ConversationId (GUID bytes) that this master key applies to
+  optional bytes conversation_id = 1;
+  // Exactly 32 bytes containing the GroupMasterKey.
+  optional bytes group_master_key_bytes = 2;
+}
+
+// Inner plaintext wrapper for GroupV2Message.ciphertext.
+message GroupV2Content {
+  string text_message = 1;
 }
 
 // Group Management Messages
@@ -180,39 +213,6 @@ message AdminHistoryEntry {
 message AdminHistoryBundle {
   optional uint32 version = 100;
   repeated AdminHistoryEntry entries = 1; // Ordered from genesis to present
-}
-
-// =============================
-// Key Rotation Plane (client-orchestrated)
-// =============================
-
-// Sent 1:1 by the acting admin to each member. Contains the per-recipient encrypted group key.
-message KeyDistributionPayload {
-  optional uint32 version = 100;
-  optional bytes group_conversation_guid = 1; // 16 bytes
-  optional uint32 key_version = 2; // Monotonic per-group version number
-  optional bytes encrypted_group_key_for_recipient = 3; // opaque ciphertext
-}
-
-// Sent by each member back to the acting admin, acknowledging adoption of key_version.
-message SignedKeyAdoptionConfirmation {
-  optional uint32 version = 100;
-  optional bytes group_conversation_guid = 1; // 16 bytes
-  optional uint32 key_version = 2;
-  optional bytes adopter_identity_key = 3; // SPKI of adopter identity (or domain-specific identifier)
-  google.protobuf.Timestamp sent_timestamp_utc = 4;
-  optional bytes signature = 5; // Signature by adopter over the confirmation payload
-}
-
-// Broadcast by the acting admin after collecting all confirmations, finalizing the admin op.
-message SignedAdminCommitOperation {
-  optional uint32 version = 100;
-  optional bytes group_conversation_guid = 1; // 16 bytes
-  optional bytes op_id = 2; // AdminOperationPayload.op_id being committed
-  optional uint32 committed_key_version = 3;
-  google.protobuf.Timestamp sent_timestamp_utc = 4;
-  optional bytes signature = 5; // Signature by acting admin over commit payload
-  optional uint64 admin_sequence_number = 6; // monotonic per-group sequence for first-commit-wins
 }
 
 // Group Notification Messages

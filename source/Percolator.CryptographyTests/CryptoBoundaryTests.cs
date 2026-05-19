@@ -64,29 +64,6 @@ public class CryptoBoundaryTests
     }
 
     [Test]
-    public void SenderKeySession_WithEmptyMessage_ShouldRoundtripSuccessfully()
-    {
-        // Arrange
-        byte[] sessionKey = RandomNumberGenerator.GetBytes(32);
-        byte[] context = "group-context"u8.ToArray();
-
-        var senderSession = new SenderKeySession(sessionKey, context);
-        var receiverSession = new SenderKeySession(sessionKey, context);
-
-        // Act
-        var emptyMessage = Array.Empty<byte>();
-        var encrypted = senderSession.Encrypt(emptyMessage);
-        var decrypted = receiverSession.Decrypt(encrypted);
-
-        // Assert
-        decrypted.Should().BeEmpty();
-
-        // Clean up
-        senderSession.Dispose();
-        receiverSession.Dispose();
-    }
-
-    [Test]
     public void EncryptDecryptAesGcm_WithMaxKeySizes_ShouldSucceed()
     {
         // Arrange - Use maximum recommended key size (32 bytes for AES-256)
