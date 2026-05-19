@@ -9,13 +9,10 @@ Primary entrypoint:
 - **`public static class SignalCrypto`**
   - **`public static int TestConnection()`**
     - Diagnostic call to verify native library loading and basic interop.
-    - Returns exactly `42` on success.
-    - Failure to load the native library should surface as `DllNotFoundException` or `BadImageFormatException`.
 
   - **`public static GroupSecretParamsSafeHandle GenerateGroupSecretParams(ReadOnlySpan<byte> randomness32)`**
     - Creates a new Groups V2 `GroupSecretParams` from exactly 32 bytes of randomness.
     - Throws `ArgumentException` if `randomness32.Length != 32`.
-    - Production randomness contract: callers must source `randomness32` from `System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)`.
 
   - **`public static GroupMasterKeySafeHandle GetGroupMasterKey(GroupSecretParamsSafeHandle secretParams)`**
     - Extracts the `GroupMasterKey` from an existing `GroupSecretParams`.
@@ -23,6 +20,16 @@ Primary entrypoint:
 
   - **`public static GroupSecretParamsSafeHandle DeriveGroupSecretParams(GroupMasterKeySafeHandle masterKey)`**
     - Derives `GroupSecretParams` deterministically from a persisted `GroupMasterKey`.
+
+  - **`public static void GetGroupId(GroupSecretParamsSafeHandle handle, Span<byte> outBuffer)`**
+    - Writes exactly 32 bytes of the group identifier.
+    - Allocation-free.
+    - Throws `ArgumentException` if the destination buffer length is not exactly 32.
+
+  - **`public static void GetBlobKey(GroupSecretParamsSafeHandle handle, Span<byte> outBuffer)`**
+    - Writes exactly 32 bytes of the blob key.
+    - Allocation-free.
+    - Throws `ArgumentException` if the destination buffer length is not exactly 32.
 
   - **`public static byte[] SerializeGroupMasterKey(GroupMasterKeySafeHandle masterKey)`**
   - **`public static void SerializeGroupMasterKey(GroupMasterKeySafeHandle masterKey, Span<byte> buffer32)`**
@@ -57,12 +64,6 @@ SafeHandle types (opaque native ownership):
   - The wrapper uses `DangerousAddRef`/`DangerousRelease` when passing handles to native code to prevent races with finalization.
   - Treat handle instances as normal reference types; avoid disposing while concurrently using them.
 
-- **Status code mapping (native -> managed)**
-  - `0` (`STATUS_OK`): success
-  - `1` (`STATUS_INVALID_ARGUMENT`): maps to `ArgumentException` / `ArgumentOutOfRangeException` (caller bug: wrong length / invalid pointer)
-  - `2` (`STATUS_PANIC`): maps to `CryptographicException` with a distinct critical message: "A fatal panic occurred within the unmanaged Signal native boundary."
-  - `4` (`STATUS_DESERIALIZATION_FAILURE`): maps to `CryptographicException` with: "Failed to deserialize the GroupMasterKey due to data corruption or invalid format."
-
 ## Rust C-ABI exports (`signal_shim`)
 
 These functions are exported from the native library and are consumed by the C# wrapper. They are not intended to be called directly from application code.
@@ -79,6 +80,10 @@ These functions are exported from the native library and are consumed by the C# 
   - `int32 signal_zkgroup_group_secret_params_generate(const uint8_t* randomness32, size_t randomness_len, void** out_secret_params)`
   - `int32 signal_zkgroup_group_secret_params_get_master_key(const void* secret_params, void** out_master_key)`
   - `int32 signal_zkgroup_group_secret_params_derive_from_master_key(const void* master_key, void** out_secret_params)`
+  - `int32 signal_zkgroup_group_secret_params_get_group_id(const void* secret_params, uint8_t* out_buffer, size_t buffer_len)`
+    - Requires `buffer_len == 32`.
+  - `int32 signal_zkgroup_group_secret_params_get_blob_key(const void* secret_params, uint8_t* out_buffer, size_t buffer_len)`
+    - Requires `buffer_len == 32`.
 
 - **GroupMasterKey persistence**
   - `int32 signal_zkgroup_group_master_key_serialize(const void* master_key, uint8_t* out_buffer, size_t buffer_len)`
@@ -97,39 +102,6 @@ These functions are exported from the native library and are consumed by the C# 
   - `1`: invalid argument
   - `2`: panic caught
   - `4`: deserialization failure
-
-## Group messaging roadmap — Signal Group V2 (zkgroup) implementation
-
-This file is the architecture blueprint for implementing Signal Group V2 (zkgroup) group messaging in this repository.
-
-The repository already contains a localized interop wrapper:
-
-- Managed assembly reference:
-  - `source/Percolator.Infrastructure/NativeBinaries/Signal.Interop.dll`
-- Native runtime dependency:
-  - `source/Percolator.Infrastructure/NativeBinaries/signal_shim.dll`
-
-This plan updates the architecture to consume that wrapper while keeping strict dependency boundaries.
-
-### Architectural dependency rules (must be enforced)
-
-- `Percolator.Cryptography` is pure managed domain code.
-  - No pointers.
-  - No `SafeHandle`.
-  - No FFI concepts.
-  - Only safe .NET types (`byte[]`, `ReadOnlySpan<byte>`, domain value objects, etc.).
-
-- `Percolator.Infrastructure` owns all FFI integration.
-  - References `Percolator.Cryptography` and implements its interfaces.
-  - References the localized `Signal.Interop.dll` and ships the required native binaries.
-  - Translates native failures into managed exceptions.
-
-### Authoritative persistence decision (must not drift)
-
-- `GroupMasterKey` is the primary root secret and the only zkgroup root material persisted in SQLite.
-- `GroupSecretParams` and all derived sub-keys (including `group_id`, `blob_key`, and any derived encryption keypairs) are ephemeral.
-  - They are deterministically rehydrated from `GroupMasterKey` at runtime.
-
 ---
 
 ## STEP 1 — Pure domain interface plan (`Percolator.Cryptography`)
@@ -152,10 +124,20 @@ Goal: represent Group V2 key material safely, without exposing raw native handle
     - If the provenance of the input `byte[]` is unclear (may be pooled/reused/mutated), do not use `FromBytesOwned`.
       - Use `FromSpan` over a defensive copy to preserve immutability assumptions.
 
-- `GroupSecretParams` (managed representation)
-  - Ephemeral, managed representation derived from `GroupMasterKey`.
-  - Can be represented as an opaque managed byte array with strict length validation.
-  - Must not be treated as a persistence root; it is a runtime derivative.
+- `GroupId`
+  - The 32-byte group identifier derived from `GroupMasterKey` via `GroupSecretParams`.
+  - Used for server-side group identification and routing.
+  - Implement as `[ByteArray(length: 32)]`.
+
+- `BlobKey`
+  - The 32-byte symmetric encryption key derived from `GroupMasterKey` via `GroupSecretParams`.
+  - Used to encrypt/decrypt group profile metadata (title, avatar, membership roster).
+  - Implement as `[ByteArray(length: 32)]`.
+
+- `GroupSecretParams` (ephemeral native handle only)
+  - Not exposed in the domain layer.
+  - Exists only transiently in the infrastructure layer during derivation operations.
+  - Sub-keys (group_id, blob_key) are extracted via `GetGroupId`/`GetBlobKey` and returned as domain value objects.
 
 ### 1.2 Domain service interface
 
@@ -168,9 +150,9 @@ Required responsibilities (pure managed contracts only):
 - **Generate**
   - Generate a new `GroupMasterKey`.
 
-- **Derive / Extract**
-  - Rehydrate/derive `GroupSecretParams` from `GroupMasterKey` (deterministic).
-  - Derive required identifiers and sub-keys from the rehydrated params (e.g., `group_id`, `blob_key`, any encryption keypairs required by Group V2).
+- **Derive sub-keys**
+  - Derive `GroupId` from `GroupMasterKey` (deterministic via ephemeral `GroupSecretParams`).
+  - Derive `BlobKey` from `GroupMasterKey` (deterministic via ephemeral `GroupSecretParams`).
 
 - **Serialize / Deserialize**
   - `GroupMasterKey` <-> `byte[]` (32 bytes)
@@ -178,7 +160,9 @@ Required responsibilities (pure managed contracts only):
 
 Interface design rule:
 
-- `GroupSecretParams` serialization may exist for wire compatibility and debugging, but persistence must be anchored on `GroupMasterKey` only.
+- `GroupSecretParams` is never exposed in the domain interface.
+- Sub-keys are derived directly from `GroupMasterKey` via infrastructure that manages ephemeral native handles.
+- Signal.Interop provides `GetGroupId` and `GetBlobKey` to extract these values without serializing `GroupSecretParams`.
 
 Domain interface design constraints:
 
