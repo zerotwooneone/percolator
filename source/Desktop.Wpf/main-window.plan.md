@@ -1,775 +1,505 @@
-## Chunk A
+# Signal.Interop API Surface
 
-### Problem statement
+This section documents the intended *public* API surface of this repository as implemented.
 
-When a handshake is **initiated by the simulator** (simulated peer invites Main) and the user clicks **Accept** in the Main window:
+## C# (.NET 9) API (`Signal.Interop`)
 
-- Main creates the session and sends an `InviteHandshakeResponse` back to the simulator (via `ApprovePendingSessionCommand` -> `InviteHandshakeResponseDeliveryService`).
-- That response is intercepted on the desktop side (`SimulatorOutboundInterceptor.TryDeliverInviteHandshakeResponse`).
-- The interceptor currently forwards the response to `SimulatorStateService.ReceiveInviteHandshakeResponseFromMainAsync`.
-- `ReceiveInviteHandshakeResponseFromMainAsync` queues the response into `_pending` and marks the simulated peer as `AwaitingUserAcceptance` (via `MarkInboundPending`).
+Primary entrypoint:
 
-This behavior conflates **two different concepts**:
+- **`public static class SignalCrypto`**
+  - **`public static int TestConnection()`**
+    - Diagnostic call to verify native library loading and basic interop.
+    - Returns exactly `42` on success.
+    - Failure to load the native library should surface as `DllNotFoundException` or `BadImageFormatException`.
 
-- **Inbound invite request** (requires user acceptance before creating a session)
-- **Inbound invite response** (is the acceptance/ack; should immediately finalize and create a session for the original inviter)
+  - **`public static GroupSecretParamsSafeHandle GenerateGroupSecretParams(ReadOnlySpan<byte> randomness32)`**
+    - Creates a new Groups V2 `GroupSecretParams` from exactly 32 bytes of randomness.
+    - Throws `ArgumentException` if `randomness32.Length != 32`.
+    - Production randomness contract: callers must source `randomness32` from `System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)`.
 
-The observable failure mode is that the simulator does **not** complete its session, so subsequent chat send attempts fail with “No session found …”.
+  - **`public static GroupMasterKeySafeHandle GetGroupMasterKey(GroupSecretParamsSafeHandle secretParams)`**
+    - Extracts the `GroupMasterKey` from an existing `GroupSecretParams`.
+    - Intended use: persisting group state across sessions.
 
-### Desired end state
+  - **`public static GroupSecretParamsSafeHandle DeriveGroupSecretParams(GroupMasterKeySafeHandle masterKey)`**
+    - Derives `GroupSecretParams` deterministically from a persisted `GroupMasterKey`.
 
-- The simulator maintains a clear, explicit state machine for invite-based handshakes.
-- When the simulator receives an `InviteHandshakeResponse` for a correlation ID that matches an **outbound invite**, it immediately finalizes the session and transitions to `Established` (no extra click required).
-- API surface (public methods) reflects intent and direction:
-  - Receiving an invite request is different from receiving an invite response.
-  - Queuing for UI acceptance is different from completing a handshake.
-- Dead/duplicative methods are removed, and remaining methods are clearly named.
+  - **`public static byte[] SerializeGroupMasterKey(GroupMasterKeySafeHandle masterKey)`**
+  - **`public static void SerializeGroupMasterKey(GroupMasterKeySafeHandle masterKey, Span<byte> buffer32)`**
+    - Serializes a master key into exactly 32 bytes.
+    - The `Span<byte>` overload is the allocation-free option.
+    - Throws `ArgumentException` if the destination buffer length is not exactly 32.
 
----
+  - **`public static GroupMasterKeySafeHandle DeserializeGroupMasterKey(ReadOnlySpan<byte> bytes32)`**
+    - Reconstructs a master key handle from exactly 32 serialized bytes.
+    - Throws `ArgumentException` if `bytes32.Length != 32`.
+    - Throws `CryptographicException` if native deserialization fails.
 
-### Plan
+SafeHandle types (opaque native ownership):
 
-#### A1. Document the two invite flows and enforce invariants
+- **`public sealed class GroupSecretParamsSafeHandle : SafeHandle`**
+- **`public sealed class GroupMasterKeySafeHandle : SafeHandle`**
 
-- **Flow 1: Main -> Simulator (Main inviter, simulator acceptor)**
-  - Simulator receives `EstablishDirectSessionRequest`.
-  - This flow currently has two competing behavioral models in the codebase:
-    - **Flow 1a (auto-accept on ingress)**: simulator creates the session immediately and can optionally defer *delivery* of the `InviteHandshakeResponse`.
-    - **Flow 1b (persist pending request + user accepts)**: simulator persists the inbound invite request, and only creates the session + delivers `InviteHandshakeResponse` after explicit user acceptance.
-  - **Chunk B** defines the target model for Flow 1b and removes the misleading “already accepted but waiting to deliver” behavior.
-  - Main-side behavior note (from `PercolatorMessageService.EstablishDirectSession`): the RPC always returns `EstablishDirectSessionResponse.Queued` after enqueuing a pending session on Main; there is no “accepted immediately” response type in the contract.
+### Usage notes (C#)
 
-- **Flow 2: Simulator -> Main (Simulator inviter, main acceptor)**
-  - Simulator sends `EstablishDirectSessionRequest`.
-  - Main accepts and creates session, then sends `InviteHandshakeResponse` back to simulator.
-  - Simulator must finalize session immediately on receipt.
+- **Ownership / lifetime**
+  - Handles own native allocations.
+  - Always dispose with `using` / `Dispose()` as soon as possible.
+  - Finalizers exist as a backstop, but explicit disposal is the intended usage.
 
-- **Invariants to encode**
-  - An `InviteHandshakeResponse` must always have a valid `RequestCorrelationId` (already enforced on simulator side).
-  - A response must match either:
-    - an outbound invite (inviter finalization path), or
-    - a pending inbound “main-initiated” flow (if we support that), but never silently become “pending acceptance”.
+- **Persistence model**
+  - Persist group state by storing **only** the 32-byte serialized `GroupMasterKey` in your encrypted local database.
+  - On next launch:
+    - `DeserializeGroupMasterKey(bytes32)`
+    - `DeriveGroupSecretParams(masterKey)`
 
-Truth table:
+- **Threading**
+  - The wrapper uses `DangerousAddRef`/`DangerousRelease` when passing handles to native code to prevent races with finalization.
+  - Treat handle instances as normal reference types; avoid disposing while concurrently using them.
 
-| Message Type | Correlation ID Source | State Transition | Storage |
-|-------------|---------------------|------------------|---------|
-| `InviteHandshakeResponse` | Matches outbound invite (simulator initiated) | `AwaitingUserAcceptance` → `Established` (immediate) | Session created in `model.SessionsMutable`; outbound invite removed; response NOT queued |
-| `InviteHandshakeResponse` | No matching outbound invite (unexpected) | No transition; error logged | Response dropped or stored for diagnostics only |
-| `EstablishDirectSessionRequest` (Main → Simulator) | N/A (new correlation) | `Ready` → `AwaitingUserAcceptance` (pending user decision) | Request queued in pending inbound invite store (Chunk B) |
-| `EstablishDirectSessionRequest` (Simulator → Main) | N/A (new correlation) | `Ready` → `OutboundPending` | Outbound invite stored in `model.OutboundInvitesMutable` |
+- **Status code mapping (native -> managed)**
+  - `0` (`STATUS_OK`): success
+  - `1` (`STATUS_INVALID_ARGUMENT`): maps to `ArgumentException` / `ArgumentOutOfRangeException` (caller bug: wrong length / invalid pointer)
+  - `2` (`STATUS_PANIC`): maps to `CryptographicException` with a distinct critical message: "A fatal panic occurred within the unmanaged Signal native boundary."
+  - `4` (`STATUS_DESERIALIZATION_FAILURE`): maps to `CryptographicException` with: "Failed to deserialize the GroupMasterKey due to data corruption or invalid format."
 
-Deliverable: truth table documented above; invariants encoded in implementation.
+## Rust C-ABI exports (`signal_shim`)
 
-#### A2. Split simulator ingress APIs by message semantics (rename + new methods)
+These functions are exported from the native library and are consumed by the C# wrapper. They are not intended to be called directly from application code.
 
-Goal: remove ambiguity in method naming and responsibilities.
+- **Diagnostics**
+  - `int32 signal_shim_test_connection()`
 
-- Introduce explicit simulator ingress methods (names are suggestions; pick final names during implementation):
-  - `HandleInboundInviteRequestFromMainAsync(...)`  (currently: `ReceiveEstablishDirectSessionFromMainAsync` / `AcceptReverseSignalInviteAsync` path)
-  - `HandleInboundInviteResponseFromMainAsync(...)` (currently: `ReceiveInviteHandshakeResponseFromMainAsync`)
+- **Allocation / freeing (must be paired)**
+  - `void signal_zkgroup_group_secret_params_free(void* secret_params)`
+  - `void signal_zkgroup_group_master_key_free(void* master_key)`
+    - Both perform secure wiping before freeing.
 
-- Replace the generic “Receive*” naming with verbs that express intent:
-  - `Handle...` for deterministic processing
-  - `Queue...` only when intentionally deferring to UI/user action
+- **Groups V2 primitives**
+  - `int32 signal_zkgroup_group_secret_params_generate(const uint8_t* randomness32, size_t randomness_len, void** out_secret_params)`
+  - `int32 signal_zkgroup_group_secret_params_get_master_key(const void* secret_params, void** out_master_key)`
+  - `int32 signal_zkgroup_group_secret_params_derive_from_master_key(const void* master_key, void** out_secret_params)`
 
-- Rename misleading state mutations:
-  - `MarkInboundPending` is currently used for both “I got a request” and “I got a response”.
-  - Create separate UI/state helpers:
-    - `MarkInviteRequestPendingUserDecision(corr)`
-    - `MarkInviteResponseReceived(corr)` (or skip entirely if response finalizes immediately)
+- **GroupMasterKey persistence**
+  - `int32 signal_zkgroup_group_master_key_serialize(const void* master_key, uint8_t* out_buffer, size_t buffer_len)`
+    - Requires `buffer_len == 32`.
+  - `int32 signal_zkgroup_group_master_key_deserialize(const uint8_t* bytes, size_t bytes_len, void** out_master_key)`
+    - Requires `bytes_len == 32`.
 
-Deliverable: compile-time-safe API where the interceptor cannot “accidentally” route a response into a request-pending path.
+### Usage notes (C-ABI)
 
-#### A2.1 Target public API surface (simulator invite *responses*)
+- **Output contract**
+  - On non-zero status, out pointers are set to null.
+- **Panic handling**
+  - All exported functions use `catch_unwind` and return status `2` if a panic is caught.
+- **Status codes**
+  - `0`: success
+  - `1`: invalid argument
+  - `2`: panic caught
+  - `4`: deserialization failure
 
-As part of Chunk A, define (and enforce via naming + types) a minimal public surface for simulator-side processing of invite handshake *responses* from Main:
+## Group messaging roadmap — Signal Group V2 (zkgroup) implementation
 
-- `HandleInboundInviteHandshakeResponseFromMainAsync(simulatedPeerId, InviteHandshakeResponse response, ct)`
-  - Pure response processing. Must not enqueue UI acceptance.
+This file is the architecture blueprint for implementing Signal Group V2 (zkgroup) group messaging in this repository.
 
-- `TryFinalizeOutboundInviteFromHandshakeResponseAsync(simulatedPeerId, acceptorPeerId, correlationId, ct)`
-  - Optional: internal helper used by the handler above.
+The repository already contains a localized interop wrapper:
 
-The existing method `ReceiveInviteHandshakeResponseFromMainAsync` should either be renamed to the handler above, or deleted once call sites are migrated.
+- Managed assembly reference:
+  - `source/Percolator.Infrastructure/NativeBinaries/Signal.Interop.dll`
+- Native runtime dependency:
+  - `source/Percolator.Infrastructure/NativeBinaries/signal_shim.dll`
 
-#### A3. Implement deterministic simulator-side finalization on response receipt
+This plan updates the architecture to consume that wrapper while keeping strict dependency boundaries.
 
-Design target:
+### Architectural dependency rules (must be enforced)
 
-- `HandleInboundInviteHandshakeResponseFromMainAsync(simulatedPeerId, response)` should:
-  - Validate fields.
-  - Resolve correlation id.
-  - Look up matching **outbound invite** record (signed pre-key private, etc.).
-  - Finalize using the existing crypto steps (currently in `TryFinalizeInviteHandshakeResponseFromMainAsync`).
-  - Persist session into `model.SessionsMutable`.
-  - Clear any transient pending markers for that correlation id.
-  - Transition UI state to `Established`.
+- `Percolator.Cryptography` is pure managed domain code.
+  - No pointers.
+  - No `SafeHandle`.
+  - No FFI concepts.
+  - Only safe .NET types (`byte[]`, `ReadOnlySpan<byte>`, domain value objects, etc.).
 
-This implies `TryFinalizeInviteHandshakeResponseFromMainAsync` likely becomes:
+- `Percolator.Infrastructure` owns all FFI integration.
+  - References `Percolator.Cryptography` and implements its interfaces.
+  - References the localized `Signal.Interop.dll` and ships the required native binaries.
+  - Translates native failures into managed exceptions.
 
-- `FinalizeOutboundInviteFromHandshakeResponse(...)` (pure finalization, no UI or pending queue)
-  - Optionally internal/private helper
+### Authoritative persistence decision (must not drift)
 
-Deliverable: simulator does not require an extra manual “accept” after Main already accepted.
-
-#### A4. Fix routing in `SimulatorOutboundInterceptor`
-
-- Update `TryDeliverInviteHandshakeResponse` path to call the *response* handler (not the request-pending handler).
-- Add structured logging around:
-  - correlation id
-  - simulated peer id
-  - whether an outbound invite was found
-  - final session id
-
-Deliverable: a single breakpoint in the interceptor shows the correct codepath for simulator-initiated handshakes.
-
-#### A5. Simplify and delete obsolete codepaths
-
-Once the flows are separated:
-
-- Re-evaluate whether the following remain necessary:
-  - `_pending.AddInviteHandshakeResponse(...)` for simulator inbound responses
-  - UI “Accept” path that currently tries finalization then falls back to deliver-to-main
-  - `TryDeliverQueuedInviteHandshakeResponseToMainAsync` usage for simulator-initiated flows
-
-If still needed for a test/debug UI, keep them but rename to emphasize they are **debug controls**, not protocol steps.
-
-Deliverable: fewer methods, each with a single responsibility, and no “magic fallback” behavior.
-
-#### A6. Add tests / harness validations (no quick fix; correctness + clarity)
-
-- Add integration-style tests (or deterministic harness tests in `Desktop.Wpf.Tests`) that assert **public behavior** (black-box), using AAA (Arrange/Act/Assert):
-  - Simulator creates outbound invite
-  - Main accepts -> main sends `InviteHandshakeResponse`
-  - Simulator receives response -> session exists -> sending a chat message succeeds
-  - Assertions must be on observable outcomes (e.g., service public APIs succeed, UI state transitions exposed via reactive properties, or session existence via public query methods), not on private fields or internal helper call ordering.
-
-- Add negative behavior tests:
-  - Response with unknown correlation id is rejected with a clear error and does not transition the simulator peer into an established/accepted state
-  - Response with missing required fields fails deterministically
-
-- Mocking guidelines:
-  - Mock external dependencies (disk persistence repository, network delivery abstractions) but use real value objects / protobuf messages.
-  - Avoid strict interaction verification unless the side-effect itself is the requirement.
-
-Deliverable: regression coverage proving the simulator-initiated handshake produces a session on the simulator side.
+- `GroupMasterKey` is the primary root secret and the only zkgroup root material persisted in SQLite.
+- `GroupSecretParams` and all derived sub-keys (including `group_id`, `blob_key`, and any derived encryption keypairs) are ephemeral.
+  - They are deterministically rehydrated from `GroupMasterKey` at runtime.
 
 ---
 
-### Acceptance criteria
+## STEP 1 — Pure domain interface plan (`Percolator.Cryptography`)
 
-- When simulator initiates handshake and Main accepts:
-  - simulator ends in `Established`
-  - simulator can perform a public behavior that requires a session (e.g., encrypt/send a chat message) without “No session found”
+### 1.1 Domain value types
 
-- Public APIs in simulator state service are semantically clear:
-  - requests vs responses are handled by different methods
-  - queuing/defer-to-UI is explicit and not used for protocol-required steps
+Goal: represent Group V2 key material safely, without exposing raw native handles.
 
-## Chunk B
+- `GroupMasterKey`
+  - Implement as a source-generated fixed-size byte value using the existing generator attribute:
+    - `[ByteArray(length: 32)]`
+  - Required invariants:
+    - **length is exactly 32 bytes** (enforced by the generated factory methods)
+    - treated as immutable once constructed
+  - Construction rules (security-sensitive; must be followed consistently):
+    - Use `GroupMasterKey.FromBytesOwned(byte[])` only when the input array is newly allocated and will never be mutated after the call.
+      - Example: `GroupMasterKey.FromBytesOwned(proto.Field.ToByteArray())`.
+    - Use `GroupMasterKey.FromSpan(ReadOnlySpan<byte>)` when converting from an existing byte-backed value without wanting to transfer ownership.
+      - This is the preferred path for converting between `ByteArray`-generated types.
+    - If the provenance of the input `byte[]` is unclear (may be pooled/reused/mutated), do not use `FromBytesOwned`.
+      - Use `FromSpan` over a defensive copy to preserve immutability assumptions.
 
-### Problem statement
+- `GroupSecretParams` (managed representation)
+  - Ephemeral, managed representation derived from `GroupMasterKey`.
+  - Can be represented as an opaque managed byte array with strict length validation.
+  - Must not be treated as a persistence root; it is a runtime derivative.
 
-For **Main -> Simulator** direct invite requests (`EstablishDirectSessionRequest` intercepted by `SimulatorOutboundInterceptor.TryEstablishDirectSession`), the simulator currently:
+### 1.2 Domain service interface
 
-- Calls `SimulatorStateService.ReceiveEstablishDirectSessionFromMainAsync(...)`.
-- Which immediately calls `AcceptReverseSignalInviteAsync(...)`.
-- `AcceptReverseSignalInviteAsync(...)` performs cryptographic acceptance and **creates a real session immediately** (`model.SessionsMutable[sessionId] = session`).
-- Only *delivery* of the resulting `InviteHandshakeResponse` is deferred by queuing it via `QueueInviteHandshakeResponseForDeliveryToMainAsync(...)`.
+Define: `IGroupCryptographyService`
 
-This makes the simulator “Accept” button misleading:
+This is the sole domain entrypoint for zkgroup primitives.
 
-- The user is not accepting a pending request.
-- The request has already been accepted (session created); the button merely triggers delivery of an already-generated response.
+Required responsibilities (pure managed contracts only):
 
-It also creates API ambiguity because the simulator’s current pending mechanisms are oriented around **pending invite handshake responses**:
+- **Generate**
+  - Generate a new `GroupMasterKey`.
 
-- `ISimulatedPeerPendingInbox` stores `InviteHandshakeResponse` keyed by `(PeerId, CorrelationId)`.
-- Persistence snapshots (`SimulatorStateDto` / `SimulatedPeerRuntimeStoreDto`) include `PendingInviteHandshakeResponses`.
-- There is **no persisted representation** of a pending inbound `EstablishDirectSessionRequest` (invite request) waiting for user decision.
+- **Derive / Extract**
+  - Rehydrate/derive `GroupSecretParams` from `GroupMasterKey` (deterministic).
+  - Derive required identifiers and sub-keys from the rehydrated params (e.g., `group_id`, `blob_key`, any encryption keypairs required by Group V2).
 
-### Desired end state
+- **Serialize / Deserialize**
+  - `GroupMasterKey` <-> `byte[]` (32 bytes)
+  - All deserialization must validate lengths and throw managed exceptions.
 
-- A direct invite request from Main can be persisted as a **pending inbound invite request**, without creating a session.
-- The simulator UI “Accept” / “Reject” semantics are truthful:
-  - **Accept**: create session + generate response + deliver response to Main.
-  - **Reject**: discard pending request (no session created).
-- APIs clearly separate:
-  - “Receive/queue inbound invite request” vs “accept inbound invite request”.
-  - “queue outbound response for delivery” remains possible, but is not used to simulate user acceptance.
-- Persistence supports process restart / snapshot restore without losing pending inbound requests.
+Interface design rule:
+
+- `GroupSecretParams` serialization may exist for wire compatibility and debugging, but persistence must be anchored on `GroupMasterKey` only.
+
+Domain interface design constraints:
+
+- All methods accept/return safe managed types.
+- Prefer `ReadOnlySpan<byte>` for inputs and `byte[]` / domain value objects for outputs.
+- No `SafeHandle`, no `IntPtr`, no `Memory<T>` pinned requirements.
 
 ---
 
-### Plan
+## STEP 2 — Infrastructure bridge plan (`Percolator.Infrastructure`)
 
-#### B1. Add a persisted model for pending inbound direct invite requests
+### 2.1 Consuming localized Signal interop binaries
 
-Introduce a runtime/persistence record representing a pending invite request from Main:
+Goal: explicitly document and enforce how `Percolator.Infrastructure` references the localized binaries.
 
-- Required fields (minimum):
-  - `CorrelationId` (from `InviteHandshakeRequestPayload.RequestCorrelationId`)
-  - Original request bytes (`EstablishDirectSessionRequest` raw bytes or the payload bytes)
-  - `ReceivedAtUtc`
-  - `InviterIdentityKeySpki` (optional redundancy; can be derived from request)
-  - Optional routing metadata for diagnostics (e.g., direct endpoint / `context.Peer` string if available)
+- `Signal.Interop.dll` is consumed via a relative assembly reference in the `.csproj`.
+- `signal_shim.dll` (and any other required native assets) are copied to the output directory.
+- `Percolator.Cryptography` must not reference these binaries.
 
-Update persistence DTOs and snapshots:
+### 2.2 Implementing `IGroupCryptographyService` via FFI
 
-- Add `PendingInboundDirectInvites` (or similar) to `SimulatedPeerRuntimeStoreDto`.
-- Add corresponding DTO(s) in `SimulatorState.cs`.
-- Update `JsonSimulatorStateRepository` hydration + save.
-- Update `PeerStateSnapshot` (if used by UI) to include the new pending inbound invite requests.
+Goal: implement the pure managed interface by orchestrating `Signal.Interop` safe handles.
 
-- Domain placement (to reduce ambiguity):
-  - Pending inbound direct invite requests should live as a domain collection on `SimulatedPeerModel` (similar to `PendingInviteHandshakeResponsesMutable`), and be included in `SimulatedPeerModel.Freeze()`.
-  - `JsonSimulatorStateRepository` must hydrate/save this new collection via `SimulatedPeerRuntimeStoreDto`.
+Implementation notes (blueprint-level; no code yet):
 
-Deliverable: simulator restart does not lose pending inbound direct invites.
+- The infrastructure implementation will:
+  - create and dispose native resources via `SafeHandle` instances (e.g., `GroupSecretParamsSafeHandle`, `GroupMasterKeySafeHandle` as exposed by `Signal.Interop`)
+  - ensure cleanup via `using`/`try/finally`
+  - capture native status codes
+  - translate non-zero native return codes into `CryptographicException` (or a domain-specific exception type if you already have one)
 
-#### B2. Split simulator pending inbox responsibilities (requests vs responses)
+Rehydration rule:
 
-Current:
+- Infrastructure must support deterministic rehydration of `GroupSecretParams` (and derived identifiers/sub-keys) from a managed 32-byte `GroupMasterKey`.
 
-- `ISimulatedPeerPendingInbox` is *response-only* (`InviteHandshakeResponse`).
+Boundary safety rules:
 
-Target:
-
-- Add a new pending store abstraction (or extend with new methods) for inbound **invite requests**.
-  - Example shape:
-    - `AddInboundDirectInviteRequest(simPeerId, corrId, requestBytes)`
-    - `TryGetInboundDirectInviteRequest(...)`
-    - `TryTakeInboundDirectInviteRequest(...)`
-
-Avoid overloading “InviteHandshakeResponse” pending structures to store requests.
-
-Deliverable: request-pending state and response-pending state cannot be confused at the type level.
-
-#### B3. Change interception handling: queue request instead of accepting
-
-Update the behavior of `SimulatorStateService.ReceiveEstablishDirectSessionFromMainAsync`:
-
-- Parse correlation id from `InviteHandshakeRequestPayload`.
-- Persist/record the inbound request as pending.
-- Transition UI state to an explicit “pending inbound invite request” state.
-- Return `EstablishDirectSessionResponse.Queued` (or similar) without creating a session.
-
-Contract alignment note:
-
-- This is aligned with the Main implementation: `PercolatorMessageService.EstablishDirectSession` also returns `Queued` after enqueueing a pending session.
-- The system is already designed such that “queued” is a valid/expected response; do not add polling or busy-wait behavior.
-
-This makes `ReceiveEstablishDirectSessionFromMainAsync` a pure ingress method, not an acceptor.
-
-Deliverable: receiving a direct invite does not create a session until user accepts.
-
-#### B4. Introduce explicit accept/reject APIs for pending inbound direct invites
-
-Add explicit public methods on `ISimulatorStateService`:
-
-- `AcceptPendingInboundDirectInviteFromMainAsync(simulatedPeerId, correlationId, mainPeerId, ct)`
-  - Loads pending request
-  - Calls the cryptographic acceptance routine (likely refactor `AcceptReverseSignalInviteAsync` into an internal helper)
-  - Creates session
-  - Generates `InviteHandshakeResponse`
-  - Delivers response to Main
-  - Clears pending request
-  - Marks peer established
-
-- `RejectPendingInboundDirectInviteFromMainAsync(simulatedPeerId, correlationId, ct)`
-  - Clears pending request
-  - Updates UI state appropriately
-
-Deliverable: UI accept/reject maps 1:1 to protocol semantics.
-
-#### B4.1 Target public API surface (pending inbound direct invite *requests*)
-
-Define a minimal, intention-revealing public API for inbound direct invite requests from Main:
-
-- `QueueInboundDirectInviteRequestFromMainAsync(simulatedPeerId, mainPeerId, EstablishDirectSessionRequest request, ct)`
-  - Ingress-only. Stores request as pending. Does not create session.
-
-- `AcceptPendingInboundDirectInviteRequestFromMainAsync(simulatedPeerId, correlationId, mainPeerId, ct)`
-  - Acceptance action. Creates session, generates response, delivers response, clears pending.
-
-- `RejectPendingInboundDirectInviteRequestFromMainAsync(simulatedPeerId, correlationId, ct)`
-  - Rejection action. Clears pending.
-
-Note: `ReceiveEstablishDirectSessionFromMainAsync` should become either a thin wrapper around `QueueInboundDirectInviteRequestFromMainAsync` or be deleted to avoid duplicated ingress entry points.
-
-#### B5. Refactor/rename `AcceptReverseSignalInviteAsync` to reflect new meaning
-
-After B3/B4, `AcceptReverseSignalInviteAsync` should no longer be callable as a general-purpose public API from multiple directions.
-
-Options:
-
-- Make it `internal` and rename to `CreateSessionAndHandshakeResponseForInboundDirectInvite(...)`.
-- Or keep as public but rename to reflect it is the *acceptance action* (not ingress), and ensure ingress never calls it.
-
-Also reconcile the UI command paths:
-
-- `SimulatedPeerItemViewModel.ExecuteMainInviteDirectAsync` currently calls `AcceptReverseSignalInviteAsync` directly (immediate accept+deliver). Decide whether that command should:
-  - remain a “debug shortcut” (clearly named/labeled), or
-  - be migrated to the same pending/accept mechanism for consistency.
-
-Deliverable: a single authoritative acceptance API, with optional explicit debug shortcuts.
-
-#### B6. Update UI state model to represent pending inbound invite request explicitly
-
-Research validation:
-
-- The simulator already shows a unified “Handshake State Machines” list (`SimulatorHandshakesTabView` + `SimulatorHandshakesTabViewModel`). It renders one `SimulatedHandshakeStateMachineCardViewModel` per peer.
-- Each card exposes a single `AcceptHandshakeCommand` button when `UiState == AwaitingUserAcceptance` and `InboundReverseSignalPendingCorrelationId != null`.
-- `SimulatedHandshakeStateMachineCardViewModel.ExecuteAcceptHandshakeAsync` currently uses *protocol guessing*:
-  - first `TryFinalizeInviteHandshakeResponseFromMainAsync(...)`
-  - if that returns `null`, then `TryDeliverQueuedInviteHandshakeResponseToMainAsync(...)`
-
-Target model (keep the unified UI surface, remove guessing, remove implicit selection):
-
-- Keep the unified “Handshake State Machines” surface, **but** make “accept” and “reject” operate on a specific pending item (no implicit selection, no `FirstOrDefault()`).
-- Replace the single per-peer Accept button with a per-item list of pending approvals:
-  - For **reverse-signal inbound direct invite requests**: source is `SimulatedPeerModel.PendingInboundDirectInvites` (already keyed by `CorrelationId`).
-  - For **standard-signal inbound hellos**: source is the existing pending standard-signal collection already shown in the UI.
-- Introduce a small UI projection model for the list (ViewModel-only):
-  - Example: `PendingApprovalItem(CorrelationId, Kind, ReceivedAtUtc, DisplayText, ...)`
-  - `Kind` must be explicit and intention-revealing.
-  - Pending approval kinds (explicit list): `InboundDirectInviteRequestFromMain`, `InboundStandardSignalHello`.
-- In `SimulatedHandshakeStateMachineCardViewModel`:
-  - Expose `PendingApprovals` as a projected read-only list suitable for binding.
-  - Add commands that take a parameter:
-    - `AcceptPendingApprovalCommand : ReactiveCommand<PendingApprovalItem>`
-    - `RejectPendingApprovalCommand : ReactiveCommand<PendingApprovalItem>`
-  - Command implementations must dispatch by `PendingApprovalItem.Kind` and must pass the specific `CorrelationId` through to service APIs.
-
-XAML wiring:
-
-- Render `PendingApprovals` via an `ItemsControl`.
-- Bind per-row buttons with `CommandParameter="{Binding}"` (or `CorrelationId` if you prefer).
-
-Service routing rules (deterministic):
-
-- `InboundDirectInviteRequestFromMain` -> call `ISimulatorStateService.AcceptPendingInboundDirectInviteAsync(simulatedPeerId, correlationId, ...)`.
-- `InboundStandardSignalHello` -> call the existing standard-signal accept API (already parameterized).
-- Any unsupported `Kind` -> throw or surface a diagnostic event (do not guess).
-
-Notes:
-
-- `UiState == AwaitingUserAcceptance` becomes a *derived UI concern* (e.g., `PendingApprovals.Count > 0`) and must not be the source of truth.
-
-Deliverable: UI provides explicit per-item accept/reject actions, with correct `CorrelationId` routing and no protocol-guessing fallbacks.
-
-#### B6.0 Revisit Chunk A temporary no-op stubs (must be removed)
-
-Chunk A intentionally replaced some UI acceptance paths with temporary no-op behavior to avoid breaking the UI while the correct Chunk B model is implemented.
-
-These temporary behaviors are **dangerous** if left in place because they can silently mask correctness issues and create “green but wrong” UI flows.
-
-**Required revisit list (explicit):**
-
-- `Desktop.Wpf/Features/Simulator/SimulatedHandshakeStateMachineCardViewModel.cs`
-  - `ExecuteAcceptHandshakeAsync`
-  - Chunk B requirement: this must be replaced by per-item accept/reject commands that take an explicit `CommandParameter` representing the target pending item (correlation id + kind) and call the real accept/reject APIs (not log-and-return).
-
-- `Desktop.Wpf/Features/Simulator/SimulatedPeerItemViewModel.cs`
-  - `ExecuteAcceptInboundPendingAsync`
-  - Chunk B requirement: this must either be removed from the UX surface or wired to `AcceptPendingInboundDirectInviteAsync(simulatedPeerId, correlationId, ...)` (not log-and-return).
-
-#### B6.1 Cleanup: split persisted pending handshake stores by handshake family + direction
-
-Motivation (from current `SimulatedPeerModel` + JSON DTOs): there are already multiple “pending” concepts stored in different shapes, some persisted as runtime store lists and some persisted as ad-hoc UI fields:
-
-- Reverse-signal (direct) related:
-  - `SimulatedPeerModel.OutboundInvites` (persisted in `RuntimeStore.OutboundInvites`)
-  - `SimulatedPeerModel.PendingInviteHandshakeResponses` (persisted in `RuntimeStore.PendingInviteHandshakeResponses`)
-  - `SimulatedPeerModel.UiState` + `InboundReverseSignalPendingCorrelationId` (persisted today via `SimulatedPeerDto.UiState` + `SimulatedPeerDto.PendingCorrelationId`)
-
-- Standard-signal related:
-  - `SimulatedPeerModel.PendingInboundStandardSignalHellos` (currently runtime-only; cleared on `MarkEstablished()` / `ClearRuntimeState()` and not represented in JSON DTOs)
-  - `SimulatedPeerModel.PendingStandardHandshakeToMainResponderPublicKeyHash` + `PendingStandardHandshakeToMainTemporarySessionId` (persisted today as top-level fields on `SimulatedPeerDto`)
-
-Target outcome:
-
-- Persistence is cleanly separated by:
-  - handshake family (**reverse-signal** vs **standard-signal**)
-  - direction (**inbound-from-main**, **outbound-to-main**, and optionally “inbound-from-peers” for standard-signal hellos)
-- The ViewModel layer is responsible for merging “awaiting user approval” items into a single UI projection (consistent with MVVM/R3 rules).
-
-Proposed restructuring (DTO + model):
-
-1) **Move ad-hoc pending handshake persistence out of `SimulatedPeerDto` UI fields**
-
-- Stop persisting pending correlation id via `SimulatedPeerDto.PendingCorrelationId`.
-- `SimulatedPeerDto.UiState` becomes **derived only** (not persisted). The persisted truth for handshake state is the set of explicit pending stores + sessions.
-- Persist pending handshakes exclusively in explicit runtime store collections.
-
-Decision (no backwards compatibility):
-
-- There is no need to load/translate legacy fields. Assume new JSON files only.
-- It is acceptable to remove `PendingCorrelationId` persistence immediately and rely on the new explicit stores.
-
-2) **Split `SimulatedPeerRuntimeStoreDto` into sub-stores**
-
-- Add nested DTOs under `SimulatedPeerRuntimeStoreDto` (or adjacent properties) such as:
-  - `ReverseSignalStore`:
-    - `OutboundInvitesToMain` (existing `OutboundInvites`)
-    - `InboundInviteHandshakeResponsesFromMain` (existing `PendingInviteHandshakeResponses` *until Chunk A finalization becomes immediate and this list is no longer needed*)
-    - `InboundDirectInviteRequestsFromMain` (new for Chunk B; this is the real “pending acceptance” store for Main->Simulator direct invites)
-  - `StandardSignalStore`:
-    - `PendingInboundHellos` (**runtime-only; do not persist**). These are transient inbound discovery/hello items and can be cleared on restart.
-    - `PendingHandshakeToMain` (re-home the existing responder PKH + temporary session id into this store)
-
-This keeps reverse-signal and standard-signal state from being conflated.
-
-3) **Update `SimulatedPeerModel` to match the split stores**
-
-- Keep existing collections, but rename and group them so their purpose is explicit:
-  - reverse-signal outbound-to-main
-  - reverse-signal inbound-from-main
-  - standard-signal pending-to-main
-  - standard-signal pending-from-peers
-
-4) **ViewModel merges “awaiting approval” items**
-
-- `SimulatedHandshakeStateMachineCardViewModel` (or a new child VM) creates a single, merged read-only projection:
-  - `IReadOnlyList<PendingApprovalItem>` derived from the per-family stores.
-
-Define `PendingApprovalItem` as a pure UI projection (not persisted) that includes:
-
-- `CorrelationId`
-- `Family` (`ReverseSignal` | `StandardSignal`)
-- `Direction` (`InboundFromMain` | `OutboundToMain` | `InboundFromPeers`)
-- `Kind` (fine-grained, e.g. `DirectInviteRequestFromMain`, `InviteHandshakeResponseFromMain`, etc.)
-- `ReceivedUtc` (if applicable)
-
-Cardinality/invariants:
-
-- The model may contain multiple pending items across families.
-- The UI **must not** rely on a single correlation id slot to decide which item is “current”.
-
-Preferred UX invariant:
-
-- Render the merged list and provide Accept/Reject per item. Do not implement a per-peer implicit selection fallback.
-
-Approval relevance inventory (what appears in the merged approval list):
-
-- **Approval-relevant** (require simulator user acceptance):
-  - Simulator **inbound-from-main** direct/reverse-signal invite requests (`ReverseSignalStore.InboundDirectInviteRequestsFromMain`).
-  - Simulator **inbound-from-peers** standard-signal hellos (current UI already treats these as per-item accept actions).
-
-- **Not approval-relevant** (no simulator confirmation needed; initiated by simulator button clicks):
-  - Simulator outbound-to-main reverse-signal invites (`ReverseSignalStore.OutboundInvitesToMain`).
-  - Simulator outbound-to-main standard-signal handshakes (the `StandardSignalStore.PendingHandshakeToMain` tracking state).
-
-Deterministic ordering rule (only needed if you keep a single Accept button per peer):
-
-- Not applicable: the plan uses per-item actions and does not keep a per-peer implicit selection.
-
-5) **DTO versioning (forward-only)**
-
-- Keep DTO `Version` bumps localized (e.g., bump `SimulatedPeerRuntimeStoreDto.Version`).
-- Only support reading the new version(s).
-
-Deliverable: JSON clearly shows separate stores for reverse-signal vs standard-signal, and inbound vs outbound to/from Main; UI derives pending-approval list by merging stores; no protocol guessing.
-
-#### B7. Delete dead code / obsolete paths once Chunk B is complete
-
-After Chunk B is fully implemented and the simulator has a first-class persisted pending inbound direct invite request model, the following code paths should become unnecessary and should be deleted (or converted into explicitly labeled debug-only utilities):
-
-- `SimulatorStateService.ReceiveEstablishDirectSessionFromMainAsync` calling `AcceptReverseSignalInviteAsync`.
-  - Replace with “queue inbound invite request” behavior; remove the auto-accept call.
-
-- “Queued response as pending acceptance” mechanism for Main->Simulator direct invites:
-  - `QueueInviteHandshakeResponseForDeliveryToMainAsync` usage from `ReceiveEstablishDirectSessionFromMainAsync`.
-  - `TryDeliverQueuedInviteHandshakeResponseToMainAsync` usage as part of the simulator accepting an inbound direct invite.
-
-- UI fallback logic that guesses which protocol direction is happening:
-  - In `SimulatedHandshakeStateMachineCardViewModel`, delete `ExecuteAcceptHandshakeAsync` and the “try finalize; if null then deliver queued response” guessing logic.
-  - Replace it with per-item accept/reject commands bound from an `ItemsControl`, with routing driven by the pending item `Kind`.
-
-- Ambiguous naming that encourages misuse:
-  - If `AcceptReverseSignalInviteAsync` is kept public, ensure there is no longer any ingress method that calls it.
-  - Prefer making the crypto/session creation routine internal and reachable only from explicit “AcceptPending…” methods.
-
-Deliverable: no remaining code that uses “response queueing” to emulate user acceptance, and no “try X then fallback to Y” acceptance logic.
-
-#### B8. Chunk B correctness + determinism hardening (recommended follow-ups)
-
-The initial Chunk B implementation can be made semantically correct and deterministic by addressing the following gaps.
-
-- **Persist the inviter peer id (Main) for pending inbound direct invites**
-  - Extend the persisted pending inbound direct invite model/DTO to store the inviter `PeerId` (or store `mainPeerId`).
-  - When `ReceiveEstablishDirectSessionFromMainAsync(simulatedPeerId, mainPeerId, request)` queues the inbound invite request, persist `mainPeerId` alongside the request bytes.
-  - In `AcceptPendingInboundDirectInviteAsync`, use the persisted inviter peer id instead of generating a new `Guid`.
-
-- **Tighten request validation on ingress**
-  - In `ReceiveEstablishDirectSessionFromMainAsync`, validate `request.HasPayload`/`Payload.Length > 0` and `request.HasInviterIdentityKey`/`InviterIdentityKey.Length > 0` before parsing.
-  - Validate presence of `payload.RequestCorrelationId` before using it.
-
-- **Render pending inbound invites as an explicit list (no selection slot)**
-  - Ensure the UI uses per-item accept/reject with `CommandParameter` set to the target item.
-  - Do not implement or persist any “selected pending correlation id” pointer for inbound invites.
-
-- **Introduce explicit pending handshake kind (to remove accept-guessing)**
-  - Update the ViewModel accept/reject actions to dispatch based on an explicit pending item kind, rather than using fallback/guessing behavior.
-
-- **API surface cleanup (clarity)**
-  - Keep `AcceptInboundDirectInviteAsync` as a crypto/session-building primitive.
-  - Ensure the primary public workflow for inbound direct invites is:
-    - receive/queue (ingress)
-    - accept/reject (explicit user action)
-    - deliver response (explicit user action, if required)
-
-Deliverable: accepting a pending inbound invite creates a session with the correct remote peer id, ordering is deterministic with multiple pending items, and there is no protocol-direction guessing.
-
-#### B9. Tests / verification (unit-testing.md compliant)
-
-Add deterministic tests (Desktop.Wpf.Tests or integration harness) that follow AAA and the black-box rule:
-
-- **Inbound direct invite is pending**
-  - Main sends `EstablishDirectSessionRequest`
-  - Simulator does not create a session yet
-  - Assert pending-ness via **publicly exposed domain/service state** (read-only observable collection of pending inbound direct invites), not via UI implementation details
-  - Assert attempting to perform a session-required action fails deterministically
-
-- **Accept creates session + delivers response**
-  - User accepts pending invite
-  - Session exists and simulator can now perform a public behavior that requires a session (e.g., encrypt/send a message)
-  - Response delivery to Main is observed via the public network abstraction/harness result, not by inspecting private queues
-
-- **Accept routing is deterministic (no guessing)**
-  - Given a pending approval item of kind `InboundDirectInviteRequestFromMain`, Accept generates+delivers `InviteHandshakeResponse` and does not attempt “finalize response from main”.
-  - Given a pending approval item of kind `InboundStandardSignalHello`, Accept uses the standard-signal accept API and does not attempt any reverse-signal delivery.
-
-- **Reject does not create session**
-  - Pending cleared
-  - Simulator still cannot perform session-required actions for that peer
-  - Assert pending collection no longer contains that correlation id (via public read-only collection)
-
-- **Persistence**
-  - Pending invite requests survive snapshot save/restore
-
-- Mocking guidelines:
-  - Mock only external dependencies (repository/network). Use real DTOs/protobuf messages and real crypto keys as needed.
-  - Avoid asserting internal collection contents directly unless it’s part of the public contract.
+- All inputs must be validated **before** passing buffers across the boundary:
+  - null checks
+  - exact-length checks
+  - reject unexpected lengths with managed exceptions
+- All outputs copied **out of native** must be:
+  - copied into managed `byte[]`
+  - validated for expected length
+  - immediately released on the native side
 
 ---
 
-### Reactive MVVM / R3 architecture constraints (must hold for Chunk A + B)
+## Chunk 0 — Signal Group V2 foundations (protocol + persistence + pipeline)
 
-- **Service/UI separation**:
-  - `SimulatorStateService` remains UI-agnostic (no `IUiDispatcher`, no WPF types). It owns canonical domain state (`ObservableList`, `ObservableDictionary`, `ReactiveProperty`) protected by its gates.
-  - ViewModels are responsible for marshaling to UI thread using `CreateView(...).ToNotifyCollectionChanged(_ui.CollectionEventDispatcher)` and `ObserveOnCurrentSynchronizationContext()` for scalar projections.
+Chunk 0 is a hard gate: no WPF UX work (Chunk A/B) proceeds until the crypto foundation and persistence model are correct.
 
-- **No sorting/filtering in services**:
-  - Services should not sort/filter; use XAML `CollectionViewSource` and view filters.
+### 0.1 Scope and guiding principle
 
-- **Collection projection rules**:
-  - Do not replace list instances in `BindableReactiveProperty<IReadOnlyList<T>>` for UI lists.
-  - Project domain collections via `CreateView` and bind to the notify adapter.
-  - Dispose child ViewModels explicitly on removals to avoid leaks.
+- Replace all placeholder “sender-key ratchet” and “control plane” concepts with actual zkgroup primitives.
+- Persist only the managed root secret (`GroupMasterKey`) at rest.
+- Rehydrate native state only inside `Percolator.Infrastructure`.
 
----
+### 0.2 Protocol primitives and managed representations
 
-### Acceptance criteria
+This plan intentionally names the primitives at the architectural level (exact naming may vary based on the interop wrapper surface).
 
-- Receiving a direct invite request from Main does not create a session until simulator user accepts.
-- After simulator accepts, simulator can perform a public behavior that requires a session, and Main receives `InviteHandshakeResponse`.
-- Pending inbound direct invites are persisted and restored correctly.
-- Public simulator APIs clearly separate ingress (receive/queue) from actions (accept/reject).
+- **GroupMasterKey**
+  - A stable 32-byte root secret.
+  - Persisted at rest (encrypted).
+  - The source of truth for rehydrating all other zkgroup material.
 
-## Chunk C
+- **GroupSecretParams (ephemeral)**
+  - Deterministically derived/rehydrated from `GroupMasterKey` at runtime.
+  - Not persisted.
 
-### Problem statement
-
-Chunk B removed the legacy single-slot correlation id pointer and replaced queued-response behavior with explicit persisted pending stores.
-
-However, the simulator UI still uses `SimulatedPeerModel.UiState` as a primary gate for “what actions are available”, and `SimulatedPeerDto.UiState` is still serialized/deserialized by `JsonSimulatorStateRepository`.
-
-This creates ambiguity because `UiState` is **not authoritative handshake truth**; it is a derived/projection concern that should be computed from:
-
-- pending stores (e.g. inbound direct invites)
-- sessions
-- explicit per-item attempt state (handshake attempts)
-
-This is incompatible with realistic simulator behavior where multiple items can be active concurrently:
-
-- multiple outbound invite attempts to Main
-- multiple inbound approval items from Main
-- multiple pending standard-signal hellos
-
-It also encourages UI logic that overwrites global state, loses context, and mis-associates errors/phases with the wrong attempt.
-
-### Desired end state
-
-- The simulator models handshake/approval items explicitly as a collection (multiple may be active at once).
-- The UI renders these items and provides explicit per-item actions.
-- No persisted field represents a “selected” item.
-- All state updates (phase/error/not-until) target a specific item by correlation id.
-- Persistence round-trips all pending/attempt items and their state.
-
----
-
-### Plan
-
-#### C1. Create a first-class model for pending/attempt items
-
-Use the existing persisted attempt model as the “first-class handshake/approval item”:
-
-- `Desktop.Wpf/Features/Simulator/SimulatorHandshakeAttemptState.cs` (`SimulatorHandshakeAttemptState`)
-- `Desktop.Wpf/Features/Simulator/SimulatedPeerModel.cs` (`HandshakeAttempts`, `UpsertAttempt`, `SetAttemptPhase/Error/NotUntil`)
-- Persisted today via `Desktop.Wpf/Features/Simulator/SimulatorState.cs` (`SimulatedPeerDto.HandshakeAttempts`)
-
-Extend `SimulatorHandshakeAttemptState` to be intention-revealing and UI-friendly (so we can render a list and drive per-item actions) by adding:
-
-- `CorrelationId`
-- `Family` enum (at minimum: `ReverseSignal`, `StandardSignal`)
-- `Direction` enum (at minimum: `OutboundToMain`, `InboundFromMain`, `InboundFromPeers`)
-- `Kind` enum (at minimum: `OutboundDirectInviteToMain`, `InboundDirectInviteFromMain`, `InboundStandardSignalHello`)
-- `CreatedAtUtc` (already present)
-- Optional `ReceivedAtUtc` (for inbound items)
-
-Attach per-item state:
-
-- `Phase` (string or enum)
-- `LastError` (string?)
-- `NotUntilUtc` (DateTimeOffset?)
-- Optional route metadata (`SelectedRouteMode`, `RelayHostPeerId`, `DirectEndpoint`) where applicable
-
-Scope decision for Chunk C:
-
-- Keep `PendingInboundDirectInvites` as the authoritative inbound-approval queue (`SimulatedPeerModel.PendingInboundDirectInvites` persisted under `SimulatedPeerRuntimeStoreDto.ReverseSignalStore.InboundDirectInviteRequestsFromMain`).
-- Ensure an attempt entry exists for the same `CorrelationId` when:
-  - an inbound direct invite is received (kind=`InboundDirectInviteFromMain`)
-  - an outbound direct invite is sent/enqueued (kind=`OutboundDirectInviteToMain`)
-  - a standard-signal hello arrives (kind=`InboundStandardSignalHello`)
-
-Invariants:
-
-- Multiple items may exist simultaneously.
-- No single global “current correlation id” is authoritative.
-
-#### C2. Deprecate and remove single-slot semantics
-
-This work item is now primarily about removing *implicit global selection* and *persisted UI projection* semantics.
-
-Eliminate dependence on:
-
-- `SimulatedPeerDto.UiState` as an authoritative persisted truth.
-- `SimulatedPeerModel.UiState` as a proxy for “what items exist” (the collections/attempts are the truth).
-
-Concrete code locations (as of post-Chunk B):
-
-- `Desktop.Wpf/Features/Simulator/JsonSimulatorStateRepository.cs`
-  - hydration currently uses `uiState: dto.UiState`
-  - persistence currently writes `UiState = model.UiState`
-
-Migration strategy (pick one explicitly during implementation):
-
-- Option A (breaking, simplest): stop writing `UiState` to JSON and ignore any value read from JSON (compute derived `UiState` after hydration).
-- Option B (non-breaking): continue to read/write `UiState` for UI convenience, but add an invariant that it must be overwritten on load by the computed derived value.
-
-Audit checklist (must be done before removing/ignoring persisted `UiState`):
-
-- Verify reverse-signal pending inbound truth is fully represented via `PendingInboundDirectInvites`.
-- Verify reverse-signal outbound truth is fully represented via `OutboundInvites`.
-- Verify standard-signal pending-to-main truth is fully represented via `PendingStandardHandshakeToMain*` fields.
-- Verify pending-from-peers standard-signal hellos are intentionally runtime-only.
-
-#### C3. Service changes: all updates target explicit items
-
-Rules:
-
-- All phase/error/not-until updates must target a specific item by `CorrelationId`.
-- Ingress creates/updates attempts explicitly (using correlation id from payload).
-- Accept/reject/finalize methods remove or transition the specific item.
-
-Known problematic call sites to fix (currently associates failures with the wrong item):
-
-- `Desktop.Wpf/Features/Simulator/SimulatedHandshakeStateMachineCardViewModel.cs`
-  - In outbound send/enqueue error handling, code currently reads `var corr = _model.InboundReverseSignalPendingCorrelationId.CurrentValue;`.
-  - Replace this with “the correlation id for this outbound operation” (the one parsed from payload / generated fallback) and update attempt state using that id.
-
-Implementation approach:
-
-- Anytime we parse or generate a correlation id for an operation, store it in a local variable and use it consistently for:
-  - `_model.MarkOutboundPending(corr)`
-  - `_model.SetAttemptPhase(corr, ...)`
-  - `_model.SetAttemptError(corr, ...)`
-  - `_model.SetAttemptNotUntil(corr, ...)`
+- **Derived sub-keys and identifiers**
+  - Derived from rehydrated `GroupSecretParams`:
+    - group stable identifier (`group_id` or equivalent)
+    - blob key / attachment key material (`blob_key`)
+    - any encryption keypairs required by Group V2
 
 Deliverable:
 
-- No code path reads a global “current corr” to decide what to update.
+- A clear mapping in domain/application code between:
+  - group conversation identity
+  - persisted group key material (`GroupMasterKey`, secret params)
+  - derived identifiers used in message envelopes
 
-#### C4. UI changes: render a list and provide per-item actions
+### 0.3 Application pipeline updates (no placeholder control planes)
 
-Update simulator UI to render a list of active items per peer. Prefer using the existing "Handshake State Machines" surface and make it show the list of attempts.
+Goal: define how group messages are produced/consumed using zkgroup-backed key material.
 
-Concrete data source:
+#### 0.3.1 Concrete message/envelope mapping (what exists today vs what must change)
 
-- `SimulatedPeerModel.HandshakeAttempts` + `SimulatedPeerModel.HandshakeAttemptsVersion`
+Current state in `Percolator.Contracts` (`Protos/internal_messaging.proto`):
 
-Concrete ViewModel work:
+- Group identity is currently represented as `group_conversation_guid` (16-byte GUID).
+- Group creation exists as `ChatEnvelope.create_group` (`CreateGroup` message).
+- Group chat content is currently carried via `ChatEnvelope.text_message` (`TextMessage`) with optional `group_conversation_guid`.
+- There is an existing administrative + key-rotation control-plane surface:
+  - `SignedAdminOperation`
+  - `KeyDistributionPayload`
+  - `SignedKeyAdoptionConfirmation`
+  - `SignedAdminCommitOperation`
 
-- In `Desktop.Wpf/Features/Simulator/SimulatedHandshakeStateMachineCardViewModel.cs`, add a projected property like:
-  - `BindableReactiveProperty<IReadOnlyList<SimulatorHandshakeAttemptState>> HandshakeAttempts`
-  - project from `_model.HandshakeAttempts` and refresh on `_model.HandshakeAttemptsVersion`
-  - sort by `CreatedAtUtc` (descending) for display only
+Required changes for Signal Group V2 (zkgroup):
 
-Per-item actions:
+- Introduce explicit Group V2 message(s) for ciphertext transport.
+  - Add a new `ChatEnvelope` oneof case for Group V2 ciphertext (name TBD, e.g. `GroupV2Message`).
+  - This message must carry:
+    - `group_conversation_guid` (for DB lookup / routing within the app)
+    - a derived zkgroup group identifier (`group_id`) if required by the native decrypt/encrypt API
+    - the ciphertext bytes (and any metadata required by the interop decrypt routine)
+    - optional attachment/blob reference(s) as needed (decrypted via derived `blob_key`)
 
-- Inbound approval items: `Accept`, `Reject`
-- Outbound attempts: `Retry` / `Cancel` / `Clear` (exact set based on what operations exist)
+- Deprecate/remove the existing “Key Rotation Plane” and sender-key distribution concepts.
+  - `KeyDistributionPayload`, `SignedKeyAdoptionConfirmation`, `SignedAdminCommitOperation` were designed for the previous placeholder protocol and should not be used for Group V2.
+  - Keep `SignedAdminOperation` only if it remains valid for the non-crypto “group management” layer; otherwise replace with Group V2 membership/auth semantics in Chunk B.
 
-Minimum viable actions for Chunk C:
+Plan invariant:
 
-- Keep existing accept/reject for inbound direct invites via `ISimulatorStateService.AcceptPendingInboundDirectInviteAsync(simulatedPeerId, correlationId)` and `RejectPendingInboundDirectInviteAsync(...)`.
-- Drive actions from explicit item correlation id (button passes corr), never from a global slot.
+- Conversation identity in the app remains `group_conversation_guid`.
+- zkgroup-derived `group_id` is treated as cryptographic metadata derived from `GroupMasterKey`/`GroupSecretParams`, not as the primary DB key.
 
-Remove reliance on:
+Inbound (receive path):
 
-- `UiState == AwaitingUserAcceptance` + a single “Accept” button that implicitly targets one correlation id
+- Parse inbound group envelope.
+- Resolve group identity.
+- Load the persisted `GroupMasterKey` for the group (read model query; no domain repository dependency on the read path).
+- Use `IGroupCryptographyService` to:
+  - rehydrate `GroupSecretParams` (managed -> infra -> native) deterministically from `GroupMasterKey`
+  - compute required derived values (e.g., `group_id`, `blob_key`) for envelope validation and data decryption
+  - decrypt/verify the message according to Group V2 rules
+- Persist decrypted plaintext into the existing conversation/message store.
 
-If keeping a single Accept button temporarily:
+Outbound (send path):
 
-- The ViewModel selects an active item by a documented rule.
-- Selection is derived from the collection (not persisted).
+- Resolve group identity and load persisted `GroupMasterKey`.
+- Use `IGroupCryptographyService` to:
+  - rehydrate `GroupSecretParams` deterministically
+  - derive per-message keys/parameters required by Group V2
+  - encrypt/sign according to Group V2
+- Dispatch using existing message send abstractions.
 
-#### C5. Persistence
+Important architectural constraint:
 
-Persistence already exists for attempts:
+- The application layer depends only on `Percolator.Cryptography` abstractions.
+- Native interop is not visible outside `Percolator.Infrastructure`.
 
-- `SimulatedPeerDto.HandshakeAttempts` (JSON)
-- Hydrated via `JsonSimulatorStateRepository.CreatePeerSnapshot(... handshakeAttempts: dto.HandshakeAttempts, ...)`
+#### 0.3.2 Epoch transition atomicity (eviction and rotation)
 
-Update persistence for new attempt fields:
+When an epoch rotation occurs (e.g., member eviction), the implementation must ensure atomicity of the epoch cutover with respect to outbound message delivery:
 
-- Extend `SimulatorHandshakeAttemptState` with the new fields; the serializer will include them.
-- Add strict hydration defaults where required (e.g., missing enum -> safe default or throw, choose explicitly).
+- The outbound message queue must block any concurrent sends to the old epoch while the 1:1 Double Ratchet tunnels are transmitting the new `GroupMasterKey` to remaining members.
+- If a message is sent signed with the old epoch parameters during this window:
+  - The server's ZK verification layer may reject the proof if it enforces strict epoch numbers.
+  - The evicted user may still be able to read the message if they intercept the packet before the epoch cutover is finalized on the relay.
 
-Stop writing legacy slot fields once migrated (see C2 strategy):
+This constraint applies to any protocol-driven epoch update that changes the root key material (not just explicit eviction).
 
-- Ensure `UiState` is computed from collections/attempts and does not act as persisted handshake truth.
+### 0.4 Persistence model (EF Core / SQLite)
 
-#### C6. Tests
+Goal: persist only the safe managed `GroupMasterKey` root secret; never persist native handles or derived zkgroup sub-keys.
 
-Add tests validating multi-item behavior:
+#### 0.4.1 EF schema decision (what exists today vs what must change)
 
-- Multiple outbound attempts can be active concurrently; updates apply to the correct correlation id.
-- Multiple inbound approval items can be queued concurrently; accept/reject applies to the chosen item.
-- Persistence round-trip retains the full collection and per-item state.
+Current state in `Percolator.Infrastructure.Persistence`:
 
-Concrete test placement:
+- `ConversationDbo` contains:
+  - `Id` (GUID)
+  - `GroupConversationGuid` (nullable GUID)
+  - no column for any group cryptographic root secret
+- `GroupMemberDbo` exists (`ConversationId`, `MemberSpki`, `Role`, etc.).
+  - This currently models membership/admin role in a way that predates Group V2 semantics.
+- `SenderKeyDbo` exists (`ConversationId`, `SenderPeerId`, `ChainKey`, `SigningKey`).
+  - This is part of the previous placeholder sender-key direction.
+  - There is no Sqlite implementation of `IGroupSenderKeyRepository` yet (only `InMemoryGroupSenderKeyRepository`).
 
-- Persistence: extend `Desktop.Wpf.Tests/SimulatorStateStoreTests.cs` to add multiple `HandshakeAttempts` entries with distinct ids and assert round-trip.
-- Behavior: add/extend tests in `Desktop.Wpf.Tests` validating that per-correlation updates do not depend on `InboundReverseSignalPendingCorrelationId`.
+Schema decision for Group V2:
+
+- Add a new persistence table dedicated to Group V2 root key material:
+  - `GroupCryptoStateDbo`
+    - `ConversationId` (PK, FK to `ConversationDbo.Id`)
+    - `EncryptedGroupMasterKeyBytes` (BLOB, required; encrypted-at-rest wrapper over exactly 32 bytes)
+    - `CreatedAtUtc`, `UpdatedAtUtc` (optional but recommended for auditing/migrations)
+
+Rationale:
+
+- Keeps group crypto material separate from `ConversationDbo` and avoids widening the conversation table with cryptography-specific concerns.
+- Makes it explicit that only group conversations have this state.
+
+Migration note:
+
+- `SenderKeys` / key-rotation-plane persistence (and any admin-sequence state that only exists to support the old control plane) should be treated as legacy and either:
+  - migrated to Group V2 semantics in a dedicated migration step, or
+  - deleted/ignored if this is a breaking protocol migration.
+
+Required persistence (authoritative):
+
+- For each group conversation, persist exactly one encrypted 32-byte master key blob:
+  - `GroupCryptoStateDbo.EncryptedGroupMasterKeyBytes`
+    - This is the encrypted-at-rest wrapper over the 32-byte serialized `GroupMasterKey`.
+    - No zkgroup-derived sub-keys (`GroupSecretParams`, `group_id`, `blob_key`, keypairs) are persisted.
+
+Explicit lifecycle:
+
+- **Create**
+  - Infrastructure generates a new `GroupMasterKey` via zkgroup.
+  - Extract/serialize `GroupMasterKey` into a managed 32-byte array.
+  - Encrypt at rest.
+  - Store into `GroupCryptoStateDbo.EncryptedGroupMasterKeyBytes` for the conversation.
+
+- **Load**
+  - Read `GroupCryptoStateDbo.EncryptedGroupMasterKeyBytes` for the conversation.
+  - Decrypt at rest into a managed 32-byte array.
+  - Validate exact length (must be 32 bytes) in managed code.
+  - Only then call infrastructure FFI to rehydrate:
+    - `GroupMasterKeySafeHandle` (or equivalent)
+    - `GroupSecretParamsSafeHandle` (or equivalent) derived deterministically from the master key
+    - derived values (`group_id`, `blob_key`, encryption keypairs) for runtime use
+
+- **Rotation / updates**
+  - Any protocol-driven update that changes root key material must be represented as a deterministic update of `GroupCryptoStateDbo.EncryptedGroupMasterKeyBytes`.
+  - No derived keys are stored; only rederived.
+
+Deliverable:
+
+- A concrete EF schema plan for group key material that supports:
+  - restart/recovery
+  - deterministic serialization
+  - safe handling of corrupt DB state
+
+### 0.5 Testing plan (crypto boundary + persistence safety)
+
+Goal: tests must prove the safety and determinism of the `GroupMasterKey` lifecycle.
+
+Infrastructure-focused tests (must exist before Chunk A):
+
+- **Serialization stability**
+  - `GroupMasterKey` serialize -> deserialize yields byte-for-byte equality.
+  - Rehydrated `GroupSecretParams` derived from the same `GroupMasterKey` yields stable derived identifiers (e.g., `group_id` is deterministic).
+
+- **Invalid length handling**
+  - `GroupMasterKey` constructor rejects non-32-byte input.
+  - Infrastructure rejects invalid buffer lengths before calling into native.
+
+- **Corruption handling**
+  - Tampered/corrupt persisted blobs cause a managed exception.
+  - No native call is made with invalid buffers.
+
+- **At-rest encryption round-trip**
+  - Persist encrypted master key bytes -> decrypt -> rehydrate params -> encrypt/decrypt a test message successfully.
+
+### 0.6 Coverage check (end-of-chunk gate)
+
+- All tests pass.
+- Boundary validation branches are covered.
+- Any native error codes are exercised via controlled failing inputs (where possible) and mapped to managed exceptions.
+
+### 0.7 Dead code to remove (breaking cleanup list)
+
+This section is an explicit checklist of code that becomes obsolete once Group V2 (zkgroup) is the only supported group messaging protocol.
+
+#### Contracts (protobuf)
+
+- Remove/deprecate the “Key Rotation Plane” messages from `Percolator.Contracts/Protos/internal_messaging.proto`:
+  - `KeyDistributionPayload` (`ChatEnvelope.key_distribution`)
+  - `SignedKeyAdoptionConfirmation` (`ChatEnvelope.key_adoption_confirmation`)
+  - `SignedAdminCommitOperation` (`ChatEnvelope.admin_commit_operation`)
+
+#### Application inbound processing
+
+- Remove the inbound `ProcessInternalEnvelopeHandler` cases and commands for the key-rotation plane:
+  - `ChatEnvelope.MessageOneofCase.KeyDistribution`
+  - `ChatEnvelope.MessageOneofCase.KeyAdoptionConfirmation`
+  - `ChatEnvelope.MessageOneofCase.AdminCommitOperation`
+
+#### Domain/Application services tied to sender-key / key-rotation
+
+- Remove sender-key import/storage services:
+  - `Percolator.Chat.App.Services.IGroupSenderKeyService`
+  - `Percolator.Application.Apps.Chat.GroupSenderKeyService`
+  - `Percolator.Application.Apps.Chat.IGroupSenderKeyRepository`
+  - `Percolator.Infrastructure.Chat.InMemoryGroupSenderKeyRepository`
+
+- Remove key-distribution handlers/commands that only exist to feed the sender-key repository:
+  - `Percolator.Chat.App.Commands.ReceiveKeyDistributionCommand`
+  - `Percolator.Chat.App.Handlers.ReceiveKeyDistributionHandler`
+
+- Remove the “adoption confirmation / commit policy” pipeline if it is only used for the old key-rotation plane:
+  - `IKeyAdoptionStore` and its handlers (e.g., `ReceiveKeyAdoptionConfirmationHandler`, `KeyAdoptionStoredHandler`)
+  - `PostSignedAdminCommitOperationCommand` / events / dispatch handlers used solely to broadcast `SignedAdminCommitOperation`
+
+#### Persistence (EF Core / SQLite)
+
+- Remove legacy sender-key persistence:
+  - `SenderKeyDbo` and the `SenderKeys` table
+
+- Remove legacy key-adoption persistence if it exists only for the old plane:
+  - `KeyAdoptionConfirmationDbo` and the `KeyAdoptionConfirmations` table
+
+Notes:
+
+- Admin-group management (`SignedAdminOperation`, `GroupAdminKeys`, `GroupAdminOps`, `GroupAdminStates`, etc.) may remain temporarily until Group V2 membership/admin semantics replace it in Chunk B.
+  - When Chunk B lands, re-evaluate and delete any remaining admin-sequencing/commit concepts that no longer exist in the Group V2 model.
 
 ---
 
-### Acceptance criteria
+## Chunk A — WPF group UX (blocked on Chunk 0)
 
-- Simulator UI can display multiple active handshake/approval items per peer.
-- Each item can be acted on explicitly (no hidden global “current attempt” semantics).
-- Errors/phases are associated with the correct correlation id.
-- Persistence round-trips the collection.
+Chunk A will be rewritten after Chunk 0 is reviewed and accepted.
+
+For now, Chunk A is explicitly blocked on:
+
+- `IGroupCryptographyService` existing in `Percolator.Cryptography`.
+- Infrastructure implementation and persistence schema being complete.
+- End-to-end send/receive group messages working through the application pipeline.
+
+---
+
+## Chunk B — Group management UX (blocked on Chunk 0)
+
+Chunk B will be rewritten after Chunk 0 is reviewed and accepted.
+
+For now, Chunk B is explicitly blocked on:
+
+- Group V2 membership/admin semantics being mapped to domain/application operations.
+- Persistence schema supporting any required group state for membership changes.
