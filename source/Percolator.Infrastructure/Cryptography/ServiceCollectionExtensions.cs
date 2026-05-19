@@ -21,6 +21,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IX3dhDeriver, X3dhDeriver>();
         services.AddSingleton<IPreKeyBundleValidator, PreKeyBundleValidator>();
         services.AddSingleton<IRatchetEngine, AeadRatchetEngine>();
+        services.AddSingleton<IGroupCryptographyService, ZkgroupCryptographyService>();
         return services;
     }
 }
