@@ -356,3 +356,123 @@ Using the current **Receiving Chain Key**:
 The client uses the derived **Message Key** to decrypt the payload.
 * **Success:** The message is readable. The *Next Receiving Chain Key* is saved. The Message Key is deleted.
 * **Failure:** The state is rolled back (transactional).
+
+# Part 8: Group Conversations (Signal Group V2 / zkgroup)
+
+While 1:1 messaging uses an asymmetric Double Ratchet to manage end-to-end sessions between individual devices, group conversations utilize **Signal Group V2 (`zkgroup`)**. Instead of fanning out individual sender keys or broadcasting plaintext member arrays via 1:1 sessions, Group V2 manages shared state through a centralized server architecture that is secured by **Zero-Knowledge (ZK) anonymous credentials** and client-side deterministic key derivation.
+
+The server acts as a validated coordinator, but client cryptography ensures that the server never learns the group name, the membership roster, or the content being distributed.
+
+---
+
+## 8.1 The Group Root Secret (`GroupMasterKey`)
+
+A group conversation is structurally anchored by a single 32-byte root secret called the `GroupMasterKey`. The server never sees this key; it exists exclusively in the local, encrypted storage of the authorized participants.
+
+### 8.1.1 Cryptographic Key Derivation Sequence
+
+Upon group creation or local rehydration, the 32-byte `GroupMasterKey` is passed into a native key derivation function (KDF) to deterministically squeeze out a single `GroupSecretParams` structure containing four critical primitives:
+
+$$GroupSecretParams = \text{Derive}(GroupMasterKey)$$
+
+- **`group_id` (Group Identifier):** A unique, stable byte array used by the server and clients to identify the cryptographic context of the group.
+- **`blob_key` (Encryption Key):** A symmetric AES key used to encrypt and decrypt the group's profile metadata, such as the title, avatar, and active membership roster.
+- **`uid_enc_key_pair` (User ID Encryption Keypair):** An asymmetric keypair used to obfuscate user identities inside the group context.
+- **`profile_key_enc_key_pair` (Profile Encryption Keypair):** An asymmetric keypair used to manage secure access to individual member profile keys within the group.
+
+Because this derivation is entirely deterministic, clients only need to store the encrypted 32-byte `GroupMasterKey` at rest. All sub-keys, identifiers, and encryption pairs are fully rehydrated in memory on demand.
+
+---
+
+## 8.2 Server-Assisted Routing via Zero-Knowledge Credentials
+
+In Group V1, the server was completely blind, forcing clients to manually track and distribute keys to every recipient. In Group V2, the server actively manages the group's state and enforces access controls, but it is cryptographically blinded via zero-knowledge proofs.
+
+### 8.2.1 Group Presentation and Admission
+When a user wishes to interact with a group (e.g., fetching the encrypted member list or sending a message envelope), they do not authenticate with their account identity or present a plaintext membership token.
+
+Instead, the client uses the derived `GroupSecretParams` to construct a short-lived **Zero-Knowledge Presentation Proof**.
+
+```protobuf
+// Conceptual schema for interacting with the Group server
+message GroupServiceRequest {
+  bytes group_id                       = 1; // Derived from GroupSecretParams
+  bytes zero_knowledge_member_proof   = 2; // ZK proof of valid membership
+  bytes encrypted_action_payload       = 3; // Opaque action executed on the server
+}
+```
+
+#### The Client's Action
+
+The client generates a mathematical proof demonstrating the statement: "I possess a valid credential signed by the group's administrative keys showing I am an active member of this group identifier."
+
+#### The Server's Validation
+
+The server verifies the proof mathematically. If the proof is valid, the server authorizes the request (e.g., accepting an uploaded message or returning an updated metadata blob).
+
+#### The Privacy Invariant
+
+The server learns absolutely nothing about who the user is, which other members belong to the group, or what text/media is inside the group envelope. It only learns that a cryptographically valid group member performed an action.
+
+## 8.3 Inbound and Outbound Message Pipeline
+
+Group messaging content is protected by an authenticated, symmetric envelope layer tied directly to the derived parameters, running alongside traditional 1:1 transport infrastructure for fallback operations where required.
+
+### 8.3.1 Outbound Send Path
+
+The client loads the 32-byte GroupMasterKey from the local database, decrypts it, and rehydrates the GroupSecretParams.
+
+The message payload (text, attachments) is encrypted symmetrically using the derived blob_key.
+
+The client constructs a presentation proof using its native ZK primitives to authenticate its group membership.
+
+The encrypted envelope and the ZK proof are dispatched to the relay server under the target group_id.
+
+The server validates the proof and fans the envelope out to the active distribution list linked to that blinded group context.
+
+### 8.3.2 Inbound Receive Path
+
+The application reads the incoming group_id and looks up the corresponding local conversation record.
+
+The client fetches the target GroupMasterKey, decrypts it, and spins up the ephemeral GroupSecretParams.
+
+The client uses the rehydrated blob_key to decrypt the ciphertext envelope and extract the clear text payload or media attachment references.
+
+The decrypted plaintext is written to the safe application read model, and the ephemeral native handles are securely zeroized from memory.
+
+## 8.4 Membership Changes & Administrative State
+
+Because group configuration (rosters, permissions, and roles) is highly sensitive, changes to group membership are not written directly to a public server database. Administrative operations are managed as state changes to an encrypted config file stored on the server, which can only be modified by producing an administrative zero-knowledge credential.
+
+### 8.4.1 Adding a Member
+
+An admin rehydrates the GroupSecretParams and decrypts the current member list using the blob_key.
+
+The admin appends the new member's public key material, encrypts the updated roster with the blob_key, and issues a specialized ZK credential to the new member via a direct 1:1 session.
+
+The admin uploads the newly encrypted configuration blob to the server using an administrative ZK proof.
+
+### 8.4.2 Removing a Member (Cryptographic Eviction)
+
+In legacy protocols, removing a user required forced key rotations across every remaining participant. Under Group V2, eviction is handled by a direct epoch update to the root secret:
+
+The admin generates a brand new GroupMasterKey for the next epoch of the conversation.
+
+The admin derives the new GroupSecretParams and blob_key from this fresh root secret.
+
+The admin encrypts the updated membership roster (which now completely excludes the evicted peer) using the brand new blob_key.
+
+The admin distributes the new GroupMasterKey directly to each remaining participant individually via their secure 1:1 Double Ratchet sessions.
+
+The admin pushes the new group configuration epoch to the server.
+
+**Epoch Cutover Race Condition Constraint:**
+
+During the eviction process, the outbound message queue must block any concurrent sends to the old epoch while the 1:1 Double Ratchet tunnels are transmitting the new GroupMasterKey to the remaining members. If a message is sent signed with the old epoch parameters during this window:
+
+- The server's ZK verification layer may reject the proof if it enforces strict epoch numbers.
+- The evicted user may still be able to read the message if they intercept the packet before the epoch cutover is finalized on the relay.
+
+The implementation must ensure that epoch transitions are atomic with respect to outbound message delivery to prevent these scenarios.
+
+Because the evicted user is excluded from the 1:1 key distribution phase, they never receive the new GroupMasterKey. They can no longer rehydrate the current blob_key, cannot decrypt future message envelopes, and cannot mathematically construct a valid Zero-Knowledge presentation proof to access the server's routing endpoints. They are permanently locked out of the cryptographic context of the conversation.
