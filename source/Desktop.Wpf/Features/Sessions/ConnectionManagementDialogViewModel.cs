@@ -16,19 +16,6 @@ using Percolator.Network;
 namespace Desktop.Wpf.Features.Sessions;
 
 
-public sealed class TransportRouteOption
-{
-    public TransportRouteOption(Guid? relayHostPeerId, string displayName)
-    {
-        RelayHostPeerId = relayHostPeerId;
-        DisplayName = displayName;
-    }
-
-    // null => Direct P2P (local mesh)
-    public Guid? RelayHostPeerId { get; }
-    public string DisplayName { get; }
-}
-
 public sealed class RouteModeOption
 {
     public RouteModeOption(string key, string displayName)
