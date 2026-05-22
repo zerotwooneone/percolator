@@ -8,7 +8,7 @@ namespace Percolator.Infrastructure.Chat;
 
 /// <summary>
 /// Infrastructure-backed resolver that maps routing keys to a local Conversation.
-/// Currently supports DirectSessionId; PKH and Group GUID paths will be added next.
+/// Currently supports DirectSessionId and PKH paths.
 /// </summary>
 public sealed class ChatConversationResolver : IConversationResolver
 {
@@ -60,7 +60,7 @@ public sealed class ChatConversationResolver : IConversationResolver
                 convo = await _db.Conversations
                     .Include(c => c.Participants)
                     .Include(c => c.Messages)
-                    .Where(c => c.SelfIdentityId == selfIdentityId && c.GroupConversationGuid == null)
+                    .Where(c => c.SelfIdentityId == selfIdentityId)
                     .Where(c => c.Participants.Any(p => p.ParticipantId == selfIdentity.PeerId) && c.Participants.Any(p => p.ParticipantId == remotePeerId))
                     .FirstOrDefaultAsync(cancellationToken);
 
@@ -131,7 +131,7 @@ public sealed class ChatConversationResolver : IConversationResolver
             var convo = await _db.Conversations
                 .Include(c => c.Participants)
                 .Include(c => c.Messages)
-                .Where(c => c.SelfIdentityId == selfIdentity.Id && c.GroupConversationGuid == null)
+                .Where(c => c.SelfIdentityId == selfIdentity.Id)
                 .Where(c => c.Participants.Any(p => p.ParticipantId == selfIdentity.PeerId) && c.Participants.Any(p => p.ParticipantId == remoteKey.PeerId.Value))
                 .FirstOrDefaultAsync(cancellationToken);
 
@@ -151,46 +151,6 @@ public sealed class ChatConversationResolver : IConversationResolver
                 convo.Participants.Add(p1);
                 convo.Participants.Add(p2);
 
-                _db.Conversations.Add(convo);
-                await _db.SaveChangesAsync(cancellationToken);
-            }
-
-            var participants = convo.Participants.Select(p => new ParticipantId(p.ParticipantId)).ToList();
-            var messages = convo.Messages
-                .OrderBy(m => m.SentAt)
-                .Select(m => new Message(new MessageId(m.MessageGuid), new ParticipantId(m.SenderId), m.Body, m.SentAt))
-                .ToList();
-            var domain = new Conversation(new ConversationId(convo.Id), participants, messages, convo.Name);
-            return new ConversationResolution(domain, selfIdentity.Id);
-        }
-        if (lookupKey.GroupConversationGuid.HasValue)
-        {
-            var identities = await _db.SelfIdentities.AsNoTracking().ToListAsync(cancellationToken);
-            if (identities.Count != 1)
-            {
-                throw new InvalidOperationException("Group resolution requires exactly one local self identity.");
-            }
-            var selfIdentity = identities[0];
-
-            var groupGuid = lookupKey.GroupConversationGuid.Value;
-
-            var convo = await _db.Conversations
-                .Include(c => c.Participants)
-                .Include(c => c.Messages)
-                .FirstOrDefaultAsync(c => c.SelfIdentityId == selfIdentity.Id && c.GroupConversationGuid == groupGuid, cancellationToken);
-
-            if (convo is null)
-            {
-                // Create a new group conversation; participants may be populated later by group membership events
-                convo = new ConversationDbo
-                {
-                    Id = Guid.NewGuid(),
-                    Name = null,
-                    GroupConversationGuid = groupGuid,
-                    SelfIdentityId = selfIdentity.Id,
-                    CreatedAt = DateTimeOffset.UtcNow,
-                    UpdatedAt = DateTimeOffset.UtcNow,
-                };
                 _db.Conversations.Add(convo);
                 await _db.SaveChangesAsync(cancellationToken);
             }

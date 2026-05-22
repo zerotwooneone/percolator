@@ -79,7 +79,7 @@ public class PostReadReceiptHandlerTests
     public async Task Handle_Throws_when_multiple_keys()
     {
         // Arrange
-        var lookup = new ConversationLookupKey(Guid.NewGuid(), new Pkh(new byte[32]), null);
+        var lookup = new ConversationLookupKey(Guid.NewGuid(), new Pkh(new byte[32]));
         var messageId = new MessageId(Guid.NewGuid());
         var handler = new PostReadReceiptHandler(_resolver.Object, _writer.Object, _publisher.Object, _selfParticipantIdProvider.Object);
         var cmd = new PostReadReceiptCommand(lookup, messageId, DateTimeOffset.UtcNow);

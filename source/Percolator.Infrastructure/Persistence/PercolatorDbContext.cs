@@ -49,10 +49,6 @@ public class PercolatorDbContext : DbContext
     public DbSet<PendingSessionDbo> PendingSessions { get; set; } = null!;
     public DbSet<SentInvitationDbo> SentInvitations { get; set; } = null!;
     public DbSet<SessionDbo> Sessions { get; set; } = null!;
-    public DbSet<GroupAdminKeyDbo> GroupAdminKeys { get; set; } = null!;
-    public DbSet<GroupAdminOpDbo> GroupAdminOps { get; set; } = null!;
-    public DbSet<GroupAdminStateDbo> GroupAdminStates { get; set; } = null!;
-    public DbSet<GroupManagerStateDbo> GroupManagerStates { get; set; } = null!;
     // New Network domain persistence (PeerRoutingProfile)
     public DbSet<PeerRoutingProfileDbo> PeerRoutingProfiles { get; set; } = null!;
     public DbSet<GrpcEndPointRoutingDbo> PeerRoutingGrpcEndPoints { get; set; } = null!;
@@ -61,7 +57,6 @@ public class PercolatorDbContext : DbContext
     public DbSet<PeerRouteCandidateDbo> PeerRouteCandidates { get; set; } = null!;
     public DbSet<DiscoveredPeerDbo> DiscoveredPeers { get; set; } = null!;
     public DbSet<DiscoveredPeerEndpointDbo> DiscoveredPeerEndpoints { get; set; } = null!;
-    public DbSet<GroupMemberDbo> GroupMembers { get; set; } = null!;
     public DbSet<GroupCryptoStateDbo> GroupCryptoStates { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -314,50 +309,6 @@ public class PercolatorDbContext : DbContext
             entity.HasIndex(e => new { e.PeerId, e.ExpiredAtUtc });
         });
 
-        // GroupAdminStates
-        modelBuilder.Entity<GroupAdminStateDbo>(entity =>
-        {
-            entity.ToTable("GroupAdminStates");
-            entity.HasKey(e => e.ConversationId);
-            entity.Property(e => e.ConversationId).ValueGeneratedNever();
-            entity.Property(e => e.NextAdminSequenceNumber).IsRequired();
-            entity.Property(e => e.LastCommittedKeyVersion).IsRequired();
-        });
-
-        // GroupManagerStates (columnar)
-        modelBuilder.Entity<GroupManagerStateDbo>(entity =>
-        {
-            entity.ToTable("GroupManagerStates");
-            entity.HasKey(e => e.ConversationId);
-            entity.Property(e => e.ConversationId).ValueGeneratedNever();
-            entity.Property(e => e.GroupId).IsRequired();
-            entity.Property(e => e.SequenceNumber).IsRequired();
-            entity.Property(e => e.Title);
-            entity.Property(e => e.CreatedAtUtc).IsRequired();
-            entity.Property(e => e.IsActive).IsRequired();
-            entity.Property(e => e.UpdatedAtUtc).IsRequired();
-            entity.HasIndex(e => e.GroupId);
-            entity.HasIndex(e => e.UpdatedAtUtc);
-        });
-
-        // GroupMembers
-        modelBuilder.Entity<GroupMemberDbo>(entity =>
-        {
-            entity.ToTable("GroupMembers");
-            entity.HasKey(e => new { e.ConversationId, e.MemberSpkiHash });
-            entity.Property(e => e.ConversationId).IsRequired();
-            entity.Property(e => e.MemberSpki).IsRequired();
-            entity.Property(e => e.MemberSpkiHash).IsRequired();
-            entity.Property(e => e.Role).IsRequired();
-            entity.Property(e => e.JoinedAtSequence).IsRequired();
-            entity.HasOne<GroupManagerStateDbo>()
-                .WithMany()
-                .HasForeignKey(e => e.ConversationId)
-                .OnDelete(DeleteBehavior.Cascade)
-                .IsRequired();
-            entity.HasIndex(e => e.ConversationId);
-        });
-
         // GroupCryptoStates (Signal Group V2 root key material)
         modelBuilder.Entity<GroupCryptoStateDbo>(entity =>
         {
@@ -489,11 +440,8 @@ public class PercolatorDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).ValueGeneratedNever();
             entity.Property(e => e.SelfIdentityId).IsRequired();
-            entity.Property(e => e.GroupConversationGuid);
             entity.Property(e => e.CreatedAt).IsRequired();
             entity.Property(e => e.UpdatedAt).IsRequired();
-            // Ensure only one conversation per self identity per group guid (when present)
-            entity.HasIndex(e => new { e.SelfIdentityId, e.GroupConversationGuid }).IsUnique();
             entity.HasOne<SelfIdentityDbo>()
                 .WithMany()
                 .HasForeignKey(e => e.SelfIdentityId)
@@ -527,32 +475,6 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.SentAt).IsRequired();
             entity.HasIndex(e => new { e.ConversationId, e.SentAt });
             entity.HasIndex(e => new { e.ConversationId, e.MessageGuid }).IsUnique();
-        });
-
-        // GroupAdminKeys
-        modelBuilder.Entity<GroupAdminKeyDbo>(entity =>
-        {
-            entity.ToTable("GroupAdminKeys");
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).ValueGeneratedOnAdd();
-            entity.Property(e => e.ConversationId).IsRequired();
-            entity.Property(e => e.AdminPublicKeySpki).IsRequired();
-            entity.Property(e => e.AddedAtUtc).IsRequired();
-            // RevokedAtUtc is nullable
-            entity.HasIndex(e => new { e.ConversationId, e.AddedAtUtc });
-            entity.HasIndex(e => new { e.ConversationId, e.RevokedAtUtc });
-        });
-
-        // GroupAdminOps
-        modelBuilder.Entity<GroupAdminOpDbo>(entity =>
-        {
-            entity.ToTable("GroupAdminOps");
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).ValueGeneratedOnAdd();
-            entity.Property(e => e.ConversationId).IsRequired();
-            entity.Property(e => e.OpId).IsRequired();
-            entity.Property(e => e.AppliedAtUtc).IsRequired();
-            entity.HasIndex(e => new { e.ConversationId, e.OpId }).IsUnique();
         });
 
         // ConversationParticipants (composite key)

@@ -89,7 +89,7 @@ public class PostTextMessageHandlerTests
     public async Task Handle_Throws_when_no_routing_key()
     {
         // Arrange
-        var lookup = new ConversationLookupKey(null, null, null);
+        var lookup = new ConversationLookupKey(null, null);
         var messageId = new MessageId(Guid.NewGuid());
         var handler = new PostTextMessageHandler(
             _resolver.Object,

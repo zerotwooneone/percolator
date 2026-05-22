@@ -12,13 +12,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IConversationRepository, SqliteConversationRepository>();
         services.AddScoped<ChatApp.IConversationResolver, ChatConversationResolver>();
         services.AddScoped<ChatApp.IChatMessageWriter, SqliteChatMessageWriter>();
-        services.AddScoped<ChatApp.IGroupAdminKeyStore, SqliteGroupAdminKeyStore>();
-        services.AddScoped<ChatApp.IGroupAdminOpStore, SqliteGroupAdminOpStore>();
-        services.AddScoped<ChatApp.IGroupAdminStateStore, SqliteGroupAdminStateStore>();
-        services.AddScoped<IGroupManagerStateStore, SqliteGroupManagerStateStore>();
         services.AddScoped<IDirectSessionConversationLookup, SqliteDirectSessionConversationLookup>();
-        services.AddScoped<IActingAdminResolver, SqliteActingAdminResolver>();
-        services.AddScoped<ChatApp.IAdminOperations, ChatApp.Services.AdminOperations>();
         return services;
     }
 }

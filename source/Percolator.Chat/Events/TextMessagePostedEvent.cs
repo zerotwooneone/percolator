@@ -12,8 +12,6 @@ namespace Percolator.Chat.Events
         public string Content { get; }
         public DateTimeOffset SentTimestampUtc { get; }
         public DirectSessionIdValueObject? DirectSessionId { get; }
-        public Guid? GroupConversationGuid { get; }
-        public byte[]? AuthorIdentityKey { get; }
 
         public TextMessagePostedEvent(
             Guid conversationId,
@@ -22,9 +20,7 @@ namespace Percolator.Chat.Events
             IReadOnlyList<Guid> recipientPeerIds,
             string content,
             DateTimeOffset sentTimestampUtc,
-            DirectSessionIdValueObject? directSessionId = null,
-            Guid? groupConversationGuid = null,
-            byte[]? authorIdentityKey = null)
+            DirectSessionIdValueObject? directSessionId = null)
         {
             ConversationId = conversationId;
             MessageId = messageId;
@@ -33,8 +29,6 @@ namespace Percolator.Chat.Events
             Content = content ?? throw new ArgumentNullException(nameof(content));
             SentTimestampUtc = sentTimestampUtc;
             DirectSessionId = directSessionId;
-            GroupConversationGuid = groupConversationGuid;
-            AuthorIdentityKey = authorIdentityKey;
         }
     }
 }

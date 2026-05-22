@@ -44,16 +44,6 @@ public sealed class PostTextMessageHandler : IRequestHandler<PostTextMessageComm
             request.SentTimestampUtc,
             cancellationToken).ConfigureAwait(false);
 
-        byte[]? authorIdentityKey = null;
-        if (request.LookupKey.GroupConversationGuid.HasValue)
-        {
-            var spki = _active.Keys?.IdentitySigningKey?.ExportSubjectPublicKeyInfo();
-            if (spki is not null)
-            {
-                authorIdentityKey = spki;
-            }
-        }
-
         await _publisher.Publish(new TextMessagePostedEvent(
                 resolution.Conversation.Id.Value,
                 request.MessageId.Value,
@@ -63,9 +53,7 @@ public sealed class PostTextMessageHandler : IRequestHandler<PostTextMessageComm
                     .ToList(),
                 request.Content,
                 request.SentTimestampUtc,
-                Percolator.Chat.ValueObjects.DirectSessionIdValueObject.FromGuid(request.LookupKey.DirectSessionId),
-                request.LookupKey.GroupConversationGuid,
-                authorIdentityKey),
+                Percolator.Chat.ValueObjects.DirectSessionIdValueObject.FromGuid(request.LookupKey.DirectSessionId)),
             cancellationToken).ConfigureAwait(false);
     }
 }

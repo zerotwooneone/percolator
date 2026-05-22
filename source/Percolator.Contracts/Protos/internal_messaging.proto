@@ -28,8 +28,8 @@ message InternalEnvelope {
 // Explicit group creation prior to any administrative operations.
 message CreateGroup {
   optional uint32 version = 100;
-  // GUID (16 bytes) chosen by the creator to identify the group across peers
-  optional bytes group_conversation_guid = 1;
+  // ConversationId (GUID bytes) chosen by the creator to identify the group across peers
+  optional bytes conversation_id = 1;
   // Initial participant identity public keys (SPKI bytes). Include the creator's identity key as well.
   repeated bytes initial_participant_identity_keys = 2;
   // Optional human-readable name
@@ -47,17 +47,11 @@ message ChatEnvelope {
     TextMessage text_message = 1;
     ReadReceipt read_receipt = 2;
     EmojiAnnotation emoji_annotation = 3;
-    UpdateGroupMembershipRequest update_group_membership_request = 4;
-    UpdateGroupInfoRequest update_group_info_request = 5;
-    GroupMembershipChangedNotification group_membership_changed_notification = 6;
-    GroupInfoChangedNotification group_info_changed_notification = 7;
     DeliveredReceipt delivered_receipt = 8;
     // Bootstrap: delivers the encrypted GroupMasterKey over existing 1:1 tunnels
     GroupV2KeyBootstrap group_v2_key_bootstrap = 15;
     // Signal Group V2 ciphertext message
     GroupV2Message group_v2_message = 14;
-    // Administrative messages (keep SignedAdminOperation for non-crypto group management)
-    SignedAdminOperation signed_admin_operation = 9;
   }
 }
 
@@ -66,20 +60,16 @@ message TextMessage {
   optional bytes author_identity_key = 2; // Required for group messages.
   google.protobuf.Timestamp sent_timestamp_utc = 3;
   string content = 4;
-  // Optional GroupConversationGuid (GUID bytes) for group routing
-  optional bytes group_conversation_guid = 5;
   // Optional Public Key Hash (PKH, 32 bytes) for 1:1 routing when no direct session exists (e.g., queued delivery)
-  optional bytes public_key_hash = 6;
+  optional bytes public_key_hash = 5;
 }
 
 message ReadReceipt {
   bytes message_id = 1; // The ID of the message being acknowledged.
   optional bytes author_identity_key = 2; // Who is acknowledging the message.
   google.protobuf.Timestamp sent_timestamp_utc = 3;
-  // Optional GroupConversationGuid (GUID bytes) for group routing
-  optional bytes group_conversation_guid = 4;
   // Optional PKH for 1:1 routing when no direct session exists
-  optional bytes public_key_hash = 5;
+  optional bytes public_key_hash = 4;
 }
 
 message EmojiAnnotation {
@@ -87,10 +77,8 @@ message EmojiAnnotation {
   optional bytes author_identity_key = 2; // Who is adding the annotation.
   google.protobuf.Timestamp sent_timestamp_utc = 3;
   string emoji = 4; // The emoji character, e.g., "👍".
-  // Optional GroupConversationGuid (GUID bytes) for group routing
-  optional bytes group_conversation_guid = 5;
   // Optional PKH for 1:1 routing when no direct session exists
-  optional bytes public_key_hash = 6;
+  optional bytes public_key_hash = 5;
 }
 
 // Delivery receipt acknowledging that a message was delivered (distinct from read)
@@ -98,10 +86,8 @@ message DeliveredReceipt {
   bytes message_id = 1; // The ID of the message being acknowledged as delivered.
   optional bytes author_identity_key = 2; // Who is acknowledging delivery (for group contexts).
   google.protobuf.Timestamp sent_timestamp_utc = 3;
-  // Optional GroupConversationGuid (GUID bytes) for group routing
-  optional bytes group_conversation_guid = 4;
   // Optional PKH for 1:1 routing when no direct session exists
-  optional bytes public_key_hash = 5;
+  optional bytes public_key_hash = 4;
 }
 
 // Signal Group V2 ciphertext message
@@ -134,105 +120,6 @@ message GroupV2KeyBootstrap {
 // Inner plaintext wrapper for GroupV2Message.ciphertext.
 message GroupV2Content {
   string text_message = 1;
-}
-
-// Group Management Messages
-message UpdateGroupMembershipRequest {
-  repeated bytes members_to_add = 1;
-  repeated bytes members_to_remove = 2;
-  bool leave_group = 3; // Set to true if the sender is leaving the group.
-  // The group to which this update applies
-  optional bytes group_conversation_guid = 4;
-}
-
-message UpdateGroupInfoRequest {
-  optional string new_group_name = 1;
-  optional bytes new_group_avatar = 2; // Raw image data for the avatar.
-  // The group to which this update applies
-  optional bytes group_conversation_guid = 3;
-}
-
-// =============================
-// Administrative Control Plane
-// =============================
-
-// Unsigned payload describing a single administrative operation. The signature is carried in SignedAdminOperation.
-message AdminOperationPayload {
-  optional uint32 version = 100;
-  optional bytes group_conversation_guid = 1; // GUID (16 bytes)
-  optional bytes op_id = 2; // GUID (16 bytes) idempotency
-  google.protobuf.Timestamp sent_timestamp_utc = 3;
-  // Optional sequencing to aid fork/conflict resolution
-  optional uint64 admin_sequence_number = 4;
-
-  oneof operation {
-    GrantAdmin grant_admin = 10;
-    RevokeAdmin revoke_admin = 11;
-    UpdateGroupMembershipPayload update_group_membership = 12;
-    UpdateGroupInfoPayload update_group_info = 13;
-  }
-}
-
-message GrantAdmin {
-  optional uint32 version = 100;
-  optional bytes grantee_public_key = 1; // SPKI bytes
-}
-
-message RevokeAdmin {
-  optional uint32 version = 100;
-  optional bytes grantee_public_key = 1; // SPKI bytes
-}
-
-message UpdateGroupMembershipPayload {
-  optional uint32 version = 100;
-  repeated bytes members_to_add = 1;    // each 16-byte participant guid
-  repeated bytes members_to_remove = 2; // each 16-byte participant guid
-  optional bool leave_group = 3;
-}
-
-message UpdateGroupInfoPayload {
-  optional uint32 version = 100;
-  optional string new_group_name = 1;
-  optional bytes new_group_avatar = 2;
-}
-
-message SignedAdminOperation {
-  optional uint32 version = 100;
-  optional AdminOperationPayload payload = 1; // The canonical bytes to sign are payload.ToByteArray()
-  optional bytes signature = 2; // Signature by an admin key (ECDSA P-256 + SHA-256 over payload bytes)
-}
-
-// History entries used for newcomer replay/validation
-message AdminHistoryEntry {
-  optional uint32 version = 100;
-  optional AdminOperationPayload payload = 1;
-  optional bytes signature = 2;
-  optional bytes signer_public_key = 3; // SPKI bytes (redundant but aids audit)
-}
-
-message AdminHistoryBundle {
-  optional uint32 version = 100;
-  repeated AdminHistoryEntry entries = 1; // Ordered from genesis to present
-}
-
-// Group Notification Messages
-message GroupMembershipChangedNotification {
-  bytes actor_identity_key = 1; // The identity of the member who made the change.
-  repeated bytes added_members = 2;
-  repeated bytes removed_members = 3;
-  optional bytes member_who_left = 4;
-  google.protobuf.Timestamp change_timestamp_utc = 5;
-  // The group to which this notification applies
-  optional bytes group_conversation_guid = 6;
-}
-
-message GroupInfoChangedNotification {
-  bytes actor_identity_key = 1; // The identity of the member who made the change.
-  optional string new_group_name = 2;
-  optional bytes new_group_avatar = 3;
-  google.protobuf.Timestamp change_timestamp_utc = 4;
-  // The group to which this notification applies
-  optional bytes group_conversation_guid = 5;
 }
 
 // === 2. File Sharing Application ===

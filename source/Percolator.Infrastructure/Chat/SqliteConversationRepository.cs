@@ -14,40 +14,6 @@ public sealed class SqliteConversationRepository : IConversationRepository
         _db = db;
     }
 
-    public async Task CreateGroupAsync(Guid groupConversationGuid, int selfIdentityId, IEnumerable<ParticipantId> initialParticipants, string? name)
-    {
-        // If already exists, no-op
-        var existing = await _db.Conversations
-            .Include(c => c.Participants)
-            .FirstOrDefaultAsync(c => c.SelfIdentityId == selfIdentityId && c.GroupConversationGuid == groupConversationGuid);
-        if (existing is not null)
-        {
-            return;
-        }
-
-        var now = DateTimeOffset.UtcNow;
-        var convoId = Guid.NewGuid();
-        var dbo = new ConversationDbo
-        {
-            Id = convoId,
-            Name = name,
-            GroupConversationGuid = groupConversationGuid,
-            SelfIdentityId = selfIdentityId,
-            CreatedAt = now,
-            UpdatedAt = now
-        };
-        foreach (var p in initialParticipants)
-        {
-            dbo.Participants.Add(new ConversationParticipantDbo
-            {
-                ConversationId = convoId,
-                ParticipantId = p.Value
-            });
-        }
-        _db.Conversations.Add(dbo);
-        await _db.SaveChangesAsync();
-    }
-
     public async Task<Conversation?> GetByIdAsync(ConversationId id, int selfIdentityId)
     {
         var dbo = await _db.Conversations
@@ -116,28 +82,17 @@ public sealed class SqliteConversationRepository : IConversationRepository
         await _db.SaveChangesAsync();
     }
 
-    public async Task<Conversation?> GetByGroupGuidAsync(Guid groupConversationGuid, int selfIdentityId)
-    {
-        var dbo = await _db.Conversations
-            .AsNoTracking()
-            .Include(c => c.Participants)
-            .Include(c => c.Messages)
-            .FirstOrDefaultAsync(c => c.SelfIdentityId == selfIdentityId && c.GroupConversationGuid == groupConversationGuid);
-
-        return dbo is null ? null : ToDomain(dbo);
-    }
-
     public async Task<Conversation?> GetByParticipantPairAsync(int selfIdentityId, Guid otherPeerId)
     {
         // Load self identity to obtain the local peer id
         var self = await _db.SelfIdentities.AsNoTracking().FirstOrDefaultAsync(i => i.Id == selfIdentityId)
             ?? throw new InvalidOperationException($"SelfIdentity not found for id {selfIdentityId}.");
 
-        // Find a direct (non-group) conversation for this self identity that contains both participants
+        // Find a direct conversation for this self identity that contains both participants
         var dbo = await _db.Conversations
             .Include(c => c.Participants)
             .Include(c => c.Messages)
-            .Where(c => c.SelfIdentityId == selfIdentityId && c.GroupConversationGuid == null)
+            .Where(c => c.SelfIdentityId == selfIdentityId)
             .Where(c => c.Participants.Any(p => p.ParticipantId == self.PeerId) && c.Participants.Any(p => p.ParticipantId == otherPeerId))
             .AsNoTracking()
             .FirstOrDefaultAsync();
