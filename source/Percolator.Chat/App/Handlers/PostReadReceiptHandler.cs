@@ -5,12 +5,12 @@ namespace Percolator.Chat.App.Commands;
 
 public sealed class PostReadReceiptHandler : IRequestHandler<PostReadReceiptCommand>
 {
-    private readonly IConversationResolver _resolver;
+    private readonly IDirectConversationResolver _resolver;
     private readonly IChatMessageWriter _writer;
     private readonly IPublisher _publisher;
     private readonly ISelfParticipantIdProvider _selfParticipantIdProvider;
 
-    public PostReadReceiptHandler(IConversationResolver resolver, IChatMessageWriter writer, IPublisher publisher, ISelfParticipantIdProvider selfParticipantIdProvider)
+    public PostReadReceiptHandler(IDirectConversationResolver resolver, IChatMessageWriter writer, IPublisher publisher, ISelfParticipantIdProvider selfParticipantIdProvider)
     {
         _resolver = resolver;
         _writer = writer;
@@ -23,7 +23,7 @@ public sealed class PostReadReceiptHandler : IRequestHandler<PostReadReceiptComm
         request.LookupKey.EnsureExactlyOne();
         var resolution = await _resolver.ResolveAsync(request.LookupKey, cancellationToken);
         var selfParticipantId = _selfParticipantIdProvider.Get();
-        
+
         await _writer.AddReadReceiptAsync(
             resolution.Conversation.Id,
             resolution.SelfIdentityId,
@@ -37,12 +37,7 @@ public sealed class PostReadReceiptHandler : IRequestHandler<PostReadReceiptComm
             resolution.Conversation.Id.Value,
             request.MessageId.Value,
             resolution.SelfIdentityId,
-            resolution.Conversation.Participants
-                .Select(p => p.Value.ToByteArray()
-                    .Take(8)
-                    .Select((b, i) => (long)b << (i * 8))
-                    .Aggregate((x, y) => x | y))
-                .ToArray(),
+            new[] { BitConverter.ToInt64(resolution.Conversation.Peer1.Value.ToByteArray()), BitConverter.ToInt64(resolution.Conversation.Peer2.Value.ToByteArray()) },
             request.SentTimestampUtc.UtcDateTime),
             cancellationToken);
     }

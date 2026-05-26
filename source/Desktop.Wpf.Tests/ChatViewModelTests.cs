@@ -1,15 +1,12 @@
 using System;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Windows.Data;
 using Desktop.Wpf.Features.Chat;
 using Desktop.Wpf.Features.Sessions;
 using Desktop.Wpf.Features.Chat.State;
 using Desktop.Wpf.Shared.Mvvm;
 using FluentAssertions;
 using MediatR;
-using Microsoft.Extensions.Logging;
 using Moq;
 using NUnit.Framework;
 using Percolator.Network;

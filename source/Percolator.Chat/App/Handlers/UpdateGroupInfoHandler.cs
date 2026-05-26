@@ -1,32 +1,28 @@
 using MediatR;
 using Percolator.Chat.App.Commands;
+using Percolator.Chat.ValueObjects;
 
 namespace Percolator.Chat.App.Handlers;
 
 public sealed class UpdateGroupInfoHandler : IRequestHandler<UpdateGroupInfoCommand>
 {
-    private readonly IConversationResolver _resolver;
-    private readonly IConversationRepository _repository;
+    private readonly IGroupConversationRepository _repository;
 
-    public UpdateGroupInfoHandler(IConversationResolver resolver, IConversationRepository repository)
+    public UpdateGroupInfoHandler(IGroupConversationRepository repository)
     {
-        _resolver = resolver;
         _repository = repository;
     }
 
     public async Task Handle(UpdateGroupInfoCommand request, CancellationToken cancellationToken)
     {
-        // Enforce exactly-one-key rule
-        request.LookupKey.EnsureExactlyOne();
-
-        var resolution = await _resolver.ResolveAsync(request.LookupKey, cancellationToken);
-        var conversation = resolution.Conversation;
+        var groupConversation = await _repository.GetByIdAsync(request.ConversationId, request.SelfIdentityId, cancellationToken)
+            ?? throw new InvalidOperationException($"Group conversation not found for id {request.ConversationId.Value}.");
 
         if (request.NewName != null)
         {
-            conversation.ChangeName(request.NewName);
+            groupConversation.ChangeName(request.NewName, DateTimeOffset.UtcNow);
         }
 
-        await _repository.UpdateAsync(conversation, resolution.SelfIdentityId);
+        await _repository.UpdateAsync(groupConversation, request.SelfIdentityId, cancellationToken);
     }
 }

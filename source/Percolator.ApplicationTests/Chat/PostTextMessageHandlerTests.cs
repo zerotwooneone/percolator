@@ -14,7 +14,7 @@ namespace Percolator.Chat.Tests;
 [TestFixture]
 public class PostTextMessageHandlerTests
 {
-    private Mock<IConversationResolver> _resolver = null!;
+    private Mock<IDirectConversationResolver> _resolver = null!;
     private Mock<IChatMessageWriter> _writer = null!;
     private Mock<IPublisher> _publisher = null!;
     private ActiveIdentityContext _active = null!;
@@ -22,20 +22,20 @@ public class PostTextMessageHandlerTests
     [SetUp]
     public void SetUp()
     {
-        _resolver = new Mock<IConversationResolver>(MockBehavior.Strict);
+        _resolver = new Mock<IDirectConversationResolver>(MockBehavior.Strict);
         _writer = new Mock<IChatMessageWriter>(MockBehavior.Strict);
         _publisher = new Mock<IPublisher>(MockBehavior.Loose);
         _active = new ActiveIdentityContext();
     }
 
-    private static Conversation MakeConversation()
+    private static DirectConversation MakeConversation()
     {
-        var participants = new[] { new ParticipantId(Guid.NewGuid()), new ParticipantId(Guid.NewGuid()) };
-        return new Conversation(
+        var peer1 = new ParticipantId(Guid.NewGuid());
+        var peer2 = new ParticipantId(Guid.NewGuid());
+        return new DirectConversation(
             new ConversationId(Guid.NewGuid()),
-            participants,
-            Array.Empty<Message>(),
-            null);
+            peer1,
+            peer2);
     }
 
     [Test]
@@ -54,7 +54,7 @@ public class PostTextMessageHandlerTests
 
         _resolver
             .Setup(r => r.ResolveAsync(lookup, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new ConversationResolution(convo, selfIdentityId));
+            .ReturnsAsync(new DirectConversationResolution(convo, selfIdentityId));
 
         _writer
             .Setup(w => w.AddTextMessageAsync(convo.Id, selfIdentityId, selfParticipantId, content, messageId, sentAt, It.IsAny<CancellationToken>()))

@@ -8,16 +8,16 @@ namespace Percolator.Application.Sessions;
 
 public class RemotePeerResolver : IRemotePeerResolver
 {
-    private readonly IConversationRepository _conversationRepository;
+    private readonly IDirectConversationRepository _directConversationRepository;
     private readonly ActiveIdentityContext _activeIdentityContext;
     private readonly ILogger<RemotePeerResolver> _logger;
 
     public RemotePeerResolver(
-        IConversationRepository conversationRepository,
+        IDirectConversationRepository directConversationRepository,
         ActiveIdentityContext activeIdentityContext,
         ILogger<RemotePeerResolver> logger)
     {
-        _conversationRepository = conversationRepository;
+        _directConversationRepository = directConversationRepository;
         _activeIdentityContext = activeIdentityContext;
         _logger = logger;
     }
@@ -28,16 +28,11 @@ public class RemotePeerResolver : IRemotePeerResolver
         if (_activeIdentityContext.Identity is null)
             throw new InvalidOperationException("Identity context not loaded");
 
-        var conversation = await _conversationRepository.GetByIdAsync(convId, _activeIdentityContext.Identity.SelfIdentityId.Value).ConfigureAwait(false)
-            ?? throw new InvalidOperationException($"Conversation with id {sessionId} not found");
-
-        if (conversation.Participants.Count != 2)
-        {
-            _logger.LogWarning("Conversation {ConversationId} has {Count} participants; direct message resolver expects exactly 2", conversation.Id, conversation.Participants.Count);
-        }
+        var conversation = await _directConversationRepository.GetByIdAsync(convId, _activeIdentityContext.Identity.SelfIdentityId.Value, default).ConfigureAwait(false)
+            ?? throw new InvalidOperationException($"Direct conversation with id {sessionId} not found");
 
         var localPeerId = _activeIdentityContext.Identity.Id;
-        var remote = conversation.Participants.First(p => p.Value != localPeerId);
+        var remote = conversation.Peer1.Value == localPeerId ? conversation.Peer2 : conversation.Peer1;
         var remoteId = new PeerId(remote.Value);
         _logger.LogInformation("Resolved remote peer {RemotePeerId} from session {SessionId}", remoteId, sessionId);
         return remoteId;

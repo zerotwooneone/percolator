@@ -34,6 +34,88 @@ namespace Percolator.Infrastructure.Migrations
                     b.ToTable("DhtNodes");
                 });
 
+            modelBuilder.Entity("Percolator.Infrastructure.Chat.Persistence.GroupMemberDbo", b =>
+                {
+                    b.Property<Guid>("ConversationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("PeerId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("JoinedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("RemovedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Role")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("ConversationId", "PeerId");
+
+                    b.HasIndex("ConversationId");
+
+                    b.ToTable("GroupMembers", (string)null);
+                });
+
+            modelBuilder.Entity("Percolator.Infrastructure.Chat.Persistence.GroupStateDbo", b =>
+                {
+                    b.Property<Guid>("ConversationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Epoch")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("ConversationId");
+
+                    b.ToTable("GroupStates", (string)null);
+                });
+
+            modelBuilder.Entity("Percolator.Infrastructure.Chat.Persistence.PendingGroupInvitationDbo", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ConversationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<byte[]>("CreatorIdentityKey")
+                        .IsRequired()
+                        .HasColumnType("BLOB");
+
+                    b.Property<string>("GroupName")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("InitialMembersJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("InviterPeerId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("ReceivedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConversationId");
+
+                    b.ToTable("PendingGroupInvitations", (string)null);
+                });
+
             modelBuilder.Entity("Percolator.Infrastructure.Cryptography.PendingSessionDbo", b =>
                 {
                     b.Property<Guid>("Id")
@@ -242,6 +324,9 @@ namespace Percolator.Infrastructure.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("Kind")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Name")
                         .HasColumnType("TEXT");
 
@@ -252,6 +337,8 @@ namespace Percolator.Infrastructure.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("Kind");
 
                     b.HasIndex("SelfIdentityId");
 
@@ -1058,6 +1145,24 @@ namespace Percolator.Infrastructure.Migrations
                     b.HasIndex("RawDataHash");
 
                     b.ToTable("PeerRoutingTlsCertificates", (string)null);
+                });
+
+            modelBuilder.Entity("Percolator.Infrastructure.Chat.Persistence.GroupMemberDbo", b =>
+                {
+                    b.HasOne("Percolator.Infrastructure.Persistence.ConversationDbo", null)
+                        .WithMany()
+                        .HasForeignKey("ConversationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Percolator.Infrastructure.Chat.Persistence.GroupStateDbo", b =>
+                {
+                    b.HasOne("Percolator.Infrastructure.Persistence.ConversationDbo", null)
+                        .WithMany()
+                        .HasForeignKey("ConversationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Percolator.Infrastructure.Cryptography.SentInvitationDbo", b =>

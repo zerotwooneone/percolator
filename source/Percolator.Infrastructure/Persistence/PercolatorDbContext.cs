@@ -58,6 +58,9 @@ public class PercolatorDbContext : DbContext
     public DbSet<DiscoveredPeerDbo> DiscoveredPeers { get; set; } = null!;
     public DbSet<DiscoveredPeerEndpointDbo> DiscoveredPeerEndpoints { get; set; } = null!;
     public DbSet<GroupCryptoStateDbo> GroupCryptoStates { get; set; } = null!;
+    public DbSet<Percolator.Infrastructure.Chat.Persistence.GroupMemberDbo> GroupMembers { get; set; } = null!;
+    public DbSet<Percolator.Infrastructure.Chat.Persistence.GroupStateDbo> GroupStates { get; set; } = null!;
+    public DbSet<Percolator.Infrastructure.Chat.Persistence.PendingGroupInvitationDbo> PendingGroupInvitations { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -325,6 +328,57 @@ public class PercolatorDbContext : DbContext
                 .IsRequired();
         });
 
+        // GroupMembers (group membership and roles)
+        modelBuilder.Entity<Percolator.Infrastructure.Chat.Persistence.GroupMemberDbo>(entity =>
+        {
+            entity.ToTable("GroupMembers");
+            entity.HasKey(e => new { e.ConversationId, e.PeerId });
+            entity.Property(e => e.ConversationId).IsRequired();
+            entity.Property(e => e.PeerId).IsRequired();
+            entity.Property(e => e.Role).IsRequired();
+            entity.Property(e => e.JoinedAtUtc).IsRequired();
+            entity.Property(e => e.RemovedAtUtc).IsRequired(false);
+            entity.HasIndex(e => e.ConversationId);
+            entity.HasOne<ConversationDbo>()
+                .WithMany()
+                .HasForeignKey(e => e.ConversationId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired();
+        });
+
+        // GroupStates (group metadata: epoch, name)
+        modelBuilder.Entity<Percolator.Infrastructure.Chat.Persistence.GroupStateDbo>(entity =>
+        {
+            entity.ToTable("GroupStates");
+            entity.HasKey(e => e.ConversationId);
+            entity.Property(e => e.ConversationId).IsRequired();
+            entity.Property(e => e.Epoch).IsRequired();
+            entity.Property(e => e.Name).IsRequired(false);
+            entity.Property(e => e.CreatedAtUtc).IsRequired();
+            entity.Property(e => e.UpdatedAtUtc).IsRequired();
+            entity.HasOne<ConversationDbo>()
+                .WithMany()
+                .HasForeignKey(e => e.ConversationId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired();
+        });
+
+        // PendingGroupInvitations (pending group invites received from remote peers)
+        modelBuilder.Entity<Percolator.Infrastructure.Chat.Persistence.PendingGroupInvitationDbo>(entity =>
+        {
+            entity.ToTable("PendingGroupInvitations");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.ConversationId).IsRequired();
+            entity.Property(e => e.InviterPeerId).IsRequired();
+            entity.Property(e => e.CreatorIdentityKey).IsRequired();
+            entity.Property(e => e.InitialMembersJson).IsRequired();
+            entity.Property(e => e.GroupName).IsRequired(false);
+            entity.Property(e => e.ReceivedAtUtc).IsRequired();
+            entity.Property(e => e.Status).IsRequired();
+            entity.HasIndex(e => e.ConversationId);
+        });
+
         modelBuilder.Entity<SignedPreKeyDbo>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -440,8 +494,10 @@ public class PercolatorDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).ValueGeneratedNever();
             entity.Property(e => e.SelfIdentityId).IsRequired();
+            entity.Property(e => e.Kind).IsRequired();
             entity.Property(e => e.CreatedAt).IsRequired();
             entity.Property(e => e.UpdatedAt).IsRequired();
+            entity.HasIndex(e => e.Kind);
             entity.HasOne<SelfIdentityDbo>()
                 .WithMany()
                 .HasForeignKey(e => e.SelfIdentityId)

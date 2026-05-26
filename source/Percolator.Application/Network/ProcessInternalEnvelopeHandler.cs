@@ -14,6 +14,8 @@ using Percolator.MessageQueue.Commands;
 using Percolator.MessageQueue.Abstractions;
 using Percolator.Network;
 using Percolator.Prekey.Handlers;
+using System.Text.Json;
+using Percolator.Chat;
 using PeerId = Percolator.Identity.PeerId;
 
 namespace Percolator.Application.Network;
@@ -26,7 +28,10 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
     private readonly IPeerRoutingProfileRepository _profileRepository;
     private readonly IMessageQueueService _mqService;
     private readonly Percolator.Chat.App.IPkhPeerResolver _pkhPeerResolver;
-    public ProcessInternalEnvelopeHandler(ILogger<ProcessInternalEnvelopeHandler> logger, IMediator mediator, IDhtService dhtService, IMessageQueueService mqService, IPeerRoutingProfileRepository profileRepository, Percolator.Chat.App.IPkhPeerResolver pkhPeerResolver)
+    private readonly IPendingGroupInvitationRepository _pendingGroupInvitationRepository;
+    private readonly Percolator.Chat.App.IGroupCryptoStateRepository _groupCryptoStateRepository;
+
+    public ProcessInternalEnvelopeHandler(ILogger<ProcessInternalEnvelopeHandler> logger, IMediator mediator, IDhtService dhtService, IMessageQueueService mqService, IPeerRoutingProfileRepository profileRepository, Percolator.Chat.App.IPkhPeerResolver pkhPeerResolver, IPendingGroupInvitationRepository pendingGroupInvitationRepository, Percolator.Chat.App.IGroupCryptoStateRepository groupCryptoStateRepository)
     {
         _logger = logger;
         _mediator = mediator;
@@ -34,6 +39,8 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
         _mqService = mqService;
         _profileRepository = profileRepository;
         _pkhPeerResolver = pkhPeerResolver;
+        _pendingGroupInvitationRepository = pendingGroupInvitationRepository;
+        _groupCryptoStateRepository = groupCryptoStateRepository;
     }
 
     public async Task<InternalEnvelope?> Handle(ProcessInternalEnvelopeCommand request, CancellationToken cancellationToken)
@@ -297,14 +304,95 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                 }
                 case ChatEnvelope.MessageOneofCase.CreateGroup:
                 {
-                    // Skeleton: Business logic to be implemented in Chunk C
-                    _logger.LogInformation("Received CreateGroup message (skeleton handler)");
+                    var chatEnv = env.ChatEnvelope;
+                    var createGroup = chatEnv.CreateGroup;
+                    
+                    // Validate conversation_id is 16 bytes and not empty
+                    if (createGroup.ConversationId.Length != 16)
+                    {
+                        _logger.LogWarning("Invalid CreateGroup: conversation_id must be 16 bytes, got {Length}", createGroup.ConversationId.Length);
+                        return null;
+                    }
+                    var conversationId = new Guid(createGroup.ConversationId.ToByteArray());
+                    if (conversationId == Guid.Empty)
+                    {
+                        _logger.LogWarning("Invalid CreateGroup: conversation_id cannot be empty");
+                        return null;
+                    }
+
+                    // Validate initial_participant_identity_keys is not empty
+                    if (createGroup.InitialParticipantIdentityKeys.Count == 0)
+                    {
+                        _logger.LogWarning("Invalid CreateGroup: initial_participant_identity_keys cannot be empty");
+                        return null;
+                    }
+
+                    // Serialize initial member identity keys to JSON
+                    var initialMembers = createGroup.InitialParticipantIdentityKeys
+                        .Select(k => k.ToByteArray())
+                        .ToList();
+                    var initialMembersJson = JsonSerializer.Serialize(initialMembers);
+
+                    if (request.Context.RemotePeerGuid == null)
+                    {
+                        _logger.LogWarning("Invalid CreateGroup: RemotePeerGuid missing from envelope context");
+                        return null;
+                    }
+                    var senderPeerId = new PeerId(request.Context.RemotePeerGuid.Value);
+
+                    // Persist pending group invitation
+                    var pendingInvitation = new PendingGroupInvitation(
+                        Guid.NewGuid(),
+                        new ConversationId(conversationId),
+                        senderPeerId,
+                        createGroup.CreatorIdentityKey.ToByteArray(),
+                        initialMembers,
+                        createGroup.Name,
+                        DateTimeOffset.UtcNow
+                    );
+
+                    await _pendingGroupInvitationRepository.AddAsync(pendingInvitation, cancellationToken);
+
+                    _logger.LogInformation("Received CreateGroup message for conversation {ConversationId} from {SenderPeerId}, persisted as pending invitation", conversationId, senderPeerId);
+                    
+                    // TODO: Dispatch notification for UI to surface in connection management dialog
                     return null;
                 }
                 case ChatEnvelope.MessageOneofCase.GroupKeyBootstrap:
                 {
-                    // Skeleton: Business logic to be implemented in Chunk C
-                    _logger.LogInformation("Received GroupKeyBootstrap message (skeleton handler)");
+                    var chatEnv = env.ChatEnvelope;
+                    var bootstrap = chatEnv.GroupKeyBootstrap;
+                    
+                    // Validate conversation_id is exactly 16 bytes and not Guid.Empty
+                    if (bootstrap.ConversationId.Length != 16)
+                    {
+                        _logger.LogWarning("Invalid GroupKeyBootstrap: conversation_id must be 16 bytes, got {Length}", bootstrap.ConversationId.Length);
+                        return null;
+                    }
+                    var conversationId = new Guid(bootstrap.ConversationId.ToByteArray());
+                    if (conversationId == Guid.Empty)
+                    {
+                        _logger.LogWarning("Invalid GroupKeyBootstrap: conversation_id cannot be empty");
+                        return null;
+                    }
+
+                    // Validate group_master_key_bytes is exactly 32 bytes
+                    if (bootstrap.GroupMasterKeyBytes.Length != 32)
+                    {
+                        _logger.LogWarning("Invalid GroupKeyBootstrap: group_master_key_bytes must be 32 bytes, got {Length}", bootstrap.GroupMasterKeyBytes.Length);
+                        return null;
+                    }
+
+                    // Derive GroupId from master key via KDF (for logging/validation)
+                    var groupMasterKey = Percolator.Cryptography.GroupMasterKey.FromBytes(bootstrap.GroupMasterKeyBytes.ToByteArray());
+                    
+                    // Persist via IGroupCryptoStateRepository
+                    await _groupCryptoStateRepository.UpsertGroupMasterKeyAsync(
+                        new Percolator.Chat.ValueObjects.ConversationId(conversationId),
+                        groupMasterKey,
+                        cancellationToken);
+
+                    _logger.LogInformation("Received GroupKeyBootstrap message for conversation {ConversationId}, persisted GroupMasterKey", conversationId);
                     return null;
                 }
                 case ChatEnvelope.MessageOneofCase.GroupMessage:

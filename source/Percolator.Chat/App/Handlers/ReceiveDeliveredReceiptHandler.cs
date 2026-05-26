@@ -8,12 +8,12 @@ namespace Percolator.Chat.App.Handlers;
 
 public sealed class ReceiveDeliveredReceiptHandler : IRequestHandler<ReceiveDeliveredReceiptCommand>
 {
-    private readonly IConversationResolver _resolver;
+    private readonly IDirectConversationResolver _resolver;
     private readonly IChatMessageWriter _writer;
     private readonly IPublisher _publisher;
 
     public ReceiveDeliveredReceiptHandler(
-        IConversationResolver resolver,
+        IDirectConversationResolver resolver,
         IChatMessageWriter writer,
         IPublisher publisher)
     {

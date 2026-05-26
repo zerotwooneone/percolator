@@ -8,17 +8,19 @@ public class Message
     private readonly List<ReadReceipt> _readReceipts = new();
 
     public MessageId Id { get; }
+    public ConversationId ConversationId { get; }
     public ParticipantId SenderId { get; }
     public string Content { get; }
     public DateTimeOffset Timestamp { get; }
     public IReadOnlyList<Reaction> Reactions => _reactions.AsReadOnly();
     public IReadOnlyList<ReadReceipt> ReadReceipts => _readReceipts.AsReadOnly();
 
-    public Message(MessageId id, ParticipantId senderId, string content, DateTimeOffset timestamp)
+    public Message(MessageId id, ConversationId conversationId, ParticipantId senderId, string content, DateTimeOffset timestamp)
     {
         // In a real application, you would add validation here.
         // For now, we keep it simple to pass the test.
         Id = id;
+        ConversationId = conversationId;
         SenderId = senderId;
         Content = content;
         Timestamp = timestamp;

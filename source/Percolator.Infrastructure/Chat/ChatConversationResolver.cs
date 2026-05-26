@@ -7,10 +7,10 @@ using Percolator.Infrastructure.Persistence;
 namespace Percolator.Infrastructure.Chat;
 
 /// <summary>
-/// Infrastructure-backed resolver that maps routing keys to a local Conversation.
+/// Infrastructure-backed resolver that maps routing keys to a local DirectConversation.
 /// Currently supports DirectSessionId and PKH paths.
 /// </summary>
-public sealed class ChatConversationResolver : IConversationResolver
+public sealed class ChatConversationResolver : IDirectConversationResolver
 {
     private readonly PercolatorDbContext _db;
 
@@ -19,7 +19,7 @@ public sealed class ChatConversationResolver : IConversationResolver
         _db = db;
     }
 
-    public async Task<ConversationResolution> ResolveAsync(ConversationLookupKey lookupKey, CancellationToken cancellationToken)
+    public async Task<DirectConversationResolution> ResolveAsync(ConversationLookupKey lookupKey, CancellationToken cancellationToken)
     {
         lookupKey.EnsureExactlyOne();
 
@@ -49,8 +49,7 @@ public sealed class ChatConversationResolver : IConversationResolver
             {
                 convo = await _db.Conversations
                     .Include(c => c.Participants)
-                    .Include(c => c.Messages)
-                    .FirstOrDefaultAsync(c => c.Id == mapping.ConversationId && c.SelfIdentityId == selfIdentityId, cancellationToken);
+                    .FirstOrDefaultAsync(c => c.Id == mapping.ConversationId && c.SelfIdentityId == selfIdentityId && c.Kind == Percolator.Infrastructure.Persistence.ConversationKind.Direct, cancellationToken);
             }
 
             if (convo is null)
@@ -59,8 +58,8 @@ public sealed class ChatConversationResolver : IConversationResolver
                 // Try to load existing direct conversation for this identity by participant pair
                 convo = await _db.Conversations
                     .Include(c => c.Participants)
-                    .Include(c => c.Messages)
                     .Where(c => c.SelfIdentityId == selfIdentityId)
+                    .Where(c => c.Kind == Percolator.Infrastructure.Persistence.ConversationKind.Direct)
                     .Where(c => c.Participants.Any(p => p.ParticipantId == selfIdentity.PeerId) && c.Participants.Any(p => p.ParticipantId == remotePeerId))
                     .FirstOrDefaultAsync(cancellationToken);
 
@@ -74,6 +73,7 @@ public sealed class ChatConversationResolver : IConversationResolver
                         SelfIdentityId = selfIdentityId,
                         CreatedAt = DateTimeOffset.UtcNow,
                         UpdatedAt = DateTimeOffset.UtcNow,
+                        Kind = Percolator.Infrastructure.Persistence.ConversationKind.Direct
                     };
 
                     var p1 = new ConversationParticipantDbo { ConversationId = convo.Id, ParticipantId = selfIdentity.PeerId };
@@ -97,12 +97,12 @@ public sealed class ChatConversationResolver : IConversationResolver
 
             // Map to domain
             var participants = convo.Participants.Select(p => new ParticipantId(p.ParticipantId)).ToList();
-            var messages = convo.Messages
-                .OrderBy(m => m.SentAt)
-                .Select(m => new Message(new MessageId(m.MessageGuid), new ParticipantId(m.SenderId), m.Body, m.SentAt))
-                .ToList();
-            var domain = new Conversation(new ConversationId(convo.Id), participants, messages, convo.Name);
-            return new ConversationResolution(domain, selfIdentityId);
+            if (participants.Count != 2)
+            {
+                throw new InvalidOperationException($"Direct conversation must have exactly 2 participants, found {participants.Count}.");
+            }
+            var domain = new DirectConversation(new ConversationId(convo.Id), participants[0], participants[1]);
+            return new DirectConversationResolution(domain, selfIdentityId);
         }
 
         if (lookupKey.PublicKeyHash is not null)
@@ -130,8 +130,8 @@ public sealed class ChatConversationResolver : IConversationResolver
             // Find or create the conversation for this self identity by participant pair
             var convo = await _db.Conversations
                 .Include(c => c.Participants)
-                .Include(c => c.Messages)
                 .Where(c => c.SelfIdentityId == selfIdentity.Id)
+                .Where(c => c.Kind == Percolator.Infrastructure.Persistence.ConversationKind.Direct)
                 .Where(c => c.Participants.Any(p => p.ParticipantId == selfIdentity.PeerId) && c.Participants.Any(p => p.ParticipantId == remoteKey.PeerId.Value))
                 .FirstOrDefaultAsync(cancellationToken);
 
@@ -144,6 +144,7 @@ public sealed class ChatConversationResolver : IConversationResolver
                     SelfIdentityId = selfIdentity.Id,
                     CreatedAt = DateTimeOffset.UtcNow,
                     UpdatedAt = DateTimeOffset.UtcNow,
+                    Kind = Percolator.Infrastructure.Persistence.ConversationKind.Direct
                 };
 
                 var p1 = new ConversationParticipantDbo { ConversationId = convo.Id, ParticipantId = selfIdentity.PeerId };
@@ -156,12 +157,12 @@ public sealed class ChatConversationResolver : IConversationResolver
             }
 
             var participants = convo.Participants.Select(p => new ParticipantId(p.ParticipantId)).ToList();
-            var messages = convo.Messages
-                .OrderBy(m => m.SentAt)
-                .Select(m => new Message(new MessageId(m.MessageGuid), new ParticipantId(m.SenderId), m.Body, m.SentAt))
-                .ToList();
-            var domain = new Conversation(new ConversationId(convo.Id), participants, messages, convo.Name);
-            return new ConversationResolution(domain, selfIdentity.Id);
+            if (participants.Count != 2)
+            {
+                throw new InvalidOperationException($"Direct conversation must have exactly 2 participants, found {participants.Count}.");
+            }
+            var domain = new DirectConversation(new ConversationId(convo.Id), participants[0], participants[1]);
+            return new DirectConversationResolution(domain, selfIdentity.Id);
         }
 
         throw new InvalidOperationException("Invalid routing key state.");

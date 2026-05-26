@@ -11,13 +11,13 @@ namespace Percolator.Application.Apps.Chat.Handlers;
 
 public sealed class PostTextMessageHandler : IRequestHandler<PostTextMessageCommand>
 {
-    private readonly IConversationResolver _resolver;
+    private readonly IDirectConversationResolver _resolver;
     private readonly IChatMessageWriter _writer;
     private readonly IPublisher _publisher;
     private readonly ActiveIdentityContext _active;
 
     public PostTextMessageHandler(
-        IConversationResolver resolver,
+        IDirectConversationResolver resolver,
         IChatMessageWriter writer,
         IPublisher publisher,
         ActiveIdentityContext active)
@@ -48,9 +48,7 @@ public sealed class PostTextMessageHandler : IRequestHandler<PostTextMessageComm
                 resolution.Conversation.Id.Value,
                 request.MessageId.Value,
                 resolution.SelfIdentityId,
-                resolution.Conversation.Participants
-                    .Select(p => p.Value)
-                    .ToList(),
+                new[] { resolution.Conversation.Peer1.Value, resolution.Conversation.Peer2.Value },
                 request.Content,
                 request.SentTimestampUtc,
                 Percolator.Chat.ValueObjects.DirectSessionIdValueObject.FromGuid(request.LookupKey.DirectSessionId)),

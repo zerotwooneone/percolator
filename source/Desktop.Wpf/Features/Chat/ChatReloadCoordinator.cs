@@ -13,6 +13,7 @@ using System.Threading.Tasks;
 using Desktop.Wpf.Features.Chat.State;
 using Percolator.Application.Identity;
 using Percolator.Chat;
+using Percolator.Application.Chat;
 
 namespace Desktop.Wpf.Features.Chat;
 
@@ -72,45 +73,48 @@ public sealed class ChatReloadCoordinator : IChatReloadCoordinator
     private async Task ReloadFromSessionAsync(DirectSessionId sessionId, CancellationToken ct)
     {
         using var scope = _scopeFactory.CreateScope();
-        var resolver = scope.ServiceProvider.GetRequiredService<IConversationResolver>();
+        var resolver = scope.ServiceProvider.GetRequiredService<IDirectConversationResolver>();
         var lookupKey = ConversationLookupKey.ForDirectSession(sessionId.Value);
         var resolution = await resolver.ResolveAsync(lookupKey, ct).ConfigureAwait(false);
 
-        SyncConversationToState(resolution, sessionId);
+        await SyncConversationToStateAsync(resolution, sessionId, ct).ConfigureAwait(false);
     }
 
     private async Task ReloadCoreAsync(ConversationId conversationId, int selfIdentityId, DirectSessionId sessionId, CancellationToken ct)
     {
         using var scope = _scopeFactory.CreateScope();
-        var repo = scope.ServiceProvider.GetRequiredService<IConversationRepository>();
-        var conversation = await repo.GetByIdAsync(conversationId, selfIdentityId).ConfigureAwait(false);
-        if (conversation is null) return;
+        var messageQueries = scope.ServiceProvider.GetRequiredService<IConversationMessageQueries>();
+        var messages = await messageQueries.GetMessagesAsync(conversationId, selfIdentityId, ct).ConfigureAwait(false);
 
         var selfParticipantId = _selfParticipantIdProvider.Get();
-        var snapshots = conversation.Messages.Select(m => new ChatMessageSnapshot(
-            Id: new MessageId(m.Id.Value),
-            Author: m.SenderId == selfParticipantId ? "Me" : "Peer",
+        var snapshots = messages.Select(m => new ChatMessageSnapshot(
+            Id: new MessageId(m.MessageId),
+            Author: m.SenderId == selfParticipantId.Value ? "Me" : "Peer",
             Text: m.Content,
             Timestamp: m.Timestamp,
-            IsOwn: m.SenderId == selfParticipantId,
+            IsOwn: m.SenderId == selfParticipantId.Value,
             IsDelivered: false,
-            IsRead: m.ReadReceipts.Any(r => r.ReaderId == selfParticipantId)
+            IsRead: false
         )).ToList();
 
         _state.SyncMessages(sessionId, snapshots);
     }
 
-    private void SyncConversationToState(ConversationResolution resolution, DirectSessionId sessionId)
+    private async Task SyncConversationToStateAsync(DirectConversationResolution resolution, DirectSessionId sessionId, CancellationToken ct)
     {
+        using var scope = _scopeFactory.CreateScope();
+        var messageQueries = scope.ServiceProvider.GetRequiredService<IConversationMessageQueries>();
+        var messages = await messageQueries.GetMessagesAsync(resolution.Conversation.Id, resolution.SelfIdentityId, ct).ConfigureAwait(false);
+
         var selfParticipantId = _selfParticipantIdProvider.Get();
-        var snapshots = resolution.Conversation.Messages.Select(m => new ChatMessageSnapshot(
-            Id: new MessageId(m.Id.Value),
-            Author: m.SenderId == selfParticipantId ? "Me" : "Peer",
+        var snapshots = messages.Select(m => new ChatMessageSnapshot(
+            Id: new MessageId(m.MessageId),
+            Author: m.SenderId == selfParticipantId.Value ? "Me" : "Peer",
             Text: m.Content,
             Timestamp: m.Timestamp,
-            IsOwn: m.SenderId == selfParticipantId,
+            IsOwn: m.SenderId == selfParticipantId.Value,
             IsDelivered: false,
-            IsRead: m.ReadReceipts.Any(r => r.ReaderId == selfParticipantId)
+            IsRead: false
         )).ToList();
 
         _state.SyncMessages(sessionId, snapshots);

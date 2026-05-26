@@ -5,12 +5,12 @@ namespace Percolator.Chat.App.Commands;
 
 public sealed class PostEmojiAnnotationHandler : IRequestHandler<PostEmojiAnnotationCommand>
 {
-    private readonly IConversationResolver _resolver;
+    private readonly IDirectConversationResolver _resolver;
     private readonly IChatMessageWriter _writer;
     private readonly IPublisher _publisher;
     private readonly ISelfParticipantIdProvider _selfParticipantIdProvider;
 
-    public PostEmojiAnnotationHandler(IConversationResolver resolver, IChatMessageWriter writer, IPublisher publisher, ISelfParticipantIdProvider selfParticipantIdProvider)
+    public PostEmojiAnnotationHandler(IDirectConversationResolver resolver, IChatMessageWriter writer, IPublisher publisher, ISelfParticipantIdProvider selfParticipantIdProvider)
     {
         _resolver = resolver;
         _writer = writer;
@@ -23,7 +23,7 @@ public sealed class PostEmojiAnnotationHandler : IRequestHandler<PostEmojiAnnota
         request.LookupKey.EnsureExactlyOne();
         var resolution = await _resolver.ResolveAsync(request.LookupKey, cancellationToken);
         var selfParticipantId = _selfParticipantIdProvider.Get();
-        
+
         await _writer.AddEmojiAnnotationAsync(
             resolution.Conversation.Id,
             resolution.SelfIdentityId,
@@ -38,12 +38,7 @@ public sealed class PostEmojiAnnotationHandler : IRequestHandler<PostEmojiAnnota
             request.MessageId.Value,
             request.Emoji,
             resolution.SelfIdentityId,
-            resolution.Conversation.Participants
-                .Select(p => p.Value.ToByteArray()
-                    .Take(8)
-                    .Select((b, i) => (long)b << (i * 8))
-                    .Aggregate((x, y) => x | y))
-                .ToArray(),
+            new[] { BitConverter.ToInt64(resolution.Conversation.Peer1.Value.ToByteArray()), BitConverter.ToInt64(resolution.Conversation.Peer2.Value.ToByteArray()) },
             request.SentTimestampUtc.UtcDateTime),
             cancellationToken);
     }

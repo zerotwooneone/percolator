@@ -1,8 +1,10 @@
 using MediatR;
+using Percolator.Chat.ValueObjects;
 
 namespace Percolator.Chat.App.Commands;
 
 public sealed record UpdateGroupInfoCommand(
-    ConversationLookupKey LookupKey,
+    ConversationId ConversationId,
+    int SelfIdentityId,
     string? NewName
 ) : IRequest;

@@ -35,7 +35,7 @@ public class DhtIntegrationTests : IntegrationTestBase
             .ReturnsAsync(Array.Empty<DirectSession>());
 
         // Mocks for unused dependencies to allow the host to build
-        var conversationRepoMock = new Mock<IConversationRepository>();
+        var directConversationRepoMock = new Mock<IDirectConversationRepository>();
         var bundleRepoMock = new Mock<IPreKeyBundleRepository>();
         var signingServiceMock = new Mock<Percolator.Cryptography.ISigningService>();
         var peerTrustManagerMock = new Mock<IPeerTrustManager>();
@@ -70,7 +70,7 @@ public class DhtIntegrationTests : IntegrationTestBase
             ratchetLookup.Setup(l => l.UpsertAsync(It.IsAny<int>(), It.Is<SessionId>(s => s.Value == sessionId.Value), It.IsAny<RatchetEphemeralKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
             services.AddSingleton<IRatchetKeyIndex>(ratchetLookup.Object);
-            services.AddSingleton<IConversationRepository>(conversationRepoMock.Object);
+            services.AddSingleton<IDirectConversationRepository>(directConversationRepoMock.Object);
             services.AddSingleton<IPreKeyBundleRepository>(bundleRepoMock.Object);
             services.AddSingleton<Percolator.Cryptography.ISigningService>(signingServiceMock.Object);
             services.AddSingleton<IPeerTrustManager>(peerTrustManagerMock.Object);
@@ -168,7 +168,7 @@ public class DhtIntegrationTests : IntegrationTestBase
             
             services.AddSingleton(directSessionRepoMock.Object);
             services.AddSingleton<IDhtService, DhtService>();
-            services.AddSingleton(new Mock<IConversationRepository>().Object);
+            services.AddSingleton(new Mock<IDirectConversationRepository>().Object);
             // MQ service required by ProcessInternalEnvelopeHandler constructor
             services.AddSingleton<IMessageQueueService>(new Mock<IMessageQueueService>().Object);
             // Ensure ActiveIdentityContext has an identity with SelfIdentityId set
