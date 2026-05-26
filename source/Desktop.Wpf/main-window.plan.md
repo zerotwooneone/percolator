@@ -178,42 +178,18 @@ Goal:
 - Group bootstrap (master key distribution) is part of group creation flow.
 
 ### C.1: Database Extensions & Conversation Models
-- Conversation kind extension (moved from Chunk E):
-  - Add `ConversationKind` enum to `Percolator.Chat`:
-    - `Direct` - 1:1 conversation
-    - `Group` - group conversation
-  - Add `Kind` property to `ConversationDbo` (enum, indexed)
-  - EF Core migration to add column (`dotnet ef migrations add ...`)
-- Group membership persistence (moved from Chunk G):
-  - `GroupMemberDbo` in `Percolator.Infrastructure/Chat/Persistence`:
-    - `ConversationId` (GUID, foreign key)
-    - `PeerId` (GUID, composite key with ConversationId)
-    - `Role` (enum: Member, Admin)
-    - `JoinedAtUtc` (timestamp)
-    - `RemovedAtUtc` (nullable timestamp)
-  - EF Core migration to create table (`dotnet ef migrations add ...`)
-  - Index on `ConversationId` for efficient queries
-  - Note: Delivery path determined from existing route table (not stored here)
-- Group state persistence (moved from Chunk G):
-  - `GroupStateDbo` in `Percolator.Infrastructure/Chat/Persistence`:
-    - `ConversationId` (GUID, primary key)
-    - `Epoch` (integer, monotonic)
-    - `Name` (string, nullable)
-    - `CreatedAtUtc` (timestamp)
-    - `UpdatedAtUtc` (timestamp)
-  - EF Core migration to create table (`dotnet ef migrations add ...`)
-  - Note: Group name stored in plaintext (protected by database encryption)
-- Persistence for pending invitations:
-  - `PendingGroupInvitationDbo` in `Percolator.Infrastructure/Chat/Persistence`:
-    - `Id` (GUID, primary key)
-    - `ConversationId` (GUID, indexed)
-    - `InviterPeerId` (GUID)
-    - `CreatorIdentityKey` (byte[])
-    - `InitialMembers` (serialized list of byte[])
-    - `GroupName` (string, nullable)
-    - `ReceivedAtUtc` (timestamp)
-    - `Status` (enum: Pending, Accepted, Declined)
-  - EF Core migration to create table (`dotnet ef migrations add ...`)
+- Domain Models & Repository Interfaces (`Percolator.Chat`):
+  - `ConversationKind` enum (Direct, Group) and add `Kind` to `Conversation` domain model.
+  - `GroupMember` domain entity & `IGroupMemberRepository` interface.
+  - `GroupState` domain entity & `IGroupStateRepository` interface.
+  - `PendingGroupInvitation` domain entity & `IPendingGroupInvitationRepository` interface.
+- Persistence implementations (`Percolator.Infrastructure/Chat/Persistence`):
+  - Add `ConversationKind` to `ConversationDbo` (enum, indexed).
+  - `GroupMemberDbo`: `ConversationId`, `PeerId`, `Role`, `JoinedAtUtc`, `RemovedAtUtc`.
+  - `GroupStateDbo`: `ConversationId`, `Epoch`, `Name`, `CreatedAtUtc`, `UpdatedAtUtc`.
+  - `PendingGroupInvitationDbo`: `Id`, `ConversationId`, `InviterPeerId`, `CreatorIdentityKey`, `InitialMembersJson`, `GroupName`, `ReceivedAtUtc`, `Status`.
+  - EF Core migrations for all tables.
+  - Implement SQLite-backed repositories (`SqliteGroupMemberRepository`, `SqliteGroupStateRepository`, `SqlitePendingGroupInvitationRepository`) to map domain entities to DBOs.
 
 ### C.2: Outbound Group Creation (Commands)
 - Create outbound group creation command/handler:
@@ -238,16 +214,17 @@ Goal:
       - `conversation_id` (GUID bytes)
       - `group_master_key_bytes` (32 bytes)
     - Send to each initial member via `IRemoteEnvelopeSender.SendChatEnvelopeToPeerAsync`
-    - Create local `Conversation` record (kind = group) immediately for creator
-    - Create local `GroupStateDbo` (epoch = 0, creator as admin)
-    - Create local membership records for all members (creator = Admin, others = Member)
+    - Create local `Conversation` record via `IConversationRepository` (kind = group) immediately for creator
+    - Create local `GroupState` (epoch = 0, creator as admin) and persist via `IGroupStateRepository`
+    - Create local membership records for all members (creator = Admin, others = Member) and persist via `IGroupMemberRepository`
 
 ### C.3: Inbound Routing & Handlers
 - Inbound group invitation handling:
   - Add `ChatEnvelope.MessageOneofCase.CreateGroup` case in `ProcessInternalEnvelopeHandler`:
     - Validate `conversation_id` is 16 bytes and not empty
     - Validate `initial_participant_identity_keys` is not empty
-    - Persist pending group invitation to `PendingGroupInvitationDbo`
+    - Instantiate `PendingGroupInvitation` domain model
+    - Persist pending group invitation via `IPendingGroupInvitationRepository`
     - Dispatch notification for UI to surface in connection management dialog
 - Inbound bootstrap handling (merged from Chunk D):
   - Add `ChatEnvelope.MessageOneofCase.GroupKeyBootstrap` case in `ProcessInternalEnvelopeHandler`:
@@ -261,13 +238,13 @@ Goal:
 - Acceptance/decline commands (`Percolator.Application.Apps.Chat`):
   - `AcceptGroupInviteCommand`:
     - Input: `ConversationId`, `SelfIdentityId`
-    - Create `Conversation` record (kind = group)
-    - Create `GroupStateDbo` (epoch = 0, pending bootstrap)
-    - Create membership records (self = Member)
-    - Update `PendingGroupInvitationDbo.Status` to Accepted
+    - Create `Conversation` record via `IConversationRepository` (kind = group)
+    - Create `GroupState` (epoch = 0, pending bootstrap) via `IGroupStateRepository`
+    - Create membership records (self = Member) via `IGroupMemberRepository`
+    - Update `PendingGroupInvitation` status to Accepted via `IPendingGroupInvitationRepository`
   - `DeclineGroupInviteCommand`:
     - Input: `ConversationId`, `SelfIdentityId`
-    - Update `PendingGroupInvitationDbo.Status` to Declined
+    - Update `PendingGroupInvitation` status to Declined via `IPendingGroupInvitationRepository`
     - Do not create conversation or membership records
 - Query interface for pending invitations:
   - `IPendingGroupInvitationQueries` in `Percolator.Application.Chat`:
@@ -326,7 +303,7 @@ Deliverables:
       - Send to each direct peer via `IRemoteEnvelopeSender.SendChatEnvelopeToPeerAsync`
       - Send to each unique relay peer via `IRemoteEnvelopeSender.SendChatEnvelopeToPeerAsync` (relay fans out to its members)
       - Note: Routing is automatic - `DefaultNetworkSender` uses `IProfileRoutePlanner` to select direct/relay based on peer profile
-    - Persist message locally to `MessageDbo` (sender's copy)
+    - Persist message locally via `IConversationRepository.AddMessageAsync` (sender's copy)
 - Send preconditions (enforced in handler):
   - Conversation must exist and have `Kind == Group`
   - Member list must be non-empty
@@ -339,11 +316,11 @@ Deliverables:
     - Derive `GroupId` + `BlobKey`
     - Decrypt ciphertext -> `GroupContent`
     - Switch on `GroupContent` fields:
-      - `text_message`: persist to `MessageDbo` via existing message writer
+      - `text_message`: Create `Message` (domain model) and persist via `IConversationRepository.AddMessageAsync`
       - Future: `add_member`, `remove_member`, `change_title` when Chunk G extends protobuf
 - Message persistence:
-  - Reuse existing `MessageDbo` structure (no changes needed)
-  - Note: GroupId not stored in MessageDbo (cryptographic context only, not needed for queries)
+  - Reuse existing `Message` domain model (no changes needed)
+  - Note: GroupId not stored in Message (cryptographic context only, not needed for queries)
 
 ## Chunk E — Read models / query surfaces for WPF UI
 
