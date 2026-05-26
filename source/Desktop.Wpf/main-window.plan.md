@@ -151,10 +151,9 @@ Deliverables:
   - Add EF Core migration to create the `GroupCryptoStates` table (`dotnet ef migrations add ...`)
   - Note: GroupId and BlobKey derived on-demand from GroupMasterKey (not persisted)
 - Implement the repository interface:
-  - `Percolator.Chat.App.IGroupCryptoStateRepository`:
-    - `Task UpsertGroupMasterKeyAsync(Guid conversationId, byte[] groupMasterKeyBytes, CancellationToken cancellationToken)`
-    - `Task<byte[]?> GetGroupMasterKeyAsync(Guid conversationId, CancellationToken cancellationToken)`
-    - `Task DeleteGroupMasterKeyAsync(Guid conversationId, CancellationToken cancellationToken)`
+  - `Percolator.Chat.App.IGroupCryptoStateRepository` (already exists, uses strongly-typed domain primitives):
+    - `Task UpsertGroupMasterKeyAsync(ConversationId conversationId, GroupMasterKey groupMasterKey, CancellationToken cancellationToken)`
+    - `Task<GroupMasterKey?> GetGroupMasterKeyAsync(ConversationId conversationId, CancellationToken cancellationToken)`
   - EF-backed implementation in `Percolator.Infrastructure.Chat.SqliteGroupCryptoStateRepository`
 - DI registration:
   - Register `IGroupCryptoStateRepository` in `Percolator.Infrastructure.Chat.ServiceCollectionExtensions.AddChatInfrastructure`
