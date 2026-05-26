@@ -49,9 +49,9 @@ message ChatEnvelope {
     EmojiAnnotation emoji_annotation = 3;
     DeliveredReceipt delivered_receipt = 8;
     // Bootstrap: delivers the encrypted GroupMasterKey over existing 1:1 tunnels
-    GroupV2KeyBootstrap group_v2_key_bootstrap = 15;
-    // Signal Group V2 ciphertext message
-    GroupV2Message group_v2_message = 14;
+    GroupKeyBootstrap group_key_bootstrap = 15;
+    // Group ciphertext message
+    GroupMessage group_message = 14;
   }
 }
 
@@ -90,17 +90,17 @@ message DeliveredReceipt {
   optional bytes public_key_hash = 4;
 }
 
-// Signal Group V2 ciphertext message
-message GroupV2Message {
+// Group ciphertext message
+message GroupMessage {
   optional uint32 version = 100;
   bytes message_id = 1; // Unique identifier for the message
   optional bytes author_identity_key = 2; // Sender's identity key
   google.protobuf.Timestamp sent_timestamp_utc = 3;
   // ConversationId (GUID bytes) for DB lookup / routing within the app
   optional bytes conversation_id = 4;
-  // The 32-byte zkgroup-derived group identifier (for cryptographic validation)
+  // The 32-byte derived group identifier (for cryptographic validation)
   optional bytes group_id = 5;
-  // The ciphertext bytes (encrypted using Signal Group V2 protocol)
+  // The ciphertext bytes (encrypted using group protocol)
   optional bytes ciphertext = 6;
   // Optional epoch number for key rotation tracking
   optional uint32 epoch = 7;
@@ -108,8 +108,8 @@ message GroupV2Message {
 
 // Bootstrap message carrying the GroupMasterKey for a conversation.
 // This is sent over existing 1:1 tunnels and is required before members can
-// decrypt or encrypt GroupV2Message payloads.
-message GroupV2KeyBootstrap {
+// decrypt or encrypt GroupMessage payloads.
+message GroupKeyBootstrap {
   optional uint32 version = 100;
   // ConversationId (GUID bytes) that this master key applies to
   optional bytes conversation_id = 1;
@@ -117,8 +117,8 @@ message GroupV2KeyBootstrap {
   optional bytes group_master_key_bytes = 2;
 }
 
-// Inner plaintext wrapper for GroupV2Message.ciphertext.
-message GroupV2Content {
+// Inner plaintext wrapper for GroupMessage.ciphertext.
+message GroupContent {
   string text_message = 1;
 }
 
