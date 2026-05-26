@@ -13,6 +13,10 @@
    - Pending Invites Display: Also modify `ConnectionManagementDialogWindow.xaml` / `ConnectionManagementDialogViewModel.cs`.
    - Sidebar UI Updates: Modify `Desktop.Wpf/Features/Sessions/SessionsSidebarView.xaml`.
 4. **Dialogs:** To open new dialogs (e.g., for picking a member to add), do NOT create raw `Window` instances directly in ViewModels. Instead, use `IWindowManager.ShowFor<YourNewViewModel>()` matching the pattern seen in `PendingHandshakesMenuViewModel.cs`. You will need to create the View/ViewModel pair and map them in `Desktop.Wpf/Shared/Windowing/ViewMappings.xaml`.
+5. **ByteArray Factory Methods:** ByteArray types (GroupMasterKey, GroupId, BlobKey, Ciphertext) have no public constructor. Use factory methods:
+   - `FromBytesOwned(byte[])` - unsafe no-copy, use only when the array is strictly owned by the called code and never accessed elsewhere
+   - `FromBytes(byte[])` - safe copy, use when the array is not owned by the called code or could be mutated elsewhere (e.g., EF Core entities, protobuf messages)
+   - `FromSpan(ReadOnlySpan<byte>)` - useful for copying one ByteArray type to another
 
 ---
 
@@ -161,6 +165,7 @@ Deliverables:
   - On read: validate `GroupMasterKeyBytes.Length == 32`, otherwise throw
   - On write: only accept exactly 32 bytes, otherwise throw
   - Upsert semantics: insert if not exists, update if exists
+  - Use `GroupMasterKey.FromBytes` when constructing from EF Core entities (see Rule 5)
 - Security posture:
   - No column-level encryption for `GroupMasterKeyBytes`
   - Rely on encrypted SQLite file
