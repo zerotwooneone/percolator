@@ -295,6 +295,24 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     await _mediator.Send(new ReceiveDeliveredReceiptCommand(lookup, recipientId, messageId, ts), cancellationToken).ConfigureAwait(false);
                     return null;
                 }
+                case ChatEnvelope.MessageOneofCase.CreateGroup:
+                {
+                    // Skeleton: Business logic to be implemented in Chunk C
+                    _logger.LogInformation("Received CreateGroup message (skeleton handler)");
+                    return null;
+                }
+                case ChatEnvelope.MessageOneofCase.GroupKeyBootstrap:
+                {
+                    // Skeleton: Business logic to be implemented in Chunk C
+                    _logger.LogInformation("Received GroupKeyBootstrap message (skeleton handler)");
+                    return null;
+                }
+                case ChatEnvelope.MessageOneofCase.GroupMessage:
+                {
+                    // Skeleton: Business logic to be implemented in Chunk D
+                    _logger.LogInformation("Received GroupMessage message (skeleton handler)");
+                    return null;
+                }
                 default:
                     return null;
             }
