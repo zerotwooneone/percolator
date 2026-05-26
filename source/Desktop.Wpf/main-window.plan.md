@@ -110,13 +110,13 @@ Deliverables:
     - Future: Extend `GroupContent` with `oneof` for `add_member`, `remove_member`, `change_title` when implementing Chunk G
     - Current implementation: Only text messages in Chunk D, membership operations deferred to Chunk G
 - Crypto boundary (application-facing):
-  - Create `Percolator.Cryptography.IGroupCryptographyService` interface:
-    - `byte[] GenerateGroupMasterKey()` - generate 32-byte random key
-    - `byte[] DeriveGroupId(byte[] groupMasterKey)` - derive GroupId via KDF
-    - `byte[] DeriveBlobKey(byte[] groupMasterKey)` - derive BlobKey via KDF
+  - Create `Percolator.Cryptography.IGroupCryptographyService` interface (already exists, but verify it uses strongly-typed domain primitives):
+    - `GroupMasterKey GenerateGroupMasterKey(ReadOnlySpan<byte> randomness32)` - generate master key
+    - `GroupId DeriveGroupId(GroupMasterKey masterKey)` - derive GroupId via KDF
+    - `BlobKey DeriveBlobKey(GroupMasterKey masterKey)` - derive BlobKey via KDF
   - Create `Percolator.Cryptography.IGroupMessageCryptographyService` interface:
-    - `byte[] EncryptGroupContent(byte[] blobKey, GroupContent content)` - encrypt content
-    - `GroupContent DecryptGroupContent(byte[] blobKey, byte[] ciphertext)` - decrypt content
+    - `Ciphertext EncryptGroupContent(BlobKey blobKey, GroupContent content)` - encrypt content
+    - `GroupContent DecryptGroupContent(BlobKey blobKey, Ciphertext ciphertext)` - decrypt content
   - Keep native/FFI (zkgroup) confined to `Percolator.Infrastructure`
 - Identity model (Signal-based security):
   - `ConversationId` (GUID) = application/database identifier for routing and persistence
