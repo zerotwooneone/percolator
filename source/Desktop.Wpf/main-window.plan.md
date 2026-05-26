@@ -180,16 +180,16 @@ Goal:
 ### C.1: Database Extensions & Conversation Models
 - Domain Models & Repository Interfaces (`Percolator.Chat`):
   - `ConversationKind` enum (Direct, Group) and add `Kind` to `Conversation` domain model.
-  - `GroupMember` domain entity & `IGroupMemberRepository` interface.
-  - `GroupState` domain entity & `IGroupStateRepository` interface.
-  - `PendingGroupInvitation` domain entity & `IPendingGroupInvitationRepository` interface.
+  - Enrich `Conversation` aggregate to hold a list of `GroupMember`s and a `GroupState` object. Remove standalone repositories for members and state.
+  - `PendingGroupInvitation` domain entity (Aggregate Root) & `IPendingGroupInvitationRepository` interface.
 - Persistence implementations (`Percolator.Infrastructure/Chat/Persistence`):
   - Add `ConversationKind` to `ConversationDbo` (enum, indexed).
   - `GroupMemberDbo`: `ConversationId`, `PeerId`, `Role`, `JoinedAtUtc`, `RemovedAtUtc`.
   - `GroupStateDbo`: `ConversationId`, `Epoch`, `Name`, `CreatedAtUtc`, `UpdatedAtUtc`.
   - `PendingGroupInvitationDbo`: `Id`, `ConversationId`, `InviterPeerId`, `CreatorIdentityKey`, `InitialMembersJson`, `GroupName`, `ReceivedAtUtc`, `Status`.
   - EF Core migrations for all tables.
-  - Implement SQLite-backed repositories (`SqliteGroupMemberRepository`, `SqliteGroupStateRepository`, `SqlitePendingGroupInvitationRepository`) to map domain entities to DBOs.
+  - Update `SqliteConversationRepository` to map the enriched `Conversation` domain entity to/from `ConversationDbo`, `GroupStateDbo`, and `GroupMemberDbo` atomically.
+  - Implement SQLite-backed repository `SqlitePendingGroupInvitationRepository` to map domain entities to DBOs.
 
 ### C.2: Outbound Group Creation (Commands)
 - Create outbound group creation command/handler:
@@ -214,9 +214,8 @@ Goal:
       - `conversation_id` (GUID bytes)
       - `group_master_key_bytes` (32 bytes)
     - Send to each initial member via `IRemoteEnvelopeSender.SendChatEnvelopeToPeerAsync`
-    - Create local `Conversation` record via `IConversationRepository` (kind = group) immediately for creator
-    - Create local `GroupState` (epoch = 0, creator as admin) and persist via `IGroupStateRepository`
-    - Create local membership records for all members (creator = Admin, others = Member) and persist via `IGroupMemberRepository`
+    - Create local rich `Conversation` record (kind = group) containing `GroupState` (epoch = 0, creator as admin) and `GroupMember`s
+    - Persist the entire aggregate via `IConversationRepository.AddAsync`
 
 ### C.3: Inbound Routing & Handlers
 - Inbound group invitation handling:
@@ -238,13 +237,14 @@ Goal:
 - Acceptance/decline commands (`Percolator.Application.Apps.Chat`):
   - `AcceptGroupInviteCommand`:
     - Input: `ConversationId`, `SelfIdentityId`
-    - Create `Conversation` record via `IConversationRepository` (kind = group)
-    - Create `GroupState` (epoch = 0, pending bootstrap) via `IGroupStateRepository`
-    - Create membership records (self = Member) via `IGroupMemberRepository`
-    - Update `PendingGroupInvitation` status to Accepted via `IPendingGroupInvitationRepository`
+    - Load `PendingGroupInvitation` via `IPendingGroupInvitationRepository`
+    - Construct enriched `Conversation` aggregate (kind = group) with `GroupState` (epoch = 0, pending bootstrap) and `GroupMember` (self = Member)
+    - Save conversation aggregate via `IConversationRepository.AddAsync`
+    - Call `Accept()` on `PendingGroupInvitation` aggregate and save via `IPendingGroupInvitationRepository.UpdateAsync`
   - `DeclineGroupInviteCommand`:
     - Input: `ConversationId`, `SelfIdentityId`
-    - Update `PendingGroupInvitation` status to Declined via `IPendingGroupInvitationRepository`
+    - Load `PendingGroupInvitation` via `IPendingGroupInvitationRepository`
+    - Call `Decline()` on `PendingGroupInvitation` aggregate and save via `IPendingGroupInvitationRepository.UpdateAsync`
     - Do not create conversation or membership records
 - Query interface for pending invitations:
   - `IPendingGroupInvitationQueries` in `Percolator.Application.Chat`:
@@ -257,6 +257,108 @@ Goal:
     - `GroupName` (string, nullable)
     - `ReceivedAtUtc` (timestamp)
   - Implementation `SqlitePendingGroupInvitationQueries` in `Percolator.Infrastructure/Chat/Queries`
+
+### C.5: Split Conversation & Extract Messages (Strict DDD)
+**Rationale**: Direct and group conversations have fundamentally different lifecycles, invariants, and boundaries. Splitting them avoids Liskov Substitution Principle violations and God Interfaces. Furthermore, aggregate roots should never contain unbounded collections (like `Messages`), which cause severe performance issues and memory bloat when loaded by EF Core.
+
+**Domain Model Changes** (`Percolator.Chat`):
+- Update `Message.cs` to act as an independent Aggregate Root (or standalone entity):
+  - Add `ConversationId` property to link it to its parent conversation
+  - Keep existing `AddReaction`, `RemoveReaction`, `AddReadReceipt` methods
+- Create `DirectConversation.cs` (Aggregate Root):
+  - Properties: `ConversationId Id`, `ParticipantId Peer1`, `ParticipantId Peer2`
+  - Constructor: `DirectConversation(ConversationId id, ParticipantId peer1, ParticipantId peer2)`
+  - Invariants enforced in constructor: exactly 2 participants, and `peer1 != peer2`
+  - Methods: none needed for basic state (no `ChangeName` or message methods)
+  - *Note: Direct conversations do not have aggregate-level names; UI derives titles from peer contacts.*
+- Create `GroupConversation.cs` (Aggregate Root):
+  - Properties: `ConversationId Id`, `GroupState State`, `IReadOnlyList<GroupMember> Members`, `string? Name`
+  - Constructor: `GroupConversation(ConversationId id, GroupState state, IEnumerable<GroupMember> members, string? name = null)`
+  - Invariants enforced in constructor: at least 1 member, no duplicate `PeerId`, at least 1 Admin
+  - Methods: `AddMember`, `RemoveMember`, `ChangeName`, `IncrementEpoch`
+  - Admin invariant in `RemoveMember`: cannot remove the last admin
+- Delete `Conversation.cs` (the monolithic class)
+- Delete `ConversationKind.cs` enum (domain layer only)
+
+**Repository Interface Changes** (`Percolator.Chat`):
+- Delete `IConversationRepository`
+- Create `IDirectConversationRepository`:
+  - `Task<DirectConversation?> GetByIdAsync(ConversationId id, int selfIdentityId)`
+  - `Task AddAsync(DirectConversation conversation, int selfIdentityId)`
+  - `Task<DirectConversation?> GetByParticipantPairAsync(int selfIdentityId, Guid otherPeerId)`
+  - `Task UpsertDirectSessionMappingAsync(int selfIdentityId, Guid directSessionId, ConversationId conversationId)`
+- Create `IGroupConversationRepository`:
+  - `Task<GroupConversation?> GetByIdAsync(ConversationId id, int selfIdentityId)`
+  - `Task AddAsync(GroupConversation conversation, int selfIdentityId)`
+  - `Task UpdateAsync(GroupConversation conversation, int selfIdentityId)`
+- Create `IMessageRepository`:
+  - `Task AddAsync(Message message, int selfIdentityId)`
+  - `Task UpdateAsync(Message message, int selfIdentityId)`
+  - `Task<Message?> GetByIdAsync(MessageId id, int selfIdentityId)`
+
+**Persistence Layer Changes** (`Percolator.Infrastructure.Chat`):
+- Delete `SqliteConversationRepository.cs`
+- Create `SqliteDirectConversationRepository`:
+  - Maps `ConversationDbo` (`Kind == ConversationKind.Direct`) to `DirectConversation`
+- Create `SqliteGroupConversationRepository`:
+  - Maps `ConversationDbo` (`Kind == ConversationKind.Group`) to `GroupConversation`, eagerly loading `GroupStateDbo` and `GroupMemberDbo`
+- Create `SqliteMessageRepository`:
+  - Maps `MessageDbo` to `Message` domain model
+  - Handles adding/updating individual messages without loading the entire conversation history
+- *Database Schema remains unchanged; `ConversationKind` enum moves to `Percolator.Infrastructure.Chat.Persistence` for internal DBO mapping.*
+
+**Application Layer Changes** (`Percolator.Application.Apps.Chat.Handlers`):
+- Update `CreateGroupCommandHandler.cs`:
+  - Construct `GroupConversation`, persist via `IGroupConversationRepository`
+- Update `AcceptGroupInviteCommandHandler.cs`:
+  - Construct `GroupConversation`, persist via `IGroupConversationRepository`
+- Update `DispatchTextMessageHandler.cs` / `PostTextMessageHandler.cs` / `ReceiveTextMessageHandler.cs`:
+  - Message appending currently uses `IChatMessageWriter` (which uses DBOs directly). No major changes needed unless they access `Conversation.Messages`.
+- Update `UpdateGroupInfoHandler.cs`:
+  - Change to use `IGroupConversationRepository.GetByIdAsync` instead of `IConversationResolver` (since group operations use IDs directly).
+- Update `RemotePeerResolver.cs`:
+  - Change to inject and use `IDirectConversationRepository` instead of `IConversationRepository`.
+
+**Query & Infrastructure Layer Changes**:
+- Implement `IConversationMessageQueries` (pulling forward from Chunk E) to unbreak UI:
+  - Create `IConversationMessageQueries.GetMessagesAsync(Guid conversationId, CancellationToken ct)` returning `MessageDto`s.
+  - Implement `SqliteConversationMessageQueries` using `DbContext.Messages`.
+  - Update `ChatReloadCoordinator.cs` (in Desktop.Wpf) to use this query interface instead of loading the `Conversation` aggregate and accessing its `.Messages` collection.
+- Update `ChatConversationResolver`:
+  - Change to return `DirectConversation` inside `ConversationResolution`.
+  - Update `IConversationResolver` interface accordingly.
+- `SqliteChatMessageWriter.cs` remains mostly unchanged as it already writes directly to the DB and bypasses the aggregate.
+
+**Test Updates**:
+- Delete `ConversationTests.cs` and replace with `DirectConversationTests.cs` and `GroupConversationTests.cs`
+- Update `SqliteConversationRepositoryTests.cs` to test the split repositories
+- Update `ProcessInternalEnvelopeHandlerTests.cs`, `DeliverOpaqueMessageHandlerTests.cs`, and `DhtIntegrationTests.cs` to mock `IDirectConversationRepository` / `IGroupConversationRepository` instead of `IConversationRepository`.
+- Fix `PostTextMessageHandlerTests.cs` and any other application tests broken by the interface split.
+
+### Chunk C.6: Draft Messages - In-Memory Only (Decision: Revert Persistence)
+**Goal:** Keep draft state in-memory via `SessionContext.Draft` rather than persisting to database. This simplifies the architecture while still providing a domain object for drafting behavior.
+
+- [x] **C.6.1: Decision - Keep Drafts In-Memory**
+  - Rationale: Database persistence adds significant complexity (new aggregate, repository, DBO, EF migration, commands/queries) for marginal UX benefit (drafts lost on app restart is acceptable).
+  - Drafts remain as a simple `ReactiveProperty<string>` in `SessionContext` for session-scoped composer state.
+  - No domain model needed - drafts are UI state, not a domain aggregate.
+
+- [x] **C.6.2: Revert Implementation**
+  - Deleted 10 files created during initial implementation:
+    - `Percolator.Chat/DraftMessage.cs`
+    - `Percolator.Chat/IDraftMessageRepository.cs`
+    - `Percolator.Infrastructure/Chat/SqliteDraftMessageRepository.cs`
+    - `Percolator.Infrastructure/Persistence/DraftMessageDbo.cs`
+    - `Percolator.Application/Apps/Chat/Commands/SaveDraftCommand.cs`
+    - `Percolator.Application/Apps/Chat/Commands/DiscardDraftCommand.cs`
+    - `Percolator.Application/Apps/Chat/Handlers/SaveDraftCommandHandler.cs`
+    - `Percolator.Application/Apps/Chat/Handlers/DiscardDraftCommandHandler.cs`
+    - `Percolator.Application/Apps/Chat/Queries/IDraftMessageQueries.cs`
+    - `Percolator.Application/Apps/Chat/Queries/SqliteDraftMessageQueries.cs`
+  - Reverted `PercolatorDbContext.cs`: Removed `DraftMessages` DbSet and entity configuration.
+  - Reverted `SessionContext.cs`: Restored `public ReactiveProperty<string> Draft { get; }` property.
+  - Reverted `ChatViewModel.cs`: Restored original constructor (removed `IDraftMessageQueries` dependency), removed async draft loading/saving logic.
+  - Reverted `ChatViewModelTests.cs`: Restored original test setup (removed draft queries mocks).
 
 ### Domain Rules (Apply to handlers)
 - Domain rules for admin status:
@@ -454,24 +556,27 @@ Goal:
   - Regenerate protobuf C# types
 - Inbound membership operation handling:
   - In `ProcessInternalEnvelopeHandler.GroupMessage` case:
+    - Load `Conversation` aggregate via `IConversationRepository`
     - For `AddMember`:
       - Validate sender is admin
-      - Add to local `GroupMemberDbo`
+      - Call `conversation.AddGroupMember(...)` 
       - If self is the added member, conversation shows "in progress" until `GroupKeyBootstrap` received
     - For `RemoveMember`:
       - Validate sender is admin
-      - Update local `GroupMemberDbo` (set `RemovedAtUtc`)
+      - Call `conversation.RemoveGroupMember(...)` 
       - If self is removed, mark conversation as left
     - For `ChangeTitle`:
       - Validate sender is admin
-      - Update `GroupStateDbo.Name`
+      - Call `conversation.ChangeGroupName(...)`
+    - Save aggregate via `IConversationRepository.UpdateAsync`
 
 ### G.2: Add Member Operation
 - Add member command/handler:
   - `AddGroupMemberCommand`:
     - Input: `ConversationId`, `PeerId` to add, `SelfIdentityId`
   - Handler: `AddGroupMemberCommandHandler`:
-    - Verify user is admin (via query interface)
+    - Load `Conversation` aggregate via `IConversationRepository`
+    - Verify user is admin
     - Verify secure session exists with target peer (via `IDirectSessionRepository`)
     - Load `GroupMasterKey` via `IGroupCryptoStateRepository`
     - Send `ChatEnvelope.create_group` to the **new member**:
@@ -480,29 +585,31 @@ Goal:
     - Send `GroupKeyBootstrap` to the **new member** via `IRemoteEnvelopeSender`
     - Create `GroupContent.add_member` with target peer identity
     - Encrypt and send as `ChatEnvelope.group_message` to all **existing members**
-    - Update local `GroupMemberDbo` (add new member)
+    - Update aggregate: `conversation.AddGroupMember(...)`
+    - Persist aggregate via `IConversationRepository.UpdateAsync`
 
 ### G.3: Remove Member (Cryptographic Eviction)
 - Remove member command/handler:
   - `RemoveGroupMemberCommand`:
     - Input: `ConversationId`, `PeerId` to remove, `SelfIdentityId`
   - Handler: `RemoveGroupMemberCommandHandler`:
+    - Load `Conversation` aggregate via `IConversationRepository`
     - If removing self (PeerId == SelfIdentityId):
       - No admin check required (user can always leave)
       - No key rotation required (user voluntarily leaving, not cryptographic eviction)
       - Create `GroupContent.remove_member` with self peer identity
       - Encrypt and send as `ChatEnvelope.group_message` to all members
-      - Update local `GroupMemberDbo` (set `RemovedAtUtc` for self)
-      - Mark conversation as left locally
+      - Update aggregate: `conversation.RemoveGroupMember(self)`
+      - Persist aggregate via `IConversationRepository.UpdateAsync`
     - If removing other member:
       - Verify user is admin
       - Verify at least 1 admin will remain after removal (throw if removing last admin)
       - Create `GroupContent.remove_member` with target peer identity
       - Encrypt and send as `ChatEnvelope.group_message` to **all current members (including the evictee)** using the *current* epoch key (this allows the evictee's UI to know they were removed)
       - Generate new `GroupMasterKey` (epoch + 1)
-      - Update `GroupStateDbo.Epoch`
+      - Update aggregate: `conversation.IncrementEpoch()` and `conversation.RemoveGroupMember(...)`
       - Persist new master key via `IGroupCryptoStateRepository`
-      - Update local `GroupMemberDbo` (set `RemovedAtUtc` for removed member)
+      - Persist aggregate via `IConversationRepository.UpdateAsync`
       - Send `GroupKeyBootstrap` to all **remaining members** via `IRemoteEnvelopeSender`
       - Throw if user attempts to send group message during epoch transition (UI handles blocking)
   - UI uses `RemoveGroupMemberCommand` for both "Remove Member" (admin removing others) and "Leave Group" (self-removal)
@@ -516,10 +623,12 @@ Goal:
   - `ChangeGroupTitleCommand`:
     - Input: `ConversationId`, `NewTitle`, `SelfIdentityId`
   - Handler: `ChangeGroupTitleCommandHandler`:
+    - Load `Conversation` aggregate via `IConversationRepository`
     - Verify user is admin
     - Create `GroupContent.change_title` with new title
     - Encrypt and send as `ChatEnvelope.group_message` to all members
-    - Update `GroupStateDbo.Name`
+    - Update aggregate: `conversation.ChangeGroupName(...)`
+    - Persist aggregate via `IConversationRepository.UpdateAsync`
 
 ### G.5: UI Behavior & Dialogs
 - Group action placement:
