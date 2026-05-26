@@ -13,6 +13,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ChatApp.IConversationResolver, ChatConversationResolver>();
         services.AddScoped<ChatApp.IChatMessageWriter, SqliteChatMessageWriter>();
         services.AddScoped<IDirectSessionConversationLookup, SqliteDirectSessionConversationLookup>();
+        services.AddScoped<ChatApp.IGroupCryptoStateRepository, SqliteGroupCryptoStateRepository>();
         return services;
     }
 }
