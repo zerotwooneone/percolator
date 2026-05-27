@@ -16,6 +16,8 @@ using Percolator.Network;
 using Percolator.Prekey.Handlers;
 using System.Text.Json;
 using Percolator.Chat;
+using Percolator.Cryptography;
+using Percolator.Chat.Events;
 using PeerId = Percolator.Identity.PeerId;
 
 namespace Percolator.Application.Network;
@@ -30,8 +32,22 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
     private readonly Percolator.Chat.App.IPkhPeerResolver _pkhPeerResolver;
     private readonly IPendingGroupInvitationRepository _pendingGroupInvitationRepository;
     private readonly Percolator.Chat.App.IGroupCryptoStateRepository _groupCryptoStateRepository;
+    private readonly IGroupMessageCryptographyService _groupMessageCryptoService;
+    private readonly IGroupCryptographyService _groupCryptoService;
+    private readonly IChatMessageWriter _messageWriter;
 
-    public ProcessInternalEnvelopeHandler(ILogger<ProcessInternalEnvelopeHandler> logger, IMediator mediator, IDhtService dhtService, IMessageQueueService mqService, IPeerRoutingProfileRepository profileRepository, Percolator.Chat.App.IPkhPeerResolver pkhPeerResolver, IPendingGroupInvitationRepository pendingGroupInvitationRepository, Percolator.Chat.App.IGroupCryptoStateRepository groupCryptoStateRepository)
+    public ProcessInternalEnvelopeHandler(
+        ILogger<ProcessInternalEnvelopeHandler> logger,
+        IMediator mediator,
+        IDhtService dhtService,
+        IMessageQueueService mqService,
+        IPeerRoutingProfileRepository profileRepository,
+        Percolator.Chat.App.IPkhPeerResolver pkhPeerResolver,
+        IPendingGroupInvitationRepository pendingGroupInvitationRepository,
+        Percolator.Chat.App.IGroupCryptoStateRepository groupCryptoStateRepository,
+        IGroupMessageCryptographyService groupMessageCryptoService,
+        IGroupCryptographyService groupCryptoService,
+        IChatMessageWriter messageWriter)
     {
         _logger = logger;
         _mediator = mediator;
@@ -41,6 +57,9 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
         _pkhPeerResolver = pkhPeerResolver;
         _pendingGroupInvitationRepository = pendingGroupInvitationRepository;
         _groupCryptoStateRepository = groupCryptoStateRepository;
+        _groupMessageCryptoService = groupMessageCryptoService;
+        _groupCryptoService = groupCryptoService;
+        _messageWriter = messageWriter;
     }
 
     public async Task<InternalEnvelope?> Handle(ProcessInternalEnvelopeCommand request, CancellationToken cancellationToken)
@@ -397,8 +416,78 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                 }
                 case ChatEnvelope.MessageOneofCase.GroupMessage:
                 {
-                    // Skeleton: Business logic to be implemented in Chunk D
-                    _logger.LogInformation("Received GroupMessage message (skeleton handler)");
+                    var groupMessage = chat.GroupMessage;
+                    
+                    // Validate conversation_id is 16 bytes and not empty
+                    if (groupMessage.ConversationId.Length != 16)
+                    {
+                        _logger.LogWarning("Invalid GroupMessage: conversation_id must be 16 bytes, got {Length}", groupMessage.ConversationId.Length);
+                        return null;
+                    }
+                    var conversationId = new Guid(groupMessage.ConversationId.ToByteArray());
+                    if (conversationId == Guid.Empty)
+                    {
+                        _logger.LogWarning("Invalid GroupMessage: conversation_id cannot be empty");
+                        return null;
+                    }
+
+                    // Load GroupMasterKey for decryption
+                    var masterKey = await _groupCryptoStateRepository.GetGroupMasterKeyAsync(
+                        new Percolator.Chat.ValueObjects.ConversationId(conversationId),
+                        cancellationToken);
+                    
+                    if (masterKey is null)
+                    {
+                        _logger.LogWarning("Group master key not found for conversation {ConversationId}, cannot decrypt group message", conversationId);
+                        return null;
+                    }
+                    var blobKey = _groupCryptoService.DeriveBlobKey(masterKey);
+
+                    // Decrypt the ciphertext
+                    var ciphertext = Ciphertext.FromBytes(groupMessage.Ciphertext.ToByteArray());
+                    var groupContent = _groupMessageCryptoService.DecryptGroupContent(blobKey, ciphertext);
+
+                    // Switch on GroupContent fields
+                    if (!string.IsNullOrEmpty(groupContent.TextMessage))
+                    {
+                        // Generate a new MessageId for the received message
+                        var messageId = MessageId.NewId();
+                        var sentTimestamp = DateTimeOffset.UtcNow;
+
+                        // Get sender peer ID from context
+                        if (request.Context.RemotePeerGuid is null)
+                        {
+                            _logger.LogWarning("GroupMessage requires RemotePeerGuid in context");
+                            return null;
+                        }
+                        var senderPeerId = new PeerId(request.Context.RemotePeerGuid.Value);
+
+                        // Persist the message via IChatMessageWriter
+                        var senderId = new ParticipantId(senderPeerId.Value);
+                        await _messageWriter.AddTextMessageAsync(
+                            new Percolator.Chat.ValueObjects.ConversationId(conversationId),
+                            request.Context.SelfIdentityId.Value,
+                            senderId,
+                            groupContent.TextMessage,
+                            messageId,
+                            sentTimestamp,
+                            cancellationToken);
+
+                        // Publish event for UI update
+                        await _mediator.Publish(new TextMessagePostedEvent(
+                            conversationId,
+                            messageId.Value,
+                            request.Context.SelfIdentityId.Value,
+                            new List<Guid> { senderPeerId.Value },
+                            groupContent.TextMessage,
+                            sentTimestamp,
+                            null), // Group conversations do not have a DirectSessionId
+                            cancellationToken);
+
+                        _logger.LogInformation("Processed GroupMessage text message for conversation {ConversationId}", conversationId);
+                    }
+                    // Future: handle add_member, remove_member, change_title when Chunk G extends protobuf
+
                     return null;
                 }
                 default:

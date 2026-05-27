@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Percolator.Application.Apps.Chat;
+using Percolator.Application.Apps.Chat.Queries;
 using Percolator.Application.Chat;
 using Percolator.Chat;
 using Percolator.Infrastructure.Chat.Queries;
@@ -21,6 +22,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IPendingGroupInvitationRepository, SqlitePendingGroupInvitationRepository>();
         services.AddScoped<IPendingGroupInvitationQueries, SqlitePendingGroupInvitationQueries>();
         services.AddScoped<IConversationMessageQueries, SqliteConversationMessageQueries>();
+        services.AddScoped<IConversationMemberQueries, SqliteConversationMemberQueries>();
         return services;
     }
 }
