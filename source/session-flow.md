@@ -445,16 +445,16 @@ Because we operate in a P2P context, administrative operations (adding/removing 
 
 An admin encrypts an `add_member` group message using the current `blob_key`. This message is sent to the new member directly via a 1:1 Double Ratchet session alongside a bootstrap payload containing the current `GroupMasterKey` and blinded roster. 
 
-Critically, the admin must also push an updated blinded routing table to the network relays (via an administrative ZK proof) so the infrastructure knows to route future messages to the new member's routing token.
+Critically, the admin must also push an updated blinded routing table—along with the public `verification_key`—to the network relays (via an administrative ZK proof) so the infrastructure knows to route future messages to the new member's routing token and has the correct parameters to verify sender proofs.
 
 ### 8.4.2 Removing a Member (Cryptographic Eviction)
 
 Eviction requires an epoch update to the root secret:
 
 1. The admin generates a brand new `GroupMasterKey` for the next epoch.
-2. The admin derives the new `blob_key` and `group_id` from this fresh root secret.
+2. The admin derives the new `blob_key`, `group_id`, and `verification_key` from this fresh root secret.
 3. The admin distributes the new `GroupMasterKey` directly to each *remaining* participant individually via their secure 1:1 Double Ratchet sessions.
-4. The admin updates the network relays with the new blinded routing table under the new `group_id`.
+4. The admin updates the network relays with the new blinded routing table and new public `verification_key` under the new `group_id`.
 
 **Epoch Cutover Constraint:**
 
