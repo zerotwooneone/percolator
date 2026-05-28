@@ -20,704 +20,259 @@
 
 ---
 
-## Chunk 0  (Complete)
+## Group Messaging Implementation Plan (V2)
 
-This section is the high-level roadmap for delivering end-to-end group chat UX and simulator parity.
-It is intentionally ordered by dependency, and it does not assume the current Chunk A/B/C boundaries are final.
+**Goal:** Provide a single, comprehensive list of the architectural, cryptographic, networking, and UX design goals that drive the entire group messaging feature. It explicitly tracks what has already been built and what requires modification or new implementation.
 
-End-to-end goals (definition of done):
+**Status Key:**
+- `[IMPLEMENTED]`: Core foundation already exists in the codebase.
+- `[NEEDS MODIFICATION]`: Code exists but must be updated to support the Layered ZK over 1:1 Transport architecture or admin features.
+- `[PENDING]`: Not yet built.
 
-- Group invites can be sent and received.
-- Group invites can be explicitly accepted/declined (approval required).
-- Group participants can be modified (add/remove; admin operations as supported).
-- Group chat messages can be sent and received (decrypt + persist).
-- All of the above works in:
-  - Desktop main window UX
-  - Simulator
+### 1. Architecture & Cryptography (Layered ZK over 1:1 Transport)
+- **Signal Group V2 Inspiration:** Adapt Signal's central-server Group V2 protocol into a decentralized P2P paradigm. `[TARGET DESIGN]`
+- **Group Anchor:** A single 32-byte `GroupMasterKey` serves as the root secret. It deterministically derives the `GroupId` (for routing/context) and `BlobKey` (for symmetric payload encryption). `[IMPLEMENTED]` *(Note: GroupId derivation exists but is currently unused; it will become the routing identifier).*
+- **Transport vs. Application Separation:** `[NEEDS MODIFICATION]`
+  - **Application Layer (ZK Envelope):** Senders encrypt the payload once using the `BlobKey` and attach a Zero-Knowledge (ZK) proof asserting: "I am an authorized member of `group_id X`". This becomes the `GroupMessageEnvelope`.
+  - **Transport Layer (1:1 Session):** Senders wrap the `GroupMessageEnvelope` in a standard 1:1 Double Ratchet session addressed directly to their relay (or direct peers). This protects the relay from unauthenticated DoS attacks on its expensive ZK circuits.
+- **Relay Blinded Fanout:** `[PENDING]`
+  - Relays decrypt the 1:1 transport envelope, *transiently* know the sender's identity, but immediately strip it.
+  - The relay validates the inner ZK proof mathematically.
+  - If valid, the relay uses its own synchronized, blinded routing table for `group_id X` to fan out the message to connected routing tokens, completely blind to the social graph.
+  - Direct peers act as a "relay of one", validating the ZK proof before accepting the payload locally.
+- **Cryptographic Eviction (Epochs):** `[PENDING]`
+  - Evicting a member requires generating a *new* `GroupMasterKey` (epoch + 1).
+  - The new key is distributed strictly via 1:1 Double Ratchet sessions to remaining members (bootstrap payloads).
+  - The admin must also push an updated blinded routing table to the relays via an administrative ZK proof.
+  - The evicted member, lacking the new key, cannot derive the new `BlobKey` to read messages, nor can they generate valid ZK proofs.
 
-Do not reinvent (guardrails):
+### 2. Protobuf & Network Contracts
+- **`internal_messaging.proto` Extensions:** 
+  - `GroupContent` message with `text_message` (string). `[IMPLEMENTED]`
+  - `GroupContent` `oneof` extensions for `add_member`, `remove_member`, and `change_title`. `[PENDING]`
+- **`ChatEnvelope` Cases:** 
+  - `create_group`: Contains initial conversation ID, creator, roster, and group name. `[IMPLEMENTED]`
+  - `group_key_bootstrap`: Distributes the encrypted `GroupMasterKey` via 1:1 sessions. `[IMPLEMENTED]`
+  - `group_message`: The envelope containing group payloads. `[IMPLEMENTED]` -> `[NEEDS MODIFICATION]` (Must be updated to include `group_id` bytes and `zero_knowledge_member_proof`).
 
-- Extend existing query/read-model and WPF selection plumbing rather than creating new parallel UI state stores.
-- Reuse existing invite/pending-request UX patterns (connection management dialog) for group invites.
-- Reuse structural patterns from the legacy group admin pipeline (command/handler/dispatcher, sequencing/idempotency) while replacing the wire contracts and identity model.
-- Keep changes surgical where possible (e.g., replace `ChatReloadCoordinator` repository reads with a read-model query interface instead of rewriting chat state management).
+### 3. Domain-Driven Design & Persistence
+- **Aggregate Segregation:** Strict DDD maintaining `Conversation` as the aggregate root. `[IMPLEMENTED]` -> `[NEEDS MODIFICATION]` (Expand to enforce epoch rotation constraints).
+- **Repositories:** Explicit separation between `IDirectConversationRepository`, `IGroupConversationRepository`, and `IMessageRepository`. `[IMPLEMENTED]`
+- **Database Contexts:** 
+  - `PercolatorDbContext`: Stores `ConversationDbo` (Kind=Group), `GroupMemberDbo`, `GroupStateDbo`, and `PendingGroupInvitationDbo`. `[IMPLEMENTED]`
+  - `CryptoDbContext`: Stores the highly sensitive `GroupCryptoStateDbo`. `[IMPLEMENTED]`
+- **Cryptographic Interfaces:** Implement `IGroupCryptographyService`, `IGroupMessageCryptographyService`, and `IGroupCryptoStateRepository`. `[IMPLEMENTED]` -> `[NEEDS MODIFICATION]` (Must be expanded to support ZK proof generation and verification).
 
-## Architecture Overview
+### 4. Commands & Handlers (CQRS)
+- **Outbound Handlers:** 
+  - `CreateGroupCommand` / `AcceptGroupInviteCommand` / `DeclineGroupInviteCommand`. `[IMPLEMENTED]`
+  - `SendGroupMessageCommand`: `[IMPLEMENTED]` -> `[NEEDS MODIFICATION]` (Currently sends basic group message; must be updated to generate ZK proof and properly execute the Layered ZK Transport wrap).
+  - `AddGroupMemberCommand` / `RemoveGroupMemberCommand` / `ChangeGroupTitleCommand`. `[PENDING]`
+- **Inbound Handlers:** 
+  - `ProcessInternalEnvelopeHandler`: Processes `group_message` cases. `[IMPLEMENTED]` -> `[NEEDS MODIFICATION]` (Currently just decrypts; must be updated to validate ZK proof and handle Relay Blinded Fanout logic if the node is acting as a relay).
+- **Read Models (Queries):** 
+  - `IConversationMemberQueries` with route resolution. `[IMPLEMENTED]`
+  - `IPendingGroupInvitationQueries`. `[IMPLEMENTED]`
+  - `IConversationMessageQueries` and `IGroupDetailsQueries`. `[PENDING]`
 
-This implementation uses **Signal-inspired P2P groups** - it adopts Signal Group V2's cryptographic primitives and key derivation patterns but operates in a peer-to-peer environment without Signal's server infrastructure.
+### 5. UI/UX Decisions & Plumbing
+- **ViewModels:** Composition (`GroupChatViewModel` wrapping `ChatStateService`). `[PENDING]`
+- **Sidebar & Selection:** Plumb selection through `SelectedChannelModel.SelectedKey`, `PeerConnectionStateService`, and `SessionsSidebarViewModel`. Group items use `IconGroup` (display name only). `[PENDING]`
+- **Group Details & Roster:** Native WPF `ToolTip` attached directly to the group name `TextBlock` in the chat header. `[PENDING]`
+- **Dialogs & Windowing:** Use `IWindowManager.ShowFor<ViewModelType>()`. "Create Group" tab in connection management with `ListBox` (Multiple selection). Pending invites with Accept/Decline. `[PENDING]`
+- **Chat Interface:** Dropdown action menu for group actions. "In progress" bootstrap state spinner. `[PENDING]`
+- **Drafts:** Keep message drafts strictly in-memory (`SessionContext.Draft`). `[IMPLEMENTED]` (Decision settled).
 
-**Key differences from Signal Group V2:**
-- **No server component** - groups are fully peer-to-peer
-- **No Zero-Knowledge proofs** - membership is based on possession of GroupMasterKey
-- **Hybrid delivery** - messages sent via relay OR direct 1:1 tunnels
-- **No identity obfuscation** - member identities are visible within group context (encrypted at rest)
-- **O(n) fanout** - sender sends to each unique relay + direct peer
-
-**Security posture:**
-- Cryptographic security: Uses Signal's GroupMasterKey derivation and encryption
-- Privacy: Content encrypted, but IP addresses visible in direct delivery
-- Access control: Based on possession of GroupMasterKey (no per-operation ZK proofs)
-- At-rest security: Database encrypted (assumed secure)
-
-**Delivery model:**
-- Senders use existing route table to determine delivery path per peer
-- Messages sent to each unique relay + each direct peer
-- Recipient doesn't care about delivery path - same protocol regardless
-- User may someday select preferred route (for now: use first route in table)
-
-## Chunk 1 (Complete)
-
-Goal:
-
-- Hard-delete the legacy groupV1 subsystem and its identity model so the new group system can be implemented on a clean slate.
-
-Rules:
-
-- No legacy migration support is required.
-- Assume a new SQLite DB file and a regenerated EF Core schema.
-- Preserve 1:1 chat features and infrastructure; delete only GroupV1 group assumptions.
-- The new group system will reintroduce membership/admin persistence later (Chunk G); do not carry forward legacy group tables.
+### 6. Simulator Parity & Testing Gates
+- **Simulator Parity:** Absolute 1:1 parity with the main app. Update `SimulatorChatViewModel` and `SimulatorOutboundInterceptor.InterceptDeliverOpaqueMessageAsync` to handle group cases. `[PENDING]`
+- **Testing Targets:**
+  - **Integration Paths:** E2E smoke tests (Create -> Invite -> Accept -> Bootstrap -> Send -> Decrypt -> Persist). `[PENDING]`
+  - **Negative/Auth Tests:** Auth boundaries, ZK mathematical rejection, cryptographic eviction enforcement. `[PENDING]`
 
 ---
 
-## Chunk A — Protocol + contract surface
-
-Goal:
-
-- The wire contracts compile and the application layer has a stable, pure-managed crypto boundary for the Signal-based group system.
-
-Deliverables:
-
-- Contracts (protobuf):
-  - Add these messages to `Percolator.Contracts/Protos/internal_messaging.proto`:
-    - `ChatEnvelope.create_group` (`CreateGroup`) - initial group invitation
-    - `ChatEnvelope.group_key_bootstrap` (`GroupKeyBootstrap`) - master key distribution
-    - `ChatEnvelope.group_message` (`GroupMessage`) - encrypted group content
-    - `GroupContent` wrapper message used as the plaintext inside group ciphertext
-  - Note: These are new message types within the existing `ChatEnvelope`, NOT new gRPC methods
-  - Note: `ChatEnvelope` is carried inside `InternalEnvelope`, which is encrypted via existing secure sessions (X3DH double ratchet)
-  - Requirement: Each peer added to a group must already have an existing secure session with the group creator
-  - Feasibility: Group messages are sent over existing secure sessions using the existing envelope infrastructure - no new gRPC methods needed
-  - Protobuf field definitions:
-    - Note: Messages already exist in `internal_messaging.proto` as `CreateGroup`, `GroupKeyBootstrap`, `GroupMessage`, `GroupContent`
-    - `CreateGroup`: `conversation_id` (bytes), `creator_identity_key` (bytes), `initial_participant_identity_keys` (repeated bytes), `name` (string, optional)
-    - `GroupKeyBootstrap`: `conversation_id` (bytes), `group_master_key_bytes` (bytes)
-    - `GroupMessage`: `message_id` (bytes), `author_identity_key` (bytes), `sent_timestamp_utc` (timestamp), `conversation_id` (bytes), `group_id` (bytes), `ciphertext` (bytes), `epoch` (uint32)
-    - `GroupContent`: `text_message` (string)
-  - Note: Protobuf "V2" naming has been removed from `internal_messaging.proto` (GroupV2KeyBootstrap → GroupKeyBootstrap, etc.)
-  - Ensure normal codegen/build updates generated C# contract types
-  - Unified group identity on `conversation_id`:
-    - All group-related payloads use `conversation_id` (GUID bytes) as the group identifier
-    - No separate group GUID field; `ConversationId` is the sole identity
-  - Group content message structure (Signal protocol):
-    - Note: `GroupContent` currently only has `text_message` field
-    - Future: Extend `GroupContent` with `oneof` for `add_member`, `remove_member`, `change_title` when implementing Chunk G
-    - Current implementation: Only text messages in Chunk D, membership operations deferred to Chunk G
-- Crypto boundary (application-facing):
-  - Create `Percolator.Cryptography.IGroupCryptographyService` interface (already exists, but verify it uses strongly-typed domain primitives):
-    - `GroupMasterKey GenerateGroupMasterKey(ReadOnlySpan<byte> randomness32)` - generate master key
-    - `GroupId DeriveGroupId(GroupMasterKey masterKey)` - derive GroupId via KDF
-    - `BlobKey DeriveBlobKey(GroupMasterKey masterKey)` - derive BlobKey via KDF
-  - Create `Percolator.Cryptography.IGroupMessageCryptographyService` interface:
-    - `Ciphertext EncryptGroupContent(BlobKey blobKey, GroupContent content)` - encrypt content
-    - `GroupContent DecryptGroupContent(BlobKey blobKey, Ciphertext ciphertext)` - decrypt content
-  - Keep native/FFI (zkgroup) confined to `Percolator.Infrastructure`
-- Identity model (Signal-based security):
-  - `ConversationId` (GUID) = application/database identifier for routing and persistence
-  - `GroupId` (derived from `GroupMasterKey`) = cryptographic identifier for encryption/decryption
-  - `BlobKey` (derived from `GroupMasterKey`) = symmetric key for message encryption (derived on-demand)
-  - Cryptographic binding: same master key always derives to same GroupId and BlobKey
-  - Store only `GroupMasterKeyBytes` in `GroupCryptoStateDbo` (derive GroupId and BlobKey on-demand)
-  - Use `ConversationId` for all application-level operations
-  - Use `GroupId` only for cryptographic operations
-  - Group metadata (name, membership) stored in plaintext (protected by database encryption)
-- Inbound routing skeleton (no business logic yet):
-  - Update `Percolator.Application/Network/ProcessInternalEnvelopeHandler.cs` to include switch cases for:
-    - `ChatEnvelope.MessageOneofCase.CreateGroup` (add skeleton, business logic in Chunk C)
-    - `ChatEnvelope.MessageOneofCase.GroupKeyBootstrap` (add skeleton, business logic in Chunk C)
-    - `ChatEnvelope.MessageOneofCase.GroupMessage` (add skeleton, business logic in Chunk D)
-  - Note: `IRemoteEnvelopeSender` and `IMessageService` require no changes - they already accept any `ChatEnvelope` type
-
-## Chunk B — Persistence + invariants (GroupMasterKey)
-
-Goal:
-
-- The application can reliably read/write raw 32-byte `GroupMasterKeyBytes` keyed by `ConversationId`.
-
-Deliverables:
-
-- Create persistence foundation:
-  - `Percolator.Infrastructure/Persistence/GroupCryptoStateDbo.cs`:
-    - `ConversationId` (GUID, primary key)
-    - `GroupMasterKeyBytes` (byte[], exactly 32 bytes)
-    - `CreatedAtUtc` (timestamp)
-    - `UpdatedAtUtc` (timestamp)
-  - Add EF Core migration to create the `GroupCryptoStates` table (`dotnet ef migrations add ...`)
-  - Note: GroupId and BlobKey derived on-demand from GroupMasterKey (not persisted)
-- Implement the repository interface:
-  - `Percolator.Chat.App.IGroupCryptoStateRepository` (already exists, uses strongly-typed domain primitives):
-    - `Task UpsertGroupMasterKeyAsync(ConversationId conversationId, GroupMasterKey groupMasterKey, CancellationToken cancellationToken)`
-    - `Task<GroupMasterKey?> GetGroupMasterKeyAsync(ConversationId conversationId, CancellationToken cancellationToken)`
-  - EF-backed implementation in `Percolator.Infrastructure.Chat.SqliteGroupCryptoStateRepository`
-- DI registration:
-  - Register `IGroupCryptoStateRepository` in `Percolator.Infrastructure.Chat.ServiceCollectionExtensions.AddChatInfrastructure`
-- Invariants:
-  - On read: validate `GroupMasterKeyBytes.Length == 32`, otherwise throw
-  - On write: only accept exactly 32 bytes, otherwise throw
-  - Upsert semantics: insert if not exists, update if exists
-  - Use `GroupMasterKey.FromBytes` when constructing from EF Core entities (see Rule 5)
-- Security posture:
-  - No column-level encryption for `GroupMasterKeyBytes`
-  - Rely on encrypted SQLite file
-
-## Chunk C — Group invite + acceptance semantics (includes bootstrap)
-
-Goal:
-
-- Group creation and invite receipt require explicit acceptance and have consistent persistence effects.
-- Group bootstrap (master key distribution) is part of group creation flow.
-
-### C.1: Database Extensions & Conversation Models
-- Domain Models & Repository Interfaces (`Percolator.Chat`):
-  - `ConversationKind` enum (Direct, Group) and add `Kind` to `Conversation` domain model.
-  - Enrich `Conversation` aggregate to hold a list of `GroupMember`s and a `GroupState` object. Remove standalone repositories for members and state.
-  - `PendingGroupInvitation` domain entity (Aggregate Root) & `IPendingGroupInvitationRepository` interface.
-- Persistence implementations (`Percolator.Infrastructure/Chat/Persistence`):
-  - Add `ConversationKind` to `ConversationDbo` (enum, indexed).
-  - `GroupMemberDbo`: `ConversationId`, `PeerId`, `Role`, `JoinedAtUtc`, `RemovedAtUtc`.
-  - `GroupStateDbo`: `ConversationId`, `Epoch`, `Name`, `CreatedAtUtc`, `UpdatedAtUtc`.
-  - `PendingGroupInvitationDbo`: `Id`, `ConversationId`, `InviterPeerId`, `CreatorIdentityKey`, `InitialMembersJson`, `GroupName`, `ReceivedAtUtc`, `Status`.
-  - EF Core migrations for all tables.
-  - Update `SqliteConversationRepository` to map the enriched `Conversation` domain entity to/from `ConversationDbo`, `GroupStateDbo`, and `GroupMemberDbo` atomically.
-  - Implement SQLite-backed repository `SqlitePendingGroupInvitationRepository` to map domain entities to DBOs.
-
-### C.2: Outbound Group Creation (Commands)
-- Create outbound group creation command/handler:
-  - `Percolator.Application.Apps.Chat.CreateGroupCommand`:
-    - Input: `SelfIdentityId`, `List<PeerId>` initial members, optional group name
-  - Handler: `CreateGroupCommandHandler`:
-    - Validate that secure sessions exist with all initial members (via `IDirectSessionRepository`)
-    - Generate a new `ConversationId` (GUID)
-    - Generate a new `GroupMasterKey` (32 random bytes) via `IGroupCryptographyService`
-    - Derive `GroupId` from master key via KDF
-    - Persist `GroupMasterKey` via `IGroupCryptoStateRepository.UpsertGroupMasterKeyAsync`
-    - Create `ChatEnvelope.create_group` with:
-      - `conversation_id` (GUID bytes)
-      - `creator_identity_key` (SPKI bytes)
-      - `initial_participant_identity_keys` (list of SPKI bytes)
-      - optional `name`
-    - Send to each initial member via `IRemoteEnvelopeSender.SendChatEnvelopeToPeerAsync`:
-      - Construct `RecipientRoute` for each member: `new RecipientRoute(peerId, publicKeyHash)`
-      - Resolve `publicKeyHash` via `IPeerPublicSigningKeyStore.GetPublicKeyHashByPeerIdAsync(peerId)`
-      - Pattern follows existing `DispatchTextMessageHandler`
-    - Create `ChatEnvelope.group_key_bootstrap` with:
-      - `conversation_id` (GUID bytes)
-      - `group_master_key_bytes` (32 bytes)
-    - Send to each initial member via `IRemoteEnvelopeSender.SendChatEnvelopeToPeerAsync`
-    - Create local rich `Conversation` record (kind = group) containing `GroupState` (epoch = 0, creator as admin) and `GroupMember`s
-    - Persist the entire aggregate via `IConversationRepository.AddAsync`
-
-### C.3: Inbound Routing & Handlers
-- Inbound group invitation handling:
-  - Add `ChatEnvelope.MessageOneofCase.CreateGroup` case in `ProcessInternalEnvelopeHandler`:
-    - Validate `conversation_id` is 16 bytes and not empty
-    - Validate `initial_participant_identity_keys` is not empty
-    - Instantiate `PendingGroupInvitation` domain model
-    - Persist pending group invitation via `IPendingGroupInvitationRepository`
-    - Dispatch notification for UI to surface in connection management dialog
-- Inbound bootstrap handling (merged from Chunk D):
-  - Add `ChatEnvelope.MessageOneofCase.GroupKeyBootstrap` case in `ProcessInternalEnvelopeHandler`:
-    - Validate `conversation_id` is exactly 16 bytes and not `Guid.Empty`
-    - Validate `group_master_key_bytes` is exactly 32 bytes
-    - Derive `GroupId` from master key via KDF
-    - Persist via `IGroupCryptoStateRepository.UpsertGroupMasterKeyAsync`
-    - Log successful bootstrap receipt
-
-### C.4: Accept/Decline & Queries
-- Acceptance/decline commands (`Percolator.Application.Apps.Chat`):
-  - `AcceptGroupInviteCommand`:
-    - Input: `ConversationId`, `SelfIdentityId`
-    - Load `PendingGroupInvitation` via `IPendingGroupInvitationRepository`
-    - Construct enriched `Conversation` aggregate (kind = group) with `GroupState` (epoch = 0, pending bootstrap) and `GroupMember` (self = Member)
-    - Save conversation aggregate via `IConversationRepository.AddAsync`
-    - Call `Accept()` on `PendingGroupInvitation` aggregate and save via `IPendingGroupInvitationRepository.UpdateAsync`
-  - `DeclineGroupInviteCommand`:
-    - Input: `ConversationId`, `SelfIdentityId`
-    - Load `PendingGroupInvitation` via `IPendingGroupInvitationRepository`
-    - Call `Decline()` on `PendingGroupInvitation` aggregate and save via `IPendingGroupInvitationRepository.UpdateAsync`
-    - Do not create conversation or membership records
-- Query interface for pending invitations:
-  - `IPendingGroupInvitationQueries` in `Percolator.Application.Chat`:
-    - `Task<List<PendingGroupInvitationDto>> GetPendingInvitationsAsync(CancellationToken cancellationToken)`
-  - `PendingGroupInvitationDto`:
-    - `ConversationId` (GUID)
-    - `InviterPeerId` (GUID)
-    - `CreatorIdentityKey` (byte[])
-    - `InitialMembers` (list of byte[])
-    - `GroupName` (string, nullable)
-    - `ReceivedAtUtc` (timestamp)
-  - Implementation `SqlitePendingGroupInvitationQueries` in `Percolator.Infrastructure/Chat/Queries`
-
-### C.5: Split Conversation & Extract Messages (Strict DDD)
-**Rationale**: Direct and group conversations have fundamentally different lifecycles, invariants, and boundaries. Splitting them avoids Liskov Substitution Principle violations and God Interfaces. Furthermore, aggregate roots should never contain unbounded collections (like `Messages`), which cause severe performance issues and memory bloat when loaded by EF Core.
-
-**Domain Model Changes** (`Percolator.Chat`):
-- Update `Message.cs` to act as an independent Aggregate Root (or standalone entity):
-  - Add `ConversationId` property to link it to its parent conversation
-  - Keep existing `AddReaction`, `RemoveReaction`, `AddReadReceipt` methods
-- Create `DirectConversation.cs` (Aggregate Root):
-  - Properties: `ConversationId Id`, `ParticipantId Peer1`, `ParticipantId Peer2`
-  - Constructor: `DirectConversation(ConversationId id, ParticipantId peer1, ParticipantId peer2)`
-  - Invariants enforced in constructor: exactly 2 participants, and `peer1 != peer2`
-  - Methods: none needed for basic state (no `ChangeName` or message methods)
-  - *Note: Direct conversations do not have aggregate-level names; UI derives titles from peer contacts.*
-- Create `GroupConversation.cs` (Aggregate Root):
-  - Properties: `ConversationId Id`, `GroupState State`, `IReadOnlyList<GroupMember> Members`, `string? Name`
-  - Constructor: `GroupConversation(ConversationId id, GroupState state, IEnumerable<GroupMember> members, string? name = null)`
-  - Invariants enforced in constructor: at least 1 member, no duplicate `PeerId`, at least 1 Admin
-  - Methods: `AddMember`, `RemoveMember`, `ChangeName`, `IncrementEpoch`
-  - Admin invariant in `RemoveMember`: cannot remove the last admin
-- Delete `Conversation.cs` (the monolithic class)
-- Delete `ConversationKind.cs` enum (domain layer only)
-
-**Repository Interface Changes** (`Percolator.Chat`):
-- Delete `IConversationRepository`
-- Create `IDirectConversationRepository`:
-  - `Task<DirectConversation?> GetByIdAsync(ConversationId id, int selfIdentityId)`
-  - `Task AddAsync(DirectConversation conversation, int selfIdentityId)`
-  - `Task<DirectConversation?> GetByParticipantPairAsync(int selfIdentityId, Guid otherPeerId)`
-  - `Task UpsertDirectSessionMappingAsync(int selfIdentityId, Guid directSessionId, ConversationId conversationId)`
-- Create `IGroupConversationRepository`:
-  - `Task<GroupConversation?> GetByIdAsync(ConversationId id, int selfIdentityId)`
-  - `Task AddAsync(GroupConversation conversation, int selfIdentityId)`
-  - `Task UpdateAsync(GroupConversation conversation, int selfIdentityId)`
-- Create `IMessageRepository`:
-  - `Task AddAsync(Message message, int selfIdentityId)`
-  - `Task UpdateAsync(Message message, int selfIdentityId)`
-  - `Task<Message?> GetByIdAsync(MessageId id, int selfIdentityId)`
-
-**Persistence Layer Changes** (`Percolator.Infrastructure.Chat`):
-- Delete `SqliteConversationRepository.cs`
-- Create `SqliteDirectConversationRepository`:
-  - Maps `ConversationDbo` (`Kind == ConversationKind.Direct`) to `DirectConversation`
-- Create `SqliteGroupConversationRepository`:
-  - Maps `ConversationDbo` (`Kind == ConversationKind.Group`) to `GroupConversation`, eagerly loading `GroupStateDbo` and `GroupMemberDbo`
-- Create `SqliteMessageRepository`:
-  - Maps `MessageDbo` to `Message` domain model
-  - Handles adding/updating individual messages without loading the entire conversation history
-- *Database Schema remains unchanged; `ConversationKind` enum moves to `Percolator.Infrastructure.Chat.Persistence` for internal DBO mapping.*
-
-**Application Layer Changes** (`Percolator.Application.Apps.Chat.Handlers`):
-- Update `CreateGroupCommandHandler.cs`:
-  - Construct `GroupConversation`, persist via `IGroupConversationRepository`
-- Update `AcceptGroupInviteCommandHandler.cs`:
-  - Construct `GroupConversation`, persist via `IGroupConversationRepository`
-- Update `DispatchTextMessageHandler.cs` / `PostTextMessageHandler.cs` / `ReceiveTextMessageHandler.cs`:
-  - Message appending currently uses `IChatMessageWriter` (which uses DBOs directly). No major changes needed unless they access `Conversation.Messages`.
-- Update `UpdateGroupInfoHandler.cs`:
-  - Change to use `IGroupConversationRepository.GetByIdAsync` instead of `IConversationResolver` (since group operations use IDs directly).
-- Update `RemotePeerResolver.cs`:
-  - Change to inject and use `IDirectConversationRepository` instead of `IConversationRepository`.
-
-**Query & Infrastructure Layer Changes**:
-- Implement `IConversationMessageQueries` (pulling forward from Chunk E) to unbreak UI:
-  - Create `IConversationMessageQueries.GetMessagesAsync(Guid conversationId, CancellationToken ct)` returning `MessageDto`s.
-  - Implement `SqliteConversationMessageQueries` using `DbContext.Messages`.
-  - Update `ChatReloadCoordinator.cs` (in Desktop.Wpf) to use this query interface instead of loading the `Conversation` aggregate and accessing its `.Messages` collection.
-- Update `ChatConversationResolver`:
-  - Change to return `DirectConversation` inside `ConversationResolution`.
-  - Update `IConversationResolver` interface accordingly.
-- `SqliteChatMessageWriter.cs` remains mostly unchanged as it already writes directly to the DB and bypasses the aggregate.
-
-**Test Updates**:
-- Delete `ConversationTests.cs` and replace with `DirectConversationTests.cs` and `GroupConversationTests.cs`
-- Update `SqliteConversationRepositoryTests.cs` to test the split repositories
-- Update `ProcessInternalEnvelopeHandlerTests.cs`, `DeliverOpaqueMessageHandlerTests.cs`, and `DhtIntegrationTests.cs` to mock `IDirectConversationRepository` / `IGroupConversationRepository` instead of `IConversationRepository`.
-- Fix `PostTextMessageHandlerTests.cs` and any other application tests broken by the interface split.
-
-### Chunk C.6: Draft Messages - In-Memory Only (Decision: Revert Persistence)
-**Goal:** Keep draft state in-memory via `SessionContext.Draft` rather than persisting to database. This simplifies the architecture while still providing a domain object for drafting behavior.
-
-- [x] **C.6.1: Decision - Keep Drafts In-Memory**
-  - Rationale: Database persistence adds significant complexity (new aggregate, repository, DBO, EF migration, commands/queries) for marginal UX benefit (drafts lost on app restart is acceptable).
-  - Drafts remain as a simple `ReactiveProperty<string>` in `SessionContext` for session-scoped composer state.
-  - No domain model needed - drafts are UI state, not a domain aggregate.
-
-- [x] **C.6.2: Revert Implementation**
-  - Deleted 10 files created during initial implementation:
-    - `Percolator.Chat/DraftMessage.cs`
-    - `Percolator.Chat/IDraftMessageRepository.cs`
-    - `Percolator.Infrastructure/Chat/SqliteDraftMessageRepository.cs`
-    - `Percolator.Infrastructure/Persistence/DraftMessageDbo.cs`
-    - `Percolator.Application/Apps/Chat/Commands/SaveDraftCommand.cs`
-    - `Percolator.Application/Apps/Chat/Commands/DiscardDraftCommand.cs`
-    - `Percolator.Application/Apps/Chat/Handlers/SaveDraftCommandHandler.cs`
-    - `Percolator.Application/Apps/Chat/Handlers/DiscardDraftCommandHandler.cs`
-    - `Percolator.Application/Apps/Chat/Queries/IDraftMessageQueries.cs`
-    - `Percolator.Application/Apps/Chat/Queries/SqliteDraftMessageQueries.cs`
-  - Reverted `PercolatorDbContext.cs`: Removed `DraftMessages` DbSet and entity configuration.
-  - Reverted `SessionContext.cs`: Restored `public ReactiveProperty<string> Draft { get; }` property.
-  - Reverted `ChatViewModel.cs`: Restored original constructor (removed `IDraftMessageQueries` dependency), removed async draft loading/saving logic.
-  - Reverted `ChatViewModelTests.cs`: Restored original test setup (removed draft queries mocks).
-
-### Domain Rules (Apply to handlers)
-- Domain rules for admin status:
-  - Creator is always assigned Admin role when group is created
-  - Domain enforces at least 1 admin remains in group (prevent removing last admin)
-  - Admin role cannot be removed, only transferred (future enhancement)
-
-UX rule (existing behavior; do not redesign):
-
-- **Initiating a group**: If the local user initiated group creation, the group conversation shows up in the main window list immediately.
-- **Receiving an invite**: If a different (remote or simulated) peer requests the main window to join a group, that request appears in the `PendingInvitations` list of the connection management dialog. The list item should display context like *"Alice invited you to a group: [Name]"*.
-
-Do not reinvent (extension points):
-
-- Pending group invitations reuse the existing connection management dialog request pattern
-- Model group invites similarly to existing pending invitation persistence and acceptance flows
-
-## Chunk D — Group messaging vertical slice (send/receive)
-
-Goal:
-
-- A plaintext message can be sent to a group and received/decrypted/persisted on recipients.
-
-Deliverables:
-- Outbound group send command/handler:
-  - `Percolator.Application.Apps.Chat.SendGroupMessageCommand`:
-    - Input: `ConversationId`, `MessageId`, `Content`, `SentTimestampUtc`, `SelfIdentityId`
-  - Handler: `SendGroupMessageCommandHandler`:
-    - Load conversation via repository to verify it's a group
-    - Resolve member recipients via query/read-model interface (not repository):
-      - Add `IConversationMemberQueries.GetGroupMembersWithRoutesAsync(Guid conversationId)`
-      - Returns list of `GroupMemberWithRouteDto` including delivery path info
-      - Implementation uses `IPeerRoutingProfileRepository` + `IProfileRoutePlanner` to determine delivery path per peer:
-        - Load `PeerRoutingProfile` for each member
-        - Call `IProfileRoutePlanner.SelectRoute(profile)` to get `RouteSelection`
-        - If `RouteSelection.Relay` is null → direct delivery
-        - If `RouteSelection.Relay` is not null → relay delivery via that relay peer
-    - Load `GroupMasterKey` via `IGroupCryptoStateRepository`
-    - Derive `GroupId` + `BlobKey` via `IGroupCryptographyService`
-    - Create `GroupContent` and set `text_message` field directly (not a oneof yet)
-    - Encrypt via `IGroupMessageCryptographyService`
-    - Hybrid delivery:
-      - Group members by delivery path (direct vs relay)
-      - Send to each direct peer via `IRemoteEnvelopeSender.SendChatEnvelopeToPeerAsync`
-      - Send to each unique relay peer via `IRemoteEnvelopeSender.SendChatEnvelopeToPeerAsync` (relay fans out to its members)
-      - Note: Routing is automatic - `DefaultNetworkSender` uses `IProfileRoutePlanner` to select direct/relay based on peer profile
-    - Persist message locally via `IConversationRepository.AddMessageAsync` (sender's copy)
-- Send preconditions (enforced in handler):
-  - Conversation must exist and have `Kind == Group`
-  - Member list must be non-empty
-  - `GroupMasterKey` must exist locally (throw if not)
-- Inbound group receive handling:
-  - Add `ChatEnvelope.MessageOneofCase.GroupMessage` case in `ProcessInternalEnvelopeHandler`:
-    - Convert `conversation_id` bytes -> `ConversationId` (reject empty)
-    - Load `GroupMasterKey` via `IGroupCryptoStateRepository`
-    - If no master key exists, log warning and return (do not process)
-    - Derive `GroupId` + `BlobKey`
-    - Decrypt ciphertext -> `GroupContent`
-    - Switch on `GroupContent` fields:
-      - `text_message`: Create `Message` (domain model) and persist via `IConversationRepository.AddMessageAsync`
-      - Future: `add_member`, `remove_member`, `change_title` when Chunk G extends protobuf
-- Message persistence:
-  - Reuse existing `Message` domain model (no changes needed)
-  - Note: GroupId not stored in Message (cryptographic context only, not needed for queries)
-
-## Chunk E — Read models / query surfaces for WPF UI
-
-Goal:
-
-- WPF can render sidebar + message history + group details using query/read-model interfaces only.
-
-Deliverables:
-
-- Sidebar query surface (extend existing):
-  - WPF uses `Percolator.Application.Sessions.IPeerConnectionSidebarQueries.LoadSidebarConnectionsAsync(...)` via `Desktop.Wpf.Features.Sessions.PeerConnectionStateService`
-  - Implementation: `Percolator.Infrastructure.Sessions.PeerConnectionSidebarQueries`
-  - Extend contract + implementation to return group items as first-class selectable entries:
-    - Add new `SidebarConnectionType` variant for groups (e.g., `GroupConversation`)
-    - For groups, `KeyValue` is the `ConversationId` (GUID) - unified identity
-    - Query logic: Filter `ConversationDbo` by `Kind == Group` and join with `GroupStateDbo` for group name
-  - Update:
-    - `PeerConnectionStateService` mapping (group items produce a `PeerConnectionKey`)
-    - `SessionsSidebarViewModel.TryParseKey(...)` to parse the new group key type
-- Message history query (replace repository reads):
-  - `Desktop.Wpf.Features.Chat.ChatReloadCoordinator` currently reads via `Percolator.Chat.App.IConversationRepository`
-  - Replace with read-model query interface and infrastructure implementation:
-    - `Percolator.Application.Chat.IConversationMessageQueries`:
-      - `Task<List<MessageDto>> GetMessagesAsync(Guid conversationId, CancellationToken cancellationToken)`
-      - `Task<MessageDto?> GetMessageAsync(Guid messageId, CancellationToken cancellationToken)`
-  - Implementation in infrastructure layer using EF Core
-  - Must load messages by `ConversationId` for both direct + group
-  - Update `ChatReloadCoordinator` to use the query interface
-- Group membership query:
-  - `IConversationMemberQueries`:
-    - `Task<List<GroupMemberDto>> GetGroupMembersAsync(Guid conversationId, CancellationToken cancellationToken)`
-    - `Task<List<GroupMemberWithRouteDto>> GetGroupMembersWithRoutesAsync(Guid conversationId, CancellationToken cancellationToken)`
-    - `Task<bool> IsUserGroupAdminAsync(Guid conversationId, Guid selfIdentityId, CancellationToken cancellationToken)`
-  - `GroupMemberDto`:
-    - `PeerId` (GUID)
-    - `DisplayName` (string)
-    - `Role` (enum: Member, Admin)
-    - `JoinedAtUtc` (timestamp)
-  - `GroupMemberWithRouteDto` (extends GroupMemberDto):
-    - `DeliveryRoute` (from existing route table: direct or relay peer ID)
-    - Use first route in route table (user preference deferred)
-- Group details snapshot query:
-  - `IGroupDetailsQueries`:
-    - `Task<GroupDetailsDto?> GetGroupDetailsAsync(Guid conversationId, CancellationToken cancellationToken)`
-  - `GroupDetailsDto`:
-    - `ConversationId` (GUID)
-    - `Name` (string, nullable)
-    - `CreatedAtUtc` (timestamp)
-    - `Members` (list of `GroupMemberDto`)
-    - `IsUserAdmin` (bool)
-
-Do not reinvent (surgical change):
-
-- Replace only the read-side message loading in `ChatReloadCoordinator`; keep existing debounce/trigger/state sync mechanisms
-- Rule (enforced): WPF reads must not call domain repositories
-
-UX rules (existing behavior; do not redesign):
-
-- **Initiating a group**: If the local user initiated group creation, the group conversation shows up in the main window list immediately.
-- **Receiving an invite**: If a different (remote or simulated) peer requests the main window to join a group, that request appears in the `PendingInvitations` list of the connection management dialog. The list item should display context like *"Alice invited you to a group: [Name]"*.
-- When a conversation has not been bootstrapped yet, use the existing "in progress" view/viewmodel used for 1:1 sessions before X3DH session initiation
-
-Unified identity + schema rule:
-
-- `ConversationId` is the only identifier for direct and group conversations
-- Group is represented by `ConversationDbo.Kind == Group` (no separate group GUID needed)
-- All wire contracts use `conversation_id` for group routing and operations
-
-## Chunk F — Desktop main window UX (selection + chat)
-
-Goal:
-
-- Group conversations appear/select like direct chats, and the main pane can load + send group messages.
-
-Deliverables:
-
-- Selection plumbing:
-  - Selection is stored in `Desktop.Wpf.Features.Sessions.State.SelectedChannelModel.SelectedKey`
-  - Extend selection to include a group key type and propagate through:
-    - `PeerConnectionStateService` (key construction for groups)
-    - `SessionsSidebarViewModel` (key parsing for group type)
-    - `SelectedChannelPaneViewModel` (content resolution for groups)
-- Message pane behavior:
-  - On group selection:
-    - Resolve `ConversationId` from selection key
-    - Load messages via `IConversationMessageQueries` (Chunk E)
-    - Load group details via `IGroupDetailsQueries` (Chunk E)
-    - Create `GroupChatViewModel` (composition, not inheritance) for group conversations:
-      - Composes existing message loading logic from `ChatStateService`
-      - Adds group-specific send behavior wired to `SendGroupMessageCommand`
-      - Adds member list display (info bubble on hover shows member names)
-      - Reuses existing reactive properties (MessageInput, CanSend, etc.)
-  - Send button:
-    - In `GroupChatViewModel`: Wired to `SendGroupMessageCommand` (Chunk D)
-    - In existing `ChatViewModel`: Routes to `PostTextMessageCommand` for direct conversations
-    - Detect conversation kind via query interface
-- Pending invitations UI:
-  - Extend connection management dialog to show pending group invitations
-  - Use `IPendingGroupInvitationQueries` to load pending invites
-  - Add Accept/Decline buttons that dispatch `AcceptGroupInviteCommand` / `DeclineGroupInviteCommand`
-- Create Group UI trigger:
-  - Add a new tab to the connection management dialog for creating groups
-  - Use a native WPF `ListBox` with `SelectionMode="Multiple"` to select peers
-  - Reuse/extend the existing material-inspired styling in `Desktop.Wpf/Shared/Theme/Styles.xaml` for the ListBox (e.g., custom `ItemTemplate` using existing brushes and hover states)
-  - Dispatches `CreateGroupCommand` on confirm
-- Bootstrap state indication:
-  - Show "in progress" indicator when group exists but no `GroupMasterKey` is present
-  - Reuse existing "in progress" view/viewmodel from 1:1 X3DH session initiation
-
-UI decisions (confirmed):
-
-- Use separate `GroupChatViewModel` (composition, not inheritance) for group conversations
-- Sidebar: Group items use `IconGroup` from Icons.xaml (pattern: use `StaticResource IconGroup` with `Style="{StaticResource IconText}"`)
-- Sidebar: No group metadata displayed (only group name)
-- Detail pane (Header Info Bubble): Add a native WPF `ToolTip` attached directly to the group name `TextBlock` (or an adjacent `IconText` block). The ToolTip simply displays the roster of group member names.
-- Send button: Wired to group-specific send behavior in `GroupChatViewModel`
-- Bootstrap state: Reuse existing "in progress" view/viewmodel, show "Waiting for group key..." with spinner
-
-## Chunk G — Group admin + membership changes
-
-Goal:
-
-- Admin/membership operations exist as write-side commands/handlers and the UI can drive them and refresh via read models.
-
-### G.1: Protobuf & Inbound Processing
-- Protobuf extension for membership operations:
-  - Extend `GroupContent` in `internal_messaging.proto` to add `oneof` for membership operations:
-    - `add_member` (bytes) - target member identity (peer identifier)
-    - `remove_member` (bytes) - target member identity (peer identifier)
-    - `change_title` (string) - new group name
-  - Regenerate protobuf C# types
-- Inbound membership operation handling:
-  - In `ProcessInternalEnvelopeHandler.GroupMessage` case:
-    - Load `Conversation` aggregate via `IConversationRepository`
-    - For `AddMember`:
-      - Validate sender is admin
-      - Call `conversation.AddGroupMember(...)` 
-      - If self is the added member, conversation shows "in progress" until `GroupKeyBootstrap` received
-    - For `RemoveMember`:
-      - Validate sender is admin
-      - Call `conversation.RemoveGroupMember(...)` 
-      - If self is removed, mark conversation as left
-    - For `ChangeTitle`:
-      - Validate sender is admin
-      - Call `conversation.ChangeGroupName(...)`
-    - Save aggregate via `IConversationRepository.UpdateAsync`
-
-### G.2: Add Member Operation
-- Add member command/handler:
-  - `AddGroupMemberCommand`:
-    - Input: `ConversationId`, `PeerId` to add, `SelfIdentityId`
-  - Handler: `AddGroupMemberCommandHandler`:
-    - Load `Conversation` aggregate via `IConversationRepository`
-    - Verify user is admin
-    - Verify secure session exists with target peer (via `IDirectSessionRepository`)
-    - Load `GroupMasterKey` via `IGroupCryptoStateRepository`
-    - Send `ChatEnvelope.create_group` to the **new member**:
-      - Populate with current group state (ConversationId, Creator, full current roster, GroupName)
-      - Send via `IRemoteEnvelopeSender.SendChatEnvelopeToPeerAsync`
-    - Send `GroupKeyBootstrap` to the **new member** via `IRemoteEnvelopeSender`
-    - Create `GroupContent.add_member` with target peer identity
-    - Encrypt and send as `ChatEnvelope.group_message` to all **existing members**
-    - Update aggregate: `conversation.AddGroupMember(...)`
-    - Persist aggregate via `IConversationRepository.UpdateAsync`
-
-### G.3: Remove Member (Cryptographic Eviction)
-- Remove member command/handler:
-  - `RemoveGroupMemberCommand`:
-    - Input: `ConversationId`, `PeerId` to remove, `SelfIdentityId`
-  - Handler: `RemoveGroupMemberCommandHandler`:
-    - Load `Conversation` aggregate via `IConversationRepository`
-    - If removing self (PeerId == SelfIdentityId):
-      - No admin check required (user can always leave)
-      - No key rotation required (user voluntarily leaving, not cryptographic eviction)
-      - Create `GroupContent.remove_member` with self peer identity
-      - Encrypt and send as `ChatEnvelope.group_message` to all members
-      - Update aggregate: `conversation.RemoveGroupMember(self)`
-      - Persist aggregate via `IConversationRepository.UpdateAsync`
-    - If removing other member:
-      - Verify user is admin
-      - Verify at least 1 admin will remain after removal (throw if removing last admin)
-      - Create `GroupContent.remove_member` with target peer identity
-      - Encrypt and send as `ChatEnvelope.group_message` to **all current members (including the evictee)** using the *current* epoch key (this allows the evictee's UI to know they were removed)
-      - Generate new `GroupMasterKey` (epoch + 1)
-      - Update aggregate: `conversation.IncrementEpoch()` and `conversation.RemoveGroupMember(...)`
-      - Persist new master key via `IGroupCryptoStateRepository`
-      - Persist aggregate via `IConversationRepository.UpdateAsync`
-      - Send `GroupKeyBootstrap` to all **remaining members** via `IRemoteEnvelopeSender`
-      - Throw if user attempts to send group message during epoch transition (UI handles blocking)
-  - UI uses `RemoveGroupMemberCommand` for both "Remove Member" (admin removing others) and "Leave Group" (self-removal)
-- Epoch cutover constraint:
-  - During removal/key rotation, domain service throws if user attempts to send group message
-  - UI is responsible for blocking send button during epoch transition: Disable the Send button (do not change placeholder or show banner)
-  - Bootstrap fanout is considered complete once all bootstrap messages are sent (fire-and-forget, no delivery confirmation required)
-
-### G.4: Change Title Operation
-- Change title command/handler (optional):
-  - `ChangeGroupTitleCommand`:
-    - Input: `ConversationId`, `NewTitle`, `SelfIdentityId`
-  - Handler: `ChangeGroupTitleCommandHandler`:
-    - Load `Conversation` aggregate via `IConversationRepository`
-    - Verify user is admin
-    - Create `GroupContent.change_title` with new title
-    - Encrypt and send as `ChatEnvelope.group_message` to all members
-    - Update aggregate: `conversation.ChangeGroupName(...)`
-    - Persist aggregate via `IConversationRepository.UpdateAsync`
-
-### G.5: UI Behavior & Dialogs
-- Group action placement:
-  - Add a menu in the space above the chat itself (`ChatView.xaml`) for group-specific actions (Add Member, Remove Member, Leave Group, Change Title)
-- Dialog Implementations:
-  - Use `IWindowManager.ShowFor<ViewModelType>()` to open dialogs for Add Member, Remove Member, and Change Title (do not instantiate `Window` objects directly).
-  - Register new ViewModel/View mappings in `Desktop.Wpf/Shared/Windowing/ViewMappings.xaml`.
-- UI behavior (reactive pattern):
-  - Expose commands as `AsyncRelayCommand`s
-  - Show progress/errors via reactive properties
-  - Reload from source after success
-  - Refresh sidebar + group details + message pane via query/read models (Chunk F)
-
-Do not reinvent (reuse existing patterns):
-
-- Use MediatR command/handler pattern for operations
-- Use existing envelope sender for fanout
-- Use query/read-model interfaces for authorization checks and UI refresh
-
-## Chunk H — Simulator parity gate
-
-Goal:
-
-- Simulator can drive and validate the same group flows as the main app.
-
-Deliverables:
-
-- Extend simulator plumbing to cover:
-  - Create group (via `CreateGroupCommand` / envelope)
-  - Receive/process `ChatEnvelope.create_group`
-  - Receive/process `ChatEnvelope.group_key_bootstrap`
-  - Send/receive `ChatEnvelope.group_message`
-- Update simulator UI and outbound interception:
-  - `Desktop.Wpf/Features/Simulator/SimulatorChatViewModel.cs` - handle group message sending
-  - `Desktop.Wpf/Features/Simulator/SimulatorOutboundInterceptor.cs` - intercept group messages:
-    - Add switch cases in `InterceptDeliverOpaqueMessageAsync` to handle `ChatEnvelope.CreateGroup`, `ChatEnvelope.GroupKeyBootstrap`, `ChatEnvelope.GroupMessage`
-    - Pattern follows existing message type interception in the interceptor
-  - Add envelope interception for new message types in simulator wiretap
-- Add simulator test scenarios:
-  - Create group between simulated peers
-  - Accept/decline group invitations
-  - Send group messages
-  - Add/remove members
-  - Verify cryptographic eviction on member removal
-
-## Chunk I — Tests + coverage gates
-
-Goal:
-
-- Group messaging end-to-end behavior is covered by tests.
-
-Deliverables:
-
-- Integration path test:
-  - Create group -> bootstrap delivered -> send `GroupMessage` -> decrypt on recipient -> plaintext persisted
-- Negative test:
-  - `GroupMessage` before bootstrap does not persist plaintext
-- Membership operation tests:
-  - Add member operation propagates to all members
-  - Remove member operation triggers key rotation
-  - Removed member cannot decrypt new messages
-- Pending invitation tests:
-  - Pending invitation persisted on receipt
-  - Accept creates conversation and membership
-  - Decline does not create conversation
-- Authorization tests:
-  - Non-admin cannot add/remove members
-  - Non-admin cannot change group title
-
-## Chunk J — Final verification
-
-Goal:
-
-- All group functionality works end-to-end in both main app and simulator.
-
-Deliverables:
-
-- End-to-end smoke test:
-  - Create group via main app UI
-  - Accept invitation on second peer
-  - Send messages from both peers
-  - Add third member
-  - Remove member
-  - Verify all operations complete successfully
-- Simulator parity verification:
-  - Run same smoke test in simulator
-  - Verify identical behavior
-- Performance check:
-  - Bootstrap distribution completes in reasonable time
-- Documentation:
-  - Update any remaining documentation that references old group system
-  - Ensure code comments are accurate
+## AI Execution Chunks
+
+The following chunks are designed to be executed sequentially by AI agents. Each chunk represents a cohesive vertical slice of the implementation that minimizes context switching while maximizing delivered value.
+
+### Chunk 1: ZK Cryptographic Core & Protocol Contracts
+**Focus:** Define the mathematical boundaries, network payloads, and strict domain rules for the ZK architecture.
+
+**1. Protocol Contracts (`Percolator.Contracts/Protos/internal_messaging.proto`):**
+- **Action:** Update `GroupContent` to use a `oneof` payload block.
+  ```protobuf
+  message GroupContent {
+    oneof content {
+      string text_message = 1;
+      bytes add_member = 2;       // SPKI identity of the added peer
+      bytes remove_member = 3;    // SPKI identity of the removed peer
+      string change_title = 4;    // New group name
+    }
+  }
+  ```
+- **Action:** Update `GroupMessage` to add `optional bytes zero_knowledge_member_proof = 8;`.
+- **Action:** Ensure you rebuild the `Percolator.Contracts` project to regenerate the C# types.
+
+**2. Crypto Interfaces (`Percolator.Cryptography`):**
+**CRITICAL:** For this milestone, we will use a "Plumbing Stub" for the ZK math. Real ZK proofs require complex public parameter distribution which is out of scope. We will build the entire data pipeline (Keys, DBs, Routing) but the actual crypto logic will be stubbed.
+- **Action:** In `IGroupCryptographyService.cs`, add three new methods:
+  - `byte[] GenerateGroupVerificationKey(GroupMasterKey masterKey);` (Stub: return `new byte[] { 0x02 };`)
+  - `byte[] GenerateZeroKnowledgeMembershipProof(GroupMasterKey masterKey);` (Stub: return `new byte[] { 0x01 };`)
+  - `bool VerifyZeroKnowledgeMembershipProof(GroupId groupId, ReadOnlySpan<byte> verificationKey, ReadOnlySpan<byte> proof);` (Stub: return `proof.SequenceEqual(new byte[] { 0x01 });`)
+- **Action:** In `Percolator.Infrastructure/Chat/Cryptography/GroupCryptographyService.cs`, implement these methods with the defined stubs.
+- **Action:** Create `Percolator.CryptographyTests/GroupCryptoRoundtripTests.cs` modeled after `SecureSessionX3dhRoundtripTests.cs`. Build a test `Sender_encrypts_and_proves_Relay_verifies_Receiver_decrypts` that:
+  1. Generates a `GroupMasterKey`.
+  2. Derives the `GroupId` and `VerificationKey`.
+  3. **Sender:** Encrypts a `GroupContent` payload and generates a ZK proof.
+  4. **Relay:** Uses `VerifyZeroKnowledgeMembershipProof` with the `GroupId`, `VerificationKey`, and `proof`. Assert it returns true.
+  5. **Receiver:** Decrypts the ciphertext using the `GroupMasterKey` and asserts the payload matches the original.
+  6. **Negative Test:** Verify that tampering with the `proof` bytes causes `VerifyZeroKnowledgeMembershipProof` to return false.
+
+**3. Domain Constraints (`Percolator.Chat` & `Percolator.Infrastructure/Chat/Persistence`):**
+- **Action:** In `GroupState.cs`, add `public bool IsEpochCutoverPending { get; private set; }`. Update constructor.
+- **Action:** In `GroupState.cs`, add methods `public void BeginEpochCutover(DateTimeOffset when)` (sets true) and `public void CompleteEpochCutover(DateTimeOffset when)` (sets false).
+- **Action:** In `GroupStateDbo.cs`, add `public bool IsEpochCutoverPending { get; set; }`. 
+- **Action:** Run EF Core Migration to add `IsEpochCutoverPending` to `GroupStates` table. Update `SqliteGroupConversationRepository.cs` to map this property between DBO and Domain.
+- **Action:** In `GroupConversation.cs`, add `public bool IsEpochCutoverPending => State.IsEpochCutoverPending;`.
+- **Action:** In `GroupConversation.cs`, update `AddMember`, `RemoveMember`, and `ChangeName` to throw `InvalidOperationException("Cannot modify group during pending epoch cutover.")` if `IsEpochCutoverPending` is true. Add `public void BeginEpochCutover(DateTimeOffset when)` and `public void CompleteEpochCutover(DateTimeOffset when)` that delegate to `State`.
+
+### Chunk 2: The Layered ZK Transport Pipeline
+**Focus:** Implement the outbound wrapping and inbound routing of group messages.
+
+**1. Relay State (`Percolator.Chat` & `Percolator.Infrastructure/Chat/Persistence`):**
+- **Action:** Create domain interface `IBlindedRoutingTableRepository` with `Task UpsertRouteAsync(GroupId groupId, ReadOnlySpan<byte> verificationKey, IEnumerable<PeerId> routingTokens, CancellationToken ct);` and `Task<(List<PeerId>? Routes, byte[]? VerificationKey)> GetRoutesAsync(GroupId groupId, CancellationToken ct);`.
+- **Action:** Create `BlindedRoutingTableDbo.cs` with `Id` (Guid), `GroupIdBytes` (byte[]), `VerificationKeyBytes` (byte[]), and `RoutingPeerIdsJson` (string).
+- **Action:** Implement `SqliteBlindedRoutingTableRepository.cs` and add EF Core Migration for the new DBO.
+
+**2. Outbound (Sender) in `SendGroupMessageCommandHandler.cs`:** 
+- **Action:** Modify the handler to use `_groupCryptoService.DeriveGroupId()` and `_groupCryptoService.GenerateZeroKnowledgeMembershipProof()`.
+- **Action:** Update the protobuf `GroupMessage` construction to set `group_id` (via `GroupId.Value`) and `zero_knowledge_member_proof`.
+- **Action:** Refactor the delivery loop. Group active members by delivery path. If a member's `RouteSelection.Relay` is not null, they are a relay recipient. If null, direct recipient.
+- **Action:** Use `IRemoteEnvelopeSender.SendChatEnvelopeToPeerAsync()` to send exactly ONE envelope to each unique Direct Peer and exactly ONE envelope to each unique Relay Peer. *(This automatically fulfills the Transport Layer 1:1 encryption requirement)*.
+
+**3. Inbound Processing in `ProcessInternalEnvelopeHandler.cs` (`GroupMessage` case):**
+- **Action:** Inject `IBlindedRoutingTableRepository`, `IGroupCryptographyService`, and `IRemoteEnvelopeSender`.
+- **Action (Relay Branch):** Read `GroupId` from `group_message.group_id`. Call `GetRoutesAsync(groupId)`. If it returns a route and a `VerificationKey`:
+  - Verify `_groupCryptoService.VerifyZeroKnowledgeMembershipProof(groupId, verificationKey, proof)`. If false, drop the message.
+  - Create a new, identical `ChatEnvelope` carrying the exact same `GroupMessage`.
+  - Loop over the routing tokens (`PeerId`s). If `token != senderPeerId` (don't echo back), use `_envelopeSender.SendChatEnvelopeToPeerAsync()` to forward it. *Do not try to decrypt it.*
+- **Action (Local Branch):** 
+  - Call `IGroupCryptoStateRepository.GetConversationIdByGroupIdAsync` (you will need to implement this reverse lookup in Chunk 4, but add the call here). 
+  - If a local `ConversationId` is found, fetch the `GroupMasterKey`, derive the `BlobKey`, decrypt the ciphertext using `_cryptoService.DecryptGroupContent()`, and persist it via `_messageWriter.AddTextMessageAsync()`.
+
+**4. Dead Code Removal:**
+- **In `SendGroupMessageCommandHandler.cs`:** Delete the `CreateGroupMessageEnvelope` method (lines 151-161). This method will be replaced by a new implementation that sets `group_id` and `zero_knowledge_member_proof`.
+- **In `ProcessInternalEnvelopeHandler.cs`:** Delete the entire `ChatEnvelope.MessageOneofCase.GroupMessage` switch case (lines 417-491). This will be replaced by the new ZK validation and Relay fanout logic.
+
+### Chunk 3: Administrative Operations & Epoch Cutover
+**Focus:** Handle group state mutation, membership eviction, and routing table synchronization.
+
+**1. Protobuf Admin Updates (`Percolator.Contracts/Protos/internal_messaging.proto`):**
+- **Action:** Add `sync_blinded_routing_table` to `ChatEnvelope` message cases.
+- **Action:** Define `message SyncBlindedRoutingTable { bytes group_id = 1; bytes zero_knowledge_admin_proof = 2; repeated bytes routing_peer_ids = 3; bytes group_verification_key = 4; }`. Rebuild contracts.
+
+**2. Add Member Command (`Percolator.Application/Apps/Chat/Handlers/AddGroupMemberCommandHandler.cs`):** 
+- **Action:** Create `AddGroupMemberCommand(ConversationId ConversationId, PeerId PeerToAdd, int SelfIdentityId)`.
+- **Action:** In handler: Load `GroupConversation`. Verify sender is an Admin.
+- **Action:** Send existing `ChatEnvelope.create_group` to the *new member* (populating full roster/name) via 1:1 `IRemoteEnvelopeSender`.
+- **Action:** Send `ChatEnvelope.group_key_bootstrap` to the *new member*.
+- **Action:** Create `GroupContent.add_member` (setting the new member's SPKI) and encrypt it. Dispatch to *existing members* via the Layered ZK Transport logic from Chunk 2.
+- **Action:** Collect unique Relay Peers from the member route table (where `member.DeliveryRoute.PeerId != member.PeerId`). Call `_groupCryptoService.GenerateGroupVerificationKey(masterKey)` and send `SyncBlindedRoutingTable` to relays via `IRemoteEnvelopeSender`.
+- **Action:** Call `conversation.AddMember()` and `_repository.UpdateAsync()`.
+
+**3. Remove Member & Epoch Cutover (`Percolator.Application/Apps/Chat/Handlers/RemoveGroupMemberCommandHandler.cs`):** 
+- **Action:** Create `RemoveGroupMemberCommand(ConversationId ConversationId, PeerId PeerToRemove, int SelfIdentityId)`.
+- **Action:** In handler: Verify Admin (unless self-leaving). Call `conversation.BeginEpochCutover()`.
+- **Action:** Encrypt `GroupContent.remove_member` using the *current* epoch key. Dispatch to ALL current members (including the evictee) via Layered ZK Transport.
+- **Action:** Call `_groupCryptoService.GenerateGroupMasterKey()`. Call `conversation.IncrementEpoch()`.
+- **Action:** Distribute the *new* key via `group_key_bootstrap` over 1:1 sessions to the *remaining* members.
+- **Action:** Send updated `SyncBlindedRoutingTable` to relays for the new `group_id`.
+- **Action:** Call `conversation.CompleteEpochCutover()`. Upsert new key to `IGroupCryptoStateRepository` and update `_repository`.
+
+**5. Inbound Processing (`ProcessInternalEnvelopeHandler.cs`):** 
+- **Action:** Add `ChatEnvelope.MessageOneofCase.SyncBlindedRoutingTable` block. Validate `zero_knowledge_admin_proof` (stub returning true). Upsert the routing peer IDs and `group_verification_key` into `IBlindedRoutingTableRepository`.
+- **Action:** In the existing `GroupMessage` local branch, switch on `GroupContent.contentCase`:
+  - `AddMember`: Call `conversation.AddMember()`.
+  - `RemoveMember`: Call `conversation.RemoveMember()`.
+  - `ChangeTitle`: Call `conversation.ChangeName()`.
+  - Save to `IGroupConversationRepository`.
+
+### Chunk 4: UI Data Layer & Plumbing Coordinators
+**Focus:** Bridge the backend handlers to the frontend WPF application via fast read models and fix inbound routing lookups.
+
+**1. GroupId Reverse Lookup (`Percolator.Infrastructure/Chat/Persistence`):**
+- **Action:** In `GroupCryptoStateDbo.cs`, add `public byte[] GroupIdBytes { get; set; } = Array.Empty<byte>();`.
+- **Action:** Generate an EF Core Migration to add this column to `GroupCryptoStates`.
+- **Action:** Update `SqliteGroupCryptoStateRepository.UpsertGroupMasterKeyAsync` to compute `_groupCryptographyService.DeriveGroupId()` and store it in `GroupIdBytes`.
+- **Action:** Add `Task<ConversationId?> GetConversationIdByGroupIdAsync(GroupId groupId, CancellationToken ct)` to `IGroupCryptoStateRepository` and implement it using a simple `SingleOrDefaultAsync` query against `GroupIdBytes`.
+
+**2. EF Core Queries (`Percolator.Application/Apps/Chat/Queries`):** 
+- **Action:** Build `IGroupDetailsQueries.cs` interface with `Task<GroupDetailsDto?> GetGroupDetailsAsync(ConversationId conversationId, int selfIdentityId, CancellationToken ct)`. `GroupDetailsDto` should contain `Name`, `CreatedAtUtc`, `IsUserAdmin`, and `List<GroupMemberDto>`.
+- **Action:** Implement `SqliteGroupDetailsQueries.cs` in `Percolator.Infrastructure/Chat/Queries` by joining `ConversationDbo`, `GroupStateDbo`, and `GroupMemberDbo`. Register it in DI.
+
+**3. Reactive Coordinators (`Desktop.Wpf/Features/Chat/ChatReloadCoordinator.cs`):** 
+- **Action:** Decouple the UI reload trigger from `DirectSessionId` (groups don't use direct sessions). 
+  - Change `IChatReloadCoordinator.TriggerReloadForConversation` to take just `(ConversationId conversationId, int selfIdentityId)`. 
+  - Update `ReloadTrigger` record to only hold `ConversationId` and `SelfIdentityId`.
+  - In `ReloadCoreAsync`, fetch messages and push them to `_state.SyncMessages(conversationId, snapshots)` (you will need to update `ChatStateService`'s internal `ConcurrentDictionary` and all public methods `SyncMessages`, `OptimisticInsert`, `MarkAsDelivered` to index by `ConversationId` instead of `DirectSessionId`).
+- **Action:** Update call sites for `TriggerReloadForConversation` (specifically in `ChatStateUpdateHandlers.cs` for `TextMessagePostedEvent` and `TextMessageReceivedEvent`) to match the new signature (remove `DirectSessionId`).
+- **Action:** Ensure `SendGroupMessageCommandHandler` and `ProcessInternalEnvelopeHandler.GroupMessage` publish a MediatR `TextMessagePostedEvent` upon persisting a message. Update `ChatReloadCoordinator` to subscribe to this event.
+
+**4. Dead Code Removal:**
+- **In `ChatReloadCoordinator.cs`:**
+  - Delete the `DirectSessionId sessionId` parameter from `IChatReloadCoordinator.TriggerReloadForConversation` (line 22).
+  - Delete the `DirectSessionId SessionId` field from the `ReloadTrigger` record (line 28).
+  - Delete the `sessionId` argument in the `TriggerReloadForConversation` implementation (line 67).
+  - Delete the `DirectSessionId sessionId` parameter from `ReloadCoreAsync` (line 83).
+  - Delete the `sessionId` argument in the `_state.SyncMessages(sessionId, snapshots)` call (line 100).
+- **In `ChatStateService.cs`:**
+  - Replace the `ConcurrentDictionary<DirectSessionId, ObservableList<ChatMessageModel>>` declaration with `ConcurrentDictionary<ConversationId, ObservableList<ChatMessageModel>>` (line 12).
+  - Update all method signatures to use `ConversationId` instead of `DirectSessionId`: `GetOrAddSessionMessagesList` (line 15), `SyncMessages` (line 18), `OptimisticInsert` (line 38), `MarkAsDelivered` (line 50).
+- **In `ChatStateUpdateHandlers.cs`:**
+  - Delete the code that extracts and passes `DirectSessionId` to `ChatStateService` and `ChatReloadCoordinator` in `TextMessagePostedEvent` (lines 25, 27, 43) and `TextMessageReceivedEvent` (lines 49, 51-55).
+
+### Chunk 5: Core Chat UI & ViewModels
+**Focus:** Render the group chat experience in the main window.
+
+**1. Selection Plumbing (`Desktop.Wpf/Features/Sessions`):** 
+- **Action:** In `Models/PeerConnectionKey.cs`, add `GroupConversation` to `SecureChannelKeyType`. Add `public static PeerConnectionKey FromGroupConversationId(Guid conversationId)`.
+- **Action:** In `SqlitePeerConnectionSidebarQueries.cs`, update the SQL query to UNION the existing direct peers with group conversations (`SELECT ... FROM Conversations WHERE Kind = 1`). Map them to `SidebarPeerConnectionDto` with a new `IsGroup` flag.
+- **Action:** In `SessionsSidebarViewModel.cs`, handle group items by forcing the icon to `StaticResource IconGroup` and hiding any relay/direct sub-text.
+
+**2. Composition ViewModel (`Desktop.Wpf/Features/Chat/GroupChatViewModel.cs`):** 
+- **Action:** Create `GroupChatViewModel` extending `ObservableObject`. Inject `ChatStateService`, `IMediator`, and `IGroupDetailsQueries`.
+- **Action:** Expose `IReadOnlyObservableList<ChatMessageSnapshot> Messages` by delegating to `_state.GetMessages(ConversationId)`.
+- **Action:** Expose `ReactiveProperty<string> RosterNames` (e.g., "Alice, Bob, Charlie") populated via `IGroupDetailsQueries`.
+- **Action:** Expose `ReactiveProperty<bool> IsEpochCutoverPending` and bind it so the Send button `CanExecute` is false when true.
+- **Action:** Implement `PostTextMessageCommand` that dispatches `SendGroupMessageCommand` via MediatR.
+- **Action:** Update `SelectedChannelPaneViewModel.cs` to resolve `GroupChatViewModel` when the `SelectedKey.Type == GroupConversation`.
+
+**3. Chat View Updates (`Desktop.Wpf/Features/Chat/ChatView.xaml`):** 
+- **Action:** In the Chat Header (where the peer name is displayed), add a `<TextBlock.ToolTip>` bound to `RosterNames` so users can hover to see the member list.
+- **Action:** In the top-right of the Chat Header, add a Dropdown Menu (`<Menu>` with a `<MenuItem Header="...">` or a styled material popup) containing:
+  - Add Member (triggers `ShowFor<AddGroupMemberDialogViewModel>`)
+  - Remove Member (triggers `ShowFor<RemoveGroupMemberDialogViewModel>`)
+  - Change Title (triggers `ShowFor<ChangeGroupTitleDialogViewModel>`)
+- **Action:** Bind the "Waiting for group key..." spinner (`BootstrapState` visibility) to show if the current user hasn't received the `GroupMasterKey` yet.
+
+### Chunk 6: Dialogs, Simulator Parity & Testing
+**Focus:** Finish the UX flows for group lifecycle and verify end-to-end correctness.
+
+**1. Group Creation & Invites UX (`Desktop.Wpf/Features/Sessions/ConnectionManagementDialogWindow.xaml`):** 
+- **Action:** Add a "Create Group" TabItem. Implement a `<ListBox>` bound to the user's connected peers (use `PeerConnectionStateService.Connections`). Set `SelectionMode="Multiple"`. Use existing custom material-inspired styling (e.g., `Style="{StaticResource ListBoxItemStyle}"`).
+- **Action:** In `ConnectionManagementDialogViewModel.cs`, add `AsyncRelayCommand CreateGroupCommand` which reads `SelectedPeers`, requests a group name via a simple prompt, and dispatches the backend `CreateGroupCommand`.
+- **Action:** Expand the Pending Requests tab in the dialog to bind to `IPendingGroupInvitationQueries.GetPendingInvitationsAsync`. Add `AcceptGroupInviteCommand` and `DeclineGroupInviteCommand`.
+
+**2. Group Action Dialogs (`Desktop.Wpf/Features/Chat/Dialogs`):**
+- **Action:** Create `AddGroupMemberDialogViewModel.cs` & `.xaml`. Provide a list of non-member peers to select. On confirm, dispatch backend `AddGroupMemberCommand`.
+- **Action:** Create `RemoveGroupMemberDialogViewModel.cs` & `.xaml`. Provide a list of current members (loaded from `IGroupDetailsQueries`). On confirm, dispatch backend `RemoveGroupMemberCommand`.
+- **Action:** Create `ChangeGroupTitleDialogViewModel.cs` & `.xaml`. Simple text input. Dispatches backend `ChangeGroupTitleCommand`.
+- **Action:** Register all three pairs in `Desktop.Wpf/Shared/Windowing/ViewMappings.xaml`.
+
+**3. Simulator Parity (`Desktop.Wpf/Features/Simulator`):** 
+- **Action:** Update `SimulatorOutboundInterceptor.InterceptDeliverOpaqueMessageAsync()`. Add explicit switch cases for `ChatEnvelope.MessageOneofCase.CreateGroup`, `GroupKeyBootstrap`, `GroupMessage`, and `SyncBlindedRoutingTable`. Ensure the simulated wiretap logs them and forwards them to the target simulated peer.
+- **Action:** Update `SimulatorChatViewModel.cs` to correctly handle sending messages when the active simulated conversation is a group (dispatching the backend `SendGroupMessageCommand` instead of the 1:1 command).
+
+**4. Testing Gates:** 
+- **Action:** Write an Integration Test demonstrating the happy path: `CreateGroupCommand` -> Simulated recipient accepts -> `GroupKeyBootstrap` is delivered -> Sender dispatches `GroupMessage` (ZK Layered) -> Recipient resolves `GroupId`, validates ZK proof, decrypts, and persists to DB.
+- **Action:** Write negative tests: (1) Ensure `RemoveGroupMemberCommand` accurately drops the evictee from the `GroupKeyBootstrap` 1:1 distribution list for the new epoch. (2) Ensure the `ProcessInternalEnvelopeHandler` Relay branch silently drops `GroupMessage` envelopes with invalid `zero_knowledge_member_proof`s.
