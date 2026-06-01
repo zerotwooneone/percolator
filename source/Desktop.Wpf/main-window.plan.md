@@ -114,12 +114,22 @@ The following chunks are designed to be executed sequentially by AI agents. Each
 - **Action:** Ensure you rebuild the `Percolator.Contracts` project to regenerate the C# types.
 
 **2. Crypto Interfaces (`Percolator.Cryptography`):**
-**CRITICAL:** For this milestone, we will use a "Plumbing Stub" for the ZK math. Real ZK proofs require complex public parameter distribution which is out of scope. We will build the entire data pipeline (Keys, DBs, Routing) but the actual crypto logic will be stubbed.
+- **Action:** Create domain types in `Percolator.Cryptography`:
+  - `GroupVerificationKey.cs`: `[ByteArray(minLength: 32, maxLength: 5000)] public sealed partial record GroupVerificationKey;` (Holds `ServerSecretParams` + `GroupPublicParams`)
+  - `ZeroKnowledgeMembershipProof.cs`: `[ByteArray(minLength: 1, maxLength: 10000)] public sealed partial record ZeroKnowledgeMembershipProof;` (Holds the serialized `AuthCredentialWithPniPresentation`)
 - **Action:** In `IGroupCryptographyService.cs`, add three new methods:
-  - `byte[] GenerateGroupVerificationKey(GroupMasterKey masterKey);` (Stub: return `new byte[] { 0x02 };`)
-  - `byte[] GenerateZeroKnowledgeMembershipProof(GroupMasterKey masterKey);` (Stub: return `new byte[] { 0x01 };`)
-  - `bool VerifyZeroKnowledgeMembershipProof(GroupId groupId, ReadOnlySpan<byte> verificationKey, ReadOnlySpan<byte> proof);` (Stub: return `proof.SequenceEqual(new byte[] { 0x01 });`)
-- **Action:** In `Percolator.Infrastructure/Chat/Cryptography/GroupCryptographyService.cs`, implement these methods with the defined stubs.
+  - `GroupVerificationKey GenerateGroupVerificationKey(GroupMasterKey masterKey);`
+  - `ZeroKnowledgeMembershipProof GenerateZeroKnowledgeMembershipProof(GroupMasterKey masterKey, ReadOnlySpan<byte> identityPublicKeyHash);`
+  - `bool VerifyZeroKnowledgeMembershipProof(GroupId groupId, GroupVerificationKey verificationKey, ZeroKnowledgeMembershipProof proof);`
+- **Action:** In `IGroupCryptographyService.cs`, add two additional methods for admin operations (routing table updates):
+  - `ZeroKnowledgeMembershipProof GenerateAdminProof(GroupMasterKey masterKey, ReadOnlySpan<byte> identityPublicKeyHash);` (Uses the same AuthCredentialWithPni flow as membership proof, since the admin is also a group member)
+  - `bool VerifyAdminProof(GroupId groupId, GroupVerificationKey verificationKey, ZeroKnowledgeMembershipProof proof);` (Same verification logic as membership proof)
+- **Action:** In `Percolator.Infrastructure/Cryptography/ZkgroupCryptographyService.cs`, implement these methods using `Signal.Interop.SignalCrypto`'s `AuthCredentialWithPni` FFI boundaries:
+  - For `GenerateGroupVerificationKey`: Deterministically derive `ServerSecretParams` from `masterKey` (e.g., hash it). Extract `GroupPublicParams` from `GroupSecretParams`. Serialize both and concatenate to return.
+  - For `GenerateZeroKnowledgeMembershipProof`: Derive `ServerSecretParams`. Derive `ServerPublicParams`. Use `IssueAuthCredentialWithPni` to issue a credential to the sender's `identityPublicKeyHash`. Receive it, and use `PresentAuthCredentialWithPni` to generate the presentation. Serialize the presentation and return it.
+  - For `VerifyZeroKnowledgeMembershipProof`: Deserialize the `GroupVerificationKey` into `ServerSecretParams` and `GroupPublicParams`. Deserialize the presentation. Call `VerifyAuthCredentialWithPniPresentation`. Return true if successful.
+  - For `GenerateAdminProof`: Delegate to `GenerateZeroKnowledgeMembershipProof` (same mechanism, since admin is a member).
+  - For `VerifyAdminProof`: Delegate to `VerifyZeroKnowledgeMembershipProof` (same verification logic).
 - **Action:** Create `Percolator.CryptographyTests/GroupCryptoRoundtripTests.cs` modeled after `SecureSessionX3dhRoundtripTests.cs`. Build a test `Sender_encrypts_and_proves_Relay_verifies_Receiver_decrypts` that:
   1. Generates a `GroupMasterKey`.
   2. Derives the `GroupId` and `VerificationKey`.
@@ -140,13 +150,13 @@ The following chunks are designed to be executed sequentially by AI agents. Each
 **Focus:** Implement the outbound wrapping and inbound routing of group messages.
 
 **1. Relay State (`Percolator.Chat` & `Percolator.Infrastructure/Chat/Persistence`):**
-- **Action:** Create domain interface `IBlindedRoutingTableRepository` with `Task UpsertRouteAsync(GroupId groupId, ReadOnlySpan<byte> verificationKey, IEnumerable<PeerId> routingTokens, CancellationToken ct);` and `Task<(List<PeerId>? Routes, byte[]? VerificationKey)> GetRoutesAsync(GroupId groupId, CancellationToken ct);`.
+- **Action:** Create domain interface `IBlindedRoutingTableRepository` with `Task UpsertRouteAsync(GroupId groupId, GroupVerificationKey verificationKey, IEnumerable<PeerId> routingTokens, CancellationToken ct);` and `Task<(List<PeerId>? Routes, GroupVerificationKey? VerificationKey)> GetRoutesAsync(GroupId groupId, CancellationToken ct);`.
 - **Action:** Create `BlindedRoutingTableDbo.cs` with `Id` (Guid), `GroupIdBytes` (byte[]), `VerificationKeyBytes` (byte[]), and `RoutingPeerIdsJson` (string).
-- **Action:** Implement `SqliteBlindedRoutingTableRepository.cs` and add EF Core Migration for the new DBO.
+- **Action:** Implement `SqliteBlindedRoutingTableRepository.cs` mapping between `VerificationKeyBytes` (byte[] in DBO) and `GroupVerificationKey` (domain type in interface). Add EF Core Migration for the new DBO.
 
 **2. Outbound (Sender) in `SendGroupMessageCommandHandler.cs`:** 
-- **Action:** Modify the handler to use `_groupCryptoService.DeriveGroupId()` and `_groupCryptoService.GenerateZeroKnowledgeMembershipProof()`.
-- **Action:** Update the protobuf `GroupMessage` construction to set `group_id` (via `GroupId.Value`) and `zero_knowledge_member_proof`.
+- **Action:** Modify the handler to use `_groupCryptoService.DeriveGroupId()` and `_groupCryptoService.GenerateZeroKnowledgeMembershipProof()` (passing the sender's identity public key hash).
+- **Action:** Update the protobuf `GroupMessage` construction to set `group_id` (via `GroupId.Value`) and `zero_knowledge_member_proof` (via `ZeroKnowledgeMembershipProof.Span.ToArray()`).
 - **Action:** Refactor the delivery loop. Group active members by delivery path. If a member's `RouteSelection.Relay` is not null, they are a relay recipient. If null, direct recipient.
 - **Action:** Use `IRemoteEnvelopeSender.SendChatEnvelopeToPeerAsync()` to send exactly ONE envelope to each unique Direct Peer and exactly ONE envelope to each unique Relay Peer. *(This automatically fulfills the Transport Layer 1:1 encryption requirement)*.
 
@@ -177,7 +187,7 @@ The following chunks are designed to be executed sequentially by AI agents. Each
 - **Action:** Send existing `ChatEnvelope.create_group` to the *new member* (populating full roster/name) via 1:1 `IRemoteEnvelopeSender`.
 - **Action:** Send `ChatEnvelope.group_key_bootstrap` to the *new member*.
 - **Action:** Create `GroupContent.add_member` (setting the new member's SPKI) and encrypt it. Dispatch to *existing members* via the Layered ZK Transport logic from Chunk 2.
-- **Action:** Collect unique Relay Peers from the member route table (where `member.DeliveryRoute.PeerId != member.PeerId`). Call `_groupCryptoService.GenerateGroupVerificationKey(masterKey)` and send `SyncBlindedRoutingTable` to relays via `IRemoteEnvelopeSender`.
+- **Action:** Collect unique Relay Peers from the member route table (where `member.DeliveryRoute.PeerId != member.PeerId`). Call `_groupCryptoService.GenerateGroupVerificationKey(masterKey)`. Call `_groupCryptoService.GenerateAdminProof(masterKey, senderIdentityHash)`. Convert both to protobuf bytes via `GroupVerificationKey.Span.ToArray()` and `ZeroKnowledgeMembershipProof.Span.ToArray()` and send `SyncBlindedRoutingTable` to relays via `IRemoteEnvelopeSender`.
 - **Action:** Call `conversation.AddMember()` and `_repository.UpdateAsync()`.
 
 **3. Remove Member & Epoch Cutover (`Percolator.Application/Apps/Chat/Handlers/RemoveGroupMemberCommandHandler.cs`):** 
@@ -186,11 +196,17 @@ The following chunks are designed to be executed sequentially by AI agents. Each
 - **Action:** Encrypt `GroupContent.remove_member` using the *current* epoch key. Dispatch to ALL current members (including the evictee) via Layered ZK Transport.
 - **Action:** Call `_groupCryptoService.GenerateGroupMasterKey()`. Call `conversation.IncrementEpoch()`.
 - **Action:** Distribute the *new* key via `group_key_bootstrap` over 1:1 sessions to the *remaining* members.
-- **Action:** Send updated `SyncBlindedRoutingTable` to relays for the new `group_id`.
+- **Action:** Call `_groupCryptoService.GenerateGroupVerificationKey(masterKey)`. Call `_groupCryptoService.GenerateAdminProof(masterKey, senderIdentityHash)`. Convert both to protobuf bytes via `GroupVerificationKey.Span.ToArray()` and `ZeroKnowledgeMembershipProof.Span.ToArray()` and send updated `SyncBlindedRoutingTable` to relays for the new `group_id`.
 - **Action:** Call `conversation.CompleteEpochCutover()`. Upsert new key to `IGroupCryptoStateRepository` and update `_repository`.
 
-**5. Inbound Processing (`ProcessInternalEnvelopeHandler.cs`):** 
-- **Action:** Add `ChatEnvelope.MessageOneofCase.SyncBlindedRoutingTable` block. Validate `zero_knowledge_admin_proof` (stub returning true). Upsert the routing peer IDs and `group_verification_key` into `IBlindedRoutingTableRepository`.
+**4. Change Title Command (`Percolator.Application/Apps/Chat/Handlers/ChangeGroupTitleCommandHandler.cs`):**
+- **Action:** Create `ChangeGroupTitleCommand(ConversationId ConversationId, string NewTitle, int SelfIdentityId)`.
+- **Action:** In handler: Load `GroupConversation`. Verify sender is an Admin.
+- **Action:** Encrypt `GroupContent.change_title` using the current epoch key. Dispatch to ALL members via Layered ZK Transport.
+- **Action:** Call `conversation.ChangeName(newTitle)` and `_repository.UpdateAsync()`.
+
+**6. Inbound Processing (`ProcessInternalEnvelopeHandler.cs`):** 
+- **Action:** Add `ChatEnvelope.MessageOneofCase.SyncBlindedRoutingTable` block. Verify `_groupCryptoService.VerifyAdminProof(groupId, verificationKey, proof)`. If false, drop the message. Convert `group_verification_key` from protobuf bytes to `GroupVerificationKey` using `GroupVerificationKey.FromBytes()`. Upsert the routing peer IDs and the converted `GroupVerificationKey` into `IBlindedRoutingTableRepository`.
 - **Action:** In the existing `GroupMessage` local branch, switch on `GroupContent.contentCase`:
   - `AddMember`: Call `conversation.AddMember()`.
   - `RemoveMember`: Call `conversation.RemoveMember()`.
@@ -201,10 +217,10 @@ The following chunks are designed to be executed sequentially by AI agents. Each
 **Focus:** Bridge the backend handlers to the frontend WPF application via fast read models and fix inbound routing lookups.
 
 **1. GroupId Reverse Lookup (`Percolator.Infrastructure/Chat/Persistence`):**
-- **Action:** In `GroupCryptoStateDbo.cs`, add `public byte[] GroupIdBytes { get; set; } = Array.Empty<byte>();`.
+- **Action:** In `GroupCryptoStateDbo.cs`, add `public byte[] GroupIdBytes { get; set; } = Array.Empty<byte>();` (byte[] for EF Core persistence).
 - **Action:** Generate an EF Core Migration to add this column to `GroupCryptoStates`.
-- **Action:** Update `SqliteGroupCryptoStateRepository.UpsertGroupMasterKeyAsync` to compute `_groupCryptographyService.DeriveGroupId()` and store it in `GroupIdBytes`.
-- **Action:** Add `Task<ConversationId?> GetConversationIdByGroupIdAsync(GroupId groupId, CancellationToken ct)` to `IGroupCryptoStateRepository` and implement it using a simple `SingleOrDefaultAsync` query against `GroupIdBytes`.
+- **Action:** Update `SqliteGroupCryptoStateRepository.UpsertGroupMasterKeyAsync` to compute `_groupCryptographyService.DeriveGroupId()` and store it in `GroupIdBytes` (convert domain `GroupId` to byte[] via `GroupId.Span.ToArray()`).
+- **Action:** Add `Task<ConversationId?> GetConversationIdByGroupIdAsync(GroupId groupId, CancellationToken ct)` to `IGroupCryptoStateRepository` and implement it using a simple `SingleOrDefaultAsync` query against `GroupIdBytes` (convert domain `GroupId` to byte[] for the query).
 
 **2. EF Core Queries (`Percolator.Application/Apps/Chat/Queries`):** 
 - **Action:** Build `IGroupDetailsQueries.cs` interface with `Task<GroupDetailsDto?> GetGroupDetailsAsync(ConversationId conversationId, int selfIdentityId, CancellationToken ct)`. `GroupDetailsDto` should contain `Name`, `CreatedAtUtc`, `IsUserAdmin`, and `List<GroupMemberDto>`.
