@@ -7,8 +7,10 @@ using Percolator.Network;
 using NetworkPeerId = Percolator.Network.PeerId;
 using Percolator.Cryptography;
 using Google.Protobuf;
+using Percolator.Application.Network;
+using Percolator.Infrastructure.Network;
 
-namespace Percolator.Application.Network;
+namespace Percolator.Infrastructure.Network.Grpc;
 
 public class GrpcMessageTransportService : IMessageTransportService
 {

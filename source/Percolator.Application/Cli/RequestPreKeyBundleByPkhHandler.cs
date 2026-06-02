@@ -2,15 +2,16 @@ using Google.Protobuf;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Identity;
-using Percolator.Application.Network;
 using Percolator.Application.Services;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Network;
+using Percolator.Network.Services;
 using Percolator.Network.ValueObjects;
 using System.Net;
 using System.Security.Cryptography;
+using Percolator.Application.Network;
 
 namespace Percolator.Application.Cli;
 
@@ -24,7 +25,7 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
     private readonly IPeerPublicSigningKeyStore _peerPublicSigningKeyStore;
 
     private readonly ISessionCrypto _sessionCrypto;
-    private readonly IGrpcSessionService _grpcSessions;
+    private readonly ISessionEstablishmentTransport _sessionTransport;
     private readonly Percolator.Cryptography.ISessionRepository _sessions;
     private readonly IDirectSessionRepository _directSessions;
     private readonly IPeerRoutingProfileRepository _routingProfiles;
@@ -39,7 +40,7 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
         ActiveIdentityContext activeIdentity,
         IPeerPublicSigningKeyStore peerPublicSigningKeyStore,
         ISessionCrypto sessionCrypto,
-        IGrpcSessionService grpcSessions,
+        ISessionEstablishmentTransport sessionTransport,
         Percolator.Cryptography.ISessionRepository sessions,
         IDirectSessionRepository directSessions,
         IPeerRoutingProfileRepository routingProfiles,
@@ -54,7 +55,7 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
         _peerPublicSigningKeyStore = peerPublicSigningKeyStore;
 
         _sessionCrypto = sessionCrypto;
-        _grpcSessions = grpcSessions;
+        _sessionTransport = sessionTransport;
         _sessions = sessions;
         _directSessions = directSessions;
         _routingProfiles = routingProfiles;
@@ -255,7 +256,7 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
             req.OnetimePrekeyId = ByteString.CopyFrom(oneTimePreKeyId.Value.ToByteArray());
         }
 
-        var resp = await _grpcSessions.EstablishSessionAsync(endpoint, req, ct).ConfigureAwait(false);
+        var resp = await _sessionTransport.EstablishSessionAsync(endpoint, req, ct).ConfigureAwait(false);
         if (resp.Response is null || !resp.Response.HasResponsePayload || resp.Response.ResponsePayload.Length == 0)
         {
             throw new InvalidOperationException("Handshake failed.");

@@ -2,7 +2,7 @@ using System.Net;
 using Percolator.Contracts;
 using Percolator.Identity;
 
-namespace Percolator.Application.Network;
+namespace Percolator.Infrastructure.Network;
 
 public interface ISimulatorOutboundInterceptor
 {

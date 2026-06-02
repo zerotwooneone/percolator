@@ -1,7 +1,7 @@
 using System.Net;
 using Percolator.Contracts;
 
-namespace Percolator.Application.Network;
+namespace Percolator.Infrastructure.Network;
 
 /// <summary>
 /// Result of simulator outbound interception attempt.

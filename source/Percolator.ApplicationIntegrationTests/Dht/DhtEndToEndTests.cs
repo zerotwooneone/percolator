@@ -11,6 +11,7 @@ using Percolator.Application.Identity;
 using Percolator.Application.Network;
 using Percolator.Contracts;
 using Percolator.ApplicationIntegrationTests.TestDoubles;
+using Percolator.Network.Services;
 
 namespace Percolator.ApplicationIntegrationTests.Dht;
 
@@ -61,7 +62,7 @@ public class DhtEndToEndTests : IntegrationTestBase
         using var alice = await CreateAndInitializeHostAsync(alicePort, "DhtE2E-Alice", identityName: "alice", additionalServiceRegistration: services =>
         {
             // Replace network-facing services with loopback fakes targeting the host
-            services.Replace(ServiceDescriptor.Singleton<IGrpcSessionService>(sp => new SingleHostGrpcSessionLoopback(host.Services)));
+            services.Replace(ServiceDescriptor.Singleton<ISessionEstablishmentTransport>(sp => new SingleHostGrpcSessionLoopback(host.Services)));
             services.Replace(ServiceDescriptor.Singleton<IMessageTransportService>(sp => new LoopbackTransport(host.Services)));
         });
 
@@ -69,7 +70,7 @@ public class DhtEndToEndTests : IntegrationTestBase
         var bobPort = GetAvailablePort();
         using var bob = await CreateAndInitializeHostAsync(bobPort, "DhtE2E-Bob", identityName: "bob", additionalServiceRegistration: services =>
         {
-            services.Replace(ServiceDescriptor.Singleton<IGrpcSessionService>(sp => new SingleHostGrpcSessionLoopback(host.Services)));
+            services.Replace(ServiceDescriptor.Singleton<ISessionEstablishmentTransport>(sp => new SingleHostGrpcSessionLoopback(host.Services)));
             services.Replace(ServiceDescriptor.Singleton<IMessageTransportService>(sp => new LoopbackTransport(host.Services)));
         });
 

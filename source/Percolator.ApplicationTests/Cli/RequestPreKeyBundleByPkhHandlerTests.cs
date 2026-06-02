@@ -12,6 +12,7 @@ using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Network;
+using Percolator.Network.Services;
 
 namespace Percolator.ApplicationTests.Cli;
 
@@ -25,7 +26,7 @@ public sealed class RequestPreKeyBundleByPkhHandlerTests
     private Mock<IMessageTransportService> _transport = null!;
     private Mock<IPeerPublicSigningKeyStore> _peerKeyStore = null!;
     private Mock<ISessionCrypto> _sessionCrypto = null!;
-    private Mock<IGrpcSessionService> _grpcSessions = null!;
+    private Mock<ISessionEstablishmentTransport> _sessionTransport = null!;
     private Mock<Percolator.Cryptography.ISessionRepository> _sessions = null!;
     private Mock<IDirectSessionRepository> _directSessions = null!;
     private Mock<IPeerRoutingProfileRepository> _routingProfiles = null!;
@@ -42,7 +43,7 @@ public sealed class RequestPreKeyBundleByPkhHandlerTests
         _transport = new Mock<IMessageTransportService>(MockBehavior.Loose);
         _peerKeyStore = new Mock<IPeerPublicSigningKeyStore>(MockBehavior.Loose);
         _sessionCrypto = new Mock<ISessionCrypto>(MockBehavior.Loose);
-        _grpcSessions = new Mock<IGrpcSessionService>(MockBehavior.Loose);
+        _sessionTransport = new Mock<ISessionEstablishmentTransport>(MockBehavior.Loose);
         _sessions = new Mock<Percolator.Cryptography.ISessionRepository>(MockBehavior.Loose);
         _directSessions = new Mock<IDirectSessionRepository>(MockBehavior.Loose);
         _routingProfiles = new Mock<IPeerRoutingProfileRepository>(MockBehavior.Loose);
@@ -174,7 +175,7 @@ public sealed class RequestPreKeyBundleByPkhHandlerTests
             }
         };
 
-        _grpcSessions
+        _sessionTransport
             .Setup(g => g.EstablishSessionAsync(endpoint, It.IsAny<EstablishSessionRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(establishResp);
 
@@ -196,7 +197,7 @@ public sealed class RequestPreKeyBundleByPkhHandlerTests
             _activeIdentity,
             _peerKeyStore.Object,
             _sessionCrypto.Object,
-            _grpcSessions.Object,
+            _sessionTransport.Object,
             _sessions.Object,
             _directSessions.Object,
             _routingProfiles.Object,
@@ -237,7 +238,7 @@ public sealed class RequestPreKeyBundleByPkhHandlerTests
             _activeIdentity,
             _peerKeyStore.Object,
             _sessionCrypto.Object,
-            _grpcSessions.Object,
+            _sessionTransport.Object,
             _sessions.Object,
             _directSessions.Object,
             _routingProfiles.Object,
@@ -286,7 +287,7 @@ public sealed class RequestPreKeyBundleByPkhHandlerTests
             _activeIdentity,
             _peerKeyStore.Object,
             _sessionCrypto.Object,
-            _grpcSessions.Object,
+            _sessionTransport.Object,
             _sessions.Object,
             _directSessions.Object,
             _routingProfiles.Object,
@@ -399,7 +400,7 @@ public sealed class RequestPreKeyBundleByPkhHandlerTests
             _activeIdentity,
             _peerKeyStore.Object,
             _sessionCrypto.Object,
-            _grpcSessions.Object,
+            _sessionTransport.Object,
             _sessions.Object,
             _directSessions.Object,
             _routingProfiles.Object,

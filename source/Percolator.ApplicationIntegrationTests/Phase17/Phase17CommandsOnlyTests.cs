@@ -15,6 +15,7 @@ using System.Collections.Concurrent;
 using Percolator.Identity;
 using PeerId = Percolator.Identity.PeerId;
 using Percolator.ApplicationIntegrationTests.TestDoubles;
+using Percolator.Network.Services;
 
 namespace Percolator.ApplicationIntegrationTests.Phase17;
 
@@ -147,7 +148,7 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
         var alicePort = GetAvailablePort();
         using var alice = await CreateAndInitializeHostAsync(alicePort, "P17-Alice", identityName: "alice", additionalServiceRegistration: services =>
         {
-            services.Replace(ServiceDescriptor.Singleton<IGrpcSessionService>(sp => new SingleHostGrpcSessionLoopback(host.Services)));
+            services.Replace(ServiceDescriptor.Singleton<ISessionEstablishmentTransport>(sp => new SingleHostGrpcSessionLoopback(host.Services)));
             services.RemoveAll<IMessageTransportService>();
             services.AddSingleton<IMessageTransportService>(sp => new ClientToHostTransport(sp, host.Services, "host"));
         });
@@ -155,7 +156,7 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
         var bobPort = GetAvailablePort();
         using var bob = await CreateAndInitializeHostAsync(bobPort, "P17-Bob", identityName: "bob", additionalServiceRegistration: services =>
         {
-            services.Replace(ServiceDescriptor.Singleton<IGrpcSessionService>(sp => new SingleHostGrpcSessionLoopback(host.Services)));
+            services.Replace(ServiceDescriptor.Singleton<ISessionEstablishmentTransport>(sp => new SingleHostGrpcSessionLoopback(host.Services)));
             services.RemoveAll<IMessageTransportService>();
             services.AddSingleton<IMessageTransportService>(sp => new ClientToHostTransport(sp, host.Services, "host"));
         });
@@ -163,7 +164,7 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
         var charliePort = GetAvailablePort();
         using var charlie = await CreateAndInitializeHostAsync(charliePort, "P17-Charlie", identityName: "charlie", additionalServiceRegistration: services =>
         {
-            services.Replace(ServiceDescriptor.Singleton<IGrpcSessionService>(sp => new SingleHostGrpcSessionLoopback(host.Services)));
+            services.Replace(ServiceDescriptor.Singleton<ISessionEstablishmentTransport>(sp => new SingleHostGrpcSessionLoopback(host.Services)));
             services.RemoveAll<IMessageTransportService>();
             services.AddSingleton<IMessageTransportService>(sp => new ClientToHostTransport(sp, host.Services, "host"));
         });

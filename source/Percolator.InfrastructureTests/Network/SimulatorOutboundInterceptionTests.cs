@@ -2,7 +2,6 @@ using System.Net;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Percolator.Application.Identity;
-using Percolator.Application.Network;
 using Percolator.Application.Services;
 using Percolator.Contracts;
 using Percolator.Cryptography;
@@ -10,8 +9,12 @@ using Percolator.Identity;
 using Percolator.Identity.Model;
 using Percolator.Network;
 using Percolator.Network.Messaging;
+using Percolator.Infrastructure.Network.Grpc;
+using Percolator.Infrastructure.Network.Tls;
+using Percolator.Infrastructure.Network.Trust;
+using Percolator.Infrastructure.Network;
 
-namespace Percolator.ApplicationTests.Network;
+namespace Percolator.InfrastructureTests.Network;
 
 [TestFixture]
 public sealed class SimulatorOutboundInterceptionTests

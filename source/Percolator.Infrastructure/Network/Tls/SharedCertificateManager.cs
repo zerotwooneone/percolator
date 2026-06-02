@@ -1,7 +1,7 @@
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.Extensions.Logging;
 
-namespace Percolator.Application.Network
+namespace Percolator.Infrastructure.Network.Tls
 {
     /// <summary>
     /// Manages the shared certificate for gRPC communication.

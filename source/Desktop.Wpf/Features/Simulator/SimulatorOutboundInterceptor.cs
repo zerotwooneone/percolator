@@ -1,9 +1,9 @@
 using System.Net;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Identity;
-using Percolator.Application.Network;
 using Percolator.Contracts;
 using Percolator.Network;
+using Percolator.Infrastructure.Network;
 
 namespace Desktop.Wpf.Features.Simulator;
 

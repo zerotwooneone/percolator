@@ -1,10 +1,10 @@
 using System.Net;
-using Percolator.Application.Network;
 using Percolator.Contracts;
+using Percolator.Network.Services;
 
 namespace Percolator.ApplicationIntegrationTests.TestDoubles;
 
-internal sealed class SingleHostGrpcSessionLoopback : IGrpcSessionService
+internal sealed class SingleHostGrpcSessionLoopback : ISessionEstablishmentTransport
 {
     private readonly IServiceProvider _hostProvider;
 

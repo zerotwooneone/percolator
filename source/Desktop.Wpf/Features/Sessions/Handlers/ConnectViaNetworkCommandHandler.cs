@@ -15,13 +15,14 @@ using System.Security.Cryptography;
 using System.Text;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
+using Percolator.Network.Services;
 
 namespace Desktop.Wpf.Features.Sessions.Handlers;
 
 public sealed class ConnectViaNetworkCommandHandler : IRequestHandler<ConnectViaNetworkCommand, ConnectViaNetworkResult>
 {
     private readonly IMainReverseSignalInviteFactory _reverseSignalInvites;
-    private readonly IGrpcSessionService _grpcSessions;
+    private readonly ISessionEstablishmentTransport _sessionTransport;
     private readonly ISecureMessagingService _secureMessaging;
     private readonly IMessageTransportService _transport;
     private readonly IDirectSessionRepository _directSessions;
@@ -35,7 +36,7 @@ public sealed class ConnectViaNetworkCommandHandler : IRequestHandler<ConnectVia
 
     public ConnectViaNetworkCommandHandler(
         IMainReverseSignalInviteFactory reverseSignalInvites,
-        IGrpcSessionService grpcSessions,
+        ISessionEstablishmentTransport sessionTransport,
         ISecureMessagingService secureMessaging,
         IMessageTransportService transport,
         IDirectSessionRepository directSessions,
@@ -48,7 +49,7 @@ public sealed class ConnectViaNetworkCommandHandler : IRequestHandler<ConnectVia
         IMediator mediator)
     {
         _reverseSignalInvites = reverseSignalInvites;
-        _grpcSessions = grpcSessions;
+        _sessionTransport = sessionTransport;
         _secureMessaging = secureMessaging;
         _transport = transport;
         _directSessions = directSessions;
@@ -92,7 +93,7 @@ public sealed class ConnectViaNetworkCommandHandler : IRequestHandler<ConnectVia
                 targetEndpointHost: endpoint.Host,
                 targetEndpointPort: endpoint.Port);
 
-            _ = await _grpcSessions.EstablishDirectSessionAsync(endpoint, invite);
+            _ = await _sessionTransport.EstablishDirectSessionAsync(endpoint, invite);
 
             return new ConnectViaNetworkResult.Success();
         }

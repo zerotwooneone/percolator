@@ -3,8 +3,9 @@ using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Percolator.Network;
+using Percolator.Infrastructure.Network.Tls;
 
-namespace Percolator.Application.Network;
+namespace Percolator.Infrastructure.Network.Trust;
 
 public class InMemoryPeerTrustStore : IPeerTrustManager
 {

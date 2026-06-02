@@ -173,7 +173,7 @@ public partial class App : Application
                         sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<Desktop.Wpf.Features.Simulator.SimulatorRelayDeliveryService>>(),
                         sp.GetRequiredService<Desktop.Wpf.Features.Simulator.ISimulatorDiagnosticsService>()));
                 services.AddSingleton<ISignalProtocolEngine, SignalProtocolEngine>();
-                services.AddSingleton<Percolator.Application.Network.ISimulatorOutboundInterceptor, Desktop.Wpf.Features.Simulator.SimulatorOutboundInterceptor>();
+                services.AddSingleton<Percolator.Infrastructure.Network.ISimulatorOutboundInterceptor, Desktop.Wpf.Features.Simulator.SimulatorOutboundInterceptor>();
                 services.AddScoped<Desktop.Wpf.Features.Simulator.ISimulatorRelayAutoDeliverService, Desktop.Wpf.Features.Simulator.SimulatorRelayAutoDeliverService>();
                 // Per-session scoped chat stack
                 services.AddScoped<Desktop.Wpf.Features.Sessions.SessionContext>();

@@ -6,13 +6,16 @@ using Grpc.Core;
 using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
 using Percolator.Contracts;
+using Percolator.Network.Services;
+using Percolator.Infrastructure.Network.Tls;
+using Percolator.Infrastructure.Network.Trust;
 
-namespace Percolator.Application.Network
+namespace Percolator.Infrastructure.Network.Grpc
 {
     /// <summary>
     /// Service for establishing gRPC sessions with remote peers
     /// </summary>
-    public class GrpcSessionService : IGrpcSessionService
+    public class GrpcSessionService : ISessionEstablishmentTransport
     {
         private readonly ILogger<GrpcSessionService> _logger;
         private readonly IPeerTrustManager _peerTrustManager;

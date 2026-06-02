@@ -19,6 +19,8 @@ using Percolator.Application.Network;
 using Percolator.Infrastructure;
 using Percolator.Infrastructure.Dht;
 using Percolator.Infrastructure.Identity;
+using Percolator.Infrastructure.Network.Tls;
+using Percolator.Infrastructure.Network.Trust;
 using Percolator.Node;
 using Microsoft.Extensions.Options;
 using Percolator.Application.Configuration;

@@ -5,26 +5,27 @@ using Percolator.Application.Network.Messaging;
 using Percolator.Contracts;
 using Percolator.Network;
 using Percolator.Network.Messaging;
+using Percolator.Network.Services;
 
 namespace Percolator.Application.Network;
 
 internal sealed class InviteHandshakeResponseDeliveryService : IInviteHandshakeResponseDeliveryService
 {
     private readonly ILogger<InviteHandshakeResponseDeliveryService> _logger;
-    private readonly IGrpcSessionService _grpc;
+    private readonly ISessionEstablishmentTransport _sessionTransport;
     private readonly IRelayTopology _relayTopology;
     private readonly IRouteSender _transport;
     private readonly IOutboundMessageWireTap _wireTap;
 
     public InviteHandshakeResponseDeliveryService(
         ILogger<InviteHandshakeResponseDeliveryService> logger,
-        IGrpcSessionService grpc,
+        ISessionEstablishmentTransport sessionTransport,
         IRelayTopology relayTopology,
         IRouteSender transport,
         IOutboundMessageWireTap wireTap)
     {
         _logger = logger;
-        _grpc = grpc;
+        _sessionTransport = sessionTransport;
         _relayTopology = relayTopology;
         _transport = transport;
         _wireTap = wireTap;
@@ -55,7 +56,7 @@ internal sealed class InviteHandshakeResponseDeliveryService : IInviteHandshakeR
         {
             try
             {
-                _ = await _grpc.DeliverInviteHandshakeResponseAsync(directCallbackEndpoint, response).ConfigureAwait(false);
+                _ = await _sessionTransport.DeliverInviteHandshakeResponseAsync(directCallbackEndpoint, response).ConfigureAwait(false);
                 if (_wireTap.Enabled)
                 {
                     _wireTap.Tap(new OutboundWireMessage(

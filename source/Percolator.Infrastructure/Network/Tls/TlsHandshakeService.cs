@@ -5,7 +5,7 @@ using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.Extensions.Logging;
 
-namespace Percolator.Application.Network;
+namespace Percolator.Infrastructure.Network.Tls;
 
 /// <summary>
 /// Service for handling TLS handshakes and certificate capture

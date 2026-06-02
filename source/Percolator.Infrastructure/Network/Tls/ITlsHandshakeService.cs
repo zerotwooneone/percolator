@@ -1,7 +1,7 @@
 using System.Net;
 using System.Security.Cryptography.X509Certificates;
 
-namespace Percolator.Application.Network
+namespace Percolator.Infrastructure.Network.Tls
 {
     /// <summary>
     /// Service for handling TLS handshakes and certificate operations

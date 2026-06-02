@@ -14,6 +14,7 @@ using Percolator.Identity;
 using Percolator.Identity.Model;
 using Percolator.Network;
 using Percolator.MessageQueue.Abstractions;
+using Percolator.Infrastructure.Network.Trust;
 using SessionId = Percolator.Cryptography.SessionId;
 using NetworkPeerId = Percolator.Network.PeerId;
 

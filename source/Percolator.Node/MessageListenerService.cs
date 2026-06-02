@@ -10,6 +10,7 @@ using Percolator.Infrastructure;
 using Percolator.Application.Network;
 using Microsoft.Extensions.Options;
 using Percolator.Application.Configuration;
+using Percolator.Infrastructure.Network.Tls;
 
 namespace Percolator.Node
 {
