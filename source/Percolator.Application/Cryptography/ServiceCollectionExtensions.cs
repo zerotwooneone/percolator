@@ -13,6 +13,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ISigningService, EcdsaSigningService>();
         services.AddSingleton<ISessionCrypto, AeadSessionCrypto>();
         services.AddScoped<IHandshakePlanner, HandshakePlannerAdapter>();
+        services.AddScoped<IGroupMessageCryptographyService, GroupMessageCryptographyService>();
         
         // Bind the configuration section to the options class
         services.AddOptions<CryptographyOptions>()
