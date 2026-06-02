@@ -1,6 +1,5 @@
 using System.Net;
 using Percolator.Contracts;
-using Percolator.Identity;
 
 namespace Percolator.Infrastructure.Network;
 

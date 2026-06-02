@@ -7,7 +7,6 @@ using Percolator.Application.Cryptography;
 using Percolator.Application.Identity;
 using Percolator.Application.Ingress;
 using Percolator.Application.Network;
-using Percolator.Application.PeerDiscovery;
 using Percolator.Application.RateLimiting;
 using Percolator.Application.ReverseSignal;
 using Percolator.Application.Sessions;
@@ -28,7 +27,6 @@ public static class ServiceCollectionExtensions
         services.AddIdentityServices();
         services.AddIngressServices();
         services.AddNetworkServices(configuration);
-        services.AddPeerDiscoveryServices();
         services.AddSessionServices();
         services.AddRateLimiting();
         

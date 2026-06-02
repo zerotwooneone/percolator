@@ -6,12 +6,10 @@ namespace Percolator.Application.PeerDiscovery;
 public class RemovePeerOnPeerExpiredHandler : INotificationHandler<PeerExpiredNotification>
 {
     private readonly ILogger<RemovePeerOnPeerExpiredHandler> _logger;
-    private readonly IPeerConnectionManager _connectionManager;
 
-    public RemovePeerOnPeerExpiredHandler(ILogger<RemovePeerOnPeerExpiredHandler> logger, IPeerConnectionManager connectionManager)
+    public RemovePeerOnPeerExpiredHandler(ILogger<RemovePeerOnPeerExpiredHandler> logger)
     {
         _logger = logger;
-        _connectionManager = connectionManager;
     }
 
     public async Task Handle(PeerExpiredNotification notification, CancellationToken cancellationToken)
