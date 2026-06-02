@@ -1,7 +1,5 @@
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
-using System.Net.Security;
-using Grpc.AspNetCore.Server;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Microsoft.AspNetCore.Builder;
@@ -23,17 +21,28 @@ var configuration = new ConfigurationBuilder()
     .AddCommandLine(args)
     .Build();
 
-var listenPort = configuration.GetValue<int>("ListenPort", 5001);
-var targetPort = configuration.GetValue<int>("TargetPort", 5002);
+var listenPort = configuration.GetValue("ListenPort", 5001);
+var targetPort = configuration.GetValue("TargetPort", 5002);
+var cleanupCertFiles = configuration.GetValue("CleanupCertFiles", true);
 
-Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [CONFIG] ListenPort: {listenPort}, TargetPort: {targetPort}");
+Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [CONFIG] ListenPort: {listenPort}, TargetPort: {targetPort}, CleanupCertFiles: {cleanupCertFiles}");
 
 // ============================================================================
-// IDENTITY & EPHEMERAL CERTIFICATE GENERATION (In-Memory Only)
+// IDENTITY & EPHEMERAL CERTIFICATE GENERATION
 // ============================================================================
+
+// Create dedicated temp directory for cert files
+var certDir = Path.Combine(Path.GetTempPath(), "TofuTlsGrpcTest");
+if (!Directory.Exists(certDir))
+{
+    Directory.CreateDirectory(certDir);
+}
+
+// Track cert files for cleanup
+var certFiles = new List<string>();
 
 // 1. Generate a dummy Identity Signing Key (ECDsa)
-using var identitySigningKey = ECDsa.Create();
+using var identitySigningKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
 var identitySpki = identitySigningKey.ExportSubjectPublicKeyInfo();
 var identityHash = SHA256.HashData(identitySpki);
 var identityHashString = Convert.ToHexString(identityHash);
@@ -41,106 +50,39 @@ var identityHashString = Convert.ToHexString(identityHash);
 Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [IDENTITY] Generated Identity Signing Key.");
 Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [IDENTITY] Identity SPKI Hash: {identityHashString}");
 
-X509Certificate2 GenerateEphemeralCertificate()
+X509Certificate2 GenerateEphemeralCertificate(ECDsa identityKey)
 {
-    Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [CERT] Generating new ephemeral self-signed TLS certificate...");
-    
-    // Simulating Percolator.Cryptography.CertificateGenerator
+    Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [CERT] Generating new ephemeral self-signed TLS certificate using identity key...");
+
+    // Use the identity key as the TLS certificate's public key
     var distinguishedName = new X500DistinguishedName($"CN=localhost");
-    var request = new CertificateRequest(distinguishedName, identitySigningKey, HashAlgorithmName.SHA256);
-    
-    // Basic Extensions
-    request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyEncipherment | X509KeyUsageFlags.DigitalSignature, critical: true));
-    request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(new OidCollection { new Oid(Oids.ServerAuthentication) }, critical: false));
-    
-    // SAN
+    var request = new CertificateRequest(distinguishedName, identityKey, HashAlgorithmName.SHA256);
+
+    // Minimal TLS 1.3 extensions
+    request.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
+    request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature, true));
+    request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(
+        new OidCollection { new Oid("1.3.6.1.5.5.7.3.1") }, false));
+
+    // SAN for localhost
     var sanBuilder = new SubjectAlternativeNameBuilder();
     sanBuilder.AddDnsName("localhost");
-    sanBuilder.AddDnsName("127.0.0.1");
+    sanBuilder.AddIpAddress(System.Net.IPAddress.Loopback);
+    sanBuilder.AddIpAddress(System.Net.IPAddress.IPv6Loopback);
     request.CertificateExtensions.Add(sanBuilder.Build());
 
-    // Custom OID for Identity Key
-    // Write ASN.1 DER Octet String containing the SPKI
-    var asnWriter = new System.Formats.Asn1.AsnWriter(System.Formats.Asn1.AsnEncodingRules.DER);
-    asnWriter.WriteOctetString(identitySpki);
-    var encodedPublicKey = asnWriter.Encode();
-    request.CertificateExtensions.Add(new X509Extension(Oids.PeerIdentityKey, encodedPublicKey, false));
-    
-    var ephemeralCert = request.CreateSelfSigned(DateTimeOffset.Now.AddDays(-1), DateTimeOffset.Now.AddDays(365));
-    
-    // Fix Windows Schannel binding issue via pure in-memory PFX roundtrip (no disk I/O)
-    var exportBytes = ephemeralCert.Export(X509ContentType.Pfx, "password");
-#pragma warning disable SYSLIB0057
-    var memoryCertificate = new X509Certificate2(exportBytes, "password", X509KeyStorageFlags.Exportable);
-#pragma warning restore SYSLIB0057
-    
-    return memoryCertificate;
-}
+    using var ephemeralCert = request.CreateSelfSigned(DateTimeOffset.Now.AddDays(-1), DateTimeOffset.Now.AddDays(365));
 
-var serverCertificate = GenerateEphemeralCertificate();
-var serverCertHash = serverCertificate.GetCertHashString(HashAlgorithmName.SHA256);
+    // Write to disk - Windows SChannel requires persistent key storage for TLS 1.3
+    var tempPfxPath = Path.Combine(certDir, $"percolator_tls_cert_{Guid.NewGuid()}.pfx");
+    var pfxBytes = ephemeralCert.Export(X509ContentType.Pfx, "password");
+    File.WriteAllBytes(tempPfxPath, pfxBytes);
+    var loadedCert = X509CertificateLoader.LoadPkcs12FromFile(tempPfxPath, "password", X509KeyStorageFlags.Exportable | X509KeyStorageFlags.PersistKeySet);
 
-Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [CERT] Ephemeral Certificate ready. TLS Cert Hash: {serverCertHash}");
-
-// ============================================================================
-// TOFU CERTIFICATE VALIDATION (Targeting Identity Key)
-// ============================================================================
-
-bool ValidateTofuCertificate(object sender, X509Certificate? certificate, X509Chain? chain, SslPolicyErrors sslPolicyErrors)
-{
-    if (certificate == null)
-    {
-        Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [CLIENT] [TOFU] CRITICAL: No certificate received!");
-        return false;
-    }
-
-    var cert2 = new X509Certificate2(certificate);
-    
-    // 1. Extract Identity Key from Custom OID
-    var identityExtension = cert2.Extensions[Oids.PeerIdentityKey];
-    if (identityExtension == null)
-    {
-        Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [CLIENT] [TOFU] CRITICAL: Certificate missing PeerIdentityKey OID!");
-        return false;
-    }
-
-    // Decode ASN.1 Octet String back to raw SPKI
-    var asnReader = new System.Formats.Asn1.AsnReader(identityExtension.RawData, System.Formats.Asn1.AsnEncodingRules.DER);
-    var extractedSpki = asnReader.ReadOctetString();
-    
-    // 2. Mathematically Verify Binding
-    // Ensure the TLS certificate was actually signed by the extracted SPKI
-    var expectedSpkiFromCert = cert2.PublicKey.ExportSubjectPublicKeyInfo();
-    if (!extractedSpki.SequenceEqual(expectedSpkiFromCert))
-    {
-        Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [CLIENT] [TOFU] CRITICAL: Embedded SPKI does not match TLS Certificate Public Key!");
-        return false;
-    }
-    
-    // 3. Perform TOFU on Identity Key Hash
-    var extractedIdentityHash = Convert.ToHexString(SHA256.HashData(extractedSpki));
-    Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [CLIENT] [TOFU] Extraction Successful. Target Identity Hash: {extractedIdentityHash}");
-
-    var trustFile = $"trusted_identity_{targetPort}.txt"; // Simulating PeerId repository lookup
-    
-    if (!File.Exists(trustFile))
-    {
-        Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [CLIENT] [TOFU] WARNING: FIRST USE - TRUSTING NEW IDENTITY KEY");
-        File.WriteAllText(trustFile, extractedIdentityHash);
-        return true;
-    }
-    
-    var storedHash = File.ReadAllText(trustFile).Trim();
-    if (storedHash.Equals(extractedIdentityHash, StringComparison.OrdinalIgnoreCase))
-    {
-        Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [CLIENT] [TOFU] Identity Hash Matches! Connection ALLOWED.");
-        return true;
-    }
-    else
-    {
-        Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [CLIENT] [TOFU] CRITICAL: IDENTITY KEY HASH MISMATCH!");
-        return false;
-    }
+    certFiles.Add(tempPfxPath);
+    Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [CERT] Certificate written to disk: {tempPfxPath}");
+    Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [CERT] Certificate loaded. Subject: {loadedCert.Subject}, HasPrivateKey: {loadedCert.HasPrivateKey}");
+    return loadedCert;
 }
 
 // ============================================================================
@@ -154,7 +96,7 @@ await Task.Delay(2000);
 
 // Simulate "Identity Selected -> BootstrapAsync()"
 Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [INIT] User logged in. Generating Identity & Certificate...");
-var dynamicServerCertificate = GenerateEphemeralCertificate();
+var dynamicServerCertificate = GenerateEphemeralCertificate(identitySigningKey);
 var dynamicServerCertHash = dynamicServerCertificate.GetCertHashString(HashAlgorithmName.SHA256);
 Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [CERT] Ephemeral Certificate ready. TLS Cert Hash: {dynamicServerCertHash}");
 
@@ -182,62 +124,113 @@ try
     {
         SslOptions =
         {
-            RemoteCertificateValidationCallback = ValidateTofuCertificate
+            // Enable TLS 1.3 for privacy (certificate payload encryption)
+            EnabledSslProtocols = System.Security.Authentication.SslProtocols.Tls13,
+            // Blind Trust: X3DH handles actual security. Accept any TLS certificate.
+            RemoteCertificateValidationCallback = (_, _, _, _) => true
         }
     };
-    
+
+    Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [CLIENT] Creating gRPC channel to https://localhost:{targetPort}...");
     var channel = GrpcChannel.ForAddress($"https://localhost:{targetPort}", new GrpcChannelOptions
     {
         HttpHandler = httpHandler
     });
-    
+
     var client = new PingPongService.PingPongServiceClient(channel);
-    
+
     for (int i = 1; i <= 3; i++)
     {
         try
         {
+            Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [CLIENT] Sending ping #{i}...");
             var response = await client.SendPingAsync(new PingRequest { Counter = i, SenderName = $"Client on {listenPort}" });
             Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [CLIENT] Pong received: {response.Message} (Counter: {response.Counter})");
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [CLIENT] Exception: {ex.Message}");
+            Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [CLIENT] Exception on ping #{i}: {ex}");
         }
         await Task.Delay(1000);
     }
     await channel.ShutdownAsync();
+    Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [CLIENT] Channel shut down successfully.");
 }
 catch (Exception ex)
 {
-    Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [CLIENT] FATAL: {ex.Message}");
+    Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [CLIENT] FATAL: {ex}");
+    Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [CLIENT] FATAL Stack: {ex.StackTrace}");
 }
 
 // ============================================================================
 // SHUTDOWN
 // ============================================================================
 
+// Wait 5 seconds before stopping server in case the other client started late
+Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [INIT] Waiting 5 seconds before shutdown...");
+await Task.Delay(5000);
+
 await serverManager.StopAsync();
+
+// Dispose certificate to release file lock before cleanup
+dynamicServerCertificate.Dispose();
+
+// Cleanup cert files if requested
+if (cleanupCertFiles)
+{
+    Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [CLEANUP] Deleting {certFiles.Count} certificate file(s)...");
+    foreach (var certFile in certFiles)
+    {
+        try
+        {
+            if (File.Exists(certFile))
+            {
+                File.Delete(certFile);
+                Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [CLEANUP] Deleted: {certFile}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [CLEANUP] Failed to delete {certFile}: {ex.Message}");
+        }
+    }
+    
+    // Try to remove the directory if it's empty
+    try
+    {
+        if (Directory.Exists(certDir) && !Directory.EnumerateFileSystemEntries(certDir).Any())
+        {
+            Directory.Delete(certDir);
+            Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [CLEANUP] Removed empty directory: {certDir}");
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [CLEANUP] Failed to remove directory {certDir}: {ex.Message}");
+    }
+}
+else
+{
+    Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [CLEANUP] Skipping cleanup (CleanupCertFiles=false). Cert files remain in: {certDir}");
+}
+
 Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [INIT] Application shut down successfully.");
 
 
-public class PingPongServiceImpl : PingPongService.PingPongServiceBase
+public class PingPongServiceImpl(int listenPort) : PingPongService.PingPongServiceBase
 {
-    private readonly int _listenPort;
-    public PingPongServiceImpl(int listenPort) => _listenPort = listenPort;
-    
     public override Task<PongResponse> SendPing(PingRequest request, ServerCallContext context)
     {
         Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [SERVER] Ping received from '{request.SenderName}', sending Pong");
-        return Task.FromResult(new PongResponse { Counter = request.Counter, Message = $"Pong from server on {_listenPort}" });
+        return Task.FromResult(new PongResponse { Counter = request.Counter, Message = $"Pong from server on {listenPort}" });
     }
 }
 
 // NOTE: Simulate the shared library constant for testing
 public static class Oids
 {
-    public const string PeerIdentityKey = "1.3.6.1.4.1.58824.1.1";
     public const string ServerAuthentication = "1.3.6.1.5.5.7.3.1";
+    // PeerIdentityKey OID no longer needed - Identity Key is the TLS public key
 }
 
 public class GrpcServerManager
@@ -251,22 +244,40 @@ public class GrpcServerManager
 
         builder.WebHost.ConfigureKestrel(options =>
         {
-            options.ListenAnyIP(port, listenOptions =>
+            Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [MANAGER] Configuring Kestrel to listen on localhost port {port}...");
+            options.ListenLocalhost(port, listenOptions =>
             {
                 listenOptions.Protocols = HttpProtocols.Http2;
-                listenOptions.UseHttps(cert);
-                Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [SERVER] Kestrel configured for HTTP/2 + HTTPS on port {port}");
+                // Use our custom ECDSA certificate with TLS 1.3
+                listenOptions.UseHttps(cert, httpsOptions =>
+                {
+                    httpsOptions.SslProtocols = System.Security.Authentication.SslProtocols.Tls13;
+                });
+                Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [SERVER] Kestrel configured for HTTP/2 + TLS 1.3 (ECDSA CERT) on localhost:{port}");
             });
+
+            // Log connection events
+            options.Limits.KeepAliveTimeout = TimeSpan.FromMinutes(2);
         });
 
         builder.Services.AddGrpc();
-        builder.Services.AddSingleton<PingPongServiceImpl>(sp => new PingPongServiceImpl(port));
+        builder.Services.AddSingleton<PingPongServiceImpl>(_ => new PingPongServiceImpl(port));
 
         _app = builder.Build();
         _app.MapGrpcService<PingPongServiceImpl>();
 
-        await _app.StartAsync();
-        Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [MANAGER] gRPC Server started successfully in the background.");
+        Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [MANAGER] Starting gRPC server on port {port}...");
+        try
+        {
+            await _app.StartAsync();
+            Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [MANAGER] gRPC Server started successfully. Listening on https://localhost:{port}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [MANAGER] FATAL: Failed to start gRPC server: {ex.Message}");
+            Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [MANAGER] FATAL Stack: {ex.StackTrace}");
+            throw;
+        }
     }
 
     public async Task StopAsync()
