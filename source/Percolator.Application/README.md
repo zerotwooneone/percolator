@@ -12,13 +12,13 @@ This project is the **Application Layer** of the Percolator system. It is respon
 
 This application layer is a hardened security boundary designed to protect the underlying domain logic. It implements several key security controls:
 
-- **Secure Session Establishment**: The primary network entry point, `PercolatorMessageService`, enforces a strict security model for session creation. It generates a new, random, and unique `PeerId` for every incoming session request, preventing session collision and hijacking attacks where a malicious client could attempt to control its identifier.
+- **Secure Session Establishment**: Session establishment is coordinated through application services that enforce a strict security model for session creation. The system generates a new, random, and unique `PeerId` for every incoming session request, preventing session collision and hijacking attacks where a malicious client could attempt to control its identifier.
 - **Resilience to Race Conditions**: The `DirectSessionManager` implements a per-conversation locking mechanism (`SemaphoreSlim`) to serialize message processing. This prevents race conditions where concurrent messages could corrupt the Double Ratchet state, ensuring session integrity and preventing denial-of-service attacks.
 - **Input Validation**: All incoming requests are rigorously validated before being passed to domain services. This includes enforcing rate limits to protect against resource exhaustion attacks.
 
 ## Key Responsibilities
 
-1.  **gRPC Service Implementation**: This project contains `PercolatorMessageService`, the implementation of the public-facing gRPC transport service. It serves as the primary entry point for all remote communication. It is responsible for receiving requests, orchestrating the X3DH handshake via `X3DHOrchestrator`, and establishing secure sessions with `DirectSessionManager`.
+1.  **Use Case Orchestration**: This project contains application services that orchestrate domain models to execute use cases such as session establishment, message routing, and peer discovery. These services coordinate the X3DH handshake, establish secure sessions, and manage message processing.
 
 2.  **Session and Message Management**: It manages the lifecycle of cryptographic sessions (`DirectSessionManager`) and handles the routing and processing of decrypted messages.
 
@@ -75,4 +75,3 @@ This clear separation ensures that local application logic (managing a contact l
 
 *   **`CredentialService`**: (Note: This service is located in the `Percolator.Identity` project). It manages the secure storage and retrieval of the user's cryptographic identity, using Windows DPAPI with additional entropy for protection.
 *   **`DirectSessionManager`**: Manages the lifecycle of direct peer-to-peer conversations. It uses `SemaphoreSlim` to enforce per-conversation locking, preventing race conditions during message processing.
-*   **`PeerConnectionManager`**: Manages gRPC connections to other peers.
