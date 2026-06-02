@@ -144,31 +144,22 @@ bool ValidateTofuCertificate(object sender, X509Certificate? certificate, X509Ch
 }
 
 // ============================================================================
-// SERVER STARTUP
+// SERVER STARTUP (Delayed On-Demand Host Pattern)
 // ============================================================================
 
-Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [SERVER] Starting gRPC server on port {listenPort}...");
+// Simulate "App Startup" without the server
+var serverManager = new GrpcServerManager();
+Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [INIT] App running. Waiting 2 seconds before 'User Logs In'...");
+await Task.Delay(2000);
 
-var builder = WebApplication.CreateBuilder(args);
+// Simulate "Identity Selected -> BootstrapAsync()"
+Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [INIT] User logged in. Generating Identity & Certificate...");
+var dynamicServerCertificate = GenerateEphemeralCertificate();
+var dynamicServerCertHash = dynamicServerCertificate.GetCertHashString(HashAlgorithmName.SHA256);
+Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [CERT] Ephemeral Certificate ready. TLS Cert Hash: {dynamicServerCertHash}");
 
-builder.WebHost.ConfigureKestrel(options =>
-{
-    options.ListenAnyIP(listenPort, listenOptions =>
-    {
-        listenOptions.Protocols = HttpProtocols.Http2;
-        listenOptions.UseHttps(serverCertificate);
-        Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [SERVER] Kestrel configured for HTTP/2 + HTTPS on port {listenPort}");
-    });
-});
-
-builder.Services.AddGrpc();
-builder.Services.AddSingleton<PingPongServiceImpl>(sp => new PingPongServiceImpl(listenPort));
-
-var app = builder.Build();
-app.MapGrpcService<PingPongServiceImpl>();
-
-var serverTask = Task.Run(async () => await app.RunAsync());
-await Task.Delay(1000);
+// Start the server on-demand
+await serverManager.StartAsync(listenPort, dynamicServerCertificate);
 
 // ============================================================================
 // RANDOM DELAY TO PREVENT RACING
@@ -222,8 +213,13 @@ catch (Exception ex)
     Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [CLIENT] FATAL: {ex.Message}");
 }
 
-// Keep server running
-await Task.Delay(Timeout.Infinite);
+// ============================================================================
+// SHUTDOWN
+// ============================================================================
+
+await serverManager.StopAsync();
+Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [INIT] Application shut down successfully.");
+
 
 public class PingPongServiceImpl : PingPongService.PingPongServiceBase
 {
@@ -242,4 +238,44 @@ public static class Oids
 {
     public const string PeerIdentityKey = "1.3.6.1.4.1.58824.1.1";
     public const string ServerAuthentication = "1.3.6.1.5.5.7.3.1";
+}
+
+public class GrpcServerManager
+{
+    private WebApplication? _app;
+
+    public async Task StartAsync(int port, X509Certificate2 cert)
+    {
+        Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [MANAGER] Dynamically building gRPC WebApplication for port {port}...");
+        var builder = WebApplication.CreateBuilder();
+
+        builder.WebHost.ConfigureKestrel(options =>
+        {
+            options.ListenAnyIP(port, listenOptions =>
+            {
+                listenOptions.Protocols = HttpProtocols.Http2;
+                listenOptions.UseHttps(cert);
+                Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [SERVER] Kestrel configured for HTTP/2 + HTTPS on port {port}");
+            });
+        });
+
+        builder.Services.AddGrpc();
+        builder.Services.AddSingleton<PingPongServiceImpl>(sp => new PingPongServiceImpl(port));
+
+        _app = builder.Build();
+        _app.MapGrpcService<PingPongServiceImpl>();
+
+        await _app.StartAsync();
+        Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [MANAGER] gRPC Server started successfully in the background.");
+    }
+
+    public async Task StopAsync()
+    {
+        if (_app != null)
+        {
+            Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [MANAGER] Stopping gRPC Server...");
+            await _app.StopAsync();
+            await _app.DisposeAsync();
+        }
+    }
 }
