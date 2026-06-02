@@ -48,14 +48,6 @@ public static class ServiceCollectionExtensions
 
         services.AddScoped<IMainReverseSignalInviteFactory, MainReverseSignalInviteFactory>();
 
-        // Register the hosted service that runs the discovery (can be disabled in tests)
-        var discoveryEnabled = configuration.GetValue<bool>("PeerDiscovery:Enabled", true);
-        if (discoveryEnabled)
-        {
-            services.AddHostedService<PeerDiscoveryHostedService>();
-        }
-
-        services.AddScoped<PercolatorMessageService>();
         services.AddSingleton<IPeerDiscoveryHandler, PeerDiscoveryHandler>();
 
         // Relay orchestrator for queued messages ACK flow

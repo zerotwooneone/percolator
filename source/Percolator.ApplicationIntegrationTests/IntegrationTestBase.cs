@@ -186,7 +186,7 @@ public abstract class IntegrationTestBase
                     
                     // Map the PercolatorMessageService to the gRPC endpoint
                     app.UseEndpoints(endpoints => {
-                        endpoints.MapGrpcService<PercolatorMessageService>();
+                        endpoints.MapGrpcService<Percolator.Infrastructure.Network.Grpc.PercolatorMessageService>();
                     });
                 });
             });

@@ -159,14 +159,14 @@ namespace Percolator.Node
                         
                         // Register the main service instances to ensure we use the same instances
                         _logger.LogInformation("Registering shared service instances from main application");
-                        services.AddSingleton<PercolatorMessageService>(s=>mainServiceProvider.GetRequiredService<PercolatorMessageService>());
+                        services.AddSingleton<Percolator.Infrastructure.Network.Grpc.PercolatorMessageService>(s=>mainServiceProvider.GetRequiredService<Percolator.Infrastructure.Network.Grpc.PercolatorMessageService>());
                     })
                     .Configure(app =>
                     {
                         app.UseRouting();
                         app.UseEndpoints(endpoints =>
                         {
-                            endpoints.MapGrpcService<Percolator.Application.Network.PercolatorMessageService>();
+                            endpoints.MapGrpcService<Percolator.Infrastructure.Network.Grpc.PercolatorMessageService>();
                             _logger.LogInformation("Mapped gRPC service: PercolatorMessageService at path /Percolator.Contracts.TransportService/*");
                             
                             // Log endpoint mapping info for debugging

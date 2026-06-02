@@ -84,9 +84,9 @@ public partial class App : Application
                 {
                     services.AddGrpc(options =>
                     {
-                        options.Interceptors.Add<IdentityReadinessInterceptor>();
+                        options.Interceptors.Add<Percolator.Infrastructure.Network.Grpc.IdentityReadinessInterceptor>();
                     });
-                    services.AddSingleton<IdentityReadinessInterceptor>();
+                    services.AddSingleton<Percolator.Infrastructure.Network.Grpc.IdentityReadinessInterceptor>();
                 });
 
                 webBuilder.Configure(app =>
@@ -94,7 +94,7 @@ public partial class App : Application
                     app.UseRouting();
                     app.UseEndpoints(endpoints =>
                     {
-                        endpoints.MapGrpcService<PercolatorMessageService>();
+                        endpoints.MapGrpcService<Percolator.Infrastructure.Network.Grpc.PercolatorMessageService>();
                     });
                 });
             })

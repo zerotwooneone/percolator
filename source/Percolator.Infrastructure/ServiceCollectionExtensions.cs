@@ -59,6 +59,17 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ISessionEstablishmentTransport, GrpcSessionService>();
         services.AddScoped<IMessageTransportService, GrpcMessageTransportService>();
 
+        // gRPC Server Services
+        services.AddScoped<Percolator.Infrastructure.Network.Grpc.PercolatorMessageService>();
+        services.AddSingleton<Percolator.Infrastructure.Network.Grpc.IdentityReadinessInterceptor>();
+
+        // Peer Discovery Hosted Service (conditional on configuration)
+        var discoveryEnabled = configuration.GetValue<bool>("PeerDiscovery:Enabled", true);
+        if (discoveryEnabled)
+        {
+            services.AddHostedService<Percolator.Infrastructure.Network.PeerDiscoveryHostedService>();
+        }
+
         // Register a named HttpClient with simplified TLS validation logic using shared certificate
         services.AddHttpClient("percolator-grpc", (serviceProvider, client) =>
             {

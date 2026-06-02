@@ -19,7 +19,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
     private readonly ISimulatorDiagnosticsService _diagnostics;
     private readonly Percolator.Application.Network.IMainReverseSignalInviteFactory _inviteFactory;
     private readonly Percolator.Application.Network.IAdvertisedHostLookup _advertisedHostLookup;
-    private readonly Percolator.Application.Network.PercolatorMessageService _messageService;
+    private readonly Percolator.Infrastructure.Network.Grpc.PercolatorMessageService _messageService;
     private readonly ISimulatorToMainTransportService _toMain;
     private readonly IOptions<TransportOptions> _transportOptions;
     private readonly Percolator.Application.Identity.ActiveIdentityContext _active;
@@ -36,7 +36,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         ISimulatorDiagnosticsService diagnostics,
         Percolator.Application.Network.IMainReverseSignalInviteFactory inviteFactory,
         Percolator.Application.Network.IAdvertisedHostLookup advertisedHostLookup,
-        Percolator.Application.Network.PercolatorMessageService messageService,
+        Percolator.Infrastructure.Network.Grpc.PercolatorMessageService messageService,
         IOptions<TransportOptions> transportOptions,
         Percolator.Application.Identity.ActiveIdentityContext active,
         Func<Percolator.Network.PeerId?> getSelectedRelayPeerId)

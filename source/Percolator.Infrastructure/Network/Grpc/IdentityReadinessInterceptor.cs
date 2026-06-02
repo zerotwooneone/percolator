@@ -2,7 +2,7 @@ using Grpc.Core;
 using Grpc.Core.Interceptors;
 using Percolator.Application.Identity;
 
-namespace Percolator.Application.Network;
+namespace Percolator.Infrastructure.Network.Grpc;
 
 public sealed class IdentityReadinessInterceptor : Interceptor
 {

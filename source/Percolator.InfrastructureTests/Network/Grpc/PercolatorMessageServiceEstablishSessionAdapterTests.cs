@@ -2,12 +2,12 @@ using Grpc.Core;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Percolator.Application.Identity;
-using Percolator.Application.Network;
 using Percolator.Contracts;
 using Percolator.Cryptography.Primitives;
 using Percolator.Identity;
+using Percolator.Infrastructure.Network.Grpc;
 
-namespace Percolator.ApplicationTests.Network;
+namespace Percolator.InfrastructureTests.Network.Grpc;
 
 [TestFixture]
 public sealed class PercolatorMessageServiceEstablishSessionAdapterTests
@@ -17,8 +17,8 @@ public sealed class PercolatorMessageServiceEstablishSessionAdapterTests
     {
         var logger = Mock.Of<ILogger<PercolatorMessageService>>();
         var ingress = Mock.Of<Percolator.Application.Ingress.IMessageIngress>();
-        var establish = new Mock<IEstablishDirectSessionService>(MockBehavior.Loose);
-        var inviteIngress = Mock.Of<IInviteHandshakeResponseIngress>();
+        var establish = new Mock<Percolator.Application.Network.IEstablishDirectSessionService>(MockBehavior.Loose);
+        var inviteIngress = Mock.Of<Percolator.Application.Network.IInviteHandshakeResponseIngress>();
 
         var expected = new EstablishSessionResponse
         {
@@ -26,7 +26,7 @@ public sealed class PercolatorMessageServiceEstablishSessionAdapterTests
             Never = new EstablishSessionResponse.Types.Never { Version = 1 }
         };
 
-        var standardIngress = new Mock<IStandardHandshakeIngress>(MockBehavior.Strict);
+        var standardIngress = new Mock<Percolator.Application.Network.IStandardHandshakeIngress>(MockBehavior.Strict);
         var request = new EstablishSessionRequest { Version = 1 };
         standardIngress
             .Setup(s => s.HandleAsync(It.IsAny<SelfId>(), request, It.IsAny<CancellationToken>()))

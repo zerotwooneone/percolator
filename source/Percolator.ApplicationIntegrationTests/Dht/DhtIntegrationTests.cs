@@ -99,7 +99,7 @@ public class DhtIntegrationTests : IntegrationTestBase
                 cfg.RegisterServicesFromAssembly(typeof(Percolator.Dht.Messages.PingRequest).Assembly));
         });
 
-        var messageService = host.Services.GetRequiredService<PercolatorMessageService>();
+        var messageService = host.Services.GetRequiredService<Percolator.Infrastructure.Network.Grpc.PercolatorMessageService>();
 
         var remotePeerId = new Percolator.Identity.PeerId(Guid.NewGuid());
 
@@ -243,7 +243,7 @@ public class DhtIntegrationTests : IntegrationTestBase
         };
 
         // Resolve service and Act
-        var messageService = host.Services.GetRequiredService<PercolatorMessageService>();
+        var messageService = host.Services.GetRequiredService<Percolator.Infrastructure.Network.Grpc.PercolatorMessageService>();
         var response = await messageService.DeliverOpaqueMessage(request, new TestServerCallContext());
 
         // Assert

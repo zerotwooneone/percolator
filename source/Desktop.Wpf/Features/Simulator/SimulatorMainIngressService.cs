@@ -30,7 +30,7 @@ public sealed class SimulatorToMainTransportService : ISimulatorToMainTransportS
         _ = request.CalculateSize();
 
         using var scope = _scopeFactory.CreateScope();
-        var messageService = scope.ServiceProvider.GetRequiredService<PercolatorMessageService>();
+        var messageService = scope.ServiceProvider.GetRequiredService<Percolator.Infrastructure.Network.Grpc.PercolatorMessageService>();
         await messageService.EstablishDirectSession(request, ctx).ConfigureAwait(false);
     }
 
@@ -50,7 +50,7 @@ public sealed class SimulatorToMainTransportService : ISimulatorToMainTransportS
         _ = request.CalculateSize();
 
         using var scope = _scopeFactory.CreateScope();
-        var messageService = scope.ServiceProvider.GetRequiredService<PercolatorMessageService>();
+        var messageService = scope.ServiceProvider.GetRequiredService<Percolator.Infrastructure.Network.Grpc.PercolatorMessageService>();
         return await messageService.EstablishSession(request, ctx).ConfigureAwait(false);
     }
 
@@ -70,7 +70,7 @@ public sealed class SimulatorToMainTransportService : ISimulatorToMainTransportS
         _ = request.CalculateSize();
 
         using var scope = _scopeFactory.CreateScope();
-        var messageService = scope.ServiceProvider.GetRequiredService<PercolatorMessageService>();
+        var messageService = scope.ServiceProvider.GetRequiredService<Percolator.Infrastructure.Network.Grpc.PercolatorMessageService>();
         return await messageService.DeliverOpaqueMessage(request, ctx).ConfigureAwait(false);
     }
 
@@ -88,7 +88,7 @@ public sealed class SimulatorToMainTransportService : ISimulatorToMainTransportS
             cancellationToken: cancellationToken);
 
         using var scope = _scopeFactory.CreateScope();
-        var messageService = scope.ServiceProvider.GetRequiredService<PercolatorMessageService>();
+        var messageService = scope.ServiceProvider.GetRequiredService<Percolator.Infrastructure.Network.Grpc.PercolatorMessageService>();
         return await messageService.DeliverInviteHandshakeResponse(response, ctx).ConfigureAwait(false);
     }
 

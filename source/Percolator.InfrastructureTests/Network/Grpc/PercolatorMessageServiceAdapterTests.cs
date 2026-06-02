@@ -3,12 +3,12 @@ using Grpc.Core;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Percolator.Application.Ingress;
-using Percolator.Application.Network;
 using Percolator.Contracts;
 using Percolator.Cryptography.Primitives;
 using Percolator.Identity;
+using Percolator.Infrastructure.Network.Grpc;
 
-namespace Percolator.ApplicationTests.Network;
+namespace Percolator.InfrastructureTests.Network.Grpc;
 
 [TestFixture]
 public class PercolatorMessageServiceAdapterTests
@@ -24,9 +24,9 @@ public class PercolatorMessageServiceAdapterTests
             .ReturnsAsync(new IngressResult(IngressDisposition.Accepted, new byte[] { 0xAA, 0xBB }));
 
         var logger = Mock.Of<ILogger<PercolatorMessageService>>();
-        var establish = Mock.Of<IEstablishDirectSessionService>();
-        var inviteIngress = Mock.Of<IInviteHandshakeResponseIngress>();
-        var standardIngress = Mock.Of<IStandardHandshakeIngress>();
+        var establish = Mock.Of<Percolator.Application.Network.IEstablishDirectSessionService>();
+        var inviteIngress = Mock.Of<Percolator.Application.Network.IInviteHandshakeResponseIngress>();
+        var standardIngress = Mock.Of<Percolator.Application.Network.IStandardHandshakeIngress>();
 
         var active = new Percolator.Application.Identity.ActiveIdentityContext
         {
@@ -70,7 +70,7 @@ public class PercolatorMessageServiceAdapterTests
             .ReturnsAsync(new IngressResult(IngressDisposition.Rejected_NotReady));
 
         var logger = Mock.Of<ILogger<PercolatorMessageService>>();
-        var establish = new Mock<IEstablishDirectSessionService>();
+        var establish = new Mock<Percolator.Application.Network.IEstablishDirectSessionService>();
         establish.Setup(e => e.QueueInviteAsync(
                 It.IsAny<SelfId>(),
                 It.IsAny<byte[]>(),
@@ -80,8 +80,8 @@ public class PercolatorMessageServiceAdapterTests
                 It.IsAny<Percolator.Identity.PeerId?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new RequestCorrelationId(Guid.NewGuid()));
-        var inviteIngress = Mock.Of<IInviteHandshakeResponseIngress>();
-        var standardIngress = Mock.Of<IStandardHandshakeIngress>();
+        var inviteIngress = Mock.Of<Percolator.Application.Network.IInviteHandshakeResponseIngress>();
+        var standardIngress = Mock.Of<Percolator.Application.Network.IStandardHandshakeIngress>();
 
         var active = new Percolator.Application.Identity.ActiveIdentityContext
         {

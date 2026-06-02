@@ -1,9 +1,9 @@
 using Grpc.Core;
 using Moq;
 using Percolator.Application.Identity;
-using Percolator.Application.Network;
+using Percolator.Infrastructure.Network.Grpc;
 
-namespace Percolator.ApplicationTests.Network;
+namespace Percolator.InfrastructureTests.Network.Grpc;
 
 [TestFixture]
 public class IdentityReadinessInterceptorTests
