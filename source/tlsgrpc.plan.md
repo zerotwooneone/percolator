@@ -938,35 +938,11 @@ public static IServiceCollection AddNetworkInfrastructure(this IServiceCollectio
 
 **Test Code Callsites:**
 
-1. **Percolator.ApplicationTests\Cli\RequestPreKeyBundleByPkhHandlerTests.cs**
-   - Mocks `ISessionEstablishmentTransport`
-   - **Action Required:** Update mock setups to include CancellationToken parameters in method signatures
-
-2. **Percolator.ApplicationIntegrationTests\TestDoubles\SingleHostGrpcSessionLoopback.cs**
-   - Test double implementing `ISessionEstablishmentTransport`
-   - **Action Required:** Update method signatures to include CancellationToken parameters
-
-**Separate Console App (Out of Scope):**
-
 5. **Percolator.Node\**
     - Console application using legacy `SharedCertificateManager` and `Tls` namespace
     - **Action:** Separate project - requires its own migration plan (see TODO #101)
 
 
-### Test Priority
-
-**High Priority (Required for Part 7 completion):**
-1. Update `SimulatorOutboundInterceptionTests.cs` to include CancellationToken in mock setup
-2. Update `RequestPreKeyBundleByPkhHandlerTests.cs` to include CancellationToken in mock setup
-3. Update `SingleHostGrpcSessionLoopback.cs` to include CancellationToken in method signatures
-
-**Medium Priority (Recommended for coverage):**
-1. Add `ListeningPortTests` for value type validation
-2. Add `GrpcSessionServiceTests` for cancellation behavior
-
-**Low Priority (Nice to have):**
-1. Update test files for ListeningPort constructor calls (SelfIdentityTests, ShellViewModelTests, StartupIdentityServiceTests)
-2. Update or remove PeerRoutingProfileTests for certificate removal
 
 ### Notes
 
