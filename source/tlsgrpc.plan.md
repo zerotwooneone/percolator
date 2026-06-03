@@ -54,7 +54,7 @@ public interface ITransportCertificateProvider
 10. Implement age-based rotation (default 90 days, configurable)
 11. No database writes for certificate lifecycle - purely file-based
 
-### C. Network Environment (`Percolator.Infrastructure`)
+### C. Network Environment (`Percolator.Application`)
 Provides network-related utilities for the Application layer.
 
 ```csharp
@@ -71,6 +71,8 @@ public interface INetworkEnvironment
    - Check TCP port availability via `System.Net.NetworkInformation.IPGlobalProperties.GetActiveTcpListeners()`
    - Check against existing identity port assignments in the database
 3. Return the first available port
+
+**Note:** Interface is defined in `Percolator.Application.Network` to avoid layering violations, implemented in `Percolator.Infrastructure.Network`.
 
 *Application Layer (`Percolator.Application`):*
 In the `CreateSelfIdentityCommandHandler`:
@@ -140,9 +142,9 @@ In `Desktop.Wpf`, Kestrel was previously attached globally to the application's 
 ```csharp
 public interface IGrpcServerManager
 {
-    Task<ServerStartResult> StartAsync(ActiveIdentityContext identityContext, CancellationToken ct);
+    Task<ServerStartResult> StartAsync(SelfIdentity identity, CancellationToken ct);
     Task StopAsync(CancellationToken ct);
-    Task RestartAsync(ActiveIdentityContext identityContext, CancellationToken ct);
+    Task RestartAsync(SelfIdentity identity, CancellationToken ct);
 }
 
 public class ServerStartResult
@@ -150,19 +152,21 @@ public class ServerStartResult
     public bool Success { get; }
     public string? ErrorMessage { get; }
     public bool IsPortConflict { get; }
-    
+
     public static ServerStartResult Succeeded() => new() { Success = true };
-    public static ServerStartResult Failed(string error, bool isPortConflict = false) 
+    public static ServerStartResult Failed(string error, bool isPortConflict = false)
         => new() { Success = false, ErrorMessage = error, IsPortConflict = isPortConflict };
 }
 ```
+
+**Note:** Changed to accept `SelfIdentity` domain model instead of `ActiveIdentityContext` to avoid layering violations.
 3. **Domain Event (`Percolator.Identity.DomainEvents`):**
 ```csharp
-// Pure domain event - no MediatR dependency
+// Pure domain event - no MediatR dependency, carries only domain primitive
 public class ActiveIdentityLoadedEvent : IDomainEvent
 {
-    public ActiveIdentityContext IdentityContext { get; }
-    public ActiveIdentityLoadedEvent(ActiveIdentityContext identityContext) => IdentityContext = identityContext;
+    public SelfId IdentityId { get; }
+    public ActiveIdentityLoadedEvent(SelfId identityId) => IdentityId = identityId;
 }
 ```
 
@@ -176,7 +180,7 @@ public class DomainEventNotification<TDomainEvent> : INotification where TDomain
 ```
 4. **Domain Event Handler (`Percolator.Infrastructure.Network`):**
 ```csharp
-public class ActiveIdentityLoadedEventHandler 
+public class ActiveIdentityLoadedEventHandler
     : INotificationHandler<DomainEventNotification<ActiveIdentityLoadedEvent>>
 {
     private readonly IGrpcServerManager _grpcServerManager;
@@ -201,49 +205,60 @@ public class ActiveIdentityLoadedEventHandler
 
     public async Task Handle(DomainEventNotification<ActiveIdentityLoadedEvent> notification, CancellationToken ct)
     {
-        var context = notification.DomainEvent.IdentityContext;
-        
+        var identityId = notification.DomainEvent.IdentityId;
+
+        // Resolve the full identity from repository
+        var identity = await _identityRepository.GetByIdAsync(identityId, ct);
+        if (identity is null)
+        {
+            _logger.LogError("Identity {IdentityId} not found", identityId.Value);
+            return;
+        }
+
         // Stop existing server if running
         await _grpcServerManager.StopAsync(ct);
-        
-        var result = await _grpcServerManager.StartAsync(context, ct);
-        
+
+        var result = await _grpcServerManager.StartAsync(identity, ct);
+
         if (!result.Success && result.IsPortConflict)
         {
-            await _networkService.ResolvePortContentionAsync(context.Identity.Id, ct);
-            
-            // Create new context with updated identity (immutable event payload)
-            var updatedIdentity = await _identityRepository.GetByIdAsync(context.Identity.Id);
-            var updatedContext = new ActiveIdentityContext(updatedIdentity);
-            
-            result = await _grpcServerManager.StartAsync(updatedContext, ct);
-            
+            await _networkService.ResolvePortContentionAsync(identityId, ct);
+
+            // Reload identity with updated port
+            var updatedIdentity = await _identityRepository.GetByIdAsync(identityId, ct);
+
+            result = await _grpcServerManager.StartAsync(updatedIdentity, ct);
+
             if (!result.Success)
             {
                 _logger.LogError(result.ErrorMessage, "Failed to start gRPC server after port reassignment");
-                
+
                 // Escalate fatal infrastructure failure to Application/Presentation layer
-                await _publisher.Publish(new NodeOfflineNotification(context.Identity.Id, result.ErrorMessage), ct);
+                await _publisher.Publish(new NodeOfflineNotification(identityId, result.ErrorMessage), ct);
             }
         }
     }
 }
 ```
 
+**Note:** Handler no longer creates `ActiveIdentityContext` - passes `SelfIdentity` directly to `IGrpcServerManager` to avoid layering violations.
+
 5. **Node Offline Notification (`Percolator.Application`):**
 ```csharp
 // Infrastructure failure notification - not a domain event
 public class NodeOfflineNotification : INotification
 {
-    public Guid IdentityId { get; }
+    public SelfId IdentityId { get; }
     public string Reason { get; }
-    public NodeOfflineNotification(Guid identityId, string reason)
+    public NodeOfflineNotification(SelfId identityId, string reason)
     {
         IdentityId = identityId;
         Reason = reason;
     }
 }
 ```
+
+**Note:** Changed to use `SelfId` domain type instead of `Guid` for consistency with domain primitives.
 
 6. **Shutdown Hosted Service (`Percolator.Infrastructure.Network`):**
 ```csharp
@@ -269,14 +284,14 @@ public class GrpcShutdownHostedService : IHostedService
 ```csharp
 public interface IIdentityNetworkService
 {
-    Task ResolvePortContentionAsync(Guid identityId, CancellationToken ct);
+    Task ResolvePortContentionAsync(SelfId identityId, CancellationToken ct);
 }
 
 public class IdentityNetworkService : IIdentityNetworkService
 {
     private readonly INetworkEnvironment _networkEnvironment;
     private readonly ISelfIdentityRepository _identityRepository;
-    
+
     public IdentityNetworkService(
         INetworkEnvironment networkEnvironment,
         ISelfIdentityRepository identityRepository)
@@ -284,16 +299,22 @@ public class IdentityNetworkService : IIdentityNetworkService
         _networkEnvironment = networkEnvironment;
         _identityRepository = identityRepository;
     }
-    
-    public async Task ResolvePortContentionAsync(Guid identityId, CancellationToken ct)
+
+    public async Task ResolvePortContentionAsync(SelfId identityId, CancellationToken ct)
     {
-        var identity = await _identityRepository.GetByIdAsync(identityId);
+        var identity = await _identityRepository.GetByIdAsync(identityId, ct);
+        if (identity is null)
+        {
+            throw new InvalidOperationException($"Identity {identityId.Value} not found");
+        }
         var newPort = await _networkEnvironment.GetAvailablePortAsync(50000, 50100, ct);
         identity.UpdateListeningPort(newPort);
-        await _identityRepository.UpdateAsync(identity);
+        await _identityRepository.SaveAsync(identity, ct);
     }
 }
 ```
+
+**Note:** Changed to use `SelfId` domain type and `SaveAsync` instead of `UpdateAsync` for consistency with repository interface.
 8. **Dynamic Bootstrap:** The implementation of `IGrpcServerManager` will dynamically build a secondary `IWebHost` or `WebApplication` exclusively for the gRPC listener. It will retrieve the certificate from `ITransportCertificateProvider` and apply it to Kestrel via `listenOptions.UseHttps(cert)`. **Critical:** The secondary host must bridge gRPC service resolution to the primary WPF container. This is achieved by implementing a generic `IGrpcServiceActivator<T>` that creates a dedicated scope for each gRPC request to properly manage scoped dependencies.
 
 ```csharp
@@ -385,17 +406,21 @@ This approach works around Windows SChannel limitations while maintaining strong
    - `Percolator.Infrastructure.Cryptography.FileBasedCertificateFactory`
    - `Percolator.Infrastructure.Network.Tls.ITlsHandshakeService`
    - `Percolator.Infrastructure.Network.Tls.TlsHandshakeService`
-3. Remove generic `"percolator-grpc"` HttpClient registration from `ServiceCollectionExtensions.cs`
+3. Remove obsolete test files:
+   - `Percolator.InfrastructureTests\Network\FileBasedTrustedPeerStoreTests.cs`
+4. Note: `"percolator-grpc"` HttpClient registration is still used by `GrpcMessageTransportService` and was not removed
 
 ### Phase 2: Domain Layer Changes
 1. Add `IDomainEvent` interface to `Percolator.Identity.SeedWork`
 2. Add `ActiveIdentityLoadedEvent` to `Percolator.Identity.DomainEvents`
 3. Add mutable `ListeningPort` property to `SelfIdentity` aggregate
 4. Add `UpdateListeningPort` method to `SelfIdentity` aggregate
+5. Add `ListeningPort` property to `IdentityRecord` (Application model)
+6. Create EF Core migration to add `ListeningPort` column to `SelfIdentity` table
 
 ### Phase 3: Infrastructure Components
 1. Implement `ITransportCertificateProvider` in `Percolator.Infrastructure.Network`
-2. Implement `INetworkEnvironment` in `Percolator.Infrastructure.Network`
+2. Implement `INetworkEnvironment` in `Percolator.Infrastructure.Network` (interface in Application, implementation in Infrastructure)
 3. Implement `IPeerGrpcChannelFactory` in `Percolator.Infrastructure.Network`
 4. Implement `IGrpcServerManager` in `Percolator.Infrastructure.Network`
 5. Implement `PrimaryContainerServiceActivator<T>` in `Percolator.Infrastructure.Network`
@@ -406,6 +431,8 @@ This approach works around Windows SChannel limitations while maintaining strong
 3. Create `NodeOfflineNotification` in `Percolator.Application`
 4. Update `CreateSelfIdentityCommandHandler` to use `INetworkEnvironment`
 5. Update `IdentityStateService.BootstrapAsync` to publish `ActiveIdentityLoadedEvent`
+6. Update `IdentityOrchestrator` to populate `ListeningPort` in `IdentityRecord`
+7. Update `StartupIdentityService` to use `INetworkEnvironment` for port assignment
 
 ### Phase 5: Event Handlers
 1. Implement `ActiveIdentityLoadedEventHandler` in `Percolator.Infrastructure.Network`
@@ -512,4 +539,632 @@ No calls to `StartAsync()` or `StopAsync()` occur during rotation - the orchestr
 1. `GrpcShutdownHostedService.StopAsync()` is called by .NET host
 2. Calls `IGrpcServerManager.StopAsync()` - disposes Kestrel's certificate
 3. If `CleanupCertFiles` is true, delete PFX files after disposal
-4. Application exits 
+4. Application exits
+
+---
+
+## Part 6: Additional Implementation Details
+
+### Configuration-Driven Port Range
+The original plan specified `INetworkEnvironment.GetAvailablePortAsync(int startRange, int endRange, CancellationToken ct)` with parameters. During implementation, this was changed to use the configured port range from `TlsOptions.PortRange` instead:
+
+**Updated Interface:**
+```csharp
+public interface INetworkEnvironment
+{
+    Task<int> GetAvailablePortAsync(CancellationToken ct);
+}
+```
+
+**Implementation:**
+- `NetworkEnvironment` now reads from `_tlsOptions.PortRange.Start` and `_tlsOptions.PortRange.End`
+- All callers (`CreateSelfIdentityHandler`, `IdentityNetworkService`, `StartupIdentityService`) updated to remove hardcoded 50000/50100 parameters
+- This makes the port range fully configurable via `appsettings.json`
+
+### Certificate File Cleanup (Critical Architectural Decision)
+**REJECTED:** The original plan mentioned a `CleanupCertFiles` configuration option for deleting PFX files on application shutdown. This was implemented but then **removed** due to critical architectural flaws:
+
+**The Flaw: CNG Container Leak**
+- Windows requires `X509KeyStorageFlags.PersistKeySet` for TLS 1.3 compatibility
+- Every time a .pfx is generated and loaded with this flag, Windows creates a hidden cryptographic key container in OS AppData
+- If certificates are deleted on shutdown and regenerated on next boot, orphaned OS key containers will leak every application cycle
+- This eventually degrades system performance or hits Windows crypto limits
+
+**The Secondary Flaw: Multi-Tenant Wipeout**
+- A global cleanup hook that deletes all `tls_cert_*.pfx` files would destroy infrastructure for all identities on the machine
+- This violates the isolation principle between different user identities
+
+**The Fix:**
+- Certificates **must persist** between application sessions to prevent CNG container leaks
+- No cleanup hook exists in `GrpcShutdownHostedService`
+- Certificates are only deleted when their parent identity is permanently deleted (not yet implemented - no UI exists)
+- The `CleanupCertFiles` configuration option remains in `TlsOptions` but is unused and should be considered deprecated
+
+---
+
+## Part 7: GrpcSessionService "Dumb Pipe" Refactoring
+
+### Critical Architectural Violations Identified
+
+**1. Infrastructure Duplication (State Dictionaries)**
+- **Flaw:** Service maintains `_channels`, `_httpClients`, and `_certificates` dictionaries
+- **Impact:** Duplicates functionality of `IPeerGrpcChannelFactory`, creates duplicate HTTP/2 connections, exhausts OS resources, causes state synchronization bugs when peer IP changes
+- **Fix:** Delete all state dictionaries and `CleanupConnectionResourcesAsync` method. Inject `IPeerGrpcChannelFactory` and let it own physical network state
+
+**2. Local vs Remote Branching Violation**
+- **Flaw:** Service manually parses IP address to check `isLocalConnection`. Creates unencrypted HTTP/2 for local, throws `NotImplementedException` for remote
+- **Impact:** Violates physical transport abstraction. Domain shouldn't care about network topology. Kestrel server enforces TLS 1.3 everywhere, so unencrypted HTTP branch will fail to connect to own server
+- **Fix:** Delete branching logic entirely. `IPeerGrpcChannelFactory` should return blind-trust TLS 1.3 channel for all endpoints (localhost or internet)
+
+**3. Lingering TOFU and mTLS Artifacts**
+- **Flaw:** Commented-out code attempts to inject `ClientCertificates`, enforce `CertificateRevocationCheckMode`, manually cache `X509Certificate2` instances
+- **Impact:** Contradicts "Blind Trust" architecture where security is delegated to inner X3DH payload
+- **Fix:** Delete all commented-out legacy TLS code and `NotImplementedException`. Transport layer is a dumb pipe
+
+### Target Architecture: The "Dumb Pipe" Pattern
+
+The service must act purely as a lightweight bridge between Domain session requests and the generated gRPC client. No state management, no local/remote branching, no TLS logic - all belongs in `IPeerGrpcChannelFactory`.
+
+**Target Implementation:**
+```csharp
+using System.Net;
+using Grpc.Core;
+using Microsoft.Extensions.Logging;
+using Percolator.Contracts;
+using Percolator.Network.Services;
+
+namespace Percolator.Infrastructure.Network.Grpc
+{
+    public class GrpcSessionService : ISessionEstablishmentTransport
+    {
+        private readonly IPeerGrpcChannelFactory _channelFactory;
+        private readonly ILogger<GrpcSessionService> _logger;
+        private readonly ISimulatorOutboundInterceptor? _simulatorOutbound;
+
+        public GrpcSessionService(
+            IPeerGrpcChannelFactory channelFactory,
+            ILogger<GrpcSessionService> logger,
+            ISimulatorOutboundInterceptor? simulatorOutbound = null)
+        {
+            _channelFactory = channelFactory;
+            _logger = logger;
+            _simulatorOutbound = simulatorOutbound;
+        }
+
+        public async Task<EstablishDirectSessionResponse> EstablishDirectSessionAsync(
+            DnsEndPoint endpoint,
+            EstablishDirectSessionRequest request)
+        {
+            if (_simulatorOutbound is not null &&
+                _simulatorOutbound.TryEstablishDirectSession(endpoint, request, CancellationToken.None, out var simulated))
+            {
+                return await simulated.ConfigureAwait(false);
+            }
+
+            return await Inner_EstablishSession(endpoint, request).ConfigureAwait(false);
+        }
+
+        public async Task<EstablishSessionResponse> EstablishSessionAsync(
+            DnsEndPoint endpoint,
+            EstablishSessionRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            if (_simulatorOutbound is not null &&
+                _simulatorOutbound.TryEstablishSession(endpoint, request, cancellationToken, out var simulated))
+            {
+                return await simulated.ConfigureAwait(false);
+            }
+
+            try
+            {
+                _logger.LogInformation("Sending EstablishSession request to {Endpoint}", endpoint);
+
+                // 1. Get the physical pipe from the centralized factory
+                var channel = _channelFactory.CreateChannel(new GrpcEndPoint(endpoint.Host, endpoint.Port));
+
+                // 2. Instantiate the gRPC client
+                var client = new TransportService.TransportServiceClient(channel);
+
+                // 3. Make the call (Timeout logic remains here)
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                cts.CancelAfter(TimeSpan.FromSeconds(300));
+
+                return await client.EstablishSessionAsync(request, cancellationToken: cts.Token).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not RpcException)
+            {
+                _logger.LogError(ex, "Failed to send EstablishSession to {Endpoint}: {ErrorMessage}", endpoint, ex.Message);
+                throw new RpcException(new Status(StatusCode.Unavailable, ex.Message));
+            }
+        }
+
+        public async Task<DeliverInviteHandshakeResponseAck> DeliverInviteHandshakeResponseAsync(
+            DnsEndPoint endpoint,
+            InviteHandshakeResponse request)
+        {
+            if (_simulatorOutbound is not null &&
+                _simulatorOutbound.TryDeliverInviteHandshakeResponse(endpoint, request, out var simulated))
+            {
+                return await simulated.ConfigureAwait(false);
+            }
+
+            try
+            {
+                _logger.LogInformation("Delivering InviteHandshakeResponse to {Endpoint}", endpoint);
+
+                var channel = _channelFactory.CreateChannel(new GrpcEndPoint(endpoint.Host, endpoint.Port));
+                var client = new TransportService.TransportServiceClient(channel);
+
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(300));
+                return await client.DeliverInviteHandshakeResponseAsync(request, cancellationToken: cts.Token).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not RpcException)
+            {
+                _logger.LogError(ex, "Failed to deliver InviteHandshakeResponse to {Endpoint}: {ErrorMessage}", endpoint, ex.Message);
+                throw new RpcException(new Status(StatusCode.Unavailable, ex.Message));
+            }
+        }
+
+        private async Task<EstablishDirectSessionResponse> Inner_EstablishSession(
+            DnsEndPoint endpoint,
+            EstablishDirectSessionRequest request)
+        {
+            try
+            {
+                _logger.LogInformation("Establishing direct session with {Endpoint}", endpoint);
+
+                var channel = _channelFactory.CreateChannel(new GrpcEndPoint(endpoint.Host, endpoint.Port));
+                var client = new TransportService.TransportServiceClient(channel);
+
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(300));
+                return await client.EstablishDirectSessionAsync(request, cancellationToken: cts.Token).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not RpcException)
+            {
+                _logger.LogError(ex, "Failed to establish direct gRPC session with {Endpoint}: {ErrorMessage}", endpoint, ex.Message);
+                throw new RpcException(new Status(StatusCode.Unavailable, ex.Message));
+            }
+        }
+    }
+}
+```
+
+### Implementation Plan
+
+#### Phase 1: Update IPeerGrpcChannelFactory for Blind Trust TLS
+
+The factory must handle all TLS logic, including certificate management and blind trust validation.
+
+**Current Interface:**
+```csharp
+public interface IPeerGrpcChannelFactory
+{
+    GrpcChannel CreateChannel(GrpcEndPoint endpoint);
+}
+```
+
+**Updated Interface:**
+```csharp
+public interface IPeerGrpcChannelFactory
+{
+    GrpcChannel CreateChannel(GrpcEndPoint endpoint);
+}
+```
+
+**No interface change needed** - the factory should internally handle certificate management.
+
+**Implementation Changes in `PeerGrpcChannelFactory`:**
+- Inject `ITransportCertificateProvider` to get the local identity's certificate
+- Inject `ISelfIdentityRepository` to get the active identity
+- Configure `SocketsHttpHandler` with TLS 1.3 for **all** endpoints (no local/remote distinction)
+- Use blind trust for remote certificate validation (accept any certificate, security is in X3DH payload)
+- Implement channel pooling internally (single channel per endpoint)
+- Configure HTTP/2 ALPN, proper timeouts, keep-alive settings
+
+**Certificate Configuration:**
+```csharp
+var activeIdentity = await _identityRepository.GetMostRecentAsync(ct);
+var clientCertificate = await _certificateProvider.GetValidCertificateAsync(activeIdentity, ct);
+
+handler = new SocketsHttpHandler
+{
+    SslOptions = new SslClientAuthenticationOptions
+    {
+        ClientCertificates = new X509CertificateCollection { clientCertificate },
+        EnabledSslProtocols = System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13,
+        CertificateRevocationCheckMode = X509RevocationMode.NoCheck,
+        TargetHost = endpoint.Host,
+        ApplicationProtocols = new List<SslApplicationProtocol> { SslApplicationProtocol.Http2 },
+        RemoteCertificateValidationCallback = (sender, cert, chain, errors) => true // Blind trust
+    },
+    PooledConnectionIdleTimeout = TimeSpan.FromMinutes(5),
+    KeepAlivePingTimeout = TimeSpan.FromSeconds(20),
+    KeepAlivePingDelay = TimeSpan.FromSeconds(60),
+    EnableMultipleHttp2Connections = true,
+    ConnectTimeout = TimeSpan.FromSeconds(10)
+};
+```
+
+**Channel Pooling:**
+- Maintain `ConcurrentDictionary<string, GrpcChannel>` internally keyed by endpoint
+- Return existing channel if available, create new if not
+- Handle channel lifecycle (dispose on application shutdown via `IHostedService`)
+
+#### Phase 2: Refactor GrpcSessionService
+
+**Delete:**
+- `_channels` dictionary
+- `_httpClients` dictionary
+- `_certificates` dictionary
+- `CleanupConnectionResourcesAsync` method
+- All local/remote branching logic (`isLocalConnection` checks)
+- All `SocketsHttpHandler` creation code
+- All `HttpClient` creation code
+- All commented-out legacy TLS code
+- `NotImplementedException` throws
+- TODO comments
+
+**Add:**
+- Inject `IPeerGrpcChannelFactory` in constructor
+- Use factory for all channel creation: `_channelFactory.CreateChannel(new GrpcEndPoint(endpoint.Host, endpoint.Port))`
+- Keep simulator interceptor (testing concern, acceptable)
+- Keep timeout logic (application-level concern)
+
+**Constructor:**
+```csharp
+public GrpcSessionService(
+    IPeerGrpcChannelFactory channelFactory,
+    ILogger<GrpcSessionService> logger,
+    ISimulatorOutboundInterceptor? simulatorOutbound = null)
+{
+    _channelFactory = channelFactory;
+    _logger = logger;
+    _simulatorOutbound = simulatorOutbound;
+}
+```
+
+#### Phase 3: Update IPeerGrpcChannelFactory Lifecycle
+
+Since the factory now owns channel state, it needs proper lifecycle management.
+
+**Add to `PeerGrpcChannelFactory`:**
+```csharp
+public async Task ShutdownAsync()
+{
+    foreach (var channel in _channels.Values)
+    {
+        try
+        {
+            await channel.ShutdownAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error shutting down channel");
+        }
+    }
+    _channels.Clear();
+}
+```
+
+**Create `GrpcChannelShutdownHostedService`:**
+```csharp
+public class GrpcChannelShutdownHostedService : IHostedService
+{
+    private readonly IPeerGrpcChannelFactory _channelFactory;
+
+    public GrpcChannelShutdownHostedService(IPeerGrpcChannelFactory channelFactory)
+    {
+        _channelFactory = channelFactory;
+    }
+
+    public Task StartAsync(CancellationToken ct) => Task.CompletedTask;
+
+    public async Task StopAsync(CancellationToken ct)
+    {
+        await _channelFactory.ShutdownAsync();
+    }
+}
+```
+
+**Register in DI:**
+```csharp
+services.AddHostedService<GrpcChannelShutdownHostedService>();
+```
+
+#### Phase 4: Configuration
+
+**No new configuration needed** - existing `TlsOptions` is sufficient. The factory uses the same certificate provider and settings as the local server.
+
+**Note:** Remove `RemoteTlsOptions` from the plan (not needed for dumb pipe architecture).
+
+#### Phase 5: Dependency Injection Registration
+
+**Update ServiceCollectionExtensions:**
+```csharp
+public static IServiceCollection AddNetworkInfrastructure(this IServiceCollection services)
+{
+    // Existing registrations...
+    services.AddScoped<IPeerGrpcChannelFactory, PeerGrpcChannelFactory>();
+    services.AddHostedService<GrpcChannelShutdownHostedService>();
+    services.AddScoped<GrpcSessionService>();
+    return services;
+}
+```
+
+#### Phase 6: Testing Considerations
+
+**Unit Tests:**
+- Mock `IPeerGrpcChannelFactory` to return mock channels
+- Test that GrpcSessionService delegates to factory correctly
+- Test simulator interceptor integration
+- Test timeout logic
+
+**Integration Tests:**
+- Test actual TLS handshake with real certificates
+- Test channel pooling (reuse existing channel for same endpoint)
+- Test blind trust certificate validation
+- Test localhost connections (should use TLS, not HTTP)
+
+### Summary of Changes
+
+**New Files:**
+- `Percolator.Infrastructure.Network.GrpcChannelShutdownHostedService` - manages factory lifecycle
+
+**Modified Files:**
+- `Percolator.Infrastructure.Network.IPeerGrpcChannelFactory` - no interface change, but implementation now handles TLS
+- `Percolator.Infrastructure.Network.PeerGrpcChannelFactory` - implement TLS channel creation, channel pooling, blind trust
+- `Percolator.Infrastructure.Network.Grpc.GrpcSessionService` - gut to dumb pipe, remove all state and branching logic
+- `Percolator.Infrastructure.ServiceCollectionExtensions` - register shutdown service
+
+**Deleted Code:**
+- All state dictionaries from GrpcSessionService (`_channels`, `_httpClients`, `_certificates`)
+- `CleanupConnectionResourcesAsync` method
+- All local/remote branching logic
+- All commented-out legacy TLS code
+- All `SocketsHttpHandler` and `HttpClient` creation code
+- All TODO comments
+- `NotImplementedException` throws
+
+**No Database Migration Needed** - No trust store required for blind trust architecture.
+
+---
+
+## Part 8: Callsite Updates and Unit Testing
+
+### Callsites Requiring Updates
+
+The following callsites must be updated to reflect the interface changes made in Part 7:
+
+**Interface Signature Changes:**
+- `ISessionEstablishmentTransport` - All methods now accept optional `CancellationToken cancellationToken = default`
+- `IPeerGrpcChannelFactory.CreateChannel` - Changed from `GrpcEndPoint` to `DnsEndPoint`
+- `ISimulatorOutboundInterceptor.TryDeliverInviteHandshakeResponse` - Added `CancellationToken cancellationToken` parameter
+
+**Production Code Callsites:**
+
+1. **Percolator.Application\Cli\RequestPreKeyBundleByPkhHandler.cs**
+   - Uses `ISessionEstablishmentTransport.EstablishSessionAsync`
+   - **Action:** No change needed - method already accepts optional CancellationToken
+
+2. **Desktop.Wpf\Features\Sessions\Handlers\ConnectViaNetworkCommandHandler.cs**
+   - Uses `ISessionEstablishmentTransport.EstablishDirectSessionAsync`
+   - **Action:** No change needed - method already accepts optional CancellationToken
+
+3. **Percolator.Application\Network\InviteHandshakeResponseDeliveryService.cs**
+   - Uses `ISessionEstablishmentTransport.DeliverInviteHandshakeResponseAsync`
+   - **Action:** No change needed - method already accepts optional CancellationToken
+
+4. **Percolator.Infrastructure\ServiceCollectionExtensions.cs**
+   - Registers `IPeerGrpcChannelFactory` and `GrpcSessionService`
+   - **Action:** Already updated - factory registered as Singleton, session as Scoped
+
+**Test Code Callsites:**
+
+1. **Percolator.InfrastructureTests\Network\SimulatorOutboundInterceptionTests.cs**
+   - Tests `GrpcSessionService` with `ISimulatorOutboundInterceptor` mock
+   - **Action Required:** Update `TryDeliverInviteHandshakeResponse` mock setup to include CancellationToken parameter
+   - **Action Required:** Update `GrpcSessionService` constructor calls to include `IPeerGrpcChannelFactory` mock
+
+2. **Percolator.ApplicationTests\Cli\RequestPreKeyBundleByPkhHandlerTests.cs**
+   - Mocks `ISessionEstablishmentTransport`
+   - **Action Required:** Update mock setups to include CancellationToken parameters in method signatures
+
+3. **Percolator.ApplicationIntegrationTests\TestDoubles\SingleHostGrpcSessionLoopback.cs**
+   - Test double implementing `ISessionEstablishmentTransport`
+   - **Action Required:** Update method signatures to include CancellationToken parameters
+
+4. **Percolator.ApplicationIntegrationTests\Phase17\Phase17CommandsOnlyTests.cs**
+   - Uses `SingleHostGrpcSessionLoopback` test double
+   - **Action:** No direct change needed - uses test double interface
+
+5. **Percolator.ApplicationIntegrationTests\Dht\DhtEndToEndTests.cs**
+   - Uses `SingleHostGrpcSessionLoopback` test double
+   - **Action:** No direct change needed - uses test double interface
+
+6. **Desktop.Wpf\Features\Simulator\SimulatorOutboundInterceptor.cs**
+   - Implements `ISimulatorOutboundInterceptor`
+   - **Action:** Already updated - TryDeliverInviteHandshakeResponse now accepts CancellationToken
+
+### Suggested Unit Tests
+
+Based on the unit-testing.md guidelines (test public behavior, not internal implementation), the following minimal unit tests are suggested for the new/modified code:
+
+**For PeerGrpcChannelFactory:**
+
+```csharp
+[TestFixture]
+public sealed class PeerGrpcChannelFactoryTests
+{
+    [Test]
+    public void CreateChannel_GivenSameEndpoint_ReturnsCachedChannel()
+    {
+        // ARRANGE
+        var logger = Mock.Of<ILogger<PeerGrpcChannelFactory>>();
+        var factory = new PeerGrpcChannelFactory(logger);
+        var endpoint = new DnsEndPoint("localhost", 5001);
+
+        // ACT
+        var channel1 = factory.CreateChannel(endpoint);
+        var channel2 = factory.CreateChannel(endpoint);
+
+        // ASSERT
+        Assert.That(channel1, Is.SameAs(channel2));
+    }
+
+    [Test]
+    public void CreateChannel_GivenDifferentEndpoints_ReturnsDifferentChannels()
+    {
+        // ARRANGE
+        var logger = Mock.Of<ILogger<PeerGrpcChannelFactory>>();
+        var factory = new PeerGrpcChannelFactory(logger);
+        var endpoint1 = new DnsEndPoint("localhost", 5001);
+        var endpoint2 = new DnsEndPoint("localhost", 5002);
+
+        // ACT
+        var channel1 = factory.CreateChannel(endpoint1);
+        var channel2 = factory.CreateChannel(endpoint2);
+
+        // ASSERT
+        Assert.That(channel1, Is.Not.SameAs(channel2));
+    }
+
+    [Test]
+    public async Task ShutdownAsync_GivenActiveChannels_ShutsDownAllChannels()
+    {
+        // ARRANGE
+        var logger = Mock.Of<ILogger<PeerGrpcChannelFactory>>();
+        var factory = new PeerGrpcChannelFactory(logger);
+        var endpoint = new DnsEndPoint("localhost", 5001);
+        factory.CreateChannel(endpoint);
+
+        // ACT
+        await factory.ShutdownAsync();
+
+        // ASSERT
+        // Behavior: channels should be shut down and cache cleared
+        // This is a smoke test - we verify no exception is thrown
+        Assert.Pass();
+    }
+}
+```
+
+**For GrpcSessionService (Updated for Dumb Pipe):**
+
+```csharp
+[TestFixture]
+public sealed class GrpcSessionServiceTests
+{
+    [Test]
+    public async Task EstablishSessionAsync_GivenCancellationToken_CancelsWhenTokenSignaled()
+    {
+        // ARRANGE
+        var channelFactory = new Mock<IPeerGrpcChannelFactory>(MockBehavior.Strict);
+        var logger = Mock.Of<ILogger<GrpcSessionService>>();
+        
+        var endpoint = new DnsEndPoint("localhost", 5001);
+        var request = new EstablishSessionRequest { Version = 1 };
+        
+        // Setup channel factory to return a mock channel
+        var mockChannel = new Mock<GrpcChannel>();
+        channelFactory.Setup(f => f.CreateChannel(endpoint)).Returns(mockChannel.Object);
+        
+        var cts = new CancellationTokenSource();
+        cts.Cancel(); // Cancel immediately
+        
+        var sut = new GrpcSessionService(channelFactory.Object, logger);
+
+        // ACT & ASSERT
+        // Should throw OperationCanceledException or similar
+        Assert.ThrowsAsync<OperationCanceledException>(async () => 
+            await sut.EstablishSessionAsync(endpoint, request, cts.Token));
+    }
+
+    [Test]
+    public async Task EstablishSessionAsync_GivenValidEndpoint_UsesChannelFactory()
+    {
+        // ARRANGE
+        var channelFactory = new Mock<IPeerGrpcChannelFactory>(MockBehavior.Strict);
+        var logger = Mock.Of<ILogger<GrpcSessionService>>();
+        
+        var endpoint = new DnsEndPoint("localhost", 5001);
+        var request = new EstablishSessionRequest { Version = 1 };
+        
+        // Setup channel factory to return a mock channel
+        var mockChannel = new Mock<GrpcChannel>();
+        channelFactory.Setup(f => f.CreateChannel(endpoint)).Returns(mockChannel.Object);
+        
+        var sut = new GrpcSessionService(channelFactory.Object, logger);
+
+        // ACT
+        try
+        {
+            await sut.EstablishSessionAsync(endpoint, request);
+        }
+        catch
+        {
+            // Expected to fail since we're using a mock channel
+        }
+
+        // ASSERT
+        channelFactory.Verify(f => f.CreateChannel(endpoint), Times.Once);
+    }
+}
+```
+
+**For GrpcChannelShutdownHostedService:**
+
+```csharp
+[TestFixture]
+public sealed class GrpcChannelShutdownHostedServiceTests
+{
+    [Test]
+    public async Task StopAsync_CallsFactoryShutdown()
+    {
+        // ARRANGE
+        var channelFactory = new Mock<IPeerGrpcChannelFactory>(MockBehavior.Strict);
+        channelFactory.Setup(f => f.ShutdownAsync()).Returns(Task.CompletedTask);
+        
+        var service = new GrpcChannelShutdownHostedService(channelFactory.Object);
+
+        // ACT
+        await service.StopAsync(CancellationToken.None);
+
+        // ASSERT
+        channelFactory.Verify(f => f.ShutdownAsync(), Times.Once);
+    }
+
+    [Test]
+    public async Task StartAsync_ReturnsCompletedTask()
+    {
+        // ARRANGE
+        var channelFactory = new Mock<IPeerGrpcChannelFactory>();
+        var service = new GrpcChannelShutdownHostedService(channelFactory.Object);
+
+        // ACT
+        var result = await service.StartAsync(CancellationToken.None);
+
+        // ASSERT
+        Assert.That(result, Is.EqualTo(Task.CompletedTask));
+    }
+}
+```
+
+### Test Priority
+
+**High Priority (Required for Part 7 completion):**
+1. Update `SimulatorOutboundInterceptionTests.cs` to include CancellationToken in mock setup
+2. Update `RequestPreKeyBundleByPkhHandlerTests.cs` to include CancellationToken in mock setup
+3. Update `SingleHostGrpcSessionLoopback.cs` to include CancellationToken in method signatures
+
+**Medium Priority (Recommended for coverage):**
+1. Add `PeerGrpcChannelFactoryTests` for channel caching behavior
+2. Add `GrpcChannelShutdownHostedServiceTests` for lifecycle management
+
+**Low Priority (Nice to have):**
+1. Add `GrpcSessionServiceTests` for cancellation behavior (requires more complex setup with gRPC mocking)
+
+### Notes
+
+- The existing `SimulatorOutboundInterceptionTests.cs` already tests the interceptor integration pattern and should be updated to reflect the new CancellationToken parameter
+- The test doubles in integration tests (`SingleHostGrpcSessionLoopback`) are minimal implementations and should simply add the CancellationToken parameter without changing behavior
+- No integration tests are suggested for the actual TLS handshake behavior - this is covered by the `TofuTlsGrpcTest` console application which performs end-to-end testing with real certificates 
