@@ -34,15 +34,6 @@ public class PeerRoutingProfileTests
     }
 
     [Test]
-    public void RotateCertificates_ReplacesCertificates()
-    {
-        var profile = new PeerRoutingProfile();
-        var certs = new[] { TlsCertificate.FromBytes(new byte[1]), TlsCertificate.FromBytes(new byte[1]) };
-        profile.Invoking(p => p.RotateCertificates(certs, DateTimeOffset.UtcNow)).Should().NotThrow();
-        profile.Certificates.Should().HaveCount(2);
-    }
-
-    [Test]
     public void RecordReachability_UpdatesStatus()
     {
         var profile = new PeerRoutingProfile();

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Desktop.Wpf.Features.Self;
@@ -19,12 +20,13 @@ public class StartupIdentityServiceTests
         // Arrange
         var now = new DateTimeOffset(2025, 7, 1, 0, 0, 0, TimeSpan.Zero);
         var repo = new Mock<ISelfIdentityRepository>(MockBehavior.Strict);
-        var existing = new SelfIdentity(new SelfId(123), new PeerId(Guid.NewGuid()));
+        var networkEnv = new Mock<Percolator.Application.Network.INetworkEnvironment>(MockBehavior.Strict);
+        var existing = new SelfIdentity(new SelfId(123), new PeerId(Guid.NewGuid()), new ListeningPort(5000));
         existing.SetDisplayName("Alice");
         existing.TouchLastUsed(now.AddDays(-1));
         repo.Setup(r => r.GetMostRecentAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(existing);
-        var svc = new StartupIdentityService(repo.Object, new TestClock(now));
+        var svc = new StartupIdentityService(repo.Object, new TestClock(now), networkEnv.Object, new Mock<Percolator.Application.Network.IReservedPortQuery>().Object);
 
         // Act
         var result = await svc.ResolveOrCreateAsync();
@@ -41,6 +43,8 @@ public class StartupIdentityServiceTests
         // Arrange
         var now = new DateTimeOffset(2025, 8, 1, 0, 0, 0, TimeSpan.Zero);
         var repo = new Mock<ISelfIdentityRepository>(MockBehavior.Strict);
+        var networkEnv = new Mock<Percolator.Application.Network.INetworkEnvironment>(MockBehavior.Strict);
+        networkEnv.Setup(n => n.GetAvailablePortAsync(It.IsAny<IEnumerable<int>>(), It.IsAny<CancellationToken>())).ReturnsAsync(5000);
         repo.Setup(r => r.GetMostRecentAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync((SelfIdentity?)null);
         SelfIdentity? saved = null;
@@ -51,11 +55,11 @@ public class StartupIdentityServiceTests
         repo.Setup(r => r.GetByIdAsync(newId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(() =>
             {
-                var created = new SelfIdentity(newId, new PeerId(Guid.NewGuid()));
+                var created = new SelfIdentity(newId, new PeerId(Guid.NewGuid()), new ListeningPort(5000));
                 created.TouchLastUsed(now);
                 return created;
             });
-        var svc = new StartupIdentityService(repo.Object, new TestClock(now));
+        var svc = new StartupIdentityService(repo.Object, new TestClock(now), networkEnv.Object, new Mock<Percolator.Application.Network.IReservedPortQuery>().Object);
 
         // Act
         var result = await svc.ResolveOrCreateAsync();

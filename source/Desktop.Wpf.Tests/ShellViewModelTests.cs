@@ -97,7 +97,7 @@ public class ShellViewModelTests
         sut.IsLoading.Value.Should().BeTrue();
 
         // ACT: Complete the bootstrap
-        var loaded = new SelfIdentity(new SelfId(1), new PeerId(Guid.NewGuid()));
+        var loaded = new SelfIdentity(new SelfId(1), new PeerId(Guid.NewGuid()), new ListeningPort(5000));
         loaded.SetDisplayName("Alice");
         tcs.SetResult(loaded);
 

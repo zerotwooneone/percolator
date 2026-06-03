@@ -963,90 +963,63 @@ The following callsites must be updated to reflect the interface changes made in
 
 **Test Code Callsites:**
 
-1. **Percolator.InfrastructureTests\Network\SimulatorOutboundInterceptionTests.cs**
-   - Tests `GrpcSessionService` with `ISimulatorOutboundInterceptor` mock
-   - **Action Required:** Update `TryDeliverInviteHandshakeResponse` mock setup to include CancellationToken parameter
-   - **Action Required:** Update `GrpcSessionService` constructor calls to include `IPeerGrpcChannelFactory` mock
-
-2. **Percolator.ApplicationTests\Cli\RequestPreKeyBundleByPkhHandlerTests.cs**
+1. **Percolator.ApplicationTests\Cli\RequestPreKeyBundleByPkhHandlerTests.cs**
    - Mocks `ISessionEstablishmentTransport`
    - **Action Required:** Update mock setups to include CancellationToken parameters in method signatures
 
-3. **Percolator.ApplicationIntegrationTests\TestDoubles\SingleHostGrpcSessionLoopback.cs**
+2. **Percolator.ApplicationIntegrationTests\TestDoubles\SingleHostGrpcSessionLoopback.cs**
    - Test double implementing `ISessionEstablishmentTransport`
    - **Action Required:** Update method signatures to include CancellationToken parameters
 
-4. **Percolator.ApplicationIntegrationTests\Phase17\Phase17CommandsOnlyTests.cs**
+3. **Percolator.ApplicationIntegrationTests\Phase17\Phase17CommandsOnlyTests.cs**
    - Uses `SingleHostGrpcSessionLoopback` test double
    - **Action:** No direct change needed - uses test double interface
 
-5. **Percolator.ApplicationIntegrationTests\Dht\DhtEndToEndTests.cs**
+4. **Percolator.ApplicationIntegrationTests\Dht\DhtEndToEndTests.cs**
    - Uses `SingleHostGrpcSessionLoopback` test double
    - **Action:** No direct change needed - uses test double interface
 
-6. **Desktop.Wpf\Features\Simulator\SimulatorOutboundInterceptor.cs**
-   - Implements `ISimulatorOutboundInterceptor`
-   - **Action:** Already updated - TryDeliverInviteHandshakeResponse now accepts CancellationToken
+**Separate Console App (Out of Scope):**
+
+5. **Percolator.Node\**
+    - Console application using legacy `SharedCertificateManager` and `Tls` namespace
+    - **Action:** Separate project - requires its own migration plan (see TODO #101)
 
 ### Suggested Unit Tests
 
 Based on the unit-testing.md guidelines (test public behavior, not internal implementation), the following minimal unit tests are suggested for the new/modified code:
 
-**For PeerGrpcChannelFactory:**
+**For ListeningPort (New Value Type):**
 
 ```csharp
 [TestFixture]
-public sealed class PeerGrpcChannelFactoryTests
+public sealed class ListeningPortTests
 {
     [Test]
-    public void CreateChannel_GivenSameEndpoint_ReturnsCachedChannel()
+    public void Constructor_GivenValueBelow1024_ThrowsArgumentException()
     {
-        // ARRANGE
-        var logger = Mock.Of<ILogger<PeerGrpcChannelFactory>>();
-        var factory = new PeerGrpcChannelFactory(logger);
-        var endpoint = new DnsEndPoint("localhost", 5001);
-
-        // ACT
-        var channel1 = factory.CreateChannel(endpoint);
-        var channel2 = factory.CreateChannel(endpoint);
-
-        // ASSERT
-        Assert.That(channel1, Is.SameAs(channel2));
+        Assert.Throws<ArgumentException>(() => new ListeningPort(1023));
     }
 
     [Test]
-    public void CreateChannel_GivenDifferentEndpoints_ReturnsDifferentChannels()
+    public void Constructor_GivenValueAbove65535_ThrowsArgumentException()
     {
-        // ARRANGE
-        var logger = Mock.Of<ILogger<PeerGrpcChannelFactory>>();
-        var factory = new PeerGrpcChannelFactory(logger);
-        var endpoint1 = new DnsEndPoint("localhost", 5001);
-        var endpoint2 = new DnsEndPoint("localhost", 5002);
-
-        // ACT
-        var channel1 = factory.CreateChannel(endpoint1);
-        var channel2 = factory.CreateChannel(endpoint2);
-
-        // ASSERT
-        Assert.That(channel1, Is.Not.SameAs(channel2));
+        Assert.Throws<ArgumentException>(() => new ListeningPort(65536));
     }
 
     [Test]
-    public async Task ShutdownAsync_GivenActiveChannels_ShutsDownAllChannels()
+    public void Constructor_GivenValidValue_AcceptsValue()
     {
-        // ARRANGE
-        var logger = Mock.Of<ILogger<PeerGrpcChannelFactory>>();
-        var factory = new PeerGrpcChannelFactory(logger);
-        var endpoint = new DnsEndPoint("localhost", 5001);
-        factory.CreateChannel(endpoint);
+        var port = new ListeningPort(5000);
+        Assert.That(port.Value, Is.EqualTo(5000));
+    }
 
-        // ACT
-        await factory.ShutdownAsync();
-
-        // ASSERT
-        // Behavior: channels should be shut down and cache cleared
-        // This is a smoke test - we verify no exception is thrown
-        Assert.Pass();
+    [Test]
+    public void ImplicitConversion_ToInt_ReturnsValue()
+    {
+        var port = new ListeningPort(5000);
+        int intValue = port;
+        Assert.That(intValue, Is.EqualTo(5000));
     }
 }
 ```
@@ -1063,94 +1036,32 @@ public sealed class GrpcSessionServiceTests
         // ARRANGE
         var channelFactory = new Mock<IPeerGrpcChannelFactory>(MockBehavior.Strict);
         var logger = Mock.Of<ILogger<GrpcSessionService>>();
-        
+
         var endpoint = new DnsEndPoint("localhost", 5001);
         var request = new EstablishSessionRequest { Version = 1 };
-        
+
         // Setup channel factory to return a mock channel
         var mockChannel = new Mock<GrpcChannel>();
         channelFactory.Setup(f => f.CreateChannel(endpoint)).Returns(mockChannel.Object);
-        
+
         var cts = new CancellationTokenSource();
         cts.Cancel(); // Cancel immediately
-        
+
         var sut = new GrpcSessionService(channelFactory.Object, logger);
 
         // ACT & ASSERT
         // Should throw OperationCanceledException or similar
-        Assert.ThrowsAsync<OperationCanceledException>(async () => 
+        Assert.ThrowsAsync<OperationCanceledException>(async () =>
             await sut.EstablishSessionAsync(endpoint, request, cts.Token));
     }
-
-    [Test]
-    public async Task EstablishSessionAsync_GivenValidEndpoint_UsesChannelFactory()
-    {
-        // ARRANGE
-        var channelFactory = new Mock<IPeerGrpcChannelFactory>(MockBehavior.Strict);
-        var logger = Mock.Of<ILogger<GrpcSessionService>>();
-        
-        var endpoint = new DnsEndPoint("localhost", 5001);
-        var request = new EstablishSessionRequest { Version = 1 };
-        
-        // Setup channel factory to return a mock channel
-        var mockChannel = new Mock<GrpcChannel>();
-        channelFactory.Setup(f => f.CreateChannel(endpoint)).Returns(mockChannel.Object);
-        
-        var sut = new GrpcSessionService(channelFactory.Object, logger);
-
-        // ACT
-        try
-        {
-            await sut.EstablishSessionAsync(endpoint, request);
-        }
-        catch
-        {
-            // Expected to fail since we're using a mock channel
-        }
-
-        // ASSERT
-        channelFactory.Verify(f => f.CreateChannel(endpoint), Times.Once);
-    }
 }
 ```
 
-**For GrpcChannelShutdownHostedService:**
-
-```csharp
-[TestFixture]
-public sealed class GrpcChannelShutdownHostedServiceTests
-{
-    [Test]
-    public async Task StopAsync_CallsFactoryShutdown()
-    {
-        // ARRANGE
-        var channelFactory = new Mock<IPeerGrpcChannelFactory>(MockBehavior.Strict);
-        channelFactory.Setup(f => f.ShutdownAsync()).Returns(Task.CompletedTask);
-        
-        var service = new GrpcChannelShutdownHostedService(channelFactory.Object);
-
-        // ACT
-        await service.StopAsync(CancellationToken.None);
-
-        // ASSERT
-        channelFactory.Verify(f => f.ShutdownAsync(), Times.Once);
-    }
-
-    [Test]
-    public async Task StartAsync_ReturnsCompletedTask()
-    {
-        // ARRANGE
-        var channelFactory = new Mock<IPeerGrpcChannelFactory>();
-        var service = new GrpcChannelShutdownHostedService(channelFactory.Object);
-
-        // ACT
-        var result = await service.StartAsync(CancellationToken.None);
-
-        // ASSERT
-        Assert.That(result, Is.EqualTo(Task.CompletedTask));
-    }
-}
-```
+**Notes:**
+- PeerGrpcChannelFactory caching tests removed - they test internal implementation (cache behavior) rather than public contract
+- GrpcChannelShutdownHostedService tests removed - class was deleted (replaced by IAsyncDisposable on factory)
+- GrpcSessionService interaction test removed - used strict Verify() which tests implementation details
+- ListeningPort tests added - validate the public contract of the new value type
 
 ### Test Priority
 
@@ -1160,11 +1071,12 @@ public sealed class GrpcChannelShutdownHostedServiceTests
 3. Update `SingleHostGrpcSessionLoopback.cs` to include CancellationToken in method signatures
 
 **Medium Priority (Recommended for coverage):**
-1. Add `PeerGrpcChannelFactoryTests` for channel caching behavior
-2. Add `GrpcChannelShutdownHostedServiceTests` for lifecycle management
+1. Add `ListeningPortTests` for value type validation
+2. Add `GrpcSessionServiceTests` for cancellation behavior
 
 **Low Priority (Nice to have):**
-1. Add `GrpcSessionServiceTests` for cancellation behavior (requires more complex setup with gRPC mocking)
+1. Update test files for ListeningPort constructor calls (SelfIdentityTests, ShellViewModelTests, StartupIdentityServiceTests)
+2. Update or remove PeerRoutingProfileTests for certificate removal
 
 ### Notes
 
