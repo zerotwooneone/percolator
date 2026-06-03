@@ -6,6 +6,7 @@ using Percolator.Identity.Model;
 using Percolator.Infrastructure.Network.Certificates;
 using Percolator.Infrastructure.Network.Grpc;
 using System.Security.Authentication;
+using Grpc.AspNetCore.Server;
 using Microsoft.AspNetCore.Server.Kestrel.Https;
 using Percolator.Identity;
 
