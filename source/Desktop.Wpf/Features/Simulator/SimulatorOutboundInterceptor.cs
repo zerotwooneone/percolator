@@ -50,6 +50,7 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
     public bool TryDeliverInviteHandshakeResponse(
         DnsEndPoint endpoint,
         InviteHandshakeResponse request,
+        CancellationToken cancellationToken,
         out Task<DeliverInviteHandshakeResponseAck> result)
     {
         if (!TryResolveSimulatedPeerId(endpoint, out var peerId))
@@ -58,7 +59,7 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
             return false;
         }
 
-        result = DeliverInviteHandshakeResponseAsync(peerId, request);
+        result = DeliverInviteHandshakeResponseAsync(peerId, request, cancellationToken);
         return true;
     }
 
@@ -136,11 +137,11 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
         }
     }
 
-    private async Task<DeliverInviteHandshakeResponseAck> DeliverInviteHandshakeResponseAsync(PeerId simulatedPeerId, InviteHandshakeResponse response)
+    private async Task<DeliverInviteHandshakeResponseAck> DeliverInviteHandshakeResponseAsync(PeerId simulatedPeerId, InviteHandshakeResponse response, CancellationToken cancellationToken)
     {
         var correlationId = response.RequestCorrelationId ?? "(missing)";
         _logger.LogInformation("[simulator] Intercepted DeliverInviteHandshakeResponse to {SimPeer} with correlation {CorrelationId}", simulatedPeerId, correlationId);
-        await _state.HandleInboundInviteHandshakeResponseFromMainAsync(simulatedPeerId, response).ConfigureAwait(false);
+        await _state.HandleInboundInviteHandshakeResponseFromMainAsync(simulatedPeerId, response, cancellationToken).ConfigureAwait(false);
         _logger.LogInformation("[simulator] Handshake response processed for {SimPeer} correlation {CorrelationId}", simulatedPeerId, correlationId);
         return new DeliverInviteHandshakeResponseAck { Version = 1 };
     }

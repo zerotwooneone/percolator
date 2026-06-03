@@ -31,6 +31,7 @@ public static class ServiceCollectionExtensions
         services.AddRateLimiting();
         
         services.AddScoped<IIdentityOrchestrator, IdentityOrchestrator>();
+        services.AddScoped<IIdentityNetworkService, IdentityNetworkService>();
 
         services.AddChatServices();
 

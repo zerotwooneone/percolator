@@ -31,8 +31,6 @@ public sealed class SimulatorOutboundInterceptionTests
     public async Task GrpcSessionService_DeliverInviteHandshakeResponseAsync_short_circuits_to_interceptor()
     {
         var logger = Mock.Of<ILogger<GrpcSessionService>>();
-        var trust = new Mock<IPeerTrustManager>(MockBehavior.Strict);
-        var cert = new Mock<SharedCertificateManager>(MockBehavior.Loose, Mock.Of<ILogger<SharedCertificateManager>>());
 
         var interceptor = new Mock<ISimulatorOutboundInterceptor>(MockBehavior.Strict);
 
@@ -47,22 +45,19 @@ public sealed class SimulatorOutboundInterceptionTests
                 return true;
             });
 
-        var sut = new GrpcSessionService(logger, trust.Object, cert.Object, interceptor.Object);
+        var sut = new GrpcSessionService(logger, interceptor.Object);
 
         var ack = await sut.DeliverInviteHandshakeResponseAsync(endpoint, response);
         Assert.That(ack, Is.Not.Null);
         Assert.That(ack.Version, Is.EqualTo(1));
 
         interceptor.Verify(i => i.TryDeliverInviteHandshakeResponse(endpoint, response, out It.Ref<Task<DeliverInviteHandshakeResponseAck>>.IsAny), Times.Once);
-        trust.VerifyNoOtherCalls();
     }
 
     [Test]
     public async Task GrpcSessionService_EstablishDirectSessionAsync_short_circuits_to_interceptor()
     {
         var logger = Mock.Of<ILogger<GrpcSessionService>>();
-        var trust = new Mock<IPeerTrustManager>(MockBehavior.Strict);
-        var cert = new Mock<SharedCertificateManager>(MockBehavior.Loose, Mock.Of<ILogger<SharedCertificateManager>>());
 
         var interceptor = new Mock<ISimulatorOutboundInterceptor>(MockBehavior.Strict);
 
@@ -81,14 +76,13 @@ public sealed class SimulatorOutboundInterceptionTests
                 return true;
             });
 
-        var sut = new GrpcSessionService(logger, trust.Object, cert.Object, interceptor.Object);
+        var sut = new GrpcSessionService(logger, interceptor.Object);
 
         var resp = await sut.EstablishDirectSessionAsync(endpoint, request);
         Assert.That(resp, Is.Not.Null);
         Assert.That(resp.Version, Is.EqualTo(1));
 
         interceptor.Verify(i => i.TryEstablishDirectSession(endpoint, request, It.IsAny<CancellationToken>(), out It.Ref<Task<EstablishDirectSessionResponse>>.IsAny), Times.Once);
-        trust.VerifyNoOtherCalls();
     }
 
     [Test]

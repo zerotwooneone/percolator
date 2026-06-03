@@ -53,7 +53,6 @@ public class PercolatorDbContext : DbContext
     public DbSet<PeerRoutingProfileDbo> PeerRoutingProfiles { get; set; } = null!;
     public DbSet<GrpcEndPointRoutingDbo> PeerRoutingGrpcEndPoints { get; set; } = null!;
     public DbSet<RelayLinkDbo> PeerRoutingRelays { get; set; } = null!;
-    public DbSet<TlsCertificateRoutingDbo> PeerRoutingTlsCertificates { get; set; } = null!;
     public DbSet<PeerRouteCandidateDbo> PeerRouteCandidates { get; set; } = null!;
     public DbSet<DiscoveredPeerDbo> DiscoveredPeers { get; set; } = null!;
     public DbSet<DiscoveredPeerEndpointDbo> DiscoveredPeerEndpoints { get; set; } = null!;
@@ -650,22 +649,6 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.RelayPeerId).IsRequired();
             entity.Property(e => e.LastSeenUtc).IsRequired();
             entity.HasIndex(e => new { e.PeerId, e.RelayPeerId }).IsUnique();
-            entity.HasOne<PeerRoutingProfileDbo>()
-                .WithMany()
-                .HasForeignKey(e => e.PeerId)
-                .OnDelete(DeleteBehavior.Cascade)
-                .IsRequired();
-        });
-
-        modelBuilder.Entity<TlsCertificateRoutingDbo>(entity =>
-        {
-            entity.ToTable("PeerRoutingTlsCertificates");
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.PeerId).IsRequired();
-            entity.Property(e => e.RawData).IsRequired();
-            entity.Property(e => e.RawDataHash).IsRequired();
-            entity.Property(e => e.AddedAtUtc).IsRequired();
-            entity.HasIndex(e => e.RawDataHash);
             entity.HasOne<PeerRoutingProfileDbo>()
                 .WithMany()
                 .HasForeignKey(e => e.PeerId)

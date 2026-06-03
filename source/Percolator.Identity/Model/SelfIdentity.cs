@@ -9,11 +9,13 @@ public sealed class SelfIdentity
     public IReadOnlyList<IdentityKey> Keys => _keys;
     public DateTimeOffset LastUsedUtc { get; private set; }
     public PeerId PeerId { get; }
+    public ListeningPort ListeningPort { get; private set; }
 
-    public SelfIdentity(SelfId id, PeerId peerId)
+    public SelfIdentity(SelfId id, PeerId peerId, ListeningPort listeningPort)
     {
         Id = id;
         PeerId = peerId;
+        ListeningPort = listeningPort;
         LastUsedUtc = default; // Explicit non-nullable; caller should set via TouchLastUsed
     }
 
@@ -37,4 +39,6 @@ public sealed class SelfIdentity
         => _keys.Where(k => k.NotBefore > when).OrderBy(k => k.NotBefore).FirstOrDefault();
 
     public void TouchLastUsed(DateTimeOffset when) => LastUsedUtc = when;
+
+    public void UpdateListeningPort(ListeningPort port) => ListeningPort = port;
 }

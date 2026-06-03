@@ -370,7 +370,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                         DateTimeOffset.UtcNow
                     );
 
-                    await _pendingGroupInvitationRepository.AddAsync(pendingInvitation, cancellationToken);
+                    await _pendingGroupInvitationRepository.AddAsync(pendingInvitation, cancellationToken).ConfigureAwait(false);
 
                     _logger.LogInformation("Received CreateGroup message for conversation {ConversationId} from {SenderPeerId}, persisted as pending invitation", conversationId, senderPeerId);
                     
@@ -409,7 +409,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     await _groupCryptoStateRepository.UpsertGroupMasterKeyAsync(
                         new Percolator.Chat.ValueObjects.ConversationId(conversationId),
                         groupMasterKey,
-                        cancellationToken);
+                        cancellationToken).ConfigureAwait(false);
 
                     _logger.LogInformation("Received GroupKeyBootstrap message for conversation {ConversationId}, persisted GroupMasterKey", conversationId);
                     return null;
@@ -434,7 +434,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     // Load GroupMasterKey for decryption
                     var masterKey = await _groupCryptoStateRepository.GetGroupMasterKeyAsync(
                         new Percolator.Chat.ValueObjects.ConversationId(conversationId),
-                        cancellationToken);
+                        cancellationToken).ConfigureAwait(false);
                     
                     if (masterKey is null)
                     {
@@ -471,18 +471,18 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                             groupContent.TextMessage,
                             messageId,
                             sentTimestamp,
-                            cancellationToken);
+                            cancellationToken).ConfigureAwait(false);
 
                         // Publish event for UI update
                         await _mediator.Publish(new TextMessagePostedEvent(
-                            conversationId,
-                            messageId.Value,
-                            request.Context.SelfIdentityId.Value,
-                            new List<Guid> { senderPeerId.Value },
-                            groupContent.TextMessage,
-                            sentTimestamp,
-                            null), // Group conversations do not have a DirectSessionId
-                            cancellationToken);
+                                conversationId,
+                                messageId.Value,
+                                request.Context.SelfIdentityId.Value,
+                                new List<Guid> { senderPeerId.Value },
+                                groupContent.TextMessage,
+                                sentTimestamp,
+                                null), // Group conversations do not have a DirectSessionId
+                            cancellationToken).ConfigureAwait(false);
 
                         _logger.LogInformation("Processed GroupMessage text message for conversation {ConversationId}", conversationId);
                     }

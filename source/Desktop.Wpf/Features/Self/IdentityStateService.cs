@@ -1,8 +1,11 @@
 using Desktop.Wpf.Features.Sessions;
 using Desktop.Wpf.Features.Shell;
+using MediatR;
 using Microsoft.Extensions.DependencyInjection;
 using Percolator.Application.Identity;
+using Percolator.Application.Messaging;
 using Percolator.Identity;
+using Percolator.Identity.DomainEvents;
 using R3;
 
 namespace Desktop.Wpf.Features.Self;
@@ -13,17 +16,20 @@ public sealed class IdentityStateService : IDisposable, IIdentityBootstrap, IIde
     private readonly IIdentityScopeAccessor _identityScopeAccessor;
     private readonly PeerConnectionStateService _peerConnectionStateService;
     private readonly SelfIdentityModel _self;
+    private readonly IPublisher _publisher;
     private readonly ReactiveProperty<string> _displayName;
     private readonly ReactiveProperty<bool> _active;
 
     public IdentityStateService(
         IIdentityScopeAccessor identityScopeAccessor,
         PeerConnectionStateService peerConnectionStateService,
-        SelfIdentityModel self)
+        SelfIdentityModel self,
+        IPublisher publisher)
     {
         _identityScopeAccessor = identityScopeAccessor;
         _peerConnectionStateService = peerConnectionStateService;
         _self = self;
+        _publisher = publisher;
         _bag = new DisposableBag();
         _displayName = new ReactiveProperty<string>("").AddTo(ref _bag);
         _active = new ReactiveProperty<bool>(false).AddTo(ref _bag);
@@ -61,6 +67,11 @@ public sealed class IdentityStateService : IDisposable, IIdentityBootstrap, IIde
         Id = domainIdentity.Id;
         _displayName.Value = displayName;
         _active.Value = true;
+
+        // Publish ActiveIdentityLoadedEvent to trigger gRPC server startup (passes only domain primitive)
+        var domainEvent = new ActiveIdentityLoadedEvent(domainIdentity.Id);
+        var notification = new DomainEventNotification<ActiveIdentityLoadedEvent>(domainEvent);
+        await _publisher.Publish(notification, cancellationToken).ConfigureAwait(false);
     }
 
     private static string ComputeInitials(string? name)

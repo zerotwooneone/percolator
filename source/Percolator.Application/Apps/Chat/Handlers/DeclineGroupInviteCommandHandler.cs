@@ -21,12 +21,12 @@ public sealed class DeclineGroupInviteCommandHandler : IRequestHandler<DeclineGr
     public async Task Handle(DeclineGroupInviteCommand request, CancellationToken cancellationToken)
     {
         // Load pending invitation
-        var pendingInvitation = await _pendingGroupInvitationRepository.GetByConversationIdAsync(request.ConversationId, cancellationToken)
+        var pendingInvitation = await _pendingGroupInvitationRepository.GetByConversationIdAsync(request.ConversationId, cancellationToken).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"No pending invitation found for conversation {request.ConversationId.Value}.");
 
         // Update PendingGroupInvitation status to Declined
         pendingInvitation.Decline();
-        await _pendingGroupInvitationRepository.UpdateAsync(pendingInvitation, cancellationToken);
+        await _pendingGroupInvitationRepository.UpdateAsync(pendingInvitation, cancellationToken).ConfigureAwait(false);
 
         _logger.LogInformation("Declined group invitation for conversation {ConversationId}", request.ConversationId.Value);
     }

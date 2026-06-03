@@ -55,7 +55,8 @@ public sealed class SqliteSelfIdentityDomainRepository : ISelfIdentityRepository
         {
             PeerId = identity.PeerId.Value,
             Name = identity.DisplayName?.Value ?? string.Empty,
-            LastUsedUtc = identity.LastUsedUtc
+            LastUsedUtc = identity.LastUsedUtc,
+            ListeningPort = identity.ListeningPort.Value
         };
         _db.SelfIdentities.Add(dbo);
         await _db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -89,6 +90,7 @@ public sealed class SqliteSelfIdentityDomainRepository : ISelfIdentityRepository
             {
                 dbo.Name = identity.DisplayName?.Value ?? dbo.Name;
                 dbo.LastUsedUtc = identity.LastUsedUtc;
+                dbo.ListeningPort = identity.ListeningPort.Value;
             }
             await _db.SaveChangesAsync(ct).ConfigureAwait(false);
         }
@@ -96,7 +98,7 @@ public sealed class SqliteSelfIdentityDomainRepository : ISelfIdentityRepository
 
     private static SelfIdentity Map(SelfIdentityDbo dbo)
     {
-        var self = new SelfIdentity(new SelfId(dbo.Id), new PeerId(dbo.PeerId));
+        var self = new SelfIdentity(new SelfId(dbo.Id), new PeerId(dbo.PeerId), new ListeningPort(dbo.ListeningPort));
         if (!string.IsNullOrWhiteSpace(dbo.Name)) self.SetDisplayName(dbo.Name);
         self.TouchLastUsed(dbo.LastUsedUtc);
         return self;

@@ -910,6 +910,9 @@ namespace Percolator.Infrastructure.Migrations
                     b.Property<long>("LastUsedUtc")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int>("ListeningPort")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -1116,35 +1119,6 @@ namespace Percolator.Infrastructure.Migrations
                     b.HasIndex("PeerIdentityKeyId");
 
                     b.ToTable("SignedPreKeys");
-                });
-
-            modelBuilder.Entity("Percolator.Infrastructure.Persistence.TlsCertificateRoutingDbo", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTimeOffset>("AddedAtUtc")
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid>("PeerId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<byte[]>("RawData")
-                        .IsRequired()
-                        .HasColumnType("BLOB");
-
-                    b.Property<byte[]>("RawDataHash")
-                        .IsRequired()
-                        .HasColumnType("BLOB");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("PeerId");
-
-                    b.HasIndex("RawDataHash");
-
-                    b.ToTable("PeerRoutingTlsCertificates", (string)null);
                 });
 
             modelBuilder.Entity("Percolator.Infrastructure.Chat.Persistence.GroupMemberDbo", b =>
@@ -1377,15 +1351,6 @@ namespace Percolator.Infrastructure.Migrations
                         .IsRequired();
 
                     b.Navigation("PeerIdentityKey");
-                });
-
-            modelBuilder.Entity("Percolator.Infrastructure.Persistence.TlsCertificateRoutingDbo", b =>
-                {
-                    b.HasOne("Percolator.Infrastructure.Persistence.PeerRoutingProfileDbo", null)
-                        .WithMany()
-                        .HasForeignKey("PeerId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
                 });
 
             modelBuilder.Entity("Percolator.Infrastructure.Identity.PeerIdentityDbo", b =>

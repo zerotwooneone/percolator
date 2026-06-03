@@ -6,7 +6,6 @@ public sealed class PeerRoutingProfile
 {
     public PeerId? Id { get; private set; }
     public List<GrpcEndPoint> Endpoints { get; } = new();
-    public List<TlsCertificate> Certificates { get; } = new();
     public Reachability Reachability { get; private set; } = new();
     public List<RelayLink> Relays { get; } = new();
     public IdentityPublicKey? IdentityPublicKey { get; private set; }
@@ -38,12 +37,6 @@ public sealed class PeerRoutingProfile
             var updated = Endpoints[idx] with { LastSeen = now };
             Endpoints[idx] = updated;
         }
-    }
-
-    public void RotateCertificates(IEnumerable<TlsCertificate> certs, DateTimeOffset now)
-    {
-        Certificates.Clear();
-        Certificates.AddRange(certs);
     }
 
     public void RecordReachability(ReachabilityStatus status, DateTimeOffset now)

@@ -47,7 +47,7 @@ public sealed class CreateGroupCommandHandler : IRequestHandler<CreateGroupComma
     public async Task<Guid> Handle(CreateGroupCommand request, CancellationToken cancellationToken)
     {
         // Load self identity to get creator's identity key
-        var selfIdentity = await _selfIdentityRepository.GetByIdAsync(new SelfId(request.SelfIdentityId), cancellationToken)
+        var selfIdentity = await _selfIdentityRepository.GetByIdAsync(new SelfId(request.SelfIdentityId), cancellationToken).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"SelfIdentity not found for id {request.SelfIdentityId}.");
 
         var creatorIdentityKey = selfIdentity.GetActiveKey(DateTimeOffset.UtcNow)
@@ -57,7 +57,7 @@ public sealed class CreateGroupCommandHandler : IRequestHandler<CreateGroupComma
         foreach (var memberPeerId in request.InitialMembers)
         {
             var networkPeerId = new Percolator.Network.PeerId(memberPeerId.Value);
-            var session = await _directSessionRepository.GetByRemotePeerIdAsync(networkPeerId, request.SelfIdentityId);
+            var session = await _directSessionRepository.GetByRemotePeerIdAsync(networkPeerId, request.SelfIdentityId).ConfigureAwait(false);
             if (session is null)
             {
                 throw new InvalidOperationException($"No secure session exists with peer {memberPeerId.Value}. Cannot add to group.");
@@ -79,7 +79,7 @@ public sealed class CreateGroupCommandHandler : IRequestHandler<CreateGroupComma
         await _groupCryptoStateRepository.UpsertGroupMasterKeyAsync(
             new ConversationId(conversationId),
             groupMasterKey,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
 
         // Create CreateGroup envelope
         var createGroupEnvelope = new ChatEnvelope
@@ -95,7 +95,7 @@ public sealed class CreateGroupCommandHandler : IRequestHandler<CreateGroupComma
         // Add initial participant identity keys (including creator)
         foreach (var memberPeerId in request.InitialMembers)
         {
-            var memberKeyHash = await _keyStore.GetPublicKeyHashByPeerIdAsync(memberPeerId, cancellationToken);
+            var memberKeyHash = await _keyStore.GetPublicKeyHashByPeerIdAsync(memberPeerId, cancellationToken).ConfigureAwait(false);
             if (memberKeyHash is null)
             {
                 _logger.LogWarning("No public key hash found for peer {PeerId}, skipping from initial participants", memberPeerId);
@@ -111,9 +111,9 @@ public sealed class CreateGroupCommandHandler : IRequestHandler<CreateGroupComma
         // Send CreateGroup to each initial member
         foreach (var memberPeerId in request.InitialMembers)
         {
-            var publicKeyHash = await _keyStore.GetPublicKeyHashByPeerIdAsync(memberPeerId, cancellationToken);
+            var publicKeyHash = await _keyStore.GetPublicKeyHashByPeerIdAsync(memberPeerId, cancellationToken).ConfigureAwait(false);
             var route = new RecipientRoute(memberPeerId, publicKeyHash);
-            await _envelopeSender.SendChatEnvelopeToPeerAsync(createGroupEnvelope, route, cancellationToken);
+            await _envelopeSender.SendChatEnvelopeToPeerAsync(createGroupEnvelope, route, cancellationToken).ConfigureAwait(false);
         }
 
         // Create GroupKeyBootstrap envelope
@@ -129,9 +129,9 @@ public sealed class CreateGroupCommandHandler : IRequestHandler<CreateGroupComma
         // Send GroupKeyBootstrap to each initial member
         foreach (var memberPeerId in request.InitialMembers)
         {
-            var publicKeyHash = await _keyStore.GetPublicKeyHashByPeerIdAsync(memberPeerId, cancellationToken);
+            var publicKeyHash = await _keyStore.GetPublicKeyHashByPeerIdAsync(memberPeerId, cancellationToken).ConfigureAwait(false);
             var route = new RecipientRoute(memberPeerId, publicKeyHash);
-            await _envelopeSender.SendChatEnvelopeToPeerAsync(bootstrapEnvelope, route, cancellationToken);
+            await _envelopeSender.SendChatEnvelopeToPeerAsync(bootstrapEnvelope, route, cancellationToken).ConfigureAwait(false);
         }
 
         // Create local GroupConversation with GroupState and GroupMembers
@@ -166,7 +166,7 @@ public sealed class CreateGroupCommandHandler : IRequestHandler<CreateGroupComma
             groupMembers,
             request.GroupName
         );
-        await _groupConversationRepository.AddAsync(groupConversation, request.SelfIdentityId, cancellationToken);
+        await _groupConversationRepository.AddAsync(groupConversation, request.SelfIdentityId, cancellationToken).ConfigureAwait(false);
 
         _logger.LogInformation("Created group {ConversationId} with {MemberCount} members", conversationId, request.InitialMembers.Count);
 

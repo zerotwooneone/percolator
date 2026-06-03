@@ -3,7 +3,6 @@ using Percolator.Infrastructure.Persistence;
 using Percolator.Network;
 using Percolator.Network.ValueObjects;
 using System.Net;
-using System.Security.Cryptography;
 
 namespace Percolator.Infrastructure.Network;
 
@@ -40,17 +39,6 @@ public sealed class SqlitePeerRoutingProfileRepository : IPeerRoutingProfileRepo
         foreach (var e in eps)
         {
             profile.AddGrpcEndPoint(new GrpcEndPoint(new DnsEndPoint(e.Host, e.Port), e.LastSeenUtc), e.LastSeenUtc);
-        }
-        // Hydrate certificates (replace set)
-        var certRows = await _db.PeerRoutingTlsCertificates.AsNoTracking()
-            .Where(c => c.PeerId == row.PeerId)
-            .ToListAsync(ct);
-        certRows = certRows.OrderBy(c => c.AddedAtUtc).ToList();
-        if (certRows.Count > 0)
-        {
-            var certs = certRows.Select(c => TlsCertificate.FromBytesOwned(c.RawData)).ToArray();
-            var tsCert = certRows.Last().AddedAtUtc;
-            profile.RotateCertificates(certs, tsCert);
         }
         // Hydrate relays
         var relayRows = await _db.PeerRoutingRelays.AsNoTracking()
@@ -109,25 +97,6 @@ public sealed class SqlitePeerRoutingProfileRepository : IPeerRoutingProfileRepo
             {
                 existing.LastSeenUtc = ep.LastSeen;
             }
-        }
-
-        // Replace certificates for this peer with aggregate set
-        var existingCerts = await _db.PeerRoutingTlsCertificates.Where(c => c.PeerId == row.PeerId).ToListAsync(ct);
-        if (existingCerts.Count > 0)
-        {
-            _db.PeerRoutingTlsCertificates.RemoveRange(existingCerts);
-        }
-        foreach (var cert in aggregate.Certificates)
-        {
-            var raw = cert.ToArray();
-            var hash = SHA256.HashData(cert.Span);
-            _db.PeerRoutingTlsCertificates.Add(new TlsCertificateRoutingDbo
-            {
-                PeerId = row.PeerId,
-                RawData = raw,
-                RawDataHash = hash,
-                AddedAtUtc = DateTimeOffset.UtcNow
-            });
         }
 
         // Sync relays: upsert present ones and remove missing

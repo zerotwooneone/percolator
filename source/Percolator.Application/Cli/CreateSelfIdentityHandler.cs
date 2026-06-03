@@ -1,7 +1,9 @@
 using MediatR;
 using Microsoft.Extensions.Logging;
+using Percolator.Application.Network;
 using Percolator.Identity;
 using System.Security.Cryptography;
+using Percolator.Identity.Model;
 
 namespace Percolator.Application.Cli;
 
@@ -9,16 +11,22 @@ public class CreateSelfIdentityHandler : IRequestHandler<CreateSelfIdentityComma
 {
     private readonly ISelfIdentityRepository _selfIdentityRepository;
     private readonly ISelfIdentityKeysStore _keysStore;
+    private readonly INetworkEnvironment _networkEnvironment;
     private readonly ILogger<CreateSelfIdentityHandler> _logger;
+    private readonly IReservedPortQuery _reservedPortQuery;
 
     public CreateSelfIdentityHandler(
         ISelfIdentityRepository selfIdentityRepository,
         ISelfIdentityKeysStore keysStore,
-        ILogger<CreateSelfIdentityHandler> logger)
+        INetworkEnvironment networkEnvironment,
+        ILogger<CreateSelfIdentityHandler> logger,
+        IReservedPortQuery reservedPortQuery)
     {
         _selfIdentityRepository = selfIdentityRepository;
         _keysStore = keysStore;
+        _networkEnvironment = networkEnvironment;
         _logger = logger;
+        _reservedPortQuery = reservedPortQuery;
     }
 
     public async Task<SelfId> Handle(CreateSelfIdentityCommand request, CancellationToken cancellationToken)
@@ -28,9 +36,13 @@ public class CreateSelfIdentityHandler : IRequestHandler<CreateSelfIdentityComma
             throw new ArgumentException("Name is required", nameof(request.Name));
         }
 
+        var excludedPorts = await _reservedPortQuery.GetReservedPortsAsync(cancellationToken).ConfigureAwait(false);
+        // Get an available port from the network environment
+        var port = await _networkEnvironment.GetAvailablePortAsync(excludedPorts,cancellationToken).ConfigureAwait(false);
+
         // Create domain identity and persist, capturing generated id
         var now = DateTimeOffset.UtcNow;
-        var identity = new Percolator.Identity.Model.SelfIdentity(new SelfId(0), PeerId.NewId());
+        var identity = new Percolator.Identity.Model.SelfIdentity(new SelfId(0), PeerId.NewId(), new ListeningPort(port));
         identity.SetDisplayName(request.Name);
         identity.TouchLastUsed(now);
         var newId = await _selfIdentityRepository.CreateAsync(identity, cancellationToken).ConfigureAwait(false);

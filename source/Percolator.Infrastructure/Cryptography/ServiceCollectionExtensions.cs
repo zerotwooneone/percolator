@@ -10,7 +10,6 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddCryptographyInfrastructure(this IServiceCollection services)
     {
-        services.AddSingleton<ICertificateFactory, FileBasedCertificateFactory>();
         services.AddScoped<IPreKeyBundleRepository, SqlitePreKeyBundleRepository>();
         services.AddScoped<IAdminSignatureVerifier, AdminSignatureVerifier>();
         services.AddScoped<IPendingSessionRepository, SqlitePendingSessionRepository>();

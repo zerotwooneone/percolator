@@ -47,14 +47,14 @@ public sealed class SendGroupMessageCommandHandler : IRequestHandler<Commands.Se
 
     public async Task Handle(Commands.SendGroupMessageCommand request, CancellationToken cancellationToken)
     {
-        var group = await _repository.GetByIdAsync(request.ConversationId, request.SelfIdentityId, cancellationToken);
+        var group = await _repository.GetByIdAsync(request.ConversationId, request.SelfIdentityId, cancellationToken).ConfigureAwait(false);
         if (group is null)
         {
             throw new InvalidOperationException($"Group conversation {request.ConversationId.Value} not found.");
         }
 
         // Fetch members with route info to dispatch messages
-        var members = await _memberQueries.GetGroupMembersWithRoutesAsync(request.ConversationId, request.SelfIdentityId, cancellationToken);
+        var members = await _memberQueries.GetGroupMembersWithRoutesAsync(request.ConversationId, request.SelfIdentityId, cancellationToken).ConfigureAwait(false);
         var activeMembers = members.Where(m => m.RemovedAtUtc == null).ToList();
 
         if (activeMembers.Count == 0)
@@ -63,7 +63,7 @@ public sealed class SendGroupMessageCommandHandler : IRequestHandler<Commands.Se
         }
 
         // Load GroupMasterKey for cryptography
-        var masterKey = await _cryptoStateRepository.GetGroupMasterKeyAsync(request.ConversationId, cancellationToken);
+        var masterKey = await _cryptoStateRepository.GetGroupMasterKeyAsync(request.ConversationId, cancellationToken).ConfigureAwait(false);
         if (masterKey is null)
         {
             throw new InvalidOperationException($"Group master key not found for conversation {request.ConversationId.Value}.");
@@ -90,7 +90,7 @@ public sealed class SendGroupMessageCommandHandler : IRequestHandler<Commands.Se
             request.Content,
             request.MessageId,
             request.SentTimestampUtc,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
 
         // Hybrid delivery: group members by delivery path (direct vs relay)
         var directRecipients = new List<RecipientRoute>();
@@ -125,27 +125,27 @@ public sealed class SendGroupMessageCommandHandler : IRequestHandler<Commands.Se
         foreach (var route in directRecipients)
         {
             var envelope = CreateGroupMessageEnvelope(request.ConversationId, ciphertext);
-            await _envelopeSender.SendChatEnvelopeToPeerAsync(envelope, route, cancellationToken);
+            await _envelopeSender.SendChatEnvelopeToPeerAsync(envelope, route, cancellationToken).ConfigureAwait(false);
         }
 
         // Send to relay peers (relay fans out to its members)
         foreach (var (relayRoute, memberPeerIds) in relayRecipients)
         {
             var envelope = CreateGroupMessageEnvelope(request.ConversationId, ciphertext);
-            await _envelopeSender.SendChatEnvelopeToPeerAsync(envelope, relayRoute, cancellationToken);
+            await _envelopeSender.SendChatEnvelopeToPeerAsync(envelope, relayRoute, cancellationToken).ConfigureAwait(false);
         }
 
         // Publish event for UI update
         var recipientPeerIds = activeMembers.Select(m => m.PeerId.Value).ToList();
         await _publisher.Publish(new TextMessagePostedEvent(
-            request.ConversationId.Value,
-            request.MessageId.Value,
-            request.SelfIdentityId,
-            recipientPeerIds,
-            request.Content,
-            request.SentTimestampUtc,
-            null), // Group conversations do not have a DirectSessionId
-            cancellationToken);
+                request.ConversationId.Value,
+                request.MessageId.Value,
+                request.SelfIdentityId,
+                recipientPeerIds,
+                request.Content,
+                request.SentTimestampUtc,
+                null), // Group conversations do not have a DirectSessionId
+            cancellationToken).ConfigureAwait(false);
     }
 
     private static ChatEnvelope CreateGroupMessageEnvelope(ConversationId conversationId, Ciphertext ciphertext)

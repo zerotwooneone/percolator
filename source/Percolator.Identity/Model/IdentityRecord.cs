@@ -16,4 +16,10 @@ public record IdentityRecord(Guid Id, string Name, string? Nickname = null)
     /// Populated from the database SelfIdentityDbo.PeerId.
     /// </summary>
     public PeerId PeerId { get; init; }
+
+    /// <summary>
+    /// The listening port for gRPC TLS connections.
+    /// Populated from the database SelfIdentityDbo.ListeningPort.
+    /// </summary>
+    public ListeningPort ListeningPort { get; init; }
 }

@@ -14,21 +14,15 @@ using Desktop.Wpf.Features.Sessions;
 using Desktop.Wpf.Features.Self;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Percolator.Infrastructure;
 using Percolator.Infrastructure.Chat;
 using Microsoft.EntityFrameworkCore;
 using Percolator.Application;
-using Percolator.Application.Configuration;
-using Percolator.Application.Network;
 using Percolator.Cryptography;
 using Percolator.Infrastructure.Persistence;
 using Desktop.Wpf.Features.Simulator;
 using Desktop.Wpf.Features.Simulator.Protocol;
 using Percolator.MessageQueue.DependencyInjection;
-using Desktop.Wpf.Features.Sessions.Queries;
 using Desktop.Wpf.Features.Sessions.State;
 using Desktop.Wpf.Shared.Mvvm;
 
@@ -66,36 +60,6 @@ public partial class App : Application
                     "Critical" => Microsoft.Extensions.Logging.LogLevel.Critical,
                     "None" => Microsoft.Extensions.Logging.LogLevel.None,
                     _ => Microsoft.Extensions.Logging.LogLevel.Information
-                });
-            })
-            .ConfigureWebHostDefaults(webBuilder =>
-            {
-                webBuilder.ConfigureKestrel((context, options) =>
-                {
-                    var port = context.Configuration.GetSection(TransportOptions.SectionName).GetValue<int>("GrpcPort");
-                    if (port == 0) port = 5001;
-                    options.ListenLocalhost(port, listen =>
-                    {
-                        listen.Protocols = HttpProtocols.Http2;
-                    });
-                });
-
-                webBuilder.ConfigureServices(services =>
-                {
-                    services.AddGrpc(options =>
-                    {
-                        options.Interceptors.Add<Percolator.Infrastructure.Network.Grpc.IdentityReadinessInterceptor>();
-                    });
-                    services.AddSingleton<Percolator.Infrastructure.Network.Grpc.IdentityReadinessInterceptor>();
-                });
-
-                webBuilder.Configure(app =>
-                {
-                    app.UseRouting();
-                    app.UseEndpoints(endpoints =>
-                    {
-                        endpoints.MapGrpcService<Percolator.Infrastructure.Network.Grpc.PercolatorMessageService>();
-                    });
                 });
             })
             .ConfigureServices((context, services) =>

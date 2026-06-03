@@ -29,11 +29,11 @@ public sealed class AcceptGroupInviteCommandHandler : IRequestHandler<AcceptGrou
     public async Task Handle(AcceptGroupInviteCommand request, CancellationToken cancellationToken)
     {
         // Load self identity to get peer ID
-        var selfIdentity = await _selfIdentityRepository.GetByIdAsync(new SelfId(request.SelfIdentityId), cancellationToken)
+        var selfIdentity = await _selfIdentityRepository.GetByIdAsync(new SelfId(request.SelfIdentityId), cancellationToken).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"SelfIdentity not found for id {request.SelfIdentityId}.");
 
         // Load pending invitation
-        var pendingInvitation = await _pendingGroupInvitationRepository.GetByConversationIdAsync(request.ConversationId, cancellationToken)
+        var pendingInvitation = await _pendingGroupInvitationRepository.GetByConversationIdAsync(request.ConversationId, cancellationToken).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"No pending invitation found for conversation {request.ConversationId.Value}.");
 
         // Create GroupConversation with GroupState and GroupMembers
@@ -59,11 +59,11 @@ public sealed class AcceptGroupInviteCommandHandler : IRequestHandler<AcceptGrou
             new[] { groupMember },
             pendingInvitation.GroupName
         );
-        await _groupConversationRepository.AddAsync(groupConversation, request.SelfIdentityId, cancellationToken);
+        await _groupConversationRepository.AddAsync(groupConversation, request.SelfIdentityId, cancellationToken).ConfigureAwait(false);
 
         // Update PendingGroupInvitation status to Accepted
         pendingInvitation.Accept();
-        await _pendingGroupInvitationRepository.UpdateAsync(pendingInvitation, cancellationToken);
+        await _pendingGroupInvitationRepository.UpdateAsync(pendingInvitation, cancellationToken).ConfigureAwait(false);
 
         _logger.LogInformation("Accepted group invitation for conversation {ConversationId}", request.ConversationId.Value);
     }

@@ -20,6 +20,7 @@ public interface ISimulatorOutboundInterceptor
     bool TryDeliverInviteHandshakeResponse(
         DnsEndPoint endpoint,
         InviteHandshakeResponse request,
+        CancellationToken cancellationToken,
         out Task<DeliverInviteHandshakeResponseAck> result);
 
     /// <summary>

@@ -29,7 +29,7 @@ namespace Percolator.Application.ReverseSignal
             var now = _clock.UtcNow;
             var removed = 0;
 
-            await foreach (var pending in _repository.EnumerateExpiredAsync(now, cancellationToken))
+            await foreach (var pending in _repository.EnumerateExpiredAsync(now, cancellationToken).ConfigureAwait(false))
             {
                 var correlationId = pending.RequestCorrelationId;
                 await _repository.DeleteAsync(pending.Id, cancellationToken).ConfigureAwait(false);
