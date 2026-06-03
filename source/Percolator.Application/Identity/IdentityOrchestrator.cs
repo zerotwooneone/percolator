@@ -4,6 +4,9 @@ using Percolator.Identity;
 using Microsoft.Extensions.Options;
 using Percolator.Identity.Model;
 using System.Security.Cryptography;
+using MediatR;
+using Percolator.Application.Messaging;
+using Percolator.Identity.DomainEvents;
 
 namespace Percolator.Application.Identity;
 
@@ -14,19 +17,22 @@ public class IdentityOrchestrator : IIdentityOrchestrator
     private readonly ILogger<IdentityOrchestrator> _logger;
     private readonly NodeOptions _options;
     private readonly ActiveIdentityContext _activeIdentityContext;
+    private readonly IPublisher _publisher;
 
     public IdentityOrchestrator(
         ISelfIdentityKeysStore keysStore,
         ISelfIdentityRepository selfIdentityRepository,
         ILogger<IdentityOrchestrator> logger,
         IOptions<NodeOptions> options,
-        ActiveIdentityContext activeIdentityContext)
+        ActiveIdentityContext activeIdentityContext,
+        IPublisher publisher)
     {
         _keysStore = keysStore;
         _selfIdentityRepository = selfIdentityRepository;
         _logger = logger;
         _options = options.Value;
         _activeIdentityContext = activeIdentityContext;
+        _publisher = publisher;
     }
 
     public async Task ResolveIdentityAsync(SelfId selfId, CancellationToken cancellationToken)
@@ -81,5 +87,10 @@ public class IdentityOrchestrator : IIdentityOrchestrator
             identityName, 
             Convert.ToBase64String(publicKeyBytes),
             Convert.ToBase64String(SHA256.HashData(publicKeyBytes)));
+
+        // Publish ActiveIdentityLoadedEvent to trigger downstream infrastructure (e.g. gRPC server startup)
+        var domainEvent = new ActiveIdentityLoadedEvent(selfId);
+        var notification = new DomainEventNotification<ActiveIdentityLoadedEvent>(domainEvent);
+        await _publisher.Publish(notification, cancellationToken).ConfigureAwait(false);
     }
 }
