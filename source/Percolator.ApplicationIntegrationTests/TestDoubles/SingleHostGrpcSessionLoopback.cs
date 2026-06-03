@@ -13,8 +13,9 @@ internal sealed class SingleHostGrpcSessionLoopback : ISessionEstablishmentTrans
         _hostProvider = hostProvider;
     }
 
-    public Task<EstablishDirectSessionResponse> EstablishDirectSessionAsync(DnsEndPoint endpoint, EstablishDirectSessionRequest request)
+    public Task<EstablishDirectSessionResponse> EstablishDirectSessionAsync(DnsEndPoint endpoint, EstablishDirectSessionRequest request, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         return Task.FromResult(new EstablishDirectSessionResponse
         {
             Version = 1,
@@ -35,8 +36,9 @@ internal sealed class SingleHostGrpcSessionLoopback : ISessionEstablishmentTrans
         });
     }
 
-    public Task<DeliverInviteHandshakeResponseAck> DeliverInviteHandshakeResponseAsync(DnsEndPoint endpoint, InviteHandshakeResponse request)
+    public Task<DeliverInviteHandshakeResponseAck> DeliverInviteHandshakeResponseAsync(DnsEndPoint endpoint, InviteHandshakeResponse request, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         return Task.FromResult(new DeliverInviteHandshakeResponseAck { Version = 1 });
     }
 }
