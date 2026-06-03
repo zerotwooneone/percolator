@@ -315,9 +315,12 @@ public class IdentityNetworkService : IIdentityNetworkService
 ```
 
 **Note:** Changed to use `SelfId` domain type and `SaveAsync` instead of `UpdateAsync` for consistency with repository interface.
-8. **Dynamic Bootstrap:** The implementation of `IGrpcServerManager` will dynamically build a secondary `IWebHost` or `WebApplication` exclusively for the gRPC listener. It will retrieve the certificate from `ITransportCertificateProvider` and apply it to Kestrel via `listenOptions.UseHttps(cert)`. **Critical:** The secondary host must bridge gRPC service resolution to the primary WPF container. This is achieved by implementing a generic `IGrpcServiceActivator<T>` that creates a dedicated scope for each gRPC request to properly manage scoped dependencies.
+8. **Dynamic Bootstrap:** The implementation of `IGrpcServerManager` will dynamically build a secondary `IWebHost` or `WebApplication` exclusively for the gRPC listener. It will retrieve the certificate from `ITransportCertificateProvider` and apply it to Kestrel via `listenOptions.UseHttps(cert)`. **Critical:** The secondary host must bridge gRPC service resolution to the primary WPF container. This is achieved by implementing the built-in `IGrpcServiceActivator<T>` from `Grpc.AspNetCore.Server` that creates a dedicated scope for each gRPC request to properly manage scoped dependencies.
 
 ```csharp
+using Grpc.AspNetCore.Server;
+using Microsoft.Extensions.DependencyInjection;
+
 public class PrimaryContainerServiceActivator<T> : IGrpcServiceActivator<T> where T : class
 {
     private readonly IServiceProvider _primaryProvider;
