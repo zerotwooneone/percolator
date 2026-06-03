@@ -9,6 +9,7 @@ using Percolator.Cryptography;
 using Google.Protobuf;
 using Percolator.Application.Network;
 using Percolator.Infrastructure.Network;
+using System.Net;
 
 namespace Percolator.Infrastructure.Network.Grpc;
 
@@ -18,18 +19,18 @@ public class GrpcMessageTransportService : IMessageTransportService
     private readonly ILogger<GrpcMessageTransportService> _logger;
     private readonly IPeerRoutingProfileRepository _profileRepository;
     private readonly IProfileRoutePlanner _routePlanner;
-    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IPeerGrpcChannelFactory _channelFactory;
     private readonly ISimulatorOutboundInterceptor? _simulatorOutbound;
 
     public GrpcMessageTransportService(
         ILogger<GrpcMessageTransportService> logger,
-        IHttpClientFactory httpClientFactory,
+        IPeerGrpcChannelFactory channelFactory,
         IPeerRoutingProfileRepository profileRepository,
         IProfileRoutePlanner routePlanner,
         ISimulatorOutboundInterceptor? simulatorOutbound = null)
     {
         _logger = logger;
-        _httpClientFactory = httpClientFactory;
+        _channelFactory = channelFactory;
         _profileRepository = profileRepository;
         _routePlanner = routePlanner;
         _simulatorOutbound = simulatorOutbound;
@@ -124,35 +125,11 @@ public class GrpcMessageTransportService : IMessageTransportService
             {
                 _logger.LogInformation("Creating new gRPC client for {Endpoint}", endPoint);
 
-                // Use the configured HTTP client from DI with certificate validation settings
-                var httpClient = _httpClientFactory.CreateClient("percolator-grpc");
-                _logger.LogInformation("Using configured HTTP client for gRPC connection with handler type: {HandlerType}", 
-                    httpClient.GetType().Name);
-
-                var channelOptions = new GrpcChannelOptions
-                {
-                    HttpClient = httpClient,
-                    MaxReceiveMessageSize = 4 * 1024 * 1024, // 4 MB
-                    MaxSendMessageSize = 4 * 1024 * 1024 // 4 MB
-                };
-
-                var uri = new Uri($"http://{endPoint.EndPoint.Host}:{endPoint.EndPoint.Port}");
-                _logger.LogInformation("Creating gRPC channel to {Uri} using http", uri);
-
-                var channel = GrpcChannel.ForAddress(uri, channelOptions);
+                // Use the centralized channel factory which handles TLS and connection pooling
+                var channel = _channelFactory.CreateChannel(new DnsEndPoint(endPoint.EndPoint.Host, endPoint.EndPoint.Port));
                 
-                // Test the connection by making a simple ping call
-                try
-                {
-                    var client = new TransportService.TransportServiceClient(channel);
-                    _logger.LogInformation("Successfully created gRPC client for {Endpoint}", endPoint);
-                    return client;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to create gRPC client for {Endpoint} - channel creation succeeded but client creation failed", endPoint);
-                    throw;
-                }
+                _logger.LogInformation("Successfully created gRPC channel for {Endpoint}", endPoint);
+                return new TransportService.TransportServiceClient(channel);
             }
             catch (Exception ex)
             {
