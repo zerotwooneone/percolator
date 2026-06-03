@@ -936,31 +936,6 @@ public static IServiceCollection AddNetworkInfrastructure(this IServiceCollectio
 
 ### Callsites Requiring Updates
 
-The following callsites must be updated to reflect the interface changes made in Part 7:
-
-**Interface Signature Changes:**
-- `ISessionEstablishmentTransport` - All methods now accept optional `CancellationToken cancellationToken = default`
-- `IPeerGrpcChannelFactory.CreateChannel` - Changed from `GrpcEndPoint` to `DnsEndPoint`
-- `ISimulatorOutboundInterceptor.TryDeliverInviteHandshakeResponse` - Added `CancellationToken cancellationToken` parameter
-
-**Production Code Callsites:**
-
-1. **Percolator.Application\Cli\RequestPreKeyBundleByPkhHandler.cs**
-   - Uses `ISessionEstablishmentTransport.EstablishSessionAsync`
-   - **Action:** No change needed - method already accepts optional CancellationToken
-
-2. **Desktop.Wpf\Features\Sessions\Handlers\ConnectViaNetworkCommandHandler.cs**
-   - Uses `ISessionEstablishmentTransport.EstablishDirectSessionAsync`
-   - **Action:** No change needed - method already accepts optional CancellationToken
-
-3. **Percolator.Application\Network\InviteHandshakeResponseDeliveryService.cs**
-   - Uses `ISessionEstablishmentTransport.DeliverInviteHandshakeResponseAsync`
-   - **Action:** No change needed - method already accepts optional CancellationToken
-
-4. **Percolator.Infrastructure\ServiceCollectionExtensions.cs**
-   - Registers `IPeerGrpcChannelFactory` and `GrpcSessionService`
-   - **Action:** Already updated - factory registered as Singleton, session as Scoped
-
 **Test Code Callsites:**
 
 1. **Percolator.ApplicationTests\Cli\RequestPreKeyBundleByPkhHandlerTests.cs**
@@ -970,14 +945,6 @@ The following callsites must be updated to reflect the interface changes made in
 2. **Percolator.ApplicationIntegrationTests\TestDoubles\SingleHostGrpcSessionLoopback.cs**
    - Test double implementing `ISessionEstablishmentTransport`
    - **Action Required:** Update method signatures to include CancellationToken parameters
-
-3. **Percolator.ApplicationIntegrationTests\Phase17\Phase17CommandsOnlyTests.cs**
-   - Uses `SingleHostGrpcSessionLoopback` test double
-   - **Action:** No direct change needed - uses test double interface
-
-4. **Percolator.ApplicationIntegrationTests\Dht\DhtEndToEndTests.cs**
-   - Uses `SingleHostGrpcSessionLoopback` test double
-   - **Action:** No direct change needed - uses test double interface
 
 **Separate Console App (Out of Scope):**
 
