@@ -140,6 +140,24 @@ namespace Percolator.Infrastructure.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "PendingGroupInvitations",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "TEXT", nullable: false),
+                    ConversationId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    InviterPeerId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    CreatorIdentityKey = table.Column<byte[]>(type: "BLOB", nullable: false),
+                    InitialMembersJson = table.Column<string>(type: "TEXT", nullable: false),
+                    GroupName = table.Column<string>(type: "TEXT", nullable: true),
+                    ReceivedAtUtc = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
+                    Status = table.Column<int>(type: "INTEGER", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_PendingGroupInvitations", x => x.Id);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "PendingSessions",
                 columns: table => new
                 {
@@ -207,7 +225,8 @@ namespace Percolator.Infrastructure.Migrations
                         .Annotation("Sqlite:Autoincrement", true),
                     PeerId = table.Column<Guid>(type: "TEXT", nullable: false),
                     Name = table.Column<string>(type: "TEXT", nullable: false),
-                    LastUsedUtc = table.Column<long>(type: "INTEGER", nullable: false)
+                    LastUsedUtc = table.Column<long>(type: "INTEGER", nullable: false),
+                    ListeningPort = table.Column<int>(type: "INTEGER", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -351,34 +370,13 @@ namespace Percolator.Infrastructure.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "PeerRoutingTlsCertificates",
-                columns: table => new
-                {
-                    Id = table.Column<long>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    PeerId = table.Column<Guid>(type: "TEXT", nullable: false),
-                    RawData = table.Column<byte[]>(type: "BLOB", nullable: false),
-                    RawDataHash = table.Column<byte[]>(type: "BLOB", nullable: false),
-                    AddedAtUtc = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_PeerRoutingTlsCertificates", x => x.Id);
-                    table.ForeignKey(
-                        name: "FK_PeerRoutingTlsCertificates_PeerRoutingProfiles_PeerId",
-                        column: x => x.PeerId,
-                        principalTable: "PeerRoutingProfiles",
-                        principalColumn: "PeerId",
-                        onDelete: ReferentialAction.Cascade);
-                });
-
-            migrationBuilder.CreateTable(
                 name: "Conversations",
                 columns: table => new
                 {
                     Id = table.Column<Guid>(type: "TEXT", nullable: false),
                     Name = table.Column<string>(type: "TEXT", nullable: true),
                     SelfIdentityId = table.Column<int>(type: "INTEGER", nullable: false),
+                    Kind = table.Column<int>(type: "INTEGER", nullable: false),
                     CreatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
                     UpdatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
                 },
@@ -683,6 +681,48 @@ namespace Percolator.Infrastructure.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "GroupMembers",
+                columns: table => new
+                {
+                    ConversationId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    PeerId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    Role = table.Column<int>(type: "INTEGER", nullable: false),
+                    JoinedAtUtc = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
+                    RemovedAtUtc = table.Column<DateTimeOffset>(type: "TEXT", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_GroupMembers", x => new { x.ConversationId, x.PeerId });
+                    table.ForeignKey(
+                        name: "FK_GroupMembers_Conversations_ConversationId",
+                        column: x => x.ConversationId,
+                        principalTable: "Conversations",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "GroupStates",
+                columns: table => new
+                {
+                    ConversationId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    Epoch = table.Column<int>(type: "INTEGER", nullable: false),
+                    Name = table.Column<string>(type: "TEXT", nullable: true),
+                    CreatedAtUtc = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
+                    UpdatedAtUtc = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_GroupStates", x => x.ConversationId);
+                    table.ForeignKey(
+                        name: "FK_GroupStates_Conversations_ConversationId",
+                        column: x => x.ConversationId,
+                        principalTable: "Conversations",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "Messages",
                 columns: table => new
                 {
@@ -728,6 +768,11 @@ namespace Percolator.Infrastructure.Migrations
                 });
 
             migrationBuilder.CreateIndex(
+                name: "IX_Conversations_Kind",
+                table: "Conversations",
+                column: "Kind");
+
+            migrationBuilder.CreateIndex(
                 name: "IX_Conversations_SelfIdentityId",
                 table: "Conversations",
                 column: "SelfIdentityId");
@@ -770,6 +815,11 @@ namespace Percolator.Infrastructure.Migrations
                 table: "EmojiReactions",
                 columns: new[] { "ConversationId", "MessageGuid", "ReactorId", "Emoji" },
                 unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_GroupMembers_ConversationId",
+                table: "GroupMembers",
+                column: "ConversationId");
 
             migrationBuilder.CreateIndex(
                 name: "IX_MessageQueue_AckId",
@@ -870,16 +920,6 @@ namespace Percolator.Infrastructure.Migrations
                 unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "IX_PeerRoutingTlsCertificates_PeerId",
-                table: "PeerRoutingTlsCertificates",
-                column: "PeerId");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_PeerRoutingTlsCertificates_RawDataHash",
-                table: "PeerRoutingTlsCertificates",
-                column: "RawDataHash");
-
-            migrationBuilder.CreateIndex(
                 name: "IX_PeerVerifications_Fingerprint",
                 table: "PeerVerifications",
                 column: "Fingerprint");
@@ -888,6 +928,11 @@ namespace Percolator.Infrastructure.Migrations
                 name: "IX_PeerVerifications_PeerId_Fingerprint",
                 table: "PeerVerifications",
                 columns: new[] { "PeerId", "Fingerprint" });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_PendingGroupInvitations_ConversationId",
+                table: "PendingGroupInvitations",
+                column: "ConversationId");
 
             migrationBuilder.CreateIndex(
                 name: "IX_PendingSessions_SelfIdentityId_RemotePeerId",
@@ -1017,6 +1062,12 @@ namespace Percolator.Infrastructure.Migrations
                 name: "GroupCryptoStates");
 
             migrationBuilder.DropTable(
+                name: "GroupMembers");
+
+            migrationBuilder.DropTable(
+                name: "GroupStates");
+
+            migrationBuilder.DropTable(
                 name: "MessageQueue");
 
             migrationBuilder.DropTable(
@@ -1041,10 +1092,10 @@ namespace Percolator.Infrastructure.Migrations
                 name: "PeerRoutingRelays");
 
             migrationBuilder.DropTable(
-                name: "PeerRoutingTlsCertificates");
+                name: "PeerVerifications");
 
             migrationBuilder.DropTable(
-                name: "PeerVerifications");
+                name: "PendingGroupInvitations");
 
             migrationBuilder.DropTable(
                 name: "PendingSessions");
