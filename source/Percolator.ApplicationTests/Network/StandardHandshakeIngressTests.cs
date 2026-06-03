@@ -1,7 +1,6 @@
 using System.Security.Cryptography;
 using Google.Protobuf;
 using MediatR;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Percolator.Application.KeyExchange;
@@ -9,7 +8,6 @@ using Percolator.Application.Network;
 using Percolator.Application.Services;
 using Percolator.Contracts;
 using Percolator.Cryptography;
-using Percolator.Cryptography.Primitives;
 using Percolator.Identity;
 using Percolator.Identity.Model;
 using Percolator.Network;

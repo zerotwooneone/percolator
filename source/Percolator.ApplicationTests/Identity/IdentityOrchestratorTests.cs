@@ -1,21 +1,15 @@
-using System;
 using System.Security.Cryptography;
-using System.Threading;
-using System.Threading.Tasks;
 using FluentAssertions;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
-using NUnit.Framework;
 using Percolator.Application.Configuration;
 using Percolator.Application.Identity;
 using Percolator.Application.Messaging;
 using Percolator.Identity;
 using Percolator.Identity.DomainEvents;
 using Percolator.Identity.Model;
-using Percolator.Infrastructure.Cryptography;
-using Percolator.Infrastructure.Persistence;
 
 namespace Percolator.ApplicationTests.Identity;
 

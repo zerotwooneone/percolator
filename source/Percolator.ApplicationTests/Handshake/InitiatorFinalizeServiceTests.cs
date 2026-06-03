@@ -3,14 +3,10 @@ using Google.Protobuf;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using MediatR;
-using Microsoft.Extensions.Logging;
-using Percolator.Application.Network;
 using Percolator.Application.Network.Handshake;
 using Percolator.Cryptography;
 using Percolator.Contracts;
-using Percolator.Cryptography.Primitives;
 using Percolator.Identity;
-using Percolator.Identity.Model;
 using Percolator.Network;
 using PeerId = Percolator.Cryptography.Primitives.PeerId;
 

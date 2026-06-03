@@ -5,7 +5,6 @@ using Moq;
 using Percolator.Application.Network;
 using Percolator.Contracts;
 using Percolator.Dht;
-using Percolator.Chat.App.Commands;
 using Google.Protobuf.WellKnownTypes;
 
 namespace Percolator.ApplicationTests.Network

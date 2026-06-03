@@ -9,7 +9,6 @@ using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Identity.Model;
 using CryptoSharedSecret = Percolator.Cryptography.SharedSecret;
-using CryptoRatchetIdentityKey = Percolator.Cryptography.RatchetIdentityKey;
 
 namespace Percolator.ApplicationTests.Sessions;
 

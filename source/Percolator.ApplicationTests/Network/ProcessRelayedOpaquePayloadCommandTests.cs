@@ -2,7 +2,6 @@ using System.Security.Cryptography;
 using Google.Protobuf;
 using MediatR;
 using Moq;
-using Percolator.Application.Identity;
 using Percolator.Application.Network;
 using Percolator.Application.Network.Handshake;
 using Percolator.Contracts;

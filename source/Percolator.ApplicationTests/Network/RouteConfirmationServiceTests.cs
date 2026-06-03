@@ -1,10 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Moq;
-using NUnit.Framework;
 using Percolator.Identity;
 using Percolator.Network;
-using Percolator.Network.Messaging;
-using Percolator.Network.ValueObjects;
 using Percolator.Application.Network;
 
 namespace Percolator.ApplicationTests.Network;
