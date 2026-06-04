@@ -949,3 +949,97 @@ public static IServiceCollection AddNetworkInfrastructure(this IServiceCollectio
 - The existing `SimulatorOutboundInterceptionTests.cs` already tests the interceptor integration pattern and should be updated to reflect the new CancellationToken parameter
 - The test doubles in integration tests (`SingleHostGrpcSessionLoopback`) are minimal implementations and should simply add the CancellationToken parameter without changing behavior
 - No integration tests are suggested for the actual TLS handshake behavior - this is covered by the `TofuTlsGrpcTest` console application which performs end-to-end testing with real certificates 
+
+---
+
+## Phase 9: Simulator Localhost gRPC Client Refactoring (Option 1)
+
+### Objective
+The `SimulatorToMainTransportService` is currently bridging the simulator to the main application using fragile DI-based in-memory invocations (`_primaryProvider.GetRequiredService<PercolatorMessageService>()`). This bypasses the new Kestrel gRPC server pipeline, missing interceptors (like `IdentityReadinessInterceptor`) and breaking DI scoping. 
+
+To correctly exercise the real application paths and prepare the Simulator to be extracted into an independent application, we must refactor this service to make **real localhost gRPC calls** over loopback, hitting the actual listening port of the main application.
+
+### Implementation Steps
+
+#### 1. Extract Channel Management (Clean Architecture)
+Create a new interface and implementation for managing the gRPC channel lifecycle. This prevents socket exhaustion and adheres to Dependency Inversion.
+
+**File:** `Desktop.Wpf\Features\Simulator\ISimulatorGrpcClientFactory.cs`
+```csharp
+public interface ISimulatorGrpcClientFactory
+{
+    TransportService.TransportServiceClient CreateClient();
+}
+```
+
+**File:** `Desktop.Wpf\Features\Simulator\SimulatorGrpcClientFactory.cs`
+- Inject `ActiveIdentityContext`.
+- Maintain a cached `GrpcChannel`. 
+- Recreate the channel *only* if the `ActiveIdentityContext.Identity.ListeningPort` changes.
+- Implement `IDisposable` to dispose of the `GrpcChannel` and `HttpClientHandler`.
+- Configure the `HttpClientHandler` with `DangerousAcceptAnyServerCertificateValidator` since the simulator must blind-trust the ephemeral localhost cert.
+
+#### 2. Update Transport Service Dependencies
+Refactor the constructor of `Desktop.Wpf.Features.Simulator.SimulatorToMainTransportService`:
+- Remove `IServiceProvider _primaryProvider`.
+- Inject `ISimulatorGrpcClientFactory _clientFactory`.
+
+#### 3. Refactor Interface Methods
+Refactor all four interface methods to use the real generated client.
+
+Example for `SendOpaqueMessageToMainAsync`:
+```csharp
+public async Task<DeliverOpaqueMessageResponse> SendOpaqueMessageToMainAsync(
+    DeliverOpaqueMessageRequest request,
+    CancellationToken cancellationToken = default)
+{
+    if (request is null) throw new ArgumentNullException(nameof(request));
+    
+    var client = _clientFactory.CreateClient();
+    return await client.DeliverOpaqueMessageAsync(request, cancellationToken: cancellationToken).ConfigureAwait(false);
+}
+```
+
+#### 4. Explicit Dead Code Cleanup
+- **In `SimulatorMainIngressService.cs`:** Completely delete the `ServerCallContextStub` nested class.
+- **In `SimulatorMainIngressService.cs`:** Remove unused using directives: `using Grpc.Core;`, `using Microsoft.Extensions.DependencyInjection;`, `using Percolator.Infrastructure.Network.Grpc;`.
+- **In `App.xaml.cs`:** Register the new factory: `services.AddSingleton<ISimulatorGrpcClientFactory, SimulatorGrpcClientFactory>();`. Update the registration for `SimulatorToMainTransportService` if necessary.
+
+#### 5. Unit Testing Strategy (Adhering to unit-testing.md)
+Create `SimulatorToMainTransportServiceTests.cs` following the AAA pattern and Black Box Rule.
+
+- **Mock the Boundary:** Use Moq to mock `ISimulatorGrpcClientFactory` and the generated `TransportService.TransportServiceClient` (gRPC client methods are virtual and mockable).
+- **Test Behavior:** Verify that calling `SendOpaqueMessageToMainAsync` successfully delegates to the gRPC client without throwing, and handles cancellation tokens correctly.
+
+**Example Test:**
+```csharp
+[Test]
+public async Task SendOpaqueMessageToMainAsync_GivenValidRequest_InvokesGrpcClient()
+{
+    // ARRANGE
+    var request = new DeliverOpaqueMessageRequest { Version = 1 };
+    var expectedResponse = new DeliverOpaqueMessageResponse { Version = 1 };
+    
+    var clientMock = new Mock<TransportService.TransportServiceClient>();
+    clientMock.Setup(c => c.DeliverOpaqueMessageAsync(
+        request, null, null, It.IsAny<CancellationToken>()))
+        .Returns(new AsyncUnaryCall<DeliverOpaqueMessageResponse>(
+            Task.FromResult(expectedResponse),
+            Task.FromResult(new Metadata()),
+            () => Status.DefaultSuccess,
+            () => new Metadata(),
+            () => { }));
+
+    var factoryMock = new Mock<ISimulatorGrpcClientFactory>();
+    factoryMock.Setup(f => f.CreateClient()).Returns(clientMock.Object);
+
+    var sut = new SimulatorToMainTransportService(factoryMock.Object);
+
+    // ACT
+    var result = await sut.SendOpaqueMessageToMainAsync(request, CancellationToken.None);
+
+    // ASSERT
+    result.Should().BeEquivalentTo(expectedResponse);
+    clientMock.Verify(c => c.DeliverOpaqueMessageAsync(request, null, null, It.IsAny<CancellationToken>()), Times.Once);
+}
+``` 
