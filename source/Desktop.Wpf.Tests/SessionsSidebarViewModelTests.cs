@@ -27,13 +27,15 @@ public sealed class SessionsSidebarViewModelTests
         var activeIdentity = new ActiveIdentityContext();
         var pendingMenu = new PendingHandshakesMenuViewModel(pendingWindowManager.Object, Mock.Of<MediatR.IMediator>(), state, activeIdentity, ui);
         var selection = new SelectedChannelModel();
+        var identityStateService = new Mock<IIdentityStateService>();
 
         var sut = new SessionsSidebarViewModel(
-            new SelfIdentityModel(),
+            identityStateService.Object,
             pendingMenu,
             state,
             selection,
-            ui);
+            ui,
+            pendingWindowManager.Object);
 
         // ASSERT: Initially empty
         sut.Items.Cast<object>().Count().Should().Be(0);

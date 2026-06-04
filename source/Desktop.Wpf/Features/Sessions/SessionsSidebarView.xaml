@@ -17,8 +17,9 @@
       </Grid.ColumnDefinitions>
 
       <!-- Self identity avatar (seeded) -->
-      <controls:InitialsAvatar Grid.Column="0" Diameter="28" Text="{Binding Self.Initials.Value}"
-                               Command="{Binding IncrementPendingInvitesCommand}"/>
+      <controls:InitialsAvatar Grid.Column="0" Diameter="28" Text="{Binding SelfInitials.Value}"
+                               Command="{Binding OpenSelfIdentitySettingsCommand}"
+                               ToolTip="Identity settings"/>
 
       <!-- Search input fills -->
       <controls:MatInput Grid.Column="1" Margin="8,0,8,0"

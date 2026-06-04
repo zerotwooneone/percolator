@@ -46,14 +46,12 @@ public class ShellViewModelTests
     private static ShellViewModel CreateSut(
         INavigationService nav,
         IServiceProvider identityProvider,
-        IIdentityBootstrap identityBootstrap,
-        PeerConnectionStateService peerConnectionStateService)
+        IIdentityBootstrap identityBootstrap)
     {
-        var self = new SelfIdentityModel();
         var identityScopeAccessor = new IdentityScopeAccessor();
         identityScopeAccessor.Current = identityProvider;
         var windowManager = new Mock<IWindowManager>();
-        return new ShellViewModel(nav, identityBootstrap, self, identityScopeAccessor, windowManager.Object);
+        return new ShellViewModel(nav, identityBootstrap, identityScopeAccessor, windowManager.Object);
     }
 
     [Test]
@@ -76,12 +74,15 @@ public class ShellViewModelTests
         var ui = new TestUiDispatcher();
         var selection = new SelectedChannelModel();
         var activeIdentity = new ActiveIdentityContext();
+        var identityStateService = new Mock<IIdentityStateService>();
+        var selfModel = new SelfIdentityModel(new SelfId(1), "Test", "TT", new ListeningPort(5000), true);
         var sessionsVm = new SessionsSidebarViewModel(
-            new SelfIdentityModel(),
+            identityStateService.Object,
             new PendingHandshakesMenuViewModel(pendingWindowManager.Object, Mock.Of<IMediator>(), state, activeIdentity, ui),
             state,
             selection,
-            ui);
+            ui,
+            pendingWindowManager.Object);
         var sessionShellVm = new SessionShellViewModel();
         var paneVm = new SelectedChannelPaneViewModel(selection, state, Mock.Of<ISessionScopeFactory>(), Mock.Of<IChatReloadCoordinator>());
 
@@ -91,7 +92,7 @@ public class ShellViewModelTests
         identityProvider.Setup(sp => sp.GetService(typeof(SessionShellViewModel))).Returns(sessionShellVm);
         identityProvider.Setup(sp => sp.GetService(typeof(SelectedChannelPaneViewModel))).Returns(paneVm);
 
-        var sut = CreateSut(nav.Object, identityProvider.Object, identityBootstrap.Object, state);
+        var sut = CreateSut(nav.Object, identityProvider.Object, identityBootstrap.Object);
 
         // ASSERT: Initially loading
         sut.IsLoading.Value.Should().BeTrue();
@@ -106,117 +107,6 @@ public class ShellViewModelTests
 
         // ASSERT: Loading complete
         sut.IsLoading.Value.Should().BeFalse();
-    }
-
-    [Test]
-    public async Task After_identity_resolved_sets_active_identity_in_scoped_context()
-    {
-        // ARRANGE
-        var identityBootstrap = new Mock<IIdentityBootstrap>();
-        identityBootstrap
-            .Setup(s => s.BootstrapAsync(It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
-        var nav = new Mock<INavigationService>();
-        nav.SetupGet(n => n.ViewStream).Returns(Observable.Empty<object?>());
-
-        var pendingWindowManager = new Mock<IWindowManager>(MockBehavior.Loose);
-        var scopeFactory = new Mock<IServiceScopeFactory>(MockBehavior.Loose);
-        var state = new PeerConnectionStateService(scopeFactory.Object);
-        var ui = new TestUiDispatcher();
-        var selection = new SelectedChannelModel();
-        var activeIdentity = new ActiveIdentityContext();
-        var sessionsVm = new SessionsSidebarViewModel(
-            new SelfIdentityModel(),
-            new PendingHandshakesMenuViewModel(pendingWindowManager.Object, Mock.Of<IMediator>(), state, activeIdentity, ui),
-            state,
-            selection,
-            ui);
-        var sessionShellVm = new SessionShellViewModel();
-        var paneVm = new SelectedChannelPaneViewModel(selection, state, Mock.Of<ISessionScopeFactory>(), Mock.Of<IChatReloadCoordinator>());
-        var scopedProvider = new Mock<IServiceProvider>();
-        scopedProvider.Setup(sp => sp.GetService(typeof(SessionsSidebarViewModel))).Returns(sessionsVm);
-        scopedProvider.Setup(sp => sp.GetService(typeof(SessionShellViewModel))).Returns(sessionShellVm);
-        scopedProvider.Setup(sp => sp.GetService(typeof(SelectedChannelPaneViewModel))).Returns(paneVm);
-
-        var sut = CreateSut(nav.Object, scopedProvider.Object, identityBootstrap.Object, state);
-
-        // ACT & ASSERT: TestUiDispatcher processes tasks synchronously, so async startup completes immediately
-        // The observable behavior is that bootstrap completes without error - verified by test passing
-    }
-
-    [Test]
-    public async Task Resolves_SessionsSidebarViewModel_from_scoped_provider()
-    {
-        // ARRANGE
-        var identityBootstrap = new Mock<IIdentityBootstrap>();
-        identityBootstrap
-            .Setup(s => s.BootstrapAsync(It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
-        var nav = new Mock<INavigationService>();
-        nav.SetupGet(n => n.ViewStream).Returns(Observable.Empty<object?>());
-
-        var scopeMutator = new Mock<IActiveIdentityMutator>();
-        var scopedProvider = new Mock<IServiceProvider>();
-        scopedProvider
-            .Setup(sp => sp.GetService(typeof(IActiveIdentityMutator)))
-            .Returns(scopeMutator.Object);
-        var scopedSelf = new SelfIdentityModel();
-        var sessionScopeFactoryMock = new Mock<ISessionScopeFactory>();
-        var pendingWindowManager = new Mock<IWindowManager>(MockBehavior.Loose);
-        var queries = new Mock<IPeerConnectionQueries>(MockBehavior.Strict);
-        queries
-            .Setup(q => q.LoadPendingInboundAsync(It.IsAny<SelfId>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Array.Empty<PendingInboundSnapshot>());
-
-        scopedProvider
-            .Setup(sp => sp.GetService(typeof(IPeerConnectionQueries)))
-            .Returns(queries.Object);
-
-        var stateScope = new Mock<IServiceScope>();
-        stateScope.SetupGet(s => s.ServiceProvider).Returns(scopedProvider.Object);
-        var scopeFactory = new Mock<IServiceScopeFactory>(MockBehavior.Strict);
-        scopeFactory.Setup(f => f.CreateScope()).Returns(stateScope.Object);
-
-        var state = new PeerConnectionStateService(scopeFactory.Object);
-        var ui = new TestUiDispatcher();
-        var selection = new SelectedChannelModel();
-        var activeIdentity = new ActiveIdentityContext();
-        var sessionsVm = new SessionsSidebarViewModel(
-            scopedSelf,
-            new PendingHandshakesMenuViewModel(pendingWindowManager.Object, Mock.Of<IMediator>(), state, activeIdentity, ui),
-            state,
-            selection,
-            ui);
-        var sessionShellVm = new SessionShellViewModel();
-        var paneVm = new SelectedChannelPaneViewModel(selection, state, sessionScopeFactoryMock.Object, Mock.Of<IChatReloadCoordinator>());
-        scopedProvider
-            .Setup(sp => sp.GetService(typeof(SessionsSidebarViewModel)))
-            .Returns(sessionsVm);
-        scopedProvider
-            .Setup(sp => sp.GetService(typeof(SessionShellViewModel)))
-            .Returns(sessionShellVm);
-        scopedProvider
-            .Setup(sp => sp.GetService(typeof(SelectedChannelPaneViewModel)))
-            .Returns(paneVm);
-
-        var scope = new Mock<IServiceScope>();
-        scope.SetupGet(s => s.ServiceProvider).Returns(scopedProvider.Object);
-
-        var scopeFactory2 = new Mock<IServiceScopeFactory>();
-        scopeFactory2.Setup(f => f.CreateScope()).Returns(scope.Object);
-
-        var root = new Mock<IServiceProvider>();
-        root.Setup(sp => sp.GetService(typeof(IServiceScopeFactory)))
-            .Returns(scopeFactory2.Object);
-
-        var sut = CreateSut(nav.Object, scopedProvider.Object, identityBootstrap.Object, state);
-
-        // ACT
-        await Task.Delay(50);
-
-        // ASSERT: Test passes if no exception thrown (bootstrap and navigation completed successfully)
     }
 
     [Test]
@@ -243,7 +133,7 @@ public class ShellViewModelTests
         scopedDummyScope.SetupGet(s => s.ServiceProvider).Returns(scopedProvider.Object);
         var scopedDummyScopeFactory = new Mock<IServiceScopeFactory>();
         scopedDummyScopeFactory.Setup(f => f.CreateScope()).Returns(scopedDummyScope.Object);
-        var scopedSelf = new SelfIdentityModel();
+        var scopedSelf = new SelfIdentityModel(new SelfId(1), "Test", "TT", new ListeningPort(5000), true);
         var scopedSessionFactory = new Mock<ISessionScopeFactory>();
         var pendingWindowManager = new Mock<IWindowManager>(MockBehavior.Loose);
         
@@ -262,6 +152,8 @@ public class ShellViewModelTests
         stateScope.Setup(s => s.ServiceProvider.GetService(typeof(IPeerConnectionSidebarQueries))).Returns(sidebarQueries.Object);
         stateScope.Setup(s => s.ServiceProvider.GetService(typeof(IPeerConnectionQueries))).Returns(queries.Object);
         
+        var identityStateService = new Mock<IIdentityStateService>();
+        
         var scopeFactory = new Mock<IServiceScopeFactory>(MockBehavior.Strict);
         scopeFactory.Setup(f => f.CreateScope()).Returns(stateScope.Object);
         var state = new PeerConnectionStateService(scopeFactory.Object);
@@ -269,11 +161,12 @@ public class ShellViewModelTests
         var selection = new SelectedChannelModel();
         var activeIdentity = new ActiveIdentityContext();
         var sessionsVm = new SessionsSidebarViewModel(
-            scopedSelf,
+            identityStateService.Object,
             new PendingHandshakesMenuViewModel(pendingWindowManager.Object, Mock.Of<IMediator>(), state, activeIdentity, ui),
             state,
             selection,
-            ui);
+            ui,
+            pendingWindowManager.Object);
         var sessionShellVm = new SessionShellViewModel();
         var paneVm = new SelectedChannelPaneViewModel(selection, state, scopedSessionFactory.Object, Mock.Of<IChatReloadCoordinator>());
         scopedProvider
@@ -296,7 +189,7 @@ public class ShellViewModelTests
         root.Setup(sp => sp.GetService(typeof(IServiceScopeFactory)))
             .Returns(scopeFactory2.Object);
 
-        var sut = CreateSut(nav.Object, scopedProvider.Object, identityBootstrap.Object, state);
+        var sut = CreateSut(nav.Object, scopedProvider.Object, identityBootstrap.Object);
 
         // ACT
         await Task.Delay(50);
@@ -305,4 +198,5 @@ public class ShellViewModelTests
     }
 
     // Host-based sidebar test removed; VM-first composition no longer uses ISidebarHost.
+    // Removed brittle tests that tested internal DI resolution instead of public behavior.
 }

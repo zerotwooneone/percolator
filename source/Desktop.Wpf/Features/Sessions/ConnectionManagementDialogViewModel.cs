@@ -93,8 +93,6 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
 
     public INotifyCollectionChangedSynchronizedViewList<PendingInvitationItemViewModel> PendingInvitations { get; }
 
-    public ReadOnlyReactiveProperty<string> IdentityDisplayName => _identityStateService.DisplayName;
-
     public AsyncRelayCommand AcceptInvitationCommand { get; }
     public AsyncRelayCommand BurnInvitationCommand { get; }
 

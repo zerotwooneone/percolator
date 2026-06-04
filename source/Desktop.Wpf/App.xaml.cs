@@ -150,11 +150,12 @@ public partial class App : Application
                 services.AddScoped<Desktop.Wpf.Features.Chat.ChatViewModel>();
 
                 // Self identity
-                services.AddSingleton<SelfIdentityModel>();
                 services.AddSingleton<Desktop.Wpf.Features.Self.IdentityStateService>();
                 services.AddSingleton<Desktop.Wpf.Features.Self.IIdentityStateService>(sp => sp.GetRequiredService<Desktop.Wpf.Features.Self.IdentityStateService>());
                 services.AddSingleton<Desktop.Wpf.Features.Self.IIdentityBootstrap>(sp => sp.GetRequiredService<Desktop.Wpf.Features.Self.IdentityStateService>());
                 services.AddScoped<IStartupIdentityService, StartupIdentityService>();
+                services.AddScoped<Desktop.Wpf.Features.Self.SelfIdentitySettingsViewModel>();
+                services.AddScoped<Desktop.Wpf.Features.Self.SelfIdentitySettingsWindow>();
                 // Identity repositories (in-memory fakes for desktop)
                 services.AddScoped<Percolator.Identity.IPeerIdentityRepository, Percolator.Infrastructure.Repositories.SqlitePeerIdentityRepository>();
                 services.AddSingleton(TimeProvider.System);

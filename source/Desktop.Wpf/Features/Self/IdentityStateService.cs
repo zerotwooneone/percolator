@@ -3,6 +3,7 @@ using Desktop.Wpf.Features.Shell;
 using Microsoft.Extensions.DependencyInjection;
 using Percolator.Application.Identity;
 using Percolator.Identity;
+using Percolator.Identity.Model;
 using R3;
 
 namespace Desktop.Wpf.Features.Self;
@@ -12,26 +13,18 @@ public sealed class IdentityStateService : IDisposable, IIdentityBootstrap, IIde
     private readonly DisposableBag _bag;
     private readonly IIdentityScopeAccessor _identityScopeAccessor;
     private readonly PeerConnectionStateService _peerConnectionStateService;
-    private readonly SelfIdentityModel _self;
-    private readonly ReactiveProperty<string> _displayName;
-    private readonly ReactiveProperty<bool> _active;
+    private readonly ReactiveProperty<SelfIdentityModel> _activeIdentity = new(new SelfIdentityModel(new SelfId(999), "Not Initialized", "N I", new ListeningPort(9999)));
+    public ReadOnlyReactiveProperty<SelfIdentityModel> ActiveIdentity => _activeIdentity;
 
     public IdentityStateService(
         IIdentityScopeAccessor identityScopeAccessor,
-        PeerConnectionStateService peerConnectionStateService,
-        SelfIdentityModel self)
+        PeerConnectionStateService peerConnectionStateService)
     {
         _identityScopeAccessor = identityScopeAccessor;
         _peerConnectionStateService = peerConnectionStateService;
-        _self = self;
         _bag = new DisposableBag();
-        _displayName = new ReactiveProperty<string>("").AddTo(ref _bag);
-        _active = new ReactiveProperty<bool>(false).AddTo(ref _bag);
+        _activeIdentity.AddTo(ref _bag);
     }
-
-    public SelfId? Id { get; private set; }
-    public ReadOnlyReactiveProperty<string> DisplayName => _displayName;
-    public ReadOnlyReactiveProperty<bool> Active => _active;
 
     public async Task BootstrapAsync(CancellationToken cancellationToken = default)
     {
@@ -42,13 +35,15 @@ public sealed class IdentityStateService : IDisposable, IIdentityBootstrap, IIde
 
         // Resolve the startup identity service to get the domain identity
         var startupIdentity = _identityScopeAccessor.Current.GetRequiredService<IStartupIdentityService>();
-        var domainIdentity = await startupIdentity.ResolveOrCreateAsync().ConfigureAwait(false);
+        var domainIdentity = await startupIdentity.ResolveOrCreateAsync(cancellationToken).ConfigureAwait(false);
 
         // Populate SelfIdentity model
         var displayName = domainIdentity.DisplayName?.Value ?? domainIdentity.Id.ToString();
-        _self.DisplayName.Value = displayName;
-        _self.Initials.Value = ComputeInitials(displayName);
-        _self.Id.Value = domainIdentity.Id.ToString();
+        _activeIdentity.Value = new SelfIdentityModel(domainIdentity.Id, 
+            displayName, 
+            ComputeInitials(displayName),
+            domainIdentity.ListeningPort, 
+            true);
 
         // Resolve application identity + keys and populate ActiveIdentityContext
         // This orchestrator is also responsible for publishing the ActiveIdentityLoadedEvent to boot infrastructure
@@ -57,11 +52,6 @@ public sealed class IdentityStateService : IDisposable, IIdentityBootstrap, IIde
 
         // Initialize the peer connection state service with the self identity ID
         await _peerConnectionStateService.InitializeAsync(domainIdentity.Id, cancellationToken).ConfigureAwait(false);
-
-        // Update the IdentityStateService state
-        Id = domainIdentity.Id;
-        _displayName.Value = displayName;
-        _active.Value = true;
     }
 
     private static string ComputeInitials(string? name)

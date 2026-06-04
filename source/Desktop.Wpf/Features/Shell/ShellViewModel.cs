@@ -18,7 +18,6 @@ public sealed class ShellViewModel : ViewModelBase
 
     private readonly INavigationService _navigation;
     private readonly IIdentityBootstrap _identityBootstrap;
-    private readonly SelfIdentityModel _self;
     private IServiceScope? _identityScope;
     private readonly IIdentityScopeAccessor _identityScopeAccessor;
     private readonly IWindowManager _windowManager;
@@ -27,13 +26,11 @@ public sealed class ShellViewModel : ViewModelBase
 
     public ShellViewModel(INavigationService navigation,
                           IIdentityBootstrap identityBootstrap,
-                          SelfIdentityModel self,
                           IIdentityScopeAccessor identityScopeAccessor,
                           IWindowManager windowManager)
     {
         _navigation = navigation;
         _identityBootstrap = identityBootstrap;
-        _self = self;
         _identityScopeAccessor = identityScopeAccessor;
         _windowManager = windowManager;
 
@@ -88,14 +85,5 @@ public sealed class ShellViewModel : ViewModelBase
     {
         _identityScopeAccessor.Current = null;
         Disposable.Dispose(CurrentView, IsLoading);
-    }
-
-    private static string ComputeInitials(string? name)
-    {
-        if (string.IsNullOrWhiteSpace(name)) return "?";
-        var parts = name.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length == 1)
-            return parts[0].Substring(0, Math.Min(2, parts[0].Length)).ToUpperInvariant();
-        return (parts[0][0].ToString() + parts[^1][0].ToString()).ToUpperInvariant();
     }
 }

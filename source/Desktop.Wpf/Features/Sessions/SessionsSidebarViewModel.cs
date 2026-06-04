@@ -2,6 +2,7 @@ using Desktop.Wpf.Features.Sessions.Models;
 using Desktop.Wpf.Features.Self;
 using Desktop.Wpf.Features.Sessions.State;
 using Desktop.Wpf.Shared.Mvvm;
+using Desktop.Wpf.Shared.Windowing;
 using ObservableCollections;
 using R3;
 
@@ -12,31 +13,39 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
     public BindableReactiveProperty<string> SearchText { get; }
     public System.ComponentModel.ICollectionView Items { get; }
     public BindableReactiveProperty<string?> SelectedSessionId { get; }
-    public SelfIdentityModel Self { get; }
+    public IReadOnlyBindableReactiveProperty<string> SelfInitials { get; }
     public BindableReactiveProperty<bool> IsLoading { get; }
     public PendingHandshakesMenuViewModel PendingMenu { get; }
+    public ReactiveCommand OpenSelfIdentitySettingsCommand { get; }
 
     private readonly ISynchronizedView<PeerConnectionModel, PeerConnectionListItemViewModel> _connectionsView;
     private readonly PeerConnectionStateService _stateService;
     private readonly SelectedChannelModel _selection;
     private readonly DisposableBag _bag;
+    private readonly IWindowManager _windowManager;
 
     public SessionsSidebarViewModel(
-        SelfIdentityModel self,
+        IIdentityStateService identityStateService,
         PendingHandshakesMenuViewModel pendingMenu,
         PeerConnectionStateService stateService,
         SelectedChannelModel selection,
-        IUiDispatcher ui)
+        IUiDispatcher ui,
+        IWindowManager windowManager)
     {
-        Self = self;
+        _bag = new DisposableBag();
+        SelfInitials = identityStateService.ActiveIdentity.CurrentValue.Initials
+            .ToBindableReactiveProperty()
+            .AddTo(ref _bag);
         _stateService = stateService;
         _selection = selection;
+        _windowManager = windowManager;
         SearchText = new BindableReactiveProperty<string>("");
         SelectedSessionId = new BindableReactiveProperty<string?>(null);
         IsLoading = new BindableReactiveProperty<bool>(false);
         PendingMenu = pendingMenu;
-        _bag = new DisposableBag();
+        
 
+        OpenSelfIdentitySettingsCommand = new ReactiveCommand(_=>OpenSelfIdentitySettings(Unit.Default)).AddTo(ref _bag);
         // 1. Create the view and track it
         _connectionsView = _stateService.Connections
             .CreateView(model => new PeerConnectionListItemViewModel(model))
@@ -114,6 +123,11 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
             SecureChannelKeyType.PendingSession => PeerConnectionKey.FromPendingSessionId(guid),
             _ => null
         };
+    }
+
+    private void OpenSelfIdentitySettings(Unit _)
+    {
+        _windowManager.ShowFor<Desktop.Wpf.Features.Self.SelfIdentitySettingsViewModel>();
     }
 
     protected override void DisposeCore()
