@@ -15,14 +15,14 @@ public class TransportCertificateProvider : ITransportCertificateProvider
 
     public TransportCertificateProvider(
         ILogger<TransportCertificateProvider> logger,
-        IOptions<TlsOptions> tlsOptions)
+        IOptions<TlsOptions> tlsOptions,
+        IOptions<StorageOptions> storageOptions)
     {
         _logger = logger;
         _tlsOptions = tlsOptions.Value;
         
-        // Use the same directory as percolator.db
-        var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        _certDirectory = Path.Combine(appDataPath, "Percolator");
+        // Use the configured storage path
+        _certDirectory = storageOptions.Value.Path;
         
         if (!Directory.Exists(_certDirectory))
         {
