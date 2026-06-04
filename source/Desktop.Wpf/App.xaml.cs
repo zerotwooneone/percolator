@@ -41,6 +41,11 @@ public partial class App : Application
 
         HostInstance = Microsoft.Extensions.Hosting.Host
             .CreateDefaultBuilder()
+            .ConfigureAppConfiguration((context, config) =>
+            {
+                // Add command line arguments to configuration
+                config.AddCommandLine(e.Args);
+            })
             .ConfigureLogging((context, builder) =>
             {
                 var logging = new LoggingOptions();
