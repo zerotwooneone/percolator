@@ -19,7 +19,6 @@ public sealed class SqliteConversationMessageQueries : IConversationMessageQueri
         var messages = await _db.Messages
             .AsNoTracking()
             .Where(m => m.ConversationId == conversationId.Value)
-            .OrderBy(m => m.SentAt)
             .Select(m => new MessageDto
             {
                 MessageId = m.MessageGuid,
@@ -29,6 +28,9 @@ public sealed class SqliteConversationMessageQueries : IConversationMessageQueri
                 Timestamp = m.SentAt
             })
             .ToListAsync(cancellationToken);
+
+        // Order in memory since SQLite doesn't support DateTimeOffset in ORDER BY clauses
+        messages = messages.OrderBy(m => m.Timestamp).ToList();
 
         return messages;
     }
