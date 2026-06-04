@@ -128,6 +128,7 @@ public partial class App : Application
                 services.AddSingleton<Desktop.Wpf.Features.Simulator.ISimulatorDiagnosticsService, Desktop.Wpf.Features.Simulator.SimulatorDiagnosticsService>();
                 services.AddSingleton<Desktop.Wpf.Features.Simulator.ISimulatorDiagnosticBundleBuilder, Desktop.Wpf.Features.Simulator.SimulatorDiagnosticBundleBuilder>();
                 services.AddSingleton<ISimulatorInitializer, SimulatorInitializer>();
+                services.AddSingleton<Desktop.Wpf.Features.Simulator.ISimulatorGrpcClientFactory, Desktop.Wpf.Features.Simulator.SimulatorGrpcClientFactory>();
                 services.AddSingleton<Desktop.Wpf.Features.Simulator.ISimulatorToMainTransportService, Desktop.Wpf.Features.Simulator.SimulatorToMainTransportService>();
                 services.AddScoped<Desktop.Wpf.Features.Simulator.ISimulatorRelayDeliveryService>(sp =>
                     new Desktop.Wpf.Features.Simulator.SimulatorRelayDeliveryService(
