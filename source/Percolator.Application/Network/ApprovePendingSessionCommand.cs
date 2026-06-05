@@ -236,7 +236,7 @@ namespace Percolator.Application.Network
                 DirectSessionId = sessionId.Value.ToString()
             };
             var initial = session.Encrypt(Plaintext.FromBytes(inner.ToByteArray()), _clock);
-
+            await _sessions.UpdateAsync(session, cancellationToken).ConfigureAwait(false);
             if (!pending.IsRelayed)
             {
                 // Routing-profile mutation boundary: only on explicit acceptance of a direct invite.
