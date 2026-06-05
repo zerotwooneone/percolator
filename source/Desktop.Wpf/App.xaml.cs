@@ -119,7 +119,6 @@ public partial class App : Application
                 services.AddSingleton<SelectedChannelModel>();
                 services.AddSingleton<SelectedPeerConnectionStateCache>();
                 services.AddScoped<SelectedChannelPaneViewModel>();
-                services.AddScoped<IPendingHandshakeSimulatorService, PendingHandshakeSimulatorService>();
                 services.AddSingleton<Desktop.Wpf.Features.Simulator.JsonSimulatorStateRepository>();
                 services.AddSingleton<Desktop.Wpf.Features.Simulator.ISimulatorStateRepository>(sp =>
                     new Desktop.Wpf.Features.Simulator.QueuedSimulatorStateRepository(

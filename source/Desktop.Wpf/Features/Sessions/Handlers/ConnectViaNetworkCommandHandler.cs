@@ -84,11 +84,17 @@ public sealed class ConnectViaNetworkCommandHandler : IRequestHandler<ConnectVia
         try
         {
             var endpoint = ParseDnsEndPoint(request.DirectEndpoint);
+            
+            if (_active.Identity is null)
+            {
+                return new ConnectViaNetworkResult.Failed("Identity not loaded.");
+            }
 
             var invite = _reverseSignalInvites.CreateInvite(
                 targetDisplayName: request.TargetDisplayName,
                 targetEndpointHost: endpoint.Host,
-                targetEndpointPort: endpoint.Port);
+                targetEndpointPort: endpoint.Port,
+                listeningPort: _active.Identity.ListeningPort);
 
             _ = await _sessionTransport.EstablishDirectSessionAsync(endpoint, invite);
 

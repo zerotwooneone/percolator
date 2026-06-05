@@ -34,7 +34,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModelDiagnosticsTests
         var model = new SimulatedPeerModel(peerId, selfIdentityId: 99000, "peer", isRelayCapable: false, spki, priv, endpoint: new System.Net.DnsEndPoint("127.77.1.1", 5002));
 
         var diagnostics = new SimulatorDiagnosticsService();
-        var options = Options.Create(new TransportOptions { GrpcPort = 5002 });
+        var options = Options.Create(new TransportOptions {  });
 
         var active = new ActiveIdentityContext();
         active.SetActiveIdentity(new IdentityRecord(Guid.NewGuid(), "self"));

@@ -260,7 +260,6 @@ async Task HostCommandHandler(InvocationContext context)
             if (overridePort.HasValue)
             {
                 overrides["Node:Port"] = overridePort.Value.ToString();
-                overrides["Transport:GrpcPort"] = (overridePort.Value + 1).ToString();
             }
             if (!string.IsNullOrWhiteSpace(dbFile))
             {
