@@ -1,8 +1,6 @@
 using System;
 using System.Threading;
 using Desktop.Wpf.Features.Sessions;
-using Desktop.Wpf.Features.Sessions.Models;
-using Desktop.Wpf.Features.Sessions.Queries;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Time.Testing;

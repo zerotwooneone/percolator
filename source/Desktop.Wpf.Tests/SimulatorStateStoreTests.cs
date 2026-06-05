@@ -12,9 +12,7 @@ using Microsoft.Extensions.Options;
 using NUnit.Framework;
 using Percolator.Application.Configuration;
 using Percolator.Cryptography;
-using Percolator.Cryptography.Primitives;
 using Percolator.Identity;
-using Percolator.Network;
 
 namespace Desktop.Wpf.Tests;
 

@@ -1,6 +1,4 @@
 using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Threading;
@@ -12,9 +10,7 @@ using Moq;
 using NUnit.Framework;
 using ObservableCollections;
 using Percolator.Cryptography;
-using Percolator.Cryptography.Primitives;
 using Percolator.Identity;
-using Percolator.Network;
 
 namespace Desktop.Wpf.Tests;
 

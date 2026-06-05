@@ -1,5 +1,4 @@
 using System;
-using System.Collections.ObjectModel;
 using System.Linq;
 using Desktop.Wpf.Features.Self;
 using Desktop.Wpf.Features.Sessions;
@@ -11,6 +10,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using NUnit.Framework;
 using Percolator.Application.Identity;
+using Percolator.Identity;
+using Percolator.Identity.Model;
+using R3;
 
 namespace Desktop.Wpf.Tests;
 
@@ -28,6 +30,8 @@ public sealed class SessionsSidebarViewModelTests
         var pendingMenu = new PendingHandshakesMenuViewModel(pendingWindowManager.Object, Mock.Of<MediatR.IMediator>(), state, activeIdentity, ui);
         var selection = new SelectedChannelModel();
         var identityStateService = new Mock<IIdentityStateService>();
+        var selfModel = new SelfIdentityModel(new SelfId(1), "Test", new ListeningPort(5000), true);
+        identityStateService.Setup(x => x.ActiveIdentity).Returns(R3.Observable.Return(selfModel).ToReadOnlyReactiveProperty());
 
         var sut = new SessionsSidebarViewModel(
             identityStateService.Object,

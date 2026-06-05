@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Threading;
@@ -11,11 +10,10 @@ using Desktop.Wpf.Features.Simulator.Models;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 using NUnit.Framework;
 using Percolator.Application.Configuration;
 using Percolator.Cryptography;
-using Percolator.Cryptography.Primitives;
-using Percolator.Network;
 
 namespace Desktop.Wpf.Tests;
 
@@ -29,6 +27,7 @@ public sealed class SimulatorStateServiceInitializationTests
         var innerStore = new InMemorySimulatorStateRepository();
         var store = new GatedLoadSimulatorStateRepository(innerStore);
         var diagnostics = new SimulatorDiagnosticsService();
+        var fakeTimeProvider = new FakeTimeProvider();
 
         var services = new ServiceCollection();
         services.AddSingleton<IClock, SystemClock>();
@@ -38,7 +37,7 @@ public sealed class SimulatorStateServiceInitializationTests
         var transportOptions = Options.Create(new TransportOptions { SimulatorPort = 5002 });
         var engine = new SignalProtocolEngine(new SystemClock());
 
-        var sut = new SimulatorStateService(store, diagnostics, scopeFactory, new NoopSimulatorToMainTransportService(), transportOptions, engine);
+        var sut = new SimulatorStateService(store, diagnostics, scopeFactory, new NoopSimulatorToMainTransportService(), transportOptions, engine, fakeTimeProvider);
 
         // Act: Call InitializeAsync concurrently
         var initializer = (ISimulatorStateInitializer)sut;
@@ -133,6 +132,7 @@ public sealed class SimulatorStateServiceInitializationTests
         store.ReleaseLoadWith(snapshot);
 
         var diagnostics = new SimulatorDiagnosticsService();
+        var fakeTimeProvider = new FakeTimeProvider();
         var services = new ServiceCollection();
         services.AddSingleton<IClock, SystemClock>();
         var sp = services.BuildServiceProvider();
@@ -146,7 +146,8 @@ public sealed class SimulatorStateServiceInitializationTests
             scopeFactory,
             new NoopSimulatorToMainTransportService(),
             transportOptions,
-            engine);
+            engine,
+            fakeTimeProvider);
 
         // Act
         var initializer = (ISimulatorStateInitializer)sut;
@@ -178,6 +179,7 @@ public sealed class SimulatorStateServiceInitializationTests
         var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
 
         var diagnostics = new SimulatorDiagnosticsService();
+        var fakeTimeProvider = new FakeTimeProvider();
         var transportOptions = Options.Create(new TransportOptions { SimulatorPort = 5002 });
         var engine = new SignalProtocolEngine(new SystemClock());
 
@@ -190,7 +192,8 @@ public sealed class SimulatorStateServiceInitializationTests
             scopeFactory,
             new NoopSimulatorToMainTransportService(),
             transportOptions,
-            engine);
+            engine,
+            fakeTimeProvider);
 
         // Release empty snapshot so InitializeAsync can complete
         store.ReleaseLoadWith(new SimulatorStateSnapshot(

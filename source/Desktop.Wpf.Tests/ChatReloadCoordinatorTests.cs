@@ -1,18 +1,14 @@
 using System;
 using Desktop.Wpf.Features.Chat;
 using Desktop.Wpf.Features.Chat.State;
-using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Time.Testing;
 using Moq;
 using NUnit.Framework;
 using Percolator.Application.Identity;
 using Percolator.Chat;
-using Percolator.Chat.App;
 using Percolator.Chat.ValueObjects;
-using Percolator.Identity;
 using Percolator.Network;
-using R3;
 
 namespace Desktop.Wpf.Tests;
 

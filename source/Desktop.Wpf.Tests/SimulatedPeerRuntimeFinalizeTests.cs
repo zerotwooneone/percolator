@@ -1,7 +1,5 @@
 using System;
-using System.Collections.Generic;
 using System.Linq;
-using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Desktop.Wpf.Features.Simulator;
@@ -11,9 +9,10 @@ using Desktop.Wpf.Features.Sessions;
 using FluentAssertions;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
-using NUnit.Framework;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
+using NUnit.Framework;
 using Percolator.Application.Configuration;
 using Percolator.Contracts;
 using Percolator.Cryptography;
@@ -57,10 +56,11 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
         var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
 
         var diagnostics = new SimulatorDiagnosticsService();
+        var fakeTimeProvider = new FakeTimeProvider();
         var transportOptions = Options.Create(new TransportOptions { SimulatorPort = 5002 });
         var engine = new SignalProtocolEngine(new SystemClock());
 
-        var sut = new SimulatorStateService(repo, diagnostics, scopeFactory, new NoopSimulatorToMainTransportService(), transportOptions, engine);
+        var sut = new SimulatorStateService(repo, diagnostics, scopeFactory, new NoopSimulatorToMainTransportService(), transportOptions, engine, fakeTimeProvider);
         await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
 
         // Setup: Add outbound invite to simulate simulator-initiated handshake state
@@ -148,10 +148,11 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
         var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
 
         var diagnostics = new SimulatorDiagnosticsService();
+        var fakeTimeProvider = new FakeTimeProvider();
         var transportOptions = Options.Create(new TransportOptions { SimulatorPort = 5002 });
         var engine = new SignalProtocolEngine(new SystemClock());
 
-        var sut = new SimulatorStateService(repo, diagnostics, scopeFactory, new NoopSimulatorToMainTransportService(), transportOptions, engine);
+        var sut = new SimulatorStateService(repo, diagnostics, scopeFactory, new NoopSimulatorToMainTransportService(), transportOptions, engine, fakeTimeProvider);
         await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
 
         // Act: Response arrives but there's no matching outbound invite
@@ -195,10 +196,11 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
         var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
 
         var diagnostics = new SimulatorDiagnosticsService();
+        var fakeTimeProvider = new FakeTimeProvider();
         var transportOptions = Options.Create(new TransportOptions { SimulatorPort = 5002 });
         var engine = new SignalProtocolEngine(new SystemClock());
 
-        var sut = new SimulatorStateService(repo, diagnostics, scopeFactory, new NoopSimulatorToMainTransportService(), transportOptions, engine);
+        var sut = new SimulatorStateService(repo, diagnostics, scopeFactory, new NoopSimulatorToMainTransportService(), transportOptions, engine, fakeTimeProvider);
         await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
 
         // Act & Assert: Response with missing acceptor_identity_key should throw
@@ -237,10 +239,11 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
         var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
 
         var diagnostics = new SimulatorDiagnosticsService();
+        var fakeTimeProvider = new FakeTimeProvider();
         var transportOptions = Options.Create(new TransportOptions { SimulatorPort = 5002 });
         var engine = new SignalProtocolEngine(new SystemClock());
 
-        var sut = new SimulatorStateService(repo, diagnostics, scopeFactory, new NoopSimulatorToMainTransportService(), transportOptions, engine);
+        var sut = new SimulatorStateService(repo, diagnostics, scopeFactory, new NoopSimulatorToMainTransportService(), transportOptions, engine, fakeTimeProvider);
         await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
 
         // Act & Assert: Response with missing acceptor_x3dh_ephemeral_key should throw
@@ -279,10 +282,11 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
         var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
 
         var diagnostics = new SimulatorDiagnosticsService();
+        var fakeTimeProvider = new FakeTimeProvider();
         var transportOptions = Options.Create(new TransportOptions { SimulatorPort = 5002 });
         var engine = new SignalProtocolEngine(new SystemClock());
 
-        var sut = new SimulatorStateService(repo, diagnostics, scopeFactory, new NoopSimulatorToMainTransportService(), transportOptions, engine);
+        var sut = new SimulatorStateService(repo, diagnostics, scopeFactory, new NoopSimulatorToMainTransportService(), transportOptions, engine, fakeTimeProvider);
         await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
 
         // Act & Assert: Response with missing initial_ratchet_message should throw

@@ -1,6 +1,7 @@
 using Desktop.Wpf.Features.Sessions;
 using Desktop.Wpf.Features.Shell;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Percolator.Application.Identity;
 using Percolator.Identity;
 using Percolator.Identity.Model;
@@ -13,17 +14,35 @@ public sealed class IdentityStateService : IDisposable, IIdentityBootstrap, IIde
     private readonly DisposableBag _bag;
     private readonly IIdentityScopeAccessor _identityScopeAccessor;
     private readonly PeerConnectionStateService _peerConnectionStateService;
-    private readonly ReactiveProperty<SelfIdentityModel> _activeIdentity = new(new SelfIdentityModel(new SelfId(999), "Not Initialized", "N I", new ListeningPort(9999)));
+    private readonly TimeProvider _timeProvider;
+
+    private static readonly SelfIdentityModel None =
+        new SelfIdentityModel(new SelfId(999), "Unknown", new ListeningPort(9999));
+    private readonly ReactiveProperty<SelfIdentityModel> _activeIdentity = new(None);
+    private readonly Subject<IdentityMutation> _mutationSubject = new();
+    private readonly ILogger<IdentityStateService> _logger;
     public ReadOnlyReactiveProperty<SelfIdentityModel> ActiveIdentity => _activeIdentity;
 
     public IdentityStateService(
         IIdentityScopeAccessor identityScopeAccessor,
-        PeerConnectionStateService peerConnectionStateService)
+        PeerConnectionStateService peerConnectionStateService,
+        ILogger<IdentityStateService> logger,
+        TimeProvider timeProvider)
     {
         _identityScopeAccessor = identityScopeAccessor;
         _peerConnectionStateService = peerConnectionStateService;
+        _logger = logger;
+        _timeProvider = timeProvider;
         _bag = new DisposableBag();
         _activeIdentity.AddTo(ref _bag);
+        _mutationSubject.AddTo(ref _bag);
+
+        // Batch mutations with 250ms timeout
+        _mutationSubject
+            .Chunk(TimeSpan.FromMilliseconds(250), _timeProvider)
+            .Where(mutations => mutations.Length > 0)
+            .SubscribeAwait(async (mutations, ct) => await ProcessMutationsAsync(mutations, ct), AwaitOperation.Sequential)
+            .AddTo(ref _bag);
     }
 
     public async Task BootstrapAsync(CancellationToken cancellationToken = default)
@@ -39,11 +58,11 @@ public sealed class IdentityStateService : IDisposable, IIdentityBootstrap, IIde
 
         // Populate SelfIdentity model
         var displayName = domainIdentity.DisplayName?.Value ?? domainIdentity.Id.ToString();
-        _activeIdentity.Value = new SelfIdentityModel(domainIdentity.Id, 
-            displayName, 
-            ComputeInitials(displayName),
-            domainIdentity.ListeningPort, 
+        _activeIdentity.Value = new SelfIdentityModel(domainIdentity.Id,
+            displayName,
+            domainIdentity.ListeningPort,
             true);
+        
 
         // Resolve application identity + keys and populate ActiveIdentityContext
         // This orchestrator is also responsible for publishing the ActiveIdentityLoadedEvent to boot infrastructure
@@ -54,13 +73,62 @@ public sealed class IdentityStateService : IDisposable, IIdentityBootstrap, IIde
         await _peerConnectionStateService.InitializeAsync(domainIdentity.Id, cancellationToken).ConfigureAwait(false);
     }
 
-    private static string ComputeInitials(string? name)
+    public void UpdateDisplayName(SelfId targetId, string newName)
     {
-        if (string.IsNullOrWhiteSpace(name)) return "?";
-        var parts = name.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length == 1)
-            return parts[0].Substring(0, Math.Min(2, parts[0].Length)).ToUpperInvariant();
-        return (parts[0][0].ToString() + parts[^1][0].ToString()).ToUpperInvariant();
+        // Immediately update the UI model
+        if (_activeIdentity.Value.Id == targetId)
+        {
+            var current = _activeIdentity.Value;
+            _activeIdentity.Value = new SelfIdentityModel(targetId,
+                newName,
+                current.ListeningPort,
+                current.Active);
+        }
+
+        // Push mutation to batch processor
+        _mutationSubject.OnNext(new IdentityMutation(targetId, identity => identity.SetDisplayName(newName)));
+    }
+
+    private async Task ProcessMutationsAsync(IList<IdentityMutation> mutations, CancellationToken cancellationToken)
+    {
+        // Group by SelfId
+        var grouped = mutations.GroupBy(m => m.TargetId);
+
+        foreach (var group in grouped)
+        {
+            var targetId = group.Key;
+            
+            if (_identityScopeAccessor.Current is null)
+            {
+                _logger.LogError("Identity scope not available while processing mutations for {TargetId}", targetId);
+                continue;
+            }
+
+            try
+            {
+                using var scope = _identityScopeAccessor.Current.CreateScope();
+                var repository = scope.ServiceProvider.GetRequiredService<ISelfIdentityRepository>();
+                var identity = await repository.GetByIdAsync(targetId, cancellationToken).ConfigureAwait(false);
+
+                if (identity is null)
+                {
+                    _logger.LogError("Identity {TargetId} not found while processing mutations", targetId);
+                    continue;
+                }
+
+                // Apply mutations in order
+                foreach (var mutation in group)
+                {
+                    mutation.Apply(identity);
+                }
+
+                await repository.SaveAsync(identity, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to process mutations for identity {TargetId}", targetId);
+            }
+        }
     }
 
     public void Dispose()
@@ -68,3 +136,5 @@ public sealed class IdentityStateService : IDisposable, IIdentityBootstrap, IIde
         _bag.Dispose();
     }
 }
+
+public sealed record IdentityMutation(SelfId TargetId, Action<Percolator.Identity.Model.SelfIdentity> Apply);

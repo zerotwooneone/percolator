@@ -10,6 +10,7 @@ using Desktop.Wpf.Features.Simulator.Protocol;
 using FluentAssertions;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
+using Microsoft.Extensions.Time.Testing;
 using NUnit.Framework;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -49,10 +50,11 @@ public sealed class SimulatedPeerPendingInboundDirectInviteTests
         var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
 
         var diagnostics = new SimulatorDiagnosticsService();
+        var fakeTimeProvider = new FakeTimeProvider();
         var transportOptions = Options.Create(new TransportOptions { SimulatorPort = 5002 });
         var engine = new SignalProtocolEngine(new SystemClock());
 
-        var sut = new SimulatorStateService(repo, diagnostics, scopeFactory, new NoopSimulatorToMainTransportService(), transportOptions, engine);
+        var sut = new SimulatorStateService(repo, diagnostics, scopeFactory, new NoopSimulatorToMainTransportService(), transportOptions, engine, fakeTimeProvider);
         await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
 
         // Create a valid EstablishDirectSessionRequest
@@ -144,10 +146,11 @@ public sealed class SimulatedPeerPendingInboundDirectInviteTests
         var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
 
         var diagnostics = new SimulatorDiagnosticsService();
+        var fakeTimeProvider = new FakeTimeProvider();
         var transportOptions = Options.Create(new TransportOptions { SimulatorPort = 5002 });
         var engine = new SignalProtocolEngine(new SystemClock());
 
-        var sut = new SimulatorStateService(repo, diagnostics, scopeFactory, new NoopSimulatorToMainTransportService(), transportOptions, engine);
+        var sut = new SimulatorStateService(repo, diagnostics, scopeFactory, new NoopSimulatorToMainTransportService(), transportOptions, engine, fakeTimeProvider);
         await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
 
         // Create and add a pending inbound direct invite
@@ -234,10 +237,11 @@ public sealed class SimulatedPeerPendingInboundDirectInviteTests
         var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
 
         var diagnostics = new SimulatorDiagnosticsService();
+        var fakeTimeProvider = new FakeTimeProvider();
         var transportOptions = Options.Create(new TransportOptions { SimulatorPort = 5002 });
         var engine = new SignalProtocolEngine(new SystemClock());
 
-        var sut = new SimulatorStateService(repo, diagnostics, scopeFactory, new NoopSimulatorToMainTransportService(), transportOptions, engine);
+        var sut = new SimulatorStateService(repo, diagnostics, scopeFactory, new NoopSimulatorToMainTransportService(), transportOptions, engine, fakeTimeProvider);
         await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
 
         // Create and add a pending inbound direct invite

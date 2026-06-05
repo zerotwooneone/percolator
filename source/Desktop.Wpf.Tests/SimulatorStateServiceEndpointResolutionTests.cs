@@ -4,13 +4,12 @@ using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 using Desktop.Wpf.Features.Simulator;
-using Desktop.Wpf.Features.Simulator.Models;
 using FluentAssertions;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 using NUnit.Framework;
 using Percolator.Application.Configuration;
 using Percolator.Cryptography;
-using Percolator.Network;
 using Desktop.Wpf.Features.Simulator.Protocol;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -120,6 +119,7 @@ public sealed class SimulatorStateServiceEndpointResolutionTests
     {
         var store = new InMemorySimulatorStateRepository();
         var diagnostics = new SimulatorDiagnosticsService();
+        var fakeTimeProvider = new FakeTimeProvider();
 
         var services = new ServiceCollection();
         services.AddSingleton<IClock>(new TestClock(DateTimeOffset.UtcNow));
@@ -129,6 +129,6 @@ public sealed class SimulatorStateServiceEndpointResolutionTests
         var transportOptions = Options.Create(new TransportOptions { SimulatorPort = 5002 });
         var engine = new SignalProtocolEngine(new TestClock(DateTimeOffset.UtcNow));
 
-        return new SimulatorStateService(store, diagnostics, scopeFactory, new NoopSimulatorToMainTransportService(), transportOptions, engine);
+        return new SimulatorStateService(store, diagnostics, scopeFactory, new NoopSimulatorToMainTransportService(), transportOptions, engine, fakeTimeProvider);
     }
 }

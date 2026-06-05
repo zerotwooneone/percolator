@@ -6,9 +6,12 @@ using Desktop.Wpf.Features.Sessions;
 using Desktop.Wpf.Features.Shell;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Time.Testing;
 using Moq;
 using NUnit.Framework;
 using Percolator.Application.Identity;
+using Percolator.Application.Sessions;
 using Percolator.Identity;
 using Percolator.Identity.Model;
 
@@ -18,7 +21,8 @@ namespace Desktop.Wpf.Tests.Features.Self;
 public class IdentityStateServiceTests
 {
     private Mock<IIdentityScopeAccessor> _identityScopeAccessorMock;
-    private Mock<IServiceScopeFactory> _scopeFactoryMock;
+    private Mock<ILogger<IdentityStateService>> _loggerMock;
+    private FakeTimeProvider _fakeTimeProvider;
     private PeerConnectionStateService _peerConnectionStateService;
     private IdentityStateService _sut;
 
@@ -26,12 +30,8 @@ public class IdentityStateServiceTests
     public void Setup()
     {
         _identityScopeAccessorMock = new Mock<IIdentityScopeAccessor>();
-        _scopeFactoryMock = new Mock<IServiceScopeFactory>(MockBehavior.Loose);
-        _peerConnectionStateService = new PeerConnectionStateService(_scopeFactoryMock.Object);
-
-        _sut = new IdentityStateService(
-            _identityScopeAccessorMock.Object,
-            _peerConnectionStateService);
+        _loggerMock = new Mock<ILogger<IdentityStateService>>();
+        _fakeTimeProvider = new FakeTimeProvider();
     }
 
     [TearDown]
@@ -41,17 +41,50 @@ public class IdentityStateServiceTests
         _peerConnectionStateService?.Dispose();
     }
 
+    private void InitializeSut(Action<IServiceCollection> configure = null)
+    {
+        var services = new ServiceCollection();
+
+        // Default dummy services to satisfy internal dependencies without brittle setups
+        services.AddSingleton(Mock.Of<IStartupIdentityService>());
+        services.AddSingleton(Mock.Of<IIdentityOrchestrator>());
+        services.AddSingleton(Mock.Of<ISelfIdentityRepository>());
+        
+        // Configure query mocks to return empty arrays instead of null
+        var sidebarQueriesMock = new Mock<IPeerConnectionSidebarQueries>();
+        sidebarQueriesMock.Setup(q => q.LoadSidebarConnectionsAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<SidebarPeerConnectionDto>());
+        services.AddSingleton(sidebarQueriesMock.Object);
+
+        var pendingQueriesMock = new Mock<IPeerConnectionQueries>();
+        pendingQueriesMock.Setup(q => q.LoadPendingInboundAsync(It.IsAny<SelfId>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<PendingInboundSnapshot>());
+        services.AddSingleton(pendingQueriesMock.Object);
+
+        configure?.Invoke(services);
+
+        var provider = services.BuildServiceProvider();
+        _identityScopeAccessorMock.Setup(a => a.Current).Returns(provider);
+
+        // Using real DI scope factory removes brittle mock verification around internal scope creation
+        _peerConnectionStateService = new PeerConnectionStateService(provider.GetRequiredService<IServiceScopeFactory>());
+
+        _sut = new IdentityStateService(
+            _identityScopeAccessorMock.Object,
+            _peerConnectionStateService,
+            _loggerMock.Object,
+            _fakeTimeProvider);
+    }
+
     [Test]
     public void BootstrapAsync_WhenIdentityScopeNotAvailable_ThrowsInvalidOperationException()
     {
         // ARRANGE
-        _identityScopeAccessorMock
-            .Setup(a => a.Current)
-            .Returns((IServiceProvider?)null);
+        InitializeSut();
+        _identityScopeAccessorMock.Setup(a => a.Current).Returns((IServiceProvider?)null);
 
         // ACT & ASSERT
-        Assert.ThrowsAsync<InvalidOperationException>(
-            () => _sut.BootstrapAsync(CancellationToken.None));
+        Assert.ThrowsAsync<InvalidOperationException>(() => _sut.BootstrapAsync(CancellationToken.None));
     }
 
     [Test]
@@ -59,67 +92,19 @@ public class IdentityStateServiceTests
     {
         // ARRANGE
         var selfId = new SelfId(1);
-        var peerId = new PeerId(Guid.NewGuid());
-        var listeningPort = new ListeningPort(5000);
+        var domainIdentity = new SelfIdentity(selfId, new PeerId(Guid.NewGuid()), new ListeningPort(5000));
+        
+        var startupMock = new Mock<IStartupIdentityService>();
+        startupMock.Setup(s => s.ResolveOrCreateAsync(It.IsAny<CancellationToken>())).ReturnsAsync(domainIdentity);
 
-        var domainIdentity = new SelfIdentity(selfId, peerId, listeningPort);
-        // DisplayName is null
-
-        var serviceProviderMock = new Mock<IServiceProvider>();
-        var startupIdentityServiceMock = new Mock<IStartupIdentityService>();
-        var identityOrchestratorMock = new Mock<IIdentityOrchestrator>();
-
-        startupIdentityServiceMock
-            .Setup(s => s.ResolveOrCreateAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(domainIdentity);
-
-        identityOrchestratorMock
-            .Setup(o => o.ResolveIdentityAsync(selfId, It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
-        serviceProviderMock
-            .Setup(sp => sp.GetService(typeof(IStartupIdentityService)))
-            .Returns(startupIdentityServiceMock.Object);
-
-        serviceProviderMock
-            .Setup(sp => sp.GetService(typeof(IIdentityOrchestrator)))
-            .Returns(identityOrchestratorMock.Object);
-
-        _identityScopeAccessorMock
-            .Setup(a => a.Current)
-            .Returns(serviceProviderMock.Object);
-
-        var scopeMock = new Mock<IServiceScope>();
-        scopeMock.SetupGet(s => s.ServiceProvider).Returns(serviceProviderMock.Object);
-
-        _scopeFactoryMock
-            .Setup(f => f.CreateScope())
-            .Returns(scopeMock.Object);
-
-        var sidebarQueriesMock = new Mock<Percolator.Application.Sessions.IPeerConnectionSidebarQueries>();
-        sidebarQueriesMock
-            .Setup(q => q.LoadSidebarConnectionsAsync(selfId.Value, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Array.Empty<Percolator.Application.Sessions.SidebarPeerConnectionDto>());
-
-        serviceProviderMock
-            .Setup(sp => sp.GetService(typeof(Percolator.Application.Sessions.IPeerConnectionSidebarQueries)))
-            .Returns(sidebarQueriesMock.Object);
-
-        var pendingQueriesMock = new Mock<Percolator.Application.Sessions.IPeerConnectionQueries>();
-        pendingQueriesMock
-            .Setup(q => q.LoadPendingInboundAsync(selfId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Array.Empty<Percolator.Application.Sessions.PendingInboundSnapshot>());
-
-        serviceProviderMock
-            .Setup(sp => sp.GetService(typeof(Percolator.Application.Sessions.IPeerConnectionQueries)))
-            .Returns(pendingQueriesMock.Object);
+        InitializeSut(services => services.AddSingleton(startupMock.Object));
 
         // ACT
         await _sut.BootstrapAsync(CancellationToken.None);
 
         // ASSERT
-        _sut.ActiveIdentity.CurrentValue.DisplayName.Value.Should().Be(selfId.ToString());
-        _sut.ActiveIdentity.CurrentValue.Initials.CurrentValue.Should().Be("1"); // First character of "1"
+        _sut.ActiveIdentity.CurrentValue.DisplayName.Should().Be(selfId.ToString());
+        _sut.ActiveIdentity.CurrentValue.Initials.Should().Be("1"); // First character of "1"
     }
 
     [Test]
@@ -127,70 +112,79 @@ public class IdentityStateServiceTests
     {
         // ARRANGE
         var selfId = new SelfId(1);
-        var peerId = new PeerId(Guid.NewGuid());
         var listeningPort = new ListeningPort(5000);
-        var displayName = "Alice";
+        var domainIdentity = new SelfIdentity(selfId, new PeerId(Guid.NewGuid()), listeningPort);
+        domainIdentity.SetDisplayName("Alice");
 
-        var domainIdentity = new SelfIdentity(selfId, peerId, listeningPort);
-        domainIdentity.SetDisplayName(displayName);
+        var startupMock = new Mock<IStartupIdentityService>();
+        startupMock.Setup(s => s.ResolveOrCreateAsync(It.IsAny<CancellationToken>())).ReturnsAsync(domainIdentity);
 
-        var serviceProviderMock = new Mock<IServiceProvider>();
-        var startupIdentityServiceMock = new Mock<IStartupIdentityService>();
-        var identityOrchestratorMock = new Mock<IIdentityOrchestrator>();
-
-        startupIdentityServiceMock
-            .Setup(s => s.ResolveOrCreateAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(domainIdentity);
-
-        identityOrchestratorMock
-            .Setup(o => o.ResolveIdentityAsync(selfId, It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
-        serviceProviderMock
-            .Setup(sp => sp.GetService(typeof(IStartupIdentityService)))
-            .Returns(startupIdentityServiceMock.Object);
-
-        serviceProviderMock
-            .Setup(sp => sp.GetService(typeof(IIdentityOrchestrator)))
-            .Returns(identityOrchestratorMock.Object);
-
-        _identityScopeAccessorMock
-            .Setup(a => a.Current)
-            .Returns(serviceProviderMock.Object);
-
-        var scopeMock = new Mock<IServiceScope>();
-        scopeMock.SetupGet(s => s.ServiceProvider).Returns(serviceProviderMock.Object);
-
-        _scopeFactoryMock
-            .Setup(f => f.CreateScope())
-            .Returns(scopeMock.Object);
-
-        var sidebarQueriesMock = new Mock<Percolator.Application.Sessions.IPeerConnectionSidebarQueries>();
-        sidebarQueriesMock
-            .Setup(q => q.LoadSidebarConnectionsAsync(selfId.Value, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Array.Empty<Percolator.Application.Sessions.SidebarPeerConnectionDto>());
-
-        serviceProviderMock
-            .Setup(sp => sp.GetService(typeof(Percolator.Application.Sessions.IPeerConnectionSidebarQueries)))
-            .Returns(sidebarQueriesMock.Object);
-
-        var pendingQueriesMock = new Mock<Percolator.Application.Sessions.IPeerConnectionQueries>();
-        pendingQueriesMock
-            .Setup(q => q.LoadPendingInboundAsync(selfId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Array.Empty<Percolator.Application.Sessions.PendingInboundSnapshot>());
-
-        serviceProviderMock
-            .Setup(sp => sp.GetService(typeof(Percolator.Application.Sessions.IPeerConnectionQueries)))
-            .Returns(pendingQueriesMock.Object);
+        InitializeSut(services => services.AddSingleton(startupMock.Object));
 
         // ACT
         await _sut.BootstrapAsync(CancellationToken.None);
 
         // ASSERT
         _sut.ActiveIdentity.CurrentValue.Id.Should().Be(selfId);
-        _sut.ActiveIdentity.CurrentValue.DisplayName.Value.Should().Be(displayName);
-        _sut.ActiveIdentity.CurrentValue.Initials.CurrentValue.Should().Be("AL"); // First two letters of "Alice"
-        _sut.ActiveIdentity.CurrentValue.ListeningPort.CurrentValue.Should().Be(listeningPort);
-        _sut.ActiveIdentity.CurrentValue.Active.Value.Should().BeTrue();
+        _sut.ActiveIdentity.CurrentValue.DisplayName.Should().Be("Alice");
+        _sut.ActiveIdentity.CurrentValue.Initials.Should().Be("AL");
+        _sut.ActiveIdentity.CurrentValue.ListeningPort.Should().Be(listeningPort);
+        _sut.ActiveIdentity.CurrentValue.Active.Should().BeTrue();
+    }
+
+    [Test]
+    public void UpdateDisplayName_WhenCalled_ImmediatelyUpdatesActiveIdentity()
+    {
+        // ARRANGE
+        var selfId = new SelfId(1);
+        var domainIdentity = new SelfIdentity(selfId, new PeerId(Guid.NewGuid()), new ListeningPort(5000));
+        domainIdentity.SetDisplayName("Alice");
+
+        var startupMock = new Mock<IStartupIdentityService>();
+        startupMock.Setup(s => s.ResolveOrCreateAsync(It.IsAny<CancellationToken>())).ReturnsAsync(domainIdentity);
+
+        InitializeSut(services => services.AddSingleton(startupMock.Object));
+        _sut.BootstrapAsync(CancellationToken.None).GetAwaiter().GetResult();
+
+        // ACT
+        var newName = "Bob";
+        _sut.UpdateDisplayName(selfId, newName);
+
+        // ASSERT - UI model should update immediately
+        _sut.ActiveIdentity.CurrentValue.DisplayName.Should().Be(newName);
+        _sut.ActiveIdentity.CurrentValue.Initials.Should().Be("BO");
+    }
+
+    [Test]
+    public async Task UpdateDisplayName_WhenCalled_QueuesMutationForBatchProcessing()
+    {
+        // ARRANGE
+        var selfId = new SelfId(1);
+        var domainIdentity = new SelfIdentity(selfId, new PeerId(Guid.NewGuid()), new ListeningPort(5000));
+        domainIdentity.SetDisplayName("Alice");
+
+        var startupMock = new Mock<IStartupIdentityService>();
+        startupMock.Setup(s => s.ResolveOrCreateAsync(It.IsAny<CancellationToken>())).ReturnsAsync(domainIdentity);
+
+        var repoMock = new Mock<ISelfIdentityRepository>();
+        repoMock.Setup(r => r.GetByIdAsync(selfId, It.IsAny<CancellationToken>())).ReturnsAsync(domainIdentity);
+
+        InitializeSut(services => 
+        {
+            services.AddSingleton(startupMock.Object);
+            services.AddSingleton(repoMock.Object);
+        });
+        
+        await _sut.BootstrapAsync(CancellationToken.None);
+
+        // ACT
+        var newName = "Bob";
+        _sut.UpdateDisplayName(selfId, newName);
+
+        // Advance fake time to trigger batch processing (250ms timeout)
+        _fakeTimeProvider.Advance(TimeSpan.FromMilliseconds(300));
+
+        // ASSERT - Only verify the primary side effect (database save via public interface)
+        repoMock.Verify(r => r.SaveAsync(It.Is<SelfIdentity>(i => i.DisplayName != null && i.DisplayName.Value == newName), It.IsAny<CancellationToken>()), Times.Once);
     }
 }

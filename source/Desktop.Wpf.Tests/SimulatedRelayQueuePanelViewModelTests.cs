@@ -1,6 +1,4 @@
 using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Desktop.Wpf.Features.Simulator;
@@ -9,9 +7,7 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
 using NUnit.Framework;
-using ObservableCollections;
 using Percolator.Identity;
-using Percolator.Network;
 using PeerId = Percolator.Network.PeerId;
 
 namespace Desktop.Wpf.Tests;

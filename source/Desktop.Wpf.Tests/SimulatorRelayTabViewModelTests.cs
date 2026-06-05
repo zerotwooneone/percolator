@@ -1,11 +1,9 @@
 using System;
 using Desktop.Wpf.Features.Simulator;
-using Desktop.Wpf.Features.Simulator.Models;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
 using NUnit.Framework;
-using ObservableCollections;
 using Percolator.Network;
 
 

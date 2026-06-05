@@ -41,6 +41,7 @@
   <system:String x:Key="IconRelay">&#xF50F;</system:String>
   <system:String x:Key="IconDirect">&#xF0B45;</system:String>
   <system:String x:Key="IconUserAdd">&#xF234;</system:String>
+  <system:String x:Key="IconUser">&#xF007;</system:String>
   <system:String x:Key="IconGroup">&#xF0C0;</system:String>
   <system:String x:Key="IconCircleCheck">&#xF05D;</system:String>
   <system:String x:Key="IconFire">&#xF0238;</system:String>

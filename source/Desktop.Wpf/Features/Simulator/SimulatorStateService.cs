@@ -63,7 +63,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         ISimulatorToMainTransportService toMain,
         IOptions<TransportOptions> transportOptions,
         Desktop.Wpf.Features.Simulator.Protocol.ISignalProtocolEngine engine,
-        TimeProvider? timeProvider = null)
+        TimeProvider timeProvider)
     {
         _store = store;
         _diagnostics = diagnostics;
@@ -72,7 +72,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         _transportOptions = transportOptions;
         _engine = engine;
 
-        _timeProvider = timeProvider ?? ObservableSystem.DefaultTimeProvider;
+        _timeProvider = timeProvider;
 
         _saveTrigger
             .Debounce(TimeSpan.FromMilliseconds(250), _timeProvider)

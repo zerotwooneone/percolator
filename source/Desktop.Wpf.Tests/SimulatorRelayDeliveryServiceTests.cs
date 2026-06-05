@@ -1,21 +1,15 @@
 using System;
-using System.Linq;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Desktop.Wpf.Features.Simulator;
-using FluentAssertions;
 using Google.Protobuf;
 using Microsoft.Extensions.Logging;
 using Moq;
 using NUnit.Framework;
 using Percolator.Contracts;
-using Percolator.Application.Identity;
-using Percolator.Application.Ingress;
-using Percolator.Application.Network;
 using Percolator.Identity;
 using Percolator.Identity.Model;
-using Percolator.Network;
 
 namespace Desktop.Wpf.Tests;
 

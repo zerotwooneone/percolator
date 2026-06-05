@@ -1,10 +1,7 @@
 using System;
-using System.Collections.ObjectModel;
-using System.Linq;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Windows;
 using Desktop.Wpf.Features.Simulator;
 using FluentAssertions;
 using Microsoft.Extensions.Options;
@@ -12,7 +9,6 @@ using Moq;
 using NUnit.Framework;
 using Percolator.Application.Configuration;
 using Percolator.Application.Identity;
-using Percolator.Cryptography;
 using Percolator.Identity.Model;
 using Percolator.Network;
 using R3;

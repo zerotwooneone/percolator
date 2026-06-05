@@ -1,6 +1,4 @@
 using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
@@ -12,6 +10,7 @@ using FluentAssertions;
 using NUnit.Framework;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 using Percolator.Application.Configuration;
 using Percolator.Cryptography;
 using Percolator.Network;
@@ -47,8 +46,9 @@ public sealed class SimulatedPeerRuntimeServiceDecryptFailureDiagnosticsTests
 
         var transportOptions = Options.Create(new TransportOptions { SimulatorPort = 5002 });
         var engine = new SignalProtocolEngine(new SystemClock());
+        var fakeTimeProvider = new FakeTimeProvider();
 
-        var sut = new SimulatorStateService(repo, diagnostics, scopeFactory, new NoopSimulatorToMainTransportService(), transportOptions, engine);
+        var sut = new SimulatorStateService(repo, diagnostics, scopeFactory, new NoopSimulatorToMainTransportService(), transportOptions, engine, fakeTimeProvider);
         await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
 
         var sessionId = new SessionId(Guid.NewGuid());

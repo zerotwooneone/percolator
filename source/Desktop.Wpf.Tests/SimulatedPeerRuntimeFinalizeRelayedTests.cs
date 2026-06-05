@@ -1,6 +1,4 @@
 using System;
-using System.Collections.Generic;
-using System.Security.Cryptography;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -10,12 +8,11 @@ using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 using NUnit.Framework;
 using Percolator.Application.Configuration;
 using Percolator.Contracts;
 using Percolator.Cryptography;
-using Percolator.Cryptography.Primitives;
-using Percolator.Network;
 using Desktop.Wpf.Features.Simulator.Protocol;
 using Desktop.Wpf.Features.Sessions;
 using Desktop.Wpf.Features.Simulator.Models;
@@ -60,6 +57,7 @@ public sealed class SimulatedPeerRuntimeFinalizeRelayedTests
         var transportOptions = Options.Create(new TransportOptions { SimulatorPort = 5002 });
         var engine = new SignalProtocolEngine(new SystemClock());
         var diagnostics = new SimulatorDiagnosticsService();
+        var fakeTimeProvider = new FakeTimeProvider();
 
         var state = new SimulatorStateService(
             store: repo,
@@ -67,7 +65,8 @@ public sealed class SimulatedPeerRuntimeFinalizeRelayedTests
             scopeFactory: scopeFactory,
             toMain: new NoopSimulatorToMainTransportService(),
             transportOptions: transportOptions,
-            engine: engine);
+            engine: engine,
+            timeProvider: fakeTimeProvider);
 
         await ((ISimulatorStateInitializer)state).InitializeAsync(CancellationToken.None);
 

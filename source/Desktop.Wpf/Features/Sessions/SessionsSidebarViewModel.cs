@@ -33,7 +33,8 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
         IWindowManager windowManager)
     {
         _bag = new DisposableBag();
-        SelfInitials = identityStateService.ActiveIdentity.CurrentValue.Initials
+        SelfInitials = identityStateService.ActiveIdentity
+            .Select(ai=>ai.Initials)
             .ToBindableReactiveProperty()
             .AddTo(ref _bag);
         _stateService = stateService;

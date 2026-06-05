@@ -9,7 +9,6 @@ using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using NUnit.Framework;
-using R3;
 
 namespace Desktop.Wpf.Tests;
 
