@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:controls="clr-namespace:Desktop.Wpf.Shared.Controls"
-        Title="Identity Settings" Height="280" Width="450"
+        Title="Identity Settings" Height="330" Width="450"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         Style="{StaticResource BaseWindow}">
@@ -15,15 +15,15 @@
       </StackPanel>
     </Grid>
 
-    <Grid Grid.Row="1" RowDefinitions="Auto,Auto,Auto">
+    <Grid Grid.Row="1" RowDefinitions="Auto,Auto,Auto,Auto">
       <TextBlock Grid.Row="0" Text="DISPLAY NAME" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
       <controls:MatInput Grid.Row="1" Margin="0,6,0,0"
                          Text="{Binding DisplayName.Value, UpdateSourceTrigger=PropertyChanged}"
                          Placeholder="Enter your display name" />
 
       <TextBlock Grid.Row="2" Margin="0,16,0,0" Text="LISTENING PORT" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
-      <Border Grid.Row="2" Margin="0,6,0,0" Style="{StaticResource BaseBorder}" Background="{StaticResource SurfaceContainerLowBrush}" Padding="12" CornerRadius="8">
-        <TextBlock Text="{Binding ListeningPort.Value}" FontWeight="SemiBold"/>
+      <Border Grid.Row="3" Margin="0,6,0,0" Style="{StaticResource BaseBorder}" Background="{StaticResource SurfaceContainerLowBrush}" Padding="12" CornerRadius="8">
+        <TextBox Text="{Binding ListeningPort.Value}" IsReadOnly="True" BorderThickness="0" Background="Transparent" FontWeight="SemiBold" VerticalAlignment="Center"/>
       </Border>
     </Grid>
 
