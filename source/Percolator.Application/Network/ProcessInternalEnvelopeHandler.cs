@@ -29,7 +29,6 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
     private readonly IDhtService _dhtService;
     private readonly IPeerRoutingProfileRepository _profileRepository;
     private readonly IMessageQueueService _mqService;
-    private readonly Percolator.Chat.App.IPkhPeerResolver _pkhPeerResolver;
     private readonly IPendingGroupInvitationRepository _pendingGroupInvitationRepository;
     private readonly Percolator.Chat.App.IGroupCryptoStateRepository _groupCryptoStateRepository;
     private readonly IGroupMessageCryptographyService _groupMessageCryptoService;
@@ -42,7 +41,6 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
         IDhtService dhtService,
         IMessageQueueService mqService,
         IPeerRoutingProfileRepository profileRepository,
-        Percolator.Chat.App.IPkhPeerResolver pkhPeerResolver,
         IPendingGroupInvitationRepository pendingGroupInvitationRepository,
         Percolator.Chat.App.IGroupCryptoStateRepository groupCryptoStateRepository,
         IGroupMessageCryptographyService groupMessageCryptoService,
@@ -54,7 +52,6 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
         _dhtService = dhtService;
         _mqService = mqService;
         _profileRepository = profileRepository;
-        _pkhPeerResolver = pkhPeerResolver;
         _pendingGroupInvitationRepository = pendingGroupInvitationRepository;
         _groupCryptoStateRepository = groupCryptoStateRepository;
         _groupMessageCryptoService = groupMessageCryptoService;

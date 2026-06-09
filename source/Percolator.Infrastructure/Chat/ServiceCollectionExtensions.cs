@@ -17,7 +17,6 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IMessageRepository, SqliteMessageRepository>();
         services.AddScoped<ChatApp.IDirectConversationResolver, ChatConversationResolver>();
         services.AddScoped<ChatApp.IChatMessageWriter, SqliteChatMessageWriter>();
-        services.AddScoped<IDirectSessionConversationLookup, SqliteDirectSessionConversationLookup>();
         services.AddScoped<ChatApp.IGroupCryptoStateRepository, SqliteGroupCryptoStateRepository>();
         services.AddScoped<IPendingGroupInvitationRepository, SqlitePendingGroupInvitationRepository>();
         services.AddScoped<IPendingGroupInvitationQueries, SqlitePendingGroupInvitationQueries>();

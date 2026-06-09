@@ -71,9 +71,6 @@ public static class ServiceCollectionExtensions
             services.AddHostedService<Percolator.Infrastructure.Network.PeerDiscoveryHostedService>();
         }
 
-        // Security/adapters
-        services.AddScoped<IAtRestKeyProvider, AtRestKeyProvider>();
-
         // Handshake pre-session store
         services.AddScoped<IPreHandshakeSessionStore, PreHandshakeSessionStore>();
 
