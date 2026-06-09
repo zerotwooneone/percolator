@@ -11,7 +11,6 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddCryptographyInfrastructure(this IServiceCollection services)
     {
         services.AddScoped<IPreKeyBundleRepository, SqlitePreKeyBundleRepository>();
-        services.AddScoped<IAdminSignatureVerifier, AdminSignatureVerifier>();
         services.AddScoped<IPendingSessionRepository, SqlitePendingSessionRepository>();
         services.AddScoped<ISentInvitationRepository, SqliteSentInvitationRepository>();
         services.AddScoped<ISessionRepository, SqliteSessionRepository>();
