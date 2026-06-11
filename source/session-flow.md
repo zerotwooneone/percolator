@@ -357,107 +357,180 @@ The client uses the derived **Message Key** to decrypt the payload.
 * **Success:** The message is readable. The *Next Receiving Chain Key* is saved. The Message Key is deleted.
 * **Failure:** The state is rolled back (transactional).
 
-# Part 8: Group Conversations (Layered ZK over 1:1 Transport)
+# Part 8: Group Conversations (Signal V2 Zero-Knowledge Fanout)
 
-While 1:1 messaging uses an asymmetric Double Ratchet to manage end-to-end sessions, group conversations utilize a decentralized architecture inspired by Signal Group V2 (`zkgroup`). To achieve scalable fanout without sacrificing social graph privacy, Percolator employs a **Layered ZK over 1:1 Transport** model.
+Unlike early client-side fanout models, Percolator implements a strict **Signal Group V2** architecture. In this model, the network utilizes a designated Relay to perform highly efficient server-side fanout, enforce strict state ordering (Epochs), and manage routing. However, through the use of Zero-Knowledge (ZK) proofs and Sealed Sender mechanics, the Relay acts as a **Blind Ledger**—maintaining zero cryptographic visibility into the group's metadata, contents, or the specific identity of the sender.
 
-In this model, relays provide network efficiency (fanout), but client-side zero-knowledge (ZK) cryptography ensures that relays never learn the group name, the actual identities of the membership roster, or the content being distributed.
+## 8.1 The Blind Ledger & ZK Authentication
 
----
+The Relay maintains a database mapping opaque `group_id`s to a list of registered `PeerId`s for network routing. It does not possess the `GroupMasterKey` and cannot read group names, avatars, or messages.
 
-## 8.1 The Group Root Secret (`GroupMasterKey`)
-
-A group conversation is structurally anchored by a single 32-byte root secret called the `GroupMasterKey`. Relays never see this key; it exists exclusively in the local, encrypted storage of the authorized participants.
-
-### 8.1.1 Cryptographic Key Derivation Sequence
-
-Upon group creation or local rehydration, the 32-byte `GroupMasterKey` is passed into a native key derivation function (KDF) to deterministically derive critical primitives:
-
-$$GroupSecretParams = \text{Derive}(GroupMasterKey)$$
-
-- **`group_id` (Group Identifier):** A unique, stable byte array used by relays and clients to identify the cryptographic context of the group.
-- **`blob_key` (Encryption Key):** A symmetric AES key used to encrypt and decrypt the group's message payloads and administrative content (roster changes, title updates).
-
-Because this derivation is entirely deterministic, clients only need to store the encrypted 32-byte `GroupMasterKey` at rest. Sub-keys and identifiers are rehydrated in memory on demand.
+To publish a message to the group, a sender must prove they are an authorized member without revealing *which* member they are.
+1. The sender's client uses the group's secret parameters to generate a **ZkAuthPresentation** (a mathematical proof).
+2. The sender connects to the Relay anonymously (via a Sealed Sender delivery certificate).
+3. The Relay mathematically verifies the ZK proof against the group's public parameters using the `zkgroup` library.
+4. Upon successful verification, the Relay knows *someone* authorized is pushing to the group and accepts the payload, completely blind to the sender's actual identity.
 
 ---
 
-## 8.2 Relay-Assisted Routing via Zero-Knowledge Credentials
+## 8.2 Group Provisioning (The Setup Plane)
 
-To save sender bandwidth, Percolator uses relays to fan out messages. However, to prevent the relay from learning who is in the group, we separate the **Transport Layer** from the **Application Layer**.
+Group creation and membership modifications require securely distributing the `GroupMasterKey` and `SenderKeyDistributionMessage`s. Because the Relay is blind, this distribution occurs over existing 1:1 Double Ratchet sessions.
 
-### 8.2.1 The Application Layer (ZK Envelope)
-The application layer defines the group message itself. The sender does not include a plaintext list of recipients. Instead, the sender constructs an envelope containing the `group_id`, the ciphertext payload (encrypted with `blob_key`), and a **Zero-Knowledge Presentation Proof**.
+### Step 8.2.1: The Group Invite Protobuf
 
-The ZK proof mathematically asserts: *"I possess a valid credential showing I am an active member of this group identifier."*
+Alice generates the `GroupMasterKey`, creates a `SenderKeyDistributionMessage` using the Signal FFI specifically for Bob, and packages it into a `GroupInvite` sent over their established 1:1 session.
 
 ```protobuf
-// The inner Application Layer payload
-message GroupMessageEnvelope {
-  bytes group_id                      = 1; // Derived from GroupSecretParams
-  bytes zero_knowledge_member_proof   = 2; // ZK proof of valid membership
-  bytes ciphertext                    = 3; // Opaque AES-GCM encrypted payload using blob_key
+message GroupInvite {
+  uint32 version = 1;
+  bytes conversation_id = 2;              // The opaque Group ID
+  string group_name = 3;                  // Encrypted within the 1:1 tunnel
+  bytes group_master_key = 4;             // 32-byte master key
+  bytes sender_key_distribution_message = 5; // VTable imported blob for Bob
+}
+
+// Injected into the standard ChatEnvelope oneof
+message ChatEnvelope {
+  // ... other fields
+  oneof message {
+    // ...
+    GroupInvite group_invite = 16;
+  }
 }
 ```
 
-### 8.2.2 The Transport Layer (1:1 Session)
-To protect the relay from unauthenticated spam and DoS attacks against its expensive ZK verification circuits, the sender wraps the `GroupMessageEnvelope` inside a standard **1:1 Double Ratchet Session** addressed directly to the relay.
+### Step 8.2.2: Provisioning Persistence (Try-Commit / Outbox Pattern)
 
-#### The Sender's Action
-1. Alice encrypts her group message and generates the ZK proof.
-2. Alice encrypts the resulting `GroupMessageEnvelope` using her 1:1 session with Relay R.
-3. Alice transmits the 1:1 packet to Relay R.
+To ensure atomic resilience against network failures, the client utilizes an **Outbox Pattern**, persisting the invite intent locally alongside the group state before asynchronously dispatching the 1:1 network messages.
 
-#### The Relay's Validation & Fanout
-1. Relay R receives the packet and decrypts it using its 1:1 session state with Alice. At this moment, Relay R *transiently* knows Alice sent the packet.
-2. Relay R immediately strips Alice's transport identity context and passes the inner `GroupMessageEnvelope` to its group processing engine.
-3. The engine verifies the ZK proof mathematically.
-4. If valid, the relay looks up its *blinded routing table* for that `group_id` and fans the envelope out to the opaque routing tokens listed there.
+SQLite (Client, GroupCryptoState)
+| Column             | Type     | Description                                           |
+| ------------------ | -------- | ----------------------------------------------------- |
+| conversation_id    | BLOB     | Primary Key. Opaque GUID.                             |
+| group_master_key   | BLOB     | 32-byte secret key (Encrypted at rest).               |
+| created_at_utc     | DATETIME | Timestamp of creation/join.                           |
 
-#### The Privacy Invariant
-By strictly separating the layers, we maintain the Signal privacy model:
-- The relay's database never maps user IDs to groups; it only stores mathematically blinded routing tokens.
-- The relay transiently authenticates the sender at the transport edge (dropping junk traffic) but drops that context during routing.
-- The relay learns absolutely nothing about the content of the message or the social graph of the group.
+SQLite (Client, RelayOutbox)
+| Column             | Type     | Description                                           |
+| ------------------ | -------- | ----------------------------------------------------- |
+| id                 | INTEGER  | Primary Key.                                          |
+| event_type         | TEXT     | e.g., "MemberInvitedDomainEvent".                     |
+| payload_json       | TEXT     | Contains destination PeerId and the Distribution Blob.|
+| processed_at_utc   | DATETIME | Nullable. Set when the 1:1 transport successfully ACKs. |
 
-## 8.3 Inbound and Outbound Message Pipeline
+SQLite (Receiver, PendingGroupInvitations)
+| Column             | Type     | Description                                           |
+| ------------------ | -------- | ----------------------------------------------------- |
+| id                 | BLOB     | Primary Key (GUID).                                   |
+| conversation_id    | BLOB     | The opaque Group ID.                                  |
+| inviter_peer_id    | BLOB     | Who sent the invite over the 1:1 session.             |
+| status             | TEXT     | "Pending", "Accepted", "Ignored".                     |
 
-### 8.3.1 Outbound Send Path
+---
 
-1. The client loads the `GroupMasterKey` from the local database and derives `group_id` and `blob_key`.
-2. The message payload is encrypted symmetrically using `blob_key`.
-3. The client constructs a ZK presentation proof to authenticate its group membership.
-4. The client wraps the resulting `GroupMessageEnvelope` in a 1:1 Double Ratchet envelope addressed to their relay.
-5. The relay decrypts the transport layer, validates the ZK proof, and fans the inner envelope out to the blinded distribution list for `group_id`.
+## 8.3 The Data Plane (Server-Side Fanout)
 
-### 8.3.2 Inbound Receive Path
+Once provisioned, standard group messaging shifts to the highly performant Data Plane.
 
-1. The receiving peer receives the `GroupMessageEnvelope` (either directly from a sender or forwarded by a relay).
-2. The peer acts as a local validator, running the exact same ZK proof verification mathematically to ensure the sender was an authorized member.
-3. The peer fetches the local `GroupMasterKey`, derives the `blob_key`, and decrypts the ciphertext.
-4. The decrypted plaintext is written to the local database, and ephemeral handles are zeroized.
+### Step 8.3.1: Data Plane Protobufs
 
-## 8.4 Membership Changes & Administrative State (Cryptographic Eviction)
+The sender transmits a single payload to the Relay. The Relay uses a bidirectional gRPC stream to push the ciphertext to all registered members.
 
-Because we operate in a P2P context, administrative operations (adding/removing members) require updating the blinded routing tables on the relays AND rotating keys among direct peers.
+```protobuf
+message PublishGroupMessageRequest {
+  bytes group_id = 1;
+  bytes ciphertext = 2;                   // Encrypted using SenderKey ratchet
+  uint32 epoch = 3;                       // The sender's known group state version
+  bytes zk_auth_presentation = 4;         // Zero-Knowledge Proof of membership
+  uint64 redemption_time = 5;
+}
 
-### 8.4.1 Adding a Member
+message PublishGroupMessageResponse {
+  enum Status {
+    SUCCESS = 0;
+    EPOCH_CONFLICT = 1;
+    UNAUTHORIZED = 2;
+  }
+  Status status = 1;
+  optional uint32 current_relay_epoch = 2; // Provided if Status == EPOCH_CONFLICT
+}
 
-An admin encrypts an `add_member` group message using the current `blob_key`. This message is sent to the new member directly via a 1:1 Double Ratchet session alongside a bootstrap payload containing the current `GroupMasterKey` and blinded roster. 
+message GroupStreamResponse {
+  bytes group_id = 1;
+  bytes sender_ciphertext = 2;
+  uint32 epoch = 3;
+}
 
-Critically, the admin must also push an updated blinded routing table—along with the public `verification_key`—to the network relays (via an administrative ZK proof) so the infrastructure knows to route future messages to the new member's routing token and has the correct parameters to verify sender proofs.
+service TransportService {
+  rpc PublishGroupMessage(PublishGroupMessageRequest) returns (PublishGroupMessageResponse);
+  rpc StreamGroupMessages(stream GroupStreamRequest) returns (stream GroupStreamResponse);
+}
+```
 
-### 8.4.2 Removing a Member (Cryptographic Eviction)
+### Step 8.3.2: Decryption Persistence
 
-Eviction requires an epoch update to the root secret:
+Receiving clients load the specific sender's `SenderKeyRecord` to decrypt the fanned-out message locally.
 
-1. The admin generates a brand new `GroupMasterKey` for the next epoch.
-2. The admin derives the new `blob_key`, `group_id`, and `verification_key` from this fresh root secret.
-3. The admin distributes the new `GroupMasterKey` directly to each *remaining* participant individually via their secure 1:1 Double Ratchet sessions.
-4. The admin updates the network relays with the new blinded routing table and new public `verification_key` under the new `group_id`.
+SQLite (Client, SenderKeyRecords)
+| Column             | Type     | Description                                           |
+| ------------------ | -------- | ----------------------------------------------------- |
+| conversation_id    | BLOB     | Composite PK. The Group ID.                           |
+| sender_peer_id     | BLOB     | Composite PK. The author's PeerId.                    |
+| sender_key_record  | BLOB     | The serialized Signal SenderKey state (ratchet).      |
 
-**Epoch Cutover Constraint:**
+---
 
-During eviction, the outbound message queue must block any concurrent sends to the old epoch while the 1:1 Double Ratchet tunnels transmit the new `GroupMasterKey` to remaining members. 
+## 8.4 Epoch Concurrency & Split-Brain Resolution
 
-Because the evicted user is excluded from the 1:1 key distribution phase, they never receive the new `GroupMasterKey`. They cannot derive the new `blob_key` to decrypt future message envelopes, and they cannot mathematically construct a valid Zero-Knowledge presentation proof for the new `group_id` to convince relays to fan out their messages. They are permanently locked out of the cryptographic context of the conversation.
+To prevent "split-brain" state divergence (e.g., Alice and Bob concurrently renaming the group), the Relay enforces **Optimistic Concurrency** using an `epoch` counter.
+
+* **Authoritative Gatekeeper:** Every group mutation payload must include the client's known `epoch`. If Alice and Bob both submit mutations at Epoch 4, the Relay accepts the first to arrive, increments the ledger to Epoch 5, and rejects the loser with an `EPOCH_CONFLICT`.
+* **Speculative Client Rebase:** Client mutations (like removing a member) are evaluated *in memory only* until the Relay confirms the epoch transition.
+
+### Step 8.4.1: Split-Brain Catch-Up Protobufs
+
+If a client receives an `EPOCH_CONFLICT`, it fetches the missing ledger updates, fast-forwards its local SQLite state, rebases the user's intended mutation against the new baseline, and automatically retries.
+
+```protobuf
+message FetchMissingEpochsRequest {
+  bytes group_id = 1;
+  uint32 known_local_epoch = 2;
+  bytes zk_auth_presentation = 3; // Must still prove membership to read ledger
+}
+
+message FetchMissingEpochsResponse {
+  repeated GroupLedgerUpdateDto updates = 1;
+}
+
+message GroupLedgerUpdateDto {
+  uint32 epoch = 1;
+  bytes encrypted_mutation_payload = 2; // e.g., Rename, AddMember, RemoveMember
+}
+```
+
+### Step 8.4.2: Local Ledger Persistence
+
+The client tracks the current confirmed epoch locally to know when it is safe to issue mutations.
+
+SQLite (Client, GroupConversations)
+| Column             | Type     | Description                                           |
+| ------------------ | -------- | ----------------------------------------------------- |
+| id                 | BLOB     | Primary Key (GUID).                                   |
+| epoch              | INTEGER  | The current strictly increasing ledger version.       |
+| name               | TEXT     | The decrypted local group name.                       |
+
+SQLite (Relay Server, RelayGroupState)
+| Column             | Type     | Description                                           |
+| ------------------ | -------- | ----------------------------------------------------- |
+| group_id           | BLOB     | Primary Key (GUID).                                   |
+| epoch              | INTEGER  | The authoritative consensus version.                  |
+| version            | INTEGER  | EF Core concurrency tracking token.                   |
+
+---
+
+## 8.5 Privacy Invariants
+
+* **Membership Privacy:** The Relay must track `PeerId`s to fan out payloads, but this routing table is disjoint from human identity.
+* **Metadata Privacy:** The group's title, roster roles, and avatars are encrypted using the `GroupMasterKey`, which never leaves the client devices.
+* **Sender Anonymity:** The combination of Sealed Sender certificates for connection and ZK Proofs for authorization guarantees the Relay cannot cryptographically prove which group member authored a specific message.
