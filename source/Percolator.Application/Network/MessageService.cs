@@ -19,7 +19,6 @@ namespace Percolator.Application.Network
         private readonly ActiveIdentityContext _active;
         private readonly INetworkSender _networkSender;
         private readonly IOutboundMessageWireTap _wireTap;
-        private readonly IPeerPublicSigningKeyStore _keyStore;
 
         public MessageService(
             ILogger<MessageService> logger,
@@ -27,8 +26,7 @@ namespace Percolator.Application.Network
             ISecureMessagingService secureMessaging,
             ActiveIdentityContext active,
             INetworkSender networkSender,
-            IOutboundMessageWireTap wireTap,
-            IPeerPublicSigningKeyStore keyStore)
+            IOutboundMessageWireTap wireTap)
         {
             _logger = logger;
             _sessions = sessions;
@@ -36,7 +34,6 @@ namespace Percolator.Application.Network
             _active = active;
             _networkSender = networkSender;
             _wireTap = wireTap;
-            _keyStore = keyStore;
         }
 
         public async Task<(SendResult Result, DeliverOpaqueMessageResponse? Response)> SendMessageWithResponseAsync(
