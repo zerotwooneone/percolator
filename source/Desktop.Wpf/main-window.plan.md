@@ -619,60 +619,28 @@ Feature Implementation Request: Signal Protocol Chunk 9 (WPF MVVM Presentation L
 You are to implement Chunk 9 of our Signal Protocol Group V2 integration for Percolator, surfacing Group Creation, Invitation Management, and Relay Host Controls.
 
 Architectural Constraints (CRITICAL):
-
-Zero Infrastructure in UI: ViewModels must NEVER reference DBOs. They must bind strictly to Application-provided Read Models.
-
-Direct Application Services: UI actions must be executed via direct calls to Application layer services (e.g., IGroupInvitationAppService), avoiding unnecessary MediatR boilerplate.
-
-Nested Reactivity: Use R3 ReactiveProperty<T> inside the presentation models to allow surgical UI updates without list thrashing.
+* Zero Database Leakage in Presentation: ViewModels must have zero awareness of EF Core, SQL parameters, or database entities (`PendingGroupInvitationDbo`). They must bind exclusively to Application-driven read models.
+* Direct Application Services: Presentation components must manipulate business state through explicit, focused interface methods on an Application service (`IGroupInvitationAppService`), completely avoiding MediatR dispatching overhead for single-consumer UI interactions.
+* Nested Observable Projections: The UI state service must expose an `IReadOnlyObservableList<PendingInviteModel>` where individual model items contain their own granular, mutable R3 `ReactiveProperty<T>` states. This allows the WPF UI to perform atomic property-level updates without forcing a complete collection view redraw.
 
 Implementation Requirements
 1. Multi-Select Roster & Group Creation Dialog (Desktop.Wpf)
-
-The Wrapper Model: Create SelectablePeerItemViewModel. It wraps PeerConnectionModel and adds a BindableReactiveProperty<bool> IsSelected.
-
-The Dialog ViewModel: Create CreateGroupDialogViewModel.
-
-Properties: BindableReactiveProperty<string> GroupName, ObservableList<SelectablePeerItemViewModel> SelectablePeers.
-
-Commands: AsyncRelayCommand ConfirmCreateCommand.
-
-Behavior: On execution, filter out selected peers, extract their identifiers, and invoke a direct call to the Application layer to create the group. Close the window upon completion via IWindowManager logic.
-
-The View Configuration: Map CreateGroupDialogWindow.xaml to the ViewModel in ViewMappings.xaml.
+* The Wrapper Model: Create `SelectablePeerItemViewModel`. It wraps `PeerConnectionModel` and adds a `BindableReactiveProperty<bool> IsSelected`.
+* The Dialog ViewModel: Create `CreateGroupDialogViewModel`.
+    * Properties: `BindableReactiveProperty<string> GroupName`, `ObservableList<SelectablePeerItemViewModel> SelectablePeers`.
+    * Behavior: On execution, filter out selected peers, extract their strongly-typed identifiers, and invoke a direct call to the Application layer to create the group conversation. Close the window upon completion via `IWindowManager` logic.
 
 2. Group Invitation Management UI (Desktop.Wpf & Percolator.Application)
-
-The Reactive Model: Define PendingInviteModel in the Application layer. It must use ReactiveProperty<T> for mutable state like InviteStatus.
-
-The App Service: Create IGroupInvitationAppService with AcceptAsync(Guid inviteId) and IgnoreAsync(Guid inviteId).
-
-The Menu ViewModel: Create GroupInvitesMenuViewModel.
-
-Project an ISynchronizedView from the State Service's observable list of PendingInviteModels.
-
-The Interaction Actions: Expose two commands:
-
-AcceptInviteCommand(Guid inviteId): Calls await _inviteAppService.AcceptAsync(inviteId).
-
-IgnoreInviteCommand(Guid inviteId): Calls await _inviteAppService.IgnoreAsync(inviteId).
-
-The Badge Bridge: Bind the count of the synchronized list to the custom MatButton.NotificationCount indicator on the sidebar.
+* The Reactive Model: Define `PendingInviteModel` in the Application layer, exposing a `ReactiveProperty<InviteStatus>` field.
+* The App Service: Create `IGroupInvitationAppService` with `Task AcceptAsync(ConversationId conversationId, CancellationToken ct)` and `Task IgnoreAsync(ConversationId conversationId, CancellationToken ct)`.
+* The Menu ViewModel: Create `GroupInvitesMenuViewModel` projecting an `ISynchronizedView` from the State Service's observable list of `PendingInviteModel`s.
+    * Bind interaction buttons directly to your App Service execution tasks.
+    * Connect the live list element count to the custom `MatButton.NotificationCount` badge layout on the sidebar framework.
 
 3. Relay Host Settings Panel (Desktop.Wpf)
-
-Inject the singleton RelayStateService into the relevant Settings ViewModel.
-
-Declare: public BindableReactiveProperty<bool> HostRelaySwitch { get; }
-
-Bind it directly to the state engine using .ToBindableReactiveProperty().
-
-The View Binding: Render a MatSlideToggle control in XAML:
-
-Code snippet
-<controls:MatSlideToggle IsChecked="{Binding HostRelaySwitch.Value, Mode=TwoWay}" />
-Ensure toggling the layout passes the boolean state to _relayStateService.RequestToggle(value).
-
+* Inject the singleton `RelayStateService` into the relevant Settings ViewModel.
+* Declare a `public BindableReactiveProperty<bool> HostRelaySwitch { get; }` property connected via `.ToBindableReactiveProperty()`.
+* Render a `MatSlideToggle` control in XAML bound directly to this switcher, routing toggles safely through the debouncer.
 ## Chunk 10
 Sticking with the lightweight mock approach is the pragmatic call. It keeps the simulator blazing fast, memory-efficient, and free from the overhead of spinning up entire DI scopes and database providers for every mock peer. We accept the small dual-maintenance burden on the protocol scripting in exchange for a highly performant, standalone test harness.
 
