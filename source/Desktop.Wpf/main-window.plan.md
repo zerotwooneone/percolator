@@ -139,21 +139,25 @@ Architectural Constraints (CRITICAL):
 * **Shared Nothing (Local Primitives):** Entity Framework models and context configurations belong exclusively in `Percolator.Infrastructure`. Clean interfaces live in `Percolator.Cryptography`. To prevent project-level dependencies between Cryptography, Chat, and Identity, you must define necessary strongly-typed primitive wrappers locally within the `Percolator.Cryptography` namespace.
 
 Implementation Requirements
-1. Cryptography Local Domain Primitives (`Percolator.Cryptography`)
-* Define your type invariants locally to avoid cross-project coupling:
+1. Cryptography Local Domain Primitives (`Percolator.Cryptography.Primitives`)
+* Define your type invariants locally in the Primitives subnamespace to avoid cross-project coupling:
   ```csharp
   public readonly record struct DeviceId(uint Value);
   public readonly record struct PeerId(Guid Value);
   public readonly record struct ConversationId(Guid Value);
+  ```
+* Define domain-specific types in the main Cryptography namespace:
+  ```csharp
   [ByteArray(minLength: 1, maxLength: 4096)] public partial record SenderKeyRecordBytes;
   ```
 
 2. The Interop Bridge Contract (`Percolator.Cryptography`)
 * Define `public interface ISenderKeyInteropBridge`.
-* Expose methods using your newly defined cryptography domain primitives consistently with fully-qualified namespaces:
+* Add `using Percolator.Cryptography.Primitives;` to import the primitive types.
+* Expose methods using your newly defined cryptography domain primitives:
   ```csharp
-  bool TryLoadSenderKey(Percolator.Cryptography.ConversationId conversationId, Percolator.Cryptography.PeerId senderId, Percolator.Cryptography.DeviceId deviceId, out byte[] recordBytes);
-  void StoreSenderKey(Percolator.Cryptography.ConversationId conversationId, Percolator.Cryptography.PeerId senderId, Percolator.Cryptography.DeviceId deviceId, byte[] recordBytes);
+  bool TryLoadSenderKey(ConversationId conversationId, PeerId senderId, DeviceId deviceId, out byte[] recordBytes);
+  void StoreSenderKey(ConversationId conversationId, PeerId senderId, DeviceId deviceId, byte[] recordBytes);
   ```
 
 3. Persistence (`Percolator.Infrastructure/Chat/Persistence`)
@@ -165,8 +169,9 @@ Implementation Requirements
 
 4. The Bridge Implementation (`Percolator.Infrastructure.Chat`)
 * Implement `SenderKeyInteropBridge` implementing `ISenderKeyInteropBridge` in namespace `Percolator.Infrastructure.Chat`.
+* Add `using Percolator.Cryptography.Primitives;` to import the primitive types.
 * Inject `IDbContextFactory<PercolatorDbContext>` into its constructor.
-* **Namespace Mapping Note:** The infrastructure class maps wrapped domain inputs (`Percolator.Cryptography.ConversationId`, `Percolator.Cryptography.PeerId`, `Percolator.Cryptography.DeviceId`) down to primitive `Guid` and `uint` parameters when invoking the underlying `db.SenderKeyRecords.Find()` composite key query.
+* **Namespace Mapping Note:** The infrastructure class maps wrapped domain inputs (`Percolator.Cryptography.Primitives.ConversationId`, `Percolator.Cryptography.Primitives.PeerId`, `Percolator.Cryptography.Primitives.DeviceId`) down to primitive `Guid` and `uint` parameters when invoking the underlying `db.SenderKeyRecords.Find()` composite key query.
 * **TryLoadSenderKey Logic:**
     * Resolve a temporary context: `using var db = _dbFactory.CreateDbContext();`.
     * Synchronously locate the record matching the full composite key using `db.SenderKeyRecords.Find(conversationId.Value, senderId.Value, deviceId.Value)`.
@@ -260,7 +265,7 @@ Implementation Requirements
 
 Entity: Create a RelayGroupLedger aggregate root.
 
-Properties: ConversationId, CurrentEpoch.
+Properties: Percolator.Cryptography.Primitives.ConversationId ConversationId, CurrentEpoch.
 
 Behavior: public void AdvanceEpoch(uint requestedEpoch). This method must throw a StaleEpochDomainException(uint CurrentEpoch) if the requested epoch is less than or equal to CurrentEpoch. If valid, it updates CurrentEpoch.
 
@@ -302,11 +307,11 @@ Add rpc PublishGroupMessage(PublishGroupMessageRequest) returns (PublishGroupMes
 
 5. Infrastructure Repositories (Percolator.Infrastructure)
 
-IRelayGroupRepository: Implement Task<RelayGroupLedger> GetLedgerAsync(ConversationId conversationId) and Task SaveAsync(RelayGroupLedger ledger).
+IRelayGroupRepository: Implement Task<RelayGroupLedger> GetLedgerAsync(Percolator.Cryptography.Primitives.ConversationId conversationId) and Task SaveAsync(RelayGroupLedger ledger).
 
 Critical Rule: Inside SaveAsync, wrap await _dbContext.SaveChangesAsync() in a try/catch. If DbUpdateConcurrencyException is caught, reload the RelayGroupStateDbo from the database and throw a pure EpochConflictDomainException(uint winningEpoch).
 
-IMessageQueueRepository: Add Task EnqueueFanOutAsync(ConversationId conversationId, byte[] payload, CancellationToken ct).
+IMessageQueueRepository: Add Task EnqueueFanOutAsync(Percolator.Cryptography.Primitives.ConversationId conversationId, byte[] payload, CancellationToken ct).
 
 Implementation: Resolve the list of registered PeerIds for the group. Generate a MessageQueueItemDbo for each peer. Use _dbContext.MessageQueueItems.AddRange() to perform a synchronous bulk-insert.
 
