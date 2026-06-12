@@ -37,7 +37,7 @@ Architectural Constraints (CRITICAL):
 
 Direct Service Orchestration: Do NOT use MediatR for this feature. We are using an explicit IProfileOrchestrationService to manage the workflows.
 
-No Shared Kernel: Our domain libraries (Percolator.Identity, Percolator.Cryptography, Percolator.Chat) DO NOT reference each other.
+No Shared Kernel: Avoid adding any NEW project dependencies between our domain libraries (Percolator.Identity, Percolator.Cryptography, Percolator.Chat).
 
 Duplicate Domain Primitives: You must define the required strongly-typed wrappers locally within each domain that needs them.
 
@@ -74,6 +74,8 @@ Define local primitives:
 
 [ByteArray(length: 32)] public partial record ProfileKeyBytes;
 
+[ByteArray(minLength: 1, maxLength: 1024)] public partial record ProfilePlaintextBytes;
+
 [ByteArray(length: 12)] public partial record ProfileNonceBytes;
 
 [ByteArray(length: 16)] public partial record ProfileTagBytes;
@@ -82,7 +84,7 @@ Define local primitives:
 
 Define a wrapper record: public record ProfileEncryptionResult(EncryptedProfileDataBytes Ciphertext, ProfileNonceBytes Nonce, ProfileTagBytes Tag);
 
-IProfileCryptographyService: Implement ProfileEncryptionResult EncryptData(byte[] serializedProfileData, ProfileKeyBytes key) and byte[] DecryptData(EncryptedProfileDataBytes ciphertext, ProfileNonceBytes nonce, ProfileTagBytes tag, ProfileKeyBytes key).
+IProfileCryptographyService: Implement ProfileEncryptionResult EncryptData(ProfilePlaintextBytes serializedProfileData, ProfileKeyBytes key) and ProfilePlaintextBytes DecryptData(EncryptedProfileDataBytes ciphertext, ProfileNonceBytes nonce, ProfileTagBytes tag, ProfileKeyBytes key).
 
 3. Network Contracts & Persistence (Percolator.Infrastructure)
 
@@ -104,9 +106,9 @@ Create IProfileOrchestrationService with three methods:
 
 Task UpdateLocalProfileAsync(string newDisplayName, CancellationToken ct)
 
-Task AttachProfileDataIfRequiredAsync(ChatEnvelope envelope, Guid recipientPeerId, CancellationToken ct)
+Task AttachProfileDataIfRequiredAsync(ChatEnvelope envelope, PeerId recipientPeerId, CancellationToken ct)
 
-Task ProcessInboundProfileDataAsync(ChatEnvelope envelope, Guid senderPeerId, CancellationToken ct)
+Task ProcessInboundProfileDataAsync(ChatEnvelope envelope, PeerId senderPeerId, CancellationToken ct)
 
 Implement the Service:
 
@@ -218,7 +220,7 @@ Interop is Ready: The Signal.Interop library has already been updated with Gener
 
 Strict Clean Architecture: Infrastructure components (Interceptors, HostedServices) must be "dumb". All business logic, validation rules, and network orchestration must live in Percolator.Application.
 
-No Shared Kernel: Duplicate the [ByteArray] domain primitives locally in the domains that need them.
+No Shared Kernel: Avoid adding any NEW project dependencies. Duplicate the [ByteArray] domain primitives locally in the domains that need them.
 
 Anti-Corruption Layer: Percolator.Application orchestrates the translation across boundaries using the zero-allocation public static [Type] FromBytesOwned(byte[] bytes) pattern.
 
@@ -249,7 +251,7 @@ Persistence: Add public byte[]? RelayDeliveryRootKey { get; set; } to SelfIdenti
 
 The Application Logic (Percolator.Application):
 
-Create IPeerAuthenticationService with method: Task<bool> AuthenticateDeliveryCertificateRequestAsync(Guid peerId, DateTimeOffset requestTimestamp, byte[] signature, CancellationToken ct).
+Create IPeerAuthenticationService with method: Task<bool> AuthenticateDeliveryCertificateRequestAsync(PeerId peerId, DateTimeOffset requestTimestamp, Ed25519SignatureBytes signature, CancellationToken ct).
 
 Implementation: Reject if requestTimestamp is older than 60 seconds (Replay attack prevention). Lookup the peer's public ECDsa Identity Key from PeerIdentityDbo. Verify the signature using the existing ISigningService. Return true if valid.
 
@@ -283,7 +285,7 @@ Use IEd25519CryptographyService to sign the payload. Return the response.
 
 The Domain Concept (Percolator.Network or appropriate domain):
 
-Define a rich domain record: public record DeliveryCertificate(byte[] SerializedPayload, DateTimeOffset ExpiresAt);
+Define a rich domain record: public record DeliveryCertificate(DeliveryCertificatePayloadBytes SerializedPayload, DateTimeOffset ExpiresAt); (Note: Add `[ByteArray] public partial record DeliveryCertificatePayloadBytes;` primitive)
 
 Define an interface IDeliveryCertificateStore to hold this singleton in memory.
 
@@ -322,7 +324,7 @@ Implementation Requirements
 
 Entity: Create a RelayGroupLedger aggregate root.
 
-Properties: GroupId, CurrentEpoch.
+Properties: ConversationId, CurrentEpoch.
 
 Behavior: public void AdvanceEpoch(uint requestedEpoch). This method must throw a StaleEpochDomainException(uint CurrentEpoch) if the requested epoch is less than or equal to CurrentEpoch. If valid, it updates CurrentEpoch.
 
@@ -342,7 +344,7 @@ Domain Entity: Update SelfIdentity to include ZkServerSecretParamsBytes. Generat
 
 Persistence: Add public byte[]? ZkServerSecretParams { get; set; } to SelfIdentityDbo.
 
-Ledger Persistence: Create RelayGroupStateDbo (GroupId PK, Epoch, and an explicit int Version for EF Core concurrency token).
+Ledger Persistence: Create RelayGroupStateDbo (ConversationId PK, Epoch, and an explicit int Version for EF Core concurrency token).
 
 4. Network Contracts (messaging.proto & Contracts)
 
@@ -358,17 +360,17 @@ UNAUTHORIZED = 2;
 Status status = 1;
 optional uint32 current_relay_epoch = 2;
 }
-Define PublishGroupMessageRequest containing group_id, ciphertext, epoch, zk_auth_presentation, and redemption_time.
+Define PublishGroupMessageRequest containing conversation_id, ciphertext, epoch, zk_auth_presentation, and redemption_time.
 
 Add rpc PublishGroupMessage(PublishGroupMessageRequest) returns (PublishGroupMessageResponse); to TransportService.
 
 5. Infrastructure Repositories (Percolator.Infrastructure)
 
-IRelayGroupRepository: Implement Task<RelayGroupLedger> GetLedgerAsync(Guid groupId) and Task SaveAsync(RelayGroupLedger ledger).
+IRelayGroupRepository: Implement Task<RelayGroupLedger> GetLedgerAsync(Guid conversationId) and Task SaveAsync(RelayGroupLedger ledger).
 
 Critical Rule: Inside SaveAsync, wrap await _dbContext.SaveChangesAsync() in a try/catch. If DbUpdateConcurrencyException is caught, reload the RelayGroupStateDbo from the database and throw a pure EpochConflictDomainException(uint winningEpoch).
 
-IMessageQueueRepository: Add Task EnqueueFanOutAsync(Guid groupId, byte[] payload, CancellationToken ct).
+IMessageQueueRepository: Add Task EnqueueFanOutAsync(Guid conversationId, byte[] payload, CancellationToken ct).
 
 Implementation: Resolve the list of registered PeerIds for the group. Generate a MessageQueueItemDbo for each peer. Use _dbContext.MessageQueueItems.AddRange() to perform a synchronous bulk-insert.
 
@@ -411,11 +413,11 @@ Infrastructure-Agnostic Application: The Application layer must use interfaces f
 Implementation Requirements
 1. Domain Layer (Percolator.Chat / Percolator.Domain)
 
-GroupConversation Aggregate: >   * Properties: GroupId, MasterKey, Epoch, List<GroupMember> Members.
+GroupConversation Aggregate: >   * Properties: ConversationId, MasterKey, Epoch, List<GroupMember> Members. (Note: Replace the existing codebase implementation. The existing GroupState class will likely become dead code; if so, remove it entirely).
 
 Methods: InviteMember(PeerId peer) which updates state and registers a MemberInvitedDomainEvent.
 
-IDomainEvent / OutboxMessage: Define a record for MemberInvitedDomainEvent containing GroupId, PeerId, and the pre-generated SenderKeyDistributionMessage.
+IDomainEvent / OutboxMessage: Define a record for MemberInvitedDomainEvent containing ConversationId, PeerId, and the pre-generated SenderKeyDistributionMessage.
 
 2. Infrastructure Layer (Percolator.Infrastructure)
 
@@ -437,7 +439,7 @@ Use a IUnitOfWork to save the GroupConversation and the resulting MemberInvitedD
 
 4. Provisioning & Invite Logic
 
-IGroupSessionBuilder: Add byte[] BuildDistributionMessage(GroupMasterKey masterKey, PeerId recipientId).
+IGroupSessionBuilder: Add SenderKeyDistributionMessageBytes BuildDistributionMessage(GroupMasterKey masterKey, PeerId recipientId). (Note: Add `[ByteArray] public partial record SenderKeyDistributionMessageBytes;` primitive)
 
 ProcessInviteHandler: Add a new case to ProcessInternalEnvelopeHandler for GroupInvite.
 
@@ -480,7 +482,7 @@ No Infrastructure Leaks: The Application layer handles the business logic; the I
 Implementation Requirements
 1. Interface Definition (Percolator.Application)
 
-public interface IGroupNotificationDispatcher { Task DispatchAsync(Guid groupId, MessageDto message, CancellationToken ct); }
+public interface IGroupNotificationDispatcher { Task DispatchAsync(Guid conversationId, MessageDto message, CancellationToken ct); }
 
 2. Infrastructure Implementation (Percolator.Infrastructure)
 
@@ -543,7 +545,7 @@ public bool EvaluateProposal(IGroupMutationProposal proposal, out string? busine
 
 Create a centralized service: GroupMutationCoordinator.
 
-Method Signature: Task<MutationResult> CoordinateMutationAsync(Guid groupId, IGroupMutationProposal proposal, int selfIdentityId, CancellationToken ct)
+Method Signature: Task<MutationResult> CoordinateMutationAsync(ConversationId conversationId, IGroupMutationProposal proposal, SelfId selfIdentityId, CancellationToken ct)
 
 The Core Loop Engine:
 
@@ -575,7 +577,7 @@ R3 State Alignment: Do NOT leak server lifecycle tracking or state into the Doma
 
 WPF ViewModel Isolation: ViewModels must remain completely isolated from Kestrel or network managers. They should purely bind to the RelayStateService via BindableReactiveProperty<T>.
 
-Encrypted Local Persistence: Create a dedicated table in your encrypted SQLite schema to map a GroupId directly to its designated RelayPeerId.
+Encrypted Local Persistence: Create a dedicated table in your encrypted SQLite schema to map a ConversationId directly to its designated RelayPeerId.
 
 Simple Capability Discovery: Keep capability discovery simple for this phase. If a peer has historically acted as a relay for us in a group context, assume they maintain that capability. Handle connection failures gracefully at runtime.
 
@@ -584,9 +586,9 @@ Implementation Requirements
 
 The Schema: Create a GroupRelayMappingDbo.
 
-Properties: Guid GroupId (PK), Guid RelayPeerId, DateTimeOffset LastAssignedUtc.
+Properties: Guid ConversationId (PK), Guid RelayPeerId, DateTimeOffset LastAssignedUtc.
 
-The Repository: Create IGroupRelayMappingRepository in the Percolator.Chat domain and implement its SQLite backing in Percolator.Infrastructure. It must support basic Upsert and GetRelayForGroupAsync queries.
+The Repository: Create IGroupRelayMappingRepository in the Percolator.Chat domain and implement its SQLite backing in Percolator.Infrastructure. It must support basic Upsert and GetRelayForConversationAsync queries.
 
 2. The Presentation State Plane (Desktop.Wpf)
 
@@ -747,7 +749,7 @@ Task CreateGroupWithMainAsync(SimulatedPeerModel initiator):
 
 Generate a GroupMasterKey, create the distribution message, package it into a GroupInvite Protobuf, and dispatch via SimulatorToMainTransportService.
 
-Task SendGroupMessageAsync(SimulatedPeerModel sender, Guid groupId, string message):
+Task SendGroupMessageAsync(SimulatedPeerModel sender, Guid conversationId, string message):
 
 Encrypt the string using the mock peer's SenderKey, package the Protobuf, and dispatch via the transport service.
 
@@ -763,6 +765,6 @@ Update SimulatedPeerCardViewModel to include two new, clean macro commands:
 
 AsyncRelayCommand CreateGroupWithMainCommand: Calls await _groupOrchestrator.CreateGroupWithMainAsync(_peerModel).
 
-AsyncRelayCommand SendGroupMessageCommand: Calls await _groupOrchestrator.SendGroupMessageAsync(_peerModel, selectedGroupId, testMessage).
+AsyncRelayCommand SendGroupMessageCommand: Calls await _groupOrchestrator.SendGroupMessageAsync(_peerModel, selectedConversationId, testMessage).
 
 Update SimulatedPeerCardView.xaml to surface these two commands as standard MatButton controls.
