@@ -415,8 +415,8 @@ Implementation Requirements
 * IDomainEvent / OutboxMessage: Define a record for `MemberInvitedDomainEvent` containing ConversationId ConversationId, PeerId PeerId, and the pre-generated `SenderKeyDistributionMessageBytes` distribution blob.
 
 2. Infrastructure Layer (Percolator.Infrastructure)
-* RelayOutboxDbo: Create a DBO to store pending domain events: Id, EventType, PayloadJson, ProcessedAtUtc.
-* OutboxDispatcherWorker: An `IHostedService` that runs periodically. It queries the Outbox table for unprocessed events, resolves the domain event, calls the `IMessageService` to dispatch the invite, and marks the event as processed.
+* RelayOutboxDbo: Create a DBO to store pending domain events: Id, EventType, PayloadJson, DestinationPkhBytes (byte[]), ProcessedAtUtc. The DestinationPkhBytes column stores the pre-resolved Public Key Hash for the target PeerId, enabling the OutboxDispatcherWorker to dispatch without secondary lookups.
+* OutboxDispatcherWorker: An `IHostedService` that runs periodically. It queries the Outbox table for unprocessed events, resolves the domain event, reads the pre-resolved DestinationPkhBytes directly from the row, calls the `IMessageService` to dispatch the invite, and marks the event as processed.
 
 3. Application Orchestration (Percolator.Application)
 * CreateGroupCommandHandler:
