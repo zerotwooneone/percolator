@@ -398,52 +398,53 @@ Implement the PublishGroupMessage endpoint. Map the request, call IRelayGroupLed
 
 ## Chunk 5
 Feature Implementation Request: Signal Protocol Chunk 5 (Group Provisioning via Outbox)
-You are to implement Group Provisioning using an Outbox pattern. This ensures that group creation and the subsequent invitations are atomic and resilient to network failures.
+You are to implement Group Provisioning using an Outbox pattern to ensure group creation and subsequent invitations are atomic and resilient to network failures.
 
 The Goal: Alice creates a group, persists the state atomically, and creates an outbox message. A background worker dispatches the invite over 1:1 encrypted tunnels.
 
 Architectural Constraints (CRITICAL):
-* Autonomous Outbox Persistence: The Application layer must NOT reference the Outbox table or explicitly construct an outbox message. The application simply saves the `GroupConversation` via its repository and calls `UnitOfWork.CommitAsync()`. The Infrastructure layer (`DbContext` interceptor or overridden `SaveChangesAsync`) must automatically catch the raised `MemberInvitedDomainEvent` objects from the aggregate tracking lifecycle, serialize them, and write them to the `RelayOutboxDbo` atomically within the ambient transaction.
-* Rich Primitive Wrappers: Strictly eliminate raw Guid and byte[] values from service signatures. All layers must use `ConversationId`, `PeerId`, and specialized cryptographic wrappers (`GroupMasterKey`, `SenderKeyDistributionMessageBytes`).
-* Infrastructure-Agnostic Application: The Application layer must use interfaces for message delivery and repository access. It must NOT reference Protobufs or EF Core DBOs.
+* **Autonomous Outbox Persistence:** The Application layer must NOT reference the Outbox table or explicitly construct an outbox message. The application simply saves the `GroupConversation` via its repository and calls `UnitOfWork.CommitAsync()`. The concrete Unit of Work implementation inside the Infrastructure layer must intercept the domain events raised by the aggregate, resolve the destination `PeerId` to its wire-safe Public Key Hash (`DestinationPkhBytes`), serialize the payload, and append it to the `RelayOutboxDbo` within the same atomic transaction.
+* **Rule 6 Adherence:** `PeerId` is a local-only identifier and must never be written to wire-bound serialization structures or sent over the wire. The Outbox table must use wire-safe routing tokens (`DestinationPkhBytes`).
+* **Rich Primitive Wrappers:** Strictly eliminate raw Guid and byte[] values from service signatures. All layers must use `ConversationId`, `PeerId`, and specialized cryptographic wrappers (`GroupMasterKey`, `SenderKeyDistributionMessageBytes`).
 
 Implementation Requirements
-1. Domain Layer (Percolator.Chat / Percolator.Domain)
-* GroupConversation Aggregate:
-   * Properties: ConversationId Id, GroupMasterKey MasterKey, uint Epoch, List<GroupMember> Members.
-   * Methods: `void InviteMember(PeerId peerId)` which updates state and registers a `MemberInvitedDomainEvent`.
-* IDomainEvent / OutboxMessage: Define a record for `MemberInvitedDomainEvent` containing ConversationId ConversationId, PeerId PeerId, and the pre-generated `SenderKeyDistributionMessageBytes` distribution blob.
+1. Domain Layer (`Percolator.Chat`)
+* GroupConversation Aggregate (`Percolator.Chat` / `App/` or root):
+    * Properties: ConversationId Id, GroupMasterKey MasterKey, uint Epoch, List<GroupMember> Members.
+    * Methods: `void InviteMember(PeerId peerId)` which updates state and registers a `MemberInvitedDomainEvent`.
+* IDomainEvent (`Percolator.Chat/Events`): Define a record for `MemberInvitedDomainEvent` containing ConversationId ConversationId, PeerId PeerId, and pre-generated `SenderKeyDistributionMessageBytes` distribution blob.
 
-2. Infrastructure Layer (Percolator.Infrastructure)
+2. Infrastructure Layer (`Percolator.Infrastructure/Chat/Persistence`)
 * RelayOutboxDbo: Create a DBO to store pending domain events: Id, EventType, PayloadJson, DestinationPkhBytes (byte[]), ProcessedAtUtc. The DestinationPkhBytes column stores the pre-resolved Public Key Hash for the target PeerId, enabling the OutboxDispatcherWorker to dispatch without secondary lookups.
-* OutboxDispatcherWorker: An `IHostedService` that runs periodically. It queries the Outbox table for unprocessed events, resolves the domain event, reads the pre-resolved DestinationPkhBytes directly from the row, calls the `IMessageService` to dispatch the invite, and marks the event as processed.
+* OutboxDispatcherWorker (`Percolator.Infrastructure/Chat`): An `IHostedService` that runs periodically. It queries the Outbox table for unprocessed events, resolves the domain event, reads the pre-resolved DestinationPkhBytes directly from the row, calls the `IMessageService` to dispatch the invite, and marks the event as processed.
 
-3. Application Orchestration (Percolator.Application)
+3. Application Orchestration (`Percolator.Application/Apps/Chat`)
 * CreateGroupCommandHandler:
-   * Generate `GroupMasterKey` via `IGroupCryptographyService`.
-   * Instantiate `GroupConversation` domain entity.
-   * Call `group.InviteMember(peerId)` for each initial member.
-   * Save via `IGroupConversationRepository` and commit through the unit of work.
+    * Generate `GroupMasterKey` via `IGroupCryptographyService`.
+    * Instantiate `GroupConversation` domain entity.
+    * Call `group.InviteMember(peerId)` for each initial member.
+    * Save via `IGroupConversationRepository` and commit through the unit of work.
 
 4. Provisioning & Invite Logic
-* IGroupSessionBuilder: Add `SenderKeyDistributionMessageBytes BuildDistributionMessage(GroupMasterKey masterKey, PeerId recipientId)`.
+* IGroupSessionBuilder (`Percolator.Application/Chat`): Add `SenderKeyDistributionMessageBytes BuildDistributionMessage(GroupMasterKey masterKey, PeerId recipientId)`.
 * ProcessInviteHandler: Add a new case to `ProcessInternalEnvelopeHandler` for `GroupInvite`.
-   * Import the DistributionMessage via the VTable bridge.
-   * Update `PendingGroupInvitation` status.
+    * Import the DistributionMessage via the VTable bridge.
+    * Update `PendingGroupInvitation` status.
 
 5. Network Contracts (internal_messaging.proto)
 * Add GroupInvite message and integrate with ChatEnvelope.
 
-
-Protocol Buffers
+```protobuf
 message GroupInvite {
-optional uint32 version = 1;
-optional bytes conversation_id = 2;
-optional string group_name = 3;
-optional bytes group_master_key = 4; // 32 bytes
-optional bytes sender_key_distribution_message = 5;
+  optional uint32 version = 1;
+  optional bytes conversation_id = 2;
+  optional string group_name = 3;
+  optional bytes group_master_key = 4; // 32 bytes
+  optional bytes sender_key_distribution_message = 5;
 }
-Add group_invite = 16; to the ChatEnvelope oneof.
+```
+Add `group_invite = 16;` to the ChatEnvelope oneof.
+---
 ## Chunk 6
 Feature Implementation Request: Signal Protocol Chunk 6 (The Data Plane)
 You are to implement the high-velocity Data Plane for Group V2.
@@ -570,7 +571,7 @@ Implementation Requirements
 
 ```C3
 C#
-public sealed class RelayStateService : IDisposable
+public sealed class RelayStateService : IRelayStateService,IDisposable
 {
 private readonly ReactiveProperty<bool> _isRelayRunning = new(false);
 private readonly Subject<bool> _toggleSubject = new();
