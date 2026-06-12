@@ -403,13 +403,13 @@ You are to implement Group Provisioning using an Outbox pattern to ensure group 
 The Goal: Alice creates a group, persists the state atomically, and creates an outbox message. A background worker dispatches the invite over 1:1 encrypted tunnels.
 
 Architectural Constraints (CRITICAL):
-* **Autonomous Outbox Persistence:** The Application layer must NOT reference the Outbox table or explicitly construct an outbox message. The application simply saves the `GroupConversation` via its repository and calls `UnitOfWork.CommitAsync()`. The concrete Unit of Work implementation inside the Infrastructure layer must intercept the domain events raised by the aggregate, resolve the destination `PeerId` to its wire-safe Public Key Hash (`DestinationPkhBytes`), serialize the payload, and append it to the `RelayOutboxDbo` within the same atomic transaction.
+* **Explicit Explicit Persistence:** Do not implement a complex EF Core DbContext Interceptor. The Application layer orchestrates saving by calling `await _groupRepository.SaveWithOutboxAsync(group, ct)`. The infrastructure implementation of this method handles saving the group state and mapping/serializing its raised domain events to the outbox table inside a single atomic `SaveChangesAsync` call.
 * **Rule 6 Adherence:** `PeerId` is a local-only identifier and must never be written to wire-bound serialization structures or sent over the wire. The Outbox table must use wire-safe routing tokens (`DestinationPkhBytes`).
 * **Rich Primitive Wrappers:** Strictly eliminate raw Guid and byte[] values from service signatures. All layers must use `ConversationId`, `PeerId`, and specialized cryptographic wrappers (`GroupMasterKey`, `SenderKeyDistributionMessageBytes`).
 
 Implementation Requirements
 1. Domain Layer (`Percolator.Chat`)
-* GroupConversation Aggregate (`Percolator.Chat` / `App/` or root):
+* GroupConversation Aggregate:
     * Properties: ConversationId Id, GroupMasterKey MasterKey, uint Epoch, List<GroupMember> Members.
     * Methods: `void InviteMember(PeerId peerId)` which updates state and registers a `MemberInvitedDomainEvent`.
 * IDomainEvent (`Percolator.Chat/Events`): Define a record for `MemberInvitedDomainEvent` containing ConversationId ConversationId, PeerId PeerId, and pre-generated `SenderKeyDistributionMessageBytes` distribution blob.
@@ -423,13 +423,19 @@ Implementation Requirements
     * Generate `GroupMasterKey` via `IGroupCryptographyService`.
     * Instantiate `GroupConversation` domain entity.
     * Call `group.InviteMember(peerId)` for each initial member.
-    * Save via `IGroupConversationRepository` and commit through the unit of work.
+    * Save via `await _groupRepository.SaveWithOutboxAsync(group, ct)`.
 
-4. Provisioning & Invite Logic
-* IGroupSessionBuilder (`Percolator.Application/Chat`): Add `SenderKeyDistributionMessageBytes BuildDistributionMessage(GroupMasterKey masterKey, PeerId recipientId)`.
-* ProcessInviteHandler: Add a new case to `ProcessInternalEnvelopeHandler` for `GroupInvite`.
-    * Import the DistributionMessage via the VTable bridge.
-    * Update `PendingGroupInvitation` status.
+4. Integration Anchor: Provisioning & Invite Ingress (`Percolator.Application/Network/ProcessInternalEnvelopeHandler.cs`)
+* Update `ProcessInternalEnvelopeHandler` to include a dedicated switch case for `ChatEnvelope.MessageOneofCase.GroupInvite`:
+  ```csharp
+  case ChatEnvelope.MessageOneofCase.GroupInvite:
+  {
+      var invite = chat.GroupInvite;
+      // Extract parameters, use IGroupMessageCryptographyService to import the distribution blob
+      // Use IPendingGroupInvitationRepository to persist the inbound invitation metadata
+      break;
+  }
+  ```
 
 5. Network Contracts (internal_messaging.proto)
 * Add GroupInvite message and integrate with ChatEnvelope.
@@ -546,36 +552,35 @@ Step 6 (On Conflict): Call _relayClient.FetchMissingEpochsAsync(...). Pass the r
 3. Refactored Application Handlers (Percolator.Application)
 
 Refactor UpdateGroupInfoHandler to be completely lean. It should simply instantiate a RenameGroupProposal, pass it directly to the GroupMutationCoordinator, and evaluate the returned structural outcome.
-
+---
 ## Chunk 8
 Feature Implementation Request: Signal Protocol Chunk 8 (P2P Relay Opt-In & R3 State Engine)
 You are to implement Chunk 8 of our Signal Protocol integration for Percolator, allowing client nodes to dynamically opt-in to hosting a blind group relay and managing the network state via an R3-powered WPF state service.
 
 Architectural Constraints (CRITICAL):
-* Transport Abstraction Enclosure: The Application layer must not pass network ports, listening primitives, or manage Kestrel lifecycles. It must interact solely with an application-layer interface: `IRelayNodeManager.SetRelayHostingStateAsync(bool enable, CancellationToken ct)`. The Infrastructure implementation of this manager must internally load the active user's identity to extract their `ListeningPort` and coordinate with `IGrpcServerManager`.
-* Direct Service Invocation: Eliminate MediatR indirection for local infrastructure toggles. The WPF `RelayStateService` must invoke the Application service interface directly to prevent overhead and enable robust, native visual studio stack-trace debugging.
-* Query/Command Separation (CQRS): For network-routing path resolution, do not use heavy domain repositories. Introduce an optimized, read-only `IGroupRoutingQueries` interface returning lightweight primitive value types for fast routing lookups.
+* **Single-Host Capability Toggle:** `IGrpcServerManager` enforces a single host instance per node and must not be stopped or restarted during runtime. `IRelayHostingAppService.SetRelayStateAsync(bool enable, CancellationToken ct)` must simply toggle a fast, cached capability flag.
+* **Early-Gate Enforcement:** The gRPC endpoints inside `PercolatorMessageService` must evaluate this local capability flag *at the absolute entry point of the call stack*. If hosting is disabled, immediately throw an `RpcException(StatusCode.PermissionDenied)` before performing any cryptographic allocations, unmanaged FFI contexts, or Zero-Knowledge verifications.
+* **Direct Service Invocation:** The WPF `RelayStateService` must invoke the Application service interface directly to prevent MediatR overhead for infrastructure lifecycle toggles.
+* **Query/Command Separation (CQRS):** For network-routing path resolution, do not use heavy domain repositories. Introduce an optimized, read-only `IGroupRoutingQueries` interface returning lightweight primitive value types for fast routing lookups.
 
 Implementation Requirements
-1. Application & Persistence Layer (Percolator.Application & Infrastructure)
-* The Service Contract: Define `IRelayNodeManager` in the Application layer.
-* The Routing Query: Define `public interface IGroupRoutingQueries { Task<PeerId?> GetDesignatedRelayAsync(ConversationId conversationId, CancellationToken ct); }`.
-* The Schema: Create a `GroupRelayMappingDbo` containing Guid ConversationId (PK), Guid RelayPeerId, DateTimeOffset LastAssignedUtc. Implement a lightweight, no-tracking execution path for `IGroupRoutingQueries` against this table.
+1. Application & Persistence Layer (`Percolator.Application/Chat` & `Percolator.Infrastructure/Chat`)
+* The Service Contract: Define `IRelayHostingAppService` in `Percolator.Application/Chat`.
+* The Routing Query: Define `public interface IGroupRoutingQueries { Task<PeerId?> GetDesignatedRelayAsync(ConversationId conversationId, CancellationToken ct); }` in `Percolator.Application/Chat`.
+* The Schema: Create a `GroupRelayMappingDbo` containing Guid ConversationId (PK), Guid RelayPeerId, DateTimeOffset LastAssignedUtc inside `Percolator.Infrastructure/Chat/Persistence`. Implement a lightweight, no-tracking execution path for `IGroupRoutingQueries` against this table in `Percolator.Infrastructure/Chat`.
 
-2. The Presentation State Plane (Desktop.Wpf)
+2. The Presentation State Plane (`Desktop.Wpf/Features/Simulator` or appropriate local settings folder)
 * The State Service: Create `RelayStateService` as an Angular-style application singleton.
-    * Inject `IRelayNodeManager` directly.
-    * Use R3's `ReactiveProperty<bool>` and debounced `Subject<bool>.Chunk()` processing loops to sequentially execute `_relayNodeManager.SetRelayHostingStateAsync(finalIntent, ct)` to guard against port thrashing.
-* The DI Registration: Register `RelayStateService` as a Singleton in `App.xaml.cs`.
-* The ViewModel: Update `ShellViewModel` to expose a `BindableReactiveProperty<bool> IsRelayEnabled` and an `AsyncRelayCommand ToggleRelayCommand` tied directly to the state service.
+    * Inject `IRelayHostingAppService` directly.
+    * Use R3's `ReactiveProperty<bool>` and debounced `Subject<bool>.Chunk()` processing loops to sequentially execute `_relayHostingAppService.SetRelayStateAsync(finalIntent, ct)` to guard against configuration thrashing.
+* The DI Registration: Register `IRelayStateService,RelayStateService` as a Singleton in `App.xaml.cs`.
 
-```C3
-C#
+```csharp
 public sealed class RelayStateService : IRelayStateService,IDisposable
 {
-private readonly ReactiveProperty<bool> _isRelayRunning = new(false);
-private readonly Subject<bool> _toggleSubject = new();
-private readonly DisposableBag _bag = new();
+    private readonly ReactiveProperty<bool> _isRelayRunning = new(false);
+    private readonly Subject<bool> _toggleSubject = new();
+    private readonly DisposableBag _bag = new();
 
     public ReadOnlyReactiveProperty<bool> IsRelayRunning => _isRelayRunning;
 
@@ -584,13 +589,12 @@ private readonly DisposableBag _bag = new();
         _isRelayRunning.AddTo(ref _bag);
         _toggleSubject.AddTo(ref _bag);
 
-        // Batch / Debounce rapid user toggles using Chunk to prevent thrashing Kestrel
         _toggleSubject
             .Chunk(TimeSpan.FromMilliseconds(300), timeProvider)
             .Where(toggles => toggles.Length > 0)
             .SubscribeAwait(async (toggles, ct) => 
             {
-                bool finalIntent = toggles[^1]; // Execute the latest user intent
+                bool finalIntent = toggles[^1];
                 await relayHostingAppService.SetRelayStateAsync(finalIntent, ct);
             }, AwaitOperation.Sequential)
             .AddTo(ref _bag);
@@ -602,18 +606,14 @@ private readonly DisposableBag _bag = new();
 }
 ```
 
-The ViewModel: Update ShellViewModel to inject RelayStateService. Expose:
+* **The ViewModel:** Update `ShellViewModel` to inject `RelayStateService`. Expose:
+    * `public BindableReactiveProperty<bool> IsRelayEnabled { get; }`
+    * `public AsyncRelayCommand ToggleRelayCommand { get; }`
+    * Bind `IsRelayEnabled` directly to the state service property using `.ToBindableReactiveProperty()`.
 
-public BindableReactiveProperty<bool> IsRelayEnabled { get; }
-
-public AsyncRelayCommand ToggleRelayCommand { get; }
-
-Bind IsRelayEnabled directly to the state service property using .ToBindableReactiveProperty().
-
-3. Infrastructure Service Implementation (Percolator.Infrastructure)
-* Implement `RelayNodeManager` wrapping the existing `IGrpcServerManager`.
-* **Logic:** When `SetRelayHostingStateAsync(true)` is invoked, the manager synchronously loads the identity profile from the repository to extract its associated `ListeningPort`, and calls `await _serverManager.StartAsync(selfId, identity.ListeningPort, ct)`. Handle port contention or fallbacks cleanly in the infrastructure space.
-
+3. Infrastructure Service Implementation (`Percolator.Infrastructure/Chat`)
+* Implement `RelayCapabilityManager` implementing `IRelayHostingAppService`.
+* **Logic:** `SetRelayStateAsync(bool enable, CancellationToken ct)` modifies a persisted capability toggle or thread-safe state container. Update the endpoints implemented in Chunk 4 (`PublishGroupMessage`) to verify this local state before completing ZK verification pipelines.
 ---
 ## Chunk 9
 Feature Implementation Request: Signal Protocol Chunk 9 (WPF MVVM Presentation Layer)
