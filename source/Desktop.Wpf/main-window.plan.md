@@ -218,7 +218,8 @@ Implementation Requirements
     * Create `IPeerAuthenticationService` exposing the verification contract:
       `Task<bool> AuthenticateDeliveryCertificateRequestAsync(string senderPkh, DateTimeOffset requestTimestamp, byte[] signature, CancellationToken ct);`
     * **The Query Interface:** Introduce `public interface IPeerIdentityQueries { Task<byte[]?> GetPublicKeyByPkhAsync(string senderPkh, CancellationToken ct); }` inside `Percolator.Application/Chat` to separate concerns and optimize read performance.
-    * **Implementation:** `AuthenticateDeliveryCertificateRequestAsync` rejects immediately if `requestTimestamp` is older than 60 seconds (Replay attack prevention). It then invokes `_peerIdentityQueries.GetPublicKeyByPkhAsync(senderPkh, ct)`. The concrete query implementation inside `Percolator.Infrastructure` maps directly to `PeerIdentityDbo` using a fast, no-tracking (`AsNoTracking()`) SQL projection to extract the public identity key bytes, completely bypassing domain aggregate hydration. Wrap these raw bytes into `Percolator.Cryptography.Ed25519SignatureBytes` strictly within the internal implementation execution boundary to perform the final cryptographic verification check.
+    * **Implementation:** `AuthenticateDeliveryCertificateRequestAsync` rejects immediately if `requestTimestamp` is older than 60 seconds (Replay attack prevention). It then invokes `_peerIdentityQueries.GetPublicKeyByPkhAsync(senderPkh, ct)`. The concrete query implementation inside `Percolator.Infrastructure` maps directly to `PeerIdentityDbo` using a fast, no-tracking (`AsNoTracking()`) SQL projection to extract the public identity key bytes, completely bypassing domain aggregate hydration.
+    * **Crypto Mapping:** Add `using Percolator.Cryptography;` to the implementation file. Wrap the retrieved raw bytes into `Percolator.Cryptography.Ed25519SignatureBytes` strictly within the internal execution boundary to perform the final cryptographic verification check.
 * The Interceptor (`Percolator.Infrastructure/Network/Grpc`):
     * Create `DeliveryCertificateAuthInterceptor : Interceptor`.
     * Extract the string token from the `"x-percolator-sender-pkh"` metadata header along with the timestamp and signature bytes.
@@ -229,7 +230,8 @@ Implementation Requirements
     * Define a `DeliveryCertificate` message containing `certificate_data` (bytes) and `signature` (bytes).
     * Add `rpc GetDeliveryCertificate(GetDeliveryCertificateRequest) returns (GetDeliveryCertificateResponse);` to `TransportService`.
 * Implementation (`PercolatorMessageService`):
-    * Implement the endpoint. Inject a lightweight query interface or local identity reader to safely pull the local node's routing parameters without mutating or tracking any domain structures. Do not access `SelfIdentityDbo` directly.
+    * **The Query Interface:** Introduce `public interface ISelfIdentityQueries { Task<byte[]?> GetRelayRootKeyAsync(CancellationToken ct); }` inside `Percolator.Application/Chat`.
+    * Implement the endpoint. Inject `ISelfIdentityQueries` to safely pull the local node's routing parameters without mutating or tracking any domain structures, completely avoiding direct database access to `SelfIdentityDbo`.
     * Construct the certificate payload bytes (containing the Relay's wire identity fingerprint and a 24-hour expiration counter).
     * Convert the payload key to `Percolator.Cryptography.RelayRootKeyBytes` and utilize `IEd25519CryptographyService` to sign the payload. Return the response.
 
@@ -249,7 +251,7 @@ Implementation Requirements
 **Testing Requirements (Chunk 3):**
 - `PeerAuthenticationService_AuthenticateDeliveryCertificateRequest_ReturnsFalse_WhenTimestampIsExpired` - Test that AuthenticateDeliveryCertificateRequestAsync returns false when the request timestamp is older than 60 seconds.
 - `SealedSenderAuthenticationRoundTrip_ClientSignedRequest_ValidatedByPeerAuthenticationService` - Integration test that a client-signed certificate request payload is successfully validated by PeerAuthenticationService when mapped cleanly using a wire-safe Public Key Hash (PKH) lookup token.
-```
+
 ---
 ## Chunk 4
 Feature Implementation Request: Signal Protocol Chunk 4 (Relay Encrypted Ledger)
