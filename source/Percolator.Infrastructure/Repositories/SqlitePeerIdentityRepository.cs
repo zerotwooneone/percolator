@@ -21,6 +21,7 @@ public sealed class SqlitePeerIdentityRepository : IPeerIdentityRepository
         if (!string.IsNullOrWhiteSpace(row.Name))
             aggregate.SetDisplayName(row.Name);
         aggregate.SetVersionFromPersistence(row.Version);
+        aggregate.SetLastKnownProfileRevision(row.LastKnownProfileRevision);
 
         var keys = await _db.PeerIdentityKeys_V2.AsNoTracking()
             .Where(k => k.PeerId == id.Value)
@@ -98,6 +99,7 @@ public sealed class SqlitePeerIdentityRepository : IPeerIdentityRepository
         existing.Name = peer.DisplayName?.Value ?? string.Empty;
         existing.Version = existing.Version + 1;
         existing.UpdatedAtUtc = now;
+        existing.LastKnownProfileRevision = peer.LastKnownProfileRevision;
 
         // Replace key set to reflect aggregate state
         var oldKeys = _db.PeerIdentityKeys_V2.Where(k => k.PeerId == peer.Id.Value);

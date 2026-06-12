@@ -1,5 +1,6 @@
 using MediatR;
 using Microsoft.Extensions.DependencyInjection;
+using Percolator.Application.Chat;
 using Percolator.Application.Identity;
 using Percolator.Chat;
 using Percolator.Chat.App;
@@ -15,6 +16,9 @@ public static class ServiceCollectionExtensions
         
         // Register SendGroupMessageCommandHandler
         services.AddScoped<IRequestHandler<Commands.SendGroupMessageCommand>, SendGroupMessageCommandHandler>();
+
+        // Register Profile Orchestration Service
+        services.AddScoped<IProfileOrchestrationService, ProfileOrchestrationService>();
 
         return services;
     }

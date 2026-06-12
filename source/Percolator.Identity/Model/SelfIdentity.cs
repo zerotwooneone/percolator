@@ -10,6 +10,10 @@ public sealed class SelfIdentity
     public DateTimeOffset LastUsedUtc { get; private set; }
     public PeerId PeerId { get; }
     public ListeningPort ListeningPort { get; private set; }
+    public DeviceId DeviceId { get; private set; } = DeviceId.Primary;
+    public ProfileKeyBytes? CurrentProfileKey { get; private set; }
+    public ProfileCiphertextPackage? CurrentProfileCiphertext { get; private set; }
+    public int ProfileRevision { get; private set; }
 
     public SelfIdentity(SelfId id, PeerId peerId, ListeningPort listeningPort)
     {
@@ -41,4 +45,11 @@ public sealed class SelfIdentity
     public void TouchLastUsed(DateTimeOffset when) => LastUsedUtc = when;
 
     public void UpdateListeningPort(ListeningPort port) => ListeningPort = port;
+
+    public void CommitProfileUpdate(ProfileKeyBytes newKey, ProfileCiphertextPackage payload)
+    {
+        CurrentProfileKey = newKey;
+        CurrentProfileCiphertext = payload;
+        ProfileRevision++;
+    }
 }

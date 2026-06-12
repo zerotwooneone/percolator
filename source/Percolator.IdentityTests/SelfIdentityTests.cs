@@ -87,4 +87,25 @@ public class SelfIdentityTests
         Assert.That(next, Is.Not.Null);
         Assert.That(next!.NotBefore, Is.EqualTo(now.AddDays(1)));
     }
+
+    [Test]
+    public void CommitProfileUpdate_IncrementsRevisionAndUpdatesPayload()
+    {
+        // Arrange
+        var id = new SelfIdentity(new SelfId(6), new PeerId(Guid.NewGuid()), new ListeningPort(5000));
+        var initialRevision = id.ProfileRevision;
+        var newKey = ProfileKeyBytes.FromBytesOwned(Bytes(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32));
+        var ciphertext = EncryptedProfileDataBytes.FromBytesOwned(Bytes(10, 20, 30));
+        var nonce = ProfileNonceBytes.FromBytesOwned(Bytes(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12));
+        var tag = ProfileTagBytes.FromBytesOwned(Bytes(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16));
+        var package = new ProfileCiphertextPackage(ciphertext, nonce, tag);
+
+        // Act
+        id.CommitProfileUpdate(newKey, package);
+
+        // Assert
+        Assert.That(id.ProfileRevision, Is.EqualTo(initialRevision + 1));
+        Assert.That(id.CurrentProfileKey, Is.EqualTo(newKey));
+        Assert.That(id.CurrentProfileCiphertext, Is.EqualTo(package));
+    }
 }

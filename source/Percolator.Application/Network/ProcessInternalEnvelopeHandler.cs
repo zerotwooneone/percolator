@@ -2,6 +2,7 @@ using Google.Protobuf;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Apps.Chat;
+using Percolator.Application.Chat;
 using Percolator.Chat.App;
 using Percolator.Chat.App.Commands;
 using Percolator.Chat.Primitives;
@@ -34,6 +35,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
     private readonly IGroupMessageCryptographyService _groupMessageCryptoService;
     private readonly IGroupCryptographyService _groupCryptoService;
     private readonly IChatMessageWriter _messageWriter;
+    private readonly IProfileOrchestrationService _profileOrchestrationService;
 
     public ProcessInternalEnvelopeHandler(
         ILogger<ProcessInternalEnvelopeHandler> logger,
@@ -45,7 +47,8 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
         Percolator.Chat.App.IGroupCryptoStateRepository groupCryptoStateRepository,
         IGroupMessageCryptographyService groupMessageCryptoService,
         IGroupCryptographyService groupCryptoService,
-        IChatMessageWriter messageWriter)
+        IChatMessageWriter messageWriter,
+        IProfileOrchestrationService profileOrchestrationService)
     {
         _logger = logger;
         _mediator = mediator;
@@ -57,6 +60,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
         _groupMessageCryptoService = groupMessageCryptoService;
         _groupCryptoService = groupCryptoService;
         _messageWriter = messageWriter;
+        _profileOrchestrationService = profileOrchestrationService;
     }
 
     public async Task<InternalEnvelope?> Handle(ProcessInternalEnvelopeCommand request, CancellationToken cancellationToken)
@@ -206,6 +210,14 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
         if (env.ApplicationPayloadCase == InternalEnvelope.ApplicationPayloadOneofCase.ChatEnvelope)
         {
             var chat = env.ChatEnvelope;
+            
+            // Process inbound profile data if present
+            if (request.Context.RemotePeerGuid is not null)
+            {
+                var senderPeerId = new PeerId(request.Context.RemotePeerGuid.Value);
+                await _profileOrchestrationService.ProcessInboundProfileDataAsync(chat, senderPeerId, cancellationToken).ConfigureAwait(false);
+            }
+            
             switch (chat.MessageCase)
             {
                 case ChatEnvelope.MessageOneofCase.TextMessage:

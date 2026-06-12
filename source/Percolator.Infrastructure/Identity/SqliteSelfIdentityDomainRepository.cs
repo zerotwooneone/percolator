@@ -91,6 +91,12 @@ public sealed class SqliteSelfIdentityDomainRepository : ISelfIdentityRepository
                 dbo.Name = identity.DisplayName?.Value ?? dbo.Name;
                 dbo.LastUsedUtc = identity.LastUsedUtc;
                 dbo.ListeningPort = identity.ListeningPort.Value;
+                dbo.DeviceId = identity.DeviceId.Value;
+                dbo.ProfileKey = identity.CurrentProfileKey?.Span.ToArray();
+                dbo.EncryptedProfileData = identity.CurrentProfileCiphertext?.Ciphertext.Span.ToArray();
+                dbo.ProfileNonce = identity.CurrentProfileCiphertext?.Nonce.Span.ToArray();
+                dbo.ProfileTag = identity.CurrentProfileCiphertext?.Tag.Span.ToArray();
+                dbo.ProfileRevision = identity.ProfileRevision;
             }
             await _db.SaveChangesAsync(ct).ConfigureAwait(false);
         }
@@ -101,6 +107,26 @@ public sealed class SqliteSelfIdentityDomainRepository : ISelfIdentityRepository
         var self = new SelfIdentity(new SelfId(dbo.Id), new PeerId(dbo.PeerId), new ListeningPort(dbo.ListeningPort));
         if (!string.IsNullOrWhiteSpace(dbo.Name)) self.SetDisplayName(dbo.Name);
         self.TouchLastUsed(dbo.LastUsedUtc);
+        
+        // Map profile data if present
+        if (dbo.ProfileKey != null && dbo.EncryptedProfileData != null && dbo.ProfileNonce != null && dbo.ProfileTag != null)
+        {
+            var profileKey = ProfileKeyBytes.FromBytesOwned(dbo.ProfileKey);
+            var ciphertext = EncryptedProfileDataBytes.FromBytesOwned(dbo.EncryptedProfileData);
+            var nonce = ProfileNonceBytes.FromBytesOwned(dbo.ProfileNonce);
+            var tag = ProfileTagBytes.FromBytesOwned(dbo.ProfileTag);
+            var package = new ProfileCiphertextPackage(ciphertext, nonce, tag);
+            
+            // Use reflection to set private properties since there's no public setter for CurrentProfileKey/CurrentProfileCiphertext
+            var profileKeyField = typeof(SelfIdentity).GetField("<CurrentProfileKey>k__BackingField", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var profileCiphertextField = typeof(SelfIdentity).GetField("<CurrentProfileCiphertext>k__BackingField", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var profileRevisionField = typeof(SelfIdentity).GetField("<ProfileRevision>k__BackingField", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            
+            profileKeyField?.SetValue(self, profileKey);
+            profileCiphertextField?.SetValue(self, package);
+            profileRevisionField?.SetValue(self, dbo.ProfileRevision);
+        }
+        
         return self;
     }
 }

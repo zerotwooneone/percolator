@@ -119,6 +119,13 @@ Attach (Send Pipeline): Check if local user's ProfileRevision > recipient peer's
 Process (Receive Pipeline): If inbound ChatEnvelope has profile_revision > local PeerIdentityDbo.LastKnownProfileRevision, extract bytes, translate to Cryptography types, decrypt, and update the peer's name, key, and revision in the database.
 
 Integration: Show how MessageService and ProcessInternalEnvelopeHandler inject and call this new service.
+
+**Testing Requirements (Chunk 1):**
+- `SelfIdentity_CommitProfileUpdate_IncrementsRevisionAndUpdatesPayload` - Test that calling CommitProfileUpdate increments ProfileRevision and updates CurrentProfileKey/CurrentProfileCiphertext
+- `EncryptedProfileDataBytes_ThrowsException_WhenPayloadExceedsMaxLength` - Test that EncryptedProfileDataBytes.FromBytesOwned throws ArgumentException when payload exceeds maximum length
+- `ProfileCryptoRoundTrip_EncryptThenDecrypt_YieldsOriginalPlaintext` - Unit test in Percolator.CryptographyTests that passing a plaintext string through EncryptData and immediately routing the resulting ciphertext, nonce, and tag into DecryptData using the same ProfileKeyBytes yields the original string without data corruption
+
+**Note:** Round-trip integration tests should be implemented in their respective domain unit test projects (e.g., Percolator.CryptographyTests, Percolator.InfrastructureTests), NOT in the ApplicationIntegrationTests project.
 ---
 ## Chunk 2
 ### Feature Implementation Request: Signal Protocol Chunk 2 (FFI Direct Interop Bridge via DbContextFactory)
@@ -155,6 +162,10 @@ Implementation Requirements
     * Resolve a temporary context: `using var db = _dbFactory.CreateDbContext();`
     * Perform a synchronous upsert. If the record exists, update its `RecordBytes`; if it does not exist, add a new `SenderKeyRecordDbo` instance.
     * Execute `db.SaveChanges();` to immediately commit the state transition to SQLite.
+
+**Testing Requirements (Chunk 2):**
+- `SenderKeyInteropBridge_TryLoadSenderKey_ReturnsFalse_WhenRecordIsMissing` - Test that TryLoadSenderKey returns false when the requested record does not exist in the database
+- `SenderKeyStatePersistenceRoundTrip_StoreThenLoad_MatchesOriginalBytes` - Integration test that a native ratchet state byte array saved via StoreSenderKey using a full composite key (ConversationId, PeerId, uint deviceId) matches the byte array returned by a subsequent TryLoadSenderKey call
 ---
 ## Chunk 3
 Feature Implementation Request: Signal Protocol Chunk 3 (Micro-PKI & Sealed Sender)
@@ -209,6 +220,9 @@ Implementation Requirements
     * Implement DeliveryCertificateRefreshWorker : IHostedService.
     * Logic: Hook into IHostApplicationLifetime.ApplicationStarted. Create a loop bounded by cancellation. Inside the loop, create an AsyncServiceScope, resolve ICertificateOrchestrator, and call RefreshLocalCertificateAsync(). Then await Task.Delay(TimeSpan.FromHours(20), ct); to trigger well before the 24-hour expiration.
 
+**Testing Requirements (Chunk 3):**
+- `PeerAuthenticationService_AuthenticateDeliveryCertificateRequest_ReturnsFalse_WhenTimestampIsExpired` - Test that AuthenticateDeliveryCertificateRequestAsync returns false when the request timestamp is older than 60 seconds
+- `SealedSenderAuthenticationRoundTrip_ClientSignedRequest_ValidatedByPeerAuthenticationService` - Integration test that a client-signed certificate request payload is successfully validated by PeerAuthenticationService when mapped cleanly using a wire-safe Public Key Hash (PKH) lookup token
 ---
 ## Chunk 4
 Feature Implementation Request: Signal Protocol Chunk 4 (Relay Encrypted Ledger)
@@ -304,6 +318,10 @@ Return Status.SUCCESS.
 7. Relay gRPC Service (Percolator.Infrastructure)
 
 Implement the PublishGroupMessage endpoint. Map the request, call IRelayGroupLedgerService.PublishAsync(), and map the result back to Protobuf. Keep the gRPC layer dumb.
+
+**Testing Requirements (Chunk 4):**
+- `RelayGroupLedger_AdvanceEpoch_UpdatesCurrentEpoch_WhenRequestedEpochIsGreater` - Test that AdvanceEpoch updates CurrentEpoch when the requested epoch is greater than the current epoch
+- `RelayGroupLedger_AdvanceEpoch_ThrowsStaleEpochDomainException_WhenRequestedEpochIsEqualOrLower` - Test that AdvanceEpoch throws StaleEpochDomainException when the requested epoch is equal to or lower than the current epoch
 ---
 
 ## Chunk 5
@@ -403,6 +421,10 @@ Implementation Requirements
       ServerCallContext context)
   ```
 * **Logic:** Parse the incoming group identifier into a `ConversationId` and the sender metadata into a `PeerId`. Call `_dispatcher.RegisterStream(conversationId, peerId, responseStream)`. Keep the stream alive using a processing loop bounded by `while (!context.CancellationToken.IsCancellationRequested) { await Task.Delay(1000, context.CancellationToken); }`. Upon exit or cancellation, safely execute `_dispatcher.UnregisterStream(conversationId, peerId)`.
+
+**Testing Requirements (Chunk 5):**
+- `ProcessInternalEnvelopeHandler_Handle_ExtractsGroupInvitePayload_WhenEnvelopeMatchesSchema` - Test that ProcessInternalEnvelopeHandler correctly extracts and processes GroupInvite payload when the ChatEnvelope contains a GroupInvite message
+- `GroupV2SessionAndMessagingRoundTrip_DistributionMessageEnablesGroupMessaging` - Integration test where a generated GroupMasterKey creates a distribution message, a separate peer context processes that distribution message to bootstrap their session, and group messages encrypted by that peer can be successfully decrypted by the group creator
 ---
 ## Chunk 7
 Feature Implementation Request: Signal Protocol Chunk 7 (Client-Side Speculative Rebase Coordinator)
@@ -452,6 +474,9 @@ Step 6 (On Conflict): Call _relayClient.FetchMissingEpochsAsync(...). Pass the r
 3. Refactored Application Handlers (Percolator.Application)
 
 Refactor UpdateGroupInfoHandler to be completely lean. It should simply instantiate a RenameGroupProposal, pass it directly to the GroupMutationCoordinator, and evaluate the returned structural outcome.
+
+**Testing Requirements (Chunk 6):**
+- `GrpcGroupNotificationDispatcher_DispatchAsync_FansOutPayloadToAllRegisteredWriters_WhenConversationHasMultipleActiveStreams` - Test that DispatchAsync fans out the payload to all registered IServerStreamWriter instances when the conversation has multiple active streams
 ---
 ## Chunk 8
 Feature Implementation Request: Signal Protocol Chunk 8 (P2P Relay Opt-In & R3 State Engine)
@@ -514,6 +539,13 @@ public sealed class RelayStateService : IRelayStateService, IDisposable
 3. Infrastructure Service Implementation (`Percolator.Infrastructure/Chat`)
 * Implement `RelayCapabilityManager` implementing `IRelayHostingAppService`.
 * **Logic:** `SetRelayStateAsync(bool enable, CancellationToken ct)` modifies a persisted capability toggle or thread-safe state container. Update the endpoints implemented in Chunk 4 (`PublishGroupMessage`) to verify this local state before completing ZK verification pipelines.
+
+**Testing Requirements (Chunk 7):**
+- `GroupMutationCoordinator_CoordinateMutation_AbortsImmediately_WhenLocalProposalFailsBusinessRules` - Test that CoordinateMutationAsync aborts immediately when the local proposal fails business rule validation
+- `GroupMutationCoordinator_CoordinateMutation_RetriesExactlyThreeTimes_WhenEncounteringContinuousEpochConflicts` - Test that CoordinateMutationAsync retries exactly three times when encountering continuous epoch conflicts
+
+**Testing Requirements (Chunk 8):**
+- `RelayStateService_RequestToggle_BatchesRapidUserInputs_AndInvokesAppServiceOnlyWithFinalIntent` - Test that RelayStateService batches rapid user inputs and invokes the app service only with the final intent
 ---
 ## Chunk 9
 Feature Implementation Request: Signal Protocol Chunk 9 (WPF MVVM Presentation Layer)

@@ -1,10 +1,10 @@
 using Google.Protobuf;
 using Microsoft.Extensions.Logging;
+using Percolator.Application.Chat;
 using Percolator.Application.Identity;
 using Percolator.Application.Services;
 using Percolator.Contracts;
 using Percolator.Cryptography;
-using Percolator.Identity;
 using Percolator.Network;
 using PeerId = Percolator.Identity.PeerId;
 using Percolator.Network.Messaging;
@@ -19,6 +19,7 @@ namespace Percolator.Application.Network
         private readonly ActiveIdentityContext _active;
         private readonly INetworkSender _networkSender;
         private readonly IOutboundMessageWireTap _wireTap;
+        private readonly IProfileOrchestrationService _profileOrchestrationService;
 
         public MessageService(
             ILogger<MessageService> logger,
@@ -26,7 +27,8 @@ namespace Percolator.Application.Network
             ISecureMessagingService secureMessaging,
             ActiveIdentityContext active,
             INetworkSender networkSender,
-            IOutboundMessageWireTap wireTap)
+            IOutboundMessageWireTap wireTap,
+            IProfileOrchestrationService profileOrchestrationService)
         {
             _logger = logger;
             _sessions = sessions;
@@ -34,6 +36,7 @@ namespace Percolator.Application.Network
             _active = active;
             _networkSender = networkSender;
             _wireTap = wireTap;
+            _profileOrchestrationService = profileOrchestrationService;
         }
 
         public async Task<(SendResult Result, DeliverOpaqueMessageResponse? Response)> SendMessageWithResponseAsync(
@@ -43,6 +46,12 @@ namespace Percolator.Application.Network
         {
             if (_active.Identity is null)
                 throw new InvalidOperationException("Active identity not initialized");
+
+            // Attach profile data if required
+            if (envelope.ApplicationPayloadCase == InternalEnvelope.ApplicationPayloadOneofCase.ChatEnvelope)
+            {
+                await _profileOrchestrationService.AttachProfileDataIfRequiredAsync(envelope.ChatEnvelope, recipientPeerId, ct).ConfigureAwait(false);
+            }
 
             // Require an existing direct session to encrypt the envelope to the recipient.
             var ds = await _sessions.GetByRemotePeerIdAsync(new Percolator.Network.PeerId(recipientPeerId.Value), _active.Identity!.SelfIdentityId.Value).ConfigureAwait(false);
@@ -114,6 +123,12 @@ namespace Percolator.Application.Network
         {
             if (_active.Identity is null)
                 throw new InvalidOperationException("Active identity not initialized");
+
+            // Attach profile data if required
+            if (envelope.ApplicationPayloadCase == InternalEnvelope.ApplicationPayloadOneofCase.ChatEnvelope)
+            {
+                await _profileOrchestrationService.AttachProfileDataIfRequiredAsync(envelope.ChatEnvelope, recipientPeerId, ct).ConfigureAwait(false);
+            }
 
             // Require an existing direct session to build recipient DR ciphertext
             var ds = await _sessions.GetByRemotePeerIdAsync(new Percolator.Network.PeerId(recipientPeerId.Value), _active.Identity!.SelfIdentityId.Value).ConfigureAwait(false);

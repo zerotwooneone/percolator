@@ -40,10 +40,19 @@ message CreateGroup {
 
 // === 1. Rich Text Chat Application ===
 
+message ProfileData {
+  optional string display_name = 1;
+}
+
 message ChatEnvelope {
   optional uint32 version = 100; // Top-level version for chat envelope
+  optional bytes profile_key = 10;
+  optional bytes encrypted_profile_data = 11;
+  optional bytes profile_nonce = 12;
+  optional bytes profile_tag = 13;
+  optional int32 profile_revision = 14;
   oneof message {
-    CreateGroup create_group = 13; // explicit group creation before any admin ops
+    CreateGroup create_group = 16; // explicit group creation before any admin ops
     TextMessage text_message = 1;
     ReadReceipt read_receipt = 2;
     EmojiAnnotation emoji_annotation = 3;
@@ -51,7 +60,7 @@ message ChatEnvelope {
     // Bootstrap: delivers the encrypted GroupMasterKey over existing 1:1 tunnels
     GroupKeyBootstrap group_key_bootstrap = 15;
     // Group ciphertext message
-    GroupMessage group_message = 14;
+    GroupMessage group_message = 17;
   }
 }
 

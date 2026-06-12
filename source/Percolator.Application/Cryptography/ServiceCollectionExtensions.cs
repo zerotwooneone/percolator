@@ -14,6 +14,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ISessionCrypto, AeadSessionCrypto>();
         services.AddScoped<IHandshakePlanner, HandshakePlannerAdapter>();
         services.AddScoped<IGroupMessageCryptographyService, GroupMessageCryptographyService>();
+        services.AddSingleton<IProfileCryptographyService, ProfileCryptographyService>();
         
         // Bind the configuration section to the options class
         services.AddOptions<CryptographyOptions>()

@@ -72,6 +72,7 @@ public sealed class PeerIdentity
     public TrustState TrustState { get; private set; } = TrustState.Unknown;
     public IReadOnlyCollection<object> DomainEvents => _domainEvents.AsReadOnly();
     public int Version { get; private set; }
+    public int LastKnownProfileRevision { get; private set; }
 
     public PeerIdentity(PeerId id)
     {
@@ -132,6 +133,12 @@ public sealed class PeerIdentity
 
     // Apply version from persistence (used by repositories)
     public void SetVersionFromPersistence(int version) => Version = version;
+
+    // Apply last known profile revision from persistence (used by repositories)
+    public void SetLastKnownProfileRevision(int revision) => LastKnownProfileRevision = revision;
+
+    // Update last known profile revision (used by profile orchestration)
+    public void UpdateLastKnownProfileRevision(int revision) => LastKnownProfileRevision = revision;
 }
 
 public sealed record PeerVerifiedEvent(PeerId PeerId, byte[] Fingerprint, VerificationMethod Method, DateTimeOffset VerifiedAt, string? VerifiedBy);
