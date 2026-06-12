@@ -150,10 +150,10 @@ Implementation Requirements
 
 2. The Interop Bridge Contract (`Percolator.Cryptography`)
 * Define `public interface ISenderKeyInteropBridge`.
-* Expose methods using your newly defined cryptography domain primitives consistently:
+* Expose methods using your newly defined cryptography domain primitives consistently with fully-qualified namespaces:
   ```csharp
-  bool TryLoadSenderKey(ConversationId conversationId, PeerId senderId, DeviceId deviceId, out byte[] recordBytes);
-  void StoreSenderKey(ConversationId conversationId, PeerId senderId, DeviceId deviceId, byte[] recordBytes);
+  bool TryLoadSenderKey(Percolator.Cryptography.ConversationId conversationId, Percolator.Cryptography.PeerId senderId, Percolator.Cryptography.DeviceId deviceId, out byte[] recordBytes);
+  void StoreSenderKey(Percolator.Cryptography.ConversationId conversationId, Percolator.Cryptography.PeerId senderId, Percolator.Cryptography.DeviceId deviceId, byte[] recordBytes);
   ```
 
 3. Persistence (`Percolator.Infrastructure/Chat/Persistence`)
@@ -166,6 +166,7 @@ Implementation Requirements
 4. The Bridge Implementation (`Percolator.Infrastructure.Chat`)
 * Implement `SenderKeyInteropBridge` implementing `ISenderKeyInteropBridge` in namespace `Percolator.Infrastructure.Chat`.
 * Inject `IDbContextFactory<PercolatorDbContext>` into its constructor.
+* **Namespace Mapping Note:** The infrastructure class maps wrapped domain inputs (`Percolator.Cryptography.ConversationId`, `Percolator.Cryptography.PeerId`, `Percolator.Cryptography.DeviceId`) down to primitive `Guid` and `uint` parameters when invoking the underlying `db.SenderKeyRecords.Find()` composite key query.
 * **TryLoadSenderKey Logic:**
     * Resolve a temporary context: `using var db = _dbFactory.CreateDbContext();`.
     * Synchronously locate the record matching the full composite key using `db.SenderKeyRecords.Find(conversationId.Value, senderId.Value, deviceId.Value)`.
@@ -205,8 +206,8 @@ Implementation Requirements
 
 3. Application-Layer Authentication (The Server Auth Flow)
 * The Application Logic (`Percolator.Application/Chat`):
-    * Create `IPeerAuthenticationService` with method: `Task<bool> AuthenticateDeliveryCertificateRequestAsync(string senderPkh, DateTimeOffset requestTimestamp, Ed25519SignatureBytes signature, CancellationToken ct)`.
-    * Implementation: Reject if requestTimestamp is older than 60 seconds (Replay attack prevention). Look up the peer's local PeerId and associated public ECDsa Identity Key from PeerIdentityDbo utilizing the `senderPkh` lookup string. Verify the signature using the existing ISigningService. Return true if valid.
+    * Create `IPeerAuthenticationService` with method using application-local types to prevent tight coupling to the crypto library: `Task<bool> AuthenticateDeliveryCertificateRequestAsync(string senderPkh, DateTimeOffset requestTimestamp, byte[] signature, CancellationToken ct)`.
+    * Implementation: Reject if requestTimestamp is older than 60 seconds (Replay attack prevention). Look up the peer's local PeerId and associated public ECDsa Identity Key from PeerIdentityDbo utilizing the `senderPkh` lookup string. The internal implementation wraps the raw input bytes into `Percolator.Cryptography.Ed25519SignatureBytes` strictly within the cryptographic execution boundary and verifies the signature using the existing ISigningService. Return true if valid.
 * The Interceptor (`Percolator.Infrastructure/Network/Grpc`):
     * Create `DeliveryCertificateAuthInterceptor : Interceptor`.
     * Extract the string token from the `"x-percolator-sender-pkh"` metadata header along with the timestamp and signature bytes.
@@ -350,9 +351,9 @@ Architectural Constraints (CRITICAL):
 Implementation Requirements
 1. Domain Layer (`Percolator.Chat`)
 * GroupConversation Aggregate:
-    * Properties: ConversationId Id, GroupMasterKey MasterKey, uint Epoch, List<GroupMember> Members.
-    * Methods: `void InviteMember(PeerId peerId)` which updates state and registers a `MemberInvitedDomainEvent`. `void ClearDomainEvents()` to flush events post-persistence.
-* IDomainEvent (`Percolator.Chat/Events`): Define a record for `MemberInvitedDomainEvent` containing ConversationId ConversationId, PeerId PeerId, and pre-generated `SenderKeyDistributionMessageBytes` distribution blob.
+    * Properties: `Percolator.Chat.ConversationId Id`, `Percolator.Chat.GroupMasterKey MasterKey`, uint Epoch, List<GroupMember> Members.
+    * Methods: `void InviteMember(Percolator.Chat.PeerId peerId)` which updates state and registers a `MemberInvitedDomainEvent`. `void ClearDomainEvents()` to flush events post-persistence.
+* IDomainEvent (`Percolator.Chat/Events`): Define a record for `MemberInvitedDomainEvent` containing `Percolator.Chat.ConversationId ConversationId`, `Percolator.Chat.PeerId PeerId`, and pre-generated `SenderKeyDistributionMessageBytes` distribution blob.
 
 2. Infrastructure Layer (`Percolator.Infrastructure/Chat/Persistence`)
 * RelayOutboxDbo: Create a DBO to store pending domain events: Id, EventType, PayloadJson, DestinationPkhBytes (byte[]), ProcessedAtUtc. The DestinationPkhBytes column stores the pre-resolved Public Key Hash for the target PeerId, enabling the OutboxDispatcherWorker to dispatch without secondary lookups.
@@ -361,10 +362,11 @@ Implementation Requirements
 * **Transient Network Backoff:** The `OutboxDispatcherWorker` must encapsulate transient network exceptions (e.g., gRPC `RpcException` timeouts). If a peer is offline, the worker must catch the error, log a warning, back off sequentially using a non-blocking `Task.Delay`, and skip updating `ProcessedAtUtc` so the record is cleanly evaluated on the next loop.
 
 3. Application Orchestration (`Percolator.Application/Apps/Chat`)
+* **Anti-Corruption Layer Note:** `CreateGroupCommandHandler` (located in `Percolator.Application/Apps/Chat`) serves as the Anti-Corruption Layer. It accepts incoming application primitives, extracts their raw primitives, and uses code-generated factory methods (e.g., `Percolator.Chat.GroupMasterKey.FromBytesOwned()`) to cleanly initialize the core domain entities.
 * CreateGroupCommandHandler:
     * Generate `GroupMasterKey` via `IGroupCryptographyService`.
-    * Instantiate `GroupConversation` domain entity.
-    * Call `group.InviteMember(peerId)` for each initial member.
+    * Instantiate `GroupConversation` domain entity using `Percolator.Chat` local types.
+    * Call `group.InviteMember(peerId)` for each initial member using `Percolator.Chat.PeerId`.
     * Save via `await _groupRepository.SaveWithOutboxAsync(group, ct)`.
 
 4. Integration Anchor: Provisioning & Invite Ingress (`Percolator.Application/Network/ProcessInternalEnvelopeHandler.cs`)
@@ -407,14 +409,14 @@ Architectural Constraints (CRITICAL):
 
 Implementation Requirements
 1. Interface Definition (`Percolator.Application/Chat`)
-* Define: `public interface IGroupNotificationDispatcher { Task DispatchAsync(ConversationId conversationId, MessageDto message, CancellationToken ct); }`
+* Define: `public interface IGroupNotificationDispatcher { Task DispatchAsync(Percolator.Application.Chat.ConversationId conversationId, MessageDto message, CancellationToken ct); }`
 
 2. Infrastructure Multi-Stream Tracking (`Percolator.Infrastructure/Chat`)
 * Create `GrpcGroupNotificationDispatcher` implementing `IGroupNotificationDispatcher`.
-* **Storage Matrix:** Maintain a thread-safe nested lookup: `ConcurrentDictionary<ConversationId, ConcurrentDictionary<PeerId, IServerStreamWriter<GroupStreamResponse>>>`.
+* **Storage Matrix:** Maintain a thread-safe nested lookup using infrastructure-local types: `ConcurrentDictionary<Percolator.Application.Chat.ConversationId, ConcurrentDictionary<Percolator.Application.Chat.PeerId, IServerStreamWriter<GroupStreamResponse>>>`.
 * **Methods:**
-    * Implement `Task DispatchAsync(...)`: Safely extract the nested list of writers for the matching `ConversationId`, iterate through the connections, and invoke `.WriteAsync()` to fan out the payload across all active peer streams.
-    * Expose helper registrations: `void RegisterStream(ConversationId conversationId, PeerId peerId, IServerStreamWriter<GroupStreamResponse> stream)` and `void UnregisterStream(ConversationId conversationId, PeerId peerId)`.
+    * Implement `Task DispatchAsync(...)`: Safely extract the nested list of writers for the matching `Percolator.Application.Chat.ConversationId`, iterate through the connections, and invoke `.WriteAsync()` to fan out the payload across all active peer streams.
+    * Expose helper registrations: `void RegisterStream(Percolator.Application.Chat.ConversationId conversationId, Percolator.Application.Chat.PeerId peerId, IServerStreamWriter<GroupStreamResponse> stream)` and `void UnregisterStream(Percolator.Application.Chat.ConversationId conversationId, Percolator.Application.Chat.PeerId peerId)`.
 * Create `SqliteChatMessageWriter` inside `Percolator.Infrastructure/Chat` to handle straightforward, async-safe database appends directly via core entity framework operations.
 
 3. Application Ingress Orchestration (`Percolator.Application/Apps/Chat`)
@@ -432,7 +434,7 @@ Implementation Requirements
       IServerStreamWriter<GroupStreamResponse> responseStream, 
       ServerCallContext context)
   ```
-* **Logic:** Parse the incoming group identifier into a `ConversationId` and the sender metadata into a `PeerId`. Call `_dispatcher.RegisterStream(conversationId, peerId, responseStream)`. Keep the stream alive using a processing loop bounded by `while (!context.CancellationToken.IsCancellationRequested) { await Task.Delay(1000, context.CancellationToken); }`. Upon exit or cancellation, safely execute `_dispatcher.UnregisterStream(conversationId, peerId)`.
+* **Logic:** Parse the incoming group identifier into a `Percolator.Application.Chat.ConversationId` and the sender metadata into a `Percolator.Application.Chat.PeerId`. Call `_dispatcher.RegisterStream(conversationId, peerId, responseStream)`. Keep the stream alive using a processing loop bounded by `while (!context.CancellationToken.IsCancellationRequested) { await Task.Delay(1000, context.CancellationToken); }`. Upon exit or cancellation, safely execute `_dispatcher.UnregisterStream(conversationId, peerId)`.
 
 **Testing Requirements (Chunk 5):**
 - `ProcessInternalEnvelopeHandler_Handle_ExtractsGroupInvitePayload_WhenEnvelopeMatchesSchema` - Test that ProcessInternalEnvelopeHandler correctly extracts and processes GroupInvite payload when the ChatEnvelope contains a GroupInvite message
@@ -465,7 +467,9 @@ public bool EvaluateProposal(IGroupMutationProposal proposal, out string? busine
 
 Create a centralized service: GroupMutationCoordinator.
 
-Method Signature: Task<MutationResult> CoordinateMutationAsync(ConversationId conversationId, IGroupMutationProposal proposal, SelfId selfIdentityId, CancellationToken ct)
+**Isolation Loop Note:** The `GroupMutationCoordinator` handles the isolation loop cleanly without passing leaked unmanaged cryptographic tokens through public handler boundaries. All cryptographic operations remain within their respective domain boundaries.
+
+Method Signature: Task<MutationResult> CoordinateMutationAsync(Percolator.Application.Chat.ConversationId conversationId, IGroupMutationProposal proposal, SelfId selfIdentityId, CancellationToken ct)
 
 The Core Loop Engine:
 
@@ -503,7 +507,7 @@ Architectural Constraints (CRITICAL):
 Implementation Requirements
 1. Application & Persistence Layer (`Percolator.Application/Chat` & `Percolator.Infrastructure/Chat`)
 * The Service Contract: Define `IRelayHostingAppService` in `Percolator.Application/Chat`.
-* The Routing Query: Define `public interface IGroupRoutingQueries { Task<PeerId?> GetDesignatedRelayAsync(ConversationId conversationId, CancellationToken ct); }` in `Percolator.Application/Chat`.
+* The Routing Query: Define `public interface IGroupRoutingQueries { Task<Percolator.Application.Chat.PeerId?> GetDesignatedRelayAsync(Percolator.Application.Chat.ConversationId conversationId, CancellationToken ct); }` in `Percolator.Application/Chat`.
 * The Schema: Create a `GroupRelayMappingDbo` containing Guid ConversationId (PK), Guid RelayPeerId, DateTimeOffset LastAssignedUtc inside `Percolator.Infrastructure/Chat/Persistence`. Implement a lightweight, no-tracking execution path for `IGroupRoutingQueries` against this table in `Percolator.Infrastructure/Chat`.
 
 2. The Presentation State Plane (`Desktop.Wpf/Features/Simulator` or appropriate local settings folder)
@@ -577,7 +581,7 @@ Implementation Requirements
 
 2. Group Invitation Management UI (Desktop.Wpf & Percolator.Application)
 * The Reactive Model: Define `PendingInviteModel` in the Application layer, exposing a `ReactiveProperty<InviteStatus>` field.
-* The App Service: Create `IGroupInvitationAppService` with `Task AcceptAsync(ConversationId conversationId, CancellationToken ct)` and `Task IgnoreAsync(ConversationId conversationId, CancellationToken ct)`.
+* The App Service: Create `IGroupInvitationAppService` with `Task AcceptAsync(Percolator.Application.Chat.ConversationId conversationId, CancellationToken ct)` and `Task IgnoreAsync(Percolator.Application.Chat.ConversationId conversationId, CancellationToken ct)`.
 * The Menu ViewModel: Create `GroupInvitesMenuViewModel` projecting an `ISynchronizedView` from the State Service's observable list of `PendingInviteModel`s.
     * Bind interaction buttons directly to your App Service execution tasks.
     * Connect the live list element count to the custom `MatButton.NotificationCount` badge layout on the sidebar framework.
@@ -612,7 +616,9 @@ Implementation Requirements
 
 Extend the existing SimulatedPeerModel:
 
-Add public Dictionary<ConversationId, GroupMasterKey> GroupMasterKeysMutable { get; } = new();
+Add public Dictionary<Percolator.Chat.ConversationId, Percolator.Cryptography.GroupMasterKey> GroupMasterKeysMutable { get; } = new();
+
+**Cross-Domain Mapping Note:** The mock simulator layer explicitly maps across both domain contexts for protocol scripting, using `Percolator.Chat.ConversationId` for conversation identification and `Percolator.Cryptography.GroupMasterKey` for cryptographic state.
 
 2. The Simulator Orchestrator (Desktop.Wpf/Features/Simulator)
 
@@ -630,7 +636,7 @@ Task CreateGroupWithMainAsync(SimulatedPeerModel initiator):
 
 Generate a GroupMasterKey, create the distribution message, package it into a GroupInvite Protobuf, and dispatch via SimulatorToMainTransportService.
 
-Task SendGroupMessageAsync(SimulatedPeerModel sender, ConversationId conversationId, string message):
+Task SendGroupMessageAsync(SimulatedPeerModel sender, Percolator.Chat.ConversationId conversationId, string message):
 
 Encrypt the string using the mock peer's SenderKey, package the Protobuf, and dispatch via the transport service.
 
