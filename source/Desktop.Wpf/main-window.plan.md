@@ -136,36 +136,48 @@ The Goal: Build a clean, synchronous interop bridge (`SenderKeyInteropBridge`) t
 Architectural Constraints (CRITICAL):
 * **SafeHandle Native Resource Management:** Follow the established codebase pattern utilizing direct static method calls to `Signal.Interop.SignalCrypto` backed by custom `SafeHandle` classes (e.g., `GroupMasterKeySafeHandle`). Do not introduce delegate pinning, `GCHandle`, or raw function pointer VTables.
 * **Isolated Transactions:** Use `IDbContextFactory<PercolatorDbContext>` to instantiate short-lived, isolated DbContext instances inside the storage operations. Call `.SaveChanges()` synchronously to ensure cryptographic state transitions commit immediately, preventing desynchronization if an ambient application transaction rolls back.
-* **Shared Nothing:** Entity Framework models and context configurations belong exclusively in `Percolator.Infrastructure`. Clean interfaces live in `Percolator.Cryptography`. No project-level dependencies may exist between Cryptography and Identity domains.
+* **Shared Nothing (Local Primitives):** Entity Framework models and context configurations belong exclusively in `Percolator.Infrastructure`. Clean interfaces live in `Percolator.Cryptography`. To prevent project-level dependencies between Cryptography, Chat, and Identity, you must define necessary strongly-typed primitive wrappers locally within the `Percolator.Cryptography` namespace.
 
 Implementation Requirements
-1. Persistence (`Percolator.Infrastructure/Chat/Persistence`)
-* Create a new database object: `SenderKeyRecordDbo`.
-* Configure a composite primary key consisting of: `ConversationId` (GUID), `PeerId` (GUID) representing the sender, and `DeviceId` (uint) to properly support multi-device user profiles.
-* Add a public `byte[] RecordBytes { get; set; }` property to store the serialized blob of the Sender Key.
-* Register this configuration in `PercolatorDbContext`. Do not write EF Core migrations.
+1. Cryptography Local Domain Primitives (`Percolator.Cryptography`)
+* Define your type invariants locally to avoid cross-project coupling:
+  ```csharp
+  public readonly record struct DeviceId(uint Value);
+  public readonly record struct PeerId(Guid Value);
+  public readonly record struct ConversationId(Guid Value);
+  [ByteArray(minLength: 1, maxLength: 4096)] public partial record SenderKeyRecordBytes;
+  ```
 
 2. The Interop Bridge Contract (`Percolator.Cryptography`)
 * Define `public interface ISenderKeyInteropBridge`.
-* Expose methods to load and store keys using local or primitive wrappers to avoid project coupling:
-    * `bool TryLoadSenderKey(ConversationId conversationId, PeerId senderId, DeviceId deviceId, out byte[] recordBytes);`
-    * `void StoreSenderKey(ConversationId conversationId, PeerId senderId, DeviceId deviceId, byte[] recordBytes);`
+* Expose methods using your newly defined cryptography domain primitives consistently:
+  ```csharp
+  bool TryLoadSenderKey(ConversationId conversationId, PeerId senderId, DeviceId deviceId, out byte[] recordBytes);
+  void StoreSenderKey(ConversationId conversationId, PeerId senderId, DeviceId deviceId, byte[] recordBytes);
+  ```
 
-3. The Bridge Implementation (`Percolator.Infrastructure/Chat`)
-* Implement `SenderKeyInteropBridge` implementing `ISenderKeyInteropBridge`.
+3. Persistence (`Percolator.Infrastructure/Chat/Persistence`)
+* Create a database entity object: `SenderKeyRecordDbo`.
+* Properties: `Guid ConversationId { get; set; }`, `Guid SenderPeerId { get; set; }`, `uint DeviceId { get; set; }`, and `byte[] RecordBytes { get; set; }`.
+* **DbSet Registration:** Add `public DbSet<SenderKeyRecordDbo> SenderKeyRecords { get; set; }` to `PercolatorDbContext`.
+* **Explicit Model Mapping:** Inside your `DbContext` configuration or an internal `IEntityTypeConfiguration<SenderKeyRecordDbo>`, map a composite primary key using EF Core fluent syntax:
+  `builder.HasKey(x => new { x.ConversationId, x.SenderPeerId, x.DeviceId });`
+
+4. The Bridge Implementation (`Percolator.Infrastructure.Chat`)
+* Implement `SenderKeyInteropBridge` implementing `ISenderKeyInteropBridge` in namespace `Percolator.Infrastructure.Chat`.
 * Inject `IDbContextFactory<PercolatorDbContext>` into its constructor.
-* **LoadSenderKey Logic:**
-    * Resolve a temporary context: `using var db = _dbFactory.CreateDbContext();`
-    * Synchronously locate the record matching the full composite key using `db.SenderKeyRecords.Find(...)`.
+* **TryLoadSenderKey Logic:**
+    * Resolve a temporary context: `using var db = _dbFactory.CreateDbContext();`.
+    * Synchronously locate the record matching the full composite key using `db.SenderKeyRecords.Find(conversationId.Value, senderId.Value, deviceId.Value)`.
     * If found, extract the bytes and return true; if missing, return false.
 * **StoreSenderKey Logic:**
-    * Resolve a temporary context: `using var db = _dbFactory.CreateDbContext();`
-    * Perform a synchronous upsert. If the record exists, update its `RecordBytes`; if it does not exist, add a new `SenderKeyRecordDbo` instance.
+    * Resolve a temporary context: `using var db = _dbFactory.CreateDbContext();`.
+    * Execute a standard programmatic check-and-update upsert: Read the row via `Find()`. If it exists, overwrite `RecordBytes`. If null, instantiate a new `SenderKeyRecordDbo` with the key coordinates and add it to the tracked set.
     * Execute `db.SaveChanges();` to immediately commit the state transition to SQLite.
 
 **Testing Requirements (Chunk 2):**
-- `SenderKeyInteropBridge_TryLoadSenderKey_ReturnsFalse_WhenRecordIsMissing` - Test that TryLoadSenderKey returns false when the requested record does not exist in the database
-- `SenderKeyStatePersistenceRoundTrip_StoreThenLoad_MatchesOriginalBytes` - Integration test that a native ratchet state byte array saved via StoreSenderKey using a full composite key (ConversationId, PeerId, uint deviceId) matches the byte array returned by a subsequent TryLoadSenderKey call
+- `SenderKeyInteropBridge_TryLoadSenderKey_ReturnsFalse_WhenRecordIsMissing` - Unit test in Percolator.InfrastructureTests that TryLoadSenderKey returns false when the requested record does not exist in the database
+- `SenderKeyStatePersistenceRoundTrip_StoreThenLoad_MatchesOriginalBytes` - Integration test in Percolator.InfrastructureTests that a native ratchet state byte array saved via StoreSenderKey using a full composite key (ConversationId, PeerId, uint deviceId) matches the byte array returned by a subsequent TryLoadSenderKey call
 ---
 ## Chunk 3
 Feature Implementation Request: Signal Protocol Chunk 3 (Micro-PKI & Sealed Sender)
