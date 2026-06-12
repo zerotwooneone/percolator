@@ -667,7 +667,7 @@ Implementation Requirements
 
 Extend the existing SimulatedPeerModel:
 
-Add public Dictionary<Guid, byte[]> GroupMasterKeysMutable { get; } = new();
+Add public Dictionary<ConversationId, GroupMasterKey> GroupMasterKeysMutable { get; } = new();
 
 2. The Simulator Orchestrator (Desktop.Wpf/Features/Simulator)
 
