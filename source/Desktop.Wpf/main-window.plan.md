@@ -366,11 +366,11 @@ Add rpc PublishGroupMessage(PublishGroupMessageRequest) returns (PublishGroupMes
 
 5. Infrastructure Repositories (Percolator.Infrastructure)
 
-IRelayGroupRepository: Implement Task<RelayGroupLedger> GetLedgerAsync(Guid conversationId) and Task SaveAsync(RelayGroupLedger ledger).
+IRelayGroupRepository: Implement Task<RelayGroupLedger> GetLedgerAsync(ConversationId conversationId) and Task SaveAsync(RelayGroupLedger ledger).
 
 Critical Rule: Inside SaveAsync, wrap await _dbContext.SaveChangesAsync() in a try/catch. If DbUpdateConcurrencyException is caught, reload the RelayGroupStateDbo from the database and throw a pure EpochConflictDomainException(uint winningEpoch).
 
-IMessageQueueRepository: Add Task EnqueueFanOutAsync(Guid conversationId, byte[] payload, CancellationToken ct).
+IMessageQueueRepository: Add Task EnqueueFanOutAsync(ConversationId conversationId, byte[] payload, CancellationToken ct).
 
 Implementation: Resolve the list of registered PeerIds for the group. Generate a MessageQueueItemDbo for each peer. Use _dbContext.MessageQueueItems.AddRange() to perform a synchronous bulk-insert.
 
@@ -482,13 +482,13 @@ No Infrastructure Leaks: The Application layer handles the business logic; the I
 Implementation Requirements
 1. Interface Definition (Percolator.Application)
 
-public interface IGroupNotificationDispatcher { Task DispatchAsync(Guid conversationId, MessageDto message, CancellationToken ct); }
+public interface IGroupNotificationDispatcher { Task DispatchAsync(ConversationId conversationId, MessageDto message, CancellationToken ct); }
 
 2. Infrastructure Implementation (Percolator.Infrastructure)
 
 GrpcGroupNotificationDispatcher: Implements IGroupNotificationDispatcher.
 
-Holds the ConcurrentDictionary<Guid, IServerStreamWriter<GroupStreamResponse>>.
+Holds the ConcurrentDictionary<ConversationId, IServerStreamWriter<GroupStreamResponse>>.
 
 Implements the StreamGroupMessages gRPC method.
 
@@ -588,7 +588,9 @@ The Schema: Create a GroupRelayMappingDbo.
 
 Properties: Guid ConversationId (PK), Guid RelayPeerId, DateTimeOffset LastAssignedUtc.
 
-The Repository: Create IGroupRelayMappingRepository in the Percolator.Chat domain and implement its SQLite backing in Percolator.Infrastructure. It must support basic Upsert and GetRelayForConversationAsync queries.
+The Repository: Create IGroupRelayMappingRepository in the Percolator.Chat domain and implement its SQLite backing in Percolator.Infrastructure. It must support basic UpsertAsync for state changes.
+
+The Query Contract: Create IGroupRoutingQueries in the Percolator.Application layer with Task<PeerId?> GetDesignatedRelayAsync(ConversationId conversationId, CancellationToken ct). The Infrastructure implementation should execute a raw, highly-optimized scalar SQL query or No-Tracking LINQ query, returning just the PeerId wrapper.
 
 2. The Presentation State Plane (Desktop.Wpf)
 
@@ -603,7 +605,7 @@ private readonly DisposableBag _bag = new();
 
     public ReadOnlyReactiveProperty<bool> IsRelayRunning => _isRelayRunning;
 
-    public RelayStateService(IMediator mediator, TimeProvider timeProvider)
+    public RelayStateService(IRelayHostingAppService relayHostingAppService, TimeProvider timeProvider)
     {
         _isRelayRunning.AddTo(ref _bag);
         _toggleSubject.AddTo(ref _bag);
@@ -615,7 +617,7 @@ private readonly DisposableBag _bag = new();
             .SubscribeAwait(async (toggles, ct) => 
             {
                 bool finalIntent = toggles[^1]; // Execute the latest user intent
-                await mediator.Send(new ToggleRelayHostingCommand(finalIntent), ct);
+                await relayHostingAppService.SetRelayStateAsync(finalIntent, ct);
             }, AwaitOperation.Sequential)
             .AddTo(ref _bag);
     }
@@ -636,9 +638,9 @@ Bind IsRelayEnabled directly to the state service property using .ToBindableReac
 
 3. Application Orchestration (Percolator.Application)
 
-Implement the MediatR handler for ToggleRelayHostingCommand(bool Enable).
+Create IRelayHostingAppService with Task SetRelayStateAsync(bool enable, CancellationToken ct).
 
-Logic:
+Implementation:
 
 Inject the infrastructure IGrpcServerManager.
 
@@ -749,7 +751,7 @@ Task CreateGroupWithMainAsync(SimulatedPeerModel initiator):
 
 Generate a GroupMasterKey, create the distribution message, package it into a GroupInvite Protobuf, and dispatch via SimulatorToMainTransportService.
 
-Task SendGroupMessageAsync(SimulatedPeerModel sender, Guid conversationId, string message):
+Task SendGroupMessageAsync(SimulatedPeerModel sender, ConversationId conversationId, string message):
 
 Encrypt the string using the mock peer's SenderKey, package the Protobuf, and dispatch via the transport service.
 
