@@ -551,30 +551,24 @@ Feature Implementation Request: Signal Protocol Chunk 8 (P2P Relay Opt-In & R3 S
 You are to implement Chunk 8 of our Signal Protocol integration for Percolator, allowing client nodes to dynamically opt-in to hosting a blind group relay and managing the network state via an R3-powered WPF state service.
 
 Architectural Constraints (CRITICAL):
-
-R3 State Alignment: Do NOT leak server lifecycle tracking or state into the Domain. Implement an Angular-style RelayStateService using R3's ReactiveProperty<T> and the DisposableBag cleanup pattern.
-
-WPF ViewModel Isolation: ViewModels must remain completely isolated from Kestrel or network managers. They should purely bind to the RelayStateService via BindableReactiveProperty<T>.
-
-Encrypted Local Persistence: Create a dedicated table in your encrypted SQLite schema to map a ConversationId directly to its designated RelayPeerId.
-
-Simple Capability Discovery: Keep capability discovery simple for this phase. If a peer has historically acted as a relay for us in a group context, assume they maintain that capability. Handle connection failures gracefully at runtime.
+* Transport Abstraction Enclosure: The Application layer must not pass network ports, listening primitives, or manage Kestrel lifecycles. It must interact solely with an application-layer interface: `IRelayNodeManager.SetRelayHostingStateAsync(bool enable, CancellationToken ct)`. The Infrastructure implementation of this manager must internally load the active user's identity to extract their `ListeningPort` and coordinate with `IGrpcServerManager`.
+* Direct Service Invocation: Eliminate MediatR indirection for local infrastructure toggles. The WPF `RelayStateService` must invoke the Application service interface directly to prevent overhead and enable robust, native visual studio stack-trace debugging.
+* Query/Command Separation (CQRS): For network-routing path resolution, do not use heavy domain repositories. Introduce an optimized, read-only `IGroupRoutingQueries` interface returning lightweight primitive value types for fast routing lookups.
 
 Implementation Requirements
-1. Encrypted Persistence Layer (Percolator.Infrastructure & Chat)
-
-The Schema: Create a GroupRelayMappingDbo.
-
-Properties: Guid ConversationId (PK), Guid RelayPeerId, DateTimeOffset LastAssignedUtc.
-
-The Repository: Create IGroupRelayMappingRepository in the Percolator.Chat domain and implement its SQLite backing in Percolator.Infrastructure. It must support basic UpsertAsync for state changes.
-
-The Query Contract: Create IGroupRoutingQueries in the Percolator.Application layer with Task<PeerId?> GetDesignatedRelayAsync(ConversationId conversationId, CancellationToken ct). The Infrastructure implementation should execute a raw, highly-optimized scalar SQL query or No-Tracking LINQ query, returning just the PeerId wrapper.
+1. Application & Persistence Layer (Percolator.Application & Infrastructure)
+* The Service Contract: Define `IRelayNodeManager` in the Application layer.
+* The Routing Query: Define `public interface IGroupRoutingQueries { Task<PeerId?> GetDesignatedRelayAsync(ConversationId conversationId, CancellationToken ct); }`.
+* The Schema: Create a `GroupRelayMappingDbo` containing Guid ConversationId (PK), Guid RelayPeerId, DateTimeOffset LastAssignedUtc. Implement a lightweight, no-tracking execution path for `IGroupRoutingQueries` against this table.
 
 2. The Presentation State Plane (Desktop.Wpf)
+* The State Service: Create `RelayStateService` as an Angular-style application singleton.
+    * Inject `IRelayNodeManager` directly.
+    * Use R3's `ReactiveProperty<bool>` and debounced `Subject<bool>.Chunk()` processing loops to sequentially execute `_relayNodeManager.SetRelayHostingStateAsync(finalIntent, ct)` to guard against port thrashing.
+* The DI Registration: Register `RelayStateService` as a Singleton in `App.xaml.cs`.
+* The ViewModel: Update `ShellViewModel` to expose a `BindableReactiveProperty<bool> IsRelayEnabled` and an `AsyncRelayCommand ToggleRelayCommand` tied directly to the state service.
 
-The State Service: Create RelayStateService as an Angular-style application singleton.
-
+```C3
 C#
 public sealed class RelayStateService : IDisposable
 {
@@ -605,7 +599,7 @@ private readonly DisposableBag _bag = new();
     public void UpdateRunningState(bool running) => _isRelayRunning.Value = running;
     public void Dispose() => _bag.Dispose();
 }
-The DI Registration: Register RelayStateService as a Singleton in App.xaml.cs.
+```
 
 The ViewModel: Update ShellViewModel to inject RelayStateService. Expose:
 
@@ -615,18 +609,11 @@ public AsyncRelayCommand ToggleRelayCommand { get; }
 
 Bind IsRelayEnabled directly to the state service property using .ToBindableReactiveProperty().
 
-3. Application Orchestration (Percolator.Application)
+3. Infrastructure Service Implementation (Percolator.Infrastructure)
+* Implement `RelayNodeManager` wrapping the existing `IGrpcServerManager`.
+* **Logic:** When `SetRelayHostingStateAsync(true)` is invoked, the manager synchronously loads the identity profile from the repository to extract its associated `ListeningPort`, and calls `await _serverManager.StartAsync(selfId, identity.ListeningPort, ct)`. Handle port contention or fallbacks cleanly in the infrastructure space.
 
-Create IRelayHostingAppService with Task SetRelayStateAsync(bool enable, CancellationToken ct).
-
-Implementation:
-
-Inject the infrastructure IGrpcServerManager.
-
-If Enable == true: Load local self-identity configurations, and invoke await _serverManager.StartAsync(selfId, port, ct). If successful, call _relayStateService.UpdateRunningState(true).
-
-If Enable == false: Invoke await _serverManager.StopAsync(ct) to cleanly dismantle the Kestrel application host instance and free the network port. Update the state service running state to false.
-
+---
 ## Chunk 9
 Feature Implementation Request: Signal Protocol Chunk 9 (WPF MVVM Presentation Layer)
 You are to implement Chunk 9 of our Signal Protocol Group V2 integration for Percolator, surfacing Group Creation, Invitation Management, and Relay Host Controls.
