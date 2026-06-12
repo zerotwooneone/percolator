@@ -129,7 +129,7 @@ The Goal: Build a clean, synchronous interop bridge (`SenderKeyInteropBridge`) t
 Architectural Constraints (CRITICAL):
 * **SafeHandle Native Resource Management:** Follow the established codebase pattern utilizing direct static method calls to `Signal.Interop.SignalCrypto` backed by custom `SafeHandle` classes (e.g., `GroupMasterKeySafeHandle`). Do not introduce delegate pinning, `GCHandle`, or raw function pointer VTables.
 * **Isolated Transactions:** Use `IDbContextFactory<PercolatorDbContext>` to instantiate short-lived, isolated DbContext instances inside the storage operations. Call `.SaveChanges()` synchronously to ensure cryptographic state transitions commit immediately, preventing desynchronization if an ambient application transaction rolls back.
-* **Shared Nothing:** Entity Framework models and context configurations belong exclusively in `Percolator.Infrastructure`. Clean interfaces live in `Percolator.Cryptography`.
+* **Shared Nothing:** Entity Framework models and context configurations belong exclusively in `Percolator.Infrastructure`. Clean interfaces live in `Percolator.Cryptography`. No project-level dependencies may exist between Cryptography and Identity domains.
 
 Implementation Requirements
 1. Persistence (`Percolator.Infrastructure/Chat/Persistence`)
@@ -140,7 +140,7 @@ Implementation Requirements
 
 2. The Interop Bridge Contract (`Percolator.Cryptography`)
 * Define `public interface ISenderKeyInteropBridge`.
-* Expose methods to load and store keys using strongly-typed domain primitives:
+* Expose methods to load and store keys using local or primitive wrappers to avoid project coupling:
     * `bool TryLoadSenderKey(ConversationId conversationId, PeerId senderId, DeviceId deviceId, out byte[] recordBytes);`
     * `void StoreSenderKey(ConversationId conversationId, PeerId senderId, DeviceId deviceId, byte[] recordBytes);`
 
@@ -156,7 +156,6 @@ Implementation Requirements
     * Perform a synchronous upsert. If the record exists, update its `RecordBytes`; if it does not exist, add a new `SenderKeyRecordDbo` instance.
     * Execute `db.SaveChanges();` to immediately commit the state transition to SQLite.
 ---
-
 ## Chunk 3
 Feature Implementation Request: Signal Protocol Chunk 3 (Micro-PKI & Sealed Sender)
 You are to implement Chunk 3 of our Signal Protocol integration for Percolator, a C# .NET 9 application built on a strict, "Shared Nothing" Modular Monolith architecture.
@@ -164,92 +163,53 @@ You are to implement Chunk 3 of our Signal Protocol integration for Percolator, 
 The Goal: Establish a Micro-PKI for "Sealed Sender". The node acting as a Relay must securely generate and store an Ed25519 Root Key. Clients must securely authenticate over a standard TLS connection using cryptographic header signatures to request a short-lived DeliveryCertificate.
 
 Architectural Constraints (CRITICAL):
-
-Interop is Ready: The Signal.Interop library has already been updated with GenerateEd25519KeyPair, Ed25519Sign, and Ed25519Verify. You just need to wrap them in the Cryptography domain.
-
-Strict Clean Architecture: Infrastructure components (Interceptors, HostedServices) must be "dumb". All business logic, validation rules, and network orchestration must live in Percolator.Application.
-
-No Shared Kernel: Avoid adding any NEW project dependencies. Duplicate the [ByteArray] domain primitives locally in the domains that need them.
-
-Anti-Corruption Layer: Percolator.Application orchestrates the translation across boundaries using the zero-allocation public static [Type] FromBytesOwned(byte[] bytes) pattern.
-
-No Data Migrations: Do not write EF Core migrations.
+* **Rule 6 Transport Adherence:** `PeerId` is a local-only database identifier and must NEVER be transmitted over the wire or included in unencrypted gRPC metadata headers. Clients must identify themselves to the relay using their wire-safe Public Key Hash (PKH) string token.
+* **Strict Clean Architecture:** Infrastructure components (Interceptors, HostedServices) must be "dumb". All business logic, validation rules, and network orchestration must live in Percolator.Application.
+* **No Shared Kernel:** Avoid adding any NEW project dependencies. Duplicate the [ByteArray] domain primitives locally in the domains that need them.
 
 Implementation Requirements
 1. The Cryptography Domain (Percolator.Cryptography)
-
-Define strongly-typed primitives:
-
-[ByteArray(length: 32)] public partial record RelayRootKeyBytes;
-
-[ByteArray(length: 32)] public partial record Ed25519PublicKeyBytes;
-
-[ByteArray(length: 64)] public partial record Ed25519SignatureBytes;
-
-Define IEd25519CryptographyService and implement it by wrapping the native Signal.Interop methods, ensuring type safety with the new primitives.
+* Define strongly-typed primitives:
+    * `[ByteArray(length: 32)] public partial record RelayRootKeyBytes;`
+    * `[ByteArray(length: 32)] public partial record Ed25519PublicKeyBytes;`
+    * `[ByteArray(length: 64)] public partial record Ed25519SignatureBytes;`
+* Define `IEd25519CryptographyService` and implement it by wrapping the native Signal.Interop methods, ensuring type safety with the new primitives.
 
 2. Identity Domain & Persistence (Percolator.Identity & Infrastructure)
-
-Primitives: Define matching RelayRootKeyBytes inside Percolator.Identity.
-
-Domain Entity: Update the SelfIdentity aggregate root to include public RelayRootKeyBytes? RelayDeliveryRootKey { get; private set; }. Add a method EnableRelayMode(RelayRootKeyBytes rootKey) to govern this state transition.
-
-Persistence: Add public byte[]? RelayDeliveryRootKey { get; set; } to SelfIdentityDbo.
+* Primitives: Define matching RelayRootKeyBytes inside Percolator.Identity.
+* Domain Entity: Update the SelfIdentity aggregate root to include public RelayRootKeyBytes? RelayDeliveryRootKey { get; private set; }. Add a method EnableRelayMode(RelayRootKeyBytes rootKey) to govern this state transition.
+* Persistence: Add public byte[]? RelayDeliveryRootKey { get; set; } to SelfIdentityDbo.
 
 3. Application-Layer Authentication (The Server Auth Flow)
-
-The Application Logic (Percolator.Application):
-
-Create IPeerAuthenticationService with method: Task<bool> AuthenticateDeliveryCertificateRequestAsync(PeerId peerId, DateTimeOffset requestTimestamp, Ed25519SignatureBytes signature, CancellationToken ct).
-
-Implementation: Reject if requestTimestamp is older than 60 seconds (Replay attack prevention). Lookup the peer's public ECDsa Identity Key from PeerIdentityDbo. Verify the signature using the existing ISigningService. Return true if valid.
-
-The Interceptor (Percolator.Infrastructure):
-
-Create DeliveryCertificateAuthInterceptor : Interceptor.
-
-Extract PeerId, Timestamp, and Signature from the gRPC request metadata.
-
-Call IPeerAuthenticationService.
-
-If it returns false, throw RpcException(StatusCode.Unauthenticated).
+* The Application Logic (`Percolator.Application/Chat`):
+    * Create `IPeerAuthenticationService` with method: `Task<bool> AuthenticateDeliveryCertificateRequestAsync(string senderPkh, DateTimeOffset requestTimestamp, Ed25519SignatureBytes signature, CancellationToken ct)`.
+    * Implementation: Reject if requestTimestamp is older than 60 seconds (Replay attack prevention). Look up the peer's local PeerId and associated public ECDsa Identity Key from PeerIdentityDbo utilizing the `senderPkh` lookup string. Verify the signature using the existing ISigningService. Return true if valid.
+* The Interceptor (`Percolator.Infrastructure/Network/Grpc`):
+    * Create `DeliveryCertificateAuthInterceptor : Interceptor`.
+    * Extract the string token from the `"x-percolator-sender-pkh"` metadata header along with the timestamp and signature bytes.
+    * Call `IPeerAuthenticationService`. If it returns false, throw `RpcException(StatusCode.Unauthenticated)`.
 
 4. Relay gRPC Service (Percolator.Infrastructure & Contracts)
-
-Protobuf (messaging.proto):
-
-Define a DeliveryCertificate message containing certificate_data (bytes) and signature (bytes).
-
-Add rpc GetDeliveryCertificate(GetDeliveryCertificateRequest) returns (GetDeliveryCertificateResponse); to TransportService.
-
-Implementation (PercolatorMessageService):
-
-Implement the endpoint. Read the RelayDeliveryRootKey from the local node's SelfIdentityDbo.
-
-Construct the certificate payload bytes (containing the Relay's ID and a 24-hour expiration).
-
-Use IEd25519CryptographyService to sign the payload. Return the response.
+* Protobuf (messaging.proto):
+    * Define a DeliveryCertificate message containing certificate_data (bytes) and signature (bytes).
+    * Add rpc GetDeliveryCertificate(GetDeliveryCertificateRequest) returns (GetDeliveryCertificateResponse); to TransportService.
+* Implementation (PercolatorMessageService):
+    * Implement the endpoint. Read the RelayDeliveryRootKey from the local node's SelfIdentityDbo.
+    * Construct the certificate payload bytes (containing the Relay's wire identity fingerprint and a 24-hour expiration).
+    * Use IEd25519CryptographyService to sign the payload. Return the response.
 
 5. The Client Certificate Flow (The Rich Domain & Worker)
+* The Domain Concept (Percolator.Network or appropriate domain):
+    * Define a rich domain record: public record DeliveryCertificate(DeliveryCertificatePayloadBytes SerializedPayload, DateTimeOffset ExpiresAt); (Note: Add `[ByteArray] public partial record DeliveryCertificatePayloadBytes;` primitive)
+    * Define an interface IDeliveryCertificateStore to hold this singleton in memory.
+* The Orchestrator (`Percolator.Application/Apps/Chat`):
+    * Create `ICertificateOrchestrator` with Task RefreshLocalCertificateAsync(CancellationToken ct).
+    * Implementation: Generate current UTC timestamp. Ask Identity domain to sign [LocalPKH + Timestamp] using the local ECDsa Identity Key. Call the Relay's GetDeliveryCertificate gRPC endpoint. Parse the response into the rich DeliveryCertificate record (extracting the expiration date), and save it to IDeliveryCertificateStore.
+* The Background Worker (`Percolator.Infrastructure/Chat`):
+    * Implement DeliveryCertificateRefreshWorker : IHostedService.
+    * Logic: Hook into IHostApplicationLifetime.ApplicationStarted. Create a loop bounded by cancellation. Inside the loop, create an AsyncServiceScope, resolve ICertificateOrchestrator, and call RefreshLocalCertificateAsync(). Then await Task.Delay(TimeSpan.FromHours(20), ct); to trigger well before the 24-hour expiration.
 
-The Domain Concept (Percolator.Network or appropriate domain):
-
-Define a rich domain record: public record DeliveryCertificate(DeliveryCertificatePayloadBytes SerializedPayload, DateTimeOffset ExpiresAt); (Note: Add `[ByteArray] public partial record DeliveryCertificatePayloadBytes;` primitive)
-
-Define an interface IDeliveryCertificateStore to hold this singleton in memory.
-
-The Orchestrator (Percolator.Application):
-
-Create ICertificateOrchestrator with Task RefreshLocalCertificateAsync(CancellationToken ct).
-
-Implementation: Generate current UTC timestamp. Ask Identity domain to sign [PeerId + Timestamp] using the local ECDsa Identity Key. Call the Relay's GetDeliveryCertificate gRPC endpoint. Parse the response into the rich DeliveryCertificate record (extracting the expiration date), and save it to IDeliveryCertificateStore.
-
-The Background Worker (Percolator.Infrastructure):
-
-Implement DeliveryCertificateRefreshWorker : IHostedService.
-
-Logic: Hook into IHostApplicationLifetime.ApplicationStarted. Create a dumb while (!ct.IsCancellationRequested) loop. Inside the loop, create an AsyncServiceScope, resolve ICertificateOrchestrator, and call RefreshLocalCertificateAsync(). Then await Task.Delay(TimeSpan.FromHours(20), ct); to trigger well before the 24-hour expiration.
-
+---
 ## Chunk 4
 Feature Implementation Request: Signal Protocol Chunk 4 (Relay Encrypted Ledger)
 You are to implement Chunk 4 of our Signal Protocol Group V2 integration for Percolator, a C# .NET 9 application built on a strict, "Shared Nothing" Modular Monolith architecture.
@@ -344,6 +304,7 @@ Return Status.SUCCESS.
 7. Relay gRPC Service (Percolator.Infrastructure)
 
 Implement the PublishGroupMessage endpoint. Map the request, call IRelayGroupLedgerService.PublishAsync(), and map the result back to Protobuf. Keep the gRPC layer dumb.
+---
 
 ## Chunk 5
 Feature Implementation Request: Signal Protocol Chunk 5 (Group Provisioning via Outbox)
@@ -352,7 +313,7 @@ You are to implement Group Provisioning using an Outbox pattern to ensure group 
 The Goal: Alice creates a group, persists the state atomically, and creates an outbox message. A background worker dispatches the invite over 1:1 encrypted tunnels.
 
 Architectural Constraints (CRITICAL):
-* **Explicit Explicit Persistence:** Do not implement a complex EF Core DbContext Interceptor. The Application layer orchestrates saving by calling `await _groupRepository.SaveWithOutboxAsync(group, ct)`. The infrastructure implementation of this method handles saving the group state and mapping/serializing its raised domain events to the outbox table inside a single atomic `SaveChangesAsync` call.
+* **Explicit Persistence:** Do not implement a complex EF Core DbContext Interceptor. The Application layer orchestrates saving by calling `await _groupRepository.SaveWithOutboxAsync(group, ct)`. The infrastructure implementation of this method handles saving the group state and mapping/serializing its raised domain events to the outbox table inside a single atomic `SaveChangesAsync` call.
 * **Rule 6 Adherence:** `PeerId` is a local-only identifier and must never be written to wire-bound serialization structures or sent over the wire. The Outbox table must use wire-safe routing tokens (`DestinationPkhBytes`).
 * **Rich Primitive Wrappers:** Strictly eliminate raw Guid and byte[] values from service signatures. All layers must use `ConversationId`, `PeerId`, and specialized cryptographic wrappers (`GroupMasterKey`, `SenderKeyDistributionMessageBytes`).
 
@@ -360,12 +321,14 @@ Implementation Requirements
 1. Domain Layer (`Percolator.Chat`)
 * GroupConversation Aggregate:
     * Properties: ConversationId Id, GroupMasterKey MasterKey, uint Epoch, List<GroupMember> Members.
-    * Methods: `void InviteMember(PeerId peerId)` which updates state and registers a `MemberInvitedDomainEvent`.
+    * Methods: `void InviteMember(PeerId peerId)` which updates state and registers a `MemberInvitedDomainEvent`. `void ClearDomainEvents()` to flush events post-persistence.
 * IDomainEvent (`Percolator.Chat/Events`): Define a record for `MemberInvitedDomainEvent` containing ConversationId ConversationId, PeerId PeerId, and pre-generated `SenderKeyDistributionMessageBytes` distribution blob.
 
 2. Infrastructure Layer (`Percolator.Infrastructure/Chat/Persistence`)
 * RelayOutboxDbo: Create a DBO to store pending domain events: Id, EventType, PayloadJson, DestinationPkhBytes (byte[]), ProcessedAtUtc. The DestinationPkhBytes column stores the pre-resolved Public Key Hash for the target PeerId, enabling the OutboxDispatcherWorker to dispatch without secondary lookups.
 * OutboxDispatcherWorker (`Percolator.Infrastructure/Chat`): An `IHostedService` that runs periodically. It queries the Outbox table for unprocessed events, resolves the domain event, reads the pre-resolved DestinationPkhBytes directly from the row, calls the `IMessageService` to dispatch the invite, and marks the event as processed.
+* **Transactional Atomicity Guarantee:** In alignment with our direct `SaveChangesAsync` repository pattern, `SaveWithOutboxAsync` must stage both the `GroupConversation` state transitions and the mapped `RelayOutboxDbo` rows against the same internal context instance before calling save, clearing domain events on the aggregate root immediately after a successful database commit. This allows Entity Framework Core to natively leverage SQLite's transaction engine to guarantee atomic persistence without requiring a custom Unit-of-Work block.
+* **Transient Network Backoff:** The `OutboxDispatcherWorker` must encapsulate transient network exceptions (e.g., gRPC `RpcException` timeouts). If a peer is offline, the worker must catch the error, log a warning, back off sequentially using a non-blocking `Task.Delay`, and skip updating `ProcessedAtUtc` so the record is cleanly evaluated on the next loop.
 
 3. Application Orchestration (`Percolator.Application/Apps/Chat`)
 * CreateGroupCommandHandler:
@@ -386,8 +349,8 @@ Implementation Requirements
   }
   ```
 
-5. Network Contracts (internal_messaging.proto)
-* Add GroupInvite message and integrate with ChatEnvelope.
+Network Contracts (internal_messaging.proto)
+Add GroupInvite message and integrate with ChatEnvelope.
 
 ```protobuf
 message GroupInvite {
@@ -398,7 +361,8 @@ message GroupInvite {
   optional bytes sender_key_distribution_message = 5;
 }
 ```
-Add `group_invite = 16;` to the ChatEnvelope oneof.
+Add group_invite = 16; to the ChatEnvelope oneof.
+
 ---
 ## Chunk 6
 Feature Implementation Request: Signal Protocol Chunk 6 (The Streaming Data Plane)
@@ -428,6 +392,7 @@ Implementation Requirements
     1. Decrypt: Call `ISenderKeyCryptographyService.Decrypt(...)` (This remains parallelizable across threads with no lock required).
     2. Persist: Call `IChatMessageWriter.AddGroupMessageAsync(...)`.
     3. Fan-Out: Call `IGroupNotificationDispatcher.DispatchAsync(...)`.
+* **Early-Gate Roster Validation:** Inside `GroupIngressService.ProcessGroupMessageAsync`, the service must execute a local database lookup against the conversation's active membership roster prior to performing any unmanaged cryptographic actions. If the incoming sender's `PeerId` is missing from the local group roster or marked as evicted, the message payload must be dropped immediately, preventing unmanaged memory allocation or decryption thrashing from unauthorized network elements.
 
 4. gRPC Streaming Service Anchor (`Percolator.Infrastructure/Network/Grpc/PercolatorMessageService.cs`)
 * Add the following endpoint contract to `PercolatorMessageService`:
@@ -508,10 +473,10 @@ Implementation Requirements
 * The State Service: Create `RelayStateService` as an Angular-style application singleton.
     * Inject `IRelayHostingAppService` directly.
     * Use R3's `ReactiveProperty<bool>` and debounced `Subject<bool>.Chunk()` processing loops to sequentially execute `_relayHostingAppService.SetRelayStateAsync(finalIntent, ct)` to guard against configuration thrashing.
-* The DI Registration: Register `IRelayStateService,RelayStateService` as a Singleton in `App.xaml.cs`.
+* The DI Registration: Register `IRelayStateService, RelayStateService` as a Singleton in `App.xaml.cs`.
 
 ```csharp
-public sealed class RelayStateService : IRelayStateService,IDisposable
+public sealed class RelayStateService : IRelayStateService, IDisposable
 {
     private readonly ReactiveProperty<bool> _isRelayRunning = new(false);
     private readonly Subject<bool> _toggleSubject = new();
