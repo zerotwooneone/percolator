@@ -1,4 +1,4 @@
-using Percolator.Chat.ValueObjects;
+using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
 using Percolator.Cryptography;
 
 namespace Percolator.Chat.App;
@@ -17,7 +17,7 @@ public interface IGroupCryptoStateRepository
     /// <param name="conversationId">The conversation ID used as the primary key for crypto state.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The GroupMasterKey, or null when no state exists yet.</returns>
-    Task<GroupMasterKey?> GetGroupMasterKeyAsync(ConversationId conversationId, CancellationToken cancellationToken = default);
+    Task<GroupMasterKey?> GetGroupMasterKeyAsync(ChatConversationId conversationId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Inserts or updates the 32-byte GroupMasterKey for a group conversation.
@@ -25,5 +25,5 @@ public interface IGroupCryptoStateRepository
     /// <param name="conversationId">The conversation ID used as the primary key for crypto state.</param>
     /// <param name="groupMasterKey">The GroupMasterKey to persist.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    Task UpsertGroupMasterKeyAsync(ConversationId conversationId, GroupMasterKey groupMasterKey, CancellationToken cancellationToken = default);
+    Task UpsertGroupMasterKeyAsync(ChatConversationId conversationId, GroupMasterKey groupMasterKey, CancellationToken cancellationToken = default);
 }

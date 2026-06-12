@@ -60,6 +60,7 @@ public class PercolatorDbContext : DbContext
     public DbSet<Percolator.Infrastructure.Chat.Persistence.GroupMemberDbo> GroupMembers { get; set; } = null!;
     public DbSet<Percolator.Infrastructure.Chat.Persistence.GroupStateDbo> GroupStates { get; set; } = null!;
     public DbSet<Percolator.Infrastructure.Chat.Persistence.PendingGroupInvitationDbo> PendingGroupInvitations { get; set; } = null!;
+    public DbSet<Percolator.Infrastructure.Chat.Persistence.SenderKeyRecordDbo> SenderKeyRecords { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -376,6 +377,17 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.ReceivedAtUtc).IsRequired();
             entity.Property(e => e.Status).IsRequired();
             entity.HasIndex(e => e.ConversationId);
+        });
+
+        // SenderKeyRecords (Signal Protocol Sender Key state persistence)
+        modelBuilder.Entity<Percolator.Infrastructure.Chat.Persistence.SenderKeyRecordDbo>(entity =>
+        {
+            entity.ToTable("SenderKeyRecords");
+            entity.HasKey(e => new { e.ConversationId, e.SenderPeerId, e.DeviceId });
+            entity.Property(e => e.ConversationId).IsRequired();
+            entity.Property(e => e.SenderPeerId).IsRequired();
+            entity.Property(e => e.DeviceId).IsRequired();
+            entity.Property(e => e.RecordBytes).IsRequired();
         });
 
         modelBuilder.Entity<SignedPreKeyDbo>(entity =>

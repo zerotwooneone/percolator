@@ -2,7 +2,7 @@ using Microsoft.Extensions.Logging;
 using Percolator.Application.Identity;
 using Percolator.Chat;
 using Percolator.Cryptography;
-using Percolator.Identity;
+using IdentityPeerId = Percolator.Identity.PeerId;
 
 namespace Percolator.Application.Sessions;
 
@@ -22,7 +22,7 @@ public class RemotePeerResolver : IRemotePeerResolver
         _logger = logger;
     }
 
-    public async Task<PeerId> ResolveFromSession(SessionId sessionId)
+    public async Task<IdentityPeerId> ResolveFromSession(SessionId sessionId)
     {
         var convId = new Percolator.Chat.ValueObjects.ConversationId(sessionId.Value);
         if (_activeIdentityContext.Identity is null)
@@ -33,7 +33,7 @@ public class RemotePeerResolver : IRemotePeerResolver
 
         var localPeerId = _activeIdentityContext.Identity.Id;
         var remote = conversation.Peer1.Value == localPeerId ? conversation.Peer2 : conversation.Peer1;
-        var remoteId = new PeerId(remote.Value);
+        var remoteId = new IdentityPeerId(remote.Value);
         _logger.LogInformation("Resolved remote peer {RemotePeerId} from session {SessionId}", remoteId, sessionId);
         return remoteId;
     }

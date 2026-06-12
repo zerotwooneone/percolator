@@ -1,6 +1,8 @@
 using MediatR;
 using Microsoft.Extensions.Logging;
+using CryptoPeerId = Percolator.Cryptography.Primitives.PeerId;
 using Percolator.Cryptography;
+using Percolator.Cryptography.Primitives;
 using Percolator.Identity;
 using System.Security.Cryptography;
 using CryptoSignature = Percolator.Cryptography.Signature;
@@ -67,7 +69,7 @@ namespace Percolator.Prekey.Handlers
                 throw new InvalidOperationException("No valid pre-key bundles provided.");
             }
 
-            await _bundleRepository.StoreBundlesAsync(new Percolator.Cryptography.Primitives.PeerId(identityPeerId.Value), domainBundles);
+            await _bundleRepository.StoreBundlesAsync(new CryptoPeerId(identityPeerId.Value), domainBundles);
             _logger.LogInformation("Stored {Count} pre-key bundles for peer {PeerId}", domainBundles.Count, request.RemotePeerId);
             return Unit.Value;
         }

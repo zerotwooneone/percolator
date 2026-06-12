@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Percolator.Application.Chat;
 using Percolator.Contracts;
 using Percolator.Cryptography;
+using IdentityPeerId = Percolator.Identity.PeerId;
 using Percolator.Identity;
 using Percolator.Identity.Model;
 
@@ -66,7 +67,7 @@ public sealed class ProfileOrchestrationService : IProfileOrchestrationService
         _logger.LogInformation("Profile updated to revision {Revision}", selfIdentity.ProfileRevision);
     }
 
-    public async Task AttachProfileDataIfRequiredAsync(ChatEnvelope envelope, PeerId recipientPeerId, CancellationToken ct)
+    public async Task AttachProfileDataIfRequiredAsync(ChatEnvelope envelope, IdentityPeerId recipientPeerId, CancellationToken ct)
     {
         var selfIdentity = await _selfIdentityRepository.GetMostRecentAsync(ct);
         if (selfIdentity is null || selfIdentity.CurrentProfileCiphertext is null)
@@ -96,7 +97,7 @@ public sealed class ProfileOrchestrationService : IProfileOrchestrationService
         _logger.LogDebug("Attached profile data (revision {Revision}) for peer {PeerId}", selfIdentity.ProfileRevision, recipientPeerId);
     }
 
-    public async Task ProcessInboundProfileDataAsync(ChatEnvelope envelope, PeerId senderPeerId, CancellationToken ct)
+    public async Task ProcessInboundProfileDataAsync(ChatEnvelope envelope, IdentityPeerId senderPeerId, CancellationToken ct)
     {
         if (!envelope.HasProfileKey || !envelope.HasEncryptedProfileData || 
             !envelope.HasProfileNonce || !envelope.HasProfileTag || 

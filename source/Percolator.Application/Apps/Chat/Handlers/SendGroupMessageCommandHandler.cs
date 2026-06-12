@@ -7,6 +7,7 @@ using Percolator.Chat.Events;
 using Percolator.Cryptography;
 using Percolator.Application.Network;
 using Percolator.Chat.ValueObjects;
+using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
 using Percolator.Contracts;
 
 namespace Percolator.Application.Apps.Chat.Handlers;
@@ -148,7 +149,7 @@ public sealed class SendGroupMessageCommandHandler : IRequestHandler<Commands.Se
             cancellationToken).ConfigureAwait(false);
     }
 
-    private static ChatEnvelope CreateGroupMessageEnvelope(ConversationId conversationId, Ciphertext ciphertext)
+    private static ChatEnvelope CreateGroupMessageEnvelope(ChatConversationId conversationId, Ciphertext ciphertext)
     {
         return new ChatEnvelope
         {

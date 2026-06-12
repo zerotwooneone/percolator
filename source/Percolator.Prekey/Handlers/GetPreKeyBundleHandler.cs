@@ -1,6 +1,7 @@
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Cryptography;
+using CryptoPeerId = Percolator.Cryptography.Primitives.PeerId;
 using Percolator.Identity;
 
 namespace Percolator.Prekey.Handlers
@@ -30,7 +31,7 @@ namespace Percolator.Prekey.Handlers
                 return null;
             }
 
-            var bundle = await _bundleRepository.PopBundleAsync(new Percolator.Cryptography.Primitives.PeerId(peerId.Value));
+            var bundle = await _bundleRepository.PopBundleAsync(new CryptoPeerId(peerId.Value));
             if (bundle is null)
             {
                 _logger.LogInformation("No pre-key bundle available for peer {PeerId}", peerId);

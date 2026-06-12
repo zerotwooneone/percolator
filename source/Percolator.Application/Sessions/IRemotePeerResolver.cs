@@ -1,9 +1,9 @@
 using Percolator.Cryptography;
-using Percolator.Identity;
+using IdentityPeerId = Percolator.Identity.PeerId;
 
 namespace Percolator.Application.Sessions;
 
 public interface IRemotePeerResolver
 {
-    Task<PeerId> ResolveFromSession(SessionId sessionId);
+    Task<IdentityPeerId> ResolveFromSession(SessionId sessionId);
 }
