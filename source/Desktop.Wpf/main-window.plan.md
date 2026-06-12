@@ -119,94 +119,43 @@ Attach (Send Pipeline): Check if local user's ProfileRevision > recipient peer's
 Process (Receive Pipeline): If inbound ChatEnvelope has profile_revision > local PeerIdentityDbo.LastKnownProfileRevision, extract bytes, translate to Cryptography types, decrypt, and update the peer's name, key, and revision in the database.
 
 Integration: Show how MessageService and ProcessInternalEnvelopeHandler inject and call this new service.
-
+---
 ## Chunk 2
-### Architectural Decisions: Moving from Asynchronous Pre-loading to a Synchronous Factory
-The initial design for Chunk 2 relied on an asynchronous pre-loading pattern ("Async Pre-load -> Sync Rust FFI -> Async Flush") using an in-memory dictionary cache to prevent "sync-over-async" thread starvation. However, further architectural review exposed two significant liabilities that made that approach untenable for a production-grade implementation:
-
-The Black-Box Predictability Problem: The unmanaged Rust libsignal FFI acts as a cryptographic black box. When decrypting a complex stream of group messages—potentially arriving out of order or containing interleaved keys—the library may traverse and request historical sender keys that the application layer cannot reliably predict. If the application layer guesses wrong during the PreLoadAsync phase, the dictionary cache will suffer a miss, the unmanaged layer will receive a "Not Found" error, and message decryption will catastrophically and permanently fail. The interop store must be a direct portal to the absolute source of truth, capable of resolving any key dynamically.
-
-The SQLite I/O Reality:
-The fear of sync-over-async deadlocks is a critical constraint when dealing with network-bound database providers (e.g., SQL Server, PostgreSQL) where threads are forced to block while waiting for network round-trips. However, Percolator utilizes SQLite, an in-process, local file-based database. In SQLite, asynchronous I/O operations are largely a managed illusion; synchronous lookups and database writes execute in fractions of a millisecond directly within the calling thread's memory space. Introducing an elaborate state-tracking asynchronous cache layer to avoid blocking on a local file read represents severe over-engineering.
-
-Transaction Isolation via IDbContextFactory:
-By utilizing a dedicated IDbContextFactory<PercolatorDbContext>, we can spin up short-lived, transient, synchronous database contexts completely isolated from the ambient request-scoped DbContext. This ensures that if an unmanaged cryptographic operation mutates and saves a Signal ratchet state, those changes are immediately committed to the database. This isolation is mandatory: if the overarching application-layer message delivery transaction fails or rolls back, the cryptographic ratchet states must still be saved to prevent the local client from desynchronizing from the network.
-
 ### Feature Implementation Request: Signal Protocol Chunk 2 (FFI Direct Interop Bridge via DbContextFactory)
 You are to implement Chunk 2 of our Signal Protocol integration for Percolator, a C# .NET 9 application built on a strict Modular Monolith architecture.
 
-The Goal: Build a safe, memory-pinned, synchronous interop bridge (SenderKeyInteropBridge) that allows the unmanaged synchronous Rust FFI (Signal.Interop) to perform direct database lookups and writes against our SQLite database via an IDbContextFactory<PercolatorDbContext>.
+The Goal: Build a clean, synchronous interop bridge (`SenderKeyInteropBridge`) that allows the managed cryptographic layer to query and persist unmanaged Sender Key states directly against our SQLite database using an `IDbContextFactory<PercolatorDbContext>`.
 
 Architectural Constraints (CRITICAL):
-
-No Asynchronous Pre-loading: Do not implement an in-memory predictive cache. The unmanaged callbacks must directly query the database synchronously to ensure reliability.
-
-Isolated Transactions: Use IDbContextFactory<PercolatorDbContext> to instantiate short-lived, isolated DbContext instances within the callbacks. Call .SaveChanges() synchronously inside the storage callbacks.
-
-Zero Memory Leaks: Properly pin the C# delegates using GCHandle.Alloc to prevent the Garbage Collector from sweeping them while unmanaged code holds the VTable. Allocate unmanaged memory using Marshal.AllocHGlobal when returning data to Rust.
-
-Shared Nothing: Entity Framework models and context implementations belong in Percolator.Infrastructure. Clean interfaces belong in Percolator.Cryptography.
+* **SafeHandle Native Resource Management:** Follow the established codebase pattern utilizing direct static method calls to `Signal.Interop.SignalCrypto` backed by custom `SafeHandle` classes (e.g., `GroupMasterKeySafeHandle`). Do not introduce delegate pinning, `GCHandle`, or raw function pointer VTables.
+* **Isolated Transactions:** Use `IDbContextFactory<PercolatorDbContext>` to instantiate short-lived, isolated DbContext instances inside the storage operations. Call `.SaveChanges()` synchronously to ensure cryptographic state transitions commit immediately, preventing desynchronization if an ambient application transaction rolls back.
+* **Shared Nothing:** Entity Framework models and context configurations belong exclusively in `Percolator.Infrastructure`. Clean interfaces live in `Percolator.Cryptography`.
 
 Implementation Requirements
-1. Persistence (Percolator.Infrastructure)
+1. Persistence (`Percolator.Infrastructure/Chat/Persistence`)
+* Create a new database object: `SenderKeyRecordDbo`.
+* Configure a composite primary key consisting of: `ConversationId` (GUID), `PeerId` (GUID) representing the sender, and `DeviceId` (uint) to properly support multi-device user profiles.
+* Add a public `byte[] RecordBytes { get; set; }` property to store the serialized blob of the Sender Key.
+* Register this configuration in `PercolatorDbContext`. Do not write EF Core migrations.
 
-Create a new database object: SenderKeyRecordDbo.
+2. The Interop Bridge Contract (`Percolator.Cryptography`)
+* Define `public interface ISenderKeyInteropBridge`.
+* Expose methods to load and store keys using strongly-typed domain primitives:
+    * `bool TryLoadSenderKey(ConversationId conversationId, PeerId senderId, DeviceId deviceId, out byte[] recordBytes);`
+    * `void StoreSenderKey(ConversationId conversationId, PeerId senderId, DeviceId deviceId, byte[] recordBytes);`
 
-Configure a composite primary key consisting of: ConversationId (GUID), PeerId (GUID), and DeviceId (uint). (Note: Signal's DistributionId maps to our ConversationId. ACI maps to our PeerId. DeviceId was established in Chunk 1).
-
-Add a public byte[] RecordBytes { get; set; } property to store the serialized blob of the Sender Key.
-
-Register this configuration in PercolatorDbContext. Do not write EF Core migrations.
-
-2. The Interop Bridge Interface (Percolator.Cryptography)
-
-Define public interface ISenderKeyInteropBridge : IDisposable;
-
-Add a method: IntPtr GetVTablePtr();
-
-3. The Bridge Implementation (Percolator.Infrastructure)
-
-Implement SenderKeyInteropBridge implementing ISenderKeyInteropBridge.
-
-Inject IDbContextFactory<PercolatorDbContext> into its constructor.
-
-Memory Pinning:
-
-Declare class-level fields for LoadSenderKeyDelegate and StoreSenderKeyDelegate to preserve their references.
-
-Inside the constructor, instantiate the delegates pointing to your private callback methods and pin them using GCHandle.Alloc(..., GCHandleType.Normal).
-
-Allocate and pin an instance of the SenderKeyStoreVTable structure, populating its function pointers with the pinned delegate addresses.
-
-LoadSenderKey Callback (Synchronous Execution):
-
-Extract ConversationId from the 16-byte distributionIdBytes pointer.
-
-Extract PeerId (ACI) and DeviceId from the opaque senderAddress pointer using Signal.Interop extraction helpers or direct Marshal pointer manipulation.
-
-Use the injected factory to resolve a temporary context: using var db = _dbFactory.CreateDbContext();
-
-Synchronously find the record matching the composite key using db.SenderKeyRecords.Find(...).
-
-If found: Allocate unmanaged memory via Marshal.AllocHGlobal(record.RecordBytes.Length), copy the managed bytes to that address via Marshal.Copy, set the outRecord and outLen parameters, and return 0. (The unmanaged layer will assume ownership and free this memory).
-
-If not found: Set output parameters to zero or null and return 1 (Not Found).
-
-StoreSenderKey Callback (Synchronous Execution):
-
-Extract the composite identifiers (ConversationId, PeerId, DeviceId) as described above.
-
-Copy the incoming unmanaged data from recordBytes and recordLen into a new managed byte[].
-
-Use the factory to resolve a temporary context: using var db = _dbFactory.CreateDbContext();
-
-Perform a synchronous upsert. If the record exists, update its RecordBytes; if it does not exist, add a new SenderKeyRecordDbo instance.
-
-Execute db.SaveChanges(); to immediately commit the state transition to SQLite. Return 0.
-
-Dispose:
-
-Free all allocated GCHandle instances cleanly to avoid memory leaks.
+3. The Bridge Implementation (`Percolator.Infrastructure/Chat`)
+* Implement `SenderKeyInteropBridge` implementing `ISenderKeyInteropBridge`.
+* Inject `IDbContextFactory<PercolatorDbContext>` into its constructor.
+* **LoadSenderKey Logic:**
+    * Resolve a temporary context: `using var db = _dbFactory.CreateDbContext();`
+    * Synchronously locate the record matching the full composite key using `db.SenderKeyRecords.Find(...)`.
+    * If found, extract the bytes and return true; if missing, return false.
+* **StoreSenderKey Logic:**
+    * Resolve a temporary context: `using var db = _dbFactory.CreateDbContext();`
+    * Perform a synchronous upsert. If the record exists, update its `RecordBytes`; if it does not exist, add a new `SenderKeyRecordDbo` instance.
+    * Execute `db.SaveChanges();` to immediately commit the state transition to SQLite.
+---
 
 ## Chunk 3
 Feature Implementation Request: Signal Protocol Chunk 3 (Micro-PKI & Sealed Sender)
@@ -452,58 +401,44 @@ message GroupInvite {
 Add `group_invite = 16;` to the ChatEnvelope oneof.
 ---
 ## Chunk 6
-Feature Implementation Request: Signal Protocol Chunk 6 (The Data Plane)
-You are to implement the high-velocity Data Plane for Group V2.
+Feature Implementation Request: Signal Protocol Chunk 6 (The Streaming Data Plane)
+You are to implement the high-velocity, real-time Data Plane for Group V2 messaging.
 
-The Goal: Build an asynchronous, decoupled pipeline for group message ingress and fan-out.
+The Goal: Build the application's foundational server-streaming infrastructure to track concurrent active group peer connections and execute decoupled, non-blocking fan-out operations.
 
 Architectural Constraints (CRITICAL):
-
-Interface Segregation: The Application layer must define IGroupNotificationDispatcher. The Infrastructure layer implements this interface using gRPC streams. The Application layer must never see an IServerStreamWriter.
-
-Decoupled Concurrency: Do not lock the whole group during decryption. Parallelize decryption (CPU-bound). Only serialize persistence/database writes (I/O-bound).
-
-No Infrastructure Leaks: The Application layer handles the business logic; the Infrastructure layer handles the gRPC streaming and database locking.
+* **Interface Segregation:** The Application layer must define `IGroupNotificationDispatcher`. The Infrastructure layer implements this interface using gRPC streams. The Application layer must never see or reference an `IServerStreamWriter`.
+* **Multi-Stream Connection Matrix:** Because multiple distinct peers connect to a single group conversation, `GrpcGroupNotificationDispatcher` must map a single `ConversationId` to a collection of active streams. Implement a thread-safe look-up matrix utilizing a nested dictionary lookup, ensuring distinct connection instances are tracked safely without overwriting concurrent peer sessions.
+* **Pragmatic Persistence Handling:** Do not wrap your SQLite database appends in artificial application-level semaphores or single-threaded loops. Trust the underlying SQLite engine's native locking mechanisms to serialize concurrent transactional writes seamlessly via standard non-blocking asynchronous calls.
 
 Implementation Requirements
-1. Interface Definition (Percolator.Application)
+1. Interface Definition (`Percolator.Application/Chat`)
+* Define: `public interface IGroupNotificationDispatcher { Task DispatchAsync(ConversationId conversationId, MessageDto message, CancellationToken ct); }`
 
-public interface IGroupNotificationDispatcher { Task DispatchAsync(ConversationId conversationId, MessageDto message, CancellationToken ct); }
+2. Infrastructure Multi-Stream Tracking (`Percolator.Infrastructure/Chat`)
+* Create `GrpcGroupNotificationDispatcher` implementing `IGroupNotificationDispatcher`.
+* **Storage Matrix:** Maintain a thread-safe nested lookup: `ConcurrentDictionary<ConversationId, ConcurrentDictionary<PeerId, IServerStreamWriter<GroupStreamResponse>>>`.
+* **Methods:**
+    * Implement `Task DispatchAsync(...)`: Safely extract the nested list of writers for the matching `ConversationId`, iterate through the connections, and invoke `.WriteAsync()` to fan out the payload across all active peer streams.
+    * Expose helper registrations: `void RegisterStream(ConversationId conversationId, PeerId peerId, IServerStreamWriter<GroupStreamResponse> stream)` and `void UnregisterStream(ConversationId conversationId, PeerId peerId)`.
+* Create `SqliteChatMessageWriter` inside `Percolator.Infrastructure/Chat` to handle straightforward, async-safe database appends directly via core entity framework operations.
 
-2. Infrastructure Implementation (Percolator.Infrastructure)
+3. Application Ingress Orchestration (`Percolator.Application/Apps/Chat`)
+* Implement `GroupIngressService.ProcessGroupMessageAsync`:
+    1. Decrypt: Call `ISenderKeyCryptographyService.Decrypt(...)` (This remains parallelizable across threads with no lock required).
+    2. Persist: Call `IChatMessageWriter.AddGroupMessageAsync(...)`.
+    3. Fan-Out: Call `IGroupNotificationDispatcher.DispatchAsync(...)`.
 
-GrpcGroupNotificationDispatcher: Implements IGroupNotificationDispatcher.
-
-Holds the ConcurrentDictionary<ConversationId, IServerStreamWriter<GroupStreamResponse>>.
-
-Implements the StreamGroupMessages gRPC method.
-
-When DispatchAsync is called, it iterates the connected streams and pushes the message.
-
-SqliteChatMessageWriter: Wrap the persistence logic in a SemaphoreSlim or a single-threaded task queue to ensure database writes are serialized and atomic.
-
-3. Application Orchestration (Percolator.Application)
-
-GroupIngressService.ProcessGroupMessageAsync:
-
-Decrypt: Call ISenderKeyCryptographyService.Decrypt(...) (No lock required).
-
-Persist: Call IChatMessageWriter.AddGroupMessageAsync(...). (The Infrastructure handles locking).
-
-Fan-Out: Call IGroupNotificationDispatcher.DispatchAsync(...).
-
-4. gRPC Streaming Service
-
-Implement the StreamGroupMessages method in PercolatorMessageService.
-
-It should register the stream with GrpcGroupNotificationDispatcher on connect.
-
-It should keep the stream open using a while (!context.CancellationToken.IsCancellationRequested) loop.
-
-It should remove the stream on disconnect.
-
-Please output the C# code for the IGroupNotificationDispatcher interface, the GrpcGroupNotificationDispatcher infrastructure implementation, and the updated PercolatorMessageService streaming logic.
-
+4. gRPC Streaming Service Anchor (`Percolator.Infrastructure/Network/Grpc/PercolatorMessageService.cs`)
+* Add the following endpoint contract to `PercolatorMessageService`:
+  ```csharp
+  public override async Task StreamGroupMessages(
+      GroupStreamRequest request, 
+      IServerStreamWriter<GroupStreamResponse> responseStream, 
+      ServerCallContext context)
+  ```
+* **Logic:** Parse the incoming group identifier into a `ConversationId` and the sender metadata into a `PeerId`. Call `_dispatcher.RegisterStream(conversationId, peerId, responseStream)`. Keep the stream alive using a processing loop bounded by `while (!context.CancellationToken.IsCancellationRequested) { await Task.Delay(1000, context.CancellationToken); }`. Upon exit or cancellation, safely execute `_dispatcher.UnregisterStream(conversationId, peerId)`.
+---
 ## Chunk 7
 Feature Implementation Request: Signal Protocol Chunk 7 (Client-Side Speculative Rebase Coordinator)
 You are to implement Chunk 7 of our Signal Protocol Group V2 integration for Percolator, isolating client-side conflict resolution behind a reusable Process Manager.
