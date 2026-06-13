@@ -253,108 +253,90 @@ Implementation Requirements
 - `SealedSenderAuthenticationRoundTrip_ClientSignedRequest_ValidatedByPeerAuthenticationService` - Integration test that a client-signed certificate request payload is successfully validated by PeerAuthenticationService when mapped cleanly using a wire-safe Public Key Hash (PKH) lookup token.
 
 ---
+
 ## Chunk 4
-Feature Implementation Request: Signal Protocol Chunk 4 (Relay Encrypted Ledger)
+### Feature Implementation Request: Signal Protocol Chunk 4 (Relay Encrypted Ledger)
 You are to implement Chunk 4 of our Signal Protocol Group V2 integration for Percolator, a C# .NET 9 application built on a strict, "Shared Nothing" Modular Monolith architecture.
 
-The Goal: Transform the Relay into an authoritative, encrypted ledger for group state. The Relay must enforce Optimistic Concurrency (Epochs), verify Zero-Knowledge (ZK) Proofs before accepting messages, and synchronously fan-out payloads to group members.
+The Goal: Transform the Relay into an authoritative, encrypted ledger for group state. The Relay must enforce Optimistic Concurrency (Epochs), verify Zero-Knowledge (ZK) Proofs before accepting messages, and fanned-out payloads to group members asynchronously via an offline storage queue.
 
 Architectural Constraints (CRITICAL):
-
-Interop is Ready: The Signal.Interop library already contains VerifyAuthCredentialWithPniPresentation and all necessary ZK SafeHandle wrappers. Wrap these in the Cryptography domain.
-
-Strict Clean Architecture: The Application layer must NOT reference Entity Framework, DbContext, or DBOs. Repositories must catch EF Core exceptions (like DbUpdateConcurrencyException) and translate them into pure Domain exceptions before they reach the Application layer.
-
-Rich Domain Model: State transitions (like advancing an epoch) must happen on a Domain entity, not in a service method.
-
-Synchronous Fan-Out: The infrastructure implementation of the queue repository must execute a synchronous bulk-insert for all fanned-out messages within a single transaction.
-
-No Data Migrations: Do not write EF Core migrations.
+* **Interop Layer Preparation:** The `Signal.Interop` library contains `VerifyAuthCredentialWithPniPresentation` and all necessary ZK SafeHandle wrappers. Wrap these within the Cryptography domain boundary.
+* **Strict Clean Architecture & CQRS:** The Application layer must NOT reference Entity Framework, DbContext, or DBO instances. Repositories must catch EF Core exceptions (like `DbUpdateConcurrencyException`) and translate them into pure Domain exceptions before they reach the Application layer.
+* **Rich Domain Model:** State transitions (like advancing an epoch) must happen directly on a Domain entity aggregate root, not inside an anemic service orchestrator method.
+* **Synchronous Fan-Out Persistence:** The infrastructure implementation of the queue repository must execute a synchronous bulk-insert for all fanned-out messages within a single transaction.
+* **No Shared Kernel (Local Primitives):** Duplicate required strongly-typed byte wrappers locally within the namespaces that execute them to preserve compile-time safety and boundary isolation.
 
 Implementation Requirements
-1. The Domain Layer (Percolator.Network or appropriate domain)
+1. The Domain Layer (`Percolator.Chat`)
+* **Entity Aggregate Root:** Create `RelayGroupLedger` aggregate root inside the `Percolator.Chat` namespace.
+* **Properties:** `Percolator.Chat.ConversationId ConversationId`, `uint CurrentEpoch`.
+* **Behavior:** `public void AdvanceEpoch(uint requestedEpoch)`. This method must throw a pure `StaleEpochDomainException(uint currentEpoch)` if the requested epoch is less than or equal to `CurrentEpoch`. If valid, it updates the state counter to `requestedEpoch`.
 
-Entity: Create a RelayGroupLedger aggregate root.
+2. The Cryptography Domain (`Percolator.Cryptography`)
+* Define strongly-typed primitives locally:
+  ```csharp
+  namespace Percolator.Cryptography;
 
-Properties: Percolator.Cryptography.Primitives.ConversationId ConversationId, CurrentEpoch.
+  [ByteArray] public partial record ZkPresentationBytes;
+  [ByteArray] public partial record ZkServerSecretParamsBytes;
+  [ByteArray] public partial record ZkGroupPublicParamsBytes;
+  ```
+* Define `IZkGroupCryptographyService` with:
+  `bool VerifyGroupPresentation(ZkPresentationBytes presentation, ZkServerSecretParamsBytes serverSecret, ZkGroupPublicParamsBytes groupPublic, ulong redemptionTime);`
+* Implement the service wrapping the existing `SignalCrypto.VerifyAuthCredentialWithPniPresentation` method.
 
-Behavior: public void AdvanceEpoch(uint requestedEpoch). This method must throw a StaleEpochDomainException(uint CurrentEpoch) if the requested epoch is less than or equal to CurrentEpoch. If valid, it updates CurrentEpoch.
+3. Identity & Relay Persistence (`Percolator.Identity` & `Percolator.Infrastructure`)
+* **Primitives:** Add `[ByteArray] public partial record ZkServerSecretParamsBytes;` primitive locally to `Percolator.Identity`.
+* **Domain Entity:** Update `SelfIdentity` aggregate root to include `ZkServerSecretParamsBytes`. Generate it alongside the `RelayDeliveryRootKey` during `EnableRelayMode()`.
+* **Identity Persistence Mapping:** Add `public byte[]? ZkServerSecretParams { get; set; }` to `SelfIdentityDbo`.
+* **Ledger Persistence Mapping:** Create `RelayGroupStateDbo` containing `Guid ConversationId` (PK), `uint Epoch`, and an explicit `int Version` configured as an EF Core concurrency token.
+* **CQRS Identity Query:** Introduce `public interface ISelfIdentityQueries { Task<byte[]?> GetZkServerSecretParamsAsync(CancellationToken ct); }` inside `Percolator.Application/Chat` to isolate fast read paths.
 
-2. The Cryptography Domain (Percolator.Cryptography)
+4. Network Contracts (`messaging.proto` & Contracts)
+* Define the Protobuf response:
+  ```protobuf
+  message PublishGroupMessageResponse {
+    enum Status {
+      SUCCESS = 0;
+      EPOCH_CONFLICT = 1;
+      UNAUTHORIZED = 2;
+    }
+    Status status = 1;
+    optional uint32 current_relay_epoch = 2;
+  }
+  ```
+* Define `PublishGroupMessageRequest` containing `conversation_id`, `ciphertext`, `epoch`, `zk_auth_presentation`, and `redemption_time`.
+* Add `rpc PublishGroupMessage(PublishGroupMessageRequest) returns (PublishGroupMessageResponse);` to `TransportService`.
 
-Define strongly-typed primitives: [ByteArray] public partial record ZkPresentationBytes, ZkServerSecretParamsBytes, and ZkGroupPublicParamsBytes.
+5. Infrastructure Repositories (`Percolator.Infrastructure/Chat`)
+* **IRelayGroupRepository:** Implement `Task<RelayGroupLedger> GetLedgerAsync(Percolator.Chat.ConversationId conversationId)` and `Task SaveAsync(RelayGroupLedger ledger)`.
+* **Concurrency Mapping Rule:** Inside `SaveAsync`, wrap `await _dbContext.SaveChangesAsync()` in a try/catch block. If `DbUpdateConcurrencyException` is caught, reload the row data from the database and throw a pure `EpochConflictDomainException(uint winningEpoch)`.
+* **IMessageQueueRepository:** Add `Task EnqueueFanOutAsync(Percolator.Chat.ConversationId conversationId, byte[] payload, CancellationToken ct)`.
+* **Implementation:** Resolve the list of registered destination `PeerId` markers from the database. Generate a `MessageQueueItemDbo` for each target peer. Use `_dbContext.MessageQueueItems.AddRange()` to execute a high-performance synchronous bulk-insert within the shared transactional context.
 
-Define IZkGroupCryptographyService with: bool VerifyGroupPresentation(ZkPresentationBytes presentation, ZkServerSecretParamsBytes serverSecret, ZkGroupPublicParamsBytes groupPublic, ulong redemptionTime).
+6. Application Orchestration (`Percolator.Application/Apps/Chat`)
+* Create `IRelayGroupLedgerService` with `Task<PublishGroupMessageResponse> PublishAsync(...)`.
+* **The Flow:**
+    * **Authenticate:** Call `_selfIdentityQueries.GetZkServerSecretParamsAsync(ct)` to pull the node configuration without domain tracking. Use `IZkGroupCryptographyService` to verify the presentation against the Relay's secret parameters and the Group's public params. Return `Status.UNAUTHORIZED` if false.
+    * **Load:** Call `IRelayGroupRepository.GetLedgerAsync()`.
+    * **Mutate:** Call `ledger.AdvanceEpoch(request.Epoch)`. (Catch `StaleEpochDomainException` and return `Status.EPOCH_CONFLICT` with the current epoch).
+    * **Queue:** Call `IMessageQueueRepository.EnqueueFanOutAsync(...)`.
+    * **Commit:** Call `IRelayGroupRepository.SaveAsync(ledger)`. (Catch `EpochConflictDomainException` and return `Status.EPOCH_CONFLICT` with the winning epoch).
+    * Return `Status.SUCCESS`.
 
-Implement the service wrapping the existing SignalCrypto.VerifyAuthCredentialWithPniPresentation method.
-
-3. Identity & Relay Persistence (Percolator.Identity & Infrastructure)
-
-Primitives: Add ZkServerSecretParamsBytes primitive to Percolator.Identity.
-
-Domain Entity: Update SelfIdentity to include ZkServerSecretParamsBytes. Generate it alongside the RelayDeliveryRootKey during EnableRelayMode().
-
-Persistence: Add public byte[]? ZkServerSecretParams { get; set; } to SelfIdentityDbo.
-
-Ledger Persistence: Create RelayGroupStateDbo (ConversationId PK, Epoch, and an explicit int Version for EF Core concurrency token).
-
-4. Network Contracts (messaging.proto & Contracts)
-
-Define the Protobuf response:
-
-Protocol Buffers
-message PublishGroupMessageResponse {
-enum Status {
-SUCCESS = 0;
-EPOCH_CONFLICT = 1;
-UNAUTHORIZED = 2;
-}
-Status status = 1;
-optional uint32 current_relay_epoch = 2;
-}
-Define PublishGroupMessageRequest containing conversation_id, ciphertext, epoch, zk_auth_presentation, and redemption_time.
-
-Add rpc PublishGroupMessage(PublishGroupMessageRequest) returns (PublishGroupMessageResponse); to TransportService.
-
-5. Infrastructure Repositories (Percolator.Infrastructure)
-
-IRelayGroupRepository: Implement Task<RelayGroupLedger> GetLedgerAsync(Percolator.Cryptography.Primitives.ConversationId conversationId) and Task SaveAsync(RelayGroupLedger ledger).
-
-Critical Rule: Inside SaveAsync, wrap await _dbContext.SaveChangesAsync() in a try/catch. If DbUpdateConcurrencyException is caught, reload the RelayGroupStateDbo from the database and throw a pure EpochConflictDomainException(uint winningEpoch).
-
-IMessageQueueRepository: Add Task EnqueueFanOutAsync(Percolator.Cryptography.Primitives.ConversationId conversationId, byte[] payload, CancellationToken ct).
-
-Implementation: Resolve the list of registered PeerIds for the group. Generate a MessageQueueItemDbo for each peer. Use _dbContext.MessageQueueItems.AddRange() to perform a synchronous bulk-insert.
-
-6. Application Orchestration (Percolator.Application)
-
-Create IRelayGroupLedgerService with Task<PublishGroupMessageResponse> PublishAsync(...).
-
-The Flow:
-
-Authenticate: Use IZkGroupCryptographyService to verify the presentation against the Relay's secret and the Group's public params. Return Status.UNAUTHORIZED if false.
-
-Load: Call IRelayGroupRepository.GetLedgerAsync().
-
-Mutate: Call ledger.AdvanceEpoch(request.Epoch). (Catch StaleEpochDomainException and return Status.EPOCH_CONFLICT with the current epoch).
-
-Queue: Call IMessageQueueRepository.EnqueueFanOutAsync(...).
-
-Commit: Call IRelayGroupRepository.SaveAsync(ledger). (Catch EpochConflictDomainException and return Status.EPOCH_CONFLICT with the winning epoch).
-
-Return Status.SUCCESS.
-
-7. Relay gRPC Service (Percolator.Infrastructure)
-
-Implement the PublishGroupMessage endpoint. Map the request, call IRelayGroupLedgerService.PublishAsync(), and map the result back to Protobuf. Keep the gRPC layer dumb.
+7. Relay gRPC Service (`Percolator.Infrastructure/Network/Grpc`)
+* Implement the `PublishGroupMessage` endpoint inside `PercolatorMessageService`. Map the incoming request, call `IRelayGroupLedgerService.PublishAsync()`, and map the domain result back to the Protobuf layout. Keep the gRPC delivery layer dumb.
 
 **Testing Requirements (Chunk 4):**
-- `RelayGroupLedger_AdvanceEpoch_UpdatesCurrentEpoch_WhenRequestedEpochIsGreater` - Test that AdvanceEpoch updates CurrentEpoch when the requested epoch is greater than the current epoch
-- `RelayGroupLedger_AdvanceEpoch_ThrowsStaleEpochDomainException_WhenRequestedEpochIsEqualOrLower` - Test that AdvanceEpoch throws StaleEpochDomainException when the requested epoch is equal to or lower than the current epoch
+- `RelayGroupLedger_AdvanceEpoch_UpdatesCurrentEpoch_WhenRequestedEpochIsGreater` - Test that AdvanceEpoch updates CurrentEpoch when the requested epoch is greater than the current epoch.
+- `RelayGroupLedger_AdvanceEpoch_ThrowsStaleEpochDomainException_WhenRequestedEpochIsEqualOrLower` - Test that AdvanceEpoch throws StaleEpochDomainException when the requested epoch is equal to or lower than the current epoch.
+
+
 ---
 
 ## Chunk 5
-Feature Implementation Request: Signal Protocol Chunk 5 (Group Provisioning via Outbox)
+### Feature Implementation Request: Signal Protocol Chunk 5 (Group Provisioning via Outbox)
 You are to implement Group Provisioning using an Outbox pattern to ensure group creation and subsequent invitations are atomic and resilient to network failures.
 
 The Goal: Alice creates a group, persists the state atomically, and creates an outbox message. A background worker dispatches the invite over 1:1 encrypted tunnels.
@@ -362,25 +344,25 @@ The Goal: Alice creates a group, persists the state atomically, and creates an o
 Architectural Constraints (CRITICAL):
 * **Explicit Persistence:** Do not implement a complex EF Core DbContext Interceptor. The Application layer orchestrates saving by calling `await _groupRepository.SaveWithOutboxAsync(group, ct)`. The infrastructure implementation of this method handles saving the group state and mapping/serializing its raised domain events to the outbox table inside a single atomic `SaveChangesAsync` call.
 * **Rule 6 Adherence:** `PeerId` is a local-only identifier and must never be written to wire-bound serialization structures or sent over the wire. The Outbox table must use wire-safe routing tokens (`DestinationPkhBytes`).
-* **Rich Primitive Wrappers:** Strictly eliminate raw Guid and byte[] values from service signatures. All layers must use `ConversationId`, `PeerId`, and specialized cryptographic wrappers (`GroupMasterKey`, `SenderKeyDistributionMessageBytes`).
+* **Rich Primitive Wrappers:** Strictly eliminate raw Guid and byte[] values from service signatures. All layers must use fully-qualified, isolated domain primitive types (`Percolator.Chat.ConversationId`, `Percolator.Chat.PeerId`, `Percolator.Chat.GroupMasterKey`, `Percolator.Chat.SenderKeyDistributionMessageBytes`).
 
 Implementation Requirements
 1. Domain Layer (`Percolator.Chat`)
-* GroupConversation Aggregate:
-    * Properties: `Percolator.Chat.ConversationId Id`, `Percolator.Chat.GroupMasterKey MasterKey`, uint Epoch, List<GroupMember> Members.
+* **GroupConversation Aggregate:**
+    * Properties: `Percolator.Chat.ConversationId Id`, `Percolator.Chat.GroupMasterKey MasterKey`, `uint Epoch`, `List<GroupMember> Members`.
     * Methods: `void InviteMember(Percolator.Chat.PeerId peerId)` which updates state and registers a `MemberInvitedDomainEvent`. `void ClearDomainEvents()` to flush events post-persistence.
-* IDomainEvent (`Percolator.Chat/Events`): Define a record for `MemberInvitedDomainEvent` containing `Percolator.Chat.ConversationId ConversationId`, `Percolator.Chat.PeerId PeerId`, and pre-generated `SenderKeyDistributionMessageBytes` distribution blob.
+* **IDomainEvent (`Percolator.Chat/Events`):** Define a record for `MemberInvitedDomainEvent` containing `Percolator.Chat.ConversationId ConversationId`, `Percolator.Chat.PeerId PeerId`, and pre-generated `SenderKeyDistributionMessageBytes` distribution blob.
 
 2. Infrastructure Layer (`Percolator.Infrastructure/Chat/Persistence`)
-* RelayOutboxDbo: Create a DBO to store pending domain events: Id, EventType, PayloadJson, DestinationPkhBytes (byte[]), ProcessedAtUtc. The DestinationPkhBytes column stores the pre-resolved Public Key Hash for the target PeerId, enabling the OutboxDispatcherWorker to dispatch without secondary lookups.
-* OutboxDispatcherWorker (`Percolator.Infrastructure/Chat`): An `IHostedService` that runs periodically. It queries the Outbox table for unprocessed events, resolves the domain event, reads the pre-resolved DestinationPkhBytes directly from the row, calls the `IMessageService` to dispatch the invite, and marks the event as processed.
+* **RelayOutboxDbo:** Create a DBO to store pending domain events: `Guid Id`, `string EventType`, `string PayloadJson`, `byte[] DestinationPkhBytes`, `DateTimeOffset? ProcessedAtUtc`. The `DestinationPkhBytes` column stores the pre-resolved Public Key Hash for the target `PeerId`, enabling the `OutboxDispatcherWorker` to dispatch without secondary lookups.
+* **OutboxDispatcherWorker (`Percolator.Infrastructure/Chat`):** An `IHostedService` that runs periodically. It queries the Outbox table for unprocessed events, resolves the domain event, reads the pre-resolved `DestinationPkhBytes` directly from the row, calls the `IMessageService` to dispatch the invite, and marks the event as processed.
 * **Transactional Atomicity Guarantee:** In alignment with our direct `SaveChangesAsync` repository pattern, `SaveWithOutboxAsync` must stage both the `GroupConversation` state transitions and the mapped `RelayOutboxDbo` rows against the same internal context instance before calling save, clearing domain events on the aggregate root immediately after a successful database commit. This allows Entity Framework Core to natively leverage SQLite's transaction engine to guarantee atomic persistence without requiring a custom Unit-of-Work block.
 * **Transient Network Backoff:** The `OutboxDispatcherWorker` must encapsulate transient network exceptions (e.g., gRPC `RpcException` timeouts). If a peer is offline, the worker must catch the error, log a warning, back off sequentially using a non-blocking `Task.Delay`, and skip updating `ProcessedAtUtc` so the record is cleanly evaluated on the next loop.
 
 3. Application Orchestration (`Percolator.Application/Apps/Chat`)
-* **Anti-Corruption Layer Note:** `CreateGroupCommandHandler` (located in `Percolator.Application/Apps/Chat`) serves as the Anti-Corruption Layer. It accepts incoming application primitives, extracts their raw primitives, and uses code-generated factory methods (e.g., `Percolator.Chat.GroupMasterKey.FromBytesOwned()`) to cleanly initialize the core domain entities.
-* CreateGroupCommandHandler:
-    * Generate `GroupMasterKey` via `IGroupCryptographyService`.
+* **Anti-Corruption Layer Note:** `CreateGroupCommandHandler` (located in `Percolator.Application/Apps/Chat`) serves as the Anti-Corruption Layer. It accepts incoming application primitives, extracts their raw values, and uses code-generated factory methods (e.g., `Percolator.Chat.GroupMasterKey.FromBytesOwned()`) to cleanly initialize the core domain entities.
+* **CreateGroupCommandHandler Execution:**
+    * Generate `Percolator.Chat.GroupMasterKey` via `IGroupCryptographyService`.
     * Instantiate `GroupConversation` domain entity using `Percolator.Chat` local types.
     * Call `group.InviteMember(peerId)` for each initial member using `Percolator.Chat.PeerId`.
     * Save via `await _groupRepository.SaveWithOutboxAsync(group, ct)`.
@@ -397,29 +379,34 @@ Implementation Requirements
   }
   ```
 
-Network Contracts (internal_messaging.proto)
-Add GroupInvite message and integrate with ChatEnvelope.
+5. Network Contracts (`internal_messaging.proto`)
+* Add `GroupInvite` message and integrate with `ChatEnvelope`:
+  ```protobuf
+  message GroupInvite {
+    optional uint32 version = 1;
+    optional bytes conversation_id = 2;
+    optional string group_name = 3;
+    optional bytes group_master_key = 4; // 32 bytes
+    optional bytes sender_key_distribution_message = 5;
+  }
+  ```
+* Add `group_invite = 16;` to the `ChatEnvelope` oneof configuration.
 
-```protobuf
-message GroupInvite {
-  optional uint32 version = 1;
-  optional bytes conversation_id = 2;
-  optional string group_name = 3;
-  optional bytes group_master_key = 4; // 32 bytes
-  optional bytes sender_key_distribution_message = 5;
-}
-```
-Add group_invite = 16; to the ChatEnvelope oneof.
+**Testing Requirements (Chunk 5):**
+- `ProcessInternalEnvelopeHandler_Handle_ExtractsGroupInvitePayload_WhenEnvelopeMatchesSchema` - Test that ProcessInternalEnvelopeHandler correctly extracts and processes GroupInvite payload when the ChatEnvelope contains a GroupInvite message.
+- `GroupV2SessionAndMessagingRoundTrip_DistributionMessageEnablesGroupMessaging` - Integration test where a generated GroupMasterKey creates a distribution message, a separate peer context processes that distribution message to bootstrap their session, and group messages encrypted by that peer can be successfully decrypted by the group creator.
+
 
 ---
+
 ## Chunk 6
-Feature Implementation Request: Signal Protocol Chunk 6 (The Streaming Data Plane)
+### Feature Implementation Request: Signal Protocol Chunk 6 (The Streaming Data Plane)
 You are to implement the high-velocity, real-time Data Plane for Group V2 messaging.
 
 The Goal: Build the application's foundational server-streaming infrastructure to track concurrent active group peer connections and execute decoupled, non-blocking fan-out operations.
 
 Architectural Constraints (CRITICAL):
-* **Interface Segregation:** The Application layer must define `IGroupNotificationDispatcher`. The Infrastructure layer implements this interface using gRPC streams. The Application layer must never see or reference an `IServerStreamWriter`.
+* **Interface Segregation:** The Application layer must define `IGroupNotificationDispatcher`. The Infrastructure layer implements this interface using gRPC streams. The Application layer must never see or reference an `IServerStreamWriter` instance.
 * **Multi-Stream Connection Matrix:** Because multiple distinct peers connect to a single group conversation, `GrpcGroupNotificationDispatcher` must map a single `ConversationId` to a collection of active streams. Implement a thread-safe look-up matrix utilizing a nested dictionary lookup, ensuring distinct connection instances are tracked safely without overwriting concurrent peer sessions.
 * **Pragmatic Persistence Handling:** Do not wrap your SQLite database appends in artificial application-level semaphores or single-threaded loops. Trust the underlying SQLite engine's native locking mechanisms to serialize concurrent transactional writes seamlessly via standard non-blocking asynchronous calls.
 
@@ -437,10 +424,10 @@ Implementation Requirements
 
 3. Application Ingress Orchestration (`Percolator.Application/Apps/Chat`)
 * Implement `GroupIngressService.ProcessGroupMessageAsync`:
-    1. Decrypt: Call `ISenderKeyCryptographyService.Decrypt(...)` (This remains parallelizable across threads with no lock required).
-    2. Persist: Call `IChatMessageWriter.AddGroupMessageAsync(...)`.
-    3. Fan-Out: Call `IGroupNotificationDispatcher.DispatchAsync(...)`.
-* **Early-Gate Roster Validation:** Inside `GroupIngressService.ProcessGroupMessageAsync`, the service must execute a local database lookup against the conversation's active membership roster prior to performing any unmanaged cryptographic actions. If the incoming sender's `PeerId` is missing from the local group roster or marked as evicted, the message payload must be dropped immediately, preventing unmanaged memory allocation or decryption thrashing from unauthorized network elements.
+    1. **Early-Gate Roster Validation:** Inside `GroupIngressService.ProcessGroupMessageAsync`, the service must execute a local database lookup or fast query projection against the conversation's active membership roster prior to performing any unmanaged cryptographic actions. If the incoming sender's `PeerId` is missing from the local group roster or marked as evicted, the message payload must be dropped immediately, preventing unmanaged memory allocation or decryption thrashing from unauthorized network elements.
+    2. Decrypt: Call `ISenderKeyCryptographyService.Decrypt(...)` (This remains parallelizable across threads with no lock required).
+    3. Persist: Call `IChatMessageWriter.AddGroupMessageAsync(...)`.
+    4. Fan-Out: Call `IGroupNotificationDispatcher.DispatchAsync(...)`.
 
 4. gRPC Streaming Service Anchor (`Percolator.Infrastructure/Network/Grpc/PercolatorMessageService.cs`)
 * Add the following endpoint contract to `PercolatorMessageService`:
@@ -452,66 +439,60 @@ Implementation Requirements
   ```
 * **Logic:** Parse the incoming group identifier into a `Percolator.Application.Chat.ConversationId` and the sender metadata into a `Percolator.Application.Chat.PeerId`. Call `_dispatcher.RegisterStream(conversationId, peerId, responseStream)`. Keep the stream alive using a processing loop bounded by `while (!context.CancellationToken.IsCancellationRequested) { await Task.Delay(1000, context.CancellationToken); }`. Upon exit or cancellation, safely execute `_dispatcher.UnregisterStream(conversationId, peerId)`.
 
-**Testing Requirements (Chunk 5):**
-- `ProcessInternalEnvelopeHandler_Handle_ExtractsGroupInvitePayload_WhenEnvelopeMatchesSchema` - Test that ProcessInternalEnvelopeHandler correctly extracts and processes GroupInvite payload when the ChatEnvelope contains a GroupInvite message
-- `GroupV2SessionAndMessagingRoundTrip_DistributionMessageEnablesGroupMessaging` - Integration test where a generated GroupMasterKey creates a distribution message, a separate peer context processes that distribution message to bootstrap their session, and group messages encrypted by that peer can be successfully decrypted by the group creator
+**Testing Requirements (Chunk 6):**
+- `GrpcGroupNotificationDispatcher_DispatchAsync_FansOutPayloadToAllRegisteredWriters_WhenConversationHasMultipleActiveStreams` - Test that DispatchAsync fans out the payload to all registered IServerStreamWriter instances when the conversation has multiple active streams.
+
+
 ---
+
 ## Chunk 7
-Feature Implementation Request: Signal Protocol Chunk 7 (Client-Side Speculative Rebase Coordinator)
+### Feature Implementation Request: Signal Protocol Chunk 7 (Client-Side Speculative Rebase Coordinator)
 You are to implement Chunk 7 of our Signal Protocol Group V2 integration for Percolator, isolating client-side conflict resolution behind a reusable Process Manager.
 
 Architectural Constraints (CRITICAL):
-
-No Dirty Memory States: Do not apply state mutations directly to tracked repository entities before network confirmation. Speculative mutations must be verified cleanly without dirtying live cache entities.
-
-Reusable Coordination: Do not write retry loops or network synchronization code inside individual MediatR handlers. Centralize this orchestration within an application-layer Process Manager (GroupMutationCoordinator).
-
-Intent-Based Validation: Group mutations must be modeled as structural proposals so they can be re-evaluated for validity if the group baseline shifts during a sync catch-up.
+* **No Dirty Memory States:** Do not apply state mutations directly to tracked repository entities before formal network confirmation. Speculative mutations must be verified cleanly without dirtying live cache entities.
+* **Reusable Coordination Over Indirection:** Do not write custom retry loops or network synchronization blocks inside individual handlers. Centralize this orchestration within an application-layer Process Manager (`GroupMutationCoordinator`).
+* **Intent-Based Validation via CQRS:** Group mutations must be modeled as structural proposals so they can be re-evaluated for validity if the group baseline shifts during a sync catch-up execution loop.
 
 Implementation Requirements
-1. The Proposal Model & Domain Safeguard (Percolator.Chat)
+1. The Proposal Model & Domain Safeguard (`Percolator.Chat`)
+* Define an interface for mutations locally: `IGroupMutationProposal`.
+* Implement an explicit proposal record: `RenameGroupProposal(string NewName) : IGroupMutationProposal`.
+* Update the `GroupConversation` aggregate root to support deep copying or dry validation:
+  `public bool EvaluateProposal(IGroupMutationProposal proposal, out string? businessRuleViolation)`
 
-Define an interface for mutations: IGroupMutationProposal.
+2. The Mutation Coordinator Process Manager (`Percolator.Application/Apps/Chat`)
+* Create a centralized service orchestrator: `GroupMutationCoordinator`.
+* **Isolation Boundary Control:** The `GroupMutationCoordinator` handles the isolation loop cleanly without passing leaked unmanaged cryptographic tokens through public handler boundaries. All cryptographic operations remain contained within their respective domain service contexts.
+* **Method Signature:**
+  ```csharp
+  Task<MutationResult> CoordinateMutationAsync(
+      Percolator.Application.Chat.ConversationId conversationId, 
+      IGroupMutationProposal proposal, 
+      SelfId selfIdentityId, 
+      CancellationToken ct)
+  ```
+* **The Core Loop Engine:**
+    * Establish a strict retry limit loop (maximum 3 attempts).
+    * **Step 1:** Load a completely fresh instance of the aggregate from `IGroupConversationRepository`.
+    * **Step 2:** Execute `group.EvaluateProposal(proposal, out var error)`. If it fails validation due to a state change found during catch-up, abort instantly and return `MutationResult.Failed(error)`.
+    * **Step 3:** Serialize the proposal intent to an encrypted payload using the current aggregate epoch context.
+    * **Step 4:** Dispatch the frame to `IRelayClient.PublishGroupMutationAsync(...)`.
+    * **Step 5 (On Success):** Now that consensus is won, apply the mutation directly to the domain object, commit it locally using `_repository.UpdateAsync(...)`, and return success.
+    * **Step 6 (On Conflict):** Call `_relayClient.FetchMissingEpochsAsync(...)`. Pass the returned delta payload directly to `IGroupSyncService.FastForwardLocalStateAsync(...)` to advance the baseline SQLite database. Yield thread execution to the next iteration loop.
 
-Implement an explicit proposal record, e.g., RenameGroupProposal(string NewName) : IGroupMutationProposal.
+3. Refactored Application Handlers (`Percolator.Application/Apps/Chat`)
+* Refactor `UpdateGroupInfoHandler` to be completely lean. It should simply instantiate a `RenameGroupProposal`, pass it directly to the `GroupMutationCoordinator`, and evaluate the returned structural outcome.
 
-Update the GroupConversation aggregate to support deep copying or dry validation:
+**Testing Requirements (Chunk 7):**
+- `GroupMutationCoordinator_CoordinateMutation_AbortsImmediately_WhenLocalProposalFailsBusinessRules` - Test that CoordinateMutationAsync aborts immediately when the local proposal fails business rule validation.
+- `GroupMutationCoordinator_CoordinateMutation_RetriesExactlyThreeTimes_WhenEncounteringContinuousEpochConflicts` - Test that CoordinateMutationAsync retries exactly three times when encountering continuous epoch conflicts.
 
-public bool EvaluateProposal(IGroupMutationProposal proposal, out string? businessRuleViolation)
 
-2. The Mutation Coordinator Process Manager (Percolator.Application)
-
-Create a centralized service: GroupMutationCoordinator.
-
-**Isolation Loop Note:** The `GroupMutationCoordinator` handles the isolation loop cleanly without passing leaked unmanaged cryptographic tokens through public handler boundaries. All cryptographic operations remain within their respective domain boundaries.
-
-Method Signature: Task<MutationResult> CoordinateMutationAsync(Percolator.Application.Chat.ConversationId conversationId, IGroupMutationProposal proposal, SelfId selfIdentityId, CancellationToken ct)
-
-The Core Loop Engine:
-
-Establish a strict retry limit loop (maximum 3 attempts).
-
-Step 1: Load a completely fresh instance of the aggregate from IGroupConversationRepository.
-
-Step 2: Execute group.EvaluateProposal(proposal, out var error). If it fails validation due to a state change found during catch-up, abort instantly and return MutationResult.Failed(error).
-
-Step 3: Serialize the proposal intent to an encrypted payload using the current aggregate epoch context.
-
-Step 4: Dispatch to IRelayClient.PublishGroupMutationAsync(...).
-
-Step 5 (On Success): Now that consensus is won, apply the mutation directly to the domain object, commit it locally using _repository.UpdateAsync(...), and return success.
-
-Step 6 (On Conflict): Call _relayClient.FetchMissingEpochsAsync(...). Pass the returned delta payload directly to IGroupSyncService.FastForwardLocalStateAsync(...) to advance the baseline SQLite database. Yield thread execution to the next iteration loop.
-
-3. Refactored Application Handlers (Percolator.Application)
-
-Refactor UpdateGroupInfoHandler to be completely lean. It should simply instantiate a RenameGroupProposal, pass it directly to the GroupMutationCoordinator, and evaluate the returned structural outcome.
-
-**Testing Requirements (Chunk 6):**
-- `GrpcGroupNotificationDispatcher_DispatchAsync_FansOutPayloadToAllRegisteredWriters_WhenConversationHasMultipleActiveStreams` - Test that DispatchAsync fans out the payload to all registered IServerStreamWriter instances when the conversation has multiple active streams
 ---
+
 ## Chunk 8
-Feature Implementation Request: Signal Protocol Chunk 8 (P2P Relay Opt-In & R3 State Engine)
+### Feature Implementation Request: Signal Protocol Chunk 8 (P2P Relay Opt-In & R3 State Engine)
 You are to implement Chunk 8 of our Signal Protocol integration for Percolator, allowing client nodes to dynamically opt-in to hosting a blind group relay and managing the network state via an R3-powered WPF state service.
 
 Architectural Constraints (CRITICAL):
@@ -524,10 +505,10 @@ Implementation Requirements
 1. Application & Persistence Layer (`Percolator.Application/Chat` & `Percolator.Infrastructure/Chat`)
 * The Service Contract: Define `IRelayHostingAppService` in `Percolator.Application/Chat`.
 * The Routing Query: Define `public interface IGroupRoutingQueries { Task<Percolator.Application.Chat.PeerId?> GetDesignatedRelayAsync(Percolator.Application.Chat.ConversationId conversationId, CancellationToken ct); }` in `Percolator.Application/Chat`.
-* The Schema: Create a `GroupRelayMappingDbo` containing Guid ConversationId (PK), Guid RelayPeerId, DateTimeOffset LastAssignedUtc inside `Percolator.Infrastructure/Chat/Persistence`. Implement a lightweight, no-tracking execution path for `IGroupRoutingQueries` against this table in `Percolator.Infrastructure/Chat`.
+* The Schema: Create a `GroupRelayMappingDbo` containing `Guid ConversationId` (PK), `Guid RelayPeerId`, `DateTimeOffset LastAssignedUtc` inside `Percolator.Infrastructure/Chat/Persistence`. Implement a lightweight, no-tracking (`AsNoTracking()`) execution path for `IGroupRoutingQueries` against this table in `Percolator.Infrastructure/Chat`.
 
-2. The Presentation State Plane (`Desktop.Wpf/Features/Simulator` or appropriate local settings folder)
-* The State Service: Create `RelayStateService` as an Angular-style application singleton.
+2. The Presentation State Plane (`Desktop.Wpf/Features/Simulator`)
+* The State Service: Create `RelayStateService` as an application singleton.
     * Inject `IRelayHostingAppService` directly.
     * Use R3's `ReactiveProperty<bool>` and debounced `Subject<bool>.Chunk()` processing loops to sequentially execute `_relayHostingAppService.SetRelayStateAsync(finalIntent, ct)` to guard against configuration thrashing.
 * The DI Registration: Register `IRelayStateService, RelayStateService` as a Singleton in `App.xaml.cs`.
@@ -570,104 +551,75 @@ public sealed class RelayStateService : IRelayStateService, IDisposable
 
 3. Infrastructure Service Implementation (`Percolator.Infrastructure/Chat`)
 * Implement `RelayCapabilityManager` implementing `IRelayHostingAppService`.
-* **Logic:** `SetRelayStateAsync(bool enable, CancellationToken ct)` modifies a persisted capability toggle or thread-safe state container. Update the endpoints implemented in Chunk 4 (`PublishGroupMessage`) to verify this local state before completing ZK verification pipelines.
-
-**Testing Requirements (Chunk 7):**
-- `GroupMutationCoordinator_CoordinateMutation_AbortsImmediately_WhenLocalProposalFailsBusinessRules` - Test that CoordinateMutationAsync aborts immediately when the local proposal fails business rule validation
-- `GroupMutationCoordinator_CoordinateMutation_RetriesExactlyThreeTimes_WhenEncounteringContinuousEpochConflicts` - Test that CoordinateMutationAsync retries exactly three times when encountering continuous epoch conflicts
+* **Logic:** `SetRelayStateAsync(bool enable, CancellationToken ct)` modifies a persisted capability toggle or thread-safe state container. Update the endpoints implemented in Chunk 4 (`PublishGroupMessage`) to verify this local state flag at the absolute entry gate of the gRPC request before entering any cryptographic or FFI verification paths.
 
 **Testing Requirements (Chunk 8):**
-- `RelayStateService_RequestToggle_BatchesRapidUserInputs_AndInvokesAppServiceOnlyWithFinalIntent` - Test that RelayStateService batches rapid user inputs and invokes the app service only with the final intent
+- `RelayStateService_RequestToggle_BatchesRapidUserInputs_AndInvokesAppServiceOnlyWithFinalIntent` - Test that RelayStateService batches rapid user inputs and invokes the app service only with the final intent.
+
+
 ---
 ## Chunk 9
-Feature Implementation Request: Signal Protocol Chunk 9 (WPF MVVM Presentation Layer)
+### Feature Implementation Request: Signal Protocol Chunk 9 (WPF MVVM Presentation Layer)
 You are to implement Chunk 9 of our Signal Protocol Group V2 integration for Percolator, surfacing Group Creation, Invitation Management, and Relay Host Controls.
 
 Architectural Constraints (CRITICAL):
-* Zero Database Leakage in Presentation: ViewModels must have zero awareness of EF Core, SQL parameters, or database entities (`PendingGroupInvitationDbo`). They must bind exclusively to Application-driven read models.
-* Direct Application Services: Presentation components must manipulate business state through explicit, focused interface methods on an Application service (`IGroupInvitationAppService`), completely avoiding MediatR dispatching overhead for single-consumer UI interactions.
-* Nested Observable Projections: The UI state service must expose an `IReadOnlyObservableList<PendingInviteModel>` where individual model items contain their own granular, mutable R3 `ReactiveProperty<T>` states. This allows the WPF UI to perform atomic property-level updates without forcing a complete collection view redraw.
+* **Zero Database Leakage in Presentation:** ViewModels must have zero awareness of EF Core, SQL parameters, or database entity objects (`PendingGroupInvitationDbo`). They must bind exclusively to Application-driven read models.
+* **Direct Application Services:** Presentation components must manipulate business state through explicit, focused interface methods on an Application service (`IGroupInvitationAppService`), completely avoiding MediatR dispatching overhead for single-consumer UI interactions.
+* **Nested Observable Projections:** The UI state service must expose an `IReadOnlyObservableList<PendingInviteModel>` where individual model items contain their own granular, mutable R3 `ReactiveProperty<T>` states. This allows the WPF UI to perform atomic property-level updates without forcing a complete collection view redraw.
 
 Implementation Requirements
-1. Multi-Select Roster & Group Creation Dialog (Desktop.Wpf)
-* The Wrapper Model: Create `SelectablePeerItemViewModel`. It wraps `PeerConnectionModel` and adds a `BindableReactiveProperty<bool> IsSelected`.
-* The Dialog ViewModel: Create `CreateGroupDialogViewModel`.
+1. Multi-Select Roster & Group Creation Dialog (`Desktop.Wpf`)
+* **The Wrapper Model:** Create `SelectablePeerItemViewModel`. It wraps `PeerConnectionModel` and adds a `BindableReactiveProperty<bool> IsSelected`.
+* **The Dialog ViewModel:** Create `CreateGroupDialogViewModel`.
     * Properties: `BindableReactiveProperty<string> GroupName`, `ObservableList<SelectablePeerItemViewModel> SelectablePeers`.
     * Behavior: On execution, filter out selected peers, extract their strongly-typed identifiers, and invoke a direct call to the Application layer to create the group conversation. Close the window upon completion via `IWindowManager` logic.
 
-2. Group Invitation Management UI (Desktop.Wpf & Percolator.Application)
-* The Reactive Model: Define `PendingInviteModel` in the Application layer, exposing a `ReactiveProperty<InviteStatus>` field.
-* The App Service: Create `IGroupInvitationAppService` with `Task AcceptAsync(Percolator.Application.Chat.ConversationId conversationId, CancellationToken ct)` and `Task IgnoreAsync(Percolator.Application.Chat.ConversationId conversationId, CancellationToken ct)`.
-* The Menu ViewModel: Create `GroupInvitesMenuViewModel` projecting an `ISynchronizedView` from the State Service's observable list of `PendingInviteModel`s.
+2. Group Invitation Management UI (`Desktop.Wpf` & `Percolator.Application`)
+* **The Reactive Model:** Define `PendingInviteModel` in the Application layer, exposing a `ReactiveProperty<InviteStatus>` field.
+* **The App Service:** Create `IGroupInvitationAppService` with `Task AcceptAsync(Percolator.Application.Chat.ConversationId conversationId, CancellationToken ct)` and `Task IgnoreAsync(Percolator.Application.Chat.ConversationId conversationId, CancellationToken ct)`.
+* **The Menu ViewModel:** Create `GroupInvitesMenuViewModel` projecting an `ISynchronizedView` from the State Service's observable list of `PendingInviteModel`s.
     * Bind interaction buttons directly to your App Service execution tasks.
     * Connect the live list element count to the custom `MatButton.NotificationCount` badge layout on the sidebar framework.
 
-3. Relay Host Settings Panel (Desktop.Wpf)
+3. Relay Host Settings Panel (`Desktop.Wpf`)
 * Inject the singleton `RelayStateService` into the relevant Settings ViewModel.
 * Declare a `public BindableReactiveProperty<bool> HostRelaySwitch { get; }` property connected via `.ToBindableReactiveProperty()`.
 * Render a `MatSlideToggle` control in XAML bound directly to this switcher, routing toggles safely through the debouncer.
+---
+
 ## Chunk 10
-Sticking with the lightweight mock approach is the pragmatic call. It keeps the simulator blazing fast, memory-efficient, and free from the overhead of spinning up entire DI scopes and database providers for every mock peer. We accept the small dual-maintenance burden on the protocol scripting in exchange for a highly performant, standalone test harness.
-
-By introducing the ISimulatedGroupOrchestrator, we completely shield your WPF ViewModels from the cryptography layer, preserving your Clean Architecture boundaries.
-
-Here is the finalized, boundary-safe prompt for Chunk 10.
-
-The Prompt for Your Implementation AI
-Copy and paste the text below:
-
-Feature Implementation Request: Signal Protocol Chunk 10 (The Lightweight Group Simulator)
+### Feature Implementation Request: Signal Protocol Chunk 10 (The Lightweight Group Simulator)
 You are to implement Chunk 10 of our Signal Protocol Group V2 integration for Percolator. This chunk extends the existing in-memory simulator to test Group Creation, Invites, and Messaging against the Main Application, strictly avoiding Smart UI anti-patterns.
 
 Architectural Constraints (CRITICAL):
-
-Smart UI Prevention: ViewModels must NOT contain FFI logic, Protobuf serialization, or key generation. They must delegate entirely to an Application-layer orchestrator.
-
-State/Behavior Separation: SimulatedPeerModel must remain a lightweight, state-only mock object. Do not embed protocol execution logic inside the model itself.
-
-Direct Interception: Leverage the existing SimulatorOutboundInterceptor and SimulatorToMainTransportService to pass ChatEnvelopes back and forth.
+* **Smart UI Prevention:** ViewModels must NOT contain FFI logic, Protobuf serialization, or key generation. They must delegate entirely to an Application-layer orchestrator.
+* **State/Behavior Separation:** `SimulatedPeerModel` must remain a lightweight, state-only mock object. Do not embed protocol execution logic inside the model itself.
+* **Direct Interception Routing:** Leverage the existing `SimulatorOutboundInterceptor` and `SimulatorToMainTransportService` to pass `ChatEnvelope` envelopes back and forth smoothly.
 
 Implementation Requirements
-1. Simulated Group Crypto State (Desktop.Wpf/Features/Simulator)
+1. Simulated Group Crypto State (`Desktop.Wpf/Features/Simulator`)
+* Extend the existing `SimulatedPeerModel` layout:
+    * Add `public Dictionary<Percolator.Chat.ConversationId, Percolator.Cryptography.GroupMasterKey> GroupMasterKeysMutable { get; } = new();`.
+* **Cross-Domain Mapping Note:** The mock simulator layer explicitly maps across both domain contexts for protocol scripting, using `Percolator.Chat.ConversationId` for conversation identification and `Percolator.Cryptography.GroupMasterKey` for cryptographic state resolution.
 
-Extend the existing SimulatedPeerModel:
-
-Add public Dictionary<Percolator.Chat.ConversationId, Percolator.Cryptography.GroupMasterKey> GroupMasterKeysMutable { get; } = new();
-
-**Cross-Domain Mapping Note:** The mock simulator layer explicitly maps across both domain contexts for protocol scripting, using `Percolator.Chat.ConversationId` for conversation identification and `Percolator.Cryptography.GroupMasterKey` for cryptographic state.
-
-2. The Simulator Orchestrator (Desktop.Wpf/Features/Simulator)
-
-Create ISimulatedGroupOrchestrator and its implementation. This is the engine that drives the mock protocol.
-
-Methods:
-
-Task HandleIngressAsync(SimulatedPeerModel peer, ChatEnvelope envelope):
-
-If it's a GroupInvite, extract the GroupMasterKey, save it to the peer's GroupMasterKeysMutable, and process the SenderKeyDistributionMessage via SignalCrypto.
-
-If it's a GroupMessage, decrypt it via the FFI layer and log it to the simulator's diagnostic output.
-
-Task CreateGroupWithMainAsync(SimulatedPeerModel initiator):
-
-Generate a GroupMasterKey, create the distribution message, package it into a GroupInvite Protobuf, and dispatch via SimulatorToMainTransportService.
-
-Task SendGroupMessageAsync(SimulatedPeerModel sender, Percolator.Chat.ConversationId conversationId, string message):
-
-Encrypt the string using the mock peer's SenderKey, package the Protobuf, and dispatch via the transport service.
+2. The Simulator Orchestrator (`Desktop.Wpf/Features/Simulator`)
+* Create `ISimulatedGroupOrchestrator` and its concrete implementation. This is the core workflow engine that drives the mock protocol script.
+* **Methods:**
+    * `Task HandleIngressAsync(SimulatedPeerModel peer, ChatEnvelope envelope)`:
+        * If it's a `GroupInvite`, extract the `GroupMasterKey`, save it to the peer's `GroupMasterKeysMutable` directory, and process the `SenderKeyDistributionMessage` via `SignalCrypto` FFI utilities.
+        * If it's a `GroupMessage`, decrypt it via the unmanaged FFI layer and log the output stream directly to the simulator's diagnostic panel.
+    * `Task CreateGroupWithMainAsync(SimulatedPeerModel initiator)`:
+        * Generate a `Percolator.Cryptography.GroupMasterKey`, generate the distribution message, package it into a `GroupInvite` Protobuf payload, and dispatch via `SimulatorToMainTransportService`.
+    * `Task SendGroupMessageAsync(SimulatedPeerModel sender, Percolator.Chat.ConversationId conversationId, string message)`:
+        * Encrypt the string using the mock peer's `SenderKey`, package the Protobuf data frame, and dispatch via the transport service.
 
 3. Simulator Ingress Wiring (Main -> Simulator)
+* Update `SimulatorStateService.ReceiveOpaqueMessageFromMainAsync`.
+* After decrypting an incoming 1:1 `ChatEnvelope`, check if it contains Group V2 payloads (Invites or Group Messages). If so, immediately hand the execution channel off to `await _groupOrchestrator.HandleIngressAsync(peer, envelope)`.
 
-Update SimulatorStateService.ReceiveOpaqueMessageFromMainAsync.
-
-After decrypting an incoming 1:1 ChatEnvelope, check if it contains Group V2 payloads (Invites or Group Messages). If so, immediately hand it off to await _groupOrchestrator.HandleIngressAsync(peer, envelope).
-
-4. Simulator Egress & Presentation (Desktop.Wpf/Features/Simulator)
-
-Update SimulatedPeerCardViewModel to include two new, clean macro commands:
-
-AsyncRelayCommand CreateGroupWithMainCommand: Calls await _groupOrchestrator.CreateGroupWithMainAsync(_peerModel).
-
-AsyncRelayCommand SendGroupMessageCommand: Calls await _groupOrchestrator.SendGroupMessageAsync(_peerModel, selectedConversationId, testMessage).
-
-Update SimulatedPeerCardView.xaml to surface these two commands as standard MatButton controls.
+4. Simulator Egress & Presentation (`Desktop.Wpf/Features/Simulator`)
+* Update `SimulatedPeerCardViewModel` to include two new, clean macro commands:
+    * `AsyncRelayCommand CreateGroupWithMainCommand`: Calls `await _groupOrchestrator.CreateGroupWithMainAsync(_peerModel)`.
+    * `AsyncRelayCommand SendGroupMessageCommand`: Calls `await _groupOrchestrator.SendGroupMessageAsync(_peerModel, selectedConversationId, testMessage)`.
+* Update `SimulatedPeerCardView.xaml` to surface these two commands as standard `MatButton` controls.
+---
