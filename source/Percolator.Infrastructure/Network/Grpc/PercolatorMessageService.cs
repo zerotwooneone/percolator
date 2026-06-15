@@ -1,11 +1,14 @@
 using Google.Protobuf;
 using Grpc.Core;
 using Microsoft.Extensions.Logging;
+using Percolator.Application.Chat;
 using Percolator.Application.Ingress;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
 using Percolator.Contracts;
+using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
+using ProtobufDeliveryCertificate = Percolator.Contracts.DeliveryCertificate;
 
 namespace Percolator.Infrastructure.Network.Grpc;
 
@@ -17,6 +20,7 @@ public class PercolatorMessageService : TransportService.TransportServiceBase
     private readonly IInviteHandshakeResponseIngress _inviteHandshakeResponseIngress;
     private readonly IStandardHandshakeIngress _standardHandshakeIngress;
     private readonly ActiveIdentityContext _active;
+    private readonly ILocalIdentitySigner _localIdentitySigner;
 
     public PercolatorMessageService(
         ILogger<PercolatorMessageService> logger,
@@ -24,7 +28,8 @@ public class PercolatorMessageService : TransportService.TransportServiceBase
         IEstablishDirectSessionService establishService,
         IInviteHandshakeResponseIngress inviteHandshakeResponseIngress,
         IStandardHandshakeIngress standardHandshakeIngress,
-        ActiveIdentityContext active)
+        ActiveIdentityContext active,
+        ILocalIdentitySigner localIdentitySigner)
     {
         _logger = logger;
         _messageIngress = messageIngress;
@@ -32,6 +37,7 @@ public class PercolatorMessageService : TransportService.TransportServiceBase
         _inviteHandshakeResponseIngress = inviteHandshakeResponseIngress;
         _standardHandshakeIngress = standardHandshakeIngress;
         _active = active;
+        _localIdentitySigner = localIdentitySigner;
     }
 
     public override Task<EstablishSessionResponse> EstablishSession(EstablishSessionRequest request, ServerCallContext context)
@@ -174,5 +180,32 @@ public class PercolatorMessageService : TransportService.TransportServiceBase
 
         await _inviteHandshakeResponseIngress.HandleAsync(_active.Identity.SelfIdentityId, request, context.CancellationToken).ConfigureAwait(false);
         return new DeliverInviteHandshakeResponseAck { Version = 1 };
+    }
+
+    public override async Task<GetDeliveryCertificateResponse> GetDeliveryCertificate(GetDeliveryCertificateRequest request, ServerCallContext context)
+    {
+        if (_active.Identity is null)
+        {
+            throw new RpcException(new Status(StatusCode.FailedPrecondition, "Active identity not loaded."));
+        }
+
+        // Construct the certificate payload (relay fingerprint + 24-hour expiration)
+        var expiration = DateTimeOffset.UtcNow.AddHours(24);
+        var payload = new byte[24]; // 16 bytes PeerId (Guid) + 8 bytes expiration timestamp
+        Buffer.BlockCopy(_active.Identity.PeerId.Value.ToByteArray(), 0, payload, 0, 16);
+        Buffer.BlockCopy(BitConverter.GetBytes(expiration.ToUnixTimeSeconds()), 0, payload, 16, 8);
+
+        // Delegate the payload directly to the signer without inspecting raw keys
+        var signature = await _localIdentitySigner.SignWithRelayRootKeyAsync(payload, context.CancellationToken);
+
+        // Package the raw bytes from signature.Span into DeliveryCertificateResponse and return
+        return new GetDeliveryCertificateResponse
+        {
+            Certificate = new ProtobufDeliveryCertificate
+            {
+                CertificateData = Google.Protobuf.ByteString.CopyFrom(payload),
+                Signature = Google.Protobuf.ByteString.CopyFrom(signature.Span)
+            }
+        };
     }
 }

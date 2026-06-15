@@ -41,13 +41,15 @@ public sealed class OutboundMessageWireTapTests
         sender.Setup(s => s.SendAsync(It.IsAny<int>(), It.IsAny<PeerId>(), It.IsAny<NetworkPayload>(), It.IsAny<SendStrategy>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SendOutcome { Success = true, Path = "Direct", AttemptedPaths = new[] { "Direct" }, Attempts = 1 });
 
+        var profileOrchestrationService = new Mock<Percolator.Application.Chat.IProfileOrchestrationService>(MockBehavior.Loose);
         var sut = new MessageService(
             NullLogger<MessageService>.Instance,
             sessions.Object,
             secure.Object,
             active,
             sender.Object,
-            tap);
+            tap,
+            profileOrchestrationService.Object);
 
         var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { TextMessage = new TextMessage { Content = "test" } } };
         var recipient = new Percolator.Identity.PeerId(Guid.NewGuid());
@@ -85,13 +87,15 @@ public sealed class OutboundMessageWireTapTests
 
         var keyStore = new Mock<IPeerPublicSigningKeyStore>(MockBehavior.Strict);
 
+        var profileOrchestrationService = new Mock<Percolator.Application.Chat.IProfileOrchestrationService>(MockBehavior.Loose);
         var sut = new MessageService(
             NullLogger<MessageService>.Instance,
             sessions.Object,
             secure.Object,
             active,
             sender.Object,
-            tap);
+            tap,
+            profileOrchestrationService.Object);
 
         var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { TextMessage = new TextMessage { Content = "test" } } };
         var recipient = new Percolator.Identity.PeerId(Guid.NewGuid());

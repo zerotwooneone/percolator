@@ -26,10 +26,31 @@ service TransportService {
 
     // Reverse-signal handshake response delivery (inviter receives acceptor's response).
     rpc DeliverInviteHandshakeResponse(InviteHandshakeResponse) returns (DeliverInviteHandshakeResponseAck);
+
+    // Requests a delivery certificate from the relay for sealed sender authentication.
+    rpc GetDeliveryCertificate(GetDeliveryCertificateRequest) returns (GetDeliveryCertificateResponse);
 }
 
 message DeliverInviteHandshakeResponseAck {
     optional uint32 version = 1;
+}
+
+// Delivery certificate for sealed sender authentication
+message DeliveryCertificate {
+    optional uint32 version = 1;
+    optional bytes certificate_data = 2;
+    optional bytes signature = 3;
+}
+
+// Request to get a delivery certificate from the relay
+message GetDeliveryCertificateRequest {
+    optional uint32 version = 1;
+}
+
+// Response containing the delivery certificate
+message GetDeliveryCertificateResponse {
+    optional uint32 version = 1;
+    optional DeliveryCertificate certificate = 2;
 }
 
 // Represents the public cryptographic materials needed to establish a secure session.

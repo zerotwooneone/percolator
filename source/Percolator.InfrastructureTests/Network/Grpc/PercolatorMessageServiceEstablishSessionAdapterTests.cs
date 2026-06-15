@@ -19,6 +19,7 @@ public sealed class PercolatorMessageServiceEstablishSessionAdapterTests
         var ingress = Mock.Of<Percolator.Application.Ingress.IMessageIngress>();
         var establish = new Mock<Percolator.Application.Network.IEstablishDirectSessionService>(MockBehavior.Loose);
         var inviteIngress = Mock.Of<Percolator.Application.Network.IInviteHandshakeResponseIngress>();
+        var localIdentitySigner = Mock.Of<Percolator.Application.Chat.ILocalIdentitySigner>();
 
         var expected = new EstablishSessionResponse
         {
@@ -46,7 +47,7 @@ public sealed class PercolatorMessageServiceEstablishSessionAdapterTests
         {
             Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "t") { SelfIdentityId = new SelfId(1) }
         };
-        var sut = new PercolatorMessageService(logger, ingress, establish.Object, inviteIngress, standardIngress.Object, active);
+        var sut = new PercolatorMessageService(logger, ingress, establish.Object, inviteIngress, standardIngress.Object, active, localIdentitySigner);
 
         var ctx = new ServerCallContextStub(
             peer: "ipv4:127.0.0.1:7777",

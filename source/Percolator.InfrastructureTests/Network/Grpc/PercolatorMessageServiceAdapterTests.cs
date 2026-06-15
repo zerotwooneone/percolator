@@ -27,12 +27,13 @@ public class PercolatorMessageServiceAdapterTests
         var establish = Mock.Of<Percolator.Application.Network.IEstablishDirectSessionService>();
         var inviteIngress = Mock.Of<Percolator.Application.Network.IInviteHandshakeResponseIngress>();
         var standardIngress = Mock.Of<Percolator.Application.Network.IStandardHandshakeIngress>();
+        var localIdentitySigner = Mock.Of<Percolator.Application.Chat.ILocalIdentitySigner>();
 
         var active = new Percolator.Application.Identity.ActiveIdentityContext
         {
             Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "test") { SelfIdentityId = new Percolator.Identity.SelfId(1) }
         };
-        var sut = new PercolatorMessageService(logger, ingress.Object, establish, inviteIngress, standardIngress, active);
+        var sut = new PercolatorMessageService(logger, ingress.Object, establish, inviteIngress, standardIngress, active, localIdentitySigner);
 
         var request = new DeliverOpaqueMessageRequest
         {
@@ -82,12 +83,13 @@ public class PercolatorMessageServiceAdapterTests
             .ReturnsAsync(new RequestCorrelationId(Guid.NewGuid()));
         var inviteIngress = Mock.Of<Percolator.Application.Network.IInviteHandshakeResponseIngress>();
         var standardIngress = Mock.Of<Percolator.Application.Network.IStandardHandshakeIngress>();
+        var localIdentitySigner = Mock.Of<Percolator.Application.Chat.ILocalIdentitySigner>();
 
         var active = new Percolator.Application.Identity.ActiveIdentityContext
         {
             Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "test") { SelfIdentityId = new Percolator.Identity.SelfId(1) }
         };
-        var sut = new PercolatorMessageService(logger, ingress.Object, establish.Object, inviteIngress, standardIngress, active);
+        var sut = new PercolatorMessageService(logger, ingress.Object, establish.Object, inviteIngress, standardIngress, active, localIdentitySigner);
 
         var request = new DeliverOpaqueMessageRequest
         {

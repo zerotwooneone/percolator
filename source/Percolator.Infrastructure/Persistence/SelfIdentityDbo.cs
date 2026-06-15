@@ -13,6 +13,7 @@ public class SelfIdentityDbo
     public byte[]? ProfileNonce { get; set; }
     public byte[]? ProfileTag { get; set; }
     public int ProfileRevision { get; set; }
+    public byte[]? RelayDeliveryRootKey { get; set; }
 
     // Navigation to the associated keys record (one-to-one)
     public SelfIdentityKeysDbo? Keys { get; set; }

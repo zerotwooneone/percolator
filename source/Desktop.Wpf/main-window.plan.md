@@ -1,13 +1,13 @@
 
 ## Rules of Execution for AI Agents
 
-1. **File Locations & Namespaces:** 
+1. **File Locations & Namespaces:**
    - Persistence (DBOs): `Percolator.Infrastructure/Chat/Persistence`
    - Commands/Handlers: `Percolator.Application/Apps/Chat`
    - Interfaces/Queries (Contracts): `Percolator.Application/Chat`
    - Query Implementations: `Percolator.Infrastructure/Chat`
 2. **EF Migrations:** To generate migrations, use PowerShell and run: `dotnet ef migrations add <MigrationName> --project source\Percolator.Infrastructure --startup-project source\Percolator.Node`
-3. **WPF UI Targets:** 
+3. **WPF UI Targets:**
    - Group Action Menu (above chat): Modify `Desktop.Wpf/Features/Chat/ChatView.xaml`.
    - "Create Group" Tab & Multi-select: Modify `Desktop.Wpf/Features/Sessions/ConnectionManagementDialogWindow.xaml` and `ConnectionManagementDialogViewModel.cs`.
    - Pending Invites Display: Also modify `ConnectionManagementDialogWindow.xaml` / `ConnectionManagementDialogViewModel.cs`.
@@ -18,8 +18,9 @@
    - `FromBytes(byte[])` - safe copy, use when the array is not owned by the called code or could be mutated elsewhere (e.g., EF Core entities, protobuf messages)
    - `FromSpan(ReadOnlySpan<byte>)` - useful for copying one ByteArray type to another
 6. **PeerId:**
-   - PeerId is a GUID 
-   - PeerId is a local only identifier, it must NEVER be sent over the wire 
+   - PeerId is a GUID
+   - PeerId is a local only identifier, it must NEVER be sent over the wire
+7. **No Shims or Temporary Code:** Do not implement shims or temporary code that does not exist in the plan. Do not write methods that throw `new NotImplementedException` - instead stop and ask the user what should be done. Each chunk must implement zero guesses. 
 
 ---
 
@@ -194,11 +195,11 @@ The Goal: Establish a Micro-PKI for "Sealed Sender". The node acting as a Relay 
 Architectural Constraints (CRITICAL):
 * **Rule 6 Transport Adherence:** `PeerId` is a local-only database identifier and must NEVER be transmitted over the wire or included in unencrypted gRPC metadata headers. Clients must identify themselves to the relay using their wire-safe Public Key Hash (PKH) string token.
 * **Strict Clean Architecture & CQRS:** Infrastructure components (Interceptors, HostedServices, and gRPC endpoints) must be completely decoupled from data access entities. The Application layer must never see or interact with Database Objects (`PeerIdentityDbo`, `SelfIdentityDbo`). For read-only lookups where no state change occurs, use optimized query interfaces to bypass heavy domain repository and change-tracking overhead.
-* **No Shared Kernel (Local Primitives):** Avoid adding any NEW project dependencies. Duplicate required strongly-typed byte wrappers locally within the namespaces that execute them to preserve compile-time safety and boundary isolation.
+* **Dual-Algorithm Type Invariants:** The Relay Root Key utilizes Ed25519 for issuing standard wire-verifiable certificates. The Client-side Identity challenge utilizes the existing local NIST P-256 ECDsa key pair wrapped inside our established domain primitive types to completely ban raw `byte[]` arrays from application service interfaces.
 
 Implementation Requirements
 1. The Cryptography Domain (`Percolator.Cryptography`)
-* Define your type invariants locally within the cryptography boundary:
+* Ensure your type invariants are verified locally within the cryptography boundary:
   ```csharp
   namespace Percolator.Cryptography;
 
@@ -215,42 +216,92 @@ Implementation Requirements
 
 3. Application-Layer Authentication (The Server Auth Flow)
 * The Application Contract & Logic (`Percolator.Application/Chat`):
+    * Define application-scoped copies of the discovered primitives to isolate the application library layer:
+      ```csharp
+      namespace Percolator.Application.Chat;
+
+      [ByteArray(minLength: 64, maxLength: 200)] public partial record RatchetIdentityKey;
+      [ByteArray(minLength: 60, maxLength: 120)] public partial record Signature;
+      ```
     * Create `IPeerAuthenticationService` exposing the verification contract:
-      `Task<bool> AuthenticateDeliveryCertificateRequestAsync(string senderPkh, DateTimeOffset requestTimestamp, byte[] signature, CancellationToken ct);`
-    * **The Query Interface:** Introduce `public interface IPeerIdentityQueries { Task<byte[]?> GetPublicKeyByPkhAsync(string senderPkh, CancellationToken ct); }` inside `Percolator.Application/Chat` to separate concerns and optimize read performance.
-    * **Implementation:** `AuthenticateDeliveryCertificateRequestAsync` rejects immediately if `requestTimestamp` is older than 60 seconds (Replay attack prevention). It then invokes `_peerIdentityQueries.GetPublicKeyByPkhAsync(senderPkh, ct)`. The concrete query implementation inside `Percolator.Infrastructure` maps directly to `PeerIdentityDbo` using a fast, no-tracking (`AsNoTracking()`) SQL projection to extract the public identity key bytes, completely bypassing domain aggregate hydration.
-    * **Crypto Mapping:** Add `using Percolator.Cryptography;` to the implementation file. Wrap the retrieved raw bytes into `Percolator.Cryptography.Ed25519SignatureBytes` strictly within the internal execution boundary to perform the final cryptographic verification check.
+      `Task<bool> AuthenticateDeliveryCertificateRequestAsync(string senderPkh, DateTimeOffset requestTimestamp, Percolator.Application.Chat.Signature signature, CancellationToken ct);`
+    * **The Query Interface:** Introduce `public interface IPeerIdentityQueries { Task<Percolator.Application.Chat.RatchetIdentityKey?> GetPublicKeyByPkhAsync(string senderPkh, CancellationToken ct); }` inside `Percolator.Application/Chat` to separate concerns and optimize read performance.
+    * **Implementation:** `AuthenticateDeliveryCertificateRequestAsync` rejects immediately if `requestTimestamp` is older than 60 seconds (Replay attack prevention). It then invokes `_peerIdentityQueries.GetPublicKeyByPkhAsync(senderPkh, ct)`. The concrete query implementation inside `Percolator.Infrastructure` maps directly to `PeerIdentityDbo` using a fast, no-tracking (`AsNoTracking()`) SQL projection to pull row bytes and parse them safely using `Percolator.Application.Chat.RatchetIdentityKey.FromBytes()`.
+    * **ECDsa Verification Mapping:** The service instantiates an `ECDsa` public key context from the retrieved `RatchetIdentityKey` parameters and verifies the inbound `Signature` payload using `HashAlgorithmName.SHA256`.
 * The Interceptor (`Percolator.Infrastructure/Network/Grpc`):
     * Create `DeliveryCertificateAuthInterceptor : Interceptor`.
-    * Extract the string token from the `"x-percolator-sender-pkh"` metadata header along with the timestamp and signature bytes.
+    * Extract the string token from the `"x-percolator-sender-pkh"` metadata header along with the timestamp and signature bytes. Map the signature bytes using `Percolator.Application.Chat.Signature.FromBytes()`.
     * Call `IPeerAuthenticationService`. If it returns false, throw an `RpcException(StatusCode.Unauthenticated)`.
 
 4. Relay gRPC Service (`Percolator.Infrastructure` & `Percolator.Contracts`)
 * Protobuf (`messaging.proto`):
     * Define a `DeliveryCertificate` message containing `certificate_data` (bytes) and `signature` (bytes).
     * Add `rpc GetDeliveryCertificate(GetDeliveryCertificateRequest) returns (GetDeliveryCertificateResponse);` to `TransportService`.
-* Implementation (`PercolatorMessageService`):
-    * **The Query Interface:** Introduce `public interface ISelfIdentityQueries { Task<byte[]?> GetRelayRootKeyAsync(CancellationToken ct); }` inside `Percolator.Application/Chat`.
-    * Implement the endpoint. Inject `ISelfIdentityQueries` to safely pull the local node's routing parameters without mutating or tracking any domain structures, completely avoiding direct database access to `SelfIdentityDbo`.
+* **The Relay Cryptographic Signing Interface:** Define a secure signature delegation interface in `Percolator.Application/Chat` to isolate key material from the service project layer:
+  ```csharp
+  namespace Percolator.Application.Chat;
+
+  [ByteArray(length: 64)] public partial record Ed25519SignatureBytes;
+
+  public interface ILocalIdentitySigner
+  {
+      Task<Percolator.Application.Chat.Ed25519SignatureBytes> SignWithRelayRootKeyAsync(byte[] payload, CancellationToken ct);
+      Task<Percolator.Application.Chat.Signature> SignWithLocalIdentityKeyAsync(byte[] payload, CancellationToken ct);
+  }
+  ```
+* **Implementation (`PercolatorMessageService`):**
+    * Implement the endpoint. Inject `ILocalIdentitySigner` straight into the gRPC service constructor.
     * Construct the certificate payload bytes (containing the Relay's wire identity fingerprint and a 24-hour expiration counter).
-    * Convert the payload key to `Percolator.Cryptography.RelayRootKeyBytes` and utilize `IEd25519CryptographyService` to sign the payload. Return the response.
+    * **The Secure Sign Call:** Delegate the payload directly to the signer without inspecting raw keys:
+      `var signature = await _localIdentitySigner.SignWithRelayRootKeyAsync(certificatePayload, context.CancellationToken);`
+    * Package the raw bytes from `signature.ToBytes()` into `DeliveryCertificateResponse` and return.
+* **Infrastructure Backing (`Percolator.Infrastructure/Chat`):**
+    * Implement `LocalIdentitySigner` implementing `ILocalIdentitySigner`. Inject `IDbContextFactory<PercolatorDbContext>`.
+    * `SignWithRelayRootKeyAsync` opens a short-lived `using var db = _dbFactory.CreateDbContext();` context, projects strictly the un-tracked `RelayDeliveryRootKey` byte array from `SelfIdentityDbo`, instantiates `Percolator.Cryptography.RelayRootKeyBytes.FromBytesOwned()`, passes it into the static `Signal.Interop.SignalCrypto` Ed25519 signing engine, and returns the result parsed into `Percolator.Application.Chat.Ed25519SignatureBytes.FromBytesOwned()`.
+    * `SignWithLocalIdentityKeyAsync` retrieves the `ECDsa` parameters from the local `SelfIdentityKeysDbo`, invokes standard managed `.SignData()` using `SHA256`, and passes the signature back wrapped inside `Percolator.Application.Chat.Signature.FromBytesOwned()`.
 
 5. The Client Certificate Flow (The Rich Domain & Worker)
 * The Domain Concept (`Percolator.Application.Chat`):
     * Define local primitives to isolate the client tracking space:
       `[ByteArray(minLength: 1, maxLength: 2048)] public partial record DeliveryCertificatePayloadBytes;`
-    * Define a rich domain record: `public record DeliveryCertificate(DeliveryCertificatePayloadBytes SerializedPayload, DateTimeOffset ExpiresAt);`.
+    * Define a rich domain record: `public record DeliveryCertificate(DeliveryCertificatePayloadBytes Payload, Percolator.Cryptography.Signature Signature, DateTimeOffset ExpiresAt);`.
     * Define an interface `IDeliveryCertificateStore` to hold this singleton in memory securely using a thread-safe lock pattern.
+* **The Application Transport Abstraction (`Percolator.Application/Chat`):**
+    * To prevent connection logic from bleeding into core workflows, define an application-layer endpoint gateway:
+      ```csharp
+      namespace Percolator.Application.Chat;
+
+      public interface IRelayTransportClient
+      {
+          Task<DeliveryCertificate> FetchCertificateAsync(
+              string targetHost, 
+              int targetPort, 
+              string senderPkh, 
+              DateTimeOffset timestamp, 
+              Percolator.Cryptography.Signature signature, 
+              CancellationToken ct);
+      }
+      ```
 * The Orchestrator (`Percolator.Application/Apps/Chat`):
     * Create `ICertificateOrchestrator` with `Task RefreshLocalCertificateAsync(CancellationToken ct);`.
-    * **Implementation:** Generate current UTC timestamp. Ask the local identity infrastructure layer to sign the combination payload `[LocalPKH + Timestamp]` using the private key. Call the target Relay's `GetDeliveryCertificate` gRPC endpoint over the transport pipeline. Parse the response into the rich `DeliveryCertificate` record, extract the expiration metadata, and save it to `IDeliveryCertificateStore`.
+    * **Implementation:** 1. **Resolve Relay Destination:** Inject `IRelayTopology` and `IPeerRoutingProfileRepository`. Call the topology layer to resolve the designated relay peer, use the repository to extract its active endpoint network profile, and pull the target host string and port integer.
+        2. **Generate Signature Challenge:** Generate the current UTC timestamp. Extract the cryptographic public key hash fingerprint token using `selfIdentity.GetActiveKey(timestamp).Fingerprint` (Rule 6 compliance). Convert to base64 string and combine with timestamp into a uniform byte buffer challenge payload. Inject `ILocalIdentitySigner` and invoke `await _localIdentitySigner.SignWithLocalIdentityKeyAsync(combinedPayload, ct);` to securely sign the payload.
+        3. **Execute Transport Call:** Inject `IRelayTransportClient`. Call `await _relayTransportClient.FetchCertificateAsync(host, port, localPkh, timestamp, signature, ct);`.
+        4. **Store Result:** The transport client returns a rich `DeliveryCertificate` domain record. Save it to `IDeliveryCertificateStore`.
+* **The Gateway Implementation (`Percolator.Infrastructure/Network/Grpc`):**
+    * Implement `RelayTransportClient` inheriting from `IRelayTransportClient`.
+    * Inject `IPeerGrpcChannelFactory` into the constructor.
+    * **Call Execution:** Follow the codebase connection pool pattern. Instantiate `var channel = _channelFactory.CreateChannel(new DnsEndPoint(targetHost, targetPort));` and wrap it inside a temporary `var client = new TransportService.TransportServiceClient(channel);`.
+    * **Metadata Header Mapping:** Construct a new gRPC `Metadata` block. Append the challenge parameters as strings/binary data frames matching the contract specs. Dispatch the request using a constructed `CallOptions` block containing the metadata and the cancellation token to call `await client.GetDeliveryCertificateAsync(new GetDeliveryCertificateRequest(), callOptions);`.
+    * **Response Parsing:** Parse the protobuf response directly into rich domain types using `DeliveryCertificatePayloadBytes.FromBytes()` and `Signature.FromBytes()`. Read expiration invariants directly from the domain concept wrapper using `payload.Span.Slice(16, 8)`. Return the constructed `DeliveryCertificate` domain record.
 * The Background Worker (`Percolator.Infrastructure/Chat`):
     * Implement `DeliveryCertificateRefreshWorker : IHostedService`.
     * **Logic:** Hook cleanly into `IHostApplicationLifetime.ApplicationStarted`. Run an asynchronous processing loop bounded by the cancellation token. Inside the loop, create an `AsyncServiceScope`, resolve `ICertificateOrchestrator`, and invoke `RefreshLocalCertificateAsync()`. Await `Task.Delay(TimeSpan.FromHours(20), ct);` to trigger updates reliably before the 24-hour expiration window closes.
 
 **Testing Requirements (Chunk 3):**
 - `PeerAuthenticationService_AuthenticateDeliveryCertificateRequest_ReturnsFalse_WhenTimestampIsExpired` - Test that AuthenticateDeliveryCertificateRequestAsync returns false when the request timestamp is older than 60 seconds.
-- `SealedSenderAuthenticationRoundTrip_ClientSignedRequest_ValidatedByPeerAuthenticationService` - Integration test that a client-signed certificate request payload is successfully validated by PeerAuthenticationService when mapped cleanly using a wire-safe Public Key Hash (PKH) lookup token.
+- `PeerAuthenticationService_AuthenticateDeliveryCertificateRequest_ReturnsFalse_WhenPeerNotFound` - Test that AuthenticateDeliveryCertificateRequestAsync returns false when the peer PKH lookup returns null.
+- `AuthenticateDeliveryCertificateRequest_DoesNotThrow_WhenAllInputsAreValid` - Test that the authentication flow doesn't throw exceptions when provided with valid inputs (PKH, timestamp, signature). Note: This tests the flow, not cryptographic correctness (which belongs in integration tests).
 
 ---
 

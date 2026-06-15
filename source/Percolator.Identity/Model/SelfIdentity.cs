@@ -14,6 +14,7 @@ public sealed class SelfIdentity
     public ProfileKeyBytes? CurrentProfileKey { get; private set; }
     public ProfileCiphertextPackage? CurrentProfileCiphertext { get; private set; }
     public int ProfileRevision { get; private set; }
+    public Percolator.Identity.RelayRootKeyBytes? RelayDeliveryRootKey { get; private set; }
 
     public SelfIdentity(SelfId id, PeerId peerId, ListeningPort listeningPort)
     {
@@ -51,5 +52,10 @@ public sealed class SelfIdentity
         CurrentProfileKey = newKey;
         CurrentProfileCiphertext = payload;
         ProfileRevision++;
+    }
+
+    public void EnableRelayMode(Percolator.Identity.RelayRootKeyBytes rootKey)
+    {
+        RelayDeliveryRootKey = rootKey;
     }
 }
