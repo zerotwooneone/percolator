@@ -220,6 +220,7 @@ public class PercolatorDbContext : DbContext
             entity.HasIndex(e => e.Name).IsUnique();
             entity.HasIndex(e => e.PeerId); // non-unique
             entity.HasIndex(e => e.LastUsedUtc);
+            entity.HasIndex(e => e.ActiveIdentityKeyFingerprint); // index for fast fingerprint lookup
         });
 
         // SelfIdentityKeys (one-to-one with SelfIdentity)

@@ -21,6 +21,7 @@ public class PercolatorMessageService : TransportService.TransportServiceBase
     private readonly IStandardHandshakeIngress _standardHandshakeIngress;
     private readonly ActiveIdentityContext _active;
     private readonly ILocalIdentitySigner _localIdentitySigner;
+    private readonly ISelfIdentityQueries _selfIdentityQueries;
 
     public PercolatorMessageService(
         ILogger<PercolatorMessageService> logger,
@@ -29,7 +30,8 @@ public class PercolatorMessageService : TransportService.TransportServiceBase
         IInviteHandshakeResponseIngress inviteHandshakeResponseIngress,
         IStandardHandshakeIngress standardHandshakeIngress,
         ActiveIdentityContext active,
-        ILocalIdentitySigner localIdentitySigner)
+        ILocalIdentitySigner localIdentitySigner,
+        ISelfIdentityQueries selfIdentityQueries)
     {
         _logger = logger;
         _messageIngress = messageIngress;
@@ -38,6 +40,7 @@ public class PercolatorMessageService : TransportService.TransportServiceBase
         _standardHandshakeIngress = standardHandshakeIngress;
         _active = active;
         _localIdentitySigner = localIdentitySigner;
+        _selfIdentityQueries = selfIdentityQueries;
     }
 
     public override Task<EstablishSessionResponse> EstablishSession(EstablishSessionRequest request, ServerCallContext context)
@@ -189,11 +192,18 @@ public class PercolatorMessageService : TransportService.TransportServiceBase
             throw new RpcException(new Status(StatusCode.FailedPrecondition, "Active identity not loaded."));
         }
 
-        // Construct the certificate payload (relay fingerprint + 24-hour expiration)
+        // Get the cryptographic fingerprint (Rule 6 compliance - use PKH, not PeerId)
+        var fingerprint = await _selfIdentityQueries.GetActiveIdentityFingerprintAsync(context.CancellationToken);
+        if (fingerprint is null)
+        {
+            throw new RpcException(new Status(StatusCode.FailedPrecondition, "No active identity key fingerprint found."));
+        }
+
+        // Construct the certificate payload (32-byte fingerprint + 8-byte expiration timestamp)
         var expiration = DateTimeOffset.UtcNow.AddHours(24);
-        var payload = new byte[24]; // 16 bytes PeerId (Guid) + 8 bytes expiration timestamp
-        Buffer.BlockCopy(_active.Identity.PeerId.Value.ToByteArray(), 0, payload, 0, 16);
-        Buffer.BlockCopy(BitConverter.GetBytes(expiration.ToUnixTimeSeconds()), 0, payload, 16, 8);
+        var payload = new byte[40]; // 32 bytes fingerprint + 8 bytes expiration timestamp
+        fingerprint.Span.CopyTo(payload.AsSpan(0, 32));
+        System.Buffers.Binary.BinaryPrimitives.WriteInt64BigEndian(payload.AsSpan(32, 8), expiration.ToUnixTimeSeconds());
 
         // Delegate the payload directly to the signer without inspecting raw keys
         var signature = await _localIdentitySigner.SignWithRelayRootKeyAsync(payload, context.CancellationToken);

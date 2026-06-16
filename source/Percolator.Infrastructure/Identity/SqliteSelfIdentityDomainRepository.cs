@@ -51,12 +51,15 @@ public sealed class SqliteSelfIdentityDomainRepository : ISelfIdentityRepository
             throw new InvalidOperationException("CreateAsync requires identity.Id to be 0 (unsaved).");
         }
 
+        var activeKey = identity.GetActiveKey(DateTimeOffset.UtcNow);
         var dbo = new SelfIdentityDbo
         {
             PeerId = identity.PeerId.Value,
             Name = identity.DisplayName?.Value ?? string.Empty,
             LastUsedUtc = identity.LastUsedUtc,
-            ListeningPort = identity.ListeningPort.Value
+            ListeningPort = identity.ListeningPort.Value,
+            ActiveIdentityKeySpki = activeKey?.Spki,
+            ActiveIdentityKeyFingerprint = activeKey?.Fingerprint
         };
         _db.SelfIdentities.Add(dbo);
         await _db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -77,12 +80,15 @@ public sealed class SqliteSelfIdentityDomainRepository : ISelfIdentityRepository
             if (dbo is null)
             {
                 // Upsert semantics: create if missing
+                var activeKey = identity.GetActiveKey(DateTimeOffset.UtcNow);
                 dbo = new SelfIdentityDbo
                 {
                     Id = identity.Id.Value,
                     PeerId = identity.PeerId.Value,
                     Name = identity.DisplayName?.Value ?? string.Empty,
-                    LastUsedUtc = identity.LastUsedUtc
+                    LastUsedUtc = identity.LastUsedUtc,
+                    ActiveIdentityKeySpki = activeKey?.Spki,
+                    ActiveIdentityKeyFingerprint = activeKey?.Fingerprint
                 };
                 _db.SelfIdentities.Add(dbo);
             }
@@ -97,6 +103,11 @@ public sealed class SqliteSelfIdentityDomainRepository : ISelfIdentityRepository
                 dbo.ProfileNonce = identity.CurrentProfileCiphertext?.Nonce.Span.ToArray();
                 dbo.ProfileTag = identity.CurrentProfileCiphertext?.Tag.Span.ToArray();
                 dbo.ProfileRevision = identity.ProfileRevision;
+                
+                // Synchronize fingerprint whenever aggregate is saved
+                var activeKey = identity.GetActiveKey(DateTimeOffset.UtcNow);
+                dbo.ActiveIdentityKeySpki = activeKey?.Spki;
+                dbo.ActiveIdentityKeyFingerprint = activeKey?.Fingerprint;
             }
             await _db.SaveChangesAsync(ct).ConfigureAwait(false);
         }

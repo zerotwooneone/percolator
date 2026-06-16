@@ -1,6 +1,8 @@
+using Percolator.Cryptography;
+
 namespace Percolator.Application.Chat;
 
 public interface ISelfIdentityQueries
 {
-    Task<byte[]?> GetRelayRootKeyAsync(CancellationToken ct);
+    Task<RatchetIdentityKey?> GetActiveIdentityFingerprintAsync(CancellationToken ct);
 }

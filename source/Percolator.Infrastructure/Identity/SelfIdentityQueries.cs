@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Percolator.Application.Chat;
+using Percolator.Cryptography;
 using Percolator.Infrastructure.Persistence;
 
 namespace Percolator.Infrastructure.Identity;
@@ -13,17 +14,15 @@ public sealed class SelfIdentityQueries : ISelfIdentityQueries
         _dbFactory = dbFactory;
     }
 
-    public async Task<byte[]?> GetRelayRootKeyAsync(CancellationToken ct)
+    public async Task<RatchetIdentityKey?> GetActiveIdentityFingerprintAsync(CancellationToken ct)
     {
         using var db = _dbFactory.CreateDbContext();
-        
-        // Use AsNoTracking() for fast, no-tracking SQL projection
-        var rootKey = await db.SelfIdentities
+        var bytes = await db.SelfIdentities
             .AsNoTracking()
-            .Where(x => x.RelayDeliveryRootKey != null)
-            .Select(x => x.RelayDeliveryRootKey)
+            .Where(x => x.ActiveIdentityKeyFingerprint != null)
+            .Select(x => x.ActiveIdentityKeyFingerprint)
             .FirstOrDefaultAsync(ct);
 
-        return rootKey;
+        return bytes is null ? null : RatchetIdentityKey.FromBytes(bytes);
     }
 }

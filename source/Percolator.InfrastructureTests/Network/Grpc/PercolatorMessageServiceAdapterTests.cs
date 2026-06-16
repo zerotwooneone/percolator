@@ -28,12 +28,13 @@ public class PercolatorMessageServiceAdapterTests
         var inviteIngress = Mock.Of<Percolator.Application.Network.IInviteHandshakeResponseIngress>();
         var standardIngress = Mock.Of<Percolator.Application.Network.IStandardHandshakeIngress>();
         var localIdentitySigner = Mock.Of<Percolator.Application.Chat.ILocalIdentitySigner>();
+        var selfIdentityQueries = Mock.Of<Percolator.Application.Chat.ISelfIdentityQueries>();
 
         var active = new Percolator.Application.Identity.ActiveIdentityContext
         {
             Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "test") { SelfIdentityId = new Percolator.Identity.SelfId(1) }
         };
-        var sut = new PercolatorMessageService(logger, ingress.Object, establish, inviteIngress, standardIngress, active, localIdentitySigner);
+        var sut = new PercolatorMessageService(logger, ingress.Object, establish, inviteIngress, standardIngress, active, localIdentitySigner, selfIdentityQueries);
 
         var request = new DeliverOpaqueMessageRequest
         {
@@ -84,12 +85,13 @@ public class PercolatorMessageServiceAdapterTests
         var inviteIngress = Mock.Of<Percolator.Application.Network.IInviteHandshakeResponseIngress>();
         var standardIngress = Mock.Of<Percolator.Application.Network.IStandardHandshakeIngress>();
         var localIdentitySigner = Mock.Of<Percolator.Application.Chat.ILocalIdentitySigner>();
+        var selfIdentityQueries = Mock.Of<Percolator.Application.Chat.ISelfIdentityQueries>();
 
         var active = new Percolator.Application.Identity.ActiveIdentityContext
         {
             Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "test") { SelfIdentityId = new Percolator.Identity.SelfId(1) }
         };
-        var sut = new PercolatorMessageService(logger, ingress.Object, establish.Object, inviteIngress, standardIngress, active, localIdentitySigner);
+        var sut = new PercolatorMessageService(logger, ingress.Object, establish.Object, inviteIngress, standardIngress, active, localIdentitySigner, selfIdentityQueries);
 
         var request = new DeliverOpaqueMessageRequest
         {
