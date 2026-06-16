@@ -119,6 +119,16 @@ public void Calculate_GivenMultipleItems_ReturnsSumOfPrices()
 
 ---
 
+## 4. The Determinism Rule (Time & Randomness)
+
+Tests must be 100% deterministic. They should never fail due to environmental factors like execution speed, CPU load, timezone differences, or the current clock time.
+
+*   **NEVER** use `DateTime.UtcNow`, `DateTime.Now`, `DateTimeOffset.UtcNow`, or `new Random()` inside your tests.
+*   **ALWAYS** use hard-coded, arbitrary values (e.g., `new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero)`) for time inputs and setups.
+*   When testing services that require the current time, ensure the System Under Test (SUT) relies on an injected abstraction (like .NET 8's `TimeProvider`) rather than calling `DateTimeOffset.UtcNow` directly. In your tests, you can then inject a mocked or fake time provider that returns your hard-coded arbitrary time.
+
+---
+
 ## 5. Summary Checklist for AI Generation
 
 Before finalizing code generation, verify:
