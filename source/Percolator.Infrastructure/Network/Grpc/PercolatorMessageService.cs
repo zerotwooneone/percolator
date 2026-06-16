@@ -199,11 +199,9 @@ public class PercolatorMessageService : TransportService.TransportServiceBase
             throw new RpcException(new Status(StatusCode.FailedPrecondition, "No active identity key fingerprint found."));
         }
 
-        // Construct the certificate payload (32-byte fingerprint + 8-byte expiration timestamp)
+        // Construct the certificate payload using the wire formatter
         var expiration = DateTimeOffset.UtcNow.AddHours(24);
-        var payload = new byte[40]; // 32 bytes fingerprint + 8 bytes expiration timestamp
-        fingerprint.Span.CopyTo(payload.AsSpan(0, 32));
-        System.Buffers.Binary.BinaryPrimitives.WriteInt64BigEndian(payload.AsSpan(32, 8), expiration.ToUnixTimeSeconds());
+        var payload = Percolator.Application.Chat.DeliveryCertificateWireFormatter.Pack(fingerprint.Span, expiration);
 
         // Delegate the payload directly to the signer without inspecting raw keys
         var signature = await _localIdentitySigner.SignWithRelayRootKeyAsync(payload, context.CancellationToken);

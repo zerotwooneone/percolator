@@ -58,9 +58,8 @@ public sealed class RelayTransportClient : IRelayTransportClient
         var payload = DeliveryCertificatePayloadBytes.FromBytes(certificateData);
         var relaySig = Signature.FromBytes(response.Certificate.Signature.ToByteArray());
 
-        // Read expiration invariants directly from the domain concept wrapper
-        // Payload is now 40 bytes: 32-byte fingerprint + 8-byte expiration timestamp
-        var expiresAt = DateTimeOffset.FromUnixTimeSeconds(BitConverter.ToInt64(payload.Span.Slice(32, 8)));
+        // Safe extraction with guaranteed bounds checking
+        var expiresAt = Percolator.Application.Chat.DeliveryCertificateWireFormatter.ExtractExpiration(payload.Span);
 
         return new Percolator.Chat.DeliveryCertificate(payload, relaySig, expiresAt);
     }
