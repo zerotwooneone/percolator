@@ -28,11 +28,17 @@
 
 **Design** Group messaging will be implemented very similar to the Signal protocol. However, as this is a peer to peer application the user must choose a single relay to host the group conversation when the group is created. All group members will need to establish a 1:1 session with the relay before they can participate in the group conversation. The relay maintains the group state - but that state is opaque to the relay.
 
-## Chunk 1
+## Chunk 1 ✅ COMPLETE
 Feature Implementation Request: Signal Protocol Chunk 1 (Identity, Profile Keys & Device IDs)
 You are to implement Chunk 1 of our Signal Protocol integration for Percolator, a C# .NET 9 application built on a strict, "Shared Nothing" Modular Monolith architecture.
 
 The Goal: Establish the local user's primary device identity, generate a 32-byte symmetric profile key, use it to encrypt the local user's Display Name, and transmit it over our existing 1:1 Double Ratchet channel.
+
+**IMPLEMENTATION NOTES:**
+- **Identity Domain:** Implemented `DeviceId`, `ProfileKeyBytes`, `EncryptedProfileDataBytes`, and `ProfileCiphertextPackage` primitives. Added `DeviceId`, `CurrentProfileKey`, `CurrentProfileCiphertext`, and `ProfileRevision` to `SelfIdentity` entity with `CommitProfileUpdate` state transition method.
+- **Cryptography Domain:** Implemented local primitives and `IProfileCryptographyService` with `EncryptData` and `DecryptData` methods using AES-GCM.
+- **Persistence:** Updated `SelfIdentityDbo` and `PeerIdentityDbo` with profile-related columns. Updated `ChatEnvelope` protobuf with profile fields.
+- **Application Orchestration:** Implemented `IProfileOrchestrationService` with `UpdateLocalProfileAsync`, `AttachProfileDataIfRequiredAsync`, and `ProcessInboundProfileDataAsync` methods. Integrated with `MessageService` and `ProcessInternalEnvelopeHandler`.
 
 Architectural Constraints (CRITICAL):
 
@@ -128,11 +134,17 @@ Integration: Show how MessageService and ProcessInternalEnvelopeHandler inject a
 
 **Note:** Round-trip integration tests should be implemented in their respective domain unit test projects (e.g., Percolator.CryptographyTests, Percolator.InfrastructureTests), NOT in the ApplicationIntegrationTests project.
 ---
-## Chunk 2
+## Chunk 2 ✅ COMPLETE
 ### Feature Implementation Request: Signal Protocol Chunk 2 (FFI Direct Interop Bridge via DbContextFactory)
 You are to implement Chunk 2 of our Signal Protocol integration for Percolator, a C# .NET 9 application built on a strict Modular Monolith architecture.
 
 The Goal: Build a clean, synchronous interop bridge (`SenderKeyInteropBridge`) that allows the managed cryptographic layer to query and persist unmanaged Sender Key states directly against our SQLite database using an `IDbContextFactory<PercolatorDbContext>`.
+
+**IMPLEMENTATION NOTES:**
+- **Cryptography Primitives:** Implemented `DeviceId`, `PeerId`, `ConversationId` primitives in `Percolator.Cryptography.Primitives` and `SenderKeyRecordBytes` in the main namespace.
+- **Interop Bridge Contract:** Defined `ISenderKeyInteropBridge` with `TryLoadSenderKey` and `StoreSenderKey` methods using cryptography domain primitives.
+- **Persistence:** Created `SenderKeyRecordDbo` with composite primary key (ConversationId, SenderPeerId, DeviceId). Registered `DbSet<SenderKeyRecordDbo>` in `PercolatorDbContext` with explicit fluent mapping.
+- **Bridge Implementation:** Implemented `SenderKeyInteropBridge` in `Percolator.Infrastructure.Chat` using `IDbContextFactory<PercolatorDbContext>` for isolated transactions. Implemented synchronous upsert logic for `StoreSenderKey` and composite key lookup for `TryLoadSenderKey`.
 
 Architectural Constraints (CRITICAL):
 * **SafeHandle Native Resource Management:** Follow the established codebase pattern utilizing direct static method calls to `Signal.Interop.SignalCrypto` backed by custom `SafeHandle` classes (e.g., `GroupMasterKeySafeHandle`). Do not introduce delegate pinning, `GCHandle`, or raw function pointer VTables.
@@ -186,11 +198,27 @@ Implementation Requirements
 - `SenderKeyInteropBridge_TryLoadSenderKey_ReturnsFalse_WhenRecordIsMissing` - Unit test in Percolator.InfrastructureTests that TryLoadSenderKey returns false when the requested record does not exist in the database
 - `SenderKeyStatePersistenceRoundTrip_StoreThenLoad_MatchesOriginalBytes` - Integration test in Percolator.InfrastructureTests that a native ratchet state byte array saved via StoreSenderKey using a full composite key (ConversationId, PeerId, uint deviceId) matches the byte array returned by a subsequent TryLoadSenderKey call
 ---
-## Chunk 3
+
+## Chunk 3 ✅ COMPLETE
 Feature Implementation Request: Signal Protocol Chunk 3 (Micro-PKI & Sealed Sender)
 You are to implement Chunk 3 of our Signal Protocol integration for Percolator, a C# .NET 9 application built on a strict, "Shared Nothing" Modular Monolith architecture.
 
 The Goal: Establish a Micro-PKI for "Sealed Sender". The node acting as a Relay must securely generate and store an Ed25519 Root Key. Clients must securely authenticate over a standard TLS connection using cryptographic header signatures to request a short-lived DeliveryCertificate.
+
+**IMPLEMENTATION NOTES:**
+- **Wire Format Abstraction:** Implemented `DeliveryCertificateWireFormatter` to encapsulate the strict 40-byte wire layout (32-byte fingerprint + 8-byte Big-Endian expiration timestamp) with bounds checking and unit tests.
+- **Endianness Fix:** Corrected `RelayTransportClient` to use `BinaryPrimitives.ReadInt64BigEndian` instead of `BitConverter.ToInt64` to match the server's Big-Endian encoding.
+- **Time Determinism:** Refactored `PeerAuthenticationService` to inject `TimeProvider` for deterministic CI/CD testing. All unit tests now use hard-coded arbitrary timestamps.
+- **Aggregate Hydration Fix:** Fixed critical data-loss bug in `SqliteSelfIdentityDomainRepository.Map` to rehydrate `ActiveIdentityKeySpki` from the database.
+- **Key Generation Fix:** Fixed `IdentityOrchestrator.ResolveIdentityAsync` to attach newly generated keys to the domain aggregate and persist them, preventing `ActiveIdentityKeyFingerprint` erasure.
+- **Unit Test Coverage:** Added comprehensive tests for `DeliveryCertificateWireFormatter`, `PeerAuthenticationService`, and `SelfIdentityDomainRepository` round-trip verification.
+
+**NOT IMPLEMENTED (De-scoped):**
+- Ed25519 native interop layer (RelayRootKeyBytes, IEd25519CryptographyService) - deferred to Chunk 4
+- SelfIdentity.EnableRelayMode and RelayRootKeyBytes persistence - deferred to Chunk 4
+- IRelayTransportClient abstraction - implemented directly in CertificateOrchestrator
+- DeliveryCertificateRefreshWorker background service - deferred to Chunk 4
+- IDeliveryCertificateStore in-memory singleton - implemented directly in CertificateOrchestrator
 
 Architectural Constraints (CRITICAL):
 * **Rule 6 Transport Adherence:** `PeerId` is a local-only database identifier and must NEVER be transmitted over the wire or included in unencrypted gRPC metadata headers. Clients must identify themselves to the relay using their wire-safe Public Key Hash (PKH) string token.
@@ -305,7 +333,57 @@ Implementation Requirements
 
 ---
 
-## Chunk 4
+## Chunk 3.1
+### Feature Implementation Request: Signal Protocol Chunk 3.1 (Micro-PKI Primitives & Refresh Worker)
+You are to implement Chunk 3.1 of our Signal Protocol integration for Percolator, a C# .NET 9 application built on a strict, "Shared Nothing" Modular Monolith architecture.
+
+The Goal: Complete the Micro-PKI infrastructure that was de-scoped from Chunk 3. This includes implementing the Ed25519 native interop wrappers, saving the Relay Root Key into the persistence layer, and building the background worker that proactively refreshes the local delivery certificate.
+
+Architectural Constraints (CRITICAL):
+* **No Raw Byte Arrays in Service Contracts:** The Application layer must use fully-qualified domain primitive types (e.g., `RelayRootKeyBytes`, `Ed25519SignatureBytes`). 
+* **SafeHandle Native Resource Management:** Follow the established codebase pattern utilizing direct static method calls to `Signal.Interop.SignalCrypto`. The Ed25519 static methods (`GenerateEd25519KeyPair`, `Ed25519Sign`, `Ed25519Verify`) are available in the interop library.
+* **Background Processing:** The certificate refresh worker must run independently of the gRPC request pipeline and handle transient errors gracefully.
+
+Implementation Requirements
+
+1. The Cryptography Domain (`Percolator.Cryptography`)
+* Note that `Ed25519PublicKeyBytes` and `Ed25519SignatureBytes` already exist.
+* The current `IEd25519CryptographyService` and `Ed25519CryptographyService` incorrectly use `ECDiffieHellman` and `ECDsa.Create()` to try and simulate Ed25519. This is wrong. You must completely replace the implementation of `Ed25519CryptographyService`.
+* Update `IEd25519CryptographyService` to the following contract:
+  ```csharp
+  public interface IEd25519CryptographyService
+  {
+      void GenerateKeyPair(out RelayRootKeyBytes privateKey, out Ed25519PublicKeyBytes publicKey);
+      Ed25519SignatureBytes Sign(ReadOnlySpan<byte> message, RelayRootKeyBytes privateKey);
+      bool Verify(Ed25519PublicKeyBytes publicKey, ReadOnlySpan<byte> message, Ed25519SignatureBytes signature);
+  }
+  ```
+* Implement `Ed25519CryptographyService` using the static methods on `Signal.Interop.SignalCrypto` (`GenerateEd25519KeyPair`, `Ed25519Sign`, `Ed25519Verify`). Note that these methods take `Span<byte>` and `ReadOnlySpan<byte>`, so you will need to allocate arrays, call the interop method, and then wrap the results in the domain primitive types using `FromBytesOwned()`.
+* Add `RelayRootKeyBytes` as a new local primitive in `Percolator.Cryptography`: `[ByteArray(length: 32)] public sealed partial record RelayRootKeyBytes;`. Note that this name implies the private key in this context.
+
+2. Identity Domain & Persistence (`Percolator.Identity` & `Percolator.Infrastructure`)
+* The `RelayRootKeyBytes` primitive already exists in `Percolator.Identity`.
+* The `SelfIdentity` aggregate already has `RelayDeliveryRootKey` and `EnableRelayMode`.
+* The `SelfIdentityDbo` already has `RelayDeliveryRootKey`.
+* **Fix the bug in `SqliteSelfIdentityDomainRepository.cs`**: Inside the `SaveAsync` method, the `RelayDeliveryRootKey` is not currently being synchronized from the aggregate `self` to the tracked entity `current`. You must map `current.RelayDeliveryRootKey = self.RelayDeliveryRootKey?.ToArray();`.
+* **Fix the bug in `SqliteSelfIdentityDomainRepository.cs`**: Inside the `Map` method, the `RelayDeliveryRootKey` is not currently being rehydrated from the database onto the aggregate. If `dbo.RelayDeliveryRootKey` is not null, call `aggregate.EnableRelayMode(Percolator.Identity.RelayRootKeyBytes.FromSpan(dbo.RelayDeliveryRootKey));` after `GetKeys` is populated.
+
+3. Background Certificate Refresh Worker (`Percolator.Infrastructure/Chat`)
+* The `DeliveryCertificateRefreshWorker` file exists but it does not execute `RefreshLocalCertificateAsync` immediately on application startup, it waits 20 hours. 
+* We need the worker to attempt to fetch a certificate immediately when it starts, so that a fresh boot of the application will authenticate with the relay.
+* Modify `RunRefreshLoopAsync` to:
+  1. Attempt to refresh the certificate using the `ICertificateOrchestrator` inside a `try/catch`.
+  2. If successful, delay for 20 hours (`Task.Delay(TimeSpan.FromHours(20), ct)`).
+  3. If an exception is thrown, log it and delay for 5 minutes (`Task.Delay(TimeSpan.FromMinutes(5), ct)`).
+  4. Ensure the loop continues running.
+
+**Testing Requirements (Chunk 3.1):**
+- `Ed25519CryptographyService_GenerateKeyPair_CreatesValidKeys` - Test that `GenerateKeyPair` returns non-null, correctly sized primitive byte arrays that are not all zeros.
+- `Ed25519CryptographyService_SignAndVerify_RoundTripsSuccessfully` - Test that signing a byte array with a generated private key and verifying it with the corresponding public key returns true.
+- `Ed25519CryptographyService_Verify_ReturnsFalse_ForInvalidSignature` - Test that verification returns false when the signature is tampered with.
+- `SelfIdentityDomainRepository_RelayMode_PersistsAndRehydrates` - Add a test (similar to `Save_and_GetById_round_trips_ActiveIdentityKeySpki`) in `SelfIdentityDomainRepositoryTests.cs` to ensure that calling `EnableRelayMode` correctly saves the `RelayRootKeyBytes` to the SQLite database and rehydrates it upon load.
+
+---
 ### Feature Implementation Request: Signal Protocol Chunk 4 (Relay Encrypted Ledger)
 You are to implement Chunk 4 of our Signal Protocol Group V2 integration for Percolator, a C# .NET 9 application built on a strict, "Shared Nothing" Modular Monolith architecture.
 
