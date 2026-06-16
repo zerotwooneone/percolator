@@ -137,6 +137,16 @@ public sealed class SqliteSelfIdentityDomainRepository : ISelfIdentityRepository
             profileCiphertextField?.SetValue(self, package);
             profileRevisionField?.SetValue(self, dbo.ProfileRevision);
         }
+
+        // Rehydrate the aggregate's internal key list from the persisted SPKI column
+        if (dbo.ActiveIdentityKeySpki != null && dbo.ActiveIdentityKeySpki.Length > 0)
+        {
+            self.AddKey(
+                spki: dbo.ActiveIdentityKeySpki, 
+                notBefore: DateTimeOffset.MinValue, 
+                expiresAt: DateTimeOffset.MaxValue, 
+                now: DateTimeOffset.UtcNow);
+        }
         
         return self;
     }

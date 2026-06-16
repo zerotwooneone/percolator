@@ -52,6 +52,11 @@ public class IdentityOrchestrator : IIdentityOrchestrator
             keys = new X3dhKeys(ikSigning, spk);
             await _keysStore.SaveAsync(selfId, keys, cancellationToken).ConfigureAwait(false);
             _logger.LogInformation("Generated and saved new X3DH keys for identity {IdentityName} (SelfIdentityId={SelfIdentityId})", dto.DisplayName, selfId);
+
+            // Extract the public SPKI bytes and update the domain aggregate to trigger persistence sync
+            var spki = ikSigning.PublicKey.ExportSubjectPublicKeyInfo();
+            dto.AddKey(spki, DateTimeOffset.UtcNow, DateTimeOffset.MaxValue, DateTimeOffset.UtcNow);
+            await _selfIdentityRepository.SaveAsync(dto, cancellationToken).ConfigureAwait(false);
         }
         else
         {
