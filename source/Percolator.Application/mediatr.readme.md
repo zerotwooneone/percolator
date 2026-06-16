@@ -50,15 +50,7 @@ These represent a clear application intent and keep identity scoping explicit.
 
 ## Query guidelines
 
-Prefer **query interfaces** when:
-
-- The query is a persistence-backed read that returns an immutable read model.
-- You want the call site to be explicit about dependencies and performance.
-
-Use MediatR for queries when:
-
-- The query is an application use case that must orchestrate multiple collaborators.
-- The result is a stable application-level DTO/read model.
+- Generally do not use queries, use a query interface instead.
 
 ## Notification (event) guidelines
 
