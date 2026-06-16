@@ -340,15 +340,17 @@ You are to implement Chunk 3.1 of our Signal Protocol integration for Percolator
 The Goal: Complete the Micro-PKI infrastructure that was de-scoped from Chunk 3. This includes implementing the Ed25519 native interop wrappers, saving the Relay Root Key into the persistence layer, and building the background worker that proactively refreshes the local delivery certificate.
 
 Architectural Constraints (CRITICAL):
-* **No Raw Byte Arrays in Service Contracts:** The Application layer must use fully-qualified domain primitive types (e.g., `RelayRootKeyBytes`, `Ed25519SignatureBytes`). 
-* **SafeHandle Native Resource Management:** Follow the established codebase pattern utilizing direct static method calls to `Signal.Interop.SignalCrypto`. The Ed25519 static methods (`GenerateEd25519KeyPair`, `Ed25519Sign`, `Ed25519Verify`) are available in the interop library.
-* **Background Processing:** The certificate refresh worker must run independently of the gRPC request pipeline and handle transient errors gracefully.
+* **Strict DDD Context Mapping (No Project Coupling):** `Percolator.Identity` and `Percolator.Cryptography` have zero project dependencies on each other. Do NOT add references between them. We will duplicate the `RelayRootKeyBytes` primitive in both domains. The Application layer (`Percolator.Application`) will act as the Anti-Corruption Layer, translating between `Percolator.Identity.RelayRootKeyBytes` and `Percolator.Cryptography.RelayRootKeyBytes` using zero-allocation `.Span` and `.FromSpan()` methods.
+* **Native FFI Memory Lifecycle:** The `Signal.Interop.SignalCrypto` Ed25519 methods are allocation-free. The C# caller must allocate the buffers. The `Ed25519CryptographyService` must remain 100% managed C#. It should allocate `byte[]` buffers (or use `stackalloc` where appropriate), pass them as `Span<byte>` to the interop layer, and instantly wrap the results in our DDD primitives via `.FromBytesOwned()`.
+* **Graceful Worker Shutdown:** The worker must handle `OperationCanceledException` explicitly to prevent hanging shutdown. Catch it *before* the general exception catch, break the loop cleanly, and do not log as an error.
+* **No Raw Byte Arrays in Service Contracts:** The Application layer must use fully-qualified domain primitive types (e.g., `RelayRootKeyBytes`, `Ed25519SignatureBytes`).
 
 Implementation Requirements
 
 1. The Cryptography Domain (`Percolator.Cryptography`)
 * Note that `Ed25519PublicKeyBytes` and `Ed25519SignatureBytes` already exist.
 * The current `IEd25519CryptographyService` and `Ed25519CryptographyService` incorrectly use `ECDiffieHellman` and `ECDsa.Create()` to try and simulate Ed25519. This is wrong. You must completely replace the implementation of `Ed25519CryptographyService`.
+* Add `RelayRootKeyBytes` as a new local primitive in `Percolator.Cryptography`: `[ByteArray(length: 32)] public sealed partial record RelayRootKeyBytes;`. Note that this name implies the private key in this context.
 * Update `IEd25519CryptographyService` to the following contract:
   ```csharp
   public interface IEd25519CryptographyService
@@ -358,8 +360,11 @@ Implementation Requirements
       bool Verify(Ed25519PublicKeyBytes publicKey, ReadOnlySpan<byte> message, Ed25519SignatureBytes signature);
   }
   ```
-* Implement `Ed25519CryptographyService` using the static methods on `Signal.Interop.SignalCrypto` (`GenerateEd25519KeyPair`, `Ed25519Sign`, `Ed25519Verify`). Note that these methods take `Span<byte>` and `ReadOnlySpan<byte>`, so you will need to allocate arrays, call the interop method, and then wrap the results in the domain primitive types using `FromBytesOwned()`.
-* Add `RelayRootKeyBytes` as a new local primitive in `Percolator.Cryptography`: `[ByteArray(length: 32)] public sealed partial record RelayRootKeyBytes;`. Note that this name implies the private key in this context.
+* Implement `Ed25519CryptographyService` using the static methods on `Signal.Interop.SignalCrypto` (`GenerateEd25519KeyPair`, `Ed25519Sign`, `Ed25519Verify`).
+  - For `GenerateKeyPair`: Allocate two 32-byte `byte[]` arrays, pass them as `Span<byte>` to `Signal.Interop.SignalCrypto.GenerateEd25519KeyPair`, then wrap the results using `RelayRootKeyBytes.FromBytesOwned()` and `Ed25519PublicKeyBytes.FromBytesOwned()`.
+  - For `Sign`: Allocate a 64-byte `byte[]` for the signature, pass `privateKey.Span`, `message`, and the signature span to `Signal.Interop.SignalCrypto.Ed25519Sign`, then wrap using `Ed25519SignatureBytes.FromBytesOwned()`.
+  - For `Verify`: Pass `publicKey.Span`, `message`, and `signature.Span` directly to `Signal.Interop.SignalCrypto.Ed25519Verify` and return the boolean result.
+  - All native interop calls may throw `CryptographicException` on failure. The service must not catch these; let them propagate to the caller for proper error handling.
 
 2. Identity Domain & Persistence (`Percolator.Identity` & `Percolator.Infrastructure`)
 * The `RelayRootKeyBytes` primitive already exists in `Percolator.Identity`.
@@ -368,20 +373,29 @@ Implementation Requirements
 * **Fix the bug in `SqliteSelfIdentityDomainRepository.cs`**: Inside the `SaveAsync` method, the `RelayDeliveryRootKey` is not currently being synchronized from the aggregate `self` to the tracked entity `current`. You must map `current.RelayDeliveryRootKey = self.RelayDeliveryRootKey?.ToArray();`.
 * **Fix the bug in `SqliteSelfIdentityDomainRepository.cs`**: Inside the `Map` method, the `RelayDeliveryRootKey` is not currently being rehydrated from the database onto the aggregate. If `dbo.RelayDeliveryRootKey` is not null, call `aggregate.EnableRelayMode(Percolator.Identity.RelayRootKeyBytes.FromSpan(dbo.RelayDeliveryRootKey));` after `GetKeys` is populated.
 
-3. Background Certificate Refresh Worker (`Percolator.Infrastructure/Chat`)
-* The `DeliveryCertificateRefreshWorker` file exists but it does not execute `RefreshLocalCertificateAsync` immediately on application startup, it waits 20 hours. 
+3. Application Layer Anti-Corruption (`Percolator.Application/Chat`)
+* The `LocalIdentitySigner` class currently uses `Signal.Interop.SignalCrypto.Ed25519Sign` directly. This is acceptable for now, but we must ensure that when it needs to use the new `IEd25519CryptographyService`, it performs zero-allocation translation between the two `RelayRootKeyBytes` primitives.
+* Translation helper (if needed): To convert from `Percolator.Identity.RelayRootKeyBytes` to `Percolator.Cryptography.RelayRootKeyBytes`, use `Percolator.Cryptography.RelayRootKeyBytes.FromSpan(identityKey.Span)`. This is zero-allocation.
+* No new Application layer code is required for Chunk 3.1 unless `LocalIdentitySigner` needs to be refactored to use `IEd25519CryptographyService`. The current direct interop usage is acceptable.
+
+4. Background Certificate Refresh Worker (`Percolator.Infrastructure/Chat`)
+* The `DeliveryCertificateRefreshWorker` file exists but it does not execute `RefreshLocalCertificateAsync` immediately on application startup, it waits 20 hours.
 * We need the worker to attempt to fetch a certificate immediately when it starts, so that a fresh boot of the application will authenticate with the relay.
 * Modify `RunRefreshLoopAsync` to:
   1. Attempt to refresh the certificate using the `ICertificateOrchestrator` inside a `try/catch`.
-  2. If successful, delay for 20 hours (`Task.Delay(TimeSpan.FromHours(20), ct)`).
-  3. If an exception is thrown, log it and delay for 5 minutes (`Task.Delay(TimeSpan.FromMinutes(5), ct)`).
-  4. Ensure the loop continues running.
+  2. **CRITICAL:** Catch `OperationCanceledException` *before* the general exception catch. When caught, log a debug/info message and break the loop cleanly (do not retry).
+  3. **CRITICAL:** Catch `CryptographicException` *before* the general exception catch. This indicates a permanent configuration error (e.g., corrupted key material). Log as a critical error and break the loop - do not retry.
+  4. If successful, delay for 20 hours (`Task.Delay(TimeSpan.FromHours(20), ct)`).
+  5. If any other exception is thrown, log it as an error and delay for 5 minutes (`Task.Delay(TimeSpan.FromMinutes(5), ct)`).
+  6. Ensure the loop continues running for non-cancellation, non-crypto exceptions.
 
 **Testing Requirements (Chunk 3.1):**
 - `Ed25519CryptographyService_GenerateKeyPair_CreatesValidKeys` - Test that `GenerateKeyPair` returns non-null, correctly sized primitive byte arrays that are not all zeros.
 - `Ed25519CryptographyService_SignAndVerify_RoundTripsSuccessfully` - Test that signing a byte array with a generated private key and verifying it with the corresponding public key returns true.
 - `Ed25519CryptographyService_Verify_ReturnsFalse_ForInvalidSignature` - Test that verification returns false when the signature is tampered with.
+- `Ed25519CryptographyService_GenerateKeyPair_ThrowsOnInvalidBufferSizes` - Test that passing incorrectly sized spans throws `ArgumentException`.
 - `SelfIdentityDomainRepository_RelayMode_PersistsAndRehydrates` - Add a test (similar to `Save_and_GetById_round_trips_ActiveIdentityKeySpki`) in `SelfIdentityDomainRepositoryTests.cs` to ensure that calling `EnableRelayMode` correctly saves the `RelayRootKeyBytes` to the SQLite database and rehydrates it upon load.
+- `DeliveryCertificateRefreshWorker_Shutdown_CancelsGracefully` - Test that when `OperationCanceledException` is thrown during `Task.Delay`, the worker exits immediately without logging an error or triggering a backoff delay.
 
 ---
 ### Feature Implementation Request: Signal Protocol Chunk 4 (Relay Encrypted Ledger)
