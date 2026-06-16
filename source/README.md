@@ -7,13 +7,23 @@ This repository contains the Percolator project, a collection of libraries and a
 *   **`Percolator.Cryptography`**: A high-performance, secure cryptography library providing implementations of advanced protocols for secure messaging.
 *   **`Percolator.Identity`**: A domain library responsible for managing peer identities, including their cryptographic keys and network endpoint information.
 *   **`Percolator.Sessions`**: A domain library that manages the lifecycle of communication sessions and the sequencing of opaque, encrypted messages.
+*   **`Percolator.Chat`**: A domain library for chat-specific value types and messaging concepts.
 *   **`Percolator.Application`**: The application layer that orchestrates the domain libraries, implementing the system's use cases and business logic.
+*   **`Percolator.Infrastructure`**: Infrastructure layer providing persistence, gRPC services, and network transport implementations.
 *   **`Percolator.CryptographyTests`**: A comprehensive test suite for the cryptography library, ensuring its correctness and security through rigorous unit testing.
 *   **`Percolator.Node`**: The main executable and command-line interface for the application.
 
 ## Overview
 
 The primary component of this solution is the `Percolator.Cryptography` library, which implements a full end-to-end secure messaging system inspired by the Signal Protocol. This includes the X3DH key agreement protocol and the Double Ratchet algorithm for pairwise sessions, as well as a secure group messaging protocol.
+
+## Architecture Overview
+
+The solution follows a layered architecture:
+
+- **Domain Layer**: Core domain libraries (`Percolator.Cryptography`, `Percolator.Identity`, `Percolator.Chat`, `Percolator.Sessions`) containing business logic, value types, and cryptographic primitives
+- **Application Layer**: `Percolator.Application` orchestrates domain libraries, implements use cases and business logic
+- **Infrastructure Layer**: `Percolator.Infrastructure` provides persistence (EF Core), gRPC services, and network transport implementations
 
 ## Guidance for AI Assistants
 
@@ -35,7 +45,8 @@ The primary component of this solution is the `Percolator.Cryptography` library,
 
 ## AI Development Guidelines
 
-- **No Raw Byte Arrays**: Domain libraries should not send or receive raw byte arrays in or out of the domain. These should be wrapped in DDD value types with clear names so that it is more clear when passing parameters or returning results.
+- **No Raw Byte Arrays**: Domain libraries should not send or receive raw byte arrays in or out of the domain. These should be wrapped in DDD value types with clear names so that it is more clear when passing parameters or returning results. This applies to both domain boundaries AND network/application layers. Examples of strongly-typed wrappers include `RatchetIdentityKey`, `Signature`, `DeliveryCertificatePayloadBytes`, and `Ed25519SignatureBytes`.
+- **Rule 6 Transport Adherence**: No database identifiers (e.g., PeerId Guid) may be transmitted over the wire. Only cryptographic public key fingerprints (PKH) are allowed in all network payloads to prevent database identifier leakage.
 - **Strongly-Typed IDs**: To enhance type safety and clarify intent, raw `Guid` primitives must not be used for identifiers in public APIs. Instead, wrap them in strongly-typed DDD value objects with intention-revealing names (e.g., `PeerId`, `ConversationId`). This prevents accidental misuse of identifiers and makes the domain language more explicit.
 - **Test-Driven Development**: All new features and refactoring should follow the Red-Green-Refactor cycle of Test-Driven Development (TDD). Write a failing test first (Red), then write the simplest code to make it pass (Green), and finally, refactor the code to improve its design while keeping the tests passing. This ensures that all logic is covered by tests and promotes a high-quality, maintainable codebase.
 
