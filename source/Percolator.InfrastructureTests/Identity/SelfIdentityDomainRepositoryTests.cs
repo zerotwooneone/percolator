@@ -55,6 +55,31 @@ public class SelfIdentityDomainRepositoryTests
     }
 
     [Test]
+    public async Task Save_and_GetById_round_trips_ActiveIdentityKeySpki()
+    {
+        // Arrange
+        await using var ctx = new PercolatorDbContext(_options);
+        var repo = new SqliteSelfIdentityDomainRepository(ctx);
+        var self = new SelfIdentity(new SelfId(0), new PeerId(Guid.NewGuid()), new ListeningPort(5000));
+        
+        var spki = new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
+        // Key is active immediately
+        self.AddKey(spki, DateTimeOffset.MinValue, DateTimeOffset.MaxValue, DateTimeOffset.UtcNow);
+
+        // Act
+        await repo.SaveAsync(self);
+        var listed = await repo.ListAsync();
+        var saved = listed.Single(x => x.PeerId == self.PeerId);
+        var byId = await repo.GetByIdAsync(saved.Id);
+
+        // Assert
+        Assert.That(byId, Is.Not.Null);
+        var activeKey = byId!.GetActiveKey(DateTimeOffset.UtcNow);
+        Assert.That(activeKey, Is.Not.Null, "The key should be successfully rehydrated and active.");
+        Assert.That(activeKey!.Spki, Is.EqualTo(spki));
+    }
+
+    [Test]
     public async Task GetMostRecent_returns_highest_LastUsed()
     {
         // Arrange

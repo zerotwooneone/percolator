@@ -8,13 +8,16 @@ public sealed class PeerAuthenticationService : IPeerAuthenticationService
 {
     private readonly IPeerIdentityQueries _peerIdentityQueries;
     private readonly ILogger<PeerAuthenticationService> _logger;
+    private readonly TimeProvider _timeProvider;
 
     public PeerAuthenticationService(
         IPeerIdentityQueries peerIdentityQueries,
-        ILogger<PeerAuthenticationService> logger)
+        ILogger<PeerAuthenticationService> logger,
+        TimeProvider timeProvider)
     {
         _peerIdentityQueries = peerIdentityQueries;
         _logger = logger;
+        _timeProvider = timeProvider;
     }
 
     public async Task<bool> AuthenticateDeliveryCertificateRequestAsync(
@@ -24,7 +27,7 @@ public sealed class PeerAuthenticationService : IPeerAuthenticationService
         CancellationToken ct)
     {
         // Reject if requestTimestamp is older than 60 seconds (Replay attack prevention)
-        var now = DateTimeOffset.UtcNow;
+        var now = _timeProvider.GetUtcNow();
         if (now - requestTimestamp > TimeSpan.FromSeconds(60))
         {
             _logger.LogWarning("Certificate request timestamp is too old: {Timestamp}", requestTimestamp);

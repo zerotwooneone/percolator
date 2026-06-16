@@ -20,6 +20,9 @@ public static class ServiceCollectionExtensions
         // Register Profile Orchestration Service
         services.AddScoped<IProfileOrchestrationService, ProfileOrchestrationService>();
 
+        // Register Peer Authentication Service
+        services.AddScoped<IPeerAuthenticationService, PeerAuthenticationService>();
+
         return services;
     }
 }

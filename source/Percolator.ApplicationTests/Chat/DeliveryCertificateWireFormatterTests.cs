@@ -11,10 +11,9 @@ public sealed class DeliveryCertificateWireFormatterTests
     {
         // Arrange
         var originalFingerprint = new byte[32];
-        Random.Shared.NextBytes(originalFingerprint); // Generate random 32-byte hash
+        for(int i = 0; i < 32; i++) originalFingerprint[i] = (byte)i; // Deterministic arbitrary byte array
         
-        // Truncate to seconds because UnixTimeSeconds drops milliseconds
-        var originalExpiration = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.AddHours(24).ToUnixTimeSeconds()); 
+        var originalExpiration = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero);
 
         // Act - Pack
         var payload = DeliveryCertificateWireFormatter.Pack(originalFingerprint, originalExpiration);
@@ -36,7 +35,7 @@ public sealed class DeliveryCertificateWireFormatterTests
     {
         // Arrange
         var invalidFingerprint = new byte[31]; // Wrong length
-        var expiration = DateTimeOffset.UtcNow;
+        var expiration = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero);
 
         // Act & Assert
         Assert.Throws<ArgumentException>(() => 

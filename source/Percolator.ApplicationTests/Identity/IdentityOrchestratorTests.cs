@@ -160,5 +160,11 @@ public class IdentityOrchestratorTests
                     keys.SignedPreKey != null),
                 It.IsAny<CancellationToken>()),
             Times.Once);
+
+        _selfIdentityRepositoryMock.Verify(
+            r => r.SaveAsync(
+                It.Is<SelfIdentity>(id => id.Keys.Count > 0),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 }

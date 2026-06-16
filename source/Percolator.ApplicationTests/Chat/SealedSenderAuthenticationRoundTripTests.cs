@@ -12,6 +12,7 @@ public sealed class SealedSenderAuthenticationRoundTripTests
 {
     private Mock<IPeerIdentityQueries> _peerIdentityQueriesMock;
     private Mock<ILogger<PeerAuthenticationService>> _loggerMock;
+    private Mock<TimeProvider> _timeProviderMock;
     private PeerAuthenticationService _service;
 
     [SetUp]
@@ -19,9 +20,15 @@ public sealed class SealedSenderAuthenticationRoundTripTests
     {
         _peerIdentityQueriesMock = new Mock<IPeerIdentityQueries>();
         _loggerMock = new Mock<ILogger<PeerAuthenticationService>>();
+        _timeProviderMock = new Mock<TimeProvider>();
+
+        // Setup deterministic time
+        _timeProviderMock.Setup(x => x.GetUtcNow()).Returns(new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero));
+
         _service = new PeerAuthenticationService(
             _peerIdentityQueriesMock.Object,
-            _loggerMock.Object);
+            _loggerMock.Object,
+            _timeProviderMock.Object);
     }
 
     [Test]
@@ -29,30 +36,31 @@ public sealed class SealedSenderAuthenticationRoundTripTests
     {
         // Arrange
         var senderPkh = Convert.ToBase64String(new byte[32]); // Valid base64 PKH
-        var validTimestamp = DateTimeOffset.UtcNow.AddMinutes(-30);
+        var validTimestamp = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero).AddSeconds(-30); // Must be within 60 seconds
         
         // Generate a valid EC key pair to simulate the peer's public key
         using var ecdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var publicKeyBytes = ecdsa.ExportSubjectPublicKeyInfo();
         var publicKey = RatchetIdentityKey.FromBytes(publicKeyBytes);
         
-        // Use a signature that meets length constraints
-        var signature = Signature.FromBytesOwned(new byte[64]);
+        // Actually sign the exact combined payload the peer uses
+        var payload = System.Text.Encoding.UTF8.GetBytes($"{senderPkh}{validTimestamp.ToUnixTimeSeconds()}");
+        var rawSig = ecdsa.SignData(payload, HashAlgorithmName.SHA256);
+        var signature = Signature.FromBytesOwned(rawSig);
 
         _peerIdentityQueriesMock
             .Setup(x => x.GetPublicKeyByPkhAsync(senderPkh, It.IsAny<CancellationToken>()))
             .ReturnsAsync(publicKey);
 
-        // Act & Assert
-        // This test verifies the round-trip flow doesn't throw exceptions
-        // The actual cryptographic verification correctness is tested in integration tests
-        Assert.DoesNotThrowAsync(async () => 
-        {
-            await _service.AuthenticateDeliveryCertificateRequestAsync(
-                senderPkh,
-                validTimestamp,
-                signature,
-                CancellationToken.None);
-        });
+        // Act
+        var result = await _service.AuthenticateDeliveryCertificateRequestAsync(
+            senderPkh,
+            validTimestamp,
+            signature,
+            CancellationToken.None);
+
+        // Assert
+        // We verify the actual boolean result, completely black-boxing the internals
+        Assert.That(result, Is.True);
     }
 }
