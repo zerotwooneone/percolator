@@ -27,6 +27,7 @@ public static class ServiceCollectionExtensions
     {
         // Ensure IConfiguration is available from DI
         services.AddSingleton(configuration);
+        services.AddSingleton(TimeProvider.System);
         services.AddOptions<StorageOptions>()
             .Bind(configuration.GetSection(StorageOptions.SectionName))
             .Configure(options =>

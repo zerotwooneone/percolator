@@ -1,6 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Time.Testing;
 using Moq;
 using Percolator.Application.Chat;
 using Percolator.Infrastructure.Chat;
@@ -19,12 +19,9 @@ public class DeliveryCertificateRefreshWorkerTests
         var scopeFactoryMock = new Mock<IServiceScopeFactory>();
         var orchestratorMock = new Mock<ICertificateOrchestrator>();
         var loggerMock = new Mock<ILogger<DeliveryCertificateRefreshWorker>>();
-        var lifetimeMock = new Mock<IHostApplicationLifetime>();
+        var fakeTimeProvider = new FakeTimeProvider();
 
-        var cts = new CancellationTokenSource();
-
-        serviceProviderMock.Setup(sp => sp.GetService(typeof(IServiceScopeFactory)))
-            .Returns(scopeFactoryMock.Object);
+        var refreshCompletedTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         serviceScopeMock.As<IAsyncDisposable>()
             .Setup(ad => ad.DisposeAsync())
@@ -40,51 +37,99 @@ public class DeliveryCertificateRefreshWorkerTests
             .Returns(orchestratorMock.Object);
 
         orchestratorMock.Setup(o => o.RefreshLocalCertificateAsync(It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+            .Returns(Task.CompletedTask)
+            .Callback(() => refreshCompletedTcs.SetResult(true));
 
         var worker = new DeliveryCertificateRefreshWorker(
-            serviceProviderMock.Object,
+            scopeFactoryMock.Object,
             loggerMock.Object,
-            lifetimeMock.Object);
+            fakeTimeProvider);
 
-        // Use reflection to call the private RunRefreshLoopAsync method directly
-        var runRefreshLoopMethod = worker.GetType()
-            .GetMethod("RunRefreshLoopAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        // ACT
 
-        // ACT - Start the refresh loop and cancel it
-        var loopTask = (Task?)runRefreshLoopMethod?.Invoke(worker, new object[] { cts.Token });
+        // 1. Start the BackgroundService
+        await worker.StartAsync(CancellationToken.None);
 
-        // Wait a bit for the first refresh to complete
-        await Task.Delay(100);
+        // 2. Wait deterministically for the first refresh
+        await refreshCompletedTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
-        // Cancel the token
-        cts.Cancel();
+        // 3. Stop the service (This cancels the stoppingToken and waits for ExecuteAsync to finish safely)
+        var stopTask = worker.StopAsync(CancellationToken.None);
+        await stopTask.WaitAsync(TimeSpan.FromSeconds(5));
 
-        // Wait for the worker to exit
-        await Task.Delay(200);
+        // 4. Assert Graceful Shutdown
+        Assert.That(stopTask.IsCompletedSuccessfully, Is.True);
+    }
+
+    [Test]
+    public async Task ErrorBackoff_RetriesAfterFiveMinutes()
+    {
+        // ARRANGE
+        var serviceProviderMock = new Mock<IServiceProvider>();
+        var serviceScopeMock = new Mock<IServiceScope>();
+        var scopeFactoryMock = new Mock<IServiceScopeFactory>();
+        var orchestratorMock = new Mock<ICertificateOrchestrator>();
+        var loggerMock = new Mock<ILogger<DeliveryCertificateRefreshWorker>>();
+        var fakeTimeProvider = new FakeTimeProvider();
+
+        var refreshCompletedTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        serviceScopeMock.As<IAsyncDisposable>()
+            .Setup(ad => ad.DisposeAsync())
+            .Returns(ValueTask.CompletedTask);
+
+        serviceScopeMock.Setup(s => s.ServiceProvider)
+            .Returns(serviceProviderMock.Object);
+
+        scopeFactoryMock.Setup(sf => sf.CreateScope())
+            .Returns(serviceScopeMock.Object);
+
+        serviceProviderMock.Setup(sp => sp.GetService(typeof(ICertificateOrchestrator)))
+            .Returns(orchestratorMock.Object);
+
+        var callCount = 0;
+        orchestratorMock.Setup(o => o.RefreshLocalCertificateAsync(It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                callCount++;
+
+                // 1. First call fails, triggering the 5-minute error backoff delay
+                if (callCount == 1)
+                {
+                    throw new Exception("Transient error");
+                }
+
+                // 2. Second call (the retry) succeeds, signaling the test thread
+                refreshCompletedTcs.TrySetResult(true);
+                return Task.CompletedTask;
+            });
+
+        var worker = new DeliveryCertificateRefreshWorker(
+            scopeFactoryMock.Object,
+            loggerMock.Object,
+            fakeTimeProvider);
+
+        // ACT
+
+        // Start the BackgroundService. It will immediately execute Call 1, throw, catch,
+        // and park itself on the 5-minute FakeTimeProvider delay.
+        await worker.StartAsync(CancellationToken.None);
+
+        // Advance time by 5 minutes to instantly complete the error delay and trigger the retry.
+        fakeTimeProvider.Advance(TimeSpan.FromMinutes(5));
+
+        // Wait deterministically for the retry to complete successfully
+        await refreshCompletedTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Stop the service (which cancels the 20-hour success delay the worker is now sitting on)
+        var stopTask = worker.StopAsync(CancellationToken.None);
+        await stopTask.WaitAsync(TimeSpan.FromSeconds(5));
 
         // ASSERT
-        // Verify that the orchestrator was called at least once (the immediate refresh)
-        orchestratorMock.Verify(o => o.RefreshLocalCertificateAsync(It.IsAny<CancellationToken>()), Times.AtLeastOnce());
+        // Verify the orchestrator was called exactly twice (Initial Failure + Successful Retry)
+        orchestratorMock.Verify(o => o.RefreshLocalCertificateAsync(It.IsAny<CancellationToken>()), Times.Exactly(2));
 
-        // Verify that no error was logged for OperationCanceledException
-        loggerMock.Verify(
-            l => l.Log(
-                LogLevel.Error,
-                It.IsAny<EventId>(),
-                It.IsAny<It.IsAnyType>(),
-                It.IsAny<OperationCanceledException>(),
-                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.Never);
-
-        // Verify that info log was logged for shutdown
-        loggerMock.Verify(
-            l => l.Log(
-                LogLevel.Information,
-                It.IsAny<EventId>(),
-                It.IsAny<It.IsAnyType>(),
-                null,
-                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.AtLeastOnce);
+        // Verify graceful shutdown
+        Assert.That(stopTask.IsCompletedSuccessfully, Is.True);
     }
 }

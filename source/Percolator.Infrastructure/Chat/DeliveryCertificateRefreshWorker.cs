@@ -6,52 +6,37 @@ using Percolator.Application.Chat;
 
 namespace Percolator.Infrastructure.Chat;
 
-public sealed class DeliveryCertificateRefreshWorker : IHostedService
+public sealed class DeliveryCertificateRefreshWorker : BackgroundService
 {
-    private readonly IServiceProvider _serviceProvider;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<DeliveryCertificateRefreshWorker> _logger;
-    private readonly IHostApplicationLifetime _lifetime;
+    private readonly TimeProvider _timeProvider;
 
     public DeliveryCertificateRefreshWorker(
-        IServiceProvider serviceProvider,
+        IServiceScopeFactory scopeFactory,
         ILogger<DeliveryCertificateRefreshWorker> logger,
-        IHostApplicationLifetime lifetime)
+        TimeProvider timeProvider)
     {
-        _serviceProvider = serviceProvider;
+        _scopeFactory = scopeFactory;
         _logger = logger;
-        _lifetime = lifetime;
+        _timeProvider = timeProvider;
     }
 
-    public Task StartAsync(CancellationToken cancellationToken)
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _lifetime.ApplicationStarted.Register(async () =>
-        {
-            await RunRefreshLoopAsync(cancellationToken);
-        });
-
-        return Task.CompletedTask;
-    }
-
-    public Task StopAsync(CancellationToken cancellationToken)
-    {
-        return Task.CompletedTask;
-    }
-
-    private async Task RunRefreshLoopAsync(CancellationToken ct)
-    {
-        while (!ct.IsCancellationRequested)
+        while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                using var scope = _serviceProvider.CreateAsyncScope();
+                using var scope = _scopeFactory.CreateAsyncScope();
                 var orchestrator = scope.ServiceProvider.GetRequiredService<ICertificateOrchestrator>();
 
                 _logger.LogInformation("Refreshing delivery certificate");
-                await orchestrator.RefreshLocalCertificateAsync(ct);
+                await orchestrator.RefreshLocalCertificateAsync(stoppingToken);
                 _logger.LogInformation("Delivery certificate refresh completed");
 
                 // Wait 20 hours before next refresh (well before 24-hour expiration)
-                await Task.Delay(TimeSpan.FromHours(20), ct);
+                await Task.Delay(TimeSpan.FromHours(20), _timeProvider, stoppingToken);
             }
             catch (OperationCanceledException)
             {
@@ -69,7 +54,7 @@ public sealed class DeliveryCertificateRefreshWorker : IHostedService
             {
                 _logger.LogError(ex, "Error during delivery certificate refresh");
                 // Wait 5 minutes before retrying on transient errors
-                await Task.Delay(TimeSpan.FromMinutes(5), ct);
+                await Task.Delay(TimeSpan.FromMinutes(5), _timeProvider, stoppingToken);
             }
         }
     }
