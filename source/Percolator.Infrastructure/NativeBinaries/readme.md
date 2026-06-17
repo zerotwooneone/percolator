@@ -35,12 +35,26 @@ Primary entrypoint:
         - Extracts the group public parameters from secret params.
         - Intended use: server-side verification of presentations.
 
+    - **`public static byte[] SerializeGroupPublicParams(GroupPublicParamsSafeHandle handle)`**
+        - Serializes group public parameters to a byte array.
+        - Intended use: network transmission to the server.
+
+    - **`public static GroupPublicParamsSafeHandle DeserializeGroupPublicParams(ReadOnlySpan<byte> bytes)`**
+        - Reconstructs group public parameters from serialized bytes.
+
     - **`public static ServerSecretParamsSafeHandle GenerateServerSecretParams(ReadOnlySpan<byte> randomness32)`**
         - Generates server secret parameters from exactly 32 bytes of randomness.
         - Intended use: in-process test loops / private deployments.
 
     - **`public static ServerPublicParamsSafeHandle GetServerPublicParams(ServerSecretParamsSafeHandle serverSecretParams)`**
         - Extracts the server public parameters from server secret params.
+
+    - **`public static byte[] SerializeServerPublicParams(ServerPublicParamsSafeHandle handle)`**
+        - Serializes server public parameters to a byte array.
+        - Intended use: network transmission to clients.
+
+    - **`public static ServerPublicParamsSafeHandle DeserializeServerPublicParams(ReadOnlySpan<byte> bytes)`**
+        - Reconstructs server public parameters from serialized bytes.
 
     - **`public static AuthCredentialWithPniResponseSafeHandle IssueAuthCredentialWithPni(ReadOnlySpan<byte> aciBytes16, ReadOnlySpan<byte> pniBytes16, ulong redemptionTimeEpochSeconds, ServerSecretParamsSafeHandle serverSecretParams, ReadOnlySpan<byte> randomness32)`**
         - Server-side issuance step.
