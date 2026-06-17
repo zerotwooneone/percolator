@@ -14,6 +14,7 @@ public class SelfIdentityDbo
     public byte[]? ProfileTag { get; set; }
     public int ProfileRevision { get; set; }
     public byte[]? RelayDeliveryRootKey { get; set; }
+    public byte[]? ZkServerSecretParamsSeed { get; set; }
     public byte[]? ActiveIdentityKeySpki { get; set; }
     public byte[]? ActiveIdentityKeyFingerprint { get; set; }
 

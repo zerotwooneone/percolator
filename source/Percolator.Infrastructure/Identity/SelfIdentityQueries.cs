@@ -25,4 +25,14 @@ public sealed class SelfIdentityQueries : ISelfIdentityQueries
 
         return bytes is null ? null : RatchetIdentityKey.FromBytes(bytes);
     }
+
+    public async Task<byte[]?> GetZkServerSecretParamsSeedAsync(CancellationToken ct)
+    {
+        using var db = _dbFactory.CreateDbContext();
+        return await db.SelfIdentities
+            .AsNoTracking()
+            .Where(x => x.ZkServerSecretParamsSeed != null)
+            .Select(x => x.ZkServerSecretParamsSeed)
+            .FirstOrDefaultAsync(ct);
+    }
 }

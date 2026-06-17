@@ -61,6 +61,8 @@ public class PercolatorDbContext : DbContext
     public DbSet<Percolator.Infrastructure.Chat.Persistence.GroupStateDbo> GroupStates { get; set; } = null!;
     public DbSet<Percolator.Infrastructure.Chat.Persistence.PendingGroupInvitationDbo> PendingGroupInvitations { get; set; } = null!;
     public DbSet<Percolator.Infrastructure.Chat.Persistence.SenderKeyRecordDbo> SenderKeyRecords { get; set; } = null!;
+    public DbSet<Percolator.Infrastructure.Chat.Persistence.RelayGroupStateDbo> RelayGroupStates { get; set; } = null!;
+    public DbSet<Percolator.Infrastructure.Chat.Persistence.RelayBlindedRosterDbo> RelayBlindedRosters { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -217,6 +219,8 @@ public class PercolatorDbContext : DbContext
                   .HasConversion(
                       v => v.ToUnixTimeMilliseconds(),
                       v => DateTimeOffset.FromUnixTimeMilliseconds(v));
+            entity.Property(e => e.RelayDeliveryRootKey);
+            entity.Property(e => e.ZkServerSecretParamsSeed);
             entity.HasIndex(e => e.Name).IsUnique();
             entity.HasIndex(e => e.PeerId); // non-unique
             entity.HasIndex(e => e.LastUsedUtc);
@@ -718,6 +722,26 @@ public class PercolatorDbContext : DbContext
                 .HasForeignKey(e => e.DiscoveryKey)
                 .OnDelete(DeleteBehavior.Cascade)
                 .IsRequired();
+        });
+
+        // RelayGroupState (Relay's authoritative encrypted ledger)
+        modelBuilder.Entity<Percolator.Infrastructure.Chat.Persistence.RelayGroupStateDbo>(entity =>
+        {
+            entity.ToTable("RelayGroupStates");
+            entity.HasKey(e => e.ConversationId);
+            entity.Property(e => e.ConversationId).IsRequired();
+            entity.Property(e => e.Epoch).IsRequired();
+            entity.Property(e => e.GroupPublicParams).IsRequired();
+            entity.Property(e => e.Version).IsConcurrencyToken();
+        });
+
+        // RelayBlindedRoster (Relay's blinded routing table)
+        modelBuilder.Entity<Percolator.Infrastructure.Chat.Persistence.RelayBlindedRosterDbo>(entity =>
+        {
+            entity.ToTable("RelayBlindedRosters");
+            entity.HasKey(e => new { e.ConversationId, e.DestinationPkhBytes });
+            entity.Property(e => e.ConversationId).IsRequired();
+            entity.Property(e => e.DestinationPkhBytes).IsRequired();
         });
     }
 }
