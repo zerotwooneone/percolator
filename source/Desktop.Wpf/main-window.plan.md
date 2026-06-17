@@ -478,9 +478,15 @@ Implementation Requirements
 * `IZkGroupCryptographyService` with `bool VerifyGroupPresentation(...)`.
 
 **3. Infrastructure Persistence (`Percolator.Infrastructure`)**
-* **FFI Patch:** In `SignalCrypto.cs`, add `[DllImport]` for `DeserializeGroupPublicParams` to access native `signal_zkgroup_group_public_params_deserialize`.
-* **Persistence:** Create `RelayGroupStateDbo` (`ConversationId`, `Epoch`, `GroupPublicParams`, `Version`) and `RelayBlindedRosterDbo` (`ConversationId`, `DestinationPkhBytes`).
-* **CQRS Identity Query:** Introduce `ISelfIdentityQueries { Task<byte[]?> GetZkServerSecretParamsSeedAsync(...) }`. **CRITICAL:** EF Core implementation MUST use `.AsNoTracking()`.
+* **FFI Patch:** In `SignalCrypto.cs`, add the following to access the native function:
+    ````csharp
+    [DllImport(LIBRARY_NAME, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern int signal_zkgroup_group_public_params_deserialize(out IntPtr groupPublicParams, ref byte bytes, UIntPtr length);
+    
+    public static GroupPublicParamsSafeHandle DeserializeGroupPublicParams(ReadOnlySpan<byte> bytes) { ... } // standard wrapper with SignalException.Check
+    ````
+* **Persistence:** Create `RelayGroupStateDbo` (`Guid ConversationId`, `uint Epoch`, `byte[] GroupPublicParams`, `int Version`) and `RelayBlindedRosterDbo` (`Guid ConversationId`, `byte[] DestinationPkhBytes`).
+* **CQRS Identity Query:** Implement `ISelfIdentityQueries` in `Percolator.Infrastructure/Identity/Queries`. Inject `PercolatorDbContext`. **CRITICAL:** EF Core implementation MUST use `.AsNoTracking()`.
 * **Config:** In `PercolatorDbContext.OnModelCreating`, use:
     ````csharp
     modelBuilder.Entity<RelayGroupStateDbo>(entity => {
@@ -494,7 +500,7 @@ Implementation Requirements
     });
     ````
 
-**4. Networking (`messaging.proto`)**
+**4. Networking (`messaging.proto`) & Orchestration**
 * **Definitions:**
     ````protobuf
     message ProvisionRelayGroupRequest {
@@ -507,7 +513,7 @@ Implementation Requirements
         Status status = 1;
     }
     ````
-* **Orchestration:** `IRelayGroupProvisioningService.ProvisionAsync()`. Validate, create ledger, map PKHs to roster, and save.
+* **Orchestration:** `IRelayGroupProvisioningService.ProvisionAsync()` (in `Percolator.Application/Apps/Chat`). Validate, create ledger, map PKHs to roster, and save using `IRelayGroupRepository` (interface in `Percolator.Application/Chat`, implementation in `Percolator.Infrastructure/Chat/Repositories`).
 
 ---
 
@@ -549,15 +555,15 @@ Implementation Requirements
     var winningEpoch = (uint)dbValues["Epoch"];
     throw new EpochConflictDomainException(winningEpoch);
     ````
-* **Identity Resolver:** Implement a service translating `List<DestinationPkhBytes>` to `List<PeerId>` using `IPeerIdentityRepository.FindByPublicKeyHashAsync()`, creating new `PeerIdentity` aggregates if null.
-* **Queue Bulk Insert:** Implement `EnqueueFanOutAsync(List<PeerId> targets, byte[] blob)`. Create `MessageQueueItemDbo` for each, generate `AckId = Guid.NewGuid()`, and stage via `AddRange()`.
+* **Identity Resolver:** Implement `IRelayTargetResolver` (in `Percolator.Application/Chat`) translating `List<DestinationPkhBytes>` to `List<Percolator.Identity.PeerId>` using `IPeerIdentityRepository.FindByPublicKeyHashAsync()`, creating new `PeerIdentity` aggregates if null.
+* **Queue Bulk Insert:** Implement `EnqueueFanOutAsync(List<Percolator.Identity.PeerId> targets, byte[] blob)`. Create `MessageQueueItemDbo` for each, generate `AckId = Guid.NewGuid()`, and stage via `AddRange()`.
 
 **4. Application Orchestration (`PublishAsync`)**
 * **Flow:**
   1. Authenticate: Call `ISelfIdentityQueries.GetZkServerSecretParamsSeedAsync`. Return `UNAUTHORIZED` if null (Relay Mode disabled). Verify ZK proof. Return `UNAUTHORIZED` if false.
   2. Load: Call `IRelayGroupRepository.GetLedgerAsync()`.
   3. Mutate: Call `ledger.AdvanceEpoch(request.Epoch)`.
-  4. Resolve: Map `DestinationPkhBytes` to `PeerId`s.
+  4. Resolve: Map `DestinationPkhBytes` to `Percolator.Identity.PeerId`s via `IRelayTargetResolver`.
   5. Queue: Call `IMessageQueueRepository.EnqueueFanOutAsync(...)`.
   6. Commit: Call `IRelayGroupRepository.SaveAsync(ledger)` with concurrency resolution.
 ---
