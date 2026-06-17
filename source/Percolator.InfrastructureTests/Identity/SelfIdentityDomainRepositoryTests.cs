@@ -97,4 +97,28 @@ public class SelfIdentityDomainRepositoryTests
         Assert.That(mru, Is.Not.Null);
         Assert.That(mru!.DisplayName!.Value, Is.EqualTo("b"));
     }
+
+    [Test]
+    public async Task RelayMode_PersistsAndRehydrates()
+    {
+        // Arrange
+        await using var ctx = new PercolatorDbContext(_options);
+        var repo = new SqliteSelfIdentityDomainRepository(ctx);
+        var self = new SelfIdentity(new SelfId(0), new PeerId(Guid.NewGuid()), new ListeningPort(5000));
+        self.SetDisplayName("relay-test");
+
+        var relayRootKey = RelayRootKeyBytes.FromBytesOwned(new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32 });
+        self.EnableRelayMode(relayRootKey);
+
+        // Act
+        await repo.SaveAsync(self);
+        var listed = await repo.ListAsync();
+        var saved = listed.Single(x => x.DisplayName!.Value == "relay-test");
+        var byId = await repo.GetByIdAsync(saved.Id);
+
+        // Assert
+        Assert.That(byId, Is.Not.Null);
+        Assert.That(byId!.RelayDeliveryRootKey, Is.Not.Null, "The relay root key should be successfully rehydrated.");
+        Assert.That(byId.RelayDeliveryRootKey!.Span.ToArray(), Is.EqualTo(relayRootKey.Span.ToArray()));
+    }
 }

@@ -17,6 +17,7 @@ using Percolator.Infrastructure.Security;
 using Percolator.Infrastructure.Network.Grpc;
 using Percolator.Application.Network;
 using Percolator.Network.Services;
+using Percolator.Cryptography;
 
 namespace Percolator.Infrastructure;
 
@@ -76,6 +77,9 @@ public static class ServiceCollectionExtensions
 
         // Self pre-key storage (local private keys) now backed by Sqlite
         services.AddScoped<ISelfPreKeyBundleRepository, Cryptography.SqliteSelfPreKeyBundleRepository>();
+
+        // Ed25519 cryptography service (native interop implementation)
+        services.AddSingleton<IEd25519CryptographyService, NativeEd25519CryptographyService>();
 
         return services;
     }

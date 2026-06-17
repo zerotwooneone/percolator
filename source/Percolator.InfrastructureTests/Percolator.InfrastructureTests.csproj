@@ -33,6 +33,13 @@
   <ItemGroup>
     <ProjectReference Include="..\Percolator.Infrastructure\Percolator.Infrastructure.csproj" />
     <ProjectReference Include="..\Percolator.Chat\Percolator.Chat.csproj" />
+    <ProjectReference Include="..\Percolator.Cryptography\Percolator.Cryptography.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\Percolator.Infrastructure\NativeBinaries\signal_shim.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
 </Project>

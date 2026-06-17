@@ -59,7 +59,8 @@ public sealed class SqliteSelfIdentityDomainRepository : ISelfIdentityRepository
             LastUsedUtc = identity.LastUsedUtc,
             ListeningPort = identity.ListeningPort.Value,
             ActiveIdentityKeySpki = activeKey?.Spki,
-            ActiveIdentityKeyFingerprint = activeKey?.Fingerprint
+            ActiveIdentityKeyFingerprint = activeKey?.Fingerprint,
+            RelayDeliveryRootKey = identity.RelayDeliveryRootKey?.ToArray()
         };
         _db.SelfIdentities.Add(dbo);
         await _db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -88,7 +89,8 @@ public sealed class SqliteSelfIdentityDomainRepository : ISelfIdentityRepository
                     Name = identity.DisplayName?.Value ?? string.Empty,
                     LastUsedUtc = identity.LastUsedUtc,
                     ActiveIdentityKeySpki = activeKey?.Spki,
-                    ActiveIdentityKeyFingerprint = activeKey?.Fingerprint
+                    ActiveIdentityKeyFingerprint = activeKey?.Fingerprint,
+                    RelayDeliveryRootKey = identity.RelayDeliveryRootKey?.ToArray()
                 };
                 _db.SelfIdentities.Add(dbo);
             }
@@ -103,7 +105,8 @@ public sealed class SqliteSelfIdentityDomainRepository : ISelfIdentityRepository
                 dbo.ProfileNonce = identity.CurrentProfileCiphertext?.Nonce.Span.ToArray();
                 dbo.ProfileTag = identity.CurrentProfileCiphertext?.Tag.Span.ToArray();
                 dbo.ProfileRevision = identity.ProfileRevision;
-                
+                dbo.RelayDeliveryRootKey = identity.RelayDeliveryRootKey?.ToArray();
+
                 // Synchronize fingerprint whenever aggregate is saved
                 var activeKey = identity.GetActiveKey(DateTimeOffset.UtcNow);
                 dbo.ActiveIdentityKeySpki = activeKey?.Spki;
@@ -142,12 +145,18 @@ public sealed class SqliteSelfIdentityDomainRepository : ISelfIdentityRepository
         if (dbo.ActiveIdentityKeySpki != null && dbo.ActiveIdentityKeySpki.Length > 0)
         {
             self.AddKey(
-                spki: dbo.ActiveIdentityKeySpki, 
-                notBefore: DateTimeOffset.MinValue, 
-                expiresAt: DateTimeOffset.MaxValue, 
+                spki: dbo.ActiveIdentityKeySpki,
+                notBefore: DateTimeOffset.MinValue,
+                expiresAt: DateTimeOffset.MaxValue,
                 now: DateTimeOffset.UtcNow);
         }
-        
+
+        // Rehydrate relay mode if the root key is present
+        if (dbo.RelayDeliveryRootKey != null && dbo.RelayDeliveryRootKey.Length > 0)
+        {
+            self.EnableRelayMode(RelayRootKeyBytes.FromSpan(dbo.RelayDeliveryRootKey));
+        }
+
         return self;
     }
 }
