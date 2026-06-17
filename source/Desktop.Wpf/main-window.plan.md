@@ -411,6 +411,7 @@ Implementation Requirements
 - `DeliveryCertificateRefreshWorker_Shutdown_CancelsGracefully` - Test that when `OperationCanceledException` is thrown during `Task.Delay`, the worker exits immediately without logging an error or triggering a backoff delay.
 
 ---
+## Chunk 4
 ### Feature Implementation Request: Signal Protocol Chunk 4 (Relay Encrypted Ledger)
 You are to implement Chunk 4 of our Signal Protocol Group V2 integration for Percolator, a C# .NET 9 application built on a strict, "Shared Nothing" Modular Monolith architecture.
 
