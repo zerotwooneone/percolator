@@ -415,72 +415,104 @@ Implementation Requirements
 
 **Architectural Constraints (CRITICAL for all 4.x Chunks):**
 * **SafeHandle Memory Management:** Every `SafeHandle` returned by `Signal.Interop` MUST be wrapped in a `using` statement immediately upon creation to prevent unmanaged memory leaks.
-* **Time Determinism:** Cryptographic validation paths require a timestamp (`redemptionTimeEpochSeconds`). You MUST inject `.NET 8 TimeProvider` into services and use `_timeProvider.GetUtcNow().ToUnixTimeSeconds()` to maintain strict test determinism. Do NOT use `DateTimeOffset.UtcNow` directly.
-* **Strict Clean Architecture & CQRS:** The Application layer must NOT reference Entity Framework, DbContext, or DBO instances. Repositories must catch EF Core exceptions and translate them into pure Domain exceptions before they reach the Application layer.
+* **Time Determinism:** Cryptographic validation paths require a timestamp (`redemptionTimeEpochSeconds`). You MUST inject `.NET 8 TimeProvider` into services and use `(ulong)_timeProvider.GetUtcNow().ToUnixTimeSeconds()` to maintain strict test determinism.
+* **Strict Clean Architecture & CQRS:** The Application layer must NOT reference Entity Framework, DbContext, or DBO instances. Repositories must catch EF Core exceptions and translate them into pure Domain exceptions.
 * **No Shared Kernel (Local Primitives):** Duplicate required strongly-typed byte wrappers locally within the namespaces that execute them to preserve compile-time safety and boundary isolation.
-* **ByteArray Primitive Mapping:** For incoming gRPC `ByteString` data, ALWAYS use `MyDomainType.FromBytesOwned(byteString.ToByteArray())` to ensure defensive copying and memory safety.
+* **ByteArray Primitive Mapping:** For incoming gRPC `ByteString` data, ALWAYS use `MyDomainType.FromBytesOwned(byteString.ToByteArray())` to ensure defensive copying.
 * **Concurrency Convention:** Use `int Version` configured via `builder.Property(x => x.Version).IsConcurrencyToken();`.
 
 ---
 
 ### Chunk 4.1: Relay Provisioning & ZK Ledger Foundation
-**Goal:** Build the Domain Ledger, the Blinded Roster, the ZK Cryptography setup, and the Provisioning pipeline.
 
 **1. The Domain Layer (`Percolator.Chat`)**
 * **Entity Aggregate Root:** Create `RelayGroupLedger`.
-* **Properties:** `ConversationId ConversationId`, `uint CurrentEpoch`, `ZkGroupPublicParamsBytes GroupPublicParams`.
-* **Behavior:** `public void AdvanceEpoch(uint requestedEpoch)`. This method must throw a pure `StaleEpochDomainException` if `requestedEpoch` <= `CurrentEpoch`.
+* **Properties:** `Percolator.Chat.ValueObjects.ConversationId ConversationId` (Must use ValueObjects namespace), `uint CurrentEpoch`, `ZkGroupPublicParamsBytes GroupPublicParams`.
+* **Behavior:** `public void AdvanceEpoch(uint requestedEpoch)`. Throw `StaleEpochDomainException` if `requestedEpoch` <= `CurrentEpoch`.
 
 **2. The Cryptography Domain (`Percolator.Cryptography`)**
 * Define local primitives:
     ````csharp
     [ByteArray] public partial record ZkPresentationBytes;
-    [ByteArray] public partial record ZkServerSecretParamsSeedBytes; // 32-byte randomness seed
+    [ByteArray] public partial record ZkServerSecretParamsSeedBytes;
     [ByteArray] public partial record ZkGroupPublicParamsBytes;
     ````
-* Define `IZkGroupCryptographyService` with: `bool VerifyGroupPresentation(ZkPresentationBytes presentation, ZkServerSecretParamsSeedBytes serverSecretSeed, ZkGroupPublicParamsBytes groupPublic, ulong redemptionTime);`
+* `IZkGroupCryptographyService` with `bool VerifyGroupPresentation(...)`.
 
-**3. Identity & Relay Persistence (`Percolator.Identity` & `Percolator.Infrastructure`)**
-* **Identity Update:** Update `SelfIdentity` and `SelfIdentityDbo` to include `ZkServerSecretParamsSeedBytes`. Generate it during `EnableRelayMode()`.
-* **Ledger Persistence:** Create `RelayGroupStateDbo` (`Guid ConversationId` (PK), `uint Epoch`, `byte[] GroupPublicParams`, `int Version` as concurrency token).
-* **Roster Persistence:** Create `RelayBlindedRosterDbo` (`Guid ConversationId` (FK), `byte[] DestinationPkhBytes`). Use a Composite Key.
-* **CQRS Identity Query:** Introduce `ISelfIdentityQueries { Task<byte[]?> GetZkServerSecretParamsSeedAsync(CancellationToken ct); }`. **CRITICAL:** EF Core implementation MUST use `.AsNoTracking()`.
+**3. Infrastructure & FFI (`Percolator.Infrastructure` & `Signal.Interop`)**
+* **Native Patch:** Add `[DllImport]` for `DeserializeGroupPublicParams` in `SignalCrypto.cs` to access the existing native `signal_zkgroup_group_public_params_deserialize`.
+* **Persistence:** Create `RelayGroupStateDbo` (`ConversationId`, `Epoch`, `GroupPublicParams`, `Version` as concurrency token) and `RelayBlindedRosterDbo` (`ConversationId`, `DestinationPkhBytes`).
+* **CQRS Identity Query:** Introduce `ISelfIdentityQueries { Task<byte[]?> GetZkServerSecretParamsSeedAsync(...) }`. **CRITICAL:** EF Core implementation MUST use `.AsNoTracking()`.
 
 **4. Network Contracts (`messaging.proto`) & Orchestration**
-* Define:
+* Define `ProvisionRelayGroupRequest` (using `optional bytes conversation_id = 1`) and `ProvisionRelayGroupResponse`.
+* **Orchestration:** Implement `IRelayGroupProvisioningService.ProvisionAsync()`.
+
+---
+
+## Chunk 4: Signal Protocol Group V2 Relay Ledger (Split Phase)
+
+**Architectural Constraints (CRITICAL):**
+* **SafeHandle Memory:** Every `SafeHandle` from `Signal.Interop` MUST be wrapped in a `using` block.
+* **Time Determinism:** Always use `(ulong)_timeProvider.GetUtcNow().ToUnixTimeSeconds()`.
+* **Clean Architecture:** Application layer does NOT reference EF Core/DBOs. Repositories translate EF Core exceptions to Domain exceptions.
+* **ByteArray Primitive Mapping:** For gRPC `ByteString`, ALWAYS use `MyDomainType.FromBytesOwned(byteString.ToByteArray())`.
+* **Concurrency Convention:** Use `int Version` configured via `builder.Property(x => x.Version).IsConcurrencyToken();`.
+
+---
+
+### Chunk 4.1: Relay Provisioning & ZK Ledger Foundation
+
+**1. Domain Layer (`Percolator.Chat`)**
+* **Entity:** `RelayGroupLedger`.
+* **Properties:** `ConversationId ConversationId`, `uint CurrentEpoch`, `ZkGroupPublicParamsBytes GroupPublicParams`.
+* **Behavior:** `AdvanceEpoch(uint requestedEpoch)`. Throw `StaleEpochDomainException` if `requestedEpoch` <= `CurrentEpoch`.
+
+**2. Cryptography Domain (`Percolator.Cryptography`)**
+* Define primitives:
+    ````csharp
+    [ByteArray] public partial record ZkPresentationBytes;
+    [ByteArray] public partial record ZkServerSecretParamsSeedBytes;
+    [ByteArray] public partial record ZkGroupPublicParamsBytes;
+    ````
+* `IZkGroupCryptographyService` with `bool VerifyGroupPresentation(...)`.
+
+**3. Infrastructure (`Percolator.Infrastructure`)**
+* **FFI Extension:** Patch `signal_shim` and `SignalCrypto.cs` to expose `DeserializeGroupPublicParams(ReadOnlySpan<byte>)`.
+* **Persistence:** Create `RelayGroupStateDbo` (`ConversationId`, `Epoch`, `GroupPublicParams`, `Version`) and `RelayBlindedRosterDbo` (`ConversationId`, `DestinationPkhBytes`).
+
+**4. Network Contracts (`messaging.proto`)**
+* **Definitions:**
     ````protobuf
     message ProvisionRelayGroupRequest {
         optional bytes conversation_id = 1;
         optional bytes group_public_params = 2;
         repeated bytes initial_routing_tokens = 3;
     }
-    
     message ProvisionRelayGroupResponse {
         enum Status { SUCCESS = 0; ALREADY_EXISTS = 1; }
         Status status = 1;
     }
     ````
 * Add `rpc ProvisionRelayGroup(...)` to `TransportService`.
-* **Orchestration:** Implement `IRelayGroupProvisioningService.ProvisionAsync()`. Validate inputs, create the ledger, map initial routing tokens, and save.
+* **Orchestration:** `IRelayGroupProvisioningService.ProvisionAsync()`. Validate inputs, create ledger, map PKHs to roster, and save.
 
 ---
 
 ### Chunk 4.2: The Fan-Out Engine & Concurrency
-**Goal:** Implement the message ingress, the ZK validation, the EF Core concurrency resolution, and the blind fan-out queue.
 
 **1. Cryptography Implementation (`Percolator.Cryptography`)**
-* Implement `IZkGroupCryptographyService`.
 * **CRITICAL Invocation:** `VerifyAuthCredentialWithPniPresentation` MUST be called inside a nested `using` block:
     ````csharp
     using var presentationHandle = SignalCrypto.DeserializeAuthCredentialWithPniPresentation(presentation.Span);
     using var groupPublicHandle = SignalCrypto.DeserializeGroupPublicParams(groupPublic.Span);
-    using var serverSecretHandle = SignalCrypto.GenerateServerSecretParams(serverSecretSeed.Span); // Generated from 32-byte seed
+    using var serverSecretHandle = SignalCrypto.GenerateServerSecretParams(serverSecretSeed.Span);
 
     SignalCrypto.VerifyAuthCredentialWithPniPresentation(presentationHandle, serverSecretHandle, groupPublicHandle, redemptionTime);
     ````
 
 **2. Network Contracts (`messaging.proto`)**
-* Define:
+* **Definitions:**
     ````protobuf
     message PublishGroupMessageRequest {
         optional bytes conversation_id = 1;
@@ -489,34 +521,34 @@ Implementation Requirements
         optional bytes zk_auth_presentation = 4;
         optional uint64 redemption_time = 5;
     }
-    
     message PublishGroupMessageResponse {
         enum Status { SUCCESS = 0; EPOCH_CONFLICT = 1; UNAUTHORIZED = 2; }
         Status status = 1;
         optional uint32 current_relay_epoch = 2;
     }
     ````
+* Add `rpc PublishGroupMessage(...)` to `TransportService`.
 
 **3. Infrastructure Repositories (`Percolator.Infrastructure/Chat`)**
 * **Concurrency:** In `IRelayGroupRepository.SaveAsync`, catch `DbUpdateConcurrencyException`:
     ````csharp
-    var dbValues = await ex.Entries.Single().GetDatabaseValuesAsync(ct); 
+    var dbValues = await ex.Entries.Single().GetDatabaseValuesAsync(ct);
+    if (dbValues == null) throw new LedgerDeletedDomainException();
     var winningEpoch = (uint)dbValues["Epoch"];
     throw new EpochConflictDomainException(winningEpoch);
     ````
-* **Identity Resolver:** Implement a service to translate `List<DestinationPkhBytes>` to `List<PeerId>`. Generate placeholder `PeerIdentityDbo` rows if PKHs are unknown.
-* **Queue Bulk Insert:** Implement `EnqueueFanOutAsync(List<PeerId> targets, byte[] blob)`. Instantiate `MessageQueueItemDbo` for each target, generating `AckId = Guid.NewGuid()`, and stage via `_dbContext.MessageQueueItems.AddRange()`.
+* **Identity Resolver:** Implement a service translating `List<DestinationPkhBytes>` to `List<PeerId>` using `IPeerIdentityRepository.FindByPublicKeyHashAsync()`, creating placeholder identities if null.
+* **Queue Bulk Insert:** Implement `EnqueueFanOutAsync(List<PeerId> targets, byte[] blob)`. Create `MessageQueueItemDbo` for each, generate `AckId = Guid.NewGuid()`, and stage via `AddRange()`.
 
 **4. Application Orchestration (`PublishAsync`)**
-* **The Flow:**
-  1. Authenticate: Pull Node Server Seed. Verify ZK presentation using `IZkGroupCryptographyService`.
-  2. Load: Call `IRelayGroupRepository.GetLedgerAsync()`.
-  3. Mutate: Call `ledger.AdvanceEpoch(request.Epoch)`.
-  4. Resolve Targets: Load `DestinationPkhBytes` from `RelayBlindedRosterDbo`. Resolve to `PeerId`s using Identity Resolver.
-  5. Queue: Call `IMessageQueueRepository.EnqueueFanOutAsync(...)`.
-  6. Commit: Call `IRelayGroupRepository.SaveAsync(ledger)` with concurrency resolution.
+* **Flow:**
+    1. Authenticate: Verify ZK proof. Return `UNAUTHORIZED` if false.
+    2. Load: Call `IRelayGroupRepository.GetLedgerAsync()`.
+    3. Mutate: Call `ledger.AdvanceEpoch(request.Epoch)`.
+    4. Resolve: Map `DestinationPkhBytes` to `PeerId`s.
+    5. Queue: Call `IMessageQueueRepository.EnqueueFanOutAsync(...)`.
+    6. Commit: Call `IRelayGroupRepository.SaveAsync(ledger)` with concurrency resolution.
 ---
-
 ## Chunk 5
 ### Feature Implementation Request: Signal Protocol Chunk 5 (Group Provisioning via Outbox)
 You are to implement Group Provisioning using an Outbox pattern to ensure group creation and subsequent invitations are atomic and resilient to network failures.
