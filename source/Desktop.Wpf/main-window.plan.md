@@ -465,7 +465,7 @@ Implementation Requirements
 
 **1. Domain Layer (`Percolator.Chat`)**
 * **Entity:** `RelayGroupLedger`.
-* **Properties:** `ConversationId ConversationId`, `uint CurrentEpoch`, `ZkGroupPublicParamsBytes GroupPublicParams`.
+* **Properties:** `Percolator.Chat.ValueObjects.ConversationId ConversationId` (Must use ValueObjects namespace), `uint CurrentEpoch`, `ZkGroupPublicParamsBytes GroupPublicParams`.
 * **Behavior:** `AdvanceEpoch(uint requestedEpoch)`. Throw `StaleEpochDomainException` if `requestedEpoch` <= `CurrentEpoch`.
 
 **2. Cryptography Domain (`Percolator.Cryptography`)**
@@ -478,8 +478,9 @@ Implementation Requirements
 * `IZkGroupCryptographyService` with `bool VerifyGroupPresentation(...)`.
 
 **3. Infrastructure (`Percolator.Infrastructure`)**
-* **FFI Extension:** Patch `signal_shim` and `SignalCrypto.cs` to expose `DeserializeGroupPublicParams(ReadOnlySpan<byte>)`.
+* **FFI Extension:** Add `[DllImport]` for `DeserializeGroupPublicParams` in `SignalCrypto.cs` to access the existing native `signal_zkgroup_group_public_params_deserialize`.
 * **Persistence:** Create `RelayGroupStateDbo` (`ConversationId`, `Epoch`, `GroupPublicParams`, `Version`) and `RelayBlindedRosterDbo` (`ConversationId`, `DestinationPkhBytes`).
+* **CQRS Identity Query:** Introduce `ISelfIdentityQueries { Task<byte[]?> GetZkServerSecretParamsSeedAsync(...) }`. **CRITICAL:** EF Core implementation MUST use `.AsNoTracking()`.
 
 **4. Network Contracts (`messaging.proto`)**
 * **Definitions:**
@@ -537,12 +538,12 @@ Implementation Requirements
     var winningEpoch = (uint)dbValues["Epoch"];
     throw new EpochConflictDomainException(winningEpoch);
     ````
-* **Identity Resolver:** Implement a service translating `List<DestinationPkhBytes>` to `List<PeerId>` using `IPeerIdentityRepository.FindByPublicKeyHashAsync()`, creating placeholder identities if null.
+* **Identity Resolver:** Implement a service translating `List<DestinationPkhBytes>` to `List<PeerIdentity>` using `IPeerIdentityRepository.FindByPublicKeyHashAsync()`. If null, create a new `PeerIdentity` domain entity and call `SaveAsync()`.
 * **Queue Bulk Insert:** Implement `EnqueueFanOutAsync(List<PeerId> targets, byte[] blob)`. Create `MessageQueueItemDbo` for each, generate `AckId = Guid.NewGuid()`, and stage via `AddRange()`.
 
 **4. Application Orchestration (`PublishAsync`)**
 * **Flow:**
-    1. Authenticate: Verify ZK proof. Return `UNAUTHORIZED` if false.
+    1. Authenticate: Call `ISelfIdentityQueries.GetZkServerSecretParamsSeedAsync`. Return `UNAUTHORIZED` if null (Relay Mode disabled). Verify ZK proof. Return `UNAUTHORIZED` if false.
     2. Load: Call `IRelayGroupRepository.GetLedgerAsync()`.
     3. Mutate: Call `ledger.AdvanceEpoch(request.Epoch)`.
     4. Resolve: Map `DestinationPkhBytes` to `PeerId`s.
