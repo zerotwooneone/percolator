@@ -2,7 +2,6 @@ using System.Security.Cryptography;
 using Google.Protobuf;
 using Microsoft.Extensions.Logging;
 using MediatR;
-using Percolator.Application.Chat;
 using Percolator.Application.ReverseSignal;
 using Percolator.Contracts;
 using Percolator.Cryptography;
@@ -17,7 +16,6 @@ namespace Percolator.Application.Network
     {
         private readonly ILogger<EstablishDirectSessionService> _logger;
         private readonly ISelfIdentityKeysStore _keysStore;
-        private readonly IPeerIdentityQueries _peerIdentityQueries;
         private readonly IPeerIdentityRepository _peerIdentityRepository;
         private readonly Percolator.Network.ISigningService _signingService;
         private readonly IPendingSessionRepository _pendingSessions;
@@ -28,7 +26,6 @@ namespace Percolator.Application.Network
         public EstablishDirectSessionService(
             ILogger<EstablishDirectSessionService> logger,
             ISelfIdentityKeysStore keysStore,
-            IPeerIdentityQueries peerIdentityQueries,
             IPeerIdentityRepository peerIdentityRepository,
             Percolator.Network.ISigningService signingService,
             IPendingSessionRepository pendingSessions,
@@ -38,7 +35,6 @@ namespace Percolator.Application.Network
         {
             _logger = logger;
             _keysStore = keysStore;
-            _peerIdentityQueries = peerIdentityQueries;
             _peerIdentityRepository = peerIdentityRepository;
             _signingService = signingService;
             _pendingSessions = pendingSessions;
@@ -189,26 +185,12 @@ namespace Percolator.Application.Network
 
             // Resolve or create peer identity by PKH
             var initiatorPkh = SHA256.HashData(inviterIdentityKeySpki);
-            var peerId = await _peerIdentityQueries.GetPeerIdByPkhAsync(Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(initiatorPkh), cancellationToken).ConfigureAwait(false);
-            
-            if (peerId == null)
+            var identity = await _peerIdentityRepository.FindByPublicKeyHashAsync(Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(initiatorPkh), cancellationToken).ConfigureAwait(false);
+            if (identity is null)
             {
                 var newId = Percolator.Identity.PeerId.NewId();
                 var hex = Convert.ToHexString(initiatorPkh);
-                var identity = new PeerIdentity(newId);
-                identity.SetDisplayName(new DisplayName($"Peer-{hex.Substring(0, Math.Min(12, hex.Length))}"));
-                var now = _clock.UtcNow;
-                identity.AddKey(inviterIdentityKeySpki, notBefore: now, expiresAt: now.AddYears(100), now: now);
-                await _peerIdentityRepository.SaveAsync(identity, cancellationToken).ConfigureAwait(false);
-                peerId = identity.PeerId;
-            }
-            
-            var identity = await _peerIdentityRepository.GetByIdAsync(peerId, cancellationToken).ConfigureAwait(false);
-            if (identity == null)
-            {
-                // PeerId exists but no identity - recreate
-                var hex = Convert.ToHexString(initiatorPkh);
-                identity = new PeerIdentity(peerId);
+                identity = new PeerIdentity(newId);
                 identity.SetDisplayName(new DisplayName($"Peer-{hex.Substring(0, Math.Min(12, hex.Length))}"));
                 var now = _clock.UtcNow;
                 identity.AddKey(inviterIdentityKeySpki, notBefore: now, expiresAt: now.AddYears(100), now: now);

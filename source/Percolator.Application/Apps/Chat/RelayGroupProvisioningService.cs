@@ -3,6 +3,7 @@ using Percolator.Chat;
 using Percolator.Chat.ValueObjects;
 using Percolator.Contracts;
 using Percolator.Cryptography;
+using Percolator.Identity;
 
 namespace Percolator.Application.Apps.Chat;
 
@@ -27,7 +28,7 @@ public sealed class RelayGroupProvisioningService : IRelayGroupProvisioningServi
             return new ProvisionRelayGroupResponse { Status = ProvisionRelayGroupResponse.Types.Status.AlreadyExists };
         }
 
-        var conversationId = ConversationId.FromBytesOwned(request.ConversationId.ToByteArray());
+        var conversationId = new ConversationId(new Guid(request.ConversationId.ToByteArray()));
 
         // Check if ledger already exists
         var existingLedger = await _relayGroupRepository.GetLedgerAsync(conversationId, ct);
@@ -41,14 +42,15 @@ public sealed class RelayGroupProvisioningService : IRelayGroupProvisioningServi
         var ledger = new RelayGroupLedger(conversationId, 0, groupPublicParams);
 
         // Map PKHs to blinded roster
-        var roster = new List<Percolator.Identity.Model.IdentityPublicKeyHash>();
+        var roster = new List<IdentityPublicKeyHash>();
         foreach (var routingToken in request.InitialRoutingTokens)
         {
-            roster.Add(Percolator.Identity.Model.IdentityPublicKeyHash.FromBytesOwned(routingToken.ToByteArray()));
+            roster.Add(IdentityPublicKeyHash.FromBytesOwned(routingToken.ToByteArray()));
         }
 
+        note("need to add roster to ledger?");
         // Save ledger and roster
-        await _relayGroupRepository.SaveAsync(ledger, roster, ct);
+        await _relayGroupRepository.SaveAsync(ledger, ct).ConfigureAwait(false);
 
         return new ProvisionRelayGroupResponse { Status = ProvisionRelayGroupResponse.Types.Status.Success };
     }

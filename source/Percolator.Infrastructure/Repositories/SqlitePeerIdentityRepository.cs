@@ -45,6 +45,16 @@ public sealed class SqlitePeerIdentityRepository : IPeerIdentityRepository
         return await GetByIdAsync(new PeerId(row.PeerId), ct);
     }
 
+    public async Task<PeerIdentity?> FindByPublicKeyHashAsync(IdentityPublicKeyHash fingerprint, CancellationToken ct = default)
+    {
+        var row = await _db.PeerIdentityKeys_V2.AsNoTracking()
+            .Where(k => k.Fingerprint != null && k.Fingerprint.SequenceEqual(fingerprint.ToArray()))
+            .Select(k => k.PeerId)
+            .FirstOrDefaultAsync(ct);
+        if (row == Guid.Empty) return null;
+        return await GetByIdAsync(new PeerId(row), ct);
+    }
+
     public async Task SaveAsync(PeerIdentity peer, CancellationToken ct = default)
     {
         var now = DateTimeOffset.UtcNow;

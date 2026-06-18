@@ -48,7 +48,7 @@ public sealed class SqliteRelayGroupRepository : IRelayGroupRepository
         }
 
         existing.Epoch = ledger.CurrentEpoch;
-        existing.GroupPublicParams = ledger.GroupPublicParams.Value;
+        existing.GroupPublicParams = ledger.GroupPublicParams.ToArray();
         // Version is incremented automatically by EF Core's concurrency token
 
         try
@@ -74,7 +74,7 @@ public sealed class SqliteRelayGroupRepository : IRelayGroupRepository
         {
             ConversationId = ledger.ConversationId.Value,
             Epoch = ledger.CurrentEpoch,
-            GroupPublicParams = ledger.GroupPublicParams.Value,
+            GroupPublicParams = ledger.GroupPublicParams.ToArray(),
             Version = 0
         };
         db.RelayGroupStates.Add(newDbo);
