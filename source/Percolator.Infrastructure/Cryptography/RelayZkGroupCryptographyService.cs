@@ -1,11 +1,13 @@
 using Signal.Interop;
+using Percolator.Cryptography;
 
-namespace Percolator.Cryptography;
+namespace Percolator.Infrastructure.Cryptography;
 
 /// <summary>
-/// Implementation of ZK group cryptography using Signal.Interop native functions.
+/// Infrastructure implementation of IZkGroupCryptographyService using Signal.Interop native functions.
+/// This service handles all native FFI integration and SafeHandle management for Relay ZK operations.
 /// </summary>
-public sealed class ZkGroupCryptographyService : IZkGroupCryptographyService
+public sealed class RelayZkGroupCryptographyService : IZkGroupCryptographyService
 {
     public bool VerifyGroupPresentation(
         ZkPresentationBytes presentation,

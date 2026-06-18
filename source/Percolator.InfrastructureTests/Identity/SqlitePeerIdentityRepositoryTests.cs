@@ -1,7 +1,10 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Internal;
+using Percolator.Application.Chat;
 using Percolator.Identity;
 using Percolator.Identity.Model;
+using Percolator.Infrastructure.Identity;
 using Percolator.Infrastructure.Persistence;
 using Percolator.Infrastructure.Repositories;
 
@@ -53,6 +56,7 @@ public class SqlitePeerIdentityRepositoryTests
         conn.Open();
         await using var db = CreateContext(conn);
         var repo = new SqlitePeerIdentityRepository(db);
+        var queries = new PeerIdentityQueries(new DbContextFactory<PercolatorDbContext>(db));
 
         var now = DateTimeOffset.UtcNow;
         var aggregate = new PeerIdentity(new PeerId(Guid.NewGuid()));
@@ -60,9 +64,9 @@ public class SqlitePeerIdentityRepositoryTests
         await repo.SaveAsync(aggregate);
 
         var fp = aggregate.GetActiveKey(now)!.Fingerprint;
-        var loaded = await repo.FindByPublicKeyHashAsync(fp);
-        Assert.That(loaded, Is.Not.Null);
-        Assert.That(loaded!.Id, Is.EqualTo(aggregate.Id));
+        var peerId = await queries.GetPeerIdByPkhAsync(fp);
+        Assert.That(peerId, Is.Not.Null);
+        Assert.That(peerId, Is.EqualTo(aggregate.Id));
     }
 
     [Test]

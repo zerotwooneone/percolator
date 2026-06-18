@@ -1,4 +1,3 @@
-using Percolator.Cryptography;
 using Percolator.Identity;
 
 namespace Percolator.Application.Chat;
@@ -12,5 +11,5 @@ public interface IRelayTargetResolver
     /// Resolves a list of destination PKH bytes to PeerId entities.
     /// Creates new PeerIdentity aggregates if they don't exist.
     /// </summary>
-    Task<List<PeerId>> ResolveTargetsAsync(List<byte[]> destinationPkhBytes, CancellationToken ct = default);
+    Task<List<PeerId>> ResolveTargetsAsync(List<IdentityPublicKeyHash> destinationPkhBytes, CancellationToken ct = default);
 }

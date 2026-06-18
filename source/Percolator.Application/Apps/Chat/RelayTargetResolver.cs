@@ -1,6 +1,6 @@
 using Percolator.Application.Chat;
-using Percolator.Cryptography;
 using Percolator.Identity;
+using Percolator.Identity.Model;
 
 namespace Percolator.Application.Apps.Chat;
 
@@ -9,34 +9,38 @@ namespace Percolator.Application.Apps.Chat;
 /// </summary>
 public sealed class RelayTargetResolver : IRelayTargetResolver
 {
+    private readonly IPeerIdentityQueries _peerIdentityQueries;
     private readonly IPeerIdentityRepository _peerIdentityRepository;
 
-    public RelayTargetResolver(IPeerIdentityRepository peerIdentityRepository)
+    public RelayTargetResolver(
+        IPeerIdentityQueries peerIdentityQueries,
+        IPeerIdentityRepository peerIdentityRepository)
     {
+        _peerIdentityQueries = peerIdentityQueries;
         _peerIdentityRepository = peerIdentityRepository;
     }
 
-    public async Task<List<PeerId>> ResolveTargetsAsync(List<byte[]> destinationPkhBytes, CancellationToken ct = default)
+    public async Task<List<PeerId>> ResolveTargetsAsync(List<IdentityPublicKeyHash> destinationPkhBytes, CancellationToken ct = default)
     {
         var peerIds = new List<PeerId>();
 
         foreach (var pkhBytes in destinationPkhBytes)
         {
-            var peerIdentity = await _peerIdentityRepository.FindByPublicKeyHashAsync(pkhBytes, ct);
+            var peerId = await _peerIdentityQueries.GetPeerIdByPkhAsync(pkhBytes, ct);
 
-            if (peerIdentity == null)
+            if (peerId == null)
             {
                 // Create a new placeholder PeerIdentity aggregate
                 var newPeerIdentity = new PeerIdentity(
                     name: $"Unknown_{Guid.NewGuid():N}",
-                    publicKeyHash: pkhBytes);
+                    publicKeyHash: pkhBytes.Span.ToArray());
                 
                 await _peerIdentityRepository.SaveAsync(newPeerIdentity, ct);
                 peerIds.Add(newPeerIdentity.PeerId);
             }
             else
             {
-                peerIds.Add(peerIdentity.PeerId);
+                peerIds.Add(peerId);
             }
         }
 
