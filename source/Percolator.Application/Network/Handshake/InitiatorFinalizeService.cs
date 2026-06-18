@@ -1,5 +1,6 @@
 using MediatR;
 using Microsoft.Extensions.Logging;
+using Percolator.Application.Chat;
 using Percolator.Application.KeyExchange;
 using Percolator.Application.Services;
 using Percolator.Cryptography;
@@ -8,6 +9,7 @@ using Percolator.Contracts;
 using Percolator.Identity;
 using Percolator.Identity.Model;
 using Percolator.Network;
+using System.Security.Cryptography;
 
 namespace Percolator.Application.Network.Handshake
 {
@@ -22,6 +24,7 @@ namespace Percolator.Application.Network.Handshake
         private readonly ISessionCrypto _sessionCrypto;
         private readonly ISentInvitationRepository _sentInvitations;
         private readonly ISelfPreKeyBundleRepository _selfPreKeys;
+        private readonly IPeerIdentityQueries _peerIdentityQueries;
         private readonly IPeerIdentityRepository _peerIdentities;
         private readonly IDirectSessionMappingWriter _directSessionMappingWriter;
         private readonly IPeerRoutingProfileRepository _routingProfiles;
@@ -40,6 +43,7 @@ namespace Percolator.Application.Network.Handshake
             ISessionCrypto sessionCrypto,
             ISentInvitationRepository sentInvitations,
             ISelfPreKeyBundleRepository selfPreKeys,
+            IPeerIdentityQueries peerIdentityQueries,
             IPeerIdentityRepository peerIdentities,
             IDirectSessionMappingWriter directSessionMappingWriter,
             IPeerRoutingProfileRepository routingProfiles,
@@ -57,6 +61,7 @@ namespace Percolator.Application.Network.Handshake
             _sessionCrypto = sessionCrypto;
             _sentInvitations = sentInvitations;
             _selfPreKeys = selfPreKeys;
+            _peerIdentityQueries = peerIdentityQueries;
             _peerIdentities = peerIdentities;
             _directSessionMappingWriter = directSessionMappingWriter;
             _routingProfiles = routingProfiles;
@@ -146,13 +151,24 @@ namespace Percolator.Application.Network.Handshake
             PeerIdentity? peerIdentity = null;
             try
             {
-                peerIdentity = await _peerIdentities.FindByPublicKeyHashAsync(Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(remotePkh), cancellationToken).ConfigureAwait(false);
-                if (peerIdentity is null)
+                var peerId = await _peerIdentityQueries.GetPeerIdByPkhAsync(Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(remotePkh), cancellationToken).ConfigureAwait(false);
+                if (peerId == null)
                 {
                     var newId = Percolator.Identity.PeerId.NewId();
                     peerIdentity = new PeerIdentity(newId);
                     var now = _clock.UtcNow;
                     peerIdentity.AddKey(response.AcceptorIdentityKey.ToByteArray(), notBefore: now, expiresAt: now.AddYears(100), now: now);
+                }
+                else
+                {
+                    peerIdentity = await _peerIdentities.GetByIdAsync(peerId, cancellationToken).ConfigureAwait(false);
+                    if (peerIdentity == null)
+                    {
+                        // PeerId exists but no identity - recreate
+                        peerIdentity = new PeerIdentity(peerId);
+                        var now = _clock.UtcNow;
+                        peerIdentity.AddKey(response.AcceptorIdentityKey.ToByteArray(), notBefore: now, expiresAt: now.AddYears(100), now: now);
+                    }
                 }
 
                 if (peerIdentity.DisplayName is null && !string.IsNullOrWhiteSpace(sentInvitation.TargetDisplayName))
@@ -489,13 +505,24 @@ namespace Percolator.Application.Network.Handshake
             PeerIdentity? peerIdentity = null;
             try
             {
-                peerIdentity = await _peerIdentities.FindByPublicKeyHashAsync(Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(remotePkh), cancellationToken).ConfigureAwait(false);
-                if (peerIdentity is null)
+                var peerId = await _peerIdentityQueries.GetPeerIdByPkhAsync(Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(remotePkh), cancellationToken).ConfigureAwait(false);
+                if (peerId == null)
                 {
                     var newId = Percolator.Identity.PeerId.NewId();
                     peerIdentity = new PeerIdentity(newId);
                     var now = _clock.UtcNow;
-                    peerIdentity.AddKey(remoteIdentitySpki, notBefore: now, expiresAt: now.AddYears(100), now: now);
+                    peerIdentity.AddKey(response.AcceptorIdentityKey.ToByteArray(), notBefore: now, expiresAt: now.AddYears(100), now: now);
+                }
+                else
+                {
+                    peerIdentity = await _peerIdentities.GetByIdAsync(peerId, cancellationToken).ConfigureAwait(false);
+                    if (peerIdentity == null)
+                    {
+                        // PeerId exists but no identity - recreate
+                        peerIdentity = new PeerIdentity(peerId);
+                        var now = _clock.UtcNow;
+                        peerIdentity.AddKey(response.AcceptorIdentityKey.ToByteArray(), notBefore: now, expiresAt: now.AddYears(100), now: now);
+                    }
                 }
 
                 if (peerIdentity.DisplayName is null && sentInvitation is not null && !string.IsNullOrWhiteSpace(sentInvitation.TargetDisplayName))

@@ -31,12 +31,12 @@ public sealed class RelayTargetResolver : IRelayTargetResolver
             if (peerId == null)
             {
                 // Create a new placeholder PeerIdentity aggregate
-                var newId = Percolator.Identity.PeerId.NewId();
-                var newPeerIdentity = new PeerIdentity(newId);
-                newPeerIdentity.SetDisplayName(new DisplayName($"Unknown_{Guid.NewGuid():N}"));
+                var newPeerIdentity = new PeerIdentity(
+                    name: $"Unknown_{Guid.NewGuid():N}",
+                    publicKeyHash: pkhBytes.Span.ToArray());
                 
                 await _peerIdentityRepository.SaveAsync(newPeerIdentity, ct);
-                peerIds.Add(newPeerIdentity.Id);
+                peerIds.Add(newPeerIdentity.PeerId);
             }
             else
             {
