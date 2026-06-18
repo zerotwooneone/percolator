@@ -14,10 +14,6 @@ public interface IMessageQueueRepository
         byte[] messageBlob,
         CancellationToken cancellationToken);
 
-    // Bulk enqueue for fan-out: stages multiple MessageQueueItemDbo entries via AddRange().
-    // The caller is responsible for calling SaveChangesAsync to commit the staged items.
-    Task EnqueueFanOutAsync(List<PeerId> targets, byte[] blob, CancellationToken cancellationToken);
-
     // Fetch up to maxCount oldest messages for the specified recipient WITHOUT deleting them.
     // Returns (AckId, Blob) pairs in enqueue order (oldest first).
     Task<IReadOnlyList<(Guid AckId, byte[] Blob)>> FetchAsync(

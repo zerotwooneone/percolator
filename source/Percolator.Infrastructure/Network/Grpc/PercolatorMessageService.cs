@@ -22,8 +22,6 @@ public class PercolatorMessageService : TransportService.TransportServiceBase
     private readonly ActiveIdentityContext _active;
     private readonly ILocalIdentitySigner _localIdentitySigner;
     private readonly ISelfIdentityQueries _selfIdentityQueries;
-    private readonly IRelayGroupProvisioningService _relayGroupProvisioningService;
-    private readonly IRelayGroupLedgerService _relayGroupLedgerService;
 
     public PercolatorMessageService(
         ILogger<PercolatorMessageService> logger,
@@ -33,9 +31,7 @@ public class PercolatorMessageService : TransportService.TransportServiceBase
         IStandardHandshakeIngress standardHandshakeIngress,
         ActiveIdentityContext active,
         ILocalIdentitySigner localIdentitySigner,
-        ISelfIdentityQueries selfIdentityQueries,
-        IRelayGroupProvisioningService relayGroupProvisioningService,
-        IRelayGroupLedgerService relayGroupLedgerService)
+        ISelfIdentityQueries selfIdentityQueries)
     {
         _logger = logger;
         _messageIngress = messageIngress;
@@ -45,8 +41,6 @@ public class PercolatorMessageService : TransportService.TransportServiceBase
         _active = active;
         _localIdentitySigner = localIdentitySigner;
         _selfIdentityQueries = selfIdentityQueries;
-        _relayGroupProvisioningService = relayGroupProvisioningService;
-        _relayGroupLedgerService = relayGroupLedgerService;
     }
 
     public override Task<EstablishSessionResponse> EstablishSession(EstablishSessionRequest request, ServerCallContext context)
@@ -221,25 +215,5 @@ public class PercolatorMessageService : TransportService.TransportServiceBase
                 Signature = Google.Protobuf.ByteString.CopyFrom(signature.Span)
             }
         };
-    }
-
-    public override async Task<ProvisionRelayGroupResponse> ProvisionRelayGroup(ProvisionRelayGroupRequest request, ServerCallContext context)
-    {
-        if (_active.Identity is null)
-        {
-            throw new RpcException(new Status(StatusCode.FailedPrecondition, "Active identity not loaded."));
-        }
-
-        return await _relayGroupProvisioningService.ProvisionAsync(request, context.CancellationToken).ConfigureAwait(false);
-    }
-
-    public override async Task<PublishGroupMessageResponse> PublishGroupMessage(PublishGroupMessageRequest request, ServerCallContext context)
-    {
-        if (_active.Identity is null)
-        {
-            throw new RpcException(new Status(StatusCode.FailedPrecondition, "Active identity not loaded."));
-        }
-
-        return await _relayGroupLedgerService.PublishAsync(request, context.CancellationToken).ConfigureAwait(false);
     }
 }

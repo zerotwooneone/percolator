@@ -29,12 +29,6 @@ service TransportService {
 
     // Requests a delivery certificate from the relay for sealed sender authentication.
     rpc GetDeliveryCertificate(GetDeliveryCertificateRequest) returns (GetDeliveryCertificateResponse);
-
-    // Provisions a new group on the Relay's encrypted ledger.
-    rpc ProvisionRelayGroup(ProvisionRelayGroupRequest) returns (ProvisionRelayGroupResponse);
-
-    // Publishes a message to a group on the Relay's encrypted ledger.
-    rpc PublishGroupMessage(PublishGroupMessageRequest) returns (PublishGroupMessageResponse);
 }
 
 message DeliverInviteHandshakeResponseAck {
@@ -57,46 +51,6 @@ message GetDeliveryCertificateRequest {
 message GetDeliveryCertificateResponse {
     optional uint32 version = 1;
     optional DeliveryCertificate certificate = 2;
-}
-
-// Request to provision a new group on the Relay's encrypted ledger
-message ProvisionRelayGroupRequest {
-    optional uint32 version = 1;
-    optional bytes conversation_id = 2;
-    optional bytes group_public_params = 3;
-    repeated bytes initial_routing_tokens = 4;
-}
-
-// Response for group provisioning
-message ProvisionRelayGroupResponse {
-    enum Status {
-        SUCCESS = 0;
-        ALREADY_EXISTS = 1;
-    }
-    optional uint32 version = 1;
-    Status status = 2;
-}
-
-// Request to publish a message to a group on the Relay's encrypted ledger
-message PublishGroupMessageRequest {
-    optional uint32 version = 1;
-    optional bytes conversation_id = 2;
-    optional bytes ciphertext = 3;
-    optional uint32 epoch = 4;
-    optional bytes zk_auth_presentation = 5;
-    optional uint64 redemption_time = 6;
-}
-
-// Response for group message publishing
-message PublishGroupMessageResponse {
-    enum Status {
-        SUCCESS = 0;
-        EPOCH_CONFLICT = 1;
-        UNAUTHORIZED = 2;
-    }
-    optional uint32 version = 1;
-    Status status = 2;
-    optional uint32 current_relay_epoch = 3;
 }
 
 // Represents the public cryptographic materials needed to establish a secure session.

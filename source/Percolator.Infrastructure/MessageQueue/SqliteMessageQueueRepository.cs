@@ -74,20 +74,6 @@ public class SqliteMessageQueueRepository : IMessageQueueRepository
         return (uint)cnt;
     }
 
-    public async Task EnqueueFanOutAsync(List<PeerId> targets, byte[] blob, CancellationToken cancellationToken)
-    {
-        var items = targets.Select(target => new MessageQueueItemDbo
-        {
-            AckId = Guid.NewGuid(),
-            RecipientPeerId = target,
-            Blob = blob,
-            EnqueuedAtUtc = DateTimeOffset.UtcNow
-        }).ToList();
-
-        _db.MessageQueueItems.AddRange(items);
-        await _db.SaveChangesAsync(cancellationToken);
-    }
-
     public async Task<IReadOnlyList<(Guid AckId, byte[] Blob)>> FetchAsync(PeerId recipientPeerId, int maxCount, CancellationToken cancellationToken)
     {
         if (maxCount <= 0)
