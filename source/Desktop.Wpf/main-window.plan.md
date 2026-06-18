@@ -555,16 +555,18 @@ Implementation Requirements
     var winningEpoch = (uint)dbValues["Epoch"];
     throw new EpochConflictDomainException(winningEpoch);
     ````
-* **Identity Resolver:** Implement `IRelayTargetResolver` (in `Percolator.Application/Chat`) translating `List<DestinationPkhBytes>` to `List<Percolator.Identity.PeerId>` using `IPeerIdentityRepository.FindByPublicKeyHashAsync()`, creating new `PeerIdentity` aggregates if null.
-* **Queue Bulk Insert:** Implement `EnqueueFanOutAsync(List<Percolator.Identity.PeerId> targets, byte[] blob)`. Create `MessageQueueItemDbo` for each, generate `AckId = Guid.NewGuid()`, and stage via `AddRange()`.
+* **Identity Resolver:** Implement `IRelayTargetResolver` (in `Percolator.Application/Chat`) translating `List<Percolator.Identity.IdentityPublicKeyHash>` to `List<Percolator.Identity.PeerId>`.
+  * *Critical DDD Boundary Constraint:* The resolver accepts the Identity domain's `Percolator.Identity.IdentityPublicKeyHash` primitive to call `IPeerIdentityRepository.FindByPublicKeyHashAsync()`. The `Identity` domain must never depend on the `Cryptography` domain types.
+* **Queue Bulk Insert:** Implement `EnqueueFanOutAsync(List<Percolator.Identity.PeerId> targets, byte[] blob)` on `IMessageQueueRepository`.
+  * *Critical DDD Boundary Constraint:* The Message Queue is an opaque transport mechanism and must not leak Application/Cryptography types into its persistence schema. Raw bytes are extracted before queuing.
 
 **4. Application Orchestration (`PublishAsync`)**
 * **Flow:**
-  1. Authenticate: Call `ISelfIdentityQueries.GetZkServerSecretParamsSeedAsync`. Return `UNAUTHORIZED` if null (Relay Mode disabled). Verify ZK proof. Return `UNAUTHORIZED` if false.
+  1. Authenticate: Call `ISelfIdentityQueries.GetZkServerSecretParamsSeedAsync`. Return `UNAUTHORIZED` if null. Map primitive bytes to `ZkServerSecretParamsSeedBytes` via `.FromBytesOwned()` to avoid allocations when taking ownership of bytes from the DB/Network.
   2. Load: Call `IRelayGroupRepository.GetLedgerAsync()`.
-  3. Mutate: Call `ledger.AdvanceEpoch(request.Epoch)`.
-  4. Resolve: Map `DestinationPkhBytes` to `Percolator.Identity.PeerId`s via `IRelayTargetResolver`.
-  5. Queue: Call `IMessageQueueRepository.EnqueueFanOutAsync(...)`.
+  3. Mutate: Call `ledger.AdvanceEpoch(request.Epoch)`. Verify ZK proof via `IZkGroupCryptographyService`.
+  4. Resolve: Map raw DBO `byte[]` arrays to `IdentityPublicKeyHash` via `.FromBytesOwned()` since the EF entity creates/owns the arrays, then call `IRelayTargetResolver`.
+  5. Queue: Call `IMessageQueueRepository.EnqueueFanOutAsync(...)` passing the extracted raw bytes.
   6. Commit: Call `IRelayGroupRepository.SaveAsync(ledger)` with concurrency resolution.
 ---
 ## Chunk 5
