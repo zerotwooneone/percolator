@@ -1,8 +1,11 @@
+using Microsoft.EntityFrameworkCore;
 using Percolator.Application.Chat;
 using Percolator.Chat;
 using Percolator.Chat.ValueObjects;
 using Percolator.Contracts;
 using Percolator.Cryptography;
+using Percolator.Infrastructure.Chat.Persistence;
+using Percolator.Infrastructure.Persistence;
 using Percolator.MessageQueue.Abstractions;
 
 namespace Percolator.Application.Apps.Chat;
@@ -13,26 +16,26 @@ namespace Percolator.Application.Apps.Chat;
 public sealed class RelayGroupLedgerService : IRelayGroupLedgerService
 {
     private readonly IRelayGroupRepository _relayGroupRepository;
-    private readonly IRelayBlindedRosterQueries _relayBlindedRosterQueries;
     private readonly ISelfIdentityQueries _selfIdentityQueries;
     private readonly IZkGroupCryptographyService _zkGroupCryptographyService;
     private readonly IRelayTargetResolver _relayTargetResolver;
     private readonly IMessageQueueRepository _messageQueueRepository;
+    private readonly IDbContextFactory<PercolatorDbContext> _dbFactory;
 
     public RelayGroupLedgerService(
         IRelayGroupRepository relayGroupRepository,
-        IRelayBlindedRosterQueries relayBlindedRosterQueries,
         ISelfIdentityQueries selfIdentityQueries,
         IZkGroupCryptographyService zkGroupCryptographyService,
         IRelayTargetResolver relayTargetResolver,
-        IMessageQueueRepository messageQueueRepository)
+        IMessageQueueRepository messageQueueRepository,
+        IDbContextFactory<PercolatorDbContext> dbFactory)
     {
         _relayGroupRepository = relayGroupRepository;
-        _relayBlindedRosterQueries = relayBlindedRosterQueries;
         _selfIdentityQueries = selfIdentityQueries;
         _zkGroupCryptographyService = zkGroupCryptographyService;
         _relayTargetResolver = relayTargetResolver;
         _messageQueueRepository = messageQueueRepository;
+        _dbFactory = dbFactory;
     }
 
     public async Task<PublishGroupMessageResponse> PublishAsync(PublishGroupMessageRequest request, CancellationToken ct = default)
@@ -61,8 +64,8 @@ public sealed class RelayGroupLedgerService : IRelayGroupLedgerService
 
         // Verify ZK proof
         var presentation = ZkPresentationBytes.FromBytesOwned(request.ZkAuthPresentation.ToByteArray());
-        var serverSecretSeedBytes = ZkServerSecretParamsSeedBytes.FromSpan(serverSecretSeed);
-        var groupPublicParams = ZkGroupPublicParamsBytes.FromSpan(ledger.GroupPublicParams.Span);
+        var serverSecretSeedBytes = ZkServerSecretParamsSeedBytes.FromBytesOwned(serverSecretSeed);
+        var groupPublicParams = ZkGroupPublicParamsBytes.FromBytesOwned(ledger.GroupPublicParams.Value);
 
         bool proofValid;
         try
@@ -98,16 +101,17 @@ public sealed class RelayGroupLedgerService : IRelayGroupLedgerService
         }
 
         // 4. Resolve: Get blinded roster PKHs
-        var destinationPkhBytes = await _relayBlindedRosterQueries.GetBlindedRosterAsync(conversationId, ct);
-        var destinationPkhs = destinationPkhBytes
-            .Select(x => Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(x))
-            .ToList();
-            
-        var peerIds = await _relayTargetResolver.ResolveTargetsAsync(destinationPkhs, ct);
+        using var db = _dbFactory.CreateDbContext();
+        var destinationPkhBytes = await db.RelayBlindedRosters
+            .AsNoTracking()
+            .Where(x => x.ConversationId == conversationId.Value)
+            .Select(x => x.DestinationPkhBytes)
+            .ToListAsync(ct);
 
-        // 5. Queue: Fan out the message (extract bytes since the queue is opaque transport)
-        var ciphertext = GroupCiphertextBytes.FromBytesOwned(request.Ciphertext.ToByteArray());
-        await _messageQueueRepository.EnqueueFanOutAsync(peerIds, ciphertext.Span.ToArray(), ct);
+        var peerIds = await _relayTargetResolver.ResolveTargetsAsync(destinationPkhBytes, ct);
+
+        // 5. Queue: Fan out the message
+        await _messageQueueRepository.EnqueueFanOutAsync(peerIds, request.Ciphertext.ToByteArray(), ct);
 
         // 6. Commit: Save ledger with concurrency resolution
         try

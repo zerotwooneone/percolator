@@ -3,7 +3,6 @@ using Google.Protobuf;
 using MediatR;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
-using Percolator.Application.Chat;
 using Percolator.Application.KeyExchange;
 using Percolator.Application.Network;
 using Percolator.Application.Services;
@@ -78,12 +77,8 @@ public sealed class StandardHandshakeIngressTests
         peerIdentity.AddKey(new byte[32], clock.UtcNow, clock.UtcNow.AddYears(100), clock.UtcNow);
         
         var peerIdentities = new Mock<IPeerIdentityRepository>(MockBehavior.Strict);
-        var peerQueries = new Mock<IPeerIdentityQueries>(MockBehavior.Strict);
-        peerQueries
-            .Setup(s => s.GetPeerIdByPkhAsync(It.IsAny<IdentityPublicKeyHash>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(peerId);
         peerIdentities
-            .Setup(s => s.GetByIdAsync(It.IsAny<PeerId>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.FindByPublicKeyHashAsync(It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(peerIdentity);
         peerIdentities
             .Setup(s => s.SaveAsync(It.IsAny<PeerIdentity>(), It.IsAny<CancellationToken>()))
@@ -113,7 +108,6 @@ public sealed class StandardHandshakeIngressTests
             sessions.Object,
             directSessionMappingWriter.Object,
             clock,
-            peerQueries.Object,
             peerIdentities.Object,
             signingService.Object,
             mediator.Object,
@@ -184,12 +178,8 @@ public sealed class StandardHandshakeIngressTests
         peerIdentity.AddKey(new byte[32], clock.UtcNow, clock.UtcNow.AddYears(100), clock.UtcNow);
         
         var peerIdentities = new Mock<IPeerIdentityRepository>(MockBehavior.Strict);
-        var peerQueries = new Mock<IPeerIdentityQueries>(MockBehavior.Strict);
-        peerQueries
-            .Setup(s => s.GetPeerIdByPkhAsync(It.IsAny<IdentityPublicKeyHash>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(peerId);
         peerIdentities
-            .Setup(s => s.GetByIdAsync(It.IsAny<PeerId>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.FindByPublicKeyHashAsync(It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(peerIdentity);
         peerIdentities
             .Setup(s => s.SaveAsync(It.IsAny<PeerIdentity>(), It.IsAny<CancellationToken>()))
@@ -219,7 +209,6 @@ public sealed class StandardHandshakeIngressTests
             sessions.Object,
             directSessionMappingWriter.Object,
             clock,
-            peerQueries.Object,
             peerIdentities.Object,
             signingService.Object,
             mediator.Object,

@@ -9,7 +9,7 @@ namespace Percolator.Infrastructure.Repositories;
 public sealed class SqlitePeerIdentityRepository : IPeerIdentityRepository
 {
     private readonly PercolatorDbContext _db;
-    public SqlitePeerIdentityRepository(PercolatorDbContext db) => _db = _db;
+    public SqlitePeerIdentityRepository(PercolatorDbContext db) => _db = db;
 
     public async Task<PeerIdentity?> GetByIdAsync(PeerId id, CancellationToken ct = default)
     {
@@ -43,6 +43,16 @@ public sealed class SqlitePeerIdentityRepository : IPeerIdentityRepository
             .FirstOrDefaultAsync(p => p.Name == name.Value, ct);
         if (row == null) return null;
         return await GetByIdAsync(new PeerId(row.PeerId), ct);
+    }
+
+    public async Task<PeerIdentity?> FindByPublicKeyHashAsync(byte[] fingerprint, CancellationToken ct = default)
+    {
+        var row = await _db.PeerIdentityKeys_V2.AsNoTracking()
+            .Where(k => k.Fingerprint != null && k.Fingerprint.SequenceEqual(fingerprint))
+            .Select(k => k.PeerId)
+            .FirstOrDefaultAsync(ct);
+        if (row == Guid.Empty) return null;
+        return await GetByIdAsync(new PeerId(row), ct);
     }
 
     public async Task SaveAsync(PeerIdentity peer, CancellationToken ct = default)

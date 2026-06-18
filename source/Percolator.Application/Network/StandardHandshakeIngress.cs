@@ -3,7 +3,6 @@ using Google.Protobuf;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Contracts;
-using Percolator.Application.Chat;
 using Percolator.Application.KeyExchange;
 using Percolator.Application.Services;
 using Percolator.Cryptography;
@@ -21,7 +20,6 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
     private readonly ISessionRepository _sessions;
     private readonly IDirectSessionMappingWriter _directSessionMappingWriter;
     private readonly IClock _clock;
-    private readonly IPeerIdentityQueries _peerIdentityQueries;
     private readonly IPeerIdentityRepository _peerIdentityRepository;
     private readonly Percolator.Cryptography.ISigningService _signingService;
     private readonly IMediator _mediator;
@@ -34,7 +32,6 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
         ISessionRepository sessions,
         IDirectSessionMappingWriter directSessionMappingWriter,
         IClock clock,
-        IPeerIdentityQueries peerIdentityQueries,
         IPeerIdentityRepository peerIdentityRepository,
         Percolator.Cryptography.ISigningService signingService,
         IMediator mediator,
@@ -46,7 +43,6 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
         _sessions = sessions;
         _directSessionMappingWriter = directSessionMappingWriter;
         _clock = clock;
-        _peerIdentityQueries = peerIdentityQueries;
         _peerIdentityRepository = peerIdentityRepository;
         _signingService = signingService;
         _mediator = mediator;
@@ -74,12 +70,11 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
         var initiatorIdentitySpki = request.IdentitySigningKey.ToByteArray();
         var initiatorPkh = SHA256.HashData(initiatorIdentitySpki);
 
-        var initiatorPeerId = await _peerIdentityQueries
-            .GetPeerIdByPkhAsync(Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(initiatorPkh), ct)
+        var initiatorIdentity = await _peerIdentityRepository
+            .FindByPublicKeyHashAsync(initiatorPkh, ct)
             .ConfigureAwait(false);
 
-        PeerIdentity initiatorIdentity;
-        if (initiatorPeerId == null)
+        if (initiatorIdentity is null)
         {
             var newId = Percolator.Identity.PeerId.NewId();
             var hex = Convert.ToHexString(initiatorPkh);
@@ -88,20 +83,6 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
             var now = _clock.UtcNow;
             initiatorIdentity.AddKey(initiatorIdentitySpki, notBefore: now, expiresAt: now.AddYears(100), now: now);
             await _peerIdentityRepository.SaveAsync(initiatorIdentity, ct).ConfigureAwait(false);
-        }
-        else
-        {
-            initiatorIdentity = await _peerIdentityRepository.GetByIdAsync(initiatorPeerId, ct).ConfigureAwait(false);
-            if (initiatorIdentity == null)
-            {
-                // PeerId exists but no identity - recreate
-                var hex = Convert.ToHexString(initiatorPkh);
-                initiatorIdentity = new PeerIdentity(initiatorPeerId);
-                initiatorIdentity.SetDisplayName(new DisplayName($"Peer-{hex.Substring(0, Math.Min(12, hex.Length))}"));
-                var now = _clock.UtcNow;
-                initiatorIdentity.AddKey(initiatorIdentitySpki, notBefore: now, expiresAt: now.AddYears(100), now: now);
-                await _peerIdentityRepository.SaveAsync(initiatorIdentity, ct).ConfigureAwait(false);
-            }
         }
 
         Guid signedPreKeyId;

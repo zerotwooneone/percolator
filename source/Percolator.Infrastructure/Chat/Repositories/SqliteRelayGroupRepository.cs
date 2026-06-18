@@ -44,12 +44,21 @@ public sealed class SqliteRelayGroupRepository : IRelayGroupRepository
 
         if (existing == null)
         {
-            throw new InvalidOperationException("Cannot save a ledger that has not been provisioned. Use ProvisionAsync instead.");
+            var newDbo = new RelayGroupStateDbo
+            {
+                ConversationId = ledger.ConversationId.Value,
+                Epoch = ledger.CurrentEpoch,
+                GroupPublicParams = ledger.GroupPublicParams.Value,
+                Version = 0
+            };
+            db.RelayGroupStates.Add(newDbo);
         }
-
-        existing.Epoch = ledger.CurrentEpoch;
-        existing.GroupPublicParams = ledger.GroupPublicParams.Value;
-        // Version is incremented automatically by EF Core's concurrency token
+        else
+        {
+            existing.Epoch = ledger.CurrentEpoch;
+            existing.GroupPublicParams = ledger.GroupPublicParams.Value;
+            // Version is incremented automatically by EF Core's concurrency token
+        }
 
         try
         {
@@ -63,39 +72,6 @@ public sealed class SqliteRelayGroupRepository : IRelayGroupRepository
 
             var winningEpoch = (uint)dbValues["Epoch"];
             throw new EpochConflictDomainException(winningEpoch);
-        }
-    }
-
-    public async Task ProvisionAsync(RelayGroupLedger ledger, IReadOnlyList<byte[]> initialRoster, CancellationToken ct = default)
-    {
-        using var db = _dbFactory.CreateDbContext();
-        
-        var newDbo = new RelayGroupStateDbo
-        {
-            ConversationId = ledger.ConversationId.Value,
-            Epoch = ledger.CurrentEpoch,
-            GroupPublicParams = ledger.GroupPublicParams.Value,
-            Version = 0
-        };
-        db.RelayGroupStates.Add(newDbo);
-
-        foreach (var routingToken in initialRoster)
-        {
-            var rosterEntry = new RelayBlindedRosterDbo
-            {
-                ConversationId = ledger.ConversationId.Value,
-                DestinationPkhBytes = routingToken
-            };
-            db.RelayBlindedRosters.Add(rosterEntry);
-        }
-
-        try
-        {
-            await db.SaveChangesAsync(ct);
-        }
-        catch (DbUpdateException ex) when (ex.InnerException?.Message.Contains("UNIQUE") == true)
-        {
-            throw new InvalidOperationException("Ledger already provisioned.", ex);
         }
     }
 }

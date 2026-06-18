@@ -1,8 +1,11 @@
+using Microsoft.EntityFrameworkCore;
 using Percolator.Application.Chat;
 using Percolator.Chat;
 using Percolator.Chat.ValueObjects;
 using Percolator.Contracts;
 using Percolator.Cryptography;
+using Percolator.Infrastructure.Chat.Persistence;
+using Percolator.Infrastructure.Persistence;
 
 namespace Percolator.Application.Apps.Chat;
 
@@ -12,11 +15,14 @@ namespace Percolator.Application.Apps.Chat;
 public sealed class RelayGroupProvisioningService : IRelayGroupProvisioningService
 {
     private readonly IRelayGroupRepository _relayGroupRepository;
+    private readonly IDbContextFactory<PercolatorDbContext> _dbFactory;
 
     public RelayGroupProvisioningService(
-        IRelayGroupRepository relayGroupRepository)
+        IRelayGroupRepository relayGroupRepository,
+        IDbContextFactory<PercolatorDbContext> dbFactory)
     {
         _relayGroupRepository = relayGroupRepository;
+        _dbFactory = dbFactory;
     }
 
     public async Task<ProvisionRelayGroupResponse> ProvisionAsync(ProvisionRelayGroupRequest request, CancellationToken ct = default)
@@ -41,14 +47,20 @@ public sealed class RelayGroupProvisioningService : IRelayGroupProvisioningServi
         var ledger = new RelayGroupLedger(conversationId, 0, groupPublicParams);
 
         // Map PKHs to blinded roster
-        var roster = new List<Percolator.Identity.Model.IdentityPublicKeyHash>();
+        using var db = _dbFactory.CreateDbContext();
         foreach (var routingToken in request.InitialRoutingTokens)
         {
-            roster.Add(Percolator.Identity.Model.IdentityPublicKeyHash.FromBytesOwned(routingToken.ToByteArray()));
+            var rosterEntry = new RelayBlindedRosterDbo
+            {
+                ConversationId = conversationId.Value,
+                DestinationPkhBytes = routingToken.ToByteArray()
+            };
+            db.RelayBlindedRosters.Add(rosterEntry);
         }
 
         // Save ledger and roster
-        await _relayGroupRepository.SaveAsync(ledger, roster, ct);
+        await _relayGroupRepository.SaveAsync(ledger, ct);
+        await db.SaveChangesAsync(ct);
 
         return new ProvisionRelayGroupResponse { Status = ProvisionRelayGroupResponse.Types.Status.Success };
     }

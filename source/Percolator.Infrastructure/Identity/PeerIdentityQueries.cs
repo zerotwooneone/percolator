@@ -1,7 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Percolator.Application.Chat;
 using Percolator.Cryptography;
-using Percolator.Identity;
 using Percolator.Infrastructure.Identity;
 using Percolator.Infrastructure.Persistence;
 
@@ -43,23 +42,5 @@ public sealed class PeerIdentityQueries : IPeerIdentityQueries
         }
 
         return RatchetIdentityKey.FromBytes(keyBytes);
-    }
-
-    public async Task<PeerId?> GetPeerIdByPkhAsync(byte[] pkhBytes, CancellationToken ct)
-    {
-        using var db = _dbFactory.CreateDbContext();
-        
-        var peerId = await db.PeerIdentityKeys_V2
-            .AsNoTracking()
-            .Where(k => k.Fingerprint == pkhBytes)
-            .Select(k => k.PeerId)
-            .FirstOrDefaultAsync(ct);
-
-        if (peerId == Guid.Empty)
-        {
-            return null;
-        }
-
-        return new PeerId(peerId);
     }
 }

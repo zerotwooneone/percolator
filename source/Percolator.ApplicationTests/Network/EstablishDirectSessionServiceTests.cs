@@ -4,7 +4,6 @@ using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using MediatR;
-using Percolator.Application.Chat;
 using Percolator.Application.Network;
 using Percolator.Application.ReverseSignal;
 using Percolator.ApplicationTests.Services;
@@ -31,7 +30,6 @@ namespace Percolator.ApplicationTests.Network
                     IdentitySigningKey: ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                     SignedPreKey: ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256)));
             var peerRepo = new Mock<IPeerIdentityRepository>(MockBehavior.Loose);
-            var peerQueries = new Mock<IPeerIdentityQueries>(MockBehavior.Loose);
             var signing = new Mock<Percolator.Network.ISigningService>(MockBehavior.Loose);
             var pendingRepo = new Mock<IPendingSessionRepository>(MockBehavior.Loose);
             var mediator = new Mock<IMediator>(MockBehavior.Loose);
@@ -67,9 +65,7 @@ namespace Percolator.ApplicationTests.Network
                     It.IsAny<Percolator.Network.PublicKey>()))
                 .Returns(true);
 
-            peerQueries.Setup(q => q.GetPeerIdByPkhAsync(It.IsAny<IdentityPublicKeyHash>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((PeerId?)null);
-            peerRepo.Setup(r => r.GetByIdAsync(It.IsAny<PeerId>(), It.IsAny<CancellationToken>()))
+            peerRepo.Setup(r => r.FindByPublicKeyHashAsync(It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((PeerIdentity?)null);
             peerRepo.Setup(r => r.SaveAsync(It.IsAny<PeerIdentity>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
@@ -87,7 +83,6 @@ namespace Percolator.ApplicationTests.Network
             var svc = new EstablishDirectSessionService(
                 logger,
                 keysStore.Object,
-                peerQueries.Object,
                 peerRepo.Object,
                 signing.Object,
                 pendingRepo.Object,
@@ -117,7 +112,6 @@ namespace Percolator.ApplicationTests.Network
                     IdentitySigningKey: ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                     SignedPreKey: ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256)));
             var peerRepo = new Mock<IPeerIdentityRepository>(MockBehavior.Loose);
-            var peerQueries = new Mock<IPeerIdentityQueries>(MockBehavior.Loose);
             var signing = new Mock<Percolator.Network.ISigningService>(MockBehavior.Loose);
             var pendingRepo = new Mock<IPendingSessionRepository>(MockBehavior.Loose);
             var clock = new TestClock();
@@ -154,7 +148,6 @@ namespace Percolator.ApplicationTests.Network
             var svc = new EstablishDirectSessionService(
                 logger,
                 keysStore.Object,
-                peerQueries.Object,
                 peerRepo.Object,
                 signing.Object,
                 pendingRepo.Object,
@@ -183,7 +176,6 @@ namespace Percolator.ApplicationTests.Network
                     IdentitySigningKey: ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                     SignedPreKey: ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256)));
             var peerRepo = new Mock<IPeerIdentityRepository>(MockBehavior.Loose);
-            var peerQueries = new Mock<IPeerIdentityQueries>(MockBehavior.Loose);
             var signing = new Mock<Percolator.Network.ISigningService>(MockBehavior.Loose);
             var pendingRepo = new Mock<IPendingSessionRepository>(MockBehavior.Loose);
             var clock = new TestClock();
@@ -238,7 +230,6 @@ namespace Percolator.ApplicationTests.Network
             var svc = new EstablishDirectSessionService(
                 logger,
                 keysStore.Object,
-                peerQueries.Object,
                 peerRepo.Object,
                 signing.Object,
                 pendingRepo.Object,
@@ -267,7 +258,6 @@ namespace Percolator.ApplicationTests.Network
                     IdentitySigningKey: ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                     SignedPreKey: ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256)));
             var peerRepo = new Mock<IPeerIdentityRepository>(MockBehavior.Loose);
-            var peerQueries = new Mock<IPeerIdentityQueries>(MockBehavior.Loose);
             var signing = new Mock<Percolator.Network.ISigningService>(MockBehavior.Loose);
             var pendingRepo = new Mock<IPendingSessionRepository>(MockBehavior.Loose);
             var clock = new TestClock();
@@ -309,7 +299,6 @@ namespace Percolator.ApplicationTests.Network
             var svc = new EstablishDirectSessionService(
                 logger,
                 keysStore.Object,
-                peerQueries.Object,
                 peerRepo.Object,
                 signing.Object,
                 pendingRepo.Object,
