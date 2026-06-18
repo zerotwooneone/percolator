@@ -31,8 +31,7 @@ public sealed class SqliteGroupCryptoStateRepository : IGroupCryptoStateReposito
         if (dbo.GroupMasterKeyBytes.Length != 32)
             throw new InvalidOperationException($"GroupMasterKeyBytes must be exactly 32 bytes, but was {dbo.GroupMasterKeyBytes.Length}.");
 
-        // Use FromBytes since EF Core owns the array and could mutate it elsewhere
-        return GroupMasterKey.FromBytes(dbo.GroupMasterKeyBytes);
+        return GroupMasterKey.FromBytesOwned(dbo.GroupMasterKeyBytes);
     }
 
     public async Task UpsertGroupMasterKeyAsync(ConversationId conversationId, GroupMasterKey groupMasterKey, CancellationToken cancellationToken = default)

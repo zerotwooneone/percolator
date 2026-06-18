@@ -23,6 +23,6 @@ public sealed class SelfIdentityQueries : ISelfIdentityQueries
             .Select(x => x.ActiveIdentityKeyFingerprint)
             .FirstOrDefaultAsync(ct);
 
-        return bytes is null ? null : RatchetIdentityKey.FromBytes(bytes);
+        return bytes is null ? null : RatchetIdentityKey.FromBytesOwned(bytes);
     }
 }

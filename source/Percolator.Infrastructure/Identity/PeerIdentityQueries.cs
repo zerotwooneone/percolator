@@ -41,6 +41,6 @@ public sealed class PeerIdentityQueries : IPeerIdentityQueries
             return null;
         }
 
-        return RatchetIdentityKey.FromBytes(keyBytes);
+        return RatchetIdentityKey.FromBytesOwned(keyBytes);
     }
 }

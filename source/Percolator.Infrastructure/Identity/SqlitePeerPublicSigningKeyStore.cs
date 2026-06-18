@@ -111,6 +111,6 @@ public class SqlitePeerPublicSigningKeyStore : IPeerPublicSigningKeyStore
         var latest = activeRows
             .OrderByDescending(x => x.ActiveAtUtc)
             .FirstOrDefault();
-        return latest?.PublicKeyHash is null ? null : IdentityPublicKeyHash.FromBytes(latest.PublicKeyHash);
+        return latest?.PublicKeyHash is null ? null : IdentityPublicKeyHash.FromBytesOwned(latest.PublicKeyHash);
     }
 }
