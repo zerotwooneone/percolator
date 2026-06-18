@@ -1,9 +1,9 @@
 using Microsoft.Extensions.Logging;
+using Percolator.Chat.ValueObjects;
 using Percolator.Identity;
-using Percolator.MessageQueue.Abstractions;
-using Percolator.MessageQueue.Results;
+using Percolator.Application.Chat.MessageQueue.Results;
 
-namespace Percolator.MessageQueue;
+namespace Percolator.Application.Chat.MessageQueue;
 
 public class MessageQueueService : IMessageQueueService
 {
@@ -53,9 +53,10 @@ public class MessageQueueService : IMessageQueueService
             return new EnqueueOpaqueMessageResult(false, "unknown recipient_public_key_hash");
         }
 
+        var queuedPayload = QueuedPayloadBytes.FromBytesOwned(messageBlob);
         (bool accepted, uint recipientCount, uint totalCount) = await _repository.TryEnqueueAsync(
             peerId,
-            messageBlob,
+            queuedPayload,
             cancellationToken);
 
         if (!accepted)

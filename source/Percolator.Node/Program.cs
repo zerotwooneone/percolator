@@ -19,7 +19,6 @@ using Percolator.Application.Configuration;
 using MediatR;
 using Percolator.Application.Cli;
 using Percolator.Prekey.DependencyInjection;
-using Percolator.MessageQueue.DependencyInjection;
 using Percolator.Infrastructure.MessageQueue;
 
 var rootCommand = new RootCommand("Percolator Node: A secure peer-to-peer communication tool.");
@@ -282,7 +281,6 @@ async Task HostCommandHandler(InvocationContext context)
             services.AddApplicationServices(config);
             services.AddPrekey();
             services.AddDhtInfrastructure();
-            services.AddMessageQueue();
             services.AddMessageQueueInfrastructure();
         });
 

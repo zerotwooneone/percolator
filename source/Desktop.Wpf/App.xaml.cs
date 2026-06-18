@@ -22,7 +22,6 @@ using Percolator.Cryptography;
 using Percolator.Infrastructure.Persistence;
 using Desktop.Wpf.Features.Simulator;
 using Desktop.Wpf.Features.Simulator.Protocol;
-using Percolator.MessageQueue.DependencyInjection;
 using Desktop.Wpf.Features.Sessions.State;
 using Desktop.Wpf.Shared.Mvvm;
 
@@ -80,7 +79,6 @@ public partial class App : Application
                 services.AddChatInfrastructure();
                 services.AddApplicationServices(context.Configuration);
                 services.AddSingleton<IClock, SystemClock>();
-                services.AddMessageQueue();
                 services.AddScoped<Percolator.Application.Services.IDirectSessionMappingWriter, Percolator.Application.Services.DirectSessionMappingWriter>();
 
                 // Views

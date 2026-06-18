@@ -1,7 +1,8 @@
 using Microsoft.EntityFrameworkCore;
+using Percolator.Application.Chat.MessageQueue;
+using Percolator.Chat.ValueObjects;
 using Percolator.Identity;
 using Percolator.Infrastructure.Persistence;
-using Percolator.MessageQueue.Abstractions;
 
 namespace Percolator.Infrastructure.MessageQueue;
 
@@ -20,7 +21,7 @@ public class SqliteMessageQueueRepository : IMessageQueueRepository
 
     public async Task<(bool Accepted, uint RecipientQueuedCount, uint TotalQueuedCount)> TryEnqueueAsync(
         PeerId recipientPeerId,
-        byte[] messageBlob,
+        QueuedPayloadBytes messageBlob,
         CancellationToken cancellationToken)
     {
         await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
@@ -49,7 +50,7 @@ public class SqliteMessageQueueRepository : IMessageQueueRepository
             {
                 AckId = Guid.NewGuid(),
                 RecipientPeerId = recipientPeerId,
-                Blob = messageBlob,
+                Blob = messageBlob.ToArray(),
                 EnqueuedAtUtc = DateTimeOffset.UtcNow
             };
 
@@ -74,11 +75,11 @@ public class SqliteMessageQueueRepository : IMessageQueueRepository
         return (uint)cnt;
     }
 
-    public async Task<IReadOnlyList<(Guid AckId, byte[] Blob)>> FetchAsync(PeerId recipientPeerId, int maxCount, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<(Guid AckId, QueuedPayloadBytes Blob)>> FetchAsync(PeerId recipientPeerId, int maxCount, CancellationToken cancellationToken)
     {
         if (maxCount <= 0)
         {
-            return Array.Empty<(Guid, byte[])>();
+            return Array.Empty<(Guid, QueuedPayloadBytes)>();
         }
 
         var take = Math.Min(maxCount, 500);
@@ -94,7 +95,7 @@ public class SqliteMessageQueueRepository : IMessageQueueRepository
             .ToList();
 
         return items
-            .Select(x => (x.AckId, x.Blob))
+            .Select(x => (x.AckId, QueuedPayloadBytes.FromBytesOwned(x.Blob)))
             .ToList();
     }
 
@@ -108,5 +109,32 @@ public class SqliteMessageQueueRepository : IMessageQueueRepository
         _db.MessageQueueItems.Remove(row);
         await _db.SaveChangesAsync(cancellationToken);
         return true;
+    }
+
+    public async Task TryEnqueueBulkAsync(
+        IReadOnlyList<PeerId> recipients,
+        QueuedPayloadBytes messageBlob,
+        CancellationToken cancellationToken)
+    {
+        await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            var items = recipients.Select(peerId => new MessageQueueItemDbo
+            {
+                AckId = Guid.NewGuid(),
+                RecipientPeerId = peerId,
+                Blob = messageBlob.ToArray(),
+                EnqueuedAtUtc = DateTimeOffset.UtcNow
+            }).ToList();
+
+            _db.MessageQueueItems.AddRange(items);
+            await _db.SaveChangesAsync(cancellationToken);
+            await tx.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            await tx.RollbackAsync(cancellationToken);
+            throw;
+        }
     }
 }

@@ -1,10 +1,9 @@
 using MediatR;
 using Microsoft.Extensions.Logging;
-using Percolator.MessageQueue.Abstractions;
-using Percolator.MessageQueue.Commands;
-using Percolator.MessageQueue.Results;
+using Percolator.Application.Chat.MessageQueue.Commands;
+using Percolator.Application.Chat.MessageQueue.Results;
 
-namespace Percolator.MessageQueue.Handlers;
+namespace Percolator.Application.Chat.MessageQueue.Handlers;
 
 public class FetchQueuedMessagesHandler : IRequestHandler<FetchQueuedMessagesQuery, FetchQueuedMessagesResult>
 {
@@ -23,7 +22,7 @@ public class FetchQueuedMessagesHandler : IRequestHandler<FetchQueuedMessagesQue
     {
         var max = request.MaxCount <= 0 ? 100 : Math.Min(request.MaxCount, 500);
         var items = await _repository.FetchAsync(request.RecipientPeerId, max, cancellationToken);
-        var blobs = items.Select(x => x.Blob).ToList();
+        var blobs = items.Select(x => x.Blob.ToArray()).ToList();
         return new FetchQueuedMessagesResult(blobs);
     }
 }

@@ -1,10 +1,10 @@
 using Google.Protobuf;
 using Microsoft.Extensions.Logging;
+using Percolator.Application.Chat.MessageQueue;
 using Percolator.Application.Services;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
-using Percolator.MessageQueue.Abstractions;
 using Percolator.Network;
 using IdentityPeerId = Percolator.Identity.PeerId;
 using NetworkPeerId = Percolator.Network.PeerId;
@@ -66,7 +66,7 @@ public class RelayOrchestrator
         var relay = new RelayOpaqueEnvelope
         {
             Version = 1,
-            OpaquePayload = ByteString.CopyFrom(blob),
+            OpaquePayload = ByteString.CopyFrom(blob.ToArray()),
             MessageAckId = ByteString.CopyFrom(ackId.ToByteArray())
         };
         var env = new InternalEnvelope { RelayOpaqueEnvelope = relay };

@@ -5,10 +5,12 @@ using Google.Protobuf;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Moq;
+using Percolator.Application.Chat.MessageQueue;
 using Percolator.Application.Identity;
 using Percolator.Identity;
 using Percolator.Application.Network;
 using Percolator.Application.Services;
+using Percolator.Chat.ValueObjects;
 using Percolator.Contracts;
 using Percolator.Network;
 using Percolator.Cryptography;
@@ -439,9 +441,9 @@ namespace Percolator.ApplicationTests.Network;
         mediator.Setup(m => m.Send(It.IsAny<ProcessInternalEnvelopeCommand>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((InternalEnvelope?)null);
         // Relay orchestrator: queue empty so loop is a no-op in tests
-        var mqRepo = new Mock<Percolator.MessageQueue.Abstractions.IMessageQueueRepository>(MockBehavior.Strict);
+        var mqRepo = new Mock<IMessageQueueRepository>(MockBehavior.Strict);
         mqRepo.Setup(r => r.FetchAsync(It.IsAny<Percolator.Identity.PeerId>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Array.Empty<(Guid, byte[])>());
+            .ReturnsAsync(Array.Empty<(Guid, QueuedPayloadBytes)>());
         var transport = new Mock<IMessageTransportService>(MockBehavior.Strict);
         var relayLogger = Mock.Of<ILogger<RelayOrchestrator>>();
         var relay = new RelayOrchestrator(relayLogger, mqRepo.Object, directRepo.Object, secureSvc.Object, transport.Object);

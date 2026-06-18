@@ -1,5 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
-using Percolator.MessageQueue.Abstractions;
+using Percolator.Application.Chat.MessageQueue;
 
 namespace Percolator.Infrastructure.MessageQueue;
 

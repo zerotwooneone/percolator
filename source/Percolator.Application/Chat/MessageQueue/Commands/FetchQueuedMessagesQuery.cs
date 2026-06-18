@@ -1,8 +1,8 @@
 using MediatR;
 using Percolator.Identity;
-using Percolator.MessageQueue.Results;
+using Percolator.Application.Chat.MessageQueue.Results;
 
-namespace Percolator.MessageQueue.Commands;
+namespace Percolator.Application.Chat.MessageQueue.Commands;
 
 public record FetchQueuedMessagesQuery(
     PeerId RecipientPeerId,

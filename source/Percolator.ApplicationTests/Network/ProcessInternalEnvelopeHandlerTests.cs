@@ -6,6 +6,7 @@ using Percolator.Application.Network;
 using Percolator.Contracts;
 using Percolator.Dht;
 using Google.Protobuf.WellKnownTypes;
+using Percolator.Application.Chat.MessageQueue;
 
 namespace Percolator.ApplicationTests.Network
 {
@@ -16,7 +17,7 @@ namespace Percolator.ApplicationTests.Network
         {
             var logger = NullLogger<ProcessInternalEnvelopeHandler>.Instance;
             var dht = new Moq.Mock<Percolator.Dht.IDhtService>(MockBehavior.Loose);
-            var mq = new Moq.Mock<Percolator.MessageQueue.Abstractions.IMessageQueueService>(MockBehavior.Loose);
+            var mq = new Moq.Mock<IMessageQueueService>(MockBehavior.Loose);
             var profile = new Moq.Mock<Percolator.Network.IPeerRoutingProfileRepository>(MockBehavior.Loose);
             var pendingGroupInvitationRepo = new Moq.Mock<Percolator.Chat.IPendingGroupInvitationRepository>(MockBehavior.Loose);
             var groupCryptoStateRepo = new Moq.Mock<Percolator.Chat.App.IGroupCryptoStateRepository>(MockBehavior.Loose);
@@ -146,7 +147,7 @@ namespace Percolator.ApplicationTests.Network
                .ReturnsAsync(Array.Empty<Percolator.Dht.DhtNode>());
 
             var logger = NullLogger<ProcessInternalEnvelopeHandler>.Instance;
-            var mq = new Moq.Mock<Percolator.MessageQueue.Abstractions.IMessageQueueService>(MockBehavior.Loose);
+            var mq = new Moq.Mock<IMessageQueueService>(MockBehavior.Loose);
             var profile = new Moq.Mock<Percolator.Network.IPeerRoutingProfileRepository>(MockBehavior.Loose);
             var pendingGroupInvitationRepo = new Moq.Mock<Percolator.Chat.IPendingGroupInvitationRepository>(MockBehavior.Loose);
             var groupCryptoStateRepo = new Moq.Mock<Percolator.Chat.App.IGroupCryptoStateRepository>(MockBehavior.Loose);
@@ -186,7 +187,7 @@ namespace Percolator.ApplicationTests.Network
                .ReturnsAsync(nodes);
 
             var logger = NullLogger<ProcessInternalEnvelopeHandler>.Instance;
-            var mq = new Moq.Mock<Percolator.MessageQueue.Abstractions.IMessageQueueService>(MockBehavior.Loose);
+            var mq = new Moq.Mock<IMessageQueueService>(MockBehavior.Loose);
             var profile = new Moq.Mock<Percolator.Network.IPeerRoutingProfileRepository>(MockBehavior.Loose);
             var pendingGroupInvitationRepo = new Moq.Mock<Percolator.Chat.IPendingGroupInvitationRepository>(MockBehavior.Loose);
             var groupCryptoStateRepo = new Moq.Mock<Percolator.Chat.App.IGroupCryptoStateRepository>(MockBehavior.Loose);
@@ -227,7 +228,7 @@ namespace Percolator.ApplicationTests.Network
                .ReturnsAsync(new[] { dhtNode });
 
             var logger = NullLogger<ProcessInternalEnvelopeHandler>.Instance;
-            var mq4 = new Moq.Mock<Percolator.MessageQueue.Abstractions.IMessageQueueService>(MockBehavior.Loose);
+            var mq4 = new Moq.Mock<IMessageQueueService>(MockBehavior.Loose);
             var pendingGroupInvitationRepo = new Moq.Mock<Percolator.Chat.IPendingGroupInvitationRepository>(MockBehavior.Loose);
             var groupCryptoStateRepo = new Moq.Mock<Percolator.Chat.App.IGroupCryptoStateRepository>(MockBehavior.Loose);
             var groupMessageCryptoService = new Moq.Mock<Percolator.Cryptography.IGroupMessageCryptographyService>(MockBehavior.Loose);

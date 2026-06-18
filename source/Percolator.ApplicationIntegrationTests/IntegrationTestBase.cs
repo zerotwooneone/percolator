@@ -6,7 +6,6 @@ using Microsoft.AspNetCore.Hosting;
 using System.Net;
 using System.Collections.Concurrent;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
-using Percolator.Application.Network;
 using Percolator.Application;
 using Percolator.Infrastructure;
 using Microsoft.Extensions.Configuration;
@@ -16,7 +15,6 @@ using Percolator.Application.Identity;
 using Percolator.Infrastructure.Persistence;
 using System.Security.Cryptography.X509Certificates;
 using System.Security.Cryptography;
-using Percolator.MessageQueue.DependencyInjection;
 
 namespace Percolator.ApplicationIntegrationTests;
 
@@ -155,7 +153,6 @@ public abstract class IntegrationTestBase
                 services.AddInfrastructureServices(context.Configuration);
                 services.AddIdentityInfrastructure();
                 services.AddApplicationServices(context.Configuration);
-                services.AddMessageQueue();
                 // Add additional services if needed
                 additionalServiceRegistration?.Invoke(services);
             })

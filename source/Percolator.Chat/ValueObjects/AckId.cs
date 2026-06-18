@@ -1,4 +1,4 @@
-namespace Percolator.MessageQueue.Primitives;
+namespace Percolator.Chat.ValueObjects;
 
 public record AckId(Guid Value)
 {

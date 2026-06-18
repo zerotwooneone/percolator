@@ -1,6 +1,6 @@
-using Percolator.MessageQueue.Results;
+using Percolator.Application.Chat.MessageQueue.Results;
 
-namespace Percolator.MessageQueue.Abstractions;
+namespace Percolator.Application.Chat.MessageQueue;
 
 public interface IMessageQueueService
 {

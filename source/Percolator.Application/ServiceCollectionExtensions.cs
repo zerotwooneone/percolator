@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Percolator.Application.Configuration;
 using Percolator.Application.Apps.Chat;
 using Percolator.Application.Apps.Chat.Handlers;
+using Percolator.Application.Chat.MessageQueue;
 using Percolator.Application.Cryptography;
 using Percolator.Application.Identity;
 using Percolator.Application.Ingress;
@@ -38,6 +39,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ReverseSignal.PendingSessionPurgeService>();
         services.AddSingleton<ICallbackEndpointValidator, CallbackEndpointValidator>();
 
+        services.AddScoped<IMessageQueueService, MessageQueueService>();
+
         services.AddMediatR(cfg =>
         {
             // Scan current Application assembly for handlers (e.g., EstablishDirectSessionHandler)
@@ -49,8 +52,6 @@ public static class ServiceCollectionExtensions
             cfg.RegisterServicesFromAssembly(typeof(ReceiveTextMessageHandler).Assembly);
             // Include Prekey handlers assembly (Percolator.Prekey)
             cfg.RegisterServicesFromAssembly(typeof(Percolator.Prekey.Handlers.SubmitPreKeyBundleHandler).Assembly);
-            // Include MessageQueue assembly (Percolator.MessageQueue) without referencing removed handler type
-            cfg.RegisterServicesFromAssembly(typeof(Percolator.MessageQueue.DependencyInjection.ServiceCollectionExtensions).Assembly);
         });
 
         return services;
