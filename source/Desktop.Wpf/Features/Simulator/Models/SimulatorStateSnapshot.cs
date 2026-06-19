@@ -1,5 +1,3 @@
-using Desktop.Wpf.Features.Simulator;
-
 namespace Desktop.Wpf.Features.Simulator.Models;
 
 public sealed record SimulatorStateSnapshot(

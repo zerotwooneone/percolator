@@ -1,5 +1,5 @@
 using FluentAssertions;
-using Percolator.Chat.ValueObjects;
+using Percolator.Chat.Messaging.ValueObjects;
 
 namespace Percolator.Chat.Tests;
 

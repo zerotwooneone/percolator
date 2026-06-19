@@ -2,9 +2,6 @@ using Google.Protobuf;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Chat;
-using Percolator.Chat.App;
-using Percolator.Chat.App.Commands;
-using Percolator.Chat.ValueObjects;
 using Percolator.Contracts;
 using Percolator.Dht;
 using Percolator.Application.Network.Handshake;
@@ -15,8 +12,13 @@ using System.Text.Json;
 using Percolator.Application.Chat.MessageQueue;
 using Percolator.Application.Chat.MessageQueue.Commands;
 using Percolator.Chat;
+using Percolator.Chat.GroupLedger;
+using Percolator.Chat.GroupMembership;
+using Percolator.Chat.Messaging.App;
+using Percolator.Chat.Messaging.App.Commands;
+using Percolator.Chat.Messaging.Events;
+using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Cryptography;
-using Percolator.Chat.Events;
 using PeerId = Percolator.Identity.PeerId;
 
 namespace Percolator.Application.Network;
@@ -29,7 +31,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
     private readonly IPeerRoutingProfileRepository _profileRepository;
     private readonly IMessageQueueService _mqService;
     private readonly IPendingGroupInvitationRepository _pendingGroupInvitationRepository;
-    private readonly Percolator.Chat.App.IGroupCryptoStateRepository _groupCryptoStateRepository;
+    private readonly IGroupCryptoStateRepository _groupCryptoStateRepository;
     private readonly IGroupMessageCryptographyService _groupMessageCryptoService;
     private readonly IGroupCryptographyService _groupCryptoService;
     private readonly IChatMessageWriter _messageWriter;
@@ -42,7 +44,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
         IMessageQueueService mqService,
         IPeerRoutingProfileRepository profileRepository,
         IPendingGroupInvitationRepository pendingGroupInvitationRepository,
-        Percolator.Chat.App.IGroupCryptoStateRepository groupCryptoStateRepository,
+        IGroupCryptoStateRepository groupCryptoStateRepository,
         IGroupMessageCryptographyService groupMessageCryptoService,
         IGroupCryptographyService groupCryptoService,
         IChatMessageWriter messageWriter,
@@ -370,7 +372,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     var pendingInvitation = new PendingGroupInvitation(
                         Guid.NewGuid(),
                         new ConversationId(conversationId),
-                        senderPeerId,
+                        new ChatPeerId(senderPeerId.Value),
                         createGroup.CreatorIdentityKey.ToByteArray(),
                         initialMembers,
                         createGroup.Name,
@@ -414,8 +416,8 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     
                     // Persist via IGroupCryptoStateRepository
                     await _groupCryptoStateRepository.UpsertGroupMasterKeyAsync(
-                        new Percolator.Chat.ValueObjects.ConversationId(conversationId),
-                        groupMasterKey,
+                        new ConversationId(conversationId),
+                        GroupMasterKeyBytes.FromBytesOwned(bootstrap.GroupMasterKeyBytes.ToByteArray()),
                         cancellationToken).ConfigureAwait(false);
 
                     _logger.LogInformation("Received GroupKeyBootstrap message for conversation {ConversationId}, persisted GroupMasterKey", conversationId);
@@ -440,7 +442,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
 
                     // Load GroupMasterKey for decryption
                     var masterKey = await _groupCryptoStateRepository.GetGroupMasterKeyAsync(
-                        new Percolator.Chat.ValueObjects.ConversationId(conversationId),
+                        new ConversationId(conversationId),
                         cancellationToken).ConfigureAwait(false);
                     
                     if (masterKey is null)
@@ -448,7 +450,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                         _logger.LogWarning("Group master key not found for conversation {ConversationId}, cannot decrypt group message", conversationId);
                         return null;
                     }
-                    var blobKey = _groupCryptoService.DeriveBlobKey(masterKey);
+                    var blobKey = _groupCryptoService.DeriveBlobKey(GroupMasterKey.FromSpan(masterKey.Span));
 
                     // Decrypt the ciphertext
                     var ciphertext = Ciphertext.FromBytes(groupMessage.Ciphertext.ToByteArray());
@@ -472,7 +474,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                         // Persist the message via IChatMessageWriter
                         var senderId = new ParticipantId(senderPeerId.Value);
                         await _messageWriter.AddTextMessageAsync(
-                            new Percolator.Chat.ValueObjects.ConversationId(conversationId),
+                            new ConversationId(conversationId),
                             request.Context.SelfIdentityId.Value,
                             senderId,
                             groupContent.TextMessage,

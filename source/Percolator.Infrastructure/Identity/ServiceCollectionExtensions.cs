@@ -3,7 +3,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
-using Percolator.Application.Apps.Chat;
 using Percolator.Identity;
 using Percolator.Infrastructure.Persistence;
 using Percolator.Infrastructure.Repositories;

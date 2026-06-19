@@ -11,7 +11,7 @@ using Percolator.Application.Network;
 using Percolator.Application.RateLimiting;
 using Percolator.Application.ReverseSignal;
 using Percolator.Application.Sessions;
-using Percolator.Chat.App.Handlers;
+using Percolator.Chat.Messaging.App.Handlers;
 using Percolator.Dht.Messages;
 
 namespace Percolator.Application;

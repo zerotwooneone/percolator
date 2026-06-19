@@ -1,5 +1,4 @@
 using Percolator.Cryptography;
-using Percolator.Contracts;
 using Percolator.Network;
 using PeerId = Percolator.Identity.PeerId;
 

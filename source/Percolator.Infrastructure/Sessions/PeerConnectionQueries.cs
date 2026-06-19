@@ -2,7 +2,6 @@ using Microsoft.Extensions.Logging;
 using Percolator.Application.Cryptography;
 using Percolator.Application.Sessions;
 using Percolator.Identity;
-using Percolator.Infrastructure.Application;
 
 namespace Percolator.Infrastructure.Sessions;
 

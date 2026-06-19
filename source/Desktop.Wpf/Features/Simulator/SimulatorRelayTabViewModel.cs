@@ -1,7 +1,6 @@
 using Desktop.Wpf.Shared.Mvvm;
 using Microsoft.Extensions.Logging;
 using ObservableCollections;
-using Percolator.Application.Network;
 using Percolator.Cryptography;
 using Percolator.Network;
 using R3;

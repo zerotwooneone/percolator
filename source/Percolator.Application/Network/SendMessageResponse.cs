@@ -1,6 +1,5 @@
 using Percolator.Contracts;
 using Percolator.Network;
-using Percolator.Network.ValueObjects;
 
 namespace Percolator.Application.Network;
 

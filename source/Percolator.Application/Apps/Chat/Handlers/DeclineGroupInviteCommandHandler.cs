@@ -1,7 +1,6 @@
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Chat;
-using Percolator.Chat.ValueObjects;
 
 namespace Percolator.Application.Apps.Chat;
 

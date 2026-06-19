@@ -1,6 +1,6 @@
 using MediatR;
 using Microsoft.Extensions.Logging;
-using Percolator.Chat.Events;
+using Percolator.Chat.Messaging.Events;
 using PeerId = Percolator.Identity.PeerId;
 
 namespace Percolator.Application.Apps.Chat.Handlers

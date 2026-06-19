@@ -1,7 +1,4 @@
-using System.Threading;
-using System.Threading.Tasks;
 using ObservableCollections;
-using Percolator.Network;
 using R3;
 using Desktop.Wpf.Shared.Mvvm;
 

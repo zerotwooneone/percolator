@@ -3,10 +3,11 @@ using MediatR;
 using Moq;
 using Percolator.Application.Identity;
 using Percolator.Application.Apps.Chat.Handlers;
-using Percolator.Chat.App;
-using Percolator.Chat.App.Commands;
-using Percolator.Chat.ValueObjects;
-using Percolator.Chat.Events;
+using Percolator.Chat.Messaging;
+using Percolator.Chat.Messaging.App;
+using Percolator.Chat.Messaging.App.Commands;
+using Percolator.Chat.Messaging.Events;
+using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Identity;
 
 namespace Percolator.Chat.Tests;

@@ -5,7 +5,6 @@ using Desktop.Wpf.Shared.Mvvm;
 using ObservableCollections;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
-using Percolator.Cryptography;
 using R3;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;

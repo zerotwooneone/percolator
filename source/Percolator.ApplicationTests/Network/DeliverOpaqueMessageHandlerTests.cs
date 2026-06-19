@@ -10,7 +10,7 @@ using Percolator.Application.Identity;
 using Percolator.Identity;
 using Percolator.Application.Network;
 using Percolator.Application.Services;
-using Percolator.Chat.ValueObjects;
+using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Contracts;
 using Percolator.Network;
 using Percolator.Cryptography;

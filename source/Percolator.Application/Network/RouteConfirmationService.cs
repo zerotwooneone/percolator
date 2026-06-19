@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Percolator.Identity;
 using Percolator.Network;
-using Percolator.Network.ValueObjects;
 
 namespace Percolator.Application.Network;
 

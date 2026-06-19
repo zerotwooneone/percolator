@@ -1,4 +1,5 @@
-using Percolator.Chat.ValueObjects;
+using Percolator.Chat.GroupMembership;
+using Percolator.Chat.Messaging.ValueObjects;
 
 namespace Percolator.Chat;
 

@@ -1,11 +1,10 @@
-using Google.Protobuf;
 using MediatR;
 using Percolator.Application.Identity;
 using Percolator.Chat;
-using Percolator.Chat.App;
-using Percolator.Chat.App.Commands;
-using Percolator.Chat.Events;
-using Percolator.Chat.ValueObjects;
+using Percolator.Chat.Messaging.App;
+using Percolator.Chat.Messaging.App.Commands;
+using Percolator.Chat.Messaging.Events;
+using Percolator.Chat.Messaging.ValueObjects;
 
 namespace Percolator.Application.Apps.Chat.Handlers;
 
@@ -51,7 +50,7 @@ public sealed class PostTextMessageHandler : IRequestHandler<PostTextMessageComm
                 new[] { resolution.Conversation.Peer1.Value, resolution.Conversation.Peer2.Value },
                 request.Content,
                 request.SentTimestampUtc,
-                Percolator.Chat.ValueObjects.DirectSessionIdValueObject.FromGuid(request.LookupKey.DirectSessionId)),
+                DirectSessionIdValueObject.FromGuid(request.LookupKey.DirectSessionId)),
             cancellationToken).ConfigureAwait(false);
     }
 }

@@ -1,5 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using System.Threading;
 using Percolator.Application.Identity;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;

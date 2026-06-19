@@ -6,7 +6,6 @@ using Percolator.Application.Ingress;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
 using Percolator.Contracts;
-using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
 using ProtobufDeliveryCertificate = Percolator.Contracts.DeliveryCertificate;
 

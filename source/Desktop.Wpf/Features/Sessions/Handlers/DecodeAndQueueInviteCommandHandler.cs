@@ -1,12 +1,7 @@
 using Desktop.Wpf.Features.Sessions.Commands;
-using Google.Protobuf;
 using MediatR;
-using Percolator.Application.Network.Handshake;
-using Percolator.Cryptography;
 using Percolator.Identity;
-using Percolator.Identity.Model;
 using System.Security.Cryptography;
-using System.Text;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
 using Percolator.Contracts;

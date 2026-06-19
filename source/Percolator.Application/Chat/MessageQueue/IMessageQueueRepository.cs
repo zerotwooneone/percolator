@@ -1,4 +1,4 @@
-using Percolator.Chat.ValueObjects;
+using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Identity;
 
 namespace Percolator.Application.Chat.MessageQueue;

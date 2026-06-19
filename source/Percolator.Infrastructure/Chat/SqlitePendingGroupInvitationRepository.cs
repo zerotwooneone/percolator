@@ -1,9 +1,10 @@
 using Microsoft.EntityFrameworkCore;
 using Percolator.Chat;
-using Percolator.Chat.ValueObjects;
 using Percolator.Infrastructure.Chat.Persistence;
 using Percolator.Infrastructure.Persistence;
 using System.Text.Json;
+using Percolator.Chat.GroupMembership;
+using Percolator.Chat.Messaging.ValueObjects;
 
 namespace Percolator.Infrastructure.Chat;
 
@@ -67,12 +68,12 @@ public sealed class SqlitePendingGroupInvitationRepository : IPendingGroupInvita
         return new PendingGroupInvitation(
             dbo.Id,
             new ConversationId(dbo.ConversationId),
-            new Percolator.Identity.PeerId(dbo.InviterPeerId),
+            new ChatPeerId(dbo.InviterPeerId),
             dbo.CreatorIdentityKey,
             initialMembers,
             dbo.GroupName,
             dbo.ReceivedAtUtc,
-            (Percolator.Chat.PendingGroupInvitationStatus)dbo.Status
+            (Percolator.Chat.GroupMembership.PendingGroupInvitationStatus)dbo.Status
         );
     }
 }

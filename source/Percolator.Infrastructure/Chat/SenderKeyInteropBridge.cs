@@ -1,5 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
 using Percolator.Infrastructure.Chat.Persistence;

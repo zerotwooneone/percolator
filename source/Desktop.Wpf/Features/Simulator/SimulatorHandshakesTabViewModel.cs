@@ -1,5 +1,3 @@
-using System.Collections.Generic;
-using System.Collections.Specialized;
 using Desktop.Wpf.Shared.Mvvm;
 using Microsoft.Extensions.Options;
 using ObservableCollections;

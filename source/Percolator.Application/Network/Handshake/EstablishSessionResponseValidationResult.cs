@@ -1,4 +1,3 @@
-using Percolator.Contracts;
 using Percolator.Cryptography;
 
 namespace Percolator.Application.Network.Handshake;

@@ -1,6 +1,5 @@
 using Desktop.Wpf.Features.Sessions.Models;
 using Desktop.Wpf.Features.Sessions.Queries;
-using Desktop.Wpf.Shared.Mvvm;
 using Microsoft.Extensions.DependencyInjection;
 using Percolator.Application.Sessions;
 using R3;

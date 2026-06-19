@@ -1,19 +1,12 @@
 using Microsoft.Extensions.DependencyInjection;
-using ObservableCollections;
-using Percolator.Chat.App;
-using Percolator.Chat.ValueObjects;
-using Percolator.Identity;
 using Percolator.Network;
 using R3;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 using Desktop.Wpf.Features.Chat.State;
 using Percolator.Application.Identity;
 using Percolator.Chat;
 using Percolator.Application.Chat;
+using Percolator.Chat.Messaging.App;
+using Percolator.Chat.Messaging.ValueObjects;
 
 namespace Desktop.Wpf.Features.Chat;
 

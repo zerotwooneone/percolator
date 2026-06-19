@@ -1,9 +1,8 @@
 using Desktop.Wpf.Features.Chat.State;
 using MediatR;
-using Percolator.Chat.Events;
-using Percolator.Chat.ValueObjects;
+using Percolator.Chat.Messaging.Events;
+using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Network;
-using R3;
 
 namespace Desktop.Wpf.Features.Chat.Handlers;
 

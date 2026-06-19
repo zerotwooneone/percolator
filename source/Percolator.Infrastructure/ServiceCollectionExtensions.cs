@@ -1,6 +1,5 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using Percolator.Infrastructure.Chat;
 using Percolator.Infrastructure.Cryptography;
 using Percolator.Infrastructure.Dht;
@@ -12,8 +11,6 @@ using Percolator.Infrastructure.MessageQueue;
 using Percolator.Application.Network.Handshake;
 using Percolator.Infrastructure.Network.Handshake;
 using Percolator.Application.KeyExchange;
-using Percolator.Application.Apps.Chat;
-using Percolator.Infrastructure.Security;
 using Percolator.Infrastructure.Network.Grpc;
 using Percolator.Application.Network;
 using Percolator.Network.Services;

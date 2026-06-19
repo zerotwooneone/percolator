@@ -1,9 +1,9 @@
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Chat;
-using Percolator.Chat.ValueObjects;
+using Percolator.Chat.GroupLedger;
+using Percolator.Chat.GroupMembership;
 using Percolator.Identity;
-using Percolator.Identity.Model;
 
 namespace Percolator.Application.Apps.Chat;
 
@@ -48,7 +48,7 @@ public sealed class AcceptGroupInviteCommandHandler : IRequestHandler<AcceptGrou
 
         var groupMember = new GroupMember(
             request.ConversationId,
-            selfIdentity.PeerId,
+            new ChatPeerId(selfIdentity.PeerId.Value),
             GroupMemberRole.Member,
             now
         );

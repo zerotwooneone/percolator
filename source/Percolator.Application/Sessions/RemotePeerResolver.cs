@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Identity;
 using Percolator.Chat;
+using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Cryptography;
 using IdentityPeerId = Percolator.Identity.PeerId;
 
@@ -24,7 +25,7 @@ public class RemotePeerResolver : IRemotePeerResolver
 
     public async Task<IdentityPeerId> ResolveFromSession(SessionId sessionId)
     {
-        var convId = new Percolator.Chat.ValueObjects.ConversationId(sessionId.Value);
+        var convId = new ConversationId(sessionId.Value);
         if (_activeIdentityContext.Identity is null)
             throw new InvalidOperationException("Identity context not loaded");
 

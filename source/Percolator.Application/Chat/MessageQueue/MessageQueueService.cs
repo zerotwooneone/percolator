@@ -1,7 +1,7 @@
 using Microsoft.Extensions.Logging;
-using Percolator.Chat.ValueObjects;
 using Percolator.Identity;
 using Percolator.Application.Chat.MessageQueue.Results;
+using Percolator.Chat.Messaging.ValueObjects;
 
 namespace Percolator.Application.Chat.MessageQueue;
 

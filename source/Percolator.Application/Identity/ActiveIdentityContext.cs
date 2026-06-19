@@ -2,7 +2,7 @@ using Percolator.Identity;
 using Percolator.Identity.Model;
 using Percolator.Chat;
 using System.Security.Cryptography;
-using ChatParticipantId = Percolator.Chat.ValueObjects.ParticipantId;
+using ChatParticipantId = Percolator.Chat.Messaging.ValueObjects.ParticipantId;
 
 namespace Percolator.Application.Identity;
 

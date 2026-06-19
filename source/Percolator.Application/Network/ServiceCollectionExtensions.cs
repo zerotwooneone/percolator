@@ -4,7 +4,6 @@ using Percolator.Application.Configuration;
 using Percolator.Application.PeerDiscovery;
 using Percolator.Application.ReverseSignal;
 using Percolator.Network;
-using Microsoft.Extensions.Logging;
 using Percolator.Application.Network.Messaging;
 
 namespace Percolator.Application.Network;

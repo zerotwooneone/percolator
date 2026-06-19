@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Percolator.Chat;
-using Percolator.Chat.ValueObjects;
+using Percolator.Chat.Messaging;
+using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Infrastructure.Persistence;
 
 namespace Percolator.Infrastructure.Chat;

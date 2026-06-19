@@ -1,6 +1,6 @@
 using Microsoft.EntityFrameworkCore;
-using Percolator.Chat.App;
-using Percolator.Chat.ValueObjects;
+using Percolator.Chat.GroupLedger;
+using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Cryptography;
 using Percolator.Infrastructure.Persistence;
 
@@ -18,7 +18,7 @@ public sealed class SqliteGroupCryptoStateRepository : IGroupCryptoStateReposito
         _db = db;
     }
 
-    public async Task<GroupMasterKey?> GetGroupMasterKeyAsync(ConversationId conversationId, CancellationToken cancellationToken = default)
+    public async Task<GroupMasterKeyBytes?> GetGroupMasterKeyAsync(ConversationId conversationId, CancellationToken cancellationToken = default)
     {
         var dbo = await _db.GroupCryptoStates
             .AsNoTracking()
@@ -31,10 +31,10 @@ public sealed class SqliteGroupCryptoStateRepository : IGroupCryptoStateReposito
         if (dbo.GroupMasterKeyBytes.Length != 32)
             throw new InvalidOperationException($"GroupMasterKeyBytes must be exactly 32 bytes, but was {dbo.GroupMasterKeyBytes.Length}.");
 
-        return GroupMasterKey.FromBytesOwned(dbo.GroupMasterKeyBytes);
+        return GroupMasterKeyBytes.FromBytesOwned(dbo.GroupMasterKeyBytes);
     }
 
-    public async Task UpsertGroupMasterKeyAsync(ConversationId conversationId, GroupMasterKey groupMasterKey, CancellationToken cancellationToken = default)
+    public async Task UpsertGroupMasterKeyAsync(ConversationId conversationId, GroupMasterKeyBytes groupMasterKey, CancellationToken cancellationToken = default)
     {
         var now = DateTimeOffset.UtcNow;
         var keyBytes = groupMasterKey.ToArray();

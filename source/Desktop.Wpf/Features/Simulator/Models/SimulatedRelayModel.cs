@@ -1,9 +1,6 @@
 using ObservableCollections;
 using Percolator.Identity;
-using Percolator.Network;
 using R3;
-using System;
-using System.Linq;
 
 namespace Desktop.Wpf.Features.Simulator.Models;
 

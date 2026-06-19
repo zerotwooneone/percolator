@@ -1,6 +1,5 @@
 using Percolator.Identity;
 using Percolator.Identity.Model;
-using R3;
 
 namespace Desktop.Wpf.Features.Self;
 

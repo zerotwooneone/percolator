@@ -5,7 +5,6 @@ using ObservableCollections;
 using Percolator.Cryptography;
 using Percolator.Network;
 using R3;
-using System.Linq;
 
 namespace Desktop.Wpf.Features.Simulator;
 

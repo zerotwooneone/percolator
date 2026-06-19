@@ -1,5 +1,3 @@
-using System.Threading;
-using System.Threading.Tasks;
 using Desktop.Wpf.Shared.Mvvm;
 using R3;
 

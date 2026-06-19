@@ -3,7 +3,6 @@ using Desktop.Wpf.Features.Sessions.Models;
 using Desktop.Wpf.Features.Sessions.Queries;
 using Desktop.Wpf.Features.Sessions.State;
 using Desktop.Wpf.Shared.Mvvm;
-using ObservableCollections;
 using Percolator.Network;
 using R3;
 

@@ -1,6 +1,5 @@
 using MediatR;
 using Percolator.Application.Network;
-using Percolator.Application.Network.Handshake;
 
 namespace Desktop.Wpf.Features.Sessions.Handlers;
 

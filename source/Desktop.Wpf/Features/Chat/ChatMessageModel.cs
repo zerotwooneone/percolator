@@ -1,6 +1,5 @@
 using R3;
-using Percolator.Chat.ValueObjects;
-using System;
+using Percolator.Chat.Messaging.ValueObjects;
 
 namespace Desktop.Wpf.Features.Chat;
 

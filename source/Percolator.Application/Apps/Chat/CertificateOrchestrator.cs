@@ -1,7 +1,5 @@
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Chat;
-using Percolator.Chat;
-using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Network;
 using Percolator.Network.Messaging;

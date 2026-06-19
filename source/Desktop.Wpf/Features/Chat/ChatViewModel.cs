@@ -1,13 +1,11 @@
-using System.Windows.Data;
 using R3;
 using ObservableCollections;
 using Desktop.Wpf.Shared.Mvvm;
 using Desktop.Wpf.Features.Sessions;
 using MediatR;
-using Percolator.Chat.App;
-using Percolator.Chat.App.Commands;
-using Percolator.Chat.Primitives;
-using Percolator.Chat.ValueObjects;
+using Percolator.Chat.Messaging.App;
+using Percolator.Chat.Messaging.App.Commands;
+using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Network;
 
 namespace Desktop.Wpf.Features.Chat;

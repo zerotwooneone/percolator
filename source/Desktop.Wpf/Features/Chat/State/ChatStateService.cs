@@ -1,9 +1,7 @@
 using ObservableCollections;
-using Percolator.Chat.ValueObjects;
 using Percolator.Network;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Linq;
+using Percolator.Chat.Messaging.ValueObjects;
 
 namespace Desktop.Wpf.Features.Chat.State;
 

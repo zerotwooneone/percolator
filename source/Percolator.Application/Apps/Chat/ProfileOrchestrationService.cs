@@ -5,7 +5,6 @@ using Percolator.Contracts;
 using Percolator.Cryptography;
 using IdentityPeerId = Percolator.Identity.PeerId;
 using Percolator.Identity;
-using Percolator.Identity.Model;
 
 namespace Percolator.Application.Apps.Chat;
 

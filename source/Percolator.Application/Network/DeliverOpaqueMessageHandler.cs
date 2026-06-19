@@ -1,4 +1,3 @@
-using System.Net;
 using Google.Protobuf;
 using MediatR;
 using Microsoft.Extensions.Logging;

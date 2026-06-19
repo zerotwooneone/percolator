@@ -1,11 +1,12 @@
 using FluentAssertions;
 using Moq;
 using MediatR;
-using Percolator.Chat.App;
-using Percolator.Chat.App.Commands;
-using Percolator.Chat.Events;
-using Percolator.Chat.ValueObjects;
-using Percolator.Chat;
+using Percolator.Chat.Messaging;
+using Percolator.Chat.Messaging.App;
+using Percolator.Chat.Messaging.App.Commands;
+using Percolator.Chat.Messaging.App.Handlers;
+using Percolator.Chat.Messaging.Events;
+using Percolator.Chat.Messaging.ValueObjects;
 
 namespace Percolator.Chat.Tests;
 
@@ -79,7 +80,7 @@ public class PostReadReceiptHandlerTests
     public async Task Handle_Throws_when_multiple_keys()
     {
         // Arrange
-        var lookup = new ConversationLookupKey(Guid.NewGuid(), new Pkh(new byte[32]));
+        var lookup = new ConversationLookupKey(Guid.NewGuid(), Pkh.FromBytes(new byte[32]));
         var messageId = new MessageId(Guid.NewGuid());
         var handler = new PostReadReceiptHandler(_resolver.Object, _writer.Object, _publisher.Object, _selfParticipantIdProvider.Object);
         var cmd = new PostReadReceiptCommand(lookup, messageId, DateTimeOffset.UtcNow);

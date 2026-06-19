@@ -1,4 +1,4 @@
-using Percolator.Chat;
+using Percolator.Chat.GroupLedger;
 
 namespace Percolator.Application.Chat;
 

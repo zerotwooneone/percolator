@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Percolator.Chat;
-using Percolator.Chat.ValueObjects;
+using Percolator.Chat.GroupLedger;
+using Percolator.Chat.GroupMembership;
+using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Identity;
 using Percolator.Infrastructure.Persistence;
 
@@ -134,7 +136,7 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
 
         var groupMembers = groupMemberDbos.Select(m => new GroupMember(
             new ConversationId(m.ConversationId),
-            new PeerId(m.PeerId),
+            new Percolator.Chat.GroupMembership.ChatPeerId(m.PeerId),
             (GroupMemberRole)m.Role,
             m.JoinedAtUtc,
             m.RemovedAtUtc)).ToList();

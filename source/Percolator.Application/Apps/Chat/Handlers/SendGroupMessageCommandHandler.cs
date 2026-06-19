@@ -2,12 +2,12 @@ using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Apps.Chat.Queries;
 using Percolator.Chat;
-using Percolator.Chat.App;
-using Percolator.Chat.Events;
 using Percolator.Cryptography;
 using Percolator.Application.Network;
-using Percolator.Chat.ValueObjects;
-using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
+using Percolator.Chat.GroupLedger;
+using Percolator.Chat.Messaging.App;
+using Percolator.Chat.Messaging.Events;
+using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Contracts;
 
 namespace Percolator.Application.Apps.Chat.Handlers;
@@ -69,7 +69,7 @@ public sealed class SendGroupMessageCommandHandler : IRequestHandler<Commands.Se
         {
             throw new InvalidOperationException($"Group master key not found for conversation {request.ConversationId.Value}.");
         }
-        var blobKey = _groupCryptoService.DeriveBlobKey(masterKey);
+        var blobKey = _groupCryptoService.DeriveBlobKey(GroupMasterKey.FromSpan(masterKey.Span));
 
         // Create GroupContent with text message
         var groupContent = new GroupContent
@@ -149,7 +149,7 @@ public sealed class SendGroupMessageCommandHandler : IRequestHandler<Commands.Se
             cancellationToken).ConfigureAwait(false);
     }
 
-    private static ChatEnvelope CreateGroupMessageEnvelope(ChatConversationId conversationId, Ciphertext ciphertext)
+    private static ChatEnvelope CreateGroupMessageEnvelope(ConversationId conversationId, Ciphertext ciphertext)
     {
         return new ChatEnvelope
         {

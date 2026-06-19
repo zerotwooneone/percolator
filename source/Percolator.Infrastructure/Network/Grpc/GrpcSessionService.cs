@@ -2,7 +2,6 @@ using System.Net;
 using Grpc.Core;
 using Microsoft.Extensions.Logging;
 using Percolator.Contracts;
-using Percolator.Network;
 using Percolator.Network.Services;
 
 namespace Percolator.Infrastructure.Network.Grpc

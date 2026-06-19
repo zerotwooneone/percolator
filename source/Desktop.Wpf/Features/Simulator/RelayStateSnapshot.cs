@@ -1,5 +1,4 @@
 using Percolator.Identity;
-using Percolator.Network;
 
 namespace Desktop.Wpf.Features.Simulator.Models;
 

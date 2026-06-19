@@ -1,5 +1,3 @@
-using System.Text.Json;
-
 namespace Percolator.Infrastructure.Chat.Persistence;
 
 /// <summary>

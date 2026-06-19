@@ -4,7 +4,6 @@ using Microsoft.Extensions.Options;
 using ObservableCollections;
 using Percolator.Application.Configuration;
 using Percolator.Cryptography;
-using Percolator.Cryptography.Primitives;
 using System.IO;
 using System.Net;
 using System.Security.Cryptography;

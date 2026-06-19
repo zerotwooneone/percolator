@@ -7,7 +7,7 @@ using Moq;
 using NUnit.Framework;
 using Percolator.Application.Identity;
 using Percolator.Chat;
-using Percolator.Chat.ValueObjects;
+using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Network;
 
 namespace Desktop.Wpf.Tests;

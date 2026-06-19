@@ -1,6 +1,5 @@
 using MediatR;
 using Percolator.Network;
-using System.Collections.Generic;
 
 namespace Desktop.Wpf.Features.Sessions.Queries;
 

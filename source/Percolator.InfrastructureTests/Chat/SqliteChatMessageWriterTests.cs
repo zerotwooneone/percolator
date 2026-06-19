@@ -1,7 +1,7 @@
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Percolator.Chat.ValueObjects;
+using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Infrastructure.Chat;
 using Percolator.Infrastructure.Persistence;
 using Percolator.InfrastructureTests.Common;

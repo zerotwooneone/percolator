@@ -8,7 +8,6 @@ using Percolator.Application.Services;
 using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Identity.Model;
-using Percolator.Network;
 
 namespace Percolator.Application.Network;
 

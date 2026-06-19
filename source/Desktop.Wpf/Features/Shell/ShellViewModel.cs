@@ -4,8 +4,6 @@ using Desktop.Wpf.Features.Self;
 using Desktop.Wpf.Features.Sessions;
 using Desktop.Wpf.Shared.Mvvm;
 using Microsoft.Extensions.DependencyInjection;
-using Percolator.Application.Identity;
-using Percolator.Identity;
 using System.Windows.Input;
 using Desktop.Wpf.Shared.Windowing;
 

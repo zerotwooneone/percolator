@@ -8,7 +8,6 @@ using Percolator.Contracts;
 using Percolator.Identity;
 using Percolator.Identity.Model;
 using Percolator.Network;
-using System.Security.Cryptography;
 
 namespace Percolator.Application.Network.Handshake
 {

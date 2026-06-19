@@ -1,4 +1,3 @@
-using Grpc.Net.Client;
 using Percolator.Contracts;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
@@ -8,7 +7,6 @@ using NetworkPeerId = Percolator.Network.PeerId;
 using Percolator.Cryptography;
 using Google.Protobuf;
 using Percolator.Application.Network;
-using Percolator.Infrastructure.Network;
 using System.Net;
 
 namespace Percolator.Infrastructure.Network.Grpc;

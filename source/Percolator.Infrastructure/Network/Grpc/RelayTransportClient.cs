@@ -1,14 +1,10 @@
 using Grpc.Core;
-using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Chat;
-using Percolator.Chat;
 using Percolator.Contracts;
 using Percolator.Cryptography;
-using Percolator.Infrastructure.Network;
 using System.Net;
-using Google.Protobuf;
-using ProtobufDeliveryCertificate = Percolator.Contracts.DeliveryCertificate;
+using Percolator.Chat.GroupLedger;
 
 namespace Percolator.Infrastructure.Network.Grpc;
 
@@ -25,7 +21,7 @@ public sealed class RelayTransportClient : IRelayTransportClient
         _logger = logger;
     }
 
-    public async Task<Percolator.Chat.DeliveryCertificate> FetchCertificateAsync(
+    public async Task<Percolator.Chat.GroupLedger.DeliveryCertificate> FetchCertificateAsync(
         string targetHost,
         int targetPort,
         string senderPkh,
@@ -56,11 +52,11 @@ public sealed class RelayTransportClient : IRelayTransportClient
         // Parse the protobuf response directly into rich domain types
         var certificateData = response.Certificate.CertificateData.ToByteArray();
         var payload = DeliveryCertificatePayloadBytes.FromBytes(certificateData);
-        var relaySig = Signature.FromBytes(response.Certificate.Signature.ToByteArray());
+        var relaySig = SignatureBytes.FromBytes(response.Certificate.Signature.ToByteArray());
 
         // Safe extraction with guaranteed bounds checking
         var expiresAt = Percolator.Application.Chat.DeliveryCertificateWireFormatter.ExtractExpiration(payload.Span);
 
-        return new Percolator.Chat.DeliveryCertificate(payload, relaySig, expiresAt);
+        return new Percolator.Chat.GroupLedger.DeliveryCertificate(payload, relaySig, expiresAt);
     }
 }

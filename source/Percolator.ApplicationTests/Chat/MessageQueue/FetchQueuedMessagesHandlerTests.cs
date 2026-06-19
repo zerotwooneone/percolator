@@ -4,7 +4,7 @@ using Moq;
 using Percolator.Application.Chat.MessageQueue;
 using Percolator.Application.Chat.MessageQueue.Commands;
 using Percolator.Application.Chat.MessageQueue.Handlers;
-using Percolator.Chat.ValueObjects;
+using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Identity;
 
 namespace Percolator.ApplicationTests.Chat.MessageQueue;

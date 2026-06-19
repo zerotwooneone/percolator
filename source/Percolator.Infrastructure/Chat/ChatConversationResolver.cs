@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
-using Percolator.Chat;
-using Percolator.Chat.App;
-using Percolator.Chat.ValueObjects;
+using Percolator.Chat.Messaging;
+using Percolator.Chat.Messaging.App;
+using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Infrastructure.Persistence;
 
 namespace Percolator.Infrastructure.Chat;
@@ -116,7 +116,7 @@ public sealed class ChatConversationResolver : IDirectConversationResolver
             var selfIdentity = identities[0];
 
             // Resolve remote peer from PKH
-            var pkhBytes = lookupKey.PublicKeyHash.Value;
+            var pkhBytes = lookupKey.PublicKeyHash.ToArray();
             var remoteKey = await _db.PeerPublicSigningKeys
                 .AsNoTracking()
                 .Where(k => k.PublicKeyHash == pkhBytes && k.ExpiredAtUtc == null)

@@ -1,5 +1,5 @@
 using MediatR;
-using Percolator.Chat.ValueObjects;
+using Percolator.Chat.Messaging.ValueObjects;
 
 namespace Percolator.Application.Apps.Chat.Commands;
 

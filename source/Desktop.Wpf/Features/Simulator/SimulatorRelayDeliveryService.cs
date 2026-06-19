@@ -1,12 +1,7 @@
-using System.Collections.Generic;
 using Google.Protobuf;
-using Grpc.Core;
 using Microsoft.Extensions.Logging;
-using Percolator.Application.Network;
 using Percolator.Contracts;
-using Percolator.Cryptography;
 using Percolator.Identity;
-using Percolator.Network;
 
 namespace Desktop.Wpf.Features.Simulator;
 

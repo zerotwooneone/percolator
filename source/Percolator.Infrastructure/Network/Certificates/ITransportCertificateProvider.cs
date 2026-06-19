@@ -1,4 +1,3 @@
-using Percolator.Identity.Model;
 using System.Security.Cryptography.X509Certificates;
 using Percolator.Identity;
 

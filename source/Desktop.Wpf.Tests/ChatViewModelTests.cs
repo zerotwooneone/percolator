@@ -9,6 +9,7 @@ using FluentAssertions;
 using MediatR;
 using Moq;
 using NUnit.Framework;
+using Percolator.Chat.Messaging.App.Commands;
 using Percolator.Network;
 
 namespace Desktop.Wpf.Tests;
@@ -54,7 +55,7 @@ public class ChatViewModelTests
 
         vm.MessageInput.Value.Should().Be(string.Empty);
         mediator.Verify(m => m.Send(
-            It.Is<Percolator.Chat.App.Commands.PostTextMessageCommand>(cmd =>
+            It.Is<PostTextMessageCommand>(cmd =>
                 cmd.LookupKey.DirectSessionId.Value == testSessionId.Value &&
                 cmd.Content == "hi"),
             It.IsAny<CancellationToken>()),

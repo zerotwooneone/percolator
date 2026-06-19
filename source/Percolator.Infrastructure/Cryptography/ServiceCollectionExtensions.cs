@@ -1,7 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Percolator.Application.Cryptography;
 using Percolator.Cryptography;
-using Percolator.Chat.App;
 using Percolator.Infrastructure.Application;
 
 namespace Percolator.Infrastructure.Cryptography;

@@ -3,12 +3,12 @@ using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Network;
 using Percolator.Chat;
-using Percolator.Chat.App;
-using Percolator.Chat.ValueObjects;
+using Percolator.Chat.GroupLedger;
+using Percolator.Chat.GroupMembership;
+using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
-using Percolator.Identity.Model;
 using Percolator.Network;
 
 namespace Percolator.Application.Apps.Chat;
@@ -78,7 +78,7 @@ public sealed class CreateGroupCommandHandler : IRequestHandler<CreateGroupComma
         // Persist GroupMasterKey
         await _groupCryptoStateRepository.UpsertGroupMasterKeyAsync(
             new ConversationId(conversationId),
-            groupMasterKey,
+            GroupMasterKeyBytes.FromSpan(groupMasterKey.Span),
             cancellationToken).ConfigureAwait(false);
 
         // Create CreateGroup envelope
@@ -153,7 +153,7 @@ public sealed class CreateGroupCommandHandler : IRequestHandler<CreateGroupComma
 
             var groupMember = new GroupMember(
                 new ConversationId(conversationId),
-                memberPeerId,
+                new ChatPeerId(memberPeerId.Value),
                 role,
                 now
             );

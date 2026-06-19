@@ -1,5 +1,4 @@
 using Percolator.Cryptography;
-using Percolator.Cryptography.Primitives;
 
 namespace Desktop.Wpf.Features.Simulator.Protocol;
 

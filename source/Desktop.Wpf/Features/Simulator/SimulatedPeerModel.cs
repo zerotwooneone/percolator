@@ -2,11 +2,7 @@ using ObservableCollections;
 using Desktop.Wpf.Features.Simulator.Models;
 using Percolator.Cryptography;
 using Percolator.Identity;
-using Percolator.Network;
 using R3;
-using System;
-using System.Linq;
-using Desktop.Wpf.Features.Chat;
 using System.Net;
 
 namespace Desktop.Wpf.Features.Simulator;
