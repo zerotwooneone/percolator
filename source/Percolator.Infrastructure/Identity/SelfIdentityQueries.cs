@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Percolator.Application.Chat;
+using Percolator.Chat.GroupLedger;
 using Percolator.Cryptography;
 using Percolator.Infrastructure.Persistence;
 
@@ -24,5 +25,17 @@ public sealed class SelfIdentityQueries : ISelfIdentityQueries
             .FirstOrDefaultAsync(ct);
 
         return bytes is null ? null : RatchetIdentityKey.FromBytesOwned(bytes);
+    }
+
+    public async Task<ZkServerSecretParamsSeedBytes?> GetZkServerSecretParamsSeedAsync(CancellationToken ct)
+    {
+        using var db = _dbFactory.CreateDbContext();
+        var bytes = await db.SelfIdentities
+            .AsNoTracking()
+            .Where(x => x.ZkServerSecretParamsSeed != null)
+            .Select(x => x.ZkServerSecretParamsSeed)
+            .FirstOrDefaultAsync(ct);
+
+        return bytes is null ? null : ZkServerSecretParamsSeedBytes.FromBytesOwned(bytes);
     }
 }

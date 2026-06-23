@@ -48,12 +48,19 @@ public sealed class RelayGroupOrchestrator : IRelayGroupOrchestrator
             throw new UnauthorizedDomainException("ZK server secret params seed not found.");
         }
 
-        // 2. Auth Proof: Verify the presentation
+        // 2. Consensus: Load ledger first (needed for GroupPublicParams in verification)
+        var ledger = await _ledgerRepository.GetByIdAsync(conversationId, cancellationToken);
+        if (ledger is null)
+        {
+            throw new UnauthorizedDomainException($"Relay group ledger not found for conversation {conversationId.Value}.");
+        }
+
+        // 3. Auth Proof: Verify the presentation
         var redemptionTimeEpochSeconds = (ulong)_timeProvider.GetUtcNow().ToUnixTimeSeconds();
         var isValid = _cryptoService.VerifyGroupPresentation(
-            seed.Span,
             presentation.Span,
-            ciphertext.Span,
+            seed.Span,
+            ledger.GroupPublicParams.Span,
             redemptionTimeEpochSeconds);
 
         if (!isValid)
@@ -61,13 +68,7 @@ public sealed class RelayGroupOrchestrator : IRelayGroupOrchestrator
             throw new UnauthorizedDomainException("Group presentation verification failed.");
         }
 
-        // 3. Consensus: Load ledger and advance epoch
-        var ledger = await _ledgerRepository.GetByIdAsync(conversationId, cancellationToken);
-        if (ledger is null)
-        {
-            throw new UnauthorizedDomainException($"Relay group ledger not found for conversation {conversationId.Value}.");
-        }
-
+        // 4. Advance epoch
         ledger.AdvanceEpoch(requestedEpoch);
 
         // 4. Fan-out: Get member peer IDs and publish

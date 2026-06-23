@@ -16,6 +16,7 @@ public class SelfIdentityDbo
     public byte[]? RelayDeliveryRootKey { get; set; }
     public byte[]? ActiveIdentityKeySpki { get; set; }
     public byte[]? ActiveIdentityKeyFingerprint { get; set; }
+    public byte[]? ZkServerSecretParamsSeed { get; set; }
 
     // Navigation to the associated keys record (one-to-one)
     public SelfIdentityKeysDbo? Keys { get; set; }

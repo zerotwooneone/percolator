@@ -56,14 +56,14 @@ public interface IGroupCryptographyService
     /// <summary>
     /// Verifies a ZK group presentation for server-side access control.
     /// </summary>
-    /// <param name="serverSecretParamsSeed">The server's secret params seed.</param>
     /// <param name="presentation">The ZK presentation bytes.</param>
-    /// <param name="ciphertext">The ciphertext bytes.</param>
+    /// <param name="serverSecretSeed">The server's secret params seed.</param>
+    /// <param name="groupPublicParams">The group's public params.</param>
     /// <param name="redemptionTimeEpochSeconds">The redemption time in epoch seconds.</param>
     /// <returns>True if the presentation is valid, false otherwise.</returns>
     bool VerifyGroupPresentation(
-        ReadOnlySpan<byte> serverSecretParamsSeed,
         ReadOnlySpan<byte> presentation,
-        ReadOnlySpan<byte> ciphertext,
+        ReadOnlySpan<byte> serverSecretSeed,
+        ReadOnlySpan<byte> groupPublicParams,
         ulong redemptionTimeEpochSeconds);
 }

@@ -2,6 +2,7 @@ using Grpc.Core;
 using Percolator.Application.Chat;
 using Percolator.Chat.GroupLedger;
 using Percolator.Chat.Messaging.ValueObjects;
+using Percolator.Contracts;
 
 namespace Percolator.Infrastructure.Network.Grpc;
 
@@ -18,6 +19,14 @@ public sealed class RelayGroupService : Percolator.Contracts.RelayGroupService.R
     {
         try
         {
+            // Validate required fields
+            if (request.ConversationId is null)
+                throw new ArgumentException("conversation_id is required.");
+            if (request.Presentation is null)
+                throw new ArgumentException("presentation is required.");
+            if (request.Ciphertext is null)
+                throw new ArgumentException("ciphertext is required.");
+
             // Boundary Defensive Copy (Protobuf ByteString -> Domain Primitive)
             // Rule: Use DomainType.FromBytesOwned(byteString.ToByteArray())
             // This prevents memory corruption by taking ownership of the defensive copy.

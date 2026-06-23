@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Percolator.Chat.GroupLedger;
 using Percolator.Cryptography;
 
 namespace Percolator.Infrastructure.Cryptography;
@@ -153,5 +154,32 @@ public sealed class ZkgroupCryptographyService : IGroupCryptographyService
         // Check if the exception indicates a deserialization failure
         // Signal.Interop maps status code 4 to CryptographicException with specific message
         return ex is CryptographicException && ex.Message.Contains("deserial");
+    }
+
+    public bool VerifyGroupPresentation(
+        ReadOnlySpan<byte> presentation,
+        ReadOnlySpan<byte> serverSecretSeed,
+        ReadOnlySpan<byte> groupPublicParams,
+        ulong redemptionTimeEpochSeconds)
+    {
+        // Deserialize the presentation
+        using var presentationHandle = Signal.Interop.SignalCrypto.DeserializeAuthCredentialWithPniPresentation(presentation);
+
+        // Generate server secret params from seed (DeserializeServerSecretParams doesn't exist in Signal.Interop)
+        // The seed is used as randomness to generate the server secret params
+        using var serverSecretParamsHandle = Signal.Interop.SignalCrypto.GenerateServerSecretParams(serverSecretSeed);
+
+        // Deserialize group public params
+        using var groupPublicParamsHandle = Signal.Interop.SignalCrypto.DeserializeGroupPublicParams(groupPublicParams);
+
+        // Verify the presentation
+        Signal.Interop.SignalCrypto.VerifyAuthCredentialWithPniPresentation(
+            presentationHandle,
+            serverSecretParamsHandle,
+            groupPublicParamsHandle,
+            redemptionTimeEpochSeconds);
+
+        // If no exception is thrown, verification succeeded
+        return true;
     }
 }

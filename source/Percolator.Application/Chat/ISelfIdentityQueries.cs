@@ -1,3 +1,4 @@
+using Percolator.Chat.GroupLedger;
 using Percolator.Cryptography;
 
 namespace Percolator.Application.Chat;
@@ -5,5 +6,5 @@ namespace Percolator.Application.Chat;
 public interface ISelfIdentityQueries
 {
     Task<RatchetIdentityKey?> GetActiveIdentityFingerprintAsync(CancellationToken ct);
-    Task<RatchetIdentityKey?> GetZkServerSecretParamsSeedAsync(CancellationToken ct);
+    Task<ZkServerSecretParamsSeedBytes?> GetZkServerSecretParamsSeedAsync(CancellationToken ct);
 }
