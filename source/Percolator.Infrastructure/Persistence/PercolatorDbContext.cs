@@ -61,6 +61,8 @@ public class PercolatorDbContext : DbContext
     public DbSet<Percolator.Infrastructure.Chat.Persistence.GroupStateDbo> GroupStates { get; set; } = null!;
     public DbSet<Percolator.Infrastructure.Chat.Persistence.PendingGroupInvitationDbo> PendingGroupInvitations { get; set; } = null!;
     public DbSet<Percolator.Infrastructure.Chat.Persistence.SenderKeyRecordDbo> SenderKeyRecords { get; set; } = null!;
+    public DbSet<RelayGroupStateDbo> RelayGroupStates { get; set; } = null!;
+    public DbSet<RelayBlindedRosterDbo> RelayBlindedRosters { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -718,6 +720,21 @@ public class PercolatorDbContext : DbContext
                 .HasForeignKey(e => e.DiscoveryKey)
                 .OnDelete(DeleteBehavior.Cascade)
                 .IsRequired();
+        });
+
+        // RelayGroupStates (Relay Ledger state for group messaging)
+        modelBuilder.Entity<RelayGroupStateDbo>(entity =>
+        {
+            entity.ToTable("RelayGroupStates");
+            entity.HasKey(e => e.ConversationId);
+            entity.Property(e => e.ConversationId).ValueGeneratedNever();
+        });
+
+        // RelayBlindedRosters (Blinded membership roster for relay fan-out)
+        modelBuilder.Entity<RelayBlindedRosterDbo>(entity =>
+        {
+            entity.ToTable("RelayBlindedRosters");
+            entity.HasKey(e => new { e.ConversationId, e.BlindedChatPeerId });
         });
     }
 }
