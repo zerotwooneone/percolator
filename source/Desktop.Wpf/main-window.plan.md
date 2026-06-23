@@ -672,6 +672,7 @@ You are implementing the Signal Protocol Group V2 Relay Ledger for Percolator. T
     {
         Task PublishGroupRelayMessageAsync(
             ConversationId conversationId,
+            uint requestedEpoch,
             ZkPresentationBytes presentation,
             CiphertextBytes ciphertext, // Strongly-typed domain primitive
             CancellationToken ct);
@@ -682,8 +683,9 @@ You are implementing the Signal Protocol Group V2 Relay Ledger for Percolator. T
     * **Workflow:**
         1. **Authorizer:** `var seed = await _identityQueries.GetZkServerSecretParamsSeedAsync(ct);`
         2. **Auth Proof:** Pass the domain-typed `CiphertextBytes` to `_cryptoService.VerifyGroupPresentation(...)` using the injected `TimeProvider` for the `redemptionTimeEpochSeconds`. Throw `UnauthorizedDomainException` if verification fails.
-        3. **Consensus:** * `var ledger = await _ledgerRepository.GetByIdAsync(conversationId, ct);`
-            * `ledger.AdvanceEpoch(requestEpoch);` (Epoch derived from payload header).
+        3. **Consensus:** 
+            * `var ledger = await _ledgerRepository.GetByIdAsync(conversationId, ct);`
+            * `ledger.AdvanceEpoch(requestedEpoch);`
         4. **Fan-out:**
             * `var peerIds = await _rosterQueries.GetMemberPeerIdsAsync(conversationId.Value, ct);`
             * `var payload = QueuedPayloadBytes.FromSpan(ciphertext.Span);` // Zero-allocation boundary copy
@@ -744,6 +746,7 @@ message SubmitGroupMessageRequest {
     optional bytes conversation_id = 1;
     optional bytes presentation = 2;    // ZK Proof
     optional bytes ciphertext = 3;      // Encrypted payload
+    optional uint32 epoch = 4;          // Target epoch for concurrency control
 }
 
 message SubmitGroupMessageResponse {
@@ -797,6 +800,7 @@ public sealed class RelayGroupService : Percolator.Contracts.RelayGroupService.R
 
             await _orchestrator.PublishGroupRelayMessageAsync(
                 conversationId,
+                request.Epoch,
                 presentation,
                 ciphertext,
                 context.CancellationToken);
