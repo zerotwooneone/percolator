@@ -52,4 +52,18 @@ public interface IGroupCryptographyService
     /// <exception cref="ArgumentException">Thrown if bytes32.Length is not exactly 32.</exception>
     /// <exception cref="CryptographicException">Thrown if deserialization fails due to data corruption or invalid format.</exception>
     GroupMasterKey DeserializeGroupMasterKey(ReadOnlySpan<byte> bytes32);
+
+    /// <summary>
+    /// Verifies a ZK group presentation for server-side access control.
+    /// </summary>
+    /// <param name="serverSecretParamsSeed">The server's secret params seed.</param>
+    /// <param name="presentation">The ZK presentation bytes.</param>
+    /// <param name="ciphertext">The ciphertext bytes.</param>
+    /// <param name="redemptionTimeEpochSeconds">The redemption time in epoch seconds.</param>
+    /// <returns>True if the presentation is valid, false otherwise.</returns>
+    bool VerifyGroupPresentation(
+        ReadOnlySpan<byte> serverSecretParamsSeed,
+        ReadOnlySpan<byte> presentation,
+        ReadOnlySpan<byte> ciphertext,
+        ulong redemptionTimeEpochSeconds);
 }

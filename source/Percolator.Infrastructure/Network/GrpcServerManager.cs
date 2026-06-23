@@ -63,13 +63,22 @@ public class GrpcServerManager : IGrpcServerManager
             builder.Services.AddSingleton<IGrpcServiceActivator<PercolatorMessageService>>(
                 new PrimaryContainerServiceActivator<PercolatorMessageService>(_primaryProvider)
             );
-            
+
+            // Register RelayGroupService activator
+            builder.Services.AddSingleton<IGrpcServiceActivator<RelayGroupService>>(
+                new PrimaryContainerServiceActivator<RelayGroupService>(_primaryProvider));
+
             // Bridge the interceptor resolution to the primary container
-            builder.Services.AddTransient<IdentityReadinessInterceptor>(sp => 
+            builder.Services.AddTransient<IdentityReadinessInterceptor>(sp =>
                 _primaryProvider.GetRequiredService<IdentityReadinessInterceptor>());
-            
+
             // Register gRPC services
             builder.Services.AddGrpc().AddServiceOptions<PercolatorMessageService>(options =>
+            {
+                options.Interceptors.Add<IdentityReadinessInterceptor>();
+            });
+
+            builder.Services.AddGrpc().AddServiceOptions<RelayGroupService>(options =>
             {
                 options.Interceptors.Add<IdentityReadinessInterceptor>();
             });
@@ -77,6 +86,7 @@ public class GrpcServerManager : IGrpcServerManager
             // Build the host
             var app = builder.Build();
             app.MapGrpcService<PercolatorMessageService>();
+            app.MapGrpcService<RelayGroupService>();
 
             // Start the host
             await app.StartAsync(ct);

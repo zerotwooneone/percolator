@@ -231,3 +231,19 @@ message RatchetHeader {
     // The number of messages in the previous sending chain.
     optional uint64 previous_chain_length = 3;
 }
+
+// Relay Group Service for group message fan-out
+service RelayGroupService {
+    rpc Publish(SubmitGroupMessageRequest) returns (SubmitGroupMessageResponse);
+}
+
+message SubmitGroupMessageRequest {
+    optional bytes conversation_id = 1;
+    optional bytes presentation = 2;    // ZK Proof
+    optional bytes ciphertext = 3;      // Encrypted payload
+    optional uint32 epoch = 4;          // Target epoch for concurrency control
+}
+
+message SubmitGroupMessageResponse {
+    optional bool success = 1;
+}
