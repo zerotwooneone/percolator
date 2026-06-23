@@ -1,5 +1,5 @@
-using Percolator.Chat.GroupLedger;
 using Percolator.Cryptography;
+using Percolator.Cryptography.GroupLedger;
 
 namespace Percolator.Application.Chat;
 

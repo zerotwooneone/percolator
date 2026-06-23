@@ -6,6 +6,7 @@ using Percolator.Chat.GroupLedger;
 using Percolator.Chat.GroupMembership;
 using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Cryptography;
+using Percolator.Cryptography.GroupLedger;
 
 namespace Percolator.ApplicationTests.Chat;
 
@@ -91,7 +92,7 @@ public class RelayGroupOrchestratorTests
         var presentation = ZkPresentationBytes.FromBytesOwned(new byte[] { 0x01, 0x02 });
         var ciphertext = CiphertextBytes.FromBytesOwned(new byte[] { 0x03, 0x04 });
         var seed = ZkServerSecretParamsSeedBytes.FromBytesOwned(new byte[32]);
-        var ledger = new RelayGroupLedger(conversationId, 0, RelayGroupPublicParamsBytes.FromBytesOwned(new byte[32]), 1);
+        var ledger = new RelayGroupLedger(conversationId, 0, new Percolator.Chat.GroupLedger.RelayGroupPublicParamsBytes(), 1);
 
         identityQueries.Setup(q => q.GetZkServerSecretParamsSeedAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(seed);
@@ -125,7 +126,7 @@ public class RelayGroupOrchestratorTests
         var presentation = ZkPresentationBytes.FromBytesOwned(new byte[] { 0x01, 0x02 });
         var ciphertext = CiphertextBytes.FromBytesOwned(new byte[] { 0x03, 0x04 });
         var seed = ZkServerSecretParamsSeedBytes.FromBytesOwned(new byte[32]);
-        var ledger = new RelayGroupLedger(conversationId, 0, RelayGroupPublicParamsBytes.FromBytesOwned(new byte[32]), 1);
+        var ledger = new RelayGroupLedger(conversationId, 0, new Percolator.Chat.GroupLedger.RelayGroupPublicParamsBytes(), 1);
         var peerIds = new List<ChatPeerId> { new ChatPeerId(Guid.NewGuid()), new ChatPeerId(Guid.NewGuid()) };
 
         identityQueries.Setup(q => q.GetZkServerSecretParamsSeedAsync(It.IsAny<CancellationToken>()))
