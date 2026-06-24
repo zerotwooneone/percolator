@@ -6,6 +6,7 @@ using Percolator.Application.Chat;
 using Percolator.Chat.GroupLedger;
 using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Contracts;
+using Percolator.Cryptography.GroupLedger;
 using InfrastructureService = Percolator.Infrastructure.Network.Grpc.RelayGroupService;
 
 namespace Percolator.InfrastructureTests.Network.Grpc;

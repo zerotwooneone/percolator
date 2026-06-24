@@ -1,9 +1,8 @@
 using Percolator.Chat.GroupLedger;
-using Percolator.Cryptography.GroupLedger;
 
 namespace Percolator.Application.Chat;
 
-public sealed record RelayGroupStateDto(uint Epoch, Percolator.Chat.GroupLedger.RelayGroupPublicParamsBytes GroupPublicParams);
+public sealed record RelayGroupStateDto(uint Epoch, RelayGroupPublicParamsBytes GroupPublicParams);
 
 public interface IRelayGroupQueries
 {
