@@ -52,45 +52,52 @@ You are to implement Group Provisioning using an Outbox pattern to ensure group 
 The Goal: Alice creates a group, persists the state atomically, and creates an outbox message. A background worker dispatches the invite over 1:1 encrypted tunnels.
 
 Architectural Constraints (CRITICAL):
-* **Explicit Persistence:** Do not implement a complex EF Core DbContext Interceptor. The Application layer orchestrates saving by calling `await _groupRepository.SaveWithOutboxAsync(group, ct)`. The infrastructure implementation of this method handles saving the group state and mapping/serializing its raised domain events to the outbox table inside a single atomic `SaveChangesAsync` call.
+* **Explicit Persistence:** Do not implement a complex EF Core DbContext Interceptor. The Application layer orchestrates saving by calling `await _groupConversationRepository.AddWithOutboxAsync(group, ct)`. The infrastructure implementation of this method handles saving the group state and mapping/serializing its raised domain events to the outbox table inside a single atomic `SaveChangesAsync` call.
 * **Rule 6 Adherence:** `PeerId` is a local-only identifier and must never be written to wire-bound serialization structures or sent over the wire. The Outbox table must use wire-safe routing tokens (`DestinationPkhBytes`).
-* **Rich Primitive Wrappers:** Strictly eliminate raw Guid and byte[] values from service signatures. All layers must use fully-qualified, isolated domain primitive types (`Percolator.Chat.ConversationId`, `Percolator.Chat.PeerId`, `Percolator.Chat.GroupMasterKey`, `Percolator.Chat.SenderKeyDistributionMessageBytes`).
+* **Rich Primitive Wrappers:** Strictly eliminate raw Guid and byte[] values from service signatures. All layers must use fully-qualified, isolated domain primitive types (e.g. `Percolator.Chat.Messaging.ValueObjects.ConversationId`, `Percolator.Chat.GroupMembership.ChatPeerId`, `Percolator.Chat.GroupLedger.GroupMasterKeyBytes`, `Percolator.Cryptography.SenderKeyDistributionMessageBytes`).
 
 Implementation Requirements
-1. Domain Layer (`Percolator.Chat`)
+1. The Cryptography Domain (`Percolator.Cryptography`)
+* **Missing Primitive & Service:** Define `[ByteArray(minLength: 1, maxLength: 5000)] public sealed partial record SenderKeyDistributionMessageBytes;` in `Percolator.Cryptography`.
+* Define `ISenderKeyCryptographyService` with a method to generate the sender key distribution message, e.g., `SenderKeyDistributionMessageBytes CreateSenderKeyDistributionMessage(ConversationId conversationId, PeerId localPeerId, DeviceId deviceId)`. (Implementation of this FFI wrapper will be in Infrastructure).
+
+2. Domain Layer (`Percolator.Chat`)
 * **GroupConversation Aggregate:**
-    * Properties: `Percolator.Chat.ConversationId Id`, `Percolator.Chat.GroupMasterKey MasterKey`, `uint Epoch`, `List<GroupMember> Members`.
-    * Methods: `void InviteMember(Percolator.Chat.PeerId peerId)` which updates state and registers a `MemberInvitedDomainEvent`. `void ClearDomainEvents()` to flush events post-persistence.
-* **IDomainEvent (`Percolator.Chat/Events`):** Define a record for `MemberInvitedDomainEvent` containing `Percolator.Chat.ConversationId ConversationId`, `Percolator.Chat.PeerId PeerId`, and pre-generated `SenderKeyDistributionMessageBytes` distribution blob.
+    * **Current State:** `GroupConversation` already exists with `Id`, `State`, `Name`, and `Members`.
+    * **Modifications:** 
+      * Add an internal collection `_domainEvents = new List<IDomainEvent>()` and expose it as a public read-only list. Add `void ClearDomainEvents()`.
+      * Add `void InviteMember(ChatPeerId peerId, Percolator.Cryptography.SenderKeyDistributionMessageBytes distributionMessage)`. This updates state and registers a new `MemberInvitedDomainEvent`.
+* **IDomainEvent (`Percolator.Chat/Events`):** Define `IDomainEvent` interface. Define a record for `MemberInvitedDomainEvent(ConversationId ConversationId, ChatPeerId PeerId, SenderKeyDistributionMessageBytes DistributionMessage) : IDomainEvent`.
 
-2. Infrastructure Layer (`Percolator.Infrastructure/Chat/Persistence`)
-* **RelayOutboxDbo:** Create a DBO to store pending domain events: `Guid Id`, `string EventType`, `string PayloadJson`, `byte[] DestinationPkhBytes`, `DateTimeOffset? ProcessedAtUtc`. The `DestinationPkhBytes` column stores the pre-resolved Public Key Hash for the target `PeerId`, enabling the `OutboxDispatcherWorker` to dispatch without secondary lookups.
-* **OutboxDispatcherWorker (`Percolator.Infrastructure/Chat`):** An `IHostedService` that runs periodically. It queries the Outbox table for unprocessed events, resolves the domain event, reads the pre-resolved `DestinationPkhBytes` directly from the row, calls the `IMessageService` to dispatch the invite, and marks the event as processed.
-* **Transactional Atomicity Guarantee:** In alignment with our direct `SaveChangesAsync` repository pattern, `SaveWithOutboxAsync` must stage both the `GroupConversation` state transitions and the mapped `RelayOutboxDbo` rows against the same internal context instance before calling save, clearing domain events on the aggregate root immediately after a successful database commit. This allows Entity Framework Core to natively leverage SQLite's transaction engine to guarantee atomic persistence without requiring a custom Unit-of-Work block.
-* **Transient Network Backoff:** The `OutboxDispatcherWorker` must encapsulate transient network exceptions (e.g., gRPC `RpcException` timeouts). If a peer is offline, the worker must catch the error, log a warning, back off sequentially using a non-blocking `Task.Delay`, and skip updating `ProcessedAtUtc` so the record is cleanly evaluated on the next loop.
+3. Infrastructure Layer (`Percolator.Infrastructure/Chat/Persistence`)
+* **RelayOutboxDbo:** Create a DBO to store pending domain events: `Guid Id`, `string EventType`, `string PayloadJson`, `byte[] DestinationPkhBytes`, `DateTimeOffset? ProcessedAtUtc`. The `DestinationPkhBytes` column stores the pre-resolved Public Key Hash for the target `PeerId`, enabling the `OutboxDispatcherWorker` to dispatch without secondary lookups. Add this DbSet to `PercolatorDbContext`.
+* **IGroupConversationRepository Update:** Add `Task AddWithOutboxAsync(GroupConversation conversation, int selfIdentityId, CancellationToken ct)`. The SQLite implementation must serialize the domain events, map them to `RelayOutboxDbo` (fetching the PKH for the `ChatPeerId` via existing stores), insert both the group state and outbox events, and call `SaveChangesAsync` atomically. Call `ClearDomainEvents()` after success.
+* **OutboxDispatcherWorker (`Percolator.Infrastructure/Chat`):** An `IHostedService` that runs periodically. It queries the Outbox table for unprocessed events, resolves the domain event, reads the pre-resolved `DestinationPkhBytes` directly from the row, calls `IRemoteEnvelopeSender` to dispatch the `GroupInvite` envelope, and marks the event as processed.
+* **Transient Network Backoff:** The `OutboxDispatcherWorker` must encapsulate transient network exceptions (e.g., gRPC `RpcException` timeouts). If a peer is offline, catch the error, log a warning, back off sequentially using a non-blocking `Task.Delay`, and skip updating `ProcessedAtUtc`.
 
-3. Application Orchestration (`Percolator.Application/Apps/Chat`)
-* **Anti-Corruption Layer Note:** `CreateGroupCommandHandler` (located in `Percolator.Application/Apps/Chat`) serves as the Anti-Corruption Layer. It accepts incoming application primitives, extracts their raw values, and uses code-generated factory methods (e.g., `Percolator.Chat.GroupMasterKey.FromBytesOwned()`) to cleanly initialize the core domain entities.
-* **CreateGroupCommandHandler Execution:**
-    * Generate `Percolator.Chat.GroupMasterKey` via `IGroupCryptographyService`.
-    * Instantiate `GroupConversation` domain entity using `Percolator.Chat` local types.
-    * Call `group.InviteMember(peerId)` for each initial member using `Percolator.Chat.PeerId`.
-    * Save via `await _groupRepository.SaveWithOutboxAsync(group, ct)`.
+4. Application Orchestration (`Percolator.Application/Apps/Chat`)
+* **CreateGroupCommandHandler Execution (Refactor):**
+    * Currently, it sends envelopes directly. Remove the direct envelope sending.
+    * Generate `GroupMasterKeyBytes` and save via `_groupCryptoStateRepository.UpsertGroupMasterKeyAsync`.
+    * Instantiate `GroupConversation` domain entity.
+    * For each member, generate a `SenderKeyDistributionMessageBytes` via the new `ISenderKeyCryptographyService`.
+    * Call `group.InviteMember(peerId, distributionMsg)` for each initial member.
+    * Save atomically via `await _groupConversationRepository.AddWithOutboxAsync(group, request.SelfIdentityId, ct)`.
 
-4. Integration Anchor: Provisioning & Invite Ingress (`Percolator.Application/Network/ProcessInternalEnvelopeHandler.cs`)
+5. Integration Anchor: Provisioning & Invite Ingress (`Percolator.Application/Network/ProcessInternalEnvelopeHandler.cs`)
 * Update `ProcessInternalEnvelopeHandler` to include a dedicated switch case for `ChatEnvelope.MessageOneofCase.GroupInvite`:
   ```csharp
   case ChatEnvelope.MessageOneofCase.GroupInvite:
   {
-      var invite = chat.GroupInvite;
-      // Extract parameters, use IGroupMessageCryptographyService to import the distribution blob
+      var invite = envelope.ChatEnvelope.GroupInvite;
+      // Use ISenderKeyCryptographyService to process the distribution blob
       // Use IPendingGroupInvitationRepository to persist the inbound invitation metadata
       break;
   }
   ```
 
-5. Network Contracts (`internal_messaging.proto`)
-* Add `GroupInvite` message and integrate with `ChatEnvelope`:
+6. Network Contracts (`internal_messaging.proto`)
+* Modify `GroupInvite` message and integrate with `ChatEnvelope`:
   ```protobuf
   message GroupInvite {
     optional uint32 version = 1;
@@ -100,11 +107,11 @@ Implementation Requirements
     optional bytes sender_key_distribution_message = 5;
   }
   ```
-* Add `group_invite = 16;` to the `ChatEnvelope` oneof configuration.
+* Change `create_group = 16` to `group_invite = 16` in the `ChatEnvelope` oneof configuration.
 
 **Testing Requirements (Chunk 5):**
 - `ProcessInternalEnvelopeHandler_Handle_ExtractsGroupInvitePayload_WhenEnvelopeMatchesSchema` - Test that ProcessInternalEnvelopeHandler correctly extracts and processes GroupInvite payload when the ChatEnvelope contains a GroupInvite message.
-- `GroupV2SessionAndMessagingRoundTrip_DistributionMessageEnablesGroupMessaging` - Integration test where a generated GroupMasterKey creates a distribution message, a separate peer context processes that distribution message to bootstrap their session, and group messages encrypted by that peer can be successfully decrypted by the group creator.
+- `OutboxDispatcherWorker_DispatchesGroupInvite_AndMarksProcessed_WhenOutboxHasPendingEvents` - Test that the worker queries pending events, calls the sender, and updates ProcessedAtUtc.
 
 
 ---
