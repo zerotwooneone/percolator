@@ -1,7 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Percolator.Application.Chat;
 using Percolator.Cryptography;
-using Percolator.Cryptography.GroupLedger;
 using Percolator.Infrastructure.Persistence;
 
 namespace Percolator.Infrastructure.Identity;

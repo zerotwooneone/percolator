@@ -156,29 +156,33 @@ public sealed class ZkgroupCryptographyService : IGroupCryptographyService
     }
 
     public bool VerifyGroupPresentation(
-        ReadOnlySpan<byte> presentation,
-        ReadOnlySpan<byte> serverSecretSeed,
-        ReadOnlySpan<byte> groupPublicParams,
+        ZkPresentationBytes presentation,
+        ZkServerSecretParamsSeedBytes serverSecretSeed,
+        ZkGroupPublicParamsBytes groupPublicParams,
         ulong redemptionTimeEpochSeconds)
     {
         // Deserialize the presentation
-        using var presentationHandle = Signal.Interop.SignalCrypto.DeserializeAuthCredentialWithPniPresentation(presentation);
+        using var presentationHandle = Signal.Interop.SignalCrypto.DeserializeAuthCredentialWithPniPresentation(presentation.Span);
 
-        // Generate server secret params from seed (DeserializeServerSecretParams doesn't exist in Signal.Interop)
-        // The seed is used as randomness to generate the server secret params
-        using var serverSecretParamsHandle = Signal.Interop.SignalCrypto.GenerateServerSecretParams(serverSecretSeed);
+        // Generate server secret params from seed
+        using var serverSecretParamsHandle = Signal.Interop.SignalCrypto.GenerateServerSecretParams(serverSecretSeed.Span);
 
         // Deserialize group public params
-        using var groupPublicParamsHandle = Signal.Interop.SignalCrypto.DeserializeGroupPublicParams(groupPublicParams);
+        using var groupPublicParamsHandle = Signal.Interop.SignalCrypto.DeserializeGroupPublicParams(groupPublicParams.Span);
 
         // Verify the presentation
-        Signal.Interop.SignalCrypto.VerifyAuthCredentialWithPniPresentation(
-            presentationHandle,
-            serverSecretParamsHandle,
-            groupPublicParamsHandle,
-            redemptionTimeEpochSeconds);
-
-        // If no exception is thrown, verification succeeded
-        return true;
+        try
+        {
+            Signal.Interop.SignalCrypto.VerifyAuthCredentialWithPniPresentation(
+                presentationHandle,
+                serverSecretParamsHandle,
+                groupPublicParamsHandle,
+                redemptionTimeEpochSeconds);
+            return true;
+        }
+        catch (Exception) // Catch the interop/verification exception 
+        {
+            return false;
+        }
     }
 }

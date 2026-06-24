@@ -1,6 +1,6 @@
 namespace Percolator.Chat.GroupLedger;
 
-public sealed class UnauthorizedDomainException : Exception
+public sealed class UnauthorizedDomainException : DomainException
 {
     public UnauthorizedDomainException(string message) : base(message)
     {

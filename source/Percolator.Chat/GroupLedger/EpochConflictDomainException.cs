@@ -1,6 +1,6 @@
 namespace Percolator.Chat.GroupLedger;
 
-public sealed class EpochConflictDomainException : Exception
+public sealed class EpochConflictDomainException : DomainException
 {
     public EpochConflictDomainException(string message) : base(message)
     {

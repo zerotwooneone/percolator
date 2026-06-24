@@ -22,6 +22,9 @@ public static class ServiceCollectionExtensions
         // Register Peer Authentication Service
         services.AddScoped<IPeerAuthenticationService, PeerAuthenticationService>();
 
+        // Register Relay Group Orchestrator (Chunk 4)
+        services.AddScoped<IRelayGroupOrchestrator, RelayGroupOrchestrator>();
+
         return services;
     }
 }

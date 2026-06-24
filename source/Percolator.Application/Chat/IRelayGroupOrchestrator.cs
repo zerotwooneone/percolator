@@ -1,6 +1,6 @@
 using Percolator.Chat.GroupLedger;
 using Percolator.Chat.Messaging.ValueObjects;
-using Percolator.Cryptography.GroupLedger;
+using Percolator.Cryptography;
 
 namespace Percolator.Application.Chat;
 

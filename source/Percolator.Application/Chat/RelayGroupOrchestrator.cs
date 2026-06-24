@@ -1,9 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Percolator.Chat.GroupLedger;
-using Percolator.Chat.GroupMembership;
 using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Cryptography;
-using Percolator.Cryptography.GroupLedger;
 
 namespace Percolator.Application.Chat;
 
@@ -58,10 +56,14 @@ public sealed class RelayGroupOrchestrator : IRelayGroupOrchestrator
 
         // 3. Auth Proof: Verify the presentation
         var redemptionTimeEpochSeconds = (ulong)_timeProvider.GetUtcNow().ToUnixTimeSeconds();
+        
+        // Map from Chat primitive to Cryptography primitive
+        var cryptoGroupPublicParams = ZkGroupPublicParamsBytes.FromSpan(ledger.GroupPublicParams.Span);
+
         var isValid = _cryptoService.VerifyGroupPresentation(
-            presentation.Span,
-            seed.Span,
-            ledger.GroupPublicParams.Span,
+            presentation,
+            seed,
+            cryptoGroupPublicParams,
             redemptionTimeEpochSeconds);
 
         if (!isValid)

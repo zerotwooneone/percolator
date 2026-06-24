@@ -62,8 +62,8 @@ public interface IGroupCryptographyService
     /// <param name="redemptionTimeEpochSeconds">The redemption time in epoch seconds.</param>
     /// <returns>True if the presentation is valid, false otherwise.</returns>
     bool VerifyGroupPresentation(
-        ReadOnlySpan<byte> presentation,
-        ReadOnlySpan<byte> serverSecretSeed,
-        ReadOnlySpan<byte> groupPublicParams,
+        ZkPresentationBytes presentation,
+        ZkServerSecretParamsSeedBytes serverSecretSeed,
+        ZkGroupPublicParamsBytes groupPublicParams,
         ulong redemptionTimeEpochSeconds);
 }
