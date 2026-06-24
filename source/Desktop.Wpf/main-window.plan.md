@@ -62,60 +62,136 @@ Implementation Requirements
 1. The Cryptography Domain (`Percolator.Cryptography`)
 * **Missing Primitives & Services:** Define `[ByteArray(minLength: 1, maxLength: 5000)] public sealed partial record SenderKeyDistributionMessageBytes;`.
 * Add `ZkGroupPublicParamsBytes DeriveGroupPublicParams(GroupMasterKey masterKey);` to `IGroupCryptographyService`.
-* Define `ISenderKeyCryptographyService` with a method to generate the sender key distribution message, e.g., `SenderKeyDistributionMessageBytes CreateSenderKeyDistributionMessage(Percolator.Cryptography.Primitives.ConversationId conversationId, Percolator.Cryptography.Primitives.PeerId localPeerId, Percolator.Cryptography.Primitives.DeviceId deviceId)`.
+* Define `ISenderKeyCryptographyService` with a method to generate the sender key distribution message:
+  ```csharp
+  public interface ISenderKeyCryptographyService
+  {
+      SenderKeyDistributionMessageBytes CreateSenderKeyDistributionMessage(
+          Percolator.Cryptography.Primitives.ConversationId conversationId,
+          Percolator.Cryptography.Primitives.PeerId localPeerId,
+          Percolator.Cryptography.Primitives.DeviceId deviceId);
+  }
+  ```
+  * **Note:** The `PeerId` parameter in the Cryptography domain is a local-only identifier. When calling this from the Application layer, you will need to pass the local peer's `PeerId` from the Identity domain, converted to the Cryptography domain's `PeerId` primitive.
 
 2. Domain Layer (`Percolator.Chat`)
 * **Local Primitives:** Define `[ByteArray(minLength: 1, maxLength: 5000)] public sealed partial record ChatSenderKeyDistributionMessageBytes;` inside `Percolator.Chat.Messaging.ValueObjects` so the Chat domain doesn't depend on Cryptography.
 * **Composite Identity Value Object:** Define `public sealed record GroupParticipantId(Pkh Pkh, ChatPeerId? LocalPeerId);` in `Percolator.Chat.GroupMembership`.
+* **Domain Events Namespace:** Create a new folder `Percolator.Chat/Events` and define the following records implementing `Percolator.Identity.SeedWork.IDomainEvent`:
+  * `public sealed record GroupProvisioningRequestedDomainEvent(ConversationId ConversationId, RelayGroupPublicParamsBytes PublicParams, IReadOnlyList<Pkh> MemberPkh);`
+  * `public sealed record MemberInvitedDomainEvent(ConversationId ConversationId, GroupParticipantId ParticipantId, ChatSenderKeyDistributionMessageBytes DistributionMessage, Pkh RelayPkh);`
 * **GroupConversation & GroupMember Refactor:**
-    * Modify `Percolator.Chat.GroupMembership.GroupMember`: Change `ChatPeerId PeerId` to `GroupParticipantId ParticipantId`. Add `void ResolveLocalPeerId(ChatPeerId localId)` to upgrade an unresolved member.
-    * Modify `Percolator.Chat.GroupLedger.GroupConversation`: Add `GroupParticipantId RelayIdentity` property. The group MUST know the globally verifiable routing identity of its host.
-    * Add `Percolator.Identity.SeedWork.IDomainEvent` to `GroupConversation` via an internal `_domainEvents` list. Add `void ClearDomainEvents()`.
-    * Update `GroupConversation` constructor to accept the `RelayIdentity` and register a `GroupProvisioningRequestedDomainEvent(ConversationId, RelayGroupPublicParamsBytes, IReadOnlyList<Pkh>)` (define this record in `Percolator.Chat.Events`).
-    * Update `InviteMember(GroupParticipantId participantId, ChatSenderKeyDistributionMessageBytes distributionMessage)` to register a `MemberInvitedDomainEvent(ConversationId, GroupParticipantId, ChatSenderKeyDistributionMessageBytes, Pkh RelayPkh)` (define this record in `Percolator.Chat.Events`).
+  * Modify `Percolator.Chat.GroupMembership.GroupMember`: Change `ChatPeerId PeerId` to `GroupParticipantId ParticipantId`. Add `void ResolveLocalPeerId(ChatPeerId localId)` to upgrade an unresolved member.
+  * Modify `Percolator.Chat.GroupLedger.GroupConversation`: Add `GroupParticipantId RelayIdentity` property. The group MUST know the globally verifiable routing identity of its host.
+  * Add `private readonly List<IDomainEvent> _domainEvents = new();` to `GroupConversation`. Add `public IReadOnlyList<IDomainEvent> GetDomainEvents() => _domainEvents;` and `public void ClearDomainEvents() => _domainEvents.Clear();`.
+  * Update `GroupConversation` constructor to accept the `RelayIdentity` and register a `GroupProvisioningRequestedDomainEvent` to `_domainEvents`.
+  * Update `InviteMember(GroupParticipantId participantId, ChatSenderKeyDistributionMessageBytes distributionMessage)` to register a `MemberInvitedDomainEvent` to `_domainEvents`.
 
 3. Message Queue Decoupling (`Percolator.Infrastructure`)
-* **Infrastructure Bug Fix:** `MessageQueueItemDbo` currently uses `PeerId RecipientPeerId`. This strictly limits the queue to known local peers. You MUST refactor `MessageQueueItemDbo` to use `Pkh RecipientPkh` directly, registering an EF Core Value Converter in `PercolatorDbContext` to map it to a byte array. Update `SqliteMessageQueueRepository` and `internal_messaging.proto` `EnqueueOpaqueMessageRequest` bindings to reflect this fully-typed PKH-based routing.
+* **Infrastructure Bug Fix:** `MessageQueueItemDbo` currently uses `PeerId RecipientPeerId`. This strictly limits the queue to known local peers. You MUST refactor `MessageQueueItemDbo` to use `Pkh RecipientPkh` directly.
+* **EF Core Value Converter Pattern:** In `PercolatorDbContext.OnModelCreating`, add a value converter for `Pkh`:
+  ```csharp
+  modelBuilder.Entity<MessageQueueItemDbo>()
+      .Property(e => e.RecipientPkh)
+      .HasConversion(
+          v => v.ToArray(),
+          v => Pkh.FromBytesOwned(v));
+  ```
+* **Repository Update:** Update `SqliteMessageQueueRepository.TryEnqueueAsync` to accept `Pkh recipientPkh` instead of `PeerId`. Update the internal counting logic to compare spans instead of GUIDs.
 
 4. Relay Provisioning Ingress (`Percolator.Infrastructure/Network/Grpc/RelayGroupService.cs`)
-* **The Provisioning Endpoint:** The Relay must expose a way to be provisioned blindly. Add `rpc ProvisionGroup(ProvisionGroupRequest) returns (ProvisionGroupResponse);` to `Percolator.Contracts/Protos/messaging.proto`.
+* **The Provisioning Endpoint:** The Relay must expose a way to be provisioned blindly. Add `rpc ProvisionGroup(ProvisionGroupRequest) returns (ProvisionGroupResponse);` to `Percolator.Contracts/Protos/messaging.proto` under the `RelayGroupService` service definition.
 * **Implementation:** Add `public override async Task<ProvisionGroupResponse> ProvisionGroup(ProvisionGroupRequest request, ServerCallContext context)` to `RelayGroupService`.
   * Validate inputs and parse bytes defensively using `.FromBytesOwned()`.
-  * Define an orchestrator interface `IRelayGroupProvisioningOrchestrator` in `Percolator.Application` and implement it. The service must call this orchestrator instead of directly touching DbContext.
-  * The orchestrator uses the repository pattern to create `RelayGroupStateDbo` (Epoch 0) and inserts members into `RelayBlindedRosterDbo` using the parsed `Pkh` tokens.
+  * Define an orchestrator interface `IRelayGroupProvisioningOrchestrator` in `Percolator.Application.Chat` with method `Task ProvisionGroupAsync(ConversationId conversationId, RelayGroupPublicParamsBytes publicParams, IReadOnlyList<Pkh> memberPkh, CancellationToken ct)`. Implement it in `RelayGroupProvisioningOrchestrator`.
+  * The orchestrator uses the existing `IRelayGroupLedgerRepository` to save the ledger state. You may need to extend `IRelayGroupLedgerRepository` with an `AddAsync` method if it doesn't exist, or use the repository pattern to directly insert `RelayGroupStateDbo` and `RelayBlindedRosterDbo` via `PercolatorDbContext`.
+* **RelayBlindedRosterDbo Bug Fix:** The current `RelayBlindedRosterDbo` uses `Guid BlindedChatPeerId` which is a local-only concept. You MUST refactor it to use `Pkh MemberPkh` instead, with an EF Core Value Converter. This ensures the relay stores globally-routable PKHs for its blinded roster.
 
 5. Infrastructure Layer (`Percolator.Infrastructure/Chat/Persistence`)
-* **RelayOutboxDbo:** Create a DBO to store pending domain events: `Guid Id`, `string EventType`, `string PayloadJson`, `Pkh DestinationPkh`, `DateTimeOffset? ProcessedAtUtc`. Use an EF Core Value Converter for `DestinationPkh`. 
+* **RelayOutboxDbo:** Create a DBO to store pending domain events: `Guid Id`, `string EventType`, `string PayloadJson`, `Pkh DestinationPkh`, `DateTimeOffset? ProcessedAtUtc`. Use an EF Core Value Converter for `DestinationPkh` (same pattern as MessageQueueItemDbo).
 * **IGroupConversationRepository Update:** Implement `Task AddWithOutboxAsync(GroupConversation conversation, int selfIdentityId, CancellationToken ct)`.
-* **OutboxDispatcherWorker:** An `IHostedService` that queries unprocessed events. 
-  * If it's a `GroupProvisioningRequestedDomainEvent`, it invokes the Relay's `ProvisionGroup` gRPC endpoint via a transport client.
-  * If it's a `MemberInvitedDomainEvent`, it dispatches the `GroupInvite` via `IRemoteEnvelopeSender`.
-* **Transient Network Backoff:** Encapsulate transient network exceptions (e.g., gRPC timeouts). If a peer is offline, log a warning, delay sequentially, and skip updating `ProcessedAtUtc`.
+  * In `SqliteGroupConversationRepository`, after saving the group state and members, iterate over `conversation.GetDomainEvents()`.
+  * Serialize each event to JSON using `System.Text.Json.JsonSerializer.Serialize(event, event.GetType())`.
+  * Map to `RelayOutboxDbo` and add to context.
+  * Call `SaveChangesAsync` atomically.
+  * Call `conversation.ClearDomainEvents()` after success.
+* **IRemoteEnvelopeSender Extension:** The current `IRemoteEnvelopeSender.SendChatEnvelopeToPeerAsync` requires `RecipientRoute(PeerId, IdentityPublicKeyHash?)`. Since we are moving to PKH-based routing for outbox events where we may not have a local `PeerId`, you MUST add an overload to `IRemoteEnvelopeSender`:
+  * `Task SendChatEnvelopeToPeerAsync(ChatEnvelope chatEnvelope, Pkh destinationPkh, CancellationToken ct = default);`
+  * Implement this overload in the sender to look up the routing profile for the PKH and resolve the endpoint, or use the message queue if no direct session exists.
+* **IPeerRoutingProfileRepository Extension:** The current `IPeerRoutingProfileRepository` is keyed by `PeerId`. To resolve relay endpoints from PKH in the outbox dispatcher, add a method:
+  * `Task<PeerRoutingProfile?> GetByPkhAsync(Percolator.Chat.Messaging.ValueObjects.Pkh pkh, CancellationToken cancellationToken = default);`
+  * Implement this in `SqlitePeerRoutingProfileRepository` by querying the `PeerRoutingProfileDbo` table and comparing the `PublicKeyHash` byte array to the PKH span.
+* **OutboxDispatcherWorker:** An `IHostedService` that runs every 5 seconds. It queries the Outbox table for unprocessed events (where `ProcessedAtUtc` is null).
+  * **Event Resolution:** Use a switch on `EventType` string to deserialize JSON back to the concrete domain event type.
+  * **Provisioning Dispatch:** If it's a `GroupProvisioningRequestedDomainEvent`, invoke the Relay's `ProvisionGroup` gRPC endpoint. To resolve the relay endpoint from the `DestinationPkh`, inject `IPeerRoutingProfileRepository` and call `GetByPkhAsync(event.DestinationPkh, ct)`. Use `GrpcChannel.ForAddress(profile.Endpoints.First().Address)`.
+  * **Invite Dispatch:** If it's a `MemberInvitedDomainEvent`, dispatch the `GroupInvite` via the new `IRemoteEnvelopeSender.SendChatEnvelopeToPeerAsync(chatEnvelope, event.DestinationPkh, ct)` overload. Construct the `ChatEnvelope` with the `GroupInvite` message populated from the event data.
+* **Transient Network Backoff:** Wrap gRPC calls in try-catch for `RpcException`. If status is `Unavailable` or `DeadlineExceeded`, log warning, `await Task.Delay(TimeSpan.FromSeconds(5))`, and continue to next event without updating `ProcessedAtUtc`.
 
 6. Application Orchestration (`Percolator.Application/Apps/Chat`)
 * **Eliminate MediatR Indirection:** Since group creation is triggered from a single UI entry point, MediatR is unnecessary overhead. Delete the existing `CreateGroupCommand.cs` and `CreateGroupCommandHandler.cs` in `Percolator.Application/Apps/Chat`.
 * **IGroupProvisioningAppService:** Create a new application service interface `Percolator.Application.Apps.Chat.IGroupProvisioningAppService` with a method `Task<ConversationId> ProvisionGroupAsync(string groupName, IReadOnlyList<Pkh> initialMembers, Pkh relayPkh, int selfIdentityId, CancellationToken ct);`. Implement it in `GroupProvisioningAppService`.
 * **ProvisionGroupAsync Execution Steps:**
-    1. Generate a 32-byte array of randomness and pass to `IGroupCryptographyService.GenerateGroupMasterKey()`.
+    1. Generate a 32-byte array of randomness using `RandomNumberGenerator.GetBytes(32)` and pass to `IGroupCryptographyService.GenerateGroupMasterKey()`.
     2. Derive `ZkGroupPublicParamsBytes` from the master key.
-    3. Convert keys to Chat domain equivalents using `GroupMasterKeyBytes.FromSpan(...)` and `RelayGroupPublicParamsBytes.FromSpan(...)`.
-    4. Save the master key using `IGroupCryptoStateRepository.UpsertGroupMasterKeyAsync`.
-    5. Construct `GroupParticipantId` for the relay and initial members.
-    6. Instantiate `Percolator.Chat.GroupLedger.GroupConversation` aggregate (passing the Relay `GroupParticipantId`).
-    7. For each member, generate distribution bytes via `ISenderKeyCryptographyService.CreateSenderKeyDistributionMessage()`. Convert to `ChatSenderKeyDistributionMessageBytes` and invoke `group.InviteMember()`.
-    8. Save atomically via `await _groupConversationRepository.AddWithOutboxAsync(group, selfIdentityId, ct)`.
+    3. Convert keys to Chat domain equivalents using zero-allocation span conversions:
+       * `var chatMasterKey = Percolator.Chat.GroupLedger.GroupMasterKeyBytes.FromSpan(cryptoMasterKey.Span);`
+       * `var chatPublicParams = Percolator.Chat.GroupLedger.RelayGroupPublicParamsBytes.FromSpan(cryptoPublicParams.Span);`
+    4. Save the master key using `IGroupCryptoStateRepository.UpsertGroupMasterKeyAsync(conversationId, chatMasterKey, ct)`.
+    5. Construct `GroupParticipantId` for the relay (`new GroupParticipantId(relayPkh, null)`) and initial members (`new GroupParticipantId(memberPkh, null)`).
+    6. Generate a new `ConversationId` GUID for the group.
+    7. Instantiate `Percolator.Chat.GroupLedger.GroupConversation` aggregate with:
+       * The generated `ConversationId`
+       * The relay's `GroupParticipantId`
+       * The group name
+       * This will raise a `GroupProvisioningRequestedDomainEvent` internally.
+    8. For each member, generate distribution bytes via `ISenderKeyCryptographyService.CreateSenderKeyDistributionMessage()`. Convert to `ChatSenderKeyDistributionMessageBytes` using `FromSpan()` and invoke `group.InviteMember()`. This will raise `MemberInvitedDomainEvent` for each member.
+    9. Save atomically via `await _groupConversationRepository.AddWithOutboxAsync(group, selfIdentityId, ct)`.
+    10. Return the generated `ConversationId`.
 
 7. Integration Anchor: Provisioning & Invite Ingress (`Percolator.Application/Network/ProcessInternalEnvelopeHandler.cs`)
-* Update `ProcessInternalEnvelopeHandler` to include a switch case for `ChatEnvelope.MessageOneofCase.GroupInvite`. Do NOT create a new MediatR command for this; handle it directly or via a direct call to a specialized AppService.
-* Upon receiving a `GroupInvite`, parse the Protobuf `ByteString` fields into proper Domain Value Objects using defensive copies: `GroupMasterKey.FromBytesOwned(invite.GroupMasterKey.ToByteArray())`, `Pkh.FromBytesOwned(invite.RelayPublicKeyHash.ToByteArray())`, etc.
-* The recipient persists the `GroupMasterKey`, processes the distribution message, and initializes their local `GroupConversation` pointing to the designated Relay.
+* Update `ProcessInternalEnvelopeHandler` to include a switch case for `ChatEnvelope.MessageOneofCase.GroupInvite`.
+* **IGroupInviteHandler Interface:** Define a new interface in `Percolator.Application.Chat`:
+  ```csharp
+  public interface IGroupInviteHandler
+  {
+      Task HandleGroupInviteAsync(GroupInvite invite, int selfIdentityId, CancellationToken ct);
+  }
+  ```
+* **Implementation:** Implement `GroupInviteHandler` with the following steps:
+  1. Parse the Protobuf `ByteString` fields into proper Domain Value Objects using defensive copies:
+     * `var conversationId = new Percolator.Chat.Messaging.ValueObjects.ConversationId(new Guid(invite.ConversationId.ToByteArray()));`
+     * `var groupMasterKey = Percolator.Cryptography.GroupMasterKey.FromBytesOwned(invite.GroupMasterKey.ToByteArray());`
+     * `var relayPkh = Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytesOwned(invite.RelayPublicKeyHash.ToByteArray());`
+     * `var inviterPkh = Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytesOwned(invite.InviterPkh.ToByteArray());`
+     * `var distributionMessage = Percolator.Chat.Messaging.ValueObjects.ChatSenderKeyDistributionMessageBytes.FromBytesOwned(invite.SenderKeyDistributionMessage.ToByteArray());`
+  2. Convert the cryptography domain `GroupMasterKey` to Chat domain: `var chatMasterKey = Percolator.Chat.GroupLedger.GroupMasterKeyBytes.FromSpan(groupMasterKey.Span);`
+  3. Persist the master key using `IGroupCryptoStateRepository.UpsertGroupMasterKeyAsync(conversationId, chatMasterKey, ct)`.
+  4. Process the sender key distribution message using the cryptography service (this will update the local sender key state).
+  5. Initialize a local `GroupConversation` aggregate with:
+     * The parsed `ConversationId` from the invite
+     * `RelayIdentity = new GroupParticipantId(relayPkh, null)` (initially unresolved)
+     * Add the inviter as a member using `GroupParticipantId(inviterPkh, null)`
+  6. Save the conversation via `IGroupConversationRepository.AddAsync`.
+* **Handler Injection:** In `ProcessInternalEnvelopeHandler`, inject `IGroupInviteHandler` and call it for the `GroupInvite` case.
 
 8. Network Contracts (`internal_messaging.proto` & `messaging.proto`)
 * **internal_messaging.proto:** 
-  * Modify `GroupInvite` message to add: `optional bytes relay_public_key_hash = 6;`.
+  * The existing `GroupKeyBootstrap` message (field 15) is used for bootstrapping the master key. You MUST create a NEW message `GroupInvite` for the full invitation protocol:
+    ```protobuf
+    message GroupInvite {
+      optional uint32 version = 100;
+      optional bytes conversation_id = 1; // GUID bytes
+      optional bytes group_master_key = 2; // 32-byte master key
+      optional bytes sender_key_distribution_message = 3; // Sender key distribution
+      optional bytes inviter_pkh = 4; // Public key hash of inviter
+      optional bytes relay_public_key_hash = 5; // Public key hash of relay
+    }
+    ```
   * Change `create_group = 16` to `group_invite = 16` in the `ChatEnvelope` oneof configuration.
 * **messaging.proto:**
+  * Add to the existing `RelayGroupService` definition: `rpc ProvisionGroup(ProvisionGroupRequest) returns (ProvisionGroupResponse);`
   * Define `ProvisionGroupRequest`: `optional bytes conversation_id = 1; optional bytes group_public_params = 2; repeated bytes member_public_key_hashes = 3;`.
+    * **Note:** `conversation_id` is a `bytes` field in protobuf but maps to `ConversationId(Guid Value)` in the code. Parse it as: `var conversationId = new Percolator.Cryptography.Primitives.ConversationId(new Guid(request.ConversationId.ToByteArray()));`.
   * Define `ProvisionGroupResponse`: `optional bool success = 1;`.
 
 **Testing Requirements (Chunk 5):**
