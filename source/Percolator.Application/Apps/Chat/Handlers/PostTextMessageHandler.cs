@@ -1,6 +1,7 @@
 using MediatR;
 using Percolator.Application.Identity;
 using Percolator.Chat;
+using Percolator.Chat.GroupMembership;
 using Percolator.Chat.Messaging.App;
 using Percolator.Chat.Messaging.App.Commands;
 using Percolator.Chat.Messaging.Events;
@@ -47,7 +48,7 @@ public sealed class PostTextMessageHandler : IRequestHandler<PostTextMessageComm
                 resolution.Conversation.Id.Value,
                 request.MessageId.Value,
                 resolution.SelfIdentityId,
-                new[] { resolution.Conversation.Peer1.Value, resolution.Conversation.Peer2.Value },
+                new[] { new ChatPeerId(resolution.Conversation.Peer1.Value), new ChatPeerId(resolution.Conversation.Peer2.Value) },
                 request.Content,
                 request.SentTimestampUtc,
                 DirectSessionIdValueObject.FromGuid(request.LookupKey.DirectSessionId)),

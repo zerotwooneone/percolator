@@ -1,4 +1,5 @@
 using MediatR;
+using Percolator.Chat.GroupMembership;
 using Percolator.Chat.Messaging.App.Commands;
 using Percolator.Chat.Messaging.Events;
 
@@ -37,7 +38,7 @@ public sealed class ReceiveReadReceiptHandler : IRequestHandler<ReceiveReadRecei
             resolution.Conversation.Id.Value,
             request.MessageId.Value,
             resolution.SelfIdentityId,
-            request.ReaderId.Value,
+            new ChatPeerId(request.ReaderId.Value),
             request.SentTimestampUtc), cancellationToken).ConfigureAwait(false);
     }
 }

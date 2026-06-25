@@ -135,8 +135,8 @@ public sealed class SimulatorDiagnosticsTabViewModel : IDisposable
     {
         if (_filteredView is null) return;
 
-        var peerId = SelectedPeerId.Value is not null ? new PeerId(SelectedPeerId.Value.Value) : null;
-        var relayHostId = SelectedRelayHostPeerId.Value is not null ? new PeerId(SelectedRelayHostPeerId.Value.Value) : null;
+        var peerId = SelectedPeerId.Value;
+        var relayHostId = SelectedRelayHostPeerId.Value;
         var eventType = SelectedEventType.Value;
 
         if (peerId is null && relayHostId is null && eventType is null)

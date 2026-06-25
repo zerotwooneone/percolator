@@ -26,9 +26,9 @@ namespace Percolator.Application.Apps.Chat.Handlers
             }
 
             var recipientPeerIds = notification.RecipientIds
-                .Select(id => new PeerId(new Guid(BitConverter.GetBytes(id))))
+                .Select(id => new PeerId(id.Value))
                 .ToList();
-            var senderPeerId = new PeerId(new Guid(BitConverter.GetBytes(notification.SenderId)));
+            var senderPeerId = new PeerId(notification.SenderId.Value);
 
             await _mediator.Send(new DispatchEmojiAnnotationCommand(
                 notification.MessageId,

@@ -215,9 +215,9 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
             var chat = env.ChatEnvelope;
             
             // Process inbound profile data if present
-            if (request.Context.RemotePeerGuid is not null)
+            if (request.Context.RemotePeer is not null)
             {
-                var senderPeerId = new PeerId(request.Context.RemotePeerGuid.Value);
+                var senderPeerId = new PeerId(request.Context.RemotePeer.Value.Value);
                 await _profileOrchestrationService.ProcessInboundProfileDataAsync(chat, senderPeerId, cancellationToken).ConfigureAwait(false);
             }
             
@@ -369,7 +369,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                         _logger.LogWarning("Invalid CreateGroup: RemotePeerGuid missing from envelope context");
                         return null;
                     }
-                    var senderPeerId = new PeerId(request.Context.RemotePeerGuid.Value);
+                    var senderPeerId = new PeerId((uint)request.Context.RemotePeerGuid.Value.GetHashCode());
 
                     // Persist pending group invitation
                     var pendingInvitation = new PendingGroupInvitation(
@@ -467,12 +467,12 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                         var sentTimestamp = DateTimeOffset.UtcNow;
 
                         // Get sender peer ID from context
-                        if (request.Context.RemotePeerGuid is null)
+                        if (request.Context.RemotePeer is null)
                         {
                             _logger.LogWarning("GroupMessage requires RemotePeerGuid in context");
                             return null;
                         }
-                        var senderPeerId = new PeerId(request.Context.RemotePeerGuid.Value);
+                        var senderPeerId = new PeerId(request.Context.RemotePeer.Value.Value);
 
                         // Persist the message via IChatMessageWriter
                         var senderId = new ParticipantId(senderPeerId.Value);
@@ -546,13 +546,13 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     int requestedMax = req.HasMaxCount ? (int)req.MaxCount : 100;
                     requestedMax = Math.Clamp(requestedMax, 1, 500);
 
-                    if (request.Context.RemotePeerGuid is null)
+                    if (request.Context.RemotePeer is null)
                     {
                         _logger.LogWarning("FetchQueuedMessagesRequest missing RemotePeerGuid in context");
                         return null;
                     }
                     var fetchResult = await _mediator.Send(
-                        new FetchQueuedMessagesQuery(new PeerId(request.Context.RemotePeerGuid.Value), requestedMax),
+                        new FetchQueuedMessagesQuery(new PeerId(request.Context.RemotePeer.Value.Value), requestedMax),
                         cancellationToken).ConfigureAwait(false);
 
                     var resp = new FetchQueuedMessagesResponse();

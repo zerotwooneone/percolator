@@ -194,7 +194,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
         var peerId = SelectedActiveSessionPeerId.Value;
         if (peerId is null) return;
 
-        await _state.AddRelayActiveSessionAsync(_relayHostPeerId, peerId, ct).ConfigureAwait(false);
+        await _state.AddRelayActiveSessionAsync(_relayHostPeerId, peerId.Value, ct).ConfigureAwait(false);
     }
 
     public ReactiveCommand<Unit> NextCommand { get; }
@@ -321,7 +321,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
 
             await _delivery.DeliverToPeerAsync(
                     relayHostPeerId: _relayHostPeerId,
-                    recipientPeerId: new PeerId(recipientPeerId.Value),
+                    recipientPeerId: recipientPeerId.Value,
                     ackId: ackId,
                     opaqueBytes: opaqueBytes,
                     debugType: debugType,
@@ -333,7 +333,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
             _diagnostics.Emit(
                 SimulatorDiagnosticEventType.RelayDelivered,
                 $"Relay deliver -> {recipientPeerId.Value.ToString()[..8]}: {(debugType ?? "opaque")}",
-                peerId: new PeerId(recipientPeerId.Value),
+                peerId: recipientPeerId,
                 relayHostPeerId: _relayHostPeerId,
                 ackId: ackId);
             return;

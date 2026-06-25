@@ -211,7 +211,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         }
 
         var invite = _inviteFactory.CreateInvite();
-        var inviterPeerId = _active.Identity is not null ? new PeerId(_active.Identity.Id) : new PeerId(Guid.Empty);
+        var inviterPeerId = _active.Identity is not null ? new PeerId((uint)_active.Identity.SelfIdentityId.Value) : new PeerId(0);
 
         var acceptance = await _state.AcceptInboundDirectInviteAsync(
                 simulatedPeerId: _model.PeerId,
@@ -261,7 +261,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         if (dequeued.Count == 0) return;
 
         var req = EstablishDirectSessionRequest.Parser.ParseFrom(dequeued[0].OpaqueBytes);
-        var inviterPeerId = _active.Identity is not null ? new PeerId(_active.Identity.Id) : new PeerId(Guid.Empty);
+        var inviterPeerId = _active.Identity is not null ? new PeerId((uint)_active.Identity.SelfIdentityId.Value) : new PeerId(0);
 
         var acceptance = await _state.AcceptInboundDirectInviteAsync(
                 simulatedPeerId: _model.PeerId,
@@ -419,7 +419,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
 
         _ = await _state.InitiateStandardHandshakeToMainByRelayPkhAsync(
                 simulatedPeerId: _model.PeerId,
-                relayHostPeerId: new PeerId(relayPeerId.Value),
+                relayHostPeerId: relayPeerId,
                 responderPublicKeyHash: mainPkh,
                 cancellationToken: ct)
             .ConfigureAwait(false);

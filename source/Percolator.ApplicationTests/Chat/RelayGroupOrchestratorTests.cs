@@ -126,7 +126,7 @@ public class RelayGroupOrchestratorTests
         var ciphertext = CiphertextBytes.FromBytesOwned(new byte[] { 0x03, 0x04 });
         var seed = ZkServerSecretParamsSeedBytes.FromBytesOwned(new byte[32]);
         var ledger = new RelayGroupLedger(conversationId, 0, RelayGroupPublicParamsBytes.FromBytesOwned(new byte[32]), 1);
-        var peerIds = new List<ChatPeerId> { new ChatPeerId(Guid.NewGuid()), new ChatPeerId(Guid.NewGuid()) };
+        var peerIds = new List<ChatPeerId> { new ChatPeerId(1), new ChatPeerId(2) };
 
         identityQueries.Setup(q => q.GetZkServerSecretParamsSeedAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(seed);

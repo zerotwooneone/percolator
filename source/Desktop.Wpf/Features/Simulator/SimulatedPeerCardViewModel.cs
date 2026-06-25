@@ -96,7 +96,7 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
         var publish = PublishTargetPeerId
             .Select(hostId =>
             {
-                var host = hostId is null ? null : _state.Peers.FirstOrDefault(p => p.PeerId == new PeerId(hostId.Value));
+                var host = hostId is null ? null : _state.Peers.FirstOrDefault(p => p.PeerId.Value == hostId.Value);
                 return host?.IsRelayCapable ?? Observable.Return(false);
             })
             .Switch()
@@ -317,22 +317,22 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
         var hostPeerId = PublishTargetPeerId.Value;
         if (hostPeerId is null) return;
 
-        if (!HasActiveSessionToHost(new PeerId(hostPeerId.Value)))
+        if (!HasActiveSessionToHost(hostPeerId.Value))
         {
             _diagnostics.Emit(
                 SimulatorDiagnosticEventType.PreKeyPublishBlockedMissingActiveSession,
                 $"Pre-key publish blocked (missing active session): publisher={_model.PeerId.Value.ToString()[..8]} relay={hostPeerId.Value.ToString()[..8]}",
                 peerId: _model.PeerId,
-                relayHostPeerId: new PeerId(hostPeerId.Value));
+                relayHostPeerId: hostPeerId);
             return;
         }
 
-        await _state.AddPublishedKeysRelationshipAsync(_model.PeerId, new PeerId(hostPeerId.Value), ct).ConfigureAwait(false);
+        await _state.AddPublishedKeysRelationshipAsync(_model.PeerId, hostPeerId, ct).ConfigureAwait(false);
 
         // In our simulator, "publishing" means pushing a standard pre-key bundle into the host's pre-key store.
         await _state.PublishStandardPreKeyBundleToRelayAsync(
                 simulatedPeerId: _model.PeerId,
-                relayHostPeerId: new PeerId(hostPeerId.Value),
+                relayHostPeerId: hostPeerId,
                 expiresUtc: DateTimeOffset.UtcNow.AddHours(12),
                 oneTimeKeyCount: OneTimeKeyCount.Value,
                 cancellationToken: ct)

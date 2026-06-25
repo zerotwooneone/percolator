@@ -10,7 +10,7 @@ public record PublicIdentityId
     public PublicIdentityId(Guid value)
     {
         if (value == Guid.Empty)
-            throw new ArgumentException("Peer ID cannot be empty.", nameof(value));
+            throw new ArgumentException("PublicIdentityId cannot be empty.", nameof(value));
         Value = value;
     }
 

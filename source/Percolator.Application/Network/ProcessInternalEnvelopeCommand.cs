@@ -5,7 +5,7 @@ using Percolator.Identity;
 namespace Percolator.Application.Network
 {
     // Context available from the caller (session/peer identity, etc.). Extend as needed.
-    public sealed record SessionContext(Guid? SessionId, SelfId SelfIdentityId, Guid? RemotePeerGuid, uint? SourceDeviceId);
+    public sealed record SessionContext(Guid? SessionId, SelfId SelfIdentityId, PeerId? RemotePeer, uint? SourceDeviceId);
 
     // Request: provide a parsed InternalEnvelope and related context.
     public sealed record ProcessInternalEnvelopeCommand(

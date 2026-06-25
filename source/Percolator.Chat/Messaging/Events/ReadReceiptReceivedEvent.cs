@@ -1,4 +1,5 @@
 using MediatR;
+using Percolator.Chat.GroupMembership;
 
 namespace Percolator.Chat.Messaging.Events
 {
@@ -7,14 +8,14 @@ namespace Percolator.Chat.Messaging.Events
         public Guid ConversationId { get; }
         public Guid MessageId { get; }
         public int SelfIdentityId { get; }
-        public Guid ReaderPeerId { get; }
+        public ChatPeerId ReaderPeerId { get; }
         public DateTimeOffset SentTimestampUtc { get; }
 
         public ReadReceiptReceivedEvent(
             Guid conversationId,
             Guid messageId,
             int selfIdentityId,
-            Guid readerPeerId,
+            ChatPeerId readerPeerId,
             DateTimeOffset sentTimestampUtc)
         {
             ConversationId = conversationId;

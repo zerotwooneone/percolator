@@ -1,4 +1,5 @@
 using MediatR;
+using Percolator.Chat.GroupMembership;
 using Percolator.Chat.Messaging.App.Commands;
 using Percolator.Chat.Messaging.Events;
 
@@ -38,7 +39,7 @@ public sealed class ReceiveEmojiAnnotationHandler : IRequestHandler<ReceiveEmoji
             resolution.Conversation.Id.Value,
             request.MessageId.Value,
             resolution.SelfIdentityId,
-            request.ReactorId.Value,
+            new ChatPeerId(request.ReactorId.Value),
             request.Emoji,
             request.SentTimestampUtc), cancellationToken).ConfigureAwait(false);
     }

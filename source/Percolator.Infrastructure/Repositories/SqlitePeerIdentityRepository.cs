@@ -51,7 +51,6 @@ public sealed class SqlitePeerIdentityRepository : IPeerIdentityRepository
             .Where(k => k.Fingerprint != null && k.Fingerprint.SequenceEqual(fingerprint))
             .Select(k => k.PeerId)
             .FirstOrDefaultAsync(ct);
-        if (row == Guid.Empty) return null;
         return await GetByIdAsync(new PeerId(row), ct);
     }
 

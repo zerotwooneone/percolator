@@ -356,7 +356,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
         await InvokeOnUiAsync(() =>
         {
             _model.SetSelectedRouteMode(ConnectionMode.ViaRelay);
-            _model.SetRelayHostPeerId(new PeerId(relayHost.PeerId.Value));
+            _model.SetRelayHostPeerId(relayHost.PeerId);
             _model.SetPhase("InviteEnqueued");
         }).ConfigureAwait(false);
 

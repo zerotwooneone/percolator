@@ -104,7 +104,7 @@ internal sealed class InviteHandshakeResponseDeliveryService : IInviteHandshakeR
         try
         {
             var payload = NetworkPayload.FromArray(response.ToByteArray());
-            var relayResult = await _transport.SendViaRelayAsync(new PeerId(relay.Value), inviterPeerId, payload, ct).ConfigureAwait(false);
+            var relayResult = await _transport.SendViaRelayAsync(relay.Value, inviterPeerId, payload, ct).ConfigureAwait(false);
             if (relayResult.Ok)
             {
                 var sendPath = $"Relay:{relay.Value}";

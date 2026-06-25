@@ -1,4 +1,5 @@
 using MediatR;
+using Percolator.Chat.GroupMembership;
 using Percolator.Chat.Messaging.App.Commands;
 using Percolator.Chat.Messaging.Events;
 using Percolator.Chat.Messaging.ValueObjects;
@@ -39,7 +40,7 @@ public sealed class ReceiveTextMessageHandler : IRequestHandler<ReceiveTextMessa
             resolution.Conversation.Id.Value,
             request.MessageId.Value,
             resolution.SelfIdentityId,
-            request.SenderId.Value,
+            new ChatPeerId(request.SenderId.Value),
             request.Content,
             request.SentTimestampUtc,
             DirectSessionIdValueObject.FromGuid(request.LookupKey.DirectSessionId)), cancellationToken).ConfigureAwait(false);

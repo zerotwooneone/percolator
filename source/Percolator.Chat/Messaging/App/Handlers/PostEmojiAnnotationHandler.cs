@@ -1,4 +1,5 @@
 using MediatR;
+using Percolator.Chat.GroupMembership;
 using Percolator.Chat.Messaging.App.Commands;
 using Percolator.Chat.Messaging.Events;
 
@@ -38,8 +39,8 @@ public sealed class PostEmojiAnnotationHandler : IRequestHandler<PostEmojiAnnota
             resolution.Conversation.Id.Value,
             request.MessageId.Value,
             request.Emoji,
-            resolution.SelfIdentityId,
-            new[] { BitConverter.ToInt64(resolution.Conversation.Peer1.Value.ToByteArray()), BitConverter.ToInt64(resolution.Conversation.Peer2.Value.ToByteArray()) },
+            new ChatPeerId((uint)resolution.SelfIdentityId),
+            new[] { new ChatPeerId(resolution.Conversation.Peer1.Value), new ChatPeerId(resolution.Conversation.Peer2.Value) },
             request.SentTimestampUtc.UtcDateTime),
             cancellationToken);
     }

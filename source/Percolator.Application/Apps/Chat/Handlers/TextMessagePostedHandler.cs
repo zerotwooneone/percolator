@@ -34,9 +34,9 @@ namespace Percolator.Application.Apps.Chat.Handlers
 
             try
             {
-                // Map recipient peer IDs (already Guids)
+                // Map recipient peer IDs (ChatPeerId to PeerId)
                 var recipientIds = notification.RecipientPeerIds
-                    .Select(g => new PeerId(g))
+                    .Select(id => new PeerId(id.Value))
                     .ToList();
 
                 // Sanity check the active identity context matches the provided self identity id

@@ -164,7 +164,7 @@ public sealed class SimulatorRelayAutoDeliverService : ISimulatorRelayAutoDelive
             {
                 await _delivery.DeliverToPeerAsync(
                         relayHostPeerId: relay.RelayHostPeerId,
-                        recipientPeerId: new PeerId(recipientPeerId.Value),
+                        recipientPeerId: recipientPeerId,
                         ackId: inbound.AckId,
                         opaqueBytes: inbound.OpaqueBytes,
                         debugType: inbound.DebugType,
@@ -176,7 +176,7 @@ public sealed class SimulatorRelayAutoDeliverService : ISimulatorRelayAutoDelive
                 _diagnostics.Emit(
                     SimulatorDiagnosticEventType.RelayDelivered,
                     $"Relay deliver -> {recipientPeerId.Value.ToString()[..8]}: {(inbound.DebugType ?? "opaque")}",
-                    peerId: new PeerId(recipientPeerId.Value),
+                    peerId: recipientPeerId,
                     relayHostPeerId: relay.RelayHostPeerId,
                     ackId: inbound.AckId);
             }
