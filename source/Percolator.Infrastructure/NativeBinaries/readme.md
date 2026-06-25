@@ -211,6 +211,75 @@ SafeHandle types (opaque native ownership):
     - The unmanaged function pointers (delegates) backing the `storeVTable` IntPtr MUST be kept alive by the managed application (e.g., stored in a class-level field) for the entire duration of the native call to prevent the Garbage Collector from cleaning them up before the native callback executes.
     - Failure to keep delegates alive will result in a fatal Execution Engine crash (Access Violation) when the Rust FFI attempts to invoke the callback.
 
+- **SenderKeyStore VTable Construction**
+    - Signal.Interop does NOT provide a helper method like `CreateSenderKeyStore`. You must manually construct the VTable struct and pin it in memory.
+    - The VTable struct layout is defined in `SenderKeyStoreVTable.cs`:
+        ```csharp
+        [StructLayout(LayoutKind.Sequential)]
+        public struct SenderKeyStoreVTable
+        {
+            public IntPtr LoadSenderKey;
+            public IntPtr StoreSenderKey;
+        }
+        ```
+    - Required delegate signatures:
+        ```csharp
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        public unsafe delegate int LoadSenderKeyDelegate(
+            IntPtr senderAddress,
+            byte* distributionIdBytes,
+            UIntPtr distributionIdLen,
+            out IntPtr outRecord,
+            out UIntPtr outLen
+        );
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        public unsafe delegate int StoreSenderKeyDelegate(
+            IntPtr senderAddress,
+            byte* distributionIdBytes,
+            UIntPtr distributionIdLen,
+            byte* recordBytes,
+            UIntPtr recordLen
+        );
+        ```
+    - **VTable Creation Pattern** (from `InMemorySenderKeyStore.cs`):
+        ```csharp
+        public unsafe IntPtr CreateVTable()
+        {
+            // 1. Create delegate instances and keep them alive
+            _loadDelegate = LoadKey;
+            _storeDelegate = StoreKey;
+            
+            // 2. Pin the delegates to prevent GC
+            _loadDelegateHandle = GCHandle.Alloc(_loadDelegate);
+            _storeDelegateHandle = GCHandle.Alloc(_storeDelegate);
+            
+            // 3. Create function pointers
+            IntPtr loadPtr = Marshal.GetFunctionPointerForDelegate(_loadDelegate);
+            IntPtr storePtr = Marshal.GetFunctionPointerForDelegate(_storeDelegate);
+            
+            // 4. Create and pin the VTable struct
+            var vTable = new SenderKeyStoreVTable
+            {
+                LoadSenderKey = loadPtr,
+                StoreSenderKey = storePtr
+            };
+            
+            _vTableHandle = GCHandle.Alloc(vTable, GCHandleType.Pinned);
+            return _vTableHandle.AddrOfPinnedObject();
+        }
+        ```
+    - **Memory Management**: You must free all GCHandles when disposing your store:
+        ```csharp
+        public void Dispose()
+        {
+            if (_loadDelegateHandle.IsAllocated) _loadDelegateHandle.Free();
+            if (_storeDelegateHandle.IsAllocated) _storeDelegateHandle.Free();
+            if (_vTableHandle.IsAllocated) _vTableHandle.Free();
+        }
+        ```
+    - The returned `IntPtr` from `CreateVTable()` is passed to methods like `CreateSenderKeyDistributionMessage(IntPtr storeVTable, ...)`.
+
 ## Rust C-ABI exports (`signal_shim`)
 
 These functions are exported from the native library and are consumed by the C# wrapper. They are not intended to be called directly from application code.
