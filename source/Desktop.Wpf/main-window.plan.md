@@ -231,6 +231,108 @@ Implementation Requirements:
 
 ---
 
+## Chunk 5.2 (Database Schema Refactoring for PeerId)
+### Feature Implementation Request: Signal Protocol Chunk 5.2 (PeerId Surrogate Key Migration)
+The Goal: Refactor the database schema to use auto-incrementing uint surrogate keys for peer relationships. This aligns with database normalization best practices. Guid IDs are being completely dropped as a concept from all tables except for the local self identity.
+
+**Architectural Context:**
+- Current state: Many tables use Guid columns as Primary Keys and Foreign Keys for peer relationships
+- Problem: Guids as PKs cause index fragmentation and increase FK column size
+- Solution: Use uint auto-increment PKs for local database mechanics
+
+**CRITICAL EXCEPTION:**
+- `Percolator.Infrastructure.Persistence.SelfIdentityDbo.PeerId` MUST remain a Guid - this is the global Signal UUID for the local identity only
+- All other PeerId columns will be changed to uint columns
+- NO GlobalPeerId columns will be added to any tables
+
+**Implementation Approach:**
+- No data migrations will be performed
+- Make the schema changes and accept compiler errors
+- Fix compiler errors in subsequent chunks
+
+**Candidate PeerId Guid Columns (Fully Qualified):**
+
+**Primary Keys (Guid) that should become uint PKs:**
+1. `Percolator.Infrastructure.Identity.PeerIdentityDbo.PeerId` - Currently the authoritative peer catalog PK
+2. `Percolator.Infrastructure.Persistence.PeerRoutingProfileDbo.PeerId` - Network routing profile PK
+
+**Foreign Keys (Guid) that should reference uint PKs:**
+3. `Percolator.Infrastructure.Persistence.DirectSessionDbo.RemotePeerId` - References remote peer
+4. `Percolator.Infrastructure.Cryptography.PendingSessionDbo.RemotePeerId` - References remote peer
+5. `Percolator.Infrastructure.Cryptography.PendingSessionDbo.RelayHostPeerId` - References relay host peer
+6. `Percolator.Infrastructure.Persistence.SessionDbo.RemotePeerId` - References remote peer
+7. `Percolator.Infrastructure.Identity.PeerIdentityKeyDbo_V2.PeerId` - FK to PeerIdentityDbo
+8. `Percolator.Infrastructure.Persistence.PeerPublicSigningKeyDbo.PeerId` - FK to peer catalog
+9. `Percolator.Infrastructure.Chat.Persistence.SenderKeyRecordDbo.SenderPeerId` - Signal sender key PK component
+10. `Percolator.Infrastructure.Persistence.SelfIdentityKnownPeerDbo.PeerId` - FK to peer catalog
+11. `Percolator.Infrastructure.Cryptography.SentInvitationDbo.TargetPeerId` - Target peer reference
+12. `Percolator.Infrastructure.Cryptography.SentInvitationDbo.InviteRelayHostPeerId` - Relay host reference
+13. `Percolator.Infrastructure.Persistence.PeerRouteCandidateDbo.RemotePeerId` - Routing candidate
+14. `Percolator.Infrastructure.Persistence.PeerRouteCandidateDbo.RelayHostPeerId` - Relay host reference
+15. `Percolator.Infrastructure.Persistence.RelayLinkDbo.PeerId` - FK to PeerRoutingProfileDbo
+16. `Percolator.Infrastructure.Persistence.RelayLinkDbo.RelayPeerId` - FK to PeerRoutingProfileDbo
+17. `Percolator.Infrastructure.Persistence.GrpcEndPointRoutingDbo.PeerId` - FK to PeerRoutingProfileDbo
+18. `Percolator.Infrastructure.Persistence.DiscoveredPeerDbo.BoundPeerId` - DHT discovery binding
+
+**Implementation Requirements:**
+
+1. **Schema Migration Strategy**
+   - Change `PeerIdentityDbo.PeerId` from Guid PK to uint PK
+   - Change `PeerRoutingProfileDbo.PeerId` from Guid PK to uint PK
+   - Change all FK columns from Guid to uint
+   - Update EF Core model configuration to reflect new PK/FK structure
+   - DO NOT create data migration scripts
+
+2. **Domain Layer Updates**
+   - Update repository interfaces to accept uint for local operations where appropriate
+   - Update cryptography layer to use SelfIdentityDbo.PeerId (Guid) when constructing Signal Protocol addresses for local identity
+   - For remote peers, the uint PK will be used for local lookups
+
+3. **Testing Requirements**
+   - Verify all FK relationships still function correctly after migration
+   - Test that Signal Protocol operations use SelfIdentityDbo.PeerId correctly for local identity
+   - Ensure backward compatibility with any existing serialized data
+
+---
+
+## Chunk 5.2.a (Domain Type Refactoring for PeerId)
+### Feature Implementation Request: Signal Protocol Chunk 5.2.a (PeerId Domain Type Migration)
+The Goal: Refactor all domain types that wrap PeerId as a Guid to instead wrap uint as simple DDD value types. This aligns the domain layer with the database schema changes in Chunk 5.2.
+
+**Standard PeerId Definition (uint):**
+All domains will use the same simple definition:
+```csharp
+public readonly record struct PeerId(uint Value)
+{
+    public override string ToString() => Value.ToString();
+}
+```
+
+**Fully Qualified Domain Types (Guid → uint):**
+
+1. `Percolator.Cryptography.Primitives.PeerId` - Replace with standard definition above
+2. `Percolator.Identity.PeerId` - Replace with standard definition above
+3. `Percolator.Network.PeerId` - Replace with standard definition above
+4. `Percolator.Chat.GroupMembership.ChatPeerId` - Replace with standard definition above
+
+**Implementation Requirements:**
+
+1. **Type Definition Updates**
+   - Replace each domain type's definition with the standard PeerId definition above
+   - Ensure all domains use the exact same definition for consistency
+
+2. **Usage Updates**
+   - Update all usages of these types to pass uint values
+   - Remove any conversion methods to/from Guid (no longer needed)
+   - Update serialization/deserialization logic if present
+
+3. **Testing Requirements**
+   - Verify all domain type tests pass with uint values
+   - Ensure equality comparisons work correctly with uint
+   - Test that the same definition works across all domains
+
+---
+
 ## Chunk 6
 ### Feature Implementation Request: Signal Protocol Chunk 6 (The Streaming Data Plane)
 You are to implement the high-velocity, real-time Data Plane for Group V2 messaging.
