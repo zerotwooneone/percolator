@@ -15,18 +15,29 @@ public enum GroupMemberRole
 public sealed class GroupMember
 {
     public Messaging.ValueObjects.ConversationId ConversationId { get; }
-    public ChatPeerId PeerId { get; }
+    public GroupParticipantId ParticipantId { get; private set; }
     public GroupMemberRole Role { get; private set; }
     public DateTimeOffset JoinedAtUtc { get; }
     public DateTimeOffset? RemovedAtUtc { get; private set; }
 
-    public GroupMember(Messaging.ValueObjects.ConversationId conversationId, ChatPeerId peerId, GroupMemberRole role, DateTimeOffset joinedAtUtc, DateTimeOffset? removedAtUtc = null)
+    public GroupMember(Messaging.ValueObjects.ConversationId conversationId, GroupParticipantId participantId, GroupMemberRole role, DateTimeOffset joinedAtUtc, DateTimeOffset? removedAtUtc = null)
     {
         ConversationId = conversationId;
-        PeerId = peerId;
+        ParticipantId = participantId;
         Role = role;
         JoinedAtUtc = joinedAtUtc;
         RemovedAtUtc = removedAtUtc;
+    }
+
+    /// <summary>
+    /// Upgrades an unresolved member to have a local peer identity.
+    /// </summary>
+    public void ResolveLocalPeerId(ChatPeerId localId)
+    {
+        if (ParticipantId.LocalPeerId is not null)
+            throw new InvalidOperationException("Member already has a resolved local peer ID.");
+        
+        ParticipantId = new GroupParticipantId(ParticipantId.Pkh, localId);
     }
 
     public void Remove(DateTimeOffset when)

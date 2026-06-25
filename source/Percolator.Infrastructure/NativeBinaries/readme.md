@@ -110,6 +110,14 @@ Primary entrypoint:
         - `uuidBytes` must be exactly 16 bytes.
         - `deviceId` must be in the range 1-127 (Signal protocol constraint).
 
+    - **`public static Guid GetSenderAddressName(IntPtr address)`**
+        - Extracts the 16-byte UUID (`PeerId`) from a raw `IntPtr` address handle.
+        - Intended use: extracting the target user identity inside a VTable `SenderKeyStore` callback.
+
+    - **`public static uint GetSenderAddressDeviceId(IntPtr address)`**
+        - Extracts the integer `DeviceId` from a raw `IntPtr` address handle.
+        - Intended use: extracting the target device inside a VTable `SenderKeyStore` callback.
+
     - **`public static SenderKeyDistributionMessageSafeHandle CreateSenderKeyDistributionMessage(IntPtr storeVTable, SenderAddressSafeHandle sender, Guid distributionId)`**
         - Creates a SenderKeyDistributionMessage for distributing a sender key to a new group member.
         - Uses the VTable-based SenderKeyStore for key state management.
@@ -279,6 +287,18 @@ SafeHandle types (opaque native ownership):
         }
         ```
     - The returned `IntPtr` from `CreateVTable()` is passed to methods like `CreateSenderKeyDistributionMessage(IntPtr storeVTable, ...)`.
+    - **Extracting Address Data in Callbacks**: When the native library invokes your delegates, it provides an `IntPtr senderAddress`. You can extract the `UUID` and `DeviceId` using the provided helpers to route the database query:
+        ```csharp
+        public unsafe int LoadKey(IntPtr senderAddress, byte* distId, UIntPtr distLen, out IntPtr record, out UIntPtr len)
+        {
+            // Extract the original identifiers
+            Guid peerId = SignalCrypto.GetSenderAddressName(senderAddress);
+            uint deviceId = SignalCrypto.GetSenderAddressDeviceId(senderAddress);
+            Guid distributionId = new Guid(new ReadOnlySpan<byte>(distId, (int)distLen));
+            
+            // ... look up in DB using peerId, deviceId, and distributionId
+        }
+        ```
 
 ## Rust C-ABI exports (`signal_shim`)
 

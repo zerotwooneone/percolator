@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Percolator.Contracts;
+using Percolator.Chat.Messaging.ValueObjects;
+using Percolator.Network;
 
 namespace Percolator.Application.Network
 {
@@ -7,13 +9,16 @@ namespace Percolator.Application.Network
     {
         private readonly ILogger<RemoteEnvelopeSender> _logger;
         private readonly IMessageService _messageService;
+        private readonly IPeerRoutingProfileRepository _routingProfileRepository;
 
         public RemoteEnvelopeSender(
             ILogger<RemoteEnvelopeSender> logger,
-            IMessageService messageService)
+            IMessageService messageService,
+            IPeerRoutingProfileRepository routingProfileRepository)
         {
             _logger = logger;
             _messageService = messageService;
+            _routingProfileRepository = routingProfileRepository;
         }
 
         public async Task SendChatEnvelopeToPeerAsync(ChatEnvelope chatEnvelope, RecipientRoute recipient, CancellationToken ct = default)
@@ -33,6 +38,25 @@ namespace Percolator.Application.Network
             {
                 _logger.LogWarning(ex, "Failed sending envelope to {PeerId}", recipient.PeerId);
             }
+        }
+
+        public async Task SendChatEnvelopeToPeerAsync(ChatEnvelope chatEnvelope, Pkh destinationPkh, CancellationToken ct = default)
+        {
+            // Convert Chat domain Pkh to Network domain PublicKeyHash (zero-allocation span conversion)
+            var publicKeyHash = Percolator.Network.PublicKeyHash.FromSpan(destinationPkh.Span);
+
+            // Look up routing profile by public key hash to resolve the endpoint
+            var routingProfile = await _routingProfileRepository.GetByPublicKeyHashAsync(publicKeyHash, ct).ConfigureAwait(false);
+
+            if (routingProfile is null)
+            {
+                _logger.LogWarning("No routing profile found for PKH, cannot send envelope");
+                return;
+            }
+
+            // Use the PeerId from the routing profile to send via existing method
+            var recipient = new RecipientRoute(routingProfile.Id, null);
+            await SendChatEnvelopeToPeerAsync(chatEnvelope, recipient, ct).ConfigureAwait(false);
         }
     }
 }

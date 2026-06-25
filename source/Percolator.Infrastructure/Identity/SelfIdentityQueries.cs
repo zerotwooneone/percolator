@@ -37,4 +37,20 @@ public sealed class SelfIdentityQueries : ISelfIdentityQueries
 
         return bytes is null ? null : ZkServerSecretParamsSeedBytes.FromBytesOwned(bytes);
     }
+
+    public async Task<(Percolator.Chat.Messaging.ValueObjects.Pkh Pkh, Guid PeerId)?> GetIdentityParticipantInfoAsync(int selfIdentityId, CancellationToken ct)
+    {
+        using var db = _dbFactory.CreateDbContext();
+        var identity = await db.SelfIdentities
+            .AsNoTracking()
+            .Where(x => x.Id == selfIdentityId && x.ActiveIdentityKeyFingerprint != null)
+            .Select(x => new { x.ActiveIdentityKeyFingerprint, x.PeerId })
+            .FirstOrDefaultAsync(ct);
+
+        if (identity is null)
+            return null;
+
+        var pkh = Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytesOwned(identity.ActiveIdentityKeyFingerprint!);
+        return (pkh, identity.PeerId);
+    }
 }

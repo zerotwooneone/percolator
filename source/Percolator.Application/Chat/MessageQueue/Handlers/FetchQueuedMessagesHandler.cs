@@ -21,7 +21,7 @@ public class FetchQueuedMessagesHandler : IRequestHandler<FetchQueuedMessagesQue
     public async Task<FetchQueuedMessagesResult> Handle(FetchQueuedMessagesQuery request, CancellationToken cancellationToken)
     {
         var max = request.MaxCount <= 0 ? 100 : Math.Min(request.MaxCount, 500);
-        var items = await _repository.FetchAsync(request.RecipientPeerId, max, cancellationToken);
+        var items = await _repository.FetchAsync(request.RecipientPeerId, max, cancellationToken).ConfigureAwait(false);
         var blobs = items.Select(x => x.Blob.ToArray()).ToList();
         return new FetchQueuedMessagesResult(blobs);
     }

@@ -47,6 +47,10 @@ namespace Percolator.Application.Network
             if (_active.Identity is null)
                 throw new InvalidOperationException("Active identity not initialized");
 
+            // Populate sender context in InternalEnvelope for cryptographic operations
+            envelope.SourcePeerId = Google.Protobuf.ByteString.CopyFrom(_active.Identity.PeerId.ToByteArray());
+            envelope.SourceDeviceId = _active.Identity.DeviceId;
+
             // Attach profile data if required
             if (envelope.ApplicationPayloadCase == InternalEnvelope.ApplicationPayloadOneofCase.ChatEnvelope)
             {
@@ -123,6 +127,10 @@ namespace Percolator.Application.Network
         {
             if (_active.Identity is null)
                 throw new InvalidOperationException("Active identity not initialized");
+
+            // Populate sender context in InternalEnvelope for cryptographic operations
+            envelope.SourcePeerId = Google.Protobuf.ByteString.CopyFrom(_active.Identity.PeerId.ToByteArray());
+            envelope.SourceDeviceId = _active.Identity.DeviceId;
 
             // Attach profile data if required
             if (envelope.ApplicationPayloadCase == InternalEnvelope.ApplicationPayloadOneofCase.ChatEnvelope)

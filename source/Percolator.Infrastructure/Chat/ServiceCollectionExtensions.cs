@@ -7,6 +7,7 @@ using Percolator.Chat.Messaging.App;
 using Percolator.Infrastructure.Chat.Persistence;
 using Percolator.Infrastructure.Chat.Queries;
 using Percolator.Infrastructure.Identity;
+using Percolator.Infrastructure.Outbox;
 using Percolator.Infrastructure.Persistence;
 
 namespace Percolator.Infrastructure.Chat;
@@ -31,7 +32,10 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IRelayRosterQueries, SqliteRelayRosterQueries>();
         services.AddScoped<IRelayGroupQueries, SqliteRelayGroupQueries>();
         services.AddScoped<IRelayMessagePublisher, SqliteRelayMessagePublisher>();
-        services.AddScoped<ISelfIdentityQueries, SelfIdentityQueries>();
+        services.AddScoped<ISelfIdentityQueries, Percolator.Infrastructure.Identity.SelfIdentityQueries>();
+
+        // Register Chunk 5 Outbox Dispatcher
+        services.AddHostedService<OutboxDispatcherWorker>();
 
         return services;
     }

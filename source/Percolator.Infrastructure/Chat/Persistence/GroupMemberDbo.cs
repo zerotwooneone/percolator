@@ -1,3 +1,5 @@
+using Percolator.Chat.Messaging.ValueObjects;
+
 namespace Percolator.Infrastructure.Chat.Persistence;
 
 /// <summary>
@@ -11,9 +13,14 @@ public class GroupMemberDbo
     public Guid ConversationId { get; set; }
 
     /// <summary>
-    /// The peer ID of the group member.
+    /// The public key hash of the group member (global identifier).
     /// </summary>
-    public Guid PeerId { get; set; }
+    public Pkh MemberPkh { get; set; } = null!;
+
+    /// <summary>
+    /// The local peer ID (optional, for resolved members).
+    /// </summary>
+    public Guid? LocalPeerId { get; set; }
 
     /// <summary>
     /// The member's role in the group.

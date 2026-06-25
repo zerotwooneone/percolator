@@ -52,6 +52,7 @@ public class PercolatorDbContext : DbContext
     // New Network domain persistence (PeerRoutingProfile)
     public DbSet<PeerRoutingProfileDbo> PeerRoutingProfiles { get; set; } = null!;
     public DbSet<GrpcEndPointRoutingDbo> PeerRoutingGrpcEndPoints { get; set; } = null!;
+    public DbSet<RelayOutboxDbo> RelayOutbox { get; set; } = null!;
     public DbSet<RelayLinkDbo> PeerRoutingRelays { get; set; } = null!;
     public DbSet<PeerRouteCandidateDbo> PeerRouteCandidates { get; set; } = null!;
     public DbSet<DiscoveredPeerDbo> DiscoveredPeers { get; set; } = null!;
@@ -335,9 +336,14 @@ public class PercolatorDbContext : DbContext
         modelBuilder.Entity<Percolator.Infrastructure.Chat.Persistence.GroupMemberDbo>(entity =>
         {
             entity.ToTable("GroupMembers");
-            entity.HasKey(e => new { e.ConversationId, e.PeerId });
+            entity.HasKey(e => new { e.ConversationId, e.MemberPkh });
             entity.Property(e => e.ConversationId).IsRequired();
-            entity.Property(e => e.PeerId).IsRequired();
+            entity.Property(e => e.MemberPkh)
+                .HasConversion(
+                    v => v.ToArray(),
+                    v => Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytesOwned(v))
+                .IsRequired();
+            entity.Property(e => e.LocalPeerId);
             entity.Property(e => e.Role).IsRequired();
             entity.Property(e => e.JoinedAtUtc).IsRequired();
             entity.Property(e => e.RemovedAtUtc).IsRequired(false);
@@ -618,14 +624,16 @@ public class PercolatorDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).ValueGeneratedOnAdd();
             entity.Property(e => e.AckId).IsRequired();
-            entity.Property(e => e.RecipientPeerId)
-                .HasConversion(v => v.Value, v => new PeerId(v))
+            entity.Property(e => e.RecipientPkh)
+                .HasConversion(
+                    v => v.ToArray(),
+                    v => Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytesOwned(v))
                 .IsRequired();
             entity.Property(e => e.Blob).IsRequired();
             entity.Property(e => e.EnqueuedAtUtc).IsRequired();
             entity.HasIndex(e => e.EnqueuedAtUtc);
-            entity.HasIndex(e => e.RecipientPeerId);
-            entity.HasIndex(e => new { e.RecipientPeerId, e.EnqueuedAtUtc });
+            entity.HasIndex(e => e.RecipientPkh);
+            entity.HasIndex(e => new { e.RecipientPkh, e.EnqueuedAtUtc });
             entity.HasIndex(e => e.AckId).IsUnique();
         });
 
@@ -734,7 +742,29 @@ public class PercolatorDbContext : DbContext
         modelBuilder.Entity<RelayBlindedRosterDbo>(entity =>
         {
             entity.ToTable("RelayBlindedRosters");
-            entity.HasKey(e => new { e.ConversationId, e.BlindedChatPeerId });
+            entity.HasKey(e => new { e.ConversationId, e.MemberPkh });
+            entity.Property(e => e.MemberPkh)
+                .HasConversion(
+                    v => v.ToArray(),
+                    v => Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytesOwned(v))
+                .IsRequired();
+        });
+
+        // RelayOutbox (Outbox pattern for group provisioning events)
+        modelBuilder.Entity<RelayOutboxDbo>(entity =>
+        {
+            entity.ToTable("RelayOutbox");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.EventType).IsRequired();
+            entity.Property(e => e.PayloadJson).IsRequired();
+            entity.Property(e => e.DestinationPkh)
+                .HasConversion(
+                    v => v.ToArray(),
+                    v => Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytesOwned(v))
+                .IsRequired();
+            entity.Property(e => e.ProcessedAtUtc);
+            entity.HasIndex(e => e.ProcessedAtUtc);
         });
     }
 }

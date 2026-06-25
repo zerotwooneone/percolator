@@ -47,7 +47,7 @@ public class MessageQueueService : IMessageQueueService
         }
 
         var identityPublicKeyHash = IdentityPublicKeyHash.FromBytes(recipientPublicKeyHash);
-        var peerId = await _publicKeyStore.GetPeerIdByPublicKeyHashAsync(identityPublicKeyHash, cancellationToken);
+        var peerId = await _publicKeyStore.GetPeerIdByPublicKeyHashAsync(identityPublicKeyHash, cancellationToken).ConfigureAwait(false);
         if (peerId is null)
         {
             return new EnqueueOpaqueMessageResult(false, "unknown recipient_public_key_hash");
@@ -57,7 +57,7 @@ public class MessageQueueService : IMessageQueueService
         (bool accepted, uint recipientCount, uint totalCount) = await _repository.TryEnqueueAsync(
             peerId,
             queuedPayload,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
 
         if (!accepted)
         {

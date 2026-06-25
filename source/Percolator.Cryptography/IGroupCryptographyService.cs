@@ -66,4 +66,12 @@ public interface IGroupCryptographyService
         ZkServerSecretParamsSeedBytes serverSecretSeed,
         ZkGroupPublicParamsBytes groupPublicParams,
         ulong redemptionTimeEpochSeconds);
+
+    /// <summary>
+    /// Derives the zero-knowledge group public parameters from a GroupMasterKey.
+    /// These parameters are used by the relay for blind roster management and access control.
+    /// </summary>
+    /// <param name="masterKey">The GroupMasterKey to derive from.</param>
+    /// <returns>The derived ZK group public parameters.</returns>
+    ZkGroupPublicParamsBytes DeriveGroupPublicParams(GroupMasterKey masterKey);
 }

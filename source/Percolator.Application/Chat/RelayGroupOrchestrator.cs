@@ -41,14 +41,14 @@ public sealed class RelayGroupOrchestrator : IRelayGroupOrchestrator
         CancellationToken cancellationToken)
     {
         // 1. Authorizer: Get ZK server secret params seed
-        var seed = await _identityQueries.GetZkServerSecretParamsSeedAsync(cancellationToken);
+        var seed = await _identityQueries.GetZkServerSecretParamsSeedAsync(cancellationToken).ConfigureAwait(false);
         if (seed is null)
         {
             throw new UnauthorizedDomainException("ZK server secret params seed not found.");
         }
 
         // 2. Consensus: Load ledger first (needed for GroupPublicParams in verification)
-        var ledger = await _ledgerRepository.GetByIdAsync(conversationId, cancellationToken);
+        var ledger = await _ledgerRepository.GetByIdAsync(conversationId, cancellationToken).ConfigureAwait(false);
         if (ledger is null)
         {
             throw new UnauthorizedDomainException($"Relay group ledger not found for conversation {conversationId.Value}.");
@@ -75,9 +75,9 @@ public sealed class RelayGroupOrchestrator : IRelayGroupOrchestrator
         ledger.AdvanceEpoch(requestedEpoch);
 
         // 4. Fan-out: Get member peer IDs and publish
-        var peerIds = await _rosterQueries.GetMemberPeerIdsAsync(conversationId.Value, cancellationToken);
+        var peerIds = await _rosterQueries.GetMemberPeerIdsAsync(conversationId.Value, cancellationToken).ConfigureAwait(false);
         var payload = QueuedPayloadBytes.FromSpan(ciphertext.Span);
-        await _publisher.PublishAtomicAsync(ledger, peerIds, payload, cancellationToken);
+        await _publisher.PublishAtomicAsync(ledger, peerIds, payload, cancellationToken).ConfigureAwait(false);
 
         _logger.LogInformation(
             "Published group relay message for conversation {ConversationId} to {RecipientCount} recipients, epoch {Epoch}",

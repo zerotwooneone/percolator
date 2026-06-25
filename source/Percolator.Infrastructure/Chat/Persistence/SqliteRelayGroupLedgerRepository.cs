@@ -26,4 +26,47 @@ public sealed class SqliteRelayGroupLedgerRepository : IRelayGroupLedgerReposito
             RelayGroupPublicParamsBytes.FromBytesOwned(dbo.GroupPublicParams),
             dbo.Version);
     }
+
+    public async Task ProvisionNewGroupAsync(ConversationId conversationId, RelayGroupPublicParamsBytes publicParams, IReadOnlyList<Pkh> memberPkhs, CancellationToken cancellationToken)
+    {
+        await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            var existingGroup = await _db.RelayGroupStates
+                .AsNoTracking()
+                .FirstOrDefaultAsync(g => g.ConversationId == conversationId.Value, cancellationToken);
+
+            if (existingGroup is not null)
+            {
+                return; // Already exists, idempotent
+            }
+
+            var relayGroupState = new RelayGroupStateDbo
+            {
+                ConversationId = conversationId.Value,
+                PublicParams = publicParams.ToArray(),
+                CreatedAtUtc = DateTimeOffset.UtcNow
+            };
+            _db.RelayGroupStates.Add(relayGroupState);
+
+            foreach (var pkh in memberPkhs)
+            {
+                var blindedRosterEntry = new RelayBlindedRosterDbo
+                {
+                    ConversationId = conversationId.Value,
+                    MemberPkh = pkh,
+                    AddedAtUtc = DateTimeOffset.UtcNow
+                };
+                _db.RelayBlindedRosters.Add(blindedRosterEntry);
+            }
+
+            await _db.SaveChangesAsync(cancellationToken);
+            await tx.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            await tx.RollbackAsync(cancellationToken);
+            throw;
+        }
+    }
 }

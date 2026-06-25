@@ -36,6 +36,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
     private readonly IGroupCryptographyService _groupCryptoService;
     private readonly IChatMessageWriter _messageWriter;
     private readonly IProfileOrchestrationService _profileOrchestrationService;
+    private readonly IGroupInviteHandler _groupInviteHandler;
 
     public ProcessInternalEnvelopeHandler(
         ILogger<ProcessInternalEnvelopeHandler> logger,
@@ -48,7 +49,8 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
         IGroupMessageCryptographyService groupMessageCryptoService,
         IGroupCryptographyService groupCryptoService,
         IChatMessageWriter messageWriter,
-        IProfileOrchestrationService profileOrchestrationService)
+        IProfileOrchestrationService profileOrchestrationService,
+        IGroupInviteHandler groupInviteHandler)
     {
         _logger = logger;
         _mediator = mediator;
@@ -61,6 +63,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
         _groupCryptoService = groupCryptoService;
         _messageWriter = messageWriter;
         _profileOrchestrationService = profileOrchestrationService;
+        _groupInviteHandler = groupInviteHandler;
     }
 
     public async Task<InternalEnvelope?> Handle(ProcessInternalEnvelopeCommand request, CancellationToken cancellationToken)
@@ -497,6 +500,13 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     }
                     // Future: handle add_member, remove_member, change_title when Chunk G extends protobuf
 
+                    return null;
+                }
+                case ChatEnvelope.MessageOneofCase.GroupInvite:
+                {
+                    var groupInvite = chat.GroupInvite;
+                    var sourceDeviceId = request.Context.SourceDeviceId ?? 1;
+                    await _groupInviteHandler.HandleGroupInviteAsync(groupInvite, request.Context.SelfIdentityId.Value, sourceDeviceId, cancellationToken).ConfigureAwait(false);
                     return null;
                 }
                 default:

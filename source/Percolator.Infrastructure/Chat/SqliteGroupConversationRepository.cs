@@ -64,7 +64,8 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
             var groupMemberDbo = new Persistence.GroupMemberDbo
             {
                 ConversationId = member.ConversationId.Value,
-                PeerId = member.PeerId.Value,
+                MemberPkh = member.ParticipantId.Pkh,
+                LocalPeerId = member.ParticipantId.LocalPeerId?.Value,
                 Role = (Persistence.GroupMemberRole)member.Role,
                 JoinedAtUtc = member.JoinedAtUtc,
                 RemovedAtUtc = member.RemovedAtUtc
@@ -111,7 +112,8 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
             var groupMemberDbo = new Persistence.GroupMemberDbo
             {
                 ConversationId = member.ConversationId.Value,
-                PeerId = member.PeerId.Value,
+                MemberPkh = member.ParticipantId.Pkh,
+                LocalPeerId = member.ParticipantId.LocalPeerId?.Value,
                 Role = (Persistence.GroupMemberRole)member.Role,
                 JoinedAtUtc = member.JoinedAtUtc,
                 RemovedAtUtc = member.RemovedAtUtc
@@ -121,6 +123,74 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
 
         _db.Conversations.Update(existing);
         await _db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task AddWithOutboxAsync(GroupConversation conversation, int selfIdentityId, CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var dbo = ToDbo(conversation);
+        dbo.CreatedAt = now;
+        dbo.UpdatedAt = now;
+        dbo.SelfIdentityId = selfIdentityId;
+        dbo.Kind = Percolator.Infrastructure.Persistence.ConversationKind.Group;
+        dbo.Name = conversation.Name;
+
+        _db.Conversations.Add(dbo);
+
+        // Persist GroupState
+        var groupStateDbo = new Persistence.GroupStateDbo
+        {
+            ConversationId = conversation.State.ConversationId.Value,
+            Epoch = conversation.State.Epoch,
+            Name = conversation.State.Name,
+            CreatedAtUtc = conversation.State.CreatedAtUtc,
+            UpdatedAtUtc = conversation.State.UpdatedAtUtc
+        };
+        _db.GroupStates.Add(groupStateDbo);
+
+        // Persist GroupMembers
+        foreach (var member in conversation.Members)
+        {
+            var groupMemberDbo = new Persistence.GroupMemberDbo
+            {
+                ConversationId = member.ConversationId.Value,
+                MemberPkh = member.ParticipantId.Pkh,
+                LocalPeerId = member.ParticipantId.LocalPeerId?.Value,
+                Role = (Persistence.GroupMemberRole)member.Role,
+                JoinedAtUtc = member.JoinedAtUtc,
+                RemovedAtUtc = member.RemovedAtUtc
+            };
+            _db.GroupMembers.Add(groupMemberDbo);
+        }
+
+        // Map domain events to outbox
+        var domainEvents = conversation.GetDomainEvents();
+        foreach (var domainEvent in domainEvents)
+        {
+            var eventType = domainEvent.GetType().Name;
+            var payloadJson = System.Text.Json.JsonSerializer.Serialize(domainEvent, domainEvent.GetType());
+            
+            // Determine destination PKH based on event type
+            Pkh destinationPkh = domainEvent switch
+            {
+                Percolator.Chat.Events.GroupProvisioningRequestedDomainEvent provisioningEvent => conversation.RelayIdentity.Pkh,
+                Percolator.Chat.Events.MemberInvitedDomainEvent inviteEvent => inviteEvent.ParticipantId.Pkh,
+                _ => throw new InvalidOperationException($"Unknown domain event type: {eventType}")
+            };
+
+            var outboxItem = new RelayOutboxDbo
+            {
+                Id = Guid.NewGuid(),
+                EventType = eventType,
+                PayloadJson = payloadJson,
+                DestinationPkh = destinationPkh,
+                ProcessedAtUtc = null
+            };
+            _db.RelayOutbox.Add(outboxItem);
+        }
+
+        await _db.SaveChangesAsync(cancellationToken);
+        conversation.ClearDomainEvents();
     }
 
     private static GroupConversation ToDomain(ConversationDbo dbo, Persistence.GroupStateDbo? groupStateDbo, List<Persistence.GroupMemberDbo> groupMemberDbos)
@@ -136,14 +206,22 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
 
         var groupMembers = groupMemberDbos.Select(m => new GroupMember(
             new ConversationId(m.ConversationId),
-            new Percolator.Chat.GroupMembership.ChatPeerId(m.PeerId),
+            new GroupParticipantId(
+                m.MemberPkh,
+                m.LocalPeerId.HasValue ? new ChatPeerId(m.LocalPeerId.Value) : null),
             (GroupMemberRole)m.Role,
             m.JoinedAtUtc,
             m.RemovedAtUtc)).ToList();
 
+        // TODO: Load relay identity from persistence - for now use placeholder
+        var relayIdentity = new GroupParticipantId(
+            Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytesOwned(Array.Empty<byte>()),
+            null);
+
         return new GroupConversation(
             new ConversationId(dbo.Id),
             groupState,
+            relayIdentity,
             groupMembers,
             dbo.Name);
     }

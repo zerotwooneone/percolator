@@ -9,6 +9,11 @@ option csharp_namespace = "Percolator.Contracts";
 // Note: HandshakeInitiatorHello is NOT carried inside InternalEnvelope.
 // It is a standalone message used to bootstrap X3DH before a direct session exists.
 message InternalEnvelope {
+  // Sender context for cryptographic operations (e.g., SenderKey distribution).
+  // These fields are encrypted inside the transport layer and are only visible to the recipient.
+  optional bytes source_peer_id = 100;    // 16-byte UUID of the sender
+  optional uint32 source_device_id = 101; // Sender's device ID (e.g., 1)
+
   oneof application_payload {
     ChatEnvelope chat_envelope = 1;
     FileShareEnvelope file_share_envelope = 2;
@@ -61,6 +66,8 @@ message ChatEnvelope {
     GroupKeyBootstrap group_key_bootstrap = 15;
     // Group ciphertext message
     GroupMessage group_message = 17;
+    // Group invitation message
+    GroupInvite group_invite = 18;
   }
 }
 
@@ -124,6 +131,24 @@ message GroupKeyBootstrap {
   optional bytes conversation_id = 1;
   // Exactly 32 bytes containing the GroupMasterKey.
   optional bytes group_master_key_bytes = 2;
+}
+
+// Group invitation message carrying cryptographic bootstrap data.
+// Sent to invite a new member to an existing group conversation.
+message GroupInvite {
+  optional uint32 version = 100;
+  // ConversationId (GUID bytes) for the group being joined
+  optional bytes conversation_id = 1;
+  // The inviter's public key hash (PKH, 32 bytes)
+  optional bytes inviter_pkh = 2;
+  // The encrypted GroupMasterKey (encrypted for the invitee)
+  optional bytes group_master_key = 3;
+  // Sender key distribution message for the group
+  optional bytes sender_key_distribution = 4;
+  // The relay's public key hash (PKH, 32 bytes) for group provisioning
+  optional bytes relay_pkh = 5;
+  // Optional group name
+  optional string name = 6;
 }
 
 // Inner plaintext wrapper for GroupMessage.ciphertext.

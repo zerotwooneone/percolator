@@ -10,9 +10,15 @@ namespace Percolator.Infrastructure.Network.Grpc;
 public sealed class RelayGroupService : Percolator.Contracts.RelayGroupService.RelayGroupServiceBase
 {
     private readonly IRelayGroupOrchestrator _orchestrator;
+    private readonly IRelayGroupLedgerRepository _ledgerRepository;
 
-    public RelayGroupService(IRelayGroupOrchestrator orchestrator)
-        => _orchestrator = orchestrator;
+    public RelayGroupService(
+        IRelayGroupOrchestrator orchestrator,
+        IRelayGroupLedgerRepository ledgerRepository)
+    {
+        _orchestrator = orchestrator;
+        _ledgerRepository = ledgerRepository;
+    }
 
     public override async Task<SubmitGroupMessageResponse> Publish(
         SubmitGroupMessageRequest request,
@@ -63,6 +69,47 @@ public sealed class RelayGroupService : Percolator.Contracts.RelayGroupService.R
         {
             // Generic Internal Server Error to prevent leaking sensitive domain details
             throw new RpcException(new Status(StatusCode.Internal, "Internal relay error."));
+        }
+    }
+
+    public override async Task<ProvisionGroupResponse> ProvisionGroup(
+        ProvisionGroupRequest request,
+        ServerCallContext context)
+    {
+        try
+        {
+            // Validate required fields
+            if (request.ConversationId is null)
+                throw new ArgumentException("conversation_id is required.");
+            if (request.PublicParams is null)
+                throw new ArgumentException("public_params is required.");
+            if (request.MemberPkh.Count == 0)
+                throw new ArgumentException("member_pkh must contain at least one member.");
+
+            // Boundary Defensive Copy (Protobuf ByteString -> Domain Primitive)
+            var conversationId = new ConversationId(new Guid(request.ConversationId.ToByteArray()));
+            var publicParams = RelayGroupPublicParamsBytes.FromBytesOwned(request.PublicParams.ToByteArray());
+            var memberPkh = request.MemberPkh
+                .Select(pkh => Pkh.FromBytesOwned(pkh.ToByteArray()))
+                .ToList();
+
+            await _ledgerRepository.ProvisionNewGroupAsync(
+                conversationId,
+                publicParams,
+                memberPkh,
+                context.CancellationToken).ConfigureAwait(false);
+
+            return new ProvisionGroupResponse { Success = true };
+        }
+        catch (ArgumentException ex)
+        {
+            // Map validation errors to InvalidArgument
+            return new ProvisionGroupResponse { Success = false, Error = ex.Message };
+        }
+        catch (Exception)
+        {
+            // Generic Internal Server Error to prevent leaking sensitive domain details
+            return new ProvisionGroupResponse { Success = false, Error = "Internal relay error." };
         }
     }
 }

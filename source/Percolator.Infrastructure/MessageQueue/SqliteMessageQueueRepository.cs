@@ -1,7 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Percolator.Application.Chat.MessageQueue;
 using Percolator.Chat.Messaging.ValueObjects;
-using Percolator.Identity;
 using Percolator.Infrastructure.Persistence;
 
 namespace Percolator.Infrastructure.MessageQueue;
@@ -20,7 +19,7 @@ public class SqliteMessageQueueRepository : IMessageQueueRepository
     }
 
     public async Task<(bool Accepted, uint RecipientQueuedCount, uint TotalQueuedCount)> TryEnqueueAsync(
-        PeerId recipientPeerId,
+        Pkh recipientPkh,
         QueuedPayloadBytes messageBlob,
         CancellationToken cancellationToken)
     {
@@ -32,13 +31,13 @@ public class SqliteMessageQueueRepository : IMessageQueueRepository
             if (totalCount >= GlobalMaxQueued)
             {
                 await tx.RollbackAsync(cancellationToken);
-                return (false, await CountRecipientAsync(recipientPeerId, cancellationToken), (uint)totalCount);
+                return (false, await CountRecipientAsync(recipientPkh, cancellationToken), (uint)totalCount);
             }
 
             // Per-recipient count (client-side filter due to EF translation limitations on value objects)
             var recipientCount = _db.MessageQueueItems
                 .AsEnumerable()
-                .Count(x => x.RecipientPeerId.Value == recipientPeerId.Value);
+                .Count(x => x.RecipientPkh.Span.SequenceEqual(recipientPkh.Span));
 
             if (recipientCount >= PerRecipientMaxQueued)
             {
@@ -49,7 +48,7 @@ public class SqliteMessageQueueRepository : IMessageQueueRepository
             var item = new MessageQueueItemDbo
             {
                 AckId = Guid.NewGuid(),
-                RecipientPeerId = recipientPeerId,
+                RecipientPkh = recipientPkh,
                 Blob = messageBlob.ToArray(),
                 EnqueuedAtUtc = DateTimeOffset.UtcNow
             };
@@ -67,15 +66,15 @@ public class SqliteMessageQueueRepository : IMessageQueueRepository
         }
     }
 
-    private async Task<uint> CountRecipientAsync(PeerId peerId, CancellationToken ct)
+    private async Task<uint> CountRecipientAsync(Pkh pkh, CancellationToken ct)
     {
         var cnt = _db.MessageQueueItems
             .AsEnumerable()
-            .Count(x => x.RecipientPeerId.Value == peerId.Value);
+            .Count(x => x.RecipientPkh.Span.SequenceEqual(pkh.Span));
         return (uint)cnt;
     }
 
-    public async Task<IReadOnlyList<(Guid AckId, QueuedPayloadBytes Blob)>> FetchAsync(PeerId recipientPeerId, int maxCount, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<(Guid AckId, QueuedPayloadBytes Blob)>> FetchAsync(Pkh recipientPkh, int maxCount, CancellationToken cancellationToken)
     {
         if (maxCount <= 0)
         {
@@ -88,7 +87,7 @@ public class SqliteMessageQueueRepository : IMessageQueueRepository
             .AsNoTracking()
             .ToListAsync(cancellationToken);
         var items = all
-            .Where(x => x.RecipientPeerId.Value == recipientPeerId.Value)
+            .Where(x => x.RecipientPkh.Span.SequenceEqual(recipientPkh.Span))
             .OrderBy(x => x.EnqueuedAtUtc)
             .Take(take)
             .Select(x => new { x.AckId, x.Blob })
@@ -112,17 +111,17 @@ public class SqliteMessageQueueRepository : IMessageQueueRepository
     }
 
     public async Task TryEnqueueBulkAsync(
-        IReadOnlyList<PeerId> recipients,
+        IReadOnlyList<Pkh> recipients,
         QueuedPayloadBytes messageBlob,
         CancellationToken cancellationToken)
     {
         await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
         try
         {
-            var items = recipients.Select(peerId => new MessageQueueItemDbo
+            var items = recipients.Select(pkh => new MessageQueueItemDbo
             {
                 AckId = Guid.NewGuid(),
-                RecipientPeerId = peerId,
+                RecipientPkh = pkh,
                 Blob = messageBlob.ToArray(),
                 EnqueuedAtUtc = DateTimeOffset.UtcNow
             }).ToList();

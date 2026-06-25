@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Percolator.Infrastructure.Persistence;
 using Percolator.Network;
 using Percolator.Network.ValueObjects;
+using Percolator.Chat.Messaging.ValueObjects;
 using System.Net;
 
 namespace Percolator.Infrastructure.Network;
@@ -26,7 +27,7 @@ public sealed class SqlitePeerRoutingProfileRepository : IPeerRoutingProfileRepo
         profile.BindIdentity(new PeerId(row.PeerId));
         if (row.DirectMessagePublicKey is not null)
         {
-            profile.SetIdentityPublicKey(IdentityPublicKey.FromBytesOwned(row.DirectMessagePublicKey));
+            profile.SetIdentityPublicKey(Percolator.Network.ValueObjects.IdentityPublicKey.FromBytesOwned(row.DirectMessagePublicKey));
         }
         if (row.ReachabilityLastChangeUtc is DateTimeOffset ts)
         {
@@ -151,7 +152,7 @@ public sealed class SqlitePeerRoutingProfileRepository : IPeerRoutingProfileRepo
         return list;
     }
 
-    private async Task<PeerRoutingProfile?> GetByPublicKeyInternalAsync(IdentityPublicKey pk, CancellationToken ct)
+    private async Task<PeerRoutingProfile?> GetByPublicKeyInternalAsync(Percolator.Network.ValueObjects.IdentityPublicKey pk, CancellationToken ct)
     {
         var all = await _db.PeerRoutingProfiles
             .AsNoTracking()
@@ -164,7 +165,7 @@ public sealed class SqlitePeerRoutingProfileRepository : IPeerRoutingProfileRepo
         }
         var profile = new PeerRoutingProfile();
         profile.BindIdentity(new PeerId(match.PeerId));
-        profile.SetIdentityPublicKey(IdentityPublicKey.FromBytesOwned(match.DirectMessagePublicKey!));
+        profile.SetIdentityPublicKey(Percolator.Network.ValueObjects.IdentityPublicKey.FromBytesOwned(match.DirectMessagePublicKey!));
         if (match.ReachabilityLastChangeUtc is DateTimeOffset ts)
         {
             profile.RecordReachability((ReachabilityStatus)match.ReachabilityStatus, ts);
@@ -182,7 +183,7 @@ public sealed class SqlitePeerRoutingProfileRepository : IPeerRoutingProfileRepo
         return UpsertInternalAsync(aggregate, cancellationToken);
     }
 
-    public Task<PeerRoutingProfile?> GetByPublicKeyAsync(IdentityPublicKey pk, CancellationToken cancellationToken = default)
+    public Task<PeerRoutingProfile?> GetByPublicKeyAsync(Percolator.Network.ValueObjects.IdentityPublicKey pk, CancellationToken cancellationToken = default)
     {
         return GetByPublicKeyInternalAsync(pk, cancellationToken);
     }
@@ -190,5 +191,20 @@ public sealed class SqlitePeerRoutingProfileRepository : IPeerRoutingProfileRepo
     public Task<IEnumerable<PeerRoutingProfile>> GetStaleAsync(DateTimeOffset threshold, CancellationToken cancellationToken = default)
     {
         return GetStaleInternalAsync(threshold, cancellationToken);
+    }
+
+    public async Task<PeerRoutingProfile?> GetByPublicKeyHashAsync(PublicKeyHash publicKeyHash, CancellationToken cancellationToken = default)
+    {
+        var all = await _db.PeerRoutingProfiles
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+
+        var match = all.FirstOrDefault(r => r.DirectMessagePublicKey != null && r.DirectMessagePublicKey.AsSpan().SequenceEqual(publicKeyHash.Span));
+        if (match is null)
+        {
+            return null;
+        }
+
+        return await GetByIdInternalAsync(new PeerId(match.PeerId), cancellationToken);
     }
 }

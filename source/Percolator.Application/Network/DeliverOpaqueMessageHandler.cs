@@ -170,7 +170,9 @@ namespace Percolator.Application.Network
                 }
                 _logger.LogDebug("Allowed InternalEnvelope case {Case}; dispatching to orchestrator/transport path", internalEnvelope.ApplicationPayloadCase);
 
-                var ctx = new SessionContext(inferredSessionId.Value, request.SelfIdentityId, directSession.RemotePeerId.Value);
+                // Extract sender context from InternalEnvelope for cryptographic operations
+                var sourceDeviceId = internalEnvelope.HasSourceDeviceId ? internalEnvelope.SourceDeviceId : 1;
+                var ctx = new SessionContext(inferredSessionId.Value, request.SelfIdentityId, directSession.RemotePeerId.Value, sourceDeviceId);
 
                 // Special-case: RelayOpaqueEnvelope requires RPC-level ack response
                 if (internalEnvelope.ApplicationPayloadCase == InternalEnvelope.ApplicationPayloadOneofCase.RelayOpaqueEnvelope)

@@ -235,6 +235,7 @@ message RatchetHeader {
 // Relay Group Service for group message fan-out
 service RelayGroupService {
     rpc Publish(SubmitGroupMessageRequest) returns (SubmitGroupMessageResponse);
+    rpc ProvisionGroup(ProvisionGroupRequest) returns (ProvisionGroupResponse);
 }
 
 message SubmitGroupMessageRequest {
@@ -246,4 +247,20 @@ message SubmitGroupMessageRequest {
 
 message SubmitGroupMessageResponse {
     optional bool success = 1;
+}
+
+message ProvisionGroupRequest {
+    optional uint32 version = 100;
+    // ConversationId (GUID bytes) for the group being provisioned
+    optional bytes conversation_id = 1;
+    // ZK group public parameters for the group
+    optional bytes public_params = 2;
+    // List of member PKHs for the blinded roster
+    repeated bytes member_pkh = 3;
+}
+
+message ProvisionGroupResponse {
+    optional uint32 version = 100;
+    optional bool success = 1;
+    optional string error = 2;
 }

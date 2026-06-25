@@ -32,7 +32,7 @@ public sealed class ProfileOrchestrationService : IProfileOrchestrationService
 
     public async Task UpdateLocalProfileAsync(string newDisplayName, CancellationToken ct)
     {
-        var selfIdentity = await _selfIdentityRepository.GetMostRecentAsync(ct);
+        var selfIdentity = await _selfIdentityRepository.GetMostRecentAsync(ct).ConfigureAwait(false);
         if (selfIdentity is null)
         {
             throw new InvalidOperationException("No active self identity found");
@@ -61,20 +61,20 @@ public sealed class ProfileOrchestrationService : IProfileOrchestrationService
         // Update and save
         selfIdentity.SetDisplayName(newDisplayName);
         selfIdentity.CommitProfileUpdate(identityProfileKey, package);
-        await _selfIdentityRepository.SaveAsync(selfIdentity, ct);
+        await _selfIdentityRepository.SaveAsync(selfIdentity, ct).ConfigureAwait(false);
 
         _logger.LogInformation("Profile updated to revision {Revision}", selfIdentity.ProfileRevision);
     }
 
     public async Task AttachProfileDataIfRequiredAsync(ChatEnvelope envelope, IdentityPeerId recipientPeerId, CancellationToken ct)
     {
-        var selfIdentity = await _selfIdentityRepository.GetMostRecentAsync(ct);
+        var selfIdentity = await _selfIdentityRepository.GetMostRecentAsync(ct).ConfigureAwait(false);
         if (selfIdentity is null || selfIdentity.CurrentProfileCiphertext is null)
         {
             return; // No profile data to attach
         }
 
-        var peerIdentity = await _peerIdentityRepository.GetByIdAsync(recipientPeerId, ct);
+        var peerIdentity = await _peerIdentityRepository.GetByIdAsync(recipientPeerId, ct).ConfigureAwait(false);
         if (peerIdentity is null)
         {
             return; // Unknown peer
@@ -105,7 +105,7 @@ public sealed class ProfileOrchestrationService : IProfileOrchestrationService
             return; // No profile data in envelope
         }
 
-        var peerIdentity = await _peerIdentityRepository.GetByIdAsync(senderPeerId, ct);
+        var peerIdentity = await _peerIdentityRepository.GetByIdAsync(senderPeerId, ct).ConfigureAwait(false);
         if (peerIdentity is null)
         {
             _logger.LogWarning("Received profile data from unknown peer {PeerId}", senderPeerId);
@@ -139,7 +139,7 @@ public sealed class ProfileOrchestrationService : IProfileOrchestrationService
         // Update peer identity
         peerIdentity.SetDisplayName(profileData.DisplayName);
         peerIdentity.UpdateLastKnownProfileRevision(envelope.ProfileRevision);
-        await _peerIdentityRepository.SaveAsync(peerIdentity, ct);
+        await _peerIdentityRepository.SaveAsync(peerIdentity, ct).ConfigureAwait(false);
 
         _logger.LogInformation("Updated profile for peer {PeerId} to revision {Revision}", senderPeerId, envelope.ProfileRevision);
     }

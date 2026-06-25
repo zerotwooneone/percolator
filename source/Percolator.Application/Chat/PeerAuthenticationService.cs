@@ -35,7 +35,7 @@ public sealed class PeerAuthenticationService : IPeerAuthenticationService
         }
 
         // Look up the peer's public key using the PKH lookup string
-        var publicKey = await _peerIdentityQueries.GetPublicKeyByPkhAsync(senderPkh, ct);
+        var publicKey = await _peerIdentityQueries.GetPublicKeyByPkhAsync(senderPkh, ct).ConfigureAwait(false);
         if (publicKey is null)
         {
             _logger.LogWarning("Peer not found for PKH: {Pkh}", senderPkh);
