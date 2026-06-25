@@ -199,6 +199,35 @@ Implementation Requirements
 - `GroupProvisioningAppService_ProvisionGroupAsync_GeneratesValidOutboxEvents` - Test that creating a group yields one provisioning event for the relay and one invite event per member.
 - `RelayGroupService_ProvisionGroup_CreatesLedgerAndRoster_FromPkhs` - Test that the Relay correctly initializes the `RelayGroupStateDbo` and `RelayBlindedRosterDbo` using the raw PKHs.
 
+---
+
+## Chunk 5.1 (Envelope Context Bridging)
+### Feature Implementation Request: Signal Protocol Chunk 5.1 (InternalEnvelope Sender Context)
+The Goal: To align with Signal's architecture, the internal unencrypted envelope must explicitly carry the Sender's UUID and Device ID. This prevents inner payloads (like `GroupInvite`) from needing to transport this data, while enabling proper `SenderAddress` construction for the cryptographic VTable.
+
+Implementation Requirements:
+
+1. Network Contracts (`internal_messaging.proto`)
+* Update `InternalEnvelope` in `Percolator.Contracts/Protos/internal_messaging.proto` to include the sender context:
+  ```protobuf
+  message InternalEnvelope {
+    optional bytes source_peer_id = 100;    // 16-byte UUID of the sender
+    optional uint32 source_device_id = 101; // Sender's device ID (e.g., 1)
+    oneof application_payload {
+      // ... existing payloads
+    }
+  }
+  ```
+
+2. Application Orchestration (`Percolator.Application`)
+* **Session Context Update:** Modify `Percolator.Application.Network.ProcessInternalEnvelopeCommand.SessionContext` to include `uint? SourceDeviceId` alongside the existing properties.
+* **Decryption Ingress Update:** In `Percolator.Application.Network.DeliverOpaqueMessageHandler` (and any other entry point that decrypts `SessionRatchetMessage` into an `InternalEnvelope`), extract the `source_device_id` (defaulting to 1 if not set) and `source_peer_id` from the decrypted `InternalEnvelope` and populate the `SessionContext` when dispatching `ProcessInternalEnvelopeCommand`.
+* **Outbound Egress Update:** In `Percolator.Application.Network.RemoteEnvelopeSender` (or equivalent outbound paths that wrap payloads in `InternalEnvelope` before encryption), you MUST populate `source_peer_id` with the local self identity's `PeerId` and `source_device_id` with the local device ID.
+
+3. Group Invite Integration (`Percolator.Application/Chat`)
+* **Handler Interface:** Update `IGroupInviteHandler.HandleGroupInviteAsync` to accept the `uint sourceDeviceId` as a parameter.
+* **Process Handler Update:** In `ProcessInternalEnvelopeHandler`, extract `request.Context.SourceDeviceId` (fallback to 1 if null) and pass it into the `HandleGroupInviteAsync` call for the `GroupInvite` branch.
+* **Cryptography Integration:** In `GroupInviteHandler`, use the provided `sourceDeviceId` to initialize `var senderDeviceId = new Percolator.Cryptography.Primitives.DeviceId(sourceDeviceId);`. Pass this `senderDeviceId` alongside the `inviterPkh` into `ISenderKeyCryptographyService.ProcessSenderKeyDistributionMessage(...)` to correctly initialize the native `SenderKeyStore`.
 
 ---
 
