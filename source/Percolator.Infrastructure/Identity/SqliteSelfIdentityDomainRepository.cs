@@ -118,7 +118,8 @@ public sealed class SqliteSelfIdentityDomainRepository : ISelfIdentityRepository
 
     private static SelfIdentity Map(SelfIdentityDbo dbo)
     {
-        var self = new SelfIdentity(new SelfId(dbo.Id), new PublicIdentityId(dbo.PublicIdentityId), new ListeningPort(dbo.ListeningPort));
+        var self = new SelfIdentity(new SelfId(dbo.Id), new PublicIdentityId(dbo.PublicIdentityId), new ListeningPort(dbo.ListeningPort), new DeviceId(dbo.DeviceId), dbo.LastUsedUtc);
+        
         if (!string.IsNullOrWhiteSpace(dbo.Name)) self.SetDisplayName(dbo.Name);
         self.TouchLastUsed(dbo.LastUsedUtc);
         

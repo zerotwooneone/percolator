@@ -16,12 +16,13 @@ public sealed class SelfIdentity
     public int ProfileRevision { get; private set; }
     public Percolator.Identity.RelayRootKeyBytes? RelayDeliveryRootKey { get; private set; }
 
-    public SelfIdentity(SelfId id, PublicIdentityId publicIdentityId, ListeningPort listeningPort)
+    public SelfIdentity(SelfId id, PublicIdentityId publicIdentityId, ListeningPort listeningPort,DeviceId deviceId, DateTimeOffset lastUsedUtc)
     {
         Id = id;
         PublicIdentityId = publicIdentityId;
         ListeningPort = listeningPort;
-        LastUsedUtc = default; // Explicit non-nullable; caller should set via TouchLastUsed
+        LastUsedUtc = lastUsedUtc; // Explicit non-nullable; caller should set via TouchLastUsed
+        DeviceId = deviceId;
     }
 
     public void SetDisplayName(DisplayName name) => DisplayName = name;

@@ -83,7 +83,7 @@ public class IdentityOrchestrator : IIdentityOrchestrator
         }
         var peerId = dto.PublicIdentityId.Value;
         var identityName = dto.DisplayName?.Value ?? dto.Id.ToString();
-        var identity = new IdentityRecord(peerId, identityName, null) with { SelfIdentityId = selfId, PublicIdentityId = dto.PublicIdentityId, ListeningPort = dto.ListeningPort };
+        var identity = new IdentityRecord(peerId, identityName, null) with { SelfIdentityId = selfId, PublicIdentityId = dto.PublicIdentityId, ListeningPort = dto.ListeningPort, DeviceId = dto.DeviceId };
 
         _activeIdentityContext.SetActiveIdentity(identity, keys);
 

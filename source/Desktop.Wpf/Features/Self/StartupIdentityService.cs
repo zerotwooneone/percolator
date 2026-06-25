@@ -36,7 +36,7 @@ public sealed class StartupIdentityService : IStartupIdentityService
 
         var excludedPorts = await _reservedPortQuery.GetReservedPortsAsync(ct).ConfigureAwait(false);
         var port = await _networkEnvironment.GetAvailablePortAsync(excludedPorts,ct).ConfigureAwait(false);
-        var created = new SelfIdentity(new SelfId(0), PeerId.NewId(), new ListeningPort(port));
+        var created = new SelfIdentity(new SelfId(0), PublicIdentityId.NewId(), new ListeningPort(port));
         created.TouchLastUsed(now);
         var newId =await _repo.CreateAsync(created, ct).ConfigureAwait(false);
         return await _repo.GetByIdAsync(newId, ct).ConfigureAwait(false)!;

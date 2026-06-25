@@ -22,4 +22,10 @@ public record IdentityRecord(Guid Id, string Name, string? Nickname = null)
     /// Populated from the database SelfIdentityDbo.ListeningPort.
     /// </summary>
     public ListeningPort ListeningPort { get; init; }
+
+    /// <summary>
+    /// The device identifier for this identity.
+    /// Populated from the database SelfIdentityDbo.DeviceId.
+    /// </summary>
+    public DeviceId DeviceId { get; init; }
 }
