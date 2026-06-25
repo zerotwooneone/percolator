@@ -19,10 +19,8 @@ public sealed class SimulatedRelayQueuePanelViewModelTests
     public async Task DeliverNextAsync_when_downstream_message_routes_to_peer_and_deletes_message()
     {
         // Arrange
-        var relayHostPeerIdGuid = Guid.NewGuid();
-        var relayHostPeerId = new PeerId(relayHostPeerIdGuid);
-        var recipientPeerIdGuid = Guid.NewGuid();
-        var recipientPeerId = new PeerId(recipientPeerIdGuid);
+        var relayHostPeerId = new PeerId(1);
+        var recipientPeerId = new PeerId(2);
         var ackId = Guid.NewGuid();
         var targetPkh = System.Security.Cryptography.SHA256.HashData(Guid.NewGuid().ToByteArray());
         var opaque = new byte[] { 0x01, 0x02, 0x03 };

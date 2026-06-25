@@ -17,7 +17,7 @@ public class SenderKeyInteropBridgeTests
     {
         // Arrange
         var conversationId = new ConversationId(Guid.NewGuid());
-        var senderId = new PeerId(Guid.NewGuid());
+        var senderId = new PeerId(1);
         var deviceId = new DeviceId(1);
         
         var options = new DbContextOptionsBuilder<PercolatorDbContext>()
@@ -41,7 +41,7 @@ public class SenderKeyInteropBridgeTests
     {
         // Arrange
         var conversationId = new ConversationId(Guid.NewGuid());
-        var senderId = new PeerId(Guid.NewGuid());
+        var senderId = new PeerId(2);
         var deviceId = new DeviceId(1);
         var originalBytes = new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
         

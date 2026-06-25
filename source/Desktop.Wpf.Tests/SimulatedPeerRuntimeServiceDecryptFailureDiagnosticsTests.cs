@@ -24,7 +24,7 @@ public sealed class SimulatedPeerRuntimeServiceDecryptFailureDiagnosticsTests
     public async Task DecryptSessionMessageAsync_WhenDecryptThrows_EmitsDecryptFailureDiagnosticEvent()
     {
         // Arrange
-        var peerId = new PeerId(Guid.NewGuid());
+        var peerId = new PeerId(1);
         var peer = CryptoTestHelpers.CreateTestPeer(
             peerId, 99000, "peer", false,
             new System.Net.DnsEndPoint("127.77.1.1", 5002));

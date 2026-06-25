@@ -401,7 +401,7 @@ async Task<int> DhtProbeCommandHandler(InvocationContext context)
         Console.ResetColor();
         foreach (var p in peers)
         {
-            var idB64 = p.HasPeerId ? Convert.ToBase64String(p.PeerId.ToByteArray()) : "<none>";
+            var idB64 = p.HasPeerId ? p.PeerId.ToString() : "<none>";
             Console.WriteLine($"- {p.Address}  id={idB64}");
         }
         return 0;

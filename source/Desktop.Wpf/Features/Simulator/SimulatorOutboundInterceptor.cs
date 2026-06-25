@@ -153,7 +153,7 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
     {
         try
         {
-            var inviterPeerId = _active.Identity is not null ? new PeerId(_active.Identity.Id) : new PeerId(Guid.Empty);
+            var inviterPeerId = _active.Identity is not null ? new PeerId((uint) _active.Identity.SelfIdentityId.Value) : new PeerId(0);
             return await _state.ReceiveEstablishDirectSessionFromMainAsync(
                     simulatedPeerId: simulatedPeerId,
                     mainPeerId: inviterPeerId,
@@ -174,7 +174,7 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
 
     private bool TryResolveSimulatedPeerId(DnsEndPoint endpoint, out PeerId simulatedPeerId)
     {
-        simulatedPeerId = new PeerId(Guid.Empty);
+        simulatedPeerId = new PeerId(0);
 
         if (!IPAddress.TryParse(endpoint.Host, out var ip))
         {

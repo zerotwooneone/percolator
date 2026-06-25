@@ -28,8 +28,8 @@ public sealed class SimulatedPeerPendingInboundDirectInviteTests
     public async Task ReceiveEstablishDirectSessionFromMainAsync_QueuesPendingInvite_DoesNotCreateSession()
     {
         // Arrange
-        var simulatedPeerId = new PeerId(Guid.NewGuid());
-        var mainPeerId = new PeerId(Guid.NewGuid());
+        var simulatedPeerId = new PeerId(1);
+        var mainPeerId = new PeerId(2);
         var correlationId = Guid.NewGuid();
 
         var simulatedPeer = CryptoTestHelpers.CreateTestPeer(
@@ -124,8 +124,8 @@ public sealed class SimulatedPeerPendingInboundDirectInviteTests
     public async Task AcceptPendingInboundDirectInviteAsync_CreatesSession_WhenInvitedPeerAccepts()
     {
         // Arrange
-        var simulatedPeerId = new PeerId(Guid.NewGuid());
-        var mainPeerId = new PeerId(Guid.NewGuid());
+        var simulatedPeerId = new PeerId(3);
+        var mainPeerId = new PeerId(4);
         var correlationId = Guid.NewGuid();
 
         var simulatedPeer = CryptoTestHelpers.CreateTestPeer(
@@ -215,8 +215,8 @@ public sealed class SimulatedPeerPendingInboundDirectInviteTests
     public async Task RejectPendingInboundDirectInviteAsync_DoesNotCreateSession_ClearsPending()
     {
         // Arrange
-        var simulatedPeerId = new PeerId(Guid.NewGuid());
-        var mainPeerId = new PeerId(Guid.NewGuid());
+        var simulatedPeerId = new PeerId(5);
+        var mainPeerId = new PeerId(6);
         var correlationId = Guid.NewGuid();
 
         var simulatedPeer = CryptoTestHelpers.CreateTestPeer(

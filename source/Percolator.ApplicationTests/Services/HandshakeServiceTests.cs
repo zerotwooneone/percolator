@@ -12,7 +12,7 @@ public class HandshakeServiceTests
     public async Task InitiateStandardHandshake_returns_session_and_initial_cipher_when_plaintext_provided()
     {
         var svc = new HandshakeService(new TestClock());
-        var result = await svc.InitiateStandardHandshakeAsync(new PeerId(Guid.NewGuid()), Plaintext.FromBytes(new byte[]{0xAA}), CancellationToken.None);
+        var result = await svc.InitiateStandardHandshakeAsync(new PeerId(1), Plaintext.FromBytes(new byte[]{0xAA}), CancellationToken.None);
         result.SessionId.Should().NotBeNull();
         result.InitialCipher.Should().NotBeNull();
     }
@@ -23,14 +23,14 @@ public class HandshakeServiceTests
         // Arrange: create sender via HandshakeService (uses zeroed root and fixed init labels)
         var svc = new HandshakeService(new TestClock());
         var plaintext = Plaintext.FromBytes(new byte[] { 0x10, 0x20, 0x30 });
-        var compose = await svc.InitiateStandardHandshakeAsync(new PeerId(Guid.NewGuid()), plaintext, CancellationToken.None);
+        var compose = await svc.InitiateStandardHandshakeAsync(new PeerId(2), plaintext, CancellationToken.None);
         Assert.That(compose.InitialCipher, Is.Not.Null);
 
         // Build complementary responder session using canonical bootstrap
         var root = RootKey.FromBytes(new byte[32]);
         var responder = RatchetBootstrap.CreateResponderSession(
             SessionId.NewId(),
-            new PeerId(Guid.NewGuid()),
+            new PeerId(3),
             new ProtocolVersion(1),
             root,
             new TestClock());

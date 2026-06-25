@@ -241,8 +241,8 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
         findCharlie.Should().NotBeNull();
         //expect host, alice, and bob
         findCharlie.CloserPeers.Should()
-            .Contain(p=>p.PeerId.ToByteArray().SequenceEqual(alicePkh))
-            .And.Contain(p=>p.PeerId.ToByteArray().SequenceEqual(bobPkh));
+            .Contain(p=>p.PeerId.SequenceEqual(alicePkh))
+            .And.Contain(p=>p.PeerId.SequenceEqual(bobPkh));
 
         // 7) Charlie initiates opaque handshakes to Alice and Bob via MQ; verify sessions exist
         await charlieMed.Send(new InitiateHandshakeViaHostCommand("host", alicePkh, PeerName:"alice"));

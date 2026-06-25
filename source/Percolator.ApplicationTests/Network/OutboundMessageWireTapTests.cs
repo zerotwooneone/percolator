@@ -31,7 +31,7 @@ public sealed class OutboundMessageWireTapTests
         sessions.Setup(s => s.ListAsync(It.IsAny<int>()))
             .ReturnsAsync(Array.Empty<DirectSession>());
         sessions.Setup(s => s.GetByRemotePeerIdAsync(It.IsAny<PeerId>(), It.IsAny<int>()))
-            .ReturnsAsync(new DirectSession(new PeerId(Guid.NewGuid()), new DirectSessionId(Guid.NewGuid())));
+            .ReturnsAsync(new DirectSession(new PeerId(1), new DirectSessionId(Guid.NewGuid())));
 
         var secure = new Mock<ISecureMessagingService>(MockBehavior.Strict);
         secure.Setup(s => s.EncryptAsync(It.IsAny<SessionId>(), It.IsAny<Plaintext>(), It.IsAny<CancellationToken>()))
@@ -74,7 +74,7 @@ public sealed class OutboundMessageWireTapTests
         sessions.Setup(s => s.ListAsync(It.IsAny<int>()))
             .ReturnsAsync(Array.Empty<DirectSession>());
         sessions.Setup(s => s.GetByRemotePeerIdAsync(It.IsAny<PeerId>(), It.IsAny<int>()))
-            .ReturnsAsync(new DirectSession(new PeerId(Guid.NewGuid()), new DirectSessionId(Guid.NewGuid())));
+            .ReturnsAsync(new DirectSession(new PeerId(2), new DirectSessionId(Guid.NewGuid())));
 
         var secure = new Mock<ISecureMessagingService>(MockBehavior.Strict);
         var expectedCipher = new byte[] { 0x01, 0x02, 0x03 };

@@ -12,7 +12,7 @@ public class PeerIdentityTests
     public void Key_validity_windows_control_activation_over_time()
     {
         var now = new DateTimeOffset(2025, 1, 1, 0, 0, 0, TimeSpan.Zero);
-        var id = new PeerIdentity(new PeerId(Guid.NewGuid()));
+        var id = new PeerIdentity(new PeerId(1));
 
         // Key active from now to +1 day
         id.AddKey(spki: Bytes(1,2,3), notBefore: now, expiresAt: now.AddDays(1), now: now);
@@ -30,7 +30,7 @@ public class PeerIdentityTests
     public void Overlapping_active_windows_are_rejected()
     {
         var now = DateTimeOffset.UtcNow;
-        var id = new PeerIdentity(new PeerId(Guid.NewGuid()));
+        var id = new PeerIdentity(new PeerId(1));
         id.AddKey(spki: Bytes(9), notBefore: now, expiresAt: now.AddDays(1), now: now);
 
         // Attempt to add a second key that would also be active at 'now'
@@ -42,7 +42,7 @@ public class PeerIdentityTests
     public void Rotation_can_be_scheduled_in_future_without_overlap()
     {
         var now = DateTimeOffset.UtcNow;
-        var id = new PeerIdentity(new PeerId(Guid.NewGuid()));
+        var id = new PeerIdentity(new PeerId(1));
         id.AddKey(spki: Bytes(1), notBefore: now, expiresAt: now.AddDays(1), now: now);
 
         // Next key starts right when previous expires
@@ -57,7 +57,7 @@ public class PeerIdentityTests
     public void Verify_OutOfBand_marks_trusted_for_active_fingerprint_only()
     {
         var now = DateTimeOffset.UtcNow;
-        var id = new PeerIdentity(new PeerId(Guid.NewGuid()));
+        var id = new PeerIdentity(new PeerId(1));
         id.AddKey(spki: Bytes(1,1,1), notBefore: now, expiresAt: now.AddDays(1), now: now);
         var active = id.GetActiveKey(now)!;
 
@@ -76,7 +76,7 @@ public class PeerIdentityTests
     public void Verify_rejects_when_no_active_key_or_mismatch()
     {
         var now = DateTimeOffset.UtcNow;
-        var id = new PeerIdentity(new PeerId(Guid.NewGuid()));
+        var id = new PeerIdentity(new PeerId(1));
         // No keys
         Assert.Throws<InvalidOperationException>(() => id.VerifyOutOfBand(new byte[32], now, null));
 
@@ -95,7 +95,7 @@ public class PeerIdentityTests
     public void Distrust_moves_state_out_of_verified()
     {
         var now = DateTimeOffset.UtcNow;
-        var id = new PeerIdentity(new PeerId(Guid.NewGuid()));
+        var id = new PeerIdentity(new PeerId(1));
         id.AddKey(Bytes(1), now, now.AddDays(1), now);
         var active = id.GetActiveKey(now)!;
         id.VerifyOutOfBand(active.Fingerprint, now, null);

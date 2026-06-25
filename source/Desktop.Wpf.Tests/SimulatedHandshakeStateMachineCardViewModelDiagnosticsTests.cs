@@ -26,7 +26,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModelDiagnosticsTests
     public async Task ForceExpire_And_Reset_EmitHandshakeStateTransitionEvents()
     {
         // Arrange
-        var peerId = new PeerId(Guid.NewGuid());
+        var peerId = new PeerId(1);
         using var ecdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var priv = ecdh.ExportECPrivateKey();
         var spki = ecdh.PublicKey.ExportSubjectPublicKeyInfo();
@@ -39,7 +39,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModelDiagnosticsTests
         var active = new ActiveIdentityContext();
         active.SetActiveIdentity(new IdentityRecord(Guid.NewGuid(), "self"));
 
-        var relayHostId = new PeerId(Guid.NewGuid());
+        var relayHostId = new PeerId(2);
         var state = new Mock<ISimulatorStateService>(MockBehavior.Loose);
 
         var relayHostModel = new SimulatedPeerModel(relayHostId, selfIdentityId: 99001, "relay", isRelayCapable: true, spki, priv, endpoint: new System.Net.DnsEndPoint("127.77.1.2", 5002));

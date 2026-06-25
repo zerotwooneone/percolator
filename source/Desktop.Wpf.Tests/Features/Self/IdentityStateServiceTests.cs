@@ -92,7 +92,7 @@ public class IdentityStateServiceTests
     {
         // ARRANGE
         var selfId = new SelfId(1);
-        var domainIdentity = new SelfIdentity(selfId, new PublicIdentityId(Guid.NewGuid()), new ListeningPort(5000));
+        var domainIdentity = new SelfIdentity(selfId, new PublicIdentityId(Guid.NewGuid()), new ListeningPort(5000), new DeviceId(1), DateTimeOffset.UtcNow);
         
         var startupMock = new Mock<IStartupIdentityService>();
         startupMock.Setup(s => s.ResolveOrCreateAsync(It.IsAny<CancellationToken>())).ReturnsAsync(domainIdentity);
@@ -113,7 +113,7 @@ public class IdentityStateServiceTests
         // ARRANGE
         var selfId = new SelfId(1);
         var listeningPort = new ListeningPort(5000);
-        var domainIdentity = new SelfIdentity(selfId, new PublicIdentityId(Guid.NewGuid()), listeningPort);
+        var domainIdentity = new SelfIdentity(selfId, new PublicIdentityId(Guid.NewGuid()), listeningPort, new DeviceId(1), DateTimeOffset.UtcNow);
         domainIdentity.SetDisplayName("Alice");
 
         var startupMock = new Mock<IStartupIdentityService>();
@@ -137,7 +137,7 @@ public class IdentityStateServiceTests
     {
         // ARRANGE
         var selfId = new SelfId(1);
-        var domainIdentity = new SelfIdentity(selfId, new PublicIdentityId(Guid.NewGuid()), new ListeningPort(5000));
+        var domainIdentity = new SelfIdentity(selfId, new PublicIdentityId(Guid.NewGuid()), new ListeningPort(5000), new DeviceId(1), DateTimeOffset.UtcNow);
         domainIdentity.SetDisplayName("Alice");
 
         var startupMock = new Mock<IStartupIdentityService>();
@@ -160,7 +160,7 @@ public class IdentityStateServiceTests
     {
         // ARRANGE
         var selfId = new SelfId(1);
-        var domainIdentity = new SelfIdentity(selfId, new PublicIdentityId(Guid.NewGuid()), new ListeningPort(5000));
+        var domainIdentity = new SelfIdentity(selfId, new PublicIdentityId(Guid.NewGuid()), new ListeningPort(5000), new DeviceId(1), DateTimeOffset.UtcNow);
         domainIdentity.SetDisplayName("Alice");
 
         var startupMock = new Mock<IStartupIdentityService>();

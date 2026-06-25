@@ -19,7 +19,7 @@ public sealed class SimulatedPeerDirectoryInitializationTests
     public async Task InitializeAsync_CoalescesConcurrentCalls_AndProjectsModelsFromState()
     {
         // Arrange
-        var peerId = new PeerId(Guid.NewGuid());
+        var peerId = new PeerId(1);
         using var ecdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var priv = ecdh.ExportECPrivateKey();
         var spki = ecdh.PublicKey.ExportSubjectPublicKeyInfo();

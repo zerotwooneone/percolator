@@ -50,9 +50,9 @@ public class IdentityOrchestratorTests
     {
         // ARRANGE
         var selfId = new SelfId(1);
-        var peerId = new PeerId(Guid.NewGuid());
+        var publicIdentityId = new PublicIdentityId(Guid.NewGuid());
         var listeningPort = new ListeningPort(5000);
-        var domainIdentity = new SelfIdentity(selfId, peerId, listeningPort);
+        var domainIdentity = new SelfIdentity(selfId, publicIdentityId, listeningPort, new DeviceId(1), DateTimeOffset.UtcNow);
         domainIdentity.SetDisplayName("TestIdentity");
 
         var ikSigning = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
@@ -84,9 +84,9 @@ public class IdentityOrchestratorTests
     {
         // ARRANGE
         var selfId = new SelfId(1);
-        var peerId = new PeerId(Guid.NewGuid());
+        var publicIdentityId = new PublicIdentityId(Guid.NewGuid());
         var listeningPort = new ListeningPort(5000);
-        var domainIdentity = new SelfIdentity(selfId, peerId, listeningPort);
+        var domainIdentity = new SelfIdentity(selfId, publicIdentityId, listeningPort, new DeviceId(1), DateTimeOffset.UtcNow);
         domainIdentity.SetDisplayName("TestIdentity");
 
         var ikSigning = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
@@ -135,9 +135,9 @@ public class IdentityOrchestratorTests
     {
         // ARRANGE
         var selfId = new SelfId(1);
-        var peerId = new PeerId(Guid.NewGuid());
+        var publicIdentityId = new PublicIdentityId(Guid.NewGuid());
         var listeningPort = new ListeningPort(5000);
-        var domainIdentity = new SelfIdentity(selfId, peerId, listeningPort);
+        var domainIdentity = new SelfIdentity(selfId, publicIdentityId, listeningPort, new DeviceId(1), DateTimeOffset.UtcNow);
         domainIdentity.SetDisplayName("TestIdentity");
 
         _selfIdentityRepositoryMock

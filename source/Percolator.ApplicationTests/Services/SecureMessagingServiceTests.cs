@@ -32,13 +32,13 @@ public class SecureMessagingServiceTests
         var root = RootKey.FromBytes(new byte[32]);
         var sender = RatchetBootstrap.CreateInitiatorSession(
             SessionId.NewId(),
-            new PeerId(Guid.NewGuid()),
+            new PeerId(1),
             new ProtocolVersion(1),
             root,
             clock);
         var receiver = RatchetBootstrap.CreateResponderSession(
             SessionId.NewId(),
-            new PeerId(Guid.NewGuid()),
+            new PeerId(2),
             new ProtocolVersion(1),
             root,
             clock);

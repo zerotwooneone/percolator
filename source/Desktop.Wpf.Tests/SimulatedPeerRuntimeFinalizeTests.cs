@@ -27,8 +27,8 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
     public async Task SimulatorInitiatedHandshake_CreatesSession_WhenMainAccepts()
     {
         // Arrange
-        var inviterPeerId = new PeerId(Guid.NewGuid());
-        var acceptorPeerId = new PeerId(Guid.NewGuid());
+        var inviterPeerId = new PeerId(1);
+        var acceptorPeerId = new PeerId(2);
         var correlation = Guid.NewGuid();
 
         var inviterPeer = CryptoTestHelpers.CreateTestPeer(
@@ -123,8 +123,8 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
     public async Task HandleInboundInviteHandshakeResponse_does_not_create_session_when_no_matching_outbound_invite()
     {
         // Arrange
-        var inviterPeerId = new PeerId(Guid.NewGuid());
-        var acceptorPeerId = new PeerId(Guid.NewGuid());
+        var inviterPeerId = new PeerId(3);
+        var acceptorPeerId = new PeerId(4);
         var correlation = Guid.NewGuid();
 
         var inviterPeer = CryptoTestHelpers.CreateTestPeer(
@@ -175,7 +175,7 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
     public async Task HandleInboundInviteHandshakeResponse_throws_when_missing_acceptor_identity_key()
     {
         // Arrange
-        var inviterPeerId = new PeerId(Guid.NewGuid());
+        var inviterPeerId = new PeerId(5);
         var correlation = Guid.NewGuid();
 
         var inviterPeer = CryptoTestHelpers.CreateTestPeer(
@@ -218,7 +218,7 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
     public async Task HandleInboundInviteHandshakeResponse_throws_when_missing_acceptor_x3dh_ephemeral_key()
     {
         // Arrange
-        var inviterPeerId = new PeerId(Guid.NewGuid());
+        var inviterPeerId = new PeerId(6);
         var correlation = Guid.NewGuid();
 
         var inviterPeer = CryptoTestHelpers.CreateTestPeer(
@@ -261,7 +261,7 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
     public async Task HandleInboundInviteHandshakeResponse_throws_when_missing_initial_ratchet_message()
     {
         // Arrange
-        var inviterPeerId = new PeerId(Guid.NewGuid());
+        var inviterPeerId = new PeerId(7);
         var correlation = Guid.NewGuid();
 
         var inviterPeer = CryptoTestHelpers.CreateTestPeer(

@@ -37,7 +37,7 @@ public class SelfIdentityDomainRepositoryTests
         // Arrange
         await using var ctx = new PercolatorDbContext(_options);
         var repo = new SqliteSelfIdentityDomainRepository(ctx);
-        var self = new SelfIdentity(new SelfId(0), new PublicIdentityId(Guid.NewGuid()), new ListeningPort(5000)); // Id not assigned yet; will be set by DB
+        var self = new SelfIdentity(new SelfId(0), new PublicIdentityId(Guid.NewGuid()), new ListeningPort(5000), new DeviceId(1), DateTimeOffset.UtcNow); // Id not assigned yet; will be set by DB
         self.SetDisplayName("alice");
         var used = new DateTimeOffset(2025, 6, 1, 0, 0, 0, TimeSpan.Zero);
         self.TouchLastUsed(used);
@@ -60,7 +60,7 @@ public class SelfIdentityDomainRepositoryTests
         // Arrange
         await using var ctx = new PercolatorDbContext(_options);
         var repo = new SqliteSelfIdentityDomainRepository(ctx);
-        var self = new SelfIdentity(new SelfId(0), new PeerId(Guid.NewGuid()), new ListeningPort(5000));
+        var self = new SelfIdentity(new SelfId(0), new PublicIdentityId(Guid.NewGuid()), new ListeningPort(5000), new DeviceId(1), DateTimeOffset.UtcNow);
         
         var spki = new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
         // Key is active immediately
@@ -85,8 +85,8 @@ public class SelfIdentityDomainRepositoryTests
         // Arrange
         await using var ctx = new PercolatorDbContext(_options);
         var repo = new SqliteSelfIdentityDomainRepository(ctx);
-        var a = new SelfIdentity(new SelfId(0), new PeerId(Guid.NewGuid()), new ListeningPort(5000)); a.SetDisplayName("a"); a.TouchLastUsed(new DateTimeOffset(2025,1,1,0,0,0,TimeSpan.Zero));
-        var b = new SelfIdentity(new SelfId(0), new PeerId(Guid.NewGuid()), new ListeningPort(5000)); b.SetDisplayName("b"); b.TouchLastUsed(new DateTimeOffset(2025,2,1,0,0,0,TimeSpan.Zero));
+        var a = new SelfIdentity(new SelfId(0), new PublicIdentityId(Guid.NewGuid()), new ListeningPort(5000), new DeviceId(1), new DateTimeOffset(2025,1,1,0,0,0,TimeSpan.Zero)); a.SetDisplayName("a");
+        var b = new SelfIdentity(new SelfId(0), new PublicIdentityId(Guid.NewGuid()), new ListeningPort(5000), new DeviceId(1), new DateTimeOffset(2025,2,1,0,0,0,TimeSpan.Zero)); b.SetDisplayName("b");
         await repo.SaveAsync(a);
         await repo.SaveAsync(b);
 
@@ -104,7 +104,7 @@ public class SelfIdentityDomainRepositoryTests
         // Arrange
         await using var ctx = new PercolatorDbContext(_options);
         var repo = new SqliteSelfIdentityDomainRepository(ctx);
-        var self = new SelfIdentity(new SelfId(0), new PeerId(Guid.NewGuid()), new ListeningPort(5000));
+        var self = new SelfIdentity(new SelfId(0), new PublicIdentityId(Guid.NewGuid()), new ListeningPort(5000), new DeviceId(1), DateTimeOffset.UtcNow);
         self.SetDisplayName("relay-test");
 
         var relayRootKey = RelayRootKeyBytes.FromBytesOwned(new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32 });

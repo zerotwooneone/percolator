@@ -31,7 +31,7 @@ public class SqlitePeerIdentityRepositoryTests
         var repo = new SqlitePeerIdentityRepository(db);
 
         var now = DateTimeOffset.UtcNow;
-        var aggregate = new PeerIdentity(new PeerId(Guid.NewGuid()));
+        var aggregate = new PeerIdentity(new PeerId(1));
         aggregate.SetDisplayName("Alice");
         aggregate.AddKey(Bytes(1,2,3), now, now.AddDays(1), now);
 
@@ -55,7 +55,7 @@ public class SqlitePeerIdentityRepositoryTests
         var repo = new SqlitePeerIdentityRepository(db);
 
         var now = DateTimeOffset.UtcNow;
-        var aggregate = new PeerIdentity(new PeerId(Guid.NewGuid()));
+        var aggregate = new PeerIdentity(new PeerId(2));
         aggregate.AddKey(Bytes(9,9,9), now, now.AddDays(1), now);
         await repo.SaveAsync(aggregate);
 
@@ -74,7 +74,7 @@ public class SqlitePeerIdentityRepositoryTests
         var repo = new SqlitePeerIdentityRepository(db);
 
         var now = DateTimeOffset.UtcNow;
-        var a = new PeerIdentity(new PeerId(Guid.NewGuid()));
+        var a = new PeerIdentity(new PeerId(3));
         a.AddKey(Bytes(1), now, now.AddDays(1), now);
         await repo.SaveAsync(a);
 
