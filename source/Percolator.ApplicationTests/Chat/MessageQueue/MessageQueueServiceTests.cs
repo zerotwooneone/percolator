@@ -85,7 +85,7 @@ public class MessageQueueServiceTests
     {
         var pkh = new byte[32];
         var blob = new byte[] { 0xBB };
-        var peerId = PeerId.NewId();
+        var peerId = new PeerId(1);
         var identityPublicKeyHash = IdentityPublicKeyHash.FromBytes(pkh);
         _keyStore.Setup(k => k.GetPeerIdByPublicKeyHashAsync(identityPublicKeyHash, It.IsAny<CancellationToken>()))
                  .ReturnsAsync(peerId);
@@ -103,7 +103,7 @@ public class MessageQueueServiceTests
     {
         var pkh = new byte[32];
         var blob = new byte[] { 0xCC };
-        var peerId = PeerId.NewId();
+        var peerId = new PeerId(1);
         var identityPublicKeyHash = IdentityPublicKeyHash.FromBytes(pkh);
         _keyStore.Setup(k => k.GetPeerIdByPublicKeyHashAsync(identityPublicKeyHash, It.IsAny<CancellationToken>()))
                  .ReturnsAsync(peerId);

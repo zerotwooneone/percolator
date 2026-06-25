@@ -277,8 +277,8 @@ The Goal: Refactor the database schema to use auto-incrementing uint surrogate k
 **Implementation Requirements:**
 
 1. **Schema Migration Strategy**
-   - Change `PeerIdentityDbo.PeerId` from Guid PK to uint PK
-   - Change `PeerRoutingProfileDbo.PeerId` from Guid PK to uint PK
+   - Change `PeerIdentityDbo.PeerId` from Guid PK to uint PK (ValueGeneratedNever - app-assigned)
+   - Change `PeerRoutingProfileDbo.PeerId` from Guid PK to uint PK (ValueGeneratedNever - matches PeerIdentityDbo.PeerId)
    - Change all FK columns from Guid to uint
    - Update EF Core model configuration to reflect new PK/FK structure
    - DO NOT create data migration scripts

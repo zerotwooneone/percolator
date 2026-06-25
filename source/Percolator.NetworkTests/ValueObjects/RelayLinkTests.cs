@@ -10,7 +10,7 @@ public class RelayLinkTests
     [Test]
     public void Create_And_Refresh_DoesNotThrow()
     {
-        var relayPeerId = PeerId.NewId();
+        var relayPeerId = new PeerId(1);
         var t0 = DateTimeOffset.UtcNow.AddMinutes(-10);
         var link = new RelayLink(relayPeerId, new EndpointFreshness(t0));
         var now = DateTimeOffset.UtcNow;

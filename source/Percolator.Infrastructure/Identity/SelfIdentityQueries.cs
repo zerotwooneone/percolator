@@ -44,7 +44,7 @@ public sealed class SelfIdentityQueries : ISelfIdentityQueries
         var identity = await db.SelfIdentities
             .AsNoTracking()
             .Where(x => x.Id == selfIdentityId && x.ActiveIdentityKeyFingerprint != null)
-            .Select(x => new { x.ActiveIdentityKeyFingerprint, x.PeerId })
+            .Select(x => new { x.ActiveIdentityKeyFingerprint, PeerId = x.PublicIdentityId })
             .FirstOrDefaultAsync(ct);
 
         if (identity is null)

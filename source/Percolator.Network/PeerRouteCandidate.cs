@@ -10,7 +10,7 @@ public sealed class PeerRouteCandidate
 {
     public long Id { get; set; }
     public int SelfIdentityId { get; set; }
-    public PeerId RemotePeerId { get; set; } = null!;
+    public PeerId RemotePeerId { get; set; }
     public RouteKind RouteKind { get; set; }
     public string? EndpointHost { get; set; }
     public int? EndpointPort { get; set; }

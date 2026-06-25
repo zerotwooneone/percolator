@@ -10,7 +10,7 @@ public class PeerRoutingProfileRelayTests
     public void AddOrRefreshRelay_AddsThenRefreshes()
     {
         var profile = new PeerRoutingProfile();
-        var relayId = PeerId.NewId();
+        var relayId = new PeerId(1);
         var t0 = DateTimeOffset.UtcNow.AddMinutes(-10);
 
         profile.Invoking(p => p.AddOrRefreshRelay(relayId, t0)).Should().NotThrow();
@@ -26,7 +26,7 @@ public class PeerRoutingProfileRelayTests
     public void RemoveRelay_RemovesIfPresent()
     {
         var profile = new PeerRoutingProfile();
-        var relayId = PeerId.NewId();
+        var relayId = new PeerId(1);
         var now = DateTimeOffset.UtcNow;
         profile.AddOrRefreshRelay(relayId, now);
         profile.Relays.Should().ContainSingle(r => r.RelayPeerId == relayId);
@@ -39,8 +39,8 @@ public class PeerRoutingProfileRelayTests
     public void PruneStaleRelays_RemovesOlderThanCutoff()
     {
         var profile = new PeerRoutingProfile();
-        var oldRelay = PeerId.NewId();
-        var freshRelay = PeerId.NewId();
+        var oldRelay = new PeerId(1);
+        var freshRelay = new PeerId(1);
         var now = DateTimeOffset.UtcNow;
 
         profile.AddOrRefreshRelay(oldRelay, now.AddMinutes(-30));

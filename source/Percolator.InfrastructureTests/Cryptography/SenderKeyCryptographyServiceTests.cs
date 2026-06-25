@@ -38,9 +38,9 @@ public class SenderKeyCryptographyServiceTests
         using var receiverService = new SenderKeyCryptographyService(receiverBridge, NullLogger<SenderKeyCryptographyService>.Instance);
 
         var conversationId = ConversationId.NewId();
-        var senderId = PeerId.NewId();
+        var senderId = new PeerId(1);
         var senderDeviceId = new DeviceId(1);
-        var receiverId = PeerId.NewId();
+        var receiverId = new PeerId(1);
         var receiverDeviceId = new DeviceId(1);
 
         // 1. Sender generates distribution message for the receiver

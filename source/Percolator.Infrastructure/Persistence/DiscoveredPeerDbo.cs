@@ -8,5 +8,5 @@ public class DiscoveredPeerDbo
     public DateTimeOffset LastSeenUtc { get; set; }
     public int Source { get; set; }
     public double Confidence { get; set; }
-    public Guid? BoundPeerId { get; set; }
+    public uint? BoundPeerId { get; set; }
 }

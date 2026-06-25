@@ -26,7 +26,7 @@ public sealed class SqliteSentInvitationRepositoryTests
 
         if (!ctx.SelfIdentities.Any())
         {
-            ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = 1, PeerId = Guid.NewGuid(), Name = "default" });
+            ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = 1, PublicIdentityId = Guid.NewGuid(), Name = "default" });
             ctx.SaveChanges();
         }
 

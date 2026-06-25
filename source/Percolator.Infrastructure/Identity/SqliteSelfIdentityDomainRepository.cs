@@ -54,7 +54,7 @@ public sealed class SqliteSelfIdentityDomainRepository : ISelfIdentityRepository
         var activeKey = identity.GetActiveKey(DateTimeOffset.UtcNow);
         var dbo = new SelfIdentityDbo
         {
-            PeerId = identity.PeerId.Value,
+            PublicIdentityId = identity.PublicIdentityId.Value,
             Name = identity.DisplayName?.Value ?? string.Empty,
             LastUsedUtc = identity.LastUsedUtc,
             ListeningPort = identity.ListeningPort.Value,
@@ -85,7 +85,7 @@ public sealed class SqliteSelfIdentityDomainRepository : ISelfIdentityRepository
                 dbo = new SelfIdentityDbo
                 {
                     Id = identity.Id.Value,
-                    PeerId = identity.PeerId.Value,
+                    PublicIdentityId = identity.PublicIdentityId.Value,
                     Name = identity.DisplayName?.Value ?? string.Empty,
                     LastUsedUtc = identity.LastUsedUtc,
                     ActiveIdentityKeySpki = activeKey?.Spki,
@@ -118,7 +118,7 @@ public sealed class SqliteSelfIdentityDomainRepository : ISelfIdentityRepository
 
     private static SelfIdentity Map(SelfIdentityDbo dbo)
     {
-        var self = new SelfIdentity(new SelfId(dbo.Id), new PeerId(dbo.PeerId), new ListeningPort(dbo.ListeningPort));
+        var self = new SelfIdentity(new SelfId(dbo.Id), new PeerId(dbo.PublicIdentityId), new ListeningPort(dbo.ListeningPort));
         if (!string.IsNullOrWhiteSpace(dbo.Name)) self.SetDisplayName(dbo.Name);
         self.TouchLastUsed(dbo.LastUsedUtc);
         

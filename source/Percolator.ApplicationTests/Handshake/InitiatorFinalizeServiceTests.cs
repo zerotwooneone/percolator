@@ -90,7 +90,7 @@ public class InitiatorFinalizeServiceTests
         // Build a responder first message compatible with the prehandshake root
         var responder = RatchetBootstrap.CreateResponderSession(
             SessionId.NewId(),
-            PeerId.NewId(),
+            new PeerId(1),
             new ProtocolVersion(1),
             RootKey.FromBytes(root),
             clock);
@@ -196,7 +196,7 @@ public class InitiatorFinalizeServiceTests
         // Build a responder first message compatible with the prehandshake root
         var responder = RatchetBootstrap.CreateResponderSession(
             SessionId.NewId(),
-            PeerId.NewId(),
+            new PeerId(1),
             new ProtocolVersion(1),
             RootKey.FromBytes(root),
             clock);

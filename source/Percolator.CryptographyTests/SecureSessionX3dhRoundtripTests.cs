@@ -63,8 +63,8 @@ public class SecureSessionX3dhRoundtripTests
         var root = RootKey.FromBytes(sharedA.ToArray());
         var (initiatorState, responderState) = CryptoTestBootstrap.CreatePairedStates(root);
 
-        var a = SecureSession.Create(SessionId.NewId(), PeerId.NewId(), new ProtocolVersion(1), initiatorState, crypto, clock);
-        var b = SecureSession.Create(SessionId.NewId(), PeerId.NewId(), new ProtocolVersion(1), responderState, crypto, clock);
+        var a = SecureSession.Create(SessionId.NewId(), new PeerId(1), new ProtocolVersion(1), initiatorState, crypto, clock);
+        var b = SecureSession.Create(SessionId.NewId(), new PeerId(1), new ProtocolVersion(1), responderState, crypto, clock);
 
         // A -> B
         var msgA0 = a.Encrypt(Plaintext.FromBytes(new byte[] { 0x09 }), clock);

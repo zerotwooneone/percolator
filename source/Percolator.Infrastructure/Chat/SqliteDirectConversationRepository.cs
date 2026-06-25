@@ -52,7 +52,7 @@ public sealed class SqliteDirectConversationRepository : IDirectConversationRepo
             .Include(c => c.Participants)
             .Where(c => c.SelfIdentityId == selfIdentityId)
             .Where(c => c.Kind == Percolator.Infrastructure.Persistence.ConversationKind.Direct)
-            .Where(c => c.Participants.Any(p => p.ParticipantId == self.PeerId) && c.Participants.Any(p => p.ParticipantId == otherPeerId))
+            .Where(c => c.Participants.Any(p => p.ParticipantId == self.PublicIdentityId) && c.Participants.Any(p => p.ParticipantId == otherPeerId))
             .AsNoTracking()
             .FirstOrDefaultAsync(cancellationToken);
 

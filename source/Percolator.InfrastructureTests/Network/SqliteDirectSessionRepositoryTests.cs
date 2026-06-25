@@ -26,7 +26,7 @@ public class SqliteDirectSessionRepositoryTests
         // Seed default SelfIdentity required by repository scoping
         if (!ctx.SelfIdentities.Any())
         {
-            ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = 1, PeerId = Guid.NewGuid(), Name = "default" });
+            ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = 1, PublicIdentityId = Guid.NewGuid(), Name = "default" });
             ctx.SaveChanges();
         }
         return ctx;
@@ -66,8 +66,8 @@ public class SqliteDirectSessionRepositoryTests
         var ctx = CreateDbContext(out var _);
         var dsr = new SqliteDirectSessionRepository(ctx);
 
-        var peerA = Percolator.Network.PeerId.NewId();
-        var peerB = Percolator.Network.PeerId.NewId();
+        var peerA = Percolator.Network.new PeerId(1);
+        var peerB = Percolator.Network.new PeerId(1);
 
         ctx.PeerIdentities.Add(new PeerIdentityDbo { PeerId = peerA.Value, Name = "peer-a", Version = 0, CreatedAtUtc = DateTimeOffset.UtcNow, UpdatedAtUtc = DateTimeOffset.UtcNow });
         ctx.PeerIdentities.Add(new PeerIdentityDbo { PeerId = peerB.Value, Name = "peer-b", Version = 0, CreatedAtUtc = DateTimeOffset.UtcNow, UpdatedAtUtc = DateTimeOffset.UtcNow });
@@ -91,7 +91,7 @@ public class SqliteDirectSessionRepositoryTests
         var dsr = new SqliteDirectSessionRepository(ctx);
 
         // Ensure Peer and PeerConnection exist for FK
-        var peerId = PeerId.NewId();
+        var peerId = new PeerId(1);
         ctx.PeerIdentities.Add(new PeerIdentityDbo { PeerId = peerId.Value, Name = "peer-a", Version = 0, CreatedAtUtc = DateTimeOffset.UtcNow, UpdatedAtUtc = DateTimeOffset.UtcNow });
         await ctx.SaveChangesAsync();
         return (ctx, dsr, peerId);

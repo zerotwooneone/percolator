@@ -11,14 +11,14 @@ public sealed class SentInvitationDbo
     public Guid SignedPreKeyId { get; set; }
     public Guid? OneTimePreKeyId { get; set; }
 
-    public Guid? TargetPeerId { get; set; }
+    public uint? TargetPeerId { get; set; }
 
     public string? TargetDisplayName { get; set; }
     public string? TargetEndpointHost { get; set; }
     public int? TargetEndpointPort { get; set; }
 
     public int InviteRouteKind { get; set; }
-    public Guid? InviteRelayHostPeerId { get; set; }
+    public uint? InviteRelayHostPeerId { get; set; }
 
     public DateTimeOffset CreatedAtUtc { get; set; }
     public DateTimeOffset ExpiresAtUtc { get; set; }

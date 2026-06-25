@@ -15,7 +15,7 @@ public record IdentityRecord(Guid Id, string Name, string? Nickname = null)
     /// The peer identifier (network ID) for this identity.
     /// Populated from the database SelfIdentityDbo.PeerId.
     /// </summary>
-    public PeerId PeerId { get; init; }
+    public PublicIdentityId PublicIdentityId { get; init; }
 
     /// <summary>
     /// The listening port for gRPC TLS connections.

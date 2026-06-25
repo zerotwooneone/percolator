@@ -34,8 +34,8 @@ public class AeadSessionCryptoHeaderTests
     {
         var clock = new TestClock_FirstHeaders();
         var crypto = new AeadSessionCrypto();
-        var initiator = SecureSession.Create(SessionId.NewId(), PeerId.NewId(), new ProtocolVersion(1), CryptoTestBootstrap.CreateBootstrappedState(RootKey.FromBytes(new byte[32])), crypto, clock);
-        var responder = SecureSession.Create(SessionId.NewId(), PeerId.NewId(), new ProtocolVersion(1), CryptoTestBootstrap.CreateBootstrappedState(RootKey.FromBytes(new byte[32])), crypto, clock);
+        var initiator = SecureSession.Create(SessionId.NewId(), new PeerId(1), new ProtocolVersion(1), CryptoTestBootstrap.CreateBootstrappedState(RootKey.FromBytes(new byte[32])), crypto, clock);
+        var responder = SecureSession.Create(SessionId.NewId(), new PeerId(1), new ProtocolVersion(1), CryptoTestBootstrap.CreateBootstrappedState(RootKey.FromBytes(new byte[32])), crypto, clock);
 
         var mInit = initiator.Encrypt(Plaintext.FromBytes(new byte[] { 0x01 }), clock);
         var mResp = responder.Encrypt(Plaintext.FromBytes(new byte[] { 0x02 }), clock);

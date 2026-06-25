@@ -35,8 +35,8 @@ public class RoutePlannerTests
     public void FallsBack_To_Relay_When_No_Endpoints()
     {
         var profile = new PeerRoutingProfile();
-        var relayIdOld = PeerId.NewId();
-        var relayIdNew = PeerId.NewId();
+        var relayIdOld = new PeerId(1);
+        var relayIdNew = new PeerId(1);
         var now = DateTimeOffset.UtcNow;
         profile.AddOrRefreshRelay(relayIdOld, now.AddMinutes(-30));
         profile.AddOrRefreshRelay(relayIdNew, now);

@@ -42,8 +42,8 @@ public class RoutePlanner_AuthoritativeTests
     {
         var profile = new PeerRoutingProfile();
         var now = DateTimeOffset.UtcNow;
-        var rOld = PeerId.NewId();
-        var rNew = PeerId.NewId();
+        var rOld = new PeerId(1);
+        var rNew = new PeerId(1);
         profile.AddOrRefreshRelay(rOld, now.AddMinutes(-10));
         profile.AddOrRefreshRelay(rNew, now);
 
@@ -59,8 +59,8 @@ public class RoutePlanner_AuthoritativeTests
     {
         var profile = new PeerRoutingProfile();
         var t = DateTimeOffset.UtcNow;
-        var rA = PeerId.NewId();
-        var rB = PeerId.NewId();
+        var rA = new PeerId(1);
+        var rB = new PeerId(1);
         profile.AddOrRefreshRelay(rA, t);
         profile.AddOrRefreshRelay(rB, t);
 
@@ -81,7 +81,7 @@ public class RoutePlanner_AuthoritativeTests
         // Very stale endpoint
         profile.AddGrpcEndPoint(new GrpcEndPoint(new DnsEndPoint("old", 9000), now.AddDays(-7)), now.AddDays(-7));
         // Fresh relay
-        var relayFresh = PeerId.NewId();
+        var relayFresh = new PeerId(1);
         profile.AddOrRefreshRelay(relayFresh, now);
 
         var planner = new SimpleRoutePlanner();
@@ -98,7 +98,7 @@ public class RoutePlanner_AuthoritativeTests
         var now = DateTimeOffset.UtcNow;
         profile.AddGrpcEndPoint(new GrpcEndPoint(new DnsEndPoint("host", 9100), now), now);
         profile.RecordReachability(ReachabilityStatus.Offline, now);
-        var relayFresh = PeerId.NewId();
+        var relayFresh = new PeerId(1);
         profile.AddOrRefreshRelay(relayFresh, now);
 
         var planner = new SimpleRoutePlanner();
@@ -116,7 +116,7 @@ public class RoutePlanner_AuthoritativeTests
         // Endpoint older than pruneAfter
         profile.AddGrpcEndPoint(new GrpcEndPoint(new DnsEndPoint("stale", 9200), now.AddHours(-3)), now.AddHours(-3));
         // Fresh relay
-        var relayFresh = PeerId.NewId();
+        var relayFresh = new PeerId(1);
         profile.AddOrRefreshRelay(relayFresh, now);
 
         var planner = new SimpleRoutePlanner();
@@ -137,7 +137,7 @@ public class RoutePlanner_AuthoritativeTests
         profile.AddGrpcEndPoint(new GrpcEndPoint(new DnsEndPoint("host", 9300), now), now);
         // mark offline
         profile.RecordReachability(ReachabilityStatus.Offline, now);
-        var relayFresh = PeerId.NewId();
+        var relayFresh = new PeerId(1);
         profile.AddOrRefreshRelay(relayFresh, now);
 
         var planner = new SimpleRoutePlanner();
@@ -156,7 +156,7 @@ public class RoutePlanner_AuthoritativeTests
         var profile = new PeerRoutingProfile();
         var now = DateTimeOffset.UtcNow;
         profile.AddGrpcEndPoint(new GrpcEndPoint(new DnsEndPoint("direct", 9400), now), now);
-        var relay = PeerId.NewId();
+        var relay = new PeerId(1);
         profile.AddOrRefreshRelay(relay, now);
 
         var planner = new SimpleRoutePlanner();
@@ -175,8 +175,8 @@ public class RoutePlanner_AuthoritativeTests
         profile.AddGrpcEndPoint(new GrpcEndPoint(new DnsEndPoint("a", 5000), t), t);
         profile.AddGrpcEndPoint(new GrpcEndPoint(new DnsEndPoint("b", 5000), t), t);
         // relays present but should be ignored since endpoints exist
-        profile.AddOrRefreshRelay(PeerId.NewId(), t);
-        profile.AddOrRefreshRelay(PeerId.NewId(), t);
+        profile.AddOrRefreshRelay(new PeerId(1), t);
+        profile.AddOrRefreshRelay(new PeerId(1), t);
 
         var planner = new SimpleRoutePlanner();
         var result = planner.SelectRoute(profile);

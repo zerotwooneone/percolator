@@ -69,7 +69,7 @@ public class SelfIdentityDomainRepositoryTests
         // Act
         await repo.SaveAsync(self);
         var listed = await repo.ListAsync();
-        var saved = listed.Single(x => x.PeerId == self.PeerId);
+        var saved = listed.Single(x => x.PublicIdentityId == self.PublicIdentityId);
         var byId = await repo.GetByIdAsync(saved.Id);
 
         // Assert

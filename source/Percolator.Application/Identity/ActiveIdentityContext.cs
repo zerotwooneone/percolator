@@ -21,7 +21,7 @@ public class ActiveIdentityContext :ISelfParticipantIdProvider, IActiveIdentityM
         {
             throw new InvalidOperationException("Identity not loaded for chat participant.");
         }
-        return new ChatParticipantId(Identity.PeerId.Value);
+        return new ChatParticipantId(Identity.PublicIdentityId.Value);
     }
 
     public void SetActiveIdentity(IdentityRecord identity, X3dhKeys? keys = null)

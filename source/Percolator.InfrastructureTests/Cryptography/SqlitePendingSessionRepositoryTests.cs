@@ -38,7 +38,7 @@ public sealed class SqlitePendingSessionRepositoryTests
 
         if (!ctx.SelfIdentities.Any())
         {
-            ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = 1, PeerId = Guid.NewGuid(), Name = "default" });
+            ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = 1, PublicIdentityId = Guid.NewGuid(), Name = "default" });
             ctx.SaveChanges();
         }
 
@@ -49,7 +49,7 @@ public sealed class SqlitePendingSessionRepositoryTests
 
         var pending = PendingSession.FromInvitationWithMetadata(
             PendingSessionId.NewId(),
-            PeerId.NewId(),
+            new PeerId(1),
             new ProtocolVersion(1),
             HandshakeInvitation.FromBytes(new byte[] { 1, 2, 3 }),
             requestCorrelationId: new RequestCorrelationId(Guid.Parse("11111111-1111-1111-1111-111111111111")),

@@ -19,7 +19,7 @@ public class SecureSessionPrevChainLengthTests
         var crypto = new AeadSessionCrypto();
         var s = SecureSession.Create(
             SessionId.NewId(),
-            PeerId.NewId(),
+            new PeerId(1),
             new ProtocolVersion(1),
             CryptoTestBootstrap.CreateBootstrappedState(RootKey.FromBytes(new byte[32])),
             crypto,

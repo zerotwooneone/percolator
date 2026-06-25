@@ -22,7 +22,7 @@ public class SqliteChatMessageWriterTests
         ctx.Database.EnsureCreated();
         if (!ctx.SelfIdentities.Any())
         {
-            ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = 1, PeerId = Guid.NewGuid(), Name = "default" });
+            ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = 1, PublicIdentityId = Guid.NewGuid(), Name = "default" });
             ctx.SaveChanges();
         }
 
@@ -46,7 +46,7 @@ public class SqliteChatMessageWriterTests
         ctx.ConversationParticipants.Add(new ConversationParticipantDbo
         {
             ConversationId = conversationId,
-            ParticipantId = self.PeerId
+            ParticipantId = self.PublicIdentityId
         });
         ctx.ConversationParticipants.Add(new ConversationParticipantDbo
         {

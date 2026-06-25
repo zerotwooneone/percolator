@@ -44,7 +44,7 @@ public sealed class PendingHandshakeQueriesTests
 
         if (!ctx.SelfIdentities.Any())
         {
-            ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = 1, PeerId = Guid.NewGuid(), Name = "default" });
+            ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = 1, PublicIdentityId = Guid.NewGuid(), Name = "default" });
             ctx.SaveChanges();
         }
 
@@ -56,7 +56,7 @@ public sealed class PendingHandshakeQueriesTests
 
         var expired = PendingSession.FromInvitationWithMetadata(
             PendingSessionId.NewId(),
-            PeerId.NewId(),
+            new PeerId(1),
             new ProtocolVersion(1),
             HandshakeInvitation.FromBytes(new byte[] { 9 }),
             requestCorrelationId: new RequestCorrelationId(Guid.Parse("33333333-3333-3333-3333-333333333333")),
@@ -70,7 +70,7 @@ public sealed class PendingHandshakeQueriesTests
 
         var open = PendingSession.FromInvitationWithMetadata(
             PendingSessionId.NewId(),
-            PeerId.NewId(),
+            new PeerId(1),
             new ProtocolVersion(1),
             HandshakeInvitation.FromBytes(new byte[] { 8 }),
             requestCorrelationId: new RequestCorrelationId(Guid.Parse("11111111-1111-1111-1111-111111111111")),
@@ -125,13 +125,13 @@ public sealed class PendingHandshakeQueriesTests
 
         if (!ctx.SelfIdentities.Any())
         {
-            ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = 1, PeerId = Guid.NewGuid(), Name = "default" });
+            ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = 1, PublicIdentityId = Guid.NewGuid(), Name = "default" });
             ctx.SaveChanges();
         }
 
         var repo = new SqlitePendingSessionRepository(ctx, active, clock);
 
-        var remotePeerId = PeerId.NewId();
+        var remotePeerId = new PeerId(1);
         var relayPeerGuid = Guid.Parse("22222222-2222-2222-2222-222222222222");
         var relayPeerId = new PeerId(relayPeerGuid);
 

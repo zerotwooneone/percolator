@@ -75,7 +75,7 @@ public class PercolatorDbContext : DbContext
         {
             entity.ToTable("PeerIdentities");
             entity.HasKey(e => e.PeerId);
-            entity.Property(e => e.PeerId).ValueGeneratedNever();
+            entity.Property(e => e.PeerId).ValueGeneratedOnAdd();
             entity.Property(e => e.Name).IsRequired();
             entity.Property(e => e.Version).IsRequired();
             entity.Property(e => e.CreatedAtUtc).IsRequired();
@@ -213,7 +213,7 @@ public class PercolatorDbContext : DbContext
             entity.ToTable("SelfIdentity");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).ValueGeneratedOnAdd();
-            entity.Property(e => e.PeerId).IsRequired();
+            entity.Property(e => e.PublicIdentityId).IsRequired();
             entity.Property(e => e.Name).IsRequired();
             entity.Property(e => e.LastUsedUtc)
                   .IsRequired()
@@ -221,7 +221,7 @@ public class PercolatorDbContext : DbContext
                       v => v.ToUnixTimeMilliseconds(),
                       v => DateTimeOffset.FromUnixTimeMilliseconds(v));
             entity.HasIndex(e => e.Name).IsUnique();
-            entity.HasIndex(e => e.PeerId); // non-unique
+            entity.HasIndex(e => e.PublicIdentityId); // non-unique
             entity.HasIndex(e => e.LastUsedUtc);
             entity.HasIndex(e => e.ActiveIdentityKeyFingerprint); // index for fast fingerprint lookup
         });
@@ -302,9 +302,7 @@ public class PercolatorDbContext : DbContext
         {
             entity.ToTable("PeerPublicSigningKeys");
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.PeerId)
-                .HasConversion(v => v.Value, v => new PeerId(v))
-                .IsRequired();
+            entity.Property(e => e.PeerId).IsRequired();
             entity.Property(e => e.PublicKey).IsRequired();
             entity.Property(e => e.PublicKeyHash).IsRequired();
             entity.Property(e => e.ActiveAtUtc).IsRequired();

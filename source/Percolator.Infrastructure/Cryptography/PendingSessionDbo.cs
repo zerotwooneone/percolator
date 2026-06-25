@@ -11,7 +11,7 @@ namespace Percolator.Infrastructure.Cryptography
 
         public int SelfIdentityId { get; set; }
 
-        public Guid RemotePeerId { get; set; }
+        public uint RemotePeerId { get; set; }
 
         public int ProtocolVersion { get; set; }
 
@@ -21,7 +21,7 @@ namespace Percolator.Infrastructure.Cryptography
 
         public bool IsRelayed { get; set; }
 
-        public Guid? RelayHostPeerId { get; set; }
+        public uint? RelayHostPeerId { get; set; }
 
         public byte[]? InviterIdentityKey { get; set; }
 

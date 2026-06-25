@@ -19,12 +19,12 @@ public sealed class PendingSessionMetadataTests
         var clock = new TestClock3 { UtcNow = DateTimeOffset.Parse("2025-05-01T00:00:00Z") };
         var act = () => PendingSession.FromInvitationWithMetadata(
             PendingSessionId.NewId(),
-            PeerId.NewId(),
+            new PeerId(1),
             new ProtocolVersion(1),
             HandshakeInvitation.FromBytes(new byte[] { 1 }),
             requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),
             isRelayed: true,
-            relayHostPeerId: PeerId.NewId(),
+            relayHostPeerId: new PeerId(1),
             inviterIdentityKey: null,
             callbackEndpointHost: "127.0.0.1",
             callbackEndpointPort: 1234,
@@ -40,7 +40,7 @@ public sealed class PendingSessionMetadataTests
 
         var act1 = () => PendingSession.FromInvitationWithMetadata(
             PendingSessionId.NewId(),
-            PeerId.NewId(),
+            new PeerId(1),
             new ProtocolVersion(1),
             HandshakeInvitation.FromBytes(new byte[] { 1 }),
             requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),
@@ -53,7 +53,7 @@ public sealed class PendingSessionMetadataTests
 
         var act2 = () => PendingSession.FromInvitationWithMetadata(
             PendingSessionId.NewId(),
-            PeerId.NewId(),
+            new PeerId(1),
             new ProtocolVersion(1),
             HandshakeInvitation.FromBytes(new byte[] { 1 }),
             requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),

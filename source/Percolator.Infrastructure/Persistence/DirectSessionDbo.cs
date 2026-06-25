@@ -9,7 +9,7 @@ public class DirectSessionDbo
     [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
     public int Id { get; set; }
 
-    public Guid RemotePeerId { get; set; } // FK to PeerConnections.PeerId
+    public uint RemotePeerId { get; set; } // FK to PeerConnections.PeerId
 
     public Guid SessionId { get; set; }
     public int SelfIdentityId { get; set; }

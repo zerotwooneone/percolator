@@ -9,7 +9,7 @@ public sealed class PeerIdentityKeyDbo_V2
     public long Id { get; set; }
 
     [Required]
-    public Guid PeerId { get; set; }
+    public uint PeerId { get; set; }
 
     [Required]
     public byte[] PublicKeySpki { get; set; } = Array.Empty<byte>();

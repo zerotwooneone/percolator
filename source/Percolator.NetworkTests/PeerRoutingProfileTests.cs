@@ -46,7 +46,7 @@ public class PeerRoutingProfileTests
     public void BindIdentity_SetsId()
     {
         var profile = new PeerRoutingProfile();
-        var id = PeerId.NewId();
+        var id = new PeerId(1);
         profile.Invoking(p => p.BindIdentity(id)).Should().NotThrow();
         profile.Id.Should().Be(id);
     }

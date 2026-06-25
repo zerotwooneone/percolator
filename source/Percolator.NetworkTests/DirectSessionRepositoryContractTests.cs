@@ -18,7 +18,7 @@ public class DirectSessionRepositoryContractTests
     [Test]
     public async Task Upsert_then_GetBySessionIdAsync_returns_entry()
     {
-        var peerId = Percolator.Network.PeerId.NewId();
+        var peerId = new Percolator.Network.PeerId(1);
         var sessionId = Guid.NewGuid();
         await _repo.UpsertAsync(peerId, new Percolator.Network.DirectSessionId(sessionId), 1);
         var ds = await _repo.GetBySessionIdAsync(new Percolator.Network.DirectSessionId(sessionId), 1);
@@ -30,7 +30,7 @@ public class DirectSessionRepositoryContractTests
     [Test]
     public async Task Upsert_overwrites_existing_session_for_same_peer()
     {
-        var peerId = Percolator.Network.PeerId.NewId();
+        var peerId = new Percolator.Network.PeerId(1);
         var s1 = Guid.NewGuid();
         var s2 = Guid.NewGuid();
         await _repo.UpsertAsync(peerId, new Percolator.Network.DirectSessionId(s1), 1);

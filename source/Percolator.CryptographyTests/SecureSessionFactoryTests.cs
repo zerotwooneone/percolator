@@ -48,7 +48,7 @@ public class SecureSessionFactoryTests
     {
         // Arrange
         var clock = new TestClock5();
-        var peer = PeerId.NewId();
+        var peer = new PeerId(1);
         var version = new ProtocolVersion(1);
         var bundle = new PreKeyBundle(
             RatchetIdentityKey.FromBytes(new byte[64]),

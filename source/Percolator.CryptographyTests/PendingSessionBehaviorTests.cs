@@ -26,7 +26,7 @@ public class PendingSessionBehaviorTests
         var inv = HandshakeInvitation.FromBytes(new byte[] { 1, 2, 3 });
         var pending = PendingSession.FromInvitationWithMetadata(
             PendingSessionId.NewId(),
-            PeerId.NewId(),
+            new PeerId(1),
             new ProtocolVersion(1),
             inv,
             requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),
@@ -51,7 +51,7 @@ public class PendingSessionBehaviorTests
         var inv = HandshakeInvitation.FromBytes(new byte[] { 4, 5, 6 });
         var pending = PendingSession.FromInvitationWithMetadata(
             PendingSessionId.NewId(),
-            PeerId.NewId(),
+            new PeerId(1),
             new ProtocolVersion(1),
             inv,
             requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),
@@ -76,7 +76,7 @@ public class PendingSessionBehaviorTests
         var inv = HandshakeInvitation.FromBytes(new byte[] { 7, 8, 9 });
         var pending = PendingSession.FromInvitationWithMetadata(
             PendingSessionId.NewId(),
-            PeerId.NewId(),
+            new PeerId(1),
             new ProtocolVersion(1),
             inv,
             requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),
@@ -100,7 +100,7 @@ public class PendingSessionBehaviorTests
         var clock = new TestClock2 { UtcNow = DateTimeOffset.Parse("2025-05-01T00:00:00Z") };
         var pending = PendingSession.FromInvitationWithMetadata(
             PendingSessionId.NewId(),
-            PeerId.NewId(),
+            new PeerId(1),
             new ProtocolVersion(1),
             HandshakeInvitation.FromBytes(new byte[] { 1 }),
             requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),
@@ -127,7 +127,7 @@ public class PendingSessionBehaviorTests
         var clock = new TestClock2 { UtcNow = DateTimeOffset.Parse("2025-05-01T00:00:00Z") };
         var pending = PendingSession.FromInvitationWithMetadata(
             PendingSessionId.NewId(),
-            PeerId.NewId(),
+            new PeerId(1),
             new ProtocolVersion(1),
             HandshakeInvitation.FromBytes(new byte[] { 2 }),
             requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),
@@ -154,7 +154,7 @@ public class PendingSessionBehaviorTests
         var clock = new TestClock2 { UtcNow = DateTimeOffset.Parse("2025-05-01T00:00:00Z") };
         var pending = PendingSession.FromInvitationWithMetadata(
             PendingSessionId.NewId(),
-            PeerId.NewId(),
+            new PeerId(1),
             new ProtocolVersion(1),
             HandshakeInvitation.FromBytes(new byte[] { 3 }),
             requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),
@@ -181,7 +181,7 @@ public class PendingSessionBehaviorTests
         var clock = new TestClock2 { UtcNow = DateTimeOffset.Parse("2025-05-01T00:00:00Z") };
         var pending = PendingSession.FromInvitationWithMetadata(
             PendingSessionId.NewId(),
-            PeerId.NewId(),
+            new PeerId(1),
             new ProtocolVersion(1),
             HandshakeInvitation.FromBytes(new byte[] { 4 }),
             requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),
@@ -208,7 +208,7 @@ public class PendingSessionBehaviorTests
         var clock = new TestClock2 { UtcNow = DateTimeOffset.Parse("2025-05-01T00:00:00Z") };
         var pending = PendingSession.FromInvitationWithMetadata(
             PendingSessionId.NewId(),
-            PeerId.NewId(),
+            new PeerId(1),
             new ProtocolVersion(1),
             HandshakeInvitation.FromBytes(new byte[] { 5 }),
             requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),
@@ -235,7 +235,7 @@ public class PendingSessionBehaviorTests
         var clock = new TestClock2 { UtcNow = DateTimeOffset.Parse("2025-05-01T00:00:00Z") };
         var pending = PendingSession.FromInvitationWithMetadata(
             PendingSessionId.NewId(),
-            PeerId.NewId(),
+            new PeerId(1),
             new ProtocolVersion(1),
             HandshakeInvitation.FromBytes(new byte[] { 6 }),
             requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),
@@ -261,7 +261,7 @@ public class PendingSessionBehaviorTests
         var clock = new TestClock2();
         var pending = PendingSession.FromInvitationWithMetadata(
             PendingSessionId.NewId(),
-            PeerId.NewId(),
+            new PeerId(1),
             new ProtocolVersion(1),
             HandshakeInvitation.FromBytes(new byte[] { 1 }),
             requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),
@@ -281,7 +281,7 @@ public class PendingSessionBehaviorTests
         var clock = new TestClock2 { UtcNow = DateTimeOffset.Parse("2025-05-01T00:00:00Z") };
         var pending = PendingSession.FromInvitationWithMetadata(
             PendingSessionId.NewId(),
-            PeerId.NewId(),
+            new PeerId(1),
             new ProtocolVersion(1),
             HandshakeInvitation.FromBytes(new byte[] { 1 }),
             requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),

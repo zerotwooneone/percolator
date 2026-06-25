@@ -60,7 +60,7 @@ public sealed class ChatConversationResolver : IDirectConversationResolver
                     .Include(c => c.Participants)
                     .Where(c => c.SelfIdentityId == selfIdentityId)
                     .Where(c => c.Kind == Percolator.Infrastructure.Persistence.ConversationKind.Direct)
-                    .Where(c => c.Participants.Any(p => p.ParticipantId == selfIdentity.PeerId) && c.Participants.Any(p => p.ParticipantId == remotePeerId))
+                    .Where(c => c.Participants.Any(p => p.ParticipantId == selfIdentity.PublicIdentityId) && c.Participants.Any(p => p.ParticipantId == remotePeerId))
                     .FirstOrDefaultAsync(cancellationToken);
 
                 if (convo is null)
@@ -76,7 +76,7 @@ public sealed class ChatConversationResolver : IDirectConversationResolver
                         Kind = Percolator.Infrastructure.Persistence.ConversationKind.Direct
                     };
 
-                    var p1 = new ConversationParticipantDbo { ConversationId = convo.Id, ParticipantId = selfIdentity.PeerId };
+                    var p1 = new ConversationParticipantDbo { ConversationId = convo.Id, ParticipantId = selfIdentity.PublicIdentityId };
                     var p2 = new ConversationParticipantDbo { ConversationId = convo.Id, ParticipantId = remotePeerId };
                     convo.Participants.Add(p1);
                     convo.Participants.Add(p2);
@@ -132,7 +132,7 @@ public sealed class ChatConversationResolver : IDirectConversationResolver
                 .Include(c => c.Participants)
                 .Where(c => c.SelfIdentityId == selfIdentity.Id)
                 .Where(c => c.Kind == Percolator.Infrastructure.Persistence.ConversationKind.Direct)
-                .Where(c => c.Participants.Any(p => p.ParticipantId == selfIdentity.PeerId) && c.Participants.Any(p => p.ParticipantId == remoteKey.PeerId.Value))
+                .Where(c => c.Participants.Any(p => p.ParticipantId == selfIdentity.PublicIdentityId) && c.Participants.Any(p => p.ParticipantId == remoteKey.PeerId.Value))
                 .FirstOrDefaultAsync(cancellationToken);
 
             if (convo is null)
@@ -147,7 +147,7 @@ public sealed class ChatConversationResolver : IDirectConversationResolver
                     Kind = Percolator.Infrastructure.Persistence.ConversationKind.Direct
                 };
 
-                var p1 = new ConversationParticipantDbo { ConversationId = convo.Id, ParticipantId = selfIdentity.PeerId };
+                var p1 = new ConversationParticipantDbo { ConversationId = convo.Id, ParticipantId = selfIdentity.PublicIdentityId };
                 var p2 = new ConversationParticipantDbo { ConversationId = convo.Id, ParticipantId = remoteKey.PeerId.Value };
                 convo.Participants.Add(p1);
                 convo.Participants.Add(p2);

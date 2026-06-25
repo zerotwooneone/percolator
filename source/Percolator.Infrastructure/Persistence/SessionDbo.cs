@@ -4,7 +4,7 @@ public class SessionDbo
 {
     public int SelfIdentityId { get; set; }
     public Guid SessionId { get; set; }
-    public Guid RemotePeerId { get; set; }
+    public uint RemotePeerId { get; set; }
     public int ProtocolVersion { get; set; }
 
     public byte[] RootKey { get; set; } = Array.Empty<byte>();

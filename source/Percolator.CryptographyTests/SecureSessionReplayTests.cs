@@ -19,8 +19,8 @@ public class SecureSessionReplayTests
         var crypto = new AeadSessionCrypto();
         var root = RootKey.FromBytes(new byte[32]);
         var (initiator, responder) = CryptoTestBootstrap.CreatePairedStates(root);
-        var receiver = SecureSession.Create(SessionId.NewId(), PeerId.NewId(), new ProtocolVersion(1), responder, crypto, clock);
-        var sender = SecureSession.Create(SessionId.NewId(), PeerId.NewId(), new ProtocolVersion(1), initiator, crypto, clock);
+        var receiver = SecureSession.Create(SessionId.NewId(), new PeerId(1), new ProtocolVersion(1), responder, crypto, clock);
+        var sender = SecureSession.Create(SessionId.NewId(), new PeerId(1), new ProtocolVersion(1), initiator, crypto, clock);
 
         var msg = sender.Encrypt(Plaintext.FromBytes(new byte[] { 0x55 }), clock);
         var p0 = receiver.Decrypt(msg, clock);

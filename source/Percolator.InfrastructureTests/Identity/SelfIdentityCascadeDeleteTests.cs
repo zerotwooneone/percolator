@@ -36,7 +36,7 @@ public class SelfIdentityCascadeDeleteTests
         // Arrange: create identity and keys
         await using (var setup = new PercolatorDbContext(_options))
         {
-            var self = new SelfIdentityDbo { Name = "alice", PeerId = Guid.NewGuid() };
+            var self = new SelfIdentityDbo { Name = "alice", PublicIdentityId = Guid.NewGuid() };
             setup.SelfIdentities.Add(self);
             await setup.SaveChangesAsync();
 

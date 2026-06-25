@@ -21,7 +21,7 @@ public class SqliteSessionRepositoryTests
         ctx.Database.EnsureCreated();
         if (!ctx.SelfIdentities.Any())
         {
-            ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = 1, PeerId = Guid.NewGuid(), Name = "default" });
+            ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = 1, PublicIdentityId = Guid.NewGuid(), Name = "default" });
             ctx.SaveChanges();
         }
         var repo = new SqliteSessionRepository(ctx, new NoopSessionCrypto(), new TestClock());
@@ -31,7 +31,7 @@ public class SqliteSessionRepositoryTests
     private static SecureSession NewSession(ISessionCrypto crypto, IClock clock)
     {
         var id = SessionId.NewId();
-        var remote = Percolator.Cryptography.Primitives.PeerId.NewId();
+        var remote = Percolator.Cryptography.Primitives.new PeerId(1);
         var ver = new ProtocolVersion(1);
         var state = new RatchetState(
             RootKey.FromBytes(new byte[32]),
@@ -115,8 +115,8 @@ public class SqliteSessionRepositoryTests
             ctxSeed.Database.EnsureCreated();
             if (!ctxSeed.SelfIdentities.Any())
             {
-                ctxSeed.SelfIdentities.Add(new SelfIdentityDbo { Id = 1, PeerId = Guid.NewGuid(), Name = "one" });
-                ctxSeed.SelfIdentities.Add(new SelfIdentityDbo { Id = 2, PeerId = Guid.NewGuid(), Name = "two" });
+                ctxSeed.SelfIdentities.Add(new SelfIdentityDbo { Id = 1, PublicIdentityId = Guid.NewGuid(), Name = "one" });
+                ctxSeed.SelfIdentities.Add(new SelfIdentityDbo { Id = 2, PublicIdentityId = Guid.NewGuid(), Name = "two" });
                 ctxSeed.SaveChanges();
             }
         }

@@ -29,13 +29,13 @@ public class SqlitePeerRoutingProfileRepositoryRelaysTests
     {
         var ctx = CreateDbContext(out var _);
         var repo = new SqlitePeerRoutingProfileRepository(ctx);
-        var pid = PeerId.NewId();
+        var pid = new PeerId(1);
         var prp = new PeerRoutingProfile();
         prp.BindIdentity(pid);
 
         var now = DateTimeOffset.UtcNow;
-        var r1 = PeerId.NewId();
-        var r2 = PeerId.NewId();
+        var r1 = new PeerId(1);
+        var r2 = new PeerId(1);
         var t1 = now.AddMinutes(-10);
         var t2 = now.AddMinutes(-5);
         prp.AddOrRefreshRelay(r1, t1);

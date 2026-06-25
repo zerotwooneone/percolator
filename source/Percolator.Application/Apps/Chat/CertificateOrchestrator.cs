@@ -46,7 +46,7 @@ public sealed class CertificateOrchestrator : ICertificateOrchestrator
         }
 
         // Call the topology layer to resolve the designated relay peer
-        var networkPeerId = new Percolator.Network.PeerId(selfIdentity.PeerId.Value);
+        var networkPeerId = new Percolator.Network.PeerId(selfIdentity.PublicIdentityId.Value);
         var relayPeerId = await _relayTopology.GetRelayForAsync(networkPeerId, ct).ConfigureAwait(false);
         if (relayPeerId is null)
         {

@@ -8,7 +8,7 @@ public sealed class SelfIdentity
     public DisplayName? DisplayName { get; private set; }
     public IReadOnlyList<IdentityKey> Keys => _keys;
     public DateTimeOffset LastUsedUtc { get; private set; }
-    public PeerId PeerId { get; }
+    public PublicIdentityId PublicIdentityId { get; }
     public ListeningPort ListeningPort { get; private set; }
     public DeviceId DeviceId { get; private set; } = DeviceId.Primary;
     public ProfileKeyBytes? CurrentProfileKey { get; private set; }
@@ -16,10 +16,10 @@ public sealed class SelfIdentity
     public int ProfileRevision { get; private set; }
     public Percolator.Identity.RelayRootKeyBytes? RelayDeliveryRootKey { get; private set; }
 
-    public SelfIdentity(SelfId id, PeerId peerId, ListeningPort listeningPort)
+    public SelfIdentity(SelfId id, PublicIdentityId publicIdentityId, ListeningPort listeningPort)
     {
         Id = id;
-        PeerId = peerId;
+        PublicIdentityId = publicIdentityId;
         ListeningPort = listeningPort;
         LastUsedUtc = default; // Explicit non-nullable; caller should set via TouchLastUsed
     }

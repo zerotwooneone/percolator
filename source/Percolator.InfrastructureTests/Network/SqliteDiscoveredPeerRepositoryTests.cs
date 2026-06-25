@@ -57,7 +57,7 @@ public class SqliteDiscoveredPeerRepositoryTests
         var dp = DiscoveredPeer.Create(key, null, now);
         dp.ObserveEndpoint(new GrpcEndPoint(new DnsEndPoint("node", 6002), now), now);
 
-        var peerId = PeerId.NewId();
+        var peerId = new PeerId(1);
         var prp = await repo.PromoteToRoutingProfileAsync(dp, peerId);
         prp.Id.Should().Be(peerId);
     }
@@ -113,7 +113,7 @@ public class SqliteDiscoveredPeerRepositoryTests
         var ctx = CreateDbContext(out var _);
         var repo = new SqliteDiscoveredPeerRepository(ctx);
         var prp = new PeerRoutingProfile();
-        var pid = PeerId.NewId();
+        var pid = new PeerId(1);
         var bound = await repo.BindIdentityAsync(prp, pid);
         bound.Id.Should().Be(pid);
     }

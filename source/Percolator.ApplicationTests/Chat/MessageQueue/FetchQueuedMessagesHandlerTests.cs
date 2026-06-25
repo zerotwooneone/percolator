@@ -18,7 +18,7 @@ public class FetchQueuedMessagesHandlerTests
         var repo = new Mock<IMessageQueueRepository>(MockBehavior.Loose);
         var logger = new Mock<ILogger<FetchQueuedMessagesHandler>>();
         var sut = new FetchQueuedMessagesHandler(logger.Object, repo.Object);
-        var peerId = PeerId.NewId();
+        var peerId = new PeerId(1);
 
         repo.Setup(r => r.FetchAsync(peerId, 100, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Array.Empty<(Guid, QueuedPayloadBytes)>());
@@ -34,7 +34,7 @@ public class FetchQueuedMessagesHandlerTests
         var repo = new Mock<IMessageQueueRepository>(MockBehavior.Loose);
         var logger = new Mock<ILogger<FetchQueuedMessagesHandler>>();
         var sut = new FetchQueuedMessagesHandler(logger.Object, repo.Object);
-        var peerId = PeerId.NewId();
+        var peerId = new PeerId(1);
 
         repo.Setup(r => r.FetchAsync(peerId, 500, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Array.Empty<(Guid, QueuedPayloadBytes)>());
@@ -50,7 +50,7 @@ public class FetchQueuedMessagesHandlerTests
         var repo = new Mock<IMessageQueueRepository>(MockBehavior.Loose);
         var logger = new Mock<ILogger<FetchQueuedMessagesHandler>>();
         var sut = new FetchQueuedMessagesHandler(logger.Object, repo.Object);
-        var peerId = PeerId.NewId();
+        var peerId = new PeerId(1);
         var msg1 = new byte[] { 0x01, 0x02 };
         var msg2 = new byte[] { 0x03 };
 

@@ -27,8 +27,8 @@ public class ActiveIdentityFilteringTests
         ctx.Database.EnsureCreated();
 
         // Seed: two identities (1 and 2)
-        ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = 1, Name = "alice", PeerId = Guid.NewGuid() });
-        ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = 2, Name = "bob", PeerId = Guid.NewGuid() });
+        ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = 1, Name = "alice", PublicIdentityId = Guid.NewGuid() });
+        ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = 2, Name = "bob", PublicIdentityId = Guid.NewGuid() });
         ctx.SelfIdentityKnownPeers.Add(new SelfIdentityKnownPeerDbo { SelfIdentityId = 1, PeerId = Guid.NewGuid() });
         ctx.SelfIdentityKnownPeers.Add(new SelfIdentityKnownPeerDbo { SelfIdentityId = 2, PeerId = Guid.NewGuid() });
         ctx.PendingSessions.Add(new PendingSessionDbo { Id = Guid.NewGuid(), SelfIdentityId = 1, RemotePeerId = Guid.NewGuid(), ProtocolVersion = 1, Invitation = new byte[]{1}, State = 0, CreatedAtUtc = DateTimeOffset.UtcNow });

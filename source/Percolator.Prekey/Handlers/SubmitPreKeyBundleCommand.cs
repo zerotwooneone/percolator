@@ -13,6 +13,6 @@ namespace Percolator.Prekey.Handlers
         public byte[] PreKeySignature { get; set; } = System.Array.Empty<byte>();
         public IReadOnlyCollection<OneTimePreKey> OneTimePreKeys { get; set; } = System.Array.Empty<OneTimePreKey>();
         public DateTimeOffset Expires { get; set; }
-        public PeerId RemotePeerId { get; set; } = null!;
+        public PeerId RemotePeerId { get; set; }
     }
 }

@@ -55,14 +55,14 @@ public class SelfIdentitySchemaTests
     {
         await using (var ctx = new PercolatorDbContext(_options))
         {
-            ctx.SelfIdentities.Add(new SelfIdentityDbo { Name = "alice", PeerId = Guid.NewGuid() });
+            ctx.SelfIdentities.Add(new SelfIdentityDbo { Name = "alice", PublicIdentityId = Guid.NewGuid() });
             await ctx.SaveChangesAsync();
         }
         // Attempt to insert duplicate name should fail due to unique index
         Assert.ThrowsAsync<DbUpdateException>(async () =>
         {
             await using var ctx2 = new PercolatorDbContext(_options);
-            ctx2.SelfIdentities.Add(new SelfIdentityDbo { Name = "alice", PeerId = Guid.NewGuid() });
+            ctx2.SelfIdentities.Add(new SelfIdentityDbo { Name = "alice", PublicIdentityId = Guid.NewGuid() });
             await ctx2.SaveChangesAsync();
         });
     }

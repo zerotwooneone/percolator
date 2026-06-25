@@ -72,7 +72,7 @@ public sealed class StandardHandshakeIngressTests
             })
             .Returns(Task.CompletedTask);
 
-        var peerId = PercolatorIdentity.PeerId.NewId();
+        var peerId = PercolatorIdentity.new PeerId(1);
         var peerIdentity = new PeerIdentity(peerId);
         peerIdentity.AddKey(new byte[32], clock.UtcNow, clock.UtcNow.AddYears(100), clock.UtcNow);
         
@@ -173,7 +173,7 @@ public sealed class StandardHandshakeIngressTests
             .Setup(w => w.WriteMappingAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<DirectSessionId>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("boom"));
 
-        var peerId = PercolatorIdentity.PeerId.NewId();
+        var peerId = PercolatorIdentity.new PeerId(1);
         var peerIdentity = new PeerIdentity(peerId);
         peerIdentity.AddKey(new byte[32], clock.UtcNow, clock.UtcNow.AddYears(100), clock.UtcNow);
         

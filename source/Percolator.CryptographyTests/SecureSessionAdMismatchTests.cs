@@ -21,14 +21,14 @@ public class SecureSessionAdMismatchTests
         var (initiator, responder) = CryptoTestBootstrap.CreatePairedStates(root);
         var receiver = SecureSession.Create(
             SessionId.NewId(),
-            PeerId.NewId(),
+            new PeerId(1),
             new ProtocolVersion(1),
             responder,
             crypto,
             clock);
         var sender = SecureSession.Create(
             SessionId.NewId(),
-            PeerId.NewId(),
+            new PeerId(1),
             new ProtocolVersion(1),
             initiator,
             crypto,

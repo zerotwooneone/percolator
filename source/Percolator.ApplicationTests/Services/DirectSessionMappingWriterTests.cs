@@ -12,7 +12,7 @@ public sealed class DirectSessionMappingWriterTests
     public async Task WriteMappingAsync_WhenRepositoryThrows_LogsWarningAndDoesNotThrow()
     {
         // Arrange
-        var remotePeerId = PeerId.NewId();
+        var remotePeerId = new PeerId(1);
         var sessionId = DirectSessionId.NewId();
         var selfIdentityId = 7;
 
