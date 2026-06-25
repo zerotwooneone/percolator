@@ -32,10 +32,6 @@ public sealed class AcceptGroupInviteCommandHandler : IRequestHandler<AcceptGrou
 
     public async Task Handle(AcceptGroupInviteCommand request, CancellationToken cancellationToken)
     {
-        // Load self identity to get peer ID
-        // var selfIdentity = await _selfIdentityRepository.GetByIdAsync(new SelfId(request.SelfIdentityId), cancellationToken).ConfigureAwait(false)
-        //     ?? throw new InvalidOperationException($"SelfIdentity not found for id {request.SelfIdentityId}.");
-
         var selfIdentityInfo = await _selfIdentityQueries.GetIdentityParticipantInfoAsync(request.SelfIdentityId, cancellationToken).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"SelfIdentity not found for id {request.SelfIdentityId}.");
         
@@ -53,9 +49,10 @@ public sealed class AcceptGroupInviteCommandHandler : IRequestHandler<AcceptGrou
             now
         );
 
+        var groupParticipantId = new GroupParticipantId(selfIdentityInfo.Pkh, null);
         var groupMember = new GroupMember(
             request.ConversationId,
-            new GroupParticipantId(selfIdentityInfo.Pkh, null),
+            groupParticipantId,
             GroupMemberRole.Member,
             now
         );
@@ -63,7 +60,7 @@ public sealed class AcceptGroupInviteCommandHandler : IRequestHandler<AcceptGrou
         var groupConversation = new GroupConversation(
             request.ConversationId,
             groupState,
-            ,
+            groupParticipantId,
             new[] { groupMember },
             pendingInvitation.GroupName
         );

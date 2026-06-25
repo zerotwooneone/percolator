@@ -37,7 +37,7 @@ public class SelfIdentityDomainRepositoryTests
         // Arrange
         await using var ctx = new PercolatorDbContext(_options);
         var repo = new SqliteSelfIdentityDomainRepository(ctx);
-        var self = new SelfIdentity(new SelfId(0), new PeerId(Guid.NewGuid()), new ListeningPort(5000)); // Id not assigned yet; will be set by DB
+        var self = new SelfIdentity(new SelfId(0), new PublicIdentityId(Guid.NewGuid()), new ListeningPort(5000)); // Id not assigned yet; will be set by DB
         self.SetDisplayName("alice");
         var used = new DateTimeOffset(2025, 6, 1, 0, 0, 0, TimeSpan.Zero);
         self.TouchLastUsed(used);

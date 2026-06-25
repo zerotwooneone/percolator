@@ -13,7 +13,7 @@ public class SelfIdentityTests
     {
         // Arrange
         var now = new DateTimeOffset(2025, 1, 1, 0, 0, 0, TimeSpan.Zero);
-        var id = new SelfIdentity(new SelfId(1), new PeerId(Guid.NewGuid()), new ListeningPort(5000));
+        var id = new SelfIdentity(new SelfId(1), new PublicIdentityId(Guid.NewGuid()), new ListeningPort(5000));
         id.AddKey(spki: Bytes(1, 2, 3), notBefore: now, expiresAt: now.AddDays(1), now: now);
 
         // Act + Assert
@@ -28,7 +28,7 @@ public class SelfIdentityTests
     {
         // Arrange
         var now = new DateTimeOffset(2025, 2, 1, 0, 0, 0, TimeSpan.Zero);
-        var id = new SelfIdentity(new SelfId(2), new PeerId(Guid.NewGuid()), new ListeningPort(5000));
+        var id = new SelfIdentity(new SelfId(2), new PublicIdentityId(Guid.NewGuid()), new ListeningPort(5000));
         id.AddKey(spki: Bytes(9), notBefore: now, expiresAt: now.AddDays(1), now: now);
 
         // Act + Assert: Attempt to add a second key that would also be active at 'now'
@@ -40,7 +40,7 @@ public class SelfIdentityTests
     public void TouchLastUsed_SetsLastUsedUtc()
     {
         // Arrange
-        var id = new SelfIdentity(new SelfId(3), new PeerId(Guid.NewGuid()), new ListeningPort(5000));
+        var id = new SelfIdentity(new SelfId(3), new PublicIdentityId(Guid.NewGuid()), new ListeningPort(5000));
         var t1 = new DateTimeOffset(2025, 3, 1, 12, 0, 0, TimeSpan.Zero);
         var t2 = t1.AddHours(1);
 

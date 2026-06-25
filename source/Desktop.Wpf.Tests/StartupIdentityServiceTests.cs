@@ -21,7 +21,7 @@ public class StartupIdentityServiceTests
         var now = new DateTimeOffset(2025, 7, 1, 0, 0, 0, TimeSpan.Zero);
         var repo = new Mock<ISelfIdentityRepository>(MockBehavior.Strict);
         var networkEnv = new Mock<Percolator.Application.Network.INetworkEnvironment>(MockBehavior.Strict);
-        var existing = new SelfIdentity(new SelfId(123), new PeerId(Guid.NewGuid()), new ListeningPort(5000));
+        var existing = new SelfIdentity(new SelfId(123), new PublicIdentityId(Guid.NewGuid()), new ListeningPort(5000));
         existing.SetDisplayName("Alice");
         existing.TouchLastUsed(now.AddDays(-1));
         repo.Setup(r => r.GetMostRecentAsync(It.IsAny<CancellationToken>()))
@@ -55,7 +55,7 @@ public class StartupIdentityServiceTests
         repo.Setup(r => r.GetByIdAsync(newId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(() =>
             {
-                var created = new SelfIdentity(newId, new PeerId(Guid.NewGuid()), new ListeningPort(5000));
+                var created = new SelfIdentity(newId, new PublicIdentityId(Guid.NewGuid()), new ListeningPort(5000));
                 created.TouchLastUsed(now);
                 return created;
             });
