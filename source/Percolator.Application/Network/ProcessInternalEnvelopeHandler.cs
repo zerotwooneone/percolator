@@ -99,12 +99,12 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
             else if (dht.PingRequest is not null)
             {
                 // Compute NodeId from remote peer's signing key
-                if (request.Context.RemotePeerGuid is null)
+                if (request.Context.RemotePeer is null)
                 {
                     _logger.LogWarning("PingRequest received without RemotePeerGuid in context");
                     return null;
                 }
-                var remotePeerId = new Percolator.Network.PeerId(request.Context.RemotePeerGuid.Value);
+                var remotePeerId = new Percolator.Network.PeerId(request.Context.RemotePeer.Value.Value);
                 var profile = await _profileRepository.GetByIdAsync(remotePeerId, cancellationToken).ConfigureAwait(false);
                 if (profile is null || profile.IdentityPublicKey is null)
                 {
@@ -140,7 +140,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     if (!upload.HasSignedPreKey) throw new InvalidOperationException("Signed pre-key is required");
                     if (!upload.HasPreKeySignature) throw new InvalidOperationException("Pre-key signature is required");
                     if (upload.OneTimePreKeys.Count == 0) throw new InvalidOperationException("At least one one-time pre-key is required");
-                    if(request.Context.RemotePeerGuid is null) throw new InvalidOperationException($"{nameof(request)} must have a {nameof(ProcessInternalEnvelopeCommand.Context.RemotePeerGuid)}");
+                    if(request.Context.RemotePeer is null) throw new InvalidOperationException($"{nameof(request)} must have a {nameof(ProcessInternalEnvelopeCommand.Context.RemotePeerGuid)}");
                     const int maxBundles = 100;
                     if (upload.OneTimePreKeys.Count > maxBundles) throw new InvalidOperationException($"Too many one-time pre-keys. Maximum is {maxBundles}");
                     foreach (var ot in upload.OneTimePreKeys)
@@ -158,7 +158,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                         PreKeySignature = upload.PreKeySignature.ToByteArray(),
                         OneTimePreKeys = upload.OneTimePreKeys.Select(x => new SubmitPreKeyBundleCommand.OneTimePreKey(new Guid(x.Id.Span), x.PublicKey.ToByteArray())).ToList(),
                         Expires = upload.ExpiresUtc.ToDateTimeOffset(),
-                        RemotePeerId = new Percolator.Network.PeerId(request.Context.RemotePeerGuid.Value)
+                        RemotePeerId = new Percolator.Network.PeerId(request.Context.RemotePeer.Value.Value)
                     };
                     await _mediator.Send(cmd, cancellationToken).ConfigureAwait(false);
                     return new InternalEnvelope { SubmitPreKeyBundleResponse = new SubmitPreKeyBundleResponse { Version = 1 } };
@@ -202,8 +202,8 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
         // RelayOpaque handling (processing only; RPC-level ack is handled in DeliverOpaqueMessageHandler)
         if (env.ApplicationPayloadCase == InternalEnvelope.ApplicationPayloadOneofCase.RelayOpaqueEnvelope)
         {
-            if(request.Context.RemotePeerGuid is null) throw new InvalidOperationException($"{nameof(request)} must have a {nameof(ProcessInternalEnvelopeCommand.Context.RemotePeerGuid)}");
-            var relayPeerId = new Percolator.Identity.PeerId(request.Context.RemotePeerGuid.Value);
+            if(request.Context.RemotePeer is null) throw new InvalidOperationException($"{nameof(request)} must have a {nameof(ProcessInternalEnvelopeCommand.Context.RemotePeer)}");
+            var relayPeerId = new Percolator.Identity.PeerId(request.Context.RemotePeer.Value.Value);
             var relay = env.RelayOpaqueEnvelope;
             await _mediator.Send(new ProcessRelayedOpaquePayloadCommand(request.Context.SelfIdentityId, Payload.FromBytesOwned(relay.OpaquePayload.ToByteArray()), relayPeerId)).ConfigureAwait(false);
             return null;
@@ -241,9 +241,9 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                         : ConversationLookupKey.ForDirectSession(request.Context.SessionId ?? throw new InvalidOperationException("SessionId required when no routing hint provided."));
 
                     // Direct chat: Use RemotePeerGuid
-                    if (request.Context.RemotePeerGuid is null)
+                    if (request.Context.RemotePeer is null)
                         throw new InvalidOperationException("Direct chat TextMessage requires RemotePeerGuid in context.");
-                    var senderId = new ParticipantId(request.Context.RemotePeerGuid.Value);
+                    var senderId = new ParticipantId(request.Context.RemotePeer.Value.Value);
 
                     var messageId = new MessageId(new Guid(text.MessageId.Span));
                     var sentTs = text.SentTimestampUtc.ToDateTimeOffset();
@@ -268,9 +268,9 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                         : ConversationLookupKey.ForDirectSession(request.Context.SessionId ?? throw new InvalidOperationException("SessionId required when no routing hint provided."));
 
                     // Direct chat: Use RemotePeerGuid
-                    if (request.Context.RemotePeerGuid is null)
+                    if (request.Context.RemotePeer is null)
                         throw new InvalidOperationException("Direct chat ReadReceipt requires RemotePeerGuid in context.");
-                    var readerId = new ParticipantId(request.Context.RemotePeerGuid.Value);
+                    var readerId = new ParticipantId(request.Context.RemotePeer.Value.Value);
 
                     var messageId = new MessageId(new Guid(rr.MessageId.Span));
                     var ts = rr.SentTimestampUtc.ToDateTimeOffset();
@@ -297,9 +297,9 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                         : ConversationLookupKey.ForDirectSession(request.Context.SessionId ?? throw new InvalidOperationException("SessionId required when no routing hint provided."));
 
                     // Direct chat: Use RemotePeerGuid
-                    if (request.Context.RemotePeerGuid is null)
+                    if (request.Context.RemotePeer is null)
                         throw new InvalidOperationException("Direct chat EmojiAnnotation requires RemotePeerGuid in context.");
-                    var reactorId = new ParticipantId(request.Context.RemotePeerGuid.Value);
+                    var reactorId = new ParticipantId(request.Context.RemotePeer.Value.Value);
 
                     var messageId = new MessageId(new Guid(em.MessageId.Span));
                     var ts = em.SentTimestampUtc.ToDateTimeOffset();
@@ -324,9 +324,9 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                         : ConversationLookupKey.ForDirectSession(request.Context.SessionId ?? throw new InvalidOperationException("SessionId required when no routing hint provided."));
 
                     // Direct chat: Use RemotePeerGuid
-                    if (request.Context.RemotePeerGuid is null)
+                    if (request.Context.RemotePeer is null)
                         throw new InvalidOperationException("Direct chat DeliveredReceipt requires RemotePeerGuid in context.");
-                    var recipientId = new ParticipantId(request.Context.RemotePeerGuid.Value);
+                    var recipientId = new ParticipantId(request.Context.RemotePeer.Value.Value);
 
                     var messageId = new MessageId(new Guid(dr.MessageId.Span));
                     var ts = dr.SentTimestampUtc.ToDateTimeOffset();
@@ -364,12 +364,12 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                         .ToList();
                     var initialMembersJson = JsonSerializer.Serialize(initialMembers);
 
-                    if (request.Context.RemotePeerGuid == null)
+                    if (request.Context.RemotePeer == null)
                     {
                         _logger.LogWarning("Invalid CreateGroup: RemotePeerGuid missing from envelope context");
                         return null;
                     }
-                    var senderPeerId = new PeerId((uint)request.Context.RemotePeerGuid.Value.GetHashCode());
+                    var senderPeerId = new PeerId(request.Context.RemotePeer.Value.Value);
 
                     // Persist pending group invitation
                     var pendingInvitation = new PendingGroupInvitation(
@@ -490,7 +490,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                                 conversationId,
                                 messageId.Value,
                                 request.Context.SelfIdentityId.Value,
-                                new List<Guid> { senderPeerId.Value },
+                                new List<ChatPeerId> { new ChatPeerId( senderPeerId.Value) },
                                 groupContent.TextMessage,
                                 sentTimestamp,
                                 null), // Group conversations do not have a DirectSessionId
@@ -505,7 +505,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                 case ChatEnvelope.MessageOneofCase.GroupInvite:
                 {
                     var groupInvite = chat.GroupInvite;
-                    var sourceDeviceId = request.Context.SourceDeviceId ?? 1;
+                    var sourceDeviceId = request.Context.SourceDeviceId ?? DeviceId.Primary;
                     await _groupInviteHandler.HandleGroupInviteAsync(groupInvite, request.Context.SelfIdentityId.Value, sourceDeviceId, cancellationToken).ConfigureAwait(false);
                     return null;
                 }

@@ -21,7 +21,7 @@ public sealed class SelfIdentity
         Id = id;
         PublicIdentityId = publicIdentityId;
         ListeningPort = listeningPort;
-        LastUsedUtc = lastUsedUtc; // Explicit non-nullable; caller should set via TouchLastUsed
+        LastUsedUtc = lastUsedUtc; 
         DeviceId = deviceId;
     }
 

@@ -4,7 +4,7 @@ public class ConversationDbo
 {
     public Guid Id { get; set; }
     public string? Name { get; set; }
-    public int SelfIdentityId { get; set; }
+    public uint SelfIdentityId { get; set; }
     public ConversationKind Kind { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }

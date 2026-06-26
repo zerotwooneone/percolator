@@ -31,7 +31,7 @@ namespace Percolator.Prekey.Handlers
                 return null;
             }
 
-            var bundle = await _bundleRepository.PopBundleAsync(new CryptoPeerId(peerId.Value));
+            var bundle = await _bundleRepository.PopBundleAsync(new CryptoPeerId(peerId.Value.Value));
             if (bundle is null)
             {
                 _logger.LogInformation("No pre-key bundle available for peer {PeerId}", peerId);

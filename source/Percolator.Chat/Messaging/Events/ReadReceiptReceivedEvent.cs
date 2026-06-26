@@ -7,14 +7,14 @@ namespace Percolator.Chat.Messaging.Events
     {
         public Guid ConversationId { get; }
         public Guid MessageId { get; }
-        public int SelfIdentityId { get; }
+        public uint SelfIdentityId { get; }
         public ChatPeerId ReaderPeerId { get; }
         public DateTimeOffset SentTimestampUtc { get; }
 
         public ReadReceiptReceivedEvent(
             Guid conversationId,
             Guid messageId,
-            int selfIdentityId,
+            uint selfIdentityId,
             ChatPeerId readerPeerId,
             DateTimeOffset sentTimestampUtc)
         {

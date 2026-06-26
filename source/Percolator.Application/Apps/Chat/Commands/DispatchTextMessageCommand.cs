@@ -1,7 +1,7 @@
 using MediatR;
 using Percolator.Identity;
 
-namespace Percolator.Application.Apps.Chat;
+namespace Percolator.Application.Apps.Chat.Commands;
 
 public sealed record DispatchTextMessageCommand(
     Guid MessageId,

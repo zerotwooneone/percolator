@@ -8,7 +8,7 @@ namespace Percolator.Chat.Messaging.Events
     {
         public Guid ConversationId { get; }
         public Guid MessageId { get; }
-        public int SenderSelfIdentityId { get; }
+        public uint SenderSelfIdentityId { get; }
         public IReadOnlyList<ChatPeerId> RecipientPeerIds { get; }
         public string Content { get; }
         public DateTimeOffset SentTimestampUtc { get; }
@@ -17,7 +17,7 @@ namespace Percolator.Chat.Messaging.Events
         public TextMessagePostedEvent(
             Guid conversationId,
             Guid messageId,
-            int senderSelfIdentityId,
+            uint senderSelfIdentityId,
             IReadOnlyList<ChatPeerId> recipientPeerIds,
             string content,
             DateTimeOffset sentTimestampUtc,

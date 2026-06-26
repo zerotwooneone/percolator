@@ -8,14 +8,16 @@ public sealed class GroupState
     public Messaging.ValueObjects.ConversationId ConversationId { get; }
     public int Epoch { get; private set; }
     public string? Name { get; private set; }
+    public RelayGroupPublicParamsBytes PublicParams { get; }
     public DateTimeOffset CreatedAtUtc { get; }
     public DateTimeOffset UpdatedAtUtc { get; private set; }
 
-    public GroupState(Messaging.ValueObjects.ConversationId conversationId, int epoch, string? name, DateTimeOffset createdAtUtc, DateTimeOffset updatedAtUtc)
+    public GroupState(Messaging.ValueObjects.ConversationId conversationId, int epoch, string? name, RelayGroupPublicParamsBytes publicParams, DateTimeOffset createdAtUtc, DateTimeOffset updatedAtUtc)
     {
         ConversationId = conversationId;
         Epoch = epoch;
         Name = name;
+        PublicParams = publicParams;
         CreatedAtUtc = createdAtUtc;
         UpdatedAtUtc = updatedAtUtc;
     }

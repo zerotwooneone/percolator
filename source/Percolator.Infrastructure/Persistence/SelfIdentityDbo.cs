@@ -2,7 +2,7 @@ namespace Percolator.Infrastructure.Persistence;
 
 public class SelfIdentityDbo
 {
-    public int Id { get; set; }
+    public uint Id { get; set; }
     public Guid PublicIdentityId { get; set; }
     public string Name { get; set; } = null!;
     public DateTimeOffset LastUsedUtc { get; set; }

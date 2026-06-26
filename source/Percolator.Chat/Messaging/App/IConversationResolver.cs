@@ -10,4 +10,4 @@ public interface IDirectConversationResolver
     Task<DirectConversationResolution> ResolveAsync(ConversationLookupKey lookupKey, CancellationToken cancellationToken);
 }
 
-public sealed record DirectConversationResolution(DirectConversation Conversation, int SelfIdentityId);
+public sealed record DirectConversationResolution(DirectConversation Conversation, uint SelfIdentityId);

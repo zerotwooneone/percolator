@@ -26,6 +26,6 @@ public interface IGroupProvisioningAppService
         GroupParticipantId selfParticipant,
         IReadOnlyList<GroupParticipantId> invitees,
         GroupParticipantId relayParticipant,
-        int selfIdentityId,
+        uint selfIdentityId,
         CancellationToken cancellationToken = default);
 }

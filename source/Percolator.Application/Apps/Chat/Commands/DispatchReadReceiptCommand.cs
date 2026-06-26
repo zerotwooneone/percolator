@@ -1,7 +1,7 @@
 using MediatR;
 using PeerId = Percolator.Identity.PeerId;
 
-namespace Percolator.Application.Apps.Chat;
+namespace Percolator.Application.Apps.Chat.Commands;
 
 public sealed record DispatchReadReceiptCommand(
     Guid MessageId,

@@ -1,4 +1,5 @@
 using Percolator.Contracts;
+using Percolator.Identity;
 
 namespace Percolator.Application.Chat;
 
@@ -15,5 +16,5 @@ public interface IGroupInviteHandler
     /// <param name="selfIdentityId">The local identity ID.</param>
     /// <param name="sourceDeviceId">The sender's device ID (from InternalEnvelope context).</param>
     /// <param name="ct">Cancellation token.</param>
-    Task HandleGroupInviteAsync(GroupInvite invite, int selfIdentityId, uint sourceDeviceId, CancellationToken ct = default);
+    Task HandleGroupInviteAsync(GroupInvite invite, SelfId selfIdentityId, DeviceId sourceDeviceId, CancellationToken ct = default);
 }

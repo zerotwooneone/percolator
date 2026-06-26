@@ -16,7 +16,7 @@ public sealed class SqliteChatMessageWriter : IChatMessageWriter
 
     public async Task AddTextMessageAsync(
         ConversationId conversationId,
-        int selfIdentityId,
+        uint selfIdentityId,
         ParticipantId senderId,
         string content,
         MessageId messageId,
@@ -61,7 +61,7 @@ public sealed class SqliteChatMessageWriter : IChatMessageWriter
 
     public async Task AddDeliveredReceiptAsync(
         ConversationId conversationId,
-        int selfIdentityId,
+        uint selfIdentityId,
         ParticipantId recipientId,
         MessageId messageId,
         DateTimeOffset deliveredAt,
@@ -102,7 +102,7 @@ public sealed class SqliteChatMessageWriter : IChatMessageWriter
 
     public async Task AddReadReceiptAsync(
         ConversationId conversationId,
-        int selfIdentityId,
+        uint selfIdentityId,
         ParticipantId readerId,
         MessageId messageId,
         DateTimeOffset sentAt,
@@ -143,7 +143,7 @@ public sealed class SqliteChatMessageWriter : IChatMessageWriter
 
     public async Task AddEmojiAnnotationAsync(
         ConversationId conversationId,
-        int selfIdentityId,
+        uint selfIdentityId,
         ParticipantId reactorId,
         MessageId messageId,
         string emoji,

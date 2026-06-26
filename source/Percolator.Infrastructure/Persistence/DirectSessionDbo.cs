@@ -12,5 +12,5 @@ public class DirectSessionDbo
     public uint RemotePeerId { get; set; } // FK to PeerConnections.PeerId
 
     public Guid SessionId { get; set; }
-    public int SelfIdentityId { get; set; }
+    public uint SelfIdentityId { get; set; }
 }

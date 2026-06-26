@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Percolator.Application.Chat;
 using Percolator.Cryptography;
+using Percolator.Identity;
 using Percolator.Infrastructure.Persistence;
 
 namespace Percolator.Infrastructure.Identity;
@@ -14,26 +15,24 @@ public sealed class PeerIdentityQueries : IPeerIdentityQueries
         _dbFactory = dbFactory;
     }
 
-    public async Task<RatchetIdentityKey?> GetPublicKeyByPkhAsync(string senderPkh, CancellationToken ct)
+    public async Task<RatchetIdentityKey?> GetPublicKeyByPkhAsync(IdentityPublicKeyHash senderPkh, CancellationToken ct)
     {
         using var db = _dbFactory.CreateDbContext();
         
-        // Map the incoming string token challenge back to binary bytes
-        var targetFingerprint = Convert.FromBase64String(senderPkh);
-        
-        var keyBytes = await db.PeerIdentities
+        var candidateKeys = await db.PeerIdentities
             .AsNoTracking()
             .Join(
                 db.PeerIdentityKeys_V2,
                 peer => peer.PeerId,
                 key => key.PeerId,
                 (peer, key) => new { peer, key })
-            .Where(x => x.key.Fingerprint == targetFingerprint)
             .Where(x => x.key.NotBeforeUtc <= DateTimeOffset.UtcNow)
             .Where(x => x.key.ExpiresAtUtc > DateTimeOffset.UtcNow)
             .Where(x => x.key.RevokedAtUtc == null)
             .Select(x => x.key.PublicKeySpki)
-            .FirstOrDefaultAsync(ct);
+            .ToListAsync(ct);
+
+        var keyBytes = candidateKeys.FirstOrDefault(x => senderPkh.Span.SequenceEqual(x));
 
         if (keyBytes is null)
         {
@@ -41,5 +40,27 @@ public sealed class PeerIdentityQueries : IPeerIdentityQueries
         }
 
         return RatchetIdentityKey.FromBytesOwned(keyBytes);
+    }
+
+    public async Task<PeerId?> GetPeerIdByPkhAsync(IdentityPublicKeyHash pkh, CancellationToken ct)
+    {
+        using var db = _dbFactory.CreateDbContext();
+        
+        var activeKeys = await db.PeerIdentityKeys_V2
+            .AsNoTracking()
+            .Where(x => x.NotBeforeUtc <= DateTimeOffset.UtcNow)
+            .Where(x => x.ExpiresAtUtc > DateTimeOffset.UtcNow)
+            .Where(x => x.RevokedAtUtc == null)
+            .Select(x => new { x.PeerId, x.Fingerprint })
+            .ToListAsync(ct);
+
+        var match = activeKeys.FirstOrDefault(x => pkh.Span.SequenceEqual(x.Fingerprint));
+
+        if (match is null)
+        {
+            return null;
+        }
+
+        return new PeerId(match.PeerId);
     }
 }

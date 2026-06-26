@@ -39,7 +39,7 @@ public sealed class PostEmojiAnnotationHandler : IRequestHandler<PostEmojiAnnota
             resolution.Conversation.Id.Value,
             request.MessageId.Value,
             request.Emoji,
-            new ChatPeerId((uint)resolution.SelfIdentityId),
+            new ChatPeerId(resolution.SelfIdentityId),
             new[] { new ChatPeerId(resolution.Conversation.Peer1.Value), new ChatPeerId(resolution.Conversation.Peer2.Value) },
             request.SentTimestampUtc.UtcDateTime),
             cancellationToken);

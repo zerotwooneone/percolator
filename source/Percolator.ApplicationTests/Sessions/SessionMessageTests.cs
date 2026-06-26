@@ -109,12 +109,12 @@ public class SessionMessageTests
 
         // Arrange: Use the shared secret to establish a double ratchet session
         var conversationId = new SessionId(Guid.NewGuid());
-        var bobPeerId = new PeerId((uint)_bobIdentity.Identity!.SelfIdentityId.Value);
+        var bobPeerId = new PeerId(_bobIdentity.Identity!.SelfIdentityId.Value);
         var bobIdentityKey = RatchetIdentityKey.FromBytes(_bobIdentity.Keys!.IdentitySigningKey.PublicKey.ExportSubjectPublicKeyInfo());
         var bobRatchetKey = RatchetEphemeralKey.FromBytes(_bobIdentity.Keys!.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo());
         
 
-        var alicePeerId = new PeerId((uint)_aliceIdentity.Identity!.SelfIdentityId.Value);
+        var alicePeerId = new PeerId(_aliceIdentity.Identity!.SelfIdentityId.Value);
         var aliceIdentityKey = RatchetIdentityKey.FromBytes(_aliceIdentity.Keys!.IdentitySigningKey.PublicKey.ExportSubjectPublicKeyInfo());
         var aliceEphemeralKey = RatchetEphemeralKey.FromBytes(_aliceIdentity.Keys.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo());
         

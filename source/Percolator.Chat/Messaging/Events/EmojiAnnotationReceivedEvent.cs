@@ -7,7 +7,7 @@ namespace Percolator.Chat.Messaging.Events
     {
         public Guid ConversationId { get; }
         public Guid MessageId { get; }
-        public int SelfIdentityId { get; }
+        public uint SelfIdentityId { get; }
         public ChatPeerId ReactorPeerId { get; }
         public string Emoji { get; }
         public DateTimeOffset SentTimestampUtc { get; }
@@ -15,7 +15,7 @@ namespace Percolator.Chat.Messaging.Events
         public EmojiAnnotationReceivedEvent(
             Guid conversationId,
             Guid messageId,
-            int selfIdentityId,
+            uint selfIdentityId,
             ChatPeerId reactorPeerId,
             string emoji,
             DateTimeOffset sentTimestampUtc)

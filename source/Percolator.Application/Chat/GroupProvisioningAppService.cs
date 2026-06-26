@@ -4,7 +4,6 @@ using Percolator.Chat.GroupLedger;
 using Percolator.Chat.GroupMembership;
 using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Cryptography;
-using Percolator.Cryptography.Primitives;
 
 namespace Percolator.Application.Chat;
 
@@ -38,7 +37,7 @@ public sealed class GroupProvisioningAppService : IGroupProvisioningAppService
         GroupParticipantId selfParticipant,
         IReadOnlyList<GroupParticipantId> invitees,
         GroupParticipantId relayParticipant,
-        int selfIdentityId,
+        uint selfIdentityId,
         CancellationToken cancellationToken = default)
     {
         // Step 1: Generate GroupMasterKey
@@ -62,6 +61,7 @@ public sealed class GroupProvisioningAppService : IGroupProvisioningAppService
             conversationId,
             epoch: 0,
             name,
+            relayGroupPublicParamsBytes,
             DateTimeOffset.UtcNow,
             DateTimeOffset.UtcNow);
 

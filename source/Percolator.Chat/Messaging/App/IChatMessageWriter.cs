@@ -6,7 +6,7 @@ public interface IChatMessageWriter
 {
     Task AddTextMessageAsync(
         ConversationId conversationId,
-        int selfIdentityId,
+        uint selfIdentityId,
         ParticipantId senderId,
         string content,
         MessageId messageId,
@@ -15,7 +15,7 @@ public interface IChatMessageWriter
 
     Task AddReadReceiptAsync(
         ConversationId conversationId,
-        int selfIdentityId,
+        uint selfIdentityId,
         ParticipantId readerId,
         MessageId messageId,
         DateTimeOffset sentAt,
@@ -23,7 +23,7 @@ public interface IChatMessageWriter
 
     Task AddDeliveredReceiptAsync(
         ConversationId conversationId,
-        int selfIdentityId,
+        uint selfIdentityId,
         ParticipantId recipientId,
         MessageId messageId,
         DateTimeOffset deliveredAt,
@@ -31,7 +31,7 @@ public interface IChatMessageWriter
 
     Task AddEmojiAnnotationAsync(
         ConversationId conversationId,
-        int selfIdentityId,
+        uint selfIdentityId,
         ParticipantId reactorId,
         MessageId messageId,
         string emoji,

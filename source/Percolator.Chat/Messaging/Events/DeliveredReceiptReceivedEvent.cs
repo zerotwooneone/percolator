@@ -8,7 +8,7 @@ namespace Percolator.Chat.Messaging.Events
     {
         public Guid ConversationId { get; }
         public Guid MessageId { get; }
-        public int SelfIdentityId { get; }
+        public uint SelfIdentityId { get; }
         public ChatPeerId RecipientPeerId { get; }
         public DateTimeOffset DeliveredTimestampUtc { get; }
         public DirectSessionIdValueObject? DirectSessionId { get; }
@@ -16,7 +16,7 @@ namespace Percolator.Chat.Messaging.Events
         public DeliveredReceiptReceivedEvent(
             Guid conversationId,
             Guid messageId,
-            int selfIdentityId,
+            uint selfIdentityId,
             ChatPeerId recipientPeerId,
             DateTimeOffset deliveredTimestampUtc,
             DirectSessionIdValueObject? directSessionId = null)

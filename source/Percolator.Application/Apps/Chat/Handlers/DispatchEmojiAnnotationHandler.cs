@@ -1,12 +1,13 @@
 using Google.Protobuf;
 using MediatR;
 using Microsoft.Extensions.Logging;
-using Percolator.Contracts;
-using PeerId = Percolator.Identity.PeerId;
+using Percolator.Application.Apps.Chat.Commands;
 using Percolator.Application.Network;
+using Percolator.Contracts;
 using Percolator.Identity;
+using PeerId = Percolator.Identity.PeerId;
 
-namespace Percolator.Application.Apps.Chat;
+namespace Percolator.Application.Apps.Chat.Handlers;
 
 public sealed class DispatchEmojiAnnotationHandler : IRequestHandler<DispatchEmojiAnnotationCommand>
 {

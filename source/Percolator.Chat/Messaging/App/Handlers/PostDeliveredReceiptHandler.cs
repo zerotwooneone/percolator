@@ -37,7 +37,7 @@ public sealed class PostDeliveredReceiptHandler : IRequestHandler<PostDeliveredR
         await _publisher.Publish(new DeliveredReceiptPostedEvent(
             resolution.Conversation.Id.Value,
             request.MessageId.Value,
-            new ChatPeerId((uint)resolution.SelfIdentityId),
+            new ChatPeerId(resolution.SelfIdentityId),
             new[] { new ChatPeerId(resolution.Conversation.Peer1.Value), new ChatPeerId(resolution.Conversation.Peer2.Value) },
             request.DeliveredAtUtc.UtcDateTime),
             cancellationToken);

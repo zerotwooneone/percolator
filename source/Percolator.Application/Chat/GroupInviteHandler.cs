@@ -5,7 +5,8 @@ using Percolator.Chat.GroupMembership;
 using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Contracts;
 using Percolator.Cryptography;
-using Percolator.Cryptography.Primitives;
+using Percolator.Identity;
+using DeviceId = Percolator.Cryptography.Primitives.DeviceId;
 
 namespace Percolator.Application.Chat;
 
@@ -18,6 +19,8 @@ public sealed class GroupInviteHandler : IGroupInviteHandler
     private readonly IGroupConversationRepository _groupConversationRepository;
     private readonly ISelfIdentityQueries _selfIdentityQueries;
     private readonly ISenderKeyCryptographyService _senderKeyCryptographyService;
+    private readonly IGroupCryptographyService _groupCryptographyService;
+    private readonly IPeerIdentityQueries _peerIdentityQueries;
     private readonly ILogger<GroupInviteHandler> _logger;
 
     public GroupInviteHandler(
@@ -25,16 +28,20 @@ public sealed class GroupInviteHandler : IGroupInviteHandler
         IGroupConversationRepository groupConversationRepository,
         ISelfIdentityQueries selfIdentityQueries,
         ISenderKeyCryptographyService senderKeyCryptographyService,
+        IGroupCryptographyService groupCryptographyService,
+        IPeerIdentityQueries peerIdentityQueries,
         ILogger<GroupInviteHandler> logger)
     {
         _groupCryptoStateRepository = groupCryptoStateRepository;
         _groupConversationRepository = groupConversationRepository;
         _selfIdentityQueries = selfIdentityQueries;
         _senderKeyCryptographyService = senderKeyCryptographyService;
+        _groupCryptographyService = groupCryptographyService;
+        _peerIdentityQueries = peerIdentityQueries;
         _logger = logger;
     }
 
-    public async Task HandleGroupInviteAsync(GroupInvite invite, int selfIdentityId, uint sourceDeviceId, CancellationToken ct = default)
+    public async Task HandleGroupInviteAsync(GroupInvite invite, SelfId selfIdentityId, Percolator.Identity.DeviceId sourceDeviceId, CancellationToken ct = default)
     {
         // Validate required fields
         if (invite.ConversationId is null || invite.ConversationId.IsEmpty)
@@ -66,11 +73,23 @@ public sealed class GroupInviteHandler : IGroupInviteHandler
         // Step 6: Persist master key
         await _groupCryptoStateRepository.UpsertGroupMasterKeyAsync(conversationId, groupMasterKeyBytes, ct).ConfigureAwait(false);
 
-        // Step 7: Process sender key distribution message
+        // Step 7: Derive group public params from master key (Signal Group V2 deterministic derivation)
+        var cryptoGroupMasterKey = _groupCryptographyService.DeserializeGroupMasterKey(groupMasterKeyBytes.Span);
+        var cryptoPublicParams = _groupCryptographyService.DeriveGroupPublicParams(cryptoGroupMasterKey);
+        var chatPublicParams = RelayGroupPublicParamsBytes.FromSpan(cryptoPublicParams.Span);
+
+        // Step 8: Process sender key distribution message
         // Convert chat domain types to cryptography domain types
         var cryptoConversationId = new Percolator.Cryptography.Primitives.ConversationId(conversationId.Value);
-        var senderPeerId = new Percolator.Cryptography.Primitives.PeerId(inviterPkh.Span);
-        var senderDeviceId = new DeviceId(sourceDeviceId);
+        
+        // Lookup inviter's PeerId by PKH
+        var inviterPeerId = await _peerIdentityQueries.GetPeerIdByPkhAsync(IdentityPublicKeyHash.FromSpan(inviterPkh.Span), ct).ConfigureAwait(false);
+        if (inviterPeerId is null)
+        {
+            throw new InvalidOperationException($"Could not resolve inviter identity for PKH {inviterPkh}");
+        }
+        var senderPeerId = new Percolator.Cryptography.Primitives.PeerId(inviterPeerId.Value.Value);
+        var senderDeviceId = new DeviceId(sourceDeviceId.Value);
         var distributionMessage = SenderKeyDistributionMessageBytes.FromSpan(distributionBytes.Span);
 
         _senderKeyCryptographyService.ProcessSenderKeyDistributionMessage(
@@ -81,11 +100,12 @@ public sealed class GroupInviteHandler : IGroupInviteHandler
 
         _logger.LogInformation("Processed sender key distribution for group {ConversationId} from device {DeviceId}", conversationId, sourceDeviceId);
 
-        // Step 8: Initialize GroupConversation
+        // Step 9: Initialize GroupConversation
         var groupState = new GroupState(
             conversationId,
             epoch: 0,
             name: invite.Name,
+            publicParams: chatPublicParams,
             DateTimeOffset.UtcNow,
             DateTimeOffset.UtcNow);
 
@@ -120,7 +140,7 @@ public sealed class GroupInviteHandler : IGroupInviteHandler
             invite.Name);
 
         // Step 9: Save via repository
-        await _groupConversationRepository.AddAsync(groupConversation, selfIdentityId, ct).ConfigureAwait(false);
+        await _groupConversationRepository.AddAsync(groupConversation, selfIdentityId.Value, ct).ConfigureAwait(false);
 
         _logger.LogInformation("Group invite processed successfully for conversation {ConversationId}", conversationId);
     }

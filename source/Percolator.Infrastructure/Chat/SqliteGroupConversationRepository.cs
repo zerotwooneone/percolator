@@ -17,7 +17,7 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
         _db = db;
     }
 
-    public async Task<GroupConversation?> GetByIdAsync(ConversationId id, int selfIdentityId, CancellationToken cancellationToken)
+    public async Task<GroupConversation?> GetByIdAsync(ConversationId id, uint selfIdentityId, CancellationToken cancellationToken)
     {
         var dbo = await _db.Conversations
             .AsNoTracking()
@@ -35,7 +35,7 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
         return ToDomain(dbo, groupStateDbo, groupMemberDbos);
     }
 
-    public async Task AddAsync(GroupConversation conversation, int selfIdentityId, CancellationToken cancellationToken)
+    public async Task AddAsync(GroupConversation conversation, uint selfIdentityId, CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
         var dbo = ToDbo(conversation);
@@ -76,7 +76,7 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
         await _db.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task UpdateAsync(GroupConversation conversation, int selfIdentityId, CancellationToken cancellationToken)
+    public async Task UpdateAsync(GroupConversation conversation, uint selfIdentityId, CancellationToken cancellationToken)
     {
         var existing = await _db.Conversations
             .FirstOrDefaultAsync(c => c.Id == conversation.Id.Value && c.SelfIdentityId == selfIdentityId && c.Kind == Percolator.Infrastructure.Persistence.ConversationKind.Group, cancellationToken);
@@ -125,7 +125,7 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
         await _db.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task AddWithOutboxAsync(GroupConversation conversation, int selfIdentityId, CancellationToken cancellationToken)
+    public async Task AddWithOutboxAsync(GroupConversation conversation, uint selfIdentityId, CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
         var dbo = ToDbo(conversation);

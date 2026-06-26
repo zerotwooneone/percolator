@@ -35,7 +35,7 @@ public sealed class ChatConversationResolver : IDirectConversationResolver
             }
 
             // Fetch identities
-            int selfIdentityId = session.SelfIdentityId;
+            var selfIdentityId = session.SelfIdentityId;
             var selfIdentity = await _db.SelfIdentities.AsNoTracking().FirstOrDefaultAsync(i => i.Id == selfIdentityId, cancellationToken)
                 ?? throw new InvalidOperationException($"SelfIdentity not found for id {selfIdentityId}.");
 

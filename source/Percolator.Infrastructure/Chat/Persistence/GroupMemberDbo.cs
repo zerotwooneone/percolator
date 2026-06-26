@@ -20,7 +20,7 @@ public class GroupMemberDbo
     /// <summary>
     /// The local peer ID (optional, for resolved members).
     /// </summary>
-    public Guid? LocalPeerId { get; set; }
+    public uint? LocalPeerId { get; set; }
 
     /// <summary>
     /// The member's role in the group.
