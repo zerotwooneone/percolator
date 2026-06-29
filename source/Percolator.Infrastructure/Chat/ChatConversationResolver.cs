@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Percolator.Chat.GroupMembership;
 using Percolator.Chat.Messaging;
 using Percolator.Chat.Messaging.App;
 using Percolator.Chat.Messaging.ValueObjects;
@@ -96,7 +97,7 @@ public sealed class ChatConversationResolver : IDirectConversationResolver
             }
 
             // Map to domain
-            var participants = convo.Participants.Select(p => new ParticipantId(p.ParticipantId)).ToList();
+            var participants = convo.Participants.Select(p => new ChatPeerId(p.ParticipantId)).ToList();
             if (participants.Count != 2)
             {
                 throw new InvalidOperationException($"Direct conversation must have exactly 2 participants, found {participants.Count}.");
@@ -156,7 +157,7 @@ public sealed class ChatConversationResolver : IDirectConversationResolver
                 await _db.SaveChangesAsync(cancellationToken);
             }
 
-            var participants = convo.Participants.Select(p => new ParticipantId(p.ParticipantId)).ToList();
+            var participants = convo.Participants.Select(p => new ChatPeerId(p.ParticipantId)).ToList();
             if (participants.Count != 2)
             {
                 throw new InvalidOperationException($"Direct conversation must have exactly 2 participants, found {participants.Count}.");

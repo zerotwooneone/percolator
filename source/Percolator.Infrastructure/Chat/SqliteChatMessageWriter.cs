@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Percolator.Chat.GroupMembership;
 using Percolator.Chat.Messaging.App;
 using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Infrastructure.Persistence;
@@ -17,7 +18,7 @@ public sealed class SqliteChatMessageWriter : IChatMessageWriter
     public async Task AddTextMessageAsync(
         ConversationId conversationId,
         uint selfIdentityId,
-        ParticipantId senderId,
+        ChatPeerId senderId,
         string content,
         MessageId messageId,
         DateTimeOffset sentAt,
@@ -62,7 +63,7 @@ public sealed class SqliteChatMessageWriter : IChatMessageWriter
     public async Task AddDeliveredReceiptAsync(
         ConversationId conversationId,
         uint selfIdentityId,
-        ParticipantId recipientId,
+        ChatPeerId recipientId,
         MessageId messageId,
         DateTimeOffset deliveredAt,
         CancellationToken cancellationToken)
@@ -103,7 +104,7 @@ public sealed class SqliteChatMessageWriter : IChatMessageWriter
     public async Task AddReadReceiptAsync(
         ConversationId conversationId,
         uint selfIdentityId,
-        ParticipantId readerId,
+        ChatPeerId readerId,
         MessageId messageId,
         DateTimeOffset sentAt,
         CancellationToken cancellationToken)
@@ -144,7 +145,7 @@ public sealed class SqliteChatMessageWriter : IChatMessageWriter
     public async Task AddEmojiAnnotationAsync(
         ConversationId conversationId,
         uint selfIdentityId,
-        ParticipantId reactorId,
+        ChatPeerId reactorId,
         MessageId messageId,
         string emoji,
         DateTimeOffset sentAt,

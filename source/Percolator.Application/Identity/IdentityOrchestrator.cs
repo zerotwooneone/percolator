@@ -16,7 +16,7 @@ public class IdentityOrchestrator : IIdentityOrchestrator
     private readonly ISelfIdentityRepository _selfIdentityRepository;
     private readonly ILogger<IdentityOrchestrator> _logger;
     private readonly NodeOptions _options;
-    private readonly ActiveIdentityContext _activeIdentityContext;
+    private readonly IActiveIdentityMutator _activeIdentityContext;
     private readonly IPublisher _publisher;
 
     public IdentityOrchestrator(
@@ -24,7 +24,7 @@ public class IdentityOrchestrator : IIdentityOrchestrator
         ISelfIdentityRepository selfIdentityRepository,
         ILogger<IdentityOrchestrator> logger,
         IOptions<NodeOptions> options,
-        ActiveIdentityContext activeIdentityContext,
+        IActiveIdentityMutator activeIdentityContext,
         IPublisher publisher)
     {
         _keysStore = keysStore;

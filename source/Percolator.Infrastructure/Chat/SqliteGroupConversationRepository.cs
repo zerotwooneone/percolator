@@ -5,6 +5,7 @@ using Percolator.Chat.GroupMembership;
 using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Identity;
 using Percolator.Infrastructure.Persistence;
+using ChatPeerId = Percolator.Chat.GroupMembership.ChatPeerId;
 
 namespace Percolator.Infrastructure.Chat;
 

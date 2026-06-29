@@ -6,6 +6,7 @@ using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
+using ChatPeerId = Percolator.Chat.GroupMembership.ChatPeerId;
 using DeviceId = Percolator.Cryptography.Primitives.DeviceId;
 
 namespace Percolator.Application.Chat;

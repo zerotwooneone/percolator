@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Moq;
 using MediatR;
+using Percolator.Chat.GroupMembership;
 using Percolator.Chat.Messaging;
 using Percolator.Chat.Messaging.App;
 using Percolator.Chat.Messaging.App.Commands;
@@ -29,8 +30,8 @@ public class PostEmojiAnnotationHandlerTests
 
     private static DirectConversation MakeConversation()
     {
-        var peer1 = new ParticipantId(Guid.NewGuid());
-        var peer2 = new ParticipantId(Guid.NewGuid());
+        var peer1 = new ChatPeerId(Guid.NewGuid());
+        var peer2 = new ChatPeerId(Guid.NewGuid());
         return new DirectConversation(
             new ConversationId(Guid.NewGuid()),
             peer1,
@@ -47,7 +48,7 @@ public class PostEmojiAnnotationHandlerTests
         var sentAt = DateTimeOffset.UtcNow;
         var convo = MakeConversation();
         var selfIdentityId = 101;
-        var selfParticipantId = new ParticipantId(Guid.NewGuid());
+        var selfParticipantId = new ChatPeerId(Guid.NewGuid());
 
         _resolver
             .Setup(r => r.ResolveAsync(lookup, It.IsAny<CancellationToken>()))

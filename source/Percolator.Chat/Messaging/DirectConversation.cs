@@ -1,4 +1,4 @@
-using Percolator.Chat.Messaging.ValueObjects;
+using Percolator.Chat.GroupMembership;
 
 namespace Percolator.Chat.Messaging;
 
@@ -10,10 +10,10 @@ namespace Percolator.Chat.Messaging;
 public sealed class DirectConversation
 {
     public ValueObjects.ConversationId Id { get; }
-    public ParticipantId Peer1 { get; }
-    public ParticipantId Peer2 { get; }
+    public ChatPeerId Peer1 { get; }
+    public ChatPeerId Peer2 { get; }
 
-    public DirectConversation(ValueObjects.ConversationId id, ValueObjects.ParticipantId peer1, ValueObjects.ParticipantId peer2)
+    public DirectConversation(ValueObjects.ConversationId id, ChatPeerId peer1, ChatPeerId peer2)
     {
         if (peer1.Value == peer2.Value)
         {

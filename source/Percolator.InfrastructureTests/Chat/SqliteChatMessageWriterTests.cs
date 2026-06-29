@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Percolator.Chat.GroupMembership;
 using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Infrastructure.Chat;
 using Percolator.Infrastructure.Persistence;
@@ -69,8 +70,8 @@ public class SqliteChatMessageWriterTests
         var sentAt = DateTimeOffset.UtcNow;
         var deliveredAt = DateTimeOffset.UtcNow;
         var ct = CancellationToken.None;
-        var senderId = new ParticipantId(otherPeerId);
-        var recipientId = new ParticipantId(otherPeerId);
+        var senderId = new ChatPeerId(otherPeerId);
+        var recipientId = new ChatPeerId(otherPeerId);
 
         // Add message first
         await writer.AddTextMessageAsync(conversationId, 1, senderId, "test", messageId, sentAt, ct);
@@ -96,7 +97,7 @@ public class SqliteChatMessageWriterTests
         var messageId = new MessageId(Guid.NewGuid());
         var sentAt = DateTimeOffset.UtcNow;
         var ct = CancellationToken.None;
-        var participantId = new ParticipantId(Guid.NewGuid());
+        var participantId = new ChatPeerId(Guid.NewGuid());
 
         await writer.AddTextMessageAsync(conversationId, 1, participantId, "hello", messageId, sentAt, ct);
         await writer.AddTextMessageAsync(conversationId, 1, participantId, "hello", messageId, sentAt, ct);
@@ -115,7 +116,7 @@ public class SqliteChatMessageWriterTests
         var messageId = new MessageId(Guid.NewGuid());
         var sentAt = DateTimeOffset.UtcNow;
         var ct = CancellationToken.None;
-        var participantId = new ParticipantId(otherPeerId);
+        var participantId = new ChatPeerId(otherPeerId);
 
         await writer.AddTextMessageAsync(conversationId, 1, participantId, "hello", messageId, sentAt, ct);
 
@@ -133,8 +134,8 @@ public class SqliteChatMessageWriterTests
         var messageId = new MessageId(Guid.NewGuid());
         var sentAt = DateTimeOffset.UtcNow;
         var ct = CancellationToken.None;
-        var senderId = new ParticipantId(otherPeerId);
-        var readerId = new ParticipantId(otherPeerId);
+        var senderId = new ChatPeerId(otherPeerId);
+        var readerId = new ChatPeerId(otherPeerId);
 
         // Add message first
         await writer.AddTextMessageAsync(conversationId, 1, senderId, "test", messageId, sentAt, ct);
@@ -156,8 +157,8 @@ public class SqliteChatMessageWriterTests
         var messageId = new MessageId(Guid.NewGuid());
         var sentAt = DateTimeOffset.UtcNow;
         var ct = CancellationToken.None;
-        var senderId = new ParticipantId(otherPeerId);
-        var reactorId = new ParticipantId(otherPeerId);
+        var senderId = new ChatPeerId(otherPeerId);
+        var reactorId = new ChatPeerId(otherPeerId);
 
         // Add message first
         await writer.AddTextMessageAsync(conversationId, 1, senderId, "test", messageId, sentAt, ct);

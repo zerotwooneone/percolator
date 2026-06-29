@@ -7,7 +7,6 @@ using Percolator.Application.Network;
 using Percolator.Chat.GroupLedger;
 using Percolator.Chat.GroupMembership;
 using Percolator.Chat.Messaging.App;
-using Percolator.Chat.Messaging.Events;
 using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Contracts;
 using Percolator.Identity;
@@ -79,7 +78,7 @@ public sealed class SendGroupMessageCommandHandler : IRequestHandler<Commands.Se
         {
             throw new InvalidOperationException($"Self is not an active member of group {request.ConversationId.Value}.");
         }
-        var senderId = new ParticipantId(selfMember.ParticipantId.LocalPeerId?.Value ?? 0);
+        var senderId = new ChatPeerId(selfMember.ParticipantId.LocalPeerId?.Value ?? 0);
 
         await _messageWriter.AddTextMessageAsync(
             request.ConversationId,

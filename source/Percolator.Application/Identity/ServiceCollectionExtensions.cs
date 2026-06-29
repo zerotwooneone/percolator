@@ -17,7 +17,6 @@ public static class ServiceCollectionExtensions
         // Application-layer orchestrator
         services.AddScoped<IIdentityOrchestrator, IdentityOrchestrator>();
         
-
         return services;
     }
 }

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Percolator.Chat;
+using Percolator.Chat.GroupMembership;
 using Percolator.Chat.Messaging;
 using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Infrastructure.Persistence;
@@ -84,7 +85,7 @@ public sealed class SqliteDirectConversationRepository : IDirectConversationRepo
 
     private static DirectConversation ToDomain(ConversationDbo dbo)
     {
-        var participants = dbo.Participants.Select(p => new ParticipantId(p.ParticipantId)).ToList();
+        var participants = dbo.Participants.Select(p => new ChatPeerId(p.ParticipantId)).ToList();
         if (participants.Count != 2)
         {
             throw new InvalidOperationException($"Direct conversation must have exactly 2 participants, found {participants.Count}.");

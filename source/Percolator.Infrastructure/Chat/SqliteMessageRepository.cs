@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Percolator.Chat;
+using Percolator.Chat.GroupMembership;
 using Percolator.Chat.Messaging;
 using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Infrastructure.Persistence;
@@ -59,7 +60,7 @@ public sealed class SqliteMessageRepository : IMessageRepository
         return new Message(
             new MessageId(dbo.MessageGuid),
             new ConversationId(dbo.ConversationId),
-            new ParticipantId(dbo.SenderId),
+            new ChatPeerId(dbo.SenderId),
             dbo.Body,
             dbo.SentAt);
     }

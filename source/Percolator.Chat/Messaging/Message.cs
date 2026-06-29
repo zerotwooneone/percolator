@@ -1,3 +1,5 @@
+using Percolator.Chat.GroupMembership;
+
 namespace Percolator.Chat.Messaging;
 
 public class Message
@@ -7,13 +9,13 @@ public class Message
 
     public ValueObjects.MessageId Id { get; }
     public ValueObjects.ConversationId ConversationId { get; }
-    public ValueObjects.ParticipantId SenderId { get; }
+    public ChatPeerId SenderId { get; }
     public string Content { get; }
     public DateTimeOffset Timestamp { get; }
     public IReadOnlyList<Reaction> Reactions => _reactions.AsReadOnly();
     public IReadOnlyList<ReadReceipt> ReadReceipts => _readReceipts.AsReadOnly();
 
-    public Message(ValueObjects.MessageId id, ValueObjects.ConversationId conversationId, ValueObjects.ParticipantId senderId, string content, DateTimeOffset timestamp)
+    public Message(ValueObjects.MessageId id, ValueObjects.ConversationId conversationId, ChatPeerId senderId, string content, DateTimeOffset timestamp)
     {
         // In a real application, you would add validation here.
         // For now, we keep it simple to pass the test.
@@ -24,7 +26,7 @@ public class Message
         Timestamp = timestamp;
     }
 
-    internal void AddReaction(ValueObjects.ParticipantId reactorId, string emoji)
+    internal void AddReaction(ChatPeerId reactorId, string emoji)
     {
         if (_reactions.Any(r => r.ReactorId == reactorId && r.Emoji == emoji))
         {
@@ -35,7 +37,7 @@ public class Message
         _reactions.Add(reaction);
     }
 
-    internal void RemoveReaction(ValueObjects.ParticipantId reactorId, string emoji)
+    internal void RemoveReaction(ChatPeerId reactorId, string emoji)
     {
         var reaction = _reactions.FirstOrDefault(r => r.ReactorId == reactorId && r.Emoji == emoji);
         if (reaction != null)
@@ -44,7 +46,7 @@ public class Message
         }
     }
 
-    internal void AddReadReceipt(ValueObjects.ParticipantId readerId)
+    internal void AddReadReceipt(ChatPeerId readerId)
     {
         if (_readReceipts.Any(r => r.ReaderId == readerId))
         {

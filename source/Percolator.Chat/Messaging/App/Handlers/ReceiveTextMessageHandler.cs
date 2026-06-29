@@ -1,8 +1,8 @@
 using MediatR;
-using Percolator.Chat.GroupMembership;
 using Percolator.Chat.Messaging.App.Commands;
 using Percolator.Chat.Messaging.Events;
 using Percolator.Chat.Messaging.ValueObjects;
+using ChatPeerId = Percolator.Chat.GroupMembership.ChatPeerId;
 
 namespace Percolator.Chat.Messaging.App.Handlers;
 

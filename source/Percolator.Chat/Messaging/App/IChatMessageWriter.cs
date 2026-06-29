@@ -1,3 +1,4 @@
+using Percolator.Chat.GroupMembership;
 using Percolator.Chat.Messaging.ValueObjects;
 
 namespace Percolator.Chat.Messaging.App;
@@ -7,7 +8,7 @@ public interface IChatMessageWriter
     Task AddTextMessageAsync(
         ConversationId conversationId,
         uint selfIdentityId,
-        ParticipantId senderId,
+        ChatPeerId senderId,
         string content,
         MessageId messageId,
         DateTimeOffset sentAt,
@@ -16,7 +17,7 @@ public interface IChatMessageWriter
     Task AddReadReceiptAsync(
         ConversationId conversationId,
         uint selfIdentityId,
-        ParticipantId readerId,
+        ChatPeerId readerId,
         MessageId messageId,
         DateTimeOffset sentAt,
         CancellationToken cancellationToken);
@@ -24,7 +25,7 @@ public interface IChatMessageWriter
     Task AddDeliveredReceiptAsync(
         ConversationId conversationId,
         uint selfIdentityId,
-        ParticipantId recipientId,
+        ChatPeerId recipientId,
         MessageId messageId,
         DateTimeOffset deliveredAt,
         CancellationToken cancellationToken);
@@ -32,7 +33,7 @@ public interface IChatMessageWriter
     Task AddEmojiAnnotationAsync(
         ConversationId conversationId,
         uint selfIdentityId,
-        ParticipantId reactorId,
+        ChatPeerId reactorId,
         MessageId messageId,
         string emoji,
         DateTimeOffset sentAt,

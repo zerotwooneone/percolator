@@ -243,7 +243,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     // Direct chat: Use RemotePeerGuid
                     if (request.Context.RemotePeer is null)
                         throw new InvalidOperationException("Direct chat TextMessage requires RemotePeerGuid in context.");
-                    var senderId = new ParticipantId(request.Context.RemotePeer.Value.Value);
+                    var senderId = new ChatPeerId(request.Context.RemotePeer.Value.Value);
 
                     var messageId = new MessageId(new Guid(text.MessageId.Span));
                     var sentTs = text.SentTimestampUtc.ToDateTimeOffset();
@@ -270,7 +270,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     // Direct chat: Use RemotePeerGuid
                     if (request.Context.RemotePeer is null)
                         throw new InvalidOperationException("Direct chat ReadReceipt requires RemotePeerGuid in context.");
-                    var readerId = new ParticipantId(request.Context.RemotePeer.Value.Value);
+                    var readerId = new ChatPeerId(request.Context.RemotePeer.Value.Value);
 
                     var messageId = new MessageId(new Guid(rr.MessageId.Span));
                     var ts = rr.SentTimestampUtc.ToDateTimeOffset();
@@ -299,7 +299,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     // Direct chat: Use RemotePeerGuid
                     if (request.Context.RemotePeer is null)
                         throw new InvalidOperationException("Direct chat EmojiAnnotation requires RemotePeerGuid in context.");
-                    var reactorId = new ParticipantId(request.Context.RemotePeer.Value.Value);
+                    var reactorId = new ChatPeerId(request.Context.RemotePeer.Value.Value);
 
                     var messageId = new MessageId(new Guid(em.MessageId.Span));
                     var ts = em.SentTimestampUtc.ToDateTimeOffset();
@@ -326,7 +326,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     // Direct chat: Use RemotePeerGuid
                     if (request.Context.RemotePeer is null)
                         throw new InvalidOperationException("Direct chat DeliveredReceipt requires RemotePeerGuid in context.");
-                    var recipientId = new ParticipantId(request.Context.RemotePeer.Value.Value);
+                    var recipientId = new ChatPeerId(request.Context.RemotePeer.Value.Value);
 
                     var messageId = new MessageId(new Guid(dr.MessageId.Span));
                     var ts = dr.SentTimestampUtc.ToDateTimeOffset();
@@ -375,7 +375,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     var pendingInvitation = new PendingGroupInvitation(
                         Guid.NewGuid(),
                         new ConversationId(conversationId),
-                        new ChatPeerId(senderPeerId.Value),
+                        new Percolator.Chat.GroupMembership.ChatPeerId(senderPeerId.Value),
                         createGroup.CreatorIdentityKey.ToByteArray(),
                         initialMembers,
                         createGroup.Name,
@@ -475,7 +475,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                         var senderPeerId = new PeerId(request.Context.RemotePeer.Value.Value);
 
                         // Persist the message via IChatMessageWriter
-                        var senderId = new ParticipantId(senderPeerId.Value);
+                        var senderId = new ChatPeerId(senderPeerId.Value);
                         await _messageWriter.AddTextMessageAsync(
                             new ConversationId(conversationId),
                             request.Context.SelfIdentityId.Value,
@@ -490,7 +490,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                                 conversationId,
                                 messageId.Value,
                                 request.Context.SelfIdentityId.Value,
-                                new List<ChatPeerId> { new ChatPeerId( senderPeerId.Value) },
+                                new List<Percolator.Chat.GroupMembership.ChatPeerId> { new Percolator.Chat.GroupMembership.ChatPeerId( senderPeerId.Value) },
                                 groupContent.TextMessage,
                                 sentTimestamp,
                                 null), // Group conversations do not have a DirectSessionId

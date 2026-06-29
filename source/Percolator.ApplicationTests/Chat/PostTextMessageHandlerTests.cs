@@ -31,8 +31,8 @@ public class PostTextMessageHandlerTests
 
     private static DirectConversation MakeConversation()
     {
-        var peer1 = new ParticipantId(Guid.NewGuid());
-        var peer2 = new ParticipantId(Guid.NewGuid());
+        var peer1 = new ChatPeerId(Guid.NewGuid());
+        var peer2 = new ChatPeerId(Guid.NewGuid());
         return new DirectConversation(
             new ConversationId(Guid.NewGuid()),
             peer1,
@@ -49,7 +49,7 @@ public class PostTextMessageHandlerTests
         var sentAt = DateTimeOffset.UtcNow;
         var convo = MakeConversation();
         var selfIdentityId = 42;
-        var selfParticipantId = new ParticipantId(Guid.NewGuid());
+        var selfParticipantId = new ChatPeerId(Guid.NewGuid());
 
         _active.SetActiveIdentity(new Percolator.Identity.Model.IdentityRecord(selfParticipantId.Value, "self") { PublicIdentityId = new PublicIdentityId(selfParticipantId.Value) });
 

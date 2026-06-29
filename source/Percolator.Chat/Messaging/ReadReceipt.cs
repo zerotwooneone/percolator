@@ -1,11 +1,13 @@
+using Percolator.Chat.GroupMembership;
+
 namespace Percolator.Chat.Messaging;
 
 public class ReadReceipt
 {
-    public ValueObjects.ParticipantId ReaderId { get; }
+    public ChatPeerId ReaderId { get; }
     public DateTimeOffset Timestamp { get; }
 
-    public ReadReceipt(ValueObjects.ParticipantId readerId, DateTimeOffset timestamp)
+    public ReadReceipt(ChatPeerId readerId, DateTimeOffset timestamp)
     {
         ReaderId = readerId;
         Timestamp = timestamp;

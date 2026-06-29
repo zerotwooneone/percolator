@@ -1,8 +1,6 @@
 using Percolator.Identity;
 using Percolator.Identity.Model;
-using Percolator.Chat;
 using System.Security.Cryptography;
-using ChatParticipantId = Percolator.Chat.Messaging.ValueObjects.ParticipantId;
 
 namespace Percolator.Application.Identity;
 
@@ -10,19 +8,10 @@ namespace Percolator.Application.Identity;
 /// Holds the details of the currently active identity for the running node.
 /// This context is populated at startup and treated as read-only thereafter.
 /// </summary>
-public class ActiveIdentityContext :ISelfParticipantIdProvider, IActiveIdentityMutator
+public class ActiveIdentityContext : IActiveIdentityMutator
 {
     public IdentityRecord? Identity { get; internal set; }
     public X3dhKeys? Keys { get; internal set; }
-
-    ChatParticipantId ISelfParticipantIdProvider.Get()
-    {
-        if (Identity is null)
-        {
-            throw new InvalidOperationException("Identity not loaded for chat participant.");
-        }
-        return new ChatParticipantId(Identity.PublicIdentityId.Value);
-    }
 
     public void SetActiveIdentity(IdentityRecord identity, X3dhKeys? keys = null)
     {
