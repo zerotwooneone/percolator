@@ -332,6 +332,83 @@ public readonly record struct PeerId(uint Value)
    - Test that the same definition works across all domains
 
 ---
+## Chunk 5.3 - PeerIdentity Wire Identity Synchronization
+
+The Goal: Currently, the system assumes a `PeerIdentity` can be created using a locally generated `PeerId` without requiring a `PublicIdentityId`. However, the desired reality is that peers must generate their own `PublicIdentityId` (their `SelfIdentity.PublicIdentityId`) and transmit it over the wire during the initial handshake process. We need to update the protobuf messages, sender logic, and receiver logic to ensure that `PublicIdentityId` is always provided by the remote peer and correctly persisted.
+
+**Architectural Constraint (Signal Alignment):**
+In Signal, your identity is NOT bound to an ephemeral session or a mutable cryptographic key. Your identity is your UUID (represented locally as `PublicIdentityId`). The `PeerId` is strictly a local database surrogate key (uint) to make indexing faster. Therefore, you cannot "create" a peer identity by generating a local UUID. The UUID *is* the peer.
+
+**1. `IPeerIdentityRepository` Refactor**
+*   **Remove** `GetByNameAsync(DisplayName name)`. As the application should never look up peers by display name (it is an existing method currently only used by tests), this method is a design smell and should be removed. Fix any integration tests to look up by `PeerId` or `PublicIdentityId` instead.
+*   **Keep** `GetByIdAsync(PeerId id)` as it is still needed for internal database relationships where the local surrogate key is used (e.g. `ProfileOrchestrationService`).
+*   **Add** `Task<PeerIdentity?> GetByPublicIdentityIdAsync(PublicIdentityId publicIdentityId, CancellationToken ct = default);`
+*   **Add** `Task<PeerIdentity> GetOrCreateAsync(PublicIdentityId publicIdentityId, CancellationToken ct = default);`
+    *   This is crucial: The repository itself should be responsible for allocating the local `PeerId` (uint) when a new `PublicIdentityId` is encountered. The application layer shouldn't call `PeerId.NewId()`.
+*   Update `SqlitePeerIdentityRepository.cs` to implement these changes. When `GetOrCreateAsync` creates a new row, it will insert a new `PeerIdentityDbo` setting the `PublicIdentityId` and allowing the database to generate the `PeerId` identity column, returning the fully hydrated aggregate.
+
+**2. Protobuf Updates:**
+*   Modify `Percolator.Contracts/Protos/messaging.proto`:
+    *   In `EstablishSessionRequest`, add `optional bytes public_identity_id = 6;` (16 bytes UUID representing the inviter's `SelfIdentity.PublicIdentityId`).
+    *   In `EstablishSessionResponse.Response.ResponsePayload`, add `optional bytes public_identity_id = 4;` (16 bytes UUID representing the acceptor's `SelfIdentity.PublicIdentityId`).
+*   Modify `Percolator.Contracts/Protos/internal_messaging.proto`:
+    *   In `InviteHandshakeRequestPayload`, add `optional bytes inviter_public_identity_id = 7;`.
+    *   In `InviteHandshakeResponse`, add `optional bytes acceptor_public_identity_id = 6;`.
+
+**3. Sender Side Updates (Client):**
+*   Update `EstablishDirectSessionService.cs` (when acting as inviter building `InviteHandshakeRequestPayload`) to include the local `SelfIdentity.PublicIdentityId` in the outgoing payload.
+*   Update `InitiatorFinalizeService.cs` (when acting as acceptor sending `InviteHandshakeResponse`) to include the local `SelfIdentity.PublicIdentityId`.
+*   Update any standard handshake egress logic to include the `public_identity_id`.
+
+**4. Receiver Side Updates (Server):**
+*   Update `EstablishDirectSessionService.cs` (when receiving an invitation):
+    *   Extract `inviter_public_identity_id` from the decoded `InviteHandshakeRequestPayload`.
+    *   Call `await _peerIdentityRepository.GetOrCreateAsync(new PublicIdentityId(new Guid(payload.InviterPublicIdentityId.ToByteArray())))`.
+*   Update `InitiatorFinalizeService.cs` (when receiving `InviteHandshakeResponse`):
+    *   Extract `acceptor_public_identity_id` from the response.
+    *   Call `await _peerIdentityRepository.GetOrCreateAsync(...)`.
+*   Update `StandardHandshakeIngress.cs` (when receiving `EstablishSessionRequest`):
+    *   Extract `public_identity_id` from the request.
+    *   Call `await _peerIdentityRepository.GetOrCreateAsync(...)`.
+
+**5. Test Updates:**
+*   Fix all unit tests. Remove calls to `PeerId.NewId()` in the application layer tests.
+
+
+## Chunk 5.3.a - Identity Key vs PublicIdentityId Implementation Plan
+
+The Goal: Modify network contracts to explicitly replace Public Key Hashes (PKH) with `PublicIdentityId` (UUID) for addressing and routing. This aligns with Signal's architecture where UUIDs are the stable identifier, allowing Identity Keys to rotate without breaking group memberships.
+
+**1. Update `messaging.proto`**
+*   File: `Percolator.Contracts/Protos/messaging.proto`
+*   In `ProvisionGroupRequest`, change `repeated bytes member_pkh = 3;` to `repeated bytes member_public_identity_ids = 3;`.
+
+**2. Update `internal_messaging.proto`**
+*   File: `Percolator.Contracts/Protos/internal_messaging.proto`
+*   In `GroupInvite`, replace `optional bytes inviter_pkh = 2;` with `optional bytes inviter_public_identity_id = 2;`.
+*   In `GroupInvite`, replace `optional bytes relay_pkh = 5;` with `optional bytes relay_public_identity_id = 5;`.
+
+**3. Update Message Instantiations (Sender Side)**
+Using compiler errors and search, find the protobuf instantiations of the above messages and swap out the PKH bytes for the `PublicIdentityId.Value.ToByteArray()` bytes.
+
+*   **EstablishSessionRequest**:
+    *   `Percolator.Application\Cli\RequestPreKeyBundleByPkhHandler.cs`: `new EstablishSessionRequest`
+    *   `Percolator.Application\Network\Handshake\ProcessRelayedOpaquePayloadCommand.cs`: `new EstablishSessionRequest`
+    *   `Desktop.Wpf\Features\Simulator\SimulatorStateService.cs`: `new EstablishSessionRequest`
+    *   `Percolator.Cryptography\HandshakeInvitation.cs`: `new EstablishSessionRequest`
+*   **EstablishSessionResponse / ResponsePayload**:
+    *   `Desktop.Wpf\Features\Simulator\SimulatorStateService.cs`: `new EstablishSessionResponse.Types.Response.Types.ResponsePayload`
+*   **InviteHandshakeRequestPayload**:
+    *   `Percolator.Application\Network\MainReverseSignalInviteFactory.cs`: `new InviteHandshakeRequestPayload`
+    *   `Desktop.Wpf\Features\Simulator\SimulatedPeerItemViewModel.cs`: `new InviteHandshakeRequestPayload`
+    *   `Desktop.Wpf\Features\Simulator\SimulatedPeerCardViewModel.cs`: `new InviteHandshakeRequestPayload`
+    *   `Desktop.Wpf\Features\Simulator\SimulatedHandshakeStateMachineCardViewModel.cs`: `new InviteHandshakeRequestPayload`
+*   **InviteHandshakeResponse**:
+    *   `Percolator.Application\Network\ApprovePendingSessionCommand.cs` (`ApprovePendingSessionHandler`): `new InviteHandshakeResponse`
+    *   `Desktop.Wpf\Features\Simulator\SimulatorStateService.cs`: `new InviteHandshakeResponse`
+
+
+---
 
 ## Chunk 6
 ### Feature Implementation Request: Signal Protocol Chunk 6 (The Streaming Data Plane)
