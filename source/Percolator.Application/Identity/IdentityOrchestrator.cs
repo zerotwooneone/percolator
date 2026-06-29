@@ -81,9 +81,8 @@ public class IdentityOrchestrator : IIdentityOrchestrator
                 _logger.LogWarning("Regenerated X3DH keys for identity {IdentityName} because existing keys were not P-256 (SelfIdentityId={SelfIdentityId})", dto.DisplayName, selfId);
             }
         }
-        var peerId = dto.PublicIdentityId.Value;
-        var identityName = dto.DisplayName?.Value ?? dto.Id.ToString();
-        var identity = new IdentityRecord(peerId, identityName, null) with { SelfIdentityId = selfId, PublicIdentityId = dto.PublicIdentityId, ListeningPort = dto.ListeningPort, DeviceId = dto.DeviceId };
+        var identityName = dto.DisplayName?.Value ?? dto.PublicIdentityId.ToString();
+        var identity = new IdentityRecord(selfId, dto.PublicIdentityId, dto.DeviceId, identityName) {ListeningPort = dto.ListeningPort};
 
         _activeIdentityContext.SetActiveIdentity(identity, keys);
 

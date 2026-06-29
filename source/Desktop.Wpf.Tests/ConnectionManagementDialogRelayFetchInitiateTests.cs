@@ -37,8 +37,14 @@ public sealed class ConnectionManagementDialogRelayFetchInitiateTests
             .ReturnsAsync(Array.Empty<DirectSession>());
 
         var active = new ActiveIdentityContext();
+        var identityPublicIdentityId = active.Identity?.PublicIdentityId ?? PublicIdentityId.NewId();
         active.SetActiveIdentity(
-            new IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = new SelfId(1) },
+            new IdentityRecord(
+                active.Identity?.SelfIdentityId ?? new SelfId(1),
+                identityPublicIdentityId,
+                active.Identity?.DeviceId ?? DeviceId.Primary,
+                active.Identity?.Name ?? "self",
+                active.Identity?.Nickname ?? identityPublicIdentityId.ToString()),
             new X3dhKeys(
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256)));
