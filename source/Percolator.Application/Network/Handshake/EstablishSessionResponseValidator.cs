@@ -77,6 +77,12 @@ internal sealed class EstablishSessionResponseValidator : IEstablishSessionRespo
             return null;
         }
 
+        if (!respPayload.HasPublicIdentityId || respPayload.PublicIdentityId.Length == 0)
+        {
+            _logger.LogWarning("Response missing public_identity_id");
+            return null;
+        }
+
         Percolator.Cryptography.SessionId sid;
         try
         {
@@ -88,9 +94,12 @@ internal sealed class EstablishSessionResponseValidator : IEstablishSessionRespo
             return null;
         }
 
+        var remotePublicIdentityId = respPayload.PublicIdentityId.ToByteArray();
+
         return new EstablishSessionResponseValidationResult(
             sid,
             remoteIdentitySpki,
-            remotePkh);
+            remotePkh,
+            remotePublicIdentityId);
     }
 }

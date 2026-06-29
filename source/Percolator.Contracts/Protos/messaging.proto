@@ -76,6 +76,7 @@ message EstablishSessionRequest {
     optional bytes ephemeral_key = 3;
     optional bytes prekey_id = 4;
     optional bytes onetime_prekey_id = 5;
+    optional bytes public_identity_id = 6;
 }
 
 message EstablishSessionResponse {
@@ -88,6 +89,7 @@ message EstablishSessionResponse {
 
             optional bytes ephemeral_key = 2;
             optional string session_id = 3;
+            optional bytes public_identity_id = 4;
         }
         optional uint32 version = 1;
 

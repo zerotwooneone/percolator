@@ -170,14 +170,16 @@ namespace Percolator.Application.Network.Handshake
                 if (hello is not null
                     && hello.HasInitiatorIdentityKeySpki && hello.InitiatorIdentityKeySpki.Length > 0
                     && hello.HasInitiatorEphemeralKeySpki && hello.InitiatorEphemeralKeySpki.Length > 0
-                    && hello.HasSignedPreKeyId && hello.SignedPreKeyId.Length > 0)
+                    && hello.HasSignedPreKeyId && hello.SignedPreKeyId.Length > 0
+                    && hello.HasInitiatorPublicIdentityId && hello.InitiatorPublicIdentityId.Length > 0)
                 {
                     var establish = new EstablishSessionRequest
                     {
                         Version = 1,
                         IdentitySigningKey = hello.InitiatorIdentityKeySpki,
                         EphemeralKey = hello.InitiatorEphemeralKeySpki,
-                        PrekeyId = hello.SignedPreKeyId
+                        PrekeyId = hello.SignedPreKeyId,
+                        PublicIdentityId = hello.InitiatorPublicIdentityId
                     };
 
                     if (hello.HasOneTimePreKeyId && hello.OneTimePreKeyId.Length > 0)

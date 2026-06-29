@@ -88,6 +88,9 @@ namespace Percolator.Application.Network.Handshake
             if (!response.HasInitialRatchetMessage || response.InitialRatchetMessage.Length == 0)
                 throw new InvalidOperationException("initial_ratchet_message is required.");
 
+            if (!response.HasAcceptorPublicIdentityId || response.AcceptorPublicIdentityId.Length == 0)
+                throw new InvalidOperationException("acceptor_public_identity_id is required.");
+
             // This is the initiator's view (the inviter who sent the signed pre-key). We derive the shared secret
             // using X3DH_Respond and then decrypt the acceptor's first ratchet message.
             var acceptorIdentityPublic = RatchetIdentityKey.FromBytes(response.AcceptorIdentityKey.ToByteArray());
@@ -95,6 +98,7 @@ namespace Percolator.Application.Network.Handshake
 
             // Derive remote PKH from acceptor identity key (SHA-256 of SPKI).
             var remotePkh = System.Security.Cryptography.SHA256.HashData(response.AcceptorIdentityKey.ToByteArray());
+            var acceptorPublicIdentityId = new PublicIdentityId(new Guid(response.AcceptorPublicIdentityId.ToByteArray()));
 
             var localIkPriv = PrivatePreKey.FromBytesOwned(keys.IdentitySigningKey.ExportECPrivateKey());
 
@@ -141,16 +145,17 @@ namespace Percolator.Application.Network.Handshake
                 return null;
             }
 
-            // Resolve or create the peer identity by PKH and apply the user-entered display name (if any)
+            // Resolve or create the peer identity by PublicIdentityId and apply the user-entered display name (if any)
             // from the sent invitation, but do not overwrite an existing user-set name.
             PeerIdentity? peerIdentity = null;
             try
             {
-                peerIdentity = await _peerIdentities.FindByPublicKeyHashAsync(remotePkh, cancellationToken).ConfigureAwait(false);
-                if (peerIdentity is null)
+                peerIdentity = await _peerIdentities.GetOrCreateAsync(acceptorPublicIdentityId, cancellationToken).ConfigureAwait(false);
+
+                // Ensure the identity key is registered
+                var hasKey = peerIdentity.Keys.Any(k => k.Fingerprint.SequenceEqual(remotePkh));
+                if (!hasKey)
                 {
-                    var newId = Percolator.Identity.PeerId.NewId();
-                    peerIdentity = new PeerIdentity(newId);
                     var now = _clock.UtcNow;
                     peerIdentity.AddKey(response.AcceptorIdentityKey.ToByteArray(), notBefore: now, expiresAt: now.AddYears(100), now: now);
                 }
@@ -454,6 +459,7 @@ namespace Percolator.Application.Network.Handshake
             var sid = validationResult.SessionId;
             var remoteIdentitySpki = validationResult.RemoteIdentitySpki;
             var remotePkh = validationResult.RemotePublicKeyHash;
+            var remotePublicIdentityId = new PublicIdentityId(new Guid(validationResult.RemotePublicIdentityId.ToByteArray()));
 
             // Match to a pending pre-handshake attempt by recipient PKH
             PreHandshakeRecord? match = null;
@@ -484,16 +490,17 @@ namespace Percolator.Application.Network.Handshake
                 _logger.LogInformation(ex, "Standard finalize: failed to retrieve sent invitation for correlation {CorrelationId}; peer name will not be applied", match.LocalRequestId);
             }
 
-            // Resolve or create peer identity by PKH (for stable remote peer id mapping)
+            // Resolve or create peer identity by PublicIdentityId (for stable remote peer id mapping)
             // and apply the user-entered display name (if any) from the sent invitation
             PeerIdentity? peerIdentity = null;
             try
             {
-                peerIdentity = await _peerIdentities.FindByPublicKeyHashAsync(remotePkh, cancellationToken).ConfigureAwait(false);
-                if (peerIdentity is null)
+                peerIdentity = await _peerIdentities.GetOrCreateAsync(remotePublicIdentityId, cancellationToken).ConfigureAwait(false);
+
+                // Ensure the identity key is registered
+                var hasKey = peerIdentity.Keys.Any(k => k.Fingerprint.SequenceEqual(remotePkh));
+                if (!hasKey)
                 {
-                    var newId = Percolator.Identity.PeerId.NewId();
-                    peerIdentity = new PeerIdentity(newId);
                     var now = _clock.UtcNow;
                     peerIdentity.AddKey(remoteIdentitySpki, notBefore: now, expiresAt: now.AddYears(100), now: now);
                 }

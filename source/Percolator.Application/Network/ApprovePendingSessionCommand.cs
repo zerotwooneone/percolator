@@ -260,7 +260,8 @@ namespace Percolator.Application.Network
                 RequestCorrelationId = pending.RequestCorrelationId.ToString(),
                 AcceptorIdentityKey = ByteString.CopyFrom(_active.Keys.IdentitySigningKey.ExportSubjectPublicKeyInfo()),
                 AcceptorX3DhEphemeralKey = ByteString.CopyFrom(x3.EphemeralPublic.ToArray()),
-                InitialRatchetMessage = ByteString.CopyFrom(initial.ToArray())
+                InitialRatchetMessage = ByteString.CopyFrom(initial.ToArray()),
+                AcceptorPublicIdentityId = ByteString.CopyFrom(_active.PublicIdentityId.Value.ToByteArray())
             };
 
             InviteHandshakeResponseDeliveryResult delivery;

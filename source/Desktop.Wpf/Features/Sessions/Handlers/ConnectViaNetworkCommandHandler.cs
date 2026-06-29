@@ -342,7 +342,8 @@ public sealed class ConnectViaNetworkCommandHandler : IRequestHandler<ConnectVia
             Version = 1,
             InitiatorIdentityKeySpki = ByteString.CopyFrom(_active.Keys.IdentitySigningKey.ExportSubjectPublicKeyInfo()),
             InitiatorEphemeralKeySpki = ByteString.CopyFrom(x3.EphemeralPublic.ToArray()),
-            SignedPreKeyId = ByteString.CopyFrom(signedPreKeyId.ToByteArray())
+            SignedPreKeyId = ByteString.CopyFrom(signedPreKeyId.ToByteArray()),
+            InitiatorPublicIdentityId = ByteString.CopyFrom(_active.PublicIdentityId.Value.ToByteArray())
         };
         if (oneTimePreKeyId is not null)
         {

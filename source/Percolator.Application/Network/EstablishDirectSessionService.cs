@@ -183,15 +183,20 @@ namespace Percolator.Application.Network
                 throw new InvalidOperationException("pre_key_signature invalid");
             }
 
-            // Resolve or create peer identity by PKH
-            var initiatorPkh = SHA256.HashData(inviterIdentityKeySpki);
-            var identity = await _peerIdentityRepository.FindByPublicKeyHashAsync(initiatorPkh, cancellationToken).ConfigureAwait(false);
-            if (identity is null)
+            // Resolve or create peer identity by PublicIdentityId
+            if (!payload.HasInviterPublicIdentityId || payload.InviterPublicIdentityId.Length == 0)
             {
-                var newId = Percolator.Identity.PeerId.NewId();
-                var hex = Convert.ToHexString(initiatorPkh);
-                identity = new PeerIdentity(newId);
-                identity.SetDisplayName(new DisplayName($"Peer-{hex.Substring(0, Math.Min(12, hex.Length))}"));
+                throw new InvalidOperationException("inviter_public_identity_id is required.");
+            }
+
+            var inviterPublicIdentityId = new PublicIdentityId(new Guid(payload.InviterPublicIdentityId.ToByteArray()));
+            var identity = await _peerIdentityRepository.GetOrCreateAsync(inviterPublicIdentityId, cancellationToken).ConfigureAwait(false);
+
+            // Ensure the identity key is registered
+            var initiatorPkh = SHA256.HashData(inviterIdentityKeySpki);
+            var hasKey = identity.Keys.Any(k => k.Fingerprint.SequenceEqual(initiatorPkh));
+            if (!hasKey)
+            {
                 var now = _clock.UtcNow;
                 identity.AddKey(inviterIdentityKeySpki, notBefore: now, expiresAt: now.AddYears(100), now: now);
                 await _peerIdentityRepository.SaveAsync(identity, cancellationToken).ConfigureAwait(false);

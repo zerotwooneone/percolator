@@ -98,7 +98,8 @@ public sealed class MainReverseSignalInviteFactory : IMainReverseSignalInviteFac
                 Version = 1,
                 InviterSignedPreKey = ByteString.CopyFrom(signedPreKeySpki),
                 PreKeySignature = ByteString.CopyFrom(preKeySig.ToArray())
-            }
+            },
+            InviterPublicIdentityId = ByteString.CopyFrom(_active.Identity.PublicIdentityId.Value.ToByteArray())
         };
 
         var payloadBytes = payload.ToByteArray();

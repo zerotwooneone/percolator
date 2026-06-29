@@ -249,7 +249,8 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
             Version = 1,
             IdentitySigningKey = ByteString.CopyFrom(_activeIdentity.Keys.IdentitySigningKey.ExportSubjectPublicKeyInfo()),
             EphemeralKey = ByteString.CopyFrom(x3.EphemeralPublic.ToArray()),
-            PrekeyId = ByteString.CopyFrom(signedPreKeyId.ToByteArray())
+            PrekeyId = ByteString.CopyFrom(signedPreKeyId.ToByteArray()),
+            PublicIdentityId = ByteString.CopyFrom(_activeIdentity.PublicIdentityId.Value.ToByteArray())
         };
         if (oneTimePreKeyId is not null)
         {

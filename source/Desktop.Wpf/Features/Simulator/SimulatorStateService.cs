@@ -1009,7 +1009,8 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 Version = 1,
                 InitiatorIdentityKeySpki = ByteString.CopyFrom(initiated.InitiatorIdentitySigningKeySpki),
                 InitiatorEphemeralKeySpki = ByteString.CopyFrom(initiated.InitiatorEphemeralKeySpki),
-                SignedPreKeyId = ByteString.CopyFrom(initiated.SignedPreKeyId.ToByteArray())
+                SignedPreKeyId = ByteString.CopyFrom(initiated.SignedPreKeyId.ToByteArray()),
+                InitiatorPublicIdentityId = ByteString.CopyFrom(model.PublicIdentityId.Value.ToByteArray())
             };
             if (initiated.OneTimePreKeyId is not null)
             {
@@ -1155,7 +1156,8 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 Version = 1,
                 IdentitySigningKey = ByteString.CopyFrom(pending!.InitiatorIdentityKeySpki),
                 EphemeralKey = ByteString.CopyFrom(pending.InitiatorEphemeralKeySpki),
-                PrekeyId = ByteString.CopyFrom(pending.SignedPreKeyId.ToByteArray())
+                PrekeyId = ByteString.CopyFrom(pending.SignedPreKeyId.ToByteArray()),
+                PublicIdentityId = ByteString.CopyFrom(model.PublicIdentityId.Value.ToByteArray())
             };
 
             if (pending.OneTimePreKeyId.HasValue)

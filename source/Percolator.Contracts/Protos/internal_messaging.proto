@@ -360,6 +360,7 @@ message HandshakeInitiatorHello {
   optional bytes one_time_pre_key_id = 5;
   // Optional encrypted opaque payload to the recipient (e.g., first message)
   optional bytes encrypted_payload = 6;
+  optional bytes initiator_public_identity_id = 7;
 }
 
 // === 7.1 Reverse-Signal Handshake Payloads (Protected) ===
@@ -393,6 +394,7 @@ message InviteHandshakeRequestPayload {
 
   // must be unpredictable (GUID). Receiver stores seen request_correlation_id until expires_at_utc and rejects duplicates.
   optional string request_correlation_id = 6;
+  optional bytes inviter_public_identity_id = 7;
 }
 
 message InviteHandshakeResponse {
@@ -405,6 +407,7 @@ message InviteHandshakeResponse {
 
   // First ratchet message (header has the acceptor's next ratchet key)
   optional bytes initial_ratchet_message = 5;
+  optional bytes acceptor_public_identity_id = 6;
 }
 
 // Preferred encrypted inner payload for HandshakeResponderHello

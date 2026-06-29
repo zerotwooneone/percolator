@@ -65,20 +65,21 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
             throw new InvalidOperationException("ephemeral_key is required.");
         if (!request.HasPrekeyId || request.PrekeyId.Length == 0)
             throw new InvalidOperationException("prekey_id is required.");
+        if (!request.HasPublicIdentityId || request.PublicIdentityId.Length == 0)
+            throw new InvalidOperationException("public_identity_id is required.");
 
         var initiatorIdentitySpki = request.IdentitySigningKey.ToByteArray();
         var initiatorPkh = SHA256.HashData(initiatorIdentitySpki);
+        var initiatorPublicIdentityId = new PublicIdentityId(new Guid(request.PublicIdentityId.ToByteArray()));
 
         var initiatorIdentity = await _peerIdentityRepository
-            .FindByPublicKeyHashAsync(initiatorPkh, ct)
+            .GetOrCreateAsync(initiatorPublicIdentityId, ct)
             .ConfigureAwait(false);
 
-        if (initiatorIdentity is null)
+        // Ensure the identity key is registered
+        var hasKey = initiatorIdentity.Keys.Any(k => k.Fingerprint.SequenceEqual(initiatorPkh));
+        if (!hasKey)
         {
-            var newId = Percolator.Identity.PeerId.NewId();
-            var hex = Convert.ToHexString(initiatorPkh);
-            initiatorIdentity = new PeerIdentity(newId);
-            initiatorIdentity.SetDisplayName(new DisplayName($"Peer-{hex.Substring(0, Math.Min(12, hex.Length))}"));
             var now = _clock.UtcNow;
             initiatorIdentity.AddKey(initiatorIdentitySpki, notBefore: now, expiresAt: now.AddYears(100), now: now);
             await _peerIdentityRepository.SaveAsync(initiatorIdentity, ct).ConfigureAwait(false);
@@ -173,7 +174,8 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
         {
             Version = 1,
             EphemeralKey = ByteString.CopyFrom(spk.Value.spkPublicSpki),
-            SessionId = sessionId.Value.ToString()
+            SessionId = sessionId.Value.ToString(),
+            PublicIdentityId = ByteString.CopyFrom(keys.PublicIdentityId.Value.ToByteArray())
         };
 
         var responsePayloadBytes = responsePayload.ToByteArray();

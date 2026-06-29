@@ -41,12 +41,12 @@ public class DhtProbeHandler : IRequestHandler<DhtProbeCommand, FindNodeResponse
 
     public async Task<FindNodeResponse> Handle(DhtProbeCommand request, CancellationToken cancellationToken)
     {
-        var identity = await _peerIdentityRepository.GetByNameAsync(new DisplayName(request.TargetIdentityName)).ConfigureAwait(false);
+        var identity = await _peerIdentityRepository.GetByIdAsync(request.TargetPeerId).ConfigureAwait(false);
         if (identity is null)
         {
-            throw new InvalidOperationException($"Unknown peer name '{request.TargetIdentityName}'. Use SetPeerNameByPublicKeyCommand first.");
+            throw new InvalidOperationException($"Unknown peer id '{request.TargetPeerId}'.");
         }
-        var remotePeer = new Peer(identity.Id, identity.DisplayName?.Value ?? request.TargetIdentityName);
+        var remotePeer = new Peer(identity.Id, identity.DisplayName?.Value ?? string.Empty);
         if (_activeIdentityContext.Identity is null)
         {
             throw new InvalidOperationException("Active identity not loaded.");

@@ -1,9 +1,10 @@
 using MediatR;
+using Percolator.Identity;
 
 namespace Percolator.Application.Cli;
 
 public record SubmitPreKeysCommand(
-    string TargetPeerName,
+    PeerId TargetPeerId,
     int OneTimeKeyCount,
     DateTimeOffset ExpiresUtc
 ) : IRequest<int>;

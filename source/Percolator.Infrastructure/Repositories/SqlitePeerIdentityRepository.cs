@@ -37,12 +37,35 @@ public sealed class SqlitePeerIdentityRepository : IPeerIdentityRepository
         return aggregate;
     }
 
-    public async Task<PeerIdentity?> GetByNameAsync(DisplayName name, CancellationToken ct = default)
+    public async Task<PeerIdentity?> GetByPublicIdentityIdAsync(PublicIdentityId publicIdentityId, CancellationToken ct = default)
     {
         var row = await _db.PeerIdentities.AsNoTracking()
-            .FirstOrDefaultAsync(p => p.Name == name.Value, ct);
+            .FirstOrDefaultAsync(p => p.PublicIdentityId == publicIdentityId, ct);
         if (row == null) return null;
         return await GetByIdAsync(row.PeerId, ct);
+    }
+
+    public async Task<PeerIdentity> GetOrCreateAsync(PublicIdentityId publicIdentityId, CancellationToken ct = default)
+    {
+        var existing = await GetByPublicIdentityIdAsync(publicIdentityId, ct);
+        if (existing != null)
+        {
+            return existing;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var insert = new PeerIdentityDbo
+        {
+            PublicIdentityId = publicIdentityId,
+            Name = string.Empty,
+            Version = 1,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        };
+        await _db.PeerIdentities.AddAsync(insert, ct);
+        await _db.SaveChangesAsync(ct);
+
+        return await GetByIdAsync(insert.PeerId, ct);
     }
 
     public async Task<PeerIdentity?> FindByPublicKeyHashAsync(byte[] fingerprint, CancellationToken ct = default)

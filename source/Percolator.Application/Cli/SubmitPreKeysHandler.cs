@@ -58,13 +58,13 @@ public class SubmitPreKeysHandler : IRequestHandler<SubmitPreKeysCommand, int>
         {
             throw new InvalidOperationException("Active identity not loaded.");
         }
-        
-        var identity = await _peerIdentityRepository.GetByNameAsync(new DisplayName(request.TargetPeerName)).ConfigureAwait(false);
+
+        var identity = await _peerIdentityRepository.GetByIdAsync(request.TargetPeerId).ConfigureAwait(false);
         if (identity == null)
         {
             throw new InvalidOperationException("Peer not found.");
         }
-        var existingPeer = new Peer(identity.Id, identity.DisplayName?.Value ?? request.TargetPeerName);
+        var existingPeer = new Peer(identity.Id, identity.DisplayName?.Value ?? string.Empty);
         
         // 1) Require existing direct session with target peer (no auto-establish here)
         var existingSessionId = await _directSessionLocator.GetAsync(existingPeer.Id, _activeIdentity.Identity.SelfIdentityId.Value, cancellationToken).ConfigureAwait(false);
