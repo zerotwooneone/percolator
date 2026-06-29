@@ -17,13 +17,13 @@ public sealed class SqlitePeerIdentityRepository : IPeerIdentityRepository
             .FirstOrDefaultAsync(p => p.PeerId == id.Value, ct);
         if (row == null) return null;
 
-        var aggregate = new PeerIdentity(id);
+        var aggregate = new PeerIdentity(id, row.PublicIdentityId);
         if (!string.IsNullOrWhiteSpace(row.Name))
             aggregate.SetDisplayName(row.Name);
         aggregate.SetVersionFromPersistence(row.Version);
         aggregate.SetLastKnownProfileRevision(row.LastKnownProfileRevision);
 
-        var keys = await _db.PeerIdentityKeys_V2.AsNoTracking()
+        var keys = await _db.PreKeyBundles.AsNoTracking()
             .Where(k => k.PeerId == id.Value)
             .ToListAsync(ct);
         keys = keys.OrderBy(k => k.NotBeforeUtc).ToList();
@@ -42,16 +42,16 @@ public sealed class SqlitePeerIdentityRepository : IPeerIdentityRepository
         var row = await _db.PeerIdentities.AsNoTracking()
             .FirstOrDefaultAsync(p => p.Name == name.Value, ct);
         if (row == null) return null;
-        return await GetByIdAsync(new PeerId(row.PeerId), ct);
+        return await GetByIdAsync(row.PeerId, ct);
     }
 
     public async Task<PeerIdentity?> FindByPublicKeyHashAsync(byte[] fingerprint, CancellationToken ct = default)
     {
-        var row = await _db.PeerIdentityKeys_V2.AsNoTracking()
+        var row = await _db.PreKeyBundles.AsNoTracking()
             .Where(k => k.Fingerprint != null && k.Fingerprint.SequenceEqual(fingerprint))
             .Select(k => k.PeerId)
             .FirstOrDefaultAsync(ct);
-        return await GetByIdAsync(new PeerId(row), ct);
+        return await GetByIdAsync(row, ct);
     }
 
     public async Task SaveAsync(PeerIdentity peer, CancellationToken ct = default)
@@ -64,7 +64,8 @@ public sealed class SqlitePeerIdentityRepository : IPeerIdentityRepository
         {
             var insert = new PeerIdentityDbo
             {
-                PeerId = peer.Id.Value,
+                PeerId = peer.Id,
+                PublicIdentityId = peer.PublicIdentityId,
                 Name = peer.DisplayName?.Value ?? string.Empty,
                 Version = 1,
                 CreatedAtUtc = now,
@@ -75,9 +76,9 @@ public sealed class SqlitePeerIdentityRepository : IPeerIdentityRepository
             // Clear and insert keys
             foreach (var k in peer.Keys)
             {
-                await _db.PeerIdentityKeys_V2.AddAsync(new PeerIdentityKeyDbo_V2
+                await _db.PreKeyBundles.AddAsync(new PeerIdentityKeyDbo
                 {
-                    PeerId = peer.Id.Value,
+                    PeerId = peer.Id,
                     PublicKeySpki = k.Spki,
                     Fingerprint = k.Fingerprint,
                     NotBeforeUtc = k.NotBefore,
@@ -101,13 +102,13 @@ public sealed class SqlitePeerIdentityRepository : IPeerIdentityRepository
         existing.LastKnownProfileRevision = peer.LastKnownProfileRevision;
 
         // Replace key set to reflect aggregate state
-        var oldKeys = _db.PeerIdentityKeys_V2.Where(k => k.PeerId == peer.Id.Value);
-        _db.PeerIdentityKeys_V2.RemoveRange(oldKeys);
+        var oldKeys = _db.PreKeyBundles.Where(k => k.PeerId == peer.Id);
+        _db.PreKeyBundles.RemoveRange(oldKeys);
         foreach (var k in peer.Keys)
         {
-            await _db.PeerIdentityKeys_V2.AddAsync(new PeerIdentityKeyDbo_V2
+            await _db.PreKeyBundles.AddAsync(new PeerIdentityKeyDbo
             {
-                PeerId = peer.Id.Value,
+                PeerId = peer.Id,
                 PublicKeySpki = k.Spki,
                 Fingerprint = k.Fingerprint,
                 NotBeforeUtc = k.NotBefore,

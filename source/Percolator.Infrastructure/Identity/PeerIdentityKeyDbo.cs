@@ -1,15 +1,16 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using Percolator.Identity;
 
 namespace Percolator.Infrastructure.Identity;
 
-public sealed class PeerIdentityKeyDbo_V2
+public sealed class PeerIdentityKeyDbo
 {
     [Key]
     public long Id { get; set; }
 
     [Required]
-    public uint PeerId { get; set; }
+    public PeerId PeerId { get; set; }
 
     [Required]
     public byte[] PublicKeySpki { get; set; } = Array.Empty<byte>();

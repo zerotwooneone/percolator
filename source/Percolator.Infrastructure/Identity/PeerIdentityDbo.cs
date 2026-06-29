@@ -1,11 +1,14 @@
 using System.ComponentModel.DataAnnotations;
+using Percolator.Identity;
 
 namespace Percolator.Infrastructure.Identity;
 
 public sealed class PeerIdentityDbo
 {
     [Key]
-    public uint PeerId { get; set; }
+    public PeerId PeerId { get; set; }
+    [Required]
+    public PublicIdentityId PublicIdentityId { get; set; }
     [Required]
     public string Name { get; set; } = string.Empty;
     public int Version { get; set; }
@@ -15,6 +18,6 @@ public sealed class PeerIdentityDbo
     public byte[]? ProfileKey { get; set; }
     public int LastKnownProfileRevision { get; set; }
 
-    public List<PeerIdentityKeyDbo_V2> Keys { get; set; } = new();
+    public List<PeerIdentityKeyDbo> Keys { get; set; } = new();
     public List<PeerVerificationDbo> Verifications { get; set; } = new();
 }

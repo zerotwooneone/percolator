@@ -13,6 +13,6 @@ public class SignedPreKeyDbo
     [Required]
     public byte[] Signature { get; set; } = null!;
 
-    public int PeerIdentityKeyId { get; set; }
-    public PeerIdentityKeyDbo PeerIdentityKey { get; set; } = null!;
+    public int PreKeyBundleId { get; set; }
+    public PreKeyBundleDbo PreKeyBundle { get; set; } = null!;
 }

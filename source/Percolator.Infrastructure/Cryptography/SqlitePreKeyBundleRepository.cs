@@ -21,29 +21,29 @@ public class SqlitePreKeyBundleRepository : IPreKeyBundleRepository
         try
         {
             // Load identity + children in memory, then filter locally to avoid Sqlite translation issues
-            var identityKeyList = await _context.PeerIdentityKeys
+            var preKeyBundleDbos = await _context.PreKeyBundles
                 .Include(ik => ik.SignedPreKeys)
                 .Include(ik => ik.OneTimePreKeys)
                 .ToListAsync();
-            var identityKeyDbo = identityKeyList.FirstOrDefault(ik => ik.PeerId == peerId.Value);
+            var preKeyBundle = preKeyBundleDbos.FirstOrDefault(ik => ik.PeerId.Value == peerId.Value);
 
-            if (identityKeyDbo is null)
+            if (preKeyBundle is null)
             {
                 await transaction.RollbackAsync();
                 return null;
             }
 
-            var signedPreKey = identityKeyDbo.SignedPreKeys.FirstOrDefault();
+            var signedPreKey = preKeyBundle.SignedPreKeys.FirstOrDefault();
             if (signedPreKey is null)
             {
                 await transaction.RollbackAsync();
                 return null; // A bundle must have a signed pre-key
             }
 
-            var oneTimePreKey = identityKeyDbo.OneTimePreKeys.FirstOrDefault();
+            var oneTimePreKey = preKeyBundle.OneTimePreKeys.FirstOrDefault();
 
             var bundle = new PreKeyBundle(
-                RatchetIdentityKey.FromBytesOwned(identityKeyDbo.PublicKey),
+                RatchetIdentityKey.FromBytesOwned(preKeyBundle.PublicKey),
                 Guid.Parse(signedPreKey.Id),
                 PreKey.FromBytesOwned(signedPreKey.PublicKey),
                 Signature.FromBytesOwned(signedPreKey.Signature),
@@ -84,34 +84,34 @@ public class SqlitePreKeyBundleRepository : IPreKeyBundleRepository
         {
             // Resolve peer existence via authoritative PeerIdentities catalog
             var identity = await _context.PeerIdentities.AsNoTracking()
-                .FirstOrDefaultAsync(pi => pi.PeerId == peerId.Value);
+                .FirstOrDefaultAsync(pi => pi.PeerId.Value == peerId.Value);
             if (identity is null)
             {
                 throw new InvalidOperationException($"Peer {peerId} not found.");
             }
 
             // Remove any existing identity key and its related pre-keys for this peer
-            var identityKeys = await _context.PeerIdentityKeys
+            var preKeyBundleDbos = await _context.PreKeyBundles
                 .Include(ik => ik.SignedPreKeys)
                 .Include(ik => ik.OneTimePreKeys)
                 .AsNoTracking()
                 .ToListAsync();
-            var existing = identityKeys.FirstOrDefault(ik => ik.PeerId == peerId.Value);
+            var existing = preKeyBundleDbos.FirstOrDefault(ik => ik.PeerId.Value == peerId.Value);
 
             if (existing is not null)
             {
-                _context.PeerIdentityKeys.Remove(existing); // required FKs will cascade delete children
+                _context.PreKeyBundles.Remove(existing); // required FKs will cascade delete children
                 await _context.SaveChangesAsync();
             }
 
-            var identityKey = new PeerIdentityKeyDbo
+            var preKeyBundle = new PreKeyBundleDbo
             {
-                PeerId = peerId.Value,
+                PeerId = new CryptographyPeerId( peerId.Value),
                 PublicKey = first.IdentitySigningKey.ToArray(),
             };
 
             // Add the canonical signed pre-key from the first bundle
-            identityKey.SignedPreKeys.Add(new SignedPreKeyDbo
+            preKeyBundle.SignedPreKeys.Add(new SignedPreKeyDbo
             {
                 Id = first.SignedPreKeyId.ToString(),
                 PublicKey = first.SignedPreKey.ToArray(),
@@ -122,14 +122,14 @@ public class SqlitePreKeyBundleRepository : IPreKeyBundleRepository
             foreach (var b in bundleList)
             {
                 if (b.OneTimePreKey is null || b.OneTimePreKeyId is null) continue;
-                identityKey.OneTimePreKeys.Add(new OneTimePreKeyDbo
+                preKeyBundle.OneTimePreKeys.Add(new OneTimePreKeyDbo
                 {
                     Id = b.OneTimePreKeyId.ToString(),
                     PublicKey = b.OneTimePreKey.ToArray(),
                 });
             }
 
-            _context.PeerIdentityKeys.Add(identityKey);
+            _context.PreKeyBundles.Add(preKeyBundle);
             await _context.SaveChangesAsync();
             await transaction.CommitAsync();
         }
@@ -147,18 +147,18 @@ public class SqlitePreKeyBundleRepository : IPreKeyBundleRepository
         try
         {
             // Load identity + keys for this peer
-            var identityKeyDbo = await _context.PeerIdentityKeys
+            var preKeyBundleDbo = await _context.PreKeyBundles
                 .Include(ik => ik.SignedPreKeys)
                 .Include(ik => ik.OneTimePreKeys)
-                .FirstOrDefaultAsync(ik => ik.PeerId == peerId.Value);
+                .FirstOrDefaultAsync(ik => ik.PeerId.Value == peerId.Value);
 
-            if (identityKeyDbo is null)
+            if (preKeyBundleDbo is null)
             {
                 await transaction.RollbackAsync();
                 return null;
             }
 
-            var spk = identityKeyDbo.SignedPreKeys.FirstOrDefault(k => k.Id == signedPreKeyId.ToString());
+            var spk = preKeyBundleDbo.SignedPreKeys.FirstOrDefault(k => k.Id == signedPreKeyId.ToString());
             if (spk is null)
             {
                 await transaction.RollbackAsync();
@@ -169,7 +169,7 @@ public class SqlitePreKeyBundleRepository : IPreKeyBundleRepository
             if (oneTimePreKeyId.HasValue)
             {
                 var otkId = oneTimePreKeyId.Value.ToString();
-                otkDbo = identityKeyDbo.OneTimePreKeys.FirstOrDefault(k => k.Id == otkId);
+                otkDbo = preKeyBundleDbo.OneTimePreKeys.FirstOrDefault(k => k.Id == otkId);
                 if (otkDbo is null)
                 {
                     await transaction.RollbackAsync();
@@ -178,11 +178,11 @@ public class SqlitePreKeyBundleRepository : IPreKeyBundleRepository
             }
             else
             {
-                otkDbo = identityKeyDbo.OneTimePreKeys.FirstOrDefault();
+                otkDbo = preKeyBundleDbo.OneTimePreKeys.FirstOrDefault();
             }
 
             var bundle = new PreKeyBundle(
-                RatchetIdentityKey.FromBytesOwned(identityKeyDbo.PublicKey),
+                RatchetIdentityKey.FromBytesOwned(preKeyBundleDbo.PublicKey),
                 signedPreKeyId,
                 PreKey.FromBytesOwned(spk.PublicKey),
                 Signature.FromBytesOwned(spk.Signature),

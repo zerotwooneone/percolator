@@ -22,9 +22,9 @@ public class PercolatorDbContext : DbContext
     }
 
     public DbSet<PeerIdentityDbo> PeerIdentities { get; set; } = null!;
-    public DbSet<PeerIdentityKeyDbo_V2> PeerIdentityKeys_V2 { get; set; } = null!;
+    public DbSet<Identity.PeerIdentityKeyDbo> PeerIdentityKeys_V2 { get; set; } = null!;
     public DbSet<PeerVerificationDbo> PeerVerifications { get; set; } = null!;
-    public DbSet<PeerIdentityKeyDbo> PeerIdentityKeys { get; set; } = null!;
+    public DbSet<PreKeyBundleDbo> PreKeyBundles { get; set; } = null!;
     public DbSet<SignedPreKeyDbo> SignedPreKeys { get; set; } = null!;
     public DbSet<OneTimePreKeyDbo> OneTimePreKeys { get; set; } = null!;
     public DbSet<PeerPublicSigningKeyDbo> PeerPublicSigningKeys { get; set; } = null!;
@@ -75,7 +75,17 @@ public class PercolatorDbContext : DbContext
         {
             entity.ToTable("PeerIdentities");
             entity.HasKey(e => e.PeerId);
-            entity.Property(e => e.PeerId).ValueGeneratedOnAdd();
+            entity.Property(e => e.PeerId)
+                .ValueGeneratedOnAdd()
+                .HasConversion(
+                    v => v.Value,
+                    v => new PeerId(v));
+            entity.Property(e => e.PublicIdentityId)
+                .IsRequired()
+                .HasConversion(
+                    v => v.Value,
+                    v => new PublicIdentityId(v));
+            entity.HasIndex(e => e.PublicIdentityId).IsUnique(); // unique index for wire-level identity lookups
             entity.Property(e => e.Name).IsRequired();
             entity.Property(e => e.Version).IsRequired();
             entity.Property(e => e.CreatedAtUtc).IsRequired();
@@ -114,7 +124,7 @@ public class PercolatorDbContext : DbContext
             entity.HasQueryFilter(e => _active != null && _active.Identity != null && e.SelfIdentityId == _active.Identity.SelfIdentityId.Value);
         });
 
-        modelBuilder.Entity<PeerIdentityKeyDbo_V2>(entity =>
+        modelBuilder.Entity<Identity.PeerIdentityKeyDbo>(entity =>
         {
             entity.ToTable("PeerIdentityKeys_V2");
             entity.HasKey(e => e.Id);
@@ -284,11 +294,15 @@ public class PercolatorDbContext : DbContext
             entity.HasQueryFilter(e => _active != null && _active.Identity != null && e.SelfIdentityId == _active.Identity.SelfIdentityId.Value);
         });
 
-        modelBuilder.Entity<PeerIdentityKeyDbo>(entity =>
+        modelBuilder.Entity<PreKeyBundleDbo>(entity =>
         {
             entity.HasKey(e => e.Id);
             entity.Property(e => e.PublicKey).IsRequired();
-            entity.Property(e => e.PeerId);
+            entity.Property(e => e.PeerId)
+                .IsRequired()
+                .HasConversion(
+                    v => v.Value,
+                    v => new Percolator.Cryptography.Primitives.PeerId(v));
 
             // FK to authoritative peer identity catalog
             entity.HasOne<PeerIdentityDbo>()
@@ -403,9 +417,9 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.PublicKey).IsRequired();
             entity.Property(e => e.Signature).IsRequired();
 
-            entity.HasOne(d => d.PeerIdentityKey)
+            entity.HasOne(d => d.PreKeyBundle)
                 .WithMany(p => p.SignedPreKeys)
-                .HasForeignKey(d => d.PeerIdentityKeyId)
+                .HasForeignKey(d => d.PreKeyBundleId)
                 .IsRequired();
         });
 
@@ -414,9 +428,9 @@ public class PercolatorDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.PublicKey).IsRequired();
 
-            entity.HasOne(d => d.PeerIdentityKey)
+            entity.HasOne(d => d.PreKeyBundle)
                 .WithMany(p => p.OneTimePreKeys)
-                .HasForeignKey(d => d.PeerIdentityKeyId)
+                .HasForeignKey(d => d.PreKeyBundleId)
                 .IsRequired();
         });
 
