@@ -63,20 +63,20 @@ public sealed class PeerIdentity
 {
     private readonly List<IdentityKey> _keys = new();
     private readonly List<VerificationRecord> _verifications = new();
-    private readonly List<object> _domainEvents = new();
 
     public PeerId Id { get; }
+    public PublicIdentityId PublicIdentityId { get; }
     public DisplayName? DisplayName { get; private set; }
     public IReadOnlyList<IdentityKey> Keys => _keys;
     public IReadOnlyList<VerificationRecord> Verifications => _verifications;
     public TrustState TrustState { get; private set; } = TrustState.Unknown;
-    public IReadOnlyCollection<object> DomainEvents => _domainEvents.AsReadOnly();
     public int Version { get; private set; }
     public int LastKnownProfileRevision { get; private set; }
 
-    public PeerIdentity(PeerId id)
+    public PeerIdentity(PeerId id, PublicIdentityId publicIdentityId)
     {
         Id = id;
+        PublicIdentityId = publicIdentityId;
     }
 
     public void SetDisplayName(DisplayName name) => DisplayName = name;
@@ -106,15 +106,6 @@ public sealed class PeerIdentity
             throw new InvalidOperationException("Fingerprint mismatch.");
         _verifications.Add(new VerificationRecord(active.Fingerprint, VerificationMethod.OutOfBand, now, verifiedBy));
         TrustState = TrustState.Verified;
-        _domainEvents.Add(new PeerVerifiedEvent(Id, active.Fingerprint, VerificationMethod.OutOfBand, now, verifiedBy));
-    }
-
-    public void VerifyTofu(DateTimeOffset now, string? verifiedBy = null)
-    {
-        var active = GetActiveKey(now) ?? throw new InvalidOperationException("No active key to verify (TOFU).");
-        _verifications.Add(new VerificationRecord(active.Fingerprint, VerificationMethod.Tofu, now, verifiedBy));
-        TrustState = TrustState.Verified;
-        _domainEvents.Add(new PeerVerifiedEvent(Id, active.Fingerprint, VerificationMethod.Tofu, now, verifiedBy));
     }
 
     public TrustState TrustStateFor(DateTimeOffset when)
@@ -128,7 +119,6 @@ public sealed class PeerIdentity
     public void Distrust(string reason, DateTimeOffset now)
     {
         TrustState = TrustState.Distrusted;
-        _domainEvents.Add(new PeerDistrustedEvent(Id, reason, now));
     }
 
     // Apply version from persistence (used by repositories)
@@ -140,6 +130,3 @@ public sealed class PeerIdentity
     // Update last known profile revision (used by profile orchestration)
     public void UpdateLastKnownProfileRevision(int revision) => LastKnownProfileRevision = revision;
 }
-
-public sealed record PeerVerifiedEvent(PeerId PeerId, byte[] Fingerprint, VerificationMethod Method, DateTimeOffset VerifiedAt, string? VerifiedBy);
-public sealed record PeerDistrustedEvent(PeerId PeerId, string Reason, DateTimeOffset At);

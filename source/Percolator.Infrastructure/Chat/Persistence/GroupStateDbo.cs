@@ -1,8 +1,10 @@
+using Percolator.Chat.GroupLedger;
+
 namespace Percolator.Infrastructure.Chat.Persistence;
 
 /// <summary>
 /// Represents the state of a group conversation.
-/// Stores the epoch (key rotation version) and group name.
+/// Stores the epoch (key rotation version), group name, and public params.
 /// </summary>
 public class GroupStateDbo
 {
@@ -20,6 +22,11 @@ public class GroupStateDbo
     /// The group name (plaintext, protected by database encryption).
     /// </summary>
     public string? Name { get; set; }
+
+    /// <summary>
+    /// The relay group public parameters (32 bytes).
+    /// </summary>
+    public RelayGroupPublicParamsBytes PublicParams { get; set; }
 
     /// <summary>
     /// UTC timestamp when the group was created.

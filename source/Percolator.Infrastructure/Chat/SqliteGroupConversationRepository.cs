@@ -53,6 +53,7 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
             ConversationId = conversation.State.ConversationId.Value,
             Epoch = conversation.State.Epoch,
             Name = conversation.State.Name,
+            PublicParams = conversation.State.PublicParams,
             CreatedAtUtc = conversation.State.CreatedAtUtc,
             UpdatedAtUtc = conversation.State.UpdatedAtUtc
         };
@@ -97,6 +98,7 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
         {
             existingGroupState.Epoch = conversation.State.Epoch;
             existingGroupState.Name = conversation.State.Name;
+            existingGroupState.PublicParams = conversation.State.PublicParams;
             existingGroupState.UpdatedAtUtc = conversation.State.UpdatedAtUtc;
             _db.GroupStates.Update(existingGroupState);
         }
@@ -143,6 +145,7 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
             ConversationId = conversation.State.ConversationId.Value,
             Epoch = conversation.State.Epoch,
             Name = conversation.State.Name,
+            PublicParams = conversation.State.PublicParams,
             CreatedAtUtc = conversation.State.CreatedAtUtc,
             UpdatedAtUtc = conversation.State.UpdatedAtUtc
         };
@@ -200,6 +203,7 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
                 new ConversationId(groupStateDbo.ConversationId),
                 groupStateDbo.Epoch,
                 groupStateDbo.Name,
+                groupStateDbo.PublicParams,
                 groupStateDbo.CreatedAtUtc,
                 groupStateDbo.UpdatedAtUtc)
             : throw new InvalidOperationException($"GroupState not found for conversation {dbo.Id}");

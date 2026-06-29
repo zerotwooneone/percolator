@@ -3,7 +3,6 @@ using Google.Protobuf;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Network.Messaging;
 using Percolator.Contracts;
-using Percolator.Network;
 using Percolator.Network.Messaging;
 using Percolator.Network.Services;
 

@@ -1,12 +1,10 @@
 using Microsoft.Extensions.DependencyInjection;
-using Percolator.Application.Apps.Chat.Queries;
 using Percolator.Application.Chat;
 using Percolator.Chat;
 using Percolator.Chat.GroupLedger;
 using Percolator.Chat.Messaging.App;
 using Percolator.Infrastructure.Chat.Persistence;
 using Percolator.Infrastructure.Chat.Queries;
-using Percolator.Infrastructure.Identity;
 using Percolator.Infrastructure.Outbox;
 using Percolator.Infrastructure.Persistence;
 
@@ -25,7 +23,6 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IPendingGroupInvitationRepository, SqlitePendingGroupInvitationRepository>();
         services.AddScoped<IPendingGroupInvitationQueries, SqlitePendingGroupInvitationQueries>();
         services.AddScoped<IConversationMessageQueries, SqliteConversationMessageQueries>();
-        services.AddScoped<IConversationMemberQueries, SqliteConversationMemberQueries>();
 
         // Register Chunk 4 Relay Ledger services
         services.AddScoped<IRelayGroupLedgerRepository, SqliteRelayGroupLedgerRepository>();

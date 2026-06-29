@@ -4,6 +4,7 @@ using Percolator.Chat.Messaging.ValueObjects;
 
 namespace Percolator.Chat.Messaging.Events
 {
+    [Obsolete("delete this. use DispatchTextMessageCommand instead")]
     public sealed class TextMessagePostedEvent : INotification
     {
         public Guid ConversationId { get; }

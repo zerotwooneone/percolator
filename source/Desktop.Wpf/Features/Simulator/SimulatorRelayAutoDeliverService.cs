@@ -144,11 +144,10 @@ public sealed class SimulatorRelayAutoDeliverService : ISimulatorRelayAutoDelive
 
         if (next is InboundRelayMessage inbound)
         {
-            Guid? recipientPeerId = null;
+            Percolator.Network.PeerId? recipientPeerId = null;
             try
             {
-                var resolved = await _state.TryGetPeerIdByIdentityPublicKeyHashAsync(inbound.TargetPkh, ct).ConfigureAwait(false);
-                recipientPeerId = resolved is not null ? resolved.Value : null;
+                recipientPeerId = await _state.TryGetPeerIdByIdentityPublicKeyHashAsync(inbound.TargetPkh, ct).ConfigureAwait(false);
             }
             catch
             {
@@ -164,7 +163,7 @@ public sealed class SimulatorRelayAutoDeliverService : ISimulatorRelayAutoDelive
             {
                 await _delivery.DeliverToPeerAsync(
                         relayHostPeerId: relay.RelayHostPeerId,
-                        recipientPeerId: recipientPeerId,
+                        recipientPeerId: recipientPeerId.Value,
                         ackId: inbound.AckId,
                         opaqueBytes: inbound.OpaqueBytes,
                         debugType: inbound.DebugType,
@@ -191,8 +190,9 @@ public sealed class SimulatorRelayAutoDeliverService : ISimulatorRelayAutoDelive
     {
         var peer = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
         if (peer is null) return null;
+        if (_active.Identity is null) throw new Exception("active identity is null");
 
-        var mainPeerId = _active.Identity is not null ? _active.Identity.Id : Guid.Empty;
+        var mainPeerId = _active.Identity.SelfIdentityId;
         var match = peer.Sessions
             .Select(kv => kv.Value)
             .FirstOrDefault(s => s.RemotePeerId.Value == mainPeerId);

@@ -1,14 +1,16 @@
 using MediatR;
 using Microsoft.Extensions.Logging;
-using Percolator.Application.Apps.Chat.Queries;
+using Percolator.Application.Chat;
 using Percolator.Chat;
 using Percolator.Cryptography;
 using Percolator.Application.Network;
 using Percolator.Chat.GroupLedger;
+using Percolator.Chat.GroupMembership;
 using Percolator.Chat.Messaging.App;
 using Percolator.Chat.Messaging.Events;
 using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Contracts;
+using Percolator.Identity;
 
 namespace Percolator.Application.Apps.Chat.Handlers;
 
@@ -16,32 +18,32 @@ public sealed class SendGroupMessageCommandHandler : IRequestHandler<Commands.Se
 {
     private readonly IGroupConversationRepository _repository;
     private readonly IChatMessageWriter _messageWriter;
-    private readonly IConversationMemberQueries _memberQueries;
     private readonly IGroupMessageCryptographyService _cryptoService;
     private readonly IGroupCryptographyService _groupCryptoService;
     private readonly IGroupCryptoStateRepository _cryptoStateRepository;
     private readonly IRemoteEnvelopeSender _envelopeSender;
+    private readonly IPeerIdentityQueries _peerIdentityQueries;
     private readonly IPublisher _publisher;
     private readonly ILogger<SendGroupMessageCommandHandler> _logger;
 
     public SendGroupMessageCommandHandler(
         IGroupConversationRepository repository,
         IChatMessageWriter messageWriter,
-        IConversationMemberQueries memberQueries,
         IGroupMessageCryptographyService cryptoService,
         IGroupCryptographyService groupCryptoService,
         IGroupCryptoStateRepository cryptoStateRepository,
         IRemoteEnvelopeSender envelopeSender,
+        IPeerIdentityQueries peerIdentityQueries,
         IPublisher publisher,
         ILogger<SendGroupMessageCommandHandler> logger)
     {
         _repository = repository;
         _messageWriter = messageWriter;
-        _memberQueries = memberQueries;
         _cryptoService = cryptoService;
         _groupCryptoService = groupCryptoService;
         _cryptoStateRepository = cryptoStateRepository;
         _envelopeSender = envelopeSender;
+        _peerIdentityQueries = peerIdentityQueries;
         _publisher = publisher;
         _logger = logger;
     }
@@ -52,15 +54,6 @@ public sealed class SendGroupMessageCommandHandler : IRequestHandler<Commands.Se
         if (group is null)
         {
             throw new InvalidOperationException($"Group conversation {request.ConversationId.Value} not found.");
-        }
-
-        // Fetch members with route info to dispatch messages
-        var members = await _memberQueries.GetGroupMembersWithRoutesAsync(request.ConversationId, request.SelfIdentityId, cancellationToken).ConfigureAwait(false);
-        var activeMembers = members.Where(m => m.RemovedAtUtc == null).ToList();
-
-        if (activeMembers.Count == 0)
-        {
-            throw new InvalidOperationException($"Group conversation {request.ConversationId.Value} has no active members.");
         }
 
         // Load GroupMasterKey for cryptography
@@ -81,8 +74,12 @@ public sealed class SendGroupMessageCommandHandler : IRequestHandler<Commands.Se
         var ciphertext = _cryptoService.EncryptGroupContent(blobKey, groupContent);
 
         // Write the message to local database via IChatMessageWriter
-        var selfParticipantId = members.FirstOrDefault(m => m.PeerId.Value == group.State.ConversationId.Value)?.PeerId.Value ?? Guid.Empty;
-        var senderId = new ParticipantId(selfParticipantId);
+        var selfMember = group.Members.FirstOrDefault(m => m.RemovedAtUtc == null);
+        if (selfMember is null)
+        {
+            throw new InvalidOperationException($"Self is not an active member of group {request.ConversationId.Value}.");
+        }
+        var senderId = new ParticipantId(selfMember.ParticipantId.LocalPeerId?.Value ?? 0);
 
         await _messageWriter.AddTextMessageAsync(
             request.ConversationId,
@@ -93,60 +90,18 @@ public sealed class SendGroupMessageCommandHandler : IRequestHandler<Commands.Se
             request.SentTimestampUtc,
             cancellationToken).ConfigureAwait(false);
 
-        // Hybrid delivery: group members by delivery path (direct vs relay)
-        var directRecipients = new List<RecipientRoute>();
-        var relayRecipients = new Dictionary<RecipientRoute, List<Percolator.Identity.PeerId>>();
-
-        foreach (var member in activeMembers)
+        // Resolve relay's network PeerId from PKH
+        var relayPkh = group.RelayIdentity.Pkh;
+        var relayPeerId = await _peerIdentityQueries.GetPeerIdByPkhAsync(IdentityPublicKeyHash.FromSpan(relayPkh.Span), cancellationToken).ConfigureAwait(false);
+        if (relayPeerId is null)
         {
-            if (member.DeliveryRoute is null)
-            {
-                _logger.LogWarning("No delivery route available for peer {PeerId}, skipping", member.PeerId.Value);
-                continue;
-            }
-
-            // Check if this is a relay delivery (route peer differs from member peer)
-            if (member.DeliveryRoute.PeerId.Value != member.PeerId.Value)
-            {
-                // Relay delivery
-                if (!relayRecipients.ContainsKey(member.DeliveryRoute))
-                {
-                    relayRecipients[member.DeliveryRoute] = new List<Percolator.Identity.PeerId>();
-                }
-                relayRecipients[member.DeliveryRoute].Add(member.PeerId);
-            }
-            else
-            {
-                // Direct delivery
-                directRecipients.Add(member.DeliveryRoute);
-            }
+            throw new InvalidOperationException($"Could not resolve relay PeerId for PKH {relayPkh}");
         }
 
-        // Send to direct peers
-        foreach (var route in directRecipients)
-        {
-            var envelope = CreateGroupMessageEnvelope(request.ConversationId, ciphertext);
-            await _envelopeSender.SendChatEnvelopeToPeerAsync(envelope, route, cancellationToken).ConfigureAwait(false);
-        }
-
-        // Send to relay peers (relay fans out to its members)
-        foreach (var (relayRoute, memberPeerIds) in relayRecipients)
-        {
-            var envelope = CreateGroupMessageEnvelope(request.ConversationId, ciphertext);
-            await _envelopeSender.SendChatEnvelopeToPeerAsync(envelope, relayRoute, cancellationToken).ConfigureAwait(false);
-        }
-
-        // Publish event for UI update
-        var recipientPeerIds = activeMembers.Select(m => m.PeerId.Value).ToList();
-        await _publisher.Publish(new TextMessagePostedEvent(
-                request.ConversationId.Value,
-                request.MessageId.Value,
-                request.SelfIdentityId,
-                recipientPeerIds,
-                request.Content,
-                request.SentTimestampUtc,
-                null), // Group conversations do not have a DirectSessionId
-            cancellationToken).ConfigureAwait(false);
+        // Send to relay (Signal Group V2: sender sends once to relay, relay fans out to members)
+        var relayRoute = new RecipientRoute(relayPeerId.Value, relayPkh);
+        var envelope = CreateGroupMessageEnvelope(request.ConversationId, ciphertext);
+        await _envelopeSender.SendChatEnvelopeToPeerAsync(envelope, relayRoute, cancellationToken).ConfigureAwait(false);
     }
 
     private static ChatEnvelope CreateGroupMessageEnvelope(ConversationId conversationId, Ciphertext ciphertext)
