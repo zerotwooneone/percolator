@@ -52,11 +52,10 @@ public class SubmitPreKeysHandlerTests
         var remotePeerId = new Percolator.Identity.PeerId(Guid.NewGuid());
         var remotePeer = new Peer(remotePeerId, "bob");
         _peerIdentityRepository
-            .Setup(r => r.GetByNameAsync(It.IsAny<Percolator.Identity.Model.DisplayName>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Percolator.Identity.Model.DisplayName dn, CancellationToken _) =>
+            .Setup(r => r.GetByIdAsync(It.IsAny<Percolator.Identity.PeerId>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Percolator.Identity.PeerId pid, CancellationToken _) =>
             {
-                var id = new Percolator.Identity.Model.PeerIdentity(remotePeerId);
-                id.SetDisplayName(dn);
+                var id = new Percolator.Identity.Model.PeerIdentity(pid, new Percolator.Identity.PublicIdentityId(Guid.NewGuid()));
                 return id;
             });
         var directSessionId = new DirectSessionId(Guid.NewGuid());
@@ -108,7 +107,7 @@ public class SubmitPreKeysHandlerTests
             _secureSvc.Object);
 
         var cmd = new SubmitPreKeysCommand(
-            TargetPeerName: "bob",
+            TargetPeerId: remotePeerId,
             OneTimeKeyCount: 3,
             ExpiresUtc: DateTimeOffset.UtcNow.AddDays(7));
 
@@ -141,7 +140,7 @@ public class SubmitPreKeysHandlerTests
             _secureSvc.Object);
 
         var cmd = new SubmitPreKeysCommand(
-            TargetPeerName: "bob",
+            TargetPeerId: new Percolator.Identity.PeerId(1),
             OneTimeKeyCount: 0,
             ExpiresUtc: DateTimeOffset.UtcNow.AddDays(1));
 
