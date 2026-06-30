@@ -34,9 +34,9 @@ public sealed class GroupProvisioningAppService : IGroupProvisioningAppService
 
     public async Task<Percolator.Chat.Messaging.ValueObjects.ConversationId> ProvisionGroupAsync(
         string? name,
-        GroupParticipantId selfParticipant,
-        IReadOnlyList<GroupParticipantId> invitees,
-        GroupParticipantId relayParticipant,
+        ChatPeerId selfPeerId,
+        IReadOnlyList<ChatPeerId> inviteePeerIds,
+        ChatPeerId relayPeerId,
         uint selfIdentityId,
         CancellationToken cancellationToken = default)
     {
@@ -68,7 +68,7 @@ public sealed class GroupProvisioningAppService : IGroupProvisioningAppService
         // Step 7: Create initial members (self as admin)
         var selfMember = new GroupMember(
             conversationId,
-            selfParticipant,
+            selfPeerId,
             GroupMemberRole.Admin,
             DateTimeOffset.UtcNow);
 
@@ -76,29 +76,29 @@ public sealed class GroupProvisioningAppService : IGroupProvisioningAppService
         var groupConversation = new GroupConversation(
             conversationId,
             groupState,
-            relayParticipant,
+            relayPeerId,
             new[] { selfMember },
             name);
 
         // Step 9: Generate sender key distribution messages for members and invite them
         // TODO: Implement sender key distribution message generation
         // This requires converting chat domain types to cryptography domain types
-        foreach (var invitee in invitees)
+        foreach (var inviteePeerId in inviteePeerIds)
         {
-            if (invitee.Pkh.Span.SequenceEqual(selfParticipant.Pkh.Span))
+            if (inviteePeerId.Value == selfPeerId.Value)
                 continue; // Skip self
 
             // TODO: Generate ChatSenderKeyDistributionMessageBytes
             // var distributionBytes = ChatSenderKeyDistributionMessageBytes.FromSpan(...);
             var distributionBytes = ChatSenderKeyDistributionMessageBytes.FromBytesOwned(Array.Empty<byte>());
             
-            groupConversation.InviteMember(invitee, distributionBytes);
+            groupConversation.InviteMember(inviteePeerId, distributionBytes);
         }
 
         // Step 10: Save atomically via outbox
         await _groupConversationRepository.AddWithOutboxAsync(groupConversation, selfIdentityId, cancellationToken).ConfigureAwait(false);
 
-        _logger.LogInformation("Group {ConversationId} provisioned successfully with {MemberCount} members", conversationId, invitees.Count + 1);
+        _logger.LogInformation("Group {ConversationId} provisioned successfully with {MemberCount} members", conversationId, inviteePeerIds.Count + 1);
 
         return conversationId;
     }

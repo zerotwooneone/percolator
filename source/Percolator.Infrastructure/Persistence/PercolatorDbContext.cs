@@ -348,14 +348,13 @@ public class PercolatorDbContext : DbContext
         modelBuilder.Entity<Percolator.Infrastructure.Chat.Persistence.GroupMemberDbo>(entity =>
         {
             entity.ToTable("GroupMembers");
-            entity.HasKey(e => new { e.ConversationId, e.MemberPkh });
+            entity.HasKey(e => new { e.ConversationId, e.PeerId });
             entity.Property(e => e.ConversationId).IsRequired();
-            entity.Property(e => e.MemberPkh)
+            entity.Property(e => e.PeerId)
                 .HasConversion(
-                    v => v.ToArray(),
-                    v => Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytesOwned(v))
+                    v => v.Value,
+                    v => new Percolator.Identity.PeerId(v))
                 .IsRequired();
-            entity.Property(e => e.LocalPeerId);
             entity.Property(e => e.Role).IsRequired();
             entity.Property(e => e.JoinedAtUtc).IsRequired();
             entity.Property(e => e.RemovedAtUtc).IsRequired(false);
@@ -375,6 +374,11 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.ConversationId).IsRequired();
             entity.Property(e => e.Epoch).IsRequired();
             entity.Property(e => e.Name).IsRequired(false);
+            entity.Property(e => e.RelayPeerId)
+                .HasConversion(
+                    v => v.Value,
+                    v => new Percolator.Identity.PeerId(v))
+                .IsRequired();
             entity.Property(e => e.CreatedAtUtc).IsRequired();
             entity.Property(e => e.UpdatedAtUtc).IsRequired();
             entity.HasOne<ConversationDbo>()
@@ -754,11 +758,11 @@ public class PercolatorDbContext : DbContext
         modelBuilder.Entity<RelayBlindedRosterDbo>(entity =>
         {
             entity.ToTable("RelayBlindedRosters");
-            entity.HasKey(e => new { e.ConversationId, e.MemberPkh });
-            entity.Property(e => e.MemberPkh)
+            entity.HasKey(e => new { e.ConversationId, e.MemberPublicIdentityId });
+            entity.Property(e => e.MemberPublicIdentityId)
                 .HasConversion(
-                    v => v.ToArray(),
-                    v => Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytesOwned(v))
+                    v => v.Value,
+                    v => new Percolator.Identity.PublicIdentityId(v))
                 .IsRequired();
         });
 
@@ -770,11 +774,7 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.Id).ValueGeneratedOnAdd();
             entity.Property(e => e.EventType).IsRequired();
             entity.Property(e => e.PayloadJson).IsRequired();
-            entity.Property(e => e.DestinationPkh)
-                .HasConversion(
-                    v => v.ToArray(),
-                    v => Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytesOwned(v))
-                .IsRequired();
+            entity.Property(e => e.DestinationPeerId).IsRequired();
             entity.Property(e => e.ProcessedAtUtc);
             entity.HasIndex(e => e.ProcessedAtUtc);
         });

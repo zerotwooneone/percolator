@@ -9,6 +9,6 @@ namespace Percolator.Chat.Events;
 /// </summary>
 public sealed record MemberInvitedDomainEvent(
     Messaging.ValueObjects.ConversationId ConversationId,
-    GroupParticipantId ParticipantId,
+    ChatPeerId ParticipantId,
     ChatSenderKeyDistributionMessageBytes DistributionMessage,
-    Pkh RelayPkh) : IDomainEvent;
+    ChatPeerId RelayPeerId) : IDomainEvent;

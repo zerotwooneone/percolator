@@ -78,7 +78,7 @@ public sealed class SendGroupMessageCommandHandler : IRequestHandler<Commands.Se
         {
             throw new InvalidOperationException($"Self is not an active member of group {request.ConversationId.Value}.");
         }
-        var senderId = new ChatPeerId(selfMember.ParticipantId.LocalPeerId?.Value ?? 0);
+        var senderId = selfMember.PeerId;
 
         await _messageWriter.AddTextMessageAsync(
             request.ConversationId,
@@ -89,16 +89,8 @@ public sealed class SendGroupMessageCommandHandler : IRequestHandler<Commands.Se
             request.SentTimestampUtc,
             cancellationToken).ConfigureAwait(false);
 
-        // Resolve relay's network PeerId from PKH
-        var relayPkh = group.RelayIdentity.Pkh;
-        var relayPeerId = await _peerIdentityQueries.GetPeerIdByPkhAsync(IdentityPublicKeyHash.FromSpan(relayPkh.Span), cancellationToken).ConfigureAwait(false);
-        if (relayPeerId is null)
-        {
-            throw new InvalidOperationException($"Could not resolve relay PeerId for PKH {relayPkh}");
-        }
-
         // Send to relay (Signal Group V2: sender sends once to relay, relay fans out to members)
-        var relayRoute = new RecipientRoute(relayPeerId.Value, relayPkh);
+        var relayRoute = new RecipientRoute(new Percolator.Cryptography.Primitives.PeerId(group.RelayPeerId.Value), null);
         var envelope = CreateGroupMessageEnvelope(request.ConversationId, ciphertext);
         await _envelopeSender.SendChatEnvelopeToPeerAsync(envelope, relayRoute, cancellationToken).ConfigureAwait(false);
     }

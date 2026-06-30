@@ -62,8 +62,6 @@ message ChatEnvelope {
     ReadReceipt read_receipt = 2;
     EmojiAnnotation emoji_annotation = 3;
     DeliveredReceipt delivered_receipt = 8;
-    // Bootstrap: delivers the encrypted GroupMasterKey over existing 1:1 tunnels
-    GroupKeyBootstrap group_key_bootstrap = 15;
     // Group ciphertext message
     GroupMessage group_message = 17;
     // Group invitation message
@@ -122,17 +120,6 @@ message GroupMessage {
   optional uint32 epoch = 7;
 }
 
-// Bootstrap message carrying the GroupMasterKey for a conversation.
-// This is sent over existing 1:1 tunnels and is required before members can
-// decrypt or encrypt GroupMessage payloads.
-message GroupKeyBootstrap {
-  optional uint32 version = 100;
-  // ConversationId (GUID bytes) that this master key applies to
-  optional bytes conversation_id = 1;
-  // Exactly 32 bytes containing the GroupMasterKey.
-  optional bytes group_master_key_bytes = 2;
-}
-
 // Group invitation message carrying cryptographic bootstrap data.
 // Sent to invite a new member to an existing group conversation.
 message GroupInvite {
@@ -149,6 +136,10 @@ message GroupInvite {
   optional bytes relay_public_identity_id = 5;
   // Optional group name
   optional string name = 6;
+  // The relay's hostname for network routing
+  optional string relay_host = 7;
+  // The relay's port for network routing
+  optional int32 relay_port = 8;
 }
 
 // Inner plaintext wrapper for GroupMessage.ciphertext.

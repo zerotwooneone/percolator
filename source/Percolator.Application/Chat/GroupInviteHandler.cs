@@ -6,6 +6,7 @@ using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
+using Percolator.Network;
 using ChatPeerId = Percolator.Chat.GroupMembership.ChatPeerId;
 using DeviceId = Percolator.Cryptography.Primitives.DeviceId;
 
@@ -21,7 +22,8 @@ public sealed class GroupInviteHandler : IGroupInviteHandler
     private readonly ISelfIdentityQueries _selfIdentityQueries;
     private readonly ISenderKeyCryptographyService _senderKeyCryptographyService;
     private readonly IGroupCryptographyService _groupCryptographyService;
-    private readonly IPeerIdentityQueries _peerIdentityQueries;
+    private readonly IPeerIdentityRepository _peerIdentityRepository;
+    private readonly IPeerRoutingProfileRepository _peerRoutingProfileRepository;
     private readonly ILogger<GroupInviteHandler> _logger;
 
     public GroupInviteHandler(
@@ -30,7 +32,8 @@ public sealed class GroupInviteHandler : IGroupInviteHandler
         ISelfIdentityQueries selfIdentityQueries,
         ISenderKeyCryptographyService senderKeyCryptographyService,
         IGroupCryptographyService groupCryptographyService,
-        IPeerIdentityQueries peerIdentityQueries,
+        IPeerIdentityRepository peerIdentityRepository,
+        IPeerRoutingProfileRepository peerRoutingProfileRepository,
         ILogger<GroupInviteHandler> logger)
     {
         _groupCryptoStateRepository = groupCryptoStateRepository;
@@ -38,7 +41,8 @@ public sealed class GroupInviteHandler : IGroupInviteHandler
         _selfIdentityQueries = selfIdentityQueries;
         _senderKeyCryptographyService = senderKeyCryptographyService;
         _groupCryptographyService = groupCryptographyService;
-        _peerIdentityQueries = peerIdentityQueries;
+        _peerIdentityRepository = peerIdentityRepository;
+        _peerRoutingProfileRepository = peerRoutingProfileRepository;
         _logger = logger;
     }
 
@@ -71,6 +75,34 @@ public sealed class GroupInviteHandler : IGroupInviteHandler
         // Step 5: Parse relayPublicIdentityId from invite
         var relayPublicIdentityId = new PublicIdentityId(new Guid(invite.RelayPublicIdentityId.ToByteArray()));
 
+        // Step 5.5: Save relay endpoint if provided in the invite
+        if (!string.IsNullOrEmpty(invite.RelayHost) && invite.RelayPort.HasValue)
+        {
+            var relayIdentity = await _peerIdentityRepository.GetOrCreateAsync(relayPublicIdentityId, ct).ConfigureAwait(false);
+            var relayPeerId = new Percolator.Network.PeerId(relayIdentity.Id.Value);
+            var relayProfile = await _peerRoutingProfileRepository.GetByIdAsync(relayPeerId, ct).ConfigureAwait(false);
+            
+            var endpoint = new System.Net.DnsEndPoint(invite.RelayHost, invite.RelayPort.Value);
+            var grpcEndpoint = new Percolator.Network.ValueObjects.GrpcEndPoint(endpoint, DateTimeOffset.UtcNow);
+            
+            if (relayProfile == null)
+            {
+                relayProfile = new Percolator.Network.PeerRoutingProfile();
+                relayProfile.BindIdentity(relayPeerId);
+                relayProfile.AddGrpcEndPoint(grpcEndpoint, DateTimeOffset.UtcNow);
+                await _peerRoutingProfileRepository.UpsertAsync(relayProfile, ct).ConfigureAwait(false);
+                _logger.LogInformation("Created new routing profile for relay {RelayPeerId} with endpoint {RelayHost}:{RelayPort}", 
+                    relayPeerId.Value, invite.RelayHost, invite.RelayPort.Value);
+            }
+            else
+            {
+                relayProfile.AddGrpcEndPoint(grpcEndpoint, DateTimeOffset.UtcNow);
+                await _peerRoutingProfileRepository.UpsertAsync(relayProfile, ct).ConfigureAwait(false);
+                _logger.LogInformation("Updated routing profile for relay {RelayPeerId} with endpoint {RelayHost}:{RelayPort}", 
+                    relayPeerId.Value, invite.RelayHost, invite.RelayPort.Value);
+            }
+        }
+
         // Step 6: Persist master key
         await _groupCryptoStateRepository.UpsertGroupMasterKeyAsync(conversationId, groupMasterKeyBytes, ct).ConfigureAwait(false);
 
@@ -83,13 +115,8 @@ public sealed class GroupInviteHandler : IGroupInviteHandler
         // Convert chat domain types to cryptography domain types
         var cryptoConversationId = new Percolator.Cryptography.Primitives.ConversationId(conversationId.Value);
 
-        // Lookup inviter's identity by PublicIdentityId
-        var inviterIdentity = await _peerIdentityQueries.GetByPublicIdentityIdAsync(inviterPublicIdentityId, ct).ConfigureAwait(false);
-        if (inviterIdentity is null)
-        {
-            throw new InvalidOperationException($"Could not resolve inviter identity for PublicIdentityId {inviterPublicIdentityId}");
-        }
-        var inviterPkh = inviterIdentity.PublicKeyHash;
+        // Ensure inviter identity exists (get or create stub)
+        var inviterIdentity = await _peerIdentityRepository.GetOrCreateAsync(inviterPublicIdentityId, ct).ConfigureAwait(false);
         var senderPeerId = new Percolator.Cryptography.Primitives.PeerId(inviterIdentity.Id.Value);
         var senderDeviceId = new DeviceId(sourceDeviceId.Value);
         var distributionMessage = SenderKeyDistributionMessageBytes.FromSpan(distributionBytes.Span);
@@ -111,14 +138,9 @@ public sealed class GroupInviteHandler : IGroupInviteHandler
             DateTimeOffset.UtcNow,
             DateTimeOffset.UtcNow);
 
-        // Lookup relay's identity by PublicIdentityId to get PKH
-        var relayIdentity = await _peerIdentityQueries.GetByPublicIdentityIdAsync(relayPublicIdentityId, ct).ConfigureAwait(false);
-        if (relayIdentity is null)
-        {
-            throw new InvalidOperationException($"Could not resolve relay identity for PublicIdentityId {relayPublicIdentityId}");
-        }
-        var relayPkh = relayIdentity.PublicKeyHash;
-        var relayIdentityParticipantId = new GroupParticipantId(relayPkh, null);
+        // Ensure relay identity exists (get or create stub)
+        var relayIdentity = await _peerIdentityRepository.GetOrCreateAsync(relayPublicIdentityId, ct).ConfigureAwait(false);
+        var relayPeerId = new ChatPeerId(relayIdentity.Id.Value);
 
         // Fetch the local identity's actual PKH and bridged PeerId
         var selfInfo = await _selfIdentityQueries.GetIdentityParticipantInfoAsync(selfIdentityId, ct).ConfigureAwait(false);
@@ -127,24 +149,24 @@ public sealed class GroupInviteHandler : IGroupInviteHandler
             throw new InvalidOperationException($"Could not resolve self identity info for ID {selfIdentityId}");
         }
 
-        var selfParticipantId = new GroupParticipantId(selfInfo.Value.Pkh, new ChatPeerId(selfInfo.Value.PeerId));
+        var selfPeerId = new ChatPeerId(selfInfo.Value.PeerId);
         var selfMember = new GroupMember(
             conversationId,
-            selfParticipantId,
+            selfPeerId,
             GroupMemberRole.Member,
             DateTimeOffset.UtcNow);
 
-        var inviterParticipantId = new GroupParticipantId(inviterPkh, null);
+        var inviterPeerId = new ChatPeerId(inviterIdentity.Id.Value);
         var inviterMember = new GroupMember(
             conversationId,
-            inviterParticipantId,
+            inviterPeerId,
             GroupMemberRole.Admin,
             DateTimeOffset.UtcNow);
 
         var groupConversation = new GroupConversation(
             conversationId,
             groupState,
-            relayIdentityParticipantId,
+            relayPeerId,
             new[] { selfMember, inviterMember },
             invite.Name);
 

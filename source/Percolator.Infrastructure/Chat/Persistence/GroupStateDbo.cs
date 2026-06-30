@@ -1,4 +1,5 @@
 using Percolator.Chat.GroupLedger;
+using Percolator.Identity;
 
 namespace Percolator.Infrastructure.Chat.Persistence;
 
@@ -27,6 +28,11 @@ public class GroupStateDbo
     /// The relay group public parameters (32 bytes).
     /// </summary>
     public RelayGroupPublicParamsBytes PublicParams { get; set; }
+
+    /// <summary>
+    /// The local peer ID of the relay for this group.
+    /// </summary>
+    public PeerId RelayPeerId { get; set; }
 
     /// <summary>
     /// UTC timestamp when the group was created.

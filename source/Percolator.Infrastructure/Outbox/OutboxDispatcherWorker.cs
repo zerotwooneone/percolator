@@ -3,9 +3,10 @@ using Microsoft.Extensions.Logging;
 using Percolator.Chat.Events;
 using Percolator.Infrastructure.Persistence;
 using Percolator.Application.Network;
-using Percolator.Chat.Messaging.ValueObjects;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Percolator.Identity;
+using Percolator.Network;
 
 namespace Percolator.Infrastructure.Outbox;
 
@@ -17,6 +18,7 @@ public sealed class OutboxDispatcherWorker : BackgroundService
 {
     private readonly PercolatorDbContext _db;
     private readonly IRemoteEnvelopeSender _remoteEnvelopeSender;
+    private readonly IPeerRoutingProfileRepository _peerRoutingProfileRepository;
     private readonly ILogger<OutboxDispatcherWorker> _logger;
     private readonly TimeSpan _pollInterval = TimeSpan.FromSeconds(5);
     private readonly TimeSpan _maxBackoff = TimeSpan.FromMinutes(5);
@@ -24,10 +26,12 @@ public sealed class OutboxDispatcherWorker : BackgroundService
     public OutboxDispatcherWorker(
         PercolatorDbContext db,
         IRemoteEnvelopeSender remoteEnvelopeSender,
+        IPeerRoutingProfileRepository peerRoutingProfileRepository,
         ILogger<OutboxDispatcherWorker> logger)
     {
         _db = db;
         _remoteEnvelopeSender = remoteEnvelopeSender;
+        _peerRoutingProfileRepository = peerRoutingProfileRepository;
         _logger = logger;
     }
 
@@ -95,7 +99,7 @@ public sealed class OutboxDispatcherWorker : BackgroundService
                     return;
                 }
 
-                await DispatchEventAsync(domainEvent, outboxItem.DestinationPkh, ct);
+                await DispatchEventAsync(domainEvent, outboxItem.DestinationPeerId, ct);
 
                 // Success - mark as processed
                 MarkAsProcessed(outboxItem);
@@ -131,7 +135,7 @@ public sealed class OutboxDispatcherWorker : BackgroundService
         }
     }
 
-    private async Task DispatchEventAsync(Percolator.Chat.SeedWork.IDomainEvent domainEvent, Pkh destinationPkh, CancellationToken ct)
+    private async Task DispatchEventAsync(Percolator.Chat.SeedWork.IDomainEvent domainEvent, PeerId destinationPeerId, CancellationToken ct)
     {
         switch (domainEvent)
         {
@@ -143,8 +147,35 @@ public sealed class OutboxDispatcherWorker : BackgroundService
 
             case MemberInvitedDomainEvent inviteEvent:
                 // Dispatch GroupInvite via IRemoteEnvelopeSender
-                // TODO: Create ChatEnvelope with GroupInvite message
-                _logger.LogInformation("MemberInvitedDomainEvent for conversation {ConversationId} to participant {Pkh} - invite dispatch not yet implemented", inviteEvent.ConversationId, inviteEvent.ParticipantId.Pkh);
+                // Query relay's routing profile to get endpoint information
+                var relayProfile = await _peerRoutingProfileRepository.GetByIdAsync(
+                    new Percolator.Network.PeerId(inviteEvent.RelayPeerId.Value), ct).ConfigureAwait(false);
+                
+                string relayHost = null;
+                int? relayPort = null;
+                
+                if (relayProfile != null && relayProfile.Endpoints.Count > 0)
+                {
+                    var endpoint = relayProfile.Endpoints.FirstOrDefault()?.EndPoint;
+                    if (endpoint != null)
+                    {
+                        relayHost = endpoint.Host;
+                        relayPort = endpoint.Port;
+                    }
+                }
+                
+                if (relayHost == null || relayPort == null)
+                {
+                    _logger.LogWarning("Cannot dispatch GroupInvite for conversation {ConversationId} - relay endpoint not found for RelayPeerId {RelayPeerId}", 
+                        inviteEvent.ConversationId, inviteEvent.RelayPeerId.Value);
+                    MarkAsProcessed(outboxItem);
+                    await _db.SaveChangesAsync(ct);
+                    return;
+                }
+                
+                // TODO: Create ChatEnvelope with GroupInvite message and populate relay_host/relay_port
+                _logger.LogInformation("MemberInvitedDomainEvent for conversation {ConversationId} to participant {PeerId} - invite dispatch with relay endpoint {RelayHost}:{RelayPort} not yet implemented", 
+                    inviteEvent.ConversationId, inviteEvent.ParticipantId.Value, relayHost, relayPort);
                 break;
 
             default:

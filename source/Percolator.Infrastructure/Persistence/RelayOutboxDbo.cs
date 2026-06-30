@@ -1,4 +1,4 @@
-using Percolator.Chat.Messaging.ValueObjects;
+using Percolator.Identity;
 
 namespace Percolator.Infrastructure.Persistence;
 
@@ -11,6 +11,6 @@ public sealed class RelayOutboxDbo
     public Guid Id { get; set; }
     public string EventType { get; set; } = null!;
     public string PayloadJson { get; set; } = null!;
-    public Pkh DestinationPkh { get; set; } = null!;
+    public PeerId DestinationPeerId { get; set; }
     public DateTimeOffset? ProcessedAtUtc { get; set; }
 }

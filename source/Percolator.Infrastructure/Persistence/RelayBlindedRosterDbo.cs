@@ -1,10 +1,10 @@
-using Percolator.Chat.Messaging.ValueObjects;
+using Percolator.Identity;
 
 namespace Percolator.Infrastructure.Persistence;
 
 public sealed class RelayBlindedRosterDbo
 {
     public Guid ConversationId { get; set; }
-    public Pkh MemberPkh { get; set; } = null!;
+    public PublicIdentityId MemberPublicIdentityId { get; set; }
     public DateTimeOffset AddedAtUtc { get; set; }
 }

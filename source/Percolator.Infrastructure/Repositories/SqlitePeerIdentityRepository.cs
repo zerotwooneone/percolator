@@ -24,7 +24,7 @@ public sealed class SqlitePeerIdentityRepository : IPeerIdentityRepository
         aggregate.SetLastKnownProfileRevision(row.LastKnownProfileRevision);
 
         var keys = await _db.PreKeyBundles.AsNoTracking()
-            .Where(k => k.PeerId == id.Value)
+            .Where(k => k.PeerId.Value == id.Value)
             .ToListAsync(ct);
         keys = keys.OrderBy(k => k.NotBeforeUtc).ToList();
         var now = DateTimeOffset.UtcNow;

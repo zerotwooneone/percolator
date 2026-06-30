@@ -18,7 +18,7 @@ public sealed class GroupConversation
     public Messaging.ValueObjects.ConversationId Id { get; }
     public GroupState State { get; private set; }
     public string? Name { get; private set; }
-    public GroupParticipantId RelayIdentity { get; }
+    public ChatPeerId RelayPeerId { get; }
     public IReadOnlyList<GroupMember> Members => new ReadOnlyCollection<GroupMember>(_members);
     public IReadOnlyList<IDomainEvent> GetDomainEvents() => _domainEvents;
     public void ClearDomainEvents() => _domainEvents.Clear();
@@ -26,7 +26,7 @@ public sealed class GroupConversation
     public GroupConversation(
         Messaging.ValueObjects.ConversationId id,
         GroupState state,
-        GroupParticipantId relayIdentity,
+        ChatPeerId relayPeerId,
         IEnumerable<GroupMember> members,
         string? name = null)
     {
@@ -43,7 +43,7 @@ public sealed class GroupConversation
             throw new ArgumentException("Cannot add removed members to a group conversation.", nameof(members));
         }
 
-        if (memberList.Select(m => m.ParticipantId.Pkh).Distinct().Count() != memberList.Count)
+        if (memberList.Select(m => m.PeerId).Distinct().Count() != memberList.Count)
         {
             throw new ArgumentException("A group conversation cannot have duplicate members.", nameof(members));
         }
@@ -55,7 +55,7 @@ public sealed class GroupConversation
 
         Id = id;
         State = state;
-        RelayIdentity = relayIdentity;
+        RelayPeerId = relayPeerId;
         Name = name;
         _members.AddRange(memberList);
 
@@ -63,12 +63,12 @@ public sealed class GroupConversation
         _domainEvents.Add(new GroupProvisioningRequestedDomainEvent(
             Id,
             State.PublicParams,
-            memberList.Select(m => m.ParticipantId.Pkh).ToList()));
+            memberList.Select(m => m.PeerId).ToList()));
     }
 
     public void AddMember(GroupMember member)
     {
-        if (_members.Any(m => m.ParticipantId.Pkh.Span.SequenceEqual(member.ParticipantId.Pkh.Span) && m.RemovedAtUtc == null))
+        if (_members.Any(m => m.PeerId.Value == member.PeerId.Value && m.RemovedAtUtc == null))
         {
             throw new InvalidOperationException("Member is already in the group.");
         }
@@ -76,27 +76,27 @@ public sealed class GroupConversation
         _members.Add(member);
     }
 
-    public void InviteMember(GroupParticipantId participantId, ChatSenderKeyDistributionMessageBytes distributionMessage)
+    public void InviteMember(ChatPeerId peerId, ChatSenderKeyDistributionMessageBytes distributionMessage)
     {
-        if (_members.Any(m => m.ParticipantId.Pkh.Span.SequenceEqual(participantId.Pkh.Span) && m.RemovedAtUtc == null))
+        if (_members.Any(m => m.PeerId.Value == peerId.Value && m.RemovedAtUtc == null))
         {
             throw new InvalidOperationException("Member is already in the group.");
         }
 
-        var member = new GroupMember(Id, participantId, GroupMemberRole.Member, DateTimeOffset.UtcNow);
+        var member = new GroupMember(Id, peerId, GroupMemberRole.Member, DateTimeOffset.UtcNow);
         _members.Add(member);
 
         // Register domain event for member invitation
         _domainEvents.Add(new MemberInvitedDomainEvent(
             Id,
-            participantId,
+            peerId,
             distributionMessage,
-            RelayIdentity.Pkh));
+            RelayPeerId));
     }
 
-    public void RemoveMember(GroupParticipantId participantId, DateTimeOffset when)
+    public void RemoveMember(ChatPeerId peerId, DateTimeOffset when)
     {
-        var member = _members.FirstOrDefault(m => m.ParticipantId.Pkh.Span.SequenceEqual(participantId.Pkh.Span) && m.RemovedAtUtc == null);
+        var member = _members.FirstOrDefault(m => m.PeerId.Value == peerId.Value && m.RemovedAtUtc == null);
         if (member == null)
         {
             throw new InvalidOperationException("Member not found in group.");
@@ -105,7 +105,7 @@ public sealed class GroupConversation
         // Ensure at least one admin remains
         if (member.Role == GroupMemberRole.Admin)
         {
-            var remainingAdmins = _members.Count(m => m.Role == GroupMemberRole.Admin && !m.ParticipantId.Pkh.Span.SequenceEqual(participantId.Pkh.Span) && m.RemovedAtUtc == null);
+            var remainingAdmins = _members.Count(m => m.Role == GroupMemberRole.Admin && m.PeerId.Value != peerId.Value && m.RemovedAtUtc == null);
             if (remainingAdmins == 0)
                 throw new InvalidOperationException("Cannot remove the last admin from the group.");
         }

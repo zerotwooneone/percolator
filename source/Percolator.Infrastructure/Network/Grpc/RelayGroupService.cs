@@ -4,6 +4,7 @@ using Percolator.Chat.GroupLedger;
 using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Contracts;
 using Percolator.Cryptography;
+using Percolator.Identity;
 
 namespace Percolator.Infrastructure.Network.Grpc;
 
@@ -83,25 +84,22 @@ public sealed class RelayGroupService : Percolator.Contracts.RelayGroupService.R
                 throw new ArgumentException("conversation_id is required.");
             if (request.PublicParams is null)
                 throw new ArgumentException("public_params is required.");
-            if (request.MemberPublicIdentityIds.Count == 0)
-                throw new ArgumentException("member_public_identity_ids must contain at least one member.");
+            if (request.MemberPublicIdentityIds.Count < 1)
+                throw new ArgumentException("member_public_identity_ids must contain at least two members.");
 
             // Boundary Defensive Copy (Protobuf ByteString -> Domain Primitive)
             var conversationId = new ConversationId(new Guid(request.ConversationId.ToByteArray()));
             var publicParams = RelayGroupPublicParamsBytes.FromBytesOwned(request.PublicParams.ToByteArray());
 
-            // Convert PublicIdentityIds to PKHs for domain layer
-            // Note: This is a temporary placeholder. In a real implementation, we would need to
-            // look up the PKH for each PublicIdentityId. For now, we'll use a placeholder conversion.
-            // The actual implementation would require IPeerIdentityRepository to resolve PublicIdentityId -> PKH.
-            var memberPkh = request.MemberPublicIdentityIds
-                .Select(id => Pkh.FromBytesOwned(id.ToByteArray())) // Placeholder: using UUID bytes as PKH
+            // Convert PublicIdentityIds from protobuf to domain primitives
+            var memberPublicIdentityIds = request.MemberPublicIdentityIds
+                .Select(id => new PublicIdentityId(new Guid(id.ToByteArray())))
                 .ToList();
 
             await _ledgerRepository.ProvisionNewGroupAsync(
                 conversationId,
                 publicParams,
-                memberPkh,
+                memberPublicIdentityIds,
                 context.CancellationToken).ConfigureAwait(false);
 
             return new ProvisionGroupResponse { Success = true };
