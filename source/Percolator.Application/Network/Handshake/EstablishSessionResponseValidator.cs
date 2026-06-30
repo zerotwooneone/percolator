@@ -94,7 +94,7 @@ internal sealed class EstablishSessionResponseValidator : IEstablishSessionRespo
             return null;
         }
 
-        var remotePublicIdentityId = respPayload.PublicIdentityId.ToByteArray();
+        var remotePublicIdentityId = new Guid(respPayload.PublicIdentityId.ToByteArray());
 
         return new EstablishSessionResponseValidationResult(
             sid,

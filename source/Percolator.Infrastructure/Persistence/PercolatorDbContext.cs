@@ -22,7 +22,7 @@ public class PercolatorDbContext : DbContext
     }
 
     public DbSet<PeerIdentityDbo> PeerIdentities { get; set; } = null!;
-    public DbSet<Identity.PeerIdentityKeyDbo> PeerIdentityKeys_V2 { get; set; } = null!;
+    public DbSet<Identity.PeerIdentityKeyDbo> PeerIdentityKeys { get; set; } = null!;
     public DbSet<PeerVerificationDbo> PeerVerifications { get; set; } = null!;
     public DbSet<PreKeyBundleDbo> PreKeyBundles { get; set; } = null!;
     public DbSet<SignedPreKeyDbo> SignedPreKeys { get; set; } = null!;
@@ -126,7 +126,7 @@ public class PercolatorDbContext : DbContext
 
         modelBuilder.Entity<Identity.PeerIdentityKeyDbo>(entity =>
         {
-            entity.ToTable("PeerIdentityKeys_V2");
+            entity.ToTable("PeerIdentityKeys");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.PeerId).IsRequired();
             entity.Property(e => e.PublicKeySpki).IsRequired();

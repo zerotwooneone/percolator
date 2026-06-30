@@ -261,7 +261,7 @@ namespace Percolator.Application.Network
                 AcceptorIdentityKey = ByteString.CopyFrom(_active.Keys.IdentitySigningKey.ExportSubjectPublicKeyInfo()),
                 AcceptorX3DhEphemeralKey = ByteString.CopyFrom(x3.EphemeralPublic.ToArray()),
                 InitialRatchetMessage = ByteString.CopyFrom(initial.ToArray()),
-                AcceptorPublicIdentityId = ByteString.CopyFrom(_active.PublicIdentityId.Value.ToByteArray())
+                AcceptorPublicIdentityId = ByteString.CopyFrom(_active.Identity.PublicIdentityId.Value.ToByteArray())
             };
 
             InviteHandshakeResponseDeliveryResult delivery;

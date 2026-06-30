@@ -505,7 +505,7 @@ namespace Percolator.Application.Network.Handshake
                     peerIdentity.AddKey(remoteIdentitySpki, notBefore: now, expiresAt: now.AddYears(100), now: now);
                 }
 
-                if (peerIdentity.DisplayName is null && sentInvitation is not null && !string.IsNullOrWhiteSpace(sentInvitation.TargetDisplayName))
+                if (sentInvitation is not null && !string.IsNullOrWhiteSpace(sentInvitation.TargetDisplayName))
                 {
                     peerIdentity.SetDisplayName(sentInvitation.TargetDisplayName);
                 }

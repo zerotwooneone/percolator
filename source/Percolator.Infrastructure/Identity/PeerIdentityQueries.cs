@@ -22,7 +22,7 @@ public sealed class PeerIdentityQueries : IPeerIdentityQueries
         var candidateKeys = await db.PeerIdentities
             .AsNoTracking()
             .Join(
-                db.PeerIdentityKeys_V2,
+                db.PeerIdentityKeys,
                 peer => peer.PeerId,
                 key => key.PeerId,
                 (peer, key) => new { peer, key })
@@ -46,7 +46,7 @@ public sealed class PeerIdentityQueries : IPeerIdentityQueries
     {
         using var db = _dbFactory.CreateDbContext();
         
-        var activeKeys = await db.PeerIdentityKeys_V2
+        var activeKeys = await db.PeerIdentityKeys
             .AsNoTracking()
             .Where(x => x.NotBeforeUtc <= DateTimeOffset.UtcNow)
             .Where(x => x.ExpiresAtUtc > DateTimeOffset.UtcNow)

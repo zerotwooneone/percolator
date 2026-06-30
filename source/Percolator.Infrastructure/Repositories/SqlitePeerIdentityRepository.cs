@@ -57,7 +57,7 @@ public sealed class SqlitePeerIdentityRepository : IPeerIdentityRepository
         var insert = new PeerIdentityDbo
         {
             PublicIdentityId = publicIdentityId,
-            Name = string.Empty,
+            Name = publicIdentityId.ToString(),
             Version = 1,
             CreatedAtUtc = now,
             UpdatedAtUtc = now

@@ -45,6 +45,7 @@ public sealed class SimulatedPeerModel : IDisposable
 
     public SimulatedPeerModel(
         Percolator.Network.PeerId peerId,
+        PublicIdentityId publicIdentityId,
         int selfIdentityId,
         string? displayName,
         bool isRelayCapable,
@@ -66,6 +67,7 @@ public sealed class SimulatedPeerModel : IDisposable
         List<SimulatedPublishedPreKeyBundleModel>? publishedPreKeyBundles = null)
     {
         PeerId = peerId;
+        PublicIdentityId = publicIdentityId;
         SelfIdentityId = selfIdentityId;
 
         IdentitySigningKeySpki = identitySigningKeySpki;
@@ -118,6 +120,7 @@ public sealed class SimulatedPeerModel : IDisposable
     }
 
     public Percolator.Network.PeerId PeerId { get; }
+    public PublicIdentityId PublicIdentityId { get; }
 
     public int SelfIdentityId { get; }
 

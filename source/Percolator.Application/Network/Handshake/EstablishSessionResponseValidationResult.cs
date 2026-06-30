@@ -11,13 +11,13 @@ public sealed class EstablishSessionResponseValidationResult
     public SessionId SessionId { get; }
     public byte[] RemoteIdentitySpki { get; }
     public byte[] RemotePublicKeyHash { get; }
-    public byte[] RemotePublicIdentityId { get; }
+    public Guid RemotePublicIdentityId { get; }
 
     public EstablishSessionResponseValidationResult(
         SessionId sessionId,
         byte[] remoteIdentitySpki,
         byte[] remotePublicKeyHash,
-        byte[] remotePublicIdentityId)
+        Guid remotePublicIdentityId)
     {
         SessionId = sessionId;
         RemoteIdentitySpki = remoteIdentitySpki;

@@ -1157,7 +1157,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 IdentitySigningKey = ByteString.CopyFrom(pending!.InitiatorIdentityKeySpki),
                 EphemeralKey = ByteString.CopyFrom(pending.InitiatorEphemeralKeySpki),
                 PrekeyId = ByteString.CopyFrom(pending.SignedPreKeyId.ToByteArray()),
-                PublicIdentityId = ByteString.CopyFrom(model.PublicIdentityId.Value.ToByteArray())
+                PublicIdentityId = ByteString.CopyFrom(pending.PublicIdentityId.Value.ToByteArray())
             };
 
             if (pending.OneTimePreKeyId.HasValue)
