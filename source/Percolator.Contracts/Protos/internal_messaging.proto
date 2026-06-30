@@ -139,14 +139,14 @@ message GroupInvite {
   optional uint32 version = 100;
   // ConversationId (GUID bytes) for the group being joined
   optional bytes conversation_id = 1;
-  // The inviter's public key hash (PKH, 32 bytes)
-  optional bytes inviter_pkh = 2;
+  // The inviter's PublicIdentityId (UUID bytes)
+  optional bytes inviter_public_identity_id = 2;
   // The encrypted GroupMasterKey (encrypted for the invitee)
   optional bytes group_master_key = 3;
   // Sender key distribution message for the group
   optional bytes sender_key_distribution = 4;
-  // The relay's public key hash (PKH, 32 bytes) for group provisioning
-  optional bytes relay_pkh = 5;
+  // The relay's PublicIdentityId (UUID bytes) for group provisioning
+  optional bytes relay_public_identity_id = 5;
   // Optional group name
   optional string name = 6;
 }

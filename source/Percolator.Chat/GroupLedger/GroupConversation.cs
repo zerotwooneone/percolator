@@ -58,7 +58,7 @@ public sealed class GroupConversation
         RelayIdentity = relayIdentity;
         Name = name;
         _members.AddRange(memberList);
-        
+
         // Register domain event for group provisioning
         _domainEvents.Add(new GroupProvisioningRequestedDomainEvent(
             Id,
@@ -85,7 +85,7 @@ public sealed class GroupConversation
 
         var member = new GroupMember(Id, participantId, GroupMemberRole.Member, DateTimeOffset.UtcNow);
         _members.Add(member);
-        
+
         // Register domain event for member invitation
         _domainEvents.Add(new MemberInvitedDomainEvent(
             Id,

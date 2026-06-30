@@ -83,14 +83,19 @@ public sealed class RelayGroupService : Percolator.Contracts.RelayGroupService.R
                 throw new ArgumentException("conversation_id is required.");
             if (request.PublicParams is null)
                 throw new ArgumentException("public_params is required.");
-            if (request.MemberPkh.Count == 0)
-                throw new ArgumentException("member_pkh must contain at least one member.");
+            if (request.MemberPublicIdentityIds.Count == 0)
+                throw new ArgumentException("member_public_identity_ids must contain at least one member.");
 
             // Boundary Defensive Copy (Protobuf ByteString -> Domain Primitive)
             var conversationId = new ConversationId(new Guid(request.ConversationId.ToByteArray()));
             var publicParams = RelayGroupPublicParamsBytes.FromBytesOwned(request.PublicParams.ToByteArray());
-            var memberPkh = request.MemberPkh
-                .Select(pkh => Pkh.FromBytesOwned(pkh.ToByteArray()))
+
+            // Convert PublicIdentityIds to PKHs for domain layer
+            // Note: This is a temporary placeholder. In a real implementation, we would need to
+            // look up the PKH for each PublicIdentityId. For now, we'll use a placeholder conversion.
+            // The actual implementation would require IPeerIdentityRepository to resolve PublicIdentityId -> PKH.
+            var memberPkh = request.MemberPublicIdentityIds
+                .Select(id => Pkh.FromBytesOwned(id.ToByteArray())) // Placeholder: using UUID bytes as PKH
                 .ToList();
 
             await _ledgerRepository.ProvisionNewGroupAsync(

@@ -257,8 +257,8 @@ message ProvisionGroupRequest {
     optional bytes conversation_id = 1;
     // ZK group public parameters for the group
     optional bytes public_params = 2;
-    // List of member PKHs for the blinded roster
-    repeated bytes member_pkh = 3;
+    // List of member PublicIdentityIds (UUID bytes) for the blinded roster
+    repeated bytes member_public_identity_ids = 3;
 }
 
 message ProvisionGroupResponse {
