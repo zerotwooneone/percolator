@@ -407,6 +407,38 @@ Using compiler errors and search, find the protobuf instantiations of the above 
     *   `Percolator.Application\Network\ApprovePendingSessionCommand.cs` (`ApprovePendingSessionHandler`): `new InviteHandshakeResponse`
     *   `Desktop.Wpf\Features\Simulator\SimulatorStateService.cs`: `new InviteHandshakeResponse`
 
+      *   `Percolator.Application\Handshake\InitiatorFinalizeService.cs`: `new InviteHandshakeResponse`
+
+## Chunk 5.3.b - Include Relay Endpoint in Group Provisioning/Invites
+
+The Goal: In a P2P environment without a central server, when a user is invited to a group hosted on a specific relay, the invitee MUST know the network address (hostname and port) of the relay to establish a connection. Currently, `GroupInvite` only includes the relay's `PublicIdentityId`, which is insufficient if the invitee has never encountered the relay before. We need to append relay endpoint info to the invite message.
+
+CRITICAL ARCHITECTURAL REQUIREMENT: The `Chat` domain (`GroupConversation`, `MemberInvitedDomainEvent`, etc.) MUST NOT know anything about hostnames, IP addresses, or ports. These are network-layer concerns. The `Chat` domain is only concerned with abstract identifiers like `PeerId` and `PublicIdentityId`.
+
+**1. Update `internal_messaging.proto`**
+*   File: `Percolator.Contracts/Protos/internal_messaging.proto`
+*   In `GroupInvite`, append the relay network coordinates:
+    *   `optional string relay_host = 7;`
+    *   `optional int32 relay_port = 8;`
+
+**2. Update Outbox Dispatcher (Sender Side - Infrastructure)**
+*   File: `Percolator.Infrastructure/Outbox/OutboxDispatcherWorker.cs`
+*   Inject `IPeerRoutingProfileRepository` into `OutboxDispatcherWorker`.
+*   In `DispatchEventAsync`, for the `MemberInvitedDomainEvent` case:
+    1.  The event contains the `RelayPeerId` (which is a `uint` wrapped in `ChatPeerId`).
+    2.  Query `IPeerRoutingProfileRepository.GetByIdAsync(new Percolator.Network.PeerId(inviteEvent.RelayPeerId.Value), ct)`.
+    3.  Extract the relay's host and port. Look at `profile.Endpoints.FirstOrDefault()?.EndPoint` (which is a `DnsEndPoint`).
+    4.  *(When implemented)* Populate the new `relay_host` and `relay_port` fields on the `GroupInvite` protobuf message before sending it via `IRemoteEnvelopeSender`.
+
+**3. Update Receiver Logic (Application)**
+*   File: `Percolator.Application/Chat/GroupInviteHandler.cs`
+*   Inject `IPeerRoutingProfileRepository` into `GroupInviteHandler`.
+*   When extracting the `GroupInvite`, check if `relay_host` and `relay_port` are provided.
+*   If provided, construct a `DnsEndPoint`.
+*   Fetch the relay's profile using `IPeerRoutingProfileRepository.GetByIdAsync(relayPeerId)` (where `relayPeerId` is the network `PeerId` derived from the `relayIdentity`).
+*   If the profile exists, call `AddGrpcEndPoint` with the endpoint and current UTC time, then `UpsertAsync`.
+*   If it doesn't exist, create a new `PeerRoutingProfile`, bind the identity, set the endpoint, and save it. (This ensures the local networking layer knows how to reach the newly discovered relay).
+
 
 ---
 
