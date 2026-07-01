@@ -439,6 +439,217 @@ CRITICAL ARCHITECTURAL REQUIREMENT: The `Chat` domain (`GroupConversation`, `Mem
 *   If the profile exists, call `AddGrpcEndPoint` with the endpoint and current UTC time, then `UpsertAsync`.
 *   If it doesn't exist, create a new `PeerRoutingProfile`, bind the identity, set the endpoint, and save it. (This ensures the local networking layer knows how to reach the newly discovered relay).
 
+## Chunk 5.4 - Fix Group Member Identity Resolution using Polymorphic ParticipantId
+
+The Goal: Currently, the codebase is in a transitional state. We updated domain events and network contracts to use universal `PublicIdentityId`s (UUIDs), but the `GroupConversation` domain object and its internal `GroupMember` still rely on `ChatPeerId` (which wraps a local database `PeerId`). This is structurally incorrect because the user's *own* local identity (`SelfIdentity`) does not have a `PeerId`. 
+
+To solve this while avoiding N+1 database queries downstream, we will introduce a discriminated union `ParticipantId` type in the Chat domain. This type will act as a memoized identity resolution token carrying the universal UUID alongside the localized database surrogate key.
+
+**1. Update Domain Layer (`Percolator.Chat`)**
+*   **Remove** usage of raw `ChatPeerId` for group members.
+*   **Create `ChatSelfId.cs`**:
+    *   File: `Percolator.Chat/GroupMembership/ChatSelfId.cs`
+    *   Create a simple wrapper: `public readonly record struct ChatSelfId(uint Value);`
+*   **Create `ParticipantId.cs`**:
+    *   File: `Percolator.Chat/GroupMembership/ParticipantId.cs`
+    *   Implement the discriminated union:
+    ```csharp
+    public abstract record ParticipantId(PublicIdentityId PublicIdentityId);
+
+    public sealed record RemoteParticipantId(PublicIdentityId PublicIdentityId, ChatPeerId PeerId) 
+        : ParticipantId(PublicIdentityId);
+
+    public sealed record LocalParticipantId(PublicIdentityId PublicIdentityId, ChatSelfId SelfId) 
+        : ParticipantId(PublicIdentityId);
+    ```
+*   **Update `GroupMember.cs`**:
+    *   Change `ChatPeerId PeerId` property to `ParticipantId ParticipantId`.
+*   **Update `GroupConversation.cs`**:
+    *   Change `ChatPeerId RelayPeerId` to `PublicIdentityId RelayPublicIdentityId`.
+    *   Update constructor, `AddMember`, `InviteMember`, and `RemoveMember` to take `ParticipantId` instead of `ChatPeerId`.
+*   **Update Domain Events**:
+    *   Update `MemberInvitedDomainEvent.cs` and `GroupProvisioningRequestedDomainEvent.cs` to use `ParticipantId` for members and `PublicIdentityId` for the relay.
+
+**2. Update Persistence Layer (`Percolator.Infrastructure.Chat`)**
+*   **Update `GroupMemberDbo.cs`**:
+    *   Add `public Guid PublicIdentityId { get; set; }` (Required).
+    *   Change `PeerId PeerId` to `public uint? PeerId { get; set; }`.
+    *   Add `public uint? SelfId { get; set; }`.
+*   **Update `PercolatorDbContext.cs`**:
+    *   Locate the `modelBuilder.Entity<Percolator.Infrastructure.Chat.Persistence.GroupMemberDbo>` configuration block.
+    *   Change the primary key from `entity.HasKey(e => new { e.ConversationId, e.PeerId });` to `entity.HasKey(e => new { e.ConversationId, e.PublicIdentityId });`.
+*   **Update `SqliteGroupConversationRepository.cs`**:
+    *   When pulling from the DB (`ToDomain`), instantiate the correct `ParticipantId` subclass: if `PeerId` is not null, return `RemoteParticipantId`; if `SelfId` is not null, return `LocalParticipantId`.
+    *   When persisting (`AddAsync`/`UpdateAsync`), populate `GroupMemberDbo.PublicIdentityId`, and assign the correct nullable `PeerId` or `SelfId` depending on the subclass pattern match.
+    *   **Outbox Routing**: When constructing outbox messages, use pattern matching on the domain event's `ParticipantId`. If it's a `RemoteParticipantId`, use its `PeerId` for `DestinationPeerId`.
+
+**3. Update Outbound Paths (Application Layer)**
+*   **Update `IGroupProvisioningAppService.cs` & `GroupProvisioningAppService.cs`**:
+    *   Change the signature to accept `IReadOnlyList<ParticipantId> invitees` and `PublicIdentityId relayIdentity`. The caller (CLI/UI layer) is now responsible for providing the fully resolved `ParticipantId` unions.
+*   **Update `SendGroupMessageCommandHandler.cs`**:
+    *   When establishing the network route `RecipientRoute`, resolve the `group.RelayPublicIdentityId` to a network `PeerId`.
+
+**4. Update Inbound Paths & Messaging (Application Layer)**
+*   **Update `IChatMessageWriter.cs` & `SqliteChatMessageWriter.cs`**:
+    *   Update methods (`AddTextMessageAsync`, `AddReadReceiptAsync`, etc.) to take `ParticipantId` instead of `ChatPeerId`.
+*   **Update Message Commands (`ReceiveTextMessageCommand.cs`, etc.)**:
+    *   Update incoming mediatR commands and their handlers to carry the new `ParticipantId` instead of `ChatPeerId`.
+*   **Update `GroupInviteHandler.cs`**:
+    *   When parsing the `GroupInvite` protobuf, use `IPeerIdentityRepository` and `ISelfIdentityQueries` to map the raw `inviter_public_identity_id` into a `RemoteParticipantId` and the local identity into a `LocalParticipantId` before inserting them into `GroupConversation`.
+
+**5. Testing & Validation**
+*   Accept compiler errors and fix them across the test suite by updating mock setups to pass `ParticipantId` unions.
+*   Run the EF Core migration to verify `GroupMemberDbo` pk migration succeeds.
+
+## Chunk 5.4.a - Review Percolator.Chat Library for uint/int SelfIdentityId Usage
+
+The Goal: After defining the `ChatSelfId` domain type in Chunk 5.4, we must review the Percolator.Chat library for internal usages of raw `uint` or `int` selfIdentityId. These should be updated to use the new `ChatSelfId` type for type safety and consistency within the domain library.
+
+**Candidates for Review (Internal to Percolator.Chat):**
+
+**1. Repository Interfaces (`Percolator.Chat` root)**
+*   `IGroupConversationRepository.cs`:
+    *   Method signatures use `uint selfIdentityId` (lines 11-13, 18).
+*   `IMessageRepository.cs`:
+    *   Method signatures use `int selfIdentityId` (lines 12-14).
+*   `IDirectConversationRepository.cs`:
+    *   Method signatures use `int selfIdentityId` (lines 11-14).
+
+**2. Messaging Application Interfaces (`Percolator.Chat.Messaging.App`)**
+*   `IChatMessageWriter.cs`:
+    *   All method signatures use `uint selfIdentityId` (lines 10, 19, 27, 35).
+*   `IConversationResolver.cs`:
+    *   `DirectConversationResolution` record uses `uint SelfIdentityId` (line 13).
+
+**3. Messaging Domain Events (`Percolator.Chat.Messaging.Events`)**
+*   `DeliveredReceiptReceivedEvent.cs`:
+    *   Property `SelfIdentityId` is `uint` (line 11, constructor line 19, 26).
+*   `EmojiAnnotationReceivedEvent.cs`:
+    *   Property `SelfIdentityId` is `uint` (line 10, constructor line 18, 25).
+*   `ReadReceiptReceivedEvent.cs`:
+    *   Property `SelfIdentityId` is `uint` (line 10, constructor line 17, 23).
+*   `TextMessagePostedEvent.cs`:
+    *   Property `SenderSelfIdentityId` is `uint` (line 12, constructor line 21, 29).
+*   `TextMessageReceivedEvent.cs`:
+    *   Property `SelfIdentityId` is `uint` (line 11, constructor line 20, 28).
+
+**4. Messaging Application Commands (`Percolator.Chat.Messaging.App.Commands`)**
+*   `UpdateGroupInfoCommand.cs`:
+    *   Property `SelfIdentityId` is `int` (line 8).
+
+**5. Messaging Application Handlers (`Percolator.Chat.Messaging.App.Handlers`)**
+*   `PostDeliveredReceiptHandler.cs`:
+    *   Uses `resolution.SelfIdentityId` (uint) and casts to `ChatPeerId` (lines 31, 40).
+*   `PostReadReceiptHandler.cs`:
+    *   Uses `resolution.SelfIdentityId` (uint) and casts to `ChatPeerId` (lines 31, 41).
+*   `PostEmojiAnnotationHandler.cs`:
+    *   Uses `resolution.SelfIdentityId` (uint) and casts to `ChatPeerId` (lines 31, 42).
+*   `ReceiveEmojiAnnotationHandler.cs`:
+    *   Uses `resolution.SelfIdentityId` (uint) (lines 31, 41).
+*   `ReceiveReadReceiptHandler.cs`:
+    *   Uses `resolution.SelfIdentityId` (uint) (lines 31, 40).
+*   `ReceiveTextMessageHandler.cs`:
+    *   Uses `resolution.SelfIdentityId` (uint) (lines 32, 42).
+*   `ReceiveDeliveredReceiptHandler.cs`:
+    *   Uses `resolution.SelfIdentityId` (uint) (lines 32, 41).
+*   `UpdateGroupInfoHandler.cs`:
+    *   Uses `request.SelfIdentityId` (int) (lines 17, 25).
+
+**Critical Semantic Rule:** `ChatPeerId` and `ChatSelfId` are semantically distinct types representing different identity concepts (remote peer vs. local self). These two uint values must never be converted or used interchangeably. If any code attempts to convert a `ChatPeerId` to a `ChatSelfId` or vice versa, the AI must stop immediately and ask the user for direction on how to handle this semantic mismatch.
+
+**Note:** This chunk is for informational purposes to guide the refactoring. External compiler errors (outside Percolator.Chat) are acceptable and will be addressed in subsequent chunks by the consuming application layers.
+
+## Chunk 5.4.b - Border Conversion Points: Identity Domain SelfId to Chat Domain ChatSelfId
+
+The Goal: Identify all public methods in Percolator.Chat that are called from outside the library (from Percolator.Application, Desktop.Wpf, etc.) where the Identity domain's `SelfId` (uint) must be converted to the Chat domain's `ChatSelfId` at the domain boundary. These are the integration points where the type conversion must occur after `ChatSelfId` is defined in Chunk 5.4.
+
+**Repository Interface Methods (Called from Percolator.Application):**
+
+**1. `IGroupConversationRepository`**
+*   **Method**: `GetByIdAsync(ConversationId conversationId, uint selfIdentityId, CancellationToken ct)`
+*   **External Callers**:
+    *   `SendGroupMessageCommandHandler.cs` (line 50): `GetByIdAsync(request.ConversationId, request.SelfIdentityId, ...)`
+    *   **Conversion Required**: `request.SelfIdentityId` (Identity domain `SelfId`) → `ChatSelfId`
+*   **Method**: `AddWithOutboxAsync(GroupConversation conversation, uint selfIdentityId, CancellationToken ct)`
+*   **External Callers**:
+    *   `GroupProvisioningAppService.cs` (line 97): `AddWithOutboxAsync(groupConversation, selfIdentityId, ...)`
+    *   **Conversion Required**: `selfIdentityId` (Identity domain `SelfId`) → `ChatSelfId`
+*   **Method**: `AddAsync(GroupConversation conversation, uint selfIdentityId, CancellationToken ct)`
+*   **External Callers**:
+    *   `GroupInviteHandler.cs` (line 169): `AddAsync(groupConversation, selfIdentityId.Value, ...)`
+    *   **Conversion Required**: `selfIdentityId.Value` (Identity domain `SelfId`) → `ChatSelfId`
+
+**2. `IChatMessageWriter`**
+*   **Method**: `AddTextMessageAsync(ConversationId conversationId, uint selfIdentityId, ChatPeerId senderId, ...)`
+*   **External Callers**:
+    *   `SendGroupMessageCommandHandler.cs` (line 81): `AddTextMessageAsync(..., request.SelfIdentityId, ...)`
+    *   `PostTextMessageHandler.cs` (line 39): `AddTextMessageAsync(..., resolution.SelfIdentityId, ...)`
+    *   `ProcessInternalEnvelopeHandler.cs` (line 479): `AddTextMessageAsync(..., request.Context.SelfIdentityId.Value, ...)`
+    *   **Conversion Required**: All `selfIdentityId` parameters (Identity domain `SelfId`) → `ChatSelfId`
+*   **Method**: `AddReadReceiptAsync(ConversationId conversationId, uint selfIdentityId, ChatPeerId readerId, ...)`
+*   **External Callers**: None found in current codebase (internal only)
+*   **Method**: `AddEmojiAnnotationAsync(ConversationId conversationId, uint selfIdentityId, ChatPeerId reactorId, ...)`
+*   **External Callers**: None found in current codebase (internal only)
+*   **Method**: `AddDeliveredReceiptAsync(ConversationId conversationId, uint selfIdentityId, ChatPeerId recipientId, ...)`
+*   **External Callers**: None found in current codebase (internal only)
+
+**3. `IDirectConversationRepository`**
+*   **Method**: `GetByIdAsync(ConversationId conversationId, int selfIdentityId, CancellationToken ct)`
+*   **External Callers**:
+    *   `RemotePeerResolver.cs` (line 32): `GetByIdAsync(convId, _activeIdentityContext.Identity.SelfIdentityId.Value, ...)`
+    *   **Conversion Required**: `_activeIdentityContext.Identity.SelfIdentityId.Value` (Identity domain `SelfId`) → `ChatSelfId`
+
+**Domain Events (Published to External Subscribers):**
+
+**4. `TextMessagePostedEvent`**
+*   **Property**: `uint SenderSelfIdentityId`
+*   **External Subscribers**:
+    *   `TextMessagePostedHandler.cs` (Percolator.Application) - line 44: compares with `_active.Identity.SelfIdentityId.Value`
+    *   `ChatStateUpdateHandlers.cs` (Desktop.Wpf) - line 42: passes to `TriggerReloadForConversation(..., notification.SenderSelfIdentityId, ...)`
+    *   **Conversion Required**: Event property remains `uint` (Identity domain `SelfId`), subscribers convert to `ChatSelfId` if needed
+
+**5. `TextMessageReceivedEvent`**
+*   **Property**: `uint SelfIdentityId`
+*   **External Subscribers**:
+    *   `ChatStateUpdateHandlers.cs` (Desktop.Wpf) - line 53: passes to `TriggerReloadForConversation(..., notification.SelfIdentityId, ...)`
+    *   **Conversion Required**: Event property remains `uint` (Identity domain `SelfId`), subscribers convert to `ChatSelfId` if needed
+
+**6. `DeliveredReceiptReceivedEvent`**
+*   **Property**: `uint SelfIdentityId`
+*   **External Subscribers**:
+    *   `DeliveredReceiptReceivedEventHandler.cs` (Desktop.Wpf) - does not use `SelfIdentityId` property
+    *   **Conversion Required**: Event property remains `uint` (Identity domain `SelfId`), subscribers convert to `ChatSelfId` if needed
+
+**7. `ReadReceiptReceivedEvent`**
+*   **Property**: `uint SelfIdentityId`
+*   **External Subscribers**: None found in current codebase
+*   **Conversion Required**: Event property remains `uint` (Identity domain `SelfId`), subscribers convert to `ChatSelfId` if needed
+
+**8. `EmojiAnnotationReceivedEvent`**
+*   **Property**: `uint SelfIdentityId`
+*   **External Subscribers**: None found in current codebase
+*   **Conversion Required**: Event property remains `uint` (Identity domain `SelfId`), subscribers convert to `ChatSelfId` if needed
+
+**Application Commands (Internal to Percolator.Chat):**
+
+**9. `UpdateGroupInfoCommand`**
+*   **Property**: `int SelfIdentityId`
+*   **External Callers**: None found (internal to Percolator.Chat)
+*   **Conversion Required**: Not applicable (internal)
+
+**Implementation Strategy for Chunk 5.4.b:**
+
+When implementing Chunk 5.4, after defining `ChatSelfId`:
+
+1. **Update Repository Interfaces**: Change method signatures from `uint selfIdentityId` to `ChatSelfId selfIdentityId`
+2. **Update External Callers**: Convert Identity domain `SelfId` to `ChatSelfId` at call sites:
+   - `SendGroupMessageCommandHandler.cs`: `new ChatSelfId(request.SelfIdentityId.Value)`
+   - `GroupProvisioningAppService.cs`: `new ChatSelfId(selfIdentityId.Value)`
+   - `GroupInviteHandler.cs`: `new ChatSelfId(selfIdentityId.Value)`
+   - `PostTextMessageHandler.cs`: `new ChatSelfId(resolution.SelfIdentityId)`
+   - `ProcessInternalEnvelopeHandler.cs`: `new ChatSelfId(request.Context.SelfIdentityId.Value)`
+   - `RemotePeerResolver.cs`: `new ChatSelfId(_activeIdentityContext.Identity.SelfIdentityId.Value)`
+3. **Domain Events**: Keep event properties as `uint` (Identity domain `SelfId`) to avoid breaking existing subscribers. Subscribers can convert to `ChatSelfId` if needed after the refactoring.
 
 ---
 
