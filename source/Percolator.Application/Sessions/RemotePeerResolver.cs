@@ -33,9 +33,7 @@ public class RemotePeerResolver : IRemotePeerResolver
         var conversation = await _directConversationRepository.GetByIdAsync(convId, new ChatSelfId(_activeIdentityContext.Identity.SelfIdentityId.Value), default).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"Direct conversation with id {sessionId} not found");
 
-        var localPeerId = _activeIdentityContext.Identity.Id;
-        var remote = conversation.Peer1.Value == localPeerId ? conversation.Peer2 : conversation.Peer1;
-        var remoteId = new IdentityPeerId(remote.Value);
+        var remoteId = new IdentityPeerId(conversation.Peer1.Value);
         _logger.LogInformation("Resolved remote peer {RemotePeerId} from session {SessionId}", remoteId, sessionId);
         return remoteId;
     }

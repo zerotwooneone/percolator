@@ -1,4 +1,5 @@
 using MediatR;
+using Percolator.Application.Apps.Chat.Commands;
 using Percolator.Application.Identity;
 using Percolator.Chat;
 using Percolator.Chat.GroupMembership;
@@ -34,25 +35,21 @@ public sealed class PostTextMessageHandler : IRequestHandler<PostTextMessageComm
         request.LookupKey.EnsureExactlyOne();
 
         var resolution = await _resolver.ResolveAsync(request.LookupKey, cancellationToken).ConfigureAwait(false);
-        var selfParticipantId = ((ISelfParticipantIdProvider) _active).Get();
-
+        
         await _writer.AddTextMessageAsync(
             resolution.Conversation.Id,
             resolution.SelfIdentityId,
-            selfParticipantId,
+            resolution.Conversation.Peer1,
             request.Content,
             request.MessageId,
             request.SentTimestampUtc,
             cancellationToken).ConfigureAwait(false);
 
-        await _publisher.Publish(new TextMessagePostedEvent(
-                resolution.Conversation.Id.Value,
-                request.MessageId.Value,
-                resolution.SelfIdentityId,
-                new[] { new ChatPeerId(resolution.Conversation.Peer1.Value), new ChatPeerId(resolution.Conversation.Peer2.Value) },
-                request.Content,
-                request.SentTimestampUtc,
-                DirectSessionIdValueObject.FromGuid(request.LookupKey.DirectSessionId)),
-            cancellationToken).ConfigureAwait(false);
+        var peerId = new Percolator.Identity.PeerId( resolution.Conversation.Peer1.Value);
+        await _publisher.Publish(new DispatchTextMessageCommand(
+            request.MessageId.Value,
+            request.Content,
+            request.SentTimestampUtc,
+            new[] {peerId}), cancellationToken).ConfigureAwait(false);
     }
 }

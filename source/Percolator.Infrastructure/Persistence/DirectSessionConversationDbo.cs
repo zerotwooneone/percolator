@@ -1,8 +1,11 @@
+using Percolator.Chat.GroupMembership;
+using Percolator.Chat.Messaging.ValueObjects;
+
 namespace Percolator.Infrastructure.Persistence;
 
 public class DirectSessionConversationDbo
 {
-    public uint SelfIdentityId { get; set; }
+    public ChatSelfId SelfIdentityId { get; set; }
     public Guid DirectSessionId { get; set; }
-    public Guid ConversationId { get; set; }
+    public ConversationId ConversationId { get; set; }
 }

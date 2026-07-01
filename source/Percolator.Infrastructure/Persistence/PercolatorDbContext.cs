@@ -222,7 +222,11 @@ public class PercolatorDbContext : DbContext
         {
             entity.ToTable("SelfIdentity");
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.Id)
+                .HasConversion(
+                    v => v.Value,
+                    v => new Percolator.Identity.SelfId(v))
+                .ValueGeneratedOnAdd();
             entity.Property(e => e.PublicIdentityId)
                 .HasConversion(
                     v => v.Value,
@@ -234,6 +238,16 @@ public class PercolatorDbContext : DbContext
                   .HasConversion(
                       v => v.ToUnixTimeMilliseconds(),
                       v => DateTimeOffset.FromUnixTimeMilliseconds(v));
+            entity.Property(e => e.ListeningPort)
+                .HasConversion(
+                    v => v.Value,
+                    v => new Percolator.Identity.Model.ListeningPort(v))
+                .IsRequired();
+            entity.Property(e => e.DeviceId)
+                .HasConversion(
+                    v => v.Value,
+                    v => new Percolator.Identity.DeviceId(v))
+                .IsRequired();
             entity.HasIndex(e => e.Name).IsUnique();
             entity.HasIndex(e => e.PublicIdentityId); // non-unique
             entity.HasIndex(e => e.LastUsedUtc);
@@ -465,11 +479,19 @@ public class PercolatorDbContext : DbContext
         {
             entity.ToTable("DirectSessionConversations");
             entity.HasKey(e => new { e.SelfIdentityId, e.DirectSessionId });
-            entity.Property(e => e.SelfIdentityId).IsRequired();
+            entity.Property(e => e.SelfIdentityId)
+                .HasConversion(
+                    v => v.Value,
+                    v => new Percolator.Chat.GroupMembership.ChatSelfId(v))
+                .IsRequired();
             entity.Property(e => e.DirectSessionId).IsRequired();
-            entity.Property(e => e.ConversationId).IsRequired();
+            entity.Property(e => e.ConversationId)
+                .HasConversion(
+                    v => v.Value,
+                    v => new Percolator.Chat.Messaging.ValueObjects.ConversationId(v))
+                .IsRequired();
             entity.HasIndex(e => new { e.SelfIdentityId, e.ConversationId }).IsUnique();
-            entity.HasQueryFilter(e => _active != null && _active.Identity != null && e.SelfIdentityId == _active.Identity.SelfIdentityId.Value);
+            entity.HasQueryFilter(e => _active != null && _active.Identity != null && e.SelfIdentityId.Value == _active.Identity.SelfIdentityId.Value);
         });
 
         // PendingSessions (Cryptography domain persistence)
@@ -569,7 +591,7 @@ public class PercolatorDbContext : DbContext
                 .HasForeignKey(p => p.ConversationId)
                 .IsRequired()
                 .OnDelete(DeleteBehavior.Cascade);
-            entity.HasQueryFilter(e => _active != null && _active.Identity != null && e.SelfIdentityId == _active.Identity.SelfIdentityId.Value);
+            entity.HasQueryFilter(e => _active != null && _active.Identity != null && e.SelfIdentityId.Value == _active.Identity.SelfIdentityId.Value);
         });
 
         // Messages
@@ -592,8 +614,16 @@ public class PercolatorDbContext : DbContext
         {
             entity.ToTable("ConversationParticipants");
             entity.HasKey(e => new { e.ConversationId, e.ParticipantId });
-            entity.Property(e => e.ConversationId).IsRequired();
-            entity.Property(e => e.ParticipantId).IsRequired();
+            entity.Property(e => e.ConversationId)
+                .HasConversion(
+                    v => v.Value,
+                    v => new Percolator.Chat.Messaging.ValueObjects.ConversationId(v))
+                .IsRequired();
+            entity.Property(e => e.ParticipantId)
+                .HasConversion(
+                    v => v.Value,
+                    v => new Percolator.Chat.GroupMembership.ChatPeerId(v))
+                .IsRequired();
         });
 
         // ReadReceipts

@@ -11,17 +11,12 @@ public sealed class DirectConversation
 {
     public ValueObjects.ConversationId Id { get; }
     public ChatPeerId Peer1 { get; }
-    public ChatPeerId Peer2 { get; }
+    public ChatSelfId SelfId { get; }
 
-    public DirectConversation(ValueObjects.ConversationId id, ChatPeerId peer1, ChatPeerId peer2)
+    public DirectConversation(ValueObjects.ConversationId id, ChatPeerId peer1, ChatSelfId selfId)
     {
-        if (peer1.Value == peer2.Value)
-        {
-            throw new ArgumentException("A direct conversation cannot have the same peer as both participants.", nameof(peer2));
-        }
-
         Id = id;
         Peer1 = peer1;
-        Peer2 = peer2;
+        SelfId = selfId;
     }
 }

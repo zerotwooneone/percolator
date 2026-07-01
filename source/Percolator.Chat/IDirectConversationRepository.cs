@@ -11,6 +11,6 @@ public interface IDirectConversationRepository
 {
     Task<DirectConversation?> GetByIdAsync(ConversationId id, ChatSelfId selfIdentityId, CancellationToken cancellationToken);
     Task AddAsync(DirectConversation conversation, ChatSelfId selfIdentityId, CancellationToken cancellationToken);
-    Task<DirectConversation?> GetByParticipantPairAsync(ChatSelfId selfIdentityId, Guid otherPeerId, CancellationToken cancellationToken);
+    Task<DirectConversation?> GetByParticipantPairAsync(ChatSelfId selfIdentityId, ChatPeerId otherPeerId, CancellationToken cancellationToken);
     Task UpsertDirectSessionMappingAsync(ChatSelfId selfIdentityId, Guid directSessionId, ConversationId conversationId, CancellationToken cancellationToken);
 }
