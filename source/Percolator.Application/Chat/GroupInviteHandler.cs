@@ -59,6 +59,8 @@ public sealed class GroupInviteHandler : IGroupInviteHandler
             throw new ArgumentException("sender_key_distribution is required.");
         if (invite.RelayPublicIdentityId is null || invite.RelayPublicIdentityId.IsEmpty)
             throw new ArgumentException("relay_public_identity_id is required.");
+        if (string.IsNullOrEmpty(invite.RelayHost) || !invite.HasRelayPort)
+            throw new ArgumentException("relay_host and relay_port are required.");
 
         // Step 1: Parse ConversationId from invite
         var conversationId = new Percolator.Chat.Messaging.ValueObjects.ConversationId(new Guid(invite.ConversationId.ToByteArray()));
@@ -76,31 +78,28 @@ public sealed class GroupInviteHandler : IGroupInviteHandler
         var relayPublicIdentityId = new PublicIdentityId(new Guid(invite.RelayPublicIdentityId.ToByteArray()));
 
         // Step 5.5: Save relay endpoint if provided in the invite
-        if (!string.IsNullOrEmpty(invite.RelayHost) && invite.RelayPort.HasValue)
+        var relayIdentity = await _peerIdentityRepository.GetOrCreateAsync(relayPublicIdentityId, ct).ConfigureAwait(false);
+        var relayPeerId = new Percolator.Network.PeerId(relayIdentity.Id.Value);
+        var relayProfile = await _peerRoutingProfileRepository.GetByIdAsync(relayPeerId, ct).ConfigureAwait(false);
+            
+        var endpoint = new System.Net.DnsEndPoint(invite.RelayHost, invite.RelayPort);
+        var grpcEndpoint = new GrpcEndPoint(endpoint, DateTimeOffset.UtcNow);
+            
+        if (relayProfile == null)
         {
-            var relayIdentity = await _peerIdentityRepository.GetOrCreateAsync(relayPublicIdentityId, ct).ConfigureAwait(false);
-            var relayPeerId = new Percolator.Network.PeerId(relayIdentity.Id.Value);
-            var relayProfile = await _peerRoutingProfileRepository.GetByIdAsync(relayPeerId, ct).ConfigureAwait(false);
-            
-            var endpoint = new System.Net.DnsEndPoint(invite.RelayHost, invite.RelayPort.Value);
-            var grpcEndpoint = new Percolator.Network.ValueObjects.GrpcEndPoint(endpoint, DateTimeOffset.UtcNow);
-            
-            if (relayProfile == null)
-            {
-                relayProfile = new Percolator.Network.PeerRoutingProfile();
-                relayProfile.BindIdentity(relayPeerId);
-                relayProfile.AddGrpcEndPoint(grpcEndpoint, DateTimeOffset.UtcNow);
-                await _peerRoutingProfileRepository.UpsertAsync(relayProfile, ct).ConfigureAwait(false);
-                _logger.LogInformation("Created new routing profile for relay {RelayPeerId} with endpoint {RelayHost}:{RelayPort}", 
-                    relayPeerId.Value, invite.RelayHost, invite.RelayPort.Value);
-            }
-            else
-            {
-                relayProfile.AddGrpcEndPoint(grpcEndpoint, DateTimeOffset.UtcNow);
-                await _peerRoutingProfileRepository.UpsertAsync(relayProfile, ct).ConfigureAwait(false);
-                _logger.LogInformation("Updated routing profile for relay {RelayPeerId} with endpoint {RelayHost}:{RelayPort}", 
-                    relayPeerId.Value, invite.RelayHost, invite.RelayPort.Value);
-            }
+            relayProfile = new Percolator.Network.PeerRoutingProfile();
+            relayProfile.BindIdentity(relayPeerId);
+            relayProfile.AddGrpcEndPoint(grpcEndpoint, DateTimeOffset.UtcNow);
+            await _peerRoutingProfileRepository.UpsertAsync(relayProfile, ct).ConfigureAwait(false);
+            _logger.LogInformation("Created new routing profile for relay {RelayPeerId} with endpoint {RelayHost}:{RelayPort}", 
+                relayPeerId.Value, invite.RelayHost, invite.RelayPort);
+        }
+        else
+        {
+            relayProfile.AddGrpcEndPoint(grpcEndpoint, DateTimeOffset.UtcNow);
+            await _peerRoutingProfileRepository.UpsertAsync(relayProfile, ct).ConfigureAwait(false);
+            _logger.LogInformation("Updated routing profile for relay {RelayPeerId} with endpoint {RelayHost}:{RelayPort}", 
+                relayPeerId.Value, invite.RelayHost, invite.RelayPort);
         }
 
         // Step 6: Persist master key
@@ -137,10 +136,6 @@ public sealed class GroupInviteHandler : IGroupInviteHandler
             publicParams: chatPublicParams,
             DateTimeOffset.UtcNow,
             DateTimeOffset.UtcNow);
-
-        // Ensure relay identity exists (get or create stub)
-        var relayIdentity = await _peerIdentityRepository.GetOrCreateAsync(relayPublicIdentityId, ct).ConfigureAwait(false);
-        var relayPeerId = new ChatPeerId(relayIdentity.Id.Value);
 
         // Fetch the local identity's actual PKH and bridged PeerId
         var selfInfo = await _selfIdentityQueries.GetIdentityParticipantInfoAsync(selfIdentityId, ct).ConfigureAwait(false);

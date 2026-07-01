@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
 using Percolator.Application.KeyExchange;
+using Percolator.Identity;
 using Percolator.Infrastructure.Persistence;
 
 namespace Percolator.Infrastructure.Cryptography;
@@ -61,20 +62,20 @@ internal sealed class SqliteSelfPreKeyBundleRepository : ISelfPreKeyBundleReposi
         await _db.SaveChangesAsync(ct);
     }
 
-    public async Task<(byte[] spkPrivate, byte[] spkPublicSpki, byte[] preKeySignature, DateTimeOffset expires)?> TryGetSignedPreKeyAsync(int selfIdentityId, Guid signedPreKeyId, CancellationToken ct = default)
+    public async Task<(byte[] spkPrivate, byte[] spkPublicSpki, byte[] preKeySignature, DateTimeOffset expires)?> TryGetSignedPreKeyAsync(SelfId selfIdentityId, Guid signedPreKeyId, CancellationToken ct = default)
     {
-        var rec = await _db.SelfPreKeySigned.AsNoTracking().FirstOrDefaultAsync(x => x.SelfIdentityId == selfIdentityId && x.SignedPreKeyId == signedPreKeyId, ct);
+        var rec = await _db.SelfPreKeySigned.AsNoTracking().FirstOrDefaultAsync(x => x.SelfIdentityId == selfIdentityId.Value && x.SignedPreKeyId == signedPreKeyId, ct);
         if (rec is null) return null;
         return (Unprotect(rec.SignedPreKeyPrivate), rec.SignedPreKeyPublicSpki, rec.PreKeySignature, rec.ExpiresUtc);
     }
 
-    public async Task<byte[]?> TryPopOneTimePreKeyPrivateAsync(int selfIdentityId, Guid oneTimePreKeyId, CancellationToken ct = default)
+    public async Task<byte[]?> TryPopOneTimePreKeyPrivateAsync(SelfId selfIdentityId, Guid oneTimePreKeyId, CancellationToken ct = default)
     {
         // transactional select+delete to ensure single-use
         await using var tx = await _db.Database.BeginTransactionAsync(ct);
         try
         {
-            var rec = await _db.SelfOneTimePreKeys.FirstOrDefaultAsync(x => x.SelfIdentityId == selfIdentityId && x.OneTimePreKeyId == oneTimePreKeyId, ct);
+            var rec = await _db.SelfOneTimePreKeys.FirstOrDefaultAsync(x => x.SelfIdentityId == selfIdentityId.Value && x.OneTimePreKeyId == oneTimePreKeyId, ct);
             if (rec is null)
             {
                 await tx.RollbackAsync(ct);

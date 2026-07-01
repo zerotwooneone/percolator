@@ -4,6 +4,7 @@ using Percolator.Chat.GroupLedger;
 using Percolator.Chat.GroupMembership;
 using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Cryptography;
+using Percolator.Identity;
 
 namespace Percolator.Application.Chat;
 
@@ -34,10 +35,9 @@ public sealed class GroupProvisioningAppService : IGroupProvisioningAppService
 
     public async Task<Percolator.Chat.Messaging.ValueObjects.ConversationId> ProvisionGroupAsync(
         string? name,
-        ChatPeerId selfPeerId,
         IReadOnlyList<ChatPeerId> inviteePeerIds,
         ChatPeerId relayPeerId,
-        uint selfIdentityId,
+        SelfId selfIdentityId,
         CancellationToken cancellationToken = default)
     {
         // Step 1: Generate GroupMasterKey
@@ -85,9 +85,7 @@ public sealed class GroupProvisioningAppService : IGroupProvisioningAppService
         // This requires converting chat domain types to cryptography domain types
         foreach (var inviteePeerId in inviteePeerIds)
         {
-            if (inviteePeerId.Value == selfPeerId.Value)
-                continue; // Skip self
-
+            
             // TODO: Generate ChatSenderKeyDistributionMessageBytes
             // var distributionBytes = ChatSenderKeyDistributionMessageBytes.FromSpan(...);
             var distributionBytes = ChatSenderKeyDistributionMessageBytes.FromBytesOwned(Array.Empty<byte>());

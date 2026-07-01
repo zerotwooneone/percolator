@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Logging;
+using Percolator.Identity;
 using Percolator.Network;
+using PeerId = Percolator.Network.PeerId;
 
 namespace Percolator.Application.Services;
 
@@ -20,11 +22,11 @@ public sealed class DirectSessionMappingWriter : IDirectSessionMappingWriter
         _logger = logger;
     }
 
-    public async Task WriteMappingAsync(PeerId remotePeerId, DirectSessionId sessionId, int selfIdentityId, CancellationToken cancellationToken)
+    public async Task WriteMappingAsync(PeerId remotePeerId, DirectSessionId sessionId, SelfId selfIdentityId, CancellationToken cancellationToken)
     {
         try
         {
-            await _directSessionRepository.UpsertAsync(remotePeerId, sessionId, selfIdentityId)
+            await _directSessionRepository.UpsertAsync(remotePeerId, sessionId, selfIdentityId.Value)
                 .ConfigureAwait(false);
         }
         catch (Exception ex)

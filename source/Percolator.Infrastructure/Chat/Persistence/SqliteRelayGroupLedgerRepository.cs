@@ -1,7 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Percolator.Chat.GroupLedger;
 using Percolator.Chat.Messaging.ValueObjects;
-using Percolator.Identity;
 using Percolator.Infrastructure.Persistence;
 
 namespace Percolator.Infrastructure.Chat.Persistence;
@@ -28,7 +27,7 @@ public sealed class SqliteRelayGroupLedgerRepository : IRelayGroupLedgerReposito
             dbo.Version);
     }
 
-    public async Task ProvisionNewGroupAsync(ConversationId conversationId, RelayGroupPublicParamsBytes publicParams, IReadOnlyList<PublicIdentityId> memberPublicIdentityIds, CancellationToken cancellationToken)
+    public async Task ProvisionNewGroupAsync(ConversationId conversationId, RelayGroupPublicParamsBytes publicParams, IReadOnlyList<Percolator.Chat.GroupLedger.PublicIdentityId> memberPublicIdentityIds, CancellationToken cancellationToken)
     {
         await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
         try
@@ -45,7 +44,7 @@ public sealed class SqliteRelayGroupLedgerRepository : IRelayGroupLedgerReposito
             var relayGroupState = new RelayGroupStateDbo
             {
                 ConversationId = conversationId.Value,
-                PublicParams = publicParams.ToArray(),
+                GroupPublicParams = publicParams.ToArray(),
                 CreatedAtUtc = DateTimeOffset.UtcNow
             };
             _db.RelayGroupStates.Add(relayGroupState);
@@ -55,7 +54,7 @@ public sealed class SqliteRelayGroupLedgerRepository : IRelayGroupLedgerReposito
                 var blindedRosterEntry = new RelayBlindedRosterDbo
                 {
                     ConversationId = conversationId.Value,
-                    MemberPublicIdentityId = publicIdentityId,
+                    MemberPublicIdentityId = new Percolator.Identity.PublicIdentityId(publicIdentityId.Value),
                     AddedAtUtc = DateTimeOffset.UtcNow
                 };
                 _db.RelayBlindedRosters.Add(blindedRosterEntry);

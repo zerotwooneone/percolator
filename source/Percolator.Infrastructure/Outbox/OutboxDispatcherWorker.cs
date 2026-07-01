@@ -153,16 +153,18 @@ public sealed class OutboxDispatcherWorker : BackgroundService
                 
                 string relayHost = null;
                 int? relayPort = null;
-                
-                if (relayProfile != null && relayProfile.Endpoints.Count > 0)
+
+                if (relayProfile == null || relayProfile.Endpoints.Count <= 0)
                 {
-                    var endpoint = relayProfile.Endpoints.FirstOrDefault()?.EndPoint;
-                    if (endpoint != null)
-                    {
-                        relayHost = endpoint.Host;
-                        relayPort = endpoint.Port;
-                    }
+                    throw new InvalidOperationException("No endpoints found for relay peer");
                 }
+
+                var endpoint = relayProfile.Endpoints.FirstOrDefault()?.EndPoint;
+                if (endpoint == null)
+                    throw new InvalidOperationException("No endpoints found for relay peer");
+                
+                relayHost = endpoint.Host;
+                relayPort = endpoint.Port;
                 
                 if (relayHost == null || relayPort == null)
                 {

@@ -84,8 +84,8 @@ public sealed class RelayGroupService : Percolator.Contracts.RelayGroupService.R
                 throw new ArgumentException("conversation_id is required.");
             if (request.PublicParams is null)
                 throw new ArgumentException("public_params is required.");
-            if (request.MemberPublicIdentityIds.Count < 1)
-                throw new ArgumentException("member_public_identity_ids must contain at least two members.");
+            if (request.MemberPublicIdentityIds.Count ==0)
+                throw new ArgumentException("member_public_identity_ids must contain at least one member.");
 
             // Boundary Defensive Copy (Protobuf ByteString -> Domain Primitive)
             var conversationId = new ConversationId(new Guid(request.ConversationId.ToByteArray()));
@@ -93,7 +93,7 @@ public sealed class RelayGroupService : Percolator.Contracts.RelayGroupService.R
 
             // Convert PublicIdentityIds from protobuf to domain primitives
             var memberPublicIdentityIds = request.MemberPublicIdentityIds
-                .Select(id => new PublicIdentityId(new Guid(id.ToByteArray())))
+                .Select(id => new Percolator.Chat.GroupLedger.PublicIdentityId(new Guid(id.ToByteArray())))
                 .ToList();
 
             await _ledgerRepository.ProvisionNewGroupAsync(

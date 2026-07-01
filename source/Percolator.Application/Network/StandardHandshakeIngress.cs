@@ -2,12 +2,12 @@ using System.Security.Cryptography;
 using Google.Protobuf;
 using MediatR;
 using Microsoft.Extensions.Logging;
+using Percolator.Application.Chat;
 using Percolator.Contracts;
 using Percolator.Application.KeyExchange;
 using Percolator.Application.Services;
 using Percolator.Cryptography;
 using Percolator.Identity;
-using Percolator.Identity.Model;
 
 namespace Percolator.Application.Network;
 
@@ -23,6 +23,7 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
     private readonly Percolator.Cryptography.ISigningService _signingService;
     private readonly IMediator _mediator;
     private readonly ILogger<StandardHandshakeIngress> _logger;
+    private readonly ISelfIdentityQueries _selfIdentityQueries;
 
     public StandardHandshakeIngress(
         ISelfIdentityKeysStore keysStore,
@@ -34,7 +35,8 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
         IPeerIdentityRepository peerIdentityRepository,
         Percolator.Cryptography.ISigningService signingService,
         IMediator mediator,
-        ILogger<StandardHandshakeIngress> logger)
+        ILogger<StandardHandshakeIngress> logger,
+        ISelfIdentityQueries selfIdentityQueries)
     {
         _keysStore = keysStore;
         _selfPreKeys = selfPreKeys;
@@ -46,6 +48,7 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
         _signingService = signingService;
         _mediator = mediator;
         _logger = logger;
+        _selfIdentityQueries = selfIdentityQueries;
     }
 
     public async Task<EstablishSessionResponse> HandleAsync(SelfId selfIdentityId, EstablishSessionRequest request, CancellationToken ct = default)
@@ -95,7 +98,7 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
             throw new InvalidOperationException("prekey_id must be a GUID (16 bytes).", ex);
         }
 
-        var spk = await _selfPreKeys.TryGetSignedPreKeyAsync(selfIdentityId.Value, signedPreKeyId, ct).ConfigureAwait(false);
+        var spk = await _selfPreKeys.TryGetSignedPreKeyAsync(selfIdentityId, signedPreKeyId, ct).ConfigureAwait(false);
         if (spk is null)
         {
             return new EstablishSessionResponse
@@ -118,7 +121,7 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
                 throw new InvalidOperationException("onetime_prekey_id must be a GUID (16 bytes).", ex);
             }
 
-            otkPriv = await _selfPreKeys.TryPopOneTimePreKeyPrivateAsync(selfIdentityId.Value, otkId, ct).ConfigureAwait(false);
+            otkPriv = await _selfPreKeys.TryPopOneTimePreKeyPrivateAsync(selfIdentityId, otkId, ct).ConfigureAwait(false);
         }
 
         var initiatorIdentityPublic = RatchetIdentityKey.FromBytes(initiatorIdentitySpki);
@@ -160,7 +163,7 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
             await _directSessionMappingWriter.WriteMappingAsync(
                 new Percolator.Network.PeerId(initiatorIdentity.Id.Value),
                 new Percolator.Network.DirectSessionId(sessionId.Value),
-                selfIdentityId.Value,
+                selfIdentityId,
                 ct).ConfigureAwait(false);
         }
         catch (Exception ex)
@@ -170,12 +173,13 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
                 initiatorIdentity.Id.Value, sessionId.Value, selfIdentityId.Value);
         }
 
+        var selfPublicIdentityKey = await _selfIdentityQueries.GetSelfIdentityPublicKeyAsync(selfIdentityId, ct).ConfigureAwait(false);
         var responsePayload = new EstablishSessionResponse.Types.Response.Types.ResponsePayload
         {
             Version = 1,
             EphemeralKey = ByteString.CopyFrom(spk.Value.spkPublicSpki),
             SessionId = sessionId.Value.ToString(),
-            PublicIdentityId = ByteString.CopyFrom(keys.PublicIdentityId.Value.ToByteArray())
+            PublicIdentityId = ByteString.CopyFrom(selfPublicIdentityKey.Value.ToByteArray())
         };
 
         var responsePayloadBytes = responsePayload.ToByteArray();

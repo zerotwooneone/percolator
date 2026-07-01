@@ -1,4 +1,6 @@
+using Percolator.Identity;
 using Percolator.Network;
+using PeerId = Percolator.Network.PeerId;
 
 namespace Percolator.Application.Services;
 
@@ -16,5 +18,5 @@ public interface IDirectSessionMappingWriter
     /// <param name="sessionId">The cryptographic session ID.</param>
     /// <param name="selfIdentityId">The local self-identity ID.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    Task WriteMappingAsync(PeerId remotePeerId, DirectSessionId sessionId, int selfIdentityId, CancellationToken cancellationToken);
+    Task WriteMappingAsync(PeerId remotePeerId, DirectSessionId sessionId, SelfId selfIdentityId, CancellationToken cancellationToken);
 }

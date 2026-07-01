@@ -1,9 +1,7 @@
 using System.Security.Cryptography;
-using FluentAssertions;
 using Google.Protobuf;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
-using Percolator.Application.Cli;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
 using Percolator.Application.Services;
