@@ -468,7 +468,7 @@ To solve this while avoiding N+1 database queries downstream, we will introduce 
     *   Keep `ChatPeerId RelayPeerId` (no change to relay field type).
     *   Update constructor, `AddMember`, `InviteMember`, and `RemoveMember` to take `ParticipantId` instead of `ChatPeerId`.
 *   **Update Domain Events**:
-    *   Update `MemberInvitedDomainEvent.cs` and `GroupProvisioningRequestedDomainEvent.cs` to use `ParticipantId` for members and `PublicIdentityId` for the relay.
+    *   Update `MemberInvitedDomainEvent.cs` and `GroupProvisioningRequestedDomainEvent.cs` to use `ParticipantId` for members and `ChatPeerId` for the relay.
 
 **2. Update Persistence Layer (`Percolator.Infrastructure.Chat`)**
 *   **Update `GroupMemberDbo.cs`**:
