@@ -538,8 +538,16 @@ public class PercolatorDbContext : DbContext
         {
             entity.ToTable("Conversations");
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).ValueGeneratedNever();
-            entity.Property(e => e.SelfIdentityId).IsRequired();
+            entity.Property(e => e.Id)
+                .HasConversion(
+                    v => v.Value,
+                    v => new Percolator.Chat.Messaging.ValueObjects.ConversationId(v))
+                .ValueGeneratedNever();
+            entity.Property(e => e.SelfIdentityId)
+                .HasConversion(
+                    v => v.Value,
+                    v => new Percolator.Chat.GroupMembership.ChatSelfId(v))
+                .IsRequired();
             entity.Property(e => e.Kind).IsRequired();
             entity.Property(e => e.CreatedAt).IsRequired();
             entity.Property(e => e.UpdatedAt).IsRequired();

@@ -1,3 +1,4 @@
+using Percolator.Chat.GroupMembership;
 using Percolator.Chat.Messaging;
 using Percolator.Chat.Messaging.ValueObjects;
 
@@ -9,7 +10,7 @@ namespace Percolator.Chat;
 /// </summary>
 public interface IMessageRepository
 {
-    Task AddAsync(Message message, int selfIdentityId, CancellationToken cancellationToken);
-    Task UpdateAsync(Message message, int selfIdentityId, CancellationToken cancellationToken);
-    Task<Message?> GetByIdAsync(MessageId id, int selfIdentityId, CancellationToken cancellationToken);
+    Task AddAsync(Message message, ChatSelfId selfIdentityId, CancellationToken cancellationToken);
+    Task UpdateAsync(Message message, ChatSelfId selfIdentityId, CancellationToken cancellationToken);
+    Task<Message?> GetByIdAsync(MessageId id, ChatSelfId selfIdentityId, CancellationToken cancellationToken);
 }

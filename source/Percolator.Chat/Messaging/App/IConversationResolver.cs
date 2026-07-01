@@ -1,3 +1,5 @@
+using Percolator.Chat.GroupMembership;
+
 namespace Percolator.Chat.Messaging.App;
 
 /// <summary>
@@ -10,4 +12,4 @@ public interface IDirectConversationResolver
     Task<DirectConversationResolution> ResolveAsync(ConversationLookupKey lookupKey, CancellationToken cancellationToken);
 }
 
-public sealed record DirectConversationResolution(DirectConversation Conversation, uint SelfIdentityId);
+public sealed record DirectConversationResolution(DirectConversation Conversation, ChatSelfId SelfIdentityId);

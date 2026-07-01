@@ -18,7 +18,7 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
         _db = db;
     }
 
-    public async Task<GroupConversation?> GetByIdAsync(ConversationId id, uint selfIdentityId, CancellationToken cancellationToken)
+    public async Task<GroupConversation?> GetByIdAsync(ConversationId id, ChatSelfId selfIdentityId, CancellationToken cancellationToken)
     {
         var dbo = await _db.Conversations
             .AsNoTracking()
@@ -36,7 +36,7 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
         return ToDomain(dbo, groupStateDbo, groupMemberDbos);
     }
 
-    public async Task AddAsync(GroupConversation conversation, uint selfIdentityId, CancellationToken cancellationToken)
+    public async Task AddAsync(GroupConversation conversation, ChatSelfId selfIdentityId, CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
         var dbo = ToDbo(conversation);
@@ -80,7 +80,7 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
         await _db.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task UpdateAsync(GroupConversation conversation, uint selfIdentityId, CancellationToken cancellationToken)
+    public async Task UpdateAsync(GroupConversation conversation, ChatSelfId selfIdentityId, CancellationToken cancellationToken)
     {
         var existing = await _db.Conversations
             .FirstOrDefaultAsync(c => c.Id == conversation.Id.Value && c.SelfIdentityId == selfIdentityId && c.Kind == Percolator.Infrastructure.Persistence.ConversationKind.Group, cancellationToken);
@@ -132,7 +132,7 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
         await _db.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task AddWithOutboxAsync(GroupConversation conversation, uint selfIdentityId, CancellationToken cancellationToken)
+    public async Task AddWithOutboxAsync(GroupConversation conversation, ChatSelfId selfIdentityId, CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
         var dbo = ToDbo(conversation);
@@ -188,7 +188,7 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
                 Percolator.Chat.Events.MemberInvitedDomainEvent inviteEvent when inviteEvent.ParticipantId is RemoteParticipantId remote =>
                     new PeerId(remote.PeerId.Value),
                 Percolator.Chat.Events.MemberInvitedDomainEvent inviteEvent when inviteEvent.ParticipantId is LocalParticipantId =>
-                    throw new InvalidOperationException("Cannot route to local participant via outbox"),
+                    throw new NotImplementedException("Cannot route to local participant via outbox"),
                 _ => throw new InvalidOperationException($"Unknown domain event type: {eventType}")
             };
 
