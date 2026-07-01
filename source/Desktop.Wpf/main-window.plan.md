@@ -660,7 +660,53 @@ When implementing Chunk 5.4, after defining `ChatSelfId`:
 3. **Domain Events**: Keep event properties as `uint` (Identity domain `SelfId`) to avoid breaking existing subscribers. Subscribers can convert to `ChatSelfId` if needed after the refactoring.
 
 ---
+## Chunk 5.5 - Implement Generic Domain Event Outbox
 
+**Goal:** Decouple the persistence layer from network routing. `SqliteGroupConversationRepository` currently attempts to resolve network `PeerId`s during outbox creation, which fails for local participants. We will migrate to a generic `DomainEventOutboxDbo`, publish outbox events via MediatR, and implement domain event handlers to handle the network vs. local routing split.
+
+**1. Refactor Outbox Persistence**
+*   Rename `source\Percolator.Infrastructure\Persistence\RelayOutboxDbo.cs` to `DomainEventOutboxDbo.cs`.
+*   Rename the class to `DomainEventOutboxDbo`.
+*   Remove the `DestinationPeerId` property. The class should only have: `Id`, `EventType`, `PayloadJson`, and `ProcessedAtUtc`.
+*   Update `PercolatorDbContext.cs`: rename the `RelayOutbox` DbSet to `public DbSet<DomainEventOutboxDbo> DomainEventOutbox { get; set; } = null!;` and update its `OnModelCreating` configuration to use the new name and table name `"DomainEventOutbox"`.
+
+**2. Update the Repository**
+*   **Update `SqliteGroupConversationRepository.cs` (`AddWithOutboxAsync`):**
+    *   Remove the `destinationPeerId` pattern matching logic and the `InvalidOperationException` for `LocalParticipantId`.
+    *   Create a `DomainEventOutboxDbo` instead of `RelayOutboxDbo`.
+    *   Add it to `_db.DomainEventOutbox.Add(outboxItem)`.
+
+**3. Create MediatR Domain Event Wrapper (Application Layer)**
+*   **Do not modify `IDomainEvent.cs`** (to maintain Clean Architecture).
+*   Create a new file `source\Percolator.Application\SeedWork\DomainEventNotification.cs`:
+    *   Create a generic wrapper record: `public record DomainEventNotification<TDomainEvent>(TDomainEvent DomainEvent) : MediatR.INotification where TDomainEvent : Percolator.Chat.SeedWork.IDomainEvent;`
+
+**4. Refactor Outbox Dispatcher Worker**
+*   **Update `OutboxDispatcherWorker.cs`:**
+    *   Update constructor: Inject `MediatR.IPublisher publisher` and remove `IRemoteEnvelopeSender` and `IPeerRoutingProfileRepository` (these belong in the handlers now).
+    *   In `ProcessOutboxAsync`, query `_db.DomainEventOutbox` instead of `_db.RelayOutbox`.
+    *   Change `ProcessOutboxItemAsync` to accept `DomainEventOutboxDbo`.
+    *   Remove the `DispatchEventAsync` method completely.
+    *   In `ProcessOutboxItemAsync`, instead of calling `DispatchEventAsync(...)`, wrap the deserialized domain event using reflection and publish it:
+        ```csharp
+        var notificationType = typeof(Percolator.Application.SeedWork.DomainEventNotification<>).MakeGenericType(domainEvent.GetType());
+        var notification = (MediatR.INotification)Activator.CreateInstance(notificationType, domainEvent)!;
+        await _publisher.Publish(notification, ct);
+        ```
+
+**5. Create Domain Event Handlers (Process Managers)**
+*   Create `source\Percolator.Application\Apps\Chat\Handlers\GroupProvisioningRequestedDomainEventHandler.cs`:
+    *   Implement `INotificationHandler<DomainEventNotification<GroupProvisioningRequestedDomainEvent>>`.
+    *   Move the TODO comment and logging regarding relay provisioning from the old dispatcher into this handler's `Handle` method (accessing `notification.DomainEvent`).
+*   Create `source\Percolator.Application\Apps\Chat\Handlers\MemberInvitedDomainEventHandler.cs`:
+    *   Implement `INotificationHandler<DomainEventNotification<MemberInvitedDomainEvent>>`.
+    *   Inject `IRemoteEnvelopeSender`, `IPeerRoutingProfileRepository`, and `ILogger`.
+    *   In the `Handle` method, switch on `notification.DomainEvent.ParticipantId`:
+        *   `RemoteParticipantId remote`: Paste the exact network routing logic previously located in `OutboxDispatcherWorker.DispatchEventAsync` (getting relayProfile, extracting endpoint, logging the TODO for `ChatEnvelope`).
+        *   `LocalParticipantId local`: Log an information message indicating that local routing will be handled via a local inbox mechanism in the future. Do not throw an exception.
+
+
+---
 ## Chunk 6
 ### Feature Implementation Request: Signal Protocol Chunk 6 (The Streaming Data Plane)
 You are to implement the high-velocity, real-time Data Plane for Group V2 messaging.
