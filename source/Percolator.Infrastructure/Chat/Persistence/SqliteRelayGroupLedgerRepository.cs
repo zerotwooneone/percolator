@@ -45,7 +45,8 @@ public sealed class SqliteRelayGroupLedgerRepository : IRelayGroupLedgerReposito
             {
                 ConversationId = conversationId.Value,
                 GroupPublicParams = publicParams.ToArray(),
-                CreatedAtUtc = DateTimeOffset.UtcNow
+                Epoch = 0,
+                Version = 1
             };
             _db.RelayGroupStates.Add(relayGroupState);
 
