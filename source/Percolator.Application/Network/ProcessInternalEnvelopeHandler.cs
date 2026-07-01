@@ -140,7 +140,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     if (!upload.HasSignedPreKey) throw new InvalidOperationException("Signed pre-key is required");
                     if (!upload.HasPreKeySignature) throw new InvalidOperationException("Pre-key signature is required");
                     if (upload.OneTimePreKeys.Count == 0) throw new InvalidOperationException("At least one one-time pre-key is required");
-                    if(request.Context.RemotePeer is null) throw new InvalidOperationException($"{nameof(request)} must have a {nameof(ProcessInternalEnvelopeCommand.Context.RemotePeerGuid)}");
+                    if(request.Context.RemotePeer is null) throw new InvalidOperationException($"{nameof(request)} must have a {nameof(ProcessInternalEnvelopeCommand.Context.RemotePeer)}");
                     const int maxBundles = 100;
                     if (upload.OneTimePreKeys.Count > maxBundles) throw new InvalidOperationException($"Too many one-time pre-keys. Maximum is {maxBundles}");
                     foreach (var ot in upload.OneTimePreKeys)

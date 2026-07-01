@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Identity;
 using Percolator.Chat;
+using Percolator.Chat.GroupMembership;
 using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Cryptography;
 using IdentityPeerId = Percolator.Identity.PeerId;

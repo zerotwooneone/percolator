@@ -66,7 +66,7 @@ public sealed class GroupInviteHandler : IGroupInviteHandler
         var conversationId = new Percolator.Chat.Messaging.ValueObjects.ConversationId(new Guid(invite.ConversationId.ToByteArray()));
 
         // Step 2: Parse inviterPublicIdentityId from invite
-        var inviterPublicIdentityId = new PublicIdentityId(new Guid(invite.InviterPublicIdentityId.ToByteArray()));
+        var inviterPublicIdentityId = new Percolator.Identity.PublicIdentityId(new Guid(invite.InviterPublicIdentityId.ToByteArray()));
 
         // Step 3: Parse groupMasterKey from invite
         var groupMasterKeyBytes = GroupMasterKeyBytes.FromBytesOwned(invite.GroupMasterKey.ToByteArray());
@@ -75,7 +75,7 @@ public sealed class GroupInviteHandler : IGroupInviteHandler
         var distributionBytes = ChatSenderKeyDistributionMessageBytes.FromBytesOwned(invite.SenderKeyDistribution.ToByteArray());
 
         // Step 5: Parse relayPublicIdentityId from invite
-        var relayPublicIdentityId = new PublicIdentityId(new Guid(invite.RelayPublicIdentityId.ToByteArray()));
+        var relayPublicIdentityId = new Percolator.Identity.PublicIdentityId(new Guid(invite.RelayPublicIdentityId.ToByteArray()));
 
         // Step 5.5: Save relay endpoint if provided in the invite
         var relayIdentity = await _peerIdentityRepository.GetOrCreateAsync(relayPublicIdentityId, ct).ConfigureAwait(false);
@@ -144,29 +144,31 @@ public sealed class GroupInviteHandler : IGroupInviteHandler
             throw new InvalidOperationException($"Could not resolve self identity info for ID {selfIdentityId}");
         }
 
-        var selfPeerId = new ChatPeerId(selfInfo.Value.PeerId);
+        var selfChatPublicId = new Percolator.Chat.GroupLedger.PublicIdentityId( selfInfo.Value.PublicIdentityId.Value);
+        var chatSelfId = new ChatSelfId(selfIdentityId.Value);
         var selfMember = new GroupMember(
             conversationId,
-            selfPeerId,
+            new LocalParticipantId(selfChatPublicId, chatSelfId),
             GroupMemberRole.Member,
             DateTimeOffset.UtcNow);
 
         var inviterPeerId = new ChatPeerId(inviterIdentity.Id.Value);
+        var invitierPublicId = new Percolator.Chat.GroupLedger.PublicIdentityId(inviterIdentity.PublicIdentityId.Value);
         var inviterMember = new GroupMember(
             conversationId,
-            inviterPeerId,
+            new RemoteParticipantId(invitierPublicId, inviterPeerId),
             GroupMemberRole.Admin,
             DateTimeOffset.UtcNow);
 
         var groupConversation = new GroupConversation(
             conversationId,
             groupState,
-            relayPeerId,
+            new ChatPeerId(relayPeerId.Value),
             new[] { selfMember, inviterMember },
             invite.Name);
 
         // Step 9: Save via repository
-        await _groupConversationRepository.AddAsync(groupConversation, new ChatSelfId(selfIdentityId.Value), ct).ConfigureAwait(false);
+        await _groupConversationRepository.AddAsync(groupConversation, chatSelfId, ct).ConfigureAwait(false);
 
         _logger.LogInformation("Group invite processed successfully for conversation {ConversationId}", conversationId);
     }
