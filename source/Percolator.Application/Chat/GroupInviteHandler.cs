@@ -166,7 +166,7 @@ public sealed class GroupInviteHandler : IGroupInviteHandler
             invite.Name);
 
         // Step 9: Save via repository
-        await _groupConversationRepository.AddAsync(groupConversation, selfIdentityId.Value, ct).ConfigureAwait(false);
+        await _groupConversationRepository.AddAsync(groupConversation, new ChatSelfId(selfIdentityId.Value), ct).ConfigureAwait(false);
 
         _logger.LogInformation("Group invite processed successfully for conversation {ConversationId}", conversationId);
     }

@@ -104,7 +104,7 @@ public sealed class GroupProvisioningAppService : IGroupProvisioningAppService
         }
 
         // Step 10: Save atomically via outbox
-        await _groupConversationRepository.AddWithOutboxAsync(groupConversation, selfIdentityId, cancellationToken).ConfigureAwait(false);
+        await _groupConversationRepository.AddWithOutboxAsync(groupConversation, new ChatSelfId(selfIdentityId.Value), cancellationToken).ConfigureAwait(false);
 
         _logger.LogInformation("Group {ConversationId} provisioned successfully with {MemberCount} members", conversationId, inviteeParticipantIds.Count + 1);
 

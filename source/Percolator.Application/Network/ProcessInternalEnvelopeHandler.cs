@@ -478,7 +478,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                         var senderId = new ChatPeerId(senderPeerId.Value);
                         await _messageWriter.AddTextMessageAsync(
                             new ConversationId(conversationId),
-                            request.Context.SelfIdentityId.Value,
+                            new ChatSelfId(request.Context.SelfIdentityId.Value),
                             senderId,
                             groupContent.TextMessage,
                             messageId,

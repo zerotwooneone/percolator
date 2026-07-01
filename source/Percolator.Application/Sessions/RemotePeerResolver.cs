@@ -29,7 +29,7 @@ public class RemotePeerResolver : IRemotePeerResolver
         if (_activeIdentityContext.Identity is null)
             throw new InvalidOperationException("Identity context not loaded");
 
-        var conversation = await _directConversationRepository.GetByIdAsync(convId, _activeIdentityContext.Identity.SelfIdentityId.Value, default).ConfigureAwait(false)
+        var conversation = await _directConversationRepository.GetByIdAsync(convId, new ChatSelfId(_activeIdentityContext.Identity.SelfIdentityId.Value), default).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"Direct conversation with id {sessionId} not found");
 
         var localPeerId = _activeIdentityContext.Identity.Id;
