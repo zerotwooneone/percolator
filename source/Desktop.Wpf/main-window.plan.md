@@ -473,8 +473,8 @@ To solve this while avoiding N+1 database queries downstream, we will introduce 
 **2. Update Persistence Layer (`Percolator.Infrastructure.Chat`)**
 *   **Update `GroupMemberDbo.cs`**:
     *   Add `public PublicIdentityId PublicIdentityId { get; set; }` (Required) using the chat domain type.
-    *   Change `PeerId PeerId` to `public uint? PeerId { get; set; }`.
-    *   Add `public uint? SelfId { get; set; }`.
+    *   Change `PeerId PeerId` to `PeerId? PeerId` (nullable domain type).
+    *   Add `public uint? SelfId { get; set; }` (SelfId is a primitive uint in the Identity domain).
 *   **Update `PercolatorDbContext.cs`**:
     *   Locate the `modelBuilder.Entity<Percolator.Infrastructure.Chat.Persistence.GroupMemberDbo>` configuration block.
     *   Change the primary key from `entity.HasKey(e => new { e.ConversationId, e.PeerId });` to `entity.HasKey(e => new { e.ConversationId, e.PublicIdentityId });`.
@@ -493,9 +493,9 @@ To solve this while avoiding N+1 database queries downstream, we will introduce 
 
 **3. Update Outbound Paths (Application Layer)**
 *   **Update `IGroupProvisioningAppService.cs` & `GroupProvisioningAppService.cs`**:
-    *   Change the signature to accept `IReadOnlyList<ParticipantId> invitees` and `PublicIdentityId relayIdentity`. The caller (CLI/UI layer) is now responsible for providing the fully resolved `ParticipantId` unions.
+    *   Change the signature to accept `IReadOnlyList<ParticipantId> invitees` and `ChatPeerId relayPeerId`. The caller (CLI/UI layer) is now responsible for providing the fully resolved `ParticipantId` unions.
 *   **Update `SendGroupMessageCommandHandler.cs`**:
-    *   When establishing the network route `RecipientRoute`, resolve the `group.RelayPublicIdentityId` to a network `PeerId`.
+    *   When establishing the network route `RecipientRoute`, use `group.RelayPeerId` for routing.
 
 **4. Update Inbound Paths & Messaging (Application Layer)**
 *   **Update `IChatMessageWriter.cs` & `SqliteChatMessageWriter.cs`**:
