@@ -16,14 +16,14 @@ public interface IGroupProvisioningAppService
     /// </summary>
     /// <param name="name">Optional group name.</param>
     /// <param name="inviteeParticipantIds">List of participant IDs for members to invite.</param>
-    /// <param name="relayPublicIdentityId">The public identity ID of the relay to use for group provisioning.</param>
+    /// <param name="relayPeerId">The peer ID of the relay to use for group provisioning.</param>
     /// <param name="selfIdentityId">The local identity ID.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The conversation ID of the newly created group.</returns>
     Task<ConversationId> ProvisionGroupAsync(
         string? name,
         IReadOnlyList<ParticipantId> inviteeParticipantIds,
-        Guid relayPublicIdentityId,
+        ChatPeerId relayPeerId,
         SelfId selfIdentityId,
         CancellationToken cancellationToken = default);
 }

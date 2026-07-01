@@ -1,3 +1,4 @@
+using Percolator.Chat.GroupLedger;
 using Percolator.Identity;
 
 namespace Percolator.Infrastructure.Chat.Persistence;
@@ -15,12 +16,12 @@ public class GroupMemberDbo
     /// <summary>
     /// The universal public identity ID (UUID).
     /// </summary>
-    public Guid PublicIdentityId { get; set; }
+    public Percolator.Chat.GroupLedger.PublicIdentityId PublicIdentityId { get; set; }
 
     /// <summary>
     /// The local peer ID (null for local self identities).
     /// </summary>
-    public uint? PeerId { get; set; }
+    public PeerId? PeerId { get; set; }
 
     /// <summary>
     /// The local self ID (null for remote peers).

@@ -11,4 +11,4 @@ public sealed record MemberInvitedDomainEvent(
     Messaging.ValueObjects.ConversationId ConversationId,
     ParticipantId ParticipantId,
     ChatSenderKeyDistributionMessageBytes DistributionMessage,
-    Guid RelayPublicIdentityId) : IDomainEvent;
+    ChatPeerId RelayPeerId) : IDomainEvent;

@@ -1,3 +1,5 @@
+using Percolator.Chat.GroupLedger;
+
 namespace Percolator.Chat.GroupMembership;
 
 /// <summary>
@@ -9,9 +11,9 @@ public abstract record ParticipantId
     /// <summary>
     /// Universal public identity identifier (UUID), stable across devices and sessions.
     /// </summary>
-    public Guid PublicIdentityId { get; }
+    public PublicIdentityId PublicIdentityId { get; }
 
-    protected ParticipantId(Guid publicIdentityId)
+    protected ParticipantId(PublicIdentityId publicIdentityId)
     {
         PublicIdentityId = publicIdentityId;
     }
@@ -20,9 +22,9 @@ public abstract record ParticipantId
 /// <summary>
 /// Remote participant identifier with PublicIdentityId and ChatPeerId.
 /// </summary>
-public sealed record RemoteParticipantId(Guid PublicIdentityId, ChatPeerId PeerId) : ParticipantId(PublicIdentityId);
+public sealed record RemoteParticipantId(PublicIdentityId PublicIdentityId, ChatPeerId PeerId) : ParticipantId(PublicIdentityId);
 
 /// <summary>
 /// Local participant identifier with PublicIdentityId and ChatSelfId.
 /// </summary>
-public sealed record LocalParticipantId(Guid PublicIdentityId, ChatSelfId SelfId) : ParticipantId(PublicIdentityId);
+public sealed record LocalParticipantId(PublicIdentityId PublicIdentityId, ChatSelfId SelfId) : ParticipantId(PublicIdentityId);

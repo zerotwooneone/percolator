@@ -39,7 +39,7 @@ public sealed class GroupProvisioningAppService : IGroupProvisioningAppService
     public async Task<Percolator.Chat.Messaging.ValueObjects.ConversationId> ProvisionGroupAsync(
         string? name,
         IReadOnlyList<ParticipantId> inviteeParticipantIds,
-        Guid relayPublicIdentityId,
+        ChatPeerId relayPeerId,
         SelfId selfIdentityId,
         CancellationToken cancellationToken = default)
     {
@@ -87,7 +87,7 @@ public sealed class GroupProvisioningAppService : IGroupProvisioningAppService
         var groupConversation = new GroupConversation(
             conversationId,
             groupState,
-            relayPublicIdentityId,
+            relayPeerId,
             new[] { selfMember },
             name);
 

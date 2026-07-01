@@ -18,7 +18,7 @@ public sealed class GroupConversation
     public Messaging.ValueObjects.ConversationId Id { get; }
     public GroupState State { get; private set; }
     public string? Name { get; private set; }
-    public Guid RelayPublicIdentityId { get; }
+    public ChatPeerId RelayPeerId { get; }
     public IReadOnlyList<GroupMember> Members => new ReadOnlyCollection<GroupMember>(_members);
     public IReadOnlyList<IDomainEvent> GetDomainEvents() => _domainEvents;
     public void ClearDomainEvents() => _domainEvents.Clear();
@@ -26,7 +26,7 @@ public sealed class GroupConversation
     public GroupConversation(
         Messaging.ValueObjects.ConversationId id,
         GroupState state,
-        Guid relayPublicIdentityId,
+        ChatPeerId relayPeerId,
         IEnumerable<GroupMember> members,
         string? name = null)
     {
@@ -55,7 +55,7 @@ public sealed class GroupConversation
 
         Id = id;
         State = state;
-        RelayPublicIdentityId = relayPublicIdentityId;
+        RelayPeerId = relayPeerId;
         Name = name;
         _members.AddRange(memberList);
 
@@ -91,7 +91,7 @@ public sealed class GroupConversation
             Id,
             participantId,
             distributionMessage,
-            RelayPublicIdentityId));
+            RelayPeerId));
     }
 
     public void RemoveMember(ParticipantId participantId, DateTimeOffset when)
