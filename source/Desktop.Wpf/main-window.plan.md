@@ -465,19 +465,27 @@ To solve this while avoiding N+1 database queries downstream, we will introduce 
 *   **Update `GroupMember.cs`**:
     *   Change `ChatPeerId PeerId` property to `ParticipantId ParticipantId`.
 *   **Update `GroupConversation.cs`**:
-    *   Change `ChatPeerId RelayPeerId` to `PublicIdentityId RelayPublicIdentityId`.
+    *   Keep `ChatPeerId RelayPeerId` (no change to relay field type).
     *   Update constructor, `AddMember`, `InviteMember`, and `RemoveMember` to take `ParticipantId` instead of `ChatPeerId`.
 *   **Update Domain Events**:
     *   Update `MemberInvitedDomainEvent.cs` and `GroupProvisioningRequestedDomainEvent.cs` to use `ParticipantId` for members and `PublicIdentityId` for the relay.
 
 **2. Update Persistence Layer (`Percolator.Infrastructure.Chat`)**
 *   **Update `GroupMemberDbo.cs`**:
-    *   Add `public Guid PublicIdentityId { get; set; }` (Required).
+    *   Add `public PublicIdentityId PublicIdentityId { get; set; }` (Required) using the chat domain type.
     *   Change `PeerId PeerId` to `public uint? PeerId { get; set; }`.
     *   Add `public uint? SelfId { get; set; }`.
 *   **Update `PercolatorDbContext.cs`**:
     *   Locate the `modelBuilder.Entity<Percolator.Infrastructure.Chat.Persistence.GroupMemberDbo>` configuration block.
     *   Change the primary key from `entity.HasKey(e => new { e.ConversationId, e.PeerId });` to `entity.HasKey(e => new { e.ConversationId, e.PublicIdentityId });`.
+    *   Add conversion for `PublicIdentityId` property to map between chat domain type and Guid:
+        ```csharp
+        entity.Property(e => e.PublicIdentityId)
+            .HasConversion(
+                v => v.Value,
+                v => new PublicIdentityId(v))
+            .IsRequired();
+        ```
 *   **Update `SqliteGroupConversationRepository.cs`**:
     *   When pulling from the DB (`ToDomain`), instantiate the correct `ParticipantId` subclass: if `PeerId` is not null, return `RemoteParticipantId`; if `SelfId` is not null, return `LocalParticipantId`.
     *   When persisting (`AddAsync`/`UpdateAsync`), populate `GroupMemberDbo.PublicIdentityId`, and assign the correct nullable `PeerId` or `SelfId` depending on the subclass pattern match.
