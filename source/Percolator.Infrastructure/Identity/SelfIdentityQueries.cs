@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Percolator.Application.Chat;
 using Percolator.Cryptography;
+using Percolator.Identity;
 using Percolator.Infrastructure.Persistence;
 
 namespace Percolator.Infrastructure.Identity;
@@ -38,19 +39,32 @@ public sealed class SelfIdentityQueries : ISelfIdentityQueries
         return bytes is null ? null : ZkServerSecretParamsSeedBytes.FromBytesOwned(bytes);
     }
 
-    public async Task<(Percolator.Chat.Messaging.ValueObjects.Pkh Pkh, Guid PeerId)?> GetIdentityParticipantInfoAsync(int selfIdentityId, CancellationToken ct)
+    public async Task<(IdentityPublicKeyHash PublicKeyHash, PublicIdentityId PublicIdentityId)?> GetIdentityParticipantInfoAsync(SelfId selfIdentityId, CancellationToken ct)
     {
         using var db = _dbFactory.CreateDbContext();
         var identity = await db.SelfIdentities
             .AsNoTracking()
-            .Where(x => x.Id == selfIdentityId && x.ActiveIdentityKeyFingerprint != null)
-            .Select(x => new { x.ActiveIdentityKeyFingerprint, PeerId = x.PublicIdentityId })
+            .Where(x => x.Id == selfIdentityId.Value && x.ActiveIdentityKeyFingerprint != null)
+            .Select(x => new { x.ActiveIdentityKeyFingerprint, PublicIdentityId = x.PublicIdentityId })
             .FirstOrDefaultAsync(ct);
 
         if (identity is null)
             return null;
 
-        var pkh = Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytesOwned(identity.ActiveIdentityKeyFingerprint!);
-        return (pkh, identity.PeerId);
+        var pkh = IdentityPublicKeyHash.FromBytesOwned(identity.ActiveIdentityKeyFingerprint!);
+        return (pkh, identity.PublicIdentityId);
+    }
+    public async Task<PublicIdentityId?> GetSelfIdentityPublicKeyAsync(SelfId selfIdentityId, CancellationToken ct)
+    {
+        using var db = _dbFactory.CreateDbContext();
+        var identity = await db.SelfIdentities
+            .AsNoTracking()
+            .Where(x => x.Id == selfIdentityId.Value)
+            .FirstOrDefaultAsync(ct);
+
+        if (identity is null)
+            return null;
+
+        return identity.PublicIdentityId;
     }
 }

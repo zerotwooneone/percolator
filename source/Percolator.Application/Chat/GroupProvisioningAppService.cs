@@ -5,6 +5,7 @@ using Percolator.Chat.GroupMembership;
 using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Cryptography;
 using Percolator.Identity;
+using PublicIdentityId = Percolator.Chat.GroupLedger.PublicIdentityId;
 
 namespace Percolator.Application.Chat;
 
@@ -19,7 +20,6 @@ public sealed class GroupProvisioningAppService : IGroupProvisioningAppService
     private readonly IGroupConversationRepository _groupConversationRepository;
     private readonly ISelfIdentityQueries _selfIdentityQueries;
     private readonly ILogger<GroupProvisioningAppService> _logger;
-
     public GroupProvisioningAppService(
         IGroupCryptographyService groupCryptographyService,
         ISenderKeyCryptographyService senderKeyCryptographyService,
@@ -70,13 +70,13 @@ public sealed class GroupProvisioningAppService : IGroupProvisioningAppService
 
         // Step 7: Create initial members (self as admin)
         // Resolve self identity info to get PublicIdentityId and SelfId
-        var selfInfo = await _selfIdentityQueries.GetIdentityParticipantInfoAsync(selfIdentityId, cancellationToken).ConfigureAwait(false);
-        if (selfInfo is null)
+        var selfIdentityPublicKey = await _selfIdentityQueries.GetSelfIdentityPublicKeyAsync(selfIdentityId, cancellationToken).ConfigureAwait(false);
+        if (selfIdentityPublicKey is null)
         {
             throw new InvalidOperationException($"Could not resolve self identity info for ID {selfIdentityId}");
         }
 
-        var selfParticipantId = new LocalParticipantId(selfInfo.Value.PublicIdentityId, new ChatSelfId(selfInfo.Value.SelfId));
+        var selfParticipantId = new LocalParticipantId(new PublicIdentityId(selfIdentityPublicKey.Value), new ChatSelfId(selfIdentityId.Value));
         var selfMember = new GroupMember(
             conversationId,
             selfParticipantId,

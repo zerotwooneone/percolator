@@ -223,7 +223,11 @@ public class PercolatorDbContext : DbContext
             entity.ToTable("SelfIdentity");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).ValueGeneratedOnAdd();
-            entity.Property(e => e.PublicIdentityId).IsRequired();
+            entity.Property(e => e.PublicIdentityId)
+                .HasConversion(
+                    v => v.Value,
+                    v => new Percolator.Identity.PublicIdentityId(v))
+                .IsRequired();
             entity.Property(e => e.Name).IsRequired();
             entity.Property(e => e.LastUsedUtc)
                   .IsRequired()
@@ -358,7 +362,7 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.PeerId)
                 .HasConversion(
                     v => v.Value,
-                    v => new Percolator.Identity.PeerId(v))
+                    v => new Percolator.Identity.PeerId(v.Value))
                 .IsRequired(false);
             entity.Property(e => e.SelfId).IsRequired(false);
             entity.Property(e => e.Role).IsRequired();

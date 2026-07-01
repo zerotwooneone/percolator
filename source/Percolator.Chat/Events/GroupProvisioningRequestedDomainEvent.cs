@@ -1,6 +1,5 @@
 using Percolator.Chat.GroupLedger;
 using Percolator.Chat.GroupMembership;
-using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Chat.SeedWork;
 
 namespace Percolator.Chat.Events;
@@ -11,4 +10,4 @@ namespace Percolator.Chat.Events;
 public sealed record GroupProvisioningRequestedDomainEvent(
     Messaging.ValueObjects.ConversationId ConversationId,
     RelayGroupPublicParamsBytes PublicParams,
-    IReadOnlyList<PublicIdentityId> MemberPublicIdentityIds) : IDomainEvent;
+    IReadOnlyList<ParticipantId> MemberParticipantIds) : IDomainEvent;

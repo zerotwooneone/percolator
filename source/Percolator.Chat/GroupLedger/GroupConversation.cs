@@ -63,7 +63,7 @@ public sealed class GroupConversation
         _domainEvents.Add(new GroupProvisioningRequestedDomainEvent(
             Id,
             State.PublicParams,
-            memberList.Select(m => m.ParticipantId.PublicIdentityId).ToList()));
+            memberList.Select(m => m.ParticipantId).ToList()));
     }
 
     public void AddMember(GroupMember member)
