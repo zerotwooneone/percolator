@@ -5,11 +5,9 @@ using Percolator.Chat;
 using Percolator.Cryptography;
 using Percolator.Application.Network;
 using Percolator.Chat.GroupLedger;
-using Percolator.Chat.GroupMembership;
 using Percolator.Chat.Messaging.App;
 using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Contracts;
-using Percolator.Identity;
 
 namespace Percolator.Application.Apps.Chat.Handlers;
 
@@ -90,7 +88,7 @@ public sealed class SendGroupMessageCommandHandler : IRequestHandler<Commands.Se
             cancellationToken).ConfigureAwait(false);
 
         // Send to relay (Signal Group V2: sender sends once to relay, relay fans out to members)
-        var relayRoute = new RecipientRoute(new Percolator.Cryptography.Primitives.PeerId(group.RelayPeerId.Value), null);
+        var relayRoute = new RecipientRoute(new Percolator.Identity.PeerId(group.RelayPeerId.Value), null);
         var envelope = CreateGroupMessageEnvelope(request.ConversationId, ciphertext);
         await _envelopeSender.SendChatEnvelopeToPeerAsync(envelope, relayRoute, cancellationToken).ConfigureAwait(false);
     }
