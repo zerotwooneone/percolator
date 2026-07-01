@@ -30,9 +30,9 @@ public class GroupStateDbo
     public RelayGroupPublicParamsBytes PublicParams { get; set; }
 
     /// <summary>
-    /// The local peer ID of the relay for this group.
+    /// The public identity ID of the relay for this group.
     /// </summary>
-    public PeerId RelayPeerId { get; set; }
+    public Guid RelayPublicIdentityId { get; set; }
 
     /// <summary>
     /// UTC timestamp when the group was created.

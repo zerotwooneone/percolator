@@ -13,9 +13,19 @@ public class GroupMemberDbo
     public Guid ConversationId { get; set; }
 
     /// <summary>
-    /// The local peer ID of the group member.
+    /// The universal public identity ID (UUID).
     /// </summary>
-    public PeerId PeerId { get; set; }
+    public Guid PublicIdentityId { get; set; }
+
+    /// <summary>
+    /// The local peer ID (null for local self identities).
+    /// </summary>
+    public uint? PeerId { get; set; }
+
+    /// <summary>
+    /// The local self ID (null for remote peers).
+    /// </summary>
+    public uint? SelfId { get; set; }
 
     /// <summary>
     /// The member's role in the group.

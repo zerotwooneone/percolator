@@ -55,7 +55,7 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
             Epoch = conversation.State.Epoch,
             Name = conversation.State.Name,
             PublicParams = conversation.State.PublicParams,
-            RelayPeerId = new PeerId(conversation.RelayPeerId.Value),
+            RelayPublicIdentityId = conversation.RelayPublicIdentityId,
             CreatedAtUtc = conversation.State.CreatedAtUtc,
             UpdatedAtUtc = conversation.State.UpdatedAtUtc
         };
@@ -67,7 +67,9 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
             var groupMemberDbo = new Persistence.GroupMemberDbo
             {
                 ConversationId = member.ConversationId.Value,
-                PeerId = new PeerId(member.PeerId.Value),
+                PublicIdentityId = member.ParticipantId.PublicIdentityId,
+                PeerId = member.ParticipantId is RemoteParticipantId remote ? remote.PeerId.Value : null,
+                SelfId = member.ParticipantId is LocalParticipantId local ? local.SelfId.Value : null,
                 Role = (Persistence.GroupMemberRole)member.Role,
                 JoinedAtUtc = member.JoinedAtUtc,
                 RemovedAtUtc = member.RemovedAtUtc
@@ -100,6 +102,7 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
             existingGroupState.Epoch = conversation.State.Epoch;
             existingGroupState.Name = conversation.State.Name;
             existingGroupState.PublicParams = conversation.State.PublicParams;
+            existingGroupState.RelayPublicIdentityId = conversation.RelayPublicIdentityId;
             existingGroupState.UpdatedAtUtc = conversation.State.UpdatedAtUtc;
             _db.GroupStates.Update(existingGroupState);
         }
@@ -115,7 +118,9 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
             var groupMemberDbo = new Persistence.GroupMemberDbo
             {
                 ConversationId = member.ConversationId.Value,
-                PeerId = new PeerId(member.PeerId.Value),
+                PublicIdentityId = member.ParticipantId.PublicIdentityId,
+                PeerId = member.ParticipantId is RemoteParticipantId remote ? remote.PeerId.Value : null,
+                SelfId = member.ParticipantId is LocalParticipantId local ? local.SelfId.Value : null,
                 Role = (Persistence.GroupMemberRole)member.Role,
                 JoinedAtUtc = member.JoinedAtUtc,
                 RemovedAtUtc = member.RemovedAtUtc
@@ -146,7 +151,7 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
             Epoch = conversation.State.Epoch,
             Name = conversation.State.Name,
             PublicParams = conversation.State.PublicParams,
-            RelayPeerId = new PeerId( conversation.RelayPeerId.Value),
+            RelayPublicIdentityId = conversation.RelayPublicIdentityId,
             CreatedAtUtc = conversation.State.CreatedAtUtc,
             UpdatedAtUtc = conversation.State.UpdatedAtUtc
         };
@@ -158,7 +163,9 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
             var groupMemberDbo = new Persistence.GroupMemberDbo
             {
                 ConversationId = member.ConversationId.Value,
-                PeerId = new PeerId( member.PeerId.Value),
+                PublicIdentityId = member.ParticipantId.PublicIdentityId,
+                PeerId = member.ParticipantId is RemoteParticipantId remote ? remote.PeerId.Value : null,
+                SelfId = member.ParticipantId is LocalParticipantId local ? local.SelfId.Value : null,
                 Role = (Persistence.GroupMemberRole)member.Role,
                 JoinedAtUtc = member.JoinedAtUtc,
                 RemovedAtUtc = member.RemovedAtUtc
@@ -172,12 +179,19 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
         {
             var eventType = domainEvent.GetType().Name;
             var payloadJson = System.Text.Json.JsonSerializer.Serialize(domainEvent, domainEvent.GetType());
-            
+
             // Determine destination PeerId based on event type
-            ChatPeerId destinationPeerId = domainEvent switch
+            // Pattern match on ParticipantId to extract PeerId for relay routing
+            PeerId destinationPeerId = domainEvent switch
             {
-                Percolator.Chat.Events.GroupProvisioningRequestedDomainEvent provisioningEvent => conversation.RelayPeerId,
-                Percolator.Chat.Events.MemberInvitedDomainEvent inviteEvent => inviteEvent.ParticipantId,
+                Percolator.Chat.Events.GroupProvisioningRequestedDomainEvent provisioningEvent =>
+                    // For provisioning, we need to resolve the relay PublicIdentityId to PeerId
+                    // This will be handled by the outbox dispatcher using IPeerIdentityRepository
+                    throw new NotImplementedException("Relay PublicIdentityId to PeerId resolution must be done in outbox dispatcher"),
+                Percolator.Chat.Events.MemberInvitedDomainEvent inviteEvent when inviteEvent.ParticipantId is RemoteParticipantId remote =>
+                    new PeerId(remote.PeerId.Value),
+                Percolator.Chat.Events.MemberInvitedDomainEvent inviteEvent when inviteEvent.ParticipantId is LocalParticipantId =>
+                    throw new InvalidOperationException("Cannot route to local participant via outbox"),
                 _ => throw new InvalidOperationException($"Unknown domain event type: {eventType}")
             };
 
@@ -186,7 +200,7 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
                 Id = Guid.NewGuid(),
                 EventType = eventType,
                 PayloadJson = payloadJson,
-                DestinationPeerId = new PeerId(destinationPeerId.Value),
+                DestinationPeerId = destinationPeerId,
                 ProcessedAtUtc = null
             };
             _db.RelayOutbox.Add(outboxItem);
@@ -208,19 +222,26 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
                 groupStateDbo.UpdatedAtUtc)
             : throw new InvalidOperationException($"GroupState not found for conversation {dbo.Id}");
 
-        var groupMembers = groupMemberDbos.Select(m => new GroupMember(
-            new ConversationId(m.ConversationId),
-            new ChatPeerId(m.PeerId.Value),
-            (GroupMemberRole)m.Role,
-            m.JoinedAtUtc,
-            m.RemovedAtUtc)).ToList();
+        var groupMembers = groupMemberDbos.Select(m =>
+        {
+            ParticipantId participantId = m.PeerId.HasValue
+                ? new RemoteParticipantId(m.PublicIdentityId, new ChatPeerId(m.PeerId.Value))
+                : m.SelfId.HasValue
+                    ? new LocalParticipantId(m.PublicIdentityId, new ChatSelfId(m.SelfId.Value))
+                    : throw new InvalidOperationException($"GroupMember must have either PeerId or SelfId set for PublicIdentityId {m.PublicIdentityId}");
 
-        var relayPeerId = new ChatPeerId(groupStateDbo!.RelayPeerId.Value);
+            return new GroupMember(
+                new ConversationId(m.ConversationId),
+                participantId,
+                (GroupMemberRole)m.Role,
+                m.JoinedAtUtc,
+                m.RemovedAtUtc);
+        }).ToList();
 
         return new GroupConversation(
             new ConversationId(dbo.Id),
             groupState,
-            relayPeerId,
+            groupStateDbo!.RelayPublicIdentityId,
             groupMembers,
             dbo.Name);
     }

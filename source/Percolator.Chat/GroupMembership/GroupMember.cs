@@ -15,15 +15,15 @@ public enum GroupMemberRole
 public sealed class GroupMember
 {
     public Messaging.ValueObjects.ConversationId ConversationId { get; }
-    public ChatPeerId PeerId { get; }
+    public ParticipantId ParticipantId { get; }
     public GroupMemberRole Role { get; private set; }
     public DateTimeOffset JoinedAtUtc { get; }
     public DateTimeOffset? RemovedAtUtc { get; private set; }
 
-    public GroupMember(Messaging.ValueObjects.ConversationId conversationId, ChatPeerId peerId, GroupMemberRole role, DateTimeOffset joinedAtUtc, DateTimeOffset? removedAtUtc = null)
+    public GroupMember(Messaging.ValueObjects.ConversationId conversationId, ParticipantId participantId, GroupMemberRole role, DateTimeOffset joinedAtUtc, DateTimeOffset? removedAtUtc = null)
     {
         ConversationId = conversationId;
-        PeerId = peerId;
+        ParticipantId = participantId;
         Role = role;
         JoinedAtUtc = joinedAtUtc;
         RemovedAtUtc = removedAtUtc;

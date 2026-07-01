@@ -15,15 +15,15 @@ public interface IGroupProvisioningAppService
     /// Generates cryptographic keys, creates the group aggregate, and saves atomically with outbox events.
     /// </summary>
     /// <param name="name">Optional group name.</param>
-    /// <param name="inviteePeerIds">List of peer IDs for members to invite.</param>
-    /// <param name="relayPeerId">The peer ID of the relay to use for group provisioning.</param>
+    /// <param name="inviteeParticipantIds">List of participant IDs for members to invite.</param>
+    /// <param name="relayPublicIdentityId">The public identity ID of the relay to use for group provisioning.</param>
     /// <param name="selfIdentityId">The local identity ID.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The conversation ID of the newly created group.</returns>
     Task<ConversationId> ProvisionGroupAsync(
         string? name,
-        IReadOnlyList<ChatPeerId> inviteePeerIds,
-        ChatPeerId relayPeerId,
+        IReadOnlyList<ParticipantId> inviteeParticipantIds,
+        Guid relayPublicIdentityId,
         SelfId selfIdentityId,
         CancellationToken cancellationToken = default);
 }

@@ -11,4 +11,4 @@ namespace Percolator.Chat.Events;
 public sealed record GroupProvisioningRequestedDomainEvent(
     Messaging.ValueObjects.ConversationId ConversationId,
     RelayGroupPublicParamsBytes PublicParams,
-    IReadOnlyList<ChatPeerId> MemberIds) : IDomainEvent;
+    IReadOnlyList<Guid> MemberPublicIdentityIds) : IDomainEvent;

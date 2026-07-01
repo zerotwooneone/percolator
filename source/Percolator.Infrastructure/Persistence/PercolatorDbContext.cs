@@ -348,13 +348,11 @@ public class PercolatorDbContext : DbContext
         modelBuilder.Entity<Percolator.Infrastructure.Chat.Persistence.GroupMemberDbo>(entity =>
         {
             entity.ToTable("GroupMembers");
-            entity.HasKey(e => new { e.ConversationId, e.PeerId });
+            entity.HasKey(e => new { e.ConversationId, e.PublicIdentityId });
             entity.Property(e => e.ConversationId).IsRequired();
-            entity.Property(e => e.PeerId)
-                .HasConversion(
-                    v => v.Value,
-                    v => new Percolator.Identity.PeerId(v))
-                .IsRequired();
+            entity.Property(e => e.PublicIdentityId).IsRequired();
+            entity.Property(e => e.PeerId).IsRequired(false);
+            entity.Property(e => e.SelfId).IsRequired(false);
             entity.Property(e => e.Role).IsRequired();
             entity.Property(e => e.JoinedAtUtc).IsRequired();
             entity.Property(e => e.RemovedAtUtc).IsRequired(false);

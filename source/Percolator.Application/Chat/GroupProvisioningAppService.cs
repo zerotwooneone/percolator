@@ -17,6 +17,7 @@ public sealed class GroupProvisioningAppService : IGroupProvisioningAppService
     private readonly ISenderKeyCryptographyService _senderKeyCryptographyService;
     private readonly IGroupCryptoStateRepository _groupCryptoStateRepository;
     private readonly IGroupConversationRepository _groupConversationRepository;
+    private readonly ISelfIdentityQueries _selfIdentityQueries;
     private readonly ILogger<GroupProvisioningAppService> _logger;
 
     public GroupProvisioningAppService(
@@ -24,19 +25,21 @@ public sealed class GroupProvisioningAppService : IGroupProvisioningAppService
         ISenderKeyCryptographyService senderKeyCryptographyService,
         IGroupCryptoStateRepository groupCryptoStateRepository,
         IGroupConversationRepository groupConversationRepository,
+        ISelfIdentityQueries selfIdentityQueries,
         ILogger<GroupProvisioningAppService> logger)
     {
         _groupCryptographyService = groupCryptographyService;
         _senderKeyCryptographyService = senderKeyCryptographyService;
         _groupCryptoStateRepository = groupCryptoStateRepository;
         _groupConversationRepository = groupConversationRepository;
+        _selfIdentityQueries = selfIdentityQueries;
         _logger = logger;
     }
 
     public async Task<Percolator.Chat.Messaging.ValueObjects.ConversationId> ProvisionGroupAsync(
         string? name,
-        IReadOnlyList<ChatPeerId> inviteePeerIds,
-        ChatPeerId relayPeerId,
+        IReadOnlyList<ParticipantId> inviteeParticipantIds,
+        Guid relayPublicIdentityId,
         SelfId selfIdentityId,
         CancellationToken cancellationToken = default)
     {
@@ -66,9 +69,17 @@ public sealed class GroupProvisioningAppService : IGroupProvisioningAppService
             DateTimeOffset.UtcNow);
 
         // Step 7: Create initial members (self as admin)
+        // Resolve self identity info to get PublicIdentityId and SelfId
+        var selfInfo = await _selfIdentityQueries.GetIdentityParticipantInfoAsync(selfIdentityId, cancellationToken).ConfigureAwait(false);
+        if (selfInfo is null)
+        {
+            throw new InvalidOperationException($"Could not resolve self identity info for ID {selfIdentityId}");
+        }
+
+        var selfParticipantId = new LocalParticipantId(selfInfo.Value.PublicIdentityId, new ChatSelfId(selfInfo.Value.SelfId));
         var selfMember = new GroupMember(
             conversationId,
-            selfPeerId,
+            selfParticipantId,
             GroupMemberRole.Admin,
             DateTimeOffset.UtcNow);
 
@@ -76,27 +87,26 @@ public sealed class GroupProvisioningAppService : IGroupProvisioningAppService
         var groupConversation = new GroupConversation(
             conversationId,
             groupState,
-            relayPeerId,
+            relayPublicIdentityId,
             new[] { selfMember },
             name);
 
         // Step 9: Generate sender key distribution messages for members and invite them
         // TODO: Implement sender key distribution message generation
         // This requires converting chat domain types to cryptography domain types
-        foreach (var inviteePeerId in inviteePeerIds)
+        foreach (var inviteeParticipantId in inviteeParticipantIds)
         {
-            
             // TODO: Generate ChatSenderKeyDistributionMessageBytes
             // var distributionBytes = ChatSenderKeyDistributionMessageBytes.FromSpan(...);
             var distributionBytes = ChatSenderKeyDistributionMessageBytes.FromBytesOwned(Array.Empty<byte>());
-            
-            groupConversation.InviteMember(inviteePeerId, distributionBytes);
+
+            groupConversation.InviteMember(inviteeParticipantId, distributionBytes);
         }
 
         // Step 10: Save atomically via outbox
         await _groupConversationRepository.AddWithOutboxAsync(groupConversation, selfIdentityId, cancellationToken).ConfigureAwait(false);
 
-        _logger.LogInformation("Group {ConversationId} provisioned successfully with {MemberCount} members", conversationId, inviteePeerIds.Count + 1);
+        _logger.LogInformation("Group {ConversationId} provisioned successfully with {MemberCount} members", conversationId, inviteeParticipantIds.Count + 1);
 
         return conversationId;
     }
