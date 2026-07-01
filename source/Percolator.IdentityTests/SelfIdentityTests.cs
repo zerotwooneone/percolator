@@ -13,7 +13,7 @@ public class SelfIdentityTests
     {
         // Arrange
         var now = new DateTimeOffset(2025, 1, 1, 0, 0, 0, TimeSpan.Zero);
-        var id = new SelfIdentity(new SelfId(1), new PublicIdentityId(Guid.NewGuid()), new ListeningPort(5000), new DeviceId(1), now);
+        var id = new SelfIdentity(new SelfId(1), PublicIdentityId.NewId(), new ListeningPort(5000), new DeviceId(1), now);
         id.AddKey(spki: Bytes(1, 2, 3), notBefore: now, expiresAt: now.AddDays(1), now: now);
 
         // Act + Assert
@@ -28,7 +28,7 @@ public class SelfIdentityTests
     {
         // Arrange
         var now = new DateTimeOffset(2025, 2, 1, 0, 0, 0, TimeSpan.Zero);
-        var id = new SelfIdentity(new SelfId(2), new PublicIdentityId(Guid.NewGuid()), new ListeningPort(5000), new DeviceId(1), now);
+        var id = new SelfIdentity(new SelfId(2), PublicIdentityId.NewId(), new ListeningPort(5000), new DeviceId(1), now);
         id.AddKey(spki: Bytes(9), notBefore: now, expiresAt: now.AddDays(1), now: now);
 
         // Act + Assert: Attempt to add a second key that would also be active at 'now'
@@ -40,7 +40,7 @@ public class SelfIdentityTests
     public void TouchLastUsed_SetsLastUsedUtc()
     {
         // Arrange
-        var id = new SelfIdentity(new SelfId(3), new PublicIdentityId(Guid.NewGuid()), new ListeningPort(5000), new DeviceId(1), DateTimeOffset.UtcNow);
+        var id = new SelfIdentity(new SelfId(3), PublicIdentityId.NewId(), new ListeningPort(5000), new DeviceId(1), DateTimeOffset.UtcNow);
         var t1 = new DateTimeOffset(2025, 3, 1, 12, 0, 0, TimeSpan.Zero);
         var t2 = t1.AddHours(1);
 
@@ -58,7 +58,7 @@ public class SelfIdentityTests
     {
         // Arrange
         var now = new DateTimeOffset(2025, 4, 1, 0, 0, 0, TimeSpan.Zero);
-        var id = new SelfIdentity(new SelfId(4), new PublicIdentityId(Guid.NewGuid()), new ListeningPort(5000), new DeviceId(1), now);
+        var id = new SelfIdentity(new SelfId(4), PublicIdentityId.NewId(), new ListeningPort(5000), new DeviceId(1), now);
         id.AddKey(Bytes(1), notBefore: now, expiresAt: now.AddDays(1), now: now);
         id.AddKey(Bytes(2), notBefore: now.AddDays(2), expiresAt: now.AddDays(3), now: now);
 
@@ -75,7 +75,7 @@ public class SelfIdentityTests
     {
         // Arrange
         var now = new DateTimeOffset(2025, 5, 1, 0, 0, 0, TimeSpan.Zero);
-        var id = new SelfIdentity(new SelfId(5), new PublicIdentityId(Guid.NewGuid()), new ListeningPort(5000), new DeviceId(1), now);
+        var id = new SelfIdentity(new SelfId(5), PublicIdentityId.NewId(), new ListeningPort(5000), new DeviceId(1), now);
         id.AddKey(Bytes(1), notBefore: now, expiresAt: now.AddDays(1), now: now);
 
         // Act: schedule next key to start exactly when previous expires
@@ -92,7 +92,7 @@ public class SelfIdentityTests
     public void CommitProfileUpdate_IncrementsRevisionAndUpdatesPayload()
     {
         // Arrange
-        var id = new SelfIdentity(new SelfId(6), new PublicIdentityId(Guid.NewGuid()), new ListeningPort(5000), new DeviceId(1), DateTimeOffset.UtcNow);
+        var id = new SelfIdentity(new SelfId(6), PublicIdentityId.NewId(), new ListeningPort(5000), new DeviceId(1), DateTimeOffset.UtcNow);
         var initialRevision = id.ProfileRevision;
         var newKey = ProfileKeyBytes.FromBytesOwned(Bytes(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32));
         var ciphertext = EncryptedProfileDataBytes.FromBytesOwned(Bytes(10, 20, 30));
