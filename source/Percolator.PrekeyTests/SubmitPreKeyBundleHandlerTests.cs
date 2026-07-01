@@ -35,7 +35,7 @@ public class SubmitPreKeyBundleHandlerTests
     public async Task Handle_success_stores_bundles_and_activates_key()
     {
         // Arrange
-        var remotePeerId = new CryptoPeerId(Guid.NewGuid());
+        var remotePeerId = new CryptoPeerId(1);
         var publicSigningKey = new byte[80];
         var signedPreKeyId = Guid.NewGuid();
         var signedPreKey = new byte[64];
@@ -85,7 +85,7 @@ public class SubmitPreKeyBundleHandlerTests
         // Arrange
         var cmd = new SubmitPreKeyBundleCommand
         {
-            RemotePeerId = new NetworkPeerId(Guid.NewGuid()),
+            RemotePeerId = new NetworkPeerId(2),
             PublicSigningKey = new byte[80],
             SignedPreKeyId = Guid.NewGuid(),
             SignedPreKey = new byte[64],
@@ -113,7 +113,7 @@ public class SubmitPreKeyBundleHandlerTests
         // Arrange
         var cmd = new SubmitPreKeyBundleCommand
         {
-            RemotePeerId = new NetworkPeerId(Guid.NewGuid()),
+            RemotePeerId = new NetworkPeerId(3),
             PublicSigningKey = new byte[80],
             SignedPreKeyId = Guid.NewGuid(),
             SignedPreKey = new byte[64],

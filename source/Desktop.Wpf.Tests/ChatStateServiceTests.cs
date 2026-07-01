@@ -30,7 +30,7 @@ public class ChatStateServiceTests
     {
         // Arrange
         var sessionId = new DirectSessionId(Guid.NewGuid());
-        var messageId = MessageId.NewId();
+        var messageId = PublicMessageId.NewId();
         var snapshot = new ChatMessageSnapshot(
             Id: messageId,
             Author: "Me",
@@ -56,7 +56,7 @@ public class ChatStateServiceTests
     {
         // Arrange
         var sessionId = new DirectSessionId(Guid.NewGuid());
-        var messageId = MessageId.NewId();
+        var messageId = PublicMessageId.NewId();
         var snapshot = new ChatMessageSnapshot(
             Id: messageId,
             Author: "Me",
@@ -83,7 +83,7 @@ public class ChatStateServiceTests
     {
         // Arrange
         var sessionId = new DirectSessionId(Guid.NewGuid());
-        var messageId = MessageId.NewId();
+        var messageId = PublicMessageId.NewId();
         var snapshot = new ChatMessageSnapshot(
             Id: messageId,
             Author: "Me",
@@ -110,7 +110,7 @@ public class ChatStateServiceTests
     {
         // Arrange
         var sessionId = new DirectSessionId(Guid.NewGuid());
-        var messageId = MessageId.NewId();
+        var messageId = PublicMessageId.NewId();
 
         // Act
         _sut.MarkAsDelivered(sessionId, messageId);
@@ -125,8 +125,8 @@ public class ChatStateServiceTests
     {
         // Arrange
         var sessionId = new DirectSessionId(Guid.NewGuid());
-        var messageId1 = MessageId.NewId();
-        var messageId2 = MessageId.NewId();
+        var messageId1 = PublicMessageId.NewId();
+        var messageId2 = PublicMessageId.NewId();
         var snapshots = new[]
         {
             new ChatMessageSnapshot(
@@ -162,7 +162,7 @@ public class ChatStateServiceTests
     {
         // Arrange
         var sessionId = new DirectSessionId(Guid.NewGuid());
-        var messageId = MessageId.NewId();
+        var messageId = PublicMessageId.NewId();
         var initialSnapshot = new ChatMessageSnapshot(
             Id: messageId,
             Author: "Me",
@@ -199,7 +199,7 @@ public class ChatStateServiceTests
     {
         // Arrange
         var sessionId = new DirectSessionId(Guid.NewGuid());
-        var messageId = MessageId.NewId();
+        var messageId = PublicMessageId.NewId();
         var initialSnapshot = new ChatMessageSnapshot(
             Id: messageId,
             Author: "Me",

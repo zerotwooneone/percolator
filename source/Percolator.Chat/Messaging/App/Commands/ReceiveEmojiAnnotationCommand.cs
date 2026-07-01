@@ -7,6 +7,6 @@ namespace Percolator.Chat.Messaging.App.Commands;
 public sealed record ReceiveEmojiAnnotationCommand(
     ConversationLookupKey LookupKey,
     ChatPeerId ReactorId,
-    MessageId MessageId,
+    PublicMessageId PublicMessageId,
     string Emoji,
     DateTimeOffset SentTimestampUtc) : IRequest;

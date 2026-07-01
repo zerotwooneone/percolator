@@ -1,11 +1,12 @@
 using MediatR;
-using Percolator.Chat.Messaging.ValueObjects;
+using Percolator.Chat.GroupMembership;
 
 namespace Percolator.Chat.Messaging.App.Commands;
 
 public sealed record PostTextMessageCommand(
     ConversationLookupKey LookupKey,
-    MessageId MessageId,
+    PublicMessageId PublicMessageId,
     string Content,
-    DateTimeOffset SentTimestampUtc
+    DateTimeOffset SentTimestampUtc,
+    ChatSelfId SelfIdentityId
 ) : IRequest;

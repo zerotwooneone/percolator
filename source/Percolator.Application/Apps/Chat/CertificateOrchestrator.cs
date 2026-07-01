@@ -45,15 +45,7 @@ public sealed class CertificateOrchestrator : ICertificateOrchestrator
             return;
         }
 
-        // Call the topology layer to resolve the designated relay peer
-        var networkPeerId = new Percolator.Network.PeerId(selfIdentity.PublicIdentityId.Value);
-        var relayPeerId = await _relayTopology.GetRelayForAsync(networkPeerId, ct).ConfigureAwait(false);
-        if (relayPeerId is null)
-        {
-            _logger.LogWarning("No relay configured for certificate refresh");
-            return;
-        }
-
+        
         // Use the repository to extract its active endpoint network profile
         var relayProfile = await _peerRoutingProfileRepository.GetByIdAsync(relayPeerId, ct).ConfigureAwait(false);
         if (relayProfile is null)

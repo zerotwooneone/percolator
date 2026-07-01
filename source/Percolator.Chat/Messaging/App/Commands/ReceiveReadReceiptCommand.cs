@@ -7,5 +7,5 @@ namespace Percolator.Chat.Messaging.App.Commands;
 public sealed record ReceiveReadReceiptCommand(
     ConversationLookupKey LookupKey,
     ChatPeerId ReaderId,
-    MessageId MessageId,
+    PublicMessageId PublicMessageId,
     DateTimeOffset SentTimestampUtc) : IRequest;

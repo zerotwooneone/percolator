@@ -14,6 +14,7 @@ using Percolator.Application.Chat.MessageQueue.Commands;
 using Percolator.Chat;
 using Percolator.Chat.GroupLedger;
 using Percolator.Chat.GroupMembership;
+using Percolator.Chat.Messaging;
 using Percolator.Chat.Messaging.App;
 using Percolator.Chat.Messaging.App.Commands;
 using Percolator.Chat.Messaging.Events;
@@ -245,7 +246,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                         throw new InvalidOperationException("Direct chat TextMessage requires RemotePeerGuid in context.");
                     var senderId = new ChatPeerId(request.Context.RemotePeer.Value.Value);
 
-                    var messageId = new MessageId(new Guid(text.MessageId.Span));
+                    var messageId = new PublicMessageId(new Guid(text.MessageId.Span));
                     var sentTs = text.SentTimestampUtc.ToDateTimeOffset();
                     await _mediator.Send(new ReceiveTextMessageCommand(lookup, senderId, messageId, text.Content, sentTs), cancellationToken).ConfigureAwait(false);
                     return null;
@@ -272,7 +273,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                         throw new InvalidOperationException("Direct chat ReadReceipt requires RemotePeerGuid in context.");
                     var readerId = new ChatPeerId(request.Context.RemotePeer.Value.Value);
 
-                    var messageId = new MessageId(new Guid(rr.MessageId.Span));
+                    var messageId = new PublicMessageId(new Guid(rr.MessageId.Span));
                     var ts = rr.SentTimestampUtc.ToDateTimeOffset();
                     await _mediator.Send(new ReceiveReadReceiptCommand(lookup, readerId, messageId, ts), cancellationToken).ConfigureAwait(false);
                     return null;
@@ -301,7 +302,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                         throw new InvalidOperationException("Direct chat EmojiAnnotation requires RemotePeerGuid in context.");
                     var reactorId = new ChatPeerId(request.Context.RemotePeer.Value.Value);
 
-                    var messageId = new MessageId(new Guid(em.MessageId.Span));
+                    var messageId = new PublicMessageId(new Guid(em.MessageId.Span));
                     var ts = em.SentTimestampUtc.ToDateTimeOffset();
                     await _mediator.Send(new ReceiveEmojiAnnotationCommand(lookup, reactorId, messageId, em.Emoji, ts), cancellationToken).ConfigureAwait(false);
                     return null;
@@ -328,7 +329,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                         throw new InvalidOperationException("Direct chat DeliveredReceipt requires RemotePeerGuid in context.");
                     var recipientId = new ChatPeerId(request.Context.RemotePeer.Value.Value);
 
-                    var messageId = new MessageId(new Guid(dr.MessageId.Span));
+                    var messageId = new PublicMessageId(new Guid(dr.MessageId.Span));
                     var ts = dr.SentTimestampUtc.ToDateTimeOffset();
                     await _mediator.Send(new ReceiveDeliveredReceiptCommand(lookup, recipientId, messageId, ts), cancellationToken).ConfigureAwait(false);
                     return null;
@@ -463,7 +464,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     if (!string.IsNullOrEmpty(groupContent.TextMessage))
                     {
                         // Generate a new MessageId for the received message
-                        var messageId = MessageId.NewId();
+                        var messageId = PublicMessageId.NewId();
                         var sentTimestamp = DateTimeOffset.UtcNow;
 
                         // Get sender peer ID from context
@@ -478,8 +479,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                         var senderId = new ChatPeerId(senderPeerId.Value);
                         await _messageWriter.AddTextMessageAsync(
                             new ConversationId(conversationId),
-                            new ChatSelfId(request.Context.SelfIdentityId.Value),
-                            senderId,
+                            new RemoteParticipantId(, senderId),
                             groupContent.TextMessage,
                             messageId,
                             sentTimestamp,

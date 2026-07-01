@@ -9,6 +9,7 @@ using Percolator.Chat.Messaging.App.Commands;
 using Percolator.Chat.Messaging.Events;
 using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Identity;
+using PublicMessageId = Percolator.Chat.Messaging.PublicMessageId;
 
 namespace Percolator.Chat.Tests;
 
@@ -44,7 +45,7 @@ public class PostTextMessageHandlerTests
     {
         // Arrange
         var lookup = ConversationLookupKey.ForDirectSession(Guid.NewGuid());
-        var messageId = new MessageId(Guid.NewGuid());
+        var messageId = new PublicMessageId(Guid.NewGuid());
         var content = "hello";
         var sentAt = DateTimeOffset.UtcNow;
         var convo = MakeConversation();
@@ -91,7 +92,7 @@ public class PostTextMessageHandlerTests
     {
         // Arrange
         var lookup = new ConversationLookupKey(null, null);
-        var messageId = new MessageId(Guid.NewGuid());
+        var messageId = new PublicMessageId(Guid.NewGuid());
         var handler = new PostTextMessageHandler(
             _resolver.Object,
             _writer.Object,

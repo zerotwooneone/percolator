@@ -66,7 +66,7 @@ public class SqliteChatMessageWriterTests
         await using var _ = conn;
         var (conversationId, otherPeerId) = SeedConversation(ctx, 1);
         var writer = new SqliteChatMessageWriter(ctx);
-        var messageId = new MessageId(Guid.NewGuid());
+        var messageId = new PublicMessageId(Guid.NewGuid());
         var sentAt = DateTimeOffset.UtcNow;
         var deliveredAt = DateTimeOffset.UtcNow;
         var ct = CancellationToken.None;
@@ -77,7 +77,7 @@ public class SqliteChatMessageWriterTests
         await writer.AddTextMessageAsync(conversationId, 1, senderId, "test", messageId, sentAt, ct);
 
         // Ensure message exists before adding receipt
-        var messageExists = await ctx.Messages.AnyAsync(m => m.ConversationId == conversationId.Value && m.MessageGuid == messageId.Value, ct);
+        var messageExists = await ctx.Messages.AnyAsync(m => m.ConversationId == conversationId.Value && m.PublicMessageId == messageId.Value, ct);
         messageExists.Should().BeTrue("Message should exist before adding receipt");
 
         await writer.AddDeliveredReceiptAsync(conversationId, 1, recipientId, messageId, deliveredAt, ct);
@@ -94,7 +94,7 @@ public class SqliteChatMessageWriterTests
         await using var _ = conn;
         var (conversationId, _) = SeedConversation(ctx, 1);
         var writer = new SqliteChatMessageWriter(ctx);
-        var messageId = new MessageId(Guid.NewGuid());
+        var messageId = new PublicMessageId(Guid.NewGuid());
         var sentAt = DateTimeOffset.UtcNow;
         var ct = CancellationToken.None;
         var participantId = new ChatPeerId(Guid.NewGuid());
@@ -102,7 +102,7 @@ public class SqliteChatMessageWriterTests
         await writer.AddTextMessageAsync(conversationId, 1, participantId, "hello", messageId, sentAt, ct);
         await writer.AddTextMessageAsync(conversationId, 1, participantId, "hello", messageId, sentAt, ct);
 
-        var count = await ctx.Messages.CountAsync(m => m.ConversationId == conversationId.Value && m.MessageGuid == messageId.Value);
+        var count = await ctx.Messages.CountAsync(m => m.ConversationId == conversationId.Value && m.PublicMessageId == messageId.Value);
         count.Should().Be(1);
     }
 
@@ -113,14 +113,14 @@ public class SqliteChatMessageWriterTests
         await using var _ = conn;
         var (conversationId, otherPeerId) = SeedConversation(ctx, 1);
         var writer = new SqliteChatMessageWriter(ctx);
-        var messageId = new MessageId(Guid.NewGuid());
+        var messageId = new PublicMessageId(Guid.NewGuid());
         var sentAt = DateTimeOffset.UtcNow;
         var ct = CancellationToken.None;
         var participantId = new ChatPeerId(otherPeerId);
 
         await writer.AddTextMessageAsync(conversationId, 1, participantId, "hello", messageId, sentAt, ct);
 
-        var msg = await ctx.Messages.SingleAsync(m => m.ConversationId == conversationId.Value && m.MessageGuid == messageId.Value);
+        var msg = await ctx.Messages.SingleAsync(m => m.ConversationId == conversationId.Value && m.PublicMessageId == messageId.Value);
         msg.SenderId.Should().Be(otherPeerId);
     }
 
@@ -131,7 +131,7 @@ public class SqliteChatMessageWriterTests
         await using var _ = conn;
         var (conversationId, otherPeerId) = SeedConversation(ctx, 1);
         var writer = new SqliteChatMessageWriter(ctx);
-        var messageId = new MessageId(Guid.NewGuid());
+        var messageId = new PublicMessageId(Guid.NewGuid());
         var sentAt = DateTimeOffset.UtcNow;
         var ct = CancellationToken.None;
         var senderId = new ChatPeerId(otherPeerId);
@@ -154,7 +154,7 @@ public class SqliteChatMessageWriterTests
         await using var _ = conn;
         var (conversationId, otherPeerId) = SeedConversation(ctx, 1);
         var writer = new SqliteChatMessageWriter(ctx);
-        var messageId = new MessageId(Guid.NewGuid());
+        var messageId = new PublicMessageId(Guid.NewGuid());
         var sentAt = DateTimeOffset.UtcNow;
         var ct = CancellationToken.None;
         var senderId = new ChatPeerId(otherPeerId);

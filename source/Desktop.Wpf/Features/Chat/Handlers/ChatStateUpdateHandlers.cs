@@ -1,5 +1,6 @@
 using Desktop.Wpf.Features.Chat.State;
 using MediatR;
+using Percolator.Chat.Messaging;
 using Percolator.Chat.Messaging.Events;
 using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Network;
@@ -25,7 +26,7 @@ public sealed class ChatStateUpdateHandlers :
 
         var sessionId = new DirectSessionId(dsid.Value);
         var conversationId = new ConversationId(notification.ConversationId);
-        var messageId = new MessageId(notification.MessageId);
+        var messageId = new PublicMessageId(notification.MessageId);
 
         // Optimistic insert via public method (handles locking internally)
         _state.OptimisticInsert(sessionId, new ChatMessageSnapshot(

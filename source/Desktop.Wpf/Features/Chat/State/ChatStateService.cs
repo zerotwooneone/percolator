@@ -45,12 +45,12 @@ public sealed class ChatStateService : IDisposable
         }
     }
 
-    public void MarkAsDelivered(DirectSessionId sessionId, MessageId messageId)
+    public void MarkAsDelivered(DirectSessionId sessionId, PublicMessageId publicMessageId)
     {
         lock (_stateGate)
         {
             var list = GetOrAddSessionMessagesList(sessionId);
-            var msg = list.FirstOrDefault(m => m.Id == messageId);
+            var msg = list.FirstOrDefault(m => m.Id == publicMessageId);
             if (msg is not null)
             {
                 msg.IsDelivered.Value = true;

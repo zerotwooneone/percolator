@@ -4,7 +4,7 @@ using Percolator.Chat.Messaging.ValueObjects;
 namespace Desktop.Wpf.Features.Chat;
 
 public sealed record ChatMessageSnapshot(
-    MessageId Id,
+    PublicMessageId Id,
     string Author,
     string Text,
     DateTimeOffset Timestamp,
@@ -17,7 +17,7 @@ public sealed class ChatMessageModel : IDisposable
 {
     private DisposableBag _bag;
 
-    public MessageId Id { get; }
+    public PublicMessageId Id { get; }
     public string Author { get; }
     public string Text { get; }
     public DateTimeOffset Timestamp { get; }

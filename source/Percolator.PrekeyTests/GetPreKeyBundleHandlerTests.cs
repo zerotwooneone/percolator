@@ -31,7 +31,7 @@ public class GetPreKeyBundleHandlerTests
         var keyHash = new byte[32];
         new Random().NextBytes(keyHash);
         var identityPublicKeyHash = IdentityPublicKeyHash.FromBytes(keyHash);
-        var peerId = new Percolator.Identity.PeerId(Guid.NewGuid());
+        var peerId = new Percolator.Identity.PeerId(1);
         var expected = new PreKeyBundle(
             RatchetIdentityKey.FromBytes(new byte[64]),
             Guid.NewGuid(),
@@ -81,7 +81,7 @@ public class GetPreKeyBundleHandlerTests
         // Arrange
         var keyHash = new byte[32];
         var identityPublicKeyHash = IdentityPublicKeyHash.FromBytes(keyHash);
-        var peerId = new Percolator.Identity.PeerId(Guid.NewGuid());
+        var peerId = new Percolator.Identity.PeerId(2);
         _publicKeyStore.Setup(s => s.GetPeerIdByPublicKeyHashAsync(identityPublicKeyHash, It.IsAny<CancellationToken>()))
             .ReturnsAsync(peerId);
         _bundleRepository.Setup(r => r.PopBundleAsync(new Percolator.Cryptography.Primitives.PeerId(peerId.Value)))

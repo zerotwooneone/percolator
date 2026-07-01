@@ -1,4 +1,5 @@
 using Percolator.Chat.GroupMembership;
+using Percolator.Chat.Messaging;
 
 namespace Percolator.Infrastructure.Persistence;
 
@@ -8,9 +9,10 @@ public class MessageDbo
     public Guid ConversationId { get; set; }
 
     // Domain MessageId for idempotency
-    public Guid MessageGuid { get; set; }
+    public PublicMessageId PublicMessageId { get; set; }
 
-    public ChatPeerId SenderId { get; set; }
+    public ChatPeerId? SenderPeerId { get; set; }
+    public ChatSelfId? SenderSelfId { get; set; }
     public string Body { get; set; } = string.Empty;
     public DateTimeOffset SentAt { get; set; }
 

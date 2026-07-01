@@ -5,9 +5,11 @@ using Percolator.Chat;
 using Percolator.Cryptography;
 using Percolator.Application.Network;
 using Percolator.Chat.GroupLedger;
+using Percolator.Chat.GroupMembership;
 using Percolator.Chat.Messaging.App;
 using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Contracts;
+using Percolator.Identity;
 
 namespace Percolator.Application.Apps.Chat.Handlers;
 
@@ -22,6 +24,7 @@ public sealed class SendGroupMessageCommandHandler : IRequestHandler<Commands.Se
     private readonly IPeerIdentityQueries _peerIdentityQueries;
     private readonly IPublisher _publisher;
     private readonly ILogger<SendGroupMessageCommandHandler> _logger;
+    private readonly ISelfIdentityQueries _selfIdentityQueries;
 
     public SendGroupMessageCommandHandler(
         IGroupConversationRepository repository,
@@ -32,7 +35,8 @@ public sealed class SendGroupMessageCommandHandler : IRequestHandler<Commands.Se
         IRemoteEnvelopeSender envelopeSender,
         IPeerIdentityQueries peerIdentityQueries,
         IPublisher publisher,
-        ILogger<SendGroupMessageCommandHandler> logger)
+        ILogger<SendGroupMessageCommandHandler> logger,
+        ISelfIdentityQueries selfIdentityQueries)
     {
         _repository = repository;
         _messageWriter = messageWriter;
@@ -43,6 +47,7 @@ public sealed class SendGroupMessageCommandHandler : IRequestHandler<Commands.Se
         _peerIdentityQueries = peerIdentityQueries;
         _publisher = publisher;
         _logger = logger;
+        _selfIdentityQueries = selfIdentityQueries;
     }
 
     public async Task Handle(Commands.SendGroupMessageCommand request, CancellationToken cancellationToken)
@@ -70,20 +75,17 @@ public sealed class SendGroupMessageCommandHandler : IRequestHandler<Commands.Se
         // Encrypt the content
         var ciphertext = _cryptoService.EncryptGroupContent(blobKey, groupContent);
 
-        // Write the message to local database via IChatMessageWriter
-        var selfMember = group.Members.FirstOrDefault(m => m.RemovedAtUtc == null);
-        if (selfMember is null)
+        var selfPublicIdentityId = await _selfIdentityQueries.GetSelfIdentityPublicKeyAsync(new SelfId(request.SelfIdentityId.Value), cancellationToken).ConfigureAwait(false);
+        if (selfPublicIdentityId is null)
         {
-            throw new InvalidOperationException($"Self is not an active member of group {request.ConversationId.Value}.");
+            throw new InvalidOperationException($"Self identity {request.SelfIdentityId.Value} not found.");
         }
-        var senderId = selfMember.PeerId;
-
+        
         await _messageWriter.AddTextMessageAsync(
             request.ConversationId,
-            request.SelfIdentityId,
-            senderId,
+            new LocalParticipantId(new Percolator.Chat.GroupLedger.PublicIdentityId(selfPublicIdentityId.Value),request.SelfIdentityId),
             request.Content,
-            request.MessageId,
+            request.PublicMessageId,
             request.SentTimestampUtc,
             cancellationToken).ConfigureAwait(false);
 

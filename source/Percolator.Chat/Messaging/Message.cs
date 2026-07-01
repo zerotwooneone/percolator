@@ -7,15 +7,15 @@ public class Message
     private readonly List<Reaction> _reactions = new();
     private readonly List<ReadReceipt> _readReceipts = new();
 
-    public ValueObjects.MessageId Id { get; }
+    public PublicMessageId Id { get; }
     public ValueObjects.ConversationId ConversationId { get; }
-    public ChatPeerId SenderId { get; }
+    public ParticipantId SenderId { get; }
     public string Content { get; }
     public DateTimeOffset Timestamp { get; }
     public IReadOnlyList<Reaction> Reactions => _reactions.AsReadOnly();
     public IReadOnlyList<ReadReceipt> ReadReceipts => _readReceipts.AsReadOnly();
 
-    public Message(ValueObjects.MessageId id, ValueObjects.ConversationId conversationId, ChatPeerId senderId, string content, DateTimeOffset timestamp)
+    public Message(PublicMessageId id, ValueObjects.ConversationId conversationId, ParticipantId senderId, string content, DateTimeOffset timestamp)
     {
         // In a real application, you would add validation here.
         // For now, we keep it simple to pass the test.

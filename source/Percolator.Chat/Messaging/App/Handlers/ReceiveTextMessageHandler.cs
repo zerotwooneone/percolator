@@ -29,18 +29,17 @@ public sealed class ReceiveTextMessageHandler : IRequestHandler<ReceiveTextMessa
 
         await _writer.AddTextMessageAsync(
             resolution.Conversation.Id,
-            resolution.SelfIdentityId,
             request.SenderId,
             request.Content,
-            request.MessageId,
+            request.PublicMessageId,
             request.SentTimestampUtc,
             cancellationToken).ConfigureAwait(false);
 
         await _publisher.Publish(new TextMessageReceivedEvent(
-            resolution.Conversation.Id.Value,
-            request.MessageId.Value,
+            resolution.Conversation.Id,
+            request.PublicMessageId,
             resolution.SelfIdentityId,
-            new ChatPeerId(request.SenderId.Value),
+            request.SenderId,
             request.Content,
             request.SentTimestampUtc,
             DirectSessionIdValueObject.FromGuid(request.LookupKey.DirectSessionId)), cancellationToken).ConfigureAwait(false);

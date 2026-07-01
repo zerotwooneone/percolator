@@ -13,7 +13,7 @@ public class ChatMessageModelTests
     public void UpdateFromSnapshot_WhenSnapshotHasTrueDelivered_UpdatesIsDeliveredToTrue()
     {
         // Arrange
-        var messageId = MessageId.NewId();
+        var messageId = PublicMessageId.NewId();
         var initialSnapshot = new ChatMessageSnapshot(
             Id: messageId,
             Author: "Me",
@@ -46,7 +46,7 @@ public class ChatMessageModelTests
     public void UpdateFromSnapshot_WhenSnapshotHasFalseDelivered_DoesNotOverwriteTrueState()
     {
         // Arrange
-        var messageId = MessageId.NewId();
+        var messageId = PublicMessageId.NewId();
         var initialSnapshot = new ChatMessageSnapshot(
             Id: messageId,
             Author: "Me",
@@ -79,7 +79,7 @@ public class ChatMessageModelTests
     public void UpdateFromSnapshot_WhenSnapshotHasTrueRead_UpdatesIsReadToTrue()
     {
         // Arrange
-        var messageId = MessageId.NewId();
+        var messageId = PublicMessageId.NewId();
         var initialSnapshot = new ChatMessageSnapshot(
             Id: messageId,
             Author: "Me",
@@ -112,7 +112,7 @@ public class ChatMessageModelTests
     public void UpdateFromSnapshot_WhenSnapshotHasFalseRead_DoesNotOverwriteTrueState()
     {
         // Arrange
-        var messageId = MessageId.NewId();
+        var messageId = PublicMessageId.NewId();
         var initialSnapshot = new ChatMessageSnapshot(
             Id: messageId,
             Author: "Me",
@@ -145,7 +145,7 @@ public class ChatMessageModelTests
     public void UpdateFromSnapshot_DoesNotOverwriteIsSending()
     {
         // Arrange
-        var messageId = MessageId.NewId();
+        var messageId = PublicMessageId.NewId();
         var initialSnapshot = new ChatMessageSnapshot(
             Id: messageId,
             Author: "Me",

@@ -21,7 +21,7 @@ public sealed class SqliteConversationMessageQueries : IConversationMessageQueri
             .Where(m => m.ConversationId == conversationId.Value)
             .Select(m => new MessageDto
             {
-                MessageId = m.MessageGuid,
+                MessageId = m.PublicMessageId,
                 ConversationId = m.ConversationId,
                 SenderId = m.SenderId,
                 Content = m.Body,

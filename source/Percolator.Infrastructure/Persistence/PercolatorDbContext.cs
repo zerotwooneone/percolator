@@ -601,12 +601,16 @@ public class PercolatorDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).ValueGeneratedOnAdd();
             entity.Property(e => e.ConversationId).IsRequired();
-            entity.Property(e => e.MessageGuid).IsRequired();
+            entity.Property(e => e.PublicMessageId)
+                .HasConversion(
+                    v => v.Value,
+                    v => new Percolator.Chat.Messaging.PublicMessageId(v))
+                .IsRequired();
             entity.Property(e => e.SenderId).IsRequired();
             entity.Property(e => e.Body).IsRequired();
             entity.Property(e => e.SentAt).IsRequired();
             entity.HasIndex(e => new { e.ConversationId, e.SentAt });
-            entity.HasIndex(e => new { e.ConversationId, e.MessageGuid }).IsUnique();
+            entity.HasIndex(e => new { e.ConversationId, MessageGuid = e.PublicMessageId }).IsUnique();
         });
 
         // ConversationParticipants (composite key)

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Percolator.Application.Chat;
+using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Infrastructure.Persistence;
@@ -61,6 +62,20 @@ public sealed class PeerIdentityQueries : IPeerIdentityQueries
             return null;
         }
 
-        return new PeerId(match.PeerId);
+        return match.PeerId;
+    }
+
+    public async Task<Pkh?> GetPublicKeyHashAsync(PeerId peerId, CancellationToken cancellationToken)
+    {
+        using var db = _dbFactory.CreateDbContext();
+        var keyBytes = await db.PeerIdentityKeys
+            .AsNoTracking()
+            .Where(x => x.PeerId == peerId)
+            .Where(x => x.NotBeforeUtc <= DateTimeOffset.UtcNow)
+            .Where(x => x.ExpiresAtUtc > DateTimeOffset.UtcNow)
+            .Where(x => x.RevokedAtUtc == null)
+            .Select(x => x.Fingerprint)
+            .FirstOrDefaultAsync(cancellationToken);
+        return keyBytes is null ? null : Pkh.FromBytesOwned(keyBytes);
     }
 }

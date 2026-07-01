@@ -81,7 +81,7 @@ public sealed class ChatReloadCoordinator : IChatReloadCoordinator
 
         var selfParticipantId = _selfParticipantIdProvider.Get();
         var snapshots = messages.Select(m => new ChatMessageSnapshot(
-            Id: new MessageId(m.MessageId),
+            Id: new PublicMessageId(m.MessageId),
             Author: m.SenderId == selfParticipantId.Value ? "Me" : "Peer",
             Text: m.Content,
             Timestamp: m.Timestamp,
@@ -101,7 +101,7 @@ public sealed class ChatReloadCoordinator : IChatReloadCoordinator
 
         var selfParticipantId = _selfParticipantIdProvider.Get();
         var snapshots = messages.Select(m => new ChatMessageSnapshot(
-            Id: new MessageId(m.MessageId),
+            Id: new PublicMessageId(m.MessageId),
             Author: m.SenderId == selfParticipantId.Value ? "Me" : "Peer",
             Text: m.Content,
             Timestamp: m.Timestamp,

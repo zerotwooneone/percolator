@@ -69,7 +69,7 @@ public sealed class ChatViewModel : ViewModelBase
             var text = MessageInput.Value;
             if (string.IsNullOrWhiteSpace(text)) return;
 
-            var messageId = MessageId.NewId();
+            var messageId = PublicMessageId.NewId();
             var sentTimestamp = DateTimeOffset.UtcNow;
 
             await _mediator.Send(new PostTextMessageCommand(

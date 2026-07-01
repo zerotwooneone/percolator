@@ -20,7 +20,7 @@ public sealed class DeliveredReceiptReceivedEventHandler : INotificationHandler<
         if (notification.DirectSessionId is not { } dsid) return Task.CompletedTask;
 
         var sessionId = new DirectSessionId(dsid.Value);
-        var messageId = new MessageId(notification.MessageId);
+        var messageId = new PublicMessageId(notification.MessageId);
 
         // Mark as delivered via public method (handles locking internally)
         _state.MarkAsDelivered(sessionId, messageId);
