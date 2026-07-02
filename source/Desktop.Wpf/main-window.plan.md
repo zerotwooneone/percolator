@@ -705,6 +705,93 @@ When implementing Chunk 5.4, after defining `ChatSelfId`:
         *   `RemoteParticipantId remote`: Paste the exact network routing logic previously located in `OutboxDispatcherWorker.DispatchEventAsync` (getting relayProfile, extracting endpoint, logging the TODO for `ChatEnvelope`).
         *   `LocalParticipantId local`: Log an information message indicating that local routing will be handled via a local inbox mechanism in the future. Do not throw an exception.
 
+---
+
+## Chunk 5.6 - Multi-Identity Delivery Certificate Handling
+
+The Goal: Refactor the Delivery Certificate storage and background refresh worker to support an application running multiple local identities (`SelfId`s), where each identity may be participating in groups hosted across multiple Relay Peers. The background worker should proactively maintain certificates for all relays actively used by any local identity.
+
+Architectural Constraints (CRITICAL):
+* **Strict DDD Typing in DBOs:** Do not use naked `Guid`, `uint`, or `byte[]` in the new database entities. Define the DBO using the exact domain value types (`ChatSelfId`, `ChatPeerId`, `DeliveryCertificatePayloadBytes`, `SignatureBytes`) and use EF Core's `HasConversion` to map them to database primitives.
+* **Surrogate PK Database Design:** Use a standard auto-incrementing `Id` for the Primary Key, and enforce the domain rule (one cert per self/relay pair) using a Unique Index. This is cleaner for EF Core than composite primary keys.
+* **Persistent Over In-Memory:** Delivery Certificates MUST be persisted to SQLite to prevent relay rate-limit stampedes and JIT latency on application startup.
+* **Intelligent Keep-Alive:** The background worker must periodically wake up, query the database for active relays, check the expiration of the existing certificates, and only request a refresh if a certificate is missing or expiring soon.
+* **JIT Guarantee:** Provide Just-In-Time (JIT) certificate fetching on the egress hot path to guarantee delivery if a certificate is missing or expired.
+
+Implementation Requirements:
+
+1. Create the Database Schema & Store (Infrastructure Layer)
+* File: `Percolator.Infrastructure/Chat/Persistence/DeliveryCertificateDbo.cs`
+* Create the DBO using explicit DDD types:
+  ```csharp
+  public class DeliveryCertificateDbo
+  {
+      public int Id { get; set; } // Auto-incrementing Surrogate PK
+      public Percolator.Chat.GroupMembership.ChatSelfId SelfId { get; set; }
+      public Percolator.Chat.GroupMembership.ChatPeerId RelayPeerId { get; set; }
+      public Percolator.Chat.GroupLedger.DeliveryCertificatePayloadBytes Payload { get; set; }
+      public Percolator.Chat.GroupLedger.SignatureBytes Signature { get; set; }
+      public DateTimeOffset ExpiresAtUtc { get; set; }
+  }
+  ```
+* File: `Percolator.Infrastructure/Persistence/PercolatorDbContext.cs`
+* Add `public DbSet<DeliveryCertificateDbo> DeliveryCertificates { get; set; } = null!;`
+* In `OnModelCreating`, configure the Surrogate PK, Unique Index, and Value Converters:
+  ```csharp
+  modelBuilder.Entity<DeliveryCertificateDbo>(entity =>
+  {
+      entity.HasKey(e => e.Id);
+      entity.HasIndex(e => new { e.SelfId, e.RelayPeerId }).IsUnique();
+      
+      entity.Property(e => e.SelfId)
+          .HasConversion(v => v.Value, v => new ChatSelfId(v));
+          
+      entity.Property(e => e.RelayPeerId)
+          .HasConversion(v => v.Value, v => new ChatPeerId(v));
+          
+      entity.Property(e => e.Payload)
+          .HasConversion(v => v.ToArray(), v => DeliveryCertificatePayloadBytes.FromBytes(v));
+          
+      entity.Property(e => e.Signature)
+          .HasConversion(v => v.ToArray(), v => SignatureBytes.FromBytes(v));
+  });
+  ```
+* File: `Percolator.Application/Chat/IDeliveryCertificateStore.cs`
+* Update the interface:
+  ```csharp
+  Task<DeliveryCertificate?> GetCertificateAsync(ChatSelfId selfId, ChatPeerId relayPeerId, CancellationToken ct);
+  Task SetCertificateAsync(ChatSelfId selfId, ChatPeerId relayPeerId, DeliveryCertificate certificate, CancellationToken ct);
+  ```
+* File: `Percolator.Infrastructure/Chat/SqliteDeliveryCertificateStore.cs`
+* Implement the interface using EF Core. Because the DBO uses domain types directly, `ToDomain()` mapping is simply `new DeliveryCertificate(dbo.Payload, dbo.Signature, dbo.ExpiresAtUtc)`.
+
+2. Update `CertificateOrchestrator` (Application Layer)
+* File: `Percolator.Application/Apps/Chat/CertificateOrchestrator.cs`
+* Update the interface and implementation signature: `Task RefreshLocalCertificateAsync(ChatSelfId selfId, ChatPeerId relayPeerId, CancellationToken ct)`
+* Inject `TimeProvider` and replace the static `DateTimeOffset.UtcNow` call with `_timeProvider.GetUtcNow()`.
+* Remove the call to `_selfIdentityRepository.GetMostRecentAsync(ct)`. Instead, fetch the specific identity using the provided parameter: `await _selfIdentityRepository.GetByIdAsync(new Percolator.Identity.SelfId(selfId.Value), ct)`.
+* Pass both identifiers down into `await _certificateStore.SetCertificateAsync(selfId, relayPeerId, certificate, ct);`.
+
+3. Provide Active Relays Query (Chat / Infrastructure Layer)
+* Create a new query interface `IDeliveryCertificateQueries` in `Percolator.Application/Chat`.
+* Add method: `Task<IReadOnlyList<(ChatSelfId SelfId, ChatPeerId RelayPeerId)>> GetActiveRelayAssignmentsAsync(CancellationToken ct);`
+* Implement this in `Percolator.Infrastructure/Chat/SqliteDeliveryCertificateQueries.cs`.
+* **Implementation Detail:** Query `_db.GroupMembers` joined with `_db.GroupStates` on `ConversationId`. Filter for rows where `m.SelfId != null` and `m.RemovedAtUtc == null`. Select and return the distinct pairs of `(new ChatSelfId(m.SelfId.Value), s.RelayPeerId)`.
+
+4. Update the Background Worker (Infrastructure Layer)
+* File: `Percolator.Infrastructure/Chat/DeliveryCertificateRefreshWorker.cs`
+* Change the sleep interval from 20 hours to 1 hour (`TimeSpan.FromHours(1)`).
+* Inject `IDeliveryCertificateQueries` and `IDeliveryCertificateStore`. The worker already injects `TimeProvider` for testability.
+* In the `ExecuteAsync` loop, query the active assignments: `var assignments = await queries.GetActiveRelayAssignmentsAsync(stoppingToken);`.
+* For each `assignment`:
+    * Load the existing cert: `var cert = await store.GetCertificateAsync(assignment.SelfId, assignment.RelayPeerId, stoppingToken);`
+    * Check expiration: If `cert == null` or `cert.ExpiresAtUtc < _timeProvider.GetUtcNow() + TimeSpan.FromHours(4)`, then invoke `await orchestrator.RefreshLocalCertificateAsync(assignment.SelfId, assignment.RelayPeerId, stoppingToken);`.
+* Handle transient failures gracefully per-relay so one failing relay does not abort the loop.
+
+5. Update the Sending Hot-Path (Application Layer)
+* Ensure that the egress path (e.g., `SendGroupMessageCommandHandler`) attempts to get the certificate using `await _certificateStore.GetCertificateAsync(group.SelfId, group.RelayPeerId, ct)`.
+* If the certificate is null or expired, explicitly `await _certificateOrchestrator.RefreshLocalCertificateAsync(group.SelfId, group.RelayPeerId, ct)` before constructing the TLS headers and dispatching the payload.
+
 
 ---
 ## Chunk 6
@@ -796,9 +883,7 @@ Implementation Requirements
 - `GroupMutationCoordinator_CoordinateMutation_AbortsImmediately_WhenLocalProposalFailsBusinessRules` - Test that CoordinateMutationAsync aborts immediately when the local proposal fails business rule validation.
 - `GroupMutationCoordinator_CoordinateMutation_RetriesExactlyThreeTimes_WhenEncounteringContinuousEpochConflicts` - Test that CoordinateMutationAsync retries exactly three times when encountering continuous epoch conflicts.
 
-
 ---
-
 ## Chunk 8
 ### Feature Implementation Request: Signal Protocol Chunk 8 (P2P Relay Opt-In & R3 State Engine)
 You are to implement Chunk 8 of our Signal Protocol integration for Percolator, allowing client nodes to dynamically opt-in to hosting a blind group relay and managing the network state via an R3-powered WPF state service.
