@@ -329,7 +329,7 @@ namespace Percolator.Application.Network.Handshake
                         Percolator.Application.Network.SecureSessionCreatedReason.InitiatorFinalize),
                     cancellationToken)
                 .ConfigureAwait(false);
-            await _index.UpsertAsync((int)selfIdentityId.Value, sid, header.PreKey, _clock.UtcNow, cancellationToken).ConfigureAwait(false);
+            await _index.UpsertAsync(selfIdentityId.Value, sid, header.PreKey, _clock.UtcNow, cancellationToken).ConfigureAwait(false);
 
             // Once the invite has been finalized into an active session, the outbound pending marker
             // (SentInvitation) should be removed so the UI no longer renders a separate PendingOutbound row.
@@ -374,9 +374,10 @@ namespace Percolator.Application.Network.Handshake
                 try
                 {
                     var root = RootKey.FromBytesOwned(pending.InitialRootKey);
+                    throw new NotImplementedException("we do not have a peer id in this case");
                     var tmp = RatchetBootstrap.CreateInitiatorSession(
                         SessionId.NewId(),
-                        Percolator.Cryptography.Primitives.PeerId.NewId(),
+                        new Percolator.Cryptography.Primitives.PeerId(uint.MaxValue),
                         new ProtocolVersion(1),
                         root,
                         _clock);
@@ -424,7 +425,7 @@ namespace Percolator.Application.Network.Handshake
                                 Percolator.Application.Network.SecureSessionCreatedReason.InitiatorFinalize),
                             cancellationToken)
                         .ConfigureAwait(false);
-                    await _index.UpsertAsync((int)selfIdentityId.Value, sid, headerPreKey, _clock.UtcNow, cancellationToken).ConfigureAwait(false);
+                    await _index.UpsertAsync(selfIdentityId.Value, sid, headerPreKey, _clock.UtcNow, cancellationToken).ConfigureAwait(false);
                     await _prehandshake.DeleteAsync(pending.Id, selfIdentityId.Value, cancellationToken).ConfigureAwait(false);
 
                     _logger.LogInformation("Initiator finalized session {SessionId} from pending record {PendingId}", sid.Value, pending.Id);
@@ -512,14 +513,12 @@ namespace Percolator.Application.Network.Handshake
             }
             catch (Exception ex)
             {
-                _logger.LogInformation(ex, "Standard finalize: best-effort peer identity upsert failed; using ephemeral remote id");
-                peerIdentity = null;
+                _logger.LogError(ex, "Standard finalize: best-effort peer identity upsert failed;");
+                throw;
             }
 
             var root = RootKey.FromBytesOwned(match.InitialRootKey);
-            var remoteCryptoPeerId = peerIdentity is null
-                ? Percolator.Cryptography.Primitives.PeerId.NewId()
-                : new Percolator.Cryptography.Primitives.PeerId(peerIdentity.Id.Value);
+            var remoteCryptoPeerId = new Percolator.Cryptography.Primitives.PeerId(peerIdentity.Id.Value);
 
             var initiatorSession = RatchetBootstrap.CreateInitiatorSession(
                 sid,
