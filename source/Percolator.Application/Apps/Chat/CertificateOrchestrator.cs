@@ -95,7 +95,7 @@ public sealed class CertificateOrchestrator : ICertificateOrchestrator
 
         // 4. Store Result
         // Save the DeliveryCertificate to IDeliveryCertificateStore
-        _certificateStore.SetCertificate(certificate);
+        _certificateStore.SetCertificate(relayPeerId,certificate);
 
         _logger.LogInformation("Successfully refreshed delivery certificate, expires at {ExpiresAt}", certificate.ExpiresAt);
     }
