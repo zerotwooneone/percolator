@@ -1,5 +1,6 @@
 using Percolator.Identity;
 using Percolator.Network;
+using PeerId = Percolator.Network.PeerId;
 
 namespace Percolator.Application.Network;
 
@@ -11,7 +12,7 @@ public interface IRouteConfirmationService
         RouteKind routeKind,
         string? endpointHost,
         int? endpointPort,
-        Guid? relayHostPeerId,
+        PeerId? relayHostPeerId,
         bool success,
         DateTimeOffset nowUtc,
         CancellationToken cancellationToken = default);
@@ -22,7 +23,7 @@ public interface IRouteConfirmationService
         RouteKind routeKind,
         string? endpointHost,
         int? endpointPort,
-        Guid? relayHostPeerId,
+        PeerId? relayHostPeerId,
         DateTimeOffset nowUtc,
         CancellationToken cancellationToken = default);
 }

@@ -1,5 +1,6 @@
 using Google.Protobuf;
 using Microsoft.Extensions.Logging;
+using Percolator.Application.Chat;
 using Percolator.Application.Chat.MessageQueue;
 using Percolator.Application.Services;
 using Percolator.Contracts;
@@ -21,20 +22,23 @@ public class RelayOrchestrator
     private readonly IDirectSessionRepository _directSessions;
     private readonly ISecureMessagingService _secureMessaging;
     private readonly IMessageTransportService _transport;
- 
+    private readonly IPeerIdentityQueries _peerIdentityQueries;
+
 
     public RelayOrchestrator(
         ILogger<RelayOrchestrator> logger,
         IMessageQueueRepository queue,
         IDirectSessionRepository directSessions,
         ISecureMessagingService secureMessaging,
-        IMessageTransportService transport)
+        IMessageTransportService transport,
+        IPeerIdentityQueries peerIdentityQueries)
     {
         _logger = logger;
         _queue = queue;
         _directSessions = directSessions;
         _secureMessaging = secureMessaging;
         _transport = transport;
+        _peerIdentityQueries = peerIdentityQueries;
     }
 
     /// <summary>
@@ -44,8 +48,13 @@ public class RelayOrchestrator
     /// </summary>
     public async Task<bool> RelayNextAsync(SelfId selfIdentityId, IdentityPeerId recipientPeerId, CancellationToken ct = default)
     {
+        var recipPkh = await _peerIdentityQueries.GetPublicKeyHashAsync(recipientPeerId, ct).ConfigureAwait(false);
+        if (recipPkh is null)
+        {
+            return false;
+        }
         // Fetch one queued item (AckId, Blob)
-        var items = await _queue.FetchAsync(recipientPeerId, 1, ct).ConfigureAwait(false);
+        var items = await _queue.FetchAsync(recipPkh, 1, ct).ConfigureAwait(false);
         if (items.Count == 0)
         {
             return false;

@@ -16,7 +16,7 @@ internal sealed class SqliteSelfPreKeyBundleRepository : ISelfPreKeyBundleReposi
         _db = db;
     }
 
-    public async Task SaveSignedPreKeyAsync(int selfIdentityId, Guid signedPreKeyId, byte[] signedPreKeyPrivate, byte[] signedPreKeyPublicSpki, byte[] preKeySignature, DateTimeOffset expires, CancellationToken ct = default)
+    public async Task SaveSignedPreKeyAsync(SelfId selfIdentityId, Guid signedPreKeyId, byte[] signedPreKeyPrivate, byte[] signedPreKeyPublicSpki, byte[] preKeySignature, DateTimeOffset expires, CancellationToken ct = default)
     {
         var encPriv = Protect(signedPreKeyPrivate);
         var existing = await _db.SelfPreKeySigned.AsNoTracking().FirstOrDefaultAsync(x => x.SelfIdentityId == selfIdentityId && x.SignedPreKeyId == signedPreKeyId, ct);
@@ -43,7 +43,7 @@ internal sealed class SqliteSelfPreKeyBundleRepository : ISelfPreKeyBundleReposi
         await _db.SaveChangesAsync(ct);
     }
 
-    public async Task SaveOneTimePreKeysAsync(int selfIdentityId, IEnumerable<(Guid otkId, byte[] otkPrivate, byte[] otkPublicSpki)> oneTimePreKeys, CancellationToken ct = default)
+    public async Task SaveOneTimePreKeysAsync(SelfId selfIdentityId, IEnumerable<(Guid otkId, byte[] otkPrivate, byte[] otkPublicSpki)> oneTimePreKeys, CancellationToken ct = default)
     {
         foreach (var (otkId, priv, spki) in oneTimePreKeys)
         {
@@ -64,7 +64,7 @@ internal sealed class SqliteSelfPreKeyBundleRepository : ISelfPreKeyBundleReposi
 
     public async Task<(byte[] spkPrivate, byte[] spkPublicSpki, byte[] preKeySignature, DateTimeOffset expires)?> TryGetSignedPreKeyAsync(SelfId selfIdentityId, Guid signedPreKeyId, CancellationToken ct = default)
     {
-        var rec = await _db.SelfPreKeySigned.AsNoTracking().FirstOrDefaultAsync(x => x.SelfIdentityId == selfIdentityId.Value && x.SignedPreKeyId == signedPreKeyId, ct);
+        var rec = await _db.SelfPreKeySigned.AsNoTracking().FirstOrDefaultAsync(x => x.SelfIdentityId == selfIdentityId && x.SignedPreKeyId == signedPreKeyId, ct);
         if (rec is null) return null;
         return (Unprotect(rec.SignedPreKeyPrivate), rec.SignedPreKeyPublicSpki, rec.PreKeySignature, rec.ExpiresUtc);
     }
@@ -75,7 +75,7 @@ internal sealed class SqliteSelfPreKeyBundleRepository : ISelfPreKeyBundleReposi
         await using var tx = await _db.Database.BeginTransactionAsync(ct);
         try
         {
-            var rec = await _db.SelfOneTimePreKeys.FirstOrDefaultAsync(x => x.SelfIdentityId == selfIdentityId.Value && x.OneTimePreKeyId == oneTimePreKeyId, ct);
+            var rec = await _db.SelfOneTimePreKeys.FirstOrDefaultAsync(x => x.SelfIdentityId == selfIdentityId && x.OneTimePreKeyId == oneTimePreKeyId, ct);
             if (rec is null)
             {
                 await tx.RollbackAsync(ct);
@@ -95,7 +95,7 @@ internal sealed class SqliteSelfPreKeyBundleRepository : ISelfPreKeyBundleReposi
     }
 
     public async Task<(Guid otkId, byte[] otkPublicSpki)?> TryReserveOneTimePreKeyAsync(
-        int selfIdentityId,
+        SelfId selfIdentityId,
         Guid requestCorrelationId,
         DateTimeOffset reservedUntilUtc,
         CancellationToken ct = default)
@@ -135,7 +135,7 @@ internal sealed class SqliteSelfPreKeyBundleRepository : ISelfPreKeyBundleReposi
     }
 
     public async Task<byte[]?> TryConsumeReservedOneTimePreKeyPrivateAsync(
-        int selfIdentityId,
+        SelfId selfIdentityId,
         Guid requestCorrelationId,
         DateTimeOffset nowUtc,
         CancellationToken ct = default)
@@ -174,7 +174,7 @@ internal sealed class SqliteSelfPreKeyBundleRepository : ISelfPreKeyBundleReposi
     }
 
     public async Task<int> PurgeExpiredReservedOneTimePreKeysAsync(
-        int selfIdentityId,
+        SelfId selfIdentityId,
         DateTimeOffset nowUtc,
         CancellationToken ct = default)
     {
@@ -201,7 +201,7 @@ internal sealed class SqliteSelfPreKeyBundleRepository : ISelfPreKeyBundleReposi
     }
 
     public async Task<bool> TryBurnReservedOneTimePreKeyAsync(
-        int selfIdentityId,
+        SelfId selfIdentityId,
         Guid requestCorrelationId,
         DateTimeOffset nowUtc,
         CancellationToken ct = default)

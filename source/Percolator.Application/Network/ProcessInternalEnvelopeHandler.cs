@@ -21,6 +21,7 @@ using Percolator.Chat.Messaging.Events;
 using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Cryptography;
 using PeerId = Percolator.Identity.PeerId;
+using PublicIdentityId = Percolator.Chat.GroupLedger.PublicIdentityId;
 
 namespace Percolator.Application.Network;
 
@@ -38,6 +39,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
     private readonly IChatMessageWriter _messageWriter;
     private readonly IProfileOrchestrationService _profileOrchestrationService;
     private readonly IGroupInviteHandler _groupInviteHandler;
+    private readonly IPeerIdentityQueries _peerIdentityQueries;
 
     public ProcessInternalEnvelopeHandler(
         ILogger<ProcessInternalEnvelopeHandler> logger,
@@ -51,7 +53,8 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
         IGroupCryptographyService groupCryptoService,
         IChatMessageWriter messageWriter,
         IProfileOrchestrationService profileOrchestrationService,
-        IGroupInviteHandler groupInviteHandler)
+        IGroupInviteHandler groupInviteHandler,
+        IPeerIdentityQueries peerIdentityQueries)
     {
         _logger = logger;
         _mediator = mediator;
@@ -65,12 +68,19 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
         _messageWriter = messageWriter;
         _profileOrchestrationService = profileOrchestrationService;
         _groupInviteHandler = groupInviteHandler;
+        _peerIdentityQueries = peerIdentityQueries;
     }
 
     public async Task<InternalEnvelope?> Handle(ProcessInternalEnvelopeCommand request, CancellationToken cancellationToken)
     {
         var env = request.Envelope;
         _logger.LogDebug("Processing InternalEnvelope with case {Case}", env.ApplicationPayloadCase);
+
+        if (!request.Context.SourceDeviceId.HasValue)
+        {
+            throw new InvalidOperationException("SourceDeviceId is required");
+        }
+        var sourceDeviceId = request.Context.SourceDeviceId.Value;
 
         // DHT handling
         if (env.ApplicationPayloadCase == InternalEnvelope.ApplicationPayloadOneofCase.DhtEnvelope)
@@ -206,7 +216,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
             if(request.Context.RemotePeer is null) throw new InvalidOperationException($"{nameof(request)} must have a {nameof(ProcessInternalEnvelopeCommand.Context.RemotePeer)}");
             var relayPeerId = new Percolator.Identity.PeerId(request.Context.RemotePeer.Value.Value);
             var relay = env.RelayOpaqueEnvelope;
-            await _mediator.Send(new ProcessRelayedOpaquePayloadCommand(request.Context.SelfIdentityId, Payload.FromBytesOwned(relay.OpaquePayload.ToByteArray()), relayPeerId)).ConfigureAwait(false);
+            await _mediator.Send(new ProcessRelayedOpaquePayloadCommand(request.Context.SelfIdentityId, Payload.FromBytesOwned(relay.OpaquePayload.ToByteArray()), relayPeerId, sourceDeviceId)).ConfigureAwait(false);
             return null;
         }
 
@@ -248,7 +258,12 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
 
                     var messageId = new PublicMessageId(new Guid(text.MessageId.Span));
                     var sentTs = text.SentTimestampUtc.ToDateTimeOffset();
-                    await _mediator.Send(new ReceiveTextMessageCommand(lookup, senderId, messageId, text.Content, sentTs), cancellationToken).ConfigureAwait(false);
+                    
+                    var senderIdentity = await _peerIdentityQueries.GetPublicIdentityIdAsync(new PeerId(senderId.Value), cancellationToken).ConfigureAwait(false);
+                    if(senderIdentity is null)
+                        throw new InvalidOperationException("Sender identity not found for peer ID");
+                    
+                    await _mediator.Send(new ReceiveTextMessageCommand(lookup, new RemoteParticipantId(new PublicIdentityId(senderIdentity.Value),senderId), messageId, text.Content, sentTs), cancellationToken).ConfigureAwait(false);
                     return null;
                 }
                 case ChatEnvelope.MessageOneofCase.ReadReceipt:
@@ -390,43 +405,6 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     // TODO: Dispatch notification for UI to surface in connection management dialog
                     return null;
                 }
-                case ChatEnvelope.MessageOneofCase.GroupKeyBootstrap:
-                {
-                    var chatEnv = env.ChatEnvelope;
-                    var bootstrap = chatEnv.GroupKeyBootstrap;
-                    
-                    // Validate conversation_id is exactly 16 bytes and not Guid.Empty
-                    if (bootstrap.ConversationId.Length != 16)
-                    {
-                        _logger.LogWarning("Invalid GroupKeyBootstrap: conversation_id must be 16 bytes, got {Length}", bootstrap.ConversationId.Length);
-                        return null;
-                    }
-                    var conversationId = new Guid(bootstrap.ConversationId.ToByteArray());
-                    if (conversationId == Guid.Empty)
-                    {
-                        _logger.LogWarning("Invalid GroupKeyBootstrap: conversation_id cannot be empty");
-                        return null;
-                    }
-
-                    // Validate group_master_key_bytes is exactly 32 bytes
-                    if (bootstrap.GroupMasterKeyBytes.Length != 32)
-                    {
-                        _logger.LogWarning("Invalid GroupKeyBootstrap: group_master_key_bytes must be 32 bytes, got {Length}", bootstrap.GroupMasterKeyBytes.Length);
-                        return null;
-                    }
-
-                    // Derive GroupId from master key via KDF (for logging/validation)
-                    var groupMasterKey = Percolator.Cryptography.GroupMasterKey.FromBytes(bootstrap.GroupMasterKeyBytes.ToByteArray());
-                    
-                    // Persist via IGroupCryptoStateRepository
-                    await _groupCryptoStateRepository.UpsertGroupMasterKeyAsync(
-                        new ConversationId(conversationId),
-                        GroupMasterKeyBytes.FromBytesOwned(bootstrap.GroupMasterKeyBytes.ToByteArray()),
-                        cancellationToken).ConfigureAwait(false);
-
-                    _logger.LogInformation("Received GroupKeyBootstrap message for conversation {ConversationId}, persisted GroupMasterKey", conversationId);
-                    return null;
-                }
                 case ChatEnvelope.MessageOneofCase.GroupMessage:
                 {
                     var groupMessage = chat.GroupMessage;
@@ -477,9 +455,12 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
 
                         // Persist the message via IChatMessageWriter
                         var senderId = new ChatPeerId(senderPeerId.Value);
+                        var senderIdentity = await _peerIdentityQueries.GetPublicIdentityIdAsync(senderPeerId, cancellationToken).ConfigureAwait(false);
+                        if(senderIdentity is null)
+                            throw new InvalidOperationException("Sender identity not found for peer ID");
                         await _messageWriter.AddTextMessageAsync(
                             new ConversationId(conversationId),
-                            new RemoteParticipantId(, senderId),
+                            new RemoteParticipantId(new PublicIdentityId(senderIdentity.Value), senderId),
                             groupContent.TextMessage,
                             messageId,
                             sentTimestamp,
@@ -505,8 +486,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                 case ChatEnvelope.MessageOneofCase.GroupInvite:
                 {
                     var groupInvite = chat.GroupInvite;
-                    var sourceDeviceId = request.Context.SourceDeviceId ?? DeviceId.Primary;
-                    await _groupInviteHandler.HandleGroupInviteAsync(groupInvite, request.Context.SelfIdentityId.Value, sourceDeviceId, cancellationToken).ConfigureAwait(false);
+                    await _groupInviteHandler.HandleGroupInviteAsync(groupInvite, request.Context.SelfIdentityId, sourceDeviceId, cancellationToken).ConfigureAwait(false);
                     return null;
                 }
                 default:

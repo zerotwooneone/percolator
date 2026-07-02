@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using Percolator.Contracts;
 using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Network;
+using PeerId = Percolator.Identity.PeerId;
 
 namespace Percolator.Application.Network
 {
@@ -54,8 +55,14 @@ namespace Percolator.Application.Network
                 return;
             }
 
+            if (routingProfile.Id is null)
+            {
+                _logger.LogWarning("No peer id found for routing profile, cannot send envelope");
+                return;
+            }
+
             // Use the PeerId from the routing profile to send via existing method
-            var recipient = new RecipientRoute(routingProfile.Id, null);
+            var recipient = new RecipientRoute(new PeerId(routingProfile.Id.Value.Value), null);
             await SendChatEnvelopeToPeerAsync(chatEnvelope, recipient, ct).ConfigureAwait(false);
         }
     }

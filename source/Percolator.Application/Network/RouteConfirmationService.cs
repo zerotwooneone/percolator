@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Percolator.Identity;
 using Percolator.Network;
+using PeerId = Percolator.Network.PeerId;
 
 namespace Percolator.Application.Network;
 
@@ -26,7 +27,7 @@ public sealed class RouteConfirmationService : IRouteConfirmationService
         RouteKind routeKind,
         string? endpointHost,
         int? endpointPort,
-        Guid? relayHostPeerId,
+        PeerId? relayHostPeerId,
         bool success,
         DateTimeOffset nowUtc,
         CancellationToken cancellationToken = default)
@@ -69,7 +70,7 @@ public sealed class RouteConfirmationService : IRouteConfirmationService
         RouteKind routeKind,
         string? endpointHost,
         int? endpointPort,
-        Guid? relayHostPeerId,
+        PeerId? relayHostPeerId,
         DateTimeOffset nowUtc,
         CancellationToken cancellationToken = default)
     {
@@ -90,9 +91,7 @@ public sealed class RouteConfirmationService : IRouteConfirmationService
             }
             else if (routeKind == RouteKind.Relayed && relayHostPeerId.HasValue)
             {
-                var relayPeerId = new Percolator.Network.PeerId(relayHostPeerId.Value);
-                
-                profile.AddOrRefreshRelay(relayPeerId, nowUtc);
+                profile.AddOrRefreshRelay(relayHostPeerId.Value, nowUtc);
             }
 
             await _profileRepository.UpsertAsync(profile, cancellationToken).ConfigureAwait(false);

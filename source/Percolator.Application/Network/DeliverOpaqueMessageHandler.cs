@@ -9,6 +9,7 @@ using Percolator.Prekey.Handlers;
 using Percolator.Application.Network.Handshake;
 using Percolator.Identity;
 using NetworkPeerId = Percolator.Network.PeerId;
+using PeerId = Percolator.Identity.PeerId;
 
 namespace Percolator.Application.Network
 {
@@ -160,6 +161,12 @@ namespace Percolator.Application.Network
                     _logger.LogWarning("Received unhandled one-of message type: {MessageType}", internalEnvelope.ApplicationPayloadCase);
                     return new DeliverOpaqueMessageResult();
                 }
+
+                if (!internalEnvelope.HasSourceDeviceId)
+                {
+                    _logger.LogWarning("Received InternalEnvelope without SourceDeviceId; skipping");
+                    return new DeliverOpaqueMessageResult();
+                }
                 _logger.LogDebug("Parsed InternalEnvelope with case {Case}", internalEnvelope.ApplicationPayloadCase);
                 InternalEnvelope? responseEnvelope = null;
 
@@ -171,19 +178,22 @@ namespace Percolator.Application.Network
                 _logger.LogDebug("Allowed InternalEnvelope case {Case}; dispatching to orchestrator/transport path", internalEnvelope.ApplicationPayloadCase);
 
                 // Extract sender context from InternalEnvelope for cryptographic operations
-                var sourceDeviceId = internalEnvelope.HasSourceDeviceId ? internalEnvelope.SourceDeviceId : 1;
-                var ctx = new SessionContext(inferredSessionId.Value, request.SelfIdentityId, directSession.RemotePeerId.Value, sourceDeviceId);
+                var sourceDeviceId = new DeviceId(internalEnvelope.SourceDeviceId);
+                var identityRemotePeerId = new PeerId(directSession.RemotePeerId.Value);
+                var ctx = new SessionContext(inferredSessionId.Value, request.SelfIdentityId, identityRemotePeerId, sourceDeviceId);
 
                 // Special-case: RelayOpaqueEnvelope requires RPC-level ack response
                 if (internalEnvelope.ApplicationPayloadCase == InternalEnvelope.ApplicationPayloadOneofCase.RelayOpaqueEnvelope)
                 {
                     var relay = internalEnvelope.RelayOpaqueEnvelope;
                     // Process the inner opaque payload (this may establish sessions and send responder msg via MessageService)
+                    var relayHostPeerId = new Percolator.Identity.PeerId(directSession.RemotePeerId.Value);
                     await _mediator.Send(new ProcessRelayedOpaquePayloadCommand(
                         request.SelfIdentityId,
                         Payload.FromBytesOwned(relay.OpaquePayload.ToByteArray()),
                         // Relay host is the remote peer for this direct session (Host as known by this node)
-                        new Percolator.Identity.PeerId(directSession.RemotePeerId.Value)), cancellationToken).ConfigureAwait(false);
+                        relayHostPeerId,
+                        sourceDeviceId), cancellationToken).ConfigureAwait(false);
 
                     // Build RPC-level RelayOpaqueResponse (not wrapped inside InternalEnvelope)
                     var ack = new RelayOpaqueResponse

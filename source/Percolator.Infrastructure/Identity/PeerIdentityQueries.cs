@@ -78,4 +78,15 @@ public sealed class PeerIdentityQueries : IPeerIdentityQueries
             .FirstOrDefaultAsync(cancellationToken);
         return keyBytes is null ? null : Pkh.FromBytesOwned(keyBytes);
     }
+
+    public async Task<Percolator.Identity.PublicIdentityId?> GetPublicIdentityIdAsync(PeerId senderPeerId, CancellationToken cancellationToken)
+    {
+        using var db = _dbFactory.CreateDbContext();
+
+        return await db.PeerIdentities
+            .AsNoTracking()
+            .Where(pid => pid.PeerId == senderPeerId)
+            .Select(pid=>pid.PublicIdentityId)
+            .FirstOrDefaultAsync();
+    }
 }

@@ -83,7 +83,7 @@ namespace Percolator.Infrastructure.Cryptography
             }
         }
 
-        public async Task<IReadOnlyList<SecureSession>> GetAllActiveAsync(int selfIdentityId, CancellationToken cancellationToken = default)
+        public async Task<IReadOnlyList<SecureSession>> GetAllActiveAsync(uint selfIdentityId, CancellationToken cancellationToken = default)
         {
             await _dbGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
@@ -103,7 +103,7 @@ namespace Percolator.Infrastructure.Cryptography
             }
         }
 
-        private SessionDbo ToDbo(SecureSession s, int selfIdentityId)
+        private SessionDbo ToDbo(SecureSession s, uint selfIdentityId)
         {
             return new SessionDbo
             {

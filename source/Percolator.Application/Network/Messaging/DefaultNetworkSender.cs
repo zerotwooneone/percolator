@@ -25,7 +25,7 @@ public sealed class DefaultNetworkSender : INetworkSender
         _candidateRepository = candidateRepository;
     }
 
-    public async Task<SendOutcome> SendAsync(int selfIdentityId, PeerId target, NetworkPayload payload, SendStrategy strategy, CancellationToken ct = default)
+    public async Task<SendOutcome> SendAsync(uint selfIdentityId, PeerId target, NetworkPayload payload, SendStrategy strategy, CancellationToken ct = default)
     {
         var plan = new List<PlannedRoute>(capacity: 2);
 
@@ -57,9 +57,9 @@ public sealed class DefaultNetworkSender : INetworkSender
                 var relay = await _relayTopology.GetRelayForAsync(target, ct).ConfigureAwait(false);
                 if (relay is not null)
                 {
-                    var relayRoute = new PlannedRoute.Relay(relay);
+                    var relayRoute = new PlannedRoute.Relay(relay.Value);
                     // Check if we already have this relay in the plan
-                    var hasRelay = plan.OfType<PlannedRoute.Relay>().Any(r => r.RelayHostPeerId.Value == relay.Value);
+                    var hasRelay = plan.OfType<PlannedRoute.Relay>().Any(r => r.RelayHostPeerId == relay.Value);
                     if (!hasRelay)
                     {
                         plan.Add(relayRoute);
@@ -87,7 +87,7 @@ public sealed class DefaultNetworkSender : INetworkSender
                     }
                     else if (candidate.RouteKind == RouteKind.Relayed && candidate.RelayHostPeerId.HasValue)
                     {
-                        plan.Add(new PlannedRoute.Relay(new PeerId(candidate.RelayHostPeerId.Value)));
+                        plan.Add(new PlannedRoute.Relay(candidate.RelayHostPeerId.Value));
                     }
                 }
             }

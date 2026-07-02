@@ -316,7 +316,8 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             var inner = new ResponderInnerHello
             {
                 Version = 1,
-                DirectSessionId = sessionId.Value.ToString()
+                DirectSessionId = sessionId.Value.ToString(),
+                note("need to add publicIdentityId")
             };
 
             var initial = session.Encrypt(Plaintext.FromBytesOwned(inner.ToByteArray()), clock);

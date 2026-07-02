@@ -405,6 +405,7 @@ message InviteHandshakeResponse {
 message ResponderInnerHello {
   optional uint32 version = 1;
   optional string direct_session_id = 2;
+  optional bytes public_identity_id = 3;
 }
 
 // RPC-level acknowledgment for a relayed opaque message. Returned as the plaintext of the

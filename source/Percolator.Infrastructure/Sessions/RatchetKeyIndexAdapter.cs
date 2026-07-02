@@ -13,7 +13,7 @@ internal sealed class RatchetKeyIndexAdapter : IRatchetKeyIndex
         _db = db;
     }
 
-    public async Task<SessionId?> TryResolveAsync(int selfIdentityId, RatchetEphemeralKey headerPublicKey, CancellationToken cancellationToken = default)
+    public async Task<SessionId?> TryResolveAsync(uint selfIdentityId, RatchetEphemeralKey headerPublicKey, CancellationToken cancellationToken = default)
     {
         var row = await _db.RatchetKeyIndex
             .AsNoTracking()
@@ -26,7 +26,7 @@ internal sealed class RatchetKeyIndexAdapter : IRatchetKeyIndex
         return row is null ? (SessionId?)null : new SessionId(row.DirectSessionId);
     }
 
-    public async Task UpsertAsync(int selfIdentityId, SessionId sessionId, RatchetEphemeralKey headerPublicKey, DateTimeOffset updatedAtUtc, CancellationToken cancellationToken = default)
+    public async Task UpsertAsync(uint selfIdentityId, SessionId sessionId, RatchetEphemeralKey headerPublicKey, DateTimeOffset updatedAtUtc, CancellationToken cancellationToken = default)
     {
         var set = _db.RatchetKeyIndex;
 

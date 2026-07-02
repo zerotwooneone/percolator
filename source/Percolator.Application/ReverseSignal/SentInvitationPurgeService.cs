@@ -46,7 +46,7 @@ public sealed class SentInvitationPurgeService
 
             // Best-effort burn of any still-reserved OTK bound to this correlation id.
             await _selfPreKeys.TryBurnReservedOneTimePreKeyAsync(
-                _active.Identity.SelfIdentityId.Value,
+                _active.Identity.SelfIdentityId,
                 invite.RequestCorrelationId.Value,
                 now,
                 cancellationToken).ConfigureAwait(false);

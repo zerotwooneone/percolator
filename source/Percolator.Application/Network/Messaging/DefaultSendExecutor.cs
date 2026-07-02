@@ -21,7 +21,7 @@ public sealed class DefaultSendExecutor : ISendExecutor
         _logger = logger;
     }
 
-    public async Task<SendOutcome> ExecuteAsync(int selfIdentityId, PeerId target, NetworkPayload payload, IReadOnlyList<PlannedRoute> plannedRoutes, CancellationToken ct = default)
+    public async Task<SendOutcome> ExecuteAsync(uint selfIdentityId, PeerId target, NetworkPayload payload, IReadOnlyList<PlannedRoute> plannedRoutes, CancellationToken ct = default)
     {
         var attemptedPaths = new List<string>(plannedRoutes.Count);
         var attemptDetails = new List<AttemptDetail>(plannedRoutes.Count);
@@ -101,7 +101,7 @@ public sealed class DefaultSendExecutor : ISendExecutor
     }
 
     private async Task RecordAttemptAndPromoteAsync(
-        int selfIdentityId,
+        uint selfIdentityId,
         PeerId target,
         PlannedRoute route,
         TransportSendResult result,
@@ -113,11 +113,11 @@ public sealed class DefaultSendExecutor : ISendExecutor
             var routeKind = route is PlannedRoute.Relay ? RouteKind.Relayed : RouteKind.Direct;
             string? endpointHost = null;
             int? endpointPort = null;
-            Guid? relayHostPeerId = null;
+            PeerId? relayHostPeerId = null;
 
             if (route is PlannedRoute.Relay relay)
             {
-                relayHostPeerId = relay.RelayHostPeerId.Value;
+                relayHostPeerId = relay.RelayHostPeerId;
             }
 
             // Convert int to SelfId for Application layer service

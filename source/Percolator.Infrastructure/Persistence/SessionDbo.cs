@@ -2,7 +2,7 @@ namespace Percolator.Infrastructure.Persistence;
 
 public class SessionDbo
 {
-    public int SelfIdentityId { get; set; }
+    public uint SelfIdentityId { get; set; }
     public Guid SessionId { get; set; }
     public uint RemotePeerId { get; set; }
     public int ProtocolVersion { get; set; }

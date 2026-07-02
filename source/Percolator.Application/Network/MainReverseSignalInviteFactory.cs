@@ -109,7 +109,7 @@ public sealed class MainReverseSignalInviteFactory : IMainReverseSignalInviteFac
 
         // Persist signed pre-key and track correlation for finalization.
         _selfPreKeys.SaveSignedPreKeyAsync(
-                _active.Identity.SelfIdentityId.Value,
+                _active.Identity.SelfIdentityId,
                 signedPreKeyId,
                 signedPreKeyPriv,
                 signedPreKeySpki,

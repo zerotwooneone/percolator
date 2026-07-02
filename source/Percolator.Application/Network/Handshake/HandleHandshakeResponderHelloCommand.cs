@@ -45,7 +45,7 @@ namespace Percolator.Application.Network.Handshake
             var header = ratchetMessage.GetHeader();
 
             // Fast-path: resolve session by ratchet header key (expected to miss on first responder message)
-            var sessionId = await _ratchetLookup.TryResolveAsync((int)request.SelfIdentityId.Value, header.PreKey, cancellationToken).ConfigureAwait(false);
+            var sessionId = await _ratchetLookup.TryResolveAsync(request.SelfIdentityId.Value, header.PreKey, cancellationToken).ConfigureAwait(false);
             Percolator.Network.DirectSessionId directSessionId;
             if (sessionId is null)
             {

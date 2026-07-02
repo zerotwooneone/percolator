@@ -222,7 +222,7 @@ namespace Percolator.Application.Network
                 invitation,
                 requestCorrelationId: requestCorrelationId,
                 isRelayed: isRelayed,
-                relayHostPeerId: relayHostPeerId is null ? null : new Percolator.Cryptography.Primitives.PeerId(relayHostPeerId.Value),
+                relayHostPeerId: relayHostPeerId is null ? null : new Percolator.Cryptography.Primitives.PeerId(relayHostPeerId.Value.Value),
                 inviterIdentityKey: inviterIdentityKey,
                 callbackEndpointHost: callbackHost,
                 callbackEndpointPort: callbackPort,

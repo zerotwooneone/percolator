@@ -12,7 +12,7 @@ namespace Percolator.Application.Network.Handshake
 {
     // Client-side processor for opaque relayed payloads. These bytes are already decrypted from Host↔Client.
     // We now parse the inner InternalEnvelope and, if it contains a handshake hello, complete responder-side handshake.
-    public record ProcessRelayedOpaquePayloadCommand(SelfId SelfIdentityId, Payload OpaquePayload, Percolator.Identity.PeerId RelayHostPeerId) : IRequest<ProcessRelayedOpaquePayloadResponse>;
+    public record ProcessRelayedOpaquePayloadCommand(SelfId SelfIdentityId, Payload OpaquePayload, Percolator.Identity.PeerId RelayHostPeerId, DeviceId DeviceId) : IRequest<ProcessRelayedOpaquePayloadResponse>;
 
     internal record ProcessRelayedOpaquePayloadResponse
     {
@@ -136,22 +136,24 @@ namespace Percolator.Application.Network.Handshake
             }
             _logger.LogDebug("Relayed InternalEnvelope allowed case {Case}; delegating to orchestrator", inner.ApplicationPayloadCase);
 
-            uint? remotePeerGuid = null;
+            uint? remotePeerId = null;
             try
             {
                 var directSession = await _directSessionRepository
                     .GetBySessionIdAsync(new DirectSessionId(sid.Value), selfIdentityId)
                     .ConfigureAwait(false);
-                remotePeerGuid = directSession?.RemotePeerId.Value;
+                remotePeerId = directSession?.RemotePeerId.Value;
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to resolve remote peer for relayed session {SessionId}; continuing with null RemotePeerGuid", sid);
+                return ProcessRelayedOpaquePayloadResponse.Failure;
             }
 
+            var identityRemotePeerId = new Percolator.Identity.PeerId(remotePeerId.Value);
             await _mediator.Send(new Percolator.Application.Network.ProcessInternalEnvelopeCommand(
                 inner,
-                new Percolator.Application.Network.SessionContext(sid.Value, request.SelfIdentityId, remotePeerGuid)
+                new Percolator.Application.Network.SessionContext(sid.Value, request.SelfIdentityId, identityRemotePeerId, request.DeviceId)
             ), cancellationToken).ConfigureAwait(false);
 
             return ProcessRelayedOpaquePayloadResponse.Success;

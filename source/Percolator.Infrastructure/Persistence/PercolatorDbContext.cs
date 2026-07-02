@@ -155,7 +155,11 @@ public class PercolatorDbContext : DbContext
             entity.ToTable("SelfPreKeySigned");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).ValueGeneratedOnAdd();
-            entity.Property(e => e.SelfIdentityId).IsRequired();
+            entity.Property(e => e.SelfIdentityId)
+                .IsRequired()
+                .HasConversion(
+                    v => v.Value,
+                    v => new Percolator.Identity.SelfId(v));
             entity.Property(e => e.SignedPreKeyId).IsRequired();
             entity.Property(e => e.SignedPreKeyPrivate).IsRequired();
             entity.Property(e => e.SignedPreKeyPublicSpki).IsRequired();
@@ -176,7 +180,11 @@ public class PercolatorDbContext : DbContext
             entity.ToTable("SelfOneTimePreKeys");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).ValueGeneratedOnAdd();
-            entity.Property(e => e.SelfIdentityId).IsRequired();
+            entity.Property(e => e.SelfIdentityId)
+                .IsRequired()
+                .HasConversion(
+                    v => v.Value,
+                    v => new Percolator.Identity.SelfId(v));
             entity.Property(e => e.OneTimePreKeyId).IsRequired();
             entity.Property(e => e.OneTimePreKeyPrivate).IsRequired();
             entity.Property(e => e.OneTimePreKeyPublicSpki).IsRequired();
@@ -606,7 +614,7 @@ public class PercolatorDbContext : DbContext
                     v => v.Value,
                     v => new Percolator.Chat.Messaging.PublicMessageId(v))
                 .IsRequired();
-            entity.Property(e => e.SenderId).IsRequired();
+            entity.Property(e => e.SenderSelfId).IsRequired();
             entity.Property(e => e.Body).IsRequired();
             entity.Property(e => e.SentAt).IsRequired();
             entity.HasIndex(e => new { e.ConversationId, e.SentAt });
@@ -756,7 +764,10 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.RouteKind).IsRequired();
             entity.Property(e => e.EndpointHost);
             entity.Property(e => e.EndpointPort);
-            entity.Property(e => e.RelayHostPeerId);
+            entity.Property(e => e.RelayHostPeerId)
+                .HasConversion(
+                    v => v.HasValue ? v.Value.Value : (uint?)null,
+                    v => v.HasValue ? new Percolator.Network.PeerId(v.Value) : null);
             entity.Property(e => e.ObservedAtUtc).IsRequired();
             entity.Property(e => e.LastAttemptAtUtc);
             entity.Property(e => e.LastSuccessAtUtc);

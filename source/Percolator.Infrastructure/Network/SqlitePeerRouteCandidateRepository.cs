@@ -55,7 +55,7 @@ public sealed class SqlitePeerRouteCandidateRepository : IPeerRouteCandidateRepo
         await _db.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task<IReadOnlyList<PeerRouteCandidate>> GetCandidatesAsync(int selfIdentityId, PeerId remotePeerId, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<PeerRouteCandidate>> GetCandidatesAsync(uint selfIdentityId, PeerId remotePeerId, CancellationToken cancellationToken = default)
     {
         var dbos = await _db.PeerRouteCandidates
             .AsNoTracking()
@@ -65,7 +65,7 @@ public sealed class SqlitePeerRouteCandidateRepository : IPeerRouteCandidateRepo
         return dbos.Select(MapToDomain).ToList();
     }
 
-    public async Task<IReadOnlyList<PeerRouteCandidate>> GetAllCandidatesAsync(int selfIdentityId, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<PeerRouteCandidate>> GetAllCandidatesAsync(uint selfIdentityId, CancellationToken cancellationToken = default)
     {
         var dbos = await _db.PeerRouteCandidates
             .AsNoTracking()

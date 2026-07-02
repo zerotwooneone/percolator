@@ -218,7 +218,7 @@ namespace Percolator.Application.Network
             await _directSessionMappingWriter.WriteMappingAsync(
                 inviterNetPeerId,
                 directSessionId,
-                _active.Identity.SelfIdentityId.Value,
+                _active.Identity.SelfIdentityId,
                 cancellationToken).ConfigureAwait(false);
 
             await _mediator.Publish(
@@ -233,7 +233,8 @@ namespace Percolator.Application.Network
             var inner = new ResponderInnerHello
             {
                 Version = 1,
-                DirectSessionId = sessionId.Value.ToString()
+                DirectSessionId = sessionId.Value.ToString(),
+                PublicIdentityId = ByteString.CopyFrom(_active.Identity.PublicIdentityId.Value.ToByteArray())
             };
             var initial = session.Encrypt(Plaintext.FromBytes(inner.ToByteArray()), _clock);
             await _sessions.UpdateAsync(session, cancellationToken).ConfigureAwait(false);
@@ -317,7 +318,7 @@ namespace Percolator.Application.Network
             if (pending.RelayHostPeerId is null) throw new InvalidOperationException("RelayHostPeerId is required for relayed pending sessions");
             if (inviterIdentityKeySpki is null || inviterIdentityKeySpki.Length == 0) throw new InvalidOperationException("Inviter identity key SPKI is required");
 
-            var relayHostPeerId = new Percolator.Identity.PeerId(pending.RelayHostPeerId.Value);
+            var relayHostPeerId = new Percolator.Identity.PeerId(pending.RelayHostPeerId.Value.Value);
 
             var relaySessionId = await _directSessions.GetAsync(relayHostPeerId, _active.Identity!.SelfIdentityId.Value, cancellationToken).ConfigureAwait(false);
             if (relaySessionId is null)
