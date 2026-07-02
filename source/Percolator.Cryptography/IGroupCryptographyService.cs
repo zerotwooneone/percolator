@@ -75,3 +75,12 @@ public interface IGroupCryptographyService
     /// <returns>The derived ZK group public parameters.</returns>
     ZkGroupPublicParamsBytes DeriveGroupPublicParams(GroupMasterKey masterKey);
 }
+
+public static class GroupCryptographyServiceExtensions
+{
+    public static GroupMasterKey GenerateGroupMasterKey(this IGroupCryptographyService service)
+    {
+        var entropy = System.Security.Cryptography.RandomNumberGenerator.GetBytes(32);
+        return service.GenerateGroupMasterKey(entropy);
+    }
+}
