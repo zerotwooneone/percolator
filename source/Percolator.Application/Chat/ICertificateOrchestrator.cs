@@ -1,6 +1,8 @@
+using Percolator.Chat.GroupMembership;
+
 namespace Percolator.Application.Chat;
 
 public interface ICertificateOrchestrator
 {
-    Task RefreshLocalCertificateAsync(CancellationToken ct);
+    Task RefreshLocalCertificateAsync(ChatPeerId relayPeerId,CancellationToken ct);
 }

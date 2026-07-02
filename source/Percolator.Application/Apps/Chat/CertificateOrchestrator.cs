@@ -1,8 +1,10 @@
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Chat;
+using Percolator.Chat.GroupMembership;
 using Percolator.Identity;
 using Percolator.Network;
 using Percolator.Network.Messaging;
+using PeerId = Percolator.Network.PeerId;
 
 namespace Percolator.Application.Apps.Chat;
 
@@ -34,7 +36,7 @@ public sealed class CertificateOrchestrator : ICertificateOrchestrator
         _logger = logger;
     }
 
-    public async Task RefreshLocalCertificateAsync(CancellationToken ct)
+    public async Task RefreshLocalCertificateAsync(ChatPeerId relayPeerId,CancellationToken ct)
     {
         // 1. Resolve Relay Destination
         // Get the local identity
@@ -44,10 +46,10 @@ public sealed class CertificateOrchestrator : ICertificateOrchestrator
             _logger.LogWarning("No self identity found for certificate refresh");
             return;
         }
-
         
         // Use the repository to extract its active endpoint network profile
-        var relayProfile = await _peerRoutingProfileRepository.GetByIdAsync(relayPeerId, ct).ConfigureAwait(false);
+        var networkRelayPeerId = new PeerId(relayPeerId.Value);
+        var relayProfile = await _peerRoutingProfileRepository.GetByIdAsync(networkRelayPeerId, ct).ConfigureAwait(false);
         if (relayProfile is null)
         {
             _logger.LogWarning("No routing profile found for relay {RelayPeerId}", relayPeerId);
