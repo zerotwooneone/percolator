@@ -13,12 +13,12 @@ file sealed class TestClock6 : IClock
 file sealed class FakeIndex : IRatchetKeyIndex
 {
     public SessionId? Resolved;
-    public (int SelfIdentityId, SessionId SessionId, RatchetEphemeralKey HeaderKey, DateTimeOffset UpdatedAtUtc)? Upserted;
+    public (uint SelfIdentityId, SessionId SessionId, RatchetEphemeralKey HeaderKey, DateTimeOffset UpdatedAtUtc)? Upserted;
 
-    public Task<SessionId?> TryResolveAsync(int selfIdentityId, RatchetEphemeralKey headerPublicKey, CancellationToken cancellationToken = default)
+    public Task<SessionId?> TryResolveAsync(uint selfIdentityId, RatchetEphemeralKey headerPublicKey, CancellationToken cancellationToken = default)
         => Task.FromResult(Resolved);
 
-    public Task UpsertAsync(int selfIdentityId, SessionId sessionId, RatchetEphemeralKey headerPublicKey, DateTimeOffset updatedAtUtc, CancellationToken cancellationToken = default)
+    public Task UpsertAsync(uint selfIdentityId, SessionId sessionId, RatchetEphemeralKey headerPublicKey, DateTimeOffset updatedAtUtc, CancellationToken cancellationToken = default)
     {
         Upserted = (selfIdentityId, sessionId, headerPublicKey, updatedAtUtc);
         return Task.CompletedTask;
@@ -28,7 +28,7 @@ file sealed class FakeIndex : IRatchetKeyIndex
 file sealed class FakeCatalog : ISessionCatalog
 {
     public List<SessionId> Sessions { get; } = new();
-    public async IAsyncEnumerable<SessionId> EnumerateActiveAsync(int selfIdentityId, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    public async IAsyncEnumerable<SessionId> EnumerateActiveAsync(uint selfIdentityId, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         foreach (var s in Sessions)
         {
@@ -60,7 +60,7 @@ file sealed class FakeRepo : ISessionRepository
         return Task.CompletedTask;
     }
 
-    public Task<IReadOnlyList<SecureSession>> GetAllActiveAsync(int selfIdentityId, CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<SecureSession>> GetAllActiveAsync(uint selfIdentityId, CancellationToken cancellationToken = default)
         => Task.FromResult((IReadOnlyList<SecureSession>)Store.Values.ToList());
 }
 
