@@ -22,6 +22,9 @@ public static class ServiceCollectionExtensions
         // Register Relay Group Orchestrator (Chunk 4)
         services.AddScoped<IRelayGroupOrchestrator, RelayGroupOrchestrator>();
 
+        // Register Certificate Orchestrator (Chunk 5.6)
+        services.AddScoped<ICertificateOrchestrator, CertificateOrchestrator>();
+
         return services;
     }
 }

@@ -25,6 +25,9 @@ public sealed class SendGroupMessageCommandHandler : IRequestHandler<Commands.Se
     private readonly IPublisher _publisher;
     private readonly ILogger<SendGroupMessageCommandHandler> _logger;
     private readonly ISelfIdentityQueries _selfIdentityQueries;
+    private readonly IDeliveryCertificateStore _certificateStore;
+    private readonly ICertificateOrchestrator _certificateOrchestrator;
+    private readonly TimeProvider _timeProvider;
 
     public SendGroupMessageCommandHandler(
         IGroupConversationRepository repository,
@@ -36,7 +39,10 @@ public sealed class SendGroupMessageCommandHandler : IRequestHandler<Commands.Se
         IPeerIdentityQueries peerIdentityQueries,
         IPublisher publisher,
         ILogger<SendGroupMessageCommandHandler> logger,
-        ISelfIdentityQueries selfIdentityQueries)
+        ISelfIdentityQueries selfIdentityQueries,
+        IDeliveryCertificateStore certificateStore,
+        ICertificateOrchestrator certificateOrchestrator,
+        TimeProvider timeProvider)
     {
         _repository = repository;
         _messageWriter = messageWriter;
@@ -48,6 +54,9 @@ public sealed class SendGroupMessageCommandHandler : IRequestHandler<Commands.Se
         _publisher = publisher;
         _logger = logger;
         _selfIdentityQueries = selfIdentityQueries;
+        _certificateStore = certificateStore;
+        _certificateOrchestrator = certificateOrchestrator;
+        _timeProvider = timeProvider;
     }
 
     public async Task Handle(Commands.SendGroupMessageCommand request, CancellationToken cancellationToken)
@@ -88,6 +97,14 @@ public sealed class SendGroupMessageCommandHandler : IRequestHandler<Commands.Se
             request.PublicMessageId,
             request.SentTimestampUtc,
             cancellationToken).ConfigureAwait(false);
+
+        // JIT: Ensure delivery certificate is available and not expired before sending to relay
+        var cert = await _certificateStore.GetCertificateAsync(request.SelfIdentityId, group.RelayPeerId, cancellationToken).ConfigureAwait(false);
+        if (cert == null || cert.ExpiresAtUtc < _timeProvider.GetUtcNow() + TimeSpan.FromHours(4))
+        {
+            _logger.LogInformation("Refreshing delivery certificate for SelfId {SelfId}, RelayPeerId {RelayPeerId} before sending group message", request.SelfIdentityId, group.RelayPeerId);
+            await _certificateOrchestrator.RefreshLocalCertificateAsync(request.SelfIdentityId, group.RelayPeerId, cancellationToken).ConfigureAwait(false);
+        }
 
         // Send to relay (Signal Group V2: sender sends once to relay, relay fans out to members)
         var relayRoute = new RecipientRoute(new Percolator.Identity.PeerId(group.RelayPeerId.Value), null);

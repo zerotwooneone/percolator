@@ -17,6 +17,7 @@ public sealed class CertificateOrchestrator : ICertificateOrchestrator
     private readonly IPeerRoutingProfileRepository _peerRoutingProfileRepository;
     private readonly IRelayTransportClient _relayTransportClient;
     private readonly ILogger<CertificateOrchestrator> _logger;
+    private readonly TimeProvider _timeProvider;
 
     public CertificateOrchestrator(
         IDeliveryCertificateStore certificateStore,
@@ -25,7 +26,8 @@ public sealed class CertificateOrchestrator : ICertificateOrchestrator
         IRelayTopology relayTopology,
         IPeerRoutingProfileRepository peerRoutingProfileRepository,
         IRelayTransportClient relayTransportClient,
-        ILogger<CertificateOrchestrator> logger)
+        ILogger<CertificateOrchestrator> logger,
+        TimeProvider timeProvider)
     {
         _certificateStore = certificateStore;
         _selfIdentityRepository = selfIdentityRepository;
@@ -34,16 +36,17 @@ public sealed class CertificateOrchestrator : ICertificateOrchestrator
         _peerRoutingProfileRepository = peerRoutingProfileRepository;
         _relayTransportClient = relayTransportClient;
         _logger = logger;
+        _timeProvider = timeProvider;
     }
 
-    public async Task RefreshLocalCertificateAsync(ChatPeerId relayPeerId,CancellationToken ct)
+    public async Task RefreshLocalCertificateAsync(ChatSelfId selfId, ChatPeerId relayPeerId, CancellationToken ct)
     {
         // 1. Resolve Relay Destination
-        // Get the local identity
-        var selfIdentity = await _selfIdentityRepository.GetMostRecentAsync(ct).ConfigureAwait(false);
+        // Get the specific local identity by ChatSelfId
+        var selfIdentity = await _selfIdentityRepository.GetByIdAsync(new Percolator.Identity.SelfId(selfId.Value), ct).ConfigureAwait(false);
         if (selfIdentity is null)
         {
-            _logger.LogWarning("No self identity found for certificate refresh");
+            _logger.LogWarning("No self identity found for certificate refresh with SelfId {SelfId}", selfId);
             return;
         }
         
@@ -66,9 +69,8 @@ public sealed class CertificateOrchestrator : ICertificateOrchestrator
         var targetHost = firstEndpoint.EndPoint.Host;
         var targetPort = firstEndpoint.EndPoint.Port;
 
-        // 2. Generate Signature Challenge
-        // Generate the current UTC timestamp
-        var timestamp = DateTimeOffset.UtcNow;
+        // Generate the current UTC timestamp using TimeProvider for testability
+        var timestamp = _timeProvider.GetUtcNow();
 
         // Extract the cryptographic public key hash fingerprint token (Respecting Rule 6)
         var activeKey = selfIdentity.GetActiveKey(timestamp);
@@ -94,9 +96,9 @@ public sealed class CertificateOrchestrator : ICertificateOrchestrator
             ct).ConfigureAwait(false);
 
         // 4. Store Result
-        // Save the DeliveryCertificate to IDeliveryCertificateStore
-        _certificateStore.SetCertificate(relayPeerId,certificate);
+        // Save the DeliveryCertificate to IDeliveryCertificateStore with both identifiers
+        await _certificateStore.SetCertificateAsync(selfId, relayPeerId, certificate, ct).ConfigureAwait(false);
 
-        _logger.LogInformation("Successfully refreshed delivery certificate, expires at {ExpiresAt}", certificate.ExpiresAt);
+        _logger.LogInformation("Successfully refreshed delivery certificate, expires at {ExpiresAt}", certificate.ExpiresAtUtc);
     }
 }

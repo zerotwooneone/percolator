@@ -34,6 +34,10 @@ public static class ServiceCollectionExtensions
         // Register Chunk 5 Outbox Dispatcher
         services.AddHostedService<OutboxDispatcherWorker>();
 
+        // Register Chunk 5.6 Delivery Certificate services
+        services.AddScoped<IDeliveryCertificateStore, SqliteDeliveryCertificateStore>();
+        services.AddScoped<IDeliveryCertificateQueries, SqliteDeliveryCertificateQueries>();
+
         return services;
     }
 }

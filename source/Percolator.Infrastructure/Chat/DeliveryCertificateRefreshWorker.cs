@@ -29,14 +29,39 @@ public sealed class DeliveryCertificateRefreshWorker : BackgroundService
             try
             {
                 using var scope = _scopeFactory.CreateAsyncScope();
+                var queries = scope.ServiceProvider.GetRequiredService<IDeliveryCertificateQueries>();
+                var store = scope.ServiceProvider.GetRequiredService<IDeliveryCertificateStore>();
                 var orchestrator = scope.ServiceProvider.GetRequiredService<ICertificateOrchestrator>();
 
-                _logger.LogInformation("Refreshing delivery certificate");
-                await orchestrator.RefreshLocalCertificateAsync(stoppingToken);
-                _logger.LogInformation("Delivery certificate refresh completed");
+                // Query all active relay assignments
+                var assignments = await queries.GetActiveRelayAssignmentsAsync(stoppingToken).ConfigureAwait(false);
+                _logger.LogInformation("Found {Count} active relay assignments to check", assignments.Count);
 
-                // Wait 20 hours before next refresh (well before 24-hour expiration)
-                await Task.Delay(TimeSpan.FromHours(20), _timeProvider, stoppingToken);
+                foreach (var (selfId, relayPeerId) in assignments)
+                {
+                    try
+                    {
+                        // Load existing certificate
+                        var cert = await store.GetCertificateAsync(selfId, relayPeerId, stoppingToken).ConfigureAwait(false);
+                        
+                        // Check if certificate is missing or expires within 4 hours
+                        var needsRefresh = cert == null || cert.ExpiresAtUtc < _timeProvider.GetUtcNow() + TimeSpan.FromHours(4);
+                        
+                        if (needsRefresh)
+                        {
+                            _logger.LogInformation("Refreshing delivery certificate for SelfId {SelfId}, RelayPeerId {RelayPeerId}", selfId, relayPeerId);
+                            await orchestrator.RefreshLocalCertificateAsync(selfId, relayPeerId, stoppingToken).ConfigureAwait(false);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        // Log per-relay failure but continue with other relays
+                        _logger.LogError(ex, "Failed to refresh delivery certificate for SelfId {SelfId}, RelayPeerId {RelayPeerId}", selfId, relayPeerId);
+                    }
+                }
+
+                // Wait 1 hour before next refresh cycle
+                await Task.Delay(TimeSpan.FromHours(1), _timeProvider, stoppingToken);
             }
             catch (OperationCanceledException)
             {
@@ -52,7 +77,7 @@ public sealed class DeliveryCertificateRefreshWorker : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error during delivery certificate refresh");
+                _logger.LogError(ex, "Error during delivery certificate refresh cycle");
                 // Wait 5 minutes before retrying on transient errors
                 await Task.Delay(TimeSpan.FromMinutes(5), _timeProvider, stoppingToken);
             }

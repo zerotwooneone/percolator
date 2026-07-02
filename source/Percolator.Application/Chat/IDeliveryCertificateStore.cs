@@ -5,6 +5,6 @@ namespace Percolator.Application.Chat;
 
 public interface IDeliveryCertificateStore
 {
-    DeliveryCertificate? GetCertificate();
-    void SetCertificate(ChatPeerId relayPeerId,DeliveryCertificate certificate);
+    Task<DeliveryCertificate?> GetCertificateAsync(ChatSelfId selfId, ChatPeerId relayPeerId, CancellationToken ct);
+    Task SetCertificateAsync(ChatSelfId selfId, ChatPeerId relayPeerId, DeliveryCertificate certificate, CancellationToken ct);
 }

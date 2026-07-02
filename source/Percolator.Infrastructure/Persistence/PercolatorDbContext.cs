@@ -64,6 +64,7 @@ public class PercolatorDbContext : DbContext
     public DbSet<Percolator.Infrastructure.Chat.Persistence.SenderKeyRecordDbo> SenderKeyRecords { get; set; } = null!;
     public DbSet<RelayGroupStateDbo> RelayGroupStates { get; set; } = null!;
     public DbSet<RelayBlindedRosterDbo> RelayBlindedRosters { get; set; } = null!;
+    public DbSet<Percolator.Infrastructure.Chat.Persistence.DeliveryCertificateDbo> DeliveryCertificates { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -840,6 +841,40 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.DestinationPeerId).IsRequired();
             entity.Property(e => e.ProcessedAtUtc);
             entity.HasIndex(e => e.ProcessedAtUtc);
+        });
+
+        // DeliveryCertificates (Persistent storage for Sealed Sender delivery certificates)
+        modelBuilder.Entity<Percolator.Infrastructure.Chat.Persistence.DeliveryCertificateDbo>(entity =>
+        {
+            entity.ToTable("DeliveryCertificates");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            
+            // Unique index on (SelfId, RelayPeerId) to enforce one cert per self/relay pair
+            entity.HasIndex(e => new { e.SelfId, e.RelayPeerId }).IsUnique();
+            
+            // Value converters for DDD types
+            entity.Property(e => e.SelfId)
+                .HasConversion(
+                    v => v.Value,
+                    v => new Percolator.Chat.GroupMembership.ChatSelfId(v));
+                    
+            entity.Property(e => e.RelayPeerId)
+                .HasConversion(
+                    v => v.Value,
+                    v => new Percolator.Chat.GroupMembership.ChatPeerId(v));
+                    
+            entity.Property(e => e.Payload)
+                .HasConversion(
+                    v => v.ToArray(),
+                    v => Percolator.Chat.GroupLedger.DeliveryCertificatePayloadBytes.FromBytes(v));
+                    
+            entity.Property(e => e.Signature)
+                .HasConversion(
+                    v => v.ToArray(),
+                    v => Percolator.Chat.GroupLedger.SignatureBytes.FromBytes(v));
+                    
+            entity.Property(e => e.ExpiresAtUtc).IsRequired();
         });
     }
 }
