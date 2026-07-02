@@ -30,7 +30,7 @@ public sealed class SecureMessagingService : ISecureMessagingService
         return msg;
     }
 
-    public async Task<(SessionId sessionId, Plaintext plaintext)?> DecryptInboundAsync(int selfIdentityId, SessionRatchetMessage message, CancellationToken cancellationToken = default)
+    public async Task<(SessionId sessionId, Plaintext plaintext)?> DecryptInboundAsync(uint selfIdentityId, SessionRatchetMessage message, CancellationToken cancellationToken = default)
     {
         var resolver = new InboundMessageResolver(_index, _catalog, _sessions);
         var result = await resolver.ResolveAsync(selfIdentityId, message, _clock, cancellationToken).ConfigureAwait(false);

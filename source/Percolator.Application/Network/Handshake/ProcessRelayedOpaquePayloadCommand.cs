@@ -136,7 +136,7 @@ namespace Percolator.Application.Network.Handshake
             }
             _logger.LogDebug("Relayed InternalEnvelope allowed case {Case}; delegating to orchestrator", inner.ApplicationPayloadCase);
 
-            Guid? remotePeerGuid = null;
+            uint? remotePeerGuid = null;
             try
             {
                 var directSession = await _directSessionRepository

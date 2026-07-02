@@ -15,7 +15,7 @@ namespace Percolator.Infrastructure.Network.Handshake
             _db = db;
         }
 
-        public async Task<PreHandshakeRecord?> TryGetMostRecentAsync(int selfIdentityId, CancellationToken cancellationToken)
+        public async Task<PreHandshakeRecord?> TryGetMostRecentAsync(uint selfIdentityId, CancellationToken cancellationToken)
         {
             var now = DateTimeOffset.UtcNow;
             var recent = await _db.PreHandshakeSessions
@@ -69,7 +69,7 @@ namespace Percolator.Infrastructure.Network.Handshake
             await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        public async IAsyncEnumerable<PreHandshakeRecord> EnumeratePendingAsync(int selfIdentityId, [EnumeratorCancellation] CancellationToken cancellationToken)
+        public async IAsyncEnumerable<PreHandshakeRecord> EnumeratePendingAsync(uint selfIdentityId, [EnumeratorCancellation] CancellationToken cancellationToken)
         {
             var now = DateTimeOffset.UtcNow;
             var recent = await _db.PreHandshakeSessions
@@ -105,7 +105,7 @@ namespace Percolator.Infrastructure.Network.Handshake
             }
         }
 
-        public async Task DeleteAsync(long recordId, int selfIdentityId, CancellationToken cancellationToken)
+        public async Task DeleteAsync(long recordId, uint selfIdentityId, CancellationToken cancellationToken)
         {
             var entity = await _db.PreHandshakeSessions
                 .Where(x => x.Id == recordId && x.SelfIdentityId == selfIdentityId)
@@ -118,7 +118,7 @@ namespace Percolator.Infrastructure.Network.Handshake
             }
         }
 
-        public async Task PurgeExpiredAsync(int selfIdentityId, CancellationToken cancellationToken)
+        public async Task PurgeExpiredAsync(uint selfIdentityId, CancellationToken cancellationToken)
         {
             var now = DateTimeOffset.UtcNow;
             var candidates = await _db.PreHandshakeSessions

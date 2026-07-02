@@ -13,7 +13,7 @@ public sealed class SqliteDirectSessionRepository : IDirectSessionRepository
         _db = db;
     }
 
-    public async Task<IReadOnlyList<DirectSession>> ListAsync(int selfIdentityId)
+    public async Task<IReadOnlyList<DirectSession>> ListAsync(uint selfIdentityId)
     {
         var rows = await _db.DirectSessions
             .AsNoTracking()
@@ -26,7 +26,7 @@ public sealed class SqliteDirectSessionRepository : IDirectSessionRepository
             .ToList();
     }
 
-    public async Task<DirectSession?> GetBySessionIdAsync(DirectSessionId sessionId, int selfIdentityId)
+    public async Task<DirectSession?> GetBySessionIdAsync(DirectSessionId sessionId, uint selfIdentityId)
     {
         var dbo = await _db.DirectSessions
             .AsNoTracking()
@@ -34,7 +34,7 @@ public sealed class SqliteDirectSessionRepository : IDirectSessionRepository
         return dbo is null ? null : new DirectSession(new PeerId(dbo.RemotePeerId), new DirectSessionId(dbo.SessionId));
     }
 
-    public async Task<DirectSession?> GetByRemotePeerIdAsync(PeerId remotePeerId, int selfIdentityId)
+    public async Task<DirectSession?> GetByRemotePeerIdAsync(PeerId remotePeerId, uint selfIdentityId)
     {
         var dbo = await _db.DirectSessions
             .AsNoTracking()
@@ -42,7 +42,7 @@ public sealed class SqliteDirectSessionRepository : IDirectSessionRepository
         return dbo is null ? null : new DirectSession(new PeerId(dbo.RemotePeerId), new DirectSessionId(dbo.SessionId));
     }
 
-    public async Task UpsertAsync(PeerId remotePeerId, DirectSessionId sessionId, int selfIdentityId)
+    public async Task UpsertAsync(PeerId remotePeerId, DirectSessionId sessionId, uint selfIdentityId)
     {
         var existing = await _db.DirectSessions
             .FirstOrDefaultAsync(x => x.RemotePeerId == remotePeerId.Value && x.SelfIdentityId == selfIdentityId);
@@ -64,7 +64,7 @@ public sealed class SqliteDirectSessionRepository : IDirectSessionRepository
         await _db.SaveChangesAsync();
     }
 
-    public async Task DeleteByRemotePeerIdAsync(PeerId remotePeerId, int selfIdentityId)
+    public async Task DeleteByRemotePeerIdAsync(PeerId remotePeerId, uint selfIdentityId)
     {
         var existing = await _db.DirectSessions
             .FirstOrDefaultAsync(x => x.RemotePeerId == remotePeerId.Value && x.SelfIdentityId == selfIdentityId);

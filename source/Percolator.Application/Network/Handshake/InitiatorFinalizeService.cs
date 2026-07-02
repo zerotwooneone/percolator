@@ -126,7 +126,7 @@ namespace Percolator.Application.Network.Handshake
                 }
 
                 var spk = await _selfPreKeys.TryGetSignedPreKeyAsync(
-                        selfIdentityId.Value,
+                        selfIdentityId,
                         sentInvitation.SignedPreKeyId,
                         cancellationToken)
                     .ConfigureAwait(false);
@@ -169,8 +169,8 @@ namespace Percolator.Application.Network.Handshake
             }
             catch (Exception ex)
             {
-                _logger.LogInformation(ex, "Invite finalize: best-effort peer identity upsert failed.");
-                peerIdentity = null;
+                _logger.LogError(ex, "Invite finalize: best-effort peer identity upsert failed.");
+                throw;
             }
 
             SharedSecret shared;
@@ -216,9 +216,7 @@ namespace Percolator.Application.Network.Handshake
             // Acceptor sent first message from an initiator session, so we must bootstrap as responder to decrypt.
             var tmp = RatchetBootstrap.CreateResponderSession(
                 SessionId.NewId(),
-                peerIdentity is null
-                    ? Percolator.Cryptography.Primitives.PeerId.NewId()
-                    : new Percolator.Cryptography.Primitives.PeerId(peerIdentity.Id.Value),
+                new Percolator.Cryptography.Primitives.PeerId(peerIdentity.Id.Value),
                 new ProtocolVersion(1),
                 root,
                 _clock);
@@ -285,7 +283,7 @@ namespace Percolator.Application.Network.Handshake
                     await _directSessionMappingWriter.WriteMappingAsync(
                         new Percolator.Network.PeerId(peerIdentity.Id.Value),
                         new Percolator.Network.DirectSessionId(sid.Value),
-                        selfIdentityId.Value,
+                        selfIdentityId,
                         cancellationToken).ConfigureAwait(false);
                 }
                 catch (Exception ex)
@@ -331,7 +329,7 @@ namespace Percolator.Application.Network.Handshake
                         Percolator.Application.Network.SecureSessionCreatedReason.InitiatorFinalize),
                     cancellationToken)
                 .ConfigureAwait(false);
-            await _index.UpsertAsync(selfIdentityId.Value, sid, header.PreKey, _clock.UtcNow, cancellationToken).ConfigureAwait(false);
+            await _index.UpsertAsync((int)selfIdentityId.Value, sid, header.PreKey, _clock.UtcNow, cancellationToken).ConfigureAwait(false);
 
             // Once the invite has been finalized into an active session, the outbound pending marker
             // (SentInvitation) should be removed so the UI no longer renders a separate PendingOutbound row.
@@ -410,7 +408,7 @@ namespace Percolator.Application.Network.Handshake
                         await _directSessionMappingWriter.WriteMappingAsync(
                             new Percolator.Network.PeerId(tmp.RemotePeerId.Value),
                             new Percolator.Network.DirectSessionId(sid.Value),
-                            selfIdentityId.Value,
+                            selfIdentityId,
                             cancellationToken).ConfigureAwait(false);
                     }
                     catch (Exception ex)
@@ -426,7 +424,7 @@ namespace Percolator.Application.Network.Handshake
                                 Percolator.Application.Network.SecureSessionCreatedReason.InitiatorFinalize),
                             cancellationToken)
                         .ConfigureAwait(false);
-                    await _index.UpsertAsync(selfIdentityId.Value, sid, headerPreKey, _clock.UtcNow, cancellationToken).ConfigureAwait(false);
+                    await _index.UpsertAsync((int)selfIdentityId.Value, sid, headerPreKey, _clock.UtcNow, cancellationToken).ConfigureAwait(false);
                     await _prehandshake.DeleteAsync(pending.Id, selfIdentityId.Value, cancellationToken).ConfigureAwait(false);
 
                     _logger.LogInformation("Initiator finalized session {SessionId} from pending record {PendingId}", sid.Value, pending.Id);
@@ -540,7 +538,7 @@ namespace Percolator.Application.Network.Handshake
                     await _directSessionMappingWriter.WriteMappingAsync(
                         new Percolator.Network.PeerId(peerIdentity.Id.Value),
                         new Percolator.Network.DirectSessionId(sid.Value),
-                        selfIdentityId.Value,
+                        selfIdentityId,
                         cancellationToken).ConfigureAwait(false);
                 }
                 catch (Exception ex)
@@ -562,7 +560,7 @@ namespace Percolator.Application.Network.Handshake
                         {
                             profile.BindIdentity(netPeerId);
                         }
-                        profile.AddOrRefreshRelay(new Percolator.Network.PeerId(relayPeerId.Value), _clock.UtcNow);
+                        profile.AddOrRefreshRelay(new Percolator.Network.PeerId(relayPeerId.Value.Value), _clock.UtcNow);
                         profile.SetIdentityPublicKey(Percolator.Network.ValueObjects.IdentityPublicKey.FromBytes(remoteIdentitySpki));
                         await _routingProfiles.UpsertAsync(profile, cancellationToken).ConfigureAwait(false);
 
@@ -576,7 +574,7 @@ namespace Percolator.Application.Network.Handshake
                             SelfIdentityId = selfIdentityId.Value,
                             RemotePeerId = netPeerId,
                             RouteKind = RouteKind.Relayed,
-                            RelayHostPeerId = relayPeerId.Value,
+                            RelayHostPeerId = new Percolator.Network.PeerId(relayPeerId.Value.Value),
                             ObservedAtUtc = _clock.UtcNow,
                             AttemptCount = 0,
                             Source = "main-initiated"

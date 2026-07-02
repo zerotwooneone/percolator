@@ -1,6 +1,8 @@
 using System.Security.Cryptography;
 using Microsoft.Extensions.Logging;
+using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Cryptography;
+using Percolator.Identity;
 
 namespace Percolator.Application.Chat;
 
@@ -21,7 +23,7 @@ public sealed class PeerAuthenticationService : IPeerAuthenticationService
     }
 
     public async Task<bool> AuthenticateDeliveryCertificateRequestAsync(
-        string senderPkh,
+        Pkh senderPkh,
         DateTimeOffset requestTimestamp,
         Signature signature,
         CancellationToken ct)
@@ -35,7 +37,7 @@ public sealed class PeerAuthenticationService : IPeerAuthenticationService
         }
 
         // Look up the peer's public key using the PKH lookup string
-        var publicKey = await _peerIdentityQueries.GetPublicKeyByPkhAsync(senderPkh, ct).ConfigureAwait(false);
+        var publicKey = await _peerIdentityQueries.GetPublicKeyByPkhAsync(IdentityPublicKeyHash.FromSpan(senderPkh.Span), ct).ConfigureAwait(false);
         if (publicKey is null)
         {
             _logger.LogWarning("Peer not found for PKH: {Pkh}", senderPkh);

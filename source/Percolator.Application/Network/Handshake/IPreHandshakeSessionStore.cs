@@ -10,16 +10,16 @@ namespace Percolator.Application.Network.Handshake
         /// <summary>
         /// Enumerate Pending records scoped to the self identity.
         /// </summary>
-        IAsyncEnumerable<PreHandshakeRecord> EnumeratePendingAsync(int selfIdentityId, CancellationToken cancellationToken);
+        IAsyncEnumerable<PreHandshakeRecord> EnumeratePendingAsync(uint selfIdentityId, CancellationToken cancellationToken);
 
         /// <summary>
         /// Returns the most recent, non-expired prehandshake record for the given self identity, or null if none.
         /// </summary>
-        Task<PreHandshakeRecord?> TryGetMostRecentAsync(int selfIdentityId, CancellationToken cancellationToken);
+        Task<PreHandshakeRecord?> TryGetMostRecentAsync(uint selfIdentityId, CancellationToken cancellationToken);
 
-        Task DeleteAsync(long recordId, int selfIdentityId, CancellationToken cancellationToken);
+        Task DeleteAsync(long recordId, uint selfIdentityId, CancellationToken cancellationToken);
 
-        Task PurgeExpiredAsync(int selfIdentityId, CancellationToken cancellationToken);
+        Task PurgeExpiredAsync(uint selfIdentityId, CancellationToken cancellationToken);
     }
 
     /// <summary>
@@ -27,7 +27,7 @@ namespace Percolator.Application.Network.Handshake
     /// </summary>
     public sealed record PreHandshakeRecord(
         long Id,
-        int SelfIdentityId,
+        uint SelfIdentityId,
         byte[] RecipientPublicKeyHash,
         Guid LocalRequestId,
         byte[] InitiatorEphemeralPrivateKey,

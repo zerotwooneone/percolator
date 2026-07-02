@@ -4,5 +4,5 @@ namespace Percolator.Application.Services;
 
 public interface IDirectSessionLocator
 {
-    Task<DirectSessionId?> GetAsync(Percolator.Identity.PeerId remotePeerId, int selfIdentityId, CancellationToken cancellationToken = default);
+    Task<DirectSessionId?> GetAsync(Percolator.Identity.PeerId remotePeerId, uint selfIdentityId, CancellationToken cancellationToken = default);
 }

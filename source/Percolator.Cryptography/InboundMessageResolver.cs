@@ -14,7 +14,7 @@ public sealed class InboundMessageResolver
     }
 
     public async Task<(SessionId sessionId, Plaintext plaintext)?> ResolveAsync(
-        int selfIdentityId,
+        uint selfIdentityId,
         SessionRatchetMessage message,
         IClock clock,
         CancellationToken cancellationToken = default)
