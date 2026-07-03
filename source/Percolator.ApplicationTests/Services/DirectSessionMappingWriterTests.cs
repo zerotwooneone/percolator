@@ -14,11 +14,11 @@ public sealed class DirectSessionMappingWriterTests
         // Arrange
         var remotePeerId = new PeerId(1);
         var sessionId = DirectSessionId.NewId();
-        var selfIdentityId = 7;
+        var selfIdentityId = new SelfId(7);
 
         var directSessionRepository = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
         directSessionRepository
-            .Setup(r => r.UpsertAsync(remotePeerId, sessionId, selfIdentityId))
+            .Setup(r => r.UpsertAsync(remotePeerId, sessionId, (uint)selfIdentityId.Value))
             .Throws(new InvalidOperationException("Database connection failed"));
 
         var logger = new Mock<ILogger<DirectSessionMappingWriter>>(MockBehavior.Loose);

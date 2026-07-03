@@ -30,7 +30,7 @@ public class ProcessRelayedOpaquePayloadCommandTests
 
         // Not a SessionRatchetMessage; handler should now fail fast.
         var payload = Percolator.Network.Payload.FromBytes(new byte[] { 0x01, 0x02, 0x03 });
-        var relayHost = new Percolator.Identity.PeerId(Guid.NewGuid());
+        var relayHost = new Percolator.Identity.PeerId((uint)Random.Shared.Next(1, 1000000));
 
         var sut = new ProcessRelayedOpaquePayloadHandler(
             logger,
@@ -43,7 +43,7 @@ public class ProcessRelayedOpaquePayloadCommandTests
             inviteIngress.Object,
             standardIngress.Object,
             finalize.Object);
-        var result = await sut.Handle(new ProcessRelayedOpaquePayloadCommand(new SelfId(1), payload, relayHost), CancellationToken.None);
+        var result = await sut.Handle(new ProcessRelayedOpaquePayloadCommand(new SelfId(1), payload, relayHost, new DeviceId(1)), CancellationToken.None);
 
         Assert.That(result.WasSuccess, Is.False);
     }
@@ -81,7 +81,7 @@ public class ProcessRelayedOpaquePayloadCommandTests
             .ReturnsAsync(new Percolator.Cryptography.Primitives.RequestCorrelationId(Guid.NewGuid()));
 
         var payload = Percolator.Network.Payload.FromBytes(req.ToByteArray());
-        var relayHost = new Percolator.Identity.PeerId(Guid.NewGuid());
+        var relayHost = new Percolator.Identity.PeerId((uint)Random.Shared.Next(1, 1000000));
 
         var sut = new ProcessRelayedOpaquePayloadHandler(
             logger,
@@ -95,7 +95,7 @@ public class ProcessRelayedOpaquePayloadCommandTests
             standardIngress.Object,
             finalize.Object);
 
-        var result = await sut.Handle(new ProcessRelayedOpaquePayloadCommand(new SelfId(1), payload, relayHost), CancellationToken.None);
+        var result = await sut.Handle(new ProcessRelayedOpaquePayloadCommand(new SelfId(1), payload, relayHost, new DeviceId(1)), CancellationToken.None);
 
         Assert.That(result.WasSuccess, Is.True);
     }
@@ -127,7 +127,7 @@ public class ProcessRelayedOpaquePayloadCommandTests
             .Returns(Task.CompletedTask);
 
         var payload = Percolator.Network.Payload.FromBytes(resp.ToByteArray());
-        var relayHost = new Percolator.Identity.PeerId(Guid.NewGuid());
+        var relayHost = new Percolator.Identity.PeerId((uint)Random.Shared.Next(1, 1000000));
 
         var sut = new ProcessRelayedOpaquePayloadHandler(
             logger,
@@ -141,7 +141,7 @@ public class ProcessRelayedOpaquePayloadCommandTests
             standardIngress.Object,
             finalize.Object);
 
-        var result = await sut.Handle(new ProcessRelayedOpaquePayloadCommand(new SelfId(1), payload, relayHost), CancellationToken.None);
+        var result = await sut.Handle(new ProcessRelayedOpaquePayloadCommand(new SelfId(1), payload, relayHost, new DeviceId(1)), CancellationToken.None);
 
         Assert.That(result.WasSuccess, Is.True);
     }
@@ -173,7 +173,7 @@ public class ProcessRelayedOpaquePayloadCommandTests
         };
 
         var payload = Percolator.Network.Payload.FromBytes(hello.ToByteArray());
-        var relayHost = new Percolator.Identity.PeerId(Guid.NewGuid());
+        var relayHost = new Percolator.Identity.PeerId((uint)Random.Shared.Next(1, 1000000));
 
         var sut = new ProcessRelayedOpaquePayloadHandler(
             logger,
@@ -187,7 +187,7 @@ public class ProcessRelayedOpaquePayloadCommandTests
             standardIngress.Object,
             finalize.Object);
 
-        var result = await sut.Handle(new ProcessRelayedOpaquePayloadCommand(new SelfId(1), payload, relayHost), CancellationToken.None);
+        var result = await sut.Handle(new ProcessRelayedOpaquePayloadCommand(new SelfId(1), payload, relayHost, new DeviceId(1)), CancellationToken.None);
 
         Assert.That(result.WasSuccess, Is.True);
     }
@@ -235,7 +235,7 @@ public class ProcessRelayedOpaquePayloadCommandTests
         };
 
         var payload = Percolator.Network.Payload.FromBytes(hello.ToByteArray());
-        var relayHost = new Percolator.Identity.PeerId(Guid.NewGuid());
+        var relayHost = new Percolator.Identity.PeerId((uint)Random.Shared.Next(1, 1000000));
         var selfId = new SelfId(123);
         var directSessionId = new DirectSessionId(Guid.NewGuid());
 
@@ -266,7 +266,7 @@ public class ProcessRelayedOpaquePayloadCommandTests
             standardIngress.Object,
             finalize.Object);
 
-        var result = await sut.Handle(new ProcessRelayedOpaquePayloadCommand(selfId, payload, relayHost), CancellationToken.None);
+        var result = await sut.Handle(new ProcessRelayedOpaquePayloadCommand(selfId, payload, relayHost, new DeviceId(1)), CancellationToken.None);
 
         Assert.That(result.WasSuccess, Is.True);
 
@@ -319,7 +319,7 @@ public class ProcessRelayedOpaquePayloadCommandTests
         };
 
         var payload = Percolator.Network.Payload.FromBytes(resp.ToByteArray());
-        var relayHost = new Percolator.Identity.PeerId(Guid.NewGuid());
+        var relayHost = new Percolator.Identity.PeerId((uint)Random.Shared.Next(1, 1000000));
 
         var sut = new ProcessRelayedOpaquePayloadHandler(
             logger,
@@ -333,7 +333,7 @@ public class ProcessRelayedOpaquePayloadCommandTests
             standardIngress.Object,
             finalize.Object);
 
-        var result = await sut.Handle(new ProcessRelayedOpaquePayloadCommand(new SelfId(1), payload, relayHost), CancellationToken.None);
+        var result = await sut.Handle(new ProcessRelayedOpaquePayloadCommand(new SelfId(1), payload, relayHost, new DeviceId(1)), CancellationToken.None);
 
         Assert.That(result.WasSuccess, Is.True);
     }

@@ -59,15 +59,12 @@ public sealed class RequestPreKeyBundleByPkhHandlerTests
         // Arrange
         var selfIdentityId = 1;
         var selfPeerGuid = Guid.NewGuid();
-        _activeIdentity.Identity = new Percolator.Identity.Model.IdentityRecord(selfPeerGuid, "self")
-        {
-            SelfIdentityId = new SelfId(selfIdentityId)
-        };
+        _activeIdentity.Identity = new Percolator.Identity.Model.IdentityRecord(new SelfId(selfIdentityId), new PublicIdentityId(selfPeerGuid), new DeviceId(1), "self");
         _activeIdentity.Keys = new X3dhKeys(
             ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
             ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256));
 
-        var remotePeerId = new Percolator.Identity.PeerId(Guid.NewGuid());
+        var remotePeerId = new Percolator.Identity.PeerId((uint)Random.Shared.Next(1, 1000000));
         var remoteIdentitySpki = new byte[80];
         var expectedPkh = SHA256.HashData(remoteIdentitySpki);
         var identityPublicKeyHash = IdentityPublicKeyHash.FromBytes(expectedPkh);
@@ -80,7 +77,7 @@ public sealed class RequestPreKeyBundleByPkhHandlerTests
 
         var hostDirectSessionId = new DirectSessionId(Guid.NewGuid());
         _directSessionLocator
-            .Setup(l => l.GetAsync(remotePeerId, selfIdentityId, It.IsAny<CancellationToken>()))
+            .Setup(l => l.GetAsync(remotePeerId, (uint)selfIdentityId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(hostDirectSessionId);
 
         _secureMessaging
@@ -133,7 +130,7 @@ public sealed class RequestPreKeyBundleByPkhHandlerTests
             });
 
         _secureMessaging
-            .Setup(s => s.DecryptInboundAsync(selfIdentityId, It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.DecryptInboundAsync((uint)selfIdentityId, It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((new SessionId(hostDirectSessionId.Value), Plaintext.FromBytes(respBytes)));
 
         var endpoint = new DnsEndPoint("example.com", 7777);
@@ -183,7 +180,7 @@ public sealed class RequestPreKeyBundleByPkhHandlerTests
             .Setup(s => s.AddAsync(It.IsAny<SecureSession>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         _directSessions
-            .Setup(s => s.UpsertAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<DirectSessionId>(), It.IsAny<int>()))
+            .Setup(s => s.UpsertAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<DirectSessionId>(), It.IsAny<uint>()))
             .Returns(Task.CompletedTask);
         _routingProfiles
             .Setup(r => r.UpsertAsync(It.IsAny<PeerRoutingProfile>(), It.IsAny<CancellationToken>()))
@@ -219,7 +216,7 @@ public sealed class RequestPreKeyBundleByPkhHandlerTests
         _directSessions.Verify(s => s.UpsertAsync(
             It.Is<Percolator.Network.PeerId>(p => p.Value == remotePeerId.Value),
             It.Is<DirectSessionId>(ds => ds.Value == newSessionGuid),
-            It.Is<int>(sid => sid == selfIdentityId)), Times.Once);
+            It.Is<uint>(sid => sid == (uint)selfIdentityId)), Times.Once);
 
         _routingProfiles.Verify(r => r.UpsertAsync(
             It.Is<PeerRoutingProfile>(p => p.Id != null && p.Id.Value == remotePeerId.Value),
@@ -259,15 +256,13 @@ public sealed class RequestPreKeyBundleByPkhHandlerTests
     {
         // Arrange
         var selfIdentityId = 1;
-        _activeIdentity.Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "self")
-        {
-            SelfIdentityId = new SelfId(selfIdentityId)
-        };
+        var selfPeerGuid = Guid.NewGuid();
+        _activeIdentity.Identity = new Percolator.Identity.Model.IdentityRecord(new SelfId(selfIdentityId), new PublicIdentityId(selfPeerGuid), new DeviceId(1), "self");
 
         var remoteIdentitySpki = new byte[80];
         var expectedPkh = SHA256.HashData(remoteIdentitySpki);
         var identityPublicKeyHash = IdentityPublicKeyHash.FromBytes(expectedPkh);
-        var remotePeerId = new Percolator.Identity.PeerId(Guid.NewGuid());
+        var remotePeerId = new Percolator.Identity.PeerId((uint)Random.Shared.Next(1, 1000000));
 
         _peerKeyStore
             .Setup(s => s.GetPeerIdByPublicKeyHashAsync(
@@ -276,7 +271,7 @@ public sealed class RequestPreKeyBundleByPkhHandlerTests
             .ReturnsAsync(remotePeerId);
 
         _directSessionLocator
-            .Setup(l => l.GetAsync(remotePeerId, selfIdentityId, It.IsAny<CancellationToken>()))
+            .Setup(l => l.GetAsync(remotePeerId, (uint)selfIdentityId, It.IsAny<CancellationToken>()))
             .ReturnsAsync((DirectSessionId?)null);
 
         var sut = new RequestPreKeyBundleByPkhHandler(
@@ -308,10 +303,8 @@ public sealed class RequestPreKeyBundleByPkhHandlerTests
     {
         // Arrange
         var selfIdentityId = 1;
-        _activeIdentity.Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "self")
-        {
-            SelfIdentityId = new SelfId(selfIdentityId)
-        };
+        var selfPeerGuid = Guid.NewGuid();
+        _activeIdentity.Identity = new Percolator.Identity.Model.IdentityRecord(new SelfId(selfIdentityId), new PublicIdentityId(selfPeerGuid), new DeviceId(1), "self");
         _activeIdentity.Keys = new X3dhKeys(
             ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
             ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256));
@@ -320,7 +313,7 @@ public sealed class RequestPreKeyBundleByPkhHandlerTests
         var expectedPkh = SHA256.HashData(expectedIdentitySpki);
         var identityPublicKeyHash = IdentityPublicKeyHash.FromBytes(expectedPkh);
 
-        var remotePeerId = new Percolator.Identity.PeerId(Guid.NewGuid());
+        var remotePeerId = new Percolator.Identity.PeerId((uint)Random.Shared.Next(1, 1000000));
         _peerKeyStore
             .Setup(s => s.GetPeerIdByPublicKeyHashAsync(
                 It.Is<IdentityPublicKeyHash>(h => h.Equals(identityPublicKeyHash)),
@@ -329,7 +322,7 @@ public sealed class RequestPreKeyBundleByPkhHandlerTests
 
         var hostDirectSessionId = new DirectSessionId(Guid.NewGuid());
         _directSessionLocator
-            .Setup(l => l.GetAsync(remotePeerId, selfIdentityId, It.IsAny<CancellationToken>()))
+            .Setup(l => l.GetAsync(remotePeerId, (uint)selfIdentityId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(hostDirectSessionId);
 
         _secureMessaging
@@ -385,7 +378,7 @@ public sealed class RequestPreKeyBundleByPkhHandlerTests
             });
 
         _secureMessaging
-            .Setup(s => s.DecryptInboundAsync(selfIdentityId, It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.DecryptInboundAsync((uint)selfIdentityId, It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((new SessionId(hostDirectSessionId.Value), Plaintext.FromBytes(respBytes)));
 
         _sessionCrypto

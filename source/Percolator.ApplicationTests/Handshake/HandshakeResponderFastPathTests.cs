@@ -24,7 +24,7 @@ namespace Percolator.ApplicationTests.Handshake
             var lookup = new Mock<IRatchetKeyIndex>(MockBehavior.Strict);
             var resolved = new SessionId(Guid.NewGuid());
             lookup
-                .Setup(l => l.TryResolveAsync(It.IsAny<int>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()))
+                .Setup(l => l.TryResolveAsync(It.IsAny<uint>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(resolved);
 
             var finalize = new Mock<IInitiatorFinalizeService>(MockBehavior.Strict);

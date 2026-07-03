@@ -17,7 +17,7 @@ public class RouteConfirmationServiceTests
         var logger = new Mock<ILogger<RouteConfirmationService>>();
 
         var selfIdentityId = new SelfId(1);
-        var remotePeerId = new Percolator.Network.PeerId(Guid.NewGuid());
+        var remotePeerId = new Percolator.Network.PeerId((uint)Random.Shared.Next(1, 1000000));
         var endpointHost = "example.com";
         var endpointPort = 443;
         var nowUtc = DateTimeOffset.UtcNow;
@@ -54,8 +54,8 @@ public class RouteConfirmationServiceTests
         var logger = new Mock<ILogger<RouteConfirmationService>>();
 
         var selfIdentityId = new SelfId(1);
-        var remotePeerId = new Percolator.Network.PeerId(Guid.NewGuid());
-        var relayHostPeerId = Guid.NewGuid();
+        var remotePeerId = new Percolator.Network.PeerId((uint)Random.Shared.Next(1, 1000000));
+        var relayHostPeerId = new Percolator.Network.PeerId((uint)Random.Shared.Next(1, 1000000));
         var nowUtc = DateTimeOffset.UtcNow;
 
         var existingProfile = new PeerRoutingProfile();
@@ -78,7 +78,7 @@ public class RouteConfirmationServiceTests
         profileRepo.Verify(r => r.UpsertAsync(
             It.Is<PeerRoutingProfile>(p =>
                 p.Id == remotePeerId &&
-                p.Relays.Any(r => r.RelayPeerId.Value == relayHostPeerId)),
+                p.Relays.Any(r => r.RelayPeerId.Value == relayHostPeerId.Value)),
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -90,7 +90,7 @@ public class RouteConfirmationServiceTests
         var logger = new Mock<ILogger<RouteConfirmationService>>();
 
         var selfIdentityId = new SelfId(1);
-        var remotePeerId = new Percolator.Network.PeerId(Guid.NewGuid());
+        var remotePeerId = new Percolator.Network.PeerId((uint)Random.Shared.Next(1, 1000000));
         var endpointHost = "example.com";
         var endpointPort = 443;
         var nowUtc = DateTimeOffset.UtcNow;
@@ -125,7 +125,7 @@ public class RouteConfirmationServiceTests
         var logger = new Mock<ILogger<RouteConfirmationService>>();
 
         var selfIdentityId = new SelfId(1);
-        var remotePeerId = new Percolator.Network.PeerId(Guid.NewGuid());
+        var remotePeerId = new Percolator.Network.PeerId((uint)Random.Shared.Next(1, 1000000));
         var endpointHost = "example.com";
         var endpointPort = 443;
         var nowUtc = DateTimeOffset.UtcNow;
@@ -175,7 +175,7 @@ public class RouteConfirmationServiceTests
         var logger = new Mock<ILogger<RouteConfirmationService>>();
 
         var selfIdentityId = new SelfId(1);
-        var remotePeerId = new Percolator.Network.PeerId(Guid.NewGuid());
+        var remotePeerId = new Percolator.Network.PeerId((uint)Random.Shared.Next(1, 1000000));
         var endpointHost = "example.com";
         var endpointPort = 443;
         var nowUtc = DateTimeOffset.UtcNow;

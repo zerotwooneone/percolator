@@ -2,6 +2,7 @@ using FluentAssertions;
 using Google.Protobuf;
 using Microsoft.Extensions.Logging;
 using Moq;
+using Percolator.Application.Chat;
 using Percolator.Application.Chat.MessageQueue;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
@@ -31,9 +32,10 @@ public class RelayOrchestratorTests
         var secureSvc = new Mock<ISecureMessagingService>(MockBehavior.Loose);
         active = new ActiveIdentityContext
         {
-            Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "Test", null) { SelfIdentityId = new SelfId(1) }
+            Identity = new Percolator.Identity.Model.IdentityRecord(new SelfId(1), new PublicIdentityId(Guid.NewGuid()), new DeviceId(1), "Test")
         };
-        var orchestrator = new RelayOrchestrator(logger, queue.Object, directSessions.Object, secureSvc.Object, transport.Object);
+        var peerIdentityQueries = new Mock<IPeerIdentityQueries>(MockBehavior.Loose);
+        var orchestrator = new RelayOrchestrator(logger, queue.Object, directSessions.Object, secureSvc.Object, transport.Object, peerIdentityQueries.Object);
         return (orchestrator, queue, directSessions, transport, secureSvc);
     }
 
@@ -41,7 +43,7 @@ public class RelayOrchestratorTests
     public async Task RelayNextAsync_happy_ack_deletes_and_returns_true()
     {
         var (orchestrator, queue, directSessions,  transport, secureSvc) = Create(out var active);
-        var peerId = new Percolator.Identity.PeerId(Guid.NewGuid());
+        var peerId = new Percolator.Identity.PeerId((uint)Random.Shared.Next(1, 1000000));
         var selfId = active.Identity!.SelfIdentityId;
         var ackId = Guid.NewGuid();
         var blob = new byte[] { 0x01, 0x02 };
@@ -50,7 +52,7 @@ public class RelayOrchestratorTests
         var directSessionId = new DirectSessionId(sessionGuid);
         var networkPeerId = new PeerId(peerId.Value);
 
-        queue.Setup(q => q.FetchAsync(peerId, 1, It.IsAny<CancellationToken>()))
+        queue.Setup(q => q.FetchAsync(It.IsAny<Pkh>(), 1, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new System.Collections.Generic.List<(Guid, QueuedPayloadBytes)> { (ackId, QueuedPayloadBytes.FromBytesOwned(blob)) });
         directSessions.Setup(d => d.GetByRemotePeerIdAsync(networkPeerId, active.Identity!.SelfIdentityId.Value))
             .ReturnsAsync(new DirectSession(networkPeerId, directSessionId));
@@ -71,7 +73,7 @@ public class RelayOrchestratorTests
 
         // DR decrypt of ack payload via SecureMessagingService yields RelayOpaqueResponse with same ack id
         var ack = new RelayOpaqueResponse { Version = 1, MessageAckId = ByteString.CopyFrom(ackId.ToByteArray()) };
-        secureSvc.Setup(s => s.DecryptInboundAsync(It.IsAny<int>(), It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
+        secureSvc.Setup(s => s.DecryptInboundAsync(It.IsAny<uint>(), It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((sessionId, Plaintext.FromBytes(ack.ToByteArray())));
 
         queue.Setup(q => q.DeleteByAckIdAsync(ackId, It.IsAny<CancellationToken>()))
@@ -85,7 +87,7 @@ public class RelayOrchestratorTests
     public void RelayNextAsync_ack_mismatch_throws()
     {
         var (orchestrator, queue, directSessions,  transport, secureSvc) = Create(out var active);
-        var peerId = new Percolator.Identity.PeerId(Guid.NewGuid());
+        var peerId = new Percolator.Identity.PeerId((uint)Random.Shared.Next(1, 1000000));
         var selfId = active.Identity!.SelfIdentityId;
         var ackId = Guid.NewGuid();
         var blob = new byte[] { 0x05 };
@@ -94,7 +96,7 @@ public class RelayOrchestratorTests
         var directSessionId = new DirectSessionId(sessionGuid);
         var networkPeerId = new PeerId(peerId.Value);
 
-        queue.Setup(q => q.FetchAsync(peerId, 1, It.IsAny<CancellationToken>()))
+        queue.Setup(q => q.FetchAsync(It.IsAny<Pkh>(), 1, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new System.Collections.Generic.List<(Guid, QueuedPayloadBytes)> { (ackId, QueuedPayloadBytes.FromBytesOwned(blob)) });
         directSessions.Setup(d => d.GetByRemotePeerIdAsync(networkPeerId, active.Identity!.SelfIdentityId.Value))
             .ReturnsAsync(new DirectSession(networkPeerId, directSessionId));
@@ -112,7 +114,7 @@ public class RelayOrchestratorTests
             .ReturnsAsync(new SendMessageResponse { OriginalResponse = response });
 
         var mismatched = new RelayOpaqueResponse { Version = 1, MessageAckId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray()) };
-        secureSvc.Setup(s => s.DecryptInboundAsync(It.IsAny<int>(), It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
+        secureSvc.Setup(s => s.DecryptInboundAsync(It.IsAny<uint>(), It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((sessionId, Plaintext.FromBytes(mismatched.ToByteArray())));
 
         Assert.ThrowsAsync<InvalidOperationException>(async () => await orchestrator.RelayNextAsync(selfId, peerId, CancellationToken.None));
@@ -124,7 +126,7 @@ public class RelayOrchestratorTests
     public void RelayNextAsync_no_response_payload_throws()
     {
         var (orchestrator, queue, directSessions,  transport, secureSvc) = Create(out var active);
-        var peerId = new Percolator.Identity.PeerId(Guid.NewGuid());
+        var peerId = new Percolator.Identity.PeerId((uint)Random.Shared.Next(1, 1000000));
         var selfId = active.Identity!.SelfIdentityId;
         var ackId = Guid.NewGuid();
         var blob = new byte[] { 0x07 };
@@ -132,7 +134,7 @@ public class RelayOrchestratorTests
         var directSessionId = new DirectSessionId(sessionGuid);
         var networkPeerId = new PeerId(peerId.Value);
 
-        queue.Setup(q => q.FetchAsync(peerId, 1, It.IsAny<CancellationToken>()))
+        queue.Setup(q => q.FetchAsync(It.IsAny<Pkh>(), 1, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new System.Collections.Generic.List<(Guid, QueuedPayloadBytes)> { (ackId, QueuedPayloadBytes.FromBytesOwned(blob)) });
         directSessions.Setup(d => d.GetByRemotePeerIdAsync(networkPeerId, active.Identity!.SelfIdentityId.Value))
             .ReturnsAsync(new DirectSession(networkPeerId, directSessionId));
@@ -150,9 +152,9 @@ public class RelayOrchestratorTests
     public async Task RelayNextAsync_empty_queue_returns_false()
     {
         var (orchestrator, queue, _, __, ___) = Create(out var active);
-        var peerId = new Percolator.Identity.PeerId(Guid.NewGuid());
+        var peerId = new Percolator.Identity.PeerId((uint)Random.Shared.Next(1, 1000000));
         var selfId = active.Identity!.SelfIdentityId;
-        queue.Setup(q => q.FetchAsync(peerId, 1, It.IsAny<CancellationToken>()))
+        queue.Setup(q => q.FetchAsync(It.IsAny<Pkh>(), 1, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new System.Collections.Generic.List<(Guid, QueuedPayloadBytes)>());
 
         var result = await orchestrator.RelayNextAsync(selfId, peerId, CancellationToken.None);
@@ -163,13 +165,13 @@ public class RelayOrchestratorTests
     public void RelayNextAsync_no_session_throws()
     {
         var (orchestrator, queue, directSessions,  transport, secureSvc) = Create(out var active);
-        var peerId = new Percolator.Identity.PeerId(Guid.NewGuid());
+        var peerId = new Percolator.Identity.PeerId((uint)Random.Shared.Next(1, 1000000));
         var selfId = active.Identity!.SelfIdentityId;
         var ackId = Guid.NewGuid();
         var blob = new byte[] { 0x09 };
         var networkPeerId = new PeerId(peerId.Value);
 
-        queue.Setup(q => q.FetchAsync(peerId, 1, It.IsAny<CancellationToken>()))
+        queue.Setup(q => q.FetchAsync(It.IsAny<Pkh>(), 1, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new System.Collections.Generic.List<(Guid, QueuedPayloadBytes)> { (ackId, QueuedPayloadBytes.FromBytesOwned(blob)) });
         directSessions.Setup(d => d.GetByRemotePeerIdAsync(networkPeerId, active.Identity!.SelfIdentityId.Value))
             .ReturnsAsync((DirectSession?)null);

@@ -96,7 +96,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
             var logger = NullLogger<ApprovePendingSessionHandler>.Instance;
             var activeAccessor = new ActiveAccessorStub { IsActive = true };
             var active = new ActiveIdentityContext();
-            var identity = new IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = new SelfId(1), PublicIdentityId = new Percolator.Identity.PeerId(Guid.NewGuid()) };
+            var identity = new IdentityRecord(new SelfId(1), new PublicIdentityId(Guid.NewGuid()), new Percolator.Identity.DeviceId(1), "self");
             var keys = new X3dhKeys(
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256));
@@ -125,7 +125,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
             var pendingId = PendingSessionId.NewId();
             var pending = BuildPending(
                 pendingId,
-                new Percolator.Cryptography.Primitives.PeerId(Guid.NewGuid()),
+                new Percolator.Cryptography.Primitives.PeerId((uint)Random.Shared.Next(1, 1000000)),
                 correlation,
                 inviterSpki,
                 payload.ToByteArray(),
@@ -194,7 +194,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
             var logger = NullLogger<ApprovePendingSessionHandler>.Instance;
             var activeAccessor = new ActiveAccessorStub { IsActive = true };
             var active = new ActiveIdentityContext();
-            var identity = new IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = new SelfId(1), PublicIdentityId = new Percolator.Identity.PeerId(Guid.NewGuid()) };
+            var identity = new IdentityRecord(new SelfId(1), new PublicIdentityId(Guid.NewGuid()), new Percolator.Identity.DeviceId(1), "self");
             var keys = new X3dhKeys(
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256));
@@ -223,7 +223,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
             var pendingId = PendingSessionId.NewId();
             var pending = BuildPending(
                 pendingId,
-                new Percolator.Cryptography.Primitives.PeerId(Guid.NewGuid()),
+                new Percolator.Cryptography.Primitives.PeerId((uint)Random.Shared.Next(1, 1000000)),
                 correlation,
                 inviterSpki,
                 payload.ToByteArray(),
@@ -294,7 +294,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
             var logger = NullLogger<ApprovePendingSessionHandler>.Instance;
             var activeAccessor = new ActiveAccessorStub { IsActive = true };
             var active = new ActiveIdentityContext();
-            var identity = new IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = new SelfId(1), PublicIdentityId = new Percolator.Identity.PeerId(Guid.NewGuid()) };
+            var identity = new IdentityRecord(new SelfId(1), new PublicIdentityId(Guid.NewGuid()), new Percolator.Identity.DeviceId(1), "self");
             var keys = new X3dhKeys(
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256));
@@ -331,12 +331,12 @@ namespace Percolator.ApplicationTests.ReverseSignal
             var pendingId = PendingSessionId.NewId();
             var pending = PendingSession.FromInvitationWithMetadata(
                 pendingId,
-                new Percolator.Cryptography.Primitives.PeerId(Guid.NewGuid()),
+                new Percolator.Cryptography.Primitives.PeerId((uint)Random.Shared.Next(1, 1000000)),
                 new ProtocolVersion(1),
                 HandshakeInvitation.FromBytes(invitationEnvelope.ToByteArray()),
                 requestCorrelationId: correlation,
                 isRelayed: true,
-                relayHostPeerId: new Percolator.Cryptography.Primitives.PeerId(Guid.NewGuid()),
+                relayHostPeerId: new Percolator.Cryptography.Primitives.PeerId((uint)Random.Shared.Next(1, 1000000)),
                 inviterIdentityKey: RatchetIdentityKey.FromBytes(inviterSpki),
                 callbackEndpointHost: null,
                 callbackEndpointPort: null,
@@ -362,7 +362,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
             var profileRepo = new Mock<IPeerRoutingProfileRepository>(MockBehavior.Loose);
             var delivery = new Mock<IInviteHandshakeResponseDeliveryService>(MockBehavior.Loose);
             var directSessions = new Mock<IDirectSessionLocator>(MockBehavior.Loose);
-            directSessions.Setup(s => s.GetAsync(It.IsAny<Percolator.Identity.PeerId>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            directSessions.Setup(s => s.GetAsync(It.IsAny<Percolator.Identity.PeerId>(), It.IsAny<uint>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((Percolator.Network.DirectSessionId?)new Percolator.Network.DirectSessionId(Guid.NewGuid()));
 
             var secure = new Mock<ISecureMessagingService>(MockBehavior.Loose);

@@ -13,7 +13,7 @@ namespace Percolator.ApplicationTests.Network;
 public class RouteSenderTests
 {
     private ActiveIdentityContext MakeActive()
-        => new ActiveIdentityContext { Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "me", null) { SelfIdentityId = new SelfId(1) } };
+        => new ActiveIdentityContext { Identity = new Percolator.Identity.Model.IdentityRecord(new SelfId(1), new PublicIdentityId(Guid.NewGuid()), new DeviceId(1), "me") };
 
     [Test]
     public async Task Direct_with_session_returns_response_payload_when_present()
@@ -21,15 +21,15 @@ public class RouteSenderTests
         var logger = Mock.Of<Microsoft.Extensions.Logging.ILogger<RouteSender>>();
         var transport = new Mock<IMessageTransportService>(MockBehavior.Strict);
         var sessions = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
-        sessions.Setup(s => s.ListAsync(It.IsAny<int>()))
+        sessions.Setup(s => s.ListAsync(It.IsAny<uint>()))
             .ReturnsAsync(Array.Empty<DirectSession>());
         var secure = new Mock<Percolator.Application.Services.ISecureMessagingService>(MockBehavior.Strict);
         var keyStore = new Mock<IPeerPublicSigningKeyStore>(MockBehavior.Strict);
         var active = MakeActive();
 
-        var target = new Percolator.Network.PeerId(Guid.NewGuid());
+        var target = new Percolator.Network.PeerId((uint)Random.Shared.Next(1, 1000000));
         var dsid = new DirectSessionId(Guid.NewGuid());
-        sessions.Setup(s => s.GetByRemotePeerIdAsync(target, 1)).ReturnsAsync(new DirectSession(target, dsid));
+        sessions.Setup(s => s.GetByRemotePeerIdAsync(target, 1u)).ReturnsAsync(new DirectSession(target, dsid));
         var cipher = SessionRatchetMessage.FromBytes(new byte[] {1,2});
         secure.Setup(s => s.EncryptAsync(It.IsAny<SessionId>(), It.IsAny<Plaintext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(cipher);
@@ -60,14 +60,14 @@ public class RouteSenderTests
         var logger = Mock.Of<Microsoft.Extensions.Logging.ILogger<RouteSender>>();
         var transport = new Mock<IMessageTransportService>(MockBehavior.Loose);
         var sessions = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
-        sessions.Setup(s => s.ListAsync(It.IsAny<int>()))
+        sessions.Setup(s => s.ListAsync(It.IsAny<uint>()))
             .ReturnsAsync(Array.Empty<DirectSession>());
         var secure = new Mock<Percolator.Application.Services.ISecureMessagingService>(MockBehavior.Loose);
         var keyStore = new Mock<IPeerPublicSigningKeyStore>(MockBehavior.Loose);
         var active = MakeActive();
 
-        var target = new Percolator.Network.PeerId(Guid.NewGuid());
-        sessions.Setup(s => s.GetByRemotePeerIdAsync(target, 1)).ReturnsAsync((DirectSession?)null);
+        var target = new Percolator.Network.PeerId((uint)Random.Shared.Next(1, 1000000));
+        sessions.Setup(s => s.GetByRemotePeerIdAsync(target, 1u)).ReturnsAsync((DirectSession?)null);
 
         var sut = new RouteSender(logger, transport.Object, sessions.Object, secure.Object, active, keyStore.Object);
         var outcome = await sut.SendDirectAsync(target, new NetworkPayload(new byte[] { 1 }), CancellationToken.None);
@@ -82,15 +82,15 @@ public class RouteSenderTests
         var logger = Mock.Of<Microsoft.Extensions.Logging.ILogger<RouteSender>>();
         var transport = new Mock<IMessageTransportService>(MockBehavior.Loose);
         var sessions = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
-        sessions.Setup(s => s.ListAsync(It.IsAny<int>()))
+        sessions.Setup(s => s.ListAsync(It.IsAny<uint>()))
             .ReturnsAsync(Array.Empty<DirectSession>());
         var secure = new Mock<Percolator.Application.Services.ISecureMessagingService>(MockBehavior.Loose);
         var keyStore = new Mock<IPeerPublicSigningKeyStore>(MockBehavior.Loose);
         var active = MakeActive();
 
-        var relay = new Percolator.Network.PeerId(Guid.NewGuid());
-        var target = new Percolator.Network.PeerId(Guid.NewGuid());
-        sessions.Setup(s => s.GetByRemotePeerIdAsync(relay, 1)).ReturnsAsync((DirectSession?)null);
+        var relay = new Percolator.Network.PeerId((uint)Random.Shared.Next(1, 1000000));
+        var target = new Percolator.Network.PeerId((uint)Random.Shared.Next(1, 1000000));
+        sessions.Setup(s => s.GetByRemotePeerIdAsync(relay, 1u)).ReturnsAsync((DirectSession?)null);
 
         var sut = new RouteSender(logger, transport.Object, sessions.Object, secure.Object, active, keyStore.Object);
         var outcome = await sut.SendViaRelayAsync(relay, target, new NetworkPayload(new byte[] { 1 }), CancellationToken.None);
@@ -105,16 +105,16 @@ public class RouteSenderTests
         var logger = Mock.Of<Microsoft.Extensions.Logging.ILogger<RouteSender>>();
         var transport = new Mock<IMessageTransportService>(MockBehavior.Strict);
         var sessions = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
-        sessions.Setup(s => s.ListAsync(It.IsAny<int>()))
+        sessions.Setup(s => s.ListAsync(It.IsAny<uint>()))
             .ReturnsAsync(Array.Empty<DirectSession>());
         var secure = new Mock<Percolator.Application.Services.ISecureMessagingService>(MockBehavior.Strict);
         var keyStore = new Mock<IPeerPublicSigningKeyStore>(MockBehavior.Strict);
         var active = MakeActive();
 
-        var relay = new Percolator.Network.PeerId(Guid.NewGuid());
-        var target = new Percolator.Network.PeerId(Guid.NewGuid());
+        var relay = new Percolator.Network.PeerId((uint)Random.Shared.Next(1, 1000000));
+        var target = new Percolator.Network.PeerId((uint)Random.Shared.Next(1, 1000000));
         var rsid = new DirectSessionId(Guid.NewGuid());
-        sessions.Setup(s => s.GetByRemotePeerIdAsync(relay, 1)).ReturnsAsync(new DirectSession(relay, rsid));
+        sessions.Setup(s => s.GetByRemotePeerIdAsync(relay, 1u)).ReturnsAsync(new DirectSession(relay, rsid));
         keyStore.Setup(k => k.GetPublicKeyHashByPeerIdAsync(new Percolator.Identity.PeerId(target.Value), It.IsAny<CancellationToken>()))
             .ReturnsAsync(IdentityPublicKeyHash.FromBytes(new byte[32].Select((_, i) => i == 0 ? (byte)5 : (byte)0).ToArray()));
 

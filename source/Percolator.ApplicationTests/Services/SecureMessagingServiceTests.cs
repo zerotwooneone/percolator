@@ -16,7 +16,7 @@ public class SecureMessagingServiceTests
         public Task<SecureSession?> GetAsync(SessionId id, CancellationToken ct = default)
             => Task.FromResult(_sessions.TryGetValue(id.Value, out var s) ? s : null);
         public Task UpdateAsync(SecureSession s, CancellationToken ct = default) { _sessions[s.Id.Value] = s; return Task.CompletedTask; }
-        public Task<IReadOnlyList<SecureSession>> GetAllActiveAsync(int selfIdentityId, CancellationToken ct = default)
+        public Task<IReadOnlyList<SecureSession>> GetAllActiveAsync(uint selfIdentityId, CancellationToken ct = default)
             => Task.FromResult((IReadOnlyList<SecureSession>)_sessions.Values.ToList());
     }
 

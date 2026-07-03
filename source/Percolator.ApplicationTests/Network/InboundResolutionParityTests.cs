@@ -56,7 +56,7 @@ namespace Percolator.ApplicationTests.Network
             await handler.Handle(cmd, CancellationToken.None);
 
             // Assert
-            ratchetIndex.Verify(x => x.TryResolveAsync(It.IsAny<int>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()), Times.Once);
+            ratchetIndex.Verify(x => x.TryResolveAsync(It.IsAny<uint>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()), Times.Once);
             finalize.Verify(
                 f => f.TryFinalizeFromInviteHandshakeResponseAsync(It.IsAny<SelfId>(), It.IsAny<InviteHandshakeResponse>(), It.IsAny<CancellationToken>()),
                 Times.Never);
@@ -73,7 +73,7 @@ namespace Percolator.ApplicationTests.Network
             var selfId = new SelfId(2);
 
             ratchetIndex
-                .Setup(x => x.TryResolveAsync(It.IsAny<int>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()))
+                .Setup(x => x.TryResolveAsync(It.IsAny<uint>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((SessionId?)null);
 
             var sid = new SessionId(Guid.NewGuid());
@@ -111,7 +111,7 @@ namespace Percolator.ApplicationTests.Network
             await handler.Handle(cmd, CancellationToken.None);
 
             // Assert
-            ratchetIndex.Verify(x => x.TryResolveAsync(It.IsAny<int>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()), Times.Once);
+            ratchetIndex.Verify(x => x.TryResolveAsync(It.IsAny<uint>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()), Times.Once);
             finalize.Verify(
                 f => f.TryFinalizeFromInviteHandshakeResponseAsync(It.IsAny<SelfId>(), It.IsAny<InviteHandshakeResponse>(), It.IsAny<CancellationToken>()),
                 Times.Once);

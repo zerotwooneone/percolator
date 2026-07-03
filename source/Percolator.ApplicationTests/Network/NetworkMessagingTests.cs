@@ -28,7 +28,7 @@ public class NetworkMessagingTests
         var planner = new SimpleRoutePlanner();
         var exec = new Mock<ISendExecutor>();
         IReadOnlyList<PlannedRoute>? capturedRoutes = null;
-        exec.Setup(e => e.ExecuteAsync(It.IsAny<int>(), peer, It.IsAny<NetworkPayload>(), It.IsAny<IReadOnlyList<PlannedRoute>>(), It.IsAny<CancellationToken>()))
+        exec.Setup(e => e.ExecuteAsync(It.IsAny<uint>(), peer, It.IsAny<NetworkPayload>(), It.IsAny<IReadOnlyList<PlannedRoute>>(), It.IsAny<CancellationToken>()))
             .Callback<int, PeerId, NetworkPayload, IReadOnlyList<PlannedRoute>, CancellationToken>((_, __, ___, routes, ____) => capturedRoutes = routes)
             .ReturnsAsync(new SendOutcome { Success = true, Path = "Direct", AttemptedPaths = new[] { "Direct" }, Attempts = 1 });
 
@@ -54,7 +54,7 @@ public class NetworkMessagingTests
         var planner = new SimpleRoutePlanner();
         var exec = new Mock<ISendExecutor>();
         IReadOnlyList<PlannedRoute>? capturedRoutes = null;
-        exec.Setup(e => e.ExecuteAsync(It.IsAny<int>(), peer, It.IsAny<NetworkPayload>(), It.IsAny<IReadOnlyList<PlannedRoute>>(), It.IsAny<CancellationToken>()))
+        exec.Setup(e => e.ExecuteAsync(It.IsAny<uint>(), peer, It.IsAny<NetworkPayload>(), It.IsAny<IReadOnlyList<PlannedRoute>>(), It.IsAny<CancellationToken>()))
             .Callback<int, PeerId, NetworkPayload, IReadOnlyList<PlannedRoute>, CancellationToken>((_, __, ___, routes, ____) => capturedRoutes = routes)
             .ReturnsAsync(new SendOutcome { Success = true, Path = $"Relay:{relay.Value}", AttemptedPaths = new[] { $"Relay:{relay.Value}" }, Attempts = 1 });
 
@@ -78,7 +78,7 @@ public class NetworkMessagingTests
         var emptyProfile = new PeerRoutingProfile(); emptyProfile.BindIdentity(peer);
         repo.Setup(r => r.GetByIdAsync(peer, It.IsAny<CancellationToken>())).ReturnsAsync(emptyProfile);
         topo.Setup(t => t.GetRelayForAsync(peer, It.IsAny<CancellationToken>())).ReturnsAsync((PeerId?)null);
-        candidateRepo.Setup(r => r.GetCandidatesAsync(It.IsAny<int>(), It.IsAny<PeerId>(), It.IsAny<CancellationToken>())).ReturnsAsync(Array.Empty<PeerRouteCandidate>());
+        candidateRepo.Setup(r => r.GetCandidatesAsync(It.IsAny<uint>(), It.IsAny<PeerId>(), It.IsAny<CancellationToken>())).ReturnsAsync(Array.Empty<PeerRouteCandidate>());
         var sut = new DefaultNetworkSender(new SimpleRoutePlanner(), repo.Object, topo.Object, exec.Object, candidateRepo.Object);
 
         var outcome = await sut.SendAsync(1, peer, new NetworkPayload(new byte[] {1,2,3}), SendStrategy.DirectOnly, CancellationToken.None);
@@ -108,16 +108,16 @@ public class NetworkMessagingTests
                 SelfIdentityId = 1,
                 RemotePeerId = peer,
                 RouteKind = RouteKind.Relayed,
-                RelayHostPeerId = relayPeerId.Value,
+                RelayHostPeerId = relayPeerId,
                 ObservedAtUtc = DateTimeOffset.UtcNow
             }
         };
-        candidateRepo.Setup(r => r.GetCandidatesAsync(1, peer, It.IsAny<CancellationToken>())).ReturnsAsync(candidates);
+        candidateRepo.Setup(r => r.GetCandidatesAsync(1u, peer, It.IsAny<CancellationToken>())).ReturnsAsync(candidates);
         
         var sut = new DefaultNetworkSender(new SimpleRoutePlanner(), repo.Object, topo.Object, exec.Object, candidateRepo.Object);
         
         IReadOnlyList<PlannedRoute>? capturedRoutes = null;
-        exec.Setup(e => e.ExecuteAsync(It.IsAny<int>(), peer, It.IsAny<NetworkPayload>(), It.IsAny<IReadOnlyList<PlannedRoute>>(), It.IsAny<CancellationToken>()))
+        exec.Setup(e => e.ExecuteAsync(It.IsAny<uint>(), peer, It.IsAny<NetworkPayload>(), It.IsAny<IReadOnlyList<PlannedRoute>>(), It.IsAny<CancellationToken>()))
             .Callback<int, PeerId, NetworkPayload, IReadOnlyList<PlannedRoute>, CancellationToken>((_, __, ___, routes, ____) => capturedRoutes = routes)
             .ReturnsAsync(new SendOutcome { Success = true, Path = $"Relay:{relayPeerId.Value}", AttemptedPaths = new[] { $"Relay:{relayPeerId.Value}" }, Attempts = 1 });
 

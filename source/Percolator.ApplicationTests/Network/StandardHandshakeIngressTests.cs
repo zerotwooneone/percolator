@@ -111,7 +111,8 @@ public sealed class StandardHandshakeIngressTests
             peerIdentities.Object,
             signingService.Object,
             mediator.Object,
-            logger);
+            logger,
+            Mock.Of<ISelfIdentityQueries>());
 
         // Act
         var result = await sut.HandleAsync(selfIdentityId, request, CancellationToken.None);
@@ -212,7 +213,8 @@ public sealed class StandardHandshakeIngressTests
             peerIdentities.Object,
             signingService.Object,
             mediator.Object,
-            logger);
+            logger,
+            Mock.Of<ISelfIdentityQueries>());
 
         // Act
         var result = await sut.HandleAsync(selfIdentityId, request, CancellationToken.None);

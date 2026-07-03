@@ -16,6 +16,7 @@
     </PackageReference>
     <PackageReference Include="FluentAssertions" Version="8.3.0" />
     <PackageReference Include="Grpc.Core.Testing" Version="2.46.6" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="8.0.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageReference Include="Moq" Version="4.20.72" />
     <PackageReference Include="NUnit" Version="4.2.2" />
@@ -29,7 +30,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Percolator.Application\Percolator.Application.csproj" />
-    <ProjectReference Include="..\Percolator.Infrastructure\Percolator.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

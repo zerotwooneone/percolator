@@ -47,6 +47,11 @@ public class RelayGroupOrchestratorTests
             throw new NotImplementedException();
         }
 
+        public ZkGroupPublicParamsBytes DeriveGroupPublicParams(GroupMasterKey masterKey)
+        {
+            throw new NotImplementedException();
+        }
+
         public bool VerifyGroupPresentation(
             ZkPresentationBytes presentation,
             ZkServerSecretParamsSeedBytes serverSecretSeed,

@@ -38,13 +38,10 @@ public class DispatchDeliveredReceiptHandlerTests
         var recipients = new[] { _recipientId };
         var command = new DispatchDeliveredReceiptCommand(_messageId, _sentUtc, recipients, _selfId);
 
-        _keyStoreMock
-            .Setup(k => k.GetPublicKeyHashByPeerIdAsync(_recipientId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((IdentityPublicKeyHash?)null);
         _senderMock
             .Setup(s => s.SendChatEnvelopeToPeerAsync(
                 It.IsAny<Percolator.Contracts.ChatEnvelope>(),
-                It.Is<RecipientRoute>(r => r.PeerId.Equals(_recipientId)),
+                It.Is<PeerId>(p => p.Equals(_recipientId)),
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask)
             .Verifiable();
