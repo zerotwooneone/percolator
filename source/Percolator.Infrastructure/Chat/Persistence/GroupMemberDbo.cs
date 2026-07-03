@@ -1,3 +1,4 @@
+using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Identity;
 
 namespace Percolator.Infrastructure.Chat.Persistence;
@@ -10,7 +11,7 @@ public class GroupMemberDbo
     /// <summary>
     /// The conversation ID (foreign key).
     /// </summary>
-    public Guid ConversationId { get; set; }
+    public ConversationId ConversationId { get; set; }
 
     /// <summary>
     /// The universal public identity ID (UUID).

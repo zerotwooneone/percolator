@@ -21,8 +21,6 @@ public sealed class SendGroupMessageCommandHandler : IRequestHandler<Commands.Se
     private readonly IGroupCryptographyService _groupCryptoService;
     private readonly IGroupCryptoStateRepository _cryptoStateRepository;
     private readonly IRemoteEnvelopeSender _envelopeSender;
-    private readonly IPeerIdentityQueries _peerIdentityQueries;
-    private readonly IPublisher _publisher;
     private readonly ILogger<SendGroupMessageCommandHandler> _logger;
     private readonly ISelfIdentityQueries _selfIdentityQueries;
     private readonly IDeliveryCertificateStore _certificateStore;
@@ -36,8 +34,6 @@ public sealed class SendGroupMessageCommandHandler : IRequestHandler<Commands.Se
         IGroupCryptographyService groupCryptoService,
         IGroupCryptoStateRepository cryptoStateRepository,
         IRemoteEnvelopeSender envelopeSender,
-        IPeerIdentityQueries peerIdentityQueries,
-        IPublisher publisher,
         ILogger<SendGroupMessageCommandHandler> logger,
         ISelfIdentityQueries selfIdentityQueries,
         IDeliveryCertificateStore certificateStore,
@@ -50,8 +46,6 @@ public sealed class SendGroupMessageCommandHandler : IRequestHandler<Commands.Se
         _groupCryptoService = groupCryptoService;
         _cryptoStateRepository = cryptoStateRepository;
         _envelopeSender = envelopeSender;
-        _peerIdentityQueries = peerIdentityQueries;
-        _publisher = publisher;
         _logger = logger;
         _selfIdentityQueries = selfIdentityQueries;
         _certificateStore = certificateStore;

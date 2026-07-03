@@ -51,7 +51,7 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
         // Persist GroupState
         var groupStateDbo = new Persistence.GroupStateDbo
         {
-            ConversationId = conversation.State.ConversationId.Value,
+            ConversationId = conversation.State.ConversationId,
             Epoch = conversation.State.Epoch,
             Name = conversation.State.Name,
             PublicParams = conversation.State.PublicParams,
@@ -66,7 +66,7 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
         {
             var groupMemberDbo = new Persistence.GroupMemberDbo
             {
-                ConversationId = member.ConversationId.Value,
+                ConversationId = member.ConversationId,
                 PublicIdentityId = member.ParticipantId.PublicIdentityId,
                 PeerId = member.ParticipantId is RemoteParticipantId remote ? new PeerId(remote.PeerId.Value) : null,
                 SelfId = member.ParticipantId is LocalParticipantId local ? local.SelfId.Value : null,
@@ -83,7 +83,7 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
     public async Task UpdateAsync(GroupConversation conversation, ChatSelfId selfIdentityId, CancellationToken cancellationToken)
     {
         var existing = await _db.Conversations
-            .FirstOrDefaultAsync(c => c.Id == conversation.Id.Value && c.SelfIdentityId == selfIdentityId && c.Kind == Percolator.Infrastructure.Persistence.ConversationKind.Group, cancellationToken);
+            .FirstOrDefaultAsync(c => c.Id == conversation.Id && c.SelfIdentityId == selfIdentityId && c.Kind == Percolator.Infrastructure.Persistence.ConversationKind.Group, cancellationToken);
 
         if (existing is null)
         {
@@ -117,7 +117,7 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
         {
             var groupMemberDbo = new Persistence.GroupMemberDbo
             {
-                ConversationId = member.ConversationId.Value,
+                ConversationId = member.ConversationId,
                 PublicIdentityId = member.ParticipantId.PublicIdentityId,
                 PeerId = member.ParticipantId is RemoteParticipantId remote ? new PeerId(remote.PeerId.Value) : null,
                 SelfId = member.ParticipantId is LocalParticipantId local ? local.SelfId.Value : null,
@@ -147,7 +147,7 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
         // Persist GroupState
         var groupStateDbo = new Persistence.GroupStateDbo
         {
-            ConversationId = conversation.State.ConversationId.Value,
+            ConversationId = conversation.State.ConversationId,
             Epoch = conversation.State.Epoch,
             Name = conversation.State.Name,
             PublicParams = conversation.State.PublicParams,
@@ -162,7 +162,7 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
         {
             var groupMemberDbo = new Persistence.GroupMemberDbo
             {
-                ConversationId = member.ConversationId.Value,
+                ConversationId = member.ConversationId,
                 PublicIdentityId = member.ParticipantId.PublicIdentityId,
                 PeerId = member.ParticipantId is RemoteParticipantId remote ? new PeerId(remote.PeerId.Value) : null,
                 SelfId = member.ParticipantId is LocalParticipantId local ? local.SelfId.Value : null,
@@ -211,7 +211,7 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
     {
         var groupState = groupStateDbo != null
             ? new GroupState(
-                new ConversationId(groupStateDbo.ConversationId),
+                groupStateDbo.ConversationId,
                 groupStateDbo.Epoch,
                 groupStateDbo.Name,
                 groupStateDbo.PublicParams,
@@ -228,7 +228,7 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
                     : throw new InvalidOperationException($"GroupMember must have either PeerId or SelfId set for PublicIdentityId {m.PublicIdentityId}");
 
             return new GroupMember(
-                new ConversationId(m.ConversationId),
+                m.ConversationId,
                 participantId,
                 (GroupMemberRole)m.Role,
                 m.JoinedAtUtc,
@@ -238,7 +238,7 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
         var relayPeerId = new ChatPeerId(groupStateDbo!.RelayPeerId.Value);
 
         return new GroupConversation(
-            new ConversationId(dbo.Id),
+            dbo.Id,
             groupState,
             relayPeerId,
             groupMembers,
@@ -249,7 +249,7 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
     {
         return new ConversationDbo
         {
-            Id = conversation.Id.Value,
+            Id = conversation.Id,
             Name = conversation.Name,
             Kind = Percolator.Infrastructure.Persistence.ConversationKind.Group
         };

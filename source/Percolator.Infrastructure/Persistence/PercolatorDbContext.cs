@@ -172,7 +172,7 @@ public class PercolatorDbContext : DbContext
                 .HasForeignKey(e => e.SelfIdentityId)
                 .OnDelete(DeleteBehavior.Cascade)
                 .IsRequired();
-            entity.HasQueryFilter(e => _active != null && _active.Identity != null && e.SelfIdentityId == _active.Identity.SelfIdentityId.Value);
+            entity.HasQueryFilter(e => _active != null && _active.Identity != null && e.SelfIdentityId == _active.Identity.SelfIdentityId);
         });
 
         // SelfOneTimePreKey
@@ -200,7 +200,7 @@ public class PercolatorDbContext : DbContext
                 .HasForeignKey(e => e.SelfIdentityId)
                 .OnDelete(DeleteBehavior.Cascade)
                 .IsRequired();
-            entity.HasQueryFilter(e => _active != null && _active.Identity != null && e.SelfIdentityId == _active.Identity.SelfIdentityId.Value);
+            entity.HasQueryFilter(e => _active != null && _active.Identity != null && e.SelfIdentityId == _active.Identity.SelfIdentityId);
         });
 
         // PreHandshakeSessions
@@ -376,7 +376,11 @@ public class PercolatorDbContext : DbContext
         {
             entity.ToTable("GroupMembers");
             entity.HasKey(e => new { e.ConversationId, e.PublicIdentityId });
-            entity.Property(e => e.ConversationId).IsRequired();
+            entity.Property(e => e.ConversationId)
+                .HasConversion(
+                    v => v.Value,
+                    v => new Percolator.Chat.Messaging.ValueObjects.ConversationId(v))
+                .IsRequired();
             entity.Property(e => e.PublicIdentityId)
                 .HasConversion(
                     v => v.Value,
@@ -404,7 +408,11 @@ public class PercolatorDbContext : DbContext
         {
             entity.ToTable("GroupStates");
             entity.HasKey(e => e.ConversationId);
-            entity.Property(e => e.ConversationId).IsRequired();
+            entity.Property(e => e.ConversationId)
+                .HasConversion(
+                    v => v.Value,
+                    v => new Percolator.Chat.Messaging.ValueObjects.ConversationId(v))
+                .IsRequired();
             entity.Property(e => e.Epoch).IsRequired();
             entity.Property(e => e.Name).IsRequired(false);
             entity.Property(e => e.RelayPeerId)

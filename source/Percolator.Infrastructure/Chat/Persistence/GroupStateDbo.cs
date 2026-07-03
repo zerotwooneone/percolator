@@ -1,4 +1,5 @@
 using Percolator.Chat.GroupLedger;
+using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Identity;
 
 namespace Percolator.Infrastructure.Chat.Persistence;
@@ -12,7 +13,7 @@ public class GroupStateDbo
     /// <summary>
     /// The conversation ID (primary key).
     /// </summary>
-    public Guid ConversationId { get; set; }
+    public ConversationId ConversationId { get; set; }
 
     /// <summary>
     /// The current epoch (monotonic counter for key rotation).
