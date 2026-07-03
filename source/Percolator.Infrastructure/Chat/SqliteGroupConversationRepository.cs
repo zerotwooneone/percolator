@@ -22,7 +22,7 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
     {
         var dbo = await _db.Conversations
             .AsNoTracking()
-            .FirstOrDefaultAsync(c => c.Id == id.Value && c.SelfIdentityId == selfIdentityId && c.Kind == Percolator.Infrastructure.Persistence.ConversationKind.Group, cancellationToken);
+            .FirstOrDefaultAsync(c => c.Id == id && c.SelfIdentityId == selfIdentityId && c.Kind == Percolator.Infrastructure.Persistence.ConversationKind.Group, cancellationToken);
 
         if (dbo is null)
             return null;
