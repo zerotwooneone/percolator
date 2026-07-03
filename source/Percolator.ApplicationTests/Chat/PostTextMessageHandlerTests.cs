@@ -1,18 +1,18 @@
 using FluentAssertions;
 using MediatR;
 using Moq;
-using Percolator.Application.Identity;
 using Percolator.Application.Apps.Chat.Handlers;
+using Percolator.Application.Identity;
+using Percolator.Chat.GroupMembership;
 using Percolator.Chat.Messaging;
 using Percolator.Chat.Messaging.App;
 using Percolator.Chat.Messaging.App.Commands;
 using Percolator.Chat.Messaging.Events;
 using Percolator.Chat.Messaging.ValueObjects;
-using Percolator.Chat.GroupMembership;
 using Percolator.Identity;
 using PublicMessageId = Percolator.Chat.Messaging.PublicMessageId;
 
-namespace Percolator.Chat.Tests;
+namespace Percolator.ApplicationTests.Chat;
 
 [TestFixture]
 public class PostTextMessageHandlerTests
