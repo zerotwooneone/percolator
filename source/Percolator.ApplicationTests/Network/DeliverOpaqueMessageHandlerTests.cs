@@ -33,7 +33,7 @@ namespace Percolator.ApplicationTests.Network;
         {
             var handler = CreateHandler(out var mediator, out var directRepo, out var ratchetLookup, out var secureSvc);
             var sessionId = Guid.NewGuid();
-            var remotePeerId = (uint)Random.Shared.Next(1, 1000000);
+            var remotePeerId = 12345u;
 
             // Build a valid ratchet payload with RelayOpaqueEnvelope
             var headerKeyBytes = RandomBytes(64);
@@ -55,19 +55,11 @@ namespace Percolator.ApplicationTests.Network;
             // Map session and peer
             directRepo.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId), It.IsAny<uint>()))
                 .ReturnsAsync(new DirectSession(new Percolator.Network.PeerId(remotePeerId), new DirectSessionId(sessionId)));
-            var endpoint = new GrpcEndPoint(new System.Net.DnsEndPoint("127.0.0.1", 5056), DateTimeOffset.UtcNow);
+            var endpoint = new GrpcEndPoint(new System.Net.DnsEndPoint("127.0.0.1", 5056), new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero));
             var identityKey = DirectMessagePublicKey.FromBytes(RandomBytes(80));
 
-            // Capture RelayHostPeerId passed to mediator
-            Percolator.Identity.PeerId? capturedRelayHost = null;
+            // Setup mediator to return success
             mediator.Setup(m => m.Send(It.IsAny<Percolator.Application.Network.Handshake.ProcessRelayedOpaquePayloadCommand>(), It.IsAny<CancellationToken>()))
-                .Callback<object, CancellationToken>((cmd, _) =>
-                {
-                    if (cmd is Percolator.Application.Network.Handshake.ProcessRelayedOpaquePayloadCommand c)
-                    {
-                        capturedRelayHost = c.RelayHostPeerId;
-                    }
-                })
                 .ReturnsAsync(Percolator.Application.Network.Handshake.ProcessRelayedOpaquePayloadResponse.Success);
 
             // Allow ratchet index upsert after decrypt in handler
@@ -81,8 +73,11 @@ namespace Percolator.ApplicationTests.Network;
             var cmd = new DeliverOpaqueMessageCommand { PayloadBytes = payloadBytes, SelfIdentityId = new SelfId(1) };
             _ = await handler.Handle(cmd, CancellationToken.None);
 
-            Assert.That(capturedRelayHost, Is.Not.Null);
-            Assert.That(capturedRelayHost, Is.EqualTo(new Percolator.Identity.PeerId(remotePeerId)));
+            // Verify the command was sent with the correct peer ID
+            mediator.Verify(m => m.Send(
+                It.Is<Percolator.Application.Network.Handshake.ProcessRelayedOpaquePayloadCommand>(
+                    c => c.RelayHostPeerId.Value == remotePeerId),
+                It.IsAny<CancellationToken>()), Times.Once);
         }
 
         [Test]
@@ -90,7 +85,7 @@ namespace Percolator.ApplicationTests.Network;
         {
             var handler = CreateHandler(out var mediator, out var directRepo, out var ratchetLookup, out var secureSvc);
             var sessionId = Guid.NewGuid();
-            var remotePeerId = (uint)Random.Shared.Next(1, 1000000);
+            var remotePeerId = 12345u;
 
             // Build a valid ratchet payload with RelayOpaqueEnvelope
             var headerKeyBytes = RandomBytes(64);
@@ -112,7 +107,7 @@ namespace Percolator.ApplicationTests.Network;
             // Map session and peer
             directRepo.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId), It.IsAny<uint>()))
                 .ReturnsAsync(new DirectSession(new Percolator.Network.PeerId(remotePeerId), new DirectSessionId(sessionId)));
-            var endpoint = new GrpcEndPoint(new System.Net.DnsEndPoint("127.0.0.1", 5055), DateTimeOffset.UtcNow);
+            var endpoint = new GrpcEndPoint(new System.Net.DnsEndPoint("127.0.0.1", 5055), new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero));
             var identityKey = DirectMessagePublicKey.FromBytes(RandomBytes(80));
 
             // Orchestrator: envelope is delegated to ProcessInternalEnvelopeCommand
@@ -141,7 +136,7 @@ namespace Percolator.ApplicationTests.Network;
         {
             var handler = CreateHandler(out var mediator, out var directRepo, out var ratchetLookup, out var secureSvc);
             var sessionId = Guid.NewGuid();
-            var remotePeerId = (uint)Random.Shared.Next(1, 1000000);
+            var remotePeerId = 12345u;
 
             // Header key and inner opaque
             var headerKeyBytes = RandomBytes(64);
@@ -170,7 +165,7 @@ namespace Percolator.ApplicationTests.Network;
             // Session mapping and peer info
             directRepo.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId), It.IsAny<uint>()))
                 .ReturnsAsync(new DirectSession(new Percolator.Network.PeerId(remotePeerId), new DirectSessionId(sessionId)));
-            var endpoint = new GrpcEndPoint(new System.Net.DnsEndPoint("127.0.0.1", 6060), DateTimeOffset.UtcNow);
+            var endpoint = new GrpcEndPoint(new System.Net.DnsEndPoint("127.0.0.1", 6060), new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero));
 
             // Orchestrator invoked via ProcessInternalEnvelopeCommand (no early response expected)
             mediator.Setup(m => m.Send(It.IsAny<ProcessInternalEnvelopeCommand>(), It.IsAny<CancellationToken>()))
@@ -199,7 +194,7 @@ namespace Percolator.ApplicationTests.Network;
     {
         var handler = CreateHandler(out var mediator, out var directRepo, out var ratchetLookup, out var secureSvc);
         var sessionId = Guid.NewGuid();
-        var remotePeerId = (uint)Random.Shared.Next(1, 1000000);
+        var remotePeerId = 67890u;
 
         // Build a valid ratchet payload with an MQ Enqueue request
         var headerKey = PreKey.FromBytes(RandomBytes(64));
@@ -225,7 +220,7 @@ namespace Percolator.ApplicationTests.Network;
         // Session mapping and peer info
         directRepo.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId), It.IsAny<uint>()))
             .ReturnsAsync(new DirectSession(new Percolator.Network.PeerId(remotePeerId), new DirectSessionId(sessionId)));
-        var endpoint = new GrpcEndPoint(new System.Net.DnsEndPoint("127.0.0.1", 7777), DateTimeOffset.UtcNow);
+        var endpoint = new GrpcEndPoint(new System.Net.DnsEndPoint("127.0.0.1", 7777), new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero));
         // For disallowed envelope path, handler returns before updating LastSeen/SaveAsync; no SaveAsync expected.
 
         // Orchestrator returns enqueue response
@@ -256,7 +251,7 @@ namespace Percolator.ApplicationTests.Network;
     {
         var handler = CreateHandler(out var mediator, out var directRepo, out var ratchetLookup, out var secureSvc);
         var sessionId = Guid.NewGuid();
-        var remotePeerId = (uint)Random.Shared.Next(1, 1000000);
+        var remotePeerId = 67890u;
 
         // Build a valid ratchet payload with a Chat TextMessage (or any allowed case)
         var headerKey = PreKey.FromBytes(RandomBytes(64));
@@ -275,7 +270,7 @@ namespace Percolator.ApplicationTests.Network;
         // Direct session mapping and peer info
         directRepo.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId), It.IsAny<uint>()))
             .ReturnsAsync(new DirectSession(new Percolator.Network.PeerId(remotePeerId), new DirectSessionId(sessionId)));
-        var endpoint = new GrpcEndPoint(new System.Net.DnsEndPoint("127.0.0.1", 7000), DateTimeOffset.UtcNow);
+        var endpoint = new GrpcEndPoint(new System.Net.DnsEndPoint("127.0.0.1", 7000), new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero));
 
         // Orchestrator returns a response envelope (e.g., MQ fetch response)
         var responseEnv = new InternalEnvelope { FetchQueuedMessagesResponse = new FetchQueuedMessagesResponse { } };
@@ -326,10 +321,10 @@ namespace Percolator.ApplicationTests.Network;
         secureSvc.Setup(s => s.DecryptInboundAsync(It.IsAny<uint>(), It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((new SessionId(sessionId), Plaintext.FromBytes(innerEnv.ToByteArray())));
         // Map session to a remote peer and provide connection info
-        var remotePeerGuid = (uint)Random.Shared.Next(1, 1000000);
+        var remotePeerGuid = 54321u;
         directRepo.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId), It.IsAny<uint>()))
             .ReturnsAsync(new DirectSession(new Percolator.Network.PeerId(remotePeerGuid), new DirectSessionId(sessionId)));
-        var endpoint3 = new GrpcEndPoint(new System.Net.DnsEndPoint("127.0.0.1", 5050), DateTimeOffset.UtcNow);
+        var endpoint3 = new GrpcEndPoint(new System.Net.DnsEndPoint("127.0.0.1", 5050), new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero));
         // peer connection lookup removed in new design
         ratchetLookup.Setup(l => l.UpsertAsync(It.IsAny<uint>(), It.Is<SessionId>(s => s.Value == sessionId), It.IsAny<RatchetEphemeralKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
@@ -373,10 +368,10 @@ namespace Percolator.ApplicationTests.Network;
             .ReturnsAsync((new SessionId(sessionId), plaintext));
 
         // Direct session mapping and peer info
-        var remotePeerId = (uint)Random.Shared.Next(1, 1000000);
+        var remotePeerId = 67890u;
         directRepo.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId), It.IsAny<uint>()))
             .ReturnsAsync(new DirectSession(new Percolator.Network.PeerId(remotePeerId), new DirectSessionId(sessionId)));
-        var endpoint = new GrpcEndPoint(new System.Net.DnsEndPoint("localhost", 6000), DateTimeOffset.UtcNow);
+        var endpoint = new GrpcEndPoint(new System.Net.DnsEndPoint("localhost", 6000), new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero));
 
         // Orchestrator receives Ping via ProcessInternalEnvelopeCommand
         mediator.Setup(m => m.Send(It.IsAny<ProcessInternalEnvelopeCommand>(), It.IsAny<CancellationToken>()))
@@ -459,7 +454,7 @@ namespace Percolator.ApplicationTests.Network;
             .Setup(r => r.GetByIdAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<CancellationToken>()))
             .Returns<Percolator.Network.PeerId, CancellationToken>((pid, ct) =>
             {
-                var now = DateTimeOffset.UtcNow;
+                var now = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero);
                 var profile = new PeerRoutingProfile();
                 profile.BindIdentity(pid);
                 profile.AddGrpcEndPoint(new GrpcEndPoint(new System.Net.DnsEndPoint("127.0.0.1", 5001), now), now);
@@ -535,7 +530,7 @@ namespace Percolator.ApplicationTests.Network;
     {
         var handler = CreateHandler(out var mediator, out var directRepo, out var ratchetLookup, out var secureSvc);
         var sessionId = Guid.NewGuid();
-        var remotePeerId = (uint)Random.Shared.Next(1, 1000000);
+        var remotePeerId = 67890u;
 
         var headerKeyBytes = RandomBytes(64);
         var headerKey = PreKey.FromBytes(headerKeyBytes);
@@ -551,7 +546,7 @@ namespace Percolator.ApplicationTests.Network;
         directRepo.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId), It.IsAny<uint>()))
             .ReturnsAsync(new DirectSession(new Percolator.Network.PeerId(remotePeerId), new DirectSessionId(sessionId)));
 
-        var endpoint = new GrpcEndPoint(new DnsEndPoint("127.0.0.1", 5001), DateTimeOffset.UtcNow);
+        var endpoint = new GrpcEndPoint(new DnsEndPoint("127.0.0.1", 5001), new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero));
         var identityKey = DirectMessagePublicKey.FromBytes(RandomBytes(80));
         // peer connection lookup removed in new design
 
@@ -578,7 +573,7 @@ namespace Percolator.ApplicationTests.Network;
     {
         var handler = CreateHandler(out var mediator, out var directRepo, out var ratchetLookup, out var secureSvc);
         var sessionId = Guid.NewGuid();
-        var remotePeerId = (uint)Random.Shared.Next(1, 1000000);
+        var remotePeerId = 67890u;
 
         var headerKeyBytes = RandomBytes(64);
         var headerKey = PreKey.FromBytes(headerKeyBytes);
@@ -594,7 +589,7 @@ namespace Percolator.ApplicationTests.Network;
         directRepo.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId), It.IsAny<uint>()))
             .ReturnsAsync(new DirectSession(new Percolator.Network.PeerId(remotePeerId), new DirectSessionId(sessionId)));
 
-        var endpoint = new GrpcEndPoint(new System.Net.DnsEndPoint("127.0.0.1", 5001), DateTimeOffset.UtcNow);
+        var endpoint = new GrpcEndPoint(new System.Net.DnsEndPoint("127.0.0.1", 5001), new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero));
         var identityKey = DirectMessagePublicKey.FromBytes(RandomBytes(80));
         // peer connection lookup removed in new design
 
@@ -636,7 +631,7 @@ namespace Percolator.ApplicationTests.Network;
     {
         var handler = CreateHandler(out var mediator, out var directRepo, out var ratchetLookup, out var secureSvc);
         var sessionId = Guid.NewGuid();
-        var remotePeerId = (uint)Random.Shared.Next(1, 1000000);
+        var remotePeerId = 67890u;
 
         // Build an InternalEnvelope with ChatEnvelope to avoid empty plaintext
         var emptyEnv = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { TextMessage = new TextMessage { Content = "test" } }, SourceDeviceId = 1 };

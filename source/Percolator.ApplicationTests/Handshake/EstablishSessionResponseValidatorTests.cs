@@ -23,7 +23,7 @@ public sealed class EstablishSessionResponseValidatorTests
         {
             Version = 1,
             EphemeralKey = ByteString.CopyFrom(new byte[32]),
-            SessionId = Guid.NewGuid().ToString()
+            SessionId = new Guid("00000000-0000-0000-0000-000000000009").ToString()
         };
         var payloadBytes = payload.ToByteArray();
 
@@ -95,7 +95,7 @@ public sealed class EstablishSessionResponseValidatorTests
         var logger = new NullLogger<EstablishSessionResponseValidator>();
         var sut = new EstablishSessionResponseValidator(logger);
 
-        var sessionId = Guid.NewGuid();
+        var sessionId = new Guid("00000000-0000-0000-0000-000000000010");
 
         using var ecdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var spki = ecdsa.ExportSubjectPublicKeyInfo();
@@ -105,7 +105,7 @@ public sealed class EstablishSessionResponseValidatorTests
             Version = 1,
             EphemeralKey = ByteString.CopyFrom(new byte[32]),
             SessionId = sessionId.ToString(),
-            PublicIdentityId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray())
+            PublicIdentityId = ByteString.CopyFrom(new Guid("00000000-0000-0000-0000-000000000011").ToByteArray())
         };
         var payloadBytes = payload.ToByteArray();
         var signature = ecdsa.SignData(payloadBytes, HashAlgorithmName.SHA256);

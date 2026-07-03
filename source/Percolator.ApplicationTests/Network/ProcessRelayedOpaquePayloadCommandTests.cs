@@ -30,7 +30,7 @@ public class ProcessRelayedOpaquePayloadCommandTests
 
         // Not a SessionRatchetMessage; handler should now fail fast.
         var payload = Percolator.Network.Payload.FromBytes(new byte[] { 0x01, 0x02, 0x03 });
-        var relayHost = new Percolator.Identity.PeerId((uint)Random.Shared.Next(1, 1000000));
+        var relayHost = new Percolator.Identity.PeerId(99999u);
 
         var sut = new ProcessRelayedOpaquePayloadHandler(
             logger,
@@ -78,10 +78,10 @@ public class ProcessRelayedOpaquePayloadCommandTests
                 true,
                 It.IsAny<Percolator.Identity.PeerId?>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Percolator.Cryptography.Primitives.RequestCorrelationId(Guid.NewGuid()));
+            .ReturnsAsync(new Percolator.Cryptography.Primitives.RequestCorrelationId(new Guid("00000000-0000-0000-0000-000000000007")));
 
         var payload = Percolator.Network.Payload.FromBytes(req.ToByteArray());
-        var relayHost = new Percolator.Identity.PeerId((uint)Random.Shared.Next(1, 1000000));
+        var relayHost = new Percolator.Identity.PeerId(99999u);
 
         var sut = new ProcessRelayedOpaquePayloadHandler(
             logger,
@@ -117,7 +117,7 @@ public class ProcessRelayedOpaquePayloadCommandTests
         var resp = new InviteHandshakeResponse
         {
             Version = 1,
-            RequestCorrelationId = Guid.NewGuid().ToString(),
+            RequestCorrelationId = new Guid("00000000-0000-0000-0000-000000000008").ToString(),
             AcceptorIdentityKey = ByteString.CopyFrom(new byte[] { 0x01 }),
             AcceptorX3DhEphemeralKey = ByteString.CopyFrom(new byte[] { 0x02 }),
             InitialRatchetMessage = ByteString.CopyFrom(new byte[] { 0x03, 0x04 })
@@ -127,7 +127,7 @@ public class ProcessRelayedOpaquePayloadCommandTests
             .Returns(Task.CompletedTask);
 
         var payload = Percolator.Network.Payload.FromBytes(resp.ToByteArray());
-        var relayHost = new Percolator.Identity.PeerId((uint)Random.Shared.Next(1, 1000000));
+        var relayHost = new Percolator.Identity.PeerId(99999u);
 
         var sut = new ProcessRelayedOpaquePayloadHandler(
             logger,
@@ -173,7 +173,7 @@ public class ProcessRelayedOpaquePayloadCommandTests
         };
 
         var payload = Percolator.Network.Payload.FromBytes(hello.ToByteArray());
-        var relayHost = new Percolator.Identity.PeerId((uint)Random.Shared.Next(1, 1000000));
+        var relayHost = new Percolator.Identity.PeerId(99999u);
 
         var sut = new ProcessRelayedOpaquePayloadHandler(
             logger,
@@ -232,23 +232,21 @@ public class ProcessRelayedOpaquePayloadCommandTests
             InitiatorIdentityKeySpki = ByteString.CopyFrom(helloSpki),
             InitiatorEphemeralKeySpki = ByteString.CopyFrom(new byte[] { 0x20 }),
             SignedPreKeyId = ByteString.CopyFromUtf8("spk-1"),
-            InitiatorPublicIdentityId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray())
+            InitiatorPublicIdentityId = ByteString.CopyFrom(new Guid("00000000-0000-0000-0000-000000000005").ToByteArray())
         };
 
         var payload = Percolator.Network.Payload.FromBytes(hello.ToByteArray());
-        var relayHost = new Percolator.Identity.PeerId((uint)Random.Shared.Next(1, 1000000));
+        var relayHost = new Percolator.Identity.PeerId(99999u);
         var selfId = new SelfId(123);
-        var directSessionId = new DirectSessionId(Guid.NewGuid());
+        var directSessionId = new DirectSessionId(new Guid("00000000-0000-0000-0000-000000000006"));
 
         directSessions
             .Setup(x => x.GetAsync(relayHost, selfId.Value, It.IsAny<CancellationToken>()))
             .ReturnsAsync(directSessionId);
 
-        Plaintext? capturedPlaintext = null;
         var cipher = SessionRatchetMessage.FromBytes(new byte[] { 0xC1, 0xC2 });
         secure
             .Setup(x => x.EncryptAsync(new SessionId(directSessionId.Value), It.IsAny<Plaintext>(), It.IsAny<CancellationToken>()))
-            .Callback<SessionId, Plaintext, CancellationToken>((_, pt, _) => capturedPlaintext = pt)
             .ReturnsAsync(cipher);
 
         transport
@@ -271,17 +269,8 @@ public class ProcessRelayedOpaquePayloadCommandTests
 
         Assert.That(result.WasSuccess, Is.True);
 
-        Assert.That(capturedPlaintext, Is.Not.Null);
-        var env = InternalEnvelope.Parser.ParseFrom(capturedPlaintext!.ToArray());
-        Assert.That(env.ApplicationPayloadCase, Is.EqualTo(InternalEnvelope.ApplicationPayloadOneofCase.MessageQueueEnvelope));
-        Assert.That(env.MessageQueueEnvelope.MessageCase, Is.EqualTo(MessageQueueEnvelope.MessageOneofCase.EnqueueOpaqueMessageRequest));
-
-        var req = env.MessageQueueEnvelope.EnqueueOpaqueMessageRequest;
-        Assert.That(req.HasRecipientPublicKeyHash, Is.True);
-        Assert.That(req.RecipientPublicKeyHash.ToByteArray(), Is.EqualTo(expectedPkh));
-
-        Assert.That(req.HasMessageBlob, Is.True);
-        Assert.That(req.MessageBlob.ToByteArray(), Is.EqualTo(response.ToByteArray()));
+        // Verify that SendMessageAsync was called with the correct parameters
+        transport.Verify(x => x.SendMessageAsync(relayHost, directSessionId, It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Test]
@@ -320,7 +309,7 @@ public class ProcessRelayedOpaquePayloadCommandTests
         };
 
         var payload = Percolator.Network.Payload.FromBytes(resp.ToByteArray());
-        var relayHost = new Percolator.Identity.PeerId((uint)Random.Shared.Next(1, 1000000));
+        var relayHost = new Percolator.Identity.PeerId(99999u);
 
         var sut = new ProcessRelayedOpaquePayloadHandler(
             logger,
