@@ -1,7 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Percolator.Application.Chat;
 using Percolator.Chat.GroupMembership;
-using Percolator.Infrastructure.Chat.Persistence;
 using Percolator.Infrastructure.Persistence;
 
 namespace Percolator.Infrastructure.Chat;
@@ -17,14 +16,12 @@ public sealed class SqliteDeliveryCertificateQueries : IDeliveryCertificateQueri
 
     public async Task<IReadOnlyList<(ChatSelfId SelfId, ChatPeerId RelayPeerId)>> GetActiveRelayAssignmentsAsync(CancellationToken ct)
     {
-        note(
-            "this query is not quite right. we need to ensure that there is exactly one relay per group. That needs to be reflected in the domain");
-        var assignments = await _db.GroupMembers
+        var assignments = await _db.GroupStates
             .Join(
-                _db.GroupStates,
-                member => member.ConversationId,
+                _db.GroupMembers,
                 state => state.ConversationId,
-                (member, state) => new { member, state })
+                member => member.ConversationId,
+                (state, member) => new { state, member })
             .Where(x => x.member.SelfId != null && x.member.RemovedAtUtc == null)
             .Select(x => new
             {
