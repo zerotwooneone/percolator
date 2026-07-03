@@ -68,8 +68,8 @@ public sealed class ApprovePendingSessionCommandTests
         var logger = NullLogger<ApprovePendingSessionHandler>.Instance;
         var activeAccessor = new ActiveAccessorStub { IsActive = true };
         var active = new ActiveIdentityContext();
-        var selfIdentityId = 7;
-        var identity = new IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = new SelfId(selfIdentityId) };
+        var selfIdentityId = new SelfId(7);
+        var identity = new IdentityRecord(selfIdentityId, new PublicIdentityId(Guid.NewGuid()), new Percolator.Identity.DeviceId(1), "self");
         var keys = new X3dhKeys(
             ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
             ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256));
@@ -77,7 +77,7 @@ public sealed class ApprovePendingSessionCommandTests
 
         var clock = new TestClock();
         var correlation = new RequestCorrelationId(Guid.NewGuid());
-        var remotePeerId = Guid.NewGuid();
+        var remotePeerId = (uint)Random.Shared.Next(1, 1000000);
         var pendingId = PendingSessionId.NewId();
 
         using var inviterEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
@@ -148,8 +148,8 @@ public sealed class ApprovePendingSessionCommandTests
         // Setup WriteMappingAsync to capture the session ID for verification
         DirectSessionId? writtenSessionId = null;
         directSessionMappingWriter
-            .Setup(w => w.WriteMappingAsync(It.IsAny<NetworkPeerId>(), It.IsAny<DirectSessionId>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
-            .Callback<NetworkPeerId, DirectSessionId, int, CancellationToken>((_, sid, _, _) =>
+            .Setup(w => w.WriteMappingAsync(It.IsAny<NetworkPeerId>(), It.IsAny<DirectSessionId>(), It.IsAny<SelfId>(), It.IsAny<CancellationToken>()))
+            .Callback<NetworkPeerId, DirectSessionId, SelfId, CancellationToken>((_, sid, _, _) =>
             {
                 writtenSessionId = sid;
             })
@@ -157,7 +157,7 @@ public sealed class ApprovePendingSessionCommandTests
 
         // Setup locator to return the written session ID for verification
         directSessionLocator
-            .Setup(l => l.GetAsync(It.IsAny<Percolator.Identity.PeerId>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Setup(l => l.GetAsync(It.IsAny<Percolator.Identity.PeerId>(), It.IsAny<uint>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => writtenSessionId);
 
         // Act
@@ -180,7 +180,7 @@ public sealed class ApprovePendingSessionCommandTests
             mediator.Object);
 
         var result = await handler.Handle(
-            new ApprovePendingSessionCommand(pendingId, new SelfId(selfIdentityId)),
+            new ApprovePendingSessionCommand(pendingId, selfIdentityId),
             CancellationToken.None);
 
         // Assert
@@ -189,7 +189,7 @@ public sealed class ApprovePendingSessionCommandTests
         // Verify state change: the mapping should be retrievable via the locator
         var locatedSessionId = await directSessionLocator.Object.GetAsync(
             new Percolator.Identity.PeerId(remotePeerId),
-            selfIdentityId,
+            selfIdentityId.Value,
             CancellationToken.None);
         locatedSessionId.Should().NotBeNull();
     }

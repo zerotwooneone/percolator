@@ -1,3 +1,4 @@
+using System.Linq;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -87,9 +88,10 @@ public class MessageQueueServiceTests
         var blob = new byte[] { 0xBB };
         var peerId = new PeerId(1);
         var identityPublicKeyHash = IdentityPublicKeyHash.FromBytes(pkh);
+        var chatPkh = Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytes(BitConverter.GetBytes(peerId.Value).Concat(new byte[28]).ToArray());
         _keyStore.Setup(k => k.GetPeerIdByPublicKeyHashAsync(identityPublicKeyHash, It.IsAny<CancellationToken>()))
                  .ReturnsAsync(peerId);
-        _repo.Setup(r => r.TryEnqueueAsync(peerId, It.IsAny<QueuedPayloadBytes>(), It.IsAny<CancellationToken>()))
+        _repo.Setup(r => r.TryEnqueueAsync(chatPkh, It.IsAny<QueuedPayloadBytes>(), It.IsAny<CancellationToken>()))
              .ReturnsAsync((false, 10u, 100u));
 
         var result = await _sut.EnqueueOpaqueAsync(pkh, blob, CancellationToken.None);
@@ -105,9 +107,10 @@ public class MessageQueueServiceTests
         var blob = new byte[] { 0xCC };
         var peerId = new PeerId(1);
         var identityPublicKeyHash = IdentityPublicKeyHash.FromBytes(pkh);
+        var chatPkh = Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytes(BitConverter.GetBytes(peerId.Value).Concat(new byte[28]).ToArray());
         _keyStore.Setup(k => k.GetPeerIdByPublicKeyHashAsync(identityPublicKeyHash, It.IsAny<CancellationToken>()))
                  .ReturnsAsync(peerId);
-        _repo.Setup(r => r.TryEnqueueAsync(peerId, It.IsAny<QueuedPayloadBytes>(), It.IsAny<CancellationToken>()))
+        _repo.Setup(r => r.TryEnqueueAsync(chatPkh, It.IsAny<QueuedPayloadBytes>(), It.IsAny<CancellationToken>()))
              .ReturnsAsync((true, 11u, 101u));
 
         var result = await _sut.EnqueueOpaqueAsync(pkh, blob, CancellationToken.None);

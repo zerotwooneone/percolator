@@ -108,7 +108,7 @@ public class IdentityOrchestratorTests
         var activeIdentity = _activeIdentityContext.Identity;
         activeIdentity.Should().NotBeNull();
         activeIdentity!.SelfIdentityId.Should().Be(selfId);
-        activeIdentity.PublicIdentityId.Should().Be(peerId);
+        activeIdentity.PublicIdentityId.Should().Be(publicIdentityId);
         activeIdentity.ListeningPort.Should().Be(listeningPort);
         _activeIdentityContext.Keys.Should().NotBeNull();
         _activeIdentityContext.Keys!.IdentitySigningKey.Should().NotBeNull();

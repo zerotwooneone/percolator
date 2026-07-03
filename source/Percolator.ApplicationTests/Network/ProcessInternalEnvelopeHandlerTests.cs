@@ -27,7 +27,9 @@ namespace Percolator.ApplicationTests.Network
             var groupCryptoService = new Moq.Mock<Percolator.Cryptography.IGroupCryptographyService>(MockBehavior.Loose);
             var messageWriter = new Moq.Mock<IChatMessageWriter>(MockBehavior.Loose);
             var profileOrchestrationService = new Moq.Mock<Percolator.Application.Chat.IProfileOrchestrationService>(MockBehavior.Loose);
-            return new ProcessInternalEnvelopeHandler(logger, mediatorMock.Object, dht.Object, mq.Object, profile.Object, pendingGroupInvitationRepo.Object, groupCryptoStateRepo.Object, groupMessageCryptoService.Object, groupCryptoService.Object, messageWriter.Object, profileOrchestrationService.Object);
+            var groupInviteHandler = new Moq.Mock<Percolator.Application.Chat.IGroupInviteHandler>(MockBehavior.Loose);
+            var peerIdentityQueries = new Moq.Mock<Percolator.Application.Chat.IPeerIdentityQueries>(MockBehavior.Loose);
+            return new ProcessInternalEnvelopeHandler(logger, mediatorMock.Object, dht.Object, mq.Object, profile.Object, pendingGroupInvitationRepo.Object, groupCryptoStateRepo.Object, groupMessageCryptoService.Object, groupCryptoService.Object, messageWriter.Object, profileOrchestrationService.Object, groupInviteHandler.Object, peerIdentityQueries.Object);
         }
 
         [Test]
@@ -44,7 +46,7 @@ namespace Percolator.ApplicationTests.Network
                 PublicKeyHash = Google.Protobuf.ByteString.CopyFrom(new byte[31]) // invalid
             };
             var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { EmojiAnnotation = em } };
-            var ctx = new SessionContext(Guid.NewGuid(), new Percolator.Identity.SelfId(1), null);
+            var ctx = new SessionContext(Guid.NewGuid(), new Percolator.Identity.SelfId(1), null, null);
 
             Assert.ThrowsAsync<InvalidOperationException>(() => sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None));
         }
@@ -62,7 +64,7 @@ namespace Percolator.ApplicationTests.Network
                 SentTimestampUtc = Timestamp.FromDateTime(DateTime.UtcNow)
             };
             var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { EmojiAnnotation = em } };
-            var ctx = new SessionContext(Guid.NewGuid(), new Percolator.Identity.SelfId(1), null);
+            var ctx = new SessionContext(Guid.NewGuid(), new Percolator.Identity.SelfId(1), null, null);
 
             Assert.ThrowsAsync<InvalidOperationException>(() => sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None));
         }
@@ -80,7 +82,7 @@ namespace Percolator.ApplicationTests.Network
                 PublicKeyHash = Google.Protobuf.ByteString.CopyFrom(new byte[31]) // invalid
             };
             var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { DeliveredReceipt = dr } };
-            var ctx = new SessionContext(Guid.NewGuid(), new Percolator.Identity.SelfId(1), null);
+            var ctx = new SessionContext(Guid.NewGuid(), new Percolator.Identity.SelfId(1), null, null);
 
             Assert.ThrowsAsync<InvalidOperationException>(() => sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None));
         }
@@ -97,7 +99,7 @@ namespace Percolator.ApplicationTests.Network
                 SentTimestampUtc = Timestamp.FromDateTime(DateTime.UtcNow)
             };
             var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { DeliveredReceipt = dr } };
-            var ctx = new SessionContext(Guid.NewGuid(), new Percolator.Identity.SelfId(1), null);
+            var ctx = new SessionContext(Guid.NewGuid(), new Percolator.Identity.SelfId(1), null, null);
 
             Assert.ThrowsAsync<InvalidOperationException>(() => sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None));
         }
@@ -116,7 +118,7 @@ namespace Percolator.ApplicationTests.Network
                 PublicKeyHash = Google.Protobuf.ByteString.CopyFrom(new byte[31]) // invalid length
             };
             var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { TextMessage = msg } };
-            var ctx = new SessionContext(Guid.NewGuid(), new Percolator.Identity.SelfId(1), null);
+            var ctx = new SessionContext(Guid.NewGuid(), new Percolator.Identity.SelfId(1), null, null);
 
             Assert.ThrowsAsync<InvalidOperationException>(() => sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None));
         }
@@ -134,7 +136,7 @@ namespace Percolator.ApplicationTests.Network
                 SentTimestampUtc = Timestamp.FromDateTime(DateTime.UtcNow)
             };
             var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { TextMessage = msg } };
-            var ctx = new SessionContext(Guid.NewGuid(), new Percolator.Identity.SelfId(1), null);
+            var ctx = new SessionContext(Guid.NewGuid(), new Percolator.Identity.SelfId(1), null, null);
 
             Assert.ThrowsAsync<InvalidOperationException>(() => sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None));
         }
@@ -157,7 +159,9 @@ namespace Percolator.ApplicationTests.Network
             var groupCryptoService = new Moq.Mock<Percolator.Cryptography.IGroupCryptographyService>(MockBehavior.Loose);
             var messageWriter = new Moq.Mock<IChatMessageWriter>(MockBehavior.Loose);
             var profileOrchestrationService = new Moq.Mock<Percolator.Application.Chat.IProfileOrchestrationService>(MockBehavior.Loose);
-            var sut = new ProcessInternalEnvelopeHandler(logger, mediator.Object, dht.Object, mq.Object, profile.Object, pendingGroupInvitationRepo.Object, groupCryptoStateRepo.Object, groupMessageCryptoService.Object, groupCryptoService.Object, messageWriter.Object, profileOrchestrationService.Object);
+            var groupInviteHandler = new Moq.Mock<Percolator.Application.Chat.IGroupInviteHandler>(MockBehavior.Loose);
+            var peerIdentityQueries = new Moq.Mock<Percolator.Application.Chat.IPeerIdentityQueries>(MockBehavior.Loose);
+            var sut = new ProcessInternalEnvelopeHandler(logger, mediator.Object, dht.Object, mq.Object, profile.Object, pendingGroupInvitationRepo.Object, groupCryptoStateRepo.Object, groupMessageCryptoService.Object, groupCryptoService.Object, messageWriter.Object, profileOrchestrationService.Object, groupInviteHandler.Object, peerIdentityQueries.Object);
 
             var contractsReq = new Percolator.Contracts.FindNodeRequest
             {
@@ -197,7 +201,9 @@ namespace Percolator.ApplicationTests.Network
             var groupCryptoService = new Moq.Mock<Percolator.Cryptography.IGroupCryptographyService>(MockBehavior.Loose);
             var messageWriter = new Moq.Mock<IChatMessageWriter>(MockBehavior.Loose);
             var profileOrchestrationService = new Moq.Mock<Percolator.Application.Chat.IProfileOrchestrationService>(MockBehavior.Loose);
-            var sut = new ProcessInternalEnvelopeHandler(logger, mediator.Object, dht.Object, mq.Object, profile.Object, pendingGroupInvitationRepo.Object, groupCryptoStateRepo.Object, groupMessageCryptoService.Object, groupCryptoService.Object, messageWriter.Object, profileOrchestrationService.Object);
+            var groupInviteHandler = new Moq.Mock<Percolator.Application.Chat.IGroupInviteHandler>(MockBehavior.Loose);
+            var peerIdentityQueries = new Moq.Mock<Percolator.Application.Chat.IPeerIdentityQueries>(MockBehavior.Loose);
+            var sut = new ProcessInternalEnvelopeHandler(logger, mediator.Object, dht.Object, mq.Object, profile.Object, pendingGroupInvitationRepo.Object, groupCryptoStateRepo.Object, groupMessageCryptoService.Object, groupCryptoService.Object, messageWriter.Object, profileOrchestrationService.Object, groupInviteHandler.Object, peerIdentityQueries.Object);
             var contractsReq = new Percolator.Contracts.FindNodeRequest
             {
                 TargetPeerId = Google.Protobuf.ByteString.CopyFrom(new byte[32])
@@ -237,7 +243,9 @@ namespace Percolator.ApplicationTests.Network
             var groupCryptoService = new Moq.Mock<Percolator.Cryptography.IGroupCryptographyService>(MockBehavior.Loose);
             var messageWriter = new Moq.Mock<IChatMessageWriter>(MockBehavior.Loose);
             var profileOrchestrationService = new Moq.Mock<Percolator.Application.Chat.IProfileOrchestrationService>(MockBehavior.Loose);
-            var sut = new ProcessInternalEnvelopeHandler(logger, mediator.Object, dht.Object, mq4.Object, new Mock<Percolator.Network.IPeerRoutingProfileRepository>().Object, pendingGroupInvitationRepo.Object, groupCryptoStateRepo.Object, groupMessageCryptoService.Object, groupCryptoService.Object, messageWriter.Object, profileOrchestrationService.Object);
+            var groupInviteHandler = new Moq.Mock<Percolator.Application.Chat.IGroupInviteHandler>(MockBehavior.Loose);
+            var peerIdentityQueries = new Moq.Mock<Percolator.Application.Chat.IPeerIdentityQueries>(MockBehavior.Loose);
+            var sut = new ProcessInternalEnvelopeHandler(logger, mediator.Object, dht.Object, mq4.Object, new Mock<Percolator.Network.IPeerRoutingProfileRepository>().Object, pendingGroupInvitationRepo.Object, groupCryptoStateRepo.Object, groupMessageCryptoService.Object, groupCryptoService.Object, messageWriter.Object, profileOrchestrationService.Object, groupInviteHandler.Object, peerIdentityQueries.Object);
 
             // Build InternalEnvelope with DHT FindNodeRequest
             var contractsReq = new Percolator.Contracts.FindNodeRequest

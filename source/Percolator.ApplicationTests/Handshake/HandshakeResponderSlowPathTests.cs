@@ -24,7 +24,7 @@ namespace Percolator.ApplicationTests.Handshake
 
             var lookup = new Mock<IRatchetKeyIndex>(MockBehavior.Strict);
             lookup
-                .Setup(l => l.TryResolveAsync(It.IsAny<int>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()))
+                .Setup(l => l.TryResolveAsync(It.IsAny<uint>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((SessionId?)null); // force slow-path
 
             var mostRecent = new PreHandshakeRecord(

@@ -61,7 +61,7 @@ public class SessionMessageTests
                     });
                 }
             });
-            builder.AddDebug();
+            builder.AddConsole();
             builder.SetMinimumLevel(LogLevel.Debug);
         });
         
@@ -72,7 +72,7 @@ public class SessionMessageTests
         _aliceEphemeral = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         _aliceIdentity = new ActiveIdentityContext
         {
-            Identity = new IdentityRecord(Guid.NewGuid(), "Alice") { SelfIdentityId = new SelfId(1), PublicIdentityId = new PublicIdentityId(Guid.NewGuid()) },
+            Identity = new IdentityRecord(new SelfId(1), new PublicIdentityId(Guid.NewGuid()), new DeviceId(1), "Alice"),
             Keys = new X3dhKeys(
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 _aliceEphemeral
@@ -81,7 +81,7 @@ public class SessionMessageTests
 
         _bobIdentity = new ActiveIdentityContext
         {
-            Identity = new IdentityRecord(Guid.NewGuid(), "Bob") { SelfIdentityId = new SelfId(1), PublicIdentityId = new PublicIdentityId(Guid.NewGuid()) },
+            Identity = new IdentityRecord(new SelfId(2), new PublicIdentityId(Guid.NewGuid()), new DeviceId(1), "Bob"),
             Keys = new X3dhKeys(
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256)

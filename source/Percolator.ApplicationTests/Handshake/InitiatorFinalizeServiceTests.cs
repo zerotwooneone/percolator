@@ -29,10 +29,7 @@ public class InitiatorFinalizeServiceTests
     public async Task TryFinalizeFromFirstResponderAsync_Decrypts_Persists_Session_And_Deletes_PreHandshake()
     {
         // Arrange
-        var self = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "self")
-        {
-            SelfIdentityId = new SelfId(7)
-        };
+        var self = new Percolator.Identity.Model.IdentityRecord(new SelfId(7), new PublicIdentityId(Guid.NewGuid()), new DeviceId(1), "self");
 
         var keysStore = new Mock<ISelfIdentityKeysStore>(MockBehavior.Strict);
         keysStore
@@ -66,7 +63,7 @@ public class InitiatorFinalizeServiceTests
 
         var index = new Mock<IRatchetKeyIndex>(MockBehavior.Strict);
         index.Setup(i => i.UpsertAsync(
-            It.IsAny<int>(),
+            It.IsAny<uint>(),
             It.IsAny<SessionId>(),
             It.IsAny<RatchetEphemeralKey>(),
             It.IsAny<DateTimeOffset>(),
@@ -76,10 +73,10 @@ public class InitiatorFinalizeServiceTests
         var directSessionMappingWriter = new Mock<Percolator.Application.Services.IDirectSessionMappingWriter>(MockBehavior.Strict);
         DirectSessionId? capturedSid = null;
         Percolator.Network.PeerId? capturedRemote = null;
-        int? capturedSelf = null;
+        SelfId? capturedSelf = null;
         directSessionMappingWriter
-            .Setup(w => w.WriteMappingAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<DirectSessionId>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
-            .Callback<Percolator.Network.PeerId, DirectSessionId, int, CancellationToken>((remote, sid, self, _) =>
+            .Setup(w => w.WriteMappingAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<DirectSessionId>(), It.IsAny<SelfId>(), It.IsAny<CancellationToken>()))
+            .Callback<Percolator.Network.PeerId, DirectSessionId, SelfId, CancellationToken>((remote, sid, self, _) =>
             {
                 capturedRemote = remote;
                 capturedSid = sid;
@@ -133,21 +130,18 @@ public class InitiatorFinalizeServiceTests
         directSessionMappingWriter.Verify(w => w.WriteMappingAsync(
             It.IsAny<Percolator.Network.PeerId>(),
             It.IsAny<DirectSessionId>(),
-            It.IsAny<int>(),
+            It.IsAny<SelfId>(),
             It.IsAny<CancellationToken>()), Times.Once);
         Assert.That(capturedSid, Is.Not.Null);
         Assert.That(capturedSid.Value.Value, Is.EqualTo(assigned.Value));
-        Assert.That(capturedSelf, Is.EqualTo(self.SelfIdentityId.Value));
+        Assert.That(capturedSelf, Is.EqualTo(self.SelfIdentityId));
     }
 
     [Test]
     public async Task TryFinalizeFromFirstResponderAsync_WhenMappingWriterThrows_ReturnsSessionId()
     {
         // Arrange
-        var self = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "self")
-        {
-            SelfIdentityId = new SelfId(7)
-        };
+        var self = new Percolator.Identity.Model.IdentityRecord(new SelfId(7), new PublicIdentityId(Guid.NewGuid()), new DeviceId(1), "self");
 
         var keysStore = new Mock<ISelfIdentityKeysStore>(MockBehavior.Strict);
         keysStore
@@ -181,7 +175,7 @@ public class InitiatorFinalizeServiceTests
 
         var index = new Mock<IRatchetKeyIndex>(MockBehavior.Strict);
         index.Setup(i => i.UpsertAsync(
-            It.IsAny<int>(),
+            It.IsAny<uint>(),
             It.IsAny<SessionId>(),
             It.IsAny<RatchetEphemeralKey>(),
             It.IsAny<DateTimeOffset>(),
@@ -190,7 +184,7 @@ public class InitiatorFinalizeServiceTests
 
         var directSessionMappingWriter = new Mock<Percolator.Application.Services.IDirectSessionMappingWriter>(MockBehavior.Strict);
         directSessionMappingWriter
-            .Setup(w => w.WriteMappingAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<DirectSessionId>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Setup(w => w.WriteMappingAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<DirectSessionId>(), It.IsAny<SelfId>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("boom"));
 
         // Build a responder first message compatible with the prehandshake root

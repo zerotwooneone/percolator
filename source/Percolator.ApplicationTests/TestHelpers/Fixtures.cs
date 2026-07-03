@@ -14,7 +14,7 @@ namespace Percolator.ApplicationTests.TestHelpers
 
     public sealed class PreHandshakeRecordBuilder
     {
-        private int _selfId = 1;
+        private uint _selfId = 1;
         private byte[] _pkh = new byte[] { 0x01 };
         private Guid _req = Guid.NewGuid();
         private byte[] _epriv = Array.Empty<byte>();
@@ -24,7 +24,7 @@ namespace Percolator.ApplicationTests.TestHelpers
         private byte[] _remoteSpki = new byte[] { 0x10 };
         private int _id = 1000;
 
-        public PreHandshakeRecordBuilder WithIds(int selfId, int id)
+        public PreHandshakeRecordBuilder WithIds(uint selfId, int id)
         {
             _selfId = selfId; _id = id; return this;
         }
@@ -56,11 +56,11 @@ namespace Percolator.ApplicationTests.TestHelpers
     {
         public static void SetupEmptyEnumerate(Mock<IPreHandshakeSessionStore> store)
         {
-            store.Setup(s => s.EnumeratePendingAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
-                 .Returns((int _, CancellationToken __) => AsyncSeq.Empty<PreHandshakeRecord>());
+            store.Setup(s => s.EnumeratePendingAsync(It.IsAny<uint>(), It.IsAny<CancellationToken>()))
+                 .Returns((uint _, CancellationToken __) => AsyncSeq.Empty<PreHandshakeRecord>());
         }
 
-        public static void SetupMostRecentAndDelete(Mock<IPreHandshakeSessionStore> store, int selfId, PreHandshakeRecord record)
+        public static void SetupMostRecentAndDelete(Mock<IPreHandshakeSessionStore> store, uint selfId, PreHandshakeRecord record)
         {
             store.Setup(s => s.TryGetMostRecentAsync(selfId, It.IsAny<CancellationToken>()))
                  .ReturnsAsync(record);

@@ -1,7 +1,9 @@
 using Microsoft.Extensions.Logging;
 using Moq;
 using Percolator.Application.Services;
+using Percolator.Identity;
 using Percolator.Network;
+using PeerId = Percolator.Network.PeerId;
 
 namespace Percolator.ApplicationTests.Services;
 

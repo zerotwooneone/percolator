@@ -3,6 +3,7 @@ using Google.Protobuf;
 using MediatR;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using Percolator.Application.Chat;
 using Percolator.Application.KeyExchange;
 using Percolator.Application.Network;
 using Percolator.Application.Services;
@@ -40,7 +41,7 @@ public sealed class StandardHandshakeIngressTests
         var spk = (spkPrivate: new byte[100], spkPublicSpki: new byte[64], preKeySignature: new byte[64], expires: clock.UtcNow);
         var spkId = Guid.NewGuid();
         selfPreKeys
-            .Setup(s => s.TryGetSignedPreKeyAsync(selfIdentityId.Value, spkId, It.IsAny<CancellationToken>()))
+            .Setup(s => s.TryGetSignedPreKeyAsync(selfIdentityId, spkId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(spk);
 
         var sessionCrypto = new Mock<ISessionCrypto>(MockBehavior.Strict);
@@ -61,10 +62,10 @@ public sealed class StandardHandshakeIngressTests
         var directSessionMappingWriter = new Mock<IDirectSessionMappingWriter>(MockBehavior.Strict);
         DirectSessionId? capturedSid = null;
         Percolator.Network.PeerId? capturedRemote = null;
-        int? capturedSelf = null;
+        SelfId? capturedSelf = null;
         directSessionMappingWriter
-            .Setup(w => w.WriteMappingAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<DirectSessionId>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
-            .Callback<Percolator.Network.PeerId, DirectSessionId, int, CancellationToken>((remote, sid, self, _) =>
+            .Setup(w => w.WriteMappingAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<DirectSessionId>(), It.IsAny<SelfId>(), It.IsAny<CancellationToken>()))
+            .Callback<Percolator.Network.PeerId, DirectSessionId, SelfId, CancellationToken>((remote, sid, self, _) =>
             {
                 capturedRemote = remote;
                 capturedSid = sid;
@@ -73,12 +74,12 @@ public sealed class StandardHandshakeIngressTests
             .Returns(Task.CompletedTask);
 
         var peerId = new Percolator.Identity.PeerId(1);
-        var peerIdentity = new PeerIdentity(peerId);
+        var peerIdentity = new PeerIdentity(peerId, new PublicIdentityId(Guid.NewGuid()));
         peerIdentity.AddKey(new byte[32], clock.UtcNow, clock.UtcNow.AddYears(100), clock.UtcNow);
         
         var peerIdentities = new Mock<IPeerIdentityRepository>(MockBehavior.Strict);
         peerIdentities
-            .Setup(s => s.FindByPublicKeyHashAsync(It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.FindByPublicKeyHashAsync(It.IsAny<IdentityPublicKeyHash>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(peerIdentity);
         peerIdentities
             .Setup(s => s.SaveAsync(It.IsAny<PeerIdentity>(), It.IsAny<CancellationToken>()))
@@ -125,10 +126,10 @@ public sealed class StandardHandshakeIngressTests
         directSessionMappingWriter.Verify(w => w.WriteMappingAsync(
             It.IsAny<Percolator.Network.PeerId>(),
             It.IsAny<DirectSessionId>(),
-            It.IsAny<int>(),
+            It.IsAny<SelfId>(),
             It.IsAny<CancellationToken>()), Times.Once);
         Assert.That(capturedSid, Is.Not.Null);
-        Assert.That(capturedSelf, Is.EqualTo(selfIdentityId.Value));
+        Assert.That(capturedSelf, Is.EqualTo(selfIdentityId));
     }
 
     [Test]
@@ -151,7 +152,7 @@ public sealed class StandardHandshakeIngressTests
         var spk = (spkPrivate: new byte[100], spkPublicSpki: new byte[64], preKeySignature: new byte[64], expires: clock.UtcNow);
         var spkId = Guid.NewGuid();
         selfPreKeys
-            .Setup(s => s.TryGetSignedPreKeyAsync(selfIdentityId.Value, spkId, It.IsAny<CancellationToken>()))
+            .Setup(s => s.TryGetSignedPreKeyAsync(selfIdentityId, spkId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(spk);
 
         var sessionCrypto = new Mock<ISessionCrypto>(MockBehavior.Strict);
@@ -171,16 +172,16 @@ public sealed class StandardHandshakeIngressTests
 
         var directSessionMappingWriter = new Mock<IDirectSessionMappingWriter>(MockBehavior.Strict);
         directSessionMappingWriter
-            .Setup(w => w.WriteMappingAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<DirectSessionId>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Setup(w => w.WriteMappingAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<DirectSessionId>(), It.IsAny<SelfId>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("boom"));
 
         var peerId = new Percolator.Identity.PeerId(1);
-        var peerIdentity = new PeerIdentity(peerId);
+        var peerIdentity = new PeerIdentity(peerId, new PublicIdentityId(Guid.NewGuid()));
         peerIdentity.AddKey(new byte[32], clock.UtcNow, clock.UtcNow.AddYears(100), clock.UtcNow);
         
         var peerIdentities = new Mock<IPeerIdentityRepository>(MockBehavior.Strict);
         peerIdentities
-            .Setup(s => s.FindByPublicKeyHashAsync(It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.FindByPublicKeyHashAsync(It.IsAny<IdentityPublicKeyHash>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(peerIdentity);
         peerIdentities
             .Setup(s => s.SaveAsync(It.IsAny<PeerIdentity>(), It.IsAny<CancellationToken>()))

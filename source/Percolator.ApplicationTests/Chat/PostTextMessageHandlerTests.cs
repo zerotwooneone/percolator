@@ -8,6 +8,8 @@ using Percolator.Chat.Messaging.App;
 using Percolator.Chat.Messaging.App.Commands;
 using Percolator.Chat.Messaging.Events;
 using Percolator.Chat.Messaging.ValueObjects;
+using Percolator.Chat.GroupMembership;
+using Percolator.Chat.GroupLedger;
 using Percolator.Identity;
 using PublicMessageId = Percolator.Chat.Messaging.PublicMessageId;
 
@@ -32,12 +34,12 @@ public class PostTextMessageHandlerTests
 
     private static DirectConversation MakeConversation()
     {
-        var peer1 = new ChatPeerId(Guid.NewGuid());
-        var peer2 = new ChatPeerId(Guid.NewGuid());
+        var peer1 = new ChatPeerId(1);
+        var selfId = new ChatSelfId(2);
         return new DirectConversation(
             new ConversationId(Guid.NewGuid()),
             peer1,
-            peer2);
+            selfId);
     }
 
     [Test]
@@ -49,17 +51,18 @@ public class PostTextMessageHandlerTests
         var content = "hello";
         var sentAt = DateTimeOffset.UtcNow;
         var convo = MakeConversation();
-        var selfIdentityId = 42;
-        var selfParticipantId = new ChatPeerId(Guid.NewGuid());
+        var selfIdentityId = new ChatSelfId(42);
+        var publicIdentityId = new Percolator.Chat.GroupLedger.PublicIdentityId(Guid.NewGuid());
+        var selfParticipantId = new Percolator.Chat.GroupMembership.LocalParticipantId(publicIdentityId, selfIdentityId);
 
-        _active.SetActiveIdentity(new Percolator.Identity.Model.IdentityRecord(selfParticipantId.Value, "self") { PublicIdentityId = new PublicIdentityId(selfParticipantId.Value) });
+        _active.SetActiveIdentity(new Percolator.Identity.Model.IdentityRecord(new SelfId(1), new Percolator.Identity.PublicIdentityId(publicIdentityId.Value), new DeviceId(1), "self"));
 
         _resolver
             .Setup(r => r.ResolveAsync(lookup, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new DirectConversationResolution(convo, selfIdentityId));
 
         _writer
-            .Setup(w => w.AddTextMessageAsync(convo.Id, selfIdentityId, selfParticipantId, content, messageId, sentAt, It.IsAny<CancellationToken>()))
+            .Setup(w => w.AddTextMessageAsync(convo.Id, selfParticipantId, content, messageId, sentAt, It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         _publisher
@@ -75,8 +78,8 @@ public class PostTextMessageHandlerTests
             _resolver.Object,
             _writer.Object,
             _publisher.Object,
-            _active);
-        var cmd = new PostTextMessageCommand(lookup, messageId, content, sentAt);
+            Mock.Of<Percolator.Application.Chat.ISelfIdentityQueries>());
+        var cmd = new PostTextMessageCommand(lookup, messageId, content, sentAt, selfIdentityId);
 
         // Act
         await handler.Handle(cmd, CancellationToken.None);
@@ -97,8 +100,8 @@ public class PostTextMessageHandlerTests
             _resolver.Object,
             _writer.Object,
             _publisher.Object,
-            _active);
-        var cmd = new PostTextMessageCommand(lookup, messageId, "x", DateTimeOffset.UtcNow);
+            Mock.Of<Percolator.Application.Chat.ISelfIdentityQueries>());
+        var cmd = new PostTextMessageCommand(lookup, messageId, "x", DateTimeOffset.UtcNow, new ChatSelfId(1));
 
         // Act
         Func<Task> act = async () => await handler.Handle(cmd, CancellationToken.None);

@@ -25,12 +25,12 @@ public sealed class OutboundMessageWireTapTests
         var tap = new OutboundMessageWireTap(options);
 
         var active = new ActiveIdentityContext();
-        active.Identity = new IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = new SelfId(1) };
+        active.Identity = new IdentityRecord(new SelfId(1), new PublicIdentityId(Guid.NewGuid()), new DeviceId(1), "self");
 
         var sessions = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
-        sessions.Setup(s => s.ListAsync(It.IsAny<int>()))
+        sessions.Setup(s => s.ListAsync(It.IsAny<uint>()))
             .ReturnsAsync(Array.Empty<DirectSession>());
-        sessions.Setup(s => s.GetByRemotePeerIdAsync(It.IsAny<PeerId>(), It.IsAny<int>()))
+        sessions.Setup(s => s.GetByRemotePeerIdAsync(It.IsAny<PeerId>(), It.IsAny<uint>()))
             .ReturnsAsync(new DirectSession(new PeerId(1), new DirectSessionId(Guid.NewGuid())));
 
         var secure = new Mock<ISecureMessagingService>(MockBehavior.Strict);
@@ -38,7 +38,7 @@ public sealed class OutboundMessageWireTapTests
             .ReturnsAsync(SessionRatchetMessage.FromBytes(new byte[] { 0xAA, 0xBB }));
 
         var sender = new Mock<INetworkSender>(MockBehavior.Strict);
-        sender.Setup(s => s.SendAsync(It.IsAny<int>(), It.IsAny<PeerId>(), It.IsAny<NetworkPayload>(), It.IsAny<SendStrategy>(), It.IsAny<CancellationToken>()))
+        sender.Setup(s => s.SendAsync(It.IsAny<uint>(), It.IsAny<PeerId>(), It.IsAny<NetworkPayload>(), It.IsAny<SendStrategy>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SendOutcome { Success = true, Path = "Direct", AttemptedPaths = new[] { "Direct" }, Attempts = 1 });
 
         var profileOrchestrationService = new Mock<Percolator.Application.Chat.IProfileOrchestrationService>(MockBehavior.Loose);
@@ -52,11 +52,11 @@ public sealed class OutboundMessageWireTapTests
             profileOrchestrationService.Object);
 
         var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { TextMessage = new TextMessage { Content = "test" } } };
-        var recipient = new Percolator.Identity.PeerId(Guid.NewGuid());
+        var recipient = new Percolator.Identity.PeerId((uint)Random.Shared.Next(1, 1000000));
 
         _ = await sut.SendMessageAsync(env, recipient, CancellationToken.None);
 
-        sender.Verify(s => s.SendAsync(It.IsAny<int>(), It.IsAny<PeerId>(), It.IsAny<NetworkPayload>(), It.IsAny<SendStrategy>(), It.IsAny<CancellationToken>()), Times.Once);
+        sender.Verify(s => s.SendAsync(It.IsAny<uint>(), It.IsAny<PeerId>(), It.IsAny<NetworkPayload>(), It.IsAny<SendStrategy>(), It.IsAny<CancellationToken>()), Times.Once);
 
         tap.Snapshot().Should().BeEmpty();
     }

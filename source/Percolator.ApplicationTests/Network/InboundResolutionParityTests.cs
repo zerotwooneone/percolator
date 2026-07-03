@@ -29,7 +29,7 @@ namespace Percolator.ApplicationTests.Network
 
             var expectedSid = new SessionId(Guid.NewGuid());
             ratchetIndex
-                .Setup(x => x.TryResolveAsync(It.IsAny<int>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()))
+                .Setup(x => x.TryResolveAsync(It.IsAny<uint>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(expectedSid);
 
             var finalize = new Mock<IInitiatorFinalizeService>(MockBehavior.Loose);

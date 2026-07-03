@@ -1,3 +1,4 @@
+using System.Linq;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -17,10 +18,18 @@ public class FetchQueuedMessagesHandlerTests
     {
         var repo = new Mock<IMessageQueueRepository>(MockBehavior.Loose);
         var logger = new Mock<ILogger<FetchQueuedMessagesHandler>>();
-        var sut = new FetchQueuedMessagesHandler(logger.Object, repo.Object);
+        var peerIdentityQueries = new Mock<Percolator.Application.Chat.IPeerIdentityQueries>(MockBehavior.Loose);
+        var sut = new FetchQueuedMessagesHandler(logger.Object, repo.Object, peerIdentityQueries.Object);
         var peerId = new PeerId(1);
+        var pkhBytes = BitConverter.GetBytes(peerId.Value).Concat(new byte[28]).ToArray();
+        var pkh = Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytes(pkhBytes);
+        var msg1 = new byte[] { 0x01, 0x02 };
+        var msg2 = new byte[] { 0x03 };
 
-        repo.Setup(r => r.FetchAsync(peerId, 100, It.IsAny<CancellationToken>()))
+        peerIdentityQueries.Setup(q => q.GetPublicKeyHashAsync(peerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(pkh);
+
+        repo.Setup(r => r.FetchAsync(pkh, 100, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Array.Empty<(Guid, QueuedPayloadBytes)>());
 
         var result = await sut.Handle(new FetchQueuedMessagesQuery(peerId, 0), CancellationToken.None);
@@ -33,10 +42,16 @@ public class FetchQueuedMessagesHandlerTests
     {
         var repo = new Mock<IMessageQueueRepository>(MockBehavior.Loose);
         var logger = new Mock<ILogger<FetchQueuedMessagesHandler>>();
-        var sut = new FetchQueuedMessagesHandler(logger.Object, repo.Object);
+        var peerIdentityQueries = new Mock<Percolator.Application.Chat.IPeerIdentityQueries>(MockBehavior.Loose);
+        var sut = new FetchQueuedMessagesHandler(logger.Object, repo.Object, peerIdentityQueries.Object);
         var peerId = new PeerId(1);
+        var pkhBytes = BitConverter.GetBytes(peerId.Value).Concat(new byte[28]).ToArray();
+        var pkh = Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytes(pkhBytes);
 
-        repo.Setup(r => r.FetchAsync(peerId, 500, It.IsAny<CancellationToken>()))
+        peerIdentityQueries.Setup(q => q.GetPublicKeyHashAsync(peerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(pkh);
+
+        repo.Setup(r => r.FetchAsync(pkh, 500, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Array.Empty<(Guid, QueuedPayloadBytes)>());
 
         var result = await sut.Handle(new FetchQueuedMessagesQuery(peerId, 10_000), CancellationToken.None);
@@ -49,12 +64,18 @@ public class FetchQueuedMessagesHandlerTests
     {
         var repo = new Mock<IMessageQueueRepository>(MockBehavior.Loose);
         var logger = new Mock<ILogger<FetchQueuedMessagesHandler>>();
-        var sut = new FetchQueuedMessagesHandler(logger.Object, repo.Object);
+        var peerIdentityQueries = new Mock<Percolator.Application.Chat.IPeerIdentityQueries>(MockBehavior.Loose);
+        var sut = new FetchQueuedMessagesHandler(logger.Object, repo.Object, peerIdentityQueries.Object);
         var peerId = new PeerId(1);
+        var pkhBytes = BitConverter.GetBytes(peerId.Value).Concat(new byte[28]).ToArray();
+        var pkh = Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytes(pkhBytes);
         var msg1 = new byte[] { 0x01, 0x02 };
         var msg2 = new byte[] { 0x03 };
 
-        repo.Setup(r => r.FetchAsync(peerId, 2, It.IsAny<CancellationToken>()))
+        peerIdentityQueries.Setup(q => q.GetPublicKeyHashAsync(peerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(pkh);
+
+        repo.Setup(r => r.FetchAsync(pkh, 2, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new[] { (Guid.NewGuid(), QueuedPayloadBytes.FromBytesOwned(msg1)), (Guid.NewGuid(), QueuedPayloadBytes.FromBytesOwned(msg2)) });
 
         var result = await sut.Handle(new FetchQueuedMessagesQuery(peerId, 2), CancellationToken.None);

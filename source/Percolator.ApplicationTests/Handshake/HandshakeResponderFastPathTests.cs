@@ -59,7 +59,7 @@ namespace Percolator.ApplicationTests.Handshake
             await handler.Handle(cmd, CancellationToken.None);
 
             // Assert
-            lookup.Verify(l => l.TryResolveAsync(It.IsAny<int>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()), Times.Once);
+            lookup.Verify(l => l.TryResolveAsync(It.IsAny<uint>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()), Times.Once);
             lookup.VerifyAll();
         }
     }

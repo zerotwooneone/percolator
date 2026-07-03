@@ -17,8 +17,8 @@ public class DispatchDeliveredReceiptHandlerTests
     private readonly Mock<IPeerPublicSigningKeyStore> _keyStoreMock;
     private readonly ILogger<DispatchDeliveredReceiptHandler> _logger;
     private readonly DispatchDeliveredReceiptHandler _sut;
-    private readonly PeerId _selfId = new(Guid.NewGuid());
-    private readonly PeerId _recipientId = new(Guid.NewGuid());
+    private readonly PeerId _selfId = new((uint)Random.Shared.Next(1, 1000000));
+    private readonly PeerId _recipientId = new((uint)Random.Shared.Next(1, 1000000));
     private readonly Guid _messageId = Guid.NewGuid();
     private readonly DateTime _sentUtc = DateTime.UtcNow;
 

@@ -65,7 +65,7 @@ namespace Percolator.ApplicationTests.Network
                     It.IsAny<Percolator.Network.PublicKey>()))
                 .Returns(true);
 
-            peerRepo.Setup(r => r.FindByPublicKeyHashAsync(It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
+            peerRepo.Setup(r => r.FindByPublicKeyHashAsync(It.IsAny<IdentityPublicKeyHash>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((PeerIdentity?)null);
             peerRepo.Setup(r => r.SaveAsync(It.IsAny<PeerIdentity>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
