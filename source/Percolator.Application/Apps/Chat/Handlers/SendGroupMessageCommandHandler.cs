@@ -101,9 +101,9 @@ public sealed class SendGroupMessageCommandHandler : IRequestHandler<Commands.Se
         }
 
         // Send to relay (Signal Group V2: sender sends once to relay, relay fans out to members)
-        var relayRoute = new RecipientRoute(new Percolator.Identity.PeerId(group.RelayPeerId.Value), null);
+        var identityPeerId = new Percolator.Identity.PeerId(group.RelayPeerId.Value);
         var envelope = CreateGroupMessageEnvelope(request.ConversationId, ciphertext);
-        await _envelopeSender.SendChatEnvelopeToPeerAsync(envelope, relayRoute, cancellationToken).ConfigureAwait(false);
+        await _envelopeSender.SendChatEnvelopeToPeerAsync(envelope, identityPeerId, cancellationToken).ConfigureAwait(false);
     }
 
     private static ChatEnvelope CreateGroupMessageEnvelope(ConversationId conversationId, Ciphertext ciphertext)
