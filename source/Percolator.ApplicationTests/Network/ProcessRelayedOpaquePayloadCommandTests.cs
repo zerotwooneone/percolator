@@ -231,7 +231,8 @@ public class ProcessRelayedOpaquePayloadCommandTests
             Version = 1,
             InitiatorIdentityKeySpki = ByteString.CopyFrom(helloSpki),
             InitiatorEphemeralKeySpki = ByteString.CopyFrom(new byte[] { 0x20 }),
-            SignedPreKeyId = ByteString.CopyFromUtf8("spk-1")
+            SignedPreKeyId = ByteString.CopyFromUtf8("spk-1"),
+            InitiatorPublicIdentityId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray())
         };
 
         var payload = Percolator.Network.Payload.FromBytes(hello.ToByteArray());

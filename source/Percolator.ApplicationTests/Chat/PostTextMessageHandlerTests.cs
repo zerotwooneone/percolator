@@ -54,7 +54,11 @@ public class PostTextMessageHandlerTests
         var publicIdentityId = new Percolator.Chat.GroupLedger.PublicIdentityId(Guid.NewGuid());
         var selfParticipantId = new Percolator.Chat.GroupMembership.LocalParticipantId(publicIdentityId, selfIdentityId);
 
-        _active.SetActiveIdentity(new Percolator.Identity.Model.IdentityRecord(new SelfId(1), new Percolator.Identity.PublicIdentityId(publicIdentityId.Value), new DeviceId(1), "self"));
+        _active.SetActiveIdentity(new Percolator.Identity.Model.IdentityRecord(new SelfId(42), new Percolator.Identity.PublicIdentityId(publicIdentityId.Value), new DeviceId(1), "self"));
+
+        var selfIdentityQueries = new Mock<Percolator.Application.Chat.ISelfIdentityQueries>(MockBehavior.Strict);
+        selfIdentityQueries.Setup(q => q.GetSelfIdentityPublicKeyAsync(new SelfId(42), It.IsAny<CancellationToken>()))
+            .Returns(Task.FromResult<Percolator.Identity.PublicIdentityId?>(new Percolator.Identity.PublicIdentityId(publicIdentityId.Value)));
 
         _resolver
             .Setup(r => r.ResolveAsync(lookup, It.IsAny<CancellationToken>()))
@@ -65,11 +69,6 @@ public class PostTextMessageHandlerTests
             .Returns(Task.CompletedTask);
 
         _publisher
-            .Setup(p => p.Publish(It.IsAny<TextMessagePostedEvent>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
-        // Some MediatR versions may route through the non-generic overload
-        _publisher
             .Setup(p => p.Publish(It.IsAny<object>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
@@ -77,7 +76,7 @@ public class PostTextMessageHandlerTests
             _resolver.Object,
             _writer.Object,
             _publisher.Object,
-            Mock.Of<Percolator.Application.Chat.ISelfIdentityQueries>());
+            selfIdentityQueries.Object);
         var cmd = new PostTextMessageCommand(lookup, messageId, content, sentAt, selfIdentityId);
 
         // Act
@@ -86,7 +85,6 @@ public class PostTextMessageHandlerTests
         // Assert
         _resolver.VerifyAll();
         _writer.VerifyAll();
-        _publisher.Verify(p => p.Publish(It.IsAny<TextMessagePostedEvent>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Test]

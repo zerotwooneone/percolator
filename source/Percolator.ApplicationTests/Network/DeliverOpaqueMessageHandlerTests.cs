@@ -358,7 +358,8 @@ namespace Percolator.ApplicationTests.Network;
         var headerKey = PreKey.FromBytes(RandomBytes(64));
         var pingEnvelope = new Percolator.Contracts.InternalEnvelope
         {
-            DhtEnvelope = new Percolator.Contracts.DhtEnvelope { PingRequest = new Percolator.Contracts.PingRequest() }
+            DhtEnvelope = new Percolator.Contracts.DhtEnvelope { PingRequest = new Percolator.Contracts.PingRequest() },
+            SourceDeviceId = 1
         };
         var plaintext = Plaintext.FromBytes(pingEnvelope.ToByteArray());
         var payloadBytes = BuildRatchetPayload(headerKey.ToArray(), plaintext.ToArray());
@@ -541,6 +542,7 @@ namespace Percolator.ApplicationTests.Network;
         var plain = Plaintext.FromBytes(BuildEnvelope(env =>
         {
             env.DhtEnvelope = new DhtEnvelope { PingRequest = new PingRequest() };
+            env.SourceDeviceId = 1;
         }).Bytes);
 
         secureSvc.Setup(s => s.DecryptInboundAsync(It.IsAny<uint>(), It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
@@ -583,6 +585,7 @@ namespace Percolator.ApplicationTests.Network;
         var plain = Plaintext.FromBytes(BuildEnvelope(env =>
         {
             env.DhtEnvelope = new DhtEnvelope { FindNodeRequest = new Contracts.FindNodeRequest { TargetPeerId = ByteString.CopyFrom(RandomBytes(32)) } };
+            env.SourceDeviceId = 1;
         }).Bytes);
 
         secureSvc.Setup(s => s.DecryptInboundAsync(It.IsAny<uint>(), It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))

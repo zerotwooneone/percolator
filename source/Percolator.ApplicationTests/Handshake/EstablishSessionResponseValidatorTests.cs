@@ -104,7 +104,8 @@ public sealed class EstablishSessionResponseValidatorTests
         {
             Version = 1,
             EphemeralKey = ByteString.CopyFrom(new byte[32]),
-            SessionId = sessionId.ToString()
+            SessionId = sessionId.ToString(),
+            PublicIdentityId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray())
         };
         var payloadBytes = payload.ToByteArray();
         var signature = ecdsa.SignData(payloadBytes, HashAlgorithmName.SHA256);
