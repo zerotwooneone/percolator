@@ -38,15 +38,19 @@ public class PeerRoutingProfileRelayTests
     [Test]
     public void PruneStaleRelays_RemovesOlderThanCutoff()
     {
+        // ARRANGE
         var profile = new PeerRoutingProfile();
         var oldRelay = new PeerId(1);
-        var freshRelay = new PeerId(1);
-        var now = DateTimeOffset.UtcNow;
+        var freshRelay = new PeerId(2);
+        var now = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero);
 
         profile.AddOrRefreshRelay(oldRelay, now.AddMinutes(-30));
         profile.AddOrRefreshRelay(freshRelay, now);
 
-        profile.Invoking(p => p.PruneStaleRelays(now.AddMinutes(-5))).Should().NotThrow();
+        // ACT
+        profile.PruneStaleRelays(now.AddMinutes(-5));
+
+        // ASSERT
         profile.Relays.Should().NotContain(r => r.RelayPeerId == oldRelay);
         profile.Relays.Should().Contain(r => r.RelayPeerId == freshRelay);
     }
