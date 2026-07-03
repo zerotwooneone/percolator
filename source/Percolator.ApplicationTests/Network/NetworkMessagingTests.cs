@@ -29,7 +29,7 @@ public class NetworkMessagingTests
         var exec = new Mock<ISendExecutor>();
         IReadOnlyList<PlannedRoute>? capturedRoutes = null;
         exec.Setup(e => e.ExecuteAsync(It.IsAny<uint>(), peer, It.IsAny<NetworkPayload>(), It.IsAny<IReadOnlyList<PlannedRoute>>(), It.IsAny<CancellationToken>()))
-            .Callback<int, PeerId, NetworkPayload, IReadOnlyList<PlannedRoute>, CancellationToken>((_, __, ___, routes, ____) => capturedRoutes = routes)
+            .Callback<uint, PeerId, NetworkPayload, IReadOnlyList<PlannedRoute>, CancellationToken>((_, __, ___, routes, ____) => capturedRoutes = routes)
             .ReturnsAsync(new SendOutcome { Success = true, Path = "Direct", AttemptedPaths = new[] { "Direct" }, Attempts = 1 });
 
         var sut = new DefaultNetworkSender(planner, repo.Object, topo.Object, exec.Object, candidateRepo.Object);
@@ -55,7 +55,7 @@ public class NetworkMessagingTests
         var exec = new Mock<ISendExecutor>();
         IReadOnlyList<PlannedRoute>? capturedRoutes = null;
         exec.Setup(e => e.ExecuteAsync(It.IsAny<uint>(), peer, It.IsAny<NetworkPayload>(), It.IsAny<IReadOnlyList<PlannedRoute>>(), It.IsAny<CancellationToken>()))
-            .Callback<int, PeerId, NetworkPayload, IReadOnlyList<PlannedRoute>, CancellationToken>((_, __, ___, routes, ____) => capturedRoutes = routes)
+            .Callback<uint, PeerId, NetworkPayload, IReadOnlyList<PlannedRoute>, CancellationToken>((_, __, ___, routes, ____) => capturedRoutes = routes)
             .ReturnsAsync(new SendOutcome { Success = true, Path = $"Relay:{relay.Value}", AttemptedPaths = new[] { $"Relay:{relay.Value}" }, Attempts = 1 });
 
         var sut = new DefaultNetworkSender(planner, repo.Object, topo.Object, exec.Object, candidateRepo.Object);
@@ -118,7 +118,7 @@ public class NetworkMessagingTests
         
         IReadOnlyList<PlannedRoute>? capturedRoutes = null;
         exec.Setup(e => e.ExecuteAsync(It.IsAny<uint>(), peer, It.IsAny<NetworkPayload>(), It.IsAny<IReadOnlyList<PlannedRoute>>(), It.IsAny<CancellationToken>()))
-            .Callback<int, PeerId, NetworkPayload, IReadOnlyList<PlannedRoute>, CancellationToken>((_, __, ___, routes, ____) => capturedRoutes = routes)
+            .Callback<uint, PeerId, NetworkPayload, IReadOnlyList<PlannedRoute>, CancellationToken>((_, __, ___, routes, ____) => capturedRoutes = routes)
             .ReturnsAsync(new SendOutcome { Success = true, Path = $"Relay:{relayPeerId.Value}", AttemptedPaths = new[] { $"Relay:{relayPeerId.Value}" }, Attempts = 1 });
 
         var outcome = await sut.SendAsync(1, peer, new NetworkPayload(new byte[] {1,2,3}), SendStrategy.DirectThenRelay, CancellationToken.None);

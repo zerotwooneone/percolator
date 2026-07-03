@@ -52,11 +52,13 @@ namespace Percolator.ApplicationTests.Network
                     PreKeySignature = ByteString.CopyFrom(new byte[64])
                 },
                 ExpiresAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow.AddMinutes(10)),
-                RequestCorrelationId = "11111111-1111-1111-1111-111111111111"
+                RequestCorrelationId = "11111111-1111-1111-1111-111111111111",
+                InviterPublicIdentityId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray())
             };
 
             var payloadBytes = payload.ToByteArray();
             var payloadSignatureBytes = new byte[64];
+            var inviterPublicIdentityId = new PublicIdentityId(new Guid(payload.InviterPublicIdentityId.ToByteArray()));
 
             // Mocks
             signing.Setup(s => s.Verify(
@@ -67,6 +69,8 @@ namespace Percolator.ApplicationTests.Network
 
             peerRepo.Setup(r => r.FindByPublicKeyHashAsync(It.IsAny<IdentityPublicKeyHash>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((PeerIdentity?)null);
+            peerRepo.Setup(r => r.GetOrCreateAsync(inviterPublicIdentityId, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new PeerIdentity(new Percolator.Identity.PeerId((uint)Random.Shared.Next(1, 1000000)), inviterPublicIdentityId));
             peerRepo.Setup(r => r.SaveAsync(It.IsAny<PeerIdentity>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
 
@@ -133,7 +137,8 @@ namespace Percolator.ApplicationTests.Network
                     PreKeySignature = ByteString.CopyFrom(new byte[64])
                 },
                 ExpiresAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow.AddMinutes(10)),
-                RequestCorrelationId = "11111111-1111-1111-1111-111111111111"
+                RequestCorrelationId = "11111111-1111-1111-1111-111111111111",
+                InviterPublicIdentityId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray())
             };
 
             var payloadBytes = payload.ToByteArray();
@@ -197,7 +202,8 @@ namespace Percolator.ApplicationTests.Network
                     PreKeySignature = ByteString.CopyFrom(new byte[64])
                 },
                 ExpiresAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow.AddMinutes(10)),
-                RequestCorrelationId = "22222222-2222-2222-2222-222222222222"
+                RequestCorrelationId = "22222222-2222-2222-2222-222222222222",
+                InviterPublicIdentityId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray())
             };
             var payloadBytes = payload.ToByteArray();
             var payloadSignatureBytes = new byte[64];
@@ -279,7 +285,8 @@ namespace Percolator.ApplicationTests.Network
                     PreKeySignature = ByteString.CopyFrom(new byte[64])
                 },
                 ExpiresAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow.AddMinutes(-10)),
-                RequestCorrelationId = "33333333-3333-3333-3333-333333333333"
+                RequestCorrelationId = "33333333-3333-3333-3333-333333333333",
+                InviterPublicIdentityId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray())
             };
             var payloadBytes = payload.ToByteArray();
             var payloadSignatureBytes = new byte[64];

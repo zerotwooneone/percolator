@@ -41,7 +41,8 @@ namespace Percolator.ApplicationTests.Network;
             var innerOpaque = RandomBytes(24);
             var plain = Plaintext.FromBytes(new InternalEnvelope
             {
-                RelayOpaqueEnvelope = new RelayOpaqueEnvelope { OpaquePayload = Google.Protobuf.ByteString.CopyFrom(innerOpaque) }
+                RelayOpaqueEnvelope = new RelayOpaqueEnvelope { OpaquePayload = Google.Protobuf.ByteString.CopyFrom(innerOpaque) },
+                SourceDeviceId = 1
             }.ToByteArray());
             var payloadBytes = BuildRatchetPayload(headerKey.ToArray(), plain.ToArray());
 
@@ -97,7 +98,8 @@ namespace Percolator.ApplicationTests.Network;
             var innerOpaque = RandomBytes(24);
             var plain = Plaintext.FromBytes(new InternalEnvelope
             {
-                RelayOpaqueEnvelope = new RelayOpaqueEnvelope { OpaquePayload = Google.Protobuf.ByteString.CopyFrom(innerOpaque) }
+                RelayOpaqueEnvelope = new RelayOpaqueEnvelope { OpaquePayload = Google.Protobuf.ByteString.CopyFrom(innerOpaque) },
+                SourceDeviceId = 1
             }.ToByteArray());
             var payloadBytes = BuildRatchetPayload(headerKey.ToArray(), plain.ToArray());
 
@@ -154,7 +156,8 @@ namespace Percolator.ApplicationTests.Network;
                 {
                     OpaquePayload = ByteString.CopyFrom(innerOpaque),
                     MessageAckId = ByteString.CopyFrom(ackId.ToByteArray())
-                }
+                },
+                SourceDeviceId = 1
             }.ToByteArray());
             var payloadBytes = BuildRatchetPayload(headerKey.ToArray(), plain.ToArray());
 
@@ -209,7 +212,7 @@ namespace Percolator.ApplicationTests.Network;
             }
         };
 
-        var env = new InternalEnvelope { MessageQueueEnvelope = mqReq };
+        var env = new InternalEnvelope { MessageQueueEnvelope = mqReq, SourceDeviceId = 1 };
         var plain = Plaintext.FromBytes(env.ToByteArray());
         var payloadBytes = BuildRatchetPayload(headerKey.ToArray(), plain.ToArray());
 
@@ -257,7 +260,7 @@ namespace Percolator.ApplicationTests.Network;
 
         // Build a valid ratchet payload with a Chat TextMessage (or any allowed case)
         var headerKey = PreKey.FromBytes(RandomBytes(64));
-        var env = new InternalEnvelope { MessageQueueEnvelope = new MessageQueueEnvelope { FetchQueuedMessagesRequest = new FetchQueuedMessagesRequest { MaxCount = 5 } } };
+        var env = new InternalEnvelope { MessageQueueEnvelope = new MessageQueueEnvelope { FetchQueuedMessagesRequest = new FetchQueuedMessagesRequest { MaxCount = 5 } }, SourceDeviceId = 1 };
         var plain = Plaintext.FromBytes(env.ToByteArray());
         var payloadBytes = BuildRatchetPayload(headerKey.ToArray(), plain.ToArray());
 
@@ -312,7 +315,7 @@ namespace Percolator.ApplicationTests.Network;
             InitiatorEphemeralKeySpki = ByteString.CopyFrom(eph.ExportSubjectPublicKeyInfo()),
             SignedPreKeyId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
         };
-        var innerEnv = new InternalEnvelope { RelayOpaqueEnvelope = new RelayOpaqueEnvelope { OpaquePayload = ByteString.CopyFrom(hello.ToByteArray()) } };
+        var innerEnv = new InternalEnvelope { RelayOpaqueEnvelope = new RelayOpaqueEnvelope { OpaquePayload = ByteString.CopyFrom(hello.ToByteArray()) }, SourceDeviceId = 1 };
         var ratchetHeaderKey = PreKey.FromBytes(RandomBytes(64));
         var ratchetPayload = BuildRatchetPayload(ratchetHeaderKey.ToArray(), innerEnv.ToByteArray());
 
@@ -598,7 +601,8 @@ namespace Percolator.ApplicationTests.Network;
             DhtEnvelope = new DhtEnvelope
             {
                 FindNodeResponse = new Contracts.FindNodeResponse()
-            }
+            },
+            SourceDeviceId = 1
         };
         mediator.Setup(m => m.Send(It.IsAny<ProcessInternalEnvelopeCommand>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(orchestratorResp);
@@ -632,7 +636,7 @@ namespace Percolator.ApplicationTests.Network;
         var remotePeerId = (uint)Random.Shared.Next(1, 1000000);
 
         // Build an InternalEnvelope with ChatEnvelope to avoid empty plaintext
-        var emptyEnv = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { TextMessage = new TextMessage { Content = "test" } } };
+        var emptyEnv = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { TextMessage = new TextMessage { Content = "test" } }, SourceDeviceId = 1 };
         var plain = Plaintext.FromBytes(emptyEnv.ToByteArray());
 
         // Header and payload

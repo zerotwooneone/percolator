@@ -45,8 +45,8 @@ public sealed class SealedSenderAuthenticationRoundTripTests
         var publicKeyBytes = ecdsa.ExportSubjectPublicKeyInfo();
         var publicKey = RatchetIdentityKey.FromBytes(publicKeyBytes);
         
-        // Actually sign the exact combined payload the peer uses
-        var payload = System.Text.Encoding.UTF8.GetBytes($"{Convert.ToBase64String(senderPkhBytes)}{validTimestamp.ToUnixTimeSeconds()}");
+        // Sign the payload using the same format as the service: {senderPkh}{timestamp}
+        var payload = System.Text.Encoding.UTF8.GetBytes($"{senderPkh}{validTimestamp.ToUnixTimeSeconds()}");
         var rawSig = ecdsa.SignData(payload, HashAlgorithmName.SHA256);
         var signature = Signature.FromBytesOwned(rawSig);
 

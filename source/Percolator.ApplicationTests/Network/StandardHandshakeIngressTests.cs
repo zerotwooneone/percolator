@@ -74,9 +74,11 @@ public sealed class StandardHandshakeIngressTests
 
         var peerId = new Percolator.Identity.PeerId(1);
         var peerIdentity = new PeerIdentity(peerId, new PublicIdentityId(Guid.NewGuid()));
-        peerIdentity.AddKey(new byte[32], clock.UtcNow, clock.UtcNow.AddYears(100), clock.UtcNow);
         
         var peerIdentities = new Mock<IPeerIdentityRepository>(MockBehavior.Strict);
+        peerIdentities
+            .Setup(s => s.GetOrCreateAsync(It.IsAny<PublicIdentityId>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(peerIdentity);
         peerIdentities
             .Setup(s => s.FindByPublicKeyHashAsync(It.IsAny<IdentityPublicKeyHash>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(peerIdentity);
@@ -93,12 +95,17 @@ public sealed class StandardHandshakeIngressTests
         mediator.Setup(m => m.Publish(It.IsAny<SecureSessionCreatedNotification>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
+        var selfIdentityQueries = new Mock<ISelfIdentityQueries>(MockBehavior.Strict);
+        selfIdentityQueries.Setup(q => q.GetSelfIdentityPublicKeyAsync(selfIdentityId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PublicIdentityId(Guid.NewGuid()));
+
         var request = new EstablishSessionRequest
         {
             Version = 1,
             IdentitySigningKey = ByteString.CopyFrom(new byte[64]),
             EphemeralKey = ByteString.CopyFrom(new byte[64]),
-            PrekeyId = ByteString.CopyFrom(spkId.ToByteArray())
+            PrekeyId = ByteString.CopyFrom(spkId.ToByteArray()),
+            PublicIdentityId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray())
         };
 
         var sut = new StandardHandshakeIngress(
@@ -112,7 +119,7 @@ public sealed class StandardHandshakeIngressTests
             signingService.Object,
             mediator.Object,
             logger,
-            Mock.Of<ISelfIdentityQueries>());
+            selfIdentityQueries.Object);
 
         // Act
         var result = await sut.HandleAsync(selfIdentityId, request, CancellationToken.None);
@@ -176,9 +183,11 @@ public sealed class StandardHandshakeIngressTests
 
         var peerId = new Percolator.Identity.PeerId(1);
         var peerIdentity = new PeerIdentity(peerId, new PublicIdentityId(Guid.NewGuid()));
-        peerIdentity.AddKey(new byte[32], clock.UtcNow, clock.UtcNow.AddYears(100), clock.UtcNow);
         
         var peerIdentities = new Mock<IPeerIdentityRepository>(MockBehavior.Strict);
+        peerIdentities
+            .Setup(s => s.GetOrCreateAsync(It.IsAny<PublicIdentityId>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(peerIdentity);
         peerIdentities
             .Setup(s => s.FindByPublicKeyHashAsync(It.IsAny<IdentityPublicKeyHash>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(peerIdentity);
@@ -195,12 +204,17 @@ public sealed class StandardHandshakeIngressTests
         mediator.Setup(m => m.Publish(It.IsAny<SecureSessionCreatedNotification>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
+        var selfIdentityQueries = new Mock<ISelfIdentityQueries>(MockBehavior.Strict);
+        selfIdentityQueries.Setup(q => q.GetSelfIdentityPublicKeyAsync(selfIdentityId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PublicIdentityId(Guid.NewGuid()));
+
         var request = new EstablishSessionRequest
         {
             Version = 1,
             IdentitySigningKey = ByteString.CopyFrom(new byte[64]),
             EphemeralKey = ByteString.CopyFrom(new byte[64]),
-            PrekeyId = ByteString.CopyFrom(spkId.ToByteArray())
+            PrekeyId = ByteString.CopyFrom(spkId.ToByteArray()),
+            PublicIdentityId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray())
         };
 
         var sut = new StandardHandshakeIngress(
@@ -214,7 +228,7 @@ public sealed class StandardHandshakeIngressTests
             signingService.Object,
             mediator.Object,
             logger,
-            Mock.Of<ISelfIdentityQueries>());
+            selfIdentityQueries.Object);
 
         // Act
         var result = await sut.HandleAsync(selfIdentityId, request, CancellationToken.None);

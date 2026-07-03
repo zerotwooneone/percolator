@@ -51,8 +51,13 @@ public class RelayOrchestratorTests
         var sessionId = new SessionId(sessionGuid);
         var directSessionId = new DirectSessionId(sessionGuid);
         var networkPeerId = new PeerId(peerId.Value);
+        var pkh = Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytes(new byte[32]);
 
-        queue.Setup(q => q.FetchAsync(It.IsAny<Pkh>(), 1, It.IsAny<CancellationToken>()))
+        var peerIdentityQueries = new Mock<IPeerIdentityQueries>(MockBehavior.Strict);
+        peerIdentityQueries.Setup(q => q.GetPublicKeyHashAsync(peerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(pkh);
+
+        queue.Setup(q => q.FetchAsync(pkh, 1, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new System.Collections.Generic.List<(Guid, QueuedPayloadBytes)> { (ackId, QueuedPayloadBytes.FromBytesOwned(blob)) });
         directSessions.Setup(d => d.GetByRemotePeerIdAsync(networkPeerId, active.Identity!.SelfIdentityId.Value))
             .ReturnsAsync(new DirectSession(networkPeerId, directSessionId));
@@ -73,13 +78,21 @@ public class RelayOrchestratorTests
 
         // DR decrypt of ack payload via SecureMessagingService yields RelayOpaqueResponse with same ack id
         var ack = new RelayOpaqueResponse { Version = 1, MessageAckId = ByteString.CopyFrom(ackId.ToByteArray()) };
-        secureSvc.Setup(s => s.DecryptInboundAsync(It.IsAny<uint>(), It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
+        secureSvc.Setup(s => s.DecryptInboundAsync(selfId.Value, It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((sessionId, Plaintext.FromBytes(ack.ToByteArray())));
 
         queue.Setup(q => q.DeleteByAckIdAsync(ackId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
 
-        var result = await orchestrator.RelayNextAsync(selfId, peerId, CancellationToken.None);
+        var orchestratorWithQueries = new RelayOrchestrator(
+            Mock.Of<ILogger<RelayOrchestrator>>(),
+            queue.Object,
+            directSessions.Object,
+            secureSvc.Object,
+            transport.Object,
+            peerIdentityQueries.Object);
+
+        var result = await orchestratorWithQueries.RelayNextAsync(selfId, peerId, CancellationToken.None);
         result.Should().BeTrue();
     }
 
@@ -95,8 +108,13 @@ public class RelayOrchestratorTests
         var sessionId = new SessionId(sessionGuid);
         var directSessionId = new DirectSessionId(sessionGuid);
         var networkPeerId = new PeerId(peerId.Value);
+        var pkh = Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytes(new byte[32]);
 
-        queue.Setup(q => q.FetchAsync(It.IsAny<Pkh>(), 1, It.IsAny<CancellationToken>()))
+        var peerIdentityQueries = new Mock<IPeerIdentityQueries>(MockBehavior.Strict);
+        peerIdentityQueries.Setup(q => q.GetPublicKeyHashAsync(peerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(pkh);
+
+        queue.Setup(q => q.FetchAsync(pkh, 1, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new System.Collections.Generic.List<(Guid, QueuedPayloadBytes)> { (ackId, QueuedPayloadBytes.FromBytesOwned(blob)) });
         directSessions.Setup(d => d.GetByRemotePeerIdAsync(networkPeerId, active.Identity!.SelfIdentityId.Value))
             .ReturnsAsync(new DirectSession(networkPeerId, directSessionId));
@@ -114,10 +132,18 @@ public class RelayOrchestratorTests
             .ReturnsAsync(new SendMessageResponse { OriginalResponse = response });
 
         var mismatched = new RelayOpaqueResponse { Version = 1, MessageAckId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray()) };
-        secureSvc.Setup(s => s.DecryptInboundAsync(It.IsAny<uint>(), It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
+        secureSvc.Setup(s => s.DecryptInboundAsync(selfId.Value, It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((sessionId, Plaintext.FromBytes(mismatched.ToByteArray())));
 
-        Assert.ThrowsAsync<InvalidOperationException>(async () => await orchestrator.RelayNextAsync(selfId, peerId, CancellationToken.None));
+        var orchestratorWithQueries = new RelayOrchestrator(
+            Mock.Of<ILogger<RelayOrchestrator>>(),
+            queue.Object,
+            directSessions.Object,
+            secureSvc.Object,
+            transport.Object,
+            peerIdentityQueries.Object);
+
+        Assert.ThrowsAsync<InvalidOperationException>(async () => await orchestratorWithQueries.RelayNextAsync(selfId, peerId, CancellationToken.None));
 
         queue.Verify(q => q.DeleteByAckIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -133,8 +159,13 @@ public class RelayOrchestratorTests
         var sessionGuid = Guid.NewGuid();
         var directSessionId = new DirectSessionId(sessionGuid);
         var networkPeerId = new PeerId(peerId.Value);
+        var pkh = Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytes(new byte[32]);
 
-        queue.Setup(q => q.FetchAsync(It.IsAny<Pkh>(), 1, It.IsAny<CancellationToken>()))
+        var peerIdentityQueries = new Mock<IPeerIdentityQueries>(MockBehavior.Strict);
+        peerIdentityQueries.Setup(q => q.GetPublicKeyHashAsync(peerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(pkh);
+
+        queue.Setup(q => q.FetchAsync(pkh, 1, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new System.Collections.Generic.List<(Guid, QueuedPayloadBytes)> { (ackId, QueuedPayloadBytes.FromBytesOwned(blob)) });
         directSessions.Setup(d => d.GetByRemotePeerIdAsync(networkPeerId, active.Identity!.SelfIdentityId.Value))
             .ReturnsAsync(new DirectSession(networkPeerId, directSessionId));
@@ -145,7 +176,15 @@ public class RelayOrchestratorTests
         transport.Setup(t => t.SendMessageAsync(peerId, directSessionId, It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SendMessageResponse { OriginalResponse = new DeliverOpaqueMessageResponse() });
 
-        Assert.ThrowsAsync<InvalidOperationException>(async () => await orchestrator.RelayNextAsync(selfId, peerId, CancellationToken.None));
+        var orchestratorWithQueries = new RelayOrchestrator(
+            Mock.Of<ILogger<RelayOrchestrator>>(),
+            queue.Object,
+            directSessions.Object,
+            secureSvc.Object,
+            transport.Object,
+            peerIdentityQueries.Object);
+
+        Assert.ThrowsAsync<InvalidOperationException>(async () => await orchestratorWithQueries.RelayNextAsync(selfId, peerId, CancellationToken.None));
     }
 
     [Test]
@@ -154,10 +193,24 @@ public class RelayOrchestratorTests
         var (orchestrator, queue, _, __, ___) = Create(out var active);
         var peerId = new Percolator.Identity.PeerId((uint)Random.Shared.Next(1, 1000000));
         var selfId = active.Identity!.SelfIdentityId;
-        queue.Setup(q => q.FetchAsync(It.IsAny<Pkh>(), 1, It.IsAny<CancellationToken>()))
+        var pkh = Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytes(new byte[32]);
+
+        var peerIdentityQueries = new Mock<IPeerIdentityQueries>(MockBehavior.Strict);
+        peerIdentityQueries.Setup(q => q.GetPublicKeyHashAsync(peerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(pkh);
+
+        queue.Setup(q => q.FetchAsync(pkh, 1, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new System.Collections.Generic.List<(Guid, QueuedPayloadBytes)>());
 
-        var result = await orchestrator.RelayNextAsync(selfId, peerId, CancellationToken.None);
+        var orchestratorWithQueries = new RelayOrchestrator(
+            Mock.Of<ILogger<RelayOrchestrator>>(),
+            queue.Object,
+            Mock.Of<IDirectSessionRepository>(),
+            Mock.Of<ISecureMessagingService>(),
+            Mock.Of<IMessageTransportService>(),
+            peerIdentityQueries.Object);
+
+        var result = await orchestratorWithQueries.RelayNextAsync(selfId, peerId, CancellationToken.None);
         result.Should().BeFalse();
     }
 
@@ -170,12 +223,25 @@ public class RelayOrchestratorTests
         var ackId = Guid.NewGuid();
         var blob = new byte[] { 0x09 };
         var networkPeerId = new PeerId(peerId.Value);
+        var pkh = Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytes(new byte[32]);
 
-        queue.Setup(q => q.FetchAsync(It.IsAny<Pkh>(), 1, It.IsAny<CancellationToken>()))
+        var peerIdentityQueries = new Mock<IPeerIdentityQueries>(MockBehavior.Strict);
+        peerIdentityQueries.Setup(q => q.GetPublicKeyHashAsync(peerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(pkh);
+
+        queue.Setup(q => q.FetchAsync(pkh, 1, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new System.Collections.Generic.List<(Guid, QueuedPayloadBytes)> { (ackId, QueuedPayloadBytes.FromBytesOwned(blob)) });
         directSessions.Setup(d => d.GetByRemotePeerIdAsync(networkPeerId, active.Identity!.SelfIdentityId.Value))
             .ReturnsAsync((DirectSession?)null);
 
-        Assert.ThrowsAsync<InvalidOperationException>(async () => await orchestrator.RelayNextAsync(selfId, peerId, CancellationToken.None));
+        var orchestratorWithQueries = new RelayOrchestrator(
+            Mock.Of<ILogger<RelayOrchestrator>>(),
+            queue.Object,
+            directSessions.Object,
+            secureSvc.Object,
+            transport.Object,
+            peerIdentityQueries.Object);
+
+        Assert.ThrowsAsync<InvalidOperationException>(async () => await orchestratorWithQueries.RelayNextAsync(selfId, peerId, CancellationToken.None));
     }
 }

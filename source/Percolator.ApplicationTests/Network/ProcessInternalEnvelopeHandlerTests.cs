@@ -168,7 +168,7 @@ namespace Percolator.ApplicationTests.Network
                 TargetPeerId = Google.Protobuf.ByteString.CopyFrom(new byte[32])
             };
             var env = new InternalEnvelope { DhtEnvelope = new DhtEnvelope { FindNodeRequest = contractsReq } };
-            var ctx = new SessionContext(null, new Percolator.Identity.SelfId(1), null, null);
+            var ctx = new SessionContext(null, new Percolator.Identity.SelfId(1), null, new Percolator.Identity.DeviceId(1));
 
             var result = await sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None);
             Assert.That(result, Is.Not.Null);
@@ -209,7 +209,7 @@ namespace Percolator.ApplicationTests.Network
                 TargetPeerId = Google.Protobuf.ByteString.CopyFrom(new byte[32])
             };
             var env = new InternalEnvelope { DhtEnvelope = new DhtEnvelope { FindNodeRequest = contractsReq } };
-            var ctx = new SessionContext(null, new Percolator.Identity.SelfId(1), null, null);
+            var ctx = new SessionContext(null, new Percolator.Identity.SelfId(1), null, new Percolator.Identity.DeviceId(1));
 
             var result = await sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None);
             Assert.That(result, Is.Not.Null);
@@ -256,7 +256,7 @@ namespace Percolator.ApplicationTests.Network
             {
                 DhtEnvelope = new DhtEnvelope { FindNodeRequest = contractsReq }
             };
-            var ctx = new SessionContext(null, new Percolator.Identity.SelfId(1), null, null);
+            var ctx = new SessionContext(null, new Percolator.Identity.SelfId(1), null, new Percolator.Identity.DeviceId(1));
 
             // Act
             var result = await sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None);
@@ -278,7 +278,7 @@ namespace Percolator.ApplicationTests.Network
             var sut = CreateSut(mediator);
 
             var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { Version = 1 } };
-            var ctx = new SessionContext(null, new Percolator.Identity.SelfId(1), null, null);
+            var ctx = new SessionContext(null, new Percolator.Identity.SelfId(1), null, new Percolator.Identity.DeviceId(1));
 
             var result = await sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None);
             Assert.That(result, Is.Null);
