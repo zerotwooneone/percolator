@@ -2,7 +2,6 @@ using MediatR;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
-using Percolator.Application.Apps.Chat;
 using Percolator.Application.Apps.Chat.Commands;
 using Percolator.Application.Apps.Chat.Handlers;
 using Percolator.Application.Network;

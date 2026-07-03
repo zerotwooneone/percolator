@@ -1,4 +1,3 @@
-using NUnit.Framework;
 using Percolator.Application.Chat;
 
 namespace Percolator.ApplicationTests.Chat;

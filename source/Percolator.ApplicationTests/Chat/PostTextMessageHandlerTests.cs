@@ -9,7 +9,6 @@ using Percolator.Chat.Messaging.App.Commands;
 using Percolator.Chat.Messaging.Events;
 using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Chat.GroupMembership;
-using Percolator.Chat.GroupLedger;
 using Percolator.Identity;
 using PublicMessageId = Percolator.Chat.Messaging.PublicMessageId;
 

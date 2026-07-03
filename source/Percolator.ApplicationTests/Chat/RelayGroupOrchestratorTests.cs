@@ -3,7 +3,6 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using Percolator.Application.Chat;
 using Percolator.Chat.GroupLedger;
-using Percolator.Chat.GroupMembership;
 using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Cryptography;
 using ChatPeerId = Percolator.Chat.GroupMembership.ChatPeerId;

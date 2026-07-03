@@ -12,7 +12,6 @@ using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Identity.Model;
 using Percolator.Network;
-using PercolatorIdentity = Percolator.Identity;
 
 namespace Percolator.ApplicationTests.Network;
 

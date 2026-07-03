@@ -1,7 +1,6 @@
 using System.Security.Cryptography;
 using Microsoft.Extensions.Logging;
 using Moq;
-using NUnit.Framework;
 using Percolator.Application.Chat;
 using Percolator.Cryptography;
 using Percolator.Identity;
