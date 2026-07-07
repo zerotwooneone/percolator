@@ -42,7 +42,7 @@ file sealed class FakeRepo : ISessionRepository
 {
     public readonly Dictionary<SessionId, SecureSession> Store = new();
 
-    public Task AddAsync(SecureSession session, CancellationToken cancellationToken = default)
+    public Task AddAsync(SecureSession session, CryptoSelfId selfIdentityId, CancellationToken cancellationToken = default)
     {
         Store[session.Id] = session;
         return Task.CompletedTask;
@@ -118,8 +118,8 @@ public class InboundMessageResolverTests
 
         var root = RootKey.FromBytes(new byte[32]);
         var (initiator, responder) = CryptoTestBootstrap.CreatePairedStates(root);
-        await repo.AddAsync(MakeSession(sid1, responder, clock));
-        await repo.AddAsync(MakeSession(sid2, responder, clock));
+        await repo.AddAsync(MakeSession(sid1, responder, clock), new CryptoSelfId(1));
+        await repo.AddAsync(MakeSession(sid2, responder, clock), new CryptoSelfId(1));
 
         // Sender produces a real framed message
         var sender2 = MakeSession(SessionId.NewId(), initiator, clock);
