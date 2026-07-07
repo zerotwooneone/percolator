@@ -89,12 +89,13 @@ public class InboundMessageResolverTests
         var root = RootKey.FromBytes(new byte[32]);
         var (initiator, responder) = CryptoTestBootstrap.CreatePairedStates(root);
         var receiver = MakeSession(sid, responder, clock);
-        await repo.AddAsync(receiver);
+        var selfIdentityId = new CryptoSelfId(1);
+        await repo.AddAsync(receiver, selfIdentityId);
 
         // Create a sender session to produce a valid framed message
         var sender = MakeSession(SessionId.NewId(), initiator, clock);
         var msg = sender.Encrypt(Plaintext.FromBytes(new byte[] { 1 }), clock);
-        var result = await resolver.ResolveAsync(new CryptoSelfId(1), msg, clock, CancellationToken.None);
+        var result = await resolver.ResolveAsync(selfIdentityId, msg, clock, CancellationToken.None);
 
         result.Should().NotBeNull();
         result!.Value.sessionId.Should().Be(sid);
