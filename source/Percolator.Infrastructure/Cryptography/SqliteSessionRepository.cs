@@ -2,7 +2,9 @@ using Microsoft.EntityFrameworkCore;
 using Percolator.Application.Identity;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
+using Percolator.Identity;
 using Percolator.Infrastructure.Persistence;
+using PeerId = Percolator.Cryptography.Primitives.PeerId;
 
 namespace Percolator.Infrastructure.Cryptography
 {
@@ -32,7 +34,7 @@ namespace Percolator.Infrastructure.Cryptography
             try
             {
                 if (_active.Identity is null) throw new InvalidOperationException("Active identity not loaded.");
-                var dbo = ToDbo(session, _active.Identity.SelfIdentityId.Value);
+                var dbo = ToDbo(session, _active.Identity.SelfIdentityId);
                 _db.Sessions.Add(dbo);
                 await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
             }
@@ -83,13 +85,13 @@ namespace Percolator.Infrastructure.Cryptography
             }
         }
 
-        public async Task<IReadOnlyList<SecureSession>> GetAllActiveAsync(uint selfIdentityId, CancellationToken cancellationToken = default)
+        public async Task<IReadOnlyList<SecureSession>> GetAllActiveAsync(CryptoSelfId selfIdentityId, CancellationToken cancellationToken = default)
         {
             await _dbGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
                 var rows = await _db.Sessions.AsNoTracking()
-                    .Where(x => x.SelfIdentityId == selfIdentityId)
+                    .Where(x => x.SelfIdentityId.Value == selfIdentityId.Value)
                     .ToListAsync(cancellationToken)
                     .ConfigureAwait(false);
                 return rows
@@ -103,13 +105,13 @@ namespace Percolator.Infrastructure.Cryptography
             }
         }
 
-        private SessionDbo ToDbo(SecureSession s, uint selfIdentityId)
+        private SessionDbo ToDbo(SecureSession s, SelfId selfIdentityId)
         {
             return new SessionDbo
             {
                 SelfIdentityId = selfIdentityId,
                 SessionId = s.Id.Value,
-                RemotePeerId = s.RemotePeerId.Value,
+                RemotePeerId = new Percolator.Identity.PeerId(s.RemotePeerId.Value),
                 ProtocolVersion = s.ProtocolVersion.Value,
                 RootKey = s.State.RootKey.ToArray(),
                 SendChainKey = s.State.SendingChainKey?.ToArray(),
@@ -128,7 +130,7 @@ namespace Percolator.Infrastructure.Cryptography
         private SecureSession FromDbo(SessionDbo row)
         {
             var id = new SessionId(row.SessionId);
-            var remote = new PeerId(row.RemotePeerId);
+            var remote = new PeerId(row.RemotePeerId.Value);
             var ver = new ProtocolVersion(row.ProtocolVersion);
             var state = new RatchetState(
                 RootKey.FromBytesOwned(row.RootKey),

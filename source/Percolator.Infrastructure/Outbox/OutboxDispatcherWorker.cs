@@ -99,7 +99,7 @@ public sealed class OutboxDispatcherWorker : BackgroundService
                     return;
                 }
 
-                await DispatchEventAsync(domainEvent, outboxItem.DestinationPeerId, ct);
+                await DispatchEventAsync(domainEvent, outboxItem.DestinationPeerId, outboxItem, ct);
 
                 // Success - mark as processed
                 MarkAsProcessed(outboxItem);
@@ -135,7 +135,7 @@ public sealed class OutboxDispatcherWorker : BackgroundService
         }
     }
 
-    private async Task DispatchEventAsync(Percolator.Chat.SeedWork.IDomainEvent domainEvent, PeerId destinationPeerId, CancellationToken ct)
+    private async Task DispatchEventAsync(Percolator.Chat.SeedWork.IDomainEvent domainEvent, Percolator.Identity.PeerId destinationPeerId, RelayOutboxDbo outboxItem, CancellationToken ct)
     {
         switch (domainEvent)
         {
@@ -177,7 +177,7 @@ public sealed class OutboxDispatcherWorker : BackgroundService
                 
                 // TODO: Create ChatEnvelope with GroupInvite message and populate relay_host/relay_port
                 _logger.LogInformation("MemberInvitedDomainEvent for conversation {ConversationId} to participant {PeerId} - invite dispatch with relay endpoint {RelayHost}:{RelayPort} not yet implemented", 
-                    inviteEvent.ConversationId, inviteEvent.ParticipantId.Value, relayHost, relayPort);
+                    inviteEvent.ConversationId, inviteEvent.ParticipantId, relayHost, relayPort);
                 break;
 
             default:

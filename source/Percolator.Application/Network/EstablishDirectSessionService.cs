@@ -124,7 +124,7 @@ namespace Percolator.Application.Network
             }
 
             // Replay/DoS: reject duplicates until expiry
-            await foreach (var existing in _pendingSessions.EnumerateAsync(cancellationToken).ConfigureAwait(false))
+            await foreach (var existing in _pendingSessions.EnumerateAsync(new CryptoSelfId(selfIdentityId.Value), cancellationToken).ConfigureAwait(false))
             {
                 if (existing.RequestCorrelationId == requestCorrelationId)
                 {
@@ -229,7 +229,7 @@ namespace Percolator.Application.Network
                 _clock,
                 expiresAtUtc: expiresAtUtc);
 
-            await _pendingSessions.AddAsync(pending, cancellationToken).ConfigureAwait(false);
+            await _pendingSessions.AddAsync(pending, new CryptoSelfId(selfIdentityId.Value), cancellationToken).ConfigureAwait(false);
             await _mediator.Publish(new PendingSessionCreatedNotification(pending.Id), cancellationToken).ConfigureAwait(false);
 
             return requestCorrelationId;

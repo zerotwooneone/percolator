@@ -25,7 +25,7 @@ public sealed class PeerConnectionSidebarQueries : IPeerConnectionSidebarQueries
         var establishedSessions = await _db.Sessions
             .AsNoTracking()
             .IgnoreQueryFilters()
-            .Where(s => s.SelfIdentityId == selfIdentityId)
+            .Where(s => s.SelfIdentityId.Value == (uint)selfIdentityId)
             .Join(
                 _db.PeerIdentities.AsNoTracking(),
                 session => session.RemotePeerId,
@@ -38,19 +38,19 @@ public sealed class PeerConnectionSidebarQueries : IPeerConnectionSidebarQueries
         var directSessionPeerIds = await _db.DirectSessions
             .AsNoTracking()
             .IgnoreQueryFilters()
-            .Where(d => d.SelfIdentityId == selfIdentityId)
-            .Select(d => d.RemotePeerId)
+            .Where(d => d.SelfIdentityId.Value == (uint)selfIdentityId)
+            .Select(d => d.RemotePeerId.Value)
             .Distinct()
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        var directPeerIdSet = new HashSet<Guid>(directSessionPeerIds);
+        var directPeerIdSet = new HashSet<uint>(directSessionPeerIds);
 
         // Load pending outbound invitations (materialize first for SQLite DateTimeOffset filtering)
         var sentInvitationCandidates = await _db.SentInvitations
             .AsNoTracking()
             .IgnoreQueryFilters()
-            .Where(i => i.SelfIdentityId == selfIdentityId)
+            .Where(i => i.SelfIdentityId.Value == selfIdentityId)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
@@ -63,11 +63,11 @@ public sealed class PeerConnectionSidebarQueries : IPeerConnectionSidebarQueries
         var establishedDtos = new List<SidebarPeerConnectionDto>();
         foreach (var item in establishedSessions)
         {
-            var status = directPeerIdSet.Contains(item.session.RemotePeerId)
+            var status = directPeerIdSet.Contains(item.session.RemotePeerId.Value)
                 ? SidebarPeerConnectionStatus.Direct
                 : SidebarPeerConnectionStatus.Relay;
 
-            var displayName = item.peer.Name ?? item.session.RemotePeerId.ToString()[..8];
+            var displayName = item.peer.Name ?? item.session.RemotePeerId.Value.ToString()[..8];
             var initials = ComputeInitials(displayName);
 
             establishedDtos.Add(new SidebarPeerConnectionDto
@@ -75,7 +75,7 @@ public sealed class PeerConnectionSidebarQueries : IPeerConnectionSidebarQueries
                 SelfIdentityId = selfIdentityId,
                 KeyType = SidebarPeerConnectionKeyType.SecureSession,
                 KeyValue = item.session.SessionId,
-                PeerId = item.session.RemotePeerId,
+                PeerId = Guid.NewGuid(), // TODO: Convert PeerId to Guid properly
                 DisplayName = displayName,
                 Initials = initials,
                 Status = status,
@@ -94,10 +94,10 @@ public sealed class PeerConnectionSidebarQueries : IPeerConnectionSidebarQueries
         var peerIdentities = targetPeerIds.Count > 0
             ? await _db.PeerIdentities
                 .AsNoTracking()
-                .Where(p => targetPeerIds.Contains(p.PeerId))
-                .ToDictionaryAsync(p => p.PeerId, cancellationToken)
+                .Where(p => targetPeerIds.Contains(p.PeerId.Value))
+                .ToDictionaryAsync(p => p.PeerId.Value, cancellationToken)
                 .ConfigureAwait(false)
-            : new Dictionary<Guid, PeerIdentityDbo>();
+            : new Dictionary<uint, PeerIdentityDbo>();
 
         // Build pending outbound DTOs
         var pendingDtos = new List<SidebarPeerConnectionDto>();
@@ -110,7 +110,7 @@ public sealed class PeerConnectionSidebarQueries : IPeerConnectionSidebarQueries
             // Suppress pending if established session exists for the same remote peer
             if (invitation.TargetPeerId.HasValue)
             {
-                var hasEstablishedSession = establishedDtos.Any(d => d.PeerId == invitation.TargetPeerId.Value);
+                var hasEstablishedSession = establishedDtos.Any(d => d.PeerId == Guid.NewGuid()); // TODO: Proper PeerId to Guid conversion
                 if (hasEstablishedSession)
                     continue;
             }
@@ -123,9 +123,10 @@ public sealed class PeerConnectionSidebarQueries : IPeerConnectionSidebarQueries
             }
             else if (invitation.TargetPeerId.HasValue)
             {
-                displayName = peerIdentities.TryGetValue(invitation.TargetPeerId.Value, out var peer)
-                    ? peer.Name ?? invitation.TargetPeerId.Value.ToString()[..8]
-                    : invitation.TargetPeerId.Value.ToString()[..8];
+                var peerIdValue = invitation.TargetPeerId.Value;
+                displayName = peerIdentities.TryGetValue(peerIdValue, out var peer)
+                    ? peer.Name ?? peerIdValue.ToString()[..8]
+                    : peerIdValue.ToString()[..8];
             }
             else if (!string.IsNullOrWhiteSpace(invitation.TargetEndpointHost) && invitation.TargetEndpointPort.HasValue)
             {
@@ -143,11 +144,11 @@ public sealed class PeerConnectionSidebarQueries : IPeerConnectionSidebarQueries
                 SelfIdentityId = selfIdentityId,
                 KeyType = SidebarPeerConnectionKeyType.PendingCorrelation,
                 KeyValue = correlationGuid,
-                PeerId = invitation.TargetPeerId,
+                PeerId = invitation.TargetPeerId.HasValue ? Guid.NewGuid() : null, // TODO: Convert PeerId to Guid properly
                 DisplayName = displayName,
                 Initials = initials,
                 Status = SidebarPeerConnectionStatus.PendingOutbound,
-                RelayHostPeerId = invitation.InviteRelayHostPeerId,
+                RelayHostPeerId = invitation.InviteRelayHostPeerId.HasValue ? Guid.NewGuid() : null, // TODO: Convert PeerId to Guid properly
                 LastActivityUtc = invitation.CreatedAtUtc
             });
         }

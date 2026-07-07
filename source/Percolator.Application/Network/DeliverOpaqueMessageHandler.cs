@@ -133,7 +133,7 @@ namespace Percolator.Application.Network
                 var sessionRatchetMessage = SessionRatchetMessage.FromBytes(request.PayloadBytes);
                 var header = sessionRatchetMessage.GetHeader();
                 var ratchetKey = header.PreKey;
-                var resolved = await _secureMessaging.DecryptInboundAsync(selfIdentityId, sessionRatchetMessage, cancellationToken).ConfigureAwait(false);
+                var resolved = await _secureMessaging.DecryptInboundAsync(new CryptoSelfId(selfIdentityId), sessionRatchetMessage, cancellationToken).ConfigureAwait(false);
                 if (resolved is null)
                 {
                     _logger.LogWarning("Decrypt returned null; returning empty result without side-effects");
@@ -148,9 +148,9 @@ namespace Percolator.Application.Network
                     return new DeliverOpaqueMessageResult();
                 }
 
-                await _ratchetLookup.UpsertAsync(selfIdentityId, inferredSessionId, ratchetKey, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
+                await _ratchetLookup.UpsertAsync(new CryptoSelfId(selfIdentityId), inferredSessionId, ratchetKey, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
 
-                var directSession = await _directSessionRepository.GetBySessionIdAsync(nonNullDirectSessionId, selfIdentityId).ConfigureAwait(false)
+                var directSession = await _directSessionRepository.GetBySessionIdAsync(nonNullDirectSessionId, new NetworkSelfId(selfIdentityId)).ConfigureAwait(false)
                     ?? throw new InvalidOperationException($"No direct session mapping found for session {inferredSessionId}");
                 var remotePeerId = directSession.RemotePeerId;
                 _logger.LogInformation("Resolved remote peer {PeerId} for session {SessionId}", remotePeerId, directSession.SessionId);

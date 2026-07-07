@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Percolator.Identity;
 using Percolator.Infrastructure.Persistence;
 using Percolator.Network;
 
@@ -13,61 +14,61 @@ public sealed class SqliteDirectSessionRepository : IDirectSessionRepository
         _db = db;
     }
 
-    public async Task<IReadOnlyList<DirectSession>> ListAsync(uint selfIdentityId)
+    public async Task<IReadOnlyList<DirectSession>> ListAsync(NetworkSelfId selfIdentityId)
     {
         var rows = await _db.DirectSessions
             .AsNoTracking()
-            .Where(x => x.SelfIdentityId == selfIdentityId)
+            .Where(x => x.SelfIdentityId.Value == selfIdentityId.Value)
             .ToListAsync()
             .ConfigureAwait(false);
 
         return rows
-            .Select(dbo => new DirectSession(new PeerId(dbo.RemotePeerId), new DirectSessionId(dbo.SessionId)))
+            .Select(dbo => new DirectSession(new Percolator.Network.PeerId(dbo.RemotePeerId.Value), new DirectSessionId(dbo.SessionId)))
             .ToList();
     }
 
-    public async Task<DirectSession?> GetBySessionIdAsync(DirectSessionId sessionId, uint selfIdentityId)
+    public async Task<DirectSession?> GetBySessionIdAsync(DirectSessionId sessionId, NetworkSelfId selfIdentityId)
     {
         var dbo = await _db.DirectSessions
             .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.SessionId == sessionId.Value && x.SelfIdentityId == selfIdentityId);
-        return dbo is null ? null : new DirectSession(new PeerId(dbo.RemotePeerId), new DirectSessionId(dbo.SessionId));
+            .FirstOrDefaultAsync(x => x.SessionId == sessionId.Value && x.SelfIdentityId.Value == selfIdentityId.Value);
+        return dbo is null ? null : new DirectSession(new Percolator.Network.PeerId(dbo.RemotePeerId.Value), new DirectSessionId(dbo.SessionId));
     }
 
-    public async Task<DirectSession?> GetByRemotePeerIdAsync(PeerId remotePeerId, uint selfIdentityId)
+    public async Task<DirectSession?> GetByRemotePeerIdAsync(Percolator.Network.PeerId remotePeerId, NetworkSelfId selfIdentityId)
     {
         var dbo = await _db.DirectSessions
             .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.RemotePeerId == remotePeerId.Value && x.SelfIdentityId == selfIdentityId);
-        return dbo is null ? null : new DirectSession(new PeerId(dbo.RemotePeerId), new DirectSessionId(dbo.SessionId));
+            .FirstOrDefaultAsync(x => x.RemotePeerId.Value == remotePeerId.Value && x.SelfIdentityId.Value == selfIdentityId.Value);
+        return dbo is null ? null : new DirectSession(new Percolator.Network.PeerId(dbo.RemotePeerId.Value), new DirectSessionId(dbo.SessionId));
     }
 
-    public async Task UpsertAsync(PeerId remotePeerId, DirectSessionId sessionId, uint selfIdentityId)
+    public async Task UpsertAsync(Percolator.Network.PeerId remotePeerId, DirectSessionId sessionId, NetworkSelfId selfIdentityId)
     {
         var existing = await _db.DirectSessions
-            .FirstOrDefaultAsync(x => x.RemotePeerId == remotePeerId.Value && x.SelfIdentityId == selfIdentityId);
+            .FirstOrDefaultAsync(x => x.RemotePeerId.Value == remotePeerId.Value && x.SelfIdentityId.Value == selfIdentityId.Value);
         if (existing is null)
         {
             _db.DirectSessions.Add(new DirectSessionDbo
             {
-                RemotePeerId = remotePeerId.Value,
+                RemotePeerId = new Percolator.Identity.PeerId(remotePeerId.Value),
                 SessionId = sessionId.Value,
-                SelfIdentityId = selfIdentityId
+                SelfIdentityId = new SelfId(selfIdentityId.Value)
             });
         }
         else
         {
             existing.SessionId = sessionId.Value;
-            existing.SelfIdentityId = selfIdentityId;
+            existing.SelfIdentityId = new SelfId(selfIdentityId.Value);
             _db.DirectSessions.Update(existing);
         }
         await _db.SaveChangesAsync();
     }
 
-    public async Task DeleteByRemotePeerIdAsync(PeerId remotePeerId, uint selfIdentityId)
+    public async Task DeleteByRemotePeerIdAsync(Percolator.Network.PeerId remotePeerId, NetworkSelfId selfIdentityId)
     {
         var existing = await _db.DirectSessions
-            .FirstOrDefaultAsync(x => x.RemotePeerId == remotePeerId.Value && x.SelfIdentityId == selfIdentityId);
+            .FirstOrDefaultAsync(x => x.RemotePeerId.Value == remotePeerId.Value && x.SelfIdentityId.Value == selfIdentityId.Value);
         if (existing != null)
         {
             _db.DirectSessions.Remove(existing);

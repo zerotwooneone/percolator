@@ -44,7 +44,7 @@ public sealed class SelfIdentityQueries : ISelfIdentityQueries
         using var db = _dbFactory.CreateDbContext();
         var identity = await db.SelfIdentities
             .AsNoTracking()
-            .Where(x => x.Id == selfIdentityId.Value && x.ActiveIdentityKeyFingerprint != null)
+            .Where(x => x.Id == selfIdentityId && x.ActiveIdentityKeyFingerprint != null)
             .Select(x => new { x.ActiveIdentityKeyFingerprint, PublicIdentityId = x.PublicIdentityId })
             .FirstOrDefaultAsync(ct);
 
@@ -59,7 +59,7 @@ public sealed class SelfIdentityQueries : ISelfIdentityQueries
         using var db = _dbFactory.CreateDbContext();
         var identity = await db.SelfIdentities
             .AsNoTracking()
-            .Where(x => x.Id == selfIdentityId.Value)
+            .Where(x => x.Id == selfIdentityId)
             .FirstOrDefaultAsync(ct);
 
         if (identity is null)

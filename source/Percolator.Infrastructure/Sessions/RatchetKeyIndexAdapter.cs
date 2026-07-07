@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Percolator.Cryptography;
+using Percolator.Identity;
 using Percolator.Infrastructure.Persistence;
 
 namespace Percolator.Infrastructure.Sessions;
@@ -13,12 +14,12 @@ internal sealed class RatchetKeyIndexAdapter : IRatchetKeyIndex
         _db = db;
     }
 
-    public async Task<SessionId?> TryResolveAsync(uint selfIdentityId, RatchetEphemeralKey headerPublicKey, CancellationToken cancellationToken = default)
+    public async Task<SessionId?> TryResolveAsync(CryptoSelfId selfIdentityId, RatchetEphemeralKey headerPublicKey, CancellationToken cancellationToken = default)
     {
         var row = await _db.RatchetKeyIndex
             .AsNoTracking()
             // EF Core can translate byte[] equality to BLOB comparison for SQLite
-            .Where(r => r.SelfIdentityId == selfIdentityId && r.RatchetPublicKey == headerPublicKey.ToArray())
+            .Where(r => r.SelfIdentityId.Value == selfIdentityId.Value && r.RatchetPublicKey == headerPublicKey.ToArray())
             .Select(r => new { r.DirectSessionId })
             .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -26,7 +27,7 @@ internal sealed class RatchetKeyIndexAdapter : IRatchetKeyIndex
         return row is null ? (SessionId?)null : new SessionId(row.DirectSessionId);
     }
 
-    public async Task UpsertAsync(uint selfIdentityId, SessionId sessionId, RatchetEphemeralKey headerPublicKey, DateTimeOffset updatedAtUtc, CancellationToken cancellationToken = default)
+    public async Task UpsertAsync(CryptoSelfId selfIdentityId, SessionId sessionId, RatchetEphemeralKey headerPublicKey, DateTimeOffset updatedAtUtc, CancellationToken cancellationToken = default)
     {
         var set = _db.RatchetKeyIndex;
 
@@ -40,7 +41,7 @@ internal sealed class RatchetKeyIndexAdapter : IRatchetKeyIndex
         {
             await set.AddAsync(new RatchetKeyIndexDbo
             {
-                SelfIdentityId = selfIdentityId,
+                SelfIdentityId = new SelfId(selfIdentityId.Value),
                 DirectSessionId = sessionId.Value,
                 RatchetPublicKey = headerPublicKey.ToArray(),
                 UpdatedAtUtc = updatedAtUtc

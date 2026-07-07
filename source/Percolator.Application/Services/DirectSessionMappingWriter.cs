@@ -26,7 +26,7 @@ public sealed class DirectSessionMappingWriter : IDirectSessionMappingWriter
     {
         try
         {
-            await _directSessionRepository.UpsertAsync(remotePeerId, sessionId, selfIdentityId.Value)
+            await _directSessionRepository.UpsertAsync(remotePeerId, sessionId, new NetworkSelfId(selfIdentityId.Value))
                 .ConfigureAwait(false);
         }
         catch (Exception ex)

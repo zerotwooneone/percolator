@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Percolator.Cryptography;
+using Percolator.Identity;
 using Percolator.Infrastructure.Cryptography;
 using Percolator.Infrastructure.Persistence;
 using Percolator.InfrastructureTests.Common;
@@ -17,11 +18,10 @@ public class SqliteSessionRepositoryTests
         var options = new DbContextOptionsBuilder<PercolatorDbContext>()
             .UseSqlite(conn)
             .Options;
-        var ctx = TestDb.NewContext(options, 1);
-        ctx.Database.EnsureCreated();
+        var ctx = TestDb.NewContextWithSchema(options, 1);
         if (!ctx.SelfIdentities.Any())
         {
-            ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = 1, PublicIdentityId = Guid.NewGuid(), Name = "default" });
+            ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = new SelfId(1), PublicIdentityId = new PublicIdentityId(Guid.NewGuid()), Name = "default", DeviceId = new DeviceId(1), ListeningPort = new Percolator.Identity.Model.ListeningPort(5000), LastUsedUtc = DateTimeOffset.UtcNow });
             ctx.SaveChanges();
         }
         var repo = new SqliteSessionRepository(ctx, new NoopSessionCrypto(), new TestClock());
@@ -31,7 +31,7 @@ public class SqliteSessionRepositoryTests
     private static SecureSession NewSession(ISessionCrypto crypto, IClock clock)
     {
         var id = SessionId.NewId();
-        var remote = Percolator.Cryptography.Primitives.new PeerId(1);
+        var remote = new Percolator.Cryptography.Primitives.PeerId(1);
         var ver = new ProtocolVersion(1);
         var state = new RatchetState(
             RootKey.FromBytes(new byte[32]),
@@ -44,6 +44,12 @@ public class SqliteSessionRepositoryTests
             null,
             1000);
         return SecureSession.Create(id, remote, ver, state, crypto, clock);
+    }
+
+    private sealed class TestClock : IClock
+    {
+        private static readonly DateTimeOffset FixedTime = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero);
+        public DateTimeOffset UtcNow => FixedTime;
     }
 
     private sealed class NoopSessionCrypto : ISessionCrypto
@@ -110,13 +116,12 @@ public class SqliteSessionRepositoryTests
             .Options;
 
         // Seed identities
-        using (var ctxSeed = TestDb.NewContext(options, 1))
+        using (var ctxSeed = TestDb.NewContextWithSchema(options, 1))
         {
-            ctxSeed.Database.EnsureCreated();
             if (!ctxSeed.SelfIdentities.Any())
             {
-                ctxSeed.SelfIdentities.Add(new SelfIdentityDbo { Id = 1, PublicIdentityId = Guid.NewGuid(), Name = "one" });
-                ctxSeed.SelfIdentities.Add(new SelfIdentityDbo { Id = 2, PublicIdentityId = Guid.NewGuid(), Name = "two" });
+                ctxSeed.SelfIdentities.Add(new SelfIdentityDbo { Id = new SelfId(1), PublicIdentityId = new PublicIdentityId(Guid.NewGuid()), Name = "one", DeviceId = new DeviceId(1), ListeningPort = new Percolator.Identity.Model.ListeningPort(5000), LastUsedUtc = DateTimeOffset.UtcNow });
+                ctxSeed.SelfIdentities.Add(new SelfIdentityDbo { Id = new SelfId(2), PublicIdentityId = new PublicIdentityId(Guid.NewGuid()), Name = "two", DeviceId = new DeviceId(1), ListeningPort = new Percolator.Identity.Model.ListeningPort(5000), LastUsedUtc = DateTimeOffset.UtcNow });
                 ctxSeed.SaveChanges();
             }
         }

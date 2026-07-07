@@ -1,3 +1,6 @@
+using Percolator.Chat.GroupMembership;
+using Percolator.Chat.Messaging.ValueObjects;
+
 namespace Percolator.Infrastructure.Chat.Persistence;
 
 /// <summary>
@@ -13,12 +16,12 @@ public class PendingGroupInvitationDbo
     /// <summary>
     /// The conversation ID (indexed).
     /// </summary>
-    public Guid ConversationId { get; set; }
+    public ConversationId ConversationId { get; set; }
 
     /// <summary>
     /// The peer ID of the inviter.
     /// </summary>
-    public Guid InviterPeerId { get; set; }
+    public ChatPeerId InviterPeerId { get; set; }
 
     /// <summary>
     /// The creator's identity key (SPKI bytes).

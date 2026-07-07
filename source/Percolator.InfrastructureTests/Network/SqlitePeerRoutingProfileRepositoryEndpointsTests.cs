@@ -4,6 +4,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Percolator.Infrastructure.Network;
 using Percolator.Infrastructure.Persistence;
+using Percolator.InfrastructureTests.Common;
 using Percolator.Network;
 
 namespace Percolator.InfrastructureTests.Network;
@@ -20,8 +21,7 @@ public class SqlitePeerRoutingProfileRepositoryEndpointsTests
             .UseSqlite(connection)
             .Options;
 
-        var ctx = new PercolatorDbContext(options);
-        ctx.Database.EnsureCreated();
+        var ctx = TestDb.NewContextWithSchema(options, null);
         return ctx;
     }
 

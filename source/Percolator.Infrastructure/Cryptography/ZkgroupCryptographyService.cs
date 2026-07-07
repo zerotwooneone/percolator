@@ -155,6 +155,35 @@ public sealed class ZkgroupCryptographyService : IGroupCryptographyService
         return ex is CryptographicException && ex.Message.Contains("deserial");
     }
 
+    /// <summary>
+    /// Derives the zero-knowledge group public parameters from a GroupMasterKey.
+    /// These parameters are used by the relay for blind roster management and access control.
+    /// </summary>
+    /// <param name="masterKey">The GroupMasterKey to derive from.</param>
+    /// <returns>The derived ZK group public parameters.</returns>
+    public ZkGroupPublicParamsBytes DeriveGroupPublicParams(GroupMasterKey masterKey)
+    {
+        if (masterKey is null)
+        {
+            throw new ArgumentNullException(nameof(masterKey));
+        }
+
+        // Deserialize the master key to a native handle
+        using var masterKeyHandle = DeserializeMasterKeyHandle(masterKey.Span);
+
+        // Derive GroupSecretParams from the master key
+        using var secretParams = Signal.Interop.SignalCrypto.DeriveGroupSecretParams(masterKeyHandle);
+
+        // Derive GroupPublicParams from GroupSecretParams
+        using var publicParams = Signal.Interop.SignalCrypto.GetGroupPublicParams(secretParams);
+
+        // Serialize the public params to bytes
+        var buffer = Signal.Interop.SignalCrypto.SerializeGroupPublicParams(publicParams);
+
+        // Convert to domain type
+        return ZkGroupPublicParamsBytes.FromBytesOwned(buffer);
+    }
+
     public bool VerifyGroupPresentation(
         ZkPresentationBytes presentation,
         ZkServerSecretParamsSeedBytes serverSecretSeed,

@@ -13,10 +13,7 @@ public static class TestDb
         var active = new ActiveIdentityContext();
         var idGuid = identityGuid ?? Guid.NewGuid();
         var display = name ?? $"test-{selfIdentityId}";
-        var identity = new IdentityRecord(idGuid, display)
-        {
-            SelfIdentityId = new SelfId(selfIdentityId)
-        };
+        var identity = new IdentityRecord(new SelfId((uint)selfIdentityId), new PublicIdentityId(idGuid), new DeviceId(1), display) { ListeningPort = new Percolator.Identity.Model.ListeningPort(5000) };
         active.SetActiveIdentity(identity, null);
         return active;
     }
@@ -29,5 +26,15 @@ public static class TestDb
         }
         var active = CreateActiveIdentity(selfIdentityId.Value);
         return new PercolatorDbContext(options, active);
+    }
+
+    public static PercolatorDbContext NewContextWithSchema(DbContextOptions<PercolatorDbContext> options, int? selfIdentityId = 1)
+    {
+        // Create schema without active identity
+        using var schemaCtx = new PercolatorDbContext(options);
+        schemaCtx.Database.EnsureCreated();
+
+        // Return context without active identity (query filters removed)
+        return new PercolatorDbContext(options);
     }
 }

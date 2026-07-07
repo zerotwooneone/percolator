@@ -50,18 +50,18 @@ public sealed class ChatConversationResolver : IDirectConversationResolver
             {
                 convo = await _db.Conversations
                     .Include(c => c.Participants)
-                    .FirstOrDefaultAsync(c => c.Id == mapping.ConversationId && c.SelfIdentityId == selfIdentityId && c.Kind == Percolator.Infrastructure.Persistence.ConversationKind.Direct, cancellationToken);
+                    .FirstOrDefaultAsync(c => c.Id == mapping.ConversationId && c.SelfIdentityId == new ChatSelfId(selfIdentityId.Value) && c.Kind == Percolator.Infrastructure.Persistence.ConversationKind.Direct, cancellationToken);
             }
 
             if (convo is null)
             {
-                var remotePeerId = session.RemotePeerId; // Guid RemotePeerId
+                var remotePeerId = session.RemotePeerId; // PeerId RemotePeerId
                 // Try to load existing direct conversation for this identity by participant pair
                 convo = await _db.Conversations
                     .Include(c => c.Participants)
-                    .Where(c => c.SelfIdentityId == selfIdentityId)
+                    .Where(c => c.SelfIdentityId == new ChatSelfId(selfIdentityId.Value))
                     .Where(c => c.Kind == Percolator.Infrastructure.Persistence.ConversationKind.Direct)
-                    .Where(c => c.Participants.Any(p => p.ParticipantId == selfIdentity.PublicIdentityId) && c.Participants.Any(p => p.ParticipantId == remotePeerId))
+                    .Where(c => c.Participants.Any(p => p.ParticipantId == new ChatPeerId(BitConverter.ToUInt32(selfIdentity.PublicIdentityId.Value.ToByteArray(), 0))) && c.Participants.Any(p => p.ParticipantId == new ChatPeerId(remotePeerId.Value)))
                     .FirstOrDefaultAsync(cancellationToken);
 
                 if (convo is null)
@@ -69,16 +69,16 @@ public sealed class ChatConversationResolver : IDirectConversationResolver
                     // Create new conversation with both participants
                     convo = new ConversationDbo
                     {
-                        Id = Guid.NewGuid(),
+                        Id = new ConversationId(Guid.NewGuid()),
                         Name = null,
-                        SelfIdentityId = selfIdentityId,
+                        SelfIdentityId = new ChatSelfId(selfIdentityId.Value),
                         CreatedAt = DateTimeOffset.UtcNow,
                         UpdatedAt = DateTimeOffset.UtcNow,
                         Kind = Percolator.Infrastructure.Persistence.ConversationKind.Direct
                     };
 
-                    var p1 = new ConversationParticipantDbo { ConversationId = convo.Id, ParticipantId = selfIdentity.PublicIdentityId };
-                    var p2 = new ConversationParticipantDbo { ConversationId = convo.Id, ParticipantId = remotePeerId };
+                    var p1 = new ConversationParticipantDbo { ConversationId = convo.Id, ParticipantId = new ChatPeerId(BitConverter.ToUInt32(selfIdentity.PublicIdentityId.Value.ToByteArray(), 0)) };
+                    var p2 = new ConversationParticipantDbo { ConversationId = convo.Id, ParticipantId = new ChatPeerId(remotePeerId.Value) };
                     convo.Participants.Add(p1);
                     convo.Participants.Add(p2);
 
@@ -97,13 +97,20 @@ public sealed class ChatConversationResolver : IDirectConversationResolver
             }
 
             // Map to domain
-            var participants = convo.Participants.Select(p => new ChatPeerId(p.ParticipantId)).ToList();
+            var participants = convo.Participants.Select(p => p.ParticipantId).ToList();
             if (participants.Count != 2)
             {
                 throw new InvalidOperationException($"Direct conversation must have exactly 2 participants, found {participants.Count}.");
             }
-            var domain = new DirectConversation(new ConversationId(convo.Id), participants[0], participants[1]);
-            return new DirectConversationResolution(domain, selfIdentityId);
+            // Find which participant is the self (matches selfIdentityId)
+            var selfParticipant = participants.FirstOrDefault(p => p.Value == selfIdentityId.Value);
+            var peerParticipant = participants.FirstOrDefault(p => p.Value != selfIdentityId.Value);
+            if (selfParticipant.Value == 0 || peerParticipant.Value == 0)
+            {
+                throw new InvalidOperationException("Could not determine self vs peer participants.");
+            }
+            var domain = new DirectConversation(convo.Id, peerParticipant, new ChatSelfId(selfParticipant.Value));
+            return new DirectConversationResolution(domain, new ChatSelfId(selfParticipant.Value));
         }
 
         if (lookupKey.PublicKeyHash is not null)
@@ -131,25 +138,25 @@ public sealed class ChatConversationResolver : IDirectConversationResolver
             // Find or create the conversation for this self identity by participant pair
             var convo = await _db.Conversations
                 .Include(c => c.Participants)
-                .Where(c => c.SelfIdentityId == selfIdentity.Id)
+                .Where(c => c.SelfIdentityId == new ChatSelfId(selfIdentity.Id.Value))
                 .Where(c => c.Kind == Percolator.Infrastructure.Persistence.ConversationKind.Direct)
-                .Where(c => c.Participants.Any(p => p.ParticipantId == selfIdentity.PublicIdentityId) && c.Participants.Any(p => p.ParticipantId == remoteKey.PeerId.Value))
+                .Where(c => c.Participants.Any(p => p.ParticipantId == new ChatPeerId(BitConverter.ToUInt32(selfIdentity.PublicIdentityId.Value.ToByteArray(), 0))) && c.Participants.Any(p => p.ParticipantId == new ChatPeerId(remoteKey.PeerId.Value)))
                 .FirstOrDefaultAsync(cancellationToken);
 
             if (convo is null)
             {
                 convo = new ConversationDbo
                 {
-                    Id = Guid.NewGuid(),
+                    Id = new ConversationId(Guid.NewGuid()),
                     Name = null,
-                    SelfIdentityId = selfIdentity.Id,
+                    SelfIdentityId = new ChatSelfId(selfIdentity.Id.Value),
                     CreatedAt = DateTimeOffset.UtcNow,
                     UpdatedAt = DateTimeOffset.UtcNow,
                     Kind = Percolator.Infrastructure.Persistence.ConversationKind.Direct
                 };
 
-                var p1 = new ConversationParticipantDbo { ConversationId = convo.Id, ParticipantId = selfIdentity.PublicIdentityId };
-                var p2 = new ConversationParticipantDbo { ConversationId = convo.Id, ParticipantId = remoteKey.PeerId.Value };
+                var p1 = new ConversationParticipantDbo { ConversationId = convo.Id, ParticipantId = new ChatPeerId(BitConverter.ToUInt32(selfIdentity.PublicIdentityId.Value.ToByteArray(), 0)) };
+                var p2 = new ConversationParticipantDbo { ConversationId = convo.Id, ParticipantId = new ChatPeerId(remoteKey.PeerId.Value) };
                 convo.Participants.Add(p1);
                 convo.Participants.Add(p2);
 
@@ -157,13 +164,20 @@ public sealed class ChatConversationResolver : IDirectConversationResolver
                 await _db.SaveChangesAsync(cancellationToken);
             }
 
-            var participants = convo.Participants.Select(p => new ChatPeerId(p.ParticipantId)).ToList();
+            var participants = convo.Participants.Select(p => p.ParticipantId).ToList();
             if (participants.Count != 2)
             {
                 throw new InvalidOperationException($"Direct conversation must have exactly 2 participants, found {participants.Count}.");
             }
-            var domain = new DirectConversation(new ConversationId(convo.Id), participants[0], participants[1]);
-            return new DirectConversationResolution(domain, selfIdentity.Id);
+            // Find which participant is the self (matches selfIdentityId)
+            var selfParticipant = participants.FirstOrDefault(p => p.Value == selfIdentity.Id.Value);
+            var peerParticipant = participants.FirstOrDefault(p => p.Value != selfIdentity.Id.Value);
+            if (selfParticipant.Value == 0 || peerParticipant.Value == 0)
+            {
+                throw new InvalidOperationException("Could not determine self vs peer participants.");
+            }
+            var domain = new DirectConversation(convo.Id, peerParticipant, new ChatSelfId(selfParticipant.Value));
+            return new DirectConversationResolution(domain, new ChatSelfId(selfParticipant.Value));
         }
 
         throw new InvalidOperationException("Invalid routing key state.");

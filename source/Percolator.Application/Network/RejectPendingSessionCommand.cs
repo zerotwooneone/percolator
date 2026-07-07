@@ -1,5 +1,6 @@
 using MediatR;
 using Percolator.Cryptography;
+using Percolator.Identity;
 
 namespace Percolator.Application.Network;
 
@@ -10,7 +11,7 @@ public abstract record RejectPendingSessionResult
     public sealed record Invalid(string ErrorMessage) : RejectPendingSessionResult;
 }
 
-public sealed record RejectPendingSessionCommand(PendingSessionId PendingSessionId) : IRequest<RejectPendingSessionResult>;
+public sealed record RejectPendingSessionCommand(PendingSessionId PendingSessionId, SelfId SelfIdentityId) : IRequest<RejectPendingSessionResult>;
 
 internal sealed class RejectPendingSessionHandler : IRequestHandler<RejectPendingSessionCommand, RejectPendingSessionResult>
 {
@@ -25,7 +26,7 @@ internal sealed class RejectPendingSessionHandler : IRequestHandler<RejectPendin
 
     public async Task<RejectPendingSessionResult> Handle(RejectPendingSessionCommand request, CancellationToken cancellationToken)
     {
-        var pending = await _pending.GetAsync(request.PendingSessionId, cancellationToken).ConfigureAwait(false);
+        var pending = await _pending.GetAsync(request.PendingSessionId, new CryptoSelfId(request.SelfIdentityId.Value), cancellationToken).ConfigureAwait(false);
         if (pending is null)
         {
             return new RejectPendingSessionResult.NotFound();
@@ -41,7 +42,7 @@ internal sealed class RejectPendingSessionHandler : IRequestHandler<RejectPendin
         }
 
         var correlationId = pending.RequestCorrelationId;
-        await _pending.DeleteAsync(pending.Id, cancellationToken).ConfigureAwait(false);
+        await _pending.DeleteAsync(pending.Id, new CryptoSelfId(request.SelfIdentityId.Value), cancellationToken).ConfigureAwait(false);
         await _mediator.Publish(
                 new PendingSessionRemovedNotification(pending.Id, correlationId, PendingSessionRemoveReason.Burned),
                 cancellationToken)

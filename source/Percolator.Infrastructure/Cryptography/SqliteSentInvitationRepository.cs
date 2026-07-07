@@ -1,38 +1,34 @@
 using System.Runtime.CompilerServices;
 using Microsoft.EntityFrameworkCore;
-using Percolator.Application.Identity;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
 using Percolator.Infrastructure.Persistence;
+using PeerId = Percolator.Cryptography.Primitives.PeerId;
 
 namespace Percolator.Infrastructure.Cryptography;
 
 internal sealed class SqliteSentInvitationRepository : ISentInvitationRepository
 {
     private readonly PercolatorDbContext _db;
-    private readonly ActiveIdentityContext _active;
 
-    public SqliteSentInvitationRepository(PercolatorDbContext db, ActiveIdentityContext active)
+    public SqliteSentInvitationRepository(PercolatorDbContext db)
     {
         _db = db;
-        _active = active;
     }
 
-    public async Task UpsertAsync(SentInvitation invitation, CancellationToken cancellationToken = default)
+    public async Task UpsertAsync(SentInvitation invitation, CryptoSelfId selfIdentityId, CancellationToken cancellationToken = default)
     {
-        if (_active.Identity is null) throw new InvalidOperationException("Active identity not loaded.");
-
         var correlation = invitation.RequestCorrelationId.ToString();
 
         var existing = await _db.SentInvitations
-            .FirstOrDefaultAsync(x => x.SelfIdentityId == _active.Identity.SelfIdentityId.Value && x.RequestCorrelationId == correlation, cancellationToken)
+            .FirstOrDefaultAsync(x => x.SelfIdentityId == new Percolator.Identity.SelfId(selfIdentityId.Value) && x.RequestCorrelationId == correlation, cancellationToken)
             .ConfigureAwait(false);
 
         if (existing is null)
         {
             _db.SentInvitations.Add(new SentInvitationDbo
             {
-                SelfIdentityId = _active.Identity.SelfIdentityId.Value,
+                SelfIdentityId = new Percolator.Identity.SelfId(selfIdentityId.Value),
                 RequestCorrelationId = correlation,
                 SignedPreKeyId = invitation.SignedPreKeyId,
                 OneTimePreKeyId = invitation.OneTimePreKeyId,
@@ -63,14 +59,12 @@ internal sealed class SqliteSentInvitationRepository : ISentInvitationRepository
         await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task SetInviteRouteAsync(RequestCorrelationId requestCorrelationId, InviteRouteKind routeKind, PeerId? relayHostPeerId, CancellationToken cancellationToken = default)
+    public async Task SetInviteRouteAsync(RequestCorrelationId requestCorrelationId, CryptoSelfId selfIdentityId, InviteRouteKind routeKind, PeerId? relayHostPeerId, CancellationToken cancellationToken = default)
     {
-        if (_active.Identity is null) throw new InvalidOperationException("Active identity not loaded.");
-
         var correlation = requestCorrelationId.ToString();
         var existing = await _db.SentInvitations
             .FirstOrDefaultAsync(
-                x => x.SelfIdentityId == _active.Identity.SelfIdentityId.Value && x.RequestCorrelationId == correlation,
+                x => x.SelfIdentityId == new Percolator.Identity.SelfId(selfIdentityId.Value) && x.RequestCorrelationId == correlation,
                 cancellationToken)
             .ConfigureAwait(false);
 
@@ -84,25 +78,23 @@ internal sealed class SqliteSentInvitationRepository : ISentInvitationRepository
         await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<SentInvitation?> TryGetAsync(RequestCorrelationId requestCorrelationId, CancellationToken cancellationToken = default)
+    public async Task<SentInvitation?> TryGetAsync(RequestCorrelationId requestCorrelationId, CryptoSelfId selfIdentityId, CancellationToken cancellationToken = default)
     {
         var correlation = requestCorrelationId.ToString();
         var row = await _db.SentInvitations
             .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.RequestCorrelationId == correlation, cancellationToken)
+            .FirstOrDefaultAsync(x => x.RequestCorrelationId == correlation && x.SelfIdentityId == new Percolator.Identity.SelfId(selfIdentityId.Value), cancellationToken)
             .ConfigureAwait(false);
 
         return row is null ? null : Rehydrate(row);
     }
 
-    public async Task DeleteAsync(RequestCorrelationId requestCorrelationId, CancellationToken cancellationToken = default)
+    public async Task DeleteAsync(RequestCorrelationId requestCorrelationId, CryptoSelfId selfIdentityId, CancellationToken cancellationToken = default)
     {
-        if (_active.Identity is null) throw new InvalidOperationException("Active identity not loaded.");
-
         var correlation = requestCorrelationId.ToString();
         var existing = await _db.SentInvitations
             .FirstOrDefaultAsync(
-                x => x.SelfIdentityId == _active.Identity.SelfIdentityId.Value
+                x => x.SelfIdentityId == new Percolator.Identity.SelfId(selfIdentityId.Value)
                      && x.RequestCorrelationId == correlation,
                 cancellationToken)
             .ConfigureAwait(false);
@@ -116,12 +108,13 @@ internal sealed class SqliteSentInvitationRepository : ISentInvitationRepository
         await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    public async IAsyncEnumerable<SentInvitation> EnumerateExpiredAsync(DateTimeOffset nowUtc, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    public async IAsyncEnumerable<SentInvitation> EnumerateExpiredAsync(CryptoSelfId selfIdentityId, DateTimeOffset nowUtc, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         // SQLite provider cannot translate some DateTimeOffset comparisons.
         // Materialize first and then filter in-memory.
         var candidates = await _db.SentInvitations
             .AsNoTracking()
+            .Where(x => x.SelfIdentityId == new Percolator.Identity.SelfId(selfIdentityId.Value))
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
@@ -132,12 +125,13 @@ internal sealed class SqliteSentInvitationRepository : ISentInvitationRepository
         }
     }
 
-    public async IAsyncEnumerable<SentInvitation> EnumerateUnexpiredAsync(DateTimeOffset nowUtc, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    public async IAsyncEnumerable<SentInvitation> EnumerateUnexpiredAsync(CryptoSelfId selfIdentityId, DateTimeOffset nowUtc, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         // SQLite provider cannot translate some DateTimeOffset comparisons.
         // Materialize first and then filter in-memory.
         var candidates = await _db.SentInvitations
             .AsNoTracking()
+            .Where(x => x.SelfIdentityId == new Percolator.Identity.SelfId(selfIdentityId.Value))
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 

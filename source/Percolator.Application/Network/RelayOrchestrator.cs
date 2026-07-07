@@ -63,7 +63,7 @@ public class RelayOrchestrator
         var (ackId, blob) = items[0];
 
         // Resolve a direct session to the peer
-        var session = await _directSessions.GetByRemotePeerIdAsync(new NetworkPeerId(recipientPeerId.Value), selfIdentityId.Value).ConfigureAwait(false);
+        var session = await _directSessions.GetByRemotePeerIdAsync(new NetworkPeerId(recipientPeerId.Value), new NetworkSelfId(selfIdentityId.Value)).ConfigureAwait(false);
         if (session is null)
         {
             throw new InvalidOperationException($"No direct session for peer {recipientPeerId} to relay message {ackId}");
@@ -95,7 +95,7 @@ public class RelayOrchestrator
 
         // Decrypt response payload as RelayOpaqueResponse
         var ackCipher = SessionRatchetMessage.FromBytes(response.ResponsePayload.ResponsePayload.ToByteArray());
-        var resolved = await _secureMessaging.DecryptInboundAsync(selfIdentityId.Value, ackCipher, ct).ConfigureAwait(false);
+        var resolved = await _secureMessaging.DecryptInboundAsync(new CryptoSelfId(selfIdentityId.Value), ackCipher, ct).ConfigureAwait(false);
         var ackPlain = resolved?.plaintext;
         if (ackPlain is null)
         {

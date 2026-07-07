@@ -27,7 +27,7 @@ public class RelayGroupServiceTests
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new UnauthorizedDomainException("Invalid credentials"));
 
-        var service = new InfrastructureService(orchestrator.Object);
+        var service = new InfrastructureService(orchestrator.Object, Mock.Of<IRelayGroupLedgerRepository>());
 
         var request = new SubmitGroupMessageRequest
         {
@@ -39,7 +39,7 @@ public class RelayGroupServiceTests
 
         var ctx = new ServerCallContextStub(
             peer: "ipv4:127.0.0.1:7777",
-            deadline: DateTime.UtcNow.AddMinutes(1),
+            deadline: new DateTime(2025, 1, 1, 12, 1, 0, DateTimeKind.Utc),
             requestHeaders: new Metadata(),
             cancellationToken: CancellationToken.None);
 
@@ -65,7 +65,7 @@ public class RelayGroupServiceTests
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new EpochConflictDomainException("Epoch mismatch"));
 
-        var service = new InfrastructureService(orchestrator.Object);
+        var service = new InfrastructureService(orchestrator.Object, Mock.Of<IRelayGroupLedgerRepository>());
 
         var request = new SubmitGroupMessageRequest
         {
@@ -77,7 +77,7 @@ public class RelayGroupServiceTests
 
         var ctx = new ServerCallContextStub(
             peer: "ipv4:127.0.0.1:7777",
-            deadline: DateTime.UtcNow.AddMinutes(1),
+            deadline: new DateTime(2025, 1, 1, 12, 1, 0, DateTimeKind.Utc),
             requestHeaders: new Metadata(),
             cancellationToken: CancellationToken.None);
 

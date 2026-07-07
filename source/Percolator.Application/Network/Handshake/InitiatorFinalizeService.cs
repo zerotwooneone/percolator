@@ -116,7 +116,7 @@ namespace Percolator.Application.Network.Handshake
                     return null;
                 }
 
-                sentInvitation = await _sentInvitations.TryGetAsync(new RequestCorrelationId(corrGuid), cancellationToken).ConfigureAwait(false);
+                sentInvitation = await _sentInvitations.TryGetAsync(new RequestCorrelationId(corrGuid), new CryptoSelfId(selfIdentityId.Value), cancellationToken).ConfigureAwait(false);
                 if (sentInvitation is null)
                 {
                     // This commonly happens for peer->main simulator flows (pinv), where main is the acceptor
@@ -329,13 +329,13 @@ namespace Percolator.Application.Network.Handshake
                         Percolator.Application.Network.SecureSessionCreatedReason.InitiatorFinalize),
                     cancellationToken)
                 .ConfigureAwait(false);
-            await _index.UpsertAsync(selfIdentityId.Value, sid, header.PreKey, _clock.UtcNow, cancellationToken).ConfigureAwait(false);
+            await _index.UpsertAsync(new CryptoSelfId(selfIdentityId.Value), sid, header.PreKey, _clock.UtcNow, cancellationToken).ConfigureAwait(false);
 
             // Once the invite has been finalized into an active session, the outbound pending marker
             // (SentInvitation) should be removed so the UI no longer renders a separate PendingOutbound row.
             try
             {
-                await _sentInvitations.DeleteAsync(sentInvitation.RequestCorrelationId, cancellationToken).ConfigureAwait(false);
+                await _sentInvitations.DeleteAsync(sentInvitation.RequestCorrelationId, new CryptoSelfId(selfIdentityId.Value), cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -345,10 +345,10 @@ namespace Percolator.Application.Network.Handshake
             // Best-effort cleanup of legacy prehandshake store (if it was populated)
             try
             {
-                var mostRecent = await _prehandshake.TryGetMostRecentAsync(selfIdentityId.Value, cancellationToken).ConfigureAwait(false);
+                var mostRecent = await _prehandshake.TryGetMostRecentAsync(new NetworkSelfId(selfIdentityId.Value), cancellationToken).ConfigureAwait(false);
                 if (mostRecent is not null)
                 {
-                    await _prehandshake.DeleteAsync(mostRecent.Id, selfIdentityId.Value, cancellationToken).ConfigureAwait(false);
+                    await _prehandshake.DeleteAsync(mostRecent.Id, new NetworkSelfId(selfIdentityId.Value), cancellationToken).ConfigureAwait(false);
                 }
             }
             catch
@@ -369,7 +369,7 @@ namespace Percolator.Application.Network.Handshake
             var header = responderFirst.GetHeader();
             var headerPreKey = header.PreKey;
 
-            await foreach (var pending in _prehandshake.EnumeratePendingAsync(selfIdentityId.Value, cancellationToken).ConfigureAwait(false))
+            await foreach (var pending in _prehandshake.EnumeratePendingAsync(new NetworkSelfId(selfIdentityId.Value), cancellationToken).ConfigureAwait(false))
             {
                 try
                 {
@@ -425,8 +425,8 @@ namespace Percolator.Application.Network.Handshake
                                 Percolator.Application.Network.SecureSessionCreatedReason.InitiatorFinalize),
                             cancellationToken)
                         .ConfigureAwait(false);
-                    await _index.UpsertAsync(selfIdentityId.Value, sid, headerPreKey, _clock.UtcNow, cancellationToken).ConfigureAwait(false);
-                    await _prehandshake.DeleteAsync(pending.Id, selfIdentityId.Value, cancellationToken).ConfigureAwait(false);
+                    await _index.UpsertAsync(new CryptoSelfId(selfIdentityId.Value), sid, headerPreKey, _clock.UtcNow, cancellationToken).ConfigureAwait(false);
+                    await _prehandshake.DeleteAsync(pending.Id, new NetworkSelfId(selfIdentityId.Value), cancellationToken).ConfigureAwait(false);
 
                     _logger.LogInformation("Initiator finalized session {SessionId} from pending record {PendingId}", sid.Value, pending.Id);
                     return (sid, pt);
@@ -462,7 +462,7 @@ namespace Percolator.Application.Network.Handshake
 
             // Match to a pending pre-handshake attempt by recipient PKH
             PreHandshakeRecord? match = null;
-            await foreach (var pending in _prehandshake.EnumeratePendingAsync(selfIdentityId.Value, cancellationToken).ConfigureAwait(false))
+            await foreach (var pending in _prehandshake.EnumeratePendingAsync(new NetworkSelfId(selfIdentityId.Value), cancellationToken).ConfigureAwait(false))
             {
                 if (pending.RecipientPublicKeyHash is { Length: > 0 }
                     && remotePkh.AsSpan().SequenceEqual(pending.RecipientPublicKeyHash))
@@ -482,7 +482,7 @@ namespace Percolator.Application.Network.Handshake
             SentInvitation? sentInvitation = null;
             try
             {
-                sentInvitation = await _sentInvitations.TryGetAsync(new RequestCorrelationId(match.LocalRequestId), cancellationToken).ConfigureAwait(false);
+                sentInvitation = await _sentInvitations.TryGetAsync(new RequestCorrelationId(match.LocalRequestId), new CryptoSelfId(selfIdentityId.Value), cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -597,14 +597,14 @@ namespace Percolator.Application.Network.Handshake
             // Cleanup pending marker and outbound route marker
             try
             {
-                await _prehandshake.DeleteAsync(match.Id, selfIdentityId.Value, cancellationToken).ConfigureAwait(false);
+                await _prehandshake.DeleteAsync(match.Id, new NetworkSelfId(selfIdentityId.Value), cancellationToken).ConfigureAwait(false);
             }
             catch
             {
             }
             try
             {
-                await _sentInvitations.DeleteAsync(new RequestCorrelationId(match.LocalRequestId), cancellationToken).ConfigureAwait(false);
+                await _sentInvitations.DeleteAsync(new RequestCorrelationId(match.LocalRequestId), new CryptoSelfId(selfIdentityId.Value), cancellationToken).ConfigureAwait(false);
             }
             catch
             {

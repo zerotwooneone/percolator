@@ -3,6 +3,7 @@ using Percolator.Application.Network.Handshake;
 using Percolator.Infrastructure.Network.Handshake;
 using Percolator.Infrastructure.Persistence;
 using Percolator.InfrastructureTests.Common;
+using Percolator.Network;
 
 namespace Percolator.InfrastructureTests.Network
 {
@@ -15,8 +16,7 @@ namespace Percolator.InfrastructureTests.Network
                 .UseInMemoryDatabase(Guid.NewGuid().ToString())
                 .Options;
 
-            var db = TestDb.NewContext(options, selfIdentityId);
-            db.Database.EnsureCreated();
+            var db = TestDb.NewContextWithSchema(options, selfIdentityId);
             return db;
         }
 
@@ -40,7 +40,7 @@ namespace Percolator.InfrastructureTests.Network
             await store.SaveAsync(rec, CancellationToken.None);
 
             var results = new List<PreHandshakeRecord>();
-            await foreach (var r in store.EnumeratePendingAsync(42, CancellationToken.None))
+            await foreach (var r in store.EnumeratePendingAsync(new NetworkSelfId(42), CancellationToken.None))
             {
                 results.Add(r);
             }
@@ -64,10 +64,10 @@ namespace Percolator.InfrastructureTests.Network
             await store.SaveAsync(active, CancellationToken.None);
             await store.SaveAsync(expired, CancellationToken.None);
 
-            await store.PurgeExpiredAsync(7, CancellationToken.None);
+            await store.PurgeExpiredAsync(new NetworkSelfId(7), CancellationToken.None);
 
             var ids = new List<long>();
-            await foreach (var r in store.EnumeratePendingAsync(7, CancellationToken.None)) ids.Add(r.Id);
+            await foreach (var r in store.EnumeratePendingAsync(new NetworkSelfId(7), CancellationToken.None)) ids.Add(r.Id);
             Assert.That(ids.Count, Is.EqualTo(1));
         }
     }

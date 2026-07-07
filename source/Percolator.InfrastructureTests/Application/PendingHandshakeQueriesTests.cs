@@ -12,6 +12,7 @@ using Percolator.Infrastructure.Application;
 using Percolator.Infrastructure.Cryptography;
 using Percolator.Infrastructure.Identity;
 using Percolator.Infrastructure.Persistence;
+using Percolator.Network;
 using PeerId = Percolator.Cryptography.Primitives.PeerId;
 
 namespace Percolator.InfrastructureTests.Application;
@@ -35,20 +36,19 @@ public sealed class PendingHandshakeQueriesTests
             .Options;
 
         var active = new ActiveIdentityContext();
-        active.SetActiveIdentity(new IdentityRecord(Guid.NewGuid(), "default") { SelfIdentityId = new SelfId(1) }, null);
+        active.SetActiveIdentity(new IdentityRecord(new SelfId(1), new PublicIdentityId(Guid.NewGuid()), new Percolator.Identity.DeviceId(1), "default") { ListeningPort = new Percolator.Identity.Model.ListeningPort(5000) }, null);
 
         var clock = new FixedClock { UtcNow = DateTimeOffset.Parse("2025-05-01T00:00:00Z") };
 
         await using var ctx = new PercolatorDbContext(options, active);
-        ctx.Database.EnsureCreated();
 
         if (!ctx.SelfIdentities.Any())
         {
-            ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = 1, PublicIdentityId = Guid.NewGuid(), Name = "default" });
+            ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = new SelfId(1), PublicIdentityId = new PublicIdentityId(Guid.NewGuid()), Name = "default", DeviceId = new Percolator.Identity.DeviceId(1), ListeningPort = new Percolator.Identity.Model.ListeningPort(5000), LastUsedUtc = DateTimeOffset.UtcNow });
             ctx.SaveChanges();
         }
 
-        var repo = new SqlitePendingSessionRepository(ctx, active, clock);
+        var repo = new SqlitePendingSessionRepository(ctx, clock);
 
         using var ecdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var inviterKeyBytes = ecdh.PublicKey.ExportSubjectPublicKeyInfo();
@@ -82,8 +82,8 @@ public sealed class PendingHandshakeQueriesTests
             clock,
             expiresAtUtc: clock.UtcNow.AddMinutes(10));
 
-        await repo.AddAsync(expired, CancellationToken.None);
-        await repo.AddAsync(open, CancellationToken.None);
+        await repo.AddAsync(expired, new CryptoSelfId(1), CancellationToken.None);
+        await repo.AddAsync(open, new CryptoSelfId(1), CancellationToken.None);
 
         var queries = new PendingHandshakeQueries(ctx, clock);
 
@@ -116,28 +116,28 @@ public sealed class PendingHandshakeQueriesTests
             .Options;
 
         var active = new ActiveIdentityContext();
-        active.SetActiveIdentity(new IdentityRecord(Guid.NewGuid(), "default") { SelfIdentityId = new SelfId(1) }, null);
+        active.SetActiveIdentity(new IdentityRecord(new SelfId(1), new PublicIdentityId(Guid.NewGuid()), new Percolator.Identity.DeviceId(1), "default") { ListeningPort = new Percolator.Identity.Model.ListeningPort(5000) }, null);
 
         var clock = new FixedClock { UtcNow = DateTimeOffset.Parse("2025-05-01T00:00:00Z") };
 
         await using var ctx = new PercolatorDbContext(options, active);
-        ctx.Database.EnsureCreated();
 
         if (!ctx.SelfIdentities.Any())
         {
-            ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = 1, PublicIdentityId = Guid.NewGuid(), Name = "default" });
+            ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = new SelfId(1), PublicIdentityId = new PublicIdentityId(Guid.NewGuid()), Name = "default", DeviceId = new Percolator.Identity.DeviceId(1), ListeningPort = new Percolator.Identity.Model.ListeningPort(5000), LastUsedUtc = DateTimeOffset.UtcNow });
             ctx.SaveChanges();
         }
 
-        var repo = new SqlitePendingSessionRepository(ctx, active, clock);
+        var repo = new SqlitePendingSessionRepository(ctx, clock);
 
-        var remotePeerId = new PeerId(1);
-        var relayPeerGuid = Guid.Parse("22222222-2222-2222-2222-222222222222");
-        var relayPeerId = new PeerId(relayPeerGuid);
+        var remotePeerId = new Percolator.Identity.PeerId(1);
+        var relayPeerId = new Percolator.Identity.PeerId(2);
+        var relayPeerNetworkId = new Percolator.Network.PeerId(2);
 
         ctx.PeerIdentities.Add(new PeerIdentityDbo
         {
-            PeerId = relayPeerGuid,
+            PeerId = relayPeerId,
+            PublicIdentityId = new PublicIdentityId(Guid.NewGuid()),
             Name = "RelayHost",
             Version = 1,
             CreatedAtUtc = clock.UtcNow,
@@ -146,48 +146,48 @@ public sealed class PendingHandshakeQueriesTests
 
         ctx.PeerRoutingProfiles.Add(new PeerRoutingProfileDbo
         {
-            PeerId = remotePeerId.Value,
+            PeerId = new Percolator.Network.PeerId(remotePeerId.Value),
             ReachabilityStatus = 0,
             ReachabilityLastChangeUtc = clock.UtcNow,
             DirectMessagePublicKey = null
         });
         ctx.PeerRoutingProfiles.Add(new PeerRoutingProfileDbo
         {
-            PeerId = relayPeerGuid,
+            PeerId = relayPeerNetworkId,
             ReachabilityStatus = 0,
             ReachabilityLastChangeUtc = clock.UtcNow,
             DirectMessagePublicKey = null
         });
         ctx.PeerRoutingGrpcEndPoints.Add(new GrpcEndPointRoutingDbo
         {
-            PeerId = relayPeerGuid,
+            PeerId = relayPeerNetworkId,
             Host = "relay.local",
             Port = 5001,
             LastSeenUtc = clock.UtcNow
         });
         ctx.PeerRoutingRelays.Add(new RelayLinkDbo
         {
-            PeerId = remotePeerId.Value,
-            RelayPeerId = relayPeerGuid,
+            PeerId = new Percolator.Network.PeerId(remotePeerId.Value),
+            RelayPeerId = relayPeerNetworkId,
             LastSeenUtc = clock.UtcNow
         });
         ctx.SaveChanges();
 
         var openRelayed = PendingSession.FromInvitationWithMetadata(
             PendingSessionId.NewId(),
-            remotePeerId,
+            new Percolator.Cryptography.Primitives.PeerId(remotePeerId.Value),
             new ProtocolVersion(1),
             HandshakeInvitation.FromBytes(new byte[] { 8 }),
             requestCorrelationId: new RequestCorrelationId(Guid.Parse("11111111-1111-1111-1111-111111111111")),
             isRelayed: true,
-            relayHostPeerId: relayPeerId,
+            relayHostPeerId: new Percolator.Cryptography.Primitives.PeerId(relayPeerId.Value),
             inviterIdentityKey: null,
             callbackEndpointHost: null,
             callbackEndpointPort: null,
             clock,
             expiresAtUtc: clock.UtcNow.AddMinutes(10));
 
-        await repo.AddAsync(openRelayed, CancellationToken.None);
+        await repo.AddAsync(openRelayed, new CryptoSelfId(1), CancellationToken.None);
 
         var queries = new PendingHandshakeQueries(ctx, clock);
 

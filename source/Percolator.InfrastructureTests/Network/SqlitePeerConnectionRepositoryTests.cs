@@ -3,9 +3,11 @@ using System.Security.Cryptography;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Percolator.Identity;
 using Percolator.Infrastructure.Network;
 using Percolator.Infrastructure.Persistence;
 using Percolator.Infrastructure.Identity;
+using Percolator.InfrastructureTests.Common;
 using Percolator.Network;
 
 namespace Percolator.InfrastructureTests.Network;
@@ -22,8 +24,7 @@ public class SqlitePeerConnectionRepositoryTests
             .UseSqlite(connection)
             .Options;
 
-        var ctx = new PercolatorDbContext(options);
-        ctx.Database.EnsureCreated();
+        var ctx = TestDb.NewContextWithSchema(options, null);
         return ctx;
     }
 
@@ -34,8 +35,8 @@ public class SqlitePeerConnectionRepositoryTests
         var repo = new SqlitePeerRoutingProfileRepository(ctx);
 
         // Arrange: ensure PeerIdentity exists to satisfy FK
-        var peerId = new PeerId(1);
-        ctx.PeerIdentities.Add(new PeerIdentityDbo { PeerId = peerId.Value, Name = "peer-name", Version = 0, CreatedAtUtc = DateTimeOffset.UtcNow, UpdatedAtUtc = DateTimeOffset.UtcNow });
+        var peerId = new Percolator.Network.PeerId(1);
+        ctx.PeerIdentities.Add(new PeerIdentityDbo { PeerId = new Percolator.Identity.PeerId(peerId.Value), Name = "peer-name", Version = 0, CreatedAtUtc = DateTimeOffset.UtcNow, UpdatedAtUtc = DateTimeOffset.UtcNow });
         await ctx.SaveChangesAsync();
 
         var now = DateTimeOffset.UtcNow;
@@ -64,10 +65,10 @@ public class SqlitePeerConnectionRepositoryTests
         var repo = new SqlitePeerRoutingProfileRepository(ctx);
 
         // Arrange peer identities
-        var peerA = new PeerId(1);
-        var peerB = new PeerId(2);
-        ctx.PeerIdentities.Add(new PeerIdentityDbo { PeerId = peerA.Value, Name = "A", Version = 0, CreatedAtUtc = DateTimeOffset.UtcNow, UpdatedAtUtc = DateTimeOffset.UtcNow });
-        ctx.PeerIdentities.Add(new PeerIdentityDbo { PeerId = peerB.Value, Name = "B", Version = 0, CreatedAtUtc = DateTimeOffset.UtcNow, UpdatedAtUtc = DateTimeOffset.UtcNow });
+        var peerA = new Percolator.Network.PeerId(1);
+        var peerB = new Percolator.Network.PeerId(2);
+        ctx.PeerIdentities.Add(new PeerIdentityDbo { PeerId = new Percolator.Identity.PeerId(peerA.Value), Name = "A", Version = 0, CreatedAtUtc = DateTimeOffset.UtcNow, UpdatedAtUtc = DateTimeOffset.UtcNow });
+        ctx.PeerIdentities.Add(new PeerIdentityDbo { PeerId = new Percolator.Identity.PeerId(peerB.Value), Name = "B", Version = 0, CreatedAtUtc = DateTimeOffset.UtcNow, UpdatedAtUtc = DateTimeOffset.UtcNow });
         await ctx.SaveChangesAsync();
 
         var now = DateTimeOffset.UtcNow;

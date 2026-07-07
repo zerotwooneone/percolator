@@ -3,6 +3,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
+using Percolator.Identity;
 using Percolator.Infrastructure.Cryptography;
 using Percolator.Infrastructure.Persistence;
 using Percolator.InfrastructureTests.Common;
@@ -21,12 +22,11 @@ public sealed class SqliteSentInvitationRepositoryTests
             .UseSqlite(connection)
             .Options;
 
-        var ctx = TestDb.NewContext(options, 1);
-        ctx.Database.EnsureCreated();
+        var ctx = TestDb.NewContextWithSchema(options, 1);
 
         if (!ctx.SelfIdentities.Any())
         {
-            ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = 1, PublicIdentityId = Guid.NewGuid(), Name = "default" });
+            ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = new SelfId(1), PublicIdentityId = new PublicIdentityId(Guid.NewGuid()), Name = "default", DeviceId = new Percolator.Identity.DeviceId(1), ListeningPort = new Percolator.Identity.Model.ListeningPort(5000), LastUsedUtc = DateTimeOffset.UtcNow });
             ctx.SaveChanges();
         }
 
@@ -39,12 +39,13 @@ public sealed class SqliteSentInvitationRepositoryTests
         await using var ctx = CreateDbContext(out var conn);
         await using var _ = conn;
 
-        var repo = new SqliteSentInvitationRepository(ctx, TestDb.CreateActiveIdentity(1));
+        var repo = new SqliteSentInvitationRepository(ctx);
 
         var corr = new RequestCorrelationId(Guid.NewGuid());
         var spk = Guid.NewGuid();
         var otk = Guid.NewGuid();
-        var created = DateTimeOffset.UtcNow;
+        var fixedTime = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero);
+        var created = fixedTime;
         var expires = created.AddMinutes(10);
 
         var invite = new SentInvitation(
@@ -57,9 +58,9 @@ public sealed class SqliteSentInvitationRepositoryTests
             targetDisplayName: "Alice",
             targetEndpointHost: "127.0.0.1",
             targetEndpointPort: 5002);
-        await repo.UpsertAsync(invite, CancellationToken.None);
+        await repo.UpsertAsync(invite, new CryptoSelfId(1), CancellationToken.None);
 
-        var loaded = await repo.TryGetAsync(corr, CancellationToken.None);
+        var loaded = await repo.TryGetAsync(corr, new CryptoSelfId(1), CancellationToken.None);
         loaded.Should().NotBeNull();
         loaded!.RequestCorrelationId.Should().Be(corr);
         loaded.SignedPreKeyId.Should().Be(spk);
@@ -70,8 +71,8 @@ public sealed class SqliteSentInvitationRepositoryTests
         loaded.TargetEndpointHost.Should().Be("127.0.0.1");
         loaded.TargetEndpointPort.Should().Be(5002);
 
-        await repo.DeleteAsync(corr, CancellationToken.None);
-        var afterDelete = await repo.TryGetAsync(corr, CancellationToken.None);
+        await repo.DeleteAsync(corr, new CryptoSelfId(1), CancellationToken.None);
+        var afterDelete = await repo.TryGetAsync(corr, new CryptoSelfId(1), CancellationToken.None);
         afterDelete.Should().BeNull();
     }
 }

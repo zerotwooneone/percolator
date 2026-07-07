@@ -1,3 +1,6 @@
+using Percolator.Chat.GroupMembership;
+using Percolator.Chat.Messaging.ValueObjects;
+
 namespace Percolator.Application.Chat;
 
 /// <summary>
@@ -5,8 +8,8 @@ namespace Percolator.Application.Chat;
 /// </summary>
 public sealed record PendingGroupInvitationDto
 {
-    public Guid ConversationId { get; init; }
-    public Guid InviterPeerId { get; init; }
+    public ConversationId ConversationId { get; init; }
+    public ChatPeerId InviterPeerId { get; init; }
     public byte[] CreatorIdentityKey { get; init; } = Array.Empty<byte>();
     public List<byte[]> InitialMembers { get; init; } = new();
     public string? GroupName { get; init; }

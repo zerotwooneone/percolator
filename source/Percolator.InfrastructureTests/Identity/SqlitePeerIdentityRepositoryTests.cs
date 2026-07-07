@@ -4,6 +4,7 @@ using Percolator.Identity;
 using Percolator.Identity.Model;
 using Percolator.Infrastructure.Persistence;
 using Percolator.Infrastructure.Repositories;
+using Percolator.InfrastructureTests.Common;
 
 namespace Percolator.InfrastructureTests.Identity;
 
@@ -15,8 +16,7 @@ public class SqlitePeerIdentityRepositoryTests
         var options = new DbContextOptionsBuilder<PercolatorDbContext>()
             .UseSqlite(conn)
             .Options;
-        var db = new PercolatorDbContext(options);
-        db.Database.EnsureCreated();
+        var db = TestDb.NewContextWithSchema(options, null);
         return db;
     }
 
@@ -30,8 +30,8 @@ public class SqlitePeerIdentityRepositoryTests
         await using var db = CreateContext(conn);
         var repo = new SqlitePeerIdentityRepository(db);
 
-        var now = DateTimeOffset.UtcNow;
-        var aggregate = new PeerIdentity(new PeerId(1));
+        var now = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero);
+        var aggregate = new PeerIdentity(new PeerId(1), new PublicIdentityId(Guid.NewGuid()));
         aggregate.SetDisplayName("Alice");
         aggregate.AddKey(Bytes(1,2,3), now, now.AddDays(1), now);
 
@@ -54,13 +54,13 @@ public class SqlitePeerIdentityRepositoryTests
         await using var db = CreateContext(conn);
         var repo = new SqlitePeerIdentityRepository(db);
 
-        var now = DateTimeOffset.UtcNow;
-        var aggregate = new PeerIdentity(new PeerId(2));
+        var now = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero);
+        var aggregate = new PeerIdentity(new PeerId(2), new PublicIdentityId(Guid.NewGuid()));
         aggregate.AddKey(Bytes(9,9,9), now, now.AddDays(1), now);
         await repo.SaveAsync(aggregate);
 
         var fp = aggregate.GetActiveKey(now)!.Fingerprint;
-        var loaded = await repo.FindByPublicKeyHashAsync(fp);
+        var loaded = await repo.FindByPublicKeyHashAsync(IdentityPublicKeyHash.FromSpki(fp));
         Assert.That(loaded, Is.Not.Null);
         Assert.That(loaded!.Id, Is.EqualTo(aggregate.Id));
     }
@@ -73,13 +73,13 @@ public class SqlitePeerIdentityRepositoryTests
         await using var db = CreateContext(conn);
         var repo = new SqlitePeerIdentityRepository(db);
 
-        var now = DateTimeOffset.UtcNow;
-        var a = new PeerIdentity(new PeerId(3));
+        var now = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero);
+        var a = new PeerIdentity(new PeerId(3), new PublicIdentityId(Guid.NewGuid()));
         a.AddKey(Bytes(1), now, now.AddDays(1), now);
         await repo.SaveAsync(a);
 
         // simulate stale copy by directly creating a new aggregate with same id and default version
-        var stale = new PeerIdentity(a.Id);
+        var stale = new PeerIdentity(a.Id, new PublicIdentityId(Guid.NewGuid()));
         stale.AddKey(Bytes(2), now, now.AddDays(2), now);
 
         // First update should succeed

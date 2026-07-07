@@ -17,7 +17,7 @@ public class SqliteSelfIdentityKeysStore : ISelfIdentityKeysStore
     public async Task<X3dhKeys?> LoadAsync(SelfId selfIdentityId, CancellationToken cancellationToken = default)
     {
         var dbo = await _db.SelfIdentityKeys.AsNoTracking()
-            .FirstOrDefaultAsync(k => k.SelfIdentityId == selfIdentityId.Value, cancellationToken);
+            .FirstOrDefaultAsync(k => k.SelfIdentityId == selfIdentityId, cancellationToken);
         if (dbo is null)
         {
             return null;
@@ -34,7 +34,7 @@ public class SqliteSelfIdentityKeysStore : ISelfIdentityKeysStore
     public async Task SaveAsync(SelfId selfIdentityId, X3dhKeys keys, CancellationToken cancellationToken = default)
     {
         var dbo = await _db.SelfIdentityKeys
-            .FirstOrDefaultAsync(k => k.SelfIdentityId == selfIdentityId.Value, cancellationToken);
+            .FirstOrDefaultAsync(k => k.SelfIdentityId == selfIdentityId, cancellationToken);
 
         var ikSigningBytes = keys.IdentitySigningKey.ExportECPrivateKey();
         var spkBytes = keys.SignedPreKey.ExportECPrivateKey();
@@ -43,7 +43,7 @@ public class SqliteSelfIdentityKeysStore : ISelfIdentityKeysStore
         {
             dbo = new SelfIdentityKeysDbo
             {
-                SelfIdentityId = selfIdentityId.Value,
+                SelfIdentityId = selfIdentityId,
                 IdentitySigningKey = ikSigningBytes,
                 SignedPreKey = spkBytes,
             };

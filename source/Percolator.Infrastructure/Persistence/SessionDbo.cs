@@ -1,10 +1,12 @@
+using Percolator.Identity;
+
 namespace Percolator.Infrastructure.Persistence;
 
 public class SessionDbo
 {
-    public uint SelfIdentityId { get; set; }
+    public SelfId SelfIdentityId { get; set; }
     public Guid SessionId { get; set; }
-    public uint RemotePeerId { get; set; }
+    public PeerId RemotePeerId { get; set; }
     public int ProtocolVersion { get; set; }
 
     public byte[] RootKey { get; set; } = Array.Empty<byte>();

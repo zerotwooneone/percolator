@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using Percolator.Identity;
 
 namespace Percolator.Infrastructure.Persistence;
 
@@ -7,7 +8,7 @@ public class PeerPublicSigningKeyDbo
     public int Id { get; set; }
 
     [Required]
-    public uint PeerId { get; set; }
+    public PeerId PeerId { get; set; }
 
     [Required]
     public byte[] PublicKey { get; set; } = null!; // SPKI bytes

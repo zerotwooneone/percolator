@@ -17,7 +17,8 @@ public sealed class SqlitePendingSessionRepositoryTests
 {
     private sealed class TestClock : IClock
     {
-        public DateTimeOffset UtcNow => DateTimeOffset.UtcNow;
+        private static readonly DateTimeOffset FixedTime = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero);
+        public DateTimeOffset UtcNow => FixedTime;
     }
 
     [Test]
@@ -31,18 +32,17 @@ public sealed class SqlitePendingSessionRepositoryTests
             .Options;
 
         var active = new ActiveIdentityContext();
-        active.SetActiveIdentity(new IdentityRecord(Guid.NewGuid(), "default") { SelfIdentityId = new SelfId(1) }, null);
+        active.SetActiveIdentity(new IdentityRecord(new SelfId(1), new PublicIdentityId(Guid.NewGuid()), new Percolator.Identity.DeviceId(1), "default") { ListeningPort = new Percolator.Identity.Model.ListeningPort(5000) }, null);
 
         await using var ctx = new PercolatorDbContext(options, active);
-        ctx.Database.EnsureCreated();
 
         if (!ctx.SelfIdentities.Any())
         {
-            ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = 1, PublicIdentityId = Guid.NewGuid(), Name = "default" });
+            ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = new SelfId(1), PublicIdentityId = new PublicIdentityId(Guid.NewGuid()), Name = "default", DeviceId = new Percolator.Identity.DeviceId(1), ListeningPort = new Percolator.Identity.Model.ListeningPort(5000), LastUsedUtc = DateTimeOffset.UtcNow });
             ctx.SaveChanges();
         }
 
-        var repo = new SqlitePendingSessionRepository(ctx, active, new TestClock());
+        var repo = new SqlitePendingSessionRepository(ctx, new TestClock());
 
         using var ecdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var inviterKeyBytes = ecdh.PublicKey.ExportSubjectPublicKeyInfo();
@@ -59,11 +59,11 @@ public sealed class SqlitePendingSessionRepositoryTests
             callbackEndpointHost: "example.com",
             callbackEndpointPort: 443,
             new TestClock(),
-            expiresAtUtc: DateTimeOffset.UtcNow.AddMinutes(5));
+            expiresAtUtc: new TestClock().UtcNow.AddMinutes(5));
 
-        await repo.AddAsync(pending, CancellationToken.None);
+        await repo.AddAsync(pending, new CryptoSelfId(1), CancellationToken.None);
 
-        var loaded = await repo.GetAsync(pending.Id, CancellationToken.None);
+        var loaded = await repo.GetAsync(pending.Id, new CryptoSelfId(1), CancellationToken.None);
         Assert.That(loaded, Is.Not.Null);
 
         Assert.That(loaded!.IsRelayed, Is.EqualTo(false));

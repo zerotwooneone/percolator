@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Linq;
 using Microsoft.EntityFrameworkCore;
 using Percolator.Chat.GroupLedger;
 using Percolator.Chat.GroupMembership;
@@ -38,12 +39,12 @@ public sealed class SqliteRelayMessagePublisher : IRelayMessagePublisher
             dbo.Version++;
 
             // 3. Fan-out: Map ChatPeerId (Domain) to MessageQueueItemDbo (Infrastructure)
-            // Note: RecipientPeerId is the routing ID.
+            // Note: RecipientPkh is the routing ID.
             var queueItems = recipients.Select(peerId => new MessageQueueItemDbo
             {
                 Id = Guid.NewGuid(),
                 AckId = Guid.NewGuid(),
-                RecipientPeerId = new PeerId(peerId.Value), // Conversion: Domain to Infrastructure Identity type
+                RecipientPkh = Pkh.FromBytes(BitConverter.GetBytes(peerId.Value).Concat(new byte[28]).ToArray()), // Conversion: Domain to Infrastructure Pkh type
                 Blob = payload.ToArray(),
                 EnqueuedAtUtc = DateTimeOffset.UtcNow
             }).ToList();

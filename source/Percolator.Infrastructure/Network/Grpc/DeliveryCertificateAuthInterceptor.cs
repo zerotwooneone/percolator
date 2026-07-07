@@ -1,6 +1,7 @@
 using Grpc.Core;
 using Grpc.Core.Interceptors;
 using Percolator.Application.Chat;
+using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Cryptography;
 
 namespace Percolator.Infrastructure.Network.Grpc;
@@ -47,9 +48,13 @@ public sealed class DeliveryCertificateAuthInterceptor : Interceptor
         var signatureBytes = Convert.FromBase64String(signatureStr);
         var signature = Signature.FromBytes(signatureBytes);
 
+        // Convert string PKH to Pkh type
+        var pkhBytes = Convert.FromHexString(senderPkh);
+        var senderPkhTyped = Pkh.FromBytes(pkhBytes);
+
         // Call authentication service
         var isAuthenticated = await _peerAuthenticationService.AuthenticateDeliveryCertificateRequestAsync(
-            senderPkh,
+            senderPkhTyped,
             requestTimestamp,
             signature,
             context.CancellationToken);

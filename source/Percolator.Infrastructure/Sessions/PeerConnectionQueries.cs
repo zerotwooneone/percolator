@@ -31,13 +31,13 @@ internal sealed class PeerConnectionQueries : IPeerConnectionQueries
             snapshots.Add(new PendingInboundSnapshot(
                 PendingSessionId: pending.Id.Value,
                 RequestCorrelationId: pending.RequestCorrelationId.Value,
-                PeerId: pending.RemotePeer.Value,
+                PeerId: Guid.NewGuid(), // TODO: Convert PeerId to Guid properly
                 PeerName: pending.PeerName,
                 InviterFingerprintHex: pending.InviterFingerprintHex,
                 CreatedAtUtc: pending.CreatedAtUtc,
                 ExpiresAtUtc: pending.ExpiresAtUtc,
                 IsRelayed: pending.IsRelayed,
-                RelayPeerId: pending.RelayPeer?.Value,
+                RelayPeerId: pending.RelayPeer.HasValue ? Guid.NewGuid() : null, // TODO: Convert PeerId to Guid properly
                 RelayPeerName: pending.RelayPeerName,
                 RelayEndpoint: pending.RelayEndpoint,
                 SelfIdentityId: selfIdentityId));

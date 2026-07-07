@@ -4,6 +4,7 @@ using Percolator.Application.Cryptography;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
 using Percolator.Infrastructure.Persistence;
+using Percolator.Network;
 using PeerId = Percolator.Cryptography.Primitives.PeerId;
 
 namespace Percolator.Infrastructure.Application;
@@ -31,10 +32,10 @@ public class PendingHandshakeQueries : IPendingHandshakeQueries
             from pi in g.DefaultIfEmpty()
             select new
             {
-                Id = ps.Id,                 // primitive
+                Id = ps.Id,
                 RemotePeerId = ps.RemotePeerId,
+                RelayHostPeerId = ps.RelayHostPeerId,
                 IsRelayed = ps.IsRelayed,
-                // keep raw display name-ish field (primitive or nullable) from DB
                 PeerDisplayName = pi == null ? null : pi.Name,
                 RequestCorrelationId = ps.RequestCorrelationId,
                 InviterIdentityKey = ps.InviterIdentityKey,
@@ -44,61 +45,41 @@ public class PendingHandshakeQueries : IPendingHandshakeQueries
 
         var rows = await sqlQuery.ToListAsync(cancellationToken).ConfigureAwait(false);
 
-        var relayedPeerIds = rows
-            .Where(r => r.IsRelayed)
-            .Select(r => r.RemotePeerId)
+        var relayPeerIds = rows
+            .Where(r => r.IsRelayed && r.RelayHostPeerId.HasValue)
+            .Select(r => r.RelayHostPeerId!.Value.Value)
             .Distinct()
             .ToList();
 
-        var relayByRemote = new Dictionary<Guid, Guid>();
-        if (relayedPeerIds.Count > 0)
-        {
-            var relayLinks = await _dbContext.PeerRoutingRelays
-                .AsNoTracking()
-                .Where(r => relayedPeerIds.Contains(r.PeerId))
-                .ToListAsync(cancellationToken)
-                .ConfigureAwait(false);
-
-            foreach (var link in relayLinks.OrderByDescending(r => r.LastSeenUtc))
-            {
-                if (!relayByRemote.ContainsKey(link.PeerId))
-                {
-                    relayByRemote[link.PeerId] = link.RelayPeerId;
-                }
-            }
-        }
-
-        var relayPeerIds = relayByRemote.Values.Distinct().ToList();
-
-        var relayNameById = new Dictionary<Guid, string>();
+        var relayNameById = new Dictionary<uint, string>();
         if (relayPeerIds.Count > 0)
         {
             var relays = await _dbContext.PeerIdentities
                 .AsNoTracking()
-                .Where(p => relayPeerIds.Contains(p.PeerId))
+                .Where(p => relayPeerIds.Contains(p.PeerId.Value))
                 .ToListAsync(cancellationToken)
                 .ConfigureAwait(false);
 
             foreach (var p in relays)
             {
-                relayNameById[p.PeerId] = p.Name;
+                relayNameById[p.PeerId.Value] = p.Name;
             }
         }
 
-        var relayEndpointById = new Dictionary<Guid, string>();
+        var relayEndpointById = new Dictionary<uint, string>();
         if (relayPeerIds.Count > 0)
         {
             var eps = await _dbContext.PeerRoutingGrpcEndPoints
                 .AsNoTracking()
-                .Where(e => relayPeerIds.Contains(e.PeerId))
+                .Where(e => relayPeerIds.Contains(e.PeerId.Value))
                 .ToListAsync(cancellationToken)
                 .ConfigureAwait(false);
 
             foreach (var ep in eps.OrderByDescending(e => e.LastSeenUtc))
             {
-                if (!relayEndpointById.ContainsKey(ep.PeerId))
+                if (!relayEndpointById.ContainsKey(ep.PeerId.Value))
                 {
-                    relayEndpointById[ep.PeerId] = $"{ep.Host}:{ep.Port}";
+                    relayEndpointById[ep.PeerId.Value] = $"{ep.Host}:{ep.Port}";
                 }
             }
         }
@@ -108,7 +89,7 @@ public class PendingHandshakeQueries : IPendingHandshakeQueries
                      .OrderByDescending(r => r.CreatedAtUtc))
         {
             var peerName = row.PeerDisplayName
-                           ?? row.RemotePeerId.ToString()[..8];
+                           ?? row.RemotePeerId.Value.ToString()[..8];
 
             if (string.IsNullOrWhiteSpace(row.RequestCorrelationId)
                 || !Guid.TryParse(row.RequestCorrelationId, out var correlationGuid)
@@ -126,8 +107,10 @@ public class PendingHandshakeQueries : IPendingHandshakeQueries
             PeerId? relayPeerId = null;
             string? relayPeerName = null;
             string? relayEndpoint = null;
-            if (row.IsRelayed && relayByRemote.TryGetValue(row.RemotePeerId, out var relayId))
+            uint relayId = 0;
+            if (row.IsRelayed && row.RelayHostPeerId.HasValue)
             {
+                relayId = row.RelayHostPeerId.Value.Value;
                 relayPeerId = new PeerId(relayId);
                 relayPeerName = relayNameById.TryGetValue(relayId, out var name)
                     ? name
@@ -140,7 +123,7 @@ public class PendingHandshakeQueries : IPendingHandshakeQueries
             yield return new PendingHandshake
             {
                 Id = new PendingSessionId(row.Id),
-                RemotePeer = new PeerId(row.RemotePeerId),
+                RemotePeer = new PeerId(row.RemotePeerId.Value),
                 PeerName = peerName,
                 RequestCorrelationId = new RequestCorrelationId(correlationGuid),
                 InviterFingerprintHex = inviterFingerprintHex,

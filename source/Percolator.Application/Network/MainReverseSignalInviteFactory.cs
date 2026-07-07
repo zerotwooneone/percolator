@@ -127,7 +127,8 @@ public sealed class MainReverseSignalInviteFactory : IMainReverseSignalInviteFac
                 expiresAtUtc: expiresAtUtc,
                 targetDisplayName: targetDisplayName,
                 targetEndpointHost: targetEndpointHost,
-                targetEndpointPort: targetEndpointPort))
+                targetEndpointPort: targetEndpointPort),
+            new CryptoSelfId(_active.Identity.SelfIdentityId.Value))
             .GetAwaiter()
             .GetResult();
 

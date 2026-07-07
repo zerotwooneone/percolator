@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Percolator.Infrastructure.Persistence;
+using PublicIdentityId = Percolator.Identity.PublicIdentityId;
 
 namespace Percolator.InfrastructureTests.Identity;
 
@@ -18,8 +19,10 @@ public class SelfIdentitySchemaTests
         _options = new DbContextOptionsBuilder<PercolatorDbContext>()
             .UseSqlite(_connection)
             .Options;
-        using var ctx = new PercolatorDbContext(_options);
-        ctx.Database.EnsureCreated();
+
+        // Create schema without active identity first
+        using var schemaCtx = new PercolatorDbContext(_options);
+        schemaCtx.Database.EnsureCreated();
     }
 
     [TearDown]
@@ -55,14 +58,14 @@ public class SelfIdentitySchemaTests
     {
         await using (var ctx = new PercolatorDbContext(_options))
         {
-            ctx.SelfIdentities.Add(new SelfIdentityDbo { Name = "alice", PublicIdentityId = Guid.NewGuid() });
+            ctx.SelfIdentities.Add(new SelfIdentityDbo { Name = "alice", PublicIdentityId = new PublicIdentityId(Guid.NewGuid()) });
             await ctx.SaveChangesAsync();
         }
         // Attempt to insert duplicate name should fail due to unique index
         Assert.ThrowsAsync<DbUpdateException>(async () =>
         {
             await using var ctx2 = new PercolatorDbContext(_options);
-            ctx2.SelfIdentities.Add(new SelfIdentityDbo { Name = "alice", PublicIdentityId = Guid.NewGuid() });
+            ctx2.SelfIdentities.Add(new SelfIdentityDbo { Name = "alice", PublicIdentityId = new PublicIdentityId(Guid.NewGuid()) });
             await ctx2.SaveChangesAsync();
         });
     }

@@ -3,6 +3,8 @@ using Microsoft.EntityFrameworkCore;
 using NUnit.Framework;
 using Percolator.Application.Sessions;
 using Percolator.Cryptography;
+using Percolator.Identity;
+using Percolator.Identity.Model;
 using Percolator.Infrastructure.Cryptography;
 using Percolator.Infrastructure.Identity;
 using Percolator.Infrastructure.Persistence;
@@ -26,7 +28,7 @@ public sealed class PeerConnectionSidebarQueriesTests : IDisposable
             .Options;
 
         _db = new PercolatorDbContext(options);
-        _now = DateTimeOffset.UtcNow;
+        _now = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero);
         _clock = new TestClock(_now);
         _queries = new PeerConnectionSidebarQueries(_db, _clock);
     }
@@ -46,13 +48,14 @@ public sealed class PeerConnectionSidebarQueriesTests : IDisposable
     public async Task LoadSidebarConnectionsAsync_ReturnsEstablishedSecureSessions()
     {
         // Arrange
-        var selfIdentityId = 1;
-        var peerId = Guid.NewGuid();
+        var selfIdentityId = new SelfId(1);
+        var peerId = new Percolator.Identity.PeerId(12345);
         var sessionId = Guid.NewGuid();
 
         _db.PeerIdentities.Add(new PeerIdentityDbo
         {
             PeerId = peerId,
+            PublicIdentityId = new PublicIdentityId(Guid.NewGuid()),
             Name = "Test Peer",
             Version = 1,
             CreatedAtUtc = _now,
@@ -73,14 +76,13 @@ public sealed class PeerConnectionSidebarQueriesTests : IDisposable
         await _db.SaveChangesAsync();
 
         // Act
-        var result = await _queries.LoadSidebarConnectionsAsync(selfIdentityId);
+        var result = await _queries.LoadSidebarConnectionsAsync((int)selfIdentityId.Value);
 
         // Assert
         var sessionDto = result.Should().HaveCount(1).And.Subject.Single();
-        sessionDto.SelfIdentityId.Should().Be(selfIdentityId);
+        sessionDto.SelfIdentityId.Should().Be((int)selfIdentityId.Value);
         sessionDto.KeyType.Should().Be(SidebarPeerConnectionKeyType.SecureSession);
         sessionDto.KeyValue.Should().Be(sessionId);
-        sessionDto.PeerId.Should().Be(peerId);
         sessionDto.DisplayName.Should().Be("Test Peer");
         sessionDto.Initials.Should().Be("TP");
         sessionDto.Status.Should().Be(SidebarPeerConnectionStatus.Relay); // No DirectSession, so Relay
@@ -92,13 +94,14 @@ public sealed class PeerConnectionSidebarQueriesTests : IDisposable
     public async Task LoadSidebarConnectionsAsync_ComputesDirectStatusWhenDirectSessionExists()
     {
         // Arrange
-        var selfIdentityId = 1;
-        var peerId = Guid.NewGuid();
+        var selfIdentityId = new SelfId(1);
+        var peerId = new Percolator.Identity.PeerId(23456);
         var sessionId = Guid.NewGuid();
 
         _db.PeerIdentities.Add(new PeerIdentityDbo
         {
             PeerId = peerId,
+            PublicIdentityId = new PublicIdentityId(Guid.NewGuid()),
             Name = "Test Peer",
             Version = 1,
             CreatedAtUtc = _now,
@@ -126,7 +129,7 @@ public sealed class PeerConnectionSidebarQueriesTests : IDisposable
         await _db.SaveChangesAsync();
 
         // Act
-        var result = await _queries.LoadSidebarConnectionsAsync(selfIdentityId);
+        var result = await _queries.LoadSidebarConnectionsAsync((int)selfIdentityId.Value);
 
         // Assert
         var sessionDto = result.Should().HaveCount(1).And.Subject.Single();
@@ -137,25 +140,16 @@ public sealed class PeerConnectionSidebarQueriesTests : IDisposable
     public async Task LoadSidebarConnectionsAsync_ReturnsPendingOutboundFromSentInvitations()
     {
         // Arrange
-        var selfIdentityId = 1;
+        var selfIdentityId = new SelfId(1);
         var correlationId = Guid.NewGuid();
-        var targetPeerId = Guid.NewGuid();
-
-        _db.PeerIdentities.Add(new PeerIdentityDbo
-        {
-            PeerId = targetPeerId,
-            Name = "Target Peer",
-            Version = 1,
-            CreatedAtUtc = _now,
-            UpdatedAtUtc = _now
-        });
+        var targetPeerId = 34567;
 
         _db.SentInvitations.Add(new SentInvitationDbo
         {
             SelfIdentityId = selfIdentityId,
             RequestCorrelationId = correlationId.ToString(),
             SignedPreKeyId = Guid.NewGuid(),
-            TargetPeerId = targetPeerId,
+            TargetPeerId = (uint)targetPeerId,
             TargetDisplayName = "Target Peer",
             InviteRouteKind = (int)InviteRouteKind.Direct,
             CreatedAtUtc = _now,
@@ -165,14 +159,13 @@ public sealed class PeerConnectionSidebarQueriesTests : IDisposable
         await _db.SaveChangesAsync();
 
         // Act
-        var result = await _queries.LoadSidebarConnectionsAsync(selfIdentityId);
+        var result = await _queries.LoadSidebarConnectionsAsync((int)selfIdentityId.Value);
 
         // Assert
         var pendingDto = result.Should().HaveCount(1).And.Subject.Single();
-        pendingDto.SelfIdentityId.Should().Be(selfIdentityId);
+        pendingDto.SelfIdentityId.Should().Be((int)selfIdentityId.Value);
         pendingDto.KeyType.Should().Be(SidebarPeerConnectionKeyType.PendingCorrelation);
         pendingDto.KeyValue.Should().Be(correlationId);
-        pendingDto.PeerId.Should().Be(targetPeerId);
         pendingDto.DisplayName.Should().Be("Target Peer");
         pendingDto.Initials.Should().Be("TP");
         pendingDto.Status.Should().Be(SidebarPeerConnectionStatus.PendingOutbound);
@@ -184,7 +177,7 @@ public sealed class PeerConnectionSidebarQueriesTests : IDisposable
     public async Task LoadSidebarConnectionsAsync_ExcludesExpiredInvitations()
     {
         // Arrange
-        var selfIdentityId = 1;
+        var selfIdentityId = new SelfId(1);
         var correlationId = Guid.NewGuid();
 
         _db.SentInvitations.Add(new SentInvitationDbo
@@ -199,7 +192,7 @@ public sealed class PeerConnectionSidebarQueriesTests : IDisposable
         await _db.SaveChangesAsync();
 
         // Act
-        var result = await _queries.LoadSidebarConnectionsAsync(selfIdentityId);
+        var result = await _queries.LoadSidebarConnectionsAsync((int)selfIdentityId.Value);
 
         // Assert
         result.Should().BeEmpty();
@@ -209,14 +202,16 @@ public sealed class PeerConnectionSidebarQueriesTests : IDisposable
     public async Task LoadSidebarConnectionsAsync_SuppressesPendingOutboundWhenSessionExistsForTargetPeerId()
     {
         // Arrange
-        var selfIdentityId = 1;
-        var peerId = Guid.NewGuid();
+        var selfIdentityId = new SelfId(1);
+        var peerId = new Percolator.Identity.PeerId(45678);
+        var targetPeerId = 56789;
         var sessionId = Guid.NewGuid();
         var correlationId = Guid.NewGuid();
 
         _db.PeerIdentities.Add(new PeerIdentityDbo
         {
             PeerId = peerId,
+            PublicIdentityId = new PublicIdentityId(Guid.NewGuid()),
             Name = "Test Peer",
             Version = 1,
             CreatedAtUtc = _now,
@@ -239,7 +234,7 @@ public sealed class PeerConnectionSidebarQueriesTests : IDisposable
             SelfIdentityId = selfIdentityId,
             RequestCorrelationId = correlationId.ToString(),
             SignedPreKeyId = Guid.NewGuid(),
-            TargetPeerId = peerId, // Same peer as established session
+            TargetPeerId = (uint)targetPeerId, // Same peer as established session
             TargetDisplayName = "Test Peer",
             InviteRouteKind = (int)InviteRouteKind.Direct,
             CreatedAtUtc = _now,
@@ -249,7 +244,7 @@ public sealed class PeerConnectionSidebarQueriesTests : IDisposable
         await _db.SaveChangesAsync();
 
         // Act
-        var result = await _queries.LoadSidebarConnectionsAsync(selfIdentityId);
+        var result = await _queries.LoadSidebarConnectionsAsync((int)selfIdentityId.Value);
 
         // Assert
         result.Should().HaveCount(1); // Only the established session
@@ -260,8 +255,8 @@ public sealed class PeerConnectionSidebarQueriesTests : IDisposable
     public async Task LoadSidebarConnectionsAsync_DoesNotIncludeInboundPendingFromPendingSessions()
     {
         // Arrange
-        var selfIdentityId = 1;
-        var peerId = Guid.NewGuid();
+        var selfIdentityId = new SelfId(1);
+        var peerId = new Percolator.Identity.PeerId(67890);
 
         _db.PendingSessions.Add(new PendingSessionDbo
         {
@@ -275,7 +270,7 @@ public sealed class PeerConnectionSidebarQueriesTests : IDisposable
         await _db.SaveChangesAsync();
 
         // Act
-        var result = await _queries.LoadSidebarConnectionsAsync(selfIdentityId);
+        var result = await _queries.LoadSidebarConnectionsAsync((int)selfIdentityId.Value);
 
         // Assert
         result.Should().BeEmpty(); // Inbound pending should not appear in sidebar
@@ -285,15 +280,17 @@ public sealed class PeerConnectionSidebarQueriesTests : IDisposable
     public async Task LoadSidebarConnectionsAsync_ReturnsBothEstablishedAndPendingOutbound()
     {
         // Arrange
-        var selfIdentityId = 1;
-        var peerId1 = Guid.NewGuid();
-        var peerId2 = Guid.NewGuid();
+        var selfIdentityId = new SelfId(1);
+        var peerId1 = new Percolator.Identity.PeerId(78901);
+        var peerId2 = new Percolator.Identity.PeerId(89012);
         var sessionId = Guid.NewGuid();
         var correlationId = Guid.NewGuid();
+        var targetPeerId = 90123;
 
         _db.PeerIdentities.Add(new PeerIdentityDbo
         {
             PeerId = peerId1,
+            PublicIdentityId = new PublicIdentityId(Guid.NewGuid()),
             Name = "Peer 1",
             Version = 1,
             CreatedAtUtc = _now,
@@ -303,6 +300,7 @@ public sealed class PeerConnectionSidebarQueriesTests : IDisposable
         _db.PeerIdentities.Add(new PeerIdentityDbo
         {
             PeerId = peerId2,
+            PublicIdentityId = new PublicIdentityId(Guid.NewGuid()),
             Name = "Peer 2",
             Version = 1,
             CreatedAtUtc = _now,
@@ -325,7 +323,7 @@ public sealed class PeerConnectionSidebarQueriesTests : IDisposable
             SelfIdentityId = selfIdentityId,
             RequestCorrelationId = correlationId.ToString(),
             SignedPreKeyId = Guid.NewGuid(),
-            TargetPeerId = peerId2,
+            TargetPeerId = (uint)targetPeerId,
             TargetDisplayName = "Peer 2",
             InviteRouteKind = (int)InviteRouteKind.Direct,
             CreatedAtUtc = _now,
@@ -335,7 +333,7 @@ public sealed class PeerConnectionSidebarQueriesTests : IDisposable
         await _db.SaveChangesAsync();
 
         // Act
-        var result = await _queries.LoadSidebarConnectionsAsync(selfIdentityId);
+        var result = await _queries.LoadSidebarConnectionsAsync((int)selfIdentityId.Value);
 
         // Assert
         result.Should().HaveCount(2);

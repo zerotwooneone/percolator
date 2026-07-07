@@ -46,7 +46,7 @@ public sealed class PercolatorMessageServiceEstablishSessionAdapterTests
 
         var active = new ActiveIdentityContext
         {
-            Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "t") { SelfIdentityId = new SelfId(1) }
+            Identity = new Percolator.Identity.Model.IdentityRecord(new SelfId(1), new PublicIdentityId(Guid.NewGuid()), new Percolator.Identity.DeviceId(1), "t")
         };
         var sut = new PercolatorMessageService(logger, ingress, establish.Object, inviteIngress, standardIngress.Object, active, localIdentitySigner, selfIdentityQueries);
 

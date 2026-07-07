@@ -6,6 +6,7 @@ using Percolator.Application.Identity;
 using Percolator.Application.ReverseSignal;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
+using Percolator.Identity;
 using Percolator.Infrastructure.Cryptography;
 using Percolator.Infrastructure.Persistence;
 using Percolator.InfrastructureTests.Common;
@@ -15,7 +16,11 @@ namespace Percolator.InfrastructureTests.ReverseSignal;
 [TestFixture]
 public sealed class SentInvitationPurgeServiceTests
 {
-    private sealed class TestClock : IClock { public DateTimeOffset UtcNow { get; set; } }
+    private sealed class TestClock : IClock
+    {
+        private static readonly DateTimeOffset FixedTime = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero);
+        public DateTimeOffset UtcNow { get; set; } = FixedTime;
+    }
 
     private static PercolatorDbContext CreateDbContext(out SqliteConnection connection)
     {
@@ -26,16 +31,7 @@ public sealed class SentInvitationPurgeServiceTests
             .UseSqlite(connection)
             .Options;
 
-        var ctx = TestDb.NewContext(options, 1);
-        ctx.Database.EnsureCreated();
-
-        if (!ctx.SelfIdentities.Any())
-        {
-            ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = 1, PublicIdentityId = Guid.NewGuid(), Name = "default" });
-            ctx.SaveChanges();
-        }
-
-        return ctx;
+        return TestDb.NewContextWithSchema(options, 1);
     }
 
     [Test]
@@ -47,10 +43,10 @@ public sealed class SentInvitationPurgeServiceTests
         var active = TestDb.CreateActiveIdentity(1);
         var activeAccessor = new MockActiveIdentityAccessor(active);
 
-        var sentRepo = new SqliteSentInvitationRepository(ctx, active);
+        var sentRepo = new SqliteSentInvitationRepository(ctx);
         var selfPreKeys = new SqliteSelfPreKeyBundleRepository(ctx);
 
-        var clock = new TestClock { UtcNow = DateTimeOffset.UtcNow };
+        var clock = new TestClock { UtcNow = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero) };
 
         var corr = new RequestCorrelationId(Guid.NewGuid());
         var expires = clock.UtcNow.AddSeconds(-1);
@@ -58,12 +54,13 @@ public sealed class SentInvitationPurgeServiceTests
 
         await sentRepo.UpsertAsync(
             new SentInvitation(corr, Guid.NewGuid(), oneTimePreKeyId: Guid.NewGuid(), targetPeerId: null, created, expires),
+            new CryptoSelfId(1),
             CancellationToken.None);
 
         // Seed an OTK and reserve it for the correlation id.
         var otkId = Guid.NewGuid();
-        await selfPreKeys.SaveOneTimePreKeysAsync(1, new[] { (otkId, new byte[] { 0xAA }, new byte[] { 0xBB }) }, CancellationToken.None);
-        var reserved = await selfPreKeys.TryReserveOneTimePreKeyAsync(1, corr.Value, expires, CancellationToken.None);
+        await selfPreKeys.SaveOneTimePreKeysAsync(new SelfId(1), new[] { (otkId, new byte[] { 0xAA }, new byte[] { 0xBB }) }, CancellationToken.None);
+        var reserved = await selfPreKeys.TryReserveOneTimePreKeyAsync(new SelfId(1), corr.Value, expires, CancellationToken.None);
         reserved.Should().NotBeNull();
 
         var sut = new SentInvitationPurgeService(
@@ -77,11 +74,11 @@ public sealed class SentInvitationPurgeServiceTests
         var purged = await sut.PurgeExpiredAsync(CancellationToken.None);
         purged.Should().Be(1);
 
-        var stillThere = await sentRepo.TryGetAsync(corr, CancellationToken.None);
+        var stillThere = await sentRepo.TryGetAsync(corr, new CryptoSelfId(1), CancellationToken.None);
         stillThere.Should().BeNull();
 
         // Reservation should be burned, so consumption should fail.
-        var consumed = await selfPreKeys.TryConsumeReservedOneTimePreKeyPrivateAsync(1, corr.Value, clock.UtcNow, CancellationToken.None);
+        var consumed = await selfPreKeys.TryConsumeReservedOneTimePreKeyPrivateAsync(new SelfId(1), corr.Value, clock.UtcNow, CancellationToken.None);
         consumed.Should().BeNull();
     }
 

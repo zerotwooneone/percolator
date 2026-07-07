@@ -42,7 +42,7 @@ public sealed class RouteSender : IRouteSender
         try
         {
             if (_active.Identity is null) return new TransportSendResult(false, null, SendFailureReason.Unknown, new InvalidOperationException("Active identity not initialized"), null);
-            var ds = await _sessions.GetByRemotePeerIdAsync(target, _active.Identity.SelfIdentityId.Value).ConfigureAwait(false);
+            var ds = await _sessions.GetByRemotePeerIdAsync(target, new NetworkSelfId(_active.Identity.SelfIdentityId.Value)).ConfigureAwait(false);
             if (ds is null) return new TransportSendResult(false, null, SendFailureReason.NoPeerConnection, null, null);
 
             var directSessionId = new DirectSessionId(ds.SessionId.Value);
@@ -72,7 +72,7 @@ public sealed class RouteSender : IRouteSender
         {
             if (_active.Identity is null) return new TransportSendResult(false, null, SendFailureReason.Unknown, new InvalidOperationException("Active identity not initialized"), null);
             // Must have a direct session to the relay host
-            var relaySession = await _sessions.GetByRemotePeerIdAsync(relay, _active.Identity.SelfIdentityId.Value).ConfigureAwait(false);
+            var relaySession = await _sessions.GetByRemotePeerIdAsync(relay, new NetworkSelfId(_active.Identity.SelfIdentityId.Value)).ConfigureAwait(false);
             if (relaySession is null) return new TransportSendResult(false, null, SendFailureReason.NoRelaySession, null, null);
 
             // We need recipient PKH to enqueue

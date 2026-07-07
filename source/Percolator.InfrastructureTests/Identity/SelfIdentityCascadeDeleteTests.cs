@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Percolator.Infrastructure.Persistence;
+using PublicIdentityId = Percolator.Identity.PublicIdentityId;
 
 namespace Percolator.InfrastructureTests.Identity;
 
@@ -20,8 +21,9 @@ public class SelfIdentityCascadeDeleteTests
             .UseSqlite(_connection)
             .Options;
 
-        using var context = new PercolatorDbContext(_options);
-        context.Database.EnsureCreated();
+        // Create schema without active identity first
+        using var schemaCtx = new PercolatorDbContext(_options);
+        schemaCtx.Database.EnsureCreated();
     }
 
     [TearDown]
@@ -36,7 +38,7 @@ public class SelfIdentityCascadeDeleteTests
         // Arrange: create identity and keys
         await using (var setup = new PercolatorDbContext(_options))
         {
-            var self = new SelfIdentityDbo { Name = "alice", PublicIdentityId = Guid.NewGuid() };
+            var self = new SelfIdentityDbo { Name = "alice", PublicIdentityId = new PublicIdentityId(Guid.NewGuid()) };
             setup.SelfIdentities.Add(self);
             await setup.SaveChangesAsync();
 

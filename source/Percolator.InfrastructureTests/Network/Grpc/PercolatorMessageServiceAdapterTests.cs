@@ -32,7 +32,7 @@ public class PercolatorMessageServiceAdapterTests
 
         var active = new Percolator.Application.Identity.ActiveIdentityContext
         {
-            Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "test") { SelfIdentityId = new Percolator.Identity.SelfId(1) }
+            Identity = new Percolator.Identity.Model.IdentityRecord(new Percolator.Identity.SelfId(1), new Percolator.Identity.PublicIdentityId(Guid.NewGuid()), new Percolator.Identity.DeviceId(1), "test")
         };
         var sut = new PercolatorMessageService(logger, ingress.Object, establish, inviteIngress, standardIngress, active, localIdentitySigner, selfIdentityQueries);
 
@@ -89,7 +89,7 @@ public class PercolatorMessageServiceAdapterTests
 
         var active = new Percolator.Application.Identity.ActiveIdentityContext
         {
-            Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "test") { SelfIdentityId = new Percolator.Identity.SelfId(1) }
+            Identity = new Percolator.Identity.Model.IdentityRecord(new Percolator.Identity.SelfId(1), new Percolator.Identity.PublicIdentityId(Guid.NewGuid()), new Percolator.Identity.DeviceId(1), "test")
         };
         var sut = new PercolatorMessageService(logger, ingress.Object, establish.Object, inviteIngress, standardIngress, active, localIdentitySigner, selfIdentityQueries);
 

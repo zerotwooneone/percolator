@@ -105,7 +105,7 @@ namespace Percolator.Application.Network.Handshake
             }
 
             // Fast/slow path via SecureMessagingService
-            var resolved = await _secureMessaging.DecryptInboundAsync(selfIdentityId, ratchetMessage, cancellationToken).ConfigureAwait(false);
+            var resolved = await _secureMessaging.DecryptInboundAsync(new CryptoSelfId(selfIdentityId), ratchetMessage, cancellationToken).ConfigureAwait(false);
             if (resolved is null)
             {
                 return ProcessRelayedOpaquePayloadResponse.Failure;
@@ -140,7 +140,7 @@ namespace Percolator.Application.Network.Handshake
             try
             {
                 var directSession = await _directSessionRepository
-                    .GetBySessionIdAsync(new DirectSessionId(sid.Value), selfIdentityId)
+                    .GetBySessionIdAsync(new DirectSessionId(sid.Value), new NetworkSelfId(selfIdentityId))
                     .ConfigureAwait(false);
                 remotePeerId = directSession?.RemotePeerId.Value;
             }

@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
 using Moq;
 using Percolator.Application.Chat;
+using Percolator.Chat.GroupMembership;
 using Percolator.Infrastructure.Chat;
 
 namespace Percolator.InfrastructureTests.Chat;
@@ -36,7 +37,7 @@ public class DeliveryCertificateRefreshWorkerTests
         serviceProviderMock.Setup(sp => sp.GetService(typeof(ICertificateOrchestrator)))
             .Returns(orchestratorMock.Object);
 
-        orchestratorMock.Setup(o => o.RefreshLocalCertificateAsync(It.IsAny<CancellationToken>()))
+        orchestratorMock.Setup(o => o.RefreshLocalCertificateAsync(It.IsAny<ChatSelfId>(), It.IsAny<ChatPeerId>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask)
             .Callback(() => refreshCompletedTcs.SetResult(true));
 
@@ -88,7 +89,7 @@ public class DeliveryCertificateRefreshWorkerTests
             .Returns(orchestratorMock.Object);
 
         var callCount = 0;
-        orchestratorMock.Setup(o => o.RefreshLocalCertificateAsync(It.IsAny<CancellationToken>()))
+        orchestratorMock.Setup(o => o.RefreshLocalCertificateAsync(It.IsAny<ChatSelfId>(), It.IsAny<ChatPeerId>(), It.IsAny<CancellationToken>()))
             .Returns(() =>
             {
                 callCount++;
@@ -127,7 +128,7 @@ public class DeliveryCertificateRefreshWorkerTests
 
         // ASSERT
         // Verify the orchestrator was called exactly twice (Initial Failure + Successful Retry)
-        orchestratorMock.Verify(o => o.RefreshLocalCertificateAsync(It.IsAny<CancellationToken>()), Times.Exactly(2));
+        orchestratorMock.Verify(o => o.RefreshLocalCertificateAsync(It.IsAny<ChatSelfId>(), It.IsAny<ChatPeerId>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
 
         // Verify graceful shutdown
         Assert.That(stopTask.IsCompletedSuccessfully, Is.True);

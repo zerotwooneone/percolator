@@ -78,12 +78,13 @@ public sealed class SenderKeyCryptographyService : ISenderKeyCryptographyService
             if (distributionIdLen.ToUInt32() != 16) return 1; // Error
             
             var distributionIdSpan = new ReadOnlySpan<byte>(distributionIdBytes, 16);
-            var conversationId = ConversationId.FromGuid(new Guid(distributionIdSpan));
+            var conversationId = new Percolator.Cryptography.Primitives.ConversationId(new Guid(distributionIdSpan));
             
             var uuid = SignalCrypto.GetSenderAddressName(senderAddress);
             var deviceId = SignalCrypto.GetSenderAddressDeviceId(senderAddress);
             
-            var peerId = new PeerId(uuid);
+            // Convert Guid to uint for PeerId - this is a design mismatch between SignalCrypto (Guid) and cryptography primitives (uint)
+            var peerId = new Percolator.Cryptography.Primitives.PeerId(BitConverter.ToUInt32(uuid.ToByteArray(), 0));
             var devId = new DeviceId(deviceId);
 
             if (_storeBridge.TryLoadSenderKey(conversationId, peerId, devId, out var recordBytes))
@@ -121,12 +122,13 @@ public sealed class SenderKeyCryptographyService : ISenderKeyCryptographyService
             if (distributionIdLen.ToUInt32() != 16) return 1;
             
             var distributionIdSpan = new ReadOnlySpan<byte>(distributionIdBytes, 16);
-            var conversationId = ConversationId.FromGuid(new Guid(distributionIdSpan));
+            var conversationId = new Percolator.Cryptography.Primitives.ConversationId(new Guid(distributionIdSpan));
             
             var uuid = SignalCrypto.GetSenderAddressName(senderAddress);
             var deviceId = SignalCrypto.GetSenderAddressDeviceId(senderAddress);
             
-            var peerId = new PeerId(uuid);
+            // Convert Guid to uint for PeerId - this is a design mismatch between SignalCrypto (Guid) and cryptography primitives (uint)
+            var peerId = new Percolator.Cryptography.Primitives.PeerId(BitConverter.ToUInt32(uuid.ToByteArray(), 0));
             var devId = new DeviceId(deviceId);
             
             var recordSpan = new ReadOnlySpan<byte>(recordBytes, (int)recordLen.ToUInt32());
@@ -144,11 +146,11 @@ public sealed class SenderKeyCryptographyService : ISenderKeyCryptographyService
     }
 
     public SenderKeyDistributionMessageBytes CreateSenderKeyDistributionMessage(
-        ConversationId conversationId, 
-        PeerId localPeerId, 
+        Percolator.Cryptography.Primitives.ConversationId conversationId, 
+        Percolator.Cryptography.Primitives.PeerId localPeerId, 
         DeviceId deviceId)
     {
-        var uuidBytes = localPeerId.Value.ToByteArray();
+        var uuidBytes = BitConverter.GetBytes(localPeerId.Value);
         using var addressHandle = SignalCrypto.NewSenderAddress(uuidBytes, deviceId.Value);
         using var messageHandle = SignalCrypto.CreateSenderKeyDistributionMessage(_vtablePtr, addressHandle, conversationId.Value);
 
@@ -157,12 +159,12 @@ public sealed class SenderKeyCryptographyService : ISenderKeyCryptographyService
     }
 
     public void ProcessSenderKeyDistributionMessage(
-        ConversationId conversationId,
-        PeerId senderPeerId,
+        Percolator.Cryptography.Primitives.ConversationId conversationId,
+        Percolator.Cryptography.Primitives.PeerId senderPeerId,
         DeviceId senderDeviceId,
         SenderKeyDistributionMessageBytes distributionMessage)
     {
-        var uuidBytes = senderPeerId.Value.ToByteArray();
+        var uuidBytes = BitConverter.GetBytes(senderPeerId.Value);
         using var addressHandle = SignalCrypto.NewSenderAddress(uuidBytes, senderDeviceId.Value);
         using var messageHandle = SignalCrypto.DeserializeSenderKeyDistributionMessage(distributionMessage.Span);
         
@@ -170,12 +172,12 @@ public sealed class SenderKeyCryptographyService : ISenderKeyCryptographyService
     }
 
     public byte[] EncryptGroupMessage(
-        ConversationId conversationId,
-        PeerId localPeerId,
+        Percolator.Cryptography.Primitives.ConversationId conversationId,
+        Percolator.Cryptography.Primitives.PeerId localPeerId,
         DeviceId deviceId,
         ReadOnlySpan<byte> plaintext)
     {
-        var uuidBytes = localPeerId.Value.ToByteArray();
+        var uuidBytes = BitConverter.GetBytes(localPeerId.Value);
         using var addressHandle = SignalCrypto.NewSenderAddress(uuidBytes, deviceId.Value);
         using var messageHandle = SignalCrypto.EncryptGroupMessage(_vtablePtr, addressHandle, conversationId.Value, plaintext);
         
@@ -183,12 +185,12 @@ public sealed class SenderKeyCryptographyService : ISenderKeyCryptographyService
     }
 
     public byte[] DecryptGroupMessage(
-        ConversationId conversationId,
-        PeerId senderPeerId,
+        Percolator.Cryptography.Primitives.ConversationId conversationId,
+        Percolator.Cryptography.Primitives.PeerId senderPeerId,
         DeviceId senderDeviceId,
         ReadOnlySpan<byte> ciphertext)
     {
-        var uuidBytes = senderPeerId.Value.ToByteArray();
+        var uuidBytes = BitConverter.GetBytes(senderPeerId.Value);
         using var addressHandle = SignalCrypto.NewSenderAddress(uuidBytes, senderDeviceId.Value);
         using var messageHandle = SignalCrypto.DeserializeSenderKeyMessage(ciphertext);
         

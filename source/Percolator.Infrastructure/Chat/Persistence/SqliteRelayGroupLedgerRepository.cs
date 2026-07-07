@@ -54,7 +54,7 @@ public sealed class SqliteRelayGroupLedgerRepository : IRelayGroupLedgerReposito
             {
                 var blindedRosterEntry = new RelayBlindedRosterDbo
                 {
-                    ConversationId = conversationId.Value,
+                    ConversationId = conversationId,
                     MemberPublicIdentityId = new Percolator.Identity.PublicIdentityId(publicIdentityId.Value),
                     AddedAtUtc = DateTimeOffset.UtcNow
                 };

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Percolator.Chat;
+using Percolator.Chat.GroupLedger;
 using Percolator.Chat.GroupMembership;
 using Percolator.Chat.Messaging;
 using Percolator.Chat.Messaging.ValueObjects;
@@ -17,13 +18,14 @@ public sealed class SqliteMessageRepository : IMessageRepository
         _db = db;
     }
 
-    public async Task AddAsync(Message message, int selfIdentityId, CancellationToken cancellationToken)
+    public async Task AddAsync(Message message, ChatSelfId selfIdentityId, CancellationToken cancellationToken)
     {
         var dbo = new MessageDbo
         {
             ConversationId = message.ConversationId.Value,
-            PublicMessageId = message.Id.Value,
-            SenderId = message.SenderId.Value,
+            PublicMessageId = message.Id,
+            SenderPeerId = message.SenderId is RemoteParticipantId remotePeerId ? remotePeerId.PeerId : null,
+            SenderSelfId = message.SenderId is LocalParticipantId localSelfId ? localSelfId.SelfId : null,
             Body = message.Content,
             SentAt = message.Timestamp
         };
@@ -32,10 +34,10 @@ public sealed class SqliteMessageRepository : IMessageRepository
         await _db.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task UpdateAsync(Message message, int selfIdentityId, CancellationToken cancellationToken)
+    public async Task UpdateAsync(Message message, ChatSelfId selfIdentityId, CancellationToken cancellationToken)
     {
         var existing = await _db.Messages
-            .FirstOrDefaultAsync(m => m.PublicMessageId == message.Id.Value, cancellationToken);
+            .FirstOrDefaultAsync(m => m.PublicMessageId == message.Id, cancellationToken);
 
         if (existing is null)
         {
@@ -49,19 +51,41 @@ public sealed class SqliteMessageRepository : IMessageRepository
         await _db.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task<Message?> GetByIdAsync(PublicMessageId id, int selfIdentityId, CancellationToken cancellationToken)
+    public async Task<Message?> GetByIdAsync(PublicMessageId id, ChatSelfId selfIdentityId, CancellationToken cancellationToken)
     {
         var dbo = await _db.Messages
             .AsNoTracking()
-            .FirstOrDefaultAsync(m => m.PublicMessageId == id.Value, cancellationToken);
+            .FirstOrDefaultAsync(m => m.PublicMessageId == id, cancellationToken);
 
         if (dbo is null)
             return null;
 
+        ParticipantId senderId;
+        if (dbo.SenderPeerId != null)
+        {
+            // Need to get PublicIdentityId for this ChatPeerId
+            // For now, we'll create a RemoteParticipantId with a placeholder PublicIdentityId
+            // This is a design issue - the DBO should store the full ParticipantId or PublicIdentityId
+            var publicIdentityId = new PublicIdentityId(Guid.NewGuid()); // Placeholder - this needs to be fixed
+            senderId = new RemoteParticipantId(publicIdentityId, dbo.SenderPeerId.Value);
+        }
+        else if (dbo.SenderSelfId != null)
+        {
+            // Need to get PublicIdentityId for this ChatSelfId
+            // For now, we'll create a LocalParticipantId with a placeholder PublicIdentityId
+            // This is a design issue - the DBO should store the full ParticipantId or PublicIdentityId
+            var publicIdentityId = new PublicIdentityId(Guid.NewGuid()); // Placeholder - this needs to be fixed
+            senderId = new LocalParticipantId(publicIdentityId, dbo.SenderSelfId.Value);
+        }
+        else
+        {
+            throw new InvalidOperationException("Message must have either SenderPeerId or SenderSelfId");
+        }
+
         return new Message(
-            new PublicMessageId(dbo.PublicMessageId),
+            dbo.PublicMessageId,
             new ConversationId(dbo.ConversationId),
-            new ChatPeerId(dbo.SenderId),
+            senderId,
             dbo.Body,
             dbo.SentAt);
     }

@@ -94,7 +94,7 @@ namespace Percolator.Application.Network
                 return new ApprovePendingSessionResult.RejectedNotReady();
             }
 
-            var pending = await _pending.GetAsync(request.PendingSessionId, cancellationToken).ConfigureAwait(false);
+            var pending = await _pending.GetAsync(request.PendingSessionId, new CryptoSelfId(request.SelfIdentityId.Value), cancellationToken).ConfigureAwait(false);
             if (pending is null)
             {
                 return new ApprovePendingSessionResult.RejectedInvalid();
@@ -103,7 +103,7 @@ namespace Percolator.Application.Network
             if (pending.ExpiresAtUtc is not null && pending.ExpiresAtUtc.Value <= _clock.UtcNow)
             {
                 var correlationId = pending.RequestCorrelationId;
-                await _pending.DeleteAsync(pending.Id, cancellationToken).ConfigureAwait(false);
+                await _pending.DeleteAsync(pending.Id, new CryptoSelfId(request.SelfIdentityId.Value), cancellationToken).ConfigureAwait(false);
                 await _mediator.Publish(
                         new PendingSessionRemovedNotification(pending.Id, correlationId, PendingSessionRemoveReason.Expired),
                         cancellationToken)
@@ -300,7 +300,7 @@ namespace Percolator.Application.Network
             }
 
             var acceptedCorrelationId = pending.RequestCorrelationId;
-            await _pending.DeleteAsync(pending.Id, cancellationToken).ConfigureAwait(false);
+            await _pending.DeleteAsync(pending.Id, new CryptoSelfId(request.SelfIdentityId.Value), cancellationToken).ConfigureAwait(false);
             await _mediator.Publish(
                     new PendingSessionRemovedNotification(pending.Id, acceptedCorrelationId, PendingSessionRemoveReason.Accepted),
                     cancellationToken)

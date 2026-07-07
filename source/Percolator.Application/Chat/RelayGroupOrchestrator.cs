@@ -75,7 +75,7 @@ public sealed class RelayGroupOrchestrator : IRelayGroupOrchestrator
         ledger.AdvanceEpoch(requestedEpoch);
 
         // 4. Fan-out: Get member peer IDs and publish
-        var peerIds = await _rosterQueries.GetMemberPeerIdsAsync(conversationId.Value, cancellationToken).ConfigureAwait(false);
+        var peerIds = await _rosterQueries.GetMemberPeerIdsAsync(conversationId, cancellationToken).ConfigureAwait(false);
         var payload = QueuedPayloadBytes.FromSpan(ciphertext.Span);
         await _publisher.PublishAtomicAsync(ledger, peerIds, payload, cancellationToken).ConfigureAwait(false);
 

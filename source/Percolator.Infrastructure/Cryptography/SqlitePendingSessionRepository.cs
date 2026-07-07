@@ -4,38 +4,35 @@ using Percolator.Application.Identity;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
 using Percolator.Infrastructure.Persistence;
+using PeerId = Percolator.Cryptography.Primitives.PeerId;
 
 namespace Percolator.Infrastructure.Cryptography
 {
     public class SqlitePendingSessionRepository : IPendingSessionRepository
     {
         private readonly PercolatorDbContext _db;
-        private readonly ActiveIdentityContext _active;
         private readonly IClock _clock;
 
         public SqlitePendingSessionRepository(
             PercolatorDbContext db, 
-            ActiveIdentityContext active,
             IClock clock)
         {
             _db = db;
-            _active = active;
             _clock = clock;
         }
 
-        public async Task AddAsync(PendingSession pending, CancellationToken cancellationToken = default)
+        public async Task AddAsync(PendingSession pending, CryptoSelfId selfIdentityId, CancellationToken cancellationToken = default)
         {
-            if (_active.Identity is null) throw new InvalidOperationException("Active identity not loaded.");
             var dbo = new PendingSessionDbo
             {
                 Id = pending.Id.Value,
-                SelfIdentityId = _active.Identity.SelfIdentityId.Value,
-                RemotePeerId = pending.RemotePeerId.Value,
+                SelfIdentityId = new Percolator.Identity.SelfId(selfIdentityId.Value),
+                RemotePeerId = new Percolator.Identity.PeerId(pending.RemotePeerId.Value),
                 ProtocolVersion = pending.ProtocolVersion.Value,
                 Invitation = pending.Invitation.ToArray(),
                 RequestCorrelationId = pending.RequestCorrelationId.ToString(),
                 IsRelayed = pending.IsRelayed,
-                RelayHostPeerId = pending.RelayHostPeerId?.Value,
+                RelayHostPeerId = pending.RelayHostPeerId.HasValue ? new Percolator.Identity.PeerId(pending.RelayHostPeerId.Value.Value) : null,
                 InviterIdentityKey = pending.InviterIdentityKey?.ToArray(),
                 CallbackEndpointHost = pending.CallbackEndpointHost,
                 CallbackEndpointPort = pending.CallbackEndpointPort,
@@ -47,45 +44,49 @@ namespace Percolator.Infrastructure.Cryptography
             await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        public async Task<PendingSession?> GetAsync(PendingSessionId id, CancellationToken cancellationToken = default)
+        public async Task<PendingSession?> GetAsync(PendingSessionId id, CryptoSelfId selfIdentityId, CancellationToken cancellationToken = default)
         {
             var row = await _db.PendingSessions
                 .AsNoTracking()
-                .FirstOrDefaultAsync(x => x.Id == id.Value, cancellationToken)
+                .FirstOrDefaultAsync(x => x.Id == id.Value && x.SelfIdentityId == new Percolator.Identity.SelfId(selfIdentityId.Value), cancellationToken)
                 .ConfigureAwait(false);
             if (row is null) return null;
             return Rehydrate(row);
         }
 
-        public async Task UpdateAsync(PendingSession pending, CancellationToken cancellationToken = default)
+        public async Task UpdateAsync(PendingSession pending, CryptoSelfId selfIdentityId, CancellationToken cancellationToken = default)
         {
-            var row = await _db.PendingSessions.FirstOrDefaultAsync(x => x.Id == pending.Id.Value, cancellationToken).ConfigureAwait(false);
+            var row = await _db.PendingSessions.FirstOrDefaultAsync(x => x.Id == pending.Id.Value && x.SelfIdentityId == new Percolator.Identity.SelfId(selfIdentityId.Value), cancellationToken).ConfigureAwait(false);
             if (row is null) return;
             row.State = (int)pending.State;
             row.ExpiresAtUtc = pending.ExpiresAtUtc;
             await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        public async Task DeleteAsync(PendingSessionId id, CancellationToken cancellationToken = default)
+        public async Task DeleteAsync(PendingSessionId id, CryptoSelfId selfIdentityId, CancellationToken cancellationToken = default)
         {
-            var stub = new PendingSessionDbo { Id = id.Value };
-            _db.Entry(stub).State = EntityState.Deleted;
+            var row = await _db.PendingSessions.FirstOrDefaultAsync(x => x.Id == id.Value && x.SelfIdentityId == new Percolator.Identity.SelfId(selfIdentityId.Value), cancellationToken).ConfigureAwait(false);
+            if (row is null) return;
+            _db.PendingSessions.Remove(row);
             await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        public async IAsyncEnumerable<PendingSession> EnumerateAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
+        public async IAsyncEnumerable<PendingSession> EnumerateAsync(CryptoSelfId selfIdentityId, [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
-            await foreach (var row in _db.PendingSessions.AsNoTracking().AsAsyncEnumerable().WithCancellation(cancellationToken))
+            await foreach (var row in _db.PendingSessions
+                .AsNoTracking()
+                .Where(x => x.SelfIdentityId == new Percolator.Identity.SelfId(selfIdentityId.Value))
+                .AsAsyncEnumerable().WithCancellation(cancellationToken))
             {
                 yield return Rehydrate(row);
             }
         }
 
-        public async IAsyncEnumerable<PendingSession> EnumerateExpiredAsync(DateTimeOffset nowUtc, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        public async IAsyncEnumerable<PendingSession> EnumerateExpiredAsync(CryptoSelfId selfIdentityId, DateTimeOffset nowUtc, [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             await foreach (var row in _db.PendingSessions
                 .AsNoTracking()
-                .Where(x => x.ExpiresAtUtc != null && x.ExpiresAtUtc <= nowUtc)
+                .Where(x => x.SelfIdentityId == new Percolator.Identity.SelfId(selfIdentityId.Value) && x.ExpiresAtUtc != null && x.ExpiresAtUtc <= nowUtc)
                 .AsAsyncEnumerable().WithCancellation(cancellationToken))
             {
                 yield return Rehydrate(row);
@@ -95,7 +96,7 @@ namespace Percolator.Infrastructure.Cryptography
         private PendingSession Rehydrate(PendingSessionDbo row)
         {
             var id = new PendingSessionId(row.Id);
-            var remote = new PeerId(row.RemotePeerId);
+            var remote = new PeerId(row.RemotePeerId.Value);
             var ver = new ProtocolVersion(row.ProtocolVersion);
             var invitation = HandshakeInvitation.FromBytesOwned(row.Invitation);
             var inviterKey = row.InviterIdentityKey is null
@@ -118,7 +119,7 @@ namespace Percolator.Infrastructure.Cryptography
                 invitation,
                 requestCorrelationId: correlationId,
                 isRelayed: row.IsRelayed,
-                relayHostPeerId: row.RelayHostPeerId is null ? null : new PeerId(row.RelayHostPeerId.Value),
+                relayHostPeerId: row.RelayHostPeerId is null ? null : new PeerId(row.RelayHostPeerId.Value.Value),
                 inviterIdentityKey: inviterKey,
                 callbackEndpointHost: row.CallbackEndpointHost,
                 callbackEndpointPort: row.CallbackEndpointPort,

@@ -21,8 +21,10 @@ public class SelfIdentityDomainRepositoryTests
         _options = new DbContextOptionsBuilder<PercolatorDbContext>()
             .UseSqlite(_connection)
             .Options;
-        using var ctx = new PercolatorDbContext(_options);
-        ctx.Database.EnsureCreated();
+
+        // Create schema without active identity first
+        using var schemaCtx = new PercolatorDbContext(_options);
+        schemaCtx.Database.EnsureCreated();
     }
 
     [TearDown]
