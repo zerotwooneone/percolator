@@ -79,7 +79,7 @@ public class SqliteSessionRepositoryTests
         var clock = new TestClock();
         var session = NewSession(new NoopSessionCrypto(), clock);
 
-        await repo.AddAsync(session, CancellationToken.None);
+        await repo.AddAsync(session, new CryptoSelfId(1), CancellationToken.None);
         var loaded = await repo.GetAsync(session.Id, CancellationToken.None);
 
         Assert.That(loaded, Is.Not.Null);
@@ -97,7 +97,7 @@ public class SqliteSessionRepositoryTests
         var clock = new TestClock();
         var session = NewSession(new NoopSessionCrypto(), clock);
 
-        await repo.AddAsync(session, CancellationToken.None);
+        await repo.AddAsync(session, new CryptoSelfId(1), CancellationToken.None);
         session.TouchLastUsed(clock);
         await repo.UpdateAsync(session, CancellationToken.None);
 
@@ -132,7 +132,7 @@ public class SqliteSessionRepositoryTests
         {
             var repo1 = new SqliteSessionRepository(ctx1, new NoopSessionCrypto(), testClock);
             var s = NewSession(new NoopSessionCrypto(), testClock);
-            await repo1.AddAsync(s, CancellationToken.None);
+            await repo1.AddAsync(s, new CryptoSelfId(1), CancellationToken.None);
         }
 
         // Attempt to read under identity 2 should return null

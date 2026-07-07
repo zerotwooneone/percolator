@@ -20,12 +20,8 @@ public static class TestDb
 
     public static PercolatorDbContext NewContext(DbContextOptions<PercolatorDbContext> options, int? selfIdentityId = 1)
     {
-        if (selfIdentityId is null)
-        {
-            return new PercolatorDbContext(options);
-        }
-        var active = CreateActiveIdentity(selfIdentityId.Value);
-        return new PercolatorDbContext(options, active);
+        // ActiveIdentityContext constructor removed - query filters are gone
+        return new PercolatorDbContext(options);
     }
 
     public static PercolatorDbContext NewContextWithSchema(DbContextOptions<PercolatorDbContext> options, int? selfIdentityId = 1)

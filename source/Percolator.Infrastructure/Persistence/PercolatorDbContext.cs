@@ -10,15 +10,8 @@ namespace Percolator.Infrastructure.Persistence;
 
 public class PercolatorDbContext : DbContext
 {
-    private readonly ActiveIdentityContext? _active;
-
     public PercolatorDbContext(DbContextOptions<PercolatorDbContext> options) : base(options)
     {
-    }
-
-    public PercolatorDbContext(DbContextOptions<PercolatorDbContext> options, ActiveIdentityContext active) : base(options)
-    {
-        _active = active;
     }
 
     public DbSet<PeerIdentityDbo> PeerIdentities { get; set; } = null!;

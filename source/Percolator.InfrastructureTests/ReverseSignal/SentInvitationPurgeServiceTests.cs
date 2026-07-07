@@ -31,7 +31,12 @@ public sealed class SentInvitationPurgeServiceTests
             .UseSqlite(connection)
             .Options;
 
-        return TestDb.NewContextWithSchema(options, 1);
+        // Create schema without ActiveIdentityContext
+        using var schemaCtx = new PercolatorDbContext(options);
+        schemaCtx.Database.EnsureCreated();
+
+        // Return context without ActiveIdentityContext
+        return new PercolatorDbContext(options);
     }
 
     [Test]
@@ -39,6 +44,18 @@ public sealed class SentInvitationPurgeServiceTests
     {
         await using var ctx = CreateDbContext(out var conn);
         await using var _ = conn;
+
+        // Seed SelfIdentity
+        ctx.SelfIdentities.Add(new SelfIdentityDbo 
+        { 
+            Id = new SelfId(1), 
+            PublicIdentityId = new PublicIdentityId(Guid.NewGuid()), 
+            Name = "test",
+            DeviceId = new Percolator.Identity.DeviceId(1),
+            ListeningPort = new Percolator.Identity.Model.ListeningPort(5000),
+            LastUsedUtc = DateTimeOffset.UtcNow
+        });
+        ctx.SaveChanges();
 
         var active = TestDb.CreateActiveIdentity(1);
         var activeAccessor = new MockActiveIdentityAccessor(active);

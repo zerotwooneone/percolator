@@ -34,7 +34,7 @@ public sealed class SqlitePendingSessionRepositoryTests
         var active = new ActiveIdentityContext();
         active.SetActiveIdentity(new IdentityRecord(new SelfId(1), new PublicIdentityId(Guid.NewGuid()), new Percolator.Identity.DeviceId(1), "default") { ListeningPort = new Percolator.Identity.Model.ListeningPort(5000) }, null);
 
-        await using var ctx = new PercolatorDbContext(options, active);
+        await using var ctx = new PercolatorDbContext(options);
 
         if (!ctx.SelfIdentities.Any())
         {

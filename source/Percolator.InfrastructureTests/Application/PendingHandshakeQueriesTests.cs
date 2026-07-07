@@ -40,7 +40,7 @@ public sealed class PendingHandshakeQueriesTests
 
         var clock = new FixedClock { UtcNow = DateTimeOffset.Parse("2025-05-01T00:00:00Z") };
 
-        await using var ctx = new PercolatorDbContext(options, active);
+        await using var ctx = new PercolatorDbContext(options);
 
         if (!ctx.SelfIdentities.Any())
         {
@@ -120,7 +120,7 @@ public sealed class PendingHandshakeQueriesTests
 
         var clock = new FixedClock { UtcNow = DateTimeOffset.Parse("2025-05-01T00:00:00Z") };
 
-        await using var ctx = new PercolatorDbContext(options, active);
+        await using var ctx = new PercolatorDbContext(options);
 
         if (!ctx.SelfIdentities.Any())
         {

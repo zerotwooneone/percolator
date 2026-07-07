@@ -15,26 +15,20 @@ namespace Percolator.Infrastructure.Cryptography
         private readonly PercolatorDbContext _db;
         private readonly ISessionCrypto _crypto;
         private readonly IClock _clock;
-        private readonly ActiveIdentityContext _active;
 
         public SqliteSessionRepository(PercolatorDbContext db, ISessionCrypto crypto, IClock clock)
         {
             _db = db;
             _crypto = crypto;
             _clock = clock;
-            _active = (ActiveIdentityContext?)db.GetType()
-                .GetField("_active", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
-                .GetValue(db)! as ActiveIdentityContext
-                ?? throw new InvalidOperationException("ActiveIdentityContext not available on DbContext.");
         }
 
-        public async Task AddAsync(SecureSession session, CancellationToken cancellationToken = default)
+        public async Task AddAsync(SecureSession session, CryptoSelfId selfIdentityId, CancellationToken cancellationToken = default)
         {
             await _dbGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                if (_active.Identity is null) throw new InvalidOperationException("Active identity not loaded.");
-                var dbo = ToDbo(session, _active.Identity.SelfIdentityId);
+                var dbo = ToDbo(session, new SelfId(selfIdentityId.Value));
                 _db.Sessions.Add(dbo);
                 await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
             }
@@ -66,7 +60,6 @@ namespace Percolator.Infrastructure.Cryptography
             await _dbGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                if (_active.Identity is null) throw new InvalidOperationException("Active identity not loaded.");
                 var row = await _db.Sessions.FirstOrDefaultAsync(x => x.SessionId == session.Id.Value, cancellationToken).ConfigureAwait(false);
                 if (row is null) return;
                 // Update mutable fields
