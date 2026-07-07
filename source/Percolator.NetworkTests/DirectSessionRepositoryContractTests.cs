@@ -11,7 +11,7 @@ public class DirectSessionRepositoryContractTests
     public async Task GetBySessionIdAsync_returns_null_for_unknown_session()
     {
         var unknown = Guid.NewGuid();
-        var result = await _repo.GetBySessionIdAsync(new Percolator.Network.DirectSessionId(unknown), 1);
+        var result = await _repo.GetBySessionIdAsync(new Percolator.Network.DirectSessionId(unknown), new Percolator.Network.NetworkSelfId(1));
         Assert.That(result, Is.Null);
     }
 
@@ -20,8 +20,8 @@ public class DirectSessionRepositoryContractTests
     {
         var peerId = new Percolator.Network.PeerId(1);
         var sessionId = Guid.NewGuid();
-        await _repo.UpsertAsync(peerId, new Percolator.Network.DirectSessionId(sessionId), 1);
-        var ds = await _repo.GetBySessionIdAsync(new Percolator.Network.DirectSessionId(sessionId), 1);
+        await _repo.UpsertAsync(peerId, new Percolator.Network.DirectSessionId(sessionId), new Percolator.Network.NetworkSelfId(1));
+        var ds = await _repo.GetBySessionIdAsync(new Percolator.Network.DirectSessionId(sessionId), new Percolator.Network.NetworkSelfId(1));
         Assert.That(ds, Is.Not.Null);
         Assert.That(ds!.RemotePeerId.Value, Is.EqualTo(peerId.Value));
         Assert.That(ds.SessionId.Value, Is.EqualTo(sessionId));
@@ -33,13 +33,13 @@ public class DirectSessionRepositoryContractTests
         var peerId = new Percolator.Network.PeerId(1);
         var s1 = Guid.NewGuid();
         var s2 = Guid.NewGuid();
-        await _repo.UpsertAsync(peerId, new Percolator.Network.DirectSessionId(s1), 1);
-        await _repo.UpsertAsync(peerId, new Percolator.Network.DirectSessionId(s2), 1);
-        var ds = await _repo.GetBySessionIdAsync(new Percolator.Network.DirectSessionId(s2), 1);
+        await _repo.UpsertAsync(peerId, new Percolator.Network.DirectSessionId(s1), new Percolator.Network.NetworkSelfId(1));
+        await _repo.UpsertAsync(peerId, new Percolator.Network.DirectSessionId(s2), new Percolator.Network.NetworkSelfId(1));
+        var ds = await _repo.GetBySessionIdAsync(new Percolator.Network.DirectSessionId(s2), new Percolator.Network.NetworkSelfId(1));
         Assert.That(ds, Is.Not.Null);
         Assert.That(ds!.RemotePeerId.Value, Is.EqualTo(peerId.Value));
         Assert.That(ds.SessionId.Value, Is.EqualTo(s2));
-        var old = await _repo.GetBySessionIdAsync(new Percolator.Network.DirectSessionId(s1), 1);
+        var old = await _repo.GetBySessionIdAsync(new Percolator.Network.DirectSessionId(s1), new Percolator.Network.NetworkSelfId(1));
         Assert.That(old, Is.Null);
     }
 }
