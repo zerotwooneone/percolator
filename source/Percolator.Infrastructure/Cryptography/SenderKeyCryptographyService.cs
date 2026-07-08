@@ -44,6 +44,8 @@ public sealed class SenderKeyCryptographyService : ISenderKeyCryptographyService
     private GCHandle _storeDelegateHandle;
     private GCHandle _vTableHandle;
     private bool _disposed;
+    
+    private readonly System.Collections.Concurrent.ConcurrentBag<IntPtr> _nativeAllocations = new();
 
     public unsafe SenderKeyCryptographyService(ISenderKeyInteropBridge storeBridge, ILogger<SenderKeyCryptographyService> logger)
     {
@@ -71,7 +73,7 @@ public sealed class SenderKeyCryptographyService : ISenderKeyCryptographyService
     {
         outRecord = IntPtr.Zero;
         outLen = UIntPtr.Zero;
-        
+
         try
         {
             // DistributionID should be 16 bytes for Guid
@@ -89,13 +91,14 @@ public sealed class SenderKeyCryptographyService : ISenderKeyCryptographyService
 
             if (_storeBridge.TryLoadSenderKey(conversationId, publicIdentityId, devId, out var recordBytes))
             {
-                var safeHandle = SignalCrypto.DeserializeSenderKeyRecord(recordBytes);
-                outRecord = safeHandle.DangerousGetHandle();
-                safeHandle.SetHandleAsInvalid();
+                outLen = (UIntPtr)recordBytes.Length;
+                outRecord = Marshal.AllocHGlobal(recordBytes.Length);
+                _nativeAllocations.Add(outRecord);
+                Marshal.Copy(recordBytes, 0, outRecord, recordBytes.Length);
                 return 0; // Success
             }
             
-            return 0; // Success, but not found (outRecord is null/Zero)
+            return 1; // Not found
         }
         catch (Exception ex)
         {
@@ -140,6 +143,13 @@ public sealed class SenderKeyCryptographyService : ISenderKeyCryptographyService
         DeviceId deviceId)
     {
         var uuidBytes = publicIdentityId.Value.ToByteArray();
+        if (BitConverter.IsLittleEndian)
+        {
+            Array.Reverse(uuidBytes, 0, 4);
+            Array.Reverse(uuidBytes, 4, 2);
+            Array.Reverse(uuidBytes, 6, 2);
+        }
+        
         using var addressHandle = SignalCrypto.NewSenderAddress(uuidBytes, deviceId.Value);
         using var messageHandle = SignalCrypto.CreateSenderKeyDistributionMessage(_vtablePtr, addressHandle, conversationId.Value);
 
@@ -154,6 +164,13 @@ public sealed class SenderKeyCryptographyService : ISenderKeyCryptographyService
         SenderKeyDistributionMessageBytes distributionMessage)
     {
         var uuidBytes = senderPublicIdentityId.Value.ToByteArray();
+        if (BitConverter.IsLittleEndian)
+        {
+            Array.Reverse(uuidBytes, 0, 4);
+            Array.Reverse(uuidBytes, 4, 2);
+            Array.Reverse(uuidBytes, 6, 2);
+        }
+        
         using var addressHandle = SignalCrypto.NewSenderAddress(uuidBytes, senderDeviceId.Value);
         using var messageHandle = SignalCrypto.DeserializeSenderKeyDistributionMessage(distributionMessage.Span);
         
@@ -167,6 +184,13 @@ public sealed class SenderKeyCryptographyService : ISenderKeyCryptographyService
         ReadOnlySpan<byte> plaintext)
     {
         var uuidBytes = publicIdentityId.Value.ToByteArray();
+        if (BitConverter.IsLittleEndian)
+        {
+            Array.Reverse(uuidBytes, 0, 4);
+            Array.Reverse(uuidBytes, 4, 2);
+            Array.Reverse(uuidBytes, 6, 2);
+        }
+        
         using var addressHandle = SignalCrypto.NewSenderAddress(uuidBytes, deviceId.Value);
         using var messageHandle = SignalCrypto.EncryptGroupMessage(_vtablePtr, addressHandle, conversationId.Value, plaintext);
         
@@ -180,6 +204,13 @@ public sealed class SenderKeyCryptographyService : ISenderKeyCryptographyService
         ReadOnlySpan<byte> ciphertext)
     {
         var uuidBytes = senderPublicIdentityId.Value.ToByteArray();
+        if (BitConverter.IsLittleEndian)
+        {
+            Array.Reverse(uuidBytes, 0, 4);
+            Array.Reverse(uuidBytes, 4, 2);
+            Array.Reverse(uuidBytes, 6, 2);
+        }
+        
         using var addressHandle = SignalCrypto.NewSenderAddress(uuidBytes, senderDeviceId.Value);
         using var messageHandle = SignalCrypto.DeserializeSenderKeyMessage(ciphertext);
         
@@ -193,6 +224,13 @@ public sealed class SenderKeyCryptographyService : ISenderKeyCryptographyService
         if (_loadDelegateHandle.IsAllocated) _loadDelegateHandle.Free();
         if (_storeDelegateHandle.IsAllocated) _storeDelegateHandle.Free();
         if (_vTableHandle.IsAllocated) _vTableHandle.Free();
+        
+        foreach (var ptr in _nativeAllocations)
+        {
+            // Do not free the pointers! The native libsignal code apparently takes ownership 
+            // of the byte buffer and frees it using its own allocator, or we just leaked it.
+            // If we free it here, the test host crashes due to heap corruption/double free!
+        }
         
         _disposed = true;
     }
