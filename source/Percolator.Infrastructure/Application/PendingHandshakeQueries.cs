@@ -89,7 +89,7 @@ public class PendingHandshakeQueries : IPendingHandshakeQueries
                      .OrderByDescending(r => r.CreatedAtUtc))
         {
             var peerName = row.PeerDisplayName
-                           ?? row.RemotePeerId.ToString()[..8];
+                           ?? (row.RemotePeerId.ToString().Length >= 8 ? row.RemotePeerId.ToString()[..8] : row.RemotePeerId.ToString());
 
             if (string.IsNullOrWhiteSpace(row.RequestCorrelationId)
                 || !Guid.TryParse(row.RequestCorrelationId, out var correlationGuid)

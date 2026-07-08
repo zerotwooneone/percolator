@@ -20,13 +20,12 @@ public class SenderKeyInteropBridgeTests
         var conversationId = new ConversationId(Guid.NewGuid());
         var senderPublicIdentityId = new CryptoPublicIdentity(Guid.NewGuid());
         var deviceId = new DeviceId(1);
-        
+
         var options = new DbContextOptionsBuilder<PercolatorDbContext>()
             .UseInMemoryDatabase(databaseName: Guid.NewGuid().ToString())
             .Options;
-        
-        using var db = new PercolatorDbContext(options);
-        var dbFactory = new DbContextFactoryWrapper(db);
+
+        var dbFactory = new DbContextFactoryWrapper(options);
         var bridge = new SenderKeyInteropBridge(dbFactory);
 
         // Act
@@ -50,21 +49,23 @@ public class SenderKeyInteropBridgeTests
             .UseInMemoryDatabase(databaseName: Guid.NewGuid().ToString())
             .Options;
         
-        using var db = new PercolatorDbContext(options);
-        var dbFactory = new DbContextFactoryWrapper(db);
+        var dbFactory = new DbContextFactoryWrapper(options);
         var bridge = new SenderKeyInteropBridge(dbFactory);
 
         // Add a PeerIdentityDbo to enable the lookup
-        db.PeerIdentities.Add(new PeerIdentityDbo
+        using (var db = dbFactory.CreateDbContext())
         {
-            PeerId = 1,
-            PublicIdentityId = senderPublicIdentityId.Value,
-            Name = "Test",
-            Version = 0,
-            CreatedAtUtc = DateTimeOffset.UtcNow,
-            UpdatedAtUtc = DateTimeOffset.UtcNow
-        });
-        db.SaveChanges();
+            db.PeerIdentities.Add(new PeerIdentityDbo
+            {
+                PeerId = 1,
+                PublicIdentityId = senderPublicIdentityId.Value,
+                Name = "Test",
+                Version = 0,
+                CreatedAtUtc = DateTimeOffset.UtcNow,
+                UpdatedAtUtc = DateTimeOffset.UtcNow
+            });
+            db.SaveChanges();
+        }
 
         // Act
         bridge.StoreSenderKey(conversationId, senderPublicIdentityId, deviceId, originalBytes);
@@ -77,16 +78,16 @@ public class SenderKeyInteropBridgeTests
 
     private class DbContextFactoryWrapper : IDbContextFactory<PercolatorDbContext>
     {
-        private readonly PercolatorDbContext _context;
+        private readonly DbContextOptions<PercolatorDbContext> _options;
 
-        public DbContextFactoryWrapper(PercolatorDbContext context)
+        public DbContextFactoryWrapper(DbContextOptions<PercolatorDbContext> options)
         {
-            _context = context;
+            _options = options;
         }
 
         public PercolatorDbContext CreateDbContext()
         {
-            return _context;
+            return new PercolatorDbContext(_options);
         }
     }
 }

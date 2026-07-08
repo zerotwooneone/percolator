@@ -551,7 +551,7 @@ public class PercolatorDbContext : DbContext
                 .IsRequired();
             entity.Property(e => e.PublicMessageId)
                 .IsRequired();
-            entity.Property(e => e.SenderSelfId).IsRequired();
+            entity.Property(e => e.SenderSelfId);
             entity.Property(e => e.Body).IsRequired();
             entity.Property(e => e.SentAt).IsRequired();
             entity.HasIndex(e => new { e.ConversationId, e.SentAt });

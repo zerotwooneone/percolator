@@ -204,7 +204,7 @@ public sealed class PeerConnectionSidebarQueriesTests : IDisposable
         // Arrange
         var selfIdentityId = new SelfId(1);
         var peerId = new Percolator.Identity.PeerId(45678);
-        var targetPeerId = 56789;
+        var targetPeerId = 45678; // Same peer as established session
         var sessionId = Guid.NewGuid();
         var correlationId = Guid.NewGuid();
 

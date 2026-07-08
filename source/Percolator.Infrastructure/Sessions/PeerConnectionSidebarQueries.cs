@@ -61,14 +61,17 @@ public sealed class PeerConnectionSidebarQueries : IPeerConnectionSidebarQueries
 
         // Build established session DTOs
         var establishedDtos = new List<SidebarPeerConnectionDto>();
+        var establishedSessionPeerIds = new HashSet<uint>();
         foreach (var item in establishedSessions)
         {
             var status = directPeerIdSet.Contains(item.session.RemotePeerId)
                 ? SidebarPeerConnectionStatus.Direct
                 : SidebarPeerConnectionStatus.Relay;
 
-            var displayName = item.peer.Name ?? item.session.RemotePeerId.ToString()[..8];
+            var displayName = item.peer.Name ?? (item.session.RemotePeerId.ToString().Length >= 8 ? item.session.RemotePeerId.ToString()[..8] : item.session.RemotePeerId.ToString());
             var initials = ComputeInitials(displayName);
+
+            establishedSessionPeerIds.Add(item.session.RemotePeerId);
 
             establishedDtos.Add(new SidebarPeerConnectionDto
             {
@@ -108,11 +111,9 @@ public sealed class PeerConnectionSidebarQueries : IPeerConnectionSidebarQueries
                 continue;
 
             // Suppress pending if established session exists for the same remote peer
-            if (invitation.TargetPeerId.HasValue)
+            if (invitation.TargetPeerId.HasValue && establishedSessionPeerIds.Contains(invitation.TargetPeerId.Value))
             {
-                var hasEstablishedSession = establishedDtos.Any(d => d.PeerId == Guid.NewGuid()); // TODO: Proper PeerId to Guid conversion
-                if (hasEstablishedSession)
-                    continue;
+                continue;
             }
 
             // Derive display name

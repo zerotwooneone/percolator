@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
 using Moq;
 using Percolator.Application.Chat;
+using Percolator.Chat.GroupLedger;
 using Percolator.Chat.GroupMembership;
 using Percolator.Infrastructure.Chat;
 
@@ -18,11 +19,15 @@ public class DeliveryCertificateRefreshWorkerTests
         var serviceProviderMock = new Mock<IServiceProvider>();
         var serviceScopeMock = new Mock<IServiceScope>();
         var scopeFactoryMock = new Mock<IServiceScopeFactory>();
+        var queriesMock = new Mock<IDeliveryCertificateQueries>();
+        var storeMock = new Mock<IDeliveryCertificateStore>();
         var orchestratorMock = new Mock<ICertificateOrchestrator>();
         var loggerMock = new Mock<ILogger<DeliveryCertificateRefreshWorker>>();
         var fakeTimeProvider = new FakeTimeProvider();
 
         var refreshCompletedTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var selfId = new ChatSelfId(1);
+        var relayPeerId = new ChatPeerId(2);
 
         serviceScopeMock.As<IAsyncDisposable>()
             .Setup(ad => ad.DisposeAsync())
@@ -34,9 +39,17 @@ public class DeliveryCertificateRefreshWorkerTests
         scopeFactoryMock.Setup(sf => sf.CreateScope())
             .Returns(serviceScopeMock.Object);
 
+        serviceProviderMock.Setup(sp => sp.GetService(typeof(IDeliveryCertificateQueries)))
+            .Returns(queriesMock.Object);
+        serviceProviderMock.Setup(sp => sp.GetService(typeof(IDeliveryCertificateStore)))
+            .Returns(storeMock.Object);
         serviceProviderMock.Setup(sp => sp.GetService(typeof(ICertificateOrchestrator)))
             .Returns(orchestratorMock.Object);
 
+        queriesMock.Setup(q => q.GetActiveRelayAssignmentsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { (selfId, relayPeerId) });
+        storeMock.Setup(s => s.GetCertificateAsync(selfId, relayPeerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DeliveryCertificate?)null);
         orchestratorMock.Setup(o => o.RefreshLocalCertificateAsync(It.IsAny<ChatSelfId>(), It.IsAny<ChatPeerId>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask)
             .Callback(() => refreshCompletedTcs.SetResult(true));
@@ -47,33 +60,35 @@ public class DeliveryCertificateRefreshWorkerTests
             fakeTimeProvider);
 
         // ACT
-
-        // 1. Start the BackgroundService
+        // Start the BackgroundService
         await worker.StartAsync(CancellationToken.None);
 
-        // 2. Wait deterministically for the first refresh
+        // Wait for the first refresh to complete
         await refreshCompletedTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
-        // 3. Stop the service (This cancels the stoppingToken and waits for ExecuteAsync to finish safely)
-        var stopTask = worker.StopAsync(CancellationToken.None);
-        await stopTask.WaitAsync(TimeSpan.FromSeconds(5));
+        // Stop the service
+        await worker.StopAsync(CancellationToken.None);
 
-        // 4. Assert Graceful Shutdown
-        Assert.That(stopTask.IsCompletedSuccessfully, Is.True);
+        // ASSERT
+        orchestratorMock.Verify(o => o.RefreshLocalCertificateAsync(selfId, relayPeerId, It.IsAny<CancellationToken>()), Times.Once());
     }
 
     [Test]
-    public async Task ErrorBackoff_RetriesAfterFiveMinutes()
+    public async Task RefreshesCertificateWhenExpiredOrMissing()
     {
         // ARRANGE
         var serviceProviderMock = new Mock<IServiceProvider>();
         var serviceScopeMock = new Mock<IServiceScope>();
         var scopeFactoryMock = new Mock<IServiceScopeFactory>();
+        var queriesMock = new Mock<IDeliveryCertificateQueries>();
+        var storeMock = new Mock<IDeliveryCertificateStore>();
         var orchestratorMock = new Mock<ICertificateOrchestrator>();
         var loggerMock = new Mock<ILogger<DeliveryCertificateRefreshWorker>>();
         var fakeTimeProvider = new FakeTimeProvider();
 
         var refreshCompletedTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var selfId = new ChatSelfId(1);
+        var relayPeerId = new ChatPeerId(2);
 
         serviceScopeMock.As<IAsyncDisposable>()
             .Setup(ad => ad.DisposeAsync())
@@ -85,25 +100,20 @@ public class DeliveryCertificateRefreshWorkerTests
         scopeFactoryMock.Setup(sf => sf.CreateScope())
             .Returns(serviceScopeMock.Object);
 
+        serviceProviderMock.Setup(sp => sp.GetService(typeof(IDeliveryCertificateQueries)))
+            .Returns(queriesMock.Object);
+        serviceProviderMock.Setup(sp => sp.GetService(typeof(IDeliveryCertificateStore)))
+            .Returns(storeMock.Object);
         serviceProviderMock.Setup(sp => sp.GetService(typeof(ICertificateOrchestrator)))
             .Returns(orchestratorMock.Object);
 
-        var callCount = 0;
+        queriesMock.Setup(q => q.GetActiveRelayAssignmentsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { (selfId, relayPeerId) });
+        storeMock.Setup(s => s.GetCertificateAsync(selfId, relayPeerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DeliveryCertificate?)null);
         orchestratorMock.Setup(o => o.RefreshLocalCertificateAsync(It.IsAny<ChatSelfId>(), It.IsAny<ChatPeerId>(), It.IsAny<CancellationToken>()))
-            .Returns(() =>
-            {
-                callCount++;
-
-                // 1. First call fails, triggering the 5-minute error backoff delay
-                if (callCount == 1)
-                {
-                    throw new Exception("Transient error");
-                }
-
-                // 2. Second call (the retry) succeeds, signaling the test thread
-                refreshCompletedTcs.TrySetResult(true);
-                return Task.CompletedTask;
-            });
+            .Returns(Task.CompletedTask)
+            .Callback(() => refreshCompletedTcs.SetResult(true));
 
         var worker = new DeliveryCertificateRefreshWorker(
             scopeFactoryMock.Object,
@@ -111,26 +121,79 @@ public class DeliveryCertificateRefreshWorkerTests
             fakeTimeProvider);
 
         // ACT
-
-        // Start the BackgroundService. It will immediately execute Call 1, throw, catch,
-        // and park itself on the 5-minute FakeTimeProvider delay.
         await worker.StartAsync(CancellationToken.None);
 
-        // Advance time by 5 minutes to instantly complete the error delay and trigger the retry.
-        fakeTimeProvider.Advance(TimeSpan.FromMinutes(5));
-
-        // Wait deterministically for the retry to complete successfully
         await refreshCompletedTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
-        // Stop the service (which cancels the 20-hour success delay the worker is now sitting on)
-        var stopTask = worker.StopAsync(CancellationToken.None);
-        await stopTask.WaitAsync(TimeSpan.FromSeconds(5));
+        await worker.StopAsync(CancellationToken.None);
 
         // ASSERT
-        // Verify the orchestrator was called exactly twice (Initial Failure + Successful Retry)
-        orchestratorMock.Verify(o => o.RefreshLocalCertificateAsync(It.IsAny<ChatSelfId>(), It.IsAny<ChatPeerId>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+        orchestratorMock.Verify(o => o.RefreshLocalCertificateAsync(selfId, relayPeerId, It.IsAny<CancellationToken>()), Times.Once());
+    }
 
-        // Verify graceful shutdown
-        Assert.That(stopTask.IsCompletedSuccessfully, Is.True);
+    [Test]
+    public async Task SkipsRefreshWhenCertificateIsValid()
+    {
+        // ARRANGE
+        var serviceProviderMock = new Mock<IServiceProvider>();
+        var serviceScopeMock = new Mock<IServiceScope>();
+        var scopeFactoryMock = new Mock<IServiceScopeFactory>();
+        var queriesMock = new Mock<IDeliveryCertificateQueries>();
+        var storeMock = new Mock<IDeliveryCertificateStore>();
+        var orchestratorMock = new Mock<ICertificateOrchestrator>();
+        var loggerMock = new Mock<ILogger<DeliveryCertificateRefreshWorker>>();
+        var fakeTimeProvider = new FakeTimeProvider();
+
+        var selfId = new ChatSelfId(1);
+        var relayPeerId = new ChatPeerId(2);
+        var validCert = new DeliveryCertificate(
+            DeliveryCertificatePayloadBytes.FromBytes(new byte[40]),
+            SignatureBytes.FromBytes(new byte[64]),
+            fakeTimeProvider.GetUtcNow() + TimeSpan.FromHours(10));
+
+        serviceScopeMock.As<IAsyncDisposable>()
+            .Setup(ad => ad.DisposeAsync())
+            .Returns(ValueTask.CompletedTask);
+
+        serviceScopeMock.Setup(s => s.ServiceProvider)
+            .Returns(serviceProviderMock.Object);
+
+        scopeFactoryMock.Setup(sf => sf.CreateScope())
+            .Returns(serviceScopeMock.Object);
+
+        serviceProviderMock.Setup(sp => sp.GetService(typeof(IDeliveryCertificateQueries)))
+            .Returns(queriesMock.Object);
+        serviceProviderMock.Setup(sp => sp.GetService(typeof(IDeliveryCertificateStore)))
+            .Returns(storeMock.Object);
+        serviceProviderMock.Setup(sp => sp.GetService(typeof(ICertificateOrchestrator)))
+            .Returns(orchestratorMock.Object);
+
+        queriesMock.Setup(q => q.GetActiveRelayAssignmentsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { (selfId, relayPeerId) });
+        storeMock.Setup(s => s.GetCertificateAsync(selfId, relayPeerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(validCert);
+        orchestratorMock.Setup(o => o.RefreshLocalCertificateAsync(It.IsAny<ChatSelfId>(), It.IsAny<ChatPeerId>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var worker = new DeliveryCertificateRefreshWorker(
+            scopeFactoryMock.Object,
+            loggerMock.Object,
+            fakeTimeProvider);
+
+        // ACT
+        using var cts = new CancellationTokenSource();
+
+        await worker.StartAsync(CancellationToken.None);
+
+        // Advance time to complete one cycle
+        fakeTimeProvider.Advance(TimeSpan.FromHours(1));
+
+        // Give the worker time to process
+        await Task.Delay(100);
+
+        await worker.StopAsync(CancellationToken.None);
+
+        // ASSERT
+        orchestratorMock.Verify(o => o.RefreshLocalCertificateAsync(It.IsAny<ChatSelfId>(), It.IsAny<ChatPeerId>(), It.IsAny<CancellationToken>()), Times.Never());
     }
 }

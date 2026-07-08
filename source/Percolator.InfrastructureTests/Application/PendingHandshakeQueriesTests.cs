@@ -12,6 +12,7 @@ using Percolator.Infrastructure.Application;
 using Percolator.Infrastructure.Cryptography;
 using Percolator.Infrastructure.Identity;
 using Percolator.Infrastructure.Persistence;
+using Percolator.InfrastructureTests.Common;
 using Percolator.Network;
 using PeerId = Percolator.Cryptography.Primitives.PeerId;
 
@@ -40,17 +41,17 @@ public sealed class PendingHandshakeQueriesTests
 
         var clock = new FixedClock { UtcNow = DateTimeOffset.Parse("2025-05-01T00:00:00Z") };
 
-        await using var ctx = new PercolatorDbContext(options);
+        await using var ctx = TestDb.NewContextWithSchema(options, 1);
 
         if (!ctx.SelfIdentities.Any())
         {
-            ctx.SelfIdentities.Add(new SelfIdentityDbo 
-            { 
-                Id = 1, 
-                PublicIdentityId = Guid.NewGuid(), 
-                Name = "default", 
-                DeviceId = 1, 
-                ListeningPort = 5000, 
+            ctx.SelfIdentities.Add(new SelfIdentityDbo
+            {
+                Id = 1,
+                PublicIdentityId = Guid.NewGuid(),
+                Name = "default",
+                DeviceId = 1,
+                ListeningPort = 5000,
                 LastUsedUtc = DateTimeOffset.UtcNow
             });
             ctx.SaveChanges();
@@ -128,17 +129,17 @@ public sealed class PendingHandshakeQueriesTests
 
         var clock = new FixedClock { UtcNow = DateTimeOffset.Parse("2025-05-01T00:00:00Z") };
 
-        await using var ctx = new PercolatorDbContext(options);
+        await using var ctx = TestDb.NewContextWithSchema(options, 1);
 
         if (!ctx.SelfIdentities.Any())
         {
-            ctx.SelfIdentities.Add(new SelfIdentityDbo 
-            { 
-                Id = 1, 
-                PublicIdentityId = Guid.NewGuid(), 
-                Name = "default", 
-                DeviceId = 1, 
-                ListeningPort = 5000, 
+            ctx.SelfIdentities.Add(new SelfIdentityDbo
+            {
+                Id = 1,
+                PublicIdentityId = Guid.NewGuid(),
+                Name = "default",
+                DeviceId = 1,
+                ListeningPort = 5000,
                 LastUsedUtc = DateTimeOffset.UtcNow
             });
             ctx.SaveChanges();
@@ -147,12 +148,11 @@ public sealed class PendingHandshakeQueriesTests
         var repo = new SqlitePendingSessionRepository(ctx, clock);
 
         var remotePeerId = new Percolator.Identity.PeerId(1);
-        var relayPeerId = new Percolator.Identity.PeerId(2);
-        var relayPeerNetworkId = new Percolator.Network.PeerId(2);
+        var relayPeerId = 2u;
 
         ctx.PeerIdentities.Add(new PeerIdentityDbo
         {
-            PeerId = relayPeerId.Value,
+            PeerId = relayPeerId,
             PublicIdentityId = Guid.NewGuid(),
             Name = "RelayHost",
             Version = 1,
@@ -169,14 +169,14 @@ public sealed class PendingHandshakeQueriesTests
         });
         ctx.PeerRoutingProfiles.Add(new PeerRoutingProfileDbo
         {
-            PeerId = relayPeerNetworkId.Value,
+            PeerId = relayPeerId,
             ReachabilityStatus = 0,
             ReachabilityLastChangeUtc = clock.UtcNow,
             DirectMessagePublicKey = null
         });
         ctx.PeerRoutingGrpcEndPoints.Add(new GrpcEndPointRoutingDbo
         {
-            PeerId = relayPeerNetworkId.Value,
+            PeerId = relayPeerId,
             Host = "relay.local",
             Port = 5001,
             LastSeenUtc = clock.UtcNow
@@ -184,7 +184,7 @@ public sealed class PendingHandshakeQueriesTests
         ctx.PeerRoutingRelays.Add(new RelayLinkDbo
         {
             PeerId = remotePeerId.Value,
-            RelayPeerId = relayPeerNetworkId.Value,
+            RelayPeerId = relayPeerId,
             LastSeenUtc = clock.UtcNow
         });
         ctx.SaveChanges();
@@ -196,7 +196,7 @@ public sealed class PendingHandshakeQueriesTests
             HandshakeInvitation.FromBytes(new byte[] { 8 }),
             requestCorrelationId: new RequestCorrelationId(Guid.Parse("11111111-1111-1111-1111-111111111111")),
             isRelayed: true,
-            relayHostPeerId: new Percolator.Cryptography.Primitives.PeerId(relayPeerId.Value),
+            relayHostPeerId: new Percolator.Cryptography.Primitives.PeerId(relayPeerId),
             inviterIdentityKey: null,
             callbackEndpointHost: null,
             callbackEndpointPort: null,
@@ -215,7 +215,7 @@ public sealed class PendingHandshakeQueriesTests
 
         results.Should().HaveCount(1);
         results[0].IsRelayed.Should().BeTrue();
-        results[0].RelayPeer.Should().Be(relayPeerId);
+        results[0].RelayPeer.Should().Be(new Percolator.Cryptography.Primitives.PeerId(relayPeerId));
         results[0].RelayPeerName.Should().Be("RelayHost");
         results[0].RelayEndpoint.Should().Be("relay.local:5001");
     }
