@@ -133,7 +133,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
                 clock);
 
             var pendingRepo = new Mock<IPendingSessionRepository>(MockBehavior.Loose);
-            pendingRepo.Setup(r => r.GetAsync(pendingId, It.IsAny<CancellationToken>()))
+            pendingRepo.Setup(r => r.GetAsync(pendingId, It.IsAny<CryptoSelfId>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(pending);
 
             var callbackValidator = new Mock<ICallbackEndpointValidator>(MockBehavior.Loose);
@@ -183,7 +183,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
             result.Should().BeOfType<ApprovePendingSessionResult.Failed>();
 
             // Verify state: pending session should still exist
-            var stillPending = await pendingRepo.Object.GetAsync(pendingId, CancellationToken.None);
+            var stillPending = await pendingRepo.Object.GetAsync(pendingId, new CryptoSelfId(1), CancellationToken.None);
             stillPending.Should().NotBeNull();
         }
 
@@ -231,7 +231,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
                 clock);
 
             var pendingRepo = new Mock<IPendingSessionRepository>(MockBehavior.Loose);
-            pendingRepo.Setup(r => r.GetAsync(pendingId, It.IsAny<CancellationToken>()))
+            pendingRepo.Setup(r => r.GetAsync(pendingId, It.IsAny<CryptoSelfId>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(pending);
 
             var callbackValidator = new Mock<ICallbackEndpointValidator>(MockBehavior.Loose);
@@ -281,9 +281,9 @@ namespace Percolator.ApplicationTests.ReverseSignal
             result.Should().BeOfType<ApprovePendingSessionResult.Accepted>();
 
             // Verify state: pending session should be deleted
-            pendingRepo.Setup(r => r.GetAsync(pendingId, It.IsAny<CancellationToken>()))
+            pendingRepo.Setup(r => r.GetAsync(pendingId, It.IsAny<CryptoSelfId>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((PendingSession?)null);
-            var deleted = await pendingRepo.Object.GetAsync(pendingId, CancellationToken.None);
+            var deleted = await pendingRepo.Object.GetAsync(pendingId, new CryptoSelfId(1), CancellationToken.None);
             deleted.Should().BeNull();
         }
 
@@ -344,7 +344,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
                 expiresAtUtc: clock.UtcNow.AddMinutes(10));
 
             var pendingRepo = new Mock<IPendingSessionRepository>(MockBehavior.Loose);
-            pendingRepo.Setup(r => r.GetAsync(pendingId, It.IsAny<CancellationToken>()))
+            pendingRepo.Setup(r => r.GetAsync(pendingId, It.IsAny<CryptoSelfId>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(pending);
 
             var callbackValidator = new Mock<ICallbackEndpointValidator>(MockBehavior.Loose);
@@ -400,9 +400,9 @@ namespace Percolator.ApplicationTests.ReverseSignal
             result.Should().BeOfType<ApprovePendingSessionResult.Accepted>();
 
             // Verify state: pending session should be deleted
-            pendingRepo.Setup(r => r.GetAsync(pendingId, It.IsAny<CancellationToken>()))
+            pendingRepo.Setup(r => r.GetAsync(pendingId, It.IsAny<CryptoSelfId>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((PendingSession?)null);
-            var deleted = await pendingRepo.Object.GetAsync(pendingId, CancellationToken.None);
+            var deleted = await pendingRepo.Object.GetAsync(pendingId, new CryptoSelfId(1), CancellationToken.None);
             deleted.Should().BeNull();
         }
     }

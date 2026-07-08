@@ -108,9 +108,9 @@ public sealed class ApprovePendingSessionCommandTests
             clock);
 
         var pendingRepo = new Mock<IPendingSessionRepository>(MockBehavior.Strict);
-        pendingRepo.Setup(r => r.GetAsync(pendingId, It.IsAny<CancellationToken>()))
+        pendingRepo.Setup(r => r.GetAsync(pendingId, It.IsAny<CryptoSelfId>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(pending);
-        pendingRepo.Setup(r => r.DeleteAsync(pendingId, It.IsAny<CancellationToken>()))
+        pendingRepo.Setup(r => r.DeleteAsync(pendingId, It.IsAny<CryptoSelfId>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         var callbackValidator = new Mock<ICallbackEndpointValidator>(MockBehavior.Strict);

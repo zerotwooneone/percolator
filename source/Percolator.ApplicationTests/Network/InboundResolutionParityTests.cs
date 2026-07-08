@@ -4,6 +4,7 @@ using Moq;
 using Percolator.Application.Network.Handshake;
 using Percolator.Contracts;
 using Percolator.Cryptography;
+using Percolator.Cryptography.Primitives;
 using Percolator.Identity;
 
 namespace Percolator.ApplicationTests.Network
@@ -29,7 +30,7 @@ namespace Percolator.ApplicationTests.Network
 
             var expectedSid = new SessionId(Guid.NewGuid());
             ratchetIndex
-                .Setup(x => x.TryResolveAsync(It.IsAny<uint>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()))
+                .Setup(x => x.TryResolveAsync(It.IsAny<CryptoSelfId>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(expectedSid);
 
             var finalize = new Mock<IInitiatorFinalizeService>(MockBehavior.Loose);
@@ -56,7 +57,7 @@ namespace Percolator.ApplicationTests.Network
             await handler.Handle(cmd, CancellationToken.None);
 
             // Assert
-            ratchetIndex.Verify(x => x.TryResolveAsync(It.IsAny<uint>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()), Times.Once);
+            ratchetIndex.Verify(x => x.TryResolveAsync(It.IsAny<CryptoSelfId>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()), Times.Once);
             finalize.Verify(
                 f => f.TryFinalizeFromInviteHandshakeResponseAsync(It.IsAny<SelfId>(), It.IsAny<InviteHandshakeResponse>(), It.IsAny<CancellationToken>()),
                 Times.Never);
@@ -73,7 +74,7 @@ namespace Percolator.ApplicationTests.Network
             var selfId = new SelfId(2);
 
             ratchetIndex
-                .Setup(x => x.TryResolveAsync(It.IsAny<uint>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()))
+                .Setup(x => x.TryResolveAsync(It.IsAny<CryptoSelfId>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((SessionId?)null);
 
             var sid = new SessionId(Guid.NewGuid());
@@ -111,7 +112,7 @@ namespace Percolator.ApplicationTests.Network
             await handler.Handle(cmd, CancellationToken.None);
 
             // Assert
-            ratchetIndex.Verify(x => x.TryResolveAsync(It.IsAny<uint>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()), Times.Once);
+            ratchetIndex.Verify(x => x.TryResolveAsync(It.IsAny<CryptoSelfId>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()), Times.Once);
             finalize.Verify(
                 f => f.TryFinalizeFromInviteHandshakeResponseAsync(It.IsAny<SelfId>(), It.IsAny<InviteHandshakeResponse>(), It.IsAny<CancellationToken>()),
                 Times.Once);

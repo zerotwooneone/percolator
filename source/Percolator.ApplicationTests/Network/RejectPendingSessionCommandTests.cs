@@ -5,6 +5,7 @@ using Percolator.Application.Network;
 using Percolator.ApplicationTests.Services;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
+using Percolator.Identity;
 
 namespace Percolator.ApplicationTests.Network;
 
@@ -17,12 +18,12 @@ public sealed class RejectPendingSessionCommandTests
         var pendingRepo = new Mock<IPendingSessionRepository>(MockBehavior.Strict);
         var id = PendingSessionId.NewId();
 
-        pendingRepo.Setup(r => r.GetAsync(id, It.IsAny<CancellationToken>()))
+        pendingRepo.Setup(r => r.GetAsync(id, It.IsAny<CryptoSelfId>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((PendingSession?)null);
 
         var sut = new RejectPendingSessionHandler(pendingRepo.Object, Mock.Of<IMediator>());
 
-        var result = await sut.Handle(new RejectPendingSessionCommand(id), CancellationToken.None);
+        var result = await sut.Handle(new RejectPendingSessionCommand(id, new SelfId(1)), CancellationToken.None);
 
         result.Should().BeOfType<RejectPendingSessionResult.NotFound>();
     }
@@ -46,9 +47,9 @@ public sealed class RejectPendingSessionCommandTests
             callbackEndpointPort: null,
             new TestClock());
 
-        pendingRepo.Setup(r => r.GetAsync(id, It.IsAny<CancellationToken>()))
+        pendingRepo.Setup(r => r.GetAsync(id, It.IsAny<CryptoSelfId>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(pending);
-        pendingRepo.Setup(r => r.DeleteAsync(id, It.IsAny<CancellationToken>()))
+        pendingRepo.Setup(r => r.DeleteAsync(id, It.IsAny<CryptoSelfId>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         var mediator = new Mock<IMediator>(MockBehavior.Strict);
@@ -60,7 +61,7 @@ public sealed class RejectPendingSessionCommandTests
 
         var sut = new RejectPendingSessionHandler(pendingRepo.Object, mediator.Object);
 
-        var result = await sut.Handle(new RejectPendingSessionCommand(id), CancellationToken.None);
+        var result = await sut.Handle(new RejectPendingSessionCommand(id, new SelfId(1)), CancellationToken.None);
 
         result.Should().BeOfType<RejectPendingSessionResult.Rejected>();
     }

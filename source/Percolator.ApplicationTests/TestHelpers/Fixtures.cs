@@ -56,15 +56,15 @@ namespace Percolator.ApplicationTests.TestHelpers
     {
         public static void SetupEmptyEnumerate(Mock<IPreHandshakeSessionStore> store)
         {
-            store.Setup(s => s.EnumeratePendingAsync(It.IsAny<uint>(), It.IsAny<CancellationToken>()))
-                 .Returns((uint _, CancellationToken __) => AsyncSeq.Empty<PreHandshakeRecord>());
+            store.Setup(s => s.EnumeratePendingAsync(It.IsAny<NetworkSelfId>(), It.IsAny<CancellationToken>()))
+                 .Returns((NetworkSelfId _, CancellationToken __) => AsyncSeq.Empty<PreHandshakeRecord>());
         }
 
         public static void SetupMostRecentAndDelete(Mock<IPreHandshakeSessionStore> store, uint selfId, PreHandshakeRecord record)
         {
-            store.Setup(s => s.TryGetMostRecentAsync(selfId, It.IsAny<CancellationToken>()))
+            store.Setup(s => s.TryGetMostRecentAsync(new NetworkSelfId(selfId), It.IsAny<CancellationToken>()))
                  .ReturnsAsync(record);
-            store.Setup(s => s.DeleteAsync(record.Id, selfId, It.IsAny<CancellationToken>()))
+            store.Setup(s => s.DeleteAsync(record.Id, new NetworkSelfId(selfId), It.IsAny<CancellationToken>()))
                  .Returns(System.Threading.Tasks.Task.CompletedTask);
         }
     }

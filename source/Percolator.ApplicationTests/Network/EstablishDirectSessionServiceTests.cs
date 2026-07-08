@@ -74,7 +74,7 @@ namespace Percolator.ApplicationTests.Network
             peerRepo.Setup(r => r.SaveAsync(It.IsAny<PeerIdentity>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
 
-            pendingRepo.Setup(r => r.EnumerateAsync(It.IsAny<CancellationToken>()))
+            pendingRepo.Setup(r => r.EnumerateAsync(It.IsAny<CryptoSelfId>(), It.IsAny<CancellationToken>()))
                 .Returns(EmptyPendingAsync());
 
             pendingRepo.Setup(r => r.AddAsync(It.IsAny<PendingSession>(), It.IsAny<CryptoSelfId>(), It.IsAny<CancellationToken>()))
@@ -215,7 +215,7 @@ namespace Percolator.ApplicationTests.Network
                 .Returns(true);
 
             // Existing pending with same correlation id, not expired.
-            pendingRepo.Setup(r => r.EnumerateAsync(It.IsAny<CancellationToken>()))
+            pendingRepo.Setup(r => r.EnumerateAsync(It.IsAny<CryptoSelfId>(), It.IsAny<CancellationToken>()))
                 .Returns(SinglePendingAsync(PendingSession.FromInvitationWithMetadata(
                     PendingSessionId.NewId(),
                     new Percolator.Cryptography.Primitives.PeerId((uint)Random.Shared.Next(1, 1000000)),
@@ -297,7 +297,7 @@ namespace Percolator.ApplicationTests.Network
                     It.IsAny<Percolator.Network.PublicKey>()))
                 .Returns(true);
 
-            pendingRepo.Setup(r => r.EnumerateAsync(It.IsAny<CancellationToken>()))
+            pendingRepo.Setup(r => r.EnumerateAsync(It.IsAny<CryptoSelfId>(), It.IsAny<CancellationToken>()))
                 .Returns(EmptyPendingAsync());
 
             callbackValidator.Setup(v => v.Validate(It.IsAny<string>(), It.IsAny<int>()))

@@ -20,7 +20,7 @@ public sealed class DirectSessionMappingWriterTests
 
         var directSessionRepository = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
         directSessionRepository
-            .Setup(r => r.UpsertAsync(remotePeerId, sessionId, (uint)selfIdentityId.Value))
+            .Setup(r => r.UpsertAsync(remotePeerId, sessionId, new NetworkSelfId((uint)selfIdentityId.Value)))
             .Throws(new InvalidOperationException("Database connection failed"));
 
         var logger = new Mock<ILogger<DirectSessionMappingWriter>>(MockBehavior.Loose);

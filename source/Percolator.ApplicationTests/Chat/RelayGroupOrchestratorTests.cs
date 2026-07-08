@@ -137,7 +137,7 @@ public class RelayGroupOrchestratorTests
             .ReturnsAsync(seed);
         ledgerRepository.Setup(r => r.GetByIdAsync(conversationId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(ledger);
-        rosterQueries.Setup(r => r.GetMemberPeerIdsAsync(conversationId.Value, It.IsAny<CancellationToken>()))
+        rosterQueries.Setup(r => r.GetMemberPeerIdsAsync(new ConversationId(conversationId.Value), It.IsAny<CancellationToken>()))
             .ReturnsAsync(peerIds);
 
         var orchestrator = CreateOrchestrator(identityQueries, cryptoService, ledgerRepository, rosterQueries, publisher, timeProvider);

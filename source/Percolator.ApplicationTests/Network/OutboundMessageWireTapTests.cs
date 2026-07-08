@@ -28,9 +28,9 @@ public sealed class OutboundMessageWireTapTests
         active.Identity = new IdentityRecord(new SelfId(1), new PublicIdentityId(Guid.NewGuid()), new DeviceId(1), "self");
 
         var sessions = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
-        sessions.Setup(s => s.ListAsync(It.IsAny<uint>()))
+        sessions.Setup(s => s.ListAsync(It.IsAny<NetworkSelfId>()))
             .ReturnsAsync(Array.Empty<DirectSession>());
-        sessions.Setup(s => s.GetByRemotePeerIdAsync(It.IsAny<PeerId>(), It.IsAny<uint>()))
+        sessions.Setup(s => s.GetByRemotePeerIdAsync(It.IsAny<PeerId>(), It.IsAny<NetworkSelfId>()))
             .ReturnsAsync(new DirectSession(new PeerId(1), new DirectSessionId(Guid.NewGuid())));
 
         var secure = new Mock<ISecureMessagingService>(MockBehavior.Strict);
@@ -71,9 +71,9 @@ public sealed class OutboundMessageWireTapTests
         active.Identity = new IdentityRecord(new SelfId(1), new PublicIdentityId(Guid.NewGuid()), new DeviceId(1), "self");
 
         var sessions = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
-        sessions.Setup(s => s.ListAsync(It.IsAny<uint>()))
+        sessions.Setup(s => s.ListAsync(It.IsAny<NetworkSelfId>()))
             .ReturnsAsync(Array.Empty<DirectSession>());
-        sessions.Setup(s => s.GetByRemotePeerIdAsync(It.IsAny<PeerId>(), It.IsAny<uint>()))
+        sessions.Setup(s => s.GetByRemotePeerIdAsync(It.IsAny<PeerId>(), It.IsAny<NetworkSelfId>()))
             .ReturnsAsync(new DirectSession(new PeerId(2), new DirectSessionId(Guid.NewGuid())));
 
         var secure = new Mock<ISecureMessagingService>(MockBehavior.Strict);

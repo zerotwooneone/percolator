@@ -59,7 +59,7 @@ public class RelayOrchestratorTests
 
         queue.Setup(q => q.FetchAsync(pkh, 1, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new System.Collections.Generic.List<(Guid, QueuedPayloadBytes)> { (ackId, QueuedPayloadBytes.FromBytesOwned(blob)) });
-        directSessions.Setup(d => d.GetByRemotePeerIdAsync(networkPeerId, active.Identity!.SelfIdentityId.Value))
+        directSessions.Setup(d => d.GetByRemotePeerIdAsync(networkPeerId, new NetworkSelfId(active.Identity!.SelfIdentityId.Value)))
             .ReturnsAsync(new DirectSession(networkPeerId, directSessionId));
         secureSvc.Setup(s => s.EncryptAsync(sessionId, It.IsAny<Plaintext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(SessionRatchetMessage.FromBytes(new byte[] { 0xAA }));
@@ -78,7 +78,7 @@ public class RelayOrchestratorTests
 
         // DR decrypt of ack payload via SecureMessagingService yields RelayOpaqueResponse with same ack id
         var ack = new RelayOpaqueResponse { Version = 1, MessageAckId = ByteString.CopyFrom(ackId.ToByteArray()) };
-        secureSvc.Setup(s => s.DecryptInboundAsync(selfId.Value, It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
+        secureSvc.Setup(s => s.DecryptInboundAsync(new CryptoSelfId(selfId.Value), It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((sessionId, Plaintext.FromBytes(ack.ToByteArray())));
 
         queue.Setup(q => q.DeleteByAckIdAsync(ackId, It.IsAny<CancellationToken>()))
@@ -116,7 +116,7 @@ public class RelayOrchestratorTests
 
         queue.Setup(q => q.FetchAsync(pkh, 1, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new System.Collections.Generic.List<(Guid, QueuedPayloadBytes)> { (ackId, QueuedPayloadBytes.FromBytesOwned(blob)) });
-        directSessions.Setup(d => d.GetByRemotePeerIdAsync(networkPeerId, active.Identity!.SelfIdentityId.Value))
+        directSessions.Setup(d => d.GetByRemotePeerIdAsync(networkPeerId, new NetworkSelfId(active.Identity!.SelfIdentityId.Value)))
             .ReturnsAsync(new DirectSession(networkPeerId, directSessionId));
         secureSvc.Setup(s => s.EncryptAsync(sessionId, It.IsAny<Plaintext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(SessionRatchetMessage.FromBytes(new byte[] { 0xAA }));
@@ -132,7 +132,7 @@ public class RelayOrchestratorTests
             .ReturnsAsync(new SendMessageResponse { OriginalResponse = response });
 
         var mismatched = new RelayOpaqueResponse { Version = 1, MessageAckId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray()) };
-        secureSvc.Setup(s => s.DecryptInboundAsync(selfId.Value, It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
+        secureSvc.Setup(s => s.DecryptInboundAsync(new CryptoSelfId(selfId.Value), It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((sessionId, Plaintext.FromBytes(mismatched.ToByteArray())));
 
         var orchestratorWithQueries = new RelayOrchestrator(
@@ -167,7 +167,7 @@ public class RelayOrchestratorTests
 
         queue.Setup(q => q.FetchAsync(pkh, 1, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new System.Collections.Generic.List<(Guid, QueuedPayloadBytes)> { (ackId, QueuedPayloadBytes.FromBytesOwned(blob)) });
-        directSessions.Setup(d => d.GetByRemotePeerIdAsync(networkPeerId, active.Identity!.SelfIdentityId.Value))
+        directSessions.Setup(d => d.GetByRemotePeerIdAsync(networkPeerId, new NetworkSelfId(active.Identity!.SelfIdentityId.Value)))
             .ReturnsAsync(new DirectSession(networkPeerId, directSessionId));
         secureSvc.Setup(s => s.EncryptAsync(It.IsAny<SessionId>(), It.IsAny<Plaintext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(SessionRatchetMessage.FromBytes(new byte[] { 0xAA }));
@@ -231,7 +231,7 @@ public class RelayOrchestratorTests
 
         queue.Setup(q => q.FetchAsync(pkh, 1, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new System.Collections.Generic.List<(Guid, QueuedPayloadBytes)> { (ackId, QueuedPayloadBytes.FromBytesOwned(blob)) });
-        directSessions.Setup(d => d.GetByRemotePeerIdAsync(networkPeerId, active.Identity!.SelfIdentityId.Value))
+        directSessions.Setup(d => d.GetByRemotePeerIdAsync(networkPeerId, new NetworkSelfId(active.Identity!.SelfIdentityId.Value)))
             .ReturnsAsync((DirectSession?)null);
 
         var orchestratorWithQueries = new RelayOrchestrator(
