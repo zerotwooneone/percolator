@@ -792,6 +792,44 @@ Implementation Requirements:
 * Ensure that the egress path (e.g., `SendGroupMessageCommandHandler`) attempts to get the certificate using `await _certificateStore.GetCertificateAsync(group.SelfId, group.RelayPeerId, ct)`.
 * If the certificate is null or expired, explicitly `await _certificateOrchestrator.RefreshLocalCertificateAsync(group.SelfId, group.RelayPeerId, ct)` before constructing the TLS headers and dispatching the payload.
 
+---
+## Chunk 5.7 - BitConverter Usage Review and Solutions
+
+**Context:**
+SelfIdentities are different identities for the local user of the application, and each has a PublicIdentityId (Guid). Peers are remote connections to which we can connect, and each peer has a PublicIdentityId. We never share PeerId over the wire because it is not a global identifier. We use PublicIdentityId as a global identifier for who someone is. At the perimeter of our application, we need to lookup both which SelfIds and which PeerIds map to the given PublicIdentityIds.
+
+**BitConverter Usage Locations and Solutions:**
+
+**1. `Percolator.Infrastructure.Persistence.SqliteRelayMessagePublisher.cs` (Line 47)**
+- **Current Code:** `RecipientPkh = Pkh.FromBytes(BitConverter.GetBytes(peerId.Value).Concat(new byte[28]).ToArray())`
+- **Problem:** Converting PeerId (uint) to PKH bytes is incorrect. PKH should be derived from the actual cryptographic public key hash, not from the local database surrogate key PeerId.
+- **Solution:** The message queue should use the actual PKH of the recipient's public key, not derive it from PeerId. The caller should provide the PKH directly, or we need to look up the peer's PKH from the PeerIdentityDbo table using the PeerId.
+
+**2. `Percolator.ApplicationTests.Chat.MessageQueue.FetchQueuedMessagesHandlerTests.cs` (Lines 23, 47, 69)**
+- **Current Code:** Test code converting peerId.Value to PKH bytes using BitConverter
+- **Problem:** Same as above - incorrectly deriving PKH from PeerId for test setup
+- **Solution:** Update tests to use actual PKH values (mocked or from test data) instead of deriving from PeerId
+
+**3. `Percolator.Infrastructure.Cryptography.SenderKeyCryptographyService.cs` (Lines 87, 131, 153, 167, 180, 193)**
+- **Current Code:** Converting Guid to uint for PeerId with comment "design mismatch between SignalCrypto (Guid) and cryptography primitives (uint)"
+- **Problem:** Signal Protocol library expects UUIDs but local crypto layer uses uint PeerId
+- **Solution:** This is a legitimate conversion between domain representations. The Signal Protocol uses UUIDs for addressing, while our local database uses uint surrogate keys. The conversion is: when calling Signal Protocol, pass the SelfIdentity's PublicIdentityId (Guid) as the UUID. When receiving results, map back to local PeerId/SelfId via lookup tables. This is NOT a BitConverter conversion issue - it's a domain mapping issue.
+
+**4. `Percolator.Infrastructure.Chat.ChatConversationResolver.cs` (Lines 64, 80, 143, 158)**
+- **Current Code:** `BitConverter.ToUInt32(selfIdentity.PublicIdentityId.ToByteArray(), 0)` to convert PublicIdentityId (Guid) to uint for ParticipantId
+- **Problem:** INCORRECT. PublicIdentityId is a global UUID identifier and cannot be converted to a local uint PeerId. The participant ID should be the SelfIdentity.Id (uint) for local identities, not derived from PublicIdentityId.
+- **Solution:** Use `selfIdentity.Id` (which is uint) directly for the local participant. For remote peers, use the PeerId from the peer identity table. The lookup flow should be: PublicIdentityId → lookup in PeerIdentityDbo or SelfIdentityDbo → get the local uint ID (PeerId or SelfId) → use that as the participant ID.
+
+**5. `Percolator.Network.PeerDiscoveryService.cs` (Line 169)**
+- **Current Code:** `BitConverter.ToString(publicKeyHash.ToArray())` for logging
+- **Problem:** None - this is just converting byte array to hex string for logging purposes
+- **Solution:** No change needed - this is legitimate BitConverter usage for display/logging
+
+**Summary of Required Changes:**
+- **ChatConversationResolver.cs**: Replace BitConverter.ToUInt32(selfIdentity.PublicIdentityId.ToByteArray(), 0) with selfIdentity.Id (uint)
+- **SqliteRelayMessagePublisher.cs**: Change to accept actual PKH instead of deriving from PeerId, or add PKH lookup
+- **FetchQueuedMessagesHandlerTests.cs**: Update test setup to use actual PKH values
+- **SenderKeyCryptographyService.cs**: Review whether the Guid→uint conversion is actually needed or if we should be passing the SelfIdentity's PublicIdentityId directly to Signal Protocol
 
 ---
 ## Chunk 6

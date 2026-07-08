@@ -83,10 +83,12 @@ public sealed class PeerIdentityQueries : IPeerIdentityQueries
     {
         using var db = _dbFactory.CreateDbContext();
 
-        return await db.PeerIdentities
+        var publicIdentityId = await db.PeerIdentities
             .AsNoTracking()
             .Where(pid => pid.PeerId == senderPeerId.Value)
             .Select(pid=>pid.PublicIdentityId)
             .FirstOrDefaultAsync();
+
+        return publicIdentityId == Guid.Empty ? null : new PublicIdentityId(publicIdentityId);
     }
 }

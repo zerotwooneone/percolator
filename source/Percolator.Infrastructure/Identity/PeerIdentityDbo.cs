@@ -8,7 +8,7 @@ public sealed class PeerIdentityDbo
     [Key]
     public uint PeerId { get; set; }
     [Required]
-    public PublicIdentityId PublicIdentityId { get; set; }
+    public Guid PublicIdentityId { get; set; }
     [Required]
     public string Name { get; set; } = string.Empty;
     public int Version { get; set; }

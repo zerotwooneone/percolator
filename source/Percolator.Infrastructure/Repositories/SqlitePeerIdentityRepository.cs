@@ -17,7 +17,7 @@ public sealed class SqlitePeerIdentityRepository : IPeerIdentityRepository
             .FirstOrDefaultAsync(p => p.PeerId == id.Value, ct);
         if (row == null) return null;
 
-        var aggregate = new PeerIdentity(id, row.PublicIdentityId);
+        var aggregate = new PeerIdentity(id, new PublicIdentityId(row.PublicIdentityId));
         if (!string.IsNullOrWhiteSpace(row.Name))
             aggregate.SetDisplayName(row.Name);
         aggregate.SetVersionFromPersistence(row.Version);
@@ -40,7 +40,7 @@ public sealed class SqlitePeerIdentityRepository : IPeerIdentityRepository
     public async Task<PeerIdentity?> GetByPublicIdentityIdAsync(PublicIdentityId publicIdentityId, CancellationToken ct = default)
     {
         var row = await _db.PeerIdentities.AsNoTracking()
-            .FirstOrDefaultAsync(p => p.PublicIdentityId == publicIdentityId, ct);
+            .FirstOrDefaultAsync(p => p.PublicIdentityId == publicIdentityId.Value, ct);
         if (row == null) return null;
         return await GetByIdAsync(new PeerId(row.PeerId), ct);
     }
@@ -56,7 +56,7 @@ public sealed class SqlitePeerIdentityRepository : IPeerIdentityRepository
         var now = DateTimeOffset.UtcNow;
         var insert = new PeerIdentityDbo
         {
-            PublicIdentityId = publicIdentityId,
+            PublicIdentityId = publicIdentityId.Value,
             Name = publicIdentityId.ToString(),
             Version = 1,
             CreatedAtUtc = now,
@@ -91,7 +91,7 @@ public sealed class SqlitePeerIdentityRepository : IPeerIdentityRepository
             var insert = new PeerIdentityDbo
             {
                 PeerId = peer.Id.Value,
-                PublicIdentityId = peer.PublicIdentityId,
+                PublicIdentityId = peer.PublicIdentityId.Value,
                 Name = peer.DisplayName?.Value ?? string.Empty,
                 Version = 1,
                 CreatedAtUtc = now,

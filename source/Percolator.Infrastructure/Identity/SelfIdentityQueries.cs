@@ -52,7 +52,7 @@ public sealed class SelfIdentityQueries : ISelfIdentityQueries
             return null;
 
         var pkh = IdentityPublicKeyHash.FromBytesOwned(identity.ActiveIdentityKeyFingerprint!);
-        return (pkh, identity.PublicIdentityId);
+        return (pkh, new PublicIdentityId(identity.PublicIdentityId));
     }
     public async Task<PublicIdentityId?> GetSelfIdentityPublicKeyAsync(SelfId selfIdentityId, CancellationToken ct)
     {
@@ -65,6 +65,6 @@ public sealed class SelfIdentityQueries : ISelfIdentityQueries
         if (identity is null)
             return null;
 
-        return identity.PublicIdentityId;
+        return new PublicIdentityId(identity.PublicIdentityId);
     }
 }
