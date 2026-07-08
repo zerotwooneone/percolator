@@ -24,7 +24,7 @@ public class SqliteSessionRepositoryTests
             ctx.SelfIdentities.Add(new SelfIdentityDbo 
             { 
                 Id = 1, 
-                PublicIdentityId = new PublicIdentityId(Guid.NewGuid()), 
+                PublicIdentityId = Guid.NewGuid(), 
                 Name = "default", 
                 DeviceId = new DeviceId(1), 
                 ListeningPort = new Percolator.Identity.Model.ListeningPort(5000), 
@@ -131,7 +131,7 @@ public class SqliteSessionRepositoryTests
                 ctxSeed.SelfIdentities.Add(new SelfIdentityDbo 
                 { 
                     Id = 1, 
-                    PublicIdentityId = new PublicIdentityId(Guid.NewGuid()), 
+                    PublicIdentityId = Guid.NewGuid(), 
                     Name = "one", 
                     DeviceId = new DeviceId(1), 
                     ListeningPort = new Percolator.Identity.Model.ListeningPort(5000), 
@@ -140,7 +140,7 @@ public class SqliteSessionRepositoryTests
                 ctxSeed.SelfIdentities.Add(new SelfIdentityDbo 
                 { 
                     Id = 2, 
-                    PublicIdentityId = new PublicIdentityId(Guid.NewGuid()), 
+                    PublicIdentityId = Guid.NewGuid(), 
                     Name = "two", 
                     DeviceId = new DeviceId(1), 
                     ListeningPort = new Percolator.Identity.Model.ListeningPort(5000), 

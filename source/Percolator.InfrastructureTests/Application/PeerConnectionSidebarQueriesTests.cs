@@ -55,7 +55,7 @@ public sealed class PeerConnectionSidebarQueriesTests : IDisposable
         _db.PeerIdentities.Add(new PeerIdentityDbo
         {
             PeerId = peerId.Value,
-            PublicIdentityId = new PublicIdentityId(Guid.NewGuid()),
+            PublicIdentityId = Guid.NewGuid(),
             Name = "Test Peer",
             Version = 1,
             CreatedAtUtc = _now,
@@ -101,7 +101,7 @@ public sealed class PeerConnectionSidebarQueriesTests : IDisposable
         _db.PeerIdentities.Add(new PeerIdentityDbo
         {
             PeerId = peerId.Value,
-            PublicIdentityId = new PublicIdentityId(Guid.NewGuid()),
+            PublicIdentityId = Guid.NewGuid(),
             Name = "Test Peer",
             Version = 1,
             CreatedAtUtc = _now,
@@ -211,7 +211,7 @@ public sealed class PeerConnectionSidebarQueriesTests : IDisposable
         _db.PeerIdentities.Add(new PeerIdentityDbo
         {
             PeerId = peerId.Value,
-            PublicIdentityId = new PublicIdentityId(Guid.NewGuid()),
+            PublicIdentityId = Guid.NewGuid(),
             Name = "Test Peer",
             Version = 1,
             CreatedAtUtc = _now,
@@ -290,7 +290,7 @@ public sealed class PeerConnectionSidebarQueriesTests : IDisposable
         _db.PeerIdentities.Add(new PeerIdentityDbo
         {
             PeerId = peerId1.Value,
-            PublicIdentityId = new PublicIdentityId(Guid.NewGuid()),
+            PublicIdentityId = Guid.NewGuid(),
             Name = "Peer 1",
             Version = 1,
             CreatedAtUtc = _now,
@@ -300,7 +300,7 @@ public sealed class PeerConnectionSidebarQueriesTests : IDisposable
         _db.PeerIdentities.Add(new PeerIdentityDbo
         {
             PeerId = peerId2.Value,
-            PublicIdentityId = new PublicIdentityId(Guid.NewGuid()),
+            PublicIdentityId = Guid.NewGuid(),
             Name = "Peer 2",
             Version = 1,
             CreatedAtUtc = _now,

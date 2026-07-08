@@ -49,7 +49,7 @@ public sealed class SentInvitationPurgeServiceTests
         ctx.SelfIdentities.Add(new SelfIdentityDbo 
         { 
             Id = 1, 
-            PublicIdentityId = new PublicIdentityId(Guid.NewGuid()), 
+            PublicIdentityId = Guid.NewGuid(), 
             Name = "test",
             DeviceId = new Percolator.Identity.DeviceId(1),
             ListeningPort = new Percolator.Identity.Model.ListeningPort(5000),

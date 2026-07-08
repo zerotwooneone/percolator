@@ -47,7 +47,7 @@ public sealed class PendingHandshakeQueriesTests
             ctx.SelfIdentities.Add(new SelfIdentityDbo 
             { 
                 Id = 1, 
-                PublicIdentityId = new PublicIdentityId(Guid.NewGuid()), 
+                PublicIdentityId = Guid.NewGuid(), 
                 Name = "default", 
                 DeviceId = new Percolator.Identity.DeviceId(1), 
                 ListeningPort = new Percolator.Identity.Model.ListeningPort(5000), 
@@ -135,7 +135,7 @@ public sealed class PendingHandshakeQueriesTests
             ctx.SelfIdentities.Add(new SelfIdentityDbo 
             { 
                 Id = 1, 
-                PublicIdentityId = new PublicIdentityId(Guid.NewGuid()), 
+                PublicIdentityId = Guid.NewGuid(), 
                 Name = "default", 
                 DeviceId = new Percolator.Identity.DeviceId(1), 
                 ListeningPort = new Percolator.Identity.Model.ListeningPort(5000), 
@@ -153,7 +153,7 @@ public sealed class PendingHandshakeQueriesTests
         ctx.PeerIdentities.Add(new PeerIdentityDbo
         {
             PeerId = relayPeerId.Value,
-            PublicIdentityId = new PublicIdentityId(Guid.NewGuid()),
+            PublicIdentityId = Guid.NewGuid(),
             Name = "RelayHost",
             Version = 1,
             CreatedAtUtc = clock.UtcNow,

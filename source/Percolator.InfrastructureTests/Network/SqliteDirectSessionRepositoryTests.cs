@@ -28,7 +28,7 @@ public class SqliteDirectSessionRepositoryTests
         // Seed default SelfIdentity required by repository scoping
         if (!ctx.SelfIdentities.Any())
         {
-            ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = 1, PublicIdentityId = new PublicIdentityId(Guid.NewGuid()), Name = "default", DeviceId = new DeviceId(1), ListeningPort = new Percolator.Identity.Model.ListeningPort(5000), LastUsedUtc = DateTimeOffset.UtcNow });
+            ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = 1, PublicIdentityId = Guid.NewGuid(), Name = "default", DeviceId = new DeviceId(1), ListeningPort = new Percolator.Identity.Model.ListeningPort(5000), LastUsedUtc = DateTimeOffset.UtcNow });
             ctx.SaveChanges();
         }
         return ctx;
@@ -72,8 +72,8 @@ public class SqliteDirectSessionRepositoryTests
         var peerB = new Percolator.Network.PeerId(67890);
         var fixedTime = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero);
 
-        ctx.PeerIdentities.Add(new PeerIdentityDbo { PeerId = peerA.Value, PublicIdentityId = new PublicIdentityId(Guid.NewGuid()), Name = "peer-a", Version = 0, CreatedAtUtc = fixedTime, UpdatedAtUtc = fixedTime });
-        ctx.PeerIdentities.Add(new PeerIdentityDbo { PeerId = peerB.Value, PublicIdentityId = new PublicIdentityId(Guid.NewGuid()), Name = "peer-b", Version = 0, CreatedAtUtc = fixedTime, UpdatedAtUtc = fixedTime });
+        ctx.PeerIdentities.Add(new PeerIdentityDbo { PeerId = peerA.Value, PublicIdentityId = Guid.NewGuid(), Name = "peer-a", Version = 0, CreatedAtUtc = fixedTime, UpdatedAtUtc = fixedTime });
+        ctx.PeerIdentities.Add(new PeerIdentityDbo { PeerId = peerB.Value, PublicIdentityId = Guid.NewGuid(), Name = "peer-b", Version = 0, CreatedAtUtc = fixedTime, UpdatedAtUtc = fixedTime });
         await ctx.SaveChangesAsync();
 
         // Seed identity rows only; DirectSession repo doesn't require PeerConnection rows
@@ -96,7 +96,7 @@ public class SqliteDirectSessionRepositoryTests
         // Ensure Peer and PeerConnection exist for FK
         var peerId = new Percolator.Network.PeerId(54321);
         var fixedTime = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero);
-        ctx.PeerIdentities.Add(new PeerIdentityDbo { PeerId = peerId.Value, PublicIdentityId = new PublicIdentityId(Guid.NewGuid()), Name = "peer-a", Version = 0, CreatedAtUtc = fixedTime, UpdatedAtUtc = fixedTime });
+        ctx.PeerIdentities.Add(new PeerIdentityDbo { PeerId = peerId.Value, PublicIdentityId = Guid.NewGuid(), Name = "peer-a", Version = 0, CreatedAtUtc = fixedTime, UpdatedAtUtc = fixedTime });
         await ctx.SaveChangesAsync();
         return (ctx, dsr, peerId);
     }
