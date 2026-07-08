@@ -44,7 +44,7 @@ public sealed class SqlitePendingGroupInvitationQueries : IPendingGroupInvitatio
             dtos.Add(new PendingGroupInvitationDto
             {
                 ConversationId = invitation.ConversationId,
-                InviterPeerId = invitation.InviterPeerId,
+                InviterPeerId = new Percolator.Chat.GroupMembership.ChatPeerId(invitation.InviterPeerId),
                 CreatorIdentityKey = invitation.CreatorIdentityKey,
                 InitialMembers = initialMembers,
                 GroupName = invitation.GroupName,

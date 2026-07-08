@@ -99,7 +99,7 @@ public sealed class OutboxDispatcherWorker : BackgroundService
                     return;
                 }
 
-                await DispatchEventAsync(domainEvent, outboxItem.DestinationPeerId, outboxItem, ct);
+                await DispatchEventAsync(domainEvent, new Percolator.Identity.PeerId(outboxItem.DestinationPeerId), outboxItem, ct);
 
                 // Success - mark as processed
                 MarkAsProcessed(outboxItem);

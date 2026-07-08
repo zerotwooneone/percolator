@@ -25,7 +25,7 @@ public class SqlitePeerPublicSigningKeyStore : IPeerPublicSigningKeyStore
                 .FirstOrDefaultAsync(ct);
             if (anyByHash is not null)
             {
-                if (anyByHash.PeerId == peerId)
+                if (anyByHash.PeerId == peerId.Value)
                 {
                     // Same peer: ensure it's active
                     if (anyByHash.ExpiredAtUtc is null)
@@ -51,7 +51,7 @@ public class SqlitePeerPublicSigningKeyStore : IPeerPublicSigningKeyStore
             // SQLite provider cannot translate ORDER BY over DateTimeOffset here reliably.
             // Materialize then order in-memory to get the latest active row.
             var activeRows = await _db.PeerPublicSigningKeys
-                .Where(x => x.PeerId == peerId && x.ExpiredAtUtc == null)
+                .Where(x => x.PeerId == peerId.Value && x.ExpiredAtUtc == null)
                 .AsNoTracking()
                 .ToListAsync(ct);
             var active = activeRows
@@ -75,7 +75,7 @@ public class SqlitePeerPublicSigningKeyStore : IPeerPublicSigningKeyStore
 
             var dbo = new PeerPublicSigningKeyDbo
             {
-                PeerId = peerId,
+                PeerId = peerId.Value,
                 PublicKey = publicKeySpki,
                 PublicKeyHash = publicKeyHashBytes,
                 ActiveAtUtc = nowUtc,
@@ -98,14 +98,14 @@ public class SqlitePeerPublicSigningKeyStore : IPeerPublicSigningKeyStore
         var row = await _db.PeerPublicSigningKeys
             .AsNoTracking()
             .FirstOrDefaultAsync(x => x.PublicKeyHash.SequenceEqual(publicKeyHashBytes), ct);
-        return row is null ? null : row.PeerId;
+        return row is null ? null : new PeerId(row.PeerId);
     }
 
     public async Task<IdentityPublicKeyHash?> GetPublicKeyHashByPeerIdAsync(PeerId peerId, CancellationToken ct = default)
     {
         // Materialize then order to ensure we pick the most recent active key
         var activeRows = await _db.PeerPublicSigningKeys
-            .Where(x => x.PeerId == peerId && x.ExpiredAtUtc == null)
+            .Where(x => x.PeerId == peerId.Value && x.ExpiredAtUtc == null)
             .AsNoTracking()
             .ToListAsync(ct);
         var latest = activeRows

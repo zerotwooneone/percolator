@@ -17,14 +17,15 @@ public sealed class SqlitePeerRouteCandidateRepository : IPeerRouteCandidateRepo
 
     public async Task UpsertAsync(PeerRouteCandidate candidate, CancellationToken cancellationToken = default)
     {
+        var candidateRelayHostPeerId = candidate.RelayHostPeerId?.Value;
         var existing = await _db.PeerRouteCandidates
             .FirstOrDefaultAsync(c =>
                 c.SelfIdentityId == candidate.SelfIdentityId &&
-                c.RemotePeerId.Value == candidate.RemotePeerId.Value &&
+                c.RemotePeerId == candidate.RemotePeerId.Value &&
                 c.RouteKind == (int)candidate.RouteKind &&
                 c.EndpointHost == candidate.EndpointHost &&
                 c.EndpointPort == candidate.EndpointPort &&
-                c.RelayHostPeerId == candidate.RelayHostPeerId,
+                c.RelayHostPeerId == candidateRelayHostPeerId,
                 cancellationToken);
 
         if (existing is null)
@@ -32,11 +33,11 @@ public sealed class SqlitePeerRouteCandidateRepository : IPeerRouteCandidateRepo
             var dbo = new PeerRouteCandidateDbo
             {
                 SelfIdentityId = candidate.SelfIdentityId,
-                RemotePeerId = new PeerId(candidate.RemotePeerId.Value),
+                RemotePeerId = candidate.RemotePeerId.Value,
                 RouteKind = (int)candidate.RouteKind,
                 EndpointHost = candidate.EndpointHost,
                 EndpointPort = candidate.EndpointPort,
-                RelayHostPeerId = candidate.RelayHostPeerId,
+                RelayHostPeerId = candidate.RelayHostPeerId?.Value,
                 ObservedAtUtc = candidate.ObservedAtUtc,
                 LastAttemptAtUtc = candidate.LastAttemptAtUtc,
                 LastSuccessAtUtc = candidate.LastSuccessAtUtc,
@@ -61,7 +62,7 @@ public sealed class SqlitePeerRouteCandidateRepository : IPeerRouteCandidateRepo
     {
         var dbos = await _db.PeerRouteCandidates
             .AsNoTracking()
-            .Where(c => c.SelfIdentityId == selfIdentityId && c.RemotePeerId.Value == remotePeerId.Value)
+            .Where(c => c.SelfIdentityId == selfIdentityId && c.RemotePeerId == remotePeerId.Value)
             .ToListAsync(cancellationToken);
 
         return dbos.Select(MapToDomain).ToList();
@@ -106,11 +107,11 @@ public sealed class SqlitePeerRouteCandidateRepository : IPeerRouteCandidateRepo
         {
             Id = dbo.Id,
             SelfIdentityId = dbo.SelfIdentityId,
-            RemotePeerId = new Percolator.Network.PeerId(dbo.RemotePeerId.Value),
+            RemotePeerId = new Percolator.Network.PeerId(dbo.RemotePeerId),
             RouteKind = (RouteKind)dbo.RouteKind,
             EndpointHost = dbo.EndpointHost,
             EndpointPort = dbo.EndpointPort,
-            RelayHostPeerId = dbo.RelayHostPeerId,
+            RelayHostPeerId = dbo.RelayHostPeerId.HasValue ? new Percolator.Network.PeerId(dbo.RelayHostPeerId.Value) : null,
             ObservedAtUtc = dbo.ObservedAtUtc,
             LastAttemptAtUtc = dbo.LastAttemptAtUtc,
             LastSuccessAtUtc = dbo.LastSuccessAtUtc,

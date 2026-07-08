@@ -22,7 +22,7 @@ public class DeliveryCertificateDbo
     /// <summary>
     /// The relay peer ID that issued this certificate.
     /// </summary>
-    public ChatPeerId RelayPeerId { get; set; }
+    public uint RelayPeerId { get; set; }
 
     /// <summary>
     /// The certificate payload bytes.

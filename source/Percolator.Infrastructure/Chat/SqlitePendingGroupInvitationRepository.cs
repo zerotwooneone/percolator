@@ -26,7 +26,7 @@ public sealed class SqlitePendingGroupInvitationRepository : IPendingGroupInvita
         {
             Id = invitation.Id,
             ConversationId = invitation.ConversationId,
-            InviterPeerId = invitation.InviterPeerId,
+            InviterPeerId = invitation.InviterPeerId.Value,
             CreatorIdentityKey = invitation.CreatorIdentityKey,
             InitialMembersJson = initialMembersJson,
             GroupName = invitation.GroupName,
@@ -69,7 +69,7 @@ public sealed class SqlitePendingGroupInvitationRepository : IPendingGroupInvita
         return new PendingGroupInvitation(
             dbo.Id,
             dbo.ConversationId,
-            dbo.InviterPeerId,
+            new ChatPeerId(dbo.InviterPeerId),
             dbo.CreatorIdentityKey,
             initialMembers,
             dbo.GroupName,

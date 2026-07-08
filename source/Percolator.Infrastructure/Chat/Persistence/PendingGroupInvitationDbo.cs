@@ -21,7 +21,7 @@ public class PendingGroupInvitationDbo
     /// <summary>
     /// The peer ID of the inviter.
     /// </summary>
-    public ChatPeerId InviterPeerId { get; set; }
+    public uint InviterPeerId { get; set; }
 
     /// <summary>
     /// The creator's identity key (SPKI bytes).

@@ -8,7 +8,7 @@ public class PeerPublicSigningKeyDbo
     public int Id { get; set; }
 
     [Required]
-    public PeerId PeerId { get; set; }
+    public uint PeerId { get; set; }
 
     [Required]
     public byte[] PublicKey { get; set; } = null!; // SPKI bytes

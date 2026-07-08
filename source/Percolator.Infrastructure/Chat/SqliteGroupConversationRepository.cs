@@ -197,7 +197,7 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
                 Id = Guid.NewGuid(),
                 EventType = eventType,
                 PayloadJson = payloadJson,
-                DestinationPeerId = destinationPeerId,
+                DestinationPeerId = destinationPeerId.Value,
                 ProcessedAtUtc = null
             };
             _db.RelayOutbox.Add(outboxItem);

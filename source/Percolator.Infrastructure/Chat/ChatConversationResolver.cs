@@ -133,7 +133,7 @@ public sealed class ChatConversationResolver : IDirectConversationResolver
                 .Include(c => c.Participants)
                 .Where(c => c.SelfIdentityId == selfIdentity.Id)
                 .Where(c => c.Kind == Percolator.Infrastructure.Persistence.ConversationKind.Direct)
-                .Where(c => c.Participants.Any(p => p.ParticipantId == remoteKey.PeerId.Value))
+                .Where(c => c.Participants.Any(p => p.ParticipantId == remoteKey.PeerId))
                 .FirstOrDefaultAsync(cancellationToken);
 
             if (convo is null)
@@ -148,7 +148,7 @@ public sealed class ChatConversationResolver : IDirectConversationResolver
                     Kind = Percolator.Infrastructure.Persistence.ConversationKind.Direct
                 };
 
-                var p1 = new ConversationParticipantDbo { ConversationId = convo.Id, ParticipantId = remoteKey.PeerId.Value };
+                var p1 = new ConversationParticipantDbo { ConversationId = convo.Id, ParticipantId = remoteKey.PeerId };
                 convo.Participants.Add(p1);
 
                 _db.Conversations.Add(convo);
