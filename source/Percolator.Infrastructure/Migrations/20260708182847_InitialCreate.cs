@@ -12,6 +12,23 @@ namespace Percolator.Infrastructure.Migrations
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.CreateTable(
+                name: "DeliveryCertificates",
+                columns: table => new
+                {
+                    Id = table.Column<int>(type: "INTEGER", nullable: false)
+                        .Annotation("Sqlite:Autoincrement", true),
+                    SelfId = table.Column<uint>(type: "INTEGER", nullable: false),
+                    RelayPeerId = table.Column<uint>(type: "INTEGER", nullable: false),
+                    Payload = table.Column<byte[]>(type: "BLOB", nullable: false),
+                    Signature = table.Column<byte[]>(type: "BLOB", nullable: false),
+                    ExpiresAtUtc = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_DeliveryCertificates", x => x.Id);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "DhtNodes",
                 columns: table => new
                 {
@@ -28,7 +45,7 @@ namespace Percolator.Infrastructure.Migrations
                 name: "DirectSessionConversations",
                 columns: table => new
                 {
-                    SelfIdentityId = table.Column<int>(type: "INTEGER", nullable: false),
+                    SelfIdentityId = table.Column<uint>(type: "INTEGER", nullable: false),
                     DirectSessionId = table.Column<Guid>(type: "TEXT", nullable: false),
                     ConversationId = table.Column<Guid>(type: "TEXT", nullable: false)
                 },
@@ -47,7 +64,7 @@ namespace Percolator.Infrastructure.Migrations
                     LastSeenUtc = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
                     Source = table.Column<int>(type: "INTEGER", nullable: false),
                     Confidence = table.Column<double>(type: "REAL", nullable: false),
-                    BoundPeerId = table.Column<Guid>(type: "TEXT", nullable: true)
+                    BoundPeerId = table.Column<uint>(type: "INTEGER", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -60,7 +77,7 @@ namespace Percolator.Infrastructure.Migrations
                 {
                     Id = table.Column<Guid>(type: "TEXT", nullable: false),
                     AckId = table.Column<Guid>(type: "TEXT", nullable: false),
-                    RecipientPeerId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    RecipientPkh = table.Column<byte[]>(type: "BLOB", nullable: false),
                     Blob = table.Column<byte[]>(type: "BLOB", nullable: false),
                     EnqueuedAtUtc = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
                 },
@@ -73,11 +90,16 @@ namespace Percolator.Infrastructure.Migrations
                 name: "PeerIdentities",
                 columns: table => new
                 {
-                    PeerId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    PeerId = table.Column<uint>(type: "INTEGER", nullable: false)
+                        .Annotation("Sqlite:Autoincrement", true),
+                    PublicIdentityId = table.Column<Guid>(type: "TEXT", nullable: false),
                     Name = table.Column<string>(type: "TEXT", nullable: false),
                     Version = table.Column<int>(type: "INTEGER", nullable: false),
                     CreatedAtUtc = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
-                    UpdatedAtUtc = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
+                    UpdatedAtUtc = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
+                    PrimaryDeviceId = table.Column<uint>(type: "INTEGER", nullable: false),
+                    ProfileKey = table.Column<byte[]>(type: "BLOB", nullable: true),
+                    LastKnownProfileRevision = table.Column<int>(type: "INTEGER", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -90,7 +112,7 @@ namespace Percolator.Infrastructure.Migrations
                 {
                     Id = table.Column<int>(type: "INTEGER", nullable: false)
                         .Annotation("Sqlite:Autoincrement", true),
-                    PeerId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    PeerId = table.Column<uint>(type: "INTEGER", nullable: false),
                     PublicKey = table.Column<byte[]>(type: "BLOB", nullable: false),
                     PublicKeyHash = table.Column<byte[]>(type: "BLOB", nullable: false),
                     ActiveAtUtc = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
@@ -107,12 +129,12 @@ namespace Percolator.Infrastructure.Migrations
                 {
                     Id = table.Column<long>(type: "INTEGER", nullable: false)
                         .Annotation("Sqlite:Autoincrement", true),
-                    SelfIdentityId = table.Column<int>(type: "INTEGER", nullable: false),
-                    RemotePeerId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    SelfIdentityId = table.Column<uint>(type: "INTEGER", nullable: false),
+                    RemotePeerId = table.Column<uint>(type: "INTEGER", nullable: false),
                     RouteKind = table.Column<int>(type: "INTEGER", nullable: false),
                     EndpointHost = table.Column<string>(type: "TEXT", nullable: true),
                     EndpointPort = table.Column<int>(type: "INTEGER", nullable: true),
-                    RelayHostPeerId = table.Column<Guid>(type: "TEXT", nullable: true),
+                    RelayHostPeerId = table.Column<uint>(type: "INTEGER", nullable: true),
                     ObservedAtUtc = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
                     LastAttemptAtUtc = table.Column<DateTimeOffset>(type: "TEXT", nullable: true),
                     LastSuccessAtUtc = table.Column<DateTimeOffset>(type: "TEXT", nullable: true),
@@ -129,7 +151,7 @@ namespace Percolator.Infrastructure.Migrations
                 name: "PeerRoutingProfiles",
                 columns: table => new
                 {
-                    PeerId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    PeerId = table.Column<uint>(type: "INTEGER", nullable: false),
                     DirectMessagePublicKey = table.Column<byte[]>(type: "BLOB", nullable: true),
                     ReachabilityStatus = table.Column<int>(type: "INTEGER", nullable: false),
                     ReachabilityLastChangeUtc = table.Column<DateTimeOffset>(type: "TEXT", nullable: true)
@@ -145,7 +167,7 @@ namespace Percolator.Infrastructure.Migrations
                 {
                     Id = table.Column<Guid>(type: "TEXT", nullable: false),
                     ConversationId = table.Column<Guid>(type: "TEXT", nullable: false),
-                    InviterPeerId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    InviterPeerId = table.Column<uint>(type: "INTEGER", nullable: false),
                     CreatorIdentityKey = table.Column<byte[]>(type: "BLOB", nullable: false),
                     InitialMembersJson = table.Column<string>(type: "TEXT", nullable: false),
                     GroupName = table.Column<string>(type: "TEXT", nullable: true),
@@ -162,13 +184,13 @@ namespace Percolator.Infrastructure.Migrations
                 columns: table => new
                 {
                     Id = table.Column<Guid>(type: "TEXT", nullable: false),
-                    SelfIdentityId = table.Column<int>(type: "INTEGER", nullable: false),
-                    RemotePeerId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    SelfIdentityId = table.Column<uint>(type: "INTEGER", nullable: false),
+                    RemotePeerId = table.Column<uint>(type: "INTEGER", nullable: false),
                     ProtocolVersion = table.Column<int>(type: "INTEGER", nullable: false),
                     Invitation = table.Column<byte[]>(type: "BLOB", nullable: false),
                     RequestCorrelationId = table.Column<string>(type: "TEXT", nullable: true),
                     IsRelayed = table.Column<bool>(type: "INTEGER", nullable: false),
-                    RelayHostPeerId = table.Column<Guid>(type: "TEXT", nullable: true),
+                    RelayHostPeerId = table.Column<uint>(type: "INTEGER", nullable: true),
                     InviterIdentityKey = table.Column<byte[]>(type: "BLOB", nullable: true),
                     CallbackEndpointHost = table.Column<string>(type: "TEXT", nullable: true),
                     CallbackEndpointPort = table.Column<int>(type: "INTEGER", nullable: true),
@@ -187,7 +209,7 @@ namespace Percolator.Infrastructure.Migrations
                 {
                     Id = table.Column<long>(type: "INTEGER", nullable: false)
                         .Annotation("Sqlite:Autoincrement", true),
-                    SelfIdentityId = table.Column<int>(type: "INTEGER", nullable: false),
+                    SelfIdentityId = table.Column<uint>(type: "INTEGER", nullable: false),
                     LocalRequestId = table.Column<Guid>(type: "TEXT", nullable: false),
                     RecipientPublicKeyHash = table.Column<byte[]>(type: "BLOB", nullable: false),
                     InitialRootKey = table.Column<byte[]>(type: "BLOB", nullable: false),
@@ -207,7 +229,7 @@ namespace Percolator.Infrastructure.Migrations
                 {
                     Id = table.Column<int>(type: "INTEGER", nullable: false)
                         .Annotation("Sqlite:Autoincrement", true),
-                    SelfIdentityId = table.Column<int>(type: "INTEGER", nullable: false),
+                    SelfIdentityId = table.Column<uint>(type: "INTEGER", nullable: false),
                     DirectSessionId = table.Column<Guid>(type: "TEXT", nullable: false),
                     RatchetPublicKey = table.Column<byte[]>(type: "BLOB", nullable: false),
                     UpdatedAtUtc = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
@@ -218,19 +240,85 @@ namespace Percolator.Infrastructure.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "RelayBlindedRosters",
+                columns: table => new
+                {
+                    ConversationId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    MemberPublicIdentityId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    AddedAtUtc = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_RelayBlindedRosters", x => new { x.ConversationId, x.MemberPublicIdentityId });
+                });
+
+            migrationBuilder.CreateTable(
+                name: "RelayGroupStates",
+                columns: table => new
+                {
+                    ConversationId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    Epoch = table.Column<uint>(type: "INTEGER", nullable: false),
+                    GroupPublicParams = table.Column<byte[]>(type: "BLOB", nullable: false),
+                    Version = table.Column<int>(type: "INTEGER", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_RelayGroupStates", x => x.ConversationId);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "RelayOutbox",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "TEXT", nullable: false),
+                    EventType = table.Column<string>(type: "TEXT", nullable: false),
+                    PayloadJson = table.Column<string>(type: "TEXT", nullable: false),
+                    DestinationPeerId = table.Column<uint>(type: "INTEGER", nullable: false),
+                    ProcessedAtUtc = table.Column<DateTimeOffset>(type: "TEXT", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_RelayOutbox", x => x.Id);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "SelfIdentity",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
+                    Id = table.Column<uint>(type: "INTEGER", nullable: false)
                         .Annotation("Sqlite:Autoincrement", true),
-                    PeerId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    PublicIdentityId = table.Column<Guid>(type: "TEXT", nullable: false),
                     Name = table.Column<string>(type: "TEXT", nullable: false),
                     LastUsedUtc = table.Column<long>(type: "INTEGER", nullable: false),
-                    ListeningPort = table.Column<int>(type: "INTEGER", nullable: false)
+                    ListeningPort = table.Column<int>(type: "INTEGER", nullable: false),
+                    DeviceId = table.Column<uint>(type: "INTEGER", nullable: false),
+                    ProfileKey = table.Column<byte[]>(type: "BLOB", nullable: true),
+                    EncryptedProfileData = table.Column<byte[]>(type: "BLOB", nullable: true),
+                    ProfileNonce = table.Column<byte[]>(type: "BLOB", nullable: true),
+                    ProfileTag = table.Column<byte[]>(type: "BLOB", nullable: true),
+                    ProfileRevision = table.Column<int>(type: "INTEGER", nullable: false),
+                    RelayDeliveryRootKey = table.Column<byte[]>(type: "BLOB", nullable: true),
+                    ActiveIdentityKeySpki = table.Column<byte[]>(type: "BLOB", nullable: true),
+                    ActiveIdentityKeyFingerprint = table.Column<byte[]>(type: "BLOB", nullable: true),
+                    ZkServerSecretParamsSeed = table.Column<byte[]>(type: "BLOB", nullable: true)
                 },
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_SelfIdentity", x => x.Id);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "SenderKeyRecords",
+                columns: table => new
+                {
+                    ConversationId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    SenderPeerId = table.Column<uint>(type: "INTEGER", nullable: false),
+                    DeviceId = table.Column<uint>(type: "INTEGER", nullable: false),
+                    RecordBytes = table.Column<byte[]>(type: "BLOB", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_SenderKeyRecords", x => new { x.ConversationId, x.SenderPeerId, x.DeviceId });
                 });
 
             migrationBuilder.CreateTable(
@@ -260,10 +348,14 @@ namespace Percolator.Infrastructure.Migrations
                 name: "PeerIdentityKeys",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
+                    Id = table.Column<long>(type: "INTEGER", nullable: false)
                         .Annotation("Sqlite:Autoincrement", true),
-                    PublicKey = table.Column<byte[]>(type: "BLOB", nullable: false),
-                    PeerId = table.Column<Guid>(type: "TEXT", nullable: false)
+                    PeerId = table.Column<uint>(type: "INTEGER", nullable: false),
+                    PublicKeySpki = table.Column<byte[]>(type: "BLOB", nullable: false),
+                    Fingerprint = table.Column<byte[]>(type: "BLOB", nullable: false),
+                    NotBeforeUtc = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
+                    ExpiresAtUtc = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
+                    RevokedAtUtc = table.Column<DateTimeOffset>(type: "TEXT", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -277,36 +369,12 @@ namespace Percolator.Infrastructure.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "PeerIdentityKeys_V2",
-                columns: table => new
-                {
-                    Id = table.Column<long>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    PeerId = table.Column<Guid>(type: "TEXT", nullable: false),
-                    PublicKeySpki = table.Column<byte[]>(type: "BLOB", nullable: false),
-                    Fingerprint = table.Column<byte[]>(type: "BLOB", nullable: false),
-                    NotBeforeUtc = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
-                    ExpiresAtUtc = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
-                    RevokedAtUtc = table.Column<DateTimeOffset>(type: "TEXT", nullable: true)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_PeerIdentityKeys_V2", x => x.Id);
-                    table.ForeignKey(
-                        name: "FK_PeerIdentityKeys_V2_PeerIdentities_PeerId",
-                        column: x => x.PeerId,
-                        principalTable: "PeerIdentities",
-                        principalColumn: "PeerId",
-                        onDelete: ReferentialAction.Cascade);
-                });
-
-            migrationBuilder.CreateTable(
                 name: "PeerVerifications",
                 columns: table => new
                 {
                     Id = table.Column<long>(type: "INTEGER", nullable: false)
                         .Annotation("Sqlite:Autoincrement", true),
-                    PeerId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    PeerId = table.Column<uint>(type: "INTEGER", nullable: false),
                     Fingerprint = table.Column<byte[]>(type: "BLOB", nullable: false),
                     Method = table.Column<int>(type: "INTEGER", nullable: false),
                     VerifiedAtUtc = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
@@ -327,12 +395,32 @@ namespace Percolator.Infrastructure.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "PreKeyBundles",
+                columns: table => new
+                {
+                    Id = table.Column<int>(type: "INTEGER", nullable: false)
+                        .Annotation("Sqlite:Autoincrement", true),
+                    PublicKey = table.Column<byte[]>(type: "BLOB", nullable: false),
+                    PeerId = table.Column<uint>(type: "INTEGER", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_PreKeyBundles", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_PreKeyBundles_PeerIdentities_PeerId",
+                        column: x => x.PeerId,
+                        principalTable: "PeerIdentities",
+                        principalColumn: "PeerId",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "PeerRoutingGrpcEndPoints",
                 columns: table => new
                 {
                     Id = table.Column<long>(type: "INTEGER", nullable: false)
                         .Annotation("Sqlite:Autoincrement", true),
-                    PeerId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    PeerId = table.Column<uint>(type: "INTEGER", nullable: false),
                     Host = table.Column<string>(type: "TEXT", nullable: false),
                     Port = table.Column<int>(type: "INTEGER", nullable: false),
                     LastSeenUtc = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
@@ -354,8 +442,8 @@ namespace Percolator.Infrastructure.Migrations
                 {
                     Id = table.Column<long>(type: "INTEGER", nullable: false)
                         .Annotation("Sqlite:Autoincrement", true),
-                    PeerId = table.Column<Guid>(type: "TEXT", nullable: false),
-                    RelayPeerId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    PeerId = table.Column<uint>(type: "INTEGER", nullable: false),
+                    RelayPeerId = table.Column<uint>(type: "INTEGER", nullable: false),
                     LastSeenUtc = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
                 },
                 constraints: table =>
@@ -375,7 +463,7 @@ namespace Percolator.Infrastructure.Migrations
                 {
                     Id = table.Column<Guid>(type: "TEXT", nullable: false),
                     Name = table.Column<string>(type: "TEXT", nullable: true),
-                    SelfIdentityId = table.Column<int>(type: "INTEGER", nullable: false),
+                    SelfIdentityId = table.Column<uint>(type: "INTEGER", nullable: false),
                     Kind = table.Column<int>(type: "INTEGER", nullable: false),
                     CreatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
                     UpdatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
@@ -397,9 +485,9 @@ namespace Percolator.Infrastructure.Migrations
                 {
                     Id = table.Column<int>(type: "INTEGER", nullable: false)
                         .Annotation("Sqlite:Autoincrement", true),
-                    RemotePeerId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    RemotePeerId = table.Column<uint>(type: "INTEGER", nullable: false),
                     SessionId = table.Column<Guid>(type: "TEXT", nullable: false),
-                    SelfIdentityId = table.Column<int>(type: "INTEGER", nullable: false)
+                    SelfIdentityId = table.Column<uint>(type: "INTEGER", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -416,7 +504,7 @@ namespace Percolator.Infrastructure.Migrations
                 name: "SelfIdentityKeys",
                 columns: table => new
                 {
-                    SelfIdentityId = table.Column<int>(type: "INTEGER", nullable: false),
+                    SelfIdentityId = table.Column<uint>(type: "INTEGER", nullable: false),
                     IdentitySigningKey = table.Column<byte[]>(type: "BLOB", nullable: false),
                     SignedPreKey = table.Column<byte[]>(type: "BLOB", nullable: false)
                 },
@@ -437,8 +525,8 @@ namespace Percolator.Infrastructure.Migrations
                 {
                     Id = table.Column<int>(type: "INTEGER", nullable: false)
                         .Annotation("Sqlite:Autoincrement", true),
-                    SelfIdentityId = table.Column<int>(type: "INTEGER", nullable: false),
-                    PeerId = table.Column<Guid>(type: "TEXT", nullable: false)
+                    SelfIdentityId = table.Column<uint>(type: "INTEGER", nullable: false),
+                    PeerId = table.Column<uint>(type: "INTEGER", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -457,7 +545,7 @@ namespace Percolator.Infrastructure.Migrations
                 {
                     Id = table.Column<int>(type: "INTEGER", nullable: false)
                         .Annotation("Sqlite:Autoincrement", true),
-                    SelfIdentityId = table.Column<int>(type: "INTEGER", nullable: false),
+                    SelfIdentityId = table.Column<uint>(type: "INTEGER", nullable: false),
                     OneTimePreKeyId = table.Column<Guid>(type: "TEXT", nullable: false),
                     OneTimePreKeyPrivate = table.Column<byte[]>(type: "BLOB", nullable: false),
                     OneTimePreKeyPublicSpki = table.Column<byte[]>(type: "BLOB", nullable: false),
@@ -481,7 +569,7 @@ namespace Percolator.Infrastructure.Migrations
                 {
                     Id = table.Column<int>(type: "INTEGER", nullable: false)
                         .Annotation("Sqlite:Autoincrement", true),
-                    SelfIdentityId = table.Column<int>(type: "INTEGER", nullable: false),
+                    SelfIdentityId = table.Column<uint>(type: "INTEGER", nullable: false),
                     SignedPreKeyId = table.Column<Guid>(type: "TEXT", nullable: false),
                     SignedPreKeyPrivate = table.Column<byte[]>(type: "BLOB", nullable: false),
                     SignedPreKeyPublicSpki = table.Column<byte[]>(type: "BLOB", nullable: false),
@@ -503,16 +591,16 @@ namespace Percolator.Infrastructure.Migrations
                 name: "SentInvitations",
                 columns: table => new
                 {
-                    SelfIdentityId = table.Column<int>(type: "INTEGER", nullable: false),
+                    SelfIdentityId = table.Column<uint>(type: "INTEGER", nullable: false),
                     RequestCorrelationId = table.Column<string>(type: "TEXT", nullable: false),
                     SignedPreKeyId = table.Column<Guid>(type: "TEXT", nullable: false),
                     OneTimePreKeyId = table.Column<Guid>(type: "TEXT", nullable: true),
-                    TargetPeerId = table.Column<Guid>(type: "TEXT", nullable: true),
+                    TargetPeerId = table.Column<uint>(type: "INTEGER", nullable: true),
                     TargetDisplayName = table.Column<string>(type: "TEXT", nullable: true),
                     TargetEndpointHost = table.Column<string>(type: "TEXT", nullable: true),
                     TargetEndpointPort = table.Column<int>(type: "INTEGER", nullable: true),
                     InviteRouteKind = table.Column<int>(type: "INTEGER", nullable: false),
-                    InviteRelayHostPeerId = table.Column<Guid>(type: "TEXT", nullable: true),
+                    InviteRelayHostPeerId = table.Column<uint>(type: "INTEGER", nullable: true),
                     CreatedAtUtc = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
                     ExpiresAtUtc = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
                 },
@@ -531,9 +619,9 @@ namespace Percolator.Infrastructure.Migrations
                 name: "Sessions",
                 columns: table => new
                 {
-                    SelfIdentityId = table.Column<int>(type: "INTEGER", nullable: false),
+                    SelfIdentityId = table.Column<uint>(type: "INTEGER", nullable: false),
                     SessionId = table.Column<Guid>(type: "TEXT", nullable: false),
-                    RemotePeerId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    RemotePeerId = table.Column<uint>(type: "INTEGER", nullable: false),
                     ProtocolVersion = table.Column<int>(type: "INTEGER", nullable: false),
                     RootKey = table.Column<byte[]>(type: "BLOB", nullable: false),
                     SendChainKey = table.Column<byte[]>(type: "BLOB", nullable: true),
@@ -564,15 +652,15 @@ namespace Percolator.Infrastructure.Migrations
                 {
                     Id = table.Column<string>(type: "TEXT", nullable: false),
                     PublicKey = table.Column<byte[]>(type: "BLOB", nullable: false),
-                    PeerIdentityKeyId = table.Column<int>(type: "INTEGER", nullable: false)
+                    PreKeyBundleId = table.Column<int>(type: "INTEGER", nullable: false)
                 },
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_OneTimePreKeys", x => x.Id);
                     table.ForeignKey(
-                        name: "FK_OneTimePreKeys_PeerIdentityKeys_PeerIdentityKeyId",
-                        column: x => x.PeerIdentityKeyId,
-                        principalTable: "PeerIdentityKeys",
+                        name: "FK_OneTimePreKeys_PreKeyBundles_PreKeyBundleId",
+                        column: x => x.PreKeyBundleId,
+                        principalTable: "PreKeyBundles",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
                 });
@@ -584,15 +672,15 @@ namespace Percolator.Infrastructure.Migrations
                     Id = table.Column<string>(type: "TEXT", nullable: false),
                     PublicKey = table.Column<byte[]>(type: "BLOB", nullable: false),
                     Signature = table.Column<byte[]>(type: "BLOB", nullable: false),
-                    PeerIdentityKeyId = table.Column<int>(type: "INTEGER", nullable: false)
+                    PreKeyBundleId = table.Column<int>(type: "INTEGER", nullable: false)
                 },
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_SignedPreKeys", x => x.Id);
                     table.ForeignKey(
-                        name: "FK_SignedPreKeys_PeerIdentityKeys_PeerIdentityKeyId",
-                        column: x => x.PeerIdentityKeyId,
-                        principalTable: "PeerIdentityKeys",
+                        name: "FK_SignedPreKeys_PreKeyBundles_PreKeyBundleId",
+                        column: x => x.PreKeyBundleId,
+                        principalTable: "PreKeyBundles",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
                 });
@@ -602,58 +690,13 @@ namespace Percolator.Infrastructure.Migrations
                 columns: table => new
                 {
                     ConversationId = table.Column<Guid>(type: "TEXT", nullable: false),
-                    ParticipantId = table.Column<Guid>(type: "TEXT", nullable: false)
+                    ParticipantId = table.Column<uint>(type: "INTEGER", nullable: false)
                 },
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_ConversationParticipants", x => new { x.ConversationId, x.ParticipantId });
                     table.ForeignKey(
                         name: "FK_ConversationParticipants_Conversations_ConversationId",
-                        column: x => x.ConversationId,
-                        principalTable: "Conversations",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
-                });
-
-            migrationBuilder.CreateTable(
-                name: "DeliveredReceipts",
-                columns: table => new
-                {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    ConversationId = table.Column<Guid>(type: "TEXT", nullable: false),
-                    MessageGuid = table.Column<Guid>(type: "TEXT", nullable: false),
-                    RecipientId = table.Column<Guid>(type: "TEXT", nullable: false),
-                    DeliveredAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_DeliveredReceipts", x => x.Id);
-                    table.ForeignKey(
-                        name: "FK_DeliveredReceipts_Conversations_ConversationId",
-                        column: x => x.ConversationId,
-                        principalTable: "Conversations",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
-                });
-
-            migrationBuilder.CreateTable(
-                name: "EmojiReactions",
-                columns: table => new
-                {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    ConversationId = table.Column<Guid>(type: "TEXT", nullable: false),
-                    MessageGuid = table.Column<Guid>(type: "TEXT", nullable: false),
-                    ReactorId = table.Column<Guid>(type: "TEXT", nullable: false),
-                    Emoji = table.Column<string>(type: "TEXT", nullable: false),
-                    SentAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_EmojiReactions", x => x.Id);
-                    table.ForeignKey(
-                        name: "FK_EmojiReactions_Conversations_ConversationId",
                         column: x => x.ConversationId,
                         principalTable: "Conversations",
                         principalColumn: "Id",
@@ -685,14 +728,16 @@ namespace Percolator.Infrastructure.Migrations
                 columns: table => new
                 {
                     ConversationId = table.Column<Guid>(type: "TEXT", nullable: false),
-                    PeerId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    PublicIdentityId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    PeerId = table.Column<uint>(type: "INTEGER", nullable: true),
+                    SelfId = table.Column<uint>(type: "INTEGER", nullable: true),
                     Role = table.Column<int>(type: "INTEGER", nullable: false),
                     JoinedAtUtc = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
                     RemovedAtUtc = table.Column<DateTimeOffset>(type: "TEXT", nullable: true)
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_GroupMembers", x => new { x.ConversationId, x.PeerId });
+                    table.PrimaryKey("PK_GroupMembers", x => new { x.ConversationId, x.PublicIdentityId });
                     table.ForeignKey(
                         name: "FK_GroupMembers_Conversations_ConversationId",
                         column: x => x.ConversationId,
@@ -708,6 +753,8 @@ namespace Percolator.Infrastructure.Migrations
                     ConversationId = table.Column<Guid>(type: "TEXT", nullable: false),
                     Epoch = table.Column<int>(type: "INTEGER", nullable: false),
                     Name = table.Column<string>(type: "TEXT", nullable: true),
+                    PublicParams = table.Column<byte[]>(type: "BLOB", nullable: false),
+                    RelayPeerId = table.Column<uint>(type: "INTEGER", nullable: false),
                     CreatedAtUtc = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
                     UpdatedAtUtc = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
                 },
@@ -729,8 +776,9 @@ namespace Percolator.Infrastructure.Migrations
                     Id = table.Column<int>(type: "INTEGER", nullable: false)
                         .Annotation("Sqlite:Autoincrement", true),
                     ConversationId = table.Column<Guid>(type: "TEXT", nullable: false),
-                    MessageGuid = table.Column<Guid>(type: "TEXT", nullable: false),
-                    SenderId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    PublicMessageId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    SenderPeerId = table.Column<uint>(type: "INTEGER", nullable: true),
+                    SenderSelfId = table.Column<uint>(type: "INTEGER", nullable: false),
                     Body = table.Column<string>(type: "TEXT", nullable: false),
                     SentAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
                 },
@@ -753,7 +801,7 @@ namespace Percolator.Infrastructure.Migrations
                         .Annotation("Sqlite:Autoincrement", true),
                     ConversationId = table.Column<Guid>(type: "TEXT", nullable: false),
                     MessageGuid = table.Column<Guid>(type: "TEXT", nullable: false),
-                    ReaderId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    ReaderId = table.Column<uint>(type: "INTEGER", nullable: false),
                     SentAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
                 },
                 constraints: table =>
@@ -778,9 +826,9 @@ namespace Percolator.Infrastructure.Migrations
                 column: "SelfIdentityId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_DeliveredReceipts_ConversationId_MessageGuid_RecipientId",
-                table: "DeliveredReceipts",
-                columns: new[] { "ConversationId", "MessageGuid", "RecipientId" },
+                name: "IX_DeliveryCertificates_SelfId_RelayPeerId",
+                table: "DeliveryCertificates",
+                columns: new[] { "SelfId", "RelayPeerId" },
                 unique: true);
 
             migrationBuilder.CreateIndex(
@@ -811,12 +859,6 @@ namespace Percolator.Infrastructure.Migrations
                 column: "PublicKeyHash");
 
             migrationBuilder.CreateIndex(
-                name: "IX_EmojiReactions_ConversationId_MessageGuid_ReactorId_Emoji",
-                table: "EmojiReactions",
-                columns: new[] { "ConversationId", "MessageGuid", "ReactorId", "Emoji" },
-                unique: true);
-
-            migrationBuilder.CreateIndex(
                 name: "IX_GroupMembers_ConversationId",
                 table: "GroupMembers",
                 column: "ConversationId");
@@ -833,19 +875,19 @@ namespace Percolator.Infrastructure.Migrations
                 column: "EnqueuedAtUtc");
 
             migrationBuilder.CreateIndex(
-                name: "IX_MessageQueue_RecipientPeerId",
+                name: "IX_MessageQueue_RecipientPkh",
                 table: "MessageQueue",
-                column: "RecipientPeerId");
+                column: "RecipientPkh");
 
             migrationBuilder.CreateIndex(
-                name: "IX_MessageQueue_RecipientPeerId_EnqueuedAtUtc",
+                name: "IX_MessageQueue_RecipientPkh_EnqueuedAtUtc",
                 table: "MessageQueue",
-                columns: new[] { "RecipientPeerId", "EnqueuedAtUtc" });
+                columns: new[] { "RecipientPkh", "EnqueuedAtUtc" });
 
             migrationBuilder.CreateIndex(
-                name: "IX_Messages_ConversationId_MessageGuid",
+                name: "IX_Messages_ConversationId_PublicMessageId",
                 table: "Messages",
-                columns: new[] { "ConversationId", "MessageGuid" },
+                columns: new[] { "ConversationId", "PublicMessageId" },
                 unique: true);
 
             migrationBuilder.CreateIndex(
@@ -854,9 +896,9 @@ namespace Percolator.Infrastructure.Migrations
                 columns: new[] { "ConversationId", "SentAt" });
 
             migrationBuilder.CreateIndex(
-                name: "IX_OneTimePreKeys_PeerIdentityKeyId",
+                name: "IX_OneTimePreKeys_PreKeyBundleId",
                 table: "OneTimePreKeys",
-                column: "PeerIdentityKeyId");
+                column: "PreKeyBundleId");
 
             migrationBuilder.CreateIndex(
                 name: "IX_PeerIdentities_Name",
@@ -865,19 +907,20 @@ namespace Percolator.Infrastructure.Migrations
                 unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "IX_PeerIdentityKeys_PeerId",
-                table: "PeerIdentityKeys",
-                column: "PeerId");
+                name: "IX_PeerIdentities_PublicIdentityId",
+                table: "PeerIdentities",
+                column: "PublicIdentityId",
+                unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "IX_PeerIdentityKeys_V2_Fingerprint",
-                table: "PeerIdentityKeys_V2",
+                name: "IX_PeerIdentityKeys_Fingerprint",
+                table: "PeerIdentityKeys",
                 column: "Fingerprint",
                 unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "IX_PeerIdentityKeys_V2_PeerId",
-                table: "PeerIdentityKeys_V2",
+                name: "IX_PeerIdentityKeys_PeerId",
+                table: "PeerIdentityKeys",
                 column: "PeerId");
 
             migrationBuilder.CreateIndex(
@@ -966,6 +1009,11 @@ namespace Percolator.Infrastructure.Migrations
                 columns: new[] { "SelfIdentityId", "RemoteIdentityKeySpkiHash", "CreatedAtUtc" });
 
             migrationBuilder.CreateIndex(
+                name: "IX_PreKeyBundles_PeerId",
+                table: "PreKeyBundles",
+                column: "PeerId");
+
+            migrationBuilder.CreateIndex(
                 name: "IX_RatchetKeyIndex_SelfIdentityId_RatchetPublicKey",
                 table: "RatchetKeyIndex",
                 columns: new[] { "SelfIdentityId", "RatchetPublicKey" },
@@ -976,6 +1024,16 @@ namespace Percolator.Infrastructure.Migrations
                 table: "ReadReceipts",
                 columns: new[] { "ConversationId", "MessageGuid", "ReaderId" },
                 unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_RelayOutbox_ProcessedAtUtc",
+                table: "RelayOutbox",
+                column: "ProcessedAtUtc");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_SelfIdentity_ActiveIdentityKeyFingerprint",
+                table: "SelfIdentity",
+                column: "ActiveIdentityKeyFingerprint");
 
             migrationBuilder.CreateIndex(
                 name: "IX_SelfIdentity_LastUsedUtc",
@@ -989,9 +1047,9 @@ namespace Percolator.Infrastructure.Migrations
                 unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "IX_SelfIdentity_PeerId",
+                name: "IX_SelfIdentity_PublicIdentityId",
                 table: "SelfIdentity",
-                column: "PeerId");
+                column: "PublicIdentityId");
 
             migrationBuilder.CreateIndex(
                 name: "IX_SelfIdentityKnownPeer_SelfIdentityId_PeerId",
@@ -1029,9 +1087,9 @@ namespace Percolator.Infrastructure.Migrations
                 columns: new[] { "SelfIdentityId", "RemotePeerId" });
 
             migrationBuilder.CreateIndex(
-                name: "IX_SignedPreKeys_PeerIdentityKeyId",
+                name: "IX_SignedPreKeys_PreKeyBundleId",
                 table: "SignedPreKeys",
-                column: "PeerIdentityKeyId");
+                column: "PreKeyBundleId");
         }
 
         /// <inheritdoc />
@@ -1041,7 +1099,7 @@ namespace Percolator.Infrastructure.Migrations
                 name: "ConversationParticipants");
 
             migrationBuilder.DropTable(
-                name: "DeliveredReceipts");
+                name: "DeliveryCertificates");
 
             migrationBuilder.DropTable(
                 name: "DhtNodes");
@@ -1054,9 +1112,6 @@ namespace Percolator.Infrastructure.Migrations
 
             migrationBuilder.DropTable(
                 name: "DiscoveredPeerEndpoints");
-
-            migrationBuilder.DropTable(
-                name: "EmojiReactions");
 
             migrationBuilder.DropTable(
                 name: "GroupCryptoStates");
@@ -1077,7 +1132,7 @@ namespace Percolator.Infrastructure.Migrations
                 name: "OneTimePreKeys");
 
             migrationBuilder.DropTable(
-                name: "PeerIdentityKeys_V2");
+                name: "PeerIdentityKeys");
 
             migrationBuilder.DropTable(
                 name: "PeerPublicSigningKeys");
@@ -1110,6 +1165,15 @@ namespace Percolator.Infrastructure.Migrations
                 name: "ReadReceipts");
 
             migrationBuilder.DropTable(
+                name: "RelayBlindedRosters");
+
+            migrationBuilder.DropTable(
+                name: "RelayGroupStates");
+
+            migrationBuilder.DropTable(
+                name: "RelayOutbox");
+
+            migrationBuilder.DropTable(
                 name: "SelfIdentityKeys");
 
             migrationBuilder.DropTable(
@@ -1120,6 +1184,9 @@ namespace Percolator.Infrastructure.Migrations
 
             migrationBuilder.DropTable(
                 name: "SelfPreKeySigned");
+
+            migrationBuilder.DropTable(
+                name: "SenderKeyRecords");
 
             migrationBuilder.DropTable(
                 name: "SentInvitations");
@@ -1140,7 +1207,7 @@ namespace Percolator.Infrastructure.Migrations
                 name: "Conversations");
 
             migrationBuilder.DropTable(
-                name: "PeerIdentityKeys");
+                name: "PreKeyBundles");
 
             migrationBuilder.DropTable(
                 name: "SelfIdentity");

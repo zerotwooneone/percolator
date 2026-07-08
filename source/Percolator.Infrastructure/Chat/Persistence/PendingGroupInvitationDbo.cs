@@ -16,7 +16,7 @@ public class PendingGroupInvitationDbo
     /// <summary>
     /// The conversation ID (indexed).
     /// </summary>
-    public ConversationId ConversationId { get; set; }
+    public Guid ConversationId { get; set; }
 
     /// <summary>
     /// The peer ID of the inviter.

@@ -26,7 +26,7 @@ public class SqliteSessionRepositoryTests
                 Id = 1, 
                 PublicIdentityId = Guid.NewGuid(), 
                 Name = "default", 
-                DeviceId = new DeviceId(1), 
+                DeviceId = 1, 
                 ListeningPort = 5000, 
                 LastUsedUtc = DateTimeOffset.UtcNow
             });
@@ -133,7 +133,7 @@ public class SqliteSessionRepositoryTests
                     Id = 1, 
                     PublicIdentityId = Guid.NewGuid(), 
                     Name = "one", 
-                    DeviceId = new DeviceId(1), 
+                    DeviceId = 1, 
                     ListeningPort = 5000, 
                     LastUsedUtc = DateTimeOffset.UtcNow
                 });
@@ -142,7 +142,7 @@ public class SqliteSessionRepositoryTests
                     Id = 2, 
                     PublicIdentityId = Guid.NewGuid(), 
                     Name = "two", 
-                    DeviceId = new DeviceId(1), 
+                    DeviceId = 1, 
                     ListeningPort = 5000, 
                     LastUsedUtc = DateTimeOffset.UtcNow
                 });

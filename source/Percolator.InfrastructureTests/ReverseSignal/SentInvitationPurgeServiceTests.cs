@@ -51,7 +51,7 @@ public sealed class SentInvitationPurgeServiceTests
             Id = 1, 
             PublicIdentityId = Guid.NewGuid(), 
             Name = "test",
-            DeviceId = new Percolator.Identity.DeviceId(1),
+            DeviceId = 1,
             ListeningPort = 5000,
             LastUsedUtc = DateTimeOffset.UtcNow
         });

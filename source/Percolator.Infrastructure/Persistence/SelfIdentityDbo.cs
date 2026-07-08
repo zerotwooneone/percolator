@@ -9,7 +9,7 @@ public class SelfIdentityDbo
     public string Name { get; set; } = null!;
     public DateTimeOffset LastUsedUtc { get; set; }
     public int ListeningPort { get; set; }
-    public DeviceId DeviceId { get; set; } = new DeviceId(1);
+    public uint DeviceId { get; set; } = 1;
     public byte[]? ProfileKey { get; set; }
     public byte[]? EncryptedProfileData { get; set; }
     public byte[]? ProfileNonce { get; set; }

@@ -43,7 +43,7 @@ public sealed class SqlitePendingSessionRepositoryTests
                 Id = 1, 
                 PublicIdentityId = Guid.NewGuid(), 
                 Name = "default", 
-                DeviceId = new Percolator.Identity.DeviceId(1), 
+                DeviceId = 1, 
                 ListeningPort = 5000, 
                 LastUsedUtc = DateTimeOffset.UtcNow
             });

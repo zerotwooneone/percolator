@@ -25,7 +25,7 @@ public sealed class SqlitePendingGroupInvitationRepository : IPendingGroupInvita
         var dbo = new PendingGroupInvitationDbo
         {
             Id = invitation.Id,
-            ConversationId = invitation.ConversationId,
+            ConversationId = invitation.ConversationId.Value,
             InviterPeerId = invitation.InviterPeerId.Value,
             CreatorIdentityKey = invitation.CreatorIdentityKey,
             InitialMembersJson = initialMembersJson,
@@ -52,7 +52,7 @@ public sealed class SqlitePendingGroupInvitationRepository : IPendingGroupInvita
     {
         var dbo = await _db.PendingGroupInvitations
             .AsNoTracking()
-            .FirstOrDefaultAsync(i => i.ConversationId == conversationId && i.Status == Persistence.PendingGroupInvitationStatus.Pending, cancellationToken);
+            .FirstOrDefaultAsync(i => i.ConversationId == conversationId.Value && i.Status == Persistence.PendingGroupInvitationStatus.Pending, cancellationToken);
 
         if (dbo == null) return null;
 
@@ -68,7 +68,7 @@ public sealed class SqlitePendingGroupInvitationRepository : IPendingGroupInvita
 
         return new PendingGroupInvitation(
             dbo.Id,
-            dbo.ConversationId,
+            new Percolator.Chat.Messaging.ValueObjects.ConversationId(dbo.ConversationId),
             new ChatPeerId(dbo.InviterPeerId),
             dbo.CreatorIdentityKey,
             initialMembers,

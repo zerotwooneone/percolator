@@ -28,7 +28,7 @@ public class SqliteDirectSessionRepositoryTests
         // Seed default SelfIdentity required by repository scoping
         if (!ctx.SelfIdentities.Any())
         {
-            ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = 1, PublicIdentityId = Guid.NewGuid(), Name = "default", DeviceId = new DeviceId(1), ListeningPort = 5000, LastUsedUtc = DateTimeOffset.UtcNow });
+            ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = 1, PublicIdentityId = Guid.NewGuid(), Name = "default", DeviceId = 1, ListeningPort = 5000, LastUsedUtc = DateTimeOffset.UtcNow });
             ctx.SaveChanges();
         }
         return ctx;

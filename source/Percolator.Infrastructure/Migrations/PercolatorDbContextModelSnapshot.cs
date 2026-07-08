@@ -34,16 +34,50 @@ namespace Percolator.Infrastructure.Migrations
                     b.ToTable("DhtNodes");
                 });
 
+            modelBuilder.Entity("Percolator.Infrastructure.Chat.Persistence.DeliveryCertificateDbo", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("ExpiresAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<byte[]>("Payload")
+                        .IsRequired()
+                        .HasColumnType("BLOB");
+
+                    b.Property<uint>("RelayPeerId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<uint>("SelfId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<byte[]>("Signature")
+                        .IsRequired()
+                        .HasColumnType("BLOB");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SelfId", "RelayPeerId")
+                        .IsUnique();
+
+                    b.ToTable("DeliveryCertificates", (string)null);
+                });
+
             modelBuilder.Entity("Percolator.Infrastructure.Chat.Persistence.GroupMemberDbo", b =>
                 {
                     b.Property<Guid>("ConversationId")
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid>("PeerId")
+                    b.Property<Guid>("PublicIdentityId")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTimeOffset>("JoinedAtUtc")
                         .HasColumnType("TEXT");
+
+                    b.Property<uint?>("PeerId")
+                        .HasColumnType("INTEGER");
 
                     b.Property<DateTimeOffset?>("RemovedAtUtc")
                         .HasColumnType("TEXT");
@@ -51,7 +85,10 @@ namespace Percolator.Infrastructure.Migrations
                     b.Property<int>("Role")
                         .HasColumnType("INTEGER");
 
-                    b.HasKey("ConversationId", "PeerId");
+                    b.Property<uint?>("SelfId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("ConversationId", "PublicIdentityId");
 
                     b.HasIndex("ConversationId");
 
@@ -71,6 +108,13 @@ namespace Percolator.Infrastructure.Migrations
 
                     b.Property<string>("Name")
                         .HasColumnType("TEXT");
+
+                    b.Property<byte[]>("PublicParams")
+                        .IsRequired()
+                        .HasColumnType("BLOB");
+
+                    b.Property<uint>("RelayPeerId")
+                        .HasColumnType("INTEGER");
 
                     b.Property<DateTimeOffset>("UpdatedAtUtc")
                         .HasColumnType("TEXT");
@@ -100,8 +144,8 @@ namespace Percolator.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid>("InviterPeerId")
-                        .HasColumnType("TEXT");
+                    b.Property<uint>("InviterPeerId")
+                        .HasColumnType("INTEGER");
 
                     b.Property<DateTimeOffset>("ReceivedAtUtc")
                         .HasColumnType("TEXT");
@@ -114,6 +158,26 @@ namespace Percolator.Infrastructure.Migrations
                     b.HasIndex("ConversationId");
 
                     b.ToTable("PendingGroupInvitations", (string)null);
+                });
+
+            modelBuilder.Entity("Percolator.Infrastructure.Chat.Persistence.SenderKeyRecordDbo", b =>
+                {
+                    b.Property<Guid>("ConversationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<uint>("SenderPeerId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<uint>("DeviceId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<byte[]>("RecordBytes")
+                        .IsRequired()
+                        .HasColumnType("BLOB");
+
+                    b.HasKey("ConversationId", "SenderPeerId", "DeviceId");
+
+                    b.ToTable("SenderKeyRecords", (string)null);
                 });
 
             modelBuilder.Entity("Percolator.Infrastructure.Cryptography.PendingSessionDbo", b =>
@@ -147,16 +211,16 @@ namespace Percolator.Infrastructure.Migrations
                     b.Property<int>("ProtocolVersion")
                         .HasColumnType("INTEGER");
 
-                    b.Property<Guid?>("RelayHostPeerId")
-                        .HasColumnType("TEXT");
+                    b.Property<uint?>("RelayHostPeerId")
+                        .HasColumnType("INTEGER");
 
-                    b.Property<Guid>("RemotePeerId")
-                        .HasColumnType("TEXT");
+                    b.Property<uint>("RemotePeerId")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("RequestCorrelationId")
                         .HasColumnType("TEXT");
 
-                    b.Property<int>("SelfIdentityId")
+                    b.Property<uint>("SelfIdentityId")
                         .HasColumnType("INTEGER");
 
                     b.Property<int>("State")
@@ -171,7 +235,7 @@ namespace Percolator.Infrastructure.Migrations
 
             modelBuilder.Entity("Percolator.Infrastructure.Cryptography.SentInvitationDbo", b =>
                 {
-                    b.Property<int>("SelfIdentityId")
+                    b.Property<uint>("SelfIdentityId")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("RequestCorrelationId")
@@ -183,8 +247,8 @@ namespace Percolator.Infrastructure.Migrations
                     b.Property<DateTimeOffset>("ExpiresAtUtc")
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid?>("InviteRelayHostPeerId")
-                        .HasColumnType("TEXT");
+                    b.Property<uint?>("InviteRelayHostPeerId")
+                        .HasColumnType("INTEGER");
 
                     b.Property<int>("InviteRouteKind")
                         .HasColumnType("INTEGER");
@@ -204,8 +268,8 @@ namespace Percolator.Infrastructure.Migrations
                     b.Property<int?>("TargetEndpointPort")
                         .HasColumnType("INTEGER");
 
-                    b.Property<Guid?>("TargetPeerId")
-                        .HasColumnType("TEXT");
+                    b.Property<uint?>("TargetPeerId")
+                        .HasColumnType("INTEGER");
 
                     b.HasKey("SelfIdentityId", "RequestCorrelationId");
 
@@ -216,14 +280,27 @@ namespace Percolator.Infrastructure.Migrations
 
             modelBuilder.Entity("Percolator.Infrastructure.Identity.PeerIdentityDbo", b =>
                 {
-                    b.Property<Guid>("PeerId")
-                        .HasColumnType("TEXT");
+                    b.Property<uint>("PeerId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
 
                     b.Property<DateTimeOffset>("CreatedAtUtc")
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("LastKnownProfileRevision")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Name")
                         .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<uint>("PrimaryDeviceId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<byte[]>("ProfileKey")
+                        .HasColumnType("BLOB");
+
+                    b.Property<Guid>("PublicIdentityId")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTimeOffset>("UpdatedAtUtc")
@@ -237,10 +314,13 @@ namespace Percolator.Infrastructure.Migrations
                     b.HasIndex("Name")
                         .IsUnique();
 
+                    b.HasIndex("PublicIdentityId")
+                        .IsUnique();
+
                     b.ToTable("PeerIdentities", (string)null);
                 });
 
-            modelBuilder.Entity("Percolator.Infrastructure.Identity.PeerIdentityKeyDbo_V2", b =>
+            modelBuilder.Entity("Percolator.Infrastructure.Identity.PeerIdentityKeyDbo", b =>
                 {
                     b.Property<long>("Id")
                         .ValueGeneratedOnAdd()
@@ -256,8 +336,8 @@ namespace Percolator.Infrastructure.Migrations
                     b.Property<DateTimeOffset>("NotBeforeUtc")
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid>("PeerId")
-                        .HasColumnType("TEXT");
+                    b.Property<uint>("PeerId")
+                        .HasColumnType("INTEGER");
 
                     b.Property<byte[]>("PublicKeySpki")
                         .IsRequired()
@@ -273,7 +353,7 @@ namespace Percolator.Infrastructure.Migrations
 
                     b.HasIndex("PeerId");
 
-                    b.ToTable("PeerIdentityKeys_V2", (string)null);
+                    b.ToTable("PeerIdentityKeys", (string)null);
                 });
 
             modelBuilder.Entity("Percolator.Infrastructure.Identity.PeerVerificationDbo", b =>
@@ -298,8 +378,8 @@ namespace Percolator.Infrastructure.Migrations
                     b.Property<string>("Note")
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid>("PeerId")
-                        .HasColumnType("TEXT");
+                    b.Property<uint>("PeerId")
+                        .HasColumnType("INTEGER");
 
                     b.Property<DateTimeOffset>("VerifiedAtUtc")
                         .HasColumnType("TEXT");
@@ -330,7 +410,7 @@ namespace Percolator.Infrastructure.Migrations
                     b.Property<string>("Name")
                         .HasColumnType("TEXT");
 
-                    b.Property<int>("SelfIdentityId")
+                    b.Property<uint>("SelfIdentityId")
                         .HasColumnType("INTEGER");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
@@ -350,43 +430,17 @@ namespace Percolator.Infrastructure.Migrations
                     b.Property<Guid>("ConversationId")
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid>("ParticipantId")
-                        .HasColumnType("TEXT");
+                    b.Property<uint>("ParticipantId")
+                        .HasColumnType("INTEGER");
 
                     b.HasKey("ConversationId", "ParticipantId");
 
                     b.ToTable("ConversationParticipants", (string)null);
                 });
 
-            modelBuilder.Entity("Percolator.Infrastructure.Persistence.DeliveredReceiptDbo", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<Guid>("ConversationId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("DeliveredAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid>("MessageGuid")
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid>("RecipientId")
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ConversationId", "MessageGuid", "RecipientId")
-                        .IsUnique();
-
-                    b.ToTable("DeliveredReceipts", (string)null);
-                });
-
             modelBuilder.Entity("Percolator.Infrastructure.Persistence.DirectSessionConversationDbo", b =>
                 {
-                    b.Property<int>("SelfIdentityId")
+                    b.Property<uint>("SelfIdentityId")
                         .HasColumnType("INTEGER");
 
                     b.Property<Guid>("DirectSessionId")
@@ -409,10 +463,10 @@ namespace Percolator.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
-                    b.Property<Guid>("RemotePeerId")
-                        .HasColumnType("TEXT");
+                    b.Property<uint>("RemotePeerId")
+                        .HasColumnType("INTEGER");
 
-                    b.Property<int>("SelfIdentityId")
+                    b.Property<uint>("SelfIdentityId")
                         .HasColumnType("INTEGER");
 
                     b.Property<Guid>("SessionId")
@@ -432,8 +486,8 @@ namespace Percolator.Infrastructure.Migrations
                     b.Property<string>("DiscoveryKey")
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid?>("BoundPeerId")
-                        .HasColumnType("TEXT");
+                    b.Property<uint?>("BoundPeerId")
+                        .HasColumnType("INTEGER");
 
                     b.Property<double>("Confidence")
                         .HasColumnType("REAL");
@@ -488,36 +542,6 @@ namespace Percolator.Infrastructure.Migrations
                     b.ToTable("DiscoveredPeerEndpoints", (string)null);
                 });
 
-            modelBuilder.Entity("Percolator.Infrastructure.Persistence.EmojiReactionDbo", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<Guid>("ConversationId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Emoji")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid>("MessageGuid")
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid>("ReactorId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("SentAt")
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ConversationId", "MessageGuid", "ReactorId", "Emoji")
-                        .IsUnique();
-
-                    b.ToTable("EmojiReactions", (string)null);
-                });
-
             modelBuilder.Entity("Percolator.Infrastructure.Persistence.GroupCryptoStateDbo", b =>
                 {
                     b.Property<Guid>("ConversationId")
@@ -551,8 +575,8 @@ namespace Percolator.Infrastructure.Migrations
                     b.Property<DateTimeOffset>("LastSeenUtc")
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid>("PeerId")
-                        .HasColumnType("TEXT");
+                    b.Property<uint>("PeerId")
+                        .HasColumnType("INTEGER");
 
                     b.Property<int>("Port")
                         .HasColumnType("INTEGER");
@@ -578,18 +602,21 @@ namespace Percolator.Infrastructure.Migrations
                     b.Property<Guid>("ConversationId")
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid>("MessageGuid")
+                    b.Property<Guid>("PublicMessageId")
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid>("SenderId")
-                        .HasColumnType("TEXT");
+                    b.Property<uint?>("SenderPeerId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<uint>("SenderSelfId")
+                        .HasColumnType("INTEGER");
 
                     b.Property<DateTimeOffset>("SentAt")
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ConversationId", "MessageGuid")
+                    b.HasIndex("ConversationId", "PublicMessageId")
                         .IsUnique();
 
                     b.HasIndex("ConversationId", "SentAt");
@@ -613,8 +640,9 @@ namespace Percolator.Infrastructure.Migrations
                     b.Property<DateTimeOffset>("EnqueuedAtUtc")
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid>("RecipientPeerId")
-                        .HasColumnType("TEXT");
+                    b.Property<byte[]>("RecipientPkh")
+                        .IsRequired()
+                        .HasColumnType("BLOB");
 
                     b.HasKey("Id");
 
@@ -623,9 +651,9 @@ namespace Percolator.Infrastructure.Migrations
 
                     b.HasIndex("EnqueuedAtUtc");
 
-                    b.HasIndex("RecipientPeerId");
+                    b.HasIndex("RecipientPkh");
 
-                    b.HasIndex("RecipientPeerId", "EnqueuedAtUtc");
+                    b.HasIndex("RecipientPkh", "EnqueuedAtUtc");
 
                     b.ToTable("MessageQueue", (string)null);
                 });
@@ -635,7 +663,7 @@ namespace Percolator.Infrastructure.Migrations
                     b.Property<string>("Id")
                         .HasColumnType("TEXT");
 
-                    b.Property<int>("PeerIdentityKeyId")
+                    b.Property<int>("PreKeyBundleId")
                         .HasColumnType("INTEGER");
 
                     b.Property<byte[]>("PublicKey")
@@ -644,29 +672,9 @@ namespace Percolator.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("PeerIdentityKeyId");
+                    b.HasIndex("PreKeyBundleId");
 
                     b.ToTable("OneTimePreKeys");
-                });
-
-            modelBuilder.Entity("Percolator.Infrastructure.Persistence.PeerIdentityKeyDbo", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<Guid>("PeerId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<byte[]>("PublicKey")
-                        .IsRequired()
-                        .HasColumnType("BLOB");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("PeerId");
-
-                    b.ToTable("PeerIdentityKeys");
                 });
 
             modelBuilder.Entity("Percolator.Infrastructure.Persistence.PeerPublicSigningKeyDbo", b =>
@@ -681,8 +689,8 @@ namespace Percolator.Infrastructure.Migrations
                     b.Property<DateTimeOffset?>("ExpiredAtUtc")
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid>("PeerId")
-                        .HasColumnType("TEXT");
+                    b.Property<uint>("PeerId")
+                        .HasColumnType("INTEGER");
 
                     b.Property<byte[]>("PublicKey")
                         .IsRequired()
@@ -733,16 +741,16 @@ namespace Percolator.Infrastructure.Migrations
                     b.Property<DateTimeOffset>("ObservedAtUtc")
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid?>("RelayHostPeerId")
-                        .HasColumnType("TEXT");
+                    b.Property<uint?>("RelayHostPeerId")
+                        .HasColumnType("INTEGER");
 
-                    b.Property<Guid>("RemotePeerId")
-                        .HasColumnType("TEXT");
+                    b.Property<uint>("RemotePeerId")
+                        .HasColumnType("INTEGER");
 
                     b.Property<int>("RouteKind")
                         .HasColumnType("INTEGER");
 
-                    b.Property<int>("SelfIdentityId")
+                    b.Property<uint>("SelfIdentityId")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("Source")
@@ -759,8 +767,8 @@ namespace Percolator.Infrastructure.Migrations
 
             modelBuilder.Entity("Percolator.Infrastructure.Persistence.PeerRoutingProfileDbo", b =>
                 {
-                    b.Property<Guid>("PeerId")
-                        .HasColumnType("TEXT");
+                    b.Property<uint>("PeerId")
+                        .HasColumnType("INTEGER");
 
                     b.Property<byte[]>("DirectMessagePublicKey")
                         .HasColumnType("BLOB");
@@ -806,7 +814,7 @@ namespace Percolator.Infrastructure.Migrations
                     b.Property<byte[]>("RemoteIdentityKeySpkiHash")
                         .HasColumnType("BLOB");
 
-                    b.Property<int>("SelfIdentityId")
+                    b.Property<uint>("SelfIdentityId")
                         .HasColumnType("INTEGER");
 
                     b.HasKey("Id");
@@ -825,6 +833,26 @@ namespace Percolator.Infrastructure.Migrations
                     b.ToTable("PreHandshakeSessions", (string)null);
                 });
 
+            modelBuilder.Entity("Percolator.Infrastructure.Persistence.PreKeyBundleDbo", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<uint>("PeerId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<byte[]>("PublicKey")
+                        .IsRequired()
+                        .HasColumnType("BLOB");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PeerId");
+
+                    b.ToTable("PreKeyBundles");
+                });
+
             modelBuilder.Entity("Percolator.Infrastructure.Persistence.RatchetKeyIndexDbo", b =>
                 {
                     b.Property<int>("Id")
@@ -838,7 +866,7 @@ namespace Percolator.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("BLOB");
 
-                    b.Property<int>("SelfIdentityId")
+                    b.Property<uint>("SelfIdentityId")
                         .HasColumnType("INTEGER");
 
                     b.Property<DateTimeOffset>("UpdatedAtUtc")
@@ -864,8 +892,8 @@ namespace Percolator.Infrastructure.Migrations
                     b.Property<Guid>("MessageGuid")
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid>("ReaderId")
-                        .HasColumnType("TEXT");
+                    b.Property<uint>("ReaderId")
+                        .HasColumnType("INTEGER");
 
                     b.Property<DateTimeOffset>("SentAt")
                         .HasColumnType("TEXT");
@@ -878,6 +906,42 @@ namespace Percolator.Infrastructure.Migrations
                     b.ToTable("ReadReceipts", (string)null);
                 });
 
+            modelBuilder.Entity("Percolator.Infrastructure.Persistence.RelayBlindedRosterDbo", b =>
+                {
+                    b.Property<Guid>("ConversationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("MemberPublicIdentityId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("AddedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("ConversationId", "MemberPublicIdentityId");
+
+                    b.ToTable("RelayBlindedRosters", (string)null);
+                });
+
+            modelBuilder.Entity("Percolator.Infrastructure.Persistence.RelayGroupStateDbo", b =>
+                {
+                    b.Property<Guid>("ConversationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<uint>("Epoch")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<byte[]>("GroupPublicParams")
+                        .IsRequired()
+                        .HasColumnType("BLOB");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("ConversationId");
+
+                    b.ToTable("RelayGroupStates", (string)null);
+                });
+
             modelBuilder.Entity("Percolator.Infrastructure.Persistence.RelayLinkDbo", b =>
                 {
                     b.Property<long>("Id")
@@ -887,11 +951,11 @@ namespace Percolator.Infrastructure.Migrations
                     b.Property<DateTimeOffset>("LastSeenUtc")
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid>("PeerId")
-                        .HasColumnType("TEXT");
+                    b.Property<uint>("PeerId")
+                        .HasColumnType("INTEGER");
 
-                    b.Property<Guid>("RelayPeerId")
-                        .HasColumnType("TEXT");
+                    b.Property<uint>("RelayPeerId")
+                        .HasColumnType("INTEGER");
 
                     b.HasKey("Id");
 
@@ -901,11 +965,50 @@ namespace Percolator.Infrastructure.Migrations
                     b.ToTable("PeerRoutingRelays", (string)null);
                 });
 
+            modelBuilder.Entity("Percolator.Infrastructure.Persistence.RelayOutboxDbo", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<uint>("DestinationPeerId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PayloadJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("ProcessedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProcessedAtUtc");
+
+                    b.ToTable("RelayOutbox", (string)null);
+                });
+
             modelBuilder.Entity("Percolator.Infrastructure.Persistence.SelfIdentityDbo", b =>
                 {
-                    b.Property<int>("Id")
+                    b.Property<uint>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
+
+                    b.Property<byte[]>("ActiveIdentityKeyFingerprint")
+                        .HasColumnType("BLOB");
+
+                    b.Property<byte[]>("ActiveIdentityKeySpki")
+                        .HasColumnType("BLOB");
+
+                    b.Property<uint>("DeviceId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<byte[]>("EncryptedProfileData")
+                        .HasColumnType("BLOB");
 
                     b.Property<long>("LastUsedUtc")
                         .HasColumnType("INTEGER");
@@ -917,24 +1020,44 @@ namespace Percolator.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid>("PeerId")
+                    b.Property<byte[]>("ProfileKey")
+                        .HasColumnType("BLOB");
+
+                    b.Property<byte[]>("ProfileNonce")
+                        .HasColumnType("BLOB");
+
+                    b.Property<int>("ProfileRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<byte[]>("ProfileTag")
+                        .HasColumnType("BLOB");
+
+                    b.Property<Guid>("PublicIdentityId")
                         .HasColumnType("TEXT");
 
+                    b.Property<byte[]>("RelayDeliveryRootKey")
+                        .HasColumnType("BLOB");
+
+                    b.Property<byte[]>("ZkServerSecretParamsSeed")
+                        .HasColumnType("BLOB");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("ActiveIdentityKeyFingerprint");
 
                     b.HasIndex("LastUsedUtc");
 
                     b.HasIndex("Name")
                         .IsUnique();
 
-                    b.HasIndex("PeerId");
+                    b.HasIndex("PublicIdentityId");
 
                     b.ToTable("SelfIdentity", (string)null);
                 });
 
             modelBuilder.Entity("Percolator.Infrastructure.Persistence.SelfIdentityKeysDbo", b =>
                 {
-                    b.Property<int>("SelfIdentityId")
+                    b.Property<uint>("SelfIdentityId")
                         .HasColumnType("INTEGER");
 
                     b.Property<byte[]>("IdentitySigningKey")
@@ -956,10 +1079,10 @@ namespace Percolator.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
-                    b.Property<Guid>("PeerId")
-                        .HasColumnType("TEXT");
+                    b.Property<uint>("PeerId")
+                        .HasColumnType("INTEGER");
 
-                    b.Property<int>("SelfIdentityId")
+                    b.Property<uint>("SelfIdentityId")
                         .HasColumnType("INTEGER");
 
                     b.HasKey("Id");
@@ -993,7 +1116,7 @@ namespace Percolator.Infrastructure.Migrations
                     b.Property<DateTimeOffset?>("ReservedUntilUtc")
                         .HasColumnType("TEXT");
 
-                    b.Property<int>("SelfIdentityId")
+                    b.Property<uint>("SelfIdentityId")
                         .HasColumnType("INTEGER");
 
                     b.HasKey("Id");
@@ -1021,7 +1144,7 @@ namespace Percolator.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("BLOB");
 
-                    b.Property<int>("SelfIdentityId")
+                    b.Property<uint>("SelfIdentityId")
                         .HasColumnType("INTEGER");
 
                     b.Property<Guid>("SignedPreKeyId")
@@ -1048,7 +1171,7 @@ namespace Percolator.Infrastructure.Migrations
                     b.Property<Guid>("SessionId")
                         .HasColumnType("TEXT");
 
-                    b.Property<int>("SelfIdentityId")
+                    b.Property<uint>("SelfIdentityId")
                         .HasColumnType("INTEGER");
 
                     b.Property<byte[]>("AssociatedData")
@@ -1075,8 +1198,8 @@ namespace Percolator.Infrastructure.Migrations
                     b.Property<ulong>("RecvCounter")
                         .HasColumnType("INTEGER");
 
-                    b.Property<Guid>("RemotePeerId")
-                        .HasColumnType("TEXT");
+                    b.Property<uint>("RemotePeerId")
+                        .HasColumnType("INTEGER");
 
                     b.Property<byte[]>("RemoteRatchetKey")
                         .HasColumnType("BLOB");
@@ -1103,7 +1226,7 @@ namespace Percolator.Infrastructure.Migrations
                     b.Property<string>("Id")
                         .HasColumnType("TEXT");
 
-                    b.Property<int>("PeerIdentityKeyId")
+                    b.Property<int>("PreKeyBundleId")
                         .HasColumnType("INTEGER");
 
                     b.Property<byte[]>("PublicKey")
@@ -1116,7 +1239,7 @@ namespace Percolator.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("PeerIdentityKeyId");
+                    b.HasIndex("PreKeyBundleId");
 
                     b.ToTable("SignedPreKeys");
                 });
@@ -1148,7 +1271,7 @@ namespace Percolator.Infrastructure.Migrations
                         .IsRequired();
                 });
 
-            modelBuilder.Entity("Percolator.Infrastructure.Identity.PeerIdentityKeyDbo_V2", b =>
+            modelBuilder.Entity("Percolator.Infrastructure.Identity.PeerIdentityKeyDbo", b =>
                 {
                     b.HasOne("Percolator.Infrastructure.Identity.PeerIdentityDbo", "Peer")
                         .WithMany("Keys")
@@ -1188,17 +1311,6 @@ namespace Percolator.Infrastructure.Migrations
                     b.Navigation("Conversation");
                 });
 
-            modelBuilder.Entity("Percolator.Infrastructure.Persistence.DeliveredReceiptDbo", b =>
-                {
-                    b.HasOne("Percolator.Infrastructure.Persistence.ConversationDbo", "Conversation")
-                        .WithMany()
-                        .HasForeignKey("ConversationId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Conversation");
-                });
-
             modelBuilder.Entity("Percolator.Infrastructure.Persistence.DirectSessionDbo", b =>
                 {
                     b.HasOne("Percolator.Infrastructure.Persistence.SelfIdentityDbo", null)
@@ -1215,17 +1327,6 @@ namespace Percolator.Infrastructure.Migrations
                         .HasForeignKey("DiscoveryKey")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-                });
-
-            modelBuilder.Entity("Percolator.Infrastructure.Persistence.EmojiReactionDbo", b =>
-                {
-                    b.HasOne("Percolator.Infrastructure.Persistence.ConversationDbo", "Conversation")
-                        .WithMany()
-                        .HasForeignKey("ConversationId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Conversation");
                 });
 
             modelBuilder.Entity("Percolator.Infrastructure.Persistence.GroupCryptoStateDbo", b =>
@@ -1259,16 +1360,16 @@ namespace Percolator.Infrastructure.Migrations
 
             modelBuilder.Entity("Percolator.Infrastructure.Persistence.OneTimePreKeyDbo", b =>
                 {
-                    b.HasOne("Percolator.Infrastructure.Persistence.PeerIdentityKeyDbo", "PeerIdentityKey")
+                    b.HasOne("Percolator.Infrastructure.Persistence.PreKeyBundleDbo", "PreKeyBundle")
                         .WithMany("OneTimePreKeys")
-                        .HasForeignKey("PeerIdentityKeyId")
+                        .HasForeignKey("PreKeyBundleId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.Navigation("PeerIdentityKey");
+                    b.Navigation("PreKeyBundle");
                 });
 
-            modelBuilder.Entity("Percolator.Infrastructure.Persistence.PeerIdentityKeyDbo", b =>
+            modelBuilder.Entity("Percolator.Infrastructure.Persistence.PreKeyBundleDbo", b =>
                 {
                     b.HasOne("Percolator.Infrastructure.Identity.PeerIdentityDbo", null)
                         .WithMany()
@@ -1344,13 +1445,13 @@ namespace Percolator.Infrastructure.Migrations
 
             modelBuilder.Entity("Percolator.Infrastructure.Persistence.SignedPreKeyDbo", b =>
                 {
-                    b.HasOne("Percolator.Infrastructure.Persistence.PeerIdentityKeyDbo", "PeerIdentityKey")
+                    b.HasOne("Percolator.Infrastructure.Persistence.PreKeyBundleDbo", "PreKeyBundle")
                         .WithMany("SignedPreKeys")
-                        .HasForeignKey("PeerIdentityKeyId")
+                        .HasForeignKey("PreKeyBundleId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.Navigation("PeerIdentityKey");
+                    b.Navigation("PreKeyBundle");
                 });
 
             modelBuilder.Entity("Percolator.Infrastructure.Identity.PeerIdentityDbo", b =>
@@ -1367,7 +1468,7 @@ namespace Percolator.Infrastructure.Migrations
                     b.Navigation("Participants");
                 });
 
-            modelBuilder.Entity("Percolator.Infrastructure.Persistence.PeerIdentityKeyDbo", b =>
+            modelBuilder.Entity("Percolator.Infrastructure.Persistence.PreKeyBundleDbo", b =>
                 {
                     b.Navigation("OneTimePreKeys");
 
