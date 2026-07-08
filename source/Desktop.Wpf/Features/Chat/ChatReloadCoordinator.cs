@@ -5,6 +5,7 @@ using Desktop.Wpf.Features.Chat.State;
 using Percolator.Application.Identity;
 using Percolator.Chat;
 using Percolator.Application.Chat;
+using Percolator.Chat.Messaging;
 using Percolator.Chat.Messaging.App;
 using Percolator.Chat.Messaging.ValueObjects;
 
@@ -23,20 +24,17 @@ public sealed class ChatReloadCoordinator : IChatReloadCoordinator
     private readonly Subject<ReloadTrigger> _reloadTrigger = new();
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ChatStateService _state;
-    private readonly ISelfParticipantIdProvider _selfParticipantIdProvider;
     private readonly ActiveIdentityContext _activeIdentity;
     private readonly DisposableBag _bag;
 
     public ChatReloadCoordinator(
         IServiceScopeFactory scopeFactory,
         ChatStateService state,
-        ISelfParticipantIdProvider selfParticipantIdProvider,
         ActiveIdentityContext activeIdentity,
         TimeProvider timeProvider)
     {
         _scopeFactory = scopeFactory;
         _state = state;
-        _selfParticipantIdProvider = selfParticipantIdProvider;
         _activeIdentity = activeIdentity;
 
         _reloadTrigger
@@ -79,7 +77,6 @@ public sealed class ChatReloadCoordinator : IChatReloadCoordinator
         var messageQueries = scope.ServiceProvider.GetRequiredService<IConversationMessageQueries>();
         var messages = await messageQueries.GetMessagesAsync(conversationId, selfIdentityId, ct).ConfigureAwait(false);
 
-        var selfParticipantId = _selfParticipantIdProvider.Get();
         var snapshots = messages.Select(m => new ChatMessageSnapshot(
             Id: new PublicMessageId(m.MessageId),
             Author: m.SenderId == selfParticipantId.Value ? "Me" : "Peer",
@@ -99,7 +96,6 @@ public sealed class ChatReloadCoordinator : IChatReloadCoordinator
         var messageQueries = scope.ServiceProvider.GetRequiredService<IConversationMessageQueries>();
         var messages = await messageQueries.GetMessagesAsync(resolution.Conversation.Id, resolution.SelfIdentityId, ct).ConfigureAwait(false);
 
-        var selfParticipantId = _selfParticipantIdProvider.Get();
         var snapshots = messages.Select(m => new ChatMessageSnapshot(
             Id: new PublicMessageId(m.MessageId),
             Author: m.SenderId == selfParticipantId.Value ? "Me" : "Peer",

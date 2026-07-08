@@ -3,6 +3,7 @@ using ObservableCollections;
 using Desktop.Wpf.Shared.Mvvm;
 using Desktop.Wpf.Features.Sessions;
 using MediatR;
+using Percolator.Chat.Messaging;
 using Percolator.Chat.Messaging.App;
 using Percolator.Chat.Messaging.App.Commands;
 using Percolator.Chat.Messaging.ValueObjects;

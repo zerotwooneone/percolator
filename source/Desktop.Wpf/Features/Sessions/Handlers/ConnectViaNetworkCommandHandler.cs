@@ -132,7 +132,7 @@ public sealed class ConnectViaNetworkCommandHandler : IRequestHandler<ConnectVia
             return new ConnectViaNetworkResult.Failed("Identity not loaded.");
         }
 
-        var relayHostPeerId = new Percolator.Identity.PeerId(request.RelayHostPeerId.Value);
+        var relayHostPeerId = new Percolator.Identity.PeerId(request.RelayHostPeerId.Value.Value);
         var selfIdentityId = _active.Identity.SelfIdentityId.Value;
 
         DirectSession? direct;
