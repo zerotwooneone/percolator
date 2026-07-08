@@ -8,7 +8,7 @@ public class SelfIdentityDbo
     public Guid PublicIdentityId { get; set; }
     public string Name { get; set; } = null!;
     public DateTimeOffset LastUsedUtc { get; set; }
-    public Percolator.Identity.Model.ListeningPort ListeningPort { get; set; }
+    public int ListeningPort { get; set; }
     public DeviceId DeviceId { get; set; } = new DeviceId(1);
     public byte[]? ProfileKey { get; set; }
     public byte[]? EncryptedProfileData { get; set; }

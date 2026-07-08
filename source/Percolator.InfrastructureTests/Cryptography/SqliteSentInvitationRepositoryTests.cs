@@ -26,7 +26,7 @@ public sealed class SqliteSentInvitationRepositoryTests
 
         if (!ctx.SelfIdentities.Any())
         {
-            ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = 1, PublicIdentityId = Guid.NewGuid(), Name = "default", DeviceId = new Percolator.Identity.DeviceId(1), ListeningPort = new Percolator.Identity.Model.ListeningPort(5000), LastUsedUtc = DateTimeOffset.UtcNow });
+            ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = 1, PublicIdentityId = Guid.NewGuid(), Name = "default", DeviceId = new Percolator.Identity.DeviceId(1), ListeningPort = 5000, LastUsedUtc = DateTimeOffset.UtcNow });
             ctx.SaveChanges();
         }
 

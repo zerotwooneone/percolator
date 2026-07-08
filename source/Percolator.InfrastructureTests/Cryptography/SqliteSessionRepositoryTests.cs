@@ -27,7 +27,7 @@ public class SqliteSessionRepositoryTests
                 PublicIdentityId = Guid.NewGuid(), 
                 Name = "default", 
                 DeviceId = new DeviceId(1), 
-                ListeningPort = new Percolator.Identity.Model.ListeningPort(5000), 
+                ListeningPort = 5000, 
                 LastUsedUtc = DateTimeOffset.UtcNow
             });
             ctx.SaveChanges();
@@ -134,7 +134,7 @@ public class SqliteSessionRepositoryTests
                     PublicIdentityId = Guid.NewGuid(), 
                     Name = "one", 
                     DeviceId = new DeviceId(1), 
-                    ListeningPort = new Percolator.Identity.Model.ListeningPort(5000), 
+                    ListeningPort = 5000, 
                     LastUsedUtc = DateTimeOffset.UtcNow
                 });
                 ctxSeed.SelfIdentities.Add(new SelfIdentityDbo 
@@ -143,7 +143,7 @@ public class SqliteSessionRepositoryTests
                     PublicIdentityId = Guid.NewGuid(), 
                     Name = "two", 
                     DeviceId = new DeviceId(1), 
-                    ListeningPort = new Percolator.Identity.Model.ListeningPort(5000), 
+                    ListeningPort = 5000, 
                     LastUsedUtc = DateTimeOffset.UtcNow
                 });
                 ctxSeed.SaveChanges();

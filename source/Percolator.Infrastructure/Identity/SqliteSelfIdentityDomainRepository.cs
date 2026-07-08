@@ -57,7 +57,7 @@ public sealed class SqliteSelfIdentityDomainRepository : ISelfIdentityRepository
             PublicIdentityId = identity.PublicIdentityId.Value,
             Name = identity.DisplayName?.Value ?? string.Empty,
             LastUsedUtc = identity.LastUsedUtc,
-            ListeningPort = identity.ListeningPort,
+            ListeningPort = identity.ListeningPort.Value,
             DeviceId = identity.DeviceId,
             ActiveIdentityKeySpki = activeKey?.Spki,
             ActiveIdentityKeyFingerprint = activeKey?.Fingerprint,
@@ -89,7 +89,7 @@ public sealed class SqliteSelfIdentityDomainRepository : ISelfIdentityRepository
                     PublicIdentityId = identity.PublicIdentityId.Value,
                     Name = identity.DisplayName?.Value ?? string.Empty,
                     LastUsedUtc = identity.LastUsedUtc,
-                    ListeningPort = identity.ListeningPort,
+                    ListeningPort = identity.ListeningPort.Value,
                     DeviceId = identity.DeviceId,
                     ActiveIdentityKeySpki = activeKey?.Spki,
                     ActiveIdentityKeyFingerprint = activeKey?.Fingerprint,
@@ -101,7 +101,7 @@ public sealed class SqliteSelfIdentityDomainRepository : ISelfIdentityRepository
             {
                 dbo.Name = identity.DisplayName?.Value ?? dbo.Name;
                 dbo.LastUsedUtc = identity.LastUsedUtc;
-                dbo.ListeningPort = identity.ListeningPort;
+                dbo.ListeningPort = identity.ListeningPort.Value;
                 dbo.DeviceId = identity.DeviceId;
                 dbo.ProfileKey = identity.CurrentProfileKey?.Span.ToArray();
                 dbo.EncryptedProfileData = identity.CurrentProfileCiphertext?.Ciphertext.Span.ToArray();
@@ -121,7 +121,7 @@ public sealed class SqliteSelfIdentityDomainRepository : ISelfIdentityRepository
 
     private static SelfIdentity Map(SelfIdentityDbo dbo)
     {
-        var self = new SelfIdentity(new SelfId(dbo.Id), new PublicIdentityId(dbo.PublicIdentityId), dbo.ListeningPort, dbo.DeviceId, dbo.LastUsedUtc);
+        var self = new SelfIdentity(new SelfId(dbo.Id), new PublicIdentityId(dbo.PublicIdentityId), new Percolator.Identity.Model.ListeningPort(dbo.ListeningPort), dbo.DeviceId, dbo.LastUsedUtc);
         
         if (!string.IsNullOrWhiteSpace(dbo.Name)) self.SetDisplayName(dbo.Name);
         self.TouchLastUsed(dbo.LastUsedUtc);

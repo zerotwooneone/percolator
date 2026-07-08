@@ -16,7 +16,7 @@ public class SqliteReservedPortQuery: IReservedPortQuery
     public async Task<IEnumerable<int>> GetReservedPortsAsync(CancellationToken ct)
     {
         return await _dbContext.SelfIdentities
-            .Select(x => x.ListeningPort.Value) // Assuming EF Core maps the Value Object cleanly
+            .Select(x => x.ListeningPort)
             .ToListAsync(ct)
             .ConfigureAwait(false);
     }
