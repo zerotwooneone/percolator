@@ -9,7 +9,7 @@ public class MessageDbo
     public Guid ConversationId { get; set; }
 
     // Domain MessageId for idempotency
-    public PublicMessageId PublicMessageId { get; set; }
+    public Guid PublicMessageId { get; set; }
 
     public uint? SenderPeerId { get; set; }
     public uint? SenderSelfId { get; set; }

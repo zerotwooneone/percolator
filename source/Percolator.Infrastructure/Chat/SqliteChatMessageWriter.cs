@@ -27,7 +27,7 @@ public sealed class SqliteChatMessageWriter : IChatMessageWriter
         // Idempotency check
         var exists = await _db.Messages
             .AsNoTracking()
-            .AnyAsync(m => m.ConversationId == conversationId.Value && m.PublicMessageId == publicMessageId, cancellationToken);
+            .AnyAsync(m => m.ConversationId == conversationId.Value && m.PublicMessageId == publicMessageId.Value, cancellationToken);
         if (exists)
         {
             return; // idempotent success
@@ -36,7 +36,7 @@ public sealed class SqliteChatMessageWriter : IChatMessageWriter
         _db.Messages.Add(new MessageDbo
         {
             ConversationId = conversationId.Value,
-            PublicMessageId = publicMessageId,
+            PublicMessageId = publicMessageId.Value,
             SenderPeerId = participantId is RemoteParticipantId remoteParticipantId ? remoteParticipantId.PeerId.Value : null,
             SenderSelfId = participantId is LocalParticipantId localParticipantId ? localParticipantId.SelfId.Value : null,
             Body = content,
@@ -53,7 +53,7 @@ public sealed class SqliteChatMessageWriter : IChatMessageWriter
             // Re-check and swallow if now present
             var nowExists = await _db.Messages
                 .AsNoTracking()
-                .AnyAsync(m => m.ConversationId == conversationId.Value && m.PublicMessageId == publicMessageId, cancellationToken);
+                .AnyAsync(m => m.ConversationId == conversationId.Value && m.PublicMessageId == publicMessageId.Value, cancellationToken);
             if (!nowExists)
             {
                 throw;

@@ -23,7 +23,7 @@ public sealed class SqliteMessageRepository : IMessageRepository
         var dbo = new MessageDbo
         {
             ConversationId = message.ConversationId.Value,
-            PublicMessageId = message.Id,
+            PublicMessageId = message.Id.Value,
             SenderPeerId = message.SenderId is RemoteParticipantId remotePeerId ? remotePeerId.PeerId.Value : null,
             SenderSelfId = message.SenderId is LocalParticipantId localSelfId ? localSelfId.SelfId.Value : null,
             Body = message.Content,
@@ -37,7 +37,7 @@ public sealed class SqliteMessageRepository : IMessageRepository
     public async Task UpdateAsync(Message message, ChatSelfId selfIdentityId, CancellationToken cancellationToken)
     {
         var existing = await _db.Messages
-            .FirstOrDefaultAsync(m => m.PublicMessageId == message.Id, cancellationToken);
+            .FirstOrDefaultAsync(m => m.PublicMessageId == message.Id.Value, cancellationToken);
 
         if (existing is null)
         {
@@ -55,7 +55,7 @@ public sealed class SqliteMessageRepository : IMessageRepository
     {
         var dbo = await _db.Messages
             .AsNoTracking()
-            .FirstOrDefaultAsync(m => m.PublicMessageId == id, cancellationToken);
+            .FirstOrDefaultAsync(m => m.PublicMessageId == id.Value, cancellationToken);
 
         if (dbo is null)
             return null;
@@ -83,7 +83,7 @@ public sealed class SqliteMessageRepository : IMessageRepository
         }
 
         return new Message(
-            dbo.PublicMessageId,
+            new PublicMessageId(dbo.PublicMessageId),
             new ConversationId(dbo.ConversationId),
             senderId,
             dbo.Body,
