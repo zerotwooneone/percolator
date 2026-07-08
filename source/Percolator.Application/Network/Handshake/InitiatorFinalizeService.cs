@@ -281,7 +281,7 @@ namespace Percolator.Application.Network.Handshake
                 try
                 {
                     await _directSessionMappingWriter.WriteMappingAsync(
-                        new Percolator.Network.PeerId(peerIdentity.Id.Value),
+                        new Percolator.Network.NetworkPeerId(peerIdentity.Id.Value),
                         new Percolator.Network.DirectSessionId(sid.Value),
                         selfIdentityId,
                         cancellationToken).ConfigureAwait(false);
@@ -302,7 +302,7 @@ namespace Percolator.Application.Network.Handshake
                 {
                     try
                     {
-                        var netPeerId = new Percolator.Network.PeerId(peerIdentity.Id.Value);
+                        var netPeerId = new Percolator.Network.NetworkPeerId(peerIdentity.Id.Value);
                         var profile = await _routingProfiles.GetByIdAsync(netPeerId, cancellationToken).ConfigureAwait(false)
                             ?? new PeerRoutingProfile();
                         if (profile.Id is null)
@@ -407,7 +407,7 @@ namespace Percolator.Application.Network.Handshake
                     try
                     {
                         await _directSessionMappingWriter.WriteMappingAsync(
-                            new Percolator.Network.PeerId(tmp.RemotePeerId.Value),
+                            new Percolator.Network.NetworkPeerId(tmp.RemotePeerId.Value),
                             new Percolator.Network.DirectSessionId(sid.Value),
                             selfIdentityId,
                             cancellationToken).ConfigureAwait(false);
@@ -535,7 +535,7 @@ namespace Percolator.Application.Network.Handshake
                 try
                 {
                     await _directSessionMappingWriter.WriteMappingAsync(
-                        new Percolator.Network.PeerId(peerIdentity.Id.Value),
+                        new Percolator.Network.NetworkPeerId(peerIdentity.Id.Value),
                         new Percolator.Network.DirectSessionId(sid.Value),
                         selfIdentityId,
                         cancellationToken).ConfigureAwait(false);
@@ -552,14 +552,14 @@ namespace Percolator.Application.Network.Handshake
                 {
                     try
                     {
-                        var netPeerId = new Percolator.Network.PeerId(peerIdentity.Id.Value);
+                        var netPeerId = new Percolator.Network.NetworkPeerId(peerIdentity.Id.Value);
                         var profile = await _routingProfiles.GetByIdAsync(netPeerId, cancellationToken).ConfigureAwait(false)
                             ?? new PeerRoutingProfile();
                         if (profile.Id is null)
                         {
                             profile.BindIdentity(netPeerId);
                         }
-                        profile.AddOrRefreshRelay(new Percolator.Network.PeerId(relayPeerId.Value.Value), _clock.UtcNow);
+                        profile.AddOrRefreshRelay(new Percolator.Network.NetworkPeerId(relayPeerId.Value.Value), _clock.UtcNow);
                         profile.SetIdentityPublicKey(Percolator.Network.ValueObjects.IdentityPublicKey.FromBytes(remoteIdentitySpki));
                         await _routingProfiles.UpsertAsync(profile, cancellationToken).ConfigureAwait(false);
 
@@ -571,9 +571,9 @@ namespace Percolator.Application.Network.Handshake
                         var candidate = new PeerRouteCandidate
                         {
                             SelfIdentityId = selfIdentityId.Value,
-                            RemotePeerId = netPeerId,
+                            RemoteNetworkPeerId = netPeerId,
                             RouteKind = RouteKind.Relayed,
-                            RelayHostPeerId = new Percolator.Network.PeerId(relayPeerId.Value.Value),
+                            RelayHostPeerId = new Percolator.Network.NetworkPeerId(relayPeerId.Value.Value),
                             ObservedAtUtc = _clock.UtcNow,
                             AttemptCount = 0,
                             Source = "main-initiated"

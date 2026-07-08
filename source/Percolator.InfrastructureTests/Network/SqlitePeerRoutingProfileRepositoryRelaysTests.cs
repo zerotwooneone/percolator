@@ -29,13 +29,13 @@ public class SqlitePeerRoutingProfileRepositoryRelaysTests
     {
         var ctx = CreateDbContext(out var _);
         var repo = new SqlitePeerRoutingProfileRepository(ctx);
-        var pid = new PeerId(1);
+        var pid = new NetworkPeerId(1);
         var prp = new PeerRoutingProfile();
         prp.BindIdentity(pid);
 
         var now = DateTimeOffset.UtcNow;
-        var r1 = new PeerId(1);
-        var r2 = new PeerId(1);
+        var r1 = new NetworkPeerId(1);
+        var r2 = new NetworkPeerId(1);
         var t1 = now.AddMinutes(-10);
         var t2 = now.AddMinutes(-5);
         prp.AddOrRefreshRelay(r1, t1);
@@ -51,6 +51,6 @@ public class SqlitePeerRoutingProfileRepositoryRelaysTests
 
         var loaded = await repo.GetByIdAsync(pid);
         loaded.Should().NotBeNull();
-        loaded!.Relays.Should().ContainSingle(x => x.RelayPeerId == r1 && x.Freshness.LastSeenUtc == t1New);
+        loaded!.Relays.Should().ContainSingle(x => x.RelayNetworkPeerId == r1 && x.Freshness.LastSeenUtc == t1New);
     }
 }

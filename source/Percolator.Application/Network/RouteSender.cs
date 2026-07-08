@@ -37,7 +37,7 @@ public sealed class RouteSender : IRouteSender
         _keyStore = keyStore;
     }
 
-    public async Task<TransportSendResult> SendDirectAsync(Percolator.Network.PeerId target, NetworkPayload payload, CancellationToken ct = default)
+    public async Task<TransportSendResult> SendDirectAsync(Percolator.Network.NetworkPeerId target, NetworkPayload payload, CancellationToken ct = default)
     {
         try
         {
@@ -66,7 +66,7 @@ public sealed class RouteSender : IRouteSender
         }
     }
 
-    public async Task<TransportSendResult> SendViaRelayAsync(Percolator.Network.PeerId relay, Percolator.Network.PeerId target, NetworkPayload payload, CancellationToken ct = default)
+    public async Task<TransportSendResult> SendViaRelayAsync(Percolator.Network.NetworkPeerId relay, Percolator.Network.NetworkPeerId target, NetworkPayload payload, CancellationToken ct = default)
     {
         try
         {

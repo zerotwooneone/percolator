@@ -11,7 +11,6 @@ using Percolator.Identity;
 using Percolator.Identity.Model;
 using Percolator.Network;
 using Percolator.Network.Messaging;
-using PeerId = Percolator.Network.PeerId;
 
 namespace Percolator.ApplicationTests.Network;
 
@@ -30,15 +29,15 @@ public sealed class OutboundMessageWireTapTests
         var sessions = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
         sessions.Setup(s => s.ListAsync(It.IsAny<NetworkSelfId>()))
             .ReturnsAsync(Array.Empty<DirectSession>());
-        sessions.Setup(s => s.GetByRemotePeerIdAsync(It.IsAny<PeerId>(), It.IsAny<NetworkSelfId>()))
-            .ReturnsAsync(new DirectSession(new PeerId(1), new DirectSessionId(Guid.NewGuid())));
+        sessions.Setup(s => s.GetByRemotePeerIdAsync(It.IsAny<NetworkPeerId>(), It.IsAny<NetworkSelfId>()))
+            .ReturnsAsync(new DirectSession(new NetworkPeerId(1), new DirectSessionId(Guid.NewGuid())));
 
         var secure = new Mock<ISecureMessagingService>(MockBehavior.Strict);
         secure.Setup(s => s.EncryptAsync(It.IsAny<SessionId>(), It.IsAny<Plaintext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(SessionRatchetMessage.FromBytes(new byte[] { 0xAA, 0xBB }));
 
         var sender = new Mock<INetworkSender>(MockBehavior.Strict);
-        sender.Setup(s => s.SendAsync(It.IsAny<uint>(), It.IsAny<PeerId>(), It.IsAny<NetworkPayload>(), It.IsAny<SendStrategy>(), It.IsAny<CancellationToken>()))
+        sender.Setup(s => s.SendAsync(It.IsAny<uint>(), It.IsAny<NetworkPeerId>(), It.IsAny<NetworkPayload>(), It.IsAny<SendStrategy>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SendOutcome { Success = true, Path = "Direct", AttemptedPaths = new[] { "Direct" }, Attempts = 1 });
 
         var profileOrchestrationService = new Mock<Percolator.Application.Chat.IProfileOrchestrationService>(MockBehavior.Loose);
@@ -56,7 +55,7 @@ public sealed class OutboundMessageWireTapTests
 
         _ = await sut.SendMessageAsync(env, recipient, CancellationToken.None);
 
-        sender.Verify(s => s.SendAsync(It.IsAny<uint>(), It.IsAny<PeerId>(), It.IsAny<NetworkPayload>(), It.IsAny<SendStrategy>(), It.IsAny<CancellationToken>()), Times.Once);
+        sender.Verify(s => s.SendAsync(It.IsAny<uint>(), It.IsAny<NetworkPeerId>(), It.IsAny<NetworkPayload>(), It.IsAny<SendStrategy>(), It.IsAny<CancellationToken>()), Times.Once);
 
         tap.Snapshot().Should().BeEmpty();
     }
@@ -73,8 +72,8 @@ public sealed class OutboundMessageWireTapTests
         var sessions = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
         sessions.Setup(s => s.ListAsync(It.IsAny<NetworkSelfId>()))
             .ReturnsAsync(Array.Empty<DirectSession>());
-        sessions.Setup(s => s.GetByRemotePeerIdAsync(It.IsAny<PeerId>(), It.IsAny<NetworkSelfId>()))
-            .ReturnsAsync(new DirectSession(new PeerId(2), new DirectSessionId(Guid.NewGuid())));
+        sessions.Setup(s => s.GetByRemotePeerIdAsync(It.IsAny<NetworkPeerId>(), It.IsAny<NetworkSelfId>()))
+            .ReturnsAsync(new DirectSession(new NetworkPeerId(2), new DirectSessionId(Guid.NewGuid())));
 
         var secure = new Mock<ISecureMessagingService>(MockBehavior.Strict);
         var expectedCipher = new byte[] { 0x01, 0x02, 0x03 };
@@ -82,7 +81,7 @@ public sealed class OutboundMessageWireTapTests
             .ReturnsAsync(SessionRatchetMessage.FromBytes(expectedCipher));
 
         var sender = new Mock<INetworkSender>(MockBehavior.Strict);
-        sender.Setup(s => s.SendAsync(It.IsAny<uint>(), It.IsAny<PeerId>(), It.IsAny<NetworkPayload>(), It.IsAny<SendStrategy>(), It.IsAny<CancellationToken>()))
+        sender.Setup(s => s.SendAsync(It.IsAny<uint>(), It.IsAny<NetworkPeerId>(), It.IsAny<NetworkPayload>(), It.IsAny<SendStrategy>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SendOutcome { Success = true, Path = "Direct", AttemptedPaths = new[] { "Direct" }, Attempts = 1 });
 
         var keyStore = new Mock<IPeerPublicSigningKeyStore>(MockBehavior.Strict);
@@ -102,11 +101,11 @@ public sealed class OutboundMessageWireTapTests
 
         _ = await sut.SendMessageAsync(env, recipient, CancellationToken.None);
 
-        sender.Verify(s => s.SendAsync(It.IsAny<uint>(), It.IsAny<PeerId>(), It.IsAny<NetworkPayload>(), It.IsAny<SendStrategy>(), It.IsAny<CancellationToken>()), Times.Never);
+        sender.Verify(s => s.SendAsync(It.IsAny<uint>(), It.IsAny<NetworkPeerId>(), It.IsAny<NetworkPayload>(), It.IsAny<SendStrategy>(), It.IsAny<CancellationToken>()), Times.Never);
 
         var items = tap.Snapshot();
         items.Should().HaveCount(1);
-        items[0].DestinationPeerId.Should().Be(new PeerId(recipient.Value));
+        items[0].DestinationNetworkPeerId.Should().Be(new NetworkPeerId(recipient.Value));
         items[0].SendPath.Should().Be("Simulated");
         items[0].MessageType.Should().Be("EncryptedEnvelope");
         items[0].RequestCorrelationId.Should().BeNull();

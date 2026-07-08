@@ -5,5 +5,5 @@ public abstract record PlannedRoute
     private PlannedRoute() { }
 
     public sealed record Direct : PlannedRoute;
-    public sealed record Relay(PeerId RelayHostPeerId) : PlannedRoute;
+    public sealed record Relay(NetworkPeerId RelayHostNetworkPeerId) : PlannedRoute;
 }

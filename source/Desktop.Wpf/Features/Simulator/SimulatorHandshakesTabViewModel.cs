@@ -25,7 +25,7 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
     private readonly NotifyCollectionChangedSynchronizedViewList<RelayHostOption> _relayHostsNotify;
 
     private readonly object _peerRelaySubGate = new();
-    private IReadOnlyDictionary<PeerId, IDisposable> _peerRelaySubs = new Dictionary<PeerId, IDisposable>();
+    private IReadOnlyDictionary<NetworkPeerId, IDisposable> _peerRelaySubs = new Dictionary<NetworkPeerId, IDisposable>();
 
     private DisposableBag _bag;
 
@@ -46,7 +46,7 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
         _state = state;
         _diagnostics = diagnostics;
 
-        SelectedRelayHostPeerId = new BindableReactiveProperty<PeerId?>(null).AddTo(ref _bag);
+        SelectedRelayHostPeerId = new BindableReactiveProperty<NetworkPeerId?>(null).AddTo(ref _bag);
 
         _relayHostsNotify = _relayHosts.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher);
 
@@ -58,13 +58,13 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
         HookRelayHosts();
     }
 
-    public sealed record RelayHostOption(PeerId PeerId, string DisplayName);
+    public sealed record RelayHostOption(NetworkPeerId NetworkPeerId, string DisplayName);
 
     public NotifyCollectionChangedSynchronizedViewList<SimulatedHandshakeStateMachineCardViewModel> Cards => _cardsNotify;
 
     public NotifyCollectionChangedSynchronizedViewList<RelayHostOption> RelayHosts => _relayHostsNotify;
 
-    public BindableReactiveProperty<PeerId?> SelectedRelayHostPeerId { get; }
+    public BindableReactiveProperty<NetworkPeerId?> SelectedRelayHostPeerId { get; }
 
     private void HookRelayHosts()
     {
@@ -88,11 +88,11 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
 
     private void RewirePeerRelaySubscriptionsOnUi()
     {
-        IReadOnlyDictionary<PeerId, IDisposable> prev;
+        IReadOnlyDictionary<NetworkPeerId, IDisposable> prev;
         lock (_peerRelaySubGate)
         {
             prev = _peerRelaySubs;
-            _peerRelaySubs = new Dictionary<PeerId, IDisposable>();
+            _peerRelaySubs = new Dictionary<NetworkPeerId, IDisposable>();
         }
 
         foreach (var d in prev.Values)
@@ -100,7 +100,7 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
             try { d.Dispose(); } catch { }
         }
 
-        var next = new Dictionary<PeerId, IDisposable>();
+        var next = new Dictionary<NetworkPeerId, IDisposable>();
         foreach (var peer in _state.Peers)
         {
             // RelayHosts needs to update when IsRelayCapable toggles or display name changes.
@@ -110,7 +110,7 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
             var sub = Observable.Merge(relayChanged, nameChanged)
                 .SubscribeAwait(async (_, __) => await _ui.InvokeAsync(RebuildRelayHostsOnUi, CancellationToken.None));
 
-            next[peer.PeerId] = sub;
+            next[peer.NetworkPeerId] = sub;
         }
 
         lock (_peerRelaySubGate)
@@ -130,12 +130,12 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
         foreach (var p in _state.Peers.Where(static x => x.IsRelayCapable.CurrentValue))
         {
             var name = p.DisplayName.CurrentValue;
-            name = string.IsNullOrWhiteSpace(name) ? p.PeerId.ToString()[..8] : name;
-            _relayHosts.Add(new RelayHostOption(p.PeerId, name!));
+            name = string.IsNullOrWhiteSpace(name) ? p.NetworkPeerId.ToString()[..8] : name;
+            _relayHosts.Add(new RelayHostOption(p.NetworkPeerId, name!));
         }
 
         if (SelectedRelayHostPeerId.Value is not null
-            && _relayHosts.All(x => x.PeerId.Value != SelectedRelayHostPeerId.Value.Value))
+            && _relayHosts.All(x => x.NetworkPeerId.Value != SelectedRelayHostPeerId.Value.Value))
         {
             SelectedRelayHostPeerId.Value = null;
         }
@@ -165,7 +165,7 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
             {
                 try { d.Dispose(); } catch { }
             }
-            _peerRelaySubs = new Dictionary<PeerId, IDisposable>();
+            _peerRelaySubs = new Dictionary<NetworkPeerId, IDisposable>();
         }
 
         _bag.Dispose();

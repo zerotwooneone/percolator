@@ -55,16 +55,16 @@ public sealed class SendOutcome
 
 public interface INetworkSender
 {
-    Task<SendOutcome> SendAsync(uint selfIdentityId, PeerId target, NetworkPayload payload, SendStrategy strategy, CancellationToken ct = default);
+    Task<SendOutcome> SendAsync(uint selfIdentityId, NetworkPeerId target, NetworkPayload payload, SendStrategy strategy, CancellationToken ct = default);
 }
 
 // Route planning and relay topology abstractions (to be implemented by Application or Infrastructure layers)
 public interface IRelayTopology
 {
-    Task<PeerId?> GetRelayForAsync(PeerId target, CancellationToken ct = default);
+    Task<NetworkPeerId?> GetRelayForAsync(NetworkPeerId target, CancellationToken ct = default);
 }
 
 public interface ISendExecutor
 {
-    Task<SendOutcome> ExecuteAsync(uint selfIdentityId, PeerId target, NetworkPayload payload, IReadOnlyList<PlannedRoute> plannedRoutes, CancellationToken ct = default);
+    Task<SendOutcome> ExecuteAsync(uint selfIdentityId, NetworkPeerId target, NetworkPayload payload, IReadOnlyList<PlannedRoute> plannedRoutes, CancellationToken ct = default);
 }

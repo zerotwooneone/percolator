@@ -55,7 +55,7 @@ namespace Percolator.ApplicationTests.Network;
 
             // Map session and peer
             directRepo.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId), It.IsAny<NetworkSelfId>()))
-                .ReturnsAsync(new DirectSession(new Percolator.Network.PeerId(remotePeerId), new DirectSessionId(sessionId)));
+                .ReturnsAsync(new DirectSession(new Percolator.Network.NetworkPeerId(remotePeerId), new DirectSessionId(sessionId)));
             var endpoint = new GrpcEndPoint(new System.Net.DnsEndPoint("127.0.0.1", 5056), new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero));
             var identityKey = DirectMessagePublicKey.FromBytes(RandomBytes(80));
 
@@ -107,7 +107,7 @@ namespace Percolator.ApplicationTests.Network;
 
             // Map session and peer
             directRepo.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId), It.IsAny<NetworkSelfId>()))
-                .ReturnsAsync(new DirectSession(new Percolator.Network.PeerId(remotePeerId), new DirectSessionId(sessionId)));
+                .ReturnsAsync(new DirectSession(new Percolator.Network.NetworkPeerId(remotePeerId), new DirectSessionId(sessionId)));
             var endpoint = new GrpcEndPoint(new System.Net.DnsEndPoint("127.0.0.1", 5055), new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero));
             var identityKey = DirectMessagePublicKey.FromBytes(RandomBytes(80));
 
@@ -165,7 +165,7 @@ namespace Percolator.ApplicationTests.Network;
 
             // Session mapping and peer info
             directRepo.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId), It.IsAny<NetworkSelfId>()))
-                .ReturnsAsync(new DirectSession(new Percolator.Network.PeerId(remotePeerId), new DirectSessionId(sessionId)));
+                .ReturnsAsync(new DirectSession(new Percolator.Network.NetworkPeerId(remotePeerId), new DirectSessionId(sessionId)));
             var endpoint = new GrpcEndPoint(new System.Net.DnsEndPoint("127.0.0.1", 6060), new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero));
 
             // Orchestrator invoked via ProcessInternalEnvelopeCommand (no early response expected)
@@ -220,7 +220,7 @@ namespace Percolator.ApplicationTests.Network;
 
         // Session mapping and peer info
         directRepo.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId), It.IsAny<NetworkSelfId>()))
-            .ReturnsAsync(new DirectSession(new Percolator.Network.PeerId(remotePeerId), new DirectSessionId(sessionId)));
+            .ReturnsAsync(new DirectSession(new Percolator.Network.NetworkPeerId(remotePeerId), new DirectSessionId(sessionId)));
         var endpoint = new GrpcEndPoint(new System.Net.DnsEndPoint("127.0.0.1", 7777), new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero));
         // For disallowed envelope path, handler returns before updating LastSeen/SaveAsync; no SaveAsync expected.
 
@@ -270,7 +270,7 @@ namespace Percolator.ApplicationTests.Network;
 
         // Direct session mapping and peer info
         directRepo.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId), It.IsAny<NetworkSelfId>()))
-            .ReturnsAsync(new DirectSession(new Percolator.Network.PeerId(remotePeerId), new DirectSessionId(sessionId)));
+            .ReturnsAsync(new DirectSession(new Percolator.Network.NetworkPeerId(remotePeerId), new DirectSessionId(sessionId)));
         var endpoint = new GrpcEndPoint(new System.Net.DnsEndPoint("127.0.0.1", 7000), new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero));
 
         // Orchestrator returns a response envelope (e.g., MQ fetch response)
@@ -324,7 +324,7 @@ namespace Percolator.ApplicationTests.Network;
         // Map session to a remote peer and provide connection info
         var remotePeerGuid = 54321u;
         directRepo.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId), It.IsAny<NetworkSelfId>()))
-            .ReturnsAsync(new DirectSession(new Percolator.Network.PeerId(remotePeerGuid), new DirectSessionId(sessionId)));
+            .ReturnsAsync(new DirectSession(new Percolator.Network.NetworkPeerId(remotePeerGuid), new DirectSessionId(sessionId)));
         var endpoint3 = new GrpcEndPoint(new System.Net.DnsEndPoint("127.0.0.1", 5050), new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero));
         // peer connection lookup removed in new design
         ratchetLookup.Setup(l => l.UpsertAsync(It.IsAny<CryptoSelfId>(), It.Is<SessionId>(s => s.Value == sessionId), It.IsAny<RatchetEphemeralKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
@@ -371,7 +371,7 @@ namespace Percolator.ApplicationTests.Network;
         // Direct session mapping and peer info
         var remotePeerId = 67890u;
         directRepo.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId), It.IsAny<NetworkSelfId>()))
-            .ReturnsAsync(new DirectSession(new Percolator.Network.PeerId(remotePeerId), new DirectSessionId(sessionId)));
+            .ReturnsAsync(new DirectSession(new Percolator.Network.NetworkPeerId(remotePeerId), new DirectSessionId(sessionId)));
         var endpoint = new GrpcEndPoint(new System.Net.DnsEndPoint("localhost", 6000), new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero));
 
         // Orchestrator receives Ping via ProcessInternalEnvelopeCommand
@@ -452,8 +452,8 @@ namespace Percolator.ApplicationTests.Network;
         var profileRepo = new Mock<IPeerRoutingProfileRepository>(MockBehavior.Loose);
         // Always return a profile with a fresh localhost endpoint for any peer id
         profileRepo
-            .Setup(r => r.GetByIdAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<CancellationToken>()))
-            .Returns<Percolator.Network.PeerId, CancellationToken>((pid, ct) =>
+            .Setup(r => r.GetByIdAsync(It.IsAny<Percolator.Network.NetworkPeerId>(), It.IsAny<CancellationToken>()))
+            .Returns<Percolator.Network.NetworkPeerId, CancellationToken>((pid, ct) =>
             {
                 var now = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero);
                 var profile = new PeerRoutingProfile();
@@ -545,7 +545,7 @@ namespace Percolator.ApplicationTests.Network;
             .ReturnsAsync((new SessionId(sessionId), plain));
 
         directRepo.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId), It.IsAny<NetworkSelfId>()))
-            .ReturnsAsync(new DirectSession(new Percolator.Network.PeerId(remotePeerId), new DirectSessionId(sessionId)));
+            .ReturnsAsync(new DirectSession(new Percolator.Network.NetworkPeerId(remotePeerId), new DirectSessionId(sessionId)));
 
         var endpoint = new GrpcEndPoint(new DnsEndPoint("127.0.0.1", 5001), new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero));
         var identityKey = DirectMessagePublicKey.FromBytes(RandomBytes(80));
@@ -588,7 +588,7 @@ namespace Percolator.ApplicationTests.Network;
             .ReturnsAsync((new SessionId(sessionId), plain));
 
         directRepo.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId), It.IsAny<NetworkSelfId>()))
-            .ReturnsAsync(new DirectSession(new Percolator.Network.PeerId(remotePeerId), new DirectSessionId(sessionId)));
+            .ReturnsAsync(new DirectSession(new Percolator.Network.NetworkPeerId(remotePeerId), new DirectSessionId(sessionId)));
 
         var endpoint = new GrpcEndPoint(new System.Net.DnsEndPoint("127.0.0.1", 5001), new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero));
         var identityKey = DirectMessagePublicKey.FromBytes(RandomBytes(80));
@@ -650,7 +650,7 @@ namespace Percolator.ApplicationTests.Network;
 
         // Direct session mapping is looked up before prefilter, set it up
         directRepo.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId), It.IsAny<NetworkSelfId>()))
-            .ReturnsAsync(new DirectSession(new Percolator.Network.PeerId(remotePeerId), new DirectSessionId(sessionId)));
+            .ReturnsAsync(new DirectSession(new Percolator.Network.NetworkPeerId(remotePeerId), new DirectSessionId(sessionId)));
 
         // Upsert after decrypt is allowed
         ratchetLookup.Setup(l => l.UpsertAsync(It.IsAny<CryptoSelfId>(), It.Is<SessionId>(s => s.Value == sessionId), It.IsAny<RatchetEphemeralKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))

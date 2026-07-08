@@ -77,8 +77,8 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
     public async Task AcceptInboundDirectInviteAsync_creates_session_in_memory()
     {
         // Arrange
-        var simulatedPeerId = new Percolator.Network.PeerId(Guid.NewGuid());
-        var inviterPeerId = new Percolator.Network.PeerId(Guid.NewGuid());
+        var simulatedPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
+        var inviterPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
 
         var acceptorPeer = CryptoTestHelpers.CreateTestPeer(
             simulatedPeerId, 99000, "sim", false,
@@ -130,16 +130,16 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         acceptance.Response.Should().NotBeNull();
         acceptance.Response.Version.Should().Be(1);
 
-        sut.Peers.Should().ContainSingle(p => p.PeerId == simulatedPeerId);
-        sut.Peers.Single(p => p.PeerId == simulatedPeerId).Sessions.Count.Should().Be(1);
+        sut.Peers.Should().ContainSingle(p => p.NetworkPeerId == simulatedPeerId);
+        sut.Peers.Single(p => p.NetworkPeerId == simulatedPeerId).Sessions.Count.Should().Be(1);
     }
 
     [Test]
     public async Task AcceptInboundDirectInviteAsync_eventually_persists_runtime_store()
     {
         // Arrange
-        var simulatedPeerId = new Percolator.Network.PeerId(Guid.NewGuid());
-        var inviterPeerId = new Percolator.Network.PeerId(Guid.NewGuid());
+        var simulatedPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
+        var inviterPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
 
         using var acceptorIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var acceptorIdentityPriv = acceptorIdentityEcdh.ExportECPrivateKey();
@@ -174,7 +174,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         };
 
         var peer = new SimulatedPeerModel(
-            peerId: simulatedPeerId,
+            networkPeerId: simulatedPeerId,
             selfIdentityId: 99000,
             displayName: "sim",
             isRelayCapable: false,
@@ -202,14 +202,14 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         timeProvider.Advance(TimeSpan.FromMilliseconds(300));
 
         repo.LastSavedSnapshot.Should().NotBeNull();
-        repo.LastSavedSnapshot!.Peers.Single(p => p.PeerId == simulatedPeerId).Sessions.Count.Should().Be(1);
+        repo.LastSavedSnapshot!.Peers.Single(p => p.NetworkPeerId == simulatedPeerId).Sessions.Count.Should().Be(1);
     }
 
     [Test]
     public async Task Relayed_HandshakeInitiatorHello_is_handled_and_persists_runtime_store()
     {
-        var simulatedPeerId = new Percolator.Network.PeerId(Guid.NewGuid());
-        var relayHostPeerId = new Percolator.Network.PeerId(Guid.NewGuid());
+        var simulatedPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
+        var relayHostPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
 
         using var responderIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var responderIdentityPriv = responderIdentityEcdh.ExportECPrivateKey();
@@ -222,7 +222,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         var responderSignedPreKeyPriv = responderSignedPreKey.ExportECPrivateKey();
 
         var peer = new SimulatedPeerModel(
-            peerId: simulatedPeerId,
+            networkPeerId: simulatedPeerId,
             selfIdentityId: 99000,
             displayName: "sim",
             isRelayCapable: false,
@@ -261,44 +261,44 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
 
         // Act: relay delivery stores standard hello as pending (no immediate response)
         await sut.UpsertPendingStandardSignalHelloAsync(
-            recipientPeerId: simulatedPeerId,
-            relayHostPeerId: relayHostPeerId,
+            recipientNetworkPeerId: simulatedPeerId,
+            relayHostNetworkPeerId: relayHostPeerId,
             hello: hello,
             receivedUtc: StaticClock.DefaultNow,
             cancellationToken: CancellationToken.None);
 
         // Assert: pending is present and no session yet
         var initiatorPkhHex = Convert.ToHexString(SHA256.HashData(initiatorIdentitySpki)).ToLowerInvariant();
-        sut.Peers.Single(p => p.PeerId == simulatedPeerId)
+        sut.Peers.Single(p => p.NetworkPeerId == simulatedPeerId)
             .PendingInboundStandardSignalHellos
             .ContainsKey(initiatorPkhHex)
             .Should().BeTrue();
 
-        sut.Peers.Single(p => p.PeerId == simulatedPeerId).Sessions.Count.Should().Be(0);
+        sut.Peers.Single(p => p.NetworkPeerId == simulatedPeerId).Sessions.Count.Should().Be(0);
 
         // Act: user accepts the pending hello, which establishes session and enqueues response back to initiator
         var accepted = await sut.TryAcceptPendingStandardSignalHelloAsync(
-            recipientPeerId: simulatedPeerId,
+            recipientNetworkPeerId: simulatedPeerId,
             initiatorPkhHex: initiatorPkhHex,
             cancellationToken: CancellationToken.None);
 
         accepted.Should().BeTrue();
 
-        var relay = sut.Relays.Single(r => r.RelayHostPeerId == relayHostPeerId);
+        var relay = sut.Relays.Single(r => r.RelayHostNetworkPeerId == relayHostPeerId);
         relay.MessageQueue.Select(kvp => kvp.Value)
             .OfType<OutboundRelayMessage>()
             .Any(m => m.DebugType == nameof(EstablishSessionResponse))
             .Should().BeTrue();
 
-        sut.Peers.Single(p => p.PeerId == simulatedPeerId).Sessions.Count.Should().Be(1);
+        sut.Peers.Single(p => p.NetworkPeerId == simulatedPeerId).Sessions.Count.Should().Be(1);
     }
 
     [Test]
     public async Task When_initiating_standard_handshake_via_relay_it_enqueues_handshake_initiator_hello_to_relay_host()
     {
         // Arrange
-        var simulatedPeerId = new Percolator.Network.PeerId(Guid.NewGuid());
-        var relayHostPeerId = new Percolator.Network.PeerId(Guid.NewGuid());
+        var simulatedPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
+        var relayHostPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
 
         using var initiatorIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var initiatorIdentityPriv = initiatorIdentityEcdh.ExportECPrivateKey();
@@ -309,7 +309,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         var responderPkh = bundle.ResponderPkh;
 
         var initiatorPeer = new SimulatedPeerModel(
-            peerId: simulatedPeerId,
+            networkPeerId: simulatedPeerId,
             selfIdentityId: 99000,
             displayName: "sim",
             isRelayCapable: false,
@@ -317,7 +317,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             identitySigningKeyPrivateKeyEcPrivateKey: initiatorIdentityPriv,
             endpoint: new System.Net.DnsEndPoint("127.77.1.1", 5002));
         var relayPeer = new SimulatedPeerModel(
-            peerId: relayHostPeerId,
+            networkPeerId: relayHostPeerId,
             selfIdentityId: 99001,
             displayName: "relay",
             isRelayCapable: true,
@@ -328,7 +328,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             {
                 new(
                     RecipientPublicKeyHash: Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(responderPkh),
-                    LogicalOwnerPeerId: new Percolator.Network.PeerId(Guid.NewGuid()),
+                    LogicalOwnerNetworkPeerId: new Percolator.Network.NetworkPeerId(Guid.NewGuid()),
                     IdentityKey: bundle.IdentityKey,
                     SignedPreKeyId: bundle.SignedPreKeyId,
                     SignedPreKey: bundle.SignedPreKey,
@@ -360,7 +360,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         // Assert
         sid.Should().NotBeNull();
 
-        var relay = sut.Relays.Single(r => r.RelayHostPeerId == relayHostPeerId);
+        var relay = sut.Relays.Single(r => r.RelayHostNetworkPeerId == relayHostPeerId);
         var queued = relay.MessageQueue.Select(kvp => kvp.Value)
             .OfType<InboundRelayMessage>()
             .Single(i => i.DebugType == nameof(HandshakeInitiatorHello));
@@ -379,8 +379,8 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
     public async Task When_relay_returns_bundle_with_mismatched_identity_key_it_does_not_enqueue_handshake_hello()
     {
         // Arrange
-        var simulatedPeerId = new Percolator.Network.PeerId(Guid.NewGuid());
-        var relayHostPeerId = new Percolator.Network.PeerId(Guid.NewGuid());
+        var simulatedPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
+        var relayHostPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
 
         using var initiatorIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var initiatorIdentityPriv = initiatorIdentityEcdh.ExportECPrivateKey();
@@ -393,7 +393,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         var bundle = CreateValidResponderPreKeyBundle();
 
         var initiatorPeer = new SimulatedPeerModel(
-            peerId: simulatedPeerId,
+            networkPeerId: simulatedPeerId,
             selfIdentityId: 99000,
             displayName: "sim",
             isRelayCapable: false,
@@ -401,7 +401,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             identitySigningKeyPrivateKeyEcPrivateKey: initiatorIdentityPriv,
             endpoint: new System.Net.DnsEndPoint("127.77.1.1", 5002));
         var relayPeer = new SimulatedPeerModel(
-            peerId: relayHostPeerId,
+            networkPeerId: relayHostPeerId,
             selfIdentityId: 99001,
             displayName: "relay",
             isRelayCapable: true,
@@ -412,7 +412,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             {
                 new(
                     RecipientPublicKeyHash: Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(requestedResponderPkh),
-                    LogicalOwnerPeerId: new Percolator.Network.PeerId(Guid.NewGuid()),
+                    LogicalOwnerNetworkPeerId: new Percolator.Network.NetworkPeerId(Guid.NewGuid()),
                     IdentityKey: bundle.IdentityKey,
                     SignedPreKeyId: bundle.SignedPreKeyId,
                     SignedPreKey: bundle.SignedPreKey,
@@ -448,7 +448,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         var maxAttempts = 50; // Prevent infinite loop
         for (var i = 0; i < maxAttempts; i++)
         {
-            var relay = sut.Relays.Single(r => r.RelayHostPeerId.Value == relayHostPeerId.Value);
+            var relay = sut.Relays.Single(r => r.RelayHostNetworkPeerId.Value == relayHostPeerId.Value);
             if (relay.MessageQueue.Count == 0)
             {
                 break;
@@ -457,7 +457,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             await Task.Delay(50);
         }
 
-        var relayAfter = sut.Relays.Single(r => r.RelayHostPeerId.Value == relayHostPeerId.Value);
+        var relayAfter = sut.Relays.Single(r => r.RelayHostNetworkPeerId.Value == relayHostPeerId.Value);
         relayAfter.MessageQueue.Count.Should().Be(0);
 
         diagnostics.Events.Should().NotContain(e => e.EventType == SimulatorDiagnosticEventType.StandardHandshakeHelloEnqueued);
@@ -467,9 +467,9 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
     public async Task Relayed_EstablishSessionResponse_is_handled_by_initiator_and_persists_session_with_assigned_session_id()
     {
         // Arrange
-        var initiatorPeerId = new Percolator.Network.PeerId(Guid.NewGuid());
-        var responderPeerId = new Percolator.Network.PeerId(Guid.NewGuid());
-        var relayHostPeerId = new Percolator.Network.PeerId(Guid.NewGuid());
+        var initiatorPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
+        var responderPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
+        var relayHostPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
 
         using var initiatorIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var initiatorIdentityPriv = initiatorIdentityEcdh.ExportECPrivateKey();
@@ -482,7 +482,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         var clock = new StaticClock(StaticClock.DefaultNow);
 
         var initiatorPeer = new SimulatedPeerModel(
-            peerId: initiatorPeerId,
+            networkPeerId: initiatorPeerId,
             selfIdentityId: 99000,
             displayName: "init",
             isRelayCapable: false,
@@ -490,7 +490,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             identitySigningKeyPrivateKeyEcPrivateKey: initiatorIdentityPriv,
             endpoint: new System.Net.DnsEndPoint("127.77.1.1", 5002));
         var relayPeer = new SimulatedPeerModel(
-            peerId: relayHostPeerId,
+            networkPeerId: relayHostPeerId,
             selfIdentityId: 99001,
             displayName: "relay",
             isRelayCapable: true,
@@ -501,7 +501,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             {
                 new(
                     RecipientPublicKeyHash: Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(responderPkh),
-                    LogicalOwnerPeerId: responderPeerId,
+                    LogicalOwnerNetworkPeerId: responderPeerId,
                     IdentityKey: bundle.IdentityKey,
                     SignedPreKeyId: bundle.SignedPreKeyId,
                     SignedPreKey: bundle.SignedPreKey,
@@ -531,7 +531,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
 
         temporarySessionId.Should().NotBeNull();
 
-        var initiator = sut.Peers.Single(p => p.PeerId == initiatorPeerId);
+        var initiator = sut.Peers.Single(p => p.NetworkPeerId == initiatorPeerId);
         initiator.PendingStandardHandshakeToMainResponderPublicKeyHash.CurrentValue.Should().NotBeNull();
         initiator.PendingStandardHandshakeToMainTemporarySessionId.CurrentValue.Should().NotBeNull();
         initiator.PendingStandardHandshakeToMainTemporarySessionId.CurrentValue.Should().Be(temporarySessionId!.Value);
@@ -558,7 +558,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         await sut.ReceiveRelayedOpaquePayloadAsync(initiatorPeerId, resp.ToByteArray(), CancellationToken.None);
 
         // Assert: session is now stored under the assigned id and gets persisted.
-        sut.Peers.Single(p => p.PeerId == initiatorPeerId)
+        sut.Peers.Single(p => p.NetworkPeerId == initiatorPeerId)
             .Sessions
             .Keys
             .Should()
@@ -570,7 +570,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         repo.LastSavedSnapshot.Should().NotBeNull();
         repo.LastSavedSnapshot!
             .Peers
-            .Single(p => p.PeerId == initiatorPeerId)
+            .Single(p => p.NetworkPeerId == initiatorPeerId)
             .Sessions
             .Should()
             .Contain(s => s.SessionId == assignedSessionId);
@@ -580,7 +580,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
     public async Task RelayHost_Returns_ResponsePayload_for_GetPreKeyBundleRequest_when_bundle_not_found()
     {
         // Arrange
-        var relayHostPeerId = new Percolator.Network.PeerId(Guid.NewGuid());
+        var relayHostPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
 
         using var relayIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         using var relayIdentityEcdsa = ECDsa.Create(relayIdentityEcdh.ExportParameters(true));
@@ -604,7 +604,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             clock);
 
         var relayPeer = new SimulatedPeerModel(
-            peerId: relayHostPeerId,
+            networkPeerId: relayHostPeerId,
             selfIdentityId: 99000,
             displayName: "relay",
             isRelayCapable: true,
@@ -624,7 +624,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         var sut = CreateSut(repo, diagnostics, clock, out var timeProvider);
         await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
 
-        sut.Peers.Single(p => p.PeerId == relayHostPeerId).SessionsMutable[responderSession.Id] = responderSession;
+        sut.Peers.Single(p => p.NetworkPeerId == relayHostPeerId).SessionsMutable[responderSession.Id] = responderSession;
 
         var envReq = new InternalEnvelope
         {

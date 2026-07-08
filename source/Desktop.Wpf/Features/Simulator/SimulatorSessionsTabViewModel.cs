@@ -128,12 +128,12 @@ public sealed class SimulatorSessionsTabViewModel : IDisposable
     {
         var name = peer.DisplayName.CurrentValue is { } n && !string.IsNullOrWhiteSpace(n)
             ? n
-            : peer.PeerId.ToString()[..8];
+            : peer.NetworkPeerId.ToString()[..8];
         var rootHash = TruncateHex(session.State.RootKey.ToArray());
 
         return new SimulatorSessionCardViewModel(
             peerName: name,
-            peerIdShort: peer.PeerId.ToString()[..8],
+            peerIdShort: peer.NetworkPeerId.ToString()[..8],
             rootKeyHash: rootHash,
             sendingCounter: session.State.SendingCounter,
             receivingCounter: session.State.ReceivingCounter,

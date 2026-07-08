@@ -4,7 +4,7 @@ using Microsoft.Extensions.Options;
 namespace Percolator.Application.Network;
 
 public sealed record OutboundWireMessage(
-    Percolator.Network.PeerId DestinationPeerId,
+    Percolator.Network.NetworkPeerId DestinationNetworkPeerId,
     string SendPath,
     string MessageType,
     string? RequestCorrelationId,

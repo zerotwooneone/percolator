@@ -18,7 +18,7 @@ public class PeerRoutingProfile_MergeTests
         dp.ObserveEndpoint(ep, epNow);
 
         var prp = new PeerRoutingProfile();
-        var pid = new PeerId(1);
+        var pid = new NetworkPeerId(1);
         prp.BindIdentity(pid);
 
         // Act
@@ -33,8 +33,8 @@ public class PeerRoutingProfile_MergeTests
     public void BindIdentity_is_idempotent_and_does_not_overwrite_existing_id()
     {
         var prp = new PeerRoutingProfile();
-        var first = new PeerId(1);
-        var second = new PeerId(1);
+        var first = new NetworkPeerId(1);
+        var second = new NetworkPeerId(1);
 
         prp.BindIdentity(first);
         prp.BindIdentity(second);

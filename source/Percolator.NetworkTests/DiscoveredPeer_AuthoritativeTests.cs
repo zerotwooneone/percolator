@@ -41,7 +41,7 @@ public class DiscoveredPeer_AuthoritativeTests
         var dp = DiscoveredPeer.Create(dk, pkh, t0);
         dp.ObserveEndpoint(new GrpcEndPoint(new DnsEndPoint("node", 6001), t0), t0);
 
-        var peerId = new PeerId(1);
+        var peerId = new NetworkPeerId(1);
         var promotedAt = t0.AddMinutes(10);
         var prp = dp.PromoteToRoutingProfile(peerId, promotedAt);
 

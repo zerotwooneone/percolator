@@ -30,7 +30,7 @@ public sealed class SimulatorStateServiceEndpointResolutionTests
         var peerId = await stateService.AddPeerAsync("TestPeer", CancellationToken.None).ConfigureAwait(false);
         
         // Get the peer to check its endpoint (necessary since no public API to get assigned endpoint)
-        var peer = stateService.Peers.FirstOrDefault(p => p.PeerId == peerId);
+        var peer = stateService.Peers.FirstOrDefault(p => p.NetworkPeerId == peerId);
         peer.Should().NotBeNull();
         var endpoint = peer!.Endpoint.CurrentValue;
         endpoint.Should().NotBeNull();
@@ -68,7 +68,7 @@ public sealed class SimulatorStateServiceEndpointResolutionTests
         var peerId = await stateService.AddPeerAsync("TestPeer", CancellationToken.None).ConfigureAwait(false);
         
         // Get the peer and its initial endpoint (necessary since no public API to get assigned endpoint)
-        var peer = stateService.Peers.FirstOrDefault(p => p.PeerId == peerId);
+        var peer = stateService.Peers.FirstOrDefault(p => p.NetworkPeerId == peerId);
         peer.Should().NotBeNull();
         var oldEndpoint = peer!.Endpoint.CurrentValue;
         oldEndpoint.Should().NotBeNull();
@@ -99,7 +99,7 @@ public sealed class SimulatorStateServiceEndpointResolutionTests
         var peerId = await stateService.AddPeerAsync("TestPeer", CancellationToken.None).ConfigureAwait(false);
         
         // Get the peer and its endpoint (necessary since no public API to get assigned endpoint)
-        var peer = stateService.Peers.FirstOrDefault(p => p.PeerId == peerId);
+        var peer = stateService.Peers.FirstOrDefault(p => p.NetworkPeerId == peerId);
         peer.Should().NotBeNull();
         var endpoint = peer!.Endpoint.CurrentValue;
         endpoint.Should().NotBeNull();

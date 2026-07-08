@@ -1,10 +1,10 @@
 using Percolator.Identity;
-using PeerId = Percolator.Network.PeerId;
+using Percolator.Network;
 
 namespace Desktop.Wpf.Features.Simulator.Models;
 
 public sealed record SimulatedPendingStandardSignalHelloModel(
-    PeerId RelayHostPeerId,
+    NetworkPeerId RelayHostNetworkPeerId,
     PublicIdentityId PublicIdentityId,
     byte[] InitiatorIdentityKeySpki,
     byte[] InitiatorEphemeralKeySpki,

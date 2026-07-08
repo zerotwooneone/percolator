@@ -54,7 +54,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
         foreach (var dto in state.Peers)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (dto.PeerId.Value == Guid.Empty) continue;
+            if (dto.NetworkPeerId.Value == Guid.Empty) continue;
 
             NormalizePeer(dto, _transportOptions.Value);
             _ = _keys.EnsureReverseSignalKeys(dto.ReverseSignalKeys);
@@ -71,7 +71,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
             foreach (var dto in state.Relays)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (dto.RelayHostPeerId.Value == Guid.Empty) continue;
+                if (dto.RelayHostNetworkPeerId.Value == Guid.Empty) continue;
                 relaySnaps.Add(CreateRelaySnapshot(dto));
             }
         }
@@ -115,7 +115,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
         foreach (var p in peers)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (p.PeerId.Value == Guid.Empty) continue;
+            if (p.NetworkPeerId.Value == Guid.Empty) continue;
 
             var dto = CreateDto(p);
             NormalizePeer(dto, _transportOptions.Value);
@@ -168,13 +168,13 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
         var port = dto.Connection?.Port ?? 0;
         if (string.IsNullOrWhiteSpace(host) || port <= 0)
         {
-            throw new InvalidDataException($"Simulated peer DTO is missing endpoint (PeerId={dto.PeerId}).");
+            throw new InvalidDataException($"Simulated peer DTO is missing endpoint (PeerId={dto.NetworkPeerId}).");
         }
 
         var endpoint = new DnsEndPoint(host, port);
 
         var model = new SimulatedPeerModel(
-            peerId: dto.PeerId,
+            networkPeerId: dto.NetworkPeerId,
             selfIdentityId: dto.SelfIdentityId,
             displayName: dto.DisplayName,
             isRelayCapable: dto.Relay?.IsRelayCapable == true,
@@ -182,7 +182,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
             identitySigningKeyPrivateKeyEcPrivateKey: dto.ReverseSignalKeys.IdentitySigningKeyPrivateKeyEcPrivateKey,
             connectionMode: dto.Connection?.Mode ?? ConnectionMode.Direct,
             endpoint: endpoint,
-            relayPeerId: dto.Connection?.RelayPeerId,
+            relayPeerId: dto.Connection?.RelayNetworkPeerId,
             targetPublicKeyHash: dto.TargetPublicKeyHash,
             selectedRouteMode: dto.SelectedRouteMode,
             directEndpoint: dto.DirectEndpoint,
@@ -195,7 +195,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
             publishedPreKeyBundles: dto.Relay?.PreKeyStore?.PublishedBundles
                 ?.Select(b => new SimulatedPublishedPreKeyBundleModel(
                     Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(b.RecipientPublicKeyHash),
-                    b.LogicalOwnerPeerId,
+                    b.LogicalOwnerNetworkPeerId,
                     b.IdentityKey,
                     b.SignedPreKeyId,
                     b.SignedPreKey,
@@ -220,7 +220,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
     {
         var dto = new SimulatedPeerDto
         {
-            PeerId = model.PeerId,
+            NetworkPeerId = model.NetworkPeerId,
             SelfIdentityId = model.SelfIdentityId,
             DisplayName = model.DisplayName,
             IdentityPublicKeyHash = SHA256.HashData(model.IdentitySigningKeySpki),
@@ -229,7 +229,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
                 Mode = model.ConnectionMode,
                 Host = model.Endpoint.Host,
                 Port = model.Endpoint.Port,
-                RelayPeerId = model.RelayPeerId
+                RelayNetworkPeerId = model.RelayNetworkPeerId
             },
             KnownPeerIds = model.KnownPeerIds.ToList(),
             // UiState is derived from sessions + pending stores; no longer persisted (Chunk C Option A)
@@ -251,7 +251,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
                         .Select(b => new PublishedPreKeyBundleDto
                         {
                             RecipientPublicKeyHash = b.RecipientPublicKeyHash.ToArray(),
-                            LogicalOwnerPeerId = b.LogicalOwnerPeerId,
+                            LogicalOwnerNetworkPeerId = b.LogicalOwnerNetworkPeerId,
                             IdentityKey = b.IdentityKey,
                             SignedPreKeyId = b.SignedPreKeyId,
                             SignedPreKey = b.SignedPreKey,
@@ -279,7 +279,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
                     .Select(s => new SimulatedSecureSessionDto
                     {
                         SessionId = s.SessionId,
-                        RemotePeerId = new Percolator.Network.PeerId(s.RemotePeerId),
+                        RemoteNetworkPeerId = new Percolator.Network.NetworkPeerId(s.RemotePeerId),
                         ProtocolVersion = s.ProtocolVersion,
                         RootKey = s.RootKey,
                         SendChainKey = s.SendChainKey,
@@ -318,7 +318,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
                             RequestBytes = r.RequestBytes,
                             ReceivedAtUtc = r.ReceivedAtUtc,
                             InviterIdentityKeySpki = r.InviterIdentityKeySpki,
-                            InviterPeerId = r.InviterPeerId.Value.ToString()
+                            InviterPeerId = r.InviterNetworkPeerId.Value.ToString()
                         })
                         .ToList()
                 },
@@ -354,15 +354,15 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
         var edges = new List<PeerRelationshipSnapshot>();
         foreach (var peer in state.Peers)
         {
-            if (peer.PeerId.Value == Guid.Empty) continue;
+            if (peer.NetworkPeerId.Value == Guid.Empty) continue;
 
             if (peer.PublishedKeysToPeerIds is not null)
             {
                 foreach (var target in peer.PublishedKeysToPeerIds)
                 {
                     if (target == Guid.Empty) continue;
-                    if (target == peer.PeerId.Value) continue;
-                    edges.Add(new PeerRelationshipSnapshot(new Percolator.Network.PeerId(peer.PeerId.Value), new Percolator.Network.PeerId(target), RelationshipType.PublishedKey));
+                    if (target == peer.NetworkPeerId.Value) continue;
+                    edges.Add(new PeerRelationshipSnapshot(new Percolator.Network.NetworkPeerId(peer.NetworkPeerId.Value), new Percolator.Network.NetworkPeerId(target), RelationshipType.PublishedKey));
                 }
             }
 
@@ -372,8 +372,8 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
                 foreach (var target in relayTargets)
                 {
                     if (target == Guid.Empty) continue;
-                    if (target == peer.PeerId.Value) continue;
-                    edges.Add(new PeerRelationshipSnapshot(new Percolator.Network.PeerId(peer.PeerId.Value), new Percolator.Network.PeerId(target), RelationshipType.RelayActiveSession));
+                    if (target == peer.NetworkPeerId.Value) continue;
+                    edges.Add(new PeerRelationshipSnapshot(new Percolator.Network.NetworkPeerId(peer.NetworkPeerId.Value), new Percolator.Network.NetworkPeerId(target), RelationshipType.RelayActiveSession));
                 }
             }
         }
@@ -389,14 +389,14 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
         var relayActiveEdges = new Dictionary<Percolator.Cryptography.Primitives.PeerId, List<Percolator.Cryptography.Primitives.PeerId>>();
         foreach (var rel in relationships)
         {
-            if (rel.SourcePeerId.Value == Guid.Empty) continue;
-            if (rel.TargetPeerId.Value == Guid.Empty) continue;
-            if (rel.SourcePeerId == rel.TargetPeerId) continue;
+            if (rel.SourceNetworkPeerId.Value == Guid.Empty) continue;
+            if (rel.TargetNetworkPeerId.Value == Guid.Empty) continue;
+            if (rel.SourceNetworkPeerId == rel.TargetNetworkPeerId) continue;
 
             if (rel.Type == RelationshipType.PublishedKey)
             {
-                var sourceCryptoPeerId = new Percolator.Cryptography.Primitives.PeerId(rel.SourcePeerId.Value);
-                var targetCryptoPeerId = new Percolator.Cryptography.Primitives.PeerId(rel.TargetPeerId.Value);
+                var sourceCryptoPeerId = new Percolator.Cryptography.Primitives.PeerId(rel.SourceNetworkPeerId.Value);
+                var targetCryptoPeerId = new Percolator.Cryptography.Primitives.PeerId(rel.TargetNetworkPeerId.Value);
                 if (!publishedKeyEdges.TryGetValue(sourceCryptoPeerId, out var list))
                 {
                     list = new List<Percolator.Cryptography.Primitives.PeerId>();
@@ -406,8 +406,8 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
             }
             else if (rel.Type == RelationshipType.RelayActiveSession)
             {
-                var sourceCryptoPeerId = new Percolator.Cryptography.Primitives.PeerId(rel.SourcePeerId.Value);
-                var targetCryptoPeerId = new Percolator.Cryptography.Primitives.PeerId(rel.TargetPeerId.Value);
+                var sourceCryptoPeerId = new Percolator.Cryptography.Primitives.PeerId(rel.SourceNetworkPeerId.Value);
+                var targetCryptoPeerId = new Percolator.Cryptography.Primitives.PeerId(rel.TargetNetworkPeerId.Value);
                 if (!relayActiveEdges.TryGetValue(sourceCryptoPeerId, out var list))
                 {
                     list = new List<Percolator.Cryptography.Primitives.PeerId>();
@@ -419,7 +419,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
 
         foreach (var peer in peers)
         {
-            var cryptoPeerId = new Percolator.Cryptography.Primitives.PeerId(peer.PeerId.Value);
+            var cryptoPeerId = new Percolator.Cryptography.Primitives.PeerId(peer.NetworkPeerId.Value);
             peer.PublishedKeysToPeerIds = publishedKeyEdges.TryGetValue(cryptoPeerId, out var pk)
                 ? pk.Distinct().OrderBy(x => x.Value).Select(x => x.Value).ToList()
                 : new List<Guid>();
@@ -447,7 +447,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
             .ToList();
 
         return new RelayStateSnapshot(
-            RelayHostPeerId: dto.RelayHostPeerId,
+            RelayHostNetworkPeerId: dto.RelayHostNetworkPeerId,
             UpstreamToMain: upstream,
             DownstreamToPeers: downstream);
     }
@@ -457,7 +457,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
         return new RelayPersistenceDto
         {
             Version = 1,
-            RelayHostPeerId = relay.RelayHostPeerId,
+            RelayHostNetworkPeerId = relay.RelayHostNetworkPeerId,
             UpstreamToMain = relay.UpstreamToMain
                 .OrderBy(x => x.EnqueuedUtc)
                 .Select(x => new RelayUpstreamMessageDto
@@ -493,7 +493,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
         foreach (var dto in store.Sessions)
         {
             if (dto.SessionId == Guid.Empty) continue;
-            if (dto.RemotePeerId.Value == Guid.Empty) continue;
+            if (dto.RemoteNetworkPeerId.Value == Guid.Empty) continue;
             if (dto.RootKey is null || dto.RootKey.Length == 0) continue;
 
             var state = new RatchetState(
@@ -509,7 +509,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
 
             var session = SecureSession.Create(
                 new SessionId(dto.SessionId),
-                new Percolator.Cryptography.Primitives.PeerId(dto.RemotePeerId.Value),
+                new Percolator.Cryptography.Primitives.PeerId(dto.RemoteNetworkPeerId.Value),
                 new ProtocolVersion(dto.ProtocolVersion <= 0 ? 1 : dto.ProtocolVersion),
                 state,
                 crypto,
@@ -537,7 +537,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
         foreach (var dto in reverseStore.InboundDirectInviteRequestsFromMain)
         {
             if (dto.CorrelationId == Guid.Empty) continue;
-            var inviterPeerId = Guid.TryParse(dto.InviterPeerId, out var parsed) ? new Percolator.Network.PeerId(parsed) : throw new InvalidOperationException("Invalid inviter peer id");
+            var inviterPeerId = Guid.TryParse(dto.InviterPeerId, out var parsed) ? new Percolator.Network.NetworkPeerId(parsed) : throw new InvalidOperationException("Invalid inviter peer id");
             model.PendingInboundDirectInvitesMutable.Add(new SimulatedPendingInboundDirectInviteModel(dto.CorrelationId, dto.RequestBytes, dto.ReceivedAtUtc, dto.InviterIdentityKeySpki, inviterPeerId));
         }
 

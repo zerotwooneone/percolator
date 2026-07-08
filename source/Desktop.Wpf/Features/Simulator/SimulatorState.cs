@@ -20,7 +20,7 @@ public sealed class GroupConversationDto
 
 public sealed class SimulatedPeerDto
 {
-    public PeerId PeerId { get; set; }
+    public NetworkPeerId NetworkPeerId { get; set; }
     public int SelfIdentityId { get; set; }
     public string? DisplayName { get; set; }
     public byte[] IdentityPublicKeyHash { get; set; } = Array.Empty<byte>();
@@ -34,7 +34,7 @@ public sealed class SimulatedPeerDto
     public byte[]? TargetPublicKeyHash { get; set; }
     public ConnectionMode? SelectedRouteMode { get; set; }
     public string? DirectEndpoint { get; set; }
-    public PeerId? RelayHostPeerId { get; set; }
+    public NetworkPeerId? RelayHostPeerId { get; set; }
     public string? Phase { get; set; }
     public DateTimeOffset? NotUntilUtc { get; set; }
     public string? LastError { get; set; }
@@ -91,7 +91,7 @@ public sealed class SimulatedPendingInboundDirectInviteDto
 public sealed class SimulatedSecureSessionDto
 {
     public Guid SessionId { get; set; }
-    public PeerId RemotePeerId { get; set; }
+    public NetworkPeerId RemoteNetworkPeerId { get; set; }
     public int ProtocolVersion { get; set; } = 1;
 
     public byte[] RootKey { get; set; } = Array.Empty<byte>();
@@ -137,7 +137,7 @@ public sealed class SimulatedPeerConnectionDto
     public ConnectionMode Mode { get; set; } = ConnectionMode.Direct;
     public string Host { get; set; } = "localhost";
     public int Port { get; set; } = 0;
-    public PeerId RelayPeerId { get; set; }
+    public NetworkPeerId RelayNetworkPeerId { get; set; }
 }
 
 public sealed class SimulatedPeerRelayStateDto
@@ -172,7 +172,7 @@ public sealed class SimulatedRelayPreKeyStoreDto
 public sealed class PublishedPreKeyBundleDto
 {
     public byte[] RecipientPublicKeyHash { get; set; } = Array.Empty<byte>();
-    public PeerId LogicalOwnerPeerId { get; set; }
+    public NetworkPeerId LogicalOwnerNetworkPeerId { get; set; }
     public byte[] IdentityKey { get; set; } = Array.Empty<byte>();
     public Guid SignedPreKeyId { get; set; }
     public byte[] SignedPreKey { get; set; } = Array.Empty<byte>();

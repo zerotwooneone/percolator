@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Percolator.Identity;
 using Percolator.Network;
-using PeerId = Percolator.Network.PeerId;
 
 namespace Percolator.Application.Network;
 
@@ -23,18 +22,18 @@ public sealed class RouteConfirmationService : IRouteConfirmationService
 
     public async Task RecordAttemptAsync(
         SelfId selfIdentityId,
-        Percolator.Network.PeerId remotePeerId,
+        Percolator.Network.NetworkPeerId remoteNetworkPeerId,
         RouteKind routeKind,
         string? endpointHost,
         int? endpointPort,
-        PeerId? relayHostPeerId,
+        NetworkPeerId? relayHostPeerId,
         bool success,
         DateTimeOffset nowUtc,
         CancellationToken cancellationToken = default)
     {
         try
         {
-            var candidates = await _candidateRepository.GetCandidatesAsync(selfIdentityId.Value, remotePeerId, cancellationToken).ConfigureAwait(false);
+            var candidates = await _candidateRepository.GetCandidatesAsync(selfIdentityId.Value, remoteNetworkPeerId, cancellationToken).ConfigureAwait(false);
             var candidate = candidates.FirstOrDefault(c =>
                 c.RouteKind == routeKind &&
                 c.EndpointHost == endpointHost &&
@@ -60,27 +59,27 @@ public sealed class RouteConfirmationService : IRouteConfirmationService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to record route attempt for {RemotePeerId}", remotePeerId);
+            _logger.LogWarning(ex, "Failed to record route attempt for {RemotePeerId}", remoteNetworkPeerId);
         }
     }
 
     public async Task PromoteToConfirmedAsync(
         SelfId selfIdentityId,
-        Percolator.Network.PeerId remotePeerId,
+        Percolator.Network.NetworkPeerId remoteNetworkPeerId,
         RouteKind routeKind,
         string? endpointHost,
         int? endpointPort,
-        PeerId? relayHostPeerId,
+        NetworkPeerId? relayHostPeerId,
         DateTimeOffset nowUtc,
         CancellationToken cancellationToken = default)
     {
         try
         {
-            var profile = await _profileRepository.GetByIdAsync(remotePeerId, cancellationToken).ConfigureAwait(false);
+            var profile = await _profileRepository.GetByIdAsync(remoteNetworkPeerId, cancellationToken).ConfigureAwait(false);
             if (profile is null)
             {
                 profile = new PeerRoutingProfile();
-                profile.BindIdentity(remotePeerId);
+                profile.BindIdentity(remoteNetworkPeerId);
             }
 
             if (routeKind == RouteKind.Direct && endpointHost is not null && endpointPort.HasValue)
@@ -98,7 +97,7 @@ public sealed class RouteConfirmationService : IRouteConfirmationService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to promote route to confirmed for {RemotePeerId}", remotePeerId);
+            _logger.LogWarning(ex, "Failed to promote route to confirmed for {RemotePeerId}", remoteNetworkPeerId);
         }
     }
 }

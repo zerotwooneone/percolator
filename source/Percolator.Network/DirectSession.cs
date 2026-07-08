@@ -2,12 +2,12 @@ namespace Percolator.Network;
 
 public sealed class DirectSession
 {
-    public PeerId RemotePeerId { get; }
+    public NetworkPeerId RemoteNetworkPeerId { get; }
     public DirectSessionId SessionId { get; }
 
-    public DirectSession(PeerId remotePeerId, DirectSessionId sessionId)
+    public DirectSession(NetworkPeerId remoteNetworkPeerId, DirectSessionId sessionId)
     {
-        RemotePeerId = remotePeerId;
+        RemoteNetworkPeerId = remoteNetworkPeerId;
         SessionId = sessionId;
     }
 }

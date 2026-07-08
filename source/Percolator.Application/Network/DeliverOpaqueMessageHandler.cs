@@ -8,7 +8,6 @@ using Percolator.Network;
 using Percolator.Prekey.Handlers;
 using Percolator.Application.Network.Handshake;
 using Percolator.Identity;
-using NetworkPeerId = Percolator.Network.PeerId;
 using PeerId = Percolator.Identity.PeerId;
 
 namespace Percolator.Application.Network
@@ -58,7 +57,7 @@ namespace Percolator.Application.Network
         }
 
         private async Task<InternalEnvelope?> HandlePrekeyEnvelopeAsync(PrekeyEnvelope prekeyEnvelope,
-            NetworkPeerId remotePeerId, CancellationToken ct)
+            NetworkPeerId remoteNetworkPeerId, CancellationToken ct)
         {
             switch (prekeyEnvelope.MessageCase)
             {
@@ -87,7 +86,7 @@ namespace Percolator.Application.Network
                         OneTimePreKeys = upload.OneTimePreKeys.Select(x => new SubmitPreKeyBundleCommand.OneTimePreKey(
                             new Guid(x.Id.Span), x.PublicKey.ToByteArray())).ToList(),
                         Expires = upload.ExpiresUtc.ToDateTimeOffset(),
-                        RemotePeerId = remotePeerId
+                        RemoteNetworkPeerId = remoteNetworkPeerId
                     };
                     await _mediator.Send(cmd, ct).ConfigureAwait(false);
                     return new InternalEnvelope { SubmitPreKeyBundleResponse = new SubmitPreKeyBundleResponse { Version = 1 } };
@@ -152,7 +151,7 @@ namespace Percolator.Application.Network
 
                 var directSession = await _directSessionRepository.GetBySessionIdAsync(nonNullDirectSessionId, new NetworkSelfId(selfIdentityId)).ConfigureAwait(false)
                     ?? throw new InvalidOperationException($"No direct session mapping found for session {inferredSessionId}");
-                var remotePeerId = directSession.RemotePeerId;
+                var remotePeerId = directSession.RemoteNetworkPeerId;
                 _logger.LogInformation("Resolved remote peer {PeerId} for session {SessionId}", remotePeerId, directSession.SessionId);
                 
                 var internalEnvelope = InternalEnvelope.Parser.ParseFrom(plaintext.Span);
@@ -179,7 +178,7 @@ namespace Percolator.Application.Network
 
                 // Extract sender context from InternalEnvelope for cryptographic operations
                 var sourceDeviceId = new DeviceId(internalEnvelope.SourceDeviceId);
-                var identityRemotePeerId = new PeerId(directSession.RemotePeerId.Value);
+                var identityRemotePeerId = new PeerId(directSession.RemoteNetworkPeerId.Value);
                 var ctx = new SessionContext(inferredSessionId.Value, request.SelfIdentityId, identityRemotePeerId, sourceDeviceId);
 
                 // Special-case: RelayOpaqueEnvelope requires RPC-level ack response
@@ -187,7 +186,7 @@ namespace Percolator.Application.Network
                 {
                     var relay = internalEnvelope.RelayOpaqueEnvelope;
                     // Process the inner opaque payload (this may establish sessions and send responder msg via MessageService)
-                    var relayHostPeerId = new Percolator.Identity.PeerId(directSession.RemotePeerId.Value);
+                    var relayHostPeerId = new Percolator.Identity.PeerId(directSession.RemoteNetworkPeerId.Value);
                     await _mediator.Send(new ProcessRelayedOpaquePayloadCommand(
                         request.SelfIdentityId,
                         Payload.FromBytesOwned(relay.OpaquePayload.ToByteArray()),

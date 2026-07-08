@@ -3,7 +3,6 @@ using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using IdentityPeerId = Percolator.Identity.PeerId;
 using Percolator.Network;
-using NetworkPeerId = Percolator.Network.PeerId;
 using Percolator.Cryptography;
 using Google.Protobuf;
 using Percolator.Application.Network;

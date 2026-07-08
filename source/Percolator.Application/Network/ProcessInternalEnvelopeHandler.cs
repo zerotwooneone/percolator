@@ -115,7 +115,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     _logger.LogWarning("PingRequest received without RemotePeerGuid in context");
                     return null;
                 }
-                var remotePeerId = new Percolator.Network.PeerId(request.Context.RemotePeer.Value.Value);
+                var remotePeerId = new Percolator.Network.NetworkPeerId(request.Context.RemotePeer.Value.Value);
                 var profile = await _profileRepository.GetByIdAsync(remotePeerId, cancellationToken).ConfigureAwait(false);
                 if (profile is null || profile.IdentityPublicKey is null)
                 {
@@ -169,7 +169,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                         PreKeySignature = upload.PreKeySignature.ToByteArray(),
                         OneTimePreKeys = upload.OneTimePreKeys.Select(x => new SubmitPreKeyBundleCommand.OneTimePreKey(new Guid(x.Id.Span), x.PublicKey.ToByteArray())).ToList(),
                         Expires = upload.ExpiresUtc.ToDateTimeOffset(),
-                        RemotePeerId = new Percolator.Network.PeerId(request.Context.RemotePeer.Value.Value)
+                        RemoteNetworkPeerId = new Percolator.Network.NetworkPeerId(request.Context.RemotePeer.Value.Value)
                     };
                     await _mediator.Send(cmd, cancellationToken).ConfigureAwait(false);
                     return new InternalEnvelope { SubmitPreKeyBundleResponse = new SubmitPreKeyBundleResponse { Version = 1 } };

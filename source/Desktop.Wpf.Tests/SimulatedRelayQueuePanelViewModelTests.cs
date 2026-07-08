@@ -8,7 +8,7 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using NUnit.Framework;
 using Percolator.Identity;
-using PeerId = Percolator.Network.PeerId;
+using Percolator.Network;
 
 namespace Desktop.Wpf.Tests;
 
@@ -19,8 +19,8 @@ public sealed class SimulatedRelayQueuePanelViewModelTests
     public async Task DeliverNextAsync_when_downstream_message_routes_to_peer_and_deletes_message()
     {
         // Arrange
-        var relayHostPeerId = new PeerId(1);
-        var recipientPeerId = new PeerId(2);
+        var relayHostPeerId = new NetworkPeerId(1);
+        var recipientPeerId = new NetworkPeerId(2);
         var ackId = Guid.NewGuid();
         var targetPkh = System.Security.Cryptography.SHA256.HashData(Guid.NewGuid().ToByteArray());
         var opaque = new byte[] { 0x01, 0x02, 0x03 };
@@ -42,7 +42,7 @@ public sealed class SimulatedRelayQueuePanelViewModelTests
         var logger = Mock.Of<ILogger<SimulatedRelayQueuePanelViewModel>>();
 
         using var sut = new SimulatedRelayQueuePanelViewModel(
-            relayHostPeerId: relayHostPeerId,
+            relayHostNetworkPeerId: relayHostPeerId,
             relayHostName: "relay",
             peerNameById: _ => "p",
             getRelayHostToMainSessionId: () => Task.FromResult<Percolator.Cryptography.SessionId?>(null),

@@ -108,7 +108,7 @@ public sealed class SignalProtocolEngine : ISignalProtocolEngine
 
         if (!sender.SessionsMutable.TryGetValue(sessionId, out var session))
         {
-            throw new InvalidOperationException($"No session exists for simulated peer {sender.PeerId} with id {sessionId.Value}");
+            throw new InvalidOperationException($"No session exists for simulated peer {sender.NetworkPeerId} with id {sessionId.Value}");
         }
 
         var cipher = session.Encrypt(plaintext, _clock);
@@ -126,7 +126,7 @@ public sealed class SignalProtocolEngine : ISignalProtocolEngine
 
         if (!receiver.SessionsMutable.TryGetValue(sessionId, out var session))
         {
-            throw new InvalidOperationException($"No session exists for simulated peer {receiver.PeerId} with id {sessionId.Value}");
+            throw new InvalidOperationException($"No session exists for simulated peer {receiver.NetworkPeerId} with id {sessionId.Value}");
         }
 
         var pt = session.Decrypt(message, _clock);

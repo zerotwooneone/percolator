@@ -26,8 +26,8 @@ public sealed class SimulatedPeerRuntimeFinalizeRelayedTests
     public async Task RelayedSimulatorInitiatedHandshake_CreatesSession_WhenMainAccepts()
     {
         // Arrange
-        var inviterPeerId = new Percolator.Network.PeerId(Guid.NewGuid());
-        var acceptorPeerId = new Percolator.Network.PeerId(Guid.NewGuid());
+        var inviterPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
+        var acceptorPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
         var correlation = Guid.NewGuid();
 
         var inviterPeer = CryptoTestHelpers.CreateTestPeer(
@@ -73,7 +73,7 @@ public sealed class SimulatedPeerRuntimeFinalizeRelayedTests
         // Setup: Add outbound invite to simulate relayed simulator-initiated handshake state
         // Note: This is internal state manipulation, which is necessary to test the service layer
         // in isolation. In production, outbound invites are created by ViewModels via UI commands.
-        state.Peers.Single(p => p.PeerId == inviterPeerId)
+        state.Peers.Single(p => p.NetworkPeerId == inviterPeerId)
             .OutboundInvitesMutable
             .Add(new SimulatedOutboundInviteModel(correlation, spkPriv));
 
@@ -110,8 +110,8 @@ public sealed class SimulatedPeerRuntimeFinalizeRelayedTests
         // Use AcceptInboundDirectInviteAsync to generate a valid response via crypto engine
         // This simulates Main accepting the invite and generating the response
         var acceptance = await state.AcceptInboundDirectInviteAsync(
-            simulatedPeerId: acceptorPeerId,
-            inviterPeerId: inviterPeerId,
+            simulatedNetworkPeerId: acceptorPeerId,
+            inviterNetworkPeerId: inviterPeerId,
             invite: invite,
             cancellationToken: CancellationToken.None);
 
@@ -119,8 +119,8 @@ public sealed class SimulatedPeerRuntimeFinalizeRelayedTests
         await state.HandleInboundInviteHandshakeResponseFromMainAsync(inviterPeerId, acceptance.Response, CancellationToken.None);
 
         // Assert: Session was created immediately (Chunk A behavior)
-        state.Peers.Single(p => p.PeerId == inviterPeerId).Sessions.Count.Should().Be(1);
+        state.Peers.Single(p => p.NetworkPeerId == inviterPeerId).Sessions.Count.Should().Be(1);
         // Outbound invite should be removed
-        state.Peers.Single(p => p.PeerId == inviterPeerId).OutboundInvitesMutable.Count.Should().Be(0);
+        state.Peers.Single(p => p.NetworkPeerId == inviterPeerId).OutboundInvitesMutable.Count.Should().Be(0);
     }
 }

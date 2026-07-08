@@ -69,7 +69,7 @@ public sealed class SimulatorStateServiceInitializationTests
     public async Task InitializeAsync_RestoresSessionsFromSnapshot()
     {
         // Arrange
-        var peerId = new Percolator.Network.PeerId(Guid.NewGuid());
+        var peerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
         var remotePeerId = new Percolator.Cryptography.Primitives.PeerId(Guid.NewGuid());
         var signedPreKeyId = Guid.NewGuid();
 
@@ -78,7 +78,7 @@ public sealed class SimulatorStateServiceInitializationTests
         var spki = identity.ExportSubjectPublicKeyInfo();
 
         var model = new SimulatedPeerModel(
-            peerId: peerId,
+            networkPeerId: peerId,
             selfIdentityId: 99000,
             displayName: "Alice",
             isRelayCapable: false,
@@ -154,7 +154,7 @@ public sealed class SimulatorStateServiceInitializationTests
         await initializer.InitializeAsync();
 
         // Assert: Verify state was restored correctly (checking internal collections to verify restoration)
-        var restoredPeer = sut.Peers.FirstOrDefault(p => p.PeerId == peerId);
+        var restoredPeer = sut.Peers.FirstOrDefault(p => p.NetworkPeerId == peerId);
         restoredPeer.Should().NotBeNull();
 
         restoredPeer.SignedPreKeysMutable.Should().HaveCount(1);
@@ -223,7 +223,7 @@ public sealed class SimulatorStateServiceInitializationTests
             oneTimeKeyCount: 3,
             cancellationToken: CancellationToken.None);
 
-        var simulatedPeer = sut.Peers.Single(p => p.PeerId == simulatedPeerId);
+        var simulatedPeer = sut.Peers.Single(p => p.NetworkPeerId == simulatedPeerId);
         var simulatedPkh = Percolator.Identity.IdentityPublicKeyHash.FromSpki(simulatedPeer.IdentitySigningKeySpki);
 
         // Act: Pop the bundle 4 times
@@ -263,7 +263,7 @@ public sealed class SimulatorStateServiceInitializationTests
         };
         poppedIds.Distinct().Should().HaveCount(3);
 
-        var relay = sut.Peers.Single(p => p.PeerId == relayHostPeerId);
+        var relay = sut.Peers.Single(p => p.NetworkPeerId == relayHostPeerId);
         relay.PublishedPreKeyBundles.Should().HaveCount(1);
         relay.PublishedPreKeyBundles.Single().OneTimeKeys.Should().HaveCount(0);
     }

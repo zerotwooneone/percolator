@@ -43,13 +43,13 @@ public sealed class QueuedSimulatorStateRepositoryTests
             using var queuedRepo = new QueuedSimulatorStateRepository(innerRepo);
 
             // Create a snapshot
-            var peerId = new Percolator.Network.PeerId(Guid.NewGuid());
+            var peerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
             using var identity = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
             var priv = identity.ExportECPrivateKey();
             var spki = identity.ExportSubjectPublicKeyInfo();
 
             var model = new SimulatedPeerModel(
-                peerId: peerId,
+                networkPeerId: peerId,
                 selfIdentityId: 99000,
                 displayName: "TestPeer",
                 isRelayCapable: false,
@@ -76,7 +76,7 @@ public sealed class QueuedSimulatorStateRepositoryTests
             // Verify the file was saved
             var loadedSnapshot = await queuedRepo.LoadStateAsync(CancellationToken.None).ConfigureAwait(false);
             loadedSnapshot.Peers.Should().HaveCount(1);
-            loadedSnapshot.Peers.Single().PeerId.Should().Be(peerId);
+            loadedSnapshot.Peers.Single().NetworkPeerId.Should().Be(peerId);
         }
         finally
         {
@@ -108,13 +108,13 @@ public sealed class QueuedSimulatorStateRepositoryTests
             using var queuedRepo = new QueuedSimulatorStateRepository(innerRepo);
 
             // Create and save initial snapshot
-            var peerId = new Percolator.Network.PeerId(Guid.NewGuid());
+            var peerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
             using var identity = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
             var priv = identity.ExportECPrivateKey();
             var spki = identity.ExportSubjectPublicKeyInfo();
 
             var model = new SimulatedPeerModel(
-                peerId: peerId,
+                networkPeerId: peerId,
                 selfIdentityId: 99000,
                 displayName: "TestPeer",
                 isRelayCapable: false,

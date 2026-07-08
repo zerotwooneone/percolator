@@ -42,13 +42,13 @@ public sealed class RouteModeOption
 
 public sealed class RelayHostOption
 {
-    public RelayHostOption(PeerId peerId, string displayName)
+    public RelayHostOption(NetworkPeerId networkPeerId, string displayName)
     {
-        PeerId = peerId;
+        NetworkPeerId = networkPeerId;
         DisplayName = displayName;
     }
 
-    public PeerId PeerId { get; }
+    public NetworkPeerId NetworkPeerId { get; }
     public string DisplayName { get; }
 }
 
@@ -234,7 +234,7 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
 
         _relayHostOptions.Clear();
         foreach (var o in result.Options)
-            _relayHostOptions.Add(new RelayHostOption(o.PeerId, o.DisplayName));
+            _relayHostOptions.Add(new RelayHostOption(o.NetworkPeerId, o.DisplayName));
         SelectedRelayHost.Value ??= _relayHostOptions.FirstOrDefault();
     }
 
@@ -327,7 +327,7 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
             routeMode.Key,
             DirectEndpointText.Value,
             TargetPkhText.Value,
-            SelectedRelayHost.Value?.PeerId,
+            SelectedRelayHost.Value?.NetworkPeerId,
             TargetDisplayNameText.Value), ct);
 
         switch (result)

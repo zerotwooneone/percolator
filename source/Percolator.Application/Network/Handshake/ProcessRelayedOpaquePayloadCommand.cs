@@ -142,7 +142,7 @@ namespace Percolator.Application.Network.Handshake
                 var directSession = await _directSessionRepository
                     .GetBySessionIdAsync(new DirectSessionId(sid.Value), new NetworkSelfId(selfIdentityId))
                     .ConfigureAwait(false);
-                remotePeerId = directSession?.RemotePeerId.Value;
+                remotePeerId = directSession?.RemoteNetworkPeerId.Value;
             }
             catch (Exception ex)
             {

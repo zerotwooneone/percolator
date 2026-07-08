@@ -35,15 +35,15 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     private readonly ObservableList<PeerRelationship> _relationships = new();
     public IReadOnlyObservableList<PeerRelationship> Relationships => _relationships;
 
-    private readonly Dictionary<Percolator.Network.PeerId, SimulatedRelayModel> _relayByHostPeerId = new();
+    private readonly Dictionary<Percolator.Network.NetworkPeerId, SimulatedRelayModel> _relayByHostPeerId = new();
 
-    private readonly Dictionary<Percolator.Network.PeerId, SimulatedPeerModel> _peerById = new();
+    private readonly Dictionary<Percolator.Network.NetworkPeerId, SimulatedPeerModel> _peerById = new();
 
-    private readonly ConcurrentDictionary<DnsEndPoint, Percolator.Network.PeerId> _endpointIndex = new();
+    private readonly ConcurrentDictionary<DnsEndPoint, Percolator.Network.NetworkPeerId> _endpointIndex = new();
 
-    private readonly Dictionary<Percolator.Network.PeerId, IDisposable> _runtimePersistenceByPeerId = new();
+    private readonly Dictionary<Percolator.Network.NetworkPeerId, IDisposable> _runtimePersistenceByPeerId = new();
 
-    private readonly Dictionary<Percolator.Network.PeerId, IDisposable> _relayPersistenceByHostPeerId = new();
+    private readonly Dictionary<Percolator.Network.NetworkPeerId, IDisposable> _relayPersistenceByHostPeerId = new();
 
     private List<GroupConversationDto> _groups = new();
 
@@ -113,7 +113,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         {
             var peerSnaps = _peers.Select(p => p.Freeze()).ToList();
             var relSnaps = _relationships
-                .Select(r => new PeerRelationshipSnapshot(r.SourcePeerId, r.TargetPeerId, r.Type))
+                .Select(r => new PeerRelationshipSnapshot(r.SourceNetworkPeerId, r.TargetNetworkPeerId, r.Type))
                 .ToList();
             var relaySnaps = _relays.Select(r => r.Freeze()).ToList();
 
@@ -134,8 +134,8 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     }
 
     public async Task<EstablishDirectSessionResponse> ReceiveEstablishDirectSessionFromMainAsync(
-        Percolator.Network.PeerId simulatedPeerId,
-        Percolator.Network.PeerId mainPeerId,
+        Percolator.Network.NetworkPeerId simulatedNetworkPeerId,
+        Percolator.Network.NetworkPeerId mainNetworkPeerId,
         EstablishDirectSessionRequest request,
         CancellationToken cancellationToken = default)
     {
@@ -160,13 +160,13 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         // Chunk B: Persist the inbound request as pending (do NOT create session yet)
         await WithStateGateAsync(() =>
         {
-            var peer = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId);
+            var peer = _peers.FirstOrDefault(p => p.NetworkPeerId == simulatedNetworkPeerId);
             if (peer is null)
             {
-                throw new InvalidOperationException($"Simulated peer {simulatedPeerId} not found");
+                throw new InvalidOperationException($"Simulated peer {simulatedNetworkPeerId} not found");
             }
 
-            peer.AddPendingInboundDirectInvite(correlationId, request.ToByteArray(), inviterIdentityKeySpki, mainPeerId);
+            peer.AddPendingInboundDirectInvite(correlationId, request.ToByteArray(), inviterIdentityKeySpki, mainNetworkPeerId);
 
             // Transition UI state to indicate pending inbound invite request
             peer.SetUiState(SimulatorPeerUiState.AwaitingUserAcceptance);
@@ -186,7 +186,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     }
 
     public async Task AcceptPendingInboundDirectInviteAsync(
-        Percolator.Network.PeerId simulatedPeerId,
+        Percolator.Network.NetworkPeerId simulatedNetworkPeerId,
         Guid correlationId,
         CancellationToken cancellationToken = default)
     {
@@ -194,8 +194,8 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 
         var (request, inviterPeerId) = await WithStateGateAsync(() =>
         {
-            var peer = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
-                ?? throw new InvalidOperationException($"Simulated peer {simulatedPeerId} not found");
+            var peer = _peers.FirstOrDefault(p => p.NetworkPeerId == simulatedNetworkPeerId)
+                ?? throw new InvalidOperationException($"Simulated peer {simulatedNetworkPeerId} not found");
 
             if (!peer.TryTakePendingInboundDirectInvite(correlationId, out var pendingInvite))
             {
@@ -203,12 +203,12 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             }
 
             var req = EstablishDirectSessionRequest.Parser.ParseFrom(pendingInvite.RequestBytes);
-            var inviter = pendingInvite.InviterPeerId; // Use persisted inviter peer id (Main)
+            var inviter = pendingInvite.InviterNetworkPeerId; // Use persisted inviter peer id (Main)
             return Task.FromResult((req, inviter));
         }, cancellationToken).ConfigureAwait(false);
 
         // Accept the invite using the existing logic
-        var acceptance = await AcceptInboundDirectInviteAsync(simulatedPeerId, inviterPeerId, request, cancellationToken)
+        var acceptance = await AcceptInboundDirectInviteAsync(simulatedNetworkPeerId, inviterPeerId, request, cancellationToken)
             .ConfigureAwait(false);
 
         // B7: Deliver response immediately instead of queuing (remove queued response mechanism)
@@ -219,8 +219,8 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         // Clear the pending state and select next oldest if any
         await WithStateGateAsync(() =>
         {
-            var peer = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
-                ?? throw new InvalidOperationException($"Simulated peer {simulatedPeerId} not found");
+            var peer = _peers.FirstOrDefault(p => p.NetworkPeerId == simulatedNetworkPeerId)
+                ?? throw new InvalidOperationException($"Simulated peer {simulatedNetworkPeerId} not found");
 
             peer.SetUiState(peer.PendingInboundDirectInvites.Count > 0
                 ? SimulatorPeerUiState.AwaitingUserAcceptance
@@ -230,7 +230,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     }
 
     public async Task RejectPendingInboundDirectInviteAsync(
-        Percolator.Network.PeerId simulatedPeerId,
+        Percolator.Network.NetworkPeerId simulatedNetworkPeerId,
         Guid correlationId,
         CancellationToken cancellationToken = default)
     {
@@ -238,8 +238,8 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 
         await WithStateGateAsync(() =>
         {
-            var peer = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
-                ?? throw new InvalidOperationException($"Simulated peer {simulatedPeerId} not found");
+            var peer = _peers.FirstOrDefault(p => p.NetworkPeerId == simulatedNetworkPeerId)
+                ?? throw new InvalidOperationException($"Simulated peer {simulatedNetworkPeerId} not found");
 
             peer.TryTakePendingInboundDirectInvite(correlationId, out _);
 
@@ -251,8 +251,8 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     }
 
     public async Task<SimulatedPeerInviteAcceptance> AcceptInboundDirectInviteAsync(
-        Percolator.Network.PeerId simulatedPeerId,
-        Percolator.Network.PeerId inviterPeerId,
+        Percolator.Network.NetworkPeerId simulatedNetworkPeerId,
+        Percolator.Network.NetworkPeerId inviterNetworkPeerId,
         EstablishDirectSessionRequest invite,
         CancellationToken cancellationToken = default)
     {
@@ -262,8 +262,8 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
-                ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
+            var model = _peers.FirstOrDefault(p => p.NetworkPeerId == simulatedNetworkPeerId)
+                ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedNetworkPeerId}");
 
         if (!invite.HasInviterIdentityKey || invite.InviterIdentityKey.Length == 0)
             throw new InvalidOperationException("Invite missing inviter_identity_key");
@@ -305,7 +305,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             var root = RootKey.FromBytes(x3.SharedSecret.ToArray());
             var session = RatchetBootstrap.CreateInitiatorSession(
                 sessionId,
-                new Percolator.Cryptography.Primitives.PeerId(inviterPeerId.Value),
+                new Percolator.Cryptography.Primitives.PeerId(inviterNetworkPeerId.Value),
                 new ProtocolVersion(1),
                 root,
                 clock,
@@ -341,7 +341,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     }
 
     public async Task HandleInboundInviteHandshakeResponseFromMainAsync(
-        Percolator.Network.PeerId simulatedPeerId,
+        Percolator.Network.NetworkPeerId simulatedNetworkPeerId,
         InviteHandshakeResponse response,
         CancellationToken cancellationToken = default)
     {
@@ -367,8 +367,8 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
-                ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
+            model = _peers.FirstOrDefault(p => p.NetworkPeerId == simulatedNetworkPeerId)
+                ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedNetworkPeerId}");
 
             outbound = model.OutboundInvitesMutable.FirstOrDefault(x => x.CorrelationId == correlationId);
             if (outbound is null)
@@ -377,7 +377,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 _diagnostics.Emit(
                     SimulatorDiagnosticEventType.HandshakeError,
                     $"InviteHandshakeResponse with correlation {correlationId} does not match any outbound invite",
-                    peerId: simulatedPeerId,
+                    peerId: simulatedNetworkPeerId,
                     contextTag: "ResponseNoMatchingOutboundInvite");
                 return;
             }
@@ -410,7 +410,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             _diagnostics.Emit(
                 SimulatorDiagnosticEventType.HandshakeError,
                 $"X3DH_Respond failed for correlation {correlationId}: {ex.Message}",
-                peerId: simulatedPeerId,
+                peerId: simulatedNetworkPeerId,
                 contextTag: "X3DHRespondFailed");
             return;
         }
@@ -427,7 +427,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             _diagnostics.Emit(
                 SimulatorDiagnosticEventType.HandshakeError,
                 $"Failed to parse ratchet message for correlation {correlationId}: {ex.Message}",
-                peerId: simulatedPeerId,
+                peerId: simulatedNetworkPeerId,
                 contextTag: "RatchetMessageParseFailed");
             return;
         }
@@ -435,7 +435,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         var clock = ResolveClock();
         var tmp = RatchetBootstrap.CreateResponderSession(
             SessionId.NewId(),
-            new Percolator.Cryptography.Primitives.PeerId(simulatedPeerId.Value),
+            new Percolator.Cryptography.Primitives.PeerId(simulatedNetworkPeerId.Value),
             new ProtocolVersion(1),
             root,
             clock);
@@ -450,7 +450,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             _diagnostics.Emit(
                 SimulatorDiagnosticEventType.HandshakeError,
                 $"Failed to decrypt ratchet message for correlation {correlationId}: {ex.Message}",
-                peerId: simulatedPeerId,
+                peerId: simulatedNetworkPeerId,
                 contextTag: "RatchetMessageDecryptFailed");
             return;
         }
@@ -465,7 +465,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             _diagnostics.Emit(
                 SimulatorDiagnosticEventType.HandshakeError,
                 $"Failed to parse ResponderInnerHello for correlation {correlationId}: {ex.Message}",
-                peerId: simulatedPeerId,
+                peerId: simulatedNetworkPeerId,
                 contextTag: "ResponderInnerHelloParseFailed");
             return;
         }
@@ -475,7 +475,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             _diagnostics.Emit(
                 SimulatorDiagnosticEventType.HandshakeError,
                 $"Invalid ResponderInnerHello version for correlation {correlationId}",
-                peerId: simulatedPeerId,
+                peerId: simulatedNetworkPeerId,
                 contextTag: "InvalidResponderInnerHelloVersion");
             return;
         }
@@ -484,7 +484,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             _diagnostics.Emit(
                 SimulatorDiagnosticEventType.HandshakeError,
                 $"Missing DirectSessionId in ResponderInnerHello for correlation {correlationId}",
-                peerId: simulatedPeerId,
+                peerId: simulatedNetworkPeerId,
                 contextTag: "MissingDirectSessionId");
             return;
         }
@@ -499,7 +499,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             _diagnostics.Emit(
                 SimulatorDiagnosticEventType.HandshakeError,
                 $"Invalid DirectSessionId format for correlation {correlationId}: {ex.Message}",
-                peerId: simulatedPeerId,
+                peerId: simulatedNetworkPeerId,
                 contextTag: "InvalidDirectSessionIdFormat");
             return;
         }
@@ -527,7 +527,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             _diagnostics.Emit(
                 SimulatorDiagnosticEventType.HandshakeStateTransition,
                 $"Handshake: established corr={correlationId.ToString()[..8]} sessionId={sessionId.Value.ToString()[..8]}",
-                peerId: simulatedPeerId,
+                peerId: simulatedNetworkPeerId,
                 contextTag: "Established");
         }
         finally
@@ -537,7 +537,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     }
 
     public async Task<EstablishSessionResponse> ReceiveEstablishSessionFromMainAsync(
-        Percolator.Network.PeerId simulatedPeerId,
+        Percolator.Network.NetworkPeerId simulatedNetworkPeerId,
         EstablishSessionRequest request,
         CancellationToken cancellationToken = default)
     {
@@ -547,8 +547,8 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
-                ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
+            var model = _peers.FirstOrDefault(p => p.NetworkPeerId == simulatedNetworkPeerId)
+                ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedNetworkPeerId}");
 
         if (!request.HasIdentitySigningKey || request.IdentitySigningKey.Length == 0)
             throw new InvalidOperationException("EstablishSession missing identity_signing_key");
@@ -588,7 +588,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             if (!model.TryPopOneTimePreKeyPrivate(otkId, out localOtkPrivate))
             {
                 throw new InvalidOperationException(
-                    $"Requested OTK id {otkGuid} not found on simulated peer {simulatedPeerId}. " +
+                    $"Requested OTK id {otkGuid} not found on simulated peer {simulatedNetworkPeerId}. " +
                     $"Remaining private OTK count: {model.OneTimePreKeysPrivate.Count}. " +
                     $"This indicates a mismatch between initiator and responder OTK pools.");
             }
@@ -651,7 +651,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     }
 
     public async Task<DeliverOpaqueMessageResponse> ReceiveOpaqueMessageFromMainAsync(
-        Percolator.Network.PeerId simulatedPeerId,
+        Percolator.Network.NetworkPeerId simulatedNetworkPeerId,
         DeliverOpaqueMessageRequest request,
         CancellationToken cancellationToken = default)
     {
@@ -668,8 +668,8 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
-                ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
+            model = _peers.FirstOrDefault(p => p.NetworkPeerId == simulatedNetworkPeerId)
+                ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedNetworkPeerId}");
 
             // Best-effort: try to decrypt with any known session (typically 1 per peer in simulator today)
             var cipher = SessionRatchetMessage.FromBytesOwned(request.Payload.ToByteArray());
@@ -758,7 +758,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             try
             {
                 popped = await TryPopPreKeyBundleByRecipientPkhAsync(
-                        simulatedPeerId,
+                        simulatedNetworkPeerId,
                         Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(getReq.PublicKeyHash.ToByteArray()),
                         cancellationToken)
                     .ConfigureAwait(false);
@@ -835,7 +835,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 throw new InvalidOperationException("EnqueueOpaqueMessageRequest missing message_blob");
 
             await EnqueueRelayDownstreamToPeerAsync(
-                relayHostPeerId: simulatedPeerId,
+                relayHostNetworkPeerId: simulatedNetworkPeerId,
                 targetIdentityPublicKeyHash: Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(enqueue.RecipientPublicKeyHash.ToByteArray()),
                 opaqueBytes: enqueue.MessageBlob.ToByteArray(),
                 debugType: "Opaque",
@@ -848,8 +848,8 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     }
 
     public async Task PublishStandardPreKeyBundleToRelayAsync(
-        Percolator.Network.PeerId simulatedPeerId,
-        Percolator.Network.PeerId relayHostPeerId,
+        Percolator.Network.NetworkPeerId simulatedNetworkPeerId,
+        Percolator.Network.NetworkPeerId relayHostNetworkPeerId,
         DateTimeOffset expiresUtc,
         int oneTimeKeyCount,
         CancellationToken cancellationToken = default)
@@ -866,8 +866,8 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
-                ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
+            var model = _peers.FirstOrDefault(p => p.NetworkPeerId == simulatedNetworkPeerId)
+                ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedNetworkPeerId}");
 
             var bundle = _engine.CreateStandardPreKeyBundle(
                 peer: model,
@@ -887,9 +887,9 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         }
 
         await PublishPreKeyBundleAsync(
-                relayHostPeerId: relayHostPeerId,
+                relayHostNetworkPeerId: relayHostNetworkPeerId,
                 recipientPublicKeyHash: recipientPublicKeyHash,
-                logicalOwnerPeerId: simulatedPeerId,
+                logicalOwnerNetworkPeerId: simulatedNetworkPeerId,
                 identityKey: identityKey,
                 signedPreKeyId: signedPreKeyId,
                 signedPreKey: signedPreKey,
@@ -901,19 +901,19 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 
         _diagnostics.Emit(
             SimulatorDiagnosticEventType.PreKeyBundleFetched,
-            $"Pre-key bundle published -> relay={relayHostPeerId.ToString()[..8]} owner={simulatedPeerId.ToString()[..8]}",
-            peerId: simulatedPeerId,
-            relayHostPeerId: relayHostPeerId);
+            $"Pre-key bundle published -> relay={relayHostNetworkPeerId.ToString()[..8]} owner={simulatedNetworkPeerId.ToString()[..8]}",
+            peerId: simulatedNetworkPeerId,
+            relayHostPeerId: relayHostNetworkPeerId);
     }
 
     public async Task<SessionId?> InitiateStandardHandshakeToMainByRelayPkhAsync(
-        Percolator.Network.PeerId simulatedPeerId,
-        Percolator.Network.PeerId relayHostPeerId,
+        Percolator.Network.NetworkPeerId simulatedNetworkPeerId,
+        Percolator.Network.NetworkPeerId relayHostNetworkPeerId,
         Percolator.Identity.IdentityPublicKeyHash responderPublicKeyHash,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var popped = await TryPopPreKeyBundleByRecipientPkhAsync(relayHostPeerId, responderPublicKeyHash, cancellationToken)
+        var popped = await TryPopPreKeyBundleByRecipientPkhAsync(relayHostNetworkPeerId, responderPublicKeyHash, cancellationToken)
             .ConfigureAwait(false);
 
         if (popped is null)
@@ -923,9 +923,9 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 
         _diagnostics.Emit(
             SimulatorDiagnosticEventType.PreKeyBundleFetched,
-            $"Pre-key bundle fetched <- relay={relayHostPeerId.ToString()[..8]} for={simulatedPeerId.ToString()[..8]}",
-            peerId: simulatedPeerId,
-            relayHostPeerId: relayHostPeerId);
+            $"Pre-key bundle fetched <- relay={relayHostNetworkPeerId.ToString()[..8]} for={simulatedNetworkPeerId.ToString()[..8]}",
+            peerId: simulatedNetworkPeerId,
+            relayHostPeerId: relayHostNetworkPeerId);
 
         // Serialize bundle from individual components
         var bundleProto = new GetPreKeyBundleResponse.Types.PreKeyBundle
@@ -993,8 +993,8 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
-                ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
+            var model = _peers.FirstOrDefault(p => p.NetworkPeerId == simulatedNetworkPeerId)
+                ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedNetworkPeerId}");
 
             var initiated = _engine.TryInitiateStandardHandshake(model, responderBundle);
             if (initiated is null)
@@ -1026,7 +1026,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         }
 
         await EnqueueRelayDownstreamToPeerAsync(
-                relayHostPeerId: relayHostPeerId,
+                relayHostNetworkPeerId: relayHostNetworkPeerId,
                 targetIdentityPublicKeyHash: responderPublicKeyHash,
                 opaqueBytes: helloBytes,
                 debugType: nameof(HandshakeInitiatorHello),
@@ -1035,9 +1035,9 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 
         _diagnostics.Emit(
             SimulatorDiagnosticEventType.StandardHandshakeHelloEnqueued,
-            $"Standard handshake hello enqueued -> relay={relayHostPeerId.ToString()[..8]}",
-            peerId: simulatedPeerId,
-            relayHostPeerId: relayHostPeerId);
+            $"Standard handshake hello enqueued -> relay={relayHostNetworkPeerId.ToString()[..8]}",
+            peerId: simulatedNetworkPeerId,
+            relayHostPeerId: relayHostNetworkPeerId);
 
         return sessionId;
     }
@@ -1045,8 +1045,8 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     private const int OneTimeKeyRequestSanityLimit = 100;
 
     public async Task UpsertPendingStandardSignalHelloAsync(
-        Percolator.Network.PeerId recipientPeerId,
-        Percolator.Network.PeerId relayHostPeerId,
+        Percolator.Network.NetworkPeerId recipientNetworkPeerId,
+        Percolator.Network.NetworkPeerId relayHostNetworkPeerId,
         HandshakeInitiatorHello hello,
         DateTimeOffset receivedUtc,
         CancellationToken cancellationToken = default)
@@ -1065,11 +1065,11 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var model = _peers.FirstOrDefault(p => p.PeerId == recipientPeerId)
-                ?? throw new InvalidOperationException($"No simulated peer exists with id {recipientPeerId}");
+            var model = _peers.FirstOrDefault(p => p.NetworkPeerId == recipientNetworkPeerId)
+                ?? throw new InvalidOperationException($"No simulated peer exists with id {recipientNetworkPeerId}");
 
             model.PendingInboundStandardSignalHellosMutable[initiatorPkhHex] = new SimulatedPendingStandardSignalHelloModel(
-                RelayHostPeerId: relayHostPeerId,
+                RelayHostNetworkPeerId: relayHostNetworkPeerId,
                 InitiatorIdentityKeySpki: hello.InitiatorIdentityKeySpki.ToByteArray(),
                 InitiatorEphemeralKeySpki: hello.InitiatorEphemeralKeySpki.ToByteArray(),
                 SignedPreKeyId: hello.HasSignedPreKeyId && hello.SignedPreKeyId.Length > 0
@@ -1101,13 +1101,13 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         _diagnostics.Emit(
             SimulatorDiagnosticEventType.HandshakeStateTransition,
             $"Standard hello pending: initiator={initiatorPkhHex[..8]}",
-            peerId: recipientPeerId,
-            relayHostPeerId: relayHostPeerId,
+            peerId: recipientNetworkPeerId,
+            relayHostPeerId: relayHostNetworkPeerId,
             contextTag: "StandardSignalPending");
     }
 
     public async Task<bool> TryAcceptPendingStandardSignalHelloAsync(
-        Percolator.Network.PeerId recipientPeerId,
+        Percolator.Network.NetworkPeerId recipientNetworkPeerId,
         string initiatorPkhHex,
         CancellationToken cancellationToken = default)
     {
@@ -1115,20 +1115,20 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         if (string.IsNullOrWhiteSpace(initiatorPkhHex)) throw new ArgumentNullException(nameof(initiatorPkhHex));
 
         SimulatedPendingStandardSignalHelloModel? pending;
-        Percolator.Network.PeerId relayHostPeerId;
+        Percolator.Network.NetworkPeerId relayHostNetworkPeerId;
 
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var model = _peers.FirstOrDefault(p => p.PeerId == recipientPeerId)
-                ?? throw new InvalidOperationException($"No simulated peer exists with id {recipientPeerId}");
+            var model = _peers.FirstOrDefault(p => p.NetworkPeerId == recipientNetworkPeerId)
+                ?? throw new InvalidOperationException($"No simulated peer exists with id {recipientNetworkPeerId}");
 
             if (!model.PendingInboundStandardSignalHellosMutable.TryGetValue(initiatorPkhHex, out pending))
             {
                 return false;
             }
 
-            relayHostPeerId = pending.RelayHostPeerId;
+            relayHostNetworkPeerId = pending.RelayHostNetworkPeerId;
             model.PendingInboundStandardSignalHellosMutable.Remove(initiatorPkhHex);
 
             // B6.1: Check pending collections instead of single-slot correlation id
@@ -1166,26 +1166,26 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 req.OnetimePrekeyId = ByteString.CopyFrom(pending.OneTimePreKeyId.Value.ToByteArray());
             }
 
-            response = await ReceiveEstablishSessionFromMainAsync(recipientPeerId, req, cancellationToken).ConfigureAwait(false);
+            response = await ReceiveEstablishSessionFromMainAsync(recipientNetworkPeerId, req, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             _diagnostics.Emit(
                 SimulatorDiagnosticEventType.HandshakeStateTransition,
                 $"Standard hello accept failed: {ex.Message}",
-                peerId: recipientPeerId,
-                relayHostPeerId: relayHostPeerId,
+                peerId: recipientNetworkPeerId,
+                relayHostPeerId: relayHostNetworkPeerId,
                 contextTag: "StandardSignalAcceptFailed");
             throw;
         }
 
         // Set connection mode for relayed handshakes
-        if (relayHostPeerId.Value != Guid.Empty)
+        if (relayHostNetworkPeerId.Value != Guid.Empty)
         {
             await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                var model = _peers.FirstOrDefault(p => p.PeerId == recipientPeerId);
+                var model = _peers.FirstOrDefault(p => p.NetworkPeerId == recipientNetworkPeerId);
                 if (model is not null)
                 {
                     // Set connection mode to ViaRelay with the relay host peer ID
@@ -1193,7 +1193,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                     model.SetConnection(
                         ConnectionMode.ViaRelay,
                         endpoint: model.Endpoint.CurrentValue,
-                        relayPeerId: relayHostPeerId);
+                        relayNetworkPeerId: relayHostNetworkPeerId);
                 }
             }
             finally
@@ -1209,7 +1209,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         if (initiatorPeerId is not null)
         {
             await EnqueueRelayDownstreamToPeerAsync(
-                    relayHostPeerId: relayHostPeerId,
+                    relayHostNetworkPeerId: relayHostNetworkPeerId,
                     targetIdentityPublicKeyHash: initiatorPkhTyped,
                     opaqueBytes: response.ToByteArray(),
                     debugType: nameof(EstablishSessionResponse),
@@ -1219,7 +1219,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         else
         {
             await EnqueueRelayUpstreamToMainAsync(
-                    relayHostPeerId: relayHostPeerId,
+                    relayHostNetworkPeerId: relayHostNetworkPeerId,
                     opaqueBytes: response.ToByteArray(),
                     debugType: nameof(EstablishSessionResponse),
                     cancellationToken: cancellationToken)
@@ -1229,8 +1229,8 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         _diagnostics.Emit(
             SimulatorDiagnosticEventType.HandshakeStateTransition,
             $"Standard hello accepted: initiator={initiatorPkhHex[..8]}",
-            peerId: recipientPeerId,
-            relayHostPeerId: relayHostPeerId,
+            peerId: recipientNetworkPeerId,
+            relayHostPeerId: relayHostNetworkPeerId,
             contextTag: "StandardSignalAccepted");
 
         return true;
@@ -1245,15 +1245,15 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         return _toMain.SendEstablishSessionToMainAsync(request, cancellationToken);
     }
 
-    public async Task<byte[]> ComputePublicKeyHashAsync(Percolator.Network.PeerId simulatedPeerId, CancellationToken cancellationToken = default)
+    public async Task<byte[]> ComputePublicKeyHashAsync(Percolator.Network.NetworkPeerId simulatedNetworkPeerId, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
-                ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
+            var model = _peers.FirstOrDefault(p => p.NetworkPeerId == simulatedNetworkPeerId)
+                ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedNetworkPeerId}");
             return SHA256.HashData(model.IdentitySigningKeySpki);
         }
         finally
@@ -1263,7 +1263,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     }
 
     public async Task<SessionRatchetMessage> EncryptInternalEnvelopeAsync(
-        Percolator.Network.PeerId simulatedPeerId,
+        Percolator.Network.NetworkPeerId simulatedNetworkPeerId,
         SessionId sessionId,
         InternalEnvelope envelope,
         CancellationToken cancellationToken = default)
@@ -1274,7 +1274,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            return EncryptInternalEnvelopeAsyncCore(simulatedPeerId, sessionId, envelope);
+            return EncryptInternalEnvelopeAsyncCore(simulatedNetworkPeerId, sessionId, envelope);
         }
         finally
         {
@@ -1283,12 +1283,12 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     }
 
     private SessionRatchetMessage EncryptInternalEnvelopeAsyncCore(
-        Percolator.Network.PeerId simulatedPeerId,
+        Percolator.Network.NetworkPeerId simulatedNetworkPeerId,
         SessionId sessionId,
         InternalEnvelope envelope)
     {
-        var model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
-            ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
+        var model = _peers.FirstOrDefault(p => p.NetworkPeerId == simulatedNetworkPeerId)
+            ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedNetworkPeerId}");
 
         var plaintext = Plaintext.FromBytesOwned(envelope.ToByteArray());
         var cipher = _engine.Encrypt(model, sessionId, plaintext);
@@ -1296,7 +1296,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     }
 
     public async Task<Plaintext> DecryptSessionMessageAsync(
-        Percolator.Network.PeerId simulatedPeerId,
+        Percolator.Network.NetworkPeerId simulatedNetworkPeerId,
         SessionId sessionId,
         SessionRatchetMessage message,
         CancellationToken cancellationToken = default)
@@ -1309,8 +1309,8 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                var model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
-                    ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
+                var model = _peers.FirstOrDefault(p => p.NetworkPeerId == simulatedNetworkPeerId)
+                    ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedNetworkPeerId}");
 
                 var pt = _engine.Decrypt(model, sessionId, message);
                 return pt;
@@ -1325,18 +1325,18 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             _diagnostics.Emit(
                 SimulatorDiagnosticEventType.DecryptFailure,
                 $"Decrypt failure: {ex.GetType().Name}: {ex.Message}",
-                peerId: simulatedPeerId);
+                peerId: simulatedNetworkPeerId);
             throw;
         }
     }
 
-    private SimulatedRelayModel GetRelayOrThrow(Percolator.Network.PeerId relayHostPeerId)
+    private SimulatedRelayModel GetRelayOrThrow(Percolator.Network.NetworkPeerId relayHostNetworkPeerId)
     {
-        if (_relayByHostPeerId.TryGetValue(relayHostPeerId, out var relay)) return relay;
-        throw new InvalidOperationException($"No relay exists with host peer id {relayHostPeerId}");
+        if (_relayByHostPeerId.TryGetValue(relayHostNetworkPeerId, out var relay)) return relay;
+        throw new InvalidOperationException($"No relay exists with host peer id {relayHostNetworkPeerId}");
     }
 
-    public async Task<bool> DeleteRelayMessageByAckIdAsync(Percolator.Network.PeerId relayHostPeerId, Guid ackId, CancellationToken cancellationToken = default)
+    public async Task<bool> DeleteRelayMessageByAckIdAsync(Percolator.Network.NetworkPeerId relayHostNetworkPeerId, Guid ackId, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -1344,7 +1344,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var relay = GetRelayOrThrow(relayHostPeerId);
+            var relay = GetRelayOrThrow(relayHostNetworkPeerId);
             removed = relay.RemoveMessage(ackId);
         }
         finally
@@ -1360,7 +1360,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         return removed;
     }
 
-    public async Task<bool> MoveRelayMessageByAckIdAsync(Percolator.Network.PeerId relayHostPeerId, Guid ackId, int delta, CancellationToken cancellationToken = default)
+    public async Task<bool> MoveRelayMessageByAckIdAsync(Percolator.Network.NetworkPeerId relayHostNetworkPeerId, Guid ackId, int delta, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (delta == 0) return false;
@@ -1369,7 +1369,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var relay = GetRelayOrThrow(relayHostPeerId);
+            var relay = GetRelayOrThrow(relayHostNetworkPeerId);
             var ordered = relay.MessageQueue
                 .Select(kvp => kvp.Value)
                 .Select(x => (AckId: x.AckId, EnqueuedUtc: x.EnqueuedUtc))
@@ -1424,7 +1424,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             _diagnostics.Emit(
                 SimulatorDiagnosticEventType.RelayReordered,
                 $"Relay reorder: delta={delta}",
-                relayHostPeerId: relayHostPeerId,
+                relayHostPeerId: relayHostNetworkPeerId,
                 ackId: ackId);
 
             changed = true;
@@ -1442,7 +1442,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         return changed;
     }
 
-    public async Task<bool> CorruptRelayMessageByAckIdAsync(Percolator.Network.PeerId relayHostPeerId, Guid ackId, CancellationToken cancellationToken = default)
+    public async Task<bool> CorruptRelayMessageByAckIdAsync(Percolator.Network.NetworkPeerId relayHostNetworkPeerId, Guid ackId, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -1451,7 +1451,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var relay = GetRelayOrThrow(relayHostPeerId);
+            var relay = GetRelayOrThrow(relayHostNetworkPeerId);
 
             if (relay.MessageQueue.TryGetValue(ackId, out var msg))
             {
@@ -1485,7 +1485,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             _diagnostics.Emit(
                 SimulatorDiagnosticEventType.RelayCorrupted,
                 "Relay corrupt",
-                relayHostPeerId: relayHostPeerId,
+                relayHostPeerId: relayHostNetworkPeerId,
                 ackId: ackId);
 
             result = true;
@@ -1504,7 +1504,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     }
 
     public async Task EnqueueRelayUpstreamToMainAsync(
-        Percolator.Network.PeerId relayHostPeerId,
+        Percolator.Network.NetworkPeerId relayHostNetworkPeerId,
         byte[] opaqueBytes,
         string? debugType = null,
         CancellationToken cancellationToken = default)
@@ -1516,7 +1516,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var relay = GetRelayOrThrow(relayHostPeerId);
+            var relay = GetRelayOrThrow(relayHostNetworkPeerId);
 
             var msg = new OutboundRelayMessage(
                 AckId: Guid.NewGuid(),
@@ -1529,7 +1529,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             _diagnostics.Emit(
                 SimulatorDiagnosticEventType.RelayEnqueued,
                 $"Relay enqueue: {(debugType ?? "opaque")}",
-                relayHostPeerId: relayHostPeerId,
+                relayHostPeerId: relayHostNetworkPeerId,
                 ackId: msg.AckId);
         }
         finally
@@ -1541,7 +1541,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     }
 
     public async Task EnqueueRelayDownstreamToPeerAsync(
-        Percolator.Network.PeerId relayHostPeerId,
+        Percolator.Network.NetworkPeerId relayHostNetworkPeerId,
         Percolator.Identity.IdentityPublicKeyHash targetIdentityPublicKeyHash,
         byte[] opaqueBytes,
         string? debugType = null,
@@ -1554,7 +1554,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var relay = GetRelayOrThrow(relayHostPeerId);
+            var relay = GetRelayOrThrow(relayHostNetworkPeerId);
 
             var msg = new InboundRelayMessage(
                 AckId: Guid.NewGuid(),
@@ -1568,7 +1568,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             _diagnostics.Emit(
                 SimulatorDiagnosticEventType.RelayEnqueued,
                 $"Relay enqueue: {(debugType ?? "opaque")}",
-                relayHostPeerId: relayHostPeerId,
+                relayHostPeerId: relayHostNetworkPeerId,
                 ackId: msg.AckId);
         }
         finally
@@ -1580,7 +1580,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     }
 
     public async Task<IReadOnlyList<InboundRelayMessage>> DequeueRelayDownstreamToPeerAsync(
-        Percolator.Network.PeerId relayHostPeerId,
+        Percolator.Network.NetworkPeerId relayHostNetworkPeerId,
         Percolator.Identity.IdentityPublicKeyHash targetIdentityPublicKeyHash,
         int max,
         CancellationToken cancellationToken = default)
@@ -1592,7 +1592,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var relay = GetRelayOrThrow(relayHostPeerId);
+            var relay = GetRelayOrThrow(relayHostNetworkPeerId);
             snapshot = relay.MessageQueue
                 .Select(kvp => kvp.Value)
                 .OfType<InboundRelayMessage>()
@@ -1620,7 +1620,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     }
 
     public async Task<int> ForwardRelayUpstreamToMainAsync(
-        Percolator.Network.PeerId relayHostPeerId,
+        Percolator.Network.NetworkPeerId relayHostNetworkPeerId,
         SessionId relayHostToMainSessionId,
         int max,
         CancellationToken cancellationToken = default)
@@ -1638,7 +1638,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                var relay = GetRelayOrThrow(relayHostPeerId);
+                var relay = GetRelayOrThrow(relayHostNetworkPeerId);
                 next = relay.MessageQueue
                     .Select(kvp => kvp.Value)
                     .OfType<OutboundRelayMessage>()
@@ -1673,7 +1673,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                     }
                 };
 
-                var cipher = await EncryptInternalEnvelopeAsync(relayHostPeerId, relayHostToMainSessionId, env, cancellationToken)
+                var cipher = await EncryptInternalEnvelopeAsync(relayHostNetworkPeerId, relayHostToMainSessionId, env, cancellationToken)
                     .ConfigureAwait(false);
 
                 var request = new DeliverOpaqueMessageRequest
@@ -1689,24 +1689,24 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                     || !resp.ResponsePayload.HasResponsePayload
                     || resp.ResponsePayload.ResponsePayload.Length == 0)
                 {
-                    await EnqueueRelayUpstreamToMainAsync(relayHostPeerId, next.OpaqueBytes, next.DebugType, cancellationToken).ConfigureAwait(false);
+                    await EnqueueRelayUpstreamToMainAsync(relayHostNetworkPeerId, next.OpaqueBytes, next.DebugType, cancellationToken).ConfigureAwait(false);
                     break;
                 }
 
                 var ackCipher = SessionRatchetMessage.FromBytesOwned(resp.ResponsePayload.ResponsePayload.ToByteArray());
-                var ackPlain = await DecryptSessionMessageAsync(relayHostPeerId, relayHostToMainSessionId, ackCipher, cancellationToken)
+                var ackPlain = await DecryptSessionMessageAsync(relayHostNetworkPeerId, relayHostToMainSessionId, ackCipher, cancellationToken)
                     .ConfigureAwait(false);
                 var ack = RelayOpaqueResponse.Parser.ParseFrom(ackPlain.ToArray());
                 if (!ack.HasMessageAckId || ack.MessageAckId.Length == 0)
                 {
-                    await EnqueueRelayUpstreamToMainAsync(relayHostPeerId, next.OpaqueBytes, next.DebugType, cancellationToken).ConfigureAwait(false);
+                    await EnqueueRelayUpstreamToMainAsync(relayHostNetworkPeerId, next.OpaqueBytes, next.DebugType, cancellationToken).ConfigureAwait(false);
                     break;
                 }
 
                 var returned = new Guid(ack.MessageAckId.ToByteArray());
                 if (returned != next.AckId)
                 {
-                    await EnqueueRelayUpstreamToMainAsync(relayHostPeerId, next.OpaqueBytes, next.DebugType, cancellationToken).ConfigureAwait(false);
+                    await EnqueueRelayUpstreamToMainAsync(relayHostNetworkPeerId, next.OpaqueBytes, next.DebugType, cancellationToken).ConfigureAwait(false);
                     break;
                 }
 
@@ -1714,7 +1714,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             }
             catch
             {
-                await EnqueueRelayUpstreamToMainAsync(relayHostPeerId, next.OpaqueBytes, next.DebugType, cancellationToken).ConfigureAwait(false);
+                await EnqueueRelayUpstreamToMainAsync(relayHostNetworkPeerId, next.OpaqueBytes, next.DebugType, cancellationToken).ConfigureAwait(false);
                 throw;
             }
         }
@@ -1725,7 +1725,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     }
 
     public async Task<bool> DeliverRelayUpstreamToMainByAckIdAsync(
-        Percolator.Network.PeerId relayHostPeerId,
+        Percolator.Network.NetworkPeerId relayHostNetworkPeerId,
         SessionId relayHostToMainSessionId,
         Guid ackId,
         CancellationToken cancellationToken = default)
@@ -1736,7 +1736,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var relay = GetRelayOrThrow(relayHostPeerId);
+            var relay = GetRelayOrThrow(relayHostNetworkPeerId);
             if (!relay.MessageQueue.TryGetValue(ackId, out var found) || found is not OutboundRelayMessage foundOut)
             {
                 return false;
@@ -1763,7 +1763,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 }
             };
 
-            var cipher = await EncryptInternalEnvelopeAsync(relayHostPeerId, relayHostToMainSessionId, env, cancellationToken)
+            var cipher = await EncryptInternalEnvelopeAsync(relayHostNetworkPeerId, relayHostToMainSessionId, env, cancellationToken)
                 .ConfigureAwait(false);
 
             var request = new DeliverOpaqueMessageRequest
@@ -1778,24 +1778,24 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 || !resp.ResponsePayload.HasResponsePayload
                 || resp.ResponsePayload.ResponsePayload.Length == 0)
             {
-                await EnqueueRelayUpstreamToMainAsync(relayHostPeerId, msg.OpaqueBytes, msg.DebugType, cancellationToken).ConfigureAwait(false);
+                await EnqueueRelayUpstreamToMainAsync(relayHostNetworkPeerId, msg.OpaqueBytes, msg.DebugType, cancellationToken).ConfigureAwait(false);
                 return false;
             }
 
             var ackCipher = SessionRatchetMessage.FromBytesOwned(resp.ResponsePayload.ResponsePayload.ToByteArray());
-            var ackPlain = await DecryptSessionMessageAsync(relayHostPeerId, relayHostToMainSessionId, ackCipher, cancellationToken)
+            var ackPlain = await DecryptSessionMessageAsync(relayHostNetworkPeerId, relayHostToMainSessionId, ackCipher, cancellationToken)
                 .ConfigureAwait(false);
             var ack = RelayOpaqueResponse.Parser.ParseFrom(ackPlain.ToArray());
             if (!ack.HasMessageAckId || ack.MessageAckId.Length == 0)
             {
-                await EnqueueRelayUpstreamToMainAsync(relayHostPeerId, msg.OpaqueBytes, msg.DebugType, cancellationToken).ConfigureAwait(false);
+                await EnqueueRelayUpstreamToMainAsync(relayHostNetworkPeerId, msg.OpaqueBytes, msg.DebugType, cancellationToken).ConfigureAwait(false);
                 return false;
             }
 
             var returned = new Guid(ack.MessageAckId.ToByteArray());
             if (returned != msg.AckId)
             {
-                await EnqueueRelayUpstreamToMainAsync(relayHostPeerId, msg.OpaqueBytes, msg.DebugType, cancellationToken).ConfigureAwait(false);
+                await EnqueueRelayUpstreamToMainAsync(relayHostNetworkPeerId, msg.OpaqueBytes, msg.DebugType, cancellationToken).ConfigureAwait(false);
                 return false;
             }
 
@@ -1803,13 +1803,13 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         }
         catch (Exception ex)
         {
-            await EnqueueRelayUpstreamToMainAsync(relayHostPeerId, msg.OpaqueBytes, msg.DebugType, cancellationToken).ConfigureAwait(false);
+            await EnqueueRelayUpstreamToMainAsync(relayHostNetworkPeerId, msg.OpaqueBytes, msg.DebugType, cancellationToken).ConfigureAwait(false);
             throw;
         }
     }
 
     public async Task<EstablishSessionResponse?> ReceiveRelayedOpaquePayloadAsync(
-        Percolator.Network.PeerId simulatedPeerId,
+        Percolator.Network.NetworkPeerId simulatedNetworkPeerId,
         byte[] opaqueBytes,
         CancellationToken cancellationToken = default)
     {
@@ -1853,8 +1853,8 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
                 try
                 {
-                    var model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
-                        ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
+                    var model = _peers.FirstOrDefault(p => p.NetworkPeerId == simulatedNetworkPeerId)
+                        ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedNetworkPeerId}");
 
                     var pendingPkh = model.PendingStandardHandshakeToMainResponderPublicKeyHash.CurrentValue;
                     var pendingSidGuid = model.PendingStandardHandshakeToMainTemporarySessionId.CurrentValue;
@@ -1895,7 +1895,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                         model.SetConnection(
                             ConnectionMode.ViaRelay,
                             endpoint: model.Endpoint.CurrentValue,
-                            relayPeerId: relayHostPeerId);
+                            relayNetworkPeerId: relayHostPeerId);
                     }
 
                     model.ClearPendingStandardHandshakeToMain();
@@ -1908,7 +1908,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 _diagnostics.Emit(
                     SimulatorDiagnosticEventType.HandshakeStateTransition,
                     $"Standard handshake established: sid={assignedGuid.ToString()[..8]}",
-                    peerId: simulatedPeerId,
+                    peerId: simulatedNetworkPeerId,
                     contextTag: "Established");
 
                 return null;
@@ -1928,7 +1928,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                var peerModel = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId);
+                var peerModel = _peers.FirstOrDefault(p => p.NetworkPeerId == simulatedNetworkPeerId);
                 if (peerModel is null)
                 {
                     return null;
@@ -1972,7 +1972,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         return null;
     }
 
-    public async Task SendChatMessageToMainAsync(Percolator.Network.PeerId simulatedPeerId, string content, CancellationToken cancellationToken = default)
+    public async Task SendChatMessageToMainAsync(Percolator.Network.NetworkPeerId simulatedNetworkPeerId, string content, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -1988,7 +1988,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         };
         var internalEnvelope = new InternalEnvelope { ChatEnvelope = chatEnvelope };
 
-        Percolator.Network.PeerId? relayHostPeerId = null;
+        Percolator.Network.NetworkPeerId? relayHostPeerId = null;
         byte[]? cipherBytes = null;
         bool useRelay = false;
         bool useDirect = false;
@@ -1996,8 +1996,8 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
-                ?? throw new InvalidOperationException($"No simulated peer with id {simulatedPeerId}");
+            var model = _peers.FirstOrDefault(p => p.NetworkPeerId == simulatedNetworkPeerId)
+                ?? throw new InvalidOperationException($"No simulated peer with id {simulatedNetworkPeerId}");
 
             // Session selection: Select the most recently created session
             var sessionId = model.SessionsMutable
@@ -2006,10 +2006,10 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 .FirstOrDefault();
 
             if (sessionId == default)
-                throw new InvalidOperationException($"No session found for peer {simulatedPeerId} to send chat message");
+                throw new InvalidOperationException($"No session found for peer {simulatedNetworkPeerId} to send chat message");
 
             // Encrypt using the existing helper
-            var cipher = EncryptInternalEnvelopeAsyncCore(simulatedPeerId, sessionId, internalEnvelope);
+            var cipher = EncryptInternalEnvelopeAsyncCore(simulatedNetworkPeerId, sessionId, internalEnvelope);
 
             // Record outbound message in peer's chat history
             model.AddChatMessage(isFromMain: false, content: content, receivedUtc: now);
@@ -2041,7 +2041,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         if (useRelay)
         {
             await EnqueueRelayUpstreamToMainAsync(
-                relayHostPeerId: relayHostPeerId,
+                relayHostNetworkPeerId: relayHostPeerId,
                 opaqueBytes: cipherBytes!,
                 debugType: "Chat",
                 cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -2104,7 +2104,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 {
                     var model = CreatePeerFromSnapshot(p);
                     _peers.Add(model);
-                    _peerById[model.PeerId] = model;
+                    _peerById[model.NetworkPeerId] = model;
                     AttachRuntimePersistence(model);
                     AttachEndpointIndex(model);
                 }
@@ -2112,7 +2112,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 _relationships.Clear();
                 foreach (var rel in snapshot.Relationships)
                 {
-                    _relationships.Add(new PeerRelationship(rel.SourcePeerId, rel.TargetPeerId, rel.Type));
+                    _relationships.Add(new PeerRelationship(rel.SourceNetworkPeerId, rel.TargetNetworkPeerId, rel.Type));
                 }
 
                 _relays.Clear();
@@ -2121,7 +2121,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 {
                     var relay = CreateRelayFromSnapshot(relaySnap);
                     _relays.Add(relay);
-                    _relayByHostPeerId[relay.RelayHostPeerId] = relay;
+                    _relayByHostPeerId[relay.RelayHostNetworkPeerId] = relay;
                     AttachRelayPersistence(relay);
                 }
 
@@ -2143,7 +2143,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     private SimulatedPeerModel CreatePeerFromSnapshot(PeerStateSnapshot snap)
     {
         var peer = new SimulatedPeerModel(
-            peerId: snap.PeerId,
+            networkPeerId: snap.NetworkPeerId,
             selfIdentityId: snap.SelfIdentityId,
             displayName: snap.DisplayName,
             isRelayCapable: snap.IsRelayCapable,
@@ -2151,7 +2151,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             identitySigningKeyPrivateKeyEcPrivateKey: snap.IdentitySigningKeyPrivateKeyEcPrivateKey,
             connectionMode: snap.ConnectionMode,
             endpoint: snap.Endpoint,
-            relayPeerId: snap.RelayPeerId.Value == Guid.Empty ? null : snap.RelayPeerId,
+            relayPeerId: snap.RelayNetworkPeerId.Value == Guid.Empty ? null : snap.RelayNetworkPeerId,
             targetPublicKeyHash: snap.TargetPublicKeyHash,
             selectedRouteMode: snap.SelectedRouteMode,
             directEndpoint: snap.DirectEndpoint,
@@ -2164,7 +2164,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             publishedPreKeyBundles: snap.PublishedPreKeyBundles
                 .Select(b => new SimulatedPublishedPreKeyBundleModel(
                     b.RecipientPublicKeyHash,
-                    b.LogicalOwnerPeerId,
+                    b.LogicalOwnerNetworkPeerId,
                     b.IdentityKey,
                     b.SignedPreKeyId,
                     b.SignedPreKey,
@@ -2206,7 +2206,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 invite.RequestBytes,
                 invite.ReceivedAtUtc,
                 invite.InviterIdentityKeySpki,
-                invite.InviterPeerId));
+                invite.InviterNetworkPeerId));
         }
 
         // Hydrate sessions
@@ -2253,7 +2253,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 
     private static SimulatedRelayModel CreateRelayFromSnapshot(RelayStateSnapshot snap)
     {
-        var relay = new SimulatedRelayModel(snap.RelayHostPeerId);
+        var relay = new SimulatedRelayModel(snap.RelayHostNetworkPeerId);
         foreach (var m in snap.UpstreamToMain)
         {
             if (m.AckId == Guid.Empty) continue;
@@ -2268,11 +2268,11 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         return relay;
     }
 
-    public async Task<Percolator.Network.PeerId> AddPeerAsync(string? displayName, CancellationToken cancellationToken = default)
+    public async Task<Percolator.Network.NetworkPeerId> AddPeerAsync(string? displayName, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        var peerId = Percolator.Network.PeerId.NewId();
+        var peerId = Percolator.Network.NetworkPeerId.NewId();
 
         byte[] priv;
         byte[] spki;
@@ -2293,7 +2293,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             var selfIdentityId = Interlocked.Increment(ref _nextSelfIdentityId);
 
             model = new SimulatedPeerModel(
-                peerId: peerId,
+                networkPeerId: peerId,
                 selfIdentityId: selfIdentityId,
                 displayName: name,
                 isRelayCapable: false,
@@ -2317,7 +2317,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 
         _diagnostics.Emit(
             SimulatorDiagnosticEventType.PeerCreated,
-            $"Peer created: {(string.IsNullOrWhiteSpace(model.DisplayName.CurrentValue) ? model.PeerId.ToString()[..8] : model.DisplayName.CurrentValue)}",
+            $"Peer created: {(string.IsNullOrWhiteSpace(model.DisplayName.CurrentValue) ? model.NetworkPeerId.ToString()[..8] : model.DisplayName.CurrentValue)}",
             peerId: peerId);
 
         return peerId;
@@ -2359,17 +2359,17 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         return new DnsEndPoint($"127.77.{fx}.{fy}", port);
     }
 
-    public async Task<Percolator.Network.PeerId?> TryGetPeerIdByIdentityPublicKeyHashAsync(Percolator.Identity.IdentityPublicKeyHash recipientPublicKeyHash, CancellationToken cancellationToken = default)
+    public async Task<Percolator.Network.NetworkPeerId?> TryGetPeerIdByIdentityPublicKeyHashAsync(Percolator.Identity.IdentityPublicKeyHash recipientPublicKeyHash, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         
-        List<Percolator.Network.PeerId> matches;
+        List<Percolator.Network.NetworkPeerId> matches;
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             matches = _peerById.Values
                 .Where(p => Percolator.Identity.IdentityPublicKeyHash.FromSpki(p.IdentitySigningKeySpki).Equals(recipientPublicKeyHash))
-                .Select(p => p.PeerId)
+                .Select(p => p.NetworkPeerId)
                 .Take(2)
                 .ToList();
         }
@@ -2382,7 +2382,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         return matches[0];
     }
 
-    public async Task RemovePeerAsync(Percolator.Network.PeerId peerId, CancellationToken cancellationToken = default)
+    public async Task RemovePeerAsync(Percolator.Network.NetworkPeerId networkPeerId, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -2393,14 +2393,14 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (!_peerById.Remove(peerId, out removedModel)) return;
-            name = string.IsNullOrWhiteSpace(removedModel.DisplayName.CurrentValue) ? removedModel.PeerId.ToString()[..8] : removedModel.DisplayName.CurrentValue;
+            if (!_peerById.Remove(networkPeerId, out removedModel)) return;
+            name = string.IsNullOrWhiteSpace(removedModel.DisplayName.CurrentValue) ? removedModel.NetworkPeerId.ToString()[..8] : removedModel.DisplayName.CurrentValue;
             removedEndpoint = removedModel.Endpoint.CurrentValue;
 
             for (var i = _relationships.Count - 1; i >= 0; i--)
             {
                 var rel = _relationships[i];
-                if (rel.SourcePeerId == peerId || rel.TargetPeerId == peerId)
+                if (rel.SourceNetworkPeerId == networkPeerId || rel.TargetNetworkPeerId == networkPeerId)
                 {
                     _relationships.RemoveAt(i);
                 }
@@ -2427,7 +2427,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         // Remove from endpoint index
         _endpointIndex.TryRemove(removedEndpoint!, out _);
 
-        await RemoveRelayIfExistsAsync(peerId, cancellationToken).ConfigureAwait(false);
+        await RemoveRelayIfExistsAsync(networkPeerId, cancellationToken).ConfigureAwait(false);
 
         removedModel?.Dispose();
 
@@ -2436,20 +2436,20 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         _diagnostics.Emit(
             SimulatorDiagnosticEventType.PeerRemoved,
             $"Peer removed: {name}",
-            peerId: peerId);
+            peerId: networkPeerId);
     }
 
-    public async Task AddPublishedKeysRelationshipAsync(Percolator.Network.PeerId publisherPeerId, Percolator.Network.PeerId hostPeerId, CancellationToken cancellationToken = default)
+    public async Task AddPublishedKeysRelationshipAsync(Percolator.Network.NetworkPeerId publisherNetworkPeerId, Percolator.Network.NetworkPeerId hostNetworkPeerId, CancellationToken cancellationToken = default)
     {
-        if (publisherPeerId == hostPeerId) return;
+        if (publisherNetworkPeerId == hostNetworkPeerId) return;
 
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (!_peerById.ContainsKey(publisherPeerId)) return;
-            if (!_peerById.ContainsKey(hostPeerId)) return;
+            if (!_peerById.ContainsKey(publisherNetworkPeerId)) return;
+            if (!_peerById.ContainsKey(hostNetworkPeerId)) return;
 
-            var rel = new PeerRelationship(publisherPeerId, hostPeerId, RelationshipType.PublishedKey);
+            var rel = new PeerRelationship(publisherNetworkPeerId, hostNetworkPeerId, RelationshipType.PublishedKey);
             if (_relationships.Contains(rel)) return;
 
             _relationships.Add(rel);
@@ -2463,16 +2463,16 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 
         _diagnostics.Emit(
             SimulatorDiagnosticEventType.PreKeyPublishRelationshipAdded,
-            $"Pre-keys relationship added: {publisherPeerId.ToString()[..8]} -> {hostPeerId.ToString()[..8]}",
-            peerId: publisherPeerId);
+            $"Pre-keys relationship added: {publisherNetworkPeerId.ToString()[..8]} -> {hostNetworkPeerId.ToString()[..8]}",
+            peerId: publisherNetworkPeerId);
     }
 
-    public async Task RemovePublishedKeysRelationshipAsync(Percolator.Network.PeerId publisherPeerId, Percolator.Network.PeerId hostPeerId, CancellationToken cancellationToken = default)
+    public async Task RemovePublishedKeysRelationshipAsync(Percolator.Network.NetworkPeerId publisherNetworkPeerId, Percolator.Network.NetworkPeerId hostNetworkPeerId, CancellationToken cancellationToken = default)
     {
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var rel = new PeerRelationship(publisherPeerId, hostPeerId, RelationshipType.PublishedKey);
+            var rel = new PeerRelationship(publisherNetworkPeerId, hostNetworkPeerId, RelationshipType.PublishedKey);
             if (!_relationships.Contains(rel)) return;
 
             _ = _relationships.Remove(rel);
@@ -2486,22 +2486,22 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 
         _diagnostics.Emit(
             SimulatorDiagnosticEventType.PreKeyPublishRelationshipRemoved,
-            $"Pre-keys relationship removed: {publisherPeerId.ToString()[..8]} -> {hostPeerId.ToString()[..8]}",
-            peerId: publisherPeerId);
+            $"Pre-keys relationship removed: {publisherNetworkPeerId.ToString()[..8]} -> {hostNetworkPeerId.ToString()[..8]}",
+            peerId: publisherNetworkPeerId);
     }
 
-    public async Task AddRelayActiveSessionAsync(Percolator.Network.PeerId relayHostPeerId, Percolator.Network.PeerId peerId, CancellationToken cancellationToken = default)
+    public async Task AddRelayActiveSessionAsync(Percolator.Network.NetworkPeerId relayHostNetworkPeerId, Percolator.Network.NetworkPeerId networkPeerId, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (relayHostPeerId == peerId) return;
+        if (relayHostNetworkPeerId == networkPeerId) return;
 
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (!_peerById.ContainsKey(relayHostPeerId)) return;
-            if (!_peerById.ContainsKey(peerId)) return;
+            if (!_peerById.ContainsKey(relayHostNetworkPeerId)) return;
+            if (!_peerById.ContainsKey(networkPeerId)) return;
 
-            var rel = new PeerRelationship(relayHostPeerId, peerId, RelationshipType.RelayActiveSession);
+            var rel = new PeerRelationship(relayHostNetworkPeerId, networkPeerId, RelationshipType.RelayActiveSession);
             if (_relationships.Contains(rel)) return;
 
             _relationships.Add(rel);
@@ -2515,20 +2515,20 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 
         _diagnostics.Emit(
             SimulatorDiagnosticEventType.RelayActiveSessionAdded,
-            $"Relay active session added: relay={relayHostPeerId.ToString()[..8]} peer={peerId.ToString()[..8]}",
-            peerId: peerId,
-            relayHostPeerId: relayHostPeerId);
+            $"Relay active session added: relay={relayHostNetworkPeerId.ToString()[..8]} peer={networkPeerId.ToString()[..8]}",
+            peerId: networkPeerId,
+            relayHostPeerId: relayHostNetworkPeerId);
     }
 
-    public async Task RemoveRelayActiveSessionAsync(Percolator.Network.PeerId relayHostPeerId, Percolator.Network.PeerId peerId, CancellationToken cancellationToken = default)
+    public async Task RemoveRelayActiveSessionAsync(Percolator.Network.NetworkPeerId relayHostNetworkPeerId, Percolator.Network.NetworkPeerId networkPeerId, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (relayHostPeerId == peerId) return;
+        if (relayHostNetworkPeerId == networkPeerId) return;
 
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var rel = new PeerRelationship(relayHostPeerId, peerId, RelationshipType.RelayActiveSession);
+            var rel = new PeerRelationship(relayHostNetworkPeerId, networkPeerId, RelationshipType.RelayActiveSession);
             if (!_relationships.Contains(rel)) return;
 
             _ = _relationships.Remove(rel);
@@ -2542,15 +2542,15 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 
         _diagnostics.Emit(
             SimulatorDiagnosticEventType.RelayActiveSessionRemoved,
-            $"Relay active session removed: relay={relayHostPeerId.ToString()[..8]} peer={peerId.ToString()[..8]}",
-            peerId: peerId,
-            relayHostPeerId: relayHostPeerId);
+            $"Relay active session removed: relay={relayHostNetworkPeerId.ToString()[..8]} peer={networkPeerId.ToString()[..8]}",
+            peerId: networkPeerId,
+            relayHostPeerId: relayHostNetworkPeerId);
     }
 
     public async Task PublishPreKeyBundleAsync(
-        Percolator.Network.PeerId relayHostPeerId,
+        Percolator.Network.NetworkPeerId relayHostNetworkPeerId,
         Percolator.Identity.IdentityPublicKeyHash recipientPublicKeyHash,
-        Percolator.Network.PeerId logicalOwnerPeerId,
+        Percolator.Network.NetworkPeerId logicalOwnerNetworkPeerId,
         byte[] identityKey,
         Guid signedPreKeyId,
         byte[] signedPreKey,
@@ -2564,11 +2564,11 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (!_peerById.TryGetValue(relayHostPeerId, out var host)) return;
+            if (!_peerById.TryGetValue(relayHostNetworkPeerId, out var host)) return;
 
             host.PublishedPreKeyBundles.Add(new SimulatedPublishedPreKeyBundleModel(
                 RecipientPublicKeyHash: recipientPublicKeyHash,
-                LogicalOwnerPeerId: logicalOwnerPeerId,
+                LogicalOwnerNetworkPeerId: logicalOwnerNetworkPeerId,
                 IdentityKey: identityKey,
                 SignedPreKeyId: signedPreKeyId,
                 SignedPreKey: signedPreKey,
@@ -2586,13 +2586,13 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         _diagnostics.Emit(
             SimulatorDiagnosticEventType.RelayEnqueued,
             "Pre-key bundle published",
-            peerId: logicalOwnerPeerId,
-            relayHostPeerId: relayHostPeerId,
+            peerId: logicalOwnerNetworkPeerId,
+            relayHostPeerId: relayHostNetworkPeerId,
             contextTag: recipientPublicKeyHash.ToString());
     }
 
     internal async Task<SimulatedPublishedPreKeyBundleModel?> TryPopPreKeyBundleByRecipientPkhAsync(
-        Percolator.Network.PeerId relayHostPeerId,
+        Percolator.Network.NetworkPeerId relayHostNetworkPeerId,
         Percolator.Identity.IdentityPublicKeyHash recipientPublicKeyHash,
         CancellationToken cancellationToken = default)
     {
@@ -2601,7 +2601,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (!_peerById.TryGetValue(relayHostPeerId, out var host)) return null;
+            if (!_peerById.TryGetValue(relayHostNetworkPeerId, out var host)) return null;
 
             var now = _timeProvider.GetUtcNow();
             for (var i = host.PublishedPreKeyBundles.Count - 1; i >= 0; i--)
@@ -2635,7 +2635,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             // Return a new bundle containing only the popped onetime key (if any)
             var result = new SimulatedPublishedPreKeyBundleModel(
                 RecipientPublicKeyHash: match.RecipientPublicKeyHash,
-                LogicalOwnerPeerId: match.LogicalOwnerPeerId,
+                LogicalOwnerNetworkPeerId: match.LogicalOwnerNetworkPeerId,
                 IdentityKey: match.IdentityKey,
                 SignedPreKeyId: match.SignedPreKeyId,
                 SignedPreKey: match.SignedPreKey,
@@ -2657,7 +2657,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 
     private void AttachRuntimePersistence(SimulatedPeerModel model)
     {
-        if (_runtimePersistenceByPeerId.ContainsKey(model.PeerId)) return;
+        if (_runtimePersistenceByPeerId.ContainsKey(model.NetworkPeerId)) return;
 
         var tracker = new SimulatedPeerRuntimeTracker(model);
 
@@ -2666,9 +2666,9 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         var lifecycleSub = model.IsRelayCapable
             .Skip(1) // Prevent double-loading during InitializeCoreAsync
             .DistinctUntilChanged()
-            .SubscribeAwait(async (enabled, ct) => await OnRelayCapabilityChangedAsync(model.PeerId, enabled, ct).ConfigureAwait(false), AwaitOperation.Sequential);
+            .SubscribeAwait(async (enabled, ct) => await OnRelayCapabilityChangedAsync(model.NetworkPeerId, enabled, ct).ConfigureAwait(false), AwaitOperation.Sequential);
 
-        _runtimePersistenceByPeerId[model.PeerId] = new CompositeDisposable(tracker, saveSub, lifecycleSub);
+        _runtimePersistenceByPeerId[model.NetworkPeerId] = new CompositeDisposable(tracker, saveSub, lifecycleSub);
     }
 
     private void AttachEndpointIndex(SimulatedPeerModel model)
@@ -2681,30 +2681,30 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             {
                 // Remove old endpoint from index if it exists
                 _endpointIndex.TryRemove(oldEndpoint, out _);
-                _endpointIndex[endpoint] = model.PeerId;
+                _endpointIndex[endpoint] = model.NetworkPeerId;
                 oldEndpoint = endpoint;
             });
 
         // Initialize the index with the current endpoint
-        _endpointIndex[oldEndpoint] = model.PeerId;
+        _endpointIndex[oldEndpoint] = model.NetworkPeerId;
 
         // Store the subscription to dispose it when the peer is removed
         // We'll attach this to the peer's lifecycle
         model.Track(endpointSub);
     }
 
-    public bool TryResolvePeerId(DnsEndPoint endpoint, out Percolator.Network.PeerId peerId)
+    public bool TryResolvePeerId(DnsEndPoint endpoint, out Percolator.Network.NetworkPeerId networkPeerId)
     {
-        return _endpointIndex.TryGetValue(endpoint, out peerId);
+        return _endpointIndex.TryGetValue(endpoint, out networkPeerId);
     }
 
-    private async Task OnRelayCapabilityChangedAsync(Percolator.Network.PeerId peerId, bool enabled, CancellationToken cancellationToken)
+    private async Task OnRelayCapabilityChangedAsync(Percolator.Network.NetworkPeerId networkPeerId, bool enabled, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
         if (!enabled)
         {
-            await RemoveRelayIfExistsAsync(peerId, cancellationToken).ConfigureAwait(false);
+            await RemoveRelayIfExistsAsync(networkPeerId, cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -2712,10 +2712,10 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (_relayByHostPeerId.ContainsKey(peerId)) return;
+            if (_relayByHostPeerId.ContainsKey(networkPeerId)) return;
 
-            var relay = new SimulatedRelayModel(peerId);
-            _relayByHostPeerId[peerId] = relay;
+            var relay = new SimulatedRelayModel(networkPeerId);
+            _relayByHostPeerId[networkPeerId] = relay;
             _relays.Add(relay);
             AttachRelayPersistence(relay);
             addedRelay = relay;
@@ -2733,14 +2733,14 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 
     private void AttachRelayPersistence(SimulatedRelayModel relay)
     {
-        if (_relayPersistenceByHostPeerId.ContainsKey(relay.RelayHostPeerId)) return;
+        if (_relayPersistenceByHostPeerId.ContainsKey(relay.RelayHostNetworkPeerId)) return;
 
         var tracker = new SimulatedRelayProtocolStateTracker(relay);
         var saveSub = tracker.Dirty.Subscribe(_ => _saveTrigger.OnNext(Unit.Default));
-        _relayPersistenceByHostPeerId[relay.RelayHostPeerId] = new CompositeDisposable(tracker, saveSub);
+        _relayPersistenceByHostPeerId[relay.RelayHostNetworkPeerId] = new CompositeDisposable(tracker, saveSub);
     }
 
-    private async Task RemoveRelayIfExistsAsync(Percolator.Network.PeerId relayHostPeerId, CancellationToken cancellationToken)
+    private async Task RemoveRelayIfExistsAsync(Percolator.Network.NetworkPeerId relayHostNetworkPeerId, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -2748,11 +2748,11 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (!_relayByHostPeerId.TryGetValue(relayHostPeerId, out relay)) return;
+            if (!_relayByHostPeerId.TryGetValue(relayHostNetworkPeerId, out relay)) return;
 
-            _relayByHostPeerId.Remove(relayHostPeerId);
+            _relayByHostPeerId.Remove(relayHostNetworkPeerId);
 
-            if (_relayPersistenceByHostPeerId.Remove(relayHostPeerId, out var d))
+            if (_relayPersistenceByHostPeerId.Remove(relayHostNetworkPeerId, out var d))
             {
                 d.Dispose();
             }

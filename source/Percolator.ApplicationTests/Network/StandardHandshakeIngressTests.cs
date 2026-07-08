@@ -60,11 +60,11 @@ public sealed class StandardHandshakeIngressTests
 
         var directSessionMappingWriter = new Mock<IDirectSessionMappingWriter>(MockBehavior.Strict);
         DirectSessionId? capturedSid = null;
-        Percolator.Network.PeerId? capturedRemote = null;
+        Percolator.Network.NetworkPeerId? capturedRemote = null;
         SelfId? capturedSelf = null;
         directSessionMappingWriter
-            .Setup(w => w.WriteMappingAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<DirectSessionId>(), It.IsAny<SelfId>(), It.IsAny<CancellationToken>()))
-            .Callback<Percolator.Network.PeerId, DirectSessionId, SelfId, CancellationToken>((remote, sid, self, _) =>
+            .Setup(w => w.WriteMappingAsync(It.IsAny<Percolator.Network.NetworkPeerId>(), It.IsAny<DirectSessionId>(), It.IsAny<SelfId>(), It.IsAny<CancellationToken>()))
+            .Callback<Percolator.Network.NetworkPeerId, DirectSessionId, SelfId, CancellationToken>((remote, sid, self, _) =>
             {
                 capturedRemote = remote;
                 capturedSid = sid;
@@ -130,7 +130,7 @@ public sealed class StandardHandshakeIngressTests
         
         // Verify WriteMappingAsync was called with correct parameters
         directSessionMappingWriter.Verify(w => w.WriteMappingAsync(
-            It.IsAny<Percolator.Network.PeerId>(),
+            It.IsAny<Percolator.Network.NetworkPeerId>(),
             It.IsAny<DirectSessionId>(),
             It.IsAny<SelfId>(),
             It.IsAny<CancellationToken>()), Times.Once);
@@ -178,7 +178,7 @@ public sealed class StandardHandshakeIngressTests
 
         var directSessionMappingWriter = new Mock<IDirectSessionMappingWriter>(MockBehavior.Strict);
         directSessionMappingWriter
-            .Setup(w => w.WriteMappingAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<DirectSessionId>(), It.IsAny<SelfId>(), It.IsAny<CancellationToken>()))
+            .Setup(w => w.WriteMappingAsync(It.IsAny<Percolator.Network.NetworkPeerId>(), It.IsAny<DirectSessionId>(), It.IsAny<SelfId>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("boom"));
 
         var peerId = new Percolator.Identity.PeerId(1);

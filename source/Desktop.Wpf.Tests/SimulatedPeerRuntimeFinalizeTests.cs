@@ -27,8 +27,8 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
     public async Task SimulatorInitiatedHandshake_CreatesSession_WhenMainAccepts()
     {
         // Arrange
-        var inviterPeerId = new PeerId(1);
-        var acceptorPeerId = new PeerId(2);
+        var inviterPeerId = new NetworkPeerId(1);
+        var acceptorPeerId = new NetworkPeerId(2);
         var correlation = Guid.NewGuid();
 
         var inviterPeer = CryptoTestHelpers.CreateTestPeer(
@@ -66,7 +66,7 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
         // Setup: Add outbound invite to simulate simulator-initiated handshake state
         // Note: This is internal state manipulation, which is necessary to test the service layer
         // in isolation. In production, outbound invites are created by ViewModels via UI commands.
-        sut.Peers.Single(p => p.PeerId == inviterPeerId)
+        sut.Peers.Single(p => p.NetworkPeerId == inviterPeerId)
             .OutboundInvitesMutable
             .Add(new SimulatedOutboundInviteModel(correlation, spkPriv));
 
@@ -103,8 +103,8 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
         // Use AcceptInboundDirectInviteAsync to generate a valid response via crypto engine
         // This simulates Main accepting the invite and generating the response
         var acceptance = await sut.AcceptInboundDirectInviteAsync(
-            simulatedPeerId: acceptorPeerId,
-            inviterPeerId: inviterPeerId,
+            simulatedNetworkPeerId: acceptorPeerId,
+            inviterNetworkPeerId: inviterPeerId,
             invite: invite,
             cancellationToken: CancellationToken.None);
 
@@ -112,19 +112,19 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
         await sut.HandleInboundInviteHandshakeResponseFromMainAsync(inviterPeerId, acceptance.Response, CancellationToken.None);
 
         // Assert: Session was created immediately (Chunk A behavior)
-        sut.Peers.Single(p => p.PeerId == inviterPeerId).Sessions.Count.Should().Be(1);
+        sut.Peers.Single(p => p.NetworkPeerId == inviterPeerId).Sessions.Count.Should().Be(1);
         // Outbound invite should be removed
-        sut.Peers.Single(p => p.PeerId == inviterPeerId).OutboundInvitesMutable.Count.Should().Be(0);
+        sut.Peers.Single(p => p.NetworkPeerId == inviterPeerId).OutboundInvitesMutable.Count.Should().Be(0);
         // UI state should be Established
-        sut.Peers.Single(p => p.PeerId == inviterPeerId).UiState.CurrentValue.Should().Be(SimulatorPeerUiState.Established);
+        sut.Peers.Single(p => p.NetworkPeerId == inviterPeerId).UiState.CurrentValue.Should().Be(SimulatorPeerUiState.Established);
     }
 
     [Test]
     public async Task HandleInboundInviteHandshakeResponse_does_not_create_session_when_no_matching_outbound_invite()
     {
         // Arrange
-        var inviterPeerId = new PeerId(3);
-        var acceptorPeerId = new PeerId(4);
+        var inviterPeerId = new NetworkPeerId(3);
+        var acceptorPeerId = new NetworkPeerId(4);
         var correlation = Guid.NewGuid();
 
         var inviterPeer = CryptoTestHelpers.CreateTestPeer(
@@ -166,16 +166,16 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
         }, CancellationToken.None);
 
         // Assert: Session was NOT created because there was no matching outbound invite
-        sut.Peers.Single(p => p.PeerId == inviterPeerId).Sessions.Count.Should().Be(0);
+        sut.Peers.Single(p => p.NetworkPeerId == inviterPeerId).Sessions.Count.Should().Be(0);
         // Outbound invites should still be empty (we never added one)
-        sut.Peers.Single(p => p.PeerId == inviterPeerId).OutboundInvitesMutable.Count.Should().Be(0);
+        sut.Peers.Single(p => p.NetworkPeerId == inviterPeerId).OutboundInvitesMutable.Count.Should().Be(0);
     }
 
     [Test]
     public async Task HandleInboundInviteHandshakeResponse_throws_when_missing_acceptor_identity_key()
     {
         // Arrange
-        var inviterPeerId = new PeerId(5);
+        var inviterPeerId = new NetworkPeerId(5);
         var correlation = Guid.NewGuid();
 
         var inviterPeer = CryptoTestHelpers.CreateTestPeer(
@@ -218,7 +218,7 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
     public async Task HandleInboundInviteHandshakeResponse_throws_when_missing_acceptor_x3dh_ephemeral_key()
     {
         // Arrange
-        var inviterPeerId = new PeerId(6);
+        var inviterPeerId = new NetworkPeerId(6);
         var correlation = Guid.NewGuid();
 
         var inviterPeer = CryptoTestHelpers.CreateTestPeer(
@@ -261,7 +261,7 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
     public async Task HandleInboundInviteHandshakeResponse_throws_when_missing_initial_ratchet_message()
     {
         // Arrange
-        var inviterPeerId = new PeerId(7);
+        var inviterPeerId = new NetworkPeerId(7);
         var correlation = Guid.NewGuid();
 
         var inviterPeer = CryptoTestHelpers.CreateTestPeer(

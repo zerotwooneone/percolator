@@ -161,7 +161,7 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
         try
         {
             await _directSessionMappingWriter.WriteMappingAsync(
-                new Percolator.Network.PeerId(initiatorIdentity.Id.Value),
+                new Percolator.Network.NetworkPeerId(initiatorIdentity.Id.Value),
                 new Percolator.Network.DirectSessionId(sessionId.Value),
                 selfIdentityId,
                 ct).ConfigureAwait(false);

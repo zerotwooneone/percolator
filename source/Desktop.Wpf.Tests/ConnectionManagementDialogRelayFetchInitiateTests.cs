@@ -31,8 +31,8 @@ public sealed class ConnectionManagementDialogRelayFetchInitiateTests
 
         var relayHostId = Guid.NewGuid();
         var directSessionId = DirectSessionId.NewId();
-        directSessions.Setup(x => x.GetByRemotePeerIdAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<int>()))
-            .ReturnsAsync(new DirectSession(new Percolator.Network.PeerId(relayHostId), directSessionId));
+        directSessions.Setup(x => x.GetByRemotePeerIdAsync(It.IsAny<Percolator.Network.NetworkPeerId>(), It.IsAny<int>()))
+            .ReturnsAsync(new DirectSession(new Percolator.Network.NetworkPeerId(relayHostId), directSessionId));
         directSessions.Setup(x => x.ListAsync(It.IsAny<int>()))
             .ReturnsAsync(Array.Empty<DirectSession>());
 
@@ -85,7 +85,7 @@ public sealed class ConnectionManagementDialogRelayFetchInitiateTests
             mediator.Object);
 
         sut.SelectedRouteMode.Value = new RouteModeOption("relay", "Via Relay Host");
-        sut.SelectedRelayHost.Value = new RelayHostOption(new Percolator.Network.PeerId(relayHostId), "relay");
+        sut.SelectedRelayHost.Value = new RelayHostOption(new Percolator.Network.NetworkPeerId(relayHostId), "relay");
         sut.TargetPkhText.Value = targetPkhHex;
 
         // ACT

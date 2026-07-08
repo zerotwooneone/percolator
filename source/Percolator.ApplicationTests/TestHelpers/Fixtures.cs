@@ -73,7 +73,7 @@ namespace Percolator.ApplicationTests.TestHelpers
     {
         public static void SetupNoExisting(Mock<IPeerRoutingProfileRepository> repo)
         {
-            repo.Setup(r => r.GetByIdAsync(It.IsAny<PeerId>(), It.IsAny<CancellationToken>()))
+            repo.Setup(r => r.GetByIdAsync(It.IsAny<NetworkPeerId>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((PeerRoutingProfile?)null);
             repo.Setup(r => r.UpsertAsync(It.IsAny<PeerRoutingProfile>(), It.IsAny<CancellationToken>()))
                 .Returns(System.Threading.Tasks.Task.CompletedTask);
@@ -81,7 +81,7 @@ namespace Percolator.ApplicationTests.TestHelpers
 
         public static void SetupExisting(Mock<IPeerRoutingProfileRepository> repo, PeerRoutingProfile existing)
         {
-            repo.Setup(r => r.GetByIdAsync(It.IsAny<PeerId>(), It.IsAny<CancellationToken>()))
+            repo.Setup(r => r.GetByIdAsync(It.IsAny<NetworkPeerId>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(existing);
             repo.Setup(r => r.UpsertAsync(existing, It.IsAny<CancellationToken>()))
                 .Returns(System.Threading.Tasks.Task.CompletedTask);

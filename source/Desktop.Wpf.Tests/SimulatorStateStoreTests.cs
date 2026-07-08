@@ -25,7 +25,7 @@ public sealed class SimulatorStateStoreTests
         var tmp = Path.Combine(Path.GetTempPath(), $"percolator-sim-{Guid.NewGuid():N}.json");
         try
         {
-            var peerId = new Percolator.Network.PeerId(Guid.NewGuid());
+            var peerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
 
             var services = new ServiceCollection();
             services.AddSingleton<IClock>(new TestClock(DateTimeOffset.UtcNow));
@@ -49,7 +49,7 @@ public sealed class SimulatorStateStoreTests
             var spki = identity.ExportSubjectPublicKeyInfo();
 
             var model = new SimulatedPeerModel(
-                peerId: peerId,
+                networkPeerId: peerId,
                 selfIdentityId: 99000,
                 displayName: "Alice",
                 isRelayCapable: false,
@@ -57,9 +57,9 @@ public sealed class SimulatorStateStoreTests
                 identitySigningKeyPrivateKeyEcPrivateKey: priv,
                 endpoint: new System.Net.DnsEndPoint("127.77.1.1", 5002));
 
-            var host1 = new Percolator.Network.PeerId(Guid.NewGuid());
-            var host2 = new Percolator.Network.PeerId(Guid.NewGuid());
-            var host3 = new Percolator.Network.PeerId(Guid.NewGuid());
+            var host1 = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
+            var host2 = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
+            var host3 = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
 
             model.SignedPreKeysMutable.Add(new SimulatedSignedPreKeyModel(
                 SignedPreKeyId: signedPreKeyId,
@@ -88,22 +88,22 @@ public sealed class SimulatorStateStoreTests
             model.SignedPreKeysMutable.Add(new SimulatedSignedPreKeyModel(Guid.NewGuid(), RandomNumberGenerator.GetBytes(32), RandomNumberGenerator.GetBytes(32)));
             model.SessionsMutable[session.Id] = session;
 
-            var inviterPeerId = new Percolator.Network.PeerId(Guid.NewGuid());
+            var inviterPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
             model.PendingInboundDirectInvitesMutable.Add(new SimulatedPendingInboundDirectInviteModel(
                 CorrelationId: Guid.NewGuid(),
                 RequestBytes: new byte[] { 0x10, 0x11, 0x12 },
                 ReceivedAtUtc: DateTimeOffset.UtcNow,
                 InviterIdentityKeySpki: new byte[] { 0x20, 0x21 },
-                InviterPeerId: inviterPeerId));
+                InviterNetworkPeerId: inviterPeerId));
 
             var relationships = new[]
             {
-                new PeerRelationshipSnapshot(model.PeerId, host1, RelationshipType.PublishedKey),
-                new PeerRelationshipSnapshot(model.PeerId, host2, RelationshipType.PublishedKey),
-                new PeerRelationshipSnapshot(model.PeerId, host3, RelationshipType.PublishedKey)
+                new PeerRelationshipSnapshot(model.NetworkPeerId, host1, RelationshipType.PublishedKey),
+                new PeerRelationshipSnapshot(model.NetworkPeerId, host2, RelationshipType.PublishedKey),
+                new PeerRelationshipSnapshot(model.NetworkPeerId, host3, RelationshipType.PublishedKey)
             };
 
-            var relayHostPeerId = new Percolator.Network.PeerId(Guid.NewGuid());
+            var relayHostPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
             var ackUp = Guid.NewGuid();
             var ackDown = Guid.NewGuid();
             var targetPkh = IdentityPublicKeyHash.FromSpki(Guid.NewGuid().ToByteArray());
@@ -112,7 +112,7 @@ public sealed class SimulatorStateStoreTests
             var relays = new[]
             {
                 new RelayStateSnapshot(
-                    RelayHostPeerId: relayHostPeerId,
+                    RelayHostNetworkPeerId: relayHostPeerId,
                     UpstreamToMain: new[]
                     {
                         new OutboundRelayMessageSnapshot(
@@ -156,21 +156,21 @@ public sealed class SimulatorStateStoreTests
             loadedSnapshot.Peers.Should().HaveCount(1);
             var loadedPeer = loadedSnapshot.Peers.Single();
 
-            loadedPeer.PeerId.Should().Be(peerId);
+            loadedPeer.NetworkPeerId.Should().Be(peerId);
             loadedPeer.DisplayName.Should().Be("Alice");
             loadedPeer.SignedPreKeys.Should().HaveCount(2);
             loadedPeer.Sessions.Should().HaveCount(1);
 
             loadedPeer.PendingInboundDirectInvites.Should().HaveCount(1);
-            loadedPeer.PendingInboundDirectInvites.Single().InviterPeerId.Should().Be(inviterPeerId);
+            loadedPeer.PendingInboundDirectInvites.Single().InviterNetworkPeerId.Should().Be(inviterPeerId);
 
             loadedSnapshot.Relationships
-                .Count(r => r.SourcePeerId == model.PeerId && r.Type == RelationshipType.PublishedKey)
+                .Count(r => r.SourceNetworkPeerId == model.NetworkPeerId && r.Type == RelationshipType.PublishedKey)
                 .Should()
                 .Be(3);
 
             loadedSnapshot.Relays.Should().HaveCount(1);
-            loadedSnapshot.Relays.Single().RelayHostPeerId.Should().Be(relayHostPeerId);
+            loadedSnapshot.Relays.Single().RelayHostNetworkPeerId.Should().Be(relayHostPeerId);
             loadedSnapshot.Relays.Single().UpstreamToMain.Should().ContainSingle(m => m.AckId == ackUp && m.DebugType == "up");
             loadedSnapshot.Relays.Single().DownstreamToPeers.Should().ContainSingle(m => m.AckId == ackDown && m.DebugType == "down");
             loadedSnapshot.Relays.Single().DownstreamToPeers.Single(m => m.AckId == ackDown).TargetIdentityPublicKeyHash.Should().Be(targetPkh);
@@ -193,8 +193,8 @@ public sealed class SimulatorStateStoreTests
         var tmp = Path.Combine(Path.GetTempPath(), $"percolator-sim-{Guid.NewGuid():N}.json");
         try
         {
-            var peerId = new Percolator.Network.PeerId(Guid.NewGuid());
-            var inviterPeerId = new Percolator.Network.PeerId(Guid.NewGuid());
+            var peerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
+            var inviterPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
             var correlationId = Guid.NewGuid();
 
             var services = new ServiceCollection();
@@ -216,7 +216,7 @@ public sealed class SimulatorStateStoreTests
             var spki = identity.ExportSubjectPublicKeyInfo();
 
             var model = new SimulatedPeerModel(
-                peerId: peerId,
+                networkPeerId: peerId,
                 selfIdentityId: 99000,
                 displayName: "TestPeer",
                 isRelayCapable: false,
@@ -230,7 +230,7 @@ public sealed class SimulatorStateStoreTests
                 RequestBytes: new byte[] { 0x01, 0x02, 0x03 },
                 ReceivedAtUtc: DateTimeOffset.UtcNow,
                 InviterIdentityKeySpki: new byte[] { 0x10, 0x11 },
-                InviterPeerId: inviterPeerId));
+                InviterNetworkPeerId: inviterPeerId));
 
             var snapshot = new SimulatorStateSnapshot(
                 Version: 1,
@@ -248,7 +248,7 @@ public sealed class SimulatorStateStoreTests
             loadedPeer.PendingInboundDirectInvites.Should().HaveCount(1);
             var loadedInvite = loadedPeer.PendingInboundDirectInvites.Single();
             loadedInvite.CorrelationId.Should().Be(correlationId);
-            loadedInvite.InviterPeerId.Should().Be(inviterPeerId);
+            loadedInvite.InviterNetworkPeerId.Should().Be(inviterPeerId);
             loadedInvite.InviterIdentityKeySpki.Should().BeEquivalentTo(new byte[] { 0x10, 0x11 });
             loadedInvite.RequestBytes.Should().BeEquivalentTo(new byte[] { 0x01, 0x02, 0x03 });
         }

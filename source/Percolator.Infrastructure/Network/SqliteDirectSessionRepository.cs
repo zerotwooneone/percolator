@@ -23,7 +23,7 @@ public sealed class SqliteDirectSessionRepository : IDirectSessionRepository
             .ConfigureAwait(false);
 
         return rows
-            .Select(dbo => new DirectSession(new Percolator.Network.PeerId(dbo.RemotePeerId), new DirectSessionId(dbo.SessionId)))
+            .Select(dbo => new DirectSession(new Percolator.Network.NetworkPeerId(dbo.RemotePeerId), new DirectSessionId(dbo.SessionId)))
             .ToList();
     }
 
@@ -32,26 +32,26 @@ public sealed class SqliteDirectSessionRepository : IDirectSessionRepository
         var dbo = await _db.DirectSessions
             .AsNoTracking()
             .FirstOrDefaultAsync(x => x.SessionId == sessionId.Value && x.SelfIdentityId == selfIdentityId.Value);
-        return dbo is null ? null : new DirectSession(new Percolator.Network.PeerId(dbo.RemotePeerId), new DirectSessionId(dbo.SessionId));
+        return dbo is null ? null : new DirectSession(new Percolator.Network.NetworkPeerId(dbo.RemotePeerId), new DirectSessionId(dbo.SessionId));
     }
 
-    public async Task<DirectSession?> GetByRemotePeerIdAsync(Percolator.Network.PeerId remotePeerId, NetworkSelfId selfIdentityId)
+    public async Task<DirectSession?> GetByRemotePeerIdAsync(Percolator.Network.NetworkPeerId remoteNetworkPeerId, NetworkSelfId selfIdentityId)
     {
         var dbo = await _db.DirectSessions
             .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.RemotePeerId == remotePeerId.Value && x.SelfIdentityId == selfIdentityId.Value);
-        return dbo is null ? null : new DirectSession(new Percolator.Network.PeerId(dbo.RemotePeerId), new DirectSessionId(dbo.SessionId));
+            .FirstOrDefaultAsync(x => x.RemotePeerId == remoteNetworkPeerId.Value && x.SelfIdentityId == selfIdentityId.Value);
+        return dbo is null ? null : new DirectSession(new Percolator.Network.NetworkPeerId(dbo.RemotePeerId), new DirectSessionId(dbo.SessionId));
     }
 
-    public async Task UpsertAsync(Percolator.Network.PeerId remotePeerId, DirectSessionId sessionId, NetworkSelfId selfIdentityId)
+    public async Task UpsertAsync(Percolator.Network.NetworkPeerId remoteNetworkPeerId, DirectSessionId sessionId, NetworkSelfId selfIdentityId)
     {
         var existing = await _db.DirectSessions
-            .FirstOrDefaultAsync(x => x.RemotePeerId == remotePeerId.Value && x.SelfIdentityId == selfIdentityId.Value);
+            .FirstOrDefaultAsync(x => x.RemotePeerId == remoteNetworkPeerId.Value && x.SelfIdentityId == selfIdentityId.Value);
         if (existing is null)
         {
             _db.DirectSessions.Add(new DirectSessionDbo
             {
-                RemotePeerId = remotePeerId.Value,
+                RemotePeerId = remoteNetworkPeerId.Value,
                 SessionId = sessionId.Value,
                 SelfIdentityId = selfIdentityId.Value
             });
@@ -65,10 +65,10 @@ public sealed class SqliteDirectSessionRepository : IDirectSessionRepository
         await _db.SaveChangesAsync();
     }
 
-    public async Task DeleteByRemotePeerIdAsync(Percolator.Network.PeerId remotePeerId, NetworkSelfId selfIdentityId)
+    public async Task DeleteByRemotePeerIdAsync(Percolator.Network.NetworkPeerId remoteNetworkPeerId, NetworkSelfId selfIdentityId)
     {
         var existing = await _db.DirectSessions
-            .FirstOrDefaultAsync(x => x.RemotePeerId == remotePeerId.Value && x.SelfIdentityId == selfIdentityId.Value);
+            .FirstOrDefaultAsync(x => x.RemotePeerId == remoteNetworkPeerId.Value && x.SelfIdentityId == selfIdentityId.Value);
         if (existing != null)
         {
             _db.DirectSessions.Remove(existing);

@@ -23,9 +23,9 @@ public sealed class SimulatorDiagnosticsTabViewModelFilteringTests
     public async Task Filtering_ByPeerRelayAndType_Works()
     {
         // Arrange
-        var peerA = new Percolator.Network.PeerId(Guid.NewGuid());
-        var peerB = new Percolator.Network.PeerId(Guid.NewGuid());
-        var relay = new Percolator.Network.PeerId(Guid.NewGuid());
+        var peerA = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
+        var peerB = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
+        var relay = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
 
         var state = new Mock<ISimulatorStateService>(MockBehavior.Strict);
 
@@ -38,10 +38,10 @@ public sealed class SimulatorDiagnosticsTabViewModelFilteringTests
         peersList.Add(new SimulatedPeerModel(peerB, selfIdentityId: 99002, "B", isRelayCapable: false, spki, priv, endpoint: new System.Net.DnsEndPoint("127.77.1.3", 5002)));
         state.SetupGet(s => s.Peers).Returns(peersList);
         state.Setup(s => s.TryGetPeerIdByIdentityPublicKeyHashAsync(It.IsAny<IdentityPublicKeyHash>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Percolator.Network.PeerId?)null);
-        state.Setup(s => s.AddRelayActiveSessionAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<Percolator.Network.PeerId>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Percolator.Network.NetworkPeerId?)null);
+        state.Setup(s => s.AddRelayActiveSessionAsync(It.IsAny<Percolator.Network.NetworkPeerId>(), It.IsAny<Percolator.Network.NetworkPeerId>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
-        state.Setup(s => s.RemoveRelayActiveSessionAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<Percolator.Network.PeerId>(), It.IsAny<CancellationToken>()))
+        state.Setup(s => s.RemoveRelayActiveSessionAsync(It.IsAny<Percolator.Network.NetworkPeerId>(), It.IsAny<Percolator.Network.NetworkPeerId>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         var diagnostics = new SimulatorDiagnosticsService();

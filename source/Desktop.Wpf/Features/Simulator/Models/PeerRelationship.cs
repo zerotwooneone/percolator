@@ -8,6 +8,6 @@ public enum RelationshipType
     RelayActiveSession
 }
 
-public sealed record PeerRelationship(PeerId SourcePeerId, PeerId TargetPeerId, RelationshipType Type);
+public sealed record PeerRelationship(NetworkPeerId SourceNetworkPeerId, NetworkPeerId TargetNetworkPeerId, RelationshipType Type);
 
-public sealed record PeerRelationshipSnapshot(PeerId SourcePeerId, PeerId TargetPeerId, RelationshipType Type);
+public sealed record PeerRelationshipSnapshot(NetworkPeerId SourceNetworkPeerId, NetworkPeerId TargetNetworkPeerId, RelationshipType Type);

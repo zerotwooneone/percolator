@@ -39,7 +39,7 @@ public sealed class SimpleRoutePlanner : IProfileRoutePlanner
         {
             var relay = profile.Relays
                 .OrderByDescending(r => r.Freshness.LastSeenUtc)
-                .ThenBy(r => r.RelayPeerId.Value.ToString(), StringComparer.Ordinal)
+                .ThenBy(r => r.RelayNetworkPeerId.Value.ToString(), StringComparer.Ordinal)
                 .First();
             return new RouteSelection(default, relay);
         }

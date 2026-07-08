@@ -18,7 +18,7 @@ public class DiscoveredPeer
 
     // Promotion state
     public bool IsPromoted { get; private set; }
-    public PeerId? BoundPeerId { get; private set; }
+    public NetworkPeerId? BoundPeerId { get; private set; }
     public DateTimeOffset? PromotedAtUtc { get; private set; }
 
     private DiscoveredPeer(DiscoveryKey key, PublicKeyHash? identityPublicKeyHash, DateTimeOffset now)
@@ -66,7 +66,7 @@ public class DiscoveredPeer
         }
     }
 
-    public PeerRoutingProfile PromoteToRoutingProfile(PeerId id, DateTimeOffset promotedAt)
+    public PeerRoutingProfile PromoteToRoutingProfile(NetworkPeerId id, DateTimeOffset promotedAt)
     {
         var prp = new PeerRoutingProfile();
         prp.BindIdentity(id);

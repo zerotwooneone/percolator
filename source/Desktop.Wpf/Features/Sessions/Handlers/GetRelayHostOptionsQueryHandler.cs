@@ -32,9 +32,9 @@ public sealed class GetRelayHostOptionsQueryHandler : IRequestHandler<GetRelayHo
         }
 
         var options = new List<RelayHostOptionDto>();
-        foreach (var s in sessions.OrderBy(x => x.RemotePeerId.Value))
+        foreach (var s in sessions.OrderBy(x => x.RemoteNetworkPeerId.Value))
         {
-            var peerId = new Percolator.Identity.PeerId(s.RemotePeerId.Value);
+            var peerId = new Percolator.Identity.PeerId(s.RemoteNetworkPeerId.Value);
 
             PeerIdentity? identity;
             try
@@ -52,7 +52,7 @@ public sealed class GetRelayHostOptionsQueryHandler : IRequestHandler<GetRelayHo
                 name = peerId.Value.ToString()[..8];
             }
 
-            options.Add(new RelayHostOptionDto(new Percolator.Network.PeerId(peerId.Value), name));
+            options.Add(new RelayHostOptionDto(new Percolator.Network.NetworkPeerId(peerId.Value), name));
         }
 
         return new GetRelayHostOptionsResult(options);

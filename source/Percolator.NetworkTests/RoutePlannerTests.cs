@@ -35,8 +35,8 @@ public class RoutePlannerTests
     public void FallsBack_To_Relay_When_No_Endpoints()
     {
         var profile = new PeerRoutingProfile();
-        var relayIdOld = new PeerId(1);
-        var relayIdNew = new PeerId(1);
+        var relayIdOld = new NetworkPeerId(1);
+        var relayIdNew = new NetworkPeerId(1);
         var now = DateTimeOffset.UtcNow;
         profile.AddOrRefreshRelay(relayIdOld, now.AddMinutes(-30));
         profile.AddOrRefreshRelay(relayIdNew, now);
@@ -51,6 +51,6 @@ public class RoutePlannerTests
         route.Should().NotBeNull();
         route.SelectedEndpoint.Should().BeNull();
         route.SelectedRelay.Should().NotBeNull();
-        route.SelectedRelay!.RelayPeerId.Should().Be(relayIdNew);
+        route.SelectedRelay!.RelayNetworkPeerId.Should().Be(relayIdNew);
     }
 }

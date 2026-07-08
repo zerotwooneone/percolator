@@ -27,7 +27,7 @@ public sealed class SimulatorRelayAutoDeliverServiceTests
 
     private sealed class StateStub : TestSimulatorStateServiceBase
     {
-        public override Task<bool> DeliverRelayUpstreamToMainByAckIdAsync(Percolator.Network.PeerId relayHostPeerId, Percolator.Cryptography.SessionId relayHostToMainSessionId, Guid ackId, CancellationToken cancellationToken = default)
+        public override Task<bool> DeliverRelayUpstreamToMainByAckIdAsync(Percolator.Network.NetworkPeerId relayHostNetworkPeerId, Percolator.Cryptography.SessionId relayHostToMainSessionId, Guid ackId, CancellationToken cancellationToken = default)
             => Task.FromResult(true);
     }
 
@@ -36,9 +36,9 @@ public sealed class SimulatorRelayAutoDeliverServiceTests
     {
         // Arrange
         var relayHostPeerIdGuid = Guid.NewGuid();
-        var relayHostPeerId = new Percolator.Network.PeerId(relayHostPeerIdGuid);
+        var relayHostPeerId = new Percolator.Network.NetworkPeerId(relayHostPeerIdGuid);
         var recipientPeerIdGuid = Guid.NewGuid();
-        var recipientPeerId = new Percolator.Network.PeerId(recipientPeerIdGuid);
+        var recipientPeerId = new Percolator.Network.NetworkPeerId(recipientPeerIdGuid);
         var ackId = Guid.NewGuid();
         var targetPkh = System.Security.Cryptography.SHA256.HashData(Guid.NewGuid().ToByteArray());
 

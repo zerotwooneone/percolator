@@ -84,9 +84,8 @@ public class MessageIntegrationTests : IntegrationTestBase
             var senderIdentityContext = senderServices.GetRequiredService<ActiveIdentityContext>();
             var receiverIdentityContext = receiverServices.GetRequiredService<ActiveIdentityContext>();
 
-            TestContext.WriteLine($"Sender identity: {senderIdentityContext.Identity?.Id}");
-            TestContext.WriteLine($"Receiver identity: {receiverIdentityContext.Identity?.Id}");
-
+            
+            
             Assert.That(senderIdentityContext.Identity, Is.Not.Null, "Sender identity should be loaded");
             Assert.That(receiverIdentityContext.Identity, Is.Not.Null, "Receiver identity should be loaded");
 

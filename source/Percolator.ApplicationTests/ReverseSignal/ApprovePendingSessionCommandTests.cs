@@ -154,7 +154,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
             var profileRepo = new Mock<IPeerRoutingProfileRepository>(MockBehavior.Loose);
             var delivery = new Mock<IInviteHandshakeResponseDeliveryService>(MockBehavior.Loose);
             delivery.Setup(d => d.DeliverAsync(
-                    It.IsAny<Percolator.Network.PeerId>(),
+                    It.IsAny<Percolator.Network.NetworkPeerId>(),
                     It.IsAny<DnsEndPoint?>(),
                     It.IsAny<InviteHandshakeResponse>(),
                     It.IsAny<CancellationToken>()))
@@ -252,7 +252,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
             var profileRepo = new Mock<IPeerRoutingProfileRepository>(MockBehavior.Loose);
             var delivery = new Mock<IInviteHandshakeResponseDeliveryService>(MockBehavior.Loose);
             delivery.Setup(d => d.DeliverAsync(
-                    It.IsAny<Percolator.Network.PeerId>(),
+                    It.IsAny<Percolator.Network.NetworkPeerId>(),
                     It.IsAny<DnsEndPoint?>(),
                     It.IsAny<InviteHandshakeResponse>(),
                     It.IsAny<CancellationToken>()))

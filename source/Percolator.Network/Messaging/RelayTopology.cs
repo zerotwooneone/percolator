@@ -9,11 +9,11 @@ public sealed class DefaultRelayTopology : IRelayTopology
         _profiles = profiles;
     }
 
-    public async Task<PeerId?> GetRelayForAsync(PeerId target, CancellationToken ct = default)
+    public async Task<NetworkPeerId?> GetRelayForAsync(NetworkPeerId target, CancellationToken ct = default)
     {
         // Read routing profile; return first configured relay if present
         var profile = await _profiles.GetByIdAsync(target, ct).ConfigureAwait(false);
         var relay = profile?.Relays.FirstOrDefault();
-        return relay is null ? null : relay.RelayPeerId;
+        return relay is null ? null : relay.RelayNetworkPeerId;
     }
 }

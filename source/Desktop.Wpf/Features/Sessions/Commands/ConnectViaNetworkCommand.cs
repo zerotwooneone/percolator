@@ -7,7 +7,7 @@ public record ConnectViaNetworkCommand(
     string RouteMode,
     string? DirectEndpoint,
     string? TargetPkhText,
-    PeerId? RelayHostPeerId,
+    NetworkPeerId? RelayHostPeerId,
     string? TargetDisplayName) : IRequest<ConnectViaNetworkResult>;
 
 public abstract record ConnectViaNetworkResult

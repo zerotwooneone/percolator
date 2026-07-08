@@ -35,12 +35,12 @@ public sealed class SqliteDiscoveredPeerRepository : IDiscoveredPeerRepository
         return GetCandidatesInternalAsync(seenSince, cancellationToken);
     }
 
-    public Task<PeerRoutingProfile> PromoteToRoutingProfileAsync(DiscoveredPeer provisional, PeerId id, CancellationToken cancellationToken = default)
+    public Task<PeerRoutingProfile> PromoteToRoutingProfileAsync(DiscoveredPeer provisional, NetworkPeerId id, CancellationToken cancellationToken = default)
     {
         return Task.FromResult(provisional.PromoteToRoutingProfile(id, DateTimeOffset.UtcNow));
     }
 
-    public Task<PeerRoutingProfile> BindIdentityAsync(PeerRoutingProfile aggregate, PeerId id, CancellationToken cancellationToken = default)
+    public Task<PeerRoutingProfile> BindIdentityAsync(PeerRoutingProfile aggregate, NetworkPeerId id, CancellationToken cancellationToken = default)
     {
         aggregate.BindIdentity(id);
         return Task.FromResult(aggregate);

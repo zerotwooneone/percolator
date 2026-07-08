@@ -34,7 +34,7 @@ public sealed class SimulatorChatViewModel : ViewModelBase
             var text = MessageInput.Value;
             if (string.IsNullOrWhiteSpace(text)) return;
 
-            await _state.SendChatMessageToMainAsync(_model.PeerId, text, CancellationToken.None);
+            await _state.SendChatMessageToMainAsync(_model.NetworkPeerId, text, CancellationToken.None);
             MessageInput.Value = string.Empty;
         },
             requery: MessageInput.Select(_ => Unit.Default),

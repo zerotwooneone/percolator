@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Percolator.Identity;
 using Percolator.Network;
-using PeerId = Percolator.Network.PeerId;
 
 namespace Percolator.Application.Services;
 
@@ -22,11 +21,11 @@ public sealed class DirectSessionMappingWriter : IDirectSessionMappingWriter
         _logger = logger;
     }
 
-    public async Task WriteMappingAsync(PeerId remotePeerId, DirectSessionId sessionId, SelfId selfIdentityId, CancellationToken cancellationToken)
+    public async Task WriteMappingAsync(NetworkPeerId remoteNetworkPeerId, DirectSessionId sessionId, SelfId selfIdentityId, CancellationToken cancellationToken)
     {
         try
         {
-            await _directSessionRepository.UpsertAsync(remotePeerId, sessionId, new NetworkSelfId(selfIdentityId.Value))
+            await _directSessionRepository.UpsertAsync(remoteNetworkPeerId, sessionId, new NetworkSelfId(selfIdentityId.Value))
                 .ConfigureAwait(false);
         }
         catch (Exception ex)
@@ -34,7 +33,7 @@ public sealed class DirectSessionMappingWriter : IDirectSessionMappingWriter
             // Best-effort: log failure but don't throw
             _logger.LogWarning(ex,
                 "Failed to persist DirectSession mapping for RemotePeerId={RemotePeerId}, SessionId={SessionId}, SelfIdentityId={SelfIdentityId}",
-                remotePeerId, sessionId, selfIdentityId);
+                remoteNetworkPeerId, sessionId, selfIdentityId);
         }
     }
 }

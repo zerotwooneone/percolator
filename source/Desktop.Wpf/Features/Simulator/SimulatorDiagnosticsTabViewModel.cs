@@ -92,9 +92,9 @@ public sealed class SimulatorDiagnosticsTabViewModel : IDisposable
     {
         var peers = _state.Peers
             .Select(p => new SimulatorFilterOption<Guid?>(
-                p.PeerId.Value,
+                p.NetworkPeerId.Value,
                 string.IsNullOrWhiteSpace(p.DisplayName.CurrentValue)
-                    ? p.PeerId.Value.ToString()[..8]
+                    ? p.NetworkPeerId.Value.ToString()[..8]
                     : p.DisplayName.CurrentValue!))
             .OrderBy(p => p.Display)
             .ToList();
@@ -108,9 +108,9 @@ public sealed class SimulatorDiagnosticsTabViewModel : IDisposable
         var relays = _state.Peers
             .Where(p => p.IsRelayCapable.CurrentValue)
             .Select(p => new SimulatorFilterOption<Guid?>(
-                p.PeerId.Value,
+                p.NetworkPeerId.Value,
                 string.IsNullOrWhiteSpace(p.DisplayName.CurrentValue)
-                    ? p.PeerId.Value.ToString()[..8]
+                    ? p.NetworkPeerId.Value.ToString()[..8]
                     : p.DisplayName.CurrentValue!))
             .OrderBy(p => p.Display)
             .ToList();
@@ -150,11 +150,11 @@ public sealed class SimulatorDiagnosticsTabViewModel : IDisposable
 
     private sealed class DiagnosticsFilter : ISynchronizedViewFilter<SimulatorDiagnosticEvent, SimulatorDiagnosticEvent>
     {
-        private readonly PeerId? _peerId;
-        private readonly PeerId? _relayHostPeerId;
+        private readonly NetworkPeerId? _peerId;
+        private readonly NetworkPeerId? _relayHostPeerId;
         private readonly SimulatorDiagnosticEventType? _eventType;
 
-        public DiagnosticsFilter(PeerId? peerId, PeerId? relayHostPeerId, SimulatorDiagnosticEventType? eventType)
+        public DiagnosticsFilter(NetworkPeerId? peerId, NetworkPeerId? relayHostPeerId, SimulatorDiagnosticEventType? eventType)
         {
             _peerId = peerId;
             _relayHostPeerId = relayHostPeerId;

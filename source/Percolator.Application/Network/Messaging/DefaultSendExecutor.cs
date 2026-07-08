@@ -21,7 +21,7 @@ public sealed class DefaultSendExecutor : ISendExecutor
         _logger = logger;
     }
 
-    public async Task<SendOutcome> ExecuteAsync(uint selfIdentityId, PeerId target, NetworkPayload payload, IReadOnlyList<PlannedRoute> plannedRoutes, CancellationToken ct = default)
+    public async Task<SendOutcome> ExecuteAsync(uint selfIdentityId, NetworkPeerId target, NetworkPayload payload, IReadOnlyList<PlannedRoute> plannedRoutes, CancellationToken ct = default)
     {
         var attemptedPaths = new List<string>(plannedRoutes.Count);
         var attemptDetails = new List<AttemptDetail>(plannedRoutes.Count);
@@ -33,7 +33,7 @@ public sealed class DefaultSendExecutor : ISendExecutor
             string routeString = route switch
             {
                 PlannedRoute.Direct => "Direct",
-                PlannedRoute.Relay r => $"Relay:{r.RelayHostPeerId.Value}",
+                PlannedRoute.Relay r => $"Relay:{r.RelayHostNetworkPeerId.Value}",
                 _ => "Unknown"
             };
             attemptedPaths.Add(routeString);
@@ -47,7 +47,7 @@ public sealed class DefaultSendExecutor : ISendExecutor
             }
             else if (route is PlannedRoute.Relay relay)
             {
-                result = await _transport.SendViaRelayAsync(relay.RelayHostPeerId, target, payload, ct).ConfigureAwait(false);
+                result = await _transport.SendViaRelayAsync(relay.RelayHostNetworkPeerId, target, payload, ct).ConfigureAwait(false);
             }
             else
             {
@@ -102,7 +102,7 @@ public sealed class DefaultSendExecutor : ISendExecutor
 
     private async Task RecordAttemptAndPromoteAsync(
         uint selfIdentityId,
-        PeerId target,
+        NetworkPeerId target,
         PlannedRoute route,
         TransportSendResult result,
         DateTimeOffset nowUtc,
@@ -113,11 +113,11 @@ public sealed class DefaultSendExecutor : ISendExecutor
             var routeKind = route is PlannedRoute.Relay ? RouteKind.Relayed : RouteKind.Direct;
             string? endpointHost = null;
             int? endpointPort = null;
-            PeerId? relayHostPeerId = null;
+            NetworkPeerId? relayHostPeerId = null;
 
             if (route is PlannedRoute.Relay relay)
             {
-                relayHostPeerId = relay.RelayHostPeerId;
+                relayHostPeerId = relay.RelayHostNetworkPeerId;
             }
 
             // Convert int to SelfId for Application layer service

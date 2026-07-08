@@ -42,7 +42,7 @@ public class SqliteDirectSessionRepositoryTests
         await dsr.UpsertAsync(peerId, new DirectSessionId(sessionId), new NetworkSelfId(1));
         var ds = await dsr.GetByRemotePeerIdAsync(peerId, new NetworkSelfId(1));
         ds.Should().NotBeNull();
-        ds!.RemotePeerId.Should().Be(peerId);
+        ds!.RemoteNetworkPeerId.Should().Be(peerId);
         ds.SessionId.Value.Should().Be(sessionId);
     }
 
@@ -68,8 +68,8 @@ public class SqliteDirectSessionRepositoryTests
         var ctx = CreateDbContext(out var _);
         var dsr = new SqliteDirectSessionRepository(ctx);
 
-        var peerA = new Percolator.Network.PeerId(12345);
-        var peerB = new Percolator.Network.PeerId(67890);
+        var peerA = new Percolator.Network.NetworkPeerId(12345);
+        var peerB = new Percolator.Network.NetworkPeerId(67890);
         var fixedTime = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero);
 
         ctx.PeerIdentities.Add(new PeerIdentityDbo { PeerId = peerA.Value, PublicIdentityId = Guid.NewGuid(), Name = "peer-a", Version = 0, CreatedAtUtc = fixedTime, UpdatedAtUtc = fixedTime });
@@ -85,16 +85,16 @@ public class SqliteDirectSessionRepositoryTests
 
         (await dsr.GetByRemotePeerIdAsync(peerA, new NetworkSelfId(1)))!.SessionId.Value.Should().Be(sA);
         (await dsr.GetByRemotePeerIdAsync(peerB, new NetworkSelfId(1)))!.SessionId.Value.Should().Be(sB);
-        (await dsr.GetBySessionIdAsync(new DirectSessionId(sA), new NetworkSelfId(1)))!.RemotePeerId.Should().Be(peerA);
-        (await dsr.GetBySessionIdAsync(new DirectSessionId(sB), new NetworkSelfId(1)))!.RemotePeerId.Should().Be(peerB);
+        (await dsr.GetBySessionIdAsync(new DirectSessionId(sA), new NetworkSelfId(1)))!.RemoteNetworkPeerId.Should().Be(peerA);
+        (await dsr.GetBySessionIdAsync(new DirectSessionId(sB), new NetworkSelfId(1)))!.RemoteNetworkPeerId.Should().Be(peerB);
     }
-    private static async Task<(PercolatorDbContext Ctx, SqliteDirectSessionRepository Dsr, Percolator.Network.PeerId PeerId)> CreateRepos()
+    private static async Task<(PercolatorDbContext Ctx, SqliteDirectSessionRepository Dsr, Percolator.Network.NetworkPeerId PeerId)> CreateRepos()
     {
         var ctx = CreateDbContext(out var _);
         var dsr = new SqliteDirectSessionRepository(ctx);
 
         // Ensure Peer and PeerConnection exist for FK
-        var peerId = new Percolator.Network.PeerId(54321);
+        var peerId = new Percolator.Network.NetworkPeerId(54321);
         var fixedTime = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero);
         ctx.PeerIdentities.Add(new PeerIdentityDbo { PeerId = peerId.Value, PublicIdentityId = Guid.NewGuid(), Name = "peer-a", Version = 0, CreatedAtUtc = fixedTime, UpdatedAtUtc = fixedTime });
         await ctx.SaveChangesAsync();
@@ -118,7 +118,7 @@ public class SqliteDirectSessionRepositoryTests
         await dsr.UpsertAsync(peerId, new DirectSessionId(sessionId), new NetworkSelfId(1));
         var ds = await dsr.GetBySessionIdAsync(new DirectSessionId(sessionId), new NetworkSelfId(1));
         ds.Should().NotBeNull();
-        ds!.RemotePeerId.Value.Should().Be(peerId.Value);
+        ds!.RemoteNetworkPeerId.Value.Should().Be(peerId.Value);
         ds.SessionId.Value.Should().Be(sessionId);
     }
 
@@ -133,7 +133,7 @@ public class SqliteDirectSessionRepositoryTests
         (await dsr.GetBySessionIdAsync(new DirectSessionId(s1), new NetworkSelfId(1))).Should().BeNull();
         var ds = await dsr.GetBySessionIdAsync(new DirectSessionId(s2), new NetworkSelfId(1));
         ds.Should().NotBeNull();
-        ds!.RemotePeerId.Value.Should().Be(peerId.Value);
+        ds!.RemoteNetworkPeerId.Value.Should().Be(peerId.Value);
         ds.SessionId.Value.Should().Be(s2);
     }
 }

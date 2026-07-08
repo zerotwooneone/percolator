@@ -8,7 +8,7 @@ public class PeerConnection
     /// <summary>
     /// The stable identifier of the peer, linking to the Identity domain.
     /// </summary>
-    public PeerId Id { get; init; }
+    public NetworkPeerId Id { get; init; }
 
     /// <summary>
     /// The public key required to initiate a direct message session with this peer.
@@ -35,15 +35,15 @@ public class PeerConnection
     /// <summary>
     /// When using a relay, indicates which peer (e.g., Host) should be used to reach this peer.
     /// </summary>
-    public PeerId? RelayPeerId { get; private set; }
+    public NetworkPeerId? RelayPeerId { get; private set; }
 
     public PeerConnection(
-        PeerId id,
+        NetworkPeerId id,
         DirectMessagePublicKey? identitySigningKey,
         IEnumerable<GrpcEndPoint> grpcEndPoints,
         IReadOnlyList<TlsCertificate> tlsCertificates,
         DateTimeOffset lastSeen,
-        PeerId? relayPeerId = null)
+        NetworkPeerId? relayPeerId = null)
     {
         Id = id;
         IdentitySigningKey = identitySigningKey;
@@ -71,8 +71,8 @@ public class PeerConnection
         IdentitySigningKey = directMessagePublicKey;
     }
 
-    public void SetRelayPeer(PeerId relayPeerId)
+    public void SetRelayPeer(NetworkPeerId relayNetworkPeerId)
     {
-        RelayPeerId = relayPeerId;
+        RelayPeerId = relayNetworkPeerId;
     }
 }

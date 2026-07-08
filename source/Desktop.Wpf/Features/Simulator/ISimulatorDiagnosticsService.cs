@@ -8,7 +8,7 @@ public interface ISimulatorDiagnosticsService
 {
     IReadOnlyObservableList<SimulatorDiagnosticEvent> Events { get; }
 
-    void Emit(SimulatorDiagnosticEventType eventType, string message, PeerId? peerId = null, PeerId? relayHostPeerId = null, Guid? ackId = null, string? contextTag = null);
+    void Emit(SimulatorDiagnosticEventType eventType, string message, NetworkPeerId? peerId = null, NetworkPeerId? relayHostPeerId = null, Guid? ackId = null, string? contextTag = null);
 
     void Clear();
 }

@@ -139,7 +139,7 @@ public sealed class ConnectViaNetworkCommandHandler : IRequestHandler<ConnectVia
         try
         {
             direct = await _directSessions
-                .GetByRemotePeerIdAsync(new Percolator.Network.PeerId(relayHostPeerId.Value), selfIdentityId);
+                .GetByRemotePeerIdAsync(new Percolator.Network.NetworkPeerId(relayHostPeerId.Value), selfIdentityId);
         }
         catch (Exception ex)
         {

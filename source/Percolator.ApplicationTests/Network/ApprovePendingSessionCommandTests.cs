@@ -17,7 +17,6 @@ using Percolator.Cryptography.Primitives;
 using Percolator.Identity;
 using Percolator.Identity.Model;
 using Percolator.Network;
-using NetworkPeerId = Percolator.Network.PeerId;
 
 namespace Percolator.ApplicationTests.Network;
 

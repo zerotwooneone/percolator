@@ -31,7 +31,7 @@ public class SqlitePeerRoutingProfileRepositoryTests
     {
         var ctx = CreateDbContext(out var _);
         var repo = new SqlitePeerRoutingProfileRepository(ctx);
-        var peerId = new PeerId(1);
+        var peerId = new NetworkPeerId(1);
 
         using var ecdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var keyBytes = ecdsa.ExportSubjectPublicKeyInfo();
@@ -52,8 +52,8 @@ public class SqlitePeerRoutingProfileRepositoryTests
         var ctx = CreateDbContext(out var _);
         var repo = new SqlitePeerRoutingProfileRepository(ctx);
 
-        var freshId = new PeerId(1);
-        var staleId = new PeerId(2);
+        var freshId = new NetworkPeerId(1);
+        var staleId = new NetworkPeerId(2);
 
         var fresh = new PeerRoutingProfile();
         fresh.BindIdentity(freshId);
@@ -76,7 +76,7 @@ public class SqlitePeerRoutingProfileRepositoryTests
     {
         var ctx = CreateDbContext(out var _);
         var repo = new SqlitePeerRoutingProfileRepository(ctx);
-        var peerId = new PeerId(1);
+        var peerId = new NetworkPeerId(1);
 
         var profile = new PeerRoutingProfile();
         profile.BindIdentity(peerId);

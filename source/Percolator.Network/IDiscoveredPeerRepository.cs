@@ -8,6 +8,6 @@ public interface IDiscoveredPeerRepository
     Task<DiscoveredPeer?> GetByPublicKeyHashAsync(PublicKeyHash pkh, CancellationToken cancellationToken = default);
     Task UpsertAsync(DiscoveredPeer entity, CancellationToken cancellationToken = default);
     Task<IEnumerable<DiscoveredPeer>> GetCandidatesAsync(DateTimeOffset seenSince, CancellationToken cancellationToken = default);
-    Task<PeerRoutingProfile> PromoteToRoutingProfileAsync(DiscoveredPeer provisional, PeerId id, CancellationToken cancellationToken = default);
-    Task<PeerRoutingProfile> BindIdentityAsync(PeerRoutingProfile aggregate, PeerId id, CancellationToken cancellationToken = default);
+    Task<PeerRoutingProfile> PromoteToRoutingProfileAsync(DiscoveredPeer provisional, NetworkPeerId id, CancellationToken cancellationToken = default);
+    Task<PeerRoutingProfile> BindIdentityAsync(PeerRoutingProfile aggregate, NetworkPeerId id, CancellationToken cancellationToken = default);
 }

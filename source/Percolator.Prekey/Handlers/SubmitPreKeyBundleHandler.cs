@@ -40,7 +40,7 @@ namespace Percolator.Prekey.Handlers
 
             var remoteIdentitySigningKeyBytes = request.PublicSigningKey;
 
-            var identityPeerId = new Percolator.Identity.PeerId(request.RemotePeerId.Value);
+            var identityPeerId = new Percolator.Identity.PeerId(request.RemoteNetworkPeerId.Value);
             
             var publicKeyHash = IdentityPublicKeyHash.FromSpki(remoteIdentitySigningKeyBytes);
             var nowTimestamp = DateTimeOffset.UtcNow;
@@ -70,7 +70,7 @@ namespace Percolator.Prekey.Handlers
             }
 
             await _bundleRepository.StoreBundlesAsync(new CryptoPeerId(identityPeerId.Value), domainBundles);
-            _logger.LogInformation("Stored {Count} pre-key bundles for peer {PeerId}", domainBundles.Count, request.RemotePeerId);
+            _logger.LogInformation("Stored {Count} pre-key bundles for peer {PeerId}", domainBundles.Count, request.RemoteNetworkPeerId);
             return Unit.Value;
         }
     }

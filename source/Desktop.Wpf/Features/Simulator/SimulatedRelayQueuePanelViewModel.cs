@@ -10,8 +10,8 @@ namespace Desktop.Wpf.Features.Simulator;
 
 public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
 {
-    private readonly PeerId _relayHostPeerId;
-    private readonly Func<PeerId, string> _peerNameById;
+    private readonly NetworkPeerId _relayHostNetworkPeerId;
+    private readonly Func<NetworkPeerId, string> _peerNameById;
     private readonly Func<Task<SessionId?>> _getRelayHostToMainSessionId;
     private readonly IUiDispatcher _ui;
     private readonly ISimulatorStateService _state;
@@ -29,7 +29,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
     private readonly ISynchronizedView<PeerRelationship, ActiveSessionTagViewModel> _activeSessionTags;
     private readonly NotifyCollectionChangedSynchronizedViewList<ActiveSessionTagViewModel> _activeSessionTagsNotify;
 
-    public BindableReactiveProperty<PeerId?> SelectedActiveSessionPeerId { get; }
+    public BindableReactiveProperty<NetworkPeerId?> SelectedActiveSessionPeerId { get; }
 
     public ReactiveCommand<Unit> AddActiveSessionCommand { get; }
 
@@ -38,9 +38,9 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
     public NotifyCollectionChangedSynchronizedViewList<ActiveSessionTargetOption> AvailableActiveSessionTargets => _availableTargetsNotify;
 
     public SimulatedRelayQueuePanelViewModel(
-        PeerId relayHostPeerId,
+        NetworkPeerId relayHostNetworkPeerId,
         string relayHostName,
-        Func<PeerId, string> peerNameById,
+        Func<NetworkPeerId, string> peerNameById,
         Func<Task<SessionId?>> getRelayHostToMainSessionId,
         IUiDispatcher ui,
         ISimulatorStateService state,
@@ -48,7 +48,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
         ISimulatorDiagnosticsService diagnostics,
         ILogger<SimulatedRelayQueuePanelViewModel> logger)
     {
-        _relayHostPeerId = relayHostPeerId;
+        _relayHostNetworkPeerId = relayHostNetworkPeerId;
         RelayHostName = relayHostName;
         _peerNameById = peerNameById;
         _getRelayHostToMainSessionId = getRelayHostToMainSessionId;
@@ -58,30 +58,30 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
         _diagnostics = diagnostics;
         _logger = logger;
 
-        _relay = _state.Relays.FirstOrDefault(r => r.RelayHostPeerId == _relayHostPeerId)
-            ?? throw new InvalidOperationException($"No relay exists for host peer id {_relayHostPeerId}");
+        _relay = _state.Relays.FirstOrDefault(r => r.RelayHostNetworkPeerId == _relayHostNetworkPeerId)
+            ?? throw new InvalidOperationException($"No relay exists for host peer id {_relayHostNetworkPeerId}");
 
         _availableTargets = _state.Peers
-            .CreateView(p => new ActiveSessionTargetOption(p.PeerId, _peerNameById(p.PeerId)))
+            .CreateView(p => new ActiveSessionTargetOption(p.NetworkPeerId, _peerNameById(p.NetworkPeerId)))
             .AddTo(ref _bag);
-        _availableTargets.AttachFilter((p, _) => p.PeerId != _relayHostPeerId);
+        _availableTargets.AttachFilter((p, _) => p.NetworkPeerId != _relayHostNetworkPeerId);
         _availableTargetsNotify = _availableTargets.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher).AddTo(ref _bag);
 
         _activeSessionTags = _state.Relationships
-            .CreateView(rel => CreateActiveSessionTag(rel.TargetPeerId))
+            .CreateView(rel => CreateActiveSessionTag(rel.TargetNetworkPeerId))
             .AddTo(ref _bag);
         _activeSessionTags.AttachFilter((rel, _) =>
-            rel.SourcePeerId == _relayHostPeerId
+            rel.SourceNetworkPeerId == _relayHostNetworkPeerId
             && rel.Type == RelationshipType.RelayActiveSession);
         _activeSessionTagsNotify = _activeSessionTags.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher).AddTo(ref _bag);
-        SelectedActiveSessionPeerId = new BindableReactiveProperty<PeerId?>(null).AddTo(ref _bag);
+        SelectedActiveSessionPeerId = new BindableReactiveProperty<NetworkPeerId?>(null).AddTo(ref _bag);
 
         var synchronizedQueueView = _relay.MessageQueue
             .CreateView(kvp =>
             {
                 var m = kvp.Value;
                 return new SimulatedRelayQueueItemViewModel(
-                    relayHostPeerId: _relayHostPeerId,
+                    relayHostNetworkPeerId: _relayHostNetworkPeerId,
                     ackId: m.AckId,
                     enqueuedUtc: m.EnqueuedUtc,
                     debugType: m.DebugType,
@@ -178,7 +178,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
             .AddTo(ref _bag);
     }
 
-    public PeerId RelayHostPeerId => _relayHostPeerId;
+    public NetworkPeerId RelayHostNetworkPeerId => _relayHostNetworkPeerId;
 
     public string RelayHostName { get; }
 
@@ -194,7 +194,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
         var peerId = SelectedActiveSessionPeerId.Value;
         if (peerId is null) return;
 
-        await _state.AddRelayActiveSessionAsync(_relayHostPeerId, peerId.Value, ct).ConfigureAwait(false);
+        await _state.AddRelayActiveSessionAsync(_relayHostNetworkPeerId, peerId.Value, ct).ConfigureAwait(false);
     }
 
     public ReactiveCommand<Unit> NextCommand { get; }
@@ -287,11 +287,11 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
             var sid = await _getRelayHostToMainSessionId().ConfigureAwait(false);
             if (sid is null)
             {
-                _logger.LogWarning("[simulator] Relay host {RelayHost} has no session to main; cannot deliver", _relayHostPeerId);
+                _logger.LogWarning("[simulator] Relay host {RelayHost} has no session to main; cannot deliver", _relayHostNetworkPeerId);
                 return;
             }
 
-            var delivered = await _state.DeliverRelayUpstreamToMainByAckIdAsync(_relayHostPeerId, sid, ackId, ct).ConfigureAwait(false);
+            var delivered = await _state.DeliverRelayUpstreamToMainByAckIdAsync(_relayHostNetworkPeerId, sid, ackId, ct).ConfigureAwait(false);
             if (!delivered)
             {
                 return;
@@ -300,7 +300,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
             _diagnostics.Emit(
                 SimulatorDiagnosticEventType.RelayDelivered,
                 $"Relay deliver -> main: {(debugType ?? "opaque")}",
-                relayHostPeerId: _relayHostPeerId,
+                relayHostPeerId: _relayHostNetworkPeerId,
                 ackId: ackId);
             return;
         }
@@ -314,27 +314,27 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
                 _diagnostics.Emit(
                     SimulatorDiagnosticEventType.RelayRoutingFailure,
                     $"Relay routing failure (no peer for PKH): {(debugType ?? "opaque")}",
-                    relayHostPeerId: _relayHostPeerId,
+                    relayHostPeerId: _relayHostNetworkPeerId,
                     ackId: ackId);
                 return;
             }
 
             await _delivery.DeliverToPeerAsync(
-                    relayHostPeerId: _relayHostPeerId,
-                    recipientPeerId: recipientPeerId.Value,
+                    relayHostNetworkPeerId: _relayHostNetworkPeerId,
+                    recipientNetworkPeerId: recipientPeerId.Value,
                     ackId: ackId,
                     opaqueBytes: opaqueBytes,
                     debugType: debugType,
                     cancellationToken: ct)
                 .ConfigureAwait(false);
 
-            _ = await _state.DeleteRelayMessageByAckIdAsync(_relayHostPeerId, ackId, ct).ConfigureAwait(false);
+            _ = await _state.DeleteRelayMessageByAckIdAsync(_relayHostNetworkPeerId, ackId, ct).ConfigureAwait(false);
 
             _diagnostics.Emit(
                 SimulatorDiagnosticEventType.RelayDelivered,
                 $"Relay deliver -> {recipientPeerId.Value.ToString()[..8]}: {(debugType ?? "opaque")}",
                 peerId: recipientPeerId,
-                relayHostPeerId: _relayHostPeerId,
+                relayHostPeerId: _relayHostNetworkPeerId,
                 ackId: ackId);
             return;
         }
@@ -346,25 +346,25 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
     private async Task DropItemAsync(SimulatedRelayQueueItemViewModel item, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        _ = await _state.DeleteRelayMessageByAckIdAsync(relayHostPeerId: _relayHostPeerId, ackId: item.AckId, cancellationToken: ct).ConfigureAwait(false);
+        _ = await _state.DeleteRelayMessageByAckIdAsync(relayHostNetworkPeerId: _relayHostNetworkPeerId, ackId: item.AckId, cancellationToken: ct).ConfigureAwait(false);
 
         _diagnostics.Emit(
             SimulatorDiagnosticEventType.RelayDropped,
             $"Relay drop: {(item.DebugType ?? "opaque")}",
-            relayHostPeerId: _relayHostPeerId,
+            relayHostPeerId: _relayHostNetworkPeerId,
             ackId: item.AckId);
     }
 
     private async Task MoveItemAsync(SimulatedRelayQueueItemViewModel item, int delta, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        _ = await _state.MoveRelayMessageByAckIdAsync(relayHostPeerId: _relayHostPeerId, ackId: item.AckId, delta: delta, cancellationToken: ct).ConfigureAwait(false);
+        _ = await _state.MoveRelayMessageByAckIdAsync(relayHostNetworkPeerId: _relayHostNetworkPeerId, ackId: item.AckId, delta: delta, cancellationToken: ct).ConfigureAwait(false);
     }
 
     private async Task CorruptItemAsync(SimulatedRelayQueueItemViewModel item, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        _ = await _state.CorruptRelayMessageByAckIdAsync(relayHostPeerId: _relayHostPeerId, ackId: item.AckId, cancellationToken: ct).ConfigureAwait(false);
+        _ = await _state.CorruptRelayMessageByAckIdAsync(relayHostNetworkPeerId: _relayHostNetworkPeerId, ackId: item.AckId, cancellationToken: ct).ConfigureAwait(false);
     }
 
     public void Dispose()
@@ -376,12 +376,12 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
         _bag.Dispose();
     }
 
-    private ActiveSessionTagViewModel CreateActiveSessionTag(PeerId peerId)
+    private ActiveSessionTagViewModel CreateActiveSessionTag(NetworkPeerId networkPeerId)
     {
         return new ActiveSessionTagViewModel(
-            peerId: peerId,
-            display: _peerNameById(peerId),
-            onRemove: removeCt => _state.RemoveRelayActiveSessionAsync(_relayHostPeerId, peerId, removeCt));
+            networkPeerId: networkPeerId,
+            display: _peerNameById(networkPeerId),
+            onRemove: removeCt => _state.RemoveRelayActiveSessionAsync(_relayHostNetworkPeerId, networkPeerId, removeCt));
     }
 
     public sealed class ActiveSessionTagViewModel : IDisposable
@@ -389,9 +389,9 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
         private readonly Func<CancellationToken, Task> _remove;
         private readonly IDisposable _removeSubscription;
 
-        public ActiveSessionTagViewModel(PeerId peerId, string display, Func<CancellationToken, Task> onRemove)
+        public ActiveSessionTagViewModel(NetworkPeerId networkPeerId, string display, Func<CancellationToken, Task> onRemove)
         {
-            PeerId = peerId;
+            NetworkPeerId = networkPeerId;
             Display = display;
             _remove = onRemove;
 
@@ -401,7 +401,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
                 .SubscribeAwait(async (_, ct) => await _remove(ct), AwaitOperation.Drop);
         }
 
-        public PeerId PeerId { get; }
+        public NetworkPeerId NetworkPeerId { get; }
 
         public string Display { get; }
 
@@ -416,13 +416,13 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
 
     public sealed class ActiveSessionTargetOption
     {
-        public ActiveSessionTargetOption(PeerId peerId, string display)
+        public ActiveSessionTargetOption(NetworkPeerId networkPeerId, string display)
         {
-            PeerId = peerId;
+            NetworkPeerId = networkPeerId;
             Display = display;
         }
 
-        public PeerId PeerId { get; }
+        public NetworkPeerId NetworkPeerId { get; }
 
         public string Display { get; }
     }

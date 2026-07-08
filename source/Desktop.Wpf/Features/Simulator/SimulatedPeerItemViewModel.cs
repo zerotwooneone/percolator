@@ -23,7 +23,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
     private readonly ISimulatorToMainTransportService _toMain;
     private readonly IOptions<TransportOptions> _transportOptions;
     private readonly Percolator.Application.Identity.ActiveIdentityContext _active;
-    private readonly Func<Percolator.Network.PeerId?> _getSelectedRelayPeerId;
+    private readonly Func<Percolator.Network.NetworkPeerId?> _getSelectedRelayPeerId;
     private DisposableBag _bag;
 
     private Percolator.Cryptography.SessionId? _sessionToMain;
@@ -39,7 +39,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         Percolator.Infrastructure.Network.Grpc.PercolatorMessageService messageService,
         IOptions<TransportOptions> transportOptions,
         Percolator.Application.Identity.ActiveIdentityContext active,
-        Func<Percolator.Network.PeerId?> getSelectedRelayPeerId)
+        Func<Percolator.Network.NetworkPeerId?> getSelectedRelayPeerId)
     {
         _directory = directory;
         _model = model;
@@ -55,8 +55,8 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
 
         DisplayText = _model.DisplayName
             .ObserveOnCurrentSynchronizationContext()
-            .Select(name => string.IsNullOrWhiteSpace(name) ? _model.PeerId.ToString()[..8] : name!)
-            .ToBindableReactiveProperty(_model.PeerId.ToString()[..8])
+            .Select(name => string.IsNullOrWhiteSpace(name) ? _model.NetworkPeerId.ToString()[..8] : name!)
+            .ToBindableReactiveProperty(_model.NetworkPeerId.ToString()[..8])
             .AddTo(ref _bag);
 
         RuntimeStateText = _model.UiState
@@ -103,7 +103,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
 
         var remove = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
         remove.AsObservable()
-            .SubscribeAwait(async (_, ct) => await _state.RemovePeerAsync(_model.PeerId, ct), AwaitOperation.Drop)
+            .SubscribeAwait(async (_, ct) => await _state.RemovePeerAsync(_model.NetworkPeerId, ct), AwaitOperation.Drop)
             .AddTo(ref _bag);
         RemoveCommand = remove.AddTo(ref _bag);
 
@@ -173,7 +173,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
             .AddTo(ref _bag);
     }
 
-    public PeerId PeerId => _model.PeerId;
+    public NetworkPeerId NetworkPeerId => _model.NetworkPeerId;
 
     public BindableReactiveProperty<string> DisplayText { get; }
 
@@ -211,11 +211,11 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         }
 
         var invite = _inviteFactory.CreateInvite();
-        var inviterPeerId = _active.Identity is not null ? new PeerId(_active.Identity.SelfIdentityId.Value) : new PeerId(0);
+        var inviterPeerId = _active.Identity is not null ? new NetworkPeerId(_active.Identity.SelfIdentityId.Value) : new NetworkPeerId(0);
 
         var acceptance = await _state.AcceptInboundDirectInviteAsync(
-                simulatedPeerId: _model.PeerId,
-                inviterPeerId: inviterPeerId,
+                simulatedNetworkPeerId: _model.NetworkPeerId,
+                inviterNetworkPeerId: inviterPeerId,
                 invite: invite,
                 cancellationToken: ct)
             .ConfigureAwait(false);
@@ -241,10 +241,10 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
 
         var invite = _inviteFactory.CreateInvite();
 
-        var selfPkh = await _state.ComputePublicKeyHashAsync(_model.PeerId, ct).ConfigureAwait(false);
+        var selfPkh = await _state.ComputePublicKeyHashAsync(_model.NetworkPeerId, ct).ConfigureAwait(false);
 
         await _state.EnqueueRelayDownstreamToPeerAsync(
-                relayHostPeerId: relayPeerId,
+                relayHostNetworkPeerId: relayPeerId,
                 targetIdentityPublicKeyHash: Percolator.Identity.IdentityPublicKeyHash.FromBytes(selfPkh),
                 opaqueBytes: invite.ToByteArray(),
                 debugType: nameof(EstablishDirectSessionRequest),
@@ -252,7 +252,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
             .ConfigureAwait(false);
 
         var dequeued = await _state.DequeueRelayDownstreamToPeerAsync(
-                relayHostPeerId: relayPeerId,
+                relayHostNetworkPeerId: relayPeerId,
                 targetIdentityPublicKeyHash: Percolator.Identity.IdentityPublicKeyHash.FromBytes(selfPkh),
                 max: 1,
                 cancellationToken: ct)
@@ -261,11 +261,11 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         if (dequeued.Count == 0) return;
 
         var req = EstablishDirectSessionRequest.Parser.ParseFrom(dequeued[0].OpaqueBytes);
-        var inviterPeerId = _active.Identity is not null ? new PeerId(_active.Identity.SelfIdentityId.Value) : new PeerId(0);
+        var inviterPeerId = _active.Identity is not null ? new NetworkPeerId(_active.Identity.SelfIdentityId.Value) : new NetworkPeerId(0);
 
         var acceptance = await _state.AcceptInboundDirectInviteAsync(
-                simulatedPeerId: _model.PeerId,
-                inviterPeerId: inviterPeerId,
+                simulatedNetworkPeerId: _model.NetworkPeerId,
+                inviterNetworkPeerId: inviterPeerId,
                 invite: req,
                 cancellationToken: ct)
             .ConfigureAwait(false);
@@ -273,16 +273,16 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         _sessionToMain = acceptance.SessionId;
 
         await _state.EnqueueRelayUpstreamToMainAsync(
-                relayHostPeerId: relayPeerId,
+                relayHostNetworkPeerId: relayPeerId,
                 opaqueBytes: acceptance.Response.ToByteArray(),
                 debugType: nameof(InviteHandshakeResponse),
                 cancellationToken: ct)
             .ConfigureAwait(false);
     }
 
-    private bool HasActiveSessionToHost(PeerId relayHostPeerId)
+    private bool HasActiveSessionToHost(NetworkPeerId relayHostNetworkPeerId)
     {
-        return _state.Relationships.Contains(new PeerRelationship(relayHostPeerId, _model.PeerId, RelationshipType.RelayActiveSession));
+        return _state.Relationships.Contains(new PeerRelationship(relayHostNetworkPeerId, _model.NetworkPeerId, RelationshipType.RelayActiveSession));
     }
 
     private async Task ExecuteRelayForwardToMainAsync(System.Threading.CancellationToken ct)
@@ -298,7 +298,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
             return;
         }
 
-        if (_model.PeerId != relayPeerId)
+        if (_model.NetworkPeerId != relayPeerId)
         {
             return;
         }
@@ -317,7 +317,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         _ = SHA256.HashData(mainSpki);
 
         await _state.ForwardRelayUpstreamToMainAsync(
-                relayHostPeerId: relayPeerId,
+                relayHostNetworkPeerId: relayPeerId,
                 relayHostToMainSessionId: _sessionToMain,
                 max: 250,
                 cancellationToken: ct)
@@ -362,7 +362,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         _ = SHA256.HashData(mainSpki);
 
         return _state.EnqueueRelayUpstreamToMainAsync(
-            relayHostPeerId: relayPeerId,
+            relayHostNetworkPeerId: relayPeerId,
             opaqueBytes: invite.ToByteArray(),
             debugType: nameof(EstablishDirectSessionRequest),
             cancellationToken: ct);
@@ -380,15 +380,15 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         {
             _diagnostics.Emit(
                 SimulatorDiagnosticEventType.PreKeyPublishBlockedMissingActiveSession,
-                $"Pre-key publish blocked (missing active session): publisher={_model.PeerId.Value.ToString()[..8]} relay={relayPeerId.Value.ToString()[..8]}",
-                peerId: _model.PeerId,
+                $"Pre-key publish blocked (missing active session): publisher={_model.NetworkPeerId.Value.ToString()[..8]} relay={relayPeerId.Value.ToString()[..8]}",
+                peerId: _model.NetworkPeerId,
                 relayHostPeerId: relayPeerId);
             return;
         }
 
         await _state.PublishStandardPreKeyBundleToRelayAsync(
-                simulatedPeerId: _model.PeerId,
-                relayHostPeerId: relayPeerId,
+                simulatedNetworkPeerId: _model.NetworkPeerId,
+                relayHostNetworkPeerId: relayPeerId,
                 expiresUtc: DateTimeOffset.UtcNow.AddHours(12),
                 oneTimeKeyCount: 5,
                 cancellationToken: ct)
@@ -418,8 +418,8 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         var mainPkh = Percolator.Identity.IdentityPublicKeyHash.FromSpki(mainSpki);
 
         _ = await _state.InitiateStandardHandshakeToMainByRelayPkhAsync(
-                simulatedPeerId: _model.PeerId,
-                relayHostPeerId: relayPeerId,
+                simulatedNetworkPeerId: _model.NetworkPeerId,
+                relayHostNetworkPeerId: relayPeerId,
                 responderPublicKeyHash: mainPkh,
                 cancellationToken: ct)
             .ConfigureAwait(false);
@@ -431,7 +431,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         var port = _transportOptions.Value.SimulatorPort;
         if (port == 0) port = 5002;
 
-        var inviterHost = AllocateSimulatorLoopbackHost(_model.PeerId);
+        var inviterHost = AllocateSimulatorLoopbackHost(_model.NetworkPeerId);
 
         using var identityEcdh = ECDiffieHellman.Create();
         identityEcdh.ImportECPrivateKey(_model.IdentitySigningKeyPrivateKeyEcPrivateKey, out _);
@@ -478,11 +478,11 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         };
     }
 
-    private static string AllocateSimulatorLoopbackHost(PeerId peerId)
+    private static string AllocateSimulatorLoopbackHost(NetworkPeerId networkPeerId)
     {
         // Stable mapping of Guid -> 127.77.X.Y. Keep within 1..254 to avoid network/broadcast edge cases.
         using var sha = SHA256.Create();
-        var hash = sha.ComputeHash(peerId.Value.ToByteArray());
+        var hash = sha.ComputeHash(networkPeerId.Value.ToByteArray());
         var x = (byte)((hash[0] % 254) + 1);
         var y = (byte)((hash[1] % 254) + 1);
         return $"127.77.{x}.{y}";

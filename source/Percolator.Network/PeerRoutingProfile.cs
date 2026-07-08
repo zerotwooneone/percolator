@@ -4,7 +4,7 @@ namespace Percolator.Network;
 
 public sealed class PeerRoutingProfile
 {
-    public PeerId? Id { get; private set; }
+    public NetworkPeerId? Id { get; private set; }
     public List<GrpcEndPoint> Endpoints { get; } = new();
     public Reachability Reachability { get; private set; } = new();
     public List<RelayLink> Relays { get; } = new();
@@ -44,7 +44,7 @@ public sealed class PeerRoutingProfile
         Reachability.TransitionTo(status, now);
     }
 
-    public void BindIdentity(PeerId id)
+    public void BindIdentity(NetworkPeerId id)
     {
         if (Id is null)
         {
@@ -65,12 +65,12 @@ public sealed class PeerRoutingProfile
         }
     }
 
-    public void AddOrRefreshRelay(PeerId relayPeerId, DateTimeOffset now)
+    public void AddOrRefreshRelay(NetworkPeerId relayNetworkPeerId, DateTimeOffset now)
     {
-        var idx = Relays.FindIndex(r => r.RelayPeerId == relayPeerId);
+        var idx = Relays.FindIndex(r => r.RelayNetworkPeerId == relayNetworkPeerId);
         if (idx < 0)
         {
-            Relays.Add(new RelayLink(relayPeerId, new EndpointFreshness(now)));
+            Relays.Add(new RelayLink(relayNetworkPeerId, new EndpointFreshness(now)));
         }
         else
         {
@@ -78,9 +78,9 @@ public sealed class PeerRoutingProfile
         }
     }
 
-    public void RemoveRelay(PeerId relayPeerId)
+    public void RemoveRelay(NetworkPeerId relayNetworkPeerId)
     {
-        Relays.RemoveAll(r => r.RelayPeerId == relayPeerId);
+        Relays.RemoveAll(r => r.RelayNetworkPeerId == relayNetworkPeerId);
     }
 
     public void PruneStaleRelays(DateTimeOffset cutoff)

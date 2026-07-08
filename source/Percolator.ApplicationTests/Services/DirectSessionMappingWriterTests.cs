@@ -3,7 +3,6 @@ using Moq;
 using Percolator.Application.Services;
 using Percolator.Identity;
 using Percolator.Network;
-using PeerId = Percolator.Network.PeerId;
 
 namespace Percolator.ApplicationTests.Services;
 
@@ -14,7 +13,7 @@ public sealed class DirectSessionMappingWriterTests
     public async Task WriteMappingAsync_WhenRepositoryThrows_LogsWarningAndDoesNotThrow()
     {
         // Arrange
-        var remotePeerId = new PeerId(1);
+        var remotePeerId = new NetworkPeerId(1);
         var sessionId = DirectSessionId.NewId();
         var selfIdentityId = new SelfId(7);
 

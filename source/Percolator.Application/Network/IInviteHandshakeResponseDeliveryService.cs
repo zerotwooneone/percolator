@@ -8,7 +8,7 @@ public sealed record InviteHandshakeResponseDeliveryResult(bool Success, string 
 public interface IInviteHandshakeResponseDeliveryService
 {
     Task<InviteHandshakeResponseDeliveryResult> DeliverAsync(
-        Percolator.Network.PeerId inviterPeerId,
+        Percolator.Network.NetworkPeerId inviterNetworkPeerId,
         DnsEndPoint? directCallbackEndpoint,
         InviteHandshakeResponse response,
         CancellationToken ct = default);

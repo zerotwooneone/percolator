@@ -2,12 +2,12 @@ namespace Percolator.Network.ValueObjects;
 
 public sealed class RelayLink
 {
-    public PeerId RelayPeerId { get; }
+    public NetworkPeerId RelayNetworkPeerId { get; }
     public EndpointFreshness Freshness { get; }
 
-    public RelayLink(PeerId relayPeerId, EndpointFreshness freshness)
+    public RelayLink(NetworkPeerId relayNetworkPeerId, EndpointFreshness freshness)
     {
-        RelayPeerId = relayPeerId;
+        RelayNetworkPeerId = relayNetworkPeerId;
         Freshness = freshness;
     }
 

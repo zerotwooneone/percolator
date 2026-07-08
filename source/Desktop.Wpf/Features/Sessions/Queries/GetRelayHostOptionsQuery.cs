@@ -7,4 +7,4 @@ public record GetRelayHostOptionsQuery(int SelfIdentityId) : IRequest<GetRelayHo
 
 public record GetRelayHostOptionsResult(IReadOnlyList<RelayHostOptionDto> Options);
 
-public record RelayHostOptionDto(PeerId PeerId, string DisplayName);
+public record RelayHostOptionDto(NetworkPeerId NetworkPeerId, string DisplayName);

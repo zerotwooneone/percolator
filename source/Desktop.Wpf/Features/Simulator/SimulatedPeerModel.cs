@@ -16,11 +16,11 @@ public sealed class SimulatedPeerModel : IDisposable
     private readonly ReactiveProperty<byte[]?> _targetPublicKeyHash;
     private readonly ReactiveProperty<ConnectionMode?> _selectedRouteMode;
     private readonly ReactiveProperty<string?> _directEndpoint;
-    private readonly ReactiveProperty<Percolator.Network.PeerId?> _relayHostPeerId;
+    private readonly ReactiveProperty<Percolator.Network.NetworkPeerId?> _relayHostPeerId;
 
     private readonly ReactiveProperty<ConnectionMode> _connectionMode;
     private readonly ReactiveProperty<DnsEndPoint> _endpoint;
-    private readonly ReactiveProperty<Percolator.Network.PeerId> _relayPeerId;
+    private readonly ReactiveProperty<Percolator.Network.NetworkPeerId> _relayPeerId;
     private readonly ReactiveProperty<string?> _phase;
     private readonly ReactiveProperty<DateTimeOffset?> _notUntilUtc;
     private readonly ReactiveProperty<string?> _lastError;
@@ -44,7 +44,7 @@ public sealed class SimulatedPeerModel : IDisposable
     private readonly ObservableDictionary<string, SimulatedPendingStandardSignalHelloModel> _pendingInboundStandardSignalHellos;
 
     public SimulatedPeerModel(
-        Percolator.Network.PeerId peerId,
+        Percolator.Network.NetworkPeerId networkPeerId,
         PublicIdentityId publicIdentityId,
         int selfIdentityId,
         string? displayName,
@@ -53,12 +53,12 @@ public sealed class SimulatedPeerModel : IDisposable
         byte[] identitySigningKeyPrivateKeyEcPrivateKey,
         ConnectionMode connectionMode = Desktop.Wpf.Features.Simulator.ConnectionMode.Direct,
         DnsEndPoint endpoint = null!,
-        Percolator.Network.PeerId? relayPeerId = null,
+        Percolator.Network.NetworkPeerId? relayPeerId = null,
         SimulatorPeerUiState uiState = SimulatorPeerUiState.Ready,
         byte[]? targetPublicKeyHash = null,
         ConnectionMode? selectedRouteMode = null,
         string? directEndpoint = null,
-        Percolator.Network.PeerId? relayHostPeerId = null,
+        Percolator.Network.NetworkPeerId? relayHostPeerId = null,
         string? phase = null,
         DateTimeOffset? notUntilUtc = null,
         string? lastError = null,
@@ -66,7 +66,7 @@ public sealed class SimulatedPeerModel : IDisposable
         List<Guid>? knownPeerIds = null,
         List<SimulatedPublishedPreKeyBundleModel>? publishedPreKeyBundles = null)
     {
-        PeerId = peerId;
+        NetworkPeerId = networkPeerId;
         PublicIdentityId = publicIdentityId;
         SelfIdentityId = selfIdentityId;
 
@@ -86,12 +86,12 @@ public sealed class SimulatedPeerModel : IDisposable
         _targetPublicKeyHash = new ReactiveProperty<byte[]?>(targetPublicKeyHash);
         _selectedRouteMode = new ReactiveProperty<ConnectionMode?>(selectedRouteMode);
         _directEndpoint = new ReactiveProperty<string?>(directEndpoint);
-        _relayHostPeerId = new ReactiveProperty<Percolator.Network.PeerId?>(relayHostPeerId);
+        _relayHostPeerId = new ReactiveProperty<Percolator.Network.NetworkPeerId?>(relayHostPeerId);
 
         _connectionMode = new ReactiveProperty<ConnectionMode>(connectionMode);
         if (endpoint is null) throw new ArgumentNullException(nameof(endpoint));
         _endpoint = new ReactiveProperty<DnsEndPoint>(endpoint);
-        _relayPeerId = new ReactiveProperty<Percolator.Network.PeerId>(relayPeerId ?? new Percolator.Network.PeerId(Guid.Empty));
+        _relayPeerId = new ReactiveProperty<Percolator.Network.NetworkPeerId>(relayPeerId ?? new Percolator.Network.NetworkPeerId(Guid.Empty));
         _phase = new ReactiveProperty<string?>(phase);
         _notUntilUtc = new ReactiveProperty<DateTimeOffset?>(notUntilUtc);
         _lastError = new ReactiveProperty<string?>(lastError);
@@ -119,7 +119,7 @@ public sealed class SimulatedPeerModel : IDisposable
         _pendingInboundStandardSignalHellos = new ObservableDictionary<string, SimulatedPendingStandardSignalHelloModel>(StringComparer.Ordinal);
     }
 
-    public Percolator.Network.PeerId PeerId { get; }
+    public Percolator.Network.NetworkPeerId NetworkPeerId { get; }
     public PublicIdentityId PublicIdentityId { get; }
 
     public int SelfIdentityId { get; }
@@ -134,11 +134,11 @@ public sealed class SimulatedPeerModel : IDisposable
     public ReadOnlyReactiveProperty<byte[]?> TargetPublicKeyHash => _targetPublicKeyHash;
     public ReadOnlyReactiveProperty<ConnectionMode?> SelectedRouteMode => _selectedRouteMode;
     public ReadOnlyReactiveProperty<string?> DirectEndpoint => _directEndpoint;
-    public ReadOnlyReactiveProperty<Percolator.Network.PeerId?> RelayHostPeerId => _relayHostPeerId;
+    public ReadOnlyReactiveProperty<Percolator.Network.NetworkPeerId?> RelayHostPeerId => _relayHostPeerId;
 
     public ReadOnlyReactiveProperty<ConnectionMode> ConnectionMode => _connectionMode;
     public ReadOnlyReactiveProperty<DnsEndPoint> Endpoint => _endpoint;
-    public ReadOnlyReactiveProperty<Percolator.Network.PeerId> RelayPeerId => _relayPeerId;
+    public ReadOnlyReactiveProperty<Percolator.Network.NetworkPeerId> RelayPeerId => _relayPeerId;
     public ReadOnlyReactiveProperty<string?> Phase => _phase;
     public ReadOnlyReactiveProperty<DateTimeOffset?> NotUntilUtc => _notUntilUtc;
     public ReadOnlyReactiveProperty<string?> LastError => _lastError;
@@ -168,14 +168,14 @@ public sealed class SimulatedPeerModel : IDisposable
 
     internal ObservableDictionary<string, SimulatedPendingStandardSignalHelloModel> PendingInboundStandardSignalHellosMutable => _pendingInboundStandardSignalHellos;
 
-    internal void AddPendingInboundDirectInvite(Guid correlationId, byte[] requestBytes, byte[] inviterIdentityKeySpki, Percolator.Network.PeerId inviterPeerId)
+    internal void AddPendingInboundDirectInvite(Guid correlationId, byte[] requestBytes, byte[] inviterIdentityKeySpki, Percolator.Network.NetworkPeerId inviterNetworkPeerId)
     {
         _pendingInboundDirectInvites.Add(new SimulatedPendingInboundDirectInviteModel(
             correlationId,
             requestBytes,
             DateTimeOffset.UtcNow,
             inviterIdentityKeySpki,
-            inviterPeerId));
+            inviterNetworkPeerId));
     }
 
     internal bool TryTakePendingInboundDirectInvite(Guid correlationId, out SimulatedPendingInboundDirectInviteModel? invite)
@@ -263,15 +263,15 @@ public sealed class SimulatedPeerModel : IDisposable
     public void SetDirectEndpoint(string? directEndpoint)
         => _directEndpoint.Value = directEndpoint;
 
-    public void SetRelayHostPeerId(Percolator.Network.PeerId? relayHostPeerId)
+    public void SetRelayHostPeerId(Percolator.Network.NetworkPeerId? relayHostPeerId)
         => _relayHostPeerId.Value = relayHostPeerId;
 
-    public void SetConnection(ConnectionMode mode, DnsEndPoint endpoint, Percolator.Network.PeerId relayPeerId)
+    public void SetConnection(ConnectionMode mode, DnsEndPoint endpoint, Percolator.Network.NetworkPeerId relayNetworkPeerId)
     {
         _connectionMode.Value = mode;
         if (endpoint is null) throw new ArgumentNullException(nameof(endpoint));
         _endpoint.Value = endpoint;
-        _relayPeerId.Value = relayPeerId;
+        _relayPeerId.Value = relayNetworkPeerId;
     }
 
     public void SetPhase(string? phase)
@@ -399,7 +399,7 @@ public sealed class SimulatedPeerModel : IDisposable
     internal PeerStateSnapshot Freeze()
     {
         return new PeerStateSnapshot(
-            PeerId: PeerId,
+            NetworkPeerId: NetworkPeerId,
             SelfIdentityId: SelfIdentityId,
             DisplayName: _displayName.Value,
             IsRelayCapable: IsRelayCapable.Value,
@@ -407,7 +407,7 @@ public sealed class SimulatedPeerModel : IDisposable
             IdentitySigningKeyPrivateKeyEcPrivateKey: IdentitySigningKeyPrivateKeyEcPrivateKey.ToArray(),
             ConnectionMode: _connectionMode.Value,
             Endpoint: _endpoint.Value,
-            RelayPeerId: _relayPeerId.Value,
+            RelayNetworkPeerId: _relayPeerId.Value,
             TargetPublicKeyHash: _targetPublicKeyHash.Value?.ToArray(),
             SelectedRouteMode: _selectedRouteMode.Value,
             DirectEndpoint: _directEndpoint.Value,
@@ -422,7 +422,7 @@ public sealed class SimulatedPeerModel : IDisposable
             PublishedPreKeyBundles: PublishedPreKeyBundles
                 .Select(b => new PublishedPreKeyBundleSnapshot(
                     b.RecipientPublicKeyHash,
-                    b.LogicalOwnerPeerId,
+                    b.LogicalOwnerNetworkPeerId,
                     b.IdentityKey,
                     b.SignedPreKeyId,
                     b.SignedPreKey,
@@ -455,7 +455,7 @@ public sealed class SimulatedPeerModel : IDisposable
                 .Select(i => new OutboundInviteSnapshot(i.CorrelationId, i.SignedPreKeyPrivateEcPrivateKey.ToArray()))
                 .ToList(),
             PendingInboundDirectInvites: _pendingInboundDirectInvites
-                .Select(r => new PendingInboundDirectInviteSnapshot(r.CorrelationId, r.RequestBytes.ToArray(), r.ReceivedAtUtc, r.InviterIdentityKeySpki.ToArray(), r.InviterPeerId))
+                .Select(r => new PendingInboundDirectInviteSnapshot(r.CorrelationId, r.RequestBytes.ToArray(), r.ReceivedAtUtc, r.InviterIdentityKeySpki.ToArray(), r.InviterNetworkPeerId))
                 .ToList(),
             RecentChatMessages: _recentChatMessages.ToList(),
             OneTimePreKeysPrivate: _oneTimePreKeysPrivate
@@ -535,11 +535,11 @@ public sealed record SimulatedOutboundInviteModel(Guid CorrelationId, byte[] Sig
 
 public sealed record SimulatedPendingInviteHandshakeResponseModel(Guid CorrelationId, byte[] ResponseBytes);
 
-public sealed record SimulatedPendingInboundDirectInviteModel(Guid CorrelationId, byte[] RequestBytes, DateTimeOffset ReceivedAtUtc, byte[] InviterIdentityKeySpki, Percolator.Network.PeerId InviterPeerId);
+public sealed record SimulatedPendingInboundDirectInviteModel(Guid CorrelationId, byte[] RequestBytes, DateTimeOffset ReceivedAtUtc, byte[] InviterIdentityKeySpki, Percolator.Network.NetworkPeerId InviterNetworkPeerId);
 
 public sealed record SimulatedPublishedPreKeyBundleModel(
     IdentityPublicKeyHash RecipientPublicKeyHash,
-    Percolator.Network.PeerId LogicalOwnerPeerId,
+    Percolator.Network.NetworkPeerId LogicalOwnerNetworkPeerId,
     byte[] IdentityKey,
     Guid SignedPreKeyId,
     byte[] SignedPreKey,

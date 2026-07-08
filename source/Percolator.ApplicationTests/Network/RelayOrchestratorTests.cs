@@ -12,7 +12,6 @@ using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Network;
-using PeerId = Percolator.Network.PeerId;
 
 namespace Percolator.ApplicationTests.Network;
 
@@ -50,7 +49,7 @@ public class RelayOrchestratorTests
         var sessionGuid = Guid.NewGuid();
         var sessionId = new SessionId(sessionGuid);
         var directSessionId = new DirectSessionId(sessionGuid);
-        var networkPeerId = new PeerId(peerId.Value);
+        var networkPeerId = new NetworkPeerId(peerId.Value);
         var pkh = Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytes(new byte[32]);
 
         var peerIdentityQueries = new Mock<IPeerIdentityQueries>(MockBehavior.Strict);
@@ -107,7 +106,7 @@ public class RelayOrchestratorTests
         var sessionGuid = Guid.NewGuid();
         var sessionId = new SessionId(sessionGuid);
         var directSessionId = new DirectSessionId(sessionGuid);
-        var networkPeerId = new PeerId(peerId.Value);
+        var networkPeerId = new NetworkPeerId(peerId.Value);
         var pkh = Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytes(new byte[32]);
 
         var peerIdentityQueries = new Mock<IPeerIdentityQueries>(MockBehavior.Strict);
@@ -158,7 +157,7 @@ public class RelayOrchestratorTests
         var blob = new byte[] { 0x07 };
         var sessionGuid = Guid.NewGuid();
         var directSessionId = new DirectSessionId(sessionGuid);
-        var networkPeerId = new PeerId(peerId.Value);
+        var networkPeerId = new NetworkPeerId(peerId.Value);
         var pkh = Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytes(new byte[32]);
 
         var peerIdentityQueries = new Mock<IPeerIdentityQueries>(MockBehavior.Strict);
@@ -222,7 +221,7 @@ public class RelayOrchestratorTests
         var selfId = active.Identity!.SelfIdentityId;
         var ackId = Guid.NewGuid();
         var blob = new byte[] { 0x09 };
-        var networkPeerId = new PeerId(peerId.Value);
+        var networkPeerId = new NetworkPeerId(peerId.Value);
         var pkh = Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytes(new byte[32]);
 
         var peerIdentityQueries = new Mock<IPeerIdentityQueries>(MockBehavior.Strict);

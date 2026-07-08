@@ -30,7 +30,7 @@ public class SqlitePeerRoutingProfileRepositoryEndpointsTests
     {
         var ctx = CreateDbContext(out var _);
         var repo = new SqlitePeerRoutingProfileRepository(ctx);
-        var pid = new PeerId(1);
+        var pid = new NetworkPeerId(1);
         var now = DateTimeOffset.UtcNow;
 
         var prp = new PeerRoutingProfile();

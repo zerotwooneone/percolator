@@ -31,7 +31,7 @@ internal sealed class InviteHandshakeResponseDeliveryService : IInviteHandshakeR
     }
 
     public async Task<InviteHandshakeResponseDeliveryResult> DeliverAsync(
-        Percolator.Network.PeerId inviterPeerId,
+        Percolator.Network.NetworkPeerId inviterNetworkPeerId,
         DnsEndPoint? directCallbackEndpoint,
         InviteHandshakeResponse response,
         CancellationToken ct = default)
@@ -42,7 +42,7 @@ internal sealed class InviteHandshakeResponseDeliveryService : IInviteHandshakeR
         {
             const string sendPath = "Simulated";
             _wireTap.Tap(new OutboundWireMessage(
-                DestinationPeerId: inviterPeerId,
+                DestinationNetworkPeerId: inviterNetworkPeerId,
                 SendPath: sendPath,
                 MessageType: nameof(InviteHandshakeResponse),
                 RequestCorrelationId: response.HasRequestCorrelationId ? response.RequestCorrelationId : null,
@@ -59,7 +59,7 @@ internal sealed class InviteHandshakeResponseDeliveryService : IInviteHandshakeR
                 if (_wireTap.Enabled)
                 {
                     _wireTap.Tap(new OutboundWireMessage(
-                        DestinationPeerId: inviterPeerId,
+                        DestinationNetworkPeerId: inviterNetworkPeerId,
                         SendPath: "Direct",
                         MessageType: nameof(InviteHandshakeResponse),
                         RequestCorrelationId: response.HasRequestCorrelationId ? response.RequestCorrelationId : null,
@@ -73,7 +73,7 @@ internal sealed class InviteHandshakeResponseDeliveryService : IInviteHandshakeR
                 if (_wireTap.Enabled)
                 {
                     _wireTap.Tap(new OutboundWireMessage(
-                        DestinationPeerId: inviterPeerId,
+                        DestinationNetworkPeerId: inviterNetworkPeerId,
                         SendPath: "Direct",
                         MessageType: nameof(InviteHandshakeResponse),
                         RequestCorrelationId: response.HasRequestCorrelationId ? response.RequestCorrelationId : null,
@@ -85,10 +85,10 @@ internal sealed class InviteHandshakeResponseDeliveryService : IInviteHandshakeR
             }
         }
 
-        Percolator.Network.PeerId? relay;
+        Percolator.Network.NetworkPeerId? relay;
         try
         {
-            relay = await _relayTopology.GetRelayForAsync(inviterPeerId, ct).ConfigureAwait(false);
+            relay = await _relayTopology.GetRelayForAsync(inviterNetworkPeerId, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -103,14 +103,14 @@ internal sealed class InviteHandshakeResponseDeliveryService : IInviteHandshakeR
         try
         {
             var payload = NetworkPayload.FromArray(response.ToByteArray());
-            var relayResult = await _transport.SendViaRelayAsync(relay.Value, inviterPeerId, payload, ct).ConfigureAwait(false);
+            var relayResult = await _transport.SendViaRelayAsync(relay.Value, inviterNetworkPeerId, payload, ct).ConfigureAwait(false);
             if (relayResult.Ok)
             {
                 var sendPath = $"Relay:{relay.Value}";
                 if (_wireTap.Enabled)
                 {
                     _wireTap.Tap(new OutboundWireMessage(
-                        DestinationPeerId: inviterPeerId,
+                        DestinationNetworkPeerId: inviterNetworkPeerId,
                         SendPath: sendPath,
                         MessageType: nameof(InviteHandshakeResponse),
                         RequestCorrelationId: response.HasRequestCorrelationId ? response.RequestCorrelationId : null,
@@ -123,7 +123,7 @@ internal sealed class InviteHandshakeResponseDeliveryService : IInviteHandshakeR
             if (_wireTap.Enabled)
             {
                 _wireTap.Tap(new OutboundWireMessage(
-                    DestinationPeerId: inviterPeerId,
+                    DestinationNetworkPeerId: inviterNetworkPeerId,
                     SendPath: $"Relay:{relay.Value}",
                     MessageType: nameof(InviteHandshakeResponse),
                     RequestCorrelationId: response.HasRequestCorrelationId ? response.RequestCorrelationId : null,
@@ -137,14 +137,14 @@ internal sealed class InviteHandshakeResponseDeliveryService : IInviteHandshakeR
             if (_wireTap.Enabled)
             {
                 _wireTap.Tap(new OutboundWireMessage(
-                    DestinationPeerId: inviterPeerId,
+                    DestinationNetworkPeerId: inviterNetworkPeerId,
                     SendPath: $"Relay:{relay.Value}",
                     MessageType: nameof(InviteHandshakeResponse),
                     RequestCorrelationId: response.HasRequestCorrelationId ? response.RequestCorrelationId : null,
                     PayloadBytes: response.ToByteArray(),
                     PayloadLength: response.CalculateSize()));
             }
-            _logger.LogWarning(ex, "Failed to deliver InviteHandshakeResponse via relay {Relay} to {Target}", relay.Value, inviterPeerId);
+            _logger.LogWarning(ex, "Failed to deliver InviteHandshakeResponse via relay {Relay} to {Target}", relay.Value, inviterNetworkPeerId);
             return new InviteHandshakeResponseDeliveryResult(false, $"Relay:{relay.Value}", ex);
         }
     }

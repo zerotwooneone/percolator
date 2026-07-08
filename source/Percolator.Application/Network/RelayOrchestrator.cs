@@ -8,7 +8,6 @@ using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Network;
 using IdentityPeerId = Percolator.Identity.PeerId;
-using NetworkPeerId = Percolator.Network.PeerId;
 
 namespace Percolator.Application.Network;
 

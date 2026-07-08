@@ -66,7 +66,7 @@ public sealed class SimulatorPeersTabViewModel : IDisposable
 
     private string ResolvePeerName(Guid peerId)
     {
-        var m = _state.Peers.FirstOrDefault(x => x.PeerId.Value == peerId);
+        var m = _state.Peers.FirstOrDefault(x => x.NetworkPeerId.Value == peerId);
         var name = m?.DisplayName.CurrentValue;
         return string.IsNullOrWhiteSpace(name) ? peerId.ToString()[..8] : name;
     }

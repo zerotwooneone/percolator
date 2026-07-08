@@ -16,7 +16,7 @@ public sealed class SqlitePeerRoutingProfileRepository : IPeerRoutingProfileRepo
         _db = db;
     }
 
-    private async Task<PeerRoutingProfile?> GetByIdInternalAsync(PeerId id, CancellationToken ct)
+    private async Task<PeerRoutingProfile?> GetByIdInternalAsync(NetworkPeerId id, CancellationToken ct)
     {
         var row = await _db.PeerRoutingProfiles.AsNoTracking().FirstOrDefaultAsync(p => p.PeerId == id.Value, ct);
         if (row is null)
@@ -24,7 +24,7 @@ public sealed class SqlitePeerRoutingProfileRepository : IPeerRoutingProfileRepo
             return null;
         }
         var profile = new PeerRoutingProfile();
-        profile.BindIdentity(new Percolator.Network.PeerId(row.PeerId));
+        profile.BindIdentity(new Percolator.Network.NetworkPeerId(row.PeerId));
         if (row.DirectMessagePublicKey is not null)
         {
             profile.SetIdentityPublicKey(Percolator.Network.ValueObjects.IdentityPublicKey.FromBytesOwned(row.DirectMessagePublicKey));
@@ -47,7 +47,7 @@ public sealed class SqlitePeerRoutingProfileRepository : IPeerRoutingProfileRepo
             .ToListAsync(ct);
         foreach (var r in relayRows)
         {
-            profile.AddOrRefreshRelay(new Percolator.Network.PeerId(r.RelayPeerId), r.LastSeenUtc);
+            profile.AddOrRefreshRelay(new Percolator.Network.NetworkPeerId(r.RelayPeerId), r.LastSeenUtc);
         }
         return profile;
     }
@@ -105,13 +105,13 @@ public sealed class SqlitePeerRoutingProfileRepository : IPeerRoutingProfileRepo
         // Upsert
         foreach (var relay in aggregate.Relays)
         {
-            var found = existingRelays.FirstOrDefault(x => x.RelayPeerId == relay.RelayPeerId.Value);
+            var found = existingRelays.FirstOrDefault(x => x.RelayPeerId == relay.RelayNetworkPeerId.Value);
             if (found is null)
             {
                 _db.PeerRoutingRelays.Add(new RelayLinkDbo
                 {
                     PeerId = row.PeerId,
-                    RelayPeerId = relay.RelayPeerId.Value,
+                    RelayPeerId = relay.RelayNetworkPeerId.Value,
                     LastSeenUtc = relay.Freshness.LastSeenUtc
                 });
             }
@@ -121,7 +121,7 @@ public sealed class SqlitePeerRoutingProfileRepository : IPeerRoutingProfileRepo
             }
         }
         // Remove missing
-        var toRemove = existingRelays.Where(db => !aggregate.Relays.Any(ar => ar.RelayPeerId.Value == db.RelayPeerId)).ToList();
+        var toRemove = existingRelays.Where(db => !aggregate.Relays.Any(ar => ar.RelayNetworkPeerId.Value == db.RelayPeerId)).ToList();
         if (toRemove.Count > 0)
         {
             _db.PeerRoutingRelays.RemoveRange(toRemove);
@@ -142,7 +142,7 @@ public sealed class SqlitePeerRoutingProfileRepository : IPeerRoutingProfileRepo
         foreach (var row in rows)
         {
             var profile = new PeerRoutingProfile();
-            profile.BindIdentity(new Percolator.Network.PeerId(row.PeerId));
+            profile.BindIdentity(new Percolator.Network.NetworkPeerId(row.PeerId));
             if (row.ReachabilityLastChangeUtc is DateTimeOffset ts)
             {
                 profile.RecordReachability((ReachabilityStatus)row.ReachabilityStatus, ts);
@@ -164,7 +164,7 @@ public sealed class SqlitePeerRoutingProfileRepository : IPeerRoutingProfileRepo
             return null;
         }
         var profile = new PeerRoutingProfile();
-        profile.BindIdentity(new Percolator.Network.PeerId(match.PeerId));
+        profile.BindIdentity(new Percolator.Network.NetworkPeerId(match.PeerId));
         profile.SetIdentityPublicKey(Percolator.Network.ValueObjects.IdentityPublicKey.FromBytesOwned(match.DirectMessagePublicKey!));
         if (match.ReachabilityLastChangeUtc is DateTimeOffset ts)
         {
@@ -173,7 +173,7 @@ public sealed class SqlitePeerRoutingProfileRepository : IPeerRoutingProfileRepo
         return profile;
     }
 
-    public Task<PeerRoutingProfile?> GetByIdAsync(PeerId id, CancellationToken cancellationToken = default)
+    public Task<PeerRoutingProfile?> GetByIdAsync(NetworkPeerId id, CancellationToken cancellationToken = default)
     {
         return GetByIdInternalAsync(id, cancellationToken);
     }
@@ -205,6 +205,6 @@ public sealed class SqlitePeerRoutingProfileRepository : IPeerRoutingProfileRepo
             return null;
         }
 
-        return await GetByIdInternalAsync(new Percolator.Network.PeerId(match.PeerId), cancellationToken);
+        return await GetByIdInternalAsync(new Percolator.Network.NetworkPeerId(match.PeerId), cancellationToken);
     }
 }

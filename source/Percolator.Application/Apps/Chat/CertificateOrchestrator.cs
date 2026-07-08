@@ -4,7 +4,6 @@ using Percolator.Chat.GroupMembership;
 using Percolator.Identity;
 using Percolator.Network;
 using Percolator.Network.Messaging;
-using PeerId = Percolator.Network.PeerId;
 
 namespace Percolator.Application.Apps.Chat;
 
@@ -51,7 +50,7 @@ public sealed class CertificateOrchestrator : ICertificateOrchestrator
         }
         
         // Use the repository to extract its active endpoint network profile
-        var networkRelayPeerId = new PeerId(relayPeerId.Value);
+        var networkRelayPeerId = new NetworkPeerId(relayPeerId.Value);
         var relayProfile = await _peerRoutingProfileRepository.GetByIdAsync(networkRelayPeerId, ct).ConfigureAwait(false);
         if (relayProfile is null)
         {

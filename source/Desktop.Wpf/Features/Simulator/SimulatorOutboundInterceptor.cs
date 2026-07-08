@@ -116,7 +116,7 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
                 $"No simulated peer listening at {endpoint.Host}:{endpoint.Port}");
         }
 
-        var match = _state.Peers.FirstOrDefault(p => p.PeerId == simulatedPeerId);
+        var match = _state.Peers.FirstOrDefault(p => p.NetworkPeerId == simulatedPeerId);
         if (match is null)
         {
             return new SimulatorOutboundInterceptResult.Undeliverable(
@@ -127,43 +127,43 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
         // Deliver to simulator
         try
         {
-            var response = await _state.ReceiveOpaqueMessageFromMainAsync(match.PeerId, request, cancellationToken).ConfigureAwait(false);
+            var response = await _state.ReceiveOpaqueMessageFromMainAsync(match.NetworkPeerId, request, cancellationToken).ConfigureAwait(false);
             return new SimulatorOutboundInterceptResult.DeliveredToSimulator(response);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[simulator] Failed to deliver opaque message to {SimPeer}", match.PeerId);
+            _logger.LogError(ex, "[simulator] Failed to deliver opaque message to {SimPeer}", match.NetworkPeerId);
             throw; // Propagate exception as per plan
         }
     }
 
-    private async Task<DeliverInviteHandshakeResponseAck> DeliverInviteHandshakeResponseAsync(PeerId simulatedPeerId, InviteHandshakeResponse response, CancellationToken cancellationToken)
+    private async Task<DeliverInviteHandshakeResponseAck> DeliverInviteHandshakeResponseAsync(NetworkPeerId simulatedNetworkPeerId, InviteHandshakeResponse response, CancellationToken cancellationToken)
     {
         var correlationId = response.RequestCorrelationId ?? "(missing)";
-        _logger.LogInformation("[simulator] Intercepted DeliverInviteHandshakeResponse to {SimPeer} with correlation {CorrelationId}", simulatedPeerId, correlationId);
-        await _state.HandleInboundInviteHandshakeResponseFromMainAsync(simulatedPeerId, response, cancellationToken).ConfigureAwait(false);
-        _logger.LogInformation("[simulator] Handshake response processed for {SimPeer} correlation {CorrelationId}", simulatedPeerId, correlationId);
+        _logger.LogInformation("[simulator] Intercepted DeliverInviteHandshakeResponse to {SimPeer} with correlation {CorrelationId}", simulatedNetworkPeerId, correlationId);
+        await _state.HandleInboundInviteHandshakeResponseFromMainAsync(simulatedNetworkPeerId, response, cancellationToken).ConfigureAwait(false);
+        _logger.LogInformation("[simulator] Handshake response processed for {SimPeer} correlation {CorrelationId}", simulatedNetworkPeerId, correlationId);
         return new DeliverInviteHandshakeResponseAck { Version = 1 };
     }
 
     private async Task<EstablishDirectSessionResponse> EstablishDirectSessionAsync(
-        PeerId simulatedPeerId,
+        NetworkPeerId simulatedNetworkPeerId,
         EstablishDirectSessionRequest request,
         CancellationToken cancellationToken)
     {
         try
         {
-            var inviterPeerId = _active.Identity is not null ? new PeerId((uint) _active.Identity.SelfIdentityId.Value) : new PeerId(0);
+            var inviterPeerId = _active.Identity is not null ? new NetworkPeerId((uint) _active.Identity.SelfIdentityId.Value) : new NetworkPeerId(0);
             return await _state.ReceiveEstablishDirectSessionFromMainAsync(
-                    simulatedPeerId: simulatedPeerId,
-                    mainPeerId: inviterPeerId,
+                    simulatedNetworkPeerId: simulatedNetworkPeerId,
+                    mainNetworkPeerId: inviterPeerId,
                     request: request,
                     cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "[simulator] Failed to intercept EstablishDirectSession to {SimPeer}", simulatedPeerId);
+            _logger.LogWarning(ex, "[simulator] Failed to intercept EstablishDirectSession to {SimPeer}", simulatedNetworkPeerId);
             return new EstablishDirectSessionResponse
             {
                 Version = 1,
@@ -172,9 +172,9 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
         }
     }
 
-    private bool TryResolveSimulatedPeerId(DnsEndPoint endpoint, out PeerId simulatedPeerId)
+    private bool TryResolveSimulatedPeerId(DnsEndPoint endpoint, out NetworkPeerId simulatedNetworkPeerId)
     {
-        simulatedPeerId = new PeerId(0);
+        simulatedNetworkPeerId = new NetworkPeerId(0);
 
         if (!IPAddress.TryParse(endpoint.Host, out var ip))
         {
@@ -192,6 +192,6 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
             return false;
         }
 
-        return _state.TryResolvePeerId(endpoint, out simulatedPeerId);
+        return _state.TryResolvePeerId(endpoint, out simulatedNetworkPeerId);
     }
 }

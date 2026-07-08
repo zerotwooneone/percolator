@@ -19,7 +19,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
     private readonly ISimulatorDiagnosticsService _diagnostics;
     private readonly IOptions<TransportOptions> _transportOptions;
     private readonly Percolator.Application.Identity.ActiveIdentityContext _active;
-    private readonly Func<PeerId?> _selectedRelayHostPeerId;
+    private readonly Func<NetworkPeerId?> _selectedRelayHostPeerId;
 
     private DisposableBag _bag;
 
@@ -30,7 +30,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
         ISimulatorDiagnosticsService diagnostics,
         IOptions<TransportOptions> transportOptions,
         Percolator.Application.Identity.ActiveIdentityContext active,
-        Func<PeerId?> selectedRelayHostPeerId)
+        Func<NetworkPeerId?> selectedRelayHostPeerId)
     {
         _model = model;
         _state = state;
@@ -42,8 +42,8 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
 
         DisplayName = _model.DisplayName
             .ObserveOnCurrentSynchronizationContext()
-            .Select(n => string.IsNullOrWhiteSpace(n) ? _model.PeerId.ToString()[..8] : n!)
-            .ToBindableReactiveProperty(_model.PeerId.ToString()[..8])
+            .Select(n => string.IsNullOrWhiteSpace(n) ? _model.NetworkPeerId.ToString()[..8] : n!)
+            .ToBindableReactiveProperty(_model.NetworkPeerId.ToString()[..8])
             .AddTo(ref _bag);
 
         StateText = _model.UiState
@@ -173,7 +173,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
         AutoRespond = new BindableReactiveProperty<bool>(false).AddTo(ref _bag);
     }
 
-    public PeerId PeerId => _model.PeerId;
+    public NetworkPeerId NetworkPeerId => _model.NetworkPeerId;
 
     public BindableReactiveProperty<string> DisplayName { get; }
 
@@ -259,7 +259,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
                     _diagnostics.Emit(
                         SimulatorDiagnosticEventType.HandshakeStateTransition,
                         $"Handshake: outbound pending corr={corr.ToString()[..8]}",
-                        peerId: _model.PeerId,
+                        peerId: _model.NetworkPeerId,
                         contextTag: "OutboundPending");
                 }
                 else
@@ -274,7 +274,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
                     _diagnostics.Emit(
                         SimulatorDiagnosticEventType.HandshakeStateTransition,
                         $"Handshake: outbound pending corr={corr2.ToString()[..8]}",
-                        peerId: _model.PeerId,
+                        peerId: _model.NetworkPeerId,
                         contextTag: "OutboundPending");
                 }
             }
@@ -290,7 +290,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
                 _diagnostics.Emit(
                     SimulatorDiagnosticEventType.HandshakeStateTransition,
                     $"Handshake: outbound pending corr={corr3.ToString()[..8]}",
-                    peerId: _model.PeerId,
+                    peerId: _model.NetworkPeerId,
                     contextTag: "OutboundPending");
             }
         }
@@ -306,7 +306,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
             _diagnostics.Emit(
                 SimulatorDiagnosticEventType.HandshakeStateTransition,
                 $"Handshake: outbound pending corr={corr4.ToString()[..8]}",
-                peerId: _model.PeerId,
+                peerId: _model.NetworkPeerId,
                 contextTag: "OutboundPending");
         }
 
@@ -345,7 +345,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
 
         var relayHostPeerId = _selectedRelayHostPeerId();
         var relayHost = relayHostPeerId is not null
-            ? _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId)
+            ? _state.Peers.FirstOrDefault(p => p.NetworkPeerId == relayHostPeerId)
             : null;
 
         relayHost ??= _state.Peers.FirstOrDefault(p => p.IsRelayCapable.CurrentValue);
@@ -356,7 +356,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
         await InvokeOnUiAsync(() =>
         {
             _model.SetSelectedRouteMode(ConnectionMode.ViaRelay);
-            _model.SetRelayHostPeerId(relayHost.PeerId);
+            _model.SetRelayHostPeerId(relayHost.NetworkPeerId);
             _model.SetPhase("InviteEnqueued");
         }).ConfigureAwait(false);
 
@@ -377,7 +377,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
                     _diagnostics.Emit(
                         SimulatorDiagnosticEventType.HandshakeStateTransition,
                         $"Handshake: outbound pending corr={corr.ToString()[..8]}",
-                        peerId: _model.PeerId,
+                        peerId: _model.NetworkPeerId,
                         contextTag: "OutboundPending");
                 }
                 else
@@ -392,7 +392,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
                     _diagnostics.Emit(
                         SimulatorDiagnosticEventType.HandshakeStateTransition,
                         $"Handshake: outbound pending corr={corr2.ToString()[..8]}",
-                        peerId: _model.PeerId,
+                        peerId: _model.NetworkPeerId,
                         contextTag: "OutboundPending");
                 }
             }
@@ -408,7 +408,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
                 _diagnostics.Emit(
                     SimulatorDiagnosticEventType.HandshakeStateTransition,
                     $"Handshake: outbound pending corr={corr3.ToString()[..8]}",
-                    peerId: _model.PeerId,
+                    peerId: _model.NetworkPeerId,
                     contextTag: "OutboundPending");
             }
         }
@@ -424,14 +424,14 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
             _diagnostics.Emit(
                 SimulatorDiagnosticEventType.HandshakeStateTransition,
                 $"Handshake: outbound pending corr={corr4.ToString()[..8]}",
-                peerId: _model.PeerId,
+                peerId: _model.NetworkPeerId,
                 contextTag: "OutboundPending");
         }
 
         try
         {
             await _state.EnqueueRelayUpstreamToMainAsync(
-                    relayHostPeerId: relayHost.PeerId,
+                    relayHostNetworkPeerId: relayHost.NetworkPeerId,
                     opaqueBytes: invite.ToByteArray(),
                     debugType: nameof(EstablishDirectSessionRequest),
                     cancellationToken: ct)
@@ -466,7 +466,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
 
         var accepted = await _state
             .TryAcceptPendingStandardSignalHelloAsync(
-                recipientPeerId: _model.PeerId,
+                recipientNetworkPeerId: _model.NetworkPeerId,
                 initiatorPkhHex: initiatorPkhHex,
                 cancellationToken: ct)
             .ConfigureAwait(false);
@@ -476,7 +476,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
             _diagnostics.Emit(
                 SimulatorDiagnosticEventType.HandshakeStateTransition,
                 $"Handshake: standard-signal accept failed initiator={initiatorPkhHex}",
-                peerId: _model.PeerId,
+                peerId: _model.NetworkPeerId,
                 contextTag: "StandardSignalAcceptFailed");
         }
     }
@@ -489,7 +489,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
         {
             case PendingHandshakeKind.InboundDirectInviteRequestFromMain:
                 await _state.AcceptPendingInboundDirectInviteAsync(
-                    simulatedPeerId: _model.PeerId,
+                    simulatedNetworkPeerId: _model.NetworkPeerId,
                     correlationId: item.CorrelationId,
                     cancellationToken: ct)
                     .ConfigureAwait(false);
@@ -498,7 +498,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
             case PendingHandshakeKind.InboundStandardSignalHello:
                 var accepted = await _state
                     .TryAcceptPendingStandardSignalHelloAsync(
-                        recipientPeerId: _model.PeerId,
+                        recipientNetworkPeerId: _model.NetworkPeerId,
                         initiatorPkhHex: item.CorrelationId.ToString(),
                         cancellationToken: ct)
                     .ConfigureAwait(false);
@@ -508,7 +508,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
                     _diagnostics.Emit(
                         SimulatorDiagnosticEventType.HandshakeStateTransition,
                         $"Handshake: standard-signal accept failed corr={item.CorrelationId}",
-                        peerId: _model.PeerId,
+                        peerId: _model.NetworkPeerId,
                         contextTag: "StandardSignalAcceptFailed");
                 }
                 break;
@@ -517,7 +517,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
                 _diagnostics.Emit(
                     SimulatorDiagnosticEventType.HandshakeStateTransition,
                     $"Handshake: unsupported pending approval kind={item.Kind}",
-                    peerId: _model.PeerId,
+                    peerId: _model.NetworkPeerId,
                     contextTag: "UnsupportedKind");
                 break;
         }
@@ -531,7 +531,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
         {
             case PendingHandshakeKind.InboundDirectInviteRequestFromMain:
                 await _state.RejectPendingInboundDirectInviteAsync(
-                    simulatedPeerId: _model.PeerId,
+                    simulatedNetworkPeerId: _model.NetworkPeerId,
                     correlationId: item.CorrelationId,
                     cancellationToken: ct)
                     .ConfigureAwait(false);
@@ -546,7 +546,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
                 _diagnostics.Emit(
                     SimulatorDiagnosticEventType.HandshakeStateTransition,
                     $"Handshake: standard-signal hello rejected corr={item.CorrelationId}",
-                    peerId: _model.PeerId,
+                    peerId: _model.NetworkPeerId,
                     contextTag: "StandardSignalRejected");
                 break;
 
@@ -554,7 +554,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
                 _diagnostics.Emit(
                     SimulatorDiagnosticEventType.HandshakeStateTransition,
                     $"Handshake: unsupported pending approval kind={item.Kind}",
-                    peerId: _model.PeerId,
+                    peerId: _model.NetworkPeerId,
                     contextTag: "UnsupportedKind");
                 break;
         }
@@ -566,7 +566,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
         _diagnostics.Emit(
             SimulatorDiagnosticEventType.HandshakeStateTransition,
             "Handshake: expired",
-            peerId: _model.PeerId,
+            peerId: _model.NetworkPeerId,
             contextTag: "Expired");
     }
 
@@ -576,7 +576,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
         _diagnostics.Emit(
             SimulatorDiagnosticEventType.HandshakeStateTransition,
             "Handshake: reset (no handshake)",
-            peerId: _model.PeerId,
+            peerId: _model.NetworkPeerId,
             contextTag: "NoHandshake");
     }
 

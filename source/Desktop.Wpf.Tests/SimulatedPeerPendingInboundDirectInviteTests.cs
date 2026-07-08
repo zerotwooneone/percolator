@@ -17,7 +17,7 @@ using Microsoft.Extensions.Options;
 using Percolator.Application.Configuration;
 using Percolator.Contracts;
 using Percolator.Cryptography;
-using PeerId = Percolator.Network.PeerId;
+using Percolator.Network;
 
 namespace Desktop.Wpf.Tests;
 
@@ -28,8 +28,8 @@ public sealed class SimulatedPeerPendingInboundDirectInviteTests
     public async Task ReceiveEstablishDirectSessionFromMainAsync_QueuesPendingInvite_DoesNotCreateSession()
     {
         // Arrange
-        var simulatedPeerId = new PeerId(1);
-        var mainPeerId = new PeerId(2);
+        var simulatedPeerId = new NetworkPeerId(1);
+        var mainPeerId = new NetworkPeerId(2);
         var correlationId = Guid.NewGuid();
 
         var simulatedPeer = CryptoTestHelpers.CreateTestPeer(
@@ -110,22 +110,22 @@ public sealed class SimulatedPeerPendingInboundDirectInviteTests
         response.Queued.RequestCorrelationId.Should().Be(correlationId.ToString());
 
         // No session should be created
-        var peer = sut.Peers.Single(p => p.PeerId == simulatedPeerId);
+        var peer = sut.Peers.Single(p => p.NetworkPeerId == simulatedPeerId);
         peer.Sessions.Count.Should().Be(0);
 
         // Pending invite should be persisted
         peer.PendingInboundDirectInvites.Count.Should().Be(1);
         var pendingInvite = peer.PendingInboundDirectInvites.Single();
         pendingInvite.CorrelationId.Should().Be(correlationId);
-        pendingInvite.InviterPeerId.Should().Be(mainPeerId);
+        pendingInvite.InviterNetworkPeerId.Should().Be(mainPeerId);
     }
 
     [Test]
     public async Task AcceptPendingInboundDirectInviteAsync_CreatesSession_WhenInvitedPeerAccepts()
     {
         // Arrange
-        var simulatedPeerId = new PeerId(3);
-        var mainPeerId = new PeerId(4);
+        var simulatedPeerId = new NetworkPeerId(3);
+        var mainPeerId = new NetworkPeerId(4);
         var correlationId = Guid.NewGuid();
 
         var simulatedPeer = CryptoTestHelpers.CreateTestPeer(
@@ -192,7 +192,7 @@ public sealed class SimulatedPeerPendingInboundDirectInviteTests
         };
 
         // Manually add pending invite to simulate the queued state
-        var peer = sut.Peers.Single(p => p.PeerId == simulatedPeerId);
+        var peer = sut.Peers.Single(p => p.NetworkPeerId == simulatedPeerId);
         peer.AddPendingInboundDirectInvite(correlationId, request.ToByteArray(), mainIdentitySpki, mainPeerId);
 
         // Act
@@ -215,8 +215,8 @@ public sealed class SimulatedPeerPendingInboundDirectInviteTests
     public async Task RejectPendingInboundDirectInviteAsync_DoesNotCreateSession_ClearsPending()
     {
         // Arrange
-        var simulatedPeerId = new PeerId(5);
-        var mainPeerId = new PeerId(6);
+        var simulatedPeerId = new NetworkPeerId(5);
+        var mainPeerId = new NetworkPeerId(6);
         var correlationId = Guid.NewGuid();
 
         var simulatedPeer = CryptoTestHelpers.CreateTestPeer(
@@ -283,7 +283,7 @@ public sealed class SimulatedPeerPendingInboundDirectInviteTests
         };
 
         // Manually add pending invite to simulate the queued state
-        var peer = sut.Peers.Single(p => p.PeerId == simulatedPeerId);
+        var peer = sut.Peers.Single(p => p.NetworkPeerId == simulatedPeerId);
         peer.AddPendingInboundDirectInvite(correlationId, request.ToByteArray(), mainIdentitySpki, mainPeerId);
 
         // Act

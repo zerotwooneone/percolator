@@ -5,15 +5,15 @@ namespace Desktop.Wpf.Features.Simulator;
 public sealed class SimulatedRelayQueueItemViewModel
 {
     public SimulatedRelayQueueItemViewModel(
-        PeerId relayHostPeerId,
+        NetworkPeerId relayHostNetworkPeerId,
         Guid ackId,
         DateTimeOffset enqueuedUtc,
         string? debugType,
         byte[]? targetIdentityPublicKeyHash,
         byte[] opaqueBytes,
-        Func<PeerId, string> peerNameById)
+        Func<NetworkPeerId, string> peerNameById)
     {
-        RelayHostPeerId = relayHostPeerId;
+        RelayHostNetworkPeerId = relayHostNetworkPeerId;
 
         AckId = ackId;
         EnqueuedUtc = enqueuedUtc;
@@ -24,12 +24,12 @@ public sealed class SimulatedRelayQueueItemViewModel
         TypeLabel = ToTypeLabel(debugType);
 
         RecipientDisplay = ToRecipientDisplay(targetIdentityPublicKeyHash);
-        FromToDisplay = $"{peerNameById(relayHostPeerId)} -> {RecipientDisplay}";
+        FromToDisplay = $"{peerNameById(relayHostNetworkPeerId)} -> {RecipientDisplay}";
 
         TimestampDisplay = enqueuedUtc.LocalDateTime.ToString("HH:mm:ss");
     }
 
-    public PeerId RelayHostPeerId { get; }
+    public NetworkPeerId RelayHostNetworkPeerId { get; }
 
     public Guid AckId { get; }
 

@@ -79,7 +79,7 @@ public sealed class GroupInviteHandler : IGroupInviteHandler
 
         // Step 5.5: Save relay endpoint if provided in the invite
         var relayIdentity = await _peerIdentityRepository.GetOrCreateAsync(relayPublicIdentityId, ct).ConfigureAwait(false);
-        var relayPeerId = new Percolator.Network.PeerId(relayIdentity.Id.Value);
+        var relayPeerId = new Percolator.Network.NetworkPeerId(relayIdentity.Id.Value);
         var relayProfile = await _peerRoutingProfileRepository.GetByIdAsync(relayPeerId, ct).ConfigureAwait(false);
             
         var endpoint = new System.Net.DnsEndPoint(invite.RelayHost, invite.RelayPort);

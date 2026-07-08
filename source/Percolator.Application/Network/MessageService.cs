@@ -58,7 +58,7 @@ namespace Percolator.Application.Network
             }
 
             // Require an existing direct session to encrypt the envelope to the recipient.
-            var ds = await _sessions.GetByRemotePeerIdAsync(new Percolator.Network.PeerId(recipientPeerId.Value), new NetworkSelfId(_active.Identity!.SelfIdentityId.Value)).ConfigureAwait(false);
+            var ds = await _sessions.GetByRemotePeerIdAsync(new Percolator.Network.NetworkPeerId(recipientPeerId.Value), new NetworkSelfId(_active.Identity!.SelfIdentityId.Value)).ConfigureAwait(false);
             if (ds is null)
             {
                 return (SendResult.CreateFailure(Array.Empty<string>(), attempts: 0, lastError: new InvalidOperationException("No direct session to recipient")), null);
@@ -74,7 +74,7 @@ namespace Percolator.Application.Network
                 {
                     const string sendPath = "Simulated";
                     _wireTap.Tap(new OutboundWireMessage(
-                        DestinationPeerId: new Percolator.Network.PeerId(recipientPeerId.Value),
+                        DestinationNetworkPeerId: new Percolator.Network.NetworkPeerId(recipientPeerId.Value),
                         SendPath: sendPath,
                         MessageType: "EncryptedEnvelope",
                         RequestCorrelationId: null,
@@ -85,13 +85,13 @@ namespace Percolator.Application.Network
             }
 
             var outcome = await _networkSender
-                .SendAsync(_active.Identity!.SelfIdentityId.Value, new Percolator.Network.PeerId(recipientPeerId.Value), new NetworkPayload(cipherBytes), SendStrategy.DirectThenRelay, ct)
+                .SendAsync(_active.Identity!.SelfIdentityId.Value, new Percolator.Network.NetworkPeerId(recipientPeerId.Value), new NetworkPayload(cipherBytes), SendStrategy.DirectThenRelay, ct)
                 .ConfigureAwait(false);
 
             if (_wireTap.Enabled)
             {
                 _wireTap.Tap(new OutboundWireMessage(
-                    DestinationPeerId: new Percolator.Network.PeerId(recipientPeerId.Value),
+                    DestinationNetworkPeerId: new Percolator.Network.NetworkPeerId(recipientPeerId.Value),
                     SendPath: outcome.Path,
                     MessageType: "EncryptedEnvelope",
                     RequestCorrelationId: null,
@@ -139,7 +139,7 @@ namespace Percolator.Application.Network
             }
 
             // Require an existing direct session to build recipient DR ciphertext
-            var ds = await _sessions.GetByRemotePeerIdAsync(new Percolator.Network.PeerId(recipientPeerId.Value), new NetworkSelfId(_active.Identity!.SelfIdentityId.Value)).ConfigureAwait(false);
+            var ds = await _sessions.GetByRemotePeerIdAsync(new Percolator.Network.NetworkPeerId(recipientPeerId.Value), new NetworkSelfId(_active.Identity!.SelfIdentityId.Value)).ConfigureAwait(false);
             if (ds is null)
             {
                 return SendResult.CreateFailure(Array.Empty<string>(), attempts: 0, lastError: new InvalidOperationException("No direct session to recipient"));
@@ -155,7 +155,7 @@ namespace Percolator.Application.Network
                 {
                     const string sendPath = "Simulated";
                     _wireTap.Tap(new OutboundWireMessage(
-                        DestinationPeerId: new Percolator.Network.PeerId(recipientPeerId.Value),
+                        DestinationNetworkPeerId: new Percolator.Network.NetworkPeerId(recipientPeerId.Value),
                         SendPath: sendPath,
                         MessageType: "EncryptedEnvelope",
                         RequestCorrelationId: null,
@@ -166,13 +166,13 @@ namespace Percolator.Application.Network
             }
 
             var outcome = await _networkSender
-                .SendAsync(_active.Identity!.SelfIdentityId.Value, new Percolator.Network.PeerId(recipientPeerId.Value), new NetworkPayload(cipherBytes), SendStrategy.DirectThenRelay, ct)
+                .SendAsync(_active.Identity!.SelfIdentityId.Value, new Percolator.Network.NetworkPeerId(recipientPeerId.Value), new NetworkPayload(cipherBytes), SendStrategy.DirectThenRelay, ct)
                 .ConfigureAwait(false);
 
             if (_wireTap.Enabled)
             {
                 _wireTap.Tap(new OutboundWireMessage(
-                    DestinationPeerId: new Percolator.Network.PeerId(recipientPeerId.Value),
+                    DestinationNetworkPeerId: new Percolator.Network.NetworkPeerId(recipientPeerId.Value),
                     SendPath: outcome.Path,
                     MessageType: "EncryptedEnvelope",
                     RequestCorrelationId: null,

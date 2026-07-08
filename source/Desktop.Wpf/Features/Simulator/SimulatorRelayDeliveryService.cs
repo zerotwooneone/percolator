@@ -8,8 +8,8 @@ namespace Desktop.Wpf.Features.Simulator;
 public interface ISimulatorRelayDeliveryService
 {
     Task DeliverToPeerAsync(
-        Percolator.Network.PeerId relayHostPeerId,
-        Percolator.Network.PeerId recipientPeerId,
+        Percolator.Network.NetworkPeerId relayHostNetworkPeerId,
+        Percolator.Network.NetworkPeerId recipientNetworkPeerId,
         Guid ackId,
         byte[] opaqueBytes,
         string? debugType,
@@ -39,8 +39,8 @@ public sealed class SimulatorRelayDeliveryService : ISimulatorRelayDeliveryServi
     }
     
     public async Task DeliverToPeerAsync(
-        Percolator.Network.PeerId relayHostPeerId,
-        Percolator.Network.PeerId recipientPeerId,
+        Percolator.Network.NetworkPeerId relayHostNetworkPeerId,
+        Percolator.Network.NetworkPeerId recipientNetworkPeerId,
         Guid ackId,
         byte[] opaqueBytes,
         string? debugType,
@@ -58,8 +58,8 @@ public sealed class SimulatorRelayDeliveryService : ISimulatorRelayDeliveryServi
                 && hello.HasSignedPreKeyId && hello.SignedPreKeyId.Length > 0)
             {
                 await _state.UpsertPendingStandardSignalHelloAsync(
-                        recipientPeerId: recipientPeerId,
-                        relayHostPeerId: relayHostPeerId,
+                        recipientNetworkPeerId: recipientNetworkPeerId,
+                        relayHostNetworkPeerId: relayHostNetworkPeerId,
                         hello: hello,
                         receivedUtc: DateTimeOffset.UtcNow,
                         cancellationToken: cancellationToken)
@@ -73,7 +73,7 @@ public sealed class SimulatorRelayDeliveryService : ISimulatorRelayDeliveryServi
         }
 
         var forwarded = await _state
-            .ReceiveRelayedOpaquePayloadAsync(recipientPeerId, opaqueBytes, cancellationToken)
+            .ReceiveRelayedOpaquePayloadAsync(recipientNetworkPeerId, opaqueBytes, cancellationToken)
             .ConfigureAwait(false);
 
         if (forwarded?.Response is null || !forwarded.Response.HasResponsePayload || forwarded.Response.ResponsePayload.Length == 0)
@@ -99,7 +99,7 @@ public sealed class SimulatorRelayDeliveryService : ISimulatorRelayDeliveryServi
             if (initiatorPeerId is not null)
             {
                 await _state.EnqueueRelayDownstreamToPeerAsync(
-                        relayHostPeerId: relayHostPeerId,
+                        relayHostNetworkPeerId: relayHostNetworkPeerId,
                         targetIdentityPublicKeyHash: initiatorPkh,
                         opaqueBytes: forwarded.ToByteArray(),
                         debugType: nameof(EstablishSessionResponse),
@@ -112,7 +112,7 @@ public sealed class SimulatorRelayDeliveryService : ISimulatorRelayDeliveryServi
                 if (matchesMainIdentity)
                 {
                     await _state.EnqueueRelayUpstreamToMainAsync(
-                            relayHostPeerId: relayHostPeerId,
+                            relayHostNetworkPeerId: relayHostNetworkPeerId,
                             opaqueBytes: forwarded.ToByteArray(),
                             debugType: nameof(EstablishSessionResponse),
                             cancellationToken: cancellationToken)
@@ -123,7 +123,7 @@ public sealed class SimulatorRelayDeliveryService : ISimulatorRelayDeliveryServi
                     _diagnostics.Emit(
                         SimulatorDiagnosticEventType.RelayRoutingFailure,
                         $"Relay response routing failure (no simulated peer or main identity for PKH): {nameof(EstablishSessionResponse)}",
-                        relayHostPeerId: relayHostPeerId,
+                        relayHostPeerId: relayHostNetworkPeerId,
                         ackId: ackId);
                     return;
                 }
@@ -132,13 +132,13 @@ public sealed class SimulatorRelayDeliveryService : ISimulatorRelayDeliveryServi
             _diagnostics.Emit(
                 SimulatorDiagnosticEventType.HandshakeStateTransition,
                 "Standard handshake response enqueued (relayed)",
-                peerId: recipientPeerId,
-                relayHostPeerId: relayHostPeerId,
+                peerId: recipientNetworkPeerId,
+                relayHostPeerId: relayHostNetworkPeerId,
                 contextTag: "ResponseEnqueued");
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "[simulator] Failed to enqueue EstablishSessionResponse back to relay host {RelayHost}", relayHostPeerId);
+            _logger.LogWarning(ex, "[simulator] Failed to enqueue EstablishSessionResponse back to relay host {RelayHost}", relayHostNetworkPeerId);
         }
     }
 

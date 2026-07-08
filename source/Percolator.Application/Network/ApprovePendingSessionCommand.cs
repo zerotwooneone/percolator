@@ -213,7 +213,7 @@ namespace Percolator.Application.Network
             await _sessions.AddAsync(session, new CryptoSelfId(_active.Identity.SelfIdentityId.Value), cancellationToken).ConfigureAwait(false);
 
             // Persist DirectSession mapping for conversation lookup
-            var inviterNetPeerId = new Percolator.Network.PeerId(pending.RemotePeerId.Value);
+            var inviterNetPeerId = new Percolator.Network.NetworkPeerId(pending.RemotePeerId.Value);
             var directSessionId = new DirectSessionId(sessionId.Value);
             await _directSessionMappingWriter.WriteMappingAsync(
                 inviterNetPeerId,

@@ -27,12 +27,12 @@ public sealed record InboundRelayMessage(
 
 public sealed class SimulatedRelayModel : IDisposable
 {
-    public SimulatedRelayModel(Percolator.Network.PeerId relayHostPeerId)
+    public SimulatedRelayModel(Percolator.Network.NetworkPeerId relayHostNetworkPeerId)
     {
-        RelayHostPeerId = relayHostPeerId;
+        RelayHostNetworkPeerId = relayHostNetworkPeerId;
     }
 
-    public Percolator.Network.PeerId RelayHostPeerId { get; }
+    public Percolator.Network.NetworkPeerId RelayHostNetworkPeerId { get; }
 
     public ReactiveProperty<bool> AutoDeliverEnabled { get; } = new(false);
 
@@ -77,7 +77,7 @@ public sealed class SimulatedRelayModel : IDisposable
             .ToList();
 
         return new RelayStateSnapshot(
-            RelayHostPeerId: RelayHostPeerId,
+            RelayHostNetworkPeerId: RelayHostNetworkPeerId,
             UpstreamToMain: upstream,
             DownstreamToPeers: downstream);
     }

@@ -9,7 +9,7 @@ using Desktop.Wpf.Features.Simulator;
 using Desktop.Wpf.Features.Simulator.Models;
 using ObservableCollections;
 using Percolator.Identity;
-using PeerId = Percolator.Network.PeerId;
+using Percolator.Network;
 
 namespace Desktop.Wpf.Tests;
 
@@ -42,82 +42,82 @@ public abstract class TestSimulatorStateServiceBase : ISimulatorStateService
     public IReadOnlyObservableList<SimulatedRelayModel> Relays => _relays;
     public IReadOnlyObservableList<PeerRelationship> Relationships => _relationships;
 
-    public PeerId? ResolvePkhToPeerId { get; set; }
+    public NetworkPeerId? ResolvePkhToPeerId { get; set; }
 
-    public virtual void AddRelay(PeerId relayHostPeerId, bool autoDeliverEnabled)
+    public virtual void AddRelay(NetworkPeerId relayHostNetworkPeerId, bool autoDeliverEnabled)
     {
-        var relay = new SimulatedRelayModel(relayHostPeerId);
+        var relay = new SimulatedRelayModel(relayHostNetworkPeerId);
         relay.AutoDeliverEnabled.Value = autoDeliverEnabled;
         _relays.Add(relay);
     }
 
     public virtual void AddRelay(SimulatedRelayModel relay) => _relays.Add(relay);
 
-    public virtual Task<PeerId?> TryGetPeerIdByIdentityPublicKeyHashAsync(IdentityPublicKeyHash recipientPublicKeyHash,
+    public virtual Task<NetworkPeerId?> TryGetPeerIdByIdentityPublicKeyHashAsync(IdentityPublicKeyHash recipientPublicKeyHash,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         return Task.FromResult(ResolvePkhToPeerId);
     }
 
-    public virtual Task<bool> DeleteRelayMessageByAckIdAsync(PeerId relayHostPeerId, Guid ackId, CancellationToken cancellationToken = default)
+    public virtual Task<bool> DeleteRelayMessageByAckIdAsync(NetworkPeerId relayHostNetworkPeerId, Guid ackId, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var relay = _relays.FirstOrDefault(r => r.RelayHostPeerId.Value == relayHostPeerId.Value);
+        var relay = _relays.FirstOrDefault(r => r.RelayHostNetworkPeerId.Value == relayHostNetworkPeerId.Value);
         if (relay is null) return Task.FromResult(false);
         var removed = relay.RemoveMessage(ackId);
         return Task.FromResult(removed);
     }
 
-    public virtual Task<bool> DeliverRelayUpstreamToMainByAckIdAsync(PeerId relayHostPeerId, Percolator.Cryptography.SessionId relayHostToMainSessionId, Guid ackId, CancellationToken cancellationToken = default)
+    public virtual Task<bool> DeliverRelayUpstreamToMainByAckIdAsync(NetworkPeerId relayHostNetworkPeerId, Percolator.Cryptography.SessionId relayHostToMainSessionId, Guid ackId, CancellationToken cancellationToken = default)
         => throw new NotImplementedException();
 
-    public Task<PeerId> AddPeerAsync(string? displayName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-    public Task RemovePeerAsync(PeerId peerId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-    public Task EnqueueRelayUpstreamToMainAsync(PeerId relayHostPeerId, byte[] opaqueBytes, string? debugType = null, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-    public Task EnqueueRelayDownstreamToPeerAsync(PeerId relayHostPeerId, Percolator.Identity.IdentityPublicKeyHash targetIdentityPublicKeyHash, byte[] opaqueBytes, string? debugType = null, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-    public Task<IReadOnlyList<InboundRelayMessage>> DequeueRelayDownstreamToPeerAsync(PeerId relayHostPeerId, Percolator.Identity.IdentityPublicKeyHash targetIdentityPublicKeyHash, int max, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-    public Task<int> ForwardRelayUpstreamToMainAsync(PeerId relayHostPeerId, Percolator.Cryptography.SessionId relayHostToMainSessionId, int max, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-    public Task<bool> MoveRelayMessageByAckIdAsync(PeerId relayHostPeerId, Guid ackId, int delta, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-    public Task<bool> CorruptRelayMessageByAckIdAsync(PeerId relayHostPeerId, Guid ackId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-    public Task AddPublishedKeysRelationshipAsync(PeerId publisherPeerId, PeerId hostPeerId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-    public Task RemovePublishedKeysRelationshipAsync(PeerId publisherPeerId, PeerId hostPeerId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-    public Task AddRelayActiveSessionAsync(PeerId relayHostPeerId, PeerId peerId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-    public Task RemoveRelayActiveSessionAsync(PeerId relayHostPeerId, PeerId peerId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-    public Task<Percolator.Contracts.EstablishDirectSessionResponse> ReceiveEstablishDirectSessionFromMainAsync(PeerId simulatedPeerId, PeerId mainPeerId, Percolator.Contracts.EstablishDirectSessionRequest request, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-    public Task AcceptPendingInboundDirectInviteAsync(PeerId simulatedPeerId, Guid correlationId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-    public Task RejectPendingInboundDirectInviteAsync(PeerId simulatedPeerId, Guid correlationId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-    public Task<SimulatedPeerInviteAcceptance> AcceptInboundDirectInviteAsync(PeerId simulatedPeerId, PeerId inviterPeerId, Percolator.Contracts.EstablishDirectSessionRequest invite, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-    public Task HandleInboundInviteHandshakeResponseFromMainAsync(PeerId simulatedPeerId, Percolator.Contracts.InviteHandshakeResponse response, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-    public Task<Percolator.Contracts.EstablishSessionResponse> ReceiveEstablishSessionFromMainAsync(PeerId simulatedPeerId, Percolator.Contracts.EstablishSessionRequest request, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-    public Task<Percolator.Contracts.DeliverOpaqueMessageResponse> ReceiveOpaqueMessageFromMainAsync(PeerId simulatedPeerId, Percolator.Contracts.DeliverOpaqueMessageRequest request, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-    public Task PublishStandardPreKeyBundleToRelayAsync(PeerId simulatedPeerId, PeerId relayHostPeerId, DateTimeOffset expiresUtc, int oneTimeKeyCount, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-    public Task<Percolator.Cryptography.SessionId?> InitiateStandardHandshakeToMainByRelayPkhAsync(PeerId simulatedPeerId, PeerId relayHostPeerId, Percolator.Identity.IdentityPublicKeyHash responderPublicKeyHash, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-    public Task<byte[]> ComputePublicKeyHashAsync(PeerId simulatedPeerId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-    public Task<Percolator.Cryptography.SessionRatchetMessage> EncryptInternalEnvelopeAsync(PeerId simulatedPeerId, Percolator.Cryptography.SessionId sessionId, Percolator.Contracts.InternalEnvelope envelope, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-    public Task<Percolator.Cryptography.Plaintext> DecryptSessionMessageAsync(PeerId simulatedPeerId, Percolator.Cryptography.SessionId sessionId, Percolator.Cryptography.SessionRatchetMessage message, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-    public Task<Percolator.Contracts.EstablishSessionResponse?> ReceiveRelayedOpaquePayloadAsync(PeerId simulatedPeerId, byte[] opaqueBytes, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+    public Task<NetworkPeerId> AddPeerAsync(string? displayName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+    public Task RemovePeerAsync(NetworkPeerId networkPeerId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+    public Task EnqueueRelayUpstreamToMainAsync(NetworkPeerId relayHostNetworkPeerId, byte[] opaqueBytes, string? debugType = null, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+    public Task EnqueueRelayDownstreamToPeerAsync(NetworkPeerId relayHostNetworkPeerId, Percolator.Identity.IdentityPublicKeyHash targetIdentityPublicKeyHash, byte[] opaqueBytes, string? debugType = null, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+    public Task<IReadOnlyList<InboundRelayMessage>> DequeueRelayDownstreamToPeerAsync(NetworkPeerId relayHostNetworkPeerId, Percolator.Identity.IdentityPublicKeyHash targetIdentityPublicKeyHash, int max, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+    public Task<int> ForwardRelayUpstreamToMainAsync(NetworkPeerId relayHostNetworkPeerId, Percolator.Cryptography.SessionId relayHostToMainSessionId, int max, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+    public Task<bool> MoveRelayMessageByAckIdAsync(NetworkPeerId relayHostNetworkPeerId, Guid ackId, int delta, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+    public Task<bool> CorruptRelayMessageByAckIdAsync(NetworkPeerId relayHostNetworkPeerId, Guid ackId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+    public Task AddPublishedKeysRelationshipAsync(NetworkPeerId publisherNetworkPeerId, NetworkPeerId hostNetworkPeerId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+    public Task RemovePublishedKeysRelationshipAsync(NetworkPeerId publisherNetworkPeerId, NetworkPeerId hostNetworkPeerId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+    public Task AddRelayActiveSessionAsync(NetworkPeerId relayHostNetworkPeerId, NetworkPeerId networkPeerId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+    public Task RemoveRelayActiveSessionAsync(NetworkPeerId relayHostNetworkPeerId, NetworkPeerId networkPeerId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+    public Task<Percolator.Contracts.EstablishDirectSessionResponse> ReceiveEstablishDirectSessionFromMainAsync(NetworkPeerId simulatedNetworkPeerId, NetworkPeerId mainNetworkPeerId, Percolator.Contracts.EstablishDirectSessionRequest request, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+    public Task AcceptPendingInboundDirectInviteAsync(NetworkPeerId simulatedNetworkPeerId, Guid correlationId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+    public Task RejectPendingInboundDirectInviteAsync(NetworkPeerId simulatedNetworkPeerId, Guid correlationId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+    public Task<SimulatedPeerInviteAcceptance> AcceptInboundDirectInviteAsync(NetworkPeerId simulatedNetworkPeerId, NetworkPeerId inviterNetworkPeerId, Percolator.Contracts.EstablishDirectSessionRequest invite, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+    public Task HandleInboundInviteHandshakeResponseFromMainAsync(NetworkPeerId simulatedNetworkPeerId, Percolator.Contracts.InviteHandshakeResponse response, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+    public Task<Percolator.Contracts.EstablishSessionResponse> ReceiveEstablishSessionFromMainAsync(NetworkPeerId simulatedNetworkPeerId, Percolator.Contracts.EstablishSessionRequest request, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+    public Task<Percolator.Contracts.DeliverOpaqueMessageResponse> ReceiveOpaqueMessageFromMainAsync(NetworkPeerId simulatedNetworkPeerId, Percolator.Contracts.DeliverOpaqueMessageRequest request, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+    public Task PublishStandardPreKeyBundleToRelayAsync(NetworkPeerId simulatedNetworkPeerId, NetworkPeerId relayHostNetworkPeerId, DateTimeOffset expiresUtc, int oneTimeKeyCount, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+    public Task<Percolator.Cryptography.SessionId?> InitiateStandardHandshakeToMainByRelayPkhAsync(NetworkPeerId simulatedNetworkPeerId, NetworkPeerId relayHostNetworkPeerId, Percolator.Identity.IdentityPublicKeyHash responderPublicKeyHash, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+    public Task<byte[]> ComputePublicKeyHashAsync(NetworkPeerId simulatedNetworkPeerId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+    public Task<Percolator.Cryptography.SessionRatchetMessage> EncryptInternalEnvelopeAsync(NetworkPeerId simulatedNetworkPeerId, Percolator.Cryptography.SessionId sessionId, Percolator.Contracts.InternalEnvelope envelope, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+    public Task<Percolator.Cryptography.Plaintext> DecryptSessionMessageAsync(NetworkPeerId simulatedNetworkPeerId, Percolator.Cryptography.SessionId sessionId, Percolator.Cryptography.SessionRatchetMessage message, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+    public Task<Percolator.Contracts.EstablishSessionResponse?> ReceiveRelayedOpaquePayloadAsync(NetworkPeerId simulatedNetworkPeerId, byte[] opaqueBytes, CancellationToken cancellationToken = default) => throw new NotImplementedException();
 
     public virtual Task UpsertPendingStandardSignalHelloAsync(
-        PeerId recipientPeerId,
-        PeerId relayHostPeerId,
+        NetworkPeerId recipientNetworkPeerId,
+        NetworkPeerId relayHostNetworkPeerId,
         Percolator.Contracts.HandshakeInitiatorHello hello,
         DateTimeOffset receivedUtc,
         CancellationToken cancellationToken = default)
         => Task.CompletedTask;
 
     public virtual Task<bool> TryAcceptPendingStandardSignalHelloAsync(
-        PeerId recipientPeerId,
+        NetworkPeerId recipientNetworkPeerId,
         string initiatorPkhHex,
         CancellationToken cancellationToken = default)
         => Task.FromResult(false);
 
-    public virtual Task SendChatMessageToMainAsync(PeerId simulatedPeerId, string content, CancellationToken cancellationToken = default)
+    public virtual Task SendChatMessageToMainAsync(NetworkPeerId simulatedNetworkPeerId, string content, CancellationToken cancellationToken = default)
         => Task.CompletedTask;
 
-    public virtual bool TryResolvePeerId(DnsEndPoint endpoint, out PeerId peerId)
+    public virtual bool TryResolvePeerId(DnsEndPoint endpoint, out NetworkPeerId networkPeerId)
     {
-        peerId = default;
+        networkPeerId = default;
         return false;
     }
 }
@@ -237,7 +237,7 @@ internal static class CryptoTestHelpers
     /// Creates a complete peer model with cryptographic keys for testing.
     /// </summary>
     public static SimulatedPeerModel CreateTestPeer(
-        Percolator.Network.PeerId peerId,
+        Percolator.Network.NetworkPeerId networkPeerId,
         int selfIdentityId,
         string displayName,
         bool isRelayCapable,
@@ -249,7 +249,7 @@ internal static class CryptoTestHelpers
         var identitySpki = identityEcdsa.ExportSubjectPublicKeyInfo();
 
         return new SimulatedPeerModel(
-            peerId: peerId,
+            networkPeerId: networkPeerId,
             selfIdentityId: selfIdentityId,
             displayName: displayName,
             isRelayCapable: isRelayCapable,

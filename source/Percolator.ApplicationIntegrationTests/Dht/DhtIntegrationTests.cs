@@ -15,7 +15,6 @@ using Percolator.Identity.Model;
 using Percolator.Network;
 using Percolator.Infrastructure.Network.Trust;
 using SessionId = Percolator.Cryptography.SessionId;
-using NetworkPeerId = Percolator.Network.PeerId;
 
 namespace Percolator.ApplicationIntegrationTests.Dht;
 

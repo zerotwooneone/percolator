@@ -149,7 +149,7 @@ public sealed class OutboxDispatcherWorker : BackgroundService
                 // Dispatch GroupInvite via IRemoteEnvelopeSender
                 // Query relay's routing profile to get endpoint information
                 var relayProfile = await _peerRoutingProfileRepository.GetByIdAsync(
-                    new Percolator.Network.PeerId(inviteEvent.RelayPeerId.Value), ct).ConfigureAwait(false);
+                    new Percolator.Network.NetworkPeerId(inviteEvent.RelayPeerId.Value), ct).ConfigureAwait(false);
                 
                 string relayHost = null;
                 int? relayPort = null;

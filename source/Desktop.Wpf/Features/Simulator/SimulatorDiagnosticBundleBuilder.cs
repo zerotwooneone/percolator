@@ -29,8 +29,8 @@ public sealed class SimulatorDiagnosticBundleBuilder : ISimulatorDiagnosticBundl
             {
                 return new
                 {
-                    p.PeerId,
-                    DisplayName = p.DisplayName.CurrentValue ?? p.PeerId.ToString()[..8],
+                    PeerId = p.NetworkPeerId,
+                    DisplayName = p.DisplayName.CurrentValue ?? p.NetworkPeerId.ToString()[..8],
                     IsRelayCapable = p.IsRelayCapable.CurrentValue,
                     ConnectionMode = p.ConnectionMode.CurrentValue.ToString(),
                     RelayPeerId = p.RelayPeerId.CurrentValue
@@ -38,14 +38,14 @@ public sealed class SimulatorDiagnosticBundleBuilder : ISimulatorDiagnosticBundl
             })
             .ToList();
 
-        var relayByHostId = _state.Relays.ToDictionary(r => r.RelayHostPeerId);
+        var relayByHostId = _state.Relays.ToDictionary(r => r.RelayHostNetworkPeerId);
         var relayQueueSummary = peerModels
             .Where(p => p.IsRelayCapable.CurrentValue)
             .Select(p => new
             {
-                RelayHostPeerId = p.PeerId,
-                RelayHostName = string.IsNullOrWhiteSpace(p.DisplayName.CurrentValue) ? p.PeerId.ToString()[..8] : p.DisplayName.CurrentValue,
-                OpaqueQueueCount = relayByHostId.TryGetValue(p.PeerId, out var relay)
+                RelayHostPeerId = p.NetworkPeerId,
+                RelayHostName = string.IsNullOrWhiteSpace(p.DisplayName.CurrentValue) ? p.NetworkPeerId.ToString()[..8] : p.DisplayName.CurrentValue,
+                OpaqueQueueCount = relayByHostId.TryGetValue(p.NetworkPeerId, out var relay)
                     ? relay.MessageQueue.Count
                     : 0,
                 PreKeyBundleCount = 0
@@ -76,7 +76,7 @@ public sealed class SimulatorDiagnosticBundleBuilder : ISimulatorDiagnosticBundl
             {
                 sessionSummaries.Add(new
                 {
-                    LocalPeerId = p.PeerId,
+                    LocalPeerId = p.NetworkPeerId,
                     RemotePeerId = s.RemotePeerId.Value,
                     SessionId = s.Id.Value,
                     ProtocolVersion = s.ProtocolVersion.Value,

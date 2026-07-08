@@ -4,7 +4,7 @@ using System.Net;
 namespace Desktop.Wpf.Features.Simulator;
 
 public sealed record PeerStateSnapshot(
-   Percolator.Network.PeerId PeerId,
+   Percolator.Network.NetworkPeerId NetworkPeerId,
     int SelfIdentityId,
     string? DisplayName,
     bool IsRelayCapable,
@@ -12,11 +12,11 @@ public sealed record PeerStateSnapshot(
     byte[] IdentitySigningKeyPrivateKeyEcPrivateKey,
     ConnectionMode ConnectionMode,
     DnsEndPoint Endpoint,
-   Percolator.Network.PeerId RelayPeerId,
+   Percolator.Network.NetworkPeerId RelayNetworkPeerId,
     byte[]? TargetPublicKeyHash,
     ConnectionMode? SelectedRouteMode,
     string? DirectEndpoint,
-   Percolator.Network.PeerId? RelayHostPeerId,
+   Percolator.Network.NetworkPeerId? RelayHostPeerId,
     string? Phase,
     DateTimeOffset? NotUntilUtc,
     string? LastError,
@@ -34,7 +34,7 @@ public sealed record PeerStateSnapshot(
 
 public sealed record PublishedPreKeyBundleSnapshot(
     IdentityPublicKeyHash RecipientPublicKeyHash,
-   Percolator.Network.PeerId LogicalOwnerPeerId,
+   Percolator.Network.NetworkPeerId LogicalOwnerNetworkPeerId,
     byte[] IdentityKey,
     Guid SignedPreKeyId,
     byte[] SignedPreKey,
@@ -66,7 +66,7 @@ public sealed record SignedPreKeySnapshot(Guid SignedPreKeyId, byte[] PrivateEcP
 
 public sealed record OutboundInviteSnapshot(Guid CorrelationId, byte[] SignedPreKeyPrivateEcPrivateKey);
 
-public sealed record PendingInboundDirectInviteSnapshot(Guid CorrelationId, byte[] RequestBytes, DateTimeOffset ReceivedAtUtc, byte[] InviterIdentityKeySpki, Percolator.Network.PeerId InviterPeerId);
+public sealed record PendingInboundDirectInviteSnapshot(Guid CorrelationId, byte[] RequestBytes, DateTimeOffset ReceivedAtUtc, byte[] InviterIdentityKeySpki, Percolator.Network.NetworkPeerId InviterNetworkPeerId);
 
 public sealed record SimulatedChatMessageSnapshot(bool IsFromMain, string Content, DateTimeOffset ReceivedUtc);
 

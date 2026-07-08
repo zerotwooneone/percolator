@@ -3,7 +3,7 @@ using Percolator.Identity;
 namespace Desktop.Wpf.Features.Simulator.Models;
 
 public sealed record RelayStateSnapshot(
-    Percolator.Network.PeerId RelayHostPeerId,
+    Percolator.Network.NetworkPeerId RelayHostNetworkPeerId,
     IReadOnlyList<OutboundRelayMessageSnapshot> UpstreamToMain,
     IReadOnlyList<InboundRelayMessageSnapshot> DownstreamToPeers);
 

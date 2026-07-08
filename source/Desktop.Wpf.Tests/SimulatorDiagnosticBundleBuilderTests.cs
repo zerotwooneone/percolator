@@ -21,8 +21,8 @@ public sealed class SimulatorDiagnosticBundleBuilderTests
     public async Task BuildJsonAsync_ContainsRequiredTopLevelSections()
     {
         // Arrange
-        var relayHostId = new Percolator.Network.PeerId(Guid.NewGuid());
-        var peerId = new Percolator.Network.PeerId(Guid.NewGuid());
+        var relayHostId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
+        var peerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
 
         var state = new Mock<ISimulatorStateService>(MockBehavior.Strict);
 
@@ -39,10 +39,10 @@ public sealed class SimulatorDiagnosticBundleBuilderTests
         state.SetupGet(s => s.Peers).Returns(peersList);
         state.SetupGet(s => s.Relays).Returns(relaysList);
         state.Setup(s => s.TryGetPeerIdByIdentityPublicKeyHashAsync(It.IsAny<IdentityPublicKeyHash>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Percolator.Network.PeerId?)null);
-        state.Setup(s => s.AddRelayActiveSessionAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<Percolator.Network.PeerId>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Percolator.Network.NetworkPeerId?)null);
+        state.Setup(s => s.AddRelayActiveSessionAsync(It.IsAny<Percolator.Network.NetworkPeerId>(), It.IsAny<Percolator.Network.NetworkPeerId>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
-        state.Setup(s => s.RemoveRelayActiveSessionAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<Percolator.Network.PeerId>(), It.IsAny<CancellationToken>()))
+        state.Setup(s => s.RemoveRelayActiveSessionAsync(It.IsAny<Percolator.Network.NetworkPeerId>(), It.IsAny<Percolator.Network.NetworkPeerId>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         var sessionId = new SessionId(Guid.NewGuid());

@@ -17,8 +17,8 @@ public sealed class SimulatorRelayTabViewModelTests
     {
         // Arrange
         var state = new StateStub();
-        state.AddRelay(new PeerId(1), autoDeliverEnabled: false);
-        state.AddRelay(new PeerId(2), autoDeliverEnabled: false);
+        state.AddRelay(new NetworkPeerId(1), autoDeliverEnabled: false);
+        state.AddRelay(new NetworkPeerId(2), autoDeliverEnabled: false);
 
         var delivery = Mock.Of<ISimulatorRelayDeliveryService>();
         var diagnostics = Mock.Of<ISimulatorDiagnosticsService>();

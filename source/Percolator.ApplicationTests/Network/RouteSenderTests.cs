@@ -28,7 +28,7 @@ public class RouteSenderTests
         var keyStore = new Mock<IPeerPublicSigningKeyStore>(MockBehavior.Strict);
         var active = MakeActive();
 
-        var target = new Percolator.Network.PeerId((uint)Random.Shared.Next(1, 1000000));
+        var target = new Percolator.Network.NetworkPeerId((uint)Random.Shared.Next(1, 1000000));
         var dsid = new DirectSessionId(Guid.NewGuid());
         sessions.Setup(s => s.GetByRemotePeerIdAsync(target, new NetworkSelfId(1u))).ReturnsAsync(new DirectSession(target, dsid));
         var cipher = SessionRatchetMessage.FromBytes(new byte[] {1,2});
@@ -67,7 +67,7 @@ public class RouteSenderTests
         var keyStore = new Mock<IPeerPublicSigningKeyStore>(MockBehavior.Loose);
         var active = MakeActive();
 
-        var target = new Percolator.Network.PeerId((uint)Random.Shared.Next(1, 1000000));
+        var target = new Percolator.Network.NetworkPeerId((uint)Random.Shared.Next(1, 1000000));
         sessions.Setup(s => s.GetByRemotePeerIdAsync(target, new NetworkSelfId(1u))).ReturnsAsync((DirectSession?)null);
 
         var sut = new RouteSender(logger, transport.Object, sessions.Object, secure.Object, active, keyStore.Object);
@@ -89,8 +89,8 @@ public class RouteSenderTests
         var keyStore = new Mock<IPeerPublicSigningKeyStore>(MockBehavior.Loose);
         var active = MakeActive();
 
-        var relay = new Percolator.Network.PeerId((uint)Random.Shared.Next(1, 1000000));
-        var target = new Percolator.Network.PeerId((uint)Random.Shared.Next(1, 1000000));
+        var relay = new Percolator.Network.NetworkPeerId((uint)Random.Shared.Next(1, 1000000));
+        var target = new Percolator.Network.NetworkPeerId((uint)Random.Shared.Next(1, 1000000));
         sessions.Setup(s => s.GetByRemotePeerIdAsync(relay, new NetworkSelfId(1u))).ReturnsAsync((DirectSession?)null);
 
         var sut = new RouteSender(logger, transport.Object, sessions.Object, secure.Object, active, keyStore.Object);
@@ -112,8 +112,8 @@ public class RouteSenderTests
         var keyStore = new Mock<IPeerPublicSigningKeyStore>(MockBehavior.Strict);
         var active = MakeActive();
 
-        var relay = new Percolator.Network.PeerId((uint)Random.Shared.Next(1, 1000000));
-        var target = new Percolator.Network.PeerId((uint)Random.Shared.Next(1, 1000000));
+        var relay = new Percolator.Network.NetworkPeerId((uint)Random.Shared.Next(1, 1000000));
+        var target = new Percolator.Network.NetworkPeerId((uint)Random.Shared.Next(1, 1000000));
         var rsid = new DirectSessionId(Guid.NewGuid());
         sessions.Setup(s => s.GetByRemotePeerIdAsync(relay, new NetworkSelfId(1u))).ReturnsAsync(new DirectSession(relay, rsid));
         keyStore.Setup(k => k.GetPublicKeyHashByPeerIdAsync(new Percolator.Identity.PeerId(target.Value), It.IsAny<CancellationToken>()))

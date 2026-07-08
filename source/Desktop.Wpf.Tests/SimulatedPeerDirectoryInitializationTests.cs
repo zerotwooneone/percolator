@@ -8,7 +8,7 @@ using Moq;
 using NUnit.Framework;
 using ObservableCollections;
 using Percolator.Identity;
-using PeerId = Percolator.Network.PeerId;
+using Percolator.Network;
 
 namespace Desktop.Wpf.Tests;
 
@@ -19,7 +19,7 @@ public sealed class SimulatedPeerDirectoryInitializationTests
     public async Task InitializeAsync_CoalescesConcurrentCalls_AndProjectsModelsFromState()
     {
         // Arrange
-        var peerId = new PeerId(1);
+        var peerId = new NetworkPeerId(1);
         using var ecdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var priv = ecdh.ExportECPrivateKey();
         var spki = ecdh.PublicKey.ExportSubjectPublicKeyInfo();
@@ -40,10 +40,10 @@ public sealed class SimulatedPeerDirectoryInitializationTests
             .Returns(initGate.Task);
 
         state.Setup(s => s.TryGetPeerIdByIdentityPublicKeyHashAsync(It.IsAny<IdentityPublicKeyHash>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((PeerId?)null);
-        state.Setup(s => s.AddRelayActiveSessionAsync(It.IsAny<PeerId>(), It.IsAny<PeerId>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((NetworkPeerId?)null);
+        state.Setup(s => s.AddRelayActiveSessionAsync(It.IsAny<NetworkPeerId>(), It.IsAny<NetworkPeerId>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
-        state.Setup(s => s.RemoveRelayActiveSessionAsync(It.IsAny<PeerId>(), It.IsAny<PeerId>(), It.IsAny<CancellationToken>()))
+        state.Setup(s => s.RemoveRelayActiveSessionAsync(It.IsAny<NetworkPeerId>(), It.IsAny<NetworkPeerId>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         var sut = new SimulatorInitializer(initializer.Object);

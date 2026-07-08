@@ -120,14 +120,14 @@ public sealed class SimulatorRelayAutoDeliverService : ISimulatorRelayAutoDelive
 
         if (next is OutboundRelayMessage)
         {
-            var sid = TryGetRelayHostToMainSessionId(relay.RelayHostPeerId);
+            var sid = TryGetRelayHostToMainSessionId(relay.RelayHostNetworkPeerId);
             if (sid is null)
             {
                 return;
             }
 
             var delivered = await _state
-                .DeliverRelayUpstreamToMainByAckIdAsync(relay.RelayHostPeerId, sid, next.AckId, ct)
+                .DeliverRelayUpstreamToMainByAckIdAsync(relay.RelayHostNetworkPeerId, sid, next.AckId, ct)
                 .ConfigureAwait(false);
 
             if (delivered)
@@ -135,7 +135,7 @@ public sealed class SimulatorRelayAutoDeliverService : ISimulatorRelayAutoDelive
                 _diagnostics.Emit(
                     SimulatorDiagnosticEventType.RelayDelivered,
                     $"Relay deliver -> main: {(next.DebugType ?? "opaque")}",
-                    relayHostPeerId: relay.RelayHostPeerId,
+                    relayHostPeerId: relay.RelayHostNetworkPeerId,
                     ackId: next.AckId);
             }
 
@@ -144,7 +144,7 @@ public sealed class SimulatorRelayAutoDeliverService : ISimulatorRelayAutoDelive
 
         if (next is InboundRelayMessage inbound)
         {
-            Percolator.Network.PeerId? recipientPeerId = null;
+            Percolator.Network.NetworkPeerId? recipientPeerId = null;
             try
             {
                 recipientPeerId = await _state.TryGetPeerIdByIdentityPublicKeyHashAsync(inbound.TargetPkh, ct).ConfigureAwait(false);
@@ -162,21 +162,21 @@ public sealed class SimulatorRelayAutoDeliverService : ISimulatorRelayAutoDelive
             try
             {
                 await _delivery.DeliverToPeerAsync(
-                        relayHostPeerId: relay.RelayHostPeerId,
-                        recipientPeerId: recipientPeerId.Value,
+                        relayHostNetworkPeerId: relay.RelayHostNetworkPeerId,
+                        recipientNetworkPeerId: recipientPeerId.Value,
                         ackId: inbound.AckId,
                         opaqueBytes: inbound.OpaqueBytes,
                         debugType: inbound.DebugType,
                         cancellationToken: ct)
                     .ConfigureAwait(false);
 
-                _ = await _state.DeleteRelayMessageByAckIdAsync(relay.RelayHostPeerId, inbound.AckId, ct).ConfigureAwait(false);
+                _ = await _state.DeleteRelayMessageByAckIdAsync(relay.RelayHostNetworkPeerId, inbound.AckId, ct).ConfigureAwait(false);
 
                 _diagnostics.Emit(
                     SimulatorDiagnosticEventType.RelayDelivered,
                     $"Relay deliver -> {recipientPeerId.Value.ToString()[..8]}: {(inbound.DebugType ?? "opaque")}",
                     peerId: recipientPeerId,
-                    relayHostPeerId: relay.RelayHostPeerId,
+                    relayHostPeerId: relay.RelayHostNetworkPeerId,
                     ackId: inbound.AckId);
             }
             catch
@@ -186,9 +186,9 @@ public sealed class SimulatorRelayAutoDeliverService : ISimulatorRelayAutoDelive
         }
     }
 
-    private SessionId? TryGetRelayHostToMainSessionId(PeerId relayHostPeerId)
+    private SessionId? TryGetRelayHostToMainSessionId(NetworkPeerId relayHostNetworkPeerId)
     {
-        var peer = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
+        var peer = _state.Peers.FirstOrDefault(p => p.NetworkPeerId == relayHostNetworkPeerId);
         if (peer is null) return null;
         if (_active.Identity is null) throw new Exception("active identity is null");
 

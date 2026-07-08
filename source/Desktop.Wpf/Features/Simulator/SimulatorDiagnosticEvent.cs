@@ -6,7 +6,7 @@ public sealed record SimulatorDiagnosticEvent(
     DateTimeOffset TimestampUtc,
     SimulatorDiagnosticEventType EventType,
     string Message,
-    PeerId? PeerId = null,
-    PeerId? RelayHostPeerId = null,
+    NetworkPeerId? PeerId = null,
+    NetworkPeerId? RelayHostPeerId = null,
     Guid? AckId = null,
     string? ContextTag = null);

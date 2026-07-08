@@ -2,9 +2,9 @@ using FluentAssertions;
 using Moq;
 using Percolator.Cryptography;
 using Percolator.Identity;
+using Percolator.Network;
 using Percolator.Prekey.Handlers;
 using CryptoPeerId = Percolator.Cryptography.Primitives.PeerId;
-using NetworkPeerId = Percolator.Network.PeerId;
 
 namespace Percolator.PrekeyTests;
 
@@ -46,7 +46,7 @@ public class SubmitPreKeyBundleHandlerTests
 
         var cmd = new SubmitPreKeyBundleCommand
         {
-            RemotePeerId = new NetworkPeerId(remotePeerId.Value),
+            RemoteNetworkPeerId = new NetworkPeerId(remotePeerId.Value),
             PublicSigningKey = publicSigningKey,
             SignedPreKeyId = signedPreKeyId,
             SignedPreKey = signedPreKey,
@@ -85,7 +85,7 @@ public class SubmitPreKeyBundleHandlerTests
         // Arrange
         var cmd = new SubmitPreKeyBundleCommand
         {
-            RemotePeerId = new NetworkPeerId(2),
+            RemoteNetworkPeerId = new NetworkPeerId(2),
             PublicSigningKey = new byte[80],
             SignedPreKeyId = Guid.NewGuid(),
             SignedPreKey = new byte[64],
@@ -113,7 +113,7 @@ public class SubmitPreKeyBundleHandlerTests
         // Arrange
         var cmd = new SubmitPreKeyBundleCommand
         {
-            RemotePeerId = new NetworkPeerId(3),
+            RemoteNetworkPeerId = new NetworkPeerId(3),
             PublicSigningKey = new byte[80],
             SignedPreKeyId = Guid.NewGuid(),
             SignedPreKey = new byte[64],

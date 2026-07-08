@@ -35,7 +35,7 @@ public class SqlitePeerConnectionRepositoryTests
         var repo = new SqlitePeerRoutingProfileRepository(ctx);
 
         // Arrange: ensure PeerIdentity exists to satisfy FK
-        var peerId = new Percolator.Network.PeerId(1);
+        var peerId = new Percolator.Network.NetworkPeerId(1);
         ctx.PeerIdentities.Add(new PeerIdentityDbo { PeerId = peerId.Value, PublicIdentityId = Guid.NewGuid(), Name = "peer-name", Version = 0, CreatedAtUtc = DateTimeOffset.UtcNow, UpdatedAtUtc = DateTimeOffset.UtcNow });
         await ctx.SaveChangesAsync();
 
@@ -65,8 +65,8 @@ public class SqlitePeerConnectionRepositoryTests
         var repo = new SqlitePeerRoutingProfileRepository(ctx);
 
         // Arrange peer identities
-        var peerA = new Percolator.Network.PeerId(1);
-        var peerB = new Percolator.Network.PeerId(2);
+        var peerA = new Percolator.Network.NetworkPeerId(1);
+        var peerB = new Percolator.Network.NetworkPeerId(2);
         ctx.PeerIdentities.Add(new PeerIdentityDbo { PeerId = peerA.Value, PublicIdentityId = Guid.NewGuid(), Name = "A", Version = 0, CreatedAtUtc = DateTimeOffset.UtcNow, UpdatedAtUtc = DateTimeOffset.UtcNow });
         ctx.PeerIdentities.Add(new PeerIdentityDbo { PeerId = peerB.Value, PublicIdentityId = Guid.NewGuid(), Name = "B", Version = 0, CreatedAtUtc = DateTimeOffset.UtcNow, UpdatedAtUtc = DateTimeOffset.UtcNow });
         await ctx.SaveChangesAsync();

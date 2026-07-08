@@ -70,9 +70,9 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
 
     private SimulatedRelayQueuePanelViewModel CreatePanel(Desktop.Wpf.Features.Simulator.Models.SimulatedRelayModel relay)
     {
-        var relayHostPeerId = relay.RelayHostPeerId;
+        var relayHostPeerId = relay.RelayHostNetworkPeerId;
         return new SimulatedRelayQueuePanelViewModel(
-            relayHostPeerId: relay.RelayHostPeerId,
+            relayHostNetworkPeerId: relay.RelayHostNetworkPeerId,
             relayHostName: PeerNameById(relayHostPeerId),
             peerNameById: PeerNameById,
             getRelayHostToMainSessionId: () => GetRelayHostToMainSessionIdAsync(relayHostPeerId),
@@ -99,22 +99,22 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
         await Task.CompletedTask.ConfigureAwait(false);
     }
 
-    private async Task<SessionId?> GetRelayHostToMainSessionIdAsync(PeerId relayHostPeerId)
+    private async Task<SessionId?> GetRelayHostToMainSessionIdAsync(NetworkPeerId relayHostNetworkPeerId)
     {
         await Task.CompletedTask.ConfigureAwait(false);
 
-        var peer = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
+        var peer = _state.Peers.FirstOrDefault(p => p.NetworkPeerId == relayHostNetworkPeerId);
         if (peer is null) return null;
 
         // Snapshot the known simulated peers to prevent InvalidOperationException during enumeration
-        var knownSimulatedPeerIds = _state.Peers.Select(p => p.PeerId).ToHashSet();
+        var knownSimulatedPeerIds = _state.Peers.Select(p => p.NetworkPeerId).ToHashSet();
 
         // Topology Inference: Main connects with an ephemeral ID. Therefore, any session 
         // where the RemotePeerId is NOT in the simulator's sandbox list is the uplink to Main.
         // We order by CreatedAt descending to ensure we get the active session if Main reconnects.
         var uplinkSession = peer.Sessions
             .Select(kv => kv.Value)
-            .Where(s => !knownSimulatedPeerIds.Contains(new Percolator.Network.PeerId(s.RemotePeerId.Value)))
+            .Where(s => !knownSimulatedPeerIds.Contains(new Percolator.Network.NetworkPeerId(s.RemotePeerId.Value)))
             .OrderByDescending(s => s.CreatedAtUtc)
             .FirstOrDefault();
 
@@ -129,14 +129,14 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
         _bag.Dispose();
     }
 
-    private string PeerNameById(PeerId peerId)
+    private string PeerNameById(NetworkPeerId networkPeerId)
     {
-        var model = _state.Peers.FirstOrDefault(p => p.PeerId == peerId);
+        var model = _state.Peers.FirstOrDefault(p => p.NetworkPeerId == networkPeerId);
         if (model is not null)
         {
             var name = model.DisplayName.CurrentValue;
             if (!string.IsNullOrWhiteSpace(name)) return name;
         }
-        return peerId.ToString()[..8];
+        return networkPeerId.ToString()[..8];
     }
 }

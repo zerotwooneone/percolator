@@ -5,7 +5,7 @@ namespace Desktop.Wpf.Features.Simulator;
 public sealed class RelayPersistenceDto
 {
     public int Version { get; set; } = 1;
-    public PeerId RelayHostPeerId { get; set; }
+    public NetworkPeerId RelayHostNetworkPeerId { get; set; }
 
     public List<RelayUpstreamMessageDto> UpstreamToMain { get; set; } = new();
 
