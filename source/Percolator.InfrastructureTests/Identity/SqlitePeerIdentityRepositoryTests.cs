@@ -49,18 +49,26 @@ public class SqlitePeerIdentityRepositoryTests
     [Test]
     public async Task Find_by_fingerprint_returns_identity()
     {
+        // Arrange
         using var conn = new SqliteConnection("DataSource=:memory:");
         conn.Open();
         await using var db = CreateContext(conn);
         var repo = new SqlitePeerIdentityRepository(db);
 
-        var now = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero);
-        var aggregate = new PeerIdentity(new PeerId(2), new PublicIdentityId(Guid.NewGuid()));
-        aggregate.AddKey(Bytes(9,9,9), now, now.AddDays(1), now);
+        var arbitraryNow = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero);
+        var publicIdentityId = new PublicIdentityId(Guid.NewGuid());
+        var aggregate = await repo.GetOrCreateAsync(publicIdentityId);
+        
+        var rawSpkiBytes = Bytes(9, 9, 9);
+        aggregate.AddKey(rawSpkiBytes, arbitraryNow, arbitraryNow.AddDays(1), arbitraryNow);
+        
         await repo.SaveAsync(aggregate);
 
-        var fp = aggregate.GetActiveKey(now)!.Fingerprint;
-        var loaded = await repo.FindByPublicKeyHashAsync(IdentityPublicKeyHash.FromSpki(fp));
+        // Act
+        var fingerprintHash = IdentityPublicKeyHash.FromSpki(rawSpkiBytes);
+        var loaded = await repo.FindByPublicKeyHashAsync(fingerprintHash);
+        
+        // Assert
         Assert.That(loaded, Is.Not.Null);
         Assert.That(loaded!.Id, Is.EqualTo(aggregate.Id));
     }
