@@ -16,7 +16,7 @@ public class GroupMemberDbo
     /// <summary>
     /// The universal public identity ID (UUID).
     /// </summary>
-    public Percolator.Chat.GroupLedger.PublicIdentityId PublicIdentityId { get; set; }
+    public Guid PublicIdentityId { get; set; }
 
     /// <summary>
     /// The local peer ID (null for local self identities).

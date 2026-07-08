@@ -67,7 +67,7 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
             var groupMemberDbo = new Persistence.GroupMemberDbo
             {
                 ConversationId = member.ConversationId.Value,
-                PublicIdentityId = member.ParticipantId.PublicIdentityId,
+                PublicIdentityId = member.ParticipantId.PublicIdentityId.Value,
                 PeerId = member.ParticipantId is RemoteParticipantId remote ? remote.PeerId.Value : null,
                 SelfId = member.ParticipantId is LocalParticipantId local ? local.SelfId.Value : null,
                 Role = (Persistence.GroupMemberRole)member.Role,
@@ -118,7 +118,7 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
             var groupMemberDbo = new Persistence.GroupMemberDbo
             {
                 ConversationId = member.ConversationId.Value,
-                PublicIdentityId = member.ParticipantId.PublicIdentityId,
+                PublicIdentityId = member.ParticipantId.PublicIdentityId.Value,
                 PeerId = member.ParticipantId is RemoteParticipantId remote ? remote.PeerId.Value : null,
                 SelfId = member.ParticipantId is LocalParticipantId local ? local.SelfId.Value : null,
                 Role = (Persistence.GroupMemberRole)member.Role,
@@ -163,7 +163,7 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
             var groupMemberDbo = new Persistence.GroupMemberDbo
             {
                 ConversationId = member.ConversationId.Value,
-                PublicIdentityId = member.ParticipantId.PublicIdentityId,
+                PublicIdentityId = member.ParticipantId.PublicIdentityId.Value,
                 PeerId = member.ParticipantId is RemoteParticipantId remote ? remote.PeerId.Value : null,
                 SelfId = member.ParticipantId is LocalParticipantId local ? local.SelfId.Value : null,
                 Role = (Persistence.GroupMemberRole)member.Role,
@@ -222,9 +222,9 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
         var groupMembers = groupMemberDbos.Select(m =>
         {
             ParticipantId participantId = m.PeerId.HasValue
-                ? new RemoteParticipantId(m.PublicIdentityId, new ChatPeerId(m.PeerId.Value))
+                ? new RemoteParticipantId(new Percolator.Chat.GroupLedger.PublicIdentityId(m.PublicIdentityId), new ChatPeerId(m.PeerId.Value))
                 : m.SelfId.HasValue
-                    ? new LocalParticipantId(m.PublicIdentityId, new ChatSelfId(m.SelfId.Value))
+                    ? new LocalParticipantId(new Percolator.Chat.GroupLedger.PublicIdentityId(m.PublicIdentityId), new ChatSelfId(m.SelfId.Value))
                     : throw new InvalidOperationException($"GroupMember must have either PeerId or SelfId set for PublicIdentityId {m.PublicIdentityId}");
 
             return new GroupMember(
