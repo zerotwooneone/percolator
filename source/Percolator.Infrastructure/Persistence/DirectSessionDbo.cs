@@ -1,6 +1,5 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
-using Percolator.Identity;
 
 namespace Percolator.Infrastructure.Persistence;
 
@@ -10,8 +9,8 @@ public class DirectSessionDbo
     [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
     public int Id { get; set; }
 
-    public PeerId RemotePeerId { get; set; } // FK to PeerConnections.PeerId
+    public uint RemotePeerId { get; set; } // FK to PeerConnections.PeerId
 
     public Guid SessionId { get; set; }
-    public SelfId SelfIdentityId { get; set; }
+    public uint SelfIdentityId { get; set; }
 }

@@ -25,7 +25,7 @@ public sealed class PeerConnectionSidebarQueries : IPeerConnectionSidebarQueries
         var establishedSessions = await _db.Sessions
             .AsNoTracking()
             .IgnoreQueryFilters()
-            .Where(s => s.SelfIdentityId.Value == (uint)selfIdentityId)
+            .Where(s => s.SelfIdentityId == (uint)selfIdentityId)
             .Join(
                 _db.PeerIdentities.AsNoTracking(),
                 session => session.RemotePeerId,
@@ -38,8 +38,8 @@ public sealed class PeerConnectionSidebarQueries : IPeerConnectionSidebarQueries
         var directSessionPeerIds = await _db.DirectSessions
             .AsNoTracking()
             .IgnoreQueryFilters()
-            .Where(d => d.SelfIdentityId.Value == (uint)selfIdentityId)
-            .Select(d => d.RemotePeerId.Value)
+            .Where(d => d.SelfIdentityId == (uint)selfIdentityId)
+            .Select(d => d.RemotePeerId)
             .Distinct()
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -50,7 +50,7 @@ public sealed class PeerConnectionSidebarQueries : IPeerConnectionSidebarQueries
         var sentInvitationCandidates = await _db.SentInvitations
             .AsNoTracking()
             .IgnoreQueryFilters()
-            .Where(i => i.SelfIdentityId.Value == selfIdentityId)
+            .Where(i => i.SelfIdentityId == selfIdentityId)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
@@ -63,11 +63,11 @@ public sealed class PeerConnectionSidebarQueries : IPeerConnectionSidebarQueries
         var establishedDtos = new List<SidebarPeerConnectionDto>();
         foreach (var item in establishedSessions)
         {
-            var status = directPeerIdSet.Contains(item.session.RemotePeerId.Value)
+            var status = directPeerIdSet.Contains(item.session.RemotePeerId)
                 ? SidebarPeerConnectionStatus.Direct
                 : SidebarPeerConnectionStatus.Relay;
 
-            var displayName = item.peer.Name ?? item.session.RemotePeerId.Value.ToString()[..8];
+            var displayName = item.peer.Name ?? item.session.RemotePeerId.ToString()[..8];
             var initials = ComputeInitials(displayName);
 
             establishedDtos.Add(new SidebarPeerConnectionDto
@@ -94,8 +94,8 @@ public sealed class PeerConnectionSidebarQueries : IPeerConnectionSidebarQueries
         var peerIdentities = targetPeerIds.Count > 0
             ? await _db.PeerIdentities
                 .AsNoTracking()
-                .Where(p => targetPeerIds.Contains(p.PeerId.Value))
-                .ToDictionaryAsync(p => p.PeerId.Value, cancellationToken)
+                .Where(p => targetPeerIds.Contains(p.PeerId))
+                .ToDictionaryAsync(p => p.PeerId, cancellationToken)
                 .ConfigureAwait(false)
             : new Dictionary<uint, PeerIdentityDbo>();
 

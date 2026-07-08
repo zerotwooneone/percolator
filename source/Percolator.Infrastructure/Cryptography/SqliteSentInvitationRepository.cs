@@ -21,14 +21,14 @@ internal sealed class SqliteSentInvitationRepository : ISentInvitationRepository
         var correlation = invitation.RequestCorrelationId.ToString();
 
         var existing = await _db.SentInvitations
-            .FirstOrDefaultAsync(x => x.SelfIdentityId == new Percolator.Identity.SelfId(selfIdentityId.Value) && x.RequestCorrelationId == correlation, cancellationToken)
+            .FirstOrDefaultAsync(x => x.SelfIdentityId == selfIdentityId.Value && x.RequestCorrelationId == correlation, cancellationToken)
             .ConfigureAwait(false);
 
         if (existing is null)
         {
             _db.SentInvitations.Add(new SentInvitationDbo
             {
-                SelfIdentityId = new Percolator.Identity.SelfId(selfIdentityId.Value),
+                SelfIdentityId = selfIdentityId.Value,
                 RequestCorrelationId = correlation,
                 SignedPreKeyId = invitation.SignedPreKeyId,
                 OneTimePreKeyId = invitation.OneTimePreKeyId,
@@ -64,7 +64,7 @@ internal sealed class SqliteSentInvitationRepository : ISentInvitationRepository
         var correlation = requestCorrelationId.ToString();
         var existing = await _db.SentInvitations
             .FirstOrDefaultAsync(
-                x => x.SelfIdentityId == new Percolator.Identity.SelfId(selfIdentityId.Value) && x.RequestCorrelationId == correlation,
+                x => x.SelfIdentityId == selfIdentityId.Value && x.RequestCorrelationId == correlation,
                 cancellationToken)
             .ConfigureAwait(false);
 
@@ -83,7 +83,7 @@ internal sealed class SqliteSentInvitationRepository : ISentInvitationRepository
         var correlation = requestCorrelationId.ToString();
         var row = await _db.SentInvitations
             .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.RequestCorrelationId == correlation && x.SelfIdentityId == new Percolator.Identity.SelfId(selfIdentityId.Value), cancellationToken)
+            .FirstOrDefaultAsync(x => x.RequestCorrelationId == correlation && x.SelfIdentityId == selfIdentityId.Value, cancellationToken)
             .ConfigureAwait(false);
 
         return row is null ? null : Rehydrate(row);
@@ -94,7 +94,7 @@ internal sealed class SqliteSentInvitationRepository : ISentInvitationRepository
         var correlation = requestCorrelationId.ToString();
         var existing = await _db.SentInvitations
             .FirstOrDefaultAsync(
-                x => x.SelfIdentityId == new Percolator.Identity.SelfId(selfIdentityId.Value)
+                x => x.SelfIdentityId == selfIdentityId.Value
                      && x.RequestCorrelationId == correlation,
                 cancellationToken)
             .ConfigureAwait(false);
@@ -114,7 +114,7 @@ internal sealed class SqliteSentInvitationRepository : ISentInvitationRepository
         // Materialize first and then filter in-memory.
         var candidates = await _db.SentInvitations
             .AsNoTracking()
-            .Where(x => x.SelfIdentityId == new Percolator.Identity.SelfId(selfIdentityId.Value))
+            .Where(x => x.SelfIdentityId == selfIdentityId.Value)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
@@ -131,7 +131,7 @@ internal sealed class SqliteSentInvitationRepository : ISentInvitationRepository
         // Materialize first and then filter in-memory.
         var candidates = await _db.SentInvitations
             .AsNoTracking()
-            .Where(x => x.SelfIdentityId == new Percolator.Identity.SelfId(selfIdentityId.Value))
+            .Where(x => x.SelfIdentityId == selfIdentityId.Value)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 

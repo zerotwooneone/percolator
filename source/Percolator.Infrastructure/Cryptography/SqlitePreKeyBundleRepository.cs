@@ -25,7 +25,7 @@ public class SqlitePreKeyBundleRepository : IPreKeyBundleRepository
                 .Include(ik => ik.SignedPreKeys)
                 .Include(ik => ik.OneTimePreKeys)
                 .ToListAsync();
-            var preKeyBundle = preKeyBundleDbos.FirstOrDefault(ik => ik.PeerId.Value == peerId.Value);
+            var preKeyBundle = preKeyBundleDbos.FirstOrDefault(ik => ik.PeerId == peerId.Value);
 
             if (preKeyBundle is null)
             {
@@ -84,7 +84,7 @@ public class SqlitePreKeyBundleRepository : IPreKeyBundleRepository
         {
             // Resolve peer existence via authoritative PeerIdentities catalog
             var identity = await _context.PeerIdentities.AsNoTracking()
-                .FirstOrDefaultAsync(pi => pi.PeerId.Value == peerId.Value);
+                .FirstOrDefaultAsync(pi => pi.PeerId == peerId.Value);
             if (identity is null)
             {
                 throw new InvalidOperationException($"Peer {peerId} not found.");
@@ -96,7 +96,7 @@ public class SqlitePreKeyBundleRepository : IPreKeyBundleRepository
                 .Include(ik => ik.OneTimePreKeys)
                 .AsNoTracking()
                 .ToListAsync();
-            var existing = preKeyBundleDbos.FirstOrDefault(ik => ik.PeerId.Value == peerId.Value);
+            var existing = preKeyBundleDbos.FirstOrDefault(ik => ik.PeerId == peerId.Value);
 
             if (existing is not null)
             {
@@ -106,7 +106,7 @@ public class SqlitePreKeyBundleRepository : IPreKeyBundleRepository
 
             var preKeyBundle = new PreKeyBundleDbo
             {
-                PeerId = new Percolator.Identity.PeerId( peerId.Value),
+                PeerId = peerId.Value,
                 PublicKey = first.IdentitySigningKey.ToArray(),
             };
 
@@ -150,7 +150,7 @@ public class SqlitePreKeyBundleRepository : IPreKeyBundleRepository
             var preKeyBundleDbo = await _context.PreKeyBundles
                 .Include(ik => ik.SignedPreKeys)
                 .Include(ik => ik.OneTimePreKeys)
-                .FirstOrDefaultAsync(ik => ik.PeerId.Value == peerId.Value);
+                .FirstOrDefaultAsync(ik => ik.PeerId == peerId.Value);
 
             if (preKeyBundleDbo is null)
             {

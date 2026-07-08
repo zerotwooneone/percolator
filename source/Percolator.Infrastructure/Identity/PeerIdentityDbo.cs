@@ -6,7 +6,7 @@ namespace Percolator.Infrastructure.Identity;
 public sealed class PeerIdentityDbo
 {
     [Key]
-    public PeerId PeerId { get; set; }
+    public uint PeerId { get; set; }
     [Required]
     public PublicIdentityId PublicIdentityId { get; set; }
     [Required]

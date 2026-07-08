@@ -84,7 +84,7 @@ namespace Percolator.Infrastructure.Cryptography
             try
             {
                 var rows = await _db.Sessions.AsNoTracking()
-                    .Where(x => x.SelfIdentityId.Value == selfIdentityId.Value)
+                    .Where(x => x.SelfIdentityId == selfIdentityId.Value)
                     .ToListAsync(cancellationToken)
                     .ConfigureAwait(false);
                 return rows
@@ -102,9 +102,9 @@ namespace Percolator.Infrastructure.Cryptography
         {
             return new SessionDbo
             {
-                SelfIdentityId = selfIdentityId,
+                SelfIdentityId = selfIdentityId.Value,
                 SessionId = s.Id.Value,
-                RemotePeerId = new Percolator.Identity.PeerId(s.RemotePeerId.Value),
+                RemotePeerId = s.RemotePeerId.Value,
                 ProtocolVersion = s.ProtocolVersion.Value,
                 RootKey = s.State.RootKey.ToArray(),
                 SendChainKey = s.State.SendingChainKey?.ToArray(),
@@ -123,7 +123,7 @@ namespace Percolator.Infrastructure.Cryptography
         private SecureSession FromDbo(SessionDbo row)
         {
             var id = new SessionId(row.SessionId);
-            var remote = new PeerId(row.RemotePeerId.Value);
+            var remote = new PeerId(row.RemotePeerId);
             var ver = new ProtocolVersion(row.ProtocolVersion);
             var state = new RatchetState(
                 RootKey.FromBytesOwned(row.RootKey),

@@ -26,7 +26,7 @@ public sealed class SqliteDeliveryCertificateQueries : IDeliveryCertificateQueri
             .Select(x => new
             {
                 SelfId = x.member.SelfId!.Value,
-                RelayPeerId = x.state.RelayPeerId.Value
+                RelayPeerId = x.state.RelayPeerId
             })
             .Distinct()
             .ToListAsync(ct)

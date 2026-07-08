@@ -22,10 +22,10 @@ public sealed class SqliteMessageRepository : IMessageRepository
     {
         var dbo = new MessageDbo
         {
-            ConversationId = message.ConversationId,
+            ConversationId = message.ConversationId.Value,
             PublicMessageId = message.Id,
-            SenderPeerId = message.SenderId is RemoteParticipantId remotePeerId ? remotePeerId.PeerId : null,
-            SenderSelfId = message.SenderId is LocalParticipantId localSelfId ? localSelfId.SelfId : null,
+            SenderPeerId = message.SenderId is RemoteParticipantId remotePeerId ? remotePeerId.PeerId.Value : null,
+            SenderSelfId = message.SenderId is LocalParticipantId localSelfId ? localSelfId.SelfId.Value : null,
             Body = message.Content,
             SentAt = message.Timestamp
         };
@@ -67,7 +67,7 @@ public sealed class SqliteMessageRepository : IMessageRepository
             // For now, we'll create a RemoteParticipantId with a placeholder PublicIdentityId
             // This is a design issue - the DBO should store the full ParticipantId or PublicIdentityId
             var publicIdentityId = new PublicIdentityId(Guid.NewGuid()); // Placeholder - this needs to be fixed
-            senderId = new RemoteParticipantId(publicIdentityId, dbo.SenderPeerId.Value);
+            senderId = new RemoteParticipantId(publicIdentityId, new ChatPeerId(dbo.SenderPeerId.Value));
         }
         else if (dbo.SenderSelfId != null)
         {
@@ -75,7 +75,7 @@ public sealed class SqliteMessageRepository : IMessageRepository
             // For now, we'll create a LocalParticipantId with a placeholder PublicIdentityId
             // This is a design issue - the DBO should store the full ParticipantId or PublicIdentityId
             var publicIdentityId = new PublicIdentityId(Guid.NewGuid()); // Placeholder - this needs to be fixed
-            senderId = new LocalParticipantId(publicIdentityId, dbo.SenderSelfId.Value);
+            senderId = new LocalParticipantId(publicIdentityId, new ChatSelfId(dbo.SenderSelfId.Value));
         }
         else
         {
@@ -84,7 +84,7 @@ public sealed class SqliteMessageRepository : IMessageRepository
 
         return new Message(
             dbo.PublicMessageId,
-            dbo.ConversationId,
+            new ConversationId(dbo.ConversationId),
             senderId,
             dbo.Body,
             dbo.SentAt);

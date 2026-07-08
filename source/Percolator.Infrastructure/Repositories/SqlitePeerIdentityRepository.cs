@@ -14,7 +14,7 @@ public sealed class SqlitePeerIdentityRepository : IPeerIdentityRepository
     public async Task<PeerIdentity?> GetByIdAsync(PeerId id, CancellationToken ct = default)
     {
         var row = await _db.PeerIdentities.AsNoTracking()
-            .FirstOrDefaultAsync(p => p.PeerId.Value == id.Value, ct);
+            .FirstOrDefaultAsync(p => p.PeerId == id.Value, ct);
         if (row == null) return null;
 
         var aggregate = new PeerIdentity(id, row.PublicIdentityId);
@@ -24,7 +24,7 @@ public sealed class SqlitePeerIdentityRepository : IPeerIdentityRepository
         aggregate.SetLastKnownProfileRevision(row.LastKnownProfileRevision);
 
         var keys = await _db.PeerIdentityKeys.AsNoTracking()
-            .Where(k => k.PeerId.Value == id.Value)
+            .Where(k => k.PeerId == id.Value)
             .ToListAsync(ct);
         keys = keys.OrderBy(k => k.NotBeforeUtc).ToList();
         var now = DateTimeOffset.UtcNow;
@@ -42,7 +42,7 @@ public sealed class SqlitePeerIdentityRepository : IPeerIdentityRepository
         var row = await _db.PeerIdentities.AsNoTracking()
             .FirstOrDefaultAsync(p => p.PublicIdentityId == publicIdentityId, ct);
         if (row == null) return null;
-        return await GetByIdAsync(row.PeerId, ct);
+        return await GetByIdAsync(new PeerId(row.PeerId), ct);
     }
 
     public async Task<PeerIdentity> GetOrCreateAsync(PublicIdentityId publicIdentityId, CancellationToken ct = default)
@@ -65,7 +65,7 @@ public sealed class SqlitePeerIdentityRepository : IPeerIdentityRepository
         await _db.PeerIdentities.AddAsync(insert, ct);
         await _db.SaveChangesAsync(ct);
 
-        return await GetByIdAsync(insert.PeerId, ct);
+        return await GetByIdAsync(new PeerId(insert.PeerId), ct);
     }
 
     public async Task<PeerIdentity?> FindByPublicKeyHashAsync(IdentityPublicKeyHash fingerprint, CancellationToken ct = default)
@@ -77,20 +77,20 @@ public sealed class SqlitePeerIdentityRepository : IPeerIdentityRepository
         var row = allKeys.FirstOrDefault(k => k.Fingerprint != null && fingerprint.Span.SequenceEqual(k.Fingerprint));
     
         if (row == null) return null;
-        return await GetByIdAsync(row.PeerId, ct);
+        return await GetByIdAsync(new PeerId(row.PeerId), ct);
     }
 
     public async Task SaveAsync(PeerIdentity peer, CancellationToken ct = default)
     {
         var now = DateTimeOffset.UtcNow;
         var existing = await _db.PeerIdentities
-            .FirstOrDefaultAsync(p => p.PeerId.Value == peer.Id.Value, ct);
+            .FirstOrDefaultAsync(p => p.PeerId == peer.Id.Value, ct);
 
         if (existing == null)
         {
             var insert = new PeerIdentityDbo
             {
-                PeerId = peer.Id,
+                PeerId = peer.Id.Value,
                 PublicIdentityId = peer.PublicIdentityId,
                 Name = peer.DisplayName?.Value ?? string.Empty,
                 Version = 1,
@@ -104,7 +104,7 @@ public sealed class SqlitePeerIdentityRepository : IPeerIdentityRepository
             {
                 await _db.PeerIdentityKeys.AddAsync(new PeerIdentityKeyDbo
                 {
-                    PeerId = peer.Id,
+                    PeerId = peer.Id.Value,
                     PublicKeySpki = k.Spki,
                     Fingerprint = k.Fingerprint,
                     NotBeforeUtc = k.NotBefore,
@@ -128,13 +128,13 @@ public sealed class SqlitePeerIdentityRepository : IPeerIdentityRepository
         existing.LastKnownProfileRevision = peer.LastKnownProfileRevision;
 
         // Replace key set to reflect aggregate state
-        var oldKeys = _db.PeerIdentityKeys.Where(k => k.PeerId == peer.Id);
+        var oldKeys = _db.PeerIdentityKeys.Where(k => k.PeerId == peer.Id.Value);
         _db.PeerIdentityKeys.RemoveRange(oldKeys);
         foreach (var k in peer.Keys)
         {
             await _db.PeerIdentityKeys.AddAsync(new PeerIdentityKeyDbo
             {
-                PeerId = peer.Id,
+                PeerId = peer.Id.Value,
                 PublicKeySpki = k.Spki,
                 Fingerprint = k.Fingerprint,
                 NotBeforeUtc = k.NotBefore,

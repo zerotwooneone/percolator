@@ -28,7 +28,7 @@ public sealed class SqliteSelfIdentityDomainRepository : ISelfIdentityRepository
     {
         var dbo = await _db.SelfIdentities
             .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Id == id, ct)
+            .FirstOrDefaultAsync(x => x.Id == id.Value, ct)
             .ConfigureAwait(false);
         return dbo is null ? null : Map(dbo);
     }
@@ -65,7 +65,7 @@ public sealed class SqliteSelfIdentityDomainRepository : ISelfIdentityRepository
         };
         _db.SelfIdentities.Add(dbo);
         await _db.SaveChangesAsync(ct).ConfigureAwait(false);
-        return dbo.Id;
+        return new SelfId(dbo.Id);
     }
 
     public async Task SaveAsync(SelfIdentity identity, CancellationToken ct = default)
@@ -78,14 +78,14 @@ public sealed class SqliteSelfIdentityDomainRepository : ISelfIdentityRepository
         else
         {
             // Update
-            var dbo = await _db.SelfIdentities.FirstOrDefaultAsync(x => x.Id == identity.Id, ct).ConfigureAwait(false);
+            var dbo = await _db.SelfIdentities.FirstOrDefaultAsync(x => x.Id == identity.Id.Value, ct).ConfigureAwait(false);
             if (dbo is null)
             {
                 // Upsert semantics: create if missing
                 var activeKey = identity.GetActiveKey(DateTimeOffset.UtcNow);
                 dbo = new SelfIdentityDbo
                 {
-                    Id = identity.Id,
+                    Id = identity.Id.Value,
                     PublicIdentityId = identity.PublicIdentityId,
                     Name = identity.DisplayName?.Value ?? string.Empty,
                     LastUsedUtc = identity.LastUsedUtc,
@@ -121,7 +121,7 @@ public sealed class SqliteSelfIdentityDomainRepository : ISelfIdentityRepository
 
     private static SelfIdentity Map(SelfIdentityDbo dbo)
     {
-        var self = new SelfIdentity(dbo.Id, dbo.PublicIdentityId, dbo.ListeningPort, dbo.DeviceId, dbo.LastUsedUtc);
+        var self = new SelfIdentity(new SelfId(dbo.Id), dbo.PublicIdentityId, dbo.ListeningPort, dbo.DeviceId, dbo.LastUsedUtc);
         
         if (!string.IsNullOrWhiteSpace(dbo.Name)) self.SetDisplayName(dbo.Name);
         self.TouchLastUsed(dbo.LastUsedUtc);

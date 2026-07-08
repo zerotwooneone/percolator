@@ -1,12 +1,11 @@
 using System.ComponentModel.DataAnnotations.Schema;
-using Percolator.Identity;
 
 namespace Percolator.Infrastructure.Cryptography;
 
 [Table("SentInvitations")]
 public sealed class SentInvitationDbo
 {
-    public SelfId SelfIdentityId { get; set; }
+    public uint SelfIdentityId { get; set; }
     public string RequestCorrelationId { get; set; } = string.Empty;
 
     public Guid SignedPreKeyId { get; set; }

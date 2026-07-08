@@ -1,5 +1,4 @@
 using System.ComponentModel.DataAnnotations;
-using Percolator.Identity;
 
 namespace Percolator.Infrastructure.Identity;
 
@@ -9,7 +8,7 @@ public sealed class PeerVerificationDbo
     public long Id { get; set; }
 
     [Required]
-    public PeerId PeerId { get; set; }
+    public uint PeerId { get; set; }
 
     [Required]
     public byte[] Fingerprint { get; set; } = Array.Empty<byte>();

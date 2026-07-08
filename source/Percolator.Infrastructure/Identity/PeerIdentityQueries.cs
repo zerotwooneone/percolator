@@ -62,7 +62,7 @@ public sealed class PeerIdentityQueries : IPeerIdentityQueries
             return null;
         }
 
-        return match.PeerId;
+        return new PeerId(match.PeerId);
     }
 
     public async Task<Pkh?> GetPublicKeyHashAsync(PeerId peerId, CancellationToken cancellationToken)
@@ -70,7 +70,7 @@ public sealed class PeerIdentityQueries : IPeerIdentityQueries
         using var db = _dbFactory.CreateDbContext();
         var keyBytes = await db.PeerIdentityKeys
             .AsNoTracking()
-            .Where(x => x.PeerId == peerId)
+            .Where(x => x.PeerId == peerId.Value)
             .Where(x => x.NotBeforeUtc <= DateTimeOffset.UtcNow)
             .Where(x => x.ExpiresAtUtc > DateTimeOffset.UtcNow)
             .Where(x => x.RevokedAtUtc == null)
@@ -85,7 +85,7 @@ public sealed class PeerIdentityQueries : IPeerIdentityQueries
 
         return await db.PeerIdentities
             .AsNoTracking()
-            .Where(pid => pid.PeerId == senderPeerId)
+            .Where(pid => pid.PeerId == senderPeerId.Value)
             .Select(pid=>pid.PublicIdentityId)
             .FirstOrDefaultAsync();
     }

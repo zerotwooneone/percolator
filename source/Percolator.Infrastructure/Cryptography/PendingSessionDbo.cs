@@ -1,6 +1,5 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
-using Percolator.Identity;
 
 namespace Percolator.Infrastructure.Cryptography
 {
@@ -10,9 +9,9 @@ namespace Percolator.Infrastructure.Cryptography
         [Key]
         public Guid Id { get; set; }
 
-        public SelfId SelfIdentityId { get; set; }
+        public uint SelfIdentityId { get; set; }
 
-        public PeerId RemotePeerId { get; set; }
+        public uint RemotePeerId { get; set; }
 
         public int ProtocolVersion { get; set; }
 
@@ -22,7 +21,7 @@ namespace Percolator.Infrastructure.Cryptography
 
         public bool IsRelayed { get; set; }
 
-        public PeerId? RelayHostPeerId { get; set; }
+        public uint? RelayHostPeerId { get; set; }
 
         public byte[]? InviterIdentityKey { get; set; }
 

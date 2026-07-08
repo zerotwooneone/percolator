@@ -40,9 +40,10 @@ public sealed class SentInvitationPurgeService
         var now = _clock.UtcNow;
         var removed = 0;
 
-        await foreach (var invite in _sentInvitations.EnumerateExpiredAsync(new CryptoSelfId(_active.Identity.SelfIdentityId.Value), now, cancellationToken).ConfigureAwait(false))
+        var selfIdentityId = new CryptoSelfId(_active.Identity.SelfIdentityId.Value);
+        await foreach (var invite in _sentInvitations.EnumerateExpiredAsync(selfIdentityId, now, cancellationToken).ConfigureAwait(false))
         {
-            await _sentInvitations.DeleteAsync(invite.RequestCorrelationId, new CryptoSelfId(_active.Identity.SelfIdentityId.Value), cancellationToken).ConfigureAwait(false);
+            await _sentInvitations.DeleteAsync(invite.RequestCorrelationId, selfIdentityId, cancellationToken).ConfigureAwait(false);
 
             // Best-effort burn of any still-reserved OTK bound to this correlation id.
             await _selfPreKeys.TryBurnReservedOneTimePreKeyAsync(

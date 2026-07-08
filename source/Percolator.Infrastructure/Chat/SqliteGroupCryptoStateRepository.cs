@@ -22,7 +22,7 @@ public sealed class SqliteGroupCryptoStateRepository : IGroupCryptoStateReposito
     {
         var dbo = await _db.GroupCryptoStates
             .AsNoTracking()
-            .FirstOrDefaultAsync(c => c.ConversationId == conversationId, cancellationToken);
+            .FirstOrDefaultAsync(c => c.ConversationId == conversationId.Value, cancellationToken);
 
         if (dbo is null)
             return null;
@@ -44,13 +44,13 @@ public sealed class SqliteGroupCryptoStateRepository : IGroupCryptoStateReposito
             throw new InvalidOperationException($"GroupMasterKey must be exactly 32 bytes, but was {keyBytes.Length}.");
 
         var existing = await _db.GroupCryptoStates
-            .FirstOrDefaultAsync(c => c.ConversationId == conversationId, cancellationToken);
+            .FirstOrDefaultAsync(c => c.ConversationId == conversationId.Value, cancellationToken);
 
         if (existing is null)
         {
             _db.GroupCryptoStates.Add(new GroupCryptoStateDbo
             {
-                ConversationId = conversationId,
+                ConversationId = conversationId.Value,
                 GroupMasterKeyBytes = keyBytes,
                 CreatedAtUtc = now,
                 UpdatedAtUtc = now

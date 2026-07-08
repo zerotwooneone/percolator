@@ -22,7 +22,7 @@ public sealed class SqliteDirectConversationRepository : IDirectConversationRepo
         var dbo = await _db.Conversations
             .AsNoTracking()
             .Include(c => c.Participants)
-            .FirstOrDefaultAsync(c => c.Id == id && c.SelfIdentityId == new ChatSelfId(selfIdentityId.Value) && c.Kind == Percolator.Infrastructure.Persistence.ConversationKind.Direct, cancellationToken);
+            .FirstOrDefaultAsync(c => c.Id == id.Value && c.SelfIdentityId == selfIdentityId.Value && c.Kind == Percolator.Infrastructure.Persistence.ConversationKind.Direct, cancellationToken);
 
         if (dbo is null)
             return null;
@@ -36,7 +36,7 @@ public sealed class SqliteDirectConversationRepository : IDirectConversationRepo
         var dbo = ToDbo(conversation);
         dbo.CreatedAt = now;
         dbo.UpdatedAt = now;
-        dbo.SelfIdentityId = new ChatSelfId(selfIdentityId.Value);
+        dbo.SelfIdentityId = selfIdentityId.Value;
         dbo.Kind = Percolator.Infrastructure.Persistence.ConversationKind.Direct;
 
         _db.Conversations.Add(dbo);
@@ -46,15 +46,15 @@ public sealed class SqliteDirectConversationRepository : IDirectConversationRepo
     public async Task<DirectConversation?> GetByParticipantPairAsync(ChatSelfId selfIdentityId, ChatPeerId otherPeerId, CancellationToken cancellationToken)
     {
         // Load self identity to obtain the local peer id
-        var self = await _db.SelfIdentities.AsNoTracking().FirstOrDefaultAsync(i => i.Id.Value == selfIdentityId.Value, cancellationToken)
+        var self = await _db.SelfIdentities.AsNoTracking().FirstOrDefaultAsync(i => i.Id == selfIdentityId.Value, cancellationToken)
             ?? throw new InvalidOperationException($"SelfIdentity not found for id {selfIdentityId}.");
 
         // Find a direct conversation for this self identity that contains both participants
         var dbo = await _db.Conversations
             .Include(c => c.Participants)
-            .Where(c => c.SelfIdentityId == new ChatSelfId(selfIdentityId.Value))
+            .Where(c => c.SelfIdentityId == selfIdentityId.Value)
             .Where(c => c.Kind == Percolator.Infrastructure.Persistence.ConversationKind.Direct)
-            .Where(c => c.Participants.Any(p => p.ParticipantId == otherPeerId))
+            .Where(c => c.Participants.Any(p => p.ParticipantId == otherPeerId.Value))
             .AsNoTracking()
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -64,20 +64,20 @@ public sealed class SqliteDirectConversationRepository : IDirectConversationRepo
     public async Task UpsertDirectSessionMappingAsync(ChatSelfId selfIdentityId, Guid directSessionId, ConversationId conversationId, CancellationToken cancellationToken)
     {
         var existingMap = await _db.DirectSessionConversations
-            .FirstOrDefaultAsync(m => m.SelfIdentityId == new SelfId(selfIdentityId.Value) && m.DirectSessionId == directSessionId, cancellationToken);
+            .FirstOrDefaultAsync(m => m.SelfIdentityId == selfIdentityId.Value && m.DirectSessionId == directSessionId, cancellationToken);
 
         if (existingMap is null)
         {
             _db.DirectSessionConversations.Add(new DirectSessionConversationDbo
             {
-                SelfIdentityId = new SelfId(selfIdentityId.Value),
+                SelfIdentityId = selfIdentityId.Value,
                 DirectSessionId = directSessionId,
-                ConversationId = conversationId
+                ConversationId = conversationId.Value
             });
         }
         else
         {
-            existingMap.ConversationId = conversationId;
+            existingMap.ConversationId = conversationId.Value;
             _db.DirectSessionConversations.Update(existingMap);
         }
 
@@ -86,30 +86,30 @@ public sealed class SqliteDirectConversationRepository : IDirectConversationRepo
 
     private static DirectConversation ToDomain(ConversationDbo dbo)
     {
-        var participants = dbo.Participants.Select(p => p.ParticipantId).ToList();
+        var participants = dbo.Participants.Select(p => new ChatPeerId(p.ParticipantId)).ToList();
         if (participants.Count != 1)
         {
             throw new InvalidOperationException($"Direct conversation must have exactly 1 participants, found {participants.Count}.");
         }
 
         return new DirectConversation(
-            dbo.Id,
+            new ConversationId(dbo.Id),
             participants[0],
-            new ChatSelfId(dbo.SelfIdentityId.Value));
+            new ChatSelfId(dbo.SelfIdentityId));
     }
 
     private static ConversationDbo ToDbo(DirectConversation conversation)
     {
         var dbo = new ConversationDbo
         {
-            Id = conversation.Id,
+            Id = conversation.Id.Value,
             Kind = Percolator.Infrastructure.Persistence.ConversationKind.Direct
         };
 
         dbo.Participants.Add(new ConversationParticipantDbo
         {
-            ConversationId = conversation.Id,
-            ParticipantId = conversation.Peer1
+            ConversationId = conversation.Id.Value,
+            ParticipantId = conversation.Peer1.Value
         });
 
         return dbo;

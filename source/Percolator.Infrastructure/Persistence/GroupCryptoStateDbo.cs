@@ -1,7 +1,5 @@
 
 
-using Percolator.Chat.Messaging.ValueObjects;
-
 namespace Percolator.Infrastructure.Persistence;
 
 /// <summary>
@@ -15,7 +13,7 @@ public class GroupCryptoStateDbo
     /// <summary>
     /// Primary key referencing the conversation.
     /// </summary>
-    public ConversationId ConversationId { get; set; }
+    public Guid ConversationId { get; set; }
 
     /// <summary>
     /// The 32-byte GroupMasterKey.

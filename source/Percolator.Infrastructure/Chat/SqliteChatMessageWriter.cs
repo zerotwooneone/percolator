@@ -27,7 +27,7 @@ public sealed class SqliteChatMessageWriter : IChatMessageWriter
         // Idempotency check
         var exists = await _db.Messages
             .AsNoTracking()
-            .AnyAsync(m => m.ConversationId == conversationId && m.PublicMessageId == publicMessageId, cancellationToken);
+            .AnyAsync(m => m.ConversationId == conversationId.Value && m.PublicMessageId == publicMessageId, cancellationToken);
         if (exists)
         {
             return; // idempotent success
@@ -35,10 +35,10 @@ public sealed class SqliteChatMessageWriter : IChatMessageWriter
 
         _db.Messages.Add(new MessageDbo
         {
-            ConversationId = conversationId,
+            ConversationId = conversationId.Value,
             PublicMessageId = publicMessageId,
-            SenderPeerId = participantId is RemoteParticipantId remoteParticipantId ? remoteParticipantId.PeerId : null,
-            SenderSelfId = participantId is LocalParticipantId localParticipantId ? localParticipantId.SelfId : null,
+            SenderPeerId = participantId is RemoteParticipantId remoteParticipantId ? remoteParticipantId.PeerId.Value : null,
+            SenderSelfId = participantId is LocalParticipantId localParticipantId ? localParticipantId.SelfId.Value : null,
             Body = content,
             SentAt = sentAt
         });
@@ -53,7 +53,7 @@ public sealed class SqliteChatMessageWriter : IChatMessageWriter
             // Re-check and swallow if now present
             var nowExists = await _db.Messages
                 .AsNoTracking()
-                .AnyAsync(m => m.ConversationId == conversationId && m.PublicMessageId == publicMessageId, cancellationToken);
+                .AnyAsync(m => m.ConversationId == conversationId.Value && m.PublicMessageId == publicMessageId, cancellationToken);
             if (!nowExists)
             {
                 throw;
@@ -73,7 +73,7 @@ public sealed class SqliteChatMessageWriter : IChatMessageWriter
         // Idempotency check: one receipt per reader per message
         var exists = await _db.ReadReceipts
             .AsNoTracking()
-            .AnyAsync(r => r.ConversationId == conversationId && r.MessageGuid == publicMessageId.Value && r.ReaderId == readerId, cancellationToken);
+            .AnyAsync(r => r.ConversationId == conversationId.Value && r.MessageGuid == publicMessageId.Value && r.ReaderId == readerId.Value, cancellationToken);
         if (exists)
         {
             return;
@@ -81,9 +81,9 @@ public sealed class SqliteChatMessageWriter : IChatMessageWriter
 
         _db.ReadReceipts.Add(new ReadReceiptDbo
         {
-            ConversationId = conversationId,
+            ConversationId = conversationId.Value,
             MessageGuid = publicMessageId.Value,
-            ReaderId = readerId,
+            ReaderId = readerId.Value,
             SentAt = sentAt
         });
 
@@ -95,7 +95,7 @@ public sealed class SqliteChatMessageWriter : IChatMessageWriter
         {
             var nowExists = await _db.ReadReceipts
                 .AsNoTracking()
-                .AnyAsync(r => r.ConversationId == conversationId && r.MessageGuid == publicMessageId.Value && r.ReaderId == readerId, cancellationToken);
+                .AnyAsync(r => r.ConversationId == conversationId.Value && r.MessageGuid == publicMessageId.Value && r.ReaderId == readerId.Value, cancellationToken);
             if (!nowExists)
             {
                 throw;

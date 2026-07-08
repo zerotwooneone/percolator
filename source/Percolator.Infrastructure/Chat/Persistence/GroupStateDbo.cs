@@ -1,5 +1,4 @@
 using Percolator.Chat.GroupLedger;
-using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Identity;
 
 namespace Percolator.Infrastructure.Chat.Persistence;
@@ -13,7 +12,7 @@ public class GroupStateDbo
     /// <summary>
     /// The conversation ID (primary key).
     /// </summary>
-    public ConversationId ConversationId { get; set; }
+    public Guid ConversationId { get; set; }
 
     /// <summary>
     /// The current epoch (monotonic counter for key rotation).
@@ -33,7 +32,7 @@ public class GroupStateDbo
     /// <summary>
     /// The local peer ID of the relay for this group.
     /// </summary>
-    public PeerId RelayPeerId { get; set; }
+    public uint RelayPeerId { get; set; }
 
     /// <summary>
     /// UTC timestamp when the group was created.

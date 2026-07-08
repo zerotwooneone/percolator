@@ -4,7 +4,7 @@ namespace Percolator.Infrastructure.Persistence;
 
 public class SelfIdentityDbo
 {
-    public SelfId Id { get; set; }
+    public uint Id { get; set; }
     public PublicIdentityId PublicIdentityId { get; set; }
     public string Name { get; set; } = null!;
     public DateTimeOffset LastUsedUtc { get; set; }
