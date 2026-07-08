@@ -116,13 +116,13 @@ public sealed class GroupInviteHandler : IGroupInviteHandler
 
         // Ensure inviter identity exists (get or create stub)
         var inviterIdentity = await _peerIdentityRepository.GetOrCreateAsync(inviterPublicIdentityId, ct).ConfigureAwait(false);
-        var senderPeerId = new Percolator.Cryptography.Primitives.PeerId(inviterIdentity.Id.Value);
+        var senderPublicIdentityId = new Percolator.Cryptography.Primitives.CryptoPublicIdentity(inviterIdentity.PublicIdentityId.Value);
         var senderDeviceId = new DeviceId(sourceDeviceId.Value);
         var distributionMessage = SenderKeyDistributionMessageBytes.FromSpan(distributionBytes.Span);
 
         _senderKeyCryptographyService.ProcessSenderKeyDistributionMessage(
             cryptoConversationId,
-            senderPeerId,
+            senderPublicIdentityId,
             senderDeviceId,
             distributionMessage);
 

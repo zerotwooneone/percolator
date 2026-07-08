@@ -9,6 +9,7 @@ using Percolator.Infrastructure.Cryptography;
 using Percolator.Infrastructure.Persistence;
 using PeerId = Percolator.Cryptography.Primitives.PeerId;
 using System.Security.Cryptography;
+using Percolator.InfrastructureTests.Common;
 
 namespace Percolator.InfrastructureTests.Cryptography;
 
@@ -30,11 +31,7 @@ public sealed class SqlitePendingSessionRepositoryTests
         var options = new DbContextOptionsBuilder<PercolatorDbContext>()
             .UseSqlite(conn)
             .Options;
-
-        var active = new ActiveIdentityContext();
-        active.SetActiveIdentity(new IdentityRecord(new SelfId(1), new PublicIdentityId(Guid.NewGuid()), new Percolator.Identity.DeviceId(1), "default") { ListeningPort = new Percolator.Identity.Model.ListeningPort(5000) }, null);
-
-        await using var ctx = new PercolatorDbContext(options);
+        var ctx = TestDb.NewContextWithSchema(options, 1);
 
         if (!ctx.SelfIdentities.Any())
         {

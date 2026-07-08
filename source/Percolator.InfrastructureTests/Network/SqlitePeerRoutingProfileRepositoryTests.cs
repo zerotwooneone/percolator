@@ -53,7 +53,7 @@ public class SqlitePeerRoutingProfileRepositoryTests
         var repo = new SqlitePeerRoutingProfileRepository(ctx);
 
         var freshId = new PeerId(1);
-        var staleId = new PeerId(1);
+        var staleId = new PeerId(2);
 
         var fresh = new PeerRoutingProfile();
         fresh.BindIdentity(freshId);

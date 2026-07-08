@@ -15,10 +15,19 @@ public sealed class SenderKeyInteropBridge : ISenderKeyInteropBridge
         _dbFactory = dbFactory;
     }
 
-    public bool TryLoadSenderKey(ConversationId conversationId, PeerId senderId, DeviceId deviceId, out byte[] recordBytes)
+    public bool TryLoadSenderKey(ConversationId conversationId, CryptoPublicIdentity senderPublicIdentityId, DeviceId deviceId, out byte[] recordBytes)
     {
         using var db = _dbFactory.CreateDbContext();
-        var record = db.SenderKeyRecords.Find(conversationId.Value, senderId.Value, deviceId.Value);
+        
+        // Resolve local PeerId from CryptoPublicIdentity
+        var peerIdentity = db.PeerIdentities.FirstOrDefault(p => p.PublicIdentityId == senderPublicIdentityId.Value);
+        if (peerIdentity is null)
+        {
+            recordBytes = Array.Empty<byte>();
+            return false;
+        }
+        
+        var record = db.SenderKeyRecords.Find(conversationId.Value, peerIdentity.PeerId, deviceId.Value);
         
         if (record is null)
         {
@@ -30,10 +39,18 @@ public sealed class SenderKeyInteropBridge : ISenderKeyInteropBridge
         return true;
     }
 
-    public void StoreSenderKey(ConversationId conversationId, PeerId senderId, DeviceId deviceId, byte[] recordBytes)
+    public void StoreSenderKey(ConversationId conversationId, CryptoPublicIdentity senderPublicIdentityId, DeviceId deviceId, byte[] recordBytes)
     {
         using var db = _dbFactory.CreateDbContext();
-        var existing = db.SenderKeyRecords.Find(conversationId.Value, senderId.Value, deviceId.Value);
+        
+        // Resolve local PeerId from CryptoPublicIdentity
+        var peerIdentity = db.PeerIdentities.FirstOrDefault(p => p.PublicIdentityId == senderPublicIdentityId.Value);
+        if (peerIdentity is null)
+        {
+            throw new InvalidOperationException($"Peer identity not found for PublicIdentityId: {senderPublicIdentityId.Value}");
+        }
+        
+        var existing = db.SenderKeyRecords.Find(conversationId.Value, peerIdentity.PeerId, deviceId.Value);
         
         if (existing is not null)
         {
@@ -44,7 +61,7 @@ public sealed class SenderKeyInteropBridge : ISenderKeyInteropBridge
             var newRecord = new SenderKeyRecordDbo
             {
                 ConversationId = conversationId.Value,
-                SenderPeerId = senderId.Value,
+                SenderPeerId = peerIdentity.PeerId,
                 DeviceId = deviceId.Value,
                 RecordBytes = recordBytes
             };

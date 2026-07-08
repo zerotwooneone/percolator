@@ -83,26 +83,15 @@ public sealed class SenderKeyCryptographyService : ISenderKeyCryptographyService
             var uuid = SignalCrypto.GetSenderAddressName(senderAddress);
             var deviceId = SignalCrypto.GetSenderAddressDeviceId(senderAddress);
             
-            // Convert Guid to uint for PeerId - this is a design mismatch between SignalCrypto (Guid) and cryptography primitives (uint)
-            var peerId = new Percolator.Cryptography.Primitives.PeerId(BitConverter.ToUInt32(uuid.ToByteArray(), 0));
+            // Use the UUID directly as CryptoPublicIdentity
+            var publicIdentityId = new CryptoPublicIdentity(uuid);
             var devId = new DeviceId(deviceId);
 
-            if (_storeBridge.TryLoadSenderKey(conversationId, peerId, devId, out var recordBytes))
+            if (_storeBridge.TryLoadSenderKey(conversationId, publicIdentityId, devId, out var recordBytes))
             {
-                // We need to allocate unmanaged memory for the native side to own.
-                // The Signal native library will eventually free this using its own allocator.
-                // Wait! Signal C-ABI expects us to return an allocated pointer? No, the documentation says:
-                // "The C-ABI expects an allocated pointer but it might be allocated by Signal.Interop"
-                // Actually, typically the C-ABI provides a way to deserialize the record to an IntPtr, or we return a raw pointer?
-                // Wait, if it expects us to deserialize it and return the pointer?
-                // The outRecord needs to be a SenderKeyRecord handle pointer! Let's check SignalCrypto for deserialization.
-                // Yes, SignalCrypto.DeserializeSenderKeyRecord returns a SafeHandle. We need to extract the underlying pointer and let the native code take ownership.
-                // The native lib takes ownership of outRecord and frees it later with signal_protocol_sender_key_record_free.
-                
                 var safeHandle = SignalCrypto.DeserializeSenderKeyRecord(recordBytes);
-                // We must transfer ownership to unmanaged code.
                 outRecord = safeHandle.DangerousGetHandle();
-                safeHandle.SetHandleAsInvalid(); // Prevent managed GC from freeing it since native will free it.
+                safeHandle.SetHandleAsInvalid();
                 return 0; // Success
             }
             
@@ -127,14 +116,14 @@ public sealed class SenderKeyCryptographyService : ISenderKeyCryptographyService
             var uuid = SignalCrypto.GetSenderAddressName(senderAddress);
             var deviceId = SignalCrypto.GetSenderAddressDeviceId(senderAddress);
             
-            // Convert Guid to uint for PeerId - this is a design mismatch between SignalCrypto (Guid) and cryptography primitives (uint)
-            var peerId = new Percolator.Cryptography.Primitives.PeerId(BitConverter.ToUInt32(uuid.ToByteArray(), 0));
+            // Use the UUID directly as CryptoPublicIdentity
+            var publicIdentityId = new CryptoPublicIdentity(uuid);
             var devId = new DeviceId(deviceId);
             
             var recordSpan = new ReadOnlySpan<byte>(recordBytes, (int)recordLen.ToUInt32());
             
             // Store using bridge
-            _storeBridge.StoreSenderKey(conversationId, peerId, devId, recordSpan.ToArray());
+            _storeBridge.StoreSenderKey(conversationId, publicIdentityId, devId, recordSpan.ToArray());
             
             return 0;
         }
@@ -147,10 +136,10 @@ public sealed class SenderKeyCryptographyService : ISenderKeyCryptographyService
 
     public SenderKeyDistributionMessageBytes CreateSenderKeyDistributionMessage(
         Percolator.Cryptography.Primitives.ConversationId conversationId, 
-        Percolator.Cryptography.Primitives.PeerId localPeerId, 
+        CryptoPublicIdentity publicIdentityId, 
         DeviceId deviceId)
     {
-        var uuidBytes = BitConverter.GetBytes(localPeerId.Value);
+        var uuidBytes = publicIdentityId.Value.ToByteArray();
         using var addressHandle = SignalCrypto.NewSenderAddress(uuidBytes, deviceId.Value);
         using var messageHandle = SignalCrypto.CreateSenderKeyDistributionMessage(_vtablePtr, addressHandle, conversationId.Value);
 
@@ -160,11 +149,11 @@ public sealed class SenderKeyCryptographyService : ISenderKeyCryptographyService
 
     public void ProcessSenderKeyDistributionMessage(
         Percolator.Cryptography.Primitives.ConversationId conversationId,
-        Percolator.Cryptography.Primitives.PeerId senderPeerId,
+        CryptoPublicIdentity senderPublicIdentityId,
         DeviceId senderDeviceId,
         SenderKeyDistributionMessageBytes distributionMessage)
     {
-        var uuidBytes = BitConverter.GetBytes(senderPeerId.Value);
+        var uuidBytes = senderPublicIdentityId.Value.ToByteArray();
         using var addressHandle = SignalCrypto.NewSenderAddress(uuidBytes, senderDeviceId.Value);
         using var messageHandle = SignalCrypto.DeserializeSenderKeyDistributionMessage(distributionMessage.Span);
         
@@ -173,11 +162,11 @@ public sealed class SenderKeyCryptographyService : ISenderKeyCryptographyService
 
     public byte[] EncryptGroupMessage(
         Percolator.Cryptography.Primitives.ConversationId conversationId,
-        Percolator.Cryptography.Primitives.PeerId localPeerId,
+        CryptoPublicIdentity publicIdentityId,
         DeviceId deviceId,
         ReadOnlySpan<byte> plaintext)
     {
-        var uuidBytes = BitConverter.GetBytes(localPeerId.Value);
+        var uuidBytes = publicIdentityId.Value.ToByteArray();
         using var addressHandle = SignalCrypto.NewSenderAddress(uuidBytes, deviceId.Value);
         using var messageHandle = SignalCrypto.EncryptGroupMessage(_vtablePtr, addressHandle, conversationId.Value, plaintext);
         
@@ -186,11 +175,11 @@ public sealed class SenderKeyCryptographyService : ISenderKeyCryptographyService
 
     public byte[] DecryptGroupMessage(
         Percolator.Cryptography.Primitives.ConversationId conversationId,
-        Percolator.Cryptography.Primitives.PeerId senderPeerId,
+        CryptoPublicIdentity senderPublicIdentityId,
         DeviceId senderDeviceId,
         ReadOnlySpan<byte> ciphertext)
     {
-        var uuidBytes = BitConverter.GetBytes(senderPeerId.Value);
+        var uuidBytes = senderPublicIdentityId.Value.ToByteArray();
         using var addressHandle = SignalCrypto.NewSenderAddress(uuidBytes, senderDeviceId.Value);
         using var messageHandle = SignalCrypto.DeserializeSenderKeyMessage(ciphertext);
         
