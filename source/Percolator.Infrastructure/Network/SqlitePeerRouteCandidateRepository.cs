@@ -19,7 +19,7 @@ public sealed class SqlitePeerRouteCandidateRepository : IPeerRouteCandidateRepo
     {
         var existing = await _db.PeerRouteCandidates
             .FirstOrDefaultAsync(c =>
-                c.SelfIdentityId.Value == candidate.SelfIdentityId &&
+                c.SelfIdentityId == candidate.SelfIdentityId &&
                 c.RemotePeerId.Value == candidate.RemotePeerId.Value &&
                 c.RouteKind == (int)candidate.RouteKind &&
                 c.EndpointHost == candidate.EndpointHost &&
@@ -31,7 +31,7 @@ public sealed class SqlitePeerRouteCandidateRepository : IPeerRouteCandidateRepo
         {
             var dbo = new PeerRouteCandidateDbo
             {
-                SelfIdentityId = new SelfId(candidate.SelfIdentityId),
+                SelfIdentityId = candidate.SelfIdentityId,
                 RemotePeerId = new PeerId(candidate.RemotePeerId.Value),
                 RouteKind = (int)candidate.RouteKind,
                 EndpointHost = candidate.EndpointHost,
@@ -61,7 +61,7 @@ public sealed class SqlitePeerRouteCandidateRepository : IPeerRouteCandidateRepo
     {
         var dbos = await _db.PeerRouteCandidates
             .AsNoTracking()
-            .Where(c => c.SelfIdentityId.Value == selfIdentityId && c.RemotePeerId.Value == remotePeerId.Value)
+            .Where(c => c.SelfIdentityId == selfIdentityId && c.RemotePeerId.Value == remotePeerId.Value)
             .ToListAsync(cancellationToken);
 
         return dbos.Select(MapToDomain).ToList();
@@ -71,7 +71,7 @@ public sealed class SqlitePeerRouteCandidateRepository : IPeerRouteCandidateRepo
     {
         var dbos = await _db.PeerRouteCandidates
             .AsNoTracking()
-            .Where(c => c.SelfIdentityId.Value == selfIdentityId)
+            .Where(c => c.SelfIdentityId == selfIdentityId)
             .ToListAsync(cancellationToken);
 
         return dbos.Select(MapToDomain).ToList();
@@ -92,7 +92,7 @@ public sealed class SqlitePeerRouteCandidateRepository : IPeerRouteCandidateRepo
         var cutoff = nowUtc.AddDays(-14);
         var toPrune = _db.PeerRouteCandidates
             .Where(c =>
-                c.SelfIdentityId.Value == selfIdentityId &&
+                c.SelfIdentityId == selfIdentityId &&
                 c.LastSuccessAtUtc == null &&
                 c.ObservedAtUtc < cutoff);
 
@@ -105,7 +105,7 @@ public sealed class SqlitePeerRouteCandidateRepository : IPeerRouteCandidateRepo
         return new PeerRouteCandidate
         {
             Id = dbo.Id,
-            SelfIdentityId = dbo.SelfIdentityId.Value,
+            SelfIdentityId = dbo.SelfIdentityId,
             RemotePeerId = new Percolator.Network.PeerId(dbo.RemotePeerId.Value),
             RouteKind = (RouteKind)dbo.RouteKind,
             EndpointHost = dbo.EndpointHost,

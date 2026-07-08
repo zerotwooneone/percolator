@@ -20,7 +20,7 @@ public sealed class SqliteDeliveryCertificateStore : IDeliveryCertificateStore
     {
         var dbo = await _db.DeliveryCertificates
             .AsNoTracking()
-            .FirstOrDefaultAsync(c => c.SelfId == selfId && c.RelayPeerId == relayPeerId, ct)
+            .FirstOrDefaultAsync(c => c.SelfId == selfId.Value && c.RelayPeerId == relayPeerId, ct)
             .ConfigureAwait(false);
 
         if (dbo is null)
@@ -34,7 +34,7 @@ public sealed class SqliteDeliveryCertificateStore : IDeliveryCertificateStore
     public async Task SetCertificateAsync(ChatSelfId selfId, ChatPeerId relayPeerId, DeliveryCertificate certificate, CancellationToken ct)
     {
         var existing = await _db.DeliveryCertificates
-            .FirstOrDefaultAsync(c => c.SelfId == selfId && c.RelayPeerId == relayPeerId, ct)
+            .FirstOrDefaultAsync(c => c.SelfId == selfId.Value && c.RelayPeerId == relayPeerId, ct)
             .ConfigureAwait(false);
 
         if (existing is not null)
@@ -49,7 +49,7 @@ public sealed class SqliteDeliveryCertificateStore : IDeliveryCertificateStore
             // Insert new certificate
             var dbo = new DeliveryCertificateDbo
             {
-                SelfId = selfId,
+                SelfId = selfId.Value,
                 RelayPeerId = relayPeerId,
                 Payload = certificate.Payload,
                 Signature = certificate.Signature,

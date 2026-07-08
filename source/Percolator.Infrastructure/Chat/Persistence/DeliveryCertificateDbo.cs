@@ -17,7 +17,7 @@ public class DeliveryCertificateDbo
     /// <summary>
     /// The local self identity ID that owns this certificate.
     /// </summary>
-    public ChatSelfId SelfId { get; set; }
+    public uint SelfId { get; set; }
 
     /// <summary>
     /// The relay peer ID that issued this certificate.

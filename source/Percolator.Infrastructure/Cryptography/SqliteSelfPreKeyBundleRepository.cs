@@ -19,12 +19,12 @@ internal sealed class SqliteSelfPreKeyBundleRepository : ISelfPreKeyBundleReposi
     public async Task SaveSignedPreKeyAsync(SelfId selfIdentityId, Guid signedPreKeyId, byte[] signedPreKeyPrivate, byte[] signedPreKeyPublicSpki, byte[] preKeySignature, DateTimeOffset expires, CancellationToken ct = default)
     {
         var encPriv = Protect(signedPreKeyPrivate);
-        var existing = await _db.SelfPreKeySigned.AsNoTracking().FirstOrDefaultAsync(x => x.SelfIdentityId == selfIdentityId && x.SignedPreKeyId == signedPreKeyId, ct);
+        var existing = await _db.SelfPreKeySigned.AsNoTracking().FirstOrDefaultAsync(x => x.SelfIdentityId == selfIdentityId.Value && x.SignedPreKeyId == signedPreKeyId, ct);
         if (existing is null)
         {
             _db.SelfPreKeySigned.Add(new SelfPreKeySignedDbo
             {
-                SelfIdentityId = selfIdentityId,
+                SelfIdentityId = selfIdentityId.Value,
                 SignedPreKeyId = signedPreKeyId,
                 SignedPreKeyPrivate = encPriv,
                 SignedPreKeyPublicSpki = signedPreKeyPublicSpki,
@@ -47,12 +47,12 @@ internal sealed class SqliteSelfPreKeyBundleRepository : ISelfPreKeyBundleReposi
     {
         foreach (var (otkId, priv, spki) in oneTimePreKeys)
         {
-            var exists = await _db.SelfOneTimePreKeys.AsNoTracking().AnyAsync(x => x.SelfIdentityId == selfIdentityId && x.OneTimePreKeyId == otkId, ct);
+            var exists = await _db.SelfOneTimePreKeys.AsNoTracking().AnyAsync(x => x.SelfIdentityId == selfIdentityId.Value && x.OneTimePreKeyId == otkId, ct);
             if (!exists)
             {
                 _db.SelfOneTimePreKeys.Add(new SelfOneTimePreKeyDbo
                 {
-                    SelfIdentityId = selfIdentityId,
+                    SelfIdentityId = selfIdentityId.Value,
                     OneTimePreKeyId = otkId,
                     OneTimePreKeyPrivate = Protect(priv),
                     OneTimePreKeyPublicSpki = spki
@@ -64,7 +64,7 @@ internal sealed class SqliteSelfPreKeyBundleRepository : ISelfPreKeyBundleReposi
 
     public async Task<(byte[] spkPrivate, byte[] spkPublicSpki, byte[] preKeySignature, DateTimeOffset expires)?> TryGetSignedPreKeyAsync(SelfId selfIdentityId, Guid signedPreKeyId, CancellationToken ct = default)
     {
-        var rec = await _db.SelfPreKeySigned.AsNoTracking().FirstOrDefaultAsync(x => x.SelfIdentityId == selfIdentityId && x.SignedPreKeyId == signedPreKeyId, ct);
+        var rec = await _db.SelfPreKeySigned.AsNoTracking().FirstOrDefaultAsync(x => x.SelfIdentityId == selfIdentityId.Value && x.SignedPreKeyId == signedPreKeyId, ct);
         if (rec is null) return null;
         return (Unprotect(rec.SignedPreKeyPrivate), rec.SignedPreKeyPublicSpki, rec.PreKeySignature, rec.ExpiresUtc);
     }
@@ -75,7 +75,7 @@ internal sealed class SqliteSelfPreKeyBundleRepository : ISelfPreKeyBundleReposi
         await using var tx = await _db.Database.BeginTransactionAsync(ct);
         try
         {
-            var rec = await _db.SelfOneTimePreKeys.FirstOrDefaultAsync(x => x.SelfIdentityId == selfIdentityId && x.OneTimePreKeyId == oneTimePreKeyId, ct);
+            var rec = await _db.SelfOneTimePreKeys.FirstOrDefaultAsync(x => x.SelfIdentityId == selfIdentityId.Value && x.OneTimePreKeyId == oneTimePreKeyId, ct);
             if (rec is null)
             {
                 await tx.RollbackAsync(ct);
@@ -105,7 +105,7 @@ internal sealed class SqliteSelfPreKeyBundleRepository : ISelfPreKeyBundleReposi
         {
             // Correlation id must be unique while reserved (duplicates rejected)
             var existingReservation = await _db.SelfOneTimePreKeys.AsNoTracking()
-                .AnyAsync(x => x.SelfIdentityId == selfIdentityId && x.ReservedForRequestCorrelationId == requestCorrelationId, ct);
+                .AnyAsync(x => x.SelfIdentityId == selfIdentityId.Value && x.ReservedForRequestCorrelationId == requestCorrelationId, ct);
             if (existingReservation)
             {
                 await tx.RollbackAsync(ct);
@@ -114,7 +114,7 @@ internal sealed class SqliteSelfPreKeyBundleRepository : ISelfPreKeyBundleReposi
 
             // Find any unreserved OTK
             var rec = await _db.SelfOneTimePreKeys
-                .FirstOrDefaultAsync(x => x.SelfIdentityId == selfIdentityId && x.ReservedForRequestCorrelationId == null, ct);
+                .FirstOrDefaultAsync(x => x.SelfIdentityId == selfIdentityId.Value && x.ReservedForRequestCorrelationId == null, ct);
             if (rec is null)
             {
                 await tx.RollbackAsync(ct);
@@ -144,7 +144,7 @@ internal sealed class SqliteSelfPreKeyBundleRepository : ISelfPreKeyBundleReposi
         try
         {
             var rec = await _db.SelfOneTimePreKeys
-                .FirstOrDefaultAsync(x => x.SelfIdentityId == selfIdentityId && x.ReservedForRequestCorrelationId == requestCorrelationId, ct);
+                .FirstOrDefaultAsync(x => x.SelfIdentityId == selfIdentityId.Value && x.ReservedForRequestCorrelationId == requestCorrelationId, ct);
             if (rec is null)
             {
                 await tx.RollbackAsync(ct);
@@ -181,7 +181,7 @@ internal sealed class SqliteSelfPreKeyBundleRepository : ISelfPreKeyBundleReposi
         // NOTE: EFCore+Sqlite can fail to translate DateTimeOffset comparisons depending on provider/version.
         // Load reserved candidates for this identity, then perform the time comparison in-memory.
         var reserved = await _db.SelfOneTimePreKeys
-            .Where(x => x.SelfIdentityId == selfIdentityId
+            .Where(x => x.SelfIdentityId == selfIdentityId.Value
                         && x.ReservedForRequestCorrelationId != null
                         && x.ReservedUntilUtc != null)
             .ToListAsync(ct);
@@ -210,7 +210,7 @@ internal sealed class SqliteSelfPreKeyBundleRepository : ISelfPreKeyBundleReposi
         try
         {
             var rec = await _db.SelfOneTimePreKeys
-                .FirstOrDefaultAsync(x => x.SelfIdentityId == selfIdentityId && x.ReservedForRequestCorrelationId == requestCorrelationId, ct);
+                .FirstOrDefaultAsync(x => x.SelfIdentityId == selfIdentityId.Value && x.ReservedForRequestCorrelationId == requestCorrelationId, ct);
             if (rec is null)
             {
                 await tx.RollbackAsync(ct);

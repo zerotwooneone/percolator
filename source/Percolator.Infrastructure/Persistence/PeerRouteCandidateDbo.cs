@@ -7,7 +7,7 @@ namespace Percolator.Infrastructure.Persistence;
 public class PeerRouteCandidateDbo
 {
     public long Id { get; set; }
-    public SelfId SelfIdentityId { get; set; }
+    public uint SelfIdentityId { get; set; }
     public PeerId RemotePeerId { get; set; }
     public int RouteKind { get; set; }
     public string? EndpointHost { get; set; }
