@@ -148,7 +148,7 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
             _clock,
             crypto: _sessionCrypto);
 
-        await _sessions.AddAsync(session, ct).ConfigureAwait(false);
+        await _sessions.AddAsync(session, new CryptoSelfId(selfIdentityId.Value), ct).ConfigureAwait(false);
         await _mediator.Publish(
                 new SecureSessionCreatedNotification(
                     sessionId,

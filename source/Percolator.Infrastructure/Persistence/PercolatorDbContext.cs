@@ -36,8 +36,6 @@ public class PercolatorDbContext : DbContext
     public DbSet<SelfPreKeySignedDbo> SelfPreKeySigned { get; set; } = null!;
     public DbSet<SelfOneTimePreKeyDbo> SelfOneTimePreKeys { get; set; } = null!;
     public DbSet<ReadReceiptDbo> ReadReceipts { get; set; } = null!;
-    public DbSet<EmojiReactionDbo> EmojiReactions { get; set; } = null!;
-    public DbSet<DeliveredReceiptDbo> DeliveredReceipts { get; set; } = null!;
     public DbSet<PreHandshakeSessionDbo> PreHandshakeSessions { get; set; } = null!;
     public DbSet<PendingSessionDbo> PendingSessions { get; set; } = null!;
     public DbSet<SentInvitationDbo> SentInvitations { get; set; } = null!;
@@ -134,7 +132,11 @@ public class PercolatorDbContext : DbContext
         {
             entity.ToTable("PeerVerifications");
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.PeerId).IsRequired();
+            entity.Property(e => e.PeerId)
+                .IsRequired()
+                .HasConversion(
+                    v => v.Value,
+                    v => new Percolator.Identity.PeerId(v));
             entity.Property(e => e.Fingerprint).IsRequired();
             entity.Property(e => e.Method).IsRequired();
             entity.Property(e => e.VerifiedAtUtc).IsRequired();
@@ -264,8 +266,7 @@ public class PercolatorDbContext : DbContext
             entity.HasOne<SelfIdentityDbo>()
                 .WithOne(i => i.Keys)
                 .HasForeignKey<SelfIdentityKeysDbo>(k => k.SelfIdentityId)
-                .OnDelete(DeleteBehavior.Cascade)
-                .IsRequired();
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         // SelfIdentityKnownPeer
@@ -316,7 +317,7 @@ public class PercolatorDbContext : DbContext
                 .IsRequired()
                 .HasConversion(
                     v => v.Value,
-                    v => new Percolator.Cryptography.Primitives.PeerId(v));
+                    v => new Percolator.Identity.PeerId(v));
 
             // FK to authoritative peer identity catalog
             entity.HasOne<PeerIdentityDbo>()
@@ -347,7 +348,11 @@ public class PercolatorDbContext : DbContext
         {
             entity.ToTable("GroupCryptoStates");
             entity.HasKey(e => e.ConversationId);
-            entity.Property(e => e.ConversationId).IsRequired();
+            entity.Property(e => e.ConversationId)
+                .IsRequired()
+                .HasConversion(
+                    v => v.Value,
+                    v => new Percolator.Chat.Messaging.ValueObjects.ConversationId(v));
             entity.Property(e => e.GroupMasterKeyBytes).IsRequired();
             entity.Property(e => e.CreatedAtUtc).IsRequired();
             entity.Property(e => e.UpdatedAtUtc).IsRequired();
@@ -602,7 +607,11 @@ public class PercolatorDbContext : DbContext
             entity.ToTable("Messages");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).ValueGeneratedOnAdd();
-            entity.Property(e => e.ConversationId).IsRequired();
+            entity.Property(e => e.ConversationId)
+                .IsRequired()
+                .HasConversion(
+                    v => v.Value,
+                    v => new Percolator.Chat.Messaging.ValueObjects.ConversationId(v));
             entity.Property(e => e.PublicMessageId)
                 .HasConversion(
                     v => v.Value,
@@ -638,48 +647,15 @@ public class PercolatorDbContext : DbContext
             entity.ToTable("ReadReceipts");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).ValueGeneratedOnAdd();
-            entity.Property(e => e.ConversationId).IsRequired();
+            entity.Property(e => e.ConversationId)
+                .IsRequired()
+                .HasConversion(
+                    v => v.Value,
+                    v => new Percolator.Chat.Messaging.ValueObjects.ConversationId(v));
             entity.Property(e => e.MessageGuid).IsRequired();
             entity.Property(e => e.ReaderId).IsRequired();
             entity.Property(e => e.SentAt).IsRequired();
             entity.HasIndex(e => new { e.ConversationId, e.MessageGuid, e.ReaderId }).IsUnique();
-            entity.HasOne(e => e.Conversation)
-                .WithMany()
-                .HasForeignKey(e => e.ConversationId)
-                .OnDelete(DeleteBehavior.Cascade)
-                .IsRequired();
-        });
-
-        // DeliveredReceipts
-        modelBuilder.Entity<DeliveredReceiptDbo>(entity =>
-        {
-            entity.ToTable("DeliveredReceipts");
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).ValueGeneratedOnAdd();
-            entity.Property(e => e.ConversationId).IsRequired();
-            entity.Property(e => e.MessageGuid).IsRequired();
-            entity.Property(e => e.RecipientId).IsRequired();
-            entity.Property(e => e.DeliveredAt).IsRequired();
-            entity.HasIndex(e => new { e.ConversationId, e.MessageGuid, e.RecipientId }).IsUnique();
-            entity.HasOne(e => e.Conversation)
-                .WithMany()
-                .HasForeignKey(e => e.ConversationId)
-                .OnDelete(DeleteBehavior.Cascade)
-                .IsRequired();
-        });
-
-        // EmojiReactions
-        modelBuilder.Entity<EmojiReactionDbo>(entity =>
-        {
-            entity.ToTable("EmojiReactions");
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).ValueGeneratedOnAdd();
-            entity.Property(e => e.ConversationId).IsRequired();
-            entity.Property(e => e.MessageGuid).IsRequired();
-            entity.Property(e => e.ReactorId).IsRequired();
-            entity.Property(e => e.Emoji).IsRequired();
-            entity.Property(e => e.SentAt).IsRequired();
-            entity.HasIndex(e => new { e.ConversationId, e.MessageGuid, e.ReactorId, e.Emoji }).IsUnique();
             entity.HasOne(e => e.Conversation)
                 .WithMany()
                 .HasForeignKey(e => e.ConversationId)

@@ -21,7 +21,15 @@ public class SqliteSessionRepositoryTests
         var ctx = TestDb.NewContextWithSchema(options, 1);
         if (!ctx.SelfIdentities.Any())
         {
-            ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = new SelfId(1), PublicIdentityId = new PublicIdentityId(Guid.NewGuid()), Name = "default", DeviceId = new DeviceId(1), ListeningPort = new Percolator.Identity.Model.ListeningPort(5000), LastUsedUtc = DateTimeOffset.UtcNow });
+            ctx.SelfIdentities.Add(new SelfIdentityDbo 
+            { 
+                Id = new SelfId(1), 
+                PublicIdentityId = new PublicIdentityId(Guid.NewGuid()), 
+                Name = "default", 
+                DeviceId = new DeviceId(1), 
+                ListeningPort = new Percolator.Identity.Model.ListeningPort(5000), 
+                LastUsedUtc = DateTimeOffset.UtcNow
+            });
             ctx.SaveChanges();
         }
         var repo = new SqliteSessionRepository(ctx, new NoopSessionCrypto(), new TestClock());
@@ -120,8 +128,24 @@ public class SqliteSessionRepositoryTests
         {
             if (!ctxSeed.SelfIdentities.Any())
             {
-                ctxSeed.SelfIdentities.Add(new SelfIdentityDbo { Id = new SelfId(1), PublicIdentityId = new PublicIdentityId(Guid.NewGuid()), Name = "one", DeviceId = new DeviceId(1), ListeningPort = new Percolator.Identity.Model.ListeningPort(5000), LastUsedUtc = DateTimeOffset.UtcNow });
-                ctxSeed.SelfIdentities.Add(new SelfIdentityDbo { Id = new SelfId(2), PublicIdentityId = new PublicIdentityId(Guid.NewGuid()), Name = "two", DeviceId = new DeviceId(1), ListeningPort = new Percolator.Identity.Model.ListeningPort(5000), LastUsedUtc = DateTimeOffset.UtcNow });
+                ctxSeed.SelfIdentities.Add(new SelfIdentityDbo 
+                { 
+                    Id = new SelfId(1), 
+                    PublicIdentityId = new PublicIdentityId(Guid.NewGuid()), 
+                    Name = "one", 
+                    DeviceId = new DeviceId(1), 
+                    ListeningPort = new Percolator.Identity.Model.ListeningPort(5000), 
+                    LastUsedUtc = DateTimeOffset.UtcNow
+                });
+                ctxSeed.SelfIdentities.Add(new SelfIdentityDbo 
+                { 
+                    Id = new SelfId(2), 
+                    PublicIdentityId = new PublicIdentityId(Guid.NewGuid()), 
+                    Name = "two", 
+                    DeviceId = new DeviceId(1), 
+                    ListeningPort = new Percolator.Identity.Model.ListeningPort(5000), 
+                    LastUsedUtc = DateTimeOffset.UtcNow
+                });
                 ctxSeed.SaveChanges();
             }
         }

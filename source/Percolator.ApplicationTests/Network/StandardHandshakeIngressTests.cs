@@ -55,7 +55,7 @@ public sealed class StandardHandshakeIngressTests
                 SharedSecret.FromBytes(new byte[32]));
 
         var sessions = new Mock<ISessionRepository>(MockBehavior.Strict);
-        sessions.Setup(s => s.AddAsync(It.IsAny<SecureSession>(), It.IsAny<CancellationToken>()))
+        sessions.Setup(s => s.AddAsync(It.IsAny<SecureSession>(), It.IsAny<CryptoSelfId>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         var directSessionMappingWriter = new Mock<IDirectSessionMappingWriter>(MockBehavior.Strict);
@@ -173,7 +173,7 @@ public sealed class StandardHandshakeIngressTests
                 SharedSecret.FromBytes(new byte[32]));
 
         var sessions = new Mock<ISessionRepository>(MockBehavior.Strict);
-        sessions.Setup(s => s.AddAsync(It.IsAny<SecureSession>(), It.IsAny<CancellationToken>()))
+        sessions.Setup(s => s.AddAsync(It.IsAny<SecureSession>(), It.IsAny<CryptoSelfId>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         var directSessionMappingWriter = new Mock<IDirectSessionMappingWriter>(MockBehavior.Strict);

@@ -10,7 +10,7 @@ public class PreKeyBundleDbo
     [Required]
     public byte[] PublicKey { get; set; } = null!;
 
-    public Percolator.Cryptography.Primitives.PeerId PeerId { get; set; }
+    public Percolator.Identity.PeerId PeerId { get; set; }
 
     public ICollection<SignedPreKeyDbo> SignedPreKeys { get; set; } = new List<SignedPreKeyDbo>();
     public ICollection<OneTimePreKeyDbo> OneTimePreKeys { get; set; } = new List<OneTimePreKeyDbo>();

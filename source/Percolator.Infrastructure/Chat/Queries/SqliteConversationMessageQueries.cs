@@ -18,11 +18,11 @@ public sealed class SqliteConversationMessageQueries : IConversationMessageQueri
     {
         var messages = await _db.Messages
             .AsNoTracking()
-            .Where(m => m.ConversationId == conversationId.Value)
+            .Where(m => m.ConversationId == conversationId)
             .Select(m => new MessageDto
             {
                 MessageId = m.PublicMessageId.Value,
-                ConversationId = m.ConversationId,
+                ConversationId = m.ConversationId.Value,
                 SenderId = m.SenderPeerId != null ? Guid.Parse(m.SenderPeerId.Value.ToString()) : (m.SenderSelfId != null ? Guid.Parse(m.SenderSelfId.Value.ToString()) : Guid.Empty),
                 Content = m.Body,
                 Timestamp = m.SentAt

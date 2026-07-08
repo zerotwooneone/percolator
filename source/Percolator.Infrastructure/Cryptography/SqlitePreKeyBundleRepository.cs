@@ -106,7 +106,7 @@ public class SqlitePreKeyBundleRepository : IPreKeyBundleRepository
 
             var preKeyBundle = new PreKeyBundleDbo
             {
-                PeerId = new CryptographyPeerId( peerId.Value),
+                PeerId = new Percolator.Identity.PeerId( peerId.Value),
                 PublicKey = first.IdentitySigningKey.ToArray(),
             };
 

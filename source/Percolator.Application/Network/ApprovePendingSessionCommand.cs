@@ -210,7 +210,7 @@ namespace Percolator.Application.Network
                 proto,
                 root,
                 _clock);
-            await _sessions.AddAsync(session, cancellationToken).ConfigureAwait(false);
+            await _sessions.AddAsync(session, new CryptoSelfId(_active.Identity.SelfIdentityId.Value), cancellationToken).ConfigureAwait(false);
 
             // Persist DirectSession mapping for conversation lookup
             var inviterNetPeerId = new Percolator.Network.PeerId(pending.RemotePeerId.Value);

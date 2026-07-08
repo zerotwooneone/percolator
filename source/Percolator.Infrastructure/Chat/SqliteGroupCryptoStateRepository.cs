@@ -18,11 +18,11 @@ public sealed class SqliteGroupCryptoStateRepository : IGroupCryptoStateReposito
         _db = db;
     }
 
-    public async Task<GroupMasterKeyBytes?> GetGroupMasterKeyAsync(ConversationId conversationId, CancellationToken cancellationToken = default)
+    public async Task<GroupMasterKeyBytes?> GetGroupMasterKeyAsync(Percolator.Chat.Messaging.ValueObjects.ConversationId conversationId, CancellationToken cancellationToken = default)
     {
         var dbo = await _db.GroupCryptoStates
             .AsNoTracking()
-            .FirstOrDefaultAsync(c => c.ConversationId == conversationId.Value, cancellationToken);
+            .FirstOrDefaultAsync(c => c.ConversationId == conversationId, cancellationToken);
 
         if (dbo is null)
             return null;
@@ -34,23 +34,23 @@ public sealed class SqliteGroupCryptoStateRepository : IGroupCryptoStateReposito
         return GroupMasterKeyBytes.FromBytesOwned(dbo.GroupMasterKeyBytes);
     }
 
-    public async Task UpsertGroupMasterKeyAsync(ConversationId conversationId, GroupMasterKeyBytes groupMasterKey, CancellationToken cancellationToken = default)
+    public async Task UpsertGroupMasterKeyAsync(Percolator.Chat.Messaging.ValueObjects.ConversationId conversationId, GroupMasterKeyBytes groupMasterKey, CancellationToken cancellationToken = default)
     {
         var now = DateTimeOffset.UtcNow;
         var keyBytes = groupMasterKey.ToArray();
-
+        
         // Validate length invariant
         if (keyBytes.Length != 32)
             throw new InvalidOperationException($"GroupMasterKey must be exactly 32 bytes, but was {keyBytes.Length}.");
 
         var existing = await _db.GroupCryptoStates
-            .FirstOrDefaultAsync(c => c.ConversationId == conversationId.Value, cancellationToken);
+            .FirstOrDefaultAsync(c => c.ConversationId == conversationId, cancellationToken);
 
         if (existing is null)
         {
             _db.GroupCryptoStates.Add(new GroupCryptoStateDbo
             {
-                ConversationId = conversationId.Value,
+                ConversationId = conversationId,
                 GroupMasterKeyBytes = keyBytes,
                 CreatedAtUtc = now,
                 UpdatedAtUtc = now

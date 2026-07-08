@@ -58,6 +58,7 @@ public sealed class SqliteSelfIdentityDomainRepository : ISelfIdentityRepository
             Name = identity.DisplayName?.Value ?? string.Empty,
             LastUsedUtc = identity.LastUsedUtc,
             ListeningPort = identity.ListeningPort,
+            DeviceId = identity.DeviceId,
             ActiveIdentityKeySpki = activeKey?.Spki,
             ActiveIdentityKeyFingerprint = activeKey?.Fingerprint,
             RelayDeliveryRootKey = identity.RelayDeliveryRootKey?.ToArray()
@@ -88,6 +89,8 @@ public sealed class SqliteSelfIdentityDomainRepository : ISelfIdentityRepository
                     PublicIdentityId = identity.PublicIdentityId,
                     Name = identity.DisplayName?.Value ?? string.Empty,
                     LastUsedUtc = identity.LastUsedUtc,
+                    ListeningPort = identity.ListeningPort,
+                    DeviceId = identity.DeviceId,
                     ActiveIdentityKeySpki = activeKey?.Spki,
                     ActiveIdentityKeyFingerprint = activeKey?.Fingerprint,
                     RelayDeliveryRootKey = identity.RelayDeliveryRootKey?.ToArray()

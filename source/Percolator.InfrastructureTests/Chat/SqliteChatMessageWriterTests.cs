@@ -79,7 +79,7 @@ public class SqliteChatMessageWriterTests
         await writer.AddTextMessageAsync(conversationId, participantId, "hello", messageId, sentAt, ct);
         await writer.AddTextMessageAsync(conversationId, participantId, "hello", messageId, sentAt, ct);
 
-        var count = await ctx.Messages.CountAsync(m => m.ConversationId == conversationId.Value && m.PublicMessageId.Value == messageId.Value);
+        var count = await ctx.Messages.CountAsync(m => m.ConversationId == conversationId && m.PublicMessageId.Value == messageId.Value);
         count.Should().Be(1);
     }
 
@@ -97,7 +97,7 @@ public class SqliteChatMessageWriterTests
 
         await writer.AddTextMessageAsync(conversationId, participantId, "hello", messageId, sentAt, ct);
 
-        var msg = await ctx.Messages.SingleAsync(m => m.ConversationId == conversationId.Value && m.PublicMessageId == messageId);
+        var msg = await ctx.Messages.SingleAsync(m => m.ConversationId == conversationId && m.PublicMessageId == messageId);
         msg.SenderPeerId.Should().Be(otherPeerId);
     }
 
@@ -120,7 +120,7 @@ public class SqliteChatMessageWriterTests
         await writer.AddReadReceiptAsync(conversationId, new ChatSelfId(1), readerId, messageId, sentAt, ct);
         await writer.AddReadReceiptAsync(conversationId, new ChatSelfId(1), readerId, messageId, sentAt, ct);
 
-        var count = await ctx.ReadReceipts.CountAsync(r => r.ConversationId == conversationId.Value && r.MessageGuid == messageId.Value);
+        var count = await ctx.ReadReceipts.CountAsync(r => r.ConversationId == conversationId && r.MessageGuid == messageId.Value);
         count.Should().Be(1);
     }
 }

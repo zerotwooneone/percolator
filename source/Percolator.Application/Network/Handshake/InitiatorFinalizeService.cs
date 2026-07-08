@@ -273,7 +273,7 @@ namespace Percolator.Application.Network.Handshake
                 new AeadSessionCrypto(),
                 _clock);
 
-            await _sessions.AddAsync(final, cancellationToken).ConfigureAwait(false);
+            await _sessions.AddAsync(final, new CryptoSelfId(selfIdentityId.Value), cancellationToken).ConfigureAwait(false);
 
             // Persist mapping between remote peer and session id (used by UI for relay-host selection).
             if (peerIdentity is not null)
@@ -401,7 +401,7 @@ namespace Percolator.Application.Network.Handshake
                         new AeadSessionCrypto(),
                         _clock);
 
-                    await _sessions.AddAsync(final, cancellationToken).ConfigureAwait(false);
+                    await _sessions.AddAsync(final, new CryptoSelfId(selfIdentityId.Value), cancellationToken).ConfigureAwait(false);
 
                     // Persist mapping between remote peer and session id (used by UI for relay-host selection).
                     try
@@ -528,7 +528,7 @@ namespace Percolator.Application.Network.Handshake
                 _clock,
                 crypto: _sessionCrypto);
 
-            await _sessions.AddAsync(initiatorSession, cancellationToken).ConfigureAwait(false);
+            await _sessions.AddAsync(initiatorSession, new CryptoSelfId(selfIdentityId.Value), cancellationToken).ConfigureAwait(false);
 
             if (peerIdentity is not null)
             {

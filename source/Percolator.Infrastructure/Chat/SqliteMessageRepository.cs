@@ -22,7 +22,7 @@ public sealed class SqliteMessageRepository : IMessageRepository
     {
         var dbo = new MessageDbo
         {
-            ConversationId = message.ConversationId.Value,
+            ConversationId = message.ConversationId,
             PublicMessageId = message.Id,
             SenderPeerId = message.SenderId is RemoteParticipantId remotePeerId ? remotePeerId.PeerId : null,
             SenderSelfId = message.SenderId is LocalParticipantId localSelfId ? localSelfId.SelfId : null,
@@ -84,7 +84,7 @@ public sealed class SqliteMessageRepository : IMessageRepository
 
         return new Message(
             dbo.PublicMessageId,
-            new ConversationId(dbo.ConversationId),
+            dbo.ConversationId,
             senderId,
             dbo.Body,
             dbo.SentAt);

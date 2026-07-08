@@ -44,7 +44,15 @@ public sealed class PendingHandshakeQueriesTests
 
         if (!ctx.SelfIdentities.Any())
         {
-            ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = new SelfId(1), PublicIdentityId = new PublicIdentityId(Guid.NewGuid()), Name = "default", DeviceId = new Percolator.Identity.DeviceId(1), ListeningPort = new Percolator.Identity.Model.ListeningPort(5000), LastUsedUtc = DateTimeOffset.UtcNow });
+            ctx.SelfIdentities.Add(new SelfIdentityDbo 
+            { 
+                Id = new SelfId(1), 
+                PublicIdentityId = new PublicIdentityId(Guid.NewGuid()), 
+                Name = "default", 
+                DeviceId = new Percolator.Identity.DeviceId(1), 
+                ListeningPort = new Percolator.Identity.Model.ListeningPort(5000), 
+                LastUsedUtc = DateTimeOffset.UtcNow
+            });
             ctx.SaveChanges();
         }
 
@@ -124,7 +132,15 @@ public sealed class PendingHandshakeQueriesTests
 
         if (!ctx.SelfIdentities.Any())
         {
-            ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = new SelfId(1), PublicIdentityId = new PublicIdentityId(Guid.NewGuid()), Name = "default", DeviceId = new Percolator.Identity.DeviceId(1), ListeningPort = new Percolator.Identity.Model.ListeningPort(5000), LastUsedUtc = DateTimeOffset.UtcNow });
+            ctx.SelfIdentities.Add(new SelfIdentityDbo 
+            { 
+                Id = new SelfId(1), 
+                PublicIdentityId = new PublicIdentityId(Guid.NewGuid()), 
+                Name = "default", 
+                DeviceId = new Percolator.Identity.DeviceId(1), 
+                ListeningPort = new Percolator.Identity.Model.ListeningPort(5000), 
+                LastUsedUtc = DateTimeOffset.UtcNow
+            });
             ctx.SaveChanges();
         }
 
