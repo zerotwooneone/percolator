@@ -46,7 +46,7 @@ public sealed class PendingHandshakeQueriesTests
         {
             ctx.SelfIdentities.Add(new SelfIdentityDbo 
             { 
-                Id = new SelfId(1), 
+                Id = 1, 
                 PublicIdentityId = new PublicIdentityId(Guid.NewGuid()), 
                 Name = "default", 
                 DeviceId = new Percolator.Identity.DeviceId(1), 
@@ -134,7 +134,7 @@ public sealed class PendingHandshakeQueriesTests
         {
             ctx.SelfIdentities.Add(new SelfIdentityDbo 
             { 
-                Id = new SelfId(1), 
+                Id = 1, 
                 PublicIdentityId = new PublicIdentityId(Guid.NewGuid()), 
                 Name = "default", 
                 DeviceId = new Percolator.Identity.DeviceId(1), 
@@ -152,7 +152,7 @@ public sealed class PendingHandshakeQueriesTests
 
         ctx.PeerIdentities.Add(new PeerIdentityDbo
         {
-            PeerId = relayPeerId,
+            PeerId = relayPeerId.Value,
             PublicIdentityId = new PublicIdentityId(Guid.NewGuid()),
             Name = "RelayHost",
             Version = 1,
@@ -162,29 +162,29 @@ public sealed class PendingHandshakeQueriesTests
 
         ctx.PeerRoutingProfiles.Add(new PeerRoutingProfileDbo
         {
-            PeerId = new Percolator.Network.PeerId(remotePeerId.Value),
+            PeerId = remotePeerId.Value,
             ReachabilityStatus = 0,
             ReachabilityLastChangeUtc = clock.UtcNow,
             DirectMessagePublicKey = null
         });
         ctx.PeerRoutingProfiles.Add(new PeerRoutingProfileDbo
         {
-            PeerId = relayPeerNetworkId,
+            PeerId = relayPeerNetworkId.Value,
             ReachabilityStatus = 0,
             ReachabilityLastChangeUtc = clock.UtcNow,
             DirectMessagePublicKey = null
         });
         ctx.PeerRoutingGrpcEndPoints.Add(new GrpcEndPointRoutingDbo
         {
-            PeerId = relayPeerNetworkId,
+            PeerId = relayPeerNetworkId.Value,
             Host = "relay.local",
             Port = 5001,
             LastSeenUtc = clock.UtcNow
         });
         ctx.PeerRoutingRelays.Add(new RelayLinkDbo
         {
-            PeerId = new Percolator.Network.PeerId(remotePeerId.Value),
-            RelayPeerId = relayPeerNetworkId,
+            PeerId = remotePeerId.Value,
+            RelayPeerId = relayPeerNetworkId.Value,
             LastSeenUtc = clock.UtcNow
         });
         ctx.SaveChanges();

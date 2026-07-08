@@ -23,7 +23,7 @@ public class SqliteSessionRepositoryTests
         {
             ctx.SelfIdentities.Add(new SelfIdentityDbo 
             { 
-                Id = new SelfId(1), 
+                Id = 1, 
                 PublicIdentityId = new PublicIdentityId(Guid.NewGuid()), 
                 Name = "default", 
                 DeviceId = new DeviceId(1), 
@@ -130,7 +130,7 @@ public class SqliteSessionRepositoryTests
             {
                 ctxSeed.SelfIdentities.Add(new SelfIdentityDbo 
                 { 
-                    Id = new SelfId(1), 
+                    Id = 1, 
                     PublicIdentityId = new PublicIdentityId(Guid.NewGuid()), 
                     Name = "one", 
                     DeviceId = new DeviceId(1), 
@@ -139,7 +139,7 @@ public class SqliteSessionRepositoryTests
                 });
                 ctxSeed.SelfIdentities.Add(new SelfIdentityDbo 
                 { 
-                    Id = new SelfId(2), 
+                    Id = 2, 
                     PublicIdentityId = new PublicIdentityId(Guid.NewGuid()), 
                     Name = "two", 
                     DeviceId = new DeviceId(1), 

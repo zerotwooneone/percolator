@@ -48,7 +48,7 @@ public sealed class SentInvitationPurgeServiceTests
         // Seed SelfIdentity
         ctx.SelfIdentities.Add(new SelfIdentityDbo 
         { 
-            Id = new SelfId(1), 
+            Id = 1, 
             PublicIdentityId = new PublicIdentityId(Guid.NewGuid()), 
             Name = "test",
             DeviceId = new Percolator.Identity.DeviceId(1),

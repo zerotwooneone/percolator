@@ -40,7 +40,7 @@ public sealed class SqlitePendingSessionRepositoryTests
         {
             ctx.SelfIdentities.Add(new SelfIdentityDbo 
             { 
-                Id = new SelfId(1), 
+                Id = 1, 
                 PublicIdentityId = new PublicIdentityId(Guid.NewGuid()), 
                 Name = "default", 
                 DeviceId = new Percolator.Identity.DeviceId(1), 

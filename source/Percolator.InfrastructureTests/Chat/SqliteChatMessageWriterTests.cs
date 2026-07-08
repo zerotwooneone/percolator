@@ -26,7 +26,7 @@ public class SqliteChatMessageWriterTests
         var ctx = TestDb.NewContextWithSchema(options, 1);
         if (!ctx.SelfIdentities.Any())
         {
-            ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = new SelfId(1), PublicIdentityId = new PublicIdentityId(Guid.NewGuid()), Name = "default", DeviceId = new Percolator.Identity.DeviceId(1), ListeningPort = new Percolator.Identity.Model.ListeningPort(5000), LastUsedUtc = DateTimeOffset.UtcNow });
+            ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = 1, PublicIdentityId = new PublicIdentityId(Guid.NewGuid()), Name = "default", DeviceId = new Percolator.Identity.DeviceId(1), ListeningPort = new Percolator.Identity.Model.ListeningPort(5000), LastUsedUtc = DateTimeOffset.UtcNow });
             ctx.SaveChanges();
         }
 
@@ -35,7 +35,7 @@ public class SqliteChatMessageWriterTests
 
     private static (ConversationId conversationId, uint otherPeerId, Percolator.Chat.GroupLedger.PublicIdentityId otherPublicIdentityId) SeedConversation(PercolatorDbContext ctx, SelfId selfIdentityId)
     {
-        var self = ctx.SelfIdentities.Single(si => si.Id == selfIdentityId);
+        var self = ctx.SelfIdentities.Single(si => si.Id == selfIdentityId.Value);
         var conversationId = new ConversationId(Guid.NewGuid());
         var otherPeerId = 12345u;
         var otherPublicIdentityId = new Percolator.Chat.GroupLedger.PublicIdentityId(Guid.NewGuid());
@@ -43,21 +43,21 @@ public class SqliteChatMessageWriterTests
 
         ctx.Conversations.Add(new ConversationDbo
         {
-            Id = conversationId,
+            Id = conversationId.Value,
             Name = "chat",
-            SelfIdentityId = new ChatSelfId(selfIdentityId.Value),
+            SelfIdentityId = selfIdentityId.Value,
             CreatedAt = fixedTime,
             UpdatedAt = fixedTime
         });
         ctx.ConversationParticipants.Add(new ConversationParticipantDbo
         {
-            ConversationId = conversationId,
-            ParticipantId = new ChatPeerId(1) // Self identity as participant
+            ConversationId = conversationId.Value,
+            ParticipantId = 1 // Self identity as participant
         });
         ctx.ConversationParticipants.Add(new ConversationParticipantDbo
         {
-            ConversationId = conversationId,
-            ParticipantId = new ChatPeerId((uint)otherPeerId)
+            ConversationId = conversationId.Value,
+            ParticipantId = otherPeerId
         });
         ctx.SaveChanges();
 
@@ -79,7 +79,7 @@ public class SqliteChatMessageWriterTests
         await writer.AddTextMessageAsync(conversationId, participantId, "hello", messageId, sentAt, ct);
         await writer.AddTextMessageAsync(conversationId, participantId, "hello", messageId, sentAt, ct);
 
-        var count = await ctx.Messages.CountAsync(m => m.ConversationId == conversationId && m.PublicMessageId.Value == messageId.Value);
+        var count = await ctx.Messages.CountAsync(m => m.ConversationId == conversationId.Value && m.PublicMessageId.Value == messageId.Value);
         count.Should().Be(1);
     }
 
@@ -97,7 +97,7 @@ public class SqliteChatMessageWriterTests
 
         await writer.AddTextMessageAsync(conversationId, participantId, "hello", messageId, sentAt, ct);
 
-        var msg = await ctx.Messages.SingleAsync(m => m.ConversationId == conversationId && m.PublicMessageId == messageId);
+        var msg = await ctx.Messages.SingleAsync(m => m.ConversationId == conversationId.Value && m.PublicMessageId == messageId);
         msg.SenderPeerId.Should().Be(otherPeerId);
     }
 
@@ -120,7 +120,7 @@ public class SqliteChatMessageWriterTests
         await writer.AddReadReceiptAsync(conversationId, new ChatSelfId(1), readerId, messageId, sentAt, ct);
         await writer.AddReadReceiptAsync(conversationId, new ChatSelfId(1), readerId, messageId, sentAt, ct);
 
-        var count = await ctx.ReadReceipts.CountAsync(r => r.ConversationId == conversationId && r.MessageGuid == messageId.Value);
+        var count = await ctx.ReadReceipts.CountAsync(r => r.ConversationId == conversationId.Value && r.MessageGuid == messageId.Value);
         count.Should().Be(1);
     }
 }

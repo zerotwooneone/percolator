@@ -54,7 +54,7 @@ public sealed class PeerConnectionSidebarQueriesTests : IDisposable
 
         _db.PeerIdentities.Add(new PeerIdentityDbo
         {
-            PeerId = peerId,
+            PeerId = peerId.Value,
             PublicIdentityId = new PublicIdentityId(Guid.NewGuid()),
             Name = "Test Peer",
             Version = 1,
@@ -64,9 +64,9 @@ public sealed class PeerConnectionSidebarQueriesTests : IDisposable
 
         _db.Sessions.Add(new SessionDbo
         {
-            SelfIdentityId = selfIdentityId,
+            SelfIdentityId = selfIdentityId.Value,
             SessionId = sessionId,
-            RemotePeerId = peerId,
+            RemotePeerId = peerId.Value,
             ProtocolVersion = 1,
             RootKey = new byte[32],
             CreatedAtUtc = _now,
@@ -100,7 +100,7 @@ public sealed class PeerConnectionSidebarQueriesTests : IDisposable
 
         _db.PeerIdentities.Add(new PeerIdentityDbo
         {
-            PeerId = peerId,
+            PeerId = peerId.Value,
             PublicIdentityId = new PublicIdentityId(Guid.NewGuid()),
             Name = "Test Peer",
             Version = 1,
@@ -110,9 +110,9 @@ public sealed class PeerConnectionSidebarQueriesTests : IDisposable
 
         _db.Sessions.Add(new SessionDbo
         {
-            SelfIdentityId = selfIdentityId,
+            SelfIdentityId = selfIdentityId.Value,
             SessionId = sessionId,
-            RemotePeerId = peerId,
+            RemotePeerId = peerId.Value,
             ProtocolVersion = 1,
             RootKey = new byte[32],
             CreatedAtUtc = _now,
@@ -121,8 +121,8 @@ public sealed class PeerConnectionSidebarQueriesTests : IDisposable
 
         _db.DirectSessions.Add(new DirectSessionDbo
         {
-            SelfIdentityId = selfIdentityId,
-            RemotePeerId = peerId,
+            SelfIdentityId = selfIdentityId.Value,
+            RemotePeerId = peerId.Value,
             SessionId = sessionId
         });
 
@@ -146,7 +146,7 @@ public sealed class PeerConnectionSidebarQueriesTests : IDisposable
 
         _db.SentInvitations.Add(new SentInvitationDbo
         {
-            SelfIdentityId = selfIdentityId,
+            SelfIdentityId = selfIdentityId.Value,
             RequestCorrelationId = correlationId.ToString(),
             SignedPreKeyId = Guid.NewGuid(),
             TargetPeerId = (uint)targetPeerId,
@@ -182,7 +182,7 @@ public sealed class PeerConnectionSidebarQueriesTests : IDisposable
 
         _db.SentInvitations.Add(new SentInvitationDbo
         {
-            SelfIdentityId = selfIdentityId,
+            SelfIdentityId = selfIdentityId.Value,
             RequestCorrelationId = correlationId.ToString(),
             SignedPreKeyId = Guid.NewGuid(),
             CreatedAtUtc = _now.AddHours(-2),
@@ -210,7 +210,7 @@ public sealed class PeerConnectionSidebarQueriesTests : IDisposable
 
         _db.PeerIdentities.Add(new PeerIdentityDbo
         {
-            PeerId = peerId,
+            PeerId = peerId.Value,
             PublicIdentityId = new PublicIdentityId(Guid.NewGuid()),
             Name = "Test Peer",
             Version = 1,
@@ -220,9 +220,9 @@ public sealed class PeerConnectionSidebarQueriesTests : IDisposable
 
         _db.Sessions.Add(new SessionDbo
         {
-            SelfIdentityId = selfIdentityId,
+            SelfIdentityId = selfIdentityId.Value,
             SessionId = sessionId,
-            RemotePeerId = peerId,
+            RemotePeerId = peerId.Value,
             ProtocolVersion = 1,
             RootKey = new byte[32],
             CreatedAtUtc = _now,
@@ -231,7 +231,7 @@ public sealed class PeerConnectionSidebarQueriesTests : IDisposable
 
         _db.SentInvitations.Add(new SentInvitationDbo
         {
-            SelfIdentityId = selfIdentityId,
+            SelfIdentityId = selfIdentityId.Value,
             RequestCorrelationId = correlationId.ToString(),
             SignedPreKeyId = Guid.NewGuid(),
             TargetPeerId = (uint)targetPeerId, // Same peer as established session
@@ -260,9 +260,9 @@ public sealed class PeerConnectionSidebarQueriesTests : IDisposable
 
         _db.PendingSessions.Add(new PendingSessionDbo
         {
-            SelfIdentityId = selfIdentityId,
+            SelfIdentityId = selfIdentityId.Value,
             Id = Guid.NewGuid(),
-            RemotePeerId = peerId,
+            RemotePeerId = peerId.Value,
             State = (int)ApprovalState.AwaitingApproval,
             CreatedAtUtc = _now
         });
@@ -289,7 +289,7 @@ public sealed class PeerConnectionSidebarQueriesTests : IDisposable
 
         _db.PeerIdentities.Add(new PeerIdentityDbo
         {
-            PeerId = peerId1,
+            PeerId = peerId1.Value,
             PublicIdentityId = new PublicIdentityId(Guid.NewGuid()),
             Name = "Peer 1",
             Version = 1,
@@ -299,7 +299,7 @@ public sealed class PeerConnectionSidebarQueriesTests : IDisposable
 
         _db.PeerIdentities.Add(new PeerIdentityDbo
         {
-            PeerId = peerId2,
+            PeerId = peerId2.Value,
             PublicIdentityId = new PublicIdentityId(Guid.NewGuid()),
             Name = "Peer 2",
             Version = 1,
@@ -309,9 +309,9 @@ public sealed class PeerConnectionSidebarQueriesTests : IDisposable
 
         _db.Sessions.Add(new SessionDbo
         {
-            SelfIdentityId = selfIdentityId,
+            SelfIdentityId = selfIdentityId.Value,
             SessionId = sessionId,
-            RemotePeerId = peerId1,
+            RemotePeerId = peerId1.Value,
             ProtocolVersion = 1,
             RootKey = new byte[32],
             CreatedAtUtc = _now,
@@ -320,7 +320,7 @@ public sealed class PeerConnectionSidebarQueriesTests : IDisposable
 
         _db.SentInvitations.Add(new SentInvitationDbo
         {
-            SelfIdentityId = selfIdentityId,
+            SelfIdentityId = selfIdentityId.Value,
             RequestCorrelationId = correlationId.ToString(),
             SignedPreKeyId = Guid.NewGuid(),
             TargetPeerId = (uint)targetPeerId,
