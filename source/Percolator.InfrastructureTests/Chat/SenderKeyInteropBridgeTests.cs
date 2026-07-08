@@ -4,6 +4,7 @@ using NUnit.Framework;
 using Percolator.Cryptography.Primitives;
 using Percolator.Infrastructure.Chat;
 using Percolator.Infrastructure.Chat.Persistence;
+using Percolator.Infrastructure.Identity;
 using Percolator.Infrastructure.Persistence;
 
 namespace Percolator.InfrastructureTests.Chat;
@@ -17,7 +18,7 @@ public class SenderKeyInteropBridgeTests
     {
         // Arrange
         var conversationId = new ConversationId(Guid.NewGuid());
-        var senderId = new PeerId(1);
+        var senderPublicIdentityId = new CryptoPublicIdentity(Guid.NewGuid());
         var deviceId = new DeviceId(1);
         
         var options = new DbContextOptionsBuilder<PercolatorDbContext>()
@@ -29,7 +30,7 @@ public class SenderKeyInteropBridgeTests
         var bridge = new SenderKeyInteropBridge(dbFactory);
 
         // Act
-        var result = bridge.TryLoadSenderKey(conversationId, senderId, deviceId, out var recordBytes);
+        var result = bridge.TryLoadSenderKey(conversationId, senderPublicIdentityId, deviceId, out var recordBytes);
 
         // Assert
         Assert.That(result, Is.False);
@@ -41,7 +42,7 @@ public class SenderKeyInteropBridgeTests
     {
         // Arrange
         var conversationId = new ConversationId(Guid.NewGuid());
-        var senderId = new PeerId(2);
+        var senderPublicIdentityId = new CryptoPublicIdentity(Guid.NewGuid());
         var deviceId = new DeviceId(1);
         var originalBytes = new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
         
@@ -53,9 +54,21 @@ public class SenderKeyInteropBridgeTests
         var dbFactory = new DbContextFactoryWrapper(db);
         var bridge = new SenderKeyInteropBridge(dbFactory);
 
+        // Add a PeerIdentityDbo to enable the lookup
+        db.PeerIdentities.Add(new PeerIdentityDbo
+        {
+            PeerId = 1,
+            PublicIdentityId = senderPublicIdentityId.Value,
+            Name = "Test",
+            Version = 0,
+            CreatedAtUtc = DateTimeOffset.UtcNow,
+            UpdatedAtUtc = DateTimeOffset.UtcNow
+        });
+        db.SaveChanges();
+
         // Act
-        bridge.StoreSenderKey(conversationId, senderId, deviceId, originalBytes);
-        var loaded = bridge.TryLoadSenderKey(conversationId, senderId, deviceId, out var loadedBytes);
+        bridge.StoreSenderKey(conversationId, senderPublicIdentityId, deviceId, originalBytes);
+        var loaded = bridge.TryLoadSenderKey(conversationId, senderPublicIdentityId, deviceId, out var loadedBytes);
 
         // Assert
         Assert.That(loaded, Is.True);
