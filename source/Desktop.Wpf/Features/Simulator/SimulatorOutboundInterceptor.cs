@@ -109,14 +109,14 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
         }
 
         // Routing rule: check if endpoint matches a simulated peer using fast index lookup
-        if (!_state.TryResolvePeerId(endpoint, out var simulatedPeerId))
+        if (!_state.TryResolvePeerId(endpoint, out var simulatedPeerId) || simulatedPeerId is null)
         {
             return new SimulatorOutboundInterceptResult.Undeliverable(
                 endpoint,
                 $"No simulated peer listening at {endpoint.Host}:{endpoint.Port}");
         }
 
-        var match = _state.Peers.FirstOrDefault(p => p.NetworkPeerId == simulatedPeerId);
+        var match = _state.Peers.FirstOrDefault(p => p.NetworkPeerId == simulatedPeerId.Value);
         if (match is null)
         {
             return new SimulatorOutboundInterceptResult.Undeliverable(
@@ -192,6 +192,12 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
             return false;
         }
 
-        return _state.TryResolvePeerId(endpoint, out simulatedNetworkPeerId);
+        if (!_state.TryResolvePeerId(endpoint, out var resolvedPeerId) || resolvedPeerId is null)
+        {
+            return false;
+        }
+
+        simulatedNetworkPeerId = resolvedPeerId.Value;
+        return true;
     }
 }

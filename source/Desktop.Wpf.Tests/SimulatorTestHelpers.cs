@@ -115,9 +115,9 @@ public abstract class TestSimulatorStateServiceBase : ISimulatorStateService
     public virtual Task SendChatMessageToMainAsync(NetworkPeerId simulatedNetworkPeerId, string content, CancellationToken cancellationToken = default)
         => Task.CompletedTask;
 
-    public virtual bool TryResolvePeerId(DnsEndPoint endpoint, out NetworkPeerId networkPeerId)
+    public virtual bool TryResolvePeerId(DnsEndPoint endpoint, out NetworkPeerId? networkPeerId)
     {
-        networkPeerId = default;
+        networkPeerId = null;
         return false;
     }
 }

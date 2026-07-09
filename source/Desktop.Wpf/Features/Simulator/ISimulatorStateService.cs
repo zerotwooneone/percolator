@@ -146,5 +146,5 @@ public interface ISimulatorStateService
 
     Task SendChatMessageToMainAsync(Percolator.Network.NetworkPeerId simulatedNetworkPeerId, string content, CancellationToken cancellationToken = default);
 
-    bool TryResolvePeerId(DnsEndPoint endpoint, out Percolator.Network.NetworkPeerId networkPeerId);
+    bool TryResolvePeerId(DnsEndPoint endpoint, out Percolator.Network.NetworkPeerId? networkPeerId);
 }

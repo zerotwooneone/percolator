@@ -2703,9 +2703,16 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         model.Track(endpointSub);
     }
 
-    public bool TryResolvePeerId(DnsEndPoint endpoint, out Percolator.Network.NetworkPeerId networkPeerId)
+    public bool TryResolvePeerId(DnsEndPoint endpoint, out Percolator.Network.NetworkPeerId? networkPeerId)
     {
-        return _endpointIndex.TryGetValue(endpoint, out networkPeerId);
+        if (_endpointIndex.TryGetValue(endpoint, out var peerId))
+        {
+            networkPeerId = peerId;
+            return true;
+        }
+        
+        networkPeerId = null;
+        return false;
     }
 
     private async Task OnRelayCapabilityChangedAsync(Percolator.Network.NetworkPeerId networkPeerId, bool enabled, CancellationToken cancellationToken)

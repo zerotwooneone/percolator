@@ -38,7 +38,8 @@ public sealed class SimulatorStateServiceEndpointResolutionTests
         // Act & Assert: Try to resolve the endpoint
         var resolved = stateService.TryResolvePeerId(endpoint!, out var resolvedPeerId);
         resolved.Should().BeTrue();
-        resolvedPeerId.Should().Be(peerId);
+        resolvedPeerId.Should().NotBeNull();
+        resolvedPeerId!.Value.Should().Be(peerId);
     }
 
     [Test]
@@ -53,7 +54,7 @@ public sealed class SimulatorStateServiceEndpointResolutionTests
         var nonExistingEndpoint = new DnsEndPoint("127.77.255.255", 9999);
         var resolved = stateService.TryResolvePeerId(nonExistingEndpoint, out var resolvedPeerId);
         resolved.Should().BeFalse();
-        resolvedPeerId.Should().Be(default);
+        resolvedPeerId.Should().BeNull();
     }
 
     [Test]
@@ -75,7 +76,8 @@ public sealed class SimulatorStateServiceEndpointResolutionTests
 
         // Verify old endpoint resolves
         stateService.TryResolvePeerId(oldEndpoint!, out var resolvedPeerId).Should().BeTrue();
-        resolvedPeerId.Should().Be(peerId);
+        resolvedPeerId.Should().NotBeNull();
+        resolvedPeerId!.Value.Should().Be(peerId);
 
         // Change the endpoint (using peer model API since no public alternative)
         var newEndpoint = new DnsEndPoint("127.77.99.99", 6000);
@@ -84,7 +86,8 @@ public sealed class SimulatorStateServiceEndpointResolutionTests
         // Act & Assert: Old endpoint should no longer resolve, new endpoint should resolve
         stateService.TryResolvePeerId(oldEndpoint!, out _).Should().BeFalse();
         stateService.TryResolvePeerId(newEndpoint, out resolvedPeerId).Should().BeTrue();
-        resolvedPeerId.Should().Be(peerId);
+        resolvedPeerId.Should().NotBeNull();
+        resolvedPeerId!.Value.Should().Be(peerId);
     }
 
     [Test]
@@ -106,7 +109,8 @@ public sealed class SimulatorStateServiceEndpointResolutionTests
 
         // Verify endpoint resolves
         stateService.TryResolvePeerId(endpoint!, out var resolvedPeerId).Should().BeTrue();
-        resolvedPeerId.Should().Be(peerId);
+        resolvedPeerId.Should().NotBeNull();
+        resolvedPeerId!.Value.Should().Be(peerId);
 
         // Remove the peer
         await stateService.RemovePeerAsync(peerId, CancellationToken.None).ConfigureAwait(false);
