@@ -19,7 +19,7 @@ public class PostTextMessageHandlerTests
 {
     private Mock<IDirectConversationResolver> _resolver = null!;
     private Mock<IChatMessageWriter> _writer = null!;
-    private Mock<IPublisher> _publisher = null!;
+    private Mock<IMediator> _publisher = null!;
     private ActiveIdentityContext _active = null!;
 
     [SetUp]
@@ -27,7 +27,7 @@ public class PostTextMessageHandlerTests
     {
         _resolver = new Mock<IDirectConversationResolver>(MockBehavior.Strict);
         _writer = new Mock<IChatMessageWriter>(MockBehavior.Strict);
-        _publisher = new Mock<IPublisher>(MockBehavior.Loose);
+        _publisher = new Mock<IMediator>(MockBehavior.Loose);
         _active = new ActiveIdentityContext();
     }
 
@@ -70,8 +70,8 @@ public class PostTextMessageHandlerTests
 
         object? publishedEvent = null;
         _publisher
-            .Setup(p => p.Publish(It.IsAny<object>(), It.IsAny<CancellationToken>()))
-            .Callback<object, CancellationToken>((evt, _) => publishedEvent = evt)
+            .Setup(p => p.Send(It.IsAny<Percolator.Application.Apps.Chat.Commands.DispatchTextMessageCommand>(), It.IsAny<CancellationToken>()))
+            .Callback<IRequest, CancellationToken>((evt, _) => publishedEvent = evt)
             .Returns(Task.CompletedTask);
 
         var handler = new PostTextMessageHandler(

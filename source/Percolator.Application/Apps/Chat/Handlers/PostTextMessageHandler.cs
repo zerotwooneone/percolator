@@ -18,18 +18,18 @@ public sealed class PostTextMessageHandler : IRequestHandler<PostTextMessageComm
 {
     private readonly IDirectConversationResolver _resolver;
     private readonly IChatMessageWriter _writer;
-    private readonly IPublisher _publisher;
+    private readonly IMediator _mediator;
     private readonly ISelfIdentityQueries _selfIdentityQueries;
 
     public PostTextMessageHandler(
         IDirectConversationResolver resolver,
         IChatMessageWriter writer,
-        IPublisher publisher,
+        IMediator mediator,
         ISelfIdentityQueries selfIdentityQueries)
     {
         _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
         _writer = writer ?? throw new ArgumentNullException(nameof(writer));
-        _publisher = publisher ?? throw new ArgumentNullException(nameof(publisher));
+        _mediator = mediator ?? throw new ArgumentNullException(nameof(mediator));
         _selfIdentityQueries = selfIdentityQueries;
     }
 
@@ -54,7 +54,7 @@ public sealed class PostTextMessageHandler : IRequestHandler<PostTextMessageComm
             cancellationToken).ConfigureAwait(false);
 
         var peerId = new Percolator.Identity.PeerId( resolution.Conversation.Peer1.Value);
-        await _publisher.Publish(new DispatchTextMessageCommand(
+        await _mediator.Send(new DispatchTextMessageCommand(
             request.PublicMessageId.Value,
             request.Content,
             request.SentTimestampUtc,
