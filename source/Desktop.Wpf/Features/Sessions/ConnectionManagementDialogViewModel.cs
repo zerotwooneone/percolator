@@ -224,7 +224,7 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
         GetRelayHostOptionsResult result;
         try
         {
-            result = await _mediator.Send(new GetRelayHostOptionsQuery(_active.Identity.SelfIdentityId.Value), ct).ConfigureAwait(false);
+            result = await _mediator.Send(new GetRelayHostOptionsQuery((int)_active.Identity.SelfIdentityId.Value), ct).ConfigureAwait(false);
         }
         catch
         {
@@ -289,7 +289,7 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
 
         try
         {
-            await _mediator.Send(new RejectPendingSessionCommand(item.PendingSessionId));
+            await _mediator.Send(new RejectPendingSessionCommand(item.PendingSessionId, _active.Identity.SelfIdentityId));
         }
         catch
         {

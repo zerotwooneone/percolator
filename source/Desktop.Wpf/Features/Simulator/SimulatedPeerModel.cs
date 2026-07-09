@@ -4,6 +4,7 @@ using Percolator.Cryptography;
 using Percolator.Identity;
 using R3;
 using System.Net;
+using Percolator.Network;
 
 namespace Desktop.Wpf.Features.Simulator;
 
@@ -31,7 +32,7 @@ public sealed class SimulatedPeerModel : IDisposable
     private readonly ObservableList<SimulatorHandshakeAttemptState> _handshakeAttempts;
     private readonly ReactiveProperty<int> _handshakeAttemptsVersion;
 
-    public ObservableList<Guid> KnownPeerIds { get; }
+    public ObservableList<NetworkPeerId> KnownPeerIds { get; }
     public ObservableList<SimulatedPublishedPreKeyBundleModel> PublishedPreKeyBundles { get; }
 
     private readonly ObservableDictionary<SessionId, SecureSession> _sessions;
@@ -63,7 +64,7 @@ public sealed class SimulatedPeerModel : IDisposable
         DateTimeOffset? notUntilUtc = null,
         string? lastError = null,
         List<SimulatorHandshakeAttemptState>? handshakeAttempts = null,
-        List<Guid>? knownPeerIds = null,
+        List<NetworkPeerId>? knownPeerIds = null,
         List<SimulatedPublishedPreKeyBundleModel>? publishedPreKeyBundles = null)
     {
         NetworkPeerId = networkPeerId;
@@ -91,7 +92,7 @@ public sealed class SimulatedPeerModel : IDisposable
         _connectionMode = new ReactiveProperty<ConnectionMode>(connectionMode);
         if (endpoint is null) throw new ArgumentNullException(nameof(endpoint));
         _endpoint = new ReactiveProperty<DnsEndPoint>(endpoint);
-        _relayPeerId = new ReactiveProperty<Percolator.Network.NetworkPeerId>(relayPeerId ?? new Percolator.Network.NetworkPeerId(Guid.Empty));
+        _relayPeerId = new ReactiveProperty<Percolator.Network.NetworkPeerId>(relayPeerId ?? new Percolator.Network.NetworkPeerId(0u));
         _phase = new ReactiveProperty<string?>(phase);
         _notUntilUtc = new ReactiveProperty<DateTimeOffset?>(notUntilUtc);
         _lastError = new ReactiveProperty<string?>(lastError);
@@ -103,7 +104,7 @@ public sealed class SimulatedPeerModel : IDisposable
         _handshakeAttempts.AddRange(handshakeAttempts ?? new());
         _handshakeAttemptsVersion = new ReactiveProperty<int>(0);
 
-        KnownPeerIds = new ObservableList<Guid>();
+        KnownPeerIds = new ObservableList<NetworkPeerId>();
         KnownPeerIds.AddRange(knownPeerIds ?? new());
 
         PublishedPreKeyBundles = new ObservableList<SimulatedPublishedPreKeyBundleModel>();
@@ -361,7 +362,7 @@ public sealed class SimulatedPeerModel : IDisposable
                 TargetPublicKeyHash = _targetPublicKeyHash.Value,
                 SelectedRouteMode = _selectedRouteMode.Value,
                 DirectEndpoint = _directEndpoint.Value,
-                RelayHostPeerId = _relayHostPeerId.Value?.Value,
+                RelayHostPeerId = _relayHostPeerId.Value,
                 Phase = _phase.Value,
                 NotUntilUtc = _notUntilUtc.Value,
                 LastError = _lastError.Value,
@@ -378,7 +379,7 @@ public sealed class SimulatedPeerModel : IDisposable
             TargetPublicKeyHash = _targetPublicKeyHash.Value,
             SelectedRouteMode = _selectedRouteMode.Value,
             DirectEndpoint = _directEndpoint.Value,
-            RelayHostPeerId = (_relayHostPeerId.Value is null || _relayHostPeerId.Value.Value == Guid.Empty) ? null : _relayHostPeerId.Value.Value,
+            RelayHostPeerId = _relayHostPeerId.Value,
             Phase = _phase.Value,
             NotUntilUtc = _notUntilUtc.Value,
             LastError = _lastError.Value,
@@ -400,6 +401,7 @@ public sealed class SimulatedPeerModel : IDisposable
     {
         return new PeerStateSnapshot(
             NetworkPeerId: NetworkPeerId,
+            PublicIdentityId: PublicIdentityId,
             SelfIdentityId: SelfIdentityId,
             DisplayName: _displayName.Value,
             IsRelayCapable: IsRelayCapable.Value,
@@ -434,7 +436,7 @@ public sealed class SimulatedPeerModel : IDisposable
                 .Select(kvp => kvp.Value)
                 .Select(s => new SessionSnapshot(
                     SessionId: s.Id.Value,
-                    RemotePeerId: s.RemotePeerId.Value,
+                    RemotePeerId: new Percolator.Network.NetworkPeerId(s.RemotePeerId.Value),
                     ProtocolVersion: s.ProtocolVersion.Value,
                     RootKey: s.State.RootKey.ToArray(),
                     SendChainKey: s.State.SendingChainKey?.ToArray(),
@@ -488,7 +490,7 @@ public sealed class SimulatedPeerModel : IDisposable
                 TargetPublicKeyHash = _targetPublicKeyHash.Value,
                 SelectedRouteMode = _selectedRouteMode.Value,
                 DirectEndpoint = _directEndpoint.Value,
-                RelayHostPeerId = _relayHostPeerId.Value.Value != Guid.Empty ? _relayHostPeerId.Value.Value : null,
+                RelayHostPeerId = _relayHostPeerId.Value,
                 Phase = _phase.Value,
                 NotUntilUtc = _notUntilUtc.Value,
                 LastError = _lastError.Value,

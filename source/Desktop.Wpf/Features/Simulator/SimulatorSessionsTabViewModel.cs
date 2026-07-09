@@ -84,7 +84,7 @@ public sealed class SimulatorSessionsTabViewModel : IDisposable
     {
         ct.ThrowIfCancellationRequested();
 
-        var mainPeerId = _active.Identity is not null ? _active.Identity.Id : Guid.Empty;
+        var mainPeerId = _active.Identity is not null ? _active.Identity.SelfIdentityId.Value : 0u;
         var peers = _state.Peers.ToArray();
 
         var cards = new System.Collections.Generic.List<SimulatorSessionCardViewModel>();

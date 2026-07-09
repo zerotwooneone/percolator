@@ -139,7 +139,7 @@ public sealed class ConnectViaNetworkCommandHandler : IRequestHandler<ConnectVia
         try
         {
             direct = await _directSessions
-                .GetByRemotePeerIdAsync(new Percolator.Network.NetworkPeerId(relayHostPeerId.Value), selfIdentityId);
+                .GetByRemotePeerIdAsync(new Percolator.Network.NetworkPeerId(relayHostPeerId.Value), new Percolator.Network.NetworkSelfId(selfIdentityId));
         }
         catch (Exception ex)
         {
@@ -187,7 +187,7 @@ public sealed class ConnectViaNetworkCommandHandler : IRequestHandler<ConnectVia
             var responseBytes = response.ResponsePayload.ResponsePayload.ToByteArray();
             var respCipher = SessionRatchetMessage.FromBytesOwned(responseBytes);
             var resolved = await _secureMessaging
-                .DecryptInboundAsync(selfIdentityId, respCipher);
+                .DecryptInboundAsync(new Percolator.Cryptography.CryptoSelfId(selfIdentityId), respCipher);
             var respPlain = resolved?.plaintext;
             if (respPlain is null)
             {
@@ -323,7 +323,8 @@ public sealed class ConnectViaNetworkCommandHandler : IRequestHandler<ConnectVia
                         targetEndpointHost: null,
                         targetEndpointPort: null,
                         inviteRouteKind: InviteRouteKind.Relayed,
-                        inviteRelayHostPeerId: new Percolator.Cryptography.Primitives.PeerId(relayHostPeerId.Value)))
+                        inviteRelayHostPeerId: new Percolator.Cryptography.Primitives.PeerId(relayHostPeerId.Value)),
+                    new Percolator.Cryptography.CryptoSelfId(selfIdentityId))
                 .ConfigureAwait(false);
 
             await _mediator.Publish(

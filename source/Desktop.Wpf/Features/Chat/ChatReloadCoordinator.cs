@@ -3,11 +3,11 @@ using Percolator.Network;
 using R3;
 using Desktop.Wpf.Features.Chat.State;
 using Percolator.Application.Identity;
-using Percolator.Chat;
 using Percolator.Application.Chat;
 using Percolator.Chat.Messaging;
 using Percolator.Chat.Messaging.App;
 using Percolator.Chat.Messaging.ValueObjects;
+using Percolator.Identity;
 
 namespace Desktop.Wpf.Features.Chat;
 
@@ -24,18 +24,19 @@ public sealed class ChatReloadCoordinator : IChatReloadCoordinator
     private readonly Subject<ReloadTrigger> _reloadTrigger = new();
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ChatStateService _state;
-    private readonly ActiveIdentityContext _activeIdentity;
+    private readonly Percolator.Application.Chat.ISelfIdentityQueries _selfIdentityQueries;
     private readonly DisposableBag _bag;
 
     public ChatReloadCoordinator(
         IServiceScopeFactory scopeFactory,
         ChatStateService state,
         ActiveIdentityContext activeIdentity,
+        Percolator.Application.Chat.ISelfIdentityQueries selfIdentityQueries,
         TimeProvider timeProvider)
     {
         _scopeFactory = scopeFactory;
         _state = state;
-        _activeIdentity = activeIdentity;
+        _selfIdentityQueries = selfIdentityQueries;
 
         _reloadTrigger
             .Debounce(TimeSpan.FromMilliseconds(50), timeProvider)
@@ -77,12 +78,15 @@ public sealed class ChatReloadCoordinator : IChatReloadCoordinator
         var messageQueries = scope.ServiceProvider.GetRequiredService<IConversationMessageQueries>();
         var messages = await messageQueries.GetMessagesAsync(conversationId, selfIdentityId, ct).ConfigureAwait(false);
 
+        var publicIdentityId = await _selfIdentityQueries.GetSelfIdentityPublicKeyAsync(new SelfId((uint)selfIdentityId), ct).ConfigureAwait(false);
+        var publicIdentityIdValue = publicIdentityId?.Value ?? throw new InvalidOperationException("Public identity ID not found");
+        
         var snapshots = messages.Select(m => new ChatMessageSnapshot(
             Id: new PublicMessageId(m.MessageId),
-            Author: m.SenderId == selfParticipantId.Value ? "Me" : "Peer",
+            Author: m.SenderId == publicIdentityIdValue ? "Me" : "Peer",
             Text: m.Content,
             Timestamp: m.Timestamp,
-            IsOwn: m.SenderId == selfParticipantId.Value,
+            IsOwn: m.SenderId == publicIdentityIdValue,
             IsDelivered: false,
             IsRead: false
         )).ToList();
@@ -94,14 +98,18 @@ public sealed class ChatReloadCoordinator : IChatReloadCoordinator
     {
         using var scope = _scopeFactory.CreateScope();
         var messageQueries = scope.ServiceProvider.GetRequiredService<IConversationMessageQueries>();
-        var messages = await messageQueries.GetMessagesAsync(resolution.Conversation.Id, resolution.SelfIdentityId, ct).ConfigureAwait(false);
+        var selfIdentityIdInt = (int)resolution.SelfIdentityId.Value;
+        var messages = await messageQueries.GetMessagesAsync(resolution.Conversation.Id, selfIdentityIdInt, ct).ConfigureAwait(false);
 
+        var publicIdentityId = await _selfIdentityQueries.GetSelfIdentityPublicKeyAsync(new SelfId((uint)selfIdentityIdInt), ct).ConfigureAwait(false);
+        var publicIdentityIdValue = publicIdentityId?.Value ?? throw new InvalidOperationException("Public identity ID not found");
+        
         var snapshots = messages.Select(m => new ChatMessageSnapshot(
             Id: new PublicMessageId(m.MessageId),
-            Author: m.SenderId == selfParticipantId.Value ? "Me" : "Peer",
+            Author: m.SenderId == publicIdentityIdValue ? "Me" : "Peer",
             Text: m.Content,
             Timestamp: m.Timestamp,
-            IsOwn: m.SenderId == selfParticipantId.Value,
+            IsOwn: m.SenderId == publicIdentityIdValue,
             IsDelivered: false,
             IsRead: false
         )).ToList();

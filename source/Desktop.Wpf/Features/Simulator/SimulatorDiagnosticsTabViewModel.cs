@@ -26,12 +26,12 @@ public sealed class SimulatorDiagnosticsTabViewModel : IDisposable
             .AddTo(ref _bag);
         _filteredNotify = _filteredView.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher);
 
-        SelectedPeerId = new BindableReactiveProperty<Guid?>(null).AddTo(ref _bag);
-        SelectedRelayHostPeerId = new BindableReactiveProperty<Guid?>(null).AddTo(ref _bag);
+        SelectedPeerId = new BindableReactiveProperty<NetworkPeerId?>(null).AddTo(ref _bag);
+        SelectedRelayHostPeerId = new BindableReactiveProperty<NetworkPeerId?>(null).AddTo(ref _bag);
         SelectedEventType = new BindableReactiveProperty<SimulatorDiagnosticEventType?>(null).AddTo(ref _bag);
 
-        PeerFilterOptions = new BindableReactiveProperty<IReadOnlyList<SimulatorFilterOption<Guid?>>>(Array.Empty<SimulatorFilterOption<Guid?>>()).AddTo(ref _bag);
-        RelayFilterOptions = new BindableReactiveProperty<IReadOnlyList<SimulatorFilterOption<Guid?>>>(Array.Empty<SimulatorFilterOption<Guid?>>()).AddTo(ref _bag);
+        PeerFilterOptions = new BindableReactiveProperty<IReadOnlyList<SimulatorFilterOption<NetworkPeerId?>>>(Array.Empty<SimulatorFilterOption<NetworkPeerId?>>()).AddTo(ref _bag);
+        RelayFilterOptions = new BindableReactiveProperty<IReadOnlyList<SimulatorFilterOption<NetworkPeerId?>>>(Array.Empty<SimulatorFilterOption<NetworkPeerId?>>()).AddTo(ref _bag);
         EventTypeFilterOptions = new BindableReactiveProperty<IReadOnlyList<SimulatorFilterOption<SimulatorDiagnosticEventType?>>>(Array.Empty<SimulatorFilterOption<SimulatorDiagnosticEventType?>>()).AddTo(ref _bag);
 
         ClearCommand = new ReactiveCommand<Unit>().AddTo(ref _bag);
@@ -73,12 +73,12 @@ public sealed class SimulatorDiagnosticsTabViewModel : IDisposable
 
     public NotifyCollectionChangedSynchronizedViewList<SimulatorDiagnosticEvent> Events => _filteredNotify;
 
-    public BindableReactiveProperty<Guid?> SelectedPeerId { get; }
-    public BindableReactiveProperty<Guid?> SelectedRelayHostPeerId { get; }
+    public BindableReactiveProperty<NetworkPeerId?> SelectedPeerId { get; }
+    public BindableReactiveProperty<NetworkPeerId?> SelectedRelayHostPeerId { get; }
     public BindableReactiveProperty<SimulatorDiagnosticEventType?> SelectedEventType { get; }
 
-    public BindableReactiveProperty<IReadOnlyList<SimulatorFilterOption<Guid?>>> PeerFilterOptions { get; }
-    public BindableReactiveProperty<IReadOnlyList<SimulatorFilterOption<Guid?>>> RelayFilterOptions { get; }
+    public BindableReactiveProperty<IReadOnlyList<SimulatorFilterOption<NetworkPeerId?>>> PeerFilterOptions { get; }
+    public BindableReactiveProperty<IReadOnlyList<SimulatorFilterOption<NetworkPeerId?>>> RelayFilterOptions { get; }
     public BindableReactiveProperty<IReadOnlyList<SimulatorFilterOption<SimulatorDiagnosticEventType?>>> EventTypeFilterOptions { get; }
 
     public ReactiveCommand<Unit> ClearCommand { get; }
@@ -88,34 +88,34 @@ public sealed class SimulatorDiagnosticsTabViewModel : IDisposable
         _diagnostics.Clear();
     }
 
-    private IReadOnlyList<SimulatorFilterOption<Guid?>> BuildPeerFilterOptions()
+    private IReadOnlyList<SimulatorFilterOption<NetworkPeerId?>> BuildPeerFilterOptions()
     {
         var peers = _state.Peers
-            .Select(p => new SimulatorFilterOption<Guid?>(
-                p.NetworkPeerId.Value,
+            .Select(p => new SimulatorFilterOption<NetworkPeerId?>(
+                p.NetworkPeerId,
                 string.IsNullOrWhiteSpace(p.DisplayName.CurrentValue)
-                    ? p.NetworkPeerId.Value.ToString()[..8]
+                    ? $"Peer{p.NetworkPeerId.Value:D2}"
                     : p.DisplayName.CurrentValue!))
             .OrderBy(p => p.Display)
             .ToList();
 
-        peers.Insert(0, new SimulatorFilterOption<Guid?>(null, "All"));
+        peers.Insert(0, new SimulatorFilterOption<NetworkPeerId?>(null, "All"));
         return peers;
     }
 
-    private IReadOnlyList<SimulatorFilterOption<Guid?>> BuildRelayFilterOptions()
+    private IReadOnlyList<SimulatorFilterOption<NetworkPeerId?>> BuildRelayFilterOptions()
     {
         var relays = _state.Peers
             .Where(p => p.IsRelayCapable.CurrentValue)
-            .Select(p => new SimulatorFilterOption<Guid?>(
-                p.NetworkPeerId.Value,
+            .Select(p => new SimulatorFilterOption<NetworkPeerId?>(
+                p.NetworkPeerId,
                 string.IsNullOrWhiteSpace(p.DisplayName.CurrentValue)
-                    ? p.NetworkPeerId.Value.ToString()[..8]
+                    ? $"Peer{p.NetworkPeerId.Value:D2}"
                     : p.DisplayName.CurrentValue!))
             .OrderBy(p => p.Display)
             .ToList();
 
-        relays.Insert(0, new SimulatorFilterOption<Guid?>(null, "All"));
+        relays.Insert(0, new SimulatorFilterOption<NetworkPeerId?>(null, "All"));
         return relays;
     }
 

@@ -195,7 +195,7 @@ public sealed class SimulatorRelayAutoDeliverService : ISimulatorRelayAutoDelive
         var mainPeerId = _active.Identity.SelfIdentityId;
         var match = peer.Sessions
             .Select(kv => kv.Value)
-            .FirstOrDefault(s => s.RemotePeerId.Value == mainPeerId);
+            .FirstOrDefault(s => s.RemotePeerId.Value == mainPeerId.Value);
 
         return match?.Id;
     }

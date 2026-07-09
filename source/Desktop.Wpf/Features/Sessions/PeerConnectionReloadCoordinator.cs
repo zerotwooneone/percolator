@@ -36,7 +36,7 @@ public sealed class PeerConnectionReloadCoordinator : IDisposable
         using var scope = _scopeFactory.CreateScope();
         var sidebarQueries = scope.ServiceProvider.GetRequiredService<IPeerConnectionSidebarQueries>();
 
-        var sidebarDtos = await sidebarQueries.LoadSidebarConnectionsAsync(_state.ActiveSelfIdentityId.Value.Value, cancellationToken).ConfigureAwait(false);
+        var sidebarDtos = await sidebarQueries.LoadSidebarConnectionsAsync((int)_state.ActiveSelfIdentityId.Value.Value, cancellationToken).ConfigureAwait(false);
 
         // Map SidebarPeerConnectionDto to PeerConnectionStateSnapshot
         var snapshots = sidebarDtos.Select(dto => new PeerConnectionStateSnapshot(

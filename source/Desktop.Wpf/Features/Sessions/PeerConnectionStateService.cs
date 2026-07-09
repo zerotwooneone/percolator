@@ -46,7 +46,7 @@ public sealed class PeerConnectionStateService : IDisposable
         using var scope = _scopeFactory.CreateScope();
         var sidebarQueries = scope.ServiceProvider.GetRequiredService<Percolator.Application.Sessions.IPeerConnectionSidebarQueries>();
 
-        var sidebarDtos = await sidebarQueries.LoadSidebarConnectionsAsync(selfIdentityId.Value, cancellationToken).ConfigureAwait(false);
+        var sidebarDtos = await sidebarQueries.LoadSidebarConnectionsAsync((int)selfIdentityId.Value, cancellationToken).ConfigureAwait(false);
 
         // Map SidebarPeerConnectionDto to PeerConnectionStateSnapshot
         var snapshots = sidebarDtos.Select(dto => new PeerConnectionStateSnapshot(

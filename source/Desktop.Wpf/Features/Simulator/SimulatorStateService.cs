@@ -5,6 +5,7 @@ using ObservableCollections;
 using Percolator.Application.Configuration;
 using Percolator.Contracts;
 using Percolator.Cryptography;
+using Percolator.Identity;
 using R3;
 using Desktop.Wpf.Features.Simulator.Models;
 using System.Security.Cryptography;
@@ -317,7 +318,6 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             {
                 Version = 1,
                 DirectSessionId = sessionId.Value.ToString(),
-                note("need to add publicIdentityId")
             };
 
             var initial = session.Encrypt(Plaintext.FromBytesOwned(inner.ToByteArray()), clock);
@@ -610,7 +610,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         var clock = ResolveClock();
         var session = RatchetBootstrap.CreateResponderSession(
             sessionId,
-            Percolator.Cryptography.Primitives.PeerId.NewId(),
+            new Percolator.Cryptography.Primitives.PeerId((uint)Random.Shared.Next()),
             new ProtocolVersion(1),
             root,
             clock,
@@ -1058,6 +1058,10 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         {
             return;
         }
+        if (!hello.HasInitiatorPublicIdentityId || hello.InitiatorPublicIdentityId.Length == 0)
+        {
+            return;
+        }
 
         var initiatorPkh = SHA256.HashData(hello.InitiatorIdentityKeySpki.ToByteArray());
         var initiatorPkhHex = Convert.ToHexString(initiatorPkh).ToLowerInvariant();
@@ -1070,6 +1074,9 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 
             model.PendingInboundStandardSignalHellosMutable[initiatorPkhHex] = new SimulatedPendingStandardSignalHelloModel(
                 RelayHostNetworkPeerId: relayHostNetworkPeerId,
+                PublicIdentityId: hello.HasInitiatorPublicIdentityId && hello.InitiatorPublicIdentityId.Length > 0
+                    ? new PublicIdentityId(new Guid(hello.InitiatorPublicIdentityId.ToByteArray()))
+                    : throw new InvalidOperationException("hello must have public identity id"),
                 InitiatorIdentityKeySpki: hello.InitiatorIdentityKeySpki.ToByteArray(),
                 InitiatorEphemeralKeySpki: hello.InitiatorEphemeralKeySpki.ToByteArray(),
                 SignedPreKeyId: hello.HasSignedPreKeyId && hello.SignedPreKeyId.Length > 0
@@ -1180,7 +1187,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         }
 
         // Set connection mode for relayed handshakes
-        if (relayHostNetworkPeerId.Value != Guid.Empty)
+        if (relayHostNetworkPeerId.Value != 0)
         {
             await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
@@ -1888,14 +1895,14 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 
                     // Check if this was a relay handshake by looking at RelayHostPeerId
                     var relayHostPeerId = model.RelayHostPeerId.CurrentValue;
-                    if (relayHostPeerId is not null && relayHostPeerId.Value != Guid.Empty)
+                    if (relayHostPeerId is not null && relayHostPeerId.Value.Value != 0u)
                     {
                         // Set connection mode to ViaRelay with the relay host peer ID
                         // Preserve existing Endpoint value
                         model.SetConnection(
                             ConnectionMode.ViaRelay,
                             endpoint: model.Endpoint.CurrentValue,
-                            relayNetworkPeerId: relayHostPeerId);
+                            relayNetworkPeerId: new Percolator.Network.NetworkPeerId(relayHostPeerId.Value.Value));
                     }
 
                     model.ClearPendingStandardHandshakeToMain();
@@ -2015,10 +2022,10 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             model.AddChatMessage(isFromMain: false, content: content, receivedUtc: now);
 
             // Determine routing and capture necessary values while holding the gate
-            if (model.ConnectionMode.CurrentValue == ConnectionMode.ViaRelay && model.RelayPeerId.CurrentValue.Value != Guid.Empty)
+            if (model.ConnectionMode.CurrentValue == ConnectionMode.ViaRelay && model.RelayPeerId.CurrentValue.Value != 0u)
             {
                 relayHostPeerId = model.RelayPeerId.CurrentValue;
-                if (relayHostPeerId.Value == Guid.Empty)
+                if (relayHostPeerId.Value.Value == 0u)
                 {
                     throw new InvalidOperationException("Relay peer ID is empty, but connection mode is ViaRelay");
                 }
@@ -2041,7 +2048,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         if (useRelay)
         {
             await EnqueueRelayUpstreamToMainAsync(
-                relayHostNetworkPeerId: relayHostPeerId,
+                relayHostNetworkPeerId: relayHostPeerId.Value,
                 opaqueBytes: cipherBytes!,
                 debugType: "Chat",
                 cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -2144,6 +2151,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     {
         var peer = new SimulatedPeerModel(
             networkPeerId: snap.NetworkPeerId,
+            publicIdentityId: snap.PublicIdentityId,
             selfIdentityId: snap.SelfIdentityId,
             displayName: snap.DisplayName,
             isRelayCapable: snap.IsRelayCapable,
@@ -2151,7 +2159,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             identitySigningKeyPrivateKeyEcPrivateKey: snap.IdentitySigningKeyPrivateKeyEcPrivateKey,
             connectionMode: snap.ConnectionMode,
             endpoint: snap.Endpoint,
-            relayPeerId: snap.RelayNetworkPeerId.Value == Guid.Empty ? null : snap.RelayNetworkPeerId,
+            relayPeerId: snap.RelayNetworkPeerId.Value == 0 ? null : snap.RelayNetworkPeerId,
             targetPublicKeyHash: snap.TargetPublicKeyHash,
             selectedRouteMode: snap.SelectedRouteMode,
             directEndpoint: snap.DirectEndpoint,
@@ -2233,7 +2241,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             var sessionCrypto = new AeadSessionCrypto();
             var session = SecureSession.Create(
                 id: new SessionId(sessionSnap.SessionId),
-                remotePeerId: new Percolator.Cryptography.Primitives.PeerId(sessionSnap.RemotePeerId),
+                remotePeerId: new Percolator.Cryptography.Primitives.PeerId(sessionSnap.RemotePeerId.Value),
                 protocolVersion: new ProtocolVersion(sessionSnap.ProtocolVersion),
                 state: ratchetState,
                 sessionCrypto: sessionCrypto,
@@ -2272,7 +2280,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        var peerId = Percolator.Network.NetworkPeerId.NewId();
+        var peerId = new Percolator.Network.NetworkPeerId((uint)Random.Shared.Next());
 
         byte[] priv;
         byte[] spki;
@@ -2291,9 +2299,11 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             var endpoint = AllocateNextLoopbackEndpointOnPeerGate();
 
             var selfIdentityId = Interlocked.Increment(ref _nextSelfIdentityId);
+            var publicIdentityId = PublicIdentityId.NewId();
 
             model = new SimulatedPeerModel(
                 networkPeerId: peerId,
+                publicIdentityId: publicIdentityId,
                 selfIdentityId: selfIdentityId,
                 displayName: name,
                 isRelayCapable: false,

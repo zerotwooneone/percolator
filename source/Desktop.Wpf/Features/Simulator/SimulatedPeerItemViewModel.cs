@@ -244,7 +244,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         var selfPkh = await _state.ComputePublicKeyHashAsync(_model.NetworkPeerId, ct).ConfigureAwait(false);
 
         await _state.EnqueueRelayDownstreamToPeerAsync(
-                relayHostNetworkPeerId: relayPeerId,
+                relayHostNetworkPeerId: relayPeerId.Value,
                 targetIdentityPublicKeyHash: Percolator.Identity.IdentityPublicKeyHash.FromBytes(selfPkh),
                 opaqueBytes: invite.ToByteArray(),
                 debugType: nameof(EstablishDirectSessionRequest),
@@ -252,7 +252,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
             .ConfigureAwait(false);
 
         var dequeued = await _state.DequeueRelayDownstreamToPeerAsync(
-                relayHostNetworkPeerId: relayPeerId,
+                relayHostNetworkPeerId: relayPeerId.Value,
                 targetIdentityPublicKeyHash: Percolator.Identity.IdentityPublicKeyHash.FromBytes(selfPkh),
                 max: 1,
                 cancellationToken: ct)
@@ -273,7 +273,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         _sessionToMain = acceptance.SessionId;
 
         await _state.EnqueueRelayUpstreamToMainAsync(
-                relayHostNetworkPeerId: relayPeerId,
+                relayHostNetworkPeerId: relayPeerId.Value,
                 opaqueBytes: acceptance.Response.ToByteArray(),
                 debugType: nameof(InviteHandshakeResponse),
                 cancellationToken: ct)
@@ -317,7 +317,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         _ = SHA256.HashData(mainSpki);
 
         await _state.ForwardRelayUpstreamToMainAsync(
-                relayHostNetworkPeerId: relayPeerId,
+                relayHostNetworkPeerId: relayPeerId.Value,
                 relayHostToMainSessionId: _sessionToMain,
                 max: 250,
                 cancellationToken: ct)
@@ -362,7 +362,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         _ = SHA256.HashData(mainSpki);
 
         return _state.EnqueueRelayUpstreamToMainAsync(
-            relayHostNetworkPeerId: relayPeerId,
+            relayHostNetworkPeerId: relayPeerId.Value,
             opaqueBytes: invite.ToByteArray(),
             debugType: nameof(EstablishDirectSessionRequest),
             cancellationToken: ct);
@@ -376,7 +376,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
             return;
         }
 
-        if (!HasActiveSessionToHost(relayPeerId))
+        if (!HasActiveSessionToHost(relayPeerId.Value))
         {
             _diagnostics.Emit(
                 SimulatorDiagnosticEventType.PreKeyPublishBlockedMissingActiveSession,
@@ -388,7 +388,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
 
         await _state.PublishStandardPreKeyBundleToRelayAsync(
                 simulatedNetworkPeerId: _model.NetworkPeerId,
-                relayHostNetworkPeerId: relayPeerId,
+                relayHostNetworkPeerId: relayPeerId.Value,
                 expiresUtc: DateTimeOffset.UtcNow.AddHours(12),
                 oneTimeKeyCount: 5,
                 cancellationToken: ct)
@@ -419,7 +419,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
 
         _ = await _state.InitiateStandardHandshakeToMainByRelayPkhAsync(
                 simulatedNetworkPeerId: _model.NetworkPeerId,
-                relayHostNetworkPeerId: relayPeerId,
+                relayHostNetworkPeerId: relayPeerId.Value,
                 responderPublicKeyHash: mainPkh,
                 cancellationToken: ct)
             .ConfigureAwait(false);
@@ -480,11 +480,10 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
 
     private static string AllocateSimulatorLoopbackHost(NetworkPeerId networkPeerId)
     {
-        // Stable mapping of Guid -> 127.77.X.Y. Keep within 1..254 to avoid network/broadcast edge cases.
-        using var sha = SHA256.Create();
-        var hash = sha.ComputeHash(networkPeerId.Value.ToByteArray());
-        var x = (byte)((hash[0] % 254) + 1);
-        var y = (byte)((hash[1] % 254) + 1);
+        // Stable mapping of uint -> 127.77.X.Y. Keep within 1..254 to avoid network/broadcast edge cases.
+        var value = networkPeerId.Value;
+        var x = (byte)((value % 254) + 1);
+        var y = (byte)(((value / 254) % 254) + 1);
         return $"127.77.{x}.{y}";
     }
 

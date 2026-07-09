@@ -78,7 +78,7 @@ public sealed class PendingHandshakesMenuViewModel : System.IDisposable
         {
             if (obj is PendingHandshakeItemViewModel item && _active.Identity is not null)
             {
-                await _mediator.Send(new RejectPendingSessionCommand(item.PendingId)).ConfigureAwait(false);
+                await _mediator.Send(new RejectPendingSessionCommand(item.PendingId, _active.Identity.SelfIdentityId)).ConfigureAwait(false);
             }
         });
 

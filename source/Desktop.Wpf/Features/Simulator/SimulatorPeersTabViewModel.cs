@@ -1,6 +1,7 @@
 using ObservableCollections;
 using R3;
 using Desktop.Wpf.Shared.Mvvm;
+using Percolator.Network;
 
 namespace Desktop.Wpf.Features.Simulator;
 
@@ -64,11 +65,11 @@ public sealed class SimulatorPeersTabViewModel : IDisposable
             resolvePeerName: ResolvePeerName);
     }
 
-    private string ResolvePeerName(Guid peerId)
+    private string ResolvePeerName(NetworkPeerId peerId)
     {
-        var m = _state.Peers.FirstOrDefault(x => x.NetworkPeerId.Value == peerId);
+        var m = _state.Peers.FirstOrDefault(x => x.NetworkPeerId == peerId);
         var name = m?.DisplayName.CurrentValue;
-        return string.IsNullOrWhiteSpace(name) ? peerId.ToString()[..8] : name;
+        return string.IsNullOrWhiteSpace(name) ? $"Peer{peerId.Value:D2}" : name;
     }
 
     private Task SetStatusOnUiAsync(string? status)

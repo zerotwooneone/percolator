@@ -1,10 +1,12 @@
 using Percolator.Identity;
 using System.Net;
+using Percolator.Network;
 
 namespace Desktop.Wpf.Features.Simulator;
 
 public sealed record PeerStateSnapshot(
    Percolator.Network.NetworkPeerId NetworkPeerId,
+   PublicIdentityId PublicIdentityId,
     int SelfIdentityId,
     string? DisplayName,
     bool IsRelayCapable,
@@ -23,7 +25,7 @@ public sealed record PeerStateSnapshot(
     IReadOnlyList<SimulatorHandshakeAttemptState> HandshakeAttempts,
     IdentityPublicKeyHash? PendingStandardHandshakeToMainResponderPublicKeyHash,
     Guid? PendingStandardHandshakeToMainTemporarySessionId,
-    IReadOnlyList<Guid> KnownPeerIds,
+    IReadOnlyList<NetworkPeerId> KnownPeerIds,
     IReadOnlyList<PublishedPreKeyBundleSnapshot> PublishedPreKeyBundles,
     IReadOnlyList<SessionSnapshot> Sessions,
     IReadOnlyList<SignedPreKeySnapshot> SignedPreKeys,
@@ -48,7 +50,7 @@ public sealed record OneTimeKeySnapshot(
 
 public sealed record SessionSnapshot(
     Guid SessionId,
-    Guid RemotePeerId,
+    Percolator.Network.NetworkPeerId RemotePeerId,
     int ProtocolVersion,
     byte[] RootKey,
     byte[]? SendChainKey,

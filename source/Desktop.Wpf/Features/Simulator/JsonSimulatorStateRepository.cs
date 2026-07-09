@@ -4,10 +4,12 @@ using Microsoft.Extensions.Options;
 using ObservableCollections;
 using Percolator.Application.Configuration;
 using Percolator.Cryptography;
+using Percolator.Identity;
 using System.IO;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text.Json;
+using Percolator.Network;
 
 namespace Desktop.Wpf.Features.Simulator;
 
@@ -54,7 +56,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
         foreach (var dto in state.Peers)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (dto.NetworkPeerId.Value == Guid.Empty) continue;
+            if (dto.NetworkPeerId.Value == 0u) continue;
 
             NormalizePeer(dto, _transportOptions.Value);
             _ = _keys.EnsureReverseSignalKeys(dto.ReverseSignalKeys);
@@ -71,7 +73,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
             foreach (var dto in state.Relays)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (dto.RelayHostNetworkPeerId.Value == Guid.Empty) continue;
+                if (dto.RelayHostNetworkPeerId.Value == 0u) continue;
                 relaySnaps.Add(CreateRelaySnapshot(dto));
             }
         }
@@ -115,7 +117,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
         foreach (var p in peers)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (p.NetworkPeerId.Value == Guid.Empty) continue;
+            if (p.NetworkPeerId.Value == 0u) continue;
 
             var dto = CreateDto(p);
             NormalizePeer(dto, _transportOptions.Value);
@@ -175,6 +177,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
 
         var model = new SimulatedPeerModel(
             networkPeerId: dto.NetworkPeerId,
+            publicIdentityId: new PublicIdentityId(dto.PublicIdentityId),
             selfIdentityId: dto.SelfIdentityId,
             displayName: dto.DisplayName,
             isRelayCapable: dto.Relay?.IsRelayCapable == true,
@@ -221,6 +224,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
         var dto = new SimulatedPeerDto
         {
             NetworkPeerId = model.NetworkPeerId,
+            PublicIdentityId = model.PublicIdentityId.Value,
             SelfIdentityId = model.SelfIdentityId,
             DisplayName = model.DisplayName,
             IdentityPublicKeyHash = SHA256.HashData(model.IdentitySigningKeySpki),
@@ -279,7 +283,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
                     .Select(s => new SimulatedSecureSessionDto
                     {
                         SessionId = s.SessionId,
-                        RemoteNetworkPeerId = new Percolator.Network.NetworkPeerId(s.RemotePeerId),
+                        RemoteNetworkPeerId = s.RemotePeerId,
                         ProtocolVersion = s.ProtocolVersion,
                         RootKey = s.RootKey,
                         SendChainKey = s.SendChainKey,
@@ -318,7 +322,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
                             RequestBytes = r.RequestBytes,
                             ReceivedAtUtc = r.ReceivedAtUtc,
                             InviterIdentityKeySpki = r.InviterIdentityKeySpki,
-                            InviterPeerId = r.InviterNetworkPeerId.Value.ToString()
+                            InviterPeerId = r.InviterNetworkPeerId.Value
                         })
                         .ToList()
                 },
@@ -354,15 +358,15 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
         var edges = new List<PeerRelationshipSnapshot>();
         foreach (var peer in state.Peers)
         {
-            if (peer.NetworkPeerId.Value == Guid.Empty) continue;
+            if (peer.NetworkPeerId.Value == 0u) continue;
 
             if (peer.PublishedKeysToPeerIds is not null)
             {
                 foreach (var target in peer.PublishedKeysToPeerIds)
                 {
-                    if (target == Guid.Empty) continue;
-                    if (target == peer.NetworkPeerId.Value) continue;
-                    edges.Add(new PeerRelationshipSnapshot(new Percolator.Network.NetworkPeerId(peer.NetworkPeerId.Value), new Percolator.Network.NetworkPeerId(target), RelationshipType.PublishedKey));
+                    if (target.Value == 0u) continue;
+                    if (target.Value == peer.NetworkPeerId.Value) continue;
+                    edges.Add(new PeerRelationshipSnapshot(peer.NetworkPeerId, target, RelationshipType.PublishedKey));
                 }
             }
 
@@ -371,9 +375,9 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
             {
                 foreach (var target in relayTargets)
                 {
-                    if (target == Guid.Empty) continue;
-                    if (target == peer.NetworkPeerId.Value) continue;
-                    edges.Add(new PeerRelationshipSnapshot(new Percolator.Network.NetworkPeerId(peer.NetworkPeerId.Value), new Percolator.Network.NetworkPeerId(target), RelationshipType.RelayActiveSession));
+                    if (target.Value == 0u) continue;
+                    if (target.Value == peer.NetworkPeerId.Value) continue;
+                    edges.Add(new PeerRelationshipSnapshot(peer.NetworkPeerId, target, RelationshipType.RelayActiveSession));
                 }
             }
         }
@@ -389,8 +393,8 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
         var relayActiveEdges = new Dictionary<Percolator.Cryptography.Primitives.PeerId, List<Percolator.Cryptography.Primitives.PeerId>>();
         foreach (var rel in relationships)
         {
-            if (rel.SourceNetworkPeerId.Value == Guid.Empty) continue;
-            if (rel.TargetNetworkPeerId.Value == Guid.Empty) continue;
+            if (rel.SourceNetworkPeerId.Value == 0u) continue;
+            if (rel.TargetNetworkPeerId.Value == 0u) continue;
             if (rel.SourceNetworkPeerId == rel.TargetNetworkPeerId) continue;
 
             if (rel.Type == RelationshipType.PublishedKey)
@@ -421,13 +425,13 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
         {
             var cryptoPeerId = new Percolator.Cryptography.Primitives.PeerId(peer.NetworkPeerId.Value);
             peer.PublishedKeysToPeerIds = publishedKeyEdges.TryGetValue(cryptoPeerId, out var pk)
-                ? pk.Distinct().OrderBy(x => x.Value).Select(x => x.Value).ToList()
-                : new List<Guid>();
+                ? pk.Distinct().OrderBy(x => x.Value).Select(x => new NetworkPeerId(x.Value)).ToList()
+                : new List<NetworkPeerId>();
 
             peer.Relay ??= new SimulatedPeerRelayStateDto();
             peer.Relay.ActiveSessionsPeerIds = relayActiveEdges.TryGetValue(cryptoPeerId, out var rs)
-                ? rs.Distinct().OrderBy(x => x.Value).Select(x => x.Value).ToList()
-                : new List<Guid>();
+                ? rs.Distinct().OrderBy(x => x.Value).Select(x => new NetworkPeerId(x.Value)).ToList()
+                : new List<NetworkPeerId>();
         }
     }
 
@@ -493,7 +497,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
         foreach (var dto in store.Sessions)
         {
             if (dto.SessionId == Guid.Empty) continue;
-            if (dto.RemoteNetworkPeerId.Value == Guid.Empty) continue;
+            if (dto.RemoteNetworkPeerId.Value == 0) continue;
             if (dto.RootKey is null || dto.RootKey.Length == 0) continue;
 
             var state = new RatchetState(
@@ -537,7 +541,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
         foreach (var dto in reverseStore.InboundDirectInviteRequestsFromMain)
         {
             if (dto.CorrelationId == Guid.Empty) continue;
-            var inviterPeerId = Guid.TryParse(dto.InviterPeerId, out var parsed) ? new Percolator.Network.NetworkPeerId(parsed) : throw new InvalidOperationException("Invalid inviter peer id");
+            var inviterPeerId = new Percolator.Network.NetworkPeerId(dto.InviterPeerId);
             model.PendingInboundDirectInvitesMutable.Add(new SimulatedPendingInboundDirectInviteModel(dto.CorrelationId, dto.RequestBytes, dto.ReceivedAtUtc, dto.InviterIdentityKeySpki, inviterPeerId));
         }
 

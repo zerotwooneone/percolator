@@ -3,11 +3,12 @@ using ObservableCollections;
 using Desktop.Wpf.Shared.Mvvm;
 using Desktop.Wpf.Features.Sessions;
 using MediatR;
+using Percolator.Application.Identity;
 using Percolator.Chat.Messaging;
 using Percolator.Chat.Messaging.App;
 using Percolator.Chat.Messaging.App.Commands;
-using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Network;
+using Percolator.Chat.GroupMembership;
 
 namespace Desktop.Wpf.Features.Chat;
 
@@ -32,6 +33,7 @@ public sealed class ChatViewModel : ViewModelBase
     private readonly Desktop.Wpf.Features.Chat.State.ChatStateService _chatState;
     private readonly IMediator _mediator;
     private readonly IUiDispatcher _ui;
+    private readonly ActiveIdentityContext _activeIdentity;
     private DisposableBag _bag;
     private ISynchronizedView<ChatMessageModel, ChatMessageViewModel>? _messagesView;
 
@@ -39,12 +41,14 @@ public sealed class ChatViewModel : ViewModelBase
         SessionContext sessionContext,
         Desktop.Wpf.Features.Chat.State.ChatStateService chatState,
         IMediator mediator,
-        IUiDispatcher ui)
+        IUiDispatcher ui,
+        ActiveIdentityContext activeIdentity)
     {
         _sessionContext = sessionContext;
         _chatState = chatState;
         _mediator = mediator;
         _ui = ui;
+        _activeIdentity = activeIdentity;
 
         // Convert SessionContext ReactiveProperty to BindableReactiveProperty for UI binding
         MessageInput = _sessionContext.Draft.ToBindableReactiveProperty(string.Empty);
@@ -67,6 +71,7 @@ public sealed class ChatViewModel : ViewModelBase
         SendCommand = new AsyncRelayCommand(async _ =>
         {
             if (_sessionId is null) return;
+            if(_activeIdentity.Identity is null) return;
             var text = MessageInput.Value;
             if (string.IsNullOrWhiteSpace(text)) return;
 
@@ -77,7 +82,8 @@ public sealed class ChatViewModel : ViewModelBase
                 ConversationLookupKey.ForDirectSession(_sessionId.Value.Value),
                 messageId,
                 text,
-                sentTimestamp));
+                sentTimestamp,
+                new ChatSelfId(_activeIdentity.Identity.SelfIdentityId.Value)));
 
             MessageInput.Value = string.Empty;
         }, _ => CanSend.Value);

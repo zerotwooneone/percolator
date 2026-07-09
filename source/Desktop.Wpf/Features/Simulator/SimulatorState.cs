@@ -21,12 +21,13 @@ public sealed class GroupConversationDto
 public sealed class SimulatedPeerDto
 {
     public NetworkPeerId NetworkPeerId { get; set; }
+    public Guid PublicIdentityId { get; set; }
     public int SelfIdentityId { get; set; }
     public string? DisplayName { get; set; }
     public byte[] IdentityPublicKeyHash { get; set; } = Array.Empty<byte>();
     public SimulatedPeerConnectionDto Connection { get; set; } = new();
-    public List<Guid> KnownPeerIds { get; set; } = new();
-    public List<Guid> PublishedKeysToPeerIds { get; set; } = new();
+    public List<NetworkPeerId> KnownPeerIds { get; set; } = new();
+    public List<NetworkPeerId> PublishedKeysToPeerIds { get; set; } = new();
     public SimulatedPeerPreKeyStateDto PreKeys { get; set; } = new();
     public SimulatedPeerRuntimeStoreDto RuntimeStore { get; set; } = new();
 
@@ -85,7 +86,7 @@ public sealed class SimulatedPendingInboundDirectInviteDto
     public byte[] RequestBytes { get; set; } = Array.Empty<byte>();
     public DateTimeOffset ReceivedAtUtc { get; set; }
     public byte[] InviterIdentityKeySpki { get; set; } = Array.Empty<byte>();
-    public string InviterPeerId { get; set; } = string.Empty;
+    public uint InviterPeerId { get; set; }
 }
 
 public sealed class SimulatedSecureSessionDto
@@ -143,7 +144,7 @@ public sealed class SimulatedPeerConnectionDto
 public sealed class SimulatedPeerRelayStateDto
 {
     public bool IsRelayCapable { get; set; }
-    public List<Guid> ActiveSessionsPeerIds { get; set; } = new();
+    public List<NetworkPeerId> ActiveSessionsPeerIds { get; set; } = new();
     public SimulatedRelayOpaqueQueueDto OpaqueQueue { get; set; } = new();
     public SimulatedRelayPreKeyStoreDto PreKeyStore { get; set; } = new();
 }

@@ -17,7 +17,7 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
     private readonly IUiDispatcher _ui;
     private readonly ISimulatorStateService _state;
     private readonly ISimulatorDiagnosticsService _diagnostics;
-    private readonly Func<Guid, string> _resolvePeerName;
+    private readonly Func<NetworkPeerId, string> _resolvePeerName;
     private DisposableBag _bag;
     private bool _disposed;
 
@@ -30,7 +30,7 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
         IUiDispatcher ui,
         ISimulatorStateService state,
         ISimulatorDiagnosticsService diagnostics,
-        Func<Guid, string> resolvePeerName)
+        Func<NetworkPeerId, string> resolvePeerName)
     {
         _model = model;
         _ui = ui;
@@ -70,7 +70,7 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
         IncludeOneTimeKeys = new BindableReactiveProperty<bool>(true).AddTo(ref _bag);
         OneTimeKeyCount = new BindableReactiveProperty<int>(5).AddTo(ref _bag);
 
-        PublishTargetPeerId = new BindableReactiveProperty<Guid?>(null).AddTo(ref _bag);
+        PublishTargetPeerId = new BindableReactiveProperty<NetworkPeerId?>(null).AddTo(ref _bag);
 
         var toggleRelay = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
         toggleRelay.AsObservable()
@@ -96,7 +96,7 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
         var publish = PublishTargetPeerId
             .Select(hostId =>
             {
-                var host = hostId is null ? null : _state.Peers.FirstOrDefault(p => p.NetworkPeerId.Value == hostId.Value);
+                var host = hostId is null ? null : _state.Peers.FirstOrDefault(p => p.NetworkPeerId.Value == hostId.Value.Value);
                 return host?.IsRelayCapable ?? Observable.Return(false);
             })
             .Switch()
@@ -106,7 +106,7 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
 
         // 1. Available Targets (Simplified: All peers except self)
         _availableTargetsView = _state.Peers
-            .CreateView(p => new PublishTargetOption(p.NetworkPeerId, _resolvePeerName(p.NetworkPeerId.Value)))
+            .CreateView(p => new PublishTargetOption(p.NetworkPeerId, _resolvePeerName(p.NetworkPeerId)))
             .AddTo(ref _bag);
         _availableTargetsView.AttachFilter((p, _) => p.NetworkPeerId != _model.NetworkPeerId);
         AvailablePublishTargets = _availableTargetsView.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher).AddTo(ref _bag);
@@ -115,7 +115,7 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
         _publishedToView = _state.Relationships
             .CreateView(rel => new RelationshipTagViewModel(
                 networkPeerId: rel.TargetNetworkPeerId,
-                display: _resolvePeerName(rel.TargetNetworkPeerId.Value),
+                display: _resolvePeerName(rel.TargetNetworkPeerId),
                 onRemove: async ct => await _state.RemovePublishedKeysRelationshipAsync(_model.NetworkPeerId, rel.TargetNetworkPeerId, ct)))
             .AddTo(ref _bag);
         _publishedToView.AttachFilter((rel, _) => rel.SourceNetworkPeerId == _model.NetworkPeerId && rel.Type == RelationshipType.PublishedKey);
@@ -126,7 +126,7 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
         _hostingForView = _state.Relationships
             .CreateView(rel => new RelationshipTagViewModel(
                 networkPeerId: rel.SourceNetworkPeerId,
-                display: _resolvePeerName(rel.SourceNetworkPeerId.Value),
+                display: _resolvePeerName(rel.SourceNetworkPeerId),
                 onRemove: async ct => await _state.RemovePublishedKeysRelationshipAsync(rel.SourceNetworkPeerId, _model.NetworkPeerId, ct)))
             .AddTo(ref _bag);
         _hostingForView.AttachFilter((rel, _) => rel.TargetNetworkPeerId == _model.NetworkPeerId && rel.Type == RelationshipType.PublishedKey);
@@ -154,7 +154,7 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
 
     public BindableReactiveProperty<Visibility> RelayBadgeVisibility { get; }
 
-    public BindableReactiveProperty<Guid?> PublishTargetPeerId { get; }
+    public BindableReactiveProperty<NetworkPeerId?> PublishTargetPeerId { get; }
 
     public BindableReactiveProperty<bool> IncludeOneTimeKeys { get; }
 
@@ -323,16 +323,16 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
                 SimulatorDiagnosticEventType.PreKeyPublishBlockedMissingActiveSession,
                 $"Pre-key publish blocked (missing active session): publisher={_model.NetworkPeerId.Value.ToString()[..8]} relay={hostPeerId.Value.ToString()[..8]}",
                 peerId: _model.NetworkPeerId,
-                relayHostPeerId: hostPeerId);
+                relayHostPeerId: hostPeerId.Value);
             return;
         }
 
-        await _state.AddPublishedKeysRelationshipAsync(_model.NetworkPeerId, hostPeerId, ct).ConfigureAwait(false);
+        await _state.AddPublishedKeysRelationshipAsync(_model.NetworkPeerId, hostPeerId.Value, ct).ConfigureAwait(false);
 
         // In our simulator, "publishing" means pushing a standard pre-key bundle into the host's pre-key store.
         await _state.PublishStandardPreKeyBundleToRelayAsync(
                 simulatedNetworkPeerId: _model.NetworkPeerId,
-                relayHostNetworkPeerId: hostPeerId,
+                relayHostNetworkPeerId: hostPeerId.Value,
                 expiresUtc: DateTimeOffset.UtcNow.AddHours(12),
                 oneTimeKeyCount: OneTimeKeyCount.Value,
                 cancellationToken: ct)

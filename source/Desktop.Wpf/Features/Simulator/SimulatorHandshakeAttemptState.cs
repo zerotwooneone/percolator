@@ -1,5 +1,7 @@
 namespace Desktop.Wpf.Features.Simulator;
 
+using Percolator.Network;
+
 public sealed record SimulatorHandshakeAttemptState
 {
     public Guid CorrelationId { get; init; }
@@ -10,7 +12,7 @@ public sealed record SimulatorHandshakeAttemptState
 
     public string? DirectEndpoint { get; init; }
 
-    public Guid? RelayHostPeerId { get; init; }
+    public NetworkPeerId? RelayHostPeerId { get; init; }
 
     public string? Phase { get; init; }
 

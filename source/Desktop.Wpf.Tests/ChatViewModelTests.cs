@@ -11,6 +11,7 @@ using Moq;
 using NUnit.Framework;
 using Percolator.Chat.Messaging.App.Commands;
 using Percolator.Network;
+using Percolator.Application.Identity;
 
 namespace Desktop.Wpf.Tests;
 
@@ -24,7 +25,8 @@ public class ChatViewModelTests
         using var chatState = new ChatStateService();
         var mediator = new Mock<IMediator>(MockBehavior.Loose);
         var ui = new Mock<IUiDispatcher>(MockBehavior.Loose);
-        var vm = new ChatViewModel(ctx, chatState, mediator.Object, ui.Object);
+        var activeIdentity = new ActiveIdentityContext();
+        var vm = new ChatViewModel(ctx, chatState, mediator.Object, ui.Object, activeIdentity);
 
         vm.MessageInput.Value = "";
         vm.CanSend.Value.Should().BeFalse();
@@ -40,7 +42,8 @@ public class ChatViewModelTests
         var chatState = new ChatStateService();
         var mediator = new Mock<IMediator>(MockBehavior.Loose);
         var ui = new Mock<IUiDispatcher>(MockBehavior.Loose);
-        var vm = new ChatViewModel(ctx, chatState, mediator.Object, ui.Object);
+        var activeIdentity = new ActiveIdentityContext();
+        var vm = new ChatViewModel(ctx, chatState, mediator.Object, ui.Object, activeIdentity);
         var testSessionId = new DirectSessionId(Guid.NewGuid());
         vm.SetSession(testSessionId);
 
@@ -69,7 +72,8 @@ public class ChatViewModelTests
         using var chatState = new ChatStateService();
         var mediator = new Mock<IMediator>(MockBehavior.Loose);
         var ui = new Mock<IUiDispatcher>(MockBehavior.Loose);
-        var vm = new ChatViewModel(ctx, chatState, mediator.Object, ui.Object);
+        var activeIdentity = new ActiveIdentityContext();
+        var vm = new ChatViewModel(ctx, chatState, mediator.Object, ui.Object, activeIdentity);
 
         vm.MessageInput.Value = string.Empty;
         vm.SendCommand.CanExecute(null).Should().BeFalse();
@@ -85,7 +89,8 @@ public class ChatViewModelTests
         using var chatState = new ChatStateService();
         var mediator = new Mock<IMediator>(MockBehavior.Loose);
         var ui = new Mock<IUiDispatcher>(MockBehavior.Loose);
-        var vm = new ChatViewModel(ctx, chatState, mediator.Object, ui.Object);
+        var activeIdentity = new ActiveIdentityContext();
+        var vm = new ChatViewModel(ctx, chatState, mediator.Object, ui.Object, activeIdentity);
 
         // Direct state
         vm.IsRelayed.Value = false;

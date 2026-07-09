@@ -135,7 +135,7 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
         }
 
         if (SelectedRelayHostPeerId.Value is not null
-            && _relayHosts.All(x => x.NetworkPeerId.Value != SelectedRelayHostPeerId.Value.Value))
+            && _relayHosts.All(x => x.NetworkPeerId.Value != SelectedRelayHostPeerId.Value.Value.Value))
         {
             SelectedRelayHostPeerId.Value = null;
         }

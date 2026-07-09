@@ -40,7 +40,7 @@ public sealed class ChatStateUpdateHandlers :
             IsSending: true));
 
         // Trigger reload to merge full history from DB
-        _reload.TriggerReloadForConversation(conversationId, notification.SenderSelfIdentityId, sessionId);
+        _reload.TriggerReloadForConversation(conversationId, (int)notification.SenderSelfIdentityId, sessionId);
         return Task.CompletedTask;
     }
 
@@ -50,8 +50,8 @@ public sealed class ChatStateUpdateHandlers :
 
         var sessionId = new DirectSessionId(dsid.Value);
         _reload.TriggerReloadForConversation(
-            new ConversationId(notification.ConversationId),
-            notification.SelfIdentityId,
+            notification.ConversationId,
+            (int)notification.SelfIdentityId.Value,
             sessionId);
         return Task.CompletedTask;
     }

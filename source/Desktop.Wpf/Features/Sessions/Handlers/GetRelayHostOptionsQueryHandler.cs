@@ -24,7 +24,7 @@ public sealed class GetRelayHostOptionsQueryHandler : IRequestHandler<GetRelayHo
         IReadOnlyList<DirectSession> sessions;
         try
         {
-            sessions = await _directSessions.ListAsync(request.SelfIdentityId).ConfigureAwait(false);
+            sessions = await _directSessions.ListAsync(new Percolator.Network.NetworkSelfId((uint)request.SelfIdentityId)).ConfigureAwait(false);
         }
         catch
         {
