@@ -474,9 +474,9 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
     public async Task Relayed_EstablishSessionResponse_is_handled_by_initiator_and_persists_session_with_assigned_session_id()
     {
         // Arrange
-        var initiatorPeerId = new NetworkPeerId(5);
-        var responderPeerId = new NetworkPeerId(6);
-        var relayHostPeerId = new NetworkPeerId(7);
+        var initiatorPeerId = new NetworkPeerId(123456789);
+        var responderPeerId = new NetworkPeerId(987654321);
+        var relayHostPeerId = new NetworkPeerId(111111111);
 
         using var initiatorIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var initiatorIdentityPriv = initiatorIdentityEcdh.ExportECPrivateKey();
@@ -490,7 +490,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
 
         var initiatorPeer = new SimulatedPeerModel(
             networkPeerId: initiatorPeerId,
-            publicIdentityId: new Percolator.Identity.PublicIdentityId(Guid.NewGuid()),
+            publicIdentityId: new Percolator.Identity.PublicIdentityId(new Guid("00000000-0000-0000-0000-000000000001")),
             selfIdentityId: 99000,
             displayName: "init",
             isRelayCapable: false,
@@ -499,11 +499,11 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             endpoint: new System.Net.DnsEndPoint("127.77.1.1", 5002));
         var relayPeer = new SimulatedPeerModel(
             networkPeerId: relayHostPeerId,
-            publicIdentityId: new Percolator.Identity.PublicIdentityId(Guid.NewGuid()),
+            publicIdentityId: new Percolator.Identity.PublicIdentityId(new Guid("00000000-0000-0000-0000-000000000002")),
             selfIdentityId: 99001,
             displayName: "relay",
             isRelayCapable: true,
-            identitySigningKeySpki: SHA256.HashData(Guid.NewGuid().ToByteArray()),
+            identitySigningKeySpki: SHA256.HashData(new Guid("00000000-0000-0000-0000-000000000003").ToByteArray()),
             identitySigningKeyPrivateKeyEcPrivateKey: new byte[] { 0x01 },
             endpoint: new System.Net.DnsEndPoint("127.77.1.2", 5002),
             publishedPreKeyBundles: new List<SimulatedPublishedPreKeyBundleModel>
@@ -516,7 +516,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
                     SignedPreKey: bundle.SignedPreKey,
                     PreKeySignature: bundle.PreKeySignature,
                     OneTimeKeys: new ObservableList<Percolator.Cryptography.OneTimeKeyInstance>(),
-                    ExpiresUtc: DateTimeOffset.UtcNow.AddMinutes(5))
+                    ExpiresUtc: new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero).AddMinutes(5))
             });
 
         var repo = new InMemorySimulatorStateRepository();
@@ -547,7 +547,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         initiator.SessionsMutable.ContainsKey(temporarySessionId!).Should().BeTrue();
 
         // Act 2: deliver the "main" response (relayed opaque payload) assigning a final session id.
-        var assignedSessionId = Guid.NewGuid();
+        var assignedSessionId = new Guid("00000000-0000-0000-0000-000000000004");
         var payload = new EstablishSessionResponse.Types.Response.Types.ResponsePayload
         {
             Version = 1,
