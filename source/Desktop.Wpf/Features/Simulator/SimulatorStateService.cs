@@ -329,7 +329,8 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 RequestCorrelationId = payload.RequestCorrelationId,
                 AcceptorIdentityKey = ByteString.CopyFrom(model.IdentitySigningKeySpki),
                 AcceptorX3DhEphemeralKey = ByteString.CopyFrom(x3.EphemeralPublic.ToArray()),
-                InitialRatchetMessage = ByteString.CopyFrom(initial.ToArray())
+                InitialRatchetMessage = ByteString.CopyFrom(initial.ToArray()),
+                AcceptorPublicIdentityId = ByteString.CopyFrom(model.PublicIdentityId.Value.ToByteArray())
             };
 
             return new SimulatedPeerInviteAcceptance(sessionId, response);
