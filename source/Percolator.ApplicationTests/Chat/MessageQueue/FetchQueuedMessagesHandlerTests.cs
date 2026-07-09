@@ -20,7 +20,7 @@ public class FetchQueuedMessagesHandlerTests
         var peerIdentityQueries = new Mock<Percolator.Application.Chat.IPeerIdentityQueries>(MockBehavior.Loose);
         var sut = new FetchQueuedMessagesHandler(logger.Object, repo.Object, peerIdentityQueries.Object);
         var peerId = new PeerId(1);
-        var pkhBytes = BitConverter.GetBytes(peerId.Value).Concat(new byte[28]).ToArray();
+        var pkhBytes = new byte[32] { 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20 };
         var pkh = Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytes(pkhBytes);
         var msg1 = new byte[] { 0x01, 0x02 };
         var msg2 = new byte[] { 0x03 };
@@ -44,7 +44,7 @@ public class FetchQueuedMessagesHandlerTests
         var peerIdentityQueries = new Mock<Percolator.Application.Chat.IPeerIdentityQueries>(MockBehavior.Loose);
         var sut = new FetchQueuedMessagesHandler(logger.Object, repo.Object, peerIdentityQueries.Object);
         var peerId = new PeerId(1);
-        var pkhBytes = BitConverter.GetBytes(peerId.Value).Concat(new byte[28]).ToArray();
+        var pkhBytes = new byte[32] { 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20 };
         var pkh = Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytes(pkhBytes);
 
         peerIdentityQueries.Setup(q => q.GetPublicKeyHashAsync(peerId, It.IsAny<CancellationToken>()))
@@ -66,7 +66,7 @@ public class FetchQueuedMessagesHandlerTests
         var peerIdentityQueries = new Mock<Percolator.Application.Chat.IPeerIdentityQueries>(MockBehavior.Loose);
         var sut = new FetchQueuedMessagesHandler(logger.Object, repo.Object, peerIdentityQueries.Object);
         var peerId = new PeerId(1);
-        var pkhBytes = BitConverter.GetBytes(peerId.Value).Concat(new byte[28]).ToArray();
+        var pkhBytes = new byte[32] { 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20 };
         var pkh = Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytes(pkhBytes);
         var msg1 = new byte[] { 0x01, 0x02 };
         var msg2 = new byte[] { 0x03 };

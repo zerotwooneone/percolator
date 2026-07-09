@@ -39,15 +39,31 @@ public sealed class SqliteRelayMessagePublisher : IRelayMessagePublisher
             dbo.Version++;
 
             // 3. Fan-out: Map ChatPeerId (Domain) to MessageQueueItemDbo (Infrastructure)
-            // Note: RecipientPkh is the routing ID.
-            var queueItems = recipients.Select(peerId => new MessageQueueItemDbo
+            // Note: RecipientPkh is the routing ID. Look up the actual PKH from PeerPublicSigningKeys.
+            var queueItems = new List<MessageQueueItemDbo>();
+            foreach (var peerId in recipients)
             {
-                Id = Guid.NewGuid(),
-                AckId = Guid.NewGuid(),
-                RecipientPkh = Pkh.FromBytes(BitConverter.GetBytes(peerId.Value).Concat(new byte[28]).ToArray()), // Conversion: Domain to Infrastructure Pkh type
-                Blob = payload.ToArray(),
-                EnqueuedAtUtc = DateTimeOffset.UtcNow
-            }).ToList();
+                // Look up the active signing key for this peer to get the actual PKH
+                var signingKey = await _db.PeerPublicSigningKeys
+                    .AsNoTracking()
+                    .Where(k => k.PeerId == peerId.Value && k.ExpiredAtUtc == null)
+                    .OrderByDescending(k => k.ActiveAtUtc)
+                    .FirstOrDefaultAsync(cancellationToken);
+                
+                if (signingKey == null)
+                {
+                    throw new InvalidOperationException($"No active signing key found for peer {peerId.Value}. Cannot determine PKH for message routing.");
+                }
+
+                queueItems.Add(new MessageQueueItemDbo
+                {
+                    Id = Guid.NewGuid(),
+                    AckId = Guid.NewGuid(),
+                    RecipientPkh = Pkh.FromBytesOwned(signingKey.PublicKeyHash),
+                    Blob = payload.ToArray(),
+                    EnqueuedAtUtc = DateTimeOffset.UtcNow
+                });
+            }
 
             _db.MessageQueueItems.AddRange(queueItems);
 
