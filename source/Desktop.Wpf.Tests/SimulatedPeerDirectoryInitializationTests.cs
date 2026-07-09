@@ -23,7 +23,7 @@ public sealed class SimulatedPeerDirectoryInitializationTests
         using var ecdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var priv = ecdh.ExportECPrivateKey();
         var spki = ecdh.PublicKey.ExportSubjectPublicKeyInfo();
-        var model = new SimulatedPeerModel(peerId, selfIdentityId: 99000, "Alice", isRelayCapable: true, spki, priv, endpoint: new System.Net.DnsEndPoint("127.77.1.1", 5002));
+        var model = new SimulatedPeerModel(peerId, publicIdentityId: new Percolator.Identity.PublicIdentityId(Guid.NewGuid()), selfIdentityId: 99000, "Alice", isRelayCapable: true, spki, priv, endpoint: new System.Net.DnsEndPoint("127.77.1.1", 5002));
 
         var peers = new ObservableList<SimulatedPeerModel>();
         peers.Add(model);

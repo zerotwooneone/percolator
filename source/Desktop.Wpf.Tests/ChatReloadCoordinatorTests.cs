@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Time.Testing;
 using Moq;
 using NUnit.Framework;
+using Percolator.Application.Chat;
 using Percolator.Application.Identity;
 using Percolator.Chat;
 using Percolator.Chat.Messaging.ValueObjects;
@@ -17,8 +18,8 @@ public class ChatReloadCoordinatorTests
 {
     private Mock<IServiceScopeFactory> _scopeFactory = null!;
     private ChatStateService _state = null!;
-    private Mock<ISelfParticipantIdProvider> _selfParticipantIdProvider = null!;
     private Mock<ActiveIdentityContext> _activeIdentity = null!;
+    private Mock<ISelfIdentityQueries> _selfIdentityQueries = null!;
     private FakeTimeProvider _timeProvider = null!;
 
     [SetUp]
@@ -26,8 +27,8 @@ public class ChatReloadCoordinatorTests
     {
         _scopeFactory = new Mock<IServiceScopeFactory>(MockBehavior.Loose);
         _state = new ChatStateService();
-        _selfParticipantIdProvider = new Mock<ISelfParticipantIdProvider>(MockBehavior.Loose);
         _activeIdentity = new Mock<ActiveIdentityContext>(MockBehavior.Loose);
+        _selfIdentityQueries = new Mock<ISelfIdentityQueries>(MockBehavior.Loose);
         _timeProvider = new FakeTimeProvider();
     }
 
@@ -47,8 +48,8 @@ public class ChatReloadCoordinatorTests
         var coordinator = new ChatReloadCoordinator(
             _scopeFactory.Object,
             _state,
-            _selfParticipantIdProvider.Object,
             _activeIdentity.Object,
+            _selfIdentityQueries.Object,
             _timeProvider);
 
         coordinator.TriggerReloadForConversation(conversationId, selfIdentityId, sessionId);
@@ -70,8 +71,8 @@ public class ChatReloadCoordinatorTests
         var coordinator = new ChatReloadCoordinator(
             _scopeFactory.Object,
             _state,
-            _selfParticipantIdProvider.Object,
             _activeIdentity.Object,
+            _selfIdentityQueries.Object,
             _timeProvider);
 
         // Act

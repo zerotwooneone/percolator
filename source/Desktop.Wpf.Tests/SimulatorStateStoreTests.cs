@@ -13,6 +13,7 @@ using NUnit.Framework;
 using Percolator.Application.Configuration;
 using Percolator.Cryptography;
 using Percolator.Identity;
+using Percolator.Network;
 
 namespace Desktop.Wpf.Tests;
 
@@ -25,7 +26,7 @@ public sealed class SimulatorStateStoreTests
         var tmp = Path.Combine(Path.GetTempPath(), $"percolator-sim-{Guid.NewGuid():N}.json");
         try
         {
-            var peerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
+            var peerId = new NetworkPeerId(32);
 
             var services = new ServiceCollection();
             services.AddSingleton<IClock>(new TestClock(DateTimeOffset.UtcNow));
@@ -41,7 +42,7 @@ public sealed class SimulatorStateStoreTests
                 keys: keys,
                 scopeFactory: scopeFactory);
 
-            var remotePeerId = new Percolator.Cryptography.Primitives.PeerId(Guid.NewGuid());
+            var remotePeerId = new Percolator.Cryptography.Primitives.PeerId(1);
             var signedPreKeyId = Guid.NewGuid();
 
             using var identity = System.Security.Cryptography.ECDiffieHellman.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
@@ -50,6 +51,7 @@ public sealed class SimulatorStateStoreTests
 
             var model = new SimulatedPeerModel(
                 networkPeerId: peerId,
+                publicIdentityId: new Percolator.Identity.PublicIdentityId(Guid.NewGuid()),
                 selfIdentityId: 99000,
                 displayName: "Alice",
                 isRelayCapable: false,
@@ -57,9 +59,9 @@ public sealed class SimulatorStateStoreTests
                 identitySigningKeyPrivateKeyEcPrivateKey: priv,
                 endpoint: new System.Net.DnsEndPoint("127.77.1.1", 5002));
 
-            var host1 = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
-            var host2 = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
-            var host3 = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
+            var host1 = new NetworkPeerId(33);
+            var host2 = new NetworkPeerId(34);
+            var host3 = new NetworkPeerId(35);
 
             model.SignedPreKeysMutable.Add(new SimulatedSignedPreKeyModel(
                 SignedPreKeyId: signedPreKeyId,
@@ -88,7 +90,7 @@ public sealed class SimulatorStateStoreTests
             model.SignedPreKeysMutable.Add(new SimulatedSignedPreKeyModel(Guid.NewGuid(), RandomNumberGenerator.GetBytes(32), RandomNumberGenerator.GetBytes(32)));
             model.SessionsMutable[session.Id] = session;
 
-            var inviterPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
+            var inviterPeerId = new NetworkPeerId(36);
             model.PendingInboundDirectInvitesMutable.Add(new SimulatedPendingInboundDirectInviteModel(
                 CorrelationId: Guid.NewGuid(),
                 RequestBytes: new byte[] { 0x10, 0x11, 0x12 },
@@ -103,7 +105,7 @@ public sealed class SimulatorStateStoreTests
                 new PeerRelationshipSnapshot(model.NetworkPeerId, host3, RelationshipType.PublishedKey)
             };
 
-            var relayHostPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
+            var relayHostPeerId = new NetworkPeerId(37);
             var ackUp = Guid.NewGuid();
             var ackDown = Guid.NewGuid();
             var targetPkh = IdentityPublicKeyHash.FromSpki(Guid.NewGuid().ToByteArray());
@@ -193,8 +195,8 @@ public sealed class SimulatorStateStoreTests
         var tmp = Path.Combine(Path.GetTempPath(), $"percolator-sim-{Guid.NewGuid():N}.json");
         try
         {
-            var peerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
-            var inviterPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
+            var peerId = new NetworkPeerId(32);
+            var inviterPeerId = new NetworkPeerId(36);
             var correlationId = Guid.NewGuid();
 
             var services = new ServiceCollection();
@@ -217,6 +219,7 @@ public sealed class SimulatorStateStoreTests
 
             var model = new SimulatedPeerModel(
                 networkPeerId: peerId,
+                publicIdentityId: new Percolator.Identity.PublicIdentityId(Guid.NewGuid()),
                 selfIdentityId: 99000,
                 displayName: "TestPeer",
                 isRelayCapable: false,

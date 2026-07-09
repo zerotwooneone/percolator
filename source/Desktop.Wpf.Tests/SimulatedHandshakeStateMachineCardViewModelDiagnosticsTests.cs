@@ -31,18 +31,18 @@ public sealed class SimulatedHandshakeStateMachineCardViewModelDiagnosticsTests
         var priv = ecdh.ExportECPrivateKey();
         var spki = ecdh.PublicKey.ExportSubjectPublicKeyInfo();
 
-        var model = new SimulatedPeerModel(peerId, selfIdentityId: 99000, "peer", isRelayCapable: false, spki, priv, endpoint: new System.Net.DnsEndPoint("127.77.1.1", 5002));
+        var model = new SimulatedPeerModel(peerId, publicIdentityId: new Percolator.Identity.PublicIdentityId(Guid.NewGuid()), selfIdentityId: 99000, "peer", isRelayCapable: false, spki, priv, endpoint: new System.Net.DnsEndPoint("127.77.1.1", 5002));
 
         var diagnostics = new SimulatorDiagnosticsService();
         var options = Options.Create(new TransportOptions {  });
 
         var active = new ActiveIdentityContext();
-        active.SetActiveIdentity(new IdentityRecord(Guid.NewGuid(), "self"));
+        active.SetActiveIdentity(new IdentityRecord(new Percolator.Identity.SelfId(1), new Percolator.Identity.PublicIdentityId(Guid.NewGuid()), new Percolator.Identity.DeviceId(1), "self"));
 
         var relayHostId = new NetworkPeerId(2);
         var state = new Mock<ISimulatorStateService>(MockBehavior.Loose);
 
-        var relayHostModel = new SimulatedPeerModel(relayHostId, selfIdentityId: 99001, "relay", isRelayCapable: true, spki, priv, endpoint: new System.Net.DnsEndPoint("127.77.1.2", 5002));
+        var relayHostModel = new SimulatedPeerModel(relayHostId, publicIdentityId: new Percolator.Identity.PublicIdentityId(Guid.NewGuid()), selfIdentityId: 99001, "relay", isRelayCapable: true, spki, priv, endpoint: new System.Net.DnsEndPoint("127.77.1.2", 5002));
         var peers = new ObservableCollections.ObservableList<SimulatedPeerModel>();
         peers.Add(relayHostModel);
         state.SetupGet(s => s.Peers).Returns(peers);

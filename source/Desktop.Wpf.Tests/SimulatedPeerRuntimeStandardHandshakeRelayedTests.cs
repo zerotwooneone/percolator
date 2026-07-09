@@ -17,6 +17,7 @@ using Percolator.Application.Configuration;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
+using Percolator.Network;
 
 namespace Desktop.Wpf.Tests;
 
@@ -77,8 +78,8 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
     public async Task AcceptInboundDirectInviteAsync_creates_session_in_memory()
     {
         // Arrange
-        var simulatedPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
-        var inviterPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
+        var simulatedPeerId = new NetworkPeerId(10);
+        var inviterPeerId = new NetworkPeerId(11);
 
         var acceptorPeer = CryptoTestHelpers.CreateTestPeer(
             simulatedPeerId, 99000, "sim", false,
@@ -138,8 +139,8 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
     public async Task AcceptInboundDirectInviteAsync_eventually_persists_runtime_store()
     {
         // Arrange
-        var simulatedPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
-        var inviterPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
+        var simulatedPeerId = new NetworkPeerId(12);
+        var inviterPeerId = new NetworkPeerId(13);
 
         using var acceptorIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var acceptorIdentityPriv = acceptorIdentityEcdh.ExportECPrivateKey();
@@ -175,6 +176,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
 
         var peer = new SimulatedPeerModel(
             networkPeerId: simulatedPeerId,
+            publicIdentityId: new Percolator.Identity.PublicIdentityId(Guid.NewGuid()),
             selfIdentityId: 99000,
             displayName: "sim",
             isRelayCapable: false,
@@ -208,8 +210,8 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
     [Test]
     public async Task Relayed_HandshakeInitiatorHello_is_handled_and_persists_runtime_store()
     {
-        var simulatedPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
-        var relayHostPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
+        var simulatedPeerId = new NetworkPeerId(14);
+        var relayHostPeerId = new NetworkPeerId(15);
 
         using var responderIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var responderIdentityPriv = responderIdentityEcdh.ExportECPrivateKey();
@@ -223,6 +225,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
 
         var peer = new SimulatedPeerModel(
             networkPeerId: simulatedPeerId,
+            publicIdentityId: new Percolator.Identity.PublicIdentityId(Guid.NewGuid()),
             selfIdentityId: 99000,
             displayName: "sim",
             isRelayCapable: false,
@@ -297,8 +300,8 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
     public async Task When_initiating_standard_handshake_via_relay_it_enqueues_handshake_initiator_hello_to_relay_host()
     {
         // Arrange
-        var simulatedPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
-        var relayHostPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
+        var simulatedPeerId = new NetworkPeerId(16);
+        var relayHostPeerId = new NetworkPeerId(17);
 
         using var initiatorIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var initiatorIdentityPriv = initiatorIdentityEcdh.ExportECPrivateKey();
@@ -310,6 +313,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
 
         var initiatorPeer = new SimulatedPeerModel(
             networkPeerId: simulatedPeerId,
+            publicIdentityId: new Percolator.Identity.PublicIdentityId(Guid.NewGuid()),
             selfIdentityId: 99000,
             displayName: "sim",
             isRelayCapable: false,
@@ -318,6 +322,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             endpoint: new System.Net.DnsEndPoint("127.77.1.1", 5002));
         var relayPeer = new SimulatedPeerModel(
             networkPeerId: relayHostPeerId,
+            publicIdentityId: new Percolator.Identity.PublicIdentityId(Guid.NewGuid()),
             selfIdentityId: 99001,
             displayName: "relay",
             isRelayCapable: true,
@@ -328,7 +333,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             {
                 new(
                     RecipientPublicKeyHash: Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(responderPkh),
-                    LogicalOwnerNetworkPeerId: new Percolator.Network.NetworkPeerId(Guid.NewGuid()),
+                    LogicalOwnerNetworkPeerId: new NetworkPeerId(4),
                     IdentityKey: bundle.IdentityKey,
                     SignedPreKeyId: bundle.SignedPreKeyId,
                     SignedPreKey: bundle.SignedPreKey,
@@ -368,19 +373,19 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
 
         diagnostics.Events.Should().Contain(e =>
             e.EventType == SimulatorDiagnosticEventType.PreKeyBundleFetched
-            && e.RelayHostPeerId.Value == relayHostPeerId.Value);
+            && e.RelayHostPeerId == relayHostPeerId);
         diagnostics.Events.Should().Contain(e =>
             e.EventType == SimulatorDiagnosticEventType.StandardHandshakeHelloEnqueued
-            && e.PeerId.Value == simulatedPeerId.Value
-            && e.RelayHostPeerId.Value == relayHostPeerId.Value);
+            && e.PeerId == simulatedPeerId
+            && e.RelayHostPeerId == relayHostPeerId);
     }
 
     [Test]
     public async Task When_relay_returns_bundle_with_mismatched_identity_key_it_does_not_enqueue_handshake_hello()
     {
         // Arrange
-        var simulatedPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
-        var relayHostPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
+        var simulatedPeerId = new NetworkPeerId(18);
+        var relayHostPeerId = new NetworkPeerId(19);
 
         using var initiatorIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var initiatorIdentityPriv = initiatorIdentityEcdh.ExportECPrivateKey();
@@ -394,6 +399,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
 
         var initiatorPeer = new SimulatedPeerModel(
             networkPeerId: simulatedPeerId,
+            publicIdentityId: new Percolator.Identity.PublicIdentityId(Guid.NewGuid()),
             selfIdentityId: 99000,
             displayName: "sim",
             isRelayCapable: false,
@@ -402,6 +408,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             endpoint: new System.Net.DnsEndPoint("127.77.1.1", 5002));
         var relayPeer = new SimulatedPeerModel(
             networkPeerId: relayHostPeerId,
+            publicIdentityId: new Percolator.Identity.PublicIdentityId(Guid.NewGuid()),
             selfIdentityId: 99001,
             displayName: "relay",
             isRelayCapable: true,
@@ -412,7 +419,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             {
                 new(
                     RecipientPublicKeyHash: Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(requestedResponderPkh),
-                    LogicalOwnerNetworkPeerId: new Percolator.Network.NetworkPeerId(Guid.NewGuid()),
+                    LogicalOwnerNetworkPeerId: new NetworkPeerId(3),
                     IdentityKey: bundle.IdentityKey,
                     SignedPreKeyId: bundle.SignedPreKeyId,
                     SignedPreKey: bundle.SignedPreKey,
@@ -467,9 +474,9 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
     public async Task Relayed_EstablishSessionResponse_is_handled_by_initiator_and_persists_session_with_assigned_session_id()
     {
         // Arrange
-        var initiatorPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
-        var responderPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
-        var relayHostPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
+        var initiatorPeerId = new NetworkPeerId(5);
+        var responderPeerId = new NetworkPeerId(6);
+        var relayHostPeerId = new NetworkPeerId(7);
 
         using var initiatorIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var initiatorIdentityPriv = initiatorIdentityEcdh.ExportECPrivateKey();
@@ -483,6 +490,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
 
         var initiatorPeer = new SimulatedPeerModel(
             networkPeerId: initiatorPeerId,
+            publicIdentityId: new Percolator.Identity.PublicIdentityId(Guid.NewGuid()),
             selfIdentityId: 99000,
             displayName: "init",
             isRelayCapable: false,
@@ -491,6 +499,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             endpoint: new System.Net.DnsEndPoint("127.77.1.1", 5002));
         var relayPeer = new SimulatedPeerModel(
             networkPeerId: relayHostPeerId,
+            publicIdentityId: new Percolator.Identity.PublicIdentityId(Guid.NewGuid()),
             selfIdentityId: 99001,
             displayName: "relay",
             isRelayCapable: true,
@@ -580,7 +589,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
     public async Task RelayHost_Returns_ResponsePayload_for_GetPreKeyBundleRequest_when_bundle_not_found()
     {
         // Arrange
-        var relayHostPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
+        var relayHostPeerId = new NetworkPeerId(20);
 
         using var relayIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         using var relayIdentityEcdsa = ECDsa.Create(relayIdentityEcdh.ExportParameters(true));
@@ -605,6 +614,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
 
         var relayPeer = new SimulatedPeerModel(
             networkPeerId: relayHostPeerId,
+            publicIdentityId: new Percolator.Identity.PublicIdentityId(Guid.NewGuid()),
             selfIdentityId: 99000,
             displayName: "relay",
             isRelayCapable: true,

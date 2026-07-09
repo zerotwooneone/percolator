@@ -9,6 +9,7 @@ using Moq;
 using NUnit.Framework;
 using ObservableCollections;
 using Percolator.Identity;
+using Percolator.Network;
 
 namespace Desktop.Wpf.Tests;
 
@@ -23,9 +24,9 @@ public sealed class SimulatorDiagnosticsTabViewModelFilteringTests
     public async Task Filtering_ByPeerRelayAndType_Works()
     {
         // Arrange
-        var peerA = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
-        var peerB = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
-        var relay = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
+        var peerA = new NetworkPeerId(26);
+        var peerB = new NetworkPeerId(27);
+        var relay = new NetworkPeerId(28);
 
         var state = new Mock<ISimulatorStateService>(MockBehavior.Strict);
 
@@ -33,9 +34,9 @@ public sealed class SimulatorDiagnosticsTabViewModelFilteringTests
         var priv = ecdh.ExportECPrivateKey();
         var spki = ecdh.PublicKey.ExportSubjectPublicKeyInfo();
         var peersList = new ObservableList<SimulatedPeerModel>();
-        peersList.Add(new SimulatedPeerModel(peerA, selfIdentityId: 99000, "A", isRelayCapable: false, spki, priv, endpoint: new System.Net.DnsEndPoint("127.77.1.1", 5002)));
-        peersList.Add(new SimulatedPeerModel(relay, selfIdentityId: 99001, "Relay", isRelayCapable: true, spki, priv, endpoint: new System.Net.DnsEndPoint("127.77.1.2", 5002)));
-        peersList.Add(new SimulatedPeerModel(peerB, selfIdentityId: 99002, "B", isRelayCapable: false, spki, priv, endpoint: new System.Net.DnsEndPoint("127.77.1.3", 5002)));
+        peersList.Add(new SimulatedPeerModel(peerA, publicIdentityId: new Percolator.Identity.PublicIdentityId(Guid.NewGuid()), selfIdentityId: 99000, "A", isRelayCapable: false, spki, priv, endpoint: new System.Net.DnsEndPoint("127.77.1.1", 5002)));
+        peersList.Add(new SimulatedPeerModel(relay, publicIdentityId: new Percolator.Identity.PublicIdentityId(Guid.NewGuid()), selfIdentityId: 99001, "Relay", isRelayCapable: true, spki, priv, endpoint: new System.Net.DnsEndPoint("127.77.1.2", 5002)));
+        peersList.Add(new SimulatedPeerModel(peerB, publicIdentityId: new Percolator.Identity.PublicIdentityId(Guid.NewGuid()), selfIdentityId: 99002, "B", isRelayCapable: false, spki, priv, endpoint: new System.Net.DnsEndPoint("127.77.1.3", 5002)));
         state.SetupGet(s => s.Peers).Returns(peersList);
         state.Setup(s => s.TryGetPeerIdByIdentityPublicKeyHashAsync(It.IsAny<IdentityPublicKeyHash>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Percolator.Network.NetworkPeerId?)null);
@@ -53,8 +54,8 @@ public sealed class SimulatorDiagnosticsTabViewModelFilteringTests
         diagnostics.Emit(SimulatorDiagnosticEventType.RelayEnqueued, "b1", peerId: peerB, relayHostPeerId: relay);
 
         // Act
-        sut.SelectedPeerId.Value = peerA.Value;
-        sut.SelectedRelayHostPeerId.Value = relay.Value;
+        sut.SelectedPeerId.Value = peerA;
+        sut.SelectedRelayHostPeerId.Value = relay;
         sut.SelectedEventType.Value = SimulatorDiagnosticEventType.RelayEnqueued;
 
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);

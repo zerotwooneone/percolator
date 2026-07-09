@@ -13,6 +13,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using NUnit.Framework;
 using Percolator.Application.Configuration;
+using Percolator.Network;
 using Percolator.Cryptography;
 
 namespace Desktop.Wpf.Tests;
@@ -69,8 +70,8 @@ public sealed class SimulatorStateServiceInitializationTests
     public async Task InitializeAsync_RestoresSessionsFromSnapshot()
     {
         // Arrange
-        var peerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
-        var remotePeerId = new Percolator.Cryptography.Primitives.PeerId(Guid.NewGuid());
+        var peerId = new NetworkPeerId(31);
+        var remotePeerId = new Percolator.Cryptography.Primitives.PeerId(1);
         var signedPreKeyId = Guid.NewGuid();
 
         using var identity = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
@@ -79,6 +80,7 @@ public sealed class SimulatorStateServiceInitializationTests
 
         var model = new SimulatedPeerModel(
             networkPeerId: peerId,
+            publicIdentityId: new Percolator.Identity.PublicIdentityId(Guid.NewGuid()),
             selfIdentityId: 99000,
             displayName: "Alice",
             isRelayCapable: false,

@@ -250,6 +250,7 @@ internal static class CryptoTestHelpers
 
         return new SimulatedPeerModel(
             networkPeerId: networkPeerId,
+            publicIdentityId: new Percolator.Identity.PublicIdentityId(Guid.NewGuid()),
             selfIdentityId: selfIdentityId,
             displayName: displayName,
             isRelayCapable: isRelayCapable,

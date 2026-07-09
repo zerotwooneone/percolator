@@ -29,22 +29,21 @@ public sealed class ConnectionManagementDialogRelayFetchInitiateTests
         // ARRANGE
         var directSessions = new Mock<IDirectSessionRepository>(MockBehavior.Loose);
 
-        var relayHostId = Guid.NewGuid();
+        var relayHostId = new NetworkPeerId(40);
         var directSessionId = DirectSessionId.NewId();
-        directSessions.Setup(x => x.GetByRemotePeerIdAsync(It.IsAny<Percolator.Network.NetworkPeerId>(), It.IsAny<int>()))
-            .ReturnsAsync(new DirectSession(new Percolator.Network.NetworkPeerId(relayHostId), directSessionId));
-        directSessions.Setup(x => x.ListAsync(It.IsAny<int>()))
+        directSessions.Setup(x => x.GetByRemotePeerIdAsync(It.IsAny<Percolator.Network.NetworkPeerId>(), It.IsAny<Percolator.Network.NetworkSelfId>()))
+            .ReturnsAsync(new DirectSession(relayHostId, directSessionId));
+        directSessions.Setup(x => x.ListAsync(It.IsAny<Percolator.Network.NetworkSelfId>()))
             .ReturnsAsync(Array.Empty<DirectSession>());
 
         var active = new ActiveIdentityContext();
         var identityPublicIdentityId = active.Identity?.PublicIdentityId ?? PublicIdentityId.NewId();
         active.SetActiveIdentity(
             new IdentityRecord(
-                active.Identity?.SelfIdentityId ?? new SelfId(1),
+                active.Identity?.SelfIdentityId ?? new Percolator.Identity.SelfId(1),
                 identityPublicIdentityId,
-                active.Identity?.DeviceId ?? DeviceId.Primary,
-                active.Identity?.Name ?? "self",
-                active.Identity?.Nickname ?? identityPublicIdentityId.ToString()),
+                active.Identity?.DeviceId ?? new Percolator.Identity.DeviceId(1),
+                active.Identity?.Name ?? "self"),
             new X3dhKeys(
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256)));
@@ -85,7 +84,7 @@ public sealed class ConnectionManagementDialogRelayFetchInitiateTests
             mediator.Object);
 
         sut.SelectedRouteMode.Value = new RouteModeOption("relay", "Via Relay Host");
-        sut.SelectedRelayHost.Value = new RelayHostOption(new Percolator.Network.NetworkPeerId(relayHostId), "relay");
+        sut.SelectedRelayHost.Value = new RelayHostOption(relayHostId, "relay");
         sut.TargetPkhText.Value = targetPkhHex;
 
         // ACT

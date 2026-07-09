@@ -11,6 +11,7 @@ using NUnit.Framework;
 using ObservableCollections;
 using Percolator.Cryptography;
 using Percolator.Identity;
+using Percolator.Network;
 
 namespace Desktop.Wpf.Tests;
 
@@ -21,8 +22,8 @@ public sealed class SimulatorDiagnosticBundleBuilderTests
     public async Task BuildJsonAsync_ContainsRequiredTopLevelSections()
     {
         // Arrange
-        var relayHostId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
-        var peerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
+        var relayHostId = new NetworkPeerId(24);
+        var peerId = new NetworkPeerId(25);
 
         var state = new Mock<ISimulatorStateService>(MockBehavior.Strict);
 
@@ -30,8 +31,8 @@ public sealed class SimulatorDiagnosticBundleBuilderTests
         var priv = ecdh.ExportECPrivateKey();
         var spki = ecdh.PublicKey.ExportSubjectPublicKeyInfo();
         var peersList = new ObservableList<SimulatedPeerModel>();
-        peersList.Add(new SimulatedPeerModel(relayHostId, selfIdentityId: 99000, "Relay", isRelayCapable: true, spki, priv, endpoint: new System.Net.DnsEndPoint("127.77.1.1", 5002)));
-        peersList.Add(new SimulatedPeerModel(peerId, selfIdentityId: 99001, "Peer", isRelayCapable: false, spki, priv, endpoint: new System.Net.DnsEndPoint("127.77.1.2", 5002)));
+        peersList.Add(new SimulatedPeerModel(relayHostId, publicIdentityId: new Percolator.Identity.PublicIdentityId(Guid.NewGuid()), selfIdentityId: 99000, "Relay", isRelayCapable: true, spki, priv, endpoint: new System.Net.DnsEndPoint("127.77.1.1", 5002)));
+        peersList.Add(new SimulatedPeerModel(peerId, publicIdentityId: new Percolator.Identity.PublicIdentityId(Guid.NewGuid()), selfIdentityId: 99001, "Peer", isRelayCapable: false, spki, priv, endpoint: new System.Net.DnsEndPoint("127.77.1.2", 5002)));
 
         var relaysList = new ObservableList<SimulatedRelayModel>();
         relaysList.Add(new SimulatedRelayModel(relayHostId));

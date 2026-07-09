@@ -59,7 +59,7 @@ public sealed class PendingHandshakesMenuViewModelTests
         var windowManager = new Mock<IWindowManager>(MockBehavior.Loose);
         var ui = new TestUiDispatcher();
         var activeIdentity = new ActiveIdentityContext();
-        var identityRecord = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = selfId };
+        var identityRecord = new Percolator.Identity.Model.IdentityRecord(selfId, new Percolator.Identity.PublicIdentityId(Guid.NewGuid()), new Percolator.Identity.DeviceId(1), "self");
         activeIdentity.SetActiveIdentity(identityRecord, new X3dhKeys(
             System.Security.Cryptography.ECDiffieHellman.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256),
             System.Security.Cryptography.ECDiffieHellman.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256)));

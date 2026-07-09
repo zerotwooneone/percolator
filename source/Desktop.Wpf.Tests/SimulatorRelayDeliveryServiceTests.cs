@@ -10,6 +10,7 @@ using NUnit.Framework;
 using Percolator.Contracts;
 using Percolator.Identity;
 using Percolator.Identity.Model;
+using Percolator.Network;
 
 namespace Desktop.Wpf.Tests;
 
@@ -20,8 +21,8 @@ public sealed class SimulatorRelayDeliveryServiceTests
     public async Task DeliverToPeerAsync_when_payload_is_valid_handshake_initiator_hello_upserts_pending_standard_hello_and_does_not_forward()
     {
         // Arrange
-        var relayHostPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
-        var recipientPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
+        var relayHostPeerId = new NetworkPeerId(29);
+        var recipientPeerId = new NetworkPeerId(30);
         var ackId = Guid.NewGuid();
 
         var initiatorIdentity = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
@@ -66,8 +67,8 @@ public sealed class SimulatorRelayDeliveryServiceTests
     public async Task DeliverToPeerAsync_when_payload_is_valid_handshake_initiator_hello_upserts_pending_standard_hello_even_if_initiator_identity_matches_a_simulated_peer()
     {
         // Arrange
-        var relayHostPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
-        var recipientPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
+        var relayHostPeerId = new NetworkPeerId(29);
+        var recipientPeerId = new NetworkPeerId(30);
         var ackId = Guid.NewGuid();
 
         using var initiatorIdentity = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
@@ -114,8 +115,8 @@ public sealed class SimulatorRelayDeliveryServiceTests
     public async Task DeliverToPeerAsync_when_initiator_pkh_matches_neither_simulated_peer_nor_main_identity_emits_routing_failure_and_does_not_enqueue()
     {
         // Arrange
-        var relayHostPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
-        var recipientPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
+        var relayHostPeerId = new NetworkPeerId(29);
+        var recipientPeerId = new NetworkPeerId(30);
         var ackId = Guid.NewGuid();
 
         using var initiatorIdentity = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);

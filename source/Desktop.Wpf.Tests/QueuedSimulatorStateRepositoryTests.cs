@@ -13,6 +13,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using NUnit.Framework;
 using Percolator.Application.Configuration;
+using Percolator.Network;
 using Percolator.Cryptography;
 
 namespace Desktop.Wpf.Tests;
@@ -43,13 +44,14 @@ public sealed class QueuedSimulatorStateRepositoryTests
             using var queuedRepo = new QueuedSimulatorStateRepository(innerRepo);
 
             // Create a snapshot
-            var peerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
+            var peerId = new NetworkPeerId(23);
             using var identity = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
             var priv = identity.ExportECPrivateKey();
             var spki = identity.ExportSubjectPublicKeyInfo();
 
             var model = new SimulatedPeerModel(
                 networkPeerId: peerId,
+                publicIdentityId: new Percolator.Identity.PublicIdentityId(Guid.NewGuid()),
                 selfIdentityId: 99000,
                 displayName: "TestPeer",
                 isRelayCapable: false,
@@ -108,13 +110,14 @@ public sealed class QueuedSimulatorStateRepositoryTests
             using var queuedRepo = new QueuedSimulatorStateRepository(innerRepo);
 
             // Create and save initial snapshot
-            var peerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
+            var peerId = new NetworkPeerId(23);
             using var identity = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
             var priv = identity.ExportECPrivateKey();
             var spki = identity.ExportSubjectPublicKeyInfo();
 
             var model = new SimulatedPeerModel(
                 networkPeerId: peerId,
+                publicIdentityId: new Percolator.Identity.PublicIdentityId(Guid.NewGuid()),
                 selfIdentityId: 99000,
                 displayName: "TestPeer",
                 isRelayCapable: false,

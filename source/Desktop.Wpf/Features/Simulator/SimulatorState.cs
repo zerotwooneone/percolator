@@ -15,7 +15,7 @@ public sealed class GroupConversationDto
     public int Version { get; set; } = 1;
     public Guid GroupId { get; set; }
     public string? Name { get; set; }
-    public List<Guid> ParticipantPeerIds { get; set; } = new();
+    public List<uint> ParticipantPeerIds { get; set; } = new();
 }
 
 public sealed class SimulatedPeerDto

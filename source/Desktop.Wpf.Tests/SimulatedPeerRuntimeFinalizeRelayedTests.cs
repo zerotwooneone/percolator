@@ -8,6 +8,7 @@ using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using Percolator.Network;
 using Microsoft.Extensions.Time.Testing;
 using NUnit.Framework;
 using Percolator.Application.Configuration;
@@ -26,8 +27,8 @@ public sealed class SimulatedPeerRuntimeFinalizeRelayedTests
     public async Task RelayedSimulatorInitiatedHandshake_CreatesSession_WhenMainAccepts()
     {
         // Arrange
-        var inviterPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
-        var acceptorPeerId = new Percolator.Network.NetworkPeerId(Guid.NewGuid());
+        var inviterPeerId = new NetworkPeerId(21);
+        var acceptorPeerId = new NetworkPeerId(22);
         var correlation = Guid.NewGuid();
 
         var inviterPeer = CryptoTestHelpers.CreateTestPeer(

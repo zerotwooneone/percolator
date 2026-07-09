@@ -28,11 +28,11 @@ public sealed class ConnectionManagementDialogImportTokenTests
         WpfTestHarness.EnsureApplication();
 
         var directSessions = new Mock<IDirectSessionRepository>(MockBehavior.Loose);
-        directSessions.Setup(x => x.ListAsync(It.IsAny<int>()))
+        directSessions.Setup(x => x.ListAsync(It.IsAny<Percolator.Network.NetworkSelfId>()))
             .ReturnsAsync(Array.Empty<DirectSession>());
 
         var active = new ActiveIdentityContext();
-        active.SetActiveIdentity(new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "self"));
+        active.SetActiveIdentity(new Percolator.Identity.Model.IdentityRecord(new Percolator.Identity.SelfId(1), new Percolator.Identity.PublicIdentityId(Guid.NewGuid()), new Percolator.Identity.DeviceId(1), "self"));
 
         var state = new PeerConnectionStateService(Mock.Of<IServiceScopeFactory>(MockBehavior.Loose));
         var identityStateService = new Mock<IIdentityStateService>(MockBehavior.Loose);
@@ -68,11 +68,11 @@ public sealed class ConnectionManagementDialogImportTokenTests
         WpfTestHarness.EnsureApplication();
 
         var directSessions = new Mock<IDirectSessionRepository>(MockBehavior.Loose);
-        directSessions.Setup(x => x.ListAsync(It.IsAny<int>()))
+        directSessions.Setup(x => x.ListAsync(It.IsAny<Percolator.Network.NetworkSelfId>()))
             .ReturnsAsync(Array.Empty<DirectSession>());
 
         var active = new ActiveIdentityContext();
-        active.SetActiveIdentity(new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "self"));
+        active.SetActiveIdentity(new Percolator.Identity.Model.IdentityRecord(new Percolator.Identity.SelfId(1), new Percolator.Identity.PublicIdentityId(Guid.NewGuid()), new Percolator.Identity.DeviceId(1), "self"));
 
         var state = new PeerConnectionStateService(Mock.Of<IServiceScopeFactory>(MockBehavior.Loose));
         var identityStateService = new Mock<IIdentityStateService>(MockBehavior.Loose);
