@@ -19,7 +19,6 @@ public class ChatReloadCoordinatorTests
     private Mock<IServiceScopeFactory> _scopeFactory = null!;
     private ChatStateService _state = null!;
     private Mock<ActiveIdentityContext> _activeIdentity = null!;
-    private Mock<ISelfIdentityQueries> _selfIdentityQueries = null!;
     private FakeTimeProvider _timeProvider = null!;
 
     [SetUp]
@@ -28,7 +27,6 @@ public class ChatReloadCoordinatorTests
         _scopeFactory = new Mock<IServiceScopeFactory>(MockBehavior.Loose);
         _state = new ChatStateService();
         _activeIdentity = new Mock<ActiveIdentityContext>(MockBehavior.Loose);
-        _selfIdentityQueries = new Mock<ISelfIdentityQueries>(MockBehavior.Loose);
         _timeProvider = new FakeTimeProvider();
     }
 
@@ -49,7 +47,6 @@ public class ChatReloadCoordinatorTests
             _scopeFactory.Object,
             _state,
             _activeIdentity.Object,
-            _selfIdentityQueries.Object,
             _timeProvider);
 
         coordinator.TriggerReloadForConversation(conversationId, selfIdentityId, sessionId);
@@ -72,7 +69,6 @@ public class ChatReloadCoordinatorTests
             _scopeFactory.Object,
             _state,
             _activeIdentity.Object,
-            _selfIdentityQueries.Object,
             _timeProvider);
 
         // Act
