@@ -7,6 +7,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Percolator.Identity;
 using Percolator.Network;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Percolator.Infrastructure.Outbox;
 
@@ -16,22 +17,16 @@ namespace Percolator.Infrastructure.Outbox;
 /// </summary>
 public sealed class OutboxDispatcherWorker : BackgroundService
 {
-    private readonly PercolatorDbContext _db;
-    private readonly IRemoteEnvelopeSender _remoteEnvelopeSender;
-    private readonly IPeerRoutingProfileRepository _peerRoutingProfileRepository;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<OutboxDispatcherWorker> _logger;
     private readonly TimeSpan _pollInterval = TimeSpan.FromSeconds(5);
     private readonly TimeSpan _maxBackoff = TimeSpan.FromMinutes(5);
 
     public OutboxDispatcherWorker(
-        PercolatorDbContext db,
-        IRemoteEnvelopeSender remoteEnvelopeSender,
-        IPeerRoutingProfileRepository peerRoutingProfileRepository,
+        IServiceScopeFactory scopeFactory,
         ILogger<OutboxDispatcherWorker> logger)
     {
-        _db = db;
-        _remoteEnvelopeSender = remoteEnvelopeSender;
-        _peerRoutingProfileRepository = peerRoutingProfileRepository;
+        _scopeFactory = scopeFactory;
         _logger = logger;
     }
 
@@ -58,7 +53,10 @@ public sealed class OutboxDispatcherWorker : BackgroundService
 
     private async Task ProcessOutboxAsync(CancellationToken ct)
     {
-        var unprocessedEvents = await _db.RelayOutbox
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PercolatorDbContext>();
+
+        var unprocessedEvents = await db.RelayOutbox
             .Where(e => e.ProcessedAtUtc == null)
             .OrderBy(e => e.Id)
             .Take(10)
@@ -71,11 +69,11 @@ public sealed class OutboxDispatcherWorker : BackgroundService
 
         foreach (var outboxItem in unprocessedEvents)
         {
-            await ProcessOutboxItemAsync(outboxItem, ct);
+            await ProcessOutboxItemAsync(outboxItem, db, scope, ct);
         }
     }
 
-    private async Task ProcessOutboxItemAsync(RelayOutboxDbo outboxItem, CancellationToken ct)
+    private async Task ProcessOutboxItemAsync(RelayOutboxDbo outboxItem, PercolatorDbContext db, IServiceScope scope, CancellationToken ct)
     {
         var backoff = TimeSpan.FromSeconds(1);
         var maxAttempts = 5;
@@ -99,11 +97,11 @@ public sealed class OutboxDispatcherWorker : BackgroundService
                     return;
                 }
 
-                await DispatchEventAsync(domainEvent, new Percolator.Identity.PeerId(outboxItem.DestinationPeerId), outboxItem, ct);
+                await DispatchEventAsync(domainEvent, new Percolator.Identity.PeerId(outboxItem.DestinationPeerId), outboxItem, db, scope.ServiceProvider, ct);
 
                 // Success - mark as processed
                 MarkAsProcessed(outboxItem);
-                await _db.SaveChangesAsync(ct);
+                await db.SaveChangesAsync(ct);
                 _logger.LogInformation("Successfully processed outbox item {Id} of type {EventType}", outboxItem.Id, outboxItem.EventType);
                 return;
             }
@@ -129,13 +127,13 @@ public sealed class OutboxDispatcherWorker : BackgroundService
                 _logger.LogError(ex, "Non-transient error processing outbox item {Id}", outboxItem.Id);
                 // Mark as processed to avoid infinite retry loops for permanent errors
                 MarkAsProcessed(outboxItem);
-                await _db.SaveChangesAsync(ct);
+                await db.SaveChangesAsync(ct);
                 return;
             }
         }
     }
 
-    private async Task DispatchEventAsync(Percolator.Chat.SeedWork.IDomainEvent domainEvent, Percolator.Identity.PeerId destinationPeerId, RelayOutboxDbo outboxItem, CancellationToken ct)
+    private async Task DispatchEventAsync(Percolator.Chat.SeedWork.IDomainEvent domainEvent, Percolator.Identity.PeerId destinationPeerId, RelayOutboxDbo outboxItem, PercolatorDbContext db, IServiceProvider serviceProvider, CancellationToken ct)
     {
         switch (domainEvent)
         {
@@ -148,7 +146,8 @@ public sealed class OutboxDispatcherWorker : BackgroundService
             case MemberInvitedDomainEvent inviteEvent:
                 // Dispatch GroupInvite via IRemoteEnvelopeSender
                 // Query relay's routing profile to get endpoint information
-                var relayProfile = await _peerRoutingProfileRepository.GetByIdAsync(
+                var peerRoutingProfileRepository = serviceProvider.GetRequiredService<IPeerRoutingProfileRepository>();
+                var relayProfile = await peerRoutingProfileRepository.GetByIdAsync(
                     new Percolator.Network.NetworkPeerId(inviteEvent.RelayPeerId.Value), ct).ConfigureAwait(false);
                 
                 string relayHost = null;
@@ -171,7 +170,7 @@ public sealed class OutboxDispatcherWorker : BackgroundService
                     _logger.LogWarning("Cannot dispatch GroupInvite for conversation {ConversationId} - relay endpoint not found for RelayPeerId {RelayPeerId}", 
                         inviteEvent.ConversationId, inviteEvent.RelayPeerId.Value);
                     MarkAsProcessed(outboxItem);
-                    await _db.SaveChangesAsync(ct);
+                    await db.SaveChangesAsync(ct);
                     return;
                 }
                 

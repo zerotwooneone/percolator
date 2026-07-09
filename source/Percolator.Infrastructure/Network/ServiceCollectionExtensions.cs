@@ -21,6 +21,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IPeerGrpcChannelFactory, PeerGrpcChannelFactory>();
         services.AddScoped<GrpcSessionService>();
 
+        // Relay transport client
+        services.AddScoped<Percolator.Application.Chat.IRelayTransportClient, Percolator.Infrastructure.Network.Grpc.RelayTransportClient>();
+
         return services;
     }
 }
