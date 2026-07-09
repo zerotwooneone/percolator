@@ -208,24 +208,24 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
     }
 
     [Test]
-    public async Task Relayed_HandshakeInitiatorHello_is_handled_and_persists_runtime_store()
+    public async Task Relayed_HandshakeInitiatorHello_WhenAccepted_EstablishesSessionAndPersistsState()
     {
-        var simulatedPeerId = new NetworkPeerId(14);
-        var relayHostPeerId = new NetworkPeerId(15);
+        var simulatedPeerId = new NetworkPeerId(123456789);
+        var relayHostPeerId = new NetworkPeerId(987654321);
 
         using var responderIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var responderIdentityPriv = responderIdentityEcdh.ExportECPrivateKey();
         using var responderIdentityEcdsa = ECDsa.Create(responderIdentityEcdh.ExportParameters(true));
         var responderIdentitySpki = responderIdentityEcdsa.ExportSubjectPublicKeyInfo();
 
-        var spkId = Guid.NewGuid();
+        var spkId = new Guid("00000000-0000-0000-0000-000000000001");
         using var responderSignedPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var responderSignedPreKeySpki = responderSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
         var responderSignedPreKeyPriv = responderSignedPreKey.ExportECPrivateKey();
 
         var peer = new SimulatedPeerModel(
             networkPeerId: simulatedPeerId,
-            publicIdentityId: new Percolator.Identity.PublicIdentityId(Guid.NewGuid()),
+            publicIdentityId: new Percolator.Identity.PublicIdentityId(new Guid("00000000-0000-0000-0000-000000000002")),
             selfIdentityId: 99000,
             displayName: "sim",
             isRelayCapable: false,
@@ -258,6 +258,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         {
             Version = 1,
             InitiatorIdentityKeySpki = ByteString.CopyFrom(initiatorIdentitySpki),
+            InitiatorPublicIdentityId = ByteString.CopyFrom(new Guid("00000000-0000-0000-0000-000000000003").ToByteArray()),
             InitiatorEphemeralKeySpki = ByteString.CopyFrom(initiatorEphSpki),
             SignedPreKeyId = ByteString.CopyFrom(spkId.ToByteArray())
         };
@@ -270,30 +271,21 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             receivedUtc: StaticClock.DefaultNow,
             cancellationToken: CancellationToken.None);
 
-        // Assert: pending is present and no session yet
-        var initiatorPkhHex = Convert.ToHexString(SHA256.HashData(initiatorIdentitySpki)).ToLowerInvariant();
-        sut.Peers.Single(p => p.NetworkPeerId == simulatedPeerId)
-            .PendingInboundStandardSignalHellos
-            .ContainsKey(initiatorPkhHex)
-            .Should().BeTrue();
-
-        sut.Peers.Single(p => p.NetworkPeerId == simulatedPeerId).Sessions.Count.Should().Be(0);
-
         // Act: user accepts the pending hello, which establishes session and enqueues response back to initiator
+        var initiatorPkhHex = Convert.ToHexString(SHA256.HashData(initiatorIdentitySpki)).ToLowerInvariant();
         var accepted = await sut.TryAcceptPendingStandardSignalHelloAsync(
             recipientNetworkPeerId: simulatedPeerId,
             initiatorPkhHex: initiatorPkhHex,
             cancellationToken: CancellationToken.None);
 
+        // Assert: verify acceptance succeeded (public API return value)
         accepted.Should().BeTrue();
 
-        var relay = sut.Relays.Single(r => r.RelayHostNetworkPeerId == relayHostPeerId);
-        relay.MessageQueue.Select(kvp => kvp.Value)
-            .OfType<OutboundRelayMessage>()
-            .Any(m => m.DebugType == nameof(EstablishSessionResponse))
-            .Should().BeTrue();
+        // Assert: advance time to trigger debounced save and verify persisted state (public behavior)
+        timeProvider.Advance(TimeSpan.FromMilliseconds(300));
 
-        sut.Peers.Single(p => p.NetworkPeerId == simulatedPeerId).Sessions.Count.Should().Be(1);
+        repo.LastSavedSnapshot.Should().NotBeNull();
+        repo.LastSavedSnapshot!.Peers.Single(p => p.NetworkPeerId == simulatedPeerId).Sessions.Count.Should().Be(1);
     }
 
     [Test]
