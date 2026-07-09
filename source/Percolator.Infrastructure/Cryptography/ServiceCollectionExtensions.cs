@@ -19,6 +19,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IPreKeyBundleValidator, PreKeyBundleValidator>();
         services.AddSingleton<IRatchetEngine, AeadRatchetEngine>();
         services.AddSingleton<IGroupCryptographyService, ZkgroupCryptographyService>();
+        services.AddSingleton<Percolator.Cryptography.ISecureRandom, Percolator.Cryptography.SystemSecureRandom>();
         return services;
     }
 }
