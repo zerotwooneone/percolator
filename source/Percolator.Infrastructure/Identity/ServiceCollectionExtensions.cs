@@ -72,7 +72,7 @@ namespace Percolator.Infrastructure.Identity
                 }.ToString();
 
                 options.UseSqlite(connectionString);
-            });
+            }, ServiceLifetime.Scoped);
 
             services.AddScoped<Percolator.Application.Chat.ISelfIdentityQueries, Percolator.Infrastructure.Identity.SelfIdentityQueries>();
             services.AddScoped<Percolator.Application.Chat.IPeerIdentityQueries, Percolator.Infrastructure.Identity.PeerIdentityQueries>();

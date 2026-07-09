@@ -38,6 +38,12 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IDeliveryCertificateStore, SqliteDeliveryCertificateStore>();
         services.AddScoped<IDeliveryCertificateQueries, SqliteDeliveryCertificateQueries>();
 
+        // Register LocalIdentitySigner
+        services.AddScoped<Percolator.Application.Chat.ILocalIdentitySigner, Percolator.Infrastructure.Chat.LocalIdentitySigner>();
+
+        // Register GroupInviteHandler
+        services.AddScoped<Percolator.Application.Chat.IGroupInviteHandler, Percolator.Application.Chat.GroupInviteHandler>();
+
         return services;
     }
 }
