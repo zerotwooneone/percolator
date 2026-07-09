@@ -154,7 +154,7 @@ async Task CreateIdentityCommandHandler(InvocationContext context)
     await using var serviceScope = services.CreateAsyncScope();
     var serviceProvider = serviceScope.ServiceProvider;
 
-    try
+    /*try
     {
         var mediator = serviceProvider.GetRequiredService<IMediator>();
         var id = await mediator.Send(new CreateSelfIdentityCommand(name!, peerId), cancellationToken);
@@ -168,7 +168,8 @@ async Task CreateIdentityCommandHandler(InvocationContext context)
         Console.ForegroundColor = ConsoleColor.Red;
         Console.WriteLine($"An error occurred while creating identity: {ex.Message}");
         Console.ResetColor();
-    }
+    }*/
+    throw new NotImplementedException("removed");
 }
 
 // --- Command Handlers ---
@@ -211,7 +212,7 @@ async Task<int> SubmitPrekeysCommandHandler(InvocationContext context)
     await using var serviceScope = services.CreateAsyncScope();
     var serviceProvider = serviceScope.ServiceProvider;
 
-    try
+    /*try
     {
         var mediator = serviceProvider.GetRequiredService<IMediator>();
         await mediator.Send(new HostCommand(selfIdentity!), cancellationToken);
@@ -239,7 +240,8 @@ async Task<int> SubmitPrekeysCommandHandler(InvocationContext context)
         Console.WriteLine($"An error occurred while submitting prekeys: {ex.Message}");
         Console.ResetColor();
         return 500;
-    }
+    }*/
+    throw new NotImplementedException("removed");
 }
 
 async Task HostCommandHandler(InvocationContext context)
@@ -377,7 +379,7 @@ async Task<int> DhtProbeCommandHandler(InvocationContext context)
     await using var serviceScope = services.CreateAsyncScope();
     var serviceProvider = serviceScope.ServiceProvider;
 
-    try
+    /*try
     {
         // Delegate probing to MediatR handler which will resolve required services
         var mediator = serviceProvider.GetRequiredService<IMediator>();
@@ -412,7 +414,8 @@ async Task<int> DhtProbeCommandHandler(InvocationContext context)
         Console.WriteLine($"An error occurred while probing: {ex.Message}");
         Console.ResetColor();
         return 500; 
-    }
+    }*/
+    throw new NotImplementedException("removed");
 }
 
 async Task ConnectCommandHandler(InvocationContext context)
@@ -434,7 +437,7 @@ async Task ConnectCommandHandler(InvocationContext context)
     await using var serviceScope = services.CreateAsyncScope();
     var serviceProvider = serviceScope.ServiceProvider;
 
-    try
+    /*try
     {
         var mediator = serviceProvider.GetRequiredService<IMediator>();
         await mediator.Send(new HostCommand(identityName!), cancellationToken);
@@ -450,7 +453,8 @@ async Task ConnectCommandHandler(InvocationContext context)
         Console.ForegroundColor = ConsoleColor.Red;
         Console.WriteLine($"An error occurred while connecting: {ex.Message}");
         Console.ResetColor();
-    }
+    }*/
+    throw new NotImplementedException("removed");
 }
 
 async Task SendCommandHandler(InvocationContext context)
@@ -473,7 +477,7 @@ async Task SendCommandHandler(InvocationContext context)
 
         var logger = serviceProvider.GetRequiredService<ILogger<Program>>();
         var activeIdentityContext = serviceProvider.GetRequiredService<ActiveIdentityContext>();
-        logger.LogInformation("Sending with Identity: {IdentityName}:{PeerId}", identityName, activeIdentityContext.Identity!.Id);
+        logger.LogInformation("Sending with Identity: {IdentityName}:{PublicIdentityId}", identityName, activeIdentityContext.Identity!.PublicIdentityId);
         
         if (string.IsNullOrEmpty(endpointString) || string.IsNullOrEmpty(peerName))
         {
