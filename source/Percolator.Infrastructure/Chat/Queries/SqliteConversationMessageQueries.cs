@@ -23,7 +23,11 @@ public sealed class SqliteConversationMessageQueries : IConversationMessageQueri
             {
                 MessageId = m.PublicMessageId,
                 ConversationId = m.ConversationId,
-                SenderId = m.SenderPeerId != null ? Guid.Parse(m.SenderPeerId.Value.ToString()) : (m.SenderSelfId != null ? Guid.Parse(m.SenderSelfId.Value.ToString()) : Guid.Empty),
+                SenderId = m.SenderPeerId != null 
+                    ? _db.PeerIdentities.Where(p => p.PeerId == m.SenderPeerId).Select(p => p.PublicIdentityId).FirstOrDefault()
+                    : (m.SenderSelfId != null 
+                        ? _db.SelfIdentities.Where(s => s.Id == m.SenderSelfId).Select(s => s.PublicIdentityId).FirstOrDefault() 
+                        : Guid.Empty),
                 Content = m.Body,
                 Timestamp = m.SentAt
             })
