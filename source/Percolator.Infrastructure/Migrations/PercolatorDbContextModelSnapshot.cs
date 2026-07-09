@@ -15,7 +15,7 @@ namespace Percolator.Infrastructure.Migrations
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "9.0.8");
+            modelBuilder.HasAnnotation("ProductVersion", "10.0.0");
 
             modelBuilder.Entity("Percolator.Dht.DhtNode", b =>
                 {
@@ -608,7 +608,7 @@ namespace Percolator.Infrastructure.Migrations
                     b.Property<uint?>("SenderPeerId")
                         .HasColumnType("INTEGER");
 
-                    b.Property<uint>("SenderSelfId")
+                    b.Property<uint?>("SenderSelfId")
                         .HasColumnType("INTEGER");
 
                     b.Property<DateTimeOffset>("SentAt")

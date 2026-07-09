@@ -778,7 +778,7 @@ namespace Percolator.Infrastructure.Migrations
                     ConversationId = table.Column<Guid>(type: "TEXT", nullable: false),
                     PublicMessageId = table.Column<Guid>(type: "TEXT", nullable: false),
                     SenderPeerId = table.Column<uint>(type: "INTEGER", nullable: true),
-                    SenderSelfId = table.Column<uint>(type: "INTEGER", nullable: false),
+                    SenderSelfId = table.Column<uint>(type: "INTEGER", nullable: true),
                     Body = table.Column<string>(type: "TEXT", nullable: false),
                     SentAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
                 },
