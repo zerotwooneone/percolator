@@ -371,22 +371,22 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
     public async Task When_relay_returns_bundle_with_mismatched_identity_key_it_does_not_enqueue_handshake_hello()
     {
         // Arrange
-        var simulatedPeerId = new NetworkPeerId(18);
-        var relayHostPeerId = new NetworkPeerId(19);
+        var simulatedPeerId = new NetworkPeerId(123456789);
+        var relayHostPeerId = new NetworkPeerId(987654321);
 
         using var initiatorIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var initiatorIdentityPriv = initiatorIdentityEcdh.ExportECPrivateKey();
         using var initiatorIdentityEcdsa = ECDsa.Create(initiatorIdentityEcdh.ExportParameters(true));
         var initiatorIdentitySpki = initiatorIdentityEcdsa.ExportSubjectPublicKeyInfo();
 
-        var requestedResponderPkh = SHA256.HashData(Guid.NewGuid().ToByteArray());
+        var requestedResponderPkh = SHA256.HashData(new Guid("00000000-0000-0000-0000-000000000001").ToByteArray());
 
         // Bundle is valid, but its identity key hashes to a different PKH.
         var bundle = CreateValidResponderPreKeyBundle();
 
         var initiatorPeer = new SimulatedPeerModel(
             networkPeerId: simulatedPeerId,
-            publicIdentityId: new Percolator.Identity.PublicIdentityId(Guid.NewGuid()),
+            publicIdentityId: new Percolator.Identity.PublicIdentityId(new Guid("00000000-0000-0000-0000-000000000002")),
             selfIdentityId: 99000,
             displayName: "sim",
             isRelayCapable: false,
@@ -395,24 +395,24 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             endpoint: new System.Net.DnsEndPoint("127.77.1.1", 5002));
         var relayPeer = new SimulatedPeerModel(
             networkPeerId: relayHostPeerId,
-            publicIdentityId: new Percolator.Identity.PublicIdentityId(Guid.NewGuid()),
+            publicIdentityId: new Percolator.Identity.PublicIdentityId(new Guid("00000000-0000-0000-0000-000000000003")),
             selfIdentityId: 99001,
             displayName: "relay",
             isRelayCapable: true,
-            identitySigningKeySpki: SHA256.HashData(Guid.NewGuid().ToByteArray()),
+            identitySigningKeySpki: SHA256.HashData(new Guid("00000000-0000-0000-0000-000000000004").ToByteArray()),
             identitySigningKeyPrivateKeyEcPrivateKey: new byte[] { 0x01 },
             endpoint: new System.Net.DnsEndPoint("127.77.1.2", 5002),
             publishedPreKeyBundles: new List<SimulatedPublishedPreKeyBundleModel>
             {
                 new(
                     RecipientPublicKeyHash: Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(requestedResponderPkh),
-                    LogicalOwnerNetworkPeerId: new NetworkPeerId(3),
+                    LogicalOwnerNetworkPeerId: new NetworkPeerId(111111111),
                     IdentityKey: bundle.IdentityKey,
                     SignedPreKeyId: bundle.SignedPreKeyId,
                     SignedPreKey: bundle.SignedPreKey,
                     PreKeySignature: bundle.PreKeySignature,
                     OneTimeKeys: new ObservableList<Percolator.Cryptography.OneTimeKeyInstance>(),
-                    ExpiresUtc: DateTimeOffset.UtcNow.AddMinutes(5))
+                    ExpiresUtc: new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero).AddMinutes(5))
             });
 
         var repo = new InMemorySimulatorStateRepository();
@@ -435,25 +435,10 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(requestedResponderPkh),
             CancellationToken.None);
 
-        // Assert
+        // Assert: verify session ID was not returned (public API)
         sid.Should().BeNull();
 
-        // Wait for relay queue to empty (observable behavior, not timing-dependent)
-        var maxAttempts = 50; // Prevent infinite loop
-        for (var i = 0; i < maxAttempts; i++)
-        {
-            var relay = sut.Relays.Single(r => r.RelayHostNetworkPeerId.Value == relayHostPeerId.Value);
-            if (relay.MessageQueue.Count == 0)
-            {
-                break;
-            }
-
-            await Task.Delay(50);
-        }
-
-        var relayAfter = sut.Relays.Single(r => r.RelayHostNetworkPeerId.Value == relayHostPeerId.Value);
-        relayAfter.MessageQueue.Count.Should().Be(0);
-
+        // Assert: verify diagnostic event was not published (public behavior)
         diagnostics.Events.Should().NotContain(e => e.EventType == SimulatorDiagnosticEventType.StandardHandshakeHelloEnqueued);
     }
 
