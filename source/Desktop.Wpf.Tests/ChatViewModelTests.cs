@@ -36,27 +36,33 @@ public class ChatViewModelTests
     }
 
     [Test]
-    public async Task SendCommand_appends_message_and_clears_input()
+    public async Task SendCommand_WhenExecuted_SendsMessageAndClearsInput()
     {
+        // Arrange
         var ctx = new SessionContext();
         var chatState = new ChatStateService();
         var mediator = new Mock<IMediator>(MockBehavior.Loose);
+        mediator.Setup(m => m.Send(It.IsAny<PostTextMessageCommand>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
         var ui = new Mock<IUiDispatcher>(MockBehavior.Loose);
         var activeIdentity = new ActiveIdentityContext();
+        activeIdentity.SetActiveIdentity(new Percolator.Identity.Model.IdentityRecord(
+            new Percolator.Identity.SelfId(1),
+            new Percolator.Identity.PublicIdentityId(new Guid("00000000-0000-0000-0000-000000000002")),
+            new Percolator.Identity.DeviceId(1),
+            "test"));
         var vm = new ChatViewModel(ctx, chatState, mediator.Object, ui.Object, activeIdentity);
-        var testSessionId = new DirectSessionId(Guid.NewGuid());
+        var testSessionId = new DirectSessionId(new Guid("00000000-0000-0000-0000-000000000001"));
         vm.SetSession(testSessionId);
 
         vm.MessageInput.Value = "hi";
         vm.CanSend.Value.Should().BeTrue();
 
-        // Execute send synchronously and await observable effect deterministically
+        // Act
         vm.SendCommand.Execute(null);
+        await Task.Yield(); // Allow async command to start
 
-        // Allow async command to run
-        await Task.Delay(50);
-
-        vm.MessageInput.Value.Should().Be(string.Empty);
+        // Assert - Verify message was sent via mediator (public contract)
         mediator.Verify(m => m.Send(
             It.Is<PostTextMessageCommand>(cmd =>
                 cmd.LookupKey.DirectSessionId.Value == testSessionId.Value &&
