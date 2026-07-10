@@ -114,7 +114,7 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
         // We order by CreatedAt descending to ensure we get the active session if Main reconnects.
         var uplinkSession = peer.Sessions
             .Select(kv => kv.Value)
-            .Where(s => !knownSimulatedPeerIds.Contains(new Percolator.Network.NetworkPeerId(s.RemotePeerId.Value)))
+            .Where(s => !knownSimulatedPeerIds.Contains(new Percolator.Network.NetworkPeerId(s.RemoteCryptoPeerId.Value)))
             .OrderByDescending(s => s.CreatedAtUtc)
             .FirstOrDefault();
 

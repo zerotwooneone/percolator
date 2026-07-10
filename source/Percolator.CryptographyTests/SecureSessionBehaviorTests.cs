@@ -15,7 +15,7 @@ public class SecureSessionBehaviorTests
     private static SecureSession CreateBaselineSession(IClock clock)
     {
         var id = SessionId.NewId();
-        var peer = new PeerId(1);
+        var peer = new CryptoPeerId(1);
         var version = new ProtocolVersion(1);
         var state = CryptoTestBootstrap.CreateBootstrappedState(RootKey.FromBytes(new byte[32]));
         var crypto = new AeadSessionCrypto();
@@ -49,8 +49,8 @@ public class SecureSessionBehaviorTests
         var clock = new TestClock4();
         var root = RootKey.FromBytes(new byte[32]);
         var (initiator, responder) = CryptoTestBootstrap.CreatePairedStates(root);
-        var receiver = SecureSession.Create(SessionId.NewId(), new PeerId(1), new ProtocolVersion(1), responder, new AeadSessionCrypto(), clock);
-        var sender = SecureSession.Create(SessionId.NewId(), new PeerId(1), new ProtocolVersion(1), initiator, new AeadSessionCrypto(), clock);
+        var receiver = SecureSession.Create(SessionId.NewId(), new CryptoPeerId(1), new ProtocolVersion(1), responder, new AeadSessionCrypto(), clock);
+        var sender = SecureSession.Create(SessionId.NewId(), new CryptoPeerId(1), new ProtocolVersion(1), initiator, new AeadSessionCrypto(), clock);
         var expected = Plaintext.FromBytes(new byte[] { 9, 9, 9 });
         var framed = sender.Encrypt(expected, clock);
         clock.UtcNow = clock.UtcNow.AddMinutes(1);

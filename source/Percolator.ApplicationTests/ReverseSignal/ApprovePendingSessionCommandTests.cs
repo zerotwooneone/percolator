@@ -29,7 +29,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
 
         private static PendingSession BuildPending(
             PendingSessionId id,
-            Percolator.Cryptography.Primitives.PeerId inviterPeerId,
+            Percolator.Cryptography.Primitives.CryptoPeerId inviterCryptoPeerId,
             RequestCorrelationId correlationId,
             byte[] inviterIdentitySpki,
             byte[] payloadBytes,
@@ -46,7 +46,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
 
             return PendingSession.FromInvitationWithMetadata(
                 id,
-                inviterPeerId,
+                inviterCryptoPeerId,
                 new ProtocolVersion(1),
                 HandshakeInvitation.FromBytes(invitationEnvelope.ToByteArray()),
                 requestCorrelationId: correlationId,
@@ -126,7 +126,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
             var pendingId = PendingSessionId.NewId();
             var pending = BuildPending(
                 pendingId,
-                new Percolator.Cryptography.Primitives.PeerId((uint)Random.Shared.Next(1, 1000000)),
+                new Percolator.Cryptography.Primitives.CryptoPeerId((uint)Random.Shared.Next(1, 1000000)),
                 correlation,
                 inviterSpki,
                 payload.ToByteArray(),
@@ -224,7 +224,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
             var pendingId = PendingSessionId.NewId();
             var pending = BuildPending(
                 pendingId,
-                new Percolator.Cryptography.Primitives.PeerId((uint)Random.Shared.Next(1, 1000000)),
+                new Percolator.Cryptography.Primitives.CryptoPeerId((uint)Random.Shared.Next(1, 1000000)),
                 correlation,
                 inviterSpki,
                 payload.ToByteArray(),
@@ -332,12 +332,12 @@ namespace Percolator.ApplicationTests.ReverseSignal
             var pendingId = PendingSessionId.NewId();
             var pending = PendingSession.FromInvitationWithMetadata(
                 pendingId,
-                new Percolator.Cryptography.Primitives.PeerId((uint)Random.Shared.Next(1, 1000000)),
+                new Percolator.Cryptography.Primitives.CryptoPeerId((uint)Random.Shared.Next(1, 1000000)),
                 new ProtocolVersion(1),
                 HandshakeInvitation.FromBytes(invitationEnvelope.ToByteArray()),
                 requestCorrelationId: correlation,
                 isRelayed: true,
-                relayHostPeerId: new Percolator.Cryptography.Primitives.PeerId((uint)Random.Shared.Next(1, 1000000)),
+                relayHostPeerId: new Percolator.Cryptography.Primitives.CryptoPeerId((uint)Random.Shared.Next(1, 1000000)),
                 inviterIdentityKey: RatchetIdentityKey.FromBytes(inviterSpki),
                 inviterPublicIdentityId: new CryptoPublicIdentityId(Guid.NewGuid()),
                 callbackEndpointHost: null,

@@ -1,7 +1,7 @@
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Cryptography;
-using CryptoPeerId = Percolator.Cryptography.Primitives.PeerId;
+using Percolator.Cryptography.Primitives;
 using Percolator.Identity;
 
 namespace Percolator.Prekey.Handlers

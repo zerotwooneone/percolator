@@ -19,8 +19,8 @@ public class SecureSessionResponderFinalizeTests
         var crypto = new AeadSessionCrypto();
         var root = RootKey.FromBytes(new byte[32]);
         var (initiator, responder) = CryptoTestBootstrap.CreatePairedStates(root);
-        var receiver = SecureSession.Create(SessionId.NewId(), new PeerId(1), new ProtocolVersion(1), responder, crypto, clock);
-        var sender = SecureSession.Create(SessionId.NewId(), new PeerId(1), new ProtocolVersion(1), initiator, crypto, clock);
+        var receiver = SecureSession.Create(SessionId.NewId(), new CryptoPeerId(1), new ProtocolVersion(1), responder, crypto, clock);
+        var sender = SecureSession.Create(SessionId.NewId(), new CryptoPeerId(1), new ProtocolVersion(1), initiator, crypto, clock);
 
         // First inbound (counter 0) decrypts
         var ptx0 = Plaintext.FromBytes(new byte[] { 0x01 });

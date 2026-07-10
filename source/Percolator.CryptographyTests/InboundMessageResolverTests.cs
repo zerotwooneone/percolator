@@ -69,7 +69,7 @@ public class InboundMessageResolverTests
 {
     private static SecureSession MakeSession(SessionId id, RatchetState state, IClock clock)
     {
-        var peer = new PeerId(1);
+        var peer = new CryptoPeerId(1);
         var version = new ProtocolVersion(1);
         var crypto = new AeadSessionCrypto();
         return SecureSession.Create(id, peer, version, state, crypto, clock);

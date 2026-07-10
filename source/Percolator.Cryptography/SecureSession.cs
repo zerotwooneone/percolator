@@ -5,7 +5,7 @@ namespace Percolator.Cryptography;
 public class SecureSession
 {
     public SessionId Id { get; }
-    public PeerId RemotePeerId { get; }
+    public CryptoPeerId RemoteCryptoPeerId { get; }
     public ProtocolVersion ProtocolVersion { get; }
     private RatchetState _state;
     public RatchetState State => _state;
@@ -17,10 +17,10 @@ public class SecureSession
 
     public int SkippedKeysCount => _skippedBuffer.Count;
 
-    private SecureSession(SessionId id, PeerId remotePeerId, ProtocolVersion protocolVersion, RatchetState state, ISessionCrypto crypto, DateTimeOffset now, bool isInitiator)
+    private SecureSession(SessionId id, CryptoPeerId remoteCryptoPeerId, ProtocolVersion protocolVersion, RatchetState state, ISessionCrypto crypto, DateTimeOffset now, bool isInitiator)
     {
         Id = id;
-        RemotePeerId = remotePeerId;
+        RemoteCryptoPeerId = remoteCryptoPeerId;
         ProtocolVersion = protocolVersion;
         _state = state;
         CreatedAtUtc = now;
@@ -33,7 +33,7 @@ public class SecureSession
         PreKeyBundle remoteBundle,
         IKeyStore keyStore,
         ISessionCrypto sessionCrypto,
-        PeerId remotePeerId,
+        CryptoPeerId remoteCryptoPeerId,
         ProtocolVersion protocolVersion,
         IClock clock)
     {
@@ -44,15 +44,15 @@ public class SecureSession
 
         var (sharedSecret, _ephPub) = sessionCrypto.X3DH_Initiate(keyStore.GetIdentityPrivateKey(), remoteBundle);
         var state = new RatchetState(RootKey.FromSpan(sharedSecret.Span), null, 0, null, 0, 0, null, null, 1000);
-        return new SecureSession(SessionId.NewId(), remotePeerId, protocolVersion, state, sessionCrypto, clock.UtcNow, true);
+        return new SecureSession(SessionId.NewId(), remoteCryptoPeerId, protocolVersion, state, sessionCrypto, clock.UtcNow, true);
     }
 
-    public static SecureSession Create(SessionId id, PeerId remotePeerId, ProtocolVersion protocolVersion, RatchetState state, ISessionCrypto sessionCrypto, IClock clock)
+    public static SecureSession Create(SessionId id, CryptoPeerId remoteCryptoPeerId, ProtocolVersion protocolVersion, RatchetState state, ISessionCrypto sessionCrypto, IClock clock)
     {
         if (state is null) throw new ArgumentNullException(nameof(state));
         if (clock is null) throw new ArgumentNullException(nameof(clock));
         if (sessionCrypto is null) throw new ArgumentNullException(nameof(sessionCrypto));
-        return new SecureSession(id, remotePeerId, protocolVersion, state, sessionCrypto, clock.UtcNow, false);
+        return new SecureSession(id, remoteCryptoPeerId, protocolVersion, state, sessionCrypto, clock.UtcNow, false);
     }
 
     public void TouchLastUsed(IClock clock)

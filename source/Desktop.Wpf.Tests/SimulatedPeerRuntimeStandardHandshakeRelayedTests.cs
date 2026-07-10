@@ -572,13 +572,13 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         var root = RootKey.FromBytes(new byte[32]);
         var initiatorSession = RatchetBootstrap.CreateInitiatorSession(
             sessionId,
-            new Percolator.Cryptography.Primitives.PeerId(1),
+            new Percolator.Cryptography.Primitives.CryptoPeerId(1),
             new ProtocolVersion(1),
             root,
             clock);
         var responderSession = RatchetBootstrap.CreateResponderSession(
             sessionId,
-            new Percolator.Cryptography.Primitives.PeerId(1),
+            new Percolator.Cryptography.Primitives.CryptoPeerId(1),
             new ProtocolVersion(1),
             root,
             clock);

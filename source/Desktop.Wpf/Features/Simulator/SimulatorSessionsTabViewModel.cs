@@ -94,7 +94,7 @@ public sealed class SimulatorSessionsTabViewModel : IDisposable
             var session = p.Sessions
                 .Select(kv => kv.Value)
                 .OrderByDescending(s => s.LastUsedAtUtc)
-                .FirstOrDefault(s => s.RemotePeerId.Value == mainPeerId);
+                .FirstOrDefault(s => s.RemoteCryptoPeerId.Value == mainPeerId);
 
             if (session is null) continue;
 

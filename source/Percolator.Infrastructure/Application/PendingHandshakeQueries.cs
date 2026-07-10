@@ -4,7 +4,6 @@ using Percolator.Application.Cryptography;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
 using Percolator.Infrastructure.Persistence;
-using PeerId = Percolator.Cryptography.Primitives.PeerId;
 
 namespace Percolator.Infrastructure.Application;
 
@@ -103,14 +102,14 @@ public class PendingHandshakeQueries : IPendingHandshakeQueries
                 inviterFingerprintHex = Convert.ToHexString(SHA256.HashData(row.InviterIdentityKey));
             }
 
-            PeerId? relayPeerId = null;
+            CryptoPeerId? relayPeerId = null;
             string? relayPeerName = null;
             string? relayEndpoint = null;
             uint relayId = 0;
             if (row.IsRelayed && row.RelayHostPeerId.HasValue)
             {
                 relayId = row.RelayHostPeerId.Value;
-                relayPeerId = new PeerId(relayId);
+                relayPeerId = new CryptoPeerId(relayId);
                 relayPeerName = relayNameById.TryGetValue(relayId, out var name)
                     ? name
                     : relayId.ToString()[..8];
@@ -122,7 +121,7 @@ public class PendingHandshakeQueries : IPendingHandshakeQueries
             yield return new PendingHandshake
             {
                 Id = new PendingSessionId(row.Id),
-                RemotePeer = new PeerId(row.RemotePeerId),
+                RemoteCryptoPeer = new CryptoPeerId(row.RemotePeerId),
                 PeerName = peerName,
                 RequestCorrelationId = new RequestCorrelationId(correlationGuid),
                 InviterFingerprintHex = inviterFingerprintHex,

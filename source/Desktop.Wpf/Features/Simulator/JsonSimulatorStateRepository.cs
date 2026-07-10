@@ -389,8 +389,8 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
 
     private static void ApplyRelationshipsToPeers(List<SimulatedPeerDto> peers, IReadOnlyList<PeerRelationshipSnapshot> relationships)
     {
-        var publishedKeyEdges = new Dictionary<Percolator.Cryptography.Primitives.PeerId, List<Percolator.Cryptography.Primitives.PeerId>>();
-        var relayActiveEdges = new Dictionary<Percolator.Cryptography.Primitives.PeerId, List<Percolator.Cryptography.Primitives.PeerId>>();
+        var publishedKeyEdges = new Dictionary<Percolator.Cryptography.Primitives.CryptoPeerId, List<Percolator.Cryptography.Primitives.CryptoPeerId>>();
+        var relayActiveEdges = new Dictionary<Percolator.Cryptography.Primitives.CryptoPeerId, List<Percolator.Cryptography.Primitives.CryptoPeerId>>();
         foreach (var rel in relationships)
         {
             if (rel.SourceNetworkPeerId.Value == 0u) continue;
@@ -399,22 +399,22 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
 
             if (rel.Type == RelationshipType.PublishedKey)
             {
-                var sourceCryptoPeerId = new Percolator.Cryptography.Primitives.PeerId(rel.SourceNetworkPeerId.Value);
-                var targetCryptoPeerId = new Percolator.Cryptography.Primitives.PeerId(rel.TargetNetworkPeerId.Value);
+                var sourceCryptoPeerId = new Percolator.Cryptography.Primitives.CryptoPeerId(rel.SourceNetworkPeerId.Value);
+                var targetCryptoPeerId = new Percolator.Cryptography.Primitives.CryptoPeerId(rel.TargetNetworkPeerId.Value);
                 if (!publishedKeyEdges.TryGetValue(sourceCryptoPeerId, out var list))
                 {
-                    list = new List<Percolator.Cryptography.Primitives.PeerId>();
+                    list = new List<Percolator.Cryptography.Primitives.CryptoPeerId>();
                     publishedKeyEdges[sourceCryptoPeerId] = list;
                 }
                 list.Add(targetCryptoPeerId);
             }
             else if (rel.Type == RelationshipType.RelayActiveSession)
             {
-                var sourceCryptoPeerId = new Percolator.Cryptography.Primitives.PeerId(rel.SourceNetworkPeerId.Value);
-                var targetCryptoPeerId = new Percolator.Cryptography.Primitives.PeerId(rel.TargetNetworkPeerId.Value);
+                var sourceCryptoPeerId = new Percolator.Cryptography.Primitives.CryptoPeerId(rel.SourceNetworkPeerId.Value);
+                var targetCryptoPeerId = new Percolator.Cryptography.Primitives.CryptoPeerId(rel.TargetNetworkPeerId.Value);
                 if (!relayActiveEdges.TryGetValue(sourceCryptoPeerId, out var list))
                 {
-                    list = new List<Percolator.Cryptography.Primitives.PeerId>();
+                    list = new List<Percolator.Cryptography.Primitives.CryptoPeerId>();
                     relayActiveEdges[sourceCryptoPeerId] = list;
                 }
                 list.Add(targetCryptoPeerId);
@@ -423,7 +423,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
 
         foreach (var peer in peers)
         {
-            var cryptoPeerId = new Percolator.Cryptography.Primitives.PeerId(peer.NetworkPeerId.Value);
+            var cryptoPeerId = new Percolator.Cryptography.Primitives.CryptoPeerId(peer.NetworkPeerId.Value);
             peer.PublishedKeysToPeerIds = publishedKeyEdges.TryGetValue(cryptoPeerId, out var pk)
                 ? pk.Distinct().OrderBy(x => x.Value).Select(x => new NetworkPeerId(x.Value)).ToList()
                 : new List<NetworkPeerId>();
@@ -513,7 +513,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
 
             var session = SecureSession.Create(
                 new SessionId(dto.SessionId),
-                new Percolator.Cryptography.Primitives.PeerId(dto.RemoteNetworkPeerId.Value),
+                new Percolator.Cryptography.Primitives.CryptoPeerId(dto.RemoteNetworkPeerId.Value),
                 new ProtocolVersion(dto.ProtocolVersion <= 0 ? 1 : dto.ProtocolVersion),
                 state,
                 crypto,

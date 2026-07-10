@@ -436,7 +436,7 @@ public sealed class SimulatedPeerModel : IDisposable
                 .Select(kvp => kvp.Value)
                 .Select(s => new SessionSnapshot(
                     SessionId: s.Id.Value,
-                    RemotePeerId: new Percolator.Network.NetworkPeerId(s.RemotePeerId.Value),
+                    RemotePeerId: new Percolator.Network.NetworkPeerId(s.RemoteCryptoPeerId.Value),
                     ProtocolVersion: s.ProtocolVersion.Value,
                     RootKey: s.State.RootKey.ToArray(),
                     SendChainKey: s.State.SendingChainKey?.ToArray(),

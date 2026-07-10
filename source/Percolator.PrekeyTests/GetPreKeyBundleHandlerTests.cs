@@ -41,7 +41,7 @@ public class GetPreKeyBundleHandlerTests
 
         _publicKeyStore.Setup(s => s.GetPeerIdByPublicIdentityIdAsync(publicIdentityId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(peerId);
-        _bundleRepository.Setup(r => r.PopBundleAsync(new Percolator.Cryptography.Primitives.PeerId(peerId.Value)))
+        _bundleRepository.Setup(r => r.PopBundleAsync(new Percolator.Cryptography.Primitives.CryptoPeerId(peerId.Value)))
             .ReturnsAsync(expected);
 
         var query = new GetPreKeyBundleQuery(publicIdentityId);
@@ -52,7 +52,7 @@ public class GetPreKeyBundleHandlerTests
         // Assert
         result.Should().NotBeNull();
         result.Should().Be(expected);
-        _bundleRepository.Verify(r => r.PopBundleAsync(new Percolator.Cryptography.Primitives.PeerId(peerId.Value)), Times.Once);
+        _bundleRepository.Verify(r => r.PopBundleAsync(new Percolator.Cryptography.Primitives.CryptoPeerId(peerId.Value)), Times.Once);
     }
 
     [Test]
@@ -69,7 +69,7 @@ public class GetPreKeyBundleHandlerTests
 
         // Assert
         result.Should().BeNull();
-        _bundleRepository.Verify(r => r.PopBundleAsync(It.IsAny<Percolator.Cryptography.Primitives.PeerId>()), Times.Never);
+        _bundleRepository.Verify(r => r.PopBundleAsync(It.IsAny<Percolator.Cryptography.Primitives.CryptoPeerId>()), Times.Never);
     }
 
     [Test]
@@ -80,7 +80,7 @@ public class GetPreKeyBundleHandlerTests
         var peerId = new Percolator.Identity.PeerId(2);
         _publicKeyStore.Setup(s => s.GetPeerIdByPublicIdentityIdAsync(publicIdentityId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(peerId);
-        _bundleRepository.Setup(r => r.PopBundleAsync(new Percolator.Cryptography.Primitives.PeerId(peerId.Value)))
+        _bundleRepository.Setup(r => r.PopBundleAsync(new Percolator.Cryptography.Primitives.CryptoPeerId(peerId.Value)))
             .ReturnsAsync((PreKeyBundle?)null);
 
         var query = new GetPreKeyBundleQuery(publicIdentityId);

@@ -81,7 +81,7 @@ public sealed class SignalProtocolEngine : ISignalProtocolEngine
 
         var session = RatchetBootstrap.CreateInitiatorSession(
             sessionId,
-            new PeerId((uint)Random.Shared.Next()),
+            new CryptoPeerId((uint)Random.Shared.Next()),
             new ProtocolVersion(1),
             root,
             _clock,

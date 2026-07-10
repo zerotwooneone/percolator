@@ -306,7 +306,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             var root = RootKey.FromBytes(x3.SharedSecret.ToArray());
             var session = RatchetBootstrap.CreateInitiatorSession(
                 sessionId,
-                new Percolator.Cryptography.Primitives.PeerId(inviterNetworkPeerId.Value),
+                new Percolator.Cryptography.Primitives.CryptoPeerId(inviterNetworkPeerId.Value),
                 new ProtocolVersion(1),
                 root,
                 clock,
@@ -437,7 +437,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         var clock = ResolveClock();
         var tmp = RatchetBootstrap.CreateResponderSession(
             SessionId.NewId(),
-            new Percolator.Cryptography.Primitives.PeerId(simulatedNetworkPeerId.Value),
+            new Percolator.Cryptography.Primitives.CryptoPeerId(simulatedNetworkPeerId.Value),
             new ProtocolVersion(1),
             root,
             clock);
@@ -508,7 +508,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 
         var final = SecureSession.Create(
             sessionId,
-            tmp.RemotePeerId,
+            tmp.RemoteCryptoPeerId,
             tmp.ProtocolVersion,
             tmp.State,
             crypto,
@@ -612,7 +612,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         var clock = ResolveClock();
         var session = RatchetBootstrap.CreateResponderSession(
             sessionId,
-            new Percolator.Cryptography.Primitives.PeerId((uint)Random.Shared.Next()),
+            new Percolator.Cryptography.Primitives.CryptoPeerId((uint)Random.Shared.Next()),
             new ProtocolVersion(1),
             root,
             clock,
@@ -1886,7 +1886,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                     var clock = ResolveClock();
                     var final = SecureSession.Create(
                         new SessionId(assignedGuid),
-                        pendingSession.RemotePeerId,
+                        pendingSession.RemoteCryptoPeerId,
                         pendingSession.ProtocolVersion,
                         pendingSession.State,
                         new AeadSessionCrypto(),
@@ -2243,7 +2243,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             var sessionCrypto = new AeadSessionCrypto();
             var session = SecureSession.Create(
                 id: new SessionId(sessionSnap.SessionId),
-                remotePeerId: new Percolator.Cryptography.Primitives.PeerId(sessionSnap.RemotePeerId.Value),
+                remoteCryptoPeerId: new Percolator.Cryptography.Primitives.CryptoPeerId(sessionSnap.RemotePeerId.Value),
                 protocolVersion: new ProtocolVersion(sessionSnap.ProtocolVersion),
                 state: ratchetState,
                 sessionCrypto: sessionCrypto,

@@ -216,7 +216,7 @@ namespace Percolator.Application.Network.Handshake
             // Acceptor sent first message from an initiator session, so we must bootstrap as responder to decrypt.
             var tmp = RatchetBootstrap.CreateResponderSession(
                 SessionId.NewId(),
-                new Percolator.Cryptography.Primitives.PeerId(peerIdentity.Id.Value),
+                new Percolator.Cryptography.Primitives.CryptoPeerId(peerIdentity.Id.Value),
                 new ProtocolVersion(1),
                 root,
                 _clock);
@@ -267,7 +267,7 @@ namespace Percolator.Application.Network.Handshake
 
             var final = SecureSession.Create(
                 sid,
-                tmp.RemotePeerId,
+                tmp.RemoteCryptoPeerId,
                 tmp.ProtocolVersion,
                 tmp.State,
                 new AeadSessionCrypto(),
@@ -377,7 +377,7 @@ namespace Percolator.Application.Network.Handshake
                     throw new NotImplementedException("we do not have a peer id in this case");
                     var tmp = RatchetBootstrap.CreateInitiatorSession(
                         SessionId.NewId(),
-                        new Percolator.Cryptography.Primitives.PeerId(uint.MaxValue),
+                        new Percolator.Cryptography.Primitives.CryptoPeerId(uint.MaxValue),
                         new ProtocolVersion(1),
                         root,
                         _clock);
@@ -395,7 +395,7 @@ namespace Percolator.Application.Network.Handshake
                     // Create final initiator session with progressed state
                     var final = SecureSession.Create(
                         sid,
-                        tmp.RemotePeerId,
+                        tmp.RemoteCryptoPeerId,
                         tmp.ProtocolVersion,
                         tmp.State,
                         new AeadSessionCrypto(),
@@ -407,7 +407,7 @@ namespace Percolator.Application.Network.Handshake
                     try
                     {
                         await _directSessionMappingWriter.WriteMappingAsync(
-                            new Percolator.Network.NetworkPeerId(tmp.RemotePeerId.Value),
+                            new Percolator.Network.NetworkPeerId(tmp.RemoteCryptoPeerId.Value),
                             new Percolator.Network.DirectSessionId(sid.Value),
                             selfIdentityId,
                             cancellationToken).ConfigureAwait(false);
@@ -416,7 +416,7 @@ namespace Percolator.Application.Network.Handshake
                     {
                         _logger.LogInformation(ex,
                             "Failed to persist DirectSession mapping for RemotePeerId={RemotePeerId}, SessionId={SessionId}, SelfIdentityId={SelfIdentityId}",
-                            tmp.RemotePeerId.Value, sid.Value, selfIdentityId.Value);
+                            tmp.RemoteCryptoPeerId.Value, sid.Value, selfIdentityId.Value);
                     }
 
                     await _mediator.Publish(
@@ -517,7 +517,7 @@ namespace Percolator.Application.Network.Handshake
             }
 
             var root = RootKey.FromBytesOwned(match.InitialRootKey);
-            var remoteCryptoPeerId = new Percolator.Cryptography.Primitives.PeerId(peerIdentity.Id.Value);
+            var remoteCryptoPeerId = new Percolator.Cryptography.Primitives.CryptoPeerId(peerIdentity.Id.Value);
 
             var initiatorSession = RatchetBootstrap.CreateInitiatorSession(
                 sid,

@@ -1,5 +1,5 @@
 using Percolator.Cryptography;
-using CryptoPeerId = Percolator.Cryptography.Primitives.PeerId;
+using Percolator.Cryptography.Primitives;
 
 namespace Percolator.Application.Services;
 
@@ -13,7 +13,7 @@ public sealed class HandshakeService : IHandshakeService
     }
 
     public Task<(SessionId SessionId, SessionRatchetMessage? InitialCipher)> InitiateStandardHandshakeAsync(
-        CryptoPeerId peerId,
+        CryptoPeerId cryptoPeerId,
         Plaintext? initialMessage,
         CancellationToken cancellationToken = default)
     {
@@ -22,7 +22,7 @@ public sealed class HandshakeService : IHandshakeService
         var sessionId = SessionId.NewId();
         var proto = new ProtocolVersion(1);
         var root = RootKey.FromBytesOwned(new byte[32]);
-        var session = RatchetBootstrap.CreateInitiatorSession(sessionId, peerId, proto, root, _clock);
+        var session = RatchetBootstrap.CreateInitiatorSession(sessionId, cryptoPeerId, proto, root, _clock);
 
         SessionRatchetMessage? initial = null;
         if (initialMessage is not null)

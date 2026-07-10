@@ -71,7 +71,7 @@ public sealed class SimulatorStateServiceInitializationTests
     {
         // Arrange
         var peerId = new NetworkPeerId(31);
-        var remotePeerId = new Percolator.Cryptography.Primitives.PeerId(1);
+        var remotePeerId = new Percolator.Cryptography.Primitives.CryptoPeerId(1);
         var signedPreKeyId = Guid.NewGuid();
 
         using var identity = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
@@ -108,7 +108,7 @@ public sealed class SimulatorStateServiceInitializationTests
 
         var session = SecureSession.Create(
             id: new SessionId(Guid.NewGuid()),
-            remotePeerId: remotePeerId,
+            remoteCryptoPeerId: remotePeerId,
             protocolVersion: new ProtocolVersion(1),
             state: ratchet,
             sessionCrypto: new AeadSessionCrypto(),

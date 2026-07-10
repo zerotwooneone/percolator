@@ -48,7 +48,7 @@ public class SecureSessionFactoryTests
     {
         // Arrange
         var clock = new TestClock5();
-        var peer = new PeerId(1);
+        var peer = new CryptoPeerId(1);
         var version = new ProtocolVersion(1);
         var bundle = new PreKeyBundle(
             RatchetIdentityKey.FromBytes(new byte[64]),
@@ -67,7 +67,7 @@ public class SecureSessionFactoryTests
 
         // Assert
         session.Should().NotBeNull();
-        session.RemotePeerId.Should().Be(peer);
+        session.RemoteCryptoPeerId.Should().Be(peer);
         session.ProtocolVersion.Should().Be(version);
         session.CreatedAtUtc.Should().Be(clock.UtcNow);
         session.LastUsedAtUtc.Should().Be(clock.UtcNow);

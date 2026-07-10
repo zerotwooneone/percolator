@@ -4,7 +4,6 @@ using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
 using Percolator.Infrastructure.Cryptography;
 using Percolator.Infrastructure.Persistence;
-using PeerId = Percolator.Cryptography.Primitives.PeerId;
 using System.Security.Cryptography;
 using Percolator.InfrastructureTests.Common;
 
@@ -51,7 +50,7 @@ public sealed class SqlitePendingSessionRepositoryTests
 
         var pending = PendingSession.FromInvitationWithMetadata(
             PendingSessionId.NewId(),
-            new PeerId(1),
+            new CryptoPeerId(1),
             new ProtocolVersion(1),
             HandshakeInvitation.FromBytes(new byte[] { 1, 2, 3 }),
             requestCorrelationId: new RequestCorrelationId(Guid.Parse("11111111-1111-1111-1111-111111111111")),

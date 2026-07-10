@@ -1,10 +1,10 @@
 using FluentAssertions;
 using Moq;
 using Percolator.Cryptography;
+using Percolator.Cryptography.Primitives;
 using Percolator.Identity;
 using Percolator.Network;
 using Percolator.Prekey.Handlers;
-using CryptoPeerId = Percolator.Cryptography.Primitives.PeerId;
 
 namespace Percolator.PrekeyTests;
 
@@ -73,7 +73,7 @@ public class SubmitPreKeyBundleHandlerTests
             It.IsAny<CancellationToken>()), Times.Once);
 
         _bundleRepository.Verify(r => r.StoreBundlesAsync(
-            It.Is<Percolator.Cryptography.Primitives.PeerId>(p => p.Value == remotePeerId.Value),
+            It.Is<Percolator.Cryptography.Primitives.CryptoPeerId>(p => p.Value == remotePeerId.Value),
             It.Is<IReadOnlyCollection<Percolator.Cryptography.PreKeyBundle>>(bundles => bundles.Count == 2)
         ), Times.Once);
     }
@@ -103,7 +103,7 @@ public class SubmitPreKeyBundleHandlerTests
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("Invalid signed pre-key signature.");
 
-        _bundleRepository.Verify(r => r.StoreBundlesAsync(It.IsAny<Percolator.Cryptography.Primitives.PeerId>(), It.IsAny<IReadOnlyCollection<Percolator.Cryptography.PreKeyBundle>>()), Times.Never);
+        _bundleRepository.Verify(r => r.StoreBundlesAsync(It.IsAny<Percolator.Cryptography.Primitives.CryptoPeerId>(), It.IsAny<IReadOnlyCollection<Percolator.Cryptography.PreKeyBundle>>()), Times.Never);
     }
 
     [Test]
@@ -131,6 +131,6 @@ public class SubmitPreKeyBundleHandlerTests
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("No valid pre-key bundles provided.");
 
-        _bundleRepository.Verify(r => r.StoreBundlesAsync(It.IsAny<Percolator.Cryptography.Primitives.PeerId>(), It.IsAny<IReadOnlyCollection<Percolator.Cryptography.PreKeyBundle>>()), Times.Never);
+        _bundleRepository.Verify(r => r.StoreBundlesAsync(It.IsAny<Percolator.Cryptography.Primitives.CryptoPeerId>(), It.IsAny<IReadOnlyCollection<Percolator.Cryptography.PreKeyBundle>>()), Times.Never);
     }
 }

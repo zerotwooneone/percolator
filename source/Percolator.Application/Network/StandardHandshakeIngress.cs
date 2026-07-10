@@ -142,7 +142,7 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
         var sessionId = SessionId.NewId();
         var session = RatchetBootstrap.CreateResponderSession(
             sessionId,
-            new Percolator.Cryptography.Primitives.PeerId(initiatorIdentity.Id.Value),
+            new Percolator.Cryptography.Primitives.CryptoPeerId(initiatorIdentity.Id.Value),
             new ProtocolVersion(1),
             root,
             _clock,
@@ -153,7 +153,7 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
                 new SecureSessionCreatedNotification(
                     sessionId,
                     SecureSessionCreatedReason.StandardHandshakeIngress,
-                    new Percolator.Cryptography.Primitives.PeerId(initiatorIdentity.Id.Value),
+                    new Percolator.Cryptography.Primitives.CryptoPeerId(initiatorIdentity.Id.Value),
                     new ProtocolVersion(1)),
                 ct)
             .ConfigureAwait(false);

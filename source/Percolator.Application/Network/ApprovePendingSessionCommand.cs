@@ -205,14 +205,14 @@ namespace Percolator.Application.Network
             var proto = pending.ProtocolVersion;
             var session = RatchetBootstrap.CreateInitiatorSession(
                 sessionId,
-                new Percolator.Cryptography.Primitives.PeerId(pending.RemotePeerId.Value),
+                new Percolator.Cryptography.Primitives.CryptoPeerId(pending.RemoteCryptoPeerId.Value),
                 proto,
                 root,
                 _clock);
             await _sessions.AddAsync(session, new CryptoSelfId(_active.Identity.SelfIdentityId.Value), cancellationToken).ConfigureAwait(false);
 
             // Persist DirectSession mapping for conversation lookup
-            var inviterNetPeerId = new Percolator.Network.NetworkPeerId(pending.RemotePeerId.Value);
+            var inviterNetPeerId = new Percolator.Network.NetworkPeerId(pending.RemoteCryptoPeerId.Value);
             var directSessionId = new DirectSessionId(sessionId.Value);
             await _directSessionMappingWriter.WriteMappingAsync(
                 inviterNetPeerId,
@@ -224,7 +224,7 @@ namespace Percolator.Application.Network
                     new SecureSessionCreatedNotification(
                         sessionId,
                         SecureSessionCreatedReason.AcceptedInvite,
-                        new Percolator.Cryptography.Primitives.PeerId(pending.RemotePeerId.Value),
+                        new Percolator.Cryptography.Primitives.CryptoPeerId(pending.RemoteCryptoPeerId.Value),
                         proto),
                     cancellationToken)
                 .ConfigureAwait(false);

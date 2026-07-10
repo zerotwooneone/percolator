@@ -19,8 +19,8 @@ public class SecureSessionApiSurfaceTests
         var crypto = new AeadSessionCrypto();
         var root = RootKey.FromBytes(new byte[32]);
         var (initiator, responder) = CryptoTestBootstrap.CreatePairedStates(root);
-        var sender = SecureSession.Create(SessionId.NewId(), new PeerId(1), new ProtocolVersion(1), initiator, crypto, clock);
-        var receiver = SecureSession.Create(SessionId.NewId(), new PeerId(1), new ProtocolVersion(1), responder, crypto, clock);
+        var sender = SecureSession.Create(SessionId.NewId(), new CryptoPeerId(1), new ProtocolVersion(1), initiator, crypto, clock);
+        var receiver = SecureSession.Create(SessionId.NewId(), new CryptoPeerId(1), new ProtocolVersion(1), responder, crypto, clock);
 
         var encrypted = sender.Encrypt(Plaintext.FromBytes(new byte[] { 1 }), clock);
         encrypted.Should().NotBeNull();
@@ -38,7 +38,7 @@ public class SecureSessionApiSurfaceTests
         var crypto = new AeadSessionCrypto();
         var s = SecureSession.Create(
             SessionId.NewId(),
-            new PeerId(1),
+            new CryptoPeerId(1),
             new ProtocolVersion(1),
             CryptoTestBootstrap.CreateBootstrappedState(RootKey.FromBytes(new byte[32])),
             crypto,

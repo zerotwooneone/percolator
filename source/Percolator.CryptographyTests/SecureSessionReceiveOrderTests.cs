@@ -19,7 +19,7 @@ public class SecureSessionReceiveOrderTests
         var crypto = new AeadSessionCrypto();
         var s = SecureSession.Create(
             SessionId.NewId(),
-            new PeerId(1),
+            new CryptoPeerId(1),
             new ProtocolVersion(1),
             new RatchetState(RootKey.FromBytes(new byte[32]), null, 0, null, 0, 0, null, null, 1000),
             crypto,

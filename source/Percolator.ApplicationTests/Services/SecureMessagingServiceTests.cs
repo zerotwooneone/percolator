@@ -31,13 +31,13 @@ public class SecureMessagingServiceTests
         var root = RootKey.FromBytes(new byte[32]);
         var sender = RatchetBootstrap.CreateInitiatorSession(
             SessionId.NewId(),
-            new Percolator.Cryptography.Primitives.PeerId(1),
+            new Percolator.Cryptography.Primitives.CryptoPeerId(1),
             new ProtocolVersion(1),
             root,
             clock);
         var receiver = RatchetBootstrap.CreateResponderSession(
             SessionId.NewId(),
-            new Percolator.Cryptography.Primitives.PeerId(2),
+            new Percolator.Cryptography.Primitives.CryptoPeerId(2),
             new ProtocolVersion(1),
             root,
             clock);

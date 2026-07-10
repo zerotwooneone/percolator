@@ -51,8 +51,8 @@ public class CryptoBoundaryTests
         var crypto = new AeadSessionCrypto();
         var root = RootKey.FromBytes(new byte[32]);
         var (initiator, responder) = CryptoTestBootstrap.CreatePairedStates(root);
-        var alice = SecureSession.Create(SessionId.NewId(), new PeerId(1), new ProtocolVersion(1), initiator, crypto, clock);
-        var bob = SecureSession.Create(SessionId.NewId(), new PeerId(1), new ProtocolVersion(1), responder, crypto, clock);
+        var alice = SecureSession.Create(SessionId.NewId(), new CryptoPeerId(1), new ProtocolVersion(1), initiator, crypto, clock);
+        var bob = SecureSession.Create(SessionId.NewId(), new CryptoPeerId(1), new ProtocolVersion(1), responder, crypto, clock);
 
         // Act - Encrypt and decrypt a minimal message (paired states without DH keys can't decrypt)
         var plaintext = Plaintext.FromBytes(new byte[] { 0x01 });

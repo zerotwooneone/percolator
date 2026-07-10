@@ -17,7 +17,7 @@ public class AggregateSkeletonTests
     {
         var clock = new TestClock { UtcNow = DateTimeOffset.Parse("2025-03-01T12:00:00Z") };
         var id = SessionId.NewId();
-        var peer = new PeerId(1);
+        var peer = new CryptoPeerId(1);
         var version = new ProtocolVersion(1);
         var state = new RatchetState(RootKey.FromBytes(new byte[32]), null, 0, null, 0, 0, null, null, 1000);
 
@@ -25,7 +25,7 @@ public class AggregateSkeletonTests
         var s = SecureSession.Create(id, peer, version, state, crypto, clock);
 
         s.Id.Should().Be(id);
-        s.RemotePeerId.Should().Be(peer);
+        s.RemoteCryptoPeerId.Should().Be(peer);
         s.ProtocolVersion.Should().Be(version);
         s.State.Should().NotBeNull();
         s.CreatedAtUtc.Should().Be(clock.UtcNow);
@@ -37,7 +37,7 @@ public class AggregateSkeletonTests
     {
         var clock = new TestClock();
         var id = SessionId.NewId();
-        var peer = new PeerId(1);
+        var peer = new CryptoPeerId(1);
         var version = new ProtocolVersion(1);
         var crypto = new AeadSessionCrypto();
         Assert.Throws<ArgumentNullException>(() => SecureSession.Create(id, peer, version, null!, crypto, clock));
@@ -50,7 +50,7 @@ public class AggregateSkeletonTests
     {
         var clock = new TestClock { UtcNow = DateTimeOffset.Parse("2025-04-01T08:30:00Z") };
         var id = PendingSessionId.NewId();
-        var peer = new PeerId(1);
+        var peer = new CryptoPeerId(1);
         var version = new ProtocolVersion(2);
         var invitation = HandshakeInvitation.FromBytes(new byte[] { 1, 2, 3 });
 
@@ -70,7 +70,7 @@ public class AggregateSkeletonTests
             expiresAtUtc: clock.UtcNow.AddHours(1));
 
         p.Id.Should().Be(id);
-        p.RemotePeerId.Should().Be(peer);
+        p.RemoteCryptoPeerId.Should().Be(peer);
         p.ProtocolVersion.Should().Be(version);
         p.Invitation.Should().Be(invitation);
         p.State.Should().Be(ApprovalState.AwaitingApproval);

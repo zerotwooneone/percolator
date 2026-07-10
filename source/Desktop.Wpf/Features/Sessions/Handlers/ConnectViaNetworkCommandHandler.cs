@@ -323,7 +323,7 @@ public sealed class ConnectViaNetworkCommandHandler : IRequestHandler<ConnectVia
                         targetEndpointHost: null,
                         targetEndpointPort: null,
                         inviteRouteKind: InviteRouteKind.Relayed,
-                        inviteRelayHostPeerId: new Percolator.Cryptography.Primitives.PeerId(relayHostPeerId.Value)),
+                        inviteRelayHostPeerId: new Percolator.Cryptography.Primitives.CryptoPeerId(relayHostPeerId.Value)),
                     new Percolator.Cryptography.CryptoSelfId(selfIdentityId))
                 .ConfigureAwait(false);
 

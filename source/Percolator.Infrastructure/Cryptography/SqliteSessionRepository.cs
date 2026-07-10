@@ -1,8 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Percolator.Cryptography;
+using Percolator.Cryptography.Primitives;
 using Percolator.Identity;
 using Percolator.Infrastructure.Persistence;
-using PeerId = Percolator.Cryptography.Primitives.PeerId;
 
 namespace Percolator.Infrastructure.Cryptography
 {
@@ -102,7 +102,7 @@ namespace Percolator.Infrastructure.Cryptography
             {
                 SelfIdentityId = selfIdentityId.Value,
                 SessionId = s.Id.Value,
-                RemotePeerId = s.RemotePeerId.Value,
+                RemotePeerId = s.RemoteCryptoPeerId.Value,
                 ProtocolVersion = s.ProtocolVersion.Value,
                 RootKey = s.State.RootKey.ToArray(),
                 SendChainKey = s.State.SendingChainKey?.ToArray(),
@@ -121,7 +121,7 @@ namespace Percolator.Infrastructure.Cryptography
         private SecureSession FromDbo(SessionDbo row)
         {
             var id = new SessionId(row.SessionId);
-            var remote = new PeerId(row.RemotePeerId);
+            var remote = new CryptoPeerId(row.RemotePeerId);
             var ver = new ProtocolVersion(row.ProtocolVersion);
             var state = new RatchetState(
                 RootKey.FromBytesOwned(row.RootKey),

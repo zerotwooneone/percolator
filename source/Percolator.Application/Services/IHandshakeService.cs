@@ -1,12 +1,12 @@
 using Percolator.Cryptography;
-using CryptoPeerId = Percolator.Cryptography.Primitives.PeerId;
+using Percolator.Cryptography.Primitives;
 
 namespace Percolator.Application.Services;
 
 public interface IHandshakeService
 {
     Task<(SessionId SessionId, SessionRatchetMessage? InitialCipher)> InitiateStandardHandshakeAsync(
-        CryptoPeerId peerId,
+        CryptoPeerId cryptoPeerId,
         Plaintext? initialMessage,
         CancellationToken cancellationToken = default);
 }

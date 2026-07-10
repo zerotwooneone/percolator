@@ -36,7 +36,7 @@ public sealed class RejectPendingSessionCommandTests
 
         var pending = PendingSession.FromInvitationWithMetadata(
             id,
-            new Percolator.Cryptography.Primitives.PeerId((uint)Random.Shared.Next(1, 1000000)),
+            new Percolator.Cryptography.Primitives.CryptoPeerId((uint)Random.Shared.Next(1, 1000000)),
             new ProtocolVersion(1),
             HandshakeInvitation.FromBytes(new byte[] { 1, 2, 3 }),
             requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),

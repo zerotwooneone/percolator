@@ -7,7 +7,6 @@ using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
 using Percolator.Identity;
-using PeerId = Percolator.Cryptography.Primitives.PeerId;
 
 namespace Percolator.Application.Network
 {
@@ -216,12 +215,12 @@ namespace Percolator.Application.Network
 
             var pending = PendingSession.FromInvitationWithMetadata(
                 PendingSessionId.NewId(),
-                new PeerId(identity.Id.Value),
+                new CryptoPeerId(identity.Id.Value),
                 protocolVersion,
                 invitation,
                 requestCorrelationId: requestCorrelationId,
                 isRelayed: isRelayed,
-                relayHostPeerId: relayHostPeerId is null ? null : new Percolator.Cryptography.Primitives.PeerId(relayHostPeerId.Value.Value),
+                relayHostPeerId: relayHostPeerId is null ? null : new Percolator.Cryptography.Primitives.CryptoPeerId(relayHostPeerId.Value.Value),
                 inviterIdentityKey: inviterIdentityKey,
                 inviterPublicIdentityId: new Percolator.Cryptography.CryptoPublicIdentityId(identity.PublicIdentityId.Value),
                 callbackEndpointHost: callbackHost,

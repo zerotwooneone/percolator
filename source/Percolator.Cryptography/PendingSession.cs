@@ -5,12 +5,12 @@ namespace Percolator.Cryptography;
 public class PendingSession
 {
     public PendingSessionId Id { get; }
-    public PeerId RemotePeerId { get; }
+    public CryptoPeerId RemoteCryptoPeerId { get; }
     public ProtocolVersion ProtocolVersion { get; }
     public HandshakeInvitation Invitation { get; }
     public RequestCorrelationId RequestCorrelationId { get; }
     public bool IsRelayed { get; }
-    public PeerId? RelayHostPeerId { get; }
+    public CryptoPeerId? RelayHostPeerId { get; }
     public RatchetIdentityKey? InviterIdentityKey { get; }
     public CryptoPublicIdentityId? InviterPublicIdentityId { get; }
     public string? CallbackEndpointHost { get; }
@@ -21,12 +21,12 @@ public class PendingSession
 
     private PendingSession(
         PendingSessionId id,
-        PeerId remotePeerId,
+        CryptoPeerId remoteCryptoPeerId,
         ProtocolVersion protocolVersion,
         HandshakeInvitation invitation,
         RequestCorrelationId requestCorrelationId,
         bool isRelayed,
-        PeerId? relayHostPeerId,
+        CryptoPeerId? relayHostPeerId,
         RatchetIdentityKey? inviterIdentityKey,
         CryptoPublicIdentityId? inviterPublicIdentityId,
         string? callbackEndpointHost,
@@ -35,7 +35,7 @@ public class PendingSession
         DateTimeOffset? expiresAtUtc)
     {
         Id = id;
-        RemotePeerId = remotePeerId;
+        RemoteCryptoPeerId = remoteCryptoPeerId;
         ProtocolVersion = protocolVersion;
         Invitation = invitation;
         RequestCorrelationId = requestCorrelationId;
@@ -72,12 +72,12 @@ public class PendingSession
 
     public static PendingSession FromInvitationWithMetadata(
         PendingSessionId id,
-        PeerId remotePeerId,
+        CryptoPeerId remoteCryptoPeerId,
         ProtocolVersion protocolVersion,
         HandshakeInvitation invitation,
         RequestCorrelationId requestCorrelationId,
         bool isRelayed,
-        PeerId? relayHostPeerId,
+        CryptoPeerId? relayHostPeerId,
         RatchetIdentityKey? inviterIdentityKey,
         CryptoPublicIdentityId? inviterPublicIdentityId,
         string? callbackEndpointHost,
@@ -89,7 +89,7 @@ public class PendingSession
         if (clock is null) throw new ArgumentNullException(nameof(clock));
         return new PendingSession(
             id,
-            remotePeerId,
+            remoteCryptoPeerId,
             protocolVersion,
             invitation,
             requestCorrelationId: requestCorrelationId,

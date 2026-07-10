@@ -77,7 +77,7 @@ public sealed class SimulatorDiagnosticBundleBuilder : ISimulatorDiagnosticBundl
                 sessionSummaries.Add(new
                 {
                     LocalPeerId = p.NetworkPeerId,
-                    RemotePeerId = s.RemotePeerId.Value,
+                    RemotePeerId = s.RemoteCryptoPeerId.Value,
                     SessionId = s.Id.Value,
                     ProtocolVersion = s.ProtocolVersion.Value,
                     SendCounter = s.State.SendingCounter,

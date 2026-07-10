@@ -23,7 +23,7 @@ public static class RatchetBootstrap
 
     public static SecureSession CreateInitiatorSession(
         SessionId id,
-        PeerId remotePeerId,
+        CryptoPeerId remoteCryptoPeerId,
         ProtocolVersion protocol,
         RootKey root,
         IClock clock,
@@ -33,13 +33,13 @@ public static class RatchetBootstrap
         var (send, recv) = DeriveInitiatorChains(root);
         var state = new RatchetState(root, send, 0, recv, 0, 0, null, null, skippedKeyLimit);
         crypto ??= new AeadSessionCrypto();
-        return SecureSession.Create(id, remotePeerId, protocol, state, crypto, clock);
+        return SecureSession.Create(id, remoteCryptoPeerId, protocol, state, crypto, clock);
         
     }
 
     public static SecureSession CreateResponderSession(
         SessionId id,
-        PeerId remotePeerId,
+        CryptoPeerId remoteCryptoPeerId,
         ProtocolVersion protocol,
         RootKey root,
         IClock clock,
@@ -49,6 +49,6 @@ public static class RatchetBootstrap
         var (send, recv) = DeriveResponderChains(root);
         var state = new RatchetState(root, send, 0, recv, 0, 0, null, null, skippedKeyLimit);
         crypto ??= new AeadSessionCrypto();
-        return SecureSession.Create(id, remotePeerId, protocol, state, crypto, clock);
+        return SecureSession.Create(id, remoteCryptoPeerId, protocol, state, crypto, clock);
     }
 }

@@ -205,7 +205,7 @@ public sealed class SimulatedPeerPendingInboundDirectInviteTests
         // Session should be created
         peer.Sessions.Count.Should().Be(1);
         var session = peer.Sessions.First().Value;
-        session.RemotePeerId.Value.Should().Be(mainPeerId.Value);
+        session.RemoteCryptoPeerId.Value.Should().Be(mainPeerId.Value);
 
         // Pending invite should be removed
         peer.PendingInboundDirectInvites.Count.Should().Be(0);

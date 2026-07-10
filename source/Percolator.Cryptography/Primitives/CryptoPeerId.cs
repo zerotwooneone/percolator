@@ -7,7 +7,7 @@ namespace Percolator.Cryptography.Primitives;
 /// This is a stable identifier that is not tied to a specific cryptographic key.
 /// </summary>
 [DebuggerDisplay("{Value}")]
-public readonly record struct PeerId(uint Value)
+public readonly record struct CryptoPeerId(uint Value)
 {
     public override string ToString() => Value.ToString();
 }

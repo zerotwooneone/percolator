@@ -218,7 +218,7 @@ namespace Percolator.ApplicationTests.Network
             pendingRepo.Setup(r => r.EnumerateAsync(It.IsAny<CryptoSelfId>(), It.IsAny<CancellationToken>()))
                 .Returns(SinglePendingAsync(PendingSession.FromInvitationWithMetadata(
                     PendingSessionId.NewId(),
-                    new Percolator.Cryptography.Primitives.PeerId((uint)Random.Shared.Next(1, 1000000)),
+                    new Percolator.Cryptography.Primitives.CryptoPeerId((uint)Random.Shared.Next(1, 1000000)),
                     new ProtocolVersion(1),
                     HandshakeInvitation.FromBytes(new byte[] { 0x01 }),
                     requestCorrelationId: new Percolator.Cryptography.Primitives.RequestCorrelationId(Guid.Parse("22222222-2222-2222-2222-222222222222")),

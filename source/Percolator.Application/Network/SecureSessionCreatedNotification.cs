@@ -1,6 +1,6 @@
 using MediatR;
 using Percolator.Cryptography;
-using CryptoPeerId = Percolator.Cryptography.Primitives.PeerId;
+using Percolator.Cryptography.Primitives;
 
 namespace Percolator.Application.Network;
 

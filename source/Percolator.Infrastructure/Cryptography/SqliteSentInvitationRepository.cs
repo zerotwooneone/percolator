@@ -3,7 +3,6 @@ using Microsoft.EntityFrameworkCore;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
 using Percolator.Infrastructure.Persistence;
-using PeerId = Percolator.Cryptography.Primitives.PeerId;
 
 namespace Percolator.Infrastructure.Cryptography;
 
@@ -59,7 +58,7 @@ internal sealed class SqliteSentInvitationRepository : ISentInvitationRepository
         await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task SetInviteRouteAsync(RequestCorrelationId requestCorrelationId, CryptoSelfId selfIdentityId, InviteRouteKind routeKind, PeerId? relayHostPeerId, CancellationToken cancellationToken = default)
+    public async Task SetInviteRouteAsync(RequestCorrelationId requestCorrelationId, CryptoSelfId selfIdentityId, InviteRouteKind routeKind, CryptoPeerId? relayHostPeerId, CancellationToken cancellationToken = default)
     {
         var correlation = requestCorrelationId.ToString();
         var existing = await _db.SentInvitations
@@ -155,13 +154,13 @@ internal sealed class SqliteSentInvitationRepository : ISentInvitationRepository
             new RequestCorrelationId(correlationGuid),
             row.SignedPreKeyId,
             row.OneTimePreKeyId,
-            row.TargetPeerId.HasValue ? new PeerId(row.TargetPeerId.Value) : null,
+            row.TargetPeerId.HasValue ? new CryptoPeerId(row.TargetPeerId.Value) : null,
             row.CreatedAtUtc,
             row.ExpiresAtUtc,
             targetDisplayName: row.TargetDisplayName,
             targetEndpointHost: row.TargetEndpointHost,
             targetEndpointPort: row.TargetEndpointPort,
             inviteRouteKind: (InviteRouteKind)row.InviteRouteKind,
-            inviteRelayHostPeerId: row.InviteRelayHostPeerId.HasValue ? new PeerId(row.InviteRelayHostPeerId.Value) : null);
+            inviteRelayHostPeerId: row.InviteRelayHostPeerId.HasValue ? new CryptoPeerId(row.InviteRelayHostPeerId.Value) : null);
     }
 }

@@ -38,7 +38,7 @@ public class SqliteSessionRepositoryTests
     private static SecureSession NewSession(ISessionCrypto crypto, IClock clock)
     {
         var id = SessionId.NewId();
-        var remote = new Percolator.Cryptography.Primitives.PeerId(1);
+        var remote = new Percolator.Cryptography.Primitives.CryptoPeerId(1);
         var ver = new ProtocolVersion(1);
         var state = new RatchetState(
             RootKey.FromBytes(new byte[32]),
@@ -91,7 +91,7 @@ public class SqliteSessionRepositoryTests
 
         Assert.That(loaded, Is.Not.Null);
         Assert.That(loaded!.Id.Value, Is.EqualTo(session.Id.Value));
-        Assert.That(loaded.RemotePeerId.Value, Is.EqualTo(session.RemotePeerId.Value));
+        Assert.That(loaded.RemoteCryptoPeerId.Value, Is.EqualTo(session.RemoteCryptoPeerId.Value));
         Assert.That(loaded.ProtocolVersion.Value, Is.EqualTo(session.ProtocolVersion.Value));
         Assert.That(loaded.State.SendingCounter, Is.EqualTo(session.State.SendingCounter));
         Assert.That(loaded.State.ReceivingCounter, Is.EqualTo(session.State.ReceivingCounter));

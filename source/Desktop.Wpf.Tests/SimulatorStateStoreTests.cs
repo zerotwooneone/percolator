@@ -42,7 +42,7 @@ public sealed class SimulatorStateStoreTests
                 keys: keys,
                 scopeFactory: scopeFactory);
 
-            var remotePeerId = new Percolator.Cryptography.Primitives.PeerId(1);
+            var remotePeerId = new Percolator.Cryptography.Primitives.CryptoPeerId(1);
             var signedPreKeyId = Guid.NewGuid();
 
             using var identity = System.Security.Cryptography.ECDiffieHellman.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
@@ -81,7 +81,7 @@ public sealed class SimulatorStateStoreTests
 
             var session = SecureSession.Create(
                 id: new SessionId(Guid.NewGuid()),
-                remotePeerId: remotePeerId,
+                remoteCryptoPeerId: remotePeerId,
                 protocolVersion: new ProtocolVersion(1),
                 state: ratchet,
                 sessionCrypto: new AeadSessionCrypto(),

@@ -11,19 +11,19 @@ public interface IPreKeyBundleRepository
     /// Stores a collection of pre-key bundles for a specific peer.
     /// If bundles for the peer already exist, they should be replaced.
     /// </summary>
-    /// <param name="peerId">The unique identifier of the peer who owns the bundles.</param>
+    /// <param name="cryptoPeerId">The unique identifier of the peer who owns the bundles.</param>
     /// <param name="bundles">The collection of pre-key bundles to store.</param>
-    Task StoreBundlesAsync(PeerId peerId, IEnumerable<PreKeyBundle> bundles);
+    Task StoreBundlesAsync(CryptoPeerId cryptoPeerId, IEnumerable<PreKeyBundle> bundles);
 
     /// <summary>
     /// Atomically retrieves and removes a single pre-key bundle for a specified peer.
     /// This operation is destructive: it consumes a one-time pre-key, which cannot be retrieved again.
     /// </summary>
-    /// <param name="peerId">The unique identifier of the peer for whom to retrieve the bundle.</param>
+    /// <param name="cryptoPeerId">The unique identifier of the peer for whom to retrieve the bundle.</param>
     /// <returns>
     /// A <see cref="PreKeyBundle"/> for the peer, or null if no valid bundle is available.
     /// </returns>
-    Task<PreKeyBundle?> PopBundleAsync(PeerId peerId);
+    Task<PreKeyBundle?> PopBundleAsync(CryptoPeerId cryptoPeerId);
 
     /// <summary>
     /// Atomically retrieves and removes a specific pre-key bundle for a peer by identifiers.
@@ -31,5 +31,5 @@ public interface IPreKeyBundleRepository
     /// Otherwise, any available one-time key for the peer may be consumed as long as the signed pre-key id matches.
     /// Returns null if no matching bundle is available.
     /// </summary>
-    Task<PreKeyBundle?> TryPopBundleAsync(PeerId peerId, Guid signedPreKeyId, Guid? oneTimePreKeyId);
+    Task<PreKeyBundle?> TryPopBundleAsync(CryptoPeerId cryptoPeerId, Guid signedPreKeyId, Guid? oneTimePreKeyId);
 }

@@ -3,7 +3,6 @@ using Microsoft.EntityFrameworkCore;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
 using Percolator.Infrastructure.Persistence;
-using PeerId = Percolator.Cryptography.Primitives.PeerId;
 
 namespace Percolator.Infrastructure.Cryptography
 {
@@ -26,7 +25,7 @@ namespace Percolator.Infrastructure.Cryptography
             {
                 Id = pending.Id.Value,
                 SelfIdentityId = selfIdentityId.Value,
-                RemotePeerId = pending.RemotePeerId.Value,
+                RemotePeerId = pending.RemoteCryptoPeerId.Value,
                 ProtocolVersion = pending.ProtocolVersion.Value,
                 Invitation = pending.Invitation.ToArray(),
                 RequestCorrelationId = pending.RequestCorrelationId.ToString(),
@@ -95,7 +94,7 @@ namespace Percolator.Infrastructure.Cryptography
         private PendingSession Rehydrate(PendingSessionDbo row)
         {
             var id = new PendingSessionId(row.Id);
-            var remote = new PeerId(row.RemotePeerId);
+            var remote = new CryptoPeerId(row.RemotePeerId);
             var ver = new ProtocolVersion(row.ProtocolVersion);
             var invitation = HandshakeInvitation.FromBytesOwned(row.Invitation);
             var inviterKey = row.InviterIdentityKey is null
@@ -118,7 +117,7 @@ namespace Percolator.Infrastructure.Cryptography
                 invitation,
                 requestCorrelationId: correlationId,
                 isRelayed: row.IsRelayed,
-                relayHostPeerId: row.RelayHostPeerId.HasValue ? new PeerId(row.RelayHostPeerId.Value) : null,
+                relayHostPeerId: row.RelayHostPeerId.HasValue ? new CryptoPeerId(row.RelayHostPeerId.Value) : null,
                 inviterIdentityKey: inviterKey,
                 inviterPublicIdentityId: row.InviterPublicIdentityId.HasValue ? new CryptoPublicIdentityId(row.InviterPublicIdentityId.Value) : null,
                 callbackEndpointHost: row.CallbackEndpointHost,

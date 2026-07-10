@@ -13,7 +13,6 @@ using Percolator.Infrastructure.Cryptography;
 using Percolator.Infrastructure.Identity;
 using Percolator.Infrastructure.Persistence;
 using Percolator.InfrastructureTests.Common;
-using PeerId = Percolator.Cryptography.Primitives.PeerId;
 
 namespace Percolator.InfrastructureTests.Application;
 
@@ -64,7 +63,7 @@ public sealed class PendingHandshakeQueriesTests
 
         var expired = PendingSession.FromInvitationWithMetadata(
             PendingSessionId.NewId(),
-            new PeerId(1),
+            new CryptoPeerId(1),
             new ProtocolVersion(1),
             HandshakeInvitation.FromBytes(new byte[] { 9 }),
             requestCorrelationId: new RequestCorrelationId(Guid.Parse("33333333-3333-3333-3333-333333333333")),
@@ -79,7 +78,7 @@ public sealed class PendingHandshakeQueriesTests
 
         var open = PendingSession.FromInvitationWithMetadata(
             PendingSessionId.NewId(),
-            new PeerId(1),
+            new CryptoPeerId(1),
             new ProtocolVersion(1),
             HandshakeInvitation.FromBytes(new byte[] { 8 }),
             requestCorrelationId: new RequestCorrelationId(Guid.Parse("11111111-1111-1111-1111-111111111111")),
@@ -192,12 +191,12 @@ public sealed class PendingHandshakeQueriesTests
 
         var openRelayed = PendingSession.FromInvitationWithMetadata(
             PendingSessionId.NewId(),
-            new Percolator.Cryptography.Primitives.PeerId(remotePeerId.Value),
+            new Percolator.Cryptography.Primitives.CryptoPeerId(remotePeerId.Value),
             new ProtocolVersion(1),
             HandshakeInvitation.FromBytes(new byte[] { 8 }),
             requestCorrelationId: new RequestCorrelationId(Guid.Parse("11111111-1111-1111-1111-111111111111")),
             isRelayed: true,
-            relayHostPeerId: new Percolator.Cryptography.Primitives.PeerId(relayPeerId),
+            relayHostPeerId: new Percolator.Cryptography.Primitives.CryptoPeerId(relayPeerId),
             inviterIdentityKey: null,
             inviterPublicIdentityId: new CryptoPublicIdentityId(Guid.NewGuid()),
             callbackEndpointHost: null,
@@ -217,7 +216,7 @@ public sealed class PendingHandshakeQueriesTests
 
         results.Should().HaveCount(1);
         results[0].IsRelayed.Should().BeTrue();
-        results[0].RelayPeer.Should().Be(new Percolator.Cryptography.Primitives.PeerId(relayPeerId));
+        results[0].RelayPeer.Should().Be(new Percolator.Cryptography.Primitives.CryptoPeerId(relayPeerId));
         results[0].RelayPeerName.Should().Be("RelayHost");
         results[0].RelayEndpoint.Should().Be("relay.local:5001");
     }

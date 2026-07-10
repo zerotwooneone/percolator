@@ -30,7 +30,7 @@ public sealed class ApprovePendingSessionCommandTests
 
     private static PendingSession BuildPending(
         PendingSessionId id,
-        Percolator.Cryptography.Primitives.PeerId inviterPeerId,
+        Percolator.Cryptography.Primitives.CryptoPeerId inviterCryptoPeerId,
         RequestCorrelationId correlationId,
         byte[] inviterIdentitySpki,
         byte[] payloadBytes,
@@ -47,7 +47,7 @@ public sealed class ApprovePendingSessionCommandTests
 
         return PendingSession.FromInvitationWithMetadata(
             id,
-            inviterPeerId,
+            inviterCryptoPeerId,
             new ProtocolVersion(1),
             HandshakeInvitation.FromBytes(invitationEnvelope.ToByteArray()),
             requestCorrelationId: correlationId,
@@ -100,7 +100,7 @@ public sealed class ApprovePendingSessionCommandTests
 
         var pending = BuildPending(
             pendingId,
-            new Percolator.Cryptography.Primitives.PeerId(remotePeerId),
+            new Percolator.Cryptography.Primitives.CryptoPeerId(remotePeerId),
             correlation,
             inviterSpki,
             payload.ToByteArray(),
