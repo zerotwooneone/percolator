@@ -3,7 +3,6 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using Percolator.Application.Chat;
 using Percolator.Cryptography;
-using Percolator.Identity;
 
 namespace Percolator.ApplicationTests.Chat;
 

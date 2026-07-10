@@ -5,9 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Time.Testing;
 using Moq;
 using NUnit.Framework;
-using Percolator.Application.Chat;
 using Percolator.Application.Identity;
-using Percolator.Chat;
 using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Network;
 

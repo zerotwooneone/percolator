@@ -4,7 +4,6 @@ using Percolator.Chat.GroupLedger;
 using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Contracts;
 using Percolator.Cryptography;
-using Percolator.Identity;
 
 namespace Percolator.Infrastructure.Network.Grpc;
 

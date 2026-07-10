@@ -1,6 +1,5 @@
 using Google.Protobuf;
 using Percolator.Contracts;
-using Percolator.Cryptography.Primitives;
 using Percolator.SourceGenerators;
 
 namespace Percolator.Cryptography;

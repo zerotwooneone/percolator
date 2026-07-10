@@ -2,10 +2,8 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Percolator.Chat.Events;
 using Percolator.Infrastructure.Persistence;
-using Percolator.Application.Network;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
-using Percolator.Identity;
 using Percolator.Network;
 using Microsoft.Extensions.DependencyInjection;
 

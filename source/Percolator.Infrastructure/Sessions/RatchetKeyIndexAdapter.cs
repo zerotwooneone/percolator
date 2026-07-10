@@ -1,6 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using Percolator.Cryptography;
-using Percolator.Identity;
 using Percolator.Infrastructure.Persistence;
 
 namespace Percolator.Infrastructure.Sessions;

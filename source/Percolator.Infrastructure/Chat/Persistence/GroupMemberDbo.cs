@@ -1,6 +1,3 @@
-using Percolator.Chat.GroupLedger;
-using Percolator.Identity;
-
 namespace Percolator.Infrastructure.Chat.Persistence;
 
 /// <summary>

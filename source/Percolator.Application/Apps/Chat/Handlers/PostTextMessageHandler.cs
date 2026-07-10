@@ -1,15 +1,10 @@
 using MediatR;
 using Percolator.Application.Apps.Chat.Commands;
 using Percolator.Application.Chat;
-using Percolator.Application.Identity;
-using Percolator.Chat;
 using Percolator.Chat.GroupMembership;
 using Percolator.Chat.Messaging.App;
 using Percolator.Chat.Messaging.App.Commands;
-using Percolator.Chat.Messaging.Events;
-using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Identity;
-using ChatPeerId = Percolator.Chat.GroupMembership.ChatPeerId;
 using PublicIdentityId = Percolator.Chat.GroupLedger.PublicIdentityId;
 
 namespace Percolator.Application.Apps.Chat.Handlers;

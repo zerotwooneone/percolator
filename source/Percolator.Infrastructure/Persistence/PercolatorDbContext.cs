@@ -1,8 +1,6 @@
 using Microsoft.EntityFrameworkCore;
-using Percolator.Identity;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Percolator.Dht;
-using Percolator.Application.Identity;
 using Percolator.Infrastructure.Identity;
 using Percolator.Infrastructure.Cryptography;
 

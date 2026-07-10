@@ -1,6 +1,5 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
-using NUnit.Framework;
 using Percolator.Cryptography.Primitives;
 using Percolator.Infrastructure.Cryptography;
 using Percolator.Cryptography;

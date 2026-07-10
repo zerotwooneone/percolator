@@ -1,10 +1,8 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
-using NUnit.Framework;
 using Percolator.Application.Sessions;
 using Percolator.Cryptography;
 using Percolator.Identity;
-using Percolator.Identity.Model;
 using Percolator.Infrastructure.Cryptography;
 using Percolator.Infrastructure.Identity;
 using Percolator.Infrastructure.Persistence;

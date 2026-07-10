@@ -1,5 +1,3 @@
-using Percolator.Chat.GroupMembership;
-
 namespace Percolator.Infrastructure.Persistence;
 
 public sealed class ReadReceiptDbo

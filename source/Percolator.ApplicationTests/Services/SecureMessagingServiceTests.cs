@@ -2,8 +2,6 @@ using FluentAssertions;
 using Moq;
 using Percolator.Application.Services;
 using Percolator.Cryptography;
-using Percolator.Cryptography.Primitives;
-using Percolator.Identity;
 
 namespace Percolator.ApplicationTests.Services;
 

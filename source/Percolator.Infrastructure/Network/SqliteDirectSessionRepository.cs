@@ -1,5 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using Percolator.Identity;
 using Percolator.Infrastructure.Persistence;
 using Percolator.Network;
 

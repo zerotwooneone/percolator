@@ -13,7 +13,6 @@ using Percolator.Infrastructure.Cryptography;
 using Percolator.Infrastructure.Identity;
 using Percolator.Infrastructure.Persistence;
 using Percolator.InfrastructureTests.Common;
-using Percolator.Network;
 using PeerId = Percolator.Cryptography.Primitives.PeerId;
 
 namespace Percolator.InfrastructureTests.Application;

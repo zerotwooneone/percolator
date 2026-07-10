@@ -1,7 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Percolator.Infrastructure.Persistence;
-using PublicIdentityId = Percolator.Identity.PublicIdentityId;
 
 namespace Percolator.InfrastructureTests.Identity;
 

@@ -1,7 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using Percolator.Chat.GroupLedger;
-using Percolator.Chat.Messaging.ValueObjects;
-using Percolator.Cryptography;
 using Percolator.Infrastructure.Persistence;
 
 namespace Percolator.Infrastructure.Chat;

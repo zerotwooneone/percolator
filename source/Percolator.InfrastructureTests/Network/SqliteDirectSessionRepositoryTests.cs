@@ -1,8 +1,6 @@
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Percolator.Identity;
-using Percolator.Identity.Model;
 using Percolator.Infrastructure.Network;
 using Percolator.Infrastructure.Persistence;
 using Percolator.Infrastructure.Identity;

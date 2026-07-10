@@ -2,13 +2,11 @@ using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Percolator.Chat.GroupMembership;
-using Percolator.Chat.GroupLedger;
 using Percolator.Chat.Messaging;
 using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Identity;
 using Percolator.Infrastructure.Chat;
 using Percolator.Infrastructure.Persistence;
-using PublicIdentityId = Percolator.Identity.PublicIdentityId;
 using Percolator.InfrastructureTests.Common;
 
 namespace Percolator.InfrastructureTests.Chat;

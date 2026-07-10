@@ -5,7 +5,6 @@ using Percolator.Application.Chat;
 using Percolator.Contracts;
 using Percolator.Dht;
 using Percolator.Application.Network.Handshake;
-using Percolator.Identity;
 using Percolator.Network;
 using Percolator.Prekey.Handlers;
 using System.Text.Json;

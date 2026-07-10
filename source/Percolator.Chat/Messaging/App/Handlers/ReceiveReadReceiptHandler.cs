@@ -1,7 +1,5 @@
 using MediatR;
-using Percolator.Chat.GroupMembership;
 using Percolator.Chat.Messaging.App.Commands;
-using Percolator.Chat.Messaging.Events;
 
 namespace Percolator.Chat.Messaging.App.Handlers;
 

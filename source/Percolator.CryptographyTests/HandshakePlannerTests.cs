@@ -1,5 +1,4 @@
 using FluentAssertions;
-using Moq;
 using Percolator.Cryptography;
 
 namespace Percolator.CryptographyTests;

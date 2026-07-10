@@ -4,7 +4,6 @@ using Percolator.Application.Cryptography;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
 using Percolator.Infrastructure.Persistence;
-using Percolator.Network;
 using PeerId = Percolator.Cryptography.Primitives.PeerId;
 
 namespace Percolator.Infrastructure.Application;

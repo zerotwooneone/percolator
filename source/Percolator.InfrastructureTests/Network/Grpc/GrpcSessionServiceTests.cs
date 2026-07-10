@@ -1,13 +1,10 @@
 using System.Net;
 using Grpc.Core;
-using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
 using Moq;
-using NUnit.Framework;
 using Percolator.Contracts;
 using Percolator.Infrastructure.Network;
 using Percolator.Infrastructure.Network.Grpc;
-using Percolator.Network;
 
 namespace Percolator.InfrastructureTests.Network.Grpc;
 

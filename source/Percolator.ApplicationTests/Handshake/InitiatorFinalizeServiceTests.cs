@@ -1,14 +1,6 @@
 using System.Runtime.CompilerServices;
-using Google.Protobuf;
-using Microsoft.Extensions.Logging.Abstractions;
-using Moq;
-using MediatR;
 using Percolator.Application.Network.Handshake;
 using Percolator.Cryptography;
-using Percolator.Contracts;
-using Percolator.Identity;
-using Percolator.Network;
-using PeerId = Percolator.Cryptography.Primitives.PeerId;
 
 namespace Percolator.ApplicationTests.Handshake;
 

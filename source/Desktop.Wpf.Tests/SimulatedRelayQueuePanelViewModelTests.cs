@@ -3,7 +3,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Desktop.Wpf.Features.Simulator;
 using Desktop.Wpf.Features.Simulator.Models;
-using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
 using NUnit.Framework;

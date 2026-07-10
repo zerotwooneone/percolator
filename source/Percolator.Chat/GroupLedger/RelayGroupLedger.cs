@@ -1,5 +1,4 @@
 using Percolator.Chat.Messaging.ValueObjects;
-using Percolator.Chat.GroupMembership;
 
 namespace Percolator.Chat.GroupLedger;
 

@@ -1,7 +1,6 @@
 using FluentAssertions;
 using Percolator.Chat.GroupLedger;
 using Percolator.Chat.Messaging.ValueObjects;
-using Percolator.Chat.GroupMembership;
 
 namespace Percolator.Chat.Tests.GroupLedger;
 

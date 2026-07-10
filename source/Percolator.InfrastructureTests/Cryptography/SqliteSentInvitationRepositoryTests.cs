@@ -3,7 +3,6 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
-using Percolator.Identity;
 using Percolator.Infrastructure.Cryptography;
 using Percolator.Infrastructure.Persistence;
 using Percolator.InfrastructureTests.Common;

@@ -15,7 +15,6 @@ using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Contracts;
 using Percolator.Network;
 using Percolator.Cryptography;
-using Percolator.Cryptography.Primitives;
 
 namespace Percolator.ApplicationTests.Network;
 

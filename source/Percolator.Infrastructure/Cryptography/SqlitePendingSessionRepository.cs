@@ -1,6 +1,5 @@
 using System.Runtime.CompilerServices;
 using Microsoft.EntityFrameworkCore;
-using Percolator.Application.Identity;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
 using Percolator.Infrastructure.Persistence;

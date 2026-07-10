@@ -3,7 +3,6 @@ using Desktop.Wpf.Features.Chat;
 using FluentAssertions;
 using NUnit.Framework;
 using Percolator.Chat.Messaging;
-using Percolator.Chat.Messaging.ValueObjects;
 
 namespace Desktop.Wpf.Tests;
 

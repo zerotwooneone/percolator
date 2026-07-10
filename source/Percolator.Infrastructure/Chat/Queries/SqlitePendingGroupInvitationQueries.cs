@@ -1,4 +1,3 @@
-using System.Linq;
 using Microsoft.EntityFrameworkCore;
 using Percolator.Application.Chat;
 using Percolator.Infrastructure.Chat.Persistence;

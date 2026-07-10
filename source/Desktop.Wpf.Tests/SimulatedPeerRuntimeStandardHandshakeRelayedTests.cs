@@ -16,7 +16,6 @@ using ObservableCollections;
 using Percolator.Application.Configuration;
 using Percolator.Contracts;
 using Percolator.Cryptography;
-using Percolator.Identity;
 using Percolator.Network;
 
 namespace Desktop.Wpf.Tests;

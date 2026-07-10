@@ -1,5 +1,4 @@
 using System.Net;
-using System.Security.Cryptography;
 using Google.Protobuf;
 using MediatR;
 using Microsoft.Extensions.Logging;

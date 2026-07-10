@@ -1,5 +1,4 @@
 using System.ComponentModel.DataAnnotations;
-using Percolator.Identity;
 
 namespace Percolator.Infrastructure.Persistence;
 

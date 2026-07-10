@@ -1,4 +1,3 @@
-using Percolator.Cryptography.Primitives;
 using Percolator.SourceGenerators;
 
 namespace Percolator.Cryptography;

@@ -1,4 +1,3 @@
-using System;
 using Desktop.Wpf.Features.Simulator;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;

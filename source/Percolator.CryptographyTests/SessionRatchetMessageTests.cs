@@ -1,6 +1,5 @@
 using System.Security.Cryptography;
 using FluentAssertions;
-using Google.Protobuf;
 using Percolator.Cryptography;
 
 namespace Percolator.CryptographyTests;

@@ -7,7 +7,6 @@ using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
 using Percolator.Identity;
-using Percolator.Identity.Model;
 using PeerId = Percolator.Cryptography.Primitives.PeerId;
 
 namespace Percolator.Application.Network

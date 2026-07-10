@@ -1,4 +1,3 @@
-using Google.Protobuf;
 using Percolator.Contracts;
 
 namespace Percolator.Cryptography;

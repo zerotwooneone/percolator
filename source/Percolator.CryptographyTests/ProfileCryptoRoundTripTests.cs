@@ -1,4 +1,3 @@
-using NUnit.Framework;
 using Percolator.Cryptography;
 
 namespace Percolator.CryptographyTests;

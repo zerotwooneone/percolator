@@ -1,8 +1,6 @@
 using Microsoft.EntityFrameworkCore;
-using Percolator.Identity;
 using Percolator.Infrastructure.Persistence;
 using Percolator.Network;
-using PeerId = Percolator.Identity.PeerId;
 
 namespace Percolator.Infrastructure.Network;
 

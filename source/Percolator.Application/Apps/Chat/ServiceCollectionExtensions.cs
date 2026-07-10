@@ -1,8 +1,6 @@
 using MediatR;
 using Microsoft.Extensions.DependencyInjection;
 using Percolator.Application.Chat;
-using Percolator.Application.Identity;
-using Percolator.Chat;
 using Percolator.Application.Apps.Chat.Handlers;
 
 namespace Percolator.Application.Apps.Chat;

@@ -4,7 +4,6 @@ using Moq;
 using Percolator.Application.Network.Handshake;
 using Percolator.Contracts;
 using Percolator.Cryptography;
-using Percolator.Cryptography.Primitives;
 using Percolator.Identity;
 
 namespace Percolator.ApplicationTests.Network

@@ -1,5 +1,3 @@
-using Percolator.Identity;
-
 namespace Percolator.Infrastructure.Persistence;
 
 public class SelfOneTimePreKeyDbo

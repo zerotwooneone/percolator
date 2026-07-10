@@ -1,6 +1,5 @@
 using Microsoft.Extensions.Logging;
 using Percolator.Contracts;
-using Percolator.Network;
 using PeerId = Percolator.Identity.PeerId;
 
 namespace Percolator.Application.Network

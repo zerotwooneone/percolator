@@ -4,7 +4,6 @@ using Percolator.Application.Identity;
 using Percolator.Application.Network;
 using Percolator.Contracts;
 using Percolator.Cryptography;
-using Percolator.Cryptography.Primitives;
 using Percolator.Network;
 using Percolator.Network.Messaging;
 using Percolator.Identity;

@@ -1,6 +1,3 @@
-using Percolator.Chat.GroupMembership;
-using Percolator.Chat.Messaging.ValueObjects;
-
 namespace Percolator.Infrastructure.Chat.Persistence;
 
 /// <summary>

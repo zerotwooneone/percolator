@@ -1,5 +1,4 @@
 using Percolator.Chat.GroupLedger;
-using Percolator.Chat.GroupMembership;
 
 namespace Percolator.Infrastructure.Chat.Persistence;
 

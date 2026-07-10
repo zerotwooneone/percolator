@@ -3,7 +3,6 @@ using Percolator.Chat;
 using Percolator.Chat.GroupMembership;
 using Percolator.Chat.Messaging;
 using Percolator.Chat.Messaging.ValueObjects;
-using Percolator.Identity;
 using Percolator.Infrastructure.Persistence;
 
 namespace Percolator.Infrastructure.Chat;

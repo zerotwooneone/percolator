@@ -6,7 +6,6 @@ using Percolator.Application.Network.Messaging;
 using Percolator.Application.Services;
 using Percolator.Contracts;
 using Percolator.Cryptography;
-using Percolator.Identity;
 using Percolator.Network;
 using Percolator.Network.Messaging;
 

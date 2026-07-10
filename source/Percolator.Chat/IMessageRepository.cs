@@ -1,6 +1,5 @@
 using Percolator.Chat.GroupMembership;
 using Percolator.Chat.Messaging;
-using Percolator.Chat.Messaging.ValueObjects;
 using PublicMessageId = Percolator.Chat.Messaging.PublicMessageId;
 
 namespace Percolator.Chat;

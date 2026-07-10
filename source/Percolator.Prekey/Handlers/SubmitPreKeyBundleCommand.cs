@@ -1,6 +1,5 @@
 using MediatR;
 using Percolator.Network;
-using Percolator.Identity;
 
 namespace Percolator.Prekey.Handlers
 {
