@@ -152,7 +152,23 @@ Implementation Requirements
     * **Persist:** Call `IChatMessageWriter.AddGroupMessageAsync(...)` to save the decrypted message locally.
 
 **Testing Requirements (Chunk 6):**
+
+**Relay Fan-Out Infrastructure Tests:**
+- `GrpcRelayGroupStreamDispatcher_RegisterStream_CreatesNewChannel_WhenFirstStreamForConversation` - Test that a new channel is created when the first stream registers for a conversation.
+- `GrpcRelayGroupStreamDispatcher_RegisterStream_AddsToExistingDictionary_WhenConversationAlreadyHasStreams` - Test that subsequent streams are added to the existing conversation's dictionary.
+- `GrpcRelayGroupStreamDispatcher_UnregisterStream_RemovesChannel_WhenStreamExists` - Test that unregistration removes the specific stream.
+- `GrpcRelayGroupStreamDispatcher_UnregisterStream_CleansUpEmptyConversation_WhenLastStreamRemoved` - Test that empty conversation entries are removed when the last stream unregisters.
 - `GrpcRelayGroupStreamDispatcher_DispatchAsync_WritesToAllChannels_WhenConversationHasMultipleActiveStreams` - Test that DispatchAsync enqueues the payload to all registered Channel instances when the conversation has multiple active streams.
+- `GrpcRelayGroupStreamDispatcher_DispatchAsync_DoesNotThrow_WhenNoStreamsRegistered` - Test that DispatchAsync handles the case gracefully when no streams are registered for a conversation.
+
+**Relay Authorization Tests:**
+- `RelayGroupService_StreamGroupMessages_ThrowsPermissionDenied_WhenCallerNotInGroup` - Test that the authorization gate rejects stream connections from non-members using a mock ledger repository.
+- `RelayGroupService_StreamGroupMessages_RegistersStream_WhenCallerIsAuthorized` - Test that authorized callers successfully register and receive a ChannelReader.
+
+**Client Ingress Tests:**
+- `GroupStreamIngressProcessor_ProcessGroupMessageAsync_RejectsMessage_WhenSenderNotInGroup` - Test that the processor rejects messages from senders not in the local group aggregate.
+- `GroupStreamIngressProcessor_ProcessGroupMessageAsync_RejectsMessage_WhenIncomingEpochExceedsLocalEpoch` - Test that the processor rejects messages with an epoch higher than the local ledger, indicating a sync is required.
+- `GroupStreamIngressProcessor_ProcessGroupMessageAsync_DecryptsAndPersists_WhenMessageIsValid` - Test that a valid message (correct epoch, authorized sender) is successfully decrypted and persisted to the message writer.
 
 
 ---
