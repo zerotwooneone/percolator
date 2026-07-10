@@ -318,6 +318,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             {
                 Version = 1,
                 DirectSessionId = sessionId.Value.ToString(),
+                PublicIdentityId = ByteString.CopyFrom( model.PublicIdentityId.Value.ToByteArray())
             };
 
             var initial = session.Encrypt(Plaintext.FromBytesOwned(inner.ToByteArray()), clock);
