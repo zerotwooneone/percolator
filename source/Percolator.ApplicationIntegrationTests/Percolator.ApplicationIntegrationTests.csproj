@@ -23,7 +23,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Percolator.Application\Percolator.Application.csproj" />
-    <ProjectReference Include="..\Percolator.Infrastructure\Percolator.Infrastructure.csproj" />
     <ProjectReference Include="..\Percolator.Node\Percolator.Node.csproj" />
   </ItemGroup>
 
