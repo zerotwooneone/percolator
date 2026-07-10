@@ -49,6 +49,54 @@ This chunk implemented the Signal Protocol Group V2 Relay Ledger and Fan-Out mec
 **Group provisioning through outbox**
 This chunk refactored the identity system to use PublicIdentityId (Guid) as the global identifier and PeerId/SelfId (uint) as local database surrogate keys. It addressed incorrect BitConverter conversions, updated network contracts to use PublicIdentityId instead of PKH for routing, and fixed identity resolution logic throughout the codebase.
 ---
+### Chunk 5.1 
+The simulator and protocol currently rely heavily on `IdentityPublicKeyHash` (PKH) for over-the-wire routing and identity resolution, whereas Signal uses Service IDs (UUIDs/PNIs) for these operations. `PublicIdentityId` was added to several handshake messages recently but has not yet permeated the routing, queueing, and application layers.
+
+Here is the step-by-step plan to transition the simulator, protocol, and main application entirely to `PublicIdentityId`.
+
+**1. Protocol Updates (`internal_messaging.proto`)**
+The protocol itself dictates PKH usage for routing and addressing. 
+*   **Message Queueing:** In `EnqueueOpaqueMessageRequest`, replace `recipient_public_key_hash` with `recipient_public_identity_id` (bytes).
+*   **Pre-key Submission:** In `SubmitPreKeyBundleRequest`, add `optional bytes public_identity_id` so the relay knows which UUID to index the bundle under.
+*   **Pre-key Fetching:** In `GetPreKeyBundleRequest`, replace `public_key_hash` with `public_identity_id` (bytes).
+*   **Chat 1:1 Routing:** In `TextMessage`, `ReadReceipt`, `EmojiAnnotation`, and `DeliveredReceipt`, replace `optional bytes public_key_hash` with `optional bytes public_identity_id` (bytes).
+
+**2. Main Application Updates (`Percolator.Application` & `Percolator.Infrastructure`)**
+The main application uses PKH for identity resolution, routing, and sealed sender authentication.
+*   **Commands:** Update `InitiateHandshakeViaHostCommand` to use `TargetPublicIdentityId` instead of `TargetPublicKeyHash`.
+*   **Identity Resolution:** In `IPeerIdentityQueries` and its implementations, replace methods like `GetPublicKeyByPkhAsync(IdentityPublicKeyHash pkh)` with `GetPublicKeyByPublicIdentityIdAsync(PublicIdentityId id)`. Shift network ingress resolution to `GetByPublicIdentityIdAsync` and deprecate `FindByPublicKeyHashAsync`.
+*   **Routing Profiles:** Ensure `PeerRoutingProfile` and related tables use `PublicIdentityId` as the unique identifier for routing lookups over the wire instead of PKH.
+*   **Sealed Sender Authentication:** In `PeerAuthenticationService` and related tests (`AuthenticateDeliveryCertificateRequestAsync`), replace `senderPkh` with `senderPublicIdentityId` in the method signature and the signed payload format (i.e. `{senderPublicIdentityId}{timestamp}`).
+*   **Message Handlers:** Update `ProcessInternalEnvelopeHandler` and `DeliverOpaqueMessageHandler` to extract and honor `public_identity_id` when parsing chat envelopes or communicating with the MQ service and DHT.
+*   **PreKey and DHT Updates:** Update `GetPreKeyBundleQuery`, `GetPreKeyBundleHandler`, DHT node logging, and underlying PreKey stores to resolve bundles by mapping the incoming `PublicIdentityId` to the surrogate `PeerId`, dropping the PKH lookup logic.
+*   **Database Migrations:** Create an EF Core migration to alter `MessageQueueItemDbo` (the `MessageQueue` table). Drop `RecipientPkh` and replace it with `RecipientPublicIdentityId`. (`PreKeyBundleDbo` and `PendingSessionDbo` are safe as they already use the `PeerId` surrogate key).
+
+**3. Simulator Persistence & DTO Updates (`SimulatorState.cs` & `JsonSimulatorStateRepository.cs`)**
+The simulator persists relay queues and pending handshakes using PKH. These must be migrated to persist and identify by UUID.
+*   **Pending Handshakes:** In `StandardSignalStoreDto`, rename `PendingHandshakeToMainResponderPublicKeyHash` to `PendingHandshakeToMainResponderPublicIdentityId` (and update `SimulatedPeerModel` accordingly).
+*   **Relay Queues:** In `RelayQueuedBlobDto` and `InboundRelayMessageSnapshot`, replace `RecipientRoutingKey` / `TargetIdentityPublicKeyHash` with `TargetPublicIdentityId`.
+*   **Pre-key Store:** In `PublishedPreKeyBundleDto`, replace `RecipientPublicKeyHash` with `RecipientPublicIdentityId`.
+*   **Routing State:** In `SimulatedPeerDto` and `SimulatedPeerModel`, replace `TargetPublicKeyHash` with `TargetPublicIdentityId`.
+
+**4. Simulator Core Services Updates (`ISimulatorStateService.cs`)**
+The API surface of the simulator dictates PKH routing for queues and standard signal handshakes.
+*   **Lookups:** Replace `TryGetPeerIdByIdentityPublicKeyHashAsync` with `TryGetPeerIdByPublicIdentityIdAsync(PublicIdentityId id)`.
+*   **Relay Queuing Methods:** Update the signature of `EnqueueRelayDownstreamToPeerAsync` and `DequeueRelayDownstreamToPeerAsync` to take `PublicIdentityId targetPublicIdentityId` instead of `IdentityPublicKeyHash targetIdentityPublicKeyHash`.
+*   **Handshakes:** Rename and update `InitiateStandardHandshakeToMainByRelayPkhAsync` to `InitiateStandardHandshakeToMainByRelayPublicIdentityIdAsync`.
+*   **Acceptance:** Update `TryAcceptPendingStandardSignalHelloAsync` to accept `initiatorPublicIdentityId` rather than `initiatorPkhHex`.
+
+**5. Simulator Application Logic & UI Updates (`SimulatorStateService.cs` & Desktop UI)**
+The implementations and UI bindings must be updated to route envelopes using the new protocol fields.
+*   **WPF UI Bindings:** Update `SimulatorRelayTabViewModel`, `SimulatorSessionsTabViewModel`, `SimulatedPeerItemViewModel`, and their associated `.xaml` files to bind to `TargetPublicIdentityId` instead of `TargetPublicKeyHash`.
+*   **Handling `EnqueueOpaqueMessageRequest`:** Update the logic to read `RecipientPublicIdentityId` instead of throwing if `recipient_public_key_hash` is missing, and pass it to the updated `EnqueueRelayDownstreamToPeerAsync`.
+*   **Handling `GetPreKeyBundleRequest`:** Look up pre-keys from the simulated relay's `PreKeyStore` using `PublicIdentityId` rather than matching PKH.
+*   **Message Dispatch:** Any simulated peer looking to deliver messages via relay or direct fallback should attach the target's `PublicIdentityId` to the outgoing request rather than hashing the SPKI.
+
+**Summary & Constraints:**
+*   `PeerId` (the `uint`) is correctly staying completely local to the in-memory maps (`_peerById` and `RemoteNetworkPeerId` inside `SecureSession`) and local database relations.
+*   **Safety Number Constraint:** Do NOT delete `IdentityPublicKeyHash` computation logic. It must be retained locally for Safety Number generation and UI verification. We are only scrubbing PKH from network transport, serialized DTOs, and routing queues.
+*   **Cryptographic Integrity:** `initiator_identity_key_spki` and `AcceptorIdentityKey` MUST remain intact in all handshake envelopes. The X3DH layer must continue to perform its DH math using the raw Curve25519/Ed25519 keys, while the outer routing and local DB lookups pivot to use the `PublicIdentityId` included in the same envelope. To complete the refactor, trust the `PublicIdentityId` (UUID) as the sole wire identifier across the protocol, main application, and simulator for routing.
+---
 ## Chunk 6
 ### Feature Implementation Request: Signal Protocol Chunk 6 (The Streaming Data Plane)
 You are to implement the high-velocity, real-time Data Plane for Group V2 messaging.
