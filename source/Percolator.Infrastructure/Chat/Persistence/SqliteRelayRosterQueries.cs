@@ -14,23 +14,34 @@ public sealed class SqliteRelayRosterQueries : IRelayRosterQueries
 
     public async Task<IReadOnlyList<ChatPeerId>> GetMemberPeerIdsAsync(ConversationId conversationId, CancellationToken cancellationToken)
     {
-        var peerIds = await _db.RelayBlindedRosters
+        // Get the PublicIdentityIds from the blinded roster
+        var publicIdentityIds = await _db.RelayBlindedRosters
             .AsNoTracking()
             .Where(e => e.ConversationId == conversationId.Value)
             .Select(e => e.MemberPublicIdentityId)
             .ToListAsync(cancellationToken);
 
-        // The DBO stores PublicIdentityId, but we need to return ChatPeerId
-        // This suggests a design mismatch - the DBO should likely store ChatPeerId instead
-        // For now, we'll need to query the actual ChatPeerId from the participants table
-        var conversation = await _db.Conversations
-            .AsNoTracking()
-            .Include(c => c.Participants)
-            .FirstOrDefaultAsync(c => c.Id == conversationId.Value, cancellationToken);
-
-        if (conversation == null)
+        if (publicIdentityIds.Count == 0)
             return new List<ChatPeerId>();
 
-        return conversation.Participants.Select(p => new ChatPeerId(p.ParticipantId)).ToList();
+        // Lookup PeerIds by PublicIdentityId
+        var peerIdentities = await _db.PeerIdentities
+            .AsNoTracking()
+            .Where(pi => publicIdentityIds.Contains(pi.PublicIdentityId))
+            .ToListAsync(cancellationToken);
+
+        if (peerIdentities.Count == 0)
+            return new List<ChatPeerId>();
+
+        var peerIds = peerIdentities.Select(pi => pi.PeerId).ToList();
+
+        // Lookup ChatPeerIds (ParticipantIds) by PeerIds for this conversation
+        var participantIds = await _db.ConversationParticipants
+            .AsNoTracking()
+            .Where(cp => cp.ConversationId == conversationId.Value && peerIds.Contains(cp.ParticipantId))
+            .Select(cp => cp.ParticipantId)
+            .ToListAsync(cancellationToken);
+
+        return participantIds.Select(pid => new ChatPeerId(pid)).ToList();
     }
 }
