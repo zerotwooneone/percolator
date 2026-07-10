@@ -35,7 +35,6 @@ namespace Percolator.Application.Network.Handshake
         private static readonly HashSet<InternalEnvelope.ApplicationPayloadOneofCase> AllowedCases = new()
         {
             InternalEnvelope.ApplicationPayloadOneofCase.ChatEnvelope,
-            InternalEnvelope.ApplicationPayloadOneofCase.FileShareEnvelope,
             InternalEnvelope.ApplicationPayloadOneofCase.DhtEnvelope,
             InternalEnvelope.ApplicationPayloadOneofCase.PrekeyEnvelope,
             InternalEnvelope.ApplicationPayloadOneofCase.MessageQueueEnvelope,

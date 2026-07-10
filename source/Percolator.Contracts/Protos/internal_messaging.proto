@@ -16,7 +16,6 @@ message InternalEnvelope {
 
   oneof application_payload {
     ChatEnvelope chat_envelope = 1;
-    FileShareEnvelope file_share_envelope = 2;
     DhtEnvelope dht_envelope = 3;
     PrekeyEnvelope prekey_envelope = 4;
     SubmitPreKeyBundleResponse submit_pre_key_bundle_response = 5;
@@ -147,29 +146,6 @@ message GroupContent {
   string text_message = 1;
 }
 
-// === 2. File Sharing Application ===
-
-message FileShareEnvelope {
-  oneof message {
-    RequestManifest request_manifest = 1;
-    Manifest manifest = 2;
-  }
-}
-
-message RequestManifest {}
-
-message Manifest {
-  message ManifestEntry {
-    enum EntryType { FILE = 0; DIRECTORY = 1; }
-    EntryType type = 1;
-    string path = 2;
-    repeated bytes chunk_hashes = 3;
-  }
-  string manifest_id = 1;
-  repeated ManifestEntry entries = 2;
-  google.protobuf.Timestamp expires_utc = 3;
-  bytes signature = 4;
-}
 
 // === 3. DHT Peer Discovery Application ===
 
