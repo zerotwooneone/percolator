@@ -562,9 +562,8 @@ namespace Percolator.Application.Network.Handshake
                         profile.SetIdentityPublicKey(Percolator.Network.ValueObjects.IdentityPublicKey.FromBytes(remoteIdentitySpki));
                         await _routingProfiles.UpsertAsync(profile, cancellationToken).ConfigureAwait(false);
 
-                        // Upsert PKH record for target peer so relayed sends can look it up
-                        var pkh = IdentityPublicKeyHash.FromBytes(remotePkh);
-                        await _keyStore.ActivateIfChangedAsync(peerIdentity.Id, remoteIdentitySpki, pkh, _clock.UtcNow, cancellationToken).ConfigureAwait(false);
+                        // Upsert public key record for target peer so relayed sends can look it up
+                        await _keyStore.ActivateIfChangedAsync(peerIdentity.Id, remoteIdentitySpki, _clock.UtcNow, cancellationToken).ConfigureAwait(false);
 
                         // Phase 1: Write candidate route for relayed handshake
                         var candidate = new PeerRouteCandidate

@@ -303,12 +303,10 @@ public class PercolatorDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.PeerId).IsRequired();
             entity.Property(e => e.PublicKey).IsRequired();
-            entity.Property(e => e.PublicKeyHash).IsRequired();
             entity.Property(e => e.ActiveAtUtc).IsRequired();
             // ExpiredAtUtc nullable
 
             entity.HasIndex(e => e.PeerId);
-            entity.HasIndex(e => e.PublicKeyHash).IsUnique();
             entity.HasIndex(e => new { e.PeerId, e.ActiveAtUtc });
             entity.HasIndex(e => new { e.PeerId, e.ExpiredAtUtc });
         });

@@ -13,28 +13,27 @@ public class SqlitePeerPublicSigningKeyStore : IPeerPublicSigningKeyStore
         _db = db;
     }
 
-    public async Task ActivateIfChangedAsync(PeerId peerId, byte[] publicKeySpki, IdentityPublicKeyHash publicKeyHash, DateTimeOffset nowUtc, CancellationToken ct = default)
+    public async Task ActivateIfChangedAsync(PeerId peerId, byte[] publicKeySpki, DateTimeOffset nowUtc, CancellationToken ct = default)
     {
-        var publicKeyHashBytes = publicKeyHash.ToArray();
         await using var tx = await _db.Database.BeginTransactionAsync(ct);
         try
         {
-            // Check if any row exists with this hash (for any peer). If so, avoid inserting a duplicate.
-            var anyByHash = await _db.PeerPublicSigningKeys
-                .Where(x => x.PublicKeyHash.SequenceEqual(publicKeyHashBytes))
+            // Check if any row exists with this public key (for any peer). If so, avoid inserting a duplicate.
+            var anyByKey = await _db.PeerPublicSigningKeys
+                .Where(x => x.PublicKey.SequenceEqual(publicKeySpki))
                 .FirstOrDefaultAsync(ct);
-            if (anyByHash is not null)
+            if (anyByKey is not null)
             {
-                if (anyByHash.PeerId == peerId.Value)
+                if (anyByKey.PeerId == peerId.Value)
                 {
                     // Same peer: ensure it's active
-                    if (anyByHash.ExpiredAtUtc is null)
+                    if (anyByKey.ExpiredAtUtc is null)
                     {
                         await tx.CommitAsync(ct);
                         return;
                     }
                     await _db.PeerPublicSigningKeys
-                        .Where(x => x.Id == anyByHash.Id)
+                        .Where(x => x.Id == anyByKey.Id)
                         .ExecuteUpdateAsync(setters => setters
                             .SetProperty(x => x.ExpiredAtUtc, (DateTimeOffset?)null)
                             .SetProperty(x => x.ActiveAtUtc, nowUtc)
@@ -58,7 +57,7 @@ public class SqlitePeerPublicSigningKeyStore : IPeerPublicSigningKeyStore
                 .OrderByDescending(x => x.ActiveAtUtc)
                 .FirstOrDefault();
 
-            if (active is not null && active.PublicKeyHash.SequenceEqual(publicKeyHashBytes))
+            if (active is not null && active.PublicKey.SequenceEqual(publicKeySpki))
             {
                 // Idempotent: same key already active -> no-op
                 await tx.CommitAsync(ct);
@@ -77,7 +76,6 @@ public class SqlitePeerPublicSigningKeyStore : IPeerPublicSigningKeyStore
             {
                 PeerId = peerId.Value,
                 PublicKey = publicKeySpki,
-                PublicKeyHash = publicKeyHashBytes,
                 ActiveAtUtc = nowUtc,
                 ExpiredAtUtc = null
             };
@@ -90,15 +88,6 @@ public class SqlitePeerPublicSigningKeyStore : IPeerPublicSigningKeyStore
             await tx.RollbackAsync(ct);
             throw;
         }
-    }
-
-    public async Task<PeerId?> GetPeerIdByPublicKeyHashAsync(IdentityPublicKeyHash publicKeyHash, CancellationToken ct = default)
-    {
-        var publicKeyHashBytes = publicKeyHash.ToArray();
-        var row = await _db.PeerPublicSigningKeys
-            .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.PublicKeyHash.SequenceEqual(publicKeyHashBytes), ct);
-        return row is null ? null : new PeerId(row.PeerId);
     }
 
     public async Task<PeerId?> GetPeerIdByPublicIdentityIdAsync(PublicIdentityId publicIdentityId, CancellationToken ct = default)

@@ -41,10 +41,8 @@ namespace Percolator.Prekey.Handlers
             var remoteIdentitySigningKeyBytes = request.PublicSigningKey;
 
             var identityPeerId = new Percolator.Identity.PeerId(request.RemoteNetworkPeerId.Value);
-            
-            var publicKeyHash = IdentityPublicKeyHash.FromSpki(remoteIdentitySigningKeyBytes);
             var nowTimestamp = DateTimeOffset.UtcNow;
-            await _publicKeyStore.ActivateIfChangedAsync(identityPeerId, remoteIdentitySigningKeyBytes, publicKeyHash, nowTimestamp, cancellationToken);
+            await _publicKeyStore.ActivateIfChangedAsync(identityPeerId, remoteIdentitySigningKeyBytes, nowTimestamp, cancellationToken);
 
             var signedPreKeyId = request.SignedPreKeyId;
             var domainBundles = new List<Percolator.Cryptography.PreKeyBundle>();

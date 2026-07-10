@@ -14,9 +14,6 @@ public class PeerPublicSigningKeyDbo
     public byte[] PublicKey { get; set; } = null!; // SPKI bytes
 
     [Required]
-    public byte[] PublicKeyHash { get; set; } = null!; // SHA-256 over SPKI
-
-    [Required]
     public DateTimeOffset ActiveAtUtc { get; set; }
 
     public DateTimeOffset? ExpiredAtUtc { get; set; }
