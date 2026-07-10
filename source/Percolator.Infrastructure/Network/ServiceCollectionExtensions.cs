@@ -24,6 +24,9 @@ public static class ServiceCollectionExtensions
         // Relay transport client
         services.AddScoped<Percolator.Application.Chat.IRelayTransportClient, Percolator.Infrastructure.Network.Grpc.RelayTransportClient>();
 
+        // Relay group stream dispatcher
+        services.AddSingleton<IRelayGroupStreamDispatcher, GrpcRelayGroupStreamDispatcher>();
+
         return services;
     }
 }

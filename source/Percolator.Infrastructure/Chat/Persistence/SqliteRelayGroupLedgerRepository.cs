@@ -70,4 +70,11 @@ public sealed class SqliteRelayGroupLedgerRepository : IRelayGroupLedgerReposito
             throw;
         }
     }
+
+    public async Task<bool> IsMemberAsync(ConversationId conversationId, PublicIdentityId publicIdentityId, CancellationToken cancellationToken)
+    {
+        return await _db.RelayBlindedRosters
+            .AsNoTracking()
+            .AnyAsync(e => e.ConversationId == conversationId.Value && e.MemberPublicIdentityId == publicIdentityId.Value, cancellationToken);
+    }
 }

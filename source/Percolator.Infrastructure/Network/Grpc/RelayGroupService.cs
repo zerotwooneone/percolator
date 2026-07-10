@@ -11,13 +11,16 @@ public sealed class RelayGroupService : Percolator.Contracts.RelayGroupService.R
 {
     private readonly IRelayGroupOrchestrator _orchestrator;
     private readonly IRelayGroupLedgerRepository _ledgerRepository;
+    private readonly IRelayGroupStreamDispatcher _dispatcher;
 
     public RelayGroupService(
         IRelayGroupOrchestrator orchestrator,
-        IRelayGroupLedgerRepository ledgerRepository)
+        IRelayGroupLedgerRepository ledgerRepository,
+        IRelayGroupStreamDispatcher dispatcher)
     {
         _orchestrator = orchestrator;
         _ledgerRepository = ledgerRepository;
+        _dispatcher = dispatcher;
     }
 
     public override async Task<SubmitGroupMessageResponse> Publish(
@@ -47,6 +50,22 @@ public sealed class RelayGroupService : Percolator.Contracts.RelayGroupService.R
                 presentation,
                 ciphertext,
                 context.CancellationToken);
+
+            // Extract sender's PublicIdentityId from context (set by DeliveryCertificateAuthInterceptor)
+            var senderPublicIdentityIdStr = context.RequestHeaders.GetValue("x-percolator-sender-public-identity-id");
+            if (senderPublicIdentityIdStr is not null)
+            {
+                var senderPublicIdentityIdBytes = Convert.FromHexString(senderPublicIdentityIdStr);
+                var senderPublicIdentityId = new Guid(senderPublicIdentityIdBytes);
+                
+                // Fan out to all connected streams
+                await _dispatcher.DispatchAsync(
+                    conversationId.Value,
+                    request.Ciphertext.Memory,
+                    request.Epoch,
+                    senderPublicIdentityId,
+                    context.CancellationToken);
+            }
 
             return new SubmitGroupMessageResponse { Success = true };
         }
@@ -112,6 +131,68 @@ public sealed class RelayGroupService : Percolator.Contracts.RelayGroupService.R
         {
             // Generic Internal Server Error to prevent leaking sensitive domain details
             return new ProvisionGroupResponse { Success = false, Error = "Internal relay error." };
+        }
+    }
+
+    public override async Task StreamGroupMessages(
+        GroupStreamRequest request,
+        IServerStreamWriter<GroupStreamResponse> responseStream,
+        ServerCallContext context)
+    {
+        try
+        {
+            // Validate required fields
+            if (request.ConversationId is null)
+                throw new ArgumentException("conversation_id is required.");
+
+            var conversationId = new Guid(request.ConversationId.ToByteArray());
+
+            // Extract caller's PublicIdentityId from context (set by DeliveryCertificateAuthInterceptor)
+            var senderPublicIdentityIdStr = context.RequestHeaders.GetValue("x-percolator-sender-public-identity-id");
+            if (senderPublicIdentityIdStr is null)
+                throw new RpcException(new Status(StatusCode.Unauthenticated, "Missing sender PublicIdentityId header"));
+
+            var senderPublicIdentityIdBytes = Convert.FromHexString(senderPublicIdentityIdStr);
+            var senderPublicIdentityId = new Guid(senderPublicIdentityIdBytes);
+
+            // Authorization Gate: Verify caller is a member of the conversation
+            var isMember = await _ledgerRepository.IsMemberAsync(
+                new ConversationId(conversationId),
+                new Percolator.Chat.GroupLedger.PublicIdentityId(senderPublicIdentityId),
+                context.CancellationToken);
+
+            if (!isMember)
+                throw new RpcException(new Status(StatusCode.PermissionDenied, "Caller is not a member of this conversation"));
+
+            // Register stream and get channel reader
+            var channelReader = _dispatcher.RegisterStream(conversationId, senderPublicIdentityId);
+
+            try
+            {
+                // Pump messages from channel to gRPC stream
+                await foreach (var msg in channelReader.ReadAllAsync(context.CancellationToken))
+                {
+                    await responseStream.WriteAsync(msg, context.CancellationToken);
+                }
+            }
+            finally
+            {
+                // Unregister stream on exit or cancellation
+                _dispatcher.UnregisterStream(conversationId, senderPublicIdentityId);
+            }
+        }
+        catch (ArgumentException ex)
+        {
+            throw new RpcException(new Status(StatusCode.InvalidArgument, ex.Message));
+        }
+        catch (RpcException)
+        {
+            // Re-throw RPC exceptions as-is
+            throw;
+        }
+        catch (Exception)
+        {
+            throw new RpcException(new Status(StatusCode.Internal, "Internal relay error."));
         }
     }
 }

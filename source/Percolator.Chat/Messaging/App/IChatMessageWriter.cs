@@ -21,5 +21,11 @@ public interface IChatMessageWriter
         DateTimeOffset sentAt,
         CancellationToken cancellationToken);
 
-    
+    Task AddGroupMessageAsync(
+        ConversationId conversationId,
+        ParticipantId senderId,
+        string content,
+        PublicMessageId publicMessageId,
+        DateTimeOffset sentAt,
+        CancellationToken cancellationToken);
 }

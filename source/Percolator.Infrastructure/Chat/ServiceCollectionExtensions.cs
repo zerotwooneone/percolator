@@ -44,6 +44,9 @@ public static class ServiceCollectionExtensions
         // Register GroupInviteHandler
         services.AddScoped<Percolator.Application.Chat.IGroupInviteHandler, Percolator.Application.Chat.GroupInviteHandler>();
 
+        // Register Chunk 6 Relay Group Stream Worker
+        services.AddHostedService<RelayGroupStreamWorker>();
+
         return services;
     }
 }

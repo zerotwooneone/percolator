@@ -103,5 +103,48 @@ public sealed class SqliteChatMessageWriter : IChatMessageWriter
         }
     }
 
-    
+    public async Task AddGroupMessageAsync(
+        ConversationId conversationId,
+        ParticipantId senderId,
+        string content,
+        PublicMessageId publicMessageId,
+        DateTimeOffset sentAt,
+        CancellationToken cancellationToken)
+    {
+        // Idempotency check
+        var exists = await _db.Messages
+            .AsNoTracking()
+            .AnyAsync(m => m.ConversationId == conversationId.Value && m.PublicMessageId == publicMessageId.Value, cancellationToken);
+        if (exists)
+        {
+            return; // idempotent success
+        }
+
+        _db.Messages.Add(new MessageDbo
+        {
+            ConversationId = conversationId.Value,
+            PublicMessageId = publicMessageId.Value,
+            SenderPeerId = senderId is RemoteParticipantId remoteParticipantId ? remoteParticipantId.PeerId.Value : null,
+            SenderSelfId = senderId is LocalParticipantId localParticipantId ? localParticipantId.SelfId.Value : null,
+            Body = content,
+            SentAt = sentAt
+        });
+
+        try
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            // Handle race: unique constraint hit means idempotent duplicate
+            // Re-check and swallow if now present
+            var nowExists = await _db.Messages
+                .AsNoTracking()
+                .AnyAsync(m => m.ConversationId == conversationId.Value && m.PublicMessageId == publicMessageId.Value, cancellationToken);
+            if (!nowExists)
+            {
+                throw;
+            }
+        }
+    }
 }

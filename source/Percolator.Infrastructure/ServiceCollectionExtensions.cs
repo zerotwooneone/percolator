@@ -62,6 +62,7 @@ public static class ServiceCollectionExtensions
         // gRPC Server Services
         services.AddScoped<Percolator.Infrastructure.Network.Grpc.PercolatorMessageService>();
         services.AddSingleton<Percolator.Infrastructure.Network.Grpc.IdentityReadinessInterceptor>();
+        services.AddScoped<Percolator.Infrastructure.Network.Grpc.RelayGroupService>();
 
         // Peer Discovery Hosted Service (conditional on configuration)
         var discoveryEnabled = configuration.GetValue<bool>("PeerDiscovery:Enabled", true);

@@ -238,6 +238,7 @@ message RatchetHeader {
 service RelayGroupService {
     rpc Publish(SubmitGroupMessageRequest) returns (SubmitGroupMessageResponse);
     rpc ProvisionGroup(ProvisionGroupRequest) returns (ProvisionGroupResponse);
+    rpc StreamGroupMessages(GroupStreamRequest) returns (stream GroupStreamResponse);
 }
 
 message SubmitGroupMessageRequest {
@@ -265,4 +266,15 @@ message ProvisionGroupResponse {
     optional uint32 version = 100;
     optional bool success = 1;
     optional string error = 2;
+}
+
+message GroupStreamRequest {
+    optional bytes conversation_id = 1;
+}
+
+message GroupStreamResponse {
+    optional bytes conversation_id = 1;
+    optional bytes ciphertext = 2;
+    optional uint32 epoch = 3;
+    optional bytes sender_public_identity_id = 4;
 }

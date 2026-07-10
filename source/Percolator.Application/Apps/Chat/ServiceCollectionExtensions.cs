@@ -23,6 +23,9 @@ public static class ServiceCollectionExtensions
         // Register Certificate Orchestrator (Chunk 5.6)
         services.AddScoped<ICertificateOrchestrator, CertificateOrchestrator>();
 
+        // Register Group Stream Ingress Processor (Chunk 6)
+        services.AddScoped<IGroupStreamIngressProcessor, GroupStreamIngressProcessor>();
+
         return services;
     }
 }

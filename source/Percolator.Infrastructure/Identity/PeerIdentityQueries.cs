@@ -43,41 +43,24 @@ public sealed class PeerIdentityQueries : IPeerIdentityQueries
 
         return RatchetIdentityKey.FromBytesOwned(keyBytes);
     }
+    
 
-    public async Task<PeerId?> GetPeerIdByPkhAsync(IdentityPublicKeyHash pkh, CancellationToken ct)
+    public async Task<PeerId?> GetPeerIdByPublicIdentityIdAsync(PublicIdentityId publicIdentityId, CancellationToken ct)
     {
         using var db = _dbFactory.CreateDbContext();
         
-        var activeKeys = await db.PeerIdentityKeys
+        var peerId = await db.PeerIdentities
             .AsNoTracking()
-            .Where(x => x.NotBeforeUtc <= DateTimeOffset.UtcNow)
-            .Where(x => x.ExpiresAtUtc > DateTimeOffset.UtcNow)
-            .Where(x => x.RevokedAtUtc == null)
-            .Select(x => new { x.PeerId, x.Fingerprint })
-            .ToListAsync(ct);
+            .Where(x => x.PublicIdentityId == publicIdentityId.Value)
+            .Select(x => x.PeerId)
+            .FirstOrDefaultAsync(ct);
 
-        var match = activeKeys.FirstOrDefault(x => pkh.Span.SequenceEqual(x.Fingerprint));
-
-        if (match is null)
+        if (peerId == 0)
         {
             return null;
         }
 
-        return new PeerId(match.PeerId);
-    }
-
-    public async Task<Pkh?> GetPublicKeyHashAsync(PeerId peerId, CancellationToken cancellationToken)
-    {
-        using var db = _dbFactory.CreateDbContext();
-        var keyBytes = await db.PeerIdentityKeys
-            .AsNoTracking()
-            .Where(x => x.PeerId == peerId.Value)
-            .Where(x => x.NotBeforeUtc <= DateTimeOffset.UtcNow)
-            .Where(x => x.ExpiresAtUtc > DateTimeOffset.UtcNow)
-            .Where(x => x.RevokedAtUtc == null)
-            .Select(x => x.Fingerprint)
-            .FirstOrDefaultAsync(cancellationToken);
-        return keyBytes is null ? null : Pkh.FromBytesOwned(keyBytes);
+        return new PeerId(peerId);
     }
 
     public async Task<Percolator.Identity.PublicIdentityId?> GetPublicIdentityIdAsync(PeerId senderPeerId, CancellationToken cancellationToken)
