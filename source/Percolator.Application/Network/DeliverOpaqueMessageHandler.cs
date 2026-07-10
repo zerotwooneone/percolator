@@ -92,9 +92,9 @@ namespace Percolator.Application.Network
                     return new InternalEnvelope { SubmitPreKeyBundleResponse = new SubmitPreKeyBundleResponse { Version = 1 } };
                 case PrekeyEnvelope.MessageOneofCase.GetPreKeyBundleRequest:
                     var getReq = prekeyEnvelope.GetPreKeyBundleRequest;
-                    if (!getReq.HasPublicKeyHash) throw new InvalidOperationException("PublicKeyHash is required");
+                    if (!getReq.HasPublicIdentityId) throw new InvalidOperationException("PublicIdentityId is required");
                     var bundle = await _mediator.Send(new Percolator.Prekey.Handlers.GetPreKeyBundleQuery(
-                        IdentityPublicKeyHash.FromSpan(getReq.PublicKeyHash.Span)), ct).ConfigureAwait(false);
+                        new Percolator.Identity.PublicIdentityId(new Guid(getReq.PublicIdentityId.Span))), ct).ConfigureAwait(false);
                     var resp = new GetPreKeyBundleResponse { Version = 1 };
                     if (bundle is not null)
                     {

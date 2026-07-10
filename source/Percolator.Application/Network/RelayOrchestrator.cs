@@ -47,13 +47,13 @@ public class RelayOrchestrator
     /// </summary>
     public async Task<bool> RelayNextAsync(SelfId selfIdentityId, IdentityPeerId recipientPeerId, CancellationToken ct = default)
     {
-        var recipPkh = await _peerIdentityQueries.GetPublicKeyHashAsync(recipientPeerId, ct).ConfigureAwait(false);
-        if (recipPkh is null)
+        var publicIdentityId = await _peerIdentityQueries.GetPublicIdentityIdAsync(recipientPeerId, ct).ConfigureAwait(false);
+        if (publicIdentityId is null)
         {
             return false;
         }
         // Fetch one queued item (AckId, Blob)
-        var items = await _queue.FetchAsync(recipPkh, 1, ct).ConfigureAwait(false);
+        var items = await _queue.FetchAsync(publicIdentityId, 1, ct).ConfigureAwait(false);
         if (items.Count == 0)
         {
             return false;

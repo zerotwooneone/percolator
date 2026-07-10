@@ -203,7 +203,7 @@ namespace Percolator.ApplicationTests.Network;
         {
             EnqueueOpaqueMessageRequest = new EnqueueOpaqueMessageRequest
             {
-                RecipientPublicKeyHash = ByteString.CopyFrom(RandomBytes(32)),
+                RecipientPublicIdentityId = ByteString.CopyFrom(RandomBytes(16)),
                 MessageBlob = ByteString.CopyFrom(RandomBytes(24))
             }
         };
@@ -443,7 +443,7 @@ namespace Percolator.ApplicationTests.Network;
             .ReturnsAsync((InternalEnvelope?)null);
         // Relay orchestrator: queue empty so loop is a no-op in tests
         var mqRepo = new Mock<IMessageQueueRepository>(MockBehavior.Strict);
-        mqRepo.Setup(r => r.FetchAsync(It.IsAny<Pkh>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+        mqRepo.Setup(r => r.FetchAsync(It.IsAny<PublicIdentityId>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Array.Empty<(Guid, QueuedPayloadBytes)>());
         var transport = new Mock<IMessageTransportService>(MockBehavior.Strict);
         var relayLogger = Mock.Of<ILogger<RelayOrchestrator>>();

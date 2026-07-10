@@ -162,7 +162,7 @@ public sealed class ConnectViaNetworkCommandHandler : IRequestHandler<ConnectVia
                     GetPreKeyBundleRequest = new GetPreKeyBundleRequest
                     {
                         Version = 1,
-                        PublicKeyHash = ByteString.CopyFrom(targetIdentityPublicKeyHash)
+                        PublicIdentityId = ByteString.CopyFrom(targetIdentityPublicKeyHash)
                     }
                 }
             };
@@ -294,7 +294,7 @@ public sealed class ConnectViaNetworkCommandHandler : IRequestHandler<ConnectVia
                     new PreHandshakeRecord(
                         Id: 0,
                         SelfIdentityId: selfIdentityId,
-                        RecipientPublicKeyHash: targetIdentityPublicKeyHash,
+                        RecipientPublicIdentityId: new Percolator.Identity.PublicIdentityId(new Guid(targetIdentityPublicKeyHash)),
                         LocalRequestId: correlationId,
                         InitiatorEphemeralPrivateKey: Array.Empty<byte>(),
                         InitialRootKey: x3.SharedSecret.ToArray(),
@@ -356,7 +356,7 @@ public sealed class ConnectViaNetworkCommandHandler : IRequestHandler<ConnectVia
             var mqReq = new EnqueueOpaqueMessageRequest
             {
                 Version = 1,
-                RecipientPublicKeyHash = ByteString.CopyFrom(targetIdentityPublicKeyHash),
+                RecipientPublicIdentityId = ByteString.CopyFrom(targetIdentityPublicKeyHash),
                 MessageBlob = ByteString.CopyFrom(hello.ToByteArray())
             };
 

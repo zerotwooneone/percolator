@@ -1,12 +1,12 @@
-using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Cryptography;
+using Percolator.Identity;
 
 namespace Percolator.Application.Chat;
 
 public interface IPeerAuthenticationService
 {
     Task<bool> AuthenticateDeliveryCertificateRequestAsync(
-        Pkh senderPkh,
+        PublicIdentityId senderPublicIdentityId,
         DateTimeOffset requestTimestamp,
         Signature signature,
         CancellationToken ct);

@@ -61,6 +61,7 @@ public sealed class SqlitePendingSessionRepositoryTests
             isRelayed: false,
             relayHostPeerId: null,
             inviterIdentityKey: RatchetIdentityKey.FromBytes(inviterKeyBytes),
+            inviterPublicIdentityId: null,
             callbackEndpointHost: "example.com",
             callbackEndpointPort: 443,
             new TestClock(),

@@ -26,6 +26,7 @@ public sealed class PendingSessionMetadataTests
             isRelayed: true,
             relayHostPeerId: new PeerId(1),
             inviterIdentityKey: null,
+            inviterPublicIdentityId: null,
             callbackEndpointHost: "127.0.0.1",
             callbackEndpointPort: 1234,
             clock);
@@ -47,6 +48,7 @@ public sealed class PendingSessionMetadataTests
             isRelayed: false,
             relayHostPeerId: null,
             inviterIdentityKey: null,
+            inviterPublicIdentityId: null,
             callbackEndpointHost: "example.com",
             callbackEndpointPort: null,
             clock);
@@ -60,6 +62,7 @@ public sealed class PendingSessionMetadataTests
             isRelayed: false,
             relayHostPeerId: null,
             inviterIdentityKey: null,
+            inviterPublicIdentityId: null,
             callbackEndpointHost: null,
             callbackEndpointPort: 443,
             clock);

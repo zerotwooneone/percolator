@@ -35,14 +35,13 @@ public sealed class PeerAuthenticationServiceTests
     public async Task AuthenticateDeliveryCertificateRequest_ReturnsFalse_WhenTimestampIsExpired()
     {
         // Arrange
-        var senderPkhBytes = new byte[32];
-        var senderPkh = Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytes(senderPkhBytes);
+        var senderPublicIdentityId = new Percolator.Identity.PublicIdentityId(Guid.NewGuid());
         var expiredTimestamp = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero).AddMinutes(-70); // More than 60 seconds old
         var signature = Signature.FromBytes(new byte[64]);
 
         // Act
         var result = await _service.AuthenticateDeliveryCertificateRequestAsync(
-            senderPkh,
+            senderPublicIdentityId,
             expiredTimestamp,
             signature,
             CancellationToken.None);
@@ -55,19 +54,17 @@ public sealed class PeerAuthenticationServiceTests
     public async Task AuthenticateDeliveryCertificateRequest_ReturnsFalse_WhenPeerNotFound()
     {
         // Arrange
-        var senderPkhBytes = new byte[32];
-        var senderPkh = Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytes(senderPkhBytes);
-        var identityPublicKeyHash = IdentityPublicKeyHash.FromBytes(senderPkhBytes);
+        var senderPublicIdentityId = new Percolator.Identity.PublicIdentityId(Guid.NewGuid());
         var validTimestamp = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero).AddSeconds(-30); // Within 60 seconds
         var signature = Signature.FromBytes(new byte[64]);
 
         _peerIdentityQueriesMock
-            .Setup(x => x.GetPublicKeyByPkhAsync(identityPublicKeyHash, It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetPublicKeyByPublicIdentityIdAsync(senderPublicIdentityId, It.IsAny<CancellationToken>()))
             .ReturnsAsync((RatchetIdentityKey?)null);
 
         // Act
         var result = await _service.AuthenticateDeliveryCertificateRequestAsync(
-            senderPkh,
+            senderPublicIdentityId,
             validTimestamp,
             signature,
             CancellationToken.None);
@@ -80,9 +77,7 @@ public sealed class PeerAuthenticationServiceTests
     public async Task AuthenticateDeliveryCertificateRequest_ReturnsFalse_WhenSignatureVerificationFails()
     {
         // Arrange
-        var senderPkhBytes = new byte[32];
-        var senderPkh = Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytes(senderPkhBytes);
-        var identityPublicKeyHash = IdentityPublicKeyHash.FromBytes(senderPkhBytes);
+        var senderPublicIdentityId = new Percolator.Identity.PublicIdentityId(Guid.NewGuid());
         var validTimestamp = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero).AddSeconds(-30);
         
         // Generate a valid EC key pair
@@ -94,12 +89,12 @@ public sealed class PeerAuthenticationServiceTests
         var signature = Signature.FromBytes(new byte[64]);
 
         _peerIdentityQueriesMock
-            .Setup(x => x.GetPublicKeyByPkhAsync(identityPublicKeyHash, It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetPublicKeyByPublicIdentityIdAsync(senderPublicIdentityId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(publicKey);
 
         // Act
         var result = await _service.AuthenticateDeliveryCertificateRequestAsync(
-            senderPkh,
+            senderPublicIdentityId,
             validTimestamp,
             signature,
             CancellationToken.None);
@@ -112,9 +107,7 @@ public sealed class PeerAuthenticationServiceTests
     public async Task AuthenticateDeliveryCertificateRequest_ReturnsTrue_WhenAllInputsAreValid()
     {
         // Arrange
-        var senderPkhBytes = new byte[32];
-        var senderPkh = Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytes(senderPkhBytes);
-        var identityPublicKeyHash = IdentityPublicKeyHash.FromBytes(senderPkhBytes);
+        var senderPublicIdentityId = new Percolator.Identity.PublicIdentityId(Guid.NewGuid());
         var validTimestamp = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero).AddSeconds(-30); // Must be within 60 seconds
         
         // Generate a valid EC key pair
@@ -122,18 +115,18 @@ public sealed class PeerAuthenticationServiceTests
         var publicKeyBytes = ecdsa.ExportSubjectPublicKeyInfo();
         var publicKey = RatchetIdentityKey.FromBytes(publicKeyBytes);
         
-        // Sign the payload using the same format as the service: {senderPkh}{timestamp}
-        var payload = System.Text.Encoding.UTF8.GetBytes($"{senderPkh}{validTimestamp.ToUnixTimeSeconds()}");
+        // Sign the payload using the same format as the service: {senderPublicIdentityId}{timestamp}
+        var payload = System.Text.Encoding.UTF8.GetBytes($"{senderPublicIdentityId}{validTimestamp.ToUnixTimeSeconds()}");
         var rawSig = ecdsa.SignData(payload, HashAlgorithmName.SHA256);
         var signature = Signature.FromBytesOwned(rawSig);
 
         _peerIdentityQueriesMock
-            .Setup(x => x.GetPublicKeyByPkhAsync(identityPublicKeyHash, It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetPublicKeyByPublicIdentityIdAsync(senderPublicIdentityId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(publicKey);
 
         // Act
         var result = await _service.AuthenticateDeliveryCertificateRequestAsync(
-            senderPkh,
+            senderPublicIdentityId,
             validTimestamp,
             signature,
             CancellationToken.None);

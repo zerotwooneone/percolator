@@ -63,6 +63,7 @@ public class AggregateSkeletonTests
             isRelayed: false,
             relayHostPeerId: null,
             inviterIdentityKey: null,
+            inviterPublicIdentityId: null,
             callbackEndpointHost: null,
             callbackEndpointPort: null,
             clock,

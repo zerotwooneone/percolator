@@ -193,12 +193,11 @@ namespace Percolator.Application.Network.Handshake
 
                     if (response?.Response is not null && response.Response.HasResponsePayload && response.Response.ResponsePayload.Length > 0)
                     {
-                        var initiatorSpki = hello.InitiatorIdentityKeySpki.ToByteArray();
-                        var initiatorPkh = SHA256.HashData(initiatorSpki);
+                        var initiatorPublicIdentityId = new PublicIdentityId(new Guid(hello.InitiatorPublicIdentityId.Span));
                         await EnqueueResponseToRelayHostAsync(
                                 selfIdentityId,
                                 relayHostPeerId,
-                                initiatorPkh,
+                                initiatorPublicIdentityId,
                                 response.ToByteArray(),
                                 cancellationToken)
                             .ConfigureAwait(false);
@@ -283,12 +282,11 @@ namespace Percolator.Application.Network.Handshake
         private async Task EnqueueResponseToRelayHostAsync(
             SelfId selfIdentityId,
             Percolator.Identity.PeerId relayHostPeerId,
-            byte[] recipientPublicKeyHash,
+            PublicIdentityId recipientPublicIdentityId,
             byte[] messageBlob,
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (recipientPublicKeyHash is null) throw new ArgumentNullException(nameof(recipientPublicKeyHash));
             if (messageBlob is null) throw new ArgumentNullException(nameof(messageBlob));
 
             var directSessionId = await _directSessions.GetAsync(relayHostPeerId, selfIdentityId.Value, cancellationToken).ConfigureAwait(false);
@@ -301,7 +299,7 @@ namespace Percolator.Application.Network.Handshake
             var mqReq = new EnqueueOpaqueMessageRequest
             {
                 Version = 1,
-                RecipientPublicKeyHash = ByteString.CopyFrom(recipientPublicKeyHash),
+                RecipientPublicIdentityId = ByteString.CopyFrom(recipientPublicIdentityId.Value.ToByteArray()),
                 MessageBlob = ByteString.CopyFrom(messageBlob)
             };
 

@@ -21,7 +21,6 @@ using Percolator.Chat.Messaging.Events;
 using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Cryptography;
 using PeerId = Percolator.Identity.PeerId;
-using PublicIdentityId = Percolator.Chat.GroupLedger.PublicIdentityId;
 
 namespace Percolator.Application.Network;
 
@@ -177,9 +176,9 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                 case PrekeyEnvelope.MessageOneofCase.GetPreKeyBundleRequest:
                 {
                     var getReq = pre.GetPreKeyBundleRequest;
-                    if (!getReq.HasPublicKeyHash) throw new InvalidOperationException("PublicKeyHash is required");
+                    if (!getReq.HasPublicIdentityId) throw new InvalidOperationException("PublicIdentityId is required");
                     var bundle = await _mediator.Send(new GetPreKeyBundleQuery(
-                        IdentityPublicKeyHash.FromSpan(getReq.PublicKeyHash.Span)), cancellationToken).ConfigureAwait(false);
+                        new Percolator.Identity.PublicIdentityId(new Guid(getReq.PublicIdentityId.Span))), cancellationToken).ConfigureAwait(false);
                     var resp = new GetPreKeyBundleResponse { Version = 1 };
                     if (bundle is not null)
                     {
@@ -240,15 +239,15 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     if (text.MessageId == null || text.MessageId.Length != 16)
                         throw new InvalidOperationException("TextMessage.message_id must be 16 bytes (GUID).");
 
-                    byte[]? pkh = null;
-                    if (text.HasPublicKeyHash)
+                    byte[]? publicIdentityId = null;
+                    if (text.HasPublicIdentityId)
                     {
-                        if (text.PublicKeyHash.Length != 32)
-                            throw new InvalidOperationException("TextMessage.public_key_hash must be 32 bytes (SHA-256).");
-                        pkh = text.PublicKeyHash.ToByteArray();
+                        if (text.PublicIdentityId.Length != 16)
+                            throw new InvalidOperationException("TextMessage.public_identity_id must be 16 bytes (UUID).");
+                        publicIdentityId = text.PublicIdentityId.ToByteArray();
                     }
-                    ConversationLookupKey lookup = (pkh is not null && pkh.Length > 0)
-                        ? ConversationLookupKey.ForPublicKeyHash(Pkh.FromBytes(pkh))
+                    ConversationLookupKey lookup = (publicIdentityId is not null && publicIdentityId.Length > 0)
+                        ? ConversationLookupKey.ForPublicIdentityId(new Percolator.Chat.GroupLedger.PublicIdentityId(new Guid(publicIdentityId)))
                         : ConversationLookupKey.ForDirectSession(request.Context.SessionId ?? throw new InvalidOperationException("SessionId required when no routing hint provided."));
 
                     // Direct chat: Use RemotePeerGuid
@@ -263,7 +262,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     if(senderIdentity is null)
                         throw new InvalidOperationException("Sender identity not found for peer ID");
                     
-                    await _mediator.Send(new ReceiveTextMessageCommand(lookup, new RemoteParticipantId(new PublicIdentityId(senderIdentity.Value),senderId), messageId, text.Content, sentTs), cancellationToken).ConfigureAwait(false);
+                    await _mediator.Send(new ReceiveTextMessageCommand(lookup, new RemoteParticipantId(new Percolator.Chat.GroupLedger.PublicIdentityId(senderIdentity.Value),senderId), messageId, text.Content, sentTs), cancellationToken).ConfigureAwait(false);
                     return null;
                 }
                 case ChatEnvelope.MessageOneofCase.ReadReceipt:
@@ -272,15 +271,15 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     if (rr.MessageId == null || rr.MessageId.Length != 16)
                         throw new InvalidOperationException("ReadReceipt.message_id must be 16 bytes (GUID).");
 
-                    byte[]? pkh = null;
-                    if (rr.HasPublicKeyHash)
+                    byte[]? publicIdentityId = null;
+                    if (rr.HasPublicIdentityId)
                     {
-                        if (rr.PublicKeyHash.Length != 32)
-                            throw new InvalidOperationException("ReadReceipt.public_key_hash must be 32 bytes (SHA-256).");
-                        pkh = rr.PublicKeyHash.ToByteArray();
+                        if (rr.PublicIdentityId.Length != 16)
+                            throw new InvalidOperationException("ReadReceipt.public_identity_id must be 16 bytes (UUID).");
+                        publicIdentityId = rr.PublicIdentityId.ToByteArray();
                     }
-                    var lookup = (pkh is not null && pkh.Length > 0)
-                        ? ConversationLookupKey.ForPublicKeyHash(Pkh.FromBytes(pkh))
+                    var lookup = (publicIdentityId is not null && publicIdentityId.Length > 0)
+                        ? ConversationLookupKey.ForPublicIdentityId(new Percolator.Chat.GroupLedger.PublicIdentityId(new Guid(publicIdentityId)))
                         : ConversationLookupKey.ForDirectSession(request.Context.SessionId ?? throw new InvalidOperationException("SessionId required when no routing hint provided."));
 
                     // Direct chat: Use RemotePeerGuid
@@ -301,15 +300,15 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     if (string.IsNullOrWhiteSpace(em.Emoji))
                         throw new InvalidOperationException("EmojiAnnotation.emoji is required.");
 
-                    byte[]? pkh = null;
-                    if (em.HasPublicKeyHash)
+                    byte[]? publicIdentityId = null;
+                    if (em.HasPublicIdentityId)
                     {
-                        if (em.PublicKeyHash.Length != 32)
-                            throw new InvalidOperationException("EmojiAnnotation.public_key_hash must be 32 bytes (SHA-256).");
-                        pkh = em.PublicKeyHash.ToByteArray();
+                        if (em.PublicIdentityId.Length != 16)
+                            throw new InvalidOperationException("EmojiAnnotation.public_identity_id must be 16 bytes (UUID).");
+                        publicIdentityId = em.PublicIdentityId.ToByteArray();
                     }
-                    var lookup = (pkh is not null && pkh.Length > 0)
-                        ? ConversationLookupKey.ForPublicKeyHash(Pkh.FromBytes(pkh))
+                    var lookup = (publicIdentityId is not null && publicIdentityId.Length > 0)
+                        ? ConversationLookupKey.ForPublicIdentityId(new Percolator.Chat.GroupLedger.PublicIdentityId(new Guid(publicIdentityId)))
                         : ConversationLookupKey.ForDirectSession(request.Context.SessionId ?? throw new InvalidOperationException("SessionId required when no routing hint provided."));
 
                     // Direct chat: Use RemotePeerGuid
@@ -328,15 +327,15 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     if (dr.MessageId == null || dr.MessageId.Length != 16)
                         throw new InvalidOperationException("DeliveredReceipt.message_id must be 16 bytes (GUID).");
 
-                    byte[]? pkh = null;
-                    if (dr.HasPublicKeyHash)
+                    byte[]? publicIdentityId = null;
+                    if (dr.HasPublicIdentityId)
                     {
-                        if (dr.PublicKeyHash.Length != 32)
-                            throw new InvalidOperationException("DeliveredReceipt.public_key_hash must be 32 bytes (SHA-256).");
-                        pkh = dr.PublicKeyHash.ToByteArray();
+                        if (dr.PublicIdentityId.Length != 16)
+                            throw new InvalidOperationException("DeliveredReceipt.public_identity_id must be 16 bytes (UUID).");
+                        publicIdentityId = dr.PublicIdentityId.ToByteArray();
                     }
-                    var lookup = (pkh is not null && pkh.Length > 0)
-                        ? ConversationLookupKey.ForPublicKeyHash(Pkh.FromBytes(pkh))
+                    var lookup = (publicIdentityId is not null && publicIdentityId.Length > 0)
+                        ? ConversationLookupKey.ForPublicIdentityId(new Percolator.Chat.GroupLedger.PublicIdentityId(new Guid(publicIdentityId)))
                         : ConversationLookupKey.ForDirectSession(request.Context.SessionId ?? throw new InvalidOperationException("SessionId required when no routing hint provided."));
 
                     // Direct chat: Use RemotePeerGuid
@@ -460,7 +459,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                             throw new InvalidOperationException("Sender identity not found for peer ID");
                         await _messageWriter.AddTextMessageAsync(
                             new ConversationId(conversationId),
-                            new RemoteParticipantId(new PublicIdentityId(senderIdentity.Value), senderId),
+                            new RemoteParticipantId(new Percolator.Chat.GroupLedger.PublicIdentityId(senderIdentity.Value), senderId),
                             groupContent.TextMessage,
                             messageId,
                             sentTimestamp,
@@ -505,8 +504,9 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                 case MessageQueueEnvelope.MessageOneofCase.EnqueueOpaqueMessageRequest:
                 {
                     var req = mq.EnqueueOpaqueMessageRequest;
+                    var publicIdentityId = new Percolator.Identity.PublicIdentityId(new Guid(req.RecipientPublicIdentityId.Span));
                     var enqueueResult = await _mqService.EnqueueOpaqueAsync(
-                        req.RecipientPublicKeyHash.ToByteArray(),
+                        publicIdentityId,
                         req.MessageBlob.ToByteArray(),
                         cancellationToken).ConfigureAwait(false);
 

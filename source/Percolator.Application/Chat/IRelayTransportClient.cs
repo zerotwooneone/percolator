@@ -8,7 +8,7 @@ public interface IRelayTransportClient
     Task<DeliveryCertificate> FetchCertificateAsync(
         string targetHost,
         int targetPort,
-        string senderPkh,
+        string senderPublicIdentityId,
         DateTimeOffset timestamp,
         Signature signature,
         CancellationToken ct);

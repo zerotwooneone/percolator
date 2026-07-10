@@ -36,7 +36,7 @@ namespace Percolator.Infrastructure.Network.Handshake
             return new PreHandshakeRecord(
                 Id: x.Id,
                 SelfIdentityId: x.SelfIdentityId,
-                RecipientPublicKeyHash: x.RecipientPublicKeyHash ?? Array.Empty<byte>(),
+                RecipientPublicIdentityId: new PublicIdentityId(new Guid(x.RecipientPublicKeyHash)),
                 LocalRequestId: x.LocalRequestId,
                 InitiatorEphemeralPrivateKey: Array.Empty<byte>(),
                 InitialRootKey: x.InitialRootKey,
@@ -58,7 +58,7 @@ namespace Percolator.Infrastructure.Network.Handshake
             var dbo = new PreHandshakeSessionDbo
             {
                 SelfIdentityId = record.SelfIdentityId,
-                RecipientPublicKeyHash = record.RecipientPublicKeyHash,
+                RecipientPublicKeyHash = record.RecipientPublicIdentityId.Value.ToByteArray(),
                 LocalRequestId = record.LocalRequestId,
                 InitialRootKey = record.InitialRootKey,
                 CreatedAtUtc = record.CreatedAtUtc,
@@ -95,7 +95,7 @@ namespace Percolator.Infrastructure.Network.Handshake
                 yield return new PreHandshakeRecord(
                     Id: x.Id,
                     SelfIdentityId: x.SelfIdentityId,
-                    RecipientPublicKeyHash: x.RecipientPublicKeyHash ?? Array.Empty<byte>(),
+                    RecipientPublicIdentityId: new PublicIdentityId(new Guid(x.RecipientPublicKeyHash)),
                     LocalRequestId: x.LocalRequestId,
                     // Initiator ephemeral private key is no longer persisted
                     InitiatorEphemeralPrivateKey: Array.Empty<byte>(),

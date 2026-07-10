@@ -54,6 +54,7 @@ public sealed class ApprovePendingSessionCommandTests
             isRelayed: false,
             relayHostPeerId: null,
             inviterIdentityKey: RatchetIdentityKey.FromBytes(inviterIdentitySpki),
+            inviterPublicIdentityId: null,
             callbackEndpointHost: "example.com",
             callbackEndpointPort: 7777,
             clock,

@@ -16,7 +16,7 @@ public sealed class PeerIdentityQueries : IPeerIdentityQueries
         _dbFactory = dbFactory;
     }
 
-    public async Task<RatchetIdentityKey?> GetPublicKeyByPkhAsync(IdentityPublicKeyHash senderPkh, CancellationToken ct)
+   public async Task<RatchetIdentityKey?> GetPublicKeyByPublicIdentityIdAsync(PublicIdentityId publicIdentityId, CancellationToken ct)
     {
         using var db = _dbFactory.CreateDbContext();
         
@@ -27,13 +27,14 @@ public sealed class PeerIdentityQueries : IPeerIdentityQueries
                 peer => peer.PeerId,
                 key => key.PeerId,
                 (peer, key) => new { peer, key })
+            .Where(x => x.peer.PublicIdentityId == publicIdentityId.Value)
             .Where(x => x.key.NotBeforeUtc <= DateTimeOffset.UtcNow)
             .Where(x => x.key.ExpiresAtUtc > DateTimeOffset.UtcNow)
             .Where(x => x.key.RevokedAtUtc == null)
             .Select(x => x.key.PublicKeySpki)
             .ToListAsync(ct);
 
-        var keyBytes = candidateKeys.FirstOrDefault(x => senderPkh.Span.SequenceEqual(x));
+        var keyBytes = candidateKeys.FirstOrDefault();
 
         if (keyBytes is null)
         {

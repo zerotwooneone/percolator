@@ -29,7 +29,7 @@ namespace Percolator.InfrastructureTests.Network
             var rec = new PreHandshakeRecord(
                 Id: 0,
                 SelfIdentityId: 42,
-                RecipientPublicKeyHash: new byte[] { 0x01, 0x02 },
+                RecipientPublicIdentityId: new Percolator.Identity.PublicIdentityId(Guid.NewGuid()),
                 LocalRequestId: Guid.NewGuid(),
                 InitiatorEphemeralPrivateKey: new byte[] { 0xAA },
                 InitialRootKey: new byte[] { 0x10, 0x20 },
@@ -48,7 +48,7 @@ namespace Percolator.InfrastructureTests.Network
             Assert.That(results.Count, Is.EqualTo(1));
             var first = results[0];
             Assert.That(first.SelfIdentityId, Is.EqualTo(42));
-            Assert.That(first.RecipientPublicKeyHash, Is.EqualTo(rec.RecipientPublicKeyHash));
+            Assert.That(first.RecipientPublicIdentityId, Is.EqualTo(rec.RecipientPublicIdentityId));
         }
 
         [Test]
@@ -58,8 +58,8 @@ namespace Percolator.InfrastructureTests.Network
             var store = new PreHandshakeSessionStore(db);
 
             var now = DateTimeOffset.UtcNow;
-            var active = new PreHandshakeRecord(0, 7, new byte[] { 0x10 }, Guid.NewGuid(), new byte[] { 0x20 }, new byte[] { 0x30 }, now, now.AddMinutes(5), new byte[]{0xA1});
-            var expired = new PreHandshakeRecord(0, 7, new byte[] { 0x11 }, Guid.NewGuid(), new byte[] { 0x21 }, new byte[] { 0x31 }, now.AddMinutes(-10), now.AddMinutes(-1), new byte[]{0xB1});
+            var active = new PreHandshakeRecord(0, 7, new Percolator.Identity.PublicIdentityId(Guid.NewGuid()), Guid.NewGuid(), new byte[] { 0x20 }, new byte[] { 0x30 }, now, now.AddMinutes(5), new byte[]{0xA1});
+            var expired = new PreHandshakeRecord(0, 7, new Percolator.Identity.PublicIdentityId(Guid.NewGuid()), Guid.NewGuid(), new byte[] { 0x21 }, new byte[] { 0x31 }, now.AddMinutes(-10), now.AddMinutes(-1), new byte[]{0xB1});
 
             await store.SaveAsync(active, CancellationToken.None);
             await store.SaveAsync(expired, CancellationToken.None);

@@ -121,6 +121,7 @@ namespace Percolator.Infrastructure.Cryptography
                 isRelayed: row.IsRelayed,
                 relayHostPeerId: row.RelayHostPeerId.HasValue ? new PeerId(row.RelayHostPeerId.Value) : null,
                 inviterIdentityKey: inviterKey,
+                inviterPublicIdentityId: row.InviterPublicIdentityId.HasValue ? new CryptoPublicIdentityId(row.InviterPublicIdentityId.Value) : null,
                 callbackEndpointHost: row.CallbackEndpointHost,
                 callbackEndpointPort: row.CallbackEndpointPort,
                 _clock,

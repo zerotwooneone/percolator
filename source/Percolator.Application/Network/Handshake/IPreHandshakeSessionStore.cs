@@ -1,3 +1,4 @@
+using Percolator.Identity;
 using Percolator.Network;
 
 namespace Percolator.Application.Network.Handshake
@@ -30,7 +31,7 @@ namespace Percolator.Application.Network.Handshake
     public sealed record PreHandshakeRecord(
         long Id,
         uint SelfIdentityId,
-        byte[] RecipientPublicKeyHash,
+        PublicIdentityId RecipientPublicIdentityId,
         Guid LocalRequestId,
         byte[] InitiatorEphemeralPrivateKey,
         byte[] InitialRootKey,

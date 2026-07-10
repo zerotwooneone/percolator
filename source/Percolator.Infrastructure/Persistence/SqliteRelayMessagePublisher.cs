@@ -39,27 +39,26 @@ public sealed class SqliteRelayMessagePublisher : IRelayMessagePublisher
             dbo.Version++;
 
             // 3. Fan-out: Map ChatPeerId (Domain) to MessageQueueItemDbo (Infrastructure)
-            // Note: RecipientPkh is the routing ID. Look up the actual PKH from PeerPublicSigningKeys.
+            // Note: RecipientPublicIdentityId is the routing ID. Look up the actual PublicIdentityId from PeerIdentityDbo.
             var queueItems = new List<MessageQueueItemDbo>();
             foreach (var peerId in recipients)
             {
-                // Look up the active signing key for this peer to get the actual PKH
-                var signingKey = await _db.PeerPublicSigningKeys
+                // Look up the peer identity to get the PublicIdentityId
+                var peerIdentity = await _db.PeerIdentities
                     .AsNoTracking()
-                    .Where(k => k.PeerId == peerId.Value && k.ExpiredAtUtc == null)
-                    .OrderByDescending(k => k.ActiveAtUtc)
+                    .Where(p => p.PeerId == peerId.Value)
                     .FirstOrDefaultAsync(cancellationToken);
                 
-                if (signingKey == null)
+                if (peerIdentity == null)
                 {
-                    throw new InvalidOperationException($"No active signing key found for peer {peerId.Value}. Cannot determine PKH for message routing.");
+                    throw new InvalidOperationException($"No peer identity found for peer {peerId.Value}. Cannot determine PublicIdentityId for message routing.");
                 }
 
                 queueItems.Add(new MessageQueueItemDbo
                 {
                     Id = Guid.NewGuid(),
                     AckId = Guid.NewGuid(),
-                    RecipientPkh = Pkh.FromBytesOwned(signingKey.PublicKeyHash),
+                    RecipientPublicIdentityId = peerIdentity.PublicIdentityId,
                     Blob = payload.ToArray(),
                     EnqueuedAtUtc = DateTimeOffset.UtcNow
                 });

@@ -23,19 +23,8 @@ public class MessageQueueService : IMessageQueueService
         _repository = repository;
     }
 
-    public async Task<EnqueueOpaqueMessageResult> EnqueueOpaqueAsync(byte[] recipientPublicKeyHash, byte[] messageBlob, CancellationToken cancellationToken = default)
+    public async Task<EnqueueOpaqueMessageResult> EnqueueOpaqueAsync(PublicIdentityId recipientPublicIdentityId, byte[] messageBlob, CancellationToken cancellationToken = default)
     {
-        if (recipientPublicKeyHash is null || recipientPublicKeyHash.Length == 0)
-        {
-            return new EnqueueOpaqueMessageResult(false, "recipient_public_key_hash is required");
-        }
-
-        // Expect SHA-256 => 32 bytes. Be tolerant but log if size deviates.
-        if (recipientPublicKeyHash.Length != 32)
-        {
-            _logger.LogWarning("Unexpected PKH length: {Length}. Expected 32.", recipientPublicKeyHash.Length);
-        }
-
         if (messageBlob is null || messageBlob.Length == 0)
         {
             return new EnqueueOpaqueMessageResult(false, "message_blob is required");
@@ -48,7 +37,7 @@ public class MessageQueueService : IMessageQueueService
 
         var queuedPayload = QueuedPayloadBytes.FromBytesOwned(messageBlob);
         (bool accepted, uint recipientCount, uint totalCount) = await _repository.TryEnqueueAsync(
-            Pkh.FromBytesOwned(recipientPublicKeyHash), 
+            recipientPublicIdentityId, 
             queuedPayload,
             cancellationToken).ConfigureAwait(false);
 

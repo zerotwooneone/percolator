@@ -43,6 +43,7 @@ public sealed class RejectPendingSessionCommandTests
             isRelayed: false,
             relayHostPeerId: null,
             inviterIdentityKey: null,
+            inviterPublicIdentityId: null,
             callbackEndpointHost: null,
             callbackEndpointPort: null,
             new TestClock());

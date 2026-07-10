@@ -1,8 +1,8 @@
 using Grpc.Core;
 using Grpc.Core.Interceptors;
 using Percolator.Application.Chat;
-using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Cryptography;
+using Percolator.Identity;
 
 namespace Percolator.Infrastructure.Network.Grpc;
 
@@ -21,10 +21,10 @@ public sealed class DeliveryCertificateAuthInterceptor : Interceptor
         UnaryServerMethod<TRequest, TResponse> continuation)
     {
         // Extract metadata headers
-        var senderPkh = context.RequestHeaders.GetValue("x-percolator-sender-pkh");
-        if (senderPkh is null)
+        var senderPublicIdentityId = context.RequestHeaders.GetValue("x-percolator-sender-public-identity-id");
+        if (senderPublicIdentityId is null)
         {
-            throw new RpcException(new Status(StatusCode.Unauthenticated, "Missing sender PKH header"));
+            throw new RpcException(new Status(StatusCode.Unauthenticated, "Missing sender PublicIdentityId header"));
         }
 
         var timestampStr = context.RequestHeaders.GetValue("x-percolator-timestamp");
@@ -48,13 +48,13 @@ public sealed class DeliveryCertificateAuthInterceptor : Interceptor
         var signatureBytes = Convert.FromBase64String(signatureStr);
         var signature = Signature.FromBytes(signatureBytes);
 
-        // Convert string PKH to Pkh type
-        var pkhBytes = Convert.FromHexString(senderPkh);
-        var senderPkhTyped = Pkh.FromBytes(pkhBytes);
+        // Convert string PublicIdentityId to PublicIdentityId type
+        var publicIdentityIdBytes = Convert.FromHexString(senderPublicIdentityId);
+        var senderPublicIdentityIdTyped = new PublicIdentityId(new Guid(publicIdentityIdBytes));
 
         // Call authentication service
         var isAuthenticated = await _peerAuthenticationService.AuthenticateDeliveryCertificateRequestAsync(
-            senderPkhTyped,
+            senderPublicIdentityIdTyped,
             requestTimestamp,
             signature,
             context.CancellationToken);

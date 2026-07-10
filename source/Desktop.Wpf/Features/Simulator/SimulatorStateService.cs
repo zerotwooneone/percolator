@@ -751,9 +751,9 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             && env.PrekeyEnvelope?.MessageCase == PrekeyEnvelope.MessageOneofCase.GetPreKeyBundleRequest)
         {
             var getReq = env.PrekeyEnvelope.GetPreKeyBundleRequest;
-            if (!getReq.HasPublicKeyHash || getReq.PublicKeyHash.Length == 0)
+            if (!getReq.HasPublicIdentityId || getReq.PublicIdentityId.Length == 0)
             {
-                throw new InvalidOperationException("GetPreKeyBundleRequest missing public_key_hash");
+                throw new InvalidOperationException("GetPreKeyBundleRequest missing public_identity_id");
             }
 
             SimulatedPublishedPreKeyBundleModel? popped;
@@ -761,7 +761,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             {
                 popped = await TryPopPreKeyBundleByRecipientPkhAsync(
                         simulatedNetworkPeerId,
-                        Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(getReq.PublicKeyHash.ToByteArray()),
+                        Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(getReq.PublicIdentityId.ToByteArray()),
                         cancellationToken)
                     .ConfigureAwait(false);
             }
@@ -831,14 +831,14 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             && env.MessageQueueEnvelope?.MessageCase == MessageQueueEnvelope.MessageOneofCase.EnqueueOpaqueMessageRequest)
         {
             var enqueue = env.MessageQueueEnvelope.EnqueueOpaqueMessageRequest;
-            if (!enqueue.HasRecipientPublicKeyHash || enqueue.RecipientPublicKeyHash.Length == 0)
-                throw new InvalidOperationException("EnqueueOpaqueMessageRequest missing recipient_public_key_hash");
+            if (!enqueue.HasRecipientPublicIdentityId || enqueue.RecipientPublicIdentityId.Length == 0)
+                throw new InvalidOperationException("EnqueueOpaqueMessageRequest missing recipient_public_identity_id");
             if (!enqueue.HasMessageBlob || enqueue.MessageBlob.Length == 0)
                 throw new InvalidOperationException("EnqueueOpaqueMessageRequest missing message_blob");
 
             await EnqueueRelayDownstreamToPeerAsync(
                 relayHostNetworkPeerId: simulatedNetworkPeerId,
-                targetIdentityPublicKeyHash: Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(enqueue.RecipientPublicKeyHash.ToByteArray()),
+                targetIdentityPublicKeyHash: Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(enqueue.RecipientPublicIdentityId.ToByteArray()),
                 opaqueBytes: enqueue.MessageBlob.ToByteArray(),
                 debugType: "Opaque",
                 cancellationToken: cancellationToken).ConfigureAwait(false);

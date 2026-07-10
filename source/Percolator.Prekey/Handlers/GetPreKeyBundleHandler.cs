@@ -24,10 +24,10 @@ namespace Percolator.Prekey.Handlers
 
         public async Task<PreKeyBundle?> Handle(GetPreKeyBundleQuery request, CancellationToken cancellationToken)
         {
-            var peerId = await _publicKeyStore.GetPeerIdByPublicKeyHashAsync(request.TargetPublicSigningKeyHash, cancellationToken);
+            var peerId = await _publicKeyStore.GetPeerIdByPublicIdentityIdAsync(request.TargetPublicIdentityId, cancellationToken);
             if (peerId is null)
             {
-                _logger.LogWarning("No peer found for provided public signing key hash.");
+                _logger.LogWarning("No peer found for provided PublicIdentityId.");
                 return null;
             }
 

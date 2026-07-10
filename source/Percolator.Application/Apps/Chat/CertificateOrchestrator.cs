@@ -78,10 +78,10 @@ public sealed class CertificateOrchestrator : ICertificateOrchestrator
             _logger.LogWarning("No active signing key found for local identity profile.");
             return;
         }
-        var localPkh = Convert.ToBase64String(activeKey.Fingerprint);
+        var localPublicIdentityId = selfIdentity.PublicIdentityId.Value.ToString("N");
 
         // Combine parameters into a uniform challenge buffer payload
-        var payload = System.Text.Encoding.UTF8.GetBytes($"{localPkh}{timestamp.ToUnixTimeSeconds()}");
+        var payload = System.Text.Encoding.UTF8.GetBytes($"{localPublicIdentityId}{timestamp.ToUnixTimeSeconds()}");
         var signature = await _localIdentitySigner.SignWithLocalIdentityKeyAsync(payload, ct).ConfigureAwait(false);
 
         // 3. Execute Transport Call
@@ -89,7 +89,7 @@ public sealed class CertificateOrchestrator : ICertificateOrchestrator
         var certificate = await _relayTransportClient.FetchCertificateAsync(
             targetHost,
             targetPort,
-            localPkh,
+            localPublicIdentityId,
             timestamp,
             signature,
             ct).ConfigureAwait(false);

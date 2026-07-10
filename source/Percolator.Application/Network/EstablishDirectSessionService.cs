@@ -224,6 +224,7 @@ namespace Percolator.Application.Network
                 isRelayed: isRelayed,
                 relayHostPeerId: relayHostPeerId is null ? null : new Percolator.Cryptography.Primitives.PeerId(relayHostPeerId.Value.Value),
                 inviterIdentityKey: inviterIdentityKey,
+                inviterPublicIdentityId: new Percolator.Cryptography.CryptoPublicIdentityId(identity.PublicIdentityId.Value),
                 callbackEndpointHost: callbackHost,
                 callbackEndpointPort: callbackPort,
                 _clock,

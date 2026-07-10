@@ -23,11 +23,11 @@ public class FetchQueuedMessagesHandler : IRequestHandler<FetchQueuedMessagesQue
 
     public async Task<FetchQueuedMessagesResult> Handle(FetchQueuedMessagesQuery request, CancellationToken cancellationToken)
     {
-        var pkh = await _peerIdentityQueries.GetPublicKeyHashAsync(request.RecipientPeerId, cancellationToken).ConfigureAwait(false);
-        if(pkh is null)
-            throw new InvalidOperationException($"Public identity key not found for peer {request.RecipientPeerId}");
+        var publicIdentityId = await _peerIdentityQueries.GetPublicIdentityIdAsync(request.RecipientPeerId, cancellationToken).ConfigureAwait(false);
+        if(publicIdentityId is null)
+            throw new InvalidOperationException($"Public identity not found for peer {request.RecipientPeerId}");
         var max = request.MaxCount <= 0 ? 100 : Math.Min(request.MaxCount, 500);
-        var items = await _repository.FetchAsync(pkh, max, cancellationToken).ConfigureAwait(false);
+        var items = await _repository.FetchAsync(publicIdentityId, max, cancellationToken).ConfigureAwait(false);
         var blobs = items.Select(x => x.Blob.ToArray()).ToList();
         return new FetchQueuedMessagesResult(blobs);
     }

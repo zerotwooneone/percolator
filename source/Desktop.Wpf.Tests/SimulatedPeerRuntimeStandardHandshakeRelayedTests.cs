@@ -566,7 +566,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         using var relayIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         using var relayIdentityEcdsa = ECDsa.Create(relayIdentityEcdh.ExportParameters(true));
         
-        var requestedPkh = SHA256.HashData(Guid.NewGuid().ToByteArray());
+        var requestedPublicIdentityId = Guid.NewGuid().ToByteArray();
 
         var clock = new StaticClock(StaticClock.DefaultNow);
         var sessionId = SessionId.NewId();
@@ -616,7 +616,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
                 GetPreKeyBundleRequest = new GetPreKeyBundleRequest
                 {
                     Version = 1,
-                    PublicKeyHash = ByteString.CopyFrom(requestedPkh)
+                    PublicIdentityId = ByteString.CopyFrom(requestedPublicIdentityId)
                 }
             }
         };

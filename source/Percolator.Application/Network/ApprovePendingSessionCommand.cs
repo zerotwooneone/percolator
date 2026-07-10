@@ -326,11 +326,11 @@ namespace Percolator.Application.Network
                 throw new InvalidOperationException("No relay host session available");
             }
 
-            var inviterPkh = SHA256.HashData(inviterIdentityKeySpki);
+            var inviterPublicIdentityId = new PublicIdentityId(pending.InviterPublicIdentityId!.Value);
             var mqReq = new EnqueueOpaqueMessageRequest
             {
                 Version = 1,
-                RecipientPublicKeyHash = ByteString.CopyFrom(inviterPkh),
+                RecipientPublicIdentityId = ByteString.CopyFrom(inviterPublicIdentityId.Value.ToByteArray()),
                 MessageBlob = ByteString.CopyFrom(response.ToByteArray())
             };
 

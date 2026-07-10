@@ -1,5 +1,6 @@
 using Moq;
 using Percolator.Application.Network.Handshake;
+using Percolator.Identity;
 using Percolator.Network;
 
 namespace Percolator.ApplicationTests.TestHelpers
@@ -42,7 +43,7 @@ namespace Percolator.ApplicationTests.TestHelpers
             return new PreHandshakeRecord(
                 Id: _id,
                 SelfIdentityId: _selfId,
-                RecipientPublicKeyHash: _pkh,
+                RecipientPublicIdentityId: new PublicIdentityId(Guid.NewGuid()),
                 LocalRequestId: _req,
                 InitiatorEphemeralPrivateKey: _epriv,
                 InitialRootKey: _irk,

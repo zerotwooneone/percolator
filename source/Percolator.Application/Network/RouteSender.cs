@@ -1,5 +1,6 @@
 using Google.Protobuf;
 using Microsoft.Extensions.Logging;
+using Percolator.Application.Chat;
 using Percolator.Application.Identity;
 using Percolator.Application.Network.Messaging;
 using Percolator.Application.Services;
@@ -19,7 +20,7 @@ public sealed class RouteSender : IRouteSender
     private readonly IDirectSessionRepository _sessions;
     private readonly ISecureMessagingService _secureMessaging;
     private readonly ActiveIdentityContext _active;
-    private readonly IPeerPublicSigningKeyStore _keyStore;
+    private readonly IPeerIdentityQueries _peerIdentityQueries;
 
     public RouteSender(
         ILogger<RouteSender> logger,
@@ -27,14 +28,14 @@ public sealed class RouteSender : IRouteSender
         IDirectSessionRepository sessions,
         ISecureMessagingService secureMessaging,
         ActiveIdentityContext active,
-        IPeerPublicSigningKeyStore keyStore)
+        IPeerIdentityQueries peerIdentityQueries)
     {
         _logger = logger;
         _transport = transport;
         _sessions = sessions;
         _secureMessaging = secureMessaging;
         _active = active;
-        _keyStore = keyStore;
+        _peerIdentityQueries = peerIdentityQueries;
     }
 
     public async Task<TransportSendResult> SendDirectAsync(Percolator.Network.NetworkPeerId target, NetworkPayload payload, CancellationToken ct = default)
@@ -75,15 +76,15 @@ public sealed class RouteSender : IRouteSender
             var relaySession = await _sessions.GetByRemotePeerIdAsync(relay, new NetworkSelfId(_active.Identity.SelfIdentityId.Value)).ConfigureAwait(false);
             if (relaySession is null) return new TransportSendResult(false, null, SendFailureReason.NoRelaySession, null, null);
 
-            // We need recipient PKH to enqueue
+            // We need recipient PublicIdentityId to enqueue
             var recipientIdentityPeerId = new Percolator.Identity.PeerId(target.Value);
-            var pkh = await _keyStore.GetPublicKeyHashByPeerIdAsync(recipientIdentityPeerId, ct).ConfigureAwait(false);
-            if (pkh is null) return new TransportSendResult(false, null, SendFailureReason.NoPeerConnection, null, null);
+            var publicIdentityId = await _peerIdentityQueries.GetPublicIdentityIdAsync(recipientIdentityPeerId, ct).ConfigureAwait(false);
+            if (publicIdentityId is null) return new TransportSendResult(false, null, SendFailureReason.NoPeerConnection, null, null);
 
             var mqReq = new EnqueueOpaqueMessageRequest
             {
                 Version = 1,
-                RecipientPublicKeyHash = Google.Protobuf.ByteString.CopyFrom(pkh.ToArray()),
+                RecipientPublicIdentityId = Google.Protobuf.ByteString.CopyFrom(publicIdentityId.Value.ToByteArray()),
                 MessageBlob = Google.Protobuf.ByteString.CopyFrom(payload.Value.ToArray())
             };
             var toRelay = new InternalEnvelope

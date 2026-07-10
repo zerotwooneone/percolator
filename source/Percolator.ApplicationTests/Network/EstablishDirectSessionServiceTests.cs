@@ -225,6 +225,7 @@ namespace Percolator.ApplicationTests.Network
                     isRelayed: false,
                     relayHostPeerId: null,
                     inviterIdentityKey: RatchetIdentityKey.FromBytes(inviterSpki),
+                    inviterPublicIdentityId: null,
                     callbackEndpointHost: null,
                     callbackEndpointPort: null,
                     clock: clock,

@@ -35,9 +35,7 @@ public sealed class SealedSenderAuthenticationRoundTripTests
     public async Task SealedSenderAuthenticationRoundTrip_ClientSignedRequest_ValidatedByPeerAuthenticationService()
     {
         // Arrange
-        var senderPkhBytes = new byte[32];
-        var senderPkh = Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytes(senderPkhBytes);
-        var identityPublicKeyHash = IdentityPublicKeyHash.FromBytes(senderPkhBytes);
+        var senderPublicIdentityId = new Percolator.Identity.PublicIdentityId(Guid.NewGuid());
         var validTimestamp = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero).AddSeconds(-30); // Must be within 60 seconds
         
         // Generate a valid EC key pair to simulate the peer's public key
@@ -45,18 +43,18 @@ public sealed class SealedSenderAuthenticationRoundTripTests
         var publicKeyBytes = ecdsa.ExportSubjectPublicKeyInfo();
         var publicKey = RatchetIdentityKey.FromBytes(publicKeyBytes);
         
-        // Sign the payload using the same format as the service: {senderPkh}{timestamp}
-        var payload = System.Text.Encoding.UTF8.GetBytes($"{senderPkh}{validTimestamp.ToUnixTimeSeconds()}");
+        // Sign the payload using the same format as the service: {senderPublicIdentityId}{timestamp}
+        var payload = System.Text.Encoding.UTF8.GetBytes($"{senderPublicIdentityId}{validTimestamp.ToUnixTimeSeconds()}");
         var rawSig = ecdsa.SignData(payload, HashAlgorithmName.SHA256);
         var signature = Signature.FromBytesOwned(rawSig);
 
         _peerIdentityQueriesMock
-            .Setup(x => x.GetPublicKeyByPkhAsync(identityPublicKeyHash, It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetPublicKeyByPublicIdentityIdAsync(senderPublicIdentityId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(publicKey);
 
         // Act
         var result = await _service.AuthenticateDeliveryCertificateRequestAsync(
-            senderPkh,
+            senderPublicIdentityId,
             validTimestamp,
             signature,
             CancellationToken.None);

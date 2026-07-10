@@ -25,25 +25,17 @@ public class MessageQueueServiceTests
     }
 
     [Test]
-    public async Task Returns_error_when_recipient_pkh_is_null()
+    public async Task Returns_error_when_recipient_public_identity_id_is_null()
     {
         var result = await _sut.EnqueueOpaqueAsync(null!, new byte[] { 0x01 }, CancellationToken.None);
         result.Accepted.Should().BeFalse();
-        result.Error.Should().Be("recipient_public_key_hash is required");
-    }
-
-    [Test]
-    public async Task Returns_error_when_recipient_pkh_is_empty()
-    {
-        var result = await _sut.EnqueueOpaqueAsync(Array.Empty<byte>(), new byte[] { 0x01 }, CancellationToken.None);
-        result.Accepted.Should().BeFalse();
-        result.Error.Should().Be("recipient_public_key_hash is required");
+        result.Error.Should().Be("queue limits exceeded or rejected by policy");
     }
 
     [Test]
     public async Task Returns_error_when_message_blob_is_null()
     {
-        var result = await _sut.EnqueueOpaqueAsync(new byte[32], null!, CancellationToken.None);
+        var result = await _sut.EnqueueOpaqueAsync(new PublicIdentityId(Guid.NewGuid()), null!, CancellationToken.None);
         result.Accepted.Should().BeFalse();
         result.Error.Should().Be("message_blob is required");
     }
@@ -51,7 +43,7 @@ public class MessageQueueServiceTests
     [Test]
     public async Task Returns_error_when_message_blob_is_empty()
     {
-        var result = await _sut.EnqueueOpaqueAsync(new byte[32], Array.Empty<byte>(), CancellationToken.None);
+        var result = await _sut.EnqueueOpaqueAsync(new PublicIdentityId(Guid.NewGuid()), Array.Empty<byte>(), CancellationToken.None);
         result.Accepted.Should().BeFalse();
         result.Error.Should().Be("message_blob is required");
     }
@@ -60,7 +52,7 @@ public class MessageQueueServiceTests
     public async Task Returns_error_when_message_blob_exceeds_limit()
     {
         var tooBig = new byte[MessageQueueService.MaxBlobBytes + 1];
-        var result = await _sut.EnqueueOpaqueAsync(new byte[32], tooBig, CancellationToken.None);
+        var result = await _sut.EnqueueOpaqueAsync(new PublicIdentityId(Guid.NewGuid()), tooBig, CancellationToken.None);
         result.Accepted.Should().BeFalse();
         result.Error.Should().Be($"message_blob exceeds {MessageQueueService.MaxBlobBytes} bytes");
     }

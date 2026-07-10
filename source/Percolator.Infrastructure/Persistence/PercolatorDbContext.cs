@@ -595,16 +595,12 @@ public class PercolatorDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).ValueGeneratedOnAdd();
             entity.Property(e => e.AckId).IsRequired();
-            entity.Property(e => e.RecipientPkh)
-                .HasConversion(
-                    v => v.ToArray(),
-                    v => Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytesOwned(v))
-                .IsRequired();
+            entity.Property(e => e.RecipientPublicIdentityId).IsRequired();
             entity.Property(e => e.Blob).IsRequired();
             entity.Property(e => e.EnqueuedAtUtc).IsRequired();
             entity.HasIndex(e => e.EnqueuedAtUtc);
-            entity.HasIndex(e => e.RecipientPkh);
-            entity.HasIndex(e => new { e.RecipientPkh, e.EnqueuedAtUtc });
+            entity.HasIndex(e => e.RecipientPublicIdentityId);
+            entity.HasIndex(e => new { e.RecipientPublicIdentityId, e.EnqueuedAtUtc });
             entity.HasIndex(e => e.AckId).IsUnique();
         });
 

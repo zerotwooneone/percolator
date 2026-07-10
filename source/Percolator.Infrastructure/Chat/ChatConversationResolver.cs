@@ -106,26 +106,36 @@ public sealed class ChatConversationResolver : IDirectConversationResolver
             return new DirectConversationResolution(domain, new ChatSelfId(selfIdentityId));
         }
 
-        if (lookupKey.PublicKeyHash is not null)
+        if (lookupKey.PublicIdentityId is not null)
         {
-            // Enforce a single local identity context for PKH path
+            // Enforce a single local identity context for PublicIdentityId path
             var identities = await _db.SelfIdentities.AsNoTracking().ToListAsync(cancellationToken);
             if (identities.Count != 1)
             {
-                throw new InvalidOperationException("PKH resolution requires exactly one local self identity.");
+                throw new InvalidOperationException("PublicIdentityId resolution requires exactly one local self identity.");
             }
             var selfIdentity = identities[0];
 
-            // Resolve remote peer from PKH
-            var pkhBytes = lookupKey.PublicKeyHash.ToArray();
+            // Resolve remote peer from PublicIdentityId mapping via PeerIdentities
+            var targetGuid = lookupKey.PublicIdentityId.Value;
+            var peerIdentity = await _db.PeerIdentities
+                .AsNoTracking()
+                .Where(p => p.PublicIdentityId == targetGuid)
+                .FirstOrDefaultAsync(cancellationToken);
+            
+            if (peerIdentity is null)
+            {
+                throw new InvalidOperationException("No peer identity found for provided PublicIdentityId.");
+            }
+
             var remoteKey = await _db.PeerPublicSigningKeys
                 .AsNoTracking()
-                .Where(k => k.PublicKeyHash == pkhBytes && k.ExpiredAtUtc == null)
+                .Where(k => k.PeerId == peerIdentity.PeerId && k.ExpiredAtUtc == null)
                 .OrderByDescending(k => k.ActiveAtUtc)
                 .FirstOrDefaultAsync(cancellationToken);
             if (remoteKey is null)
             {
-                throw new InvalidOperationException("No active peer signing key found for provided PKH.");
+                throw new InvalidOperationException("No active peer signing key found for provided PublicIdentityId.");
             }
 
             // Find or create the conversation for this self identity by participant pair

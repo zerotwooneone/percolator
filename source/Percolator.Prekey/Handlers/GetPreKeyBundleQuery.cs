@@ -6,11 +6,11 @@ namespace Percolator.Prekey.Handlers
 {
     public sealed class GetPreKeyBundleQuery : IRequest<PreKeyBundle?>
     {
-        public IdentityPublicKeyHash TargetPublicSigningKeyHash { get; }
+        public PublicIdentityId TargetPublicIdentityId { get; }
 
-        public GetPreKeyBundleQuery(IdentityPublicKeyHash targetPublicSigningKeyHash)
+        public GetPreKeyBundleQuery(PublicIdentityId targetPublicIdentityId)
         {
-            TargetPublicSigningKeyHash = targetPublicSigningKeyHash;
+            TargetPublicIdentityId = targetPublicIdentityId;
         }
     }
 }

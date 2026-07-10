@@ -25,6 +25,8 @@ namespace Percolator.Infrastructure.Cryptography
 
         public byte[]? InviterIdentityKey { get; set; }
 
+        public Guid? InviterPublicIdentityId { get; set; }
+
         public string? CallbackEndpointHost { get; set; }
 
         public int? CallbackEndpointPort { get; set; }

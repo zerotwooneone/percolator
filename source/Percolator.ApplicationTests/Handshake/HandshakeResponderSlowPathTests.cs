@@ -30,7 +30,7 @@ namespace Percolator.ApplicationTests.Handshake
             var mostRecent = new PreHandshakeRecord(
                 Id: 41,
                 SelfIdentityId: selfId.Value,
-                RecipientPublicKeyHash: new byte[] { 0x41 },
+                RecipientPublicIdentityId: new Percolator.Identity.PublicIdentityId(Guid.NewGuid()),
                 LocalRequestId: Guid.NewGuid(),
                 InitiatorEphemeralPrivateKey: Array.Empty<byte>(),
                 InitialRootKey: new byte[] { 0x10, 0x20 },

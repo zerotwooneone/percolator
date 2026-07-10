@@ -24,7 +24,7 @@ public sealed class RelayTransportClient : IRelayTransportClient
     public async Task<Percolator.Chat.GroupLedger.DeliveryCertificate> FetchCertificateAsync(
         string targetHost,
         int targetPort,
-        string senderPkh,
+        string senderPublicIdentityId,
         DateTimeOffset timestamp,
         Signature signature,
         CancellationToken ct)
@@ -35,14 +35,14 @@ public sealed class RelayTransportClient : IRelayTransportClient
 
         // Construct metadata headers
         var headers = new Metadata();
-        headers.Add("x-percolator-sender-pkh", senderPkh);
+        headers.Add("x-percolator-sender-public-identity-id", senderPublicIdentityId);
         headers.Add("x-percolator-timestamp", timestamp.ToUnixTimeSeconds().ToString());
         headers.Add("x-percolator-signature", Google.Protobuf.ByteString.CopyFrom(signature.Span).ToBase64());
 
         // Construct call options with metadata and cancellation token
         var callOptions = new CallOptions(headers: headers, cancellationToken: ct);
 
-        _logger.LogInformation("Fetching delivery certificate from relay {Host}:{Port} for PKH {Pkh}", targetHost, targetPort, senderPkh);
+        _logger.LogInformation("Fetching delivery certificate from relay {Host}:{Port} for PublicIdentityId {PublicIdentityId}", targetHost, targetPort, senderPublicIdentityId);
 
         // Dispatch the request
         var response = await client.GetDeliveryCertificateAsync(new GetDeliveryCertificateRequest(), callOptions);

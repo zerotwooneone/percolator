@@ -43,7 +43,7 @@ namespace Percolator.ApplicationTests.Network
                 MessageId = Google.Protobuf.ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
                 Emoji = ":)",
                 SentTimestampUtc = Timestamp.FromDateTime(DateTime.UtcNow),
-                PublicKeyHash = Google.Protobuf.ByteString.CopyFrom(new byte[31]) // invalid
+                PublicIdentityId = Google.Protobuf.ByteString.CopyFrom(new byte[15]) // invalid
             };
             var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { EmojiAnnotation = em } };
             var ctx = new SessionContext(Guid.NewGuid(), new Percolator.Identity.SelfId(1), null, null);
@@ -79,7 +79,7 @@ namespace Percolator.ApplicationTests.Network
             {
                 MessageId = Google.Protobuf.ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
                 SentTimestampUtc = Timestamp.FromDateTime(DateTime.UtcNow),
-                PublicKeyHash = Google.Protobuf.ByteString.CopyFrom(new byte[31]) // invalid
+                PublicIdentityId = Google.Protobuf.ByteString.CopyFrom(new byte[15]) // invalid
             };
             var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { DeliveredReceipt = dr } };
             var ctx = new SessionContext(Guid.NewGuid(), new Percolator.Identity.SelfId(1), null, null);
@@ -115,7 +115,7 @@ namespace Percolator.ApplicationTests.Network
                 MessageId = Google.Protobuf.ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
                 Content = "x",
                 SentTimestampUtc = Timestamp.FromDateTime(DateTime.UtcNow),
-                PublicKeyHash = Google.Protobuf.ByteString.CopyFrom(new byte[31]) // invalid length
+                PublicIdentityId = Google.Protobuf.ByteString.CopyFrom(new byte[15]) // invalid length
             };
             var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { TextMessage = msg } };
             var ctx = new SessionContext(Guid.NewGuid(), new Percolator.Identity.SelfId(1), null, null);

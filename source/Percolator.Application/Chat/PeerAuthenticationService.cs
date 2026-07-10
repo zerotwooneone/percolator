@@ -1,6 +1,5 @@
 using System.Security.Cryptography;
 using Microsoft.Extensions.Logging;
-using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Cryptography;
 using Percolator.Identity;
 
@@ -23,7 +22,7 @@ public sealed class PeerAuthenticationService : IPeerAuthenticationService
     }
 
     public async Task<bool> AuthenticateDeliveryCertificateRequestAsync(
-        Pkh senderPkh,
+        PublicIdentityId senderPublicIdentityId,
         DateTimeOffset requestTimestamp,
         Signature signature,
         CancellationToken ct)
@@ -36,11 +35,11 @@ public sealed class PeerAuthenticationService : IPeerAuthenticationService
             return false;
         }
 
-        // Look up the peer's public key using the PKH lookup string
-        var publicKey = await _peerIdentityQueries.GetPublicKeyByPkhAsync(IdentityPublicKeyHash.FromSpan(senderPkh.Span), ct).ConfigureAwait(false);
+        // Look up the peer's public key using the PublicIdentityId
+        var publicKey = await _peerIdentityQueries.GetPublicKeyByPublicIdentityIdAsync(senderPublicIdentityId, ct).ConfigureAwait(false);
         if (publicKey is null)
         {
-            _logger.LogWarning("Peer not found for PKH: {Pkh}", senderPkh);
+            _logger.LogWarning("Peer not found for PublicIdentityId: {PublicIdentityId}", senderPublicIdentityId);
             return false;
         }
 
@@ -49,13 +48,13 @@ public sealed class PeerAuthenticationService : IPeerAuthenticationService
         ecdsa.ImportSubjectPublicKeyInfo(publicKey.Span, out _);
 
         // Verify the inbound Signature payload using SHA256
-        // The signature is over the combined payload [senderPkh + timestamp]
-        var payload = System.Text.Encoding.UTF8.GetBytes($"{senderPkh}{requestTimestamp.ToUnixTimeSeconds()}");
+        // The signature is over the combined payload [senderPublicIdentityId + timestamp]
+        var payload = System.Text.Encoding.UTF8.GetBytes($"{senderPublicIdentityId}{requestTimestamp.ToUnixTimeSeconds()}");
         var isValid = ecdsa.VerifyData(payload, signature.Span, HashAlgorithmName.SHA256);
 
         if (!isValid)
         {
-            _logger.LogWarning("Signature verification failed for PKH: {Pkh}", senderPkh);
+            _logger.LogWarning("Signature verification failed for PublicIdentityId: {PublicIdentityId}", senderPublicIdentityId);
         }
 
         return isValid;

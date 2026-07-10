@@ -460,12 +460,11 @@ namespace Percolator.Application.Network.Handshake
             var remotePkh = validationResult.RemotePublicKeyHash;
             var remotePublicIdentityId = new PublicIdentityId(new Guid(validationResult.RemotePublicIdentityId.ToByteArray()));
 
-            // Match to a pending pre-handshake attempt by recipient PKH
+            // Match to a pending pre-handshake attempt by recipient PublicIdentityId
             PreHandshakeRecord? match = null;
             await foreach (var pending in _prehandshake.EnumeratePendingAsync(new NetworkSelfId(selfIdentityId.Value), cancellationToken).ConfigureAwait(false))
             {
-                if (pending.RecipientPublicKeyHash is { Length: > 0 }
-                    && remotePkh.AsSpan().SequenceEqual(pending.RecipientPublicKeyHash))
+                if (pending.RecipientPublicIdentityId == remotePublicIdentityId)
                 {
                     match = pending;
                     break;
@@ -474,7 +473,7 @@ namespace Percolator.Application.Network.Handshake
 
             if (match is null)
             {
-                _logger.LogInformation("Standard finalize: no pending record matched responder PKH; skipping");
+                _logger.LogInformation("Standard finalize: no pending record matched responder PublicIdentityId; skipping");
                 return null;
             }
 

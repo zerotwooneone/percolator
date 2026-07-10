@@ -74,16 +74,16 @@ message TextMessage {
   optional bytes author_identity_key = 2; // Required for group messages.
   google.protobuf.Timestamp sent_timestamp_utc = 3;
   string content = 4;
-  // Optional Public Key Hash (PKH, 32 bytes) for 1:1 routing when no direct session exists (e.g., queued delivery)
-  optional bytes public_key_hash = 5;
+  // Optional PublicIdentityId (UUID bytes) for 1:1 routing when no direct session exists (e.g., queued delivery)
+  optional bytes public_identity_id = 5;
 }
 
 message ReadReceipt {
   bytes message_id = 1; // The ID of the message being acknowledged.
   optional bytes author_identity_key = 2; // Who is acknowledging the message.
   google.protobuf.Timestamp sent_timestamp_utc = 3;
-  // Optional PKH for 1:1 routing when no direct session exists
-  optional bytes public_key_hash = 4;
+  // Optional PublicIdentityId (UUID bytes) for 1:1 routing when no direct session exists
+  optional bytes public_identity_id = 4;
 }
 
 message EmojiAnnotation {
@@ -91,8 +91,8 @@ message EmojiAnnotation {
   optional bytes author_identity_key = 2; // Who is adding the annotation.
   google.protobuf.Timestamp sent_timestamp_utc = 3;
   string emoji = 4; // The emoji character, e.g., "👍".
-  // Optional PKH for 1:1 routing when no direct session exists
-  optional bytes public_key_hash = 5;
+  // Optional PublicIdentityId (UUID bytes) for 1:1 routing when no direct session exists
+  optional bytes public_identity_id = 5;
 }
 
 // Delivery receipt acknowledging that a message was delivered (distinct from read)
@@ -100,8 +100,8 @@ message DeliveredReceipt {
   bytes message_id = 1; // The ID of the message being acknowledged as delivered.
   optional bytes author_identity_key = 2; // Who is acknowledging delivery (for group contexts).
   google.protobuf.Timestamp sent_timestamp_utc = 3;
-  // Optional PKH for 1:1 routing when no direct session exists
-  optional bytes public_key_hash = 4;
+  // Optional PublicIdentityId (UUID bytes) for 1:1 routing when no direct session exists
+  optional bytes public_identity_id = 4;
 }
 
 // Group ciphertext message
@@ -234,6 +234,8 @@ message SubmitPreKeyBundleRequest {
   repeated OneTimePreKey one_time_pre_keys = 6;
 
   optional google.protobuf.Timestamp expiresUtc = 7;
+
+  optional bytes public_identity_id = 8;
 }
 
 // Response for the pre-key bundle submission.
@@ -241,11 +243,11 @@ message SubmitPreKeyBundleResponse {
   optional uint32 version = 1;
 }
 
-// Request a pre-key bundle by the recipient's public key hash (PKH).
+// Request a pre-key bundle by the recipient's PublicIdentityId (UUID).
 message GetPreKeyBundleRequest {
   optional uint32 version = 1;
-  // SHA-256 of the recipient's identity signing public key bytes (SPKI)
-  optional bytes public_key_hash = 2;
+  // PublicIdentityId (UUID bytes) of the recipient
+  optional bytes public_identity_id = 2;
 }
 
 // Response carrying the pre-key bundle for the requested PKH.
@@ -291,11 +293,11 @@ message MessageQueueEnvelope {
   }
 }
 
-// Request to enqueue an opaque message for a recipient identified by public key hash (PKH).
+// Request to enqueue an opaque message for a recipient identified by PublicIdentityId (UUID).
 message EnqueueOpaqueMessageRequest {
   optional uint32 version = 1;
-  // SHA-256 of the recipient's identity signing public key bytes (SPKI)
-  optional bytes recipient_public_key_hash = 2;
+  // PublicIdentityId (UUID bytes) of the recipient
+  optional bytes recipient_public_identity_id = 2;
   // Opaque encrypted blob (double ratchet ciphertext). Max size enforced by application.
   optional bytes message_blob = 3;
 }
@@ -303,7 +305,7 @@ message EnqueueOpaqueMessageRequest {
 // Response for enqueue operation. Placed at top-level InternalEnvelope.
 message EnqueueOpaqueMessageResponse {
   optional uint32 version = 1;
-  // True when the message was accepted into the queue. False when rejected (e.g., limits exceeded or unknown PKH).
+  // True when the message was accepted into the queue. False when rejected (e.g., limits exceeded or unknown PublicIdentityId).
   optional bool accepted = 2;
   // If not accepted, a brief error string suitable for logs/diagnostics.
   optional string error = 3;

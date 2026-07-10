@@ -12,6 +12,7 @@ public class PendingSession
     public bool IsRelayed { get; }
     public PeerId? RelayHostPeerId { get; }
     public RatchetIdentityKey? InviterIdentityKey { get; }
+    public CryptoPublicIdentityId? InviterPublicIdentityId { get; }
     public string? CallbackEndpointHost { get; }
     public int? CallbackEndpointPort { get; }
     public ApprovalState State { get; private set; }
@@ -27,6 +28,7 @@ public class PendingSession
         bool isRelayed,
         PeerId? relayHostPeerId,
         RatchetIdentityKey? inviterIdentityKey,
+        CryptoPublicIdentityId? inviterPublicIdentityId,
         string? callbackEndpointHost,
         int? callbackEndpointPort,
         DateTimeOffset createdAtUtc,
@@ -40,6 +42,7 @@ public class PendingSession
         IsRelayed = isRelayed;
         RelayHostPeerId = relayHostPeerId;
         InviterIdentityKey = inviterIdentityKey;
+        InviterPublicIdentityId = inviterPublicIdentityId;
         CallbackEndpointHost = callbackEndpointHost;
         CallbackEndpointPort = callbackEndpointPort;
         State = ApprovalState.AwaitingApproval;
@@ -76,6 +79,7 @@ public class PendingSession
         bool isRelayed,
         PeerId? relayHostPeerId,
         RatchetIdentityKey? inviterIdentityKey,
+        CryptoPublicIdentityId? inviterPublicIdentityId,
         string? callbackEndpointHost,
         int? callbackEndpointPort,
         IClock clock,
@@ -92,6 +96,7 @@ public class PendingSession
             isRelayed: isRelayed,
             relayHostPeerId: relayHostPeerId,
             inviterIdentityKey: inviterIdentityKey,
+            inviterPublicIdentityId: inviterPublicIdentityId,
             callbackEndpointHost: callbackEndpointHost,
             callbackEndpointPort: callbackEndpointPort,
             createdAtUtc: clock.UtcNow,

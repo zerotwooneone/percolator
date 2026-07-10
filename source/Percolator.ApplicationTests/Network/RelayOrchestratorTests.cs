@@ -50,13 +50,13 @@ public class RelayOrchestratorTests
         var sessionId = new SessionId(sessionGuid);
         var directSessionId = new DirectSessionId(sessionGuid);
         var networkPeerId = new NetworkPeerId(peerId.Value);
-        var pkh = Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytes(new byte[32]);
+        var publicIdentityId = new Percolator.Identity.PublicIdentityId(Guid.NewGuid());
 
         var peerIdentityQueries = new Mock<IPeerIdentityQueries>(MockBehavior.Strict);
-        peerIdentityQueries.Setup(q => q.GetPublicKeyHashAsync(peerId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(pkh);
+        peerIdentityQueries.Setup(q => q.GetPublicIdentityIdAsync(peerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(publicIdentityId);
 
-        queue.Setup(q => q.FetchAsync(pkh, 1, It.IsAny<CancellationToken>()))
+        queue.Setup(q => q.FetchAsync(publicIdentityId, 1, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new System.Collections.Generic.List<(Guid, QueuedPayloadBytes)> { (ackId, QueuedPayloadBytes.FromBytesOwned(blob)) });
         directSessions.Setup(d => d.GetByRemotePeerIdAsync(networkPeerId, new NetworkSelfId(active.Identity!.SelfIdentityId.Value)))
             .ReturnsAsync(new DirectSession(networkPeerId, directSessionId));
@@ -107,13 +107,13 @@ public class RelayOrchestratorTests
         var sessionId = new SessionId(sessionGuid);
         var directSessionId = new DirectSessionId(sessionGuid);
         var networkPeerId = new NetworkPeerId(peerId.Value);
-        var pkh = Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytes(new byte[32]);
+        var publicIdentityId = new Percolator.Identity.PublicIdentityId(Guid.NewGuid());
 
         var peerIdentityQueries = new Mock<IPeerIdentityQueries>(MockBehavior.Strict);
-        peerIdentityQueries.Setup(q => q.GetPublicKeyHashAsync(peerId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(pkh);
+        peerIdentityQueries.Setup(q => q.GetPublicIdentityIdAsync(peerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(publicIdentityId);
 
-        queue.Setup(q => q.FetchAsync(pkh, 1, It.IsAny<CancellationToken>()))
+        queue.Setup(q => q.FetchAsync(publicIdentityId, 1, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new System.Collections.Generic.List<(Guid, QueuedPayloadBytes)> { (ackId, QueuedPayloadBytes.FromBytesOwned(blob)) });
         directSessions.Setup(d => d.GetByRemotePeerIdAsync(networkPeerId, new NetworkSelfId(active.Identity!.SelfIdentityId.Value)))
             .ReturnsAsync(new DirectSession(networkPeerId, directSessionId));
@@ -158,13 +158,13 @@ public class RelayOrchestratorTests
         var sessionGuid = Guid.NewGuid();
         var directSessionId = new DirectSessionId(sessionGuid);
         var networkPeerId = new NetworkPeerId(peerId.Value);
-        var pkh = Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytes(new byte[32]);
+        var publicIdentityId = new Percolator.Identity.PublicIdentityId(Guid.NewGuid());
 
         var peerIdentityQueries = new Mock<IPeerIdentityQueries>(MockBehavior.Strict);
-        peerIdentityQueries.Setup(q => q.GetPublicKeyHashAsync(peerId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(pkh);
+        peerIdentityQueries.Setup(q => q.GetPublicIdentityIdAsync(peerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(publicIdentityId);
 
-        queue.Setup(q => q.FetchAsync(pkh, 1, It.IsAny<CancellationToken>()))
+        queue.Setup(q => q.FetchAsync(publicIdentityId, 1, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new System.Collections.Generic.List<(Guid, QueuedPayloadBytes)> { (ackId, QueuedPayloadBytes.FromBytesOwned(blob)) });
         directSessions.Setup(d => d.GetByRemotePeerIdAsync(networkPeerId, new NetworkSelfId(active.Identity!.SelfIdentityId.Value)))
             .ReturnsAsync(new DirectSession(networkPeerId, directSessionId));
@@ -192,13 +192,13 @@ public class RelayOrchestratorTests
         var (orchestrator, queue, _, __, ___) = Create(out var active);
         var peerId = new Percolator.Identity.PeerId((uint)Random.Shared.Next(1, 1000000));
         var selfId = active.Identity!.SelfIdentityId;
-        var pkh = Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytes(new byte[32]);
+        var publicIdentityId = new Percolator.Identity.PublicIdentityId(Guid.NewGuid());
 
         var peerIdentityQueries = new Mock<IPeerIdentityQueries>(MockBehavior.Strict);
-        peerIdentityQueries.Setup(q => q.GetPublicKeyHashAsync(peerId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(pkh);
+        peerIdentityQueries.Setup(q => q.GetPublicIdentityIdAsync(peerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(publicIdentityId);
 
-        queue.Setup(q => q.FetchAsync(pkh, 1, It.IsAny<CancellationToken>()))
+        queue.Setup(q => q.FetchAsync(publicIdentityId, 1, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new System.Collections.Generic.List<(Guid, QueuedPayloadBytes)>());
 
         var orchestratorWithQueries = new RelayOrchestrator(
@@ -222,13 +222,13 @@ public class RelayOrchestratorTests
         var ackId = Guid.NewGuid();
         var blob = new byte[] { 0x09 };
         var networkPeerId = new NetworkPeerId(peerId.Value);
-        var pkh = Percolator.Chat.Messaging.ValueObjects.Pkh.FromBytes(new byte[32]);
+        var publicIdentityId = new Percolator.Identity.PublicIdentityId(Guid.NewGuid());
 
         var peerIdentityQueries = new Mock<IPeerIdentityQueries>(MockBehavior.Strict);
-        peerIdentityQueries.Setup(q => q.GetPublicKeyHashAsync(peerId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(pkh);
+        peerIdentityQueries.Setup(q => q.GetPublicIdentityIdAsync(peerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(publicIdentityId);
 
-        queue.Setup(q => q.FetchAsync(pkh, 1, It.IsAny<CancellationToken>()))
+        queue.Setup(q => q.FetchAsync(publicIdentityId, 1, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new System.Collections.Generic.List<(Guid, QueuedPayloadBytes)> { (ackId, QueuedPayloadBytes.FromBytesOwned(blob)) });
         directSessions.Setup(d => d.GetByRemotePeerIdAsync(networkPeerId, new NetworkSelfId(active.Identity!.SelfIdentityId.Value)))
             .ReturnsAsync((DirectSession?)null);
