@@ -11,9 +11,7 @@ namespace Percolator.Application.Apps.Chat.Handlers;
 
 public sealed class DispatchTextMessageHandler : IRequestHandler<DispatchTextMessageCommand>
 {
-    private readonly IMediator _mediator;
     private readonly IRemoteEnvelopeSender _sender;
-    private readonly IPeerPublicSigningKeyStore _keyStore;
     private readonly ILogger<DispatchTextMessageHandler> _logger;
 
     public DispatchTextMessageHandler(
@@ -22,9 +20,7 @@ public sealed class DispatchTextMessageHandler : IRequestHandler<DispatchTextMes
         IPeerPublicSigningKeyStore keyStore,
         ILogger<DispatchTextMessageHandler> logger)
     {
-        _mediator = mediator ?? throw new ArgumentNullException(nameof(mediator));
         _sender = sender ?? throw new ArgumentNullException(nameof(sender));
-        _keyStore = keyStore ?? throw new ArgumentNullException(nameof(keyStore));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
