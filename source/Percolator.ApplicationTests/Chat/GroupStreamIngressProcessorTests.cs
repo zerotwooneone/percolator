@@ -6,14 +6,11 @@ using Percolator.Chat.GroupLedger;
 using Percolator.Chat.GroupMembership;
 using Percolator.Chat.Messaging;
 using Percolator.Chat.Messaging.App;
-using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
 using Percolator.Identity;
 using PublicIdentityId = Percolator.Identity.PublicIdentityId;
 using ChatConversationId = Percolator.Chat.Messaging.ValueObjects.ConversationId;
-using CryptoConversationId = Percolator.Cryptography.Primitives.ConversationId;
-using CryptoDeviceId = Percolator.Cryptography.Primitives.DeviceId;
 using ChatPublicIdentityId = Percolator.Chat.GroupLedger.PublicIdentityId;
 
 namespace Percolator.ApplicationTests.Chat;
