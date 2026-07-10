@@ -335,12 +335,6 @@ message HandshakeInitiatorHello {
 // === 7.1 Reverse-Signal Handshake Payloads (Protected) ===
 // These messages are not exposed to transport metadata. They are intended to be serialized and carried
 // inside end-to-end protected fields (e.g., HandshakeInitiatorHello.encrypted_payload).
-message ReverseSignalCallbackEndpoint {
-  optional uint32 version = 1;
-  // Hostname or IP literal.
-  optional string host = 2;
-  optional uint32 port = 3;
-}
 
 message InviteHandshakePreKeyBundle {
   optional uint32 version = 1;
