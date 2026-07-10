@@ -99,46 +99,60 @@ The implementations and UI bindings must be updated to route envelopes using the
 ---
 ## Chunk 6
 ### Feature Implementation Request: Signal Protocol Chunk 6 (The Streaming Data Plane)
-You are to implement the high-velocity, real-time Data Plane for Group V2 messaging.
-
-The Goal: Build the application's foundational server-streaming infrastructure to track concurrent active group peer connections and execute decoupled, non-blocking fan-out operations.
+You are to implement the high-velocity, real-time Data Plane for Group V2 messaging, cleanly separating the Relay's opaque fan-out responsibilities from the Client's local decryption and persistence logic.
 
 Architectural Constraints (CRITICAL):
-* **Interface Segregation:** The Application layer must define `IGroupNotificationDispatcher`. The Infrastructure layer implements this interface using gRPC streams. The Application layer must never see or reference an `IServerStreamWriter` instance.
-* **Multi-Stream Connection Matrix:** Because multiple distinct peers connect to a single group conversation, `GrpcGroupNotificationDispatcher` must map a single `ConversationId` to a collection of active streams. Implement a thread-safe look-up matrix utilizing a nested dictionary lookup, ensuring distinct connection instances are tracked safely without overwriting concurrent peer sessions.
-* **Pragmatic Persistence Handling:** Do not wrap your SQLite database appends in artificial application-level semaphores or single-threaded loops. Trust the underlying SQLite engine's native locking mechanisms to serialize concurrent transactional writes seamlessly via standard non-blocking asynchronous calls.
+* **Strict E2EE Separation:** The Relay role must *never* decrypt payloads or touch application models. It only routes raw `ciphertext` to connected streams. The Client role performs decryption locally *after* receiving the stream event.
+* **Clean Architecture Directional Dependency:** The Relay's streaming dispatcher is a purely infrastructural networking concern. The Application layer must have zero knowledge of it.
+* **Shared Nothing / Thread Safety:** `IServerStreamWriter` is strictly NOT thread-safe. You must serialize concurrent writes to individual peer streams using isolated asynchronous queues (e.g., `System.Threading.Channels.Channel<GroupStreamResponse>`).
+* **DDD & Signal Protocol Validation:** The Client Ingress must load the local `GroupConversation` aggregate to validate membership *and* verify the incoming message's epoch against the local ledger before attempting decryption.
 
 Implementation Requirements
-1. Interface Definition (`Percolator.Application/Chat`)
-* Define: `public interface IGroupNotificationDispatcher { Task DispatchAsync(Percolator.Application.Chat.ConversationId conversationId, MessageDto message, CancellationToken ct); }`
 
-2. Infrastructure Multi-Stream Tracking (`Percolator.Infrastructure/Chat`)
-* Create `GrpcGroupNotificationDispatcher` implementing `IGroupNotificationDispatcher`.
-* **Storage Matrix:** Maintain a thread-safe nested lookup using infrastructure-local types: `ConcurrentDictionary<Percolator.Application.Chat.ConversationId, ConcurrentDictionary<Percolator.Application.Chat.PeerId, IServerStreamWriter<GroupStreamResponse>>>`.
-* **Methods:**
-    * Implement `Task DispatchAsync(...)`: Safely extract the nested list of writers for the matching `Percolator.Application.Chat.ConversationId`, iterate through the connections, and invoke `.WriteAsync()` to fan out the payload across all active peer streams.
-    * Expose helper registrations: `void RegisterStream(Percolator.Application.Chat.ConversationId conversationId, Percolator.Application.Chat.PeerId peerId, IServerStreamWriter<GroupStreamResponse> stream)` and `void UnregisterStream(Percolator.Application.Chat.ConversationId conversationId, Percolator.Application.Chat.PeerId peerId)`.
-* Create `SqliteChatMessageWriter` inside `Percolator.Infrastructure/Chat` to handle straightforward, async-safe database appends directly via core entity framework operations.
-
-3. Application Ingress Orchestration (`Percolator.Application/Apps/Chat`)
-* Implement `GroupIngressService.ProcessGroupMessageAsync`:
-    1. **Early-Gate Roster Validation:** Inside `GroupIngressService.ProcessGroupMessageAsync`, the service must execute a local database lookup or fast query projection against the conversation's active membership roster prior to performing any unmanaged cryptographic actions. If the incoming sender's `PeerId` is missing from the local group roster or marked as evicted, the message payload must be dropped immediately, preventing unmanaged memory allocation or decryption thrashing from unauthorized network elements.
-    2. Decrypt: Call `ISenderKeyCryptographyService.Decrypt(...)` (This remains parallelizable across threads with no lock required).
-    3. Persist: Call `IChatMessageWriter.AddGroupMessageAsync(...)`.
-    4. Fan-Out: Call `IGroupNotificationDispatcher.DispatchAsync(...)`.
-
-4. gRPC Streaming Service Anchor (`Percolator.Infrastructure/Network/Grpc/PercolatorMessageService.cs`)
-* Add the following endpoint contract to `PercolatorMessageService`:
-  ```csharp
-  public override async Task StreamGroupMessages(
-      GroupStreamRequest request, 
-      IServerStreamWriter<GroupStreamResponse> responseStream, 
-      ServerCallContext context)
+1. Protobuf Updates (`messaging.proto`)
+* Add `GroupStreamRequest` message:
+  ```protobuf
+  message GroupStreamRequest {
+      optional bytes conversation_id = 1;
+  }
   ```
-* **Logic:** Parse the incoming group identifier into a `Percolator.Application.Chat.ConversationId` and the sender metadata into a `Percolator.Application.Chat.PeerId`. Call `_dispatcher.RegisterStream(conversationId, peerId, responseStream)`. Keep the stream alive using a processing loop bounded by `while (!context.CancellationToken.IsCancellationRequested) { await Task.Delay(1000, context.CancellationToken); }`. Upon exit or cancellation, safely execute `_dispatcher.UnregisterStream(conversationId, peerId)`.
+* Add `GroupStreamResponse` message:
+  ```protobuf
+  message GroupStreamResponse {
+      optional bytes conversation_id = 1;
+      optional bytes ciphertext = 2;
+      optional uint32 epoch = 3;
+      optional bytes sender_public_identity_id = 4;
+  }
+  ```
+* Add RPC to `RelayGroupService`: `rpc StreamGroupMessages(GroupStreamRequest) returns (stream GroupStreamResponse);`
+
+2. Relay Fan-Out Infrastructure (`Percolator.Infrastructure` ONLY)
+* Define interface and implementation entirely within `Percolator.Infrastructure/Network/Grpc`: `internal interface IRelayGroupStreamDispatcher { Task DispatchAsync(Guid conversationId, ReadOnlyMemory<byte> ciphertext, uint epoch, Guid senderPublicIdentityId, CancellationToken ct); }`
+* Create `GrpcRelayGroupStreamDispatcher`.
+    * **Storage Matrix:** `ConcurrentDictionary<Guid, ConcurrentDictionary<Guid, Channel<GroupStreamResponse>>>` (ConversationId -> PublicIdentityId -> Channel).
+    * Implement `DispatchAsync(...)`: Extract the nested list of channels for the `conversationId`. For each channel, use `ChannelWriter.TryWrite(...)` to enqueue the payload non-blockingly.
+    * Expose helpers: `ChannelReader<GroupStreamResponse> RegisterStream(Guid conversationId, Guid publicIdentityId)` and `void UnregisterStream(Guid conversationId, Guid publicIdentityId)`.
+* Wire into `RelayGroupService` (in `Percolator.Infrastructure/Network/Grpc/RelayGroupService.cs`):
+    * Implement `StreamGroupMessages`: Extract caller's `PublicIdentityId` from context. **Authorization Gate:** Call `_ledgerRepository` or `_orchestrator` to verify the caller's `PublicIdentityId` is a valid member of the `ConversationId`. If not, throw an `RpcException(PermissionDenied)`. Call `RegisterStream(...)` to get a `ChannelReader`. Use a `await foreach (var msg in reader.ReadAllAsync(context.CancellationToken))` loop to safely `await responseStream.WriteAsync(msg)`. In a `finally` block, call `UnregisterStream(...)`.
+    * Update `Publish` method: After successful ledger validation, call `_dispatcher.DispatchAsync(...)`.
+
+3. Client Fan-In Infrastructure (`Percolator.Infrastructure`)
+* The plan must include a client-side stream consumer to pump messages into the application layer. Create `RelayGroupStreamWorker` (an `IHostedService` or background loop in `Percolator.Infrastructure`) that connects to `RelayGroupService.StreamGroupMessages` for active groups.
+* The worker simply loops over `ResponseStream.ReadAllAsync()` and passes the payload to `IGroupStreamIngressProcessor.ProcessGroupMessageAsync`.
+
+4. Client Ingress Orchestration (`Percolator.Application` & `Percolator.Chat`)
+* Update `IChatMessageWriter` (in `Percolator.Chat/Messaging/App/IChatMessageWriter.cs`): Add `Task AddGroupMessageAsync(Percolator.Chat.Messaging.ValueObjects.ConversationId conversationId, Percolator.Chat.GroupMembership.ParticipantId senderId, string content, Percolator.Chat.Messaging.ValueObjects.PublicMessageId publicMessageId, DateTimeOffset sentAt, CancellationToken cancellationToken);`
+* Update `SqliteChatMessageWriter` (in `Percolator.Infrastructure/Chat/SqliteChatMessageWriter.cs`) to implement `AddGroupMessageAsync` using standard EF Core entity appends.
+* Create `IGroupStreamIngressProcessor` and its implementation `GroupStreamIngressProcessor` in `Percolator.Application/Apps/Chat`.
+    * Implement `ProcessGroupMessageAsync(Guid conversationIdBytes, Guid senderPublicIdentityIdBytes, uint epoch, byte[] ciphertext, CancellationToken ct)`.
+    * **DDD Validation:** Load the group aggregate (via `IGroupConversationRepository` or an optimized read model). Verify the sender's `PeerId` is an active member. If not, drop or reject the message.
+    * **Epoch Verification:** Compare the incoming `epoch` against the local group's current epoch. If `incoming > local_epoch`, throw an exception or return a result indicating a sync is required (do not attempt decryption).
+    * **Decrypt:** Call `ISenderKeyCryptographyService.DecryptGroupMessage(...)` to obtain the plaintext (use `new DeviceId(1)` for the sender device).
+    * **Persist:** Call `IChatMessageWriter.AddGroupMessageAsync(...)` to save the decrypted message locally.
 
 **Testing Requirements (Chunk 6):**
-- `GrpcGroupNotificationDispatcher_DispatchAsync_FansOutPayloadToAllRegisteredWriters_WhenConversationHasMultipleActiveStreams` - Test that DispatchAsync fans out the payload to all registered IServerStreamWriter instances when the conversation has multiple active streams.
+- `GrpcRelayGroupStreamDispatcher_DispatchAsync_WritesToAllChannels_WhenConversationHasMultipleActiveStreams` - Test that DispatchAsync enqueues the payload to all registered Channel instances when the conversation has multiple active streams.
 
 
 ---
