@@ -60,7 +60,7 @@ You are to fix the architectural flaws introduced in Chunks 4-6 related to the R
 
 Architectural Constraints (CRITICAL):
 * **No Epoch Advancement on Chat:** The `Publish` endpoint must verify the ZK Proof against the `CurrentEpoch` but must **never** advance the epoch or alter the `GroupPublicParams`.
-* **The New Roster Contract:** The Relay must track the exact `PeerId`s to correctly fan-out messages, but the client must only send global UUIDs (`PublicIdentityId`s) over the wire. The Relay is responsible for doing the local `PublicIdentityId -> PeerId` map when executing structural mutations.
+* **The New Roster Contract:** The Relay tracks exact internal `PeerId`s in its `RelayBlindedRosters` table. The client sends global UUIDs (`PublicIdentityId`s) over the wire, and the Relay translates these into internal `PeerId`s (creating placeholder identities if they don't exist yet) before saving the mutation.
 
 Implementation Requirements
 
@@ -108,9 +108,8 @@ Implementation Requirements
 * In `IGroupCryptographyService` (and its concrete implementations), add `EncryptedGroupProfileBytes EncryptGroupProfile(GroupMasterKey masterKey, ReadOnlySpan<byte> profilePlaintext);` and `byte[] DecryptGroupProfile(GroupMasterKey masterKey, EncryptedGroupProfileBytes ciphertext);`. (Use AEAD AES-GCM with a key derived from the master key).
 
 3. The Database Updates (`Percolator.Infrastructure/Chat`)
-* Create a new EF Core Migration.
-* In `RelayGroupStateDbo` (or the equivalent table), add `public byte[] EncryptedProfile { get; set; } = Array.Empty<byte>();`.
-* Note: A migration must be executed to persist these changes using `dotnet ef migrations add ...`.
+* In `RelayGroupStateDbo`, add `public byte[] EncryptedProfile { get; set; } = Array.Empty<byte>();`.
+* In `RelayBlindedRosterDbo`, remove `MemberPublicIdentityId` and replace it with `public uint MemberPeerId { get; set; }`. Add a Foreign Key relationship to `PeerIdentityDbo.PeerId` for strict referential integrity.
 
 4. The Domain Updates (`Percolator.Chat/GroupLedger`)
 * Update the `RelayGroupLedger` aggregate.
@@ -118,22 +117,30 @@ Implementation Requirements
     * Update the constructor to take `EncryptedGroupProfileBytes`.
     * Add `public void Mutate(uint requestedEpoch, EncryptedGroupProfileBytes newProfile)`. This method asserts the new epoch is strictly greater, then updates the fields.
 * Modify the `AdvanceEpoch` method to be removed or replaced, as chat messages no longer advance the epoch.
+* Update `IRelayGroupLedgerRepository`:
+    * Add `EncryptedGroupProfileBytes encryptedProfile` to the signature of `ProvisionNewGroupAsync` and ensure it accepts `IReadOnlyList<Percolator.Identity.PeerId>` instead of `PublicIdentityId`.
+    * Add a new method: `Task UpdateGroupStateAsync(RelayGroupLedger ledger, IReadOnlyList<Percolator.Identity.PeerId> addPeerIds, IReadOnlyList<Percolator.Identity.PeerId> removePeerIds, CancellationToken cancellationToken);` which executes the ledger update and the blinded roster insertions/deletions inside a single EF Core transaction.
+    * Update `IsMemberAsync` to either take a `PeerId` or perform a join against `PeerIdentityDbo` to match the target `PublicIdentityId` to the `MemberPeerId` in the roster table.
+* Refactor `SqliteRelayRosterQueries.GetMemberPeerIdsAsync`: Since `RelayBlindedRosterDbo` now holds `MemberPeerId`, delete the `PeerIdentities` lookup join entirely and use the newly available `MemberPeerId` to directly look up `ChatPeerId` participants.
 
 5. Service Implementation (`Percolator.Application/Chat` & `Percolator.Infrastructure/Network`)
+* **RelayGroupOperationStatus Enum:** Define an enum `RelayGroupOperationStatus { Success, EpochConflict, Unauthorized, GroupNotFound }` in `Percolator.Application.Chat` to communicate expected domain failures without throwing exceptions.
 * **RelayGroupOrchestrator:**
-    * In `PublishGroupRelayMessageAsync`, **delete** the code that advances the epoch. The method should now just verify the ZK proof against the current `GroupPublicParams` and queue the message.
-    * Add a new method: `Task ModifyGroupAsync(ConversationId conversationId, uint baseEpoch, ZkPresentationBytes presentation, EncryptedGroupProfileBytes newProfile, IReadOnlyList<Guid> addPublicIdentityIds, IReadOnlyList<Guid> removePublicIdentityIds, CancellationToken ct);`.
-    * In `ModifyGroupAsync`: Verify the presentation against the *existing* `GroupPublicParams`. Then call `ledger.Mutate(...)`. Use `IPeerIdentityQueries` to map the `Guid` lists to local `PeerId`s, and interact with `IRelayRosterRepository` or `IRelayGroupLedgerRepository` to add/remove the resulting `PeerId`s from the fan-out roster. Finally, save the ledger.
-    * Add a new method: `Task<RelayGroupLedger> GetGroupStateAsync(ConversationId conversationId, ZkPresentationBytes presentation, CancellationToken ct);`. Verify the ZK proof before returning the ledger.
+    * In `PublishGroupRelayMessageAsync`, change the return type to `Task<RelayGroupOperationStatus>`. **Delete** the code that advances the epoch. The method should now just verify the ZK proof against the current `GroupPublicParams`. Replace `ledger.AdvanceEpoch` with a validation check: `if (requestedEpoch != ledger.CurrentEpoch) return RelayGroupOperationStatus.EpochConflict;`. If auth fails, return `Unauthorized`. If successful, queue the message and return `Success`.
+    * Add a new method: `Task<RelayGroupOperationStatus> ModifyGroupAsync(ConversationId conversationId, uint baseEpoch, ZkPresentationBytes presentation, EncryptedGroupProfileBytes newProfile, IReadOnlyList<Percolator.Chat.GroupLedger.PublicIdentityId> addPublicIdentityIds, IReadOnlyList<Percolator.Chat.GroupLedger.PublicIdentityId> removePublicIdentityIds, CancellationToken ct);`.
+    * In `ModifyGroupAsync`: Return `EpochConflict`, `Unauthorized`, or `GroupNotFound` on domain failures. If valid, translate the `PublicIdentityId`s into `Percolator.Identity.PeerId`s (provisioning new ones if necessary via the Identity layer). Interact with `IRelayGroupLedgerRepository.UpdateGroupStateAsync` to persist the ledger changes alongside the insertions/deletions in the `RelayBlindedRosters` table. Finally, return `Success`.
+    * Add a new method: `Task<RelayGroupLedger?> GetGroupStateAsync(ConversationId conversationId, ZkPresentationBytes presentation, CancellationToken ct);`. Verify the ZK proof before returning the ledger (or null if not found/unauthorized).
 * **RelayGroupService (gRPC):**
+    * Update `Publish` to evaluate the returned `RelayGroupOperationStatus` and throw the corresponding `RpcException(StatusCode.Aborted)` or `RpcException(StatusCode.Unauthenticated)` based on the enum, removing the need for domain exception catch blocks.
     * Update `ProvisionGroup` to extract and pass the `EncryptedGroupProfileBytes`.
     * Implement the new `ModifyGroup` endpoint, translating the protobuf inputs into the corresponding types for `RelayGroupOrchestrator.ModifyGroupAsync`.
     * Implement the new `GetGroupState` endpoint, calling `RelayGroupOrchestrator.GetGroupStateAsync` and returning the epoch, public params, and encrypted profile.
 
 **Testing Requirements (Chunk 6.1):**
 - `RelayGroupOrchestrator_PublishGroupRelayMessageAsync_DoesNotAdvanceEpoch` - Ensure that chat messages only verify auth and fan out, leaving the epoch unchanged.
+- `RelayGroupOrchestrator_PublishGroupRelayMessageAsync_ReturnsEpochConflict_WhenEpochMismatched` - Test that providing an incorrect epoch returns the new `EpochConflict` enum instead of throwing an exception.
 - `RelayGroupOrchestrator_ModifyGroupAsync_AdvancesEpochAndUpdatesProfile` - Test that the new mutation method properly increments the epoch and stores the new parameters.
-- `RelayGroupOrchestrator_ModifyGroupAsync_UpdatesRoster_MappingPublicIdentityIdsToPeerIds` - Test that the mutation method correctly uses the identity queries to map network UUIDs to internal PeerIds for the Relay Roster.
+- `RelayGroupOrchestrator_ModifyGroupAsync_UpdatesRoster_MappingToPeerIds` - Test that the mutation method correctly translates the PublicIdentityIds to PeerIds before passing them to the repository for blinded roster updates.
 
 ---
 
