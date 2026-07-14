@@ -14,31 +14,20 @@ public sealed class SqliteRelayRosterQueries : IRelayRosterQueries
 
     public async Task<IReadOnlyList<ChatPeerId>> GetMemberPeerIdsAsync(ConversationId conversationId, CancellationToken cancellationToken)
     {
-        // Get the PublicIdentityIds from the blinded roster
-        var publicIdentityIds = await _db.RelayBlindedRosters
+        // Get the MemberPeerIds directly from the blinded roster
+        var memberPeerIds = await _db.RelayBlindedRosters
             .AsNoTracking()
             .Where(e => e.ConversationId == conversationId.Value)
-            .Select(e => e.MemberPublicIdentityId)
+            .Select(e => e.MemberPeerId)
             .ToListAsync(cancellationToken);
 
-        if (publicIdentityIds.Count == 0)
+        if (memberPeerIds.Count == 0)
             return new List<ChatPeerId>();
-
-        // Lookup PeerIds by PublicIdentityId
-        var peerIdentities = await _db.PeerIdentities
-            .AsNoTracking()
-            .Where(pi => publicIdentityIds.Contains(pi.PublicIdentityId))
-            .ToListAsync(cancellationToken);
-
-        if (peerIdentities.Count == 0)
-            return new List<ChatPeerId>();
-
-        var peerIds = peerIdentities.Select(pi => pi.PeerId).ToList();
 
         // Lookup ChatPeerIds (ParticipantIds) by PeerIds for this conversation
         var participantIds = await _db.ConversationParticipants
             .AsNoTracking()
-            .Where(cp => cp.ConversationId == conversationId.Value && peerIds.Contains(cp.ParticipantId))
+            .Where(cp => cp.ConversationId == conversationId.Value && memberPeerIds.Contains(cp.ParticipantId))
             .Select(cp => cp.ParticipantId)
             .ToListAsync(cancellationToken);
 

@@ -4,6 +4,7 @@ using Percolator.Chat.GroupLedger;
 using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Contracts;
 using Percolator.Cryptography;
+using Percolator.Identity;
 
 namespace Percolator.Infrastructure.Network.Grpc;
 
@@ -12,15 +13,18 @@ public sealed class RelayGroupService : Percolator.Contracts.RelayGroupService.R
     private readonly IRelayGroupOrchestrator _orchestrator;
     private readonly IRelayGroupLedgerRepository _ledgerRepository;
     private readonly IRelayGroupStreamDispatcher _dispatcher;
+    private readonly IPeerIdentityRepository _peerIdentityRepository;
 
     public RelayGroupService(
         IRelayGroupOrchestrator orchestrator,
         IRelayGroupLedgerRepository ledgerRepository,
-        IRelayGroupStreamDispatcher dispatcher)
+        IRelayGroupStreamDispatcher dispatcher,
+        IPeerIdentityRepository peerIdentityRepository)
     {
         _orchestrator = orchestrator;
         _ledgerRepository = ledgerRepository;
         _dispatcher = dispatcher;
+        _peerIdentityRepository = peerIdentityRepository;
     }
 
     public override async Task<SubmitGroupMessageResponse> Publish(
@@ -38,55 +42,65 @@ public sealed class RelayGroupService : Percolator.Contracts.RelayGroupService.R
                 throw new ArgumentException("ciphertext is required.");
 
             // Boundary Defensive Copy (Protobuf ByteString -> Domain Primitive)
-            // Rule: Use DomainType.FromBytesOwned(byteString.ToByteArray())
-            // This prevents memory corruption by taking ownership of the defensive copy.
             var conversationId = new ConversationId(new Guid(request.ConversationId.ToByteArray()));
             var presentation = ZkPresentationBytes.FromBytesOwned(request.Presentation.ToByteArray());
             var ciphertext = CiphertextBytes.FromBytesOwned(request.Ciphertext.ToByteArray());
 
-            await _orchestrator.PublishGroupRelayMessageAsync(
+            var status = await _orchestrator.PublishGroupRelayMessageAsync(
                 conversationId,
                 request.Epoch,
                 presentation,
                 ciphertext,
                 context.CancellationToken);
 
-            // Extract sender's PublicIdentityId from context (set by DeliveryCertificateAuthInterceptor)
-            var senderPublicIdentityIdStr = context.RequestHeaders.GetValue("x-percolator-sender-public-identity-id");
-            if (senderPublicIdentityIdStr is not null)
+            // Map status to gRPC response
+            if (status == RelayGroupOperationStatus.Success)
             {
-                var senderPublicIdentityIdBytes = Convert.FromHexString(senderPublicIdentityIdStr);
-                var senderPublicIdentityId = new Guid(senderPublicIdentityIdBytes);
-                
-                // Fan out to all connected streams
-                await _dispatcher.DispatchAsync(
-                    conversationId.Value,
-                    request.Ciphertext.Memory,
-                    request.Epoch,
-                    senderPublicIdentityId,
-                    context.CancellationToken);
-            }
+                // Extract sender's PublicIdentityId from context (set by DeliveryCertificateAuthInterceptor)
+                var senderPublicIdentityIdStr = context.RequestHeaders.GetValue("x-percolator-sender-public-identity-id");
+                if (senderPublicIdentityIdStr is not null)
+                {
+                    var senderPublicIdentityIdBytes = Convert.FromHexString(senderPublicIdentityIdStr);
+                    var senderPublicIdentityId = new Guid(senderPublicIdentityIdBytes);
+                    
+                    // Fan out to all connected streams
+                    await _dispatcher.DispatchAsync(
+                        conversationId.Value,
+                        request.Ciphertext.Memory,
+                        request.Epoch,
+                        senderPublicIdentityId,
+                        context.CancellationToken);
+                }
 
-            return new SubmitGroupMessageResponse { Success = true };
-        }
-        catch (UnauthorizedDomainException ex)
-        {
-            // Map auth failure to Unauthenticated
-            throw new RpcException(new Status(StatusCode.Unauthenticated, ex.Message));
-        }
-        catch (EpochConflictDomainException ex)
-        {
-            // Map concurrency/epoch conflict to Aborted
-            throw new RpcException(new Status(StatusCode.Aborted, ex.Message));
+                return new SubmitGroupMessageResponse { Success = true };
+            }
+            else if (status == RelayGroupOperationStatus.EpochConflict)
+            {
+                throw new RpcException(new Status(StatusCode.Aborted, "Epoch conflict: client state is stale."));
+            }
+            else if (status == RelayGroupOperationStatus.Unauthorized)
+            {
+                throw new RpcException(new Status(StatusCode.Unauthenticated, "Authentication failed."));
+            }
+            else if (status == RelayGroupOperationStatus.GroupNotFound)
+            {
+                throw new RpcException(new Status(StatusCode.NotFound, "Group not found."));
+            }
+            else
+            {
+                throw new RpcException(new Status(StatusCode.Internal, "Internal relay error."));
+            }
         }
         catch (ArgumentException ex)
         {
-            // Map validation errors to InvalidArgument
             throw new RpcException(new Status(StatusCode.InvalidArgument, ex.Message));
+        }
+        catch (RpcException)
+        {
+            throw;
         }
         catch (Exception)
         {
-            // Generic Internal Server Error to prevent leaking sensitive domain details
             throw new RpcException(new Status(StatusCode.Internal, "Internal relay error."));
         }
     }
@@ -102,35 +116,172 @@ public sealed class RelayGroupService : Percolator.Contracts.RelayGroupService.R
                 throw new ArgumentException("conversation_id is required.");
             if (request.PublicParams is null)
                 throw new ArgumentException("public_params is required.");
-            if (request.MemberPublicIdentityIds.Count ==0)
+            if (request.MemberPublicIdentityIds.Count == 0)
                 throw new ArgumentException("member_public_identity_ids must contain at least one member.");
+            if (request.EncryptedProfile is null)
+                throw new ArgumentException("encrypted_profile is required.");
 
             // Boundary Defensive Copy (Protobuf ByteString -> Domain Primitive)
             var conversationId = new ConversationId(new Guid(request.ConversationId.ToByteArray()));
             var publicParams = RelayGroupPublicParamsBytes.FromBytesOwned(request.PublicParams.ToByteArray());
+            var encryptedProfile = EncryptedGroupProfileBytes.FromBytesOwned(request.EncryptedProfile.ToByteArray());
 
-            // Convert PublicIdentityIds from protobuf to domain primitives
-            var memberPublicIdentityIds = request.MemberPublicIdentityIds
-                .Select(id => new Percolator.Chat.GroupLedger.PublicIdentityId(new Guid(id.ToByteArray())))
-                .ToList();
+            // Convert PublicIdentityIds from protobuf to domain primitives, then map to PeerIds
+            var memberPeerIds = new List<Percolator.Chat.GroupMembership.ChatPeerId>();
+            foreach (var idBytes in request.MemberPublicIdentityIds)
+            {
+                var publicIdentityId = new Percolator.Identity.PublicIdentityId(new Guid(idBytes.ToByteArray()));
+                var peerIdentity = await _peerIdentityRepository.GetOrCreateAsync(publicIdentityId, context.CancellationToken);
+                memberPeerIds.Add(new Percolator.Chat.GroupMembership.ChatPeerId(peerIdentity.Id.Value));
+            }
 
             await _ledgerRepository.ProvisionNewGroupAsync(
                 conversationId,
                 publicParams,
-                memberPublicIdentityIds,
+                encryptedProfile,
+                memberPeerIds,
                 context.CancellationToken).ConfigureAwait(false);
 
             return new ProvisionGroupResponse { Success = true };
         }
         catch (ArgumentException ex)
         {
-            // Map validation errors to InvalidArgument
             return new ProvisionGroupResponse { Success = false, Error = ex.Message };
         }
         catch (Exception)
         {
-            // Generic Internal Server Error to prevent leaking sensitive domain details
             return new ProvisionGroupResponse { Success = false, Error = "Internal relay error." };
+        }
+    }
+
+    public override async Task<ModifyGroupResponse> ModifyGroup(
+        ModifyGroupRequest request,
+        ServerCallContext context)
+    {
+        try
+        {
+            // Validate required fields
+            if (request.ConversationId is null)
+                throw new ArgumentException("conversation_id is required.");
+            if (request.Presentation is null)
+                throw new ArgumentException("presentation is required.");
+            if (request.NewEncryptedProfile is null)
+                throw new ArgumentException("new_encrypted_profile is required.");
+
+            // Boundary Defensive Copy (Protobuf ByteString -> Domain Primitive)
+            var conversationId = new ConversationId(new Guid(request.ConversationId.ToByteArray()));
+            var presentation = ZkPresentationBytes.FromBytesOwned(request.Presentation.ToByteArray());
+            var newEncryptedProfile = EncryptedGroupProfileBytes.FromBytesOwned(request.NewEncryptedProfile.ToByteArray());
+
+            // Convert PublicIdentityIds from protobuf to domain primitives
+            var addPublicIdentityIds = request.AddPublicIdentityIds
+                .Select(id => new Percolator.Identity.PublicIdentityId(new Guid(id.ToByteArray())))
+                .ToList();
+
+            var removePublicIdentityIds = request.RemovePublicIdentityIds
+                .Select(id => new Percolator.Identity.PublicIdentityId(new Guid(id.ToByteArray())))
+                .ToList();
+
+            var status = await _orchestrator.ModifyGroupAsync(
+                conversationId,
+                request.BaseEpoch,
+                presentation,
+                newEncryptedProfile,
+                addPublicIdentityIds,
+                removePublicIdentityIds,
+                context.CancellationToken);
+
+            // Map status to gRPC response
+            if (status == RelayGroupOperationStatus.Success)
+            {
+                return new ModifyGroupResponse { Success = true };
+            }
+            else if (status == RelayGroupOperationStatus.EpochConflict)
+            {
+                throw new RpcException(new Status(StatusCode.Aborted, "Epoch conflict: client state is stale."));
+            }
+            else if (status == RelayGroupOperationStatus.Unauthorized)
+            {
+                throw new RpcException(new Status(StatusCode.Unauthenticated, "Authentication failed."));
+            }
+            else if (status == RelayGroupOperationStatus.GroupNotFound)
+            {
+                throw new RpcException(new Status(StatusCode.NotFound, "Group not found."));
+            }
+            else
+            {
+                throw new RpcException(new Status(StatusCode.Internal, "Internal relay error."));
+            }
+        }
+        catch (ArgumentException ex)
+        {
+            throw new RpcException(new Status(StatusCode.InvalidArgument, ex.Message));
+        }
+        catch (RpcException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            throw new RpcException(new Status(StatusCode.Internal, "Internal relay error."));
+        }
+    }
+
+    public override async Task<GetGroupStateResponse> GetGroupState(
+        GetGroupStateRequest request,
+        ServerCallContext context)
+    {
+        try
+        {
+            // Validate required fields
+            if (request.ConversationId is null)
+                throw new ArgumentException("conversation_id is required.");
+            if (request.Presentation is null)
+                throw new ArgumentException("presentation is required.");
+
+            // Boundary Defensive Copy (Protobuf ByteString -> Domain Primitive)
+            var conversationId = new ConversationId(new Guid(request.ConversationId.ToByteArray()));
+            var presentation = ZkPresentationBytes.FromBytesOwned(request.Presentation.ToByteArray());
+
+            var (status, ledger) = await _orchestrator.GetGroupStateAsync(
+                conversationId,
+                presentation,
+                context.CancellationToken);
+
+            // Map status to gRPC response
+            if (status == RelayGroupOperationStatus.Success && ledger is not null)
+            {
+                return new GetGroupStateResponse
+                {
+                    CurrentEpoch = ledger.CurrentEpoch,
+                    PublicParams = Google.Protobuf.ByteString.CopyFrom(ledger.GroupPublicParams.Span),
+                    EncryptedProfile = Google.Protobuf.ByteString.CopyFrom(ledger.EncryptedProfile.Span)
+                };
+            }
+            else if (status == RelayGroupOperationStatus.Unauthorized)
+            {
+                throw new RpcException(new Status(StatusCode.Unauthenticated, "Authentication failed."));
+            }
+            else if (status == RelayGroupOperationStatus.GroupNotFound)
+            {
+                throw new RpcException(new Status(StatusCode.NotFound, "Group not found."));
+            }
+            else
+            {
+                throw new RpcException(new Status(StatusCode.Internal, "Internal relay error."));
+            }
+        }
+        catch (ArgumentException ex)
+        {
+            throw new RpcException(new Status(StatusCode.InvalidArgument, ex.Message));
+        }
+        catch (RpcException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            throw new RpcException(new Status(StatusCode.Internal, "Internal relay error."));
         }
     }
 
@@ -155,10 +306,15 @@ public sealed class RelayGroupService : Percolator.Contracts.RelayGroupService.R
             var senderPublicIdentityIdBytes = Convert.FromHexString(senderPublicIdentityIdStr);
             var senderPublicIdentityId = new Guid(senderPublicIdentityIdBytes);
 
+            // Map PublicIdentityId to PeerId for authorization check
+            var senderPeerIdentity = await _peerIdentityRepository.GetOrCreateAsync(
+                new Percolator.Identity.PublicIdentityId(senderPublicIdentityId),
+                context.CancellationToken);
+
             // Authorization Gate: Verify caller is a member of the conversation
             var isMember = await _ledgerRepository.IsMemberAsync(
                 new ConversationId(conversationId),
-                new Percolator.Chat.GroupLedger.PublicIdentityId(senderPublicIdentityId),
+                new Percolator.Chat.GroupMembership.ChatPeerId(senderPeerIdentity.Id.Value),
                 context.CancellationToken);
 
             if (!isMember)

@@ -705,10 +705,15 @@ public class PercolatorDbContext : DbContext
         modelBuilder.Entity<RelayBlindedRosterDbo>(entity =>
         {
             entity.ToTable("RelayBlindedRosters");
-            entity.HasKey(e => new { e.ConversationId, e.MemberPublicIdentityId });
+            entity.HasKey(e => new { e.ConversationId, e.MemberPeerId });
             entity.Property(e => e.ConversationId)
                 .IsRequired();
-            entity.Property(e => e.MemberPublicIdentityId)
+            entity.Property(e => e.MemberPeerId)
+                .IsRequired();
+            entity.HasOne<PeerIdentityDbo>()
+                .WithMany()
+                .HasForeignKey(e => e.MemberPeerId)
+                .OnDelete(DeleteBehavior.Restrict)
                 .IsRequired();
         });
 

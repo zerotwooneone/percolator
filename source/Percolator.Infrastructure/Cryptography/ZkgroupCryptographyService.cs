@@ -214,4 +214,58 @@ public sealed class ZkgroupCryptographyService : IGroupCryptographyService
             return false;
         }
     }
+
+    public byte[] EncryptGroupProfile(
+        GroupMasterKey masterKey,
+        ProfilePlaintextBytes profilePlaintext)
+    {
+        using var masterKeyHandle = DeserializeMasterKeyHandle(masterKey.Span);
+        using var secretParams = Signal.Interop.SignalCrypto.DeriveGroupSecretParams(masterKeyHandle);
+        
+        var blobKeyBytes = new byte[32];
+        Signal.Interop.SignalCrypto.GetBlobKey(secretParams, blobKeyBytes);
+        
+        using var aes = new System.Security.Cryptography.AesGcm(blobKeyBytes, 16);
+        byte[] nonce = new byte[12];
+        System.Security.Cryptography.RandomNumberGenerator.Fill(nonce);
+        
+        byte[] ciphertext = new byte[profilePlaintext.Length];
+        byte[] tag = new byte[16];
+        
+        aes.Encrypt(nonce, profilePlaintext.Span, ciphertext, tag);
+        
+        byte[] result = new byte[12 + ciphertext.Length + 16];
+        Buffer.BlockCopy(nonce, 0, result, 0, 12);
+        Buffer.BlockCopy(ciphertext, 0, result, 12, ciphertext.Length);
+        Buffer.BlockCopy(tag, 0, result, 12 + ciphertext.Length, 16);
+        
+        return result;
+    }
+
+    public ProfilePlaintextBytes DecryptGroupProfile(
+        GroupMasterKey masterKey,
+        ReadOnlySpan<byte> ciphertextSpan)
+    {
+        if (ciphertextSpan.Length < 12 + 16)
+        {
+            throw new ArgumentException("Ciphertext too short to contain nonce and tag");
+        }
+
+        using var masterKeyHandle = DeserializeMasterKeyHandle(masterKey.Span);
+        using var secretParams = Signal.Interop.SignalCrypto.DeriveGroupSecretParams(masterKeyHandle);
+        
+        var blobKeyBytes = new byte[32];
+        Signal.Interop.SignalCrypto.GetBlobKey(secretParams, blobKeyBytes);
+        
+        using var aes = new System.Security.Cryptography.AesGcm(blobKeyBytes, 16);
+        
+        byte[] nonce = ciphertextSpan.Slice(0, 12).ToArray();
+        byte[] ciphertext = ciphertextSpan.Slice(12, ciphertextSpan.Length - 28).ToArray();
+        byte[] tag = ciphertextSpan.Slice(ciphertextSpan.Length - 16, 16).ToArray();
+        
+        byte[] plaintext = new byte[ciphertext.Length];
+        aes.Decrypt(nonce, ciphertext, tag, plaintext);
+        
+        return ProfilePlaintextBytes.FromBytesOwned(plaintext);
+    }
 }

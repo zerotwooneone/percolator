@@ -238,6 +238,8 @@ message RatchetHeader {
 service RelayGroupService {
     rpc Publish(SubmitGroupMessageRequest) returns (SubmitGroupMessageResponse);
     rpc ProvisionGroup(ProvisionGroupRequest) returns (ProvisionGroupResponse);
+    rpc ModifyGroup(ModifyGroupRequest) returns (ModifyGroupResponse);
+    rpc GetGroupState(GetGroupStateRequest) returns (GetGroupStateResponse);
     rpc StreamGroupMessages(GroupStreamRequest) returns (stream GroupStreamResponse);
 }
 
@@ -260,12 +262,38 @@ message ProvisionGroupRequest {
     optional bytes public_params = 2;
     // List of member PublicIdentityIds (UUID bytes) for the blinded roster
     repeated bytes member_public_identity_ids = 3;
+    // Encrypted group profile (metadata)
+    optional bytes encrypted_profile = 4;
 }
 
 message ProvisionGroupResponse {
     optional uint32 version = 100;
     optional bool success = 1;
     optional string error = 2;
+}
+
+message ModifyGroupRequest {
+    optional bytes conversation_id = 1;
+    optional uint32 base_epoch = 2;
+    optional bytes presentation = 3;
+    optional bytes new_encrypted_profile = 4;
+    repeated bytes add_public_identity_ids = 5;
+    repeated bytes remove_public_identity_ids = 6;
+}
+
+message ModifyGroupResponse {
+    optional bool success = 1;
+}
+
+message GetGroupStateRequest {
+    optional bytes conversation_id = 1;
+    optional bytes presentation = 2;
+}
+
+message GetGroupStateResponse {
+    optional uint32 current_epoch = 1;
+    optional bytes public_params = 2;
+    optional bytes encrypted_profile = 3;
 }
 
 message GroupStreamRequest {

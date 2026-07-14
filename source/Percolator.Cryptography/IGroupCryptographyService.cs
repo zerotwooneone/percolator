@@ -74,6 +74,26 @@ public interface IGroupCryptographyService
     /// <param name="masterKey">The GroupMasterKey to derive from.</param>
     /// <returns>The derived ZK group public parameters.</returns>
     ZkGroupPublicParamsBytes DeriveGroupPublicParams(GroupMasterKey masterKey);
+
+    /// <summary>
+    /// Encrypts group profile plaintext using AEAD AES-GCM with a key derived from the master key.
+    /// </summary>
+    /// <param name="masterKey">The GroupMasterKey to derive the encryption key from.</param>
+    /// <param name="profilePlaintext">The plaintext profile data to encrypt.</param>
+    /// <returns>The encrypted profile bytes.</returns>
+    byte[] EncryptGroupProfile(
+        GroupMasterKey masterKey,
+        ProfilePlaintextBytes profilePlaintext);
+
+    /// <summary>
+    /// Decrypts group profile ciphertext using AEAD AES-GCM with a key derived from the master key.
+    /// </summary>
+    /// <param name="masterKey">The GroupMasterKey to derive the decryption key from.</param>
+    /// <param name="ciphertext">The encrypted profile bytes to decrypt.</param>
+    /// <returns>The decrypted profile plaintext.</returns>
+    ProfilePlaintextBytes DecryptGroupProfile(
+        GroupMasterKey masterKey,
+        ReadOnlySpan<byte> ciphertext);
 }
 
 public static class GroupCryptographyServiceExtensions

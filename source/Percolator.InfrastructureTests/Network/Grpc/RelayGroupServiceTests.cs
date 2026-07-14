@@ -10,6 +10,9 @@ using Percolator.Contracts;
 using InfrastructureService = Percolator.Infrastructure.Network.Grpc.RelayGroupService;
 using Percolator.Infrastructure.Network.Grpc;
 using System.Threading.Channels;
+using Percolator.Chat.GroupMembership;
+using Percolator.Identity;
+using Percolator.Identity.Model;
 
 namespace Percolator.InfrastructureTests.Network.Grpc;
 
@@ -27,9 +30,9 @@ public class RelayGroupServiceTests
                 It.IsAny<ZkPresentationBytes>(),
                 It.IsAny<CiphertextBytes>(),
                 It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new UnauthorizedDomainException("Invalid credentials"));
+            .ReturnsAsync(RelayGroupOperationStatus.Unauthorized);
 
-        var service = new InfrastructureService(orchestrator.Object, Mock.Of<IRelayGroupLedgerRepository>(), Mock.Of<IRelayGroupStreamDispatcher>());
+        var service = new InfrastructureService(orchestrator.Object, Mock.Of<IRelayGroupLedgerRepository>(), Mock.Of<IRelayGroupStreamDispatcher>(), Mock.Of<IPeerIdentityRepository>());
 
         var request = new SubmitGroupMessageRequest
         {
@@ -51,7 +54,7 @@ public class RelayGroupServiceTests
         // ASSERT
         var ex = await act.Should().ThrowAsync<RpcException>();
         ex.Which.StatusCode.Should().Be(StatusCode.Unauthenticated);
-        ex.Which.Status.Detail.Should().Be("Invalid credentials");
+        ex.Which.Status.Detail.Should().Be("Authentication failed.");
     }
 
     [Test]
@@ -65,9 +68,9 @@ public class RelayGroupServiceTests
                 It.IsAny<ZkPresentationBytes>(),
                 It.IsAny<CiphertextBytes>(),
                 It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new EpochConflictDomainException("Epoch mismatch"));
+            .ReturnsAsync(RelayGroupOperationStatus.EpochConflict);
 
-        var service = new InfrastructureService(orchestrator.Object, Mock.Of<IRelayGroupLedgerRepository>(), Mock.Of<IRelayGroupStreamDispatcher>());
+        var service = new InfrastructureService(orchestrator.Object, Mock.Of<IRelayGroupLedgerRepository>(), Mock.Of<IRelayGroupStreamDispatcher>(), Mock.Of<IPeerIdentityRepository>());
 
         var request = new SubmitGroupMessageRequest
         {
@@ -89,7 +92,7 @@ public class RelayGroupServiceTests
         // ASSERT
         var ex = await act.Should().ThrowAsync<RpcException>();
         ex.Which.StatusCode.Should().Be(StatusCode.Aborted);
-        ex.Which.Status.Detail.Should().Be("Epoch mismatch");
+        ex.Which.Status.Detail.Should().Be("Epoch conflict: client state is stale.");
     }
 
     [Test]
@@ -99,14 +102,19 @@ public class RelayGroupServiceTests
         var ledgerRepository = new Mock<IRelayGroupLedgerRepository>();
         ledgerRepository.Setup(r => r.IsMemberAsync(
                 It.IsAny<ConversationId>(),
-                It.IsAny<PublicIdentityId>(),
+                It.IsAny<ChatPeerId>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
+
+        var peerIdentityRepository = new Mock<IPeerIdentityRepository>();
+        peerIdentityRepository.Setup(r => r.GetOrCreateAsync(It.IsAny<Percolator.Identity.PublicIdentityId>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PeerIdentity(new PeerId(1), new Percolator.Identity.PublicIdentityId(Guid.NewGuid())));
 
         var service = new InfrastructureService(
             Mock.Of<IRelayGroupOrchestrator>(),
             ledgerRepository.Object,
-            Mock.Of<IRelayGroupStreamDispatcher>());
+            Mock.Of<IRelayGroupStreamDispatcher>(),
+            peerIdentityRepository.Object);
 
         var conversationId = Guid.NewGuid();
         var request = new GroupStreamRequest
@@ -138,7 +146,7 @@ public class RelayGroupServiceTests
         var ledgerRepository = new Mock<IRelayGroupLedgerRepository>();
         ledgerRepository.Setup(r => r.IsMemberAsync(
                 It.IsAny<ConversationId>(),
-                It.IsAny<PublicIdentityId>(),
+                It.IsAny<ChatPeerId>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
 
@@ -148,10 +156,15 @@ public class RelayGroupServiceTests
         dispatcher.Setup(d => d.RegisterStream(It.IsAny<Guid>(), It.IsAny<Guid>()))
             .Returns(reader);
 
+        var peerIdentityRepository = new Mock<IPeerIdentityRepository>();
+        peerIdentityRepository.Setup(r => r.GetOrCreateAsync(It.IsAny<Percolator.Identity.PublicIdentityId>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PeerIdentity(new PeerId(1), new Percolator.Identity.PublicIdentityId(Guid.NewGuid())));
+
         var service = new InfrastructureService(
             Mock.Of<IRelayGroupOrchestrator>(),
             ledgerRepository.Object,
-            dispatcher.Object);
+            dispatcher.Object,
+            peerIdentityRepository.Object);
 
         var conversationId = Guid.NewGuid();
         var request = new GroupStreamRequest
@@ -176,9 +189,6 @@ public class RelayGroupServiceTests
         // ACT
         var streamTask = service.StreamGroupMessages(request, responseStreamMock.Object, ctx);
         
-        // Wait a moment for stream to start
-        await Task.Delay(100);
-        
         // Complete the channel to signal stream should end
         channel.Writer.Complete();
         
@@ -186,6 +196,376 @@ public class RelayGroupServiceTests
         // Public behavior: Stream should complete without throwing when channel completes
         // This verifies authorization passed and stream was registered successfully
         await streamTask;
+    }
+
+    [Test]
+    public async Task ModifyGroup_WhenValid_CallsOrchestratorAndReturnsSuccess()
+    {
+        // ARRANGE
+        var orchestrator = new Mock<IRelayGroupOrchestrator>();
+        orchestrator.Setup(o => o.ModifyGroupAsync(
+                It.IsAny<ConversationId>(),
+                It.IsAny<uint>(),
+                It.IsAny<ZkPresentationBytes>(),
+                It.IsAny<EncryptedGroupProfileBytes>(),
+                It.IsAny<IReadOnlyList<Percolator.Identity.PublicIdentityId>>(),
+                It.IsAny<IReadOnlyList<Percolator.Identity.PublicIdentityId>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RelayGroupOperationStatus.Success);
+
+        var service = new InfrastructureService(orchestrator.Object, Mock.Of<IRelayGroupLedgerRepository>(), Mock.Of<IRelayGroupStreamDispatcher>(), Mock.Of<IPeerIdentityRepository>());
+
+        var request = new ModifyGroupRequest
+        {
+            ConversationId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
+            BaseEpoch = 5,
+            Presentation = ByteString.CopyFrom(new byte[] { 0x01, 0x02 }),
+            NewEncryptedProfile = ByteString.CopyFrom(new byte[] { 0x03, 0x04 })
+        };
+        request.AddPublicIdentityIds.Add(ByteString.CopyFrom(Guid.NewGuid().ToByteArray()));
+        request.RemovePublicIdentityIds.Add(ByteString.CopyFrom(Guid.NewGuid().ToByteArray()));
+
+        var ctx = new ServerCallContextStub(
+            peer: "ipv4:127.0.0.1:7777",
+            deadline: new DateTime(2025, 1, 1, 12, 1, 0, DateTimeKind.Utc),
+            requestHeaders: new Metadata(),
+            cancellationToken: CancellationToken.None);
+
+        // ACT
+        var response = await service.ModifyGroup(request, ctx);
+
+        // ASSERT
+        response.Success.Should().BeTrue();
+    }
+
+    [Test]
+    public async Task ModifyGroup_WhenEpochConflict_ThrowsAborted()
+    {
+        // ARRANGE
+        var orchestrator = new Mock<IRelayGroupOrchestrator>();
+        orchestrator.Setup(o => o.ModifyGroupAsync(
+                It.IsAny<ConversationId>(),
+                It.IsAny<uint>(),
+                It.IsAny<ZkPresentationBytes>(),
+                It.IsAny<EncryptedGroupProfileBytes>(),
+                It.IsAny<IReadOnlyList<Percolator.Identity.PublicIdentityId>>(),
+                It.IsAny<IReadOnlyList<Percolator.Identity.PublicIdentityId>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RelayGroupOperationStatus.EpochConflict);
+
+        var service = new InfrastructureService(orchestrator.Object, Mock.Of<IRelayGroupLedgerRepository>(), Mock.Of<IRelayGroupStreamDispatcher>(), Mock.Of<IPeerIdentityRepository>());
+
+        var request = new ModifyGroupRequest
+        {
+            ConversationId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
+            BaseEpoch = 3,
+            Presentation = ByteString.CopyFrom(new byte[] { 0x01, 0x02 }),
+            NewEncryptedProfile = ByteString.CopyFrom(new byte[] { 0x03, 0x04 })
+        };
+
+        var ctx = new ServerCallContextStub(
+            peer: "ipv4:127.0.0.1:7777",
+            deadline: new DateTime(2025, 1, 1, 12, 1, 0, DateTimeKind.Utc),
+            requestHeaders: new Metadata(),
+            cancellationToken: CancellationToken.None);
+
+        // ACT
+        var act = async () => await service.ModifyGroup(request, ctx);
+
+        // ASSERT
+        var ex = await act.Should().ThrowAsync<RpcException>();
+        ex.Which.StatusCode.Should().Be(StatusCode.Aborted);
+        ex.Which.Status.Detail.Should().Be("Epoch conflict: client state is stale.");
+    }
+
+    [Test]
+    public async Task GetGroupState_WhenValid_ReturnsGroupState()
+    {
+        // ARRANGE
+        var orchestrator = new Mock<IRelayGroupOrchestrator>();
+        var conversationId = new ConversationId(Guid.NewGuid());
+        var publicParams = RelayGroupPublicParamsBytes.FromBytesOwned(new byte[] { 0x01, 0x02 });
+        var encryptedProfile = EncryptedGroupProfileBytes.FromBytesOwned(new byte[] { 0x03, 0x04 });
+        var ledger = new RelayGroupLedger(conversationId, 10, publicParams, encryptedProfile, 1);
+
+        orchestrator.Setup(o => o.GetGroupStateAsync(
+                It.IsAny<ConversationId>(),
+                It.IsAny<ZkPresentationBytes>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RelayGroupOperationStatus.Success, ledger));
+
+        var service = new InfrastructureService(orchestrator.Object, Mock.Of<IRelayGroupLedgerRepository>(), Mock.Of<IRelayGroupStreamDispatcher>(), Mock.Of<IPeerIdentityRepository>());
+
+        var request = new GetGroupStateRequest
+        {
+            ConversationId = ByteString.CopyFrom(conversationId.Value.ToByteArray()),
+            Presentation = ByteString.CopyFrom(new byte[] { 0x05, 0x06 })
+        };
+
+        var ctx = new ServerCallContextStub(
+            peer: "ipv4:127.0.0.1:7777",
+            deadline: new DateTime(2025, 1, 1, 12, 1, 0, DateTimeKind.Utc),
+            requestHeaders: new Metadata(),
+            cancellationToken: CancellationToken.None);
+
+        // ACT
+        var response = await service.GetGroupState(request, ctx);
+
+        // ASSERT
+        response.CurrentEpoch.Should().Be(10);
+        response.PublicParams.Should().NotBeNull();
+        response.EncryptedProfile.Should().NotBeNull();
+    }
+
+    [Test]
+    public async Task GetGroupState_WhenUnauthorized_ThrowsUnauthenticated()
+    {
+        // ARRANGE
+        var orchestrator = new Mock<IRelayGroupOrchestrator>();
+        orchestrator.Setup(o => o.GetGroupStateAsync(
+                It.IsAny<ConversationId>(),
+                It.IsAny<ZkPresentationBytes>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RelayGroupOperationStatus.Unauthorized, null));
+
+        var service = new InfrastructureService(orchestrator.Object, Mock.Of<IRelayGroupLedgerRepository>(), Mock.Of<IRelayGroupStreamDispatcher>(), Mock.Of<IPeerIdentityRepository>());
+
+        var request = new GetGroupStateRequest
+        {
+            ConversationId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
+            Presentation = ByteString.CopyFrom(new byte[] { 0x01, 0x02 })
+        };
+
+        var ctx = new ServerCallContextStub(
+            peer: "ipv4:127.0.0.1:7777",
+            deadline: new DateTime(2025, 1, 1, 12, 1, 0, DateTimeKind.Utc),
+            requestHeaders: new Metadata(),
+            cancellationToken: CancellationToken.None);
+
+        // ACT
+        var act = async () => await service.GetGroupState(request, ctx);
+
+        // ASSERT
+        var ex = await act.Should().ThrowAsync<RpcException>();
+        ex.Which.StatusCode.Should().Be(StatusCode.Unauthenticated);
+    }
+
+    [Test]
+    public async Task Publish_WhenGroupNotFound_ThrowsNotFound()
+    {
+        // ARRANGE
+        var orchestrator = new Mock<IRelayGroupOrchestrator>();
+        orchestrator.Setup(o => o.PublishGroupRelayMessageAsync(
+                It.IsAny<ConversationId>(),
+                It.IsAny<uint>(),
+                It.IsAny<ZkPresentationBytes>(),
+                It.IsAny<CiphertextBytes>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RelayGroupOperationStatus.GroupNotFound);
+
+        var service = new InfrastructureService(orchestrator.Object, Mock.Of<IRelayGroupLedgerRepository>(), Mock.Of<IRelayGroupStreamDispatcher>(), Mock.Of<IPeerIdentityRepository>());
+
+        var request = new SubmitGroupMessageRequest
+        {
+            ConversationId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
+            Presentation = ByteString.CopyFrom(new byte[] { 0x01, 0x02 }),
+            Ciphertext = ByteString.CopyFrom(new byte[] { 0x03, 0x04 }),
+            Epoch = 1
+        };
+
+        var ctx = new ServerCallContextStub(
+            peer: "ipv4:127.0.0.1:7777",
+            deadline: new DateTime(2025, 1, 1, 12, 1, 0, DateTimeKind.Utc),
+            requestHeaders: new Metadata(),
+            cancellationToken: CancellationToken.None);
+
+        // ACT
+        var act = async () => await service.Publish(request, ctx);
+
+        // ASSERT
+        var ex = await act.Should().ThrowAsync<RpcException>();
+        ex.Which.StatusCode.Should().Be(StatusCode.NotFound);
+    }
+
+    [Test]
+    public async Task Publish_WhenSuccess_ReturnsSuccessResponse()
+    {
+        // ARRANGE
+        var orchestrator = new Mock<IRelayGroupOrchestrator>();
+        orchestrator.Setup(o => o.PublishGroupRelayMessageAsync(
+                It.IsAny<ConversationId>(),
+                It.IsAny<uint>(),
+                It.IsAny<ZkPresentationBytes>(),
+                It.IsAny<CiphertextBytes>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RelayGroupOperationStatus.Success);
+
+        var service = new InfrastructureService(orchestrator.Object, Mock.Of<IRelayGroupLedgerRepository>(), Mock.Of<IRelayGroupStreamDispatcher>(), Mock.Of<IPeerIdentityRepository>());
+
+        var request = new SubmitGroupMessageRequest
+        {
+            ConversationId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
+            Presentation = ByteString.CopyFrom(new byte[] { 0x01, 0x02 }),
+            Ciphertext = ByteString.CopyFrom(new byte[] { 0x03, 0x04 }),
+            Epoch = 1
+        };
+
+        var ctx = new ServerCallContextStub(
+            peer: "ipv4:127.0.0.1:7777",
+            deadline: new DateTime(2025, 1, 1, 12, 1, 0, DateTimeKind.Utc),
+            requestHeaders: new Metadata(),
+            cancellationToken: CancellationToken.None);
+
+        // ACT
+        var response = await service.Publish(request, ctx);
+
+        // ASSERT
+        response.Success.Should().BeTrue();
+    }
+
+    [Test]
+    public async Task ModifyGroup_WhenUnauthorized_ThrowsUnauthenticated()
+    {
+        // ARRANGE
+        var orchestrator = new Mock<IRelayGroupOrchestrator>();
+        orchestrator.Setup(o => o.ModifyGroupAsync(
+                It.IsAny<ConversationId>(),
+                It.IsAny<uint>(),
+                It.IsAny<ZkPresentationBytes>(),
+                It.IsAny<EncryptedGroupProfileBytes>(),
+                It.IsAny<IReadOnlyList<Percolator.Identity.PublicIdentityId>>(),
+                It.IsAny<IReadOnlyList<Percolator.Identity.PublicIdentityId>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RelayGroupOperationStatus.Unauthorized);
+
+        var service = new InfrastructureService(orchestrator.Object, Mock.Of<IRelayGroupLedgerRepository>(), Mock.Of<IRelayGroupStreamDispatcher>(), Mock.Of<IPeerIdentityRepository>());
+
+        var request = new ModifyGroupRequest
+        {
+            ConversationId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
+            BaseEpoch = 5,
+            Presentation = ByteString.CopyFrom(new byte[] { 0x01, 0x02 }),
+            NewEncryptedProfile = ByteString.CopyFrom(new byte[] { 0x03, 0x04 })
+        };
+
+        var ctx = new ServerCallContextStub(
+            peer: "ipv4:127.0.0.1:7777",
+            deadline: new DateTime(2025, 1, 1, 12, 1, 0, DateTimeKind.Utc),
+            requestHeaders: new Metadata(),
+            cancellationToken: CancellationToken.None);
+
+        // ACT
+        var act = async () => await service.ModifyGroup(request, ctx);
+
+        // ASSERT
+        var ex = await act.Should().ThrowAsync<RpcException>();
+        ex.Which.StatusCode.Should().Be(StatusCode.Unauthenticated);
+    }
+
+    [Test]
+    public async Task ModifyGroup_WhenGroupNotFound_ThrowsNotFound()
+    {
+        // ARRANGE
+        var orchestrator = new Mock<IRelayGroupOrchestrator>();
+        orchestrator.Setup(o => o.ModifyGroupAsync(
+                It.IsAny<ConversationId>(),
+                It.IsAny<uint>(),
+                It.IsAny<ZkPresentationBytes>(),
+                It.IsAny<EncryptedGroupProfileBytes>(),
+                It.IsAny<IReadOnlyList<Percolator.Identity.PublicIdentityId>>(),
+                It.IsAny<IReadOnlyList<Percolator.Identity.PublicIdentityId>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RelayGroupOperationStatus.GroupNotFound);
+
+        var service = new InfrastructureService(orchestrator.Object, Mock.Of<IRelayGroupLedgerRepository>(), Mock.Of<IRelayGroupStreamDispatcher>(), Mock.Of<IPeerIdentityRepository>());
+
+        var request = new ModifyGroupRequest
+        {
+            ConversationId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
+            BaseEpoch = 5,
+            Presentation = ByteString.CopyFrom(new byte[] { 0x01, 0x02 }),
+            NewEncryptedProfile = ByteString.CopyFrom(new byte[] { 0x03, 0x04 })
+        };
+
+        var ctx = new ServerCallContextStub(
+            peer: "ipv4:127.0.0.1:7777",
+            deadline: new DateTime(2025, 1, 1, 12, 1, 0, DateTimeKind.Utc),
+            requestHeaders: new Metadata(),
+            cancellationToken: CancellationToken.None);
+
+        // ACT
+        var act = async () => await service.ModifyGroup(request, ctx);
+
+        // ASSERT
+        var ex = await act.Should().ThrowAsync<RpcException>();
+        ex.Which.StatusCode.Should().Be(StatusCode.NotFound);
+    }
+
+    [Test]
+    public async Task GetGroupState_WhenGroupNotFound_ThrowsNotFound()
+    {
+        // ARRANGE
+        var orchestrator = new Mock<IRelayGroupOrchestrator>();
+        orchestrator.Setup(o => o.GetGroupStateAsync(
+                It.IsAny<ConversationId>(),
+                It.IsAny<ZkPresentationBytes>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RelayGroupOperationStatus.GroupNotFound, null));
+
+        var service = new InfrastructureService(orchestrator.Object, Mock.Of<IRelayGroupLedgerRepository>(), Mock.Of<IRelayGroupStreamDispatcher>(), Mock.Of<IPeerIdentityRepository>());
+
+        var request = new GetGroupStateRequest
+        {
+            ConversationId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
+            Presentation = ByteString.CopyFrom(new byte[] { 0x01, 0x02 })
+        };
+
+        var ctx = new ServerCallContextStub(
+            peer: "ipv4:127.0.0.1:7777",
+            deadline: new DateTime(2025, 1, 1, 12, 1, 0, DateTimeKind.Utc),
+            requestHeaders: new Metadata(),
+            cancellationToken: CancellationToken.None);
+
+        // ACT
+        var act = async () => await service.GetGroupState(request, ctx);
+
+        // ASSERT
+        var ex = await act.Should().ThrowAsync<RpcException>();
+        ex.Which.StatusCode.Should().Be(StatusCode.NotFound);
+    }
+
+    [Test]
+    public async Task StreamGroupMessages_WhenAuthorizationHeaderMissing_ThrowsUnauthenticated()
+    {
+        // ARRANGE
+        var ledgerRepository = new Mock<IRelayGroupLedgerRepository>();
+        var service = new InfrastructureService(
+            Mock.Of<IRelayGroupOrchestrator>(),
+            ledgerRepository.Object,
+            Mock.Of<IRelayGroupStreamDispatcher>(),
+            Mock.Of<IPeerIdentityRepository>());
+
+        var conversationId = Guid.NewGuid();
+        var request = new GroupStreamRequest
+        {
+            ConversationId = ByteString.CopyFrom(conversationId.ToByteArray())
+        };
+
+        var headers = new Metadata();
+        // No authorization header added
+
+        var ctx = new ServerCallContextStub(
+            peer: "ipv4:127.0.0.1:7777",
+            deadline: new DateTime(2025, 1, 1, 12, 1, 0, DateTimeKind.Utc),
+            requestHeaders: headers,
+            cancellationToken: CancellationToken.None);
+
+        // ACT
+        var act = async () => await service.StreamGroupMessages(request, Mock.Of<IServerStreamWriter<GroupStreamResponse>>(), ctx);
+
+        // ASSERT
+        var ex = await act.Should().ThrowAsync<RpcException>();
+        ex.Which.StatusCode.Should().Be(StatusCode.Unauthenticated);
     }
 
     private sealed class ServerCallContextStub : ServerCallContext
