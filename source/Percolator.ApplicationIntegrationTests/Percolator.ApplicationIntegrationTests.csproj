@@ -26,4 +26,10 @@
     <ProjectReference Include="..\Percolator.Node\Percolator.Node.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="..\Percolator.Infrastructure\NativeBinaries\signal_shim.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>
