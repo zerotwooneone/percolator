@@ -112,11 +112,12 @@ Implementation Requirements
 * In `RelayBlindedRosterDbo`, remove `MemberPublicIdentityId` and replace it with `public uint MemberPeerId { get; set; }`. Add a Foreign Key relationship to `PeerIdentityDbo.PeerId` for strict referential integrity.
 
 4. The Domain Updates (`Percolator.Chat/GroupLedger`)
-* Update the `RelayGroupLedger` aggregate.
+* Update the `RelayGroupLedger` aggregate to better encapsulate its business rules (protecting invariants against anemic domain logic).
     * Add `public EncryptedGroupProfileBytes EncryptedProfile { get; private set; }`.
     * Update the constructor to take `EncryptedGroupProfileBytes`.
-    * Add `public void Mutate(uint requestedEpoch, EncryptedGroupProfileBytes newProfile)`. This method asserts the new epoch is strictly greater, then updates the fields.
-* Modify the `AdvanceEpoch` method to be removed or replaced, as chat messages no longer advance the epoch.
+    * Add `public bool CanAcceptChatMessage(uint requestedEpoch)`. This method evaluates `requestedEpoch == CurrentEpoch` to enforce the non-mutating concurrency check for data plane messages.
+    * Add `public bool TryApplyMutation(uint baseEpoch, EncryptedGroupProfileBytes newProfile)`. This method asserts that `baseEpoch == CurrentEpoch`. If valid, it increments `CurrentEpoch++`, updates `EncryptedProfile = newProfile`, and returns `true`. Otherwise, it returns `false`.
+* Remove the old `AdvanceEpoch` method, as the concept of blindly setting the epoch from the application layer violates our new concurrency rules.
 * Update `IRelayGroupLedgerRepository`:
     * Add `EncryptedGroupProfileBytes encryptedProfile` to the signature of `ProvisionNewGroupAsync` and ensure it accepts `IReadOnlyList<Percolator.Identity.PeerId>` instead of `PublicIdentityId`.
     * Add a new method: `Task UpdateGroupStateAsync(RelayGroupLedger ledger, IReadOnlyList<Percolator.Identity.PeerId> addPeerIds, IReadOnlyList<Percolator.Identity.PeerId> removePeerIds, CancellationToken cancellationToken);` which executes the ledger update and the blinded roster insertions/deletions inside a single EF Core transaction.
@@ -126,9 +127,9 @@ Implementation Requirements
 5. Service Implementation (`Percolator.Application/Chat` & `Percolator.Infrastructure/Network`)
 * **RelayGroupOperationStatus Enum:** Define an enum `RelayGroupOperationStatus { Success, EpochConflict, Unauthorized, GroupNotFound }` in `Percolator.Application.Chat` to communicate expected domain failures without throwing exceptions.
 * **RelayGroupOrchestrator:**
-    * In `PublishGroupRelayMessageAsync`, change the return type to `Task<RelayGroupOperationStatus>`. **Delete** the code that advances the epoch. The method should now just verify the ZK proof against the current `GroupPublicParams`. Replace `ledger.AdvanceEpoch` with a validation check: `if (requestedEpoch != ledger.CurrentEpoch) return RelayGroupOperationStatus.EpochConflict;`. If auth fails, return `Unauthorized`. If successful, queue the message and return `Success`.
+    * In `PublishGroupRelayMessageAsync`, change the return type to `Task<RelayGroupOperationStatus>`. **Delete** the code that advances the epoch. Replace `ledger.AdvanceEpoch` by deferring to the aggregate's invariant: `if (!ledger.CanAcceptChatMessage(requestedEpoch)) return RelayGroupOperationStatus.EpochConflict;`. If auth fails, return `Unauthorized`. If successful, queue the message and return `Success`.
     * Add a new method: `Task<RelayGroupOperationStatus> ModifyGroupAsync(ConversationId conversationId, uint baseEpoch, ZkPresentationBytes presentation, EncryptedGroupProfileBytes newProfile, IReadOnlyList<Percolator.Chat.GroupLedger.PublicIdentityId> addPublicIdentityIds, IReadOnlyList<Percolator.Chat.GroupLedger.PublicIdentityId> removePublicIdentityIds, CancellationToken ct);`.
-    * In `ModifyGroupAsync`: Return `EpochConflict`, `Unauthorized`, or `GroupNotFound` on domain failures. If valid, translate the `PublicIdentityId`s into `Percolator.Identity.PeerId`s (provisioning new ones if necessary via the Identity layer). Interact with `IRelayGroupLedgerRepository.UpdateGroupStateAsync` to persist the ledger changes alongside the insertions/deletions in the `RelayBlindedRosters` table. Finally, return `Success`.
+    * In `ModifyGroupAsync`: Verify the presentation. Defer the state mutation to the aggregate: `if (!ledger.TryApplyMutation(baseEpoch, newProfile)) return RelayGroupOperationStatus.EpochConflict;`. Translate the `PublicIdentityId`s into `Percolator.Identity.PeerId`s (provisioning new ones if necessary via the Identity layer). Interact with `IRelayGroupLedgerRepository.UpdateGroupStateAsync` to persist the ledger changes alongside the insertions/deletions in the `RelayBlindedRosters` table. Finally, return `Success`.
     * Add a new method: `Task<RelayGroupLedger?> GetGroupStateAsync(ConversationId conversationId, ZkPresentationBytes presentation, CancellationToken ct);`. Verify the ZK proof before returning the ledger (or null if not found/unauthorized).
 * **RelayGroupService (gRPC):**
     * Update `Publish` to evaluate the returned `RelayGroupOperationStatus` and throw the corresponding `RpcException(StatusCode.Aborted)` or `RpcException(StatusCode.Unauthenticated)` based on the enum, removing the need for domain exception catch blocks.
