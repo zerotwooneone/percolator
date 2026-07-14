@@ -46,130 +46,94 @@ This chunk completed the Micro-PKI infrastructure that was deferred from Chunk 3
 This chunk implemented the Signal Protocol Group V2 Relay Ledger and Fan-Out mechanism. It introduced atomic ledger updates and message queue inserts to ensure concurrency control via manual version checking, while also establishing the core external gRPC contracts for handling incoming group message publish requests.
 ---
 ## Chunk 5 ✅ COMPLETE
-**Group provisioning through outbox**
-This chunk refactored the identity system to use PublicIdentityId (Guid) as the global identifier and PeerId/SelfId (uint) as local database surrogate keys. It addressed incorrect BitConverter conversions, updated network contracts to use PublicIdentityId instead of PKH for routing, and fixed identity resolution logic throughout the codebase.
+**Group Provisioning Through Outbox**
+This chunk refactored the identity system to use `PublicIdentityId` (Guid) as the global identifier and `PeerId`/`SelfId` (uint) as local database surrogate keys. It updated network contracts to use `PublicIdentityId` instead of PKH for routing, fixing identity resolution logic throughout the codebase, including the simulator.
 ---
-### Chunk 5.1 
-The simulator and protocol currently rely heavily on `IdentityPublicKeyHash` (PKH) for over-the-wire routing and identity resolution, whereas Signal uses Service IDs (UUIDs/PNIs) for these operations. `PublicIdentityId` was added to several handshake messages recently but has not yet permeated the routing, queueing, and application layers.
+## Chunk 6 ✅ COMPLETE
+**The Streaming Data Plane**
+This chunk implemented the real-time Data Plane for Group V2 messaging. On the Relay side, it introduced `GrpcRelayGroupStreamDispatcher` for non-blocking channel-based fan-out. On the Client side, it implemented `RelayGroupStreamWorker` and `GroupStreamIngressProcessor` to catch incoming group messages, verify the sender's membership, enforce optimistic epoch validation, and decrypt the contents locally into the SQLite database.
 
-Here is the step-by-step plan to transition the simulator, protocol, and main application entirely to `PublicIdentityId`.
-
-**1. Protocol Updates (`internal_messaging.proto`)**
-The protocol itself dictates PKH usage for routing and addressing. 
-*   **Message Queueing:** In `EnqueueOpaqueMessageRequest`, replace `recipient_public_key_hash` with `recipient_public_identity_id` (bytes).
-*   **Pre-key Submission:** In `SubmitPreKeyBundleRequest`, add `optional bytes public_identity_id` so the relay knows which UUID to index the bundle under.
-*   **Pre-key Fetching:** In `GetPreKeyBundleRequest`, replace `public_key_hash` with `public_identity_id` (bytes).
-*   **Chat 1:1 Routing:** In `TextMessage`, `ReadReceipt`, `EmojiAnnotation`, and `DeliveredReceipt`, replace `optional bytes public_key_hash` with `optional bytes public_identity_id` (bytes).
-
-**2. Main Application Updates (`Percolator.Application` & `Percolator.Infrastructure`)**
-The main application uses PKH for identity resolution, routing, and sealed sender authentication.
-*   **Commands:** Update `InitiateHandshakeViaHostCommand` to use `TargetPublicIdentityId` instead of `TargetPublicKeyHash`.
-*   **Identity Resolution:** In `IPeerIdentityQueries` and its implementations, replace methods like `GetPublicKeyByPkhAsync(IdentityPublicKeyHash pkh)` with `GetPublicKeyByPublicIdentityIdAsync(PublicIdentityId id)`. Shift network ingress resolution to `GetByPublicIdentityIdAsync` and deprecate `FindByPublicKeyHashAsync`.
-*   **Routing Profiles:** Ensure `PeerRoutingProfile` and related tables use `PublicIdentityId` as the unique identifier for routing lookups over the wire instead of PKH.
-*   **Sealed Sender Authentication:** In `PeerAuthenticationService` and related tests (`AuthenticateDeliveryCertificateRequestAsync`), replace `senderPkh` with `senderPublicIdentityId` in the method signature and the signed payload format (i.e. `{senderPublicIdentityId}{timestamp}`).
-*   **Message Handlers:** Update `ProcessInternalEnvelopeHandler` and `DeliverOpaqueMessageHandler` to extract and honor `public_identity_id` when parsing chat envelopes or communicating with the MQ service and DHT.
-*   **PreKey and DHT Updates:** Update `GetPreKeyBundleQuery`, `GetPreKeyBundleHandler`, DHT node logging, and underlying PreKey stores to resolve bundles by mapping the incoming `PublicIdentityId` to the surrogate `PeerId`, dropping the PKH lookup logic.
-*   **Database Migrations:** Create an EF Core migration to alter `MessageQueueItemDbo` (the `MessageQueue` table). Drop `RecipientPkh` and replace it with `RecipientPublicIdentityId`. (`PreKeyBundleDbo` and `PendingSessionDbo` are safe as they already use the `PeerId` surrogate key).
-
-**3. Simulator Persistence & DTO Updates (`SimulatorState.cs` & `JsonSimulatorStateRepository.cs`)**
-The simulator persists relay queues and pending handshakes using PKH. These must be migrated to persist and identify by UUID.
-*   **Pending Handshakes:** In `StandardSignalStoreDto`, rename `PendingHandshakeToMainResponderPublicKeyHash` to `PendingHandshakeToMainResponderPublicIdentityId` (and update `SimulatedPeerModel` accordingly).
-*   **Relay Queues:** In `RelayQueuedBlobDto` and `InboundRelayMessageSnapshot`, replace `RecipientRoutingKey` / `TargetIdentityPublicKeyHash` with `TargetPublicIdentityId`.
-*   **Pre-key Store:** In `PublishedPreKeyBundleDto`, replace `RecipientPublicKeyHash` with `RecipientPublicIdentityId`.
-*   **Routing State:** In `SimulatedPeerDto` and `SimulatedPeerModel`, replace `TargetPublicKeyHash` with `TargetPublicIdentityId`.
-
-**4. Simulator Core Services Updates (`ISimulatorStateService.cs`)**
-The API surface of the simulator dictates PKH routing for queues and standard signal handshakes.
-*   **Lookups:** Replace `TryGetPeerIdByIdentityPublicKeyHashAsync` with `TryGetPeerIdByPublicIdentityIdAsync(PublicIdentityId id)`.
-*   **Relay Queuing Methods:** Update the signature of `EnqueueRelayDownstreamToPeerAsync` and `DequeueRelayDownstreamToPeerAsync` to take `PublicIdentityId targetPublicIdentityId` instead of `IdentityPublicKeyHash targetIdentityPublicKeyHash`.
-*   **Handshakes:** Rename and update `InitiateStandardHandshakeToMainByRelayPkhAsync` to `InitiateStandardHandshakeToMainByRelayPublicIdentityIdAsync`.
-*   **Acceptance:** Update `TryAcceptPendingStandardSignalHelloAsync` to accept `initiatorPublicIdentityId` rather than `initiatorPkhHex`.
-
-**5. Simulator Application Logic & UI Updates (`SimulatorStateService.cs` & Desktop UI)**
-The implementations and UI bindings must be updated to route envelopes using the new protocol fields.
-*   **WPF UI Bindings:** Update `SimulatorRelayTabViewModel`, `SimulatorSessionsTabViewModel`, `SimulatedPeerItemViewModel`, and their associated `.xaml` files to bind to `TargetPublicIdentityId` instead of `TargetPublicKeyHash`.
-*   **Handling `EnqueueOpaqueMessageRequest`:** Update the logic to read `RecipientPublicIdentityId` instead of throwing if `recipient_public_key_hash` is missing, and pass it to the updated `EnqueueRelayDownstreamToPeerAsync`.
-*   **Handling `GetPreKeyBundleRequest`:** Look up pre-keys from the simulated relay's `PreKeyStore` using `PublicIdentityId` rather than matching PKH.
-*   **Message Dispatch:** Any simulated peer looking to deliver messages via relay or direct fallback should attach the target's `PublicIdentityId` to the outgoing request rather than hashing the SPKI.
-
-**Summary & Constraints:**
-*   `PeerId` (the `uint`) is correctly staying completely local to the in-memory maps (`_peerById` and `RemoteNetworkPeerId` inside `SecureSession`) and local database relations.
-*   **Safety Number Constraint:** Do NOT delete `IdentityPublicKeyHash` computation logic. It must be retained locally for Safety Number generation and UI verification. We are only scrubbing PKH from network transport, serialized DTOs, and routing queues.
-*   **Cryptographic Integrity:** `initiator_identity_key_spki` and `AcceptorIdentityKey` MUST remain intact in all handshake envelopes. The X3DH layer must continue to perform its DH math using the raw Curve25519/Ed25519 keys, while the outer routing and local DB lookups pivot to use the `PublicIdentityId` included in the same envelope. To complete the refactor, trust the `PublicIdentityId` (UUID) as the sole wire identifier across the protocol, main application, and simulator for routing.
 ---
-## Chunk 6
-### Feature Implementation Request: Signal Protocol Chunk 6 (The Streaming Data Plane)
-You are to implement the high-velocity, real-time Data Plane for Group V2 messaging, cleanly separating the Relay's opaque fan-out responsibilities from the Client's local decryption and persistence logic.
+## Chunk 6.1
+### Feature Implementation Request: Signal Protocol Chunk 6.1 (Architecture Correction)
+You are to fix the architectural flaws introduced in Chunks 4-6 related to the Relay Ledger and Epoch mutation mechanics. In Signal Group V2, standard chat messages do NOT mutate the epoch. Only structural roster or metadata changes (which update the `EncryptedProfile`) mutate the epoch.
 
 Architectural Constraints (CRITICAL):
-* **Strict E2EE Separation:** The Relay role must *never* decrypt payloads or touch application models. It only routes raw `ciphertext` to connected streams. The Client role performs decryption locally *after* receiving the stream event.
-* **Clean Architecture Directional Dependency:** The Relay's streaming dispatcher is a purely infrastructural networking concern. The Application layer must have zero knowledge of it.
-* **Shared Nothing / Thread Safety:** `IServerStreamWriter` is strictly NOT thread-safe. You must serialize concurrent writes to individual peer streams using isolated asynchronous queues (e.g., `System.Threading.Channels.Channel<GroupStreamResponse>`).
-* **DDD & Signal Protocol Validation:** The Client Ingress must load the local `GroupConversation` aggregate to validate membership *and* verify the incoming message's epoch against the local ledger before attempting decryption.
+* **No Epoch Advancement on Chat:** The `Publish` endpoint must verify the ZK Proof against the `CurrentEpoch` but must **never** advance the epoch or alter the `GroupPublicParams`.
+* **The New Roster Contract:** The Relay must track the exact `PeerId`s to correctly fan-out messages, but the client must only send global UUIDs (`PublicIdentityId`s) over the wire. The Relay is responsible for doing the local `PublicIdentityId -> PeerId` map when executing structural mutations.
 
 Implementation Requirements
 
-1. Protobuf Updates (`messaging.proto`)
-* Add `GroupStreamRequest` message:
+1. Protobuf Updates (`Percolator.Contracts/Protos/messaging.proto`)
+* Change `SubmitGroupMessageRequest`: Ensure it contains `conversation_id`, `presentation`, `ciphertext`, and `epoch`.
+* Add `ModifyGroupRequest` and `ModifyGroupResponse` to `messaging.proto`:
   ```protobuf
-  message GroupStreamRequest {
+  message ModifyGroupRequest {
       optional bytes conversation_id = 1;
+      optional uint32 base_epoch = 2;
+      optional bytes presentation = 3;
+      optional bytes new_encrypted_profile = 4;
+      repeated bytes add_public_identity_ids = 5;
+      repeated bytes remove_public_identity_ids = 6;
+  }
+
+  message ModifyGroupResponse {
+      optional bool success = 1;
   }
   ```
-* Add `GroupStreamResponse` message:
+* Add `GetGroupStateRequest` and `GetGroupStateResponse` to `messaging.proto`:
   ```protobuf
-  message GroupStreamResponse {
+  message GetGroupStateRequest {
       optional bytes conversation_id = 1;
-      optional bytes ciphertext = 2;
-      optional uint32 epoch = 3;
-      optional bytes sender_public_identity_id = 4;
+      optional bytes presentation = 2;
+  }
+
+  message GetGroupStateResponse {
+      optional uint32 current_epoch = 1;
+      optional bytes public_params = 2;
+      optional bytes encrypted_profile = 3;
   }
   ```
-* Add RPC to `RelayGroupService`: `rpc StreamGroupMessages(GroupStreamRequest) returns (stream GroupStreamResponse);`
+* Add the RPC endpoint `rpc GetGroupState(GetGroupStateRequest) returns (GetGroupStateResponse);` to the `RelayGroupService`.
+* Add the RPC endpoint `rpc ModifyGroup(ModifyGroupRequest) returns (ModifyGroupResponse);` to the `RelayGroupService`.
+* Add `bytes encrypted_profile` to `ProvisionGroupRequest`.
 
-2. Relay Fan-Out Infrastructure (`Percolator.Infrastructure` ONLY)
-* Define interface and implementation entirely within `Percolator.Infrastructure/Network/Grpc`: `internal interface IRelayGroupStreamDispatcher { Task DispatchAsync(Guid conversationId, ReadOnlyMemory<byte> ciphertext, uint epoch, Guid senderPublicIdentityId, CancellationToken ct); }`
-* Create `GrpcRelayGroupStreamDispatcher`.
-    * **Storage Matrix:** `ConcurrentDictionary<Guid, ConcurrentDictionary<Guid, Channel<GroupStreamResponse>>>` (ConversationId -> PublicIdentityId -> Channel).
-    * Implement `DispatchAsync(...)`: Extract the nested list of channels for the `conversationId`. For each channel, use `ChannelWriter.TryWrite(...)` to enqueue the payload non-blockingly.
-    * Expose helpers: `ChannelReader<GroupStreamResponse> RegisterStream(Guid conversationId, Guid publicIdentityId)` and `void UnregisterStream(Guid conversationId, Guid publicIdentityId)`.
-* Wire into `RelayGroupService` (in `Percolator.Infrastructure/Network/Grpc/RelayGroupService.cs`):
-    * Implement `StreamGroupMessages`: Extract caller's `PublicIdentityId` from context. **Authorization Gate:** Call `_ledgerRepository` or `_orchestrator` to verify the caller's `PublicIdentityId` is a valid member of the `ConversationId`. If not, throw an `RpcException(PermissionDenied)`. Call `RegisterStream(...)` to get a `ChannelReader`. Use a `await foreach (var msg in reader.ReadAllAsync(context.CancellationToken))` loop to safely `await responseStream.WriteAsync(msg)`. In a `finally` block, call `UnregisterStream(...)`.
-    * Update `Publish` method: After successful ledger validation, call `_dispatcher.DispatchAsync(...)`.
+2. Group Encryption Profiles (`Percolator.Cryptography`)
+* We must establish domain value types for the Encrypted Profile to ensure type safety between the raw bytes and the domain logic.
+* In `Percolator.Chat.Messaging.ValueObjects`, define:
+  ```csharp
+  [ByteArray(minLength: 1, maxLength: 5000)]
+  public sealed partial record EncryptedGroupProfileBytes;
+  ```
+* In `IGroupCryptographyService` (and its concrete implementations), add `EncryptedGroupProfileBytes EncryptGroupProfile(GroupMasterKey masterKey, ReadOnlySpan<byte> profilePlaintext);` and `byte[] DecryptGroupProfile(GroupMasterKey masterKey, EncryptedGroupProfileBytes ciphertext);`. (Use AEAD AES-GCM with a key derived from the master key).
 
-3. Client Fan-In Infrastructure (`Percolator.Infrastructure`)
-* The plan must include a client-side stream consumer to pump messages into the application layer. Create `RelayGroupStreamWorker` (an `IHostedService` or background loop in `Percolator.Infrastructure`) that connects to `RelayGroupService.StreamGroupMessages` for active groups.
-* The worker simply loops over `ResponseStream.ReadAllAsync()` and passes the payload to `IGroupStreamIngressProcessor.ProcessGroupMessageAsync`.
+3. The Database Updates (`Percolator.Infrastructure/Chat`)
+* Create a new EF Core Migration.
+* In `RelayGroupStateDbo` (or the equivalent table), add `public byte[] EncryptedProfile { get; set; } = Array.Empty<byte>();`.
+* Note: A migration must be executed to persist these changes using `dotnet ef migrations add ...`.
 
-4. Client Ingress Orchestration (`Percolator.Application` & `Percolator.Chat`)
-* Update `IChatMessageWriter` (in `Percolator.Chat/Messaging/App/IChatMessageWriter.cs`): Add `Task AddGroupMessageAsync(Percolator.Chat.Messaging.ValueObjects.ConversationId conversationId, Percolator.Chat.GroupMembership.ParticipantId senderId, string content, Percolator.Chat.Messaging.ValueObjects.PublicMessageId publicMessageId, DateTimeOffset sentAt, CancellationToken cancellationToken);`
-* Update `SqliteChatMessageWriter` (in `Percolator.Infrastructure/Chat/SqliteChatMessageWriter.cs`) to implement `AddGroupMessageAsync` using standard EF Core entity appends.
-* Create `IGroupStreamIngressProcessor` and its implementation `GroupStreamIngressProcessor` in `Percolator.Application/Apps/Chat`.
-    * Implement `ProcessGroupMessageAsync(Guid conversationIdBytes, Guid senderPublicIdentityIdBytes, uint epoch, byte[] ciphertext, CancellationToken ct)`.
-    * **DDD Validation:** Load the group aggregate (via `IGroupConversationRepository` or an optimized read model). Verify the sender's `PeerId` is an active member. If not, drop or reject the message.
-    * **Epoch Verification:** Compare the incoming `epoch` against the local group's current epoch. If `incoming > local_epoch`, throw an exception or return a result indicating a sync is required (do not attempt decryption).
-    * **Decrypt:** Call `ISenderKeyCryptographyService.DecryptGroupMessage(...)` to obtain the plaintext (use `new DeviceId(1)` for the sender device).
-    * **Persist:** Call `IChatMessageWriter.AddGroupMessageAsync(...)` to save the decrypted message locally.
+4. The Domain Updates (`Percolator.Chat/GroupLedger`)
+* Update the `RelayGroupLedger` aggregate.
+    * Add `public EncryptedGroupProfileBytes EncryptedProfile { get; private set; }`.
+    * Update the constructor to take `EncryptedGroupProfileBytes`.
+    * Add `public void Mutate(uint requestedEpoch, EncryptedGroupProfileBytes newProfile)`. This method asserts the new epoch is strictly greater, then updates the fields.
+* Modify the `AdvanceEpoch` method to be removed or replaced, as chat messages no longer advance the epoch.
 
-**Testing Requirements (Chunk 6):**
+5. Service Implementation (`Percolator.Application/Chat` & `Percolator.Infrastructure/Network`)
+* **RelayGroupOrchestrator:**
+    * In `PublishGroupRelayMessageAsync`, **delete** the code that advances the epoch. The method should now just verify the ZK proof against the current `GroupPublicParams` and queue the message.
+    * Add a new method: `Task ModifyGroupAsync(ConversationId conversationId, uint baseEpoch, ZkPresentationBytes presentation, EncryptedGroupProfileBytes newProfile, IReadOnlyList<Guid> addPublicIdentityIds, IReadOnlyList<Guid> removePublicIdentityIds, CancellationToken ct);`.
+    * In `ModifyGroupAsync`: Verify the presentation against the *existing* `GroupPublicParams`. Then call `ledger.Mutate(...)`. Use `IPeerIdentityQueries` to map the `Guid` lists to local `PeerId`s, and interact with `IRelayRosterRepository` or `IRelayGroupLedgerRepository` to add/remove the resulting `PeerId`s from the fan-out roster. Finally, save the ledger.
+    * Add a new method: `Task<RelayGroupLedger> GetGroupStateAsync(ConversationId conversationId, ZkPresentationBytes presentation, CancellationToken ct);`. Verify the ZK proof before returning the ledger.
+* **RelayGroupService (gRPC):**
+    * Update `ProvisionGroup` to extract and pass the `EncryptedGroupProfileBytes`.
+    * Implement the new `ModifyGroup` endpoint, translating the protobuf inputs into the corresponding types for `RelayGroupOrchestrator.ModifyGroupAsync`.
+    * Implement the new `GetGroupState` endpoint, calling `RelayGroupOrchestrator.GetGroupStateAsync` and returning the epoch, public params, and encrypted profile.
 
-**Relay Fan-Out Infrastructure Tests:**
-- `GrpcRelayGroupStreamDispatcher_RegisterStream_CreatesNewChannel_WhenFirstStreamForConversation` - Test that a new channel is created when the first stream registers for a conversation.
-- `GrpcRelayGroupStreamDispatcher_RegisterStream_AddsToExistingDictionary_WhenConversationAlreadyHasStreams` - Test that subsequent streams are added to the existing conversation's dictionary.
-- `GrpcRelayGroupStreamDispatcher_UnregisterStream_RemovesChannel_WhenStreamExists` - Test that unregistration removes the specific stream.
-- `GrpcRelayGroupStreamDispatcher_UnregisterStream_CleansUpEmptyConversation_WhenLastStreamRemoved` - Test that empty conversation entries are removed when the last stream unregisters.
-- `GrpcRelayGroupStreamDispatcher_DispatchAsync_WritesToAllChannels_WhenConversationHasMultipleActiveStreams` - Test that DispatchAsync enqueues the payload to all registered Channel instances when the conversation has multiple active streams.
-- `GrpcRelayGroupStreamDispatcher_DispatchAsync_DoesNotThrow_WhenNoStreamsRegistered` - Test that DispatchAsync handles the case gracefully when no streams are registered for a conversation.
-
-**Relay Authorization Tests:**
-- `RelayGroupService_StreamGroupMessages_ThrowsPermissionDenied_WhenCallerNotInGroup` - Test that the authorization gate rejects stream connections from non-members using a mock ledger repository.
-- `RelayGroupService_StreamGroupMessages_RegistersStream_WhenCallerIsAuthorized` - Test that authorized callers successfully register and receive a ChannelReader.
-
-**Client Ingress Tests:**
-- `GroupStreamIngressProcessor_ProcessGroupMessageAsync_RejectsMessage_WhenSenderNotInGroup` - Test that the processor rejects messages from senders not in the local group aggregate.
-- `GroupStreamIngressProcessor_ProcessGroupMessageAsync_RejectsMessage_WhenIncomingEpochExceedsLocalEpoch` - Test that the processor rejects messages with an epoch higher than the local ledger, indicating a sync is required.
-- `GroupStreamIngressProcessor_ProcessGroupMessageAsync_DecryptsAndPersists_WhenMessageIsValid` - Test that a valid message (correct epoch, authorized sender) is successfully decrypted and persisted to the message writer.
-
+**Testing Requirements (Chunk 6.1):**
+- `RelayGroupOrchestrator_PublishGroupRelayMessageAsync_DoesNotAdvanceEpoch` - Ensure that chat messages only verify auth and fan out, leaving the epoch unchanged.
+- `RelayGroupOrchestrator_ModifyGroupAsync_AdvancesEpochAndUpdatesProfile` - Test that the new mutation method properly increments the epoch and stores the new parameters.
+- `RelayGroupOrchestrator_ModifyGroupAsync_UpdatesRoster_MappingPublicIdentityIdsToPeerIds` - Test that the mutation method correctly uses the identity queries to map network UUIDs to internal PeerIds for the Relay Roster.
 
 ---
 
@@ -181,40 +145,119 @@ Architectural Constraints (CRITICAL):
 * **No Dirty Memory States:** Do not apply state mutations directly to tracked repository entities before formal network confirmation. Speculative mutations must be verified cleanly without dirtying live cache entities.
 * **Reusable Coordination Over Indirection:** Do not write custom retry loops or network synchronization blocks inside individual handlers. Centralize this orchestration within an application-layer Process Manager (`GroupMutationCoordinator`).
 * **Intent-Based Validation via CQRS:** Group mutations must be modeled as structural proposals so they can be re-evaluated for validity if the group baseline shifts during a sync catch-up execution loop.
+* **Sealed Sender Compatibility:** The Relay is completely opaque. It tracks the roster for fan-out but does NOT know the sender of a group message. All mutations are just opaque ciphertexts published via the existing `SubmitGroupMessageRequest` gRPC endpoint, which uses ZK proofs (`presentation`) for authorization without revealing identity.
 
 Implementation Requirements
-1. The Proposal Model & Domain Safeguard (`Percolator.Chat`)
+
+1. Protobuf Updates (`Percolator.Contracts/Protos/internal_messaging.proto`)
+* Add a `GroupUpdatePayload` to `GroupContent` to support serializing intents into the encrypted envelope.
+  ```protobuf
+  message GroupContent {
+    optional string text_message = 1;
+    optional GroupUpdatePayload update_payload = 2;
+  }
+
+  message GroupUpdatePayload {
+    optional string new_group_name = 1;
+    optional bytes new_avatar_id = 2;
+    repeated PeerRoleUpdate role_updates = 3;
+    repeated bytes added_public_identity_ids = 4;
+    repeated bytes removed_public_identity_ids = 5;
+  }
+
+  message PeerRoleUpdate {
+    optional bytes public_identity_id = 1;
+    optional uint32 role_enum = 2;
+  }
+
+  message GroupProfilePlaintext {
+    optional string group_name = 1;
+    optional bytes avatar_id = 2;
+    repeated PeerRoleUpdate roles = 3;
+  }
+  ```
+
+2. The Proposal Model & Domain Safeguard (`Percolator.Chat`)
 * Define an interface for mutations locally: `IGroupMutationProposal`.
 * Implement an explicit proposal record: `RenameGroupProposal(string NewName) : IGroupMutationProposal`.
 * Update the `GroupConversation` aggregate root to support deep copying or dry validation:
   `public bool EvaluateProposal(IGroupMutationProposal proposal, out string? businessRuleViolation)`
+* Add `public byte[] GenerateProfilePlaintext()` to `GroupConversation` to serialize the group's current name and roles into a `GroupProfilePlaintext` protobuf payload.
 
-2. The Mutation Coordinator Process Manager (`Percolator.Application/Apps/Chat`)
+3. The Mutation Coordinator Process Manager (`Percolator.Application/Apps/Chat`)
 * Create a centralized service orchestrator: `GroupMutationCoordinator`.
-* **Isolation Boundary Control:** The `GroupMutationCoordinator` handles the isolation loop cleanly without passing leaked unmanaged cryptographic tokens through public handler boundaries. All cryptographic operations remain contained within their respective domain service contexts.
+* Define a new network interface in `Percolator.Application/Chat`: `IRelayGroupNetworkClient`. It should expose `ModifyGroupAsync`, `GetGroupStateAsync`, and `PublishGroupMessageAsync` using strictly domain types (e.g., `ZkPresentationBytes`, `EncryptedGroupProfileBytes`, `CiphertextBytes`), fully abstracting away gRPC and Protobufs.
+* Inject the necessary services: `IGroupConversationRepository`, `ISelfIdentityQueries`, `IGroupCryptographyService`, `ISenderKeyCryptographyService`, and `IRelayGroupNetworkClient`.
+* **Isolation Boundary Control:** The `GroupMutationCoordinator` handles the isolation loop cleanly without passing leaked unmanaged cryptographic tokens through public handler boundaries. It must have ZERO knowledge of `Percolator.Contracts` or gRPC `RpcException`s. Network errors must be wrapped in domain exceptions (e.g., `EpochConflictException`) by the infrastructure client.
 * **Method Signature:**
   ```csharp
   Task<MutationResult> CoordinateMutationAsync(
-      Percolator.Application.Chat.ConversationId conversationId, 
+      Percolator.Chat.Messaging.ValueObjects.ConversationId conversationId, 
       IGroupMutationProposal proposal, 
-      SelfId selfIdentityId, 
       CancellationToken ct)
   ```
+
 * **The Core Loop Engine:**
     * Establish a strict retry limit loop (maximum 3 attempts).
-    * **Step 1:** Load a completely fresh instance of the aggregate from `IGroupConversationRepository`.
-    * **Step 2:** Execute `group.EvaluateProposal(proposal, out var error)`. If it fails validation due to a state change found during catch-up, abort instantly and return `MutationResult.Failed(error)`.
-    * **Step 3:** Serialize the proposal intent to an encrypted payload using the current aggregate epoch context.
-    * **Step 4:** Dispatch the frame to `IRelayClient.PublishGroupMutationAsync(...)`.
-    * **Step 5 (On Success):** Now that consensus is won, apply the mutation directly to the domain object, commit it locally using `_repository.UpdateAsync(...)`, and return success.
-    * **Step 6 (On Conflict):** Call `_relayClient.FetchMissingEpochsAsync(...)`. Pass the returned delta payload directly to `IGroupSyncService.FastForwardLocalStateAsync(...)` to advance the baseline SQLite database. Yield thread execution to the next iteration loop.
+    * **Step 1:** Load a fresh instance of the aggregate from `IGroupConversationRepository` and clone it (or evaluate it) using `EvaluateProposal`.
+    * **Step 2:** If it fails validation due to a state change found during catch-up, abort instantly and return `MutationResult.Failed(error)`.
+    * **Step 3 (Relay Ledger Update):** Serialize the proposed group state using `group.GenerateProfilePlaintext()`. Encrypt this using `IGroupCryptographyService.EncryptGroupProfile` to generate an `EncryptedGroupProfileBytes`. Generate a `ZkPresentationBytes` and call `_relayGroupNetworkClient.ModifyGroupAsync(...)`.
+    * **Step 4 (On Conflict):** If `ModifyGroupAsync` throws an `EpochConflictException` indicating an epoch conflict or verification failure, call `_relayGroupNetworkClient.GetGroupStateAsync(...)` to fetch the authoritative latest state. Decrypt the returned `EncryptedProfile`, apply it to the local SQLite database to advance the baseline, and retry the loop.
+    * **Step 5 (Fan-Out Broadcast):** Once `ModifyGroupAsync` succeeds, construct the `GroupUpdatePayload` protobuf (the diff). Encrypt it using `ISenderKeyCryptographyService.EncryptGroupMessage(...)`. Dispatch the frame to the relay using `_relayGroupNetworkClient.PublishGroupMessageAsync(...)`. 
+    * **Step 6 (Commit):** Apply the mutation directly to the domain object, commit it locally using `_repository.UpdateAsync(...)`, and return success.
 
-3. Refactored Application Handlers (`Percolator.Application/Apps/Chat`)
+4. Infrastructure Network Client (`Percolator.Infrastructure/Network`)
+* Implement `RelayGroupNetworkClient : IRelayGroupNetworkClient`.
+* This class is responsible for injecting the gRPC `RelayGroupServiceClient`, translating domain types into `ModifyGroupRequest`, `GetGroupStateRequest`, and `SubmitGroupMessageRequest` Protobufs, executing the RPC calls, and wrapping `RpcException(StatusCode.Aborted)` into `EpochConflictException`.
+
+5. Refactored Application Handlers (`Percolator.Application/Apps/Chat`)
 * Refactor `UpdateGroupInfoHandler` to be completely lean. It should simply instantiate a `RenameGroupProposal`, pass it directly to the `GroupMutationCoordinator`, and evaluate the returned structural outcome.
 
 **Testing Requirements (Chunk 7):**
 - `GroupMutationCoordinator_CoordinateMutation_AbortsImmediately_WhenLocalProposalFailsBusinessRules` - Test that CoordinateMutationAsync aborts immediately when the local proposal fails business rule validation.
-- `GroupMutationCoordinator_CoordinateMutation_RetriesExactlyThreeTimes_WhenEncounteringContinuousEpochConflicts` - Test that CoordinateMutationAsync retries exactly three times when encountering continuous epoch conflicts.
+- `GroupMutationCoordinator_CoordinateMutation_RetriesExactlyThreeTimes_WhenEncounteringContinuousEpochConflicts` - Test that CoordinateMutationAsync retries exactly three times when encountering continuous gRPC RpcExceptions before giving up.
+
+---
+## Chunk 7.1
+### Feature Implementation Request: Signal Protocol Chunk 7.1 (Forward Secrecy & Member Management)
+You are to implement Chunk 7.1 of our Signal Protocol Group V2 integration for Percolator. This chunk handles the complex cryptography and orchestration required to add new members or enforce forward secrecy when removing members.
+
+Architectural Constraints (CRITICAL):
+* **No `GroupMasterKey` Rotation:** GroupMasterKeys are completely static. Rotating them destroys the group's ZK parameters.
+* **Sender Key Rotation on Removal:** If a member is removed (or leaves), all remaining peers must instantly destroy their local Signal `SenderKeyRecord` for that group and generate a new one to prevent the kicked member from decrypting future network traffic.
+
+Implementation Requirements
+
+1. The Proposal Models (`Percolator.Chat`)
+* Create `AddMemberProposal(Guid NewMemberPublicIdentityId) : IGroupMutationProposal`.
+* Create `RemoveMemberProposal(Guid TargetPublicIdentityId) : IGroupMutationProposal`.
+
+2. The Coordinator Handlers (`GroupMutationCoordinator`)
+* Expand `CoordinateMutationAsync` to process Add/Remove proposals.
+* **Add Member Flow:**
+    * When an `AddMemberProposal` is detected, call `_relayGroupNetworkClient.ModifyGroupAsync` passing the new member's UUID in the `addPublicIdentityIds` array.
+    * Once `ModifyGroupAsync` succeeds, construct the `GroupUpdatePayload` (setting `added_public_identity_ids`) and fan it out via `PublishGroupMessageAsync`.
+    * **1:1 Bootstrapping:** Dispatch a 1:1 `GroupInvite` containing the `GroupMasterKey` to the new member using the outbox infrastructure (reusing patterns from Chunk 5).
+* **Remove Member Flow:**
+    * When a `RemoveMemberProposal` is detected, call `_relayGroupNetworkClient.ModifyGroupAsync` passing the target's UUID in the `removePublicIdentityIds` array.
+    * The Relay will drop the member from `RelayGroupRosters`, instantly severing their ability to receive messages.
+    * **Forward Secrecy Enforced:** Clear out the client's current `SenderKeyRecord` for this group (e.g., call `ISenderKeyCryptographyService.RotateSenderKey(...)`).
+    * Generate a new `SenderKeyDistributionMessage`.
+    * Enqueue 1:1 `GroupInvite` / `SenderKeyDistribution` envelopes via the outbox to all *remaining* members to share your newly rotated Sender Key.
+    * Construct the `GroupUpdatePayload` (setting `removed_public_identity_ids`) and fan it out via `PublishGroupMessageAsync`.
+
+3. Client Ingress Upgrades (`GroupStreamIngressProcessor`)
+* Update `GroupStreamIngressProcessor` to detect if a decrypted `GroupContent` contains a `GroupUpdatePayload`.
+* If it contains `removed_public_identity_ids`:
+    * Verify the author is an Admin.
+    * Execute the local DB removal.
+    * **Forward Secrecy Enforced:** Just like the author, the receiving client must *immediately* delete their own `SenderKeyRecord` for this group, generate a new one, and enqueue outbox 1:1 envelopes to the remaining peers.
+* If it contains `new_group_name`, `added_public_identity_ids`, or `role_updates`, apply them to the local `GroupConversation` and `GroupMembers` SQLite tables.
+
+**Testing Requirements (Chunk 7.1):**
+- `GroupMutationCoordinator_CoordinateMutation_AddMember_Sends1to1BootstrappingInvite` - Test that adding a member enqueues a 1:1 invite to the new member alongside the relay mutations.
+- `GroupMutationCoordinator_CoordinateMutation_RemoveMember_TriggersSenderKeyRotation` - Test that removing a member clears the local SenderKeyRecord and enqueues distribution messages to remaining peers.
+- `GroupStreamIngressProcessor_ProcessGroupMessageAsync_TriggersSenderKeyRotation_OnRemoveMemberPayload` - Test that receiving a legitimate removal payload from an admin causes the client to rotate its own sender key.
 
 ---
 ## Chunk 8
