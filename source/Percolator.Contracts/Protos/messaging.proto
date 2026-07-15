@@ -234,13 +234,14 @@ message RatchetHeader {
     optional uint64 previous_chain_length = 3;
 }
 
-// Relay Group Service for group message fan-out
-service RelayGroupService {
+// Relay Service for unified relay operations (both 1:1 and Group)
+service RelayService {
     rpc Publish(SubmitGroupMessageRequest) returns (SubmitGroupMessageResponse);
     rpc ProvisionGroup(ProvisionGroupRequest) returns (ProvisionGroupResponse);
     rpc ModifyGroup(ModifyGroupRequest) returns (ModifyGroupResponse);
     rpc GetGroupState(GetGroupStateRequest) returns (GetGroupStateResponse);
-    rpc StreamGroupMessages(GroupStreamRequest) returns (stream GroupStreamResponse);
+    rpc EnqueueOpaqueMessage(EnqueueOpaqueMessageRequest) returns (EnqueueOpaqueMessageResponse);
+    rpc ConnectRelay(stream ClientRelayStream) returns (stream ServerRelayStream);
 }
 
 message SubmitGroupMessageRequest {
@@ -306,4 +307,33 @@ message GroupStreamResponse {
     optional uint32 epoch = 3;
     optional bytes sender_public_identity_id = 4;
     optional uint32 sender_device_id = 5;
+}
+
+message ClientRelayStream {
+    oneof payload {
+        MessageAck message_ack = 1;  // Acknowledges an ingress 1:1 message
+    }
+}
+
+message MessageAck {
+    optional bytes ack_id = 1; // Guid bytes
+}
+
+message ServerRelayStream {
+    oneof payload {
+        GroupMessageDelivery group_delivery = 1;
+        OpaqueMessageDelivery opaque_delivery = 2; // For 1:1 queued messages
+    }
+}
+
+message GroupMessageDelivery {
+    optional bytes conversation_id = 1;
+    optional uint32 epoch = 2;
+    optional bytes ciphertext = 3;
+    optional bytes sender_presentation = 4;
+}
+
+message OpaqueMessageDelivery {
+    optional bytes ack_id = 1; // Guid bytes
+    optional bytes opaque_payload = 2;
 }

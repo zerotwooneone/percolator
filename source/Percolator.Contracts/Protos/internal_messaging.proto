@@ -22,10 +22,7 @@ message InternalEnvelope {
     GetPreKeyBundleResponse get_pre_key_bundle_response = 6;
     MessageQueueEnvelope message_queue_envelope = 7;
     EnqueueOpaqueMessageResponse enqueue_opaque_message_response = 8;
-    FetchQueuedMessagesResponse fetch_queued_messages_response = 9;
-    // Host relay wrapper carrying inner opaque payload
-    RelayOpaqueEnvelope relay_opaque_envelope = 10;
-    RelayOpaqueResponse relay_opaque_response =11;
+    RelayOpaqueResponse relay_opaque_response = 10;
   }
 }
 
@@ -265,7 +262,6 @@ message MessageQueueEnvelope {
   optional uint32 version = 1;
   oneof message {
     EnqueueOpaqueMessageRequest enqueue_opaque_message_request = 2;
-    FetchQueuedMessagesRequest fetch_queued_messages_request = 3;
   }
 }
 
@@ -288,32 +284,6 @@ message EnqueueOpaqueMessageResponse {
   // Optional counts for observability (may be omitted by implementations).
   optional uint32 recipient_queued_count = 4;
   optional uint32 total_queued_count = 5;
-}
-
-// Request to fetch queued opaque messages for the requesting peer.
-// The identity of the requester is derived from the active DirectSession; no fields needed.
-message FetchQueuedMessagesRequest {
-  optional uint32 version = 1;
-  // Optional maximum number of messages to fetch in one batch; server may cap this value.
-  optional uint32 max_count = 2;
-}
-
-// Response containing zero or more opaque message blobs destined for the requester.
-// Placed at top-level InternalEnvelope.
-message FetchQueuedMessagesResponse {
-  optional uint32 version = 1;
-  repeated bytes messages = 2;
-}
-
-// === 6. Host Relay Wrapper ===
-// The Host uses this to deliver an inner opaque payload on behalf of the logical sender to the destination.
-message RelayOpaqueEnvelope {
-  optional uint32 version = 100;
-  // Privacy-preserving: host does not include or persist sender identity here.
-  // The exact opaque payload intended for the destination (e.g., an InternalEnvelope bytes)
-  optional bytes opaque_payload = 1;
-  // Host-assigned GUID (16 bytes) used for idempotent acknowledgment
-  optional bytes message_ack_id = 2;
 }
 
 // === 7. Opaque Handshake (Signal-style) ===
