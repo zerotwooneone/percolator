@@ -149,6 +149,8 @@ Implementation Requirements
 You are to replace the fragmented, pull-based 1:1 messaging model and the conversation-centric group streaming model with a singular, bidirectional gRPC stream per Relay. This chunk enforces strict "shared nothing" Clean Architecture across the `Network`, `Chat`, `Cryptography`, and `Identity` domains. Critically, it corrects a privacy flaw by strictly segregating authenticated ingress streams from anonymous egress RPCs to preserve the Sealed Sender protocol.
 
 #### Architectural Overview & Problem Analysis
+**AI AGENT DIRECTIVE:** Intermediate compilation is NOT required between Sub-Chunks A through D. You will intentionally break the build by changing contracts and splitting interfaces. **Do NOT attempt to fix cascading compilation errors outside the scope of your current Sub-Chunk.** All legacy wiring will be cleaned up in Sub-Chunk E.
+
 * **Network Egress Domain Value Types (`Percolator.Network/ValueObjects`):**
     * Create `EgressJobId` (wrapping `Guid`).
     * Create `NetworkPayloadBytes` (wrapping `byte[]`, representing the raw encrypted outbound data). **Format Definition:** This byte array must store the exact `ToByteArray()` output of the underlying Protobuf request (e.g., the serialized bytes of `SubmitGroupMessageRequest` or `EnqueueOpaqueMessageRequest`). The worker will deserialize it based on the `PayloadType` enum.
@@ -278,7 +280,12 @@ You are to replace the fragmented, pull-based 1:1 messaging model and the conver
 ### Sub-Chunk D: Peer as Relay Client (Upstream Connection Worker)
 **Goal:** Manage this node's continuous authenticated ingress connection to external Relay Hosts.
 
-1. **Infrastructure Logic (`Percolator.Infrastructure/Network/Upstream`)**
+1. **Application Logic (`Percolator.Application/Network`)**
+* **Extract 1:1 Ingress Routing:** Define `IOpaqueMessageDeliverer` in `Percolator.Application/Network`. 
+* Extract the relevant inbound logic from the bloated `DeliverOpaqueMessageHandler` into this new service: `Task<bool> DeliverAsync(byte[] opaqueBytes, CancellationToken ct)`. It must handle Ratchet decryption, `DirectSession` lookup, and `InternalEnvelope` dispatching. If `DeliverAsync` returns true, the caller should yield a `MessageAck`. Do **not** use MediatR for this outer loop routing.
+* Update `DeliverOpaqueMessageHandler` to either delegate to this new service or remove the extracted logic entirely.
+
+2. **Infrastructure Logic (`Percolator.Infrastructure/Network/Upstream`)**
 * Create `UpstreamRelayStreamWorker` (Replacing `RelayGroupStreamWorker`).
 * **Connection Lifecycle & Concurrency:** Add a new method `Task<IEnumerable<PeerRoutingProfile>> GetAllAsync(CancellationToken ct)` to `IPeerRoutingProfileRepository` and implement it in `SqlitePeerRoutingProfileRepository`. The worker then calls `GetAllAsync()` and filters for profiles where `Relays.Count > 0` to resolve the set of all active Relay `NetworkPeerId`s. Launch a background task for each relay using an unbounded `Task.WhenAll` loop (as the expected count is small—tens at most). It must implement an exponential backoff loop for reconnections upon stream failure.
 * **Client Authentication & Expiry:** Before invoking `ConnectRelay`, query `IDeliveryCertificateStore.GetCertificateAsync()` to retrieve this node's `DeliveryCertificate`. Generate the cryptographic signature over the current timestamp and append the standard `x-percolator-*` headers to the gRPC `CallOptions`.
@@ -286,7 +293,7 @@ You are to replace the fragmented, pull-based 1:1 messaging model and the conver
 * **Ingress Pipeline:**
     * Loop over `ServerRelayStream` `oneof`. 
     * Route payloads by directly invoking service methods. For group deliveries, call `IGroupStreamIngressProcessor.ProcessGroupMessageAsync`.
-    * For 1:1 deliveries, define `IOpaqueMessageDeliverer` in `Percolator.Application/Network`. This service extracts the relevant inbound logic from the bloated `DeliverOpaqueMessageHandler`: `Task<bool> DeliverAsync(byte[] opaqueBytes, CancellationToken ct)`. It handles Ratchet decryption, `DirectSession` lookup, and `InternalEnvelope` dispatching. If `DeliverAsync` returns true, immediately push a `MessageAck` back up the `ClientRelayStream`. Do **not** use MediatR for the outer loop routing.
+    * For 1:1 deliveries, call the newly created `IOpaqueMessageDeliverer.DeliverAsync()`. If it returns true, immediately push a `MessageAck` back up the `ClientRelayStream`.
 * **Tests (`Percolator.ApplicationTests`)**:
   * `IOpaqueMessageDeliverer_DeliverAsync_Success_ReturnsTrue`.
   * `IOpaqueMessageDeliverer_DeliverAsync_DecryptionFailure_ReturnsFalse`.
@@ -301,7 +308,8 @@ You are to replace the fragmented, pull-based 1:1 messaging model and the conver
 **Goal:** Migrate existing usage and delete obsolete code.
 
 1. **Refactoring Handlers (`Percolator.Application`)**
-* Update all Application paths that presently invoke `ISessionMessageService` or `RouteSender` for routing payloads (e.g., chat message sending) to instead construct a `NetworkEgressJob` and save it to `INetworkEgressJobRepository`. This establishes durability.
+* **AI Action:** Use your code search tools to explicitly find all Application Handlers that inject `ISessionMessageService` or `RouteSender`.
+* Update all of these discovered paths to instead construct a `NetworkEgressJob` and save it to `INetworkEgressJobRepository` for routing payloads (e.g., chat message sending). This establishes durability and cuts ties to the legacy ephemeral senders.
 
 2. **Dead Code Deletion**
 * **Implementation Files:**
