@@ -95,6 +95,9 @@ public class GroupStreamIngressProcessorTests
             senderPublicIdentityId,
             epoch: 1,
             ciphertext: new byte[] { 0x01, 0x02 },
+            selfIdentityId: new ChatSelfId(1),
+            senderDeviceId: 1,
+            sentAt: FixedTime,
             CancellationToken.None);
 
         // ASSERT - Message should not be persisted
@@ -152,6 +155,9 @@ public class GroupStreamIngressProcessorTests
             senderPublicIdentityId,
             epoch: 5, // Higher than local epoch (1)
             ciphertext: new byte[] { 0x01, 0x02 },
+            selfIdentityId: new ChatSelfId(1),
+            senderDeviceId: 1,
+            sentAt: FixedTime,
             CancellationToken.None);
 
         // ASSERT
@@ -206,6 +212,9 @@ public class GroupStreamIngressProcessorTests
             senderPublicIdentityId,
             epoch: 5, // Same as local epoch
             ciphertext: new byte[] { 0x01, 0x02 },
+            selfIdentityId: new ChatSelfId(1),
+            senderDeviceId: 1,
+            sentAt: FixedTime,
             CancellationToken.None);
 
         // ASSERT - Verify the message was persisted

@@ -2,7 +2,6 @@ using FluentAssertions;
 using NUnit.Framework;
 using Percolator.Cryptography;
 using Percolator.Infrastructure.Cryptography;
-using System;
 using System.Text;
 
 namespace Percolator.ApplicationIntegrationTests.Cryptography;

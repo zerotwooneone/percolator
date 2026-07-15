@@ -1,19 +1,54 @@
+using Percolator.Cryptography.Primitives;
 using Percolator.Contracts;
 
 namespace Percolator.Cryptography;
 
 /// <summary>
-/// Implements group message encryption/decryption using AEAD with the provided BlobKey.
+/// Implements group message encryption/decryption using Signal SenderKey protocol.
+/// Delegates to the infrastructure SenderKeyCryptographyService which handles the native FFI integration.
 /// </summary>
 public sealed class GroupMessageCryptographyService : IGroupMessageCryptographyService
 {
-    public Ciphertext EncryptGroupContent(BlobKey blobKey, GroupContent content)
+    private readonly ISenderKeyCryptographyService _senderKeyCryptoService;
+
+    public GroupMessageCryptographyService(ISenderKeyCryptographyService senderKeyCryptoService)
     {
-        throw new NotImplementedException();
+        _senderKeyCryptoService = senderKeyCryptoService;
     }
 
-    public GroupContent DecryptGroupContent(BlobKey blobKey, Ciphertext ciphertext)
+    public Ciphertext EncryptGroupContent(
+        Primitives.ConversationId conversationId,
+        CryptoPublicIdentity publicIdentityId,
+        DeviceId deviceId,
+        GroupContent content)
     {
-        throw new NotImplementedException();
+        // Serialize GroupContent protobuf to bytes
+        var contentBytes = Google.Protobuf.MessageExtensions.ToByteArray(content);
+
+        // Use SenderKey protocol for encryption
+        var ciphertextBytes = _senderKeyCryptoService.EncryptGroupMessage(
+            conversationId,
+            publicIdentityId,
+            deviceId,
+            contentBytes);
+
+        return Ciphertext.FromBytesOwned(ciphertextBytes);
+    }
+
+    public GroupContent DecryptGroupContent(
+        Primitives.ConversationId conversationId,
+        CryptoPublicIdentity senderPublicIdentityId,
+        DeviceId senderDeviceId,
+        Ciphertext ciphertext)
+    {
+        // Use SenderKey protocol for decryption
+        var plaintextBytes = _senderKeyCryptoService.DecryptGroupMessage(
+            conversationId,
+            senderPublicIdentityId,
+            senderDeviceId,
+            ciphertext.Span.ToArray());
+
+        // Deserialize bytes back to GroupContent protobuf
+        return GroupContent.Parser.ParseFrom(plaintextBytes);
     }
 }

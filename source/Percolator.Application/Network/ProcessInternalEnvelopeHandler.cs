@@ -3,6 +3,8 @@ using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Chat;
 using Percolator.Contracts;
+using Percolator.Cryptography;
+using Percolator.Cryptography.Primitives;
 using Percolator.Dht;
 using Percolator.Application.Network.Handshake;
 using Percolator.Network;
@@ -18,8 +20,8 @@ using Percolator.Chat.Messaging.App;
 using Percolator.Chat.Messaging.App.Commands;
 using Percolator.Chat.Messaging.Events;
 using Percolator.Chat.Messaging.ValueObjects;
-using Percolator.Cryptography;
 using PeerId = Percolator.Identity.PeerId;
+using CryptoConversationId = Percolator.Cryptography.Primitives.ConversationId;
 
 namespace Percolator.Application.Network;
 
@@ -31,9 +33,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
     private readonly IPeerRoutingProfileRepository _profileRepository;
     private readonly IMessageQueueService _mqService;
     private readonly IPendingGroupInvitationRepository _pendingGroupInvitationRepository;
-    private readonly IGroupCryptoStateRepository _groupCryptoStateRepository;
     private readonly IGroupMessageCryptographyService _groupMessageCryptoService;
-    private readonly IGroupCryptographyService _groupCryptoService;
     private readonly IChatMessageWriter _messageWriter;
     private readonly IProfileOrchestrationService _profileOrchestrationService;
     private readonly IGroupInviteHandler _groupInviteHandler;
@@ -46,9 +46,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
         IMessageQueueService mqService,
         IPeerRoutingProfileRepository profileRepository,
         IPendingGroupInvitationRepository pendingGroupInvitationRepository,
-        IGroupCryptoStateRepository groupCryptoStateRepository,
         IGroupMessageCryptographyService groupMessageCryptoService,
-        IGroupCryptographyService groupCryptoService,
         IChatMessageWriter messageWriter,
         IProfileOrchestrationService profileOrchestrationService,
         IGroupInviteHandler groupInviteHandler,
@@ -60,9 +58,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
         _mqService = mqService;
         _profileRepository = profileRepository;
         _pendingGroupInvitationRepository = pendingGroupInvitationRepository;
-        _groupCryptoStateRepository = groupCryptoStateRepository;
         _groupMessageCryptoService = groupMessageCryptoService;
-        _groupCryptoService = groupCryptoService;
         _messageWriter = messageWriter;
         _profileOrchestrationService = profileOrchestrationService;
         _groupInviteHandler = groupInviteHandler;
@@ -388,7 +384,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     // Persist pending group invitation
                     var pendingInvitation = new PendingGroupInvitation(
                         Guid.NewGuid(),
-                        new ConversationId(conversationId),
+                        new Percolator.Chat.Messaging.ValueObjects.ConversationId(conversationId),
                         new Percolator.Chat.GroupMembership.ChatPeerId(senderPeerId.Value),
                         createGroup.CreatorIdentityKey.ToByteArray(),
                         initialMembers,
@@ -420,21 +416,25 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                         return null;
                     }
 
-                    // Load GroupMasterKey for decryption
-                    var masterKey = await _groupCryptoStateRepository.GetGroupMasterKeyAsync(
-                        new ConversationId(conversationId),
-                        cancellationToken).ConfigureAwait(false);
-                    
-                    if (masterKey is null)
+                    // Get sender peer ID from context
+                    if (request.Context.RemotePeer is null)
                     {
-                        _logger.LogWarning("Group master key not found for conversation {ConversationId}, cannot decrypt group message", conversationId);
+                        _logger.LogWarning("GroupMessage requires RemotePeerGuid in context");
                         return null;
                     }
-                    var blobKey = _groupCryptoService.DeriveBlobKey(GroupMasterKey.FromSpan(masterKey.Span));
+                    var senderPeerId = new PeerId(request.Context.RemotePeer.Value.Value);
 
-                    // Decrypt the ciphertext
+                    // Get sender identity
+                    var senderIdentity = await _peerIdentityQueries.GetPublicIdentityIdAsync(senderPeerId, cancellationToken).ConfigureAwait(false);
+                    if(senderIdentity is null)
+                        throw new InvalidOperationException("Sender identity not found for peer ID");
+
+                    // Decrypt the ciphertext using Signal SenderKey protocol
+                    var cryptoConversationId = new CryptoConversationId(conversationId);
+                    var cryptoPublicIdentityId = new CryptoPublicIdentity(senderIdentity.Value);
+                    var senderDeviceId = new DeviceId(sourceDeviceId.Value); // Use source device ID from envelope context
                     var ciphertext = Ciphertext.FromBytes(groupMessage.Ciphertext.ToByteArray());
-                    var groupContent = _groupMessageCryptoService.DecryptGroupContent(blobKey, ciphertext);
+                    var groupContent = _groupMessageCryptoService.DecryptGroupContent(cryptoConversationId, cryptoPublicIdentityId, senderDeviceId, ciphertext);
 
                     // Switch on GroupContent fields
                     if (!string.IsNullOrEmpty(groupContent.TextMessage))
@@ -443,21 +443,10 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                         var messageId = PublicMessageId.NewId();
                         var sentTimestamp = DateTimeOffset.UtcNow;
 
-                        // Get sender peer ID from context
-                        if (request.Context.RemotePeer is null)
-                        {
-                            _logger.LogWarning("GroupMessage requires RemotePeerGuid in context");
-                            return null;
-                        }
-                        var senderPeerId = new PeerId(request.Context.RemotePeer.Value.Value);
-
                         // Persist the message via IChatMessageWriter
                         var senderId = new ChatPeerId(senderPeerId.Value);
-                        var senderIdentity = await _peerIdentityQueries.GetPublicIdentityIdAsync(senderPeerId, cancellationToken).ConfigureAwait(false);
-                        if(senderIdentity is null)
-                            throw new InvalidOperationException("Sender identity not found for peer ID");
                         await _messageWriter.AddTextMessageAsync(
-                            new ConversationId(conversationId),
+                            new Percolator.Chat.Messaging.ValueObjects.ConversationId(conversationId),
                             new RemoteParticipantId(new Percolator.Chat.GroupLedger.PublicIdentityId(senderIdentity.Value), senderId),
                             groupContent.TextMessage,
                             messageId,

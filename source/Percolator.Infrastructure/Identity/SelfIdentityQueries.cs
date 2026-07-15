@@ -3,6 +3,7 @@ using Percolator.Application.Chat;
 using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Infrastructure.Persistence;
+using DeviceId = Percolator.Identity.DeviceId;
 
 namespace Percolator.Infrastructure.Identity;
 
@@ -66,5 +67,20 @@ public sealed class SelfIdentityQueries : ISelfIdentityQueries
             return null;
 
         return new PublicIdentityId(identity.PublicIdentityId);
+    }
+
+    public async Task<(PublicIdentityId PublicIdentityId, DeviceId DeviceId)?> GetSelfIdentityCryptoInfoAsync(SelfId selfIdentityId, CancellationToken ct)
+    {
+        using var db = _dbFactory.CreateDbContext();
+        var identity = await db.SelfIdentities
+            .AsNoTracking()
+            .Where(x => x.Id == selfIdentityId.Value)
+            .Select(x => new { x.PublicIdentityId, x.DeviceId })
+            .FirstOrDefaultAsync(ct);
+
+        if (identity is null)
+            return null;
+
+        return (new PublicIdentityId(identity.PublicIdentityId), new DeviceId(identity.DeviceId));
     }
 }

@@ -1,26 +1,39 @@
+using Percolator.Cryptography.Primitives;
 using Percolator.Contracts;
 
 namespace Percolator.Cryptography
 {
     /// <summary>
-    /// Service interface for encrypting and decrypting group message content.
+    /// Service interface for encrypting and decrypting group message content using Signal SenderKey protocol.
     /// </summary>
     public interface IGroupMessageCryptographyService
     {
         /// <summary>
-        /// Encrypts group content using the provided BlobKey.
+        /// Encrypts group content using Signal SenderKey protocol.
         /// </summary>
-        /// <param name="blobKey">The symmetric key for encryption (derived from GroupMasterKey).</param>
+        /// <param name="conversationId">The group conversation identifier.</param>
+        /// <param name="publicIdentityId">The sender's public identity.</param>
+        /// <param name="deviceId">The sender's device ID.</param>
         /// <param name="content">The plaintext GroupContent to encrypt.</param>
         /// <returns>A Ciphertext containing the encrypted GroupContent bytes.</returns>
-        Ciphertext EncryptGroupContent(BlobKey blobKey, GroupContent content);
+        Ciphertext EncryptGroupContent(
+            Primitives.ConversationId conversationId,
+            CryptoPublicIdentity publicIdentityId,
+            DeviceId deviceId,
+            GroupContent content);
 
         /// <summary>
-        /// Decrypts group content using the provided BlobKey.
+        /// Decrypts group content using Signal SenderKey protocol.
         /// </summary>
-        /// <param name="blobKey">The symmetric key for decryption (derived from GroupMasterKey).</param>
+        /// <param name="conversationId">The group conversation identifier.</param>
+        /// <param name="senderPublicIdentityId">The sender's public identity.</param>
+        /// <param name="senderDeviceId">The sender's device ID.</param>
         /// <param name="ciphertext">The Ciphertext bytes to decrypt.</param>
         /// <returns>The decrypted GroupContent.</returns>
-        GroupContent DecryptGroupContent(BlobKey blobKey, Ciphertext ciphertext);
+        GroupContent DecryptGroupContent(
+            Primitives.ConversationId conversationId,
+            CryptoPublicIdentity senderPublicIdentityId,
+            DeviceId senderDeviceId,
+            Ciphertext ciphertext);
     }
 }

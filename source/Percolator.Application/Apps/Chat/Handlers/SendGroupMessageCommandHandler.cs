@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Percolator.Application.Chat;
 using Percolator.Chat;
 using Percolator.Cryptography;
+using Percolator.Cryptography.Primitives;
 using Percolator.Application.Network;
 using Percolator.Chat.GroupLedger;
 using Percolator.Chat.GroupMembership;
@@ -10,6 +11,7 @@ using Percolator.Chat.Messaging.App;
 using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Contracts;
 using Percolator.Identity;
+using CryptoConversationId = Percolator.Cryptography.Primitives.ConversationId;
 
 namespace Percolator.Application.Apps.Chat.Handlers;
 
@@ -18,8 +20,6 @@ public sealed class SendGroupMessageCommandHandler : IRequestHandler<Commands.Se
     private readonly IGroupConversationRepository _repository;
     private readonly IChatMessageWriter _messageWriter;
     private readonly IGroupMessageCryptographyService _cryptoService;
-    private readonly IGroupCryptographyService _groupCryptoService;
-    private readonly IGroupCryptoStateRepository _cryptoStateRepository;
     private readonly IRemoteEnvelopeSender _envelopeSender;
     private readonly ILogger<SendGroupMessageCommandHandler> _logger;
     private readonly ISelfIdentityQueries _selfIdentityQueries;
@@ -31,8 +31,6 @@ public sealed class SendGroupMessageCommandHandler : IRequestHandler<Commands.Se
         IGroupConversationRepository repository,
         IChatMessageWriter messageWriter,
         IGroupMessageCryptographyService cryptoService,
-        IGroupCryptographyService groupCryptoService,
-        IGroupCryptoStateRepository cryptoStateRepository,
         IRemoteEnvelopeSender envelopeSender,
         ILogger<SendGroupMessageCommandHandler> logger,
         ISelfIdentityQueries selfIdentityQueries,
@@ -43,8 +41,6 @@ public sealed class SendGroupMessageCommandHandler : IRequestHandler<Commands.Se
         _repository = repository;
         _messageWriter = messageWriter;
         _cryptoService = cryptoService;
-        _groupCryptoService = groupCryptoService;
-        _cryptoStateRepository = cryptoStateRepository;
         _envelopeSender = envelopeSender;
         _logger = logger;
         _selfIdentityQueries = selfIdentityQueries;
@@ -61,13 +57,11 @@ public sealed class SendGroupMessageCommandHandler : IRequestHandler<Commands.Se
             throw new InvalidOperationException($"Group conversation {request.ConversationId.Value} not found.");
         }
 
-        // Load GroupMasterKey for cryptography
-        var masterKey = await _cryptoStateRepository.GetGroupMasterKeyAsync(request.ConversationId, cancellationToken).ConfigureAwait(false);
-        if (masterKey is null)
+        var selfCryptoInfo = await _selfIdentityQueries.GetSelfIdentityCryptoInfoAsync(new SelfId(request.SelfIdentityId.Value), cancellationToken).ConfigureAwait(false);
+        if (selfCryptoInfo is null)
         {
-            throw new InvalidOperationException($"Group master key not found for conversation {request.ConversationId.Value}.");
+            throw new InvalidOperationException($"Self identity {request.SelfIdentityId.Value} not found.");
         }
-        var blobKey = _groupCryptoService.DeriveBlobKey(GroupMasterKey.FromSpan(masterKey.Span));
 
         // Create GroupContent with text message
         var groupContent = new GroupContent
@@ -75,18 +69,15 @@ public sealed class SendGroupMessageCommandHandler : IRequestHandler<Commands.Se
             TextMessage = request.Content
         };
 
-        // Encrypt the content
-        var ciphertext = _cryptoService.EncryptGroupContent(blobKey, groupContent);
-
-        var selfPublicIdentityId = await _selfIdentityQueries.GetSelfIdentityPublicKeyAsync(new SelfId(request.SelfIdentityId.Value), cancellationToken).ConfigureAwait(false);
-        if (selfPublicIdentityId is null)
-        {
-            throw new InvalidOperationException($"Self identity {request.SelfIdentityId.Value} not found.");
-        }
+        // Encrypt the content using Signal SenderKey protocol
+        var cryptoConversationId = new CryptoConversationId(request.ConversationId.Value);
+        var cryptoPublicIdentityId = new CryptoPublicIdentity(selfCryptoInfo.Value.PublicIdentityId.Value);
+        var deviceId = new Percolator.Cryptography.Primitives.DeviceId(selfCryptoInfo.Value.DeviceId.Value);
+        var ciphertext = _cryptoService.EncryptGroupContent(cryptoConversationId, cryptoPublicIdentityId, deviceId, groupContent);
         
         await _messageWriter.AddTextMessageAsync(
             request.ConversationId,
-            new LocalParticipantId(new Percolator.Chat.GroupLedger.PublicIdentityId(selfPublicIdentityId.Value),request.SelfIdentityId),
+            new LocalParticipantId(new Percolator.Chat.GroupLedger.PublicIdentityId(selfCryptoInfo.Value.PublicIdentityId.Value),request.SelfIdentityId),
             request.Content,
             request.PublicMessageId,
             request.SentTimestampUtc,
@@ -106,7 +97,7 @@ public sealed class SendGroupMessageCommandHandler : IRequestHandler<Commands.Se
         await _envelopeSender.SendChatEnvelopeToPeerAsync(envelope, identityPeerId, cancellationToken).ConfigureAwait(false);
     }
 
-    private static ChatEnvelope CreateGroupMessageEnvelope(ConversationId conversationId, Ciphertext ciphertext)
+    private static ChatEnvelope CreateGroupMessageEnvelope(Percolator.Chat.Messaging.ValueObjects.ConversationId conversationId, Ciphertext ciphertext)
     {
         return new ChatEnvelope
         {

@@ -2,7 +2,6 @@ using Percolator.Chat;
 using Percolator.Chat.GroupMembership;
 using Percolator.Chat.Messaging;
 using Percolator.Chat.Messaging.App;
-using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
 using Percolator.Identity;
@@ -28,7 +27,7 @@ public sealed class GroupStreamIngressProcessor : IGroupStreamIngressProcessor
         _chatMessageWriter = chatMessageWriter;
     }
 
-    public async Task ProcessGroupMessageAsync(Guid conversationIdBytes, Guid senderPublicIdentityIdBytes, uint epoch, byte[] ciphertext, CancellationToken ct)
+    public async Task ProcessGroupMessageAsync(Guid conversationIdBytes, Guid senderPublicIdentityIdBytes, uint epoch, byte[] ciphertext, ChatSelfId selfIdentityId, uint senderDeviceId, DateTimeOffset sentAt, CancellationToken ct)
     {
         var conversationId = new Percolator.Chat.Messaging.ValueObjects.ConversationId(conversationIdBytes);
         var senderPublicIdentityId = new PublicIdentityId(senderPublicIdentityIdBytes);
@@ -42,8 +41,6 @@ public sealed class GroupStreamIngressProcessor : IGroupStreamIngressProcessor
         }
 
         // Load the group aggregate for validation
-        // We need a ChatSelfId for the repository - use a default for now (this is a relay context)
-        var selfIdentityId = new ChatSelfId(1); // TODO: This should come from context
         var groupConversation = await _groupConversationRepository.GetByIdAsync(conversationId, selfIdentityId, ct).ConfigureAwait(false);
         if (groupConversation is null)
         {
@@ -70,20 +67,19 @@ public sealed class GroupStreamIngressProcessor : IGroupStreamIngressProcessor
 
         // Decrypt the message
         var senderCryptoPublicIdentity = new CryptoPublicIdentity(senderPublicIdentityIdBytes);
-        var senderDeviceId = new Percolator.Cryptography.Primitives.DeviceId(1); // TODO: This should come from context or message metadata
+        var cryptoSenderDeviceId = new Percolator.Cryptography.Primitives.DeviceId(senderDeviceId);
         var conversationCryptoId = new Percolator.Cryptography.Primitives.ConversationId(conversationIdBytes);
         
         var plaintext = _senderKeyCryptographyService.DecryptGroupMessage(
             conversationCryptoId,
             senderCryptoPublicIdentity,
-            senderDeviceId,
+            cryptoSenderDeviceId,
             ciphertext);
 
         var content = System.Text.Encoding.UTF8.GetString(plaintext);
 
         // Persist the decrypted message
         var publicMessageId = new PublicMessageId(Guid.NewGuid());
-        var sentAt = DateTimeOffset.UtcNow; // TODO: This should come from message metadata
 
         await _chatMessageWriter.AddGroupMessageAsync(
             conversationId,

@@ -1,5 +1,6 @@
 using Percolator.Cryptography;
 using Percolator.Identity;
+using DeviceId = Percolator.Identity.DeviceId;
 
 namespace Percolator.Application.Chat;
 
@@ -11,4 +12,6 @@ public interface ISelfIdentityQueries
     Task<(IdentityPublicKeyHash PublicKeyHash, PublicIdentityId PublicIdentityId)?> GetIdentityParticipantInfoAsync(
         SelfId selfIdentityId, CancellationToken ct);
     Task<PublicIdentityId?> GetSelfIdentityPublicKeyAsync(SelfId selfIdentityId, CancellationToken ct);
+    Task<(PublicIdentityId PublicIdentityId, DeviceId DeviceId)?> GetSelfIdentityCryptoInfoAsync(
+        SelfId selfIdentityId, CancellationToken ct);
 }

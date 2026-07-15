@@ -14,17 +14,20 @@ public sealed class RelayGroupService : Percolator.Contracts.RelayGroupService.R
     private readonly IRelayGroupLedgerRepository _ledgerRepository;
     private readonly IRelayGroupStreamDispatcher _dispatcher;
     private readonly IPeerIdentityRepository _peerIdentityRepository;
+    private readonly IPeerIdentityQueries _peerIdentityQueries;
 
     public RelayGroupService(
         IRelayGroupOrchestrator orchestrator,
         IRelayGroupLedgerRepository ledgerRepository,
         IRelayGroupStreamDispatcher dispatcher,
-        IPeerIdentityRepository peerIdentityRepository)
+        IPeerIdentityRepository peerIdentityRepository,
+        IPeerIdentityQueries peerIdentityQueries)
     {
         _orchestrator = orchestrator;
         _ledgerRepository = ledgerRepository;
         _dispatcher = dispatcher;
         _peerIdentityRepository = peerIdentityRepository;
+        _peerIdentityQueries = peerIdentityQueries;
     }
 
     public override async Task<SubmitGroupMessageResponse> Publish(
@@ -307,14 +310,17 @@ public sealed class RelayGroupService : Percolator.Contracts.RelayGroupService.R
             var senderPublicIdentityId = new Guid(senderPublicIdentityIdBytes);
 
             // Map PublicIdentityId to PeerId for authorization check
-            var senderPeerIdentity = await _peerIdentityRepository.GetOrCreateAsync(
+            var senderPeerId = await _peerIdentityQueries.GetPeerIdByPublicIdentityIdAsync(
                 new Percolator.Identity.PublicIdentityId(senderPublicIdentityId),
                 context.CancellationToken);
+
+            if (senderPeerId is null)
+                throw new RpcException(new Status(StatusCode.NotFound, "Sender peer identity not found"));
 
             // Authorization Gate: Verify caller is a member of the conversation
             var isMember = await _ledgerRepository.IsMemberAsync(
                 new ConversationId(conversationId),
-                new Percolator.Chat.GroupMembership.ChatPeerId(senderPeerIdentity.Id.Value),
+                new Percolator.Chat.GroupMembership.ChatPeerId(senderPeerId.Value.Value),
                 context.CancellationToken);
 
             if (!isMember)

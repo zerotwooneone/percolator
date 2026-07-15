@@ -22,14 +22,12 @@ namespace Percolator.ApplicationTests.Network
             var mq = new Moq.Mock<IMessageQueueService>(MockBehavior.Loose);
             var profile = new Moq.Mock<Percolator.Network.IPeerRoutingProfileRepository>(MockBehavior.Loose);
             var pendingGroupInvitationRepo = new Moq.Mock<Percolator.Chat.IPendingGroupInvitationRepository>(MockBehavior.Loose);
-            var groupCryptoStateRepo = new Moq.Mock<IGroupCryptoStateRepository>(MockBehavior.Loose);
             var groupMessageCryptoService = new Moq.Mock<Percolator.Cryptography.IGroupMessageCryptographyService>(MockBehavior.Loose);
-            var groupCryptoService = new Moq.Mock<Percolator.Cryptography.IGroupCryptographyService>(MockBehavior.Loose);
             var messageWriter = new Moq.Mock<IChatMessageWriter>(MockBehavior.Loose);
             var profileOrchestrationService = new Moq.Mock<Percolator.Application.Chat.IProfileOrchestrationService>(MockBehavior.Loose);
             var groupInviteHandler = new Moq.Mock<Percolator.Application.Chat.IGroupInviteHandler>(MockBehavior.Loose);
             var peerIdentityQueries = new Moq.Mock<Percolator.Application.Chat.IPeerIdentityQueries>(MockBehavior.Loose);
-            return new ProcessInternalEnvelopeHandler(logger, mediatorMock.Object, dht.Object, mq.Object, profile.Object, pendingGroupInvitationRepo.Object, groupCryptoStateRepo.Object, groupMessageCryptoService.Object, groupCryptoService.Object, messageWriter.Object, profileOrchestrationService.Object, groupInviteHandler.Object, peerIdentityQueries.Object);
+            return new ProcessInternalEnvelopeHandler(logger, mediatorMock.Object, dht.Object, mq.Object, profile.Object, pendingGroupInvitationRepo.Object, groupMessageCryptoService.Object, messageWriter.Object, profileOrchestrationService.Object, groupInviteHandler.Object, peerIdentityQueries.Object);
         }
 
         [Test]
@@ -154,14 +152,12 @@ namespace Percolator.ApplicationTests.Network
             var mq = new Moq.Mock<IMessageQueueService>(MockBehavior.Loose);
             var profile = new Moq.Mock<Percolator.Network.IPeerRoutingProfileRepository>(MockBehavior.Loose);
             var pendingGroupInvitationRepo = new Moq.Mock<Percolator.Chat.IPendingGroupInvitationRepository>(MockBehavior.Loose);
-            var groupCryptoStateRepo = new Moq.Mock<IGroupCryptoStateRepository>(MockBehavior.Loose);
             var groupMessageCryptoService = new Moq.Mock<Percolator.Cryptography.IGroupMessageCryptographyService>(MockBehavior.Loose);
-            var groupCryptoService = new Moq.Mock<Percolator.Cryptography.IGroupCryptographyService>(MockBehavior.Loose);
             var messageWriter = new Moq.Mock<IChatMessageWriter>(MockBehavior.Loose);
             var profileOrchestrationService = new Moq.Mock<Percolator.Application.Chat.IProfileOrchestrationService>(MockBehavior.Loose);
             var groupInviteHandler = new Moq.Mock<Percolator.Application.Chat.IGroupInviteHandler>(MockBehavior.Loose);
             var peerIdentityQueries = new Moq.Mock<Percolator.Application.Chat.IPeerIdentityQueries>(MockBehavior.Loose);
-            var sut = new ProcessInternalEnvelopeHandler(logger, mediator.Object, dht.Object, mq.Object, profile.Object, pendingGroupInvitationRepo.Object, groupCryptoStateRepo.Object, groupMessageCryptoService.Object, groupCryptoService.Object, messageWriter.Object, profileOrchestrationService.Object, groupInviteHandler.Object, peerIdentityQueries.Object);
+            var sut = new ProcessInternalEnvelopeHandler(logger, mediator.Object, dht.Object, mq.Object, profile.Object, pendingGroupInvitationRepo.Object, groupMessageCryptoService.Object, messageWriter.Object, profileOrchestrationService.Object, groupInviteHandler.Object, peerIdentityQueries.Object);
 
             var contractsReq = new Percolator.Contracts.FindNodeRequest
             {
@@ -196,14 +192,12 @@ namespace Percolator.ApplicationTests.Network
             var mq = new Moq.Mock<IMessageQueueService>(MockBehavior.Loose);
             var profile = new Moq.Mock<Percolator.Network.IPeerRoutingProfileRepository>(MockBehavior.Loose);
             var pendingGroupInvitationRepo = new Moq.Mock<Percolator.Chat.IPendingGroupInvitationRepository>(MockBehavior.Loose);
-            var groupCryptoStateRepo = new Moq.Mock<IGroupCryptoStateRepository>(MockBehavior.Loose);
             var groupMessageCryptoService = new Moq.Mock<Percolator.Cryptography.IGroupMessageCryptographyService>(MockBehavior.Loose);
-            var groupCryptoService = new Moq.Mock<Percolator.Cryptography.IGroupCryptographyService>(MockBehavior.Loose);
             var messageWriter = new Moq.Mock<IChatMessageWriter>(MockBehavior.Loose);
             var profileOrchestrationService = new Moq.Mock<Percolator.Application.Chat.IProfileOrchestrationService>(MockBehavior.Loose);
             var groupInviteHandler = new Moq.Mock<Percolator.Application.Chat.IGroupInviteHandler>(MockBehavior.Loose);
             var peerIdentityQueries = new Moq.Mock<Percolator.Application.Chat.IPeerIdentityQueries>(MockBehavior.Loose);
-            var sut = new ProcessInternalEnvelopeHandler(logger, mediator.Object, dht.Object, mq.Object, profile.Object, pendingGroupInvitationRepo.Object, groupCryptoStateRepo.Object, groupMessageCryptoService.Object, groupCryptoService.Object, messageWriter.Object, profileOrchestrationService.Object, groupInviteHandler.Object, peerIdentityQueries.Object);
+            var sut = new ProcessInternalEnvelopeHandler(logger, mediator.Object, dht.Object, mq.Object, profile.Object, pendingGroupInvitationRepo.Object, groupMessageCryptoService.Object, messageWriter.Object, profileOrchestrationService.Object, groupInviteHandler.Object, peerIdentityQueries.Object);
             var contractsReq = new Percolator.Contracts.FindNodeRequest
             {
                 TargetPeerId = Google.Protobuf.ByteString.CopyFrom(new byte[32])
@@ -238,14 +232,12 @@ namespace Percolator.ApplicationTests.Network
             var logger = NullLogger<ProcessInternalEnvelopeHandler>.Instance;
             var mq4 = new Moq.Mock<IMessageQueueService>(MockBehavior.Loose);
             var pendingGroupInvitationRepo = new Moq.Mock<Percolator.Chat.IPendingGroupInvitationRepository>(MockBehavior.Loose);
-            var groupCryptoStateRepo = new Moq.Mock<IGroupCryptoStateRepository>(MockBehavior.Loose);
             var groupMessageCryptoService = new Moq.Mock<Percolator.Cryptography.IGroupMessageCryptographyService>(MockBehavior.Loose);
-            var groupCryptoService = new Moq.Mock<Percolator.Cryptography.IGroupCryptographyService>(MockBehavior.Loose);
             var messageWriter = new Moq.Mock<IChatMessageWriter>(MockBehavior.Loose);
             var profileOrchestrationService = new Moq.Mock<Percolator.Application.Chat.IProfileOrchestrationService>(MockBehavior.Loose);
             var groupInviteHandler = new Moq.Mock<Percolator.Application.Chat.IGroupInviteHandler>(MockBehavior.Loose);
             var peerIdentityQueries = new Moq.Mock<Percolator.Application.Chat.IPeerIdentityQueries>(MockBehavior.Loose);
-            var sut = new ProcessInternalEnvelopeHandler(logger, mediator.Object, dht.Object, mq4.Object, new Mock<Percolator.Network.IPeerRoutingProfileRepository>().Object, pendingGroupInvitationRepo.Object, groupCryptoStateRepo.Object, groupMessageCryptoService.Object, groupCryptoService.Object, messageWriter.Object, profileOrchestrationService.Object, groupInviteHandler.Object, peerIdentityQueries.Object);
+            var sut = new ProcessInternalEnvelopeHandler(logger, mediator.Object, dht.Object, mq4.Object, new Mock<Percolator.Network.IPeerRoutingProfileRepository>().Object, pendingGroupInvitationRepo.Object, groupMessageCryptoService.Object, messageWriter.Object, profileOrchestrationService.Object, groupInviteHandler.Object, peerIdentityQueries.Object);
 
             // Build InternalEnvelope with DHT FindNodeRequest
             var contractsReq = new Percolator.Contracts.FindNodeRequest
