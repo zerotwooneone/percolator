@@ -61,10 +61,15 @@ public sealed class RelayGroupService : Percolator.Contracts.RelayGroupService.R
             {
                 // Extract sender's PublicIdentityId from context (set by DeliveryCertificateAuthInterceptor)
                 var senderPublicIdentityIdStr = context.RequestHeaders.GetValue("x-percolator-sender-public-identity-id");
+                var senderDeviceIdStr = context.RequestHeaders.GetValue("x-percolator-sender-device-id");
+                
                 if (senderPublicIdentityIdStr is not null)
                 {
                     var senderPublicIdentityIdBytes = Convert.FromHexString(senderPublicIdentityIdStr);
                     var senderPublicIdentityId = new Guid(senderPublicIdentityIdBytes);
+                    
+                    // Parse sender device ID (default to 1 if not provided)
+                    var senderDeviceId = senderDeviceIdStr is not null ? uint.Parse(senderDeviceIdStr) : 1u;
                     
                     // Fan out to all connected streams
                     await _dispatcher.DispatchAsync(
@@ -72,6 +77,7 @@ public sealed class RelayGroupService : Percolator.Contracts.RelayGroupService.R
                         request.Ciphertext.Memory,
                         request.Epoch,
                         senderPublicIdentityId,
+                        senderDeviceId,
                         context.CancellationToken);
                 }
 

@@ -23,6 +23,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IPendingGroupInvitationRepository, SqlitePendingGroupInvitationRepository>();
         services.AddScoped<IPendingGroupInvitationQueries, SqlitePendingGroupInvitationQueries>();
         services.AddScoped<IConversationMessageQueries, SqliteConversationMessageQueries>();
+        services.AddScoped<IGroupConversationQueries, SqliteGroupConversationQueries>();
 
         // Register Chunk 4 Relay Ledger services
         services.AddScoped<IRelayGroupLedgerRepository, SqliteRelayGroupLedgerRepository>();

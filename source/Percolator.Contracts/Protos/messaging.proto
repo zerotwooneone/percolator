@@ -305,4 +305,5 @@ message GroupStreamResponse {
     optional bytes ciphertext = 2;
     optional uint32 epoch = 3;
     optional bytes sender_public_identity_id = 4;
+    optional uint32 sender_device_id = 5;
 }

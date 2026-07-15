@@ -88,9 +88,10 @@ public class GrpcRelayGroupStreamDispatcherTests
         var ciphertext = new byte[] { 0x01, 0x02, 0x03 };
         var epoch = 1u;
         var senderPublicIdentityId = Guid.NewGuid();
+        var senderDeviceId = 1u;
 
         // ACT
-        await dispatcher.DispatchAsync(conversationId, ciphertext, epoch, senderPublicIdentityId, CancellationToken.None);
+        await dispatcher.DispatchAsync(conversationId, ciphertext, epoch, senderPublicIdentityId, senderDeviceId, CancellationToken.None);
 
         // ASSERT
         var firstMessage = await firstReader.ReadAsync(CancellationToken.None);
@@ -114,9 +115,10 @@ public class GrpcRelayGroupStreamDispatcherTests
         var ciphertext = new byte[] { 0x01, 0x02, 0x03 };
         var epoch = 1u;
         var senderPublicIdentityId = Guid.NewGuid();
+        var senderDeviceId = 1u;
 
         // ACT
-        var act = async () => await dispatcher.DispatchAsync(conversationId, ciphertext, epoch, senderPublicIdentityId, CancellationToken.None);
+        var act = async () => await dispatcher.DispatchAsync(conversationId, ciphertext, epoch, senderPublicIdentityId, senderDeviceId, CancellationToken.None);
 
         // ASSERT
         await act.Should().NotThrowAsync();

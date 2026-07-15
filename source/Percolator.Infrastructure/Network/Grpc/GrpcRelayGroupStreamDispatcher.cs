@@ -7,7 +7,7 @@ internal sealed class GrpcRelayGroupStreamDispatcher : IRelayGroupStreamDispatch
 {
     private readonly ConcurrentDictionary<Guid, ConcurrentDictionary<Guid, Channel<Percolator.Contracts.GroupStreamResponse>>> _streamMatrix = new();
 
-    public Task DispatchAsync(Guid conversationId, ReadOnlyMemory<byte> ciphertext, uint epoch, Guid senderPublicIdentityId, CancellationToken ct)
+    public Task DispatchAsync(Guid conversationId, ReadOnlyMemory<byte> ciphertext, uint epoch, Guid senderPublicIdentityId, uint senderDeviceId, CancellationToken ct)
     {
         if (!_streamMatrix.TryGetValue(conversationId, out var conversationStreams))
         {
@@ -20,7 +20,8 @@ internal sealed class GrpcRelayGroupStreamDispatcher : IRelayGroupStreamDispatch
             ConversationId = Google.Protobuf.ByteString.CopyFrom(conversationId.ToByteArray()),
             Ciphertext = Google.Protobuf.ByteString.CopyFrom(ciphertext.ToArray()),
             Epoch = epoch,
-            SenderPublicIdentityId = Google.Protobuf.ByteString.CopyFrom(senderPublicIdentityId.ToByteArray())
+            SenderPublicIdentityId = Google.Protobuf.ByteString.CopyFrom(senderPublicIdentityId.ToByteArray()),
+            SenderDeviceId = senderDeviceId
         };
 
         foreach (var (_, channel) in conversationStreams)
