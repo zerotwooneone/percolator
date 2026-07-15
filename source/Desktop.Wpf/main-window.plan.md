@@ -144,6 +144,187 @@ Implementation Requirements
 - `RelayGroupOrchestrator_ModifyGroupAsync_UpdatesRoster_MappingToPeerIds` - Test that the mutation method correctly translates the PublicIdentityIds to PeerIds before passing them to the repository for blinded roster updates.
 
 ---
+## Chunk 6.2
+### Feature Implementation Request: Signal Protocol Chunk 6.2 (Bidirectional Stream & Privacy-Preserving Egress)
+You are to replace the fragmented, pull-based 1:1 messaging model and the conversation-centric group streaming model with a singular, bidirectional gRPC stream per Relay. This chunk enforces strict "shared nothing" Clean Architecture across the `Network`, `Chat`, `Cryptography`, and `Identity` domains. Critically, it corrects a privacy flaw by strictly segregating authenticated ingress streams from anonymous egress RPCs to preserve the Sealed Sender protocol.
+
+#### Architectural Overview & Problem Analysis
+* **Network Egress Domain Value Types (`Percolator.Network/ValueObjects`):**
+    * Create `EgressJobId` (wrapping `Guid`).
+    * Create `NetworkPayloadBytes` (wrapping `byte[]`, representing the raw encrypted outbound data). **Format Definition:** This byte array must store the exact `ToByteArray()` output of the underlying Protobuf request (e.g., the serialized bytes of `SubmitGroupMessageRequest` or `EnqueueOpaqueMessageRequest`). The worker will deserialize it based on the `PayloadType` enum.
+* **Cross-Domain Value Types Violation:** 
+  * Ensure `NetworkEgressJob` uses `Percolator.Network.NetworkPeerId` for routing.
+  * Ensure `RelayHostStreamManager` uses `Percolator.Identity.PublicIdentityId` for stream tracking. 
+  * Do NOT leak `Percolator.Chat.GroupLedger.PublicIdentityId` into the Infrastructure network tracking.
+* **The Sealed Sender Privacy Boundary (CRITICAL):** Signal's Sealed Sender protocol dictates that the Relay knows who is receiving a group message, but *not* who sent it.
+  * **Solution:** **Ingress is Authenticated, Egress has Split Authorization.** We will use a Bidirectional gRPC Stream *exclusively* for retrieving messages and sending Acks. Egress remains **Unary RPCs**. 
+  * Group Egress (`SubmitGroupMessage`) is dispatched anonymously (omitting `DeliveryCertificate` headers) relying entirely on ZK Proofs for authorization. 
+  * 1:1 Egress (`EnqueueOpaqueMessage`) *must* attach the sender's `DeliveryCertificate` headers to prevent mailbox-spam DoS on the relay, as we do not yet have recipient-issued Sealed Sender tokens for 1:1s.
+* **Lack of Egress Outbox:** Currently, we lack a dedicated persistent Egress queue for network routing payloads. We use direct ephemeral RPCs or internal envelopes. We must introduce `NetworkEgressJobDbo` exclusively for serialized network payloads, leaving `RelayOutboxDbo` (renamed to `DomainEventOutboxDbo`) exclusively for Application Domain Events.
+* **Greenfield Cutover:** As this is greenfield development, we do not write EF migrations. We define the new code, update the EF DbContext to drop the old tables/create the new ones, and delete the legacy code once cutover is complete.
+
+---
+
+### Sub-Chunk A: Protobuf Contracts & Network Domain Egress
+**Goal:** Define the bidirectional gRPC contracts (strictly for ingress/acks) and establish the `Network` domain aggregate for reliable outbound routing.
+
+1. **Protobuf Updates (`Percolator.Contracts`)**
+* Delete `FetchQueuedMessagesRequest`, `FetchQueuedMessagesResponse`, and `RelayOpaqueEnvelope` from `internal_messaging.proto`.
+* **Service Alignment:** Our existing RPC definitions loosely split into P2P (`TransportService`) and Relay (`RelayGroupService`). To perfectly match the desired unified transport pipe design, rename `RelayGroupService` to `RelayService` in `messaging.proto` so it handles *all* Relay operations (both 1:1 and Group). Remove the obsolete `rpc StreamGroupMessages` from it.
+* In `messaging.proto`, add the new Unary endpoint for 1:1 relay drop-off to `RelayService`:
+  ```protobuf
+  rpc EnqueueOpaqueMessage(EnqueueOpaqueMessageRequest) returns (EnqueueOpaqueMessageResponse);
+
+  message EnqueueOpaqueMessageRequest {
+      optional bytes target_public_identity_id = 1;
+      optional bytes opaque_payload = 2;
+  }
+  
+  message EnqueueOpaqueMessageResponse {
+      optional bool success = 1;
+  }
+  ```
+* In `messaging.proto`, define the new Bidirectional stream protocol and add `rpc ConnectRelay` to `RelayService`. It does **not** include outbound messages.
+  ```protobuf
+  rpc ConnectRelay(stream ClientRelayStream) returns (stream ServerRelayStream);
+
+  message ClientRelayStream {
+      oneof payload {
+          MessageAck message_ack = 1;  // Acknowledges an ingress 1:1 message
+      }
+  }
+  
+  message MessageAck {
+      optional bytes ack_id = 1; // Guid bytes
+  }
+
+  message ServerRelayStream {
+      oneof payload {
+          GroupMessageDelivery group_delivery = 1;
+          OpaqueMessageDelivery opaque_delivery = 2; // For 1:1 queued messages
+      }
+  }
+  
+  message GroupMessageDelivery {
+      optional bytes conversation_id = 1;
+      optional uint32 epoch = 2;
+      optional bytes ciphertext = 3;
+      optional bytes sender_presentation = 4;
+  }
+  
+  message OpaqueMessageDelivery {
+      optional bytes ack_id = 1; // Guid bytes
+      optional bytes opaque_payload = 2;
+  }
+  ```
+
+2. **Network Domain (`Percolator.Network`)**
+* Create `NetworkEgressJob` aggregate root in `Percolator.Network/Egress`. This represents a serialized network payload waiting to be transmitted anonymously.
+    * Properties: `JobId` (EgressJobId), `DestinationPeerId` (NetworkPeerId), `RoutePreference` (Enum: Direct, Relay, Any), `PayloadType` (Enum: Group, Opaque1to1), `PayloadBytes` (NetworkPayloadBytes), `AttemptCount` (int), `NextAttemptUtc` (DateTimeOffset).
+    * Behaviors: `void RecordFailure()` (increments attempts, updates `NextAttemptUtc` using exponential backoff: `UtcNow + 2^AttemptCount seconds`), `void MarkSent()`. Max attempts before permanent failure is 10.
+* Create `INetworkEgressJobRepository` for standard CRUD.
+* **Tests (`Percolator.NetworkTests`)**:
+  * `NetworkEgressJob_RecordFailure_IncrementsAttemptAndSetsNextAttemptUtc` (Adhere strictly to deterministic time testing using hard-coded `DateTimeOffset` values).
+  * `NetworkEgressJob_MarkSent_UpdatesStateToSent`.
+
+---
+
+### Sub-Chunk B: Infrastructure Egress Persistence & Worker
+**Goal:** Implement the physical storage and the background worker that drains the egress queue anonymously.
+
+1. **Infrastructure Persistence (`Percolator.Infrastructure`)**
+* Create `NetworkEgressJobDbo`. Map it to the EF Core context.
+* Rename `RelayOutboxDbo` to `DomainEventOutboxDbo` to clarify its exact purpose (processing `IDomainEvent` triggers, NOT network bytes). Update `OutboxDispatcherWorker` to only read from `DomainEventOutboxDbo`.
+* Implement `SqliteNetworkEgressJobRepository` using isolated EF transactions.
+
+2. **Application & Infrastructure Orchestration**
+* Create `NetworkEgressWorker` (BackgroundService) in `Percolator.Infrastructure/Egress`.
+* Logic: `ExecuteAsync` runs a continuous loop (with a 5-second `Task.Delay` polling interval). It polls `INetworkEgressJobRepository` for jobs where `NextAttemptUtc <= Now`.
+    * Deserialize the job and dispatch it using standard **Unary gRPC Clients**.
+    * **Direct (P2P) Routing:** If `RoutePreference` is Direct, use `IPeerGrpcChannelFactory` to get a client for the destination `NetworkPeerId` and call the existing `PercolatorMessageService.DeliverOpaqueMessage`.
+    * **Relay Routing:** Use the Relay's channel. 
+    * **Split Authorization (Crucial):** For Group Egress, call the unary `RelayService.Publish(SubmitGroupMessageRequest)` endpoint, and do *not* attach the sender's `DeliveryCertificate` identity headers (anonymous egress). For 1:1 Egress, call `RelayService.EnqueueOpaqueMessage(EnqueueOpaqueMessageRequest)`, and *do* attach the headers (authenticated drop-off).
+    * On success, delete the job. On failure, invoke `RecordFailure()` and save.
+* **Tests (`Percolator.InfrastructureTests`)**:
+  * `NetworkEgressWorker_DispatchesPayload_AndDeletesJobOnSuccess`.
+  * `NetworkEgressWorker_RecordFailure_UpdatesAttemptCountAndNextAttemptUtc`.
+  * `NetworkEgressWorker_RoutePreferenceDirect_UsesDirectClient`.
+  * `NetworkEgressWorker_RoutePreferenceRelay_UsesRelayClientWithAnonymousAuth` (Group).
+  * `NetworkEgressWorker_RoutePreferenceRelay_UsesRelayClientWithAuthFor1to1`.
+
+---
+
+### Sub-Chunk C: Peer as Relay Host (Server-Side Ingress Management)
+**Goal:** Manage active streaming sockets when this node acts as a Relay Server, enforcing Certificate Authentication for connecting downstream clients.
+
+1. **Stream Authentication (`Percolator.Infrastructure/Network/RelayHost`)**
+* Update `DeliveryCertificateAuthInterceptor` to override `DuplexStreamingServerHandler`. 
+* This ensures that when a downstream client calls `ConnectRelay`, the gRPC pipeline verifies the `x-percolator-signature`, `x-percolator-timestamp`, and `x-percolator-sender-public-identity-id` headers, securing the ingress socket so the Relay knows which queues to flush to this connection.
+
+2. **Application Logic (`Percolator.Application/Network/RelayHost`)**
+* Create `RelayHostStreamManager`. It must be a DI Singleton utilizing a `ConcurrentDictionary<Percolator.Identity.PublicIdentityId, IServerStreamWriter<ServerRelayStream>>` for thread safety.
+* **Query/Mutation Split:** Split the existing `IMessageQueueRepository` interface by moving `FetchAsync` into a new `IMessageQueueQueries` interface (`Task<IReadOnlyList<(Guid AckId, QueuedPayloadBytes Blob)>> FetchAsync(PublicIdentityId recipientPublicIdentityId, int maxCount, CancellationToken ct)`). The remaining enqueue/delete methods stay in `IMessageQueueRepository` (mutations). Ensure `SqliteMessageQueueRepository` in the infrastructure layer implements both interfaces.
+* When `ConnectRelay` passes the interceptor, the server loops over the `IAsyncStreamReader<ClientRelayStream>`.
+    * On connect, query `IMessageQueueQueries` to retrieve any pending messages and push them as `OpaqueMessageDelivery` downwards.
+    * On `message_ack`, delete the queued item using `IMessageQueueRepository`.
+    * **Stream Lifecycle & Cert Freshness:** The server's `MoveNext` loop must periodically evaluate the client's `DeliveryCertificate.ExpiresAtUtc`. If it expires, throw an `RpcException` to forcefully drop the stream. Wrap the entire connection handler in a `try/finally { _manager.Remove(clientId); }` block to ensure disconnects are immediately purged from the `ConcurrentDictionary`.
+* **Tests (`Percolator.ApplicationTests`)**:
+  * `RelayHostStreamManager_RegisterClient_FlushesExistingQueue`.
+  * `RelayHostStreamManager_StreamDisconnect_RemovesFromDictionary`.
+  * `RelayHostStreamManager_CertificateExpired_DropsStreamWithRpcException`.
+
+---
+
+### Sub-Chunk D: Peer as Relay Client (Upstream Connection Worker)
+**Goal:** Manage this node's continuous authenticated ingress connection to external Relay Hosts.
+
+1. **Infrastructure Logic (`Percolator.Infrastructure/Network/Upstream`)**
+* Create `UpstreamRelayStreamWorker` (Replacing `RelayGroupStreamWorker`).
+* **Connection Lifecycle & Concurrency:** Add a new method `Task<IEnumerable<PeerRoutingProfile>> GetAllAsync(CancellationToken ct)` to `IPeerRoutingProfileRepository` and implement it in `SqlitePeerRoutingProfileRepository`. The worker then calls `GetAllAsync()` and filters for profiles where `Relays.Count > 0` to resolve the set of all active Relay `NetworkPeerId`s. Launch a background task for each relay using an unbounded `Task.WhenAll` loop (as the expected count is small—tens at most). It must implement an exponential backoff loop for reconnections upon stream failure.
+* **Client Authentication & Expiry:** Before invoking `ConnectRelay`, query `IDeliveryCertificateStore.GetCertificateAsync()` to retrieve this node's `DeliveryCertificate`. Generate the cryptographic signature over the current timestamp and append the standard `x-percolator-*` headers to the gRPC `CallOptions`.
+    * *Note on Cert Freshness:* If the Relay Host drops the stream because the certificate expired mid-session, the worker's catch block triggers the backoff loop, fetches the newest certificate (which `DeliveryCertificateRefreshWorker` keeps updated in the background), and successfully reconnects.
+* **Ingress Pipeline:**
+    * Loop over `ServerRelayStream` `oneof`. 
+    * Route payloads by directly invoking service methods. For group deliveries, call `IGroupStreamIngressProcessor.ProcessGroupMessageAsync`.
+    * For 1:1 deliveries, define `IOpaqueMessageDeliverer` in `Percolator.Application/Network`. This service extracts the relevant inbound logic from the bloated `DeliverOpaqueMessageHandler`: `Task<bool> DeliverAsync(byte[] opaqueBytes, CancellationToken ct)`. It handles Ratchet decryption, `DirectSession` lookup, and `InternalEnvelope` dispatching. If `DeliverAsync` returns true, immediately push a `MessageAck` back up the `ClientRelayStream`. Do **not** use MediatR for the outer loop routing.
+* **Tests (`Percolator.ApplicationTests`)**:
+  * `IOpaqueMessageDeliverer_DeliverAsync_Success_ReturnsTrue`.
+  * `IOpaqueMessageDeliverer_DeliverAsync_DecryptionFailure_ReturnsFalse`.
+* **Tests (`Percolator.InfrastructureTests`)**:
+  * `UpstreamRelayStreamWorker_YieldsAckUpstream_WhenOpaqueDeliveryReceived`.
+  * `UpstreamRelayStreamWorker_ConnectionFailure_ImplementsExponentialBackoff`.
+  * `UpstreamRelayStreamWorker_CertificateExpired_RefetchesAndReconnects`.
+
+---
+
+### Sub-Chunk E: Cutover & Dead Code Elimination
+**Goal:** Migrate existing usage and delete obsolete code.
+
+1. **Refactoring Handlers (`Percolator.Application`)**
+* Update all Application paths that presently invoke `ISessionMessageService` or `RouteSender` for routing payloads (e.g., chat message sending) to instead construct a `NetworkEgressJob` and save it to `INetworkEgressJobRepository`. This establishes durability.
+
+2. **Dead Code Deletion**
+* **Implementation Files:**
+  * Delete `RelayGroupStreamWorker.cs`.
+  * Delete `GrpcRelayGroupStreamDispatcher.cs` & `IRelayGroupStreamDispatcher.cs`.
+  * Delete `RelayOrchestrator.cs` (The legacy pull-based orchestrator).
+  * Delete `FetchQueuedMessagesHandler.cs` and related Pull-model contracts (`FetchQueuedMessagesQuery.cs`, `FetchQueuedMessagesResult.cs`).
+  * Delete `TryRelayNextForPeerCommand.cs` (command that uses deleted `RelayOrchestrator`).
+  * Delete `ProcessRelayedOpaquePayloadCommand.cs` (references `RelayOpaqueEnvelope` which is being deleted from protobuf).
+  * Rename `RelayGroupService.cs` to `RelayService.cs` and update the class to inherit from `RelayService.RelayServiceBase` instead of `RelayGroupService.RelayGroupServiceBase`. Update `GrpcServerManager.cs` to register `RelayService` instead of `RelayGroupService`.
+* **Test Files:**
+  * Delete `RelayOrchestratorTests.cs`.
+  * Delete `FetchQueuedMessagesHandlerTests.cs`.
+  * Delete `GrpcRelayGroupStreamDispatcherTests.cs`.
+* **Service Registrations:**
+  * Remove `services.AddScoped<RelayOrchestrator>();` from `Percolator.Application/Network/ServiceCollectionExtensions.cs`.
+  * Remove the `IRelayGroupStreamDispatcher` registration from `Percolator.Infrastructure/Network/ServiceCollectionExtensions.cs`.
+* **Dependency Cleanup:**
+  * Remove `_relayOrchestrator` dependency from `DeliverOpaqueMessageHandler.cs` and delete the relay loop logic (lines 213-224) that calls `RelayNextAsync`.
+* **Database Cleanup:**
+  * Ensure the SQLite database drops the legacy `RelayOutbox` tables.
+
+---
 
 ## Chunk 7
 ### Feature Implementation Request: Signal Protocol Chunk 7 (Client-Side Speculative Rebase Coordinator)
@@ -187,10 +368,10 @@ Implementation Requirements
 
 2. The Proposal Model & Domain Safeguard (`Percolator.Chat`)
 * Define an interface for mutations locally: `IGroupMutationProposal`.
-* Implement an explicit proposal record: `RenameGroupProposal(string NewName) : IGroupMutationProposal`.
+* Implement an explicit proposal record: `RenameGroupProposal(GroupName NewName) : IGroupMutationProposal`.
 * Update the `GroupConversation` aggregate root to support deep copying or dry validation:
   `public bool EvaluateProposal(IGroupMutationProposal proposal, out string? businessRuleViolation)`
-* Add `public byte[] GenerateProfilePlaintext()` to `GroupConversation` to serialize the group's current name and roles into a `GroupProfilePlaintext` protobuf payload.
+* Add `public GroupProfilePlaintextBytes GenerateProfilePlaintext()` to `GroupConversation` to serialize the group's current name and roles into a `GroupProfilePlaintext` protobuf payload.
 
 3. The Mutation Coordinator Process Manager (`Percolator.Application/Apps/Chat`)
 * Create a centralized service orchestrator: `GroupMutationCoordinator`.
@@ -237,8 +418,8 @@ Architectural Constraints (CRITICAL):
 Implementation Requirements
 
 1. The Proposal Models (`Percolator.Chat`)
-* Create `AddMemberProposal(Guid NewMemberPublicIdentityId) : IGroupMutationProposal`.
-* Create `RemoveMemberProposal(Guid TargetPublicIdentityId) : IGroupMutationProposal`.
+* Create `AddMemberProposal(PublicIdentityId NewMemberPublicIdentityId) : IGroupMutationProposal`.
+* Create `RemoveMemberProposal(PublicIdentityId TargetPublicIdentityId) : IGroupMutationProposal`.
 
 2. The Coordinator Handlers (`GroupMutationCoordinator`)
 * Expand `CoordinateMutationAsync` to process Add/Remove proposals.
