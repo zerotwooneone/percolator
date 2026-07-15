@@ -30,7 +30,7 @@ public class DhtIntegrationTests : IntegrationTestBase
         var secureSvcMock = new Mock<Percolator.Application.Services.ISecureMessagingService>();
         var directSessionRepoMock = new Mock<IDirectSessionRepository>();
         directSessionRepoMock
-            .Setup(r => r.ListAsync(It.IsAny<int>()))
+            .Setup(r => r.ListAsync(It.IsAny<NetworkSelfId>()))
             .ReturnsAsync(Array.Empty<DirectSession>());
 
         // Mocks for unused dependencies to allow the host to build
@@ -64,9 +64,9 @@ public class DhtIntegrationTests : IntegrationTestBase
             // Fast-path lookup resolves our header key via domain index
             var ratchetLookup = new Moq.Mock<IRatchetKeyIndex>();
             var preKey = PreKey.FromBytes(headerKey);
-            ratchetLookup.Setup(l => l.TryResolveAsync(It.IsAny<int>(), It.Is<RatchetEphemeralKey>(p => p.ToArray().SequenceEqual(headerKey)), It.IsAny<CancellationToken>()))
+            ratchetLookup.Setup(l => l.TryResolveAsync(It.IsAny<CryptoSelfId>(), It.Is<RatchetEphemeralKey>(p => p.ToArray().SequenceEqual(headerKey)), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(sessionId);
-            ratchetLookup.Setup(l => l.UpsertAsync(It.IsAny<int>(), It.Is<SessionId>(s => s.Value == sessionId.Value), It.IsAny<RatchetEphemeralKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            ratchetLookup.Setup(l => l.UpsertAsync(It.IsAny<CryptoSelfId>(), It.Is<SessionId>(s => s.Value == sessionId.Value), It.IsAny<RatchetEphemeralKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
             services.AddSingleton<IRatchetKeyIndex>(ratchetLookup.Object);
             services.AddSingleton<IDirectConversationRepository>(directConversationRepoMock.Object);
@@ -91,7 +91,7 @@ public class DhtIntegrationTests : IntegrationTestBase
             // Ensure ActiveIdentityContext has an identity with SelfIdentityId set
             services.AddSingleton(new Percolator.Application.Identity.ActiveIdentityContext
             {
-                Identity = new IdentityRecord(Guid.NewGuid(), "Test") { SelfIdentityId = new SelfId(1) }
+                Identity = new IdentityRecord(new SelfId(1), new PublicIdentityId(Guid.NewGuid()), new DeviceId(1), "Test")
             });
             services.AddMediatR(cfg => 
                 cfg.RegisterServicesFromAssembly(typeof(Percolator.Dht.Messages.PingRequest).Assembly));
@@ -99,18 +99,18 @@ public class DhtIntegrationTests : IntegrationTestBase
 
         var messageService = host.Services.GetRequiredService<Percolator.Infrastructure.Network.Grpc.PercolatorMessageService>();
 
-        var remotePeerId = new Percolator.Identity.PeerId(Guid.NewGuid());
+        var remotePeerId = new Percolator.Identity.PeerId(1);
 
         // 1. Mock inbound decrypt via SecureMessagingService to return the expected InternalEnvelope
         var dhtEnvelope = new DhtEnvelope { PingRequest = new Contracts.PingRequest() };
         var internalEnvelope = new InternalEnvelope { DhtEnvelope = dhtEnvelope };
         var ciphertext = Ciphertext.FromBytes(new byte[1]); // Content doesn't matter
         secureSvcMock
-            .Setup(s => s.DecryptInboundAsync(It.IsAny<int>(), It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.DecryptInboundAsync(It.IsAny<CryptoSelfId>(), It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((sessionId, Plaintext.FromBytes(internalEnvelope.ToByteArray())));
 
         // 2. Mock the direct session repository to map session to remote peer
-        directSessionRepoMock.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId.Value), It.IsAny<int>()))
+        directSessionRepoMock.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId.Value), It.IsAny<NetworkSelfId>()))
             .ReturnsAsync(new DirectSession(new NetworkPeerId(remotePeerId.Value), new DirectSessionId(sessionId.Value)));
 
         // 3. Provide routing profile repo/planner mocks in host setup above; no legacy connection repo
@@ -144,7 +144,7 @@ public class DhtIntegrationTests : IntegrationTestBase
         var secureSvcMock = new Mock<Percolator.Application.Services.ISecureMessagingService>();
         var directSessionRepoMock = new Mock<IDirectSessionRepository>();
         directSessionRepoMock
-            .Setup(r => r.ListAsync(It.IsAny<int>()))
+            .Setup(r => r.ListAsync(It.IsAny<NetworkSelfId>()))
             .ReturnsAsync(Array.Empty<DirectSession>());
         var sessionId = new Percolator.Cryptography.SessionId(Guid.NewGuid());
 
@@ -173,16 +173,16 @@ public class DhtIntegrationTests : IntegrationTestBase
             // Ensure ActiveIdentityContext has an identity with SelfIdentityId set
             services.AddSingleton(new Percolator.Application.Identity.ActiveIdentityContext
             {
-                Identity = new IdentityRecord(Guid.NewGuid(), "Test") { SelfIdentityId = new SelfId(1) }
+                Identity = new IdentityRecord(new SelfId(1), new PublicIdentityId(Guid.NewGuid()), new DeviceId(1), "Test")
             });
             // Fast-path lookup resolves our header key via domain index
             var ratchetLookup2 = new Moq.Mock<IRatchetKeyIndex>();
             var preKey2 = PreKey.FromBytes(headerKey2);
             ratchetLookup2
-                .Setup(l => l.TryResolveAsync(It.IsAny<int>(), It.Is<RatchetEphemeralKey>(p => p.ToArray().SequenceEqual(headerKey2)), It.IsAny<CancellationToken>()))
+                .Setup(l => l.TryResolveAsync(It.IsAny<CryptoSelfId>(), It.Is<RatchetEphemeralKey>(p => p.ToArray().SequenceEqual(headerKey2)), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(sessionId);
             ratchetLookup2
-                .Setup(l => l.UpsertAsync(It.IsAny<int>(), It.Is<SessionId>(s => s.Value == sessionId.Value), It.IsAny<RatchetEphemeralKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+                .Setup(l => l.UpsertAsync(It.IsAny<CryptoSelfId>(), It.Is<SessionId>(s => s.Value == sessionId.Value), It.IsAny<RatchetEphemeralKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
             services.AddSingleton<IRatchetKeyIndex>(ratchetLookup2.Object);
             // Avoid querying real DB tables from domain planner repo during tests
@@ -205,18 +205,18 @@ public class DhtIntegrationTests : IntegrationTestBase
 
         // Prepare inputs for this test scope
         var targetId = NodeId.FromBytes(SHA256.HashData(Guid.NewGuid().ToByteArray()));
-        var remotePeerId = new Percolator.Identity.PeerId(Guid.NewGuid());
+        var remotePeerId = new Percolator.Identity.PeerId(2);
 
         // 1. Mock inbound decrypt via SecureMessagingService for FindNodeRequest
         var findNodeRequestProto = new Contracts.FindNodeRequest { TargetPeerId = ByteString.CopyFrom(targetId.ToArray()) };
         var dhtEnvelope = new DhtEnvelope { FindNodeRequest = findNodeRequestProto };
         var internalEnvelope = new InternalEnvelope { DhtEnvelope = dhtEnvelope };
         secureSvcMock
-            .Setup(s => s.DecryptInboundAsync(It.IsAny<int>(), It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.DecryptInboundAsync(It.IsAny<CryptoSelfId>(), It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((sessionId, Plaintext.FromBytes(internalEnvelope.ToByteArray())));
 
         // 2. Mock the direct session repository to map session to remote peer
-        directSessionRepoMock.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId.Value), It.IsAny<int>()))
+        directSessionRepoMock.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId.Value), It.IsAny<NetworkSelfId>()))
             .ReturnsAsync(new DirectSession(new NetworkPeerId(remotePeerId.Value), new DirectSessionId(sessionId.Value)));
 
         // 3. No legacy connection repo; routing profile repo/planner mocks provided in host setup

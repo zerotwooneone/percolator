@@ -203,15 +203,26 @@ public abstract class IntegrationTestBase
             await dbContext.Database.EnsureCreatedAsync();
         }
 
+        // Create and load the self identity
         using (var scope = host.Services.CreateScope())
         {
-            // Ensure the self identity exists in the repository (and keys exist) before loading
-            var mediator = scope.ServiceProvider.GetRequiredService<MediatR.IMediator>();
-            var selfId = await mediator.Send(new Percolator.Application.Cli.CreateSelfIdentityCommand(identityName, null));
-
+            var identityRepository = scope.ServiceProvider.GetRequiredService<Percolator.Identity.ISelfIdentityRepository>();
             var identityOrchestrator = scope.ServiceProvider.GetRequiredService<IIdentityOrchestrator>();
-            await identityOrchestrator.ResolveIdentityAsync(selfId, CancellationToken.None);
+            
+            // Create a new self identity (Id must be 0 for unsaved identity)
+            var selfId = new Percolator.Identity.SelfId(0);
+            var publicIdentityId = new Percolator.Identity.PublicIdentityId(Guid.NewGuid());
+            var listeningPort = new Percolator.Identity.Model.ListeningPort(port);
+            var deviceId = new Percolator.Identity.DeviceId(1);
+            var identity = new Percolator.Identity.Model.SelfIdentity(selfId, publicIdentityId, listeningPort, deviceId, DateTimeOffset.UtcNow);
+            identity.SetDisplayName(identityName);
+            
+            var createdId = await identityRepository.CreateAsync(identity, CancellationToken.None);
+            
+            // Load the identity into the ActiveIdentityContext
+            await identityOrchestrator.ResolveIdentityAsync(createdId, CancellationToken.None);
         }
+        
         return host;
     }
 

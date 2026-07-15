@@ -32,7 +32,7 @@ public class RelayGroupServiceTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(RelayGroupOperationStatus.Unauthorized);
 
-        var service = new InfrastructureService(orchestrator.Object, Mock.Of<IRelayGroupLedgerRepository>(), Mock.Of<IRelayGroupStreamDispatcher>(), Mock.Of<IPeerIdentityRepository>());
+        var service = new InfrastructureService(orchestrator.Object, Mock.Of<IRelayGroupLedgerRepository>(), Mock.Of<IRelayGroupStreamDispatcher>(), Mock.Of<IPeerIdentityRepository>(), Mock.Of<IPeerIdentityQueries>());
 
         var request = new SubmitGroupMessageRequest
         {
@@ -70,7 +70,7 @@ public class RelayGroupServiceTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(RelayGroupOperationStatus.EpochConflict);
 
-        var service = new InfrastructureService(orchestrator.Object, Mock.Of<IRelayGroupLedgerRepository>(), Mock.Of<IRelayGroupStreamDispatcher>(), Mock.Of<IPeerIdentityRepository>());
+        var service = new InfrastructureService(orchestrator.Object, Mock.Of<IRelayGroupLedgerRepository>(), Mock.Of<IRelayGroupStreamDispatcher>(), Mock.Of<IPeerIdentityRepository>(), Mock.Of<IPeerIdentityQueries>());
 
         var request = new SubmitGroupMessageRequest
         {
@@ -106,15 +106,16 @@ public class RelayGroupServiceTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
 
-        var peerIdentityRepository = new Mock<IPeerIdentityRepository>();
-        peerIdentityRepository.Setup(r => r.GetOrCreateAsync(It.IsAny<Percolator.Identity.PublicIdentityId>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new PeerIdentity(new PeerId(1), new Percolator.Identity.PublicIdentityId(Guid.NewGuid())));
+        var peerIdentityQueries = new Mock<IPeerIdentityQueries>();
+        peerIdentityQueries.Setup(q => q.GetPeerIdByPublicIdentityIdAsync(It.IsAny<Percolator.Identity.PublicIdentityId>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PeerId(1));
 
         var service = new InfrastructureService(
             Mock.Of<IRelayGroupOrchestrator>(),
             ledgerRepository.Object,
             Mock.Of<IRelayGroupStreamDispatcher>(),
-            peerIdentityRepository.Object);
+            Mock.Of<IPeerIdentityRepository>(),
+            peerIdentityQueries.Object);
 
         var conversationId = Guid.NewGuid();
         var request = new GroupStreamRequest
@@ -156,15 +157,16 @@ public class RelayGroupServiceTests
         dispatcher.Setup(d => d.RegisterStream(It.IsAny<Guid>(), It.IsAny<Guid>()))
             .Returns(reader);
 
-        var peerIdentityRepository = new Mock<IPeerIdentityRepository>();
-        peerIdentityRepository.Setup(r => r.GetOrCreateAsync(It.IsAny<Percolator.Identity.PublicIdentityId>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new PeerIdentity(new PeerId(1), new Percolator.Identity.PublicIdentityId(Guid.NewGuid())));
+        var peerIdentityQueries = new Mock<IPeerIdentityQueries>();
+        peerIdentityQueries.Setup(q => q.GetPeerIdByPublicIdentityIdAsync(It.IsAny<Percolator.Identity.PublicIdentityId>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PeerId(1));
 
         var service = new InfrastructureService(
             Mock.Of<IRelayGroupOrchestrator>(),
             ledgerRepository.Object,
             dispatcher.Object,
-            peerIdentityRepository.Object);
+            Mock.Of<IPeerIdentityRepository>(),
+            peerIdentityQueries.Object);
 
         var conversationId = Guid.NewGuid();
         var request = new GroupStreamRequest
@@ -213,7 +215,7 @@ public class RelayGroupServiceTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(RelayGroupOperationStatus.Success);
 
-        var service = new InfrastructureService(orchestrator.Object, Mock.Of<IRelayGroupLedgerRepository>(), Mock.Of<IRelayGroupStreamDispatcher>(), Mock.Of<IPeerIdentityRepository>());
+        var service = new InfrastructureService(orchestrator.Object, Mock.Of<IRelayGroupLedgerRepository>(), Mock.Of<IRelayGroupStreamDispatcher>(), Mock.Of<IPeerIdentityRepository>(), Mock.Of<IPeerIdentityQueries>());
 
         var request = new ModifyGroupRequest
         {
@@ -253,7 +255,7 @@ public class RelayGroupServiceTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(RelayGroupOperationStatus.EpochConflict);
 
-        var service = new InfrastructureService(orchestrator.Object, Mock.Of<IRelayGroupLedgerRepository>(), Mock.Of<IRelayGroupStreamDispatcher>(), Mock.Of<IPeerIdentityRepository>());
+        var service = new InfrastructureService(orchestrator.Object, Mock.Of<IRelayGroupLedgerRepository>(), Mock.Of<IRelayGroupStreamDispatcher>(), Mock.Of<IPeerIdentityRepository>(), Mock.Of<IPeerIdentityQueries>());
 
         var request = new ModifyGroupRequest
         {
@@ -294,7 +296,7 @@ public class RelayGroupServiceTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync((RelayGroupOperationStatus.Success, ledger));
 
-        var service = new InfrastructureService(orchestrator.Object, Mock.Of<IRelayGroupLedgerRepository>(), Mock.Of<IRelayGroupStreamDispatcher>(), Mock.Of<IPeerIdentityRepository>());
+        var service = new InfrastructureService(orchestrator.Object, Mock.Of<IRelayGroupLedgerRepository>(), Mock.Of<IRelayGroupStreamDispatcher>(), Mock.Of<IPeerIdentityRepository>(), Mock.Of<IPeerIdentityQueries>());
 
         var request = new GetGroupStateRequest
         {
@@ -328,7 +330,7 @@ public class RelayGroupServiceTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync((RelayGroupOperationStatus.Unauthorized, null));
 
-        var service = new InfrastructureService(orchestrator.Object, Mock.Of<IRelayGroupLedgerRepository>(), Mock.Of<IRelayGroupStreamDispatcher>(), Mock.Of<IPeerIdentityRepository>());
+        var service = new InfrastructureService(orchestrator.Object, Mock.Of<IRelayGroupLedgerRepository>(), Mock.Of<IRelayGroupStreamDispatcher>(), Mock.Of<IPeerIdentityRepository>(), Mock.Of<IPeerIdentityQueries>());
 
         var request = new GetGroupStateRequest
         {
@@ -363,7 +365,7 @@ public class RelayGroupServiceTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(RelayGroupOperationStatus.GroupNotFound);
 
-        var service = new InfrastructureService(orchestrator.Object, Mock.Of<IRelayGroupLedgerRepository>(), Mock.Of<IRelayGroupStreamDispatcher>(), Mock.Of<IPeerIdentityRepository>());
+        var service = new InfrastructureService(orchestrator.Object, Mock.Of<IRelayGroupLedgerRepository>(), Mock.Of<IRelayGroupStreamDispatcher>(), Mock.Of<IPeerIdentityRepository>(), Mock.Of<IPeerIdentityQueries>());
 
         var request = new SubmitGroupMessageRequest
         {
@@ -400,7 +402,7 @@ public class RelayGroupServiceTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(RelayGroupOperationStatus.Success);
 
-        var service = new InfrastructureService(orchestrator.Object, Mock.Of<IRelayGroupLedgerRepository>(), Mock.Of<IRelayGroupStreamDispatcher>(), Mock.Of<IPeerIdentityRepository>());
+        var service = new InfrastructureService(orchestrator.Object, Mock.Of<IRelayGroupLedgerRepository>(), Mock.Of<IRelayGroupStreamDispatcher>(), Mock.Of<IPeerIdentityRepository>(), Mock.Of<IPeerIdentityQueries>());
 
         var request = new SubmitGroupMessageRequest
         {
@@ -438,7 +440,7 @@ public class RelayGroupServiceTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(RelayGroupOperationStatus.Unauthorized);
 
-        var service = new InfrastructureService(orchestrator.Object, Mock.Of<IRelayGroupLedgerRepository>(), Mock.Of<IRelayGroupStreamDispatcher>(), Mock.Of<IPeerIdentityRepository>());
+        var service = new InfrastructureService(orchestrator.Object, Mock.Of<IRelayGroupLedgerRepository>(), Mock.Of<IRelayGroupStreamDispatcher>(), Mock.Of<IPeerIdentityRepository>(), Mock.Of<IPeerIdentityQueries>());
 
         var request = new ModifyGroupRequest
         {
@@ -477,7 +479,7 @@ public class RelayGroupServiceTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(RelayGroupOperationStatus.GroupNotFound);
 
-        var service = new InfrastructureService(orchestrator.Object, Mock.Of<IRelayGroupLedgerRepository>(), Mock.Of<IRelayGroupStreamDispatcher>(), Mock.Of<IPeerIdentityRepository>());
+        var service = new InfrastructureService(orchestrator.Object, Mock.Of<IRelayGroupLedgerRepository>(), Mock.Of<IRelayGroupStreamDispatcher>(), Mock.Of<IPeerIdentityRepository>(), Mock.Of<IPeerIdentityQueries>());
 
         var request = new ModifyGroupRequest
         {
@@ -512,7 +514,7 @@ public class RelayGroupServiceTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync((RelayGroupOperationStatus.GroupNotFound, null));
 
-        var service = new InfrastructureService(orchestrator.Object, Mock.Of<IRelayGroupLedgerRepository>(), Mock.Of<IRelayGroupStreamDispatcher>(), Mock.Of<IPeerIdentityRepository>());
+        var service = new InfrastructureService(orchestrator.Object, Mock.Of<IRelayGroupLedgerRepository>(), Mock.Of<IRelayGroupStreamDispatcher>(), Mock.Of<IPeerIdentityRepository>(), Mock.Of<IPeerIdentityQueries>());
 
         var request = new GetGroupStateRequest
         {
@@ -543,7 +545,8 @@ public class RelayGroupServiceTests
             Mock.Of<IRelayGroupOrchestrator>(),
             ledgerRepository.Object,
             Mock.Of<IRelayGroupStreamDispatcher>(),
-            Mock.Of<IPeerIdentityRepository>());
+            Mock.Of<IPeerIdentityRepository>(),
+            Mock.Of<IPeerIdentityQueries>());
 
         var conversationId = Guid.NewGuid();
         var request = new GroupStreamRequest
