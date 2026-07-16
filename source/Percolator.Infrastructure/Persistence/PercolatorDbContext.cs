@@ -41,7 +41,8 @@ public class PercolatorDbContext : DbContext
     // New Network domain persistence (PeerRoutingProfile)
     public DbSet<PeerRoutingProfileDbo> PeerRoutingProfiles { get; set; } = null!;
     public DbSet<GrpcEndPointRoutingDbo> PeerRoutingGrpcEndPoints { get; set; } = null!;
-    public DbSet<RelayOutboxDbo> RelayOutbox { get; set; } = null!;
+    public DbSet<DomainEventOutboxDbo> DomainEventOutbox { get; set; } = null!;
+    public DbSet<NetworkEgressJobDbo> NetworkEgressJobs { get; set; } = null!;
     public DbSet<RelayLinkDbo> PeerRoutingRelays { get; set; } = null!;
     public DbSet<PeerRouteCandidateDbo> PeerRouteCandidates { get; set; } = null!;
     public DbSet<DiscoveredPeerDbo> DiscoveredPeers { get; set; } = null!;
@@ -717,10 +718,10 @@ public class PercolatorDbContext : DbContext
                 .IsRequired();
         });
 
-        // RelayOutbox (Outbox pattern for group provisioning events)
-        modelBuilder.Entity<RelayOutboxDbo>(entity =>
+        // DomainEventOutbox (Outbox pattern for domain event processing)
+        modelBuilder.Entity<DomainEventOutboxDbo>(entity =>
         {
-            entity.ToTable("RelayOutbox");
+            entity.ToTable("DomainEventOutbox");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).ValueGeneratedOnAdd();
             entity.Property(e => e.EventType).IsRequired();
@@ -728,6 +729,25 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.DestinationPeerId).IsRequired();
             entity.Property(e => e.ProcessedAtUtc);
             entity.HasIndex(e => e.ProcessedAtUtc);
+        });
+
+        // NetworkEgressJobs (Network egress queue for anonymous/authenticated message dispatch)
+        modelBuilder.Entity<NetworkEgressJobDbo>(entity =>
+        {
+            entity.ToTable("NetworkEgressJobs");
+            entity.HasKey(e => e.JobId);
+            entity.Property(e => e.JobId).ValueGeneratedOnAdd();
+            entity.Property(e => e.DestinationPeerId).IsRequired();
+            entity.Property(e => e.RoutePreference).IsRequired();
+            entity.Property(e => e.PayloadType).IsRequired();
+            entity.Property(e => e.PayloadBytes).IsRequired();
+            entity.Property(e => e.AttemptCount).IsRequired();
+            entity.Property(e => e.NextAttemptUtc).IsRequired();
+            entity.Property(e => e.IsSent).IsRequired();
+            entity.Property(e => e.IsPermanentlyFailed).IsRequired();
+            entity.HasIndex(e => e.NextAttemptUtc);
+            entity.HasIndex(e => e.IsSent);
+            entity.HasIndex(e => e.IsPermanentlyFailed);
         });
 
         // DeliveryCertificates (Persistent storage for Sealed Sender delivery certificates)

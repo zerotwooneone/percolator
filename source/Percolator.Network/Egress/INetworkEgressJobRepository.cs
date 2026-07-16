@@ -4,6 +4,7 @@ namespace Percolator.Network.Egress;
 
 public interface INetworkEgressJobRepository
 {
+    Task<EgressJobId> CreateAsync(NetworkEgressJob job, CancellationToken cancellationToken = default);
     Task SaveAsync(NetworkEgressJob job, CancellationToken cancellationToken = default);
     Task<NetworkEgressJob?> GetByIdAsync(EgressJobId jobId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<NetworkEgressJob>> GetPendingJobsAsync(DateTimeOffset nowUtc, CancellationToken cancellationToken = default);

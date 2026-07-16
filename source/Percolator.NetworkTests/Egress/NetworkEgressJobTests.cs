@@ -11,7 +11,7 @@ public class NetworkEgressJobTests
     public void RecordFailure_IncrementsAttemptAndSetsNextAttemptUtc()
     {
         // ARRANGE
-        var jobId = new EgressJobId(Guid.NewGuid());
+        var jobId = new EgressJobId(1);
         var destinationPeerId = new NetworkPeerId(1);
         var payloadBytes = new NetworkPayloadBytes(new byte[] { 1, 2, 3 });
         var fixedTime = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero);
@@ -37,7 +37,7 @@ public class NetworkEgressJobTests
     public void RecordFailure_SecondFailure_UsesExponentialBackoff()
     {
         // ARRANGE
-        var jobId = new EgressJobId(Guid.NewGuid());
+        var jobId = new EgressJobId(1);
         var destinationPeerId = new NetworkPeerId(1);
         var payloadBytes = new NetworkPayloadBytes(new byte[] { 1, 2, 3 });
         var fixedTime = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero);
@@ -64,7 +64,7 @@ public class NetworkEgressJobTests
     public void RecordFailure_ReachesMaxAttempts_MarksPermanentlyFailed()
     {
         // ARRANGE
-        var jobId = new EgressJobId(Guid.NewGuid());
+        var jobId = new EgressJobId(1);
         var destinationPeerId = new NetworkPeerId(1);
         var payloadBytes = new NetworkPayloadBytes(new byte[] { 1, 2, 3 });
         var fixedTime = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero);
@@ -91,7 +91,7 @@ public class NetworkEgressJobTests
     public void MarkSent_UpdatesStateToSent()
     {
         // ARRANGE
-        var jobId = new EgressJobId(Guid.NewGuid());
+        var jobId = new EgressJobId(1);
         var destinationPeerId = new NetworkPeerId(1);
         var payloadBytes = new NetworkPayloadBytes(new byte[] { 1, 2, 3 });
         var fixedTime = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero);
@@ -115,7 +115,7 @@ public class NetworkEgressJobTests
     public void MarkSent_AfterPermanentFailure_DoesNotUpdateState()
     {
         // ARRANGE
-        var jobId = new EgressJobId(Guid.NewGuid());
+        var jobId = new EgressJobId(1);
         var destinationPeerId = new NetworkPeerId(1);
         var payloadBytes = new NetworkPayloadBytes(new byte[] { 1, 2, 3 });
         var fixedTime = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero);
@@ -144,7 +144,7 @@ public class NetworkEgressJobTests
     public void RecordFailure_AfterMarkSent_DoesNotUpdateState()
     {
         // ARRANGE
-        var jobId = new EgressJobId(Guid.NewGuid());
+        var jobId = new EgressJobId(1);
         var destinationPeerId = new NetworkPeerId(1);
         var payloadBytes = new NetworkPayloadBytes(new byte[] { 1, 2, 3 });
         var fixedTime = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero);

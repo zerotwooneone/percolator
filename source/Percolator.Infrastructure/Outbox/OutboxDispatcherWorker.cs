@@ -54,7 +54,7 @@ public sealed class OutboxDispatcherWorker : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<PercolatorDbContext>();
 
-        var unprocessedEvents = await db.RelayOutbox
+        var unprocessedEvents = await db.DomainEventOutbox
             .Where(e => e.ProcessedAtUtc == null)
             .OrderBy(e => e.Id)
             .Take(10)
@@ -71,7 +71,7 @@ public sealed class OutboxDispatcherWorker : BackgroundService
         }
     }
 
-    private async Task ProcessOutboxItemAsync(RelayOutboxDbo outboxItem, PercolatorDbContext db, IServiceScope scope, CancellationToken ct)
+    private async Task ProcessOutboxItemAsync(DomainEventOutboxDbo outboxItem, PercolatorDbContext db, IServiceScope scope, CancellationToken ct)
     {
         var backoff = TimeSpan.FromSeconds(1);
         var maxAttempts = 5;
@@ -131,7 +131,7 @@ public sealed class OutboxDispatcherWorker : BackgroundService
         }
     }
 
-    private async Task DispatchEventAsync(Percolator.Chat.SeedWork.IDomainEvent domainEvent, Percolator.Identity.PeerId destinationPeerId, RelayOutboxDbo outboxItem, PercolatorDbContext db, IServiceProvider serviceProvider, CancellationToken ct)
+    private async Task DispatchEventAsync(Percolator.Chat.SeedWork.IDomainEvent domainEvent, Percolator.Identity.PeerId destinationPeerId, DomainEventOutboxDbo outboxItem, PercolatorDbContext db, IServiceProvider serviceProvider, CancellationToken ct)
     {
         switch (domainEvent)
         {
@@ -182,7 +182,7 @@ public sealed class OutboxDispatcherWorker : BackgroundService
         }
     }
 
-    private void MarkAsProcessed(RelayOutboxDbo outboxItem)
+    private void MarkAsProcessed(DomainEventOutboxDbo outboxItem)
     {
         outboxItem.ProcessedAtUtc = DateTimeOffset.UtcNow;
     }

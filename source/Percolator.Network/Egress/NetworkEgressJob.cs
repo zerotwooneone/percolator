@@ -30,12 +30,12 @@ public sealed class NetworkEgressJob
     private const int MaxAttempts = 10;
 
     public NetworkEgressJob(
-        EgressJobId jobId,
-        NetworkPeerId destinationPeerId,
-        RoutePreference routePreference,
-        PayloadType payloadType,
-        NetworkPayloadBytes payloadBytes,
-        DateTimeOffset nextAttemptUtc)
+        EgressJobId jobId = default,
+        NetworkPeerId destinationPeerId = default,
+        RoutePreference routePreference = default,
+        PayloadType payloadType = default,
+        NetworkPayloadBytes payloadBytes = default,
+        DateTimeOffset nextAttemptUtc = default)
     {
         JobId = jobId;
         DestinationPeerId = destinationPeerId;
