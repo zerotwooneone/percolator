@@ -9,4 +9,5 @@ public interface IPeerIdentityQueries
     Task<RatchetIdentityKey?> GetPublicKeyByPublicIdentityIdAsync(PublicIdentityId publicIdentityId, CancellationToken ct);
     Task<PeerId?> GetPeerIdByPublicIdentityIdAsync(PublicIdentityId publicIdentityId, CancellationToken ct);
     Task<PublicIdentityId?> GetPublicIdentityIdAsync(PeerId senderPeerId, CancellationToken cancellationToken);
+    Task<PeerOrSelfId?> GetPeerOrSelfIdByPublicIdentityIdAsync(PublicIdentityId publicIdentityId, CancellationToken ct);
 }

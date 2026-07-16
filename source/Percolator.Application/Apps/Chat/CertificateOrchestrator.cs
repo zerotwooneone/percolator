@@ -15,6 +15,7 @@ public sealed class CertificateOrchestrator : ICertificateOrchestrator
     private readonly IRelayTopology _relayTopology;
     private readonly IPeerRoutingProfileRepository _peerRoutingProfileRepository;
     private readonly IRelayTransportClient _relayTransportClient;
+    private readonly IPeerIdentityQueries _peerIdentityQueries;
     private readonly ILogger<CertificateOrchestrator> _logger;
     private readonly TimeProvider _timeProvider;
 
@@ -25,6 +26,7 @@ public sealed class CertificateOrchestrator : ICertificateOrchestrator
         IRelayTopology relayTopology,
         IPeerRoutingProfileRepository peerRoutingProfileRepository,
         IRelayTransportClient relayTransportClient,
+        IPeerIdentityQueries peerIdentityQueries,
         ILogger<CertificateOrchestrator> logger,
         TimeProvider timeProvider)
     {
@@ -34,6 +36,7 @@ public sealed class CertificateOrchestrator : ICertificateOrchestrator
         _relayTopology = relayTopology;
         _peerRoutingProfileRepository = peerRoutingProfileRepository;
         _relayTransportClient = relayTransportClient;
+        _peerIdentityQueries = peerIdentityQueries;
         _logger = logger;
         _timeProvider = timeProvider;
     }
@@ -84,12 +87,22 @@ public sealed class CertificateOrchestrator : ICertificateOrchestrator
         var payload = System.Text.Encoding.UTF8.GetBytes($"{localPublicIdentityId}{timestamp.ToUnixTimeSeconds()}");
         var signature = await _localIdentitySigner.SignWithLocalIdentityKeyAsync(payload, ct).ConfigureAwait(false);
 
+        // Get the relay's PublicIdentityId
+        var identityRelayPeerId = new Percolator.Identity.PeerId(relayPeerId.Value);
+        var targetPublicIdentityId = await _peerIdentityQueries.GetPublicIdentityIdAsync(identityRelayPeerId, ct).ConfigureAwait(false);
+        if (targetPublicIdentityId is null)
+        {
+            _logger.LogWarning("No PublicIdentityId found for relay {RelayPeerId}", identityRelayPeerId);
+            return;
+        }
+
         // 3. Execute Transport Call
         // Call IRelayTransportClient to fetch the certificate
         var certificate = await _relayTransportClient.FetchCertificateAsync(
             targetHost,
             targetPort,
             localPublicIdentityId,
+            targetPublicIdentityId,
             timestamp,
             signature,
             ct).ConfigureAwait(false);

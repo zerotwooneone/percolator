@@ -6,7 +6,7 @@ using Percolator.Infrastructure.Persistence;
 
 namespace Percolator.Infrastructure.MessageQueue;
 
-public class SqliteMessageQueueRepository : IMessageQueueRepository
+public class SqliteMessageQueueRepository : IMessageQueueRepository, IMessageQueueQueries
 {
     // Enforced limits
     public const int GlobalMaxQueued = 10_000;

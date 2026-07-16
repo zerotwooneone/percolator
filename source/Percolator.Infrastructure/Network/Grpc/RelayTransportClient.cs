@@ -25,6 +25,7 @@ public sealed class RelayTransportClient : IRelayTransportClient
         string targetHost,
         int targetPort,
         string senderPublicIdentityId,
+        Percolator.Identity.PublicIdentityId targetPublicIdentityId,
         DateTimeOffset timestamp,
         Signature signature,
         CancellationToken ct)
@@ -44,8 +45,12 @@ public sealed class RelayTransportClient : IRelayTransportClient
 
         _logger.LogInformation("Fetching delivery certificate from relay {Host}:{Port} for PublicIdentityId {PublicIdentityId}", targetHost, targetPort, senderPublicIdentityId);
 
-        // Dispatch the request
-        var response = await client.GetDeliveryCertificateAsync(new GetDeliveryCertificateRequest(), callOptions);
+        // Dispatch the request with targetPublicIdentityId
+        var request = new GetDeliveryCertificateRequest
+        {
+            PublicIdentityId = Google.Protobuf.ByteString.CopyFrom(targetPublicIdentityId.Value.ToByteArray())
+        };
+        var response = await client.GetDeliveryCertificateAsync(request, callOptions);
 
         _logger.LogInformation("Successfully fetched delivery certificate from relay {Host}:{Port}", targetHost, targetPort);
 

@@ -45,6 +45,7 @@ message DeliveryCertificate {
 // Request to get a delivery certificate from the relay
 message GetDeliveryCertificateRequest {
     optional uint32 version = 1;
+    optional bytes public_identity_id = 2; // The PublicIdentityId of the identity requesting the certificate
 }
 
 // Response containing the delivery certificate

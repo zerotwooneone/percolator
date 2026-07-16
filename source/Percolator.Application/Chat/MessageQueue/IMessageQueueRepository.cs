@@ -3,6 +3,10 @@ using Percolator.Identity;
 
 namespace Percolator.Application.Chat.MessageQueue;
 
+/// <summary>
+/// Mutation interface for message queue operations (write-only).
+/// Separated from queries to support different access patterns.
+/// </summary>
 public interface IMessageQueueRepository
 {
     // Attempts to enqueue the message for the recipient. Returns (accepted, recipientCount, totalCount).
@@ -20,13 +24,6 @@ public interface IMessageQueueRepository
     Task TryEnqueueBulkAsync(
         IReadOnlyList<PublicIdentityId> recipients,
         QueuedPayloadBytes messageBlob,
-        CancellationToken cancellationToken);
-
-    // Fetch up to maxCount oldest messages for the specified recipient WITHOUT deleting them.
-    // Returns (AckId, Blob) pairs in enqueue order (oldest first).
-    Task<IReadOnlyList<(Guid AckId, QueuedPayloadBytes Blob)>> FetchAsync(
-        PublicIdentityId recipientPublicIdentityId,
-        int maxCount,
         CancellationToken cancellationToken);
 
     // Idempotent delete by AckId; returns true if a row was deleted, false if not found.

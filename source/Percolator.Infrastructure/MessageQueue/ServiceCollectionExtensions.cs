@@ -8,6 +8,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddMessageQueueInfrastructure(this IServiceCollection services)
     {
         services.AddScoped<IMessageQueueRepository, SqliteMessageQueueRepository>();
+        services.AddScoped<IMessageQueueQueries, SqliteMessageQueueRepository>();
         return services;
     }
 }

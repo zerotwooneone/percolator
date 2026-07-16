@@ -39,6 +39,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IDeliveryCertificateStore, SqliteDeliveryCertificateStore>();
         services.AddScoped<IDeliveryCertificateQueries, SqliteDeliveryCertificateQueries>();
 
+        // Register Chunk 6.3 Self Certificate Service
+        services.AddScoped<ISelfCertificateService, SelfCertificateService>();
+
         // Register LocalIdentitySigner
         services.AddScoped<Percolator.Application.Chat.ILocalIdentitySigner, Percolator.Infrastructure.Chat.LocalIdentitySigner>();
 

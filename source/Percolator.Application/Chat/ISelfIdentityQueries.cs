@@ -6,7 +6,6 @@ namespace Percolator.Application.Chat;
 
 public interface ISelfIdentityQueries
 {
-    Task<RatchetIdentityKey?> GetActiveIdentityFingerprintAsync(CancellationToken ct);
     Task<ZkServerSecretParamsSeedBytes?> GetZkServerSecretParamsSeedAsync(CancellationToken ct);
 
     Task<(IdentityPublicKeyHash PublicKeyHash, PublicIdentityId PublicIdentityId)?> GetIdentityParticipantInfoAsync(
@@ -14,4 +13,7 @@ public interface ISelfIdentityQueries
     Task<PublicIdentityId?> GetSelfIdentityPublicKeyAsync(SelfId selfIdentityId, CancellationToken ct);
     Task<(PublicIdentityId PublicIdentityId, DeviceId DeviceId)?> GetSelfIdentityCryptoInfoAsync(
         SelfId selfIdentityId, CancellationToken ct);
+    Task<(PublicIdentityId PublicIdentityId, DeviceId DeviceId, RatchetIdentityKey? Fingerprint)?> GetSelfIdentityCertInfoAsync(
+        SelfId selfIdentityId, CancellationToken ct);
+    Task<SelfId?> GetSelfIdByPublicIdentityIdAsync(PublicIdentityId publicIdentityId, CancellationToken ct);
 }

@@ -9,6 +9,7 @@ public interface IRelayTransportClient
         string targetHost,
         int targetPort,
         string senderPublicIdentityId,
+        Percolator.Identity.PublicIdentityId targetPublicIdentityId,
         DateTimeOffset timestamp,
         Signature signature,
         CancellationToken ct);

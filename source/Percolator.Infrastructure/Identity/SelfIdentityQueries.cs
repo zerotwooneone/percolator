@@ -16,21 +16,9 @@ public sealed class SelfIdentityQueries : ISelfIdentityQueries
         _dbFactory = dbFactory;
     }
 
-    public async Task<RatchetIdentityKey?> GetActiveIdentityFingerprintAsync(CancellationToken ct)
-    {
-        using var db = _dbFactory.CreateDbContext();
-        var bytes = await db.SelfIdentities
-            .AsNoTracking()
-            .Where(x => x.ActiveIdentityKeyFingerprint != null)
-            .Select(x => x.ActiveIdentityKeyFingerprint)
-            .FirstOrDefaultAsync(ct);
-
-        return bytes is null ? null : RatchetIdentityKey.FromBytesOwned(bytes);
-    }
-
     public async Task<ZkServerSecretParamsSeedBytes?> GetZkServerSecretParamsSeedAsync(CancellationToken ct)
     {
-        using var db = _dbFactory.CreateDbContext();
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var bytes = await db.SelfIdentities
             .AsNoTracking()
             .Where(x => x.ZkServerSecretParamsSeed != null)
@@ -42,7 +30,7 @@ public sealed class SelfIdentityQueries : ISelfIdentityQueries
 
     public async Task<(IdentityPublicKeyHash PublicKeyHash, PublicIdentityId PublicIdentityId)?> GetIdentityParticipantInfoAsync(SelfId selfIdentityId, CancellationToken ct)
     {
-        using var db = _dbFactory.CreateDbContext();
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var identity = await db.SelfIdentities
             .AsNoTracking()
             .Where(x => x.Id == selfIdentityId.Value && x.ActiveIdentityKeyFingerprint != null)
@@ -57,7 +45,7 @@ public sealed class SelfIdentityQueries : ISelfIdentityQueries
     }
     public async Task<PublicIdentityId?> GetSelfIdentityPublicKeyAsync(SelfId selfIdentityId, CancellationToken ct)
     {
-        using var db = _dbFactory.CreateDbContext();
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var identity = await db.SelfIdentities
             .AsNoTracking()
             .Where(x => x.Id == selfIdentityId.Value)
@@ -71,7 +59,7 @@ public sealed class SelfIdentityQueries : ISelfIdentityQueries
 
     public async Task<(PublicIdentityId PublicIdentityId, DeviceId DeviceId)?> GetSelfIdentityCryptoInfoAsync(SelfId selfIdentityId, CancellationToken ct)
     {
-        using var db = _dbFactory.CreateDbContext();
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var identity = await db.SelfIdentities
             .AsNoTracking()
             .Where(x => x.Id == selfIdentityId.Value)
@@ -82,5 +70,38 @@ public sealed class SelfIdentityQueries : ISelfIdentityQueries
             return null;
 
         return (new PublicIdentityId(identity.PublicIdentityId), new DeviceId(identity.DeviceId));
+    }
+    
+    public async Task<(PublicIdentityId PublicIdentityId, DeviceId DeviceId, RatchetIdentityKey? Fingerprint)?> GetSelfIdentityCertInfoAsync(SelfId selfIdentityId, CancellationToken ct)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var identity = await db.SelfIdentities
+            .AsNoTracking()
+            .Where(x => x.Id == selfIdentityId.Value)
+            .Select(x => new { x.PublicIdentityId, x.DeviceId, x.ActiveIdentityKeyFingerprint })
+            .FirstOrDefaultAsync(ct);
+
+        if (identity is null)
+            return null;
+
+        return (
+            new PublicIdentityId(identity.PublicIdentityId), 
+            new DeviceId(identity.DeviceId), 
+            identity.ActiveIdentityKeyFingerprint is null ? null : RatchetIdentityKey.FromBytesOwned(identity.ActiveIdentityKeyFingerprint));
+    }
+
+    public async Task<SelfId?> GetSelfIdByPublicIdentityIdAsync(PublicIdentityId publicIdentityId, CancellationToken ct)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var identity = await db.SelfIdentities
+            .AsNoTracking()
+            .Where(x => x.PublicIdentityId == publicIdentityId.Value)
+            .Select(x => x.Id)
+            .FirstOrDefaultAsync(ct);
+
+        if (identity == 0)
+            return null;
+
+        return new SelfId(identity);
     }
 }

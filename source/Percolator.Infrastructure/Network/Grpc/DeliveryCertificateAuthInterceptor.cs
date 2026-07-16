@@ -66,4 +66,59 @@ public sealed class DeliveryCertificateAuthInterceptor : Interceptor
 
         return await continuation(request, context);
     }
+
+    public override async Task DuplexStreamingServerHandler<TRequest, TResponse>(
+        IAsyncStreamReader<TRequest> requestStream,
+        IServerStreamWriter<TResponse> responseStream,
+        ServerCallContext context,
+        DuplexStreamingServerMethod<TRequest, TResponse> continuation)
+    {
+        // Extract metadata headers for bidirectional stream authentication
+        var senderPublicIdentityId = context.RequestHeaders.GetValue("x-percolator-sender-public-identity-id");
+        if (senderPublicIdentityId is null)
+        {
+            throw new RpcException(new Status(StatusCode.Unauthenticated, "Missing sender PublicIdentityId header"));
+        }
+
+        var timestampStr = context.RequestHeaders.GetValue("x-percolator-timestamp");
+        if (timestampStr is null)
+        {
+            throw new RpcException(new Status(StatusCode.Unauthenticated, "Missing timestamp header"));
+        }
+
+        var signatureStr = context.RequestHeaders.GetValue("x-percolator-signature");
+        if (signatureStr is null)
+        {
+            throw new RpcException(new Status(StatusCode.Unauthenticated, "Missing signature header"));
+        }
+
+        if (!long.TryParse(timestampStr, out var timestampUnix))
+        {
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "Invalid timestamp format"));
+        }
+
+        var requestTimestamp = DateTimeOffset.FromUnixTimeSeconds(timestampUnix);
+        //todo: sanity check timestamp
+        var signatureBytes = Convert.FromBase64String(signatureStr);
+        //todo: sanity check signature
+        var signature = Signature.FromBytes(signatureBytes);
+
+        // Convert string PublicIdentityId to PublicIdentityId type
+        var publicIdentityIdBytes = Convert.FromHexString(senderPublicIdentityId);
+        var senderPublicIdentityIdTyped = new PublicIdentityId(new Guid(publicIdentityIdBytes));
+
+        // Call authentication service
+        var isAuthenticated = await _peerAuthenticationService.AuthenticateDeliveryCertificateRequestAsync(
+            senderPublicIdentityIdTyped,
+            requestTimestamp,
+            signature,
+            context.CancellationToken);
+
+        if (!isAuthenticated)
+        {
+            throw new RpcException(new Status(StatusCode.Unauthenticated, "Authentication failed"));
+        }
+
+        await continuation(requestStream, responseStream, context);
+    }
 }

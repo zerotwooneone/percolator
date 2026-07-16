@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Percolator.Application.Chat;
+using Percolator.Chat.GroupMembership;
 using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Cryptography;
 using Percolator.Identity;
@@ -74,5 +75,36 @@ public sealed class PeerIdentityQueries : IPeerIdentityQueries
             .FirstOrDefaultAsync();
 
         return publicIdentityId == Guid.Empty ? null : new PublicIdentityId(publicIdentityId);
+    }
+
+    public async Task<PeerOrSelfId?> GetPeerOrSelfIdByPublicIdentityIdAsync(PublicIdentityId publicIdentityId, CancellationToken ct)
+    {
+        using var db = _dbFactory.CreateDbContext();
+
+        // First check if it's a local self identity
+        var selfIdentity = await db.SelfIdentities
+            .AsNoTracking()
+            .Where(s => s.PublicIdentityId == publicIdentityId.Value)
+            .Select(s => s.Id)
+            .FirstOrDefaultAsync(ct);
+
+        if (selfIdentity != 0)
+        {
+            return PeerOrSelfId.FromSelfId(new ChatSelfId(selfIdentity));
+        }
+
+        // Otherwise check if it's a remote peer
+        var peerId = await db.PeerIdentities
+            .AsNoTracking()
+            .Where(p => p.PublicIdentityId == publicIdentityId.Value)
+            .Select(p => p.PeerId)
+            .FirstOrDefaultAsync(ct);
+
+        if (peerId != 0)
+        {
+            return PeerOrSelfId.FromPeerId(new PeerId(peerId));
+        }
+
+        return null;
     }
 }

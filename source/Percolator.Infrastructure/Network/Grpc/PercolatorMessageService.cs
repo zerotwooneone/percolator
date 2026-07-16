@@ -5,8 +5,10 @@ using Percolator.Application.Chat;
 using Percolator.Application.Ingress;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
+using Percolator.Chat.GroupMembership;
 using Percolator.Contracts;
 using Percolator.Cryptography.Primitives;
+using Percolator.Identity;
 using ProtobufDeliveryCertificate = Percolator.Contracts.DeliveryCertificate;
 
 namespace Percolator.Infrastructure.Network.Grpc;
@@ -21,6 +23,8 @@ public class PercolatorMessageService : TransportService.TransportServiceBase
     private readonly ActiveIdentityContext _active;
     private readonly ILocalIdentitySigner _localIdentitySigner;
     private readonly ISelfIdentityQueries _selfIdentityQueries;
+    private readonly IPeerIdentityQueries _peerIdentityQueries;
+    private readonly ISelfCertificateService _selfCertificateService;
 
     public PercolatorMessageService(
         ILogger<PercolatorMessageService> logger,
@@ -30,7 +34,9 @@ public class PercolatorMessageService : TransportService.TransportServiceBase
         IStandardHandshakeIngress standardHandshakeIngress,
         ActiveIdentityContext active,
         ILocalIdentitySigner localIdentitySigner,
-        ISelfIdentityQueries selfIdentityQueries)
+        ISelfIdentityQueries selfIdentityQueries,
+        IPeerIdentityQueries peerIdentityQueries,
+        ISelfCertificateService selfCertificateService)
     {
         _logger = logger;
         _messageIngress = messageIngress;
@@ -40,6 +46,8 @@ public class PercolatorMessageService : TransportService.TransportServiceBase
         _active = active;
         _localIdentitySigner = localIdentitySigner;
         _selfIdentityQueries = selfIdentityQueries;
+        _peerIdentityQueries = peerIdentityQueries;
+        _selfCertificateService = selfCertificateService;
     }
 
     public override Task<EstablishSessionResponse> EstablishSession(EstablishSessionRequest request, ServerCallContext context)
@@ -191,27 +199,33 @@ public class PercolatorMessageService : TransportService.TransportServiceBase
             throw new RpcException(new Status(StatusCode.FailedPrecondition, "Active identity not loaded."));
         }
 
-        // Get the cryptographic fingerprint (Rule 6 compliance - use PKH, not PeerId)
-        var fingerprint = await _selfIdentityQueries.GetActiveIdentityFingerprintAsync(context.CancellationToken);
-        if (fingerprint is null)
+        // PublicIdentityId is required - fail fast if missing
+        if (request.PublicIdentityId is null || request.PublicIdentityId.Length == 0)
         {
-            throw new RpcException(new Status(StatusCode.FailedPrecondition, "No active identity key fingerprint found."));
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "public_identity_id is required"));
         }
 
-        // Construct the certificate payload using the wire formatter
-        var expiration = DateTimeOffset.UtcNow.AddHours(24);
-        var payload = Percolator.Application.Chat.DeliveryCertificateWireFormatter.Pack(fingerprint.Span, expiration);
+        var publicIdentityIdBytes = request.PublicIdentityId.ToByteArray();
+        var publicIdentityId = new PublicIdentityId(new Guid(publicIdentityIdBytes));
 
-        // Delegate the payload directly to the signer without inspecting raw keys
-        var signature = await _localIdentitySigner.SignWithRelayRootKeyAsync(payload, context.CancellationToken);
+        // Determine if this is a local self identity or a remote peer
+        var selfId = await _selfIdentityQueries.GetSelfIdByPublicIdentityIdAsync(publicIdentityId, context.CancellationToken);
 
-        // Package the raw bytes from signature.Span into DeliveryCertificateResponse and return
+        if (selfId is null)
+            throw new RpcException(new Status(StatusCode.NotFound, $"{nameof(request.PublicIdentityId)} not found."));
+        
+        var certificate = await _selfCertificateService.GenerateValidCertAsync(new ChatSelfId(selfId.Value.Value), context.CancellationToken);
+        if (certificate is null)
+        {
+            throw new RpcException(new Status(StatusCode.NotFound, "Error locating certificate."));
+        }
+
         return new GetDeliveryCertificateResponse
         {
             Certificate = new ProtobufDeliveryCertificate
             {
-                CertificateData = Google.Protobuf.ByteString.CopyFrom(payload),
-                Signature = Google.Protobuf.ByteString.CopyFrom(signature.Span)
+                CertificateData = Google.Protobuf.ByteString.CopyFrom(certificate.Payload.Span),
+                Signature = Google.Protobuf.ByteString.CopyFrom(certificate.Signature.Span)
             }
         };
     }
