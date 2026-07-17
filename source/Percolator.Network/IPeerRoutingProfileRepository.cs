@@ -6,7 +6,4 @@ public interface IPeerRoutingProfileRepository
 {
     Task<PeerRoutingProfile?> GetByIdAsync(NetworkPeerId id, CancellationToken cancellationToken = default);
     Task UpsertAsync(PeerRoutingProfile aggregate, CancellationToken cancellationToken = default);
-    Task<PeerRoutingProfile?> GetByPublicKeyAsync(IdentityPublicKey pk, CancellationToken cancellationToken = default);
-    Task<IEnumerable<PeerRoutingProfile>> GetStaleAsync(DateTimeOffset threshold, CancellationToken cancellationToken = default);
-    Task<PeerRoutingProfile?> GetByPublicKeyHashAsync(PublicKeyHash publicKeyHash, CancellationToken cancellationToken = default);
 }

@@ -181,29 +181,4 @@ public sealed class SqlitePeerRoutingProfileRepository : IPeerRoutingProfileRepo
     {
         return UpsertInternalAsync(aggregate, cancellationToken);
     }
-
-    public Task<PeerRoutingProfile?> GetByPublicKeyAsync(Percolator.Network.ValueObjects.IdentityPublicKey pk, CancellationToken cancellationToken = default)
-    {
-        return GetByPublicKeyInternalAsync(pk, cancellationToken);
-    }
-
-    public Task<IEnumerable<PeerRoutingProfile>> GetStaleAsync(DateTimeOffset threshold, CancellationToken cancellationToken = default)
-    {
-        return GetStaleInternalAsync(threshold, cancellationToken);
-    }
-
-    public async Task<PeerRoutingProfile?> GetByPublicKeyHashAsync(PublicKeyHash publicKeyHash, CancellationToken cancellationToken = default)
-    {
-        var all = await _db.PeerRoutingProfiles
-            .AsNoTracking()
-            .ToListAsync(cancellationToken);
-
-        var match = all.FirstOrDefault(r => r.DirectMessagePublicKey != null && r.DirectMessagePublicKey.AsSpan().SequenceEqual(publicKeyHash.Span));
-        if (match is null)
-        {
-            return null;
-        }
-
-        return await GetByIdInternalAsync(new Percolator.Network.NetworkPeerId(match.PeerId), cancellationToken);
-    }
 }

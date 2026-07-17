@@ -22,6 +22,7 @@ namespace Percolator.Application.Network
         private readonly IPeerRoutingProfileRepository _profileRepository;
         private readonly IProfileRoutePlanner _routePlanner;
         private readonly ISecureMessagingService _secureMessaging;
+        private readonly IOpaqueMessageDeliverer _opaqueMessageDeliverer;
         // Centralized allowlist to avoid drift with documentation and tests.
         private static readonly HashSet<InternalEnvelope.ApplicationPayloadOneofCase> AllowedCases = new()
         {
@@ -43,7 +44,8 @@ namespace Percolator.Application.Network
             RelayOrchestrator relayOrchestrator,
             IPeerRoutingProfileRepository profileRepository,
             IProfileRoutePlanner routePlanner,
-            ISecureMessagingService secureMessaging)
+            ISecureMessagingService secureMessaging,
+            IOpaqueMessageDeliverer opaqueMessageDeliverer)
         {
             _logger = logger;
             _mediator = mediator;
@@ -53,6 +55,7 @@ namespace Percolator.Application.Network
             _profileRepository = profileRepository;
             _routePlanner = routePlanner;
             _secureMessaging = secureMessaging;
+            _opaqueMessageDeliverer = opaqueMessageDeliverer;
         }
 
         private async Task<InternalEnvelope?> HandlePrekeyEnvelopeAsync(PrekeyEnvelope prekeyEnvelope,
@@ -127,115 +130,123 @@ namespace Percolator.Application.Network
         {
             var selfIdentityId = request.SelfIdentityId.Value;
             _logger.LogInformation("Processing opaque message (session inferred from ratchet header)");
-            
-                var sessionRatchetMessage = SessionRatchetMessage.FromBytes(request.PayloadBytes);
-                var header = sessionRatchetMessage.GetHeader();
-                var ratchetKey = header.PreKey;
-                var resolved = await _secureMessaging.DecryptInboundAsync(new CryptoSelfId(selfIdentityId), sessionRatchetMessage, cancellationToken).ConfigureAwait(false);
-                if (resolved is null)
+
+            var sessionRatchetMessage = SessionRatchetMessage.FromBytes(request.PayloadBytes);
+            var header = sessionRatchetMessage.GetHeader();
+            var ratchetKey = header.PreKey;
+            var resolved = await _secureMessaging.DecryptInboundAsync(new CryptoSelfId(selfIdentityId), sessionRatchetMessage, cancellationToken).ConfigureAwait(false);
+            if (resolved is null)
+            {
+                _logger.LogWarning("Decrypt returned null; returning empty result without side-effects");
+                return new DeliverOpaqueMessageResult();
+            }
+            var inferredSessionId = resolved.Value.sessionId;
+            var plaintext = resolved.Value.plaintext;
+            var nonNullDirectSessionId = new DirectSessionId(inferredSessionId.Value);
+            if (plaintext is null)
+            {
+                _logger.LogWarning("Decryption resulted in null plaintext for session {SessionId}. This may be a skipped message.", inferredSessionId);
+                return new DeliverOpaqueMessageResult();
+            }
+
+            await _ratchetLookup.UpsertAsync(new CryptoSelfId(selfIdentityId), inferredSessionId, ratchetKey, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
+
+            var directSession = await _directSessionRepository.GetBySessionIdAsync(nonNullDirectSessionId, new NetworkSelfId(selfIdentityId)).ConfigureAwait(false)
+                ?? throw new InvalidOperationException($"No direct session mapping found for session {inferredSessionId}");
+            var remotePeerId = directSession.RemoteNetworkPeerId;
+            _logger.LogInformation("Resolved remote peer {PeerId} for session {SessionId}", remotePeerId, directSession.SessionId);
+
+            var internalEnvelope = InternalEnvelope.Parser.ParseFrom(plaintext.Span);
+            if (internalEnvelope.ApplicationPayloadCase == InternalEnvelope.ApplicationPayloadOneofCase.None)
+            {
+                _logger.LogWarning("Received unhandled one-of message type: {MessageType}", internalEnvelope.ApplicationPayloadCase);
+                return new DeliverOpaqueMessageResult();
+            }
+
+            if (!internalEnvelope.HasSourceDeviceId)
+            {
+                _logger.LogWarning("Received InternalEnvelope without SourceDeviceId; skipping");
+                return new DeliverOpaqueMessageResult();
+            }
+            _logger.LogDebug("Parsed InternalEnvelope with case {Case}", internalEnvelope.ApplicationPayloadCase);
+            InternalEnvelope? responseEnvelope = null;
+
+            if (!AllowedCases.Contains(internalEnvelope.ApplicationPayloadCase))
+            {
+                _logger.LogWarning("InternalEnvelope case {Case} not allowed in DeliverOpaque path", internalEnvelope.ApplicationPayloadCase);
+                return new DeliverOpaqueMessageResult();
+            }
+            _logger.LogDebug("Allowed InternalEnvelope case {Case}; dispatching to orchestrator/transport path", internalEnvelope.ApplicationPayloadCase);
+
+            // Extract sender context from InternalEnvelope for cryptographic operations
+            var sourceDeviceId = new DeviceId(internalEnvelope.SourceDeviceId);
+            var identityRemotePeerId = new PeerId(directSession.RemoteNetworkPeerId.Value);
+            var ctx = new SessionContext(inferredSessionId.Value, request.SelfIdentityId, identityRemotePeerId, sourceDeviceId);
+
+            // Special-case: RelayOpaqueEnvelope requires RPC-level ack response
+            if (internalEnvelope.ApplicationPayloadCase == InternalEnvelope.ApplicationPayloadOneofCase.RelayOpaqueEnvelope)
+            {
+                var relay = internalEnvelope.RelayOpaqueEnvelope;
+                // Process the inner opaque payload (this may establish sessions and send responder msg via MessageService)
+                var relayHostPeerId = new Percolator.Identity.PeerId(directSession.RemoteNetworkPeerId.Value);
+                await _mediator.Send(new ProcessRelayedOpaquePayloadCommand(
+                    request.SelfIdentityId,
+                    Payload.FromBytesOwned(relay.OpaquePayload.ToByteArray()),
+                    // Relay host is the remote peer for this direct session (Host as known by this node)
+                    relayHostPeerId,
+                    sourceDeviceId), cancellationToken).ConfigureAwait(false);
+
+                // Build RPC-level RelayOpaqueResponse (not wrapped inside InternalEnvelope)
+                var ack = new RelayOpaqueResponse
                 {
-                    _logger.LogWarning("Decrypt returned null; returning empty result without side-effects");
-                    return new DeliverOpaqueMessageResult();
-                }
-                var inferredSessionId = resolved.Value.sessionId;
-                var plaintext = resolved.Value.plaintext;
-                var nonNullDirectSessionId = new DirectSessionId(inferredSessionId.Value);
-                if (plaintext is null)
+                    Version = 1,
+                    MessageAckId = relay.MessageAckId
+                };
+                // Encrypt ack bytes directly as RPC response payload
+                var ackPlain = Plaintext.FromBytesOwned(ack.ToByteArray());
+                var ackCipher = await _secureMessaging.EncryptAsync(inferredSessionId, ackPlain, cancellationToken).ConfigureAwait(false);
+                var ackBytes = ackCipher.ToArray();
+                return new DeliverOpaqueMessageResult { ResponsePayloadBytes = ackBytes };
+            }
+
+            // Delegate standard opaque message delivery to the new service
+            var delivered = await _opaqueMessageDeliverer.DeliverAsync(request.PayloadBytes, cancellationToken).ConfigureAwait(false);
+            if (!delivered)
+            {
+                _logger.LogWarning("Opaque message delivery failed");
+                return new DeliverOpaqueMessageResult();
+            }
+
+            var processed = await _mediator.Send(new ProcessInternalEnvelopeCommand(internalEnvelope, ctx), cancellationToken).ConfigureAwait(false);
+
+
+            // Signal: peer online. Attempt relay of queued messages one-by-one until empty or first failure.
+            try
+            {
+                var identityPeerId = new Percolator.Identity.PeerId(remotePeerId.Value);
+                while (await _relayOrchestrator.RelayNextAsync(request.SelfIdentityId, identityPeerId, cancellationToken).ConfigureAwait(false))
                 {
-                    _logger.LogWarning("Decryption resulted in null plaintext for session {SessionId}. This may be a skipped message.", inferredSessionId);
-                    return new DeliverOpaqueMessageResult();
+                    // continue while acked
                 }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Relay loop stopped due to failure; will resume on next online signal for {PeerId}", remotePeerId);
+            }
 
-                await _ratchetLookup.UpsertAsync(new CryptoSelfId(selfIdentityId), inferredSessionId, ratchetKey, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
+            if (processed is not null)
+            {
+                var earlyBytes = await EncryptResponseEnvelope(inferredSessionId, processed).ConfigureAwait(false);
+                return new DeliverOpaqueMessageResult { ResponsePayloadBytes = earlyBytes };
+            }
 
-                var directSession = await _directSessionRepository.GetBySessionIdAsync(nonNullDirectSessionId, new NetworkSelfId(selfIdentityId)).ConfigureAwait(false)
-                    ?? throw new InvalidOperationException($"No direct session mapping found for session {inferredSessionId}");
-                var remotePeerId = directSession.RemoteNetworkPeerId;
-                _logger.LogInformation("Resolved remote peer {PeerId} for session {SessionId}", remotePeerId, directSession.SessionId);
-                
-                var internalEnvelope = InternalEnvelope.Parser.ParseFrom(plaintext.Span);
-                if (internalEnvelope.ApplicationPayloadCase == InternalEnvelope.ApplicationPayloadOneofCase.None)
-                {
-                    _logger.LogWarning("Received unhandled one-of message type: {MessageType}", internalEnvelope.ApplicationPayloadCase);
-                    return new DeliverOpaqueMessageResult();
-                }
+            if (responseEnvelope is null)
+            {
+                return new DeliverOpaqueMessageResult();
+            }
+            var responseBytes = await EncryptResponseEnvelope(inferredSessionId, responseEnvelope).ConfigureAwait(false);
+            return new DeliverOpaqueMessageResult { ResponsePayloadBytes = responseBytes };
 
-                if (!internalEnvelope.HasSourceDeviceId)
-                {
-                    _logger.LogWarning("Received InternalEnvelope without SourceDeviceId; skipping");
-                    return new DeliverOpaqueMessageResult();
-                }
-                _logger.LogDebug("Parsed InternalEnvelope with case {Case}", internalEnvelope.ApplicationPayloadCase);
-                InternalEnvelope? responseEnvelope = null;
-
-                if (!AllowedCases.Contains(internalEnvelope.ApplicationPayloadCase))
-                {
-                    _logger.LogWarning("InternalEnvelope case {Case} not allowed in DeliverOpaque path", internalEnvelope.ApplicationPayloadCase);
-                    return new DeliverOpaqueMessageResult();
-                }
-                _logger.LogDebug("Allowed InternalEnvelope case {Case}; dispatching to orchestrator/transport path", internalEnvelope.ApplicationPayloadCase);
-
-                // Extract sender context from InternalEnvelope for cryptographic operations
-                var sourceDeviceId = new DeviceId(internalEnvelope.SourceDeviceId);
-                var identityRemotePeerId = new PeerId(directSession.RemoteNetworkPeerId.Value);
-                var ctx = new SessionContext(inferredSessionId.Value, request.SelfIdentityId, identityRemotePeerId, sourceDeviceId);
-
-                // Special-case: RelayOpaqueEnvelope requires RPC-level ack response
-                if (internalEnvelope.ApplicationPayloadCase == InternalEnvelope.ApplicationPayloadOneofCase.RelayOpaqueEnvelope)
-                {
-                    var relay = internalEnvelope.RelayOpaqueEnvelope;
-                    // Process the inner opaque payload (this may establish sessions and send responder msg via MessageService)
-                    var relayHostPeerId = new Percolator.Identity.PeerId(directSession.RemoteNetworkPeerId.Value);
-                    await _mediator.Send(new ProcessRelayedOpaquePayloadCommand(
-                        request.SelfIdentityId,
-                        Payload.FromBytesOwned(relay.OpaquePayload.ToByteArray()),
-                        // Relay host is the remote peer for this direct session (Host as known by this node)
-                        relayHostPeerId,
-                        sourceDeviceId), cancellationToken).ConfigureAwait(false);
-
-                    // Build RPC-level RelayOpaqueResponse (not wrapped inside InternalEnvelope)
-                    var ack = new RelayOpaqueResponse
-                    {
-                        Version = 1,
-                        MessageAckId = relay.MessageAckId
-                    };
-                    // Encrypt ack bytes directly as RPC response payload
-                    var ackPlain = Plaintext.FromBytesOwned(ack.ToByteArray());
-                    var ackCipher = await _secureMessaging.EncryptAsync(inferredSessionId, ackPlain, cancellationToken).ConfigureAwait(false);
-                    var ackBytes = ackCipher.ToArray();
-                    return new DeliverOpaqueMessageResult { ResponsePayloadBytes = ackBytes };
-                }
-
-                var processed = await _mediator.Send(new ProcessInternalEnvelopeCommand(internalEnvelope, ctx), cancellationToken).ConfigureAwait(false);
-
-
-                // Signal: peer online. Attempt relay of queued messages one-by-one until empty or first failure.
-                try
-                {
-                    var identityPeerId = new Percolator.Identity.PeerId(remotePeerId.Value);
-                    while (await _relayOrchestrator.RelayNextAsync(request.SelfIdentityId, identityPeerId, cancellationToken).ConfigureAwait(false))
-                    {
-                        // continue while acked
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Relay loop stopped due to failure; will resume on next online signal for {PeerId}", remotePeerId);
-                }
-
-                if (processed is not null)
-                {
-                    var earlyBytes = await EncryptResponseEnvelope(inferredSessionId, processed).ConfigureAwait(false);
-                    return new DeliverOpaqueMessageResult { ResponsePayloadBytes = earlyBytes };
-                }
-                
-                if (responseEnvelope is null)
-                {
-                    return new DeliverOpaqueMessageResult();
-                }
-                var responseBytes = await EncryptResponseEnvelope(inferredSessionId, responseEnvelope).ConfigureAwait(false);
-                return new DeliverOpaqueMessageResult { ResponsePayloadBytes = responseBytes };
-            
         }
         private async Task<byte[]> EncryptResponseEnvelope(SessionId sessionId, InternalEnvelope internalEnvelope)
         {
