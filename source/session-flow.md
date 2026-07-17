@@ -617,3 +617,22 @@ When Bob's client receives the `GroupMessageEnvelope`, it must independently ver
 4. **Semantic Authorization:** Bob checks his decrypted SQLite `GroupMembers` roster. *Is Alice actually an authorized member of this group?* If the Relay was malicious and allowed a non-member's message through, Bob's client silently drops it.
 5. **Authorship and Tamper Verification:** Bob verifies the Ed25519 signature on the payload against Alice's public signature key (which he stored during the 1:1 distribution).
     * *If the signature is valid:* Bob is mathematically guaranteed that Alice authored the message and that the Relay (or any MITM) did not tamper with the ciphertext.
+
+### 10.7 Reliability: Handling Missing Sender Keys
+
+Because the group broadcast happens asynchronously, race conditions can occur where a recipient (Bob) receives a `GroupMessageEnvelope` before the 1:1 Sender Key distribution message from the author (Alice).
+
+1. **Detection:** Upon receiving a `GroupMessageEnvelope`, Bob's client checks its local SQLite `SenderKeyRatchets` table for the `sender_key_id`.
+2. **Missing Key Handling:** If no ratchet is found for that ID:
+    - Bob's client sends a `SenderKeyRequest` to Alice.
+    - **Transport:** This request is sent as a standard 1:1 private message, encrypted via the existing Double Ratchet session between Bob and Alice.
+3. **Author Response:** Upon receiving the `SenderKeyRequest`, Alice's client re-transmits the `SenderKeyDistributionMessage` (the same one used in the bootstrapping flow in 10.2) via a 1:1 Double Ratchet session to Bob.
+4. **Resumption:** Bob decrypts the 1:1 message, installs the ratchet state for Alice, and is now able to decrypt the pending group message.
+
+````protobuf
+// Target: 1:1 Peer-to-Peer (Encrypted via Double Ratchet)
+message SenderKeyRequest {
+    uint32 conversation_id = 1;
+    uint32 sender_key_id = 2; // The ID of the key the receiver is missing
+}
+````
