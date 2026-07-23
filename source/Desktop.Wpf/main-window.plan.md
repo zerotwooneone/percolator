@@ -26,7 +26,16 @@
 
 ## Group Messaging Implementation Plan (V2)
 
-**Design** Group messaging will be implemented very similar to the Signal protocol. However, as this is a peer to peer application the user must choose a single relay to host the group conversation when the group is created. All group members will need to establish a 1:1 session with the relay before they can participate in the group conversation. The relay maintains the group state - but that state is opaque to the relay.
+**Design & Requirements:**
+The goal of this plan is to implement group chat for Percolator. Key requirements include:
+* **Optional Relay Role:** The main window can optionally choose to become a relay.
+* **Group Hosting:** The main window can use a given relay (including itself) to host a new group chat.
+* **Group Membership: The main window can receive and optionally accept/reject group invitations. The main window can send/receive group chat messages once joined.
+* **Simulator Support:** The simulator must be updated to serve as both a peer and a relay in group chats.
+* **Unauthenticated RPCs:** Some RPC methods must be unauthenticated by design, such as posting a message to a group chat using an HMAC Delivery Ticket (and later, initial x3dh handshake messages which are outside the scope of this plan).
+* **Authenticated RPCs:** Other RPC methods are authenticated, where every message has an associated peerId that the endpoint can look up based on provided information (the peerId is not sent in the message itself).
+* **Relay Outbox:** Relays require an outbox to fan-out messages to group members.
+* **Signal Protocol Logic:** All group logic strictly follows the Signal Protocol Group V2 flows as specified in `session-flow.md`.
 
 ## Chunk 1 ✅ COMPLETE
 The goal of this chunk was to establish the local user's primary device identity and generate a 32-byte symmetric profile key. This key was used to securely encrypt the user's Display Name and transmit it over the existing 1:1 Double Ratchet channel, laying the foundation for profile sharing.
