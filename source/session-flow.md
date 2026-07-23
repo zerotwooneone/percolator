@@ -506,11 +506,72 @@ These protobuf messages are encrypted by the sender and only decrypted by the re
 
 ```protobuf
 // Target: Peer (Via 1:1 Double Ratchet Session)
-// Usage: Bootstrapping a new member, or distributing a new Sender Key.
-message GroupInvitePayload {
-  bytes conversation_id = 1;
-  uint32 epoch = 2;
-  bytes group_master_key = 3;         // The 32-byte secret required to derive Sender Keys
+// Usage: Bootstrapping a new member into the group fabric. (Defined in internal_messaging.proto)
+// ============================================================================
+// 1. INITIAL GROUP CREATION / MEMBERSHIP INVITATION MESSAGE
+// ============================================================================
+// Sent by the group creator or admin to an invited peer via an encrypted 1:1 session.
+// It hands over the foundational keys needed to compute group membership and auth tokens.
+message GroupInitializationMessage {
+    // The routing/conversation identifier for the group (UUID bytes)
+    bytes conversation_id = 1;
+    uint32 epoch = 2;
+
+    // The root symmetric key for the group state (used to derive Sender Keys and state keys)
+    bytes group_master_key = 3;
+
+    // Public parameters required for Zero-Knowledge (KVAC) credential verification
+    bytes group_public_params = 4;
+
+    // The encrypted profile / initial encrypted roster blob 
+    bytes encrypted_profile = 5;
+
+    // The peer's assigned cryptographic credential proving they are an active member
+    bytes member_credential = 6;
+
+    // --- Percolator-specific Relay Topology ---
+    // The relay's PublicIdentityId (UUID bytes) for establishing transport
+    bytes relay_public_identity_id = 7;
+    // The relay's hostname for network routing
+    string relay_host = 8;
+    // The relay's port for network routing
+    int32 relay_port = 9;
+}
+
+// ============================================================================
+// 2. GROUP MEMBERSHIP ACKNOWLEDGEMENT (Response-like)
+// ============================================================================
+// Sent back by the invited/added peer to the admin via an encrypted 1:1 session 
+// to acknowledge receipt, sync state, and confirm successful initialization.
+message GroupInitializationAckMessage {
+    bytes conversation_id = 1;
+    uint32 acknowledged_epoch = 2;
+
+    // Confirmation status (e.g., success code or error details)
+    bool success = 3;
+
+    // Optional diagnostic or handshake correlation token
+    bytes correlation_token = 4;
+}
+
+// ============================================================================
+// 3. 1:1 SENDER KEY DISTRIBUTION MESSAGE (Creation / Rotation)
+// ============================================================================
+// Sent by any member (including the creator) to all other group peers via 1:1 sessions.
+// This allows recipients to map the sender's ephemeral sender_key_id to their ratchet.
+// The relay server never sees the contents of this payload (it only sees opaque 1:1 transport ciphertext).
+message SenderKeyDistributionMessage {
+    // The routing/conversation identifier for the group (UUID bytes)
+    bytes conversation_id = 1;
+
+    // The random, ephemeral ID chosen by the sender to tag their group broadcasts for O(1) lookups
+    uint32 sender_key_id = 2;
+
+    // The initial symmetric Chain Key for the Sender Key Ratchet
+    bytes chain_key = 3;
+
+    // The Ed25519 signature public key used by the sender to sign their group payloads
+    bytes signature_public_key = 4;
 }
 
 // Target: Peer (Via Group V2 Sender Key Fan-out)
@@ -558,7 +619,7 @@ To protect this unauthenticated endpoint from DoS attacks without revealing her 
 // Target: AnonymousPublishService (Unauthenticated Unary gRPC)
 // Header requirement: "x-delivery-ticket" : "Base64(TicketId + Expiry + HMAC)"
 message PublishGroupMessageRequest {
-  uint32 conversation_id = 1;
+  bytes conversation_id = 1;
 
   // ZK Proof (KVAC presentation) evaluated against GroupPublicParams.
   // Proves the sender holds the GroupMasterKey without revealing who they are.
@@ -600,7 +661,7 @@ When a recipient (Bob) connects via his **authenticated gRPC channel**, the Rela
 ```protobuf
 // Target: Peer (From Relay over authenticated multiplexed stream)
 message GroupMessageEnvelope {
-    uint32 conversation_id = 1;
+    bytes conversation_id = 1;
     
     // Forwarded verbatim from the PublishGroupMessageRequest
     uint32 sender_key_id = 2; 
@@ -631,8 +692,11 @@ Because the group broadcast happens asynchronously, race conditions can occur wh
 
 ````protobuf
 // Target: 1:1 Peer-to-Peer (Encrypted via Double Ratchet)
+// Usage: Recovery request when a recipient is missing a sender's key ratchet
 message SenderKeyRequest {
-    uint32 conversation_id = 1;
-    uint32 sender_key_id = 2; // The ID of the key the receiver is missing
+    // The routing/conversation identifier for fabric alignment (UUID bytes)
+    bytes conversation_id = 1;
+    // The specific sender_key_id that the recipient is missing and needs re-transmitted
+    uint32 sender_key_id = 2;
 }
 ````
