@@ -193,6 +193,19 @@ You are to implement all `.proto` contract updates required for the new Relay ar
         optional bytes encrypted_profile = 3;
     }
 
+    // Required by Chunk 1 / Chunk 2 for semantic group metadata encryption
+    message GroupProfilePlaintext {
+        optional string group_name = 1;
+        optional string group_description = 2;
+        optional bytes avatar_id = 3;
+        repeated PeerRoleUpdate roles = 4;
+    }
+
+    message PeerRoleUpdate {
+        optional bytes public_identity_id = 1;
+        optional uint32 role_enum = 2; // 0 = Standard, 1 = Admin
+    }
+
     message ProcessAnonymousGroupResponse { 
         optional bool success = 1; 
     }
@@ -252,6 +265,52 @@ You are to implement all `.proto` contract updates required for the new Relay ar
 
     message EnqueueOpaqueMessageResponse {
         optional bool success = 1;
+    }
+    ```
+
+**5. Peer-to-Peer Payloads (`internal_messaging.proto`)**
+*   **Action:** Define the exact payloads for establishing and modifying Group V2 E2EE sessions. Add these to `internal_messaging.proto`.
+    ```protobuf
+    // 1:1 Bootstrapping Payloads (Encrypted via Double Ratchet)
+    message GroupInitializationMessage {
+        optional bytes conversation_id = 1;
+        optional uint32 epoch = 2;
+        optional bytes group_master_key = 3;
+        optional bytes group_public_params = 4;
+        optional bytes encrypted_profile = 5;
+        optional bytes member_credential = 6;
+        optional bytes relay_public_identity_id = 7;
+        optional string relay_host = 8;
+        optional int32 relay_port = 9;
+    }
+
+    message SenderKeyDistributionMessage {
+        optional bytes conversation_id = 1;
+        optional uint32 sender_key_id = 2;
+        optional bytes chain_key = 3;
+        optional bytes signature_public_key = 4;
+    }
+
+    // Group Fan-out Payloads (Encrypted via Sender Key Ratchet)
+    message GroupUpdatePayload {
+        optional string new_group_name = 1;
+        optional string new_description = 2;
+        optional bytes new_avatar_id = 3;
+        repeated PeerRoleUpdate role_updates = 4;
+        repeated bytes added_public_identity_ids = 5;
+        repeated bytes removed_public_identity_ids = 6;
+    }
+
+    // Envelope Wrapping
+    message DirectMessageContent {
+        // ... existing fields ...
+        optional GroupInitializationMessage group_invite = 10;
+        optional SenderKeyDistributionMessage sender_key_distribution = 11;
+    }
+
+    message GroupContent {
+        optional string text_message = 1;
+        optional GroupUpdatePayload update_payload = 2;
     }
     ```
 ---
@@ -460,33 +519,8 @@ Architectural Constraints (CRITICAL):
 
 Implementation Requirements
 
-1. Protobuf Updates (`Percolator.Contracts/Protos/internal_messaging.proto`)
-* Add a `GroupUpdatePayload` to `GroupContent` to support serializing intents into the encrypted envelope.
-  ```protobuf
-  message GroupContent {
-    optional string text_message = 1;
-    optional GroupUpdatePayload update_payload = 2;
-  }
-
-  message GroupUpdatePayload {
-    optional string new_group_name = 1;
-    optional bytes new_avatar_id = 2;
-    repeated PeerRoleUpdate role_updates = 3;
-    repeated bytes added_public_identity_ids = 4;
-    repeated bytes removed_public_identity_ids = 5;
-  }
-
-  message PeerRoleUpdate {
-    optional bytes public_identity_id = 1;
-    optional uint32 role_enum = 2;
-  }
-
-  message GroupProfilePlaintext {
-    optional string group_name = 1;
-    optional bytes avatar_id = 2;
-    repeated PeerRoleUpdate roles = 3;
-  }
-  ```
+1. Protobuf Updates
+* Implement the `.proto` message and service definitions from Chunk 3.
 
 2. The Mutation Coordinator Process Manager (`Percolator.Application/Apps/Chat`)
 * Create a centralized service orchestrator: `GroupMutationCoordinator`.
