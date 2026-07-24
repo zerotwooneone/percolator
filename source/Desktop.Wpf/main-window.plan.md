@@ -144,8 +144,92 @@ You are to implement all physical database definitions, repositories, and query 
     *   **Action:** Refactor `GetMemberPeerIdsAsync` to `GetRoutingTokensAsync`. Since `RelayBlindedRosterDbo` now holds `RoutingToken`, simply return the exact bytes. The Relay uses these opaque tokens to route fan-out messages without knowing the true identities.
 ---
 
-## Chunk 3 ✅ COMPLETE
-The objective here was to establish a Micro-PKI for the "Sealed Sender" feature, allowing relay nodes to securely generate and store an Ed25519 Root Key. Clients can now authenticate over standard TLS connections using cryptographic header signatures to request short-lived Delivery Certificates.
+## Chunk 3 (Protobuf Contracts)
+### Feature Implementation Request: Signal Protocol Chunk 3 (Network Definitions)
+You are to implement all `.proto` contract updates required for the new Relay architecture. These changes establish the exact wire formats and gRPC service signatures without requiring any application-level business logic.
+
+**1. Service Refactoring (`messaging.proto` & `internal_messaging.proto`)**
+*   **Action:** Delete `FetchQueuedMessagesRequest`, `FetchQueuedMessagesResponse`, and `RelayOpaqueEnvelope` from `internal_messaging.proto`.
+*   **Action:** Delete the obsolete `rpc FetchQueuedMessages` from `InternalMessagingService` in `internal_messaging.proto`.
+*   **Action:** Rename the existing `RelayGroupService` to `RelayService` in `messaging.proto`. This service will now handle *all* Relay operations (both 1:1 and Group) to create a unified transport boundary.
+*   **Action:** Remove the obsolete `rpc StreamGroupMessages` and `rpc Publish` from `RelayService`.
+
+**2. Group Egress & Relay Operations (`messaging.proto`)**
+*   **Action:** Delete `SubmitGroupMessageRequest` and `SubmitGroupMessageResponse`.
+*   **Action:** Add the following definitions:
+    ```protobuf
+    message GetGroupStateRequest {
+        optional bytes conversation_id = 1;
+        optional bytes presentation = 2;
+    }
+
+    message GetGroupStateResponse {
+        optional uint32 current_epoch = 1;
+        optional bytes public_params = 2;
+        optional bytes encrypted_profile = 3;
+    }
+
+    message ProcessAnonymousGroupResponse { 
+        optional bool success = 1; 
+    }
+    ```
+*   **Action:** Ensure `AnonymousGroupRequest` handles `FanoutMessagePayload`, `update_encrypted_profile`, and `ModifyMembershipPayload` as an opaque `oneof group_operation`.
+*   **Action:** Ensure `ModifyMembershipPayload` uses `repeated bytes routing_tokens = 2;` as defined in `session-flow.md`.
+*   **Action:** Update `ProvisionGroupRequest` to include `bytes encrypted_profile = 4;`.
+*   **Action:** Add `rpc GetGroupState(GetGroupStateRequest) returns (GetGroupStateResponse);` to `RelayService`.
+*   **Action:** Add `rpc ProcessAnonymousGroupRequest(AnonymousGroupRequest) returns (ProcessAnonymousGroupResponse);` to `RelayService`.
+
+**3. Ingress / Stream Operations (`messaging.proto`)**
+*   **Action:** Define the new Bidirectional Stream contract. It does **not** include outbound messages.
+    ```protobuf
+    rpc ConnectRelay(stream ClientRelayStream) returns (stream ServerRelayStream);
+
+    message ClientRelayStream {
+        oneof payload {
+            MessageAck message_ack = 1;  // Acknowledges an ingress 1:1 message
+        }
+    }
+
+    message MessageAck {
+        optional bytes ack_id = 1; // Guid bytes
+    }
+
+    message ServerRelayStream {
+        oneof payload {
+            GroupMessageDelivery group_delivery = 1;
+            OpaqueMessageDelivery opaque_delivery = 2; // For 1:1 queued messages
+        }
+    }
+
+    message GroupMessageDelivery {
+        optional bytes conversation_id = 1;
+        optional uint32 epoch = 2;
+        optional bytes ciphertext = 3;
+        optional bytes sender_presentation = 4;
+    }
+
+    message OpaqueMessageDelivery {
+        optional bytes ack_id = 1; // Guid bytes
+        optional bytes opaque_payload = 2;
+    }
+    ```
+
+**4. 1:1 Opaque Egress (`messaging.proto`)**
+*   **Action:** Update `EnqueueOpaqueMessageRequest` to ensure it represents the new unified opaque drop-off, replacing `target_public_identity_id` with `destination_routing_token` to maintain blind routing:
+    ```protobuf
+    rpc EnqueueOpaqueMessage(EnqueueOpaqueMessageRequest) returns (EnqueueOpaqueMessageResponse);
+
+    message EnqueueOpaqueMessageRequest {
+        optional bytes destination_routing_token = 1; // Matches the blinded roster
+        optional uint32 route_preference = 2;
+        optional bytes ciphertext = 3;
+        optional bytes sender_presentation = 4;
+    }
+
+    message EnqueueOpaqueMessageResponse {
+        optional bool success = 1;
+    }
+    ```
 ---
 
 ## Chunk 3.1 ✅ COMPLETE
@@ -173,27 +257,8 @@ Architectural Constraints (CRITICAL):
 
 Implementation Requirements
 
-1. Protobuf Updates (`Percolator.Contracts/Protos/messaging.proto`)
-* Delete `SubmitGroupMessageRequest` and `SubmitGroupMessageResponse` from `messaging.proto` and remove the `rpc Publish` endpoint from `RelayService` (formerly `RelayGroupService`). These are entirely replaced by `AnonymousGroupRequest` and `ProcessAnonymousGroupRequest`.
-* Ensure `AnonymousGroupRequest` handles `FanoutMessagePayload`, `update_encrypted_profile`, and `ModifyMembershipPayload` as an opaque `oneof group_operation`.
-* The `ModifyMembershipPayload` will use `repeated bytes routing_tokens = 2;` as defined in `session-flow.md`.
-* Add `GetGroupStateRequest` and `GetGroupStateResponse` to `messaging.proto`:
-  ```protobuf
-  message GetGroupStateRequest {
-      optional bytes conversation_id = 1;
-      optional bytes presentation = 2;
-  }
-
-  message GetGroupStateResponse {
-      optional uint32 current_epoch = 1;
-      optional bytes public_params = 2;
-      optional bytes encrypted_profile = 3;
-  }
-  ```
-* Add the RPC endpoint `rpc GetGroupState(GetGroupStateRequest) returns (GetGroupStateResponse);` to the `RelayService` (formerly `RelayGroupService`).
-* Add the RPC endpoint `rpc ProcessAnonymousGroupRequest(AnonymousGroupRequest) returns (ProcessAnonymousGroupResponse);` to the `RelayService`.
-* Add `message ProcessAnonymousGroupResponse { optional bool success = 1; }`.
-* Add `bytes encrypted_profile` to `ProvisionGroupRequest`.
+1. Protobuf Updates (`Percolator.Contracts/Protos`)
+* Implement the `.proto` message and service definitions from Chunk 3.
 
 2. Group Encryption Profiles (`Percolator.Cryptography`)
 * In `IGroupCryptographyService` (and its concrete implementations), add `EncryptedGroupProfileBytes EncryptGroupProfile(GroupMasterKey masterKey, ReadOnlySpan<byte> profilePlaintext);` and `byte[] DecryptGroupProfile(GroupMasterKey masterKey, EncryptedGroupProfileBytes ciphertext);`. (Use AEAD AES-GCM with a key derived from the master key).
@@ -248,54 +313,7 @@ You are to replace the fragmented, pull-based 1:1 messaging model and the conver
 **Goal:** Define the bidirectional gRPC contracts (strictly for ingress/acks) and establish the `Network` domain aggregate for reliable outbound routing.
 
 1. **Protobuf Updates (`Percolator.Contracts`)**
-* Delete `FetchQueuedMessagesRequest`, `FetchQueuedMessagesResponse`, and `RelayOpaqueEnvelope` from `internal_messaging.proto`.
-* **Service Alignment:** Our existing RPC definitions loosely split into P2P (`TransportService`) and Relay (`RelayGroupService`). To perfectly match the desired unified transport pipe design, rename `RelayGroupService` to `RelayService` in `messaging.proto` so it handles *all* Relay operations (both 1:1 and Group). Remove the obsolete `rpc StreamGroupMessages` from it.
-* In `messaging.proto`, add the new Unary endpoint for 1:1 relay drop-off to `RelayService`:
-  ```protobuf
-  rpc EnqueueOpaqueMessage(EnqueueOpaqueMessageRequest) returns (EnqueueOpaqueMessageResponse);
-
-  message EnqueueOpaqueMessageRequest {
-      optional bytes target_public_identity_id = 1;
-      optional bytes opaque_payload = 2;
-  }
-  
-  message EnqueueOpaqueMessageResponse {
-      optional bool success = 1;
-  }
-  ```
-* In `messaging.proto`, define the new Bidirectional stream protocol and add `rpc ConnectRelay` to `RelayService`. It does **not** include outbound messages.
-  ```protobuf
-  rpc ConnectRelay(stream ClientRelayStream) returns (stream ServerRelayStream);
-
-  message ClientRelayStream {
-      oneof payload {
-          MessageAck message_ack = 1;  // Acknowledges an ingress 1:1 message
-      }
-  }
-  
-  message MessageAck {
-      optional bytes ack_id = 1; // Guid bytes
-  }
-
-  message ServerRelayStream {
-      oneof payload {
-          GroupMessageDelivery group_delivery = 1;
-          OpaqueMessageDelivery opaque_delivery = 2; // For 1:1 queued messages
-      }
-  }
-  
-  message GroupMessageDelivery {
-      optional bytes conversation_id = 1;
-      optional uint32 epoch = 2;
-      optional bytes ciphertext = 3;
-      optional bytes sender_presentation = 4;
-  }
-  
-  message OpaqueMessageDelivery {
-      optional bytes ack_id = 1; // Guid bytes
-      optional bytes opaque_payload = 2;
-  }
-  ```
+* Implement the `.proto` message and service definitions from Chunk 3.
 
 1. **Network Domain (`Percolator.Network`)**
 * Implement definitions from Chunk 2.
