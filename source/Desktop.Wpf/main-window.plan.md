@@ -22,6 +22,11 @@
    - PeerId is a local only identifier, it must NEVER be sent over the wire
 7. **No Shims or Temporary Code:** Do not implement shims or temporary code that does not exist in the plan. Do not write methods that throw `new NotImplementedException` - instead stop and ask the user what should be done. Each chunk must implement zero guesses.
 8. **Remove Dead Code:** Do not simply deprecate unused code. Fully delete code, methods, and classes that are no longer used or have been obsoleted by architectural changes.
+9. **Time Representation Rule:** 
+   - Domain and Application layers must strictly use `DateTimeOffset`.
+   - DBOs and SQLite schemas must store these as Unix-Time-Milliseconds counts (`long` or `INTEGER` in SQLite).
+   - Use EF Core's `HasConversion` (`v => v.ToUnixTimeMilliseconds()`, `v => DateTimeOffset.FromUnixTimeMilliseconds(v)`) in `OnModelCreating` so the DBO C# class can still use `DateTimeOffset` cleanly.
+   - All columns and properties representing time must be suffixed with `Utc` (e.g., `NextAttemptUtc`, `CreatedAtUtc`) to make their interpretation clear.
 
 ---
 
@@ -93,8 +98,50 @@ Implementation Requirements
 * **Domain Events:** Delete `GroupProvisioningRequestedDomainEvent` and `MemberInvitedDomainEvent` (obsolete).
 
 ---
-## Chunk 2 ✅ COMPLETE
-This chunk focused on building a clean, synchronous interop bridge that connects the managed cryptographic layer directly to the SQLite database. It enabled querying and persisting unmanaged Sender Key states using isolated Entity Framework transactions, ensuring cryptographic states commit immediately without relying on ambient transactions.
+## Chunk 2 (Infrastructure Definitions)
+### Feature Implementation Request: Signal Protocol Chunk 2 (Persistence & Repositories)
+You are to implement all physical database definitions, repositories, and query interfaces required by the new Signal Protocol Group V2 architecture. These definitions must be complete, technically accurate, and ready for code generation. Do not create any domain logic here; this is purely mapping physical storage.
+
+**1. EF Core Table Updates (Relay Blinded Routing & DbContext)**
+*   **Target:** `PercolatorDbContext` (in `Percolator.Infrastructure/Persistence`)
+    *   **Action:** Remove `public DbSet<NetworkEgressJobDbo> NetworkEgressJobs`.
+    *   **Action:** Add `public DbSet<AnonymousRelayEgressJobDbo> AnonymousRelayEgressJobs { get; set; }`.
+    *   **Action:** Add `public DbSet<AuthenticatedPeerEgressJobDbo> AuthenticatedPeerEgressJobs { get; set; }`.
+    *   **Action:** Rename the existing `RelayOutbox` DbSet to `DomainEventOutbox`.
+    *   **Action:** Ensure `RelayGroupStates` and `RelayBlindedRosters` are properly mapped and their schemas updated in `OnModelCreating`.
+    *   **Action:** In `OnModelCreating`, configure `HasConversion` on `NextAttemptUtc` for both `AnonymousRelayEgressJobDbo` and `AuthenticatedPeerEgressJobDbo` to explicitly store `DateTimeOffset` properties as `long` Unix-Time-Milliseconds in SQLite.
+*   **Target:** `RelayBlindedRosterDbo` (Move to `Percolator.Infrastructure/Network/RelayLedger`)
+    *   **Action:** Remove `MemberPublicIdentityId`.
+    *   **Action:** Add `public byte[] RoutingToken { get; set; } = Array.Empty<byte>();`
+    *   **Constraint:** Do **NOT** add any Foreign Key relationships to identity tables. The Relay must remain completely blinded to the true identity of the `RoutingToken`.
+*   **Target:** `RelayGroupStateDbo` (Move to `Percolator.Infrastructure/Network/RelayLedger`)
+    *   **Action:** Add `public byte[] EncryptedProfile { get; set; } = Array.Empty<byte>();`
+
+**2. Network Egress Persistence (`Percolator.Infrastructure/Network/Egress`)**
+*   **Target:** `AnonymousRelayEgressJobDbo`
+    *   **Properties:** `Guid JobId`, `byte[] RelayPeerId` (NetworkPeerId), `byte[] PayloadBytes` (NetworkPayloadBytes), `int AttemptCount`, `DateTimeOffset NextAttemptUtc`.
+*   **Target:** `AuthenticatedPeerEgressJobDbo`
+    *   **Properties:** `Guid JobId`, `byte[] DestinationPeerId` (NetworkPeerId), `int RoutePreference` (enum), `byte[] PayloadBytes` (NetworkPayloadBytes), `int AttemptCount`, `DateTimeOffset NextAttemptUtc`.
+*   **Target:** `DomainEventOutboxDbo`
+    *   **Action:** Rename the existing `RelayOutboxDbo` to `DomainEventOutboxDbo` to clarify its exact purpose (processing `IDomainEvent` triggers, NOT network bytes). 
+    *   **Action:** Update `OutboxDispatcherWorker` to only read from `DomainEventOutboxDbo`.
+
+**3. Repository Interfaces & Implementations**
+*   **Target:** `IAnonymousRelayEgressJobRepository` (`Percolator.Network`)
+    *   **Action:** Define standard CRUD for `AnonymousRelayEgressJob`.
+*   **Target:** `IAuthenticatedPeerEgressJobRepository` (`Percolator.Network`)
+    *   **Action:** Define standard CRUD for `AuthenticatedPeerEgressJob`.
+*   **Target:** `SqliteAnonymousRelayEgressJobRepository` & `SqliteAuthenticatedPeerEgressJobRepository` (`Percolator.Infrastructure/Network`)
+    *   **Action:** Implement mapping to the new DBOs using isolated EF transactions.
+*   **Target:** `IRelayGroupLedgerRepository` (`Percolator.Network/RelayLedger`)
+    *   **Action:** Move this interface to `Percolator.Network`.
+    *   **Action:** Add `RelayProfileBytes encryptedProfile` to the signature of `ProvisionNewGroupAsync` and ensure it accepts `IReadOnlyList<byte[]> routingTokens` instead of `PublicIdentityId` or `PeerId`.
+    *   **Action:** Add method: `Task UpdateGroupStateAsync(RelayGroupLedger ledger, IReadOnlyList<byte[]> addRoutingTokens, IReadOnlyList<byte[]> removeRoutingTokens, CancellationToken cancellationToken);`. This executes the ledger update and the blinded roster insertions/deletions inside a single EF Core transaction.
+    *   **Action:** Update `IsMemberAsync` to check if a `RoutingToken` exists in the `RelayBlindedRosterDbo`.
+
+**4. Queries**
+*   **Target:** `SqliteRelayRosterQueries` (`Percolator.Infrastructure/Network`)
+    *   **Action:** Refactor `GetMemberPeerIdsAsync` to `GetRoutingTokensAsync`. Since `RelayBlindedRosterDbo` now holds `RoutingToken`, simply return the exact bytes. The Relay uses these opaque tokens to route fan-out messages without knowing the true identities.
 ---
 
 ## Chunk 3 ✅ COMPLETE
@@ -151,17 +198,6 @@ Implementation Requirements
 2. Group Encryption Profiles (`Percolator.Cryptography`)
 * In `IGroupCryptographyService` (and its concrete implementations), add `EncryptedGroupProfileBytes EncryptGroupProfile(GroupMasterKey masterKey, ReadOnlySpan<byte> profilePlaintext);` and `byte[] DecryptGroupProfile(GroupMasterKey masterKey, EncryptedGroupProfileBytes ciphertext);`. (Use AEAD AES-GCM with a key derived from the master key).
 
-3. The Database Updates (`Percolator.Infrastructure/Chat`)
-* In `RelayGroupStateDbo`, add `public byte[] EncryptedProfile { get; set; } = Array.Empty<byte>();`.
-* In `RelayBlindedRosterDbo`, remove `MemberPublicIdentityId` and replace it with `public byte[] RoutingToken { get; set; }`. Do **NOT** add any Foreign Key relationships to identity tables. The Relay must remain completely blinded to the true identity of the `RoutingToken`.
-
-4. The Domain Repository Updates (`Percolator.Network/RelayLedger`)
-* Update `IRelayGroupLedgerRepository` (moved to Network domain):
-    * Add `RelayProfileBytes encryptedProfile` to the signature of `ProvisionNewGroupAsync` and ensure it accepts `IReadOnlyList<byte[]> routingTokens` instead of `PublicIdentityId` or `PeerId`.
-    * Add a new method: `Task UpdateGroupStateAsync(RelayGroupLedger ledger, IReadOnlyList<byte[]> addRoutingTokens, IReadOnlyList<byte[]> removeRoutingTokens, CancellationToken cancellationToken);` which executes the ledger update and the blinded roster insertions/deletions inside a single EF Core transaction.
-    * Update `IsMemberAsync` to check if a `RoutingToken` exists in the `RelayBlindedRosterDbo`.
-* Refactor `SqliteRelayRosterQueries.GetRoutingTokensAsync` (previously `GetMemberPeerIdsAsync`): Since `RelayBlindedRosterDbo` now holds `RoutingToken`, simply return the exact bytes. The Relay uses these opaque tokens to route fan-out messages without knowing the true identities.
-
 5. Service Implementation (`Percolator.Application/Chat` & `Percolator.Infrastructure/Network`)
 * **RelayGroupOperationStatus Enum:** Define an enum `RelayGroupOperationStatus { Success, EpochConflict, Unauthorized, GroupNotFound }` in `Percolator.Application.Chat` to communicate expected domain failures without throwing exceptions.
 * **RelayGroupService (gRPC):**
@@ -203,7 +239,7 @@ You are to replace the fragmented, pull-based 1:1 messaging model and the conver
   * **Solution:** **Ingress is Authenticated, Egress has Split Authorization.** We will use a Bidirectional gRPC Stream *exclusively* for retrieving messages and sending Acks. Egress remains **Unary RPCs**. 
   * Group Egress (`ProcessAnonymousGroupRequest`) is dispatched anonymously (omitting `DeliveryCertificate` headers) relying entirely on ZK Proofs for authorization. 
   * 1:1 Egress (`EnqueueOpaqueMessage`) *must* attach the sender's `DeliveryCertificate` headers to prevent mailbox-spam DoS on the relay, as we do not yet have recipient-issued Sealed Sender tokens for 1:1s.
-* **Lack of Egress Outbox:** Currently, we lack a dedicated persistent Egress queue for network routing payloads. We use direct ephemeral RPCs or internal envelopes. We must introduce `AnonymousRelayEgressJobDbo` and `AuthenticatedPeerEgressJobDbo` exclusively for serialized network payloads, leaving `RelayOutboxDbo` (renamed to `DomainEventOutboxDbo`) exclusively for Application Domain Events.
+* **Lack of Egress Outbox:** Currently, we lack a dedicated persistent Egress queue for network routing payloads. We use direct ephemeral RPCs or internal envelopes. Refer to Chunk 2 for new definitions.
 * **Greenfield Cutover:** As this is greenfield development, we do not write EF migrations. We define the new code, update the EF DbContext to drop the old tables/create the new ones, and delete the legacy code once cutover is complete.
 
 ---
@@ -261,8 +297,8 @@ You are to replace the fragmented, pull-based 1:1 messaging model and the conver
   }
   ```
 
-2. **Network Domain (`Percolator.Network`)**
-* Create `IAnonymousRelayEgressJobRepository` and `IAuthenticatedPeerEgressJobRepository` for standard CRUD.
+1. **Network Domain (`Percolator.Network`)**
+* Implement definitions from Chunk 2.
 * **Tests (`Percolator.NetworkTests`)**:
   * `AnonymousRelayEgressJob_RecordFailure_IncrementsAttemptAndSetsNextAttemptUtc` (Adhere strictly to deterministic time testing using hard-coded `DateTimeOffset` values).
   * `AuthenticatedPeerEgressJob_MarkSent_UpdatesStateToSent`.
@@ -273,9 +309,7 @@ You are to replace the fragmented, pull-based 1:1 messaging model and the conver
 **Goal:** Implement the physical storage and the background worker that drains the egress queue anonymously.
 
 1. **Infrastructure Persistence (`Percolator.Infrastructure`)**
-* Create `AnonymousRelayEgressJobDbo` and `AuthenticatedPeerEgressJobDbo`. Map them to the EF Core context.
-* Rename `RelayOutboxDbo` to `DomainEventOutboxDbo` to clarify its exact purpose (processing `IDomainEvent` triggers, NOT network bytes). Update `OutboxDispatcherWorker` to only read from `DomainEventOutboxDbo`.
-* Implement `SqliteAnonymousRelayEgressJobRepository` and `SqliteAuthenticatedPeerEgressJobRepository` using isolated EF transactions.
+* Review Chunk 2 and map DBOs to the EF Core context.
 
 2. **Application & Infrastructure Orchestration**
 * Create `NetworkEgressWorker` (BackgroundService) in `Percolator.Infrastructure/Egress`.
