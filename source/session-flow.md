@@ -502,16 +502,7 @@ message GetGroupStateResponse {
     bytes encrypted_profile = 3;
 }
 
-// Target: Relay (Processed by RelayGroupOrchestrator)
-// Usage: Advancing the Epoch, changing group structure, or updating the encrypted profile.
-message ModifyGroupRequest {
-    bytes conversation_id = 1;
-    uint32 base_epoch = 2;              // The epoch the client is attempting to mutate
-    bytes presentation = 3;             // ZK Proof verifying authorized membership
-    bytes new_encrypted_profile = 4;    // The new EncryptedProfile blob
-    repeated bytes add_public_identity_ids = 5;
-    repeated bytes remove_public_identity_ids = 6;
-}
+
 ```
 
 #### 2. Peer-to-Peer Payloads (Client -> Client)
