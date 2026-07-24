@@ -121,11 +121,18 @@ You are to implement all physical database definitions, repositories, and query 
     *   **Action:** Add `public DbSet<AuthenticatedPeerEgressJobDbo> AuthenticatedPeerEgressJobs { get; set; }`.
     *   **Action:** Rename the existing `RelayOutbox` DbSet to `DomainEventOutbox`.
     *   **Action:** Ensure `RelayGroupStates` and `RelayBlindedRosters` are properly mapped and their schemas updated in `OnModelCreating`.
-    *   **Action:** In `OnModelCreating`, configure `HasConversion` on `NextAttemptUtc` for both `AnonymousRelayEgressJobDbo` and `AuthenticatedPeerEgressJobDbo` to explicitly store `DateTimeOffset` properties as `long` Unix-Time-Milliseconds in SQLite.
+    *   **Action:** In `OnModelCreating`, configure `HasConversion` on all `DateTimeOffset` properties across *all* Chat and Network DBOs (e.g., `NextAttemptUtc`, `CreatedAtUtc`, `JoinedAtUtc`, `RemovedAtUtc`) to explicitly store them as `long` Unix-Time-Milliseconds in SQLite, satisfying Rule #9.
+    *   **Action:** In `OnModelCreating`, configure a strict 1:1 required relationship between `GroupStateDbo` and `GroupCryptoStateDbo` using `.HasOne().WithOne().HasForeignKey()`. This allows seamless hydration of the `GroupConversation` aggregate's Master Key.
+
+*   **Target:** `GroupStateDbo` (in `Percolator.Infrastructure/Chat`)
+    *   **Action:** Add `public byte[]? AvatarId { get; set; }` to support avatar updates.
+    *   **Action:** Add `public string? Description { get; set; }` for extensibility.
+
 *   **Target:** `RelayBlindedRosterDbo` (Move to `Percolator.Infrastructure/Network/RelayLedger`)
     *   **Action:** Remove `MemberPublicIdentityId`.
     *   **Action:** Add `public byte[] RoutingToken { get; set; } = Array.Empty<byte>();`
     *   **Constraint:** Do **NOT** add any Foreign Key relationships to identity tables. The Relay must remain completely blinded to the true identity of the `RoutingToken`.
+
 *   **Target:** `RelayGroupStateDbo` (Move to `Percolator.Infrastructure/Network/RelayLedger`)
     *   **Action:** Add `public byte[] EncryptedProfile { get; set; } = Array.Empty<byte>();`
 
@@ -139,6 +146,11 @@ You are to implement all physical database definitions, repositories, and query 
     *   **Action:** Update `OutboxDispatcherWorker` to only read from `DomainEventOutboxDbo`.
 
 **3. Repository Interfaces & Implementations**
+*   **Target:** `IGroupConversationRepository` (`Percolator.Chat`)
+    *   **Action:** Define standard hydration and persistence for the `GroupConversation` aggregate.
+    *   **Constraint (Soft Deletes):** When an aggregate removes a member (e.g., `LeaveGroupProposal` or `RemoveMemberProposal`), the repository must *soft-delete* the `GroupMemberDbo` by setting `RemovedAtUtc = DateTimeOffset.UtcNow` rather than physically deleting the row. This preserves UI history.
+*   **Target:** `SqliteGroupConversationRepository` (`Percolator.Infrastructure/Chat`)
+    *   **Action:** Implement mapping from `GroupStateDbo`, `GroupCryptoStateDbo` (via 1:1 include), and `GroupMemberDbo` into the rich `GroupConversation` aggregate defined in Chunk 1.
 *   **Target:** `IAnonymousRelayEgressJobRepository` (`Percolator.Network`)
     *   **Action:** Define standard CRUD for `AnonymousRelayEgressJob`.
 *   **Target:** `IAuthenticatedPeerEgressJobRepository` (`Percolator.Network`)
