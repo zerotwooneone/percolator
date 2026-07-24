@@ -57,6 +57,8 @@ Implementation Requirements
   * `ChatRelayId` (Guid/uint wrapper for the Relay's identity in the Chat context)
   * `GroupEpoch` (uint wrapper)
   * `GroupName` (string wrapper)
+  * `GroupAvatarId` (ByteArray wrapper for the avatar identifier)
+  * `GroupRole` (Enum: Standard = 0, Admin = 1)
   * `[ByteArray(1, 5000)] public sealed partial record EncryptedGroupProfileBytes;`
 * **Network Domain Value Types (`Percolator.Network.ValueObjects`)**:
   * `RelayGroupId` (Guid wrapper)
@@ -88,11 +90,21 @@ Implementation Requirements
 
 4. **Domain Aggregate: `GroupConversation` (`Percolator.Chat`)**
 * **Shared Nothing:** Only uses `Percolator.Chat.ValueObjects`.
-* **Mutation Proposals:** Define `IGroupMutationProposal` locally. Create `RenameGroupProposal(GroupName NewName)`, `AddMemberProposal(ChatPeerId NewMemberId)`, `RemoveMemberProposal(ChatPeerId TargetId)`.
+* **State Properties:** `ConversationId Id`, `GroupName Name`, `GroupMasterKey MasterKey`, `GroupEpoch CurrentEpoch`, `GroupAvatarId AvatarId`, and an encapsulated `IReadOnlyCollection<GroupMember> Members` (where `GroupMember` tracks `ChatPeerId` and `GroupRole`).
+* **Mutation Proposals:** Define `IGroupMutationProposal` locally. Create:
+  * `RenameGroupProposal(GroupName NewName)`
+  * `UpdateAvatarProposal(GroupAvatarId NewAvatarId)`
+  * `AddMemberProposal(ChatPeerId NewMemberId)`
+  * `RemoveMemberProposal(ChatPeerId TargetId)` (Admin kicking someone)
+  * `LeaveGroupProposal()` (Member voluntarily leaving)
+  * `ChangeMemberRoleProposal(ChatPeerId TargetId, GroupRole NewRole)`
 * **Behaviors (Protecting Invariants):**
-  * `GroupMutationFailureReason? ValidateProposal(IGroupMutationProposal proposal)` (where `GroupMutationFailureReason` is a domain enum/record).
-  * `void ApplyProposal(IGroupMutationProposal proposal)`
-    Must throw `DomainException` if `ValidateProposal` returns a failure. Otherwise, applies the change.
+  * `static GroupConversation CreateNew(ConversationId id, GroupName name, ChatPeerId creatorId, GroupMasterKey key)`
+    Enforces Day-Zero invariants (e.g., Epoch = 1, creator is assigned Admin).
+  * `GroupMutationFailureReason? ValidateProposal(ChatPeerId actorId, IGroupMutationProposal proposal)` (where `GroupMutationFailureReason` is a domain enum/record).
+    Evaluates invariants (e.g., actor is Admin for structural changes like `RemoveMemberProposal` or `RenameGroupProposal`, or actor == target for `LeaveGroupProposal`).
+  * `void ApplyProposal(ChatPeerId actorId, IGroupMutationProposal proposal)`
+    Must throw `DomainException` if `ValidateProposal` returns a failure. Otherwise, applies the change and correctly increments the `GroupEpoch`.
   * **Rule for Avoiding Exception Control Flow:** The Application Service avoids exception branching by calling `ValidateProposal` first. If it returns a failure (e.g., attempting to remove the last admin), the Application Service gracefully aborts. If it succeeds, it calls `ApplyProposal`, knowing the aggregate will not throw.
 * **No Infra Leakage:** Do NOT add Protobuf generation methods to the domain. The Application layer will map domain properties to Protobufs.
 * **Domain Events:** Delete `GroupProvisioningRequestedDomainEvent` and `MemberInvitedDomainEvent` (obsolete).
