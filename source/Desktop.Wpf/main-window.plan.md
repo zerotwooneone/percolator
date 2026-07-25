@@ -90,22 +90,23 @@ Implementation Requirements
 
 4. **Domain Aggregate: `GroupConversation` (`Percolator.Chat`)**
 * **Shared Nothing:** Only uses `Percolator.Chat.ValueObjects`.
-* **State Properties:** `ConversationId Id`, `GroupName Name`, `GroupMasterKey MasterKey`, `GroupEpoch CurrentEpoch`, `GroupAvatarId AvatarId`, and an encapsulated `IReadOnlyCollection<GroupMember> Members` (where `GroupMember` tracks `ChatPeerId` and `GroupRole`).
-* **Mutation Proposals:** Define `IGroupMutationProposal` locally. Create:
-  * `RenameGroupProposal(GroupName NewName)`
-  * `UpdateAvatarProposal(GroupAvatarId NewAvatarId)`
-  * `AddMemberProposal(ChatPeerId NewMemberId)`
-  * `RemoveMemberProposal(ChatPeerId TargetId)` (Admin kicking someone)
-  * `LeaveGroupProposal()` (Member voluntarily leaving)
-  * `ChangeMemberRoleProposal(ChatPeerId TargetId, GroupRole NewRole)`
+* **State Properties:** `ConversationId Id`, `GroupName Name`, `GroupMasterKey MasterKey`, `GroupEpoch CurrentEpoch`, `GroupAvatarId AvatarId`, and an encapsulated `IReadOnlyCollection<GroupMember> Members` (where `GroupMember` tracks `ParticipantId` and `GroupMemberRole`).
 * **Behaviors (Protecting Invariants):**
-  * `static GroupConversation CreateNew(ConversationId id, GroupName name, ChatPeerId creatorId, GroupMasterKey key)`
+  * `static GroupConversation CreateNew(ConversationId id, GroupName name, ParticipantId creatorParticipantId, GroupMasterKey masterKey, GroupAvatarId avatarId)`
     Enforces Day-Zero invariants (e.g., Epoch = 1, creator is assigned Admin).
-  * `GroupMutationFailureReason? ValidateProposal(ChatPeerId actorId, IGroupMutationProposal proposal)` (where `GroupMutationFailureReason` is a domain enum/record).
-    Evaluates invariants (e.g., actor is Admin for structural changes like `RemoveMemberProposal` or `RenameGroupProposal`, or actor == target for `LeaveGroupProposal`).
-  * `void ApplyProposal(ChatPeerId actorId, IGroupMutationProposal proposal)`
-    Must throw `DomainException` if `ValidateProposal` returns a failure. Otherwise, applies the change and correctly increments the `GroupEpoch`.
-  * **Rule for Avoiding Exception Control Flow:** The Application Service avoids exception branching by calling `ValidateProposal` first. If it returns a failure (e.g., attempting to remove the last admin), the Application Service gracefully aborts. If it succeeds, it calls `ApplyProposal`, knowing the aggregate will not throw.
+  * `void RenameGroup(ParticipantId actorParticipantId, GroupName newName)`
+    Must throw `UnauthorizedDomainException` if actor is not Admin. Otherwise, updates name and increments `GroupEpoch`.
+  * `void UpdateAvatar(ParticipantId actorParticipantId, GroupAvatarId newAvatarId)`
+    Must throw `UnauthorizedDomainException` if actor is not Admin. Otherwise, updates avatar and increments `GroupEpoch`.
+  * `void AddMember(ParticipantId actorParticipantId, ParticipantId newMemberParticipantId)`
+    Must throw `UnauthorizedDomainException` if actor is not Admin or member already exists. Otherwise, adds member and increments `GroupEpoch`.
+  * `void RemoveMember(ParticipantId actorParticipantId, ParticipantId targetParticipantId)`
+    Must throw `UnauthorizedDomainException` if actor is not Admin, target not found, or removing last admin. Otherwise, soft-deletes member and increments `GroupEpoch`.
+  * `void LeaveGroup(ParticipantId actorParticipantId)`
+    Must throw `UnauthorizedDomainException` if actor is last admin. Otherwise, soft-deletes actor and increments `GroupEpoch`.
+  * `void ChangeMemberRole(ParticipantId actorParticipantId, ParticipantId targetParticipantId, GroupRole newRole)`
+    Must throw `UnauthorizedDomainException` if actor is not Admin, target not found, or demoting last admin. Otherwise, updates role and increments `GroupEpoch`.
+  * **Rule for Avoiding Exception Control Flow:** Domain Aggregates must throw exceptions to prevent silent corruption of invalid states. To avoid branching based on exceptions, Application layers must proactively verify preconditions before mutating. For example, the Application Service must check actor permissions and invariants *before* calling the mutation methods.
 * **No Infra Leakage:** Do NOT add Protobuf generation methods to the domain. The Application layer will map domain properties to Protobufs.
 * **Domain Events:** Delete `GroupProvisioningRequestedDomainEvent` and `MemberInvitedDomainEvent` (obsolete).
 
