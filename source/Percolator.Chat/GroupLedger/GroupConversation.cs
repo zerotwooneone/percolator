@@ -1,126 +1,201 @@
-using System.Collections.ObjectModel;
 using Percolator.Chat.GroupMembership;
 using Percolator.Chat.Messaging.ValueObjects;
-using Percolator.Chat.Events;
-using Percolator.Chat.SeedWork;
+using Percolator.Chat.ValueObjects;
 
 namespace Percolator.Chat.GroupLedger;
 
 /// <summary>
 /// Represents a group conversation with variable membership, roles, and cryptographic state.
-/// Groups have an aggregate-level name and enforce admin invariants.
+/// Enforces admin invariants and epoch-based mutation tracking.
 /// </summary>
 public sealed class GroupConversation
 {
     private readonly List<GroupMember> _members = new();
-    private readonly List<IDomainEvent> _domainEvents = new();
 
-    public Messaging.ValueObjects.ConversationId Id { get; }
-    public GroupState State { get; private set; }
-    public string? Name { get; private set; }
-    public ChatPeerId RelayPeerId { get; }
-    public IReadOnlyList<GroupMember> Members => new ReadOnlyCollection<GroupMember>(_members);
-    public IReadOnlyList<IDomainEvent> GetDomainEvents() => _domainEvents;
-    public void ClearDomainEvents() => _domainEvents.Clear();
+    public ConversationId Id { get; }
+    public GroupName Name { get; private set; }
+    public GroupMasterKeyBytes MasterKey { get; }
+    public GroupEpoch CurrentEpoch { get; private set; }
+    public GroupAvatarId AvatarId { get; private set; }
+    public IReadOnlyCollection<GroupMember> Members => _members.AsReadOnly();
 
-    public GroupConversation(
-        Messaging.ValueObjects.ConversationId id,
-        GroupState state,
-        ChatPeerId relayPeerId,
-        IEnumerable<GroupMember> members,
-        string? name = null)
+    private GroupConversation(
+        ConversationId id,
+        GroupName name,
+        GroupMasterKeyBytes masterKey,
+        GroupEpoch currentEpoch,
+        GroupAvatarId avatarId,
+        IEnumerable<GroupMember> members)
     {
-        var memberList = members.ToList();
-
-        // Enforce invariants
-        if (memberList.Count == 0)
-        {
-            throw new ArgumentException("A group conversation must have at least one member.", nameof(members));
-        }
-
-        if (memberList.Any(m => m.RemovedAtUtc != null))
-        {
-            throw new ArgumentException("Cannot add removed members to a group conversation.", nameof(members));
-        }
-
-        if (memberList.Select(m => m.ParticipantId.PublicIdentityId).Distinct().Count() != memberList.Count)
-        {
-            throw new ArgumentException("A group conversation cannot have duplicate members.", nameof(members));
-        }
-
-        if (!memberList.Any(m => m.Role == GroupMemberRole.Admin))
-        {
-            throw new ArgumentException("A group conversation must have at least one admin.", nameof(members));
-        }
-
         Id = id;
-        State = state;
-        RelayPeerId = relayPeerId;
         Name = name;
-        _members.AddRange(memberList);
-
-        // Register domain event for group provisioning
-        _domainEvents.Add(new GroupProvisioningRequestedDomainEvent(
-            Id,
-            State.PublicParams,
-            memberList.Select(m => m.ParticipantId).ToList()));
+        MasterKey = masterKey;
+        CurrentEpoch = currentEpoch;
+        AvatarId = avatarId;
+        _members.AddRange(members);
     }
 
-    public void AddMember(GroupMember member)
+    /// <summary>
+    /// Creates a new group conversation with the creator as the initial admin.
+    /// </summary>
+    public static GroupConversation CreateNew(
+        ConversationId id,
+        GroupName name,
+        ParticipantId creatorParticipantId,
+        GroupMasterKeyBytes masterKey,
+        GroupAvatarId avatarId)
     {
-        if (_members.Any(m => m.ParticipantId.PublicIdentityId == member.ParticipantId.PublicIdentityId && m.RemovedAtUtc == null))
-        {
-            throw new InvalidOperationException("Member is already in the group.");
-        }
+        var creatorMember = new GroupMember(
+            id,
+            creatorParticipantId,
+            GroupMemberRole.Admin,
+            DateTimeOffset.UtcNow);
 
-        _members.Add(member);
+        return new GroupConversation(
+            id,
+            name,
+            masterKey,
+            new GroupEpoch(1),
+            avatarId,
+            new[] { creatorMember });
     }
 
-    public void InviteMember(ParticipantId participantId, ChatSenderKeyDistributionMessageBytes distributionMessage)
+    /// <summary>
+    /// Renames the group. Only admins can perform this action.
+    /// </summary>
+    public void RenameGroup(ParticipantId actorParticipantId, GroupName newName)
     {
-        if (_members.Any(m => m.ParticipantId.PublicIdentityId == participantId.PublicIdentityId && m.RemovedAtUtc == null))
+        var actor = _members.FirstOrDefault(m => m.ParticipantId.PublicIdentityId == actorParticipantId.PublicIdentityId && m.RemovedAtUtc == null);
+        if (actor == null || actor.Role != GroupMemberRole.Admin)
         {
-            throw new InvalidOperationException("Member is already in the group.");
+            throw new UnauthorizedDomainException("Only admins can rename the group.");
         }
 
-        var member = new GroupMember(Id, participantId, GroupMemberRole.Member, DateTimeOffset.UtcNow);
-        _members.Add(member);
-
-        // Register domain event for member invitation
-        _domainEvents.Add(new MemberInvitedDomainEvent(
-            Id,
-            participantId,
-            distributionMessage,
-            RelayPeerId));
-    }
-
-    public void RemoveMember(ParticipantId participantId, DateTimeOffset when)
-    {
-        var member = _members.FirstOrDefault(m => m.ParticipantId.PublicIdentityId == participantId.PublicIdentityId && m.RemovedAtUtc == null);
-        if (member == null)
-        {
-            throw new InvalidOperationException("Member not found in group.");
-        }
-
-        // Ensure at least one admin remains
-        if (member.Role == GroupMemberRole.Admin)
-        {
-            var remainingAdmins = _members.Count(m => m.Role == GroupMemberRole.Admin && m.ParticipantId.PublicIdentityId != participantId.PublicIdentityId && m.RemovedAtUtc == null);
-            if (remainingAdmins == 0)
-                throw new InvalidOperationException("Cannot remove the last admin from the group.");
-        }
-
-        member.Remove(when);
-    }
-
-    public void ChangeName(string? newName, DateTimeOffset when)
-    {
-        State.ChangeName(newName, when);
         Name = newName;
+        CurrentEpoch = new GroupEpoch(CurrentEpoch.Value + 1);
     }
 
-    public void IncrementEpoch(DateTimeOffset when)
+    /// <summary>
+    /// Updates the group avatar. Only admins can perform this action.
+    /// </summary>
+    public void UpdateAvatar(ParticipantId actorParticipantId, GroupAvatarId newAvatarId)
     {
-        State.IncrementEpoch(when);
+        var actor = _members.FirstOrDefault(m => m.ParticipantId.PublicIdentityId == actorParticipantId.PublicIdentityId && m.RemovedAtUtc == null);
+        if (actor == null || actor.Role != GroupMemberRole.Admin)
+        {
+            throw new UnauthorizedDomainException("Only admins can update the group avatar.");
+        }
+
+        AvatarId = newAvatarId;
+        CurrentEpoch = new GroupEpoch(CurrentEpoch.Value + 1);
+    }
+
+    /// <summary>
+    /// Adds a new member to the group. Only admins can perform this action.
+    /// </summary>
+    public void AddMember(ParticipantId actorParticipantId, ParticipantId newMemberParticipantId)
+    {
+        var actor = _members.FirstOrDefault(m => m.ParticipantId.PublicIdentityId == actorParticipantId.PublicIdentityId && m.RemovedAtUtc == null);
+        if (actor == null || actor.Role != GroupMemberRole.Admin)
+        {
+            throw new UnauthorizedDomainException("Only admins can add members to the group.");
+        }
+
+        if (_members.Any(m => m.ParticipantId.PublicIdentityId == newMemberParticipantId.PublicIdentityId && m.RemovedAtUtc == null))
+        {
+            throw new UnauthorizedDomainException("Member is already in the group.");
+        }
+
+        var newMember = new GroupMember(
+            Id,
+            newMemberParticipantId,
+            GroupMemberRole.Member,
+            DateTimeOffset.UtcNow);
+        _members.Add(newMember);
+        CurrentEpoch = new GroupEpoch(CurrentEpoch.Value + 1);
+    }
+
+    /// <summary>
+    /// Removes a member from the group. Only admins can perform this action.
+    /// </summary>
+    public void RemoveMember(ParticipantId actorParticipantId, ParticipantId targetParticipantId)
+    {
+        var actor = _members.FirstOrDefault(m => m.ParticipantId.PublicIdentityId == actorParticipantId.PublicIdentityId && m.RemovedAtUtc == null);
+        if (actor == null || actor.Role != GroupMemberRole.Admin)
+        {
+            throw new UnauthorizedDomainException("Only admins can remove members from the group.");
+        }
+
+        var target = _members.FirstOrDefault(m => m.ParticipantId.PublicIdentityId == targetParticipantId.PublicIdentityId && m.RemovedAtUtc == null);
+        if (target == null)
+        {
+            throw new UnauthorizedDomainException("Target member not found in group.");
+        }
+
+        if (target.Role == GroupMemberRole.Admin)
+        {
+            var remainingAdmins = _members.Count(m => m.Role == GroupMemberRole.Admin && m.RemovedAtUtc == null);
+            if (remainingAdmins <= 1)
+            {
+                throw new UnauthorizedDomainException("Cannot remove the last admin from the group.");
+            }
+        }
+
+        target.Remove(DateTimeOffset.UtcNow);
+        CurrentEpoch = new GroupEpoch(CurrentEpoch.Value + 1);
+    }
+
+    /// <summary>
+    /// Leaves the group. A member cannot leave if they are the last admin.
+    /// </summary>
+    public void LeaveGroup(ParticipantId actorParticipantId)
+    {
+        var actor = _members.FirstOrDefault(m => m.ParticipantId.PublicIdentityId == actorParticipantId.PublicIdentityId && m.RemovedAtUtc == null);
+        if (actor == null)
+        {
+            throw new UnauthorizedDomainException("Actor is not in the group.");
+        }
+
+        if (actor.Role == GroupMemberRole.Admin)
+        {
+            var remainingAdmins = _members.Count(m => m.Role == GroupMemberRole.Admin && m.RemovedAtUtc == null);
+            if (remainingAdmins <= 1)
+            {
+                throw new UnauthorizedDomainException("Cannot leave as the last admin of the group.");
+            }
+        }
+
+        actor.Remove(DateTimeOffset.UtcNow);
+        CurrentEpoch = new GroupEpoch(CurrentEpoch.Value + 1);
+    }
+
+    /// <summary>
+    /// Changes a member's role. Only admins can perform this action.
+    /// </summary>
+    public void ChangeMemberRole(ParticipantId actorParticipantId, ParticipantId targetParticipantId, GroupRole newRole)
+    {
+        var actor = _members.FirstOrDefault(m => m.ParticipantId.PublicIdentityId == actorParticipantId.PublicIdentityId && m.RemovedAtUtc == null);
+        if (actor == null || actor.Role != GroupMemberRole.Admin)
+        {
+            throw new UnauthorizedDomainException("Only admins can change member roles.");
+        }
+
+        var target = _members.FirstOrDefault(m => m.ParticipantId.PublicIdentityId == targetParticipantId.PublicIdentityId && m.RemovedAtUtc == null);
+        if (target == null)
+        {
+            throw new UnauthorizedDomainException("Target member not found in group.");
+        }
+
+        if (newRole == GroupRole.Standard && target.Role == GroupMemberRole.Admin)
+        {
+            var remainingAdmins = _members.Count(m => m.Role == GroupMemberRole.Admin && m.RemovedAtUtc == null);
+            if (remainingAdmins <= 1)
+            {
+                throw new UnauthorizedDomainException("Cannot demote the last admin of the group.");
+            }
+        }
+
+        target.ChangeRole(newRole == GroupRole.Admin ? GroupMemberRole.Admin : GroupMemberRole.Member);
+        CurrentEpoch = new GroupEpoch(CurrentEpoch.Value + 1);
     }
 }

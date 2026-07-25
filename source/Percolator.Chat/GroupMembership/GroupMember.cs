@@ -38,4 +38,9 @@ public sealed class GroupMember
     {
         Role = GroupMemberRole.Admin;
     }
+
+    public void ChangeRole(GroupMemberRole newRole)
+    {
+        Role = newRole;
+    }
 }
