@@ -67,6 +67,10 @@ The goal of this plan is to implement group chat for Percolator. Key requirement
 *   Create `ZkPresentationBytes.cs`: `[ByteArray(1, 1000)] public sealed partial record ZkPresentationBytes;`
 *   Create `AuthCredentialMacBytes.cs`: `[ByteArray(1, 1000)] public sealed partial record AuthCredentialMacBytes;`
 
+**4a. Shared Egress / Outbox Domain (`Percolator.Network/Egress`)**
+*   Create `RelayEgressJob` (Aggregate Root): represents a pending payload that the Relay must deliver to a connected client. The payload should be generalized as it will wrap `ServerRelayStream` messages.
+    *   Properties: `Guid JobId`, `NetworkPeerId DestinationPeerId`, `byte[] PayloadBytes` (the serialized `ServerRelayStream` protobuf), `int AttemptCount`, `DateTimeOffset NextAttemptUtc`.
+
 **5. Domain Aggregate: `RelayGroupLedger` (`Percolator.Network/RelayLedger`)**
 *   Create `RelayGroupLedger.cs` in `Percolator.Network/RelayLedger`.
 *   **Properties:** `RelayGroupId Id`, `RelayGroupEpoch CurrentEpoch`, `EncryptedEntriesBlobBytes EncryptedEntriesBlob`, `int ConcurrencyVersion`.
@@ -129,6 +133,11 @@ You are to completely remove the old SQL/EF definitions and implement all new ph
     *   Map `RelayGroupLedger` aggregate to `RelayGroupLedgerDbo`.
     *   Methods: `GetByIdAsync`, `OverwriteStateAsync`.
 
+**2a. Egress Outbox Persistence (`Percolator.Infrastructure/Network/Egress`)**
+*   Create `RelayEgressJobDbo.cs` for storing generalized payloads waiting for peer connection. Initially, this will primarily be used for transient fan-out group messages wrapped in the `ServerRelayStream` envelope, but it will eventually accommodate other types of outbox messages (like 1:1 messages).
+    *   Properties: `Guid JobId` (PK), `uint DestinationPeerId`, `byte[] PayloadBytes`, `int AttemptCount`, `long NextAttemptUtc`.
+*   Ensure mapping exists in `PercolatorDbContext`.
+
 **3. Client Persistence - Cryptography Domain (`Percolator.Infrastructure/Cryptography/GroupLedger`)**
 *   Create `GroupCredentialsDbo.cs`:
     *   Properties: `Guid ConversationId` (PK), `byte[] GroupMasterKey`, `byte[] AuthCredentialMac`.
@@ -148,14 +157,15 @@ You are to completely remove the old SQL/EF definitions and implement all new ph
     *   Ensure exact mapping: `Guid ConversationId`, `byte[] PublicIdentityId`, `int Role`.
 
 **5. DbContext Configuration (`Percolator.Infrastructure/Persistence/PercolatorDbContext.cs`)**
-*   Add `DbSet`s for `RelayGroupLedgers`, `GroupCredentials`, `SenderKeyRatchets`, `UnknownMessageCaches`, `SkippedMessageKeys`.
+*   Add `DbSet`s for `RelayGroupLedgers`, `GroupCredentials`, `SenderKeyRatchets`, `UnknownMessageCaches`, `SkippedMessageKeys`, and `RelayEgressJobs`.
 *   In `OnModelCreating`, configure the composite keys for `SenderKeyRatchetDbo` and `SkippedMessageKeyDbo`.
-*   Configure `HasConversion` for `UnknownMessageCacheDbo.ReceivedAtUtc` to explicit `long` (Unix Time Milliseconds) per Rule #9.
+*   Configure `HasConversion` for time properties (e.g., `UnknownMessageCacheDbo.ReceivedAtUtc`, `RelayEgressJobDbo.NextAttemptUtc`) to explicit `long` (Unix Time Milliseconds) per Rule #9.
 
 **6. Repository Interfaces & Implementations**
 *   Create `IGroupCredentialsRepository` / `SqliteGroupCredentialsRepository`.
 *   Create `ISenderKeyRatchetRepository` / `SqliteSenderKeyRatchetRepository`.
 *   Create `IUnknownMessageCacheRepository` / `SqliteUnknownMessageCacheRepository`.
+*   Create `IRelayEgressJobRepository` / `SqliteRelayEgressJobRepository`.
 *   Update `IGroupConversationRepository` / `SqliteGroupConversationRepository` to map only semantic state (no crypto). When an aggregate removes a member, the repository must soft-delete the `GroupMemberDbo` by setting `RemovedAtUtc = DateTimeOffset.UtcNow`.
 *   **Unit Tests:** Every repository implementation must have a corresponding integration/unit test verifying `Save` and `Load` (hydration) logic against an in-memory or throwaway SQLite connection.
 ---
@@ -189,6 +199,9 @@ You are to implement all `.proto` contract updates required for the new Relay ar
         // Exclusively for State Mutations (Add/Kick/Rename)
         optional bytes new_encrypted_entries_blob = 5;
         optional uint32 new_epoch = 6;
+        
+        // Anti-Spam / Rate-limiting Header Note:
+        // Client must provide grpc metadata header: "x-delivery-ticket" 
     }
 
     message ProcessAnonymousGroupResponse { 
@@ -263,6 +276,7 @@ You are to implement all `.proto` contract updates required for the new Relay ar
       uint32 role_enum = 2;
     }
     ```
+*   **Action:** Wire these specific messages into the inner `DirectMessageContent` and `GroupContent` payload structures.
 
 **5. Contract Generation Rules**
 *   Ensure the C# Protobuf generated code uses the appropriate `Google.Protobuf` attributes. Do not implement any application services, queries, or handler logic in this chunk. Just compile the `.proto` files successfully.

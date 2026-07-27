@@ -604,13 +604,20 @@ Alice transmits the message to the Relay using the unauthenticated `AnonymousGro
 ### 10.4 Relay Routing and Fan-Out
 The Relay acts as a blind router:
 1. **Authorization via ZK Proof ($O(N)$):** The Relay queries `RelayGroupLedger` for the `encrypted_entries_blob`. It feeds the ZK proof, payload hash, and the $N$ entries into an Elliptic Curve verification equation. If True, the Relay knows the anonymous sender mathematically owns exactly one of the entries.
-2. **Execution:** The Relay iterates over `target_public_identity_ids` and inserts a copy into the `RelayMessageOutbox` for each connected client.
+2. **Execution:** The Relay iterates over `target_public_identity_ids` and inserts a copy of the `GroupMessageEnvelope` into a unified `RelayMessageOutbox` (a general outbox queue per peer) for each connected client.
 3. **Cleanup:** The Relay immediately purges the `target_public_identity_ids` from RAM.
 
 ### 10.5 The Delivery (Relay to Peer)
-When Bob connects, the Relay flushes the pending outbox records down the stream.
+When Bob connects, the Relay flushes the pending outbox records from his generalized message outbox down the stream. The outbox wraps all outbound messages in a `ServerRelayStream` envelope.
 
 ```protobuf
+message ServerRelayStream {
+    oneof payload {
+        OpaqueMessageDelivery opaque_delivery = 1; // For 1:1 queued messages
+        GroupMessageEnvelope group_message = 2; // For transient fan-out
+    }
+}
+
 message GroupMessageEnvelope {
     bytes conversation_id = 1;
     uint32 sender_key_id = 2; 
