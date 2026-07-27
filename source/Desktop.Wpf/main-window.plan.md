@@ -79,7 +79,7 @@ The goal of this plan is to implement group chat for Percolator. Key requirement
     *   `public static RelayGroupLedger CreateNew(RelayGroupId id, EncryptedEntriesBlobBytes initialBlob)`
     *   `public void OverwriteState(RelayGroupEpoch baseEpoch, EncryptedEntriesBlobBytes newBlob)`
         Throws `InvalidOperationException` if `baseEpoch != CurrentEpoch`. Otherwise, increments `CurrentEpoch` by 1 and overwrites `EncryptedEntriesBlob`.
-*   **Unit Tests (`RelayGroupLedgerTests.cs`):**
+*   **Unit Tests (`Percolator.NetworkTests/RelayGroupLedgerTests.cs`):**
     *   Test: `OverwriteState_WhenBaseEpochMatches_UpdatesBlobAndIncrementsEpoch`
     *   Test: `OverwriteState_WhenBaseEpochDiffers_ThrowsInvalidOperationException` (Testing the Epoch Conflict mechanism).
 
@@ -87,7 +87,7 @@ The goal of this plan is to implement group chat for Percolator. Key requirement
 *   Update `GroupConversation.cs`.
 *   **Properties:** `ConversationId Id`, `GroupName Name`, `GroupEpoch CurrentEpoch`, `GroupAvatarId AvatarId`, `IReadOnlyCollection<GroupMember> Members`.
 *   *(Note: Cryptographic primitives like `GroupMasterKeyBytes` and `AuthCredentialMacBytes` belong in the `Cryptography` domain or are managed by specialized interfaces. The Chat domain aggregate ONLY models the semantic group state.)*
-*   **Removal:** Delete `GroupMasterKey` and `PublicParams` properties from this class entirely. Update `CreateNew` accordingly.
+*   **Removal:** Delete `GroupMasterKey` and `PublicParams` properties from this class entirely. Remove these parameters from the `CreateNew` factory method accordingly.
 *   **Behaviors (Protecting Invariants):**
     *   `public void RenameGroup(ParticipantId actorParticipantId, GroupName newName)`: Throws `UnauthorizedDomainException` if actor is not Admin. Updates name and increments `GroupEpoch`.
     *   `public void UpdateAvatar(ParticipantId actorParticipantId, GroupAvatarId newAvatarId)`: Throws `UnauthorizedDomainException` if actor is not Admin. Updates avatar and increments `GroupEpoch`.
@@ -95,7 +95,7 @@ The goal of this plan is to implement group chat for Percolator. Key requirement
     *   `public void RemoveMember(ParticipantId actorParticipantId, ParticipantId targetParticipantId)`: Throws `UnauthorizedDomainException` if actor is not Admin, target not found, or removing last admin. Soft-deletes member and increments `GroupEpoch`.
     *   `public void LeaveGroup(ParticipantId actorParticipantId)`: Throws `UnauthorizedDomainException` if actor is last admin. Soft-deletes actor and increments `GroupEpoch`.
     *   `public void ChangeMemberRole(ParticipantId actorParticipantId, ParticipantId targetParticipantId, GroupMemberRole newRole)`: Throws `UnauthorizedDomainException` if actor is not Admin, target not found, or demoting last admin. Updates role and increments `GroupEpoch`.
-*   **Unit Tests (`GroupConversationTests.cs`):**
+*   **Unit Tests (`Percolator.Chat.Tests/GroupConversationTests.cs`):**
     *   Test: `RenameGroup_WhenActorIsAdmin_UpdatesNameAndIncrementsEpoch`
     *   Test: `RenameGroup_WhenActorIsNotAdmin_ThrowsUnauthorizedDomainException`
     *   Test: `LeaveGroup_WhenActorIsLastAdmin_ThrowsUnauthorizedDomainException`
@@ -104,14 +104,14 @@ The goal of this plan is to implement group chat for Percolator. Key requirement
 **7. New Domain Aggregates: Client Security State (`Percolator.Cryptography/GroupLedger`)**
 *   *Note: These aggregates reside in the Cryptography domain to preserve "Shared Nothing" clean architecture.*
 *   Create `GroupCredentials.cs`:
-    *   Properties: `GroupId Id` (Guid-based from Cryptography domain), `GroupMasterKey MasterKey`, `AuthCredentialMacBytes AuthCredentialMac`.
+    *   Properties: `GroupId Id` (Guid wrapper from `Percolator.Cryptography`), `GroupMasterKey MasterKey`, `AuthCredentialMacBytes AuthCredentialMac`.
 *   Create `SenderKeyRatchet.cs`:
     *   Properties: `GroupId Id`, `CryptoPublicIdentityId AuthorPublicIdentityId`, `uint KeyId`, `ChainKey ChainKey`, `SignaturePublicKey SignatureKey`.
 *   Create `UnknownMessageCache.cs`:
     *   Properties: `long Id`, `GroupId GroupId`, `uint MissingKeyId`, `Ciphertext Ciphertext`, `DateTimeOffset ReceivedAtUtc`.
 *   Create `SkippedMessageKey.cs`:
     *   Properties: `GroupId GroupId`, `uint KeyId`, `int MessageIndex`, `byte[] MessageKey`.
-*   **Unit Tests:**
+*   **Unit Tests (`Percolator.CryptographyTests/`):**
     *   Ensure any complex logic inside these (like FIFO eviction on the cache) gets Black Box unit tests. e.g. `UnknownMessageCache_WhenCapacityExceeded_EvictsOldestAndGeneratesTombstone`.
 
 ---
@@ -162,25 +162,25 @@ You are to completely remove the old SQL/EF definitions and implement all new ph
 *   Configure `HasConversion` for time properties (e.g., `UnknownMessageCacheDbo.ReceivedAtUtc`, `RelayEgressJobDbo.NextAttemptUtc`) to explicit `long` (Unix Time Milliseconds) per Rule #9.
 
 **6. Repository Interfaces & Implementations**
-*   Create `IGroupCredentialsRepository` / `SqliteGroupCredentialsRepository`.
-*   Create `ISenderKeyRatchetRepository` / `SqliteSenderKeyRatchetRepository`.
-*   Create `IUnknownMessageCacheRepository` / `SqliteUnknownMessageCacheRepository`.
-*   Create `IRelayEgressJobRepository` / `SqliteRelayEgressJobRepository`.
-*   Update `IGroupConversationRepository` / `SqliteGroupConversationRepository` to map only semantic state (no crypto). When an aggregate removes a member, the repository must soft-delete the `GroupMemberDbo` by setting `RemovedAtUtc = DateTimeOffset.UtcNow`.
-*   **Unit Tests:** Every repository implementation must have a corresponding integration/unit test verifying `Save` and `Load` (hydration) logic against an in-memory or throwaway SQLite connection.
+*   Create `IGroupCredentialsRepository` (`Percolator.Cryptography/GroupLedger`) / `SqliteGroupCredentialsRepository` (`Percolator.Infrastructure/Cryptography`).
+*   Create `ISenderKeyRatchetRepository` (`Percolator.Cryptography/GroupLedger`) / `SqliteSenderKeyRatchetRepository` (`Percolator.Infrastructure/Cryptography`).
+*   Create `IUnknownMessageCacheRepository` (`Percolator.Cryptography/GroupLedger`) / `SqliteUnknownMessageCacheRepository` (`Percolator.Infrastructure/Cryptography`).
+*   Create `IRelayEgressJobRepository` (`Percolator.Network/Egress`) / `SqliteRelayEgressJobRepository` (`Percolator.Infrastructure/Network/Egress`).
+*   Update `IGroupConversationRepository` (`Percolator.Chat`) / `SqliteGroupConversationRepository` (`Percolator.Infrastructure/Chat`) to map only semantic state (no crypto). When an aggregate removes a member, the repository must soft-delete the `GroupMemberDbo` by setting `RemovedAtUtc = DateTimeOffset.UtcNow`.
+*   **Unit Tests (`Percolator.InfrastructureTests/`):** Every repository implementation must have a corresponding integration/unit test verifying `Save` and `Load` (hydration) logic against an in-memory or throwaway SQLite connection.
 ---
 
 ## Chunk 3 (Protobuf Contracts)
 ### Feature Implementation Request: Signal Protocol Chunk 3 (Network Definitions)
 You are to implement all `.proto` contract updates required for the new Relay architecture. These changes establish the exact wire formats and gRPC service signatures without requiring any application-level business logic.
 
-**1. Service Refactoring (`messaging.proto` & `internal_messaging.proto`)**
+**1. Service Refactoring (`Percolator.Contracts/Protos/messaging.proto` & `internal_messaging.proto`)**
 *   **Action:** Delete `FetchQueuedMessagesRequest`, `FetchQueuedMessagesResponse`, and `RelayOpaqueEnvelope` from `internal_messaging.proto`.
 *   **Action:** Delete the obsolete `rpc FetchQueuedMessages` from `InternalMessagingService` in `internal_messaging.proto`.
-*   **Action:** Ensure `RelayService` acts as the unified transport boundary. Remove any old endpoints like `StreamGroupMessages`, `Publish`, `ProvisionGroup`, or `ModifyGroup`.
-*   **Action:** Delete `SubmitGroupMessageRequest`, `SubmitGroupMessageResponse`, `ProvisionGroupRequest`, `ModifyGroupRequest`, and `GroupProvisioningRequestedDomainEvent` representations if they exist.
+*   **Action:** Ensure `RelayService` in `messaging.proto` acts as the unified transport boundary. Remove any old endpoints like `StreamGroupMessages`, `Publish`, `ProvisionGroup`, or `ModifyGroup`.
+*   **Action:** Delete `SubmitGroupMessageRequest`, `SubmitGroupMessageResponse`, `ProvisionGroupRequest`, `ModifyGroupRequest`, and `GroupProvisioningRequestedDomainEvent` representations if they exist in `messaging.proto`.
 
-**2. Group Egress & Relay API Contracts (`messaging.proto`)**
+**2. Group Egress & Relay API Contracts (`Percolator.Contracts/Protos/messaging.proto`)**
 *   **Action:** Add the `AnonymousGroupService` containing a single unary endpoint for all operations:
     ```protobuf
     service AnonymousGroupService {
@@ -220,7 +220,7 @@ You are to implement all `.proto` contract updates required for the new Relay ar
     }
     ```
 
-**3. Relay Ingress Delivery (`messaging.proto`)**
+**3. Relay Ingress Delivery (`Percolator.Contracts/Protos/messaging.proto`)**
 *   **Action:** Define `GroupMessageEnvelope` flowing from the Relay back to the peers over the authenticated stream:
     ```protobuf
     message GroupMessageEnvelope {
@@ -230,7 +230,7 @@ You are to implement all `.proto` contract updates required for the new Relay ar
     }
     ```
 
-**4. Peer-to-Peer Payloads (`internal_messaging.proto`)**
+**4. Peer-to-Peer Payloads (`Percolator.Contracts/Protos/internal_messaging.proto`)**
 *   **Action:** Define `GroupInitializationMessage` (sent over 1:1 sessions). This delivers the cryptographic primitives to new members:
     ```protobuf
     message GroupInitializationMessage {
@@ -276,12 +276,25 @@ You are to implement all `.proto` contract updates required for the new Relay ar
       uint32 role_enum = 2;
     }
     ```
-*   **Action:** Wire these specific messages into the inner `DirectMessageContent` and `GroupContent` payload structures.
+*   **Action:** Wire these specific messages into the inner `DirectMessageContent` and `GroupContent` payload structures:
+    ```protobuf
+    // Envelope Wrapping
+    message DirectMessageContent {
+        // ... existing fields ...
+        optional GroupInitializationMessage group_invite = 10;
+        optional SenderKeyDistributionMessage sender_key_distribution = 11;
+    }
+
+    message GroupContent {
+        optional string text_message = 1;
+        optional GroupUpdatePayload update_payload = 2;
+    }
+    ```
 
 **5. Contract Generation Rules**
 *   Ensure the C# Protobuf generated code uses the appropriate `Google.Protobuf` attributes. Do not implement any application services, queries, or handler logic in this chunk. Just compile the `.proto` files successfully.
 
-**6. Ingress / Stream Operations (`messaging.proto`)**
+**6. Ingress / Stream Operations (`Percolator.Contracts/Protos/messaging.proto`)**
 *   **Action:** Define the new Bidirectional Stream contract. This handles standard 1:1 and the new Group V2 envelopes.
     ```protobuf
     rpc ConnectRelay(stream ClientRelayStream) returns (stream ServerRelayStream);
@@ -309,7 +322,7 @@ You are to implement all `.proto` contract updates required for the new Relay ar
     }
     ```
 
-**7. 1:1 Opaque Egress (`messaging.proto`)**
+**7. 1:1 Opaque Egress (`Percolator.Contracts/Protos/messaging.proto`)**
 *   **Action:** Ensure `EnqueueOpaqueMessageRequest` represents the unified opaque drop-off for standard messages:
     ```protobuf
     rpc EnqueueOpaqueMessage(EnqueueOpaqueMessageRequest) returns (EnqueueOpaqueMessageResponse);
@@ -323,52 +336,6 @@ You are to implement all `.proto` contract updates required for the new Relay ar
 
     message EnqueueOpaqueMessageResponse {
         optional bool success = 1;
-    }
-    ```
-
-**5. Peer-to-Peer Payloads (`internal_messaging.proto`)**
-*   **Action:** Define the exact payloads for establishing and modifying Group V2 E2EE sessions. Add these to `internal_messaging.proto`.
-    ```protobuf
-    // 1:1 Bootstrapping Payloads (Encrypted via Double Ratchet)
-    message GroupInitializationMessage {
-        optional bytes conversation_id = 1;
-        optional uint32 epoch = 2;
-        optional bytes group_master_key = 3;
-        optional bytes group_public_params = 4;
-        optional bytes encrypted_profile = 5;
-        optional bytes member_credential = 6;
-        optional bytes relay_public_identity_id = 7;
-        optional string relay_host = 8;
-        optional int32 relay_port = 9;
-    }
-
-    message SenderKeyDistributionMessage {
-        optional bytes conversation_id = 1;
-        optional uint32 sender_key_id = 2;
-        optional bytes chain_key = 3;
-        optional bytes signature_public_key = 4;
-    }
-
-    // Group Fan-out Payloads (Encrypted via Sender Key Ratchet)
-    message GroupUpdatePayload {
-        optional string new_group_name = 1;
-        optional string new_description = 2;
-        optional bytes new_avatar_id = 3;
-        repeated PeerRoleUpdate role_updates = 4;
-        repeated bytes added_public_identity_ids = 5;
-        repeated bytes removed_public_identity_ids = 6;
-    }
-
-    // Envelope Wrapping
-    message DirectMessageContent {
-        // ... existing fields ...
-        optional GroupInitializationMessage group_invite = 10;
-        optional SenderKeyDistributionMessage sender_key_distribution = 11;
-    }
-
-    message GroupContent {
-        optional string text_message = 1;
-        optional GroupUpdatePayload update_payload = 2;
     }
     ```
 ---
