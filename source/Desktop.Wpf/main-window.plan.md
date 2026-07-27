@@ -44,71 +44,71 @@ The goal of this plan is to implement group chat for Percolator. Key requirement
 * **Signal Protocol Logic:** All group logic strictly follows the Signal Protocol Group V2 flows as specified in `session-flow.md`.
 
 ## Chunk 1
-### Feature Implementation Request: Signal Protocol Chunk 1 (Domain Aggregates & Value Types)
-You are to implement all new and updated Domain Aggregates and DDD Value Types required for the Signal Protocol Group V2 architecture.
+### Feature Implementation Request: Signal Protocol Chunk 1 (Domain Model Overhaul)
 
-Implementation Requirements
+**1. Deletions (Clean Slate)**
+*   Delete `Percolator.Chat/GroupLedger/RelayGroupPublicParamsBytes.cs` (Obsolete, ZK anchor uses an opaque blob).
+*   Delete `Percolator.Chat/GroupLedger/RelayGroupLedger.cs` (Moving to Network domain).
+*   Delete `Percolator.Chat/GroupLedger/IRelayGroupLedgerRepository.cs` (Moving to Network domain).
+*   Remove any logic in `Percolator.Chat/GroupLedger/GroupConversation.cs` related to `RelayGroupPublicParamsBytes` or `GroupMasterKeyBytes`.
+*   Delete any old event or request classes tied to Group V1 if they exist (e.g., `GroupProvisioningRequestedDomainEvent`, `ModifyGroupRequest`).
 
-1. **Strict Value Types & Primitives Avoidance**
-* Domains must define their own Value Types to represent concepts. Primitives (int, byte[], Guid) are only allowed inside the Value Type wrappers, DBOs, and Protobufs.
-* Use `[ByteArray(minLength, maxLength)]` when creating DDD value types that wrap `byte[]`.
-* **Chat Domain Value Types (`Percolator.Chat.ValueObjects`)**:
-  * `ConversationId` (Guid wrapper)
-  * `ChatRelayId` (Guid/uint wrapper for the Relay's identity in the Chat context)
-  * `GroupEpoch` (uint wrapper)
-  * `GroupName` (string wrapper)
-  * `GroupAvatarId` (ByteArray wrapper for the avatar identifier)
-  * `GroupRole` (Enum: Standard = 0, Admin = 1)
-  * `[ByteArray(1, 5000)] public sealed partial record EncryptedGroupProfileBytes;`
-* **Network Domain Value Types (`Percolator.Network.ValueObjects`)**:
-  * `RelayGroupId` (Guid wrapper)
-  * `RelayGroupEpoch` (uint wrapper)
-  * `NetworkPeerId` (Guid/uint wrapper)
-  * `EgressJobId` (Guid wrapper)
-  * `DeliveryAttemptCount` (int wrapper)
-  * `[ByteArray(1, 5000)] public sealed partial record RelayProfileBytes;`
-  * `[ByteArray(1, 5000)] public sealed partial record RelayGroupPublicParamsBytes;`
-  * `[ByteArray(1, 1000)] public sealed partial record ZkPresentationBytes;`
-  * `[ByteArray(1, int.MaxValue)] public sealed partial record NetworkPayloadBytes;`
+**2. Network Domain Value Types (`Percolator.Network/ValueObjects`)**
+*   Create `EncryptedEntriesBlobBytes.cs`: `[ByteArray(1, 5000)] public sealed partial record EncryptedEntriesBlobBytes;`
+*   Ensure `RelayGroupId` (Guid wrapper), `RelayGroupEpoch` (uint wrapper), and `NetworkPeerId` (uint wrapper) exist and are structurally correct.
 
-2. **Domain Aggregate: `RelayGroupLedger` (`Percolator.Network/RelayLedger`)**
-* **Shared Nothing:** Moved from `Percolator.Chat` to `Percolator.Network` to enforce strict DDD bounded contexts. It must only use `Percolator.Network.ValueObjects` (e.g., `RelayGroupId` instead of `ConversationId`).
-* **Properties:** `RelayGroupId Id`, `RelayGroupEpoch CurrentEpoch`, `RelayGroupPublicParamsBytes PublicParams`, `RelayProfileBytes EncryptedProfile`, `int ConcurrencyVersion`.
-* **Behaviors (Protecting Invariants):**
-  * `void ApplyMutation(RelayGroupEpoch baseEpoch, RelayProfileBytes newProfile)`
-    Must throw `InvalidOperationException` if `baseEpoch != CurrentEpoch`. Otherwise, increment `CurrentEpoch` and update `EncryptedProfile`.
-  * **Rule for Avoiding Exception Control Flow:** Domain Aggregates must throw exceptions to prevent silent corruption of invalid states. To avoid branching based on exceptions, Application layers must proactively verify preconditions before mutating. For example, the Application Service must check `if (ledger.CurrentEpoch != request.BaseEpoch)` *before* calling `ApplyMutation`.
+**3. Chat Domain Value Types (`Percolator.Chat/ValueObjects`)**
+*   Create `SenderKeyId.cs`: `public readonly record struct SenderKeyId(uint Value);` (O(1) ratchet lookup).
+*   Create `EncryptedGroupProfileBytes.cs`: `[ByteArray(1, 5000)] public sealed partial record EncryptedGroupProfileBytes;`
+*   Ensure `ConversationId` (Guid wrapper), `GroupEpoch` (uint wrapper), `GroupName` (string wrapper), `GroupAvatarId` (ByteArray wrapper), `GroupRole` (Enum) exist and are structurally correct.
+*   Ensure `ChatPeerId` (uint wrapper) exists to represent remote peers within the Chat domain.
 
-3. **Domain Aggregates: Network Egress Jobs (`Percolator.Network/Egress`)**
-* We must not use a single domain aggregate for all network egress.
-* Create `AnonymousRelayEgressJob` aggregate root.
-    * Properties: `EgressJobId JobId`, `NetworkPeerId RelayPeerId`, `NetworkPayloadBytes PayloadBytes`, `DeliveryAttemptCount Attempts`, `DateTimeOffset NextAttemptUtc`.
-    * Behaviors: `void RecordFailure(DateTimeOffset now)` (increments attempts, updates `NextAttemptUtc`), `void MarkSent()`.
-* Create `AuthenticatedPeerEgressJob` aggregate root.
-    * Properties: `EgressJobId JobId`, `NetworkPeerId DestinationPeerId`, `RoutePreference RoutePreference`, `NetworkPayloadBytes PayloadBytes`, `DeliveryAttemptCount Attempts`, `DateTimeOffset NextAttemptUtc`.
-    * Behaviors: `void RecordFailure(DateTimeOffset now)`, `void MarkSent()`.
+**4. Cryptography Domain Value Types (`Percolator.Cryptography/GroupLedger`)**
+*   Create `ZkPresentationBytes.cs`: `[ByteArray(1, 1000)] public sealed partial record ZkPresentationBytes;`
+*   Create `AuthCredentialMacBytes.cs`: `[ByteArray(1, 1000)] public sealed partial record AuthCredentialMacBytes;`
 
-4. **Domain Aggregate: `GroupConversation` (`Percolator.Chat`)**
-* **Shared Nothing:** Only uses `Percolator.Chat.ValueObjects`.
-* **State Properties:** `ConversationId Id`, `GroupName Name`, `GroupMasterKey MasterKey`, `GroupEpoch CurrentEpoch`, `GroupAvatarId AvatarId`, and an encapsulated `IReadOnlyCollection<GroupMember> Members` (where `GroupMember` tracks `ParticipantId` and `GroupMemberRole`).
-* **Behaviors (Protecting Invariants):**
-  * `static GroupConversation CreateNew(ConversationId id, GroupName name, ParticipantId creatorParticipantId, GroupMasterKey masterKey, GroupAvatarId avatarId)`
-    Enforces Day-Zero invariants (e.g., Epoch = 1, creator is assigned Admin).
-  * `void RenameGroup(ParticipantId actorParticipantId, GroupName newName)`
-    Must throw `UnauthorizedDomainException` if actor is not Admin. Otherwise, updates name and increments `GroupEpoch`.
-  * `void UpdateAvatar(ParticipantId actorParticipantId, GroupAvatarId newAvatarId)`
-    Must throw `UnauthorizedDomainException` if actor is not Admin. Otherwise, updates avatar and increments `GroupEpoch`.
-  * `void AddMember(ParticipantId actorParticipantId, ParticipantId newMemberParticipantId)`
-    Must throw `UnauthorizedDomainException` if actor is not Admin or member already exists. Otherwise, adds member and increments `GroupEpoch`.
-  * `void RemoveMember(ParticipantId actorParticipantId, ParticipantId targetParticipantId)`
-    Must throw `UnauthorizedDomainException` if actor is not Admin, target not found, or removing last admin. Otherwise, soft-deletes member and increments `GroupEpoch`.
-  * `void LeaveGroup(ParticipantId actorParticipantId)`
-    Must throw `UnauthorizedDomainException` if actor is last admin. Otherwise, soft-deletes actor and increments `GroupEpoch`.
-  * `void ChangeMemberRole(ParticipantId actorParticipantId, ParticipantId targetParticipantId, GroupRole newRole)`
-    Must throw `UnauthorizedDomainException` if actor is not Admin, target not found, or demoting last admin. Otherwise, updates role and increments `GroupEpoch`.
-  * **Rule for Avoiding Exception Control Flow:** Domain Aggregates must throw exceptions to prevent silent corruption of invalid states. To avoid branching based on exceptions, Application layers must proactively verify preconditions before mutating. For example, the Application Service must check actor permissions and invariants *before* calling the mutation methods.
-* **No Infra Leakage:** Do NOT add Protobuf generation methods to the domain. The Application layer will map domain properties to Protobufs.
-* **Domain Events:** Delete `GroupProvisioningRequestedDomainEvent` and `MemberInvitedDomainEvent` (obsolete).
+**5. Domain Aggregate: `RelayGroupLedger` (`Percolator.Network/RelayLedger`)**
+*   Create `RelayGroupLedger.cs` in `Percolator.Network/RelayLedger`.
+*   **Properties:** `RelayGroupId Id`, `RelayGroupEpoch CurrentEpoch`, `EncryptedEntriesBlobBytes EncryptedEntriesBlob`, `int ConcurrencyVersion`.
+*   **Behaviors:**
+    *   `private RelayGroupLedger(...)` constructor.
+    *   `public static RelayGroupLedger CreateNew(RelayGroupId id, EncryptedEntriesBlobBytes initialBlob)`
+    *   `public void OverwriteState(RelayGroupEpoch baseEpoch, EncryptedEntriesBlobBytes newBlob)`
+        Throws `InvalidOperationException` if `baseEpoch != CurrentEpoch`. Otherwise, increments `CurrentEpoch` by 1 and overwrites `EncryptedEntriesBlob`.
+*   **Unit Tests (`RelayGroupLedgerTests.cs`):**
+    *   Test: `OverwriteState_WhenBaseEpochMatches_UpdatesBlobAndIncrementsEpoch`
+    *   Test: `OverwriteState_WhenBaseEpochDiffers_ThrowsInvalidOperationException` (Testing the Epoch Conflict mechanism).
+
+**6. Domain Aggregate: `GroupConversation` Refactoring (`Percolator.Chat/GroupLedger`)**
+*   Update `GroupConversation.cs`.
+*   **Properties:** `ConversationId Id`, `GroupName Name`, `GroupEpoch CurrentEpoch`, `GroupAvatarId AvatarId`, `IReadOnlyCollection<GroupMember> Members`.
+*   *(Note: Cryptographic primitives like `GroupMasterKeyBytes` and `AuthCredentialMacBytes` belong in the `Cryptography` domain or are managed by specialized interfaces. The Chat domain aggregate ONLY models the semantic group state.)*
+*   **Removal:** Delete `GroupMasterKey` and `PublicParams` properties from this class entirely. Update `CreateNew` accordingly.
+*   **Behaviors (Protecting Invariants):**
+    *   `public void RenameGroup(ParticipantId actorParticipantId, GroupName newName)`: Throws `UnauthorizedDomainException` if actor is not Admin. Updates name and increments `GroupEpoch`.
+    *   `public void UpdateAvatar(ParticipantId actorParticipantId, GroupAvatarId newAvatarId)`: Throws `UnauthorizedDomainException` if actor is not Admin. Updates avatar and increments `GroupEpoch`.
+    *   `public void AddMember(ParticipantId actorParticipantId, ParticipantId newMemberParticipantId)`: Throws `UnauthorizedDomainException` if actor is not Admin or member already exists. Adds member and increments `GroupEpoch`.
+    *   `public void RemoveMember(ParticipantId actorParticipantId, ParticipantId targetParticipantId)`: Throws `UnauthorizedDomainException` if actor is not Admin, target not found, or removing last admin. Soft-deletes member and increments `GroupEpoch`.
+    *   `public void LeaveGroup(ParticipantId actorParticipantId)`: Throws `UnauthorizedDomainException` if actor is last admin. Soft-deletes actor and increments `GroupEpoch`.
+    *   `public void ChangeMemberRole(ParticipantId actorParticipantId, ParticipantId targetParticipantId, GroupMemberRole newRole)`: Throws `UnauthorizedDomainException` if actor is not Admin, target not found, or demoting last admin. Updates role and increments `GroupEpoch`.
+*   **Unit Tests (`GroupConversationTests.cs`):**
+    *   Test: `RenameGroup_WhenActorIsAdmin_UpdatesNameAndIncrementsEpoch`
+    *   Test: `RenameGroup_WhenActorIsNotAdmin_ThrowsUnauthorizedDomainException`
+    *   Test: `LeaveGroup_WhenActorIsLastAdmin_ThrowsUnauthorizedDomainException`
+    *   Test: `AddMember_WhenMemberAlreadyExists_ThrowsUnauthorizedDomainException`
+
+**7. New Domain Aggregates: Client Security State (`Percolator.Cryptography/GroupLedger`)**
+*   *Note: These aggregates reside in the Cryptography domain to preserve "Shared Nothing" clean architecture.*
+*   Create `GroupCredentials.cs`:
+    *   Properties: `GroupId Id` (Guid-based from Cryptography domain), `GroupMasterKey MasterKey`, `AuthCredentialMacBytes AuthCredentialMac`.
+*   Create `SenderKeyRatchet.cs`:
+    *   Properties: `GroupId Id`, `CryptoPublicIdentityId AuthorPublicIdentityId`, `uint KeyId`, `ChainKey ChainKey`, `SignaturePublicKey SignatureKey`.
+*   Create `UnknownMessageCache.cs`:
+    *   Properties: `long Id`, `GroupId GroupId`, `uint MissingKeyId`, `Ciphertext Ciphertext`, `DateTimeOffset ReceivedAtUtc`.
+*   Create `SkippedMessageKey.cs`:
+    *   Properties: `GroupId GroupId`, `uint KeyId`, `int MessageIndex`, `byte[] MessageKey`.
+*   **Unit Tests:**
+    *   Ensure any complex logic inside these (like FIFO eviction on the cache) gets Black Box unit tests. e.g. `UnknownMessageCache_WhenCapacityExceeded_EvictsOldestAndGeneratesTombstone`.
 
 ---
 ## Chunk 2 (Infrastructure Definitions)
