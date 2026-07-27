@@ -13,7 +13,7 @@ public class NetworkEgressJobTests
         // ARRANGE
         var jobId = new EgressJobId(1);
         var destinationPeerId = new NetworkPeerId(1);
-        var payloadBytes = new NetworkPayloadBytes(new byte[] { 1, 2, 3 });
+        var payloadBytes = NetworkPayloadBytes.FromBytesOwned(new byte[] { 1, 2, 3 });
         var fixedTime = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero);
         
         var job = new NetworkEgressJob(
@@ -39,7 +39,7 @@ public class NetworkEgressJobTests
         // ARRANGE
         var jobId = new EgressJobId(1);
         var destinationPeerId = new NetworkPeerId(1);
-        var payloadBytes = new NetworkPayloadBytes(new byte[] { 1, 2, 3 });
+        var payloadBytes = NetworkPayloadBytes.FromBytesOwned(new byte[] { 1, 2, 3 });
         var fixedTime = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero);
         
         var job = new NetworkEgressJob(
@@ -66,7 +66,7 @@ public class NetworkEgressJobTests
         // ARRANGE
         var jobId = new EgressJobId(1);
         var destinationPeerId = new NetworkPeerId(1);
-        var payloadBytes = new NetworkPayloadBytes(new byte[] { 1, 2, 3 });
+        var payloadBytes = NetworkPayloadBytes.FromBytesOwned(new byte[] { 1, 2, 3 });
         var fixedTime = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero);
         
         var job = new NetworkEgressJob(
@@ -93,7 +93,7 @@ public class NetworkEgressJobTests
         // ARRANGE
         var jobId = new EgressJobId(1);
         var destinationPeerId = new NetworkPeerId(1);
-        var payloadBytes = new NetworkPayloadBytes(new byte[] { 1, 2, 3 });
+        var payloadBytes = NetworkPayloadBytes.FromBytesOwned(new byte[] { 1, 2, 3 });
         var fixedTime = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero);
         
         var job = new NetworkEgressJob(
@@ -117,7 +117,7 @@ public class NetworkEgressJobTests
         // ARRANGE
         var jobId = new EgressJobId(1);
         var destinationPeerId = new NetworkPeerId(1);
-        var payloadBytes = new NetworkPayloadBytes(new byte[] { 1, 2, 3 });
+        var payloadBytes = NetworkPayloadBytes.FromBytesOwned(new byte[] { 1, 2, 3 });
         var fixedTime = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero);
         
         var job = new NetworkEgressJob(
@@ -146,7 +146,7 @@ public class NetworkEgressJobTests
         // ARRANGE
         var jobId = new EgressJobId(1);
         var destinationPeerId = new NetworkPeerId(1);
-        var payloadBytes = new NetworkPayloadBytes(new byte[] { 1, 2, 3 });
+        var payloadBytes = NetworkPayloadBytes.FromBytesOwned(new byte[] { 1, 2, 3 });
         var fixedTime = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero);
         
         var job = new NetworkEgressJob(
