@@ -167,55 +167,114 @@ You are to implement all `.proto` contract updates required for the new Relay ar
 **1. Service Refactoring (`messaging.proto` & `internal_messaging.proto`)**
 *   **Action:** Delete `FetchQueuedMessagesRequest`, `FetchQueuedMessagesResponse`, and `RelayOpaqueEnvelope` from `internal_messaging.proto`.
 *   **Action:** Delete the obsolete `rpc FetchQueuedMessages` from `InternalMessagingService` in `internal_messaging.proto`.
-*   **Action:** Rename the existing `RelayGroupService` to `RelayService` in `messaging.proto`. This service will now handle *all* Relay operations (both 1:1 and Group) to create a unified transport boundary.
-*   **Action:** Remove the obsolete `rpc StreamGroupMessages` and `rpc Publish` from `RelayService`.
+*   **Action:** Ensure `RelayService` acts as the unified transport boundary. Remove any old endpoints like `StreamGroupMessages`, `Publish`, `ProvisionGroup`, or `ModifyGroup`.
+*   **Action:** Delete `SubmitGroupMessageRequest`, `SubmitGroupMessageResponse`, `ProvisionGroupRequest`, `ModifyGroupRequest`, and `GroupProvisioningRequestedDomainEvent` representations if they exist.
 
-**2. Group Egress & Relay Operations (`messaging.proto`)**
-*   **Action:** Delete `SubmitGroupMessageRequest` and `SubmitGroupMessageResponse`.
-*   **Action:** Add the following definitions:
+**2. Group Egress & Relay API Contracts (`messaging.proto`)**
+*   **Action:** Add the `AnonymousGroupService` containing a single unary endpoint for all operations:
     ```protobuf
-    message GetGroupStateRequest {
-        optional bytes conversation_id = 1;
-        optional bytes presentation = 2;
+    service AnonymousGroupService {
+        rpc ProcessAnonymousGroupRequest(AnonymousGroupRequest) returns (ProcessAnonymousGroupResponse);
+        rpc GetGroupState(GetGroupStateRequest) returns (GetGroupStateResponse);
     }
-
-    message GetGroupStateResponse {
-        optional uint32 current_epoch = 1;
-        optional bytes public_params = 2;
-        optional bytes encrypted_profile = 3;
-    }
-
-    // Required by Chunk 1 / Chunk 2 for semantic group metadata encryption
-    message GroupProfilePlaintext {
-        optional string group_name = 1;
-        optional string group_description = 2;
-        optional bytes avatar_id = 3;
-        repeated PeerRoleUpdate roles = 4;
-    }
-
-    message PeerRoleUpdate {
-        optional bytes public_identity_id = 1;
-        optional uint32 role_enum = 2; // 0 = Standard, 1 = Admin
+    ```
+*   **Action:** Define the exact `AnonymousGroupRequest` message representing the blind transient fanout:
+    ```protobuf
+    message AnonymousGroupRequest {
+        bytes conversation_id = 1;
+        bytes presentation_proof = 2; // KVAC ZK Proof
+        repeated bytes target_public_identity_ids = 3; // Transient Fanout list
+        optional bytes ciphertext = 4; // Inner encrypted group message
+        
+        // Exclusively for State Mutations (Add/Kick/Rename)
+        optional bytes new_encrypted_entries_blob = 5;
+        optional uint32 new_epoch = 6;
     }
 
     message ProcessAnonymousGroupResponse { 
-        optional bool success = 1; 
+        bool success = 1; 
     }
     ```
-*   **Action:** Ensure `AnonymousGroupRequest` handles `FanoutMessagePayload`, `update_encrypted_profile`, and `ModifyMembershipPayload` as an opaque `oneof group_operation`.
-*   **Action:** Ensure `ModifyMembershipPayload` uses `repeated bytes routing_tokens = 2;` as defined in `session-flow.md`.
-*   **Action:** Update `ProvisionGroupRequest` to include `bytes encrypted_profile = 4;`.
-*   **Action:** Add `rpc GetGroupState(GetGroupStateRequest) returns (GetGroupStateResponse);` to `RelayService`.
-*   **Action:** Add `rpc ProcessAnonymousGroupRequest(AnonymousGroupRequest) returns (ProcessAnonymousGroupResponse);` to `RelayService`.
+*   **Action:** Define `GetGroupState` messages for the ZK Anchor sync:
+    ```protobuf
+    message GetGroupStateRequest {
+        bytes conversation_id = 1;
+    }
 
-**3. Ingress / Stream Operations (`messaging.proto`)**
-*   **Action:** Define the new Bidirectional Stream contract. It does **not** include outbound messages.
+    message GetGroupStateResponse {
+        uint32 current_epoch = 1;
+        bytes encrypted_entries_blob = 2;
+    }
+    ```
+
+**3. Relay Ingress Delivery (`messaging.proto`)**
+*   **Action:** Define `GroupMessageEnvelope` flowing from the Relay back to the peers over the authenticated stream:
+    ```protobuf
+    message GroupMessageEnvelope {
+        bytes conversation_id = 1;
+        uint32 sender_key_id = 2; 
+        bytes ciphertext = 3;
+    }
+    ```
+
+**4. Peer-to-Peer Payloads (`internal_messaging.proto`)**
+*   **Action:** Define `GroupInitializationMessage` (sent over 1:1 sessions). This delivers the cryptographic primitives to new members:
+    ```protobuf
+    message GroupInitializationMessage {
+        bytes conversation_id = 1;
+        uint32 epoch = 2;
+        bytes group_master_key = 3;
+        bytes member_credential_mac = 4; // Replaces old "group_public_params"
+        
+        // --- Percolator-specific Relay Topology ---
+        bytes relay_public_identity_id = 7;
+        string relay_host = 8;
+        int32 relay_port = 9;
+    }
+    ```
+*   **Action:** Define `SenderKeyDistributionMessage` for ratchet key sharing:
+    ```protobuf
+    message SenderKeyDistributionMessage {
+        bytes conversation_id = 1;
+        uint32 sender_key_id = 2;
+        bytes chain_key = 3;
+        bytes signature_public_key = 4;
+    }
+    ```
+*   **Action:** Define `SenderKeyRequest` for recovery:
+    ```protobuf
+    message SenderKeyRequest {
+        bytes conversation_id = 1;
+        uint32 sender_key_id = 2;
+    }
+    ```
+*   **Action:** Define `GroupUpdatePayload` (encrypted payload representing semantic chat updates):
+    ```protobuf
+    message GroupUpdatePayload {
+      optional string new_group_name = 1;
+      optional bytes new_avatar_id = 2;
+      repeated PeerRoleUpdate role_updates = 3;
+      repeated bytes added_public_identity_ids = 4;
+      repeated bytes removed_public_identity_ids = 5;
+    }
+
+    message PeerRoleUpdate {
+      bytes public_identity_id = 1;
+      uint32 role_enum = 2;
+    }
+    ```
+
+**5. Contract Generation Rules**
+*   Ensure the C# Protobuf generated code uses the appropriate `Google.Protobuf` attributes. Do not implement any application services, queries, or handler logic in this chunk. Just compile the `.proto` files successfully.
+
+**6. Ingress / Stream Operations (`messaging.proto`)**
+*   **Action:** Define the new Bidirectional Stream contract. This handles standard 1:1 and the new Group V2 envelopes.
     ```protobuf
     rpc ConnectRelay(stream ClientRelayStream) returns (stream ServerRelayStream);
 
     message ClientRelayStream {
         oneof payload {
-            MessageAck message_ack = 1;  // Acknowledges an ingress 1:1 message
+            MessageAck message_ack = 1;  // Acknowledges an ingress 1:1 or group message
         }
     }
 
@@ -225,16 +284,9 @@ You are to implement all `.proto` contract updates required for the new Relay ar
 
     message ServerRelayStream {
         oneof payload {
-            GroupMessageDelivery group_delivery = 1;
-            OpaqueMessageDelivery opaque_delivery = 2; // For 1:1 queued messages
+            OpaqueMessageDelivery opaque_delivery = 1; // For 1:1 queued messages
+            GroupMessageEnvelope group_message = 2; // For transient fan-out
         }
-    }
-
-    message GroupMessageDelivery {
-        optional bytes conversation_id = 1;
-        optional uint32 epoch = 2;
-        optional bytes ciphertext = 3;
-        optional bytes sender_presentation = 4;
     }
 
     message OpaqueMessageDelivery {
@@ -243,8 +295,8 @@ You are to implement all `.proto` contract updates required for the new Relay ar
     }
     ```
 
-**4. 1:1 Opaque Egress (`messaging.proto`)**
-*   **Action:** Update `EnqueueOpaqueMessageRequest` to ensure it represents the new unified opaque drop-off, replacing `target_public_identity_id` with `destination_routing_token` to maintain blind routing:
+**7. 1:1 Opaque Egress (`messaging.proto`)**
+*   **Action:** Ensure `EnqueueOpaqueMessageRequest` represents the unified opaque drop-off for standard messages:
     ```protobuf
     rpc EnqueueOpaqueMessage(EnqueueOpaqueMessageRequest) returns (EnqueueOpaqueMessageResponse);
 
