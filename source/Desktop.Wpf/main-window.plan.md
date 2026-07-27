@@ -3,9 +3,6 @@
 
 1. **File Locations & Namespaces:**
    - Persistence (DBOs): `Percolator.Infrastructure/Chat/Persistence`
-   - Commands/Handlers: `Percolator.Application/Apps/Chat`
-   - Interfaces/Queries (Contracts): `Percolator.Application/Chat`
-   - Query Implementations: `Percolator.Infrastructure/Chat`
 2. **EF Migrations:** To generate migrations, use PowerShell and run: `dotnet ef migrations add <MigrationName> --project source\Percolator.Infrastructure --startup-project source\Percolator.Node`
 3. **WPF UI Targets:**
    - Group Action Menu (above chat): Modify `Desktop.Wpf/Features/Chat/ChatView.xaml`.
@@ -18,9 +15,12 @@
    - `FromBytes(byte[])` - safe copy, use when the array is not owned by the called code or could be mutated elsewhere (e.g., EF Core entities, protobuf messages)
    - `FromSpan(ReadOnlySpan<byte>)` - useful for copying one ByteArray type to another
 6. **PeerId:**
-   - PeerId is a GUID
+   - PeerId is a uint auto-incrementing identifier that refers to a remote identity
    - PeerId is a local only identifier, it must NEVER be sent over the wire
-7. **No Shims or Temporary Code:** Do not implement shims or temporary code that does not exist in the plan. Do not write methods that throw `new NotImplementedException` - instead stop and ask the user what should be done. Each chunk must implement zero guesses.
+   - SelfId is a uint auto-incrementing identifier that refers to an identity local to the current application.
+   - SelfId is a local only identifier, it must NEVER be sent over the wire
+   - PublicIdentityId is a guid which uniquely identifies **either** a selfId or a peerId this may be sent over the wire
+7. **No Shims or Temporary Code:** Do not implement shims or temporary code that does not exist in the plan. Do not write methods that throw `new NotImplementedException` - instead stop and ask the user what should be done. Each chunk must implement zero guesses. Do not write todo comments - instead stop and ask the user how to proceed.
 8. **Remove Dead Code:** Do not simply deprecate unused code. Fully delete code, methods, and classes that are no longer used or have been obsoleted by architectural changes.
 9. **Time Representation Rule:** 
    - Domain and Application layers must strictly use `DateTimeOffset`.
