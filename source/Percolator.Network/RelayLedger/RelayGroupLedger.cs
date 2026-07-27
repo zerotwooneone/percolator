@@ -3,38 +3,47 @@ using Percolator.Network.ValueObjects;
 namespace Percolator.Network.RelayLedger;
 
 /// <summary>
-/// Server-side authoritative ledger for a Relay group.
-/// Enforces epoch concurrency and stores encrypted group profile.
+/// Server-side authoritative ledger for a Relay group using ZK anchor.
+/// Enforces epoch concurrency and stores encrypted entries blob.
 /// </summary>
 public sealed class RelayGroupLedger
 {
     public RelayGroupId Id { get; }
     public RelayGroupEpoch CurrentEpoch { get; private set; }
-    public RelayGroupPublicParamsBytes PublicParams { get; private set; }
-    public RelayProfileBytes EncryptedProfile { get; private set; }
+    public EncryptedEntriesBlobBytes EncryptedEntriesBlob { get; private set; }
     public int ConcurrencyVersion { get; private set; }
 
-    public RelayGroupLedger(
+    private RelayGroupLedger(
         RelayGroupId id,
         RelayGroupEpoch currentEpoch,
-        RelayGroupPublicParamsBytes publicParams,
-        RelayProfileBytes encryptedProfile,
+        EncryptedEntriesBlobBytes encryptedEntriesBlob,
         int concurrencyVersion)
     {
         Id = id;
         CurrentEpoch = currentEpoch;
-        PublicParams = publicParams;
-        EncryptedProfile = encryptedProfile;
+        EncryptedEntriesBlob = encryptedEntriesBlob;
         ConcurrencyVersion = concurrencyVersion;
     }
 
     /// <summary>
-    /// Applies a structural mutation to the group ledger.
+    /// Creates a new RelayGroupLedger with the initial state.
+    /// </summary>
+    public static RelayGroupLedger CreateNew(RelayGroupId id, EncryptedEntriesBlobBytes initialBlob)
+    {
+        return new RelayGroupLedger(
+            id,
+            new RelayGroupEpoch(0),
+            initialBlob,
+            0);
+    }
+
+    /// <summary>
+    /// Overwrites the state with a new encrypted entries blob, validating the epoch.
     /// </summary>
     /// <param name="baseEpoch">The expected current epoch before mutation.</param>
-    /// <param name="newProfile">The new encrypted profile after mutation.</param>
+    /// <param name="newBlob">The new encrypted entries blob.</param>
     /// <exception cref="InvalidOperationException">Thrown when baseEpoch does not match CurrentEpoch.</exception>
-    public void ApplyMutation(RelayGroupEpoch baseEpoch, RelayProfileBytes newProfile)
+    public void OverwriteState(RelayGroupEpoch baseEpoch, EncryptedEntriesBlobBytes newBlob)
     {
         if (baseEpoch.Value != CurrentEpoch.Value)
         {
@@ -42,7 +51,7 @@ public sealed class RelayGroupLedger
         }
 
         CurrentEpoch = new RelayGroupEpoch(CurrentEpoch.Value + 1);
-        EncryptedProfile = newProfile;
+        EncryptedEntriesBlob = newBlob;
         ConcurrencyVersion++;
     }
 }

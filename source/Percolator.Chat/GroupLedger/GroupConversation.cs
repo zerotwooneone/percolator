@@ -5,8 +5,9 @@ using Percolator.Chat.ValueObjects;
 namespace Percolator.Chat.GroupLedger;
 
 /// <summary>
-/// Represents a group conversation with variable membership, roles, and cryptographic state.
+/// Represents a group conversation with variable membership, roles, and semantic state.
 /// Enforces admin invariants and epoch-based mutation tracking.
+/// Cryptographic primitives like GroupMasterKey and AuthCredentialMac belong in the Cryptography domain.
 /// </summary>
 public sealed class GroupConversation
 {
@@ -14,30 +15,21 @@ public sealed class GroupConversation
 
     public ConversationId Id { get; }
     public GroupName Name { get; private set; }
-    public GroupMasterKeyBytes MasterKey { get; }
-    public RelayGroupPublicParamsBytes PublicParams { get; }
     public GroupEpoch CurrentEpoch { get; private set; }
     public GroupAvatarId AvatarId { get; private set; }
-    public ChatPeerId RelayPeerId { get; }
     public IReadOnlyCollection<GroupMember> Members => _members.AsReadOnly();
 
     private GroupConversation(
         ConversationId id,
         GroupName name,
-        GroupMasterKeyBytes masterKey,
-        RelayGroupPublicParamsBytes publicParams,
         GroupEpoch currentEpoch,
         GroupAvatarId avatarId,
-        ChatPeerId relayPeerId,
         IEnumerable<GroupMember> members)
     {
         Id = id;
         Name = name;
-        MasterKey = masterKey;
-        PublicParams = publicParams;
         CurrentEpoch = currentEpoch;
         AvatarId = avatarId;
-        RelayPeerId = relayPeerId;
         _members.AddRange(members);
     }
 
@@ -48,10 +40,7 @@ public sealed class GroupConversation
         ConversationId id,
         GroupName name,
         ParticipantId creatorParticipantId,
-        GroupMasterKeyBytes masterKey,
-        RelayGroupPublicParamsBytes publicParams,
-        GroupAvatarId avatarId,
-        ChatPeerId relayPeerId)
+        GroupAvatarId avatarId)
     {
         var creatorMember = new GroupMember(
             id,
@@ -62,11 +51,8 @@ public sealed class GroupConversation
         return new GroupConversation(
             id,
             name,
-            masterKey,
             new GroupEpoch(1),
-            publicParams,
             avatarId,
-            relayPeerId,
             new[] { creatorMember });
     }
 
@@ -182,7 +168,7 @@ public sealed class GroupConversation
     /// <summary>
     /// Changes a member's role. Only admins can perform this action.
     /// </summary>
-    public void ChangeMemberRole(ParticipantId actorParticipantId, ParticipantId targetParticipantId, GroupRole newRole)
+    public void ChangeMemberRole(ParticipantId actorParticipantId, ParticipantId targetParticipantId, GroupMemberRole newRole)
     {
         var actor = _members.FirstOrDefault(m => m.ParticipantId.PublicIdentityId == actorParticipantId.PublicIdentityId && m.RemovedAtUtc == null);
         if (actor == null || actor.Role != GroupMemberRole.Admin)
@@ -196,7 +182,7 @@ public sealed class GroupConversation
             throw new UnauthorizedDomainException("Target member not found in group.");
         }
 
-        if (newRole == GroupRole.Standard && target.Role == GroupMemberRole.Admin)
+        if (newRole == GroupMemberRole.Member && target.Role == GroupMemberRole.Admin)
         {
             var remainingAdmins = _members.Count(m => m.Role == GroupMemberRole.Admin && m.RemovedAtUtc == null);
             if (remainingAdmins <= 1)
@@ -205,7 +191,7 @@ public sealed class GroupConversation
             }
         }
 
-        target.ChangeRole(newRole == GroupRole.Admin ? GroupMemberRole.Admin : GroupMemberRole.Member);
+        target.ChangeRole(newRole);
         CurrentEpoch = new GroupEpoch(CurrentEpoch.Value + 1);
     }
 }
