@@ -42,7 +42,8 @@ public class PercolatorDbContext : DbContext
     public DbSet<PeerRoutingProfileDbo> PeerRoutingProfiles { get; set; } = null!;
     public DbSet<GrpcEndPointRoutingDbo> PeerRoutingGrpcEndPoints { get; set; } = null!;
     public DbSet<DomainEventOutboxDbo> DomainEventOutbox { get; set; } = null!;
-    public DbSet<NetworkEgressJobDbo> NetworkEgressJobs { get; set; } = null!;
+    public DbSet<AnonymousRelayEgressJobDbo> AnonymousRelayEgressJobs { get; set; } = null!;
+    public DbSet<AuthenticatedPeerEgressJobDbo> AuthenticatedPeerEgressJobs { get; set; } = null!;
     public DbSet<RelayLinkDbo> PeerRoutingRelays { get; set; } = null!;
     public DbSet<PeerRouteCandidateDbo> PeerRouteCandidates { get; set; } = null!;
     public DbSet<DiscoveredPeerDbo> DiscoveredPeers { get; set; } = null!;
@@ -52,8 +53,8 @@ public class PercolatorDbContext : DbContext
     public DbSet<Percolator.Infrastructure.Chat.Persistence.GroupStateDbo> GroupStates { get; set; } = null!;
     public DbSet<Percolator.Infrastructure.Chat.Persistence.PendingGroupInvitationDbo> PendingGroupInvitations { get; set; } = null!;
     public DbSet<Percolator.Infrastructure.Chat.Persistence.SenderKeyRecordDbo> SenderKeyRecords { get; set; } = null!;
-    public DbSet<RelayGroupStateDbo> RelayGroupStates { get; set; } = null!;
-    public DbSet<RelayBlindedRosterDbo> RelayBlindedRosters { get; set; } = null!;
+    public DbSet<Percolator.Infrastructure.Network.RelayLedger.RelayGroupStateDbo> RelayGroupStates { get; set; } = null!;
+    public DbSet<Percolator.Infrastructure.Network.RelayLedger.RelayBlindedRosterDbo> RelayBlindedRosters { get; set; } = null!;
     public DbSet<Percolator.Infrastructure.Chat.Persistence.DeliveryCertificateDbo> DeliveryCertificates { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -318,11 +319,21 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.ConversationId)
                 .IsRequired();
             entity.Property(e => e.GroupMasterKeyBytes).IsRequired();
-            entity.Property(e => e.CreatedAtUtc).IsRequired();
-            entity.Property(e => e.UpdatedAtUtc).IsRequired();
-            entity.HasOne<ConversationDbo>()
-                .WithMany()
-                .HasForeignKey(e => e.ConversationId)
+            entity.Property(e => e.CreatedAtUtc)
+                .IsRequired()
+                .HasConversion(
+                    v => v.ToUnixTimeMilliseconds(),
+                    v => DateTimeOffset.FromUnixTimeMilliseconds(v));
+            entity.Property(e => e.UpdatedAtUtc)
+                .IsRequired()
+                .HasConversion(
+                    v => v.ToUnixTimeMilliseconds(),
+                    v => DateTimeOffset.FromUnixTimeMilliseconds(v));
+
+            // 1:1 required relationship with GroupStateDbo
+            entity.HasOne<Percolator.Infrastructure.Chat.Persistence.GroupStateDbo>()
+                .WithOne()
+                .HasForeignKey<GroupCryptoStateDbo>(e => e.ConversationId)
                 .OnDelete(DeleteBehavior.Cascade)
                 .IsRequired();
         });
@@ -340,8 +351,16 @@ public class PercolatorDbContext : DbContext
                 .IsRequired(false);
             entity.Property(e => e.SelfId).IsRequired(false);
             entity.Property(e => e.Role).IsRequired();
-            entity.Property(e => e.JoinedAtUtc).IsRequired();
-            entity.Property(e => e.RemovedAtUtc).IsRequired(false);
+            entity.Property(e => e.JoinedAtUtc)
+                .IsRequired()
+                .HasConversion(
+                    v => v.ToUnixTimeMilliseconds(),
+                    v => DateTimeOffset.FromUnixTimeMilliseconds(v));
+            entity.Property(e => e.RemovedAtUtc)
+                .IsRequired(false)
+                .HasConversion(
+                    v => v.HasValue ? v.Value.ToUnixTimeMilliseconds() : (long?)null,
+                    v => v.HasValue ? DateTimeOffset.FromUnixTimeMilliseconds(v.Value) : (DateTimeOffset?)null);
             entity.HasIndex(e => e.ConversationId);
             entity.HasOne<ConversationDbo>()
                 .WithMany()
@@ -366,8 +385,16 @@ public class PercolatorDbContext : DbContext
                     v => v.ToArray(),
                     v => Percolator.Chat.GroupLedger.RelayGroupPublicParamsBytes.FromBytesOwned(v)))
                 .IsRequired();
-            entity.Property(e => e.CreatedAtUtc).IsRequired();
-            entity.Property(e => e.UpdatedAtUtc).IsRequired();
+            entity.Property(e => e.CreatedAtUtc)
+                .IsRequired()
+                .HasConversion(
+                    v => v.ToUnixTimeMilliseconds(),
+                    v => DateTimeOffset.FromUnixTimeMilliseconds(v));
+            entity.Property(e => e.UpdatedAtUtc)
+                .IsRequired()
+                .HasConversion(
+                    v => v.ToUnixTimeMilliseconds(),
+                    v => DateTimeOffset.FromUnixTimeMilliseconds(v));
             entity.HasOne<ConversationDbo>()
                 .WithMany()
                 .HasForeignKey(e => e.ConversationId)
@@ -386,7 +413,11 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.CreatorIdentityKey).IsRequired();
             entity.Property(e => e.InitialMembersJson).IsRequired();
             entity.Property(e => e.GroupName).IsRequired(false);
-            entity.Property(e => e.ReceivedAtUtc).IsRequired();
+            entity.Property(e => e.ReceivedAtUtc)
+                .IsRequired()
+                .HasConversion(
+                    v => v.ToUnixTimeMilliseconds(),
+                    v => DateTimeOffset.FromUnixTimeMilliseconds(v));
             entity.Property(e => e.Status).IsRequired();
             entity.HasIndex(e => e.ConversationId);
         });
@@ -695,7 +726,7 @@ public class PercolatorDbContext : DbContext
         });
 
         // RelayGroupStates (Relay Ledger state for group messaging)
-        modelBuilder.Entity<RelayGroupStateDbo>(entity =>
+        modelBuilder.Entity<Percolator.Infrastructure.Network.RelayLedger.RelayGroupStateDbo>(entity =>
         {
             entity.ToTable("RelayGroupStates");
             entity.HasKey(e => e.ConversationId);
@@ -703,19 +734,20 @@ public class PercolatorDbContext : DbContext
         });
 
         // RelayBlindedRosters (Blinded membership roster for relay fan-out)
-        modelBuilder.Entity<RelayBlindedRosterDbo>(entity =>
+        modelBuilder.Entity<Percolator.Infrastructure.Network.RelayLedger.RelayBlindedRosterDbo>(entity =>
         {
             entity.ToTable("RelayBlindedRosters");
-            entity.HasKey(e => new { e.ConversationId, e.MemberPeerId });
+            entity.HasKey(e => new { e.ConversationId, e.RoutingToken });
             entity.Property(e => e.ConversationId)
                 .IsRequired();
-            entity.Property(e => e.MemberPeerId)
+            entity.Property(e => e.RoutingToken)
                 .IsRequired();
-            entity.HasOne<PeerIdentityDbo>()
-                .WithMany()
-                .HasForeignKey(e => e.MemberPeerId)
-                .OnDelete(DeleteBehavior.Restrict)
-                .IsRequired();
+            entity.Property(e => e.AddedAtUtc)
+                .IsRequired()
+                .HasConversion(
+                    v => v.ToUnixTimeMilliseconds(),
+                    v => DateTimeOffset.FromUnixTimeMilliseconds(v));
+            // No foreign key relationships to identity tables - Relay remains blinded
         });
 
         // DomainEventOutbox (Outbox pattern for domain event processing)
@@ -731,18 +763,42 @@ public class PercolatorDbContext : DbContext
             entity.HasIndex(e => e.ProcessedAtUtc);
         });
 
-        // NetworkEgressJobs (Network egress queue for anonymous/authenticated message dispatch)
-        modelBuilder.Entity<NetworkEgressJobDbo>(entity =>
+        // AnonymousRelayEgressJobs (Network egress for anonymous Relay messages)
+        modelBuilder.Entity<AnonymousRelayEgressJobDbo>(entity =>
         {
-            entity.ToTable("NetworkEgressJobs");
+            entity.ToTable("AnonymousRelayEgressJobs");
+            entity.HasKey(e => e.JobId);
+            entity.Property(e => e.JobId).ValueGeneratedOnAdd();
+            entity.Property(e => e.RelayPeerId).IsRequired();
+            entity.Property(e => e.PayloadBytes).IsRequired();
+            entity.Property(e => e.AttemptCount).IsRequired();
+            entity.Property(e => e.NextAttemptUtc)
+                .IsRequired()
+                .HasConversion(
+                    v => v.ToUnixTimeMilliseconds(),
+                    v => DateTimeOffset.FromUnixTimeMilliseconds(v));
+            entity.Property(e => e.IsSent).IsRequired();
+            entity.Property(e => e.IsPermanentlyFailed).IsRequired();
+            entity.HasIndex(e => e.NextAttemptUtc);
+            entity.HasIndex(e => e.IsSent);
+            entity.HasIndex(e => e.IsPermanentlyFailed);
+        });
+
+        // AuthenticatedPeerEgressJobs (Network egress for authenticated peer messages)
+        modelBuilder.Entity<AuthenticatedPeerEgressJobDbo>(entity =>
+        {
+            entity.ToTable("AuthenticatedPeerEgressJobs");
             entity.HasKey(e => e.JobId);
             entity.Property(e => e.JobId).ValueGeneratedOnAdd();
             entity.Property(e => e.DestinationPeerId).IsRequired();
             entity.Property(e => e.RoutePreference).IsRequired();
-            entity.Property(e => e.PayloadType).IsRequired();
             entity.Property(e => e.PayloadBytes).IsRequired();
             entity.Property(e => e.AttemptCount).IsRequired();
-            entity.Property(e => e.NextAttemptUtc).IsRequired();
+            entity.Property(e => e.NextAttemptUtc)
+                .IsRequired()
+                .HasConversion(
+                    v => v.ToUnixTimeMilliseconds(),
+                    v => DateTimeOffset.FromUnixTimeMilliseconds(v));
             entity.Property(e => e.IsSent).IsRequired();
             entity.Property(e => e.IsPermanentlyFailed).IsRequired();
             entity.HasIndex(e => e.NextAttemptUtc);
@@ -756,28 +812,32 @@ public class PercolatorDbContext : DbContext
             entity.ToTable("DeliveryCertificates");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).ValueGeneratedOnAdd();
-            
+
             // Unique index on (SelfId, RelayPeerId) to enforce one cert per self/relay pair
             entity.HasIndex(e => new { e.SelfId, e.RelayPeerId }).IsUnique();
-            
+
             // Value converters for DDD types
             entity.Property(e => e.SelfId)
                 .IsRequired();
-                    
+
             entity.Property(e => e.RelayPeerId)
                 .IsRequired();
-                    
+
             entity.Property(e => e.Payload)
                 .HasConversion(
                     v => v.ToArray(),
                     v => Percolator.Chat.GroupLedger.DeliveryCertificatePayloadBytes.FromBytes(v));
-                    
+
             entity.Property(e => e.Signature)
                 .HasConversion(
                     v => v.ToArray(),
                     v => Percolator.Chat.GroupLedger.SignatureBytes.FromBytes(v));
-                    
-            entity.Property(e => e.ExpiresAtUtc).IsRequired();
+
+            entity.Property(e => e.ExpiresAtUtc)
+                .IsRequired()
+                .HasConversion(
+                    v => v.ToUnixTimeMilliseconds(),
+                    v => DateTimeOffset.FromUnixTimeMilliseconds(v));
         });
     }
 }

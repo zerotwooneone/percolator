@@ -16,7 +16,7 @@ public class GroupStateDbo
     /// <summary>
     /// The current epoch (monotonic counter for key rotation).
     /// </summary>
-    public int Epoch { get; set; }
+    public uint Epoch { get; set; }
 
     /// <summary>
     /// The group name (plaintext, protected by database encryption).
@@ -32,6 +32,16 @@ public class GroupStateDbo
     /// The local peer ID of the relay for this group.
     /// </summary>
     public uint RelayPeerId { get; set; }
+
+    /// <summary>
+    /// The group avatar identifier (nullable).
+    /// </summary>
+    public byte[]? AvatarId { get; set; }
+
+    /// <summary>
+    /// The group description for extensibility (nullable).
+    /// </summary>
+    public string? Description { get; set; }
 
     /// <summary>
     /// UTC timestamp when the group was created.

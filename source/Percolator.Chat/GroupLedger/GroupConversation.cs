@@ -15,23 +15,29 @@ public sealed class GroupConversation
     public ConversationId Id { get; }
     public GroupName Name { get; private set; }
     public GroupMasterKeyBytes MasterKey { get; }
+    public RelayGroupPublicParamsBytes PublicParams { get; }
     public GroupEpoch CurrentEpoch { get; private set; }
     public GroupAvatarId AvatarId { get; private set; }
+    public ChatPeerId RelayPeerId { get; }
     public IReadOnlyCollection<GroupMember> Members => _members.AsReadOnly();
 
     private GroupConversation(
         ConversationId id,
         GroupName name,
         GroupMasterKeyBytes masterKey,
+        RelayGroupPublicParamsBytes publicParams,
         GroupEpoch currentEpoch,
         GroupAvatarId avatarId,
+        ChatPeerId relayPeerId,
         IEnumerable<GroupMember> members)
     {
         Id = id;
         Name = name;
         MasterKey = masterKey;
+        PublicParams = publicParams;
         CurrentEpoch = currentEpoch;
         AvatarId = avatarId;
+        RelayPeerId = relayPeerId;
         _members.AddRange(members);
     }
 
@@ -43,7 +49,9 @@ public sealed class GroupConversation
         GroupName name,
         ParticipantId creatorParticipantId,
         GroupMasterKeyBytes masterKey,
-        GroupAvatarId avatarId)
+        RelayGroupPublicParamsBytes publicParams,
+        GroupAvatarId avatarId,
+        ChatPeerId relayPeerId)
     {
         var creatorMember = new GroupMember(
             id,
@@ -56,7 +64,9 @@ public sealed class GroupConversation
             name,
             masterKey,
             new GroupEpoch(1),
+            publicParams,
             avatarId,
+            relayPeerId,
             new[] { creatorMember });
     }
 
