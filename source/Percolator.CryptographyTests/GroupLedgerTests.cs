@@ -1,3 +1,4 @@
+using Percolator.Cryptography;
 using Percolator.Cryptography.GroupLedger;
 
 namespace Percolator.CryptographyTests;
@@ -9,7 +10,7 @@ public class GroupLedgerTests
     public void GroupCredentials_CanBeInstantiated()
     {
         // Arrange
-        var groupId = new GroupId(Guid.NewGuid());
+        var groupId = GroupId.FromBytesOwned(new byte[32]);
         var masterKey = GroupMasterKey.FromBytesOwned(new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32 });
         var authCredentialMac = AuthCredentialMacBytes.FromBytesOwned(new byte[] { 1, 2, 3 });
 
@@ -26,10 +27,10 @@ public class GroupLedgerTests
     public void SenderKeyRatchet_CanBeInstantiated()
     {
         // Arrange
-        var groupId = new GroupId(Guid.NewGuid());
+        var groupId = GroupId.FromBytesOwned(new byte[32]);
         var authorId = new CryptoPublicIdentityId(Guid.NewGuid());
         var keyId = 1u;
-        var chainKey = ChainKey.FromBytesOwned(new byte[] { 1, 2, 3 });
+        var chainKey = ChainKey.FromBytesOwned(new byte[32]);
         var signatureKey = SignaturePublicKey.FromBytesOwned(new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32 });
 
         // Act
@@ -47,7 +48,7 @@ public class GroupLedgerTests
     public void UnknownMessageCache_CanBeInstantiated()
     {
         // Arrange
-        var groupId = new GroupId(Guid.NewGuid());
+        var groupId = GroupId.FromBytesOwned(new byte[32]);
         var missingKeyId = 1u;
         var ciphertext = Ciphertext.FromBytesOwned(new byte[] { 1, 2, 3 });
         var receivedAtUtc = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero);
@@ -67,7 +68,7 @@ public class GroupLedgerTests
     public void SkippedMessageKey_CanBeInstantiated()
     {
         // Arrange
-        var groupId = new GroupId(Guid.NewGuid());
+        var groupId = GroupId.FromBytesOwned(new byte[32]);
         var keyId = 1u;
         var messageIndex = 5;
         var messageKey = new byte[] { 1, 2, 3 };
@@ -86,7 +87,7 @@ public class GroupLedgerTests
     public void UnknownMessageCache_WhenCapacityNotExceeded_DoesNotEvict()
     {
         // Arrange
-        var groupId = new GroupId(Guid.NewGuid());
+        var groupId = GroupId.FromBytesOwned(new byte[32]);
         var missingKeyId = 1u;
         var ciphertext = Ciphertext.FromBytesOwned(new byte[] { 1, 2, 3 });
         var receivedAtUtc = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero);
@@ -104,7 +105,7 @@ public class GroupLedgerTests
     public void UnknownMessageCache_WhenCapacityExceededAndIsOldest_Evicts()
     {
         // Arrange
-        var groupId = new GroupId(Guid.NewGuid());
+        var groupId = GroupId.FromBytesOwned(new byte[32]);
         var missingKeyId = 1u;
         var ciphertext = Ciphertext.FromBytesOwned(new byte[] { 1, 2, 3 });
         var receivedAtUtc = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero);
@@ -122,7 +123,7 @@ public class GroupLedgerTests
     public void UnknownMessageCache_WhenCapacityExceededAndNotOldest_DoesNotEvict()
     {
         // Arrange
-        var groupId = new GroupId(Guid.NewGuid());
+        var groupId = GroupId.FromBytesOwned(new byte[32]);
         var missingKeyId = 1u;
         var ciphertext = Ciphertext.FromBytesOwned(new byte[] { 1, 2, 3 });
         var receivedAtUtc = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero);
