@@ -38,7 +38,7 @@ The goal of this plan is to implement group chat for Percolator. Key requirement
 * **Group Hosting:** The main window can use a given relay (including itself) to host a new group chat.
 * **Group Membership: The main window can receive and optionally accept/reject group invitations. The main window can send/receive group chat messages once joined.
 * **Simulator Support:** The simulator must be updated to serve as both a peer and a relay in group chats.
-* **Unauthenticated RPCs:** Some RPC methods must be unauthenticated by design, such as posting a message to a group chat using an HMAC Delivery Ticket (and later, initial x3dh handshake messages which are outside the scope of this plan).
+* **Unauthenticated RPCs:** Some RPC methods must be unauthenticated by design, such as posting a message to a group chat using an Delivery Ticket (and later, initial x3dh handshake messages which are outside the scope of this plan).
 * **Authenticated RPCs:** Other RPC methods are authenticated, where every message has an associated peerId that the endpoint can look up based on provided information (the peerId is not sent in the message itself).
 * **Relay Outbox:** Relays require an outbox to fan-out messages to group members.
 * **Signal Protocol Logic:** All group logic strictly follows the Signal Protocol Group V2 flows as specified in `session-flow.md`.
