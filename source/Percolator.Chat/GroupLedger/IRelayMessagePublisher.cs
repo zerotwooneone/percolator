@@ -5,5 +5,5 @@ namespace Percolator.Chat.GroupLedger;
 
 public interface IRelayMessagePublisher
 {
-    Task PublishAtomicAsync(RelayGroupLedger ledger, IReadOnlyList<ChatPeerId> recipients, QueuedPayloadBytes payload, CancellationToken cancellationToken);
+    Task PublishAtomicAsync(ConversationId conversationId, IReadOnlyList<ChatPeerId> recipients, QueuedPayloadBytes payload, CancellationToken cancellationToken);
 }

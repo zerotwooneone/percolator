@@ -1,23 +1,25 @@
 namespace Percolator.Chat.GroupLedger;
 
+using Percolator.Chat.Messaging.ValueObjects;
+
 /// <summary>
 /// Domain model for the mutable state/metadata of a group conversation.
 /// </summary>
 public sealed class GroupState
 {
-    public Messaging.ValueObjects.ConversationId ConversationId { get; }
+    public ConversationId ConversationId { get; }
     public int Epoch { get; private set; }
     public string? Name { get; private set; }
-    public RelayGroupPublicParamsBytes PublicParams { get; }
+    public EncryptedGroupProfileBytes EncryptedProfile { get; }
     public DateTimeOffset CreatedAtUtc { get; }
     public DateTimeOffset UpdatedAtUtc { get; private set; }
 
-    public GroupState(Messaging.ValueObjects.ConversationId conversationId, int epoch, string? name, RelayGroupPublicParamsBytes publicParams, DateTimeOffset createdAtUtc, DateTimeOffset updatedAtUtc)
+    public GroupState(ConversationId conversationId, int epoch, string? name, EncryptedGroupProfileBytes encryptedProfile, DateTimeOffset createdAtUtc, DateTimeOffset updatedAtUtc)
     {
         ConversationId = conversationId;
         Epoch = epoch;
         Name = name;
-        PublicParams = publicParams;
+        EncryptedProfile = encryptedProfile;
         CreatedAtUtc = createdAtUtc;
         UpdatedAtUtc = updatedAtUtc;
     }

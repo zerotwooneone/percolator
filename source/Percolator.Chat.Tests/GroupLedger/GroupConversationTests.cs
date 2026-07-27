@@ -13,7 +13,8 @@ public class GroupConversationTests
     {
         // Arrange
         var conversationId = new ConversationId(Guid.NewGuid());
-        var creatorId = new ParticipantId(Guid.NewGuid());
+        var publicIdentityId = new PublicIdentityId(Guid.NewGuid());
+        var creatorId = new LocalParticipantId(publicIdentityId, new ChatSelfId(1));
         var initialName = new GroupName("Initial Name");
         var avatarId = GroupAvatarId.FromBytesOwned(new byte[] { 1, 2, 3 });
         var conversation = GroupConversation.CreateNew(conversationId, initialName, creatorId, avatarId);
@@ -32,8 +33,10 @@ public class GroupConversationTests
     {
         // Arrange
         var conversationId = new ConversationId(Guid.NewGuid());
-        var creatorId = new ParticipantId(Guid.NewGuid());
-        var memberId = new ParticipantId(Guid.NewGuid());
+        var creatorPublicId = new PublicIdentityId(Guid.NewGuid());
+        var creatorId = new LocalParticipantId(creatorPublicId, new ChatSelfId(1));
+        var memberPublicId = new PublicIdentityId(Guid.NewGuid());
+        var memberId = new LocalParticipantId(memberPublicId, new ChatSelfId(2));
         var initialName = new GroupName("Initial Name");
         var avatarId = GroupAvatarId.FromBytesOwned(new byte[] { 1, 2, 3 });
         var conversation = GroupConversation.CreateNew(conversationId, initialName, creatorId, avatarId);
@@ -51,7 +54,8 @@ public class GroupConversationTests
     {
         // Arrange
         var conversationId = new ConversationId(Guid.NewGuid());
-        var creatorId = new ParticipantId(Guid.NewGuid());
+        var publicIdentityId = new PublicIdentityId(Guid.NewGuid());
+        var creatorId = new LocalParticipantId(publicIdentityId, new ChatSelfId(1));
         var initialName = new GroupName("Initial Name");
         var avatarId = GroupAvatarId.FromBytesOwned(new byte[] { 1, 2, 3 });
         var conversation = GroupConversation.CreateNew(conversationId, initialName, creatorId, avatarId);
@@ -66,8 +70,10 @@ public class GroupConversationTests
     {
         // Arrange
         var conversationId = new ConversationId(Guid.NewGuid());
-        var creatorId = new ParticipantId(Guid.NewGuid());
-        var memberId = new ParticipantId(Guid.NewGuid());
+        var creatorPublicId = new PublicIdentityId(Guid.NewGuid());
+        var creatorId = new LocalParticipantId(creatorPublicId, new ChatSelfId(1));
+        var memberPublicId = new PublicIdentityId(Guid.NewGuid());
+        var memberId = new LocalParticipantId(memberPublicId, new ChatSelfId(2));
         var initialName = new GroupName("Initial Name");
         var avatarId = GroupAvatarId.FromBytesOwned(new byte[] { 1, 2, 3 });
         var conversation = GroupConversation.CreateNew(conversationId, initialName, creatorId, avatarId);

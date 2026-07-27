@@ -6,6 +6,6 @@ namespace Percolator.Chat.Messaging.App.Commands;
 
 public sealed record UpdateGroupInfoCommand(
     ConversationId ConversationId,
-    ChatSelfId SelfIdentityId,
+    ParticipantId ActorParticipantId,
     string? NewName
 ) : IRequest;
