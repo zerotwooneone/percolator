@@ -113,60 +113,51 @@ The goal of this plan is to implement group chat for Percolator. Key requirement
 ---
 ## Chunk 2 (Infrastructure Definitions)
 ### Feature Implementation Request: Signal Protocol Chunk 2 (Persistence & Repositories)
-You are to implement all physical database definitions, repositories, and query interfaces required by the new Signal Protocol Group V2 architecture. These definitions must be complete, technically accurate, and ready for code generation. Do not create any domain logic here; this is purely mapping physical storage.
+You are to completely remove the old SQL/EF definitions and implement all new physical database definitions, repositories, and query interfaces required by the Signal Protocol Group V2 architecture. Do not create any domain logic here; this is purely mapping physical storage.
 
-**1. EF Core Table Updates (Relay Blinded Routing & DbContext)**
-*   **Target:** `PercolatorDbContext` (in `Percolator.Infrastructure/Persistence`)
-    *   **Action:** Remove `public DbSet<NetworkEgressJobDbo> NetworkEgressJobs`.
-    *   **Action:** Add `public DbSet<AnonymousRelayEgressJobDbo> AnonymousRelayEgressJobs { get; set; }`.
-    *   **Action:** Add `public DbSet<AuthenticatedPeerEgressJobDbo> AuthenticatedPeerEgressJobs { get; set; }`.
-    *   **Action:** Rename the existing `RelayOutbox` DbSet to `DomainEventOutbox`.
-    *   **Action:** Ensure `RelayGroupStates` and `RelayBlindedRosters` are properly mapped and their schemas updated in `OnModelCreating`.
-    *   **Action:** In `OnModelCreating`, configure `HasConversion` on all `DateTimeOffset` properties across *all* Chat and Network DBOs (e.g., `NextAttemptUtc`, `CreatedAtUtc`, `JoinedAtUtc`, `RemovedAtUtc`) to explicitly store them as `long` Unix-Time-Milliseconds in SQLite, satisfying Rule #9.
-    *   **Action:** In `OnModelCreating`, configure a strict 1:1 required relationship between `GroupStateDbo` and `GroupCryptoStateDbo` using `.HasOne().WithOne().HasForeignKey()`. This allows seamless hydration of the `GroupConversation` aggregate's Master Key.
+**1. Deletions (Clean Slate Infrastructure)**
+*   Delete `GroupCryptoStateDbo.cs`.
+*   Delete `RelayGroupStateDbo.cs`.
+*   Delete `RelayBlindedRosterDbo.cs` (The Relay no longer stores network topologies or routing rosters).
+*   Delete `IRelayRosterQueries.cs` and `SqliteRelayRosterQueries.cs`.
+*   Remove `RelayBlindedRosters` and `GroupCryptoStates` DbSets and their configurations from `PercolatorDbContext`.
 
-*   **Target:** `GroupStateDbo` (in `Percolator.Infrastructure/Chat`)
-    *   **Action:** Add `public byte[]? AvatarId { get; set; }` to support avatar updates.
-    *   **Action:** Add `public string? Description { get; set; }` for extensibility.
+**2. Relay Server Persistence (`Percolator.Infrastructure/Network/RelayLedger`)**
+*   Create `RelayGroupLedgerDbo.cs`:
+    *   Properties: `Guid ConversationId` (PK), `uint Epoch`, `byte[] EncryptedEntriesBlob`.
+*   Update `IRelayGroupLedgerRepository` (in `Percolator.Network`) and `SqliteRelayGroupLedgerRepository`:
+    *   Map `RelayGroupLedger` aggregate to `RelayGroupLedgerDbo`.
+    *   Methods: `GetByIdAsync`, `OverwriteStateAsync`.
 
-*   **Target:** `RelayBlindedRosterDbo` (Move to `Percolator.Infrastructure/Network/RelayLedger`)
-    *   **Action:** Remove `MemberPublicIdentityId`.
-    *   **Action:** Add `public byte[] RoutingToken { get; set; } = Array.Empty<byte>();`
-    *   **Constraint:** Do **NOT** add any Foreign Key relationships to identity tables. The Relay must remain completely blinded to the true identity of the `RoutingToken`.
+**3. Client Persistence - Cryptography Domain (`Percolator.Infrastructure/Cryptography/GroupLedger`)**
+*   Create `GroupCredentialsDbo.cs`:
+    *   Properties: `Guid ConversationId` (PK), `byte[] GroupMasterKey`, `byte[] AuthCredentialMac`.
+*   Create `SenderKeyRatchetDbo.cs`:
+    *   Properties: `Guid ConversationId` (PK Part 1), `uint SenderKeyId` (PK Part 2), `byte[] AuthorPublicIdentityId`, `byte[] ChainKey`, `byte[] SignatureKey`.
+*   Create `UnknownMessageCacheDbo.cs`:
+    *   Properties: `long Id` (PK Auto), `Guid ConversationId`, `uint MissingKeyId`, `byte[] Ciphertext`, `long ReceivedAtUtc`.
+*   Create `SkippedMessageKeyDbo.cs`:
+    *   Properties: `Guid ConversationId` (PK Part 1), `uint SenderKeyId` (PK Part 2), `int MessageIndex` (PK Part 3), `byte[] MessageKey`.
 
-*   **Target:** `RelayGroupStateDbo` (Move to `Percolator.Infrastructure/Network/RelayLedger`)
-    *   **Action:** Add `public byte[] EncryptedProfile { get; set; } = Array.Empty<byte>();`
+**4. Client Persistence - Chat Domain (`Percolator.Infrastructure/Chat/Persistence`)**
+*   Update `GroupStateDbo.cs`:
+    *   Keep: `Guid ConversationId` (PK), `uint Epoch`, `string? Name`, `byte[]? AvatarId`.
+    *   Remove: `byte[] PublicParams` (gone in ZK model), `uint RelayPeerId` (routing is transient now).
+*   Update `GroupMemberDbo.cs`:
+    *   Add: `byte[] ProfileKey`.
+    *   Ensure exact mapping: `Guid ConversationId`, `byte[] PublicIdentityId`, `int Role`.
 
-**2. Network Egress Persistence (`Percolator.Infrastructure/Network/Egress`)**
-*   **Target:** `AnonymousRelayEgressJobDbo`
-    *   **Properties:** `Guid JobId`, `byte[] RelayPeerId` (NetworkPeerId), `byte[] PayloadBytes` (NetworkPayloadBytes), `int AttemptCount`, `DateTimeOffset NextAttemptUtc`.
-*   **Target:** `AuthenticatedPeerEgressJobDbo`
-    *   **Properties:** `Guid JobId`, `byte[] DestinationPeerId` (NetworkPeerId), `int RoutePreference` (enum), `byte[] PayloadBytes` (NetworkPayloadBytes), `int AttemptCount`, `DateTimeOffset NextAttemptUtc`.
-*   **Target:** `DomainEventOutboxDbo`
-    *   **Action:** Rename the existing `RelayOutboxDbo` to `DomainEventOutboxDbo` to clarify its exact purpose (processing `IDomainEvent` triggers, NOT network bytes). 
-    *   **Action:** Update `OutboxDispatcherWorker` to only read from `DomainEventOutboxDbo`.
+**5. DbContext Configuration (`Percolator.Infrastructure/Persistence/PercolatorDbContext.cs`)**
+*   Add `DbSet`s for `RelayGroupLedgers`, `GroupCredentials`, `SenderKeyRatchets`, `UnknownMessageCaches`, `SkippedMessageKeys`.
+*   In `OnModelCreating`, configure the composite keys for `SenderKeyRatchetDbo` and `SkippedMessageKeyDbo`.
+*   Configure `HasConversion` for `UnknownMessageCacheDbo.ReceivedAtUtc` to explicit `long` (Unix Time Milliseconds) per Rule #9.
 
-**3. Repository Interfaces & Implementations**
-*   **Target:** `IGroupConversationRepository` (`Percolator.Chat`)
-    *   **Action:** Define standard hydration and persistence for the `GroupConversation` aggregate.
-    *   **Constraint (Soft Deletes):** When an aggregate removes a member (e.g., `LeaveGroupProposal` or `RemoveMemberProposal`), the repository must *soft-delete* the `GroupMemberDbo` by setting `RemovedAtUtc = DateTimeOffset.UtcNow` rather than physically deleting the row. This preserves UI history.
-*   **Target:** `SqliteGroupConversationRepository` (`Percolator.Infrastructure/Chat`)
-    *   **Action:** Implement mapping from `GroupStateDbo`, `GroupCryptoStateDbo` (via 1:1 include), and `GroupMemberDbo` into the rich `GroupConversation` aggregate defined in Chunk 1.
-*   **Target:** `IAnonymousRelayEgressJobRepository` (`Percolator.Network`)
-    *   **Action:** Define standard CRUD for `AnonymousRelayEgressJob`.
-*   **Target:** `IAuthenticatedPeerEgressJobRepository` (`Percolator.Network`)
-    *   **Action:** Define standard CRUD for `AuthenticatedPeerEgressJob`.
-*   **Target:** `SqliteAnonymousRelayEgressJobRepository` & `SqliteAuthenticatedPeerEgressJobRepository` (`Percolator.Infrastructure/Network`)
-    *   **Action:** Implement mapping to the new DBOs using isolated EF transactions.
-*   **Target:** `IRelayGroupLedgerRepository` (`Percolator.Network/RelayLedger`)
-    *   **Action:** Move this interface to `Percolator.Network`.
-    *   **Action:** Add `RelayProfileBytes encryptedProfile` to the signature of `ProvisionNewGroupAsync` and ensure it accepts `IReadOnlyList<byte[]> routingTokens` instead of `PublicIdentityId` or `PeerId`.
-    *   **Action:** Add method: `Task UpdateGroupStateAsync(RelayGroupLedger ledger, IReadOnlyList<byte[]> addRoutingTokens, IReadOnlyList<byte[]> removeRoutingTokens, CancellationToken cancellationToken);`. This executes the ledger update and the blinded roster insertions/deletions inside a single EF Core transaction.
-    *   **Action:** Update `IsMemberAsync` to check if a `RoutingToken` exists in the `RelayBlindedRosterDbo`.
-
-**4. Queries**
-*   **Target:** `SqliteRelayRosterQueries` (`Percolator.Infrastructure/Network`)
-    *   **Action:** Refactor `GetMemberPeerIdsAsync` to `GetRoutingTokensAsync`. Since `RelayBlindedRosterDbo` now holds `RoutingToken`, simply return the exact bytes. The Relay uses these opaque tokens to route fan-out messages without knowing the true identities.
+**6. Repository Interfaces & Implementations**
+*   Create `IGroupCredentialsRepository` / `SqliteGroupCredentialsRepository`.
+*   Create `ISenderKeyRatchetRepository` / `SqliteSenderKeyRatchetRepository`.
+*   Create `IUnknownMessageCacheRepository` / `SqliteUnknownMessageCacheRepository`.
+*   Update `IGroupConversationRepository` / `SqliteGroupConversationRepository` to map only semantic state (no crypto). When an aggregate removes a member, the repository must soft-delete the `GroupMemberDbo` by setting `RemovedAtUtc = DateTimeOffset.UtcNow`.
+*   **Unit Tests:** Every repository implementation must have a corresponding integration/unit test verifying `Save` and `Load` (hydration) logic against an in-memory or throwaway SQLite connection.
 ---
 
 ## Chunk 3 (Protobuf Contracts)
