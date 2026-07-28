@@ -21,7 +21,6 @@ message InternalEnvelope {
     SubmitPreKeyBundleResponse submit_pre_key_bundle_response = 5;
     GetPreKeyBundleResponse get_pre_key_bundle_response = 6;
     MessageQueueEnvelope message_queue_envelope = 7;
-    EnqueueOpaqueMessageResponse enqueue_opaque_message_response = 8;
     RelayOpaqueResponse relay_opaque_response = 10;
   }
 }
@@ -62,6 +61,10 @@ message ChatEnvelope {
     GroupMessage group_message = 17;
     // Group invitation message
     GroupInvite group_invite = 18;
+    // Group initialization message (V2)
+    GroupInitializationMessage group_initialization = 19;
+    // Sender key distribution message (V2)
+    SenderKeyDistributionMessage sender_key_distribution = 20;
   }
 }
 
@@ -140,7 +143,47 @@ message GroupInvite {
 
 // Inner plaintext wrapper for GroupMessage.ciphertext.
 message GroupContent {
-  string text_message = 1;
+  optional string text_message = 1;
+  optional GroupUpdatePayload update_payload = 2;
+}
+
+// Group initialization message for delivering cryptographic primitives to new members
+message GroupInitializationMessage {
+  optional uint32 version = 100;
+  bytes conversation_id = 1;
+  uint32 epoch = 2;
+  bytes group_master_key = 3;
+  bytes member_credential_mac = 4; // Replaces old "group_public_params"
+  
+  // --- Percolator-specific Relay Topology ---
+  bytes relay_public_identity_id = 7;
+  string relay_host = 8;
+  int32 relay_port = 9;
+}
+
+// Sender key distribution message for ratchet key sharing
+message SenderKeyDistributionMessage {
+  optional uint32 version = 100;
+  bytes conversation_id = 1;
+  uint32 sender_key_id = 2;
+  bytes chain_key = 3;
+  bytes signature_public_key = 4;
+}
+
+// Group update payload representing semantic chat updates
+message GroupUpdatePayload {
+  optional uint32 version = 100;
+  optional string new_group_name = 1;
+  optional bytes new_avatar_id = 2;
+  repeated PeerRoleUpdate role_updates = 3;
+  repeated bytes added_public_identity_ids = 4;
+  repeated bytes removed_public_identity_ids = 5;
+}
+
+message PeerRoleUpdate {
+  optional uint32 version = 100;
+  bytes public_identity_id = 1;
+  uint32 role_enum = 2;
 }
 
 
@@ -258,32 +301,9 @@ message GetPreKeyBundleResponse {
 
 // === 5. Message Queue Application ===
 
+// Message queue envelope for future queue operations
 message MessageQueueEnvelope {
   optional uint32 version = 1;
-  oneof message {
-    EnqueueOpaqueMessageRequest enqueue_opaque_message_request = 2;
-  }
-}
-
-// Request to enqueue an opaque message for a recipient identified by PublicIdentityId (UUID).
-message EnqueueOpaqueMessageRequest {
-  optional uint32 version = 1;
-  // PublicIdentityId (UUID bytes) of the recipient
-  optional bytes recipient_public_identity_id = 2;
-  // Opaque encrypted blob (double ratchet ciphertext). Max size enforced by application.
-  optional bytes message_blob = 3;
-}
-
-// Response for enqueue operation. Placed at top-level InternalEnvelope.
-message EnqueueOpaqueMessageResponse {
-  optional uint32 version = 1;
-  // True when the message was accepted into the queue. False when rejected (e.g., limits exceeded or unknown PublicIdentityId).
-  optional bool accepted = 2;
-  // If not accepted, a brief error string suitable for logs/diagnostics.
-  optional string error = 3;
-  // Optional counts for observability (may be omitted by implementations).
-  optional uint32 recipient_queued_count = 4;
-  optional uint32 total_queued_count = 5;
 }
 
 // === 7. Opaque Handshake (Signal-style) ===

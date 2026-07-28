@@ -237,77 +237,57 @@ message RatchetHeader {
 
 // Relay Service for unified relay operations (both 1:1 and Group)
 service RelayService {
-    rpc Publish(SubmitGroupMessageRequest) returns (SubmitGroupMessageResponse);
-    rpc ProvisionGroup(ProvisionGroupRequest) returns (ProvisionGroupResponse);
-    rpc ModifyGroup(ModifyGroupRequest) returns (ModifyGroupResponse);
-    rpc GetGroupState(GetGroupStateRequest) returns (GetGroupStateResponse);
     rpc EnqueueOpaqueMessage(EnqueueOpaqueMessageRequest) returns (EnqueueOpaqueMessageResponse);
     rpc ConnectRelay(stream ClientRelayStream) returns (stream ServerRelayStream);
 }
 
-message SubmitGroupMessageRequest {
-    optional bytes conversation_id = 1;
-    optional bytes presentation = 2;    // ZK Proof
-    optional bytes ciphertext = 3;      // Encrypted payload
-    optional uint32 epoch = 4;          // Target epoch for concurrency control
+service AnonymousGroupService {
+    rpc ProcessAnonymousGroupRequest(AnonymousGroupRequest) returns (ProcessAnonymousGroupResponse);
+    rpc GetGroupState(GetGroupStateRequest) returns (GetGroupStateResponse);
 }
 
-message SubmitGroupMessageResponse {
+message EnqueueOpaqueMessageRequest {
+    optional bytes destination_routing_token = 1; // Matches the blinded roster
+    optional uint32 route_preference = 2;
+    optional bytes ciphertext = 3;
+    optional bytes sender_presentation = 4;
+}
+
+message EnqueueOpaqueMessageResponse {
     optional bool success = 1;
 }
 
-message ProvisionGroupRequest {
-    optional uint32 version = 100;
-    // ConversationId (GUID bytes) for the group being provisioned
-    optional bytes conversation_id = 1;
-    // ZK group public parameters for the group
-    optional bytes public_params = 2;
-    // List of member PublicIdentityIds (UUID bytes) for the blinded roster
-    repeated bytes member_public_identity_ids = 3;
-    // Encrypted group profile (metadata)
-    optional bytes encrypted_profile = 4;
+message AnonymousGroupRequest {
+    bytes conversation_id = 1;
+    bytes presentation_proof = 2; // KVAC ZK Proof
+    repeated bytes target_public_identity_ids = 3; // Transient Fanout list
+    optional bytes ciphertext = 4; // Inner encrypted group message
+    
+    // Exclusively for State Mutations (Add/Kick/Rename)
+    optional bytes new_encrypted_entries_blob = 5;
+    optional uint32 new_epoch = 6;
+    
+    // Anti-Spam / Rate-limiting Header Note:
+    // Client must provide grpc metadata header: "x-delivery-ticket" 
 }
 
-message ProvisionGroupResponse {
-    optional uint32 version = 100;
-    optional bool success = 1;
-    optional string error = 2;
-}
-
-message ModifyGroupRequest {
-    optional bytes conversation_id = 1;
-    optional uint32 base_epoch = 2;
-    optional bytes presentation = 3;
-    optional bytes new_encrypted_profile = 4;
-    repeated bytes add_public_identity_ids = 5;
-    repeated bytes remove_public_identity_ids = 6;
-}
-
-message ModifyGroupResponse {
-    optional bool success = 1;
+message ProcessAnonymousGroupResponse { 
+    bool success = 1; 
 }
 
 message GetGroupStateRequest {
-    optional bytes conversation_id = 1;
-    optional bytes presentation = 2;
+    bytes conversation_id = 1;
 }
 
 message GetGroupStateResponse {
-    optional uint32 current_epoch = 1;
-    optional bytes public_params = 2;
-    optional bytes encrypted_profile = 3;
+    uint32 current_epoch = 1;
+    bytes encrypted_entries_blob = 2;
 }
 
-message GroupStreamRequest {
-    optional bytes conversation_id = 1;
-}
-
-message GroupStreamResponse {
-    optional bytes conversation_id = 1;
-    optional bytes ciphertext = 2;
-    optional uint32 epoch = 3;
-    optional bytes sender_public_identity_id = 4;
-    optional uint32 sender_device_id = 5;
+message GroupMessageEnvelope {
+    bytes conversation_id = 1;
+    uint32 sender_key_id = 2; 
+    bytes ciphertext = 3;
 }
 
 message ClientRelayStream {
@@ -322,16 +302,9 @@ message MessageAck {
 
 message ServerRelayStream {
     oneof payload {
-        GroupMessageDelivery group_delivery = 1;
-        OpaqueMessageDelivery opaque_delivery = 2; // For 1:1 queued messages
+        OpaqueMessageDelivery opaque_delivery = 1; // For 1:1 queued messages
+        GroupMessageEnvelope group_message = 2; // For transient fan-out
     }
-}
-
-message GroupMessageDelivery {
-    optional bytes conversation_id = 1;
-    optional uint32 epoch = 2;
-    optional bytes ciphertext = 3;
-    optional bytes sender_presentation = 4;
 }
 
 message OpaqueMessageDelivery {
