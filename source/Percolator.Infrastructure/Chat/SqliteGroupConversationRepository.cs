@@ -27,20 +27,12 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
         if (groupStateDbo is null)
             return null;
 
-        // Load group crypto state (1:1 relationship)
-        var groupCryptoStateDbo = await _db.GroupCryptoStates
-            .AsNoTracking()
-            .FirstOrDefaultAsync(c => c.ConversationId == id.Value, cancellationToken);
-
-        if (groupCryptoStateDbo is null)
-            return null;
-
         // Load group members
         var groupMemberDbos = await _db.GroupMembers
             .Where(m => m.ConversationId == id.Value)
             .ToListAsync(cancellationToken);
 
-        return ToDomain(groupStateDbo, groupCryptoStateDbo, groupMemberDbos);
+        return ToDomain(groupStateDbo, groupMemberDbos);
     }
 
     public async Task AddAsync(GroupConversation conversation, CancellationToken cancellationToken)
@@ -53,24 +45,11 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
             ConversationId = conversation.Id.Value,
             Epoch = conversation.CurrentEpoch.Value,
             Name = conversation.Name.Value,
-            PublicParams = conversation.PublicParams,
-            RelayPeerId = conversation.RelayPeerId.Value,
             AvatarId = conversation.AvatarId.ToArray(),
-            Description = null,
             CreatedAtUtc = now,
             UpdatedAtUtc = now
         };
         _db.GroupStates.Add(groupStateDbo);
-
-        // Persist GroupCryptoState (1:1 relationship)
-        var groupCryptoStateDbo = new GroupCryptoStateDbo
-        {
-            ConversationId = conversation.Id.Value,
-            GroupMasterKeyBytes = conversation.MasterKey.ToArray(),
-            CreatedAtUtc = now,
-            UpdatedAtUtc = now
-        };
-        _db.GroupCryptoStates.Add(groupCryptoStateDbo);
 
         // Persist GroupMembers
         foreach (var member in conversation.Members)
@@ -82,6 +61,7 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
                 PeerId = member.ParticipantId is RemoteParticipantId remote ? remote.PeerId.Value : null,
                 SelfId = member.ParticipantId is LocalParticipantId local ? local.SelfId.Value : null,
                 Role = (Persistence.GroupMemberRole)member.Role,
+                ProfileKey = [],
                 JoinedAtUtc = member.JoinedAtUtc,
                 RemovedAtUtc = member.RemovedAtUtc
             };
@@ -101,19 +81,9 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
         {
             existingGroupState.Epoch = conversation.CurrentEpoch.Value;
             existingGroupState.Name = conversation.Name.Value;
-            existingGroupState.PublicParams = conversation.PublicParams;
-            existingGroupState.AvatarId = conversation.AvatarId.Value;
+            existingGroupState.AvatarId = conversation.AvatarId.ToArray();
             existingGroupState.UpdatedAtUtc = now;
             _db.GroupStates.Update(existingGroupState);
-        }
-
-        // Update GroupCryptoState (1:1 relationship)
-        var existingCryptoState = await _db.GroupCryptoStates.FindAsync(new object[] { conversation.Id.Value }, cancellationToken);
-        if (existingCryptoState != null)
-        {
-            existingCryptoState.GroupMasterKeyBytes = conversation.MasterKey.ToArray();
-            existingCryptoState.UpdatedAtUtc = now;
-            _db.GroupCryptoStates.Update(existingCryptoState);
         }
 
         // Update GroupMembers - soft-delete support
@@ -140,6 +110,7 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
                     PeerId = member.ParticipantId is RemoteParticipantId remote ? remote.PeerId.Value : null,
                     SelfId = member.ParticipantId is LocalParticipantId local ? local.SelfId.Value : null,
                     Role = (Persistence.GroupMemberRole)member.Role,
+                    ProfileKey = [],
                     JoinedAtUtc = member.JoinedAtUtc,
                     RemovedAtUtc = member.RemovedAtUtc
                 };
@@ -160,24 +131,11 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
             ConversationId = conversation.Id.Value,
             Epoch = conversation.CurrentEpoch.Value,
             Name = conversation.Name.Value,
-            PublicParams = conversation.PublicParams,
-            RelayPeerId = conversation.RelayPeerId.Value,
             AvatarId = conversation.AvatarId.ToArray(),
-            Description = null,
             CreatedAtUtc = now,
             UpdatedAtUtc = now
         };
         _db.GroupStates.Add(groupStateDbo);
-
-        // Persist GroupCryptoState (1:1 relationship)
-        var groupCryptoStateDbo = new GroupCryptoStateDbo
-        {
-            ConversationId = conversation.Id.Value,
-            GroupMasterKeyBytes = conversation.MasterKey.ToArray(),
-            CreatedAtUtc = now,
-            UpdatedAtUtc = now
-        };
-        _db.GroupCryptoStates.Add(groupCryptoStateDbo);
 
         // Persist GroupMembers
         foreach (var member in conversation.Members)
@@ -189,19 +147,17 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
                 PeerId = member.ParticipantId is RemoteParticipantId remote ? remote.PeerId.Value : null,
                 SelfId = member.ParticipantId is LocalParticipantId local ? local.SelfId.Value : null,
                 Role = (Persistence.GroupMemberRole)member.Role,
+                ProfileKey = [],
                 JoinedAtUtc = member.JoinedAtUtc,
                 RemovedAtUtc = member.RemovedAtUtc
             };
             _db.GroupMembers.Add(groupMemberDbo);
         }
 
-        // Note: Domain events are no longer used for group provisioning
-        // The plan specified deleting GroupProvisioningRequestedDomainEvent and MemberInvitedDomainEvent
-
         await _db.SaveChangesAsync(cancellationToken);
     }
 
-    private static GroupConversation ToDomain(Persistence.GroupStateDbo groupStateDbo, GroupCryptoStateDbo groupCryptoStateDbo, List<Persistence.GroupMemberDbo> groupMemberDbos)
+    private static GroupConversation ToDomain(Persistence.GroupStateDbo groupStateDbo, List<Persistence.GroupMemberDbo> groupMemberDbos)
     {
         var groupMembers = groupMemberDbos.Select(m =>
         {
@@ -219,21 +175,15 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
                 m.RemovedAtUtc);
         }).ToList();
 
-        var masterKey = Percolator.Chat.GroupLedger.GroupMasterKeyBytes.FromBytesOwned(groupCryptoStateDbo.GroupMasterKeyBytes);
-        var publicParams = groupStateDbo.PublicParams;
         var epoch = new Percolator.Chat.GroupLedger.GroupEpoch(groupStateDbo.Epoch);
         var name = new Percolator.Chat.GroupLedger.GroupName(groupStateDbo.Name ?? string.Empty);
         var avatarId = new Percolator.Chat.GroupLedger.GroupAvatarId(groupStateDbo.AvatarId ?? Array.Empty<byte>());
-        var relayPeerId = new ChatPeerId(groupStateDbo.RelayPeerId);
 
         return new GroupConversation(
             new ConversationId(groupStateDbo.ConversationId),
             name,
-            masterKey,
-            publicParams,
             epoch,
             avatarId,
-            relayPeerId,
             groupMembers);
     }
 }

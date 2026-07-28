@@ -31,6 +31,11 @@ public class GroupMemberDbo
     public GroupMemberRole Role { get; set; }
 
     /// <summary>
+    /// The member's profile key (for ZK proofs).
+    /// </summary>
+    public byte[] ProfileKey { get; set; } = [];
+
+    /// <summary>
     /// UTC timestamp when the member joined the group.
     /// </summary>
     public DateTimeOffset JoinedAtUtc { get; set; }

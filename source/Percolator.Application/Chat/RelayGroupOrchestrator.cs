@@ -3,6 +3,7 @@ using Percolator.Chat.GroupLedger;
 using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Cryptography;
 using Percolator.Identity;
+using Percolator.Network.RelayLedger;
 using PublicIdentityId = Percolator.Chat.GroupLedger.PublicIdentityId;
 
 namespace Percolator.Application.Chat;
