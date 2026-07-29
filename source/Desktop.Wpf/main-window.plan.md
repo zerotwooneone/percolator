@@ -338,17 +338,95 @@ You are to implement all `.proto` contract updates required for the new Relay ar
         optional bool success = 1;
     }
     ```
----
 
-## Chunk 3.1 ✅ COMPLETE
-This chunk completed the Micro-PKI infrastructure that was deferred from Chunk 3. It implemented the native Ed25519 interop wrappers, enabled persisting the Relay Root Key, and introduced a background worker to proactively refresh the local delivery certificate.
+## Chunk 4
+### Feature Implementation Request: Signal Protocol Chunk 4 (Ingress & Egress Application Services)
+You are to implement the application services and orchestrators around the new Relay architecture ingress and egress models defined in Chunks 1-3. Ensure "shared nothing" Clean Architecture by properly mapping between Protobuf requests, Domain aggregates, and Infrastructure repositories.
+
+**1. Deletions (Clean Slate)**
+* Delete obsolete classes and interfaces that are replaced by the new fast-path/outbox mechanism:
+    * `Percolator.Chat.GroupLedger.IRelayMessagePublisher`
+    * `Percolator.Infrastructure.Persistence.SqliteRelayMessagePublisher`
+    * `Percolator.Application.Chat.MessageQueue.IMessageQueueQueries`
+    * `Percolator.Application.Chat.MessageQueue.IMessageQueueRepository`
+    * `Percolator.Infrastructure.MessageQueue.SqliteMessageQueueRepository`
+    * Note: Make sure to clean up any dependency injection registrations in `Percolator.Infrastructure/Chat/ServiceCollectionExtensions.cs`.
+
+**2. Relay Fast-Path & Provisioning (`Percolator.Application/Chat` & `Percolator.Network`)**
+* Create `Percolator.Application.Chat.IRelayLiveDispatcher`. It must expose domain-primitive methods: `Task PushGroupMessageAsync(ConversationId conversationId, uint senderKeyId, CiphertextBytes ciphertext, IReadOnlyList<Percolator.Identity.PublicIdentityId> targetIdentities, CancellationToken ct)` and `Task PushOpaqueMessageAsync(Percolator.Identity.PublicIdentityId target, Guid ackId, byte[] payload, CancellationToken ct)`.
+* Update `Percolator.Network.RelayLedger.IRelayGroupLedgerRepository` to add `Task CreateAsync(RelayGroupLedger ledger, CancellationToken ct)`.
+
+**3. Relay Ingress - Group Orchestration (`Percolator.Application/Chat`)**
+* Update existing `RelayGroupOperationStatus` enum (`Percolator.Application.Chat.RelayGroupOperationStatus`) if any values are missing (`Success`, `EpochConflict`, `Unauthorized`, `GroupNotFound`).
+* Update `IRelayGroupOrchestrator` and `RelayGroupOrchestrator`:
+    * Replace `PublishGroupRelayMessageAsync` and `ModifyGroupAsync` with a unified method using strict Domain primitives (NO Protobuf types leaking into the Application layer): `Task<RelayGroupOperationStatus> ProcessAnonymousGroupRequestAsync(ConversationId conversationId, ZkPresentationBytes presentation, IReadOnlyList<Percolator.Identity.PublicIdentityId> targetIdentities, CiphertextBytes? ciphertext, EncryptedGroupProfileBytes? newEncryptedEntries, uint? newEpoch, CancellationToken ct)`.
+    * Implement `ProcessAnonymousGroupRequestAsync`:
+        1. Load `RelayGroupLedger` via `IRelayGroupLedgerRepository.GetByIdAsync(...)`.
+        2. **Genesis (Epoch 0):** If ledger is null, `newEpoch == 0`, and `newEncryptedEntries` is provided, provision the ledger using `RelayGroupLedger.CreateNew(...)` and save via `IRelayGroupLedgerRepository.CreateAsync()`.
+        3. Perform ZK verification using `IGroupCryptographyService.VerifyGroupPresentation(...)`, verifying the `presentation` against the `ledger.EncryptedProfile` (NOT a server secret). Return `RelayGroupOperationStatus.Unauthorized` if invalid.
+        4. If ledger existed and `newEncryptedEntries` is provided: Apply mutation to ledger (`TryApplyMutation`), check epoch, save via `UpdateGroupStateAsync`. 
+        5. Fan-out (always): For each identity in `targetIdentities`, map to `NetworkPeerId` and create a `RelayEgressJob` (Aggregate in `Percolator.Network.Egress`). Save all jobs via `IRelayEgressJobRepository.SaveAsync(...)`.
+        6. **Fast-Path:** Call `IRelayLiveDispatcher.PushGroupMessageAsync(...)` to instantly notify connected streams.
+
+**4. Relay Ingress - gRPC Endpoints (`Percolator.Infrastructure/Network/Grpc`)**
+* Update `Percolator.Contracts/Protos/messaging.proto`: Add `optional bytes ack_id = 4;` to `GroupMessageEnvelope` so clients can acknowledge group deliveries.
+* Create `Percolator.Infrastructure.Network.Grpc.AnonymousGroupService` inheriting `Contracts.AnonymousGroupService.AnonymousGroupServiceBase`:
+    * Implement `ProcessAnonymousGroupRequest`: 
+        * **Fail-fast Validation:** Check if `conversation_id`, `presentation_proof`, or `target_public_identity_ids` are null/empty. Throw `RpcException(StatusCode.InvalidArgument)` immediately.
+        * **Map to Domain:** Convert protobuf fields to `ConversationId`, `ZkPresentationBytes`, `CiphertextBytes`, etc.
+        * Call `IRelayGroupOrchestrator.ProcessAnonymousGroupRequestAsync`. Map statuses to RpcExceptions (`Aborted` for EpochConflict, `Unauthenticated` for Unauthorized, `NotFound` for GroupNotFound). Return `ProcessAnonymousGroupResponse { Success = true }`.
+    * Implement `GetGroupState`: Fail-fast on missing `conversation_id`. Map to Domain `ConversationId`. Call `_orchestrator.GetGroupStateAsync`. Return `GetGroupStateResponse`.
+* Update `Percolator.Infrastructure.Network.Grpc.RelayService`:
+    * Implement `EnqueueOpaqueMessage` (override base method): 
+        * **Fail-fast Validation:** Check if `destination_routing_token` or `ciphertext` are null/empty. Throw `RpcException(StatusCode.InvalidArgument)`.
+        * Extract sender's `PublicIdentityId` from auth headers (`x-percolator-sender-public-identity-id`). Create a `RelayEgressJob` for the target `destination_routing_token` (resolve to `NetworkPeerId`). Save to `IRelayEgressJobRepository`. 
+        * **Fast-Path:** Call `IRelayLiveDispatcher.PushOpaqueMessageAsync(...)` to instantly notify if connected. Return success.
+
+**5. Relay Egress - Real-Time Data Plane (`Percolator.Infrastructure/Network/RelayHost`)**
+* Create `Percolator.Infrastructure.Network.RelayHost.GrpcRelayLiveDispatcher` implementing `IRelayLiveDispatcher`:
+    * Internally maintain an in-memory Pub/Sub channel matrix `ConcurrentDictionary<Percolator.Identity.PublicIdentityId, Channel<ServerRelayStream>>`.
+    * Implement methods to lookup the target identity channel, translate the domain primitives into Protobuf `ServerRelayStream` messages (`GroupMessageEnvelope` or `OpaqueMessageDelivery`), and write them to the channel asynchronously.
+* Update `RelayService.ConnectRelay` (The Sync Loop):
+    * Remove references to `IMessageQueueQueries`.
+    * Fetch offline/pending `RelayEgressJob`s from `IRelayEgressJobRepository` on connect and flush them to the `responseStream`.
+    * Register the connected `PublicIdentityId` with `GrpcRelayLiveDispatcher` to receive a `ChannelReader<ServerRelayStream>`.
+    * Maintain a loop reading from `channelReader.ReadAllAsync(...)` and writing to `responseStream.WriteAsync(...)`.
+    * Listen to the `requestStream` for `ClientRelayStream` acknowledgements and delete the corresponding `RelayEgressJob` using `IRelayEgressJobRepository.DeleteAsync(...)`.
+
+**6. Client Egress - Client Outbox Dispatcher (`Percolator.Infrastructure/Egress`)**
+* Update `Percolator.Infrastructure.Egress.NetworkEgressWorker`:
+    * In `DispatchRelayAsync` when `job.PayloadType == PayloadType.Group`, update the logic to use `AnonymousGroupServiceClient` instead of `RelayServiceClient` for group messages.
+    * Parse `AnonymousGroupRequest` instead of `SubmitGroupMessageRequest`.
+    * Invoke `ProcessAnonymousGroupRequestAsync` (anonymous egress, no auth headers attached) for group payloads.
 ---
-## Chunk 4 ✅ COMPLETE
-This chunk implemented the Signal Protocol Group V2 Relay Ledger and Fan-Out mechanism. It introduced atomic ledger updates and message queue inserts to ensure concurrency control via manual version checking, while also establishing the core external gRPC contracts for handling incoming group message publish requests.
----
-## Chunk 5 ✅ COMPLETE
-**Group Provisioning Through Outbox**
-This chunk refactored the identity system to use `PublicIdentityId` (Guid) as the global identifier and `PeerId`/`SelfId` (uint) as local database surrogate keys. It updated network contracts to use `PublicIdentityId` instead of PKH for routing, fixing identity resolution logic throughout the codebase, including the simulator.
+## Chunk 5
+### Feature Implementation Request: Signal Protocol Chunk 5 (Client-Side Ingress Pipeline)
+This chunk implements the Client's consumption of the unified Relay stream. The client must connect to the Relay, catch up on missed offline jobs, listen for real-time [ServerRelayStream](cci:2://file:///C:/Users/squir/source/repos/percolator/source/Percolator.Contracts/Protos/messaging.proto:302:0-307:1) messages over the gRPC channel, and safely decrypt/process the domain payloads.
+
+**1. Client Stream Worker (`Percolator.Infrastructure/Ingress`)**
+* Create `Percolator.Infrastructure.Ingress.RelayIngressStreamWorker` (inheriting from `BackgroundService`):
+    * On startup, resolve the Relay node's routing profile.
+    * Establish a persistent `ConnectRelay` bidirectional stream via `IRelayServiceClient`.
+    * Wrap the connection in a resilient Polly retry loop (auto-reconnect on network failure).
+    * Use an `await foreach` loop over the server's `responseStream`.
+    * For each `ServerRelayStream` message, examine the `payload` (OneOf). Route `OpaqueMessageDelivery` to the existing `IIngressPipeline.DeliverOpaqueAsync`. 
+    * For `GroupMessageEnvelope`, map the protobuf fields into a new `Percolator.Application.Chat.GroupMessageIngressPayload` record and route it to `IGroupStreamIngressProcessor.ProcessGroupMessageAsync`.
+
+**2. Group Ingress Processing (`Percolator.Application/Chat`)**
+* Create a new `Percolator.Application.Chat.GroupMessageIngressPayload` record to cleanly encapsulate the incoming data (e.g., `Guid ConversationId`, `uint SenderKeyId`, `byte[] Ciphertext`, `Guid AckId`).
+* Update existing `Percolator.Application.Chat.IGroupStreamIngressProcessor` interface and `GroupStreamIngressProcessor` implementation:
+    * Refactor `ProcessGroupMessageAsync` to accept the new `GroupMessageIngressPayload` and a `CancellationToken` instead of the old primitive arguments.
+    * Map the `payload.ConversationId` to the local SQLite `GroupConversation` via `IGroupConversationRepository`.
+    * Attempt to fetch the Sender Key Ratchet (via infrastructure/DB not currently fully mocked) using `payload.SenderKeyId`.
+    * **Holding Tank:** If the ratchet does not exist in the local database, the message MUST be placed into the `UnknownMessageCache` (a holding tank) for future decryption when the ratchet arrives.
+    * **Out of Order / Gap Handling:** If the ratchet exists but the message index is out of order, it must leverage the `SkippedMessageKeys` table as dictated by the standard Double Ratchet protocol.
+    * If ready, call `IGroupCryptographyService.DecryptGroupContent(...)` to unseal the payload.
+    * Append the decrypted chat message to the local `SqliteGroupConversationRepository`.
+
+**3. Client Message Acknowledgement (The Egress Loopback)**
+* Update `RelayIngressStreamWorker`:
+    * If `ProcessGroupMessageAsync` or `DeliverOpaqueAsync` succeeds, construct a `ClientRelayStream { MessageAck = new MessageAck { AckId = envelope.AckId } }`.
+    * Write the ACK back up the bidirectional stream via `requestStream.WriteAsync(...)`. This fulfills the Server's requirement to delete the `RelayEgressJob` from its database, completing the reliable delivery loop.
 ---
 ## Chunk 6 ✅ COMPLETE
 **The Streaming Data Plane**
