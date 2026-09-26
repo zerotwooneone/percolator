@@ -92,6 +92,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TofuTlsGrpcTest", "TofuTlsG
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Domain", "Percolator.Domain\Percolator.Domain.csproj", "{015F38F7-FE54-49A9-8ACD-3007972E35DC}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Domain.Tests", "Percolator.Domain.Tests\Percolator.Domain.Tests.csproj", "{953F2569-D6C4-48A6-B550-D47103D2CEA9}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -402,6 +404,18 @@ Global
 		{015F38F7-FE54-49A9-8ACD-3007972E35DC}.Release|x64.Build.0 = Release|Any CPU
 		{015F38F7-FE54-49A9-8ACD-3007972E35DC}.Release|x86.ActiveCfg = Release|Any CPU
 		{015F38F7-FE54-49A9-8ACD-3007972E35DC}.Release|x86.Build.0 = Release|Any CPU
+		{953F2569-D6C4-48A6-B550-D47103D2CEA9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{953F2569-D6C4-48A6-B550-D47103D2CEA9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{953F2569-D6C4-48A6-B550-D47103D2CEA9}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{953F2569-D6C4-48A6-B550-D47103D2CEA9}.Debug|x64.Build.0 = Debug|Any CPU
+		{953F2569-D6C4-48A6-B550-D47103D2CEA9}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{953F2569-D6C4-48A6-B550-D47103D2CEA9}.Debug|x86.Build.0 = Debug|Any CPU
+		{953F2569-D6C4-48A6-B550-D47103D2CEA9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{953F2569-D6C4-48A6-B550-D47103D2CEA9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{953F2569-D6C4-48A6-B550-D47103D2CEA9}.Release|x64.ActiveCfg = Release|Any CPU
+		{953F2569-D6C4-48A6-B550-D47103D2CEA9}.Release|x64.Build.0 = Release|Any CPU
+		{953F2569-D6C4-48A6-B550-D47103D2CEA9}.Release|x86.ActiveCfg = Release|Any CPU
+		{953F2569-D6C4-48A6-B550-D47103D2CEA9}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
