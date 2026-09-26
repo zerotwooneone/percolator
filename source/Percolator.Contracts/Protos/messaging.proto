@@ -259,13 +259,14 @@ message EnqueueOpaqueMessageResponse {
 
 message AnonymousGroupRequest {
     bytes conversation_id = 1;
-    bytes presentation_proof = 2; // KVAC ZK Proof
-    repeated bytes target_public_identity_ids = 3; // Transient Fanout list
-    optional bytes ciphertext = 4; // Inner encrypted group message
+    uint32 sender_key_id = 2; // Ephemeral identifier for recipient to lookup SenderKey Ratchet
+    bytes presentation_proof = 3; // KVAC ZK Proof
+    repeated bytes target_public_identity_ids = 4; // Transient Fanout list
+    optional bytes ciphertext = 5; // Inner encrypted group message
     
     // Exclusively for State Mutations (Add/Kick/Rename)
-    optional bytes new_encrypted_entries_blob = 5;
-    optional uint32 new_epoch = 6;
+    optional bytes new_encrypted_entries_blob = 6;
+    optional uint32 new_epoch = 7;
     
     // Anti-Spam / Rate-limiting Header Note:
     // Client must provide grpc metadata header: "x-delivery-ticket" 
@@ -277,6 +278,7 @@ message ProcessAnonymousGroupResponse {
 
 message GetGroupStateRequest {
     bytes conversation_id = 1;
+    bytes presentation_proof = 2;
 }
 
 message GetGroupStateResponse {
@@ -288,6 +290,7 @@ message GroupMessageEnvelope {
     bytes conversation_id = 1;
     uint32 sender_key_id = 2; 
     bytes ciphertext = 3;
+    optional bytes ack_id = 4; // Guid bytes for client acknowledgment
 }
 
 message ClientRelayStream {

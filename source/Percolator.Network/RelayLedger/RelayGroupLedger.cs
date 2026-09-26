@@ -38,6 +38,22 @@ public sealed class RelayGroupLedger
     }
 
     /// <summary>
+    /// Rehydrates a RelayGroupLedger from persistence.
+    /// </summary>
+    public static RelayGroupLedger Rehydrate(
+        RelayGroupId id,
+        RelayGroupEpoch currentEpoch,
+        EncryptedEntriesBlobBytes encryptedEntriesBlob,
+        int concurrencyVersion)
+    {
+        return new RelayGroupLedger(
+            id,
+            currentEpoch,
+            encryptedEntriesBlob,
+            concurrencyVersion);
+    }
+
+    /// <summary>
     /// Overwrites the state with a new encrypted entries blob, validating the epoch.
     /// </summary>
     /// <param name="baseEpoch">The expected current epoch before mutation.</param>

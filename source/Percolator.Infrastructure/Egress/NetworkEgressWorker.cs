@@ -22,6 +22,7 @@ public sealed class NetworkEgressWorker : BackgroundService
     private readonly INetworkEgressJobRepository _repository;
     private readonly ITransportServiceClient _transportServiceClient;
     private readonly IRelayServiceClient _relayServiceClient;
+    private readonly IAnonymousGroupServiceClient _anonymousGroupServiceClient;
     private readonly IPeerGrpcChannelFactory _channelFactory;
     private readonly IPeerRoutingProfileRepository _peerRoutingProfileRepository;
     private readonly IDeliveryCertificateStore _deliveryCertificateStore;
@@ -32,6 +33,7 @@ public sealed class NetworkEgressWorker : BackgroundService
         INetworkEgressJobRepository repository,
         ITransportServiceClient transportServiceClient,
         IRelayServiceClient relayServiceClient,
+        IAnonymousGroupServiceClient anonymousGroupServiceClient,
         IPeerGrpcChannelFactory channelFactory,
         IPeerRoutingProfileRepository peerRoutingProfileRepository,
         IDeliveryCertificateStore deliveryCertificateStore,
@@ -40,6 +42,7 @@ public sealed class NetworkEgressWorker : BackgroundService
         _repository = repository;
         _transportServiceClient = transportServiceClient;
         _relayServiceClient = relayServiceClient;
+        _anonymousGroupServiceClient = anonymousGroupServiceClient;
         _channelFactory = channelFactory;
         _peerRoutingProfileRepository = peerRoutingProfileRepository;
         _deliveryCertificateStore = deliveryCertificateStore;
@@ -172,12 +175,12 @@ public sealed class NetworkEgressWorker : BackgroundService
         {
             if (job.PayloadType == PayloadType.Group)
             {
-                var groupRequest = SubmitGroupMessageRequest.Parser.ParseFrom(job.PayloadBytes.ToArray());
-                
+                var anonymousGroupRequest = AnonymousGroupRequest.Parser.ParseFrom(job.PayloadBytes.ToArray());
+
                 // Anonymous egress - no auth headers for sealed-sender group messages
                 var callOptions = new CallOptions(cancellationToken: ct);
-                var response = await _relayServiceClient.PublishAsync(groupRequest, callOptions, ct);
-                
+                var response = await _anonymousGroupServiceClient.ProcessAnonymousGroupRequestAsync(anonymousGroupRequest, callOptions, ct);
+
                 return response.Success;
             }
             else if (job.PayloadType == PayloadType.Opaque1to1)

@@ -3,6 +3,7 @@ using Percolator.Chat;
 using Percolator.Chat.GroupLedger;
 using Percolator.Chat.GroupMembership;
 using Percolator.Chat.Messaging.ValueObjects;
+using Percolator.Chat.ValueObjects;
 using Percolator.Identity;
 using Percolator.Infrastructure.Persistence;
 using ChatPeerId = Percolator.Chat.GroupMembership.ChatPeerId;
@@ -175,11 +176,11 @@ public sealed class SqliteGroupConversationRepository : IGroupConversationReposi
                 m.RemovedAtUtc);
         }).ToList();
 
-        var epoch = new Percolator.Chat.GroupLedger.GroupEpoch(groupStateDbo.Epoch);
-        var name = new Percolator.Chat.GroupLedger.GroupName(groupStateDbo.Name ?? string.Empty);
-        var avatarId = new Percolator.Chat.GroupLedger.GroupAvatarId(groupStateDbo.AvatarId ?? Array.Empty<byte>());
+        var epoch = new GroupEpoch(groupStateDbo.Epoch);
+        var name = new GroupName(groupStateDbo.Name ?? string.Empty);
+        var avatarId = GroupAvatarId.FromBytesOwned(groupStateDbo.AvatarId ?? Array.Empty<byte>());
 
-        return new GroupConversation(
+        return GroupConversation.Rehydrate(
             new ConversationId(groupStateDbo.ConversationId),
             name,
             epoch,

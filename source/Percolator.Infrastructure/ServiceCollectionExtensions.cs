@@ -7,7 +7,6 @@ using Percolator.Infrastructure.Identity;
 using Percolator.Infrastructure.Sessions;
 using Percolator.Infrastructure.Network;
 using Percolator.Infrastructure.Network.Certificates;
-using Percolator.Infrastructure.MessageQueue;
 using Percolator.Application.Network.Handshake;
 using Percolator.Infrastructure.Network.Handshake;
 using Percolator.Application.KeyExchange;
@@ -43,7 +42,6 @@ public static class ServiceCollectionExtensions
         services.AddNetworkInfrastructure();
         services.AddDhtInfrastructure();
         services.AddCryptographyInfrastructure();
-        services.AddMessageQueueInfrastructure();
 
         // Bind Domain Interfaces to Infrastructure Implementations
         services.AddSingleton<ISessionEstablishmentTransport, GrpcSessionService>();

@@ -20,11 +20,24 @@ public sealed class SqliteRelayGroupLedgerRepository : IRelayGroupLedgerReposito
         if (dbo == null)
             return null;
 
-        return new RelayGroupLedger(
+        return RelayGroupLedger.Rehydrate(
             new RelayGroupId(dbo.ConversationId),
             new RelayGroupEpoch(dbo.Epoch),
             EncryptedEntriesBlobBytes.FromBytesOwned(dbo.EncryptedEntriesBlob),
             0);
+    }
+
+    public async Task CreateAsync(RelayGroupLedger ledger, CancellationToken cancellationToken)
+    {
+        var dbo = new RelayGroupLedgerDbo
+        {
+            ConversationId = ledger.Id.Value,
+            Epoch = ledger.CurrentEpoch.Value,
+            EncryptedEntriesBlob = ledger.EncryptedEntriesBlob.ToArray()
+        };
+
+        _db.RelayGroupLedgers.Add(dbo);
+        await _db.SaveChangesAsync(cancellationToken);
     }
 
     public async Task OverwriteStateAsync(RelayGroupLedger ledger, CancellationToken cancellationToken)

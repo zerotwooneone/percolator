@@ -1,7 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Percolator.Application.Chat;
-using Percolator.Chat.GroupLedger;
+using Percolator.Chat.Messaging.ValueObjects;
 using Percolator.Infrastructure.Persistence;
+using Percolator.Network.ValueObjects;
 
 namespace Percolator.Infrastructure.Chat.Persistence;
 
@@ -11,17 +12,17 @@ public sealed class SqliteRelayGroupQueries : IRelayGroupQueries
 
     public SqliteRelayGroupQueries(PercolatorDbContext db) => _db = db;
 
-    public async Task<RelayGroupStateDto?> GetGroupStateAsync(Guid conversationId, CancellationToken cancellationToken)
+    public async Task<RelayGroupStateDto?> GetGroupStateAsync(ConversationId conversationId, CancellationToken cancellationToken)
     {
-        var dbo = await _db.RelayGroupStates
+        var dbo = await _db.RelayGroupLedgers
             .AsNoTracking()
-            .FirstOrDefaultAsync(e => e.ConversationId == conversationId, cancellationToken);
+            .FirstOrDefaultAsync(e => e.ConversationId == conversationId.Value, cancellationToken);
 
         if (dbo == null)
             return null;
 
         return new RelayGroupStateDto(
-            dbo.Epoch,
-            RelayGroupPublicParamsBytes.FromBytesOwned(dbo.GroupPublicParams));
+            new RelayGroupEpoch(dbo.Epoch),
+            EncryptedEntriesBlobBytes.FromBytesOwned(dbo.EncryptedEntriesBlob));
     }
 }

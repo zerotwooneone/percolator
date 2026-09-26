@@ -2,9 +2,9 @@ using Percolator.Chat;
 using Percolator.Chat.GroupMembership;
 using Percolator.Chat.Messaging;
 using Percolator.Chat.Messaging.App;
+using Percolator.Chat.ValueObjects;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
-using Percolator.Identity;
 
 namespace Percolator.Application.Chat;
 
@@ -27,13 +27,11 @@ public sealed class GroupStreamIngressProcessor : IGroupStreamIngressProcessor
         _chatMessageWriter = chatMessageWriter;
     }
 
-    public async Task ProcessGroupMessageAsync(Guid conversationIdBytes, Guid senderPublicIdentityIdBytes, uint epoch, byte[] ciphertext, ChatSelfId selfIdentityId, uint senderDeviceId, DateTimeOffset sentAt, CancellationToken ct)
+    public async Task ProcessGroupMessageAsync(Percolator.Chat.Messaging.ValueObjects.ConversationId conversationId, Percolator.Chat.GroupLedger.PublicIdentityId senderPublicIdentityId, GroupEpoch epoch, byte[] ciphertext, ChatSelfId selfIdentityId, uint senderDeviceId, DateTimeOffset sentAt, CancellationToken ct)
     {
-        var conversationId = new Percolator.Chat.Messaging.ValueObjects.ConversationId(conversationIdBytes);
-        var senderPublicIdentityId = new PublicIdentityId(senderPublicIdentityIdBytes);
-
         // Resolve sender's PeerId from PublicIdentityId
-        var senderPeerId = await _peerIdentityQueries.GetPeerIdByPublicIdentityIdAsync(senderPublicIdentityId, ct).ConfigureAwait(false);
+        var identitySenderPublicIdentityId = new Percolator.Identity.PublicIdentityId(senderPublicIdentityId.Value);
+        var senderPeerId = await _peerIdentityQueries.GetPeerIdByPublicIdentityIdAsync(identitySenderPublicIdentityId, ct).ConfigureAwait(false);
         if (senderPeerId is null)
         {
             // Unknown sender, drop the message
@@ -41,7 +39,7 @@ public sealed class GroupStreamIngressProcessor : IGroupStreamIngressProcessor
         }
 
         // Load the group aggregate for validation
-        var groupConversation = await _groupConversationRepository.GetByIdAsync(conversationId, selfIdentityId, ct).ConfigureAwait(false);
+        var groupConversation = await _groupConversationRepository.GetByIdAsync(conversationId, ct).ConfigureAwait(false);
         if (groupConversation is null)
         {
             // Unknown conversation, drop the message
@@ -51,7 +49,7 @@ public sealed class GroupStreamIngressProcessor : IGroupStreamIngressProcessor
         // DDD Validation: Verify sender is an active member
         var chatPublicIdentityId = new Percolator.Chat.GroupLedger.PublicIdentityId(senderPublicIdentityId.Value);
         var senderParticipantId = new RemoteParticipantId(chatPublicIdentityId, new ChatPeerId(senderPeerId.Value.Value));
-        if (!groupConversation.Members.Any(m => m.ParticipantId == senderParticipantId))
+        if (groupConversation.Members.All(m => m.ParticipantId != senderParticipantId))
         {
             // Sender is not a member, drop the message
             return;
@@ -66,9 +64,9 @@ public sealed class GroupStreamIngressProcessor : IGroupStreamIngressProcessor
         }
 
         // Decrypt the message
-        var senderCryptoPublicIdentity = new CryptoPublicIdentity(senderPublicIdentityIdBytes);
+        var senderCryptoPublicIdentity = new CryptoPublicIdentity(senderPublicIdentityId.Value);
         var cryptoSenderDeviceId = new Percolator.Cryptography.Primitives.DeviceId(senderDeviceId);
-        var conversationCryptoId = new Percolator.Cryptography.Primitives.ConversationId(conversationIdBytes);
+        var conversationCryptoId = new Percolator.Cryptography.Primitives.ConversationId(conversationId.Value);
         
         var plaintext = _senderKeyCryptographyService.DecryptGroupMessage(
             conversationCryptoId,

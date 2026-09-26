@@ -27,6 +27,20 @@ public sealed class SqliteRelayEgressJobRepository : IRelayEgressJobRepository
             DateTimeOffset.FromUnixTimeMilliseconds(dbo.NextAttemptUtc));
     }
 
+    public async Task<IReadOnlyList<RelayEgressJob>> GetByDestinationPeerIdAsync(NetworkPeerId destinationPeerId, CancellationToken cancellationToken)
+    {
+        var dbos = await _db.RelayEgressJobs
+            .AsNoTracking()
+            .Where(e => e.DestinationPeerId == destinationPeerId.Value)
+            .ToListAsync(cancellationToken);
+
+        return dbos.Select(dbo => new RelayEgressJob(
+            dbo.JobId,
+            new NetworkPeerId(dbo.DestinationPeerId),
+            dbo.PayloadBytes,
+            DateTimeOffset.FromUnixTimeMilliseconds(dbo.NextAttemptUtc))).ToList();
+    }
+
     public async Task SaveAsync(RelayEgressJob job, CancellationToken cancellationToken)
     {
         var dbo = await _db.RelayEgressJobs

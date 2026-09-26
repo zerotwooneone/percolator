@@ -5,6 +5,9 @@ using Percolator.Chat.GroupLedger;
 using Percolator.Chat.Messaging.App;
 using Percolator.Infrastructure.Chat.Persistence;
 using Percolator.Infrastructure.Chat.Queries;
+using Percolator.Infrastructure.Network;
+using Percolator.Infrastructure.Network.Egress;
+using Percolator.Infrastructure.Network.RelayHost;
 using Percolator.Infrastructure.Outbox;
 using Percolator.Infrastructure.Persistence;
 
@@ -27,10 +30,12 @@ public static class ServiceCollectionExtensions
 
         // Register Chunk 4 Relay Ledger services
         services.AddScoped<IRelayGroupLedgerRepository, SqliteRelayGroupLedgerRepository>();
-        services.AddScoped<IRelayRosterQueries, SqliteRelayRosterQueries>();
         services.AddScoped<IRelayGroupQueries, SqliteRelayGroupQueries>();
-        services.AddScoped<IRelayMessagePublisher, SqliteRelayMessagePublisher>();
         services.AddScoped<ISelfIdentityQueries, Percolator.Infrastructure.Identity.SelfIdentityQueries>();
+
+        // Register Chunk 4 Relay Live Dispatcher and Egress
+        services.AddScoped<IRelayLiveDispatcher, GrpcRelayLiveDispatcher>();
+        services.AddScoped<IRelayEgressJobRepository, SqliteRelayEgressJobRepository>();
 
         // Register Chunk 5 Outbox Dispatcher
         services.AddHostedService<OutboxDispatcherWorker>();

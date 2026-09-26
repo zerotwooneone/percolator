@@ -2,12 +2,11 @@ using Grpc.Core;
 using Google.Protobuf;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Chat;
-using Percolator.Application.Chat.MessageQueue;
-using Percolator.Application.Network.RelayHost;
 using Percolator.Chat.GroupMembership;
 using Percolator.Contracts;
-using DeliveryCertificate = Percolator.Chat.GroupLedger.DeliveryCertificate;
-using PublicIdentityId = Percolator.Identity.PublicIdentityId;
+using Percolator.Identity;
+using Percolator.Network.Egress;
+using Percolator.Network.ValueObjects;
 
 namespace Percolator.Infrastructure.Network.Grpc;
 
@@ -17,29 +16,20 @@ namespace Percolator.Infrastructure.Network.Grpc;
 /// </summary>
 public sealed class RelayService : Contracts.RelayService.RelayServiceBase
 {
-    private readonly RelayHostStreamManager _streamManager;
-    private readonly IMessageQueueQueries _messageQueueQueries;
-    private readonly IMessageQueueRepository _messageQueueRepository;
-    private readonly IDeliveryCertificateStore _deliveryCertificateStore;
+    private readonly IRelayLiveDispatcher _liveDispatcher;
+    private readonly IRelayEgressJobRepository _egressJobRepository;
     private readonly IPeerIdentityQueries _peerIdentityQueries;
-    private readonly ISelfCertificateService _selfCertificateService;
     private readonly ILogger<RelayService> _logger;
 
     public RelayService(
-        RelayHostStreamManager streamManager,
-        IMessageQueueQueries messageQueueQueries,
-        IMessageQueueRepository messageQueueRepository,
-        IDeliveryCertificateStore deliveryCertificateStore,
+        IRelayLiveDispatcher liveDispatcher,
+        IRelayEgressJobRepository egressJobRepository,
         IPeerIdentityQueries peerIdentityQueries,
-        ISelfCertificateService selfCertificateService,
         ILogger<RelayService> logger)
     {
-        _streamManager = streamManager;
-        _messageQueueQueries = messageQueueQueries;
-        _messageQueueRepository = messageQueueRepository;
-        _deliveryCertificateStore = deliveryCertificateStore;
+        _liveDispatcher = liveDispatcher;
+        _egressJobRepository = egressJobRepository;
         _peerIdentityQueries = peerIdentityQueries;
-        _selfCertificateService = selfCertificateService;
         _logger = logger;
     }
 
@@ -47,10 +37,48 @@ public sealed class RelayService : Contracts.RelayService.RelayServiceBase
         EnqueueOpaqueMessageRequest request,
         ServerCallContext context)
     {
-        // TODO: Implement opaque message enqueue for 1:1 relay
-        // This is the authenticated drop-off point for 1:1 messages
-        _logger.LogWarning("EnqueueOpaqueMessage not yet implemented");
-        return new EnqueueOpaqueMessageResponse { Success = false };
+        // Fail-fast Validation
+        if (request.DestinationRoutingToken is null || request.DestinationRoutingToken.Length == 0)
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "destination_routing_token is required"));
+
+        if (request.Ciphertext is null || request.Ciphertext.Length == 0)
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "ciphertext is required"));
+
+        // Extract sender's PublicIdentityId from auth headers
+        var senderPublicIdentityIdStr = context.RequestHeaders.GetValue("x-percolator-sender-public-identity-id");
+        if (senderPublicIdentityIdStr is null)
+        {
+            throw new RpcException(new Status(StatusCode.Unauthenticated, "Missing sender PublicIdentityId header"));
+        }
+
+        var senderPublicIdentityIdBytes = Convert.FromHexString(senderPublicIdentityIdStr);
+        var senderPublicIdentityId = new PublicIdentityId(new Guid(senderPublicIdentityIdBytes));
+
+        // Resolve destination routing token to NetworkPeerId
+        // For now, we'll treat the routing token as a NetworkPeerId GUID
+        var destinationPeerId = new NetworkPeerId(new Guid(request.DestinationRoutingToken.ToByteArray()));
+
+        // Create RelayEgressJob
+        var ackId = undefined_ack_id;
+        var payloadBytes = request.Ciphertext.ToByteArray();
+        var job = new RelayEgressJob(ackId, destinationPeerId, payloadBytes, DateTimeOffset.UtcNow);
+
+        await _egressJobRepository.SaveAsync(job, context.CancellationToken);
+
+        // Fast-Path: Call IRelayLiveDispatcher.PushOpaqueMessageAsync
+        // Note: We need to map destinationPeerId to PublicIdentityId for the dispatcher
+        await _liveDispatcher.PushOpaqueMessageAsync(
+            undefined_destination_public_identity_id,
+            ackId,
+            payloadBytes,
+            context.CancellationToken);
+
+        _logger.LogInformation(
+            "Enqueued opaque message for {DestinationPeerId} from {SenderPublicIdentityId}",
+            destinationPeerId.Value,
+            senderPublicIdentityId);
+
+        return new EnqueueOpaqueMessageResponse { Success = true };
     }
 
     public override async Task ConnectRelay(
@@ -68,118 +96,79 @@ public sealed class RelayService : Contracts.RelayService.RelayServiceBase
         var senderPublicIdentityIdBytes = Convert.FromHexString(senderPublicIdentityIdStr);
         var senderPublicIdentityId = new PublicIdentityId(new Guid(senderPublicIdentityIdBytes));
 
-        // Determine if sender is a local self identity or a remote peer
-        var publicIdentityLookup = await _peerIdentityQueries.GetPeerOrSelfIdByPublicIdentityIdAsync(senderPublicIdentityId, context.CancellationToken);
-        if (publicIdentityLookup is null)
-        {
-            throw new RpcException(new Status(StatusCode.NotFound, "Sender identity not found"));
-        }
-
-        // Get the delivery certificate for this client to check expiry
-        DeliveryCertificate? certificate;
-        if (publicIdentityLookup.Value.IsPeer)
-        {
-            // For remote peers, use IDeliveryCertificateStore (certificates issued by external relays)
-            // TODO: Determine which ChatSelfId to use for certificate lookup
-            certificate = await _deliveryCertificateStore.GetCertificateAsync(
-                note("TODO: Determine SelfId"), // ChatSelfId - need to determine
-                new ChatPeerId(publicIdentityLookup.Value.PeerId.Value), // ChatPeerId - need to determine relay peer ID
-                context.CancellationToken);
-        }
-        else
-        {
-            // For local self identities, use ISelfCertificateService (self-generated certificates)
-            certificate = await _selfCertificateService.GenerateValidCertAsync(publicIdentityLookup.Value.SelfId, context.CancellationToken);
-        }
-
-        if (certificate is null)
-        {
-            throw new RpcException(new Status(StatusCode.Unauthenticated, "No delivery certificate found"));
-        }
-
-        // Register the client's stream using PublicIdentityId (not PeerId or ChatSelfId)
-        _streamManager.RegisterClient(senderPublicIdentityId, responseStream);
+        // Create a channel for this client's live messages
+        var channel = System.Threading.Channels.Channel.CreateUnbounded<ServerRelayStream>();
+        (_liveDispatcher as GrpcRelayLiveDispatcher)?.RegisterStream(senderPublicIdentityId, channel);
 
         try
         {
-            // Flush any pending messages on connect
-            await FlushPendingMessagesAsync(senderPublicIdentityId, responseStream, context.CancellationToken);
+            // Flush offline/pending RelayEgressJobs on connect
+            await FlushOfflineJobsAsync(senderPublicIdentityId, responseStream, context.CancellationToken);
 
-            // Process incoming stream messages with periodic certificate expiry checking
-            var certificateCheckInterval = TimeSpan.FromSeconds(30);
-            var lastCertificateCheck = DateTimeOffset.UtcNow;
+            // Start background task to process acknowledgments from requestStream
+            var ackProcessingTask = ProcessRequestStreamAsync(requestStream, senderPublicIdentityId, context.CancellationToken);
 
-            await foreach (var clientMessage in requestStream.ReadAllAsync(context.CancellationToken))
+            // Pump live messages from channel to responseStream
+            await foreach (var message in channel.Reader.ReadAllAsync(context.CancellationToken))
             {
-                // Periodic certificate expiry check
-                var now = DateTimeOffset.UtcNow;
-                if (now - lastCertificateCheck >= certificateCheckInterval)
-                {
-                    if (now >= certificate.ExpiresAtUtc)
-                    {
-                        _logger.LogWarning("Certificate expired for client {PublicIdentityId}, dropping stream", senderPublicIdentityId);
-                        throw new RpcException(new Status(StatusCode.Unauthenticated, "Delivery certificate expired"));
-                    }
-                    lastCertificateCheck = now;
-                }
-
-                await ProcessClientMessageAsync(clientMessage, senderPublicIdentityId, context.CancellationToken);
+                await responseStream.WriteAsync(message, context.CancellationToken);
             }
+
+            await ackProcessingTask;
         }
         finally
         {
             // Ensure cleanup on disconnect
-            _streamManager.RemoveClient(senderPublicIdentityId);
+            (_liveDispatcher as GrpcRelayLiveDispatcher)?.UnregisterStream(senderPublicIdentityId);
             _logger.LogInformation("Client {PublicIdentityId} disconnected from relay", senderPublicIdentityId);
         }
     }
 
-    private async Task FlushPendingMessagesAsync(
+    private async Task FlushOfflineJobsAsync(
         PublicIdentityId senderPublicIdentityId,
         IServerStreamWriter<ServerRelayStream> responseStream,
         CancellationToken ct)
     {
-        var pendingMessages = await _messageQueueQueries.FetchAsync(senderPublicIdentityId, maxCount: 100, ct);
-
-        foreach (var (ackId, blob) in pendingMessages)
+        // Map PublicIdentityId to NetworkPeerId
+        var peerIdentity = await _peerIdentityQueries.GetByPublicIdentityIdAsync(senderPublicIdentityId, ct);
+        if (peerIdentity is null)
         {
-            var delivery = new ServerRelayStream
-            {
-                OpaqueDelivery = new OpaqueMessageDelivery
-                {
-                    AckId = ByteString.CopyFrom(ackId.ToByteArray()),
-                    OpaquePayload = ByteString.CopyFrom(blob.Span)
-                }
-            };
-
-            await responseStream.WriteAsync(delivery, ct);
-            _logger.LogDebug("Flushed pending message {AckId} to client {PublicIdentityId}", ackId, senderPublicIdentityId);
+            _logger.LogWarning("No peer identity found for {PublicIdentityId}", senderPublicIdentityId);
+            return;
         }
 
-        _logger.LogInformation("Flushed {Count} pending messages to client {PublicIdentityId}", pendingMessages.Count, senderPublicIdentityId);
+        var networkPeerId = new NetworkPeerId(peerIdentity.Id.Value);
+
+        // Fetch offline/pending RelayEgressJobs
+        var offlineJobs = await _egressJobRepository.GetByDestinationPeerIdAsync(networkPeerId, ct);
+
+        foreach (var job in offlineJobs)
+        {
+            var serverStream = ServerRelayStream.Parser.ParseFrom(job.PayloadBytes);
+            await responseStream.WriteAsync(serverStream, ct);
+            _logger.LogDebug("Flushed offline job {JobId} to client {PublicIdentityId}", job.JobId, senderPublicIdentityId);
+        }
+
+        _logger.LogInformation("Flushed {Count} offline jobs to client {PublicIdentityId}", offlineJobs.Count, senderPublicIdentityId);
     }
 
-    private async Task ProcessClientMessageAsync(
-        ClientRelayStream clientMessage,
+    private async Task ProcessRequestStreamAsync(
+        IAsyncStreamReader<ClientRelayStream> requestStream,
         PublicIdentityId senderPublicIdentityId,
         CancellationToken ct)
     {
-        switch (clientMessage.PayloadCase)
+        await foreach (var clientMessage in requestStream.ReadAllAsync(ct))
         {
-            case ClientRelayStream.PayloadOneofCase.MessageAck:
-                // Delete the acknowledged message from the queue
-                if (Guid.TryParse(clientMessage.MessageAck.AckId.ToString(), out var ackId))
+            // Listen to the requestStream for ClientRelayStream acknowledgements
+            if (clientMessage.PayloadCase == ClientRelayStream.PayloadOneofCase.MessageAck)
+            {
+                if (clientMessage.MessageAck.AckId is not null)
                 {
-                    var deleted = await _messageQueueRepository.DeleteByAckIdAsync(ackId, ct);
-                    if (deleted)
-                    {
-                        _logger.LogDebug("Deleted acknowledged message {AckId} for client {PublicIdentityId}", ackId, senderPublicIdentityId);
-                    }
+                    var ackId = new Guid(clientMessage.MessageAck.AckId.ToByteArray());
+                    await _egressJobRepository.DeleteAsync(ackId, ct);
+                    _logger.LogDebug("Deleted acknowledged job {AckId} for client {PublicIdentityId}", ackId, senderPublicIdentityId);
                 }
-                break;
-            default:
-                _logger.LogWarning("Unknown message type from client {PublicIdentityId}", senderPublicIdentityId);
-                break;
+            }
         }
     }
 }

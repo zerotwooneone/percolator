@@ -1,28 +1,22 @@
 using Percolator.Chat.GroupLedger;
 using Percolator.Chat.Messaging.ValueObjects;
-using Percolator.Cryptography;
+using Percolator.Cryptography.GroupLedger;
 
 namespace Percolator.Application.Chat;
 
 public interface IRelayGroupOrchestrator
 {
-    Task<RelayGroupOperationStatus> PublishGroupRelayMessageAsync(
+    Task<RelayGroupOperationStatus> ProcessAnonymousGroupRequestAsync(
         ConversationId conversationId,
-        uint requestedEpoch,
+        uint senderKeyId,
         ZkPresentationBytes presentation,
-        CiphertextBytes ciphertext,
+        IReadOnlyList<Percolator.Identity.PublicIdentityId> targetIdentities,
+        CiphertextBytes? ciphertext,
+        EncryptedGroupProfileBytes? newEncryptedEntries,
+        uint? newEpoch,
         CancellationToken cancellationToken);
 
-    Task<RelayGroupOperationStatus> ModifyGroupAsync(
-        ConversationId conversationId,
-        uint baseEpoch,
-        ZkPresentationBytes presentation,
-        EncryptedGroupProfileBytes newEncryptedProfile,
-        IReadOnlyList<Percolator.Identity.PublicIdentityId> addPublicIdentityIds,
-        IReadOnlyList<Percolator.Identity.PublicIdentityId> removePublicIdentityIds,
-        CancellationToken cancellationToken);
-
-    Task<(RelayGroupOperationStatus Status, RelayGroupLedger? Ledger)> GetGroupStateAsync(
+    Task<(RelayGroupOperationStatus Status, RelayGroupStateDto? State)> GetGroupStateAsync(
         ConversationId conversationId,
         ZkPresentationBytes presentation,
         CancellationToken cancellationToken);

@@ -57,6 +57,24 @@ public sealed class GroupConversation
     }
 
     /// <summary>
+    /// Rehydrates a GroupConversation from persistence.
+    /// </summary>
+    public static GroupConversation Rehydrate(
+        ConversationId id,
+        GroupName name,
+        GroupEpoch currentEpoch,
+        GroupAvatarId avatarId,
+        IEnumerable<GroupMember> members)
+    {
+        return new GroupConversation(
+            id,
+            name,
+            currentEpoch,
+            avatarId,
+            members);
+    }
+
+    /// <summary>
     /// Renames the group. Only admins can perform this action.
     /// </summary>
     public void RenameGroup(ParticipantId actorParticipantId, GroupName newName)

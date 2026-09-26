@@ -283,7 +283,6 @@ async Task HostCommandHandler(InvocationContext context)
             services.AddApplicationServices(config);
             services.AddPrekey();
             services.AddDhtInfrastructure();
-            services.AddMessageQueueInfrastructure();
         });
 
     var host = builder.Build();
