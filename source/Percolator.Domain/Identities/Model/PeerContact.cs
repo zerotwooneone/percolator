@@ -1,5 +1,7 @@
+using System.Buffers.Binary;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Domain.Security.Ports;
 
 namespace Percolator.Domain.Identities.Model;
 
@@ -13,6 +15,8 @@ public enum PeerTrustLevel
 
 public sealed class PeerContact : AggregateRoot<PublicIdentityId>
 {
+    public const int MaxRegisteredDevicesPerPeer = 32;
+
     public override PublicIdentityId Id => RemotePeerId;
     public PublicIdentityId OwnerIdentityId { get; }
     public PublicIdentityId RemotePeerId { get; }
@@ -36,6 +40,9 @@ public sealed class PeerContact : AggregateRoot<PublicIdentityId>
         Nickname = nickname;
         TrustLevel = trustLevel;
         CreatedAtUtc = createdAtUtc;
+
+        // Primary device is implicitly registered
+        _registeredDevices.Add(DeviceId.Primary);
     }
 
     public void UpdateTrust(PeerTrustLevel trustLevel)
@@ -43,9 +50,39 @@ public sealed class PeerContact : AggregateRoot<PublicIdentityId>
         TrustLevel = trustLevel;
     }
 
-    public void RegisterDevice(DeviceId deviceId)
+    public DomainResult RegisterSecondaryDevice(
+        DeviceId deviceId,
+        IdentityPublicKey secondaryDevicePublicKey,
+        DeviceLinkProof linkProof,
+        IdentityPublicKey primaryPeerPublicKey,
+        ICryptoEngine cryptoEngine)
     {
+        if (deviceId.IsPrimary)
+        {
+            return DomainResult.Failure(new DomainError("INVALID_DEVICE_ID", "Cannot register primary device as secondary."));
+        }
+
+        if (_registeredDevices.Contains(deviceId))
+        {
+            return DomainResult.Success();
+        }
+
+        if (_registeredDevices.Count >= MaxRegisteredDevicesPerPeer)
+        {
+            return DomainResult.Failure(new DomainError("MAX_DEVICES_EXCEEDED", $"Cannot register more than {MaxRegisteredDevicesPerPeer} devices for a peer."));
+        }
+
+        Span<byte> messageToVerify = stackalloc byte[4 + 32];
+        BinaryPrimitives.WriteUInt32LittleEndian(messageToVerify[..4], deviceId.Value);
+        secondaryDevicePublicKey.Span.CopyTo(messageToVerify[4..]);
+
+        if (!cryptoEngine.VerifyEd25519Signature(primaryPeerPublicKey, messageToVerify, linkProof.Span))
+        {
+            return DomainResult.Failure(new DomainError("INVALID_LINK_PROOF_SIGNATURE", "The device link proof signature is invalid or forged."));
+        }
+
         _registeredDevices.Add(deviceId);
+        return DomainResult.Success();
     }
 
     public void RecordActivity(DateTimeOffset timestampUtc)

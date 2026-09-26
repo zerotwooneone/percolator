@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
 
@@ -6,12 +7,14 @@ namespace Percolator.Domain.Tests.TestDoubles;
 
 public sealed class DeterministicCryptoEngine : ICryptoEngine
 {
+    public bool SignaturesAlwaysValid { get; set; } = true;
+    private byte _keyPairCounter = 1;
+
     public (ChainKey NextChainKey, MessageKey DerivedMessageKey) StepRatchet(ChainKey currentChainKey)
     {
         Span<byte> nextChainBytes = stackalloc byte[32];
         Span<byte> messageKeyBytes = stackalloc byte[32];
 
-        // Deterministic derivation: SHA256(currentChainKey || 0x01) and SHA256(currentChainKey || 0x02)
         Span<byte> buffer = stackalloc byte[33];
         currentChainKey.Span.CopyTo(buffer);
 
@@ -22,6 +25,34 @@ public sealed class DeterministicCryptoEngine : ICryptoEngine
         SHA256.HashData(buffer, messageKeyBytes);
 
         return (ChainKey.FromSpan(nextChainBytes), MessageKey.FromSpan(messageKeyBytes));
+    }
+
+    public (ChainKey NextRootKey, ChainKey DerivedChainKey) KdfRk(ChainKey currentRootKey, SharedSecret dhSecret)
+    {
+        Span<byte> nextRootBytes = stackalloc byte[32];
+        Span<byte> chainKeyBytes = stackalloc byte[32];
+
+        Span<byte> buffer = stackalloc byte[65];
+        currentRootKey.Span.CopyTo(buffer);
+        dhSecret.Span.CopyTo(buffer[32..64]);
+
+        buffer[64] = 0x10;
+        SHA256.HashData(buffer, nextRootBytes);
+
+        buffer[64] = 0x20;
+        SHA256.HashData(buffer, chainKeyBytes);
+
+        return (ChainKey.FromSpan(nextRootBytes), ChainKey.FromSpan(chainKeyBytes));
+    }
+
+    public (byte[] PrivateKey, IdentityPublicKey PublicKey) GenerateEphemeralKeyPair()
+    {
+        byte val = _keyPairCounter++;
+        var priv = new byte[32];
+        var pub = new byte[32];
+        Array.Fill(priv, val);
+        Array.Fill(pub, (byte)(val + 100));
+        return (priv, IdentityPublicKey.FromSpan(pub));
     }
 
     public SharedSecret ComputeDiffieHellman(ReadOnlySpan<byte> privateKey, ReadOnlySpan<byte> publicKey)
@@ -36,7 +67,6 @@ public sealed class DeterministicCryptoEngine : ICryptoEngine
 
     public byte[] EncryptAesGcm(ReadOnlySpan<byte> key, ReadOnlySpan<byte> nonce, ReadOnlySpan<byte> plaintext, ReadOnlySpan<byte> associatedData)
     {
-        // Simple deterministic test mock: plaintext prefixed with nonce
         var result = new byte[plaintext.Length + nonce.Length];
         nonce.CopyTo(result);
         plaintext.CopyTo(result.AsSpan(nonce.Length));
@@ -47,5 +77,11 @@ public sealed class DeterministicCryptoEngine : ICryptoEngine
     {
         if (ciphertext.Length < nonce.Length) return [];
         return ciphertext[nonce.Length..].ToArray();
+    }
+
+    public bool VerifyEd25519Signature(IdentityPublicKey publicKey, ReadOnlySpan<byte> message, ReadOnlySpan<byte> signature)
+    {
+        if (!SignaturesAlwaysValid) return false;
+        return publicKey.Span.Length == 32 && signature.Length == 64;
     }
 }

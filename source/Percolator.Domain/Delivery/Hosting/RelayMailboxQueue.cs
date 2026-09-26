@@ -10,7 +10,9 @@ public sealed class RelayMailboxQueue : AggregateRoot<Guid>
     public override Guid Id { get; }
     public PublicIdentityId RelayIdentityId { get; }
 
+    private readonly Dictionary<BlindedRoutingToken, DeliveryToken> _authorizedTokens = [];
     private readonly List<MailboxEnvelope> _envelopes = [];
+
     public IReadOnlyList<MailboxEnvelope> Envelopes => _envelopes.AsReadOnly();
     public int TotalCount => _envelopes.Count;
 
@@ -20,8 +22,44 @@ public sealed class RelayMailboxQueue : AggregateRoot<Guid>
         RelayIdentityId = relayIdentityId;
     }
 
-    public DomainResult Enqueue(MailboxEnvelope envelope, IDateTimeProvider timeProvider)
+    public void RegisterRecipient(BlindedRoutingToken routingToken, DeliveryToken deliveryToken)
     {
+        _authorizedTokens[routingToken] = deliveryToken;
+    }
+
+    public void RevokeRecipient(BlindedRoutingToken routingToken)
+    {
+        _authorizedTokens.Remove(routingToken);
+    }
+
+    public DomainResult Enqueue(
+        MailboxEnvelope envelope,
+        DeliveryToken presentedToken,
+        IDateTimeProvider timeProvider,
+        PurgePolicy? policy = null)
+    {
+        var effectivePolicy = policy ?? PurgePolicy.Default;
+
+        if (!_authorizedTokens.TryGetValue(envelope.RecipientToken, out var authorizedToken) || authorizedToken != presentedToken)
+        {
+            return DomainResult.Failure(new DomainError(
+                "UNAUTHORIZED_DELIVERY_TOKEN",
+                "The presented delivery token is invalid or not authorized for this recipient mailbox."));
+        }
+
+        if (_envelopes.Count >= effectivePolicy.MaxRetainedEnvelopes)
+        {
+            // First attempt to purge expired
+            PurgeExpired(timeProvider);
+
+            if (_envelopes.Count >= effectivePolicy.MaxRetainedEnvelopes)
+            {
+                return DomainResult.Failure(new DomainError(
+                    "MAILBOX_QUOTA_EXCEEDED",
+                    $"Relay mailbox queue reached maximum capacity of {effectivePolicy.MaxRetainedEnvelopes} envelopes."));
+            }
+        }
+
         _envelopes.Add(envelope);
         AddDomainEvent(new EnvelopeBufferedEvent(envelope.Id, envelope.RecipientToken, timeProvider.UtcNow));
         return DomainResult.Success();
@@ -49,7 +87,6 @@ public sealed class RelayMailboxQueue : AggregateRoot<Guid>
         }
 
         int toRemoveCount = _envelopes.Count - maxRetainedCount;
-        // Sort by EnqueuedAtUtc ascending (oldest first)
         _envelopes.Sort((a, b) => a.EnqueuedAtUtc.CompareTo(b.EnqueuedAtUtc));
         _envelopes.RemoveRange(0, toRemoveCount);
         return toRemoveCount;

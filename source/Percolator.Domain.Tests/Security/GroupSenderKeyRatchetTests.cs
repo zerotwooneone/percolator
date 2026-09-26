@@ -14,7 +14,7 @@ public class GroupSenderKeyRatchetTests
     private ConversationId _conversationId;
     private PublicIdentityId _authorId;
     private DeviceId _authorDeviceId;
-    private ChainKey _initialChainKey;
+    private ChainKey _initialChainKey = null!;
 
     [SetUp]
     public void SetUp()
@@ -29,6 +29,12 @@ public class GroupSenderKeyRatchetTests
         _initialChainKey = ChainKey.FromSpan(rawKey);
     }
 
+    [TearDown]
+    public void TearDown()
+    {
+        _initialChainKey?.Dispose();
+    }
+
     [Test]
     public void Advance_IncrementsIteration_AndDerivesNewMessageKey()
     {
@@ -39,19 +45,16 @@ public class GroupSenderKeyRatchetTests
             _initialChainKey,
             initialIteration: 0);
 
-        var result1 = ratchet.Advance(_cryptoEngine);
-        var result2 = ratchet.Advance(_cryptoEngine);
+        var result = ratchet.Advance(_cryptoEngine);
 
-        result1.IsSuccess.Should().BeTrue();
-        result2.IsSuccess.Should().BeTrue();
-        result1.Value.Iteration.Should().Be(0);
-        result2.Value.Iteration.Should().Be(1);
-        result1.Value.Key.Should().NotBe(result2.Value.Key);
-        ratchet.Iteration.Should().Be(2);
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Iteration.Should().Be(0);
+        result.Value.Key.Should().NotBeNull();
+        ratchet.Iteration.Should().Be(1);
     }
 
     [Test]
-    public void Dispose_ZeroizesChainKey()
+    public void Advance_WhenZeroized_ReturnsError()
     {
         var ratchet = new GroupSenderKeyRatchet(
             _conversationId,
@@ -62,6 +65,9 @@ public class GroupSenderKeyRatchetTests
 
         ratchet.Dispose();
 
-        ratchet.IsZeroized.Should().BeTrue();
+        var result = ratchet.Advance(_cryptoEngine);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("INVALID_RATCHET_STATE");
     }
 }

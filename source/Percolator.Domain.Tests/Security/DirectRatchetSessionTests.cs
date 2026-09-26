@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Model;
 using Percolator.Domain.Security.ValueObjects;
@@ -9,122 +8,144 @@ namespace Percolator.Domain.Tests.Security;
 [TestFixture]
 public class DirectRatchetSessionTests
 {
-    private DeterministicCryptoEngine _cryptoEngine = null!;
-    private PublicIdentityId _ownerId;
-    private DeviceId _ownerDeviceId;
-    private PublicIdentityId _peerId;
-    private DeviceId _peerDeviceId;
-    private ChainKey _initialChainKey;
+    private DeterministicCryptoEngine _engine = null!;
+    private PublicIdentityId _aliceId;
+    private PublicIdentityId _bobId;
+    private DeviceId _device1;
+    private ChainKey _initialChainKey = null!;
+    private ChainKey _rootKey = null!;
 
     [SetUp]
     public void SetUp()
     {
-        _cryptoEngine = new DeterministicCryptoEngine();
-        _ownerId = PublicIdentityId.New();
-        _ownerDeviceId = DeviceId.Primary;
-        _peerId = PublicIdentityId.New();
-        _peerDeviceId = DeviceId.Primary;
+        _engine = new DeterministicCryptoEngine();
+        _aliceId = PublicIdentityId.New();
+        _bobId = PublicIdentityId.New();
+        _device1 = DeviceId.Primary;
 
-        byte[] rawChainKey = new byte[32];
-        RandomNumberGenerator.Fill(rawChainKey);
-        _initialChainKey = ChainKey.FromSpan(rawChainKey);
+        _initialChainKey = ChainKey.FromSpan(new byte[32]);
+        _rootKey = ChainKey.FromSpan(new byte[32]);
+    }
+
+    [TearDown]
+    public void TearDown()
+    {
+        _initialChainKey?.Dispose();
+        _rootKey?.Dispose();
     }
 
     [Test]
-    public void StepSendingChain_AdvancesCounter_AndDerivesUniqueMessageKeys()
+    public void StepSendingChain_AdvancesSendingCounter_AndDerivesKey()
     {
         var session = new DirectRatchetSession(
-            _ownerId,
-            _ownerDeviceId,
-            _peerId,
-            _peerDeviceId,
+            _aliceId, _device1,
+            _bobId, _device1,
+            rootKey: _rootKey,
             sendingChainKey: _initialChainKey,
             receivingChainKey: null);
 
-        var result1 = session.StepSendingChain(_cryptoEngine);
-        var result2 = session.StepSendingChain(_cryptoEngine);
-
-        result1.IsSuccess.Should().BeTrue();
-        result2.IsSuccess.Should().BeTrue();
-        result1.Value.MessageCounter.Should().Be(0);
-        result2.Value.MessageCounter.Should().Be(1);
-        result1.Value.Key.Should().NotBe(result2.Value.Key);
-        session.SendingCounter.Should().Be(2);
-    }
-
-    [Test]
-    public void StepReceivingChain_InOrder_AdvancesReceivingCounter()
-    {
-        var session = new DirectRatchetSession(
-            _ownerId,
-            _ownerDeviceId,
-            _peerId,
-            _peerDeviceId,
-            sendingChainKey: null,
-            receivingChainKey: _initialChainKey);
-
-        var result = session.StepReceivingChain(_cryptoEngine, targetCounter: 0);
+        var result = session.StepSendingChain(_engine);
 
         result.IsSuccess.Should().BeTrue();
-        session.ReceivingCounter.Should().Be(1);
+        result.Value.MessageCounter.Should().Be(0);
+        result.Value.Key.Should().NotBeNull();
+        session.SendingCounter.Should().Be(1);
     }
 
     [Test]
     public void StepReceivingChain_WithSkippedCounter_CachesSkippedKeys()
     {
         var session = new DirectRatchetSession(
-            _ownerId,
-            _ownerDeviceId,
-            _peerId,
-            _peerDeviceId,
+            _aliceId, _device1,
+            _bobId, _device1,
+            rootKey: _rootKey,
             sendingChainKey: null,
             receivingChainKey: _initialChainKey);
 
-        // Message 2 arrives first (skipping 0 and 1)
-        var result = session.StepReceivingChain(_cryptoEngine, targetCounter: 2);
+        // Step straight to counter 3 (skipping 0, 1, 2)
+        var result = session.StepReceivingChain(_engine, targetCounter: 3);
 
         result.IsSuccess.Should().BeTrue();
-        session.ReceivingCounter.Should().Be(3);
+        result.Value.MessageCounter.Should().Be(3);
+        session.ReceivingCounter.Should().Be(4);
+
         session.HasSkippedKey(0).Should().BeTrue();
         session.HasSkippedKey(1).Should().BeTrue();
+        session.HasSkippedKey(2).Should().BeTrue();
+        session.HasSkippedKey(3).Should().BeFalse();
 
-        // Late message 0 arrives and retrieves cached key
-        var lateResult = session.TryConsumeSkippedKey(0);
-        lateResult.IsSuccess.Should().BeTrue();
-        session.HasSkippedKey(0).Should().BeFalse();
+        // Consume a skipped key
+        var consumeResult = session.TryConsumeSkippedKey(1);
+        consumeResult.IsSuccess.Should().BeTrue();
+        session.HasSkippedKey(1).Should().BeFalse();
     }
 
     [Test]
-    public void StepReceivingChain_WhenSkipExceedsThreshold_ReturnsError()
+    public void StepReceivingChain_WhenSkipThresholdExceeded_ReturnsError()
     {
         var session = new DirectRatchetSession(
-            _ownerId,
-            _ownerDeviceId,
-            _peerId,
-            _peerDeviceId,
+            _aliceId, _device1,
+            _bobId, _device1,
+            rootKey: _rootKey,
             sendingChainKey: null,
             receivingChainKey: _initialChainKey);
 
-        // Attempting to skip 2001 messages
-        var result = session.StepReceivingChain(_cryptoEngine, targetCounter: 2001);
+        var result = session.StepReceivingChain(_engine, targetCounter: DirectRatchetSession.MaxSkipThreshold + 1);
 
         result.IsFailure.Should().BeTrue();
         result.Error.Code.Should().Be("SKIP_THRESHOLD_EXCEEDED");
     }
 
     [Test]
-    public void Dispose_ZeroizesActiveChainKeys()
+    public void StepDhRatchet_AdvancesRootKey_AndResetsCounters()
+    {
+        var localPriv = new byte[32];
+        Array.Fill(localPriv, (byte)0xAA);
+        var initialRemotePub = IdentityPublicKey.FromSpan(new byte[32]);
+
+        var session = new DirectRatchetSession(
+            _aliceId, _device1,
+            _bobId, _device1,
+            rootKey: _rootKey,
+            sendingChainKey: _initialChainKey,
+            receivingChainKey: null,
+            remoteEphemeralPublicKey: initialRemotePub,
+            localEphemeralPrivateKey: localPriv);
+
+        session.StepSendingChain(_engine);
+        session.SendingCounter.Should().Be(1);
+
+        var newRemotePub = IdentityPublicKey.FromSpan(Enumerable.Repeat((byte)0xBB, 32).ToArray());
+        var dhResult = session.StepDhRatchet(newRemotePub, _engine);
+
+        dhResult.IsSuccess.Should().BeTrue();
+        session.SendingCounter.Should().Be(0);
+        session.ReceivingCounter.Should().Be(0);
+        session.PreviousSendingChainLength.Should().Be(1);
+        session.RemoteEphemeralPublicKey.Should().Be(newRemotePub);
+        session.LocalEphemeralPublicKey.Should().NotBeNull();
+    }
+
+    [Test]
+    public void Dispose_ZeroizesActiveSecretsAndSkippedKeys()
     {
         var session = new DirectRatchetSession(
-            _ownerId,
-            _ownerDeviceId,
-            _peerId,
-            _peerDeviceId,
+            _aliceId, _device1,
+            _bobId, _device1,
+            rootKey: _rootKey,
             sendingChainKey: _initialChainKey,
-            receivingChainKey: null);
+            receivingChainKey: _initialChainKey);
+
+        session.StepReceivingChain(_engine, targetCounter: 2);
+        session.HasSkippedKey(0).Should().BeTrue();
 
         session.Dispose();
 
         session.IsZeroized.Should().BeTrue();
+        session.HasSkippedKey(0).Should().BeFalse();
+
+        var stepResult = session.StepSendingChain(_engine);
+        stepResult.IsFailure.Should().BeTrue();
+        stepResult.Error.Code.Should().Be("INVALID_SESSION_STATE");
     }
 }

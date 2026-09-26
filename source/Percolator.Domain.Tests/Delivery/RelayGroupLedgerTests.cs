@@ -108,7 +108,6 @@ public class RelayGroupLedgerTests
             _dummyParams,
             _timeProvider).Value;
 
-        // Try to commit against stale epoch (e.g. baseEpoch = 5 instead of 0)
         var result = ledger.CommitMutation(
             baseEpoch: new EpochNumber(5),
             newBlob: _dummyBlob,
@@ -145,5 +144,51 @@ public class RelayGroupLedgerTests
 
         result.IsFailure.Should().BeTrue();
         result.Error.Code.Should().Be("INVALID_ZK_PROOF");
+    }
+
+    [Test]
+    public void VerifyDispatch_WithValidProofBoundToCiphertext_Succeeds()
+    {
+        var token = BlindedRoutingToken.New();
+        var ledger = RelayGroupLedger.CreateGenesis(
+            _conversationId,
+            _relayIdentityId,
+            _dummyBlob,
+            new HashSet<BlindedRoutingToken> { token },
+            _dummyParams,
+            _timeProvider).Value;
+
+        byte[] ciphertext = new byte[] { 1, 2, 3, 4 };
+        var result = ledger.VerifyDispatch(_dummyProof, ciphertext, _zkEngine);
+
+        result.IsSuccess.Should().BeTrue();
+    }
+
+    [Test]
+    public void CommitMutation_WhenTokensExceedMaxCapacity_ReturnsError()
+    {
+        var token1 = BlindedRoutingToken.New();
+        var ledger = RelayGroupLedger.CreateGenesis(
+            _conversationId,
+            _relayIdentityId,
+            _dummyBlob,
+            new HashSet<BlindedRoutingToken> { token1 },
+            _dummyParams,
+            _timeProvider).Value;
+
+        var oversizedRoster = Enumerable.Range(0, RelayGroupLedger.MaxGroupMembers + 1)
+            .Select(_ => BlindedRoutingToken.New())
+            .ToHashSet();
+
+        var result = ledger.CommitMutation(
+            baseEpoch: EpochNumber.Genesis,
+            newBlob: _dummyBlob,
+            newTokens: oversizedRoster,
+            proof: _dummyProof,
+            proofEngine: _zkEngine,
+            _timeProvider);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("MAX_GROUP_CAPACITY_EXCEEDED");
     }
 }

@@ -1,28 +1,32 @@
+using System.Buffers.Binary;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Domain.Security.Ports;
 
 namespace Percolator.Domain.Identities.Model;
 
 public sealed class DeviceRecord : IEntity<DeviceId>
 {
-    public DeviceId Id { get; }
+    public DeviceId Id => DeviceId;
+    public DeviceId DeviceId { get; }
     public string DeviceName { get; private set; }
-    public IdentityPublicKey DevicePublicKey { get; private set; }
-    public DeviceLinkProof? LinkProof { get; private set; }
-    public DateTimeOffset RegisteredAtUtc { get; private set; }
+    public IdentityPublicKey DevicePublicKey { get; }
+    public DeviceLinkProof? LinkProof { get; }
+    public DateTimeOffset CreatedAtUtc { get; }
+    public DateTimeOffset? LastSeenAtUtc { get; private set; }
 
     private DeviceRecord(
-        DeviceId id,
+        DeviceId deviceId,
         string deviceName,
         IdentityPublicKey devicePublicKey,
         DeviceLinkProof? linkProof,
-        DateTimeOffset registeredAtUtc)
+        DateTimeOffset createdAtUtc)
     {
-        Id = id;
+        DeviceId = deviceId;
         DeviceName = deviceName;
         DevicePublicKey = devicePublicKey;
         LinkProof = linkProof;
-        RegisteredAtUtc = registeredAtUtc;
+        CreatedAtUtc = createdAtUtc;
     }
 
     public static DomainResult<DeviceRecord> CreatePrimary(
@@ -49,6 +53,8 @@ public sealed class DeviceRecord : IEntity<DeviceId>
         DeviceId deviceId,
         IdentityPublicKey devicePublicKey,
         DeviceLinkProof linkProof,
+        IdentityPublicKey primaryIdentityPublicKey,
+        ICryptoEngine cryptoEngine,
         string deviceName,
         IDateTimeProvider timeProvider)
     {
@@ -65,6 +71,20 @@ public sealed class DeviceRecord : IEntity<DeviceId>
         if (linkProof == null)
         {
             return DomainResult<DeviceRecord>.Failure(new DomainError("MISSING_LINK_PROOF", "Secondary device requires a valid DeviceLinkProof."));
+        }
+
+        if (primaryIdentityPublicKey == null)
+        {
+            return DomainResult<DeviceRecord>.Failure(new DomainError("NULL_PRIMARY_KEY", "Primary identity public key is required to verify link proof."));
+        }
+
+        Span<byte> messageToVerify = stackalloc byte[4 + 32];
+        BinaryPrimitives.WriteUInt32LittleEndian(messageToVerify[..4], deviceId.Value);
+        devicePublicKey.Span.CopyTo(messageToVerify[4..]);
+
+        if (!cryptoEngine.VerifyEd25519Signature(primaryIdentityPublicKey, messageToVerify, linkProof.Span))
+        {
+            return DomainResult<DeviceRecord>.Failure(new DomainError("INVALID_LINK_PROOF_SIGNATURE", "The device link proof signature is invalid or forged."));
         }
 
         var record = new DeviceRecord(
