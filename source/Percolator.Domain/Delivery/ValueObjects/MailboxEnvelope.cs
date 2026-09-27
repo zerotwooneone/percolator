@@ -1,7 +1,7 @@
 namespace Percolator.Domain.Delivery.ValueObjects;
 
 public readonly record struct MailboxEnvelope(
-    Guid Id,
+    EnvelopeId Id,
     BlindedRoutingToken RecipientToken,
     ReadOnlyMemory<byte> Ciphertext,
     DateTimeOffset EnqueuedAtUtc,

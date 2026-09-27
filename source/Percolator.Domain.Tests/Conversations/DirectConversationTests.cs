@@ -24,9 +24,33 @@ public class DirectConversationTests
     }
 
     [Test]
+    public void Create_WithValidParameters_ReturnsSuccess()
+    {
+        var result = DirectConversation.Create(_conversationId, _ownerId, _peerId, _timeProvider);
+
+        result.IsSuccess.Should().BeTrue();
+        var conv = result.Value;
+        conv.Id.Should().Be(_conversationId);
+        conv.OwnerIdentityId.Should().Be(_ownerId);
+        conv.RemotePeerId.Should().Be(_peerId);
+        conv.CreatedAtUtc.Should().Be(_timeProvider.UtcNow);
+        conv.LastActivityUtc.Should().Be(_timeProvider.UtcNow);
+        conv.LastReadMessageId.Should().BeNull();
+    }
+
+    [Test]
+    public void Create_WithSelfAsPeer_ReturnsSelfConversationNotAllowedError()
+    {
+        var result = DirectConversation.Create(_conversationId, _ownerId, _ownerId, _timeProvider);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("SELF_CONVERSATION_NOT_ALLOWED");
+    }
+
+    [Test]
     public void AppendMessage_AppendsMessage_AndUpdatesLastActivityTimestamp()
     {
-        var conversation = new DirectConversation(_conversationId, _ownerId, _peerId, _timeProvider.UtcNow);
+        var conversation = DirectConversation.Create(_conversationId, _ownerId, _peerId, _timeProvider).Value;
 
         _timeProvider.Advance(TimeSpan.FromMinutes(5));
         var message = new Message(
@@ -47,7 +71,7 @@ public class DirectConversationTests
     [Test]
     public void MarkAsRead_UpdatesLastReadMessageId()
     {
-        var conversation = new DirectConversation(_conversationId, _ownerId, _peerId, _timeProvider.UtcNow);
+        var conversation = DirectConversation.Create(_conversationId, _ownerId, _peerId, _timeProvider).Value;
         var msgId = MessageId.New();
 
         conversation.MarkAsRead(msgId);

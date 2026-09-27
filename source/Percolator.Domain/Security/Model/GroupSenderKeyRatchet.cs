@@ -7,14 +7,14 @@ using Percolator.Domain.Security.ValueObjects;
 
 namespace Percolator.Domain.Security.Model;
 
-public sealed class GroupSenderKeyRatchet : AggregateRoot<Guid>, ISensitiveSecret
+public sealed class GroupSenderKeyRatchet : AggregateRoot<SessionId>, ISensitiveSecret
 {
-    public override Guid Id { get; }
+    public override SessionId Id { get; }
     public ConversationId ConversationId { get; }
     public PublicIdentityId AuthorId { get; }
     public DeviceId AuthorDeviceId { get; }
 
-    private byte[]? _chainKeyBytes;
+    private ChainKey? _chainKey;
     public uint Iteration { get; private set; }
     public bool IsZeroized { get; private set; }
 
@@ -24,28 +24,28 @@ public sealed class GroupSenderKeyRatchet : AggregateRoot<Guid>, ISensitiveSecre
         DeviceId authorDeviceId,
         ChainKey initialChainKey,
         uint initialIteration = 0,
-        Guid? id = null)
+        SessionId? id = null)
     {
-        Id = id ?? Guid.NewGuid();
+        Id = id ?? SessionId.New();
         ConversationId = conversationId;
         AuthorId = authorId;
         AuthorDeviceId = authorDeviceId;
-        _chainKeyBytes = initialChainKey.Span.ToArray();
+        _chainKey = ChainKey.FromSpan(initialChainKey.Span);
         Iteration = initialIteration;
     }
 
     public DomainResult<(uint Iteration, MessageKey Key)> Advance(ICryptoEngine engine)
     {
-        if (IsZeroized || _chainKeyBytes == null)
+        if (IsZeroized || _chainKey == null)
         {
             return DomainResult<(uint, MessageKey)>.Failure(new DomainError("INVALID_RATCHET_STATE", "Sender key ratchet has been zeroized."));
         }
 
-        var currentChainKey = ChainKey.FromSpan(_chainKeyBytes);
-        var (nextChainKey, messageKey) = engine.StepRatchet(currentChainKey);
+        var previousKey = _chainKey;
+        var (nextChainKey, messageKey) = engine.StepRatchet(previousKey);
 
-        CryptographicOperations.ZeroMemory(_chainKeyBytes);
-        _chainKeyBytes = nextChainKey.Span.ToArray();
+        _chainKey = nextChainKey;
+        previousKey.Dispose();
 
         uint currentIteration = Iteration++;
         return DomainResult<(uint, MessageKey)>.Success((currentIteration, messageKey));
@@ -53,10 +53,10 @@ public sealed class GroupSenderKeyRatchet : AggregateRoot<Guid>, ISensitiveSecre
 
     public void Zeroize()
     {
-        if (_chainKeyBytes != null)
+        if (_chainKey != null)
         {
-            CryptographicOperations.ZeroMemory(_chainKeyBytes);
-            _chainKeyBytes = null;
+            _chainKey.Dispose();
+            _chainKey = null;
         }
 
         IsZeroized = true;

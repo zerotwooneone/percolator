@@ -93,6 +93,22 @@ public class DeviceRecordTests
     }
 
     [Test]
+    public void CreateSecondaryDevice_WithZeroDeviceId_ReturnsError()
+    {
+        var result = DeviceRecord.CreateSecondary(
+            new DeviceId(0),
+            _dummyKey,
+            _dummyProof,
+            _primaryKey,
+            _cryptoEngine,
+            "Phone",
+            _timeProvider);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("INVALID_DEVICE_ID");
+    }
+
+    [Test]
     public void CreateSecondaryDevice_WithoutLinkProof_ReturnsError()
     {
         var result = DeviceRecord.CreateSecondary(

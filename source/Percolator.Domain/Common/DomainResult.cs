@@ -18,15 +18,20 @@ public readonly record struct DomainResult
 
 public readonly record struct DomainResult<T>
 {
+    private readonly T _value;
+
     public bool IsSuccess { get; }
     public bool IsFailure => !IsSuccess;
-    public T Value { get; }
     public DomainError Error { get; }
+
+    public T Value => IsSuccess
+        ? _value
+        : throw new InvalidOperationException($"Cannot access Value of failed result ({Error.Code}: {Error.Description}).");
 
     private DomainResult(bool isSuccess, T value, DomainError error)
     {
         IsSuccess = isSuccess;
-        Value = value;
+        _value = value;
         Error = error;
     }
 

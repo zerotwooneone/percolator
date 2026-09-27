@@ -30,7 +30,7 @@ public class RelayMailboxQueueTests
     public void Enqueue_WithValidDeliveryToken_StoresEnvelope()
     {
         var envelope = new MailboxEnvelope(
-            Guid.NewGuid(),
+            EnvelopeId.New(),
             _recipientToken,
             new byte[] { 1, 2, 3 },
             _timeProvider.UtcNow,
@@ -47,7 +47,7 @@ public class RelayMailboxQueueTests
     {
         var invalidToken = DeliveryToken.FromSpan(Enumerable.Repeat((byte)0xFF, 32).ToArray());
         var envelope = new MailboxEnvelope(
-            Guid.NewGuid(),
+            EnvelopeId.New(),
             _recipientToken,
             new byte[] { 1, 2, 3 },
             _timeProvider.UtcNow,
@@ -66,14 +66,14 @@ public class RelayMailboxQueueTests
         var tightPolicy = new PurgePolicy(DefaultTtl: TimeSpan.FromDays(1), MaxRetainedEnvelopes: 1);
 
         var env1 = new MailboxEnvelope(
-            Guid.NewGuid(),
+            EnvelopeId.New(),
             _recipientToken,
             new byte[] { 1 },
             _timeProvider.UtcNow,
             _timeProvider.UtcNow.AddDays(1));
 
         var env2 = new MailboxEnvelope(
-            Guid.NewGuid(),
+            EnvelopeId.New(),
             _recipientToken,
             new byte[] { 2 },
             _timeProvider.UtcNow,
@@ -91,14 +91,14 @@ public class RelayMailboxQueueTests
     public void PurgeExpired_RemovesOnlyExpiredEnvelopes()
     {
         var expiredEnv = new MailboxEnvelope(
-            Guid.NewGuid(),
+            EnvelopeId.New(),
             _recipientToken,
             new byte[] { 1 },
             _timeProvider.UtcNow.AddDays(-2),
             _timeProvider.UtcNow.AddDays(-1));
 
         var validEnv = new MailboxEnvelope(
-            Guid.NewGuid(),
+            EnvelopeId.New(),
             _recipientToken,
             new byte[] { 2 },
             _timeProvider.UtcNow,
@@ -121,9 +121,9 @@ public class RelayMailboxQueueTests
         var otherDeliveryToken = DeliveryToken.FromSpan(new byte[32]);
         _queue.RegisterRecipient(otherToken, otherDeliveryToken);
 
-        var env1 = new MailboxEnvelope(Guid.NewGuid(), _recipientToken, new byte[] { 1 }, _timeProvider.UtcNow, _timeProvider.UtcNow.AddDays(1));
-        var env2 = new MailboxEnvelope(Guid.NewGuid(), otherToken, new byte[] { 2 }, _timeProvider.UtcNow, _timeProvider.UtcNow.AddDays(1));
-        var env3 = new MailboxEnvelope(Guid.NewGuid(), _recipientToken, new byte[] { 3 }, _timeProvider.UtcNow, _timeProvider.UtcNow.AddDays(1));
+        var env1 = new MailboxEnvelope(EnvelopeId.New(), _recipientToken, new byte[] { 1 }, _timeProvider.UtcNow, _timeProvider.UtcNow.AddDays(1));
+        var env2 = new MailboxEnvelope(EnvelopeId.New(), otherToken, new byte[] { 2 }, _timeProvider.UtcNow, _timeProvider.UtcNow.AddDays(1));
+        var env3 = new MailboxEnvelope(EnvelopeId.New(), _recipientToken, new byte[] { 3 }, _timeProvider.UtcNow, _timeProvider.UtcNow.AddDays(1));
 
         _queue.Enqueue(env1, _deliveryToken, _timeProvider);
         _queue.Enqueue(env2, otherDeliveryToken, _timeProvider);

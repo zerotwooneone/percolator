@@ -58,9 +58,9 @@ public sealed class DeviceRecord : IEntity<DeviceId>
         string deviceName,
         IDateTimeProvider timeProvider)
     {
-        if (deviceId.IsPrimary)
+        if (deviceId.IsPrimary || !deviceId.IsValid)
         {
-            return DomainResult<DeviceRecord>.Failure(new DomainError("INVALID_DEVICE_ID", "Secondary device cannot have Primary DeviceId(1)."));
+            return DomainResult<DeviceRecord>.Failure(new DomainError("INVALID_DEVICE_ID", "Secondary device must have a valid non-zero DeviceId and cannot be Primary DeviceId(1)."));
         }
 
         if (devicePublicKey == null)

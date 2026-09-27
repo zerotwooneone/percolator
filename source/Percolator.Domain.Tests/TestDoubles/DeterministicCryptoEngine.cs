@@ -45,14 +45,14 @@ public sealed class DeterministicCryptoEngine : ICryptoEngine
         return (ChainKey.FromSpan(nextRootBytes), ChainKey.FromSpan(chainKeyBytes));
     }
 
-    public (byte[] PrivateKey, IdentityPublicKey PublicKey) GenerateEphemeralKeyPair()
+    public (EphemeralPrivateKey PrivateKey, IdentityPublicKey PublicKey) GenerateEphemeralKeyPair()
     {
         byte val = _keyPairCounter++;
-        var priv = new byte[32];
-        var pub = new byte[32];
-        Array.Fill(priv, val);
-        Array.Fill(pub, (byte)(val + 100));
-        return (priv, IdentityPublicKey.FromSpan(pub));
+        Span<byte> priv = stackalloc byte[32];
+        Span<byte> pub = stackalloc byte[32];
+        priv.Fill(val);
+        pub.Fill((byte)(val + 100));
+        return (EphemeralPrivateKey.FromSpan(priv), IdentityPublicKey.FromSpan(pub));
     }
 
     public SharedSecret ComputeDiffieHellman(ReadOnlySpan<byte> privateKey, ReadOnlySpan<byte> publicKey)
@@ -81,7 +81,6 @@ public sealed class DeterministicCryptoEngine : ICryptoEngine
 
     public bool VerifyEd25519Signature(IdentityPublicKey publicKey, ReadOnlySpan<byte> message, ReadOnlySpan<byte> signature)
     {
-        if (!SignaturesAlwaysValid) return false;
-        return publicKey.Span.Length == 32 && signature.Length == 64;
+        return SignaturesAlwaysValid;
     }
 }

@@ -45,6 +45,8 @@ public class GroupSenderKeyRatchetTests
             _initialChainKey,
             initialIteration: 0);
 
+        ratchet.Id.IsValid.Should().BeTrue();
+
         var result = ratchet.Advance(_cryptoEngine);
 
         result.IsSuccess.Should().BeTrue();

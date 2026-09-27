@@ -4,9 +4,9 @@ using Percolator.Domain.Identities.ValueObjects;
 
 namespace Percolator.Domain.Delivery.Hosting;
 
-public sealed class RelayMailboxQueue : AggregateRoot<Guid>
+public sealed class RelayMailboxQueue : AggregateRoot<QueueId>
 {
-    public override Guid Id { get; }
+    public override QueueId Id { get; }
     public PublicIdentityId RelayIdentityId { get; }
 
     private readonly Dictionary<BlindedRoutingToken, DeliveryToken> _authorizedTokens = [];
@@ -15,9 +15,9 @@ public sealed class RelayMailboxQueue : AggregateRoot<Guid>
     public IReadOnlyList<MailboxEnvelope> Envelopes => _envelopes.AsReadOnly();
     public int TotalCount => _envelopes.Count;
 
-    public RelayMailboxQueue(PublicIdentityId relayIdentityId, Guid? id = null)
+    public RelayMailboxQueue(PublicIdentityId relayIdentityId, QueueId? id = null)
     {
-        Id = id ?? Guid.NewGuid();
+        Id = id ?? QueueId.New();
         RelayIdentityId = relayIdentityId;
     }
 

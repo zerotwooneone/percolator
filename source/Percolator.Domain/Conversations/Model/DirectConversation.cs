@@ -17,7 +17,7 @@ public sealed class DirectConversation : AggregateRoot<ConversationId>
     private readonly List<Message> _messages = [];
     public IReadOnlyList<Message> Messages => _messages.AsReadOnly();
 
-    public DirectConversation(
+    private DirectConversation(
         ConversationId id,
         PublicIdentityId ownerIdentityId,
         PublicIdentityId remotePeerId,
@@ -28,6 +28,36 @@ public sealed class DirectConversation : AggregateRoot<ConversationId>
         RemotePeerId = remotePeerId;
         CreatedAtUtc = createdAtUtc;
         LastActivityUtc = createdAtUtc;
+    }
+
+    public static DomainResult<DirectConversation> Create(
+        ConversationId id,
+        PublicIdentityId ownerIdentityId,
+        PublicIdentityId remotePeerId,
+        IDateTimeProvider timeProvider)
+    {
+        if (!id.IsValid)
+        {
+            return DomainResult<DirectConversation>.Failure(new DomainError("INVALID_CONVERSATION_ID", "ConversationId cannot be empty."));
+        }
+
+        if (!ownerIdentityId.IsValid)
+        {
+            return DomainResult<DirectConversation>.Failure(new DomainError("INVALID_OWNER_ID", "OwnerIdentityId cannot be empty."));
+        }
+
+        if (!remotePeerId.IsValid)
+        {
+            return DomainResult<DirectConversation>.Failure(new DomainError("INVALID_PEER_ID", "RemotePeerId cannot be empty."));
+        }
+
+        if (ownerIdentityId == remotePeerId)
+        {
+            return DomainResult<DirectConversation>.Failure(new DomainError("SELF_CONVERSATION_NOT_ALLOWED", "Owner cannot establish a direct conversation with self."));
+        }
+
+        var conversation = new DirectConversation(id, ownerIdentityId, remotePeerId, timeProvider.UtcNow);
+        return DomainResult<DirectConversation>.Success(conversation);
     }
 
     public DomainResult AppendMessage(Message message, IDateTimeProvider timeProvider)

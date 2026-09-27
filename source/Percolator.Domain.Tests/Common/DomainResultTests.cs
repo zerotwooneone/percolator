@@ -50,6 +50,17 @@ public class DomainResultTests
     }
 
     [Test]
+    public void FailureOfT_AccessingValue_ThrowsInvalidOperationException()
+    {
+        var error = new DomainError("NOT_FOUND", "Item was not found");
+        var result = DomainResult<string>.Failure(error);
+
+        var act = () => _ = result.Value;
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*NOT_FOUND*Item was not found*");
+    }
+
+    [Test]
     public void ImplicitConversion_FromValue_CreatesSuccessResult()
     {
         DomainResult<int> result = 42;

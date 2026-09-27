@@ -104,7 +104,8 @@ public sealed class RelayGroupLedger : AggregateRoot<ConversationId>
             return DomainResult.Failure(new DomainError("MAX_GROUP_CAPACITY_EXCEEDED", $"Group size cannot exceed {MaxGroupMembers} members."));
         }
 
-        byte[] transcriptChallenge = ComputeMutationChallenge(newBlob, newTokens);
+        Span<byte> transcriptChallenge = stackalloc byte[32];
+        ComputeMutationChallenge(newBlob, newTokens, transcriptChallenge);
 
         if (!proofEngine.VerifyGroupPresentation(CurrentEpoch.Value, proof, transcriptChallenge, PublicParams))
         {
@@ -142,7 +143,10 @@ public sealed class RelayGroupLedger : AggregateRoot<ConversationId>
         return DomainResult.Success();
     }
 
-    private static byte[] ComputeMutationChallenge(EncryptedEntriesBlob newBlob, IReadOnlySet<BlindedRoutingToken> newTokens)
+    private static void ComputeMutationChallenge(
+        EncryptedEntriesBlob newBlob,
+        IReadOnlySet<BlindedRoutingToken> newTokens,
+        Span<byte> destination)
     {
         using var sha = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         sha.AppendData(newBlob.Span);
@@ -154,6 +158,6 @@ public sealed class RelayGroupLedger : AggregateRoot<ConversationId>
             sha.AppendData(guidBytes);
         }
 
-        return sha.GetHashAndReset();
+        sha.GetHashAndReset(destination);
     }
 }

@@ -57,9 +57,9 @@ public sealed class PeerContact : AggregateRoot<PublicIdentityId>
         IdentityPublicKey primaryPeerPublicKey,
         ICryptoEngine cryptoEngine)
     {
-        if (deviceId.IsPrimary)
+        if (deviceId.IsPrimary || !deviceId.IsValid)
         {
-            return DomainResult.Failure(new DomainError("INVALID_DEVICE_ID", "Cannot register primary device as secondary."));
+            return DomainResult.Failure(new DomainError("INVALID_DEVICE_ID", "Secondary device must have a valid non-zero DeviceId and cannot be Primary DeviceId(1)."));
         }
 
         if (_registeredDevices.Contains(deviceId))

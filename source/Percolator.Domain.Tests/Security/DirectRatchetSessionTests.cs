@@ -99,8 +99,9 @@ public class DirectRatchetSessionTests
     [Test]
     public void StepDhRatchet_AdvancesRootKey_AndResetsCounters()
     {
-        var localPriv = new byte[32];
-        Array.Fill(localPriv, (byte)0xAA);
+        Span<byte> privBytes = stackalloc byte[32];
+        privBytes.Fill((byte)0xAA);
+        using var localPriv = EphemeralPrivateKey.FromSpan(privBytes);
         var initialRemotePub = IdentityPublicKey.FromSpan(new byte[32]);
 
         var session = new DirectRatchetSession(
