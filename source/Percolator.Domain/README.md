@@ -10,12 +10,12 @@ As the architectural anchor, this project contains the pure domain logic decoupl
 
 ### 1.1 Inward Dependency Rule
 Dependencies in Onion Architecture point strictly inward:
-- **Zero Inbound Dependencies:** `Percolator.Domain` has no dependencies on other solution projects (except source generators) and zero references to external frameworks.
-- **Wire Contract Decoupling:** The domain never references `Percolator.Contracts`, Protobuf definitions, or network serialization schemas. Wire models and domain models are distinct concerns separated by application mapping layers.
+- **Zero Inbound Dependencies:** `Percolator.Domain` has no dependencies on other solution projects (except compile-time code generators) and zero references to external frameworks.
+- **Wire Contract Decoupling:** The domain never references external contracts, Protobuf definitions, or network serialization schemas. Wire models and domain models are distinct concerns separated by application mapping layers.
 - **Framework Independence:** The domain is completely agnostic of databases, UI frameworks, cloud providers, and networking libraries.
 
 ### 1.2 Strict Temporal Determinism
-Aggregates and entities must never access system clocks directly (`DateTime.UtcNow` or `DateTimeOffset.UtcNow`). All temporal logic is passed explicitly or inverted via domain clock ports. This guarantees deterministic state transitions, replayable event streams, and repeatable unit testing.
+Aggregates and entities must never access system clocks directly. All temporal logic is passed explicitly or inverted via domain clock abstractions. This guarantees deterministic state transitions, replayable event streams, and repeatable unit testing.
 
 ### 1.3 Memory & Secret Hygiene
 In end-to-end encrypted messaging, cryptographic state management is a domain invariant. Any domain structure managing sensitive keys, ratchets, or secrets is responsible for its own memory lifecycle and zeroization upon disposal or state progression.
@@ -39,10 +39,10 @@ In end-to-end encrypted messaging, cryptographic state management is a domain in
 
 | Anti-Pattern / Technology | Where It Belongs | Why It Is Excluded |
 | :--- | :--- | :--- |
-| **Database & ORM Plumbing** | Infrastructure / Persistence | EF Core `DbContext`, SQL queries, migration scripts, column mapping attributes, and change tracking have no place in pure domain models. |
+| **Database & ORM Plumbing** | Infrastructure / Persistence | Data access contexts, SQL queries, migration scripts, column mapping attributes, and change tracking have no place in pure domain models. |
 | **Wire & Serialization Schemas** | Contracts / Infrastructure | Protobuf files, gRPC contracts, JSON serialization attributes, and DTOs couple domain logic to external communication protocols. |
 | **Transport Delivery Mechanisms** | Application / Infrastructure | Transactional outbox dispatching, polling workers, exponential backoff retries, and network socket management solve distributed systems problems, not business rules. |
-| **Network Idempotency (Inbox Pattern)** | Application / Infrastructure | Handling duplicate network packets, HTTP/gRPC stream deduplication, and transport acknowledgments are transport concerns. The domain enforces idempotency naturally via aggregate state and cryptographic counters. |
+| **Network Idempotency (Inbox Pattern)** | Application / Infrastructure | Handling duplicate network packets, stream deduplication, and transport acknowledgments are transport concerns. The domain enforces idempotency naturally via aggregate state and cryptographic counters. |
 | **Direct Hardware & OS Access** | Infrastructure | Direct file system access, network socket communication, and platform-specific cryptographic APIs belong behind domain port adapters. |
 | **Presentation & UI Concerns** | UI / Presentation Layer | ViewModels, command bindings, formatting strings for human presentation, and UI state machines must never leak into the domain. |
 
@@ -61,3 +61,40 @@ Because `Percolator.Domain` is completely isolated from I/O and external systems
 - All domain tests are fast, deterministic in-memory unit tests.
 - Tests never require network fixtures, databases, containers, or mock frameworks for external services.
 - Test doubles are implemented as simple in-memory fakes implementing domain ports.
+
+---
+
+## 6. Functional Requirements & Signal Protocol Alignment
+
+Percolator strictly models the security guarantees of the **Signal Protocol** (Extended Triple Diffie-Hellman, Double Ratchet, multi-device linking, and Signal Private Groups), extended to support **direct peer-to-peer handshakes**, **decentralized arbitrary relays**, and **opaque byte transport**.
+
+### 6.1 Core Domain Capabilities
+
+1. **Independent Identity Management:**
+   - The domain supports independent creation and lifecycle management of multiple local cryptographic identities without relying on phone numbers or centralized authority.
+2. **Key Rotation & Safety Number Invariants:**
+   - Identities can rotate long-term identity keys, signed pre-keys, and one-time pre-key pools over time.
+   - When a remote peer's public identity key changes, existing verification is invalidated and trust is automatically downgraded to untrusted, requiring re-verification of the contact's safety number.
+3. **Mutual Key Agreement (X3DH):**
+   - Direct or relayed mutual authentication establishes shared secrets between identities using ephemeral keys, identity keys, signed pre-keys, and optional one-time pre-keys.
+   - The derived master secret initializes end-to-end symmetric ratchet sessions.
+4. **Relay Pre-Key Hosting & Fine-Grained Boundaries:**
+   - Any node acting as a relay can host pre-key material for peers on an opt-in basis.
+   - Pre-key hosting is scoped per identity and per device, preventing unbounded in-memory registry growth and eliminating lock contention across unrelated peers.
+5. **Relay Quota Limits & DoS Resistance:**
+   - Relays enforce configurable maximum quotas on stored one-time pre-keys per identity to defend against storage exhaustion attacks.
+6. **Atomic Pre-Key Consumption & Fallback:**
+   - Relays dispense one-time pre-keys atomically on a first-in, first-out basis.
+   - When one-time pre-keys are exhausted, relays gracefully fall back to serving the valid signed pre-key, preserving forward secrecy while maintaining service continuity.
+7. **Asynchronous Hold-and-Forward Mailboxes:**
+   - Relays can store and forward opaque handshake payloads and messages for offline or unreachable peers.
+   - Routing and delivery authorization rely on cryptographic blind tokens, preventing relays from associating senders with recipients.
+8. **Decentralized Relay Group Genesis:**
+   - Identities that have established secure sessions with a common relay can establish group conversations.
+   - The relay manages group genesis, recording conversation identity, initial routing tokens, and starting epoch.
+9. **Private Group Governance & Epoch Forward Secrecy:**
+   - Group administration enforces role-based authorization for membership changes.
+   - Removing a group member automatically advances the conversation epoch, discarding previous sender keys to ensure former members cannot decrypt future communications (forward secrecy).
+   - Group roster updates on relays are verified anonymously using zero-knowledge proofs, preventing the relay from reconstructing the social graph.
+10. **Direct P2P & Multi-Relay Architectural Feasibility:**
+   - The domain operates strictly on abstract cryptographic state machines and opaque byte spans, remaining completely agnostic to physical network topology (direct socket, local mesh, or multi-hop relays).

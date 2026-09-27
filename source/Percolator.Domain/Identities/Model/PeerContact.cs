@@ -20,6 +20,7 @@ public sealed class PeerContact : AggregateRoot<PublicIdentityId>
     public override PublicIdentityId Id => RemotePeerId;
     public PublicIdentityId OwnerIdentityId { get; }
     public PublicIdentityId RemotePeerId { get; }
+    public IdentityPublicKey? PrimaryPublicKey { get; private set; }
     public string Nickname { get; private set; }
     public PeerTrustLevel TrustLevel { get; private set; }
     public DateTimeOffset CreatedAtUtc { get; private set; }
@@ -33,13 +34,15 @@ public sealed class PeerContact : AggregateRoot<PublicIdentityId>
         PublicIdentityId remotePeerId,
         string nickname,
         PeerTrustLevel trustLevel,
-        DateTimeOffset createdAtUtc)
+        DateTimeOffset createdAtUtc,
+        IdentityPublicKey? primaryPublicKey = null)
     {
         OwnerIdentityId = ownerIdentityId;
         RemotePeerId = remotePeerId;
         Nickname = nickname;
         TrustLevel = trustLevel;
         CreatedAtUtc = createdAtUtc;
+        PrimaryPublicKey = primaryPublicKey;
 
         // Primary device is implicitly registered
         _registeredDevices.Add(DeviceId.Primary);
@@ -48,6 +51,24 @@ public sealed class PeerContact : AggregateRoot<PublicIdentityId>
     public void UpdateTrust(PeerTrustLevel trustLevel)
     {
         TrustLevel = trustLevel;
+    }
+
+    public DomainResult RotatePrimaryPublicKey(IdentityPublicKey newKey)
+    {
+        if (newKey == null)
+        {
+            return DomainResult.Failure(new DomainError("NULL_PUBLIC_KEY", "New primary public key cannot be null."));
+        }
+
+        if (PrimaryPublicKey != null && PrimaryPublicKey.Equals(newKey))
+        {
+            return DomainResult.Success();
+        }
+
+        PrimaryPublicKey = newKey;
+        // Signal protocol: When an identity key changes, safety number changes -> trust drops to Untrusted.
+        TrustLevel = PeerTrustLevel.Untrusted;
+        return DomainResult.Success();
     }
 
     public DomainResult RegisterSecondaryDevice(

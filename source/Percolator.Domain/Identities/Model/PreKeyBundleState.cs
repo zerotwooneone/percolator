@@ -35,4 +35,9 @@ public sealed class PreKeyBundleState : AggregateRoot<DeviceId>
     {
         AvailableOneTimePreKeysCount += count;
     }
+
+    public void RotateSignedPreKey(DateTimeOffset newCreatedAtUtc)
+    {
+        SignedPreKeyCreatedAtUtc = newCreatedAtUtc;
+    }
 }

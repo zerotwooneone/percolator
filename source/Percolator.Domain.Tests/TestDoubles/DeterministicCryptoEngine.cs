@@ -69,6 +69,27 @@ public sealed class DeterministicCryptoEngine : ICryptoEngine
         return SharedSecret.FromSpan(hash);
     }
 
+    public SharedSecret DeriveX3dhMasterSecret(
+        ReadOnlySpan<byte> dh1,
+        ReadOnlySpan<byte> dh2,
+        ReadOnlySpan<byte> dh3,
+        ReadOnlySpan<byte> dh4 = default)
+    {
+        int totalLength = dh1.Length + dh2.Length + dh3.Length + (dh4.IsEmpty ? 0 : dh4.Length);
+        Span<byte> buffer = stackalloc byte[totalLength];
+        dh1.CopyTo(buffer);
+        dh2.CopyTo(buffer[dh1.Length..]);
+        dh3.CopyTo(buffer[(dh1.Length + dh2.Length)..]);
+        if (!dh4.IsEmpty)
+        {
+            dh4.CopyTo(buffer[(dh1.Length + dh2.Length + dh3.Length)..]);
+        }
+
+        Span<byte> hash = stackalloc byte[32];
+        SHA256.HashData(buffer, hash);
+        return SharedSecret.FromSpan(hash);
+    }
+
     public byte[] EncryptAesGcm(ReadOnlySpan<byte> key, ReadOnlySpan<byte> nonce, ReadOnlySpan<byte> plaintext, ReadOnlySpan<byte> associatedData)
     {
         var result = new byte[plaintext.Length + nonce.Length];
