@@ -2,19 +2,30 @@
 
 ## Milestone 1: Microkernel Pipeline & Plugin Contracts (`Percolator.Application2`)
 
-### 1.1 Pipeline Components & Behaviors
+### 1.1 Ingress Gateway & Edge Protection
+- **`IInboundIngressService` Port**: Inbound gateway entry point called by transport endpoints (gRPC `DeliverOpaqueMessage`, etc.). Enforces edge packet limits (e.g. max 64KB), parses outer envelope/session headers, invokes domain ratchet authenticated decryption, and forwards decrypted `ApplicationFrame` into the pipeline.
+- **Inbound Pipeline Sanitization Behaviors (`IPipelineBehavior<InboundPayloadContext>`)**:
+  - **`FrameSanityBehavior`**: Validates frame boundaries (size between 1 byte and 64KB limit) and checks that `AppId` is a recognized registered application ID before deserialization.
+  - **`DeduplicationBehavior`**: Idempotency filter using sliding-window / Bloom filter caching to drop duplicated or replayed packets.
+  - **`InboundRateLimitingBehavior`**: Anti-flood throttling per peer identity/device, rejecting spam bursts with `RATE_LIMIT_EXCEEDED`.
 - **`IPipelineBehavior<TContext>` & `PipelineDelegate<TContext>`**: Generic middleware delegate chain for inbound and outbound contexts.
 - **`PayloadDispatcher`**: Implements `IPayloadDispatcher`. Routes inbound decrypted payloads to registered `IAppPayloadHandler` based on `InboundPayloadContext.AppId`.
 - **`OutboundPipeline`**: Implements `IPayloadSender` and `IOutboundPipeline`. Validates non-empty payloads, executes outbound middleware pipeline, attaches `ApplicationFrame` header, and packages payload into an `OutboxJob`.
 - **`ServiceCollectionExtensions`**: DI extension methods `AddPercolatorApplication(this IServiceCollection services)` and `AddAppPlugin<TPlugin>(this IServiceCollection services)`.
 
 ### 1.2 Unit Tests (`Percolator.Application2.Tests/Pipeline`)
-- `PayloadDispatcherTests.DispatchAsync_WithRegisteredHandler_RoutesPayloadCorrectly`: asserts handler is invoked with matching context.
-- `PayloadDispatcherTests.DispatchAsync_WithUnregisteredAppId_ReturnsHandlerNotFoundError`: asserts `HANDLER_NOT_FOUND` domain error.
-- `PayloadDispatcherTests.DispatchAsync_WithEmptyPayload_ReturnsMalformedFrameError`: asserts guard rejection on 0-byte frame.
-- `PipelineBehaviorTests.OutboundPipeline_ExecutesMiddlewareInRegisteredOrder`: asserts sequential middleware execution order.
-- `PipelineBehaviorTests.OutboundPipeline_WhenMiddlewareFails_ShortCircuitsPipeline`: asserts execution halts when middleware returns error.
-- `DependencyInjectionTests.AddPercolatorApplication_RegistersCoreServices`: asserts resolving `IPayloadDispatcher` and `IPayloadSender`.
+- **Sanitization & Edge Defense Tests:**
+  - `FrameSanityBehaviorTests.HandleAsync_WithPayloadExceedingMaxLimit_ReturnsPayloadTooLargeError`: asserts rejection when frame exceeds 64KB.
+  - `FrameSanityBehaviorTests.HandleAsync_WithZeroLengthPayload_ReturnsMalformedFrameError`: asserts rejection on empty payload.
+  - `FrameSanityBehaviorTests.HandleAsync_WithUnrecognizedAppId_ReturnsUnknownAppIdError`: asserts rejection before handler dispatch.
+  - `DeduplicationBehaviorTests.HandleAsync_DuplicateMessage_SuppressesDownstreamExecution`: asserts duplicate dropped without invoking next delegate.
+  - `InboundRateLimitingBehaviorTests.HandleAsync_ExceedsBurstQuota_ReturnsRateLimitExceededError`: asserts throttling when quota exceeded.
+- **Dispatcher & Outbound Pipeline Tests:**
+  - `PayloadDispatcherTests.DispatchAsync_WithRegisteredHandler_RoutesPayloadCorrectly`: asserts handler is invoked with matching context.
+  - `PayloadDispatcherTests.DispatchAsync_WithUnregisteredAppId_ReturnsHandlerNotFoundError`: asserts `HANDLER_NOT_FOUND` domain error.
+  - `PipelineBehaviorTests.OutboundPipeline_ExecutesMiddlewareInRegisteredOrder`: asserts sequential middleware execution order.
+  - `PipelineBehaviorTests.OutboundPipeline_WhenMiddlewareFails_ShortCircuitsPipeline`: asserts execution halts when middleware returns error.
+  - `DependencyInjectionTests.AddPercolatorApplication_RegistersCoreServices`: asserts resolving `IPayloadDispatcher`, `IPayloadSender`, and `IInboundIngressService`.
 
 ---
 
