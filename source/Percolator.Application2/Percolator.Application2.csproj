@@ -2,6 +2,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Percolator.Domain\Percolator.Domain.csproj" />
+    <ProjectReference Include="..\Percolator.PluginSdk\Percolator.PluginSdk.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.0" />
   </ItemGroup>
 
   <PropertyGroup>

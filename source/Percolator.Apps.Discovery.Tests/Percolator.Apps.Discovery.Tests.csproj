@@ -24,7 +24,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Percolator.Apps.Discovery\Percolator.Apps.Discovery.csproj" />
-    <ProjectReference Include="..\Percolator.Application2\Percolator.Application2.csproj" />
+    <ProjectReference Include="..\Percolator.PluginSdk\Percolator.PluginSdk.csproj" />
     <ProjectReference Include="..\Percolator.Domain\Percolator.Domain.csproj" />
   </ItemGroup>
 

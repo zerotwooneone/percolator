@@ -5,12 +5,13 @@
 
 ## 1. Architectural Vision & Scope
 
-`Percolator.Application2` acts as the **application orchestration core** sitting directly on top of `Percolator.Domain`. While the domain is strictly isolated and agnostic to wire protocols, storage engines, and specific applications, `Percolator.Application2` is responsible for:
-- Orchestrating use cases across bounded contexts (Identities, Conversations, Security, Delivery).
-- Managing store-and-forward outbox workers, delivery retry policies, and transport routing.
-- Hosting an **Event-Driven Microkernel & Plugin Pipeline** that decouples application logic (Chat, Discovery, File Transfer) from core end-to-end encryption transport.
-- Enforcing the strict duality between **Control Plane** (in-band E2EE signaling) and **Data Plane** (out-of-band high-throughput P2P streaming).
-- Packaging cryptographic framing (`RatchetHeader`, `MailboxEnvelope`) and orchestrating cryptographic handshakes (X3DH initial sessions, pairwise Sender Key distribution, and ZK group relay dispatch).
+`Percolator.Application2` acts as the **application orchestration core** sitting directly on top of `Percolator.Domain` and `Percolator.PluginSdk`. In strict DDD and Onion Architecture:
+- `Percolator.Domain` is pure, isolated, and agnostic to transport, storage, and concrete applications.
+- `Percolator.PluginSdk` is the **lightweight shared abstraction library** defining plugin contracts, application contexts, and serializable payload abstractions (`AppId`, `IAppPlugin`, `IAppPayloadHandler`, `IPayloadSerializer`, `IPayloadSender`).
+- Applications (`Percolator.Apps.Chat`, `Percolator.Apps.Discovery`, `Percolator.Apps.FileTransfer`) depend *only* on `Percolator.PluginSdk` and `Percolator.Domain`. They have **zero** knowledge of the host pipeline engine, outbox worker, or database infrastructure.
+- `Percolator.Application2` hosts the **Event-Driven Microkernel & Plugin Pipeline**, manages outbox jobs, routes messages, and handles cryptographic orchestration across sessions.
+- Enforces the strict duality between **Control Plane** (in-band E2EE signaling via domain ratchets) and **Data Plane** (out-of-band high-throughput P2P streaming).
+- Declares clear **ports** for external concerns: `IPayloadSerializer` (Protobuf adapter in Infrastructure), `IOutboxRepository` (SQLite in Infrastructure), and `ITransportDispatcher` (gRPC/P2P sockets in Infrastructure).
 
 ```
  ┌────────────────────────────────────────────────────────────────────────────────────┐
@@ -22,8 +23,16 @@
  │   │  - Local Link Preview │  │ - Presence Tickets       │  │ - P2P Swarm (Data)    │  │
  │   └───────────┬───────────┘  └────────────┬─────────────┘  └───────────┬───────────┘  │
  └───────────────┼───────────────────────────┼────────────────────────────┼──────────────┘
-                 │ (Payload, AppId=0x01)     │ (Payload, AppId=0x02)      │ (Control Manifest, 0x03)
+                 │                           │                            │
                  ▼                           ▼                            ▼
+ ┌────────────────────────────────────────────────────────────────────────────────────┐
+ │                                Percolator.PluginSdk                                │
+ │       (IAppPlugin, IAppPayloadHandler, AppId, ApplicationFrame,                    │
+ │        InboundPayloadContext, OutboundPayloadContext, IPayloadSerializer,          │
+ │        IPayloadSender, DeliveryRoute)                                              │
+ └────────────────────────────────────────┬───────────────────────────────────────────┘
+                                          │
+                                          ▼
  ┌────────────────────────────────────────────────────────────────────────────────────┐
  │                         Percolator.Application2 (Microkernel Core)                 │
  │   ┌────────────────────────────────────────────────────────────────────────────┐   │
@@ -34,8 +43,8 @@
  │                                        │                                           │
  │   ┌────────────────────────────────────▼───────────────────────────────────────┐   │
  │   │                      Store-and-Forward Outbox Worker                       │   │
- │   │   - SQLite Job Queue & Transactional Consistency                           │   │
- │   │   - Exponential Backoff & Jitter Retry Policies                            │   │
+ │   │   - Job Queue & Transactional State Transitions                            │   │
+ │   │   - Exponential Backoff & Jitter Retry Scheduler                           │   │
  │   │   - Dormancy Watcher (Zero-Leakage "Black Hole" Rule)                      │   │
  │   └────────────────────────────────────┬───────────────────────────────────────┘   │
  └────────────────────────────────────────┼───────────────────────────────────────────┘
@@ -50,208 +59,245 @@
 
 ---
 
-## 2. Core Architectural Pillars
+## 2. Core Architectural Boundaries: Application vs. Infrastructure
 
-### 2.1 The Control Plane vs. Data Plane Duality
+### 2.1 Logical Application Framing vs. Infrastructure Wire Framing
+To prevent infrastructure concerns (sockets, packet magic bytes, network byte order, chunk framing) from polluting the application layer, framing is strictly segregated:
 
-Streaming multi-megabyte or gigabyte file chunks through the Double Ratchet or Group Sender Key ratchet destroys ratcheting counters, saturates relay bandwidth, and fragments local databases. To solve this, the architecture splits operations into two planes:
+1. **Logical Application Frame (`Percolator.PluginSdk`):**
+   - Models the clean domain/application data structure:
+     ```csharp
+     public readonly record struct AppId(byte Value)
+     {
+         public static readonly AppId SystemControl = new(0x00);
+         public static readonly AppId Chat = new(0x01);
+         public static readonly AppId Discovery = new(0x02);
+         public static readonly AppId FileTransferControl = new(0x03);
+     }
 
-1. **The Control Plane (In-Band E2EE via `Percolator.Domain`):**
-   - Transports all lightweight, latency-sensitive, and security-critical signaling.
-   - Chat messages, reactions, delivery/read receipts, typing notifications.
-   - DHT presence tickets, rendezvous discovery requests.
-   - File transfer manifests (infohashes, Merkle roots, file sizes, chunk sizes, and one-time symmetric encryption keys).
-   - Strict forward secrecy and post-compromise security via Double Ratchet / Sender Keys.
-2. **The Data Plane (Out-of-Band High-Throughput P2P):**
-   - Transports raw file chunks and heavy binary streams directly between peers or swarms (BitTorrent-style P2P sidecar, WebRTC data channels, or direct TCP/QUIC).
-   - Chunks are encrypted with ephemeral symmetric keys negotiated over the Control Plane and verified against the Merkle tree.
-   - The domain and relay never see or buffer raw file chunks; untrusted transport nodes only see opaque ciphertext blocks.
+     public sealed record ApplicationFrame(
+         AppId AppId,
+         ReadOnlyMemory<byte> Payload);
+     ```
+   - Application multiplexer tags and strips the 1-byte `AppId`.
+2. **Infrastructure Wire Layout (`Percolator.Infrastructure`):**
+   - The physical network socket wire framing (magic bytes `0x50 0x01`, 32-bit packet lengths, TLS framing, gRPC stream framing) lives entirely in `Percolator.Infrastructure` behind transport interfaces (`ITransportConnection`, `IPacketCodec`).
 
-### 2.2 Event-Driven Microkernel & Multiplexing Protocol
+### 2.2 Payload Serialization: Port & Adapter Pattern (Protobuf Strategy)
+To benefit from Protocol Buffers' robust forward/backwards compatibility without taking a hard dependency on protobuf packages inside the core application library:
+- **Shared Plugin Port (`Percolator.PluginSdk`):**
+  ```csharp
+  public interface IPayloadSerializer
+  {
+      ReadOnlyMemory<byte> Serialize<T>(T payload);
+      DomainResult<T> Deserialize<T>(ReadOnlyMemory<byte> data);
+  }
+  ```
+- **Infrastructure Adapter (`Percolator.Infrastructure.Serialization`):**
+  - Implements `ProtobufPayloadSerializer : IPayloadSerializer` using `Google.Protobuf` or `protobuf-net`.
+- **Unit Testing Adapter (`Percolator.Application2.Tests`):**
+  - A lightweight test serializer double is provided in the test project so tests execute rapidly (< 50ms) without native dependencies or protobuf compilation overhead.
 
-Every message sent across the network encapsulates an application header:
-- **Header:** 1-byte `AppId` (e.g., `0x01` Chat, `0x02` Discovery, `0x03` FileTransferControl, `0x00` SystemControl).
-- **Body:** Opaque application payload (`ReadOnlyMemory<byte>`), serialized and deserialized by the respective plugin.
+### 2.3 Outbox Persistence Boundary
+- **Port:** `IOutboxRepository` is declared in `Percolator.Application2.Delivery.Ports`.
+- **Strict Separation Mandate:** `InMemoryOutboxRepository` must **not** be defined in `Percolator.Application2`. Production persistence (SQLite) belongs in `Percolator.Infrastructure`.
+- **Test Doubles:** `InMemoryOutboxRepository` is defined strictly within the test suite (`Percolator.Application2.Tests/TestDoubles`) to support unit and integration testing.
 
-The microkernel pipeline provides:
-- **`IAppPlugin` / `IAppPayloadHandler`:** Plugin contract for handling specific `AppId` payloads.
-- **Middleware Chain:** Extensible pipeline handlers for inbound and outbound messages:
-  - Idempotency & Deduplication
-  - Anti-Flood & Rate Limiting
-  - Diagnostics & Privacy-Preserving Logging
-
----
-
-## 3. Cryptographic Orchestration & Framing Flows
-
-### 3.1 Flow A: Direct 1:1 Session Handshake & Ratchet
-1. **Outbound Initiation:**
-   - Client fetches Bob's published `PreKeyBundle`.
-   - Calls `DirectRatchetSession.InitiateOutbound(AliceId, AliceDeviceId, bobBundle, engine)`.
-   - Steps sending chain: receives `(counter = 0, messageKey, ephemeralPublicKey)`.
-   - Encrypts payload with `messageKey` via AES-GCM; packages plaintext `RatchetHeader(ephemeralPublicKey, counter, previousLength)`.
-   - Dispatches initial packet to Outbox.
-2. **Inbound Initiation:**
-   - Bob receives packet with `RatchetHeader`.
-   - Looks up corresponding local pre-key private key.
-   - Calls `DirectRatchetSession.InitiateInbound(BobId, BobDeviceId, AliceId, AliceDeviceId, localPreKeyPriv, header.EphemeralPublicKey, engine)`.
-   - Steps receiving chain: derives matching `messageKey` and decrypts payload.
-   - Session transitions to active Double Ratchet state.
-
-### 3.2 Flow B: 1:1 Over Store-and-Forward Relay
-1. **Envelope Packaging:**
-   - Application serializes payload and encrypts via `DirectRatchetSession`.
-   - Bundles `RatchetHeader` and ciphertext into `ReadOnlyMemory<byte>`.
-   - Wraps into `MailboxEnvelope(EnvelopeId.New(), RecipientToken, envelopeData, enqueuedAtUtc, expiresAtUtc)`.
-2. **Relay Enqueue & Drain:**
-   - Sender submits envelope with authorized `DeliveryToken` to `RelayMailboxQueue.Enqueue`.
-   - Relay verifies token, enforces quota policy, and buffers envelope.
-   - Recipient authenticates to relay, calls `RelayMailboxQueue.DrainForToken(RecipientToken)`, parses header, and steps ratchet.
-
-### 3.3 Flow C: Group Sender Key Fan-Out & ZK Relay Dispatch
-1. **Pairwise Key Distribution:**
-   - Group creator/author generates `GroupSenderKeyRatchet`.
-   - Packages distribution control payload: `SenderKeyDistributionPayload(ConversationId, InitialChainKey, Iteration)`.
-   - Transmits distribution payload to each group member pairwise via their established 1:1 `DirectRatchetSession` channels.
-   - Each member receives the control payload and instantiates a `GroupReceiverSession(ConversationId, AuthorId, AuthorDeviceId, chainKey)`.
-2. **Group Message Dispatch & Verification:**
-   - Author calls `GroupSenderKeyRatchet.Advance(engine)` ➔ derives `(iteration, messageKey)`.
-   - Encrypts message payload.
-   - Generates ZK membership presentation proof over the envelope ciphertext.
-   - Relay verifies proof against current group epoch via `RelayGroupLedger.VerifyDispatch()`.
-   - Relay broadcasts envelope to all `ActiveRoutingTokens`.
-   - Recipients receive envelope, call `GroupReceiverSession.AdvanceTo(iteration, engine)`, and decrypt payload (with out-of-order skipped key cache support).
+### 2.4 Dependency Injection
+- Standard Microsoft DI extension methods are exposed in `Percolator.Application2.DependencyInjection`:
+  ```csharp
+  public static class ServiceCollectionExtensions
+  {
+      public static IServiceCollection AddPercolatorApplication(this IServiceCollection services);
+      public static IServiceCollection AddAppPlugin<TPlugin>(this IServiceCollection services) 
+          where TPlugin : class, IAppPlugin;
+  }
+  ```
 
 ---
 
-## 4. Sub-System Specifications
+## 3. C# Pipeline & Microkernel Interface Contracts
 
-### 4.1 Sub-System 1: Outbox & Delivery Orchestrator (`Percolator.Application2.Delivery`)
-- **Lifecycle & Storage:**
-  - Persists `OutboxJob` entities via `IOutboxRepository`.
-  - Manages statuses: `Pending` ➔ `InFlight` ➔ `Delivered` (or `Failed` with exponential backoff).
-- **Zero-Leakage Inactivity ("Black Hole" Rule):**
-  - Listens to `IdentityDisabledEvent` from `Percolator.Domain`.
-  - Immediately transitions all pending jobs for the disabled persona to `PausedDormant`.
-  - Suppresses all outbound socket/relay connections for that identity without emitting network errors.
-- **Transport Routing:**
-  - Dispatches to direct P2P endpoints or relay gRPC mailboxes based on `DeliveryRoute` (`DirectP2P`, `RelayedOneToOne`, `RelayedGroup`).
+### 3.1 Plugin & Handler Contracts (in `Percolator.PluginSdk`)
+```csharp
+namespace Percolator.PluginSdk;
 
-### 4.2 Sub-System 2: Application Pipeline & Plugin Host (`Percolator.Application2.Pipeline`)
-- **Contracts:**
-  - `IAppPlugin`: Base contract declaring `AppId`, plugin metadata, and lifecycle hooks (`StartAsync`, `StopAsync`).
-  - `IAppPayloadHandler`: Handles inbound decrypted payloads for a specific `AppId` (`ReadOnlyMemory<byte>`).
-  - `IPayloadDispatcher`: Routes inbound decrypted messages from the domain ratchet session to the appropriate registered handler.
-  - `IOutboundPipeline`: Orchestrates application payload serialization, header attachment, ratchet session encryption, and outbox job creation.
-- **Middleware Infrastructure:**
-  - Pipeline context carrying `ConversationId`, `SenderIdentityId`, `RecipientIdentityId`, timestamp, and raw payload span.
+public interface IAppPlugin
+{
+    AppId Id { get; }
+    string Name { get; }
+    Task StartAsync(CancellationToken ct = default);
+    Task StopAsync(CancellationToken ct = default);
+}
 
-### 4.3 Sub-System 3: Chat Application Plugin (`Percolator.Apps.Chat`)
-- **Payload Schema (`AppId = 0x01`):**
-  - Text messages (UTF-8, limited markdown).
-  - Reactions: `(TargetMessageId, EmojiCode, Action: Add|Remove)`.
-  - Receipts: `(TargetMessageId, Status: Delivered|Read, TimestampUtc)`.
-- **Local Link Preview Engine (Signal-Style Privacy):**
-  - The *sender's* client extracts OpenGraph / microdata from links locally.
-  - Generates small compressed thumbnails (< 32KB).
-  - Encrypts preview metadata and thumbnail into the chat payload.
-  - The *recipient* renders the preview locally without ever fetching the external URL, preventing IP address leakage and tracking.
+public interface IAppPayloadHandler
+{
+    AppId TargetAppId { get; }
+    ValueTask<DomainResult> HandleInboundAsync(InboundPayloadContext context, CancellationToken ct = default);
+}
 
-### 4.4 Sub-System 4: Peer Discovery & DHT Plugin (`Percolator.Apps.Discovery`)
-- **Payload Schema (`AppId = 0x02`):**
-  - `DhtPing`, `DhtFindNode`, `DhtNodeAdvertisement`.
-- **Blinded DHT Identity Locators:**
-  - Opt-in discovery: Users can publish blinded locator tokens `SHA256(PublicIdentityId || Salt)` into a Kademlia DHT.
-  - Peers who know the shared secret or public identity can compute the locator and discover the peer's active relay endpoint or direct rendezvous IP.
-  - Zero linkage between DHT keys and actual identity keys for non-contacts.
+public sealed record InboundPayloadContext(
+    ConversationId ConversationId,
+    PublicIdentityId SenderIdentityId,
+    DeviceId SenderDeviceId,
+    AppId AppId,
+    ReadOnlyMemory<byte> Payload,
+    DateTimeOffset ReceivedAtUtc);
 
-### 4.5 Sub-System 5: Out-of-Band File Transfer Plugin (`Percolator.Apps.FileTransfer`)
-- **Control Plane (`AppId = 0x03`):**
-  - `FileManifestMessage`:
-    - `InfoHash` (SHA-256 of file descriptor)
-    - `MerkleRoot` (tree root of chunk hashes)
-    - `TotalSizeBytes`, `ChunkSizeBytes` (typically 32KB–128KB)
-    - `EphemeralKey` (256-bit AES-GCM or ChaCha20 key)
-- **Data Plane (Out-of-Band P2P Sidecar):**
-  - Independent transport channel: WebRTC DataChannel, direct TCP/QUIC, or BitTorrent swarm.
-  - Chunks requested via `Bitfield` and `PieceRequest` messages.
-  - Each chunk is verified against the Merkle tree before writing to disk.
-  - BitTorrent-style tit-for-tat or concurrent multi-source chunk downloading from swarm peers.
+public sealed record OutboundPayloadContext(
+    ConversationId ConversationId,
+    PublicIdentityId RecipientIdentityId,
+    AppId AppId,
+    ReadOnlyMemory<byte> Payload,
+    DeliveryRoute Route);
+
+public interface IPayloadSender
+{
+    ValueTask<DomainResult> SendPayloadAsync(OutboundPayloadContext context, CancellationToken ct = default);
+}
+```
+
+### 3.2 Dispatcher & Pipeline Behaviors (in `Percolator.Application2.Pipeline`)
+```csharp
+namespace Percolator.Application2.Pipeline;
+
+public delegate ValueTask<DomainResult> PipelineDelegate<TContext>(TContext context, CancellationToken ct);
+
+public interface IPipelineBehavior<TContext>
+{
+    ValueTask<DomainResult> HandleAsync(
+        TContext context, 
+        PipelineDelegate<TContext> next, 
+        CancellationToken ct);
+}
+
+public interface IPayloadDispatcher
+{
+    void RegisterHandler(IAppPayloadHandler handler);
+    ValueTask<DomainResult> DispatchAsync(InboundPayloadContext context, CancellationToken ct = default);
+}
+
+public interface IOutboundPipeline : IPayloadSender
+{
+    ValueTask<DomainResult<OutboxJob>> SendAndQueuePayloadAsync(
+        OutboundPayloadContext context, 
+        CancellationToken ct = default);
+}
+```
+
+### 3.3 Outbox & Delivery Ports (in `Percolator.Application2.Delivery.Ports`)
+```csharp
+namespace Percolator.Application2.Delivery.Ports;
+
+public interface IOutboxRepository
+{
+    Task<DomainResult> EnqueueAsync(OutboxJob job, CancellationToken ct = default);
+    Task<IReadOnlyList<OutboxJob>> FetchPendingJobsAsync(int batchSize, CancellationToken ct = default);
+    Task<DomainResult> UpdateStatusAsync(OutboxJobId jobId, OutboxStatus newStatus, CancellationToken ct = default);
+    Task<DomainResult> PauseJobsForIdentityAsync(PublicIdentityId identityId, CancellationToken ct = default);
+}
+
+public interface ITransportDispatcher
+{
+    Task<DomainResult> DispatchJobAsync(OutboxJob job, CancellationToken ct = default);
+}
+```
 
 ---
 
-## 5. Step-by-Step TDD Implementation Plan
+## 4. Cryptographic Orchestration Flows (Application Layer)
+
+1. **Direct 1:1 Flow (X3DH & Double Ratchet):**
+   - Outbound: Application checks for existing `DirectRatchetSession`. If absent, retrieves `PreKeyBundle` and calls `DirectRatchetSession.InitiateOutbound()`.
+   - Steps sending chain, derives `MessageKey`, encrypts payload (AES-GCM), attaches `RatchetHeader`, envelopes into `OutboxJob`.
+   - Inbound: Recipient receives packet, initializes `DirectRatchetSession.InitiateInbound()` via `RatchetHeader`, derives key, decrypts, and passes `ApplicationFrame` to `IPayloadDispatcher`.
+2. **Store-and-Forward Relay Flow:**
+   - Outbound: Encrypted payload + `RatchetHeader` wrapped into `MailboxEnvelope`. Dispatched to `RelayMailboxQueue` using `DeliveryToken`.
+   - Inbound: Recipient authenticates to relay using `BlindedRoutingToken`, drains envelopes, unpacks `RatchetHeader`, steps receiving ratchet, and dispatches decrypted payload.
+3. **Group Flow (Sender Keys & ZK Relay Dispatch):**
+   - Group Author initializes `GroupSenderKeyRatchet`, distributes initial `ChainKey` pairwise to members via 1:1 direct sessions.
+   - Members instantiate `GroupReceiverSession`.
+   - Author advances sender key, encrypts message, attaches ZK presentation proof, and submits envelope to relay.
+   - Relay verifies proof via `RelayGroupLedger.VerifyDispatch()` and broadcasts to active member routing tokens.
+   - Recipients decrypt via `GroupReceiverSession.AdvanceTo()`.
+
+---
+
+## 5. TDD Implementation Plan: Milestones & Unit Tests
+
+*Adhering strictly to `unit-testing.md`: Red-Green-Refactor sequence, tests written as code is written, asserting invariants and failure modes with virtualized time.*
 
 ### Milestone 1: Microkernel Pipeline & Plugin Contracts (`Percolator.Application2`)
-- **Tasks:**
-  - Define `IAppPlugin`, `IAppPayloadHandler`, `InboundPayloadContext`, `OutboundPayloadContext`.
-  - Implement `PayloadDispatcher` with `AppId` multiplexing (tagging first byte).
-  - Implement inbound/outbound middleware pipeline (`PipelineDelegate`, `IPipelineBehavior`).
-- **Tests (`Percolator.Application2.Tests`):**
-  - `PayloadDispatcherTests`: Verifies payload routing to correct `AppId` handler, unknown `AppId` handling, and malformed header rejection.
-  - `PipelineBehaviorTests`: Verifies middleware order execution, cancellation, and error handling.
+- **Components to Implement:**
+  - `IPipelineBehavior<TContext>`.
+  - `PayloadDispatcher`: multiplexes inbound payloads by `AppId`.
+  - `OutboundPipeline`: implements `IPayloadSender`, runs middleware behaviors, validates non-empty payloads, and encapsulates logical frame.
+  - DI registration: `AddPercolatorApplication()`, `AddAppPlugin<T>()`.
+- **Unit Tests Written (`Percolator.Application2.Tests`):**
+  - `PayloadDispatcherTests.DispatchAsync_WithRegisteredHandler_RoutesPayloadCorrectly`: verifies handler invocation.
+  - `PayloadDispatcherTests.DispatchAsync_WithUnregisteredAppId_ReturnsHandlerNotFoundError`: asserts `HANDLER_NOT_FOUND` error.
+  - `PayloadDispatcherTests.DispatchAsync_WithEmptyPayload_ReturnsMalformedFrameError`: boundary guard against 0-byte frames.
+  - `PipelineBehaviorTests.OutboundPipeline_ExecutesMiddlewareInRegisteredOrder`: asserts pipeline order.
+  - `PipelineBehaviorTests.OutboundPipeline_WhenMiddlewareFails_ShortCircuitsPipeline`: verifies failure propagation without calling next.
+  - `DependencyInjectionTests.AddPercolatorApplication_RegistersCoreServices`: asserts required services resolve.
 
-### Milestone 2: Outbox Worker & Transport Dispatcher (`Percolator.Application2`)
-- **Tasks:**
-  - Implement `OutboxWorker` (reactive/background channel processing pending `OutboxJob`s).
-  - Implement exponential backoff retry scheduler with jitter.
-  - Implement dormancy event listener: binds `IdentityDisabledEvent` to suspend jobs via `OutboxJob.PauseForDormancy`.
-- **Tests (`Percolator.Application2.Tests`):**
-  - `OutboxWorkerTests`: Successful delivery transitions job to `Delivered`.
-  - `OutboxRetryPolicyTests`: Transient failure increments retry count and sets backoff; terminal failure marks `Failed`.
-  - `DormancySuspensionTests`: Emitting `IdentityDisabledEvent` pauses pending outbox jobs and halts transmissions.
+### Milestone 2: Outbox Worker & Delivery Orchestrator (`Percolator.Application2`)
+- **Components to Implement:**
+  - `OutboxJob`, `OutboxJobId`, `OutboxStatus` (`Pending`, `InFlight`, `Delivered`, `Failed`, `PausedDormant`).
+  - `IOutboxRepository` (port), `ITransportDispatcher` (port).
+  - `InMemoryOutboxRepository` (implemented in `Percolator.Application2.Tests/TestDoubles` for testing).
+  - `OutboxRetryPolicy`: exponential backoff with jitter calculation.
+  - `OutboxWorker`: background channel processing pending jobs.
+  - `DormancyEventListener`: listens to `IdentityDisabledEvent` and transitions jobs to `PausedDormant` ("Black Hole" rule).
+- **Unit Tests Written (`Percolator.Application2.Tests`):**
+  - `OutboxWorkerTests.ProcessBatchAsync_WhenTransportSucceeds_MarksJobDelivered`: asserts status delta to `Delivered`.
+  - `OutboxWorkerTests.ProcessBatchAsync_WhenTransientFailure_SchedulesBackoff`: asserts retry count increment and future `NextAttemptUtc`.
+  - `OutboxWorkerTests.ProcessBatchAsync_WhenMaxRetriesExceeded_MarksJobFailed`: asserts terminal `Failed` state.
+  - `OutboxRetryPolicyTests.CalculateBackoff_IncreasesExponentiallyWithJitter`: boundary calculation tests.
+  - `DormancyEventListenerTests.OnIdentityDisabled_TransitionsAllIdentityJobsToPausedDormant`: verifies zero leakage for dormant personas.
+  - `InMemoryOutboxRepositoryTests.EnqueueAndFetch_AdheresToFifoAndStatusFilters`: verifies repository invariants using the test double.
 
 ### Milestone 3: Chat Application Plugin (`Percolator.Apps.Chat`)
-- **Tasks:**
-  - Implement `ChatPayload` binary/Protobuf serialization (text, reactions, receipts).
-  - Implement `ChatPlugin` (`IAppPlugin`, `AppId = 0x01`).
-  - Implement sender-side `LinkPreviewExtractor` and thumbnail packager.
-- **Tests (`Percolator.Apps.Chat.Tests`):**
-  - `ChatPayloadTests`: Serialization roundtrip for text, emoji reactions, and receipts.
-  - `ChatPluginTests`: Inbound payload triggers appropriate domain chat events.
-  - `LinkPreviewExtractorTests`: OpenGraph parser produces compact preview payloads without recipient network requests.
+- **Components to Implement:**
+  - `ChatPlugin` (`IAppPlugin`, `AppId = 0x01`).
+  - DTOs: `TextMessageDto`, `ReactionDto`, `ReceiptDto`.
+  - `ChatPayloadHandler` (`IAppPayloadHandler`): deserializes chat payload via `IPayloadSerializer` and emits domain conversation commands/events.
+  - `LinkPreviewExtractor`: sender-side OpenGraph metadata and compressed thumbnail packager.
+- **Unit Tests Written (`Percolator.Apps.Chat.Tests`):**
+  - `ChatPayloadHandlerTests.HandleInboundAsync_TextMessage_AppendsMessageToConversation`: asserts domain message appended.
+  - `ChatPayloadHandlerTests.HandleInboundAsync_EmojiReaction_AppliesReaction`: asserts reaction state delta.
+  - `ChatPayloadHandlerTests.HandleInboundAsync_ReadReceipt_UpdatesLastReadMessageId`: asserts read marker advance.
+  - `ChatPayloadHandlerTests.HandleInboundAsync_CorruptedPayload_ReturnsDeserializationError`: asserts error handling.
+  - `LinkPreviewExtractorTests.ExtractPreview_ValidHtml_GeneratesThumbnailUnder32KB`: asserts compact privacy preview generation.
 
 ### Milestone 4: Peer Discovery Plugin (`Percolator.Apps.Discovery`)
-- **Tasks:**
-  - Implement `DiscoveryPayload` (`AppId = 0x02`).
-  - Implement blinded locator derivation (`SHA256(PublicIdentityId || Salt)`).
-  - Implement rendezvous ping/pong state machine.
-- **Tests (`Percolator.Apps.Discovery.Tests`):**
-  - `BlindedLocatorTests`: Verifies deterministic blinded token generation and contact verification.
-  - `DiscoveryPluginTests`: Handles inbound peer lookup and returns relay routing descriptor.
+- **Components to Implement:**
+  - `DiscoveryPlugin` (`IAppPlugin`, `AppId = 0x02`).
+  - `DiscoveryPayloadHandler`: handles `DhtPing`, `DhtFindNode`, `DhtNodeAdvertisement`.
+  - `BlindedLocatorService`: computes `SHA256(PublicIdentityId || Salt)` for contact discovery.
+  - `RendezvousStateMachine`: manages rendezvous registration and expiration.
+- **Unit Tests Written (`Percolator.Apps.Discovery.Tests`):**
+  - `BlindedLocatorTests.ComputeLocator_IsDeterministicAndMatchesSharedSecret`: verifies zero linkability for non-contacts.
+  - `DiscoveryPayloadHandlerTests.HandleInboundAsync_Ping_ReturnsPongWithRelayDescriptor`: asserts rendezvous ping/pong.
+  - `RendezvousStateMachineTests.Register_WhenTtlExpired_PurgesExpiredRendezvousTickets`: asserts TTL purging with `IDateTimeProvider`.
 
-### Milestone 5: Control/Data Plane File Transfer Plugin (`Percolator.Apps.FileTransfer`)
-- **Tasks:**
-  - Implement Control Plane manifest schema (`FileManifestTicket`, `AppId = 0x03`).
-  - Implement Merkle tree chunk builder and proof verifier.
-  - Implement Data Plane chunk transport adapter (symmetric encryption per chunk, verified against Merkle leaf).
-- **Tests (`Percolator.Apps.FileTransfer.Tests`):**
-  - `FileManifestTests`: Manifest creation, serialization, and symmetric key exchange.
-  - `MerkleChunkVerifierTests`: Detects and rejects corrupted or tampered file chunks.
-  - `DataPlaneTransferTests`: Simulated multi-chunk transfer with out-of-band P2P mock, verifying zero Double Ratchet involvement.
+### Milestone 5: Out-of-Band File Transfer Plugin (`Percolator.Apps.FileTransfer`)
+- **Components to Implement:**
+  - `FileTransferPlugin` (`IAppPlugin`, `AppId = 0x03`).
+  - Control Plane: `FileManifestDto` (`InfoHash`, `MerkleRoot`, `TotalSizeBytes`, `ChunkSizeBytes`, `EphemeralSymmetricKey`).
+  - `MerkleTreeBuilder` & `MerkleProofVerifier`.
+  - Data Plane: `ChunkTransferAdapter` (transfers raw encrypted blocks directly out-of-band, verified against Merkle leaves).
+- **Unit Tests Written (`Percolator.Apps.FileTransfer.Tests`):**
+  - `FileManifestTests.CreateManifest_DerivesAccurateMerkleRootAndKey`: asserts manifest generation.
+  - `MerkleProofVerifierTests.VerifyChunk_ValidChunk_ReturnsTrue`: asserts valid proof verification.
+  - `MerkleProofVerifierTests.VerifyChunk_TamperedChunk_ReturnsFalse`: asserts corrupted chunk rejection.
+  - `ChunkTransferAdapterTests.Transfer_TransfersDataPlaneDirectlyWithoutRatchetInvolvement`: asserts zero Double Ratchet involvement.
 
 ### Milestone 6: End-to-End Cryptographic Integration Test Suite (`Percolator.Application2IntegrationTests`)
-- **Tasks:**
-  - Implement end-to-end integration test harnesses validating cryptographic orchestration between Application2, plugins, and the domain.
-- **Tests (`Percolator.Application2IntegrationTests`):**
+- **Tests Implemented (Run upon completion of Milestones 1–5):**
   - **`DirectOneToOneEncryptionIntegrationTests`:**
-    - Handshake initiation via `PreKeyBundle` and `DirectRatchetSession.InitiateOutbound` / `InitiateInbound`.
-    - Bidirectional messaging with alternating DH ratchets and symmetric stepping.
-    - Out-of-order message arrival with skipped-key recovery and replay protection.
-    - Application pipeline multiplexing (`AppId = 0x01` Chat text, reactions, receipts).
-    - Secret hygiene verification: session disposal zeroizes memory.
+    - Full X3DH handshake $\rightarrow$ Double Ratchet steps $\rightarrow$ out-of-order message caching $\rightarrow$ chat payload demuxing $\rightarrow$ memory zeroization verification.
   - **`RelayedOneToOneEncryptionIntegrationTests`:**
-    - Alice packs encrypted payload and `RatchetHeader` into `MailboxEnvelope`.
-    - Outbox dispatches envelope to `RelayMailboxQueue` using `DeliveryToken`.
-    - Relay verifies token, quota policy, and buffers envelope.
-    - Bob authenticates with `BlindedRoutingToken`, drains envelope, unpacks header, and decrypts.
-    - Expired envelope cleanup via `PurgeExpired`.
+    - Outbox packing $\rightarrow$ relay queue buffering via `DeliveryToken` $\rightarrow$ recipient drain via `BlindedRoutingToken` $\rightarrow$ decryption $\rightarrow$ purge expired.
   - **`GroupCommunicationEncryptionIntegrationTests`:**
-    - Group creation and `RelayGroupLedger.CreateGenesis`.
-    - Pairwise sender key distribution: author distributes initial `ChainKey` to members via 1:1 `DirectRatchetSession`.
-    - Members instantiate `GroupReceiverSession`.
-    - Author advances `GroupSenderKeyRatchet`, encrypts group broadcast message, generates ZK presentation proof.
-    - `RelayGroupLedger.VerifyDispatch` verifies proof against current epoch and dispatches to active routing tokens.
-    - Multiple group members drain envelope and decrypt via `GroupReceiverSession.AdvanceTo()`.
-    - Out-of-order group message delivery verified via `GroupReceiverSession` skipped-key caching.
-    - Group member removal triggering epoch rotation and rekeying.
+    - Group genesis $\rightarrow$ pairwise sender key distribution $\rightarrow$ ZK-proof group broadcast verification by `RelayGroupLedger` $\rightarrow$ fan-out to members $\rightarrow$ out-of-order decryption by `GroupReceiverSession` $\rightarrow$ epoch rekeying.

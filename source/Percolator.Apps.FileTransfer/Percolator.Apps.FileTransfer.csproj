@@ -1,8 +1,8 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <ProjectReference Include="..\Percolator.Application2\Percolator.Application2.csproj" />
     <ProjectReference Include="..\Percolator.Domain\Percolator.Domain.csproj" />
+    <ProjectReference Include="..\Percolator.PluginSdk\Percolator.PluginSdk.csproj" />
   </ItemGroup>
 
   <PropertyGroup>
