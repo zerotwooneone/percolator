@@ -58,9 +58,13 @@ public sealed class DeterministicCryptoEngine : ICryptoEngine
     public SharedSecret ComputeDiffieHellman(ReadOnlySpan<byte> privateKey, ReadOnlySpan<byte> publicKey)
     {
         Span<byte> hash = stackalloc byte[32];
-        Span<byte> combined = stackalloc byte[privateKey.Length + publicKey.Length];
-        privateKey.CopyTo(combined);
-        publicKey.CopyTo(combined[privateKey.Length..]);
+        byte privVal = privateKey.Length > 0 ? privateKey[0] : (byte)0;
+        byte pubVal = publicKey.Length > 0 ? (publicKey[0] >= 100 ? (byte)(publicKey[0] - 100) : publicKey[0]) : (byte)0;
+        byte valA = Math.Min(privVal, pubVal);
+        byte valB = Math.Max(privVal, pubVal);
+        Span<byte> combined = stackalloc byte[2];
+        combined[0] = valA;
+        combined[1] = valB;
         SHA256.HashData(combined, hash);
         return SharedSecret.FromSpan(hash);
     }

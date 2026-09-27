@@ -149,4 +149,50 @@ public class DirectRatchetSessionTests
         stepResult.IsFailure.Should().BeTrue();
         stepResult.Error.Code.Should().Be("INVALID_SESSION_STATE");
     }
+
+    [Test]
+    public void InitiateOutbound_And_InitiateInbound_DerivesMatchingInitialKeys()
+    {
+        // 1. Bob prepares his signed pre-key
+        var (bobSignedPreKeyPriv, bobSignedPreKeyPub) = _engine.GenerateEphemeralKeyPair();
+        var bobIdentityKey = IdentityPublicKey.FromSpan(new byte[32]);
+        var bobProof = DeviceLinkProof.FromSpan(new byte[64]);
+        var bobBundle = new PreKeyBundle(_bobId, _device1, bobIdentityKey, bobSignedPreKeyPub, bobProof);
+
+        // 2. Alice initiates outbound session
+        var aliceResult = DirectRatchetSession.InitiateOutbound(_aliceId, _device1, bobBundle, _engine);
+        aliceResult.IsSuccess.Should().BeTrue();
+        using var aliceSession = aliceResult.Value;
+
+        // 3. Alice steps her sending chain to derive the first message key
+        var aliceStep = aliceSession.StepSendingChain(_engine);
+        aliceStep.IsSuccess.Should().BeTrue();
+        var (aliceCounter, aliceMessageKey, aliceEphemeralPub) = aliceStep.Value;
+        aliceCounter.Should().Be(0);
+        aliceEphemeralPub.Should().NotBeNull();
+
+        // 4. Bob initiates inbound session using Alice's ephemeral public key
+        var bobResult = DirectRatchetSession.InitiateInbound(
+            _bobId,
+            _device1,
+            _aliceId,
+            _device1,
+            bobSignedPreKeyPriv,
+            aliceEphemeralPub!,
+            _engine);
+        bobResult.IsSuccess.Should().BeTrue();
+        using var bobSession = bobResult.Value;
+
+        // 5. Bob steps his receiving chain to derive the matching message key
+        var bobStep = bobSession.StepReceivingChain(_engine, targetCounter: 0);
+        bobStep.IsSuccess.Should().BeTrue();
+        var (bobCounter, bobMessageKey) = bobStep.Value;
+
+        bobCounter.Should().Be(0);
+        bobMessageKey.Span.SequenceEqual(aliceMessageKey.Span).Should().BeTrue();
+
+        bobSignedPreKeyPriv.Dispose();
+        aliceMessageKey.Dispose();
+        bobMessageKey.Dispose();
+    }
 }

@@ -65,6 +65,99 @@ public sealed class DirectRatchetSession : AggregateRoot<SessionId>, ISensitiveS
         ReceivingCounter = receivingCounter;
     }
 
+    /// <summary>
+    /// Initiates an outbound Double Ratchet session towards a remote peer using their published PreKeyBundle.
+    /// Derives initial root key and sending chain key, ready to encrypt the first message.
+    /// </summary>
+    public static DomainResult<DirectRatchetSession> InitiateOutbound(
+        PublicIdentityId ownerIdentityId,
+        DeviceId ownerDeviceId,
+        PreKeyBundle peerBundle,
+        ICryptoEngine engine,
+        SessionId? sessionId = null)
+    {
+        if (ownerIdentityId == peerBundle.IdentityId)
+        {
+            return DomainResult<DirectRatchetSession>.Failure(new DomainError(
+                "SELF_SESSION_NOT_ALLOWED", "Cannot initiate Double Ratchet session with self."));
+        }
+
+        // Generate Alice's initial ephemeral keypair
+        var (ephemeralPriv, ephemeralPub) = engine.GenerateEphemeralKeyPair();
+
+        // Perform initial DH between Alice's ephemeral key and Bob's signed pre-key
+        using var dhSecret = engine.ComputeDiffieHellman(ephemeralPriv.Span, peerBundle.SignedPreKey.Span);
+
+        // Derive root key and initial sending chain key
+        Span<byte> zeroRoot = stackalloc byte[32];
+        using var initialRoot = ChainKey.FromSpan(zeroRoot);
+        var (nextRoot, sendingChain) = engine.KdfRk(initialRoot, dhSecret);
+
+        var session = new DirectRatchetSession(
+            ownerIdentityId,
+            ownerDeviceId,
+            peerBundle.IdentityId,
+            peerBundle.DeviceId,
+            rootKey: nextRoot,
+            sendingChainKey: sendingChain,
+            receivingChainKey: null,
+            remoteEphemeralPublicKey: peerBundle.SignedPreKey,
+            localEphemeralPrivateKey: ephemeralPriv,
+            localEphemeralPublicKey: ephemeralPub,
+            sessionId: sessionId);
+
+        nextRoot.Dispose();
+        sendingChain.Dispose();
+        ephemeralPriv.Dispose();
+
+        return DomainResult<DirectRatchetSession>.Success(session);
+    }
+
+    /// <summary>
+    /// Initiates an inbound Double Ratchet session upon receiving an initial message with the sender's ephemeral public key.
+    /// Computes the matching root key and initial receiving chain key, ready to decrypt incoming messages.
+    /// </summary>
+    public static DomainResult<DirectRatchetSession> InitiateInbound(
+        PublicIdentityId ownerIdentityId,
+        DeviceId ownerDeviceId,
+        PublicIdentityId remotePeerId,
+        DeviceId remoteDeviceId,
+        EphemeralPrivateKey localSignedPreKeyPriv,
+        IdentityPublicKey remoteEphemeralPublicKey,
+        ICryptoEngine engine,
+        SessionId? sessionId = null)
+    {
+        if (ownerIdentityId == remotePeerId)
+        {
+            return DomainResult<DirectRatchetSession>.Failure(new DomainError(
+                "SELF_SESSION_NOT_ALLOWED", "Cannot initiate Double Ratchet session with self."));
+        }
+
+        // Perform initial DH between Bob's signed pre-key private key and Alice's ephemeral public key
+        using var dhSecret = engine.ComputeDiffieHellman(localSignedPreKeyPriv.Span, remoteEphemeralPublicKey.Span);
+
+        // Derive matching root key and initial receiving chain key
+        Span<byte> zeroRoot = stackalloc byte[32];
+        using var initialRoot = ChainKey.FromSpan(zeroRoot);
+        var (nextRoot, receivingChain) = engine.KdfRk(initialRoot, dhSecret);
+
+        var session = new DirectRatchetSession(
+            ownerIdentityId,
+            ownerDeviceId,
+            remotePeerId,
+            remoteDeviceId,
+            rootKey: nextRoot,
+            sendingChainKey: null,
+            receivingChainKey: receivingChain,
+            remoteEphemeralPublicKey: remoteEphemeralPublicKey,
+            sessionId: sessionId);
+
+        nextRoot.Dispose();
+        receivingChain.Dispose();
+
+        return DomainResult<DirectRatchetSession>.Success(session);
+    }
+
     public DomainResult<(uint MessageCounter, MessageKey Key, IdentityPublicKey? EphemeralPublicKey)> StepSendingChain(ICryptoEngine engine)
     {
         if (IsZeroized || _sendingChainKey == null)
