@@ -1,6 +1,6 @@
 using Percolator.Domain.Common;
 
-namespace Percolator.Domain.Delivery.Events;
+namespace Percolator.Application2.Delivery.Events;
 
 public sealed record OutboxJobDeliveredEvent(
     Guid JobId,

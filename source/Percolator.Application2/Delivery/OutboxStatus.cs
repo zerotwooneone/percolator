@@ -1,4 +1,4 @@
-namespace Percolator.Domain.Delivery.ValueObjects;
+namespace Percolator.Application2.Delivery;
 
 public enum OutboxStatus
 {

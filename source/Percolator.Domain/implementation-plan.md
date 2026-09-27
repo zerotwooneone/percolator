@@ -19,11 +19,13 @@
    - **1:1 Relayed Messaging:** Senders drop off Sealed Sender envelopes addressed to the recipient's `PublicIdentityId`. The relay knows the recipient but has zero knowledge of the sender. The recipient drains envelopes over an **authenticated gRPC bidirectional stream** (`ConnectRelayStream`).
    - **Group Messaging:** Senders submit anonymous unary requests verified exclusively by `ZkPresentationBytes` against `RelayGroupLedger.CurrentEpoch`. Group recipients receive messages over an **anonymous stream** bound to ephemeral `BlindedRoutingToken`s. The relay learns neither the sender nor recipient identity.
 2. **Multi-Device Cryptographic Hierarchy & Anti-Phantom Injection:**
-   - Master account identity is established by the primary device (`DeviceId = 1`) holding `IdentityKeyring`.\n   - Secondary devices (`DeviceId > 1`) generate their own identity keys and must present a `DeviceLinkProof` signed by the primary identity key. Both `DeviceRecord.CreateSecondary` and `PeerContact.RegisterSecondaryDevice` cryptographically verify this signature to prevent phantom device injection.
+   - Master account identity is established by the primary device (`DeviceId = 1`) holding `IdentityKeyring`.
+   - Secondary devices (`DeviceId > 1`) generate their own identity keys and must present a `DeviceLinkProof` signed by the primary identity key. Both `DeviceRecord.CreateSecondary` and `PeerContact.RegisterSecondaryDevice` cryptographically verify this signature to prevent phantom device injection.
    - Double Ratchet sessions are strictly **pairwise per physical device**: `(OwnerIdentityId, OwnerDeviceId) <-> (PeerIdentityId, PeerDeviceId)`.
 3. **ZK Proof Transcript Binding (Anti-Replay / Anti-Hijacking):**
    - In accordance with Signal Group V2 algebraic MAC / Fiat-Shamir credential schemes, `IZkProofEngine.VerifyGroupPresentation` binds a 32-byte transcript challenge:
-     - Group Mutations bind `SHA256(newBlob || sorted(newTokens))`.\n     - Message Dispatches bind `SHA256(envelopeCiphertext)`.
+     - Group Mutations bind `SHA256(newBlob || sorted(newTokens))`.
+     - Message Dispatches bind `SHA256(envelopeCiphertext)`.
    - Replaying a valid presentation proof against a modified roster or an unauthorized message fails cryptographic verification.
 4. **Post-Compromise Security (Asymmetric DH Ratchet Turn):**
    - `DirectRatchetSession` implements the full Signal Double Ratchet turn (`StepDhRatchet`), deriving fresh root keys and sending/receiving chains from new remote ephemeral public keys via `KdfRk` and ECDH.
@@ -68,9 +70,11 @@
 - Events: `MessageAppendedEvent`, `GroupEpochAdvancedEvent`, `MemberJoinedEvent`, `MemberRemovedEvent`.
 - Tests: `GroupConversationTests`, `DirectConversationTests`.
 
-### Milestone 5: Delivery Bounded Context (Routing, Outbox & Relay Hosting)
-- Production: `BlindedRoutingToken` (`[GuidId(CryptographicRandom)]`), `DeliveryRoute`, `OutboxStatus`, `EncryptedEntriesBlob`, `MailboxEnvelope`, `PurgePolicy`, `DeliveryToken`.
-- Models: `OutboxJob`, `RelayGroupLedger` (with Fiat-Shamir transcript binding and group capacity caps), `RelayMailboxQueue` (with `DeliveryToken` verification and quota enforcement).
-- Ports: `IOutboxRepository`, `IRelayLedgerRepository`, `IRelayMailboxRepository`.
-- Events: `OutboxJobEnqueuedEvent`, `OutboxJobPausedEvent`, `OutboxJobDeliveredEvent`, `EnvelopeBufferedEvent`, `EpochCommittedEvent`.
-- Tests: `OutboxJobTests`, `RelayGroupLedgerTests`, `RelayMailboxQueueTests`, `GuidIdTests`.
+### Milestone 5: Delivery Bounded Context (Relay Mailboxes & Ledger Hosting)
+- Production: `BlindedRoutingToken` (`[GuidId(CryptographicRandom)]`), `EncryptedEntriesBlob`, `MailboxEnvelope`, `PurgePolicy`, `DeliveryToken`.
+- Models: `RelayGroupLedger` (with Fiat-Shamir transcript binding and group capacity caps), `RelayMailboxQueue` (with `DeliveryToken` verification and quota enforcement).
+- Ports: `IRelayLedgerRepository`, `IRelayMailboxRepository`.
+- Events: `EnvelopeBufferedEvent`, `EpochCommittedEvent`.
+- Tests: `RelayGroupLedgerTests`, `RelayMailboxQueueTests`, `GuidIdTests`.
+
+*(Note: Store-and-Forward Outbox orchestration has been elevated to `Percolator.Application2` in accordance with Onion Architecture boundaries.)*

@@ -1,9 +1,9 @@
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
 
-namespace Percolator.Domain.Delivery.Events;
+namespace Percolator.Application2.Delivery.Events;
 
-public sealed record OutboxJobPausedEvent(
+public sealed record OutboxJobEnqueuedEvent(
     Guid JobId,
     PublicIdentityId OwnerIdentityId,
     DateTimeOffset OccurredOnUtc) : IDomainEvent
