@@ -34,7 +34,7 @@ public sealed class IdentityProfile : AggregateRoot<PublicIdentityId>
         IdentityRole role,
         IDateTimeProvider timeProvider)
     {
-        if (id.IsEmpty)
+        if (!id.IsValid)
         {
             return DomainResult<IdentityProfile>.Failure(new DomainError("INVALID_IDENTITY_ID", "PublicIdentityId cannot be empty."));
         }

@@ -41,7 +41,7 @@ public sealed class GroupConversation : AggregateRoot<ConversationId>
         string title,
         IDateTimeProvider timeProvider)
     {
-        if (id.IsEmpty)
+        if (!id.IsValid)
         {
             return DomainResult<GroupConversation>.Failure(new DomainError("INVALID_CONVERSATION_ID", "ConversationId cannot be empty."));
         }

@@ -54,7 +54,7 @@ public sealed class RelayGroupLedger : AggregateRoot<ConversationId>
         ZkGroupPublicParams publicParams,
         IDateTimeProvider timeProvider)
     {
-        if (conversationId.IsEmpty)
+        if (!conversationId.IsValid)
         {
             return DomainResult<RelayGroupLedger>.Failure(new DomainError("INVALID_CONVERSATION_ID", "ConversationId cannot be empty."));
         }
@@ -150,7 +150,7 @@ public sealed class RelayGroupLedger : AggregateRoot<ConversationId>
         Span<byte> guidBytes = stackalloc byte[16];
         foreach (var token in newTokens.OrderBy(t => t.Value))
         {
-            token.Value.TryWriteBytes(guidBytes);
+            token.TryWriteBytes(guidBytes);
             sha.AppendData(guidBytes);
         }
 
