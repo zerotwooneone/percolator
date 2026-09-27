@@ -12,6 +12,7 @@ public class PeerContactTests
     private IdentityPublicKey _secondaryDeviceKey = null!;
     private DeviceLinkProof _dummyProof = null!;
     private PeerContact _contact = null!;
+    private static readonly DateTimeOffset FixedCreatedAt = new(2026, 3, 1, 9, 0, 0, TimeSpan.Zero);
 
     [SetUp]
     public void SetUp()
@@ -26,7 +27,7 @@ public class PeerContactTests
             remotePeerId: PublicIdentityId.New(),
             nickname: "Alice",
             trustLevel: PeerTrustLevel.Tofu,
-            createdAtUtc: DateTimeOffset.UtcNow);
+            createdAtUtc: FixedCreatedAt);
     }
 
     [Test]
@@ -42,6 +43,28 @@ public class PeerContactTests
 
         result.IsSuccess.Should().BeTrue();
         _contact.RegisteredDevices.Should().Contain(secondaryId);
+    }
+
+    [Test]
+    public void RegisterSecondaryDevice_WhenAlreadyRegistered_IsIdempotentAndSucceeds()
+    {
+        var secondaryId = new DeviceId(2);
+        _contact.RegisterSecondaryDevice(
+            secondaryId,
+            _secondaryDeviceKey,
+            _dummyProof,
+            _primaryPeerKey,
+            _cryptoEngine);
+
+        var result = _contact.RegisterSecondaryDevice(
+            secondaryId,
+            _secondaryDeviceKey,
+            _dummyProof,
+            _primaryPeerKey,
+            _cryptoEngine);
+
+        result.IsSuccess.Should().BeTrue();
+        _contact.RegisteredDevices.Count.Should().Be(2); // Primary (1) + Secondary (2)
     }
 
     [Test]

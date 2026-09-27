@@ -12,7 +12,7 @@ public sealed class RelayMailboxQueue : AggregateRoot<QueueId>
     private readonly Dictionary<BlindedRoutingToken, DeliveryToken> _authorizedTokens = [];
     private readonly List<MailboxEnvelope> _envelopes = [];
 
-    public IReadOnlyList<MailboxEnvelope> Envelopes => _envelopes.AsReadOnly();
+    public IReadOnlyCollection<MailboxEnvelope> Envelopes => _envelopes.AsReadOnly();
     public int TotalCount => _envelopes.Count;
 
     public RelayMailboxQueue(PublicIdentityId relayIdentityId, QueueId? id = null)
@@ -21,14 +21,9 @@ public sealed class RelayMailboxQueue : AggregateRoot<QueueId>
         RelayIdentityId = relayIdentityId;
     }
 
-    public void RegisterRecipient(BlindedRoutingToken routingToken, DeliveryToken deliveryToken)
+    public void RegisterRecipient(BlindedRoutingToken recipientToken, DeliveryToken deliveryToken)
     {
-        _authorizedTokens[routingToken] = deliveryToken;
-    }
-
-    public void RevokeRecipient(BlindedRoutingToken routingToken)
-    {
-        _authorizedTokens.Remove(routingToken);
+        _authorizedTokens[recipientToken] = deliveryToken;
     }
 
     public DomainResult Enqueue(
@@ -38,6 +33,13 @@ public sealed class RelayMailboxQueue : AggregateRoot<QueueId>
         PurgePolicy? policy = null)
     {
         var effectivePolicy = policy ?? PurgePolicy.Default;
+
+        if (envelope.ExpiresAtUtc <= timeProvider.UtcNow)
+        {
+            return DomainResult.Failure(new DomainError(
+                "ENVELOPE_EXPIRED",
+                "Cannot enqueue an envelope that has already expired."));
+        }
 
         if (!_authorizedTokens.TryGetValue(envelope.RecipientToken, out var authorizedToken) || authorizedToken != presentedToken)
         {

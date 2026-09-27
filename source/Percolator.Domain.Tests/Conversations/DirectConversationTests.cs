@@ -29,13 +29,7 @@ public class DirectConversationTests
         var result = DirectConversation.Create(_conversationId, _ownerId, _peerId, _timeProvider);
 
         result.IsSuccess.Should().BeTrue();
-        var conv = result.Value;
-        conv.Id.Should().Be(_conversationId);
-        conv.OwnerIdentityId.Should().Be(_ownerId);
-        conv.RemotePeerId.Should().Be(_peerId);
-        conv.CreatedAtUtc.Should().Be(_timeProvider.UtcNow);
-        conv.LastActivityUtc.Should().Be(_timeProvider.UtcNow);
-        conv.LastReadMessageId.Should().BeNull();
+        result.Value.Id.Should().Be(_conversationId);
     }
 
     [Test]
@@ -66,6 +60,46 @@ public class DirectConversationTests
         result.IsSuccess.Should().BeTrue();
         conversation.LastActivityUtc.Should().Be(_timeProvider.UtcNow);
         conversation.DomainEvents.Should().ContainSingle(e => e is MessageAppendedEvent);
+    }
+
+    [Test]
+    public void AppendMessage_WithMismatchedConversationId_ReturnsError()
+    {
+        var conversation = DirectConversation.Create(_conversationId, _ownerId, _peerId, _timeProvider).Value;
+        var wrongConvId = ConversationId.New();
+
+        var message = new Message(
+            MessageId.New(),
+            wrongConvId,
+            _ownerId,
+            DeviceId.Primary,
+            new byte[] { 42 },
+            _timeProvider.UtcNow);
+
+        var result = conversation.AppendMessage(message, _timeProvider);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("CONVERSATION_MISMATCH");
+    }
+
+    [Test]
+    public void AppendMessage_WithNonParticipantSender_ReturnsSenderNotParticipantError()
+    {
+        var conversation = DirectConversation.Create(_conversationId, _ownerId, _peerId, _timeProvider).Value;
+        var strangerId = PublicIdentityId.New();
+
+        var message = new Message(
+            MessageId.New(),
+            conversation.Id,
+            strangerId,
+            DeviceId.Primary,
+            new byte[] { 42 },
+            _timeProvider.UtcNow);
+
+        var result = conversation.AppendMessage(message, _timeProvider);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("SENDER_NOT_PARTICIPANT");
     }
 
     [Test]

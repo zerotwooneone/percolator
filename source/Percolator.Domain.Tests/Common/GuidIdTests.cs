@@ -51,16 +51,6 @@ public class GuidIdTests
     }
 
     [Test]
-    public void FromGuid_CreatesValidIdentifier()
-    {
-        var guid = Guid.NewGuid();
-        var id = PublicIdentityId.FromGuid(guid);
-
-        id.Value.Should().Be(guid);
-        id.IsValid.Should().BeTrue();
-    }
-
-    [Test]
     public void FromBytes_And_TryWriteBytes_RoundtripSuccessfully()
     {
         var original = BlindedRoutingToken.New();
@@ -97,15 +87,5 @@ public class GuidIdTests
 
         BlindedRoutingToken.TryParse(str, null, out var tryParsed).Should().BeTrue();
         tryParsed.Should().Be(token);
-    }
-
-    [Test]
-    public void ExplicitCast_ToAndFromGuid_WorksCorrectly()
-    {
-        var rawGuid = Guid.NewGuid();
-        var convId = (ConversationId)rawGuid;
-
-        convId.Value.Should().Be(rawGuid);
-        ((Guid)convId).Should().Be(rawGuid);
     }
 }

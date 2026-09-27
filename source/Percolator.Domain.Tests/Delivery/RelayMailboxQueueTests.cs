@@ -43,6 +43,23 @@ public class RelayMailboxQueueTests
     }
 
     [Test]
+    public void Enqueue_WhenEnvelopeAlreadyExpired_ReturnsEnvelopeExpiredError()
+    {
+        var expiredEnvelope = new MailboxEnvelope(
+            EnvelopeId.New(),
+            _recipientToken,
+            new byte[] { 1, 2, 3 },
+            _timeProvider.UtcNow.AddDays(-2),
+            _timeProvider.UtcNow.AddDays(-1)); // already expired relative to _timeProvider.UtcNow
+
+        var result = _queue.Enqueue(expiredEnvelope, _deliveryToken, _timeProvider);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("ENVELOPE_EXPIRED");
+        _queue.TotalCount.Should().Be(0);
+    }
+
+    [Test]
     public void Enqueue_WithUnauthorizedDeliveryToken_ReturnsError()
     {
         var invalidToken = DeliveryToken.FromSpan(Enumerable.Repeat((byte)0xFF, 32).ToArray());
@@ -90,28 +107,31 @@ public class RelayMailboxQueueTests
     [Test]
     public void PurgeExpired_RemovesOnlyExpiredEnvelopes()
     {
-        var expiredEnv = new MailboxEnvelope(
+        var shortLivedEnv = new MailboxEnvelope(
             EnvelopeId.New(),
             _recipientToken,
             new byte[] { 1 },
-            _timeProvider.UtcNow.AddDays(-2),
-            _timeProvider.UtcNow.AddDays(-1));
+            _timeProvider.UtcNow,
+            _timeProvider.UtcNow.AddDays(1));
 
-        var validEnv = new MailboxEnvelope(
+        var longLivedEnv = new MailboxEnvelope(
             EnvelopeId.New(),
             _recipientToken,
             new byte[] { 2 },
             _timeProvider.UtcNow,
             _timeProvider.UtcNow.AddDays(5));
 
-        _queue.Enqueue(expiredEnv, _deliveryToken, _timeProvider);
-        _queue.Enqueue(validEnv, _deliveryToken, _timeProvider);
+        _queue.Enqueue(shortLivedEnv, _deliveryToken, _timeProvider).IsSuccess.Should().BeTrue();
+        _queue.Enqueue(longLivedEnv, _deliveryToken, _timeProvider).IsSuccess.Should().BeTrue();
+
+        // Advance virtual time past the short-lived envelope's expiration
+        _timeProvider.Advance(TimeSpan.FromDays(2));
 
         int removed = _queue.PurgeExpired(_timeProvider);
 
         removed.Should().Be(1);
         _queue.TotalCount.Should().Be(1);
-        _queue.Envelopes.Single().Id.Should().Be(validEnv.Id);
+        _queue.Envelopes.Single().Id.Should().Be(longLivedEnv.Id);
     }
 
     [Test]
@@ -135,5 +155,18 @@ public class RelayMailboxQueueTests
         drained.Select(e => e.Id).Should().Contain([env1.Id, env3.Id]);
         _queue.TotalCount.Should().Be(1);
         _queue.Envelopes.Single().Id.Should().Be(env2.Id);
+    }
+
+    [Test]
+    public void DrainForToken_WhenNonExistentToken_ReturnsEmptyAndDoesNotMutateQueue()
+    {
+        var env = new MailboxEnvelope(EnvelopeId.New(), _recipientToken, new byte[] { 1 }, _timeProvider.UtcNow, _timeProvider.UtcNow.AddDays(1));
+        _queue.Enqueue(env, _deliveryToken, _timeProvider);
+
+        var unknownToken = BlindedRoutingToken.New();
+        var drained = _queue.DrainForToken(unknownToken);
+
+        drained.Should().BeEmpty();
+        _queue.TotalCount.Should().Be(1);
     }
 }

@@ -67,6 +67,11 @@ public sealed class DirectConversation : AggregateRoot<ConversationId>
             return DomainResult.Failure(new DomainError("CONVERSATION_MISMATCH", "Message does not belong to this conversation."));
         }
 
+        if (message.AuthorId != OwnerIdentityId && message.AuthorId != RemotePeerId)
+        {
+            return DomainResult.Failure(new DomainError("SENDER_NOT_PARTICIPANT", "Message author is not a participant in this direct conversation."));
+        }
+
         _messages.Add(message);
         LastActivityUtc = timeProvider.UtcNow;
 

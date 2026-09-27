@@ -56,6 +56,26 @@ public class GroupConversationTests
     }
 
     [Test]
+    public void AddMember_WhenMemberAlreadyExists_ReturnsMemberAlreadyExistsError()
+    {
+        var group = GroupConversation.CreateGenesis(
+            _conversationId,
+            _ownerId,
+            "Security Team",
+            _timeProvider).Value;
+
+        var result = group.AddMember(
+            actorId: _adminId,
+            newMemberId: _ownerId,
+            role: GroupRole.Member,
+            _timeProvider);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("MEMBER_ALREADY_EXISTS");
+        group.CurrentEpoch.Value.Should().Be(0);
+    }
+
+    [Test]
     public void AddMember_ByNonAdmin_ReturnsUnauthorizedRoleError()
     {
         var group = GroupConversation.CreateGenesis(
@@ -83,6 +103,67 @@ public class GroupConversationTests
     }
 
     [Test]
+    public void RemoveMember_ByAdmin_RemovesMember_AdvancesEpoch_AndEmitsMemberRemovedEvent()
+    {
+        var group = GroupConversation.CreateGenesis(
+            _conversationId,
+            _ownerId,
+            "Security Team",
+            _timeProvider).Value;
+
+        var memberId = PublicIdentityId.New();
+        group.AddMember(_adminId, memberId, GroupRole.Member, _timeProvider);
+        group.ClearDomainEvents();
+
+        var result = group.RemoveMember(_adminId, memberId, _timeProvider);
+
+        result.IsSuccess.Should().BeTrue();
+        group.CurrentEpoch.Value.Should().Be(2);
+        group.Members.Should().NotContain(m => m.Id == memberId);
+
+        group.DomainEvents.Should().ContainSingle(e => e is MemberRemovedEvent);
+        var removedEvent = (MemberRemovedEvent)group.DomainEvents.Single();
+        removedEvent.MemberId.Should().Be(memberId);
+        removedEvent.NewEpoch.Should().Be(group.CurrentEpoch);
+    }
+
+    [Test]
+    public void RemoveMember_ByNonAdmin_ReturnsUnauthorizedRoleError()
+    {
+        var group = GroupConversation.CreateGenesis(
+            _conversationId,
+            _ownerId,
+            "Security Team",
+            _timeProvider).Value;
+
+        var member1 = PublicIdentityId.New();
+        var member2 = PublicIdentityId.New();
+        group.AddMember(_adminId, member1, GroupRole.Member, _timeProvider);
+        group.AddMember(_adminId, member2, GroupRole.Member, _timeProvider);
+
+        var result = group.RemoveMember(member1, member2, _timeProvider);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("UNAUTHORIZED_ROLE");
+    }
+
+    [Test]
+    public void RemoveMember_WhenMemberNotFound_ReturnsMemberNotFoundError()
+    {
+        var group = GroupConversation.CreateGenesis(
+            _conversationId,
+            _ownerId,
+            "Security Team",
+            _timeProvider).Value;
+
+        var ghostId = PublicIdentityId.New();
+        var result = group.RemoveMember(_adminId, ghostId, _timeProvider);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("MEMBER_NOT_FOUND");
+    }
+
+    [Test]
     public void AppendMessage_AppendsMessage_WithoutChangingEpoch()
     {
         var group = GroupConversation.CreateGenesis(
@@ -104,6 +185,54 @@ public class GroupConversationTests
         result.IsSuccess.Should().BeTrue();
         group.CurrentEpoch.Value.Should().Be(0); // Epoch must NOT change on message
         group.DomainEvents.Should().ContainSingle(e => e is MessageAppendedEvent);
+    }
+
+    [Test]
+    public void AppendMessage_WithMismatchedConversationId_ReturnsError()
+    {
+        var group = GroupConversation.CreateGenesis(
+            _conversationId,
+            _ownerId,
+            "Security Team",
+            _timeProvider).Value;
+
+        var wrongConvId = ConversationId.New();
+        var message = new Message(
+            MessageId.New(),
+            wrongConvId,
+            _ownerId,
+            DeviceId.Primary,
+            new byte[] { 1, 2, 3 },
+            _timeProvider.UtcNow);
+
+        var result = group.AppendMessage(message, _timeProvider);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("CONVERSATION_MISMATCH");
+    }
+
+    [Test]
+    public void AppendMessage_WhenSenderNotMember_ReturnsSenderNotMemberError()
+    {
+        var group = GroupConversation.CreateGenesis(
+            _conversationId,
+            _ownerId,
+            "Security Team",
+            _timeProvider).Value;
+
+        var strangerId = PublicIdentityId.New();
+        var message = new Message(
+            MessageId.New(),
+            group.Id,
+            strangerId,
+            DeviceId.Primary,
+            new byte[] { 1, 2, 3 },
+            _timeProvider.UtcNow);
+
+        var result = group.AppendMessage(message, _timeProvider);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("SENDER_NOT_MEMBER");
     }
 
     [Test]

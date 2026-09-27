@@ -100,6 +100,45 @@ public class GroupReceiverSessionTests
     }
 
     [Test]
+    public void AdvanceTo_WhenSkipThresholdExceeded_ReturnsError()
+    {
+        var session = new GroupReceiverSession(
+            _conversationId,
+            _authorId,
+            _authorDeviceId,
+            _initialChainKey,
+            initialIteration: 0);
+
+        var result = session.AdvanceTo(GroupReceiverSession.MaxSkipThreshold + 1, _engine);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("SKIP_THRESHOLD_EXCEEDED");
+    }
+
+    [Test]
+    public void AdvanceTo_WhenSkippedKeysExceedCapacity_EvictsOldestKey()
+    {
+        var session = new GroupReceiverSession(
+            _conversationId,
+            _authorId,
+            _authorDeviceId,
+            _initialChainKey,
+            initialIteration: 0);
+
+        // Advance skipping MaxTotalSkippedKeys + 1 messages (0 to 1000 skipped)
+        session.AdvanceTo(GroupReceiverSession.MaxTotalSkippedKeys + 1, _engine);
+
+        // Oldest skipped key (0) must have been evicted to preserve bound
+        session.HasSkippedKey(0).Should().BeFalse();
+        var consumeOldest = session.TryConsumeSkippedKey(0);
+        consumeOldest.IsFailure.Should().BeTrue();
+        consumeOldest.Error.Code.Should().Be("KEY_NOT_FOUND");
+
+        // More recent skipped key (1) is still cached
+        session.HasSkippedKey(1).Should().BeTrue();
+    }
+
+    [Test]
     public void Dispose_ZeroizesActiveSecretsAndSkippedKeys()
     {
         var session = new GroupReceiverSession(

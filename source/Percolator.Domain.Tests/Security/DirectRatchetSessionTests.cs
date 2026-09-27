@@ -81,6 +81,47 @@ public class DirectRatchetSessionTests
     }
 
     [Test]
+    public void StepReceivingChain_ReplayAttempt_ReturnsCounterAlreadyPassed()
+    {
+        var session = new DirectRatchetSession(
+            _aliceId, _device1,
+            _bobId, _device1,
+            rootKey: _rootKey,
+            sendingChainKey: null,
+            receivingChainKey: _initialChainKey);
+
+        session.StepReceivingChain(_engine, targetCounter: 0);
+
+        // Attempt replay of counter 0
+        var replay = session.StepReceivingChain(_engine, targetCounter: 0);
+        replay.IsFailure.Should().BeTrue();
+        replay.Error.Code.Should().Be("COUNTER_ALREADY_PASSED");
+    }
+
+    [Test]
+    public void StepReceivingChain_WhenSkippedKeysExceedCapacity_EvictsOldestKey()
+    {
+        var session = new DirectRatchetSession(
+            _aliceId, _device1,
+            _bobId, _device1,
+            rootKey: _rootKey,
+            sendingChainKey: null,
+            receivingChainKey: _initialChainKey);
+
+        // Skip MaxTotalSkippedKeys + 1 messages (0 to 1000 skipped, landing on 1001)
+        session.StepReceivingChain(_engine, targetCounter: DirectRatchetSession.MaxTotalSkippedKeys + 1);
+
+        // Oldest skipped key (0) must have been evicted to preserve bound
+        session.HasSkippedKey(0).Should().BeFalse();
+        var consumeOldest = session.TryConsumeSkippedKey(0);
+        consumeOldest.IsFailure.Should().BeTrue();
+        consumeOldest.Error.Code.Should().Be("KEY_NOT_FOUND");
+
+        // More recent skipped key (1) should still be intact
+        session.HasSkippedKey(1).Should().BeTrue();
+    }
+
+    [Test]
     public void StepReceivingChain_WhenSkipThresholdExceeded_ReturnsError()
     {
         var session = new DirectRatchetSession(

@@ -8,29 +8,27 @@ namespace Percolator.Domain.Conversations.Model;
 public sealed class GroupConversation : AggregateRoot<ConversationId>
 {
     public override ConversationId Id { get; }
-    public PublicIdentityId OwnerIdentityId { get; }
     public string Title { get; private set; }
     public EpochNumber CurrentEpoch { get; private set; }
     public DateTimeOffset CreatedAtUtc { get; }
     public DateTimeOffset LastActivityUtc { get; private set; }
+    public MessageId? LastReadMessageId { get; private set; }
 
     private readonly List<GroupMember> _members = [];
-    public IReadOnlyList<GroupMember> Members => _members.AsReadOnly();
+    public IReadOnlyCollection<GroupMember> Members => _members.AsReadOnly();
 
     private readonly List<Message> _messages = [];
     public IReadOnlyList<Message> Messages => _messages.AsReadOnly();
 
     private GroupConversation(
         ConversationId id,
-        PublicIdentityId ownerIdentityId,
         string title,
-        EpochNumber epoch,
+        EpochNumber initialEpoch,
         DateTimeOffset createdAtUtc)
     {
         Id = id;
-        OwnerIdentityId = ownerIdentityId;
         Title = title;
-        CurrentEpoch = epoch;
+        CurrentEpoch = initialEpoch;
         CreatedAtUtc = createdAtUtc;
         LastActivityUtc = createdAtUtc;
     }
@@ -41,17 +39,12 @@ public sealed class GroupConversation : AggregateRoot<ConversationId>
         string title,
         IDateTimeProvider timeProvider)
     {
-        if (!id.IsValid)
-        {
-            return DomainResult<GroupConversation>.Failure(new DomainError("INVALID_CONVERSATION_ID", "ConversationId cannot be empty."));
-        }
-
         if (string.IsNullOrWhiteSpace(title))
         {
             return DomainResult<GroupConversation>.Failure(new DomainError("INVALID_TITLE", "Group title cannot be empty."));
         }
 
-        var group = new GroupConversation(id, creatorId, title.Trim(), EpochNumber.Genesis, timeProvider.UtcNow);
+        var group = new GroupConversation(id, title, EpochNumber.Genesis, timeProvider.UtcNow);
         group._members.Add(new GroupMember(creatorId, GroupRole.Admin, timeProvider.UtcNow));
 
         return DomainResult<GroupConversation>.Success(group);
@@ -119,6 +112,11 @@ public sealed class GroupConversation : AggregateRoot<ConversationId>
             return DomainResult.Failure(new DomainError("CONVERSATION_MISMATCH", "Message does not belong to this group conversation."));
         }
 
+        if (!_members.Any(m => m.Id == message.AuthorId))
+        {
+            return DomainResult.Failure(new DomainError("SENDER_NOT_MEMBER", "Message author is not an active member of this group."));
+        }
+
         _messages.Add(message);
         LastActivityUtc = timeProvider.UtcNow;
 
@@ -133,5 +131,10 @@ public sealed class GroupConversation : AggregateRoot<ConversationId>
         _members.Clear();
         _members.AddRange(currentMembers);
         LastActivityUtc = timeProvider.UtcNow;
+    }
+
+    public void MarkAsRead(MessageId messageId)
+    {
+        LastReadMessageId = messageId;
     }
 }
