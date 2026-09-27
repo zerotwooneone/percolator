@@ -18,7 +18,7 @@ public class IdentityProfileTests
     }
 
     [Test]
-    public void Create_WithValidParameters_ReturnsActiveProfile_AndEmitsCreatedEvent()
+    public void Create_WithValidParameters_ReturnsActiveProfile()
     {
         var id = PublicIdentityId.New();
         var result = IdentityProfile.Create(id, "Work Persona", IdentityRole.UserPersona, _timeProvider);
@@ -31,8 +31,7 @@ public class IdentityProfileTests
         profile.State.Should().Be(IdentityState.Active);
         profile.CreatedAtUtc.Should().Be(_timeProvider.UtcNow);
         profile.DisabledAtUtc.Should().BeNull();
-
-        profile.DomainEvents.Should().ContainSingle(e => e is IdentityCreatedEvent);
+        profile.DomainEvents.Should().BeEmpty();
     }
 
     [TestCase(null)]
@@ -79,7 +78,7 @@ public class IdentityProfileTests
     }
 
     [Test]
-    public void Enable_WhenDisabled_TransitionsToActive_AndEmitsIdentityEnabledEvent()
+    public void Enable_WhenDisabled_TransitionsToActive()
     {
         var profile = IdentityProfile.Create(PublicIdentityId.New(), "Work", IdentityRole.UserPersona, _timeProvider).Value;
         profile.Disable(_timeProvider);
@@ -91,7 +90,6 @@ public class IdentityProfileTests
         result.IsSuccess.Should().BeTrue();
         profile.State.Should().Be(IdentityState.Active);
         profile.DisabledAtUtc.Should().BeNull();
-
-        profile.DomainEvents.Should().ContainSingle(e => e is IdentityEnabledEvent);
+        profile.DomainEvents.Should().BeEmpty();
     }
 }

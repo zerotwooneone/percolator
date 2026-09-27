@@ -8,6 +8,7 @@ public sealed record MemberJoinedEvent(
     ConversationId ConversationId,
     PublicIdentityId MemberId,
     GroupRole Role,
+    EpochNumber NewEpoch,
     DateTimeOffset OccurredOnUtc) : IDomainEvent
 {
     public Guid EventId { get; } = Guid.NewGuid();

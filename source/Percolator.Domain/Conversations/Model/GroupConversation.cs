@@ -80,8 +80,7 @@ public sealed class GroupConversation : AggregateRoot<ConversationId>
         CurrentEpoch = CurrentEpoch.Next();
         LastActivityUtc = timeProvider.UtcNow;
 
-        AddDomainEvent(new GroupEpochAdvancedEvent(Id, CurrentEpoch, LastActivityUtc));
-        AddDomainEvent(new MemberJoinedEvent(Id, newMemberId, role, LastActivityUtc));
+        AddDomainEvent(new MemberJoinedEvent(Id, newMemberId, role, CurrentEpoch, LastActivityUtc));
 
         return DomainResult.Success();
     }
@@ -108,8 +107,7 @@ public sealed class GroupConversation : AggregateRoot<ConversationId>
         CurrentEpoch = CurrentEpoch.Next();
         LastActivityUtc = timeProvider.UtcNow;
 
-        AddDomainEvent(new GroupEpochAdvancedEvent(Id, CurrentEpoch, LastActivityUtc));
-        AddDomainEvent(new MemberRemovedEvent(Id, targetMemberId, LastActivityUtc));
+        AddDomainEvent(new MemberRemovedEvent(Id, targetMemberId, CurrentEpoch, LastActivityUtc));
 
         return DomainResult.Success();
     }
@@ -124,17 +122,16 @@ public sealed class GroupConversation : AggregateRoot<ConversationId>
         _messages.Add(message);
         LastActivityUtc = timeProvider.UtcNow;
 
-        // Note: In Signal Group V2, regular messages do NOT increment epoch
         AddDomainEvent(new MessageAppendedEvent(Id, message.Id, LastActivityUtc));
 
         return DomainResult.Success();
     }
 
-    public void Rebase(EpochNumber latestEpoch, IEnumerable<GroupMember> latestMembers, IDateTimeProvider timeProvider)
+    public void Rebase(EpochNumber newEpoch, IEnumerable<GroupMember> currentMembers, IDateTimeProvider timeProvider)
     {
-        CurrentEpoch = latestEpoch;
+        CurrentEpoch = newEpoch;
         _members.Clear();
-        _members.AddRange(latestMembers);
+        _members.AddRange(currentMembers);
         LastActivityUtc = timeProvider.UtcNow;
     }
 }

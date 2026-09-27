@@ -7,6 +7,7 @@ namespace Percolator.Domain.Conversations.Events;
 public sealed record MemberRemovedEvent(
     ConversationId ConversationId,
     PublicIdentityId MemberId,
+    EpochNumber NewEpoch,
     DateTimeOffset OccurredOnUtc) : IDomainEvent
 {
     public Guid EventId { get; } = Guid.NewGuid();

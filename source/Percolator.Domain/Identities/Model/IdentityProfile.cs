@@ -45,8 +45,6 @@ public sealed class IdentityProfile : AggregateRoot<PublicIdentityId>
         }
 
         var profile = new IdentityProfile(id, displayName.Trim(), role, IdentityState.Active, timeProvider.UtcNow);
-        profile.AddDomainEvent(new IdentityCreatedEvent(id, role, timeProvider.UtcNow));
-
         return DomainResult<IdentityProfile>.Success(profile);
     }
 
@@ -84,8 +82,6 @@ public sealed class IdentityProfile : AggregateRoot<PublicIdentityId>
 
         State = IdentityState.Active;
         DisabledAtUtc = null;
-
-        AddDomainEvent(new IdentityEnabledEvent(Id, timeProvider.UtcNow));
 
         return DomainResult.Success();
     }

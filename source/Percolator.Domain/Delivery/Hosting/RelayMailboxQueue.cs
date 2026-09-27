@@ -1,5 +1,4 @@
 using Percolator.Domain.Common;
-using Percolator.Domain.Delivery.Events;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 
@@ -61,7 +60,6 @@ public sealed class RelayMailboxQueue : AggregateRoot<Guid>
         }
 
         _envelopes.Add(envelope);
-        AddDomainEvent(new EnvelopeBufferedEvent(envelope.Id, envelope.RecipientToken, timeProvider.UtcNow));
         return DomainResult.Success();
     }
 
@@ -76,19 +74,6 @@ public sealed class RelayMailboxQueue : AggregateRoot<Guid>
     {
         var matching = _envelopes.Where(e => e.RecipientToken == token).ToList();
         _envelopes.RemoveAll(e => e.RecipientToken == token);
-        return matching;
-    }
-
-    public int PruneDiscretionary(int maxRetainedCount)
-    {
-        if (_envelopes.Count <= maxRetainedCount)
-        {
-            return 0;
-        }
-
-        int toRemoveCount = _envelopes.Count - maxRetainedCount;
-        _envelopes.Sort((a, b) => a.EnqueuedAtUtc.CompareTo(b.EnqueuedAtUtc));
-        _envelopes.RemoveRange(0, toRemoveCount);
-        return toRemoveCount;
+        return matching.AsReadOnly();
     }
 }

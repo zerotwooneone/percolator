@@ -1,4 +1,3 @@
-using Percolator.Domain.Delivery.Events;
 using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
@@ -28,7 +27,7 @@ public class RelayMailboxQueueTests
     }
 
     [Test]
-    public void Enqueue_WithValidDeliveryToken_StoresEnvelope_AndEmitsEvent()
+    public void Enqueue_WithValidDeliveryToken_StoresEnvelope()
     {
         var envelope = new MailboxEnvelope(
             Guid.NewGuid(),
@@ -41,7 +40,6 @@ public class RelayMailboxQueueTests
 
         result.IsSuccess.Should().BeTrue();
         _queue.TotalCount.Should().Be(1);
-        _queue.DomainEvents.Should().ContainSingle(e => e is EnvelopeBufferedEvent);
     }
 
     [Test]
@@ -81,76 +79,61 @@ public class RelayMailboxQueueTests
             _timeProvider.UtcNow,
             _timeProvider.UtcNow.AddDays(1));
 
-        _queue.Enqueue(env1, _deliveryToken, _timeProvider, tightPolicy);
+        _queue.Enqueue(env1, _deliveryToken, _timeProvider, tightPolicy).IsSuccess.Should().BeTrue();
         var result = _queue.Enqueue(env2, _deliveryToken, _timeProvider, tightPolicy);
 
         result.IsFailure.Should().BeTrue();
         result.Error.Code.Should().Be("MAILBOX_QUOTA_EXCEEDED");
+        _queue.TotalCount.Should().Be(1);
     }
 
     [Test]
-    public void PurgeExpired_RemovesEnvelopesPastExpiresAtUtc()
+    public void PurgeExpired_RemovesOnlyExpiredEnvelopes()
     {
-        var expiredEnvelope = new MailboxEnvelope(
+        var expiredEnv = new MailboxEnvelope(
             Guid.NewGuid(),
             _recipientToken,
             new byte[] { 1 },
             _timeProvider.UtcNow.AddDays(-2),
             _timeProvider.UtcNow.AddDays(-1));
 
-        var validEnvelope = new MailboxEnvelope(
+        var validEnv = new MailboxEnvelope(
             Guid.NewGuid(),
             _recipientToken,
             new byte[] { 2 },
             _timeProvider.UtcNow,
-            _timeProvider.UtcNow.AddDays(1));
+            _timeProvider.UtcNow.AddDays(5));
 
-        _queue.Enqueue(expiredEnvelope, _deliveryToken, _timeProvider);
-        _queue.Enqueue(validEnvelope, _deliveryToken, _timeProvider);
+        _queue.Enqueue(expiredEnv, _deliveryToken, _timeProvider);
+        _queue.Enqueue(validEnv, _deliveryToken, _timeProvider);
 
-        int purged = _queue.PurgeExpired(_timeProvider);
+        int removed = _queue.PurgeExpired(_timeProvider);
 
-        purged.Should().Be(1);
+        removed.Should().Be(1);
         _queue.TotalCount.Should().Be(1);
+        _queue.Envelopes.Single().Id.Should().Be(validEnv.Id);
     }
 
     [Test]
-    public void DrainForToken_RemovesAndReturnsEnvelopesForSpecificRecipient()
+    public void DrainForToken_RemovesAndReturnsMatchingEnvelopes()
     {
         var otherToken = BlindedRoutingToken.New();
-        var otherDeliveryToken = DeliveryToken.FromSpan(Enumerable.Repeat((byte)0x55, 32).ToArray());
+        var otherDeliveryToken = DeliveryToken.FromSpan(new byte[32]);
         _queue.RegisterRecipient(otherToken, otherDeliveryToken);
 
         var env1 = new MailboxEnvelope(Guid.NewGuid(), _recipientToken, new byte[] { 1 }, _timeProvider.UtcNow, _timeProvider.UtcNow.AddDays(1));
         var env2 = new MailboxEnvelope(Guid.NewGuid(), otherToken, new byte[] { 2 }, _timeProvider.UtcNow, _timeProvider.UtcNow.AddDays(1));
+        var env3 = new MailboxEnvelope(Guid.NewGuid(), _recipientToken, new byte[] { 3 }, _timeProvider.UtcNow, _timeProvider.UtcNow.AddDays(1));
 
         _queue.Enqueue(env1, _deliveryToken, _timeProvider);
         _queue.Enqueue(env2, otherDeliveryToken, _timeProvider);
+        _queue.Enqueue(env3, _deliveryToken, _timeProvider);
 
         var drained = _queue.DrainForToken(_recipientToken);
 
-        drained.Should().HaveCount(1);
-        drained[0].RecipientToken.Should().Be(_recipientToken);
+        drained.Should().HaveCount(2);
+        drained.Select(e => e.Id).Should().Contain([env1.Id, env3.Id]);
         _queue.TotalCount.Should().Be(1);
-    }
-
-    [Test]
-    public void PruneDiscretionary_PrunesOldestEnvelopesDownToLimit()
-    {
-        for (int i = 0; i < 5; i++)
-        {
-            var env = new MailboxEnvelope(
-                Guid.NewGuid(),
-                _recipientToken,
-                new byte[] { (byte)i },
-                _timeProvider.UtcNow.AddMinutes(i),
-                _timeProvider.UtcNow.AddDays(1));
-            _queue.Enqueue(env, _deliveryToken, _timeProvider);
-        }
-
-        int pruned = _queue.PruneDiscretionary(maxRetainedCount: 2);
-
-        pruned.Should().Be(3);
-        _queue.TotalCount.Should().Be(2);
+        _queue.Envelopes.Single().Id.Should().Be(env2.Id);
     }
 }

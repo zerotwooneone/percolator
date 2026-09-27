@@ -26,7 +26,7 @@ public class GroupConversationTests
     }
 
     [Test]
-    public void AddMember_ByAdmin_AddsMember_IncrementsEpoch_AndEmitsEvents()
+    public void AddMember_ByAdmin_AddsMember_IncrementsEpoch_AndEmitsMemberJoinedEvent()
     {
         var group = GroupConversation.CreateGenesis(
             _conversationId,
@@ -47,8 +47,12 @@ public class GroupConversationTests
         group.CurrentEpoch.Value.Should().Be(1);
         group.Members.Should().Contain(m => m.Id == newMemberId && m.Role == GroupRole.Member);
 
-        group.DomainEvents.Should().ContainSingle(e => e is GroupEpochAdvancedEvent);
         group.DomainEvents.Should().ContainSingle(e => e is MemberJoinedEvent);
+        var joinedEvent = (MemberJoinedEvent)group.DomainEvents.Single();
+        joinedEvent.ConversationId.Should().Be(_conversationId);
+        joinedEvent.MemberId.Should().Be(newMemberId);
+        joinedEvent.Role.Should().Be(GroupRole.Member);
+        joinedEvent.NewEpoch.Should().Be(group.CurrentEpoch);
     }
 
     [Test]
