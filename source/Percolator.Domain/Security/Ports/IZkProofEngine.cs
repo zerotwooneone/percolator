@@ -9,4 +9,10 @@ public interface IZkProofEngine
         ZkPresentationBytes presentation,
         ReadOnlySpan<byte> transcriptChallenge,
         ZkGroupPublicParams publicParams);
+
+    ZkPresentationBytes GenerateGroupPresentation(
+        uint epoch,
+        ReadOnlySpan<byte> transcriptChallenge,
+        ReadOnlySpan<byte> groupMasterSecret32,
+        ReadOnlySpan<byte> authCredentialMac);
 }

@@ -128,6 +128,21 @@ public class GroupConversationTests
     }
 
     [Test]
+    public void RemoveMember_WhenTargetIsLastAdmin_ReturnsCannotRemoveLastAdminError()
+    {
+        var group = GroupConversation.CreateGenesis(
+            _conversationId,
+            _ownerId,
+            "Security Team",
+            _timeProvider).Value;
+
+        var result = group.RemoveMember(_adminId, _adminId, _timeProvider);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("CANNOT_REMOVE_LAST_ADMIN");
+    }
+
+    [Test]
     public void RemoveMember_ByNonAdmin_ReturnsUnauthorizedRoleError()
     {
         var group = GroupConversation.CreateGenesis(
@@ -161,6 +176,162 @@ public class GroupConversationTests
 
         result.IsFailure.Should().BeTrue();
         result.Error.Code.Should().Be("MEMBER_NOT_FOUND");
+    }
+
+    [Test]
+    public void RenameGroup_ByAdmin_UpdatesTitle_AdvancesEpoch_AndEmitsGroupRenamedEvent()
+    {
+        var group = GroupConversation.CreateGenesis(
+            _conversationId,
+            _ownerId,
+            "Initial Title",
+            _timeProvider).Value;
+
+        group.ClearDomainEvents();
+
+        var result = group.RenameGroup(_adminId, "Updated Title", _timeProvider);
+
+        result.IsSuccess.Should().BeTrue();
+        group.Title.Should().Be("Updated Title");
+        group.CurrentEpoch.Value.Should().Be(1);
+
+        group.DomainEvents.Should().ContainSingle(e => e is GroupRenamedEvent);
+        var renamedEvent = (GroupRenamedEvent)group.DomainEvents.Single();
+        renamedEvent.NewTitle.Should().Be("Updated Title");
+        renamedEvent.ActorId.Should().Be(_adminId);
+    }
+
+    [Test]
+    public void RenameGroup_ByNonAdmin_ReturnsUnauthorizedRoleError()
+    {
+        var group = GroupConversation.CreateGenesis(
+            _conversationId,
+            _ownerId,
+            "Initial Title",
+            _timeProvider).Value;
+
+        var memberId = PublicIdentityId.New();
+        group.AddMember(_adminId, memberId, GroupRole.Member, _timeProvider);
+
+        var result = group.RenameGroup(memberId, "Malicious Rename", _timeProvider);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("UNAUTHORIZED_ROLE");
+        group.Title.Should().Be("Initial Title");
+    }
+
+    [Test]
+    public void RenameGroup_WithEmptyTitle_ReturnsInvalidTitleError()
+    {
+        var group = GroupConversation.CreateGenesis(
+            _conversationId,
+            _ownerId,
+            "Initial Title",
+            _timeProvider).Value;
+
+        var result = group.RenameGroup(_adminId, "   ", _timeProvider);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("INVALID_TITLE");
+    }
+
+    [Test]
+    public void ChangeMemberRole_ByAdmin_PromotesMember_AdvancesEpoch_AndEmitsMemberRoleChangedEvent()
+    {
+        var group = GroupConversation.CreateGenesis(
+            _conversationId,
+            _ownerId,
+            "Security Team",
+            _timeProvider).Value;
+
+        var memberId = PublicIdentityId.New();
+        group.AddMember(_adminId, memberId, GroupRole.Member, _timeProvider);
+        group.ClearDomainEvents();
+
+        var result = group.ChangeMemberRole(_adminId, memberId, GroupRole.Admin, _timeProvider);
+
+        result.IsSuccess.Should().BeTrue();
+        group.Members.First(m => m.Id == memberId).Role.Should().Be(GroupRole.Admin);
+        group.CurrentEpoch.Value.Should().Be(2);
+
+        group.DomainEvents.Should().ContainSingle(e => e is MemberRoleChangedEvent);
+        var changedEvent = (MemberRoleChangedEvent)group.DomainEvents.Single();
+        changedEvent.TargetMemberId.Should().Be(memberId);
+        changedEvent.NewRole.Should().Be(GroupRole.Admin);
+    }
+
+    [Test]
+    public void ChangeMemberRole_DemotingLastAdmin_ReturnsLastAdminCannotBeDemotedError()
+    {
+        var group = GroupConversation.CreateGenesis(
+            _conversationId,
+            _ownerId,
+            "Security Team",
+            _timeProvider).Value;
+
+        var result = group.ChangeMemberRole(_adminId, _adminId, GroupRole.Member, _timeProvider);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("LAST_ADMIN_CANNOT_BE_DEMOTED");
+        group.Members.First(m => m.Id == _adminId).Role.Should().Be(GroupRole.Admin);
+    }
+
+    [Test]
+    public void ChangeMemberRole_ByNonAdmin_ReturnsUnauthorizedRoleError()
+    {
+        var group = GroupConversation.CreateGenesis(
+            _conversationId,
+            _ownerId,
+            "Security Team",
+            _timeProvider).Value;
+
+        var memberId = PublicIdentityId.New();
+        group.AddMember(_adminId, memberId, GroupRole.Member, _timeProvider);
+
+        var result = group.ChangeMemberRole(memberId, _adminId, GroupRole.Member, _timeProvider);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("UNAUTHORIZED_ROLE");
+    }
+
+    [Test]
+    public void LeaveGroup_WhenRegularMemberLeaves_RemovesMember_AndAdvancesEpoch()
+    {
+        var group = GroupConversation.CreateGenesis(
+            _conversationId,
+            _ownerId,
+            "Security Team",
+            _timeProvider).Value;
+
+        var memberId = PublicIdentityId.New();
+        group.AddMember(_adminId, memberId, GroupRole.Member, _timeProvider);
+        group.ClearDomainEvents();
+
+        var result = group.LeaveGroup(memberId, _timeProvider);
+
+        result.IsSuccess.Should().BeTrue();
+        group.Members.Should().NotContain(m => m.Id == memberId);
+        group.CurrentEpoch.Value.Should().Be(2);
+
+        group.DomainEvents.Should().ContainSingle(e => e is MemberRemovedEvent);
+    }
+
+    [Test]
+    public void LeaveGroup_WhenLastAdminLeavesAndOtherMembersExist_ReturnsLastAdminCannotLeaveError()
+    {
+        var group = GroupConversation.CreateGenesis(
+            _conversationId,
+            _ownerId,
+            "Security Team",
+            _timeProvider).Value;
+
+        var memberId = PublicIdentityId.New();
+        group.AddMember(_adminId, memberId, GroupRole.Member, _timeProvider);
+
+        var result = group.LeaveGroup(_adminId, _timeProvider);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("LAST_ADMIN_CANNOT_LEAVE");
     }
 
     [Test]

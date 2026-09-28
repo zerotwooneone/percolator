@@ -20,4 +20,15 @@ public sealed class FakeZkProofEngine : IZkProofEngine
         if (ExpectedTranscriptChallenge != null && !transcriptChallenge.SequenceEqual(ExpectedTranscriptChallenge)) return false;
         return presentation.Length > 0 && publicParams.Length > 0;
     }
+
+    public ZkPresentationBytes GenerateGroupPresentation(
+        uint epoch,
+        ReadOnlySpan<byte> transcriptChallenge,
+        ReadOnlySpan<byte> groupMasterSecret32,
+        ReadOnlySpan<byte> authCredentialMac)
+    {
+        var dummy = new byte[64];
+        dummy[0] = (byte)(epoch & 0xFF);
+        return ZkPresentationBytes.FromBytesOwned(dummy);
+    }
 }

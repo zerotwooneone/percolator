@@ -41,13 +41,15 @@ The legacy codebase contains overlapping, dated modules:
 
 ## 4. Required Port Implementations & Specific Adapters
 
-### 4.1 Cryptography (`Percolator.Domain.Security.Ports.ICryptoEngine`)
-- **Adapter**: `SignalCryptoEngine` / `SodiumCryptoEngine`
-- **Responsibilities**:
+### 4.1 Cryptography (`Percolator.Domain.Security.Ports.ICryptoEngine` & `IZkProofEngine`)
+- **Adapter**: `SignalCryptoEngine` / `SodiumCryptoEngine` (`ICryptoEngine`)
   - **Ed25519 Signatures**: Signs and verifies device link proofs and pre-key signatures (`VerifyEd25519Signature(IdentityKey, ...)`).
   - **Curve25519 (X25519) Diffie-Hellman**: Computes scalar multiplication between private keys and public DH keys (`ComputeDiffieHellman`, `DeriveX3dhMasterSecret`).
   - **HKDF / HMAC Ratchet Steps**: Performs SHA-256 HMAC-based root key updates (`KdfRk`) and symmetric chain key advances (`StepRatchet`).
-  - **Authenticated Encryption**: AES-256-GCM / ChaCha20-Poly1305 authenticated symmetric encryption (`EncryptAesGcm`, `DecryptAesGcm`).
+  - **Authenticated Encryption**: AES-256-GCM authenticated symmetric encryption (`EncryptAesGcm`, `DecryptAesGcm`).
+- **Adapter**: `ZkgroupCryptographyService` (`IZkProofEngine`)
+  - **Native zkgroup FFI**: Wraps `Signal.Interop` native C/Rust binaries with safe handle management.
+  - **ZK Group Presentations**: Generates and verifies zero-knowledge membership proofs for anonymous group relay interactions (`VerifyGroupPresentation`, `GenerateGroupPresentation`).
 
 ### 4.2 Persistence & Database Repositories
 - **Database Engine**: Encrypted SQLite using SQLCipher (`SQLitePCLRaw.bundle_e_sqlcipher` with EF Core or Dapper).
@@ -61,15 +63,23 @@ The legacy codebase contains overlapping, dated modules:
     - Persists active `DirectRatchetSession` states (root key, current chain keys, skipped message key cache) under encryption.
   - **`IRelayPreKeyDirectoryRepository`**:
     - Backs the relay pre-key hosting directory with paging, expiration cleanup, and quota enforcement.
+  - **`IUnknownGroupMessageCacheRepository`**:
+    - Persists bounded out-of-order group messages awaiting author sender key distribution.
 
-### 4.3 Network Transport & Dispatcher
+### 4.3 Network Transport, Streaming & Dispatching
 - **Adapters**:
   - **`ITransportDispatcher`** (`Percolator.Application2.Delivery.Ports`):
-    - Implements outbound message dispatching.
-    - Routes `OutboxJob` packets via direct gRPC P2P channel or gRPC Relay Mailbox service based on `IRoutingCoordinator` directives.
+    - Routes `OutboxJob` packets via direct gRPC P2P channel or gRPC Relay Mailbox service based on `DeliveryChannelType`.
   - **`IInboundIngressService` gRPC Server Endpoint**:
     - ASP.NET Core gRPC service exposing `DeliverOpaqueMessage(OpaqueEnvelopeRequest)` to receive incoming frames from peers or relays.
     - Validates packet size, invokes ingress edge filters, and hands payloads to `IInboundIngressService`.
+  - **`RelayGroupStreamWorker` (`IHostedService`)**:
+    - Manages live, resilient server-streaming gRPC subscriptions (`RelayGroupService.SubscribeGroupStream`) to host relays.
+    - Implements automatic reconnection with exponential backoff and jitter upon network drops.
+    - Feeds streamed envelopes directly into `IInboundIngressService`.
+  - **Direct P2P TLS Certificate Pinning**:
+    - Configures custom `RemoteCertificateValidationCallback` on gRPC `SocketsHttpHandler`.
+    - Validates self-signed peer certificates by verifying certificate thumbprints match the pinned `IdentityKey` of the remote contact.
   - **Relay Client Adapter**:
     - Publishes `PreKeyBundle` uploads to relay identities.
     - Fetches remote peer pre-key bundles from relays out-of-band.
@@ -78,5 +88,11 @@ The legacy codebase contains overlapping, dated modules:
 ### 4.4 Platform & Storage Adapters
 - **`IDateTimeProvider`** (`Percolator.Domain.Common`):
   - `SystemDateTimeProvider` delegating to `DateTimeOffset.UtcNow`.
+- **`ICredentialStorage`** (Security Provider):
+  - `DpapiCredentialService` utilizing Windows DPAPI (`ProtectedData.Protect`/`Unprotect`) and local filesystem ACLs to safeguard SQLCipher encryption passphrases and root identity seed keys.
+- **`UdpLanDiscoveryAdapter`** (`Percolator.Apps.Discovery`):
+  - Manages UDP broadcast socket (`ReuseAddress`, `EnableBroadcast = true`) for local subnet peer auto-discovery without external server dependencies.
+- **`KademliaRoutingTable`** (`Percolator.Apps.Discovery`):
+  - Manages 160-bit XOR distance metrics, $k=20$ K-bucket storage, and node contact tables for decentralized rendezvous discovery.
 - **`IFileChunkStorage`** (`Percolator.Apps.FileTransfer`):
   - Streams chunk payloads to/from local disk with SHA-256 / Merkle root integrity verification.

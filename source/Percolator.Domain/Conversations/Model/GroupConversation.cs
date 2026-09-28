@@ -50,6 +50,36 @@ public sealed class GroupConversation : AggregateRoot<ConversationId>
         return DomainResult<GroupConversation>.Success(group);
     }
 
+    public DomainResult RenameGroup(
+        PublicIdentityId actorId,
+        string newTitle,
+        IDateTimeProvider timeProvider)
+    {
+        if (string.IsNullOrWhiteSpace(newTitle))
+        {
+            return DomainResult.Failure(new DomainError("INVALID_TITLE", "Group title cannot be empty."));
+        }
+
+        var actor = _members.FirstOrDefault(m => m.Id == actorId);
+        if (actor == null || actor.Role != GroupRole.Admin)
+        {
+            return DomainResult.Failure(new DomainError("UNAUTHORIZED_ROLE", "Only group admins can rename the group."));
+        }
+
+        if (Title == newTitle)
+        {
+            return DomainResult.Success();
+        }
+
+        Title = newTitle;
+        CurrentEpoch = CurrentEpoch.Next();
+        LastActivityUtc = timeProvider.UtcNow;
+
+        AddDomainEvent(new GroupRenamedEvent(Id, actorId, newTitle, CurrentEpoch, LastActivityUtc));
+
+        return DomainResult.Success();
+    }
+
     public DomainResult AddMember(
         PublicIdentityId actorId,
         PublicIdentityId newMemberId,
@@ -78,6 +108,43 @@ public sealed class GroupConversation : AggregateRoot<ConversationId>
         return DomainResult.Success();
     }
 
+    public DomainResult ChangeMemberRole(
+        PublicIdentityId actorId,
+        PublicIdentityId targetMemberId,
+        GroupRole newRole,
+        IDateTimeProvider timeProvider)
+    {
+        var actor = _members.FirstOrDefault(m => m.Id == actorId);
+        if (actor == null || actor.Role != GroupRole.Admin)
+        {
+            return DomainResult.Failure(new DomainError("UNAUTHORIZED_ROLE", "Only group admins can change member roles."));
+        }
+
+        var targetMember = _members.FirstOrDefault(m => m.Id == targetMemberId);
+        if (targetMember == null)
+        {
+            return DomainResult.Failure(new DomainError("MEMBER_NOT_FOUND", "Target member does not exist in group."));
+        }
+
+        if (targetMember.Role == newRole)
+        {
+            return DomainResult.Success();
+        }
+
+        if (targetMember.Role == GroupRole.Admin && newRole != GroupRole.Admin && _members.Count(m => m.Role == GroupRole.Admin) <= 1)
+        {
+            return DomainResult.Failure(new DomainError("LAST_ADMIN_CANNOT_BE_DEMOTED", "Cannot demote the last remaining admin in the group."));
+        }
+
+        targetMember.ChangeRole(newRole);
+        CurrentEpoch = CurrentEpoch.Next();
+        LastActivityUtc = timeProvider.UtcNow;
+
+        AddDomainEvent(new MemberRoleChangedEvent(Id, targetMemberId, newRole, CurrentEpoch, LastActivityUtc));
+
+        return DomainResult.Success();
+    }
+
     public DomainResult RemoveMember(
         PublicIdentityId actorId,
         PublicIdentityId targetMemberId,
@@ -95,12 +162,42 @@ public sealed class GroupConversation : AggregateRoot<ConversationId>
             return DomainResult.Failure(new DomainError("MEMBER_NOT_FOUND", "Member does not exist in group."));
         }
 
+        if (memberToRemove.Role == GroupRole.Admin && _members.Count(m => m.Role == GroupRole.Admin) <= 1)
+        {
+            return DomainResult.Failure(new DomainError("CANNOT_REMOVE_LAST_ADMIN", "Cannot remove the last remaining admin from the group."));
+        }
+
         _members.Remove(memberToRemove);
 
         CurrentEpoch = CurrentEpoch.Next();
         LastActivityUtc = timeProvider.UtcNow;
 
         AddDomainEvent(new MemberRemovedEvent(Id, targetMemberId, CurrentEpoch, LastActivityUtc));
+
+        return DomainResult.Success();
+    }
+
+    public DomainResult LeaveGroup(
+        PublicIdentityId memberId,
+        IDateTimeProvider timeProvider)
+    {
+        var member = _members.FirstOrDefault(m => m.Id == memberId);
+        if (member == null)
+        {
+            return DomainResult.Failure(new DomainError("MEMBER_NOT_FOUND", "Member does not exist in group."));
+        }
+
+        if (member.Role == GroupRole.Admin && _members.Count(m => m.Role == GroupRole.Admin) <= 1 && _members.Count > 1)
+        {
+            return DomainResult.Failure(new DomainError("LAST_ADMIN_CANNOT_LEAVE", "The last remaining admin cannot leave the group without promoting another member to admin first."));
+        }
+
+        _members.Remove(member);
+
+        CurrentEpoch = CurrentEpoch.Next();
+        LastActivityUtc = timeProvider.UtcNow;
+
+        AddDomainEvent(new MemberRemovedEvent(Id, memberId, CurrentEpoch, LastActivityUtc));
 
         return DomainResult.Success();
     }
