@@ -25,26 +25,26 @@ public sealed class X3dhAgreementTests
         aliceIdentityPriv.Fill(10);
         Span<byte> aliceIdentityPub = stackalloc byte[32];
         aliceIdentityPub.Fill(110);
-        var aliceIdPub = IdentityPublicKey.FromSpan(aliceIdentityPub);
+        var aliceIdPub = IdentityKey.FromSpan(aliceIdentityPub);
 
         // Bob (Receiver)
         Span<byte> bobIdentityPriv = stackalloc byte[32];
         bobIdentityPriv.Fill(20);
         Span<byte> bobIdentityPub = stackalloc byte[32];
         bobIdentityPub.Fill(120);
-        var bobIdPub = IdentityPublicKey.FromSpan(bobIdentityPub);
+        var bobIdPub = IdentityKey.FromSpan(bobIdentityPub);
 
         Span<byte> bobSignedPreKeyPriv = stackalloc byte[32];
         bobSignedPreKeyPriv.Fill(30);
         Span<byte> bobSignedPreKeyPub = stackalloc byte[32];
         bobSignedPreKeyPub.Fill(130);
-        var bobSpkPub = IdentityPublicKey.FromSpan(bobSignedPreKeyPub);
+        var bobSpkPub = DhPublicKey.FromSpan(bobSignedPreKeyPub);
 
         Span<byte> bobOneTimePreKeyPriv = stackalloc byte[32];
         bobOneTimePreKeyPriv.Fill(40);
         Span<byte> bobOneTimePreKeyPub = stackalloc byte[32];
         bobOneTimePreKeyPub.Fill(140);
-        var bobOpkPub = IdentityPublicKey.FromSpan(bobOneTimePreKeyPub);
+        var bobOpkPub = DhPublicKey.FromSpan(bobOneTimePreKeyPub);
 
         var bobBundle = new PreKeyBundle(
             PublicIdentityId.New(),
@@ -87,7 +87,7 @@ public sealed class X3dhAgreementTests
         aliceIdentityPriv.Fill(10);
         Span<byte> aliceIdentityPub = stackalloc byte[32];
         aliceIdentityPub.Fill(110);
-        var aliceIdPub = IdentityPublicKey.FromSpan(aliceIdentityPub);
+        var aliceIdPub = IdentityKey.FromSpan(aliceIdentityPub);
 
         Span<byte> bobIdentityPriv = stackalloc byte[32];
         bobIdentityPriv.Fill(20);
@@ -102,8 +102,8 @@ public sealed class X3dhAgreementTests
         var bobBundle = new PreKeyBundle(
             PublicIdentityId.New(),
             DeviceId.Primary,
-            IdentityPublicKey.FromSpan(bobIdentityPub),
-            IdentityPublicKey.FromSpan(bobSignedPreKeyPub),
+            IdentityKey.FromSpan(bobIdentityPub),
+            DhPublicKey.FromSpan(bobSignedPreKeyPub),
             DeviceLinkProof.FromSpan(new byte[64]),
             OneTimePreKey: null,
             OneTimePreKeyId: 0);
@@ -134,12 +134,12 @@ public sealed class X3dhAgreementTests
         var bobBundle = new PreKeyBundle(
             PublicIdentityId.New(),
             DeviceId.Primary,
-            IdentityPublicKey.FromSpan(new byte[32]),
-            IdentityPublicKey.FromSpan(new byte[32]),
+            IdentityKey.FromSpan(new byte[32]),
+            DhPublicKey.FromSpan(new byte[32]),
             DeviceLinkProof.FromSpan(new byte[64]));
 
         // Act
-        var result = X3dhAgreement.Initiate(new byte[32], IdentityPublicKey.FromSpan(new byte[32]), bobBundle, _cryptoEngine);
+        var result = X3dhAgreement.Initiate(new byte[32], IdentityKey.FromSpan(new byte[32]), bobBundle, _cryptoEngine);
 
         // Assert
         Assert.That(result.IsSuccess, Is.False);

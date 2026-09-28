@@ -10,7 +10,7 @@ public sealed class DeviceRecord : IEntity<DeviceId>
     public DeviceId Id => DeviceId;
     public DeviceId DeviceId { get; }
     public string DeviceName { get; private set; }
-    public IdentityPublicKey DevicePublicKey { get; }
+    public IdentityKey DevicePublicKey { get; }
     public DeviceLinkProof? LinkProof { get; }
     public DateTimeOffset CreatedAtUtc { get; }
     public DateTimeOffset? LastSeenAtUtc { get; private set; }
@@ -18,7 +18,7 @@ public sealed class DeviceRecord : IEntity<DeviceId>
     private DeviceRecord(
         DeviceId deviceId,
         string deviceName,
-        IdentityPublicKey devicePublicKey,
+        IdentityKey devicePublicKey,
         DeviceLinkProof? linkProof,
         DateTimeOffset createdAtUtc)
     {
@@ -30,7 +30,7 @@ public sealed class DeviceRecord : IEntity<DeviceId>
     }
 
     public static DomainResult<DeviceRecord> CreatePrimary(
-        IdentityPublicKey devicePublicKey,
+        IdentityKey devicePublicKey,
         string deviceName,
         IDateTimeProvider timeProvider)
     {
@@ -51,9 +51,9 @@ public sealed class DeviceRecord : IEntity<DeviceId>
 
     public static DomainResult<DeviceRecord> CreateSecondary(
         DeviceId deviceId,
-        IdentityPublicKey devicePublicKey,
+        IdentityKey devicePublicKey,
         DeviceLinkProof linkProof,
-        IdentityPublicKey primaryIdentityPublicKey,
+        IdentityKey primaryIdentityPublicKey,
         ICryptoEngine cryptoEngine,
         string deviceName,
         IDateTimeProvider timeProvider)
@@ -89,11 +89,16 @@ public sealed class DeviceRecord : IEntity<DeviceId>
 
         var record = new DeviceRecord(
             deviceId,
-            deviceName?.Trim() ?? $"Device {deviceId.Value}",
+            deviceName?.Trim() ?? $"Device-{deviceId.Value}",
             devicePublicKey,
             linkProof,
             timeProvider.UtcNow);
 
         return DomainResult<DeviceRecord>.Success(record);
+    }
+
+    public void TouchLastSeen(IDateTimeProvider timeProvider)
+    {
+        LastSeenAtUtc = timeProvider.UtcNow;
     }
 }

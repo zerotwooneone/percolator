@@ -15,7 +15,7 @@ public sealed class KeyRotationTests
     public void RotatePrimaryPublicKey_WhenPeerChangesKey_ResetsTrustToUntrusted()
     {
         // Arrange
-        var initialKey = IdentityPublicKey.FromSpan(new byte[32]);
+        var initialKey = IdentityKey.FromSpan(new byte[32]);
         var contact = new PeerContact(
             _ownerId,
             _peerId,
@@ -29,7 +29,7 @@ public sealed class KeyRotationTests
         // Act: Peer rotates their key (safety number changes)
         Span<byte> newKeyBytes = stackalloc byte[32];
         newKeyBytes.Fill(99);
-        var newKey = IdentityPublicKey.FromSpan(newKeyBytes);
+        var newKey = IdentityKey.FromSpan(newKeyBytes);
 
         var result = contact.RotatePrimaryPublicKey(newKey);
 
@@ -43,7 +43,7 @@ public sealed class KeyRotationTests
     public void RotatePrimaryPublicKey_WithSameKey_IsIdempotentAndPreservesTrust()
     {
         // Arrange
-        var initialKey = IdentityPublicKey.FromSpan(new byte[32]);
+        var initialKey = IdentityKey.FromSpan(new byte[32]);
         var contact = new PeerContact(
             _ownerId,
             _peerId,
@@ -61,16 +61,17 @@ public sealed class KeyRotationTests
     }
 
     [Test]
-    public void PreKeyBundleState_RotateSignedPreKey_UpdatesTimestamp()
+    public void RotateSignedPreKey_UpdatesTimestamp()
     {
         // Arrange
-        var state = new PreKeyBundleState(_ownerId, DeviceId.Primary, 50, _fixedTime);
-        var newTime = _fixedTime.AddDays(7);
+        var initialRotation = _fixedTime;
+        var state = new PreKeyBundleState(_ownerId, DeviceId.Primary, 10, initialRotation);
+        var newRotationTime = initialRotation.AddDays(7);
 
         // Act
-        state.RotateSignedPreKey(newTime);
+        state.RotateSignedPreKey(newRotationTime);
 
         // Assert
-        Assert.That(state.SignedPreKeyCreatedAtUtc, Is.EqualTo(newTime));
+        Assert.That(state.SignedPreKeyCreatedAtUtc, Is.EqualTo(newRotationTime));
     }
 }

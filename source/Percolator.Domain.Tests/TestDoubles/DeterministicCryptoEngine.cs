@@ -7,8 +7,8 @@ namespace Percolator.Domain.Tests.TestDoubles;
 
 public sealed class DeterministicCryptoEngine : ICryptoEngine
 {
-    public bool SignaturesAlwaysValid { get; set; } = true;
     private byte _keyPairCounter = 1;
+    public bool SignaturesAlwaysValid { get; set; } = true;
 
     public (ChainKey NextChainKey, MessageKey DerivedMessageKey) StepRatchet(ChainKey currentChainKey)
     {
@@ -34,7 +34,7 @@ public sealed class DeterministicCryptoEngine : ICryptoEngine
 
         Span<byte> buffer = stackalloc byte[65];
         currentRootKey.Span.CopyTo(buffer);
-        dhSecret.Span.CopyTo(buffer[32..64]);
+        dhSecret.Span.CopyTo(buffer[32..]);
 
         buffer[64] = 0x10;
         SHA256.HashData(buffer, nextRootBytes);
@@ -45,14 +45,14 @@ public sealed class DeterministicCryptoEngine : ICryptoEngine
         return (ChainKey.FromSpan(nextRootBytes), ChainKey.FromSpan(chainKeyBytes));
     }
 
-    public (EphemeralPrivateKey PrivateKey, IdentityPublicKey PublicKey) GenerateEphemeralKeyPair()
+    public (EphemeralPrivateKey PrivateKey, DhPublicKey PublicKey) GenerateEphemeralKeyPair()
     {
         byte val = _keyPairCounter++;
         Span<byte> priv = stackalloc byte[32];
         Span<byte> pub = stackalloc byte[32];
         priv.Fill(val);
         pub.Fill((byte)(val + 100));
-        return (EphemeralPrivateKey.FromSpan(priv), IdentityPublicKey.FromSpan(pub));
+        return (EphemeralPrivateKey.FromSpan(priv), DhPublicKey.FromSpan(pub));
     }
 
     public SharedSecret ComputeDiffieHellman(ReadOnlySpan<byte> privateKey, ReadOnlySpan<byte> publicKey)
@@ -104,7 +104,7 @@ public sealed class DeterministicCryptoEngine : ICryptoEngine
         return ciphertext[nonce.Length..].ToArray();
     }
 
-    public bool VerifyEd25519Signature(IdentityPublicKey publicKey, ReadOnlySpan<byte> message, ReadOnlySpan<byte> signature)
+    public bool VerifyEd25519Signature(IdentityKey publicKey, ReadOnlySpan<byte> message, ReadOnlySpan<byte> signature)
     {
         return SignaturesAlwaysValid;
     }

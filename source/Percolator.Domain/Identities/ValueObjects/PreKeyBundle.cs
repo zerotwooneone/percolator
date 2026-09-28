@@ -9,8 +9,8 @@ namespace Percolator.Domain.Identities.ValueObjects;
 public sealed record PreKeyBundle(
     PublicIdentityId IdentityId,
     DeviceId DeviceId,
-    IdentityPublicKey IdentityKey,
-    IdentityPublicKey SignedPreKey,
+    IdentityKey IdentityKey,
+    DhPublicKey SignedPreKey,
     DeviceLinkProof SignedPreKeySignature,
-    IdentityPublicKey? OneTimePreKey = null,
+    DhPublicKey? OneTimePreKey = null,
     uint OneTimePreKeyId = 0);

@@ -8,8 +8,8 @@ namespace Percolator.Domain.Tests.Identities;
 public class PeerContactTests
 {
     private DeterministicCryptoEngine _cryptoEngine = null!;
-    private IdentityPublicKey _primaryPeerKey = null!;
-    private IdentityPublicKey _secondaryDeviceKey = null!;
+    private IdentityKey _primaryPeerKey = null!;
+    private IdentityKey _secondaryDeviceKey = null!;
     private DeviceLinkProof _dummyProof = null!;
     private PeerContact _contact = null!;
     private static readonly DateTimeOffset FixedCreatedAt = new(2026, 3, 1, 9, 0, 0, TimeSpan.Zero);
@@ -18,8 +18,8 @@ public class PeerContactTests
     public void SetUp()
     {
         _cryptoEngine = new DeterministicCryptoEngine();
-        _primaryPeerKey = IdentityPublicKey.FromSpan(new byte[32]);
-        _secondaryDeviceKey = IdentityPublicKey.FromSpan(new byte[32]);
+        _primaryPeerKey = IdentityKey.FromSpan(new byte[32]);
+        _secondaryDeviceKey = IdentityKey.FromSpan(new byte[32]);
         _dummyProof = DeviceLinkProof.FromSpan(new byte[64]);
 
         _contact = new PeerContact(
@@ -46,66 +46,70 @@ public class PeerContactTests
     }
 
     [Test]
-    public void RegisterSecondaryDevice_WhenAlreadyRegistered_IsIdempotentAndSucceeds()
+    public void RegisterSecondaryDevice_DeviceIdOne_Fails()
     {
-        var secondaryId = new DeviceId(2);
-        _contact.RegisterSecondaryDevice(
-            secondaryId,
-            _secondaryDeviceKey,
-            _dummyProof,
-            _primaryPeerKey,
-            _cryptoEngine);
-
         var result = _contact.RegisterSecondaryDevice(
-            secondaryId,
-            _secondaryDeviceKey,
-            _dummyProof,
-            _primaryPeerKey,
-            _cryptoEngine);
-
-        result.IsSuccess.Should().BeTrue();
-        _contact.RegisteredDevices.Count.Should().Be(2); // Primary (1) + Secondary (2)
-    }
-
-    [Test]
-    public void RegisterSecondaryDevice_WithInvalidSignature_RejectsDeviceInjection()
-    {
-        _cryptoEngine.SignaturesAlwaysValid = false;
-        var secondaryId = new DeviceId(2);
-
-        var result = _contact.RegisterSecondaryDevice(
-            secondaryId,
+            DeviceId.Primary,
             _secondaryDeviceKey,
             _dummyProof,
             _primaryPeerKey,
             _cryptoEngine);
 
         result.IsFailure.Should().BeTrue();
-        result.Error.Code.Should().Be("INVALID_LINK_PROOF_SIGNATURE");
-        _contact.RegisteredDevices.Should().NotContain(secondaryId);
+        result.Error!.Code.Should().Be("INVALID_DEVICE_ID");
     }
 
     [Test]
-    public void RegisterSecondaryDevice_WhenCapacityExceeded_ReturnsError()
+    public void RegisterSecondaryDevice_InvalidSignature_Fails()
+    {
+        _cryptoEngine.SignaturesAlwaysValid = false;
+
+        var result = _contact.RegisterSecondaryDevice(
+            new DeviceId(5),
+            _secondaryDeviceKey,
+            _dummyProof,
+            _primaryPeerKey,
+            _cryptoEngine);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error!.Code.Should().Be("INVALID_LINK_PROOF_SIGNATURE");
+        _contact.RegisteredDevices.Should().NotContain(new DeviceId(5));
+    }
+
+    [Test]
+    public void RegisterSecondaryDevice_AlreadyRegistered_IsIdempotent()
+    {
+        var secondaryId = new DeviceId(2);
+        _contact.RegisterSecondaryDevice(secondaryId, _secondaryDeviceKey, _dummyProof, _primaryPeerKey, _cryptoEngine);
+
+        var countBefore = _contact.RegisteredDevices.Count;
+        var duplicateResult = _contact.RegisterSecondaryDevice(secondaryId, _secondaryDeviceKey, _dummyProof, _primaryPeerKey, _cryptoEngine);
+
+        duplicateResult.IsSuccess.Should().BeTrue();
+        _contact.RegisteredDevices.Count.Should().Be(countBefore);
+    }
+
+    [Test]
+    public void RegisterSecondaryDevice_ExceedsMaxLimit_Fails()
     {
         for (uint i = 2; i <= PeerContact.MaxRegisteredDevicesPerPeer; i++)
         {
-            _contact.RegisterSecondaryDevice(
-                new DeviceId(i),
-                _secondaryDeviceKey,
-                _dummyProof,
-                _primaryPeerKey,
-                _cryptoEngine);
+            var res = _contact.RegisterSecondaryDevice(new DeviceId(i), _secondaryDeviceKey, _dummyProof, _primaryPeerKey, _cryptoEngine);
+            res.IsSuccess.Should().BeTrue();
         }
 
-        var result = _contact.RegisterSecondaryDevice(
-            new DeviceId(100),
-            _secondaryDeviceKey,
-            _dummyProof,
-            _primaryPeerKey,
-            _cryptoEngine);
+        var overflowId = new DeviceId(PeerContact.MaxRegisteredDevicesPerPeer + 1);
+        var overflowResult = _contact.RegisterSecondaryDevice(overflowId, _secondaryDeviceKey, _dummyProof, _primaryPeerKey, _cryptoEngine);
 
-        result.IsFailure.Should().BeTrue();
-        result.Error.Code.Should().Be("MAX_DEVICES_EXCEEDED");
+        overflowResult.IsFailure.Should().BeTrue();
+        overflowResult.Error!.Code.Should().Be("DEVICE_LIMIT_EXCEEDED");
+    }
+
+    [Test]
+    public void UpdateTrust_ChangesTrustLevel()
+    {
+        _contact.TrustLevel.Should().Be(PeerTrustLevel.Tofu);
+        _contact.UpdateTrust(PeerTrustLevel.Verified);
+        _contact.TrustLevel.Should().Be(PeerTrustLevel.Verified);
     }
 }

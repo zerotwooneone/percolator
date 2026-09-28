@@ -22,13 +22,13 @@ public sealed class RelayHostedPreKeyBundleTests
         // Arrange
         var ownerId = PublicIdentityId.New();
         var deviceId = DeviceId.Primary;
-        var identityKey = IdentityPublicKey.FromSpan(new byte[32]);
-        var signedPreKey = IdentityPublicKey.FromSpan(new byte[32]);
+        var identityKey = IdentityKey.FromSpan(new byte[32]);
+        var signedPreKey = DhPublicKey.FromSpan(new byte[32]);
         var signature = DeviceLinkProof.FromSpan(new byte[64]);
 
-        var otpk1 = IdentityPublicKey.FromSpan(new byte[32]);
-        var otpk2 = IdentityPublicKey.FromSpan(new byte[32]);
-        var oneTimeKeys = new (uint, IdentityPublicKey)[]
+        var otpk1 = DhPublicKey.FromSpan(new byte[32]);
+        var otpk2 = DhPublicKey.FromSpan(new byte[32]);
+        var oneTimeKeys = new (uint, DhPublicKey)[]
         {
             (1u, otpk1),
             (2u, otpk2)
@@ -81,8 +81,8 @@ public sealed class RelayHostedPreKeyBundleTests
         var result = RelayHostedPreKeyBundle.Create(
             ownerId,
             DeviceId.Primary,
-            IdentityPublicKey.FromSpan(new byte[32]),
-            IdentityPublicKey.FromSpan(new byte[32]),
+            IdentityKey.FromSpan(new byte[32]),
+            DhPublicKey.FromSpan(new byte[32]),
             DeviceLinkProof.FromSpan(new byte[64]),
             [],
             policy,
@@ -100,19 +100,19 @@ public sealed class RelayHostedPreKeyBundleTests
         var policy = new RelayHostingPolicy(IsAcceptingPreKeys: true, MaxOneTimePreKeysPerIdentity: 2);
         var ownerId = PublicIdentityId.New();
 
-        var oneTimeKeys = new (uint, IdentityPublicKey)[]
+        var oneTimeKeys = new (uint, DhPublicKey)[]
         {
-            (1u, IdentityPublicKey.FromSpan(new byte[32])),
-            (2u, IdentityPublicKey.FromSpan(new byte[32])),
-            (3u, IdentityPublicKey.FromSpan(new byte[32]))
+            (1u, DhPublicKey.FromSpan(new byte[32])),
+            (2u, DhPublicKey.FromSpan(new byte[32])),
+            (3u, DhPublicKey.FromSpan(new byte[32]))
         };
 
         // Act
         var result = RelayHostedPreKeyBundle.Create(
             ownerId,
             DeviceId.Primary,
-            IdentityPublicKey.FromSpan(new byte[32]),
-            IdentityPublicKey.FromSpan(new byte[32]),
+            IdentityKey.FromSpan(new byte[32]),
+            DhPublicKey.FromSpan(new byte[32]),
             DeviceLinkProof.FromSpan(new byte[64]),
             oneTimeKeys,
             policy,
@@ -133,16 +133,16 @@ public sealed class RelayHostedPreKeyBundleTests
         var bundle = RelayHostedPreKeyBundle.Create(
             ownerId,
             DeviceId.Primary,
-            IdentityPublicKey.FromSpan(new byte[32]),
-            IdentityPublicKey.FromSpan(new byte[32]),
+            IdentityKey.FromSpan(new byte[32]),
+            DhPublicKey.FromSpan(new byte[32]),
             DeviceLinkProof.FromSpan(new byte[64]),
-            [(1u, IdentityPublicKey.FromSpan(new byte[32]))],
+            [(1u, DhPublicKey.FromSpan(new byte[32]))],
             policy,
             _cryptoEngine).Value;
 
         // Act: Replenish 2 more (total 3, exceeds limit of 2)
         var result = bundle.ReplenishOneTimePreKeys(
-            [(2u, IdentityPublicKey.FromSpan(new byte[32])), (3u, IdentityPublicKey.FromSpan(new byte[32]))],
+            [(2u, DhPublicKey.FromSpan(new byte[32])), (3u, DhPublicKey.FromSpan(new byte[32]))],
             policy);
 
         // Assert

@@ -53,7 +53,7 @@ public class DirectRatchetSessionTests
     }
 
     [Test]
-    public void StepReceivingChain_WithSkippedCounter_CachesSkippedKeys()
+    public void StepReceivingChain_TargetMatchesCounter_DerivesKeyDirectly()
     {
         var session = new DirectRatchetSession(
             _aliceId, _device1,
@@ -62,26 +62,16 @@ public class DirectRatchetSessionTests
             sendingChainKey: null,
             receivingChainKey: _initialChainKey);
 
-        // Step straight to counter 3 (skipping 0, 1, 2)
-        var result = session.StepReceivingChain(_engine, targetCounter: 3);
+        var result = session.StepReceivingChain(_engine, targetCounter: 0);
 
         result.IsSuccess.Should().BeTrue();
-        result.Value.MessageCounter.Should().Be(3);
-        session.ReceivingCounter.Should().Be(4);
-
-        session.HasSkippedKey(0).Should().BeTrue();
-        session.HasSkippedKey(1).Should().BeTrue();
-        session.HasSkippedKey(2).Should().BeTrue();
-        session.HasSkippedKey(3).Should().BeFalse();
-
-        // Consume a skipped key
-        var consumeResult = session.TryConsumeSkippedKey(1);
-        consumeResult.IsSuccess.Should().BeTrue();
-        session.HasSkippedKey(1).Should().BeFalse();
+        result.Value.MessageCounter.Should().Be(0);
+        result.Value.Key.Should().NotBeNull();
+        session.ReceivingCounter.Should().Be(1);
     }
 
     [Test]
-    public void StepReceivingChain_ReplayAttempt_ReturnsCounterAlreadyPassed()
+    public void StepReceivingChain_TargetGreaterThanCounter_CachesSkippedKeys()
     {
         var session = new DirectRatchetSession(
             _aliceId, _device1,
@@ -90,39 +80,44 @@ public class DirectRatchetSessionTests
             sendingChainKey: null,
             receivingChainKey: _initialChainKey);
 
-        session.StepReceivingChain(_engine, targetCounter: 0);
+        // Target message 2 received out-of-order -> keys 0 and 1 should be skipped & cached
+        var result = session.StepReceivingChain(_engine, targetCounter: 2);
 
-        // Attempt replay of counter 0
-        var replay = session.StepReceivingChain(_engine, targetCounter: 0);
-        replay.IsFailure.Should().BeTrue();
-        replay.Error.Code.Should().Be("COUNTER_ALREADY_PASSED");
+        result.IsSuccess.Should().BeTrue();
+        result.Value.MessageCounter.Should().Be(2);
+        session.ReceivingCounter.Should().Be(3);
+
+        // Verify keys 0 and 1 were cached and can be retrieved
+        var key0 = session.TryGetSkippedKey(0);
+        key0.IsSuccess.Should().BeTrue();
+
+        var key1 = session.TryGetSkippedKey(1);
+        key1.IsSuccess.Should().BeTrue();
+
+        // Retrieving again should fail (consumed / anti-replay)
+        var key0Again = session.TryGetSkippedKey(0);
+        key0Again.IsFailure.Should().BeTrue();
     }
 
     [Test]
-    public void StepReceivingChain_WhenSkippedKeysExceedCapacity_EvictsOldestKey()
+    public void StepReceivingChain_TargetBehindCounter_Fails()
     {
         var session = new DirectRatchetSession(
             _aliceId, _device1,
             _bobId, _device1,
             rootKey: _rootKey,
             sendingChainKey: null,
-            receivingChainKey: _initialChainKey);
+            receivingChainKey: _initialChainKey,
+            receivingCounter: 5);
 
-        // Skip MaxTotalSkippedKeys + 1 messages (0 to 1000 skipped, landing on 1001)
-        session.StepReceivingChain(_engine, targetCounter: DirectRatchetSession.MaxTotalSkippedKeys + 1);
+        var result = session.StepReceivingChain(_engine, targetCounter: 3);
 
-        // Oldest skipped key (0) must have been evicted to preserve bound
-        session.HasSkippedKey(0).Should().BeFalse();
-        var consumeOldest = session.TryConsumeSkippedKey(0);
-        consumeOldest.IsFailure.Should().BeTrue();
-        consumeOldest.Error.Code.Should().Be("KEY_NOT_FOUND");
-
-        // More recent skipped key (1) should still be intact
-        session.HasSkippedKey(1).Should().BeTrue();
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("COUNTER_ALREADY_PASSED");
     }
 
     [Test]
-    public void StepReceivingChain_WhenSkipThresholdExceeded_ReturnsError()
+    public void StepReceivingChain_SkipThresholdExceeded_Fails()
     {
         var session = new DirectRatchetSession(
             _aliceId, _device1,
@@ -143,7 +138,7 @@ public class DirectRatchetSessionTests
         Span<byte> privBytes = stackalloc byte[32];
         privBytes.Fill((byte)0xAA);
         using var localPriv = EphemeralPrivateKey.FromSpan(privBytes);
-        var initialRemotePub = IdentityPublicKey.FromSpan(new byte[32]);
+        var initialRemotePub = DhPublicKey.FromSpan(new byte[32]);
 
         var session = new DirectRatchetSession(
             _aliceId, _device1,
@@ -157,7 +152,7 @@ public class DirectRatchetSessionTests
         session.StepSendingChain(_engine);
         session.SendingCounter.Should().Be(1);
 
-        var newRemotePub = IdentityPublicKey.FromSpan(Enumerable.Repeat((byte)0xBB, 32).ToArray());
+        var newRemotePub = DhPublicKey.FromSpan(Enumerable.Repeat((byte)0xBB, 32).ToArray());
         var dhResult = session.StepDhRatchet(newRemotePub, _engine);
 
         dhResult.IsSuccess.Should().BeTrue();
@@ -179,12 +174,11 @@ public class DirectRatchetSessionTests
             receivingChainKey: _initialChainKey);
 
         session.StepReceivingChain(_engine, targetCounter: 2);
-        session.HasSkippedKey(0).Should().BeTrue();
+        session.TryGetSkippedKey(0).IsSuccess.Should().BeTrue();
 
         session.Dispose();
 
         session.IsZeroized.Should().BeTrue();
-        session.HasSkippedKey(0).Should().BeFalse();
 
         var stepResult = session.StepSendingChain(_engine);
         stepResult.IsFailure.Should().BeTrue();
@@ -196,7 +190,7 @@ public class DirectRatchetSessionTests
     {
         // 1. Bob prepares his signed pre-key
         var (bobSignedPreKeyPriv, bobSignedPreKeyPub) = _engine.GenerateEphemeralKeyPair();
-        var bobIdentityKey = IdentityPublicKey.FromSpan(new byte[32]);
+        var bobIdentityKey = IdentityKey.FromSpan(new byte[32]);
         var bobProof = DeviceLinkProof.FromSpan(new byte[64]);
         var bobBundle = new PreKeyBundle(_bobId, _device1, bobIdentityKey, bobSignedPreKeyPub, bobProof);
 
@@ -208,32 +202,23 @@ public class DirectRatchetSessionTests
         // 3. Alice steps her sending chain to derive the first message key
         var aliceStep = aliceSession.StepSendingChain(_engine);
         aliceStep.IsSuccess.Should().BeTrue();
-        var (aliceCounter, aliceMessageKey, aliceEphemeralPub) = aliceStep.Value;
-        aliceCounter.Should().Be(0);
-        aliceEphemeralPub.Should().NotBeNull();
 
-        // 4. Bob initiates inbound session using Alice's ephemeral public key
+        // 4. Bob receives Alice's initial message with Alice's ephemeral public key
         var bobResult = DirectRatchetSession.InitiateInbound(
-            _bobId,
-            _device1,
-            _aliceId,
-            _device1,
+            _bobId, _device1,
+            _aliceId, _device1,
             bobSignedPreKeyPriv,
-            aliceEphemeralPub!,
+            aliceSession.LocalEphemeralPublicKey!,
             _engine);
+
         bobResult.IsSuccess.Should().BeTrue();
         using var bobSession = bobResult.Value;
 
-        // 5. Bob steps his receiving chain to derive the matching message key
+        // 5. Bob steps his receiving chain to derive the message key
         var bobStep = bobSession.StepReceivingChain(_engine, targetCounter: 0);
         bobStep.IsSuccess.Should().BeTrue();
-        var (bobCounter, bobMessageKey) = bobStep.Value;
 
-        bobCounter.Should().Be(0);
-        bobMessageKey.Span.SequenceEqual(aliceMessageKey.Span).Should().BeTrue();
-
-        bobSignedPreKeyPriv.Dispose();
-        aliceMessageKey.Dispose();
-        bobMessageKey.Dispose();
+        // 6. Assert mutual cryptographic convergence: Alice's message key == Bob's message key!
+        aliceStep.Value.Key.Span.ToArray().Should().BeEquivalentTo(bobStep.Value.Key.Span.ToArray());
     }
 }

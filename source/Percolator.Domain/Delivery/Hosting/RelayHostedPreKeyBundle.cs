@@ -14,19 +14,19 @@ public sealed class RelayHostedPreKeyBundle : AggregateRoot<HostedPreKeyRecordId
     public override HostedPreKeyRecordId Id => new(OwnerId, DeviceId);
     public PublicIdentityId OwnerId { get; }
     public DeviceId DeviceId { get; }
-    public IdentityPublicKey IdentityKey { get; }
-    public IdentityPublicKey SignedPreKey { get; private set; }
+    public IdentityKey IdentityKey { get; }
+    public DhPublicKey SignedPreKey { get; private set; }
     public DeviceLinkProof SignedPreKeySignature { get; private set; }
 
-    private readonly Queue<(uint KeyId, IdentityPublicKey Key)> _oneTimePreKeys = new();
+    private readonly Queue<(uint KeyId, DhPublicKey Key)> _oneTimePreKeys = new();
     public int AvailableOneTimePreKeyCount => _oneTimePreKeys.Count;
-    public IReadOnlyCollection<(uint KeyId, IdentityPublicKey Key)> OneTimePreKeys => _oneTimePreKeys;
+    public IReadOnlyCollection<(uint KeyId, DhPublicKey Key)> OneTimePreKeys => _oneTimePreKeys;
 
     private RelayHostedPreKeyBundle(
         PublicIdentityId ownerId,
         DeviceId deviceId,
-        IdentityPublicKey identityKey,
-        IdentityPublicKey signedPreKey,
+        IdentityKey identityKey,
+        DhPublicKey signedPreKey,
         DeviceLinkProof signedPreKeySignature)
     {
         OwnerId = ownerId;
@@ -39,10 +39,10 @@ public sealed class RelayHostedPreKeyBundle : AggregateRoot<HostedPreKeyRecordId
     public static DomainResult<RelayHostedPreKeyBundle> Create(
         PublicIdentityId ownerId,
         DeviceId deviceId,
-        IdentityPublicKey identityKey,
-        IdentityPublicKey signedPreKey,
+        IdentityKey identityKey,
+        DhPublicKey signedPreKey,
         DeviceLinkProof signedPreKeySignature,
-        IEnumerable<(uint KeyId, IdentityPublicKey Key)> oneTimePreKeys,
+        IEnumerable<(uint KeyId, DhPublicKey Key)> oneTimePreKeys,
         RelayHostingPolicy policy,
         ICryptoEngine cryptoEngine)
     {
@@ -74,7 +74,7 @@ public sealed class RelayHostedPreKeyBundle : AggregateRoot<HostedPreKeyRecordId
 
         if (oneTimePreKeys != null)
         {
-            var incoming = oneTimePreKeys as IReadOnlyCollection<(uint KeyId, IdentityPublicKey Key)> ?? oneTimePreKeys.ToList();
+            var incoming = oneTimePreKeys as IReadOnlyCollection<(uint KeyId, DhPublicKey Key)> ?? oneTimePreKeys.ToList();
             if (incoming.Count > policy.MaxOneTimePreKeysPerIdentity)
             {
                 return DomainResult<RelayHostedPreKeyBundle>.Failure(
@@ -91,7 +91,7 @@ public sealed class RelayHostedPreKeyBundle : AggregateRoot<HostedPreKeyRecordId
     }
 
     public DomainResult UpdateSignedPreKey(
-        IdentityPublicKey signedPreKey,
+        DhPublicKey signedPreKey,
         DeviceLinkProof signedPreKeySignature,
         RelayHostingPolicy policy,
         ICryptoEngine cryptoEngine)
@@ -120,7 +120,7 @@ public sealed class RelayHostedPreKeyBundle : AggregateRoot<HostedPreKeyRecordId
     }
 
     public DomainResult ReplenishOneTimePreKeys(
-        IEnumerable<(uint KeyId, IdentityPublicKey Key)> newPreKeys,
+        IEnumerable<(uint KeyId, DhPublicKey Key)> newPreKeys,
         RelayHostingPolicy policy)
     {
         if (policy == null || !policy.IsAcceptingPreKeys)
@@ -134,7 +134,7 @@ public sealed class RelayHostedPreKeyBundle : AggregateRoot<HostedPreKeyRecordId
             return DomainResult.Success();
         }
 
-        var incoming = newPreKeys as IReadOnlyCollection<(uint KeyId, IdentityPublicKey Key)> ?? newPreKeys.ToList();
+        var incoming = newPreKeys as IReadOnlyCollection<(uint KeyId, DhPublicKey Key)> ?? newPreKeys.ToList();
         if (_oneTimePreKeys.Count + incoming.Count > policy.MaxOneTimePreKeysPerIdentity)
         {
             return DomainResult.Failure(
@@ -151,7 +151,7 @@ public sealed class RelayHostedPreKeyBundle : AggregateRoot<HostedPreKeyRecordId
 
     public DomainResult<PreKeyBundle> ConsumeBundle()
     {
-        (uint KeyId, IdentityPublicKey Key)? oneTimeKey = null;
+        (uint KeyId, DhPublicKey Key)? oneTimeKey = null;
         if (_oneTimePreKeys.Count > 0)
         {
             oneTimeKey = _oneTimePreKeys.Dequeue();

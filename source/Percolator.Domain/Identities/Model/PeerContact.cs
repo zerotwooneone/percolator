@@ -20,7 +20,7 @@ public sealed class PeerContact : AggregateRoot<PublicIdentityId>
     public override PublicIdentityId Id => RemotePeerId;
     public PublicIdentityId OwnerIdentityId { get; }
     public PublicIdentityId RemotePeerId { get; }
-    public IdentityPublicKey? PrimaryPublicKey { get; private set; }
+    public IdentityKey? PrimaryPublicKey { get; private set; }
     public string Nickname { get; private set; }
     public PeerTrustLevel TrustLevel { get; private set; }
     public DateTimeOffset CreatedAtUtc { get; private set; }
@@ -35,7 +35,7 @@ public sealed class PeerContact : AggregateRoot<PublicIdentityId>
         string nickname,
         PeerTrustLevel trustLevel,
         DateTimeOffset createdAtUtc,
-        IdentityPublicKey? primaryPublicKey = null)
+        IdentityKey? primaryPublicKey = null)
     {
         OwnerIdentityId = ownerIdentityId;
         RemotePeerId = remotePeerId;
@@ -53,7 +53,7 @@ public sealed class PeerContact : AggregateRoot<PublicIdentityId>
         TrustLevel = trustLevel;
     }
 
-    public DomainResult RotatePrimaryPublicKey(IdentityPublicKey newKey)
+    public DomainResult RotatePrimaryPublicKey(IdentityKey newKey)
     {
         if (newKey == null)
         {
@@ -73,9 +73,9 @@ public sealed class PeerContact : AggregateRoot<PublicIdentityId>
 
     public DomainResult RegisterSecondaryDevice(
         DeviceId deviceId,
-        IdentityPublicKey secondaryDevicePublicKey,
+        IdentityKey secondaryDevicePublicKey,
         DeviceLinkProof linkProof,
-        IdentityPublicKey primaryPeerPublicKey,
+        IdentityKey primaryPeerPublicKey,
         ICryptoEngine cryptoEngine)
     {
         if (deviceId.IsPrimary || !deviceId.IsValid)
@@ -90,7 +90,7 @@ public sealed class PeerContact : AggregateRoot<PublicIdentityId>
 
         if (_registeredDevices.Count >= MaxRegisteredDevicesPerPeer)
         {
-            return DomainResult.Failure(new DomainError("MAX_DEVICES_EXCEEDED", $"Cannot register more than {MaxRegisteredDevicesPerPeer} devices for a peer."));
+            return DomainResult.Failure(new DomainError("DEVICE_LIMIT_EXCEEDED", $"Cannot exceed maximum registered devices ({MaxRegisteredDevicesPerPeer})."));
         }
 
         Span<byte> messageToVerify = stackalloc byte[4 + 32];
@@ -106,8 +106,8 @@ public sealed class PeerContact : AggregateRoot<PublicIdentityId>
         return DomainResult.Success();
     }
 
-    public void RecordActivity(DateTimeOffset timestampUtc)
+    public void TouchLastSeen(IDateTimeProvider timeProvider)
     {
-        LastSeenAtUtc = timestampUtc;
+        LastSeenAtUtc = timeProvider.UtcNow;
     }
 }

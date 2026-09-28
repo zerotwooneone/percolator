@@ -8,8 +8,8 @@ namespace Percolator.Domain.Security;
 
 public sealed record X3dhInitiatorResult(
     SharedSecret MasterSecret,
-    IdentityPublicKey EphemeralPublicKey,
-    IdentityPublicKey InitiatorIdentityKey,
+    DhPublicKey EphemeralPublicKey,
+    IdentityKey InitiatorIdentityKey,
     uint? OneTimePreKeyIdUsed);
 
 /// <summary>
@@ -20,7 +20,7 @@ public static class X3dhAgreement
 {
     public static DomainResult<X3dhInitiatorResult> Initiate(
         ReadOnlySpan<byte> initiatorIdentityPrivateKey,
-        IdentityPublicKey initiatorIdentityPublicKey,
+        IdentityKey initiatorIdentityPublicKey,
         PreKeyBundle remoteBundle,
         ICryptoEngine cryptoEngine)
     {
@@ -85,8 +85,8 @@ public static class X3dhAgreement
         ReadOnlySpan<byte> receiverIdentityPrivateKey,
         ReadOnlySpan<byte> receiverSignedPreKeyPrivateKey,
         ReadOnlySpan<byte> receiverOneTimePreKeyPrivateKeyOrEmpty,
-        IdentityPublicKey initiatorIdentityKey,
-        IdentityPublicKey initiatorEphemeralKey,
+        IdentityKey initiatorIdentityKey,
+        DhPublicKey initiatorEphemeralKey,
         ICryptoEngine cryptoEngine)
     {
         if (receiverIdentityPrivateKey.IsEmpty || receiverSignedPreKeyPrivateKey.IsEmpty)
@@ -98,7 +98,7 @@ public static class X3dhAgreement
         if (initiatorIdentityKey == null || initiatorEphemeralKey == null)
         {
             return DomainResult<SharedSecret>.Failure(
-                new DomainError("NULL_INITIATOR_KEYS", "Initiator identity key and ephemeral key cannot be null."));
+                new DomainError("NULL_KEY_MATERIAL", "Initiator identity key and ephemeral key cannot be null."));
         }
 
         // DH1 = DH(SPK_B, IK_A)

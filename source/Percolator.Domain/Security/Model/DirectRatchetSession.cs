@@ -19,8 +19,8 @@ public sealed class DirectRatchetSession : AggregateRoot<SessionId>, ISensitiveS
 
     private ChainKey? _rootKey;
     private EphemeralPrivateKey? _localEphemeralPrivateKey;
-    public IdentityPublicKey? LocalEphemeralPublicKey { get; private set; }
-    public IdentityPublicKey? RemoteEphemeralPublicKey { get; private set; }
+    public DhPublicKey? LocalEphemeralPublicKey { get; private set; }
+    public DhPublicKey? RemoteEphemeralPublicKey { get; private set; }
 
     private ChainKey? _sendingChainKey;
     private ChainKey? _receivingChainKey;
@@ -40,9 +40,9 @@ public sealed class DirectRatchetSession : AggregateRoot<SessionId>, ISensitiveS
         ChainKey? rootKey,
         ChainKey? sendingChainKey,
         ChainKey? receivingChainKey,
-        IdentityPublicKey? remoteEphemeralPublicKey = null,
+        DhPublicKey? remoteEphemeralPublicKey = null,
         EphemeralPrivateKey? localEphemeralPrivateKey = null,
-        IdentityPublicKey? localEphemeralPublicKey = null,
+        DhPublicKey? localEphemeralPublicKey = null,
         uint sendingCounter = 0,
         uint receivingCounter = 0,
         SessionId? sessionId = null)
@@ -57,17 +57,15 @@ public sealed class DirectRatchetSession : AggregateRoot<SessionId>, ISensitiveS
         _sendingChainKey = sendingChainKey != null ? ChainKey.FromSpan(sendingChainKey.Span) : null;
         _receivingChainKey = receivingChainKey != null ? ChainKey.FromSpan(receivingChainKey.Span) : null;
         _localEphemeralPrivateKey = localEphemeralPrivateKey != null ? EphemeralPrivateKey.FromSpan(localEphemeralPrivateKey.Span) : null;
-
         LocalEphemeralPublicKey = localEphemeralPublicKey;
         RemoteEphemeralPublicKey = remoteEphemeralPublicKey;
-
         SendingCounter = sendingCounter;
         ReceivingCounter = receivingCounter;
     }
 
     /// <summary>
-    /// Initiates an outbound Double Ratchet session towards a remote peer using their published PreKeyBundle.
-    /// Derives initial root key and sending chain key, ready to encrypt the first message.
+    /// Initiates an outbound Double Ratchet session using the remote peer's pre-key bundle.
+    /// Derives the initial sending chain and root key, and records the initial ephemeral public key.
     /// </summary>
     public static DomainResult<DirectRatchetSession> InitiateOutbound(
         PublicIdentityId ownerIdentityId,
@@ -82,10 +80,10 @@ public sealed class DirectRatchetSession : AggregateRoot<SessionId>, ISensitiveS
                 "SELF_SESSION_NOT_ALLOWED", "Cannot initiate Double Ratchet session with self."));
         }
 
-        // Generate Alice's initial ephemeral keypair
+        // Generate Alice's initial ephemeral key pair
         var (ephemeralPriv, ephemeralPub) = engine.GenerateEphemeralKeyPair();
 
-        // Perform initial DH between Alice's ephemeral key and Bob's signed pre-key
+        // Perform initial DH between Alice's ephemeral private key and Bob's signed pre-key
         using var dhSecret = engine.ComputeDiffieHellman(ephemeralPriv.Span, peerBundle.SignedPreKey.Span);
 
         // Derive root key and initial sending chain key
@@ -123,7 +121,7 @@ public sealed class DirectRatchetSession : AggregateRoot<SessionId>, ISensitiveS
         PublicIdentityId remotePeerId,
         DeviceId remoteDeviceId,
         EphemeralPrivateKey localSignedPreKeyPriv,
-        IdentityPublicKey remoteEphemeralPublicKey,
+        DhPublicKey remoteEphemeralPublicKey,
         ICryptoEngine engine,
         SessionId? sessionId = null)
     {
@@ -158,11 +156,11 @@ public sealed class DirectRatchetSession : AggregateRoot<SessionId>, ISensitiveS
         return DomainResult<DirectRatchetSession>.Success(session);
     }
 
-    public DomainResult<(uint MessageCounter, MessageKey Key, IdentityPublicKey? EphemeralPublicKey)> StepSendingChain(ICryptoEngine engine)
+    public DomainResult<(uint MessageCounter, MessageKey Key, DhPublicKey? EphemeralPublicKey)> StepSendingChain(ICryptoEngine engine)
     {
         if (IsZeroized || _sendingChainKey == null)
         {
-            return DomainResult<(uint, MessageKey, IdentityPublicKey?)>.Failure(new DomainError("INVALID_SESSION_STATE", "Sending chain key is not available or has been zeroized."));
+            return DomainResult<(uint, MessageKey, DhPublicKey?)>.Failure(new DomainError("INVALID_SESSION_STATE", "Sending chain key is not available or has been zeroized."));
         }
 
         var previousChainKey = _sendingChainKey;
@@ -172,7 +170,7 @@ public sealed class DirectRatchetSession : AggregateRoot<SessionId>, ISensitiveS
         previousChainKey.Dispose();
 
         uint counter = SendingCounter++;
-        return DomainResult<(uint, MessageKey, IdentityPublicKey?)>.Success((counter, messageKey, LocalEphemeralPublicKey));
+        return DomainResult<(uint, MessageKey, DhPublicKey?)>.Success((counter, messageKey, LocalEphemeralPublicKey));
     }
 
     public DomainResult<(uint MessageCounter, MessageKey Key)> StepReceivingChain(ICryptoEngine engine, uint targetCounter)
@@ -216,7 +214,7 @@ public sealed class DirectRatchetSession : AggregateRoot<SessionId>, ISensitiveS
         return DomainResult<(uint, MessageKey)>.Success((current, targetMessageKey));
     }
 
-    public DomainResult StepDhRatchet(IdentityPublicKey newRemoteEphemeralKey, ICryptoEngine engine)
+    public DomainResult StepDhRatchet(DhPublicKey newRemoteEphemeralKey, ICryptoEngine engine)
     {
         if (IsZeroized || _rootKey == null)
         {
@@ -238,55 +236,65 @@ public sealed class DirectRatchetSession : AggregateRoot<SessionId>, ISensitiveS
         if (_localEphemeralPrivateKey != null)
         {
             using var dhRecv = engine.ComputeDiffieHellman(_localEphemeralPrivateKey.Span, newRemoteEphemeralKey.Span);
-            var prevRoot = _rootKey;
-            var (nextRootRecv, receivingChainKey) = engine.KdfRk(prevRoot, dhRecv);
+            var (r1, receivingChain) = engine.KdfRk(_rootKey, dhRecv);
 
-            _rootKey = nextRootRecv;
-            prevRoot.Dispose();
+            _rootKey.Dispose();
+            _rootKey = r1;
 
             _receivingChainKey?.Dispose();
-            _receivingChainKey = receivingChainKey;
+            _receivingChainKey = receivingChain;
+
+            PreviousSendingChainLength = SendingCounter;
+            SendingCounter = 0;
+            ReceivingCounter = 0;
+
+            _localEphemeralPrivateKey.Dispose();
+            _localEphemeralPrivateKey = null;
+            LocalEphemeralPublicKey = null;
         }
 
-        // 2. Generate new local ephemeral keypair
+        RemoteEphemeralPublicKey = newRemoteEphemeralKey;
+
+        // 2. DH Send step: generate new local ephemeral pair, perform DH with new remote public key
         var (newLocalPriv, newLocalPub) = engine.GenerateEphemeralKeyPair();
-        _localEphemeralPrivateKey?.Dispose();
         _localEphemeralPrivateKey = newLocalPriv;
         LocalEphemeralPublicKey = newLocalPub;
 
-        // 3. DH Send step using new local private key and new remote public key
-        using var dhSend = engine.ComputeDiffieHellman(_localEphemeralPrivateKey.Span, newRemoteEphemeralKey.Span);
-        var intermediateRoot = _rootKey;
-        var (nextRootSend, sendingChainKey) = engine.KdfRk(intermediateRoot, dhSend);
+        using var dhSend = engine.ComputeDiffieHellman(_localEphemeralPrivateKey.Span, RemoteEphemeralPublicKey.Span);
+        var (r2, sendingChain) = engine.KdfRk(_rootKey, dhSend);
 
-        _rootKey = nextRootSend;
-        intermediateRoot.Dispose();
+        _rootKey.Dispose();
+        _rootKey = r2;
 
         _sendingChainKey?.Dispose();
-        _sendingChainKey = sendingChainKey;
-
-        // 4. Update state
-        PreviousSendingChainLength = SendingCounter;
-        SendingCounter = 0;
-        ReceivingCounter = 0;
-        RemoteEphemeralPublicKey = newRemoteEphemeralKey;
+        _sendingChainKey = sendingChain;
 
         return DomainResult.Success();
     }
 
+    public DomainResult<MessageKey> TryGetSkippedKey(uint counter)
+    {
+        if (IsZeroized)
+        {
+            return DomainResult<MessageKey>.Failure(new DomainError("INVALID_SESSION_STATE", "Session has been zeroized."));
+        }
+
+        if (_skippedMessageKeys.Remove(counter, out var key))
+        {
+            return DomainResult<MessageKey>.Success(key);
+        }
+
+        return DomainResult<MessageKey>.Failure(new DomainError("SKIPPED_KEY_NOT_FOUND", $"No skipped key cached for counter {counter}."));
+    }
+
     private void StoreSkippedKey(uint counter, MessageKey key)
     {
-        // Enforce total upper limit with O(1) LRU queue eviction
         if (_skippedMessageKeys.Count >= MaxTotalSkippedKeys)
         {
-            while (_skippedKeyOrder.Count > 0)
+            var oldestCounter = _skippedKeyOrder.Dequeue();
+            if (_skippedMessageKeys.Remove(oldestCounter, out var evictedKey))
             {
-                uint oldestCounter = _skippedKeyOrder.Dequeue();
-                if (_skippedMessageKeys.Remove(oldestCounter, out var evictedKey))
-                {
-                    evictedKey.Dispose();
-                    break;
-                }
+                evictedKey.Dispose();
             }
         }
 
@@ -294,25 +302,17 @@ public sealed class DirectRatchetSession : AggregateRoot<SessionId>, ISensitiveS
         _skippedKeyOrder.Enqueue(counter);
     }
 
-    public bool HasSkippedKey(uint counter) => _skippedMessageKeys.ContainsKey(counter);
-
-    public DomainResult<MessageKey> TryConsumeSkippedKey(uint counter)
-    {
-        if (_skippedMessageKeys.Remove(counter, out var key))
-        {
-            return DomainResult<MessageKey>.Success(key);
-        }
-
-        return DomainResult<MessageKey>.Failure(new DomainError("KEY_NOT_FOUND", $"No skipped key found for counter {counter}."));
-    }
-
     public void Zeroize()
     {
+        if (IsZeroized) return;
+
         _rootKey?.Dispose();
         _rootKey = null;
 
         _localEphemeralPrivateKey?.Dispose();
         _localEphemeralPrivateKey = null;
+        LocalEphemeralPublicKey = null;
+        RemoteEphemeralPublicKey = null;
 
         _sendingChainKey?.Dispose();
         _sendingChainKey = null;
