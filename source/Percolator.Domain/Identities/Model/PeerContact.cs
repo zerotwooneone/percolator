@@ -13,6 +13,13 @@ public enum PeerTrustLevel
     Blocked = 3
 }
 
+public enum ContactState
+{
+    Active = 0,
+    PendingApproval = 1,
+    Rejected = 2
+}
+
 public sealed class PeerContact : AggregateRoot<PublicIdentityId>
 {
     public const int MaxRegisteredDevicesPerPeer = 32;
@@ -23,6 +30,7 @@ public sealed class PeerContact : AggregateRoot<PublicIdentityId>
     public IdentityKey? PrimaryPublicKey { get; private set; }
     public string Nickname { get; private set; }
     public PeerTrustLevel TrustLevel { get; private set; }
+    public ContactState State { get; private set; }
     public DateTimeOffset CreatedAtUtc { get; private set; }
     public DateTimeOffset? LastSeenAtUtc { get; private set; }
 
@@ -35,17 +43,105 @@ public sealed class PeerContact : AggregateRoot<PublicIdentityId>
         string nickname,
         PeerTrustLevel trustLevel,
         DateTimeOffset createdAtUtc,
-        IdentityKey? primaryPublicKey = null)
+        IdentityKey? primaryPublicKey = null,
+        ContactState state = ContactState.Active)
     {
         OwnerIdentityId = ownerIdentityId;
         RemotePeerId = remotePeerId;
         Nickname = nickname;
         TrustLevel = trustLevel;
+        State = state;
         CreatedAtUtc = createdAtUtc;
         PrimaryPublicKey = primaryPublicKey;
 
         // Primary device is implicitly registered
         _registeredDevices.Add(DeviceId.Primary);
+    }
+
+    public static DomainResult<PeerContact> CreateInboundRequest(
+        PublicIdentityId ownerIdentityId,
+        PublicIdentityId remotePeerId,
+        IdentityKey primaryPublicKey,
+        string proposedNickname,
+        IDateTimeProvider timeProvider)
+    {
+        if (!ownerIdentityId.IsValid)
+        {
+            return DomainResult<PeerContact>.Failure(new DomainError("INVALID_OWNER_ID", "Owner identity id cannot be empty."));
+        }
+
+        if (!remotePeerId.IsValid)
+        {
+            return DomainResult<PeerContact>.Failure(new DomainError("INVALID_PEER_ID", "Remote peer identity id cannot be empty."));
+        }
+
+        if (ownerIdentityId == remotePeerId)
+        {
+            return DomainResult<PeerContact>.Failure(new DomainError("CANNOT_CONTACT_SELF", "Cannot create a contact request for oneself."));
+        }
+
+        if (primaryPublicKey == null)
+        {
+            return DomainResult<PeerContact>.Failure(new DomainError("NULL_PUBLIC_KEY", "Primary public key cannot be null."));
+        }
+
+        var nickname = string.IsNullOrWhiteSpace(proposedNickname) ? remotePeerId.ToString() : proposedNickname.Trim();
+
+        var contact = new PeerContact(
+            ownerIdentityId,
+            remotePeerId,
+            nickname,
+            PeerTrustLevel.Untrusted,
+            timeProvider.UtcNow,
+            primaryPublicKey,
+            ContactState.PendingApproval);
+
+        return DomainResult<PeerContact>.Success(contact);
+    }
+
+    public DomainResult Approve(PeerTrustLevel initialTrust = PeerTrustLevel.Tofu)
+    {
+        if (State == ContactState.Active)
+        {
+            return DomainResult.Success();
+        }
+
+        if (TrustLevel == PeerTrustLevel.Blocked)
+        {
+            return DomainResult.Failure(new DomainError("CONTACT_BLOCKED", "Cannot approve a blocked contact without unblocking first."));
+        }
+
+        State = ContactState.Active;
+        TrustLevel = initialTrust;
+        return DomainResult.Success();
+    }
+
+    public DomainResult Reject(bool block = false)
+    {
+        State = ContactState.Rejected;
+        if (block)
+        {
+            TrustLevel = PeerTrustLevel.Blocked;
+        }
+
+        return DomainResult.Success();
+    }
+
+    public DomainResult Block()
+    {
+        TrustLevel = PeerTrustLevel.Blocked;
+        return DomainResult.Success();
+    }
+
+    public DomainResult Unblock(PeerTrustLevel restoreTrust = PeerTrustLevel.Untrusted)
+    {
+        if (TrustLevel != PeerTrustLevel.Blocked)
+        {
+            return DomainResult.Success();
+        }
+
+        TrustLevel = restoreTrust;
+        return DomainResult.Success();
     }
 
     public void UpdateTrust(PeerTrustLevel trustLevel)

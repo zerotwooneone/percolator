@@ -112,4 +112,98 @@ public class PeerContactTests
         _contact.UpdateTrust(PeerTrustLevel.Verified);
         _contact.TrustLevel.Should().Be(PeerTrustLevel.Verified);
     }
+
+    [Test]
+    public void CreateInboundRequest_SetsPendingApprovalState_AndUntrusted()
+    {
+        var ownerId = PublicIdentityId.New();
+        var peerId = PublicIdentityId.New();
+        var timeProvider = new FakeDateTimeProvider(FixedCreatedAt);
+
+        var result = PeerContact.CreateInboundRequest(
+            ownerId,
+            peerId,
+            _primaryPeerKey,
+            "Bob",
+            timeProvider);
+
+        result.IsSuccess.Should().BeTrue();
+        var contact = result.Value;
+        contact.OwnerIdentityId.Should().Be(ownerId);
+        contact.RemotePeerId.Should().Be(peerId);
+        contact.State.Should().Be(ContactState.PendingApproval);
+        contact.TrustLevel.Should().Be(PeerTrustLevel.Untrusted);
+        contact.Nickname.Should().Be("Bob");
+    }
+
+    [Test]
+    public void CreateInboundRequest_ForSelf_ReturnsError()
+    {
+        var sameId = PublicIdentityId.New();
+        var timeProvider = new FakeDateTimeProvider(FixedCreatedAt);
+
+        var result = PeerContact.CreateInboundRequest(
+            sameId,
+            sameId,
+            _primaryPeerKey,
+            "Self",
+            timeProvider);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("CANNOT_CONTACT_SELF");
+    }
+
+    [Test]
+    public void Approve_TransitionsFromPendingToActive_AndSetsTrustLevel()
+    {
+        var timeProvider = new FakeDateTimeProvider(FixedCreatedAt);
+        var contact = PeerContact.CreateInboundRequest(
+            PublicIdentityId.New(),
+            PublicIdentityId.New(),
+            _primaryPeerKey,
+            "Bob",
+            timeProvider).Value;
+
+        var approveResult = contact.Approve(PeerTrustLevel.Tofu);
+
+        approveResult.IsSuccess.Should().BeTrue();
+        contact.State.Should().Be(ContactState.Active);
+        contact.TrustLevel.Should().Be(PeerTrustLevel.Tofu);
+    }
+
+    [Test]
+    public void Reject_TransitionsStateToRejected_AndOptionallyBlocks()
+    {
+        var timeProvider = new FakeDateTimeProvider(FixedCreatedAt);
+        var contact = PeerContact.CreateInboundRequest(
+            PublicIdentityId.New(),
+            PublicIdentityId.New(),
+            _primaryPeerKey,
+            "Bob",
+            timeProvider).Value;
+
+        var rejectResult = contact.Reject(block: true);
+
+        rejectResult.IsSuccess.Should().BeTrue();
+        contact.State.Should().Be(ContactState.Rejected);
+        contact.TrustLevel.Should().Be(PeerTrustLevel.Blocked);
+    }
+
+    [Test]
+    public void Approve_WhenBlocked_ReturnsError()
+    {
+        var timeProvider = new FakeDateTimeProvider(FixedCreatedAt);
+        var contact = PeerContact.CreateInboundRequest(
+            PublicIdentityId.New(),
+            PublicIdentityId.New(),
+            _primaryPeerKey,
+            "Bob",
+            timeProvider).Value;
+
+        contact.Reject(block: true);
+        var approveResult = contact.Approve(PeerTrustLevel.Tofu);
+
+        approveResult.IsFailure.Should().BeTrue();
+        approveResult.Error.Code.Should().Be("CONTACT_BLOCKED");
+    }
 }
