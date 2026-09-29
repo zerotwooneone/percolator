@@ -1,36 +1,72 @@
 # Percolator.Application2 Implementation Plan
 
 ## Summary & Architectural Constraints
-- **Target Project**: `Percolator.Application2` (Application microkernel: host pipeline, outbox worker, transport routing, and profile coordination).
+- **Target Project**: `Percolator.Application2` (Application microkernel: high-performance ingress pipeline, outbox worker, transport routing, and profile coordination).
 - **Architectural Rules (Rule 1 & Rule 2)**:
   - Depends **only** on `Percolator.Domain` and `Percolator.PluginSdk`.
   - Zero reference to infrastructure/transport/storage libraries (no gRPC, SQLite, EF Core, or socket APIs).
   - Pure onion architecture: All external interactions are abstracted behind outbound ports (interfaces).
   - Clean boundary with application plugins: App-specific payloads and logic (`Apps.Chat`, `Apps.Discovery`, `Apps.FileTransfer`) reside in their respective plugin projects, not in `Application2`.
+  - High-performance, NGINX-inspired design: Phase-based sequential processing, $O(1)$ zero-branching jump table dispatching, and zero-allocation hot paths (`readonly record struct` contexts, `IBufferWriter<byte>`).
   - Test-first implementation: All behaviors must have corresponding unit tests using test doubles.
 
 ---
 
-## Milestone 1: Application Ingress & App Host Pipeline
+## Milestone 1: High-Performance Ingress Pipeline & App Host (`Percolator.Application2`)
 
-### 1.1 Ingress Dispatcher & Pipeline Architecture
-- **`IAppPlugin` & `IAppPayloadHandler` Ports**: Contracts for registered application modules (`AppId`, `Version`, `CanHandle(byte appType)`).
-- **`AppHostPipeline`**:
-  - Validates authenticated framing and routes decrypted payloads to the correct registered `IAppPayloadHandler`.
-  - Enforces envelope size limits (< 64KB per uncompressed payload) and checks payload version headers.
-  - Emits telemetry and logging hooks for unrecognized application IDs.
-- **`IPayloadSerializer` Port**: Abstract binary serializer interface allowing application plugins to unpack protobuf/binary DTOs without coupling to concrete wire libraries.
-- **Wire Framing & Associated Data (AD) Binding**:
-  - Enforces Double Ratchet wire header serialization (`RatchetWireFrame`: `DhPublicKey`, `MessageCounter`, `PreviousChainLength`).
+### 1.1 NGINX-Style Phased Ingress Pipeline
+The ingress pipeline processes inbound packets through strictly ordered, unbranching phases, avoiding nested conditional sprawl:
+
+```
+[ Inbound Wire Envelope ]
+         │
+         ▼
+┌─────────────────────────┐
+│ Phase 1: Frame Parse    │ ──> Fast validation (<64KB payload cap, version header check, frame slicing)
+└─────────────────────────┘
+         │
+         ▼
+┌─────────────────────────┐
+│ Phase 2: Ingress Filter │ ──> Black-hole check (IdentityDisabledEvent), rate-limit check, quota validation
+└─────────────────────────┘
+         │
+         ▼
+┌─────────────────────────┐
+│ Phase 3: Cryptography   │ ──> Double Ratchet step with Associated Data (AD) verification (RatchetWireFrame)
+└─────────────────────────┘
+         │
+         ▼
+┌─────────────────────────┐
+│ Phase 4: Direct Jump    │ ──> O(1) jump table dispatch to registered IAppPayloadHandler[AppId.Value]
+└─────────────────────────┘
+         │
+         ▼
+┌─────────────────────────┐
+│ Phase 5: Post-Action    │ ──> Domain event publication, telemetry metrics, ephemeral span zeroization
+└─────────────────────────┘
+```
+
+### 1.2 Direct $O(1)$ Jump-Table Router
+- **Zero-Branching Dispatch Table (`AppRouter`)**:
+  - `AppId` is an 8-bit value (`byte Value` $\in [0, 255]$).
+  - The router maintains a fixed 256-slot array `IAppPayloadHandler?[256]`.
+  - Handler registration assigns directly by slot: `_handlers[handler.TargetAppId.Value] = handler`.
+  - Dispatching performs an immediate $O(1)$ indexed jump (`_handlers[context.AppId.Value]`) without dictionary lookups, LINQ scans, or branching trees.
+  - If a slot is null, immediately returns `DomainResult.Failure(new DomainError("UNKNOWN_APP_ID", ...))`.
+
+### 1.3 Wire Framing & Associated Data (AD) Binding
+- **`RatchetWireFrame` Structure**:
+  - Enforces Double Ratchet wire header serialization (`DhPublicKey`, `MessageCounter`, `PreviousChainLength`).
   - Feeds the serialized header bytes into `ICryptoEngine.EncryptAesGcm` / `DecryptAesGcm` as Associated Data (AD) to guarantee header authenticity.
 
-### 1.2 Test Doubles & Unit Tests (`Percolator.Application2.Tests/Ingress`)
+### 1.4 Test Doubles & Unit Tests (`Percolator.Application2.Tests/Ingress`)
 - **`InMemoryAppPluginRegistry`**: Test double implementing plugin registration.
 - **`FakeAppPayloadHandler`**: Test double capturing handled payloads.
-- `AppHostPipelineTests.DispatchAsync_WithRegisteredPlugin_InvokesHandler`: asserts successful payload dispatch.
-- `AppHostPipelineTests.DispatchAsync_WithUnregisteredAppId_LogsWarningAndDrops`: asserts graceful rejection of unknown AppIds.
-- `AppHostPipelineTests.DispatchAsync_PayloadExceedingSizeLimit_ReturnsPayloadTooLargeError`: verifies max payload constraint.
-- `AppHostPipelineTests.DispatchAsync_CorruptWireFrame_FailsAssociatedDataValidation`: verifies rejection if header AD has been altered.
+- `AppHostPipelineTests.DispatchAsync_WithRegisteredPlugin_InvokesHandlerDirectly`: asserts direct jump table dispatch.
+- `AppHostPipelineTests.DispatchAsync_WithUnregisteredAppId_ReturnsUnknownAppIdFailure`: asserts $O(1)$ lookup fallback.
+- `AppHostPipelineTests.DispatchAsync_PayloadExceedingSizeLimit_ReturnsPayloadTooLargeError`: verifies Phase 1 max payload constraint.
+- `AppHostPipelineTests.DispatchAsync_SenderDisabled_AbortsInIngressFilterPhase`: verifies Phase 2 black-hole filtering.
+- `AppHostPipelineTests.DispatchAsync_CorruptWireFrame_FailsAssociatedDataValidation`: verifies Phase 3 cryptographic AD rejection.
 
 ---
 

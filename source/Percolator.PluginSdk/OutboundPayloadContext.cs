@@ -3,7 +3,7 @@ using Percolator.Domain.Identities.ValueObjects;
 
 namespace Percolator.PluginSdk;
 
-public sealed record OutboundPayloadContext(
+public readonly record struct OutboundPayloadContext(
     ConversationId ConversationId,
     PublicIdentityId RecipientIdentityId,
     AppId AppId,

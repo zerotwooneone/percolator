@@ -1,5 +1,5 @@
 namespace Percolator.PluginSdk;
 
-public sealed record ApplicationFrame(
+public readonly record struct ApplicationFrame(
     AppId AppId,
     ReadOnlyMemory<byte> Payload);
