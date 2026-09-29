@@ -1,7 +1,7 @@
 # Percolator.Application2 Implementation Plan
 
 ## Summary & Architectural Constraints
-- **Target Project**: `Percolator.Application2` (Application microkernel: high-performance ingress pipeline, outbox worker, transport routing, and profile coordination).
+- **Target Project**: `Percolator.Application2` (Application microkernel: high-performance ingress pipeline, transactional outbox worker, transport routing, and profile coordination).
 - **Architectural Rules (Rule 1 & Rule 2)**:
   - Depends **only** on `Percolator.Domain` and `Percolator.PluginSdk`.
   - Zero reference to infrastructure/transport/storage libraries (no gRPC, SQLite, EF Core, or socket APIs).
@@ -9,7 +9,9 @@
   - Strict serialization boundary: Application layer handles pure C# DTOs and delegates serialization to `IPayloadSerializer`. Concrete Protobuf contracts (`.proto`) and Google Protobuf code live strictly in `Percolator.Infrastructure2.Serialization`.
   - Clean boundary with application plugins: App-specific payloads and logic (`Apps.Chat`, `Apps.Discovery`, `Apps.FileTransfer`) reside in their respective plugin projects, not in `Application2`.
   - High-performance, NGINX-inspired design: Phase-based sequential processing, $O(1)$ zero-branching jump table dispatching, and zero-allocation hot paths (`readonly record struct` contexts, `IBufferWriter<byte>`).
-  - Symmetrical High-Performance Ingress & Egress: Ingress uses a 5-phase zero-allocation inbound pipeline; Egress uses a 5-phase sequential egress pipeline with a dual-path dispatcher (zero-allocation memory stream channel fast-path + persistent outbox spillover slow-path).
+  - Symmetrical High-Performance Ingress & Outbox Egress:
+    - Ingress uses a 5-phase zero-allocation inbound pipeline (`RatchetWireFrame` AD $\rightarrow$ $O(1)$ jump table).
+    - Egress uses a 5-phase sequential pipeline that persists all outgoing jobs transactionally to `IOutboxRepository` first, followed by immediate stream-worker dispatching via `IStreamRegistry` / `ITransportDispatcher` (resilient transactional outbox pattern).
   - Test-first implementation: All behaviors must have corresponding unit tests using test doubles.
 
 ---
@@ -72,7 +74,7 @@ The ingress pipeline processes inbound packets through strictly ordered, unbranc
 
 ---
 
-## Milestone 2: High-Performance Egress Pipeline & Stream Orchestration
+## Milestone 2: Transactional Outbox Worker & Egress Stream Orchestration
 
 ### 2.1 Symmetrical 5-Phase Sequential Egress Pipeline
 Outgoing packets from applications (`IPayloadSender`) or relay services are processed through a strictly ordered 5-phase sequential pipeline:
@@ -97,13 +99,12 @@ Outgoing packets from applications (`IPayloadSender`) or relay services are proc
          │
          ▼
 ┌─────────────────────────┐
-│ Phase 4: Dual Dispatch  │ ──> Fast Path: Non-blocking try-write to IStreamRegistry open stream
-│                         │     Slow Path: On stream offline/backpressure, spill to IOutboxRepository
+│ Phase 4: Outbox Persist │ ──> Atomically persist OutboxJob to IOutboxRepository (Always Outbox First)
 └─────────────────────────┘
          │
          ▼
 ┌─────────────────────────┐
-│ Phase 5: Post-Action    │ ──> Telemetry metrics, ephemeral key span zeroization, event notification
+│ Phase 5: Stream Trigger │ ──> Signal OutboxWorker / IStreamRegistry for immediate write or backoff
 └─────────────────────────┘
 ```
 
@@ -123,17 +124,17 @@ A relay node or high-throughput client holds large numbers of open gRPC streams 
   }
   ```
 - **`StreamWriteResult` Value Object**:
-  - `Success`: Envelope written to active HTTP/2 stream buffer with zero disk writes.
-  - `StreamClosed`: Stream disconnected; triggers route failover or outbox spillover.
-  - `Backpressured`: Stream HTTP/2 flow control window full; triggers outbox spillover to prevent memory bloat.
+  - `Success`: Envelope written to active HTTP/2 stream buffer.
+  - `StreamClosed`: Stream disconnected; job remains in outbox for retry/routing failover.
+  - `Backpressured`: Stream HTTP/2 flow control window full; job remains queued in outbox.
 - **Relay 1-to-$N$ Group Broadcast Fan-Out**:
   - When committing mutations or publishing group channel payloads to a shared relay, `Application2` packages **one** encrypted payload bound to the active blinded routing tokens or zero-knowledge proof.
   - The relay stream dispatcher dispatches a single multi-recipient envelope across the upstream relay stream rather than serializing $N$ distinct outbox jobs.
 
-### 2.3 Dual-Path Outbox Worker & Retry State Machine
-- **Fast-Path vs. Slow-Path (NGINX "Buffer on Spill")**:
-  - **Fast-Path**: If `IStreamRegistry` holds an active stream, the payload writes directly to the stream's memory channel without disk I/O.
-  - **Slow-Path**: If the stream is closed, offline, or backpressured, the packet spills seamlessly into `IOutboxRepository`.
+### 2.3 Transactional Outbox Worker & Retry State Machine
+- **Guaranteed At-Least-Once Delivery**:
+  - All outbound jobs are recorded to `IOutboxRepository` with status `Pending` before transmission.
+  - An in-process trigger notifies `OutboxWorker` to process immediately when an active stream is ready, eliminating polling delays while ensuring crash resilience.
 - **`DeliveryChannelType` Enum**:
   - `PeerDirectAuthenticated`: Direct peer-to-peer authenticated stream.
   - `RelayAnonymousDelivery`: Store-and-forward mailbox delivery token.
@@ -151,9 +152,9 @@ A relay node or high-throughput client holds large numbers of open gRPC streams 
 ### 2.4 Test Doubles & Unit Tests (`Percolator.Application2.Tests/Delivery`)
 - **`InMemoryStreamRegistry`**: Test double capturing active stream states and simulating backpressure/disconnects.
 - **`InMemoryOutboxRepository`**: Test double defined strictly within `Percolator.Application2.Tests/TestDoubles`.
-- `EgressPipelineTests.DispatchAsync_WhenStreamOnline_DispatchesViaFastPathWithoutDbAlloc`: verifies zero-disk fast path.
-- `EgressPipelineTests.DispatchAsync_WhenStreamDisconnected_SpillsToOutbox`: verifies automatic outbox spillover.
-- `EgressPipelineTests.DispatchAsync_WhenStreamBackpressured_SpillsToOutboxWithoutDropping`: verifies backpressure protection.
+- `EgressPipelineTests.DispatchAsync_AlwaysPersistsJobToOutboxFirst`: verifies transactional persistence guarantee.
+- `EgressPipelineTests.DispatchAsync_WhenStreamOnline_TriggersImmediateStreamDispatch`: verifies low-latency execution.
+- `EgressPipelineTests.DispatchAsync_WhenStreamDisconnected_LeavesJobPendingWithBackoff`: verifies retry queueing.
 - `EgressPipelineTests.DispatchGroupBroadcast_DispatchesSingleFramedPayloadWithRosterTokens`: verifies fan-out optimization.
 - `OutboxWorkerTests.ProcessBatchAsync_WhenTransportSucceeds_MarksJobDelivered`: asserts status delta to `Delivered`.
 - `OutboxWorkerTests.ProcessBatchAsync_WhenTransientFailure_SchedulesBackoff`: asserts retry counter increment and future `NextAttemptUtc`.
@@ -172,7 +173,8 @@ A relay node or high-throughput client holds large numbers of open gRPC streams 
   - Determines optimal outbound routing path: routes direct when peer stream or socket is verified and reachable; falls back automatically to `RelayMailbox` if direct delivery fails or peer is marked offline/dormant.
   - Emits routing telemetry on transport failover.
 
-### 3.2 Test Doubles & Unit Tests (`Percolator.Application2.Tests/Routing`)\n- `RoutingCoordinatorTests.ResolveRoute_WhenPeerOnlineAndReachable_SelectsDirect`: asserts direct P2P routing selection.
+### 3.2 Test Doubles & Unit Tests (`Percolator.Application2.Tests/Routing`)
+- `RoutingCoordinatorTests.ResolveRoute_WhenPeerOnlineAndReachable_SelectsDirect`: asserts direct P2P routing selection.
 - `RoutingCoordinatorTests.ResolveRoute_WhenPeerOfflineOrSuspect_SelectsRelay`: asserts graceful fallback to relay mailbox.
 
 ---
