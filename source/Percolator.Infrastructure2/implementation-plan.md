@@ -72,11 +72,13 @@ The legacy codebase contains overlapping, dated modules:
   - **`IRatchetSessionRepository`** (`Percolator.Application2.Ports`):
     - Persists active `DirectRatchetSession` states (root key, current chain keys, skipped message key cache) under encryption.
   - **`IChannelRepository`** (`Percolator.Domain.Channels.Ports`):
-    - Persists direct channels (`DirectChannel`) and group channels (`GroupChannel`) with member roles, epochs, and encrypted payload logs.
+    - Persists direct channels (`DirectChannel`) and group channels (`GroupChannel`) with member roles, epochs, and encrypted payload logs (`ChannelPayload`). Serves as the single authoritative persistence store for all channel state across applications.
   - **`IRelayPreKeyDirectoryRepository`** (`Percolator.Domain.Relays.Ports`):
     - Backs the relay pre-key hosting directory with paging, expiration cleanup, and quota enforcement.
   - **`IUnknownGroupMessageCacheRepository`** (`Percolator.Apps.Chat` port):
     - Persists bounded out-of-order group messages awaiting author sender key distribution.
+  - **`IManifestCatalogRepository`** (`Percolator.Apps.FileTransfer` port):
+    - Indexes hosted and remote file manifests (`FileManifest`), chunk hashes, and Merkle root trees.
 
 ### 4.4 Ingress Edge Filtering & Stream Registry (`Percolator.Application2.Ports`)
 - **Adapters**:
