@@ -1,8 +1,8 @@
 # Percolator.Domain
 
-`Percolator.Domain` represents the **innermost core** of the Onion Architecture. It encapsulates the enterprise business rules, cryptographic invariants, and conversational domain models for the Percolator ecosystem. 
+`Percolator.Domain` represents the **innermost core** of the Onion Architecture. It encapsulates enterprise business rules, cryptographic invariants, and conversational domain models for the Percolator ecosystem.
 
-As the architectural anchor, this project contains the pure domain logic decoupled from frameworks, transport mechanisms, and storage engines.
+As the architectural anchor, this project contains pure domain logic strictly decoupled from frameworks, transport mechanisms, wire serializations, and storage engines.
 
 ---
 
@@ -22,36 +22,48 @@ In end-to-end encrypted messaging, cryptographic state management is a domain in
 
 ---
 
-## 2. What Belongs in the Domain
+## 2. What Belongs in the Domain (In Scope)
 
-| Concept | Description & Guidelines |
+The domain contains only enterprise business logic and cryptographic invariants that are true regardless of network transport, storage engine, or UI presentation:
+
+| Concept | High-Level Scope & Guidelines |
 | :--- | :--- |
-| **Aggregates & Entities** | Conceptual consistency boundaries that encapsulate state and enforce business invariants. State changes occur exclusively through public domain methods that preserve aggregate validity. |
-| **Value Objects** | Immutable types identified solely by their attributes and validation rules rather than an entity identifier. Value objects are zero-allocation where possible, enforce structural validity upon creation, and guarantee value equality. |
-| **Domain Events** | Immutable records capturing significant business and cryptographic occurrences within an aggregate boundary. Used to communicate state changes to outer layers without coupling. |
-| **Domain Invariants & Rules** | Core policies governing participant roles, cryptographic state transitions, group epoch advancement, member authorisations, and identity states. |
-| **Domain Ports (Interfaces)** | Outward-facing abstractions defining required capabilities (such as repositories, cryptographic engines, or zero-knowledge verifiers) without exposing implementation details or technology choices. |
-| **Domain Results & Errors** | Strongly typed, allocation-conscious result representations for expected domain rejections. Expected rule violations return domain failures rather than throwing exceptions. |
+| **Aggregates & Entities** | Conceptual consistency boundaries that encapsulate state and enforce business invariants. State mutations occur exclusively through domain methods that maintain invariant validity. |
+| **Value Objects** | Immutable types identified solely by their attributes and validation rules rather than an entity identifier. Value objects enforce structural validity upon creation, guarantee value equality, and encapsulate domain validation. |
+| **Domain Events** | Immutable notifications capturing significant business and cryptographic occurrences within an aggregate boundary. Used to communicate state changes to outer layers without coupling. |
+| **Cryptographic Protocol State Machines** | In-memory representations of end-to-end cryptographic state transitions (Double Ratchet symmetric chain advancing, Diffie-Hellman ratchet steps, out-of-order skipped key cache limits, and key rotation lifecycle). |
+| **Key Exchange & Agreement Invariants** | Extended Triple Diffie-Hellman (X3DH) mutual authentication state logic, pre-key bundle validation, signature verification, and master secret derivation. |
+| **Group Invariants & Governance** | Conversation membership rosters, administrative roles, admin-gated mutations (membership changes, title renames, role promotions/demotions), and the invariant that a group must never be left without an active administrator. |
+| **Epoch Advancement & Forward Secrecy** | Epoch advancement rules upon group membership removal, ensuring cryptographic forward secrecy across group state changes. |
+| **Relay Ledger & Mailbox Governance** | Relay-hosted pre-key quotas, atomic pre-key consumption with signed fallback, hold-and-forward mailbox queues, and blinded token routing authorization without social graph linkage. |
+| **Domain Ports (Interfaces)** | Outward-facing abstractions defining required capabilities (such as cryptographic engines, zero-knowledge proof engines, or aggregate repositories) without leaking external implementation details. |
+| **Domain Results & Errors** | Strongly typed, allocation-conscious result representations for expected domain rejections, returning explicit error codes rather than throwing exceptions for ordinary rule violations. |
 
 ---
 
-## 3. What Does NOT Belong in the Domain
+## 3. What Does NOT Belong in the Domain (Out of Scope)
 
-| Anti-Pattern / Technology | Where It Belongs | Why It Is Excluded |
+The following concerns are explicitly excluded from `Percolator.Domain` and are handled by outer layers:
+
+| Excluded Concern | Responsible Layer | Architectural Reason |
 | :--- | :--- | :--- |
-| **Database & ORM Plumbing** | Infrastructure / Persistence | Data access contexts, SQL queries, migration scripts, column mapping attributes, and change tracking have no place in pure domain models. |
-| **Wire & Serialization Schemas** | Contracts / Infrastructure | Protobuf files, gRPC contracts, JSON serialization attributes, and DTOs couple domain logic to external communication protocols. |
-| **Transport Delivery Mechanisms** | Application / Infrastructure | Transactional outbox dispatching, polling workers, exponential backoff retries, and network socket management solve distributed systems problems, not business rules. |
-| **Network Idempotency (Inbox Pattern)** | Application / Infrastructure | Handling duplicate network packets, stream deduplication, and transport acknowledgments are transport concerns. The domain enforces idempotency naturally via aggregate state and cryptographic counters. |
-| **Direct Hardware & OS Access** | Infrastructure | Direct file system access, network socket communication, and platform-specific cryptographic APIs belong behind domain port adapters. |
-| **Presentation & UI Concerns** | UI / Presentation Layer | ViewModels, command bindings, formatting strings for human presentation, and UI state machines must never leak into the domain. |
+| **Wire & Transport Framing** | Application / Infrastructure | Protobuf DTOs, wire byte framing, packet delimiters, and Associated Data (AD) byte construction belong in the application pipeline before delegating to domain cryptographic ports. |
+| **Database & ORM Plumbing** | Infrastructure / Persistence | SQL queries, migrations, table schemas, change tracking, and database engines (SQLCipher/SQLite/EF Core) are storage details. |
+| **Transport Delivery & Retries** | Application / Infrastructure | Transactional outbox queues, retry policies, exponential backoff with jitter, socket management, and delivery channel routing (direct P2P vs. relay) belong to application orchestration. |
+| **Message Ordering Buffers** | Application | Caching out-of-order messages while awaiting sender key distribution payloads is an application ingress buffering responsibility. |
+| **Profile Metadata & Media** | Application | Display profiles (nicknames, avatar images, bio status, profile key symmetric encryption packages) are application-level user metadata, not core cryptographic protocol invariants. |
+| **Group Invitation Consent Workflows** | Application | Managing inbound group invitation requests (pending approval, acceptance, rejection) is an application user-consent state machine. |
+| **Peer & Network Discovery** | Application / Infrastructure | Kademlia DHT routing tables, UDP broadcast listeners, rendezvous ping/pong protocols, and network reachability probing belong in application plugins and infrastructure network adapters. |
+| **OS Security & Secret Storage** | Infrastructure | Platform-specific credential encryption (DPAPI, macOS Keychain, Linux Keyutils) and file system ACLs belong to platform security adapters. |
+| **Transport Streaming & Sockets** | Infrastructure | Resilient server-streaming gRPC connections, stream reconnection loops, keep-alives, and TLS certificate thumbprint pinning callbacks are infrastructure concerns. |
+| **Presentation & UI State** | Presentation / UI | ViewModels, UI bindings, view formatting, localization, and user input validation must never touch domain models. |
 
 ---
 
 ## 4. Error Handling Philosophy
 
-- **Result Pattern for Business Rejections:** When an operation violates a domain invariant (e.g., unauthorized role, mismatched epoch, or invalid signature), the method returns a typed failure result carrying an explicit error code and description.
-- **Exceptions Reserved for System Failures:** Exceptions in the domain are reserved strictly for non-recoverable coding defects (such as null argument contract violations in internal constructors) or severe cryptographic faults, never for ordinary business flow control.
+- **Result Pattern for Business Rejections:** When an operation violates a domain invariant (such as an unauthorized role, mismatched epoch, exhausted pre-keys, or invalid cryptographic signature), the method returns a typed failure result carrying an explicit error code and description.
+- **Exceptions Reserved for System Failures:** Exceptions in the domain are reserved strictly for non-recoverable coding defects (such as null argument contract violations in internal constructors) or severe unrecoverable faults, never for ordinary business flow control.
 
 ---
 
@@ -64,20 +76,21 @@ Because `Percolator.Domain` is completely isolated from I/O and external systems
 
 ---
 
-## 6. Functional Requirements & Signal Protocol Alignment
+## 6. Functional Capabilities & Protocol Alignment
 
-Percolator strictly models the security guarantees of the **Signal Protocol** (Extended Triple Diffie-Hellman, Double Ratchet, multi-device linking, and Signal Private Groups), extended to support **direct peer-to-peer handshakes**, **decentralized arbitrary relays**, and **opaque byte transport**.
+Percolator models the security guarantees of the **Signal Protocol** (Extended Triple Diffie-Hellman, Double Ratchet, multi-device linking, and Signal Private Groups), extended to support **direct peer-to-peer handshakes**, **decentralized arbitrary relays**, and **opaque byte transport**.
 
 ### 6.1 Core Domain Capabilities
 
 1. **Independent Identity Management:**
-   - The domain supports independent creation and lifecycle management of multiple local cryptographic identities without relying on phone numbers or centralized authority.
+   - Supports independent creation and lifecycle management of multiple local cryptographic identities without relying on phone numbers or centralized authority.
 2. **Key Rotation & Safety Number Invariants:**
-   - Identities can rotate long-term identity keys, signed pre-keys, and one-time pre-key pools over time.
+   - Identities rotate long-term identity keys, signed pre-keys, and one-time pre-key pools over time.
    - When a remote peer's public identity key changes, existing verification is invalidated and trust is automatically downgraded to untrusted, requiring re-verification of the contact's safety number.
 3. **Mutual Key Agreement (X3DH):**
    - Direct or relayed mutual authentication establishes shared secrets between identities using ephemeral keys, identity keys, signed pre-keys, and optional one-time pre-keys.
-   - The derived master secret initializes end-to-end symmetric ratchet sessions.
+   - Distinct cryptographic key roles separate digital signatures from Diffie-Hellman key exchange.
+   - Derived master secrets initialize end-to-end symmetric ratchet sessions.
 4. **Relay Pre-Key Hosting & Fine-Grained Boundaries:**
    - Any node acting as a relay can host pre-key material for peers on an opt-in basis.
    - Pre-key hosting is scoped per identity and per device, preventing unbounded in-memory registry growth and eliminating lock contention across unrelated peers.
@@ -87,14 +100,15 @@ Percolator strictly models the security guarantees of the **Signal Protocol** (E
    - Relays dispense one-time pre-keys atomically on a first-in, first-out basis.
    - When one-time pre-keys are exhausted, relays gracefully fall back to serving the valid signed pre-key, preserving forward secrecy while maintaining service continuity.
 7. **Asynchronous Hold-and-Forward Mailboxes:**
-   - Relays can store and forward opaque handshake payloads and messages for offline or unreachable peers.
+   - Relays store and forward opaque handshake payloads and messages for offline or unreachable peers.
    - Routing and delivery authorization rely on cryptographic blind tokens, preventing relays from associating senders with recipients.
 8. **Decentralized Relay Group Genesis:**
    - Identities that have established secure sessions with a common relay can establish group conversations.
    - The relay manages group genesis, recording conversation identity, initial routing tokens, and starting epoch.
 9. **Private Group Governance & Epoch Forward Secrecy:**
-   - Group administration enforces role-based authorization for membership changes.
+   - Group administration enforces role-based authorization for membership changes, group renames, and administrative promotions/demotions.
+   - Enforces the core invariant that an active group can never have its last remaining administrator removed or demoted.
    - Removing a group member automatically advances the conversation epoch, discarding previous sender keys to ensure former members cannot decrypt future communications (forward secrecy).
    - Group roster updates on relays are verified anonymously using zero-knowledge proofs, preventing the relay from reconstructing the social graph.
 10. **Direct P2P & Multi-Relay Architectural Feasibility:**
-   - The domain operates strictly on abstract cryptographic state machines and opaque byte spans, remaining completely agnostic to physical network topology (direct socket, local mesh, or multi-hop relays).
+    - The domain operates strictly on abstract cryptographic state machines and opaque byte spans, remaining completely agnostic to physical network topology (direct socket, local mesh, or multi-hop relays).
