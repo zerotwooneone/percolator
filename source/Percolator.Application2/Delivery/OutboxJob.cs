@@ -1,4 +1,5 @@
 using Percolator.Application2.Delivery.Events;
+using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
 
@@ -6,40 +7,63 @@ namespace Percolator.Application2.Delivery;
 
 public sealed class OutboxJob : AggregateRoot<Guid>
 {
+    public const int DefaultMaxAttempts = 5;
+
     public override Guid Id { get; }
+    public ChannelId ChannelId { get; }
     public PublicIdentityId OwnerIdentityId { get; }
+    public PublicIdentityId? RecipientIdentityId { get; }
     public DeliveryRoute Route { get; }
     public ReadOnlyMemory<byte> Payload { get; }
     public OutboxStatus Status { get; private set; }
     public int RetryCount { get; private set; }
+    public int MaxAttempts { get; }
     public DateTimeOffset CreatedAtUtc { get; }
     public DateTimeOffset? NextAttemptAtUtc { get; private set; }
 
     private OutboxJob(
         Guid id,
+        ChannelId channelId,
         PublicIdentityId ownerIdentityId,
+        PublicIdentityId? recipientIdentityId,
         DeliveryRoute route,
         ReadOnlyMemory<byte> payload,
-        DateTimeOffset createdAtUtc)
+        DateTimeOffset createdAtUtc,
+        int maxAttempts = DefaultMaxAttempts)
     {
         Id = id;
+        ChannelId = channelId;
         OwnerIdentityId = ownerIdentityId;
+        RecipientIdentityId = recipientIdentityId;
         Route = route;
         Payload = payload;
         Status = OutboxStatus.Pending;
         RetryCount = 0;
+        MaxAttempts = maxAttempts;
         CreatedAtUtc = createdAtUtc;
         NextAttemptAtUtc = createdAtUtc;
     }
 
     public static DomainResult<OutboxJob> Create(
+        ChannelId channelId,
         PublicIdentityId ownerIdentityId,
+        PublicIdentityId? recipientIdentityId,
         DeliveryRoute route,
         ReadOnlyMemory<byte> payload,
         IDateTimeProvider timeProvider,
+        int maxAttempts = DefaultMaxAttempts,
         Guid? id = null)
     {
-        var job = new OutboxJob(id ?? Guid.NewGuid(), ownerIdentityId, route, payload, timeProvider.UtcNow);
+        var job = new OutboxJob(
+            id ?? Guid.NewGuid(),
+            channelId,
+            ownerIdentityId,
+            recipientIdentityId,
+            route,
+            payload,
+            timeProvider.UtcNow,
+            maxAttempts);
+
         job.AddDomainEvent(new OutboxJobEnqueuedEvent(job.Id, ownerIdentityId, timeProvider.UtcNow));
         return DomainResult<OutboxJob>.Success(job);
     }
@@ -81,7 +105,15 @@ public sealed class OutboxJob : AggregateRoot<Guid>
     public void RecordFailure(DateTimeOffset nextRetryUtc)
     {
         RetryCount++;
-        Status = OutboxStatus.Failed;
-        NextAttemptAtUtc = nextRetryUtc;
+        if (RetryCount >= MaxAttempts)
+        {
+            Status = OutboxStatus.Failed;
+            NextAttemptAtUtc = null;
+        }
+        else
+        {
+            Status = OutboxStatus.Pending;
+            NextAttemptAtUtc = nextRetryUtc;
+        }
     }
 }
