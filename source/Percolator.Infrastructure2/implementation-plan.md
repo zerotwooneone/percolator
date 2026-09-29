@@ -2,11 +2,12 @@
 
 ## 1. Overview & Architectural Role
 
-`Percolator.Infrastructure2` provides concrete technical adapters, storage repositories, network transport clients/servers, and cryptographic primitives for the Percolator microkernel architecture.
+`Percolator.Infrastructure2` provides concrete technical adapters, storage repositories, network transport clients/servers, cryptographic primitives, and binary serialization engines for the Percolator microkernel architecture.
 
 Following Clean Architecture principles:
-- **Dependencies Flow Inward**: `Infrastructure2` references `Percolator.Domain`, `Percolator.Application2`, and `Percolator.PluginSdk`. It does NOT expose infrastructure-specific types (e.g., SQLite connections, gRPC stubs, raw sockets) to the domain or application layers.
-- **Port Realization**: Every component in this project implements an interface (port) defined by `Percolator.Domain` or `Percolator.Application2`.
+- **Dependencies Flow Inward**: `Infrastructure2` references `Percolator.Domain`, `Percolator.Application2`, and `Percolator.PluginSdk`. It does NOT expose infrastructure-specific types (e.g., SQLite connections, gRPC stubs, Protobuf classes, raw sockets) to the domain or application layers.
+- **Port Realization**: Every component in this project implements an interface (port) defined by `Percolator.Domain`, `Percolator.Application2`, or `Percolator.PluginSdk`.
+- **Wire Contract & Serialization Ownership**: Concrete Protobuf `.proto` schemas, code-generated message classes, and binary serializers live strictly within `Percolator.Infrastructure2.Serialization`. The inner layers interact solely via pure C# DTOs and the `IPayloadSerializer` port.
 
 ---
 
@@ -51,7 +52,16 @@ The legacy codebase contains overlapping, dated modules:
   - **Native zkgroup FFI**: Wraps `Signal.Interop` native C/Rust binaries with safe handle management.
   - **ZK Group Presentations**: Generates and verifies zero-knowledge membership proofs for anonymous group relay interactions (`VerifyGroupPresentation`, `GenerateGroupPresentation`).
 
-### 4.2 Persistence & Database Repositories
+### 4.2 Serialization & Wire Contracts (`Percolator.PluginSdk.IPayloadSerializer`)
+- **Protobuf Schemas (`Protos/`)**:
+  - `chat.proto`: Wire contracts for `TextMessageDto`, `ReactionDto`, `ReceiptDto`, `SenderKeyDistribution`.
+  - `discovery.proto`: Wire contracts for `DhtPingPayload`, `DhtPongPayload`, `DhtFindNodePayload`.
+  - `filetransfer.proto`: Wire contracts for `FileManifestDto`, `ManifestQueryDto`, `TransferNegotiationDto`.
+- **Adapter**: `ProtobufPayloadSerializer` (`IPayloadSerializer`):
+  - Serializes C# DTOs to binary using `Google.Protobuf.CodedOutputStream` and `IBufferWriter<byte>`.
+  - Deserializes binary spans into strongly-typed C# DTOs via `Google.Protobuf.MessageParser<T>`.
+
+### 4.3 Persistence & Database Repositories
 - **Database Engine**: Encrypted SQLite using SQLCipher (`SQLitePCLRaw.bundle_e_sqlcipher` with EF Core or Dapper).
 - **Adapters**:
   - **`IOutboxRepository`** (`Percolator.Application2.Delivery.Ports`):
@@ -61,12 +71,14 @@ The legacy codebase contains overlapping, dated modules:
     - Stores `PeerContact` records, primary identity keys, authorized secondary devices, and trust levels.
   - **`IRatchetSessionRepository`**:
     - Persists active `DirectRatchetSession` states (root key, current chain keys, skipped message key cache) under encryption.
+  - **`IChannelRepository`**:
+    - Persists direct channels (`DirectChannel`) and group channels (`GroupChannel`) with member roles, epochs, and encrypted payload logs.
   - **`IRelayPreKeyDirectoryRepository`**:
     - Backs the relay pre-key hosting directory with paging, expiration cleanup, and quota enforcement.
   - **`IUnknownGroupMessageCacheRepository`**:
     - Persists bounded out-of-order group messages awaiting author sender key distribution.
 
-### 4.3 Network Transport, Streaming & Dispatching
+### 4.4 Network Transport, Streaming & Dispatching
 - **Adapters**:
   - **`ITransportDispatcher`** (`Percolator.Application2.Delivery.Ports`):
     - Routes `OutboxJob` packets via direct gRPC P2P channel or gRPC Relay Mailbox service based on `DeliveryChannelType`.
@@ -85,7 +97,7 @@ The legacy codebase contains overlapping, dated modules:
     - Fetches remote peer pre-key bundles from relays out-of-band.
     - Queues and fetches store-and-forward mailbox envelopes via `DeliveryToken` / `BlindedRoutingToken`.
 
-### 4.4 Platform & Storage Adapters
+### 4.5 Platform, Discovery & Out-of-Band Transfer Adapters
 - **`IDateTimeProvider`** (`Percolator.Domain.Common`):
   - `SystemDateTimeProvider` delegating to `DateTimeOffset.UtcNow`.
 - **`ICredentialStorage`** (Security Provider):
@@ -94,5 +106,6 @@ The legacy codebase contains overlapping, dated modules:
   - Manages UDP broadcast socket (`ReuseAddress`, `EnableBroadcast = true`) for local subnet peer auto-discovery without external server dependencies.
 - **`KademliaRoutingTable`** (`Percolator.Apps.Discovery`):
   - Manages 160-bit XOR distance metrics, $k=20$ K-bucket storage, and node contact tables for decentralized rendezvous discovery.
-- **`IFileChunkStorage`** (`Percolator.Apps.FileTransfer`):
+- **`IOutBandTransferAdapter` & `IFileChunkStorage`** (`Percolator.Apps.FileTransfer`):
+  - Dedicated out-of-band binary transfer adapter (raw TCP/QUIC data streams) bypassing domain Double Ratchet channels for multi-megabyte/gigabyte payload streaming.
   - Streams chunk payloads to/from local disk with SHA-256 / Merkle root integrity verification.

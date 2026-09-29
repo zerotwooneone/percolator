@@ -5,6 +5,7 @@
 - **Architectural Rules (Rule 1 & Rule 2)**:
   - Depends **only** on `Percolator.Domain` and `Percolator.PluginSdk`.
   - Zero reference to infrastructure/transport/storage libraries (no UDP sockets, raw TCP, SQLite, or OS APIs).
+  - Strict serialization boundary: Application layer handles pure C# DTOs and delegates serialization to `IPayloadSerializer`. Concrete Protobuf contracts (`.proto`) and Google Protobuf code live strictly in `Percolator.Infrastructure2.Serialization`.
   - Implements `IAppPlugin` (`AppId.Discovery = 0x02`) and `IAppPayloadHandler` from `Percolator.PluginSdk`.
   - Test-first implementation: All behaviors must have corresponding unit tests in `Percolator.Apps.Discovery.Tests` using in-memory test doubles.
 
@@ -14,7 +15,7 @@
 
 ### 1.1 Plugin Definition & Discovery DTOs
 - **`DiscoveryPlugin`**: Implements `IAppPlugin` with `AppId = 0x02` and semantic versioning.
-- **Application Payload DTOs**:
+- **Application Payload DTOs** (Protobuf serialization abstracted via `IPayloadSerializer`):
   - `DhtPingPayload`: Node ID, sequence number, and network epoch.
   - `DhtPongPayload`: Acknowledgment, responder node descriptor, and candidate relay locators.
   - `DhtFindNodePayload`: Target ID lookup request.
@@ -58,4 +59,3 @@
 ### 3.2 Test Doubles & Unit Tests (`Percolator.Apps.Discovery.Tests/Rendezvous`)
 - `RendezvousStateMachineTests.Register_WhenTtlExpired_PurgesExpiredTickets`: asserts ticket expiration pruning with virtual time.
 - `RendezvousStateMachineTests.ResolveTicket_WhenValid_ReturnsEndpointDescriptor`: asserts active ticket retrieval.
-- `RendezvousStateMachineTests.ResolveTicket_WhenExpired_ReturnsNull`: asserts clean eviction.

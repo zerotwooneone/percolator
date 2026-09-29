@@ -1,11 +1,11 @@
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 
-namespace Percolator.Domain.Delivery.Events;
+namespace Percolator.Domain.Channels.Events;
 
-public sealed record EpochCommittedEvent(
+public sealed record PayloadAppendedEvent(
     ChannelId ChannelId,
-    EpochNumber NewEpoch,
+    PayloadId PayloadId,
     DateTimeOffset OccurredOnUtc) : IDomainEvent
 {
     public Guid EventId { get; } = Guid.NewGuid();

@@ -1,6 +1,6 @@
 using System.Security.Cryptography;
+using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
-using Percolator.Domain.Conversations.ValueObjects;
 using Percolator.Domain.Delivery.Events;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
@@ -9,12 +9,12 @@ using Percolator.Domain.Security.ValueObjects;
 
 namespace Percolator.Domain.Delivery.Hosting;
 
-public sealed class RelayGroupLedger : AggregateRoot<ConversationId>
+public sealed class RelayGroupLedger : AggregateRoot<ChannelId>
 {
     public const int MaxGroupMembers = 1000;
 
-    public override ConversationId Id => ConversationId;
-    public ConversationId ConversationId { get; }
+    public override ChannelId Id => ChannelId;
+    public ChannelId ChannelId { get; }
     public PublicIdentityId RelayIdentityId { get; }
     public EpochNumber CurrentEpoch { get; private set; }
     public EncryptedEntriesBlob EncryptedRosterBlob { get; private set; }
@@ -25,7 +25,7 @@ public sealed class RelayGroupLedger : AggregateRoot<ConversationId>
     public IReadOnlySet<BlindedRoutingToken> ActiveRoutingTokens => _activeRoutingTokens;
 
     private RelayGroupLedger(
-        ConversationId conversationId,
+        ChannelId channelId,
         PublicIdentityId relayIdentityId,
         EpochNumber initialEpoch,
         EncryptedEntriesBlob initialBlob,
@@ -33,7 +33,7 @@ public sealed class RelayGroupLedger : AggregateRoot<ConversationId>
         ZkGroupPublicParams publicParams,
         DateTimeOffset createdAtUtc)
     {
-        ConversationId = conversationId;
+        ChannelId = channelId;
         RelayIdentityId = relayIdentityId;
         CurrentEpoch = initialEpoch;
         EncryptedRosterBlob = initialBlob;
@@ -47,16 +47,16 @@ public sealed class RelayGroupLedger : AggregateRoot<ConversationId>
     }
 
     public static DomainResult<RelayGroupLedger> CreateGenesis(
-        ConversationId conversationId,
+        ChannelId channelId,
         PublicIdentityId relayIdentityId,
         EncryptedEntriesBlob genesisBlob,
         IReadOnlySet<BlindedRoutingToken> initialTokens,
         ZkGroupPublicParams publicParams,
         IDateTimeProvider timeProvider)
     {
-        if (!conversationId.IsValid)
+        if (!channelId.IsValid)
         {
-            return DomainResult<RelayGroupLedger>.Failure(new DomainError("INVALID_CONVERSATION_ID", "ConversationId cannot be empty."));
+            return DomainResult<RelayGroupLedger>.Failure(new DomainError("INVALID_CHANNEL_ID", "ChannelId cannot be empty."));
         }
 
         if (initialTokens == null || initialTokens.Count == 0)
@@ -70,7 +70,7 @@ public sealed class RelayGroupLedger : AggregateRoot<ConversationId>
         }
 
         var ledger = new RelayGroupLedger(
-            conversationId,
+            channelId,
             relayIdentityId,
             EpochNumber.Genesis,
             genesisBlob,
@@ -122,7 +122,7 @@ public sealed class RelayGroupLedger : AggregateRoot<ConversationId>
         CurrentEpoch = CurrentEpoch.Next();
         LastUpdatedUtc = timeProvider.UtcNow;
 
-        AddDomainEvent(new EpochCommittedEvent(ConversationId, CurrentEpoch, LastUpdatedUtc));
+        AddDomainEvent(new EpochCommittedEvent(ChannelId, CurrentEpoch, LastUpdatedUtc));
 
         return DomainResult.Success();
     }

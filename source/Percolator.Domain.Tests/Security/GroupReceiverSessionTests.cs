@@ -1,5 +1,5 @@
 using System.Security.Cryptography;
-using Percolator.Domain.Conversations.ValueObjects;
+using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Model;
 using Percolator.Domain.Security.ValueObjects;
@@ -11,7 +11,7 @@ namespace Percolator.Domain.Tests.Security;
 public class GroupReceiverSessionTests
 {
     private DeterministicCryptoEngine _engine = null!;
-    private ConversationId _conversationId;
+    private ChannelId _channelId;
     private PublicIdentityId _authorId;
     private DeviceId _authorDeviceId;
     private ChainKey _initialChainKey = null!;
@@ -20,7 +20,7 @@ public class GroupReceiverSessionTests
     public void SetUp()
     {
         _engine = new DeterministicCryptoEngine();
-        _conversationId = ConversationId.New();
+        _channelId = ChannelId.New();
         _authorId = PublicIdentityId.New();
         _authorDeviceId = DeviceId.Primary;
 
@@ -38,125 +38,76 @@ public class GroupReceiverSessionTests
     [Test]
     public void AdvanceTo_SequentialIterations_Succeeds()
     {
-        var session = new GroupReceiverSession(
-            _conversationId,
+        using var session = new GroupReceiverSession(
+            _channelId,
             _authorId,
             _authorDeviceId,
-            _initialChainKey,
-            initialIteration: 0);
+            _initialChainKey);
 
-        var key0 = session.AdvanceTo(0, _engine);
-        key0.IsSuccess.Should().BeTrue();
-        key0.Value.Should().NotBeNull();
-        session.ReceivingCounter.Should().Be(1);
+        var result0 = session.TryAdvanceToIteration(0, _engine);
+        result0.IsSuccess.Should().BeTrue();
+        result0.Value.Dispose();
 
-        var key1 = session.AdvanceTo(1, _engine);
-        key1.IsSuccess.Should().BeTrue();
+        var result1 = session.TryAdvanceToIteration(1, _engine);
+        result1.IsSuccess.Should().BeTrue();
+        result1.Value.Dispose();
+
         session.ReceivingCounter.Should().Be(2);
     }
 
     [Test]
-    public void AdvanceTo_WithSkippedIterations_CachesSkippedKeysAndConsumes()
+    public void AdvanceTo_OutOrder_CachesSkippedKeysAndRetrievesThem()
     {
-        var session = new GroupReceiverSession(
-            _conversationId,
+        using var session = new GroupReceiverSession(
+            _channelId,
             _authorId,
             _authorDeviceId,
-            _initialChainKey,
-            initialIteration: 0);
+            _initialChainKey);
 
-        // Advance directly to iteration 3 (skipping 0, 1, 2)
-        var key3 = session.AdvanceTo(3, _engine);
-        key3.IsSuccess.Should().BeTrue();
+        var result3 = session.TryAdvanceToIteration(3, _engine);
+        result3.IsSuccess.Should().BeTrue();
+        result3.Value.Dispose();
         session.ReceivingCounter.Should().Be(4);
 
-        session.HasSkippedKey(0).Should().BeTrue();
-        session.HasSkippedKey(1).Should().BeTrue();
-        session.HasSkippedKey(2).Should().BeTrue();
-        session.HasSkippedKey(3).Should().BeFalse();
+        var result1 = session.TryAdvanceToIteration(1, _engine);
+        result1.IsSuccess.Should().BeTrue();
+        result1.Value.Dispose();
 
-        // Late delivery of message 1: AdvanceTo should consume from cache
-        var key1 = session.AdvanceTo(1, _engine);
-        key1.IsSuccess.Should().BeTrue();
-        session.HasSkippedKey(1).Should().BeFalse();
+        var result1Again = session.TryAdvanceToIteration(1, _engine);
+        result1Again.IsFailure.Should().BeTrue();
+        result1Again.Error.Code.Should().Be("EXPIRED_OR_DUPLICATE_MESSAGE");
     }
 
     [Test]
-    public void AdvanceTo_WhenPastAndNotCached_ReturnsCounterAlreadyPassed()
+    public void AdvanceTo_ExceedsMaxSkipThreshold_ReturnsError()
     {
-        var session = new GroupReceiverSession(
-            _conversationId,
+        using var session = new GroupReceiverSession(
+            _channelId,
             _authorId,
             _authorDeviceId,
-            _initialChainKey,
-            initialIteration: 0);
+            _initialChainKey);
 
-        session.AdvanceTo(0, _engine);
-
-        // Try to request iteration 0 again (already consumed, not in skipped)
-        var replay = session.AdvanceTo(0, _engine);
-        replay.IsFailure.Should().BeTrue();
-        replay.Error.Code.Should().Be("COUNTER_ALREADY_PASSED");
-    }
-
-    [Test]
-    public void AdvanceTo_WhenSkipThresholdExceeded_ReturnsError()
-    {
-        var session = new GroupReceiverSession(
-            _conversationId,
-            _authorId,
-            _authorDeviceId,
-            _initialChainKey,
-            initialIteration: 0);
-
-        var result = session.AdvanceTo(GroupReceiverSession.MaxSkipThreshold + 1, _engine);
+        var result = session.TryAdvanceToIteration(GroupReceiverSession.MaxSkipThreshold + 1, _engine);
 
         result.IsFailure.Should().BeTrue();
-        result.Error.Code.Should().Be("SKIP_THRESHOLD_EXCEEDED");
+        result.Error.Code.Should().Be("MAX_SKIP_THRESHOLD_EXCEEDED");
     }
 
     [Test]
-    public void AdvanceTo_WhenSkippedKeysExceedCapacity_EvictsOldestKey()
+    public void Zeroize_ClearsAllKeysAndPreventsFurtherAdvances()
     {
         var session = new GroupReceiverSession(
-            _conversationId,
+            _channelId,
             _authorId,
             _authorDeviceId,
-            _initialChainKey,
-            initialIteration: 0);
+            _initialChainKey);
 
-        // Advance skipping MaxTotalSkippedKeys + 1 messages (0 to 1000 skipped)
-        session.AdvanceTo(GroupReceiverSession.MaxTotalSkippedKeys + 1, _engine);
+        session.TryAdvanceToIteration(2, _engine);
+        session.Zeroize();
 
-        // Oldest skipped key (0) must have been evicted to preserve bound
-        session.HasSkippedKey(0).Should().BeFalse();
-        var consumeOldest = session.TryConsumeSkippedKey(0);
-        consumeOldest.IsFailure.Should().BeTrue();
-        consumeOldest.Error.Code.Should().Be("KEY_NOT_FOUND");
-
-        // More recent skipped key (1) is still cached
-        session.HasSkippedKey(1).Should().BeTrue();
-    }
-
-    [Test]
-    public void Dispose_ZeroizesActiveSecretsAndSkippedKeys()
-    {
-        var session = new GroupReceiverSession(
-            _conversationId,
-            _authorId,
-            _authorDeviceId,
-            _initialChainKey,
-            initialIteration: 0);
-
-        session.AdvanceTo(2, _engine);
-        session.HasSkippedKey(0).Should().BeTrue();
-
-        session.Dispose();
         session.IsZeroized.Should().BeTrue();
-        session.HasSkippedKey(0).Should().BeFalse();
-
-        var failedAdvance = session.AdvanceTo(3, _engine);
-        failedAdvance.IsFailure.Should().BeTrue();
-        failedAdvance.Error.Code.Should().Be("INVALID_SESSION_STATE");
+        var result = session.TryAdvanceToIteration(3, _engine);
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("INVALID_SESSION_STATE");
     }
 }

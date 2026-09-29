@@ -1,5 +1,5 @@
 using System.Security.Cryptography;
-using Percolator.Domain.Conversations.ValueObjects;
+using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Model;
 using Percolator.Domain.Security.ValueObjects;
@@ -11,7 +11,7 @@ namespace Percolator.Domain.Tests.Security;
 public class GroupSenderKeyRatchetTests
 {
     private DeterministicCryptoEngine _cryptoEngine = null!;
-    private ConversationId _conversationId;
+    private ChannelId _channelId;
     private PublicIdentityId _authorId;
     private DeviceId _authorDeviceId;
     private ChainKey _initialChainKey = null!;
@@ -20,7 +20,7 @@ public class GroupSenderKeyRatchetTests
     public void SetUp()
     {
         _cryptoEngine = new DeterministicCryptoEngine();
-        _conversationId = ConversationId.New();
+        _channelId = ChannelId.New();
         _authorId = PublicIdentityId.New();
         _authorDeviceId = DeviceId.Primary;
 
@@ -38,37 +38,34 @@ public class GroupSenderKeyRatchetTests
     [Test]
     public void Advance_IncrementsIteration_AndDerivesNewMessageKey()
     {
-        var ratchet = new GroupSenderKeyRatchet(
-            _conversationId,
+        using var ratchet = new GroupSenderKeyRatchet(
+            _channelId,
             _authorId,
             _authorDeviceId,
-            _initialChainKey,
-            initialIteration: 0);
-
-        ratchet.Id.IsValid.Should().BeTrue();
+            _initialChainKey);
 
         var result = ratchet.Advance(_cryptoEngine);
 
         result.IsSuccess.Should().BeTrue();
         result.Value.Iteration.Should().Be(0);
-        result.Value.Key.Should().NotBeNull();
         ratchet.Iteration.Should().Be(1);
+
+        result.Value.Key.Dispose();
     }
 
     [Test]
-    public void Advance_WhenZeroized_ReturnsError()
+    public void Zeroize_ClearsChainKey_AndPreventsFurtherAdvances()
     {
         var ratchet = new GroupSenderKeyRatchet(
-            _conversationId,
+            _channelId,
             _authorId,
             _authorDeviceId,
-            _initialChainKey,
-            initialIteration: 0);
+            _initialChainKey);
 
-        ratchet.Dispose();
+        ratchet.Zeroize();
 
+        ratchet.IsZeroized.Should().BeTrue();
         var result = ratchet.Advance(_cryptoEngine);
-
         result.IsFailure.Should().BeTrue();
         result.Error.Code.Should().Be("INVALID_RATCHET_STATE");
     }

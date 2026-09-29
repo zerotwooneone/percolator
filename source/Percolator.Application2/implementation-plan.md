@@ -6,6 +6,7 @@
   - Depends **only** on `Percolator.Domain` and `Percolator.PluginSdk`.
   - Zero reference to infrastructure/transport/storage libraries (no gRPC, SQLite, EF Core, or socket APIs).
   - Pure onion architecture: All external interactions are abstracted behind outbound ports (interfaces).
+  - Strict serialization boundary: Application layer handles pure C# DTOs and delegates serialization to `IPayloadSerializer`. Concrete Protobuf contracts (`.proto`) and Google Protobuf code live strictly in `Percolator.Infrastructure2.Serialization`.
   - Clean boundary with application plugins: App-specific payloads and logic (`Apps.Chat`, `Apps.Discovery`, `Apps.FileTransfer`) reside in their respective plugin projects, not in `Application2`.
   - High-performance, NGINX-inspired design: Phase-based sequential processing, $O(1)$ zero-branching jump table dispatching, and zero-allocation hot paths (`readonly record struct` contexts, `IBufferWriter<byte>`).
   - Test-first implementation: All behaviors must have corresponding unit tests using test doubles.
@@ -50,7 +51,7 @@ The ingress pipeline processes inbound packets through strictly ordered, unbranc
 - **Zero-Branching Dispatch Table (`AppRouter`)**:
   - `AppId` is an 8-bit value (`byte Value` $\in [0, 255]$).
   - The router maintains a fixed 256-slot array `IAppPayloadHandler?[256]`.
-  - Handler registration assigns directly by slot: `_handlers[handler.TargetAppId.Value] = handler`.
+  - Handler registration assigns directly by slot: `_handlers[handler.TargetAppId.Value] = handler`.\
   - Dispatching performs an immediate $O(1)$ indexed jump (`_handlers[context.AppId.Value]`) without dictionary lookups, LINQ scans, or branching trees.
   - If a slot is null, immediately returns `DomainResult.Failure(new DomainError("UNKNOWN_APP_ID", ...))`.
 
@@ -77,7 +78,7 @@ The ingress pipeline processes inbound packets through strictly ordered, unbranc
   - `PeerDirectAuthenticated`: Sent directly to peer endpoint with mutual TLS/session authentication.
   - `RelayAnonymousDelivery`: Sent to Relay store-and-forward mailbox without sender identity linking.
   - `RelayGroupBroadcast`: Sent to Relay group ledger accompanied by Zero-Knowledge presentation.
-- **`OutboxJob` Value Object/Entity**: Tracks outgoing messages (`JobId`, `ConversationId`, `RecipientId`, `DeliveryChannelType`, `PayloadBytes`, `Attempts`, `MaxAttempts`, `NextAttemptUtc`, `Status`: `Pending`, `InFlight`, `Delivered`, `Failed`, `PausedDormant`).
+- **`OutboxJob` Value Object/Entity**: Tracks outgoing messages (`JobId`, `ChannelId`, `RecipientId`, `DeliveryChannelType`, `PayloadBytes`, `Attempts`, `MaxAttempts`, `NextAttemptUtc`, `Status`: `Pending`, `InFlight`, `Delivered`, `Failed`, `PausedDormant`).
 - **`IOutboxRepository` Port**: Abstract persistence interface for outbox jobs.
 - **`ITransportDispatcher` Port**: Abstract outbound transport contract (`SendAsync(OutboxJob job, CancellationToken ct)`).
 - **`OutboxWorker` Hosted Process / Background Engine**:
@@ -118,20 +119,18 @@ The ingress pipeline processes inbound packets through strictly ordered, unbranc
 ### 4.1 Signal Encrypted Profiles
 - **`ProfileKey` & `ProfileCiphertextPackage`**: 32-byte symmetric key and AES-GCM ciphertext container protecting profile metadata (display name, avatar bytes, status bio, revision number).
 - **`IProfileManager` & `ProfileManager`**:
-  - Encrypts local profile data upon update and increments `ProfileRevision`.
-  - Securely reveals `ProfileKey` to approved peer contacts.
-  - Decrypts and caches remote peer profiles when their `ProfileKey` is received.
+  - Encrypts updated profile packages using current `ProfileKey`.
+  - Rotates `ProfileKey` and distributes to approved contacts upon identity update.
+  - Decrypts remote contact profiles using cached keys.
 
-### 4.2 Contact Request Workflow Coordination
-- **`IContactRequestCoordinator` & `ContactRequestCoordinator`**:
-  - Application use case service coordinating unsolicited inbound session handshakes.
-  - Interfaces with domain `PeerContact.CreateInboundRequest`, `Approve`, `Reject`, and `Block`.
-  - On approval: transitions contact to active, reveals local `ProfileKey`, and emits application event for UI.
-  - On rejection/block: purges session caches and flags peer in `IPeerContactRepository`.
+### 4.2 Contact Request Approval Flow
+- **`ContactRequestCoordinator`**:
+  - Listens to inbound contact requests and checks `PeerContact.State`.
+  - If state is `PendingApproval`: prompts UI and buffers handshake until approved.
+  - Once approved: transitions `PeerContact.Approve()`, saves repository, and unlocks Double Ratchet handshake payload dispatch.
+  - If rejected: marks `PeerContact.Reject()` and suppresses future outbox transmissions.
 
-### 4.3 Test Doubles & Unit Tests (`Percolator.Application2.Tests/ProfilesAndContacts`)
-- `ProfileManagerTests.UpdateProfile_EncryptsPayload_AndIncrementsRevision`: asserts AES-GCM encryption and revision advance.
-- `ProfileManagerTests.DecryptPeerProfile_WithValidKey_ExtractsCleartext`: asserts successful decryption of peer name and avatar.
-- `ProfileManagerTests.DecryptPeerProfile_WithMismatchedKey_ReturnsDecryptionError`: asserts rejection when MAC check fails.
-- `ContactRequestCoordinatorTests.ApproveRequest_UpdatesDomainContact_AndRevealsProfileKey`: asserts coordinated domain transition and key reveal.
-- `ContactRequestCoordinatorTests.RejectRequest_UpdatesDomainContact_AndPurgesCachedSession`: asserts clean session purge.
+### 4.3 Test Doubles & Unit Tests (`Percolator.Application2.Tests/Profiles`)
+- `ProfileManagerTests.UpdateProfile_EncryptsProfilePackage_AndDistributesKey`: asserts profile package generation.
+- `ContactRequestCoordinatorTests.InboundRequest_WhenPending_BlocksRatchetHandshake`: asserts contact gating.
+- `ContactRequestCoordinatorTests.ApproveRequest_TransitionsContactToActive_AndResumesOutbox`: asserts approval flow.

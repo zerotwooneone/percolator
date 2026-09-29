@@ -1,4 +1,4 @@
-using Percolator.Domain.Conversations.ValueObjects;
+using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 
@@ -64,16 +64,16 @@ public class GuidIdTests
     }
 
     [Test]
-    public void MessageId_SequentialTimeBased_EmbedsTimestampAndOrdersMonotonically()
+    public void PayloadId_SequentialTimeBased_EmbedsTimestampAndOrdersMonotonically()
     {
         var t1 = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
         var t2 = new DateTimeOffset(2026, 1, 2, 0, 0, 0, TimeSpan.Zero);
 
-        var msg1 = MessageId.New(t1);
-        var msg2 = MessageId.New(t2);
+        var p1 = PayloadId.New(t1);
+        var p2 = PayloadId.New(t2);
 
-        msg1.CompareTo(msg2).Should().BeNegative();
-        (msg1.Value < msg2.Value).Should().BeTrue();
+        p1.CompareTo(p2).Should().BeNegative();
+        (p1.Value < p2.Value).Should().BeTrue();
     }
 
     [Test]

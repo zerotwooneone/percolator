@@ -1,4 +1,4 @@
-namespace Percolator.Domain.Conversations.ValueObjects;
+namespace Percolator.Domain.Channels.ValueObjects;
 
 public readonly record struct EpochNumber(uint Value) : IComparable<EpochNumber>, IEquatable<EpochNumber>
 {

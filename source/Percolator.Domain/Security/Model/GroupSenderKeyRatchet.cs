@@ -1,6 +1,6 @@
 using System.Security.Cryptography;
+using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
-using Percolator.Domain.Conversations.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
@@ -10,7 +10,7 @@ namespace Percolator.Domain.Security.Model;
 public sealed class GroupSenderKeyRatchet : AggregateRoot<SessionId>, ISensitiveSecret
 {
     public override SessionId Id { get; }
-    public ConversationId ConversationId { get; }
+    public ChannelId ChannelId { get; }
     public PublicIdentityId AuthorId { get; }
     public DeviceId AuthorDeviceId { get; }
 
@@ -19,7 +19,7 @@ public sealed class GroupSenderKeyRatchet : AggregateRoot<SessionId>, ISensitive
     public bool IsZeroized { get; private set; }
 
     public GroupSenderKeyRatchet(
-        ConversationId conversationId,
+        ChannelId channelId,
         PublicIdentityId authorId,
         DeviceId authorDeviceId,
         ChainKey initialChainKey,
@@ -27,7 +27,7 @@ public sealed class GroupSenderKeyRatchet : AggregateRoot<SessionId>, ISensitive
         SessionId? id = null)
     {
         Id = id ?? SessionId.New();
-        ConversationId = conversationId;
+        ChannelId = channelId;
         AuthorId = authorId;
         AuthorDeviceId = authorDeviceId;
         _chainKey = ChainKey.FromSpan(initialChainKey.Span);
@@ -44,21 +44,23 @@ public sealed class GroupSenderKeyRatchet : AggregateRoot<SessionId>, ISensitive
         var previousKey = _chainKey;
         var (nextChainKey, messageKey) = engine.StepRatchet(previousKey);
 
-        _chainKey = nextChainKey;
         previousKey.Dispose();
+        _chainKey = nextChainKey;
+        var emittedIteration = Iteration;
+        Iteration++;
 
-        uint currentIteration = Iteration++;
-        return DomainResult<(uint, MessageKey)>.Success((currentIteration, messageKey));
+        return DomainResult<(uint, MessageKey)>.Success((emittedIteration, messageKey));
     }
 
     public void Zeroize()
     {
-        if (_chainKey != null)
+        if (IsZeroized)
         {
-            _chainKey.Dispose();
-            _chainKey = null;
+            return;
         }
 
+        _chainKey?.Dispose();
+        _chainKey = null;
         IsZeroized = true;
     }
 

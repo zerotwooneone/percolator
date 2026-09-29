@@ -1,6 +1,6 @@
 # Percolator.Domain
 
-`Percolator.Domain` represents the **innermost core** of the Onion Architecture. It encapsulates enterprise business rules, cryptographic invariants, and conversational domain models for the Percolator ecosystem.
+`Percolator.Domain` represents the **innermost core** of the Onion Architecture. It encapsulates enterprise business rules, cryptographic invariants, and secure communication channel domain models for the Percolator ecosystem.
 
 As the architectural anchor, this project contains pure domain logic strictly decoupled from frameworks, transport mechanisms, wire serializations, and storage engines.
 
@@ -33,8 +33,8 @@ The domain contains only enterprise business logic and cryptographic invariants 
 | **Domain Events** | Immutable notifications capturing significant business and cryptographic occurrences within an aggregate boundary. Used to communicate state changes to outer layers without coupling. |
 | **Cryptographic Protocol State Machines** | In-memory representations of end-to-end cryptographic state transitions (Double Ratchet symmetric chain advancing, Diffie-Hellman ratchet steps, out-of-order skipped key cache limits, and key rotation lifecycle). |
 | **Key Exchange & Agreement Invariants** | Extended Triple Diffie-Hellman (X3DH) mutual authentication state logic, pre-key bundle validation, signature verification, and master secret derivation. |
-| **Group Invariants & Governance** | Conversation membership rosters, administrative roles, admin-gated mutations (membership changes, title renames, role promotions/demotions), and the invariant that a group must never be left without an active administrator. |
-| **Epoch Advancement & Forward Secrecy** | Epoch advancement rules upon group membership removal, ensuring cryptographic forward secrecy across group state changes. |
+| **Channel Invariants & Governance** | Communication channel membership rosters, administrative roles, admin-gated mutations (membership changes, channel name updates, role promotions/demotions), and the invariant that a channel must never be left without an active administrator. |
+| **Epoch Advancement & Forward Secrecy** | Epoch advancement rules upon channel membership removal, ensuring cryptographic forward secrecy across channel state changes. |
 | **Relay Ledger & Mailbox Governance** | Relay-hosted pre-key quotas, atomic pre-key consumption with signed fallback, hold-and-forward mailbox queues, and blinded token routing authorization without social graph linkage. |
 | **Domain Ports (Interfaces)** | Outward-facing abstractions defining required capabilities (such as cryptographic engines, zero-knowledge proof engines, or aggregate repositories) without leaking external implementation details. |
 | **Domain Results & Errors** | Strongly typed, allocation-conscious result representations for expected domain rejections, returning explicit error codes rather than throwing exceptions for ordinary rule violations. |
@@ -48,12 +48,14 @@ The following concerns are explicitly excluded from `Percolator.Domain` and are 
 | Excluded Concern | Responsible Layer | Architectural Reason |
 | :--- | :--- | :--- |
 | **Wire & Transport Framing** | Application / Infrastructure | Protobuf DTOs, wire byte framing, packet delimiters, and Associated Data (AD) byte construction belong in the application pipeline before delegating to domain cryptographic ports. |
+| **Protobuf Serialization** | Infrastructure | Compiling `.proto` definitions and serializing binary wire contracts belongs strictly in infrastructure technical adapters. |
 | **Database & ORM Plumbing** | Infrastructure / Persistence | SQL queries, migrations, table schemas, change tracking, and database engines (SQLCipher/SQLite/EF Core) are storage details. |
 | **Transport Delivery & Retries** | Application / Infrastructure | Transactional outbox queues, retry policies, exponential backoff with jitter, socket management, and delivery channel routing (direct P2P vs. relay) belong to application orchestration. |
-| **Message Ordering Buffers** | Application | Caching out-of-order messages while awaiting sender key distribution payloads is an application ingress buffering responsibility. |
+| **Payload Ordering Buffers** | Application | Caching out-of-order payloads while awaiting sender key distribution payloads is an application ingress buffering responsibility. |
 | **Profile Metadata & Media** | Application | Display profiles (nicknames, avatar images, bio status, profile key symmetric encryption packages) are application-level user metadata, not core cryptographic protocol invariants. |
-| **Group Invitation Consent Workflows** | Application | Managing inbound group invitation requests (pending approval, acceptance, rejection) is an application user-consent state machine. |
+| **Channel Invitation Consent Workflows** | Application | Managing inbound invitation requests (pending approval, acceptance, rejection) is an application user-consent state machine. |
 | **Peer & Network Discovery** | Application / Infrastructure | Kademlia DHT routing tables, UDP broadcast listeners, rendezvous ping/pong protocols, and network reachability probing belong in application plugins and infrastructure network adapters. |
+| **Out-of-Band Data Streaming** | Application / Infrastructure | Large file chunk streaming, torrent-like peer exchanges, and high-bandwidth socket transports belong in dedicated application and infrastructure adapters, outside of ratcheted domain channels. |
 | **OS Security & Secret Storage** | Infrastructure | Platform-specific credential encryption (DPAPI, macOS Keychain, Linux Keyutils) and file system ACLs belong to platform security adapters. |
 | **Transport Streaming & Sockets** | Infrastructure | Resilient server-streaming gRPC connections, stream reconnection loops, keep-alives, and TLS certificate thumbprint pinning callbacks are infrastructure concerns. |
 | **Presentation & UI State** | Presentation / UI | ViewModels, UI bindings, view formatting, localization, and user input validation must never touch domain models. |
@@ -78,7 +80,7 @@ Because `Percolator.Domain` is completely isolated from I/O and external systems
 
 ## 6. Functional Capabilities & Protocol Alignment
 
-Percolator models the security guarantees of the **Signal Protocol** (Extended Triple Diffie-Hellman, Double Ratchet, multi-device linking, and Signal Private Groups), extended to support **direct peer-to-peer handshakes**, **decentralized arbitrary relays**, and **opaque byte transport**.
+Percolator models the security guarantees of the **Signal Protocol** (Extended Triple Diffie-Hellman, Double Ratchet, multi-device linking, and Signal Private Groups), extended to support **direct peer-to-peer handshakes**, **decentralized arbitrary relays**, and **opaque byte transport across multi-party communication channels**.
 
 ### 6.1 Core Domain Capabilities
 
@@ -103,12 +105,12 @@ Percolator models the security guarantees of the **Signal Protocol** (Extended T
    - Relays store and forward opaque handshake payloads and messages for offline or unreachable peers.
    - Routing and delivery authorization rely on cryptographic blind tokens, preventing relays from associating senders with recipients.
 8. **Decentralized Relay Group Genesis:**
-   - Identities that have established secure sessions with a common relay can establish group conversations.
-   - The relay manages group genesis, recording conversation identity, initial routing tokens, and starting epoch.
-9. **Private Group Governance & Epoch Forward Secrecy:**
-   - Group administration enforces role-based authorization for membership changes, group renames, and administrative promotions/demotions.
-   - Enforces the core invariant that an active group can never have its last remaining administrator removed or demoted.
-   - Removing a group member automatically advances the conversation epoch, discarding previous sender keys to ensure former members cannot decrypt future communications (forward secrecy).
-   - Group roster updates on relays are verified anonymously using zero-knowledge proofs, preventing the relay from reconstructing the social graph.
+   - Identities that have established secure sessions with a common relay can establish multi-party communication channels.
+   - The relay manages channel genesis, recording channel identity, initial routing tokens, and starting epoch.
+9. **Private Channel Governance & Epoch Forward Secrecy:**
+   - Channel administration enforces role-based authorization for membership changes, channel name updates, and administrative promotions/demotions.
+   - Enforces the core invariant that an active channel can never have its last remaining administrator removed or demoted.
+   - Removing a channel member automatically advances the channel epoch, discarding previous sender keys to ensure former members cannot decrypt future communications (forward secrecy).
+   - Channel roster updates on relays are verified anonymously using zero-knowledge proofs, preventing the relay from reconstructing the social graph.
 10. **Direct P2P & Multi-Relay Architectural Feasibility:**
     - The domain operates strictly on abstract cryptographic state machines and opaque byte spans, remaining completely agnostic to physical network topology (direct socket, local mesh, or multi-hop relays).

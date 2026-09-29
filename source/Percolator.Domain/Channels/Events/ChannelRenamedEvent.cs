@@ -1,13 +1,13 @@
+using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
-using Percolator.Domain.Conversations.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 
-namespace Percolator.Domain.Conversations.Events;
+namespace Percolator.Domain.Channels.Events;
 
-public sealed record GroupRenamedEvent(
-    ConversationId ConversationId,
+public sealed record ChannelRenamedEvent(
+    ChannelId ChannelId,
     PublicIdentityId ActorId,
-    string NewTitle,
+    string NewName,
     EpochNumber NewEpoch,
     DateTimeOffset OccurredOnUtc) : IDomainEvent
 {

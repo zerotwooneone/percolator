@@ -1,4 +1,4 @@
-using Percolator.Domain.Conversations.ValueObjects;
+using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Delivery.Events;
 using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Delivery.ValueObjects;
@@ -13,7 +13,7 @@ public class RelayGroupLedgerTests
 {
     private FakeDateTimeProvider _timeProvider = null!;
     private FakeZkProofEngine _zkEngine = null!;
-    private ConversationId _conversationId;
+    private ChannelId _channelId;
     private PublicIdentityId _relayIdentityId;
     private EncryptedEntriesBlob _dummyBlob = null!;
     private ZkGroupPublicParams _dummyParams = null!;
@@ -24,7 +24,7 @@ public class RelayGroupLedgerTests
     {
         _timeProvider = new FakeDateTimeProvider(new DateTimeOffset(2026, 3, 1, 10, 0, 0, TimeSpan.Zero));
         _zkEngine = new FakeZkProofEngine();
-        _conversationId = ConversationId.New();
+        _channelId = ChannelId.New();
         _relayIdentityId = PublicIdentityId.New();
 
         _dummyBlob = EncryptedEntriesBlob.FromSpan(new byte[] { 10, 20, 30 });
@@ -37,7 +37,7 @@ public class RelayGroupLedgerTests
     {
         var token = BlindedRoutingToken.New();
         var result = RelayGroupLedger.CreateGenesis(
-            _conversationId,
+            _channelId,
             _relayIdentityId,
             _dummyBlob,
             new HashSet<BlindedRoutingToken> { token },
@@ -54,7 +54,7 @@ public class RelayGroupLedgerTests
     public void CreateGenesis_WithEmptyRoster_ReturnsError()
     {
         var result = RelayGroupLedger.CreateGenesis(
-            _conversationId,
+            _channelId,
             _relayIdentityId,
             _dummyBlob,
             new HashSet<BlindedRoutingToken>(), // empty!
@@ -70,7 +70,7 @@ public class RelayGroupLedgerTests
     {
         var token1 = BlindedRoutingToken.New();
         var ledger = RelayGroupLedger.CreateGenesis(
-            _conversationId,
+            _channelId,
             _relayIdentityId,
             _dummyBlob,
             new HashSet<BlindedRoutingToken> { token1 },
@@ -101,7 +101,7 @@ public class RelayGroupLedgerTests
     {
         var token1 = BlindedRoutingToken.New();
         var ledger = RelayGroupLedger.CreateGenesis(
-            _conversationId,
+            _channelId,
             _relayIdentityId,
             _dummyBlob,
             new HashSet<BlindedRoutingToken> { token1 },
@@ -125,7 +125,7 @@ public class RelayGroupLedgerTests
     {
         var token1 = BlindedRoutingToken.New();
         var ledger = RelayGroupLedger.CreateGenesis(
-            _conversationId,
+            _channelId,
             _relayIdentityId,
             _dummyBlob,
             new HashSet<BlindedRoutingToken> { token1 },
@@ -151,7 +151,7 @@ public class RelayGroupLedgerTests
     {
         var token = BlindedRoutingToken.New();
         var ledger = RelayGroupLedger.CreateGenesis(
-            _conversationId,
+            _channelId,
             _relayIdentityId,
             _dummyBlob,
             new HashSet<BlindedRoutingToken> { token },
@@ -169,7 +169,7 @@ public class RelayGroupLedgerTests
     {
         var token1 = BlindedRoutingToken.New();
         var ledger = RelayGroupLedger.CreateGenesis(
-            _conversationId,
+            _channelId,
             _relayIdentityId,
             _dummyBlob,
             new HashSet<BlindedRoutingToken> { token1 },

@@ -1,5 +1,5 @@
+using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
-using Percolator.Domain.Conversations.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
@@ -16,7 +16,7 @@ public sealed class GroupReceiverSession : AggregateRoot<SessionId>, ISensitiveS
     public const int MaxTotalSkippedKeys = 1000;
 
     public override SessionId Id { get; }
-    public ConversationId ConversationId { get; }
+    public ChannelId ChannelId { get; }
     public PublicIdentityId AuthorId { get; }
     public DeviceId AuthorDeviceId { get; }
 
@@ -28,7 +28,7 @@ public sealed class GroupReceiverSession : AggregateRoot<SessionId>, ISensitiveS
     private readonly Queue<uint> _skippedKeyOrder = new();
 
     public GroupReceiverSession(
-        ConversationId conversationId,
+        ChannelId channelId,
         PublicIdentityId authorId,
         DeviceId authorDeviceId,
         ChainKey initialChainKey,
@@ -36,110 +36,86 @@ public sealed class GroupReceiverSession : AggregateRoot<SessionId>, ISensitiveS
         SessionId? id = null)
     {
         Id = id ?? SessionId.New();
-        ConversationId = conversationId;
+        ChannelId = channelId;
         AuthorId = authorId;
         AuthorDeviceId = authorDeviceId;
         _chainKey = ChainKey.FromSpan(initialChainKey.Span);
         ReceivingCounter = initialIteration;
     }
 
-    public DomainResult<MessageKey> AdvanceTo(uint targetIteration, ICryptoEngine engine)
+    public DomainResult<MessageKey> TryAdvanceToIteration(uint targetIteration, ICryptoEngine engine)
     {
         if (IsZeroized || _chainKey == null)
         {
-            return DomainResult<MessageKey>.Failure(new DomainError("INVALID_SESSION_STATE", "Group receiver session has been zeroized or is invalid."));
+            return DomainResult<MessageKey>.Failure(new DomainError("INVALID_SESSION_STATE", "Group receiver session has been zeroized."));
         }
 
         if (targetIteration < ReceivingCounter)
         {
-            // Check if we have this key cached in skipped keys
             if (_skippedMessageKeys.Remove(targetIteration, out var skippedKey))
             {
                 return DomainResult<MessageKey>.Success(skippedKey);
             }
 
-            return DomainResult<MessageKey>.Failure(new DomainError(
-                "COUNTER_ALREADY_PASSED",
-                $"Iteration {targetIteration} is behind receiving counter {ReceivingCounter} and key is not cached."));
+            return DomainResult<MessageKey>.Failure(new DomainError("EXPIRED_OR_DUPLICATE_MESSAGE", "The message key for this iteration has already been used or was never cached."));
         }
 
         if (targetIteration - ReceivingCounter > MaxSkipThreshold)
         {
-            return DomainResult<MessageKey>.Failure(new DomainError(
-                "SKIP_THRESHOLD_EXCEEDED",
-                $"Skipping {targetIteration - ReceivingCounter} messages exceeds max threshold of {MaxSkipThreshold}."));
+            return DomainResult<MessageKey>.Failure(new DomainError("MAX_SKIP_THRESHOLD_EXCEEDED", $"Cannot skip more than {MaxSkipThreshold} keys. Potential denial of service."));
         }
 
-        // Cache intermediate keys
         while (ReceivingCounter < targetIteration)
         {
-            var prevKey = _chainKey;
-            var (nextChainKey, skippedMessageKey) = engine.StepRatchet(prevKey);
-
+            var previousKey = _chainKey;
+            var (nextChainKey, skippedMessageKey) = engine.StepRatchet(previousKey);
+            previousKey.Dispose();
             _chainKey = nextChainKey;
-            prevKey.Dispose();
 
-            StoreSkippedKey(ReceivingCounter, skippedMessageKey);
+            EvictOldestSkippedKeyIfFull();
+            _skippedMessageKeys[ReceivingCounter] = skippedMessageKey;
+            _skippedKeyOrder.Enqueue(ReceivingCounter);
+
             ReceivingCounter++;
         }
 
-        // Derive target key
-        var currentKey = _chainKey;
-        var (nextTargetChainKey, targetMessageKey) = engine.StepRatchet(currentKey);
-
-        _chainKey = nextTargetChainKey;
-        currentKey.Dispose();
-
+        var currentChain = _chainKey;
+        var (finalChainKey, derivedMessageKey) = engine.StepRatchet(currentChain);
+        currentChain.Dispose();
+        _chainKey = finalChainKey;
         ReceivingCounter++;
-        return DomainResult<MessageKey>.Success(targetMessageKey);
+
+        return DomainResult<MessageKey>.Success(derivedMessageKey);
     }
 
-    public bool HasSkippedKey(uint iteration) => _skippedMessageKeys.ContainsKey(iteration);
-
-    public DomainResult<MessageKey> TryConsumeSkippedKey(uint iteration)
+    private void EvictOldestSkippedKeyIfFull()
     {
-        if (_skippedMessageKeys.Remove(iteration, out var key))
+        while (_skippedMessageKeys.Count >= MaxTotalSkippedKeys && _skippedKeyOrder.TryDequeue(out var oldestIteration))
         {
-            return DomainResult<MessageKey>.Success(key);
-        }
-
-        return DomainResult<MessageKey>.Failure(new DomainError("KEY_NOT_FOUND", $"No skipped key found for iteration {iteration}."));
-    }
-
-    private void StoreSkippedKey(uint iteration, MessageKey key)
-    {
-        if (_skippedMessageKeys.Count >= MaxTotalSkippedKeys)
-        {
-            while (_skippedKeyOrder.Count > 0)
+            if (_skippedMessageKeys.Remove(oldestIteration, out var evictedKey))
             {
-                uint oldest = _skippedKeyOrder.Dequeue();
-                if (_skippedMessageKeys.Remove(oldest, out var evicted))
-                {
-                    evicted.Dispose();
-                    break;
-                }
+                evictedKey.Dispose();
             }
         }
-
-        _skippedMessageKeys[iteration] = key;
-        _skippedKeyOrder.Enqueue(iteration);
     }
 
     public void Zeroize()
     {
-        if (_chainKey != null)
+        if (IsZeroized)
         {
-            _chainKey.Dispose();
-            _chainKey = null;
+            return;
         }
+
+        _chainKey?.Dispose();
+        _chainKey = null;
 
         foreach (var key in _skippedMessageKeys.Values)
         {
             key.Dispose();
         }
+
         _skippedMessageKeys.Clear();
         _skippedKeyOrder.Clear();
-
         IsZeroized = true;
     }
 

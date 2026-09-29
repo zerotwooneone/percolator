@@ -1,11 +1,11 @@
+using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
-using Percolator.Domain.Conversations.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 
-namespace Percolator.Domain.Conversations.Events;
+namespace Percolator.Domain.Channels.Events;
 
 public sealed record MemberRemovedEvent(
-    ConversationId ConversationId,
+    ChannelId ChannelId,
     PublicIdentityId MemberId,
     EpochNumber NewEpoch,
     DateTimeOffset OccurredOnUtc) : IDomainEvent

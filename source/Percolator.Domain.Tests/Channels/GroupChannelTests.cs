@@ -1,19 +1,19 @@
-using Percolator.Domain.Conversations.Events;
-using Percolator.Domain.Conversations.Model;
-using Percolator.Domain.Conversations.ValueObjects;
+using Percolator.Domain.Channels.Events;
+using Percolator.Domain.Channels.Model;
+using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Tests.TestDoubles;
 
-namespace Percolator.Domain.Tests.Conversations;
+namespace Percolator.Domain.Tests.Channels;
 
 [TestFixture]
-public class GroupConversationTests
+public class GroupChannelTests
 {
     private FakeDateTimeProvider _timeProvider = null!;
     private PublicIdentityId _ownerId;
     private PublicIdentityId _adminId;
     private PublicIdentityId _regularMemberId;
-    private ConversationId _conversationId;
+    private ChannelId _channelId;
 
     [SetUp]
     public void SetUp()
@@ -22,14 +22,14 @@ public class GroupConversationTests
         _ownerId = PublicIdentityId.New();
         _adminId = _ownerId;
         _regularMemberId = PublicIdentityId.New();
-        _conversationId = ConversationId.New();
+        _channelId = ChannelId.New();
     }
 
     [Test]
     public void AddMember_ByAdmin_AddsMember_IncrementsEpoch_AndEmitsMemberJoinedEvent()
     {
-        var group = GroupConversation.CreateGenesis(
-            _conversationId,
+        var group = GroupChannel.CreateGenesis(
+            _channelId,
             _ownerId,
             "Security Team",
             _timeProvider).Value;
@@ -40,26 +40,26 @@ public class GroupConversationTests
         var result = group.AddMember(
             actorId: _adminId,
             newMemberId: newMemberId,
-            role: GroupRole.Member,
+            role: ChannelRole.Member,
             _timeProvider);
 
         result.IsSuccess.Should().BeTrue();
         group.CurrentEpoch.Value.Should().Be(1);
-        group.Members.Should().Contain(m => m.Id == newMemberId && m.Role == GroupRole.Member);
+        group.Members.Should().Contain(m => m.Id == newMemberId && m.Role == ChannelRole.Member);
 
         group.DomainEvents.Should().ContainSingle(e => e is MemberJoinedEvent);
         var joinedEvent = (MemberJoinedEvent)group.DomainEvents.Single();
-        joinedEvent.ConversationId.Should().Be(_conversationId);
+        joinedEvent.ChannelId.Should().Be(_channelId);
         joinedEvent.MemberId.Should().Be(newMemberId);
-        joinedEvent.Role.Should().Be(GroupRole.Member);
+        joinedEvent.Role.Should().Be(ChannelRole.Member);
         joinedEvent.NewEpoch.Should().Be(group.CurrentEpoch);
     }
 
     [Test]
     public void AddMember_WhenMemberAlreadyExists_ReturnsMemberAlreadyExistsError()
     {
-        var group = GroupConversation.CreateGenesis(
-            _conversationId,
+        var group = GroupChannel.CreateGenesis(
+            _channelId,
             _ownerId,
             "Security Team",
             _timeProvider).Value;
@@ -67,7 +67,7 @@ public class GroupConversationTests
         var result = group.AddMember(
             actorId: _adminId,
             newMemberId: _ownerId,
-            role: GroupRole.Member,
+            role: ChannelRole.Member,
             _timeProvider);
 
         result.IsFailure.Should().BeTrue();
@@ -78,15 +78,15 @@ public class GroupConversationTests
     [Test]
     public void AddMember_ByNonAdmin_ReturnsUnauthorizedRoleError()
     {
-        var group = GroupConversation.CreateGenesis(
-            _conversationId,
+        var group = GroupChannel.CreateGenesis(
+            _channelId,
             _ownerId,
             "Security Team",
             _timeProvider).Value;
 
         // Add regular member first
         var nonAdmin = PublicIdentityId.New();
-        group.AddMember(_adminId, nonAdmin, GroupRole.Member, _timeProvider);
+        group.AddMember(_adminId, nonAdmin, ChannelRole.Member, _timeProvider);
         group.ClearDomainEvents();
 
         // Non-admin attempts to invite someone
@@ -94,7 +94,7 @@ public class GroupConversationTests
         var result = group.AddMember(
             actorId: nonAdmin,
             newMemberId: stranger,
-            role: GroupRole.Member,
+            role: ChannelRole.Member,
             _timeProvider);
 
         result.IsFailure.Should().BeTrue();
@@ -105,14 +105,14 @@ public class GroupConversationTests
     [Test]
     public void RemoveMember_ByAdmin_RemovesMember_AdvancesEpoch_AndEmitsMemberRemovedEvent()
     {
-        var group = GroupConversation.CreateGenesis(
-            _conversationId,
+        var group = GroupChannel.CreateGenesis(
+            _channelId,
             _ownerId,
             "Security Team",
             _timeProvider).Value;
 
         var memberId = PublicIdentityId.New();
-        group.AddMember(_adminId, memberId, GroupRole.Member, _timeProvider);
+        group.AddMember(_adminId, memberId, ChannelRole.Member, _timeProvider);
         group.ClearDomainEvents();
 
         var result = group.RemoveMember(_adminId, memberId, _timeProvider);
@@ -130,8 +130,8 @@ public class GroupConversationTests
     [Test]
     public void RemoveMember_WhenTargetIsLastAdmin_ReturnsCannotRemoveLastAdminError()
     {
-        var group = GroupConversation.CreateGenesis(
-            _conversationId,
+        var group = GroupChannel.CreateGenesis(
+            _channelId,
             _ownerId,
             "Security Team",
             _timeProvider).Value;
@@ -145,16 +145,16 @@ public class GroupConversationTests
     [Test]
     public void RemoveMember_ByNonAdmin_ReturnsUnauthorizedRoleError()
     {
-        var group = GroupConversation.CreateGenesis(
-            _conversationId,
+        var group = GroupChannel.CreateGenesis(
+            _channelId,
             _ownerId,
             "Security Team",
             _timeProvider).Value;
 
         var member1 = PublicIdentityId.New();
         var member2 = PublicIdentityId.New();
-        group.AddMember(_adminId, member1, GroupRole.Member, _timeProvider);
-        group.AddMember(_adminId, member2, GroupRole.Member, _timeProvider);
+        group.AddMember(_adminId, member1, ChannelRole.Member, _timeProvider);
+        group.AddMember(_adminId, member2, ChannelRole.Member, _timeProvider);
 
         var result = group.RemoveMember(member1, member2, _timeProvider);
 
@@ -165,8 +165,8 @@ public class GroupConversationTests
     [Test]
     public void RemoveMember_WhenMemberNotFound_ReturnsMemberNotFoundError()
     {
-        var group = GroupConversation.CreateGenesis(
-            _conversationId,
+        var group = GroupChannel.CreateGenesis(
+            _channelId,
             _ownerId,
             "Security Team",
             _timeProvider).Value;
@@ -179,135 +179,135 @@ public class GroupConversationTests
     }
 
     [Test]
-    public void RenameGroup_ByAdmin_UpdatesTitle_AdvancesEpoch_AndEmitsGroupRenamedEvent()
+    public void RenameChannel_ByAdmin_UpdatesName_AdvancesEpoch_AndEmitsChannelRenamedEvent()
     {
-        var group = GroupConversation.CreateGenesis(
-            _conversationId,
+        var group = GroupChannel.CreateGenesis(
+            _channelId,
             _ownerId,
             "Initial Title",
             _timeProvider).Value;
 
         group.ClearDomainEvents();
 
-        var result = group.RenameGroup(_adminId, "Updated Title", _timeProvider);
+        var result = group.RenameChannel(_adminId, "Updated Title", _timeProvider);
 
         result.IsSuccess.Should().BeTrue();
-        group.Title.Should().Be("Updated Title");
+        group.Name.Should().Be("Updated Title");
         group.CurrentEpoch.Value.Should().Be(1);
 
-        group.DomainEvents.Should().ContainSingle(e => e is GroupRenamedEvent);
-        var renamedEvent = (GroupRenamedEvent)group.DomainEvents.Single();
-        renamedEvent.NewTitle.Should().Be("Updated Title");
+        group.DomainEvents.Should().ContainSingle(e => e is ChannelRenamedEvent);
+        var renamedEvent = (ChannelRenamedEvent)group.DomainEvents.Single();
+        renamedEvent.NewName.Should().Be("Updated Title");
         renamedEvent.ActorId.Should().Be(_adminId);
     }
 
     [Test]
-    public void RenameGroup_ByNonAdmin_ReturnsUnauthorizedRoleError()
+    public void RenameChannel_ByNonAdmin_ReturnsUnauthorizedRoleError()
     {
-        var group = GroupConversation.CreateGenesis(
-            _conversationId,
+        var group = GroupChannel.CreateGenesis(
+            _channelId,
             _ownerId,
             "Initial Title",
             _timeProvider).Value;
 
         var memberId = PublicIdentityId.New();
-        group.AddMember(_adminId, memberId, GroupRole.Member, _timeProvider);
+        group.AddMember(_adminId, memberId, ChannelRole.Member, _timeProvider);
 
-        var result = group.RenameGroup(memberId, "Malicious Rename", _timeProvider);
+        var result = group.RenameChannel(memberId, "Malicious Rename", _timeProvider);
 
         result.IsFailure.Should().BeTrue();
         result.Error.Code.Should().Be("UNAUTHORIZED_ROLE");
-        group.Title.Should().Be("Initial Title");
+        group.Name.Should().Be("Initial Title");
     }
 
     [Test]
-    public void RenameGroup_WithEmptyTitle_ReturnsInvalidTitleError()
+    public void RenameChannel_WithEmptyName_ReturnsInvalidNameError()
     {
-        var group = GroupConversation.CreateGenesis(
-            _conversationId,
+        var group = GroupChannel.CreateGenesis(
+            _channelId,
             _ownerId,
             "Initial Title",
             _timeProvider).Value;
 
-        var result = group.RenameGroup(_adminId, "   ", _timeProvider);
+        var result = group.RenameChannel(_adminId, "   ", _timeProvider);
 
         result.IsFailure.Should().BeTrue();
-        result.Error.Code.Should().Be("INVALID_TITLE");
+        result.Error.Code.Should().Be("INVALID_NAME");
     }
 
     [Test]
     public void ChangeMemberRole_ByAdmin_PromotesMember_AdvancesEpoch_AndEmitsMemberRoleChangedEvent()
     {
-        var group = GroupConversation.CreateGenesis(
-            _conversationId,
+        var group = GroupChannel.CreateGenesis(
+            _channelId,
             _ownerId,
             "Security Team",
             _timeProvider).Value;
 
         var memberId = PublicIdentityId.New();
-        group.AddMember(_adminId, memberId, GroupRole.Member, _timeProvider);
+        group.AddMember(_adminId, memberId, ChannelRole.Member, _timeProvider);
         group.ClearDomainEvents();
 
-        var result = group.ChangeMemberRole(_adminId, memberId, GroupRole.Admin, _timeProvider);
+        var result = group.ChangeMemberRole(_adminId, memberId, ChannelRole.Admin, _timeProvider);
 
         result.IsSuccess.Should().BeTrue();
-        group.Members.First(m => m.Id == memberId).Role.Should().Be(GroupRole.Admin);
+        group.Members.First(m => m.Id == memberId).Role.Should().Be(ChannelRole.Admin);
         group.CurrentEpoch.Value.Should().Be(2);
 
-        group.DomainEvents.Should().ContainSingle(e => e is MemberRoleChangedEvent);
-        var changedEvent = (MemberRoleChangedEvent)group.DomainEvents.Single();
+        group.DomainEvents.Should().ContainSingle(e => e is ChannelMemberRoleChangedEvent);
+        var changedEvent = (ChannelMemberRoleChangedEvent)group.DomainEvents.Single();
         changedEvent.TargetMemberId.Should().Be(memberId);
-        changedEvent.NewRole.Should().Be(GroupRole.Admin);
+        changedEvent.NewRole.Should().Be(ChannelRole.Admin);
     }
 
     [Test]
     public void ChangeMemberRole_DemotingLastAdmin_ReturnsLastAdminCannotBeDemotedError()
     {
-        var group = GroupConversation.CreateGenesis(
-            _conversationId,
+        var group = GroupChannel.CreateGenesis(
+            _channelId,
             _ownerId,
             "Security Team",
             _timeProvider).Value;
 
-        var result = group.ChangeMemberRole(_adminId, _adminId, GroupRole.Member, _timeProvider);
+        var result = group.ChangeMemberRole(_adminId, _adminId, ChannelRole.Member, _timeProvider);
 
         result.IsFailure.Should().BeTrue();
         result.Error.Code.Should().Be("LAST_ADMIN_CANNOT_BE_DEMOTED");
-        group.Members.First(m => m.Id == _adminId).Role.Should().Be(GroupRole.Admin);
+        group.Members.First(m => m.Id == _adminId).Role.Should().Be(ChannelRole.Admin);
     }
 
     [Test]
     public void ChangeMemberRole_ByNonAdmin_ReturnsUnauthorizedRoleError()
     {
-        var group = GroupConversation.CreateGenesis(
-            _conversationId,
+        var group = GroupChannel.CreateGenesis(
+            _channelId,
             _ownerId,
             "Security Team",
             _timeProvider).Value;
 
         var memberId = PublicIdentityId.New();
-        group.AddMember(_adminId, memberId, GroupRole.Member, _timeProvider);
+        group.AddMember(_adminId, memberId, ChannelRole.Member, _timeProvider);
 
-        var result = group.ChangeMemberRole(memberId, _adminId, GroupRole.Member, _timeProvider);
+        var result = group.ChangeMemberRole(memberId, _adminId, ChannelRole.Member, _timeProvider);
 
         result.IsFailure.Should().BeTrue();
         result.Error.Code.Should().Be("UNAUTHORIZED_ROLE");
     }
 
     [Test]
-    public void LeaveGroup_WhenRegularMemberLeaves_RemovesMember_AndAdvancesEpoch()
+    public void LeaveChannel_WhenRegularMemberLeaves_RemovesMember_AndAdvancesEpoch()
     {
-        var group = GroupConversation.CreateGenesis(
-            _conversationId,
+        var group = GroupChannel.CreateGenesis(
+            _channelId,
             _ownerId,
             "Security Team",
             _timeProvider).Value;
 
         var memberId = PublicIdentityId.New();
-        group.AddMember(_adminId, memberId, GroupRole.Member, _timeProvider);
+        group.AddMember(_adminId, memberId, ChannelRole.Member, _timeProvider);
         group.ClearDomainEvents();
 
-        var result = group.LeaveGroup(memberId, _timeProvider);
+        var result = group.LeaveChannel(memberId, _timeProvider);
 
         result.IsSuccess.Should().BeTrue();
         group.Members.Should().NotContain(m => m.Id == memberId);
@@ -317,90 +317,90 @@ public class GroupConversationTests
     }
 
     [Test]
-    public void LeaveGroup_WhenLastAdminLeavesAndOtherMembersExist_ReturnsLastAdminCannotLeaveError()
+    public void LeaveChannel_WhenLastAdminLeavesAndOtherMembersExist_ReturnsLastAdminCannotLeaveError()
     {
-        var group = GroupConversation.CreateGenesis(
-            _conversationId,
+        var group = GroupChannel.CreateGenesis(
+            _channelId,
             _ownerId,
             "Security Team",
             _timeProvider).Value;
 
         var memberId = PublicIdentityId.New();
-        group.AddMember(_adminId, memberId, GroupRole.Member, _timeProvider);
+        group.AddMember(_adminId, memberId, ChannelRole.Member, _timeProvider);
 
-        var result = group.LeaveGroup(_adminId, _timeProvider);
+        var result = group.LeaveChannel(_adminId, _timeProvider);
 
         result.IsFailure.Should().BeTrue();
         result.Error.Code.Should().Be("LAST_ADMIN_CANNOT_LEAVE");
     }
 
     [Test]
-    public void AppendMessage_AppendsMessage_WithoutChangingEpoch()
+    public void AppendPayload_AppendsPayload_WithoutChangingEpoch()
     {
-        var group = GroupConversation.CreateGenesis(
-            _conversationId,
+        var group = GroupChannel.CreateGenesis(
+            _channelId,
             _ownerId,
             "Security Team",
             _timeProvider).Value;
 
-        var message = new Message(
-            MessageId.New(),
+        var payload = new ChannelPayload(
+            PayloadId.New(),
             group.Id,
             _ownerId,
             DeviceId.Primary,
             new byte[] { 1, 2, 3 },
             _timeProvider.UtcNow);
 
-        var result = group.AppendMessage(message, _timeProvider);
+        var result = group.AppendPayload(payload, _timeProvider);
 
         result.IsSuccess.Should().BeTrue();
-        group.CurrentEpoch.Value.Should().Be(0); // Epoch must NOT change on message
-        group.DomainEvents.Should().ContainSingle(e => e is MessageAppendedEvent);
+        group.CurrentEpoch.Value.Should().Be(0); // Epoch must NOT change on payload
+        group.DomainEvents.Should().ContainSingle(e => e is PayloadAppendedEvent);
     }
 
     [Test]
-    public void AppendMessage_WithMismatchedConversationId_ReturnsError()
+    public void AppendPayload_WithMismatchedChannelId_ReturnsError()
     {
-        var group = GroupConversation.CreateGenesis(
-            _conversationId,
+        var group = GroupChannel.CreateGenesis(
+            _channelId,
             _ownerId,
             "Security Team",
             _timeProvider).Value;
 
-        var wrongConvId = ConversationId.New();
-        var message = new Message(
-            MessageId.New(),
-            wrongConvId,
+        var wrongChannelId = ChannelId.New();
+        var payload = new ChannelPayload(
+            PayloadId.New(),
+            wrongChannelId,
             _ownerId,
             DeviceId.Primary,
             new byte[] { 1, 2, 3 },
             _timeProvider.UtcNow);
 
-        var result = group.AppendMessage(message, _timeProvider);
+        var result = group.AppendPayload(payload, _timeProvider);
 
         result.IsFailure.Should().BeTrue();
-        result.Error.Code.Should().Be("CONVERSATION_MISMATCH");
+        result.Error.Code.Should().Be("CHANNEL_MISMATCH");
     }
 
     [Test]
-    public void AppendMessage_WhenSenderNotMember_ReturnsSenderNotMemberError()
+    public void AppendPayload_WhenSenderNotMember_ReturnsSenderNotMemberError()
     {
-        var group = GroupConversation.CreateGenesis(
-            _conversationId,
+        var group = GroupChannel.CreateGenesis(
+            _channelId,
             _ownerId,
             "Security Team",
             _timeProvider).Value;
 
         var strangerId = PublicIdentityId.New();
-        var message = new Message(
-            MessageId.New(),
+        var payload = new ChannelPayload(
+            PayloadId.New(),
             group.Id,
             strangerId,
             DeviceId.Primary,
             new byte[] { 1, 2, 3 },
             _timeProvider.UtcNow);
 
-        var result = group.AppendMessage(message, _timeProvider);
+        var result = group.AppendPayload(payload, _timeProvider);
 
         result.IsFailure.Should().BeTrue();
         result.Error.Code.Should().Be("SENDER_NOT_MEMBER");
@@ -409,16 +409,16 @@ public class GroupConversationTests
     [Test]
     public void Rebase_WhenConflictOccurs_ReplacesLocalEpochAndRoster()
     {
-        var group = GroupConversation.CreateGenesis(
-            _conversationId,
+        var group = GroupChannel.CreateGenesis(
+            _channelId,
             _ownerId,
             "Security Team",
             _timeProvider).Value;
 
-        var remoteMember = new GroupMember(PublicIdentityId.New(), GroupRole.Member, _timeProvider.UtcNow);
+        var remoteMember = new ChannelMember(PublicIdentityId.New(), ChannelRole.Member, _timeProvider.UtcNow);
         var latestEpoch = new EpochNumber(5);
 
-        group.Rebase(latestEpoch, [new GroupMember(_ownerId, GroupRole.Admin, _timeProvider.UtcNow), remoteMember], _timeProvider);
+        group.Rebase(latestEpoch, [new ChannelMember(_ownerId, ChannelRole.Admin, _timeProvider.UtcNow), remoteMember], _timeProvider);
 
         group.CurrentEpoch.Should().Be(latestEpoch);
         group.Members.Should().HaveCount(2);
