@@ -67,28 +67,38 @@ The legacy codebase contains overlapping, dated modules:
   - **`IOutboxRepository`** (`Percolator.Application2.Delivery.Ports`):
     - Persists outbound messages (`OutboxJob`) in transactional storage.
     - Supports FIFO retrieval of pending jobs, status progression (`Pending` $\rightarrow$ `InFlight` $\rightarrow$ `Delivered` / `Failed`), and persona black-holing (`PauseJobsForIdentityAsync`).
-  - **`IPeerContactRepository`**:
+  - **`IPeerContactRepository`** (`Percolator.Domain.Identities.Ports`):
     - Stores `PeerContact` records, primary identity keys, authorized secondary devices, and trust levels.
-  - **`IRatchetSessionRepository`**:
+  - **`IRatchetSessionRepository`** (`Percolator.Application2.Ports`):
     - Persists active `DirectRatchetSession` states (root key, current chain keys, skipped message key cache) under encryption.
-  - **`IChannelRepository`**:
+  - **`IChannelRepository`** (`Percolator.Domain.Channels.Ports`):
     - Persists direct channels (`DirectChannel`) and group channels (`GroupChannel`) with member roles, epochs, and encrypted payload logs.
-  - **`IRelayPreKeyDirectoryRepository`**:
+  - **`IRelayPreKeyDirectoryRepository`** (`Percolator.Domain.Relays.Ports`):
     - Backs the relay pre-key hosting directory with paging, expiration cleanup, and quota enforcement.
-  - **`IUnknownGroupMessageCacheRepository`**:
+  - **`IUnknownGroupMessageCacheRepository`** (`Percolator.Apps.Chat` port):
     - Persists bounded out-of-order group messages awaiting author sender key distribution.
 
-### 4.4 Network Transport, Streaming & Dispatching
+### 4.4 Ingress Edge Filtering & Stream Registry (`Percolator.Application2.Ports`)
+- **Adapters**:
+  - **`IIngressFilterService`** (`Percolator.Application2.Ports`):
+    - Enforces blacklist filtering against blocked identities (`PeerTrustLevel.Blocked`), sender rate limits, and identity dormancy status.
+  - **`IStreamRegistry`** (`Percolator.Application2.Ports`):
+    - Tracks active, open gRPC duplex/server-streaming connections for direct peers and home relays.
+    - Detects HTTP/2 connection drops and backpressure flow-control saturation (`StreamWriteResult`).
+  - **`IPeerReachabilityService`** (`Percolator.Application2.Routing`):
+    - Evaluates direct reachability (via active connection or discovery rendezvous ticket) and resolves home relay mailboxes for offline peers.
+
+### 4.5 Network Transport, Streaming & Dispatching
 - **Adapters**:
   - **`ITransportDispatcher`** (`Percolator.Application2.Delivery.Ports`):
     - Routes `OutboxJob` packets via direct gRPC P2P channel or gRPC Relay Mailbox service based on `DeliveryChannelType`.
   - **`IInboundIngressService` gRPC Server Endpoint**:
     - ASP.NET Core gRPC service exposing `DeliverOpaqueMessage(OpaqueEnvelopeRequest)` to receive incoming frames from peers or relays.
-    - Validates packet size, invokes ingress edge filters, and hands payloads to `IInboundIngressService`.
+    - Validates packet size, invokes ingress edge filters (`IIngressFilterService`), and hands payloads to `InboundIngressPipeline`.
   - **`RelayGroupStreamWorker` (`IHostedService`)**:
     - Manages live, resilient server-streaming gRPC subscriptions (`RelayGroupService.SubscribeGroupStream`) to host relays.
     - Implements automatic reconnection with exponential backoff and jitter upon network drops.
-    - Feeds streamed envelopes directly into `IInboundIngressService`.
+    - Feeds streamed envelopes directly into `InboundIngressPipeline`.
   - **Direct P2P TLS Certificate Pinning**:
     - Configures custom `RemoteCertificateValidationCallback` on gRPC `SocketsHttpHandler`.
     - Validates self-signed peer certificates by verifying certificate thumbprints match the pinned `IdentityKey` of the remote contact.
@@ -97,7 +107,7 @@ The legacy codebase contains overlapping, dated modules:
     - Fetches remote peer pre-key bundles from relays out-of-band.
     - Queues and fetches store-and-forward mailbox envelopes via `DeliveryToken` / `BlindedRoutingToken`.
 
-### 4.5 Platform, Discovery & Out-of-Band Transfer Adapters
+### 4.6 Platform, Discovery & Out-of-Band Transfer Adapters
 - **`IDateTimeProvider`** (`Percolator.Domain.Common`):
   - `SystemDateTimeProvider` delegating to `DateTimeOffset.UtcNow`.
 - **`ICredentialStorage`** (Security Provider):
