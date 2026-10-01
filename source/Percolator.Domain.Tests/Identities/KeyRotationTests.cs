@@ -19,7 +19,7 @@ public sealed class KeyRotationTests
         var contact = new PeerContact(
             _ownerId,
             _peerId,
-            "Bob",
+            ContactNickname.Create("Bob", _peerId),
             PeerTrustLevel.Verified,
             _fixedTime,
             initialKey);
@@ -47,7 +47,7 @@ public sealed class KeyRotationTests
         var contact = new PeerContact(
             _ownerId,
             _peerId,
-            "Bob",
+            ContactNickname.Create("Bob", _peerId),
             PeerTrustLevel.Verified,
             _fixedTime,
             initialKey);

@@ -28,7 +28,7 @@ public sealed class PeerContact : AggregateRoot<PublicIdentityId>
     public PublicIdentityId OwnerIdentityId { get; }
     public PublicIdentityId RemotePeerId { get; }
     public IdentityKey? PrimaryPublicKey { get; private set; }
-    public string Nickname { get; private set; }
+    public ContactNickname Nickname { get; private set; }
     public PeerTrustLevel TrustLevel { get; private set; }
     public ContactState State { get; private set; }
     public DateTimeOffset CreatedAtUtc { get; private set; }
@@ -40,7 +40,7 @@ public sealed class PeerContact : AggregateRoot<PublicIdentityId>
     public PeerContact(
         PublicIdentityId ownerIdentityId,
         PublicIdentityId remotePeerId,
-        string nickname,
+        ContactNickname nickname,
         PeerTrustLevel trustLevel,
         DateTimeOffset createdAtUtc,
         IdentityKey? primaryPublicKey = null,
@@ -62,7 +62,7 @@ public sealed class PeerContact : AggregateRoot<PublicIdentityId>
         PublicIdentityId ownerIdentityId,
         PublicIdentityId remotePeerId,
         IdentityKey primaryPublicKey,
-        string proposedNickname,
+        string? proposedNickname,
         IDateTimeProvider timeProvider)
     {
         if (!ownerIdentityId.IsValid)
@@ -85,7 +85,7 @@ public sealed class PeerContact : AggregateRoot<PublicIdentityId>
             return DomainResult<PeerContact>.Failure(new DomainError("NULL_PUBLIC_KEY", "Primary public key cannot be null."));
         }
 
-        var nickname = string.IsNullOrWhiteSpace(proposedNickname) ? remotePeerId.ToString() : proposedNickname.Trim();
+        var nickname = ContactNickname.Create(proposedNickname, remotePeerId);
 
         var contact = new PeerContact(
             ownerIdentityId,
@@ -97,6 +97,17 @@ public sealed class PeerContact : AggregateRoot<PublicIdentityId>
             ContactState.PendingApproval);
 
         return DomainResult<PeerContact>.Success(contact);
+    }
+
+    public DomainResult SetNickname(ContactNickname newNickname)
+    {
+        if (TrustLevel == PeerTrustLevel.Blocked)
+        {
+            return DomainResult.Failure(new DomainError("CONTACT_BLOCKED", "Cannot change nickname of a blocked contact."));
+        }
+
+        Nickname = newNickname;
+        return DomainResult.Success();
     }
 
     public DomainResult Approve(PeerTrustLevel initialTrust = PeerTrustLevel.Tofu)

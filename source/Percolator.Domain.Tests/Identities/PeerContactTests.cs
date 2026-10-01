@@ -22,10 +22,11 @@ public class PeerContactTests
         _secondaryDeviceKey = IdentityKey.FromSpan(new byte[32]);
         _dummyProof = DeviceLinkProof.FromSpan(new byte[64]);
 
+        var ownerId = PublicIdentityId.New();
         _contact = new PeerContact(
-            ownerIdentityId: PublicIdentityId.New(),
+            ownerIdentityId: ownerId,
             remotePeerId: PublicIdentityId.New(),
-            nickname: "Alice",
+            nickname: ContactNickname.Create("Alice", ownerId),
             trustLevel: PeerTrustLevel.Tofu,
             createdAtUtc: FixedCreatedAt);
     }
@@ -114,6 +115,29 @@ public class PeerContactTests
     }
 
     [Test]
+    public void SetNickname_WhenNotBlocked_UpdatesNickname()
+    {
+        var newNickname = ContactNickname.TryCreate("NewAlice").Value;
+
+        var result = _contact.SetNickname(newNickname);
+
+        result.IsSuccess.Should().BeTrue();
+        _contact.Nickname.Should().Be(newNickname);
+    }
+
+    [Test]
+    public void SetNickname_WhenBlocked_ReturnsContactBlockedError()
+    {
+        _contact.Block();
+        var newNickname = ContactNickname.TryCreate("NewAlice").Value;
+
+        var result = _contact.SetNickname(newNickname);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("CONTACT_BLOCKED");
+    }
+
+    [Test]
     public void CreateInboundRequest_SetsPendingApprovalState_AndUntrusted()
     {
         var ownerId = PublicIdentityId.New();
@@ -133,7 +157,7 @@ public class PeerContactTests
         contact.RemotePeerId.Should().Be(peerId);
         contact.State.Should().Be(ContactState.PendingApproval);
         contact.TrustLevel.Should().Be(PeerTrustLevel.Untrusted);
-        contact.Nickname.Should().Be("Bob");
+        contact.Nickname.Value.Should().Be("Bob");
     }
 
     [Test]

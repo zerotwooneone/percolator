@@ -76,7 +76,7 @@ public sealed class ProfileAndContactTests
         var contact = result.Value!;
         contact.OwnerIdentityId.Should().Be(_aliceId);
         contact.RemotePeerId.Should().Be(_bobId);
-        contact.Nickname.Should().Be("Bob The Builder");
+        contact.Nickname.Value.Should().Be("Bob The Builder");
         contact.State.Should().Be(ContactState.PendingApproval);
         contact.TrustLevel.Should().Be(PeerTrustLevel.Untrusted);
     }
@@ -131,6 +131,6 @@ public sealed class ProfileAndContactTests
         var contact = duplicateResult.Value!;
         contact.State.Should().Be(ContactState.Active);
         contact.TrustLevel.Should().Be(PeerTrustLevel.Verified);
-        contact.Nickname.Should().Be("Bob");
+        contact.Nickname.Value.Should().Be("Bob");
     }
 }
