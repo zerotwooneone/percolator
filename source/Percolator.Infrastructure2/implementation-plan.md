@@ -113,7 +113,7 @@ The legacy codebase contains overlapping, dated modules:
 - **`IDateTimeProvider`** (`Percolator.Domain.Common`):
   - `SystemDateTimeProvider` delegating to `DateTimeOffset.UtcNow`.
 - **`ICredentialStorage`** (Security Provider):
-  - `DpapiCredentialService` utilizing Windows DPAPI (`ProtectedData.Protect`/`Unprotect`) and local filesystem ACLs to safeguard SQLCipher encryption passphrases and root identity seed keys.
+  - `DpapiCredentialService` utilizing Windows DPAPI (`ProtectedData.Protect`/`Unprotect` with additional static entropy) and strict filesystem ACLs (`FileSystemAccessRule` granting `FullControl` solely to `WindowsIdentity.GetCurrent().User` with inherited permissions stripped) to safeguard SQLCipher encryption passphrases and root identity seed keys on disk.
 - **`UdpLanDiscoveryAdapter`** (`Percolator.Apps.Discovery`):
   - Manages UDP broadcast socket (`ReuseAddress`, `EnableBroadcast = true`) for local subnet peer auto-discovery without external server dependencies.
 - **`KademliaRoutingTable`** (`Percolator.Apps.Discovery`):
