@@ -99,11 +99,16 @@ The legacy codebase contains overlapping, dated modules:
     - Validates packet size, invokes ingress edge filters (`IIngressFilterService`), and hands payloads to `InboundIngressPipeline`.
   - **`RelayGroupStreamWorker` (`IHostedService`)**:
     - Manages live, resilient server-streaming gRPC subscriptions (`RelayGroupService.SubscribeGroupStream`) to host relays.
-    - Implements automatic reconnection with exponential backoff and jitter upon network drops.\
+    - Implements automatic reconnection with exponential backoff and jitter upon network drops.
     - Feeds streamed envelopes directly into `InboundIngressPipeline`.
-  - **Direct P2P TLS Certificate Pinning**:
-    - Configures custom `RemoteCertificateValidationCallback` on gRPC `SocketsHttpHandler`.
-    - Validates self-signed peer certificates by verifying certificate thumbprints match the pinned `IdentityKey` of the remote contact.
+  - **Ephemeral Direct P2P TLS 1.3 Transport (Anonymity & Blind-Trust Architecture)**:
+    - **Security Architecture**: TLS does *not* authenticate peers; authentic end-to-end identity and secrecy is provided entirely by Signal Double Ratchet & X3DH application payloads. The transport layer's sole responsibility is wire encryption and network-level metadata obfuscation (masking HTTP/2 framing, gRPC route names, and packet lengths from passive network observers).
+    - **Blind Trust Client Verification**: `SocketsHttpHandler` configures `RemoteCertificateValidationCallback = (_, _, _, _) => true`. This decouples TLS certificates from permanent identity keys, preventing network-level linkability/correlation of IP endpoints to identities.
+    - **Ephemeral Server Certificate Generation (`TransportCertificateProvider`)**:
+      - On application/identity startup, generates a fresh, disposable ECDSA P-256 (`ECCurve.NamedCurves.nistP256`) keypair and self-signed certificate with `CN=Percolator-Ephemeral`, `KeyUsageFlags.DigitalSignature`, `EnhancedKeyUsage` (ServerAuthentication `1.3.6.1.5.5.7.3.1`), and loopback SANs (`localhost`, `127.0.0.1`, `::1`).
+      - **Windows SChannel / CNG Invariant**: Windows SChannel fails TLS 1.3 server handshakes with ephemeral in-memory certificates. To function properly, the generated certificate must be exported as PKCS#12 (`.pfx`) bytes and loaded from disk using `X509CertificateLoader.LoadPkcs12FromFile(..., X509KeyStorageFlags.Exportable | X509KeyStorageFlags.PersistKeySet)`.
+      - **Antivirus Write Retry**: Writing the `.pfx` file triggers asynchronous Windows Defender/antivirus scans, which briefly hold shared file locks. The certificate writer must implement an exponential retry policy (`WriteCertificateWithRetryAsync`) to avoid file sharing violation exceptions (`IOException`).
+      - **CNG Key Deletion on Rotation**: Upon certificate rotation or shutdown, explicitly delete the CNG key container via `((ECDsaCng)cert.GetECDsaPrivateKey()).Key.Delete()` to avoid leaking orphaned cryptographic keys in the Windows CNG store.
   - **Relay Client Adapter**:
     - Publishes `PreKeyBundle` uploads to relay identities.
     - Fetches remote peer pre-key bundles from relays out-of-band.
@@ -114,10 +119,8 @@ The legacy codebase contains overlapping, dated modules:
   - `SystemDateTimeProvider` delegating to `DateTimeOffset.UtcNow`.
 - **`ICredentialStorage`** (Security Provider):
   - `DpapiCredentialService` utilizing Windows DPAPI (`ProtectedData.Protect`/`Unprotect` with additional static entropy) and strict filesystem ACLs (`FileSystemAccessRule` granting `FullControl` solely to `WindowsIdentity.GetCurrent().User` with inherited permissions stripped) to safeguard SQLCipher encryption passphrases and root identity seed keys on disk.
-- **`UdpLanDiscoveryAdapter`** (`Percolator.Apps.Discovery`):
-  - Manages UDP broadcast socket (`ReuseAddress`, `EnableBroadcast = true`) for local subnet peer auto-discovery without external server dependencies.
 - **`KademliaRoutingTable`** (`Percolator.Apps.Discovery`):
-  - Manages 160-bit XOR distance metrics, $k=20$ K-bucket storage, and node contact tables for decentralized rendezvous discovery.
+  - Manages 160-bit XOR distance metrics, $k=20$ K-bucket storage, and node contact tables for decentralized rendezvous discovery. (Note: UDP LAN discovery is explicitly excluded).
 - **`IOutBandTransferAdapter` & `IFileChunkStorage`** (`Percolator.Apps.FileTransfer`):
   - Dedicated out-of-band binary transfer adapter (raw TCP/QUIC data streams) bypassing domain Double Ratchet channels for multi-megabyte/gigabyte payload streaming.
   - Streams chunk payloads to/from local disk with SHA-256 / Merkle root integrity verification.
@@ -126,7 +129,7 @@ The legacy codebase contains overlapping, dated modules:
 - **Problem Statement**: Multiple transient and ephemeral tables accumulate stale records that must be pruned periodically without locking active database transactions or degrading ingress throughput.
 - **Research Scope & Target Adapters**:
   - **`OutboxRetentionPruner`**: Evaluates retention window policies for `OutboxJob` rows (e.g., pruning `Delivered` jobs older than 7 days, purging dead-letter jobs that have exceeded `MaxRetryCount` and manual inspection windows).
-  - **`RelayPreKeyDirectoryPruner`**: Evicts expired signed pre-key bundles and consumed or timed-out one-time pre-keys from `IRelayPreKeyDirectoryRepository`.
+  - **`RelayPreKeyDirectoryPruner`**: Evicts expired signed pre-key bundles and consumed or timed-out one-time pre-keys from `IRelayPreKeyDirectoryRepository` environmental records.
   - **`UnknownGroupMessageCachePruner`**: Purges buffered group chat frames from `IUnknownGroupMessageCacheRepository` that exceed maximum TTL (e.g. 48 hours) where the author's sender key distribution was never received.
   - **`AbandonedInvitePruner`**: Scans inbound contact requests (`PeerContactState.PendingApproval`) and group invitations (`PendingGroupInvitation`) exceeding local expiration policies (e.g. 14 days without user response) and marks or purges them.
   - **`RendezvousTicketPruner`**: Scans DHT presence announcements in `Apps.Discovery` past `ExpiresAtUtc` and evicts expired routing entries.
