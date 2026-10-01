@@ -99,7 +99,7 @@ The legacy codebase contains overlapping, dated modules:
     - Validates packet size, invokes ingress edge filters (`IIngressFilterService`), and hands payloads to `InboundIngressPipeline`.
   - **`RelayGroupStreamWorker` (`IHostedService`)**:
     - Manages live, resilient server-streaming gRPC subscriptions (`RelayGroupService.SubscribeGroupStream`) to host relays.
-    - Implements automatic reconnection with exponential backoff and jitter upon network drops.
+    - Implements automatic reconnection with exponential backoff and jitter upon network drops.\
     - Feeds streamed envelopes directly into `InboundIngressPipeline`.
   - **Direct P2P TLS Certificate Pinning**:
     - Configures custom `RemoteCertificateValidationCallback` on gRPC `SocketsHttpHandler`.
@@ -121,3 +121,13 @@ The legacy codebase contains overlapping, dated modules:
 - **`IOutBandTransferAdapter` & `IFileChunkStorage`** (`Percolator.Apps.FileTransfer`):
   - Dedicated out-of-band binary transfer adapter (raw TCP/QUIC data streams) bypassing domain Double Ratchet channels for multi-megabyte/gigabyte payload streaming.
   - Streams chunk payloads to/from local disk with SHA-256 / Merkle root integrity verification.
+
+### 4.7 Transient State Cleanup & Pruning Services (Research & Design)
+- **Problem Statement**: Multiple transient and ephemeral tables accumulate stale records that must be pruned periodically without locking active database transactions or degrading ingress throughput.
+- **Research Scope & Target Adapters**:
+  - **`OutboxRetentionPruner`**: Evaluates retention window policies for `OutboxJob` rows (e.g., pruning `Delivered` jobs older than 7 days, purging dead-letter jobs that have exceeded `MaxRetryCount` and manual inspection windows).
+  - **`RelayPreKeyDirectoryPruner`**: Evicts expired signed pre-key bundles and consumed or timed-out one-time pre-keys from `IRelayPreKeyDirectoryRepository`.
+  - **`UnknownGroupMessageCachePruner`**: Purges buffered group chat frames from `IUnknownGroupMessageCacheRepository` that exceed maximum TTL (e.g. 48 hours) where the author's sender key distribution was never received.
+  - **`AbandonedInvitePruner`**: Scans inbound contact requests (`PeerContactState.PendingApproval`) and group invitations (`PendingGroupInvitation`) exceeding local expiration policies (e.g. 14 days without user response) and marks or purges them.
+  - **`RendezvousTicketPruner`**: Scans DHT presence announcements in `Apps.Discovery` past `ExpiresAtUtc` and evicts expired routing entries.
+- **Design Invariant**: Background pruners execute as scheduled `IHostedService` cron workers utilizing batch deletion with SQLite `LIMIT` clauses to avoid long-lived database write locks.
