@@ -37,6 +37,7 @@ The legacy codebase contains overlapping, dated modules:
 2. **Zero Plaintext Sensitive State at Rest**: All private keys, ratchet chain keys, and session secrets stored on disk must be encrypted using SQLCipher or OS DPAPI/keychain.
 3. **Deterministic Memory Zeroization**: Any unmanaged buffers or cryptographic key spans must be cleared (`CryptographicOperations.ZeroMemory`) when disposed.
 4. **Resilient Network Handling**: All gRPC network calls must obey cancellation tokens, transport timeouts, and surface transient vs. permanent network failures cleanly to `OutboxRetryPolicy`.
+5. **Cryptographic Logging Guardrails**: Honor `CryptographyOptions.EnableCryptographicMaterialLogging = false` by default across all infrastructure loggers and diagnostics. Sensitive cryptographic keys, KDF digests, and plaintexts must never be emitted to logs.
 
 ---
 
@@ -44,10 +45,12 @@ The legacy codebase contains overlapping, dated modules:
 
 ### 4.1 Cryptography (`Percolator.Domain.Security.Ports.ICryptoEngine` & `IZkProofEngine`)
 - **Adapter**: `SignalCryptoEngine` / `SodiumCryptoEngine` (`ICryptoEngine`)
-  - **Ed25519 Signatures**: Signs and verifies device link proofs and pre-key signatures (`VerifyEd25519Signature(IdentityKey, ...)`).
+  - **Ed25519 Signatures**: Signs and verifies device link proofs, pre-key signatures, and group sender key messages (`VerifyEd25519Signature(IdentityKey, ...)`, `SignEd25519(ReadOnlySpan<byte> privateKey, ReadOnlySpan<byte> message)`).
   - **Curve25519 (X25519) Diffie-Hellman**: Computes scalar multiplication between private keys and public DH keys (`ComputeDiffieHellman`, `DeriveX3dhMasterSecret`).
   - **HKDF / HMAC Ratchet Steps**: Performs SHA-256 HMAC-based root key updates (`KdfRk`) and symmetric chain key advances (`StepRatchet`).
   - **Authenticated Encryption**: AES-256-GCM authenticated symmetric encryption (`EncryptAesGcm`, `DecryptAesGcm`).
+  - **Resilient Public Key Parsing**: Supports importing public keys from both raw 32/64/65-byte point spans and ASN.1 DER SubjectPublicKeyInfo structures without throwing parsing exceptions.
+  - **Logging Guardrails**: Redacts all key spans and secrets in logs, controlled via `CryptographyOptions`.
 - **Adapter**: `ZkgroupCryptographyService` (`IZkProofEngine`)
   - **Native zkgroup FFI**: Wraps `Signal.Interop` native C/Rust binaries with safe handle management.
   - **ZK Group Presentations**: Generates and verifies zero-knowledge membership proofs for anonymous group relay interactions (`VerifyGroupPresentation`, `GenerateGroupPresentation`).
@@ -58,8 +61,7 @@ The legacy codebase contains overlapping, dated modules:
   - `discovery.proto`: Wire contracts for `DhtPingPayload`, `DhtPongPayload`, `DhtFindNodePayload`.
   - `filetransfer.proto`: Wire contracts for `FileManifestDto`, `ManifestQueryDto`, `TransferNegotiationDto`.
 - **Adapter**: `ProtobufPayloadSerializer` (`IPayloadSerializer`):
-  - Serializes C# DTOs to binary using `Google.Protobuf.CodedOutputStream` and `IBufferWriter<byte>`.
-  - Deserializes binary spans into strongly-typed C# DTOs via `Google.Protobuf.MessageParser<T>`.
+  - Serializes C# DTOs to binary using `Google.Protobuf.CodedOutputStream` and `IBufferWriter<byte>`.\n  - Deserializes binary spans into strongly-typed C# DTOs via `Google.Protobuf.MessageParser<T>`.
 
 ### 4.3 Persistence & Database Repositories
 - **Database Engine**: Encrypted SQLite using SQLCipher (`SQLitePCLRaw.bundle_e_sqlcipher` with EF Core or Dapper).
@@ -71,6 +73,10 @@ The legacy codebase contains overlapping, dated modules:
     - Stores `PeerContact` records, primary identity keys, authorized secondary devices, and trust levels.
   - **`IRatchetSessionRepository`** (`Percolator.Application2.Ports`):
     - Persists active `DirectRatchetSession` states (root key, current chain keys, skipped message key cache) under encryption.
+  - **`IPrivatePreKeyStore`** (`Percolator.Domain.Identities.Ports`):
+    - Persists local private signed pre-keys and pools of private one-time pre-keys, supporting atomic retrieval and consumption by key ID for inbound X3DH responder handshakes.
+  - **`IGroupCredentialsRepository`** (`Percolator.Domain.Security.Ports`):
+    - Persists client-side `GroupCredentials` (master keys, auth credential MACs, blob keys) under encryption.
   - **`IChannelRepository`** (`Percolator.Domain.Channels.Ports`):
     - Persists direct channels (`DirectChannel`) and group channels (`GroupChannel`) with member roles, epochs, and encrypted payload logs (`ChannelPayload`). Serves as the single authoritative persistence store for all channel state across applications.
   - **`IRelayPreKeyDirectoryRepository`** (`Percolator.Domain.Relays.Ports`):

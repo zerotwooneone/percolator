@@ -10,7 +10,8 @@ public sealed record X3dhInitiatorResult(
     SharedSecret MasterSecret,
     DhPublicKey EphemeralPublicKey,
     IdentityKey InitiatorIdentityKey,
-    uint? OneTimePreKeyIdUsed);
+    uint? OneTimePreKeyIdUsed,
+    EphemeralPrivateKey? EphemeralPrivateKey = null);
 
 /// <summary>
 /// Encapsulates the cryptographic rules for the Extended Triple Diffie-Hellman (X3DH) key agreement protocol.
@@ -78,7 +79,7 @@ public static class X3dhAgreement
             dh4Span);
 
         return DomainResult<X3dhInitiatorResult>.Success(
-            new X3dhInitiatorResult(masterSecret, ephemeralPublicKey, initiatorIdentityPublicKey, opkIdUsed));
+            new X3dhInitiatorResult(masterSecret, ephemeralPublicKey, initiatorIdentityPublicKey, opkIdUsed, ephemeralPrivateKey));
     }
 
     public static DomainResult<SharedSecret> Receive(

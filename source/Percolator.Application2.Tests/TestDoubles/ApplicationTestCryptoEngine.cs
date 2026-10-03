@@ -119,4 +119,14 @@ public sealed class ApplicationTestCryptoEngine : ICryptoEngine
     {
         return true;
     }
+
+    public byte[] SignEd25519(ReadOnlySpan<byte> privateKey, ReadOnlySpan<byte> message)
+    {
+        var sig = new byte[64];
+        if (message.Length > 0)
+        {
+            SHA256.HashData(message, sig.AsSpan(0, 32));
+        }
+        return sig;
+    }
 }

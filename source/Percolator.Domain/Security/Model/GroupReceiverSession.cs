@@ -19,6 +19,8 @@ public sealed class GroupReceiverSession : AggregateRoot<SessionId>, ISensitiveS
     public ChannelId ChannelId { get; }
     public PublicIdentityId AuthorId { get; }
     public DeviceId AuthorDeviceId { get; }
+    public uint KeyId { get; }
+    public IdentityKey? AuthorSigningKey { get; }
 
     private ChainKey? _chainKey;
     public uint ReceivingCounter { get; private set; }
@@ -33,12 +35,16 @@ public sealed class GroupReceiverSession : AggregateRoot<SessionId>, ISensitiveS
         DeviceId authorDeviceId,
         ChainKey initialChainKey,
         uint initialIteration = 0,
+        uint keyId = 1,
+        IdentityKey? authorSigningKey = null,
         SessionId? id = null)
     {
         Id = id ?? SessionId.New();
         ChannelId = channelId;
         AuthorId = authorId;
         AuthorDeviceId = authorDeviceId;
+        KeyId = keyId;
+        AuthorSigningKey = authorSigningKey;
         _chainKey = ChainKey.FromSpan(initialChainKey.Span);
         ReceivingCounter = initialIteration;
     }
@@ -86,6 +92,21 @@ public sealed class GroupReceiverSession : AggregateRoot<SessionId>, ISensitiveS
         ReceivingCounter++;
 
         return DomainResult<MessageKey>.Success(derivedMessageKey);
+    }
+
+    public DomainResult VerifyAuthorSignature(ReadOnlySpan<byte> message, ReadOnlySpan<byte> signature, ICryptoEngine engine)
+    {
+        if (AuthorSigningKey == null)
+        {
+            return DomainResult.Failure(new DomainError("MISSING_SIGNING_KEY", "Author signing public key is not set."));
+        }
+
+        if (!engine.VerifyEd25519Signature(AuthorSigningKey, message, signature))
+        {
+            return DomainResult.Failure(new DomainError("INVALID_SIGNATURE", "Group message signature verification failed. Possible forgery."));
+        }
+
+        return DomainResult.Success();
     }
 
     private void EvictOldestSkippedKeyIfFull()

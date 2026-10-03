@@ -64,6 +64,96 @@ public sealed class DirectRatchetSession : AggregateRoot<SessionId>, ISensitiveS
     }
 
     /// <summary>
+    /// Creates an outbound Double Ratchet session initialized directly from the results of a mutual X3DH agreement.
+    /// Derives the initial sending chain and root key from the X3DH master shared secret.
+    /// </summary>
+    public static DomainResult<DirectRatchetSession> CreateFromX3dhInitiator(
+        PublicIdentityId ownerIdentityId,
+        DeviceId ownerDeviceId,
+        PublicIdentityId remotePeerId,
+        DeviceId remoteDeviceId,
+        X3dhInitiatorResult x3DhResult,
+        DhPublicKey remoteSignedPreKey,
+        ICryptoEngine engine,
+        SessionId? sessionId = null)
+    {
+        if (ownerIdentityId == remotePeerId)
+        {
+            return DomainResult<DirectRatchetSession>.Failure(new DomainError(
+                "SELF_SESSION_NOT_ALLOWED", "Cannot initiate Double Ratchet session with self."));
+        }
+
+        ArgumentNullException.ThrowIfNull(x3DhResult);
+        ArgumentNullException.ThrowIfNull(remoteSignedPreKey);
+        ArgumentNullException.ThrowIfNull(engine);
+
+        using var initialRoot = ChainKey.FromSpan(x3DhResult.MasterSecret.Span);
+        var (nextRoot, sendingChain) = engine.KdfRk(initialRoot, x3DhResult.MasterSecret);
+
+        var session = new DirectRatchetSession(
+            ownerIdentityId,
+            ownerDeviceId,
+            remotePeerId,
+            remoteDeviceId,
+            rootKey: nextRoot,
+            sendingChainKey: sendingChain,
+            receivingChainKey: null,
+            remoteEphemeralPublicKey: remoteSignedPreKey,
+            localEphemeralPrivateKey: x3DhResult.EphemeralPrivateKey,
+            localEphemeralPublicKey: x3DhResult.EphemeralPublicKey,
+            sessionId: sessionId);
+
+        nextRoot.Dispose();
+        sendingChain.Dispose();
+
+        return DomainResult<DirectRatchetSession>.Success(session);
+    }
+
+    /// <summary>
+    /// Creates an inbound Double Ratchet session initialized directly from the results of a mutual X3DH responder agreement.
+    /// Derives the matching initial receiving chain and root key from the X3DH master shared secret.
+    /// </summary>
+    public static DomainResult<DirectRatchetSession> CreateFromX3dhResponder(
+        PublicIdentityId ownerIdentityId,
+        DeviceId ownerDeviceId,
+        PublicIdentityId remotePeerId,
+        DeviceId remoteDeviceId,
+        SharedSecret masterSecret,
+        DhPublicKey remoteEphemeralPublicKey,
+        ICryptoEngine engine,
+        SessionId? sessionId = null)
+    {
+        if (ownerIdentityId == remotePeerId)
+        {
+            return DomainResult<DirectRatchetSession>.Failure(new DomainError(
+                "SELF_SESSION_NOT_ALLOWED", "Cannot initiate Double Ratchet session with self."));
+        }
+
+        ArgumentNullException.ThrowIfNull(masterSecret);
+        ArgumentNullException.ThrowIfNull(remoteEphemeralPublicKey);
+        ArgumentNullException.ThrowIfNull(engine);
+
+        using var initialRoot = ChainKey.FromSpan(masterSecret.Span);
+        var (nextRoot, receivingChain) = engine.KdfRk(initialRoot, masterSecret);
+
+        var session = new DirectRatchetSession(
+            ownerIdentityId,
+            ownerDeviceId,
+            remotePeerId,
+            remoteDeviceId,
+            rootKey: nextRoot,
+            sendingChainKey: null,
+            receivingChainKey: receivingChain,
+            remoteEphemeralPublicKey: remoteEphemeralPublicKey,
+            sessionId: sessionId);
+
+        nextRoot.Dispose();
+        receivingChain.Dispose();
+
+        return DomainResult<DirectRatchetSession>.Success(session);
+    }
+
+    /// <summary>
     /// Initiates an outbound Double Ratchet session using the remote peer's pre-key bundle.
     /// Derives the initial sending chain and root key, and records the initial ephemeral public key.
     /// </summary>
@@ -158,7 +248,21 @@ public sealed class DirectRatchetSession : AggregateRoot<SessionId>, ISensitiveS
 
     public DomainResult<(uint MessageCounter, MessageKey Key, DhPublicKey? EphemeralPublicKey)> StepSendingChain(ICryptoEngine engine)
     {
-        if (IsZeroized || _sendingChainKey == null)
+        if (IsZeroized)
+        {
+            return DomainResult<(uint, MessageKey, DhPublicKey?)>.Failure(new DomainError("INVALID_SESSION_STATE", "Sending chain key is not available or has been zeroized."));
+        }
+
+        if (_sendingChainKey == null && RemoteEphemeralPublicKey != null)
+        {
+            var ratchetResult = StepDhRatchet(RemoteEphemeralPublicKey, engine);
+            if (ratchetResult.IsFailure)
+            {
+                return DomainResult<(uint, MessageKey, DhPublicKey?)>.Failure(ratchetResult.Error);
+            }
+        }
+
+        if (_sendingChainKey == null)
         {
             return DomainResult<(uint, MessageKey, DhPublicKey?)>.Failure(new DomainError("INVALID_SESSION_STATE", "Sending chain key is not available or has been zeroized."));
         }
@@ -226,14 +330,14 @@ public sealed class DirectRatchetSession : AggregateRoot<SessionId>, ISensitiveS
             return DomainResult.Failure(new DomainError("NULL_EPHEMERAL_KEY", "Remote ephemeral public key cannot be null."));
         }
 
-        if (RemoteEphemeralPublicKey != null && RemoteEphemeralPublicKey == newRemoteEphemeralKey)
+        if (RemoteEphemeralPublicKey != null && RemoteEphemeralPublicKey == newRemoteEphemeralKey && _sendingChainKey != null)
         {
-            // Already ratcheted to this ephemeral key
+            // Already ratcheted to this ephemeral key and sending chain is ready
             return DomainResult.Success();
         }
 
         // 1. DH Receive step using existing local private key and new remote public key
-        if (_localEphemeralPrivateKey != null)
+        if (_localEphemeralPrivateKey != null && RemoteEphemeralPublicKey != newRemoteEphemeralKey)
         {
             using var dhRecv = engine.ComputeDiffieHellman(_localEphemeralPrivateKey.Span, newRemoteEphemeralKey.Span);
             var (r1, receivingChain) = engine.KdfRk(_rootKey, dhRecv);
