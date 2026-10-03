@@ -12,6 +12,9 @@
     - To eliminate the risk of split-brain state, divergent message sequences, and out-of-sync message histories, `Percolator.Domain.Channels` (`DirectChannel` and `GroupChannel`) is the **sole authoritative owner** of channel membership, administrative roles, cryptographic epochs, and the chronological payload timeline.
     - `Percolator.Apps.Chat` does **not** persist a separate, duplicative database or aggregate of messages. It appends payload entries (`ChannelPayload`) directly to the domain channel aggregates and persists them via `IChannelRepository`.
     - Chat conversations, emoji reactions, and read receipts are presented through a typed **Read Model / Projection Service** (`ChatConversationService`) that projects the domain channel's payload log on-the-fly.
+  - **Cryptographic Logging Guardrails**:
+    - The Chat application must strictly honor cryptographic logging guardrails (`CryptographyOptions.EnableCryptographicMaterialLogging = false` by default).
+    - Diagnostic, audit, and trace logging must **never** record sensitive cryptographic key material (chain keys, message keys, sender keys, or key derivation hashes) or user plaintexts. Only sanitized operational metadata (e.g. channel IDs, timestamps, payload size) may appear in logs.
   - Test-first implementation: All behaviors must have corresponding unit tests in `Percolator.Apps.Chat.Tests` using in-memory test doubles.
 
 ---
@@ -55,8 +58,7 @@
   - Upon receiving `SenderKeyDistributionPayload`: initializes `GroupReceiverSession` and immediately flushes/decrypts buffered messages in order.
 
 ### 2.2 Test Doubles & Unit Tests (`Percolator.Apps.Chat.Tests/SenderKeys`)
-- **`InMemoryUnknownGroupMessageCache`**: Test double implementing `IUnknownGroupMessageCache`.
-- `ChatPayloadHandlerTests.HandleInboundAsync_SenderKeyDistribution_InitializesGroupReceiverSession`: asserts sender key ratchet setup.
+- **`InMemoryUnknownGroupMessageCache`**: Test double implementing `IUnknownGroupMessageCache`.\n- `ChatPayloadHandlerTests.HandleInboundAsync_SenderKeyDistribution_InitializesGroupReceiverSession`: asserts sender key ratchet setup.
 - `ChatPayloadHandlerTests.HandleInboundAsync_SenderKeyDistribution_FlushesUnknownMessageCache`: asserts buffered messages decrypted upon key arrival.
 - `UnknownMessageCacheTests.Enqueue_WhenLimitExceeded_EvictsOldestMessage`: asserts bounded FIFO invariant.
 

@@ -10,6 +10,9 @@
   - **Prerequisite Handshake & Prekey Bundle Invariant**:
     - Discovery announcement and locator queries **require** that the remote peer has already successfully completed a mutual cryptographic handshake AND has an active, valid `PreKeyBundle` available.
     - Peered nodes without established trust or unconsumable pre-keys are suppressed from rendezvous announcements and reachability resolution. This ensures nodes can never be advertised if communication cannot be initiated, and grants peers sovereign control over whether and how they can be discovered.
+  - **Cryptographic Logging Guardrails**:
+    - The Discovery application must strictly honor cryptographic logging guardrails (`CryptographyOptions.EnableCryptographicMaterialLogging = false` by default).
+    - Diagnostic and trace logging must **never** leak contact shared secrets, blinded locator pre-image secrets, node private keys, or pre-key cryptographic components. Only non-sensitive metrics (e.g. bucket IDs, ping round-trip times, candidate counts) may be emitted.
   - Test-first implementation: All behaviors must have corresponding unit tests in `Percolator.Apps.Discovery.Tests` using in-memory test doubles.
 
 ---

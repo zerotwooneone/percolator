@@ -59,3 +59,6 @@ The application host treats application payloads as opaque byte buffers tagged w
 
 ### 3.4 Temporal Inversion
 All pipeline steps, outbox retries, and contact request workflows obtain current time exclusively through inverted time providers, ensuring that all use cases can be verified deterministically in unit tests without arbitrary clock delays.
+
+### 3.5 Cryptographic Logging Guardrails
+The application layer and all its pipelines must strictly honor cryptographic logging guardrails (`CryptographyOptions.EnableCryptographicMaterialLogging = false` by default). Pipeline loggers, diagnostic traces, and exception handlers must **never** record sensitive cryptographic key material (root keys, chain keys, message keys, ephemeral private keys, or intermediate KDF digests) or decrypted application plaintexts in log outputs. Only sanitized operational metadata (e.g. ChannelId, PublicIdentityId, DeviceId, MessageCounter, frame byte lengths) is permissible in log sinks.

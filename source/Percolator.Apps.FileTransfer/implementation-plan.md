@@ -9,6 +9,9 @@
   - Strict separation of protocol control vs. out-of-band data streaming:
     - **In-Band Manifests & Queries**: Manifest advertisements, file availability queries, chunk requests, and transfer negotiations flow strictly as application payloads on top of the domain communication channels (`DirectChannel` / `GroupChannel`). They do **not** appear in chat message feeds.
     - **Out-of-Band Data Streaming**: Actual file binary transfers (e.g. 2GB payload data) do **not** travel through domain Double Ratchets or conversation message histories, and do not use the core messaging gRPC endpoints. High-bandwidth file chunk streaming is executed out-of-band via dedicated infrastructure transfer adapters (e.g., direct TCP/QUIC data streams or torrent-style swarm transports) using authentication tokens negotiated in-band.
+  - **Cryptographic Logging Guardrails**:
+    - The File Transfer application must strictly honor cryptographic logging guardrails (`CryptographyOptions.EnableCryptographicMaterialLogging = false` by default).
+    - Diagnostic logging must **never** write transfer session secret tokens, Merkle tree encryption keys, or unauthenticated chunk buffers to log sinks. Only public file manifest IDs, chunk indexes, transfer progress percentages, and byte transfer rates may be logged.
   - Test-first implementation: All behaviors must have corresponding unit tests in `Percolator.Apps.FileTransfer.Tests` using in-memory test doubles.
 
 ---
@@ -23,7 +26,7 @@
   - `ManifestQueryResponseDto`: Response containing available file manifests.
   - `TransferNegotiationDto`: Handshake payload specifying out-of-band candidate endpoints (IP, port, protocol) and single-use session transfer token.
 - **`FileTransferPayloadHandler`**:
-  - Implements `IAppPayloadHandler` for `AppId.FileTransfer`.
+  - Implements `IAppPayloadHandler` for `AppId.FileTransfer``.
   - Ingress processing: Deserializes inbound manifest packets and routes to the manifest catalog or transfer session coordinator.
   - Manifest messages are isolated from chat applications—they are handled solely by the file transfer subsystem.
 
