@@ -249,6 +249,9 @@ Database Engine: Encrypted SQLite using SQLCipher (`SQLitePCLRaw.bundle_e_sqlcip
   - Persists active `GroupReceiverSession` states (channel, author ID, author device ID, current iteration, chain key, skipped message keys) under encryption.
 - **`IGroupSenderKeyRepository`** (`Percolator.Application2.Ports`):
   - Persists active `GroupSenderKeyRatchet` states (channel, author ID, author device ID, current iteration, chain key, Ed25519 signing key) under encryption.
+- **`IPendingHandshakeRepository`** (`Percolator.Application2.Ports`):
+  - Persists pending inbound handshake envelopes (`InboundHandshakeEnvelope`) and encrypted greeting payloads while an inbound contact request is awaiting user approval (`PendingApproval`).
+  - Supports retrieval by `(RecipientIdentityId, SenderIdentityId)` and atomic deletion upon handshake completion or contact rejection.
 - **`IPrivatePreKeyStore`** (`Percolator.Domain.Identities.Ports`):
   - Persists local private signed pre-keys and pools of private one-time pre-keys, supporting atomic retrieval and consumption by key ID for inbound X3DH responder handshakes.
 - **`IGroupCredentialsRepository`** (`Percolator.Domain.Security.Ports`):
@@ -346,6 +349,6 @@ Database Engine: Encrypted SQLite using SQLCipher (`SQLitePCLRaw.bundle_e_sqlcip
   - **`OutboxRetentionPruner`**: Evaluates retention window policies for `OutboxJob` rows (e.g., pruning `Delivered` jobs older than 7 days, purging dead-letter jobs that have exceeded `MaxRetryCount` and manual inspection windows).
   - **`RelayPreKeyDirectoryPruner`**: Evicts expired signed pre-key bundles and consumed or timed-out one-time pre-keys from `IRelayPreKeyDirectoryRepository` environmental records.
   - **`UnknownGroupMessageCachePruner`**: Purges buffered group chat frames from `IUnknownGroupMessageCacheRepository` that exceed maximum TTL (e.g. 48 hours) where the author's sender key distribution was never received.
-  - **`AbandonedInvitePruner`**: Scans inbound contact requests (`PeerContactState.PendingApproval`) and group invitations (`PendingGroupInvitation`) exceeding local expiration policies (e.g. 14 days without user response) and marks or purges them.
+  - **`AbandonedInvitePruner`**: Scans inbound contact requests (`PeerContactState.PendingApproval`), pending handshake envelopes in `IPendingHandshakeRepository`, and group invitations (`PendingGroupInvitation`) exceeding local expiration policies (e.g. 14 days without user response) and marks or purges them.
   - **`RendezvousTicketPruner`**: Scans DHT presence announcements in `Apps.Discovery` past `ExpiresAtUtc` and evicts expired routing entries.
 - **Design Invariant**: Background pruners execute as scheduled `IHostedService` cron workers utilizing batch deletion with SQLite `LIMIT` clauses to avoid long-lived database write locks.
