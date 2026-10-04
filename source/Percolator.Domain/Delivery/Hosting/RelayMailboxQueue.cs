@@ -41,6 +41,13 @@ public sealed class RelayMailboxQueue : AggregateRoot<QueueId>
                 "Cannot enqueue an envelope that has already expired."));
         }
 
+        if (envelope.Ciphertext.Length > effectivePolicy.MaxEnvelopeSizeBytes)
+        {
+            return DomainResult.Failure(new DomainError(
+                "ENVELOPE_TOO_LARGE",
+                $"Envelope ciphertext size of {envelope.Ciphertext.Length} bytes exceeds maximum allowed limit of {effectivePolicy.MaxEnvelopeSizeBytes} bytes."));
+        }
+
         if (!_authorizedTokens.TryGetValue(envelope.RecipientToken, out var authorizedToken) || authorizedToken != presentedToken)
         {
             return DomainResult.Failure(new DomainError(

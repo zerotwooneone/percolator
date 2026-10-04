@@ -78,6 +78,29 @@ public class RelayMailboxQueueTests
     }
 
     [Test]
+    public void Enqueue_WhenEnvelopeExceedsMaxSize_ReturnsEnvelopeTooLargeError()
+    {
+        var smallSizePolicy = new PurgePolicy(
+            DefaultTtl: TimeSpan.FromDays(1),
+            MaxRetainedEnvelopes: 100,
+            MaxEnvelopeSizeBytes: 50);
+
+        var oversizedPayload = new byte[51];
+        var envelope = new MailboxEnvelope(
+            EnvelopeId.New(),
+            _recipientToken,
+            oversizedPayload,
+            _timeProvider.UtcNow,
+            _timeProvider.UtcNow.AddDays(1));
+
+        var result = _queue.Enqueue(envelope, _deliveryToken, _timeProvider, smallSizePolicy);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("ENVELOPE_TOO_LARGE");
+        _queue.TotalCount.Should().Be(0);
+    }
+
+    [Test]
     public void Enqueue_WhenQuotaExceeded_ReturnsQuotaExceededError()
     {
         var tightPolicy = new PurgePolicy(DefaultTtl: TimeSpan.FromDays(1), MaxRetainedEnvelopes: 1);

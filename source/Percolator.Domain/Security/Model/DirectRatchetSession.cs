@@ -412,12 +412,12 @@ public sealed class DirectRatchetSession : AggregateRoot<SessionId>, ISensitiveS
 
     private void StoreSkippedKey(uint counter, MessageKey key)
     {
-        if (_skippedMessageKeys.Count >= MaxTotalSkippedKeys)
+        while (_skippedMessageKeys.Count >= MaxTotalSkippedKeys && _skippedKeyOrder.TryDequeue(out var oldestCounter))
         {
-            var oldestCounter = _skippedKeyOrder.Dequeue();
             if (_skippedMessageKeys.Remove(oldestCounter, out var evictedKey))
             {
                 evictedKey.Dispose();
+                break;
             }
         }
 

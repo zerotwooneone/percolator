@@ -175,6 +175,11 @@ public sealed class PeerContact : AggregateRoot<PublicIdentityId>
         PrimaryPublicKey = newKey;
         // Signal protocol: When an identity key changes, safety number changes -> trust drops to Untrusted.
         TrustLevel = PeerTrustLevel.Untrusted;
+
+        // Security: Secondary devices linked against the old primary key are invalidated until fresh link proofs are verified.
+        _registeredDevices.Clear();
+        _registeredDevices.Add(DeviceId.Primary);
+
         return DomainResult.Success();
     }
 

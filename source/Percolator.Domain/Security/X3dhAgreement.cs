@@ -52,13 +52,13 @@ public static class X3dhAgreement
 
         // 3. Compute Diffie-Hellman shared secrets:
         // DH1 = DH(IK_A, SPK_B)
-        var dh1 = cryptoEngine.ComputeDiffieHellman(initiatorIdentityPrivateKey, remoteBundle.SignedPreKey.Span);
+        using var dh1 = cryptoEngine.ComputeDiffieHellman(initiatorIdentityPrivateKey, remoteBundle.SignedPreKey.Span);
 
         // DH2 = DH(EK_A, IK_B)
-        var dh2 = cryptoEngine.ComputeDiffieHellman(ephemeralPrivateKey.Span, remoteBundle.IdentityKey.Span);
+        using var dh2 = cryptoEngine.ComputeDiffieHellman(ephemeralPrivateKey.Span, remoteBundle.IdentityKey.Span);
 
         // DH3 = DH(EK_A, SPK_B)
-        var dh3 = cryptoEngine.ComputeDiffieHellman(ephemeralPrivateKey.Span, remoteBundle.SignedPreKey.Span);
+        using var dh3 = cryptoEngine.ComputeDiffieHellman(ephemeralPrivateKey.Span, remoteBundle.SignedPreKey.Span);
 
         // DH4 = DH(EK_A, OPK_B) [optional]
         SharedSecret? dh4 = null;
@@ -69,6 +69,7 @@ public static class X3dhAgreement
             opkIdUsed = remoteBundle.OneTimePreKeyId;
         }
 
+        using var dh4Disposable = dh4;
         ReadOnlySpan<byte> dh4Span = dh4 != null ? dh4.Span : default;
 
         // 4. Derive master shared secret
@@ -103,13 +104,13 @@ public static class X3dhAgreement
         }
 
         // DH1 = DH(SPK_B, IK_A)
-        var dh1 = cryptoEngine.ComputeDiffieHellman(receiverSignedPreKeyPrivateKey, initiatorIdentityKey.Span);
+        using var dh1 = cryptoEngine.ComputeDiffieHellman(receiverSignedPreKeyPrivateKey, initiatorIdentityKey.Span);
 
         // DH2 = DH(IK_B, EK_A)
-        var dh2 = cryptoEngine.ComputeDiffieHellman(receiverIdentityPrivateKey, initiatorEphemeralKey.Span);
+        using var dh2 = cryptoEngine.ComputeDiffieHellman(receiverIdentityPrivateKey, initiatorEphemeralKey.Span);
 
         // DH3 = DH(SPK_B, EK_A)
-        var dh3 = cryptoEngine.ComputeDiffieHellman(receiverSignedPreKeyPrivateKey, initiatorEphemeralKey.Span);
+        using var dh3 = cryptoEngine.ComputeDiffieHellman(receiverSignedPreKeyPrivateKey, initiatorEphemeralKey.Span);
 
         // DH4 = DH(OPK_B, EK_A) [optional]
         SharedSecret? dh4 = null;
@@ -118,6 +119,7 @@ public static class X3dhAgreement
             dh4 = cryptoEngine.ComputeDiffieHellman(receiverOneTimePreKeyPrivateKeyOrEmpty, initiatorEphemeralKey.Span);
         }
 
+        using var dh4Disposable = dh4;
         ReadOnlySpan<byte> dh4Span = dh4 != null ? dh4.Span : default;
 
         var masterSecret = cryptoEngine.DeriveX3dhMasterSecret(

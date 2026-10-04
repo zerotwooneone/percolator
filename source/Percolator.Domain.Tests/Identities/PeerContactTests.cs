@@ -230,4 +230,20 @@ public class PeerContactTests
         approveResult.IsFailure.Should().BeTrue();
         approveResult.Error.Code.Should().Be("CONTACT_BLOCKED");
     }
+
+    [Test]
+    public void RotatePrimaryPublicKey_WhenRotated_ResetsRegisteredDevicesToPrimary()
+    {
+        var secondaryId = new DeviceId(2);
+        _contact.RegisterSecondaryDevice(secondaryId, _secondaryDeviceKey, _dummyProof, _primaryPeerKey, _cryptoEngine);
+        _contact.RegisteredDevices.Should().Contain(secondaryId);
+
+        var newPrimaryKey = IdentityKey.FromSpan(Enumerable.Repeat((byte)0xEE, 32).ToArray());
+        var rotateResult = _contact.RotatePrimaryPublicKey(newPrimaryKey);
+
+        rotateResult.IsSuccess.Should().BeTrue();
+        _contact.PrimaryPublicKey.Should().Be(newPrimaryKey);
+        _contact.TrustLevel.Should().Be(PeerTrustLevel.Untrusted);
+        _contact.RegisteredDevices.Should().ContainSingle().Which.Should().Be(DeviceId.Primary);
+    }
 }
