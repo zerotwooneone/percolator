@@ -18,13 +18,23 @@ public sealed class DirectRatchetSession : AggregateRoot<SessionId>, ISensitiveS
     public DeviceId RemoteDeviceId { get; }
 
     private ChainKey? _rootKey;
+    public ChainKey? RootKey => _rootKey;
+
     private EphemeralPrivateKey? _localEphemeralPrivateKey;
+    public EphemeralPrivateKey? LocalEphemeralPrivateKey => _localEphemeralPrivateKey;
+
     public DhPublicKey? LocalEphemeralPublicKey { get; private set; }
     public DhPublicKey? RemoteEphemeralPublicKey { get; private set; }
 
     private ChainKey? _sendingChainKey;
+    public ChainKey? SendingChainKey => _sendingChainKey;
+
     private ChainKey? _receivingChainKey;
+    public ChainKey? ReceivingChainKey => _receivingChainKey;
+
     private readonly Dictionary<uint, MessageKey> _skippedMessageKeys = [];
+    public IReadOnlyDictionary<uint, MessageKey> SkippedMessageKeys => _skippedMessageKeys;
+
     private readonly Queue<uint> _skippedKeyOrder = new();
 
     public uint SendingCounter { get; private set; }
@@ -45,7 +55,8 @@ public sealed class DirectRatchetSession : AggregateRoot<SessionId>, ISensitiveS
         DhPublicKey? localEphemeralPublicKey = null,
         uint sendingCounter = 0,
         uint receivingCounter = 0,
-        SessionId? sessionId = null)
+        SessionId? sessionId = null,
+        IEnumerable<KeyValuePair<uint, MessageKey>>? skippedKeys = null)
     {
         Id = sessionId ?? SessionId.New();
         OwnerIdentityId = ownerIdentityId;
@@ -61,6 +72,14 @@ public sealed class DirectRatchetSession : AggregateRoot<SessionId>, ISensitiveS
         RemoteEphemeralPublicKey = remoteEphemeralPublicKey;
         SendingCounter = sendingCounter;
         ReceivingCounter = receivingCounter;
+
+        if (skippedKeys != null)
+        {
+            foreach (var kvp in skippedKeys)
+            {
+                StoreSkippedKey(kvp.Key, MessageKey.FromSpan(kvp.Value.Span));
+            }
+        }
     }
 
     /// <summary>
