@@ -57,22 +57,24 @@ public sealed record InboundHandshakeEnvelope(
     PublicIdentityId RecipientIdentityId,
     PublicIdentityId SenderIdentityId,
     DeviceId SenderDeviceId,
+    IdentityKey SenderIdentityKey,
     DhPublicKey SenderEphemeralKey,
-    PreKeyId SignedPreKeyId,
-    PreKeyId? OneTimePreKeyId,
+    uint SignedPreKeyId,
+    uint? OneTimePreKeyId,
     ReadOnlyMemory<byte> EncryptedPayload,
     DateTimeOffset ReceivedAtUtc)
-    : InboundEnvelope(ChannelId.Empty, RecipientIdentityId, SenderIdentityId, SenderDeviceId, ReceivedAtUtc);
+    : InboundEnvelope(new ChannelId(), RecipientIdentityId, SenderIdentityId, SenderDeviceId, ReceivedAtUtc);
 ```
 
 #### Pipeline Phases:
 1. **Size & Sanity Validation**: Rejects payloads exceeding maximum allowed size (`MaxPayloadBytes = 64 KB`).
 2. **Ingress Filtering**: Invokes `IIngressFilterService.CheckIngressAllowedAsync` (rate limiting, blocked peer checks, dormancy state).
-3. **Cryptographic Processing by Envelope Type**:
+3. **Ratchet Concurrency Lock**: Acquires scoped channel/session synchronization via `IChannelLockService` to prevent concurrent ratchet modifications.
+4. **Cryptographic Processing by Envelope Type**:
    - **`InboundHandshakeEnvelope`**: Delegated to `IHandshakeService.ReceiveInvitationAsync`.
    - **`InboundDirectEnvelope`**:
      - Fetches active session from `IRatchetSessionRepository`.
-     - **DH Ratchet Advancement**: If `session.RemoteEphemeralPublicKey != envelope.Header.RatchetKey`, advances ratchet via `session.StepDhRatchet(envelope.Header.RatchetKey, _cryptoEngine)`.
+     - **DH Ratchet Advancement**: If `session.RemoteEphemeralPublicKey != envelope.Header.EphemeralPublicKey`, advances ratchet via `session.StepDhRatchet(envelope.Header.EphemeralPublicKey, _cryptoEngine)`.
      - Steps receiving chain: `session.StepReceivingChain(_cryptoEngine, envelope.Header.Counter)`.
      - Decrypts ciphertext via `_cryptoEngine.DecryptAesGcm` using derived message key, `envelope.Nonce`, and header bytes as associated data.
      - Persists advanced session to `IRatchetSessionRepository`.
@@ -82,10 +84,11 @@ public sealed record InboundHandshakeEnvelope(
      - Decrypts ciphertext via `_cryptoEngine.DecryptAesGcm`.
      - Verifies author signature: `receiverSession.VerifyAuthorSignature(envelope.Ciphertext, envelope.Signature, _cryptoEngine)`.
      - Persists advanced receiver session to `IGroupReceiverSessionRepository`.
-4. **AppRouter Direct Jump**:
+5. **AppRouter Direct Jump**:
    - Reads `AppId` from byte 0 of decrypted inner plaintext (`[0] = AppId, [1..] = Payload`).
-   - Resolves handler via `_appRouter.Resolve(appId)` and dispatches `InboundPayloadContext`.
-5. **Post-Action Cleanup**: Deterministically zeroizes decrypted plaintext memory.
+   - If `AppId` corresponds to internal system messages (e.g. `AppId.System` for Sender Key Distribution), routes to internal system coordinators.
+   - Otherwise, resolves handler via `_appRouter.Resolve(appId)` and dispatches `InboundPayloadContext`.
+6. **Deterministic Plaintext Zeroization**: Plaintext memory buffer is zeroized (`Array.Clear` / pooled buffer return) in a `finally` block before returning.
 
 ---
 
@@ -93,8 +96,9 @@ public sealed record InboundHandshakeEnvelope(
 Accepts an `OutboundPayloadContext` from plugins via `PluginSdk`:
 
 #### Pipeline Phases:
-1. **Inner Payload Packing**: Encapsulates `[AppId] + [Payload]`.
-2. **Cryptographic Ratchet Stepping & Encryption**:
+1. **Ratchet Concurrency Lock**: Acquires scoped channel lock via `IChannelLockService` to prevent concurrent sends on the same session from interleaving ratchet keys.
+2. **Inner Payload Packing**: Encapsulates `[AppId] + [Payload]`.
+3. **Cryptographic Ratchet Stepping & Encryption**:
    - **Pairwise 1:1 (`context.RecipientIdentityId.HasValue`)**:
      - Fetches session from `IRatchetSessionRepository`.
      - Advances sending chain: `session.StepSendingChain(_cryptoEngine)` $\rightarrow$ yields counter, message key, ephemeral public key.
@@ -109,9 +113,9 @@ Accepts an `OutboundPayloadContext` from plugins via `PluginSdk`:
      - Signs ciphertext: `ratchet.SignPayload(ciphertext, _cryptoEngine)` $\rightarrow$ generates Ed25519 author signature.
      - Invokes `ISessionWirePacker.PackGroupMessage(channelId, iteration, signature, ciphertext)` $\rightarrow$ serializes to self-contained wire bytes.
      - Persists advanced ratchet to `IGroupSenderKeyRepository`.
-3. **Route Resolution**: Resolves `DeliveryRoute` (`DirectP2P`, `RelayedOneToOne`, or `RelayedGroup`).
-4. **Always Outbox First**: Creates `OutboxJob` with the packed wire bytes and saves to `IOutboxRepository`.
-5. **Direct Stream Fast-Path**: If direct stream is active in `IStreamRegistry`, attempts immediate non-blocking dispatch; otherwise leaves job pending for `OutboxWorker`.
+4. **Route Resolution**: Resolves `DeliveryRoute` (`DirectP2P`, `RelayedOneToOne`, or `RelayedGroup`).
+5. **Always Outbox First**: Creates `OutboxJob` with the packed wire bytes and saves to `IOutboxRepository`.
+6. **Direct Stream Fast-Path**: If direct stream is active in `IStreamRegistry`, attempts immediate non-blocking dispatch; otherwise leaves job pending for `OutboxWorker`.
 
 ---
 
@@ -128,58 +132,105 @@ Encapsulates X3DH key agreement and user consent workflows:
    - Persists handshake outbox job to `IOutboxRepository`.
 
 2. **`ReceiveInvitationAsync` (Inbound)**:
+   - **Replay / DoS Filter**: Checks `IHandshakeReplayFilter` against `envelope.SenderEphemeralKey` to discard replayed handshake frames before computing expensive Curve25519 scalar multiplications.
    - Inspects `PeerContact` state via `IPeerContactRepository`:
      - **If Blocked**: silently drops invitation.
-     - **If Untrusted / Not Found**: delegates to `IContactRequestCoordinator.HandleInboundRequestAsync(...)`, recording `ContactState.PendingApproval`. Defers cryptographic session derivation until user consent/approval.
+     - **If Untrusted / Not Found**: delegates to `IContactRequestCoordinator.HandleInboundRequestAsync(...)`, recording `ContactState.PendingApproval`.
+       - If `envelope.EncryptedPayload` is non-empty, saves the raw handshake envelope to `IPendingHandshakeRepository` so the greeting message is preserved across user approval.
      - **If Active (`Tofu` or `Verified`)**:
-       - Looks up signed prekey and atomically consumes OPK from `IPrivatePreKeyStore`.
-       - Computes `X3dhAgreement.Receive(...)` to derive master shared secret.
-       - Instantiates inbound `DirectRatchetSession.CreateFromX3dhResponder(...)`.
-       - Saves session to `IRatchetSessionRepository`.
-       - If piggybacked initial message is present: steps receiving chain at counter 0, decrypts, and dispatches to `_appRouter`.
+       - Executes `DeriveSessionAndDispatchMessageAsync(...)`:
+         - Looks up signed prekey and atomically consumes OPK from `IPrivatePreKeyStore`.
+         - Computes `X3dhAgreement.Receive(...)` to derive master shared secret.
+         - Instantiates inbound `DirectRatchetSession.CreateFromX3dhResponder(...)`.
+         - Saves session to `IRatchetSessionRepository`.
+         - If piggybacked initial message is present: steps receiving chain at counter 0, decrypts, and dispatches to `_appRouter`.
+
+3. **`CompletePendingHandshakeAsync` (Approval Hook)**:
+   - Invoked when user approves contact (`ContactRequestCoordinator.ApproveRequestAsync`).
+   - Retrieves stored envelope from `IPendingHandshakeRepository`.
+   - Executes session derivation, decrypts the deferred initial greeting message, and removes envelope from pending store.
 
 ---
 
-## 4. Required Ports in `Percolator.Application2/Ports`
+## 4. Key Microkernel Architecture Enhancements
 
-1. **Session Repositories (Domain Aggregates)**:
-   - `IRatchetSessionRepository`:
-     - `Task<DirectRatchetSession?> GetSessionAsync(PublicIdentityId ownerId, PublicIdentityId remotePeerId, DeviceId remoteDeviceId, CancellationToken ct = default);`
-     - `Task SaveSessionAsync(DirectRatchetSession session, CancellationToken ct = default);`
-   - `IGroupReceiverSessionRepository`:
-     - `Task<GroupReceiverSession?> GetReceiverSessionAsync(ChannelId channelId, PublicIdentityId authorId, DeviceId authorDeviceId, CancellationToken ct = default);`
-     - `Task SaveReceiverSessionAsync(GroupReceiverSession session, CancellationToken ct = default);`
-   - `IGroupSenderKeyRepository`:
-     - `Task<GroupSenderKeyRatchet?> GetSenderKeyRatchetAsync(ChannelId channelId, PublicIdentityId authorId, DeviceId authorDeviceId, CancellationToken ct = default);`
-     - `Task SaveSenderKeyRatchetAsync(GroupSenderKeyRatchet ratchet, CancellationToken ct = default);`
+### 4.1 In-Process Channel/Session Synchronization (`IChannelLockService`)
+- Ratchets are sequential state machines where concurrent operations lead to race conditions, key desynchronization, and corrupted sessions.
+- `IChannelLockService` provides scoped asynchronous keyed locking (`AsyncKeyedLock<ChannelId>`) ensuring that only one outbound or inbound pipeline thread steps a given channel or session at any instant.
+- **Design & Testability**:
+  - Defined as an interface in `Percolator.Application2.Ports`.
+  - Default implementation: `KeyedSemaphoreLockService` in `Application2`.
+  - Test double: `NoOpChannelLockService` in `Percolator.Application2.Tests`, ensuring unit tests never deadlock on concurrent locks.
 
-2. **Read-Only Fast-Path Query Ports (Bypassing Domain Aggregates)**:
-   - `IOutboxQueryService` (`Percolator.Application2.Delivery.Ports`):
-     - `Task<IReadOnlyList<OutboxJobSummaryReadModel>> GetPendingJobsAsync(int limit = 50, CancellationToken ct = default);`
-     - `Task<IReadOnlyList<OutboxJobSummaryReadModel>> GetFailedJobsAsync(int limit = 50, CancellationToken ct = default);`
-     - `Task<OutboxJobSummaryReadModel?> GetJobSummaryByIdAsync(Guid jobId, CancellationToken ct = default);`
-     - Returns lightweight DTOs without loading opaque encrypted payload buffers or event lists into memory.
-   - `IPeerContactQueryService` (`Percolator.Application2.Ports`):
-     - `Task<IReadOnlyList<PeerContactSummaryReadModel>> GetContactSummariesAsync(PublicIdentityId ownerId, CancellationToken ct = default);`
-     - `Task<PeerContactDetailReadModel?> GetContactDetailAsync(PublicIdentityId ownerId, PublicIdentityId contactId, CancellationToken ct = default);`
-     - Returns read-only contact book records for the UI without hydrating private keys or device link proofs.
+### 4.2 Handshake Ephemeral Key Cache (`IHandshakeReplayFilter`)
+- Prevents CPU-exhaustion denial-of-service attacks by maintaining an in-memory bounded LRU / sliding window cache of recently observed `SenderEphemeralKey` public keys.
+- Duplicate or replayed handshake frames are rejected immediately before consuming private prekeys or performing Diffie-Hellman scalar operations.
+- **Design & Testability**:
+  - Defined as an interface in `Percolator.Application2.Ports`.
+  - Default implementation: `MemoryHandshakeReplayFilter` in `Application2`.
+  - Test double: `FakeHandshakeReplayFilter` in `Percolator.Application2.Tests`.
 
-3. **Wire Packaging & Serialization Port**:
-   - `ISessionWirePacker`:
-     ```csharp
-     public interface ISessionWirePacker
-     {
-         ReadOnlyMemory<byte> PackDirectRatchetMessage(RatchetHeader header, ReadOnlyMemory<byte> nonce, ReadOnlyMemory<byte> ciphertext);
-         ReadOnlyMemory<byte> PackGroupMessage(ChannelId channelId, uint iteration, ReadOnlyMemory<byte> signature, ReadOnlyMemory<byte> ciphertext);
-         DomainResult<InboundDirectEnvelope> UnpackDirectRatchetMessage(ChannelId channelId, PublicIdentityId recipientId, PublicIdentityId senderId, DeviceId senderDeviceId, ReadOnlyMemory<byte> wireBytes, DateTimeOffset receivedAtUtc);
-         DomainResult<InboundGroupEnvelope> UnpackGroupMessage(ChannelId channelId, PublicIdentityId recipientId, PublicIdentityId authorId, DeviceId authorDeviceId, ReadOnlyMemory<byte> wireBytes, DateTimeOffset receivedAtUtc);
-     }
-     ```
+### 4.3 Pending Handshake Repository (`IPendingHandshakeRepository`)
+- Retains initial piggybacked greeting payloads during the `PendingApproval` contact phase.
+- Once user consent is granted, the handshake derivation completes cleanly and dispatches the initial message without loss.
+- **Design & Testability**:
+  - True Infrastructure Port in `Percolator.Application2.Ports`.
+  - Implemented in `Percolator.Infrastructure2` backed by SQLite/EF Core.
 
-4. **Services & Infrastructure Ports**:
-   - `IHandshakeService`
-   - `IIngressFilterService`
+### 4.4 Group Sender Key Distribution Workflow (`IGroupKeyDistributionService`)
+- **Signal Sender Keys Architecture**:
+  - In a group channel, broadcast messages are encrypted with the author's local `GroupSenderKeyRatchet`.
+  - In order for other group members to decrypt these messages, the author must distribute their sender key material (Chain Key + iteration + Ed25519 signing public key) to all group members **via pairwise 1:1 Double Ratchet channels**.
+- **Orchestration**:
+  - `IGroupKeyDistributionService`:
+    ```csharp
+    public interface IGroupKeyDistributionService
+    {
+        ValueTask<DomainResult> DistributeSenderKeyAsync(
+            ChannelId channelId,
+            PublicIdentityId senderId,
+            IEnumerable<PublicIdentityId> recipientMemberIds,
+            CancellationToken ct = default);
+    }
+    ```
+  - Packages the sender key distribution message and sends it pairwise via `IPayloadSender.SendPayloadAsync(...)` with `AppId.System`.
+  - On the receiving side, `InboundIngressPipeline` processes the incoming system message and imports the sender key into `IGroupReceiverSessionRepository`.
+
+### 4.5 Plaintext Zeroization & Memory Pooling
+- Protects against memory inspection and reduces GC churn for large payload traffic (such as 64 KB file chunks).
+- Decrypted plaintexts are cleared from memory immediately upon dispatch completion in `finally` blocks.
+
+---
+
+## 5. Port & Service Organization
+
+### 5.1 Infrastructure Ports (Implemented in `Percolator.Infrastructure2`)
+These ports represent durable persistence, network wire packaging, and transport listeners:
+1. **Domain Session Repositories**:
+   - `IRatchetSessionRepository`
+   - `IGroupReceiverSessionRepository`
+   - `IGroupSenderKeyRepository`
+   - `IPendingHandshakeRepository`
+2. **Read-Only Fast-Path Query Ports (CQRS)**:
+   - `IOutboxQueryService` (`Percolator.Application2.Delivery.Ports`): Flat `OutboxJobSummaryReadModel` reads.
+   - `IPeerContactQueryService` (`Percolator.Application2.Ports`): Flat `PeerContactSummaryReadModel` / `PeerContactDetailReadModel` reads.
+3. **Wire Packaging & Transport Serialization**:
+   - `ISessionWirePacker`: Cryptographic wire frame packing and unpacking.
+   - `ISealedEnvelopeUnwrapper`: Unwraps sealed mailbox envelopes to typed inbound envelopes.
+4. **Environmental Stores & Sockets**:
+   - `ILocalIdentityKeyStore`
+   - `IPrivatePreKeyStore`
    - `IStreamRegistry`
    - `IOutboxRepository`
    - `ITransportDispatcher`
-   - `ISealedEnvelopeUnwrapper` (bridges relay `MailboxEnvelope` to `InboundEnvelope`)
+   - `IIngressFilterService`
+
+### 5.2 Application-Internal Services & In-Library Defaults (Defined in `Percolator.Application2`)
+These interfaces govern in-process orchestration and concurrency, providing in-library default implementations while remaining mockable for tests:
+1. **`IChannelLockService`**: In-process asynchronous keyed locking (`KeyedSemaphoreLockService`).
+2. **`IHandshakeReplayFilter`**: In-process ephemeral key sliding cache (`MemoryHandshakeReplayFilter`).
+3. **`IGroupKeyDistributionService`**: Coordinates Signal Sender Key distribution across group members.
+4. **`IHandshakeService`**: Orchestrates X3DH key agreement and pending contact hooks.
+5. **`IInboundIngressPipeline`**: Orchestrates ingress size validation, filtering, decryption, and dispatch.
+6. **`IPayloadSender` (`OutboundEgressPipeline`)**: Orchestrates outbound payload packing, ratcheting, wire framing, and outbox persistence.
+7. **`IAppRouter`**: Microkernel registry and $O(1)$ constant-time payload dispatcher.
