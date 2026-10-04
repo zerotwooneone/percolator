@@ -1,9 +1,11 @@
+using System.Security.Cryptography;
 using Percolator.Application2.Delivery;
 using Percolator.Application2.Delivery.Ports;
-using Percolator.Application2.Ingress;
 using Percolator.Application2.Ports;
 using Percolator.Domain.Common;
+using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Ports;
+using Percolator.Domain.Security.ValueObjects;
 using Percolator.PluginSdk;
 using PluginRoute = Percolator.PluginSdk.DeliveryRoute;
 
@@ -12,6 +14,8 @@ namespace Percolator.Application2.Egress;
 public sealed class OutboundEgressPipeline : IPayloadSender
 {
     private readonly IRatchetSessionRepository _sessionRepo;
+    private readonly IGroupSenderKeyRepository _groupSenderKeyRepo;
+    private readonly ISessionWirePacker _sessionWirePacker;
     private readonly ICryptoEngine _cryptoEngine;
     private readonly IOutboxRepository _outboxRepo;
     private readonly IStreamRegistry _streamRegistry;
@@ -19,12 +23,16 @@ public sealed class OutboundEgressPipeline : IPayloadSender
 
     public OutboundEgressPipeline(
         IRatchetSessionRepository sessionRepo,
+        IGroupSenderKeyRepository groupSenderKeyRepo,
+        ISessionWirePacker sessionWirePacker,
         ICryptoEngine cryptoEngine,
         IOutboxRepository outboxRepo,
         IStreamRegistry streamRegistry,
         IDateTimeProvider timeProvider)
     {
         _sessionRepo = sessionRepo ?? throw new ArgumentNullException(nameof(sessionRepo));
+        _groupSenderKeyRepo = groupSenderKeyRepo ?? throw new ArgumentNullException(nameof(groupSenderKeyRepo));
+        _sessionWirePacker = sessionWirePacker ?? throw new ArgumentNullException(nameof(sessionWirePacker));
         _cryptoEngine = cryptoEngine ?? throw new ArgumentNullException(nameof(cryptoEngine));
         _outboxRepo = outboxRepo ?? throw new ArgumentNullException(nameof(outboxRepo));
         _streamRegistry = streamRegistry ?? throw new ArgumentNullException(nameof(streamRegistry));
@@ -34,13 +42,13 @@ public sealed class OutboundEgressPipeline : IPayloadSender
     public async ValueTask<DomainResult> SendPayloadAsync(OutboundPayloadContext context, CancellationToken ct = default)
     {
         // -------------------------------------------------------------
-        // Phase 1: Payload Pack (Inner wire structure: [AppId] + [Payload])
+        // Phase 1: Payload Pack (Inner structure: [AppId] + [Payload])
         // -------------------------------------------------------------
         byte[] innerPlaintext = new byte[1 + context.Payload.Length];
         innerPlaintext[0] = context.AppId.Value;
         context.Payload.Span.CopyTo(innerPlaintext.AsSpan(1));
 
-        byte[] framedPayload;
+        ReadOnlyMemory<byte> packedWireBytes;
 
         // -------------------------------------------------------------
         // Phase 2: Crypto Ratchet Step & AD Construction
@@ -63,37 +71,57 @@ public sealed class OutboundEgressPipeline : IPayloadSender
                 return DomainResult.Failure(stepResult.Error!);
             }
 
-            var stepVal = stepResult.Value;
-            var msgCounter = stepVal.MessageCounter;
-            var msgKey = stepVal.Key;
-            var localEphemeralKey = stepVal.EphemeralPublicKey;
-
-            var header = new RatchetWireFrame(
+            var (msgCounter, msgKey, localEphemeralKey) = stepResult.Value;
+            var header = new RatchetHeader(
                 localEphemeralKey ?? session.LocalEphemeralPublicKey!,
                 msgCounter,
                 session.PreviousSendingChainLength);
 
-            byte[] headerBytes = new byte[RatchetWireFrame.HeaderSize];
-            header.WriteTo(headerBytes);
+            byte[] nonce = new byte[12];
+            RandomNumberGenerator.Fill(nonce);
 
-            byte[] nonce = new byte[InboundIngressPipeline.NonceSize];
-            nonce[0] = (byte)(msgCounter & 0xFF);
-            nonce[1] = (byte)((msgCounter >> 8) & 0xFF);
-
-            byte[] ciphertext = _cryptoEngine.EncryptAesGcm(msgKey.Span, nonce, innerPlaintext, headerBytes);
+            byte[] ciphertext = _cryptoEngine.EncryptAesGcm(msgKey.Span, nonce, innerPlaintext, header.EphemeralPublicKey.Span);
             msgKey.Dispose();
 
             await _sessionRepo.SaveSessionAsync(session, ct);
 
-            framedPayload = new byte[headerBytes.Length + nonce.Length + ciphertext.Length];
-            Buffer.BlockCopy(headerBytes, 0, framedPayload, 0, headerBytes.Length);
-            Buffer.BlockCopy(nonce, 0, framedPayload, headerBytes.Length, nonce.Length);
-            Buffer.BlockCopy(ciphertext, 0, framedPayload, headerBytes.Length + nonce.Length, ciphertext.Length);
+            packedWireBytes = _sessionWirePacker.PackDirectRatchetMessage(header, nonce, ciphertext);
         }
         else
         {
-            // Group broadcast (single framed envelope)
-            framedPayload = innerPlaintext;
+            // Group broadcast
+            var ratchet = await _groupSenderKeyRepo.GetSenderKeyRatchetAsync(
+                context.ChannelId, context.SenderIdentityId, DeviceId.Primary, ct);
+
+            if (ratchet == null)
+            {
+                return DomainResult.Failure(new DomainError(
+                    "SENDER_KEY_RATCHET_NOT_FOUND", "No active group sender key ratchet exists for channel."));
+            }
+
+            var advanceResult = ratchet.Advance(_cryptoEngine);
+            if (!advanceResult.IsSuccess)
+            {
+                return DomainResult.Failure(advanceResult.Error!);
+            }
+
+            var (iteration, msgKey) = advanceResult.Value;
+            byte[] nonce = new byte[12];
+            RandomNumberGenerator.Fill(nonce);
+
+            byte[] ciphertext = _cryptoEngine.EncryptAesGcm(msgKey.Span, nonce, innerPlaintext, ReadOnlySpan<byte>.Empty);
+            msgKey.Dispose();
+
+            var signResult = ratchet.SignPayload(ciphertext, _cryptoEngine);
+            if (!signResult.IsSuccess)
+            {
+                return DomainResult.Failure(signResult.Error!);
+            }
+
+            var signature = signResult.Value!;
+            await _groupSenderKeyRepo.SaveSenderKeyRatchetAsync(ratchet, ct);
+
+            packedWireBytes = _sessionWirePacker.PackGroupMessage(context.ChannelId, iteration, signature, ciphertext);
         }
 
         // -------------------------------------------------------------
@@ -116,7 +144,7 @@ public sealed class OutboundEgressPipeline : IPayloadSender
             context.SenderIdentityId,
             context.RecipientIdentityId,
             route,
-            framedPayload,
+            packedWireBytes,
             _timeProvider);
 
         if (!jobResult.IsSuccess)
@@ -133,7 +161,7 @@ public sealed class OutboundEgressPipeline : IPayloadSender
         if (context.RecipientIdentityId.HasValue && _streamRegistry.HasActiveStream(context.RecipientIdentityId.Value))
         {
             var streamWriteResult = await _streamRegistry.TryWriteAsync(
-                context.RecipientIdentityId.Value, framedPayload, ct);
+                context.RecipientIdentityId.Value, packedWireBytes, ct);
 
             if (streamWriteResult.IsSuccess)
             {

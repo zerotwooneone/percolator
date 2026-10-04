@@ -94,7 +94,12 @@ public sealed class ApplicationTestCryptoEngine : ICryptoEngine
     {
         // Simple mock encryption: tag (16 bytes) + plaintext
         var result = new byte[16 + plaintext.Length];
-        associatedData[..Math.Min(16, associatedData.Length)].CopyTo(result.AsSpan(0, 16));
+        var tag = result.AsSpan(0, 16);
+        tag.Fill(0xAA);
+        if (!associatedData.IsEmpty)
+        {
+            associatedData[..Math.Min(16, associatedData.Length)].CopyTo(tag);
+        }
         plaintext.CopyTo(result.AsSpan(16));
         return result;
     }
@@ -109,6 +114,18 @@ public sealed class ApplicationTestCryptoEngine : ICryptoEngine
         if (ciphertext.Length < 16)
         {
             throw new CryptographicException("Ciphertext too short.");
+        }
+
+        Span<byte> expectedTag = stackalloc byte[16];
+        expectedTag.Fill(0xAA);
+        if (!associatedData.IsEmpty)
+        {
+            associatedData[..Math.Min(16, associatedData.Length)].CopyTo(expectedTag);
+        }
+
+        if (!ciphertext[..16].SequenceEqual(expectedTag))
+        {
+            throw new CryptographicException("Authentication tag mismatch.");
         }
 
         // Return the plaintext payload after the 16-byte tag

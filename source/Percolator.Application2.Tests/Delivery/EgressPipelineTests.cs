@@ -16,6 +16,8 @@ namespace Percolator.Application2.Tests.Delivery;
 public sealed class EgressPipelineTests
 {
     private InMemoryRatchetSessionRepository _sessionRepo = null!;
+    private InMemoryGroupSenderKeyRepository _groupSenderKeyRepo = null!;
+    private FakeSessionWirePacker _sessionWirePacker = null!;
     private ApplicationTestCryptoEngine _cryptoEngine = null!;
     private InMemoryOutboxRepository _outboxRepo = null!;
     private InMemoryStreamRegistry _streamRegistry = null!;
@@ -32,6 +34,8 @@ public sealed class EgressPipelineTests
     public void SetUp()
     {
         _sessionRepo = new InMemoryRatchetSessionRepository();
+        _groupSenderKeyRepo = new InMemoryGroupSenderKeyRepository();
+        _sessionWirePacker = new FakeSessionWirePacker();
         _cryptoEngine = new ApplicationTestCryptoEngine();
         _outboxRepo = new InMemoryOutboxRepository();
         _streamRegistry = new InMemoryStreamRegistry();
@@ -39,6 +43,8 @@ public sealed class EgressPipelineTests
 
         _egressPipeline = new OutboundEgressPipeline(
             _sessionRepo,
+            _groupSenderKeyRepo,
+            _sessionWirePacker,
             _cryptoEngine,
             _outboxRepo,
             _streamRegistry,
@@ -180,6 +186,18 @@ public sealed class EgressPipelineTests
     public async Task DispatchGroupBroadcast_DispatchesSingleFramedPayload()
     {
         // Arrange
+        using var initialChain = ChainKey.FromSpan(new byte[32]);
+        var (signingPriv, signingPub) = _cryptoEngine.GenerateEphemeralKeyPair();
+        var ratchet = new GroupSenderKeyRatchet(
+            _channelId,
+            _aliceId,
+            DeviceId.Primary,
+            initialChain,
+            signingPrivateKey: signingPriv,
+            authorSigningPublicKey: IdentityKey.FromSpan(signingPub.Span));
+
+        await _groupSenderKeyRepo.SaveSenderKeyRatchetAsync(ratchet);
+
         var context = new OutboundPayloadContext(
             _channelId,
             _aliceId,

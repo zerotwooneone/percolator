@@ -1,7 +1,11 @@
+using Percolator.Application2.Handshake;
 using Percolator.Application2.Ingress;
+using Percolator.Application2.Ports;
+using Percolator.Application2.Profiles;
 using Percolator.Application2.Tests.TestDoubles;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
+using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Model;
 using Percolator.Domain.Security.ValueObjects;
@@ -14,8 +18,16 @@ public sealed class AppHostPipelineTests
 {
     private InMemoryIngressFilterService _filterService = null!;
     private InMemoryRatchetSessionRepository _sessionRepo = null!;
+    private InMemoryGroupReceiverSessionRepository _groupReceiverRepo = null!;
+    private InMemoryLocalIdentityKeyStore _identityKeyStore = null!;
+    private InMemoryPrivatePreKeyStore _preKeyStore = null!;
+    private InMemoryPeerContactRepository _contactRepo = null!;
+    private ContactRequestCoordinator _coordinator = null!;
+    private InMemoryOutboxRepository _outboxRepo = null!;
+    private TestDateTimeProvider _timeProvider = null!;
     private ApplicationTestCryptoEngine _cryptoEngine = null!;
     private AppRouter _appRouter = null!;
+    private HandshakeService _handshakeService = null!;
     private InboundIngressPipeline _pipeline = null!;
 
     private PublicIdentityId _aliceId;
@@ -29,9 +41,34 @@ public sealed class AppHostPipelineTests
     {
         _filterService = new InMemoryIngressFilterService();
         _sessionRepo = new InMemoryRatchetSessionRepository();
+        _groupReceiverRepo = new InMemoryGroupReceiverSessionRepository();
+        _identityKeyStore = new InMemoryLocalIdentityKeyStore();
+        _preKeyStore = new InMemoryPrivatePreKeyStore();
+        _contactRepo = new InMemoryPeerContactRepository();
+        _timeProvider = new TestDateTimeProvider();
+        _coordinator = new ContactRequestCoordinator(_contactRepo, _timeProvider);
+        _outboxRepo = new InMemoryOutboxRepository();
         _cryptoEngine = new ApplicationTestCryptoEngine();
         _appRouter = new AppRouter();
-        _pipeline = new InboundIngressPipeline(_filterService, _sessionRepo, _cryptoEngine, _appRouter);
+
+        _handshakeService = new HandshakeService(
+            _identityKeyStore,
+            _preKeyStore,
+            _contactRepo,
+            _coordinator,
+            _sessionRepo,
+            _outboxRepo,
+            _cryptoEngine,
+            _timeProvider,
+            _appRouter);
+
+        _pipeline = new InboundIngressPipeline(
+            _filterService,
+            _sessionRepo,
+            _groupReceiverRepo,
+            _handshakeService,
+            _cryptoEngine,
+            _appRouter);
 
         _aliceId = PublicIdentityId.New();
         _aliceDeviceId = DeviceId.Primary;
@@ -65,34 +102,37 @@ public sealed class AppHostPipelineTests
         return (aliceSession, bobSession);
     }
 
-    private byte[] CreateWirePacket(DirectRatchetSession senderSession, AppId appId, byte[] appContent)
+    private InboundDirectEnvelope CreateDirectEnvelope(DirectRatchetSession senderSession, AppId appId, byte[] appContent)
     {
         var stepResult = senderSession.StepSendingChain(_cryptoEngine).Value;
-        var header = new RatchetWireFrame(senderSession.LocalEphemeralPublicKey!, stepResult.MessageCounter, senderSession.PreviousSendingChainLength);
+        var header = new RatchetHeader(
+            senderSession.LocalEphemeralPublicKey!,
+            stepResult.MessageCounter,
+            senderSession.PreviousSendingChainLength);
 
-        byte[] headerBytes = new byte[RatchetWireFrame.HeaderSize];
-        header.WriteTo(headerBytes);
-
-        byte[] nonce = new byte[InboundIngressPipeline.NonceSize];
+        byte[] nonce = new byte[12];
         nonce[0] = 0xAA;
 
         byte[] inner = new byte[1 + appContent.Length];
         inner[0] = appId.Value;
         Buffer.BlockCopy(appContent, 0, inner, 1, appContent.Length);
 
-        byte[] ciphertext = _cryptoEngine.EncryptAesGcm(stepResult.Key.Span, nonce, inner, headerBytes);
+        byte[] ciphertext = _cryptoEngine.EncryptAesGcm(stepResult.Key.Span, nonce, inner, header.EphemeralPublicKey.Span);
         stepResult.Key.Dispose();
 
-        byte[] wire = new byte[headerBytes.Length + nonce.Length + ciphertext.Length];
-        Buffer.BlockCopy(headerBytes, 0, wire, 0, headerBytes.Length);
-        Buffer.BlockCopy(nonce, 0, wire, headerBytes.Length, nonce.Length);
-        Buffer.BlockCopy(ciphertext, 0, wire, headerBytes.Length + nonce.Length, ciphertext.Length);
-
-        return wire;
+        return new InboundDirectEnvelope(
+            _channelId,
+            _bobId,
+            _aliceId,
+            _aliceDeviceId,
+            header,
+            nonce,
+            ciphertext,
+            DateTimeOffset.UtcNow);
     }
 
     [Test]
-    public async Task DispatchAsync_WithRegisteredPlugin_InvokesHandlerDirectly()
+    public async Task ProcessInboundAsync_DirectMessage_WithRegisteredPlugin_InvokesHandlerDirectly()
     {
         // Arrange
         var (_, bobSession) = CreateSessionPair();
@@ -103,15 +143,7 @@ public sealed class AppHostPipelineTests
         _appRouter.RegisterHandler(chatHandler);
 
         byte[] appContent = "Hello Percolator"u8.ToArray();
-        byte[] wirePacket = CreateWirePacket(aliceSessionForSending, AppId.Chat, appContent);
-
-        var envelope = new InboundWireEnvelope(
-            _channelId,
-            RecipientIdentityId: _bobId,
-            SenderIdentityId: _aliceId,
-            SenderDeviceId: _aliceDeviceId,
-            WirePayload: wirePacket,
-            ReceivedAtUtc: DateTimeOffset.UtcNow);
+        var envelope = CreateDirectEnvelope(aliceSessionForSending, AppId.Chat, appContent);
 
         // Act
         var result = await _pipeline.ProcessInboundAsync(envelope);
@@ -126,7 +158,7 @@ public sealed class AppHostPipelineTests
     }
 
     [Test]
-    public async Task DispatchAsync_WithUnregisteredAppId_ReturnsUnknownAppIdFailure()
+    public async Task ProcessInboundAsync_DirectMessage_WithUnregisteredAppId_ReturnsUnknownAppIdFailure()
     {
         // Arrange
         var (_, bobSession) = CreateSessionPair();
@@ -135,15 +167,7 @@ public sealed class AppHostPipelineTests
         var (aliceSessionForSending, _) = CreateSessionPair();
         byte[] appContent = "Unregistered App Payload"u8.ToArray();
         var unregisteredAppId = new AppId(0xFE);
-        byte[] wirePacket = CreateWirePacket(aliceSessionForSending, unregisteredAppId, appContent);
-
-        var envelope = new InboundWireEnvelope(
-            _channelId,
-            RecipientIdentityId: _bobId,
-            SenderIdentityId: _aliceId,
-            SenderDeviceId: _aliceDeviceId,
-            WirePayload: wirePacket,
-            ReceivedAtUtc: DateTimeOffset.UtcNow);
+        var envelope = CreateDirectEnvelope(aliceSessionForSending, unregisteredAppId, appContent);
 
         // Act
         var result = await _pipeline.ProcessInboundAsync(envelope);
@@ -154,17 +178,19 @@ public sealed class AppHostPipelineTests
     }
 
     [Test]
-    public async Task DispatchAsync_PayloadExceedingSizeLimit_ReturnsPayloadTooLargeError()
+    public async Task ProcessInboundAsync_PayloadExceedingSizeLimit_ReturnsPayloadTooLargeError()
     {
         // Arrange
-        byte[] oversizedWire = new byte[InboundIngressPipeline.MaxWirePayloadBytes + 1];
-        var envelope = new InboundWireEnvelope(
+        byte[] oversized = new byte[InboundIngressPipeline.MaxPayloadBytes + 1];
+        var envelope = new InboundDirectEnvelope(
             _channelId,
-            RecipientIdentityId: _bobId,
-            SenderIdentityId: _aliceId,
-            SenderDeviceId: _aliceDeviceId,
-            WirePayload: oversizedWire,
-            ReceivedAtUtc: DateTimeOffset.UtcNow);
+            _bobId,
+            _aliceId,
+            _aliceDeviceId,
+            new RatchetHeader(DhPublicKey.FromBytes(new byte[32]), 0, 0),
+            new byte[12],
+            oversized,
+            DateTimeOffset.UtcNow);
 
         // Act
         var result = await _pipeline.ProcessInboundAsync(envelope);
@@ -175,7 +201,7 @@ public sealed class AppHostPipelineTests
     }
 
     [Test]
-    public async Task DispatchAsync_SenderDisabled_AbortsInIngressFilterPhase()
+    public async Task ProcessInboundAsync_SenderDisabled_AbortsInIngressFilterPhase()
     {
         // Arrange
         _filterService.BlockIdentity(_aliceId);
@@ -184,15 +210,7 @@ public sealed class AppHostPipelineTests
         await _sessionRepo.SaveSessionAsync(bobSession);
 
         var (aliceSessionForSending, _) = CreateSessionPair();
-        byte[] wirePacket = CreateWirePacket(aliceSessionForSending, AppId.Chat, "Blocked"u8.ToArray());
-
-        var envelope = new InboundWireEnvelope(
-            _channelId,
-            RecipientIdentityId: _bobId,
-            SenderIdentityId: _aliceId,
-            SenderDeviceId: _aliceDeviceId,
-            WirePayload: wirePacket,
-            ReceivedAtUtc: DateTimeOffset.UtcNow);
+        var envelope = CreateDirectEnvelope(aliceSessionForSending, AppId.Chat, "Blocked"u8.ToArray());
 
         // Act
         var result = await _pipeline.ProcessInboundAsync(envelope);
@@ -203,48 +221,42 @@ public sealed class AppHostPipelineTests
     }
 
     [Test]
-    public async Task DispatchAsync_CorruptWireFrame_FailsAssociatedDataValidation()
+    public async Task ProcessInboundAsync_TamperedCiphertext_FailsAuthentication()
     {
         // Arrange
         var (_, bobSession) = CreateSessionPair();
         await _sessionRepo.SaveSessionAsync(bobSession);
 
         var (aliceSessionForSending, _) = CreateSessionPair();
-        byte[] wirePacket = CreateWirePacket(aliceSessionForSending, AppId.Chat, "Tampered"u8.ToArray());
+        var validEnvelope = CreateDirectEnvelope(aliceSessionForSending, AppId.Chat, "Tampered"u8.ToArray());
 
-        // Tamper with header byte
-        wirePacket[0] ^= 0xFF;
+        byte[] tamperedCiphertext = validEnvelope.Ciphertext.ToArray();
+        tamperedCiphertext[0] ^= 0xFF;
 
-        var envelope = new InboundWireEnvelope(
-            _channelId,
-            RecipientIdentityId: _bobId,
-            SenderIdentityId: _aliceId,
-            SenderDeviceId: _aliceDeviceId,
-            WirePayload: wirePacket,
-            ReceivedAtUtc: DateTimeOffset.UtcNow);
+        var envelope = new InboundDirectEnvelope(
+            validEnvelope.ChannelId,
+            validEnvelope.RecipientIdentityId,
+            validEnvelope.SenderIdentityId,
+            validEnvelope.SenderDeviceId,
+            validEnvelope.Header,
+            validEnvelope.Nonce,
+            tamperedCiphertext,
+            validEnvelope.ReceivedAtUtc);
 
         // Act
         var result = await _pipeline.ProcessInboundAsync(envelope);
 
         // Assert
         result.IsSuccess.Should().BeFalse();
+        result.Error!.Code.Should().Be("DECRYPTION_FAILED");
     }
 
     [Test]
-    public async Task DispatchAsync_MissingSession_ReturnsSessionNotFoundFailure()
+    public async Task ProcessInboundAsync_MissingSession_ReturnsSessionNotFoundFailure()
     {
         // Arrange (Do NOT save session in repository)
         var (aliceSessionForSending, _) = CreateSessionPair();
-        byte[] appContent = "Hello to unknown peer"u8.ToArray();
-        byte[] wirePacket = CreateWirePacket(aliceSessionForSending, AppId.Chat, appContent);
-
-        var envelope = new InboundWireEnvelope(
-            _channelId,
-            RecipientIdentityId: _bobId,
-            SenderIdentityId: _aliceId,
-            SenderDeviceId: _aliceDeviceId,
-            WirePayload: wirePacket,
-            ReceivedAtUtc: DateTimeOffset.UtcNow);
+        var envelope = CreateDirectEnvelope(aliceSessionForSending, AppId.Chat, "Unknown peer"u8.ToArray());
 
         // Act
         var result = await _pipeline.ProcessInboundAsync(envelope);
@@ -252,5 +264,61 @@ public sealed class AppHostPipelineTests
         // Assert
         result.IsSuccess.Should().BeFalse();
         result.Error!.Code.Should().Be("SESSION_NOT_FOUND");
+    }
+
+    [Test]
+    public async Task ProcessInboundAsync_GroupMessage_VerifiesAuthorSignatureAndDispatches()
+    {
+        // Arrange
+        using var chainKey = ChainKey.FromSpan(new byte[32]);
+        var (authorPriv, authorPub) = _cryptoEngine.GenerateEphemeralKeyPair();
+        var authorSigningKey = IdentityKey.FromSpan(authorPub.Span);
+
+        var receiverSession = new GroupReceiverSession(
+            _channelId,
+            _aliceId,
+            _aliceDeviceId,
+            chainKey,
+            initialIteration: 0,
+            authorSigningKey: authorSigningKey);
+
+        await _groupReceiverRepo.SaveReceiverSessionAsync(receiverSession);
+
+        var chatHandler = new FakeAppPayloadHandler(AppId.Chat);
+        _appRouter.RegisterHandler(chatHandler);
+
+        // Encrypt inner group payload with message key derived at iteration 0
+        using var authorChain = ChainKey.FromSpan(new byte[32]);
+        var (nextChain, messageKey) = _cryptoEngine.StepRatchet(authorChain);
+        nextChain.Dispose();
+
+        byte[] appContent = "Group Chat Payload"u8.ToArray();
+        byte[] inner = new byte[1 + appContent.Length];
+        inner[0] = AppId.Chat.Value;
+        Buffer.BlockCopy(appContent, 0, inner, 1, appContent.Length);
+
+        byte[] nonce = new byte[12];
+        byte[] ciphertext = _cryptoEngine.EncryptAesGcm(messageKey.Span, nonce, inner, ReadOnlySpan<byte>.Empty);
+        messageKey.Dispose();
+
+        byte[] signature = _cryptoEngine.SignEd25519(authorPriv.Span, ciphertext);
+
+        var envelope = new InboundGroupEnvelope(
+            _channelId,
+            _bobId,
+            _aliceId,
+            _aliceDeviceId,
+            Iteration: 0,
+            Ciphertext: ciphertext,
+            Signature: signature,
+            ReceivedAtUtc: DateTimeOffset.UtcNow);
+
+        // Act
+        var result = await _pipeline.ProcessInboundAsync(envelope);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        chatHandler.HandledContexts.Should().HaveCount(1);
+        chatHandler.CopiedPayloads[0].Should().BeEquivalentTo(appContent);
     }
 }
