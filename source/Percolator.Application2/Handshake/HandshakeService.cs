@@ -25,6 +25,8 @@ public sealed class HandshakeService : IHandshakeService
     private readonly IPeerContactRepository _contactRepo;
     private readonly IContactRequestCoordinator _contactCoordinator;
     private readonly IRatchetSessionRepository _sessionRepo;
+    private readonly IPendingHandshakeRepository _pendingHandshakeRepo;
+    private readonly IHandshakeReplayFilter _replayFilter;
     private readonly IOutboxRepository _outboxRepo;
     private readonly ICryptoEngine _cryptoEngine;
     private readonly IDateTimeProvider _timeProvider;
@@ -36,6 +38,8 @@ public sealed class HandshakeService : IHandshakeService
         IPeerContactRepository contactRepo,
         IContactRequestCoordinator contactCoordinator,
         IRatchetSessionRepository sessionRepo,
+        IPendingHandshakeRepository pendingHandshakeRepo,
+        IHandshakeReplayFilter replayFilter,
         IOutboxRepository outboxRepo,
         ICryptoEngine cryptoEngine,
         IDateTimeProvider timeProvider,
@@ -46,6 +50,8 @@ public sealed class HandshakeService : IHandshakeService
         _contactRepo = contactRepo ?? throw new ArgumentNullException(nameof(contactRepo));
         _contactCoordinator = contactCoordinator ?? throw new ArgumentNullException(nameof(contactCoordinator));
         _sessionRepo = sessionRepo ?? throw new ArgumentNullException(nameof(sessionRepo));
+        _pendingHandshakeRepo = pendingHandshakeRepo ?? throw new ArgumentNullException(nameof(pendingHandshakeRepo));
+        _replayFilter = replayFilter ?? throw new ArgumentNullException(nameof(replayFilter));
         _outboxRepo = outboxRepo ?? throw new ArgumentNullException(nameof(outboxRepo));
         _cryptoEngine = cryptoEngine ?? throw new ArgumentNullException(nameof(cryptoEngine));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
@@ -153,6 +159,12 @@ public sealed class HandshakeService : IHandshakeService
         InboundHandshakeEnvelope envelope,
         CancellationToken ct = default)
     {
+        if (!_replayFilter.TryRecordAndValidate(envelope.SenderEphemeralKey, envelope.ReceivedAtUtc))
+        {
+            return DomainResult.Failure(new DomainError(
+                "HANDSHAKE_REPLAY_DETECTED", "Handshake invitation contains duplicate or replayed ephemeral key."));
+        }
+
         var contact = await _contactRepo.GetByPeerIdAsync(envelope.RecipientIdentityId, envelope.SenderIdentityId, ct);
         if (contact != null && contact.TrustLevel == PeerTrustLevel.Blocked)
         {
@@ -161,6 +173,12 @@ public sealed class HandshakeService : IHandshakeService
 
         if (contact == null || contact.State == ContactState.PendingApproval)
         {
+            if (envelope.EncryptedPayload.Length > 0)
+            {
+                await _pendingHandshakeRepo.SavePendingHandshakeAsync(
+                    envelope.RecipientIdentityId, envelope.SenderIdentityId, envelope, ct);
+            }
+
             var coordResult = await _contactCoordinator.HandleInboundRequestAsync(
                 envelope.RecipientIdentityId,
                 envelope.SenderIdentityId,
@@ -177,6 +195,33 @@ public sealed class HandshakeService : IHandshakeService
         }
 
         // Active contact (Tofu or Verified) -> derive session
+        return await ProcessActiveInvitationAsync(envelope, ct);
+    }
+
+    public async ValueTask<DomainResult> CompletePendingHandshakeAsync(
+        PublicIdentityId recipientId,
+        PublicIdentityId senderId,
+        CancellationToken ct = default)
+    {
+        var envelope = await _pendingHandshakeRepo.GetPendingHandshakeAsync(recipientId, senderId, ct);
+        if (envelope == null)
+        {
+            return DomainResult.Success();
+        }
+
+        var result = await ProcessActiveInvitationAsync(envelope, ct);
+        if (result.IsSuccess)
+        {
+            await _pendingHandshakeRepo.DeletePendingHandshakeAsync(recipientId, senderId, ct);
+        }
+
+        return result;
+    }
+
+    private async ValueTask<DomainResult> ProcessActiveInvitationAsync(
+        InboundHandshakeEnvelope envelope,
+        CancellationToken ct)
+    {
         var signedPreKeyPriv = await _preKeyStore.GetSignedPreKeyPrivateAsync(
             envelope.RecipientIdentityId, DeviceId.Primary, ct);
 

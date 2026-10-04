@@ -20,4 +20,9 @@ public interface IHandshakeService
     ValueTask<DomainResult> ReceiveInvitationAsync(
         InboundHandshakeEnvelope envelope,
         CancellationToken ct = default);
+
+    ValueTask<DomainResult> CompletePendingHandshakeAsync(
+        PublicIdentityId recipientId,
+        PublicIdentityId senderId,
+        CancellationToken ct = default);
 }

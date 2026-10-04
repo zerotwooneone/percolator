@@ -20,6 +20,7 @@ public sealed class OutboundEgressPipeline : IPayloadSender
     private readonly IOutboxRepository _outboxRepo;
     private readonly IStreamRegistry _streamRegistry;
     private readonly IDateTimeProvider _timeProvider;
+    private readonly IChannelLockService _channelLockService;
 
     public OutboundEgressPipeline(
         IRatchetSessionRepository sessionRepo,
@@ -28,7 +29,8 @@ public sealed class OutboundEgressPipeline : IPayloadSender
         ICryptoEngine cryptoEngine,
         IOutboxRepository outboxRepo,
         IStreamRegistry streamRegistry,
-        IDateTimeProvider timeProvider)
+        IDateTimeProvider timeProvider,
+        IChannelLockService channelLockService)
     {
         _sessionRepo = sessionRepo ?? throw new ArgumentNullException(nameof(sessionRepo));
         _groupSenderKeyRepo = groupSenderKeyRepo ?? throw new ArgumentNullException(nameof(groupSenderKeyRepo));
@@ -37,6 +39,7 @@ public sealed class OutboundEgressPipeline : IPayloadSender
         _outboxRepo = outboxRepo ?? throw new ArgumentNullException(nameof(outboxRepo));
         _streamRegistry = streamRegistry ?? throw new ArgumentNullException(nameof(streamRegistry));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
+        _channelLockService = channelLockService ?? throw new ArgumentNullException(nameof(channelLockService));
     }
 
     public async ValueTask<DomainResult> SendPayloadAsync(OutboundPayloadContext context, CancellationToken ct = default)
@@ -51,77 +54,80 @@ public sealed class OutboundEgressPipeline : IPayloadSender
         ReadOnlyMemory<byte> packedWireBytes;
 
         // -------------------------------------------------------------
-        // Phase 2: Crypto Ratchet Step & AD Construction
+        // Phase 2: Crypto Ratchet Step & AD Construction (Scoped Lock)
         // -------------------------------------------------------------
-        if (context.RecipientIdentityId.HasValue)
+        using (await _channelLockService.AcquireLockAsync(context.ChannelId, ct).ConfigureAwait(false))
         {
-            // Pairwise Direct / Relayed 1:1 message
-            var targetId = context.RecipientIdentityId.Value;
-            var session = await _sessionRepo.GetSessionAsync(
-                context.SenderIdentityId, targetId, context.RecipientDeviceId, ct);
-            if (session == null)
+            if (context.RecipientIdentityId.HasValue)
             {
-                return DomainResult.Failure(new DomainError(
-                    "SESSION_NOT_FOUND", "No active ratchet session exists for recipient."));
-            }
+                // Pairwise Direct / Relayed 1:1 message
+                var targetId = context.RecipientIdentityId.Value;
+                var session = await _sessionRepo.GetSessionAsync(
+                    context.SenderIdentityId, targetId, context.RecipientDeviceId, ct);
+                if (session == null)
+                {
+                    return DomainResult.Failure(new DomainError(
+                        "SESSION_NOT_FOUND", "No active ratchet session exists for recipient."));
+                }
 
-            var stepResult = session.StepSendingChain(_cryptoEngine);
-            if (!stepResult.IsSuccess)
+                var stepResult = session.StepSendingChain(_cryptoEngine);
+                if (!stepResult.IsSuccess)
+                {
+                    return DomainResult.Failure(stepResult.Error!);
+                }
+
+                var (msgCounter, msgKey, localEphemeralKey) = stepResult.Value;
+                var header = new RatchetHeader(
+                    localEphemeralKey ?? session.LocalEphemeralPublicKey!,
+                    msgCounter,
+                    session.PreviousSendingChainLength);
+
+                byte[] nonce = new byte[12];
+                RandomNumberGenerator.Fill(nonce);
+
+                byte[] ciphertext = _cryptoEngine.EncryptAesGcm(msgKey.Span, nonce, innerPlaintext, header.EphemeralPublicKey.Span);
+                msgKey.Dispose();
+
+                await _sessionRepo.SaveSessionAsync(session, ct);
+
+                packedWireBytes = _sessionWirePacker.PackDirectRatchetMessage(header, nonce, ciphertext);
+            }
+            else
             {
-                return DomainResult.Failure(stepResult.Error!);
+                // Group broadcast
+                var ratchet = await _groupSenderKeyRepo.GetSenderKeyRatchetAsync(
+                    context.ChannelId, context.SenderIdentityId, DeviceId.Primary, ct);
+
+                if (ratchet == null)
+                {
+                    return DomainResult.Failure(new DomainError(
+                        "SENDER_KEY_RATCHET_NOT_FOUND", "No active group sender key ratchet exists for channel."));
+                }
+
+                var advanceResult = ratchet.Advance(_cryptoEngine);
+                if (!advanceResult.IsSuccess)
+                {
+                    return DomainResult.Failure(advanceResult.Error!);
+                }
+
+                var (iteration, msgKey) = advanceResult.Value;
+                byte[] nonce = new byte[12];
+                RandomNumberGenerator.Fill(nonce);
+
+                byte[] ciphertext = _cryptoEngine.EncryptAesGcm(msgKey.Span, nonce, innerPlaintext, ReadOnlySpan<byte>.Empty);
+                msgKey.Dispose();
+
+                var signResult = ratchet.SignPayload(ciphertext, _cryptoEngine);
+                if (!signResult.IsSuccess)
+                {
+                    return DomainResult.Failure(signResult.Error!);
+                }
+
+                var signature = signResult.Value!;
+                await _groupSenderKeyRepo.SaveSenderKeyRatchetAsync(ratchet, ct);
+
+                packedWireBytes = _sessionWirePacker.PackGroupMessage(context.ChannelId, iteration, signature, ciphertext);
             }
-
-            var (msgCounter, msgKey, localEphemeralKey) = stepResult.Value;
-            var header = new RatchetHeader(
-                localEphemeralKey ?? session.LocalEphemeralPublicKey!,
-                msgCounter,
-                session.PreviousSendingChainLength);
-
-            byte[] nonce = new byte[12];
-            RandomNumberGenerator.Fill(nonce);
-
-            byte[] ciphertext = _cryptoEngine.EncryptAesGcm(msgKey.Span, nonce, innerPlaintext, header.EphemeralPublicKey.Span);
-            msgKey.Dispose();
-
-            await _sessionRepo.SaveSessionAsync(session, ct);
-
-            packedWireBytes = _sessionWirePacker.PackDirectRatchetMessage(header, nonce, ciphertext);
-        }
-        else
-        {
-            // Group broadcast
-            var ratchet = await _groupSenderKeyRepo.GetSenderKeyRatchetAsync(
-                context.ChannelId, context.SenderIdentityId, DeviceId.Primary, ct);
-
-            if (ratchet == null)
-            {
-                return DomainResult.Failure(new DomainError(
-                    "SENDER_KEY_RATCHET_NOT_FOUND", "No active group sender key ratchet exists for channel."));
-            }
-
-            var advanceResult = ratchet.Advance(_cryptoEngine);
-            if (!advanceResult.IsSuccess)
-            {
-                return DomainResult.Failure(advanceResult.Error!);
-            }
-
-            var (iteration, msgKey) = advanceResult.Value;
-            byte[] nonce = new byte[12];
-            RandomNumberGenerator.Fill(nonce);
-
-            byte[] ciphertext = _cryptoEngine.EncryptAesGcm(msgKey.Span, nonce, innerPlaintext, ReadOnlySpan<byte>.Empty);
-            msgKey.Dispose();
-
-            var signResult = ratchet.SignPayload(ciphertext, _cryptoEngine);
-            if (!signResult.IsSuccess)
-            {
-                return DomainResult.Failure(signResult.Error!);
-            }
-
-            var signature = signResult.Value!;
-            await _groupSenderKeyRepo.SaveSenderKeyRatchetAsync(ratchet, ct);
-
-            packedWireBytes = _sessionWirePacker.PackGroupMessage(context.ChannelId, iteration, signature, ciphertext);
         }
 
         // -------------------------------------------------------------

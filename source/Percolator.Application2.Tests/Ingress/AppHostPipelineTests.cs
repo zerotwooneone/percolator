@@ -1,7 +1,9 @@
+using System.Buffers.Binary;
 using Percolator.Application2.Handshake;
 using Percolator.Application2.Ingress;
 using Percolator.Application2.Ports;
 using Percolator.Application2.Profiles;
+using Percolator.Application2.Services;
 using Percolator.Application2.Tests.TestDoubles;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
@@ -19,15 +21,21 @@ public sealed class AppHostPipelineTests
     private InMemoryIngressFilterService _filterService = null!;
     private InMemoryRatchetSessionRepository _sessionRepo = null!;
     private InMemoryGroupReceiverSessionRepository _groupReceiverRepo = null!;
+    private InMemoryGroupSenderKeyRepository _senderKeyRepo = null!;
     private InMemoryLocalIdentityKeyStore _identityKeyStore = null!;
     private InMemoryPrivatePreKeyStore _preKeyStore = null!;
     private InMemoryPeerContactRepository _contactRepo = null!;
+    private InMemoryPendingHandshakeRepository _pendingHandshakeRepo = null!;
+    private FakeHandshakeReplayFilter _replayFilter = null!;
     private ContactRequestCoordinator _coordinator = null!;
     private InMemoryOutboxRepository _outboxRepo = null!;
     private TestDateTimeProvider _timeProvider = null!;
     private ApplicationTestCryptoEngine _cryptoEngine = null!;
     private AppRouter _appRouter = null!;
     private HandshakeService _handshakeService = null!;
+    private NoOpChannelLockService _channelLockService = null!;
+    private FakePayloadSender _payloadSender = null!;
+    private GroupKeyDistributionService _groupKeyDistributionService = null!;
     private InboundIngressPipeline _pipeline = null!;
 
     private PublicIdentityId _aliceId;
@@ -42,14 +50,19 @@ public sealed class AppHostPipelineTests
         _filterService = new InMemoryIngressFilterService();
         _sessionRepo = new InMemoryRatchetSessionRepository();
         _groupReceiverRepo = new InMemoryGroupReceiverSessionRepository();
+        _senderKeyRepo = new InMemoryGroupSenderKeyRepository();
         _identityKeyStore = new InMemoryLocalIdentityKeyStore();
         _preKeyStore = new InMemoryPrivatePreKeyStore();
         _contactRepo = new InMemoryPeerContactRepository();
+        _pendingHandshakeRepo = new InMemoryPendingHandshakeRepository();
+        _replayFilter = new FakeHandshakeReplayFilter();
         _timeProvider = new TestDateTimeProvider();
         _coordinator = new ContactRequestCoordinator(_contactRepo, _timeProvider);
         _outboxRepo = new InMemoryOutboxRepository();
         _cryptoEngine = new ApplicationTestCryptoEngine();
         _appRouter = new AppRouter();
+        _channelLockService = new NoOpChannelLockService();
+        _payloadSender = new FakePayloadSender();
 
         _handshakeService = new HandshakeService(
             _identityKeyStore,
@@ -57,10 +70,18 @@ public sealed class AppHostPipelineTests
             _contactRepo,
             _coordinator,
             _sessionRepo,
+            _pendingHandshakeRepo,
+            _replayFilter,
             _outboxRepo,
             _cryptoEngine,
             _timeProvider,
             _appRouter);
+
+        _groupKeyDistributionService = new GroupKeyDistributionService(
+            _senderKeyRepo,
+            _groupReceiverRepo,
+            _payloadSender,
+            _cryptoEngine);
 
         _pipeline = new InboundIngressPipeline(
             _filterService,
@@ -68,7 +89,9 @@ public sealed class AppHostPipelineTests
             _groupReceiverRepo,
             _handshakeService,
             _cryptoEngine,
-            _appRouter);
+            _appRouter,
+            _channelLockService,
+            _groupKeyDistributionService);
 
         _aliceId = PublicIdentityId.New();
         _aliceDeviceId = DeviceId.Primary;
@@ -320,5 +343,45 @@ public sealed class AppHostPipelineTests
         result.IsSuccess.Should().BeTrue();
         chatHandler.HandledContexts.Should().HaveCount(1);
         chatHandler.CopiedPayloads[0].Should().BeEquivalentTo(appContent);
+    }
+
+    [Test]
+    public async Task ProcessInboundAsync_SystemControlSenderKeyDistribution_InstallsGroupReceiverSession()
+    {
+        // Arrange: Alice and Bob have an established pairwise direct session
+        var (_, bobSession) = CreateSessionPair();
+        await _sessionRepo.SaveSessionAsync(bobSession);
+
+        var (aliceSessionForSending, _) = CreateSessionPair();
+
+        // Alice prepares a group sender key distribution payload
+        byte[] distPayload = new byte[GroupKeyDistributionService.DistributionPayloadLength];
+        distPayload[0] = 0x01; // MessageTypeSenderKeyDistribution
+        _channelId.TryWriteBytes(distPayload.AsSpan(1, 16));
+        BinaryPrimitives.WriteUInt32BigEndian(distPayload.AsSpan(17, 4), 1); // KeyId = 1
+        BinaryPrimitives.WriteUInt32BigEndian(distPayload.AsSpan(21, 4), 0); // Iteration = 0
+
+        byte[] chainBytes = new byte[32];
+        chainBytes[0] = 0x77;
+        chainBytes.CopyTo(distPayload.AsSpan(25, 32));
+
+        var (authorPriv, authorPub) = _cryptoEngine.GenerateEphemeralKeyPair();
+        authorPub.Span.CopyTo(distPayload.AsSpan(57, 32));
+
+        // Package as direct envelope targeting AppId.SystemControl
+        var envelope = CreateDirectEnvelope(aliceSessionForSending, AppId.SystemControl, distPayload);
+
+        // Act: Bob receives the direct envelope
+        var result = await _pipeline.ProcessInboundAsync(envelope);
+
+        // Assert: Process succeeds
+        result.IsSuccess.Should().BeTrue();
+
+        // Group receiver session was successfully saved in repository for Alice on _channelId!
+        var installedSession = await _groupReceiverRepo.GetReceiverSessionAsync(_channelId, _aliceId, _aliceDeviceId);
+        installedSession.Should().NotBeNull();
+        installedSession!.ChannelId.Should().Be(_channelId);
+        installedSession.AuthorId.Should().Be(_aliceId);
+        installedSession.AuthorSigningKey!.Span.ToArray().Should().BeEquivalentTo(authorPub.Span.ToArray());
     }
 }

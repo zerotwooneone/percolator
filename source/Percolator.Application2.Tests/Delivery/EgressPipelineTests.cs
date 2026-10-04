@@ -22,6 +22,7 @@ public sealed class EgressPipelineTests
     private InMemoryOutboxRepository _outboxRepo = null!;
     private InMemoryStreamRegistry _streamRegistry = null!;
     private TestDateTimeProvider _timeProvider = null!;
+    private NoOpChannelLockService _channelLockService = null!;
     private OutboundEgressPipeline _egressPipeline = null!;
 
     private PublicIdentityId _aliceId;
@@ -40,6 +41,7 @@ public sealed class EgressPipelineTests
         _outboxRepo = new InMemoryOutboxRepository();
         _streamRegistry = new InMemoryStreamRegistry();
         _timeProvider = new TestDateTimeProvider();
+        _channelLockService = new NoOpChannelLockService();
 
         _egressPipeline = new OutboundEgressPipeline(
             _sessionRepo,
@@ -48,7 +50,8 @@ public sealed class EgressPipelineTests
             _cryptoEngine,
             _outboxRepo,
             _streamRegistry,
-            _timeProvider);
+            _timeProvider,
+            _channelLockService);
 
         _aliceId = PublicIdentityId.New();
         _aliceDeviceId = DeviceId.Primary;
