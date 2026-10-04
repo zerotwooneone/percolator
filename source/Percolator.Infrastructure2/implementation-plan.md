@@ -1,4 +1,4 @@
-# Percolator.Infrastructure2
+# Percolator.Infrastructure2 Implementation Plan
 
 ## 1. Overview & Architectural Role
 
@@ -7,13 +7,14 @@
 Following Clean Architecture principles:
 - **Dependencies Flow Inward**: `Infrastructure2` references `Percolator.Domain`, `Percolator.Application2`, and `Percolator.PluginSdk`. It does NOT expose infrastructure-specific types (e.g., SQLite connections, gRPC stubs, Protobuf classes, raw sockets) to the domain or application layers.
 - **Port Realization**: Every component in this project implements an interface (port) defined by `Percolator.Domain`, `Percolator.Application2`, or `Percolator.PluginSdk`.
-- **Wire Contract & Serialization Ownership**: Concrete Protobuf `.proto` schemas, code-generated message classes, and binary serializers live strictly within `Percolator.Infrastructure2.Serialization`. The inner layers interact solely via pure C# DTOs and the `IPayloadSerializer` port.
+- **Wire Contract & Serialization Ownership**: Concrete Protobuf `.proto` schemas, code-generated message classes, gRPC service stubs, and binary serializers live strictly within `Percolator.Infrastructure2`. The inner layers interact solely via pure C# DTOs and domain models via the `IPayloadSerializer` and `ISessionWirePacker` ports.
 
 ---
 
 ## 2. Legacy Migration & Cutover Strategy
 
-The legacy codebase contains overlapping, dated modules:
+The legacy codebase contains dated, overlapping modules marked for total deletion during the cutover:
+- `Percolator.Contracts` (Legacy Protobuf definitions and gRPC service contracts)
 - `Percolator.Identity`
 - `Percolator.Cryptography`
 - `Percolator.Network`
@@ -22,7 +23,9 @@ The legacy codebase contains overlapping, dated modules:
 
 ### Cutover Workflow
 1. **Domain & Application Completion**: Implement and verify `Percolator.Domain`, `Percolator.Application2`, application plugins (`Percolator.Apps.Chat`, `Discovery`, `FileTransfer`), and their test suites.
-2. **Project Deletion**: Remove the legacy projects from the solution and delete their directories before implementing `Percolator.Infrastructure2` and updating the desktop application.
+2. **Legacy Project Deletion**: Remove `Percolator.Contracts` and all legacy projects from the solution (`Percolator.sln`) and delete their filesystem directories.
+   - None of the modern projects (`Percolator.Domain`, `Percolator.PluginSdk`, `Percolator.Application2`, `Percolator.Apps.*`) reference `Percolator.Contracts`.
+   - All replacement Protobuf schemas are authored fresh within `Percolator.Infrastructure2/Protos/`.
 3. **Compiler-Error-Driven Triage**:
    - The resulting compiler breaks in the desktop app and infrastructure serve as an intentional audit trail.
    - For every breaking symbol/class, decide deliberately:
@@ -38,6 +41,10 @@ The legacy codebase contains overlapping, dated modules:
 3. **Deterministic Memory Zeroization**: Any unmanaged buffers or cryptographic key spans must be cleared (`CryptographicOperations.ZeroMemory`) when disposed.
 4. **Resilient Network Handling**: All gRPC network calls must obey cancellation tokens, transport timeouts, and surface transient vs. permanent network failures cleanly to `OutboxRetryPolicy`.
 5. **Cryptographic Logging Guardrails**: Honor `CryptographyOptions.EnableCryptographicMaterialLogging = false` by default across all infrastructure loggers and diagnostics. Sensitive cryptographic keys, KDF digests, and plaintexts must never be emitted to logs.
+6. **Strict Authentication & Metadata Isolation**:
+   - **Public Edge / Ingress & Deposit**: Must be unauthenticated (zero sender identity leakage on the wire). Relies on recipient-issued `DeliveryToken`s and Sealed Sender cryptography.
+   - **Mailbox Retrieval, Directory & Management**: Must be strictly authenticated via challenge-response or signature cryptographic proofs to prevent unauthorized message draining, OPK exhaustion attacks, and mass directory scraping (mirroring Signal's security model).
+   - **Group Operations**: Must be protected via Zero-Knowledge presentation proofs against `RelayGroupLedger` epochs without revealing individual member identities to relays.
 
 ---
 
@@ -55,13 +62,176 @@ The legacy codebase contains overlapping, dated modules:
   - **Native zkgroup FFI**: Wraps `Signal.Interop` native C/Rust binaries with safe handle management.
   - **ZK Group Presentations**: Generates and verifies zero-knowledge membership proofs for anonymous group relay interactions (`VerifyGroupPresentation`, `GenerateGroupPresentation`).
 
-### 4.2 Serialization & Wire Contracts (`Percolator.PluginSdk.IPayloadSerializer`)
-- **Protobuf Schemas (`Protos/`)**:
-  - `chat.proto`: Wire contracts for `TextMessageDto`, `ReactionDto`, `ReceiptDto`, `SenderKeyDistribution`.
-  - `discovery.proto`: Wire contracts for `DhtPingPayload`, `DhtPongPayload`, `DhtFindNodePayload`.
-  - `filetransfer.proto`: Wire contracts for `FileManifestDto`, `ManifestQueryDto`, `TransferNegotiationDto`.
-- **Adapter**: `ProtobufPayloadSerializer` (`IPayloadSerializer`):
-  - Serializes C# DTOs to binary using `Google.Protobuf.CodedOutputStream` and `IBufferWriter<byte>`.\n  - Deserializes binary spans into strongly-typed C# DTOs via `Google.Protobuf.MessageParser<T>`.
+### 4.2 Serialization, Wire Contracts & Protobuf Schemas (`Protos/`)
+
+Rather than blindly cloning legacy contracts, `Infrastructure2` defines purpose-built Protobuf services organized strictly by **trust boundary** and **authentication model**:
+
+```
+                                  ┌────────────────────────────────────────┐
+                                  │      Client / Sender / Peer Node       │
+                                  └────────────────────────────────────────┘
+                                      │                   │              │
+                   (Unauthenticated / │       (Auth via   │   (Auth via  │
+                    Delivery Token)   │        Signature) │    ZK-Proof) │
+                                      ▼                   ▼              ▼
+┌──────────────────────────────────────┐ ┌──────────────────┐ ┌─────────────────────┐
+│    UnauthenticatedDeliveryService    │ │ Authenticated    │ │ AnonymousGroupRelay │
+│──────────────────────────────────────│ │ RelayService     │ │ Service             │
+│ • DeliverDirect(SealedEnvelope)      │ │──────────────────│ │─────────────────────│
+│ • EnqueueMailbox(SealedEnvelope)     │ │ • ConnectMailbox │ │ • SubscribeGroup    │
+│                                      │ │   Stream()       │ │   Stream()          │
+│                                      │ │ • DrainMailbox() │ │ • DispatchGroupMsg()│
+│                                      │ │ • RegisterMbox() │ │ • CommitMutation()  │
+│                                      │ │ • PublishPreKey()│ │ • FetchGroupState() │
+│                                      │ │ • FetchPreKey()  │ └─────────────────────┘
+└──────────────────────────────────────┘ └──────────────────┘
+```
+
+#### 1. `unauthenticated_delivery.proto` (Public Edge / Sealed Sender Ingress & Deposit)
+- **Trust Boundary**: Open to peers and anonymous senders. Zero sender identity metadata is exposed to transport headers or relay logs. Protected by rate limiting and recipient-issued `DeliveryToken`s.
+- **Messages**:
+  - `SealedEnvelopeProto`:
+    - `bytes recipient_routing_token = 1;` (16-byte `BlindedRoutingToken` for mailbox routing)
+    - `bytes delivery_token = 2;` (32-byte `DeliveryToken` verifying sender authorization to drop message)
+    - `bytes encrypted_package = 3;` (Opaque encrypted package containing sender ID, ratchet header, and inner payload)
+    - `google.protobuf.Timestamp expires_at_utc = 4;` (Enforces queue purge TTL and limits replay windows)
+  - `DeliveryAckProto`: `bool success = 1;`, `string error_message = 2;`
+  - `EnqueueAckProto`: `bool accepted = 1;`, `google.protobuf.Timestamp expires_at_utc = 2;`
+- **Service**:
+  - `service UnauthenticatedDeliveryService`:
+    - `rpc DeliverDirect(SealedEnvelopeProto) returns (DeliveryAckProto);` (Direct 1:1 P2P ingress over ephemeral TLS)
+    - `rpc EnqueueMailbox(SealedEnvelopeProto) returns (EnqueueAckProto);` (Deposit into recipient's store-and-forward relay queue)
+
+#### 2. `authenticated_relay.proto` (Mailbox Ownership, Pre-Key Directory & Stream Management)
+- **Trust Boundary**: Challenge-response / signature authenticated. Restricted exclusively to the private key holder of the `PublicIdentityId` / caller identity.
+- **Security Rationale (Mirroring Signal)**:
+  - `FetchPreKeyBundle` requires authenticated requester identity verification to prevent anonymous scrapers from exhausting one-time prekeys (OPKs) and crawling directory listings, while enabling per-account rate limiting.
+- **Messages**:
+  - `MailboxStreamClientMessage`:
+    - `oneof payload`:
+      - `AuthResponseProto auth_response = 1;` (Signature over server-issued challenge nonce)
+      - `MailboxAckProto ack = 2;` (Confirms client receipt and triggers atomic deletion of queued message)
+  - `MailboxStreamServerMessage`:
+    - `oneof payload`:
+      - `AuthChallengeProto auth_challenge = 1;` (Server-generated random 32-byte challenge nonce)
+      - `AuthResultProto auth_result = 2;` (Authentication success or error code)
+      - `QueuedSealedEnvelopeProto envelope = 3;` (Queued `SealedEnvelopeProto` accompanied by unique `bytes ack_id`)
+  - `RegisterMailboxRequest`:
+    - `bytes owner_identity_key = 1;`
+    - `bytes routing_token = 2;`
+    - `bytes authorized_delivery_token = 3;`
+    - `bytes signature = 4;` (Signs `routing_token + authorized_delivery_token` to prove ownership)
+  - `RegisterMailboxResponse`: `bool success = 1;`
+  - `DrainMailboxRequest`: `bytes routing_token = 1;`, `bytes auth_token = 2;`
+  - `DrainMailboxResponse`: `repeated QueuedSealedEnvelopeProto envelopes = 1;`
+  - `PublishPreKeyBundleRequest`:
+    - `bytes identity_key = 1;`
+    - `bytes signed_prekey = 2;`
+    - `bytes prekey_signature = 3;`
+    - `bytes signed_prekey_id = 4;`
+    - `repeated OneTimePreKeyProto one_time_prekeys = 5;`
+    - `bytes signature = 6;`
+  - `PublishPreKeyBundleResponse`: `bool success = 1;`
+  - `FetchPreKeyBundleRequest`:
+    - `bytes recipient_routing_token = 1;`
+    - `bytes requester_identity_key = 2;`
+    - `bytes requester_signature = 3;` (Signs `recipient_routing_token + timestamp_utc` proving requester identity)
+    - `google.protobuf.Timestamp timestamp_utc = 4;`
+  - `FetchPreKeyBundleResponse`:
+    - `bytes identity_key = 1;`
+    - `bytes signed_prekey = 2;`
+    - `bytes prekey_signature = 3;`
+    - `bytes signed_prekey_id = 4;`
+    - `optional bytes one_time_prekey = 5;`
+    - `optional bytes one_time_prekey_id = 6;`
+  - `OneTimePreKeyProto`: `bytes key_id = 1;`, `bytes public_key = 2;`
+- **Service**:
+  - `service AuthenticatedRelayService`:
+    - `rpc ConnectMailboxStream(stream MailboxStreamClientMessage) returns (stream MailboxStreamServerMessage);` (Duplex streaming connection for real-time pushed messages with ACK flow control)
+    - `rpc RegisterMailbox(RegisterMailboxRequest) returns (RegisterMailboxResponse);` (Registers authorized delivery tokens)
+    - `rpc DrainMailbox(DrainMailboxRequest) returns (DrainMailboxResponse);` (Unary fallback for intermittent polling)
+    - `rpc PublishPreKeyBundle(PublishPreKeyBundleRequest) returns (PublishPreKeyBundleResponse);` (Authenticated prekey publishing)
+    - `rpc FetchPreKeyBundle(FetchPreKeyBundleRequest) returns (FetchPreKeyBundleResponse);` (Authenticated prekey lookup with OPK rate-limiting & anti-scraping enforcement)
+
+#### 3. `anonymous_group.proto` (Zero-Knowledge Group Relay Service)
+- **Trust Boundary**: Zero-Knowledge membership verification. Group members prove authorization to read and write without revealing their identities to the relay.
+- **Messages**:
+  - `GroupStreamClientMessage`:
+    - `bytes conversation_id = 1;`
+    - `uint32 current_epoch = 2;`
+    - `bytes zk_presentation_proof = 3;` (Proves membership in the current epoch)
+  - `GroupStreamServerMessage`:
+    - `oneof payload`:
+      - `GroupBroadcastEnvelope broadcast = 1;` (Real-time group payload dispatched to subscribers)
+      - `EpochMutationNotification mutation = 2;` (Alerts members that a roster change occurred)
+  - `GroupBroadcastEnvelope`:
+    - `bytes conversation_id = 1;`
+    - `uint32 epoch = 2;`
+    - `uint32 sender_key_iteration = 3;`
+    - `bytes ciphertext = 4;`
+    - `bytes author_signature = 5;`
+  - `EpochMutationNotification`:
+    - `bytes conversation_id = 1;`
+    - `uint32 new_epoch = 2;`
+  - `DispatchGroupMessageRequest`:
+    - `bytes conversation_id = 1;`
+    - `uint32 epoch = 2;`
+    - `bytes zk_presentation_proof = 3;` (Verifies proof over `SHA256(ciphertext)`)
+    - `uint32 sender_key_iteration = 4;`
+    - `bytes ciphertext = 5;`
+    - `bytes author_signature = 6;`
+  - `DispatchGroupMessageResponse`: `bool accepted = 1;`
+  - `CommitRosterMutationRequest`:
+    - `bytes conversation_id = 1;`
+    - `uint32 base_epoch = 2;`
+    - `bytes new_roster_blob = 3;`
+    - `repeated bytes new_routing_tokens = 4;`
+    - `bytes zk_presentation_proof = 5;` (Verifies proof over mutation transcript hash)
+  - `CommitRosterMutationResponse`: `bool committed = 1;`, `uint32 new_epoch = 2;`
+  - `FetchGroupStateRequest`: `bytes conversation_id = 1;`, `bytes zk_presentation_proof = 2;`
+  - `FetchGroupStateResponse`: `uint32 current_epoch = 1;`, `bytes encrypted_roster_blob = 2;`
+- **Service**:
+  - `service AnonymousGroupRelayService`:
+    - `rpc SubscribeGroupStream(GroupStreamClientMessage) returns (stream GroupStreamServerMessage);` (Server-streaming subscription to live channel updates)
+    - `rpc DispatchGroupMessage(DispatchGroupMessageRequest) returns (DispatchGroupMessageResponse);` (Anonymous broadcast dispatch)
+    - `rpc CommitRosterMutation(CommitRosterMutationRequest) returns (CommitRosterMutationResponse);` (Roster epoch transition)
+    - `rpc FetchGroupState(FetchGroupStateRequest) returns (FetchGroupStateResponse);` (State catch-up)
+
+#### 4. `session.proto` (Inner Cryptographic Packaging)
+Carried inside `SealedEnvelopeProto.encrypted_package` (opaque to relays and passive observers):
+- **Messages**:
+  - `RatchetHeaderProto`: `bytes ratchet_public_key = 1;`, `uint32 counter = 2;`, `uint32 previous_chain_length = 3;`
+  - `DirectSessionPackageProto`:
+    - `RatchetHeaderProto header = 1;`
+    - `bytes nonce = 2;`
+    - `bytes ciphertext = 3;`
+  - `GroupSessionPackageProto`:
+    - `bytes conversation_id = 1;`
+    - `uint32 iteration = 2;`
+    - `bytes ciphertext = 3;`
+    - `bytes author_signature = 4;`
+  - `HandshakeInvitationPackageProto`:
+    - `bytes initiator_identity_key = 1;`
+    - `bytes initiator_ephemeral_key = 2;`
+    - `bytes signed_prekey_id = 3;`
+    - `bytes onetime_prekey_id = 4;`
+    - `bytes encrypted_payload = 5;`
+
+#### 5. Application Plugins (`chat.proto`, `discovery.proto`, `filetransfer.proto`)
+- `chat.proto`: `TextMessageDto`, `ReadReceiptDto`, `DeliveredReceiptDto`, `EmojiAnnotationDto`, `SenderKeyDistributionDto`, `GroupUpdateDto`, `ProfileUpdateDto`.
+- `discovery.proto`: `DhtPingPayload`, `DhtPongPayload`, `DhtFindNodeRequest`, `DhtFindNodeResponse`, `NodeInfoProto`.
+- `filetransfer.proto`: `FileTransferService` (`rpc TransferChunks`), `TransferChunkRequest`, `TransferChunkResponse`, `FileManifestDto`, `ManifestQueryDto`, `TransferNegotiationDto`.
+
+#### Serialization Adapters:
+- **`ProtobufSessionWirePacker`** (`Percolator.Application2.Ports.ISessionWirePacker`):
+  - Packs domain cryptographic elements (`RatchetHeader`, `nonce`, `ciphertext`) into Protobuf `DirectSessionPackageProto` or `GroupSessionPackageProto`.
+  - Wraps packed payloads into `SealedEnvelopeProto` with target `BlindedRoutingToken` and `DeliveryToken`.
+  - Unpacks incoming `SealedEnvelopeProto` records into typed `InboundDirectEnvelope` or `InboundGroupEnvelope` instances for `Application2`.
+- **`ProtobufPayloadSerializer`** (`Percolator.PluginSdk.IPayloadSerializer`):
+  - Serializes C# DTOs to binary using `Google.Protobuf.CodedOutputStream` and `IBufferWriter<byte>`.
+  - Deserializes binary spans into strongly-typed C# DTOs via `Google.Protobuf.MessageParser<T>`.
+
+---
 
 ### 4.3 Persistence & Database Repositories
 - **Database Engine**: Encrypted SQLite using SQLCipher (`SQLitePCLRaw.bundle_e_sqlcipher` with EF Core or Dapper).
@@ -73,6 +243,10 @@ The legacy codebase contains overlapping, dated modules:
     - Stores `PeerContact` records, primary identity keys, authorized secondary devices, and trust levels.
   - **`IRatchetSessionRepository`** (`Percolator.Application2.Ports`):
     - Persists active `DirectRatchetSession` states (root key, current chain keys, skipped message key cache) under encryption.
+  - **`IGroupReceiverSessionRepository`** (`Percolator.Application2.Ports`):
+    - Persists active `GroupReceiverSession` states (channel, author ID, author device ID, current iteration, chain key, skipped message keys) under encryption.
+  - **`IGroupSenderKeyRepository`** (`Percolator.Application2.Ports`):
+    - Persists active `GroupSenderKeyRatchet` states (channel, author ID, author device ID, current iteration, chain key, Ed25519 signing key) under encryption.
   - **`IPrivatePreKeyStore`** (`Percolator.Domain.Identities.Ports`):
     - Persists local private signed pre-keys and pools of private one-time pre-keys, supporting atomic retrieval and consumption by key ID for inbound X3DH responder handshakes.
   - **`IGroupCredentialsRepository`** (`Percolator.Domain.Security.Ports`):
@@ -86,6 +260,8 @@ The legacy codebase contains overlapping, dated modules:
   - **`IManifestCatalogRepository`** (`Percolator.Apps.FileTransfer` port):
     - Indexes hosted and remote file manifests (`FileManifest`), chunk hashes, and Merkle root trees.
 
+---
+
 ### 4.4 Ingress Edge Filtering & Stream Registry (`Percolator.Application2.Ports`)
 - **Adapters**:
   - **`IIngressFilterService`** (`Percolator.Application2.Ports`):
@@ -96,17 +272,26 @@ The legacy codebase contains overlapping, dated modules:
   - **`IPeerReachabilityService`** (`Percolator.Application2.Routing`):
     - Evaluates direct reachability (via active connection or discovery rendezvous ticket) and resolves home relay mailboxes for offline peers.
 
+---
+
 ### 4.5 Network Transport, Streaming & Dispatching
 - **Adapters**:
   - **`ITransportDispatcher`** (`Percolator.Application2.Delivery.Ports`):
-    - Routes `OutboxJob` packets via direct gRPC P2P channel or gRPC Relay Mailbox service based on `DeliveryChannelType`.
-  - **`IInboundIngressService` gRPC Server Endpoint**:
-    - ASP.NET Core gRPC service exposing `DeliverOpaqueMessage(OpaqueEnvelopeRequest)` to receive incoming frames from peers or relays.
-    - Validates packet size, invokes ingress edge filters (`IIngressFilterService`), and hands payloads to `InboundIngressPipeline`.
+    - Direct 1:1: Invokes `UnauthenticatedDeliveryService.DeliverDirect` against peer's ephemeral TLS endpoint.
+    - Relayed 1:1: Invokes `UnauthenticatedDeliveryService.EnqueueMailbox` against recipient's home relay using `DeliveryToken`.
+    - Relayed Group: Invokes `AnonymousGroupRelayService.DispatchGroupMessage` against shared channel relay with ZK membership proof.
+  - **`UnauthenticatedDeliveryEndpoint` (ASP.NET Core gRPC Service)**:
+    - Implements `UnauthenticatedDeliveryService`.
+    - Validates packet size and `DeliveryToken` validity, invokes ingress edge filters (`IIngressFilterService`), and hands unpacked envelopes to `InboundIngressPipeline`.
+  - **`RelayMailboxStreamWorker` (`IHostedService`)**:
+    - Maintains resilient duplex stream to user's home relay via `AuthenticatedRelayService.ConnectMailboxStream`.
+    - Handles challenge-response authentication with local `IdentityKey`.
+    - Receives queued `SealedEnvelopeProto` messages, feeds them into `InboundIngressPipeline`, and returns `MailboxAckProto` confirmations upon successful persistence.
+    - Automatically reconnects with exponential backoff and jitter on socket/HTTP-2 disconnects.
   - **`RelayGroupStreamWorker` (`IHostedService`)**:
-    - Manages live, resilient server-streaming gRPC subscriptions (`RelayGroupService.SubscribeGroupStream`) to host relays.
-    - Implements automatic reconnection with exponential backoff and jitter upon network drops.
-    - Feeds streamed envelopes directly into `InboundIngressPipeline`.
+    - Manages live server-streaming subscriptions (`AnonymousGroupRelayService.SubscribeGroupStream`) to host relays.
+    - Presents ZK membership proofs for each active group channel.
+    - Feeds broadcast group envelopes directly into `InboundIngressPipeline`.
   - **Ephemeral Direct P2P TLS 1.3 Transport (Anonymity & Blind-Trust Architecture)**:
     - **Security Architecture**: TLS does *not* authenticate peers; authentic end-to-end identity and secrecy is provided entirely by Signal Double Ratchet & X3DH application payloads. The transport layer's sole responsibility is wire encryption and network-level metadata obfuscation (masking HTTP/2 framing, gRPC route names, and packet lengths from passive network observers).
     - **Blind Trust Client Verification**: `SocketsHttpHandler` configures `RemoteCertificateValidationCallback = (_, _, _, _) => true`. This decouples TLS certificates from permanent identity keys, preventing network-level linkability/correlation of IP endpoints to identities.
@@ -116,9 +301,11 @@ The legacy codebase contains overlapping, dated modules:
       - **Antivirus Write Retry**: Writing the `.pfx` file triggers asynchronous Windows Defender/antivirus scans, which briefly hold shared file locks. The certificate writer must implement an exponential retry policy (`WriteCertificateWithRetryAsync`) to avoid file sharing violation exceptions (`IOException`).
       - **CNG Key Deletion on Rotation**: Upon certificate rotation or shutdown, explicitly delete the CNG key container via `((ECDsaCng)cert.GetECDsaPrivateKey()).Key.Delete()` to avoid leaking orphaned cryptographic keys in the Windows CNG store.
   - **Relay Client Adapter**:
-    - Publishes `PreKeyBundle` uploads to relay identities.
-    - Fetches remote peer pre-key bundles from relays out-of-band.
-    - Queues and fetches store-and-forward mailbox envelopes via `DeliveryToken` / `BlindedRoutingToken`.
+    - Publishes `PreKeyBundle` uploads to relay identities via `AuthenticatedRelayService.PublishPreKeyBundle`.
+    - Fetches remote peer pre-key bundles from relays out-of-band via `AuthenticatedRelayService.FetchPreKeyBundle`, authenticating with local `IdentityKey` signature to defeat OPK exhaustion attacks.
+    - Queues store-and-forward mailbox envelopes via `UnauthenticatedDeliveryService.EnqueueMailbox` using recipient `DeliveryToken` / `BlindedRoutingToken`.
+
+---
 
 ### 4.6 Platform, Discovery & Out-of-Band Transfer Adapters
 - **`IDateTimeProvider`** (`Percolator.Domain.Common`):
@@ -131,9 +318,10 @@ The legacy codebase contains overlapping, dated modules:
   - Dedicated out-of-band binary transfer adapter (raw TCP/QUIC data streams) bypassing domain Double Ratchet channels for multi-megabyte/gigabyte payload streaming.
   - Streams chunk payloads to/from local disk with SHA-256 / Merkle root integrity verification.
 
+---
+
 ### 4.7 Transient State Cleanup & Pruning Services (Research & Design)
-- **Problem Statement**: Multiple transient and ephemeral tables accumulate stale records that must be pruned periodically without locking active database transactions or degrading ingress throughput.
-- **Research Scope & Target Adapters**:
+- **Problem Statement**: Multiple transient and ephemeral tables accumulate stale records that must be pruned periodically without locking active database transactions or degrading ingress throughput.\n- **Research Scope & Target Adapters**:
   - **`OutboxRetentionPruner`**: Evaluates retention window policies for `OutboxJob` rows (e.g., pruning `Delivered` jobs older than 7 days, purging dead-letter jobs that have exceeded `MaxRetryCount` and manual inspection windows).
   - **`RelayPreKeyDirectoryPruner`**: Evicts expired signed pre-key bundles and consumed or timed-out one-time pre-keys from `IRelayPreKeyDirectoryRepository` environmental records.
   - **`UnknownGroupMessageCachePruner`**: Purges buffered group chat frames from `IUnknownGroupMessageCacheRepository` that exceed maximum TTL (e.g. 48 hours) where the author's sender key distribution was never received.
