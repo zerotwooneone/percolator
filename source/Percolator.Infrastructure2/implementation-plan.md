@@ -233,36 +233,54 @@ Carried inside `SealedEnvelopeProto.encrypted_package` (opaque to relays and pas
 
 ---
 
-### 4.3 Persistence & Database Repositories
-- **Database Engine**: Encrypted SQLite using SQLCipher (`SQLitePCLRaw.bundle_e_sqlcipher` with EF Core or Dapper).
-- **Adapters**:
-  - **`IOutboxRepository`** (`Percolator.Application2.Delivery.Ports`):
-    - Persists outbound messages (`OutboxJob`) in transactional storage.
-    - Supports FIFO retrieval of pending jobs, status progression (`Pending` $\rightarrow$ `InFlight` $\rightarrow$ `Delivered` / `Failed`), and persona black-holing (`PauseJobsForIdentityAsync`).
-  - **`IPeerContactRepository`** (`Percolator.Domain.Identities.Ports`):
-    - Stores `PeerContact` records, primary identity keys, authorized secondary devices, and trust levels.
-  - **`IRatchetSessionRepository`** (`Percolator.Application2.Ports`):
-    - Persists active `DirectRatchetSession` states (root key, current chain keys, skipped message key cache) under encryption.
-  - **`IGroupReceiverSessionRepository`** (`Percolator.Application2.Ports`):
-    - Persists active `GroupReceiverSession` states (channel, author ID, author device ID, current iteration, chain key, skipped message keys) under encryption.
-  - **`IGroupSenderKeyRepository`** (`Percolator.Application2.Ports`):
-    - Persists active `GroupSenderKeyRatchet` states (channel, author ID, author device ID, current iteration, chain key, Ed25519 signing key) under encryption.
-  - **`IPrivatePreKeyStore`** (`Percolator.Domain.Identities.Ports`):
-    - Persists local private signed pre-keys and pools of private one-time pre-keys, supporting atomic retrieval and consumption by key ID for inbound X3DH responder handshakes.
-  - **`IGroupCredentialsRepository`** (`Percolator.Domain.Security.Ports`):
-    - Persists client-side `GroupCredentials` (master keys, auth credential MACs, blob keys) under encryption.
-  - **`IChannelRepository`** (`Percolator.Domain.Channels.Ports`):
-    - Persists direct channels (`DirectChannel`) and group channels (`GroupChannel`) with member roles, epochs, and encrypted payload logs (`ChannelPayload`). Serves as the single authoritative persistence store for all channel state across applications.
-  - **`IRelayPreKeyDirectoryRepository`** (`Percolator.Domain.Relays.Ports`):
-    - Backs the relay pre-key hosting directory with paging, expiration cleanup, and quota enforcement.
-  - **`IUnknownGroupMessageCacheRepository`** (`Percolator.Apps.Chat` port):
-    - Persists bounded out-of-order group messages awaiting author sender key distribution.
-  - **`IManifestCatalogRepository`** (`Percolator.Apps.FileTransfer` port):
-    - Indexes hosted and remote file manifests (`FileManifest`), chunk hashes, and Merkle root trees.
+### 4.3 Persistence, Database Repositories & Fast-Path Query Services
+
+Database Engine: Encrypted SQLite using SQLCipher (`SQLitePCLRaw.bundle_e_sqlcipher` with EF Core or Dapper).
+
+#### 1. Domain Aggregate Repositories (Write / Consistency Enforcing)
+- **`IOutboxRepository`** (`Percolator.Application2.Delivery.Ports`):
+  - Persists outbound messages (`OutboxJob`) in transactional storage.
+  - Supports FIFO retrieval of pending jobs, status progression (`Pending` $\rightarrow$ `InFlight` $\rightarrow$ `Delivered` / `Failed`), and persona black-holing (`PauseJobsForIdentityAsync`).
+- **`IPeerContactRepository`** (`Percolator.Domain.Identities.Ports`):
+  - Stores `PeerContact` records, primary identity keys, authorized secondary devices, and trust levels.
+- **`IRatchetSessionRepository`** (`Percolator.Application2.Ports`):
+  - Persists active `DirectRatchetSession` states (root key, current chain keys, skipped message key cache) under encryption.
+- **`IGroupReceiverSessionRepository`** (`Percolator.Application2.Ports`):
+  - Persists active `GroupReceiverSession` states (channel, author ID, author device ID, current iteration, chain key, skipped message keys) under encryption.
+- **`IGroupSenderKeyRepository`** (`Percolator.Application2.Ports`):
+  - Persists active `GroupSenderKeyRatchet` states (channel, author ID, author device ID, current iteration, chain key, Ed25519 signing key) under encryption.
+- **`IPrivatePreKeyStore`** (`Percolator.Domain.Identities.Ports`):
+  - Persists local private signed pre-keys and pools of private one-time pre-keys, supporting atomic retrieval and consumption by key ID for inbound X3DH responder handshakes.
+- **`IGroupCredentialsRepository`** (`Percolator.Domain.Security.Ports`):
+  - Persists client-side `GroupCredentials` (master keys, auth credential MACs, blob keys) under encryption.
+- **`IChannelRepository`** (`Percolator.Domain.Channels.Ports`):
+  - Persists direct channels (`DirectChannel`) and group channels (`GroupChannel`) with member roles, epochs, and encrypted payload logs (`ChannelPayload`). Serves as the single authoritative persistence store for all channel state across applications.
+- **`IRelayPreKeyDirectoryRepository`** (`Percolator.Domain.Relays.Ports`):
+  - Backs the relay pre-key hosting directory with paging, expiration cleanup, and quota enforcement.
+- **`IUnknownGroupMessageCacheRepository`** (`Percolator.Apps.Chat` port):
+  - Persists bounded out-of-order group messages awaiting author sender key distribution.
+- **`IManifestCatalogRepository`** (`Percolator.Apps.FileTransfer` port):
+  - Indexes hosted and remote file manifests (`FileManifest`), chunk hashes, and Merkle root trees.
+
+#### 2. Fast-Path Read Query Adapters (Bypassing Domain Aggregates via Direct SQL / Dapper Projections)
+- **`SqlChatMessageQueryService`** (`Percolator.Apps.Chat.Ports.IChatMessageQueryService`):
+  - Queries indexed `ChannelPayloads` and joined reaction/receipt tables via direct paged SQL (`WHERE ChannelId = @channelId AND Sequence < @beforeSeq ORDER BY Sequence DESC LIMIT @limit`). Returns lightweight `ChatMessageReadModel` instances without hydrating domain aggregates.
+- **`SqlConversationListQueryService`** (`Percolator.Apps.Chat.Ports.IConversationListQueryService`):
+  - Direct SQL query aggregating active channels, last message snippet, timestamp, and unread counts for the UI channel list.
+- **`SqlGroupInvitationQueryService`** (`Percolator.Apps.Chat.Ports.IGroupInvitationQueryService`):
+  - Fast query for pending group invitations awaiting user consent.
+- **`SqlOutboxQueryService`** (`Percolator.Application2.Delivery.Ports.IOutboxQueryService`):
+  - Reads pending/failed outbox job summaries for UI diagnostic dashboards without hydrating byte payload buffers.
+- **`SqlPeerContactQueryService`** (`Percolator.Application2.Ports.IPeerContactQueryService`):
+  - Fetches contact book rows and reachability summaries without loading private keys or device link proofs.
+- **`SqlDiscoveryQueryService`** (`Percolator.Apps.Discovery.Ports.IDiscoveryQueryService`):
+  - Reads active peer presence entries and locator cache records directly.
+- **`SqlFileTransferQueryService`** (`Percolator.Apps.FileTransfer.Ports.IFileTransferQueryService`):
+  - Reads active file transfer task progress, byte rates, and manifest catalogs without locking active chunk transfer state machines.
 
 ---
 
-### 4.4 Ingress Edge Filtering & Stream Registry (`Percolator.Application2.Ports`)
+### 4.4 Ingress Edge Filtering, Stream Registry & Envelope Unwrapping (`Percolator.Application2.Ports`)
 - **Adapters**:
   - **`IIngressFilterService`** (`Percolator.Application2.Ports`):
     - Enforces blacklist filtering against blocked identities (`PeerTrustLevel.Blocked`), sender rate limits, and identity dormancy status.
@@ -271,6 +289,8 @@ Carried inside `SealedEnvelopeProto.encrypted_package` (opaque to relays and pas
     - Detects HTTP/2 connection drops and backpressure flow-control saturation (`StreamWriteResult`).
   - **`IPeerReachabilityService`** (`Percolator.Application2.Routing`):
     - Evaluates direct reachability (via active connection or discovery rendezvous ticket) and resolves home relay mailboxes for offline peers.
+  - **`SealedEnvelopeUnwrapper`** (`Percolator.Application2.Ports.ISealedEnvelopeUnwrapper`):
+    - Bridges relay `MailboxEnvelope` instances to strongly typed `InboundEnvelope` objects using `ProtobufSessionWirePacker`.
 
 ---
 
@@ -315,13 +335,14 @@ Carried inside `SealedEnvelopeProto.encrypted_package` (opaque to relays and pas
 - **`KademliaRoutingTable`** (`Percolator.Apps.Discovery`):
   - Manages 160-bit XOR distance metrics, $k=20$ K-bucket storage, and node contact tables for decentralized rendezvous discovery. (Note: UDP LAN discovery is explicitly excluded).
 - **`IOutBandTransferAdapter` & `IFileChunkStorage`** (`Percolator.Apps.FileTransfer`):
-  - Dedicated out-of-band binary transfer adapter (raw TCP/QUIC data streams) bypassing domain Double Ratchet channels for multi-megabyte/gigabyte payload streaming.
-  - Streams chunk payloads to/from local disk with SHA-256 / Merkle root integrity verification.
+  - Dedicated out-of-band binary transfer adapter (raw TCP/QUIC data streams) bypassing domain Double Ratchet channels for multi-megabyte/gigabyte payload streaming (`TcpOutBandTransferAdapter`).
+  - Streams chunk payloads to/from local disk with SHA-256 / Merkle root integrity verification (`DiskFileChunkStorage`).
 
 ---
 
 ### 4.7 Transient State Cleanup & Pruning Services (Research & Design)
-- **Problem Statement**: Multiple transient and ephemeral tables accumulate stale records that must be pruned periodically without locking active database transactions or degrading ingress throughput.\n- **Research Scope & Target Adapters**:
+- **Problem Statement**: Multiple transient and ephemeral tables accumulate stale records that must be pruned periodically without locking active database transactions or degrading ingress throughput.
+- **Research Scope & Target Adapters**:
   - **`OutboxRetentionPruner`**: Evaluates retention window policies for `OutboxJob` rows (e.g., pruning `Delivered` jobs older than 7 days, purging dead-letter jobs that have exceeded `MaxRetryCount` and manual inspection windows).
   - **`RelayPreKeyDirectoryPruner`**: Evicts expired signed pre-key bundles and consumed or timed-out one-time pre-keys from `IRelayPreKeyDirectoryRepository` environmental records.
   - **`UnknownGroupMessageCachePruner`**: Purges buffered group chat frames from `IUnknownGroupMessageCacheRepository` that exceed maximum TTL (e.g. 48 hours) where the author's sender key distribution was never received.

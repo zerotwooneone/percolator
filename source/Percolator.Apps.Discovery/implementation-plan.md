@@ -7,6 +7,9 @@
   - Zero reference to infrastructure/transport/storage libraries (no UDP sockets, raw TCP, SQLite, or OS APIs).
   - Strict serialization boundary: Application layer handles pure C# DTOs and delegates serialization to `IPayloadSerializer`. Concrete Protobuf contracts (`.proto`) and Google Protobuf code live strictly in `Percolator.Infrastructure2.Serialization`.
   - Implements `IAppPlugin` (`AppId.Discovery = 0x02`) and `IAppPayloadHandler` from `Percolator.PluginSdk`.
+  - **CQRS Separation (Rendezvous State vs. Fast Read Queries)**:
+    - **Write Path**: State updates (rendezvous announcements, contact locator registrations, DHT bucket routing) update internal models or domain repositories.
+    - **Read Path**: The UI and routing layers query peer reachability, presence summaries, and locator status via a dedicated read-only query port (`IDiscoveryQueryService`), skipping domain aggregate loading or full DHT bucket traversal.
   - **Prerequisite Handshake & Prekey Bundle Invariant**:
     - Discovery announcement and locator queries **require** that the remote peer has already successfully completed a mutual cryptographic handshake AND has an active, valid `PreKeyBundle` available.
     - Peered nodes without established trust or unconsumable pre-keys are suppressed from rendezvous announcements and reachability resolution. This ensures nodes can never be advertised if communication cannot be initiated, and grants peers sovereign control over whether and how they can be discovered.
@@ -56,7 +59,7 @@
 
 ---
 
-## Milestone 3: Rendezvous & Presence State Machine
+## Milestone 3: Rendezvous, Presence State Machine & Fast Queries
 
 ### 3.1 Presence Ticket Management
 - **`RendezvousTicket` Value Object/Entity**:
@@ -67,7 +70,15 @@
   - Prunes expired presence tickets using domain clock abstractions (`IDateTimeProvider`).
   - Answers contact reachability inquiries queried by `IRoutingCoordinator` (`IPeerReachabilityService`).
 
-### 3.2 Test Doubles & Unit Tests (`Percolator.Apps.Discovery.Tests/Rendezvous`)
+### 3.2 Read-Only Discovery Query Port
+- **`IDiscoveryQueryService`** (`Percolator.Apps.Discovery.Ports`):
+  - Read-only query port for UI presence dashboards and fast contact reachability queries:
+    - `Task<IReadOnlyList<PeerPresenceReadModel>> GetActivePeerPresencesAsync(CancellationToken ct = default);`
+    - `Task<PeerPresenceReadModel?> GetPeerPresenceAsync(PublicIdentityId peerId, CancellationToken ct = default);`
+  - Bypasses DHT bucket rebalancing or domain aggregate locking, querying the localized routing cache directly.
+
+### 3.3 Test Doubles & Unit Tests (`Percolator.Apps.Discovery.Tests/Rendezvous`)
 - `RendezvousStateMachineTests.Register_WhenTtlExpired_PurgesExpiredTickets`: asserts ticket expiration pruning with virtual time.
 - `RendezvousStateMachineTests.ResolveTicket_WhenValid_ReturnsEndpointDescriptor`: asserts active ticket retrieval.
 - `RendezvousStateMachineTests.ResolveTicket_WhenPeerHasNoPreKeyBundle_ReturnsUnreachable`: asserts pre-key requirement.
+- `DiscoveryQueryServiceTests.GetActivePeerPresencesAsync_ReturnsActivePresences`: asserts fast read query accuracy.
