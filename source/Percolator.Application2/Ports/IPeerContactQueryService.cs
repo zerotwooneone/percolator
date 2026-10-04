@@ -7,6 +7,7 @@ public sealed record PeerContactSummaryReadModel(
     PublicIdentityId IdentityId,
     string DisplayName,
     PeerTrustLevel TrustLevel,
+    ContactState State,
     DateTimeOffset AddedAtUtc,
     bool IsOnline);
 
@@ -14,6 +15,7 @@ public sealed record PeerContactDetailReadModel(
     PublicIdentityId IdentityId,
     string DisplayName,
     PeerTrustLevel TrustLevel,
+    ContactState State,
     IdentityKey PrimaryPublicKey,
     IReadOnlyList<DeviceId> RegisteredDevices,
     DateTimeOffset AddedAtUtc,
