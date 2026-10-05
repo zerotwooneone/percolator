@@ -6,7 +6,7 @@
 
 Following Clean Architecture principles:
 - **Dependencies Flow Inward**: `Infrastructure2` references `Percolator.Domain`, `Percolator.Application2`, and `Percolator.PluginSdk`. It does NOT expose infrastructure-specific types (e.g., SQLite connections, gRPC stubs, Protobuf classes, raw sockets) to the domain or application layers.
-- **Port Realization**: Every component in this project implements an interface (port) defined by `Percolator.Domain`, `Percolator.Application2`, or `Percolator.PluginSdk`.
+- **Port Realization**: Every component in this project implements an interface (port) defined by `Percolator.Domain`, `Percolator.Application2`, `Percolator.PluginSdk`, or application plugins (`Percolator.Apps.*`).
 - **Wire Contract & Serialization Ownership**: Concrete Protobuf `.proto` schemas, code-generated message classes, gRPC service stubs, and binary serializers live strictly within `Percolator.Infrastructure2`. The inner layers interact solely via pure C# DTOs and domain models via the `IPayloadSerializer` and `ISessionWirePacker` ports.
 
 ---
@@ -56,8 +56,7 @@ The legacy codebase contains dated, overlapping modules marked for total deletio
   - **Curve25519 (X25519) Diffie-Hellman**: Computes scalar multiplication between private keys and public DH keys (`ComputeDiffieHellman`, `DeriveX3dhMasterSecret`).
   - **HKDF / HMAC Ratchet Steps**: Performs SHA-256 HMAC-based root key updates (`KdfRk`) and symmetric chain key advances (`StepRatchet`).
   - **Authenticated Encryption**: AES-256-GCM authenticated symmetric encryption (`EncryptAesGcm`, `DecryptAesGcm`).
-  - **Resilient Public Key Parsing**: Supports importing public keys from both raw 32/64/65-byte point spans and ASN.1 DER SubjectPublicKeyInfo structures without throwing parsing exceptions.
-  - **Logging Guardrails**: Redacts all key spans and secrets in logs, controlled via `CryptographyOptions`.
+  - **Resilient Public Key Parsing**: Supports importing public keys from both raw 32/64/65-byte point spans and ASN.1 DER SubjectPublicKeyInfo structures without throwing parsing exceptions.\n  - **Logging Guardrails**: Redacts all key spans and secrets in logs, controlled via `CryptographyOptions`.
 - **Adapter**: `ZkgroupCryptographyService` (`IZkProofEngine`)
   - **Native zkgroup FFI**: Wraps `Signal.Interop` native C/Rust binaries with safe handle management.
   - **ZK Group Presentations**: Generates and verifies zero-knowledge membership proofs for anonymous group relay interactions (`VerifyGroupPresentation`, `GenerateGroupPresentation`).
@@ -217,10 +216,9 @@ Carried inside `SealedEnvelopeProto.encrypted_package` (opaque to relays and pas
     - `bytes onetime_prekey_id = 4;`
     - `bytes encrypted_payload = 5;`
 
-#### 5. Application Plugins (`chat.proto`, `discovery.proto`, `filetransfer.proto`)
+#### 5. Application Plugins (`chat.proto`, `discovery.proto`)
 - `chat.proto`: `TextMessageDto`, `ReadReceiptDto`, `DeliveredReceiptDto`, `EmojiAnnotationDto`, `SenderKeyDistributionDto`, `GroupUpdateDto`, `ProfileUpdateDto`.
 - `discovery.proto`: `DhtPingPayload`, `DhtPongPayload`, `DhtFindNodeRequest`, `DhtFindNodeResponse`, `NodeInfoProto`.
-- `filetransfer.proto`: `FileTransferService` (`rpc TransferChunks`), `TransferChunkRequest`, `TransferChunkResponse`, `FileManifestDto`, `ManifestQueryDto`, `TransferNegotiationDto`.
 
 #### Serialization Adapters:
 - **`ProtobufSessionWirePacker`** (`Percolator.Application2.Ports.ISessionWirePacker`):
@@ -262,8 +260,8 @@ Database Engine: Encrypted SQLite using SQLCipher (`SQLitePCLRaw.bundle_e_sqlcip
   - Backs the relay pre-key hosting directory with paging, expiration cleanup, and quota enforcement.
 - **`IUnknownGroupMessageCacheRepository`** (`Percolator.Apps.Chat` port):
   - Persists bounded out-of-order group messages awaiting author sender key distribution.
-- **`IManifestCatalogRepository`** (`Percolator.Apps.FileTransfer` port):
-  - Indexes hosted and remote file manifests (`FileManifest`), chunk hashes, and Merkle root trees.
+- **`ITransferSessionRepository`** (`Percolator.Apps.FileTransfer.Ports`):
+  - Persists active and historical file transfer sessions, manifests, bitfields, and swarm peer caches.
 
 #### 2. Fast-Path Read Query Adapters (Bypassing Domain Aggregates via Direct SQL / Dapper Projections)
 - **`SqlChatMessageQueryService`** (`Percolator.Apps.Chat.Ports.IChatMessageQueryService`):
@@ -337,16 +335,13 @@ Database Engine: Encrypted SQLite using SQLCipher (`SQLitePCLRaw.bundle_e_sqlcip
 
 ---
 
-### 4.6 Platform, Discovery & Out-of-Band Transfer Adapters
+### 4.6 Platform & Discovery Adapters
 - **`IDateTimeProvider`** (`Percolator.Domain.Common`):
   - `SystemDateTimeProvider` delegating to `DateTimeOffset.UtcNow`.
 - **`ICredentialStorage`** (Security Provider):
   - `DpapiCredentialService` utilizing Windows DPAPI (`ProtectedData.Protect`/`Unprotect` with additional static entropy) and strict filesystem ACLs (`FileSystemAccessRule` granting `FullControl` solely to `WindowsIdentity.GetCurrent().User` with inherited permissions stripped) to safeguard SQLCipher encryption passphrases and root identity seed keys on disk.
 - **`KademliaRoutingTable`** (`Percolator.Apps.Discovery`):
   - Manages 160-bit XOR distance metrics, $k=20$ K-bucket storage, and node contact tables for decentralized rendezvous discovery. (Note: UDP LAN discovery is explicitly excluded).
-- **`IOutBandTransferAdapter` & `IFileChunkStorage`** (`Percolator.Apps.FileTransfer`):
-  - Dedicated out-of-band binary transfer adapter (raw TCP/QUIC data streams) bypassing domain Double Ratchet channels for multi-megabyte/gigabyte payload streaming (`TcpOutBandTransferAdapter`).
-  - Streams chunk payloads to/from local disk with SHA-256 / Merkle root integrity verification (`DiskFileChunkStorage`).
 
 ---
 
@@ -382,3 +377,81 @@ Database Engine: Encrypted SQLite using SQLCipher (`SQLitePCLRaw.bundle_e_sqlcip
 - **`RelayBlobRetentionPruner`** (`IHostedService`):
   - Background cron worker on relays executing periodic sweeps to delete expired blobs based on TTL (default 14 days).
   - Enforces disk storage high/low watermarks (evicting oldest expired blobs if disk usage exceeds 90%).
+
+---
+
+### 4.9 High-Performance File Transfer Adapters, Multi-Stream Engine & Relay Pipes (`Percolator.Apps.FileTransfer.Ports`)
+
+Concrete realization of out-of-band high-speed croc-inspired and BitTorrent swarm mechanics:
+
+#### 1. Multi-Stream Sockets & Binary Framing Engine
+- **`TcpMultiStreamPool` & `TransferStream`** (`ITransferStreamPool`, `ITransferStreamPoolFactory`, `ITransferStream`):
+  - Opens and manages a pool of 4 to 8 parallel multiplexed TCP/QUIC connections with `TCP_NODELAY = true`.
+  - Implements the binary length-prefixed framing wire protocol:
+    - `0x01 STREAM_HANDSHAKE`: Handshake with `SessionId`, `StreamIndex`, and `StreamAuthToken`.
+    - `0x02 BITFIELD`: Bitfield declaration of possessed chunks.
+    - `0x03 HAVE`: Chunk verification announcement.
+    - `0x04 REQUEST_CHUNK` & `0x05 CHUNK_DATA`: 1 MB chunk streaming with AES-256-GCM authentication tags.
+    - `0x06 CANCEL_CHUNK`: Endgame chunk cancellation.
+    - `0x07 CHOKE` / `0x08 UNCHOKE`: Transport backpressure signaling.
+    - `0x09 KEEP_ALIVE`: Liveness ping frames.
+    - `0x0A PEX_PEERS`: Out-of-band peer exchange gossip frames.
+  - Work-stealing scheduler: Detects stalled streams and redistributes in-flight chunk requests to faster streams in the pool.
+
+#### 2. Channel Relay Transfer Pipe (Client & Relay Service Endpoint)
+- **`RelayTransferPipeClient`**:
+  - Connects 4 to 8 parallel streams to the channel's designated relay endpoint: `POST /transfer-pipes/{sessionId}` (or WebSocket `GET /transfer-pipes/{sessionId}/ws`).
+  - Presents `PipeAuthToken = HMAC-SHA256(K_transfer, "relay-pipe-rendezvous")` in HTTP headers (`X-Pipe-Auth`).
+  - Operates as a transparent binary stream pipe to the paired peer.
+- **Relay Server Pipe Service (Relay-Side Execution)**:
+  - Pairs incoming sender and receiver streams by `(SessionId, StreamIndex)`.
+  - Executes zero-copy bidirectional socket splicing (`System.IO.Pipelines` or `PipeReader.CopyToAsync`).
+  - **Zero Disk Usage**: Pure memory buffer pipe (bounded to 2 MB buffer per stream).
+  - **Operator Opt-In Safeguards**: Configured via `RelayFileTransferCapabilities`:
+    - `SupportsTransferPipes`: If false, relay rejects connection with HTTP 403 Forbidden.
+    - `MaxPipeBandwidthBytesPerSec`: Bandwidth throttling per active pipe session.
+    - `MaxConcurrentPipes`: Rejects new pipe negotiations if concurrent limit is reached.
+    - Idle timeout: Closes pipe after 60 seconds of silence.
+
+#### 3. Relay Blind Swarm Tracker (Client & Relay Service Endpoint)
+- **`RelaySwarmTrackerClient`** (`IRelaySwarmTrackerClient`):
+  - Sends out-of-band HTTP `POST /swarms/{blindSwarmId}/announce` to channel relay.
+  - Blind identifier: $\text{BlindSwarmId} = \text{HMAC-SHA256}(K_{\text{transfer}}, \text{"swarm-rendezvous"})$.
+  - Receives list of active candidate endpoints for the swarm without touching in-band ratchet channels.
+- **Relay Server Swarm Tracker Endpoint (Relay-Side Execution)**:
+  - In-memory thread-safe dictionary: `ConcurrentDictionary<byte[], SwarmPeerRegistry>`.
+  - Ephemeral 90-second sliding expiration. Entries purged if heartbeat stops.
+  - Zero disk storage; zero awareness of channel identity or file contents.
+  - Opt-in enforcement: If `SupportsSwarmTracker = false`, returns HTTP 501 Not Implemented, causing clients to fall back strictly to out-of-band PEX.
+
+#### 4. Desktop Sparse File Storage & Atomic File Finalization
+- **`DesktopSparseFileStore`** (`IDesktopFileStorage`):
+  - **Windows Sparse File Pre-Allocation**:
+    - Opens target files with `FileShare.ReadWrite | FileShare.Delete`.
+    - Invokes `DeviceIoControl` with `FSCTL_SET_SPARSE` (IOCTL `0x000900C4`) to enable sparse file allocation.
+    - Advances end-of-file pointer via `SetFilePointerEx` / `SetEndOfFile` (or cross-platform `FileStream.SetLength`).
+    - Allocates multi-gigabyte files instantaneously without zero-filling or physical disk block pre-allocation.
+  - **File Staging with `.percolator-part`**:
+    - Writes incoming chunks to `{relativePath}.percolator-part` using `RandomAccess.WriteAsync(SafeFileHandle, ReadOnlyMemory<byte>, fileOffset, ct)`.
+    - Protects incomplete files against Windows Defender, search indexers, and accidental user execution.
+  - **Atomic Finalization**:
+    - Upon complete chunk verification of all blocks belonging to a file:
+    - Flushes file buffers to disk.
+    - Atomically renames `{relativePath}.percolator-part` to `{relativePath}` via `File.Move(..., overwrite: true)`.
+    - Sets `File.SetLastWriteTimeUtc` from manifest timestamp.
+  - **Resumption Bitfield Scanner**:
+    - Reads existing `.percolator-part` and completed files on disk in 1 MB blocks.
+    - Computes SHA-256 over each block and compares against `ChunkHashes` to construct the resumption `Bitfield`.
+
+#### 5. Bandwidth Rate Limiter
+- **`TokenBucketRateLimiter`** (`ITransferRateLimiter`):
+  - Implements high-precision token-bucket algorithm using `PeriodicTimer` or fractional nanosecond timestamp tracking.
+  - Enforces global speed caps (`MaxDownloadBytesPerSec`, `MaxUploadBytesPerSec`) and per-session overrides.
+  - Dynamically throttles `Stream.ReadAsync` and `Stream.WriteAsync` loops in `TcpMultiStreamPool`.
+
+#### 6. SQLite Repositories for File Transfer
+- Implements `ITransferSessionRepository`:
+  - `ft_transfer_sessions`: Stores session state, channel ID, peer identity, root name, metrics, manifest blob ID, session key, base nonce, destination path, and status.
+  - `ft_manifest_files`: Stores individual file entries and bundle byte offsets.
+  - `ft_session_bitfields`: Stores binary chunk bitfield state for active downloads.
+  - `ft_swarm_peers`: Caches known active swarm peer endpoints.
