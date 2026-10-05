@@ -1,258 +1,57 @@
-# Percolator.PluginSdk Implementation Plan: Out-of-Band Encrypted Blob Storage & Transfer
+# Percolator.PluginSdk Implementation Plan: Encrypted Blob Storage Contracts
 
-## 1. Problem Definition & Architectural Motivation
+## 1. Overview & Architectural Role
 
-### 1.1 The Double Ratchet 64 KB Payload Limit
-In `Percolator.Application`, end-to-end encrypted direct channels and multi-party group channels operate over Double Ratchet and Signal Sender Key state machines with a strict invariant:
+`Percolator.PluginSdk` provides the public microkernel contracts, DTOs, interfaces, and value objects exposed to application plugins (`Percolator.Apps.Chat`, `Percolator.Apps.Discovery`, `Percolator.Apps.FileTransfer`, etc.).
+
+Following Onion Architecture principles:
+- **Dependencies Flow Inward**: `PluginSdk` depends **only** on `Percolator.Domain`.
+- **Zero Technical Infrastructure**: Contains zero references to SQLite, EF Core, gRPC, HTTP, raw sockets, or operating system file systems.
+- **Microkernel Contract Boundary**: Plugins consume services provided by the host application through pure C# interfaces. Inner layers (`Percolator.Application2`) implement these interfaces, and outer adapters (`Percolator.Infrastructure2`) provide technical realization.
+
+---
+
+## 2. Problem Definition & Contract Motivation
+
+### 2.1 The Double Ratchet 64 KB Invariant
+In `Percolator.Application2`, end-to-end encrypted direct channels and multi-party group channels enforce a strict payload boundary:
 ```csharp
 public const int MaxPayloadBytes = 64 * 1024; // 64 KB
 ```
-This constraint is essential for cryptographic channel health:
-- Bounds memory footprint of in-flight message keys.
-- Prevents transactional outbox bloat and head-of-line blocking in reliable delivery queues.
-- Protects against memory exhaustion when advancing skipped-key ratchets.
+This constraint bounds in-flight message keys in memory, prevents transactional outbox bloat in SQLite, and ensures low-latency message ratchet advancement.
 
-### 1.2 Why `Percolator.Apps.FileTransfer` is the Wrong Fit for Chat Media
-`Percolator.Apps.FileTransfer` is designed as a heavy, BitTorrent-like decentralized distribution mechanism for arbitrary multi-gigabyte files (Merkle trees, K-buckets, peer swarms). Using `FileTransfer` for a 1.5 MB photo or voice note introduces unacceptable latency, complex swarm discovery, and excessive protocol overhead.
+### 2.2 Why Not `Percolator.Apps.FileTransfer`?
+`Percolator.Apps.FileTransfer` is a heavy, BitTorrent-like peer swarming network for multi-gigabyte files (Merkle trees, K-buckets, chunk negotiation). Using it for typical chat media (a 1.5 MB photo or voice note) introduces excessive latency, requires online swarms, and creates massive protocol overhead.
 
-### 1.3 The Solution: Single-Endpoint Encrypted Blob Storage in `PluginSdk`
-`Percolator.PluginSdk` provides a high-level abstraction (`IBlobStorageService`) allowing any application plugin (`Apps.Chat`, `Apps.Discovery`, etc.) to:
-1. Strip invasive EXIF / GPS geolocation metadata client-side before encryption.
-2. Encrypt medium-sized blobs (1 KB to 50 MB) client-side with an ephemeral symmetric key using chunked streaming AEAD.
-3. Pad media to discrete size buckets to eliminate traffic-analysis fingerprinting.
-4. Transmit media based on **Channel Topology**:
-   - **1:1 Direct (No Relay)**: Encrypt and stage in local chunk store; stream directly peer-to-peer on recipient pull (both peers must be online).
-   - **1:1 Relayed**: Upload to the channel's designated relay for asynchronous delivery.
-   - **Group Channel**: Upload **once** to the group's single common relay for all members to fetch.
-5. Transmit a compact `BlobReference` inside the normal 64 KB E2EE ratchet envelope.
-6. Download, verify, and decrypt out-of-band with byte-range resumption and zero Large Object Heap (LOH) memory bloat.
+### 2.3 The `PluginSdk` Abstraction
+`PluginSdk` defines a lightweight, single-endpoint encrypted blob transfer abstraction (`IBlobStorageService`). It enables plugins to transmit out-of-band encrypted media (1 KB to 50 MB) by embedding a featherweight (~300-byte) `BlobReference` inside the normal 64 KB E2EE ratchet envelope.
+
+### 2.4 Separation of Responsibilities Across Projects
+- **`Percolator.PluginSdk` (This Project)**: Defines the public C# types, DTOs, and `IBlobStorageService` interface consumed by plugins.
+- **`Percolator.Application2`**: Implements `IBlobStorageService` via `BlobStorageService`, orchestrating channel topology routing (Direct P2P staging vs. Channel Relay upload) and local disk cache policies.
+- **`Percolator.Infrastructure2`**: Implements technical ports:
+  - `StreamingAesGcmCryptoService` (64 KB chunked STREAM AEAD, bucket padding, EXIF scrubbing).
+  - `RelayBlobClient` (HTTP/2 or gRPC streaming with Range resumption).
+  - `PeerStreamBlobClient` (multiplexed peer stream transfer).
+  - `LocalFileChunkStore` (atomic disk cache in AppData).
+- **`Percolator.Apps.Chat`**: Consumes `IBlobStorageService` for inline ($\le 32$ KB) vs. out-of-band ($> 32$ KB) media attachments.
 
 ---
 
-## 2. Cryptographic Security & Privacy Model
+## 3. Public Contracts & Types in `PluginSdk`
 
-```
-Sender Client                          Channel Relay / Direct P2P              Recipient Client
-┌───────────────────────┐                                                     ┌───────────────────────┐
-│ Plaintext Media       │                                                     │ Decrypted Media       │
-│ (Photo / Voice / GIF) │                                                     │ (Rendered in Chat UI) │
-└──────────┬────────────┘                                                     └──────────▲────────────┘
-           │ 1. Strip EXIF / GPS metadata                                                │ 6. Decrypt chunk stream
-           │    Pad to discrete bucket                                                   │    Verify tags per chunk
-           │    Generate K_blob (256-bit)                                                │
-           │    STREAM Chunked AEAD                                                      │
-           ▼                                                                             │
-┌───────────────────────┐              2. Upload Ciphertext Blob              ┌──────────┴────────────┐
-│ Ciphertext Stream     ├────────────────────────────────────────────────────►┌───────────────────────┐
-│ (64 KB Chunks + Tags) │                          │ Channel Media Storage  │ │ Ciphertext Stream     │
-│ + SHA-256 Digest      │                          │ (Zero Plaintext Access)│ │ (Downloaded & Cached) │
-└───────────────────────┘                          │ Content-Addressed      │ └──────────▲────────────┘
-                                                   │ Enforces Quotas & TTL  │            │
-                                                   └──────────┬─────────────┘            │ 5. Resumable Download
-                                                              │                          │    (Range requests)
-                                                              │                          │    Verify chunk tags
-┌───────────────────────┐   3. Send E2EE Chat Message         │                          │
-│ Ratchet Envelope      ├─────────────────────────────────────┼──────────────────────────┘
-│ (< 64 KB payload)     │   (carries BlobReference with       │
-│                       │    K_blob, Hash, Size, MIME, TTL,   │
-│                       │    inline BlurHash & Waveform)      │
-└───────────────────────┘                                     ▼
-```
-
-### 2.1 Cryptographic & Privacy Guarantees
-1. **Client-Side EXIF / Geolocation Scrubbing (Signal-Aligned Privacy)**:
-   - Smartphone and camera photos embed sensitive EXIF/XMP tags (GPS coordinates, device model, camera serial numbers).
-   - Prior to padding and encryption, `IBlobStorageService` strips all geolocation and hardware metadata, preventing physical location leakage to chat recipients.
-2. **Chunked Streaming AEAD (STREAM Construction)**:
-   - Media is split into fixed $64\text{ KB}$ chunks.
-   - Each chunk $i$ is encrypted with AES-256-GCM using a sequential counter nonce:
-     $$\text{Nonce}_i = N_{\text{base}} \oplus i$$
-   - Each chunk carries its own 16-byte authentication tag.
-   - Decryption operates on the fly using pooled memory (`ArrayPool<byte>.Shared`), strictly bounding memory footprint to $\le 64\text{ KB}$ and eliminating Large Object Heap (LOH) allocations.
-3. **Anti-Traffic-Analysis Padding**:
-   - Plaintext media is padded using PKCS#7 or ISO/IEC 7816-4 to discrete bucket boundaries before encryption:
-     - Files $< 1\text{ MB}$: Rounded up to nearest $32\text{ KB}$.
-     - Files $1\text{ MB} - 10\text{ MB}$: Rounded up to nearest $256\text{ KB}$.
-     - Files $> 10\text{ MB}$: Rounded up to nearest $1\text{ MB}$.
-   - The exact unpadded length is carried securely inside the E2EE ratchet envelope.
-4. **Content-Addressed Identifiers**:
-   - The blob's identifier on the relay is the hex-encoded SHA-256 digest of the complete ciphertext:
-     $$\text{BlobId} = \text{Hex}(\text{SHA-256}(\text{Ciphertext}))$$
-   - Because the ciphertext is encrypted with a random 256-bit key, $\text{BlobId}$ is indistinguishable from random noise and acts as an unguessable capability token.
-   - In group chats, the sender uploads once; all recipients download from the same content-addressed ID.
-5. **Relay Upload Authentication & Anti-DoS**:
-   - To prevent unauthenticated botnets from filling relay disks to capacity, `POST /blobs` requires an authorization proof:
-     - 1:1 Relayed: Signed upload ticket from an identity registered on that relay.
-     - Group Channel: Group Epoch Membership Token proving the uploader is an active channel member.
-6. **Cryptographic Redaction**:
-   - `BlobReference` overrides `ToString()` to redact `EncryptionKey` (`[REDACTED]`), preserving compliance with `CryptographyOptions.EnableCryptographicMaterialLogging = false`.
-
----
-
-## 3. Channel Topologies & Media Transmission Expectations
-
-Media transfer is grounded strictly in **Channel Topologies**:
-
-```
-                    ┌────────────────────────────────────────────────────────┐
-                    │                    CHANNEL TOPOLOGY                    │
-                    └───────────────────────────┬────────────────────────────┘
-                                                │
-                 ┌──────────────────────────────┼──────────────────────────────┐
-                 ▼                              ▼                              ▼
-     ┌───────────────────────┐      ┌───────────────────────┐      ┌───────────────────────┐
-     │      1:1 Direct       │      │      1:1 Relayed      │      │     Group Channel     │
-     │      (No Relay)       │      │                       │      │                       │
-     │  - Both peers ONLINE  │      │  - Designated Relay   │      │  - Single Common Relay│
-     │  - Sender stages disk │      │  - Asynchronous store │      │  - Single upload once │
-     │  - Recipient pulls P2P│      │  - 14-day retention   │      │  - All members fetch  │
-     └───────────────────────┘      └───────────────────────┘      └───────────────────────┘
-```
-
-### 3.1 Topology A: 1:1 Direct Channel (No Relay)
-- **Operational Reality**: Media can **only** be transferred when **both parties are online concurrently**.
-- **Staging & Pull Workflow**:
-  1. The sender calls `UploadBlobAsync`. Because there is no relay, `UploadBlobAsync` encrypts the media with chunked STREAM AEAD and **stages the ciphertext chunks in the sender's local disk chunk store**.
-  2. The sender dispatches the tiny `ChatMessageDto` carrying the `BlobReference` through `OutboundEgressPipeline`.
-  3. When the recipient receives the message envelope, the recipient's client calls `DownloadBlobAsync`, which requests the chunks from the sender's node over an active multiplexed peer stream (`IStreamRegistry`).
-  4. If the peer is offline, the Chat UI disables the upload button or displays: *"Waiting for recipient to come online to stream media"*.
-  5. **Zero Relay Quota**: Consumes zero relay bandwidth or disk storage.
-
-### 3.2 Topology B: 1:1 Relayed Channel
-- **Operational Reality**: The channel is configured to route through a specific relay. **That designated relay is the sole media store for the channel.**
-- **Behavior**:
-  1. The sender uploads the encrypted blob to the channel's designated relay.
-  2. The relay stores the blind ciphertext (content-addressed by SHA-256, subject to the relay's TTL, e.g. 14 days).
-  3. The sender sends the E2EE chat message with the `BlobReference` containing the relay endpoint and decryption key.
-  4. The recipient fetches the ciphertext asynchronously from that same relay upon coming online.
-
-### 3.3 Topology C: Group Channel (Common Relay)
-- **Operational Reality**: Group channels communicate via a **Single Common Relay** (the channel's rendezvous host). **That common relay is the authoritative media store for all group members.**
-- **Behavior (The Signal Model)**:
-  1. The sender uploads the encrypted, padded media blob **exactly once** to the group's common relay.
-  2. The sender distributes the `BlobReference` inside their group message using their **Sender Key** ratchet.
-  3. The common relay fans out the small (~1 KB) text envelope to all group members.
-  4. Group members render the inline BlurHash and waveform immediately, and stream the full media chunks from that same common relay (via manual tap-to-download or Wi-Fi auto-download).
-  5. The common relay enforces retention TTL (e.g. 14 days) and purges expired blobs via a background pruner.
-
----
-
-## 4. Integration with `Application2` Performance Pipeline
-
-To maintain sub-millisecond messaging performance in [`Percolator.Application2`](file:///C:/Users/squir/source/repos/percolator/source/Percolator.Application2):
-
-### 4.1 Ratchet Lock Decoupling
-- In [`OutboundEgressPipeline`](file:///C:/Users/squir/source/repos/percolator/source/Percolator.Application2/Egress/OutboundEgressPipeline.cs), Phase 2 holds a channel lock via `_channelLockService.AcquireLockAsync(context.ChannelId)`.
-- **In-Band Prohibition**: Blob encryption and network uploads must **never** occur inside `OutboundEgressPipeline`.
-- **Workflow**:
-  1. `Apps.Chat` executes `IBlobStorageService.UploadBlobAsync` out-of-band (no lock held).
-  2. Once complete, `Apps.Chat` constructs `ChatMessageDto` embedding the lightweight `BlobReference`.
-  3. `ChatMessageDto` is passed to `OutboundEgressPipeline`, which acquires the ratchet lock, advances the chain, and writes to Outbox in `< 1ms`.
-
-### 4.2 Outbox Protection (No Large Blobs in SQLite)
-- `OutboxJob` stores `PackedWireBytes` in the database.
-- Multi-megabyte media must **never** be stored in SQLite, preventing Write-Ahead-Log (WAL) bloat and database locks.
-- Ciphertext chunks are written directly to the file system (`LocalFileChunkStore`). The Outbox only handles the compact (~300-byte) `BlobReference`.
-
-### 4.3 Ingress Pipeline Isolation
-- [`InboundIngressPipeline`](file:///C:/Users/squir/source/repos/percolator/source/Percolator.Application2/Ingress/InboundIngressPipeline.cs) strictly enforces `MaxPayloadBytes = 64 * 1024`.
-- Media chunks bypass `InboundIngressPipeline` completely, streaming over dedicated HTTP/gRPC endpoints (relay) or multiplexed peer data channels (`IStreamRegistry`).
-
----
-
-## 5. Opt-In Relay Storage Roles (Servers & Individual Peers)
-
-1. **Standalone Relays (Server Opt-In)**:
-   - Operators configure their storage policy:
-     - `EnableBlobStorage = true | false`
-     - `MaxBlobSizeBytes = 50 * 1024 * 1024` (50 MB)
-     - `StorageQuotaBytes = 100 * 1024 * 1024 * 1024` (100 GB)
-     - `DefaultRetentionDays = 14`
-   - If a relay disables blob storage, it functions as a lightweight text/control router. Clients attempting to send media through a storage-disabled relay receive an explicit `RelayBlobStorageDisabled` error.
-2. **Individual Peers as Relays (Desktop Opt-In)**:
-   - Users running Percolator on desktop nodes with unmetered connections can opt-in:
-     *`[x] Act as Relay & Media Host for my groups and direct channels`*.
-   - When enabled, their local node hosts the embedded relay blob service, allowing their contacts and groups to use their machine as the channel relay.
-
----
-
-## 6. Blob Lifecycle, Retention & Local Cache Management
-
-### 6.1 Expiration & Time-to-Live (TTL)
-- Every stored blob on a relay specifies `ExpiresAtUtc` (default: 14 days).
-- Once expired, the relay permanently deletes the ciphertext.
-- **Inline Continuity**: The low-resolution thumbnail ($\le 2\text{ KB}$), BlurHash string, and audio waveform travel **inline** within the 64 KB ratchet envelope. Even after the out-of-band blob expires, the chat timeline permanently retains visual and audio scrubbing context.
-
-### 6.2 Relay-Side Retention Pruning (`BlobRetentionPruner`)
-- Relays run a background pruning worker to purge expired blobs.
-- Watermark protection: If relay disk usage exceeds 90%, the oldest expired or near-expiration blobs are evicted on an LRU basis.
-
-### 6.3 Client-Side Local Cache Management
-- Downloaded media files are stored in a dedicated local LRU cache directory with a user-configurable limit (e.g. 1 GB to 5 GB).
-- When disk usage exceeds the threshold, unpinned/oldest media files are evicted. (They can be re-fetched from the relay if still within the TTL window).
-- When a message is deleted (tombstone) or expires via disappearing message timer, the local client invokes `DeleteLocalCacheAsync` to immediately shred local media files.
-
----
-
-## 7. Architectural Allocation (Onion Architecture Layers)
-
-Responsibilities are cleanly divided across layers:
-
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│                        Percolator.Apps.Chat                            │
-│  • Strips EXIF metadata; computes BlurHash, waveform & dimensions      │
-│  • Enforces AutoDownloadPolicy (Wi-Fi vs Cellular vs Manual)          │
-│  • Embeds BlobReference in ChatMessageDto; renders BlurHash & badges   │
-│  • Calls PluginSdk IBlobStorageService.UploadBlobAsync / Download      │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │ consumes
-┌───────────────────────────────────▼────────────────────────────────────┐
-│                        Percolator.PluginSdk                            │
-│  • Public Contracts: IBlobStorageService                               │
-│  • Public DTOs: BlobUploadRequest, BlobUploadResult, BlobReference     │
-│  • Status Enums: BlobStorageMode (DirectP2P, ChannelRelay)             │
-│  • TransferProgress: BytesTransferred, TotalBytes, BytesPerSecond      │
-│  • Zero crypto engines, zero network clients, zero file I/O            │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │ implemented by
-┌───────────────────────────────────▼────────────────────────────────────┐
-│                      Percolator.Application2                           │
-│  • BlobTransferCoordinator:                                            │
-│    - If DirectChannel (no relay): stages to local chunk store for pull.│
-│    - If Relayed or GroupChannel: uploads/downloads to/from relay.      │
-│  • LocalClientLruCacheService: Enforces local 1–5 GB device disk limit │
-│  • Opt-in Relay Host Engine: Manages local hosted relay storage & TTL   │
-│  • Outbound Ports: IRelayBlobClient, IPeerStreamBlobClient, IChunkStore │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │ implemented by
-┌───────────────────────────────────▼────────────────────────────────────┐
-│                     Percolator.Infrastructure2                         │
-│  • RelayBlobClient: HTTP/2 / gRPC chunked upload/download (Range)      │
-│  • PeerStreamBlobClient: Direct QUIC/TCP stream between online peers   │
-│  • StreamingAesGcmCryptoService: 64KB chunked STREAM AEAD + ArrayPool  │
-│  • LocalFileChunkStore: Atomic file writes (.tmp -> rename) in AppData │
-└────────────────────────────────────────────────────────────────────────┘
-
-┌────────────────────────────────────────────────────────────────────────┐
-│                     Percolator.Relay (Server/Host)                     │
-│  • POST /blobs (Authenticated upload of ciphertext chunk stream)       │
-│  • GET /blobs/{sha256} (Download ciphertext with HTTP Range support)   │
-│  • BlobRetentionPruner: Background cron purging expired TTL blobs      │
-└────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 8. Proposed `PluginSdk` Contracts & Interfaces
-
-### 8.1 Blob Identification, Reference & Progress Models
+### 3.1 Blob Identification & Storage Mode
 ```csharp
 namespace Percolator.PluginSdk;
 
 public readonly record struct BlobId(string HexDigest)
 {
-    public static BlobId FromSha256(byte[] sha256Bytes) => new(Convert.ToHexString(sha256Bytes).ToLowerInvariant());
+    public static BlobId FromSha256(byte[] sha256Bytes)
+    {
+        ArgumentNullException.ThrowIfNull(sha256Bytes);
+        return new BlobId(Convert.ToHexString(sha256Bytes).ToLowerInvariant());
+    }
+
     public override string ToString() => HexDigest;
 }
 
@@ -261,15 +60,21 @@ public enum BlobStorageMode
     DirectP2P = 1,
     ChannelRelay = 2
 }
+```
 
+### 3.2 Telemetry: Transfer Progress
+```csharp
 public readonly record struct TransferProgress(
     long BytesTransferred,
     long TotalBytes,
     double BytesPerSecond)
 {
-    public double FractionComplete => TotalBytes > 0 ? (double)BytesTransferred / TotalBytes : 0.0;
+    public double FractionComplete => TotalBytes > 0 ? Math.Clamp((double)BytesTransferred / TotalBytes, 0.0, 1.0) : 0.0;
 }
+```
 
+### 3.3 The `BlobReference` Envelope Descriptor
+```csharp
 /// <summary>
 /// Lightweight descriptor carried inside E2EE application payloads (e.g. Chat ChatMessageDto).
 /// Fits comfortably within the 64 KB Double Ratchet payload limit.
@@ -303,7 +108,7 @@ public sealed record BlobReference
 }
 ```
 
-### 8.2 Upload & Download Models
+### 3.4 Upload & Download Request/Result Models
 ```csharp
 public sealed record BlobUploadRequest(
     Stream ContentStream,
@@ -332,13 +137,13 @@ public sealed record BlobDownloadResult(
     long ContentLength);
 ```
 
-### 8.3 Service Port (`IBlobStorageService`)
+### 3.5 Service Port: `IBlobStorageService`
 ```csharp
 public interface IBlobStorageService
 {
     /// <summary>
     /// Strips EXIF metadata, encrypts (chunked STREAM AEAD), and stages/transfers media:
-    /// - 1:1 Direct (no relay): stages ciphertext in local chunk store for direct peer pull.
+    /// - 1:1 Direct (no relay): stages ciphertext in local chunk store for direct peer pull (fails if peer offline).
     /// - 1:1 Relayed or GroupChannel: uploads once to the channel's designated relay.
     /// Returns a compact BlobReference suitable for embedding in an E2EE chat message.
     /// </summary>
@@ -370,16 +175,27 @@ public interface IBlobStorageService
 
 ---
 
-## 9. Implementation Safeguards & Edge Cases
+## 4. Contract Invariants & Guarantees
 
-1. **Zero Large Object Heap (LOH) Allocations**:
-   - `StreamingAesGcmCryptoService` rents $64\text{ KB}$ byte buffers from `ArrayPool<byte>.Shared`.
-   - Chunks are encrypted/decrypted in place or piped through streams, avoiding multi-megabyte contiguous arrays.
-2. **Byte-Range Resumption with Integrity**:
-   - Relays support HTTP `Range: bytes={start}-{end}`.
-   - Because each $64\text{ KB}$ chunk contains its own 16-byte authentication tag, a resumed download resumes at the nearest chunk boundary and validates integrity chunk-by-chunk.
-3. **Malicious / Corrupted Blobs**:
-   - If a relay or man-in-the-middle corrupts a single chunk, AEAD verification fails immediately.
-   - The download worker aborts, discards unverified data, and reports `BLOB_CHUNK_AUTH_FAILED`.
-4. **Offline Peer in Direct 1:1**:
-   - If a user attempts to upload a blob to a 1:1 direct channel without an active connected session, `UploadBlobAsync` immediately returns `DomainError.DirectPeerOffline("Media cannot be sent because peer is offline")`.
+1. **Payload Size Invariant**:
+   - `BlobReference` serialized size is $< 500\text{ bytes}$, fitting easily within `MaxPayloadBytes` (64 KB).
+2. **Cryptographic Redaction**:
+   - `BlobReference.ToString()` must **always** redact `EncryptionKey` and `BaseNonce` as `[REDACTED]`, preventing sensitive symmetric keys from appearing in diagnostic logs.
+3. **Client-Side Privacy Boundary**:
+   - All geolocation, camera serial numbers, and device tags in EXIF/XMP must be sanitized before encryption.
+   - Plaintext media must be bucket-padded prior to encryption to eliminate file-size fingerprinting.
+4. **Topology-Driven Transmission**:
+   - **1:1 Direct (No Relay)**: Online-only peer pull. `UploadBlobAsync` stages ciphertext in the local chunk store; the receiver pulls chunks over a multiplexed peer stream. Fails with `DIRECT_PEER_OFFLINE` if the remote peer is not connected.
+   - **1:1 Relayed & GroupChannel**: Single-relay upload. Senders upload ciphertext once to the designated channel relay; recipients fetch independently.
+
+---
+
+## 5. Implementation Status
+
+- [x] **`BlobId.cs`**: Implemented in `Percolator.PluginSdk`.
+- [x] **`BlobStorageMode.cs`**: Implemented in `Percolator.PluginSdk`.
+- [x] **`TransferProgress.cs`**: Implemented in `Percolator.PluginSdk`.
+- [x] **`BlobReference.cs`**: Implemented in `Percolator.PluginSdk` with key redaction.
+- [x] **`BlobTransferModels.cs`**: Implemented in `Percolator.PluginSdk`.
+- [x] **`IBlobStorageService.cs`**: Implemented in `Percolator.PluginSdk`.
+- [x] **`Application2` Service**: `BlobStorageService` implemented and verified by 5 unit tests in `Percolator.Application2.Tests` (62/62 passing tests).
