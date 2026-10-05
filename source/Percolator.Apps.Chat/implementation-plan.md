@@ -95,25 +95,30 @@
 ### 3.1 Media Attachment Strategy (Inline vs. Out-of-Band)
 To satisfy the strict 64 KB Double Ratchet payload limit without resorting to heavy peer swarms:
 1. **Inline Media ($\le$ 32 KB)**:
-   - Voice clips, animated stickers, custom emojis, and low-resolution image previews / BlurHashes.
+   - Short voice clips, animated stickers, custom emojis, and low-resolution image previews / BlurHashes.
    - Encrypted directly within the E2EE channel payload via `MediaAttachmentDto.InlineBytes`.
    - Zero additional network requests required; available instantaneously on message arrival.
 2. **Out-of-Band Encrypted Blobs (32 KB to 50 MB)**:
    - Photos, audio tracks, GIF animations, and short video clips.
-   - Plaintext media is padded to discrete size buckets to defeat traffic analysis and file fingerprinting.
-   - Uses `Percolator.PluginSdk.IBlobStorageService` to encrypt with chunked STREAM AEAD ($64\text{ KB}$ chunks, sequential counter nonces, and independent auth tags) and transfer according to channel topology.
+   - **EXIF Geolocation Scrubbing**: All GPS coordinates, camera serial numbers, and device tags are stripped client-side before padding and encryption.
+   - **Anti-Traffic Padding**: Plaintext media is padded to discrete size buckets before encryption.
+   - **Chunked STREAM AEAD**: Encrypted in $64\text{ KB}$ chunks with sequential counter nonces and independent auth tags via `Percolator.PluginSdk.IBlobStorageService`.
+   - **Audio Waveforms & Layout Stability**:
+     - Voice notes embed normalized amplitude bytes (`Waveform`) inline in `BlobReference` for immediate waveform rendering without audio decoding.
+     - Images and videos mandate `Width` and `Height` in `BlobReference` to eliminate Cumulative Layout Shift (CLS) in chat feeds.
    - `MediaAttachmentDto` carries the lightweight `BlobReference` containing the symmetric key, base nonce, ciphertext SHA-256 digest, unpadded size, and storage mode.
 
 ### 3.2 Channel Topologies & Media Expectations
 Media behavior is strictly driven by the channel's configured topology:
 1. **1:1 Direct Channel (No Relay)**:
    - **Expectation**: Media can **only** be transferred when **both peers are online concurrently**.
-   - If the remote peer is offline, the Chat UI disables the media upload button or queues the message with status: *"Waiting for recipient to come online to stream media"*.
-   - When both peers are connected, media streams directly peer-to-peer over the active transport (zero relay storage consumed).
+   - **Staged Pull Workflow**: Sender calls `UploadBlobAsync`, which encrypts and stages chunks in the sender's local disk store. The tiny `BlobReference` is sent via chat message. When the recipient's client receives the message, it pulls chunks directly from the sender's node over a dedicated peer stream.
+   - If the remote peer is offline, the Chat UI disables the upload button or queues the message with status: *"Waiting for recipient to come online to stream media"*.
+   - Consumes zero relay bandwidth or disk storage.
 2. **1:1 Relayed Channel**:
    - **Expectation**: The channel's designated relay acts as the single media storage endpoint.
-   - Sender uploads ciphertext to the channel relay.
-   - Recipient downloads ciphertext asynchronously from the same relay upon coming online.
+   - Sender uploads ciphertext out-of-band to the channel relay.
+   - Recipient downloads ciphertext asynchronously from that same relay upon coming online.
 3. **Group Channel**:
    - **Expectation**: The group's single common relay acts as the authoritative media store for all group members (pure Signal model).
    - Sender uploads the encrypted, padded blob **exactly once** to the group relay.
@@ -121,6 +126,9 @@ Media behavior is strictly driven by the channel's configured topology:
    - All group members stream chunks from that same common relay (via manual tap-to-download or Wi-Fi auto-download).
 4. **Relay Quota & Policy Enforcement**:
    - If the channel relay rejects an upload because its storage is full or disabled, `IBlobStorageService` returns an explicit error (`RelayStorageQuotaExceeded` or `RelayBlobStorageDisabled`), and the Chat UI displays a clear explanation to the user.
+5. **Decoupled Performance Pipeline**:
+   - Blob uploads/downloads run **out-of-band BEFORE `OutboundEgressPipeline`**, ensuring the ratchet lock (`IChannelLockService`) is never held during file uploads.
+   - Multi-megabyte media bypasses the SQLite Outbox completely, preserving the featherweight transaction outbox invariant.
 
 ### 3.3 Privacy-Preserving Link Previews
 - **Zero Recipient Deanonymization (Signal-Aligned Privacy)**:
@@ -196,7 +204,7 @@ Media behavior is strictly driven by the channel's configured topology:
 
 ### 5.2 Media & Blob Storage Tests (`Percolator.Apps.Chat.Tests/Media`)
 - `ChatMediaServiceTests.SendMediaAsync_InlineMedia_EmbedsBytesDirectly`: Verifies $\le$ 32 KB payload remains inline.
-- `ChatMediaServiceTests.SendMediaAsync_1to1Direct_WhenPeerOnline_StreamsDirectly`: Verifies P2P streaming when peer is connected.
+- `ChatMediaServiceTests.SendMediaAsync_1to1Direct_WhenPeerOnline_StagesAndSendsReference`: Verifies local staging and peer pull in 1:1 direct.
 - `ChatMediaServiceTests.SendMediaAsync_1to1Direct_WhenPeerOffline_ReturnsPeerOfflineError`: Verifies failure expectation when peer is offline in non-relayed 1:1.
 - `ChatMediaServiceTests.SendMediaAsync_RelayedChannel_UploadsToChannelRelay`: Verifies upload to designated channel relay.
 - `ChatMediaServiceTests.SendMediaAsync_GroupChannel_UploadsOnceToCommonRelay`: Verifies single upload to group common relay.
