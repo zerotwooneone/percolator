@@ -100,16 +100,27 @@ To satisfy the strict 64 KB Double Ratchet payload limit without resorting to he
    - Zero additional network requests required; available instantaneously on message arrival.
 2. **Out-of-Band Encrypted Blobs (32 KB to 50 MB)**:
    - Photos, audio tracks, GIF animations, and short video clips.
-   - Uses `Percolator.PluginSdk.IBlobStorageService` to encrypt with an ephemeral AES-256-GCM symmetric key and upload to available storage.
-   - `MediaAttachmentDto` carries the lightweight `BlobReference` containing the symmetric key, ciphertext SHA-256 digest, initialization vector, and relay location pointer.
+   - Plaintext media is padded to discrete size buckets to defeat traffic analysis and file fingerprinting.
+   - Uses `Percolator.PluginSdk.IBlobStorageService` to encrypt with chunked STREAM AEAD ($64\text{ KB}$ chunks, sequential counter nonces, and independent auth tags) and transfer according to channel topology.
+   - `MediaAttachmentDto` carries the lightweight `BlobReference` containing the symmetric key, base nonce, ciphertext SHA-256 digest, unpadded size, and storage mode.
 
-### 3.2 Relay Refusal, Quota Limits & Tiered Upload Fallback
-Relays in Percolator are decentralized and may refuse blob storage due to quota exhaustion, file size limits, or storage policy restrictions.
-- `Percolator.Apps.Chat` integrates with `IBlobStorageService.UploadBlobAsync`, handling the tiered fallback:
-  1. **Tier 1 (Recipient Relay)**: Asynchronous delivery deposit for offline recipient.
-  2. **Tier 2 (Sender Relay)**: Host on sender's own relay with access token in `BlobReference`.
-  3. **Tier 3 (Direct P2P Stream)**: Direct streaming if peer is online or via ephemeral channel.
-  4. **Tier 4 (Graceful UI Handling)**: Chat UI surfaces clear upload status (*"Relay quota exceeded. Retry directly when peer comes online"*).
+### 3.2 Channel Topologies & Media Expectations
+Media behavior is strictly driven by the channel's configured topology:
+1. **1:1 Direct Channel (No Relay)**:
+   - **Expectation**: Media can **only** be transferred when **both peers are online concurrently**.
+   - If the remote peer is offline, the Chat UI disables the media upload button or queues the message with status: *"Waiting for recipient to come online to stream media"*.
+   - When both peers are connected, media streams directly peer-to-peer over the active transport (zero relay storage consumed).
+2. **1:1 Relayed Channel**:
+   - **Expectation**: The channel's designated relay acts as the single media storage endpoint.
+   - Sender uploads ciphertext to the channel relay.
+   - Recipient downloads ciphertext asynchronously from the same relay upon coming online.
+3. **Group Channel**:
+   - **Expectation**: The group's single common relay acts as the authoritative media store for all group members (pure Signal model).
+   - Sender uploads the encrypted, padded blob **exactly once** to the group relay.
+   - Sender distributes the `BlobReference` inside their group message using their **Sender Key** ratchet.
+   - All group members stream chunks from that same common relay (via manual tap-to-download or Wi-Fi auto-download).
+4. **Relay Quota & Policy Enforcement**:
+   - If the channel relay rejects an upload because its storage is full or disabled, `IBlobStorageService` returns an explicit error (`RelayStorageQuotaExceeded` or `RelayBlobStorageDisabled`), and the Chat UI displays a clear explanation to the user.
 
 ### 3.3 Privacy-Preserving Link Previews
 - **Zero Recipient Deanonymization (Signal-Aligned Privacy)**:
@@ -185,9 +196,12 @@ Relays in Percolator are decentralized and may refuse blob storage due to quota 
 
 ### 5.2 Media & Blob Storage Tests (`Percolator.Apps.Chat.Tests/Media`)
 - `ChatMediaServiceTests.SendMediaAsync_InlineMedia_EmbedsBytesDirectly`: Verifies $\le$ 32 KB payload remains inline.
-- `ChatMediaServiceTests.SendMediaAsync_OutofBandMedia_UploadsViaBlobStorageService`: Verifies `IBlobStorageService.UploadBlobAsync` invocation and `BlobReference` generation.
-- `ChatMediaServiceTests.SendMediaAsync_RelayQuotaExceeded_FallsBackToTieredStrategy`: Verifies tiered upload fallback behavior.
-- `ChatMediaServiceTests.ReceiveMediaAsync_OutofBandMedia_VerifiesSha256AndDecrypts`: Verifies integrity verification on download.
+- `ChatMediaServiceTests.SendMediaAsync_1to1Direct_WhenPeerOnline_StreamsDirectly`: Verifies P2P streaming when peer is connected.
+- `ChatMediaServiceTests.SendMediaAsync_1to1Direct_WhenPeerOffline_ReturnsPeerOfflineError`: Verifies failure expectation when peer is offline in non-relayed 1:1.
+- `ChatMediaServiceTests.SendMediaAsync_RelayedChannel_UploadsToChannelRelay`: Verifies upload to designated channel relay.
+- `ChatMediaServiceTests.SendMediaAsync_GroupChannel_UploadsOnceToCommonRelay`: Verifies single upload to group common relay.
+- `ChatMediaServiceTests.SendMediaAsync_RelayQuotaExceeded_ReturnsQuotaError`: Verifies clear error propagation on relay rejection.
+- `ChatMediaServiceTests.ReceiveMediaAsync_OutofBandMedia_VerifiesSha256AndDecrypts`: Verifies chunk integrity verification on download.
 
 ### 5.3 Invitations & Query Tests (`Percolator.Apps.Chat.Tests/Invitations`)
 - `GroupInvitationServiceTests.ReceiveInvitation_EmitsPendingInvitation`: Verifies pending invitation creation.
