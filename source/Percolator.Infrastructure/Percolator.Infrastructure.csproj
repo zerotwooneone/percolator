@@ -9,7 +9,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Percolator.Application\Percolator.Application.csproj" />
     <ProjectReference Include="..\Percolator.Chat\Percolator.Chat.csproj" />
     <ProjectReference Include="..\Percolator.Dht\Percolator.Dht.csproj" />
     <ProjectReference Include="..\Percolator.Identity\Percolator.Identity.csproj" />
