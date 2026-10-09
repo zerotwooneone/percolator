@@ -110,6 +110,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Infrastructure.W
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Desktop", "Percolator.Desktop\Percolator.Desktop.csproj", "{C621C8F0-9F41-4D0F-A547-8A5F3DCAE55A}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Simulator", "Percolator.Simulator\Percolator.Simulator.csproj", "{0F2B4406-84B3-413B-A44F-97EECB87351F}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -528,6 +530,18 @@ Global
 		{C621C8F0-9F41-4D0F-A547-8A5F3DCAE55A}.Release|x64.Build.0 = Release|Any CPU
 		{C621C8F0-9F41-4D0F-A547-8A5F3DCAE55A}.Release|x86.ActiveCfg = Release|Any CPU
 		{C621C8F0-9F41-4D0F-A547-8A5F3DCAE55A}.Release|x86.Build.0 = Release|Any CPU
+		{0F2B4406-84B3-413B-A44F-97EECB87351F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0F2B4406-84B3-413B-A44F-97EECB87351F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0F2B4406-84B3-413B-A44F-97EECB87351F}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{0F2B4406-84B3-413B-A44F-97EECB87351F}.Debug|x64.Build.0 = Debug|Any CPU
+		{0F2B4406-84B3-413B-A44F-97EECB87351F}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{0F2B4406-84B3-413B-A44F-97EECB87351F}.Debug|x86.Build.0 = Debug|Any CPU
+		{0F2B4406-84B3-413B-A44F-97EECB87351F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0F2B4406-84B3-413B-A44F-97EECB87351F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0F2B4406-84B3-413B-A44F-97EECB87351F}.Release|x64.ActiveCfg = Release|Any CPU
+		{0F2B4406-84B3-413B-A44F-97EECB87351F}.Release|x64.Build.0 = Release|Any CPU
+		{0F2B4406-84B3-413B-A44F-97EECB87351F}.Release|x86.ActiveCfg = Release|Any CPU
+		{0F2B4406-84B3-413B-A44F-97EECB87351F}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -570,5 +584,6 @@ Global
 		{965B5B3F-5987-4907-B161-5DD35B46F027} = {D4096C37-2151-4956-B164-18F7A5736F56}
 		{3D0B7B1E-208B-45D8-AF24-C2C98E5E2585} = {1BA0BC13-1FAC-43E6-8485-EB8EA00CD072}
 		{C621C8F0-9F41-4D0F-A547-8A5F3DCAE55A} = {FD9F8435-A340-4CFA-B719-2D0A55E42A43}
+		{0F2B4406-84B3-413B-A44F-97EECB87351F} = {FD9F8435-A340-4CFA-B719-2D0A55E42A43}
 	EndGlobalSection
 EndGlobal

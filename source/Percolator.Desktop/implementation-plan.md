@@ -138,6 +138,44 @@ Privacy and zero unauthorized disclosure are core architectural requirements:
 * **Session Teardown & Lock**:
   - If the user explicitly locks the client or deactivates all active identities, all listening sockets immediately close and the client reverts to total stealth mode.
 
+### 2.11 LRU-Cached DI Session Scopes (`SessionScopeFactory`)
+* **The Problem**: In a messenger with dozens or hundreds of peer chats, creating a global singleton `ChatViewModel` for every conversation consumes excessive RAM and keeps hundreds of background reactive streams active. Conversely, recreating the entire ViewModel from scratch every time a user switches tabs wipes uncommitted message drafts and scroll positions.
+* **The Solution**: An LRU-cached session scope manager (`SessionScopeFactory` with capacity 3–5):
+  - When switching between active chats (Alice → Bob → Alice), the child `IServiceScope`, its `SessionContext`, and its `ChatViewModel` remain hot in memory, preserving drafts, scroll offsets, and active observables.
+  - When a 6th conversation is opened, the least recently used session scope is evicted and disposed (`scope.Dispose()`), freeing memory and unsubscribing its `DisposableBag` cleanly.
+
+### 2.12 Reactive Debounced Reload Coordinators (`ChatReloadCoordinator`)
+* **The Problem**: Rapid bursts of incoming events (multiple chat messages in a second, delivery receipts, read confirmations, background sync ticks) can trigger rapid-fire database queries, causing thread pool contention, SQLite lock collisions, and UI stutter.
+* **The Solution**: The Reload Coordinator pattern:
+  ```csharp
+  _reloadTrigger
+      .Debounce(TimeSpan.FromMilliseconds(50), _timeProvider)
+      .SelectAwait(async (trigger, ct) =>
+      {
+          await ReloadFromDatabaseAsync(trigger.SessionId, ct);
+          return Unit.Default;
+      }, AwaitOperation.Drop)
+      .Subscribe()
+      .AddTo(ref _bag);
+  ```
+  - `AwaitOperation.Drop` guarantees that while a database read is currently in-flight, redundant intermediate requests are dropped. Once the current read completes, the latest debounced trigger captures all recent database commits in a single roundtrip.
+
+### 2.13 Connection & Handshake Lifecycle Orchestration
+* `Desktop.Wpf` established complete workflows for P2P connection establishment:
+  1. **Out-of-Band Invitation Tokens**: Sharing base64/QR code tokens containing signed identity keys, decoded via `DecodeAndQueueInviteCommand`.
+  2. **Multi-Route Handshake Initiation**: Selecting between Direct IP/Port vs. establishing a tunnel through a chosen Relay Host (`ConnectViaNetworkCommand`).
+  3. **Pending Inbound Invitations Queue**: Inbound handshake requests appear in a pending menu (`PendingHandshakesMenuViewModel`) allowing the user to Accept, Reject, or Burn invitations, returning structured results (`Accepted`, `RejectedExpired`, `RejectedInvalid`).
+  4. **Dynamic Relay Discovery**: Discovered peers that support acting as relay nodes are dynamically queried and populate the relay selection dropdown.
+
+### 2.14 Window Lifecycle & Child DI Containers (`WindowManager`)
+* Secondary windows (Settings, Diagnostics, Connection Management) must not be treated as haphazard modal popups:
+  - **Single-Instance Focus**: Calling `ShowFor<TViewModel>()` checks if an existing window of that type is already open and brings it to the foreground rather than opening duplicate windows.
+  - **Child DI Scope Isolation**: Each window is spawned within its own child `IServiceScope`. When the window is closed, its DI scope is immediately disposed, preventing memory leaks from lingering window services.
+
+### 2.15 Global Reactive Exception Plumbing
+* In R3, unhandled exceptions inside reactive streams do not always surface on the standard dispatcher thread; if unobserved, they crash the host process.
+* `ObservableSystem.RegisterUnhandledExceptionHandler` must be registered in `App.axaml.cs` alongside `TaskScheduler.UnobservedTaskException` and `AppDomain.CurrentDomain.UnhandledException`, piping errors into `ILogger` for diagnostic capture.
+
 ---
 
 ## 3. Technology Stack & Component Architecture
@@ -149,6 +187,8 @@ Privacy and zero unauthorized disclosure are core architectural requirements:
 | **Privacy & Security** | `NetworkStealthGate` | Gated listener activation ensuring zero open ports until identity selection |
 | **Iconography** | Segoe Fluent Icons + FiraCode Nerd Font | Hybrid: Fluent icons for standard UX, embedded Nerd Font for P2P mesh & route metrics |
 | **Custom UI Primitives** | `PeerAvatar`, `StatusChip`, `BadgedButton`, `ChatComposer` | Domain-specific controls for peer presence, route badges, notification pulse |
+| **Session Scoping** | `SessionScopeFactory` | LRU-cached child DI scopes for active conversation ViewModels |
+| **Data Synchronization** | `ReloadCoordinator` | Debounced reactive query batching with `AwaitOperation.Drop` |
 | **MVVM Tooling** | CommunityToolkit.Mvvm 8.4 | Source-generated `[ObservableProperty]`, `[RelayCommand]` |
 | **Reactive Extensions** | R3 (v1.3) + ObservableCollections (v3.3) | Next-generation reactive pipelines and synchronized view lists |
 | **App Shell & DI** | `Microsoft.Extensions.Hosting` | Dependency injection, configuration, logging, and hosted services |
@@ -168,7 +208,9 @@ Percolator.Desktop/
 │   ├── Controls/                  # NerdIcon.cs, NerdIconSource.cs, PeerAvatar.axaml, StatusChip.axaml
 │   ├── Converters/                # Value converters (AvatarColorConverter, StatusColor, RelativeTime)
 │   ├── Extensions/                # R3 and Avalonia binding extensions
-│   └── Services/                  # UI-level services (DialogService, NavigationService, NetworkStealthGate)
+│   ├── Navigation/                # INavigationService.cs, NavigationService.cs
+│   ├── Services/                  # DialogService, NetworkStealthGate
+│   └── Windowing/                 # IWindowManager.cs, WindowManager.cs (child-scoped window lifecycle)
 ├── Features/
 │   ├── IdentityGate/              # Privacy Gatekeeper: First screen before any network activation
 │   │   ├── IdentityGateViewModel.cs
@@ -179,10 +221,16 @@ Percolator.Desktop/
 │   │   └── ShellView.axaml
 │   ├── Chat/                      # Direct Messaging & Group Channels
 │   │   ├── Controls/              # ChatComposer.axaml (auto-expand, keyboard send behavior)
-│   │   ├── State/                 # ChatStateService (authoritative message cache)
+│   │   ├── State/                 # ChatStateService, ChatReloadCoordinator.cs
 │   │   ├── Models/                # ChatMessageModel, ChatMessageSnapshot (UI-only)
 │   │   ├── ViewModels/            # ChatViewModel, ChatMessageViewModel
 │   │   └── Views/                 # ChatView.axaml, MessageBubbleView.axaml
+│   ├── Sessions/                  # Session routing, connection management, LRU scopes
+│   │   ├── Scopes/                # ISessionScopeFactory.cs, SessionScopeFactory.cs (LRU cache)
+│   │   ├── Dialogs/               # ConnectionManagementDialogView.axaml, ConnectionManagementDialogViewModel.cs
+│   │   ├── Menus/                 # PendingHandshakesMenuView.axaml, PendingHandshakesMenuViewModel.cs
+│   │   ├── State/                 # PeerConnectionStateService.cs, PeerConnectionReloadCoordinator.cs
+│   │   └── ViewModels/            # SessionSidebarViewModel.cs, PeerConnectionListItemViewModel.cs
 │   ├── Discovery/                 # Peer Discovery & Swarm Inspector
 │   │   ├── State/                 # DiscoveryStateService
 │   │   ├── Models/                # PeerNodeModel (UI-only)
@@ -203,7 +251,7 @@ Percolator.Desktop/
 │   ├── MainWindow.axaml           # FluentWindow shell with NavigationView
 │   └── MainWindow.axaml.cs
 ├── App.axaml                      # Application styles and FluentAvalonia theme
-├── App.axaml.cs                   # App bootstrap & DI host initialization
+├── App.axaml.cs                   # App bootstrap, R3 unhandled exception plumbing, DI host
 ├── Program.cs                     # Avalonia entry point
 └── Percolator.Desktop.csproj
 ```
@@ -215,8 +263,9 @@ Percolator.Desktop/
 ### Milestone 1: Stealth Mode Startup, Identity Gatekeeper & Shell Lifecycle (Sprint 1)
 - [x] Scaffold `Percolator.Desktop` with Avalonia, FluentAvalonia, CommunityToolkit.Mvvm, R3, ObservableCollections.
 - [x] Configure `Program.cs`, `App.axaml`, and FluentAvalonia theme.
+- [ ] Implement `ObservableSystem.RegisterUnhandledExceptionHandler` in `App.axaml.cs` to prevent silent reactive crashes.
 - [ ] Implement `NetworkStealthGate` ensuring all network listener sockets remain unbound until identity confirmation.
-- [ ] Implement `IdentityGateView.axaml` and `IdentityGateViewModel.cs` as the initial startup window/dialog:
+- [ ] Implement `IdentityGateView.axaml` and `IdentityGateViewModel.cs` as the initial startup window:
   - Display available local identities with activation checkboxes.
   - "Create New Identity" wizard (generating Ed25519/X25519 keys via `Percolator.Domain`).
   - Passphrase unlock prompt for encrypted identity vaults.
@@ -226,23 +275,30 @@ Percolator.Desktop/
 - [ ] Implement `StatusChip` and `PeerAvatar` controls with presence dot and hash-color palette.
 - [ ] Implement `BadgeAttachedBehavior` (notification count & pulse animation on buttons).
 - [ ] Implement `IHost` configuration with `Microsoft.Extensions.Hosting` in `App.axaml.cs`.
+- [ ] Implement `IWindowManager` with single-instance activation and child DI scope lifecycle.
 - [ ] Configure `NavigationView` navigation routing in `MainWindow` with `Frame` page switching.
-- [ ] Implement `INavigationService` and `IDialogService` (using FluentAvalonia `ContentDialog`).
 - [ ] Set up Dark/Light/HighContrast theme switching and OS accent color auto-detection.
 
-### Milestone 2: Identity Management & Session Shell (Sprint 2)
+### Milestone 2: Identity Management, Handshakes & Session Shell (Sprint 2)
 - [ ] Port `IdentityStateService` and `ActiveIdentityContext` into UI state layer.
 - [ ] Implement Identity Switching & Lock:
   - Allow adding or removing active identities from the session on the fly.
   - "Lock Client" action which tears down network sockets immediately and returns to `IdentityGateView`.
+- [ ] Implement `SessionScopeFactory` with LRU eviction policy (capacity 3–5) for bounded memory usage.
+- [ ] Implement `ConnectionManagementDialog`:
+  - Out-of-band invitation token import/export (base64/QR code) via `DecodeAndQueueInviteCommand`.
+  - Direct connection initiation vs. Relay host dropdown selection.
+- [ ] Implement `PendingHandshakesMenu`:
+  - Inbound invitation queue with Accept, Reject, and Burn actions.
+- [ ] Implement `PeerConnectionReloadCoordinator` with debounced sync.
 - [ ] Implement Contacts & Session list in the left navigation sidebar using `PeerAvatar` and `StatusChip`.
-- [ ] Implement peer status presence indicators (Online, Relayed, Direct, Offline).
 
 ### Milestone 3: Real-Time Chat Experience (Sprint 3)
 - [ ] Port `ChatStateService` managing session message queues and message history.
+- [ ] Implement `ChatReloadCoordinator` with `50ms` debounce and `AwaitOperation.Drop` for burst SQLite writes.
 - [ ] Build `ChatView.axaml` with virtualized message list (`ItemsRepeater` or `ListBox`).
 - [ ] Implement `ChatComposer.axaml` control with auto-expand, Enter-to-send, and attachment hooks.
-- [ ] Implement message projection with `_messagesView = domainList.CreateView(m => new ChatMessageViewModel(m))` .
+- [ ] Implement message projection with `_messagesView = domainList.CreateView(m => new ChatMessageViewModel(m))`.
 - [ ] Add disposal handler `_messagesView.ObserveRemove().Subscribe(...)`.
 - [ ] Add route indicator badge using `NerdIcon` & `StatusChip` (Direct P2P `DirectRoute` vs. Relayed via DHT node `RelayedRoute`).
 
@@ -282,7 +338,19 @@ Percolator.Desktop/
 2. **Stealth Mode & Network Gate Verification**:
    * Verify that launching the application in test harnesses initiates zero TCP/UDP socket bindings before `IdentityGateViewModel.ConfirmActivation()` is invoked.
    * Verify immediate socket teardown upon session lock.
-3. **Headless UI Testing**:
+3. **Session LRU Scope Tests**:
+   * Test that navigating across >5 conversations evicts and disposes the least recently used child scopes while keeping the newest 5 hot in memory.
+4. **Headless UI Testing**:
    * Use `Avalonia.Headless.XUnit` to verify layout, command triggering, and input validation without opening native windows.
-4. **State Service Concurrency Tests**:
+5. **State Service Concurrency Tests**:
    * Multi-threaded producer tests simulating concurrent gRPC and network message arrivals to guarantee no collection corruption.
+
+---
+
+## 7. Developer Tooling & Simulation Interoperability
+
+Testing multi-peer network topologies, relays, and handshakes is handled by the standalone companion project **`Percolator.Simulator`** (see [`Percolator.Simulator/implementation-plan.md`](../Percolator.Simulator/implementation-plan.md)).
+
+`Percolator.Desktop` contains **zero simulator code** or mock interceptors. To interoperate with the simulator during development, `Percolator.Desktop` supports a development flag:
+* `Development:AllowLocalhostPeers: true` (or `--allow-localhost` CLI argument).
+* When set, loopback `127.0.0.1` targets are permitted as valid peer endpoints without triggering production WAN stealth security rejections.
