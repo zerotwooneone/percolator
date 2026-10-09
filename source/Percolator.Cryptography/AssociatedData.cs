@@ -1,9 +1,0 @@
-using Percolator.SourceGenerators;
-
-namespace Percolator.Cryptography;
-
-[ByteArray(minLength: 1, maxLength: 1000000)]
-public sealed partial record AssociatedData
-{
-    public static AssociatedData None { get; } = new(Array.Empty<byte>());
-}

@@ -1,9 +1,0 @@
-namespace Percolator.Cryptography;
-
-public interface ISessionRepository
-{
-    Task AddAsync(SecureSession session, CryptoSelfId selfIdentityId, CancellationToken cancellationToken = default);
-    Task<SecureSession?> GetAsync(SessionId id, CancellationToken cancellationToken = default);
-    Task UpdateAsync(SecureSession session, CancellationToken cancellationToken = default);
-    Task<IReadOnlyList<SecureSession>> GetAllActiveAsync(CryptoSelfId selfIdentityId, CancellationToken cancellationToken = default);
-}
