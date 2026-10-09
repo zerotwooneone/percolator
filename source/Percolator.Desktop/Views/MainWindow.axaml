@@ -4,7 +4,6 @@
         xmlns:ui="using:FluentAvalonia.UI.Controls"
         x:Class="Percolator.Desktop.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
-        Icon="/Assets/avalonia-logo.ico"
         Title="Percolator Desktop"
         Width="1100" Height="700"
         WindowStartupLocation="CenterScreen">
