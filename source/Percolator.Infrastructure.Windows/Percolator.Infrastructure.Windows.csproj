@@ -12,7 +12,7 @@
     <ProjectReference Include="..\Percolator.Application\Percolator.Application.csproj" />
     <ProjectReference Include="..\Percolator.PluginSdk\Percolator.PluginSdk.csproj" />
     <ProjectReference Include="..\Percolator.Apps.FileTransfer\Percolator.Apps.FileTransfer.csproj" />
-    <ProjectReference Include="..\Percolator.Infrastructure2\Percolator.Infrastructure2.csproj" />
+    <ProjectReference Include="..\Percolator.Infrastructure\Percolator.Infrastructure.csproj" />
   </ItemGroup>
 
   <ItemGroup>
