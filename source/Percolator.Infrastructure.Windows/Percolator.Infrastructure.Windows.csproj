@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Percolator.Infrastructure.Windows</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Percolator.Domain\Percolator.Domain.csproj" />
+    <ProjectReference Include="..\Percolator.Application\Percolator.Application.csproj" />
+    <ProjectReference Include="..\Percolator.PluginSdk\Percolator.PluginSdk.csproj" />
+    <ProjectReference Include="..\Percolator.Apps.FileTransfer\Percolator.Apps.FileTransfer.csproj" />
+    <ProjectReference Include="..\Percolator.Infrastructure2\Percolator.Infrastructure2.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="9.0.0" />
+  </ItemGroup>
+
+</Project>

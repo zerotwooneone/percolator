@@ -112,6 +112,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "03 - Infrastructure2", "03 
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Domain.IntegrationTests", "Percolator.Domain.IntegrationTests\Percolator.Domain.IntegrationTests.csproj", "{965B5B3F-5987-4907-B161-5DD35B46F027}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Infrastructure.Windows", "Percolator.Infrastructure.Windows\Percolator.Infrastructure.Windows.csproj", "{3D0B7B1E-208B-45D8-AF24-C2C98E5E2585}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -530,6 +532,18 @@ Global
 		{965B5B3F-5987-4907-B161-5DD35B46F027}.Release|x64.Build.0 = Release|Any CPU
 		{965B5B3F-5987-4907-B161-5DD35B46F027}.Release|x86.ActiveCfg = Release|Any CPU
 		{965B5B3F-5987-4907-B161-5DD35B46F027}.Release|x86.Build.0 = Release|Any CPU
+		{3D0B7B1E-208B-45D8-AF24-C2C98E5E2585}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3D0B7B1E-208B-45D8-AF24-C2C98E5E2585}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3D0B7B1E-208B-45D8-AF24-C2C98E5E2585}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{3D0B7B1E-208B-45D8-AF24-C2C98E5E2585}.Debug|x64.Build.0 = Debug|Any CPU
+		{3D0B7B1E-208B-45D8-AF24-C2C98E5E2585}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{3D0B7B1E-208B-45D8-AF24-C2C98E5E2585}.Debug|x86.Build.0 = Debug|Any CPU
+		{3D0B7B1E-208B-45D8-AF24-C2C98E5E2585}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3D0B7B1E-208B-45D8-AF24-C2C98E5E2585}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3D0B7B1E-208B-45D8-AF24-C2C98E5E2585}.Release|x64.ActiveCfg = Release|Any CPU
+		{3D0B7B1E-208B-45D8-AF24-C2C98E5E2585}.Release|x64.Build.0 = Release|Any CPU
+		{3D0B7B1E-208B-45D8-AF24-C2C98E5E2585}.Release|x86.ActiveCfg = Release|Any CPU
+		{3D0B7B1E-208B-45D8-AF24-C2C98E5E2585}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

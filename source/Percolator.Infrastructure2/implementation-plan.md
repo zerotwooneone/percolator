@@ -5,8 +5,9 @@
 `Percolator.Infrastructure2` provides concrete technical adapters, storage repositories, network transport clients/servers, cryptographic primitives, and binary serialization engines for the Percolator microkernel architecture.
 
 Following Clean Architecture principles:
+- **Target Framework**: Targets standard `net10.0` with **zero Windows-specific or platform-locked dependencies**. Runs uniformly on Linux Docker containers (relay hosts), macOS, and cross-platform desktop runtimes.
 - **Dependencies Flow Inward**: `Infrastructure2` references `Percolator.Domain`, `Percolator.Application`, and `Percolator.PluginSdk`. It does NOT expose infrastructure-specific types (e.g., SQLite connections, gRPC stubs, Protobuf classes, raw sockets) to the domain or application layers.
-- **Port Realization**: Every component in this project implements an interface (port) defined by `Percolator.Domain`, `Percolator.Application`, `Percolator.PluginSdk`, or application plugins (`Percolator.Apps.*`).
+- **Port Realization & Swappability**: Every component in this project implements an interface (port) defined by `Percolator.Domain`, `Percolator.Application`, `Percolator.PluginSdk`, or application plugins (`Percolator.Apps.*`). Platform-specific optimizations (such as Windows DPAPI, Windows SChannel PFX persistence, or NTFS sparse files) are decoupled into `Percolator.Infrastructure.Windows` and swapped in via dependency injection.
 - **Wire Contract & Serialization Ownership**: Concrete Protobuf `.proto` schemas, code-generated message classes, gRPC service stubs, and binary serializers live strictly within `Percolator.Infrastructure2`. The inner layers interact solely via pure C# DTOs and domain models via the `IPayloadSerializer` and `ISessionWirePacker` ports.
 
 ---
@@ -22,11 +23,12 @@ The legacy codebase contains dated, overlapping modules marked for total deletio
 - `Percolator.Wpf` (Legacy Windows-only desktop client)
 
 ### Cutover Workflow
-1. **Domain & Application Completion**: Implement and verify `Percolator.Domain`, `Percolator.Application` (formerly `Application2`), application plugins (`Percolator.Apps.Chat`, `Discovery`, `FileTransfer`), and their test suites.
-2. **Legacy Project Deletion**: Remove `Percolator.Contracts` and all legacy projects from the solution (`Percolator.sln`) and delete their filesystem directories.
+1. **Domain & Application Completion**: Implement and verify `Percolator.Domain`, `Percolator.Application`, application plugins (`Percolator.Apps.Chat`, `Discovery`, `FileTransfer`), and their test suites.
+2. **Platform Separation**: Core cross-platform infrastructure lives in `Percolator.Infrastructure2`. Dedicated Windows-specific adapters live in `Percolator.Infrastructure.Windows`.
+3. **Legacy Project Deletion**: Remove `Percolator.Contracts` and all legacy projects from the solution (`Percolator.sln`) and delete their filesystem directories.
    - None of the modern projects (`Percolator.Domain`, `Percolator.PluginSdk`, `Percolator.Application`, `Percolator.Apps.*`) reference `Percolator.Contracts`.
    - All replacement Protobuf schemas are authored fresh within `Percolator.Infrastructure2/Protos/`.
-3. **Compiler-Error-Driven Triage**:
+4. **Compiler-Error-Driven Triage**:
    - The resulting compiler breaks in the desktop app and infrastructure serve as an intentional audit trail.
    - For every breaking symbol/class, decide deliberately:
      - **Keep & Convert**: If an existing adapter (e.g., SQLCipher schema setup or gRPC proto definitions) can be refactored to implement the clean domain/application ports.
@@ -37,7 +39,7 @@ The legacy codebase contains dated, overlapping modules marked for total deletio
 ## 3. High-Level Requirements
 
 1. **Zero Domain Logic in Infrastructure**: Infrastructure adapters must solely translate between external APIs/data formats and domain value objects / entities.
-2. **Zero Plaintext Sensitive State at Rest**: All private keys, ratchet chain keys, and session secrets stored on disk must be encrypted using SQLCipher and/or OS keychain abstractions. Sensitive cryptographic fields must never be stored as unencrypted BLOBs in SQLite.
+2. **Zero Plaintext Sensitive State at Rest**: All private keys, ratchet chain keys, and session secrets stored on disk must be encrypted using SQLCipher and/or master secret key derivation. Sensitive cryptographic fields must never be stored as unencrypted BLOBs in SQLite.
 3. **Deterministic Memory Zeroization**: Any unmanaged buffers or cryptographic key spans must be cleared (`CryptographicOperations.ZeroMemory`) when disposed.
 4. **Resilient Network Handling**: All gRPC network calls must obey cancellation tokens, transport timeouts, and surface transient vs. permanent network failures cleanly to `OutboxRetryPolicy`.
 5. **Cryptographic Logging Guardrails**: Honor `CryptographyOptions.EnableCryptographicMaterialLogging = false` by default across all infrastructure loggers and diagnostics. Sensitive cryptographic keys, KDF digests, and plaintexts must never be emitted to logs.
@@ -45,7 +47,7 @@ The legacy codebase contains dated, overlapping modules marked for total deletio
    - **Public Edge / Ingress & Deposit**: Must be unauthenticated (zero sender identity leakage on the wire). Relies on recipient-issued `DeliveryToken`s and Sealed Sender cryptography.
    - **Mailbox Retrieval, Directory & Management**: Must be strictly authenticated via challenge-response or signature cryptographic proofs to prevent unauthorized message draining, OPK exhaustion attacks, and mass directory scraping (mirroring Signal's security model).
    - **Group Operations**: Must be protected via Zero-Knowledge presentation proofs against `RelayGroupLedger` epochs without revealing individual member identities to relays.
-7. **Zero Platform Lock-in (Cross-Platform Architecture)**: Core infrastructure contracts, cryptographic flows, and persistence abstractions must run seamlessly across Windows, Linux, and macOS. Platform-specific mechanisms (e.g. Windows SChannel PFX loading, NTFS `FSCTL_SET_SPARSE`, DPAPI) must live behind clean OS-agnostic ports with functional non-Windows fallbacks.
+7. **Zero Platform Lock-in (Cross-Platform Architecture)**: Core infrastructure contracts, cryptographic flows, and persistence abstractions must run seamlessly across Windows, Linux, and macOS. Windows-only optimizations live behind clean ports and are supplied by `Percolator.Infrastructure.Windows`.
 
 ---
 
@@ -321,7 +323,7 @@ Database Engine: Encrypted SQLite using SQLCipher (`SQLitePCLRaw.bundle_e_sqlcip
 - **Adapters**:
   - **`ITransportDispatcher`** (`Percolator.Application.Delivery.Ports`):
     - Direct 1:1: Invokes `UnauthenticatedDeliveryService.DeliverDirect` against peer's ephemeral TLS endpoint.
-    - Relayed 1:1: Invokes `UnauthenticatedDeliveryService.EnqueueMailbox` against recipient's home relay using `DeliveryToken`.
+    - Relayed 1:1: Invokes `UnauthenticatedDeliveryService.EnqueueMailbox` against recipient's home relay using `DeliveryToken``.
     - Relayed Group: Invokes `AnonymousGroupRelayService.DispatchGroupMessage` against shared channel relay with ZK membership proof.
   - **`UnauthenticatedDeliveryEndpoint` (ASP.NET Core gRPC Service)**:
     - Implements `UnauthenticatedDeliveryService`.
@@ -360,11 +362,10 @@ Database Engine: Encrypted SQLite using SQLCipher (`SQLitePCLRaw.bundle_e_sqlcip
       - The protocol decouples clients and identities from strict single-port bindings. Each running node/identity operates across a sane, configurable port range (e.g. 5200–5299, roughly one port per active identity/relay).
       - **Optional Invitation Port**: When an invitation link omits the port (`percolator://{host}/{publicKey}`), the P2P transport dialer attempts connections across the configured port range to bring the direct channel online. Only when a user explicitly specifies a strict port in the invitation link does the dialer bypass port range probing.
       - **Port Contention Resolution**: On startup, nodes query active listening ports and dynamically claim an open port within the range (`SqliteReservedPortQuery`), enabling seamless multi-identity operation on the same machine without port collision.
-    - **Ephemeral Server Certificate Generation (`TransportCertificateProvider`)**:
-      - On application/identity startup, generates a fresh, disposable ECDSA P-256 (`ECCurve.NamedCurves.nistP256`) keypair and self-signed certificate with `CN=Percolator-Ephemeral`, `KeyUsageFlags.DigitalSignature`, `EnhancedKeyUsage` (ServerAuthentication `1.3.6.1.5.5.7.3.1`), and loopback SANs (`localhost`, `127.0.0.1`, `::1`).
-      - **Windows SChannel / CNG Invariant**: Windows SChannel fails TLS 1.3 server handshakes with ephemeral in-memory certificates. On Windows, the certificate must be exported as PKCS#12 (`.pfx`) bytes and loaded from disk using `X509CertificateLoader.LoadPkcs12FromFile(..., X509KeyStorageFlags.Exportable | X509KeyStorageFlags.PersistKeySet)`. On Linux/macOS, ephemeral in-memory certificates are used directly without filesystem round-trips.
-      - **Antivirus Write Retry**: Writing the `.pfx` file on Windows triggers asynchronous Windows Defender scans, holding shared file locks. The certificate writer must implement an exponential retry policy (`WriteCertificateWithRetryAsync`) to avoid `IOException` sharing violations.
-      - **CNG Key Deletion on Rotation**: Upon certificate rotation or shutdown on Windows, explicitly delete the CNG key container via `((ECDsaCng)cert.GetECDsaPrivateKey()).Key.Delete()` to avoid leaking orphaned cryptographic keys in the Windows CNG store.
+    - **Portable Ephemeral Certificate Provider (`InMemoryTransportCertificateProvider`)**:
+      - On application startup, generates a fresh, disposable ECDSA P-256 (`ECCurve.NamedCurves.nistP256`) keypair and in-memory self-signed certificate with `CN=Percolator-Ephemeral`, `KeyUsageFlags.DigitalSignature`, and loopback SANs (`localhost`, `127.0.0.1`, `::1`).
+      - On Linux, macOS, and portable Kestrel OpenSSL servers, certificates remain purely in-memory with zero disk I/O.
+      - *(Note: On Windows SChannel, ephemeral in-memory certificates fail TLS 1.3 handshakes. `Percolator.Infrastructure.Windows` provides `WindowsSChannelCertificateProvider` to handle PKCS#12 disk loading, Windows Defender write-retry backoff, and CNG key deletion).*
   - **Relay Client Adapter**:
     - Publishes `PreKeyBundle` uploads to relay identities via `AuthenticatedRelayService.PublishPreKeyBundle`.
     - Fetches remote peer pre-key bundles from relays out-of-band via `AuthenticatedRelayService.FetchPreKeyBundle`, authenticating with local `IdentityKey` signature to defeat OPK exhaustion attacks.
@@ -375,12 +376,9 @@ Database Engine: Encrypted SQLite using SQLCipher (`SQLitePCLRaw.bundle_e_sqlcip
 ### 4.6 Platform & Discovery Adapters
 - **`IDateTimeProvider`** (`Percolator.Domain.Common`):
   - `SystemDateTimeProvider` delegating to `DateTimeOffset.UtcNow`.
-- **Cross-Platform `ICredentialStorage`** (Security Provider):
-  - Replaces the legacy Windows-only DPAPI (`ProtectedData.Protect`) coupling with an OS-agnostic credential provider:
-    - **Windows**: Windows DPAPI / Windows Credential Manager with ACLs granting exclusive access to the current user.
-    - **Linux**: FreeDesktop Secret Service API (`libsecret` via DBus) with desktop keyring integration.
-    - **macOS**: Apple Keychain Services (`Security.framework`).
-    - **Headless / Linux Fallback**: Master passphrase key derivation using Argon2id with an AES-256-GCM encrypted local keyfile.
+- **Portable `ICredentialStorage`** (`Percolator.Application.Ports.ICredentialStorage`):
+  - **`PortablePassphraseCredentialStorage`**: Cross-platform master secret provider utilizing Argon2id key derivation from user master passphrase with AES-256-GCM encrypted local keyfile storage.
+  - *(Note: On Windows, `Percolator.Infrastructure.Windows` provides `WindowsDpapiCredentialStorage` to bind encryption directly to the Windows User DPAPI master key and apply Windows NTFS user-exclusive ACLs).*
 - **`KademliaRoutingTable`** (`Percolator.Apps.Discovery`):
   - Manages 160-bit XOR distance metrics, $k=20$ K-bucket storage, and node contact tables for decentralized rendezvous discovery. (Note: UDP LAN discovery is explicitly excluded).
 
@@ -394,7 +392,7 @@ Database Engine: Encrypted SQLite using SQLCipher (`SQLitePCLRaw.bundle_e_sqlcip
   - **`UnknownGroupMessageCachePruner`**: Purges buffered group chat frames from `IUnknownGroupMessageCacheRepository` that exceed maximum TTL (e.g. 48 hours) where the author's sender key distribution was never received.
   - **`AbandonedInvitePruner`**: Scans inbound contact requests (`PeerContactState.PendingApproval`), pending handshake envelopes in `IPendingHandshakeRepository`, and group invitations (`PendingGroupInvitation`) exceeding local expiration policies (e.g. 14 days without user response) and marks or purges them.
   - **`RendezvousTicketPruner`**: Scans DHT presence announcements in `Apps.Discovery` past `ExpiresAtUtc` and evicts expired routing entries.
-- **Background Worker Resiliency Best Practices** (Synthesized from Legacy Lessons):
+- **Background Worker Resiliency Best Practices**:
   - **Async Scopes**: Workers must use `IServiceScopeFactory.CreateAsyncScope()` for deterministic asynchronous resource cleanup.
   - **Time Virtualization**: Depend strictly on .NET `TimeProvider` (`timeProvider.GetUtcNow()`, `Task.Delay(..., timeProvider, ct)`) to enable deterministic time manipulation and fast-forwarding in integration test suites.
   - **Proactive Soft Expiry**: Workers refreshing certificates, pre-keys, or tokens must inspect soft thresholds (e.g. `ExpiresAtUtc < now + TimeSpan.FromHours(4)`) rather than waiting for hard expiration, preventing downtime during transient network outages.
@@ -411,7 +409,7 @@ Database Engine: Encrypted SQLite using SQLCipher (`SQLitePCLRaw.bundle_e_sqlcip
 - **`StreamingAesGcmCryptoService`** (`Percolator.Application.Ports.IBlobCryptoService`):
   - **EXIF & Geolocation Metadata Scrubbing**: Strips invasive EXIF/XMP tags (GPS coordinates, camera serial numbers, device model) from raw image/video streams client-side before padding and encryption, guaranteeing complete location privacy.
   - **Stepped Bucket Padding**: Applies PKCS#7 or ISO/IEC 7816-4 padding to discrete boundaries (< 1 MB to 32 KB; 1–10 MB to 256 KB; > 10 MB to 1 MB) to prevent traffic analysis and file fingerprinting.
-  - **Chunked STREAM AEAD**: Encrypts and decrypts in fixed $64\text{ KB}$ chunks using .NET `AesGcm` with sequential counter nonces ($\text{Nonce}_i = N_{\text{base}} \oplus i$) and 16-byte authentication tags.
+  - **Chunked STREAM AEAD**: Encrypts and decrypts in fixed $64\text{ KB}$ chunks using .NET `AesGcm` with sequential counter nonces ($\text{Nonce}_i = N_{\\text{base}} \\oplus i$) and 16-byte authentication tags.
   - **Bounded Memory & Zero LOH Allocations**: Rents chunk buffers from `ArrayPool<byte>.Shared`, ensuring memory consumption never exceeds $\le 64\text{ KB}$ regardless of multi-megabyte file size.
 - **`RelayBlobClient`** (`Percolator.Application.Ports.IRelayBlobClient`):
   - High-performance HTTP/2 or gRPC streaming client communicating with the channel's designated relay.
@@ -474,16 +472,14 @@ Concrete realization of out-of-band high-speed croc-inspired and BitTorrent swar
   - Zero disk storage; zero awareness of channel identity or file contents.
   - Opt-in enforcement: If `SupportsSwarmTracker = false`, returns HTTP 501 Not Implemented, causing clients to fall back strictly to out-of-band PEX.
 
-#### 4. Desktop Sparse File Storage & Atomic File Finalization
-- **`DesktopSparseFileStore`** (`IDesktopFileStorage`):
-  - **Sparse File Pre-Allocation (Cross-Platform)**:
+#### 4. Portable Desktop File Storage & Atomic File Finalization
+- **`PortableDesktopFileStore`** (`IDesktopFileStorage`):
+  - **Portable Pre-Allocation**:
     - Opens target files with `FileShare.ReadWrite | FileShare.Delete`.
-    - **Windows**: Invokes `DeviceIoControl` with `FSCTL_SET_SPARSE` (IOCTL `0x000900C4`) to enable NTFS sparse file allocation.
-    - **Linux/macOS**: Invokes `fallocate` / `posix_fallocate` or advances end-of-file pointer via `FileStream.SetLength`.
-    - Allocates multi-gigabyte files instantaneously without zero-filling or physical disk block pre-allocation.
+    - Advances end-of-file pointer via `FileStream.SetLength(totalBytes)` (or POSIX `posix_fallocate`).
   - **File Staging with `.percolator-part`**:
     - Writes incoming chunks to `{relativePath}.percolator-part` using `RandomAccess.WriteAsync(SafeFileHandle, ReadOnlyMemory<byte>, fileOffset, ct)`.
-    - Protects incomplete files against antivirus scans, search indexers, and accidental user execution.
+    - Protects incomplete files against antivirus scans, search indexers, and accidental execution.
   - **Atomic Finalization**:
     - Upon complete chunk verification of all blocks belonging to a file:
     - Flushes file buffers to disk.
@@ -492,6 +488,7 @@ Concrete realization of out-of-band high-speed croc-inspired and BitTorrent swar
   - **Resumption Bitfield Scanner**:
     - Reads existing `.percolator-part` and completed files on disk in 1 MB blocks.
     - Computes SHA-256 over each block and compares against `ChunkHashes` to construct the resumption `Bitfield`.
+  - *(Note: On Windows NTFS, `Percolator.Infrastructure.Windows` provides `WindowsSparseDesktopFileStore` which invokes Win32 `DeviceIoControl` with `FSCTL_SET_SPARSE` to avoid synchronous zero-fill overhead).*
 
 #### 5. Bandwidth Rate Limiter
 - **`TokenBucketRateLimiter`** (`ITransferRateLimiter`):
