@@ -84,7 +84,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Domain.Tests", "
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "01 - Domain", "01 - Domain", "{D4096C37-2151-4956-B164-18F7A5736F56}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Application2", "Percolator.Application2\Percolator.Application2.csproj", "{8DAAB72C-5F61-49DD-B759-E58B6AA0BE47}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Application", "Percolator.Application\Percolator.Application.csproj", "{8DAAB72C-5F61-49DD-B759-E58B6AA0BE47}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Apps.Chat", "Percolator.Apps.Chat\Percolator.Apps.Chat.csproj", "{EFD29B85-D011-4CF3-BE43-CAE695F74136}"
 EndProject
@@ -92,9 +92,9 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Apps.Discovery",
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Apps.FileTransfer", "Percolator.Apps.FileTransfer\Percolator.Apps.FileTransfer.csproj", "{E48E0396-A863-4A93-90AA-FCA3EF072421}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "02 - Application2", "02 - Application2", "{55E7F686-A694-4C3D-8922-B0F398141028}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "02 - Application", "02 - Application", "{55E7F686-A694-4C3D-8922-B0F398141028}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Application2.Tests", "Percolator.Application2.Tests\Percolator.Application2.Tests.csproj", "{E65B00B1-173E-4CCC-9A55-EC31725F7FBD}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Application.Tests", "Percolator.Application.Tests\Percolator.Application.Tests.csproj", "{E65B00B1-173E-4CCC-9A55-EC31725F7FBD}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Apps.Chat.Tests", "Percolator.Apps.Chat.Tests\Percolator.Apps.Chat.Tests.csproj", "{22D63AC9-27F1-47E3-83B4-ADFD09E2C153}"
 EndProject
@@ -102,7 +102,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Apps.Discovery.T
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Apps.FileTransfer.Tests", "Percolator.Apps.FileTransfer.Tests\Percolator.Apps.FileTransfer.Tests.csproj", "{AC2CF643-312E-45B6-ACAB-E77D895F5F8F}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Application2IntegrationTests", "Percolator.Application2IntegrationTests\Percolator.Application2IntegrationTests.csproj", "{FEDA68BF-CEC1-4F96-B8FD-AE93F01986B7}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.ApplicationIntegrationTests", "Percolator.ApplicationIntegrationTests\Percolator.ApplicationIntegrationTests.csproj", "{FEDA68BF-CEC1-4F96-B8FD-AE93F01986B7}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.PluginSdk", "Percolator.PluginSdk\Percolator.PluginSdk.csproj", "{918AC08C-376A-45D1-9B61-87F72D4058A2}"
 EndProject
