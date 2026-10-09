@@ -1,0 +1,48 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Percolator.Desktop.ViewModels"
+        xmlns:ui="using:FluentAvalonia.UI.Controls"
+        x:Class="Percolator.Desktop.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Icon="/Assets/avalonia-logo.ico"
+        Title="Percolator Desktop"
+        Width="1100" Height="700"
+        WindowStartupLocation="CenterScreen">
+
+    <Design.DataContext>
+        <vm:MainWindowViewModel />
+    </Design.DataContext>
+
+    <Grid RowDefinitions="Auto,*">
+        <!-- Top TitleBar / Header Area -->
+        <Border Grid.Row="0" Height="32" Background="Transparent" />
+
+        <!-- Main Navigation Shell -->
+        <ui:NavigationView Grid.Row="1"
+                           x:Name="NavView"
+                           PaneDisplayMode="Left"
+                           IsSettingsVisible="True"
+                           SelectedItem="{Binding SelectedNavigationItem, Mode=TwoWay}">
+            <ui:NavigationView.MenuItems>
+                <ui:NavigationViewItem Content="Chats" Tag="Chats" IconSource="Chat" />
+                <ui:NavigationViewItem Content="Discovery" Tag="Discovery" IconSource="People" />
+                <ui:NavigationViewItem Content="File Transfers" Tag="Files" IconSource="Folder" />
+            </ui:NavigationView.MenuItems>
+
+            <ui:Frame x:Name="ContentFrame">
+                <!-- Fallback content if no navigation page selected yet -->
+                <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <StackPanel Spacing="12" HorizontalAlignment="Center">
+                        <TextBlock Text="Welcome to Percolator"
+                                   Theme="{StaticResource TitleTextBlockStyle}"
+                                   HorizontalAlignment="Center" />
+                        <TextBlock Text="{Binding StatusText}"
+                                   Theme="{StaticResource BodyTextBlockStyle}"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   HorizontalAlignment="Center" />
+                    </StackPanel>
+                </Grid>
+            </ui:Frame>
+        </ui:NavigationView>
+    </Grid>
+</Window>
