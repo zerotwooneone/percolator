@@ -1,13 +1,35 @@
 # Percolator.Apps.Chat Implementation Plan
 
 > [!NOTE]
-> This is an ephemeral, step-by-step implementation plan. For domain requirements, threat models, and architectural invariants, refer to [spec.md](spec.md).
+> This is an ephemeral, step-by-step implementation plan executing the directives from [spec.md](spec.md) and [unit-testing.md](../unit-testing.md). It will be deleted after implementation is complete and verified.
 
 ---
 
-## 1. Project Structure & Namespaces
+## 1. Testing Standards & Execution Discipline
 
-All code will reside in `Percolator.Apps.Chat` (`net10.0`), strictly referencing `Percolator.Domain` and `Percolator.PluginSdk`:
+Per our testing directive ([unit-testing.md](../unit-testing.md)), all code in `Percolator.Apps.Chat` will be implemented strictly via **Red-Green-Refactor**:
+
+### 1.1 High-Value Invariant Testing (AI Token Economy)
+- **\u274c BANNED (Zero Value / Wasted Tokens)**:
+  - Constructor field assignments (`new ChatMessageDto(...).Content == "..."`).
+  - Auto-properties, getters, setters.
+  - C# record structural equality or enum value checks.
+  - Mock framework wiring checks (`mock.Setup(x => x.Foo()).Returns(1); mock.Object.Foo().Should().Be(1)`).
+- **\u2705 MANDATORY (High-Value Defect Prevention)**:
+  - **Domain Invariants**: Stepped padding boundary calculations; UTF-8 byte span indexing for mentions; 24-hour edit windows.
+  - **State Transitions**: `PendingGroupInvitation` transitions (`Pending` $\rightarrow$ `Accepted`, `Pending` $\rightarrow$ `Declined`, `Pending` $\rightarrow$ `Expired`).
+  - **Result & Error Codes**: Asserting specific `DomainError` codes (`EDIT_WINDOW_EXPIRED`, `UNAUTHORIZED_AUTHOR`, `INVALID_CONTENT`).
+  - **Side-Effect & Delivery Assertions**: `IPayloadSender` dispatching padded envelopes; `IChatMessageRepository` mutations.
+  - **Temporal Expirations**: Virtualized time validation via `FakeDateTimeProvider` (no wall-clock dependencies).
+
+### 1.2 Anti-Bloat Guidelines
+- **Rule A (Parameterized Tests)**: Use NUnit `[TestCase]` to collapse boundary checks (null, empty, whitespace content; padding boundary lengths).
+- **Rule B (Assert the Delta)**: Verify only the result or state delta changed by the `Act` step.
+- **Rule C (Object Mother Factory)**: Use `ChatTestFactory` for repeatable DTO/context instantiation.
+
+---
+
+## 2. Project Structure & Namespaces
 
 ```
 Percolator.Apps.Chat/
@@ -64,240 +86,144 @@ Percolator.Apps.Chat/
 
 ---
 
-## 2. Milestone 1: Wire DTOs, Envelopes & Models
+## 3. Milestone 1: Models, DTOs & Invariant Logic (TDD)
 
-### 2.1 Enums & Discriminator
-- **`ChatPayloadType.cs`**:
+### Step 1.1: RED — Write Invariant Tests
+Create `Percolator.Apps.Chat.Tests/Models/SteppedPaddingTests.cs` and `MentionSpanTests.cs`:
+- `SteppedPaddingTests.CalculatePaddedLength_ReturnsExpectedBucket`:
   ```csharp
-  namespace Percolator.Apps.Chat.Models;
-
-  public enum ChatPayloadType : byte
+  [TestCase(0, 256)]
+  [TestCase(1, 256)]
+  [TestCase(256, 256)]
+  [TestCase(257, 512)]
+  [TestCase(512, 512)]
+  [TestCase(513, 1024)]
+  [TestCase(1024, 1024)]
+  [TestCase(1025, 2048)]
+  [TestCase(2048, 2048)]
+  [TestCase(2049, 4096)]
+  [TestCase(4096, 4096)]
+  [TestCase(4097, 8192)]
+  public void CalculatePaddedLength_ReturnsExpectedBucket(int unpaddedLength, int expectedPaddedLength)
   {
-      Message = 1,
-      Edit = 2,
-      Tombstone = 3,
-      Reaction = 4,
-      ReadReceipt = 5,
-      SystemNotice = 6,
-      GroupInvitation = 7,
-      GroupInvitationResponse = 8
+      SteppedPadding.CalculatePaddedLength(unpaddedLength).Should().Be(expectedPaddedLength);
   }
   ```
-- **`ReactionAction.cs`**: `public enum ReactionAction : byte { Add = 1, Remove = 2 }`
-- **`SystemNoticeType.cs`**: `public enum SystemNoticeType : byte { SafetyNumberChanged = 1, MemberJoined = 2, MemberLeft = 3, RolePromoted = 4, EpochAdvanced = 5 }`
-- **`GroupInvitationStatus.cs`**: `public enum GroupInvitationStatus : byte { Pending = 1, Accepted = 2, Declined = 3, Expired = 4 }`
+- `MentionSpanTests.ValidateSpan_WithEmojiAndMultibyteText_PreservesUtf8ByteBoundaries`:
+  Asserts that `MentionDto` offset calculations correctly account for multi-byte UTF-8 bytes (`Encoding.UTF8.GetByteCount`) when emojis/surrogates precede the mention.
+- Run `dotnet test Percolator.Apps.Chat.Tests` $\rightarrow$ **Fails (RED)**.
 
-### 2.2 Wire Envelope & Padding Helper
-- **`SteppedPadding.cs`**:
-  ```csharp
-  namespace Percolator.Apps.Chat.Services;
+### Step 1.2: GREEN — Implement Invariants & DTOs
+- Implement `SteppedPadding.cs` in `Percolator.Apps.Chat.Services`.
+- Implement `ChatPayloadType.cs`, `ReactionAction.cs`, `SystemNoticeType.cs`, `GroupInvitationStatus.cs`.
+- Implement `ChatPayloadEnvelopeDto.cs`, `MentionDto.cs`, `ReplyContextDto.cs`, `LinkPreviewDto.cs`, `MediaAttachmentDto.cs`.
+- Implement `ChatMessageDto.cs`, `MessageEditDto.cs`, `MessageTombstoneDto.cs`, `ReactionUpdateDto.cs`, `ReadReceiptDto.cs`, `SystemNoticeDto.cs`, `GroupInvitationDto.cs`, `GroupInvitationResponseDto.cs`.
+- Implement internal persistence records: `ChatMessageRecord.cs`, `UnknownGroupMessageRecord.cs`, `PendingGroupInvitation.cs`.
+- Implement read models: `ChatMessageReadModel.cs`, `ConversationSummaryReadModel.cs`, `ReactionGroupReadModel.cs`, `GroupInvitationSummaryReadModel.cs`.
 
-  public static class SteppedPadding
-  {
-      public static int CalculatePaddedLength(int unpaddedLength)
-      {
-          if (unpaddedLength <= 256) return 256;
-          if (unpaddedLength <= 512) return 512;
-          if (unpaddedLength <= 1024) return 1024;
-          if (unpaddedLength <= 2048) return 2048;
-          if (unpaddedLength <= 4096) return 4096;
-          return ((unpaddedLength + 4095) / 4096) * 4096;
-      }
-  }
-  ```
-- **`ChatPayloadEnvelopeDto.cs`**:
-  ```csharp
-  namespace Percolator.Apps.Chat.Models;
-
-  public sealed record ChatPayloadEnvelopeDto(
-      ChatPayloadType Type,
-      ReadOnlyMemory<byte> Data,
-      ReadOnlyMemory<byte> Padding);
-  ```
-
-### 2.3 Application Payload DTOs
-All timestamps use `ulong TimestampUnixMs` (millisecond-precision Unix epoch).
-- **`MentionDto.cs`**: `(PublicIdentityId IdentityId, int StartOffset, int Length)` where offsets are UTF-8 byte spans.
-- **`ReplyContextDto.cs`**: `(PayloadId ParentPayloadId, PublicIdentityId ParentAuthorId)` - strictly no quote text on the wire.
-- **`LinkPreviewDto.cs`**: `(string Title, string Description, string CanonicalUrl, BlobReference? ThumbnailBlob)`
-- **`MediaAttachmentDto.cs`**: `(BlobId BlobId, string? FileName, string ContentType, long ByteSize, int? Width, int? Height, byte[]? Waveform, ReadOnlyMemory<byte>? InlineBytes)`
-- **`ChatMessageDto.cs`**:
-  ```csharp
-  namespace Percolator.Apps.Chat.Models;
-
-  public sealed record ChatMessageDto(
-      PayloadId Id,
-      ChannelId ChannelId,
-      PublicIdentityId AuthorId,
-      ulong TimestampUnixMs,
-      string Content,
-      IReadOnlyList<MentionDto> Mentions,
-      ReplyContextDto? ReplyContext,
-      LinkPreviewDto? LinkPreview,
-      IReadOnlyList<MediaAttachmentDto> Attachments,
-      int? ExpireAfterSeconds,
-      ulong? EditedAtUnixMs);
-  ```
-- **`MessageEditDto.cs`**: `(PayloadId TargetPayloadId, ChannelId ChannelId, PublicIdentityId AuthorId, string NewContent, IReadOnlyList<MentionDto> NewMentions, ulong EditedAtUnixMs)`
-- **`MessageTombstoneDto.cs`**: `(PayloadId TargetPayloadId, ChannelId ChannelId, PublicIdentityId RequestedBy, ulong DeletedAtUnixMs)`
-- **`ReactionUpdateDto.cs`**: `(PayloadId TargetPayloadId, ChannelId ChannelId, PublicIdentityId AuthorId, string Emoji, ReactionAction Action, ulong TimestampUnixMs)`
-- **`ReadReceiptDto.cs`**: `(ChannelId ChannelId, PublicIdentityId ReaderId, PayloadId UpToPayloadId, ulong ReadAtUnixMs)`
-- **`SystemNoticeDto.cs`**: `(ChannelId ChannelId, SystemNoticeType Type, PublicIdentityId AffectedIdentity, ulong TimestampUnixMs)`
-- **`GroupInvitationDto.cs`**: `(Guid InvitationId, ChannelId TargetGroupChannelId, string GroupName, PublicIdentityId InviterId, string? RelayEndpoint, ulong ExpiresAtUnixMs)`
-- **`GroupInvitationResponseDto.cs`**: `(Guid InvitationId, ChannelId TargetGroupChannelId, PublicIdentityId ResponderId, bool Accepted, ulong RespondedAtUnixMs)`
-
-### 2.4 Internal Records & Read Models
-- **`ChatMessageRecord.cs`**: Represents the persisted message row in `IChatMessageRepository` (with `ExpiresAtUtc`, `IsDeleted`, `CreatedAtUtc`, reactions, mentions, attachments).
-- **`PendingGroupInvitation.cs`**: Entity representing a received group invitation with state transition methods (`Accept()`, `Decline()`, `Expire()`).
-- **`ChatMessageReadModel.cs`**: Read model for the UI containing formatted text, mentions, resolved parent snippet, attachments, and `ReactionGroupReadModel` aggregations.
-- **`ConversationSummaryReadModel.cs`**: Read model for the conversations list (ChannelId, Title, Snippet, LastActivityUtc, UnreadCount).
+### Step 1.3: CHECKPOINT 1
+- Run `dotnet test Percolator.Apps.Chat.Tests`.
+- **Criteria**: All tests pass (GREEN).
+- Run `dotnet build Percolator.sln`.
+- **Criteria**: 0 errors, 0 warnings.
 
 ---
 
-## 3. Milestone 2: Ports (Repositories & Query Services)
+## 4. Milestone 2: Ports & In-Memory Test Doubles
 
-Define interfaces in `Percolator.Apps.Chat.Ports`:
+### Step 2.1: Implement Ports in `Percolator.Apps.Chat.Ports`
+- `IChatService.cs`: Outbound commands port.
+- `IChatMessageRepository.cs`: Rich message persistence port (insert, edit, tombstone, reaction, receipt, purge).
+- `IGroupInvitationRepository.cs`: Group invitation persistence port.
+- `IUnknownGroupMessageCacheRepository.cs`: Out-of-order group frames port.
+- `IChatMessageQueryService.cs`, `IConversationListQueryService.cs`, `IGroupInvitationQueryService.cs`: Read query ports.
 
-### 3.1 `IChatMessageRepository`
-```csharp
-namespace Percolator.Apps.Chat.Ports;
+### Step 2.2: Implement Test Doubles in `Percolator.Apps.Chat.Tests/TestDoubles`
+- `FakeDateTimeProvider`: Time virtualizer implementing `IDateTimeProvider` with `SetTime(DateTimeOffset)` and `Advance(TimeSpan)`.
+- `InMemoryChatMessageRepository`: Dictionary-backed `IChatMessageRepository`.
+- `InMemoryGroupInvitationRepository`: Dictionary-backed `IGroupInvitationRepository`.
+- `TestPayloadSender`: Captures `OutboundPayloadContext` for verification without network I/O.
+- `TestPayloadSerializer`: Deterministic JSON/Memory serializer implementing `IPayloadSerializer`.
+- `ChatTestFactory`: Object Mother providing pre-built valid `DirectChannel`, `GroupChannel`, `SendMessageCommand`, etc.
 
-public interface IChatMessageRepository
-{
-    ValueTask SaveMessageAsync(ChatMessageRecord record, CancellationToken ct = default);
-    ValueTask<ChatMessageRecord?> GetMessageByIdAsync(PayloadId payloadId, CancellationToken ct = default);
-    ValueTask UpdateMessageEditAsync(PayloadId payloadId, string newContent, IReadOnlyList<MentionDto> mentions, DateTimeOffset editedAtUtc, CancellationToken ct = default);
-    ValueTask ApplyTombstoneAsync(PayloadId payloadId, PublicIdentityId requestedBy, DateTimeOffset deletedAtUtc, CancellationToken ct = default);
-    ValueTask AddReactionAsync(PayloadId payloadId, PublicIdentityId reactorId, string emoji, DateTimeOffset timestampUtc, CancellationToken ct = default);
-    ValueTask RemoveReactionAsync(PayloadId payloadId, PublicIdentityId reactorId, string emoji, CancellationToken ct = default);
-    ValueTask UpdateReadReceiptAsync(ChannelId channelId, PublicIdentityId peerId, PayloadId upToPayloadId, DateTimeOffset readAtUtc, CancellationToken ct = default);
-    ValueTask PurgeExpiredMessagesAsync(DateTimeOffset nowUtc, CancellationToken ct = default);
-}
-```
-
-### 3.2 `IGroupInvitationRepository`
-```csharp
-namespace Percolator.Apps.Chat.Ports;
-
-public interface IGroupInvitationRepository
-{
-    ValueTask SaveInvitationAsync(PendingGroupInvitation invitation, CancellationToken ct = default);
-    ValueTask<PendingGroupInvitation?> GetByIdAsync(Guid invitationId, CancellationToken ct = default);
-    ValueTask UpdateStatusAsync(Guid invitationId, GroupInvitationStatus status, CancellationToken ct = default);
-}
-```
-
-### 3.3 `IUnknownGroupMessageCacheRepository`
-```csharp
-namespace Percolator.Apps.Chat.Ports;
-
-public interface IUnknownGroupMessageCacheRepository
-{
-    ValueTask StageUnknownMessageAsync(UnknownGroupMessageRecord record, CancellationToken ct = default);
-    ValueTask<IReadOnlyList<UnknownGroupMessageRecord>> GetPendingByAuthorAsync(ChannelId channelId, PublicIdentityId authorId, CancellationToken ct = default);
-    ValueTask RemoveAsync(Guid recordId, CancellationToken ct = default);
-}
-```
-
-### 3.4 Fast-Path Read Query Ports
-- **`IChatMessageQueryService`**:
-  ```csharp
-  Task<IReadOnlyList<ChatMessageReadModel>> GetPagedMessagesAsync(ChannelId channelId, int beforeSequence, int limit, CancellationToken ct = default);
-  Task<ChatMessageReadModel?> GetMessageByIdAsync(PayloadId payloadId, CancellationToken ct = default);
-  ```
-- **`IConversationListQueryService`**:
-  ```csharp
-  Task<IReadOnlyList<ConversationSummaryReadModel>> GetRecentConversationsAsync(PublicIdentityId ownerId, CancellationToken ct = default);
-  ```
-- **`IGroupInvitationQueryService`**:
-  ```csharp
-  Task<IReadOnlyList<GroupInvitationSummaryReadModel>> GetPendingInvitationsAsync(PublicIdentityId recipientId, CancellationToken ct = default);
-  ```
+### Step 2.3: CHECKPOINT 2
+- Run `dotnet build Percolator.sln`.
+- **Criteria**: 0 errors, 0 warnings. Clean compilation across all projects.
 
 ---
 
-## 4. Milestone 3: Services & Handlers
+## 5. Milestone 3: Services & Handlers (TDD Cycle)
 
-### 4.1 Outbound Commands & `ChatService`
-- **Commands**:
-  - `SendMessageCommand`: `(ChannelId ChannelId, PublicIdentityId AuthorId, DeviceId DeviceId, string Content, IReadOnlyList<MentionDto> Mentions, ReplyContextDto? ReplyContext, IReadOnlyList<MediaAttachmentDto> Attachments, int? ExpireAfterSeconds, DeliveryRoute Route)`
-  - `EditMessageCommand`: `(ChannelId ChannelId, PayloadId TargetPayloadId, PublicIdentityId AuthorId, DeviceId DeviceId, string NewContent, IReadOnlyList<MentionDto> NewMentions, DeliveryRoute Route)`
-  - `DeleteMessageCommand`: `(ChannelId ChannelId, PayloadId TargetPayloadId, PublicIdentityId RequestedBy, DeviceId DeviceId, DeliveryRoute Route)`
-  - `AddReactionCommand`: `(ChannelId ChannelId, PayloadId TargetPayloadId, PublicIdentityId AuthorId, DeviceId DeviceId, string Emoji, DeliveryRoute Route)`
-  - `RemoveReactionCommand`: `(ChannelId ChannelId, PayloadId TargetPayloadId, PublicIdentityId AuthorId, DeviceId DeviceId, string Emoji, DeliveryRoute Route)`
-  - `MarkAsReadCommand`: `(ChannelId ChannelId, PublicIdentityId ReaderId, DeviceId DeviceId, PayloadId UpToPayloadId, DeliveryRoute Route)`
+### Step 3.1: `ChatService` (Outbound Write Path)
+- **Phase 1: RED**:
+  Create `Percolator.Apps.Chat.Tests/Services/ChatServiceTests.cs`.
+  Write focused, high-value invariant tests:
+  1. `SendMessageAsync_ValidText_AppendsChannelPayload_AndDispatchesPaddedEnvelope`
+  2. `SendMessageAsync_ClampsTimestampToUnixMilliseconds` (verifies sub-millisecond precision is stripped).
+  3. `SendMessageAsync_ReplyContext_ExcludesSnippetFromWire` (verifies only parent ID and author ID are included).
+  4. `SendMessageAsync_WithInvalidOrEmptyContent_ReturnsValidationError` (using `[TestCase(null)]`, `[TestCase("")]`, `[TestCase("   ")]`).
+  5. `EditMessageAsync_Within24HourWindow_UpdatesRepository_AndDispatchesEditDto`
+  6. `EditMessageAsync_Past24HourWindow_ReturnsEditWindowExpiredError`
+  7. `EditMessageAsync_ByNonAuthor_ReturnsUnauthorizedError`
+  8. `DeleteMessageAsync_Author_MarksTombstone_AndDispatchesTombstoneDto`
+  9. `AddReactionAsync_RepeatedCalls_AreIdempotent`
+  10. `MarkAsReadAsync_AdvancesCursorAndDispatchesReadReceiptDto`
+  Run tests $\rightarrow$ **Fails (RED)**.
+- **Phase 2: GREEN**:
+  Implement `ChatService.cs` in `Percolator.Apps.Chat.Services`.
+  Run tests $\rightarrow$ **Passes (GREEN)**.
+- **Phase 3: REFACTOR**: Clean up allocations, verify no wall-clock dependencies remain.
 
-- **`ChatService` Implementation Logic**:
-  1. Validates UTF-8 mention boundaries (`Encoding.UTF8.GetByteCount`) and ensures content is not whitespace-only.
-  2. For `EditMessageAsync`: validates `target.AuthorId == command.AuthorId` and `now - target.CreatedAt <= 24 hours`.
-  3. Clamps send timestamp: `(ulong)timeProvider.UtcNow.ToUnixTimeMilliseconds()`.
-  4. Serializes the inner DTO with `IPayloadSerializer.Serialize(innerDto)`.
-  5. Computes stepped padding: `SteppedPadding.CalculatePaddedLength(innerBytes.Length) - innerBytes.Length`.
-  6. Wraps into `ChatPayloadEnvelopeDto(type, innerBytes, paddingBytes)` and serializes envelope.
-  7. Appends `ChannelPayload` to domain aggregate (`DirectChannel` or `GroupChannel`) via `IChannelRepository`.
-  8. Calls `IPayloadSender.SendPayloadAsync(outboundContext)` to ship over network.
-  9. Commits the record to `IChatMessageRepository`.
+### Step 3.2: `ChatPayloadHandler` (Inbound Write Path)
+- **Phase 1: RED**:
+  Create `Percolator.Apps.Chat.Tests/Handlers/ChatPayloadHandlerTests.cs`.
+  Write focused invariant tests:
+  1. `HandleInboundAsync_TextMessage_AppendsToChannel_AndPersistsToChatMessageRepository`
+  2. `HandleInboundAsync_DiscardsSteppedPaddingCleanly` (asserts message text is intact regardless of padding bytes).
+  3. `HandleInboundAsync_WithMentions_ValidatesUtf8ByteBoundaries`
+  4. `HandleInboundAsync_EmojiReaction_AppliesReactionToChatRepo`
+  5. `HandleInboundAsync_MessageEdit_WithinWindow_UpdatesChatRepo`
+  6. `HandleInboundAsync_MessageEdit_NonAuthor_RejectsEdit`
+  7. `HandleInboundAsync_MessageTombstone_ReplacesWithDeletedPlaceholder`
+  8. `HandleInboundAsync_CorruptedEnvelope_ReturnsDeserializationError`
+  9. `HandleInboundAsync_FutureUnknownType_ReturnsSuccessWithoutError` (forward compatibility).
+  Run tests $\rightarrow$ **Fails (RED)**.
+- **Phase 2: GREEN**:
+  Implement `ChatPayloadHandler.cs` in `Percolator.Apps.Chat.Handlers`.
+  Run tests $\rightarrow$ **Passes (GREEN)**.
 
-### 4.2 Inbound `ChatPayloadHandler`
-- Implements `IAppPayloadHandler` with `TargetAppId => AppId.Chat`.
-- Logic:
-  1. Deserializes `ChatPayloadEnvelopeDto` from `context.Payload`.
-  2. Evaluates `envelope.Type`:
-     - **`Message`**: Deserializes `ChatMessageDto`, appends `ChannelPayload` to `IChannelRepository`, inserts `ChatMessageRecord` into `IChatMessageRepository`.
-     - **`Edit`**: Deserializes `MessageEditDto`. Verifies that author matches original message author and that edit window $\le 24\text{ hours}$. Updates `IChatMessageRepository`.
-     - **`Tombstone`**: Deserializes `MessageTombstoneDto`. Verifies authorization. Updates `IChatMessageRepository` with deleted placeholder and purges associated media cache via `IBlobStorageService`.
-     - **`Reaction`**: Deserializes `ReactionUpdateDto`. Calls `AddReactionAsync` or `RemoveReactionAsync` on `IChatMessageRepository`.
-     - **`ReadReceipt`**: Deserializes `ReadReceiptDto`. Calls `UpdateReadReceiptAsync` on `IChatMessageRepository`.
-     - **`GroupInvitation`**: Deserializes `GroupInvitationDto`. Creates `PendingGroupInvitation` in `IGroupInvitationRepository`.
-     - **`GroupInvitationResponse`**: Deserializes `GroupInvitationResponseDto`.
-     - **Unknown Type**: Forward-compatibility: logs debug trace and returns `DomainResult.Success()` without throwing.
+### Step 3.3: `GroupInvitationService` (Consent State Machine)
+- **Phase 1: RED**:
+  Create `Percolator.Apps.Chat.Tests/Services/GroupInvitationServiceTests.cs`.
+  Assert state transitions:
+  1. `ReceiveInvitation_CreatesPendingRecord`
+  2. `AcceptInvitation_TransitionsToAccepted_JoinsGroupChannel_AndDispatchesResponse`
+  3. `DeclineInvitation_TransitionsToDeclined_AndDispatchesDeclineResponse`
+  4. `AcceptInvitation_WhenExpired_ReturnsInvitationExpiredError`
+  Run tests $\rightarrow$ **Fails (RED)**.
+- **Phase 2: GREEN**:
+  Implement `GroupInvitationService.cs` in `Percolator.Apps.Chat.Services`.
+  Run tests $\rightarrow$ **Passes (GREEN)**.
 
-### 4.3 `GroupInvitationService`
-- Manages the consent lifecycle:
-  - `AcceptInvitationAsync(Guid invitationId)`: Calls `invitation.Accept()`, adds member to `GroupChannel`, saves to `IChannelRepository`, dispatches `GroupInvitationResponseDto(Accepted = true)` over the pairwise channel.
-  - `DeclineInvitationAsync(Guid invitationId)`: Calls `invitation.Decline()`, dispatches `GroupInvitationResponseDto(Accepted = false)` over the pairwise channel.
-
-### 4.4 `ChatPlugin`
-- Implements `IAppPlugin`:
-  - `Id => AppId.Chat`
-  - `Name => "Chat"`
-  - `StartAsync` and `StopAsync` lifecycle hooks.
+### Step 3.4: `ChatPlugin` & Dependency Injection
+- Implement `ChatPlugin.cs` (`IAppPlugin`).
+- Implement `DependencyInjection/ServiceCollectionExtensions.cs` (`services.AddChatPlugin()`).
 
 ---
 
-## 5. Milestone 4: Unit Test Suite (`Percolator.Apps.Chat.Tests`)
+## 6. Milestone 4: Verification Checkpoints & Solution Gate
 
-Implement full in-memory unit tests using mocks and test doubles:
+Execute this strict sequence before considering the task complete:
 
-### 5.1 Test Doubles
-- `InMemoryChatMessageRepository`: Thread-safe dictionary-backed store implementing `IChatMessageRepository`.
-- `InMemoryGroupInvitationRepository`: Thread-safe dictionary-backed store implementing `IGroupInvitationRepository`.
-- `TestPayloadSender`: Captures dispatched `OutboundPayloadContext` for assertion.
-- `TestPayloadSerializer`: Real implementation of `IPayloadSerializer` for roundtrip testing.
-- `TestDateTimeProvider`: Controllable time provider for testing 24-hour edit windows and timestamps.
-
-### 5.2 Test Cases
-1. **Outbound Commands**:
-   - `SendMessageAsync_ValidText_SerializesEnvelopeWithSteppedPaddingAndDispatches`
-   - `SendMessageAsync_ClampsTimestampToUnixMilliseconds`
-   - `SendMessageAsync_ReplyContext_ExcludesSnippetFromWire`
-   - `SendMessageAsync_MentionOffsets_CalculatesUtf8ByteSpans`
-   - `EditMessageAsync_WithinWindow_DispatchesEditDto`
-   - `EditMessageAsync_PastWindow_ReturnsValidationError`
-   - `DeleteMessageAsync_Author_DispatchesTombstoneDto`
-   - `AddReactionAsync_DispatchesReactionUpdateDto`
-   - `MarkAsReadAsync_AdvancesCursorAndDispatchesReadReceiptDto`
-2. **Inbound Payloads**:
-   - `HandleInboundAsync_TextMessage_AppendsPayloadToDomainChannelAndSavesRecord`
-   - `HandleInboundAsync_DiscardsSteppedPaddingCleanly`
-   - `HandleInboundAsync_WithMentions_ValidatesUtf8ByteBoundaries`
-   - `HandleInboundAsync_EmojiReaction_AppliesReactionToChatRepo`
-   - `HandleInboundAsync_MessageEdit_WithinWindow_UpdatesChatRepo`
-   - `HandleInboundAsync_MessageEdit_NonAuthor_RejectsEdit`
-   - `HandleInboundAsync_MessageTombstone_ReplacesWithDeletedPlaceholder`
-   - `HandleInboundAsync_CorruptedEnvelope_ReturnsDeserializationError`
-   - `HandleInboundAsync_FutureUnknownType_ReturnsSuccessWithoutError`
-3. **Invitations**:
-   - `ReceiveInvitation_CreatesPendingRecord`
-   - `AcceptInvitation_JoinsGroupChannelAndDispatchesResponse`
-   - `DeclineInvitation_MarksDeclinedAndDispatchesDeclineResponse`
+1. **Unit Test Run**:
+   `dotnet test Percolator.Apps.Chat.Tests/Percolator.Apps.Chat.Tests.csproj`
+   - Must pass 100% with zero failures.
+2. **Whole Solution Regression Run**:
+   `dotnet test Percolator.sln`
+   - All 400+ domain, application, plugin, and crypto tests must pass 100%.
+3. **Compiler & Analyzer Check**:
+   `dotnet build Percolator.sln`
+   - 0 errors, 0 new warnings.
+4. **Git Verification & Commit**:
+   - Check `git status` to ensure all new files are tracked and clean.
+   - Commit changes cleanly: `git commit -m "feat(apps.chat): implement chat plugin models, ports, services, and unit tests"`.
