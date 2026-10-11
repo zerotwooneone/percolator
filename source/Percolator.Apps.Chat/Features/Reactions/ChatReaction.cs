@@ -4,5 +4,5 @@ namespace Percolator.Apps.Chat.Features.Reactions;
 
 public sealed record ChatReaction(
     PublicIdentityId ReactorId,
-    string Emoji,
+    Emoji Emoji,
     ulong ReactedAtUnixMs);

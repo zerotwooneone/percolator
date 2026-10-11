@@ -2,6 +2,7 @@ using FluentAssertions;
 using NUnit.Framework;
 using Percolator.Apps.Chat.Features.Media;
 using Percolator.Apps.Chat.Features.Messaging;
+using Percolator.Apps.Chat.Features.Reactions;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.PluginSdk;
@@ -20,6 +21,36 @@ public class ChatMessageTests
     private const ulong MaxEditWindowMs = 24UL * 60 * 60 * 1000;
 
     [Test]
+    public void Constructor_WithEmptyContentAndNoAttachments_ThrowsArgumentException()
+    {
+        var act = () => new ChatMessage(
+            MessageId,
+            TestChannelId,
+            Author,
+            SentAtMs,
+            "",
+            attachments: Array.Empty<MediaAttachmentDto>());
+
+        act.Should().Throw<ArgumentException>()
+            .WithMessage("*non-empty content or at least one attachment*");
+    }
+
+    [Test]
+    public void Constructor_WithContentExceedingMaxLength_ThrowsArgumentException()
+    {
+        var tooLong = new string('a', ChatMessage.MaxContentLength + 1);
+        var act = () => new ChatMessage(
+            MessageId,
+            TestChannelId,
+            Author,
+            SentAtMs,
+            tooLong);
+
+        act.Should().Throw<ArgumentException>()
+            .WithMessage($"*cannot exceed {ChatMessage.MaxContentLength} characters*");
+    }
+
+    [Test]
     public void ApplyEdit_ByAuthor_Within24Hours_SucceedsAndUpdatesContent()
     {
         var message = new ChatMessage(
@@ -35,6 +66,39 @@ public class ChatMessageTests
         result.IsSuccess.Should().BeTrue();
         message.Content.Should().Be("Edited text");
         message.EditedAtUnixMs.Should().Be(editTime);
+    }
+
+    [Test]
+    public void ApplyEdit_WithEmptyOrWhitespaceContent_ReturnsInvalidContentError()
+    {
+        var message = new ChatMessage(
+            MessageId,
+            TestChannelId,
+            Author,
+            SentAtMs,
+            "Initial text");
+
+        var result = message.ApplyEdit("   ", Array.Empty<MentionDto>(), SentAtMs + 100, Author);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("INVALID_CONTENT");
+    }
+
+    [Test]
+    public void ApplyEdit_WithContentExceedingMaxLength_ReturnsContentTooLongError()
+    {
+        var message = new ChatMessage(
+            MessageId,
+            TestChannelId,
+            Author,
+            SentAtMs,
+            "Initial text");
+
+        var tooLong = new string('x', ChatMessage.MaxContentLength + 1);
+        var result = message.ApplyEdit(tooLong, Array.Empty<MentionDto>(), SentAtMs + 100, Author);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("CONTENT_TOO_LONG");
     }
 
     [Test]
@@ -210,15 +274,17 @@ public class ChatMessageTests
             SentAtMs,
             "Hello");
 
-        message.AddReaction(Author, "👍", SentAtMs + 100);
-        message.AddReaction(Author, "👍", SentAtMs + 200); // duplicate add updates timestamp
+        var emoji = Emoji.Create("👍").Value;
+
+        message.AddReaction(Author, emoji, SentAtMs + 100);
+        message.AddReaction(Author, emoji, SentAtMs + 200); // duplicate add updates timestamp
 
         message.Reactions.Should().HaveCount(1);
-        message.Reactions[0].Emoji.Should().Be("👍");
+        message.Reactions[0].Emoji.Should().Be(emoji);
         message.Reactions[0].ReactedAtUnixMs.Should().Be(SentAtMs + 200);
 
-        message.RemoveReaction(Author, "👍");
-        message.RemoveReaction(Author, "👍"); // duplicate remove
+        message.RemoveReaction(Author, emoji);
+        message.RemoveReaction(Author, emoji); // duplicate remove
 
         message.Reactions.Should().BeEmpty();
     }

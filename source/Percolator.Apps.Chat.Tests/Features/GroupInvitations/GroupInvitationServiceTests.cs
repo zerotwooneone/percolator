@@ -39,8 +39,9 @@ public class GroupInvitationServiceTests
     public async Task ReceiveInvitationAsync_CreatesPendingRecord()
     {
         var groupChannelId = ChannelId.New();
+        var inviteId = new InvitationId("invite-100");
         var inviteDto = new GroupInvitationDto(
-            "invite-100",
+            inviteId,
             groupChannelId,
             "Security Team",
             ChatTestFactory.BobId,
@@ -50,7 +51,7 @@ public class GroupInvitationServiceTests
         var result = await _sut.ReceiveInvitationAsync(inviteDto);
 
         result.IsSuccess.Should().BeTrue();
-        var saved = await _invitationRepo.GetByIdAsync("invite-100");
+        var saved = await _invitationRepo.GetByIdAsync(inviteId);
         saved.Should().NotBeNull();
         saved!.Status.Should().Be(GroupInvitationStatus.Pending);
         saved.GroupName.Should().Be("Security Team");
@@ -66,8 +67,9 @@ public class GroupInvitationServiceTests
         var directChannel = ChatTestFactory.CreateDirectChannel(_timeProvider, ownerId: ChatTestFactory.AliceId, peerId: ChatTestFactory.BobId);
         await _channelRepo.SaveDirectAsync(directChannel);
 
+        var inviteId = new InvitationId("invite-101");
         var inviteDto = new GroupInvitationDto(
-            "invite-101",
+            inviteId,
             groupChannelId,
             "Security Team",
             ChatTestFactory.BobId,
@@ -77,7 +79,7 @@ public class GroupInvitationServiceTests
         await _sut.ReceiveInvitationAsync(inviteDto);
 
         var acceptResult = await _sut.AcceptInvitationAsync(
-            "invite-101",
+            inviteId,
             ChatTestFactory.AliceId,
             ChatTestFactory.AliceDeviceId,
             directChannel.Id,
@@ -85,7 +87,7 @@ public class GroupInvitationServiceTests
 
         acceptResult.IsSuccess.Should().BeTrue();
 
-        var updated = await _invitationRepo.GetByIdAsync("invite-101");
+        var updated = await _invitationRepo.GetByIdAsync(inviteId);
         updated!.Status.Should().Be(GroupInvitationStatus.Accepted);
         updated.RespondedAtUnixMs.Should().Be(_timeProvider.UtcNowUnixMs);
 
@@ -105,8 +107,9 @@ public class GroupInvitationServiceTests
         var directChannel = ChatTestFactory.CreateDirectChannel(_timeProvider, ownerId: ChatTestFactory.AliceId, peerId: ChatTestFactory.BobId);
         await _channelRepo.SaveDirectAsync(directChannel);
 
+        var inviteId = new InvitationId("invite-102");
         var inviteDto = new GroupInvitationDto(
-            "invite-102",
+            inviteId,
             ChannelId.New(),
             "Random Group",
             ChatTestFactory.BobId,
@@ -116,7 +119,7 @@ public class GroupInvitationServiceTests
         await _sut.ReceiveInvitationAsync(inviteDto);
 
         var declineResult = await _sut.DeclineInvitationAsync(
-            "invite-102",
+            inviteId,
             ChatTestFactory.AliceId,
             ChatTestFactory.AliceDeviceId,
             directChannel.Id,
@@ -124,7 +127,7 @@ public class GroupInvitationServiceTests
 
         declineResult.IsSuccess.Should().BeTrue();
 
-        var updated = await _invitationRepo.GetByIdAsync("invite-102");
+        var updated = await _invitationRepo.GetByIdAsync(inviteId);
         updated!.Status.Should().Be(GroupInvitationStatus.Declined);
 
         _payloadSender.SentPayloads.Should().ContainSingle();
@@ -143,8 +146,9 @@ public class GroupInvitationServiceTests
         await _channelRepo.SaveDirectAsync(directChannel);
 
         var expiresAt = _timeProvider.UtcNowUnixMs + 1000;
+        var inviteId = new InvitationId("invite-103");
         var inviteDto = new GroupInvitationDto(
-            "invite-103",
+            inviteId,
             ChannelId.New(),
             "Expired Group",
             ChatTestFactory.BobId,
@@ -157,7 +161,7 @@ public class GroupInvitationServiceTests
         _timeProvider.Advance(TimeSpan.FromSeconds(5));
 
         var acceptResult = await _sut.AcceptInvitationAsync(
-            "invite-103",
+            inviteId,
             ChatTestFactory.AliceId,
             ChatTestFactory.AliceDeviceId,
             directChannel.Id,

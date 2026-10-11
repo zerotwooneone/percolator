@@ -184,7 +184,34 @@ public class ChatPayloadHandlerTests
 
         result.IsSuccess.Should().BeTrue();
         var updated = await _chatRepo.GetByIdAsync(msgId);
-        updated!.Reactions.Should().ContainSingle(r => r.Emoji == "❤️" && r.ReactorId == channel.RemotePeerId);
+        updated!.Reactions.Should().ContainSingle(r => r.Emoji.Value == "❤️" && r.ReactorId == channel.RemotePeerId);
+    }
+
+    [Test]
+    public async Task HandleInboundAsync_InvalidEmoji_ReturnsInvalidEmoji()
+    {
+        var channel = ChatTestFactory.CreateDirectChannel(_timeProvider);
+        await _channelRepo.SaveDirectAsync(channel);
+
+        var msgId = PayloadId.New();
+        var message = new ChatMessage(msgId, channel.Id, channel.OwnerIdentityId, _timeProvider.UtcNowUnixMs, "Original message");
+        await _chatRepo.AddAsync(message);
+
+        var reactionDto = new ReactionUpdateDto(
+            msgId,
+            channel.Id,
+            channel.RemotePeerId,
+            "NOT_AN_EMOJI_AND_TOO_LONG",
+            ReactionAction.Add,
+            _timeProvider.UtcNowUnixMs);
+
+        var envelope = new ChatPayloadEnvelopeDto(ChatPayloadType.Reaction, _serializer.Serialize(reactionDto), Array.Empty<byte>());
+        var context = new InboundPayloadContext(channel.Id, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
+
+        var result = await _sut.HandleInboundAsync(context);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("INVALID_EMOJI");
     }
 
     [Test]
@@ -405,7 +432,7 @@ public class ChatPayloadHandlerTests
 
         // Sender context is Bob, but invite claims inviter is Alice
         var forgedInvite = new GroupInvitationDto(
-            "invite-999",
+            new InvitationId("invite-999"),
             ChannelId.New(),
             "Hacker Group",
             channel.OwnerIdentityId, // Forged inviter!

@@ -9,7 +9,7 @@ public sealed class PendingGroupInvitation
     public static readonly DomainError InvitationExpiredError = new("INVITATION_EXPIRED", "The group invitation has expired.");
     public static readonly DomainError InvalidStateTransitionError = new("INVALID_STATE_TRANSITION", "Cannot transition invitation from its current state.");
 
-    public string InvitationId { get; }
+    public InvitationId InvitationId { get; }
     public ChannelId TargetGroupChannelId { get; }
     public string GroupName { get; }
     public PublicIdentityId InviterId { get; }
@@ -19,7 +19,7 @@ public sealed class PendingGroupInvitation
     public ulong? RespondedAtUnixMs { get; private set; }
 
     public PendingGroupInvitation(
-        string invitationId,
+        InvitationId invitationId,
         ChannelId targetGroupChannelId,
         string groupName,
         PublicIdentityId inviterId,
@@ -28,7 +28,6 @@ public sealed class PendingGroupInvitation
         GroupInvitationStatus status = GroupInvitationStatus.Pending,
         ulong? respondedAtUnixMs = null)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(invitationId);
         ArgumentException.ThrowIfNullOrWhiteSpace(groupName);
 
         InvitationId = invitationId;

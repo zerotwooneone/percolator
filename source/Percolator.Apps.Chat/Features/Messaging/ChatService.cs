@@ -43,6 +43,11 @@ public sealed class ChatService : IChatService
             return DomainResult<PayloadId>.Failure(new DomainError("INVALID_CONTENT", "Message content or attachments must be provided."));
         }
 
+        if (command.Content is not null && command.Content.Length > ChatMessage.MaxContentLength)
+        {
+            return DomainResult<PayloadId>.Failure(new DomainError("CONTENT_TOO_LONG", $"Message content cannot exceed {ChatMessage.MaxContentLength} characters."));
+        }
+
         var payloadId = PayloadId.New();
         ulong timestampUnixMs = (ulong)_timeProvider.UtcNow.ToUnixTimeMilliseconds();
 
@@ -266,7 +271,7 @@ public sealed class ChatService : IChatService
             command.TargetPayloadId,
             command.ChannelId,
             command.AuthorId,
-            command.Emoji,
+            command.Emoji.Value,
             ReactionAction.Add,
             nowMs);
 
@@ -302,7 +307,7 @@ public sealed class ChatService : IChatService
             command.TargetPayloadId,
             command.ChannelId,
             command.AuthorId,
-            command.Emoji,
+            command.Emoji.Value,
             ReactionAction.Remove,
             nowMs);
 

@@ -37,6 +37,4 @@ public readonly record struct DomainResult<T>
 
     public static DomainResult<T> Success(T value) => new(true, value, DomainError.None);
     public static DomainResult<T> Failure(DomainError error) => new(false, default!, error);
-
-    public static implicit operator DomainResult<T>(T value) => Success(value);
 }

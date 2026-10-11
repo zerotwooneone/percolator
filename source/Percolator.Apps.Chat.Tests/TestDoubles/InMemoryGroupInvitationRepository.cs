@@ -5,7 +5,7 @@ namespace Percolator.Apps.Chat.Tests.TestDoubles;
 
 public sealed class InMemoryGroupInvitationRepository : IGroupInvitationRepository
 {
-    private readonly ConcurrentDictionary<string, PendingGroupInvitation> _storage = new();
+    private readonly ConcurrentDictionary<InvitationId, PendingGroupInvitation> _storage = new();
 
     public IReadOnlyCollection<PendingGroupInvitation> All => _storage.Values.ToList();
 
@@ -15,7 +15,7 @@ public sealed class InMemoryGroupInvitationRepository : IGroupInvitationReposito
         return Task.CompletedTask;
     }
 
-    public Task<PendingGroupInvitation?> GetByIdAsync(string invitationId, CancellationToken ct = default)
+    public Task<PendingGroupInvitation?> GetByIdAsync(InvitationId invitationId, CancellationToken ct = default)
     {
         _storage.TryGetValue(invitationId, out var invitation);
         return Task.FromResult(invitation);

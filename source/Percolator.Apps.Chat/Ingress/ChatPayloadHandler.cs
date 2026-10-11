@@ -274,6 +274,12 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
             return DomainResult.Failure(new DomainError("CHANNEL_MISMATCH", "Target message belongs to a different channel."));
         }
 
+        var emojiResult = Emoji.Create(dto.Emoji);
+        if (emojiResult.IsFailure)
+        {
+            return DomainResult.Failure(emojiResult.Error);
+        }
+
         var message = await _chatRepo.GetByIdAsync(dto.TargetPayloadId, ct).ConfigureAwait(false);
         if (message is null)
         {
@@ -287,11 +293,11 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
 
         if (dto.Action == ReactionAction.Add)
         {
-            message.AddReaction(dto.AuthorId, dto.Emoji, dto.TimestampUnixMs);
+            message.AddReaction(dto.AuthorId, emojiResult.Value, dto.TimestampUnixMs);
         }
         else
         {
-            message.RemoveReaction(dto.AuthorId, dto.Emoji);
+            message.RemoveReaction(dto.AuthorId, emojiResult.Value);
         }
 
         await _chatRepo.UpdateAsync(message, ct).ConfigureAwait(false);

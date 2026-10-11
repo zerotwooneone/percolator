@@ -29,6 +29,7 @@ public readonly partial record struct AccountId;
         generated.Should().Contain("public static AccountId FromBytes(global::System.ReadOnlySpan<byte> bytes) => new(new global::System.Guid(bytes));");
         generated.Should().Contain("public bool TryWriteBytes(global::System.Span<byte> destination) => Value.TryWriteBytes(destination);");
         generated.Should().Contain("public global::System.Guid Value { get; }");
+        generated.Should().NotContain("operator");
     }
 
     [Test]
@@ -45,6 +46,7 @@ public readonly partial record struct MessageId;
         var generated = sources.Single(s => s.Contains("MessageId", StringComparison.Ordinal));
         generated.Should().Contain("public static MessageId New() => new(global::System.Guid.CreateVersion7());");
         generated.Should().Contain("public static MessageId New(global::System.DateTimeOffset timestamp) => new(global::System.Guid.CreateVersion7(timestamp));");
+        generated.Should().NotContain("operator");
     }
 
     [Test]
@@ -62,6 +64,7 @@ public readonly partial record struct TokenId(System.Guid Value);
         // Should not duplicate Value property or primary constructor
         generated.Should().NotContain("public global::System.Guid Value { get; }");
         generated.Should().Contain("public static TokenId New() => new(global::System.Guid.NewGuid());");
+        generated.Should().NotContain("operator");
     }
 
     [Test]

@@ -8,6 +8,7 @@ namespace Percolator.Apps.Chat.Features.Messaging;
 
 public sealed class ChatMessage
 {
+    public const int MaxContentLength = 16_000;
     private const ulong MaxEditWindowMs = 24UL * 60 * 60 * 1000; // 24 hours
     private const ulong MaxTombstoneWindowMs = 24UL * 60 * 60 * 1000; // 24 hours
 
@@ -48,11 +49,23 @@ public sealed class ChatMessage
         PublicIdentityId? deletedBy = null,
         IEnumerable<ChatReaction>? reactions = null)
     {
+        bool hasContent = !string.IsNullOrWhiteSpace(content);
+        bool hasAttachments = attachments is not null && attachments.Count > 0;
+        if (!hasContent && !hasAttachments && !isTombstone)
+        {
+            throw new ArgumentException("A message must have non-empty content or at least one attachment unless tombstoned.", nameof(content));
+        }
+
+        if (content is not null && content.Length > MaxContentLength)
+        {
+            throw new ArgumentException($"Message content cannot exceed {MaxContentLength} characters.", nameof(content));
+        }
+
         Id = id;
         ChannelId = channelId;
         AuthorId = authorId;
         TimestampUnixMs = timestampUnixMs;
-        Content = content;
+        Content = content ?? string.Empty;
         Mentions = mentions ?? Array.Empty<MentionDto>();
         ReplyContext = replyContext;
         LinkPreview = linkPreview;
@@ -80,6 +93,16 @@ public sealed class ChatMessage
         if (editorId != AuthorId)
         {
             return DomainResult.Failure(new DomainError("UNAUTHORIZED_AUTHOR", "Only the author can edit this message."));
+        }
+
+        if (string.IsNullOrWhiteSpace(newContent))
+        {
+            return DomainResult.Failure(new DomainError("INVALID_CONTENT", "Message content cannot be empty."));
+        }
+
+        if (newContent.Length > MaxContentLength)
+        {
+            return DomainResult.Failure(new DomainError("CONTENT_TOO_LONG", $"Message content cannot exceed {MaxContentLength} characters."));
         }
 
         if (editedAtUnixMs < TimestampUnixMs || (editedAtUnixMs - TimestampUnixMs) > MaxEditWindowMs)
@@ -122,13 +145,13 @@ public sealed class ChatMessage
         return DomainResult.Success();
     }
 
-    public void AddReaction(PublicIdentityId reactorId, string emoji, ulong timestampUnixMs)
+    public void AddReaction(PublicIdentityId reactorId, Emoji emoji, ulong timestampUnixMs)
     {
         _reactions.RemoveAll(r => r.ReactorId == reactorId && r.Emoji == emoji);
         _reactions.Add(new ChatReaction(reactorId, emoji, timestampUnixMs));
     }
 
-    public void RemoveReaction(PublicIdentityId reactorId, string emoji)
+    public void RemoveReaction(PublicIdentityId reactorId, Emoji emoji)
     {
         _reactions.RemoveAll(r => r.ReactorId == reactorId && r.Emoji == emoji);
     }

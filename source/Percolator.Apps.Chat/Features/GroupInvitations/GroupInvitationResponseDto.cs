@@ -4,7 +4,7 @@ using Percolator.Domain.Identities.ValueObjects;
 namespace Percolator.Apps.Chat.Features.GroupInvitations;
 
 public sealed record GroupInvitationResponseDto(
-    string InvitationId,
+    InvitationId InvitationId,
     ChannelId TargetGroupChannelId,
     PublicIdentityId ResponderId,
     bool Accepted,

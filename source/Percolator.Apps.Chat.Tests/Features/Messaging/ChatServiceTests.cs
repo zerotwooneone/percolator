@@ -281,6 +281,7 @@ public class ChatServiceTests
         var sendResult = await _sut.SendMessageAsync(sendCmd);
         var messageId = sendResult.Value;
 
+        var emoji = Emoji.Create("🚀").Value;
         var reactCmd = new AddReactionCommand(
             messageId,
             channel.Id,
@@ -288,7 +289,7 @@ public class ChatServiceTests
             channel.RemotePeerId,
             ChatTestFactory.BobDeviceId,
             DeliveryRoute.DirectP2P,
-            "🚀");
+            emoji);
 
         var first = await _sut.AddReactionAsync(reactCmd);
         var second = await _sut.AddReactionAsync(reactCmd);

@@ -77,6 +77,4 @@ public readonly record struct ContactNickname : IEquatable<ContactNickname>
     }
 
     public override string ToString() => Value;
-
-    public static implicit operator string(ContactNickname nickname) => nickname.Value;
 }

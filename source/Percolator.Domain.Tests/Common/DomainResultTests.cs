@@ -59,14 +59,4 @@ public class DomainResultTests
         act.Should().Throw<InvalidOperationException>()
             .WithMessage("*NOT_FOUND*Item was not found*");
     }
-
-    [Test]
-    public void ImplicitConversion_FromValue_CreatesSuccessResult()
-    {
-        DomainResult<int> result = 42;
-
-        result.IsSuccess.Should().BeTrue();
-        result.Value.Should().Be(42);
-        result.Error.Should().Be(DomainError.None);
-    }
 }

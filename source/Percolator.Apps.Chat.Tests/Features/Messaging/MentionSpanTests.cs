@@ -32,13 +32,22 @@ public class MentionSpanTests
     }
 
     [Test]
-    public void IsValidSpan_InvalidOrOutOfBoundsSpan_ReturnsFalse()
+    public void IsValidSpan_OutOfBoundsSpan_ReturnsFalse()
     {
         var text = "Hello world";
         var outOfBoundsMention = new MentionDto(AliceId, 20, 5);
         MentionHelper.IsValidSpan(text, outOfBoundsMention).Should().BeFalse();
+    }
 
-        var negativeOffsetMention = new MentionDto(AliceId, -1, 5);
-        MentionHelper.IsValidSpan(text, negativeOffsetMention).Should().BeFalse();
+    [Test]
+    public void MentionDto_NegativeOffsetOrLength_ThrowsArgumentOutOfRangeException()
+    {
+        var actNegativeOffset = () => new MentionDto(AliceId, -1, 5);
+        actNegativeOffset.Should().Throw<ArgumentOutOfRangeException>()
+            .WithMessage("*StartOffset must be non-negative*");
+
+        var actZeroLength = () => new MentionDto(AliceId, 0, 0);
+        actZeroLength.Should().Throw<ArgumentOutOfRangeException>()
+            .WithMessage("*Length must be positive*");
     }
 }

@@ -4,7 +4,7 @@ using Percolator.Domain.Identities.ValueObjects;
 namespace Percolator.Apps.Chat.Features.GroupInvitations;
 
 public sealed record GroupInvitationSummaryReadModel(
-    string InvitationId,
+    InvitationId InvitationId,
     ChannelId TargetGroupChannelId,
     string GroupName,
     PublicIdentityId InviterId,

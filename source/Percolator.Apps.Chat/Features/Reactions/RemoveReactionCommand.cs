@@ -11,4 +11,4 @@ public sealed record RemoveReactionCommand(
     PublicIdentityId? RecipientIdentityId,
     DeviceId RecipientDeviceId,
     DeliveryRoute Route,
-    string Emoji);
+    Emoji Emoji);

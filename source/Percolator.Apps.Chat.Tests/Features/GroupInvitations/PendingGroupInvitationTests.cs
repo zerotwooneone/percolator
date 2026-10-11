@@ -11,13 +11,14 @@ public class PendingGroupInvitationTests
 {
     private static readonly ChannelId GroupChannelId = ChannelId.New();
     private static readonly PublicIdentityId Inviter = PublicIdentityId.New();
+    private static readonly InvitationId TestInvitationId = new("inv-1");
     private const ulong ExpirationMs = 1_000_000;
 
     [Test]
     public void Accept_WhenPendingAndNotExpired_TransitionsToAccepted()
     {
         var invitation = new PendingGroupInvitation(
-            "inv-1",
+            TestInvitationId,
             GroupChannelId,
             "Secret Agents",
             Inviter,
@@ -35,7 +36,7 @@ public class PendingGroupInvitationTests
     public void Decline_WhenPendingAndNotExpired_TransitionsToDeclined()
     {
         var invitation = new PendingGroupInvitation(
-            "inv-1",
+            TestInvitationId,
             GroupChannelId,
             "Secret Agents",
             Inviter,
@@ -53,7 +54,7 @@ public class PendingGroupInvitationTests
     public void Accept_WhenExpired_FailsWithInvitationExpiredError_AndTransitionsToExpired()
     {
         var invitation = new PendingGroupInvitation(
-            "inv-1",
+            TestInvitationId,
             GroupChannelId,
             "Secret Agents",
             Inviter,
@@ -71,7 +72,7 @@ public class PendingGroupInvitationTests
     public void Decline_WhenExpired_FailsWithInvitationExpiredError_AndTransitionsToExpired()
     {
         var invitation = new PendingGroupInvitation(
-            "inv-1",
+            TestInvitationId,
             GroupChannelId,
             "Secret Agents",
             Inviter,
@@ -91,7 +92,7 @@ public class PendingGroupInvitationTests
     public void AcceptOrDecline_WhenNotPending_FailsWithInvalidStateTransition(GroupInvitationStatus nonPendingStatus)
     {
         var invitation = new PendingGroupInvitation(
-            "inv-1",
+            TestInvitationId,
             GroupChannelId,
             "Secret Agents",
             Inviter,
@@ -106,5 +107,35 @@ public class PendingGroupInvitationTests
         var declineResult = invitation.Decline(timestampUnixMs: 500_000);
         declineResult.IsFailure.Should().BeTrue();
         declineResult.Error.Code.Should().Be("INVALID_STATE_TRANSITION");
+    }
+
+    [Test]
+    public void InvitationId_Create_ValidString_Succeeds()
+    {
+        var result = InvitationId.Create("valid-invite-id-123");
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Value.Should().Be("valid-invite-id-123");
+    }
+
+    [TestCase(null)]
+    [TestCase("")]
+    [TestCase("   ")]
+    public void InvitationId_Create_NullOrWhitespace_Fails(string? invalid)
+    {
+        var result = InvitationId.Create(invalid!);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("INVALID_INVITATION_ID");
+    }
+
+    [Test]
+    public void InvitationId_Create_Exceeds128Chars_Fails()
+    {
+        var longId = new string('x', 129);
+        var result = InvitationId.Create(longId);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("INVALID_INVITATION_ID");
     }
 }

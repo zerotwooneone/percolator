@@ -11,4 +11,4 @@ public sealed record AddReactionCommand(
     PublicIdentityId? RecipientIdentityId,
     DeviceId RecipientDeviceId,
     DeliveryRoute Route,
-    string Emoji);
+    Emoji Emoji);

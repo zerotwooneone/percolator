@@ -239,10 +239,6 @@ internal sealed class GuidIdAttribute : global::System.Attribute
             }
             sb.AppendLine();
 
-            sb.AppendLine($"    public static explicit operator global::System.Guid({typeName} id) => id.Value;");
-            sb.AppendLine($"    public static explicit operator {typeName}(global::System.Guid guid) => new(guid);");
-            sb.AppendLine();
-
             sb.AppendLine($"    public int CompareTo({typeName} other) => Value.CompareTo(other.Value);");
             sb.AppendLine();
 

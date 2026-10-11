@@ -47,15 +47,13 @@ public sealed class GroupInvitationService
     }
 
     public async ValueTask<DomainResult> AcceptInvitationAsync(
-        string invitationId,
+        InvitationId invitationId,
         PublicIdentityId responderId,
         DeviceId responderDeviceId,
         ChannelId directChannelId,
         DeliveryRoute route,
         CancellationToken ct = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(invitationId);
-
         var invitation = await _invitationRepo.GetByIdAsync(invitationId, ct).ConfigureAwait(false);
         if (invitation is null)
         {
@@ -93,15 +91,13 @@ public sealed class GroupInvitationService
     }
 
     public async ValueTask<DomainResult> DeclineInvitationAsync(
-        string invitationId,
+        InvitationId invitationId,
         PublicIdentityId responderId,
         DeviceId responderDeviceId,
         ChannelId directChannelId,
         DeliveryRoute route,
         CancellationToken ct = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(invitationId);
-
         var invitation = await _invitationRepo.GetByIdAsync(invitationId, ct).ConfigureAwait(false);
         if (invitation is null)
         {
