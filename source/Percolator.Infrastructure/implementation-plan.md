@@ -44,7 +44,7 @@ The legacy codebase contains dated, overlapping modules marked for total deletio
 4. **Resilient Network Handling**: All gRPC network calls must obey cancellation tokens, transport timeouts, and surface transient vs. permanent network failures cleanly to `OutboxRetryPolicy`.
 5. **Cryptographic Logging Guardrails**: Honor `CryptographyOptions.EnableCryptographicMaterialLogging = false` by default across all infrastructure loggers and diagnostics. Sensitive cryptographic keys, KDF digests, and plaintexts must never be emitted to logs.
 6. **Strict Authentication & Metadata Isolation**:
-   - **Public Edge / Ingress & Deposit**: Must be unauthenticated (zero sender identity leakage on the wire). Relies on recipient-issued `DeliveryToken`s and Sealed Sender cryptography.
+   - **Public Edge / Ingress & Deposit (Sealed Sender)**: Must be unauthenticated (zero sender identity or channel ID leakage on the wire). Relies on recipient-issued `DeliveryToken`s and Sealed Sender cryptography. Relays see strictly routing tokens.
    - **Mailbox Retrieval, Directory & Management**: Must be strictly authenticated via challenge-response or signature cryptographic proofs to prevent unauthorized message draining, OPK exhaustion attacks, and mass directory scraping (mirroring Signal's security model).
    - **Group Operations**: Must be protected via Zero-Knowledge presentation proofs against `RelayGroupLedger` epochs without revealing individual member identities to relays.
 7. **Zero Platform Lock-in (Cross-Platform Architecture)**: Core infrastructure contracts, cryptographic flows, and persistence abstractions must run seamlessly across Windows, Linux, and macOS. Windows-only optimizations live behind clean ports and are supplied by `Percolator.Infrastructure.Windows`.
@@ -97,7 +97,7 @@ Rather than blindly cloning legacy contracts, `Infrastructure2` defines purpose-
 ```
 
 #### 1. `unauthenticated_delivery.proto` (Public Edge / Sealed Sender Ingress & Deposit)
-- **Trust Boundary**: Open to peers and anonymous senders. Zero sender identity metadata is exposed to transport headers or relay logs. Protected by rate limiting and recipient-issued `DeliveryToken`s.
+- **Trust Boundary & Sealed Sender Invariant**: Open to peers and anonymous senders. **Zero sender identity metadata** and **zero channel identifiers** are exposed to transport headers, outer envelopes, or relay logs. The relay only observes `recipient_routing_token` and `delivery_token`. Sender identity and ChannelId live strictly inside the encrypted package (`DirectSessionPackageProto` / `GroupSessionPackageProto` under Double Ratchet E2EE). Protected by rate limiting and recipient-issued `DeliveryToken`s.
 - **Messages**:
   - `SealedEnvelopeProto`:
     - `bytes recipient_routing_token = 1;` (16-byte `BlindedRoutingToken` for mailbox routing)
@@ -227,7 +227,53 @@ Carried inside `SealedEnvelopeProto.encrypted_package` (opaque to relays and pas
     - `bytes encrypted_payload = 5;`
 
 #### 5. Application Plugins (`chat.proto`, `discovery.proto`)
-- `chat.proto`: `TextMessageDto`, `ReadReceiptDto`, `DeliveredReceiptDto`, `EmojiAnnotationDto`, `SenderKeyDistributionDto`, `GroupUpdateDto`, `ProfileUpdateDto`.
+- `chat.proto`:
+  - `ChatPayloadEnvelopeProto`:
+    - `uint32 type = 1;` (Wire discriminator: Message=1, Edit=2, Tombstone=3, Reaction=4, ReadReceipt=5, SystemNotice=6, GroupInvitation=7, GroupInvitationResponse=8)
+    - `bytes data = 2;` (Serialized inner message payload)
+    - `bytes padding = 3;` (Pseudo-random stepped bucket padding expanding total frame to 256, 512, 1024, 2048, 4096 bytes to defeat traffic analysis)
+  - `ChatMessageProto`:
+    - `bytes id = 1;` (16-byte `PayloadId`)
+    - `bytes channel_id = 2;` (16-byte `ChannelId`)
+    - `bytes author_id = 3;` (32-byte `PublicIdentityId`)
+    - `uint64 timestamp_unix_ms = 4;` (Clamped millisecond Unix timestamp defeating OS clock tick fingerprinting)
+    - `string content = 5;` (Markdown rich text)
+    - `repeated MentionProto mentions = 6;`
+    - `optional ReplyContextProto reply_context = 7;`
+    - `optional LinkPreviewProto link_preview = 8;`
+    - `repeated MediaAttachmentProto attachments = 9;`
+    - `optional uint32 expire_after_seconds = 10;`
+    - `optional uint64 edited_at_unix_ms = 11;`
+  - `ReplyContextProto`:
+    - `bytes parent_payload_id = 1;`
+    - `bytes parent_author_id = 2;`
+    - *(Note: Explicitly zero quote snippet text on the wire to preserve cryptographic deniability and prevent leaking retracted messages).*
+  - `MentionProto`:
+    - `bytes identity_id = 1;`
+    - `uint32 start_offset = 2;` (Measured strictly in UTF-8 byte spans)
+    - `uint32 length = 3;` (Measured strictly in UTF-8 byte spans)
+  - `MediaAttachmentProto`:
+    - `bytes blob_id = 1;`
+    - `optional string file_name = 2;` (Client-side sanitized: omitted/generic for photos, voice, video; preserved only for explicit document files)
+    - `string content_type = 3;`
+    - `uint64 unpadded_byte_size = 4;`
+    - `uint32 width = 5;`
+    - `uint32 height = 6;`
+    - `bytes waveform = 7;`
+  - `MessageEditProto`:
+    - `bytes target_payload_id = 1;`, `bytes channel_id = 2;`, `bytes author_id = 3;`, `string new_content = 4;`, `repeated MentionProto new_mentions = 5;`, `uint64 edited_at_unix_ms = 6;`
+  - `MessageTombstoneProto`:
+    - `bytes target_payload_id = 1;`, `bytes channel_id = 2;`, `bytes requested_by = 3;`, `uint64 deleted_at_unix_ms = 4;`
+  - `ReactionUpdateProto`:
+    - `bytes target_payload_id = 1;`, `bytes channel_id = 2;`, `bytes author_id = 3;`, `string emoji = 4;`, `uint32 action = 5;`, `uint64 timestamp_unix_ms = 6;`
+  - `ReadReceiptProto`:
+    - `bytes channel_id = 1;`, `bytes reader_id = 2;`, `bytes up_to_payload_id = 3;`, `uint64 read_at_unix_ms = 4;`
+  - `SystemNoticeProto`:
+    - `bytes channel_id = 1;`, `uint32 type = 2;`, `bytes affected_identity = 3;`, `uint64 timestamp_unix_ms = 4;`
+  - `GroupInvitationProto`:
+    - `string invitation_id = 1;`, `bytes target_group_channel_id = 2;`, `string group_name = 3;`, `bytes inviter_id = 4;`, `optional string relay_endpoint = 5;`, `uint64 expires_at_unix_ms = 6;`
+  - `GroupInvitationResponseProto`:
+    - `string invitation_id = 1;`, `bytes target_group_channel_id = 2;`, `bytes responder_id = 3;`, `bool accepted = 4;`, `uint64 responded_at_unix_ms = 5;`
 - `discovery.proto`: `DhtPingPayload`, `DhtPongPayload`, `DhtFindNodeRequest`, `DhtFindNodeResponse`, `NodeInfoProto`.
 
 #### Serialization Adapters:
@@ -259,7 +305,7 @@ Database Engine: Encrypted SQLite using SQLCipher (`SQLitePCLRaw.bundle_e_sqlcip
    - Replaces the legacy vulnerability where private keys (`ExportECPrivateKey()`) and chain keys (`ChainKey`, `SignatureKey`) were stored in raw plaintext BLOBs.
    - Key material stored on disk must always have column-level encryption using master keys derived from `ICredentialStorage`.
 
-#### 1. Domain Aggregate Repositories (Write / Consistency Enforcing)
+#### 1. Domain Aggregate & Plugin Repositories (Write / Consistency Enforcing)
 - **`IOutboxRepository`** (`Percolator.Application.Delivery.Ports`):
   - Persists outbound messages (`OutboxJob`) in transactional storage.
   - Supports FIFO retrieval of pending jobs, status progression (`Pending` $\rightarrow$ `InFlight` $\rightarrow$ `Delivered` / `Failed`), and persona black-holing (`PauseJobsForIdentityAsync`).
@@ -282,18 +328,22 @@ Database Engine: Encrypted SQLite using SQLCipher (`SQLitePCLRaw.bundle_e_sqlcip
   - Persists direct channels (`DirectChannel`) and group channels (`GroupChannel`) with member roles, epochs, and encrypted payload logs (`ChannelPayload`). Serves as the single authoritative persistence store for all channel state across applications.
 - **`IRelayPreKeyDirectoryRepository`** (`Percolator.Domain.Relays.Ports`):
   - Backs the relay pre-key hosting directory with paging, expiration cleanup, and quota enforcement.
-- **`IUnknownGroupMessageCacheRepository`** (`Percolator.Apps.Chat` port):
-  - Persists bounded out-of-order group messages awaiting author sender key distribution.
+- **`IChatMessageRepository`** (`Percolator.Apps.Chat.Ports`):
+  - **Adapter**: `SqlChatMessageRepository`. Persists and updates rich chat messages (`chat_messages`), mentions (`chat_message_mentions`), attachments (`chat_message_attachments`), reactions (`chat_reactions`), and read cursors (`chat_read_receipts`). Handles atomic message insertions, 24-hour edits, tombstones, and soft/hard expiration.
+- **`IGroupInvitationRepository`** (`Percolator.Apps.Chat.Ports`):
+  - **Adapter**: `SqlGroupInvitationRepository`. Persists `chat_group_invitations` tracking inbound and outbound invitations with consent status (`Pending`, `Accepted`, `Declined`, `Expired`).
+- **`IUnknownGroupMessageCacheRepository`** (`Percolator.Apps.Chat.Ports`):
+  - **Adapter**: `SqlUnknownGroupMessageCacheRepository`. Persists bounded out-of-order group messages (`chat_unknown_group_messages`) awaiting author sender key distribution.
 - **`ITransferSessionRepository`** (`Percolator.Apps.FileTransfer.Ports`):
   - Persists active and historical file transfer sessions, manifests, bitfields, and swarm peer caches.
 
 #### 2. Fast-Path Read Query Adapters (Bypassing Domain Aggregates via Direct SQL / Dapper Projections)
 - **`SqlChatMessageQueryService`** (`Percolator.Apps.Chat.Ports.IChatMessageQueryService`):
-  - Queries indexed `ChannelPayloads` and joined reaction/receipt tables via direct paged SQL (`WHERE ChannelId = @channelId AND Sequence < @beforeSeq ORDER BY Sequence DESC LIMIT @limit`). Returns lightweight `ChatMessageReadModel` instances without hydrating domain aggregates.
+  - Queries indexed `chat_messages` and joined reaction/attachment tables via direct paged SQL (`WHERE channel_id = @channelId AND (expires_at_utc IS NULL OR expires_at_utc > @now) AND sequence < @beforeSeq ORDER BY sequence DESC LIMIT @limit`). Returns lightweight `ChatMessageReadModel` instances without hydrating domain aggregates.
 - **`SqlConversationListQueryService`** (`Percolator.Apps.Chat.Ports.IConversationListQueryService`):
   - Direct SQL query aggregating active channels, last message snippet, timestamp, and unread counts for the UI channel list.
 - **`SqlGroupInvitationQueryService`** (`Percolator.Apps.Chat.Ports.IGroupInvitationQueryService`):
-  - Fast query for pending group invitations awaiting user consent.
+  - Fast query for pending group invitations awaiting user consent (`WHERE status = 'Pending' AND expires_at_utc > @now`).
 - **`SqlOutboxQueryService`** (`Percolator.Application.Delivery.Ports.IOutboxQueryService`):
   - Reads pending/failed outbox job summaries for UI diagnostic dashboards without hydrating byte payload buffers.
 - **`SqlPeerContactQueryService`** (`Percolator.Application.Ports.IPeerContactQueryService`):
@@ -377,7 +427,7 @@ Database Engine: Encrypted SQLite using SQLCipher (`SQLitePCLRaw.bundle_e_sqlcip
 - **`IDateTimeProvider`** (`Percolator.Domain.Common`):
   - `SystemDateTimeProvider` delegating to `DateTimeOffset.UtcNow`.
 - **Portable `ICredentialStorage`** (`Percolator.Application.Ports.ICredentialStorage`):
-  - **`PortablePassphraseCredentialStorage`**: Cross-platform master secret provider utilizing Argon2id key derivation from user master passphrase with AES-256-GCM encrypted local keyfile storage.
+  - **`PortablePassphraseCredentialStorage`**: Cross-platform master secret provider utilizing Argon2id key derivation from user master passphrase with AES-256-GCM encrypted local keyfile storage.\
   - *(Note: On Windows, `Percolator.Infrastructure.Windows` provides `WindowsDpapiCredentialStorage` to bind encryption directly to the Windows User DPAPI master key and apply Windows NTFS user-exclusive ACLs).*
 - **`KademliaRoutingTable`** (`Percolator.Apps.Discovery`):
   - Manages 160-bit XOR distance metrics, $k=20$ K-bucket storage, and node contact tables for decentralized rendezvous discovery. (Note: UDP LAN discovery is explicitly excluded).
@@ -387,8 +437,9 @@ Database Engine: Encrypted SQLite using SQLCipher (`SQLitePCLRaw.bundle_e_sqlcip
 ### 4.7 Transient State Cleanup & Pruning Services (Research & Design)
 - **Problem Statement**: Multiple transient and ephemeral tables accumulate stale records that must be pruned periodically without locking active database transactions or degrading ingress throughput.
 - **Research Scope & Target Adapters**:
+  - **`DisappearingMessageEvictionWorker`**: Scheduled cron worker (running every 30 seconds) calling `IChatMessageRepository.PurgeExpiredMessagesAsync(now)` to delete messages past `expires_at_utc` and invoking `IBlobStorageService.DeleteLocalCacheAsync` for deleted media blobs.
   - **`OutboxRetentionPruner`**: Evaluates retention window policies for `OutboxJob` rows (e.g., pruning `Delivered` jobs older than 7 days, purging dead-letter jobs that have exceeded `MaxRetryCount` and manual inspection windows).
-  - **`RelayPreKeyDirectoryPruner`**: Evicts expired signed pre-key bundles and consumed or timed-out one-time pre-keys from `IRelayPreKeyDirectoryRepository` environmental records.
+  - **`RelayPreKeyDirectoryPruner`**: Evicts expired signed pre-key bundles and consumed or timed-out one-time pre-keys from `IRelayPreKeyDirectoryRepository` environmental records.\
   - **`UnknownGroupMessageCachePruner`**: Purges buffered group chat frames from `IUnknownGroupMessageCacheRepository` that exceed maximum TTL (e.g. 48 hours) where the author's sender key distribution was never received.
   - **`AbandonedInvitePruner`**: Scans inbound contact requests (`PeerContactState.PendingApproval`), pending handshake envelopes in `IPendingHandshakeRepository`, and group invitations (`PendingGroupInvitation`) exceeding local expiration policies (e.g. 14 days without user response) and marks or purges them.
   - **`RendezvousTicketPruner`**: Scans DHT presence announcements in `Apps.Discovery` past `ExpiresAtUtc` and evicts expired routing entries.
@@ -409,7 +460,7 @@ Database Engine: Encrypted SQLite using SQLCipher (`SQLitePCLRaw.bundle_e_sqlcip
 - **`StreamingAesGcmCryptoService`** (`Percolator.Application.Ports.IBlobCryptoService`):
   - **EXIF & Geolocation Metadata Scrubbing**: Strips invasive EXIF/XMP tags (GPS coordinates, camera serial numbers, device model) from raw image/video streams client-side before padding and encryption, guaranteeing complete location privacy.
   - **Stepped Bucket Padding**: Applies PKCS#7 or ISO/IEC 7816-4 padding to discrete boundaries (< 1 MB to 32 KB; 1–10 MB to 256 KB; > 10 MB to 1 MB) to prevent traffic analysis and file fingerprinting.
-  - **Chunked STREAM AEAD**: Encrypts and decrypts in fixed $64\text{ KB}$ chunks using .NET `AesGcm` with sequential counter nonces ($\text{Nonce}_i = N_{\\text{base}} \\oplus i$) and 16-byte authentication tags.
+  - **Chunked STREAM AEAD**: Encrypts and decrypts in fixed $64\text{ KB}$ chunks using .NET `AesGcm` with sequential counter nonces ($\text{Nonce}_i = N_{\text{base}} \oplus i$) and 16-byte authentication tags.
   - **Bounded Memory & Zero LOH Allocations**: Rents chunk buffers from `ArrayPool<byte>.Shared`, ensuring memory consumption never exceeds $\le 64\text{ KB}$ regardless of multi-megabyte file size.
 - **`RelayBlobClient`** (`Percolator.Application.Ports.IRelayBlobClient`):
   - High-performance HTTP/2 or gRPC streaming client communicating with the channel's designated relay.
@@ -478,7 +529,7 @@ Concrete realization of out-of-band high-speed croc-inspired and BitTorrent swar
     - Opens target files with `FileShare.ReadWrite | FileShare.Delete`.
     - Advances end-of-file pointer via `FileStream.SetLength(totalBytes)` (or POSIX `posix_fallocate`).
   - **File Staging with `.percolator-part`**:
-    - Writes incoming chunks to `{relativePath}.percolator-part` using `RandomAccess.WriteAsync(SafeFileHandle, ReadOnlyMemory<byte>, fileOffset, ct)`.
+    - Writes incoming chunks to `{relativePath}.percolator-part` using `RandomAccess.WriteAsync(SafeFileHandle, ReadOnlyMemory<byte>, fileOffset, ct)`.\
     - Protects incomplete files against antivirus scans, search indexers, and accidental execution.
   - **Atomic Finalization**:
     - Upon complete chunk verification of all blocks belonging to a file:

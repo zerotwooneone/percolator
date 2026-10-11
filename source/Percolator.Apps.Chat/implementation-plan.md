@@ -9,91 +9,226 @@
   - Implements `IAppPlugin` (`AppId.Chat = 0x01`) and `IAppPayloadHandler` from `Percolator.PluginSdk`.
   - Content isolation: Chat handles user conversations, rich text formatting, media attachments, reactions, and group metadata. File manifests, BitTorrent swarms, and discovery pings are handled by other apps and never appear in chat feeds.
   - **Single Source of Truth & CQRS Separation (Domain Writes vs. Fast-Path Queries)**:
-    - **Write Path (Mutations & State Transitions)**: To eliminate the risk of split-brain state, divergent message sequences, and out-of-sync histories, `Percolator.Domain.Channels` (`DirectChannel` and `GroupChannel`) is the **sole authoritative owner** of channel membership, administrative roles, cryptographic epochs, and the chronological payload timeline. Inbound messages are committed through domain aggregates and persisted via `IChannelRepository`.
-    - **Read Path (Fast-Path Queries Skipping Domain Aggregates)**: The UI and read models do **NOT** hydrate heavy domain channel aggregates (which contain full member lists, child collections, and cryptographic state). Instead, read operations use dedicated read-only query ports (`IChatMessageQueryService` and `IConversationListQueryService`) to query indexed database tables directly, retrieving only the required paged timeline fields with sub-millisecond latency.
+    - **Domain Channels (Membership, Epochs, Sequence)**: `Percolator.Domain.Channels` (`DirectChannel` and `GroupChannel`) is the authoritative owner of channel membership, administrative roles, cryptographic epochs, and the chronological payload timeline. Every sent or received chat frame appends a `ChannelPayload` aggregate entry committed via `IChannelRepository`.
+    - **Chat Message Persistence & Read Models**: Rich message state (markdown content, mentions, reactions, edit status, read receipts, tombstones) is maintained through `IChatMessageRepository`. Fast-path read operations (`IChatMessageQueryService` and `IConversationListQueryService`) query indexed database projections directly, retrieving paged timeline fields with sub-millisecond latency without hydrating heavy domain aggregates.
   - **Cryptographic Separation of Concerns**:
     - Sender key ratchet generation and distribution across 1:1 pairwise channels are owned by `Percolator.Application` (`GroupKeyDistributionService`) via `AppId.SystemControl` (0x00). `Percolator.Apps.Chat` operates strictly as an application payload consumer on top of established channels.
   - **Cryptographic Logging Guardrails**:
-    - The Chat application must strictly honor cryptographic logging guardrails (`CryptographyOptions.EnableCryptographicMaterialLogging = false` by default).
+    - The Chat application strictly honors cryptographic logging guardrails (`CryptographyOptions.EnableCryptographicMaterialLogging = false` by default).
     - Diagnostic, audit, and trace logging must **never** record sensitive cryptographic key material (chain keys, message keys, symmetric media keys, or key derivation hashes) or user plaintexts. Only sanitized operational metadata (e.g. channel IDs, timestamps, payload size) may appear in logs.
   - Test-first implementation: All behaviors must have corresponding unit tests in `Percolator.Apps.Chat.Tests` using in-memory test doubles.
 
 ---
 
-## 2. Milestone 1: Chat Plugin Architecture, Payload DTOs & CQRS Queries
+## 2. Signal-Aligned Cryptographic & Privacy Guardrails
 
-### 2.1 Plugin Definition & Binary DTOs
-- **`ChatPlugin`**: Implements `IAppPlugin` with `AppId = 0x01` and semantic versioning.
-- **Application Payload DTOs** (Protobuf serialization abstracted via `IPayloadSerializer`):
+To match the operational security and metadata resistance of the Signal Protocol, the wire protocol and payload processing enforce six strict privacy constraints:
+
+1. **Traffic Analysis Defense via Stepped Bucket Padding**:
+   - Stream ciphers (AES-GCM / ChaCha20-Poly1305) produce ciphertext of length equal to plaintext + 16-byte tag. Raw message lengths leak linguistic structure, language model patterns, and message type distinctions (e.g. distinguishing a 1-character reaction from a short text).
+   - `ChatPayloadEnvelopeDto` mandates a pseudo-random `Padding` byte span that pads the serialized payload up to discrete stepped boundaries ($256\text{ B}$, $512\text{ B}$, $1024\text{ B}$, $2048\text{ B}$, $4096\text{ B}$).
+2. **Reply Deniability & Anti-Tombstone Leakage**:
+   - Quoting plaintext snippets over the wire breaks cryptographic deniability and permanently preserves retracted text: if Bob retracts a sensitive message via a tombstone, Alice's reply must not preserve Bob's deleted text in a quote transcript.
+   - `ReplyContextDto` carries **only** `(PayloadId ParentPayloadId, PublicIdentityId ParentAuthorId)`. The receiving client resolves the parent message and snippet purely from its local `IChatMessageRepository`.
+3. **Timestamp Clamping & Clock-Skew Fingerprinting Defense**:
+   - Sub-millisecond .NET `DateTimeOffset` precision leaks operating system hardware clock tick rates, NTP synchronization jitter, and machine-specific drift, enabling cross-session identity linking.
+   - All wire timestamps are normalized and clamped to integer Unix millisecond precision (`ulong TimestampUnixMs`), discarding OS tick fractions.
+4. **UTF-8 Byte-Span Mention Invariant**:
+   - Mention spans `(StartOffset, Length)` are measured strictly in **UTF-8 byte offsets** (`Encoding.UTF8.GetByteCount`), not C# UTF-16 characters (`string.Length`). This prevents string slicing corruption and off-by-one rendering flaws when emojis, surrogate pairs, or complex multi-byte scripts precede mentions.
+   - Mentions carry `PublicIdentityId`, never display names or nicknames, avoiding identity spoofing and wire metadata leakage.
+5. **Media Metadata & Filename Scrubbing**:
+   - Camera and OS generated filenames (e.g., `IMG_20261010_180512.jpg`, `Screenshot_iPhone.png`) leak exact capture time, camera apps, and device hardware.
+   - Photo, video, and audio attachments scrub original filenames client-side before dispatch (replacing with generic descriptors or omitting entirely). Only explicitly designated user file attachments retain sanitized filenames.
+   - All out-of-band media blobs enforce EXIF/geolocation scrubbing and stepped chunk padding via `IBlobStorageService`.
+6. **Strict Sealed Sender & Relay Isolation**:
+   - The outer transport envelope (`SealedEnvelopeProto`) visible to relays contains **zero sender identity fields** and **zero channel IDs**.
+   - `ChannelId`, `AuthorId`, and application payloads exist **exclusively inside Tier 3 (the inner E2EE Double Ratchet payload)**, preventing relays from constructing social graphs or mapping channel conversations.
+
+---
+
+## 3. Milestone 1: Chat Plugin Architecture, Binary DTOs & Wire Envelopes
+
+### 3.1 Wire Envelope Discriminator & DTOs
+All chat traffic over the wire is packaged in an explicit typed envelope to guarantee zero-ambiguity binary deserialization:
+
+- **`ChatPayloadType` (Byte Discriminator)**:
+  ```csharp
+  public enum ChatPayloadType : byte
+  {
+      Message = 1,
+      Edit = 2,
+      Tombstone = 3,
+      Reaction = 4,
+      ReadReceipt = 5,
+      SystemNotice = 6,
+      GroupInvitation = 7,
+      GroupInvitationResponse = 8
+  }
+  ```
+
+- **`ChatPayloadEnvelopeDto`**:
+  - `ChatPayloadType Type`: Discriminator identifying the inner payload.
+  - `ReadOnlyMemory<byte> Data`: Serialized inner DTO bytes.
+  - `ReadOnlyMemory<byte> Padding`: Random padding bytes expanding the total envelope to the nearest stepped boundary (256, 512, 1024, 2048, 4096 bytes).
+
+- **Inner Application Payload DTOs** (Serialized via `IPayloadSerializer`):
   - `ChatMessageDto`:
     - `PayloadId Id`: Unique message identifier.
     - `ChannelId ChannelId`: Target direct or group channel.
     - `PublicIdentityId AuthorId`: Sender identity.
-    - `DateTimeOffset TimestampUtc`: Message dispatch timestamp.
+    - `ulong TimestampUnixMs`: Normalized Unix millisecond timestamp.
     - `string Content`: Rich text content (Markdown format).
     - `IReadOnlyList<MentionDto> Mentions`: Byte-offset mentions (`IdentityId`, `StartOffset`, `Length`).
-    - `ReplyContextDto? ReplyContext`: Reply reference (`ParentPayloadId`, `ParentAuthorId`, `Snippet`).
+    - `ReplyContextDto? ReplyContext`: Reply reference (`ParentPayloadId`, `ParentAuthorId`). No plaintext snippet on wire.
     - `LinkPreviewDto? LinkPreview`: Sender-generated client-side link preview.
     - `IReadOnlyList<MediaAttachmentDto> Attachments`: Inline or out-of-band media descriptors.
     - `int? ExpireAfterSeconds`: Disappearing message timer (null = permanent).
-    - `DateTimeOffset? EditedAtUtc`: Last edit timestamp (null = original).
+    - `ulong? EditedAtUnixMs`: Last edit timestamp (null = original).
   - `MessageEditDto`:
     - `PayloadId TargetPayloadId`: Message being edited.
+    - `ChannelId ChannelId`: Target channel.
+    - `PublicIdentityId AuthorId`: Editing identity.
     - `string NewContent`: Updated Markdown text.
     - `IReadOnlyList<MentionDto> NewMentions`: Updated mentions.
-    - `DateTimeOffset EditedAtUtc`: Edit timestamp.
+    - `ulong EditedAtUnixMs`: Edit timestamp.
   - `MessageTombstoneDto`:
     - `PayloadId TargetPayloadId`: Message being deleted.
+    - `ChannelId ChannelId`: Target channel.
     - `PublicIdentityId RequestedBy`: Identity requesting deletion.
-    - `DateTimeOffset DeletedAtUtc`: Deletion timestamp.
+    - `ulong DeletedAtUnixMs`: Deletion timestamp.
   - `ReactionUpdateDto`:
     - `PayloadId TargetPayloadId`: Target message identifier.
+    - `ChannelId ChannelId`: Target channel.
+    - `PublicIdentityId AuthorId`: Reactor identity.
     - `string Emoji`: Unicode emoji representation.
     - `ReactionAction Action`: `Add` or `Remove`.
-    - `DateTimeOffset TimestampUtc`: Action timestamp.
+    - `ulong TimestampUnixMs`: Action timestamp.
   - `ReadReceiptDto`:
     - `ChannelId ChannelId`: Target channel.
+    - `PublicIdentityId ReaderId`: Reading identity.
     - `PayloadId UpToPayloadId`: Highest read message sequence marker.
-    - `DateTimeOffset ReadAtUtc`: Read timestamp.
+    - `ulong ReadAtUnixMs`: Read timestamp.
   - `SystemNoticeDto`:
     - `ChannelId ChannelId`: Target channel.
     - `SystemNoticeType Type`: `SafetyNumberChanged`, `MemberJoined`, `MemberLeft`, `RolePromoted`, `EpochAdvanced`.
     - `PublicIdentityId AffectedIdentity`: Identity involved.
-    - `DateTimeOffset TimestampUtc`: Notice timestamp.
+    - `ulong TimestampUnixMs`: Notice timestamp.
+  - `GroupInvitationDto`:
+    - `Guid InvitationId`: Unique invitation identifier.
+    - `ChannelId TargetGroupChannelId`: Target group channel ID.
+    - `string GroupName`: Human-readable group name.
+    - `PublicIdentityId InviterId`: Admin inviting the peer.
+    - `string? RelayEndpoint`: Designated group common relay (if applicable).
+    - `ulong ExpiresAtUnixMs`: Invitation validity window.
+  - `GroupInvitationResponseDto`:
+    - `Guid InvitationId`: Invitation identifier.
+    - `ChannelId TargetGroupChannelId`: Target group channel ID.
+    - `PublicIdentityId ResponderId`: Accepting or declining identity.
+    - `bool Accepted`: True if accepted, false if declined.
+    - `ulong RespondedAtUnixMs`: Response timestamp.
 
-### 2.2 Rich Text Formatting & Mention Offset Invariants
+### 3.2 Rich Text Formatting & Mention Offset Invariants
 - **Markdown Formatting**:
   - The UI parser supports bold (`**`), italic (`*`), strikethrough (`~~`), inline code (`` ` ``), blockquotes (`>`), and syntax-highlighted code blocks (` ``` `).
 - **Byte-Span Mentions**:
-  - Mentions are represented as `MentionDto(PublicIdentityId IdentityId, int StartOffset, int Length)` measured in UTF-8 byte spans.
-  - This eliminates display name spoofing and brittle raw-text regex parsing, matching the Signal Protocol's secure mention model.
-
-### 2.3 `ChatPayloadHandler` (Write Path)
-- Implements `IAppPayloadHandler` for `AppId.Chat`.
-- Deserializes inbound payloads via `IPayloadSerializer`.
-- Validates message constraints (e.g. edit window within 24 hours, author matches original sender, tombstone authorization).
-- Commits payloads directly into domain channel aggregates:
-  - Direct: `DirectChannel.AppendPayload` via `IChannelRepository`.
-  - Group: `GroupChannel.AppendPayload` via `IChannelRepository`.
-- Dispatches domain events for reaction, read receipt, edit, and tombstone updates.
-
-### 2.4 Fast-Path Read Query Ports (Bypassing Domain Aggregates)
-- **`IChatMessageQueryService`** (`Percolator.Apps.Chat.Ports`):
-  - Read-only query port for paginated conversation messages, reactions, and attachments.
-  - `Task<IReadOnlyList<ChatMessageReadModel>> GetPagedMessagesAsync(ChannelId channelId, int beforeSequence, int limit, CancellationToken ct = default);`
-  - `Task<ChatMessageReadModel?> GetMessageByIdAsync(PayloadId payloadId, CancellationToken ct = default);`
-  - Returns lightweight `ChatMessageReadModel` projections (including aggregated reactions and attachments) directly from indexed database storage.
-- **`IConversationListQueryService`** (`Percolator.Apps.Chat.Ports`):
-  - Read-only query port for the user's conversation list feed.
-  - `Task<IReadOnlyList<ConversationSummaryReadModel>> GetRecentConversationsAsync(PublicIdentityId ownerId, CancellationToken ct = default);`
-  - Returns channel ID, display title, last message snippet, last activity timestamp, and unread counts directly from database indices.
+  - Mentions are represented as `MentionDto(PublicIdentityId IdentityId, int StartOffset, int Length)` measured strictly in UTF-8 byte spans (`Encoding.UTF8.GetByteCount`).
+  - Eliminates display name spoofing, character-boundary desync, and brittle raw-text regex parsing.
 
 ---
 
-## 3. Milestone 2: Media Attachments, Out-of-Band Blob Storage & Privacy Previews
+## 4. Milestone 2: Outbound Commands, Inbound Handler & Persistence Ports
 
-### 3.1 Media Attachment Strategy (Inline vs. Out-of-Band)
-To satisfy the strict 64 KB Double Ratchet payload limit without resorting to heavy peer swarms:
+### 4.1 Outbound Chat Service (`IChatService` & `ChatService`)
+The outbound service invoked by the UI/Desktop client:
+- **Port Interface**:
+  ```csharp
+  public interface IChatService
+  {
+      ValueTask<DomainResult<PayloadId>> SendMessageAsync(SendMessageCommand command, CancellationToken ct = default);
+      ValueTask<DomainResult> EditMessageAsync(EditMessageCommand command, CancellationToken ct = default);
+      ValueTask<DomainResult> DeleteMessageAsync(DeleteMessageCommand command, CancellationToken ct = default);
+      ValueTask<DomainResult> AddReactionAsync(AddReactionCommand command, CancellationToken ct = default);
+      ValueTask<DomainResult> RemoveReactionAsync(RemoveReactionCommand command, CancellationToken ct = default);
+      ValueTask<DomainResult> MarkAsReadAsync(MarkAsReadCommand command, CancellationToken ct = default);
+  }
+  ```
+- **Outbound Orchestration Pipeline**:
+  1. **Validation**: Validates content limits ($\le$ 64 KB total envelope), UTF-8 mention byte boundaries, and active channel membership.
+  2. **Attachment Pre-processing & Sanitization**: For media attachments, sanitizes filenames, strips EXIF data, coordinates stepped padding with `IBlobStorageService` (stages locally for 1:1 direct peer pull or uploads to channel relay).
+  3. **DTO Creation & Serialization**: Creates the typed DTO with clamped Unix millisecond timestamps, serializes via `IPayloadSerializer`, calculates stepped padding bucket, and wraps in `ChatPayloadEnvelopeDto`.
+  4. **Domain Channel Logging**: Appends `ChannelPayload` to `DirectChannel` or `GroupChannel` via `IChannelRepository`.
+  5. **Network Dispatch**: Passes payload to `IPayloadSender.SendPayloadAsync(OutboundPayloadContext)`.
+  6. **Local Chat Persistence**: Saves rich record in `IChatMessageRepository`.
+
+### 4.2 Inbound Chat Payload Handler (`ChatPayloadHandler`)
+- Implements `IAppPayloadHandler` for `AppId.Chat`.
+- **Inbound Processing Flow**:
+  1. Deserializes `ChatPayloadEnvelopeDto` via `IPayloadSerializer` (discards padding span).
+  2. Routes by `envelope.Type`:
+     - `Message`: Deserializes `ChatMessageDto`, validates author against channel membership, appends `ChannelPayload` to `IChannelRepository`, inserts into `IChatMessageRepository`, and triggers notification events.
+     - `Edit`: Deserializes `MessageEditDto`, validates that author matches original message author and that `now - message.CreatedAt <= 24 hours`, updates `IChatMessageRepository`.
+     - `Tombstone`: Deserializes `MessageTombstoneDto`, verifies author or channel admin permissions, updates `IChatMessageRepository` to mark tombstone placeholder, purges local media blob cache.
+     - `Reaction`: Deserializes `ReactionUpdateDto`, idempotently records or removes reaction in `IChatMessageRepository`.
+     - `ReadReceipt`: Deserializes `ReadReceiptDto`, updates remote read marker in `IChatMessageRepository`.
+     - `GroupInvitation`: Deserializes `GroupInvitationDto`, creates `PendingGroupInvitation` in `IGroupInvitationRepository`.
+     - `GroupInvitationResponse`: Deserializes `GroupInvitationResponseDto`, notifies group admin.
+
+### 4.3 Persistence Ports (`Percolator.Apps.Chat.Ports`)
+Pure C# repository ports implemented by `Percolator.Infrastructure2`:
+
+- **`IChatMessageRepository`**:
+  ```csharp
+  public interface IChatMessageRepository
+  {
+      ValueTask SaveMessageAsync(ChatMessageRecord record, CancellationToken ct = default);
+      ValueTask<ChatMessageRecord?> GetMessageByIdAsync(PayloadId payloadId, CancellationToken ct = default);
+      ValueTask UpdateMessageEditAsync(PayloadId payloadId, string newContent, IReadOnlyList<MentionDto> mentions, DateTimeOffset editedAtUtc, CancellationToken ct = default);
+      ValueTask ApplyTombstoneAsync(PayloadId payloadId, PublicIdentityId requestedBy, DateTimeOffset deletedAtUtc, CancellationToken ct = default);
+      ValueTask AddReactionAsync(PayloadId payloadId, PublicIdentityId reactorId, string emoji, DateTimeOffset timestampUtc, CancellationToken ct = default);
+      ValueTask RemoveReactionAsync(PayloadId payloadId, PublicIdentityId reactorId, string emoji, CancellationToken ct = default);
+      ValueTask UpdateReadReceiptAsync(ChannelId channelId, PublicIdentityId peerId, PayloadId upToPayloadId, DateTimeOffset readAtUtc, CancellationToken ct = default);
+      ValueTask PurgeExpiredMessagesAsync(DateTimeOffset nowUtc, CancellationToken ct = default);
+  }
+  ```
+
+- **`IGroupInvitationRepository`**:
+  ```csharp
+  public interface IGroupInvitationRepository
+  {
+      ValueTask SaveInvitationAsync(PendingGroupInvitation invitation, CancellationToken ct = default);
+      ValueTask<PendingGroupInvitation?> GetByIdAsync(Guid invitationId, CancellationToken ct = default);
+      ValueTask UpdateStatusAsync(Guid invitationId, GroupInvitationStatus status, CancellationToken ct = default);
+  }
+  ```
+
+- **`IUnknownGroupMessageCacheRepository`**:
+  ```csharp
+  public interface IUnknownGroupMessageCacheRepository
+  {
+      ValueTask StageUnknownMessageAsync(UnknownGroupMessageRecord record, CancellationToken ct = default);
+      ValueTask<IReadOnlyList<UnknownGroupMessageRecord>> GetPendingByAuthorAsync(ChannelId channelId, PublicIdentityId authorId, CancellationToken ct = default);
+      ValueTask RemoveAsync(Guid recordId, CancellationToken ct = default);
+  }
+  ```
+
+### 4.4 Fast-Path Read Query Ports (`Percolator.Apps.Chat.Ports`)
+- **`IChatMessageQueryService`**:
+  - Read-only query port for paginated conversation messages, reactions, and attachments directly from database projections.
+  - `Task<IReadOnlyList<ChatMessageReadModel>> GetPagedMessagesAsync(ChannelId channelId, int beforeSequence, int limit, CancellationToken ct = default);`
+  - `Task<ChatMessageReadModel?> GetMessageByIdAsync(PayloadId payloadId, CancellationToken ct = default);`
+- **`IConversationListQueryService`**:
+  - Read-only query port for the user's conversation list feed.
+  - `Task<IReadOnlyList<ConversationSummaryReadModel>> GetRecentConversationsAsync(PublicIdentityId ownerId, CancellationToken ct = default);`
+- **`IGroupInvitationQueryService`**:
+  - Read-only query port for pending group invitations awaiting user consent.
+  - `Task<IReadOnlyList<GroupInvitationSummaryReadModel>> GetPendingInvitationsAsync(PublicIdentityId recipientId, CancellationToken ct = default);`
+
+---
+
+## 5. Milestone 3: Media Attachments, Disappearing Messages & Group Governance
+
+### 5.1 Media Attachment Strategy (Inline vs. Out-of-Band)
+To satisfy the strict 64 KB Double Ratchet payload limit:
 1. **Inline Media ($\le$ 32 KB)**:
    - Short voice clips, animated stickers, custom emojis, and low-resolution image previews / BlurHashes.
    - Encrypted directly within the E2EE channel payload via `MediaAttachmentDto.InlineBytes`.
@@ -101,119 +236,95 @@ To satisfy the strict 64 KB Double Ratchet payload limit without resorting to he
 2. **Out-of-Band Encrypted Blobs (32 KB to 50 MB)**:
    - Photos, audio tracks, GIF animations, and short video clips.
    - **EXIF Geolocation Scrubbing**: All GPS coordinates, camera serial numbers, and device tags are stripped client-side before padding and encryption.
-   - **Anti-Traffic Padding**: Plaintext media is padded to discrete size buckets before encryption.
+   - **Filename Scrubbing**: Default camera/OS filenames stripped; generic or omitted on wire.
+   - **Stepped Bucket Padding**: Plaintext media is padded to discrete size buckets (< 1 MB to 32 KB; 1–10 MB to 256 KB; > 10 MB to 1 MB) before encryption.
    - **Chunked STREAM AEAD**: Encrypted in $64\text{ KB}$ chunks with sequential counter nonces and independent auth tags via `Percolator.PluginSdk.IBlobStorageService`.
    - **Audio Waveforms & Layout Stability**:
      - Voice notes embed normalized amplitude bytes (`Waveform`) inline in `BlobReference` for immediate waveform rendering without audio decoding.
      - Images and videos mandate `Width` and `Height` in `BlobReference` to eliminate Cumulative Layout Shift (CLS) in chat feeds.
-   - `MediaAttachmentDto` carries the lightweight `BlobReference` containing the symmetric key, base nonce, ciphertext SHA-256 digest, unpadded size, and storage mode.
+   - `MediaAttachmentDto` carries the lightweight `BlobReference` containing symmetric key, base nonce, ciphertext SHA-256 digest, unpadded size, and storage mode.
 
-### 3.2 Channel Topologies & Media Expectations
+### 5.2 Channel Topologies & Media Expectations
 Media behavior is strictly driven by the channel's configured topology:
 1. **1:1 Direct Channel (No Relay)**:
-   - **Expectation**: Media can **only** be transferred when **both peers are online concurrently**.
-   - **Staged Pull Workflow**: Sender calls `UploadBlobAsync`, which encrypts and stages chunks in the sender's local disk store. The tiny `BlobReference` is sent via chat message. When the recipient's client receives the message, it pulls chunks directly from the sender's node over a dedicated peer stream.
-   - If the remote peer is offline, the Chat UI disables the upload button or queues the message with status: *"Waiting for recipient to come online to stream media"*.
-   - Consumes zero relay bandwidth or disk storage.
+   - Media can **only** be transferred when **both peers are online concurrently**.
+   - **Staged Pull Workflow**: Sender calls `UploadBlobAsync`, which encrypts and stages chunks in the sender's local disk store. The tiny `BlobReference` is sent via chat message. When the recipient receives the message, it pulls chunks directly from the sender over a dedicated peer stream.
+   - If remote peer is offline, the Chat UI disables upload or marks status: *"Waiting for recipient to come online to stream media"*.
 2. **1:1 Relayed Channel**:
-   - **Expectation**: The channel's designated relay acts as the single media storage endpoint.
-   - Sender uploads ciphertext out-of-band to the channel relay.
-   - Recipient downloads ciphertext asynchronously from that same relay upon coming online.
+   - The channel's designated relay acts as the single media storage endpoint.
+   - Sender uploads ciphertext out-of-band to the channel relay. Recipient downloads asynchronously upon coming online.
 3. **Group Channel**:
-   - **Expectation**: The group's single common relay acts as the authoritative media store for all group members (pure Signal model).
-   - Sender uploads the encrypted, padded blob **exactly once** to the group relay.
-   - Sender distributes the `BlobReference` inside their group message using their **Sender Key** ratchet.
-   - All group members stream chunks from that same common relay (via manual tap-to-download or Wi-Fi auto-download).
-4. **Relay Quota & Policy Enforcement**:
-   - If the channel relay rejects an upload because its storage is full or disabled, `IBlobStorageService` returns an explicit error (`RelayStorageQuotaExceeded` or `RelayBlobStorageDisabled`), and the Chat UI displays a clear explanation to the user.
-5. **Decoupled Performance Pipeline**:
+   - The group's single common relay acts as the authoritative media store for all group members (pure Signal model).
+   - Sender uploads encrypted, padded blob **once** to group relay and distributes `BlobReference` via group Sender Key ratchet.
+4. **Decoupled Performance Pipeline**:
    - Blob uploads/downloads run **out-of-band BEFORE `OutboundEgressPipeline`**, ensuring the ratchet lock (`IChannelLockService`) is never held during file uploads.
-   - Multi-megabyte media bypasses the SQLite Outbox completely, preserving the featherweight transaction outbox invariant.
 
-### 3.3 Privacy-Preserving Link Previews
+### 5.3 Privacy-Preserving Link Previews
 - **Zero Recipient Deanonymization (Signal-Aligned Privacy)**:
-  - The recipient client must **never** automatically scrape URLs or fetch OpenGraph metadata from the internet. Doing so leaks the recipient's IP address and browsing behavior to external web servers.
+  - The recipient client must **never** automatically scrape URLs or fetch OpenGraph metadata from the internet.
 - **Sender-Generated Preview Model**:
   - The sender's client optionally generates OpenGraph metadata (`Title`, `Description`, `CanonicalUrl`) and a small encrypted thumbnail blob.
   - Previews are embedded in `LinkPreviewDto` within the E2EE ratchet envelope.
-  - Recipient renders the preview purely from the received E2EE data without external HTTP calls.
+  - Recipient renders preview purely from received E2EE data without external HTTP calls.
 
----
-
-## 4. Milestone 3: Message Lifecycles, Reactions & Group Governance
-
-### 4.1 Message Edits & Deletions (Tombstones)
-- **Message Edits**:
-  - Allowed within a 24-hour window from original send timestamp.
-  - Must be signed by the original author.
-  - Inbound edits update the local message read model, marking the message with an `(edited)` indicator and updating `EditedAtUtc`.
-- **Message Deletions / Remote Retraction**:
-  - Authors may delete a message within 24 hours of posting.
-  - Group administrators may delete messages from any member if permitted by channel policy.
-  - Rendered as a tombstone placeholder: *"This message was deleted"*, preserving thread sequence integrity and reply linkages while permanently purging the ciphertext and local media cache.
-
-### 4.2 Disappearing Messages
+### 5.4 Disappearing Messages Eviction Model
 - Configured at channel level or overridden per message via `ExpireAfterSeconds`.
-- **Sender Timer**: Starts counting down immediately upon successful message dispatch.
-- **Recipient Timer**: Starts counting down upon message read receipt or first display in the active viewport.
-- **Local Eviction Worker**: Automatically prunes expired messages and invokes `IBlobStorageService.DeleteLocalCacheAsync` to purge associated media blobs from disk.
+- **Sender Timer**: Starts counting down immediately upon message dispatch (`expires_at_utc = sent_at + ExpireAfterSeconds`).
+- **Recipient Timer**: Starts counting down upon message read receipt or first display in the active viewport (`expires_at_utc = read_at + ExpireAfterSeconds`).
+- **Periodic Background Hosted Worker (`DisappearingMessageEvictionWorker`)**:
+  - Wakes up periodically (every 30 seconds).
+  - Queries `IChatMessageRepository.PurgeExpiredMessagesAsync(now)`.
+  - Invokes `IBlobStorageService.DeleteLocalCacheAsync` to purge associated media blobs from disk.
+- **Query Filter Safeguard**:
+  - `IChatMessageQueryService` filters `WHERE (expires_at_utc IS NULL OR expires_at_utc > @now)` as an immediate defense even before the periodic worker fires.
 
-### 4.3 Emoji Reactions & Read Aggregation
-- **Reaction Model**:
-  - `ReactionUpdateDto` dispatches `Add` or `Remove` actions for a Unicode emoji.
-  - Idempotent: repeated adds from the same user do not duplicate reactions.
-- **Pre-Aggregated Read Projection**:
-  - `ReactionGroupReadModel` exposed on `ChatMessageReadModel`:
-    - `string Emoji`: The emoji glyph.
-    - `int Count`: Total reactions.
-    - `bool ReactedByMe`: Whether the local user reacted.
-    - `IReadOnlyList<PublicIdentityId> ReactorIds`: Identity list for tooltip/details modal.
-
-### 4.4 Group Invitation Consent State Machine
+### 5.5 Group Invitation Consent State Machine
+- **Transport Mechanism**:
+  - Group invitations travel over the existing **1:1 Pairwise Direct Channel** (direct or relayed) between inviter and invitee as a `GroupInvitationDto`.
+  - Strictly E2EE, mutually authenticated, and spam-protected by existing pairwise trust.
 - **`PendingGroupInvitation` Entity**:
-  - Inbound invitations to join group channels require explicit local user consent before joining or exchanging keys.
   - States: `Pending`, `Accepted`, `Declined`, `Expired`.
-- **`IGroupInvitationService` & `GroupInvitationService`**:
-  - Emits events when an invitation is received.
-  - On user acceptance: joins `GroupChannel` (mutating the domain aggregate as single source of truth) and informs `GroupKeyDistributionService`.
-  - On user decline: records state and rejects further channel traffic.
-- **`IGroupInvitationQueryService`** (`Percolator.Apps.Chat.Ports`):
-  - Read-only query port for UI invitation notifications:
-    - `Task<IReadOnlyList<GroupInvitationSummaryReadModel>> GetPendingInvitationsAsync(PublicIdentityId recipientId, CancellationToken ct = default);`
-
-### 4.5 In-Stream System Notices & Read Status
-- **System Notices (`SystemNoticeDto`)**:
-  - Inserted directly into the chat timeline for safety number rotations, member additions/removals, admin promotions, and epoch advancements.
-- **Read Cursors & Unread Badges**:
-  - `ReadReceiptDto` advances the remote read marker.
-  - `IConversationListQueryService` computes unread badge counts based on local read cursor vs. latest channel sequence numbers.
+- **`GroupInvitationService`**:
+  - On incoming `GroupInvitationDto`: Persists `PendingGroupInvitation` via `IGroupInvitationRepository` and fires UI event.
+  - On User Acceptance:
+    - Joins `GroupChannel` via domain aggregate `AddMember`.
+    - Dispatches `GroupInvitationResponseDto(Accepted = true)` back over 1:1 pairwise channel.
+    - Notifies `GroupKeyDistributionService` in `Percolator.Application`.
+  - On User Decline:
+    - Marks invitation declined in `IGroupInvitationRepository`.
+    - Dispatches `GroupInvitationResponseDto(Accepted = false)` back over 1:1 pairwise channel.
 
 ---
 
-## 5. Milestone 4: Test Suite Specification
+## 6. Milestone 4: Test Suite Specification
 
-### 5.1 Ingress & Payload Tests (`Percolator.Apps.Chat.Tests/Ingress`)
-- `ChatPayloadHandlerTests.HandleInboundAsync_TextMessage_AppendsPayloadToDomainChannel`: Verifies write path aggregate mutation.
-- `ChatPayloadHandlerTests.HandleInboundAsync_WithMentions_PreservesByteOffsets`: Verifies byte offset span validation.
-- `ChatPayloadHandlerTests.HandleInboundAsync_EmojiReaction_AppliesReactionToTimeline`: Verifies reaction aggregation delta.
-- `ChatPayloadHandlerTests.HandleInboundAsync_MessageEdit_WithinWindow_UpdatesMessage`: Verifies 24-hour edit window acceptance.
-- `ChatPayloadHandlerTests.HandleInboundAsync_MessageEdit_PastWindow_RejectsEdit`: Verifies rejection of edits after 24 hours.
+### 6.1 Outbound Commands Tests (`Percolator.Apps.Chat.Tests/Outbound`)
+- `ChatServiceTests.SendMessageAsync_ValidText_SerializesEnvelopeWithSteppedPaddingAndDispatches`: Verifies stepped padding bucket expansion and `IPayloadSender` dispatch.
+- `ChatServiceTests.SendMessageAsync_ClampsTimestampToUnixMilliseconds`: Verifies sub-millisecond tick precision is stripped.
+- `ChatServiceTests.SendMessageAsync_ReplyContext_ExcludesSnippetFromWire`: Verifies only parent ID and author ID are included.
+- `ChatServiceTests.SendMessageAsync_MentionOffsets_CalculatesUtf8ByteSpans`: Verifies UTF-8 byte offset indexing with emojis.
+- `ChatServiceTests.SendMessageAsync_ImageAttachment_SanitizesFileName`: Verifies camera filename scrubbing.
+- `ChatServiceTests.EditMessageAsync_WithinWindow_DispatchesEditDto`: Verifies 24-hour edit window acceptance.
+- `ChatServiceTests.EditMessageAsync_PastWindow_ReturnsValidationError`: Verifies rejection of edits past 24 hours.
+- `ChatServiceTests.DeleteMessageAsync_Author_DispatchesTombstoneDto`: Verifies tombstone creation.
+- `ChatServiceTests.AddReactionAsync_DispatchesReactionUpdateDto`: Verifies emoji reaction command dispatch.
+- `ChatServiceTests.MarkAsReadAsync_AdvancesCursorAndDispatchesReadReceiptDto`: Verifies read receipt dispatch.
+
+### 6.2 Ingress & Inbound Payload Tests (`Percolator.Apps.Chat.Tests/Ingress`)
+- `ChatPayloadHandlerTests.HandleInboundAsync_TextMessage_AppendsPayloadToDomainChannelAndSavesRecord`: Verifies domain channel append + chat repo insert.
+- `ChatPayloadHandlerTests.HandleInboundAsync_DiscardsSteppedPaddingCleanly`: Verifies padding does not affect inner deserialization.
+- `ChatPayloadHandlerTests.HandleInboundAsync_WithMentions_ValidatesUtf8ByteBoundaries`: Verifies byte offset span validation.
+- `ChatPayloadHandlerTests.HandleInboundAsync_EmojiReaction_AppliesReactionToChatRepo`: Verifies reaction aggregation delta.
+- `ChatPayloadHandlerTests.HandleInboundAsync_MessageEdit_WithinWindow_UpdatesChatRepo`: Verifies edit update.
 - `ChatPayloadHandlerTests.HandleInboundAsync_MessageEdit_NonAuthor_RejectsEdit`: Verifies non-author edit rejection.
 - `ChatPayloadHandlerTests.HandleInboundAsync_MessageTombstone_ReplacesWithDeletedPlaceholder`: Verifies tombstone mutation and media cache eviction trigger.
-- `ChatPayloadHandlerTests.HandleInboundAsync_CorruptedPayload_ReturnsDeserializationError`: Verifies robust error handling on corrupted data.
+- `ChatPayloadHandlerTests.HandleInboundAsync_CorruptedEnvelope_ReturnsDeserializationError`: Verifies robust error handling on corrupted data.
 
-### 5.2 Media & Blob Storage Tests (`Percolator.Apps.Chat.Tests/Media`)
-- `ChatMediaServiceTests.SendMediaAsync_InlineMedia_EmbedsBytesDirectly`: Verifies $\le$ 32 KB payload remains inline.
+### 6.3 Media, Invitations & Query Tests (`Percolator.Apps.Chat.Tests/Features`)
 - `ChatMediaServiceTests.SendMediaAsync_1to1Direct_WhenPeerOnline_StagesAndSendsReference`: Verifies local staging and peer pull in 1:1 direct.
 - `ChatMediaServiceTests.SendMediaAsync_1to1Direct_WhenPeerOffline_ReturnsPeerOfflineError`: Verifies failure expectation when peer is offline in non-relayed 1:1.
-- `ChatMediaServiceTests.SendMediaAsync_RelayedChannel_UploadsToChannelRelay`: Verifies upload to designated channel relay.
 - `ChatMediaServiceTests.SendMediaAsync_GroupChannel_UploadsOnceToCommonRelay`: Verifies single upload to group common relay.
-- `ChatMediaServiceTests.SendMediaAsync_RelayQuotaExceeded_ReturnsQuotaError`: Verifies clear error propagation on relay rejection.
-- `ChatMediaServiceTests.ReceiveMediaAsync_OutofBandMedia_VerifiesSha256AndDecrypts`: Verifies chunk integrity verification on download.
-
-### 5.3 Invitations & Query Tests (`Percolator.Apps.Chat.Tests/Invitations`)
 - `GroupInvitationServiceTests.ReceiveInvitation_EmitsPendingInvitation`: Verifies pending invitation creation.
 - `GroupInvitationServiceTests.AcceptInvitation_JoinsDomainGroup`: Verifies domain group aggregate mutation.
-- `GroupInvitationServiceTests.DeclineInvitation_MarksDeclinedAndSuppressesFutureTraffic`: Verifies rejection flow.
 - `InMemoryChatMessageQueryServiceTests.GetPagedMessagesAsync_ReturnsRequestedPage_WithoutDomainHydration`: Verifies CQRS fast-path read model queries.
-- `InMemoryConversationListQueryServiceTests.GetRecentConversationsAsync_ComputesUnreadCountsCorrectly`: Verifies unread badge computation.
+- `DisappearingMessageEvictionWorkerTests.ExecuteAsync_PurgesExpiredMessages`: Verifies background eviction worker purging.
