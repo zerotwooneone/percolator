@@ -1,4 +1,4 @@
-# Percolator.Infrastructure2 Implementation Plan
+﻿# Percolator.Infrastructure2 Implementation Plan
 
 ## 1. Overview & Architectural Role
 
@@ -274,7 +274,29 @@ Carried inside `SealedEnvelopeProto.encrypted_package` (opaque to relays and pas
     - `string invitation_id = 1;`, `bytes target_group_channel_id = 2;`, `string group_name = 3;`, `bytes inviter_id = 4;`, `optional string relay_endpoint = 5;`, `uint64 expires_at_unix_ms = 6;`
   - `GroupInvitationResponseProto`:
     - `string invitation_id = 1;`, `bytes target_group_channel_id = 2;`, `bytes responder_id = 3;`, `bool accepted = 4;`, `uint64 responded_at_unix_ms = 5;`
-- `discovery.proto`: `DhtPingPayload`, `DhtPongPayload`, `DhtFindNodeRequest`, `DhtFindNodeResponse`, `NodeInfoProto`.
+- `discovery.proto`:
+  - `NearbyDiscoveryQueryProto`:
+    - `bytes target_relay_id = 1;` (32-byte `PublicIdentityId` of target relay/peer)
+    - `uint32 limit = 2;` (Clamped between 1 and 100 via `DiscoveryResultLimit`)
+  - `NearbyDiscoveryResponseProto`:
+    - `repeated PeerDiscoveryDescriptorProto peers = 1;`
+  - `PeerDiscoveryDescriptorProto`:
+    - `bytes public_identity_id = 1;` (32-byte `PublicIdentityId`)
+    - `DeliveryRouteProto delivery_route = 2;`
+  - `DeliveryRouteProto`:
+    - `uint32 route_kind = 1;` (DirectP2P=1, RelayedOneToOne=2)
+    - `bytes relay_identity_id = 2;`
+    - `bytes delivery_token = 3;`
+  - `DiscoveryRegistrationProto`:
+    - `bytes peer_id = 1;`
+    - `bytes relay_token = 2;`
+    - `uint32 visibility = 3;` (Hidden=0, Discoverable=1)
+  - `BlindedRendezvousQueryProto`:
+    - `bytes blinded_locator = 1;` (32-byte HMAC-SHA256 locator)
+    - `uint64 epoch = 2;` (24-hour UTC Unix day ratchet window)
+  - `BlindedRendezvousResponseProto`:
+    - `bool found = 1;`
+    - `optional PeerDiscoveryDescriptorProto descriptor = 2;`
 
 #### Serialization Adapters:
 - **`ProtobufSessionWirePacker`** (`Percolator.Application.Ports.ISessionWirePacker`):
@@ -336,6 +358,8 @@ Database Engine: Encrypted SQLite using SQLCipher (`SQLitePCLRaw.bundle_e_sqlcip
   - **Adapter**: `SqlUnknownGroupMessageCacheRepository`. Persists bounded out-of-order group messages (`chat_unknown_group_messages`) awaiting author sender key distribution.
 - **`ITransferSessionRepository`** (`Percolator.Apps.FileTransfer.Ports`):
   - Persists active and historical file transfer sessions, manifests, bitfields, and swarm peer caches.
+- **`IRelayPeerDirectory`** (`Percolator.Apps.Discovery.Features.RelayDirectoryHosting`):
+  - **Adapter**: `SqliteRelayPeerDirectory`. Backed by `disc_relay_peer_registrations` (`peer_id`, `delivery_token`, `visibility`, `last_registered_at_utc`). Stores registered discoverable peers on sovereign relays. Enforces admission gate validation (`IDiscoveryAdmissionGate` checking active Signed PreKey and handshake completion), respects relay policy (`Disabled`, `Open`, `BlindedContactsOnly`), peer visibility (`Hidden`, `Discoverable`), and bounds candidate results to `DiscoveryResultLimit`.
 
 #### 2. Fast-Path Read Query Adapters (Bypassing Domain Aggregates via Direct SQL / Dapper Projections)
 - **`SqlChatMessageQueryService`** (`Percolator.Apps.Chat.Ports.IChatMessageQueryService`):
@@ -348,8 +372,8 @@ Database Engine: Encrypted SQLite using SQLCipher (`SQLitePCLRaw.bundle_e_sqlcip
   - Reads pending/failed outbox job summaries for UI diagnostic dashboards without hydrating byte payload buffers.
 - **`SqlPeerContactQueryService`** (`Percolator.Application.Ports.IPeerContactQueryService`):
   - Fetches contact book rows, pending contact requests (`ContactState.PendingApproval`), and reachability summaries without loading private keys or device link proofs. Projects `ContactState State` into `PeerContactSummaryReadModel` and `PeerContactDetailReadModel` for UI contact lists and incoming request approval badges.
-- **`SqlDiscoveryQueryService`** (`Percolator.Apps.Discovery.Ports.IDiscoveryQueryService`):
-  - Reads active peer presence entries and locator cache records directly.
+- **`SqliteRelayPeerDirectory`** (`Percolator.Apps.Discovery.Features.RelayDirectoryHosting.IRelayPeerDirectory`):
+  - Fast-path paged SQL query over `disc_relay_peer_registrations` projecting candidate discoverable peers directly into lightweight `PeerDiscoveryDescriptor` instances without hydrating domain aggregates.
 - **`SqlFileTransferQueryService`** (`Percolator.Apps.FileTransfer.Ports.IFileTransferQueryService`):
   - Reads active file transfer task progress, byte rates, and manifest catalogs without locking active chunk transfer state machines.
 
@@ -363,7 +387,7 @@ Database Engine: Encrypted SQLite using SQLCipher (`SQLitePCLRaw.bundle_e_sqlcip
     - Tracks active, open gRPC duplex/server-streaming connections for direct peers and home relays.
     - Detects HTTP/2 connection drops and backpressure flow-control saturation (`StreamWriteResult`).
   - **`IPeerReachabilityService`** (`Percolator.Application.Routing`):
-    - Evaluates direct reachability (via active connection or discovery rendezvous ticket) and resolves home relay mailboxes for offline peers.
+    - Evaluates direct reachability (via active connection or private rendezvous descriptor) and resolves home relay mailboxes for offline peers.
   - **`SealedEnvelopeUnwrapper`** (`Percolator.Application.Ports.ISealedEnvelopeUnwrapper`):
     - Bridges relay `MailboxEnvelope` instances to strongly typed `InboundEnvelope` objects using `ProtobufSessionWirePacker`.
 
@@ -420,6 +444,15 @@ Database Engine: Encrypted SQLite using SQLCipher (`SQLitePCLRaw.bundle_e_sqlcip
     - Publishes `PreKeyBundle` uploads to relay identities via `AuthenticatedRelayService.PublishPreKeyBundle`.
     - Fetches remote peer pre-key bundles from relays out-of-band via `AuthenticatedRelayService.FetchPreKeyBundle`, authenticating with local `IdentityKey` signature to defeat OPK exhaustion attacks.
     - Queues store-and-forward mailbox envelopes via `UnauthenticatedDeliveryService.EnqueueMailbox` using recipient `DeliveryToken` / `BlindedRoutingToken`.
+  - **Discovery Client & PreKey Adapters (`Percolator.Apps.Discovery.Ports`)**:
+    - **`DiscoveryQueryClient`** (`INearbyDiscoveryQueryClientPort`):
+      - Connects to a target relay or peer gRPC endpoint to execute `NearbyDiscoveryQueryProto` requests. Enforces `DiscoveryResultLimit` clamping (1–100), deserializes `NearbyDiscoveryResponseProto`, and returns sanitized `IReadOnlyList<PeerDiscoveryDescriptor>` with `DeliveryRoute.RelayedOneToOne`.
+    - **`DiscoveryHandshakeAdapter`** (`IDiscoveryHandshakePort`):
+      - Initiates mutual X3DH / Double Ratchet handshake with a discovered candidate peer. Bridges to the application handshake workflow / pending handshake queue to establish an authenticated direct or relayed E2EE session.
+    - **`PreKeyAvailabilityAdapter`** (`IPreKeyAvailabilityPort`):
+      - Checks local relay directory (`IRelayPreKeyDirectoryRepository`) or prekey registry to verify whether an active Signed PreKey (SPK) is available for admission gate validation.
+    - **`PreKeyBundleProviderAdapter`** (`IPreKeyBundleProvider`):
+      - Fetches the active prekey bundle (Identity Key, Signed PreKey + signature, and optional One-Time PreKey) for a discovered peer upon user connection intent, deferring bundle retrieval until Step 2 to prevent OPK exhaustion.
 
 ---
 
@@ -429,8 +462,8 @@ Database Engine: Encrypted SQLite using SQLCipher (`SQLitePCLRaw.bundle_e_sqlcip
 - **Portable `ICredentialStorage`** (`Percolator.Application.Ports.ICredentialStorage`):
   - **`PortablePassphraseCredentialStorage`**: Cross-platform master secret provider utilizing Argon2id key derivation from user master passphrase with AES-256-GCM encrypted local keyfile storage.\
   - *(Note: On Windows, `Percolator.Infrastructure.Windows` provides `WindowsDpapiCredentialStorage` to bind encryption directly to the Windows User DPAPI master key and apply Windows NTFS user-exclusive ACLs).*
-- **`KademliaRoutingTable`** (`Percolator.Apps.Discovery`):
-  - Manages 160-bit XOR distance metrics, $k=20$ K-bucket storage, and node contact tables for decentralized rendezvous discovery. (Note: UDP LAN discovery is explicitly excluded).
+- **Private Rendezvous & Locator Adapters** (`Percolator.Apps.Discovery`):
+  - **`PrivateRendezvousService`**: Computes deterministic blinded locators ($\text{BlindedLocator} = \text{HMAC-SHA256}(K_{\text{rendezvous}}, \text{epoch})$) keyed by 24-hour UTC ratchet windows (`DiscoveryEpoch`) for sovereign relay rendezvous lookup, eliminating global DHT routing tables, XOR distance metrics, and broadcast sniffing.
 
 ---
 
@@ -442,7 +475,7 @@ Database Engine: Encrypted SQLite using SQLCipher (`SQLitePCLRaw.bundle_e_sqlcip
   - **`RelayPreKeyDirectoryPruner`**: Evicts expired signed pre-key bundles and consumed or timed-out one-time pre-keys from `IRelayPreKeyDirectoryRepository` environmental records.\
   - **`UnknownGroupMessageCachePruner`**: Purges buffered group chat frames from `IUnknownGroupMessageCacheRepository` that exceed maximum TTL (e.g. 48 hours) where the author's sender key distribution was never received.
   - **`AbandonedInvitePruner`**: Scans inbound contact requests (`PeerContactState.PendingApproval`), pending handshake envelopes in `IPendingHandshakeRepository`, and group invitations (`PendingGroupInvitation`) exceeding local expiration policies (e.g. 14 days without user response) and marks or purges them.
-  - **`RendezvousTicketPruner`**: Scans DHT presence announcements in `Apps.Discovery` past `ExpiresAtUtc` and evicts expired routing entries.
+  - **`RelayDiscoveryRegistrationPruner`**: Scans `disc_relay_peer_registrations` table in `Apps.Discovery` to evict expired registrations (e.g., registrations older than 7 days without renewal) or registrations whose corresponding Signed PreKey has expired.
 - **Background Worker Resiliency Best Practices**:
   - **Async Scopes**: Workers must use `IServiceScopeFactory.CreateAsyncScope()` for deterministic asynchronous resource cleanup.
   - **Time Virtualization**: Depend strictly on .NET `TimeProvider` (`timeProvider.GetUtcNow()`, `Task.Delay(..., timeProvider, ct)`) to enable deterministic time manipulation and fast-forwarding in integration test suites.
