@@ -1,84 +1,146 @@
 # Percolator.Apps.Discovery Implementation Plan
 
-## Summary & Architectural Constraints
-- **Target Project**: `Percolator.Apps.Discovery` (Decentralized peer discovery, Kademlia DHT rendezvous, and blinded contact locator queries).
-- **Architectural Rules (Rule 1 & Rule 2)**:
-  - Depends **only** on `Percolator.Domain` and `Percolator.PluginSdk`.
-  - Zero reference to infrastructure/transport/storage libraries (no UDP sockets, raw TCP, SQLite, or OS APIs).
-  - Strict serialization boundary: Application layer handles pure C# DTOs and delegates serialization to `IPayloadSerializer`. Concrete Protobuf contracts (`.proto`) and Google Protobuf code live strictly in `Percolator.Infrastructure2.Serialization`.
-  - Implements `IAppPlugin` (`AppId.Discovery = 0x02`) and `IAppPayloadHandler` from `Percolator.PluginSdk`.
-  - **CQRS Separation (Rendezvous State vs. Fast Read Queries)**:
-    - **Write Path**: State updates (rendezvous announcements, contact locator registrations, DHT bucket routing) update internal models or domain repositories.
-    - **Read Path**: The UI and routing layers query peer reachability, presence summaries, and locator status via a dedicated read-only query port (`IDiscoveryQueryService`), skipping domain aggregate loading or full DHT bucket traversal.
-  - **Prerequisite Handshake & Prekey Bundle Invariant**:
-    - Discovery announcement and locator queries **require** that the remote peer has already successfully completed a mutual cryptographic handshake AND has an active, valid `PreKeyBundle` available.
-    - Peered nodes without established trust or unconsumable pre-keys are suppressed from rendezvous announcements and reachability resolution. This ensures nodes can never be advertised if communication cannot be initiated, and grants peers sovereign control over whether and how they can be discovered.
-  - **Cryptographic Logging Guardrails**:
-    - The Discovery application must strictly honor cryptographic logging guardrails (`CryptographyOptions.EnableCryptographicMaterialLogging = false` by default).
-    - Diagnostic and trace logging must **never** leak contact shared secrets, blinded locator pre-image secrets, node private keys, or pre-key cryptographic components. Only non-sensitive metrics (e.g. bucket IDs, ping round-trip times, candidate counts) may be emitted.
-  - Test-first implementation: All behaviors must have corresponding unit tests in `Percolator.Apps.Discovery.Tests` using in-memory test doubles.
+## 1. Executive Summary & Core Architectural Goals
+
+The **Discovery Plugin** (`Percolator.Apps.Discovery`, `AppId = 0x02`) provides privacy-preserving peer rendezvous and relay-mediated node discovery.
+
+Following the **asynchronous, store-and-forward design of the Signal Protocol**, the plugin:
+* Does **not** track volatile online/offline status or require connection heartbeats.
+* Operates strictly on **manual, user-driven intent** (zero background network polling).
+* Enforces **two-phase discovery** so passive directory scans never consume One-Time Prekeys (OPKs).
+* Protects against primitive obsession and operator conversions by enforcing self-validating Value Objects.
+* Adheres strictly to **DDD Onion Architecture** organized in **vertical feature slices**.
 
 ---
 
-## Milestone 1: Discovery Plugin & Payload Architecture
+## 2. Security Boundaries & Protocol Invariants
 
-### 1.1 Plugin Definition & Discovery DTOs
-- **`DiscoveryPlugin`**: Implements `IAppPlugin` with `AppId = 0x02` and semantic versioning.
-- **Application Payload DTOs** (Protobuf serialization abstracted via `IPayloadSerializer`):
-  - `DhtPingPayload`: Node ID, sequence number, and network epoch.
-  - `DhtPongPayload`: Acknowledgment, responder node descriptor, candidate relay locators, and active signed pre-key reference.
-  - `DhtFindNodePayload`: Target ID lookup request.
-  - `DhtNodeListPayload`: Nearest $k$ contact descriptors (filtered by handshake and pre-key validity).
-- **`DiscoveryPayloadHandler`**:
-  - Implements `IAppPayloadHandler` for `AppId.Discovery`.
-  - Routes inbound ping/find-node payloads to the rendezvous and routing engine.
-  - Rejects/ignores discovery announcements from unknown peers that do not provide consumable pre-key bundles.
+### 2.1 Invocation Model: Manual-Only
+* **Zero Ambient Polling**: Discovery queries are triggered exclusively by explicit user intent (e.g. clicking *"Scan Local Network"* or *"Discover Relay Peers"*).
+* Eliminates background traffic correlation, battery drain, and radio fingerprinting.
 
-### 1.2 Test Doubles & Unit Tests (`Percolator.Apps.Discovery.Tests/Ingress`)
-- `DiscoveryPayloadHandlerTests.HandleInboundAsync_PingWithValidPreKey_ReturnsPongWithRelayDescriptor`: asserts rendezvous ping/pong response.
-- `DiscoveryPayloadHandlerTests.HandleInboundAsync_PingWithoutPreKeyBundle_RejectsAnnouncement`: asserts uncontactable nodes are dropped.
-- `DiscoveryPayloadHandlerTests.HandleInboundAsync_FindNode_ReturnsNearestCandidateNodes`: asserts node lookup dispatching.
+### 2.2 Two-Phase Discovery (OPK Depletion Protection)
+* **Phase 1 (Discovery Query)**: Returns lightweight `PeerDiscoveryDescriptor` records containing `PublicIdentityId` and `DeliveryRoute`. **Zero One-Time Prekeys are popped or burned.**
+* **Phase 2 (Handshake on Intent to Chat)**: When the user chooses to start a conversation, the client fetches the fresh prekey bundle via the dedicated prekey endpoint and executes X3DH.
+
+### 2.3 Hard Admission Gate: Handshake + Active Signed PreKey (SPK)
+* **PreKey Requirement (Signal Parity)**: A peer is eligible for discovery admission if and only if they have:
+  1. An authenticated cryptographic handshake with the relay.
+  2. A valid, unexpired **Signed PreKey (SPK)** with a verified signature.
+* **One-Time Prekeys are strictly optional**: In accordance with X3DH, depletion of ephemeral OPKs does **not** disqualify a peer from discovery (the protocol seamlessly falls back to Triple-DH until new OPKs are uploaded).
+
+### 2.4 Sealed Sender Throttling & Sane Result Bounds
+* Ingress traffic is naturally throttled by Percolator's existing sealed sender token issuance.
+* To prevent excessive memory allocation or unbounded response packets, discovery queries enforce a strongly typed `DiscoveryResultLimit` (defaulting to 50, bounded between 1 and 100).
+
+### 2.5 Epoch-Windowed Blinded Locators
+* To prevent semi-honest relays or eavesdroppers from correlating user presence over time, blinded locators are ratcheted by day/epoch:
+  $$\text{Locator} = \text{HMAC-SHA256}(\text{ContactSharedSecret}, \text{EpochDay} \parallel \text{PublicIdentityId})$$
+* Encapsulated in the `BlindedLocator` value object.
+
+### 2.6 Cryptographic Registration Authority
+* A peer can **only** submit discovery visibility registrations (`Discoverable` vs `Hidden`) for its own `PublicIdentityId`.
+* The relay enforces that the registration identity strictly matches the authenticated session identity established during the transport handshake.
+
+### 2.7 Route Privacy
+* **LAN Discovery**: Descriptors return direct local routes (`DeliveryRoute.Direct(...)`).
+* **WAN Relay Discovery**: Descriptors return relay-mediated routes (`DeliveryRoute.ViaRelay(...)`), concealing the peer's actual IP address and physical location.
+
+### 2.8 Elimination of Primitive Obsession & Operator Conversions
+* No bare strings or unbounded ints for domain concepts with invariants.
+* Every value object enforces validation in static factory methods (`Create()`, `New()`) and exposes values via `.Value` and `ToString()`.
+* **Zero `implicit operator` or `explicit operator` conversions.**
 
 ---
 
-## Milestone 2: Blinded Contact Locators
+## 3. Vertical Feature Slices
 
-### 2.1 Privacy-Preserving Locator Derivation & Handshake Gating
-- **`BlindedLocator` Value Object**:
-  - Derives deterministic blinded query token: `SHA256(PublicIdentityId || ContactSharedSecret)`.
-  - Enables mutual contacts to locate each other on relays or DHT nodes without exposing public identity keys to intermediaries or passive eavesdroppers.
-- **`IBlindedLocatorService` & `BlindedLocatorService`**:
-  - Validates that target peer has an active handshake and valid pre-key bundle before computing or publishing locators.
-  - Computes active and next-epoch query locators for approved `PeerContact` instances.
-  - Generates lookup requests to discovery relays.
+The codebase is organized into vertical feature slices under `Percolator.Apps.Discovery`:
 
-### 2.2 Test Doubles & Unit Tests (`Percolator.Apps.Discovery.Tests/Locators`)
-- `BlindedLocatorTests.ComputeLocator_IsDeterministicAndMatchesSharedSecret`: verifies zero linkability for non-contacts.
-- `BlindedLocatorTests.ComputeLocator_DifferentSecret_ProducesUncorrelatedHash`: verifies cryptographic privacy.
-- `BlindedLocatorTests.PublishLocator_WhenHandshakeMissing_SuppressesPublication`: asserts handshake requirement invariant.
+```
+Percolator.Apps.Discovery/
+├── DiscoveryPlugin.cs                      # IAppPlugin (AppId = 0x02)
+├── Features/
+│   ├── RelayPolicy/                       # Feature Slice: Relay sovereignty & policies
+│   │   ├── RelayDiscoveryPolicy.cs        # Enum: Disabled, OpenLan, BlindedContactsOnly
+│   │   ├── RelayDiscoveryConfig.cs        # Value Object: Policy + MaxResults + per-peer blocklist
+│   │   └── IRelayPolicyEvaluator.cs       # Evaluates if query scope is permitted
+│   │
+│   ├── Admission/                         # Feature Slice: Pre-condition gatekeeping
+│   │   ├── IDiscoveryAdmissionGate.cs     # Admission contract
+│   │   └── DiscoveryAdmissionGate.cs      # Enforces handshake + active SPK verification
+│   │
+│   ├── PeerVisibility/                    # Feature Slice: Sovereign peer visibility ("Stealth")
+│   │   ├── PeerDiscoveryVisibility.cs     # Enum: Hidden (default), Discoverable
+│   │   ├── DiscoveryRegistrationDto.cs    # Registration payload
+│   │   └── PeerVisibilityRegistry.cs      # Session-authenticated visibility state
+│   │
+│   ├── BlindedLocators/                   # Feature Slice: Epoch-windowed contact locators
+│   │   ├── DiscoveryEpoch.cs              # Value Object: Day/epoch time window
+│   │   ├── BlindedLocator.cs              # Value Object: HMAC-derived locator token
+│   │   └── IBlindedLocatorService.cs      # Derives active & next-epoch locators
+│   │
+│   └── Directory/                         # Feature Slice: Discovery query & CQRS read models
+│       ├── DiscoveryResultLimit.cs        # Value Object: Validates 1 <= limit <= 100
+│       ├── PeerDiscoveryDescriptor.cs     # Record: PublicIdentityId, DeliveryRoute
+│       ├── DiscoveryQueryPayload.cs       # Inbound query DTO
+│       ├── DiscoveryResponsePayload.cs    # Outbound response DTO
+│       ├── IPeerDiscoveryDirectory.cs     # Read/Write directory port
+│       └── IDiscoveryQueryService.cs      # CQRS Read query port
+│
+├── Ingress/
+│   └── DiscoveryPayloadHandler.cs         # IAppPayloadHandler: Routes payloads to slices
+│
+└── Ports/
+    └── IPreKeyAvailabilityPort.cs         # Port to check peer SPK freshness without loading keys
+```
 
 ---
 
-## Milestone 3: Rendezvous, Presence State Machine & Fast Queries
+## 4. Implementation Milestones
 
-### 3.1 Presence Ticket Management
-- **`RendezvousTicket` Value Object/Entity**:
-  - Tracks peer presence tickets (`PeerId`, `BlindedLocator`, `RelayEndpointDescriptor`, `RegisteredAtUtc`, `ExpiresAtUtc`, `HasPreKeyBundle`).
-- **`RendezvousStateMachine`**:
-  - Registers active routing descriptors for local identities.
-  - Enforces that presence tickets are only granted and announced when valid pre-key bundles and handshakes are established.
-  - Prunes expired presence tickets using domain clock abstractions (`IDateTimeProvider`).
-  - Answers contact reachability inquiries queried by `IRoutingCoordinator` (`IPeerReachabilityService`).
+### Milestone 1: Domain Primitives & Feature Slices (`RelayPolicy`, `Admission`, `PeerVisibility`, `BlindedLocators`)
+* **`DiscoveryEpoch`**:
+  * Value object encapsulating `long EpochDays`. Factory `DiscoveryEpoch.FromUtc(DateTimeOffset)`.
+* **`BlindedLocator`**:
+  * Value object encapsulating 32-byte cryptographic token.
+  * Factory `BlindedLocator.Derive(PublicIdentityId peerId, ReadOnlySpan<byte> sharedSecret, DiscoveryEpoch epoch)`.
+  * Validates non-empty, strict 32-byte span. Exposes `.Value` and `ToString()`. Zero operators.
+* **`RelayDiscoveryPolicy` & `PeerDiscoveryVisibility`**:
+  * Strict enums with safe defaults (`RelayDiscoveryPolicy.Disabled`, `PeerDiscoveryVisibility.Hidden`).
+* **`IDiscoveryAdmissionGate` & `DiscoveryAdmissionGate`**:
+  * Evaluates relay policy, peer visibility, handshake state, and unexpired Signed PreKey ($SPK$) presence.
+* **Unit Tests** (`Percolator.Apps.Discovery.Tests`):
+  * Blinded locator deterministic derivation and epoch isolation tests.
+  * Admission gate assertions across all policy combinations.
 
-### 3.2 Read-Only Discovery Query Port
-- **`IDiscoveryQueryService`** (`Percolator.Apps.Discovery.Ports`):
-  - Read-only query port for UI presence dashboards and fast contact reachability queries:
-    - `Task<IReadOnlyList<PeerPresenceReadModel>> GetActivePeerPresencesAsync(CancellationToken ct = default);`
-    - `Task<PeerPresenceReadModel?> GetPeerPresenceAsync(PublicIdentityId peerId, CancellationToken ct = default);`
-  - Bypasses DHT bucket rebalancing or domain aggregate locking, querying the localized routing cache directly.
+### Milestone 2: Directory Feature Slice & CQRS Read Port (`Directory`)
+* **`DiscoveryResultLimit`**:
+  * Value object validating limit between 1 and 100 (defaults to 50).
+* **`PeerDiscoveryDescriptor`**:
+  * Carries `PublicIdentityId` and route-masked `DeliveryRoute`.
+* **`IPeerDiscoveryDirectory` & `InMemoryPeerDiscoveryDirectory`**:
+  * In-memory store for relay-registered peers and their SPK availability.
+* **`IDiscoveryQueryService`**:
+  * `Task<IReadOnlyList<PeerDiscoveryDescriptor>> DiscoverPeersAsync(DiscoveryScope scope, DiscoveryResultLimit limit, CancellationToken ct);`
+  * `Task<PeerDiscoveryDescriptor?> FindByBlindedLocatorAsync(BlindedLocator locator, CancellationToken ct);`
+* **Unit Tests**:
+  * Directory query filtering, result bounds clamping, and blinded locator resolution.
 
-### 3.3 Test Doubles & Unit Tests (`Percolator.Apps.Discovery.Tests/Rendezvous`)
-- `RendezvousStateMachineTests.Register_WhenTtlExpired_PurgesExpiredTickets`: asserts ticket expiration pruning with virtual time.
-- `RendezvousStateMachineTests.ResolveTicket_WhenValid_ReturnsEndpointDescriptor`: asserts active ticket retrieval.
-- `RendezvousStateMachineTests.ResolveTicket_WhenPeerHasNoPreKeyBundle_ReturnsUnreachable`: asserts pre-key requirement.
-- `DiscoveryQueryServiceTests.GetActivePeerPresencesAsync_ReturnsActivePresences`: asserts fast read query accuracy.
+### Milestone 3: Ingress Handler & Plugin Registration (`Ingress`)
+* **`DiscoveryQueryPayload` & `DiscoveryResponsePayload`**:
+  * Pure application DTOs (Protobuf serialization abstracted via `IPayloadSerializer`).
+* **`DiscoveryPayloadHandler`**:
+  * Implements `IAppPayloadHandler` for `AppId.Discovery` (`0x02`).
+  * Enforces session authentication: rejects registration payloads where the payload ID does not match the authenticated session ID.
+* **`DiscoveryPlugin`**:
+  * Implements `IAppPlugin` declaring capabilities and dependencies.
+* **Unit Tests**:
+  * Ingress dispatching, impersonation rejection, and payload routing.
+
+---
+
+## 5. Verification & Testing Strategy
+* 100% unit test coverage in `Percolator.Apps.Discovery.Tests` using in-memory test doubles.
+* Virtualized time using `FakeDateTimeProvider` for epoch computations.
+* Full solution test validation: run `dotnet test Percolator.sln` to guarantee zero regressions across all projects.
