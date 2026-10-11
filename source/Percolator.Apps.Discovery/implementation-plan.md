@@ -115,7 +115,7 @@ Percolator.Apps.Discovery/
   * `IRelayPeerDirectory` & `InMemoryRelayPeerDirectory`.
   * `DiscoveryRegistrationPayload` handling with session-authentication verification.
 * **Unit Tests** (`Percolator.Apps.Discovery.Tests/RelayDirectoryHosting`):
-  * Admission gate assertions under all policy/visibility combinations.
+  * State-based admission gate tests covering all policy/visibility matrices.
   * Directory registration, visibility toggling, and query filtering.
 
 ### Milestone 2: Private Rendezvous Feature Slice (`PrivateRendezvous`)
@@ -129,7 +129,7 @@ Percolator.Apps.Discovery/
   * Derives active and next-epoch locators for mutual contacts.
   * Queries and resolves rendezvous points.
 * **Unit Tests** (`Percolator.Apps.Discovery.Tests/PrivateRendezvous`):
-  * Deterministic HMAC derivation and epoch window rotation.
+  * Deterministic HMAC derivation and epoch window rotation using virtualized time.
   * Blinded locator query resolution.
 
 ### Milestone 3: Nearby Peer Discovery Feature Slice (`NearbyPeerDiscovery`)
@@ -161,7 +161,38 @@ Percolator.Apps.Discovery/
 
 ---
 
-## 5. Verification & Testing Strategy
-* 100% unit test coverage in `Percolator.Apps.Discovery.Tests` using in-memory test doubles.
-* Virtualized time using `FakeDateTimeProvider` for epoch computations.
-* Full solution test validation: run `dotnet test Percolator.sln` to guarantee zero regressions across all projects.
+## 5. Verification & Testing Strategy (High-Value, Low-Brittle Tests)
+
+To prevent brittle tests that break during internal refactorings while guaranteeing mission-critical cryptographic and privacy properties, testing adheres strictly to the following standards:
+
+### 5.1 Test Design Rules
+1. **State-Based & Behavioral Verification (No Mock Call Counting)**:
+   * Tests assert on returned domain values (`DomainResult`, descriptors, active ratchet sessions, error codes).
+   * Avoid `mock.Verify(x => x.SomeInternalCall(), Times.Once)`; verify outcomes and observable state transitions instead.
+2. **In-Memory Doubles Over Fragile Mocks**:
+   * Use stateful in-memory implementations (`InMemoryRelayPeerDirectory`, `FakePreKeyBundleProvider`, `FakeHandshakeService`) that behave like real dependencies.
+3. **Deterministic Virtual Time**:
+   * All time-sensitive calculations (`DiscoveryEpoch`, SPK freshness) inject `IDateTimeProvider` (`FakeDateTimeProvider`), eliminating flaky timer or wall-clock dependencies.
+4. **Zero Ritualistic Boilerplate**:
+   * Tests must test domain logic and protocol invariants. Avoid redundant tests for trivial compiler-generated getters/setters.
+
+### 5.2 Key Invariant Test Matrix
+
+| Test Category | Target Invariant Under Test | Observable Verification |
+| :--- | :--- | :--- |
+| **Relay Admission Matrix** | `RelayDiscoveryPolicy.Disabled` rejects all queries | `DiscoverPeersAsync` returns empty list or failure with `RELAY_DISCOVERY_DISABLED`. |
+| **Peer Stealth Mode** | `PeerDiscoveryVisibility.Hidden` excludes peer from results | Hidden peer is never listed in discovery responses even when `Policy == Open`. |
+| **Uncontactable Suppression** | Missing handshake or expired SPK excludes peer | Candidate without active SPK is omitted from directory responses. |
+| **Anti-Impersonation** | Node A cannot alter Node B's visibility | Ingress returns `DomainResult.Failure("UNAUTHORIZED_REGISTRATION")` when `payload.PeerId != context.SenderIdentityId`. |
+| **Epoch Isolation** | Day boundary ratchets blinded locators | `BlindedLocator.Derive` on Day $N$ differs from Day $N+1$ for the same peer and secret. |
+| **Mutual Determinism** | Both peers derive identical blinded locators | Alice and Bob derive matching locators given their pairwise shared secret. |
+| **OPK Starvation Protection** | Step 1 query never consumes prekeys | Step 1 (`QueryNearbyPeersAsync`) leaves `AvailableOneTimePreKeysCount` unchanged on the prekey store. |
+| **Workflow Fault Tolerance** | Handshake error on peer 1 does not abort peer 2 | `DiscoverAndConnectAsync` returns 1 successful session in `ConnectedPeers` and 1 failure in `Failures`. |
+| **Result Clamping** | Over-sized limit requests are clamped | Requesting limit of 500 returns at most 100 descriptors. |
+
+---
+
+## 6. Execution Quality Checklist
+* All tests pass cleanly (`dotnet test Percolator.sln`).
+* Zero `implicit operator` or `explicit operator` conversions.
+* Zero infrastructure dependencies in `Percolator.Apps.Discovery` (pure domain/application contracts).
