@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
-using Percolator.Apps.Chat.Models;
-using Percolator.Apps.Chat.Ports;
+using Percolator.Apps.Chat.Features.GroupInvitations;
 
 namespace Percolator.Apps.Chat.Tests.TestDoubles;
 
@@ -28,11 +27,25 @@ public sealed class InMemoryGroupInvitationRepository : IGroupInvitationReposito
         return Task.CompletedTask;
     }
 
-    public Task<IReadOnlyList<PendingGroupInvitation>> GetPendingAsync(ulong currentTimestampUnixMs, CancellationToken ct = default)
+    public Task<IReadOnlyList<PendingGroupInvitation>> GetAllPendingAsync(CancellationToken ct = default)
     {
         var list = _storage.Values
-            .Where(i => i.Status == GroupInvitationStatus.Pending && currentTimestampUnixMs < i.ExpiresAtUnixMs)
+            .Where(i => i.Status == GroupInvitationStatus.Pending)
             .ToList();
         return Task.FromResult<IReadOnlyList<PendingGroupInvitation>>(list);
+    }
+
+    public Task<int> PurgeExpiredAsync(ulong currentTimestampUnixMs, CancellationToken ct = default)
+    {
+        int purgedCount = 0;
+        foreach (var kvp in _storage)
+        {
+            if (kvp.Value.CheckExpiration(currentTimestampUnixMs))
+            {
+                purgedCount++;
+            }
+        }
+
+        return Task.FromResult(purgedCount);
     }
 }

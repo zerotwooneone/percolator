@@ -85,8 +85,11 @@ Message content supports a deterministic subset of GitHub Flavored Markdown:
 
 ### 4.2 Message Deletions (Tombstones)
 - **Window**: Allowed within 24 hours of original send timestamp.
-- **Authorization**: The original author may delete their message. Group channel administrators may delete messages from any participant if channel policy permits.
-- **Tombstone Semantics**: Replaces the message content with a deleted placeholder (*"This message was deleted"*), preserves thread position and reply linkage, and triggers permanent deletion of local cached media blobs.
+- **Authorization**:
+  - The original author may delete their message (resulting placeholder: *"This message was deleted"*).
+  - In group channels, participants with `ChannelRole.Admin` may delete messages from any participant within 24 hours (resulting placeholder: *"This message was deleted by a channel administrator"*, recording `DeletedBy = requestedBy` and `DeletedAtUnixMs`).
+  - In 1:1 channels, deletions are strictly author-only.
+- **Tombstone Semantics**: Replaces the message content with the appropriate deleted placeholder, clears attachments, wipes link previews, preserves thread position and reply linkage, and triggers permanent deletion of local cached media blobs.
 
 ### 4.3 Emoji Reactions
 - **Composite Key**: Identified by `(MessageId, ReactorId, Emoji)`.
@@ -143,3 +146,14 @@ Chat balances low-latency message delivery against the Double Ratchet's 64 KB pe
 ### 6.2 Fast-Path Read Projections
 - User interfaces and query handlers do **not** hydrate heavy domain channel aggregates.
 - Read operations execute optimized, indexed queries against projection stores, retrieving paged timelines, conversation summaries, and unread badge counts with sub-millisecond latency.
+
+---
+
+## 7. Vertical Feature Slice Architecture
+
+The Chat subsystem is organized vertically into autonomous feature slices with strict 1:1 directory-to-namespace mapping:
+1. `Percolator.Apps.Chat.Features.Messaging`: Encapsulates message creation, 24-hour edits, author/admin tombstones, paged timeline queries, and conversation feeds.
+2. `Percolator.Apps.Chat.Features.Reactions`: Encapsulates domain emoji reactions, idempotency, and aggregate badge projections.
+3. `Percolator.Apps.Chat.Features.GroupInvitations`: Encapsulates pairwise consent negotiation, invitation state machines, and acceptance coordination.
+4. `Percolator.Apps.Chat.Features.Media`: Encapsulates 32 KB inline thresholds, STREAM chunking descriptors, and privacy-preserving filename scrubbing.
+5. `Percolator.Apps.Chat.Ingress`: Centralizes transport envelope demuxing, cryptographic sender authentication, cross-channel boundary guards, and domain channel append synchronization.

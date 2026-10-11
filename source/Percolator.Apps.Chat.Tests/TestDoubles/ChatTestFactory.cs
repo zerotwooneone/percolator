@@ -1,5 +1,5 @@
-using Percolator.Apps.Chat.Commands;
-using Percolator.Apps.Chat.Models;
+using Percolator.Apps.Chat.Features.Media;
+using Percolator.Apps.Chat.Features.Messaging;
 using Percolator.Domain.Channels.Model;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;

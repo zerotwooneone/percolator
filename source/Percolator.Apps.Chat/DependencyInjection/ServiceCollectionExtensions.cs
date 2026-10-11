@@ -1,7 +1,8 @@
 using Microsoft.Extensions.DependencyInjection;
-using Percolator.Apps.Chat.Handlers;
-using Percolator.Apps.Chat.Ports;
-using Percolator.Apps.Chat.Services;
+using Percolator.Apps.Chat.Features.GroupInvitations;
+using Percolator.Apps.Chat.Features.Media;
+using Percolator.Apps.Chat.Features.Messaging;
+using Percolator.Apps.Chat.Ingress;
 using Percolator.PluginSdk;
 
 namespace Percolator.Apps.Chat.DependencyInjection;

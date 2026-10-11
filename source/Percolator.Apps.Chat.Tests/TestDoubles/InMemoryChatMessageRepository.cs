@@ -1,29 +1,28 @@
 using System.Collections.Concurrent;
-using Percolator.Apps.Chat.Models;
-using Percolator.Apps.Chat.Ports;
+using Percolator.Apps.Chat.Features.Messaging;
 using Percolator.Domain.Channels.ValueObjects;
 
 namespace Percolator.Apps.Chat.Tests.TestDoubles;
 
 public sealed class InMemoryChatMessageRepository : IChatMessageRepository
 {
-    private readonly ConcurrentDictionary<PayloadId, ChatMessageRecord> _storage = new();
+    private readonly ConcurrentDictionary<PayloadId, ChatMessage> _storage = new();
 
-    public IReadOnlyCollection<ChatMessageRecord> All => _storage.Values.ToList();
+    public IReadOnlyCollection<ChatMessage> All => _storage.Values.ToList();
 
-    public Task AddAsync(ChatMessageRecord record, CancellationToken ct = default)
+    public Task AddAsync(ChatMessage record, CancellationToken ct = default)
     {
         _storage[record.Id] = record;
         return Task.CompletedTask;
     }
 
-    public Task<ChatMessageRecord?> GetByIdAsync(PayloadId id, CancellationToken ct = default)
+    public Task<ChatMessage?> GetByIdAsync(PayloadId id, CancellationToken ct = default)
     {
         _storage.TryGetValue(id, out var record);
         return Task.FromResult(record);
     }
 
-    public Task UpdateAsync(ChatMessageRecord record, CancellationToken ct = default)
+    public Task UpdateAsync(ChatMessage record, CancellationToken ct = default)
     {
         _storage[record.Id] = record;
         return Task.CompletedTask;
