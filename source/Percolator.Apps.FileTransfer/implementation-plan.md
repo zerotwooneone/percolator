@@ -50,7 +50,7 @@
     - Requests the local home gateway router via UPnP IGD (`WANIPConnection`) to open a dedicated port mapping. Operates purely locally on the home LAN with **zero external server dependencies**.
   - Public IP candidates discovered via UPnP or Relay STUN are **never advertised** unless the user has explicitly opted into WAN direct connection for that transfer session.
 - **Relay Operator Safeguards & Throttling**:
-  - Relays advertise capabilities via `RelayFileTransferCapabilities` (`SupportsTransferPipes`, `SupportsSwarmTracker`, `SupportsStunReflection`, `MaxPipeBandwidthBytesPerSec`, `MaxConcurrentPipes`).
+  - Relays advertise capabilities via `RelayFileTransferCapabilities` (`Capabilities: RelayTransferCapabilityFlags`, `MaxPipeBandwidth: TransferBandwidth`, `MaxConcurrentPipes: PipeConcurrencyLimit`).
 
 ### 1.4 Push-Based Multi-Peer Initiator
 - Senders select one or more recipient peers (`IReadOnlyList<PublicIdentityId>`) and one or more files and/or directory trees.
@@ -89,7 +89,7 @@
 - Files are written with a `.percolator-part` extension during download to prevent Windows Defender, search indexers, or users from locking or launching incomplete binaries.
 - Upon full verification of all chunks in a file, it is atomically renamed to its final target filename.
 
----\
+---
 
 ## 2. Inbound Domain State Machine & Privacy Decision Lifecycle
 
@@ -111,7 +111,7 @@ flowchart TD
 ```
 
 ### 2.1 Domain Aggregate Root: `TransferSession` & `SwarmMember` Entity
-Following `Percolator.Domain.Common.AggregateRoot<TId>`, `TransferSession` models the transfer lifecycle as an aggregate boundary emitting domain events upon state transitions. Swarm peer states, bitfield tracking, and piece verification invariants are fully encapsulated within the aggregate root:
+Following `Percolator.Domain.Common.AggregateRoot<TId>`, `TransferSession` models the transfer lifecycle as an aggregate boundary emitting domain events upon state transitions. Swarm peer states, bitfield tracking, piece verification, and participant boundaries are fully encapsulated within the aggregate root:
 
 ```csharp
 namespace Percolator.Apps.FileTransfer.Features.TransferNegotiation;
@@ -130,7 +130,9 @@ public enum TransferSessionState : byte
     Paused = 0x04,           // Active streams temporarily closed; bitfield and manifest preserved on disk
     Completed = 0x05,        // All selected files downloaded, verified against Merkle tree, and atomically renamed
     Seeding = 0x06,          // Serving completed chunks to active swarm peers based on SeedRatio
-    Cancelled = 0x07         // Terminated by sender or recipient; sockets torn down
+    Stalled = 0x07,          // Missing chunks across active swarm; streams paused waiting for seeders
+    Cancelled = 0x08,        // Explicitly aborted by user
+    Failed = 0x09            // Unrecoverable I/O, storage quota, or cryptographic verification failure
 }
 
 public enum PeerChokeStatus : byte
@@ -153,21 +155,22 @@ public sealed class SwarmMember : IEntity<PublicIdentityId>
     public PeerChokeStatus ChokeStatus { get; private set; }
     public PeerInterestStatus InterestStatus { get; private set; }
     public DateTimeOffset LastSeenUtc { get; private set; }
+    public SwarmPeerRole Role => Bitfield.IsComplete ? SwarmPeerRole.Seeder : SwarmPeerRole.Leecher;
 
-    public SwarmMember(PublicIdentityId peerId, Bitfield bitfield)
+    internal SwarmMember(PublicIdentityId peerId, Bitfield bitfield, DateTimeOffset initialSeenUtc)
     {
         PeerId = peerId;
         Bitfield = bitfield;
         ChokeStatus = PeerChokeStatus.Choked;
         InterestStatus = PeerInterestStatus.NotInterested;
-        LastSeenUtc = DateTimeOffset.UtcNow;
+        LastSeenUtc = initialSeenUtc;
     }
 
-    public void UpdateBitfield(Bitfield bitfield) => Bitfield = bitfield;
-    public void RecordHave(ChunkIndex chunkIndex) => Bitfield = Bitfield.WithChunk(chunkIndex);
-    public void SetChoke(PeerChokeStatus status) => ChokeStatus = status;
-    public void SetInterest(PeerInterestStatus status) => InterestStatus = status;
-    public void Touch(DateTimeOffset timestamp) => LastSeenUtc = timestamp;
+    internal void UpdateBitfield(Bitfield bitfield) => Bitfield = bitfield;
+    internal void RecordHave(ChunkIndex chunkIndex) => Bitfield = Bitfield.WithChunk(chunkIndex);
+    internal void SetChoke(PeerChokeStatus status) => ChokeStatus = status;
+    internal void SetInterest(PeerInterestStatus status) => InterestStatus = status;
+    internal void Touch(DateTimeOffset timestamp) => LastSeenUtc = timestamp;
 }
 
 public sealed class TransferSession : AggregateRoot<TransferSessionId>
@@ -176,6 +179,8 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
     public TransferRole Role { get; }
     public TransferSessionState State { get; private set; }
     public PublicIdentityId InitiatorId { get; }
+    public PublicIdentityId? RemotePeerId { get; }                   // 1:1 transfer participant
+    public IReadOnlySet<PublicIdentityId> TargetRecipients { get; }   // 1:N push transfer targets
     public TransferManifest Manifest { get; }
     public Bitfield LocalBitfield { get; private set; }
     public RootDestinationPath? DestinationPath { get; private set; }
@@ -202,6 +207,8 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
     // DomainResult SetPeerInterest(PublicIdentityId peerId, PeerInterestStatus status)
     // DomainResult VerifyAndCommitChunk(ChunkIndex chunkIndex, PlaintextChunkData data, IDateTimeProvider clock)
     // DomainResult CompleteTransfer(IDateTimeProvider clock)
+    // DomainResult MarkStalled(IDateTimeProvider clock)
+    // DomainResult MarkFailed(TransferTerminationReason reason, IDateTimeProvider clock)
     // DomainResult Pause()
     // DomainResult Resume()
     // DomainResult Cancel(TransferTerminationReason reason, IDateTimeProvider clock)
@@ -262,13 +269,22 @@ public sealed record TransferResumedDomainEvent(
     TransferSessionId SessionId,
     DateTimeOffset OccurredAtUtc) : IDomainEvent;
 
+public sealed record TransferStalledDomainEvent(
+    TransferSessionId SessionId,
+    DateTimeOffset OccurredAtUtc) : IDomainEvent;
+
+public sealed record TransferFailedDomainEvent(
+    TransferSessionId SessionId,
+    TransferTerminationReason Reason,
+    DateTimeOffset OccurredAtUtc) : IDomainEvent;
+
 public sealed record TransferCancelledDomainEvent(
     TransferSessionId SessionId,
     TransferTerminationReason Reason,
     DateTimeOffset OccurredAtUtc) : IDomainEvent;
 ```
 
----\
+---
 
 ## 3. Onion Architecture, Multi-Route Representation & Value Objects
 
@@ -315,6 +331,7 @@ To eliminate repetitive defensive-copy boilerplate, range validation, and equali
 | **`StreamAuthToken`** | `[ByteArray(length: 32)]` | 32-byte out-of-band stream authentication token | Explicit `Generate()`, `FromBytes(...)`, `.Span`. Zero cast operators. |
 | **`BaseNonce`** | `[ByteArray(length: 12)]` | 12-byte base nonce for AES-GCM deterministic derivation | Explicit `Generate()`, `FromBytes(...)`, `.Span`. Zero cast operators. |
 | **`RelayPipeToken`** | `[ByteArray(length: 32)]` | 32-byte authentication token for relay pipe rendezvous | Explicit `Generate()`, `FromBytes(...)`, `.Span`. Zero cast operators. |
+| **`RelayRendezvousDescriptor`** | `sealed record` | Encapsulated relay endpoint URI and 32-byte auth token | Explicit `Create(RelayPipeEndpointUri, RelayPipeToken)`, `.EndpointUri`, `.Token`. Zero cast operators. |
 | **`InlineManifestData`** | `[ByteArray(minLength: 1, maxLength: 65536)]` | Serialized inline manifest payload ($\le 64\text{ KB}$) | Explicit `FromBytes(...)`, `FromSpan(...)`, `.Span`. Zero cast operators. |
 | **`RootBundleName`** | `sealed record` | Sanitized display title for transfer root ($1 \le \text{Length} \le 255$) | Explicit `Parse(string)`, `.Value`. Zero cast operators. |
 | **`RelayPipeEndpointUri`** | `sealed record` | URI for relay transfer pipe rendezvous (`percolator-pipe://` / `wss://`) | Explicit `Parse(string)`, `FromUri(Uri)`, `.Value`. Zero cast operators. |
@@ -328,8 +345,8 @@ To eliminate repetitive defensive-copy boilerplate, range validation, and equali
 | **`ChunkIndex`** | `readonly record struct` | Zero-indexed 32-bit chunk sequence: $0 \le \text{Index} < \text{TotalChunks}$ | Explicit `FromInt(int)`, `.Value`, `Next()`. Zero cast operators. |
 | **`ChunkSizeBytes`** | `readonly record struct` | Bounded chunk size: $64\text{ KB} \le \text{Bytes} \le 4\text{ MB}$, default $1\text{ MB}$ | Explicit `Default`, `FromBytes(int)`, `.Bytes`. Zero cast operators. |
 | **`TotalBundleBytes`** | `readonly record struct` | Combined byte size of bundle: $\text{Bytes} \ge 0$ | Explicit `FromBytes(long)`, `Zero`, `.Bytes`. Zero cast operators. |
-| **`FileSizeBytes`** | `readonly record struct` | Byte size of single file: $\text{Bytes} \ge 0$ | Explicit `FromBytes(long)`, `.Bytes`. Zero cast operators. |
-| **`BundleByteOffset`** | `readonly record struct` | Offset across global bundle byte layout: $\text{Offset} \ge 0$ | Explicit `FromOffset(long)`, `FromChunk(ChunkIndex, ChunkSizeBytes)`, `Add(TransferByteLength)`, `Subtract(BundleByteOffset)`, `Zero`, `.Offset`. Zero cast operators. |
+| **`FileSizeBytes`** | `readonly record struct` | Byte size of single file: $\text{Bytes} \ge 0$ | Explicit `FromBytes(long)`, `RemainingSlice(FileByteOffset, ChunkByteLength)`, `.Bytes`. Zero cast operators. |
+| **`BundleByteOffset`** | `readonly record struct` | Offset across global bundle byte layout: $\text{Offset} \ge 0$ | Explicit `FromOffset(long)`, `FromChunk(ChunkIndex, ChunkSizeBytes)`, `Add(FileSizeBytes)`, `Add(TransferByteLength)`, `Subtract(BundleByteOffset)`, `SubtractToFileOffset(BundleByteOffset)`, `Zero`, `.Offset`. Zero cast operators. |
 | **`FileByteOffset`** | `readonly record struct` | Offset within specific file on disk: $\text{Offset} \ge 0$ | Explicit `FromOffset(long)`, `Add(TransferByteLength)`, `Zero`, `.Offset`. Zero cast operators. |
 | **`FileCount`** | `readonly record struct` | Total file count in manifest: $\text{Count} \ge 0$ | Explicit `FromInt(int)`, `Zero`, `.Count`. Zero cast operators. |
 | **`ChunkCount`** | `readonly record struct` | Total chunks in transfer: $\text{Count} \ge 1$ | Explicit `FromInt(int)`, `.Count`. Zero cast operators. |
@@ -337,8 +354,12 @@ To eliminate repetitive defensive-copy boilerplate, range validation, and equali
 | **`PeerCount`** | `readonly record struct` | Count of connected swarm peers: $\text{Count} \ge 0$ | Explicit `FromInt(int)`, `Zero`, `.Count`. Zero cast operators. |
 | **`TransferByteLength`** | `readonly record struct` | Byte length slice for transfer/throttle operations: $\text{Bytes} \ge 0$ | Explicit `FromBytes(int)`, `.Bytes`. Zero cast operators. |
 | **`TransferBandwidth`** | `readonly record struct` | Bandwidth speed cap: $\text{BytesPerSec} \ge 0$ | Explicit `FromBytesPerSecond(long)`, `.BytesPerSecond`. Zero cast operators. |
+| **`BandwidthLimit`** | `readonly record struct` | Bandwidth speed cap: Unlimited or bounded speed | Explicit `Unlimited`, `Capped(TransferBandwidth)`, `.IsUnlimited`, `.Value`. Zero cast operators. |
+| **`PipeConcurrencyLimit`** | `readonly record struct` | Maximum concurrent relay streams: $1 \le \text{Count} \le 128$ | Explicit `FromInt(int)`, `Default` (8), `.Count`. Zero cast operators. |
+| **`RelayTransferCapabilityFlags`** | `[Flags] enum : byte` | Advertised relay transfer feature flags | Explicit flags: `None` (0x00), `TransferPipes` (0x01), `SwarmTracker` (0x02), `StunReflection` (0x04). |
+| **`RelayFileTransferCapabilities`** | `sealed record` | Relay feature capabilities and resource boundaries | Explicit `Create(...)`, `Capabilities`, `MaxPipeBandwidth`, `MaxConcurrentPipes`. Zero cast operators. |
 | **`SeedRatio`** | `readonly record struct` | Upload/Download ratio cap: $\ge 0.0$ or Unlimited | Explicit `FromDouble(double)`, `Unlimited`, `.Multiplier`. Zero cast operators. |
-| **`Bitfield`** | `sealed record` | Chunk possession bitmask: byte length $\lceil \text{TotalChunks} / 8 \rceil$. **Immutable** | Explicit `WithChunk(ChunkIndex)` returning new instance; `Empty(ChunkCount)`, `HasChunk(ChunkIndex)`, `ToByteArray()`, `.Length`. Zero cast operators. |
+| **`Bitfield`** | `sealed record` | Chunk possession bitmask: byte length $\lceil \text{TotalChunks} / 8 \rceil$. **Immutable** | Explicit `WithChunk(ChunkIndex)` returning new instance; `Empty(ChunkCount)`, `HasChunk(ChunkIndex)`, `ToByteArray()`, `.Length`, `.IsComplete`. Zero cast operators. |
 | **`RoutePriority`** | `enum : byte` | Candidate route preference hierarchy | Explicit enum values: `DirectLan` (0x01), `DirectWanOptIn` (0x02), `PrimaryRelay` (0x03), `SecondaryRelay` (0x04). |
 | **`DirectWanPolicy`** | `enum : byte` | Direct WAN candidate exposure policy | Explicit enum values: `DisabledByDefault` (0x01), `ExplicitlyAllowed` (0x02). |
 | **`TransportRoutingPreference`** | `enum : byte` | In-band connection route preference | Explicit enum values: `DirectPreferred` (0x01), `RelayOnly` (0x02). |
@@ -347,7 +368,7 @@ To eliminate repetitive defensive-copy boilerplate, range validation, and equali
 | **`PeerInterestStatus`** | `enum : byte` | Out-of-band peer chunk interest state | Explicit enum values: `NotInterested` (0x01), `Interested` (0x02). |
 | **`ChunkByteLength`** | `readonly record struct` | Actual bounded byte length of an individual chunk: $1 \le \text{Bytes} \le 4\text{ MB}$ | Explicit `FromBytes(int)`, `Subtract(TransferByteLength)`, `.Bytes`. Zero cast operators. |
 | **`EncryptedChunkData`** | `sealed record` | Ciphertext payload of chunk with appended 16-byte GCM auth tag | Explicit `FromBytes(byte[])`, `FromSpan(ReadOnlySpan<byte>)`, `.Span`, `.Length`. Zero cast operators. |
-| **`PlaintextChunkData`** | `sealed record` | Decrypted chunk bytes for disk I/O ($1 \le \text{Bytes} \le 4\text{ MB}$) | Explicit `FromBytes(byte[])`, `FromMemory(ReadOnlyMemory<byte>)`, `.Memory`, `.Span`, `.Length`. Zero cast operators. |
+| **`PlaintextChunkData`** | `sealed record` | Decrypted chunk bytes for disk I/O ($1 \le \\text{Bytes} \\le 4\\text{ MB}$) | Explicit `FromBytes(byte[])`, `FromMemory(ReadOnlyMemory<byte>)`, `.Memory`, `.Span`, `.Length`. Zero cast operators. |
 | **`DiskSpacePreflightResult`** | `sealed record` | Domain result of pre-flight disk capacity check | Explicit `Sufficient(required, available)`, `Insufficient(required, available)`, `.HasSpace`. Zero cast operators. |
 | **`ManifestBlobDescriptor`** | `sealed record` | Clean out-of-band manifest storage reference | Explicit `Create(...)`, `BlobId`, `CiphertextSha256`, `PlaintextSizeBytes`, `RelayEndpointUri`. Zero cast operators. |
 | **`ManifestDistribution`** | `sealed record` | Discriminated union of inline vs. out-of-band manifest | Explicit `FromInline(...)`, `FromBlob(...)`, `Kind`, `InlineData`, `BlobDescriptor`. Zero cast operators. |
@@ -355,7 +376,7 @@ To eliminate repetitive defensive-copy boilerplate, range validation, and equali
 | **`SelectedFileIndices`** | `sealed record` | Checked file indices: non-null immutable set of `FileIndex` | Explicit `All(FileCount)`, `FromIndices(...)`, `Contains(FileIndex)`. Zero cast operators. |
 | **`StreamIndex`** | `readonly record struct` | Zero-indexed out-of-band stream: $0 \le \text{Index} \le 7$ | Explicit `FromInt(int)`, `.Value`. Zero cast operators. |
 
----\
+---
 
 ## 4. Vertical Feature Slice Architecture
 
@@ -368,19 +389,23 @@ Percolator.Apps.FileTransfer/
 │   │   ├── TransferSession.cs      # AggregateRoot<TransferSessionId>: Domain session aggregate
 │   │   ├── TransferSessionId.cs    # [GuidId] Value Object: RFC 4122 UUID
 │   │   ├── TransferRole.cs         # Enum: Sender (0x01), Recipient (0x02)
-│   │   ├── TransferSessionState.cs # Enum: Offered, PendingConsent, InFlight, Paused, Completed, Seeding, Cancelled
+│   │   ├── TransferSessionState.cs # Enum: Offered, PendingConsent, InFlight, Paused, Completed, Seeding, Stalled, Cancelled, Failed
 │   │   ├── DirectWanPolicy.cs      # Enum: DisabledByDefault (0x01), ExplicitlyAllowed (0x02)
 │   │   ├── TransportRoutingPreference.cs # Enum: DirectPreferred (0x01), RelayOnly (0x02)
 │   │   ├── RoutePriority.cs        # Enum: DirectLan, DirectWanOptIn, PrimaryRelay, SecondaryRelay
 │   │   ├── TransferKey.cs          # [ByteArray(32)] Value Object: AES key (ISensitiveSecret)
 │   │   ├── BaseNonce.cs            # [ByteArray(12)] Value Object: AES-GCM nonce base
 │   │   ├── RelayPipeToken.cs       # [ByteArray(32)] Value Object: Relay pipe rendezvous token
+│   │   ├── RelayRendezvousDescriptor.cs # Value Object: Cohesive EndpointUri + Token
 │   │   ├── StreamAuthToken.cs      # [ByteArray(32)] Value Object: 32-byte stream auth token
 │   │   ├── RootBundleName.cs       # Value Object: Sanitized bundle display title
 │   │   ├── RelayPipeEndpointUri.cs # Value Object: Validated relay pipe endpoint URI
 │   │   ├── TransferTerminationReason.cs # Value Object: Typed termination / cancellation reason
 │   │   ├── TransferEndpointCandidate.cs # Host, Port, CandidateKind
 │   │   ├── CandidateKind.cs        # Enum: DirectLan, DirectWanUpnp, DirectWanStun, RelayPipe
+│   │   ├── RelayTransferCapabilityFlags.cs # [Flags] Enum: TransferPipes, SwarmTracker, StunReflection
+│   │   ├── RelayFileTransferCapabilities.cs # Domain record: Capabilities, MaxPipeBandwidth, MaxConcurrentPipes
+│   │   ├── PipeConcurrencyLimit.cs # Value Object: Bounded concurrent relay pipe stream limit
 │   │   ├── FileTransferOfferPayload.cs
 │   │   ├── FileTransferAcceptPayload.cs
 │   │   ├── FileTransferRejectPayload.cs
@@ -395,18 +420,20 @@ Percolator.Apps.FileTransfer/
 │   │   │   ├── TransferCompletedDomainEvent.cs
 │   │   │   ├── TransferPausedDomainEvent.cs
 │   │   │   ├── TransferResumedDomainEvent.cs
+│   │   │   ├── TransferStalledDomainEvent.cs
+│   │   │   ├── TransferFailedDomainEvent.cs
 │   │   │   └── TransferCancelledDomainEvent.cs
 │   │   ├── ITransferNegotiationWorkflow.cs
 │   │   └── TransferNegotiationWorkflow.cs
 │   ├── ManifestManagement/         # Two-tier manifest distribution, MerkleTreeIndex, file boundaries
 │   │   ├── TransferManifest.cs     # IEntity<TransferSessionId>: Complete manifest bundle entity
-│   │   ├── FileEntry.cs            # IEntity<FileIndex>: File record with relative path, size, bundle offset
+│   │   ├── FileEntry.cs            # IEntity<FileIndex>: File record with relative path, size, bundle offsets
 │   │   ├── FileIndex.cs            # Value Object: 0-based file index
 │   │   ├── ChunkIndex.cs           # Value Object: 0-based chunk sequence
 │   │   ├── ChunkSizeBytes.cs       # Value Object: 1 MB bounded
 │   │   ├── TotalBundleBytes.cs     # Value Object: Total byte size >= 0
 │   │   ├── FileSizeBytes.cs        # Value Object: Single file byte size >= 0
-│   │   ├── BundleByteOffset.cs     # Value Object: Bundle offset >= 0
+│   │   ├── BundleByteOffset.cs     # Value Object: Bundle offset >= 0 with domain math
 │   │   ├── FileByteOffset.cs       # Value Object: File offset >= 0
 │   │   ├── FileLastModifiedUtc.cs  # Value Object: Sanitized file timestamp
 │   │   ├── FileCount.cs            # Value Object: File count >= 0
@@ -469,7 +496,8 @@ Percolator.Apps.FileTransfer/
 │   ├── ITransferStreamPool.cs      # Multi-stream network pool port
 │   ├── IDistributedTrackerPort.cs  # Swarm peer & bitfield coordination port
 │   ├── IDesktopFileStorage.cs      # Abstract block/chunk storage port
-│   ├── ITransferRateLimiter.cs     # Bandwidth throttling port
+│   ├── ITransferRateLimiter.cs     # Bandwidth throttling port (BandwidthLimit)
+│   ├── BandwidthLimit.cs           # Value Object: Unlimited vs Capped speed limit
 │   ├── ITransferSessionRepository.cs # Encrypted session persistence port (atomic aggregate persistence)
 │   ├── IFileTransferFilterPolicyRepository.cs # Filter policy persistence port
 │   ├── IFileTransferQueryService.cs  # CQRS transfer manager read queries
@@ -541,6 +569,7 @@ public sealed class FileEntry : IEntity<FileIndex>
     public SanitizedRelativePath RelativePath { get; }  // e.g. "Source/Assets/diffuse.png"
     public FileSizeBytes FileSize { get; }              // Exact byte length
     public BundleByteOffset StartOffset { get; }        // Global byte offset across bundle
+    public BundleByteOffset EndOffset => StartOffset.Add(FileSize); // Encapsulated end boundary
     public FileLastModifiedUtc LastModifiedUtc { get; } // Preserves sanitized file timestamp
 
     public FileEntry(
@@ -570,7 +599,7 @@ public sealed class TransferManifest : IEntity<TransferSessionId>
     public MerkleTreeIndex MerkleTree { get; }          // Validated Merkle tree root and leaf hashes
     public IReadOnlyList<FileEntry> Files { get; }      // File structure entities
 
-    public TransferManifest(
+    private TransferManifest(
         TransferSessionId manifestId,
         RootBundleName rootName,
         TotalBundleBytes totalSize,
@@ -588,6 +617,33 @@ public sealed class TransferManifest : IEntity<TransferSessionId>
         TotalChunks = totalChunks;
         MerkleTree = merkleTree;
         Files = files;
+    }
+
+    public static TransferManifest Create(
+        TransferSessionId manifestId,
+        RootBundleName rootName,
+        ChunkSizeBytes chunkSize,
+        MerkleTreeIndex merkleTree,
+        IReadOnlyList<FileEntry> files)
+    {
+        long totalBytes = 0;
+        foreach (FileEntry file in files)
+        {
+            totalBytes += file.FileSize.Bytes;
+        }
+
+        TotalBundleBytes bundleBytes = TotalBundleBytes.FromBytes(totalBytes);
+        int chunkCount = (int)Math.Max(1, (totalBytes + chunkSize.Bytes - 1) / chunkSize.Bytes);
+
+        return new TransferManifest(
+            manifestId,
+            rootName,
+            bundleBytes,
+            FileCount.FromInt(files.Count),
+            chunkSize,
+            ChunkCount.FromInt(chunkCount),
+            merkleTree,
+            files);
     }
 }
 ```
@@ -609,15 +665,14 @@ int bufferOffset = 0;
 while (remainingChunkBytes.Bytes > 0)
 {
     FileEntry file = FindFileForOffset(manifest.Files, currentOffset);
-    FileByteOffset offsetInFile = currentOffset.Subtract(file.StartOffset);
-    TransferByteLength bytesForThisFile = TransferByteLength.FromBytes(
-        Math.Min(remainingChunkBytes.Bytes, (int)(file.FileSize.Bytes - offsetInFile.Offset)));
+    FileByteOffset offsetInFile = currentOffset.SubtractToFileOffset(file.StartOffset);
+    TransferByteLength bytesForThisFile = file.FileSize.RemainingSlice(offsetInFile, remainingChunkBytes);
 
     if (selectedFiles.Contains(file.Index))
     {
         ReadOnlyMemory<byte> slice = chunkBuffer.Slice(bufferOffset, bytesForThisFile.Bytes);
         PlaintextChunkData plainSlice = PlaintextChunkData.FromMemory(slice);
-        await storage.WriteChunkAsync(file.RelativePath, offsetInFile, plainSlice, ct);
+        await storage.WriteChunkAsync(destinationRoot, file.RelativePath, offsetInFile, plainSlice, ct);
     }
 
     bufferOffset += bytesForThisFile.Bytes;
@@ -646,7 +701,7 @@ while (remainingChunkBytes.Bytes > 0)
 ### 8.3 Graceful Teardown & Disconnect State Machines
 1. **Sender Stops Sharing**:
    - Sender invokes cancel command. Broadcasts `Choke` frame and disconnects stream pool. Unregisters from `BlindSwarmId`.
-   - Swarm survival: If 100% of pieces exist across remaining peers, swarming continues. If pieces are missing, peers pause in `Stalled` state.
+   - Swarm survival: If 100% of pieces exist across remaining peers, swarming continues. If pieces are missing, peers transition to `Stalled` state waiting for seeders to reconnect. If storage quota is exhausted or unrecoverable verification errors occur, the session transitions to `Failed`.
 2. **Recipient Stops / Pauses**:
    - Recipient pauses or cancels. Broadcasts `CancelChunk` for in-flight requests and closes stream pool. Other peers update bitfield records.
 3. **Tracker Expiration**:
@@ -695,8 +750,7 @@ public sealed record FileTransferOfferPayload(
     TransferKey SessionEncryptionKey,           // 32-byte AES key
     BaseNonce BaseNonce,                        // 12-byte base nonce
     StreamAuthToken StreamAuthToken,            // 32-byte auth token for out-of-band streams
-    RelayPipeToken RelayPipeToken,              // 32-byte auth token for relay pipe rendezvous
-    RelayPipeEndpointUri? RelayPipeUri,         // Designated relay endpoint
+    RelayRendezvousDescriptor? RelayRendezvous, // Encapsulated endpoint URI + relay token
     IReadOnlyList<TransferEndpointCandidate> DirectCandidates);
 
 public sealed record FileTransferAcceptPayload(
@@ -827,14 +881,15 @@ public interface ITransferStreamPool : IAsyncDisposable
 {
     StreamCount ActiveStreams { get; }
     ValueTask ConnectDirectAsync(IReadOnlyList<TransferEndpointCandidate> candidates, StreamAuthToken authToken, CancellationToken ct = default);
-    ValueTask ConnectRelayPipeAsync(RelayPipeEndpointUri relayPipeUri, TransferSessionId sessionId, RelayPipeToken relayToken, CancellationToken ct = default);
+    ValueTask ConnectRelayPipeAsync(RelayRendezvousDescriptor rendezvous, TransferSessionId sessionId, CancellationToken ct = default);
     ITransferStream GetStream(StreamIndex index);
     ValueTask BroadcastFrameAsync(IStreamFramePayload frame, CancellationToken ct = default);
 }
 
 public interface ITransferStreamPoolFactory
 {
-    ITransferStreamPool CreatePool(TransferSessionId sessionId, StreamCount? streamCount = null);
+    ITransferStreamPool CreatePool(TransferSessionId sessionId, StreamCount streamCount);
+    ITransferStreamPool CreatePool(TransferSessionId sessionId); // Defaults to StreamCount.Default
 }
 
 public interface IDistributedTrackerPort
@@ -855,8 +910,8 @@ namespace Percolator.Apps.FileTransfer.Ports;
 public interface IDesktopFileStorage
 {
     ValueTask PreAllocateFilesAsync(RootDestinationPath destinationRoot, IReadOnlyList<FileEntry> files, SelectedFileIndices selectedIndices, CancellationToken ct = default);
-    ValueTask WriteChunkAsync(SanitizedRelativePath relativePath, FileByteOffset fileOffset, PlaintextChunkData data, CancellationToken ct = default);
-    ValueTask<PlaintextChunkData> ReadChunkAsync(SanitizedRelativePath relativePath, FileByteOffset fileOffset, TransferByteLength length, CancellationToken ct = default);
+    ValueTask WriteChunkAsync(RootDestinationPath destinationRoot, SanitizedRelativePath relativePath, FileByteOffset fileOffset, PlaintextChunkData data, CancellationToken ct = default);
+    ValueTask<PlaintextChunkData> ReadChunkAsync(RootDestinationPath destinationRoot, SanitizedRelativePath relativePath, FileByteOffset fileOffset, TransferByteLength length, CancellationToken ct = default);
     ValueTask<Bitfield> ScanAndComputeBitfieldAsync(RootDestinationPath rootPath, TransferManifest manifest, CancellationToken ct = default);
     ValueTask FinalizeFileAsync(RootDestinationPath destinationRoot, SanitizedRelativePath relativePath, FileLastModifiedUtc lastModifiedUtc, CancellationToken ct = default);
     ValueTask<DiskSpacePreflightResult> CheckDiskSpaceAsync(RootDestinationPath rootPath, TotalBundleBytes requiredBytes);
@@ -869,8 +924,8 @@ namespace Percolator.Apps.FileTransfer.Ports;
 
 public interface ITransferRateLimiter
 {
-    void SetGlobalSpeedCaps(TransferBandwidth? maxDownload, TransferBandwidth? maxUpload);
-    void SetSessionSpeedCaps(TransferSessionId sessionId, TransferBandwidth? maxDownload, TransferBandwidth? maxUpload);
+    void SetGlobalSpeedCaps(BandwidthLimit downloadCap, BandwidthLimit uploadCap);
+    void SetSessionSpeedCaps(TransferSessionId sessionId, BandwidthLimit downloadCap, BandwidthLimit uploadCap);
     ValueTask ThrottleDownloadAsync(TransferSessionId sessionId, TransferByteLength byteCount, CancellationToken ct = default);
     ValueTask ThrottleUploadAsync(TransferSessionId sessionId, TransferByteLength byteCount, CancellationToken ct = default);
 }
@@ -926,12 +981,13 @@ public interface IFileTransferQueryService
 
 public interface IFileTransferActionHandler
 {
-    ValueTask<DomainResult> AcceptTransferAsync(TransferSessionId sessionId, RootDestinationPath destinationFolder, SelectedFileIndices? selectedFiles = null, CancellationToken ct = default);
+    ValueTask<DomainResult> AcceptTransferAsync(TransferSessionId sessionId, RootDestinationPath destinationFolder, CancellationToken ct = default);
+    ValueTask<DomainResult> AcceptTransferAsync(TransferSessionId sessionId, RootDestinationPath destinationFolder, SelectedFileIndices selectedFiles, CancellationToken ct = default);
     ValueTask<DomainResult> PauseTransferAsync(TransferSessionId sessionId, CancellationToken ct = default);
     ValueTask<DomainResult> ResumeTransferAsync(TransferSessionId sessionId, CancellationToken ct = default);
     ValueTask<DomainResult> StopSeedingAsync(TransferSessionId sessionId, CancellationToken ct = default);
     ValueTask<DomainResult> CancelTransferAsync(TransferSessionId sessionId, TransferTerminationReason reason, CancellationToken ct = default);
-    ValueTask<DomainResult> SetSessionSpeedCapAsync(TransferSessionId sessionId, TransferBandwidth? downloadCap, TransferBandwidth? uploadCap, CancellationToken ct = default);
+    ValueTask<DomainResult> SetSessionSpeedCapAsync(TransferSessionId sessionId, BandwidthLimit downloadCap, BandwidthLimit uploadCap, CancellationToken ct = default);
     ValueTask<DomainResult> SetSessionSeedRatioAsync(TransferSessionId sessionId, SeedRatio targetRatio, CancellationToken ct = default);
 }
 ```
@@ -999,17 +1055,17 @@ public interface IFileTransferActionHandler
    - `[ByteArray(32)]`: `MerkleRoot`, `ChunkHash`, `TransferKey`, `BlindSwarmId`, `StreamAuthToken`, `RelayPipeToken`
    - `[ByteArray(12)]`: `BaseNonce`
    - `[ByteArray(1..65536)]`: `InlineManifestData`
-   - Enums: `TransferRole`, `TransferSessionState`, `RoutePriority`, `DirectWanPolicy`, `TransportRoutingPreference`, `SwarmPeerRole`, `PeerChokeStatus`, `PeerInterestStatus`, `CandidateKind`, `StreamFrameType`, `ManifestTierKind`.
-   - Invariant-enforced records & structs: `ChunkByteLength`, `EncryptedChunkData`, `PlaintextChunkData`, `DiskSpacePreflightResult`, `ManifestBlobDescriptor`, `ManifestDistribution`, `MerkleTreeIndex`, `FileLastModifiedUtc`, `RootBundleName`, `RelayPipeEndpointUri`, `TransferTerminationReason`, `TotalBundleBytes`, `FileSizeBytes`, `BundleByteOffset`, `FileByteOffset`, `FileCount`, `ChunkCount`, `ChunkIndex`, `ChunkSizeBytes`, `FileIndex`, `StreamCount`, `PeerCount`, `TransferByteLength`, `SanitizedRelativePath`, `TransferEndpointCandidate`, `EndpointHost`, `PortNumber`, `TransferBandwidth`, `SeedRatio`, `Bitfield` (immutable, `WithChunk`), `SelectedFileIndices`, `StreamIndex`, `RootDestinationPath`.
-   - Domain events implementing `IDomainEvent`: `TransferOfferedDomainEvent`, `TransferAcceptedDomainEvent`, `TransferStreamingStartedDomainEvent`, `SwarmMemberJoinedDomainEvent`, `ChunkVerifiedDomainEvent`, `FileCompletedDomainEvent`, `TransferCompletedDomainEvent`, `TransferPausedDomainEvent`, `TransferResumedDomainEvent`, `TransferCancelledDomainEvent`.
+   - Enums: `TransferRole`, `TransferSessionState`, `RoutePriority`, `DirectWanPolicy`, `TransportRoutingPreference`, `SwarmPeerRole`, `PeerChokeStatus`, `PeerInterestStatus`, `CandidateKind`, `StreamFrameType`, `ManifestTierKind`, `RelayTransferCapabilityFlags`.
+   - Invariant-enforced records & structs: `ChunkByteLength`, `EncryptedChunkData`, `PlaintextChunkData`, `DiskSpacePreflightResult`, `ManifestBlobDescriptor`, `ManifestDistribution`, `MerkleTreeIndex`, `FileLastModifiedUtc`, `RootBundleName`, `RelayPipeEndpointUri`, `RelayRendezvousDescriptor`, `RelayFileTransferCapabilities`, `PipeConcurrencyLimit`, `BandwidthLimit`, `TransferTerminationReason`, `TotalBundleBytes`, `FileSizeBytes`, `BundleByteOffset`, `FileByteOffset`, `FileCount`, `ChunkCount`, `ChunkIndex`, `ChunkSizeBytes`, `FileIndex`, `StreamCount`, `PeerCount`, `TransferByteLength`, `SanitizedRelativePath`, `TransferEndpointCandidate`, `EndpointHost`, `PortNumber`, `TransferBandwidth`, `SeedRatio`, `Bitfield` (immutable, `WithChunk`), `SelectedFileIndices`, `StreamIndex`, `RootDestinationPath`.
+   - Domain events implementing `IDomainEvent`: `TransferOfferedDomainEvent`, `TransferAcceptedDomainEvent`, `TransferStreamingStartedDomainEvent`, `SwarmMemberJoinedDomainEvent`, `ChunkVerifiedDomainEvent`, `FileCompletedDomainEvent`, `TransferCompletedDomainEvent`, `TransferPausedDomainEvent`, `TransferResumedDomainEvent`, `TransferStalledDomainEvent`, `TransferFailedDomainEvent`, `TransferCancelledDomainEvent`.
    - Typed frame payloads: `IStreamFramePayload`, `HandshakeFrame`, `BitfieldFrame`, `HaveFrame`, `RequestChunkFrame`, `ChunkDataFrame`, `CancelChunkFrame`, `ChokeFrame`, `UnchokeFrame`, `KeepAliveFrame`, `PexPeersFrame`, `StreamFrameEnvelope`.
    - Strictly verify **zero implicit/explicit cast operators** across all Value Objects.
 4. Implement Domain Aggregates & Entities:
-   - `TransferSession : AggregateRoot<TransferSessionId>` encapsulating participants (`InitiatorId`), swarm members (`SwarmMember`), security policy (`WanPolicy`), piece verification (`VerifyAndCommitChunk`), and session secrets (`SessionKey`, `BaseNonce`, `StreamAuthToken`, `RelayPipeToken`).
+   - `TransferSession : AggregateRoot<TransferSessionId>` encapsulating participants (`InitiatorId`, `RemotePeerId`, `TargetRecipients`), swarm members (`SwarmMember`), security policy (`WanPolicy`), piece verification (`VerifyAndCommitChunk`), and session secrets (`SessionKey`, `BaseNonce`, `StreamAuthToken`, `RelayPipeToken`).
    - `SwarmMember : IEntity<PublicIdentityId>` managing per-peer bitfields, choke status, and interest status.
    - `FileTransferFilterPolicy : AggregateRoot<PublicIdentityId>` managing peer and relay blocklists.
-   - `TransferManifest : IEntity<TransferSessionId>` encapsulating `MerkleTreeIndex`.
-   - `FileEntry : IEntity<FileIndex>` encapsulating `FileLastModifiedUtc`.
+   - `TransferManifest : IEntity<TransferSessionId>` encapsulating `MerkleTreeIndex` and invariant-enforced `Create(...)` factory.
+   - `FileEntry : IEntity<FileIndex>` encapsulating `FileLastModifiedUtc` and `EndOffset`.
 5. Implement `MerkleTreeBuilder` (SHA-256 domain-separated hashing producing `MerkleTreeIndex`).
 6. Implement two-tier manifest distribution (`ManifestDistribution.FromInline` vs. `ManifestDistribution.FromBlob`).
 7. Implement in-band payloads: `FileTransferOfferPayload`, `FileTransferAcceptPayload`, `FileTransferCancelPayload`, `FileTransferRejectPayload`.
@@ -1024,7 +1080,7 @@ public interface IFileTransferActionHandler
 5. Implement opt-in direct candidate discovery adapter hooks (local UPnP port forwarder and relay-assisted STUN reflexive address resolver).
 
 ### Milestone 3: Desktop Disk I/O, Sparse Allocation & Selective Downloading
-1. Define `IDesktopFileStorage` port using `PlaintextChunkData`, `FileLastModifiedUtc`, and `DiskSpacePreflightResult`.
+1. Define `IDesktopFileStorage` port using `PlaintextChunkData`, `FileLastModifiedUtc`, `RootDestinationPath`, and `DiskSpacePreflightResult`.
 2. Implement `DiskChunkAssembler` handling multi-file boundary spanning, chunk writes, and atomic finalization with domain arithmetic (`BundleByteOffset`, `FileByteOffset`, `ChunkByteLength`).
 3. Implement selective file downloading chunk range mapping (`SelectedFileIndices`).
 4. Implement `BitfieldScanner` for resumption of partially completed downloads.
@@ -1036,7 +1092,7 @@ public interface IFileTransferActionHandler
 4. Implement seeding ratio tracking ($\text{Uploaded} / \text{Total}$) and automatic disconnect on target ratio.
 
 ### Milestone 5: CQRS Transfer Manager Ports & Rate Limiter
-1. Implement rate limiter adapter integration with `ITransferRateLimiter`.
+1. Implement rate limiter adapter integration with `ITransferRateLimiter` using `BandwidthLimit`.
 2. Implement `IFileTransferFilterPolicyRepository` port for filter policy persistence.
 3. Implement `IFileTransferQueryService` and `IFileTransferActionHandler` returning `ValueTask<DomainResult>` for all commands.
 4. Expose state machine transitions and event streams for presentation consumers.
