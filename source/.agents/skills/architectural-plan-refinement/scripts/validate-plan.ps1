@@ -5,7 +5,13 @@
     Verifies that the target implementation plan:
     1. Contains a valid 'Refinement Status Gate' header.
     2. Does not unlock the 'Implementation Gate' prematurely while lenses remain pending.
-    3. Contains no banned architectural anti-patterns (implicit/explicit cast operators, brittle mock invocations).
+    3. Contains no banned architectural anti-patterns:
+       - Implicit/explicit cast operators
+       - Brittle mock invocations
+       - Naked booleans in interface signatures (method parameters / Task<bool>)
+       - Leaked byte buffers in port interfaces (ReadOnlyMemory<byte>, byte[])
+       - Naked integer priorities (int Priority)
+       - Repository partial persistence side-doors
     4. Enforces vertical feature slice naming conventions.
 .PARAMETER Path
     The absolute or relative path to the implementation plan markdown file.
@@ -80,6 +86,33 @@ if ($content -match "\.Verify\s*\(|\bTimes\.(Once|Exactly|AtLeastOnce)\b") {
 # 6. Anti-Pattern Scan: Horizontal Layer Folders
 if ($content -match "(?m)^[\s-]*`?(Services|Models|Helpers|Utilities|DTOs)/`?") {
     $warnings.Add("Detected horizontal layering (`Services/`, `Models/`, etc.). Plans should organize by vertical feature slices (`Features/<FeatureName>/`).")
+}
+
+# 7. Anti-Pattern Scan: Naked Booleans in Interface Signatures
+$interfaceBlocks = [regex]::Matches($content, 'interface\s+I\w+[\s\S]*?\{[\s\S]*?\}')
+foreach ($block in $interfaceBlocks) {
+    if ($block.Value -match '\b(ValueTask|Task)<bool>\s+\w+\(|\(\s*bool\s+\w+|,\s*bool\s+\w+') {
+        $errors.Add("Banned anti-pattern detected: Naked boolean in interface contract or method signature in:`n$($block.Value.Trim())`nUse strongly-typed enums, policy objects, or domain result models.")
+    }
+}
+
+# 8. Anti-Pattern Scan: Leaked Byte Buffers in Port Signatures
+foreach ($block in $interfaceBlocks) {
+    if ($block.Value -match 'interface\s+I(Transfer|Distributed|Desktop|App|File|Storage)\w*') {
+        if ($block.Value -match '\b(ReadOnlyMemory<byte>|byte\[\])\b') {
+            $errors.Add("Banned anti-pattern detected: Leaked raw byte buffer (`ReadOnlyMemory<byte>` or `byte[]`) in port interface:`n$($block.Value.Trim())`nEncapsulate raw buffers in strongly-typed domain value objects.")
+        }
+    }
+}
+
+# 9. Anti-Pattern Scan: Naked Integer Priority
+if ($content -match '\bint\s+Priority\b') {
+    $errors.Add("Banned anti-pattern detected: Naked integer priority (`int Priority`). Model priority and ranking hierarchies using explicit enums or bounded value objects.")
+}
+
+# 10. Anti-Pattern Scan: Repository Partial Persistence Side-Doors
+if ($content -match 'interface\s+I\w*Repository[\s\S]*?\{[\s\S]*?\bSave(?!Session|Policy|Aggregate)\w+Async') {
+    $errors.Add("Banned anti-pattern detected: Repository side-door method detected. Repositories must persist and load aggregate roots atomically.")
 }
 
 # Summary

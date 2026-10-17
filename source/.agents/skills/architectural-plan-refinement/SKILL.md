@@ -45,9 +45,11 @@ When starting or resuming refinement (e.g., after context compaction or session 
 - **Orchestration Decomposition**: Verify that multi-step operations (e.g., candidate discovery + connection) are modeled as distinct, composable workflow steps rather than monolithic methods.
 
 ### Lens 2: Onion Architecture & Primitive Obsession (Turn 2)
-- **Domain & Plugin Purity**: Domain aggregates and application plugins must have zero direct dependencies on concrete databases, transport sockets, or serialization frameworks.
-- **Eliminate Primitive Obsession**: Any naked primitive (`string`, `byte[]`, `int`, `long`, `Guid`) representing a domain concept (e.g., limits, tokens, locators, epochs, session IDs) must be encapsulated in a strongly typed Value Object.
-- **Ban Implicit/Explicit Cast Operators**: Value objects must provide zero `implicit` or `explicit` cast operators. Mandate explicit factory methods (e.g., `FromX()`, `Create()`) and explicit property accessors to eliminate silent type coercion bugs.
+- **Shared Kernel & Domain Purity**: Feature slices must never pollute shared core domain aggregates. Domain aggregates, entities, and ports must have zero direct dependencies on concrete databases, transport sockets, or serialization frameworks.
+- **Aggregate Completeness & Boundary Gatekeeping**: Aggregate roots must encapsulate all cryptographic keys, nonces, and participants needed to validate their lifecycle transitions (anti-anemic). Child entities must be accessed via read-only interfaces, and repositories must persist aggregate roots atomically with zero partial side-door methods.
+- **Eliminate Primitive Obsession**: Any naked primitive (`string`, `byte[]`, `ReadOnlyMemory<byte>`, `int`, `long`, `Guid`, `bool`) representing a domain concept (tokens, limits, topologies, roles, policies, offsets) must be encapsulated in a strongly typed Value Object or enum.
+- **Ban Flag Arguments & Nullable Doublets**: Never use boolean flags for control coupling or method flow control. Model mutually exclusive state variants via discriminated unions or polymorphic domain records instead of paired nullable properties.
+- **Ban Implicit/Explicit Cast Operators**: Value objects must provide zero `implicit` or `explicit` cast operators. Construction must use explicit factory methods (`Create`, `FromX`, `Parse`), access must be through named properties, and arithmetic must be encapsulated within domain methods.
 
 ### Lens 3: Threat Modeling & Security Posture (Turn 3)
 - **Protocol Parity**: Preserve core cryptographic invariants matching or exceeding Signal Protocol standards (e.g., asynchronous store-and-forward, zero online/offline presence tracking, zero activity leases).

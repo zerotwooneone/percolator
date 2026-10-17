@@ -13,16 +13,33 @@ This document provides in-depth evaluation criteria for each of the five archite
 ---
 
 ## Lens 2: Onion Architecture & Primitive Obsession
-- [ ] **Dependency Direction**: Does the feature slice depend only on `Percolator.Domain`, `Percolator.PluginSdk`, or local internal types? (Zero dependencies on EF Core, SQLite, ASP.NET Core, gRPC, or System.Net).
-- [ ] **Primitive Obsession Audit**:
-  - Are limits, sizes, or counts wrapped in bounded Value Objects (e.g., `DiscoveryResultLimit`)?
-  - Are tokens, hashes, and identifiers wrapped in strongly typed Value Objects (e.g., `BlindedLocator`, `DeliveryToken`)?
-  - Are time windows or epochs wrapped in dedicated domain models (e.g., `DiscoveryEpoch`)?
-- [ ] **Zero Cast Operators**:
-  - Verify there are zero `public static implicit operator` declarations.
-  - Verify there are zero `public static explicit operator` declarations.
-  - Verify construction passes through factory methods (`Create`, `FromValue`, `TryCreate`) with domain validation.
-  - Verify access is via named properties (`Value`, `Bytes`, `Id`).
+
+### 1. Boundary & Kernel Purity
+- [ ] **Shared Kernel Integrity**: Does this feature propose modifying core domain entities or aggregates (e.g., in `Percolator.Domain`)? All feature-specific state must remain encapsulated within the feature slice's own internal entities, value objects, or reachability adapters.
+- [ ] **Zero Infrastructure Leaks**: Do domain aggregates, entities, or port signatures reference transport protocols, sockets, raw network streams, database models, or serialization attributes?
+- [ ] **Port Interface Isolation**: Do aggregate domain methods accept any port interfaces or services as arguments (e.g., `aggregate.DoWork(IPort port)`)? Aggregates must accept only pure domain models and clock providers.
+
+### 2. Aggregate Completeness & Encapsulation
+- [ ] **Anti-Anemic State Completeness**: Does the aggregate root hold all participants, cryptographic tokens, nonces, and lifecycle state required to validate its own transitions? Orchestration workflows must never hoard state on the aggregate's behalf.
+- [ ] **Child Entity Gatekeeping**: Are internal child entities hidden behind `IReadOnlyCollection<T>` or `IReadOnlyDictionary<TKey, TValue>`? All mutations to child entities must be dispatched through domain methods on the root aggregate.
+- [ ] **Atomic Aggregate Persistence**: Does the repository persist and load the aggregate root *atomically*? Partial persistence side-doors (e.g., `SaveChildStateAsync`, `SaveBitfieldAsync`) are strictly banned.
+
+### 3. Primitive Obsession & Type Safety
+- [ ] **Naked Boolean Elimination**:
+  - Are booleans used to model roles, modes, or topologies? (Convert to explicit enums: e.g., `PeerRole`, `RoutingPreference`).
+  - Are booleans used to model security or admission policies? (Convert to policy enums: e.g., `WanPolicy.DisabledByDefault`).
+  - Are methods using boolean flag arguments for control coupling (`DoAction(bool force)`)? (Split into distinct methods or pass option value objects).
+  - Are there any tri-state `bool?` variables? (Convert to explicit domain state enums).
+- [ ] **Rank, Priority & Magic Numbers**: Are any priorities, ranks, or sequence types modeled as naked integers (`int Priority`)? (Wrap in bounded enums or value objects like `RoutePriority : byte`).
+- [ ] **Zero Cast Operators**: Are value objects strictly constructed via factory methods (`Create`, `FromValue`, `Parse`) with zero `implicit` or `explicit` cast operators?
+- [ ] **Immutable Value Objects**: Do all value objects guarantee structural immutability? (Mutations must return new copies via `WithX(...)`; mutable buffers must be classified as internal Entities).
+- [ ] **Domain Math Encapsulation**: Do value objects encapsulate arithmetic and offset math (e.g., `offset.Add(slice)`), preventing callers from unboxing to raw primitives and casting?
+- [ ] **Discriminated Unions vs. Nullable Doublets**: Are mutually exclusive states modeled via paired nullable properties (`PropA?`, `PropB?`)? (Convert to discriminated unions or polymorphic domain records).
+
+### 4. Port & CQRS Contract Precision
+- [ ] **Buffer Wrapping on Ports**: Do port interfaces leak naked byte arrays or `ReadOnlyMemory<byte>`? (Wrap in domain concepts: e.g., `PlaintextChunkData`, `EncryptedPayload`, typed `IStreamFramePayload`).
+- [ ] **Explicit Domain Results**: Do command handlers and validation ports return expressive domain results (`ValueTask<DomainResult>`, `DiskSpacePreflightResult`), rather than naked `bool` or `void`?
+- [ ] **Read Model Typings**: Do CQRS read models maintain domain enum/value object fidelity rather than reverting to raw primitives (e.g., `TransferRole Role` instead of `bool IsOutgoing`)?
 
 ---
 
