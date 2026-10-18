@@ -49,6 +49,14 @@
   - **Local UPnP IGD Port Forwarding (Opt-In)**:
     - Requests the local home gateway router via UPnP IGD (`WANIPConnection`) to open a dedicated port mapping. Operates purely locally on the home LAN with **zero external server dependencies**.
   - Public IP candidates discovered via UPnP or Relay STUN are **never advertised** unless the user has explicitly opted into WAN direct connection for that transfer session.
+
+### 1.3.1 Explicit Swarm & Direct P2P Privacy Tradeoffs (Intentional Design Posture)
+Unlike Percolator's core Double Ratchet messaging—which enforces continuous per-message forward secrecy and shields IP addresses behind sovereign relay mailboxes—the FileTransfer app is intentionally designed with BitTorrent-grade multi-peer performance tradeoffs:
+1. **Direct IP Exposure**: Direct socket saturation and multi-peer piece sharing require establishing direct TCP/QUIC socket connections between peers. In doing so, peers inherently expose their physical IPv4/IPv6 addresses, network NAT topologies, and ISP locations to each other. Unlike public BitTorrent swarms that reveal IPs to the entire open internet, Percolator restricts this exposure strictly to invited contacts (`TargetRecipients`).
+2. **Static Symmetric Session Key**: To eliminate re-ratcheting overhead on millions of high-throughput bulk chunks, all chunks in a transfer session are encrypted with a single static symmetric AES-256 key ($K_{\text{transfer}}$). Forward secrecy and break-in recovery are intentionally lost at the bulk streaming layer; compromise of this session key decrypts all chunks for that session.
+3. **Chunk Possession & Activity Leakage**: BitTorrent swarming relies on high-frequency possession broadcasts (`HAVE` and `BITFIELD` frames). Peers actively reveal which chunks they possess, which pieces they are requesting, and their real-time download progress to all other connected peers.
+4. **UI Presentation Responsibility**: These tradeoffs are explicit architectural choices for gigabit throughput parity with croc and BitTorrent. The Presentation layer (UI) bears the explicit responsibility of warning users before initiating or accepting direct WAN/P2P transfers, listing the participating contacts (`PublicIdentityId`) whose IP addresses will be revealed.
+
 - **Relay Operator Safeguards & Throttling**:
   - Relays advertise capabilities via `RelayFileTransferCapabilities` (`Capabilities: RelayTransferCapabilityFlags`, `MaxPipeBandwidth: TransferBandwidth`, `MaxConcurrentPipes: PipeConcurrencyLimit`).
 
@@ -153,17 +161,15 @@ public sealed class SwarmMember : IEntity<PublicIdentityId>
 {
     public PublicIdentityId Id => PeerId;
     public PublicIdentityId PeerId { get; }
-    public EphemeralSwarmMemberToken Token { get; }
     public Bitfield Bitfield { get; private set; }
     public PeerChokeStatus ChokeStatus { get; private set; }
     public PeerInterestStatus InterestStatus { get; private set; }
     public DateTimeOffset LastSeenUtc { get; private set; }
     public SwarmPeerRole Role => Bitfield.IsComplete ? SwarmPeerRole.Seeder : SwarmPeerRole.Leecher;
 
-    internal SwarmMember(PublicIdentityId peerId, EphemeralSwarmMemberToken token, Bitfield bitfield, DateTimeOffset initialSeenUtc)
+    internal SwarmMember(PublicIdentityId peerId, Bitfield bitfield, DateTimeOffset initialSeenUtc)
     {
         PeerId = peerId;
-        Token = token;
         Bitfield = bitfield;
         ChokeStatus = PeerChokeStatus.Choked;
         InterestStatus = PeerInterestStatus.NotInterested;
@@ -198,17 +204,17 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
     public DateTimeOffset CreatedAtUtc { get; }
     public DateTimeOffset? CompletedAtUtc { get; private set; }
 
-    private readonly Dictionary<EphemeralSwarmMemberToken, SwarmMember> _swarmMembers = [];
+    private readonly Dictionary<PublicIdentityId, SwarmMember> _swarmMembers = [];
     public IReadOnlyCollection<SwarmMember> SwarmMembers => _swarmMembers.Values;
 
     // Encapsulated domain methods returning DomainResult & emitting IDomainEvent:
     // DomainResult AcceptTransfer(RootDestinationPath destinationFolder, SelectedFileIndices selectedFiles, IDateTimeProvider clock)
     // DomainResult StartStreaming() -> zero infrastructure socket/stream parameters
-    // DomainResult RegisterSwarmMember(PublicIdentityId peerId, EphemeralSwarmMemberToken token, Bitfield initialBitfield, IDateTimeProvider clock)
-    // DomainResult RecordPeerBitfield(EphemeralSwarmMemberToken token, Bitfield bitfield)
-    // DomainResult RecordPeerHave(EphemeralSwarmMemberToken token, ChunkIndex chunkIndex)
-    // DomainResult SetPeerChoke(EphemeralSwarmMemberToken token, PeerChokeStatus status)
-    // DomainResult SetPeerInterest(EphemeralSwarmMemberToken token, PeerInterestStatus status)
+    // DomainResult RegisterSwarmMember(PublicIdentityId peerId, Bitfield initialBitfield, IDateTimeProvider clock)
+    // DomainResult RecordPeerBitfield(PublicIdentityId peerId, Bitfield bitfield)
+    // DomainResult RecordPeerHave(PublicIdentityId peerId, ChunkIndex chunkIndex)
+    // DomainResult SetPeerChoke(PublicIdentityId peerId, PeerChokeStatus status)
+    // DomainResult SetPeerInterest(PublicIdentityId peerId, PeerInterestStatus status)
     // DomainResult VerifyAndRecordChunk(ChunkIndex chunkIndex, PlaintextChunkData data, IDateTimeProvider clock)
     // DomainResult CompleteTransfer(IDateTimeProvider clock)
     // DomainResult MarkStalled(IDateTimeProvider clock)
@@ -244,11 +250,14 @@ public sealed class FileTransferFilterPolicy : AggregateRoot<PublicIdentityId>
     public void BlockRelay(RelayPipeEndpointUri relayUri) => _blockedRelays.Add(relayUri);
     public void UnblockRelay(RelayPipeEndpointUri relayUri) => _blockedRelays.Remove(relayUri);
 
-    public IngressDecision EvaluateDecision(PublicIdentityId senderId, RelayPipeEndpointUri? relayUri)
+    public IngressDecision EvaluateEdgeIngress(PublicIdentityId senderId)
     {
-        if (_blockedPeers.Contains(senderId)) return IngressDecision.DiscardSilently;
-        if (relayUri != null && _blockedRelays.Contains(relayUri)) return IngressDecision.DiscardSilently;
-        return IngressDecision.Accept;
+        return _blockedPeers.Contains(senderId) ? IngressDecision.DiscardSilently : IngressDecision.Accept;
+    }
+
+    public bool IsRelayBlocked(RelayPipeEndpointUri relayUri)
+    {
+        return _blockedRelays.Contains(relayUri);
     }
 }
 ```
@@ -265,10 +274,16 @@ public sealed record TransferOfferedDomainEvent(
     TransferBundleSummary Summary,
     DateTimeOffset OccurredAtUtc) : IDomainEvent;
 
-public sealed record TransferAcceptedDomainEvent(
+public sealed record TransferAcceptedLocallyDomainEvent(
     TransferSessionId SessionId,
     RootDestinationPath DestinationPath,
     SelectedFileIndices SelectedFiles,
+    DateTimeOffset OccurredAtUtc) : IDomainEvent;
+
+public sealed record PeerAcceptedTransferDomainEvent(
+    TransferSessionId SessionId,
+    PublicIdentityId RecipientId,
+    Bitfield ResumptionBitfield,
     DateTimeOffset OccurredAtUtc) : IDomainEvent;
 
 public sealed record TransferStreamingStartedDomainEvent(
@@ -278,7 +293,6 @@ public sealed record TransferStreamingStartedDomainEvent(
 public sealed record SwarmMemberJoinedDomainEvent(
     TransferSessionId SessionId,
     PublicIdentityId PeerId,
-    EphemeralSwarmMemberToken Token,
     Bitfield InitialBitfield,
     DateTimeOffset OccurredAtUtc) : IDomainEvent;
 
@@ -366,7 +380,6 @@ To eliminate repetitive defensive-copy boilerplate, range validation, and equali
 | **`ChunkHash`** | `[ByteArray(length: 32)]` | 32-byte SHA-256 leaf hash | Explicit `FromBytes(...)`, `FromSpan(...)`, `.Span`. Zero cast operators. |
 | **`TransferKey`** | `[ByteArray(length: 32)]` | 32-byte ephemeral AES-256 session key (`ISensitiveSecret`) | Explicit `Generate()`, `FromBytes(...)`, `.Span`. Implements `Zeroize()`. Zero cast operators. |
 | **`BlindSwarmId`** | `[ByteArray(length: 32)]` | 32-byte HMAC-SHA256 rendezvous token | Explicit `Derive(TransferKey)`, `FromBytes(...)`, `.Span`. Zero cast operators. |
-| **`EphemeralSwarmMemberToken`** | `[ByteArray(length: 16)]` | 16-byte ephemeral session token for anonymous swarm registration | Explicit `Derive(TransferKey, PeerId)`, `FromBytes(...)`, `.Span`. Zero cast operators. |
 | **`StreamAuthToken`** | `[ByteArray(length: 32)]` | 32-byte out-of-band stream authentication token | Explicit `Generate()`, `FromBytes(...)`, `.Span`. Zero cast operators. |
 | **`BaseNonce`** | `[ByteArray(length: 12)]` | 12-byte base nonce for AES-GCM deterministic derivation | Explicit `Generate()`, `FromBytes(...)`, `.Span`. Zero cast operators. |
 | **`RelayPipeToken`** | `[ByteArray(length: 32)]` | 32-byte authentication token for relay pipe rendezvous | Explicit `Generate()`, `FromBytes(...)`, `.Span`. Zero cast operators. |
@@ -456,7 +469,8 @@ Percolator.Apps.FileTransfer/
 │   │   ├── FileTransferCancelPayload.cs
 │   │   ├── Events/                 # Formal domain events (IDomainEvent)
 │   │   │   ├── TransferOfferedDomainEvent.cs
-│   │   │   ├── TransferAcceptedDomainEvent.cs
+│   │   │   ├── TransferAcceptedLocallyDomainEvent.cs
+│   │   │   ├── PeerAcceptedTransferDomainEvent.cs
 │   │   │   ├── TransferStreamingStartedDomainEvent.cs
 │   │   │   ├── SwarmMemberJoinedDomainEvent.cs
 │   │   │   ├── ChunkVerifiedDomainEvent.cs
@@ -500,7 +514,7 @@ Percolator.Apps.FileTransfer/
 │   │   ├── IStreamFramePayload.cs  # Strongly typed frame payload contract
 │   │   ├── StreamFrameEnvelope.cs  # Typed framing envelope wrapping IStreamFramePayload
 │   │   ├── StreamFrameType.cs      # Typed frame discriminator enum
-│   │   ├── HandshakeFrame.cs       # StreamAuthToken, SessionId, StreamIndex, EphemeralSwarmMemberToken
+│   │   ├── HandshakeFrame.cs       # StreamAuthToken, SessionId, StreamIndex, PublicIdentityId
 │   │   ├── BitfieldFrame.cs        # Bitfield possession frame
 │   │   ├── HaveFrame.cs            # ChunkIndex announcement frame
 │   │   ├── RequestChunkFrame.cs    # ChunkIndex request frame
@@ -514,7 +528,6 @@ Percolator.Apps.FileTransfer/
 │   │   └── TransferStreamScheduler.cs
 │   ├── SwarmCoordination/          # BitTorrent piece tracking, bitfields, rarest-first piece selection, distributed tracker
 │   │   ├── BlindSwarmId.cs         # [ByteArray(32)] Value Object: HMAC-SHA256 handle
-│   │   ├── EphemeralSwarmMemberToken.cs # [ByteArray(16)] Value Object: Anonymous swarm registration
 │   │   ├── SwarmMember.cs          # IEntity<PublicIdentityId>: Encapsulated swarm peer entity
 │   │   ├── SwarmPeerRole.cs        # Enum: Leecher (0x01), Seeder (0x02)
 │   │   ├── PeerChokeStatus.cs      # Enum: Choked (0x01), Unchoked (0x02)
@@ -741,8 +754,8 @@ while (remainingChunkBytes.Bytes > 0)
 - **Blind Swarm Identifier**:
   $$\text{BlindSwarmId} = \text{HMAC-SHA256}(K_{\text{transfer}}, \text{"swarm-rendezvous"})$$
 - **Rendezvous Posting**:
-  - Peers register their ephemeral direct candidates and bitfields under `BlindSwarmId` using an anonymous session `EphemeralSwarmMemberToken`.
-  - Relays store ephemeral 90-second sliding records without learning file names, channels, or peer cryptographic identities (`PublicIdentityId`).
+  - Peers register their direct candidate endpoints and bitfields under `BlindSwarmId` using their `PublicIdentityId`.
+  - Relays store ephemeral 90-second sliding records without learning file names, channel topologies, or content keys.
 - **Out-of-Band Peer Exchange (PEX)**:
   - Peers exchange known active candidate addresses directly over out-of-band streams via `PexPeers` frames.
 
@@ -837,7 +850,7 @@ public sealed record HandshakeFrame(
     StreamAuthToken AuthToken,
     TransferSessionId SessionId,
     StreamIndex StreamIndex,
-    EphemeralSwarmMemberToken SenderToken) : IStreamFramePayload
+    PublicIdentityId SenderPeerId) : IStreamFramePayload
 {
     public StreamFrameType FrameType => StreamFrameType.Handshake;
 }
@@ -934,17 +947,22 @@ public interface ITransferStreamPool : IAsyncDisposable
 
 public interface ITransferStreamPoolFactory
 {
-    ITransferStreamPool CreatePool(TransferSessionId sessionId, EphemeralSwarmMemberToken peerToken, StreamCount streamCount);
-    ITransferStreamPool CreatePool(TransferSessionId sessionId, EphemeralSwarmMemberToken peerToken); // Defaults to StreamCount.Default
+    ITransferStreamPool CreatePool(TransferSessionId sessionId, PublicIdentityId peerId, StreamCount streamCount);
+    ITransferStreamPool CreatePool(TransferSessionId sessionId, PublicIdentityId peerId); // Defaults to StreamCount.Default
 }
 
 public interface IDistributedTrackerPort
 {
     ValueTask<IReadOnlyList<DirectEndpointCandidate>> AnnounceAsync(
         BlindSwarmId blindSwarmId,
-        EphemeralSwarmMemberToken memberToken,
+        PublicIdentityId memberId,
         IReadOnlyList<DirectEndpointCandidate> candidates,
         SwarmPeerRole role,
+        CancellationToken ct = default);
+
+    ValueTask UnregisterAsync(
+        BlindSwarmId blindSwarmId,
+        PublicIdentityId memberId,
         CancellationToken ct = default);
 }
 ```
@@ -960,7 +978,7 @@ public interface IDesktopFileStorage
     ValueTask<PlaintextChunkData> ReadChunkAsync(ResolvedDestinationFilePath targetPath, FileByteOffset fileOffset, TransferByteLength length, CancellationToken ct = default);
     ValueTask<Bitfield> ScanAndComputeBitfieldAsync(RootDestinationPath rootPath, TransferManifest manifest, CancellationToken ct = default);
     ValueTask FinalizeFileAsync(ResolvedDestinationFilePath targetPath, FileLastModifiedUtc lastModifiedUtc, CancellationToken ct = default);
-    ValueTask<DiskSpacePreflightResult> CheckDiskSpaceAsync(RootDestinationPath rootPath, TotalBundleBytes requiredBytes);
+    ValueTask<DiskSpacePreflightResult> CheckDiskSpaceAsync(RootDestinationPath rootPath, TotalBundleBytes requiredBytes, CancellationToken ct = default);
 }
 ```
 
@@ -970,8 +988,8 @@ namespace Percolator.Apps.FileTransfer.Ports;
 
 public interface ITransferRateLimiter
 {
-    void SetGlobalSpeedCaps(BandwidthLimit downloadCap, BandwidthLimit uploadCap);
-    void SetSessionSpeedCaps(TransferSessionId sessionId, BandwidthLimit downloadCap, BandwidthLimit uploadCap);
+    ValueTask SetGlobalSpeedCapsAsync(BandwidthLimit downloadCap, BandwidthLimit uploadCap, CancellationToken ct = default);
+    ValueTask SetSessionSpeedCapsAsync(TransferSessionId sessionId, BandwidthLimit downloadCap, BandwidthLimit uploadCap, CancellationToken ct = default);
     ValueTask ThrottleDownloadAsync(TransferSessionId sessionId, TransferByteLength byteCount, CancellationToken ct = default);
     ValueTask ThrottleUploadAsync(TransferSessionId sessionId, TransferByteLength byteCount, CancellationToken ct = default);
 }
@@ -1010,6 +1028,9 @@ public sealed record ManifestFileReadModel(
 public sealed record TransferSessionReadModel(
     TransferSessionId SessionId,
     RootBundleName RootName,
+    PublicIdentityId InitiatorId,
+    PublicIdentityId? RemotePeerId,
+    IReadOnlySet<PublicIdentityId> TargetRecipients,
     TotalBundleBytes TotalBytes,
     TotalBundleBytes TransferredBytes,
     TotalBundleBytes UploadedBytes,
@@ -1064,7 +1085,10 @@ public interface IFileTransferActionHandler
 | **Directory Traversal** | Path sanitization rejecting `..`, absolute paths, null bytes, and Windows device names via `SanitizedRelativePath`. | Test suite fuzzes malicious path entries in manifests. |
 | **In-Band Ratchet Bloat** | Control-only ratchet messages; bulk data runs strictly over out-of-band parallel streams. | Architecture enforces maximum ratchet offer size $\le 64\text{ KB}$. |
 | **Disk Exhaustion** | Upfront disk space verification (`CheckDiskSpaceAsync`) before accepting. | Test asserts rejection if disk quota is exceeded. |
-| **IP Address Leakage** | Default posture routes WAN transfers strictly via blind relay pipes; direct WAN endpoints (UPnP / Relay STUN) require explicit user opt-in (`WanPolicy == DirectWanPolicy.ExplicitlyAllowed`). | Test asserts WAN IP endpoints are never generated or dispatched unless opted in. |
+| **IP Address Leakage (Default Relayed)** | Default posture routes WAN transfers strictly via blind relay pipes; direct WAN endpoints (UPnP / Relay STUN) require explicit user opt-in (`WanPolicy == DirectWanPolicy.ExplicitlyAllowed`). | Test asserts WAN IP endpoints are never generated or dispatched unless opted in. |
+| **Direct P2P & Swarm IP Exposure** | Intentional protocol design for throughput parity with BitTorrent. Direct socket saturation requires peers to exchange socket candidates, exposing physical IPv4/IPv6 addresses, NAT topologies, and ISP locations to invited peers (`TargetRecipients`). The UI presentation layer explicitly warns users and lists participant identities before opening direct connections. | Unit test asserts WAN IP candidates are never generated or advertised when direct connections are disabled; UI read model exposes participants for privacy prompt. |
+| **Static Symmetric Session Key** | Intentional performance design avoiding per-chunk Double Ratchet overhead. AES-256 session key $K_{\text{transfer}}$ is securely negotiated in-band; all bulk streaming chunks share the key. Loss of per-chunk forward secrecy is bounded to that transfer session. | Architecture enforces strict in-band exchange of session key and base nonce; zero ratchet messages used for bulk data. |
+| **Piece Possession Leakage** | Intentional BitTorrent swarming requirement; bitfield and `HAVE` broadcasts leak chunk possession to invited peers to enable rarest-first piece scheduling. | Architecture limits piece announcements strictly to authenticated swarm streams. |
 | **Chunk Tampering / Substitution** | Dual cryptographic verification: AES-256-GCM authentication tag + SHA-256 leaf hash against Merkle root. | Test asserts corrupted chunk bytes are discarded and requested again. |
 | **Relay Snooping** | E2EE per-chunk encryption ($K_{\text{transfer}}$); relay acts as blind socket proxy without keys. | Test verifies relay cannot decrypt chunks with zero knowledge of session key. |
 | **Network Bufferbloat / Choking** | High-precision token bucket bandwidth throttle (`ITransferRateLimiter`). | Unit test asserts throughput throttles accurately to configured caps. |
@@ -1114,17 +1138,16 @@ public interface IFileTransferActionHandler
 3. Implement Value Objects & Enums via `Percolator.SourceGenerators` and explicit domain contracts:
    - `[GuidId(GuidIdKind.CryptographicRandom)]`: `TransferSessionId`
    - `[ByteArray(32)]`: `MerkleRoot`, `ChunkHash`, `TransferKey`, `BlindSwarmId`, `StreamAuthToken`, `RelayPipeToken`
-   - `[ByteArray(16)]`: `EphemeralSwarmMemberToken`
    - `[ByteArray(12)]`: `BaseNonce`
    - `[ByteArray(1..65536)]`: `InlineManifestData`
    - Enums: `TransferRole`, `TransferSessionState`, `RoutePriority`, `DirectWanPolicy`, `TransportRoutingPreference`, `SwarmPeerRole`, `PeerChokeStatus`, `PeerInterestStatus`, `DirectCandidateKind`, `StreamFrameType`, `ManifestTierKind`, `RelayTransferCapabilityFlags`.
    - Invariant-enforced records & structs: `ChunkByteLength`, `EncryptedChunkData`, `PlaintextChunkData`, `DiskSpacePreflightResult`, `ManifestBlobDescriptor`, `ManifestDistribution`, `MerkleTreeIndex`, `FileLastModifiedUtc`, `RootBundleName`, `RelayPipeEndpointUri`, `RelayRendezvousDescriptor`, `RelayFileTransferCapabilities`, `PipeConcurrencyLimit`, `BandwidthLimit`, `TransferTerminationReason`, `TotalBundleBytes`, `FileSizeBytes`, `BundleByteOffset`, `FileByteOffset`, `FileCount`, `ChunkCount`, `ChunkIndex`, `ChunkSizeBytes`, `FileIndex`, `StreamCount`, `PeerCount`, `TransferByteLength`, `SanitizedRelativePath`, `DirectEndpointCandidate`, `EndpointHost`, `PortNumber`, `TransferBandwidth`, `SeedRatio`, `Bitfield` (immutable, `WithChunk`), `SelectedFileIndices`, `StreamIndex`, `RootDestinationPath`, `ResolvedDestinationFilePath`, `TransferBundleSummary`.
-   - Domain events implementing `IDomainEvent`: `TransferOfferedDomainEvent`, `TransferAcceptedDomainEvent`, `TransferStreamingStartedDomainEvent`, `SwarmMemberJoinedDomainEvent`, `ChunkVerifiedDomainEvent`, `FileCompletedDomainEvent`, `TransferCompletedDomainEvent`, `TransferPausedDomainEvent`, `TransferResumedDomainEvent`, `TransferStalledDomainEvent`, `TransferFailedDomainEvent`, `TransferCancelledDomainEvent`.
+   - Domain events implementing `IDomainEvent`: `TransferOfferedDomainEvent`, `TransferAcceptedLocallyDomainEvent`, `PeerAcceptedTransferDomainEvent`, `TransferStreamingStartedDomainEvent`, `SwarmMemberJoinedDomainEvent`, `ChunkVerifiedDomainEvent`, `FileCompletedDomainEvent`, `TransferCompletedDomainEvent`, `TransferPausedDomainEvent`, `TransferResumedDomainEvent`, `TransferStalledDomainEvent`, `TransferFailedDomainEvent`, `TransferCancelledDomainEvent`.
    - Typed frame payloads: `IStreamFramePayload`, `HandshakeFrame`, `BitfieldFrame`, `HaveFrame`, `RequestChunkFrame`, `ChunkDataFrame`, `CancelChunkFrame`, `ChokeFrame`, `UnchokeFrame`, `KeepAliveFrame`, `PexPeersFrame`, `StreamFrameEnvelope`.
    - Strictly verify **zero implicit/explicit cast operators** across all Value Objects.
 4. Implement Domain Aggregates & Entities:
    - `TransferSession : AggregateRoot<TransferSessionId>` encapsulating participants (`InitiatorId`, `RemotePeerId`, `TargetRecipients`), swarm members (`SwarmMember`), security policy (`WanPolicy`), piece verification (`VerifyAndRecordChunk`), and session secrets (`SessionKey`, `BaseNonce`, `StreamAuthToken`, `RelayPipeToken`).
-   - `SwarmMember : IEntity<PublicIdentityId>` managing per-peer bitfields, choke status, interest status, and `EphemeralSwarmMemberToken`.
+   - `SwarmMember : IEntity<PublicIdentityId>` managing per-peer bitfields, choke status, and interest status.
    - `FileTransferFilterPolicy : AggregateRoot<PublicIdentityId>` managing peer and relay blocklists.
    - `TransferManifest : IEntity<TransferSessionId>` encapsulating `MerkleTreeIndex` and invariant-enforced `Create(...)` factory.
    - `FileEntry : IEntity<FileIndex>` encapsulating `FileLastModifiedUtc` and `EndOffset`.
@@ -1150,11 +1173,11 @@ public interface IFileTransferActionHandler
 ### Milestone 4: Swarm Coordination, Distributed Tracker & Seeding Ratios
 1. Implement `SwarmCoordinator` updating `SwarmMember` entities within `TransferSession`.
 2. Implement `RarestFirstChunkSelector` and `EndgameMode`.
-3. Implement `IDistributedTrackerPort` and `PEX_PEERS` out-of-band frame handling using `SwarmPeerRole` and `EphemeralSwarmMemberToken`.
+3. Implement `IDistributedTrackerPort` and `PEX_PEERS` out-of-band frame handling using `SwarmPeerRole`, `PublicIdentityId`, and `UnregisterAsync`.
 4. Implement seeding ratio tracking ($\text{Uploaded} / \text{Total}$) and automatic disconnect on target ratio.
 
 ### Milestone 5: CQRS Transfer Manager Ports & Rate Limiter
-1. Implement rate limiter adapter integration with `ITransferRateLimiter` using `BandwidthLimit`.
+1. Implement rate limiter adapter integration with `ITransferRateLimiter` using `BandwidthLimit` and async `ValueTask` caps.
 2. Implement `IFileTransferFilterPolicyRepository` port for filter policy persistence taking `ownerId`.
 3. Implement `IFileTransferQueryService` and `IFileTransferActionHandler` supporting `InitiateTransferAsync`, `ManifestFileReadModel`, and `ValueTask<DomainResult>`.
 4. Expose state machine transitions and event streams for presentation consumers.
