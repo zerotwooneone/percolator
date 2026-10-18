@@ -24,11 +24,14 @@ graph TD
     Kernel["Percolator.Domain.Kernel<br/>(AggregateRoot, DomainResult, PublicIdentityId)"]
     CoreDomain["Percolator.Domain<br/>(Double Ratchet, X3DH, Relays, Channels)"]
     FTDomain["Percolator.Apps.FileTransfer.Domain<br/>(TransferSession, Manifest, MerkleTree, Bitfield)"]
-    ChatDomain["Percolator.Apps.Chat.Domain<br/>(ChatMessage, Reactions)"]
+    DiscoveryApp["Percolator.Apps.Discovery<br/>(NearbyPeerDiscovery, BlindedRendezvous)"]
+    ChatDomain["Percolator.Apps.Chat<br/>(ChatMessage, Channels)"]
     
     CoreDomain -->|References| Kernel
     FTDomain -->|References| Kernel
-    ChatDomain -->|References| Kernel
+    DiscoveryApp -->|References Core &| Kernel
+    DiscoveryApp --> CoreDomain
+    ChatDomain --> CoreDomain
 ```
 
 ---
@@ -142,13 +145,23 @@ To safely extract `Percolator.Domain.Kernel` and update `Percolator.Domain`:
 1. Add `<ProjectReference Include="..\Percolator.Domain.Kernel\Percolator.Domain.Kernel.csproj" />` to `Percolator.Domain.csproj`.
 2. Delete the original local files from `Percolator.Domain/Common/` and `Percolator.Domain/Identities/ValueObjects/PublicIdentityId.cs`.
 
-### Step 3: Verify Existing Test Suites Pass
+### Step 3: Verify Existing Domain Test Suites Pass
 1. Run `dotnet test Percolator.Domain.Tests\Percolator.Domain.Tests.csproj`.
 2. Verify all 119 tests pass without compile errors or behavioral regressions.
-3. Migrate existing `DomainResultTests.cs` and `GuidIdTests.cs` to a new lightweight test project `Percolator.Domain.Kernel.Tests` or reference `Kernel` in `Percolator.Domain.Tests`.
+3. Reference `Percolator.Domain.Kernel` in `Percolator.Domain.Tests` or retain existing test references since `Percolator.Domain` transitively exposes Kernel.
 
-### Step 4: Update `FileTransfer.Domain` Plan
-Update `Percolator.Apps.FileTransfer/domain-plan.md` to reference `Percolator.Domain.Kernel` rather than `Percolator.Domain`.
+### Step 4: Verify & Update `Percolator.Apps.Discovery`
+1. Review `Percolator.Apps.Discovery/Percolator.Apps.Discovery.csproj`.
+2. Because `Percolator.Apps.Discovery` coordinates Step 2 X3DH handshakes (`DirectRatchetSession`, `DeviceId`, `PreKeyBundle`), it legitimately depends on `Percolator.Domain`.
+3. Add `<ProjectReference Include="..\Percolator.Domain.Kernel\Percolator.Domain.Kernel.csproj" />` to `Percolator.Apps.Discovery.csproj` for direct access to kernel primitives (`PublicIdentityId`, `DomainResult`, `IDateTimeProvider`, `DiscoveryResultLimit`).
+4. Run `dotnet test Percolator.Apps.Discovery.Tests\Percolator.Apps.Discovery.Tests.csproj` and verify all 32 tests pass cleanly with zero warnings or breaks.
+
+### Step 5: Full Solution Verification (`dotnet test Percolator.sln`)
+1. Run `dotnet test Percolator.sln` across all test suites (`Percolator.Domain.Tests`, `Percolator.Apps.Discovery.Tests`, `Percolator.Apps.Chat.Tests`, `Percolator.Application.Tests`, `Percolator.SourceGenerators.Tests`).
+2. Verify that all 260+ tests pass with zero compiler breaks across the entire solution.
+
+### Step 6: Update `FileTransfer.Domain` Plan
+Ensure `Percolator.Apps.FileTransfer/domain-plan.md` references `Percolator.Domain.Kernel` as an independent standalone project with zero references to `Percolator.Domain`.
 
 ---
 
@@ -168,4 +181,6 @@ Update `Percolator.Apps.FileTransfer/domain-plan.md` to reference `Percolator.Do
 - **Milestone 1**: Author `Percolator.Domain.Kernel.csproj`, source files, and guardrail `README.md`.
 - **Milestone 2**: Reference `Kernel` from `Percolator.Domain.csproj`, delete duplicates, and build solution.
 - **Milestone 3**: Run `dotnet test Percolator.Domain.Tests` to verify green test suite (119 passing tests).
-- **Milestone 4**: Update `Percolator.Apps.FileTransfer/domain-plan.md` to establish `Percolator.Apps.FileTransfer.Domain` as a standalone project referencing `Percolator.Domain.Kernel`.
+- **Milestone 4**: Verify and update `Percolator.Apps.Discovery` (add direct reference to `Kernel`, run `dotnet test Percolator.Apps.Discovery.Tests` - 32 passing tests).
+- **Milestone 5**: Run full solution test suite (`dotnet test Percolator.sln` - 260+ passing tests).
+- **Milestone 6**: Update `Percolator.Apps.FileTransfer/domain-plan.md` to establish `Percolator.Apps.FileTransfer.Domain` as a standalone project referencing `Percolator.Domain.Kernel`.
