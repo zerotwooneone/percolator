@@ -14,8 +14,7 @@
 
 - **Target Project**: `Percolator.Apps.FileTransfer` (`AppId = 0x03`).
 - **Target Environment**: **Desktop only** (multi-core processors, high-bandwidth unmetered networks, fast SSD/NVMe storage, large addressable memory, sparse file OS support).
-- **Core Inspiration**: **croc** (multi-stream parallel socket saturation, direct P2P with relay pipe fallback, directory tree bundling, chunked streaming, bitfield-based resumption) combined with **BitTorrent swarm piece sharing, peer tracking, and selective downloads**.
-- **Dependencies**: Depends on `Percolator.Domain`, `Percolator.Apps.FileTransfer.Domain`, `Percolator.PluginSdk`, and `Percolator.SourceGenerators`. Zero reference to concrete transport, storage, or SQLite implementations.
+- **Core Inspiration**: **croc** (multi-stream parallel socket saturation, direct P2P with relay pipe fallback, directory tree bundling, chunked streaming, bitfield-based resumption) combined with **BitTorrent swarm piece sharing, peer tracking, and selective downloads**.\n- **Dependencies**: Depends on `Percolator.Domain`, `Percolator.Apps.FileTransfer.Domain`, `Percolator.PluginSdk`, and `Percolator.SourceGenerators`. Zero reference to concrete transport, storage, or SQLite implementations.
 
 ### 1.1 Inherent Swarm & Direct P2P Privacy Posture (Intentional Design)
 Unlike Percolator's core Double Ratchet messaging—which enforces continuous per-message forward secrecy and shields IP addresses behind sovereign relay mailboxes—the FileTransfer app is intentionally designed with BitTorrent-grade multi-peer performance tradeoffs:
@@ -64,7 +63,90 @@ public interface IAppIngressFilter
 
 ## 3. Application Wire Payloads & Out-of-Band Framing
 
-### 3.1 In-Band Control Channel Payloads (`AppId.FileTransferControl = 0x03`)
+### 3.1 Application Value Objects & Distribution Models (V-60)
+
+```csharp
+namespace Percolator.Apps.FileTransfer.Features.TransferNegotiation;
+
+public sealed record EncryptedChunkData
+{
+    public ReadOnlyMemory<byte> CiphertextWithAuthTag { get; }
+    public int Length => CiphertextWithAuthTag.Length;
+    public ReadOnlySpan<byte> Span => CiphertextWithAuthTag.Span;
+
+    private EncryptedChunkData(ReadOnlyMemory<byte> data) => CiphertextWithAuthTag = data;
+    public static EncryptedChunkData FromBytes(byte[] data) => new(data ?? throw new ArgumentNullException(nameof(data)));
+    public static EncryptedChunkData FromMemory(ReadOnlyMemory<byte> memory) => new(memory);
+}
+
+public sealed record InlineManifestData
+{
+    public ReadOnlyMemory<byte> SerializedBytes { get; }
+    public int Length => SerializedBytes.Length;
+    public ReadOnlySpan<byte> Span => SerializedBytes.Span;
+
+    private InlineManifestData(ReadOnlyMemory<byte> bytes) => SerializedBytes = bytes;
+    public static InlineManifestData FromBytes(byte[] bytes)
+    {
+        if (bytes == null || bytes.Length == 0 || bytes.Length > 65536)
+            throw new ArgumentException("Inline manifest must be between 1 and 65536 bytes.", nameof(bytes));
+        return new InlineManifestData(bytes);
+    }
+}
+
+public sealed record ManifestBlobDescriptor(
+    string BlobId,
+    ChunkHash CiphertextSha256,
+    TotalBundleBytes PlaintextSizeBytes,
+    RelayPipeEndpointUri RelayEndpointUri);
+
+public enum ManifestDistributionKind : byte
+{
+    Inline = 0x01,
+    RemoteBlob = 0x02
+}
+
+public sealed record ManifestDistribution
+{
+    public ManifestDistributionKind Kind { get; }
+    public InlineManifestData? InlineData { get; }
+    public ManifestBlobDescriptor? BlobDescriptor { get; }
+
+    private ManifestDistribution(ManifestDistributionKind kind, InlineManifestData? inlineData, ManifestBlobDescriptor? blob)
+    {
+        Kind = kind;
+        InlineData = inlineData;
+        BlobDescriptor = blob;
+    }
+
+    public static ManifestDistribution FromInline(InlineManifestData data) =>
+        new(ManifestDistributionKind.Inline, data ?? throw new ArgumentNullException(nameof(data)), null);
+
+    public static ManifestDistribution FromBlob(ManifestBlobDescriptor blob) =>
+        new(ManifestDistributionKind.RemoteBlob, null, blob ?? throw new ArgumentNullException(nameof(blob)));
+}
+
+public sealed record DiskSpacePreflightResult(
+    bool HasSufficientSpace,
+    TotalBundleBytes RequiredBytes,
+    TotalBundleBytes AvailableBytes)
+{
+    public static DiskSpacePreflightResult Sufficient(TotalBundleBytes required, TotalBundleBytes available) =>
+        new(true, required, available);
+    public static DiskSpacePreflightResult Insufficient(TotalBundleBytes required, TotalBundleBytes available) =>
+        new(false, required, available);
+}
+
+public sealed record ResolvedFilePath
+{
+    public string AbsolutePath { get; }
+    private ResolvedFilePath(string absolutePath) => AbsolutePath = absolutePath;
+    public static ResolvedFilePath Resolve(RootDirectoryPath root, SanitizedRelativePath relativePath) =>
+        new(Path.Combine(root.Value, relativePath.Value));
+}
+```
+
+### 3.2 In-Band Control Channel Payloads (`AppId.FileTransferControl = 0x03`)
 Carried inside the Double Ratchet envelope ($\le 64\text{ KB}$):
 
 ```csharp
@@ -86,16 +168,14 @@ public sealed record FileTransferAcceptPayload(
     TransportRoutingPreference RoutingPreference,
     Bitfield ResumptionBitfield);                // Bitmap of chunks already possessed
 
-public sealed record FileTransferRejectPayload(
-    TransferSessionId TransferSessionId,
-    TransferTerminationReason Reason);
-
+// Inbound offer decline in PendingConsent is 100% silent on the wire (local discard).
+// FileTransferCancelPayload is dispatched exclusively when aborting active in-flight sessions (V-63).
 public sealed record FileTransferCancelPayload(
     TransferSessionId TransferSessionId,
     TransferTerminationReason Reason);
 ```
 
-### 3.2 Out-of-Band Stream Frame Envelopes
+### 3.3 Out-of-Band Stream Frame Envelopes (V-61)
 Typed frame abstraction for parallel data streams (4–8 multiplexed streams):
 
 ```csharp
@@ -111,8 +191,10 @@ public enum StreamFrameType : byte
     CancelChunk = 0x06,
     Choke = 0x07,
     Unchoke = 0x08,
-    KeepAlive = 0x09,
-    PexPeers = 0x0A
+    Interested = 0x09,       // Signals local interest in remote chunks (V-61)
+    NotInterested = 0x0A,    // Signals local disinterest in remote chunks (V-61)
+    KeepAlive = 0x0B,
+    PexPeers = 0x0C
 }
 
 public interface IStreamFramePayload
@@ -162,6 +244,16 @@ public sealed record ChokeFrame : IStreamFramePayload
 public sealed record UnchokeFrame : IStreamFramePayload
 {
     public StreamFrameType FrameType => StreamFrameType.Unchoke;
+}
+
+public sealed record InterestedFrame : IStreamFramePayload
+{
+    public StreamFrameType FrameType => StreamFrameType.Interested;
+}
+
+public sealed record NotInterestedFrame : IStreamFramePayload
+{
+    public StreamFrameType FrameType => StreamFrameType.NotInterested;
 }
 
 public sealed record KeepAliveFrame : IStreamFramePayload
@@ -224,10 +316,10 @@ public interface IDistributedTrackerPort
 public interface IDesktopFileStorage
 {
     ValueTask PreAllocateFilesAsync(RootDirectoryPath rootPath, TransferManifest manifest, SelectedFileIndices selectedIndices, CancellationToken ct = default);
-    ValueTask WriteChunkAsync(ResolvedDestinationFilePath targetPath, FileByteOffset fileOffset, PlaintextChunkData data, CancellationToken ct = default);
-    ValueTask<PlaintextChunkData> ReadChunkAsync(ResolvedDestinationFilePath targetPath, FileByteOffset fileOffset, TransferByteLength length, CancellationToken ct = default);
+    ValueTask WriteChunkAsync(ResolvedFilePath targetPath, FileByteOffset fileOffset, PlaintextChunkData data, CancellationToken ct = default);
+    ValueTask<PlaintextChunkData> ReadChunkAsync(ResolvedFilePath sourcePath, FileByteOffset fileOffset, TransferByteLength length, CancellationToken ct = default);
     ValueTask<Bitfield> ScanAndComputeBitfieldAsync(RootDirectoryPath rootPath, TransferManifest manifest, CancellationToken ct = default);
-    ValueTask FinalizeFileAsync(ResolvedDestinationFilePath targetPath, FileLastModifiedUtc lastModifiedUtc, CancellationToken ct = default);
+    ValueTask FinalizeFileAsync(ResolvedFilePath targetPath, FileLastModifiedUtc lastModifiedUtc, CancellationToken ct = default);
     ValueTask<DiskSpacePreflightResult> CheckDiskSpaceAsync(RootDirectoryPath rootPath, TotalBundleBytes requiredBytes, CancellationToken ct = default);
 }
 
@@ -258,7 +350,7 @@ public interface IFileTransferFilterPolicyRepository
 ## 5. Minimal, Light-Touch CQRS Contracts
 
 ### 5.1 `IFileTransferActionHandler`
-Consolidates into 5 fundamental lifecycle commands without guessing UI layout or dialog flags:
+Consolidates into 5 fundamental lifecycle commands with explicit optional parameters for title and seeding ratio (V-64):
 
 ```csharp
 namespace Percolator.Apps.FileTransfer.Ports;
@@ -270,6 +362,8 @@ public interface IFileTransferActionHandler
         RootDirectoryPath sourceRoot,
         IReadOnlyList<SanitizedRelativePath> filePaths,
         DirectWanPolicy wanPolicy,
+        RootBundleName? customBundleName = null,
+        SeedRatio? targetSeedRatio = null,
         CancellationToken ct = default);
 
     ValueTask<DomainResult> AcceptTransferAsync(
@@ -302,8 +396,8 @@ public sealed record TransferSessionReadModel(
     PublicIdentityId InitiatorId,
     TransferTopology Topology,
     TotalBundleBytes TotalBytes,
-    TotalBundleBytes TransferredBytes,
-    TotalBundleBytes UploadedBytes,
+    TotalBundleBytes DownloadedBytes,       // Unambiguous downloaded volume (V-65)
+    TotalBundleBytes UploadedBytes,         // Tracked upload volume (V-65)
     SeedRatio CurrentSeedRatio,
     SeedRatio TargetSeedRatio,
     ChunkCount CompletedChunks,
@@ -314,7 +408,7 @@ public sealed record TransferSessionReadModel(
     PeerCount ConnectedPeers,
     TransferSessionState Status,
     TransferRole Role,
-    DateTimeOffset StartedAtUtc,
+    DateTimeOffset CreatedAtUtc,            // Aligned with domain aggregate (V-65)
     DateTimeOffset? CompletedAtUtc);
 
 public interface IFileTransferQueryService
@@ -382,17 +476,17 @@ public interface IFileTransferQueryService
 1. Implement `FileTransferPlugin` implementing `IAppPlugin` (`AppId.FileTransferControl = 0x03`).
 2. Implement `FileTransferIngressFilter` implementing `IAppIngressFilter` (`PluginSdk`) for ingress pre-filtering before deserialization.
 3. Implement `FileTransferPayloadHandler` for ingress processing.
-4. Implement in-band payloads: `FileTransferOfferPayload`, `FileTransferAcceptPayload`, `FileTransferRejectPayload`, `FileTransferCancelPayload`.
+4. Implement in-band payloads: `FileTransferOfferPayload`, `FileTransferAcceptPayload`, `FileTransferCancelPayload`.
 
 ### Milestone 2: Multi-Stream Coordinator & Out-of-Band Engine
 1. Define ports: `ITransferStreamPool`, `ITransferStreamPoolFactory`, `ITransferStream`.
 2. Implement `TransferSessionCoordinator` managing active 4–8 streams.
-3. Implement out-of-band typed frame dispatching via `IStreamFramePayload` and `StreamFrameEnvelope`.
+3. Implement out-of-band typed frame dispatching via `IStreamFramePayload` and `StreamFrameEnvelope` (including `InterestedFrame` and `NotInterestedFrame`).
 4. Implement concurrent chunk request pipeline (keeping 4–8 requests in flight per stream).
 5. Implement opt-in direct candidate discovery adapter hooks (local UPnP port forwarder and relay-assisted STUN reflexive address resolver).
 
 ### Milestone 3: Desktop Disk I/O & Storage Abstraction
-1. Define `IDesktopFileStorage` port using `PlaintextChunkData`, `FileLastModifiedUtc`, `RootDirectoryPath`, `ResolvedDestinationFilePath`, and `DiskSpacePreflightResult`.
+1. Define `IDesktopFileStorage` port using `PlaintextChunkData`, `FileLastModifiedUtc`, `RootDirectoryPath`, `ResolvedFilePath`, and `DiskSpacePreflightResult`.
 2. Implement `DiskChunkAssembler` handling multi-file boundary spanning, chunk writes, and atomic finalization.
 3. Implement selective file downloading chunk range mapping (`SelectedFileIndices`).
 
