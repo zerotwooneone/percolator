@@ -366,6 +366,14 @@ public sealed class TransferManifest : IEntity<TransferSessionId>
         return required;
     }
 }
+
+public sealed record ResolvedFilePath
+{
+    public string AbsolutePath { get; }
+    private ResolvedFilePath(string absolutePath) => AbsolutePath = absolutePath;
+    public static ResolvedFilePath Resolve(RootDirectoryPath root, SanitizedRelativePath relativePath) =>
+        new(Path.Combine(root.Value, relativePath.Value));
+}
 ```
 
 ### 2.4 `FileTransferFilterPolicy` Aggregate Root

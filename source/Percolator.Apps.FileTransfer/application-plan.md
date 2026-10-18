@@ -14,7 +14,8 @@
 
 - **Target Project**: `Percolator.Apps.FileTransfer` (`AppId = 0x03`).
 - **Target Environment**: **Desktop only** (multi-core processors, high-bandwidth unmetered networks, fast SSD/NVMe storage, large addressable memory, sparse file OS support).
-- **Core Inspiration**: **croc** (multi-stream parallel socket saturation, direct P2P with relay pipe fallback, directory tree bundling, chunked streaming, bitfield-based resumption) combined with **BitTorrent swarm piece sharing, peer tracking, and selective downloads**.\n- **Dependencies**: Depends on `Percolator.Domain`, `Percolator.Apps.FileTransfer.Domain`, `Percolator.PluginSdk`, and `Percolator.SourceGenerators`. Zero reference to concrete transport, storage, or SQLite implementations.
+- **Core Inspiration**: **croc** (multi-stream parallel socket saturation, direct P2P with relay pipe fallback, directory tree bundling, chunked streaming, bitfield-based resumption) combined with **BitTorrent swarm piece sharing, peer tracking, and selective downloads**.
+- **Dependencies**: Depends on `Percolator.Domain`, `Percolator.Apps.FileTransfer.Domain`, `Percolator.PluginSdk`, and `Percolator.SourceGenerators`. Zero reference to concrete transport, storage, or SQLite implementations.
 
 ### 1.1 Inherent Swarm & Direct P2P Privacy Posture (Intentional Design)
 Unlike Percolator's core Double Ratchet messaging—which enforces continuous per-message forward secrecy and shields IP addresses behind sovereign relay mailboxes—the FileTransfer app is intentionally designed with BitTorrent-grade multi-peer performance tradeoffs:
@@ -63,7 +64,7 @@ public interface IAppIngressFilter
 
 ## 3. Application Wire Payloads & Out-of-Band Framing
 
-### 3.1 Application Value Objects & Distribution Models (V-60)
+### 3.1 Application Value Objects & Distribution Models (V-60, V-66, V-67)
 
 ```csharp
 namespace Percolator.Apps.FileTransfer.Features.TransferNegotiation;
@@ -94,8 +95,9 @@ public sealed record InlineManifestData
     }
 }
 
+// Uses strongly typed BlobId from Percolator.PluginSdk (V-66):
 public sealed record ManifestBlobDescriptor(
-    string BlobId,
+    BlobId BlobId,
     ChunkHash CiphertextSha256,
     TotalBundleBytes PlaintextSizeBytes,
     RelayPipeEndpointUri RelayEndpointUri);
@@ -137,13 +139,7 @@ public sealed record DiskSpacePreflightResult(
         new(false, required, available);
 }
 
-public sealed record ResolvedFilePath
-{
-    public string AbsolutePath { get; }
-    private ResolvedFilePath(string absolutePath) => AbsolutePath = absolutePath;
-    public static ResolvedFilePath Resolve(RootDirectoryPath root, SanitizedRelativePath relativePath) =>
-        new(Path.Combine(root.Value, relativePath.Value));
-}
+// Note: ResolvedFilePath is defined in Percolator.Apps.FileTransfer.Domain.ManifestManagement and imported here (V-67).
 ```
 
 ### 3.2 In-Band Control Channel Payloads (`AppId.FileTransferControl = 0x03`)
@@ -318,7 +314,7 @@ public interface IDesktopFileStorage
     ValueTask PreAllocateFilesAsync(RootDirectoryPath rootPath, TransferManifest manifest, SelectedFileIndices selectedIndices, CancellationToken ct = default);
     ValueTask WriteChunkAsync(ResolvedFilePath targetPath, FileByteOffset fileOffset, PlaintextChunkData data, CancellationToken ct = default);
     ValueTask<PlaintextChunkData> ReadChunkAsync(ResolvedFilePath sourcePath, FileByteOffset fileOffset, TransferByteLength length, CancellationToken ct = default);
-    ValueTask<Bitfield> ScanAndComputeBitfieldAsync(RootDirectoryPath rootPath, TransferManifest manifest, CancellationToken ct = default);
+    ValueTask<Bitfield> ScanAndComputeBitfieldAsync(RootDirectoryPath rootPath, TransferManifest manifest, SelectedFileIndices? selectedIndices = null, CancellationToken ct = default); // (V-70)
     ValueTask FinalizeFileAsync(ResolvedFilePath targetPath, FileLastModifiedUtc lastModifiedUtc, CancellationToken ct = default);
     ValueTask<DiskSpacePreflightResult> CheckDiskSpaceAsync(RootDirectoryPath rootPath, TotalBundleBytes requiredBytes, CancellationToken ct = default);
 }
@@ -388,16 +384,19 @@ public sealed record ManifestFileReadModel(
     FileSizeBytes FileSize,
     BundleByteOffset StartOffset,
     BundleByteOffset EndOffset,
-    FileLastModifiedUtc LastModifiedUtc);
+    FileLastModifiedUtc LastModifiedUtc,
+    bool IsSelected,                    // Selective download projection (V-69)
+    bool IsCompleted);                  // Per-file completion status (V-69)
 
 public sealed record TransferSessionReadModel(
     TransferSessionId SessionId,
     RootBundleName RootName,
     PublicIdentityId InitiatorId,
     TransferTopology Topology,
+    RootDirectoryPath? LocalRootPath,   // Preserves local disk folder for UI actions (V-68)
     TotalBundleBytes TotalBytes,
-    TotalBundleBytes DownloadedBytes,       // Unambiguous downloaded volume (V-65)
-    TotalBundleBytes UploadedBytes,         // Tracked upload volume (V-65)
+    TotalBundleBytes DownloadedBytes,   // Unambiguous downloaded volume (V-65)
+    TotalBundleBytes UploadedBytes,     // Tracked upload volume (V-65)
     SeedRatio CurrentSeedRatio,
     SeedRatio TargetSeedRatio,
     ChunkCount CompletedChunks,
@@ -408,7 +407,7 @@ public sealed record TransferSessionReadModel(
     PeerCount ConnectedPeers,
     TransferSessionState Status,
     TransferRole Role,
-    DateTimeOffset CreatedAtUtc,            // Aligned with domain aggregate (V-65)
+    DateTimeOffset CreatedAtUtc,        // Aligned with domain aggregate (V-65)
     DateTimeOffset? CompletedAtUtc);
 
 public interface IFileTransferQueryService
