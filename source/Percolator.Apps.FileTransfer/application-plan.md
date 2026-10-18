@@ -57,8 +57,8 @@ public interface IAppIngressFilter
 }
 ```
 
-- `FileTransferIngressFilter` implements `IAppIngressFilter`, invoking `FileTransferFilterPolicy.EvaluateEdgeIngress(context.SenderIdentityId)`. When blocked, raw bytes are discarded before deserialization.
-- `FileTransferPayloadHandler` implements `IAppPayloadHandler`, validating relay URI against `policy.IsRelayBlocked(relayUri)` before staging inbound sessions.
+- `FileTransferIngressFilter` implements `IAppIngressFilter`, invoking `FileTransferFilterPolicy.EvaluatePeer(context.SenderIdentityId)`. When `PeerFilterDecision.Blocked`, raw bytes are discarded before deserialization (`IngressDecision.DiscardSilently`).
+- `FileTransferPayloadHandler` implements `IAppPayloadHandler`, validating relay URI against `policy.EvaluateRelay(relayUri) == RelayFilterDecision.Blocked` before staging inbound sessions.
 
 ---
 
@@ -223,12 +223,12 @@ public interface IDistributedTrackerPort
 
 public interface IDesktopFileStorage
 {
-    ValueTask PreAllocateFilesAsync(RootDestinationPath destinationRoot, TransferManifest manifest, SelectedFileIndices selectedIndices, CancellationToken ct = default);
+    ValueTask PreAllocateFilesAsync(RootDirectoryPath rootPath, TransferManifest manifest, SelectedFileIndices selectedIndices, CancellationToken ct = default);
     ValueTask WriteChunkAsync(ResolvedDestinationFilePath targetPath, FileByteOffset fileOffset, PlaintextChunkData data, CancellationToken ct = default);
     ValueTask<PlaintextChunkData> ReadChunkAsync(ResolvedDestinationFilePath targetPath, FileByteOffset fileOffset, TransferByteLength length, CancellationToken ct = default);
-    ValueTask<Bitfield> ScanAndComputeBitfieldAsync(RootDestinationPath rootPath, TransferManifest manifest, CancellationToken ct = default);
+    ValueTask<Bitfield> ScanAndComputeBitfieldAsync(RootDirectoryPath rootPath, TransferManifest manifest, CancellationToken ct = default);
     ValueTask FinalizeFileAsync(ResolvedDestinationFilePath targetPath, FileLastModifiedUtc lastModifiedUtc, CancellationToken ct = default);
-    ValueTask<DiskSpacePreflightResult> CheckDiskSpaceAsync(RootDestinationPath rootPath, TotalBundleBytes requiredBytes, CancellationToken ct = default);
+    ValueTask<DiskSpacePreflightResult> CheckDiskSpaceAsync(RootDirectoryPath rootPath, TotalBundleBytes requiredBytes, CancellationToken ct = default);
 }
 
 public interface ITransferRateLimiter
@@ -267,14 +267,14 @@ public interface IFileTransferActionHandler
 {
     ValueTask<DomainResult<TransferSessionId>> InitiateTransferAsync(
         IReadOnlyList<PublicIdentityId> recipients,
-        RootDestinationPath sourceRoot,
+        RootDirectoryPath sourceRoot,
         IReadOnlyList<SanitizedRelativePath> filePaths,
         DirectWanPolicy wanPolicy,
         CancellationToken ct = default);
 
     ValueTask<DomainResult> AcceptTransferAsync(
         TransferSessionId sessionId,
-        RootDestinationPath destinationFolder,
+        RootDirectoryPath destinationFolder,
         SelectedFileIndices? selectedFiles = null,
         CancellationToken ct = default);
 
@@ -300,8 +300,7 @@ public sealed record TransferSessionReadModel(
     TransferSessionId SessionId,
     RootBundleName RootName,
     PublicIdentityId InitiatorId,
-    PublicIdentityId? RemotePeerId,
-    IReadOnlySet<PublicIdentityId> TargetRecipients,
+    TransferTopology Topology,
     TotalBundleBytes TotalBytes,
     TotalBundleBytes TransferredBytes,
     TotalBundleBytes UploadedBytes,
@@ -393,7 +392,7 @@ public interface IFileTransferQueryService
 5. Implement opt-in direct candidate discovery adapter hooks (local UPnP port forwarder and relay-assisted STUN reflexive address resolver).
 
 ### Milestone 3: Desktop Disk I/O & Storage Abstraction
-1. Define `IDesktopFileStorage` port using `PlaintextChunkData`, `FileLastModifiedUtc`, `RootDestinationPath`, `ResolvedDestinationFilePath`, and `DiskSpacePreflightResult`.
+1. Define `IDesktopFileStorage` port using `PlaintextChunkData`, `FileLastModifiedUtc`, `RootDirectoryPath`, `ResolvedDestinationFilePath`, and `DiskSpacePreflightResult`.
 2. Implement `DiskChunkAssembler` handling multi-file boundary spanning, chunk writes, and atomic finalization.
 3. Implement selective file downloading chunk range mapping (`SelectedFileIndices`).
 

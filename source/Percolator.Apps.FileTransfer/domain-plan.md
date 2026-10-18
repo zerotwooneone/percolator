@@ -28,7 +28,7 @@
 ## 2. Domain Aggregate Roots & Entities
 
 ### 2.1 `TransferSession` Aggregate Root
-Following `Percolator.Domain.Common.AggregateRoot<TId>`, `TransferSession` models the transfer lifecycle as an aggregate boundary emitting domain events upon state transitions. Swarm peer states, bitfield tracking, piece verification, and participant boundaries are fully encapsulated within the aggregate root:
+Following `Percolator.Domain.Common.AggregateRoot<TId>`, `TransferSession` models the transfer lifecycle as an aggregate boundary emitting domain events upon state transitions. Swarm peer states, bitfield tracking, piece verification, and participant topologies are fully encapsulated within the aggregate root:
 
 ```csharp
 namespace Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
@@ -57,12 +57,11 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
     public override TransferSessionId Id { get; }
     public TransferRole Role { get; }
     public TransferSessionState State { get; private set; }
-    public PublicIdentityId InitiatorId { get; }
-    public PublicIdentityId? RemotePeerId { get; }                   // 1:1 transfer participant
-    public IReadOnlySet<PublicIdentityId> TargetRecipients { get; }   // 1:N push transfer targets
+    public TransferTopology Topology { get; }                        // Cohesive participant topology (V-50)
+    public PublicIdentityId InitiatorId => Topology.InitiatorId;
     public TransferManifest Manifest { get; }
     public Bitfield LocalBitfield { get; private set; }
-    public RootDestinationPath? DestinationPath { get; private set; }
+    public RootDirectoryPath? LocalRootPath { get; private set; }     // Cohesive disk root for sender/receiver (V-52)
     public SelectedFileIndices? SelectedFiles { get; private set; }
     public SeedRatio TargetSeedRatio { get; private set; }
     public DirectWanPolicy WanPolicy { get; }
@@ -76,11 +75,12 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
     private readonly Dictionary<PublicIdentityId, SwarmMember> _swarmMembers = [];
     public IReadOnlyCollection<SwarmMember> SwarmMembers => _swarmMembers.Values;
 
-    // Invariant-enforced Factory Methods (V-46):
+    // Invariant-enforced Factory Methods (V-46, V-50):
     public static TransferSession CreateOutgoing1to1(
         TransferSessionId sessionId,
         PublicIdentityId initiatorId,
         PublicIdentityId recipientId,
+        RootDirectoryPath sourceRoot,
         TransferManifest manifest,
         DirectWanPolicy wanPolicy,
         TransferKey sessionKey,
@@ -93,6 +93,7 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
         TransferSessionId sessionId,
         PublicIdentityId initiatorId,
         IReadOnlyList<PublicIdentityId> recipients,
+        RootDirectoryPath sourceRoot,
         TransferManifest manifest,
         DirectWanPolicy wanPolicy,
         TransferKey sessionKey,
@@ -113,8 +114,17 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
         IDateTimeProvider clock);
 
     // Encapsulated Domain Mutation Methods:
-    public DomainResult AcceptTransfer(RootDestinationPath destinationFolder, SelectedFileIndices? selectedFiles, IDateTimeProvider clock);
+    public DomainResult AcceptTransfer(RootDirectoryPath destinationFolder, SelectedFileIndices selectedFiles, IDateTimeProvider clock);
     public DomainResult StartStreaming();
+    
+    // Encapsulates remote peer acceptance lifecycle (V-51):
+    public DomainResult RecordPeerAcceptance(
+        PublicIdentityId recipientId,
+        IReadOnlyList<DirectEndpointCandidate> candidates,
+        TransportRoutingPreference routingPreference,
+        Bitfield resumptionBitfield,
+        IDateTimeProvider clock);
+
     public DomainResult RegisterSwarmMember(PublicIdentityId peerId, Bitfield initialBitfield, IReadOnlyList<DirectEndpointCandidate> candidates, TransportRoutingPreference routingPreference, IDateTimeProvider clock);
     public DomainResult RecordPeerBitfield(PublicIdentityId peerId, Bitfield bitfield);
     public DomainResult RecordPeerHave(PublicIdentityId peerId, ChunkIndex chunkIndex);
@@ -191,7 +201,7 @@ public sealed class SwarmMember : IEntity<PublicIdentityId>
     internal void UpdateCandidates(IReadOnlyList<DirectEndpointCandidate> candidates) => EndpointCandidates = candidates;
     internal void SetChoke(PeerChokeStatus status) => ChokeStatus = status;
     internal void SetInterest(PeerInterestStatus status) => InterestStatus = status;
-    internal void Touch(DateTimeOffset timestamp) => LastSeenUtc = timestamp;
+    internal void Touch(IDateTimeProvider clock) => LastSeenUtc = clock.UtcNow;
 }
 ```
 
@@ -256,6 +266,7 @@ public sealed class TransferManifest : IEntity<TransferSessionId>
         Files = files;
     }
 
+    // Invariant-enforced Factory (V-53):
     public static TransferManifest Create(
         TransferSessionId manifestId,
         RootBundleName rootName,
@@ -263,14 +274,30 @@ public sealed class TransferManifest : IEntity<TransferSessionId>
         MerkleTreeIndex merkleTree,
         IReadOnlyList<FileEntry> files)
     {
+        if (files == null || files.Count == 0)
+        {
+            throw new DomainValidationException("Transfer bundle must contain at least one file entry.");
+        }
+
         long totalBytes = 0;
         foreach (FileEntry file in files)
         {
             totalBytes += file.FileSize.Bytes;
         }
 
+        if (totalBytes <= 0)
+        {
+            throw new DomainValidationException("Transfer bundle total byte size must be greater than zero.");
+        }
+
         TotalBundleBytes bundleBytes = TotalBundleBytes.FromBytes(totalBytes);
         int chunkCount = (int)Math.Max(1, (totalBytes + chunkSize.Bytes - 1) / chunkSize.Bytes);
+
+        if (merkleTree.LeafCount != chunkCount)
+        {
+            throw new DomainValidationException(
+                $"Merkle tree leaf count ({merkleTree.LeafCount}) must match bundle chunk count ({chunkCount}).");
+        }
 
         return new TransferManifest(
             manifestId,
@@ -286,8 +313,22 @@ public sealed class TransferManifest : IEntity<TransferSessionId>
 ```
 
 ### 2.4 `FileTransferFilterPolicy` Aggregate Root
+Encapsulates edge ingress filtering decisions with pure domain types (V-48) and emits domain events upon policy mutations:
+
 ```csharp
 namespace Percolator.Apps.FileTransfer.Domain.IngressControl;
+
+public enum PeerFilterDecision : byte
+{
+    Allowed = 0x01,
+    Blocked = 0x02
+}
+
+public enum RelayFilterDecision : byte
+{
+    Allowed = 0x01,
+    Blocked = 0x02
+}
 
 public sealed class FileTransferFilterPolicy : AggregateRoot<PublicIdentityId>
 {
@@ -305,19 +346,47 @@ public sealed class FileTransferFilterPolicy : AggregateRoot<PublicIdentityId>
         OwnerId = ownerId;
     }
 
-    public void BlockPeer(PublicIdentityId peerId) => _blockedPeers.Add(peerId);
-    public void UnblockPeer(PublicIdentityId peerId) => _blockedPeers.Remove(peerId);
-    public void BlockRelay(RelayPipeEndpointUri relayUri) => _blockedRelays.Add(relayUri);
-    public void UnblockRelay(RelayPipeEndpointUri relayUri) => _blockedRelays.Remove(relayUri);
-
-    public IngressDecision EvaluateEdgeIngress(PublicIdentityId senderId)
+    public void BlockPeer(PublicIdentityId peerId, IDateTimeProvider clock)
     {
-        return _blockedPeers.Contains(senderId) ? IngressDecision.DiscardSilently : IngressDecision.Accept;
+        if (_blockedPeers.Add(peerId))
+        {
+            RaiseDomainEvent(new PeerBlockedDomainEvent(OwnerId, peerId, clock.UtcNow));
+        }
     }
 
-    public bool IsRelayBlocked(RelayPipeEndpointUri relayUri)
+    public void UnblockPeer(PublicIdentityId peerId, IDateTimeProvider clock)
     {
-        return _blockedRelays.Contains(relayUri);
+        if (_blockedPeers.Remove(peerId))
+        {
+            RaiseDomainEvent(new PeerUnblockedDomainEvent(OwnerId, peerId, clock.UtcNow));
+        }
+    }
+
+    public void BlockRelay(RelayPipeEndpointUri relayUri, IDateTimeProvider clock)
+    {
+        if (_blockedRelays.Add(relayUri))
+        {
+            RaiseDomainEvent(new RelayBlockedDomainEvent(OwnerId, relayUri, clock.UtcNow));
+        }
+    }
+
+    public void UnblockRelay(RelayPipeEndpointUri relayUri, IDateTimeProvider clock)
+    {
+        if (_blockedRelays.Remove(relayUri))
+        {
+            RaiseDomainEvent(new RelayUnblockedDomainEvent(OwnerId, relayUri, clock.UtcNow));
+        }
+    }
+
+    // Pure Domain Decisions (Zero PluginSdk Dependency) (V-48):
+    public PeerFilterDecision EvaluatePeer(PublicIdentityId senderId)
+    {
+        return _blockedPeers.Contains(senderId) ? PeerFilterDecision.Blocked : PeerFilterDecision.Allowed;
+    }
+
+    public RelayFilterDecision EvaluateRelay(RelayPipeEndpointUri relayUri)
+    {
+        return _blockedRelays.Contains(relayUri) ? RelayFilterDecision.Blocked : RelayFilterDecision.Allowed;
     }
 }
 ```
@@ -340,44 +409,37 @@ All domain concepts in `Apps.FileTransfer.Domain` are modeled as strongly typed 
 | **`RelayPipeToken`** | `[ByteArray(length: 32)]` | 32-byte authentication token for relay pipe rendezvous | Explicit `Generate()`, `FromBytes(...)`, `.Span`. Zero cast operators. |
 | **`RelayRendezvousDescriptor`** | `sealed record` | Encapsulated relay endpoint URI and 32-byte auth token | Explicit `Create(RelayPipeEndpointUri, RelayPipeToken)`, `.EndpointUri`, `.Token`. Zero cast operators. |
 | **`TransferBundleSummary`** | `sealed record` | Cohesive bundle metadata (title, size, files, chunks, Merkle root) | Explicit `Create(...)`, `.RootName`, `.TotalSize`, `.TotalFiles`, `.ChunkSizeBytes`, `.TotalChunks`, `.MerkleRoot`. Zero cast operators. |
-| **`InlineManifestData`** | `[ByteArray(minLength: 1, maxLength: 65536)]` | Serialized inline manifest payload ($\le 64\text{ KB}$) | Explicit `FromBytes(...)`, `FromSpan(...)`, `.Span`. Zero cast operators. |
+| **`TransferTopology`** | `sealed record` | Discriminated union of participant topology: OneToOne, MultiPeer, Incoming | Explicit `OneToOne(...)`, `MultiPeer(...)`, `Incoming(...)`, `.InitiatorId`, `.Recipients`, `.ContainsRecipient(...)`. Zero cast operators. (V-50) |
 | **`RootBundleName`** | `sealed record` | Sanitized display title for transfer root ($1 \le \text{Length} \le 255$) | Explicit `Parse(string)`, `.Value`. Zero cast operators. |
 | **`RelayPipeEndpointUri`** | `sealed record` | URI for relay transfer pipe rendezvous (`percolator-pipe://` / `wss://`) | Explicit `Parse(string)`, `FromUri(Uri)`, `.Value`. Zero cast operators. |
 | **`TransferTerminationReason`**| `sealed record` | Reason for transfer rejection, cancellation, or failure | Explicit `UserDeclined`, `SenderCancelled`, `StorageExhausted`, `VerificationFailed`, `Timeout`, `FromText(string)`, `.Value`. Zero cast operators. |
 | **`SanitizedRelativePath`** | `sealed record` | Relative file path verified against directory traversal | Explicit `Parse(string)`, `.Value`. Zero cast operators. |
-| **`RootDestinationPath`** | `sealed record` | Validated absolute desktop target folder path | Explicit `Parse(string)`, `Resolve(SanitizedRelativePath)`, `.Value`. Zero cast operators. |
-| **`ResolvedDestinationFilePath`**| `sealed record` | Validated combined absolute destination file path | Explicit `Resolve(RootDestinationPath, SanitizedRelativePath)`, `.AbsolutePath`. Zero cast operators. |
+| **`RootDirectoryPath`** | `sealed record` | Validated absolute desktop root folder path for source or destination | Explicit `Parse(string)`, `Resolve(SanitizedRelativePath)`, `.Value`. Zero cast operators. (V-52) |
+| **`ResolvedDestinationFilePath`**| `sealed record` | Validated combined absolute destination file path | Explicit `Resolve(RootDirectoryPath, SanitizedRelativePath)`, `.AbsolutePath`. Zero cast operators. |
+| **`FileChunkSlice`** | `sealed record` | Pure domain calculation mapping chunk byte slice to target file | Explicit `Create(...)`, `.FileIndex`, `.RelativePath`, `.OffsetInFile`, `.SliceLength`, `.BufferOffset`. Zero cast operators. (V-47) |
 | **`FileLastModifiedUtc`** | `readonly record struct` | Validated file modification timestamp ($0 \le \text{epoch} \le \text{future buffer}$) | Explicit `FromDateTimeOffset(DateTimeOffset)`, `FromUnixSeconds(long)`, `.UtcDateTime`, `.UnixSeconds`. Zero cast operators. |
 | **`EndpointHost`** | `sealed record` | Validated IP address or DNS hostname | Explicit `Parse(string)`, `.Value`. Zero cast operators. |
 | **`PortNumber`** | `readonly record struct` | Network port: $1 \le \text{Port} \le 65535$ | Explicit `FromInt(int)`, `.Value`. Zero cast operators. |
 | **`FileIndex`** | `readonly record struct` | Zero-indexed file sequence in manifest: $0 \le \text{Value} < \text{TotalFiles}$ | Explicit `FromInt(int)`, `.Value`. Zero cast operators. |
 | **`ChunkIndex`** | `readonly record struct` | Zero-indexed 32-bit chunk sequence: $0 \le \text{Index} < \text{TotalChunks}$ | Explicit `FromInt(int)`, `WriteBigEndian(Span<byte>)`, `.Value`, `Next()`. Zero cast operators. |
 | **`ChunkSizeBytes`** | `readonly record struct` | Bounded chunk size: $64\text{ KB} \le \text{Bytes} \le 4\text{ MB}$, default $1\text{ MB}$ | Explicit `Default`, `FromBytes(int)`, `.Bytes`. Zero cast operators. |
-| **`TotalBundleBytes`** | `readonly record struct` | Combined byte size of bundle: $\text{Bytes} \ge 0$ | Explicit `FromBytes(long)`, `Zero`, `.Bytes`. Zero cast operators. |
+| **`TotalBundleBytes`** | `readonly record struct` | Combined byte size of bundle: $\text{Bytes} > 0$ | Explicit `FromBytes(long)`, `.Bytes`. Zero cast operators. |
 | **`FileSizeBytes`** | `readonly record struct` | Byte size of single file: $\text{Bytes} \ge 0$ | Explicit `FromBytes(long)`, `RemainingSlice(FileByteOffset, ChunkByteLength)`, `.Bytes`. Zero cast operators. |
 | **`BundleByteOffset`** | `readonly record struct` | Offset across global bundle byte layout: $\text{Offset} \ge 0$ | Explicit `FromOffset(long)`, `FromChunk(ChunkIndex, ChunkSizeBytes)`, `Add(FileSizeBytes)`, `Add(TransferByteLength)`, `Subtract(BundleByteOffset)`, `SubtractToFileOffset(BundleByteOffset)`, `Zero`, `.Offset`. Zero cast operators. |
 | **`FileByteOffset`** | `readonly record struct` | Offset within specific file on disk: $\text{Offset} \ge 0$ | Explicit `FromOffset(long)`, `Add(TransferByteLength)`, `Zero`, `.Offset`. Zero cast operators. |
-| **`FileCount`** | `readonly record struct` | Total file count in manifest: $\text{Count} \ge 0$ | Explicit `FromInt(int)`, `Zero`, `.Count`. Zero cast operators. |
+| **`FileCount`** | `readonly record struct` | Total file count in manifest: $\text{Count} \ge 1$ | Explicit `FromInt(int)`, `.Count`. Zero cast operators. |
 | **`ChunkCount`** | `readonly record struct` | Total chunks in transfer: $\text{Count} \ge 1$ | Explicit `FromInt(int)`, `.Count`. Zero cast operators. |
 | **`StreamCount`** | `readonly record struct` | Count of active parallel streams: $0 \le \text{Count} \le 8$ | Explicit `FromInt(int)`, `Default` (4), `.Count`. Zero cast operators. |
 | **`PeerCount`** | `readonly record struct` | Count of connected swarm peers: $\text{Count} \ge 0$ | Explicit `FromInt(int)`, `Zero`, `.Count`. Zero cast operators. |
 | **`TransferByteLength`** | `readonly record struct` | Byte length slice for transfer/throttle operations: $\text{Bytes} \ge 0$ | Explicit `FromBytes(int)`, `.Bytes`. Zero cast operators. |
 | **`TransferBandwidth`** | `readonly record struct` | Bandwidth speed cap: $\text{BytesPerSec} \ge 0$ | Explicit `FromBytesPerSecond(long)`, `.BytesPerSecond`. Zero cast operators. |
 | **`BandwidthLimit`** | `readonly record struct` | Bandwidth speed cap: Unlimited or bounded speed | Explicit `Unlimited`, `Capped(TransferBandwidth)`, `.IsUnlimited`, `.Value`. Zero cast operators. |
-| **`PipeConcurrencyLimit`** | `readonly record struct` | Maximum concurrent relay streams: $1 \le \text{Count} \le 128$ | Explicit `FromInt(int)`, `Default` (8), `.Count`. Zero cast operators. |
-| **`RelayTransferCapabilityFlags`** | `[Flags] enum : byte` | Advertised relay transfer feature flags | Explicit flags: `None` (0x00), `TransferPipes` (0x01), `SwarmTracker` (0x02), `StunReflection` (0x04). |
-| **`RelayFileTransferCapabilities`** | `sealed record` | Relay feature capabilities and resource boundaries | Explicit `Create(...)`, `Capabilities`, `MaxPipeBandwidth`, `MaxConcurrentPipes`. Zero cast operators. |
 | **`SeedRatio`** | `readonly record struct` | Upload/Download ratio cap: $\ge 0.0$ or Unlimited | Explicit `Zero`, `Unlimited`, `FromMultiplier(double)`, `.Multiplier`, `.IsUnlimited`. Rejects NaN, Infinity, negative values. Zero cast operators. |
 | **`Bitfield`** | `sealed record` | Chunk possession bitmask: byte length $\lceil \text{TotalChunks} / 8 \rceil$. **Immutable** | Explicit `WithChunk(ChunkIndex)` returning new instance; `Empty(ChunkCount)`, `HasChunk(ChunkIndex)`, `ToByteArray()`, `.Length`, `.IsComplete`. Zero cast operators. |
-| **`RoutePriority`** | `enum : byte` | Candidate route preference hierarchy | Explicit enum values: `DirectLan` (0x01), `DirectWanOptIn` (0x02), `PrimaryRelay` (0x03), `SecondaryRelay` (0x04). |
 | **`DirectWanPolicy`** | `enum : byte` | Direct WAN candidate exposure policy | Explicit enum values: `DisabledByDefault` (0x01), `ExplicitlyAllowed` (0x02). |
 | **`TransportRoutingPreference`** | `enum : byte` | In-band connection route preference | Explicit enum values: `DirectPreferred` (0x01), `RelayOnly` (0x02). |
 | **`ChunkByteLength`** | `readonly record struct` | Actual bounded byte length of an individual chunk: $1 \le \text{Bytes} \le 4\text{ MB}$ | Explicit `FromBytes(int)`, `Subtract(TransferByteLength)`, `.Bytes`. Zero cast operators. |
-| **`EncryptedChunkData`** | `sealed record` | Ciphertext payload of chunk with appended 16-byte GCM auth tag | Explicit `FromBytes(byte[])`, `FromSpan(ReadOnlySpan<byte>)`, `.Span`, `.Length`. Zero cast operators. |
 | **`PlaintextChunkData`** | `sealed record` | Decrypted chunk bytes for disk I/O ($1 \le \text{Bytes} \le 4\text{ MB}$) | Explicit `FromBytes(byte[])`, `FromMemory(ReadOnlyMemory<byte>)`, `.Memory`, `.Span`, `.Length`. Zero cast operators. |
-| **`DiskSpacePreflightResult`** | `sealed record` | Domain result of pre-flight disk capacity check | Explicit `Sufficient(required, available)`, `Insufficient(required, available)`, `.HasSpace`. Zero cast operators. |
-| **`ManifestBlobDescriptor`** | `sealed record` | Clean out-of-band manifest storage reference | Explicit `Create(...)`, `BlobId`, `CiphertextSha256`, `PlaintextSizeBytes`, `RelayEndpointUri`. Zero cast operators. |
-| **`ManifestDistribution`** | `sealed record` | Discriminated union of inline vs. out-of-band manifest | Explicit `FromInline(...)`, `FromBlob(...)`, `Kind`, `InlineData`, `BlobDescriptor`. Zero cast operators. |
 | **`MerkleTreeIndex`** | `sealed record` | Encapsulated Merkle tree root and leaf verification index | Explicit `Create(root, leaves)`, `VerifyLeaf(index, span)`, `GetLeaf(index)`. Zero cast operators. |
 | **`SelectedFileIndices`** | `sealed record` | Checked file indices: non-null immutable set of `FileIndex` | Explicit `All(FileCount)`, `FromIndices(...)`, `Contains(FileIndex)`. Zero cast operators. |
 | **`StreamIndex`** | `readonly record struct` | Zero-indexed out-of-band stream: $0 \le \text{Index} \le 7$ | Explicit `FromInt(int)`, `.Value`. Zero cast operators. |
@@ -388,7 +450,7 @@ All domain concepts in `Apps.FileTransfer.Domain` are modeled as strongly typed 
 
 ## 4. Formal Domain Events Hierarchy
 
-Every domain transition in `TransferSession` emits an immutable domain event implementing `IDomainEvent` (`Percolator.Domain.Common`):
+Every domain transition in `TransferSession` and `FileTransferFilterPolicy` emits an immutable domain event implementing `IDomainEvent` (`Percolator.Domain.Common`):
 
 ```csharp
 namespace Percolator.Apps.FileTransfer.Domain.TransferNegotiation.Events;
@@ -401,7 +463,7 @@ public sealed record TransferOfferedDomainEvent(
 
 public sealed record TransferAcceptedLocallyDomainEvent(
     TransferSessionId SessionId,
-    RootDestinationPath DestinationPath,
+    RootDirectoryPath DestinationPath,
     SelectedFileIndices SelectedFiles,
     DateTimeOffset OccurredAtUtc) : IDomainEvent;
 
@@ -461,38 +523,100 @@ public sealed record TransferCancelledDomainEvent(
     TransferSessionId SessionId,
     TransferTerminationReason Reason,
     DateTimeOffset OccurredAtUtc) : IDomainEvent;
+
+// Filter Policy Domain Events (V-48):
+public sealed record PeerBlockedDomainEvent(
+    PublicIdentityId OwnerId,
+    PublicIdentityId PeerId,
+    DateTimeOffset OccurredAtUtc) : IDomainEvent;
+
+public sealed record PeerUnblockedDomainEvent(
+    PublicIdentityId OwnerId,
+    PublicIdentityId PeerId,
+    DateTimeOffset OccurredAtUtc) : IDomainEvent;
+
+public sealed record RelayBlockedDomainEvent(
+    PublicIdentityId OwnerId,
+    RelayPipeEndpointUri RelayUri,
+    DateTimeOffset OccurredAtUtc) : IDomainEvent;
+
+public sealed record RelayUnblockedDomainEvent(
+    PublicIdentityId OwnerId,
+    RelayPipeEndpointUri RelayUri,
+    DateTimeOffset OccurredAtUtc) : IDomainEvent;
 ```
 
 ---
 
 ## 5. Pure Domain Algorithms & Boundary Math
 
-### 5.1 Multi-File Boundary Spanning Math (`DiskChunkAssembler`)
-Encapsulates calculating byte offsets across multi-gigabyte continuous byte streams into target file boundaries:
+### 5.1 Multi-File Boundary Spanning Calculation (`ChunkBoundaryCalculator`)
+Encapsulates calculating byte offsets across multi-gigabyte continuous byte streams into target file slices with **zero I/O dependencies** (V-47):
 
 ```csharp
-BundleByteOffset chunkStart = BundleByteOffset.FromChunk(chunkIndex, chunkSize);
-ChunkByteLength remainingChunkBytes = actualChunkSize;
-BundleByteOffset currentOffset = chunkStart;
-int bufferOffset = 0;
+namespace Percolator.Apps.FileTransfer.Domain.ManifestManagement;
 
-while (remainingChunkBytes.Bytes > 0)
+public static class ChunkBoundaryCalculator
 {
-    FileEntry file = FindFileForOffset(manifest.Files, currentOffset);
-    FileByteOffset offsetInFile = currentOffset.SubtractToFileOffset(file.StartOffset);
-    TransferByteLength bytesForThisFile = file.FileSize.RemainingSlice(offsetInFile, remainingChunkBytes);
-
-    if (selectedFiles.Contains(file.Index))
+    public static IReadOnlyList<FileChunkSlice> CalculateSlices(
+        TransferManifest manifest,
+        ChunkIndex chunkIndex,
+        ChunkByteLength actualChunkSize)
     {
-        ReadOnlyMemory<byte> slice = chunkBuffer.Slice(bufferOffset, bytesForThisFile.Bytes);
-        PlaintextChunkData plainSlice = PlaintextChunkData.FromMemory(slice);
-        ResolvedDestinationFilePath targetFile = destinationRoot.Resolve(file.RelativePath);
-        await storage.WriteChunkAsync(targetFile, offsetInFile, plainSlice, ct);
+        List<FileChunkSlice> slices = [];
+        BundleByteOffset chunkStart = BundleByteOffset.FromChunk(chunkIndex, manifest.ChunkSize);
+        ChunkByteLength remainingChunkBytes = actualChunkSize;
+        BundleByteOffset currentOffset = chunkStart;
+        int bufferOffset = 0;
+
+        while (remainingChunkBytes.Bytes > 0)
+        {
+            FileEntry file = FindFileForOffset(manifest.Files, currentOffset);
+            FileByteOffset offsetInFile = currentOffset.SubtractToFileOffset(file.StartOffset);
+            TransferByteLength bytesForThisFile = file.FileSize.RemainingSlice(offsetInFile, remainingChunkBytes);
+
+            slices.Add(new FileChunkSlice(
+                file.Index,
+                file.RelativePath,
+                offsetInFile,
+                bytesForThisFile,
+                bufferOffset));
+
+            bufferOffset += bytesForThisFile.Bytes;
+            currentOffset = currentOffset.Add(bytesForThisFile);
+            remainingChunkBytes = remainingChunkBytes.Subtract(bytesForThisFile);
+        }
+
+        return slices;
     }
 
-    bufferOffset += bytesForThisFile.Bytes;
-    currentOffset = currentOffset.Add(bytesForThisFile);
-    remainingChunkBytes = remainingChunkBytes.Subtract(bytesForThisFile);
+    private static FileEntry FindFileForOffset(IReadOnlyList<FileEntry> files, BundleByteOffset offset)
+    {
+        // Binary search over sorted file bundle offsets
+        int low = 0;
+        int high = files.Count - 1;
+
+        while (low <= high)
+        {
+            int mid = low + (high - low) / 2;
+            FileEntry candidate = files[mid];
+
+            if (offset.Offset < candidate.StartOffset.Offset)
+            {
+                high = mid - 1;
+            }
+            else if (offset.Offset >= candidate.EndOffset.Offset)
+            {
+                low = mid + 1;
+            }
+            else
+            {
+                return candidate;
+            }
+        }
+
+        throw new DomainValidationException($"Offset {offset.Offset} falls outside bundle layout.");
+    }
 }
 ```
 
@@ -509,9 +633,13 @@ while (remainingChunkBytes.Bytes > 0)
 | :--- | :--- | :--- | :--- |
 | **Factory Invariant** | Instantiating 1:1 sender without recipient | Throws `DomainValidationException` | Asserts aggregate cannot be constructed in invalid state. |
 | **Factory Invariant** | Instantiating 1:N sender with empty recipient list | Throws `DomainValidationException` | Prevents headless push transfers. |
+| **Manifest Invariant** | Instantiating manifest with 0 files or 0 total bytes | Throws `DomainValidationException` | Enforces non-empty bundle invariant (V-53). |
+| **Manifest Invariant** | Mismatched Merkle tree leaf count vs chunk count | Throws `DomainValidationException` | Enforces Merkle tree index integrity (V-53). |
 | **Bitfield Immutability** | Calling `Bitfield.WithChunk(index)` | Returns new instance; original unchanged | Asserts immutability of piece possession bitfields. |
-| **Boundary Spanning** | Chunk spanning exactly across 2 files | Math produces correct offset slices for both files | Zero mock I/O; pure domain offset calculation verification. |
+| **Boundary Spanning** | Chunk spanning exactly across 2 files | `ChunkBoundaryCalculator` produces 2 slice mappings | Pure domain offset math verification with zero storage mocks (V-47). |
 | **File Completion** | Verifying last chunk of a multi-chunk file | Aggregate emits `FileCompletedDomainEvent` | Asserts aggregate directly evaluates file boundaries. |
+| **Peer Acceptance** | Sender records peer acceptance via `RecordPeerAcceptance` | Aggregate registers member and emits `PeerAcceptedTransferDomainEvent` | Verifies lifecycle transition and event emission (V-51). |
+| **Filter Policy** | Blocking peer in `FileTransferFilterPolicy` | Returns `PeerFilterDecision.Blocked` and emits event | Pure domain evaluation with zero `PluginSdk` coupling (V-48). |
 | **Traversal Rejection** | Manifest containing `../../etc/passwd` | `SanitizedRelativePath.Parse` throws exception | Asserts immediate validation rejection at parser level. |
 | **SeedRatio Validation** | Passing negative multiplier or NaN to `SeedRatio` | Throws `DomainValidationException` | Enforces bounded invariant. |
 
@@ -521,15 +649,17 @@ while (remainingChunkBytes.Bytes > 0)
 
 ### Milestone 1: Domain Primitives, Value Objects & Roslyn Integration
 1. Configure `Percolator.Apps.FileTransfer.csproj` with Roslyn incremental source generator analyzer reference to `Percolator.SourceGenerators`.
-2. Generate and implement all Value Objects via source generators (`TransferSessionId`, `SwarmRendezvousId`, `MerkleRoot`, `ChunkHash`, `TransferKey`, `BaseNonce`, `StreamAuthToken`, `RelayPipeToken`, `RelayRendezvousDescriptor`, `TransferBundleSummary`, `InlineManifestData`, `EndpointHost`, `PortNumber`, `DirectEndpointCandidate`, `ChunkByteLength`, `EncryptedChunkData`, `PlaintextChunkData`, `TotalBundleBytes`, `FileSizeBytes`, `BundleByteOffset`, `FileByteOffset`, `ChunkIndex`, `FileIndex`, `StreamIndex`, `StreamCount`, `PeerCount`, `TransferByteLength`, `TransferBandwidth`, `BandwidthLimit`, `SeedRatio`, `Bitfield`, `SelectedFileIndices`, `RootDestinationPath`, `ResolvedDestinationFilePath`, `DiskSpacePreflightResult`, `TransferTerminationReason`).
-3. Implement Domain Enums: `TransferRole`, `TransferSessionState`, `RoutePriority`, `DirectWanPolicy`, `TransportRoutingPreference`, `SwarmPeerRole`, `PeerChokeStatus`, `PeerInterestStatus`, `DirectCandidateKind`, `RelayTransferCapabilityFlags`.
+2. Generate and implement all Domain Value Objects via source generators:
+   - `TransferSessionId`, `SwarmRendezvousId`, `MerkleRoot`, `ChunkHash`, `TransferKey`, `BaseNonce`, `StreamAuthToken`, `RelayPipeToken`.
+   - Records & Structs: `TransferTopology`, `RelayRendezvousDescriptor`, `TransferBundleSummary`, `EndpointHost`, `PortNumber`, `DirectEndpointCandidate`, `ChunkByteLength`, `PlaintextChunkData`, `TotalBundleBytes`, `FileSizeBytes`, `BundleByteOffset`, `FileByteOffset`, `ChunkIndex`, `FileIndex`, `StreamIndex`, `StreamCount`, `PeerCount`, `TransferByteLength`, `TransferBandwidth`, `BandwidthLimit`, `SeedRatio`, `Bitfield`, `SelectedFileIndices`, `RootDirectoryPath`, `ResolvedDestinationFilePath`, `FileChunkSlice`, `TransferTerminationReason`.
+3. Implement Domain Enums: `TransferRole`, `TransferSessionState`, `DirectWanPolicy`, `TransportRoutingPreference`, `SwarmPeerRole`, `PeerChokeStatus`, `PeerInterestStatus`, `DirectCandidateKind`, `PeerFilterDecision`, `RelayFilterDecision`.
 4. Strictly verify **zero implicit/explicit cast operators** across all Value Objects.
 
 ### Milestone 2: Domain Entities & Aggregate Roots
-1. Implement `TransferManifest : IEntity<TransferSessionId>` and `FileEntry : IEntity<FileIndex>`.
+1. Implement `TransferManifest : IEntity<TransferSessionId>` and `FileEntry : IEntity<FileIndex>` with strict count and size validation (V-53).
 2. Implement `SwarmMember : IEntity<PublicIdentityId>` with `EndpointCandidates`, `Bitfield`, and flow control methods.
-3. Implement `FileTransferFilterPolicy : AggregateRoot<PublicIdentityId>` with `EvaluateEdgeIngress` and `IsRelayBlocked`.
-4. Implement `TransferSession : AggregateRoot<TransferSessionId>` with invariant factories (`CreateOutgoing1to1`, `CreateOutgoingMultiPeer`, `CreateIncomingStaged`), encapsulated chunk verification, and file completion detection.
-5. Implement all 13 `IDomainEvent` records.
-6. Implement `MerkleTreeIndex` and `MerkleTreeBuilder`.
+3. Implement `FileTransferFilterPolicy : AggregateRoot<PublicIdentityId>` with pure domain decisions `EvaluatePeer` and `EvaluateRelay` and domain events (V-48).
+4. Implement `TransferSession : AggregateRoot<TransferSessionId>` with invariant factories (`CreateOutgoing1to1`, `CreateOutgoingMultiPeer`, `CreateIncomingStaged`), `RecordPeerAcceptance` (V-51), encapsulated chunk verification, and file completion detection.
+5. Implement all 17 `IDomainEvent` records (13 transfer events + 4 filter policy events).
+6. Implement `MerkleTreeIndex`, `MerkleTreeBuilder`, and pure `ChunkBoundaryCalculator` (V-47).
 7. Implement pure domain unit tests covering the Domain Unit Testing Matrix.
