@@ -15,7 +15,7 @@
 - **Target Bounded Context**: `Percolator.Apps.FileTransfer.Domain` (Core Domain Model for `AppId = 0x03`).
 - **Target Environment**: **Desktop only** (multi-core, high-bandwidth unmetered networks, NVMe/SSD storage, large addressable memory, sparse files).
 - **Core Domain Responsibilities**:
-  - Encapsulate file transfer sessions, multi-peer swarming state, bitfield piece tracking, Merkle leaf validation, and filter policies.
+  - Encapsulate file transfer sessions, multi-peer swarming state, bitfield piece tracking, Merkle leaf validation, bidirectional choking flow control, seeding ratios, and filter policies.
   - Model multi-file directory manifests, chunk boundary spanning math, and selective download ranges.
 - **Strict Onion Architecture Invariants**:
   - Depends **strictly** on `Percolator.Domain.Common` base contracts (`AggregateRoot<TId>`, `IEntity<TId>`, `IDomainEvent`, `DomainResult`, `DomainResult<T>`, `IDateTimeProvider`) and `Percolator.SourceGenerators`.
@@ -28,7 +28,7 @@
 ## 2. Domain Aggregate Roots & Entities
 
 ### 2.1 `TransferSession` Aggregate Root
-Following `Percolator.Domain.Common.AggregateRoot<TId>`, `TransferSession` models the transfer lifecycle as an aggregate boundary emitting domain events upon state transitions. Swarm peer states, bitfield tracking, piece verification, and participant topologies are fully encapsulated within the aggregate root:
+Following `Percolator.Domain.Common.AggregateRoot<TId>`, `TransferSession` models the transfer lifecycle as an aggregate boundary emitting domain events upon state transitions. Swarm peer states, piece verification, upload tracking, and participant topologies are fully encapsulated within the aggregate root:
 
 ```csharp
 namespace Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
@@ -63,7 +63,8 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
     public Bitfield LocalBitfield { get; private set; }
     public RootDirectoryPath? LocalRootPath { get; private set; }     // Cohesive disk root for sender/receiver (V-52)
     public SelectedFileIndices? SelectedFiles { get; private set; }
-    public SeedRatio TargetSeedRatio { get; private set; }
+    public SeedRatio TargetSeedRatio { get; private set; }           // Enforced seeding ratio (V-57)
+    public TotalBundleBytes UploadedBytes { get; private set; }      // Tracked uploaded volume (V-57)
     public DirectWanPolicy WanPolicy { get; }
     public TransferKey SessionKey { get; }
     public BaseNonce BaseNonce { get; }
@@ -75,7 +76,19 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
     private readonly Dictionary<PublicIdentityId, SwarmMember> _swarmMembers = [];
     public IReadOnlyCollection<SwarmMember> SwarmMembers => _swarmMembers.Values;
 
-    // Invariant-enforced Factory Methods (V-46, V-50):
+    // Evaluates selective download completion against required chunk mask (V-55):
+    public bool IsDownloadComplete =>
+        SelectedFiles != null && LocalBitfield.HasAllChunks(Manifest.GetRequiredChunks(SelectedFiles));
+
+    public SeedRatio CurrentSeedRatio =>
+        Manifest.TotalSize.Bytes > 0
+            ? SeedRatio.FromMultiplier((double)UploadedBytes.Bytes / Manifest.TotalSize.Bytes)
+            : SeedRatio.Zero;
+
+    public bool HasReachedTargetSeedRatio =>
+        !TargetSeedRatio.IsUnlimited && CurrentSeedRatio.Multiplier >= TargetSeedRatio.Multiplier;
+
+    // Invariant-enforced Factory Methods (V-46, V-50, V-57):
     public static TransferSession CreateOutgoing1to1(
         TransferSessionId sessionId,
         PublicIdentityId initiatorId,
@@ -87,6 +100,7 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
         BaseNonce baseNonce,
         StreamAuthToken streamAuthToken,
         RelayRendezvousDescriptor? relayRendezvous,
+        SeedRatio targetSeedRatio,
         IDateTimeProvider clock);
 
     public static TransferSession CreateOutgoingMultiPeer(
@@ -100,6 +114,7 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
         BaseNonce baseNonce,
         StreamAuthToken streamAuthToken,
         RelayRendezvousDescriptor? relayRendezvous,
+        SeedRatio targetSeedRatio,
         IDateTimeProvider clock);
 
     public static TransferSession CreateIncomingStaged(
@@ -111,13 +126,14 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
         BaseNonce baseNonce,
         StreamAuthToken streamAuthToken,
         RelayRendezvousDescriptor? relayRendezvous,
+        SeedRatio targetSeedRatio,
         IDateTimeProvider clock);
 
     // Encapsulated Domain Mutation Methods:
+    // Transitions PendingConsent -> InFlight directly upon consent (V-58, V-59)
     public DomainResult AcceptTransfer(RootDirectoryPath destinationFolder, SelectedFileIndices selectedFiles, IDateTimeProvider clock);
-    public DomainResult StartStreaming();
     
-    // Encapsulates remote peer acceptance lifecycle (V-51):
+    // Transitions Offered -> InFlight on first peer acceptance (V-51, V-58)
     public DomainResult RecordPeerAcceptance(
         PublicIdentityId recipientId,
         IReadOnlyList<DirectEndpointCandidate> candidates,
@@ -126,13 +142,21 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
         IDateTimeProvider clock);
 
     public DomainResult RegisterSwarmMember(PublicIdentityId peerId, Bitfield initialBitfield, IReadOnlyList<DirectEndpointCandidate> candidates, TransportRoutingPreference routingPreference, IDateTimeProvider clock);
-    public DomainResult RecordPeerBitfield(PublicIdentityId peerId, Bitfield bitfield);
+    public DomainResult RecordPeerBitfield(PublicIdentityId peerId, Bitfield bitfield); // Enforces bitfield length (V-59)
     public DomainResult RecordPeerHave(PublicIdentityId peerId, ChunkIndex chunkIndex);
     public DomainResult UpdatePeerCandidates(PublicIdentityId peerId, IReadOnlyList<DirectEndpointCandidate> candidates);
-    public DomainResult SetPeerChoke(PublicIdentityId peerId, PeerChokeStatus status);
-    public DomainResult SetPeerInterest(PublicIdentityId peerId, PeerInterestStatus status);
-    
-    // Encapsulates file completion boundary detection (V-45):
+
+    // Bidirectional flow control mutations (V-56):
+    public DomainResult SetWeChokingPeer(PublicIdentityId peerId, PeerChokeStatus status);
+    public DomainResult RecordPeerChokingUs(PublicIdentityId peerId, PeerChokeStatus status);
+    public DomainResult SetWeInterestedInPeer(PublicIdentityId peerId, PeerInterestStatus status);
+    public DomainResult RecordPeerInterestedInUs(PublicIdentityId peerId, PeerInterestStatus status);
+
+    // Seeding ratio and upload tracking (V-57):
+    public DomainResult RecordUploadedBytes(TransferByteLength bytes, IDateTimeProvider clock);
+    public DomainResult SetTargetSeedRatio(SeedRatio seedRatio);
+
+    // Encapsulates file completion boundary detection (V-45, V-55):
     public DomainResult VerifyAndRecordChunk(ChunkIndex chunkIndex, PlaintextChunkData data, IDateTimeProvider clock);
     
     public DomainResult CompleteTransfer(IDateTimeProvider clock);
@@ -145,7 +169,7 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
 ```
 
 ### 2.2 `SwarmMember` Entity
-Encapsulates swarm participant piece availability, connection flow control, and fast-resume endpoint candidates:
+Encapsulates swarm participant piece availability, fast-resume endpoint candidates, and **bidirectional flow control** (V-56):
 
 ```csharp
 namespace Percolator.Apps.FileTransfer.Domain.SwarmCoordination;
@@ -173,8 +197,13 @@ public sealed class SwarmMember : IEntity<PublicIdentityId>
     public PublicIdentityId Id => PeerId;
     public PublicIdentityId PeerId { get; }
     public Bitfield Bitfield { get; private set; }
-    public PeerChokeStatus ChokeStatus { get; private set; }
-    public PeerInterestStatus InterestStatus { get; private set; }
+    
+    // Bidirectional Flow Control Properties (V-56):
+    public PeerChokeStatus PeerChokingUs { get; private set; }       // Did remote peer choke us?
+    public PeerChokeStatus WeChokingPeer { get; private set; }       // Are we choking remote peer?
+    public PeerInterestStatus PeerInterestedInUs { get; private set; } // Is remote peer interested in us?
+    public PeerInterestStatus WeInterestedInPeer { get; private set; } // Are we interested in remote peer?
+
     public DateTimeOffset LastSeenUtc { get; private set; }
     public IReadOnlyList<DirectEndpointCandidate> EndpointCandidates { get; private set; }
     public TransportRoutingPreference RoutingPreference { get; private set; }
@@ -191,16 +220,23 @@ public sealed class SwarmMember : IEntity<PublicIdentityId>
         Bitfield = bitfield;
         EndpointCandidates = candidates;
         RoutingPreference = routingPreference;
-        ChokeStatus = PeerChokeStatus.Choked;
-        InterestStatus = PeerInterestStatus.NotInterested;
+        PeerChokingUs = PeerChokeStatus.Choked;
+        WeChokingPeer = PeerChokeStatus.Choked;
+        PeerInterestedInUs = PeerInterestStatus.NotInterested;
+        WeInterestedInPeer = PeerInterestStatus.NotInterested;
         LastSeenUtc = initialSeenUtc;
     }
 
     internal void UpdateBitfield(Bitfield bitfield) => Bitfield = bitfield;
     internal void RecordHave(ChunkIndex chunkIndex) => Bitfield = Bitfield.WithChunk(chunkIndex);
     internal void UpdateCandidates(IReadOnlyList<DirectEndpointCandidate> candidates) => EndpointCandidates = candidates;
-    internal void SetChoke(PeerChokeStatus status) => ChokeStatus = status;
-    internal void SetInterest(PeerInterestStatus status) => InterestStatus = status;
+    
+    // Directional flow control setters:
+    internal void SetPeerChokingUs(PeerChokeStatus status) => PeerChokingUs = status;
+    internal void SetWeChokingPeer(PeerChokeStatus status) => WeChokingPeer = status;
+    internal void SetPeerInterestedInUs(PeerInterestStatus status) => PeerInterestedInUs = status;
+    internal void SetWeInterestedInPeer(PeerInterestStatus status) => WeInterestedInPeer = status;
+    
     internal void Touch(IDateTimeProvider clock) => LastSeenUtc = clock.UtcNow;
 }
 ```
@@ -309,11 +345,31 @@ public sealed class TransferManifest : IEntity<TransferSessionId>
             merkleTree,
             files);
     }
+
+    // Computes bitfield mask of required chunks for selective file download (V-55):
+    public Bitfield GetRequiredChunks(SelectedFileIndices selectedFiles)
+    {
+        Bitfield required = Bitfield.Empty(TotalChunks);
+        foreach (FileIndex index in selectedFiles.Indices)
+        {
+            FileEntry file = Files[index.Value];
+            if (file.FileSize.Bytes == 0) continue;
+
+            int firstChunk = (int)(file.StartOffset.Offset / ChunkSize.Bytes);
+            int lastChunk = (int)((file.EndOffset.Offset - 1) / ChunkSize.Bytes);
+
+            for (int c = firstChunk; c <= lastChunk; c++)
+            {
+                required = required.WithChunk(ChunkIndex.FromInt(c));
+            }
+        }
+        return required;
+    }
 }
 ```
 
 ### 2.4 `FileTransferFilterPolicy` Aggregate Root
-Encapsulates edge ingress filtering decisions with pure domain types (V-48) and emits domain events upon policy mutations:
+Encapsulates edge ingress filtering decisions with pure domain types (V-48) and emits domain events via `AddDomainEvent` (V-54):
 
 ```csharp
 namespace Percolator.Apps.FileTransfer.Domain.IngressControl;
@@ -350,7 +406,7 @@ public sealed class FileTransferFilterPolicy : AggregateRoot<PublicIdentityId>
     {
         if (_blockedPeers.Add(peerId))
         {
-            RaiseDomainEvent(new PeerBlockedDomainEvent(OwnerId, peerId, clock.UtcNow));
+            AddDomainEvent(new PeerBlockedDomainEvent(OwnerId, peerId, clock.UtcNow));
         }
     }
 
@@ -358,7 +414,7 @@ public sealed class FileTransferFilterPolicy : AggregateRoot<PublicIdentityId>
     {
         if (_blockedPeers.Remove(peerId))
         {
-            RaiseDomainEvent(new PeerUnblockedDomainEvent(OwnerId, peerId, clock.UtcNow));
+            AddDomainEvent(new PeerUnblockedDomainEvent(OwnerId, peerId, clock.UtcNow));
         }
     }
 
@@ -366,7 +422,7 @@ public sealed class FileTransferFilterPolicy : AggregateRoot<PublicIdentityId>
     {
         if (_blockedRelays.Add(relayUri))
         {
-            RaiseDomainEvent(new RelayBlockedDomainEvent(OwnerId, relayUri, clock.UtcNow));
+            AddDomainEvent(new RelayBlockedDomainEvent(OwnerId, relayUri, clock.UtcNow));
         }
     }
 
@@ -374,7 +430,7 @@ public sealed class FileTransferFilterPolicy : AggregateRoot<PublicIdentityId>
     {
         if (_blockedRelays.Remove(relayUri))
         {
-            RaiseDomainEvent(new RelayUnblockedDomainEvent(OwnerId, relayUri, clock.UtcNow));
+            AddDomainEvent(new RelayUnblockedDomainEvent(OwnerId, relayUri, clock.UtcNow));
         }
     }
 
@@ -435,13 +491,13 @@ All domain concepts in `Apps.FileTransfer.Domain` are modeled as strongly typed 
 | **`TransferBandwidth`** | `readonly record struct` | Bandwidth speed cap: $\text{BytesPerSec} \ge 0$ | Explicit `FromBytesPerSecond(long)`, `.BytesPerSecond`. Zero cast operators. |
 | **`BandwidthLimit`** | `readonly record struct` | Bandwidth speed cap: Unlimited or bounded speed | Explicit `Unlimited`, `Capped(TransferBandwidth)`, `.IsUnlimited`, `.Value`. Zero cast operators. |
 | **`SeedRatio`** | `readonly record struct` | Upload/Download ratio cap: $\ge 0.0$ or Unlimited | Explicit `Zero`, `Unlimited`, `FromMultiplier(double)`, `.Multiplier`, `.IsUnlimited`. Rejects NaN, Infinity, negative values. Zero cast operators. |
-| **`Bitfield`** | `sealed record` | Chunk possession bitmask: byte length $\lceil \text{TotalChunks} / 8 \rceil$. **Immutable** | Explicit `WithChunk(ChunkIndex)` returning new instance; `Empty(ChunkCount)`, `HasChunk(ChunkIndex)`, `ToByteArray()`, `.Length`, `.IsComplete`. Zero cast operators. |
+| **`Bitfield`** | `sealed record` | Chunk possession bitmask: byte length $\lceil \text{TotalChunks} / 8 \rceil$. **Immutable** | Explicit `WithChunk(ChunkIndex)` returning new instance; `Empty(ChunkCount)`, `HasChunk(ChunkIndex)`, `HasAllChunks(Bitfield)`, `ToByteArray()`, `.Length`, `.IsComplete`. Zero cast operators. |
 | **`DirectWanPolicy`** | `enum : byte` | Direct WAN candidate exposure policy | Explicit enum values: `DisabledByDefault` (0x01), `ExplicitlyAllowed` (0x02). |
 | **`TransportRoutingPreference`** | `enum : byte` | In-band connection route preference | Explicit enum values: `DirectPreferred` (0x01), `RelayOnly` (0x02). |
 | **`ChunkByteLength`** | `readonly record struct` | Actual bounded byte length of an individual chunk: $1 \le \text{Bytes} \le 4\text{ MB}$ | Explicit `FromBytes(int)`, `Subtract(TransferByteLength)`, `.Bytes`. Zero cast operators. |
 | **`PlaintextChunkData`** | `sealed record` | Decrypted chunk bytes for disk I/O ($1 \le \text{Bytes} \le 4\text{ MB}$) | Explicit `FromBytes(byte[])`, `FromMemory(ReadOnlyMemory<byte>)`, `.Memory`, `.Span`, `.Length`. Zero cast operators. |
 | **`MerkleTreeIndex`** | `sealed record` | Encapsulated Merkle tree root and leaf verification index | Explicit `Create(root, leaves)`, `VerifyLeaf(index, span)`, `GetLeaf(index)`. Zero cast operators. |
-| **`SelectedFileIndices`** | `sealed record` | Checked file indices: non-null immutable set of `FileIndex` | Explicit `All(FileCount)`, `FromIndices(...)`, `Contains(FileIndex)`. Zero cast operators. |
+| **`SelectedFileIndices`** | `sealed record` | Checked file indices: non-null immutable set of `FileIndex` | Explicit `All(FileCount)`, `FromIndices(...)`, `Contains(FileIndex)`, `.SelectedCount`, `.Indices`. Zero cast operators. |
 | **`StreamIndex`** | `readonly record struct` | Zero-indexed out-of-band stream: $0 \le \text{Index} \le 7$ | Explicit `FromInt(int)`, `.Value`. Zero cast operators. |
 | **`DirectCandidateKind`** | `enum : byte` | Direct socket candidate network topology | Explicit enum values: `DirectLan` (0x01), `DirectWanUpnp` (0x02), `DirectWanStun` (0x03). |
 | **`DirectEndpointCandidate`** | `sealed record` | Direct IP socket connection candidate | Explicit `Create(Host, Port, Kind)`, `.Host`, `.Port`, `.Kind`. Zero cast operators. |
@@ -450,7 +506,7 @@ All domain concepts in `Apps.FileTransfer.Domain` are modeled as strongly typed 
 
 ## 4. Formal Domain Events Hierarchy
 
-Every domain transition in `TransferSession` and `FileTransferFilterPolicy` emits an immutable domain event implementing `IDomainEvent` (`Percolator.Domain.Common`):
+Every domain transition in `TransferSession` and `FileTransferFilterPolicy` emits an immutable domain event conforming strictly to `IDomainEvent` (`Percolator.Domain.Common`), possessing `EventId` and `OccurredOnUtc` (V-54):
 
 ```csharp
 namespace Percolator.Apps.FileTransfer.Domain.TransferNegotiation.Events;
@@ -459,13 +515,19 @@ public sealed record TransferOfferedDomainEvent(
     TransferSessionId SessionId,
     PublicIdentityId InitiatorId,
     TransferBundleSummary Summary,
-    DateTimeOffset OccurredAtUtc) : IDomainEvent;
+    DateTimeOffset OccurredOnUtc) : IDomainEvent
+{
+    public Guid EventId { get; } = Guid.NewGuid();
+}
 
 public sealed record TransferAcceptedLocallyDomainEvent(
     TransferSessionId SessionId,
     RootDirectoryPath DestinationPath,
     SelectedFileIndices SelectedFiles,
-    DateTimeOffset OccurredAtUtc) : IDomainEvent;
+    DateTimeOffset OccurredOnUtc) : IDomainEvent
+{
+    public Guid EventId { get; } = Guid.NewGuid();
+}
 
 public sealed record PeerAcceptedTransferDomainEvent(
     TransferSessionId SessionId,
@@ -473,77 +535,115 @@ public sealed record PeerAcceptedTransferDomainEvent(
     IReadOnlyList<DirectEndpointCandidate> Candidates,
     TransportRoutingPreference RoutingPreference,
     Bitfield ResumptionBitfield,
-    DateTimeOffset OccurredAtUtc) : IDomainEvent;
-
-public sealed record TransferStreamingStartedDomainEvent(
-    TransferSessionId SessionId,
-    DateTimeOffset OccurredAtUtc) : IDomainEvent;
+    DateTimeOffset OccurredOnUtc) : IDomainEvent
+{
+    public Guid EventId { get; } = Guid.NewGuid();
+}
 
 public sealed record SwarmMemberJoinedDomainEvent(
     TransferSessionId SessionId,
     PublicIdentityId PeerId,
     Bitfield InitialBitfield,
-    DateTimeOffset OccurredAtUtc) : IDomainEvent;
+    DateTimeOffset OccurredOnUtc) : IDomainEvent
+{
+    public Guid EventId { get; } = Guid.NewGuid();
+}
 
 public sealed record ChunkVerifiedDomainEvent(
     TransferSessionId SessionId,
     ChunkIndex ChunkIndex,
     ChunkHash LeafHash,
-    DateTimeOffset OccurredAtUtc) : IDomainEvent;
+    DateTimeOffset OccurredOnUtc) : IDomainEvent
+{
+    public Guid EventId { get; } = Guid.NewGuid();
+}
 
 public sealed record FileCompletedDomainEvent(
     TransferSessionId SessionId,
     FileIndex FileIndex,
     SanitizedRelativePath RelativePath,
-    DateTimeOffset OccurredAtUtc) : IDomainEvent;
+    DateTimeOffset OccurredOnUtc) : IDomainEvent
+{
+    public Guid EventId { get; } = Guid.NewGuid();
+}
 
 public sealed record TransferCompletedDomainEvent(
     TransferSessionId SessionId,
     TotalBundleBytes TotalBytes,
-    DateTimeOffset OccurredAtUtc) : IDomainEvent;
+    DateTimeOffset OccurredOnUtc) : IDomainEvent
+{
+    public Guid EventId { get; } = Guid.NewGuid();
+}
 
 public sealed record TransferPausedDomainEvent(
     TransferSessionId SessionId,
-    DateTimeOffset OccurredAtUtc) : IDomainEvent;
+    DateTimeOffset OccurredOnUtc) : IDomainEvent
+{
+    public Guid EventId { get; } = Guid.NewGuid();
+}
 
 public sealed record TransferResumedDomainEvent(
     TransferSessionId SessionId,
-    DateTimeOffset OccurredAtUtc) : IDomainEvent;
+    DateTimeOffset OccurredOnUtc) : IDomainEvent
+{
+    public Guid EventId { get; } = Guid.NewGuid();
+}
 
 public sealed record TransferStalledDomainEvent(
     TransferSessionId SessionId,
-    DateTimeOffset OccurredAtUtc) : IDomainEvent;
+    DateTimeOffset OccurredOnUtc) : IDomainEvent
+{
+    public Guid EventId { get; } = Guid.NewGuid();
+}
 
 public sealed record TransferFailedDomainEvent(
     TransferSessionId SessionId,
     TransferTerminationReason Reason,
-    DateTimeOffset OccurredAtUtc) : IDomainEvent;
+    DateTimeOffset OccurredOnUtc) : IDomainEvent
+{
+    public Guid EventId { get; } = Guid.NewGuid();
+}
 
 public sealed record TransferCancelledDomainEvent(
     TransferSessionId SessionId,
     TransferTerminationReason Reason,
-    DateTimeOffset OccurredAtUtc) : IDomainEvent;
+    DateTimeOffset OccurredOnUtc) : IDomainEvent
+{
+    public Guid EventId { get; } = Guid.NewGuid();
+}
 
-// Filter Policy Domain Events (V-48):
+// Filter Policy Domain Events (V-48, V-54):
 public sealed record PeerBlockedDomainEvent(
     PublicIdentityId OwnerId,
     PublicIdentityId PeerId,
-    DateTimeOffset OccurredAtUtc) : IDomainEvent;
+    DateTimeOffset OccurredOnUtc) : IDomainEvent
+{
+    public Guid EventId { get; } = Guid.NewGuid();
+}
 
 public sealed record PeerUnblockedDomainEvent(
     PublicIdentityId OwnerId,
     PublicIdentityId PeerId,
-    DateTimeOffset OccurredAtUtc) : IDomainEvent;
+    DateTimeOffset OccurredOnUtc) : IDomainEvent
+{
+    public Guid EventId { get; } = Guid.NewGuid();
+}
 
 public sealed record RelayBlockedDomainEvent(
     PublicIdentityId OwnerId,
     RelayPipeEndpointUri RelayUri,
-    DateTimeOffset OccurredAtUtc) : IDomainEvent;
+    DateTimeOffset OccurredOnUtc) : IDomainEvent
+{
+    public Guid EventId { get; } = Guid.NewGuid();
+}
 
 public sealed record RelayUnblockedDomainEvent(
     PublicIdentityId OwnerId,
     RelayPipeEndpointUri RelayUri,
-    DateTimeOffset OccurredAtUtc) : IDomainEvent;
+    DateTimeOffset OccurredOnUtc) : IDomainEvent
+{
+    public Guid EventId { get; } = Guid.NewGuid();
+}
 ```
 
 ---
@@ -635,11 +735,15 @@ public static class ChunkBoundaryCalculator
 | **Factory Invariant** | Instantiating 1:N sender with empty recipient list | Throws `DomainValidationException` | Prevents headless push transfers. |
 | **Manifest Invariant** | Instantiating manifest with 0 files or 0 total bytes | Throws `DomainValidationException` | Enforces non-empty bundle invariant (V-53). |
 | **Manifest Invariant** | Mismatched Merkle tree leaf count vs chunk count | Throws `DomainValidationException` | Enforces Merkle tree index integrity (V-53). |
+| **Selective Completion** | Downloading 1 file out of 10 in bundle | Aggregate evaluates `IsDownloadComplete == true` once required chunks present | Validates selective completion invariant (V-55). |
+| **Bidirectional Flow** | Peer chokes us while we keep peer unchoked | `PeerChokingUs == Choked` and `WeChokingPeer == Unchoked` | Validates independent directional flow control (V-56). |
+| **Bitfield Validation** | Calling `RecordPeerBitfield` with mismatched byte length | Returns `DomainResult.Failure` | Enforces piece mask boundary validation (V-59). |
 | **Bitfield Immutability** | Calling `Bitfield.WithChunk(index)` | Returns new instance; original unchanged | Asserts immutability of piece possession bitfields. |
+| **Seeding Cap** | Calling `RecordUploadedBytes` reaching `TargetSeedRatio` | Aggregate transitions `State` to `Completed` | Validates seeding ratio enforcement (V-57). |
 | **Boundary Spanning** | Chunk spanning exactly across 2 files | `ChunkBoundaryCalculator` produces 2 slice mappings | Pure domain offset math verification with zero storage mocks (V-47). |
 | **File Completion** | Verifying last chunk of a multi-chunk file | Aggregate emits `FileCompletedDomainEvent` | Asserts aggregate directly evaluates file boundaries. |
-| **Peer Acceptance** | Sender records peer acceptance via `RecordPeerAcceptance` | Aggregate registers member and emits `PeerAcceptedTransferDomainEvent` | Verifies lifecycle transition and event emission (V-51). |
-| **Filter Policy** | Blocking peer in `FileTransferFilterPolicy` | Returns `PeerFilterDecision.Blocked` and emits event | Pure domain evaluation with zero `PluginSdk` coupling (V-48). |
+| **Peer Acceptance** | Sender records peer acceptance via `RecordPeerAcceptance` | Aggregate registers member, transitions to `InFlight`, emits event | Verifies lifecycle transition and event emission (V-51, V-58). |
+| **Filter Policy** | Blocking peer in `FileTransferFilterPolicy` | Returns `PeerFilterDecision.Blocked` and emits event with `EventId` & `OccurredOnUtc` | Pure domain evaluation and shared kernel event alignment (V-48, V-54). |
 | **Traversal Rejection** | Manifest containing `../../etc/passwd` | `SanitizedRelativePath.Parse` throws exception | Asserts immediate validation rejection at parser level. |
 | **SeedRatio Validation** | Passing negative multiplier or NaN to `SeedRatio` | Throws `DomainValidationException` | Enforces bounded invariant. |
 
@@ -656,10 +760,10 @@ public static class ChunkBoundaryCalculator
 4. Strictly verify **zero implicit/explicit cast operators** across all Value Objects.
 
 ### Milestone 2: Domain Entities & Aggregate Roots
-1. Implement `TransferManifest : IEntity<TransferSessionId>` and `FileEntry : IEntity<FileIndex>` with strict count and size validation (V-53).
-2. Implement `SwarmMember : IEntity<PublicIdentityId>` with `EndpointCandidates`, `Bitfield`, and flow control methods.
-3. Implement `FileTransferFilterPolicy : AggregateRoot<PublicIdentityId>` with pure domain decisions `EvaluatePeer` and `EvaluateRelay` and domain events (V-48).
-4. Implement `TransferSession : AggregateRoot<TransferSessionId>` with invariant factories (`CreateOutgoing1to1`, `CreateOutgoingMultiPeer`, `CreateIncomingStaged`), `RecordPeerAcceptance` (V-51), encapsulated chunk verification, and file completion detection.
-5. Implement all 17 `IDomainEvent` records (13 transfer events + 4 filter policy events).
+1. Implement `TransferManifest : IEntity<TransferSessionId>` and `FileEntry : IEntity<FileIndex>` with strict count and size validation (V-53) and `GetRequiredChunks` (V-55).
+2. Implement `SwarmMember : IEntity<PublicIdentityId>` with `EndpointCandidates`, `Bitfield`, and bidirectional flow control methods (V-56).
+3. Implement `FileTransferFilterPolicy : AggregateRoot<PublicIdentityId>` with pure domain decisions `EvaluatePeer` and `EvaluateRelay` and domain events via `AddDomainEvent` (V-48, V-54).
+4. Implement `TransferSession : AggregateRoot<TransferSessionId>` with invariant factories (`CreateOutgoing1to1`, `CreateOutgoingMultiPeer`, `CreateIncomingStaged`), `RecordPeerAcceptance` (V-51), seeding ratio tracking (V-57), selective download completion evaluation (V-55), encapsulated chunk verification, and file completion detection.
+5. Implement all 16 `IDomainEvent` records with `EventId` and `OccurredOnUtc` (V-54).
 6. Implement `MerkleTreeIndex`, `MerkleTreeBuilder`, and pure `ChunkBoundaryCalculator` (V-47).
 7. Implement pure domain unit tests covering the Domain Unit Testing Matrix.
