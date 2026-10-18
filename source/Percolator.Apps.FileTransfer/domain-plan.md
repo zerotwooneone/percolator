@@ -141,7 +141,17 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
         Bitfield resumptionBitfield,
         IDateTimeProvider clock);
 
-    public DomainResult RegisterSwarmMember(PublicIdentityId peerId, Bitfield initialBitfield, IReadOnlyList<DirectEndpointCandidate> candidates, TransportRoutingPreference routingPreference, IDateTimeProvider clock);
+    // Swarm admission invariant: peer must be an authorized participant in Topology (Lens 3)
+    public DomainResult RegisterSwarmMember(
+        PublicIdentityId peerId,
+        Bitfield initialBitfield,
+        IReadOnlyList<DirectEndpointCandidate> candidates,
+        TransportRoutingPreference routingPreference,
+        IDateTimeProvider clock);
+
+    // Offer expiration transition (Lens 3):
+    // Transitions PendingConsent -> Cancelled with reason OfferExpired
+    public DomainResult ExpireOffer(IDateTimeProvider clock);
     public DomainResult RecordPeerBitfield(PublicIdentityId peerId, Bitfield bitfield); // Enforces bitfield length (V-59)
     public DomainResult RecordPeerHave(PublicIdentityId peerId, ChunkIndex chunkIndex);
     public DomainResult UpdatePeerCandidates(PublicIdentityId peerId, IReadOnlyList<DirectEndpointCandidate> candidates);
@@ -326,6 +336,27 @@ public sealed class TransferManifest : IEntity<TransferSessionId>
             throw new DomainValidationException("Transfer bundle total byte size must be greater than zero.");
         }
 
+        // Strict contiguous layout invariant (Lens 3):
+        long expectedOffset = 0;
+        for (int i = 0; i < files.Count; i++)
+        {
+            FileEntry file = files[i];
+            if (file.Index.Value != i)
+            {
+                throw new DomainValidationException($"File entry at index {i} has non-sequential index {file.Index.Value}.");
+            }
+            if (file.StartOffset.Offset != expectedOffset)
+            {
+                throw new DomainValidationException($"File '{file.RelativePath.Value}' start offset ({file.StartOffset.Offset}) does not match expected contiguous bundle offset ({expectedOffset}).");
+            }
+            expectedOffset += file.FileSize.Bytes;
+        }
+
+        if (expectedOffset != totalBytes)
+        {
+            throw new DomainValidationException($"Total bundle bytes ({totalBytes}) does not equal cumulative file offsets ({expectedOffset}).");
+        }
+
         TotalBundleBytes bundleBytes = TotalBundleBytes.FromBytes(totalBytes);
         int chunkCount = (int)Math.Max(1, (totalBytes + chunkSize.Bytes - 1) / chunkSize.Bytes);
 
@@ -473,11 +504,11 @@ All domain concepts in `Apps.FileTransfer.Domain` are modeled as strongly typed 
 | **`RelayPipeToken`** | `[ByteArray(length: 32)]` | 32-byte authentication token for relay pipe rendezvous | Explicit `Generate()`, `FromBytes(...)`, `.Span`. Zero cast operators. |
 | **`RelayRendezvousDescriptor`** | `sealed record` | Encapsulated relay endpoint URI and 32-byte auth token | Explicit `Create(RelayPipeEndpointUri, RelayPipeToken)`, `.EndpointUri`, `.Token`. Zero cast operators. |
 | **`TransferBundleSummary`** | `sealed record` | Cohesive bundle metadata (title, size, files, chunks, Merkle root) | Explicit `Create(...)`, `.RootName`, `.TotalSize`, `.TotalFiles`, `.ChunkSizeBytes`, `.TotalChunks`, `.MerkleRoot`. Zero cast operators. |
-| **`TransferTopology`** | `sealed record` | Discriminated union of participant topology: OneToOne, MultiPeer, Incoming | Explicit `OneToOne(...)`, `MultiPeer(...)`, `Incoming(...)`, `.InitiatorId`, `.Recipients`, `.ContainsRecipient(...)`. Zero cast operators. (V-50) |
+| **`TransferTopology`** | `sealed record` | Discriminated union of participant topology: OneToOne, MultiPeer, Incoming. Exposes pure participant query: `.ContainsParticipant(PublicIdentityId)`. Zero cast operators. (V-50, Lens 3) |
 | **`RootBundleName`** | `sealed record` | Sanitized display title for transfer root ($1 \le \text{Length} \le 255$) | Explicit `Parse(string)`, `.Value`. Zero cast operators. |
 | **`RelayPipeEndpointUri`** | `sealed record` | URI for relay transfer pipe rendezvous (`percolator-pipe://` / `wss://`) | Explicit `Parse(string)`, `FromUri(Uri)`, `.Value`. Zero cast operators. |
-| **`TransferTerminationReason`**| `sealed record` | Reason for transfer rejection, cancellation, or failure | Explicit `UserDeclined`, `SenderCancelled`, `StorageExhausted`, `VerificationFailed`, `Timeout`, `FromText(string)`, `.Value`. Zero cast operators. |
-| **`SanitizedRelativePath`** | `sealed record` | Relative file path verified against directory traversal | Explicit `Parse(string)`, `.Value`. Zero cast operators. |
+| **`TransferTerminationReason`**| `sealed record` | Reason for transfer rejection, cancellation, or failure | Explicit `UserDeclined`, `SenderCancelled`, `StorageExhausted`, `VerificationFailed`, `Timeout`, `OfferExpired`, `FromText(string)`, `.Value`. Zero cast operators. (Lens 3) |
+| **`SanitizedRelativePath`** | `sealed record` | Relative file path verified against directory traversal. Pure relative directory hierarchy: rejects empty/whitespace paths, leading/trailing separators, root/drive prefixes (`C:`), parent traversal (`..`), and current directory segments (`.`). Normalizes separators to canonical `/`. | Explicit `Parse(string)`, `.Value`. Zero cast operators. (Lens 3) |
 | **`RootDirectoryPath`** | `sealed record` | Validated absolute desktop root folder path for source or destination | Explicit `Parse(string)`, `Resolve(SanitizedRelativePath)`, `.Value`. Zero cast operators. (V-52) |
 | **`ResolvedFilePath`**| `sealed record` | Validated combined absolute destination file path | Explicit `Resolve(RootDirectoryPath, SanitizedRelativePath)`, `.AbsolutePath`. Zero cast operators. |
 | **`FileChunkSlice`** | `sealed record` | Pure domain calculation mapping chunk byte slice to target file | Explicit `Create(...)`, `.FileIndex`, `.RelativePath`, `.OffsetInFile`, `.SliceLength`, `.BufferOffset`. Zero cast operators. (V-47) |
@@ -754,6 +785,10 @@ public static class ChunkBoundaryCalculator
 | **Filter Policy** | Blocking peer in `FileTransferFilterPolicy` | Returns `PeerFilterDecision.Blocked` and emits event with `EventId` & `OccurredOnUtc` | Pure domain evaluation and shared kernel event alignment (V-48, V-54). |
 | **Traversal Rejection** | Manifest containing `../../etc/passwd` | `SanitizedRelativePath.Parse` throws exception | Asserts immediate validation rejection at parser level. |
 | **SeedRatio Validation** | Passing negative multiplier or NaN to `SeedRatio` | Throws `DomainValidationException` | Enforces bounded invariant. |
+| **Swarm Admission Gate** | Registering peer not in `TransferTopology` | `RegisterSwarmMember` returns `DomainResult.Failure` | Asserts aggregate root boundary protection against unauthorized swarm members (Lens 3). |
+| **Contiguous Offsets** | Instantiating manifest with overlapping or gap file offsets | Throws `DomainValidationException` | Enforces contiguous bundle layout (Lens 3). |
+| **Offer Expiration** | Calling `ExpireOffer` on staged session | Aggregate transitions `State` to `Cancelled` with reason `OfferExpired` and emits event | Verifies offer timeout lifecycle transition (Lens 3). |
+| **Relative Path Hierarchy** | Attempting to parse `/etc/passwd`, `C:\Windows`, `foo/../bar`, or `.` into `SanitizedRelativePath` | Throws `DomainValidationException` | Asserts pure relative directory invariants (Lens 3). |
 
 ---
 

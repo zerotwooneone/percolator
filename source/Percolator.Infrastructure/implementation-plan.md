@@ -476,6 +476,7 @@ Database Engine: Encrypted SQLite using SQLCipher (`SQLitePCLRaw.bundle_e_sqlcip
   - **`UnknownGroupMessageCachePruner`**: Purges buffered group chat frames from `IUnknownGroupMessageCacheRepository` that exceed maximum TTL (e.g. 48 hours) where the author's sender key distribution was never received.
   - **`AbandonedInvitePruner`**: Scans inbound contact requests (`PeerContactState.PendingApproval`), pending handshake envelopes in `IPendingHandshakeRepository`, and group invitations (`PendingGroupInvitation`) exceeding local expiration policies (e.g. 14 days without user response) and marks or purges them.
   - **`RelayDiscoveryRegistrationPruner`**: Scans `disc_relay_peer_registrations` table in `Apps.Discovery` to evict expired registrations (e.g., registrations older than 7 days without renewal) or registrations whose corresponding Signed PreKey has expired.
+  - **`TransferOfferReaperWorker`**: Scheduled cron worker (running every 15 minutes) calling `ITransferOfferReaperService.SweepAndExpireStaleOffersAsync(TimeSpan.FromHours(24))` to expire and persist stale staged file transfer offers in `ft_transfer_sessions` that have timed out without recipient consent (Lens 3).
 - **Background Worker Resiliency Best Practices**:
   - **Async Scopes**: Workers must use `IServiceScopeFactory.CreateAsyncScope()` for deterministic asynchronous resource cleanup.
   - **Time Virtualization**: Depend strictly on .NET `TimeProvider` (`timeProvider.GetUtcNow()`, `Task.Delay(..., timeProvider, ct)`) to enable deterministic time manipulation and fast-forwarding in integration test suites.
@@ -573,6 +574,13 @@ Concrete realization of out-of-band high-speed croc-inspired and BitTorrent swar
     - Reads existing `.percolator-part` and completed files on disk in 1 MB blocks.
     - Computes SHA-256 over each block and compares against `ChunkHashes` to construct the resumption `Bitfield`.
   - *(Note: On Windows NTFS, `Percolator.Infrastructure.Windows` provides `WindowsSparseDesktopFileStore` which invokes Win32 `DeviceIoControl` with `FSCTL_SET_SPARSE` to avoid synchronous zero-fill overhead).*
+  - **Security Risk & OS Path Sanitization Guardrail (Lens 3 Security)**:
+    - *Path Traversal & Device Name Hijacking*: While the domain model enforces relative path invariants (`SanitizedRelativePath`), `PortableDesktopFileStore` bears the concrete infrastructure responsibility of validating the fully resolved destination path against operating system vulnerabilities before opening file handles:
+      - **Win32 Reserved Device Names**: Explicitly rejects legacy DOS device namespaces (e.g., `CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9`, `CONIN$`, `CONOUT$`) and any filename with these base names regardless of file extension (e.g. `nul.txt` or `aux.dat`).
+      - **NTFS Alternate Data Streams (ADS)**: Prohibits colons (`:`) in relative paths to prevent hiding payloads or overriding stream attributes (`file.txt:evil.exe`).
+      - **Canonical Boundary Verification**: Resolves the full canonical absolute path via `Path.GetFullPath` and verifies:
+        `resolvedPath.StartsWith(canonicalRootPath, StringComparison.OrdinalIgnoreCase)`
+        preventing symlink, directory junction, or hardlink escapes out of the destination root directory.
 
 #### 5. Bandwidth Rate Limiter
 - **`TokenBucketRateLimiter`** (`ITransferRateLimiter`):

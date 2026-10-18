@@ -60,6 +60,36 @@ public interface IAppIngressFilter
 - `FileTransferIngressFilter` implements `IAppIngressFilter`, invoking `FileTransferFilterPolicy.EvaluatePeer(context.SenderIdentityId)`. When `PeerFilterDecision.Blocked`, raw bytes are discarded before deserialization (`IngressDecision.DiscardSilently`).
 - `FileTransferPayloadHandler` implements `IAppPayloadHandler`, validating relay URI against `policy.EvaluateRelay(relayUri) == RelayFilterDecision.Blocked` before staging inbound sessions.
 
+### 2.2 Ingress Offer Payload Limits & Memory Defense (Lens 3)
+To defend against unbounded heap allocations and memory exhaustion DoS attacks from untrusted peers, the application payload handler validates incoming offers prior to staging or domain entity instantiation:
+
+```csharp
+namespace Percolator.Apps.FileTransfer.Features.TransferNegotiation;
+
+public static class IngressTransferOfferValidator
+{
+    public const int MaxFilesPerBundle = 50_000;
+    public const int MaxChunksPerBundle = 1_000_000;
+    public const long MaxBundleSizeBytes = 16_000_000_000_000L; // 16 TB
+    public const int MaxInlineManifestBytes = 65_536;
+
+    public static ValidationResult ValidateOffer(FileTransferOfferPayload offer)
+    {
+        if (offer.Summary.TotalFiles.Count > MaxFilesPerBundle)
+            return ValidationResult.Failure($"Offer file count ({offer.Summary.TotalFiles.Count}) exceeds maximum allowed ({MaxFilesPerBundle}).");
+        if (offer.Summary.TotalChunks.Count > MaxChunksPerBundle)
+            return ValidationResult.Failure($"Offer chunk count ({offer.Summary.TotalChunks.Count}) exceeds maximum allowed ({MaxChunksPerBundle}).");
+        if (offer.Summary.TotalSize.Bytes > MaxBundleSizeBytes)
+            return ValidationResult.Failure($"Offer bundle size ({offer.Summary.TotalSize.Bytes} bytes) exceeds maximum allowed ({MaxBundleSizeBytes} bytes).");
+        if (offer.ManifestDistribution.Kind == ManifestDistributionKind.Inline &&
+            offer.ManifestDistribution.InlineData!.Length > MaxInlineManifestBytes)
+            return ValidationResult.Failure("Inline manifest exceeds 64 KB limit.");
+        return ValidationResult.Success();
+    }
+}
+```
+Offers failing these bounds are dropped silently without staging into memory or SQLite.
+
 ---
 
 ## 3. Application Wire Payloads & Out-of-Band Framing
@@ -416,7 +446,16 @@ public interface IFileTransferQueryService
     ValueTask<TransferSessionReadModel?> GetTransferByIdAsync(TransferSessionId sessionId, CancellationToken ct = default);
     ValueTask<IReadOnlyList<ManifestFileReadModel>> GetManifestFilesAsync(TransferSessionId sessionId, CancellationToken ct = default);
 }
+
+public interface ITransferOfferReaperService
+{
+    ValueTask<int> SweepAndExpireStaleOffersAsync(TimeSpan retentionWindow, CancellationToken ct = default);
+}
 ```
+
+- Periodic background service (running every 15 minutes) scanning staged incoming sessions (`TransferSessionState.PendingConsent`) in `ITransferSessionRepository`.
+- Any offer where `clock.UtcNow - session.CreatedAtUtc > TimeSpan.FromHours(24)` is transitioned to `Cancelled` via `session.ExpireOffer(clock)` and persisted.
+- Prevents staging memory and database row accumulation from unaccepted transfer offers (Lens 3).
 
 ---
 
@@ -430,9 +469,11 @@ public interface IFileTransferQueryService
      $$\text{SwarmRendezvousId} = \text{HMAC-SHA256}(K_{\text{transfer}}, \text{"swarm-rendezvous"})$$
    - Peers announce their current IP candidates to the relay tracker under `SwarmRendezvousId` with their `PublicIdentityId`.
    - The relay tracker stores 90-second sliding records without learning file contents or session keys.
-3. **Live Peer Exchange (PEX)**:
+3. **Live Peer Exchange (PEX) & Candidate Flooding Defense (Lens 3)**:
    - As connected peers discover new routes or candidates, they dispatch `PexPeersFrame(Candidates)` over active data streams.
-   - The recipient aggregate invokes `SwarmMember.UpdateCandidates(newCandidates)` and persists the updated candidates to SQLite (`ft_swarm_endpoints`) for future fast-resume cycles.
+   - **PEX Flood Rate Limiter**: Coordinators throttle `PexPeersFrame` ingestion to at most 1 frame per 10 seconds per peer.
+   - **Candidate Capping & Deduplication**: Capped at `MaxCandidatesPerPeer = 16`. Candidates are deduplicated by Host+Port. Bogus formats or loopback/private candidates (unless `AllowLan` is enabled) are discarded before updating the domain model.
+   - The coordinator passes sanitized candidates to `TransferSession.UpdatePeerCandidates(peerId, sanitizedCandidates)` and persists the updated candidates to SQLite (`ft_swarm_endpoints`) for future fast-resume cycles.
 
 ---
 
@@ -451,6 +492,9 @@ public interface IFileTransferQueryService
 | **Chunk Tampering / Substitution** | Dual cryptographic verification: AES-256-GCM authentication tag + SHA-256 leaf hash against Merkle root. | Test asserts corrupted chunk bytes are discarded and requested again. |
 | **Relay Snooping** | E2EE per-chunk encryption ($K_{\text{transfer}}$); relay acts as blind socket proxy without keys. | Test verifies relay cannot decrypt chunks with zero knowledge of session key. |
 | **Network Bufferbloat / Choking** | High-precision token bucket bandwidth throttle (`ITransferRateLimiter`). | Unit test asserts throughput throttles accurately to configured caps. |
+| **Unbounded Manifest Allocation / Deserialization DoS** | Ingress offer bounds (`MaxFilesPerBundle = 50,000`, `MaxChunksPerBundle = 1,000,000`, `MaxBundleSizeBytes = 16 TB`, 64 KB inline limit) reject malformed offers before domain allocation. | Ingress validation unit tests verify rejection of oversized offers (Lens 3). |
+| **PEX Candidate Flooding / Dialing Amplification** | PEX frame rate-limiting (1 frame / 10s per peer), candidate cap (`MaxCandidates = 16`), and Host/Port deduplication protect dialing pools and memory. | Unit test asserts candidate list truncation and deduplication (Lens 3). |
+| **Pre-Consent Offer Hoarding / Storage Bloat** | Background `TransferOfferReaperService` sweeps and expires offers older than 24h via `session.ExpireOffer(clock)`. | Integration test verifies offer reaping after time-advancement (Lens 3). |
 
 ---
 
@@ -466,6 +510,7 @@ public interface IFileTransferQueryService
 | `ITransferRateLimiter` | `TokenBucketRateLimiter` | High-precision token bucket bandwidth throttle |
 | `IFileTransferQueryService` | `SqlFileTransferQueryService` | Fast-path Dapper/SQL projection for transfer dashboard |
 | Ingress Filtering (`IAppIngressFilter`) | `InboundIngressPipeline` Edge Interceptor | Pre-dispatch drop before deserialization or app routing |
+| `ITransferOfferReaperService` | `TransferOfferReaperWorker` | Scheduled background worker sweeping expired staged sessions (Lens 3) |
 
 ---
 
