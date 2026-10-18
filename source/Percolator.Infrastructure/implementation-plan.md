@@ -581,6 +581,9 @@ Concrete realization of out-of-band high-speed croc-inspired and BitTorrent swar
       - **Canonical Boundary Verification**: Resolves the full canonical absolute path via `Path.GetFullPath` and verifies:
         `resolvedPath.StartsWith(canonicalRootPath, StringComparison.OrdinalIgnoreCase)`
         preventing symlink, directory junction, or hardlink escapes out of the destination root directory.
+      - **Unicode Normalization & Hidden Segment Traversal (V-79)**: 
+        Performs Unicode Normalization Form C (`NormalizationForm.FormC`) on all incoming relative paths before resolving to physical disk paths.
+        Explicitly rejects homoglyphs (e.g. fullwidth solidus `／`, division slash `∕`, two-dot leader `‥`), ASCII control characters (` `–``), trailing spaces (`foo `), and trailing dots (`foo.`) in directory and file segment names that cause Windows Win32 filesystems to truncate or silently collapse segment paths.
 
 #### 5. Bandwidth Rate Limiter
 - **`TokenBucketRateLimiter`** (`ITransferRateLimiter`):

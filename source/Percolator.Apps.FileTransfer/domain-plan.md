@@ -12,11 +12,14 @@
 
 ## 1. Summary & Domain Boundaries
 
+> ### Core Domain Boundary Definition
+> **The `FileTransfer.Domain` bounded context encapsulates strictly the mathematical, structural, and lifecycle invariants of a content-addressed multi-file transfer session.** Specifically, it is the sole authority on: (1) manifest structural integrity and contiguous multi-file bundle offset arithmetic; (2) piece possession state via immutable bitfields; (3) Merkle tree leaf and root cryptographic verification; and (4) session state machine transitions gated by participant topology and user consent. It is strictly agnostic to physical storage I/O, operating system filesystem or path encoding quirks, network framing, socket pools, peer reputation scoring, and transport coordination.
+
 - **Target Bounded Context**: `Percolator.Apps.FileTransfer.Domain` (Core Domain Model for `AppId = 0x03`).
 - **Target Environment**: **Desktop only** (multi-core, high-bandwidth unmetered networks, NVMe/SSD storage, large addressable memory, sparse files).
 - **Core Domain Responsibilities**:
   - Encapsulate file transfer sessions, multi-peer swarming state, bitfield piece tracking, Merkle leaf validation, bidirectional choking flow control, seeding ratios, and filter policies.
-  - Model multi-file directory manifests, chunk boundary spanning math, and selective download ranges.
+  - Model multi-file directory manifests, chunk boundary spanning math, zero-byte file bundle layout invariants, and selective download ranges.
 - **Strict Onion Architecture Invariants**:
   - Depends **strictly** on `Percolator.Domain.Common` base contracts (`AggregateRoot<TId>`, `IEntity<TId>`, `IDomainEvent`, `DomainResult`, `DomainResult<T>`, `IDateTimeProvider`) and `Percolator.SourceGenerators`.
   - **Zero dependencies** on transport sockets (TCP/QUIC), storage I/O, SQLite, Protobuf wire encoders, serialization libraries, or `PluginSdk`.
@@ -336,7 +339,7 @@ public sealed class TransferManifest : IEntity<TransferSessionId>
             throw new DomainValidationException("Transfer bundle total byte size must be greater than zero.");
         }
 
-        // Strict contiguous layout invariant (Lens 3):
+        // Strict contiguous layout invariant and zero-byte file semantics (Lens 3):
         long expectedOffset = 0;
         for (int i = 0; i < files.Count; i++)
         {
@@ -349,6 +352,7 @@ public sealed class TransferManifest : IEntity<TransferSessionId>
             {
                 throw new DomainValidationException($"File '{file.RelativePath.Value}' start offset ({file.StartOffset.Offset}) does not match expected contiguous bundle offset ({expectedOffset}).");
             }
+            // Zero-byte files have StartOffset == EndOffset and advance the expected bundle offset by 0 bytes.
             expectedOffset += file.FileSize.Bytes;
         }
 
@@ -731,7 +735,7 @@ public static class ChunkBoundaryCalculator
 
     private static FileEntry FindFileForOffset(IReadOnlyList<FileEntry> files, BundleByteOffset offset)
     {
-        // Binary search over sorted file bundle offsets
+        // Binary search over non-empty file bundle offsets (zero-byte files occupy 0 bytes and are skipped in chunk stream mapping)
         int low = 0;
         int high = files.Count - 1;
 
@@ -739,6 +743,20 @@ public static class ChunkBoundaryCalculator
         {
             int mid = low + (high - low) / 2;
             FileEntry candidate = files[mid];
+
+            // If mid is a zero-byte file (StartOffset == EndOffset), advance search rightward
+            if (candidate.FileSize.Bytes == 0)
+            {
+                if (offset.Offset < candidate.StartOffset.Offset)
+                {
+                    high = mid - 1;
+                }
+                else
+                {
+                    low = mid + 1;
+                }
+                continue;
+            }
 
             if (offset.Offset < candidate.StartOffset.Offset)
             {
@@ -787,6 +805,7 @@ public static class ChunkBoundaryCalculator
 | **SeedRatio Validation** | Passing negative multiplier or NaN to `SeedRatio` | Throws `DomainValidationException` | Enforces bounded invariant. |
 | **Swarm Admission Gate** | Registering peer not in `TransferTopology` | `RegisterSwarmMember` returns `DomainResult.Failure` | Asserts aggregate root boundary protection against unauthorized swarm members (Lens 3). |
 | **Contiguous Offsets** | Instantiating manifest with overlapping or gap file offsets | Throws `DomainValidationException` | Enforces contiguous bundle layout (Lens 3). |
+| **Zero-Byte File Layout** | Bundle containing 0-byte file adjacent to non-empty files | Manifest validates contiguous offsets with `StartOffset == EndOffset`; `FindFileForOffset` correctly skips 0-byte file and maps chunks | Asserts pure mathematical layout for empty files without index disruption. |
 | **Offer Expiration** | Calling `ExpireOffer` on staged session | Aggregate transitions `State` to `Cancelled` with reason `OfferExpired` and emits event | Verifies offer timeout lifecycle transition (Lens 3). |
 | **Relative Path Hierarchy** | Attempting to parse `/etc/passwd`, `C:\Windows`, `foo/../bar`, or `.` into `SanitizedRelativePath` | Throws `DomainValidationException` | Asserts pure relative directory invariants (Lens 3). |
 

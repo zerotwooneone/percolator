@@ -475,6 +475,14 @@ public interface ITransferOfferReaperService
    - **Candidate Capping & Deduplication**: Capped at `MaxCandidatesPerPeer = 16`. Candidates are deduplicated by Host+Port. Bogus formats or loopback/private candidates (unless `AllowLan` is enabled) are discarded before updating the domain model.
    - The coordinator passes sanitized candidates to `TransferSession.UpdatePeerCandidates(peerId, sanitizedCandidates)` and persists the updated candidates to SQLite (`ft_swarm_endpoints`) for future fast-resume cycles.
 
+4. **Swarm Peer Attribution, Poisoned Block Defense & Choking Coordination (Lens 3)**:
+   - **Stream-to-Peer Attribution**: The `TransferSessionCoordinator` maps each active TCP/QUIC stream to its supplying peer identity (`PublicIdentityId`).
+   - **Poisoned Block Penalization**: When a chunk payload received from stream $S$ fails cryptographic verification against the domain Merkle root:
+     1. The coordinator records an offense against the supplying peer's score.
+     2. Immediately terminates the corrupted stream and notifies the domain aggregate to choke the peer (`session.SetWeChokingPeer(peerId, PeerChokeStatus.Choked)`).
+     3. Blacklists the peer from supplying that chunk and reschedules the failed piece to an alternate seeder via rarest-first selection.
+     4. If a peer accumulates multiple invalid chunks (e.g. 3 failures), the coordinator tears down all streams to that peer and removes them from active dialing pools.
+
 ---
 
 ## 7. Threat Modeling & Security Posture
@@ -490,6 +498,7 @@ public interface ITransferOfferReaperService
 | **Static Symmetric Session Key** | Intentional performance design avoiding per-chunk Double Ratchet overhead. AES-256 session key $K_{\text{transfer}}$ is securely negotiated in-band; all bulk streaming chunks share the key. Loss of per-chunk forward secrecy is bounded to that transfer session. | Architecture enforces strict in-band exchange of session key and base nonce; zero ratchet messages used for bulk data. |
 | **Piece Possession Leakage** | Intentional BitTorrent swarming requirement; bitfield and `HAVE` broadcasts leak chunk possession to invited peers to enable rarest-first piece scheduling. | Architecture limits piece announcements strictly to authenticated swarm streams. |
 | **Chunk Tampering / Substitution** | Dual cryptographic verification: AES-256-GCM authentication tag + SHA-256 leaf hash against Merkle root. | Test asserts corrupted chunk bytes are discarded and requested again. |
+| **Poisoned Block / Sybil Torrent Flooding** | Application `TransferSessionCoordinator` maps streams to peer identities; on verification failure, it chokes the peer (`SetWeChokingPeer`), logs an offense, drops the connection, and reschedules the chunk to alternate seeders. | Coordinator unit test verifies that peer streams are disconnected and choked upon receiving corrupt chunks (Lens 3). |
 | **Relay Snooping** | E2EE per-chunk encryption ($K_{\text{transfer}}$); relay acts as blind socket proxy without keys. | Test verifies relay cannot decrypt chunks with zero knowledge of session key. |
 | **Network Bufferbloat / Choking** | High-precision token bucket bandwidth throttle (`ITransferRateLimiter`). | Unit test asserts throughput throttles accurately to configured caps. |
 | **Unbounded Manifest Allocation / Deserialization DoS** | Ingress offer bounds (`MaxFilesPerBundle = 50,000`, `MaxChunksPerBundle = 1,000,000`, `MaxBundleSizeBytes = 16 TB`, 64 KB inline limit) reject malformed offers before domain allocation. | Ingress validation unit tests verify rejection of oversized offers (Lens 3). |
