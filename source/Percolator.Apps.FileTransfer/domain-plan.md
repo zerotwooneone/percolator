@@ -15,13 +15,16 @@
 > ### Core Domain Boundary Definition
 > **The `FileTransfer.Domain` bounded context encapsulates strictly the mathematical, structural, and lifecycle invariants of a content-addressed multi-file transfer session.** Specifically, it is the sole authority on: (1) manifest structural integrity and contiguous multi-file bundle offset arithmetic; (2) piece possession state via immutable bitfields; (3) Merkle tree leaf and root cryptographic verification; and (4) session state machine transitions gated by participant topology and user consent. It is strictly agnostic to physical storage I/O, operating system filesystem or path encoding quirks, network framing, socket pools, peer reputation scoring, and transport coordination.
 
-- **Target Bounded Context**: `Percolator.Apps.FileTransfer.Domain` (Core Domain Model for `AppId = 0x03`).
+- **Target Bounded Context**: `Percolator.Apps.FileTransfer.Domain` (Standalone Core Domain Library for `AppId = 0x03`).
+- **Target Project**: `Percolator.Apps.FileTransfer.Domain.csproj` (Completely standalone domain library decoupled from `Percolator.Domain`).
 - **Target Environment**: **Desktop only** (multi-core, high-bandwidth unmetered networks, NVMe/SSD storage, large addressable memory, sparse files).
 - **Core Domain Responsibilities**:
   - Encapsulate file transfer sessions, multi-peer swarming state, bitfield piece tracking, Merkle leaf validation, bidirectional choking flow control, seeding ratios, and filter policies.
   - Model multi-file directory manifests, chunk boundary spanning math, zero-byte file bundle layout invariants, and selective download ranges.
 - **Strict Onion Architecture Invariants**:
-  - Depends **strictly** on `Percolator.Domain.Common` base contracts (`AggregateRoot<TId>`, `IEntity<TId>`, `IDomainEvent`, `DomainResult`, `DomainResult<T>`, `IDateTimeProvider`) and `Percolator.SourceGenerators`.
+  - Depends **strictly** on `Percolator.Domain.Kernel` (`AggregateRoot<TId>`, `IEntity<TId>`, `IDomainEvent`, `DomainResult`, `DomainError`, `IDateTimeProvider`, `ISensitiveSecret`, `PublicIdentityId`) and compile-time `Percolator.SourceGenerators`.
+  - **Zero dependencies** on `Percolator.Domain` (zero awareness of Double Ratchet, X3DH, Relays, or Mailbox Queues).
+  - **Zero dependencies** on transport sockets (TCP/QUIC), storage I/O, SQLite, Protobuf wire encoders, serialization libraries, or `PluginSdk`.
   - **Zero dependencies** on transport sockets (TCP/QUIC), storage I/O, SQLite, Protobuf wire encoders, serialization libraries, or `PluginSdk`.
   - **Zero references** to UI frameworks, view models, or presentation controls.
   - All domain concepts modeled as strongly typed Value Objects with **zero implicit/explicit cast operators**.
@@ -813,8 +816,9 @@ public static class ChunkBoundaryCalculator
 
 ## 7. Phased Domain Implementation Milestones
 
-### Milestone 1: Domain Primitives, Value Objects & Roslyn Integration
-1. Configure `Percolator.Apps.FileTransfer.csproj` with Roslyn incremental source generator analyzer reference to `Percolator.SourceGenerators`.
+### Milestone 1: Standalone Domain Project, Primitives & Roslyn Integration
+1. Create standalone project `Percolator.Apps.FileTransfer.Domain.csproj` targeting `net10.0` referencing `Percolator.Domain.Kernel` and `Percolator.SourceGenerators` (Analyzer).
+2. Verify zero project references to `Percolator.Domain` or external network/storage packages.
 2. Generate and implement all Domain Value Objects via source generators:
    - `TransferSessionId`, `SwarmRendezvousId`, `MerkleRoot`, `ChunkHash`, `TransferKey`, `BaseNonce`, `StreamAuthToken`, `RelayPipeToken`.
    - Records & Structs: `TransferTopology`, `RelayRendezvousDescriptor`, `TransferBundleSummary`, `EndpointHost`, `PortNumber`, `DirectEndpointCandidate`, `ChunkByteLength`, `PlaintextChunkData`, `TotalBundleBytes`, `FileSizeBytes`, `BundleByteOffset`, `FileByteOffset`, `ChunkIndex`, `FileIndex`, `StreamIndex`, `StreamCount`, `PeerCount`, `TransferByteLength`, `TransferBandwidth`, `BandwidthLimit`, `SeedRatio`, `Bitfield`, `SelectedFileIndices`, `RootDirectoryPath`, `ResolvedFilePath`, `FileChunkSlice`, `TransferTerminationReason`.
