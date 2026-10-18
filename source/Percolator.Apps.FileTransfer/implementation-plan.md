@@ -33,7 +33,7 @@
 | **1:1 Direct P2P (Opt-In WAN)** | Pairwise Double Ratchet via `DirectChannel` | 4–8 Parallel Direct Streams (UPnP / Relay STUN) | Direct Public Candidate Exchange (Opt-In Only) |
 | **1:1 Relayed (Default WAN)** | Pairwise Double Ratchet via Relay Mailbox | 4–8 Relay Pipe Streams | Matched by `TransferSessionId` on Relay Pipe |
 | **Group Direct (LAN)** | Sender Key Ratchet via `GroupChannel` | 4–8 Direct Streams between LAN members | Local Peer Announcements in Group Ratchet |
-| **Group Relayed (WAN Swarm)** | Sender Key Ratchet via `GroupChannel` | 4–8 Relay Pipe Streams per Peer Pair | `BlindSwarmId` Distributed Tracker + PEX |
+| **Group Relayed (WAN Swarm)** | Sender Key Ratchet via `GroupChannel` | 4–8 Relay Pipe Streams per Peer Pair | `SwarmRendezvousId` Distributed Tracker + PEX |
 | **Mixed Topology** | Sender Key Ratchet via `GroupChannel` | Direct P2P for local peers; Relay Pipe for WAN peers | Hybrid: Local direct candidates + Relay tracker |
 
 ### 1.3 Sovereign Privacy & Opt-In WAN Direct Connect (UPnP & Decentralized Relay STUN)
@@ -165,12 +165,21 @@ public sealed class SwarmMember : IEntity<PublicIdentityId>
     public PeerChokeStatus ChokeStatus { get; private set; }
     public PeerInterestStatus InterestStatus { get; private set; }
     public DateTimeOffset LastSeenUtc { get; private set; }
+    public IReadOnlyList<DirectEndpointCandidate> EndpointCandidates { get; private set; }
+    public TransportRoutingPreference RoutingPreference { get; private set; }
     public SwarmPeerRole Role => Bitfield.IsComplete ? SwarmPeerRole.Seeder : SwarmPeerRole.Leecher;
 
-    internal SwarmMember(PublicIdentityId peerId, Bitfield bitfield, DateTimeOffset initialSeenUtc)
+    internal SwarmMember(
+        PublicIdentityId peerId,
+        Bitfield bitfield,
+        IReadOnlyList<DirectEndpointCandidate> candidates,
+        TransportRoutingPreference routingPreference,
+        DateTimeOffset initialSeenUtc)
     {
         PeerId = peerId;
         Bitfield = bitfield;
+        EndpointCandidates = candidates;
+        RoutingPreference = routingPreference;
         ChokeStatus = PeerChokeStatus.Choked;
         InterestStatus = PeerInterestStatus.NotInterested;
         LastSeenUtc = initialSeenUtc;
@@ -178,6 +187,7 @@ public sealed class SwarmMember : IEntity<PublicIdentityId>
 
     internal void UpdateBitfield(Bitfield bitfield) => Bitfield = bitfield;
     internal void RecordHave(ChunkIndex chunkIndex) => Bitfield = Bitfield.WithChunk(chunkIndex);
+    internal void UpdateCandidates(IReadOnlyList<DirectEndpointCandidate> candidates) => EndpointCandidates = candidates;
     internal void SetChoke(PeerChokeStatus status) => ChokeStatus = status;
     internal void SetInterest(PeerInterestStatus status) => InterestStatus = status;
     internal void Touch(DateTimeOffset timestamp) => LastSeenUtc = timestamp;
@@ -200,7 +210,7 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
     public TransferKey SessionKey { get; }
     public BaseNonce BaseNonce { get; }
     public StreamAuthToken StreamAuthToken { get; }
-    public RelayPipeToken RelayPipeToken { get; }
+    public RelayRendezvousDescriptor? RelayRendezvous { get; } // Cohesive URI + Token
     public DateTimeOffset CreatedAtUtc { get; }
     public DateTimeOffset? CompletedAtUtc { get; private set; }
 
@@ -283,6 +293,8 @@ public sealed record TransferAcceptedLocallyDomainEvent(
 public sealed record PeerAcceptedTransferDomainEvent(
     TransferSessionId SessionId,
     PublicIdentityId RecipientId,
+    IReadOnlyList<DirectEndpointCandidate> Candidates,
+    TransportRoutingPreference RoutingPreference,
     Bitfield ResumptionBitfield,
     DateTimeOffset OccurredAtUtc) : IDomainEvent;
 
@@ -379,7 +391,7 @@ To eliminate repetitive defensive-copy boilerplate, range validation, and equali
 | **`MerkleRoot`** | `[ByteArray(length: 32)]` | 32-byte cryptographic SHA-256 Merkle root | Explicit `FromBytes(...)`, `FromSpan(...)`, `.Span`. Zero cast operators. |
 | **`ChunkHash`** | `[ByteArray(length: 32)]` | 32-byte SHA-256 leaf hash | Explicit `FromBytes(...)`, `FromSpan(...)`, `.Span`. Zero cast operators. |
 | **`TransferKey`** | `[ByteArray(length: 32)]` | 32-byte ephemeral AES-256 session key (`ISensitiveSecret`) | Explicit `Generate()`, `FromBytes(...)`, `.Span`. Implements `Zeroize()`. Zero cast operators. |
-| **`BlindSwarmId`** | `[ByteArray(length: 32)]` | 32-byte HMAC-SHA256 rendezvous token | Explicit `Derive(TransferKey)`, `FromBytes(...)`, `.Span`. Zero cast operators. |
+| **`SwarmRendezvousId`** | `[ByteArray(length: 32)]` | 32-byte HMAC-SHA256 rendezvous topic derived from $K_{\text{transfer}}$ | Explicit `Derive(TransferKey)`, `FromBytes(...)`, `.Span`. Zero cast operators. |
 | **`StreamAuthToken`** | `[ByteArray(length: 32)]` | 32-byte out-of-band stream authentication token | Explicit `Generate()`, `FromBytes(...)`, `.Span`. Zero cast operators. |
 | **`BaseNonce`** | `[ByteArray(length: 12)]` | 12-byte base nonce for AES-GCM deterministic derivation | Explicit `Generate()`, `FromBytes(...)`, `.Span`. Zero cast operators. |
 | **`RelayPipeToken`** | `[ByteArray(length: 32)]` | 32-byte authentication token for relay pipe rendezvous | Explicit `Generate()`, `FromBytes(...)`, `.Span`. Zero cast operators. |
@@ -527,7 +539,7 @@ Percolator.Apps.FileTransfer/
 │   │   ├── ITransferStreamScheduler.cs
 │   │   └── TransferStreamScheduler.cs
 │   ├── SwarmCoordination/          # BitTorrent piece tracking, bitfields, rarest-first piece selection, distributed tracker
-│   │   ├── BlindSwarmId.cs         # [ByteArray(32)] Value Object: HMAC-SHA256 handle
+│   │   ├── SwarmRendezvousId.cs    # [ByteArray(32)] Value Object: HMAC-SHA256 rendezvous topic
 │   │   ├── SwarmMember.cs          # IEntity<PublicIdentityId>: Encapsulated swarm peer entity
 │   │   ├── SwarmPeerRole.cs        # Enum: Leecher (0x01), Seeder (0x02)
 │   │   ├── PeerChokeStatus.cs      # Enum: Choked (0x01), Unchoked (0x02)
@@ -750,18 +762,22 @@ while (remainingChunkBytes.Bytes > 0)
 - As recipients finish downloading individual 1 MB chunks, they become seeders for those chunks to the rest of the swarm.
 - If the original sender disconnects or stops sharing, the remaining peers continue swarming pieces among themselves as long as the full set of chunks is distributed across the swarm.
 
-### 8.2 Distributed Swarm Tracker Architecture
-- **Blind Swarm Identifier**:
-  $$\text{BlindSwarmId} = \text{HMAC-SHA256}(K_{\text{transfer}}, \text{"swarm-rendezvous"})$$
-- **Rendezvous Posting**:
-  - Peers register their direct candidate endpoints and bitfields under `BlindSwarmId` using their `PublicIdentityId`.
-  - Relays store ephemeral 90-second sliding records without learning file names, channel topologies, or content keys.
-- **Out-of-Band Peer Exchange (PEX)**:
-  - Peers exchange known active candidate addresses directly over out-of-band streams via `PexPeers` frames.
+### 8.2 Swarm Rendezvous, Fast-Resume & PEX Coordination
+1. **Immediate Fast-Path Reconnection (Zero Tracker Latency)**:
+   - When an active or paused transfer is resumed (or after an application restart), the transfer coordinator immediately dials the `EndpointCandidates` encapsulated on each `SwarmMember`.
+   - On local LANs or stable WAN IPs, direct streaming resumes within milliseconds without wire signaling or tracker queries.
+2. **Authenticated Rendezvous Fallback**:
+   - If direct connection attempts fail or candidates have expired:
+     $$\text{SwarmRendezvousId} = \text{HMAC-SHA256}(K_{\text{transfer}}, \text{"swarm-rendezvous"})$$
+   - Peers announce their current IP candidates to the relay tracker under `SwarmRendezvousId` with their `PublicIdentityId`.
+   - The relay tracker stores 90-second sliding records without learning file contents or session keys.
+3. **Live Peer Exchange (PEX)**:
+   - As connected peers discover new routes or candidates, they dispatch `PexPeersFrame(Candidates)` over active data streams.
+   - The recipient aggregate invokes `SwarmMember.UpdateCandidates(newCandidates)` and persists the updated candidates to SQLite for future fast-resume cycles.
 
 ### 8.3 Graceful Teardown & Disconnect State Machines
 1. **Sender Stops Sharing**:
-   - Sender invokes cancel command. Broadcasts `Choke` frame and disconnects stream pool. Unregisters from `BlindSwarmId`.
+   - Sender invokes cancel command. Broadcasts `Choke` frame and disconnects stream pool. Unregisters from `SwarmRendezvousId`.
    - Swarm survival: If 100% of pieces exist across remaining peers, swarming continues. If pieces are missing, peers transition to `Stalled` state waiting for seeders to reconnect. If storage quota is exhausted or unrecoverable verification errors occur, the session transitions to `Failed`.
 2. **Recipient Stops / Pauses**:
    - Recipient pauses or cancels. Broadcasts `CancelChunk` for in-flight requests and closes stream pool. Other peers update bitfield records.
@@ -939,8 +955,8 @@ public interface ITransferStream : IAsyncDisposable
 public interface ITransferStreamPool : IAsyncDisposable
 {
     StreamCount ActiveStreams { get; }
-    ValueTask ConnectDirectAsync(IReadOnlyList<DirectEndpointCandidate> candidates, StreamAuthToken authToken, CancellationToken ct = default);
-    ValueTask ConnectRelayPipeAsync(RelayRendezvousDescriptor rendezvous, TransferSessionId sessionId, CancellationToken ct = default);
+    ValueTask ConnectDirectAsync(IReadOnlyList<DirectEndpointCandidate> candidates, CancellationToken ct = default);
+    ValueTask ConnectRelayPipeAsync(RelayRendezvousDescriptor rendezvous, CancellationToken ct = default);
     ITransferStream GetStream(StreamIndex index);
     ValueTask BroadcastFrameAsync(IStreamFramePayload frame, CancellationToken ct = default);
 }
@@ -954,14 +970,14 @@ public interface ITransferStreamPoolFactory
 public interface IDistributedTrackerPort
 {
     ValueTask<IReadOnlyList<DirectEndpointCandidate>> AnnounceAsync(
-        BlindSwarmId blindSwarmId,
+        SwarmRendezvousId rendezvousId,
         PublicIdentityId memberId,
         IReadOnlyList<DirectEndpointCandidate> candidates,
         SwarmPeerRole role,
         CancellationToken ct = default);
 
     ValueTask UnregisterAsync(
-        BlindSwarmId blindSwarmId,
+        SwarmRendezvousId rendezvousId,
         PublicIdentityId memberId,
         CancellationToken ct = default);
 }
@@ -1063,14 +1079,15 @@ public interface IFileTransferActionHandler
         DirectWanPolicy wanPolicy,
         CancellationToken ct = default);
 
-    ValueTask<DomainResult> AcceptTransferAsync(TransferSessionId sessionId, RootDestinationPath destinationFolder, CancellationToken ct = default);
-    ValueTask<DomainResult> AcceptTransferAsync(TransferSessionId sessionId, RootDestinationPath destinationFolder, SelectedFileIndices selectedFiles, CancellationToken ct = default);
+    ValueTask<DomainResult> AcceptTransferAsync(
+        TransferSessionId sessionId,
+        RootDestinationPath destinationFolder,
+        SelectedFileIndices? selectedFiles = null,
+        CancellationToken ct = default);
+
     ValueTask<DomainResult> PauseTransferAsync(TransferSessionId sessionId, CancellationToken ct = default);
     ValueTask<DomainResult> ResumeTransferAsync(TransferSessionId sessionId, CancellationToken ct = default);
-    ValueTask<DomainResult> StopSeedingAsync(TransferSessionId sessionId, CancellationToken ct = default);
     ValueTask<DomainResult> CancelTransferAsync(TransferSessionId sessionId, TransferTerminationReason reason, CancellationToken ct = default);
-    ValueTask<DomainResult> SetSessionSpeedCapAsync(TransferSessionId sessionId, BandwidthLimit downloadCap, BandwidthLimit uploadCap, CancellationToken ct = default);
-    ValueTask<DomainResult> SetSessionSeedRatioAsync(TransferSessionId sessionId, SeedRatio targetRatio, CancellationToken ct = default);
 }
 ```
 
@@ -1122,7 +1139,7 @@ public interface IFileTransferActionHandler
 | `ITransferStreamPool` | `TcpMultiStreamPool` | 4–8 multiplexed TCP/QUIC sockets (`TCP_NODELAY = true`) |
 | `IDistributedTrackerPort` | Distributed Relay Swarm Tracker / PEX Client | Blind swarm rendezvous on relay or out-of-band PEX |
 | `IDesktopFileStorage` | `PortableDesktopFileStore` | Staging with `.percolator-part`, pre-allocation, atomic rename |
-| `ITransferSessionRepository` | `SqliteTransferSessionRepository` | `ft_transfer_sessions`, `ft_manifest_files`, `ft_swarm_members` |
+| `ITransferSessionRepository` | `SqliteTransferSessionRepository` | `ft_transfer_sessions`, `ft_manifest_files`, `ft_swarm_members`, `ft_swarm_endpoints` |
 | `IFileTransferFilterPolicyRepository` | `SqliteFilterPolicyRepository` | `ft_filter_policies`, `ft_blocked_peers`, `ft_blocked_relays` |
 | `ITransferRateLimiter` | `TokenBucketRateLimiter` | High-precision token bucket bandwidth throttle |
 | `IFileTransferQueryService` | `SqlFileTransferQueryService` | Fast-path Dapper/SQL projection for transfer dashboard |
@@ -1137,7 +1154,7 @@ public interface IFileTransferActionHandler
 2. Implement `FileTransferPlugin` implementing `IAppPlugin` (`AppId.FileTransferControl = 0x03`).
 3. Implement Value Objects & Enums via `Percolator.SourceGenerators` and explicit domain contracts:
    - `[GuidId(GuidIdKind.CryptographicRandom)]`: `TransferSessionId`
-   - `[ByteArray(32)]`: `MerkleRoot`, `ChunkHash`, `TransferKey`, `BlindSwarmId`, `StreamAuthToken`, `RelayPipeToken`
+   - `[ByteArray(32)]`: `MerkleRoot`, `ChunkHash`, `TransferKey`, `SwarmRendezvousId`, `StreamAuthToken`, `RelayPipeToken`
    - `[ByteArray(12)]`: `BaseNonce`
    - `[ByteArray(1..65536)]`: `InlineManifestData`
    - Enums: `TransferRole`, `TransferSessionState`, `RoutePriority`, `DirectWanPolicy`, `TransportRoutingPreference`, `SwarmPeerRole`, `PeerChokeStatus`, `PeerInterestStatus`, `DirectCandidateKind`, `StreamFrameType`, `ManifestTierKind`, `RelayTransferCapabilityFlags`.
@@ -1173,13 +1190,14 @@ public interface IFileTransferActionHandler
 ### Milestone 4: Swarm Coordination, Distributed Tracker & Seeding Ratios
 1. Implement `SwarmCoordinator` updating `SwarmMember` entities within `TransferSession`.
 2. Implement `RarestFirstChunkSelector` and `EndgameMode`.
-3. Implement `IDistributedTrackerPort` and `PEX_PEERS` out-of-band frame handling using `SwarmPeerRole`, `PublicIdentityId`, and `UnregisterAsync`.
-4. Implement seeding ratio tracking ($\text{Uploaded} / \text{Total}$) and automatic disconnect on target ratio.
+3. Implement fast-resume endpoint hydration from `ft_swarm_endpoints` and live PEX frame candidate updates (`SwarmMember.UpdateCandidates`).
+4. Implement `IDistributedTrackerPort` announce and unregister workflows using `SwarmRendezvousId` and `PublicIdentityId`.
+5. Implement seeding ratio tracking ($\text{Uploaded} / \text{Total}$) and automatic disconnect on target ratio.
 
 ### Milestone 5: CQRS Transfer Manager Ports & Rate Limiter
 1. Implement rate limiter adapter integration with `ITransferRateLimiter` using `BandwidthLimit` and async `ValueTask` caps.
 2. Implement `IFileTransferFilterPolicyRepository` port for filter policy persistence taking `ownerId`.
-3. Implement `IFileTransferQueryService` and `IFileTransferActionHandler` supporting `InitiateTransferAsync`, `ManifestFileReadModel`, and `ValueTask<DomainResult>`.
+3. Implement `IFileTransferQueryService` and `IFileTransferActionHandler` supporting the 5 core lifecycle commands (`InitiateTransferAsync`, `AcceptTransferAsync`, `PauseTransferAsync`, `ResumeTransferAsync`, `CancelTransferAsync`).
 4. Expose state machine transitions and event streams for presentation consumers.
 
 ### Milestone 6: Infrastructure Adapter Integration & End-to-End Verification
