@@ -25,7 +25,6 @@
   - Depends **strictly** on `Percolator.Domain.Kernel` (`AggregateRoot<TId>`, `IEntity<TId>`, `IDomainEvent`, `DomainResult`, `DomainError`, `IDateTimeProvider`, `ISensitiveSecret`, `PublicIdentityId`) and compile-time `Percolator.SourceGenerators`.
   - **Zero dependencies** on `Percolator.Domain` (zero awareness of Double Ratchet, X3DH, Relays, or Mailbox Queues).
   - **Zero dependencies** on transport sockets (TCP/QUIC), storage I/O, SQLite, Protobuf wire encoders, serialization libraries, or `PluginSdk`.
-  - **Zero dependencies** on transport sockets (TCP/QUIC), storage I/O, SQLite, Protobuf wire encoders, serialization libraries, or `PluginSdk`.
   - **Zero references** to UI frameworks, view models, or presentation controls.
   - All domain concepts modeled as strongly typed Value Objects with **zero implicit/explicit cast operators**.
 
@@ -344,7 +343,7 @@ public sealed class TransferManifest : IEntity<TransferSessionId>
 
         // Strict contiguous layout invariant and zero-byte file semantics (Lens 3):
         long expectedOffset = 0;
-        for (int i = 0; i < files.Count; i++)
+        for (int i = 0; i < files.Count; i++)\
         {
             FileEntry file = files[i];
             if (file.Index.Value != i)
