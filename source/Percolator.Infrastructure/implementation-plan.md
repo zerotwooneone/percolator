@@ -515,16 +515,16 @@ Database Engine: Encrypted SQLite using SQLCipher (`SQLitePCLRaw.bundle_e_sqlcip
 
 ### 4.9 High-Performance File Transfer Adapters, Multi-Stream Engine & Relay Pipes (`Percolator.Apps.FileTransfer.Ports`)
 
-Concrete realization of out-of-band high-speed croc-inspired and BitTorrent swarm mechanics:
+Concrete realization of out-of-band high-speed croc-inspired and BitTorrent swarm mechanics, implementing ports defined in `Percolator.Apps.FileTransfer.Ports` using application-level transport DTOs:
 
 #### 1. Multi-Stream Sockets & Binary Framing Engine
 - **`TcpMultiStreamPool` & `TransferStream`** (`ITransferStreamPool`, `ITransferStreamPoolFactory`, `ITransferStream`):
   - Opens and manages a pool of 4 to 8 parallel multiplexed TCP/QUIC connections with `TCP_NODELAY = true`.
-  - Implements the binary length-prefixed framing wire protocol:
+  - Implements the binary length-prefixed framing wire protocol using `StreamAuthToken`, `BaseNonce`, and `TransferKey`:
     - `0x01 STREAM_HANDSHAKE`: Handshake with `SessionId`, `StreamIndex`, and `StreamAuthToken`.
     - `0x02 BITFIELD`: Bitfield declaration of possessed chunks.
     - `0x03 HAVE`: Chunk verification announcement.
-    - `0x04 REQUEST_CHUNK` & `0x05 CHUNK_DATA`: 1 MB chunk streaming with AES-256-GCM authentication tags.
+    - `0x04 REQUEST_CHUNK` & `0x05 CHUNK_DATA`: 1 MB chunk streaming with AES-256-GCM authentication tags using `BaseNonce` and `TransferKey`.
     - `0x06 CANCEL_CHUNK`: Endgame chunk cancellation.
     - `0x07 CHOKE` / `0x08 UNCHOKE`: Transport backpressure signaling.
     - `0x09 KEEP_ALIVE`: Liveness ping frames.
@@ -533,7 +533,7 @@ Concrete realization of out-of-band high-speed croc-inspired and BitTorrent swar
 
 #### 2. Channel Relay Transfer Pipe (Client & Relay Service Endpoint)
 - **`RelayTransferPipeClient`**:
-  - Connects 4 to 8 parallel streams to the channel's designated relay endpoint: `POST /transfer-pipes/{sessionId}` (or WebSocket `GET /transfer-pipes/{sessionId}/ws`).
+  - Connects 4 to 8 parallel streams to the channel's designated relay endpoint: `POST /transfer-pipes/{sessionId}` (or WebSocket `GET /transfer-pipes/{sessionId}/ws`) using `RelayPipeEndpointUri` and `RelayPipeToken`.
   - Presents `PipeAuthToken = HMAC-SHA256(K_transfer, "relay-pipe-rendezvous")` in HTTP headers (`X-Pipe-Auth`).
   - Operates as a transparent binary stream pipe to the paired peer.
 - **Relay Server Pipe Service (Relay-Side Execution)**:
@@ -549,8 +549,8 @@ Concrete realization of out-of-band high-speed croc-inspired and BitTorrent swar
 #### 3. Relay Blind Swarm Tracker (Client & Relay Service Endpoint)
 - **`RelaySwarmTrackerClient`** (`IRelaySwarmTrackerClient`):
   - Sends out-of-band HTTP `POST /swarms/{blindSwarmId}/announce` to channel relay.
-  - Blind identifier: $\text{BlindSwarmId} = \text{HMAC-SHA256}(K_{\text{transfer}}, \text{"swarm-rendezvous"})$.
-  - Receives list of active candidate endpoints for the swarm without touching in-band ratchet channels.
+  - Blind identifier: $\text{BlindSwarmId} = \text{HMAC-SHA256}(K_{\text{transfer}}, \text{"swarm-rendezvous"})$ (`SwarmRendezvousId`).
+  - Receives list of active `DirectEndpointCandidate` records for the swarm without touching in-band ratchet channels.
 - **Relay Server Swarm Tracker Endpoint (Relay-Side Execution)**:
   - In-memory thread-safe dictionary: `ConcurrentDictionary<byte[], SwarmPeerRegistry>`.
   - Ephemeral 90-second sliding expiration. Entries purged if heartbeat stops.
@@ -562,17 +562,18 @@ Concrete realization of out-of-band high-speed croc-inspired and BitTorrent swar
   - **Portable Pre-Allocation**:
     - Opens target files with `FileShare.ReadWrite | FileShare.Delete`.
     - Advances end-of-file pointer via `FileStream.SetLength(totalBytes)` (or POSIX `posix_fallocate`).
-  - **File Staging with `.percolator-part`**:
-    - Writes incoming chunks to `{relativePath}.percolator-part` using `RandomAccess.WriteAsync(SafeFileHandle, ReadOnlyMemory<byte>, fileOffset, ct)`.\
+  - **Path Resolution & Staging with `.percolator-part`**:
+    - Combines `RootDirectoryPath` and `SanitizedRelativePath` to resolve `ResolvedFilePath`.
+    - Writes incoming chunks to `{relativePath}.percolator-part` using `RandomAccess.WriteAsync(SafeFileHandle, ReadOnlyMemory<byte>, fileOffset, ct)`.
     - Protects incomplete files against antivirus scans, search indexers, and accidental execution.
   - **Atomic Finalization**:
     - Upon complete chunk verification of all blocks belonging to a file:
     - Flushes file buffers to disk.
     - Atomically renames `{relativePath}.percolator-part` to `{relativePath}` via `File.Move(..., overwrite: true)`.
-    - Sets `File.SetLastWriteTimeUtc` from manifest timestamp.
+    - Sets `File.SetLastWriteTimeUtc` from manifest timestamp (`FileLastModifiedUtc`).
   - **Resumption Bitfield Scanner**:
-    - Reads existing `.percolator-part` and completed files on disk in 1 MB blocks.
-    - Computes SHA-256 over each block and compares against `ChunkHashes` to construct the resumption `Bitfield`.
+    - Reads existing `.percolator-part` and completed files on disk in chunk-sized blocks.
+    - Computes SHA-256 over each block and compares against `MerkleTreeIndex` leaf hashes to construct the resumption `Bitfield`.
   - *(Note: On Windows NTFS, `Percolator.Infrastructure.Windows` provides `WindowsSparseDesktopFileStore` which invokes Win32 `DeviceIoControl` with `FSCTL_SET_SPARSE` to avoid synchronous zero-fill overhead).*
   - **Security Risk & OS Path Sanitization Guardrail (Lens 3 Security)**:
     - *Path Traversal & Device Name Hijacking*: While the domain model enforces relative path invariants (`SanitizedRelativePath`), `PortableDesktopFileStore` bears the concrete infrastructure responsibility of validating the fully resolved destination path against operating system vulnerabilities before opening file handles:
@@ -583,17 +584,21 @@ Concrete realization of out-of-band high-speed croc-inspired and BitTorrent swar
         preventing symlink, directory junction, or hardlink escapes out of the destination root directory.
       - **Unicode Normalization & Hidden Segment Traversal (V-79)**: 
         Performs Unicode Normalization Form C (`NormalizationForm.FormC`) on all incoming relative paths before resolving to physical disk paths.
-        Explicitly rejects homoglyphs (e.g. fullwidth solidus `／`, division slash `∕`, two-dot leader `‥`), ASCII control characters (` `–``), trailing spaces (`foo `), and trailing dots (`foo.`) in directory and file segment names that cause Windows Win32 filesystems to truncate or silently collapse segment paths.
+        Explicitly rejects homoglyphs (e.g. fullwidth solidus `／`, division slash `∕`, two-dot leader `‥`), ASCII control characters (`\u0000`–`\u001f`), trailing spaces (`foo `), and trailing dots (`foo.`) in directory and file segment names that cause Windows Win32 filesystems to truncate or silently collapse segment paths.
 
 #### 5. Bandwidth Rate Limiter
 - **`TokenBucketRateLimiter`** (`ITransferRateLimiter`):
   - Implements high-precision token-bucket algorithm using `PeriodicTimer` or fractional nanosecond timestamp tracking.
-  - Enforces global speed caps (`MaxDownloadBytesPerSec`, `MaxUploadBytesPerSec`) and per-session overrides.
+  - Enforces global speed caps (`MaxDownloadBytesPerSec`, `MaxUploadBytesPerSec`) and per-session overrides using `BandwidthLimit` and `TransferBandwidth`.
   - Dynamically throttles `Stream.ReadAsync` and `Stream.WriteAsync` loops in `TcpMultiStreamPool`.
 
 #### 6. SQLite Repositories for File Transfer
-- Implements `ITransferSessionRepository`:
-  - `ft_transfer_sessions`: Stores session state, channel ID, peer identity, root name, metrics, manifest blob ID, session key, base nonce, destination path, and status.
-  - `ft_manifest_files`: Stores individual file entries and bundle byte offsets.
-  - `ft_session_bitfields`: Stores binary chunk bitfield state for active downloads.
-  - `ft_swarm_peers`: Caches known active swarm peer endpoints.
+- **`SqliteTransferSessionRepository`** (`ITransferSessionRepository`):
+  - `ft_transfer_sessions`: Stores session state, role, initiator identity, participant topology JSON, root title, total bytes, chunk size, total chunks, target seed ratio, uploaded bytes, Merkle root BLOB, local destination path (`RootDirectoryPath`), AES session key (`TransferKey` encrypted under local master key), base nonce (`BaseNonce`), stream auth token (`StreamAuthToken`), relay URI, created/completed timestamps.
+  - `ft_manifest_files`: Stores file index, sanitized relative path, file size in bytes, start offset, end offset, and sanitized last modified timestamp. Keyed by `(session_id, file_index)`.
+  - `ft_session_bitfields`: Stores binary chunk bitfield BLOB representing local piece possession state for active downloads. Keyed by `session_id`.
+  - `ft_swarm_endpoints`: Stores discovered direct connection candidates (`session_id`, `peer_identity_id`, `host`, `port`, `candidate_kind`, `routing_preference`, `last_seen_utc`) for fast-resume without polluting the domain model with socket addresses.
+- **`SqliteFilterPolicyRepository`** (`IFileTransferFilterPolicyRepository`):
+  - `ft_filter_policies`: Stores owner identity ID and policy updated timestamp.
+  - `ft_blocked_peers`: Stores blocked peer identities (`owner_identity_id`, `blocked_peer_identity_id`, `created_at_utc`).
+  - `ft_blocked_relays`: Stores blocked relay URIs (`owner_identity_id`, `relay_uri`, `created_at_utc`).

@@ -39,7 +39,7 @@ flowchart TD
     ZeroWire --> ExposeReadModel["Expose TransferSessionReadModel to Ports"]
 ```
 
-### 2.1 Contracts
+### 2.1 Contracts & Filter Policy Model
 ```csharp
 namespace Percolator.PluginSdk;
 
@@ -57,7 +57,35 @@ public interface IAppIngressFilter
 }
 ```
 
-- `FileTransferIngressFilter` implements `IAppIngressFilter`, invoking `FileTransferFilterPolicy.EvaluatePeer(context.SenderIdentityId)`. When `PeerFilterDecision.Blocked`, raw bytes are discarded before deserialization (`IngressDecision.DiscardSilently`).
+```csharp
+namespace Percolator.Apps.FileTransfer.Features.IngressControl;
+
+public enum PeerFilterDecision : byte
+{
+    Allowed = 0x01,
+    Blocked = 0x02
+}
+
+public enum RelayFilterDecision : byte
+{
+    Allowed = 0x01,
+    Blocked = 0x02
+}
+
+public sealed record FileTransferFilterPolicy(
+    PublicIdentityId OwnerId,
+    IReadOnlySet<PublicIdentityId> BlockedPeers,
+    IReadOnlySet<RelayPipeEndpointUri> BlockedRelays)
+{
+    public PeerFilterDecision EvaluatePeer(PublicIdentityId peerId) =>
+        BlockedPeers.Contains(peerId) ? PeerFilterDecision.Blocked : PeerFilterDecision.Allowed;
+
+    public RelayFilterDecision EvaluateRelay(RelayPipeEndpointUri relayUri) =>
+        BlockedRelays.Contains(relayUri) ? RelayFilterDecision.Blocked : RelayFilterDecision.Allowed;
+}
+```
+
+- `FileTransferIngressFilter` implements `IAppIngressFilter`, invoking `policy.EvaluatePeer(context.SenderIdentityId)`. When `PeerFilterDecision.Blocked`, raw bytes are discarded before deserialization (`IngressDecision.DiscardSilently`).
 - `FileTransferPayloadHandler` implements `IAppPayloadHandler`, validating relay URI against `policy.EvaluateRelay(relayUri) == RelayFilterDecision.Blocked` before staging inbound sessions.
 
 ### 2.2 Ingress Offer Payload Limits & Memory Defense (Lens 3)
@@ -94,11 +122,127 @@ Offers failing these bounds are dropped silently without staging into memory or 
 
 ## 3. Application Wire Payloads & Out-of-Band Framing
 
-### 3.1 Application Value Objects & Distribution Models (V-60, V-66, V-67)
+### 3.1 Application Value Objects & Transport Models
+
+These models represent transport coordination, relay routing, wire encryption keys, rate throttling, and desktop filesystem paths (excised from `FileTransfer.Domain` to keep the domain pure and focused on math, bitfields, and lifecycle):
 
 ```csharp
 namespace Percolator.Apps.FileTransfer.Features.TransferNegotiation;
 
+// --- Transport Reachability & Candidate Discovery ---
+public enum DirectCandidateKind : byte
+{
+    DirectLan = 0x01,
+    DirectWanUpnp = 0x02,
+    DirectWanStun = 0x03
+}
+
+public enum DirectWanPolicy : byte
+{
+    DisabledByDefault = 0x01,
+    ExplicitlyAllowed = 0x02
+}
+
+public enum TransportRoutingPreference : byte
+{
+    DirectPreferred = 0x01,
+    RelayOnly = 0x02
+}
+
+public sealed record EndpointHost
+{
+    public string Value { get; }
+    private EndpointHost(string value) => Value = value;
+    public static EndpointHost Parse(string host)
+    {
+        if (string.IsNullOrWhiteSpace(host)) throw new ArgumentException("Host cannot be empty.", nameof(host));
+        return new EndpointHost(host);
+    }
+}
+
+public readonly record struct PortNumber
+{
+    public ushort Value { get; }
+    private PortNumber(ushort value) => Value = value;
+    public static PortNumber FromInt(int port)
+    {
+        if (port is < 1 or > 65535) throw new ArgumentOutOfRangeException(nameof(port), "Port must be 1..65535.");
+        return new PortNumber((ushort)port);
+    }
+}
+
+public sealed record DirectEndpointCandidate(
+    EndpointHost Host,
+    PortNumber Port,
+    DirectCandidateKind Kind);
+
+// --- Relay Reachability & Pipe Rendezvous ---
+public sealed record RelayPipeEndpointUri
+{
+    public string Value { get; }
+    private RelayPipeEndpointUri(string value) => Value = value;
+    public static RelayPipeEndpointUri Parse(string uri) => new(uri ?? throw new ArgumentNullException(nameof(uri)));
+}
+
+public sealed record RelayPipeToken([property: ByteArray(32)] byte[] Bytes);
+
+public sealed record RelayRendezvousDescriptor(
+    RelayPipeEndpointUri EndpointUri,
+    RelayPipeToken Token);
+
+// --- Stream Encryption, Nonces & Sockets ---
+public sealed record TransferKey([property: ByteArray(32)] byte[] Bytes) : ISensitiveSecret
+{
+    public void Zeroize() => CryptographicOperations.ZeroMemory(Bytes);
+}
+
+public sealed record BaseNonce([property: ByteArray(12)] byte[] Bytes);
+
+public sealed record StreamAuthToken([property: ByteArray(32)] byte[] Bytes);
+
+public sealed record SwarmRendezvousId([property: ByteArray(32)] byte[] Bytes);
+
+public readonly record struct StreamIndex(int Value)
+{
+    public static StreamIndex FromInt(int index) => new(index);
+}
+
+public readonly record struct StreamCount(int Count)
+{
+    public static StreamCount FromInt(int count) => new(count);
+    public static StreamCount Default => new(4);
+}
+
+// --- Bandwidth Rate Limiting ---
+public readonly record struct TransferBandwidth(long BytesPerSecond);
+
+public readonly record struct BandwidthLimit(bool IsUnlimited, TransferBandwidth Value)
+{
+    public static BandwidthLimit Unlimited => new(true, default);
+    public static BandwidthLimit Capped(TransferBandwidth cap) => new(false, cap);
+}
+
+// --- Desktop OS Filesystem Paths ---
+public sealed record RootDirectoryPath
+{
+    public string Value { get; }
+    private RootDirectoryPath(string value) => Value = value;
+    public static RootDirectoryPath Parse(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException("Path cannot be empty.", nameof(path));
+        return new RootDirectoryPath(Path.GetFullPath(path));
+    }
+}
+
+public sealed record ResolvedFilePath
+{
+    public string AbsolutePath { get; }
+    private ResolvedFilePath(string absolutePath) => AbsolutePath = absolutePath;
+    public static ResolvedFilePath Resolve(RootDirectoryPath root, SanitizedRelativePath relativePath) =>
+        new(Path.Combine(root.Value, relativePath.Value));
+}
+
+// --- Wire Chunk Buffers & In-Band Manifest Wrappers ---
 public sealed record EncryptedChunkData
 {
     public ReadOnlyMemory<byte> CiphertextWithAuthTag { get; }
@@ -125,7 +269,6 @@ public sealed record InlineManifestData
     }
 }
 
-// Uses strongly typed BlobId from Percolator.PluginSdk (V-66):
 public sealed record ManifestBlobDescriptor(
     BlobId BlobId,
     ChunkHash CiphertextSha256,
@@ -168,8 +311,6 @@ public sealed record DiskSpacePreflightResult(
     public static DiskSpacePreflightResult Insufficient(TotalBundleBytes required, TotalBundleBytes available) =>
         new(false, required, available);
 }
-
-// Note: ResolvedFilePath is defined in Percolator.Apps.FileTransfer.Domain.ManifestManagement and imported here (V-67).
 ```
 
 ### 3.2 In-Band Control Channel Payloads (`AppId.FileTransferControl = 0x03`)
@@ -376,7 +517,7 @@ public interface IFileTransferFilterPolicyRepository
 ## 5. Minimal, Light-Touch CQRS Contracts
 
 ### 5.1 `IFileTransferActionHandler`
-Consolidates into 5 fundamental lifecycle commands with explicit optional parameters for title and seeding ratio (V-64):
+Consolidates into 5 fundamental lifecycle commands with explicit optional parameters for title and seeding ratio:
 
 ```csharp
 namespace Percolator.Apps.FileTransfer.Ports;
@@ -462,7 +603,7 @@ public interface ITransferOfferReaperService
 ## 6. Swarm Rendezvous, Fast-Resume & PEX Orchestration
 
 1. **Immediate Fast-Path Reconnection (Zero Tracker Latency)**:
-   - When an active or paused transfer is resumed (or after an application restart), the transfer coordinator immediately dials the `EndpointCandidates` encapsulated on each `SwarmMember`.
+   - When an active or paused transfer is resumed (or after an application restart), the transfer coordinator queries `ft_swarm_endpoints` and dials candidate IP addresses directly.
    - On local LANs or stable WAN IPs, direct streaming resumes within milliseconds without wire signaling or tracker queries.
 2. **Authenticated Rendezvous Fallback**:
    - If direct connection attempts fail or candidates have expired:
@@ -472,9 +613,8 @@ public interface ITransferOfferReaperService
 3. **Live Peer Exchange (PEX) & Candidate Flooding Defense (Lens 3)**:
    - As connected peers discover new routes or candidates, they dispatch `PexPeersFrame(Candidates)` over active data streams.
    - **PEX Flood Rate Limiter**: Coordinators throttle `PexPeersFrame` ingestion to at most 1 frame per 10 seconds per peer.
-   - **Candidate Capping & Deduplication**: Capped at `MaxCandidatesPerPeer = 16`. Candidates are deduplicated by Host+Port. Bogus formats or loopback/private candidates (unless `AllowLan` is enabled) are discarded before updating the domain model.
-   - The coordinator passes sanitized candidates to `TransferSession.UpdatePeerCandidates(peerId, sanitizedCandidates)` and persists the updated candidates to SQLite (`ft_swarm_endpoints`) for future fast-resume cycles.
-
+   - **Candidate Capping & Deduplication**: Capped at `MaxCandidatesPerPeer = 16`. Candidates are deduplicated by Host+Port. Bogus formats or loopback/private candidates (unless `AllowLan` is enabled) are discarded.
+   - The coordinator persists valid candidates to SQLite (`ft_swarm_endpoints`) for fast-resume cycles, completely isolating physical network addresses from the core domain model.
 4. **Swarm Peer Attribution, Poisoned Block Defense & Choking Coordination (Lens 3)**:
    - **Stream-to-Peer Attribution**: The `TransferSessionCoordinator` maps each active TCP/QUIC stream to its supplying peer identity (`PublicIdentityId`).
    - **Poisoned Block Penalization**: When a chunk payload received from stream $S$ fails cryptographic verification against the domain Merkle root:
@@ -546,7 +686,7 @@ public interface ITransferOfferReaperService
 ### Milestone 4: Swarm Coordination, Distributed Tracker & Seeding Ratios
 1. Implement `SwarmCoordinator` updating `SwarmMember` entities within `TransferSession`.
 2. Implement `RarestFirstChunkSelector` and `EndgameMode`.
-3. Implement fast-resume endpoint hydration from `ft_swarm_endpoints` and live PEX frame candidate updates (`SwarmMember.UpdateCandidates`).
+3. Implement fast-resume endpoint hydration from `ft_swarm_endpoints` and live PEX frame candidate updates.
 4. Implement `IDistributedTrackerPort` announce and unregister workflows using `SwarmRendezvousId` and `PublicIdentityId`.
 5. Implement seeding ratio tracking ($\text{Uploaded} / \text{Total}$) and automatic disconnect on target ratio.
 
