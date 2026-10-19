@@ -3,7 +3,7 @@
 ## Refinement Status Gate
 - [x] Lens 1: Scope & Feature Slice Framing (Status: Approved)
 - [x] Lens 2: Onion Architecture & Primitive Obsession (Status: Approved)
-- [ ] Lens 3: Threat Modeling & Security Posture (Status: In Progress)
+- [x] Lens 3: Threat Modeling & Security Posture (Status: Approved)
 - [ ] Lens 4: High-Value, Low-Brittle Unit Test Design (Status: Pending)
 - [ ] Lens 5: Cross-Layer Infrastructure Alignment (Status: Pending)
 - [ ] Implementation Gate: LOCKED (Requires Approval of Lenses 1-5)
@@ -802,7 +802,25 @@ To eliminate Merkle tree malleability (CVE-2012-2459) while guaranteeing root ha
 
 ---
 
-## 6. High-Value Domain Unit Testing Matrix
+## 6. Domain Invariant Security & Integrity Invariants (Lens 3)
+
+The pure domain kernel enforces mathematical, cryptographic, and structural defenses against invariant tampering and corrupted state, completely independent of network framing or operating system environments:
+
+| Domain Integrity Threat | Pure Domain Defense | Verification Invariant |
+| :--- | :--- | :--- |
+| **Merkle Tree Malleability (CVE-2012-2459)** | Odd-node promotion rule promotes unpaired nodes directly to the next level without duplicate hashing ($H(N, N)$ prohibited). Domain separation prefixes (`0x00` leaf, `0x01` interior) prevent collision attacks. | `MerkleTreeIndex` deterministically produces root and rejects duplicate-node spoofing. |
+| **Bitfield Padding Malleability** | `Bitfield` constructor validates that trailing unused bits in the final byte are strictly zero (`0x00`). `Bitfield` is immutable; bitwise operations return new instances with recomputed `PopCount`. | Instantiating `Bitfield` with non-zero padding bits throws `DomainValidationException`. |
+| **Swarm Admission & Phantom Peers** | `RegisterSwarmMember` enforces `Topology.ContainsParticipant(peerId)`. Mutations (`RecordPeerHave`, `RecordPeerBitfield`, `RecordPeerChokingUs`) require prior registration in `_swarmMembers`. | Mutations with unknown or unauthorized peer IDs return `DomainResult.Failure`. |
+| **Chunk Size Misalignment & Overrun** | `VerifyAndRecordChunk` validates input byte length against `manifest.GetExpectedChunkSize(chunkIndex)`. | Chunk data exceeding or falling short of expected size returns `DomainResult.Failure`. |
+| **Duplicate Event Poisoning** | `VerifyAndRecordChunk` checks `LocalBitfield.HasChunk(chunkIndex)`. If already present, returns `DomainResult.Success` idempotently without re-emitting events. | Re-verifying chunks emits zero duplicate domain events. |
+| **Bundle Layout Gaps & Overlaps** | `TransferManifest.Create` enforces contiguous offsets: $\text{StartOffset}_{i+1} == \text{StartOffset}_i + \text{FileSize}_i$ and $\sum \text{FileSize} == \text{TotalSize}$. Zero-byte files have $\text{StartOffset} == \text{EndOffset}$. | Non-contiguous offsets throw `DomainValidationException`. |
+| **Logical Relative Path Recursion** | `SanitizedRelativePath.Parse` rejects absolute paths, drive roots (`C:`), parent traversal (`..`), current directory (`.`), and caps depth at 32 segments and length at 1,024 bytes. | Malicious paths throw `DomainValidationException`. |
+| **Lifecycle Precondition Violations** | Formal State Transition Matrix (§2.1.1) gates all aggregate mutations. Terminal states (`Completed`, `Cancelled`, `Failed`) reject any further transitions. | Aggregate rejects out-of-order mutations across all invalid states. |
+| **Seeding Ratio Tampering** | `SeedRatio` validates against negative numbers, NaN, and Infinity. Aggregate automatically signals completion when `CurrentSeedRatio >= TargetSeedRatio`. | Invalid multipliers throw `DomainValidationException`; completion triggers on target ratio. |
+
+---
+
+## 7. High-Value Domain Unit Testing Matrix
 
 | Test Category | Target Invariant Under Test | Observable Verification | Low-Brittle Guarantee |
 | :--- | :--- | :--- | :--- |
@@ -834,7 +852,7 @@ To eliminate Merkle tree malleability (CVE-2012-2459) while guaranteeing root ha
 
 ---
 
-## 7. Phased Domain Implementation Milestones
+## 8. Phased Domain Implementation Milestones
 
 ### Milestone 1: Standalone Domain Project, Primitives & Roslyn Integration
 1. Create standalone project `Percolator.Apps.FileTransfer.Domain.csproj` targeting `net10.0` referencing `Percolator.Domain.Kernel` and `Percolator.SourceGenerators` (Analyzer).
