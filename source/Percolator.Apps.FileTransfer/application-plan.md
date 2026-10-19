@@ -88,8 +88,10 @@ public sealed record FileTransferFilterPolicy(
 - `FileTransferIngressFilter` implements `IAppIngressFilter`, invoking `policy.EvaluatePeer(context.SenderIdentityId)`. When `PeerFilterDecision.Blocked`, raw bytes are discarded before deserialization (`IngressDecision.DiscardSilently`).
 - `FileTransferPayloadHandler` implements `IAppPayloadHandler`, validating relay URI against `policy.EvaluateRelay(relayUri) == RelayFilterDecision.Blocked` before staging inbound sessions.
 
-### 2.2 Ingress Offer Payload Limits & Memory Defense (Lens 3)
-To defend against unbounded heap allocations and memory exhaustion DoS attacks from untrusted peers, the application payload handler validates incoming offers prior to staging or domain entity instantiation:
+### 2.2 Bundle Limits & Memory Defense (Symmetric Ingress & Egress Invariants)
+To defend against unbounded heap allocations and memory exhaustion DoS attacks from untrusted peers or oversized local directory selections, the application layer validates bundle limits symmetrically:
+- **Inbound Ingress**: `IngressTransferOfferValidator` validates incoming offers prior to staging or domain entity instantiation.
+- **Outbound Egress**: `TransferInitiationService` validates local file scan results prior to constructing the `TransferManifest` or staging an outgoing session.
 
 ```csharp
 namespace Percolator.Apps.FileTransfer.Features.TransferNegotiation;
@@ -553,6 +555,21 @@ public interface IFileTransferActionHandler
 }
 ```
 
+#### 5.1.1 Command Handler Orchestration Rules
+1. **Initiate Transfer Pre-Flight Bounds**:
+   - `InitiateTransferAsync` scans the local `sourceRoot` to collect files and compute total size.
+   - Enforces symmetric caps before manifest allocation: if files $> 50,000$, total size $> 16\text{ TB}$, or chunks $> 1,000,000$, returns `DomainResult.Failure` without staging or persisting an aggregate.
+2. **Accept Transfer Selective Pre-Flight Disk Math**:
+   - `AcceptTransferAsync` resolves `selectedFiles`:
+     - If `selectedFiles == null`: defaults to `SelectedFileIndices.All(manifest.TotalFiles)`.
+     - If `selectedFiles.SelectedCount == 0`: returns `DomainResult.Failure("At least one file must be selected for transfer.")`.
+   - **Selective Disk Space Verification**: Calculates required bytes strictly for selected files:
+     $$\text{RequiredSpace} = \sum_{i \in \text{SelectedFiles}} \text{manifest.Files}[i].\text{FileSize}$$
+     Invokes `IDesktopFileStorage.CheckDiskSpaceAsync(destinationFolder, RequiredSpace, ct)`. If space is insufficient, returns `DomainResult.Failure` without transitioning aggregate state.
+3. **Zero-Byte File Finalization on InFlight Transition**:
+   - When user consent is given and the session transitions from `PendingConsent` to `InFlight`, `TransferSessionCoordinator` immediately calls `IDesktopFileStorage.FinalizeFileAsync` for any selected files with `FileSize.Bytes == 0`.
+   - Because 0-byte files have zero chunks, they emit no chunk verification events; immediate finalization ensures 0-byte files are materialized and marked completed immediately upon starting the transfer.
+
 ### 5.2 Read Models & Query Service
 ```csharp
 namespace Percolator.Apps.FileTransfer.Ports;
@@ -710,7 +727,8 @@ public interface ITransferOfferReaperService
 ### Milestone 3: Desktop Disk I/O & Storage Abstraction
 1. Define `IDesktopFileStorage` port using `PlaintextChunkData`, `FileLastModifiedUtc`, `RootDirectoryPath`, `ResolvedFilePath`, and `DiskSpacePreflightResult`.
 2. Implement `DiskChunkAssembler` handling multi-file boundary spanning, chunk writes, and atomic finalization.
-3. Implement selective file downloading chunk range mapping (`SelectedFileIndices`).
+3. Implement selective file downloading chunk range mapping (`SelectedFileIndices`) and selective disk space pre-flight calculation.
+4. Implement zero-byte file immediate finalization workflow on transfer start.
 
 ### Milestone 4: Swarm Coordination, Distributed Tracker & Seeding Ratios
 1. Implement `SwarmCoordinator` managing active `SwarmMember` entities within `TransferSession` and tracking heartbeat/liveness via `SwarmPeerLiveness`.

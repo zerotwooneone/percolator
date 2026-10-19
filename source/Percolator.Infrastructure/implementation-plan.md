@@ -559,9 +559,9 @@ Concrete realization of out-of-band high-speed croc-inspired and BitTorrent swar
 
 #### 4. Portable Desktop File Storage & Atomic File Finalization
 - **`PortableDesktopFileStore`** (`IDesktopFileStorage`):
-  - **Portable Pre-Allocation**:
-    - Opens target files with `FileShare.ReadWrite | FileShare.Delete`.
-    - Advances end-of-file pointer via `FileStream.SetLength(totalBytes)` (or POSIX `posix_fallocate`).
+  - **Portable Pre-Allocation & Zero-Byte File Materialization**:
+    - **Non-Empty Files (`FileSize.Bytes > 0`)**: Opens target files with `FileShare.ReadWrite | FileShare.Delete` and advances end-of-file pointer via `FileStream.SetLength(totalBytes)` (or POSIX `posix_fallocate`).
+    - **Zero-Byte Files (`FileSize.Bytes == 0`)**: Directly creates the empty file at target path `{relativePath}` (without the `.percolator-part` staging suffix), applies `File.SetLastWriteTimeUtc` from manifest timestamp, and flushes immediately. This guarantees that 0-byte files are fully materialized from the start, avoiding dangling `.percolator-part` files on disk that never receive chunk verification callbacks.
   - **Path Resolution & Staging with `.percolator-part`**:
     - Combines `RootDirectoryPath` and `SanitizedRelativePath` to resolve `ResolvedFilePath`.
     - Writes incoming chunks to `{relativePath}.percolator-part` using `RandomAccess.WriteAsync(SafeFileHandle, ReadOnlyMemory<byte>, fileOffset, ct)`.
@@ -574,6 +574,7 @@ Concrete realization of out-of-band high-speed croc-inspired and BitTorrent swar
   - **Resumption Bitfield Scanner**:
     - Reads existing `.percolator-part` and completed files on disk in chunk-sized blocks.
     - Computes SHA-256 over each block and compares against `MerkleTreeIndex` leaf hashes to construct the resumption `Bitfield`.
+    - Zero-byte files are skipped during chunk offset mapping and verified strictly for filesystem existence, ensuring they do not offset or corrupt the piece bitmask.
   - *(Note: On Windows NTFS, `Percolator.Infrastructure.Windows` provides `WindowsSparseDesktopFileStore` which invokes Win32 `DeviceIoControl` with `FSCTL_SET_SPARSE` to avoid synchronous zero-fill overhead).*
   - **Security Risk & OS Path Sanitization Guardrail (Lens 3 Security)**:
     - *Path Traversal & Device Name Hijacking*: While the domain model enforces relative path invariants (`SanitizedRelativePath`), `PortableDesktopFileStore` bears the concrete infrastructure responsibility of validating the fully resolved destination path against operating system vulnerabilities before opening file handles:
