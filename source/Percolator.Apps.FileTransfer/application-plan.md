@@ -622,6 +622,26 @@ public interface ITransferOfferReaperService
      2. Immediately terminates the corrupted stream and notifies the domain aggregate to choke the peer (`session.SetWeChokingPeer(peerId, PeerChokeStatus.Choked)`).
      3. Blacklists the peer from supplying that chunk and reschedules the failed piece to an alternate seeder via rarest-first selection.
      4. If a peer accumulates multiple invalid chunks (e.g. 3 failures), the coordinator tears down all streams to that peer and removes them from active dialing pools.
+5. **Swarm Peer Liveness, Idle Keep-Alives & Endpoint Persistence**:
+   - Tracking when a remote peer was last active over TCP/QUIC is a network liveness / transport coordination concern:
+     ```csharp
+     public sealed class SwarmPeerLiveness
+     {
+         public PublicIdentityId PeerId { get; }
+         public DateTimeOffset LastSeenUtc { get; private set; }
+
+         public SwarmPeerLiveness(PublicIdentityId peerId, DateTimeOffset lastSeenUtc)
+         {
+             PeerId = peerId;
+             LastSeenUtc = lastSeenUtc;
+         }
+
+         public bool IsActive(DateTimeOffset now, TimeSpan timeout) => now - LastSeenUtc <= timeout;
+         public void RecordActivity(IDateTimeProvider clock) => LastSeenUtc = clock.UtcNow;
+     }
+     ```
+   - **Keep-Alive Frame Dispatch**: `SwarmCoordinator` tracks `SwarmPeerLiveness` for each connected peer. If a stream remains idle for $\ge 30\text{ seconds}$ without chunk traffic, the coordinator transmits a 0-byte payload `KeepAliveFrame` to keep NAT bindings open.
+   - **Disconnect Detection & Ephemeral Eviction**: If no packet or frame is received from a peer for $\ge 60\text{ seconds}$, the coordinator marks the peer connection dead, tears down dead sockets, and persists `last_seen_utc` in SQLite (`ft_swarm_endpoints`) before evicting the peer from active dialing pools.
 
 ---
 
@@ -684,7 +704,7 @@ public interface ITransferOfferReaperService
 3. Implement selective file downloading chunk range mapping (`SelectedFileIndices`).
 
 ### Milestone 4: Swarm Coordination, Distributed Tracker & Seeding Ratios
-1. Implement `SwarmCoordinator` updating `SwarmMember` entities within `TransferSession`.
+1. Implement `SwarmCoordinator` managing active `SwarmMember` entities within `TransferSession` and tracking heartbeat/liveness via `SwarmPeerLiveness`.
 2. Implement `RarestFirstChunkSelector` and `EndgameMode`.
 3. Implement fast-resume endpoint hydration from `ft_swarm_endpoints` and live PEX frame candidate updates.
 4. Implement `IDistributedTrackerPort` announce and unregister workflows using `SwarmRendezvousId` and `PublicIdentityId`.

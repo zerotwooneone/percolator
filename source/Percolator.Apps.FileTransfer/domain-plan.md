@@ -53,7 +53,7 @@ public enum TransferSessionState : byte
     Completed = 0x05,        // All selected files downloaded and verified against Merkle tree
     Seeding = 0x06,          // Serving completed chunks to active swarm peers based on SeedRatio
     Stalled = 0x07,          // Missing chunks across active swarm; waiting for seeders
-    Cancelled = 0x08,        // Explicitly aborted by user
+    Cancelled = 0x08,        // Explicitly aborted by user or expired
     Failed = 0x09            // Unrecoverable cryptographic verification or domain invariant failure
 }
 
@@ -157,8 +157,43 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
 }
 ```
 
+### 2.1.1 Formal Lifecycle State Transition Matrix
+
+The table below codifies the exact state machine invariants enforced by `TransferSession`. Any mutation attempted from an invalid state returns `DomainResult.Failure` or throws `DomainValidationException`:
+
+| Current State | Triggering Domain Method | Next State | Guard Conditions & Observable Invariants |
+| :--- | :--- | :--- | :--- |
+| *(None)* | `CreateOutgoing1to1` / `MultiPeer` | `Offered` | Sender initialization. `LocalBitfield` is 100% full. |
+| *(None)* | `CreateIncomingStaged` | `PendingConsent` | Recipient staging. `LocalBitfield` is empty. Zero network ACK emitted. |
+| `Offered` | `RecordPeerAcceptance` | `InFlight` | Gated on `Topology.ContainsParticipant(recipientId)`. Registers peer bitfield. Emits `PeerAcceptedTransferDomainEvent`. |
+| `Offered` | `Cancel(reason, clock)` | `Cancelled` | Emits `TransferCancelledDomainEvent`. Terminal state. |
+| `Offered` | `MarkFailed(reason, clock)` | `Failed` | Emits `TransferFailedDomainEvent`. Terminal state. |
+| `PendingConsent` | `AcceptTransfer(selectedFiles, clock)` | `InFlight` | Validates `selectedFiles` non-empty. Emits `TransferAcceptedLocallyDomainEvent`. |
+| `PendingConsent` | `ExpireOffer(clock)` | `Cancelled` | Reason is strictly `TransferTerminationReason.OfferExpired`. Emits `TransferCancelledDomainEvent`. |
+| `PendingConsent` | `Cancel(reason, clock)` | `Cancelled` | Reason is strictly `TransferTerminationReason.UserDeclined`. Terminal state. |
+| `InFlight` | `VerifyAndRecordChunk(index, data, clock)` | `InFlight` | Piece verified. Emits `ChunkVerifiedDomainEvent`. If last chunk of file, emits `FileCompletedDomainEvent`. |
+| `InFlight` | `VerifyAndRecordChunk(index, data, clock)` | `Completed` | Last required chunk verified, and `TargetSeedRatio.IsZero`. Emits `TransferCompletedDomainEvent`. |
+| `InFlight` | `VerifyAndRecordChunk(index, data, clock)` | `Seeding` | Last required chunk verified, and `TargetSeedRatio > 0`. Emits `TransferCompletedDomainEvent`. |
+| `InFlight` | `Pause()` | `Paused` | Suspends active chunk verification. Emits `TransferPausedDomainEvent`. |
+| `InFlight` | `MarkStalled(clock)` | `Stalled` | Triggered when zero connected peers possess remaining missing pieces. Emits `TransferStalledDomainEvent`. |
+| `InFlight` | `Cancel(reason, clock)` | `Cancelled` | User or timeout abortion. Emits `TransferCancelledDomainEvent`. Terminal state. |
+| `InFlight` | `MarkFailed(reason, clock)` | `Failed` | Cryptographic verification or bundle corruption. Emits `TransferFailedDomainEvent`. Terminal state. |
+| `Paused` | `Resume()` | `InFlight` | Resumes verification. Emits `TransferResumedDomainEvent`. |
+| `Paused` | `Cancel(reason, clock)` | `Cancelled` | Terminal state. |
+| `Stalled` | `RecordPeerHave` / `Bitfield` | `InFlight` | Transition occurs automatically when a newly recorded piece resolves stall condition. |
+| `Stalled` | `Pause()` | `Paused` | Emits `TransferPausedDomainEvent`. |
+| `Stalled` | `Cancel(reason, clock)` | `Cancelled` | Terminal state. |
+| `Seeding` | `RecordUploadedBytes(bytes, clock)` | `Completed` | Transition occurs when `CurrentSeedRatio >= TargetSeedRatio`. Terminal state. |
+| `Seeding` | `Pause()` | `Paused` | Temporarily halts seeding. Emits `TransferPausedDomainEvent`. |
+| `Seeding` | `Cancel(reason, clock)` | `Cancelled` | Terminal state. |
+| `Completed` | *(Any mutation)* | `Completed` | **Terminal State**: `IsSuccess = false` / throws `DomainValidationException`. State is immutable. |
+| `Cancelled` | *(Any mutation)* | `Cancelled` | **Terminal State**: `IsSuccess = false` / throws `DomainValidationException`. State is immutable. |
+| `Failed` | *(Any mutation)* | `Failed` | **Terminal State**: `IsSuccess = false` / throws `DomainValidationException`. State is immutable. |
+
+---
+
 ### 2.2 `SwarmMember` Entity
-Encapsulates swarm participant piece possession, last-seen activity, and **bidirectional flow control**:
+Encapsulates swarm participant piece possession and **bidirectional flow control**:
 
 ```csharp
 namespace Percolator.Apps.FileTransfer.Domain.SwarmCoordination;
@@ -193,13 +228,11 @@ public sealed class SwarmMember : IEntity<PublicIdentityId>
     public PeerInterestStatus PeerInterestedInUs { get; private set; } // Is remote peer interested in us?
     public PeerInterestStatus WeInterestedInPeer { get; private set; } // Are we interested in remote peer?
 
-    public DateTimeOffset LastSeenUtc { get; private set; }
     public SwarmPeerRole Role => Bitfield.IsComplete ? SwarmPeerRole.Seeder : SwarmPeerRole.Leecher;
 
     internal SwarmMember(
         PublicIdentityId peerId,
-        Bitfield bitfield,
-        DateTimeOffset initialSeenUtc)
+        Bitfield bitfield)
     {
         PeerId = peerId;
         Bitfield = bitfield;
@@ -207,7 +240,6 @@ public sealed class SwarmMember : IEntity<PublicIdentityId>
         WeChokingPeer = PeerChokeStatus.Choked;
         PeerInterestedInUs = PeerInterestStatus.NotInterested;
         WeInterestedInPeer = PeerInterestStatus.NotInterested;
-        LastSeenUtc = initialSeenUtc;
     }
 
     internal void UpdateBitfield(Bitfield bitfield) => Bitfield = bitfield;
@@ -218,10 +250,10 @@ public sealed class SwarmMember : IEntity<PublicIdentityId>
     internal void SetWeChokingPeer(PeerChokeStatus status) => WeChokingPeer = status;
     internal void SetPeerInterestedInUs(PeerInterestStatus status) => PeerInterestedInUs = status;
     internal void SetWeInterestedInPeer(PeerInterestStatus status) => WeInterestedInPeer = status;
-    
-    internal void Touch(IDateTimeProvider clock) => LastSeenUtc = clock.UtcNow;
 }
 ```
+
+---
 
 ### 2.3 `TransferManifest` & `FileEntry` Entities
 ```csharp
@@ -398,7 +430,7 @@ All domain concepts in `FileTransfer.Domain` are modeled as strongly typed Value
 | **`TransferTopology`** | `sealed record` | Discriminated union of participant topology: OneToOne, MultiPeer, Incoming. Exposes pure participant query: `.ContainsParticipant(PublicIdentityId)`. Zero cast operators. |
 | **`RootBundleName`** | `sealed record` | Sanitized display title for transfer root ($1 \le \text{Length} \le 255$) | Explicit `Parse(string)`, `.Value`. Zero cast operators. |
 | **`TransferTerminationReason`**| `sealed record` | Reason for transfer rejection, cancellation, or failure | Explicit `UserDeclined`, `SenderCancelled`, `StorageExhausted`, `VerificationFailed`, `Timeout`, `OfferExpired`, `FromText(string)`, `.Value`. Zero cast operators. |
-| **`SanitizedRelativePath`** | `sealed record` | Relative file path verified against directory traversal. Pure relative directory hierarchy: rejects empty/whitespace paths, leading/trailing separators, root/drive prefixes (`C:`), parent traversal (`..`), and current directory segments (`.`). Normalizes separators to canonical `/`. | Explicit `Parse(string)`, `.Value`. Zero cast operators. |
+| **`SanitizedRelativePath`** | `sealed record` | Relative file path verified against directory traversal and recursion depth. Enforces max total length 1,024 bytes, max segment length 255 bytes, and max depth of 32 segments. Rejects empty/whitespace paths, leading/trailing separators, root/drive prefixes (`C:`), parent traversal (`..`), and current directory segments (`.`). Normalizes separators to canonical `/`. | Explicit `Parse(string)`, `.Value`. Zero cast operators. |
 | **`FileChunkSlice`** | `sealed record` | Pure domain calculation mapping chunk byte slice to target file | Explicit `Create(...)`, `.FileIndex`, `.RelativePath`, `.OffsetInFile`, `.SliceLength`, `.BufferOffset`. Zero cast operators. |
 | **`FileLastModifiedUtc`** | `readonly record struct` | Validated file modification timestamp ($0 \le \text{epoch} \le \text{future buffer}$) | Explicit `FromDateTimeOffset(DateTimeOffset)`, `FromUnixSeconds(long)`, `.UtcDateTime`, `.UnixSeconds`. Zero cast operators. |
 | **`FileIndex`** | `readonly record struct` | Zero-indexed file sequence in manifest: $0 \le \text{Value} < \text{TotalFiles}$ | Explicit `FromInt(int)`, `.Value`. Zero cast operators. |
@@ -415,9 +447,148 @@ All domain concepts in `FileTransfer.Domain` are modeled as strongly typed Value
 | **`ChunkByteLength`** | `readonly record struct` | Actual bounded byte length of an individual chunk: $1 \le \text{Bytes} \le 4\text{ MB}$ | Explicit `FromBytes(int)`, `Subtract(TransferByteLength)`, `.Bytes`. Zero cast operators. |
 | **`PlaintextChunkData`** | `sealed record` | Decrypted chunk bytes for disk I/O ($1 \le \text{Bytes} \le 4\text{ MB}$) | Explicit `FromBytes(byte[])`, `FromMemory(ReadOnlyMemory<byte>)`, `.Memory`, `.Span`, `.Length`. Zero cast operators. |
 | **`SeedRatio`** | `readonly record struct` | Upload/Download ratio cap: $\ge 0.0$ or Unlimited | Explicit `Zero`, `Unlimited`, `FromMultiplier(double)`, `.Multiplier`, `.IsUnlimited`. Rejects NaN, Infinity, negative values. Zero cast operators. |
-| **`Bitfield`** | `sealed record` | Chunk possession bitmask: byte length $\lceil \text{TotalChunks} / 8 \rceil$. **Immutable** | Explicit `WithChunk(ChunkIndex)` returning new instance; `Empty(ChunkCount)`, `HasChunk(ChunkIndex)`, `HasAllChunks(Bitfield)`, `ToByteArray()`, `.Length`, `.IsComplete`. Zero cast operators. |
+| **`Bitfield`** | `sealed record` | Chunk possession bitmask: byte length $\lceil \text{TotalChunks} / 8 \rceil$. Big-endian bit ordering. Trailing unused bits strictly zeroed. **Immutable** | Explicit `WithChunk(ChunkIndex)` returning new instance; `Empty(ChunkCount)`, `Full(ChunkCount)`, `FromBytes(ReadOnlySpan<byte>, ChunkCount)`, `HasChunk(ChunkIndex)`, `HasAllChunks(Bitfield)`, `Intersect(Bitfield)`, `Difference(Bitfield)`, `PopCount`, `ToByteArray()`, `.ByteLength`, `.IsComplete`. Zero cast operators. |
 | **`MerkleTreeIndex`** | `sealed record` | Encapsulated Merkle tree root and leaf verification index | Explicit `Create(root, leaves)`, `VerifyLeaf(index, span)`, `GetLeaf(index)`. Zero cast operators. |
 | **`SelectedFileIndices`** | `sealed record` | Checked file indices: non-null immutable set of `FileIndex` | Explicit `All(FileCount)`, `FromIndices(...)`, `Contains(FileIndex)`, `.SelectedCount`, `.Indices`. Zero cast operators. |
+
+---
+
+### 3.1 Detailed Specification: `Bitfield` Value Object
+
+```csharp
+namespace Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
+
+public sealed record Bitfield
+{
+    // Big-endian bit ordering (BitTorrent Standard):
+    // Bit 0 is the most significant bit (0x80) of Byte 0.
+    // Bit 7 is the least significant bit (0x01) of Byte 0.
+    // Bit 8 is the most significant bit (0x80) of Byte 1.
+    public ChunkCount TotalChunks { get; }
+    public int ByteLength => (TotalChunks.Count + 7) / 8;
+    public int PopCount { get; }
+    public bool IsEmpty => PopCount == 0;
+    public bool IsComplete => PopCount == TotalChunks.Count;
+
+    private readonly byte[] _bytes;
+
+    private Bitfield(byte[] bytes, ChunkCount totalChunks, int popCount)
+    {
+        _bytes = bytes;
+        TotalChunks = totalChunks;
+        PopCount = popCount;
+    }
+
+    public static Bitfield Empty(ChunkCount totalChunks)
+    {
+        int len = (totalChunks.Count + 7) / 8;
+        return new Bitfield(new byte[len], totalChunks, 0);
+    }
+
+    public static Bitfield Full(ChunkCount totalChunks)
+    {
+        int len = (totalChunks.Count + 7) / 8;
+        byte[] bytes = new byte[len];
+        for (int i = 0; i < len; i++) bytes[i] = 0xFF;
+        
+        // Invariant: Trailing unused bits in the final byte must be strictly zeroed:
+        int remainder = totalChunks.Count % 8;
+        if (remainder != 0)
+        {
+            byte mask = (byte)(0xFF << (8 - remainder));
+            bytes[len - 1] &= mask;
+        }
+
+        return new Bitfield(bytes, totalChunks, totalChunks.Count);
+    }
+
+    public static Bitfield FromBytes(ReadOnlySpan<byte> source, ChunkCount totalChunks)
+    {
+        int expectedLen = (totalChunks.Count + 7) / 8;
+        if (source.Length != expectedLen)
+            throw new DomainValidationException($"Bitfield byte length ({source.Length}) does not match expected ({expectedLen}) for {totalChunks.Count} chunks.");
+
+        byte[] copy = source.ToArray();
+        
+        // Strict Invariant: Trailing unused bits must be 0:
+        int remainder = totalChunks.Count % 8;
+        if (remainder != 0)
+        {
+            byte trailingMask = (byte)(0xFF >> remainder);
+            if ((copy[expectedLen - 1] & trailingMask) != 0)
+                throw new DomainValidationException("Bitfield contains non-zero bits in trailing padding.");
+        }
+
+        int count = CountBits(copy);
+        return new Bitfield(copy, totalChunks, count);
+    }
+
+    public bool HasChunk(ChunkIndex index)
+    {
+        if (index.Value < 0 || index.Value >= TotalChunks.Count) return false;
+        int byteIdx = index.Value / 8;
+        int bitIdx = 7 - (index.Value % 8);
+        return (_bytes[byteIdx] & (1 << bitIdx)) != 0;
+    }
+
+    public Bitfield WithChunk(ChunkIndex index)
+    {
+        if (HasChunk(index)) return this;
+        byte[] next = (byte[])_bytes.Clone();
+        int byteIdx = index.Value / 8;
+        int bitIdx = 7 - (index.Value % 8);
+        next[byteIdx] |= (byte)(1 << bitIdx);
+        return new Bitfield(next, TotalChunks, PopCount + 1);
+    }
+
+    public Bitfield WithoutChunk(ChunkIndex index)
+    {
+        if (!HasChunk(index)) return this;
+        byte[] next = (byte[])_bytes.Clone();
+        int byteIdx = index.Value / 8;
+        int bitIdx = 7 - (index.Value % 8);
+        next[byteIdx] &= (byte)~(1 << bitIdx);
+        return new Bitfield(next, TotalChunks, PopCount - 1);
+    }
+
+    public bool HasAllChunks(Bitfield mask)
+    {
+        if (mask.TotalChunks != TotalChunks) return false;
+        for (int i = 0; i < _bytes.Length; i++)
+        {
+            if ((_bytes[i] & mask._bytes[i]) != mask._bytes[i]) return false;
+        }
+        return true;
+    }
+
+    public Bitfield Intersect(Bitfield other)
+    {
+        if (other.TotalChunks != TotalChunks)
+            throw new DomainValidationException("Cannot intersect bitfields with differing total chunk counts.");
+        byte[] result = new byte[_bytes.Length];
+        for (int i = 0; i < _bytes.Length; i++) result[i] = (byte)(_bytes[i] & other._bytes[i]);
+        return new Bitfield(result, TotalChunks, CountBits(result));
+    }
+
+    public Bitfield Difference(Bitfield other)
+    {
+        if (other.TotalChunks != TotalChunks)
+            throw new DomainValidationException("Cannot compute difference of bitfields with differing total chunk counts.");
+        byte[] result = new byte[_bytes.Length];
+        for (int i = 0; i < _bytes.Length; i++) result[i] = (byte)(_bytes[i] & ~other._bytes[i]);
+        return new Bitfield(result, TotalChunks, CountBits(result));
+    }
+
+    public byte[] ToByteArray() => (byte[])_bytes.Clone();
+
+    private static int CountBits(byte[] bytes)
+    {
+        int count = 0;
+        foreach (byte b in bytes) count += System.Numerics.BitOperations.PopCount(b);
+        return count;
+    }
+}
+```
 
 ---
 
@@ -636,17 +807,19 @@ To eliminate Merkle tree malleability (CVE-2012-2459) while guaranteeing root ha
 | **Bidirectional Flow** | Peer chokes us while we keep peer unchoked | `PeerChokingUs == Choked` and `WeChokingPeer == Unchoked` | Validates independent directional flow control. |
 | **Bitfield Validation** | Calling `RecordPeerBitfield` with mismatched byte length | Returns `DomainResult.Failure` | Enforces piece mask boundary validation. |
 | **Bitfield Immutability** | Calling `Bitfield.WithChunk(index)` | Returns new instance; original unchanged | Asserts immutability of piece possession bitfields. |
+| **Bitfield Trailing Bits** | Instantiating `Bitfield` with non-zero trailing unused padding bits | Throws `DomainValidationException` | Enforces zeroed unused bit invariant. |
+| **Bitfield Set Operations** | `Bitfield.Intersect(other)` and `Difference(other)` | Returns correct set-theory bitmask with accurate `PopCount` | Asserts piece discovery and rarest-first mask math. |
 | **Seeding Cap** | Calling `RecordUploadedBytes` reaching `TargetSeedRatio` | Aggregate transitions `State` to `Completed` | Validates seeding ratio enforcement. |
 | **Boundary Spanning** | Chunk spanning exactly across 2 files | `ChunkBoundaryCalculator` produces 2 slice mappings | Pure domain offset math verification with zero storage mocks. |
 | **File Completion** | Verifying last chunk of a multi-chunk file | Aggregate emits `FileCompletedDomainEvent` | Asserts aggregate directly evaluates file boundaries. |
 | **Peer Acceptance** | Sender records peer acceptance via `RecordPeerAcceptance` | Aggregate registers member, transitions to `InFlight`, emits event | Verifies lifecycle transition and event emission. |
 | **Traversal Rejection** | Manifest containing `../../etc/passwd` | `SanitizedRelativePath.Parse` throws exception | Asserts immediate validation rejection at parser level. |
+| **Path Depth & Length** | Path with $> 32$ segments or $> 1024$ characters | `SanitizedRelativePath.Parse` throws `DomainValidationException` | Prevents deep directory nesting / recursion attacks. |
 | **SeedRatio Validation** | Passing negative multiplier or NaN to `SeedRatio` | Throws `DomainValidationException` | Enforces bounded invariant. |
 | **Swarm Admission Gate** | Registering peer not in `TransferTopology` | `RegisterSwarmMember` returns `DomainResult.Failure` | Asserts aggregate root boundary protection against unauthorized swarm members. |
 | **Contiguous Offsets** | Instantiating manifest with overlapping or gap file offsets | Throws `DomainValidationException` | Enforces contiguous bundle layout. |
 | **Zero-Byte File Layout** | Bundle containing 0-byte file adjacent to non-empty files | Manifest validates contiguous offsets with `StartOffset == EndOffset`; `FindFileForOffset` correctly skips 0-byte file and maps chunks | Asserts pure mathematical layout for empty files without index disruption. |
 | **Offer Expiration** | Calling `ExpireOffer` on staged session | Aggregate transitions `State` to `Cancelled` with reason `OfferExpired` and emits event | Verifies offer timeout lifecycle transition. |
-| **Relative Path Hierarchy** | Attempting to parse `/etc/passwd`, `C:\Windows`, `foo/../bar`, or `.` into `SanitizedRelativePath` | Throws `DomainValidationException` | Asserts pure relative directory invariants. |
 | **Chunk Size Validation** | Passing chunk data whose byte length does not equal `GetExpectedChunkSize(chunkIndex)` | `VerifyAndRecordChunk` returns `DomainResult.Failure` | Prevents buffer overrun and slice misalignment attacks. |
 | **Idempotent Chunk Verification** | Calling `VerifyAndRecordChunk` on a chunk already present in `LocalBitfield` | Returns `DomainResult.Success` without re-emitting `ChunkVerifiedDomainEvent` or `FileCompletedDomainEvent` | Protects event stream from duplication or poisoning. |
 | **State Gating Matrix** | Invoking `VerifyAndRecordChunk` when session is in `Paused`, `Completed`, or `Cancelled` | Returns `DomainResult.Failure` | Enforces state machine mutation precondition integrity. |
@@ -661,14 +834,14 @@ To eliminate Merkle tree malleability (CVE-2012-2459) while guaranteeing root ha
 2. Verify zero project references to `Percolator.Domain` or external network/storage packages.
 3. Generate and implement all Domain Value Objects:
    - `TransferSessionId`, `MerkleRoot`, `ChunkHash`, `TransferBundleSummary`, `TransferTopology`, `RootBundleName`, `SanitizedRelativePath`, `TransferTerminationReason`.
-   - Records & Structs: `FileChunkSlice`, `FileLastModifiedUtc`, `FileIndex`, `ChunkIndex`, `ChunkSizeBytes`, `TotalBundleBytes`, `FileSizeBytes`, `BundleByteOffset`, `FileByteOffset`, `FileCount`, `ChunkCount`, `PeerCount`, `TransferByteLength`, `ChunkByteLength`, `PlaintextChunkData`, `SeedRatio`, `Bitfield`, `MerkleTreeIndex`, `SelectedFileIndices`.
+   - Records & Structs: `FileChunkSlice`, `FileLastModifiedUtc`, `FileIndex`, `ChunkIndex`, `ChunkSizeBytes`, `TotalBundleBytes`, `FileSizeBytes`, `BundleByteOffset`, `FileByteOffset`, `FileCount`, `ChunkCount`, `PeerCount`, `TransferByteLength`, `ChunkByteLength`, `PlaintextChunkData`, `SeedRatio`, `Bitfield` (with PopCount & bitwise set operations), `MerkleTreeIndex`, `SelectedFileIndices`.
 4. Implement Domain Enums: `TransferRole`, `TransferSessionState`, `SwarmPeerRole`, `PeerChokeStatus`, `PeerInterestStatus`.
 5. Strictly verify **zero implicit/explicit cast operators** across all Value Objects.
 
 ### Milestone 2: Domain Entities & Aggregate Roots
 1. Implement `TransferManifest : IEntity<TransferSessionId>` and `FileEntry : IEntity<FileIndex>` with strict count and size validation, `GetExpectedChunkSize`, and `GetRequiredChunks`.
-2. Implement `SwarmMember : IEntity<PublicIdentityId>` with piece possession `Bitfield` and bidirectional flow control methods.
-3. Implement `TransferSession : AggregateRoot<TransferSessionId>` with invariant factories (`CreateOutgoing1to1`, `CreateOutgoingMultiPeer`, `CreateIncomingStaged`), `RecordPeerAcceptance`, seeding ratio tracking, selective download completion evaluation, exact chunk verification with odd-node Merkle promotion, and file completion detection.
+2. Implement `SwarmMember : IEntity<PublicIdentityId>` with piece possession `Bitfield` and bidirectional flow control methods (zero transport liveness or socket candidates).
+3. Implement `TransferSession : AggregateRoot<TransferSessionId>` with invariant factories (`CreateOutgoing1to1`, `CreateOutgoingMultiPeer`, `CreateIncomingStaged`), formal state transition matrix, seeding ratio tracking, selective download completion evaluation, exact chunk verification with odd-node Merkle promotion, and file completion detection.
 4. Implement all 12 pure `IDomainEvent` records with `EventId` and `OccurredOnUtc`.
 5. Implement `MerkleTreeIndex`, `MerkleTreeBuilder` (with odd-node promotion rule), and pure `ChunkBoundaryCalculator`.
 6. Implement pure domain unit tests covering the Domain Unit Testing Matrix.
