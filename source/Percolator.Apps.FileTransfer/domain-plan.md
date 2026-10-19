@@ -421,6 +421,13 @@ public sealed class TransferManifest : IEntity<TransferSessionId>
 
 All domain concepts in `FileTransfer.Domain` are modeled as strongly typed Value Objects with **zero implicit/explicit cast operators**, explicit factory methods, and named property accessors.
 
+> [!IMPORTANT]
+> **Strict Prohibition of Implicit / Explicit Conversion Operators**:
+> To guarantee type safety, domain integrity, and prevent primitive obsession relapse:
+> - **Zero implicit or explicit conversion operators are permitted** across any Domain Value Objects, Identifiers, or Entities.
+> - Allowing implicit type conversions (e.g. converting a `ChunkIndex` to an `int` or `SanitizedRelativePath` to a `string`) breaks encapsulation, subverts domain boundary invariants, and permits accidental parameter transpositions (such as passing a `FileIndex` where a `ChunkIndex` is expected, or `FileByteOffset` where `BundleByteOffset` is expected).
+> - All transformations must be 100% explicit via designated factory methods (e.g. `FromInt`, `FromBytes`, `FromOffset`, `Parse`) and named property accessors (e.g. `.Value`, `.Bytes`, `.Count`, `.Offset`).
+
 | Value Object | Source Generator / Structure | Encapsulated Concept & Invariants | Zero Cast Guarantee |
 | :--- | :--- | :--- | :--- |
 | **`TransferSessionId`** | `[GuidId(GuidIdKind.CryptographicRandom)]` | 16-byte UUID identifying a transfer session | Explicit `FromGuid(Guid)`, `NewUnique()`, `.Value`. Zero cast operators. |

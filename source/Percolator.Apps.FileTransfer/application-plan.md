@@ -126,6 +126,14 @@ Offers failing these bounds are dropped silently without staging into memory or 
 
 These models represent transport coordination, relay routing, wire encryption keys, rate throttling, and desktop filesystem paths (excised from `FileTransfer.Domain` to keep the domain pure and focused on math, bitfields, and lifecycle):
 
+> [!IMPORTANT]
+> **Strict Prohibition of Implicit / Explicit Conversion Operators**:
+> In alignment with `FileTransfer.Domain`, all Application Value Objects, transport models, cryptographic secrets, and filesystem paths enforce a strict **zero implicit/explicit conversion operator** policy:
+> - **Zero implicit or explicit conversion operators are permitted** across any Application Value Objects, transport models, or secrets.
+> - Implicit type casting on cryptographic secrets (e.g. decaying `TransferKey` to a naked `byte[]`) is a critical security vulnerability that bypasses zeroization (`ISensitiveSecret`) and memory lifecycle controls.
+> - Implicit type casting on filesystem paths (e.g. coercing `RootDirectoryPath` to `string`) subverts path canonicalization and directory traversal protections.
+> - All transformations must be 100% explicit via designated factory methods (e.g. `Parse`, `FromInt`, `FromBytes`, `FromMemory`, `Resolve`) and named property accessors (e.g. `.Value`, `.Bytes`, `.Span`, `.Memory`, `.Count`).
+
 ```csharp
 namespace Percolator.Apps.FileTransfer.Features.TransferNegotiation;
 
@@ -692,11 +700,12 @@ public interface ITransferOfferReaperService
 4. Implement in-band payloads: `FileTransferOfferPayload`, `FileTransferAcceptPayload`, `FileTransferCancelPayload`.
 
 ### Milestone 2: Multi-Stream Coordinator & Out-of-Band Engine
-1. Define ports: `ITransferStreamPool`, `ITransferStreamPoolFactory`, `ITransferStream`.
-2. Implement `TransferSessionCoordinator` managing active 4–8 streams.
-3. Implement out-of-band typed frame dispatching via `IStreamFramePayload` and `StreamFrameEnvelope` (including `InterestedFrame` and `NotInterestedFrame`).
-4. Implement concurrent chunk request pipeline (keeping 4–8 requests in flight per stream).
-5. Implement opt-in direct candidate discovery adapter hooks (local UPnP port forwarder and relay-assisted STUN reflexive address resolver).
+1. Implement Application Value Objects and Transport Models, strictly verifying **zero implicit or explicit conversion operators** across all types.
+2. Define ports: `ITransferStreamPool`, `ITransferStreamPoolFactory`, `ITransferStream`.
+3. Implement `TransferSessionCoordinator` managing active 4–8 streams.
+4. Implement out-of-band typed frame dispatching via `IStreamFramePayload` and `StreamFrameEnvelope` (including `InterestedFrame` and `NotInterestedFrame`).
+5. Implement concurrent chunk request pipeline (keeping 4–8 requests in flight per stream).
+6. Implement opt-in direct candidate discovery adapter hooks (local UPnP port forwarder and relay-assisted STUN reflexive address resolver).
 
 ### Milestone 3: Desktop Disk I/O & Storage Abstraction
 1. Define `IDesktopFileStorage` port using `PlaintextChunkData`, `FileLastModifiedUtc`, `RootDirectoryPath`, `ResolvedFilePath`, and `DiskSpacePreflightResult`.
