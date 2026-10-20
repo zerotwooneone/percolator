@@ -527,8 +527,9 @@ Concrete realization of out-of-band high-speed croc-inspired and BitTorrent swar
     - `0x04 REQUEST_CHUNK` & `0x05 CHUNK_DATA`: 1 MB chunk streaming with AES-256-GCM authenticated encryption/decryption using `AesGcm` and deterministic 12-byte `ChunkNonce` derived as $\text{BaseNonce} \oplus \text{BigEndianUInt96}(i)$.
     - `0x06 CANCEL_CHUNK`: Endgame chunk cancellation.
     - `0x07 CHOKE` / `0x08 UNCHOKE`: Transport backpressure signaling and request queue bounding (`MaxPendingRequestsPerPeer = 32`).
-    - `0x09 KEEP_ALIVE`: Liveness ping frames.
-    - `0x0A PEX_PEERS`: Out-of-band peer exchange gossip frames.
+    - `0x09 INTERESTED` / `0x0A NOT_INTERESTED`: Swarm interest signaling for selective piece availability.
+    - `0x0B KEEP_ALIVE`: Liveness ping frames.
+    - `0x0C PEX_PEERS`: Out-of-band peer exchange gossip frames.
   - Work-stealing scheduler: Detects stalled streams and redistributes in-flight chunk requests to faster streams in the pool.
 
 #### 2. Channel Relay Transfer Pipe (Client & Relay Service Endpoint)
@@ -548,7 +549,7 @@ Concrete realization of out-of-band high-speed croc-inspired and BitTorrent swar
     - Idle timeout: Closes pipe after 60 seconds of silence.
 
 #### 3. Relay Blind Swarm Tracker (Client & Relay Service Endpoint)
-- **`RelaySwarmTrackerClient`** (`IRelaySwarmTrackerClient`):
+- **`RelaySwarmTrackerClient`** (`IDistributedTrackerPort`):
   - Sends out-of-band HTTP `POST /swarms/{blindSwarmId}/announce` to channel relay.
   - Blind identifier: $\text{BlindSwarmId} = \text{HMAC-SHA256}(K_{\text{transfer}}, \text{"swarm-rendezvous"})$ (`SwarmRendezvousId`).
   - Receives list of active `DirectEndpointCandidate` records for the swarm without touching in-band ratchet channels.
@@ -600,8 +601,26 @@ Concrete realization of out-of-band high-speed croc-inspired and BitTorrent swar
 - **`SqliteTransferSessionRepository`** (`ITransferSessionRepository`):
   - `ft_transfer_sessions`: Stores session state, role, initiator identity, participant topology JSON, root title, total bytes, chunk size, total chunks, target seed ratio, uploaded bytes, Merkle root BLOB, local destination path (`RootDirectoryPath`), AES session key (`TransferKey` encrypted under local master key), base nonce (`BaseNonce`), stream auth token (`StreamAuthToken`), relay URI, created/completed timestamps.
   - `ft_manifest_files`: Stores file index, sanitized relative path, file size in bytes, start offset, end offset, and sanitized last modified timestamp. Keyed by `(session_id, file_index)`.
-  - `ft_session_bitfields`: Stores binary chunk bitfield BLOB representing local piece possession state for active downloads. Keyed by `session_id`.\n  - `ft_swarm_endpoints`: Stores discovered direct connection candidates (`session_id`, `peer_identity_id`, `host`, `port`, `candidate_kind`, `routing_preference`, `last_seen_utc`) for fast-resume without polluting the domain model with socket addresses.
+  - `ft_session_bitfields`: Stores binary chunk bitfield BLOB representing local piece possession state for active downloads. Keyed by `session_id`.
+  - `ft_swarm_members`: Stores connected member piece possession and flow control state (`session_id`, `peer_identity_id`, `bitfield_blob`, `choking_us`, `we_choking`, `interested_in_us`, `we_interested`, `joined_at_utc`). Keyed by `(session_id, peer_identity_id)`.
+  - `ft_swarm_endpoints`: Stores discovered direct connection candidates (`session_id`, `peer_identity_id`, `host`, `port`, `candidate_kind`, `routing_preference`, `last_seen_utc`) for fast-resume without polluting the domain model with socket addresses.
 - **`SqliteFilterPolicyRepository`** (`IFileTransferFilterPolicyRepository`):
   - `ft_filter_policies`: Stores owner identity ID and policy updated timestamp.
   - `ft_blocked_peers`: Stores blocked peer identities (`owner_identity_id`, `blocked_peer_identity_id`, `created_at_utc`).
   - `ft_blocked_relays`: Stores blocked relay URIs (`owner_identity_id`, `relay_uri`, `created_at_utc`).
+
+#### 7. CQRS Transfer Query Service
+- **`SqlFileTransferQueryService`** (`IFileTransferQueryService`):
+  - Fast-path read-only service using Dapper/SQL direct queries against `ft_transfer_sessions` and `ft_manifest_files`.
+  - Materializes `TransferSessionReadModel` and `ManifestFileReadModel` with real-time progress calculations, speed caps, seeding ratio, and per-file completion status without domain aggregate hydration overhead.
+
+#### 8. Transfer Offer Reaper Worker
+- **`TransferOfferReaperWorker`** (`ITransferOfferReaperService`, `IHostedService`):
+  - Scheduled background worker executing every 15 minutes.
+  - Invokes `SweepAndExpireStaleOffersAsync(TimeSpan.FromHours(24))` against `ITransferSessionRepository`.
+  - Transitions abandoned/unaccepted staged sessions (`PendingConsent`) older than 24 hours to `Cancelled` via `session.ExpireOffer(clock)` and purges stale endpoints.
+
+#### 9. Swarm Endpoint Retention Pruner
+- **`SwarmEndpointRetentionPruner`** (`IHostedService`):
+  - Scheduled background maintenance worker running daily.
+  - Purges rows from `ft_swarm_endpoints` where `last_seen_utc` is older than 7 days, preventing unbounded database growth from transient swarm peers.

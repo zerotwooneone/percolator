@@ -5,8 +5,8 @@
 - [x] Lens 2: Onion Architecture & Primitive Obsession (Status: Approved)
 - [x] Lens 3: Threat Modeling & Security Posture (Status: Approved)
 - [x] Lens 4: High-Value, Low-Brittle Unit Test Design (Status: Approved)
-- [ ] Lens 5: Cross-Layer Infrastructure Alignment (Status: Pending)
-- [ ] Implementation Gate: LOCKED (Requires Approval of Lenses 1-5)
+- [x] Lens 5: Cross-Layer Infrastructure Alignment (Status: Approved)
+- [x] Implementation Gate: UNLOCKED (All Lenses Approved)
 
 ---
 
@@ -910,7 +910,44 @@ In alignment with the Percolator domain testing standards, unit tests within `Pe
 
 ---
 
-## 8. Phased Domain Implementation Milestones
+---
+
+## 8. Domain Persistence Independence & Boundary Encapsulation (Lens 5)
+
+In strict adherence to Onion Architecture, `Percolator.Apps.FileTransfer.Domain` remains **100% database-agnostic and infrastructure-ignorant**. The domain contains zero references to SQLite, SQL data types, relational schemas, ORM attributes, or wire serialization formats.
+
+### 8.1 Persistence Independence & Anti-Corruption Invariants
+1. **Zero Database / ORM Contamination**:
+   - Domain entities and value objects contain zero database attributes (e.g., `[Table]`, `[Key]`, `[Column]`), zero EF Core navigation hooks, and zero parameterless constructors designed for deserializers.
+   - All state is strictly encapsulated behind read-only properties (`IReadOnlyCollection<SwarmMember>`, `LocalBitfield`, `TransferTopology`).
+2. **Atomic Aggregate Persistence Capability**:
+   - The aggregate root `TransferSession` encapsulates all child entities (`SwarmMember`), value objects (`Bitfield`, `SelectedFileIndices`), and invariants needed for persistence.
+   - The persistence boundary must persist and load the aggregate root as an atomic whole, strictly preventing partial update side-doors.
+3. **Pure Rehydration Invariant (Zero Re-Execution of Business Events)**:
+   - For reconstituting persisted aggregate state without executing side-effects or re-emitting historic domain events, the aggregate provides a dedicated rehydration factory method:
+     ```csharp
+     public static TransferSession Rehydrate(
+         TransferSessionId id,
+         TransferRole role,
+         TransferSessionState state,
+         TransferTopology topology,
+         TransferManifest manifest,
+         Bitfield localBitfield,
+         SelectedFileIndices? selectedFiles,
+         SeedRatio targetSeedRatio,
+         TotalBundleBytes uploadedBytes,
+         IReadOnlyList<SwarmMember> swarmMembers,
+         DateTimeOffset createdAtUtc,
+         DateTimeOffset? completedAtUtc);
+     ```
+   - Rehydration populates state directly, verifying only structural integrity (non-null references, valid bitfield dimensions) while suppressing domain event publication.
+4. **Zero Knowledge of Outbound Ports**:
+   - In pure Onion Architecture, outbound persistence ports (`ITransferSessionRepository`, `IDesktopFileStorage`) are declared in the **Application layer** (`Percolator.Apps.FileTransfer.Ports`), never in the Domain layer.
+   - The Domain kernel accepts only pure inputs and emits pure domain events, maintaining total architectural isolation from storage mechanisms.
+
+---
+
+## 9. Phased Domain Implementation Milestones
 
 ### Milestone 1: Standalone Domain Project, Primitives & Roslyn Integration
 1. Create standalone project `Percolator.Apps.FileTransfer.Domain.csproj` targeting `net10.0` referencing `Percolator.Domain.Kernel` and `Percolator.SourceGenerators` (Analyzer).

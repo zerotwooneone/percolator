@@ -5,8 +5,8 @@
 - [x] Lens 2: Onion Architecture & Primitive Obsession (Status: Approved)
 - [x] Lens 3: Threat Modeling & Security Posture (Status: Approved)
 - [x] Lens 4: High-Value, Low-Brittle Unit Test Design (Status: Approved)
-- [ ] Lens 5: Cross-Layer Infrastructure Alignment (Status: Pending)
-- [ ] Implementation Gate: LOCKED (Requires Approval of Lenses 1-5)
+- [x] Lens 5: Cross-Layer Infrastructure Alignment (Status: Approved)
+- [x] Implementation Gate: UNLOCKED (All Lenses Approved)
 
 ---
 
@@ -779,6 +779,7 @@ public interface ITransferOfferReaperService
 | `IFileTransferQueryService` | `SqlFileTransferQueryService` | Fast-path Dapper/SQL projection for transfer dashboard |
 | Ingress Filtering (`IAppIngressFilter`) | `InboundIngressPipeline` Edge Interceptor | Pre-dispatch drop before deserialization or app routing |
 | `ITransferOfferReaperService` | `TransferOfferReaperWorker` | Scheduled background worker sweeping expired staged sessions (Lens 3) |
+| Retention & Maintenance | `SwarmEndpointRetentionPruner` | Scheduled background worker pruning `ft_swarm_endpoints` older than 7 days |
 
 ---
 
