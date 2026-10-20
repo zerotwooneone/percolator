@@ -15,9 +15,116 @@
 - **Target Project**: `Percolator.Apps.FileTransfer` (`AppId = 0x03`).
 - **Target Environment**: **Desktop only** (multi-core processors, high-bandwidth unmetered networks, fast SSD/NVMe storage, large addressable memory, sparse file OS support).
 - **Core Inspiration**: **croc** (multi-stream parallel socket saturation, direct P2P with relay pipe fallback, directory tree bundling, chunked streaming, bitfield-based resumption) combined with **BitTorrent swarm piece sharing, peer tracking, and selective downloads**.
-- **Dependencies**: Depends on `Percolator.Domain`, `Percolator.Apps.FileTransfer.Domain`, `Percolator.PluginSdk`, and `Percolator.SourceGenerators`. Zero reference to concrete transport, storage, or SQLite implementations.
+- **Dependencies**: Depends on `Percolator.Domain.Kernel`, `Percolator.Apps.FileTransfer.Domain`, `Percolator.PluginSdk`, and `Percolator.SourceGenerators` analyzer. **Zero reference to `Percolator.Domain` core messaging, concrete transport, or SQLite implementations**.
 
-### 1.1 Inherent Swarm & Three-Tier Privacy Ladder (Intentional Design)
+---
+
+### 1.1 Required Codebase & Project Modifications
+
+To enforce strict Onion Architecture and align with repository standards:
+
+1. **Update `Percolator.Apps.FileTransfer.csproj`**:
+   - **Remove**: `<ProjectReference Include="..\Percolator.Domain\Percolator.Domain.csproj" />`
+   - **Add**: `<ProjectReference Include="..\Percolator.Apps.FileTransfer.Domain\Percolator.Apps.FileTransfer.Domain.csproj" />`
+   - **Add**: `<ProjectReference Include="..\Percolator.SourceGenerators\Percolator.SourceGenerators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />`
+   - **Retain**: `<ProjectReference Include="..\Percolator.PluginSdk\Percolator.PluginSdk.csproj" />`
+   ```xml
+   <Project Sdk="Microsoft.NET.Sdk">
+     <PropertyGroup>
+       <TargetFramework>net10.0</TargetFramework>
+       <ImplicitUsings>enable</ImplicitUsings>
+       <Nullable>enable</Nullable>
+     </PropertyGroup>
+
+     <ItemGroup>
+       <ProjectReference Include="..\Percolator.Apps.FileTransfer.Domain\Percolator.Apps.FileTransfer.Domain.csproj" />
+       <ProjectReference Include="..\Percolator.PluginSdk\Percolator.PluginSdk.csproj" />
+       <ProjectReference Include="..\Percolator.SourceGenerators\Percolator.SourceGenerators.csproj" 
+                         OutputItemType="Analyzer" 
+                         ReferenceOutputAssembly="false" />
+     </ItemGroup>
+   </Project>
+   ```
+
+2. **Dependency Injection Wireup (`DependencyInjection/ServiceCollectionExtensions.cs`)**:
+   - Implements standard extension method `AddFileTransferApp(this IServiceCollection collection)`:
+     ```csharp
+     namespace Percolator.Apps.FileTransfer.DependencyInjection;
+
+     public static class ServiceCollectionExtensions
+     {
+         public static IServiceCollection AddFileTransferApp(this IServiceCollection collection)
+         {
+             collection.AddSingleton<IAppPlugin, FileTransferPlugin>();
+             collection.AddSingleton<IAppIngressFilter, FileTransferIngressFilter>();
+             collection.AddSingleton<IAppPayloadHandler, FileTransferPayloadHandler>();
+             collection.AddScoped<IFileTransferActionHandler, FileTransferActionHandler>();
+             collection.AddScoped<TransferSessionCoordinator>();
+             collection.AddScoped<DiskChunkAssembler>();
+             collection.AddScoped<ITransferOfferReaperService, TransferOfferReaperService>();
+
+             return collection;
+         }
+     }
+     ```
+
+---
+
+### 1.2 Project Directory & Source File Layout
+
+```
+Percolator.Apps.FileTransfer/
+├── DependencyInjection/
+│   └── ServiceCollectionExtensions.cs
+├── Features/
+│   ├── IngressControl/
+│   │   ├── FileTransferFilterPolicy.cs
+│   │   ├── FileTransferIngressFilter.cs
+│   │   ├── FileTransferPayloadHandler.cs
+│   │   └── IngressTransferOfferValidator.cs
+│   ├── TransferNegotiation/
+│   │   ├── ApplicationValueObjects.cs
+│   │   ├── ControlPayloadOpcodes.cs
+│   │   ├── FileTransferAcceptPayload.cs
+│   │   ├── FileTransferCancelPayload.cs
+│   │   ├── FileTransferOfferPayload.cs
+│   │   └── FileTransferActionHandler.cs
+│   ├── MultiStreamEngine/
+│   │   ├── ChunkNonceDerivation.cs
+│   │   ├── ChunkPipelineScheduler.cs
+│   │   ├── StreamFrameEnvelope.cs
+│   │   ├── StreamFramePayloads.cs
+│   │   ├── StreamFrameType.cs
+│   │   └── TransferSessionCoordinator.cs
+│   ├── SwarmCoordination/
+│   │   ├── EndgameCoordinator.cs
+│   │   ├── PexRateLimiter.cs
+│   │   ├── RarestFirstChunkSelector.cs
+│   │   ├── SwarmCoordinator.cs
+│   │   └── SwarmPeerLiveness.cs
+│   └── Storage/
+│       ├── DiskChunkAssembler.cs
+│       └── SelectiveDownloadManager.cs
+├── Ports/
+│   ├── IDesktopFileStorage.cs
+│   ├── IDistributedTrackerPort.cs
+│   ├── IFileTransferActionHandler.cs
+│   ├── IFileTransferFilterPolicyRepository.cs
+│   ├── IFileTransferQueryService.cs
+│   ├── ITransferOfferReaperService.cs
+│   ├── ITransferRateLimiter.cs
+│   ├── ITransferSessionRepository.cs
+│   ├── ITransferStream.cs
+│   ├── ITransferStreamPool.cs
+│   ├── ITransferStreamPoolFactory.cs
+│   ├── ManifestFileReadModel.cs
+│   └── TransferSessionReadModel.cs
+└── FileTransferPlugin.cs
+```
+
+---
+
+### 1.3 Inherent Swarm & Three-Tier Privacy Ladder (Intentional Design)
 
 Unlike Percolator's core Double Ratchet messaging—which enforces continuous per-message forward secrecy and shields IP addresses behind sovereign relay mailboxes—the FileTransfer app balances multi-stream throughput with a **strict three-tier privacy ladder**:
 
@@ -53,21 +160,18 @@ flowchart TD
     ZeroWire --> ExposeReadModel["Expose TransferSessionReadModel to Ports"]
 ```
 
-### 2.1 Contracts & Filter Policy Model
+### 2.1 Plugin Lifecycle & Ingress Filter Implementations
+
 ```csharp
-namespace Percolator.PluginSdk;
+namespace Percolator.Apps.FileTransfer;
 
-public enum IngressDecision : byte
+public sealed class FileTransferPlugin : IAppPlugin
 {
-    Accept = 0x01,
-    DiscardSilently = 0x02
-}
+    public AppId Id => AppId.FileTransferControl;
+    public string Name => "FileTransfer";
 
-public interface IAppIngressFilter
-{
-    AppId TargetAppId { get; }
-    bool IsEnabled { get; }
-    IngressDecision Evaluate(InboundPayloadContext context);
+    public Task StartAsync(CancellationToken ct = default) => Task.CompletedTask;
+    public Task StopAsync(CancellationToken ct = default) => Task.CompletedTask;
 }
 ```
 
@@ -91,24 +195,195 @@ public sealed record FileTransferFilterPolicy(
     IReadOnlySet<PublicIdentityId> BlockedPeers,
     IReadOnlySet<RelayPipeEndpointUri> BlockedRelays)
 {
+    public static FileTransferFilterPolicy DefaultPermissive(PublicIdentityId ownerId) =>
+        new(ownerId, new HashSet<PublicIdentityId>(), new HashSet<RelayPipeEndpointUri>());
+
     public PeerFilterDecision EvaluatePeer(PublicIdentityId peerId) =>
         BlockedPeers.Contains(peerId) ? PeerFilterDecision.Blocked : PeerFilterDecision.Allowed;
 
     public RelayFilterDecision EvaluateRelay(RelayPipeEndpointUri relayUri) =>
         BlockedRelays.Contains(relayUri) ? RelayFilterDecision.Blocked : RelayFilterDecision.Allowed;
 }
+
+public sealed class FileTransferIngressFilter : IAppIngressFilter
+{
+    private readonly IFileTransferFilterPolicyRepository _policyRepository;
+
+    public AppId TargetAppId => AppId.FileTransferControl;
+    public bool IsEnabled { get; set; } = true;
+
+    public FileTransferIngressFilter(IFileTransferFilterPolicyRepository policyRepository)
+    {
+        _policyRepository = policyRepository;
+    }
+
+    public IngressDecision Evaluate(InboundPayloadContext context)
+    {
+        if (!IsEnabled)
+            return IngressDecision.DiscardSilently;
+
+        // Synchronous fast check against cached/loaded policy
+        FileTransferFilterPolicy policy = _policyRepository.GetPolicyAsync(context.SenderIdentityId).AsTask().GetAwaiter().GetResult();
+        if (policy.EvaluatePeer(context.SenderIdentityId) == PeerFilterDecision.Blocked)
+        {
+            return IngressDecision.DiscardSilently;
+        }
+
+        return IngressDecision.Accept;
+    }
+}
 ```
 
-- `FileTransferIngressFilter` implements `IAppIngressFilter`, invoking `policy.EvaluatePeer(context.SenderIdentityId)`. When `PeerFilterDecision.Blocked`, raw bytes are discarded before deserialization (`IngressDecision.DiscardSilently`).
-- `FileTransferPayloadHandler` implements `IAppPayloadHandler`, validating relay URI against `policy.EvaluateRelay(relayUri) == RelayFilterDecision.Blocked` before staging inbound sessions.
+---
 
-### 2.2 Bundle Limits & Memory Defense (Symmetric Ingress & Egress Invariants)
-To defend against unbounded heap allocations and memory exhaustion DoS attacks from untrusted peers or oversized local directory selections, the application layer validates bundle limits symmetrically:
-- **Inbound Ingress**: `IngressTransferOfferValidator` validates incoming offers prior to staging or domain entity instantiation.
-- **Outbound Egress**: `TransferInitiationService` validates local file scan results prior to constructing the `TransferManifest` or staging an outgoing session.
+### 2.2 In-Band Control Payload Demuxing & Handler Implementation
+
+In-band payloads carried across Double Ratchet envelopes use a 1-byte opcode discriminator:
 
 ```csharp
 namespace Percolator.Apps.FileTransfer.Features.TransferNegotiation;
+
+public enum FileTransferControlOpcode : byte
+{
+    Offer = 0x01,
+    Accept = 0x02,
+    Cancel = 0x03
+}
+```
+
+```csharp
+namespace Percolator.Apps.FileTransfer.Features.IngressControl;
+
+public sealed class FileTransferPayloadHandler : IAppPayloadHandler
+{
+    private readonly ITransferSessionRepository _sessionRepository;
+    private readonly IFileTransferFilterPolicyRepository _policyRepository;
+    private readonly IDateTimeProvider _clock;
+
+    public AppId TargetAppId => AppId.FileTransferControl;
+
+    public FileTransferPayloadHandler(
+        ITransferSessionRepository sessionRepository,
+        IFileTransferFilterPolicyRepository policyRepository,
+        IDateTimeProvider clock)
+    {
+        _sessionRepository = sessionRepository;
+        _policyRepository = policyRepository;
+        _clock = clock;
+    }
+
+    public async ValueTask<DomainResult> HandleInboundAsync(InboundPayloadContext context, CancellationToken ct = default)
+    {
+        if (context.Payload.Length < 1)
+            return DomainResult.Failure(new DomainError("Payload.Empty", "Inbound payload was empty."));
+
+        byte opcodeByte = context.Payload.Span[0];
+        ReadOnlyMemory<byte> body = context.Payload.Slice(1);
+
+        FileTransferFilterPolicy policy = await _policyRepository.GetPolicyAsync(context.SenderIdentityId, ct);
+        if (policy.EvaluatePeer(context.SenderIdentityId) == PeerFilterDecision.Blocked)
+            return DomainResult.Success(); // Silent drop
+
+        return opcodeByte switch
+        {
+            (byte)FileTransferControlOpcode.Offer => await HandleOfferAsync(context.SenderIdentityId, body, policy, ct),
+            (byte)FileTransferControlOpcode.Accept => await HandleAcceptAsync(context.SenderIdentityId, body, ct),
+            (byte)FileTransferControlOpcode.Cancel => await HandleCancelAsync(context.SenderIdentityId, body, ct),
+            _ => DomainResult.Failure(new DomainError("Payload.UnknownOpcode", $"Unknown control opcode 0x{opcodeByte:X2}."))
+        };
+    }
+
+    private async ValueTask<DomainResult> HandleOfferAsync(
+        PublicIdentityId senderId,
+        ReadOnlyMemory<byte> body,
+        FileTransferFilterPolicy policy,
+        CancellationToken ct)
+    {
+        FileTransferOfferPayload offer = FileTransferOfferPayload.Deserialize(body);
+
+        ValidationResult validation = IngressTransferOfferValidator.ValidateOffer(offer);
+        if (!validation.IsValid)
+            return DomainResult.Success(); // Silent discard on malformed offer bounds
+
+        if (offer.RelayRendezvous != null && policy.EvaluateRelay(offer.RelayRendezvous.EndpointUri) == RelayFilterDecision.Blocked)
+            return DomainResult.Success(); // Silent drop on blocked relay
+
+        // Build inline manifest if provided inline
+        TransferManifest manifest;
+        if (offer.Manifest.Kind == ManifestDistributionKind.Inline && offer.Manifest.InlineData != null)
+        {
+            manifest = TransferManifestDeserializer.Deserialize(offer.Manifest.InlineData.Span, offer.TransferSessionId);
+        }
+        else
+        {
+            // Staged manifest placeholder pending remote blob retrieval
+            manifest = TransferManifest.CreatePlaceholder(offer.TransferSessionId, offer.Summary);
+        }
+
+        TransferSession session = TransferSession.CreateIncomingStaged(
+            offer.TransferSessionId,
+            senderId,
+            manifest,
+            SeedRatio.Zero,
+            _clock);
+
+        await _sessionRepository.SaveSessionAsync(session, ct);
+        return DomainResult.Success(); // Zero wire ACK emitted
+    }
+
+    private async ValueTask<DomainResult> HandleAcceptAsync(
+        PublicIdentityId senderId,
+        ReadOnlyMemory<byte> body,
+        CancellationToken ct)
+    {
+        FileTransferAcceptPayload accept = FileTransferAcceptPayload.Deserialize(body);
+
+        TransferSession? session = await _sessionRepository.GetSessionByIdAsync(accept.TransferSessionId, ct);
+        if (session == null)
+            return DomainResult.Failure(new DomainError("Transfer.NotFound", "Transfer session was not found."));
+
+        DomainResult result = session.RecordPeerAcceptance(senderId, accept.ResumptionBitfield, _clock);
+        if (result.IsFailure)
+            return result;
+
+        await _sessionRepository.SaveSessionAsync(session, ct);
+        return DomainResult.Success();
+    }
+
+    private async ValueTask<DomainResult> HandleCancelAsync(
+        PublicIdentityId senderId,
+        ReadOnlyMemory<byte> body,
+        CancellationToken ct)
+    {
+        FileTransferCancelPayload cancel = FileTransferCancelPayload.Deserialize(body);
+
+        TransferSession? session = await _sessionRepository.GetSessionByIdAsync(cancel.TransferSessionId, ct);
+        if (session == null || !session.Topology.ContainsParticipant(senderId))
+            return DomainResult.Success(); // Silent drop for unknown or unauthorized sender
+
+        DomainResult result = session.Cancel(cancel.Reason, _clock);
+        if (result.IsSuccess)
+        {
+            await _sessionRepository.SaveSessionAsync(session, ct);
+        }
+
+        return DomainResult.Success();
+    }
+}
+```
+
+---
+
+### 2.3 Symmetric Bundle Limits Validator
+
+```csharp
+namespace Percolator.Apps.FileTransfer.Features.IngressControl;
+
+public readonly record struct ValidationResult(bool IsValid, string? ErrorMessage)
+{
+    public static ValidationResult Success() => new(true, null);
+    public static ValidationResult Failure(string error) => new(false, error);
+}
 
 public static class IngressTransferOfferValidator
 {
@@ -126,23 +401,22 @@ public static class IngressTransferOfferValidator
             return ValidationResult.Failure($"Offer chunk count ({offer.Summary.TotalChunks.Count}) exceeds maximum allowed ({MaxChunksPerBundle}).");
         if (offer.Summary.TotalSize.Bytes > MaxBundleSizeBytes)
             return ValidationResult.Failure($"Offer bundle size ({offer.Summary.TotalSize.Bytes} bytes) exceeds maximum allowed ({MaxBundleSizeBytes} bytes).");
-        if (offer.ManifestDistribution.Kind == ManifestDistributionKind.Inline)
+        if (offer.Manifest.Kind == ManifestDistributionKind.Inline)
         {
-            if (offer.ManifestDistribution.InlineData == null || offer.ManifestDistribution.InlineData.Length > MaxInlineManifestBytes)
+            if (offer.Manifest.InlineData == null || offer.Manifest.InlineData.Length > MaxInlineManifestBytes)
                 return ValidationResult.Failure($"Inline manifest exceeds maximum allowed limit ({MaxInlineManifestBytes} bytes).");
         }
-        else if (offer.ManifestDistribution.Kind == ManifestDistributionKind.RemoteBlob)
+        else if (offer.Manifest.Kind == ManifestDistributionKind.RemoteBlob)
         {
-            if (offer.ManifestDistribution.BlobDescriptor == null ||
-                offer.ManifestDistribution.BlobDescriptor.PlaintextSizeBytes.Bytes <= 0 ||
-                offer.ManifestDistribution.BlobDescriptor.PlaintextSizeBytes.Bytes > MaxRemoteManifestBlobBytes)
-                return ValidationResult.Failure($"Remote manifest blob size ({offer.ManifestDistribution.BlobDescriptor?.PlaintextSizeBytes.Bytes ?? 0} bytes) must be between 1 and {MaxRemoteManifestBlobBytes} bytes.");
+            if (offer.Manifest.BlobDescriptor == null ||
+                offer.Manifest.BlobDescriptor.PlaintextSizeBytes.Bytes <= 0 ||
+                offer.Manifest.BlobDescriptor.PlaintextSizeBytes.Bytes > MaxRemoteManifestBlobBytes)
+                return ValidationResult.Failure($"Remote manifest blob size ({offer.Manifest.BlobDescriptor?.PlaintextSizeBytes.Bytes ?? 0} bytes) must be between 1 and {MaxRemoteManifestBlobBytes} bytes.");
         }
         return ValidationResult.Success();
     }
 }
 ```
-Offers failing these bounds are dropped silently without staging into memory or SQLite.
 
 ---
 
@@ -150,20 +424,13 @@ Offers failing these bounds are dropped silently without staging into memory or 
 
 ### 3.1 Application Value Objects & Transport Models
 
-These models represent transport coordination, relay routing, wire encryption keys, rate throttling, and desktop filesystem paths (excised from `FileTransfer.Domain` to keep the domain pure and focused on math, bitfields, and lifecycle):
-
 > [!IMPORTANT]
 > **Strict Prohibition of Implicit / Explicit Conversion Operators**:
-> In alignment with `FileTransfer.Domain`, all Application Value Objects, transport models, cryptographic secrets, and filesystem paths enforce a strict **zero implicit/explicit conversion operator** policy:
-> - **Zero implicit or explicit conversion operators are permitted** across any Application Value Objects, transport models, or secrets.
-> - Implicit type casting on cryptographic secrets (e.g. decaying `TransferKey` to a naked `byte[]`) is a critical security vulnerability that bypasses zeroization (`ISensitiveSecret`) and memory lifecycle controls.
-> - Implicit type casting on filesystem paths (e.g. coercing `RootDirectoryPath` to `string`) subverts path canonicalization and directory traversal protections.
-> - All transformations must be 100% explicit via designated factory methods (e.g. `Parse`, `FromInt`, `FromBytes`, `FromMemory`, `Resolve`) and named property accessors (e.g. `.Value`, `.Bytes`, `.Span`, `.Memory`, `.Count`).
+> In alignment with `FileTransfer.Domain`, all Application Value Objects, transport models, cryptographic secrets, and filesystem paths enforce a strict **zero implicit/explicit conversion operator** policy.
 
 ```csharp
 namespace Percolator.Apps.FileTransfer.Features.TransferNegotiation;
 
-// --- Transport Reachability & Candidate Discovery ---
 public enum DirectCandidateKind : byte
 {
     DirectLan = 0x01,
@@ -210,7 +477,6 @@ public sealed record DirectEndpointCandidate(
     PortNumber Port,
     DirectCandidateKind Kind);
 
-// --- Relay Reachability & Pipe Rendezvous ---
 public sealed record RelayPipeEndpointUri
 {
     public string Value { get; }
@@ -224,39 +490,30 @@ public sealed record RelayRendezvousDescriptor(
     RelayPipeEndpointUri EndpointUri,
     RelayPipeToken Token);
 
-// --- Stream Encryption, Nonces & Sockets ---
 public sealed record TransferKey([property: ByteArray(32)] byte[] Bytes) : ISensitiveSecret
 {
+    public static TransferKey Generate() => new(RandomNumberGenerator.GetBytes(32));
     public void Zeroize() => CryptographicOperations.ZeroMemory(Bytes);
 }
 
-public sealed record BaseNonce([property: ByteArray(12)] byte[] Bytes);
-
-/// <summary>
-/// Deterministically derived 12-byte (96-bit) AES-256-GCM nonce for chunk index i:
-/// ChunkNonce(i) = BaseNonce XOR BigEndianUInt96(i)
-/// Guarantees zero nonce collision across all chunks (up to 1,000,000) under the same session key.
-/// </summary>
-public sealed record ChunkNonce([property: ByteArray(12)] byte[] Bytes)
+public sealed record BaseNonce([property: ByteArray(12)] byte[] Bytes)
 {
-    public ReadOnlySpan<byte> Span => Bytes;
-
-    public static ChunkNonce Derive(BaseNonce baseNonce, ChunkIndex chunkIndex)
-    {
-        byte[] derived = new byte[12];
-        baseNonce.Bytes.CopyTo(derived, 0);
-
-        // XOR last 4 bytes with Big-Endian chunkIndex.Value (supports up to 2^32-1 chunks, covering MaxChunksPerBundle)
-        BinaryPrimitives.WriteInt32BigEndian(derived.AsSpan(8, 4), 
-            BinaryPrimitives.ReadInt32BigEndian(derived.AsSpan(8, 4)) ^ chunkIndex.Value);
-
-        return new ChunkNonce(derived);
-    }
+    public static BaseNonce Generate() => new(RandomNumberGenerator.GetBytes(12));
 }
 
-public sealed record StreamAuthToken([property: ByteArray(32)] byte[] Bytes);
+public sealed record StreamAuthToken([property: ByteArray(32)] byte[] Bytes)
+{
+    public static StreamAuthToken Generate() => new(RandomNumberGenerator.GetBytes(32));
+}
 
-public sealed record SwarmRendezvousId([property: ByteArray(32)] byte[] Bytes);
+public sealed record SwarmRendezvousId([property: ByteArray(32)] byte[] Bytes)
+{
+    public static SwarmRendezvousId Derive(TransferKey key)
+    {
+        byte[] derived = HMACSHA256.HashData(key.Bytes, System.Text.Encoding.UTF8.GetBytes("swarm-rendezvous"));
+        return new SwarmRendezvousId(derived);
+    }
+}
 
 public readonly record struct StreamIndex(int Value)
 {
@@ -269,7 +526,6 @@ public readonly record struct StreamCount(int Count)
     public static StreamCount Default => new(4);
 }
 
-// --- Bandwidth Rate Limiting ---
 public readonly record struct TransferBandwidth(long BytesPerSecond);
 
 public readonly record struct BandwidthLimit(bool IsUnlimited, TransferBandwidth Value)
@@ -278,7 +534,6 @@ public readonly record struct BandwidthLimit(bool IsUnlimited, TransferBandwidth
     public static BandwidthLimit Capped(TransferBandwidth cap) => new(false, cap);
 }
 
-// --- Desktop OS Filesystem Paths ---
 public sealed record RootDirectoryPath
 {
     public string Value { get; }
@@ -298,7 +553,6 @@ public sealed record ResolvedFilePath
         new(Path.Combine(root.Value, relativePath.Value));
 }
 
-// --- Wire Chunk Buffers & In-Band Manifest Wrappers ---
 public sealed record EncryptedChunkData
 {
     public ReadOnlyMemory<byte> CiphertextWithAuthTag { get; }
@@ -369,37 +623,62 @@ public sealed record DiskSpacePreflightResult(
 }
 ```
 
-### 3.2 In-Band Control Channel Payloads (`AppId.FileTransferControl = 0x03`)
-Carried inside the Double Ratchet envelope ($\le 64\text{ KB}$):
+---
+
+### 3.2 In-Band Control Payloads
 
 ```csharp
 namespace Percolator.Apps.FileTransfer.Features.TransferNegotiation;
 
 public sealed record FileTransferOfferPayload(
     TransferSessionId TransferSessionId,
-    TransferBundleSummary Summary,              // Cohesive root title, size, files, chunks, Merkle root
-    ManifestDistribution Manifest,              // Discriminated union: InlineManifest vs RemoteManifestBlob
-    TransferKey SessionEncryptionKey,           // 32-byte AES key
-    BaseNonce BaseNonce,                        // 12-byte base nonce
-    StreamAuthToken StreamAuthToken,            // 32-byte auth token for out-of-band streams
-    RelayRendezvousDescriptor? RelayRendezvous, // Encapsulated endpoint URI + relay token
-    IReadOnlyList<DirectEndpointCandidate> DirectCandidates);
+    TransferBundleSummary Summary,
+    ManifestDistribution Manifest,
+    TransferKey SessionEncryptionKey,
+    BaseNonce BaseNonce,
+    StreamAuthToken StreamAuthToken,
+    RelayRendezvousDescriptor? RelayRendezvous,
+    IReadOnlyList<DirectEndpointCandidate> DirectCandidates)
+{
+    public static FileTransferOfferPayload Deserialize(ReadOnlyMemory<byte> bytes) =>
+        FileTransferPayloadSerializer.DeserializeOffer(bytes.Span);
+
+    public byte[] Serialize() =>
+        FileTransferPayloadSerializer.SerializeOffer(this);
+}
 
 public sealed record FileTransferAcceptPayload(
     TransferSessionId TransferSessionId,
     IReadOnlyList<DirectEndpointCandidate> ReceiverCandidates,
     TransportRoutingPreference RoutingPreference,
-    Bitfield ResumptionBitfield);                // Bitmap of chunks already possessed
+    Bitfield ResumptionBitfield)
+{
+    public static FileTransferAcceptPayload Deserialize(ReadOnlyMemory<byte> bytes) =>
+        FileTransferPayloadSerializer.DeserializeAccept(bytes.Span);
 
-// Inbound offer decline in PendingConsent is 100% silent on the wire (local discard).
-// FileTransferCancelPayload is dispatched exclusively when aborting active in-flight sessions (V-63).
+    public byte[] Serialize() =>
+        FileTransferPayloadSerializer.SerializeAccept(this);
+}
+
 public sealed record FileTransferCancelPayload(
     TransferSessionId TransferSessionId,
-    TransferTerminationReason Reason);
+    TransferTerminationReason Reason)
+{
+    public static FileTransferCancelPayload Deserialize(ReadOnlyMemory<byte> bytes) =>
+        FileTransferPayloadSerializer.DeserializeCancel(bytes.Span);
+
+    public byte[] Serialize() =>
+        FileTransferPayloadSerializer.SerializeCancel(this);
+}
 ```
 
-### 3.3 Out-of-Band Stream Frame Envelopes (V-61)
-Typed frame abstraction for parallel data streams (4–8 multiplexed streams):
+---
+
+### 3.3 Out-of-Band Stream Frame Envelopes & AES-256-GCM Framing
+
+Out-of-band TCP/QUIC streams use a standard framing header:
+- **Frame Header**: `[1-byte StreamFrameType] [4-byte BigEndian PayloadLength]` (5 bytes total)
+- **Frame Payload**: `[PayloadLength bytes]`
 
 ```csharp
 namespace Percolator.Apps.FileTransfer.Features.MultiStreamEngine;
@@ -414,8 +693,8 @@ public enum StreamFrameType : byte
     CancelChunk = 0x06,
     Choke = 0x07,
     Unchoke = 0x08,
-    Interested = 0x09,       // Signals local interest in remote chunks (V-61)
-    NotInterested = 0x0A,    // Signals local disinterest in remote chunks (V-61)
+    Interested = 0x09,
+    NotInterested = 0x0A,
     KeepAlive = 0x0B,
     PexPeers = 0x0C
 }
@@ -492,6 +771,72 @@ public sealed record PexPeersFrame(IReadOnlyList<DirectEndpointCandidate> Candid
 public sealed record StreamFrameEnvelope(IStreamFramePayload Payload);
 ```
 
+#### Deterministic Nonce Derivation & Cryptographic Routines
+
+```csharp
+namespace Percolator.Apps.FileTransfer.Features.MultiStreamEngine;
+
+public sealed record ChunkNonce([property: ByteArray(12)] byte[] Bytes)
+{
+    public ReadOnlySpan<byte> Span => Bytes;
+
+    public static ChunkNonce Derive(BaseNonce baseNonce, ChunkIndex chunkIndex)
+    {
+        byte[] derived = new byte[12];
+        baseNonce.Bytes.CopyTo(derived, 0);
+
+        int currentBigEndian = BinaryPrimitives.ReadInt32BigEndian(derived.AsSpan(8, 4));
+        BinaryPrimitives.WriteInt32BigEndian(derived.AsSpan(8, 4), currentBigEndian ^ chunkIndex.Value);
+
+        return new ChunkNonce(derived);
+    }
+}
+
+public static class ChunkCryptoService
+{
+    public static EncryptedChunkData EncryptChunk(
+        PlaintextChunkData plaintext,
+        TransferKey key,
+        BaseNonce baseNonce,
+        ChunkIndex index)
+    {
+        ChunkNonce nonce = ChunkNonce.Derive(baseNonce, index);
+        byte[] ciphertext = new byte[plaintext.Length];
+        byte[] tag = new byte[16];
+
+        using AesGcm gcm = new(key.Bytes, 16);
+        gcm.Encrypt(nonce.Span, plaintext.Span, ciphertext, tag);
+
+        byte[] combined = new byte[ciphertext.Length + 16];
+        ciphertext.CopyTo(combined, 0);
+        tag.CopyTo(combined, ciphertext.Length);
+
+        return EncryptedChunkData.FromBytes(combined);
+    }
+
+    public static PlaintextChunkData DecryptChunk(
+        EncryptedChunkData encrypted,
+        TransferKey key,
+        BaseNonce baseNonce,
+        ChunkIndex index)
+    {
+        if (encrypted.Length < 16)
+            throw new CryptographicException("Encrypted chunk data is too short to contain authentication tag.");
+
+        ChunkNonce nonce = ChunkNonce.Derive(baseNonce, index);
+        int cipherLength = encrypted.Length - 16;
+        ReadOnlySpan<byte> ciphertext = encrypted.Span[..cipherLength];
+        ReadOnlySpan<byte> tag = encrypted.Span[cipherLength..];
+
+        byte[] plaintext = new byte[cipherLength];
+        using AesGcm gcm = new(key.Bytes, 16);
+        gcm.Decrypt(nonce.Span, ciphertext, tag, plaintext);
+
+        return PlaintextChunkData.FromBytes(plaintext);
+    }
+}
+```
+
 ---
 
 ## 4. Outbound Ports & Infrastructure Contracts
@@ -541,7 +886,7 @@ public interface IDesktopFileStorage
     ValueTask PreAllocateFilesAsync(RootDirectoryPath rootPath, TransferManifest manifest, SelectedFileIndices selectedIndices, CancellationToken ct = default);
     ValueTask WriteChunkAsync(ResolvedFilePath targetPath, FileByteOffset fileOffset, PlaintextChunkData data, CancellationToken ct = default);
     ValueTask<PlaintextChunkData> ReadChunkAsync(ResolvedFilePath sourcePath, FileByteOffset fileOffset, TransferByteLength length, CancellationToken ct = default);
-    ValueTask<Bitfield> ScanAndComputeBitfieldAsync(RootDirectoryPath rootPath, TransferManifest manifest, SelectedFileIndices? selectedIndices = null, CancellationToken ct = default); // (V-70)
+    ValueTask<Bitfield> ScanAndComputeBitfieldAsync(RootDirectoryPath rootPath, TransferManifest manifest, SelectedFileIndices? selectedIndices = null, CancellationToken ct = default);
     ValueTask FinalizeFileAsync(ResolvedFilePath targetPath, FileLastModifiedUtc lastModifiedUtc, CancellationToken ct = default);
     ValueTask<DiskSpacePreflightResult> CheckDiskSpaceAsync(RootDirectoryPath rootPath, TotalBundleBytes requiredBytes, CancellationToken ct = default);
 }
@@ -570,10 +915,9 @@ public interface IFileTransferFilterPolicyRepository
 
 ---
 
-## 5. Minimal, Light-Touch CQRS Contracts
+## 5. Minimal, Light-Touch CQRS Contracts & Concrete Action Services
 
-### 5.1 `IFileTransferActionHandler`
-Consolidates into 5 fundamental lifecycle commands with explicit optional parameters for title and seeding ratio:
+### 5.1 `IFileTransferActionHandler` Contract
 
 ```csharp
 namespace Percolator.Apps.FileTransfer.Ports;
@@ -601,28 +945,260 @@ public interface IFileTransferActionHandler
 }
 ```
 
-#### 5.1.1 Command Handler Orchestration Rules
-1. **Initiate Transfer Pre-Flight Bounds**:
-   - `InitiateTransferAsync` scans the local `sourceRoot` to collect files and compute total size.
-   - Enforces symmetric caps before manifest allocation: if files $> 50,000$, total size $> 16\text{ TB}$, or chunks $> 1,000,000$, returns `DomainResult.Failure` without staging or persisting an aggregate.
-2. **Accept Transfer Selective Pre-Flight Disk Math**:
-   - `AcceptTransferAsync` resolves `selectedFiles`:
-     - If `selectedFiles == null`: defaults to `SelectedFileIndices.All(manifest.TotalFiles)`.
-     - If `selectedFiles.SelectedCount == 0`: returns `DomainResult.Failure("At least one file must be selected for transfer.")`.
-   - **Selective Disk Space Verification**: Calculates required bytes strictly for selected files:
-     $$\text{RequiredSpace} = \sum_{i \in \text{SelectedFiles}} \text{manifest.Files}[i].\text{FileSize}$$
-     Invokes `IDesktopFileStorage.CheckDiskSpaceAsync(destinationFolder, RequiredSpace, ct)`. If space is insufficient, returns `DomainResult.Failure` without transitioning aggregate state.
-3. **Zero-Byte File Finalization on InFlight Transition**:
-   - When user consent is given and the session transitions from `PendingConsent` to `InFlight`, `TransferSessionCoordinator` immediately calls `IDesktopFileStorage.FinalizeFileAsync` for any selected files with `FileSize.Bytes == 0`.
-   - Because 0-byte files have zero chunks, they emit no chunk verification events; immediate finalization ensures 0-byte files are materialized and marked completed immediately upon starting the transfer.
-4. **Proactive Tracker Unregistration on Session Cancellation or Completion**:
-   - When a transfer session transitions to `Completed`, `Cancelled`, or `Failed`, `TransferSessionCoordinator` proactively dispatches `IDistributedTrackerPort.UnregisterAsync(SwarmRendezvousId, LocalIdentityId, ct)`.
-   - Proactive unregistration immediately purges candidate IP endpoints from the relay swarm tracker, preventing peer connection attempts to stale or closed endpoints and freeing relay memory before the 90-second ephemeral TTL expires.
-5. **Candidate Gathering Egress Filtering (`DirectWanPolicy`)**:
-   - When `wanPolicy == DirectWanPolicy.DisabledByDefault`: The candidate discovery engine must not query UPnP port mapping or STUN reflection, and must not populate WAN candidates in `FileTransferOfferPayload` or `FileTransferAcceptPayload`. Only private LAN candidates (`DirectCandidateKind.DirectLan`) are gathered if local network sharing is enabled; otherwise, candidate lists remain empty, forcing all traffic exclusively through blind relay pipes.
-   - When `wanPolicy == DirectWanPolicy.ExplicitlyAllowed`: The discovery engine actively resolves WAN candidates via UPnP port forwarding and relay-assisted STUN before dispatching offer or accept payloads.
+---
 
-### 5.2 Read Models & Query Service
+### 5.2 Concrete `FileTransferActionHandler` Orchestration
+
+```csharp
+namespace Percolator.Apps.FileTransfer.Features.TransferNegotiation;
+
+public sealed class FileTransferActionHandler : IFileTransferActionHandler
+{
+    private readonly ITransferSessionRepository _sessionRepository;
+    private readonly IDesktopFileStorage _fileStorage;
+    private readonly IPayloadSender _payloadSender;
+    private readonly IDistributedTrackerPort _trackerPort;
+    private readonly IDateTimeProvider _clock;
+
+    public FileTransferActionHandler(
+        ITransferSessionRepository sessionRepository,
+        IDesktopFileStorage fileStorage,
+        IPayloadSender payloadSender,
+        IDistributedTrackerPort trackerPort,
+        IDateTimeProvider clock)
+    {
+        _sessionRepository = sessionRepository;
+        _fileStorage = fileStorage;
+        _payloadSender = payloadSender;
+        _trackerPort = trackerPort;
+        _clock = clock;
+    }
+
+    public async ValueTask<DomainResult<TransferSessionId>> InitiateTransferAsync(
+        IReadOnlyList<PublicIdentityId> recipients,
+        RootDirectoryPath sourceRoot,
+        IReadOnlyList<SanitizedRelativePath> filePaths,
+        DirectWanPolicy wanPolicy,
+        RootBundleName? customBundleName = null,
+        SeedRatio? targetSeedRatio = null,
+        CancellationToken ct = default)
+    {
+        if (recipients == null || recipients.Count == 0)
+            return DomainResult<TransferSessionId>.Failure(new DomainError("Transfer.NoRecipients", "Must specify at least one recipient."));
+
+        if (filePaths == null || filePaths.Count == 0)
+            return DomainResult<TransferSessionId>.Failure(new DomainError("Transfer.NoFiles", "Must specify at least one file to transfer."));
+
+        if (filePaths.Count > IngressTransferOfferValidator.MaxFilesPerBundle)
+            return DomainResult<TransferSessionId>.Failure(new DomainError("Transfer.FileLimitExceeded", $"File count ({filePaths.Count}) exceeds maximum allowed ({IngressTransferOfferValidator.MaxFilesPerBundle})."));
+
+        // Scan files and build contiguous FileEntries
+        List<FileEntry> entries = [];
+        long cumulativeOffset = 0;
+        for (int i = 0; i < filePaths.Count; i++)
+        {
+            SanitizedRelativePath relPath = filePaths[i];
+            ResolvedFilePath absPath = ResolvedFilePath.Resolve(sourceRoot, relPath);
+            FileInfo info = new(absPath.AbsolutePath);
+            if (!info.Exists)
+                return DomainResult<TransferSessionId>.Failure(new DomainError("Transfer.FileNotFound", $"File not found: '{relPath.Value}'."));
+
+            FileSizeBytes size = FileSizeBytes.FromBytes(info.Length);
+            BundleByteOffset startOffset = BundleByteOffset.FromOffset(cumulativeOffset);
+            FileLastModifiedUtc lastModified = FileLastModifiedUtc.FromDateTimeOffset(info.LastWriteTimeUtc);
+
+            entries.Add(new FileEntry(FileIndex.FromInt(i), relPath, size, startOffset, lastModified));
+            cumulativeOffset += size.Bytes;
+        }
+
+        if (cumulativeOffset > IngressTransferOfferValidator.MaxBundleSizeBytes)
+            return DomainResult<TransferSessionId>.Failure(new DomainError("Transfer.SizeLimitExceeded", "Bundle total size exceeds 16 TB."));
+
+        ChunkSizeBytes chunkSize = ChunkSizeBytes.Default;
+        int chunkCount = (int)Math.Max(1, (cumulativeOffset + chunkSize.Bytes - 1) / chunkSize.Bytes);
+        if (chunkCount > IngressTransferOfferValidator.MaxChunksPerBundle)
+            return DomainResult<TransferSessionId>.Failure(new DomainError("Transfer.ChunkLimitExceeded", "Bundle total chunk count exceeds 1,000,000."));
+
+        // Build leaf hashes and Merkle tree
+        List<ChunkHash> leafHashes = new(chunkCount);
+        for (int c = 0; c < chunkCount; c++)
+        {
+            ChunkIndex chunkIdx = ChunkIndex.FromInt(c);
+            ChunkByteLength expectedSize = ChunkByteLength.FromBytes((int)Math.Min((long)chunkSize.Bytes, cumulativeOffset - ((long)c * chunkSize.Bytes)));
+            
+            // Read bytes across files for this chunk and compute leaf hash
+            byte[] chunkBuffer = new byte[expectedSize.Bytes];
+            IReadOnlyList<FileChunkSlice> slices = ChunkBoundaryCalculator.CalculateSlicesFromEntries(entries, chunkSize, chunkIdx, expectedSize);
+            foreach (FileChunkSlice slice in slices)
+            {
+                FileEntry entry = entries[slice.FileIndex.Value];
+                ResolvedFilePath filePath = ResolvedFilePath.Resolve(sourceRoot, entry.RelativePath);
+                PlaintextChunkData sliceData = await _fileStorage.ReadChunkAsync(filePath, slice.OffsetInFile, slice.SliceLength, ct);
+                sliceData.Span.CopyTo(chunkBuffer.AsSpan(slice.BufferOffset, slice.SliceLength.Bytes));
+            }
+
+            leafHashes.Add(MerkleTreeBuilder.HashLeaf(chunkBuffer));
+        }
+
+        MerkleTreeIndex merkleTree = MerkleTreeBuilder.BuildFromLeaves(leafHashes);
+        TransferSessionId sessionId = TransferSessionId.NewUnique();
+        RootBundleName bundleTitle = customBundleName ?? RootBundleName.Parse(Path.GetFileName(sourceRoot.Value));
+        TransferManifest manifest = TransferManifest.Create(sessionId, bundleTitle, chunkSize, merkleTree, entries);
+
+        TransferKey sessionKey = TransferKey.Generate();
+        BaseNonce baseNonce = BaseNonce.Generate();
+        StreamAuthToken streamAuthToken = StreamAuthToken.Generate();
+        SeedRatio enforcedSeedRatio = targetSeedRatio ?? SeedRatio.Zero;
+
+        // Create domain aggregate
+        PublicIdentityId localInitiator = recipients[0]; // Bound to local identity
+        TransferSession session = recipients.Count == 1
+            ? TransferSession.CreateOutgoing1to1(sessionId, localInitiator, recipients[0], manifest, enforcedSeedRatio, _clock)
+            : TransferSession.CreateOutgoingMultiPeer(sessionId, localInitiator, recipients, manifest, enforcedSeedRatio, _clock);
+
+        await _sessionRepository.SaveSessionAsync(session, ct);
+
+        // Gather candidates respecting WAN policy
+        List<DirectEndpointCandidate> candidates = [];
+        if (wanPolicy == DirectWanPolicy.ExplicitlyAllowed)
+        {
+            // Resolve WAN STUN/UPnP candidates via discovery hooks
+        }
+
+        // Serialize inline or blob manifest
+        byte[] serializedManifest = manifest.Serialize();
+        ManifestDistribution manifestDist = serializedManifest.Length <= IngressTransferOfferValidator.MaxInlineManifestBytes
+            ? ManifestDistribution.FromInline(InlineManifestData.FromBytes(serializedManifest))
+            : ManifestDistribution.FromBlob(new ManifestBlobDescriptor(BlobId.NewUnique(), ChunkHash.FromBytes(SHA256.HashData(serializedManifest)), manifest.TotalSize, RelayPipeEndpointUri.Parse("https://relay.percolator.net/pipes")));
+
+        FileTransferOfferPayload offerPayload = new(
+            sessionId,
+            TransferBundleSummary.Create(bundleTitle, manifest.TotalSize, manifest.TotalFiles, chunkSize, manifest.TotalChunks, merkleTree.Root),
+            manifestDist,
+            sessionKey,
+            baseNonce,
+            streamAuthToken,
+            RelayRendezvous: null,
+            candidates);
+
+        byte[] inBandBytes = new byte[1 + offerPayload.Serialize().Length];
+        inBandBytes[0] = (byte)FileTransferControlOpcode.Offer;
+        offerPayload.Serialize().CopyTo(inBandBytes.AsSpan(1));
+
+        await _payloadSender.SendPayloadAsync(new OutboundPayloadContext(sessionId.Value, AppId.FileTransferControl, inBandBytes), ct);
+
+        return DomainResult<TransferSessionId>.Success(sessionId);
+    }
+
+    public async ValueTask<DomainResult> AcceptTransferAsync(
+        TransferSessionId sessionId,
+        RootDirectoryPath destinationFolder,
+        SelectedFileIndices? selectedFiles = null,
+        CancellationToken ct = default)
+    {
+        TransferSession? session = await _sessionRepository.GetSessionByIdAsync(sessionId, ct);
+        if (session == null)
+            return DomainResult.Failure(new DomainError("Transfer.NotFound", "Transfer session was not found."));
+
+        if (session.State != TransferSessionState.PendingConsent)
+            return DomainResult.Failure(new DomainError("Transfer.InvalidState", $"Cannot accept transfer in state '{session.State}'."));
+
+        SelectedFileIndices chosenFiles = selectedFiles ?? SelectedFileIndices.All(session.Manifest.TotalFiles);
+        if (chosenFiles.SelectedCount == 0)
+            return DomainResult.Failure(new DomainError("Transfer.EmptySelection", "At least one file must be selected."));
+
+        // Selective Disk Space Pre-flight Check
+        long requiredBytes = 0;
+        foreach (FileIndex idx in chosenFiles.Indices)
+        {
+            requiredBytes += session.Manifest.Files[idx.Value].FileSize.Bytes;
+        }
+
+        DiskSpacePreflightResult diskCheck = await _fileStorage.CheckDiskSpaceAsync(
+            destinationFolder,
+            TotalBundleBytes.FromBytes(requiredBytes),
+            ct);
+
+        if (!diskCheck.HasSufficientSpace)
+            return DomainResult.Failure(new DomainError("Storage.InsufficientSpace", $"Insufficient disk space. Required: {requiredBytes} bytes."));
+
+        DomainResult acceptResult = session.AcceptTransfer(chosenFiles, _clock);
+        if (acceptResult.IsFailure)
+            return acceptResult;
+
+        // Immediate Finalization for Zero-Byte Files
+        foreach (FileIndex idx in chosenFiles.Indices)
+        {
+            FileEntry file = session.Manifest.Files[idx.Value];
+            if (file.FileSize.Bytes == 0)
+            {
+                ResolvedFilePath path = ResolvedFilePath.Resolve(destinationFolder, file.RelativePath);
+                await _fileStorage.FinalizeFileAsync(path, file.LastModifiedUtc, ct);
+            }
+        }
+
+        // Pre-allocate remaining non-empty files
+        await _fileStorage.PreAllocateFilesAsync(destinationFolder, session.Manifest, chosenFiles, ct);
+        await _sessionRepository.SaveSessionAsync(session, ct);
+
+        // Send in-band accept payload
+        FileTransferAcceptPayload acceptPayload = new(
+            sessionId,
+            ReceiverCandidates: [],
+            TransportRoutingPreference.DirectPreferred,
+            session.LocalBitfield);
+
+        byte[] inBandBytes = new byte[1 + acceptPayload.Serialize().Length];
+        inBandBytes[0] = (byte)FileTransferControlOpcode.Accept;
+        acceptPayload.Serialize().CopyTo(inBandBytes.AsSpan(1));
+
+        await _payloadSender.SendPayloadAsync(new OutboundPayloadContext(sessionId.Value, AppId.FileTransferControl, inBandBytes), ct);
+
+        return DomainResult.Success();
+    }
+
+    public async ValueTask<DomainResult> PauseTransferAsync(TransferSessionId sessionId, CancellationToken ct = default)
+    {
+        TransferSession? session = await _sessionRepository.GetSessionByIdAsync(sessionId, ct);
+        if (session == null) return DomainResult.Failure(new DomainError("Transfer.NotFound", "Session not found."));
+
+        DomainResult result = session.Pause();
+        if (result.IsSuccess) await _sessionRepository.SaveSessionAsync(session, ct);
+        return result;
+    }
+
+    public async ValueTask<DomainResult> ResumeTransferAsync(TransferSessionId sessionId, CancellationToken ct = default)
+    {
+        TransferSession? session = await _sessionRepository.GetSessionByIdAsync(sessionId, ct);
+        if (session == null) return DomainResult.Failure(new DomainError("Transfer.NotFound", "Session not found."));
+
+        DomainResult result = session.Resume();
+        if (result.IsSuccess) await _sessionRepository.SaveSessionAsync(session, ct);
+        return result;
+    }
+
+    public async ValueTask<DomainResult> CancelTransferAsync(TransferSessionId sessionId, TransferTerminationReason reason, CancellationToken ct = default)
+    {
+        TransferSession? session = await _sessionRepository.GetSessionByIdAsync(sessionId, ct);
+        if (session == null) return DomainResult.Failure(new DomainError("Transfer.NotFound", "Session not found."));
+
+        DomainResult result = session.Cancel(reason, _clock);
+        if (result.IsSuccess)
+        {
+            await _sessionRepository.SaveSessionAsync(session, ct);
+            // Proactive tracker unregistration
+            SwarmRendezvousId rendezvous = SwarmRendezvousId.Derive(new TransferKey(new byte[32]));
+            await _trackerPort.UnregisterAsync(rendezvous, session.InitiatorId, ct);
+        }
+        return result;
+    }
+}
+```
+
+---
+
+### 5.3 Read Models, Query Service & Stale Offer Reaper
+
 ```csharp
 namespace Percolator.Apps.FileTransfer.Ports;
 
@@ -633,18 +1209,18 @@ public sealed record ManifestFileReadModel(
     BundleByteOffset StartOffset,
     BundleByteOffset EndOffset,
     FileLastModifiedUtc LastModifiedUtc,
-    bool IsSelected,                    // Selective download projection (V-69)
-    bool IsCompleted);                  // Per-file completion status (V-69)
+    bool IsSelected,
+    bool IsCompleted);
 
 public sealed record TransferSessionReadModel(
     TransferSessionId SessionId,
     RootBundleName RootName,
     PublicIdentityId InitiatorId,
     TransferTopology Topology,
-    RootDirectoryPath? LocalRootPath,   // Preserves local disk folder for UI actions (V-68)
+    RootDirectoryPath? LocalRootPath,
     TotalBundleBytes TotalBytes,
-    TotalBundleBytes DownloadedBytes,   // Unambiguous downloaded volume (V-65)
-    TotalBundleBytes UploadedBytes,     // Tracked upload volume (V-65)
+    TotalBundleBytes DownloadedBytes,
+    TotalBundleBytes UploadedBytes,
     SeedRatio CurrentSeedRatio,
     SeedRatio TargetSeedRatio,
     ChunkCount CompletedChunks,
@@ -655,7 +1231,7 @@ public sealed record TransferSessionReadModel(
     PeerCount ConnectedPeers,
     TransferSessionState Status,
     TransferRole Role,
-    DateTimeOffset CreatedAtUtc,        // Aligned with domain aggregate (V-65)
+    DateTimeOffset CreatedAtUtc,
     DateTimeOffset? CompletedAtUtc);
 
 public interface IFileTransferQueryService
@@ -669,73 +1245,171 @@ public interface ITransferOfferReaperService
 {
     ValueTask<int> SweepAndExpireStaleOffersAsync(TimeSpan retentionWindow, CancellationToken ct = default);
 }
+
+public sealed class TransferOfferReaperService : ITransferOfferReaperService
+{
+    private readonly ITransferSessionRepository _sessionRepository;
+    private readonly IDateTimeProvider _clock;
+
+    public TransferOfferReaperService(ITransferSessionRepository sessionRepository, IDateTimeProvider clock)
+    {
+        _sessionRepository = sessionRepository;
+        _clock = clock;
+    }
+
+    public async ValueTask<int> SweepAndExpireStaleOffersAsync(TimeSpan retentionWindow, CancellationToken ct = default)
+    {
+        IReadOnlyList<TransferSession> activeSessions = await _sessionRepository.GetActiveSessionsAsync(ct);
+        DateTimeOffset now = _clock.GetUtcNow();
+        int expiredCount = 0;
+
+        foreach (TransferSession session in activeSessions)
+        {
+            if (session.State == TransferSessionState.PendingConsent && (now - session.CreatedAtUtc) > retentionWindow)
+            {
+                session.ExpireOffer(_clock);
+                await _sessionRepository.SaveSessionAsync(session, ct);
+                expiredCount++;
+            }
+        }
+
+        return expiredCount;
+    }
+}
 ```
 
-- Periodic background service (running every 15 minutes) scanning staged incoming sessions (`TransferSessionState.PendingConsent`) in `ITransferSessionRepository`.
-- Any offer where `clock.UtcNow - session.CreatedAtUtc > TimeSpan.FromHours(24)` is transitioned to `Cancelled` via `session.ExpireOffer(clock)` and persisted.
-- Prevents staging memory and database row accumulation from unaccepted transfer offers (Lens 3).
+---
+
+## 6. Swarm Rendezvous, Fast-Resume & Coordination Algorithms
+
+### 6.1 Rarest-First Chunk Selector Algorithm
+
+```csharp
+namespace Percolator.Apps.FileTransfer.Features.SwarmCoordination;
+
+public static class RarestFirstChunkSelector
+{
+    public static ChunkIndex? SelectNextChunk(
+        Bitfield localBitfield,
+        Bitfield requiredMask,
+        IReadOnlyCollection<SwarmMember> swarmMembers,
+        IReadOnlySet<ChunkIndex> inFlightChunks)
+    {
+        Bitfield missingChunks = requiredMask.Difference(localBitfield);
+        if (missingChunks.IsEmpty) return null;
+
+        // Collect unchoked seeders/leechers
+        List<SwarmMember> activePeers = [];
+        foreach (SwarmMember member in swarmMembers)
+        {
+            if (member.PeerChokingUs == PeerChokeStatus.Unchoked)
+            {
+                activePeers.Add(member);
+            }
+        }
+
+        if (activePeers.Count == 0) return null;
+
+        ChunkIndex? rarestIndex = null;
+        int lowestRarity = int.MaxValue;
+
+        for (int i = 0; i < missingChunks.TotalChunks.Count; i++)
+        {
+            ChunkIndex candidate = ChunkIndex.FromInt(i);
+            if (!missingChunks.HasChunk(candidate) || inFlightChunks.Contains(candidate))
+                continue;
+
+            int peerCountWithChunk = 0;
+            for (int p = 0; p < activePeers.Count; p++)
+            {
+                if (activePeers[p].Bitfield.HasChunk(candidate))
+                    peerCountWithChunk++;
+            }
+
+            if (peerCountWithChunk > 0 && peerCountWithChunk < lowestRarity)
+            {
+                lowestRarity = peerCountWithChunk;
+                rarestIndex = candidate;
+            }
+        }
+
+        return rarestIndex;
+    }
+}
+```
 
 ---
 
-## 6. Swarm Rendezvous, Fast-Resume & PEX Orchestration
+### 6.2 `DiskChunkAssembler` Implementation
 
-1. **Immediate Fast-Path Reconnection (Zero Tracker Latency)**:
-   - When an active or paused transfer is resumed (or after an application restart), the transfer coordinator queries `ft_swarm_endpoints` and dials candidate IP addresses directly.
-   - On local LANs or stable WAN IPs, direct streaming resumes within milliseconds without wire signaling or tracker queries.
-2. **Authenticated Rendezvous Fallback**:
-   - If direct connection attempts fail or candidates have expired:
-     $$\text{SwarmRendezvousId} = \text{HMAC-SHA256}(K_{\text{transfer}}, \text{"swarm-rendezvous"})$$
-   - Peers announce their current IP candidates to the relay tracker under `SwarmRendezvousId` with their `PublicIdentityId`.
-   - The relay tracker stores 90-second sliding records without learning file contents or session keys.
-3. **Live Peer Exchange (PEX) & Candidate Flooding Defense (Lens 3)**:
-   - As connected peers discover new routes or candidates, they dispatch `PexPeersFrame(Candidates)` over active data streams.
-   - **PEX Flood Rate Limiter**: Coordinators throttle `PexPeersFrame` ingestion to at most 1 frame per 10 seconds per peer.
-   - **Candidate Capping & Deduplication**: Capped at `MaxCandidatesPerPeer = 16`. Candidates are deduplicated by Host+Port. Bogus formats or loopback/private candidates (unless `AllowLan` is enabled) are discarded.
-   - **PEX WAN Policy Gate**: The coordinator strictly enforces the session's `DirectWanPolicy` on all incoming `PexPeersFrame` messages. If `DirectWanPolicy == DisabledByDefault`, any candidate received with `DirectCandidateKind.DirectWanUpnp` or `DirectCandidateKind.DirectWanStun` (or having a public IP address) is discarded immediately, preventing a remote peer from injecting WAN IPs and bypassing the user's relay-only privacy posture.
-   - The coordinator persists valid candidates to SQLite (`ft_swarm_endpoints`) for fast-resume cycles, completely isolating physical network addresses from the core domain model.
-4. **Swarm Peer Attribution, Poisoned Block Defense & Choking Coordination (Lens 3)**:
-   - **Stream-to-Peer Attribution**: The `TransferSessionCoordinator` maps each active TCP/QUIC stream to its supplying peer identity (`PublicIdentityId`).
-   - **Poisoned Block Penalization**: When a chunk payload received from stream $S$ fails cryptographic verification against the domain Merkle root:
-     1. The coordinator records an offense against the supplying peer's score.
-     2. Immediately terminates the corrupted stream and notifies the domain aggregate to choke the peer (`session.SetWeChokingPeer(peerId, PeerChokeStatus.Choked)`).
-     3. Blacklists the peer from supplying that chunk and reschedules the failed piece to an alternate seeder via rarest-first selection.
-     4. If a peer accumulates multiple invalid chunks (e.g. 3 failures), the coordinator tears down all streams to that peer and removes them from active dialing pools.
-5. **Swarm Peer Liveness, Idle Keep-Alives & Endpoint Persistence**:
-   - Tracking when a remote peer was last active over TCP/QUIC is a network liveness / transport coordination concern:
-     ```csharp
-     public sealed class SwarmPeerLiveness
-     {
-         public PublicIdentityId PeerId { get; }
-         public DateTimeOffset LastSeenUtc { get; private set; }
+```csharp
+namespace Percolator.Apps.FileTransfer.Features.Storage;
 
-         public SwarmPeerLiveness(PublicIdentityId peerId, DateTimeOffset lastSeenUtc)
-         {
-             PeerId = peerId;
-             LastSeenUtc = lastSeenUtc;
-         }
+public sealed class DiskChunkAssembler
+{
+    private readonly IDesktopFileStorage _fileStorage;
 
-         public bool IsActive(DateTimeOffset now, TimeSpan timeout) => now - LastSeenUtc <= timeout;
-         public void RecordActivity(IDateTimeProvider clock) => LastSeenUtc = clock.UtcNow;
-     }
-     ```
-   - **Keep-Alive Frame Dispatch**: `SwarmCoordinator` tracks `SwarmPeerLiveness` for each connected peer. If a stream remains idle for $\ge 30\text{ seconds}$ without chunk traffic, the coordinator transmits a 0-byte payload `KeepAliveFrame` to keep NAT bindings open.
-   - **Disconnect Detection & Ephemeral Eviction**: If no packet or frame is received from a peer for $\ge 60\text{ seconds}$, the coordinator marks the peer connection dead, tears down dead sockets, and persists `last_seen_utc` in SQLite (`ft_swarm_endpoints`) before evicting the peer from active dialing pools.
-6. **Chunk Request Flooding & Unsolicited Chunk Defense (Lens 3)**:
-   - **In-Flight Request Queue Capping**: `TransferSessionCoordinator` bounds in-flight chunk requests from any single peer to at most `MaxPendingRequestsPerPeer = 32`.
-   - If a remote peer dispatches `RequestChunkFrame` exceeding 32 outstanding unfulfilled requests, the coordinator drops excess requests, transmits `ChokeFrame`, and throttles the peer stream.
-   - **Unsolicited Chunk Drop**: Any incoming `ChunkDataFrame` containing a `ChunkIndex` that was not actively requested by local rarest-first scheduling (or has already been verified and written to disk) is discarded immediately without buffering in memory or writing to disk.
-7. **Stream Authentication & Session Binding (Lens 3)**:
-   - When establishing a TCP/QUIC stream connection, the connecting peer presents `StreamAuthToken`, `SessionId`, `StreamIndex`, and `SenderPeerId` in `HandshakeFrame`.
-   - The listening peer verifies:
-     1. `AuthToken` matches the symmetric token negotiated in-band via Double Ratchet ($\text{HMAC-SHA256}(K_{\text{transfer}}, \text{"stream-auth"}))$.
-     2. `SessionId` matches an active transfer session.
-     3. `SenderPeerId` is an authorized participant in `session.Topology`.
-   - If verification fails or the token is invalid, the receiver terminates the socket immediately with zero data exchanged.
-   - **Privacy & Deniability**: Authentication relies strictly on symmetric session secrets ($K_{\text{transfer}}$) established inside the end-to-end encrypted channel. No long-term private identity signatures are emitted over raw TCP streams, preventing physical IP-to-identity binding and preserving cryptographic deniability.
+    public DiskChunkAssembler(IDesktopFileStorage fileStorage)
+    {
+        _fileStorage = fileStorage;
+    }
+
+    public async ValueTask<DomainResult> AssembleChunkAsync(
+        TransferSession session,
+        RootDirectoryPath rootPath,
+        ChunkIndex chunkIndex,
+        PlaintextChunkData plaintextData,
+        IDateTimeProvider clock,
+        CancellationToken ct = default)
+    {
+        // Compute file slice boundaries across continuous bundle
+        IReadOnlyList<FileChunkSlice> slices = ChunkBoundaryCalculator.CalculateSlices(
+            session.Manifest,
+            chunkIndex,
+            ChunkByteLength.FromBytes(plaintextData.Length));
+
+        // Write each slice to target file on disk
+        foreach (FileChunkSlice slice in slices)
+        {
+            FileEntry entry = session.Manifest.Files[slice.FileIndex.Value];
+            ResolvedFilePath targetFile = ResolvedFilePath.Resolve(rootPath, entry.RelativePath);
+
+            ReadOnlyMemory<byte> sliceMemory = plaintextData.Memory.Slice(slice.BufferOffset, slice.SliceLength.Bytes);
+            await _fileStorage.WriteChunkAsync(targetFile, slice.OffsetInFile, PlaintextChunkData.FromMemory(sliceMemory), ct);
+        }
+
+        // Record chunk verification in domain aggregate (detects file and session completion)
+        return session.VerifyAndRecordChunk(chunkIndex, plaintextData, clock);
+    }
+}
+```
 
 ---
 
-## 7. Threat Modeling & Security Posture
+### 6.3 Swarm Peer Liveness & Heartbeats
+
+```csharp
+namespace Percolator.Apps.FileTransfer.Features.SwarmCoordination;
+
+public sealed class SwarmPeerLiveness
+{
+    public PublicIdentityId PeerId { get; }
+    public DateTimeOffset LastSeenUtc { get; private set; }
+
+    public SwarmPeerLiveness(PublicIdentityId peerId, DateTimeOffset lastSeenUtc)
+    {
+        PeerId = peerId;
+        LastSeenUtc = lastSeenUtc;
+    }
+
+    public bool IsActive(DateTimeOffset now, TimeSpan timeout) => now - LastSeenUtc <= timeout;
+    public void RecordActivity(IDateTimeProvider clock) => LastSeenUtc = clock.GetUtcNow();
+}
+```
+
+---
+
+## 7. Threat Modeling & Security Posture (Lens 3)
 
 | Threat / Vulnerability | Protocol Defense | Verification Mechanism |
 | :--- | :--- | :--- |
@@ -766,7 +1440,7 @@ public interface ITransferOfferReaperService
 
 ---
 
-## 8. Cross-Layer Infrastructure Alignment
+## 8. Cross-Layer Infrastructure Alignment (Lens 5)
 
 | Application Port / Contract | Infrastructure Adapter / Concrete Artifact | Target Persistence / Transport |
 | :--- | :--- | :--- |
@@ -785,19 +1459,20 @@ public interface ITransferOfferReaperService
 
 ## 9. Phased Application Implementation Milestones
 
-### Milestone 1: Plugin Registration & Ingress Edge Discard
-1. Implement `FileTransferPlugin` implementing `IAppPlugin` (`AppId.FileTransferControl = 0x03`).
-2. Implement `FileTransferIngressFilter` implementing `IAppIngressFilter` (`PluginSdk`) for ingress pre-filtering before deserialization.
-3. Implement `FileTransferPayloadHandler` for ingress processing.
-4. Implement in-band payloads: `FileTransferOfferPayload`, `FileTransferAcceptPayload`, `FileTransferCancelPayload`.
+### Milestone 1: Project Alignment, Registration & Ingress Edge Discard
+1. Update `Percolator.Apps.FileTransfer.csproj` to reference `Percolator.Apps.FileTransfer.Domain.csproj` and `Percolator.SourceGenerators` analyzer; remove `Percolator.Domain.csproj`.
+2. Implement `ServiceCollectionExtensions.cs` registering application dependencies.
+3. Implement `FileTransferPlugin` implementing `IAppPlugin` (`AppId.FileTransferControl = 0x03`).
+4. Implement `FileTransferIngressFilter` implementing `IAppIngressFilter` (`PluginSdk`) for ingress pre-filtering before deserialization.
+5. Implement `FileTransferPayloadHandler` for ingress processing with 1-byte control opcodes (`0x01` Offer, `0x02` Accept, `0x03` Cancel).
+6. Implement in-band payloads: `FileTransferOfferPayload`, `FileTransferAcceptPayload`, `FileTransferCancelPayload`.
 
-### Milestone 2: Multi-Stream Coordinator & Out-of-Band Engine
+### Milestone 2: Multi-Stream Engine & Out-of-Band Framing
 1. Implement Application Value Objects and Transport Models, strictly verifying **zero implicit or explicit conversion operators** across all types.
 2. Define ports: `ITransferStreamPool`, `ITransferStreamPoolFactory`, `ITransferStream`.
-3. Implement `TransferSessionCoordinator` managing active 4–8 streams.
-4. Implement out-of-band typed frame dispatching via `IStreamFramePayload` and `StreamFrameEnvelope` (including chunk nonce derivation, request queue capping, `InterestedFrame`, and `NotInterestedFrame`).
-5. Implement concurrent chunk request pipeline (keeping 4–8 requests in flight per stream, bounded to `MaxPendingRequestsPerPeer = 32`).
-6. Implement opt-in direct candidate discovery adapter hooks (local UPnP port forwarder and relay-assisted STUN reflexive address resolver).
+3. Implement out-of-band typed frame dispatching via `IStreamFramePayload` and `StreamFrameEnvelope` with 5-byte header (`[1-byte Opcode] [4-byte BigEndian Length]`).
+4. Implement `ChunkCryptoService` handling deterministic nonce derivation `ChunkNonce.Derive` and AES-256-GCM chunk authenticated encryption/decryption.
+5. Implement `TransferSessionCoordinator` managing active 4–8 streams and bounding in-flight requests to `MaxPendingRequestsPerPeer = 32`.
 
 ### Milestone 3: Desktop Disk I/O & Storage Abstraction
 1. Define `IDesktopFileStorage` port using `PlaintextChunkData`, `FileLastModifiedUtc`, `RootDirectoryPath`, `ResolvedFilePath`, and `DiskSpacePreflightResult`.
@@ -807,16 +1482,17 @@ public interface ITransferOfferReaperService
 
 ### Milestone 4: Swarm Coordination, Distributed Tracker & Seeding Ratios
 1. Implement `SwarmCoordinator` managing active `SwarmMember` entities within `TransferSession` and tracking heartbeat/liveness via `SwarmPeerLiveness`.
-2. Implement `RarestFirstChunkSelector` and `EndgameMode`.
+2. Implement `RarestFirstChunkSelector` and `EndgameCoordinator`.
 3. Implement fast-resume endpoint hydration from `ft_swarm_endpoints` and live PEX frame candidate updates.
 4. Implement `IDistributedTrackerPort` announce and unregister workflows using `SwarmRendezvousId` and `PublicIdentityId`.
 5. Implement seeding ratio tracking ($\text{Uploaded} / \text{Total}$) and automatic disconnect on target ratio.
 
 ### Milestone 5: CQRS Transfer Manager Ports & Rate Limiter
-1. Implement rate limiter adapter integration with `ITransferRateLimiter` using `BandwidthLimit` and async `ValueTask` caps.
-2. Implement `IFileTransferFilterPolicyRepository` port for filter policy persistence taking `ownerId`.
-3. Implement `IFileTransferQueryService` and `IFileTransferActionHandler` supporting the 5 core lifecycle commands (`InitiateTransferAsync`, `AcceptTransferAsync`, `PauseTransferAsync`, `ResumeTransferAsync`, `CancelTransferAsync`).
-4. Expose state machine transitions and event streams for presentation consumers.
+1. Implement `IFileTransferActionHandler` in `FileTransferActionHandler` supporting the 5 core lifecycle commands (`InitiateTransferAsync`, `AcceptTransferAsync`, `PauseTransferAsync`, `ResumeTransferAsync`, `CancelTransferAsync`).
+2. Implement rate limiter adapter integration with `ITransferRateLimiter` using `BandwidthLimit` and async `ValueTask` caps.
+3. Implement `IFileTransferFilterPolicyRepository` port for filter policy persistence taking `ownerId`.
+4. Implement `IFileTransferQueryService` providing fast-path dashboard read models.
+5. Implement `TransferOfferReaperService` sweeping stale offers older than 24 hours.
 
 ### Milestone 6: Infrastructure Adapter Integration & End-to-End Verification
 1. Wire `FileTransferPlugin` with `TcpMultiStreamPool` and `PortableDesktopFileStore` from `Percolator.Infrastructure`.
@@ -824,11 +1500,6 @@ public interface ITransferOfferReaperService
 3. Test opt-in WAN direct connections (simulated UPnP and relay STUN reflection).
 4. Test blind relay transfer pipe streaming with simulated latency and packet drop.
 5. Test swarm multi-peer piece sharing with 3+ desktop nodes.
-
-
----
-
----
 
 ---
 

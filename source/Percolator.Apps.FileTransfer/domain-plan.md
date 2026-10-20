@@ -10,7 +10,7 @@
 
 ---
 
-## 1. Summary & Domain Boundaries
+## 1. Summary, Domain Boundaries & Codebase Modifications
 
 > ### Core Domain Boundary Definition
 > **The `FileTransfer.Domain` bounded context encapsulates strictly the mathematical, structural, and lifecycle invariants of a content-addressed multi-file transfer session.** Specifically, it is the sole authority on: (1) manifest structural integrity and contiguous multi-file bundle offset arithmetic; (2) piece possession state via immutable bitfields; (3) Merkle tree leaf and root cryptographic verification; and (4) session state machine transitions gated by participant topology and user consent. It is strictly agnostic to physical storage I/O, operating system filesystem or path encoding quirks, network framing, socket pools, peer reputation scoring, and transport coordination.
@@ -27,6 +27,104 @@
   - **Zero dependencies** on transport sockets (TCP/QUIC), socket pools, direct IP/port candidates, NAT traversal, relay pipes, storage I/O, SQLite, Protobuf wire encoders, serialization libraries, or `PluginSdk`.
   - **Zero references** to UI frameworks, view models, or presentation controls.
   - All domain concepts modeled as strongly typed Value Objects with **zero implicit/explicit cast operators**.
+
+---
+
+### 1.1 Required Codebase & Project Modifications
+
+To enforce strict Onion Architecture and decouple the file transfer application from core messaging domain abstractions, the following project changes are executed:
+
+1. **Create Greenfield Project `Percolator.Apps.FileTransfer.Domain.csproj`**:
+   - Location: `source/Percolator.Apps.FileTransfer.Domain/Percolator.Apps.FileTransfer.Domain.csproj`
+   - Content:
+     ```xml
+     <Project Sdk="Microsoft.NET.Sdk">
+       <PropertyGroup>
+         <TargetFramework>net10.0</TargetFramework>
+         <ImplicitUsings>enable</ImplicitUsings>
+         <Nullable>enable</Nullable>
+       </PropertyGroup>
+
+       <ItemGroup>
+         <ProjectReference Include="..\Percolator.Domain.Kernel\Percolator.Domain.Kernel.csproj" />
+         <ProjectReference Include="..\Percolator.SourceGenerators\Percolator.SourceGenerators.csproj" 
+                           OutputItemType="Analyzer" 
+                           ReferenceOutputAssembly="false" />
+       </ItemGroup>
+     </Project>
+     ```
+2. **Add to Solution (`Percolator.sln`)**:
+   - Register `Percolator.Apps.FileTransfer.Domain.csproj` under solution folder `01 - Domain`.
+3. **Decouple Application Project (`Percolator.Apps.FileTransfer.csproj`)**:
+   - **Remove**: `<ProjectReference Include="..\Percolator.Domain\Percolator.Domain.csproj" />`
+   - **Add**: `<ProjectReference Include="..\Percolator.Apps.FileTransfer.Domain\Percolator.Apps.FileTransfer.Domain.csproj" />`
+4. **Update Unit Test Project (`Percolator.Apps.FileTransfer.Tests.csproj`)**:
+   - Ensure direct project reference to `..\Percolator.Apps.FileTransfer.Domain\Percolator.Apps.FileTransfer.Domain.csproj`.
+
+---
+
+### 1.2 Project Directory & Source File Layout
+
+```
+Percolator.Apps.FileTransfer.Domain/
+├── Exceptions/
+│   └── DomainValidationException.cs
+├── Common/
+│   ├── ChunkByteLength.cs
+│   ├── ChunkCount.cs
+│   ├── ChunkIndex.cs
+│   ├── ChunkSizeBytes.cs
+│   ├── FileByteOffset.cs
+│   ├── FileCount.cs
+│   ├── FileIndex.cs
+│   ├── FileSizeBytes.cs
+│   ├── PeerCount.cs
+│   ├── PlaintextChunkData.cs
+│   ├── SeedRatio.cs
+│   ├── TotalBundleBytes.cs
+│   └── TransferByteLength.cs
+├── ManifestManagement/
+│   ├── BundleByteOffset.cs
+│   ├── ChunkBoundaryCalculator.cs
+│   ├── FileChunkSlice.cs
+│   ├── FileEntry.cs
+│   ├── FileLastModifiedUtc.cs
+│   ├── MerkleRoot.cs
+│   ├── MerkleTreeBuilder.cs
+│   ├── MerkleTreeIndex.cs
+│   ├── RootBundleName.cs
+│   ├── SanitizedRelativePath.cs
+│   ├── TransferBundleSummary.cs
+│   └── TransferManifest.cs
+├── SwarmCoordination/
+│   ├── PeerChokeStatus.cs
+│   ├── PeerInterestStatus.cs
+│   ├── SwarmMember.cs
+│   └── SwarmPeerRole.cs
+└── TransferNegotiation/
+    ├── Bitfield.cs
+    ├── ChunkHash.cs
+    ├── SelectedFileIndices.cs
+    ├── TransferRole.cs
+    ├── TransferSession.cs
+    ├── TransferSessionId.cs
+    ├── TransferSessionState.cs
+    ├── TransferTerminationReason.cs
+    ├── TransferTopology.cs
+    └── Events/
+        ├── ChunkVerifiedDomainEvent.cs
+        ├── FileCompletedDomainEvent.cs
+        ├── PeerAcceptedTransferDomainEvent.cs
+        ├── SwarmMemberJoinedDomainEvent.cs
+        ├── TransferAcceptedLocallyDomainEvent.cs
+        ├── TransferCancelledDomainEvent.cs
+        ├── TransferCompletedDomainEvent.cs
+        ├── TransferFailedDomainEvent.cs
+        ├── TransferOfferedDomainEvent.cs
+        ├── TransferPausedDomainEvent.cs
+        ├── TransferResumedDomainEvent.cs
+        └── TransferStalledDomainEvent.cs
+```
 
 ---
 
@@ -87,6 +185,32 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
     public bool HasReachedTargetSeedRatio =>
         !TargetSeedRatio.IsUnlimited && CurrentSeedRatio.Multiplier >= TargetSeedRatio.Multiplier;
 
+    private TransferSession(
+        TransferSessionId id,
+        TransferRole role,
+        TransferSessionState state,
+        TransferTopology topology,
+        TransferManifest manifest,
+        Bitfield localBitfield,
+        SelectedFileIndices? selectedFiles,
+        SeedRatio targetSeedRatio,
+        TotalBundleBytes uploadedBytes,
+        DateTimeOffset createdAtUtc,
+        DateTimeOffset? completedAtUtc = null)
+    {
+        Id = id;
+        Role = role;
+        State = state;
+        Topology = topology;
+        Manifest = manifest;
+        LocalBitfield = localBitfield;
+        SelectedFiles = selectedFiles;
+        TargetSeedRatio = targetSeedRatio;
+        UploadedBytes = uploadedBytes;
+        CreatedAtUtc = createdAtUtc;
+        CompletedAtUtc = completedAtUtc;
+    }
+
     // Invariant-enforced Factory Methods:
     public static TransferSession CreateOutgoing1to1(
         TransferSessionId sessionId,
@@ -94,7 +218,42 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
         PublicIdentityId recipientId,
         TransferManifest manifest,
         SeedRatio targetSeedRatio,
-        IDateTimeProvider clock);
+        IDateTimeProvider clock)
+    {
+        ArgumentNullException.ThrowIfNull(clock);
+        if (initiatorId == recipientId)
+            throw new DomainValidationException("Recipient identity cannot be the same as initiator.");
+
+        TransferTopology.OneToOne topology = new(initiatorId, recipientId);
+        Bitfield fullBitfield = Bitfield.Full(manifest.TotalChunks);
+        DateTimeOffset now = clock.GetUtcNow();
+
+        TransferSession session = new(
+            sessionId,
+            TransferRole.Sender,
+            TransferSessionState.Offered,
+            topology,
+            manifest,
+            fullBitfield,
+            SelectedFileIndices.All(manifest.TotalFiles),
+            targetSeedRatio,
+            TotalBundleBytes.FromBytes(0),
+            now);
+
+        session.AddDomainEvent(new TransferOfferedDomainEvent(
+            sessionId,
+            initiatorId,
+            TransferBundleSummary.Create(
+                manifest.RootName,
+                manifest.TotalSize,
+                manifest.TotalFiles,
+                manifest.ChunkSize,
+                manifest.TotalChunks,
+                manifest.MerkleTree.Root),
+            now));
+
+        return session;
+    }
 
     public static TransferSession CreateOutgoingMultiPeer(
         TransferSessionId sessionId,
@@ -102,64 +261,423 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
         IReadOnlyList<PublicIdentityId> recipients,
         TransferManifest manifest,
         SeedRatio targetSeedRatio,
-        IDateTimeProvider clock);
+        IDateTimeProvider clock)
+    {
+        ArgumentNullException.ThrowIfNull(clock);
+        if (recipients == null || recipients.Count == 0)
+            throw new DomainValidationException("Multi-peer transfer must specify at least one recipient.");
+
+        foreach (PublicIdentityId recipient in recipients)
+        {
+            if (recipient == initiatorId)
+                throw new DomainValidationException("Recipient collection cannot contain the initiator.");
+        }
+
+        TransferTopology.MultiPeer topology = new(initiatorId, recipients);
+        Bitfield fullBitfield = Bitfield.Full(manifest.TotalChunks);
+        DateTimeOffset now = clock.GetUtcNow();
+
+        TransferSession session = new(
+            sessionId,
+            TransferRole.Sender,
+            TransferSessionState.Offered,
+            topology,
+            manifest,
+            fullBitfield,
+            SelectedFileIndices.All(manifest.TotalFiles),
+            targetSeedRatio,
+            TotalBundleBytes.FromBytes(0),
+            now);
+
+        session.AddDomainEvent(new TransferOfferedDomainEvent(
+            sessionId,
+            initiatorId,
+            TransferBundleSummary.Create(
+                manifest.RootName,
+                manifest.TotalSize,
+                manifest.TotalFiles,
+                manifest.ChunkSize,
+                manifest.TotalChunks,
+                manifest.MerkleTree.Root),
+            now));
+
+        return session;
+    }
 
     public static TransferSession CreateIncomingStaged(
         TransferSessionId sessionId,
         PublicIdentityId initiatorId,
         TransferManifest manifest,
         SeedRatio targetSeedRatio,
-        IDateTimeProvider clock);
+        IDateTimeProvider clock)
+    {
+        ArgumentNullException.ThrowIfNull(clock);
+
+        TransferTopology.IncomingStaged topology = new(initiatorId);
+        Bitfield emptyBitfield = Bitfield.Empty(manifest.TotalChunks);
+        DateTimeOffset now = clock.GetUtcNow();
+
+        return new TransferSession(
+            sessionId,
+            TransferRole.Recipient,
+            TransferSessionState.PendingConsent,
+            topology,
+            manifest,
+            emptyBitfield,
+            selectedFiles: null,
+            targetSeedRatio,
+            TotalBundleBytes.FromBytes(0),
+            now);
+    }
 
     // Encapsulated Domain Mutation Methods:
-    // Transitions PendingConsent -> InFlight directly upon user consent
-    public DomainResult AcceptTransfer(SelectedFileIndices selectedFiles, IDateTimeProvider clock);
-    
-    // Transitions Offered -> InFlight on first peer acceptance
+    public DomainResult AcceptTransfer(SelectedFileIndices selectedFiles, IDateTimeProvider clock)
+    {
+        ArgumentNullException.ThrowIfNull(clock);
+        if (State != TransferSessionState.PendingConsent)
+            return DomainResult.Failure(new DomainError("Transfer.InvalidState", $"Cannot accept transfer in state '{State}'."));
+
+        if (selectedFiles == null || selectedFiles.SelectedCount == 0)
+            return DomainResult.Failure(new DomainError("Transfer.EmptySelection", "Must select at least one file to accept transfer."));
+
+        SelectedFiles = selectedFiles;
+        State = TransferSessionState.InFlight;
+        DateTimeOffset now = clock.GetUtcNow();
+
+        AddDomainEvent(new TransferAcceptedLocallyDomainEvent(Id, selectedFiles, now));
+        return DomainResult.Success();
+    }
+
     public DomainResult RecordPeerAcceptance(
         PublicIdentityId recipientId,
         Bitfield resumptionBitfield,
-        IDateTimeProvider clock);
+        IDateTimeProvider clock)
+    {
+        ArgumentNullException.ThrowIfNull(clock);
+        if (State != TransferSessionState.Offered)
+            return DomainResult.Failure(new DomainError("Transfer.InvalidState", $"Cannot record peer acceptance in state '{State}'."));
 
-    // Swarm admission invariant: peer must be an authorized participant in Topology
+        if (!Topology.ContainsParticipant(recipientId))
+            return DomainResult.Failure(new DomainError("Transfer.UnauthorizedPeer", $"Peer '{recipientId}' is not an authorized participant in session topology."));
+
+        if (resumptionBitfield.TotalChunks != Manifest.TotalChunks)
+            return DomainResult.Failure(new DomainError("Transfer.MismatchedBitfield", "Peer bitfield total chunk count does not match session manifest."));
+
+        _swarmMembers[recipientId] = new SwarmMember(recipientId, resumptionBitfield);
+        State = TransferSessionState.InFlight;
+        DateTimeOffset now = clock.GetUtcNow();
+
+        AddDomainEvent(new PeerAcceptedTransferDomainEvent(Id, recipientId, resumptionBitfield, now));
+        return DomainResult.Success();
+    }
+
     public DomainResult RegisterSwarmMember(
         PublicIdentityId peerId,
         Bitfield initialBitfield,
-        IDateTimeProvider clock);
+        IDateTimeProvider clock)
+    {
+        ArgumentNullException.ThrowIfNull(clock);
+        if (!Topology.ContainsParticipant(peerId))
+            return DomainResult.Failure(new DomainError("Swarm.UnauthorizedPeer", $"Peer '{peerId}' is not authorized to join this swarm."));
 
-    // Transitions PendingConsent -> Cancelled with reason OfferExpired
-    public DomainResult ExpireOffer(IDateTimeProvider clock);
-    
-    // Piece possession mutations:
-    public DomainResult RecordPeerBitfield(PublicIdentityId peerId, Bitfield bitfield); // Enforces bitfield length
-    public DomainResult RecordPeerHave(PublicIdentityId peerId, ChunkIndex chunkIndex);
+        if (initialBitfield.TotalChunks != Manifest.TotalChunks)
+            return DomainResult.Failure(new DomainError("Swarm.MismatchedBitfield", "Initial bitfield does not match manifest chunk count."));
 
-    // Bidirectional flow control mutations:
-    public DomainResult SetWeChokingPeer(PublicIdentityId peerId, PeerChokeStatus status);
-    public DomainResult RecordPeerChokingUs(PublicIdentityId peerId, PeerChokeStatus status);
-    public DomainResult SetWeInterestedInPeer(PublicIdentityId peerId, PeerInterestStatus status);
-    public DomainResult RecordPeerInterestedInUs(PublicIdentityId peerId, PeerInterestStatus status);
+        if (_swarmMembers.ContainsKey(peerId))
+            return DomainResult.Success();
 
-    // Seeding ratio and upload tracking:
-    public DomainResult RecordUploadedBytes(TransferByteLength bytes, IDateTimeProvider clock);
-    public DomainResult SetTargetSeedRatio(SeedRatio seedRatio);
+        _swarmMembers[peerId] = new SwarmMember(peerId, initialBitfield);
+        DateTimeOffset now = clock.GetUtcNow();
 
-    // Encapsulates exact chunk verification, idempotency, and file completion boundary detection:
-    public DomainResult VerifyAndRecordChunk(ChunkIndex chunkIndex, PlaintextChunkData data, IDateTimeProvider clock);
-    
-    // Lifecycle transitions:
-    public DomainResult CompleteTransfer(IDateTimeProvider clock);
-    public DomainResult MarkStalled(IDateTimeProvider clock);
-    public DomainResult MarkFailed(TransferTerminationReason reason, IDateTimeProvider clock);
-    public DomainResult Pause();
-    public DomainResult Resume();
-    public DomainResult Cancel(TransferTerminationReason reason, IDateTimeProvider clock);
+        AddDomainEvent(new SwarmMemberJoinedDomainEvent(Id, peerId, initialBitfield, now));
+        return DomainResult.Success();
+    }
+
+    public DomainResult RecordPeerBitfield(PublicIdentityId peerId, Bitfield bitfield)
+    {
+        if (!_swarmMembers.TryGetValue(peerId, out SwarmMember? member))
+            return DomainResult.Failure(new DomainError("Swarm.UnknownPeer", $"Peer '{peerId}' is not a registered swarm member."));
+
+        if (bitfield.TotalChunks != Manifest.TotalChunks)
+            return DomainResult.Failure(new DomainError("Swarm.MismatchedBitfield", "Bitfield total chunk count does not match session manifest."));
+
+        member.UpdateBitfield(bitfield);
+        return DomainResult.Success();
+    }
+
+    public DomainResult RecordPeerHave(PublicIdentityId peerId, ChunkIndex chunkIndex)
+    {
+        if (!_swarmMembers.TryGetValue(peerId, out SwarmMember? member))
+            return DomainResult.Failure(new DomainError("Swarm.UnknownPeer", $"Peer '{peerId}' is not a registered swarm member."));
+
+        if (chunkIndex.Value < 0 || chunkIndex.Value >= Manifest.TotalChunks.Count)
+            return DomainResult.Failure(new DomainError("Swarm.InvalidChunkIndex", $"Chunk index {chunkIndex.Value} is out of bounds."));
+
+        member.RecordHave(chunkIndex);
+        return DomainResult.Success();
+    }
+
+    public DomainResult SetWeChokingPeer(PublicIdentityId peerId, PeerChokeStatus status)
+    {
+        if (!_swarmMembers.TryGetValue(peerId, out SwarmMember? member))
+            return DomainResult.Failure(new DomainError("Swarm.UnknownPeer", $"Peer '{peerId}' is not a registered swarm member."));
+
+        member.SetWeChokingPeer(status);
+        return DomainResult.Success();
+    }
+
+    public DomainResult RecordPeerChokingUs(PublicIdentityId peerId, PeerChokeStatus status)
+    {
+        if (!_swarmMembers.TryGetValue(peerId, out SwarmMember? member))
+            return DomainResult.Failure(new DomainError("Swarm.UnknownPeer", $"Peer '{peerId}' is not a registered swarm member."));
+
+        member.SetPeerChokingUs(status);
+        return DomainResult.Success();
+    }
+
+    public DomainResult SetWeInterestedInPeer(PublicIdentityId peerId, PeerInterestStatus status)
+    {
+        if (!_swarmMembers.TryGetValue(peerId, out SwarmMember? member))
+            return DomainResult.Failure(new DomainError("Swarm.UnknownPeer", $"Peer '{peerId}' is not a registered swarm member."));
+
+        member.SetWeInterestedInPeer(status);
+        return DomainResult.Success();
+    }
+
+    public DomainResult RecordPeerInterestedInUs(PublicIdentityId peerId, PeerInterestStatus status)
+    {
+        if (!_swarmMembers.TryGetValue(peerId, out SwarmMember? member))
+            return DomainResult.Failure(new DomainError("Swarm.UnknownPeer", $"Peer '{peerId}' is not a registered swarm member."));
+
+        member.SetPeerInterestedInUs(status);
+        return DomainResult.Success();
+    }
+
+    public DomainResult RecordUploadedBytes(TransferByteLength bytes, IDateTimeProvider clock)
+    {
+        ArgumentNullException.ThrowIfNull(clock);
+        if (bytes.Bytes < 0)
+            return DomainResult.Failure(new DomainError("Transfer.NegativeBytes", "Uploaded bytes cannot be negative."));
+
+        UploadedBytes = TotalBundleBytes.FromBytes(UploadedBytes.Bytes + bytes.Bytes);
+
+        if (State == TransferSessionState.Seeding && HasReachedTargetSeedRatio)
+        {
+            State = TransferSessionState.Completed;
+            DateTimeOffset now = clock.GetUtcNow();
+            CompletedAtUtc = now;
+            AddDomainEvent(new TransferCompletedDomainEvent(Id, Manifest.TotalSize, now));
+        }
+
+        return DomainResult.Success();
+    }
+
+    public DomainResult SetTargetSeedRatio(SeedRatio seedRatio)
+    {
+        TargetSeedRatio = seedRatio;
+        return DomainResult.Success();
+    }
+
+    public DomainResult VerifyAndRecordChunk(
+        ChunkIndex chunkIndex,
+        PlaintextChunkData data,
+        IDateTimeProvider clock)
+    {
+        ArgumentNullException.ThrowIfNull(clock);
+        if (State != TransferSessionState.InFlight)
+            return DomainResult.Failure(new DomainError("Transfer.InvalidState", $"Cannot record chunks in state '{State}'."));
+
+        if (chunkIndex.Value < 0 || chunkIndex.Value >= Manifest.TotalChunks.Count)
+            return DomainResult.Failure(new DomainError("Transfer.InvalidChunkIndex", $"Chunk index {chunkIndex.Value} is out of bounds."));
+
+        ChunkByteLength expectedChunkSize = Manifest.GetExpectedChunkSize(chunkIndex);
+        if (data.Length != expectedChunkSize.Bytes)
+            return DomainResult.Failure(new DomainError("Transfer.MismatchedChunkSize", $"Chunk byte length {data.Length} does not match expected {expectedChunkSize.Bytes}."));
+
+        // Idempotency: if already possessed, succeed without emitting duplicate events
+        if (LocalBitfield.HasChunk(chunkIndex))
+            return DomainResult.Success();
+
+        // Cryptographic leaf verification
+        if (!Manifest.MerkleTree.VerifyLeaf(chunkIndex, data.Span))
+            return DomainResult.Failure(new DomainError("Transfer.CryptographicVerificationFailed", $"Leaf hash verification failed for chunk {chunkIndex.Value}."));
+
+        LocalBitfield = LocalBitfield.WithChunk(chunkIndex);
+        DateTimeOffset now = clock.GetUtcNow();
+
+        AddDomainEvent(new ChunkVerifiedDomainEvent(Id, chunkIndex, Manifest.MerkleTree.GetLeaf(chunkIndex), now));
+
+        // Check if any spanned files completed with this chunk
+        IReadOnlyList<FileChunkSlice> slices = ChunkBoundaryCalculator.CalculateSlices(Manifest, chunkIndex, expectedChunkSize);
+        foreach (FileChunkSlice slice in slices)
+        {
+            FileEntry file = Manifest.Files[slice.FileIndex.Value];
+            if (IsFileComplete(file))
+            {
+                AddDomainEvent(new FileCompletedDomainEvent(Id, file.Index, file.RelativePath, now));
+            }
+        }
+
+        // Evaluate overall download completion
+        if (IsDownloadComplete)
+        {
+            if (TargetSeedRatio.IsZero)
+            {
+                State = TransferSessionState.Completed;
+                CompletedAtUtc = now;
+                AddDomainEvent(new TransferCompletedDomainEvent(Id, Manifest.TotalSize, now));
+            }
+            else
+            {
+                State = TransferSessionState.Seeding;
+                AddDomainEvent(new TransferCompletedDomainEvent(Id, Manifest.TotalSize, now));
+            }
+        }
+
+        return DomainResult.Success();
+    }
+
+    private bool IsFileComplete(FileEntry file)
+    {
+        if (file.FileSize.Bytes == 0) return true;
+        int firstChunk = (int)(file.StartOffset.Offset / Manifest.ChunkSize.Bytes);
+        int lastChunk = (int)((file.EndOffset.Offset - 1) / Manifest.ChunkSize.Bytes);
+
+        for (int c = firstChunk; c <= lastChunk; c++)
+        {
+            if (!LocalBitfield.HasChunk(ChunkIndex.FromInt(c)))
+                return false;
+        }
+        return true;
+    }
+
+    public DomainResult CompleteTransfer(IDateTimeProvider clock)
+    {
+        ArgumentNullException.ThrowIfNull(clock);
+        if (State != TransferSessionState.InFlight && State != TransferSessionState.Seeding)
+            return DomainResult.Failure(new DomainError("Transfer.InvalidState", $"Cannot complete transfer from state '{State}'."));
+
+        State = TransferSessionState.Completed;
+        DateTimeOffset now = clock.GetUtcNow();
+        CompletedAtUtc = now;
+        AddDomainEvent(new TransferCompletedDomainEvent(Id, Manifest.TotalSize, now));
+        return DomainResult.Success();
+    }
+
+    public DomainResult MarkStalled(IDateTimeProvider clock)
+    {
+        ArgumentNullException.ThrowIfNull(clock);
+        if (State != TransferSessionState.InFlight)
+            return DomainResult.Failure(new DomainError("Transfer.InvalidState", $"Cannot mark stalled from state '{State}'."));
+
+        State = TransferSessionState.Stalled;
+        AddDomainEvent(new TransferStalledDomainEvent(Id, clock.GetUtcNow()));
+        return DomainResult.Success();
+    }
+
+    public DomainResult MarkFailed(TransferTerminationReason reason, IDateTimeProvider clock)
+    {
+        ArgumentNullException.ThrowIfNull(clock);
+        if (State == TransferSessionState.Completed || State == TransferSessionState.Cancelled || State == TransferSessionState.Failed)
+            return DomainResult.Failure(new DomainError("Transfer.TerminalState", $"Cannot fail transfer in terminal state '{State}'."));
+
+        State = TransferSessionState.Failed;
+        AddDomainEvent(new TransferFailedDomainEvent(Id, reason, clock.GetUtcNow()));
+        return DomainResult.Success();
+    }
+
+    public DomainResult Pause()
+    {
+        if (State != TransferSessionState.InFlight && State != TransferSessionState.Seeding && State != TransferSessionState.Stalled)
+            return DomainResult.Failure(new DomainError("Transfer.InvalidState", $"Cannot pause transfer in state '{State}'."));
+
+        State = TransferSessionState.Paused;
+        AddDomainEvent(new TransferPausedDomainEvent(Id, DateTimeOffset.UtcNow));
+        return DomainResult.Success();
+    }
+
+    public DomainResult Resume()
+    {
+        if (State != TransferSessionState.Paused)
+            return DomainResult.Failure(new DomainError("Transfer.InvalidState", $"Cannot resume transfer in state '{State}'."));
+
+        State = TransferSessionState.InFlight;
+        AddDomainEvent(new TransferResumedDomainEvent(Id, DateTimeOffset.UtcNow));
+        return DomainResult.Success();
+    }
+
+    public DomainResult Cancel(TransferTerminationReason reason, IDateTimeProvider clock)
+    {
+        ArgumentNullException.ThrowIfNull(clock);
+        if (State == TransferSessionState.Completed || State == TransferSessionState.Cancelled || State == TransferSessionState.Failed)
+            return DomainResult.Failure(new DomainError("Transfer.TerminalState", $"Cannot cancel transfer in terminal state '{State}'."));
+
+        State = TransferSessionState.Cancelled;
+        AddDomainEvent(new TransferCancelledDomainEvent(Id, reason, clock.GetUtcNow()));
+        return DomainResult.Success();
+    }
+
+    public DomainResult ExpireOffer(IDateTimeProvider clock)
+    {
+        ArgumentNullException.ThrowIfNull(clock);
+        if (State != TransferSessionState.PendingConsent)
+            return DomainResult.Failure(new DomainError("Transfer.InvalidState", $"Cannot expire offer in state '{State}'."));
+
+        State = TransferSessionState.Cancelled;
+        AddDomainEvent(new TransferCancelledDomainEvent(Id, TransferTerminationReason.OfferExpired, clock.GetUtcNow()));
+        return DomainResult.Success();
+    }
+
+    // Pure Rehydration Factory (Suppresses Domain Events):
+    public static TransferSession Rehydrate(
+        TransferSessionId id,
+        TransferRole role,
+        TransferSessionState state,
+        TransferTopology topology,
+        TransferManifest manifest,
+        Bitfield localBitfield,
+        SelectedFileIndices? selectedFiles,
+        SeedRatio targetSeedRatio,
+        TotalBundleBytes uploadedBytes,
+        IReadOnlyList<SwarmMember> swarmMembers,
+        DateTimeOffset createdAtUtc,
+        DateTimeOffset? completedAtUtc)
+    {
+        ArgumentNullException.ThrowIfNull(id);
+        ArgumentNullException.ThrowIfNull(topology);
+        ArgumentNullException.ThrowIfNull(manifest);
+        ArgumentNullException.ThrowIfNull(localBitfield);
+
+        if (localBitfield.TotalChunks != manifest.TotalChunks)
+            throw new DomainValidationException("Rehydrated bitfield chunk count does not match manifest.");
+
+        TransferSession session = new(
+            id,
+            role,
+            state,
+            topology,
+            manifest,
+            localBitfield,
+            selectedFiles,
+            targetSeedRatio,
+            uploadedBytes,
+            createdAtUtc,
+            completedAtUtc);
+
+        if (swarmMembers != null)
+        {
+            foreach (SwarmMember member in swarmMembers)
+            {
+                session._swarmMembers[member.PeerId] = member;
+            }
+        }
+
+        return session;
+    }
 }
 ```
 
 ### 2.1.1 Formal Lifecycle State Transition Matrix
-
-The table below codifies the exact state machine invariants enforced by `TransferSession`. Any mutation attempted from an invalid state returns `DomainResult.Failure` or throws `DomainValidationException`:
 
 | Current State | Triggering Domain Method | Next State | Guard Conditions & Observable Invariants |
 | :--- | :--- | :--- | :--- |
@@ -230,7 +748,7 @@ public sealed class SwarmMember : IEntity<PublicIdentityId>
 
     public SwarmPeerRole Role => Bitfield.IsComplete ? SwarmPeerRole.Seeder : SwarmPeerRole.Leecher;
 
-    internal SwarmMember(
+    public SwarmMember(
         PublicIdentityId peerId,
         Bitfield bitfield)
     {
@@ -242,14 +760,14 @@ public sealed class SwarmMember : IEntity<PublicIdentityId>
         WeInterestedInPeer = PeerInterestStatus.NotInterested;
     }
 
-    internal void UpdateBitfield(Bitfield bitfield) => Bitfield = bitfield;
-    internal void RecordHave(ChunkIndex chunkIndex) => Bitfield = Bitfield.WithChunk(chunkIndex);
+    public void UpdateBitfield(Bitfield bitfield) => Bitfield = bitfield;
+    public void RecordHave(ChunkIndex chunkIndex) => Bitfield = Bitfield.WithChunk(chunkIndex);
     
     // Directional flow control setters:
-    internal void SetPeerChokingUs(PeerChokeStatus status) => PeerChokingUs = status;
-    internal void SetWeChokingPeer(PeerChokeStatus status) => WeChokingPeer = status;
-    internal void SetPeerInterestedInUs(PeerInterestStatus status) => PeerInterestedInUs = status;
-    internal void SetWeInterestedInPeer(PeerInterestStatus status) => WeInterestedInPeer = status;
+    public void SetPeerChokingUs(PeerChokeStatus status) => PeerChokingUs = status;
+    public void SetWeChokingPeer(PeerChokeStatus status) => WeChokingPeer = status;
+    public void SetPeerInterestedInUs(PeerInterestStatus status) => PeerInterestedInUs = status;
+    public void SetWeInterestedInPeer(PeerInterestStatus status) => WeInterestedInPeer = status;
 }
 ```
 
@@ -417,7 +935,7 @@ public sealed class TransferManifest : IEntity<TransferSessionId>
 
 ---
 
-## 3. Strongly Typed Value Objects Catalog
+## 3. Strongly Typed Value Objects Catalog & Concrete Specifications
 
 All domain concepts in `FileTransfer.Domain` are modeled as strongly typed Value Objects with **zero implicit/explicit cast operators**, explicit factory methods, and named property accessors.
 
@@ -434,10 +952,10 @@ All domain concepts in `FileTransfer.Domain` are modeled as strongly typed Value
 | **`MerkleRoot`** | `[ByteArray(length: 32)]` | 32-byte cryptographic SHA-256 Merkle root | Explicit `FromBytes(...)`, `FromSpan(...)`, `.Span`. Zero cast operators. |
 | **`ChunkHash`** | `[ByteArray(length: 32)]` | 32-byte SHA-256 leaf hash | Explicit `FromBytes(...)`, `FromSpan(...)`, `.Span`. Zero cast operators. |
 | **`TransferBundleSummary`** | `sealed record` | Cohesive bundle metadata (title, size, files, chunks, Merkle root) | Explicit `Create(...)`, `.RootName`, `.TotalSize`, `.TotalFiles`, `.ChunkSizeBytes`, `.TotalChunks`, `.MerkleRoot`. Zero cast operators. |
-| **`TransferTopology`** | `sealed record` | Discriminated union of participant topology: OneToOne, MultiPeer, Incoming. Exposes pure participant query: `.ContainsParticipant(PublicIdentityId)`. Zero cast operators. |
+| **`TransferTopology`** | `abstract record` | Discriminated union of participant topology: `OneToOne`, `MultiPeer`, `IncomingStaged`. Gated member query: `.ContainsParticipant(PublicIdentityId)`. | Explicit instantiation, zero cast operators. |
 | **`RootBundleName`** | `sealed record` | Sanitized display title for transfer root ($1 \le \text{Length} \le 255$) | Explicit `Parse(string)`, `.Value`. Zero cast operators. |
 | **`TransferTerminationReason`**| `sealed record` | Reason for transfer rejection, cancellation, or failure | Explicit `UserDeclined`, `SenderCancelled`, `StorageExhausted`, `VerificationFailed`, `Timeout`, `OfferExpired`, `FromText(string)`, `.Value`. Zero cast operators. |
-| **`SanitizedRelativePath`** | `sealed record` | Relative file path verified against directory traversal and recursion depth. Enforces max total length 1,024 bytes, max segment length 255 bytes, and max depth of 32 segments. Rejects empty/whitespace paths, leading/trailing separators, root/drive prefixes (`C:`), parent traversal (`..`), and current directory segments (`.`). Normalizes separators to canonical `/`. | Explicit `Parse(string)`, `.Value`. Zero cast operators. |
+| **`SanitizedRelativePath`** | `sealed record` | Relative file path verified against directory traversal and recursion depth. Max total length 1,024 bytes, max segment length 255 bytes, max depth of 32 segments. Normalizes separators to canonical `/`. | Explicit `Parse(string)`, `.Value`. Zero cast operators. |
 | **`FileChunkSlice`** | `sealed record` | Pure domain calculation mapping chunk byte slice to target file | Explicit `Create(...)`, `.FileIndex`, `.RelativePath`, `.OffsetInFile`, `.SliceLength`, `.BufferOffset`. Zero cast operators. |
 | **`FileLastModifiedUtc`** | `readonly record struct` | Validated file modification timestamp ($0 \le \text{epoch} \le \text{future buffer}$) | Explicit `FromDateTimeOffset(DateTimeOffset)`, `FromUnixSeconds(long)`, `.UtcDateTime`, `.UnixSeconds`. Zero cast operators. |
 | **`FileIndex`** | `readonly record struct` | Zero-indexed file sequence in manifest: $0 \le \text{Value} < \text{TotalFiles}$ | Explicit `FromInt(int)`, `.Value`. Zero cast operators. |
@@ -460,7 +978,150 @@ All domain concepts in `FileTransfer.Domain` are modeled as strongly typed Value
 
 ---
 
-### 3.1 Detailed Specification: `Bitfield` Value Object
+### 3.1 `DomainValidationException` Specification
+
+```csharp
+namespace Percolator.Apps.FileTransfer.Domain.Exceptions;
+
+public sealed class DomainValidationException : Exception
+{
+    public DomainValidationException(string message) : base(message)
+    {
+    }
+
+    public DomainValidationException(string message, Exception innerException) : base(message, innerException)
+    {
+    }
+}
+```
+
+---
+
+### 3.2 `TransferTopology` Specification
+
+```csharp
+namespace Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
+
+public abstract record TransferTopology
+{
+    public PublicIdentityId InitiatorId { get; }
+
+    protected TransferTopology(PublicIdentityId initiatorId)
+    {
+        InitiatorId = initiatorId;
+    }
+
+    public abstract bool ContainsParticipant(PublicIdentityId peerId);
+
+    public sealed record OneToOne : TransferTopology
+    {
+        public PublicIdentityId RecipientId { get; }
+
+        public OneToOne(PublicIdentityId initiatorId, PublicIdentityId recipientId) 
+            : base(initiatorId)
+        {
+            RecipientId = recipientId;
+        }
+
+        public override bool ContainsParticipant(PublicIdentityId peerId) =>
+            peerId == InitiatorId || peerId == RecipientId;
+    }
+
+    public sealed record MultiPeer : TransferTopology
+    {
+        public IReadOnlyList<PublicIdentityId> Recipients { get; }
+
+        public MultiPeer(PublicIdentityId initiatorId, IReadOnlyList<PublicIdentityId> recipients) 
+            : base(initiatorId)
+        {
+            Recipients = recipients;
+        }
+
+        public override bool ContainsParticipant(PublicIdentityId peerId)
+        {
+            if (peerId == InitiatorId) return true;
+            for (int i = 0; i < Recipients.Count; i++)
+            {
+                if (Recipients[i] == peerId) return true;
+            }
+            return false;
+        }
+    }
+
+    public sealed record IncomingStaged : TransferTopology
+    {
+        public IncomingStaged(PublicIdentityId initiatorId) 
+            : base(initiatorId)
+        {
+        }
+
+        public override bool ContainsParticipant(PublicIdentityId peerId) =>
+            peerId == InitiatorId;
+    }
+}
+```
+
+---
+
+### 3.3 `SelectedFileIndices` Specification
+
+```csharp
+namespace Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
+
+public sealed record SelectedFileIndices
+{
+    private readonly HashSet<FileIndex> _indices;
+    public IReadOnlySet<FileIndex> Indices => _indices;
+    public int SelectedCount => _indices.Count;
+
+    private SelectedFileIndices(HashSet<FileIndex> indices)
+    {
+        _indices = indices;
+    }
+
+    public bool Contains(FileIndex index) => _indices.Contains(index);
+
+    public static SelectedFileIndices All(FileCount fileCount)
+    {
+        if (fileCount.Count <= 0)
+            throw new DomainValidationException("FileCount must be greater than zero.");
+
+        HashSet<FileIndex> set = new(fileCount.Count);
+        for (int i = 0; i < fileCount.Count; i++)
+        {
+            set.Add(FileIndex.FromInt(i));
+        }
+        return new SelectedFileIndices(set);
+    }
+
+    public static SelectedFileIndices FromIndices(IEnumerable<FileIndex> indices, FileCount fileCount)
+    {
+        ArgumentNullException.ThrowIfNull(indices);
+        HashSet<FileIndex> set = [];
+
+        foreach (FileIndex index in indices)
+        {
+            if (index.Value < 0 || index.Value >= fileCount.Count)
+            {
+                throw new DomainValidationException(
+                    $"Selected file index {index.Value} is out of bounds for bundle containing {fileCount.Count} files.");
+            }
+            set.Add(index);
+        }
+
+        if (set.Count == 0)
+        {
+            throw new DomainValidationException("Selected file set must contain at least one file entry.");
+        }
+
+        return new SelectedFileIndices(set);
+    }
+}
+```
+
+---
+
+### 3.4 Detailed Specification: `Bitfield` Value Object
 
 ```csharp
 namespace Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
@@ -593,6 +1254,100 @@ public sealed record Bitfield
         int count = 0;
         foreach (byte b in bytes) count += System.Numerics.BitOperations.PopCount(b);
         return count;
+    }
+}
+```
+
+---
+
+### 3.5 Value Object Arithmetic Helper Methods & Parsing Specifications
+
+```csharp
+// BundleByteOffset & FileByteOffset conversions
+public readonly record struct BundleByteOffset(long Offset)
+{
+    public static BundleByteOffset Zero => new(0);
+    public static BundleByteOffset FromOffset(long offset) =>
+        offset >= 0 ? new(offset) : throw new DomainValidationException("Bundle offset cannot be negative.");
+
+    public static BundleByteOffset FromChunk(ChunkIndex chunk, ChunkSizeBytes chunkSize) =>
+        new((long)chunk.Value * chunkSize.Bytes);
+
+    public BundleByteOffset Add(FileSizeBytes size) => new(Offset + size.Bytes);
+    public BundleByteOffset Add(TransferByteLength length) => new(Offset + length.Bytes);
+    public FileByteOffset SubtractToFileOffset(BundleByteOffset other) =>
+        FileByteOffset.FromOffset(Offset - other.Offset);
+}
+
+// FileSizeBytes remaining slice calculation
+public readonly record struct FileSizeBytes(long Bytes)
+{
+    public static FileSizeBytes FromBytes(long bytes) =>
+        bytes >= 0 ? new(bytes) : throw new DomainValidationException("File size cannot be negative.");
+
+    public TransferByteLength RemainingSlice(FileByteOffset offsetInFile, ChunkByteLength remainingChunkBytes)
+    {
+        long remainingInFile = Bytes - offsetInFile.Offset;
+        int sliceLength = (int)Math.Min(remainingInFile, (long)remainingChunkBytes.Bytes);
+        return TransferByteLength.FromBytes(sliceLength);
+    }
+}
+
+// SanitizedRelativePath: strictly canonical, traversal-safe path
+public sealed record SanitizedRelativePath
+{
+    public string Value { get; }
+
+    private SanitizedRelativePath(string value) => Value = value;
+
+    public static SanitizedRelativePath Parse(string rawPath)
+    {
+        if (string.IsNullOrWhiteSpace(rawPath))
+            throw new DomainValidationException("Relative path cannot be null or whitespace.");
+
+        string normalized = rawPath.Replace('\\', '/');
+
+        if (normalized.StartsWith('/') || (normalized.Length >= 2 && normalized[1] == ':'))
+            throw new DomainValidationException($"Path '{rawPath}' is absolute, which is strictly prohibited.");
+
+        string[] segments = normalized.Split('/', StringSplitOptions.None);
+        if (segments.Length > 32)
+            throw new DomainValidationException($"Path '{rawPath}' exceeds maximum depth of 32 segments.");
+
+        if (System.Text.Encoding.UTF8.GetByteCount(normalized) > 1024)
+            throw new DomainValidationException($"Path '{rawPath}' exceeds maximum byte length of 1,024 bytes.");
+
+        for (int i = 0; i < segments.Length; i++)
+        {
+            string seg = segments[i];
+            if (string.IsNullOrEmpty(seg) || seg == "." || seg == "..")
+                throw new DomainValidationException($"Path '{rawPath}' contains invalid or traversal segment '{seg}'.");
+
+            if (System.Text.Encoding.UTF8.GetByteCount(seg) > 255)
+                throw new DomainValidationException($"Segment '{seg}' exceeds maximum byte length of 255 bytes.");
+        }
+
+        return new SanitizedRelativePath(normalized);
+    }
+}
+
+// RootBundleName: sanitized bundle title
+public sealed record RootBundleName
+{
+    public string Value { get; }
+
+    private RootBundleName(string value) => Value = value;
+
+    public static RootBundleName Parse(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            throw new DomainValidationException("Root bundle name cannot be null or whitespace.");
+
+        string trimmed = value.Trim();
+        if (trimmed.Length > 255)
+            throw new DomainValidationException("Root bundle name cannot exceed 255 characters.");
+
+        return new RootBundleName(trimmed);
     }
 }
 ```
@@ -793,12 +1548,123 @@ public static class ChunkBoundaryCalculator
 }
 ```
 
-### 5.2 Merkle Tree Index Verification & Odd-Node Promotion
+---
+
+### 5.2 Merkle Tree Index Verification & Odd-Node Promotion (`MerkleTreeIndex` & `MerkleTreeBuilder`)
+
 To eliminate Merkle tree malleability (CVE-2012-2459) while guaranteeing root hash determinism:
 - **Leaf hashing**: $H_{\text{leaf}}(i) = \text{SHA-256}(0x00 \parallel \text{PlaintextChunk}_i)$
 - **Interior node hashing**: $H_{\text{interior}}(\text{Left}, \text{Right}) = \text{SHA-256}(0x01 \parallel \text{Left} \parallel \text{Right})$
 - **Odd-Node Promotion Rule**: When a level in the Merkle tree has an odd number of nodes, the final unpaired node is promoted directly to the next level **without duplicate hashing** ($H(N, N)$ is strictly prohibited).
-- Encapsulated inside `MerkleTreeIndex.VerifyLeaf(ChunkIndex index, ReadOnlySpan<byte> plaintextChunk)`.
+
+```csharp
+namespace Percolator.Apps.FileTransfer.Domain.ManifestManagement;
+
+public sealed record MerkleTreeIndex
+{
+    public MerkleRoot Root { get; }
+    public IReadOnlyList<ChunkHash> Leaves { get; }
+    public int LeafCount => Leaves.Count;
+
+    private MerkleTreeIndex(MerkleRoot root, IReadOnlyList<ChunkHash> leaves)
+    {
+        Root = root;
+        Leaves = leaves;
+    }
+
+    public static MerkleTreeIndex Create(MerkleRoot root, IReadOnlyList<ChunkHash> leaves)
+    {
+        ArgumentNullException.ThrowIfNull(root);
+        ArgumentNullException.ThrowIfNull(leaves);
+        if (leaves.Count == 0)
+            throw new DomainValidationException("Merkle tree leaves cannot be empty.");
+
+        return new MerkleTreeIndex(root, leaves);
+    }
+
+    public ChunkHash GetLeaf(ChunkIndex index)
+    {
+        if (index.Value < 0 || index.Value >= Leaves.Count)
+            throw new DomainValidationException($"Chunk index {index.Value} is out of bounds for leaf count {Leaves.Count}.");
+
+        return Leaves[index.Value];
+    }
+
+    public bool VerifyLeaf(ChunkIndex index, ReadOnlySpan<byte> plaintextChunk)
+    {
+        if (index.Value < 0 || index.Value >= Leaves.Count) return false;
+
+        ChunkHash computed = MerkleTreeBuilder.HashLeaf(plaintextChunk);
+        return computed.Span.SequenceEqual(Leaves[index.Value].Span);
+    }
+}
+
+public static class MerkleTreeBuilder
+{
+    public static ChunkHash HashLeaf(ReadOnlySpan<byte> plaintextChunk)
+    {
+        byte[] buffer = new byte[1 + plaintextChunk.Length];
+        buffer[0] = 0x00; // Leaf domain separation prefix
+        plaintextChunk.CopyTo(buffer.AsSpan(1));
+
+        byte[] hash = System.Security.Cryptography.SHA256.HashData(buffer);
+        return ChunkHash.FromBytes(hash);
+    }
+
+    public static byte[] HashInterior(ReadOnlySpan<byte> left, ReadOnlySpan<byte> right)
+    {
+        byte[] buffer = new byte[1 + left.Length + right.Length];
+        buffer[0] = 0x01; // Interior domain separation prefix
+        left.CopyTo(buffer.AsSpan(1));
+        right.CopyTo(buffer.AsSpan(1 + left.Length));
+
+        return System.Security.Cryptography.SHA256.HashData(buffer);
+    }
+
+    public static MerkleTreeIndex BuildFromLeaves(IReadOnlyList<ChunkHash> leaves)
+    {
+        if (leaves == null || leaves.Count == 0)
+            throw new DomainValidationException("Cannot build Merkle tree from empty leaf collection.");
+
+        if (leaves.Count == 1)
+        {
+            MerkleRoot singleRoot = MerkleRoot.FromBytes(leaves[0].Span.ToArray());
+            return MerkleTreeIndex.Create(singleRoot, leaves);
+        }
+
+        List<byte[]> currentLevel = new(leaves.Count);
+        for (int i = 0; i < leaves.Count; i++)
+        {
+            currentLevel.Add(leaves[i].Span.ToArray());
+        }
+
+        while (currentLevel.Count > 1)
+        {
+            int nextLevelCount = (currentLevel.Count + 1) / 2;
+            List<byte[]> nextLevel = new(nextLevelCount);
+
+            for (int i = 0; i < currentLevel.Count; i += 2)
+            {
+                if (i + 1 < currentLevel.Count)
+                {
+                    byte[] parent = HashInterior(currentLevel[i], currentLevel[i + 1]);
+                    nextLevel.Add(parent);
+                }
+                else
+                {
+                    // Odd-node promotion rule: promote unpaired node directly without duplicate hashing
+                    nextLevel.Add(currentLevel[i]);
+                }
+            }
+
+            currentLevel = nextLevel;
+        }
+
+        MerkleRoot root = MerkleRoot.FromBytes(currentLevel[0]);
+        return MerkleTreeIndex.Create(root, leaves);
+    }
+}
+```
 
 ---
 
@@ -817,10 +1683,6 @@ The pure domain kernel enforces mathematical, cryptographic, and structural defe
 | **Logical Relative Path Recursion** | `SanitizedRelativePath.Parse` rejects absolute paths, drive roots (`C:`), parent traversal (`..`), current directory (`.`), and caps depth at 32 segments and length at 1,024 bytes. | Malicious paths throw `DomainValidationException`. |
 | **Lifecycle Precondition Violations** | Formal State Transition Matrix (§2.1.1) gates all aggregate mutations. Terminal states (`Completed`, `Cancelled`, `Failed`) reject any further transitions. | Aggregate rejects out-of-order mutations across all invalid states. |
 | **Seeding Ratio Tampering** | `SeedRatio` validates against negative numbers, NaN, and Infinity. Aggregate automatically signals completion when `CurrentSeedRatio >= TargetSeedRatio`. | Invalid multipliers throw `DomainValidationException`; completion triggers on target ratio. |
-
----
-
----
 
 ---
 
@@ -910,8 +1772,6 @@ In alignment with the Percolator domain testing standards, unit tests within `Pe
 
 ---
 
----
-
 ## 8. Domain Persistence Independence & Boundary Encapsulation (Lens 5)
 
 In strict adherence to Onion Architecture, `Percolator.Apps.FileTransfer.Domain` remains **100% database-agnostic and infrastructure-ignorant**. The domain contains zero references to SQLite, SQL data types, relational schemas, ORM attributes, or wire serialization formats.
@@ -951,17 +1811,20 @@ In strict adherence to Onion Architecture, `Percolator.Apps.FileTransfer.Domain`
 
 ### Milestone 1: Standalone Domain Project, Primitives & Roslyn Integration
 1. Create standalone project `Percolator.Apps.FileTransfer.Domain.csproj` targeting `net10.0` referencing `Percolator.Domain.Kernel` and `Percolator.SourceGenerators` (Analyzer).
-2. Verify zero project references to `Percolator.Domain` or external network/storage packages.
-3. Generate and implement all Domain Value Objects:
-   - `TransferSessionId`, `MerkleRoot`, `ChunkHash`, `TransferBundleSummary`, `TransferTopology`, `RootBundleName`, `SanitizedRelativePath`, `TransferTerminationReason`.
-   - Records & Structs: `FileChunkSlice`, `FileLastModifiedUtc`, `FileIndex`, `ChunkIndex`, `ChunkSizeBytes`, `TotalBundleBytes`, `FileSizeBytes`, `BundleByteOffset`, `FileByteOffset`, `FileCount`, `ChunkCount`, `PeerCount`, `TransferByteLength`, `ChunkByteLength`, `PlaintextChunkData`, `SeedRatio`, `Bitfield` (with PopCount & bitwise set operations), `MerkleTreeIndex`, `SelectedFileIndices`.
-4. Implement Domain Enums: `TransferRole`, `TransferSessionState`, `SwarmPeerRole`, `PeerChokeStatus`, `PeerInterestStatus`.
-5. Strictly verify **zero implicit/explicit cast operators** across all Value Objects.
+2. Register project in `Percolator.sln` under `01 - Domain`.
+3. Update `Percolator.Apps.FileTransfer.csproj` to reference `Percolator.Apps.FileTransfer.Domain.csproj` and remove `Percolator.Domain.csproj`.
+4. Implement `DomainValidationException` in `Percolator.Apps.FileTransfer.Domain.Exceptions`.
+5. Implement all Domain Value Objects:
+   - `TransferSessionId`, `MerkleRoot`, `ChunkHash`, `TransferBundleSummary`, `RootBundleName`, `SanitizedRelativePath`, `TransferTerminationReason`.
+   - Records & Structs: `FileChunkSlice`, `FileLastModifiedUtc`, `FileIndex`, `ChunkIndex`, `ChunkSizeBytes`, `TotalBundleBytes`, `FileSizeBytes`, `BundleByteOffset`, `FileByteOffset`, `FileCount`, `ChunkCount`, `PeerCount`, `TransferByteLength`, `ChunkByteLength`, `PlaintextChunkData`, `SeedRatio`.
+   - `Bitfield` (with Big-Endian bit ordering, PopCount & bitwise set operations), `TransferTopology` (discriminated union: `OneToOne`, `MultiPeer`, `IncomingStaged`), `SelectedFileIndices`.
+6. Implement Domain Enums: `TransferRole`, `TransferSessionState`, `SwarmPeerRole`, `PeerChokeStatus`, `PeerInterestStatus`.
+7. Strictly verify **zero implicit/explicit cast operators** across all Value Objects.
 
 ### Milestone 2: Domain Entities & Aggregate Roots
-1. Implement `TransferManifest : IEntity<TransferSessionId>` and `FileEntry : IEntity<FileIndex>` with strict count and size validation, `GetExpectedChunkSize`, and `GetRequiredChunks`.
+1. Implement `TransferManifest : IEntity<TransferSessionId>` and `FileEntry : IEntity<FileIndex>` with strict count and contiguous offset validation, `GetExpectedChunkSize`, and `GetRequiredChunks`.
 2. Implement `SwarmMember : IEntity<PublicIdentityId>` with piece possession `Bitfield` and bidirectional flow control methods (zero transport liveness or socket candidates).
 3. Implement `TransferSession : AggregateRoot<TransferSessionId>` with invariant factories (`CreateOutgoing1to1`, `CreateOutgoingMultiPeer`, `CreateIncomingStaged`), formal state transition matrix, seeding ratio tracking, selective download completion evaluation, exact chunk verification with odd-node Merkle promotion, and file completion detection.
 4. Implement all 12 pure `IDomainEvent` records with `EventId` and `OccurredOnUtc`.
 5. Implement `MerkleTreeIndex`, `MerkleTreeBuilder` (with odd-node promotion rule), and pure `ChunkBoundaryCalculator`.
-6. Implement pure domain unit tests covering the Domain Unit Testing Matrix.
+6. Implement pure domain unit tests covering the Domain Unit Testing Matrix (DT-LIF, DT-MAN, DT-BIT, DT-MRK, DT-SWM).
