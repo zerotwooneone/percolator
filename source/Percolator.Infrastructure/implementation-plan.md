@@ -1,4 +1,4 @@
-﻿# Percolator.Infrastructure2 Implementation Plan
+﻿﻿# Percolator.Infrastructure2 Implementation Plan
 
 ## 1. Overview & Architectural Role
 
@@ -520,13 +520,13 @@ Concrete realization of out-of-band high-speed croc-inspired and BitTorrent swar
 #### 1. Multi-Stream Sockets & Binary Framing Engine
 - **`TcpMultiStreamPool` & `TransferStream`** (`ITransferStreamPool`, `ITransferStreamPoolFactory`, `ITransferStream`):
   - Opens and manages a pool of 4 to 8 parallel multiplexed TCP/QUIC connections with `TCP_NODELAY = true`.
-  - Implements the binary length-prefixed framing wire protocol using `StreamAuthToken`, `BaseNonce`, and `TransferKey`:
-    - `0x01 STREAM_HANDSHAKE`: Handshake with `SessionId`, `StreamIndex`, and `StreamAuthToken`.
+  - Implements the binary length-prefixed framing wire protocol using `StreamAuthToken`, `BaseNonce`, `ChunkNonce`, and `TransferKey`:
+    - `0x01 STREAM_HANDSHAKE`: Handshake with `SessionId`, `StreamIndex`, `StreamAuthToken`, and `SenderPeerId`.
     - `0x02 BITFIELD`: Bitfield declaration of possessed chunks.
     - `0x03 HAVE`: Chunk verification announcement.
-    - `0x04 REQUEST_CHUNK` & `0x05 CHUNK_DATA`: 1 MB chunk streaming with AES-256-GCM authentication tags using `BaseNonce` and `TransferKey`.
+    - `0x04 REQUEST_CHUNK` & `0x05 CHUNK_DATA`: 1 MB chunk streaming with AES-256-GCM authenticated encryption/decryption using `AesGcm` and deterministic 12-byte `ChunkNonce` derived as $\text{BaseNonce} \oplus \text{BigEndianUInt96}(i)$.
     - `0x06 CANCEL_CHUNK`: Endgame chunk cancellation.
-    - `0x07 CHOKE` / `0x08 UNCHOKE`: Transport backpressure signaling.
+    - `0x07 CHOKE` / `0x08 UNCHOKE`: Transport backpressure signaling and request queue bounding (`MaxPendingRequestsPerPeer = 32`).
     - `0x09 KEEP_ALIVE`: Liveness ping frames.
     - `0x0A PEX_PEERS`: Out-of-band peer exchange gossip frames.
   - Work-stealing scheduler: Detects stalled streams and redistributes in-flight chunk requests to faster streams in the pool.
@@ -536,6 +536,7 @@ Concrete realization of out-of-band high-speed croc-inspired and BitTorrent swar
   - Connects 4 to 8 parallel streams to the channel's designated relay endpoint: `POST /transfer-pipes/{sessionId}` (or WebSocket `GET /transfer-pipes/{sessionId}/ws`) using `RelayPipeEndpointUri` and `RelayPipeToken`.
   - Presents `PipeAuthToken = HMAC-SHA256(K_transfer, "relay-pipe-rendezvous")` in HTTP headers (`X-Pipe-Auth`).
   - Operates as a transparent binary stream pipe to the paired peer.
+  - **Remote Manifest Blob Streaming Guard (Lens 3)**: When downloading out-of-band manifests via `ManifestBlobDescriptor`, wraps response stream in a counting bounded stream that strictly aborts transfer and closes the connection if payload size exceeds 8 MB (`MaxRemoteManifestBlobBytes = 8_388_608`), defending against unbounded memory inflation.
 - **Relay Server Pipe Service (Relay-Side Execution)**:
   - Pairs incoming sender and receiver streams by `(SessionId, StreamIndex)`.
   - Executes zero-copy bidirectional socket splicing (`System.IO.Pipelines` or `PipeReader.CopyToAsync`).
@@ -551,9 +552,11 @@ Concrete realization of out-of-band high-speed croc-inspired and BitTorrent swar
   - Sends out-of-band HTTP `POST /swarms/{blindSwarmId}/announce` to channel relay.
   - Blind identifier: $\text{BlindSwarmId} = \text{HMAC-SHA256}(K_{\text{transfer}}, \text{"swarm-rendezvous"})$ (`SwarmRendezvousId`).
   - Receives list of active `DirectEndpointCandidate` records for the swarm without touching in-band ratchet channels.
+  - **Proactive Unregistration (`IDistributedTrackerPort.UnregisterAsync`)**: Dispatches HTTP `DELETE /swarms/{blindSwarmId}/candidates?peerId={memberId}` with `X-Swarm-Auth` header upon session completion or cancellation, immediately purging endpoint records.
 - **Relay Server Swarm Tracker Endpoint (Relay-Side Execution)**:
   - In-memory thread-safe dictionary: `ConcurrentDictionary<byte[], SwarmPeerRegistry>`.
   - Ephemeral 90-second sliding expiration. Entries purged if heartbeat stops.
+  - Candidate deletion handler: `DELETE /swarms/{blindSwarmId}/candidates` removes matching peer entries immediately upon client departure.
   - Zero disk storage; zero awareness of channel identity or file contents.
   - Opt-in enforcement: If `SupportsSwarmTracker = false`, returns HTTP 501 Not Implemented, causing clients to fall back strictly to out-of-band PEX.
 
@@ -597,8 +600,7 @@ Concrete realization of out-of-band high-speed croc-inspired and BitTorrent swar
 - **`SqliteTransferSessionRepository`** (`ITransferSessionRepository`):
   - `ft_transfer_sessions`: Stores session state, role, initiator identity, participant topology JSON, root title, total bytes, chunk size, total chunks, target seed ratio, uploaded bytes, Merkle root BLOB, local destination path (`RootDirectoryPath`), AES session key (`TransferKey` encrypted under local master key), base nonce (`BaseNonce`), stream auth token (`StreamAuthToken`), relay URI, created/completed timestamps.
   - `ft_manifest_files`: Stores file index, sanitized relative path, file size in bytes, start offset, end offset, and sanitized last modified timestamp. Keyed by `(session_id, file_index)`.
-  - `ft_session_bitfields`: Stores binary chunk bitfield BLOB representing local piece possession state for active downloads. Keyed by `session_id`.
-  - `ft_swarm_endpoints`: Stores discovered direct connection candidates (`session_id`, `peer_identity_id`, `host`, `port`, `candidate_kind`, `routing_preference`, `last_seen_utc`) for fast-resume without polluting the domain model with socket addresses.
+  - `ft_session_bitfields`: Stores binary chunk bitfield BLOB representing local piece possession state for active downloads. Keyed by `session_id`.\n  - `ft_swarm_endpoints`: Stores discovered direct connection candidates (`session_id`, `peer_identity_id`, `host`, `port`, `candidate_kind`, `routing_preference`, `last_seen_utc`) for fast-resume without polluting the domain model with socket addresses.
 - **`SqliteFilterPolicyRepository`** (`IFileTransferFilterPolicyRepository`):
   - `ft_filter_policies`: Stores owner identity ID and policy updated timestamp.
   - `ft_blocked_peers`: Stores blocked peer identities (`owner_identity_id`, `blocked_peer_identity_id`, `created_at_utc`).

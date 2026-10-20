@@ -3,7 +3,7 @@
 ## Refinement Status Gate
 - [x] Lens 1: Scope & Feature Slice Framing (Status: Approved)
 - [x] Lens 2: Onion Architecture & Primitive Obsession (Status: Approved)
-- [ ] Lens 3: Threat Modeling & Security Posture (Status: In Progress)
+- [x] Lens 3: Threat Modeling & Security Posture (Status: Approved)
 - [ ] Lens 4: High-Value, Low-Brittle Unit Test Design (Status: Pending)
 - [ ] Lens 5: Cross-Layer Infrastructure Alignment (Status: Pending)
 - [ ] Implementation Gate: LOCKED (Requires Approval of Lenses 1-5)
@@ -17,12 +17,25 @@
 - **Core Inspiration**: **croc** (multi-stream parallel socket saturation, direct P2P with relay pipe fallback, directory tree bundling, chunked streaming, bitfield-based resumption) combined with **BitTorrent swarm piece sharing, peer tracking, and selective downloads**.
 - **Dependencies**: Depends on `Percolator.Domain`, `Percolator.Apps.FileTransfer.Domain`, `Percolator.PluginSdk`, and `Percolator.SourceGenerators`. Zero reference to concrete transport, storage, or SQLite implementations.
 
-### 1.1 Inherent Swarm & Direct P2P Privacy Posture (Intentional Design)
-Unlike Percolator's core Double Ratchet messaging—which enforces continuous per-message forward secrecy and shields IP addresses behind sovereign relay mailboxes—the FileTransfer app is intentionally designed with BitTorrent-grade multi-peer performance tradeoffs:
-1. **Direct IP Exposure**: Direct socket saturation and multi-peer piece sharing require establishing direct TCP/QUIC socket connections between peers. In doing so, peers inherently expose their physical IPv4/IPv6 addresses, network NAT topologies, and ISP locations to each other. Unlike public BitTorrent swarms that reveal IPs to the open internet, Percolator restricts this exposure strictly to invited contacts (`TargetRecipients`).
-2. **Static Symmetric Session Key**: To eliminate re-ratcheting overhead on millions of continuous bulk chunks, all chunks in a transfer session are encrypted with a single static symmetric AES-256 key ($K_{\text{transfer}}$). Forward secrecy and break-in recovery are intentionally lost at the bulk streaming layer; compromise of this session key decrypts all chunks for that session.
-3. **Chunk Possession & Activity Leakage**: BitTorrent swarming relies on high-frequency possession broadcasts (`HAVE` and `BITFIELD` frames). Peers actively reveal which chunks they possess, which pieces they are requesting, and their real-time download progress to all other connected peers.
-4. **UI Presentation Responsibility**: These tradeoffs are explicit architectural choices for gigabit throughput parity with croc and BitTorrent. The Presentation layer (UI) bears the explicit responsibility of warning users before initiating or accepting direct WAN/P2P transfers, listing the participating contacts (`PublicIdentityId`) whose IP addresses will be revealed.
+### 1.1 Inherent Swarm & Three-Tier Privacy Ladder (Intentional Design)
+
+Unlike Percolator's core Double Ratchet messaging—which enforces continuous per-message forward secrecy and shields IP addresses behind sovereign relay mailboxes—the FileTransfer app balances multi-stream throughput with a **strict three-tier privacy ladder**:
+
+1. **Tier 1: Default WAN Mode (Blind Relay Pipes) — ZERO IP Exposure**:
+   - By default (`DirectWanPolicy.DisabledByDefault`), all internet/WAN transfers route exclusively through blind relay pipes (`POST /transfer-pipes/{sessionId}`).
+   - The relay operates as an oblivious memory-buffered socket splicer; it cannot see file contents ($K_{\text{transfer}}$ encryption) and peers **never learn each other's physical IP addresses, ISP locations, or NAT topologies**.
+2. **Tier 2: Direct LAN Mode — Local Subnet IP Only**:
+   - When peers are detected on the same local subnet (e.g., home or office network), direct sockets connect over private RFC 1918 addresses (`192.168.x.x`, `10.x.x.x`).
+   - Only local intranet addresses are exchanged; physical public WAN IP addresses are never exposed to the wider internet.
+3. **Tier 3: Direct WAN Swarm (Explicit User Opt-In Only) — Public IP Exposure**:
+   - Enabled **strictly** when the user explicitly grants permission (`DirectWanPolicy.ExplicitlyAllowed`).
+   - Direct socket saturation and multi-peer piece sharing establish direct internet TCP/QUIC connections across WAN UPnP or STUN endpoints, exposing public IPv4/IPv6 addresses **exclusively to invited contacts (`TargetRecipients`)**, never to public open swarms.
+   - **UI Presentation Responsibility**: The Presentation layer (UI) bears the explicit responsibility of warning users before initiating or accepting direct WAN transfers, displaying the participating contacts (`PublicIdentityId`) whose IP addresses will be revealed.
+
+#### Cryptographic & Activity Privacy Invariants:
+1. **Static Symmetric Session Key ($K_{\text{transfer}}$)**: To eliminate re-ratcheting overhead on millions of continuous bulk chunks, all chunks in a transfer session are encrypted with a single static symmetric AES-256 key negotiated in-band over Double Ratchet. Forward secrecy and break-in recovery are intentionally bounded to that transfer session; compromise of this session key decrypts all chunks for that session.
+2. **Chunk Possession & Activity Leakage**: BitTorrent swarming relies on high-frequency possession broadcasts (`HAVE` and `BITFIELD` frames). Connected swarm peers actively reveal which chunks they possess, which pieces they are requesting, and their real-time download progress to other participating peers.
+3. **Deniable Symmetric Secrets**: Stream handshakes rely exclusively on ephemeral symmetric HMAC tokens derived from $K_{\text{transfer}}$. Zero root identity keys or digital signatures are transmitted over raw network sockets, guaranteeing cryptographic deniability and preventing any third-party proof binding a physical IP address to a user identity.
 
 ---
 
@@ -101,7 +114,8 @@ public static class IngressTransferOfferValidator
     public const int MaxFilesPerBundle = 50_000;
     public const int MaxChunksPerBundle = 1_000_000;
     public const long MaxBundleSizeBytes = 16_000_000_000_000L; // 16 TB
-    public const int MaxInlineManifestBytes = 65_536;
+    public const int MaxInlineManifestBytes = 49_152; // 48 KB (preserves headroom in 64 KB Double Ratchet envelope)
+    public const long MaxRemoteManifestBlobBytes = 8_388_608L; // 8 MB
 
     public static ValidationResult ValidateOffer(FileTransferOfferPayload offer)
     {
@@ -111,9 +125,18 @@ public static class IngressTransferOfferValidator
             return ValidationResult.Failure($"Offer chunk count ({offer.Summary.TotalChunks.Count}) exceeds maximum allowed ({MaxChunksPerBundle}).");
         if (offer.Summary.TotalSize.Bytes > MaxBundleSizeBytes)
             return ValidationResult.Failure($"Offer bundle size ({offer.Summary.TotalSize.Bytes} bytes) exceeds maximum allowed ({MaxBundleSizeBytes} bytes).");
-        if (offer.ManifestDistribution.Kind == ManifestDistributionKind.Inline &&
-            offer.ManifestDistribution.InlineData!.Length > MaxInlineManifestBytes)
-            return ValidationResult.Failure("Inline manifest exceeds 64 KB limit.");
+        if (offer.ManifestDistribution.Kind == ManifestDistributionKind.Inline)
+        {
+            if (offer.ManifestDistribution.InlineData == null || offer.ManifestDistribution.InlineData.Length > MaxInlineManifestBytes)
+                return ValidationResult.Failure($"Inline manifest exceeds maximum allowed limit ({MaxInlineManifestBytes} bytes).");
+        }
+        else if (offer.ManifestDistribution.Kind == ManifestDistributionKind.RemoteBlob)
+        {
+            if (offer.ManifestDistribution.BlobDescriptor == null ||
+                offer.ManifestDistribution.BlobDescriptor.PlaintextSizeBytes.Bytes <= 0 ||
+                offer.ManifestDistribution.BlobDescriptor.PlaintextSizeBytes.Bytes > MaxRemoteManifestBlobBytes)
+                return ValidationResult.Failure($"Remote manifest blob size ({offer.ManifestDistribution.BlobDescriptor?.PlaintextSizeBytes.Bytes ?? 0} bytes) must be between 1 and {MaxRemoteManifestBlobBytes} bytes.");
+        }
         return ValidationResult.Success();
     }
 }
@@ -208,6 +231,28 @@ public sealed record TransferKey([property: ByteArray(32)] byte[] Bytes) : ISens
 
 public sealed record BaseNonce([property: ByteArray(12)] byte[] Bytes);
 
+/// <summary>
+/// Deterministically derived 12-byte (96-bit) AES-256-GCM nonce for chunk index i:
+/// ChunkNonce(i) = BaseNonce XOR BigEndianUInt96(i)
+/// Guarantees zero nonce collision across all chunks (up to 1,000,000) under the same session key.
+/// </summary>
+public sealed record ChunkNonce([property: ByteArray(12)] byte[] Bytes)
+{
+    public ReadOnlySpan<byte> Span => Bytes;
+
+    public static ChunkNonce Derive(BaseNonce baseNonce, ChunkIndex chunkIndex)
+    {
+        byte[] derived = new byte[12];
+        baseNonce.Bytes.CopyTo(derived, 0);
+
+        // XOR last 4 bytes with Big-Endian chunkIndex.Value (supports up to 2^32-1 chunks, covering MaxChunksPerBundle)
+        BinaryPrimitives.WriteInt32BigEndian(derived.AsSpan(8, 4), 
+            BinaryPrimitives.ReadInt32BigEndian(derived.AsSpan(8, 4)) ^ chunkIndex.Value);
+
+        return new ChunkNonce(derived);
+    }
+}
+
 public sealed record StreamAuthToken([property: ByteArray(32)] byte[] Bytes);
 
 public sealed record SwarmRendezvousId([property: ByteArray(32)] byte[] Bytes);
@@ -273,8 +318,8 @@ public sealed record InlineManifestData
     private InlineManifestData(ReadOnlyMemory<byte> bytes) => SerializedBytes = bytes;
     public static InlineManifestData FromBytes(byte[] bytes)
     {
-        if (bytes == null || bytes.Length == 0 || bytes.Length > 65536)
-            throw new ArgumentException("Inline manifest must be between 1 and 65536 bytes.", nameof(bytes));
+        if (bytes == null || bytes.Length == 0 || bytes.Length > 49_152)
+            throw new ArgumentException("Inline manifest must be between 1 and 49152 bytes.", nameof(bytes));
         return new InlineManifestData(bytes);
     }
 }
@@ -569,6 +614,9 @@ public interface IFileTransferActionHandler
 3. **Zero-Byte File Finalization on InFlight Transition**:
    - When user consent is given and the session transitions from `PendingConsent` to `InFlight`, `TransferSessionCoordinator` immediately calls `IDesktopFileStorage.FinalizeFileAsync` for any selected files with `FileSize.Bytes == 0`.
    - Because 0-byte files have zero chunks, they emit no chunk verification events; immediate finalization ensures 0-byte files are materialized and marked completed immediately upon starting the transfer.
+4. **Proactive Tracker Unregistration on Session Cancellation or Completion**:
+   - When a transfer session transitions to `Completed`, `Cancelled`, or `Failed`, `TransferSessionCoordinator` proactively dispatches `IDistributedTrackerPort.UnregisterAsync(SwarmRendezvousId, LocalIdentityId, ct)`.
+   - Proactive unregistration immediately purges candidate IP endpoints from the relay swarm tracker, preventing peer connection attempts to stale or closed endpoints and freeing relay memory before the 90-second ephemeral TTL expires.
 
 ### 5.2 Read Models & Query Service
 ```csharp
@@ -667,6 +715,18 @@ public interface ITransferOfferReaperService
      ```
    - **Keep-Alive Frame Dispatch**: `SwarmCoordinator` tracks `SwarmPeerLiveness` for each connected peer. If a stream remains idle for $\ge 30\text{ seconds}$ without chunk traffic, the coordinator transmits a 0-byte payload `KeepAliveFrame` to keep NAT bindings open.
    - **Disconnect Detection & Ephemeral Eviction**: If no packet or frame is received from a peer for $\ge 60\text{ seconds}$, the coordinator marks the peer connection dead, tears down dead sockets, and persists `last_seen_utc` in SQLite (`ft_swarm_endpoints`) before evicting the peer from active dialing pools.
+6. **Chunk Request Flooding & Unsolicited Chunk Defense (Lens 3)**:
+   - **In-Flight Request Queue Capping**: `TransferSessionCoordinator` bounds in-flight chunk requests from any single peer to at most `MaxPendingRequestsPerPeer = 32`.
+   - If a remote peer dispatches `RequestChunkFrame` exceeding 32 outstanding unfulfilled requests, the coordinator drops excess requests, transmits `ChokeFrame`, and throttles the peer stream.
+   - **Unsolicited Chunk Drop**: Any incoming `ChunkDataFrame` containing a `ChunkIndex` that was not actively requested by local rarest-first scheduling (or has already been verified and written to disk) is discarded immediately without buffering in memory or writing to disk.
+7. **Stream Authentication & Session Binding (Lens 3)**:
+   - When establishing a TCP/QUIC stream connection, the connecting peer presents `StreamAuthToken`, `SessionId`, `StreamIndex`, and `SenderPeerId` in `HandshakeFrame`.
+   - The listening peer verifies:
+     1. `AuthToken` matches the symmetric token negotiated in-band via Double Ratchet ($\text{HMAC-SHA256}(K_{\text{transfer}}, \text{"stream-auth"}))$.
+     2. `SessionId` matches an active transfer session.
+     3. `SenderPeerId` is an authorized participant in `session.Topology`.
+   - If verification fails or the token is invalid, the receiver terminates the socket immediately with zero data exchanged.
+   - **Privacy & Deniability**: Authentication relies strictly on symmetric session secrets ($K_{\text{transfer}}$) established inside the end-to-end encrypted channel. No long-term private identity signatures are emitted over raw TCP streams, preventing physical IP-to-identity binding and preserving cryptographic deniability.
 
 ---
 
@@ -680,14 +740,20 @@ public interface ITransferOfferReaperService
 | **Disk Exhaustion** | Upfront disk space verification (`CheckDiskSpaceAsync` with cancellation) before accepting. | Test asserts rejection if disk quota is exceeded. |
 | **IP Address Leakage (Default Relayed)** | Default posture routes WAN transfers strictly via blind relay pipes; direct WAN endpoints (UPnP / Relay STUN) require explicit user opt-in (`WanPolicy == DirectWanPolicy.ExplicitlyAllowed`). | Test asserts WAN IP endpoints are never generated or dispatched unless opted in. |
 | **Direct P2P & Swarm IP Exposure** | Intentional protocol design for throughput parity with BitTorrent. Direct socket saturation requires peers to exchange socket candidates, exposing physical IPv4/IPv6 addresses, NAT topologies, and ISP locations to invited peers (`TargetRecipients`). The UI presentation layer explicitly warns users and lists participant identities before opening direct connections. | Unit test asserts WAN IP candidates are never generated or advertised when direct connections are disabled; UI read model exposes participants for privacy prompt. |
+| **Physical IP-to-Identity Binding / Non-Repudiation** | Raw stream handshakes rely strictly on symmetric HMAC session tokens ($K_{\text{transfer}}$) negotiated inside Double Ratchet. Zero root identity signatures are emitted over TCP, maintaining forward secrecy and cryptographic deniability. | Architecture enforces that private identity keys are never passed to transport socket pools or stream frames (Lens 3). |
 | **Static Symmetric Session Key** | Intentional performance design avoiding per-chunk Double Ratchet overhead. AES-256 session key $K_{\text{transfer}}$ is securely negotiated in-band; all bulk streaming chunks share the key. Loss of per-chunk forward secrecy is bounded to that transfer session. | Architecture enforces strict in-band exchange of session key and base nonce; zero ratchet messages used for bulk data. |
 | **Piece Possession Leakage** | Intentional BitTorrent swarming requirement; bitfield and `HAVE` broadcasts leak chunk possession to invited peers to enable rarest-first piece scheduling. | Architecture limits piece announcements strictly to authenticated swarm streams. |
 | **Chunk Tampering / Substitution** | Dual cryptographic verification: AES-256-GCM authentication tag + SHA-256 leaf hash against Merkle root. | Test asserts corrupted chunk bytes are discarded and requested again. |
 | **Poisoned Block / Sybil Torrent Flooding** | Application `TransferSessionCoordinator` maps streams to peer identities; on verification failure, it chokes the peer (`SetWeChokingPeer`), logs an offense, drops the connection, and reschedules the chunk to alternate seeders. | Coordinator unit test verifies that peer streams are disconnected and choked upon receiving corrupt chunks (Lens 3). |
 | **Relay Snooping** | E2EE per-chunk encryption ($K_{\text{transfer}}$); relay acts as blind socket proxy without keys. | Test verifies relay cannot decrypt chunks with zero knowledge of session key. |
 | **Network Bufferbloat / Choking** | High-precision token bucket bandwidth throttle (`ITransferRateLimiter`). | Unit test asserts throughput throttles accurately to configured caps. |
-| **Unbounded Manifest Allocation / Deserialization DoS** | Ingress offer bounds (`MaxFilesPerBundle = 50,000`, `MaxChunksPerBundle = 1,000,000`, `MaxBundleSizeBytes = 16 TB`, 64 KB inline limit) reject malformed offers before domain allocation. | Ingress validation unit tests verify rejection of oversized offers (Lens 3). |
+| **In-Band Ratchet Envelope Overflow** | Strict 48 KB cap (`MaxInlineManifestBytes = 49_152`); manifests exceeding 48 KB must distribute via out-of-band `RemoteBlob`. Preserves headroom in Double Ratchet 64 KB total envelope limit. | Unit test verifies that inline manifests $> 48\text{ KB}$ are rejected by validator and initiation service (Lens 3). |
+| **Remote Manifest Blob Exhaustion / Heap Bloat** | Strict 8 MB cap (`MaxRemoteManifestBlobBytes = 8_388_608`) on `RemoteBlob` size; downloader counting stream aborts download if exceeded. | Unit test rejects offer with `PlaintextSizeBytes > 8\text{ MB}` (Lens 3). |
+| **Unbounded Manifest Allocation / Deserialization DoS** | Ingress offer bounds (`MaxFilesPerBundle = 50,000`, `MaxChunksPerBundle = 1,000,000`, `MaxBundleSizeBytes = 16 TB`, 48 KB inline limit) reject malformed offers before domain allocation. | Ingress validation unit tests verify rejection of oversized offers (Lens 3). |
+| **AES-GCM Nonce Collision / Key-Stream Reuse** | Deterministic nonce derivation $\text{ChunkNonce}(i) = \text{BaseNonce} \oplus \text{BigEndianUInt96}(i)$ guarantees distinct 12-byte nonces for every chunk index $0 \le i < 1,000,000$. | Unit test asserts mathematical uniqueness of nonces across all chunk indices up to bundle maximum (Lens 3). |
+| **Chunk Request Queue Flooding (Memory Exhaustion DoS)** | In-flight request queue capped at `MaxPendingRequestsPerPeer = 32`; requests beyond cap are dropped and peer is choked. | Unit test verifies request dropping and choking upon exceeding 32 requests (Lens 3). |
 | **PEX Candidate Flooding / Dialing Amplification** | PEX frame rate-limiting (1 frame / 10s per peer), candidate cap (`MaxCandidates = 16`), and Host/Port deduplication protect dialing pools and memory. | Unit test asserts candidate list truncation and deduplication (Lens 3). |
+| **Dangling Swarm Tracker Candidates** | Proactive unregistration via `IDistributedTrackerPort.UnregisterAsync` upon cancellation, failure, or completion. | Unit test asserts `UnregisterAsync` invocation when cancelling/completing transfer (Lens 3). |
 | **Pre-Consent Offer Hoarding / Storage Bloat** | Background `TransferOfferReaperService` sweeps and expires offers older than 24h via `session.ExpireOffer(clock)`. | Integration test verifies offer reaping after time-advancement (Lens 3). |
 
 ---
@@ -720,8 +786,8 @@ public interface ITransferOfferReaperService
 1. Implement Application Value Objects and Transport Models, strictly verifying **zero implicit or explicit conversion operators** across all types.
 2. Define ports: `ITransferStreamPool`, `ITransferStreamPoolFactory`, `ITransferStream`.
 3. Implement `TransferSessionCoordinator` managing active 4–8 streams.
-4. Implement out-of-band typed frame dispatching via `IStreamFramePayload` and `StreamFrameEnvelope` (including `InterestedFrame` and `NotInterestedFrame`).
-5. Implement concurrent chunk request pipeline (keeping 4–8 requests in flight per stream).
+4. Implement out-of-band typed frame dispatching via `IStreamFramePayload` and `StreamFrameEnvelope` (including chunk nonce derivation, request queue capping, `InterestedFrame`, and `NotInterestedFrame`).
+5. Implement concurrent chunk request pipeline (keeping 4–8 requests in flight per stream, bounded to `MaxPendingRequestsPerPeer = 32`).
 6. Implement opt-in direct candidate discovery adapter hooks (local UPnP port forwarder and relay-assisted STUN reflexive address resolver).
 
 ### Milestone 3: Desktop Disk I/O & Storage Abstraction
