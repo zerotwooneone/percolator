@@ -4,7 +4,7 @@
 - [x] Lens 1: Scope & Feature Slice Framing (Status: Approved)
 - [x] Lens 2: Onion Architecture & Primitive Obsession (Status: Approved)
 - [x] Lens 3: Threat Modeling & Security Posture (Status: Approved)
-- [ ] Lens 4: High-Value, Low-Brittle Unit Test Design (Status: Pending)
+- [x] Lens 4: High-Value, Low-Brittle Unit Test Design (Status: Approved)
 - [ ] Lens 5: Cross-Layer Infrastructure Alignment (Status: Pending)
 - [ ] Implementation Gate: LOCKED (Requires Approval of Lenses 1-5)
 
@@ -820,35 +820,93 @@ The pure domain kernel enforces mathematical, cryptographic, and structural defe
 
 ---
 
-## 7. High-Value Domain Unit Testing Matrix
+---
 
-| Test Category | Target Invariant Under Test | Observable Verification | Low-Brittle Guarantee |
-| :--- | :--- | :--- | :--- |
-| **Factory Invariant** | Instantiating 1:1 sender without recipient | Throws `DomainValidationException` | Asserts aggregate cannot be constructed in invalid state. |
-| **Factory Invariant** | Instantiating 1:N sender with empty recipient list | Throws `DomainValidationException` | Prevents headless push transfers. |
-| **Manifest Invariant** | Instantiating manifest with 0 files or 0 total bytes | Throws `DomainValidationException` | Enforces non-empty bundle invariant. |
-| **Manifest Invariant** | Mismatched Merkle tree leaf count vs chunk count | Throws `DomainValidationException` | Enforces Merkle tree index integrity. |
-| **Selective Completion** | Downloading 1 file out of 10 in bundle | Aggregate evaluates `IsDownloadComplete == true` once required chunks present | Validates selective completion invariant. |
-| **Bidirectional Flow** | Peer chokes us while we keep peer unchoked | `PeerChokingUs == Choked` and `WeChokingPeer == Unchoked` | Validates independent directional flow control. |
-| **Bitfield Validation** | Calling `RecordPeerBitfield` with mismatched byte length | Returns `DomainResult.Failure` | Enforces piece mask boundary validation. |
-| **Bitfield Immutability** | Calling `Bitfield.WithChunk(index)` | Returns new instance; original unchanged | Asserts immutability of piece possession bitfields. |
-| **Bitfield Trailing Bits** | Instantiating `Bitfield` with non-zero trailing unused padding bits | Throws `DomainValidationException` | Enforces zeroed unused bit invariant. |
-| **Bitfield Set Operations** | `Bitfield.Intersect(other)` and `Difference(other)` | Returns correct set-theory bitmask with accurate `PopCount` | Asserts piece discovery and rarest-first mask math. |
-| **Seeding Cap** | Calling `RecordUploadedBytes` reaching `TargetSeedRatio` | Aggregate transitions `State` to `Completed` | Validates seeding ratio enforcement. |
-| **Boundary Spanning** | Chunk spanning exactly across 2 files | `ChunkBoundaryCalculator` produces 2 slice mappings | Pure domain offset math verification with zero storage mocks. |
-| **File Completion** | Verifying last chunk of a multi-chunk file | Aggregate emits `FileCompletedDomainEvent` | Asserts aggregate directly evaluates file boundaries. |
-| **Peer Acceptance** | Sender records peer acceptance via `RecordPeerAcceptance` | Aggregate registers member, transitions to `InFlight`, emits event | Verifies lifecycle transition and event emission. |
-| **Traversal Rejection** | Manifest containing `../../etc/passwd` | `SanitizedRelativePath.Parse` throws exception | Asserts immediate validation rejection at parser level. |
-| **Path Depth & Length** | Path with $> 32$ segments or $> 1024$ characters | `SanitizedRelativePath.Parse` throws `DomainValidationException` | Prevents deep directory nesting / recursion attacks. |
-| **SeedRatio Validation** | Passing negative multiplier or NaN to `SeedRatio` | Throws `DomainValidationException` | Enforces bounded invariant. |
-| **Swarm Admission Gate** | Registering peer not in `TransferTopology` | `RegisterSwarmMember` returns `DomainResult.Failure` | Asserts aggregate root boundary protection against unauthorized swarm members. |
-| **Contiguous Offsets** | Instantiating manifest with overlapping or gap file offsets | Throws `DomainValidationException` | Enforces contiguous bundle layout. |
-| **Zero-Byte File Layout** | Bundle containing 0-byte file adjacent to non-empty files | Manifest validates contiguous offsets with `StartOffset == EndOffset`; `FindFileForOffset` correctly skips 0-byte file and maps chunks | Asserts pure mathematical layout for empty files without index disruption. |
-| **Offer Expiration** | Calling `ExpireOffer` on staged session | Aggregate transitions `State` to `Cancelled` with reason `OfferExpired` and emits event | Verifies offer timeout lifecycle transition. |
-| **Chunk Size Validation** | Passing chunk data whose byte length does not equal `GetExpectedChunkSize(chunkIndex)` | `VerifyAndRecordChunk` returns `DomainResult.Failure` | Prevents buffer overrun and slice misalignment attacks. |
-| **Idempotent Chunk Verification** | Calling `VerifyAndRecordChunk` on a chunk already present in `LocalBitfield` | Returns `DomainResult.Success` without re-emitting `ChunkVerifiedDomainEvent` or `FileCompletedDomainEvent` | Protects event stream from duplication or poisoning. |
-| **State Gating Matrix** | Invoking `VerifyAndRecordChunk` when session is in `Paused`, `Completed`, or `Cancelled` | Returns `DomainResult.Failure` | Enforces state machine mutation precondition integrity. |
-| **Merkle Tree Malleability** | Constructing Merkle tree with odd leaf count | Unpaired node is promoted without duplicate hashing; root calculation is deterministic | Asserts resistance to CVE-2012-2459 duplicate node malleability. |
+---
+
+## 7. High-Value, Low-Brittle Domain Unit Testing Suite (Lens 4)
+
+### 7.1 Testing Philosophy & Behavioral Invariants
+In alignment with the Percolator domain testing standards, unit tests within `Percolator.Apps.FileTransfer.Domain` focus strictly on **observable domain outcomes, cryptographic integrity, state machine transitions, and mathematical boundary invariants**.
+
+#### Anti-Brittle Directives:
+1. **Zero Mock Invocation Assertions**: Tests never assert internal dispatch counts or method sequences. All domain tests evaluate pure state transformations, returned `DomainResult` values, and emitted `IDomainEvent` payloads.
+2. **Zero Serialization & String Matching**: Tests never perform fragile string matching against exception messages. Tests assert typed domain errors, enum codes, or structured domain event properties.
+3. **Pure State & Admission Testing**: Aggregates and entities are tested through deterministic input/output matrices, boundary condition limits, mathematical verification, and state transition matrices.
+4. **Isolated Mathematical Kernel**: The domain contains zero network sockets, transport pools, or filesystem I/O, guaranteeing 100% deterministic, high-speed unit test execution.
+5. **Deterministic Virtualized Clocks**: All temporal evaluations (such as offer expiration via `ExpireOffer`) must use an injected `IDateTimeProvider` virtualized clock, explicitly prohibiting real-time wall-clock delays (`Task.Delay`, `Thread.Sleep`).
+
+---
+
+### 7.2 Suite 1: `TransferSession` Lifecycle & State Transitions
+
+| Test Identifier | Test Scenario | Input / Preconditions | Observable Behavioral Assertion / State Transition | Rationale & Low-Brittle Guarantee |
+| :--- | :--- | :--- | :--- | :--- |
+| **DT-LIF-01** | Outgoing 1:1 session instantiation validation | `CreateOutgoing1to1` with empty or null recipient `PublicIdentityId`. | Throws `DomainValidationException`. Aggregate is not constructed. | Asserts aggregate cannot be constructed in headless state. |
+| **DT-LIF-02** | Outgoing multi-peer session recipient validation | `CreateOutgoingMultiPeer` with empty recipient collection. | Throws `DomainValidationException`. Aggregate is not constructed. | Prevents headless push transfers. |
+| **DT-LIF-03** | Peer acceptance transitions sender to `InFlight` | Outgoing session in `Offered` state receives `RecordPeerAcceptance(recipientId, bitfield)`. | State transitions to `InFlight`; `SwarmMember` is registered; emits `PeerAcceptedTransferDomainEvent`. | Verifies lifecycle progression and domain event emission. |
+| **DT-LIF-04** | Valid pause and resume lifecycle transitions | Active session in `InFlight` receives `Pause()`, followed by `Resume()`. | `Pause()` transitions state to `Paused` (emits `TransferPausedDomainEvent`); `Resume()` transitions state to `InFlight` (emits `TransferResumedDomainEvent`). | Asserts bidirectional lifecycle control. |
+| **DT-LIF-05** | Staged offer timeout expiration via virtual clock | Staged incoming session in `PendingConsent` receives `ExpireOffer(clock)` where virtual clock is advanced 25 hours. | State transitions to `Cancelled` with reason `OfferExpired`; emits `TransferCancelledDomainEvent`. | Verifies offer timeout lifecycle progression with zero wall-clock wait. |
+| **DT-LIF-06** | Parametric state transition matrix integrity | Parametric theory testing all forbidden $(S_{\text{from}}, S_{\text{to}})$ state transition pairs (e.g., `Offered` $\to$ `Completed`, `Completed` $\to$ `InFlight`, `Cancelled` $\to$ `Paused`). | Every forbidden state transition returns `DomainResult.Failure`; state remains unchanged; zero domain events emitted. | Systematically proves state machine boundary integrity across all invalid paths. |
+| **DT-LIF-07** | Terminal state mutation lockout | Session in terminal state (`Completed`, `Cancelled`, or `Failed`) receives `VerifyAndRecordChunk`, `Pause`, `Resume`, or `Cancel`. | Returns `DomainResult.Failure`; state remains unchanged; zero domain events emitted. | Prevents post-termination state corruption. |
+| **DT-LIF-08** | Stalled state detection and event emission | Active session in `InFlight` detects missing pieces across all swarm members and receives `MarkStalled()`. | State transitions to `Stalled`; emits `TransferStalledDomainEvent`. | Signals swarm piece unavailability to application layer. |
+
+---
+
+### 7.3 Suite 2: `TransferManifest` & Contiguous Boundary Math
+
+| Test Identifier | Test Scenario | Input / Preconditions | Observable Behavioral Assertion / State Transition | Rationale & Low-Brittle Guarantee |
+| :--- | :--- | :--- | :--- | :--- |
+| **DT-MAN-01** | Empty bundle rejection | `TransferManifest.Create` with 0 files. | Throws `DomainValidationException`. | Enforces non-empty bundle invariant. |
+| **DT-MAN-02** | Contiguous offset validation across files | File 0 (1000 bytes, `StartOffset = 0`), File 1 (`StartOffset = 1001` - gap of 1 byte). | `TransferManifest.Create` throws `DomainValidationException`. | Guards against layout gaps and corruption. |
+| **DT-MAN-03** | Cumulative file size equality invariant | Manifest with files totaling 5,000 bytes, but final `expectedOffset != totalBytes`. | Throws `DomainValidationException`. | Guarantees total bundle size matches file sum. |
+| **DT-MAN-04** | Sub-chunk bundle layout math | Single-file bundle of 500 bytes with `ChunkSizeBytes = 1 MB`. | Manifest computes `TotalChunks = 1`; `GetExpectedChunkSize(0) == 500 bytes`. | Verifies edge case where bundle is smaller than 1 chunk. |
+| **DT-MAN-05** | Chunk boundary spanning across 2 adjacent files | Chunk 0 (1 MB) covers File 0 (600 KB) and File 1 (800 KB). | `ChunkBoundaryCalculator.CalculateSlices` returns exactly 2 slices: Slice 0 (600 KB for File 0), Slice 1 (424 KB for File 1). | Pure mathematical offset calculation without disk I/O. |
+| **DT-MAN-06** | Chunk boundary spanning with interleaved zero-byte files | Chunk 0 (1 MB) spans File 0 (500 KB), File 1 (0 bytes), and File 2 (800 KB). | `CalculateSlices` returns exactly 2 slices (for File 0 and File 2); cleanly skips 0-byte File 1. | Proves zero-byte files do not disrupt chunk stream layout. |
+| **DT-MAN-07** | Selective download required chunk bitfield calculation | 10-file bundle (1 MB files, 1 MB chunks). User selects files 2 and 5. | `manifest.GetRequiredChunks` returns bitfield with bits 2 and 5 set (PopCount = 2); bits 0, 1, 3, 4, 6, 7, 8, 9 unset. | Validates selective chunk requirement derivation. |
+| **DT-MAN-08** | Relative path directory traversal sanitization | Relative path containing `../../etc/passwd` or `C:/file.txt`. | `SanitizedRelativePath.Parse` throws `DomainValidationException`. | Enforces path sanitization at parser boundary. |
+| **DT-MAN-09** | Multi-chunk single-file boundary calculations | Single file of 2.5 MB with `ChunkSizeBytes = 1 MB` (3 chunks total). | Chunk 0: slice offset 0, length 1 MB; Chunk 1: slice offset 1 MB, length 1 MB; Chunk 2: slice offset 2 MB, length 500 KB. | Asserts multi-chunk continuous file layout math. |
+| **DT-MAN-10** | All-zero-byte bundle rejection | `TransferManifest.Create` with bundle where all files have `FileSize = 0` (TotalSize = 0). | Throws `DomainValidationException` ("bundle total byte size must be greater than zero"). | Prevents zero-byte ghost transfers. |
+| **DT-MAN-11** | Selected file indices out-of-bounds rejection | User creates `SelectedFileIndices` containing index $\ge \text{TotalFiles}$. | Throws `DomainValidationException`. | Prevents array index out-of-bounds crashes during chunk mask derivation. |
+
+---
+
+### 7.4 Suite 3: Immutable `Bitfield` Algebra & Piece Possession
+
+| Test Identifier | Test Scenario | Input / Preconditions | Observable Behavioral Assertion / State Transition | Rationale & Low-Brittle Guarantee |
+| :--- | :--- | :--- | :--- | :--- |
+| **DT-BIT-01** | Structural immutability of bitfield mutations | Calling `bitfield.WithChunk(index)` and `WithoutChunk(index)`. | Returns new `Bitfield` instance; original instance byte array and `PopCount` remain unchanged. | Guarantees thread-safe immutability without defensive copying. |
+| **DT-BIT-02** | Trailing unused padding bit zero-mask enforcement | Instantiating `Bitfield.FromBytes` for 9 chunks (2 bytes needed: 8 bits in byte 0, 1 bit in byte 1) where trailing padding bits in byte 1 are non-zero. | Throws `DomainValidationException`. | Enforces zeroed unused bit invariant to prevent bitfield malleability. |
+| **DT-BIT-03** | Boundary bitfield byte length calculations | `Bitfield.Empty` and `Full` for boundary chunk counts ($1, 7, 8, 9, 15, 16$ chunks). | Byte lengths are exactly 1, 1, 1, 2, 2, 2 bytes respectively; `Full` correctly zeros trailing padding bits. | Verifies mathematical bitfield sizing and padding masks. |
+| **DT-BIT-04** | Bitfield set intersection algebra | Peer A bitfield (chunks 0, 1, 2) intersects Peer B bitfield (chunks 1, 2, 3). | `Intersect` returns bitfield with chunks 1, 2 set (`PopCount = 2`). | Validates swarm piece overlap calculation. |
+| **DT-BIT-05** | Bitfield set difference algebra | Local missing bitfield computed via `other.Difference(local)`. | `Difference` returns chunks possessed by `other` that are absent locally. | Validates rarest-first piece scheduling input. |
+| **DT-BIT-06** | Selective download completion evaluation | Session with `SelectedFiles` checking files 1 and 3. `LocalBitfield` satisfies all required chunks for files 1 and 3, but missing other files. | `session.IsDownloadComplete` evaluates to `true`. | Asserts selective completion logic ignores unselected files. |
+| **DT-BIT-07** | Bitfield malformed byte length rejection | Calling `Bitfield.FromBytes` with byte array shorter or longer than $\lceil \text{TotalChunks} / 8 \rceil$ (e.g. 1 byte or 3 bytes for 10 chunks). | Throws `DomainValidationException`. | Rejects truncated or padded bitfield frames before processing. |
+
+---
+
+### 7.5 Suite 4: Cryptographic Merkle Tree & Integrity Invariants
+
+| Test Identifier | Test Scenario | Input / Preconditions | Observable Behavioral Assertion / State Transition | Rationale & Low-Brittle Guarantee |
+| :--- | :--- | :--- | :--- | :--- |
+| **DT-MRK-01** | Odd-node promotion rule verification | Merkle tree constructed from 3 leaf chunks (odd count). | Level 0 has 3 nodes; final node is promoted directly to Level 1 without duplicate hashing ($H(N, N)$ is not computed). Root is deterministic. | Proves resistance to CVE-2012-2459 duplicate-leaf malleability. |
+| **DT-MRK-02** | Merkle leaf hash domain separation prefixes | Computing leaf hash vs interior node hash. | Leaf hash prefixes data with `0x00`; interior node prefixes children with `0x01`. | Prevents second-preimage collision attacks between leaves and interior nodes. |
+| **DT-MRK-03** | Corrupted chunk leaf verification rejection | `VerifyAndRecordChunk` called with altered plaintext chunk bytes. | Fails leaf hash check against Merkle tree; returns `DomainResult.Failure`; bitfield unchanged; emits zero events. | Verifies chunk tampering detection. |
+| **DT-MRK-04** | Idempotent chunk verification protection | `VerifyAndRecordChunk` called on chunk index already marked present in `LocalBitfield`. | Returns `DomainResult.Success` idempotently; emits zero duplicate `ChunkVerifiedDomainEvent` or `FileCompletedDomainEvent`. | Protects domain event stream from duplicate poisoning. |
+| **DT-MRK-05** | Merkle tree leaf count boundary topologies | Constructing Merkle trees for $N = 1, 2, 4, 5$ leaves. | $N=1$: root equals single leaf hash; $N=2$: single level; $N=4$: balanced binary tree; $N=5$: 3-tier tree with odd promotion at Level 0 (5 nodes $\to$ 3 nodes $\to$ 2 nodes $\to$ root). All roots deterministic and collision-free. | Mathematically proves Merkle builder correctness across all structural edge cases. |
+
+---
+
+### 7.6 Suite 5: Swarm Admission & Flow Control (Choking/Interested)
+
+| Test Identifier | Test Scenario | Input / Preconditions | Observable Behavioral Assertion / State Transition | Rationale & Low-Brittle Guarantee |
+| :--- | :--- | :--- | :--- | :--- |
+| **DT-SWM-01** | Swarm member admission gating | Invoking `RegisterSwarmMember` with peer identity not present in `TransferTopology`. | Returns `DomainResult.Failure`. Member is not added to `_swarmMembers`. | Protects swarm aggregate boundary from unauthorized peers. |
+| **DT-SWM-02** | Independent bidirectional choking flow control | Local node chokes remote peer (`SetWeChokingPeer(peer, Choked)`), while remote peer unchokes local node (`RecordPeerChokingUs(peer, Unchoked)`). | `WeChokingPeer == Choked` and `PeerChokingUs == Unchoked`. | Verifies asymmetric directional flow control states. |
+| **DT-SWM-03** | Independent bidirectional interest flow control | Local node updates interest (`SetWeInterestedInPeer(peer, Interested)`), and remote peer signals interest (`RecordPeerInterestedInUs(peer, NotInterested)`). | `WeInterestedInPeer == Interested` and `PeerInterestedInUs == NotInterested`. | Verifies independent interest state tracking. |
+| **DT-SWM-04** | Peer bitfield update dimension validation | Connected member submits bitfield with total chunk count differing from manifest. | `RecordPeerBitfield` returns `DomainResult.Failure`; member bitfield remains empty. | Prevents mismatched piece mask injection. |
+| **DT-SWM-05** | Seeding ratio target auto-completion | Outgoing session with `TargetSeedRatio = 2.0`. Cumulative `UploadedBytes` reaches $2.0 \times \text{TotalSize}$. | `HasReachedTargetSeedRatio` evaluates to `true`; state transitions to `Completed`; emits `TransferCompletedDomainEvent`. | Enforces seeding economics invariant. |
+| **DT-SWM-06** | File completion detection on last chunk verification | Verifying chunk index $i$ completes the final missing chunk spanning `FileEntry` $K$. | Emits `FileCompletedDomainEvent` containing file index and sanitized relative path. | Validates automated file boundary completion detection. |
 
 ---
 

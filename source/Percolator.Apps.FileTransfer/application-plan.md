@@ -4,7 +4,7 @@
 - [x] Lens 1: Scope & Feature Slice Framing (Status: Approved)
 - [x] Lens 2: Onion Architecture & Primitive Obsession (Status: Approved)
 - [x] Lens 3: Threat Modeling & Security Posture (Status: Approved)
-- [ ] Lens 4: High-Value, Low-Brittle Unit Test Design (Status: Pending)
+- [x] Lens 4: High-Value, Low-Brittle Unit Test Design (Status: Approved)
 - [ ] Lens 5: Cross-Layer Infrastructure Alignment (Status: Pending)
 - [ ] Implementation Gate: LOCKED (Requires Approval of Lenses 1-5)
 
@@ -823,3 +823,94 @@ public interface ITransferOfferReaperService
 3. Test opt-in WAN direct connections (simulated UPnP and relay STUN reflection).
 4. Test blind relay transfer pipe streaming with simulated latency and packet drop.
 5. Test swarm multi-peer piece sharing with 3+ desktop nodes.
+
+
+---
+
+---
+
+---
+
+## 10. High-Value, Low-Brittle Application Unit Testing Suite (Lens 4)
+
+### 10.1 Testing Strategy & Anti-Brittle Verification Invariants
+In strict adherence to the Percolator architecture and testing standards, application-layer unit tests focus exclusively on **observable domain outcomes, protocol admission boundaries, state machine transitions, and fault tolerance**.
+
+#### Anti-Brittle Directives:
+1. **Zero Mock Invocation Assertions**: Tests never assert internal mock dispatch counts or internal method invocation sequences. Verification is conducted exclusively through observable state transformations, returned `DomainResult` values, event emissions, and outbound port records.
+2. **Zero Serialization & String Matching**: Tests never perform fragile string matching against serialized JSON/Protobuf or exception error messages. Tests assert typed domain errors, enum codes, or structured payload properties.
+3. **Pure State & Admission Testing**: Subsystems are tested through pure input/output matrices, boundary condition limits, deterministic cryptographic derivation, and fault-isolated batch execution.
+4. **Vertical Slice Alignment**: Tests are organized strictly by vertical feature slices (`Features/<FeatureName>/Tests/` and `Ports/Tests/`), matching the production directory topology.
+5. **Deterministic Virtualized Clocks**: All temporal evaluations (PEX 10s rate limiting, 30s idle keep-alive, 60s dead peer timeout, 24h offer reaper sweep) must use `IDateTimeProvider` (or .NET's `FakeTimeProvider`) to advance virtual time, explicitly prohibiting real-time wall-clock delays (`Task.Delay`, `Thread.Sleep`).
+
+---
+
+### 10.2 Vertical Slice 1: `Features/IngressControl` Unit Tests
+
+| Test Identifier | Test Scenario | Input / Preconditions | Observable Behavioral Assertion / State Transition | Rationale & Anti-Brittle Justification |
+| :--- | :--- | :--- | :--- | :--- |
+| **UT-ING-01** | Edge filter silent discard when plugin disabled | `IAppIngressFilter.IsEnabled == false`, inbound packet with `AppId.FileTransferControl` (0x03). | Returns `IngressDecision.DiscardSilently`. Zero parsing, zero allocation, zero downstream dispatch. | Verifies edge kill-switch behavior without inspecting internal filter state. |
+| **UT-ING-02** | Ingress peer blocking policy enforcement | Filter policy contains sender `PublicIdentityId` in `BlockedPeers`. | `FileTransferIngressFilter.Evaluate` returns `IngressDecision.DiscardSilently`. | Verifies privacy firewall without emitting error frames on wire. |
+| **UT-ING-03** | Ingress relay URI blocking policy enforcement | Inbound offer contains `RelayPipeEndpointUri` present in `BlockedRelays`. | `FileTransferPayloadHandler` drops payload silently; session repository retains zero staged rows. | Verifies unverified relay rejection without wire signaling. |
+| **UT-ING-04** | Ingress offer staging for allowed peer | Valid `FileTransferOfferPayload` received from authorized sender not in blocklist. | Staged session is persisted in `ITransferSessionRepository` with `TransferSessionState.PendingConsent`. Exactly zero outbound network packets or wire ACKs emitted. | Proves silent staging requirement (recipient privacy). |
+| **UT-ING-05** | Offer rejection on bundle file count overflow | Inbound `FileTransferOfferPayload` specifies `Summary.TotalFiles.Count = 50_001` (> 50,000 cap). | `IngressTransferOfferValidator.ValidateOffer` returns `ValidationResult.Failure`. Session is not staged; repository is uninvoked. | Guards against memory exhaustion DoS before domain object instantiation. |
+| **UT-ING-06** | Offer rejection on bundle chunk count overflow | Inbound `FileTransferOfferPayload` specifies `Summary.TotalChunks.Count = 1_000_001` (> 1,000,000 cap). | Returns `ValidationResult.Failure`. Session is not staged. | Enforces symmetric chunk bounds. |
+| **UT-ING-07** | Offer rejection on bundle byte size overflow | Inbound `FileTransferOfferPayload` specifies `Summary.TotalSize.Bytes = 16_000_000_000_001L` (> 16 TB cap). | Returns `ValidationResult.Failure`. Session is not staged. | Enforces 16 TB architectural cap. |
+| **UT-ING-08** | In-band manifest envelope overflow rejection | Inbound offer with `ManifestDistributionKind.Inline` containing 49,153 bytes (> 48 KB cap). | Returns `ValidationResult.Failure`. Offer is rejected prior to domain allocation. | Preserves 64 KB Double Ratchet headroom. |
+| **UT-ING-09** | Remote manifest blob size bounds verification | Inbound offer with `ManifestDistributionKind.RemoteBlob` referencing blob with `PlaintextSizeBytes = 8_388_609L` (> 8 MB cap). | Returns `ValidationResult.Failure`. Offer is rejected prior to fetching blob. | Prevents manifest memory exhaustion. |
+| **UT-ING-10** | Inbound cancellation from authorized initiator | Inbound `FileTransferCancelPayload` received matching an active or staged session from `InitiatorId`. | Session transitions to `TransferSessionState.Cancelled` with reason recorded. | Verifies authorized session lifecycle termination. |
+| **UT-ING-11** | Inbound cancellation from unauthorized third party | Inbound `FileTransferCancelPayload` received from peer identity not present in `session.Topology`. | Cancellation is discarded silently; session state remains unchanged (`PendingConsent` or `InFlight`). | Prevents unauthorized session disruption. |
+
+---
+
+### 10.3 Vertical Slice 2: `Features/TransferNegotiation` Unit Tests
+
+| Test Identifier | Test Scenario | Input / Preconditions | Observable Behavioral Assertion / State Transition | Rationale & Anti-Brittle Justification |
+| :--- | :--- | :--- | :--- | :--- |
+| **UT-NEG-01** | Selective file preflight disk space calculation | User accepts transfer selecting files 0 and 2 from 4-file bundle (sizes: 100 MB, 500 MB, 200 MB, 1 GB). | Coordinator queries `IDesktopFileStorage.CheckDiskSpaceAsync` with exactly 300 MB (`RequiredBytes`). If sufficient, transitions session to `InFlight`. | Verifies that unselected files (1.5 GB) are excluded from disk pre-allocation math. |
+| **UT-NEG-02** | Insufficient disk space abort | User accepts transfer, but `IDesktopFileStorage.CheckDiskSpaceAsync` returns `DiskSpacePreflightResult.Insufficient`. | `AcceptTransferAsync` returns `DomainResult.Failure`; session state remains `PendingConsent`; no files pre-allocated. | Prevents partial writes when disk space is inadequate. |
+| **UT-NEG-03** | Immediate finalization of zero-byte files on start | Transfer bundle contains three files: 0-byte `empty.txt`, 50 MB `data.bin`, 0-byte `readme.txt`. Session transitions to `InFlight`. | Storage port records completion for `empty.txt` and `readme.txt` immediately with zero chunk read/write operations. | Prevents hung transfers on zero-chunk files. |
+| **UT-NEG-04** | Egress candidate suppression under default WAN policy | User initiates transfer with `DirectWanPolicy.DisabledByDefault`. | Generated `FileTransferOfferPayload.DirectCandidates` contains zero WAN endpoints (UPnP/STUN); only RFC 1918 LAN candidates present (or empty if LAN disabled). | Verifies Tier 1 default WAN privacy posture. |
+| **UT-NEG-05** | Egress candidate gathering under explicit opt-in policy | User initiates transfer with `DirectWanPolicy.ExplicitlyAllowed`. | Generated `FileTransferOfferPayload.DirectCandidates` contains resolved WAN candidates (`DirectCandidateKind.DirectWanUpnp` / `DirectWanStun`). | Verifies Tier 3 opt-in candidate emission. |
+| **UT-NEG-06** | Dialing pool fault tolerance on partial batch failure | Coordinator dials 4 endpoint candidates (2 LAN direct, 2 relay pipes). One LAN dial fails with connection timeout; 3 remaining succeed. | Failed connection does not abort transfer; 3 active streams are registered in pool; session state progresses to `InFlight`. | Verifies fault-tolerant batch connection dialing without brittle single-point abort. |
+| **UT-NEG-07** | Remote manifest blob deceptive overflow abort | Inbound offer advertises `PlaintextSizeBytes = 500 KB`, but relay HTTP stream emits $> 8\text{ MB}$ of ciphertext. | Counting stream detects byte count exceeding `MaxRemoteManifestBlobBytes` (8 MB), aborts connection immediately, and deletes incomplete payload. | Defends against malicious seeders attempting heap exhaustion via false manifest size claims. |
+
+---
+
+### 10.4 Vertical Slice 3: `Features/MultiStreamEngine` Unit Tests
+
+| Test Identifier | Test Scenario | Input / Preconditions | Observable Behavioral Assertion / State Transition | Rationale & Anti-Brittle Justification |
+| :--- | :--- | :--- | :--- | :--- |
+| **UT-MSE-01** | Deterministic AES-GCM nonce derivation | Derived `ChunkNonce` calculated for indices $i = 0$, $i = 1$, $i = 999,999$ from fixed `BaseNonce`. | Nonce values match $\text{BaseNonce} \oplus \text{BigEndianUInt96}(i)$; nonces are pairwise distinct across all indices up to maximum. | Verifies mathematical uniqueness avoiding key-stream reuse. |
+| **UT-MSE-02** | In-flight request queue bounding per peer | Remote peer sends 33 consecutive `RequestChunkFrame` messages without waiting for responses (`MaxPendingRequestsPerPeer = 32`). | The 33rd request is dropped unfulfilled; coordinator transitions peer flow status to choked (`SetWeChokingPeer`) and pending count remains at 32. | Verifies observable queue bounding and flow control without inspecting private frame emission order. |
+| **UT-MSE-03** | Unsolicited chunk data frame drop | Inbound `ChunkDataFrame` arrives for chunk index 42, which was never scheduled or requested by local node. | Chunk payload is discarded immediately; storage port is not invoked; zero disk writes occur. | Protects disk I/O and cache from unrequested data injection. |
+| **UT-MSE-04** | Corrupted chunk verification & poisoned peer choking | Inbound `ChunkDataFrame` fails Merkle tree leaf hash or AES-GCM authentication. | Coordinator chokes peer (`SetWeChokingPeer`), increments offense counter, terminates corrupted stream, and reschedules chunk to alternate peer. | Verifies poisoned block containment and swarm self-healing. |
+| **UT-MSE-05** | Symmetric stream handshake authentication | Incoming stream connection receives `HandshakeFrame` with valid `StreamAuthToken`, valid `SessionId`, and authorized `SenderPeerId`. | Stream handshake completes successfully; stream is registered in active multi-stream pool. | Verifies symmetric deniable authentication without identity leakage. |
+| **UT-MSE-06** | Invalid handshake token socket termination | Incoming stream connection receives `HandshakeFrame` with invalid `StreamAuthToken` or unknown `SessionId`. | Stream socket is terminated immediately; zero payload data is read or processed. | Prevents unauthorized socket hijacking. |
+| **UT-MSE-07** | Out-of-order parallel chunk reassembly | Parallel streams deliver chunks out of order (Stream 1 delivers Chunk 4, Stream 2 delivers Chunk 1). | `DiskChunkAssembler` dispatches each chunk to its target file offset independently; `LocalBitfield` marks both chunks; zero chunk stalling occurs. | Validates concurrent non-blocking chunk assembly across parallel streams. |
+
+---
+
+### 10.5 Vertical Slice 4: `Features/SwarmCoordination` Unit Tests
+
+| Test Identifier | Test Scenario | Input / Preconditions | Observable Behavioral Assertion / State Transition | Rationale & Anti-Brittle Justification |
+| :--- | :--- | :--- | :--- | :--- |
+| **UT-SWM-01** | Rarest-first chunk scheduling across swarm | 3 peers connected. Chunk 0 is available on 3 peers; Chunk 1 is available on 1 peer; Chunk 2 is available on 2 peers. | `RarestFirstChunkSelector` schedules Chunk 1 first, maximizing swarm piece availability. | Validates piece dissemination optimization. |
+| **UT-SWM-02** | PEX frame ingestion rate limiting via virtual clock | Remote peer sends two `PexPeersFrame` messages separated by 4 seconds on `IDateTimeProvider` virtual clock (limit is 1 frame / 10s). | Second PEX frame is dropped without processing candidates or querying storage. | Prevents PEX dialing amplification attacks with zero wall-clock wait. |
+| **UT-SWM-03** | PEX WAN policy gate enforcement | Inbound `PexPeersFrame` contains 2 LAN candidates and 2 public WAN candidates during session with `DirectWanPolicy.DisabledByDefault`. | LAN candidates are accepted; WAN candidates are discarded immediately and not persisted to `ft_swarm_endpoints`. | Enforces strict relay privacy firewall against remote candidate injection. |
+| **UT-SWM-04** | Swarm peer heartbeat & idle keep-alive via virtual clock | Connected stream has zero chunk traffic while virtual clock is advanced by 30 seconds. | `SwarmCoordinator` transmits 0-byte `KeepAliveFrame` over the idle stream. | Maintains NAT bindings without payload overhead. |
+| **UT-SWM-05** | Dead peer detection and endpoint archival via virtual clock | Virtual clock is advanced by 60 seconds with zero frames received from connected peer. | Peer connection is marked dead, sockets are closed, and peer's `last_seen_utc` is archived in SQLite `ft_swarm_endpoints`. | Cleans up dead connections and prepares fast-resume cache. |
+| **UT-SWM-06** | Target seed ratio auto-completion | Transfer session configured with `TargetSeedRatio = 1.5`. Cumulative uploaded bytes reach $1.5 \times \text{TotalBytes}$. | Session transitions to `TransferSessionState.Completed`; seeding streams disconnect cleanly; tracker is unregistered. | Enforces bandwidth quota policy without manual user intervention. |
+| **UT-SWM-07** | Endgame mode chunk broadcast & cancellation | Only 2 chunks remain uncompleted in transfer; active request to Peer A is slow. | Coordinator broadcasts `RequestChunkFrame` for remaining chunks to all unchoked seeders (Peers A and B). Upon receiving chunk from Peer B, coordinator immediately broadcasts `CancelChunkFrame` to Peer A. | Prevents tail latency in multi-peer swarm transfers. |
+| **UT-SWM-08** | PEX candidate deduplication & self-endpoint filtering | Inbound `PexPeersFrame` contains duplicate host+port entries and local node's own listening address. | Coordinator deduplicates candidates and strips local node endpoint before persisting to `ft_swarm_endpoints`. | Prevents self-dialing loops and redundant connection attempts. |
+
+---
+
+### 10.6 Vertical Slices 5 & 6: Application Ports & CQRS Unit Tests
+
+| Test Identifier | Test Scenario | Input / Preconditions | Observable Behavioral Assertion / State Transition | Rationale & Anti-Brittle Justification |
+| :--- | :--- | :--- | :--- | :--- |
+| **UT-CMD-01** | Initiate transfer bounds enforcement | User initiates transfer from folder containing 50,001 files. | `IFileTransferActionHandler.InitiateTransferAsync` returns `DomainResult.Failure`; zero database records created. | Validates command boundary enforcement. |
+| **UT-CMD-02** | Proactive tracker endpoint unregistration on cancellation | Active transfer session is cancelled via `CancelTransferAsync`. | Coordinator dispatches `IDistributedTrackerPort.UnregisterAsync(RendezvousId, LocalPeerId)`; session state is `Cancelled`. | Prevents dangling stale IP endpoints on relay swarm tracker. |
+| **UT-REP-01** | Stale offer reaping service sweep via virtual clock | `ITransferSessionRepository` contains two offers in `PendingConsent`: one created 25 hours ago, one created 2 hours ago. `IDateTimeProvider` clock matches current time. | `TransferOfferReaperService.SweepAndExpireStaleOffersAsync` expires the 25-hour offer (transitions to `Cancelled`), leaving the 2-hour offer intact. | Prevents staged offer hoarding and database accumulation with zero wall-clock delay. |
+| **UT-QRY-01** | Transfer session query projection accuracy | Query service retrieves `TransferSessionReadModel` for multi-file transfer in progress. | Read model accurately projects `TotalBytes`, `DownloadedBytes`, `UploadedBytes`, `CurrentSeedRatio`, `ConnectedStreams`, and `Status` without exposing secrets. | Ensures UI presentation layer receives strictly sanitized, typed progress data. |
