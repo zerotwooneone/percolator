@@ -52,6 +52,20 @@ public class ChatMediaServiceTests
     }
 
     [Test]
+    public void PrepareInlineAttachment_WhenOver32KbInlineLimit_ReturnsInlineThresholdExceededError()
+    {
+        var overInlineLimitBytes = new byte[32 * 1024 + 1];
+        var result = _sut.PrepareInlineAttachment(
+            new BlobId("test"),
+            "doc.pdf",
+            "application/pdf",
+            overInlineLimitBytes);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("INLINE_THRESHOLD_EXCEEDED");
+    }
+
+    [Test]
     public void PrepareInlineAttachment_WhenWithinInlineLimit_EmbedsInlineBytes()
     {
         var data = new byte[1024];

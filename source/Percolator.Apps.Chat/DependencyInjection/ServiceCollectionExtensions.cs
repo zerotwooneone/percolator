@@ -12,7 +12,8 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddChatApp(this IServiceCollection services)
     {
         services.AddSingleton<IAppPlugin, ChatPlugin>();
-        services.AddSingleton<IAppPayloadHandler, ChatPayloadHandler>();
+        services.AddSingleton<IAppIngressFilter, ChatIngressFilter>();
+        services.AddScoped<IAppPayloadHandler, ChatPayloadHandler>();
         services.AddScoped<IChatService, ChatService>();
         services.AddScoped<ChatMediaService>();
         services.AddScoped<GroupInvitationService>();

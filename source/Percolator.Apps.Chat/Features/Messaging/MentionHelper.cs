@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text;
 using Percolator.Domain.Identities.ValueObjects;
 
@@ -36,7 +37,76 @@ public static class MentionHelper
             return false;
         }
 
-        byte[] bytes = Encoding.UTF8.GetBytes(text);
+        int maxByteCount = Encoding.UTF8.GetMaxByteCount(text.Length);
+        byte[]? rented = null;
+        Span<byte> utf8Buffer = maxByteCount <= 1024
+            ? stackalloc byte[maxByteCount]
+            : (rented = ArrayPool<byte>.Shared.Rent(maxByteCount));
+
+        try
+        {
+            int actualBytes = Encoding.UTF8.GetBytes(text.AsSpan(), utf8Buffer);
+            return IsValidSpanInUtf8Bytes(utf8Buffer.Slice(0, actualBytes), mention);
+        }
+        finally
+        {
+            if (rented is not null)
+            {
+                ArrayPool<byte>.Shared.Return(rented);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Filters a list of mentions in a single UTF-8 encoding pass using pooled/stack memory.
+    /// Eliminates O(M * N) repeated UTF-8 byte array allocations on the hot path.
+    /// </summary>
+    public static IReadOnlyList<MentionDto> FilterValidSpans(string? text, IReadOnlyList<MentionDto>? mentions)
+    {
+        if (string.IsNullOrEmpty(text) || mentions is null || mentions.Count == 0)
+        {
+            return Array.Empty<MentionDto>();
+        }
+
+        int maxByteCount = Encoding.UTF8.GetMaxByteCount(text.Length);
+        byte[]? rented = null;
+        Span<byte> utf8Buffer = maxByteCount <= 1024
+            ? stackalloc byte[maxByteCount]
+            : (rented = ArrayPool<byte>.Shared.Rent(maxByteCount));
+
+        try
+        {
+            int actualBytes = Encoding.UTF8.GetBytes(text.AsSpan(), utf8Buffer);
+            ReadOnlySpan<byte> utf8Slice = utf8Buffer.Slice(0, actualBytes);
+
+            var valid = new List<MentionDto>(mentions.Count);
+            for (int i = 0; i < mentions.Count; i++)
+            {
+                var m = mentions[i];
+                if (m is not null && IsValidSpanInUtf8Bytes(utf8Slice, m))
+                {
+                    valid.Add(m);
+                }
+            }
+
+            return valid;
+        }
+        finally
+        {
+            if (rented is not null)
+            {
+                ArrayPool<byte>.Shared.Return(rented);
+            }
+        }
+    }
+
+    private static bool IsValidSpanInUtf8Bytes(ReadOnlySpan<byte> bytes, MentionDto mention)
+    {
+        if (mention.StartOffset < 0 || mention.Length <= 0)
+        {
+            return false;
+        }
+
         if (mention.StartOffset + mention.Length > bytes.Length)
         {
             return false;

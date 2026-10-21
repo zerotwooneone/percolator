@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using Percolator.Apps.Chat.Features.Media;
 using Percolator.Apps.Chat.Features.Reactions;
 using Percolator.Domain.Channels.Model;
@@ -17,19 +16,22 @@ public sealed class ChatService : IChatService
     private readonly IPayloadSender _payloadSender;
     private readonly IPayloadSerializer _serializer;
     private readonly IDateTimeProvider _timeProvider;
+    private readonly IBlobStorageService? _blobStorage;
 
     public ChatService(
         IChatMessageRepository chatRepo,
         IChannelRepository channelRepo,
         IPayloadSender payloadSender,
         IPayloadSerializer serializer,
-        IDateTimeProvider timeProvider)
+        IDateTimeProvider timeProvider,
+        IBlobStorageService? blobStorage = null)
     {
         _chatRepo = chatRepo ?? throw new ArgumentNullException(nameof(chatRepo));
         _channelRepo = channelRepo ?? throw new ArgumentNullException(nameof(channelRepo));
         _payloadSender = payloadSender ?? throw new ArgumentNullException(nameof(payloadSender));
         _serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
+        _blobStorage = blobStorage;
     }
 
     public async ValueTask<DomainResult<PayloadId>> SendMessageAsync(SendMessageCommand command, CancellationToken ct = default)
@@ -48,6 +50,14 @@ public sealed class ChatService : IChatService
             return DomainResult<PayloadId>.Failure(new DomainError("CONTENT_TOO_LONG", $"Message content cannot exceed {ChatMessage.MaxContentLength} characters."));
         }
 
+        if (command.ExpireAfterSeconds.HasValue &&
+            (command.ExpireAfterSeconds.Value <= 0 || command.ExpireAfterSeconds.Value > ChatMessage.MaxExpireAfterSeconds))
+        {
+            return DomainResult<PayloadId>.Failure(new DomainError(
+                "INVALID_EXPIRATION",
+                $"ExpireAfterSeconds must be between 1 and {ChatMessage.MaxExpireAfterSeconds} seconds."));
+        }
+
         var payloadId = PayloadId.New();
         ulong timestampUnixMs = (ulong)_timeProvider.UtcNow.ToUnixTimeMilliseconds();
 
@@ -59,20 +69,23 @@ public sealed class ChatService : IChatService
                 command.ReplyContext.ParentAuthorId);
         }
 
+        IReadOnlyList<MentionDto> sanitizedMentions = MentionHelper.FilterValidSpans(command.Content, command.Mentions);
+        IReadOnlyList<MediaAttachmentDto> sanitizedAttachments = SanitizeAttachments(command.Attachments);
+
         var messageDto = new ChatMessageDto(
             payloadId,
             command.ChannelId,
             command.AuthorId,
             timestampUnixMs,
             command.Content ?? string.Empty,
-            command.Mentions ?? Array.Empty<MentionDto>(),
+            sanitizedMentions,
             cleanReplyContext,
             command.LinkPreview,
-            command.Attachments ?? Array.Empty<MediaAttachmentDto>(),
+            sanitizedAttachments,
             command.ExpireAfterSeconds,
             null);
 
-        var envelopeBytes = CreatePaddedEnvelopeBytes(ChatPayloadType.Message, messageDto);
+        var envelopeBytes = SteppedPadding.CreatePaddedEnvelopeBytes(_serializer, ChatPayloadType.Message, messageDto);
 
         // Append to domain channel aggregate to maintain consistency
         var directChannel = await _channelRepo.GetDirectByIdAsync(command.ChannelId, ct).ConfigureAwait(false);
@@ -115,10 +128,15 @@ public sealed class ChatService : IChatService
 
                 await _channelRepo.SaveGroupAsync(groupChannel, ct).ConfigureAwait(false);
             }
+            else
+            {
+                return DomainResult<PayloadId>.Failure(new DomainError("CHANNEL_NOT_FOUND", "Target channel was not found."));
+            }
         }
 
+        // Sender timer starts immediately upon dispatch (README Section 4.4)
         ulong? expiresAtUnixMs = command.ExpireAfterSeconds.HasValue
-            ? timestampUnixMs + (ulong)(command.ExpireAfterSeconds.Value * 1000)
+            ? timestampUnixMs + ((ulong)command.ExpireAfterSeconds.Value * 1000UL)
             : null;
 
         var message = new ChatMessage(
@@ -127,10 +145,10 @@ public sealed class ChatService : IChatService
             command.AuthorId,
             timestampUnixMs,
             command.Content ?? string.Empty,
-            command.Mentions,
+            sanitizedMentions,
             cleanReplyContext,
             command.LinkPreview,
-            command.Attachments,
+            sanitizedAttachments,
             command.ExpireAfterSeconds,
             expiresAtUnixMs);
 
@@ -169,8 +187,14 @@ public sealed class ChatService : IChatService
             return DomainResult.Failure(new DomainError("MESSAGE_NOT_FOUND", "Target message could not be found."));
         }
 
+        if (message.ChannelId != command.ChannelId)
+        {
+            return DomainResult.Failure(new DomainError("CHANNEL_MISMATCH", "Target message belongs to a different channel."));
+        }
+
+        var validMentions = MentionHelper.FilterValidSpans(command.NewContent, command.NewMentions);
         ulong editedAtUnixMs = (ulong)_timeProvider.UtcNow.ToUnixTimeMilliseconds();
-        var editResult = message.ApplyEdit(command.NewContent, command.NewMentions ?? Array.Empty<MentionDto>(), editedAtUnixMs, command.AuthorId);
+        var editResult = message.ApplyEdit(command.NewContent, validMentions, editedAtUnixMs, command.AuthorId);
         if (editResult.IsFailure)
         {
             return editResult;
@@ -183,10 +207,10 @@ public sealed class ChatService : IChatService
             command.ChannelId,
             command.AuthorId,
             command.NewContent,
-            command.NewMentions ?? Array.Empty<MentionDto>(),
+            validMentions,
             editedAtUnixMs);
 
-        var envelopeBytes = CreatePaddedEnvelopeBytes(ChatPayloadType.Edit, editDto);
+        var envelopeBytes = SteppedPadding.CreatePaddedEnvelopeBytes(_serializer, ChatPayloadType.Edit, editDto);
 
         var outboundContext = new OutboundPayloadContext(
             command.ChannelId,
@@ -210,6 +234,11 @@ public sealed class ChatService : IChatService
             return DomainResult.Failure(new DomainError("MESSAGE_NOT_FOUND", "Target message could not be found."));
         }
 
+        if (message.ChannelId != command.ChannelId)
+        {
+            return DomainResult.Failure(new DomainError("CHANNEL_MISMATCH", "Target message belongs to a different channel."));
+        }
+
         bool isChannelAdmin = false;
         if (message.AuthorId != command.RequestedBy)
         {
@@ -224,6 +253,8 @@ public sealed class ChatService : IChatService
             }
         }
 
+        var attachmentsToPurge = message.Attachments;
+
         ulong deletedAtUnixMs = (ulong)_timeProvider.UtcNow.ToUnixTimeMilliseconds();
         var tombstoneResult = message.ApplyTombstone(command.RequestedBy, deletedAtUnixMs, isChannelAdmin);
         if (tombstoneResult.IsFailure)
@@ -233,13 +264,25 @@ public sealed class ChatService : IChatService
 
         await _chatRepo.UpdateAsync(message, ct).ConfigureAwait(false);
 
+        // README Section 4.2: Tombstone triggers permanent deletion of local cached media blobs
+        if (_blobStorage is not null && attachmentsToPurge.Count > 0)
+        {
+            foreach (var attachment in attachmentsToPurge)
+            {
+                if (!string.IsNullOrWhiteSpace(attachment.BlobId.HexDigest))
+                {
+                    await _blobStorage.DeleteLocalCacheAsync(attachment.BlobId, ct).ConfigureAwait(false);
+                }
+            }
+        }
+
         var tombstoneDto = new MessageTombstoneDto(
             command.TargetPayloadId,
             command.ChannelId,
             command.RequestedBy,
             deletedAtUnixMs);
 
-        var envelopeBytes = CreatePaddedEnvelopeBytes(ChatPayloadType.Tombstone, tombstoneDto);
+        var envelopeBytes = SteppedPadding.CreatePaddedEnvelopeBytes(_serializer, ChatPayloadType.Tombstone, tombstoneDto);
 
         var outboundContext = new OutboundPayloadContext(
             command.ChannelId,
@@ -263,6 +306,11 @@ public sealed class ChatService : IChatService
             return DomainResult.Failure(new DomainError("MESSAGE_NOT_FOUND", "Target message could not be found."));
         }
 
+        if (message.ChannelId != command.ChannelId)
+        {
+            return DomainResult.Failure(new DomainError("CHANNEL_MISMATCH", "Target message belongs to a different channel."));
+        }
+
         ulong nowMs = (ulong)_timeProvider.UtcNow.ToUnixTimeMilliseconds();
         message.AddReaction(command.AuthorId, command.Emoji, nowMs);
         await _chatRepo.UpdateAsync(message, ct).ConfigureAwait(false);
@@ -275,7 +323,7 @@ public sealed class ChatService : IChatService
             ReactionAction.Add,
             nowMs);
 
-        var envelopeBytes = CreatePaddedEnvelopeBytes(ChatPayloadType.Reaction, update);
+        var envelopeBytes = SteppedPadding.CreatePaddedEnvelopeBytes(_serializer, ChatPayloadType.Reaction, update);
 
         var outboundContext = new OutboundPayloadContext(
             command.ChannelId,
@@ -299,6 +347,11 @@ public sealed class ChatService : IChatService
             return DomainResult.Failure(new DomainError("MESSAGE_NOT_FOUND", "Target message could not be found."));
         }
 
+        if (message.ChannelId != command.ChannelId)
+        {
+            return DomainResult.Failure(new DomainError("CHANNEL_MISMATCH", "Target message belongs to a different channel."));
+        }
+
         ulong nowMs = (ulong)_timeProvider.UtcNow.ToUnixTimeMilliseconds();
         message.RemoveReaction(command.AuthorId, command.Emoji);
         await _chatRepo.UpdateAsync(message, ct).ConfigureAwait(false);
@@ -311,7 +364,7 @@ public sealed class ChatService : IChatService
             ReactionAction.Remove,
             nowMs);
 
-        var envelopeBytes = CreatePaddedEnvelopeBytes(ChatPayloadType.Reaction, update);
+        var envelopeBytes = SteppedPadding.CreatePaddedEnvelopeBytes(_serializer, ChatPayloadType.Reaction, update);
 
         var outboundContext = new OutboundPayloadContext(
             command.ChannelId,
@@ -330,13 +383,34 @@ public sealed class ChatService : IChatService
         ArgumentNullException.ThrowIfNull(command);
 
         ulong nowMs = (ulong)_timeProvider.UtcNow.ToUnixTimeMilliseconds();
+
+        // Start disappearing message timer on local messages up to UpToPayloadId (README Section 4.4)
+        var targetMessage = await _chatRepo.GetByIdAsync(command.UpToPayloadId, ct).ConfigureAwait(false);
+        if (targetMessage is not null && targetMessage.ChannelId == command.ChannelId)
+        {
+            targetMessage.MarkAsRead(nowMs);
+            await _chatRepo.UpdateAsync(targetMessage, ct).ConfigureAwait(false);
+
+            var channelMessages = await _chatRepo.GetByChannelIdAsync(command.ChannelId, ct).ConfigureAwait(false);
+            foreach (var msg in channelMessages)
+            {
+                if (msg.Id != targetMessage.Id &&
+                    msg.TimestampUnixMs <= targetMessage.TimestampUnixMs &&
+                    msg.ReadAtUnixMs is null)
+                {
+                    msg.MarkAsRead(nowMs);
+                    await _chatRepo.UpdateAsync(msg, ct).ConfigureAwait(false);
+                }
+            }
+        }
+
         var receiptDto = new ReadReceiptDto(
             command.ChannelId,
             command.ReaderId,
             command.UpToPayloadId,
             nowMs);
 
-        var envelopeBytes = CreatePaddedEnvelopeBytes(ChatPayloadType.ReadReceipt, receiptDto);
+        var envelopeBytes = SteppedPadding.CreatePaddedEnvelopeBytes(_serializer, ChatPayloadType.ReadReceipt, receiptDto);
 
         var outboundContext = new OutboundPayloadContext(
             command.ChannelId,
@@ -350,19 +424,21 @@ public sealed class ChatService : IChatService
         return await _payloadSender.SendPayloadAsync(outboundContext, ct).ConfigureAwait(false);
     }
 
-    private ReadOnlyMemory<byte> CreatePaddedEnvelopeBytes<T>(ChatPayloadType type, T payload)
+    private static IReadOnlyList<MediaAttachmentDto> SanitizeAttachments(IReadOnlyList<MediaAttachmentDto>? attachments)
     {
-        var serializedData = _serializer.Serialize(payload);
-        int paddedLength = SteppedPadding.CalculatePaddedLength(serializedData.Length);
-        int paddingSize = Math.Max(0, paddedLength - serializedData.Length);
-
-        byte[] paddingBytes = new byte[paddingSize];
-        if (paddingSize > 0)
+        if (attachments is null || attachments.Count == 0)
         {
-            RandomNumberGenerator.Fill(paddingBytes);
+            return Array.Empty<MediaAttachmentDto>();
         }
 
-        var envelope = new ChatPayloadEnvelopeDto(type, serializedData, paddingBytes);
-        return _serializer.Serialize(envelope);
+        var sanitized = new List<MediaAttachmentDto>(attachments.Count);
+        for (int i = 0; i < attachments.Count; i++)
+        {
+            var a = attachments[i];
+            var cleanName = ChatMediaService.SanitizeMediaFileName(a.FileName, a.ContentType);
+            sanitized.Add(cleanName == a.FileName ? a : a with { FileName = cleanName });
+        }
+
+        return sanitized;
     }
 }

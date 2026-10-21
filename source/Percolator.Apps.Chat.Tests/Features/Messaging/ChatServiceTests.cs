@@ -1,9 +1,11 @@
 using FluentAssertions;
 using NUnit.Framework;
+using Percolator.Apps.Chat.Features.Media;
 using Percolator.Apps.Chat.Features.Messaging;
 using Percolator.Apps.Chat.Features.Reactions;
 using Percolator.Apps.Chat.Tests.TestDoubles;
 using Percolator.Domain.Channels.ValueObjects;
+using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.PluginSdk;
 
@@ -17,6 +19,7 @@ public class ChatServiceTests
     private TestPayloadSender _payloadSender = null!;
     private TestPayloadSerializer _serializer = null!;
     private FakeDateTimeProvider _timeProvider = null!;
+    private FakeBlobStorageService _blobStorage = null!;
     private ChatService _sut = null!;
 
     [SetUp]
@@ -27,8 +30,9 @@ public class ChatServiceTests
         _payloadSender = new TestPayloadSender();
         _serializer = new TestPayloadSerializer();
         _timeProvider = new FakeDateTimeProvider(new DateTimeOffset(2026, 10, 10, 12, 0, 0, 123, TimeSpan.Zero)); // fractional ms
+        _blobStorage = new FakeBlobStorageService();
 
-        _sut = new ChatService(_chatRepo, _channelRepo, _payloadSender, _serializer, _timeProvider);
+        _sut = new ChatService(_chatRepo, _channelRepo, _payloadSender, _serializer, _timeProvider, _blobStorage);
     }
 
     [Test]
@@ -67,6 +71,37 @@ public class ChatServiceTests
         var envelope = envelopeResult.Value;
         envelope.Type.Should().Be(ChatPayloadType.Message);
         envelope.Padding.Length.Should().BeGreaterThan(0);
+    }
+
+    [Test]
+    public async Task SendMessageAsync_SanitizesMediaAttachmentFilenamesBeforeDispatch()
+    {
+        var channel = ChatTestFactory.CreateDirectChannel(_timeProvider);
+        await _channelRepo.SaveDirectAsync(channel);
+
+        var unsanitizedPhoto = new MediaAttachmentDto(
+            new BlobId("0123456789abcdef"),
+            "IMG_20261010_120000.jpg",
+            "image/jpeg",
+            2048,
+            800,
+            600,
+            null,
+            null);
+
+        var cmd = ChatTestFactory.CreateSendMessageCommand(
+            channelId: channel.Id,
+            authorId: channel.OwnerIdentityId,
+            recipientId: channel.RemotePeerId,
+            content: "Photo attached",
+            attachments: new[] { unsanitizedPhoto });
+
+        var result = await _sut.SendMessageAsync(cmd);
+        result.IsSuccess.Should().BeTrue();
+
+        var saved = await _chatRepo.GetByIdAsync(result.Value);
+        saved!.Attachments.Should().ContainSingle();
+        saved.Attachments[0].FileName.Should().BeNull();
     }
 
     [Test]
@@ -211,12 +246,20 @@ public class ChatServiceTests
     }
 
     [Test]
-    public async Task DeleteMessageAsync_Author_MarksTombstone_AndDispatchesTombstoneDto()
+    public async Task DeleteMessageAsync_Author_MarksTombstone_PurgesLocalBlobs_AndDispatchesTombstoneDto()
     {
         var channel = ChatTestFactory.CreateDirectChannel(_timeProvider);
         await _channelRepo.SaveDirectAsync(channel);
 
-        var sendCmd = ChatTestFactory.CreateSendMessageCommand(channelId: channel.Id, authorId: channel.OwnerIdentityId, recipientId: channel.RemotePeerId, content: "To be deleted");
+        var blobId = new BlobId("deadbeef01234567");
+        var attachment = new MediaAttachmentDto(blobId, "report.pdf", "application/pdf", 4096, null, null, null, null);
+
+        var sendCmd = ChatTestFactory.CreateSendMessageCommand(
+            channelId: channel.Id,
+            authorId: channel.OwnerIdentityId,
+            recipientId: channel.RemotePeerId,
+            content: "To be deleted",
+            attachments: new[] { attachment });
         var sendResult = await _sut.SendMessageAsync(sendCmd);
         var messageId = sendResult.Value;
 
@@ -234,6 +277,7 @@ public class ChatServiceTests
         var record = await _chatRepo.GetByIdAsync(messageId);
         record!.IsTombstone.Should().BeTrue();
         record.Content.Should().Be("This message was deleted");
+        _blobStorage.DeletedBlobs.Should().ContainSingle(b => b == blobId);
 
         var lastSent = _payloadSender.SentPayloads.Last();
         var envelope = _serializer.Deserialize<ChatPayloadEnvelopeDto>(lastSent.Payload).Value;
@@ -281,7 +325,7 @@ public class ChatServiceTests
         var sendResult = await _sut.SendMessageAsync(sendCmd);
         var messageId = sendResult.Value;
 
-        var emoji = Emoji.Create("🚀").Value;
+        var emoji = Emoji.Create("\ud83d\ude80").Value;
         var reactCmd = new AddReactionCommand(
             messageId,
             channel.Id,
@@ -302,24 +346,67 @@ public class ChatServiceTests
     }
 
     [Test]
-    public async Task MarkAsReadAsync_AdvancesCursorAndDispatchesReadReceiptDto()
+    public async Task MarkAsReadAsync_AdvancesCursor_StartsDisappearingTimer_AndDispatchesReadReceiptDto()
     {
         var channel = ChatTestFactory.CreateDirectChannel(_timeProvider);
         await _channelRepo.SaveDirectAsync(channel);
 
-        var readCmd = new MarkAsReadCommand(
+        var msgId = PayloadId.New();
+        var incomingDisappearingMsg = new ChatMessage(
+            msgId,
             channel.Id,
             channel.RemotePeerId,
-            PayloadId.New(),
+            _timeProvider.UtcNowUnixMs,
+            "View once secret",
+            expireAfterSeconds: 60,
+            expiresAtUnixMs: null);
+        await _chatRepo.AddAsync(incomingDisappearingMsg);
+
+        _timeProvider.Advance(TimeSpan.FromMinutes(5));
+        ulong readTimestampMs = _timeProvider.UtcNowUnixMs;
+
+        var readCmd = new MarkAsReadCommand(
+            channel.Id,
             channel.OwnerIdentityId,
-            ChatTestFactory.AliceDeviceId,
+            msgId,
+            channel.RemotePeerId,
+            ChatTestFactory.BobDeviceId,
             DeliveryRoute.DirectP2P);
 
         var result = await _sut.MarkAsReadAsync(readCmd);
 
         result.IsSuccess.Should().BeTrue();
+        var updatedMsg = await _chatRepo.GetByIdAsync(msgId);
+        updatedMsg!.ReadAtUnixMs.Should().Be(readTimestampMs);
+        updatedMsg.ExpiresAtUnixMs.Should().Be(readTimestampMs + 60_000UL);
+
         var lastSent = _payloadSender.SentPayloads.Last();
         var envelope = _serializer.Deserialize<ChatPayloadEnvelopeDto>(lastSent.Payload).Value;
         envelope.Type.Should().Be(ChatPayloadType.ReadReceipt);
+    }
+
+    private sealed class FakeBlobStorageService : IBlobStorageService
+    {
+        public List<BlobId> DeletedBlobs { get; } = new();
+
+        public ValueTask<DomainResult<BlobUploadResult>> UploadBlobAsync(
+            BlobUploadRequest request,
+            IProgress<TransferProgress>? progress = null,
+            CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
+        public ValueTask<DomainResult<BlobDownloadResult>> DownloadBlobAsync(
+            BlobDownloadRequest request,
+            IProgress<TransferProgress>? progress = null,
+            CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
+        public bool IsCachedLocally(BlobId blobId) => true;
+
+        public ValueTask DeleteLocalCacheAsync(BlobId blobId, CancellationToken ct = default)
+        {
+            DeletedBlobs.Add(blobId);
+            return ValueTask.CompletedTask;
+        }
     }
 }

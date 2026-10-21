@@ -22,6 +22,15 @@ public sealed class InMemoryChatMessageRepository : IChatMessageRepository
         return Task.FromResult(record);
     }
 
+    public Task<IReadOnlyList<ChatMessage>> GetByChannelIdAsync(ChannelId channelId, CancellationToken ct = default)
+    {
+        var messages = _storage.Values
+            .Where(m => m.ChannelId == channelId)
+            .OrderBy(m => m.TimestampUnixMs)
+            .ToList();
+        return Task.FromResult<IReadOnlyList<ChatMessage>>(messages);
+    }
+
     public Task UpdateAsync(ChatMessage record, CancellationToken ct = default)
     {
         _storage[record.Id] = record;

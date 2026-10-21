@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using FluentAssertions;
 using NUnit.Framework;
 using Percolator.Apps.Chat.Features.GroupInvitations;
@@ -18,6 +19,7 @@ public class ChatPayloadHandlerTests
     private InMemoryChatMessageRepository _chatRepo = null!;
     private InMemoryChannelRepository _channelRepo = null!;
     private InMemoryGroupInvitationRepository _invitationRepo = null!;
+    private InMemoryUnknownGroupCache _unknownGroupCache = null!;
     private TestPayloadSerializer _serializer = null!;
     private FakeDateTimeProvider _timeProvider = null!;
     private ChatPayloadHandler _sut = null!;
@@ -28,10 +30,17 @@ public class ChatPayloadHandlerTests
         _chatRepo = new InMemoryChatMessageRepository();
         _channelRepo = new InMemoryChannelRepository();
         _invitationRepo = new InMemoryGroupInvitationRepository();
+        _unknownGroupCache = new InMemoryUnknownGroupCache();
         _serializer = new TestPayloadSerializer();
         _timeProvider = new FakeDateTimeProvider(new DateTimeOffset(2026, 10, 10, 12, 0, 0, TimeSpan.Zero));
 
-        _sut = new ChatPayloadHandler(_chatRepo, _channelRepo, _invitationRepo, _serializer, _timeProvider);
+        _sut = new ChatPayloadHandler(
+            _chatRepo,
+            _channelRepo,
+            _invitationRepo,
+            _serializer,
+            _timeProvider,
+            _unknownGroupCache);
     }
 
     [Test]
@@ -78,6 +87,43 @@ public class ChatPayloadHandlerTests
         record.AuthorId.Should().Be(channel.RemotePeerId);
 
         channel.Payloads.Should().ContainSingle(p => p.Id == msgId);
+    }
+
+    [Test]
+    public async Task HandleInboundAsync_UnknownGroupMessage_BuffersInUnknownGroupCacheUntilJoined()
+    {
+        var unknownGroupId = ChannelId.New();
+        var msgId = PayloadId.New();
+        var msgDto = new ChatMessageDto(
+            msgId,
+            unknownGroupId,
+            ChatTestFactory.BobId,
+            _timeProvider.UtcNowUnixMs,
+            "Early group message before invite accepted",
+            Array.Empty<MentionDto>(),
+            null,
+            null,
+            Array.Empty<MediaAttachmentDto>(),
+            null,
+            null);
+
+        var envelope = new ChatPayloadEnvelopeDto(ChatPayloadType.Message, _serializer.Serialize(msgDto), Array.Empty<byte>());
+        var rawPayload = _serializer.Serialize(envelope);
+
+        var context = new InboundPayloadContext(
+            unknownGroupId,
+            ChatTestFactory.BobId,
+            ChatTestFactory.BobDeviceId,
+            AppId.Chat,
+            rawPayload,
+            _timeProvider.UtcNow);
+
+        var result = await _sut.HandleInboundAsync(context);
+        result.IsSuccess.Should().BeTrue();
+
+        // Buffered in unknown group cache, not yet in active chat repository
+        (await _chatRepo.GetByIdAsync(msgId)).Should().BeNull();
+        (await _unknownGroupCache.GetByChannelIdAsync(unknownGroupId)).Should().ContainSingle(r => r.Id == msgId);
     }
 
     [Test]
@@ -173,7 +219,7 @@ public class ChatPayloadHandlerTests
             msgId,
             channel.Id,
             channel.RemotePeerId,
-            "❤️",
+            "\u2764\ufe0f",
             ReactionAction.Add,
             _timeProvider.UtcNowUnixMs);
 
@@ -184,7 +230,7 @@ public class ChatPayloadHandlerTests
 
         result.IsSuccess.Should().BeTrue();
         var updated = await _chatRepo.GetByIdAsync(msgId);
-        updated!.Reactions.Should().ContainSingle(r => r.Emoji.Value == "❤️" && r.ReactorId == channel.RemotePeerId);
+        updated!.Reactions.Should().ContainSingle(r => r.Emoji.Value == "\u2764\ufe0f" && r.ReactorId == channel.RemotePeerId);
     }
 
     [Test]
@@ -247,6 +293,37 @@ public class ChatPayloadHandlerTests
     }
 
     [Test]
+    public async Task HandleInboundAsync_MessageEdit_WhenSenderSpoofsTimestampPast24HourReceiverWindow_RejectsEdit()
+    {
+        var channel = ChatTestFactory.CreateDirectChannel(_timeProvider);
+        await _channelRepo.SaveDirectAsync(channel);
+
+        var msgId = PayloadId.New();
+        var initialSentMs = _timeProvider.UtcNowUnixMs;
+        var message = new ChatMessage(msgId, channel.Id, channel.RemotePeerId, initialSentMs, "Initial");
+        await _chatRepo.AddAsync(message);
+
+        // Receiver clock is now 30 hours later, but sender spoofs EditedAtUnixMs = initialSentMs + 1000
+        _timeProvider.Advance(TimeSpan.FromHours(30));
+
+        var spoofedEditDto = new MessageEditDto(
+            msgId,
+            channel.Id,
+            channel.RemotePeerId,
+            "Spoofed backdated edit",
+            Array.Empty<MentionDto>(),
+            initialSentMs + 1000);
+
+        var envelope = new ChatPayloadEnvelopeDto(ChatPayloadType.Edit, _serializer.Serialize(spoofedEditDto), Array.Empty<byte>());
+        var context = new InboundPayloadContext(channel.Id, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
+
+        var result = await _sut.HandleInboundAsync(context);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("EDIT_WINDOW_EXPIRED");
+    }
+
+    [Test]
     public async Task HandleInboundAsync_MessageEdit_NonAuthor_RejectsEdit()
     {
         var channel = ChatTestFactory.CreateDirectChannel(_timeProvider);
@@ -301,6 +378,74 @@ public class ChatPayloadHandlerTests
     }
 
     [Test]
+    public async Task HandleInboundAsync_ReadReceipt_StartsDisappearingTimerAndRejectsForgedReader()
+    {
+        var channel = ChatTestFactory.CreateDirectChannel(_timeProvider);
+        await _channelRepo.SaveDirectAsync(channel);
+
+        var msgId = PayloadId.New();
+        var message = new ChatMessage(
+            msgId,
+            channel.Id,
+            channel.OwnerIdentityId,
+            _timeProvider.UtcNowUnixMs,
+            "Ephemeral 1:1 message",
+            expireAfterSeconds: 30,
+            expiresAtUnixMs: null);
+        await _chatRepo.AddAsync(message);
+
+        _timeProvider.Advance(TimeSpan.FromMinutes(2));
+
+        // 1. Forged reader identity is rejected
+        var forgedReceipt = new ReadReceiptDto(channel.Id, channel.OwnerIdentityId, msgId, _timeProvider.UtcNowUnixMs);
+        var forgedEnv = new ChatPayloadEnvelopeDto(ChatPayloadType.ReadReceipt, _serializer.Serialize(forgedReceipt), Array.Empty<byte>());
+        var forgedCtx = new InboundPayloadContext(channel.Id, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(forgedEnv), _timeProvider.UtcNow);
+        var forgedResult = await _sut.HandleInboundAsync(forgedCtx);
+        forgedResult.IsFailure.Should().BeTrue();
+        forgedResult.Error.Code.Should().Be("UNAUTHORIZED_AUTHOR");
+
+        // 2. Valid read receipt marks message read and starts 30s expiration countdown
+        var validReceipt = new ReadReceiptDto(channel.Id, channel.RemotePeerId, msgId, _timeProvider.UtcNowUnixMs);
+        var validEnv = new ChatPayloadEnvelopeDto(ChatPayloadType.ReadReceipt, _serializer.Serialize(validReceipt), Array.Empty<byte>());
+        var validCtx = new InboundPayloadContext(channel.Id, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(validEnv), _timeProvider.UtcNow);
+        var validResult = await _sut.HandleInboundAsync(validCtx);
+        validResult.IsSuccess.Should().BeTrue();
+
+        var updated = await _chatRepo.GetByIdAsync(msgId);
+        updated!.ReadAtUnixMs.Should().Be(_timeProvider.UtcNowUnixMs);
+        updated.ExpiresAtUnixMs.Should().Be(_timeProvider.UtcNowUnixMs + 30_000UL);
+    }
+
+    [Test]
+    public void ChatIngressFilter_RejectsOversizedFramesAndRateLimitsFloods()
+    {
+        var filter = new ChatIngressFilter(_timeProvider, maxFramesPerWindow: 2);
+        var channelId = ChannelId.New();
+
+        // 1. Oversized frame (> 64 KB) is dropped before deserialization
+        var oversized = new InboundPayloadContext(
+            channelId,
+            ChatTestFactory.BobId,
+            ChatTestFactory.BobDeviceId,
+            AppId.Chat,
+            new byte[ChatIngressFilter.MaxWireFrameBytes + 1],
+            _timeProvider.UtcNow);
+        filter.Evaluate(oversized).Should().Be(IngressDecision.DiscardSilently);
+
+        // 2. Valid frames accepted up to rate limit
+        var validFrame = new InboundPayloadContext(
+            channelId,
+            ChatTestFactory.BobId,
+            ChatTestFactory.BobDeviceId,
+            AppId.Chat,
+            new byte[256],
+            _timeProvider.UtcNow);
+        filter.Evaluate(validFrame).Should().Be(IngressDecision.Accept);
+        filter.Evaluate(validFrame).Should().Be(IngressDecision.Accept);
+        filter.Evaluate(validFrame).Should().Be(IngressDecision.DiscardSilently);
+    }
+
+    [Test]
     public async Task HandleInboundAsync_CorruptedEnvelope_ReturnsDeserializationError()
     {
         var channel = ChatTestFactory.CreateDirectChannel(_timeProvider);
@@ -344,7 +489,7 @@ public class ChatPayloadHandlerTests
             msgId,
             channel.Id,
             channel.OwnerIdentityId, // Forged author!
-            "👍",
+            "\ud83d\udc4d",
             ReactionAction.Add,
             _timeProvider.UtcNowUnixMs);
 
@@ -375,7 +520,7 @@ public class ChatPayloadHandlerTests
             msgId,
             channelB.Id,
             channelA.RemotePeerId,
-            "👍",
+            "\ud83d\udc4d",
             ReactionAction.Add,
             _timeProvider.UtcNowUnixMs);
 
@@ -544,4 +689,40 @@ public class ChatPayloadHandlerTests
     }
 
     #endregion
+
+    private sealed class InMemoryUnknownGroupCache : IUnknownGroupMessageCacheRepository
+    {
+        private readonly ConcurrentDictionary<PayloadId, UnknownGroupMessageRecord> _records = new();
+
+        public Task AddAsync(UnknownGroupMessageRecord record, CancellationToken ct = default)
+        {
+            _records[record.Id] = record;
+            return Task.CompletedTask;
+        }
+
+        public Task<IReadOnlyList<UnknownGroupMessageRecord>> GetByChannelIdAsync(ChannelId channelId, CancellationToken ct = default)
+        {
+            var list = _records.Values.Where(r => r.ChannelId == channelId).ToList();
+            return Task.FromResult<IReadOnlyList<UnknownGroupMessageRecord>>(list);
+        }
+
+        public Task RemoveAsync(PayloadId id, CancellationToken ct = default)
+        {
+            _records.TryRemove(id, out _);
+            return Task.CompletedTask;
+        }
+
+        public Task<int> PurgeExpiredAsync(ulong currentTimestampUnixMs, CancellationToken ct = default)
+        {
+            int count = 0;
+            foreach (var kvp in _records)
+            {
+                if (kvp.Value.ExpiresAtUnixMs <= currentTimestampUnixMs && _records.TryRemove(kvp.Key, out _))
+                {
+                    count++;
+                }
+            }
+            return Task.FromResult(count);
+        }
+    }
 }

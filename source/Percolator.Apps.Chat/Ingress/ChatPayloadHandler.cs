@@ -1,4 +1,5 @@
 using Percolator.Apps.Chat.Features.GroupInvitations;
+using Percolator.Apps.Chat.Features.Media;
 using Percolator.Apps.Chat.Features.Messaging;
 using Percolator.Apps.Chat.Features.Reactions;
 using Percolator.Domain.Channels.Model;
@@ -11,6 +12,8 @@ namespace Percolator.Apps.Chat.Ingress;
 
 public sealed class ChatPayloadHandler : IAppPayloadHandler
 {
+    public const ulong DefaultUnknownGroupCacheTtlMs = 24UL * 60 * 60 * 1000; // 24 hours
+
     public AppId TargetAppId => AppId.Chat;
 
     private readonly IChatMessageRepository _chatRepo;
@@ -18,23 +21,34 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
     private readonly IGroupInvitationRepository _invitationRepo;
     private readonly IPayloadSerializer _serializer;
     private readonly IDateTimeProvider _timeProvider;
+    private readonly IUnknownGroupMessageCacheRepository? _unknownGroupCache;
+    private readonly IBlobStorageService? _blobStorage;
 
     public ChatPayloadHandler(
         IChatMessageRepository chatRepo,
         IChannelRepository channelRepo,
         IGroupInvitationRepository invitationRepo,
         IPayloadSerializer serializer,
-        IDateTimeProvider timeProvider)
+        IDateTimeProvider timeProvider,
+        IUnknownGroupMessageCacheRepository? unknownGroupCache = null,
+        IBlobStorageService? blobStorage = null)
     {
         _chatRepo = chatRepo ?? throw new ArgumentNullException(nameof(chatRepo));
         _channelRepo = channelRepo ?? throw new ArgumentNullException(nameof(channelRepo));
         _invitationRepo = invitationRepo ?? throw new ArgumentNullException(nameof(invitationRepo));
         _serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
+        _unknownGroupCache = unknownGroupCache;
+        _blobStorage = blobStorage;
     }
 
     public async ValueTask<DomainResult> HandleInboundAsync(InboundPayloadContext context, CancellationToken ct = default)
     {
+        if (context.AppId != TargetAppId)
+        {
+            return DomainResult.Failure(new DomainError("APP_ID_MISMATCH", $"Payload has AppId '{context.AppId}' but handler expects '{TargetAppId}'."));
+        }
+
         var envelopeResult = _serializer.Deserialize<ChatPayloadEnvelopeDto>(context.Payload);
         if (envelopeResult.IsFailure)
         {
@@ -79,6 +93,14 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
             return DomainResult.Failure(new DomainError("CHANNEL_MISMATCH", "Target message belongs to a different channel."));
         }
 
+        if (dto.ExpireAfterSeconds.HasValue &&
+            (dto.ExpireAfterSeconds.Value <= 0 || dto.ExpireAfterSeconds.Value > ChatMessage.MaxExpireAfterSeconds))
+        {
+            return DomainResult.Failure(new DomainError(
+                "INVALID_EXPIRATION",
+                $"ExpireAfterSeconds must be between 1 and {ChatMessage.MaxExpireAfterSeconds} seconds."));
+        }
+
         // Replay & duplicate ingestion guard
         var existing = await _chatRepo.GetByIdAsync(dto.Id, ct).ConfigureAwait(false);
         if (existing is not null)
@@ -86,10 +108,8 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
             return DomainResult.Success();
         }
 
-        // Validate and filter mentions
-        var validMentions = dto.Mentions?
-            .Where(m => MentionHelper.IsValidSpan(dto.Content, m))
-            .ToList() ?? new List<MentionDto>();
+        // Single-pass UTF-8 mention validation
+        var validMentions = MentionHelper.FilterValidSpans(dto.Content, dto.Mentions);
 
         // Append to domain channel aggregate
         var directChannel = await _channelRepo.GetDirectByIdAsync(context.ChannelId, ct).ConfigureAwait(false);
@@ -132,10 +152,25 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
 
                 await _channelRepo.SaveGroupAsync(groupChannel, ct).ConfigureAwait(false);
             }
+            else if (_unknownGroupCache is not null)
+            {
+                ulong receivedAtMs = (ulong)context.ReceivedAtUtc.ToUnixTimeMilliseconds();
+                var unknownRecord = new UnknownGroupMessageRecord(
+                    dto.Id,
+                    context.ChannelId,
+                    dto.AuthorId,
+                    context.Payload,
+                    receivedAtMs,
+                    receivedAtMs + DefaultUnknownGroupCacheTtlMs);
+
+                await _unknownGroupCache.AddAsync(unknownRecord, ct).ConfigureAwait(false);
+                return DomainResult.Success();
+            }
         }
 
+        ulong receiptBaselineMs = (ulong)context.ReceivedAtUtc.ToUnixTimeMilliseconds();
         ulong? expiresAtUnixMs = dto.ExpireAfterSeconds.HasValue
-            ? dto.TimestampUnixMs + (ulong)(dto.ExpireAfterSeconds.Value * 1000)
+            ? receiptBaselineMs + ((ulong)dto.ExpireAfterSeconds.Value * 1000UL)
             : null;
 
         var message = new ChatMessage(
@@ -186,11 +221,16 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
             return DomainResult.Failure(new DomainError("CHANNEL_MISMATCH", "Target message belongs to a different channel."));
         }
 
-        var validMentions = dto.NewMentions?
-            .Where(m => MentionHelper.IsValidSpan(dto.NewContent, m))
-            .ToList() ?? new List<MentionDto>();
+        var validMentions = MentionHelper.FilterValidSpans(dto.NewContent, dto.NewMentions);
+        ulong receivedAtUnixMs = (ulong)context.ReceivedAtUtc.ToUnixTimeMilliseconds();
 
-        var appliedResult = message.ApplyEdit(dto.NewContent, validMentions, dto.EditedAtUnixMs, context.SenderIdentityId);
+        var appliedResult = message.ApplyEdit(
+            dto.NewContent,
+            validMentions,
+            dto.EditedAtUnixMs,
+            context.SenderIdentityId,
+            receivedAtUnixMs);
+
         if (appliedResult.IsFailure)
         {
             return appliedResult;
@@ -209,6 +249,11 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
         }
 
         var dto = tombstoneResult.Value;
+        if (dto.RequestedBy != context.SenderIdentityId)
+        {
+            return DomainResult.Failure(new DomainError("UNAUTHORIZED_AUTHOR", "Tombstone requester does not match sender identity."));
+        }
+
         if (dto.ChannelId != context.ChannelId)
         {
             return DomainResult.Failure(new DomainError("CHANNEL_MISMATCH", "Target message belongs to a different channel."));
@@ -225,9 +270,17 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
             return DomainResult.Failure(new DomainError("CHANNEL_MISMATCH", "Target message belongs to a different channel."));
         }
 
+        var attachmentsToPurge = message.Attachments;
+        ulong receivedAtUnixMs = (ulong)context.ReceivedAtUtc.ToUnixTimeMilliseconds();
+
         if (context.SenderIdentityId == message.AuthorId)
         {
-            var tombstoneResultApplied = message.ApplyTombstone(context.SenderIdentityId, dto.DeletedAtUnixMs, isChannelAdmin: false);
+            var tombstoneResultApplied = message.ApplyTombstone(
+                context.SenderIdentityId,
+                dto.DeletedAtUnixMs,
+                isChannelAdmin: false,
+                receivedAtUnixMs: receivedAtUnixMs);
+
             if (tombstoneResultApplied.IsFailure)
             {
                 return tombstoneResultApplied;
@@ -239,7 +292,12 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
             var member = groupChannel?.Members.FirstOrDefault(m => m.Id == context.SenderIdentityId);
             if (member?.Role == ChannelRole.Admin)
             {
-                var tombstoneResultApplied = message.ApplyTombstone(context.SenderIdentityId, dto.DeletedAtUnixMs, isChannelAdmin: true);
+                var tombstoneResultApplied = message.ApplyTombstone(
+                    context.SenderIdentityId,
+                    dto.DeletedAtUnixMs,
+                    isChannelAdmin: true,
+                    receivedAtUnixMs: receivedAtUnixMs);
+
                 if (tombstoneResultApplied.IsFailure)
                 {
                     return tombstoneResultApplied;
@@ -252,6 +310,18 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
         }
 
         await _chatRepo.UpdateAsync(message, ct).ConfigureAwait(false);
+
+        if (_blobStorage is not null && attachmentsToPurge.Count > 0)
+        {
+            foreach (var attachment in attachmentsToPurge)
+            {
+                if (!string.IsNullOrWhiteSpace(attachment.BlobId.HexDigest))
+                {
+                    await _blobStorage.DeleteLocalCacheAsync(attachment.BlobId, ct).ConfigureAwait(false);
+                }
+            }
+        }
+
         return DomainResult.Success();
     }
 
@@ -304,15 +374,46 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
         return DomainResult.Success();
     }
 
-    private ValueTask<DomainResult> HandleReadReceiptAsync(ReadOnlyMemory<byte> data, InboundPayloadContext context, CancellationToken ct)
+    private async ValueTask<DomainResult> HandleReadReceiptAsync(ReadOnlyMemory<byte> data, InboundPayloadContext context, CancellationToken ct)
     {
         var receiptResult = _serializer.Deserialize<ReadReceiptDto>(data);
         if (receiptResult.IsFailure)
         {
-            return ValueTask.FromResult(DomainResult.Failure(receiptResult.Error));
+            return DomainResult.Failure(receiptResult.Error);
         }
 
-        return ValueTask.FromResult(DomainResult.Success());
+        var dto = receiptResult.Value;
+        if (dto.ReaderId != context.SenderIdentityId)
+        {
+            return DomainResult.Failure(new DomainError("UNAUTHORIZED_AUTHOR", "Read receipt reader does not match cryptographic sender."));
+        }
+
+        if (dto.ChannelId != context.ChannelId)
+        {
+            return DomainResult.Failure(new DomainError("CHANNEL_MISMATCH", "Read receipt belongs to a different channel."));
+        }
+
+        ulong effectiveReadMs = (ulong)context.ReceivedAtUtc.ToUnixTimeMilliseconds();
+        var targetMessage = await _chatRepo.GetByIdAsync(dto.UpToPayloadId, ct).ConfigureAwait(false);
+        if (targetMessage is not null && targetMessage.ChannelId == context.ChannelId)
+        {
+            targetMessage.MarkAsRead(effectiveReadMs);
+            await _chatRepo.UpdateAsync(targetMessage, ct).ConfigureAwait(false);
+
+            var channelMessages = await _chatRepo.GetByChannelIdAsync(context.ChannelId, ct).ConfigureAwait(false);
+            foreach (var msg in channelMessages)
+            {
+                if (msg.Id != targetMessage.Id &&
+                    msg.TimestampUnixMs <= targetMessage.TimestampUnixMs &&
+                    msg.ReadAtUnixMs is null)
+                {
+                    msg.MarkAsRead(effectiveReadMs);
+                    await _chatRepo.UpdateAsync(msg, ct).ConfigureAwait(false);
+                }
+            }
+        }
+
+        return DomainResult.Success();
     }
 
     private async ValueTask<DomainResult> HandleGroupInvitationAsync(ReadOnlyMemory<byte> data, InboundPayloadContext context, CancellationToken ct)
@@ -361,6 +462,17 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
             if (dto.Accepted)
             {
                 existing.Accept(dto.RespondedAtUnixMs);
+
+                // If the local node manages the target GroupChannel, add the accepting responder as a Member
+                var group = await _channelRepo.GetGroupByIdAsync(existing.TargetGroupChannelId, ct).ConfigureAwait(false);
+                if (group is not null && !group.Members.Any(m => m.Id == dto.ResponderId))
+                {
+                    var addResult = group.AddMember(existing.InviterId, dto.ResponderId, ChannelRole.Member, _timeProvider);
+                    if (addResult.IsSuccess)
+                    {
+                        await _channelRepo.SaveGroupAsync(group, ct).ConfigureAwait(false);
+                    }
+                }
             }
             else
             {
@@ -379,6 +491,12 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
         if (noticeResult.IsFailure)
         {
             return ValueTask.FromResult(DomainResult.Failure(noticeResult.Error));
+        }
+
+        var dto = noticeResult.Value;
+        if (dto.ChannelId != context.ChannelId)
+        {
+            return ValueTask.FromResult(DomainResult.Failure(new DomainError("CHANNEL_MISMATCH", "System notice belongs to a different channel.")));
         }
 
         return ValueTask.FromResult(DomainResult.Success());

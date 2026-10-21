@@ -9,8 +9,9 @@ namespace Percolator.Apps.Chat.Features.Messaging;
 public sealed class ChatMessage
 {
     public const int MaxContentLength = 16_000;
-    private const ulong MaxEditWindowMs = 24UL * 60 * 60 * 1000; // 24 hours
-    private const ulong MaxTombstoneWindowMs = 24UL * 60 * 60 * 1000; // 24 hours
+    public const int MaxExpireAfterSeconds = 28 * 24 * 60 * 60; // 28 days
+    public const ulong MaxEditWindowMs = 24UL * 60 * 60 * 1000; // 24 hours
+    public const ulong MaxTombstoneWindowMs = 24UL * 60 * 60 * 1000; // 24 hours
 
     public PayloadId Id { get; }
     public ChannelId ChannelId { get; }
@@ -22,7 +23,8 @@ public sealed class ChatMessage
     public LinkPreviewDto? LinkPreview { get; private set; }
     public IReadOnlyList<MediaAttachmentDto> Attachments { get; private set; }
     public int? ExpireAfterSeconds { get; }
-    public ulong? ExpiresAtUnixMs { get; }
+    public ulong? ExpiresAtUnixMs { get; private set; }
+    public ulong? ReadAtUnixMs { get; private set; }
     public ulong? EditedAtUnixMs { get; private set; }
     public bool IsTombstone { get; private set; }
     public ulong? DeletedAtUnixMs { get; private set; }
@@ -47,7 +49,8 @@ public sealed class ChatMessage
         bool isTombstone = false,
         ulong? deletedAtUnixMs = null,
         PublicIdentityId? deletedBy = null,
-        IEnumerable<ChatReaction>? reactions = null)
+        IEnumerable<ChatReaction>? reactions = null,
+        ulong? readAtUnixMs = null)
     {
         bool hasContent = !string.IsNullOrWhiteSpace(content);
         bool hasAttachments = attachments is not null && attachments.Count > 0;
@@ -61,6 +64,13 @@ public sealed class ChatMessage
             throw new ArgumentException($"Message content cannot exceed {MaxContentLength} characters.", nameof(content));
         }
 
+        if (expireAfterSeconds.HasValue && (expireAfterSeconds.Value <= 0 || expireAfterSeconds.Value > MaxExpireAfterSeconds))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(expireAfterSeconds),
+                $"ExpireAfterSeconds must be between 1 and {MaxExpireAfterSeconds} seconds.");
+        }
+
         Id = id;
         ChannelId = channelId;
         AuthorId = authorId;
@@ -72,6 +82,7 @@ public sealed class ChatMessage
         Attachments = attachments ?? Array.Empty<MediaAttachmentDto>();
         ExpireAfterSeconds = expireAfterSeconds;
         ExpiresAtUnixMs = expiresAtUnixMs;
+        ReadAtUnixMs = readAtUnixMs;
         EditedAtUnixMs = editedAtUnixMs;
         IsTombstone = isTombstone;
         DeletedAtUnixMs = deletedAtUnixMs;
@@ -83,7 +94,12 @@ public sealed class ChatMessage
         }
     }
 
-    public DomainResult ApplyEdit(string newContent, IReadOnlyList<MentionDto> newMentions, ulong editedAtUnixMs, PublicIdentityId editorId)
+    public DomainResult ApplyEdit(
+        string newContent,
+        IReadOnlyList<MentionDto> newMentions,
+        ulong editedAtUnixMs,
+        PublicIdentityId editorId,
+        ulong? receivedAtUnixMs = null)
     {
         if (IsTombstone)
         {
@@ -110,13 +126,23 @@ public sealed class ChatMessage
             return DomainResult.Failure(new DomainError("EDIT_WINDOW_EXPIRED", "Message edit window has expired."));
         }
 
+        if (receivedAtUnixMs.HasValue &&
+            (receivedAtUnixMs.Value < TimestampUnixMs || (receivedAtUnixMs.Value - TimestampUnixMs) > MaxEditWindowMs))
+        {
+            return DomainResult.Failure(new DomainError("EDIT_WINDOW_EXPIRED", "Message edit window has expired at receiver."));
+        }
+
         Content = newContent;
         Mentions = newMentions;
         EditedAtUnixMs = editedAtUnixMs;
         return DomainResult.Success();
     }
 
-    public DomainResult ApplyTombstone(PublicIdentityId requestedBy, ulong deletedAtUnixMs, bool isChannelAdmin = false)
+    public DomainResult ApplyTombstone(
+        PublicIdentityId requestedBy,
+        ulong deletedAtUnixMs,
+        bool isChannelAdmin = false,
+        ulong? receivedAtUnixMs = null)
     {
         if (IsTombstone)
         {
@@ -133,6 +159,12 @@ public sealed class ChatMessage
             return DomainResult.Failure(new DomainError("TOMBSTONE_WINDOW_EXPIRED", "Message tombstone window has expired."));
         }
 
+        if (receivedAtUnixMs.HasValue &&
+            (receivedAtUnixMs.Value < TimestampUnixMs || (receivedAtUnixMs.Value - TimestampUnixMs) > MaxTombstoneWindowMs))
+        {
+            return DomainResult.Failure(new DomainError("TOMBSTONE_WINDOW_EXPIRED", "Message tombstone window has expired at receiver."));
+        }
+
         IsTombstone = true;
         Content = requestedBy != AuthorId && isChannelAdmin
             ? "This message was deleted by a channel administrator"
@@ -143,6 +175,23 @@ public sealed class ChatMessage
         DeletedAtUnixMs = deletedAtUnixMs;
         DeletedBy = requestedBy;
         return DomainResult.Success();
+    }
+
+    /// <summary>
+    /// Marks the message as read at the given timestamp and starts the disappearing-message countdown
+    /// for 1:1 messages that defer expiration until read.
+    /// </summary>
+    public void MarkAsRead(ulong readAtUnixMs)
+    {
+        ReadAtUnixMs ??= readAtUnixMs;
+
+        if (ExpireAfterSeconds is > 0)
+        {
+            ulong readBasedExpiry = ReadAtUnixMs.Value + ((ulong)ExpireAfterSeconds.Value * 1000UL);
+            ExpiresAtUnixMs = ExpiresAtUnixMs.HasValue
+                ? Math.Min(ExpiresAtUnixMs.Value, readBasedExpiry)
+                : readBasedExpiry;
+        }
     }
 
     public void AddReaction(PublicIdentityId reactorId, Emoji emoji, ulong timestampUnixMs)
