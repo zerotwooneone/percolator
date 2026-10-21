@@ -226,7 +226,7 @@ Carried inside `SealedEnvelopeProto.encrypted_package` (opaque to relays and pas
     - `bytes onetime_prekey_id = 4;`
     - `bytes encrypted_payload = 5;`
 
-#### 5. Application Plugins (`chat.proto`, `discovery.proto`)
+#### 5. Application Plugins (`chat.proto`, `discovery.proto`, `file_transfer.proto`)
 - `chat.proto`:
   - `ChatPayloadEnvelopeProto`:
     - `uint32 type = 1;` (Wire discriminator: Message=1, Edit=2, Tombstone=3, Reaction=4, ReadReceipt=5, SystemNotice=6, GroupInvitation=7, GroupInvitationResponse=8)
@@ -297,6 +297,23 @@ Carried inside `SealedEnvelopeProto.encrypted_package` (opaque to relays and pas
   - `BlindedRendezvousResponseProto`:
     - `bool found = 1;`
     - `optional PeerDiscoveryDescriptorProto descriptor = 2;`
+- `file_transfer.proto`:
+  - `TransferManifestProto`:
+    - `bytes manifest_id = 1;` (16-byte UUID in RFC 4122 big-endian order)
+    - `string root_name = 2;`
+    - `int64 total_size_bytes = 3;`
+    - `int32 chunk_size_bytes = 4;`
+    - `bytes merkle_root = 5;` (32-byte SHA-256 root)
+    - `bytes concatenated_leaves = 6;` (Contiguous `N * 32`-byte SHA-256 leaf array with zero per-leaf tag overhead)
+    - `repeated FileEntryProto files = 7;`
+  - `FileEntryProto`:
+    - `int32 index = 1;`, `string relative_path = 2;`, `int64 file_size_bytes = 3;`, `int64 start_offset = 4;`, `int64 last_modified_unix_seconds = 5;`
+  - `FileTransferOfferProto`:
+    - `bytes transfer_session_id = 1;`, `TransferBundleSummaryProto summary = 2;`, `ManifestDistributionProto manifest = 3;`, `bytes session_encryption_key = 4;`, `bytes base_nonce = 5;`, `bytes stream_auth_token = 6;`, `RelayRendezvousDescriptorProto relay_rendezvous = 7;`, `repeated DirectEndpointCandidateProto direct_candidates = 8;`
+  - `FileTransferAcceptProto`:
+    - `bytes transfer_session_id = 1;`, `repeated DirectEndpointCandidateProto receiver_candidates = 2;`, `uint32 routing_preference = 3;`, `int32 total_chunks = 4;`, `bytes resumption_bitfield = 5;`
+  - `FileTransferCancelProto`:
+    - `bytes transfer_session_id = 1;`, `string reason = 2;`
 
 #### Serialization Adapters:
 - **`ProtobufSessionWirePacker`** (`Percolator.Application.Ports.ISessionWirePacker`):

@@ -1,6 +1,5 @@
 using System.Security.Cryptography;
 using Percolator.Apps.FileTransfer.Domain.Common;
-using Percolator.Apps.FileTransfer.Domain.Exceptions;
 using Percolator.Apps.FileTransfer.Domain.ManifestManagement;
 using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Features.IngressControl;
@@ -17,6 +16,7 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
     private readonly ITransferSessionRepository _sessionRepository;
     private readonly IDesktopFileStorage _fileStorage;
     private readonly IPayloadSender _payloadSender;
+    private readonly IPayloadSerializer _serializer;
     private readonly IDistributedTrackerPort _trackerPort;
     private readonly IDateTimeProvider _clock;
 
@@ -24,14 +24,16 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         ITransferSessionRepository sessionRepository,
         IDesktopFileStorage fileStorage,
         IPayloadSender payloadSender,
+        IPayloadSerializer serializer,
         IDistributedTrackerPort trackerPort,
         IDateTimeProvider clock)
     {
-        _sessionRepository = sessionRepository;
-        _fileStorage = fileStorage;
-        _payloadSender = payloadSender;
-        _trackerPort = trackerPort;
-        _clock = clock;
+        _sessionRepository = sessionRepository ?? throw new ArgumentNullException(nameof(sessionRepository));
+        _fileStorage = fileStorage ?? throw new ArgumentNullException(nameof(fileStorage));
+        _payloadSender = payloadSender ?? throw new ArgumentNullException(nameof(payloadSender));
+        _serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
+        _trackerPort = trackerPort ?? throw new ArgumentNullException(nameof(trackerPort));
+        _clock = clock ?? throw new ArgumentNullException(nameof(clock));
     }
 
     public async ValueTask<DomainResult<TransferSessionId>> InitiateTransferAsync(
@@ -121,14 +123,17 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         List<DirectEndpointCandidate> candidates = [];
         if (wanPolicy == DirectWanPolicy.ExplicitlyAllowed)
         {
-            // Direct WAN candidates when explicitly allowed
             candidates.Add(new DirectEndpointCandidate(EndpointHost.Parse("wan.example.com"), PortNumber.FromInt(50000), DirectCandidateKind.DirectWanUpnp));
         }
 
-        byte[] serializedManifest = TransferManifestSerializer.Serialize(manifest);
+        ReadOnlyMemory<byte> serializedManifest = _serializer.Serialize(manifest);
         ManifestDistribution manifestDist = serializedManifest.Length <= IngressTransferOfferValidator.MaxInlineManifestBytes
-            ? ManifestDistribution.FromInline(InlineManifestData.FromBytes(serializedManifest))
-            : ManifestDistribution.FromBlob(new ManifestBlobDescriptor(BlobId.FromSha256(SHA256.HashData(serializedManifest)), ChunkHash.FromBytes(SHA256.HashData(serializedManifest)), manifest.TotalSize, RelayPipeEndpointUri.Parse("https://relay.percolator.net/pipes")));
+            ? ManifestDistribution.FromInline(InlineManifestData.FromSpan(serializedManifest.Span))
+            : ManifestDistribution.FromBlob(new ManifestBlobDescriptor(
+                BlobId.FromSha256(SHA256.HashData(serializedManifest.Span)),
+                ChunkHash.FromBytes(SHA256.HashData(serializedManifest.Span)),
+                manifest.TotalSize,
+                RelayPipeEndpointUri.Parse("https://relay.percolator.net/pipes")));
 
         FileTransferOfferPayload offerPayload = new(
             sessionId,
@@ -140,9 +145,7 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
             RelayRendezvous: null,
             candidates);
 
-        byte[] inBandBytes = new byte[1 + offerPayload.Serialize().Length];
-        inBandBytes[0] = (byte)FileTransferControlOpcode.Offer;
-        offerPayload.Serialize().CopyTo(inBandBytes.AsSpan(1));
+        byte[] inBandBytes = PrependOpcode(FileTransferControlOpcode.Offer, _serializer.Serialize(offerPayload).Span);
 
         foreach (PublicIdentityId recipient in recipients)
         {
@@ -219,9 +222,7 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
             TransportRoutingPreference.DirectPreferred,
             session.LocalBitfield);
 
-        byte[] inBandBytes = new byte[1 + acceptPayload.Serialize().Length];
-        inBandBytes[0] = (byte)FileTransferControlOpcode.Accept;
-        acceptPayload.Serialize().CopyTo(inBandBytes.AsSpan(1));
+        byte[] inBandBytes = PrependOpcode(FileTransferControlOpcode.Accept, _serializer.Serialize(acceptPayload).Span);
 
         var outboundContext = new OutboundPayloadContext(
             ChannelId.FromGuid(sessionId.Value),
@@ -272,9 +273,7 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
 
             // Send in-band cancel payload
             FileTransferCancelPayload cancelPayload = new(sessionId, reason);
-            byte[] inBandBytes = new byte[1 + cancelPayload.Serialize().Length];
-            inBandBytes[0] = (byte)FileTransferControlOpcode.Cancel;
-            cancelPayload.Serialize().CopyTo(inBandBytes.AsSpan(1));
+            byte[] inBandBytes = PrependOpcode(FileTransferControlOpcode.Cancel, _serializer.Serialize(cancelPayload).Span);
 
             var outboundContext = new OutboundPayloadContext(
                 ChannelId.FromGuid(sessionId.Value),
@@ -288,5 +287,13 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
             await _payloadSender.SendPayloadAsync(outboundContext, ct);
         }
         return result;
+    }
+
+    private static byte[] PrependOpcode(FileTransferControlOpcode opcode, ReadOnlySpan<byte> payload)
+    {
+        byte[] framed = new byte[1 + payload.Length];
+        framed[0] = (byte)opcode;
+        payload.CopyTo(framed.AsSpan(1));
+        return framed;
     }
 }

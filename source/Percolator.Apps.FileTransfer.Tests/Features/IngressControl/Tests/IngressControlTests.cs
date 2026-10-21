@@ -7,6 +7,7 @@ using Percolator.Apps.FileTransfer.Tests.TestDoubles;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Infrastructure2.Serialization;
 using Percolator.PluginSdk;
 
 namespace Percolator.Apps.FileTransfer.Tests.Features.IngressControl.Tests;
@@ -17,6 +18,7 @@ public sealed class IngressControlTests
     private FakeDateTimeProvider _clock = null!;
     private InMemoryTransferSessionRepository _sessionRepository = null!;
     private InMemoryFilterPolicyRepository _policyRepository = null!;
+    private IPayloadSerializer _serializer = null!;
 
     [SetUp]
     public void SetUp()
@@ -24,6 +26,7 @@ public sealed class IngressControlTests
         _clock = new FakeDateTimeProvider();
         _sessionRepository = new InMemoryTransferSessionRepository();
         _policyRepository = new InMemoryFilterPolicyRepository();
+        _serializer = new ProtobufPayloadSerializer();
     }
 
     [Test]
@@ -77,11 +80,11 @@ public sealed class IngressControlTests
         RelayPipeEndpointUri blockedRelay = RelayPipeEndpointUri.Parse("https://malicious-relay.com/pipe");
         _policyRepository.Policy = FileTransferFilterPolicy.CreateDefault().BlockRelay(blockedRelay);
 
-        FileTransferPayloadHandler handler = new(_sessionRepository, _policyRepository, _clock);
+        FileTransferPayloadHandler handler = new(_sessionRepository, _policyRepository, _serializer, _clock);
 
         TransferSessionId sessionId = TransferSessionId.New();
         FileTransferOfferPayload offer = CreateValidOffer(sessionId, relayUri: blockedRelay);
-        byte[] payloadBytes = PrependOpcode((byte)FileTransferControlOpcode.Offer, offer.Serialize());
+        byte[] payloadBytes = PrependOpcode((byte)FileTransferControlOpcode.Offer, _serializer.Serialize(offer).Span);
 
         PublicIdentityId senderId = PublicIdentityId.New();
         InboundPayloadContext context = new(
@@ -102,11 +105,11 @@ public sealed class IngressControlTests
     [Test]
     public async Task UT_ING_04_IngressOfferStagingForAllowedPeer()
     {
-        FileTransferPayloadHandler handler = new(_sessionRepository, _policyRepository, _clock);
+        FileTransferPayloadHandler handler = new(_sessionRepository, _policyRepository, _serializer, _clock);
 
         TransferSessionId sessionId = TransferSessionId.New();
         FileTransferOfferPayload offer = CreateValidOffer(sessionId);
-        byte[] payloadBytes = PrependOpcode((byte)FileTransferControlOpcode.Offer, offer.Serialize());
+        byte[] payloadBytes = PrependOpcode((byte)FileTransferControlOpcode.Offer, _serializer.Serialize(offer).Span);
 
         PublicIdentityId senderId = PublicIdentityId.New();
         InboundPayloadContext context = new(
@@ -246,7 +249,7 @@ public sealed class IngressControlTests
     [Test]
     public async Task UT_ING_10_InboundCancellationFromAuthorizedInitiator()
     {
-        FileTransferPayloadHandler handler = new(_sessionRepository, _policyRepository, _clock);
+        FileTransferPayloadHandler handler = new(_sessionRepository, _policyRepository, _serializer, _clock);
 
         TransferSessionId sessionId = TransferSessionId.New();
         PublicIdentityId initiatorId = PublicIdentityId.New();
@@ -262,7 +265,7 @@ public sealed class IngressControlTests
         await _sessionRepository.SaveSessionAsync(session);
 
         FileTransferCancelPayload cancel = new(sessionId, TransferTerminationReason.SenderCancelled);
-        byte[] payloadBytes = PrependOpcode((byte)FileTransferControlOpcode.Cancel, cancel.Serialize());
+        byte[] payloadBytes = PrependOpcode((byte)FileTransferControlOpcode.Cancel, _serializer.Serialize(cancel).Span);
 
         InboundPayloadContext context = new(
             ChannelId.FromGuid(sessionId.Value),
@@ -282,7 +285,7 @@ public sealed class IngressControlTests
     [Test]
     public async Task UT_ING_11_InboundCancellationFromUnauthorizedThirdParty()
     {
-        FileTransferPayloadHandler handler = new(_sessionRepository, _policyRepository, _clock);
+        FileTransferPayloadHandler handler = new(_sessionRepository, _policyRepository, _serializer, _clock);
 
         TransferSessionId sessionId = TransferSessionId.New();
         byte[] idBytes1 = new byte[16];
@@ -304,7 +307,7 @@ public sealed class IngressControlTests
         PublicIdentityId attackerId = PublicIdentityId.FromBytes(attackerBytes);
 
         FileTransferCancelPayload cancel = new(sessionId, TransferTerminationReason.SenderCancelled);
-        byte[] payloadBytes = PrependOpcode((byte)FileTransferControlOpcode.Cancel, cancel.Serialize());
+        byte[] payloadBytes = PrependOpcode((byte)FileTransferControlOpcode.Cancel, _serializer.Serialize(cancel).Span);
 
         InboundPayloadContext context = new(
             ChannelId.FromGuid(sessionId.Value),
@@ -321,7 +324,7 @@ public sealed class IngressControlTests
         unchanged!.State.Should().Be(TransferSessionState.PendingConsent);
     }
 
-    private static FileTransferOfferPayload CreateValidOffer(TransferSessionId sessionId, RelayPipeEndpointUri? relayUri = null)
+    private FileTransferOfferPayload CreateValidOffer(TransferSessionId sessionId, RelayPipeEndpointUri? relayUri = null)
     {
         TransferManifest manifest = TransferManifest.Create(
             sessionId,
@@ -330,7 +333,7 @@ public sealed class IngressControlTests
             MerkleTreeBuilder.BuildFromLeaves([ChunkHash.FromBytes(new byte[32])]),
             [new FileEntry(FileIndex.FromInt(0), SanitizedRelativePath.Parse("file.bin"), FileSizeBytes.FromBytes(1024), BundleByteOffset.Zero, FileLastModifiedUtc.FromDateTimeOffset(DateTimeOffset.UtcNow))]);
 
-        byte[] manifestBytes = TransferManifestSerializer.Serialize(manifest);
+        ReadOnlyMemory<byte> manifestBytes = _serializer.Serialize(manifest);
 
         TransferBundleSummary summary = TransferBundleSummary.Create(
             manifest.RootName,
@@ -347,7 +350,7 @@ public sealed class IngressControlTests
         return new FileTransferOfferPayload(
             sessionId,
             summary,
-            ManifestDistribution.FromInline(InlineManifestData.FromBytes(manifestBytes)),
+            ManifestDistribution.FromInline(InlineManifestData.FromSpan(manifestBytes.Span)),
             TransferKey.Generate(),
             BaseNonce.Generate(),
             StreamAuthToken.Generate(),
@@ -355,11 +358,11 @@ public sealed class IngressControlTests
             DirectCandidates: []);
     }
 
-    private static byte[] PrependOpcode(byte opcode, byte[] payload)
+    private static byte[] PrependOpcode(byte opcode, ReadOnlySpan<byte> payload)
     {
         byte[] combined = new byte[1 + payload.Length];
         combined[0] = opcode;
-        payload.CopyTo(combined, 1);
+        payload.CopyTo(combined.AsSpan(1));
         return combined;
     }
 }

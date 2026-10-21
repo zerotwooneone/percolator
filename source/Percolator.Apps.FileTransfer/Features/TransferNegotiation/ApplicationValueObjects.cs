@@ -77,7 +77,10 @@ public sealed record RelayPipeEndpointUri
 }
 
 [ByteArray(length: 32)]
-public sealed partial record RelayPipeToken;
+public sealed partial record RelayPipeToken
+{
+    public static RelayPipeToken Generate() => FromBytes(RandomNumberGenerator.GetBytes(32));
+}
 
 public sealed record RelayRendezvousDescriptor(
     RelayPipeEndpointUri EndpointUri,
@@ -194,6 +197,10 @@ public sealed record InlineManifestData
             throw new ArgumentException("Inline manifest must be between 1 and 49152 bytes.", nameof(bytes));
         return new InlineManifestData(bytes);
     }
+
+    public static InlineManifestData FromSpan(ReadOnlySpan<byte> bytes) => FromBytes(bytes.ToArray());
+
+    public byte[] ToByteArray() => SerializedBytes.ToArray();
 }
 
 public sealed record ManifestBlobDescriptor(

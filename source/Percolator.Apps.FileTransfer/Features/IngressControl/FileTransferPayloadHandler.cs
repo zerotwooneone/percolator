@@ -13,6 +13,7 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
 {
     private readonly ITransferSessionRepository _sessionRepository;
     private readonly IFileTransferFilterPolicyRepository _policyRepository;
+    private readonly IPayloadSerializer _serializer;
     private readonly IDateTimeProvider _clock;
 
     public AppId TargetAppId => AppId.FileTransferControl;
@@ -20,11 +21,13 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
     public FileTransferPayloadHandler(
         ITransferSessionRepository sessionRepository,
         IFileTransferFilterPolicyRepository policyRepository,
+        IPayloadSerializer serializer,
         IDateTimeProvider clock)
     {
-        _sessionRepository = sessionRepository;
-        _policyRepository = policyRepository;
-        _clock = clock;
+        _sessionRepository = sessionRepository ?? throw new ArgumentNullException(nameof(sessionRepository));
+        _policyRepository = policyRepository ?? throw new ArgumentNullException(nameof(policyRepository));
+        _serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
+        _clock = clock ?? throw new ArgumentNullException(nameof(clock));
     }
 
     public async ValueTask<DomainResult> HandleInboundAsync(InboundPayloadContext context, CancellationToken ct = default)
@@ -54,7 +57,11 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
         FileTransferFilterPolicy policy,
         CancellationToken ct)
     {
-        FileTransferOfferPayload offer = FileTransferOfferPayload.Deserialize(body);
+        DomainResult<FileTransferOfferPayload> offerResult = _serializer.Deserialize<FileTransferOfferPayload>(body);
+        if (offerResult.IsFailure)
+            return DomainResult.Success(); // Silent discard on malformed offer wire format
+
+        FileTransferOfferPayload offer = offerResult.Value;
 
         ValidationResult validation = IngressTransferOfferValidator.ValidateOffer(offer);
         if (!validation.IsValid)
@@ -66,12 +73,14 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
         if (offer.Manifest.Kind != ManifestDistributionKind.Inline || offer.Manifest.InlineData == null)
             return DomainResult.Success(); // Out-of-band blob manifest requires asynchronous blob fetch before session staging
 
-        TransferManifest manifest = TransferManifestDeserializer.Deserialize(offer.Manifest.InlineData.Span, offer.TransferSessionId);
+        DomainResult<TransferManifest> manifestResult = _serializer.Deserialize<TransferManifest>(offer.Manifest.InlineData.ToByteArray());
+        if (manifestResult.IsFailure)
+            return DomainResult.Success(); // Silent discard on malformed inline manifest
 
         TransferSession session = TransferSession.CreateIncomingStaged(
             offer.TransferSessionId,
             senderId,
-            manifest,
+            manifestResult.Value,
             SeedRatio.Zero,
             _clock);
 
@@ -84,7 +93,11 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
         ReadOnlyMemory<byte> body,
         CancellationToken ct)
     {
-        FileTransferAcceptPayload accept = FileTransferAcceptPayload.Deserialize(body);
+        DomainResult<FileTransferAcceptPayload> acceptResult = _serializer.Deserialize<FileTransferAcceptPayload>(body);
+        if (acceptResult.IsFailure)
+            return DomainResult.Failure(acceptResult.Error);
+
+        FileTransferAcceptPayload accept = acceptResult.Value;
 
         TransferSession? session = await _sessionRepository.GetSessionByIdAsync(accept.TransferSessionId, ct);
         if (session == null)
@@ -103,7 +116,11 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
         ReadOnlyMemory<byte> body,
         CancellationToken ct)
     {
-        FileTransferCancelPayload cancel = FileTransferCancelPayload.Deserialize(body);
+        DomainResult<FileTransferCancelPayload> cancelResult = _serializer.Deserialize<FileTransferCancelPayload>(body);
+        if (cancelResult.IsFailure)
+            return DomainResult.Success(); // Silent drop for malformed cancel frame
+
+        FileTransferCancelPayload cancel = cancelResult.Value;
 
         TransferSession? session = await _sessionRepository.GetSessionByIdAsync(cancel.TransferSessionId, ct);
         if (session == null || !session.Topology.ContainsParticipant(senderId))

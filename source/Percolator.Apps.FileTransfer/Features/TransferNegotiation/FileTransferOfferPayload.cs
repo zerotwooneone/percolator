@@ -11,11 +11,4 @@ public sealed record FileTransferOfferPayload(
     BaseNonce BaseNonce,
     StreamAuthToken StreamAuthToken,
     RelayRendezvousDescriptor? RelayRendezvous,
-    IReadOnlyList<DirectEndpointCandidate> DirectCandidates)
-{
-    public static FileTransferOfferPayload Deserialize(ReadOnlyMemory<byte> bytes) =>
-        FileTransferPayloadSerializer.DeserializeOffer(bytes.Span);
-
-    public byte[] Serialize() =>
-        FileTransferPayloadSerializer.SerializeOffer(this);
-}
+    IReadOnlyList<DirectEndpointCandidate> DirectCandidates);

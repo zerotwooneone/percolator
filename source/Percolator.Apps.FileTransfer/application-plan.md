@@ -15,7 +15,7 @@
 - **Target Project**: `Percolator.Apps.FileTransfer` (`AppId = 0x03`).
 - **Target Environment**: **Desktop only** (multi-core processors, high-bandwidth unmetered networks, fast SSD/NVMe storage, large addressable memory, sparse file OS support).
 - **Core Inspiration**: **croc** (multi-stream parallel socket saturation, direct P2P with relay pipe fallback, directory tree bundling, chunked streaming, bitfield-based resumption) combined with **BitTorrent swarm piece sharing, peer tracking, and selective downloads**.
-- **Dependencies**: Depends on `Percolator.Domain.Kernel`, `Percolator.Apps.FileTransfer.Domain`, `Percolator.PluginSdk`, and `Percolator.SourceGenerators` analyzer. **Zero reference to `Percolator.Domain` core messaging, concrete transport, or SQLite implementations**.
+- **Dependencies**: Depends on `Percolator.Domain.Kernel`, `Percolator.Apps.FileTransfer.Domain`, `Percolator.PluginSdk`, and `Percolator.SourceGenerators` analyzer. **Zero reference to `Percolator.Domain` core messaging, concrete transport, wire serialization (Protobuf/JSON), or SQLite implementations**.
 
 ---
 
@@ -238,7 +238,7 @@ public sealed class FileTransferIngressFilter : IAppIngressFilter
 
 ### 2.2 In-Band Control Payload Demuxing & Handler Implementation
 
-In-band payloads carried across Double Ratchet envelopes use a 1-byte opcode discriminator:
+In-band payloads carried across Double Ratchet envelopes use a 1-byte opcode discriminator, with binary wire serialization abstracted behind `IPayloadSerializer` (`Percolator.PluginSdk`):
 
 ```csharp
 namespace Percolator.Apps.FileTransfer.Features.TransferNegotiation;
@@ -258,6 +258,7 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
 {
     private readonly ITransferSessionRepository _sessionRepository;
     private readonly IFileTransferFilterPolicyRepository _policyRepository;
+    private readonly IPayloadSerializer _serializer;
     private readonly IDateTimeProvider _clock;
 
     public AppId TargetAppId => AppId.FileTransferControl;
@@ -265,10 +266,12 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
     public FileTransferPayloadHandler(
         ITransferSessionRepository sessionRepository,
         IFileTransferFilterPolicyRepository policyRepository,
+        IPayloadSerializer serializer,
         IDateTimeProvider clock)
     {
         _sessionRepository = sessionRepository;
         _policyRepository = policyRepository;
+        _serializer = serializer;
         _clock = clock;
     }
 
@@ -299,7 +302,11 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
         FileTransferFilterPolicy policy,
         CancellationToken ct)
     {
-        FileTransferOfferPayload offer = FileTransferOfferPayload.Deserialize(body);
+        DomainResult<FileTransferOfferPayload> offerResult = _serializer.Deserialize<FileTransferOfferPayload>(body);
+        if (offerResult.IsFailure)
+            return DomainResult.Success(); // Silent discard on malformed offer wire format
+
+        FileTransferOfferPayload offer = offerResult.Value;
 
         ValidationResult validation = IngressTransferOfferValidator.ValidateOffer(offer);
         if (!validation.IsValid)
@@ -308,22 +315,17 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
         if (offer.RelayRendezvous != null && policy.EvaluateRelay(offer.RelayRendezvous.EndpointUri) == RelayFilterDecision.Blocked)
             return DomainResult.Success(); // Silent drop on blocked relay
 
-        // Build inline manifest if provided inline
-        TransferManifest manifest;
-        if (offer.Manifest.Kind == ManifestDistributionKind.Inline && offer.Manifest.InlineData != null)
-        {
-            manifest = TransferManifestDeserializer.Deserialize(offer.Manifest.InlineData.Span, offer.TransferSessionId);
-        }
-        else
-        {
-            // Staged manifest placeholder pending remote blob retrieval
-            manifest = TransferManifest.CreatePlaceholder(offer.TransferSessionId, offer.Summary);
-        }
+        if (offer.Manifest.Kind != ManifestDistributionKind.Inline || offer.Manifest.InlineData == null)
+            return DomainResult.Success(); // Out-of-band blob manifest requires asynchronous blob fetch before session staging
+
+        DomainResult<TransferManifest> manifestResult = _serializer.Deserialize<TransferManifest>(offer.Manifest.InlineData.ToByteArray());
+        if (manifestResult.IsFailure)
+            return DomainResult.Success(); // Silent discard on malformed inline manifest
 
         TransferSession session = TransferSession.CreateIncomingStaged(
             offer.TransferSessionId,
             senderId,
-            manifest,
+            manifestResult.Value,
             SeedRatio.Zero,
             _clock);
 
@@ -336,7 +338,11 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
         ReadOnlyMemory<byte> body,
         CancellationToken ct)
     {
-        FileTransferAcceptPayload accept = FileTransferAcceptPayload.Deserialize(body);
+        DomainResult<FileTransferAcceptPayload> acceptResult = _serializer.Deserialize<FileTransferAcceptPayload>(body);
+        if (acceptResult.IsFailure)
+            return DomainResult.Failure(acceptResult.Error);
+
+        FileTransferAcceptPayload accept = acceptResult.Value;
 
         TransferSession? session = await _sessionRepository.GetSessionByIdAsync(accept.TransferSessionId, ct);
         if (session == null)
@@ -355,7 +361,11 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
         ReadOnlyMemory<byte> body,
         CancellationToken ct)
     {
-        FileTransferCancelPayload cancel = FileTransferCancelPayload.Deserialize(body);
+        DomainResult<FileTransferCancelPayload> cancelResult = _serializer.Deserialize<FileTransferCancelPayload>(body);
+        if (cancelResult.IsFailure)
+            return DomainResult.Success(); // Silent drop for malformed cancel frame
+
+        FileTransferCancelPayload cancel = cancelResult.Value;
 
         TransferSession? session = await _sessionRepository.GetSessionByIdAsync(cancel.TransferSessionId, ct);
         if (session == null || !session.Topology.ContainsParticipant(senderId))
@@ -577,6 +587,10 @@ public sealed record InlineManifestData
             throw new ArgumentException("Inline manifest must be between 1 and 49152 bytes.", nameof(bytes));
         return new InlineManifestData(bytes);
     }
+
+    public static InlineManifestData FromSpan(ReadOnlySpan<byte> bytes) => FromBytes(bytes.ToArray());
+
+    public byte[] ToByteArray() => SerializedBytes.ToArray();
 }
 
 public sealed record ManifestBlobDescriptor(
@@ -625,7 +639,11 @@ public sealed record DiskSpacePreflightResult(
 
 ---
 
-### 3.2 In-Band Control Payloads
+### 3.2 In-Band Control Payloads (Pure Application Models)
+
+> [!NOTE]
+> **Port-Abstracted Wire Serialization (`IPayloadSerializer`)**:
+> Application payload models (`FileTransferOfferPayload`, `FileTransferAcceptPayload`, `FileTransferCancelPayload`) and domain models (`TransferManifest`) contain zero wire serialization or parsing logic. Wire serialization is delegated through `IPayloadSerializer` (`Percolator.PluginSdk`) to `ProtobufPayloadSerializer` (`Protos/file_transfer.proto`) in `Percolator.Infrastructure`.
 
 ```csharp
 namespace Percolator.Apps.FileTransfer.Features.TransferNegotiation;
@@ -638,38 +656,17 @@ public sealed record FileTransferOfferPayload(
     BaseNonce BaseNonce,
     StreamAuthToken StreamAuthToken,
     RelayRendezvousDescriptor? RelayRendezvous,
-    IReadOnlyList<DirectEndpointCandidate> DirectCandidates)
-{
-    public static FileTransferOfferPayload Deserialize(ReadOnlyMemory<byte> bytes) =>
-        FileTransferPayloadSerializer.DeserializeOffer(bytes.Span);
-
-    public byte[] Serialize() =>
-        FileTransferPayloadSerializer.SerializeOffer(this);
-}
+    IReadOnlyList<DirectEndpointCandidate> DirectCandidates);
 
 public sealed record FileTransferAcceptPayload(
     TransferSessionId TransferSessionId,
     IReadOnlyList<DirectEndpointCandidate> ReceiverCandidates,
     TransportRoutingPreference RoutingPreference,
-    Bitfield ResumptionBitfield)
-{
-    public static FileTransferAcceptPayload Deserialize(ReadOnlyMemory<byte> bytes) =>
-        FileTransferPayloadSerializer.DeserializeAccept(bytes.Span);
-
-    public byte[] Serialize() =>
-        FileTransferPayloadSerializer.SerializeAccept(this);
-}
+    Bitfield ResumptionBitfield);
 
 public sealed record FileTransferCancelPayload(
     TransferSessionId TransferSessionId,
-    TransferTerminationReason Reason)
-{
-    public static FileTransferCancelPayload Deserialize(ReadOnlyMemory<byte> bytes) =>
-        FileTransferPayloadSerializer.DeserializeCancel(bytes.Span);
-
-    public byte[] Serialize() =>
-        FileTransferPayloadSerializer.SerializeCancel(this);
-}
+    TransferTerminationReason Reason);
 ```
 
 ---
@@ -957,6 +954,7 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
     private readonly ITransferSessionRepository _sessionRepository;
     private readonly IDesktopFileStorage _fileStorage;
     private readonly IPayloadSender _payloadSender;
+    private readonly IPayloadSerializer _payloadSerializer;
     private readonly IDistributedTrackerPort _trackerPort;
     private readonly IDateTimeProvider _clock;
 
@@ -964,12 +962,14 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         ITransferSessionRepository sessionRepository,
         IDesktopFileStorage fileStorage,
         IPayloadSender payloadSender,
+        IPayloadSerializer payloadSerializer,
         IDistributedTrackerPort trackerPort,
         IDateTimeProvider clock)
     {
         _sessionRepository = sessionRepository;
         _fileStorage = fileStorage;
         _payloadSender = payloadSender;
+        _payloadSerializer = payloadSerializer;
         _trackerPort = trackerPort;
         _clock = clock;
     }
@@ -1065,11 +1065,11 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
             // Resolve WAN STUN/UPnP candidates via discovery hooks
         }
 
-        // Serialize inline or blob manifest
-        byte[] serializedManifest = manifest.Serialize();
+        // Serialize inline or blob manifest via IPayloadSerializer
+        ReadOnlyMemory<byte> serializedManifest = _payloadSerializer.Serialize(manifest);
         ManifestDistribution manifestDist = serializedManifest.Length <= IngressTransferOfferValidator.MaxInlineManifestBytes
-            ? ManifestDistribution.FromInline(InlineManifestData.FromBytes(serializedManifest))
-            : ManifestDistribution.FromBlob(new ManifestBlobDescriptor(BlobId.NewUnique(), ChunkHash.FromBytes(SHA256.HashData(serializedManifest)), manifest.TotalSize, RelayPipeEndpointUri.Parse("https://relay.percolator.net/pipes")));
+            ? ManifestDistribution.FromInline(InlineManifestData.FromSpan(serializedManifest.Span))
+            : ManifestDistribution.FromBlob(new ManifestBlobDescriptor(BlobId.NewUnique(), ChunkHash.FromBytes(SHA256.HashData(serializedManifest.Span)), manifest.TotalSize, RelayPipeEndpointUri.Parse("https://relay.percolator.net/pipes")));
 
         FileTransferOfferPayload offerPayload = new(
             sessionId,
@@ -1081,9 +1081,10 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
             RelayRendezvous: null,
             candidates);
 
-        byte[] inBandBytes = new byte[1 + offerPayload.Serialize().Length];
+        ReadOnlyMemory<byte> serializedOffer = _payloadSerializer.Serialize(offerPayload);
+        byte[] inBandBytes = new byte[1 + serializedOffer.Length];
         inBandBytes[0] = (byte)FileTransferControlOpcode.Offer;
-        offerPayload.Serialize().CopyTo(inBandBytes.AsSpan(1));
+        serializedOffer.Span.CopyTo(inBandBytes.AsSpan(1));
 
         await _payloadSender.SendPayloadAsync(new OutboundPayloadContext(sessionId.Value, AppId.FileTransferControl, inBandBytes), ct);
 
@@ -1148,9 +1149,10 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
             TransportRoutingPreference.DirectPreferred,
             session.LocalBitfield);
 
-        byte[] inBandBytes = new byte[1 + acceptPayload.Serialize().Length];
+        ReadOnlyMemory<byte> serializedAccept = _payloadSerializer.Serialize(acceptPayload);
+        byte[] inBandBytes = new byte[1 + serializedAccept.Length];
         inBandBytes[0] = (byte)FileTransferControlOpcode.Accept;
-        acceptPayload.Serialize().CopyTo(inBandBytes.AsSpan(1));
+        serializedAccept.Span.CopyTo(inBandBytes.AsSpan(1));
 
         await _payloadSender.SendPayloadAsync(new OutboundPayloadContext(sessionId.Value, AppId.FileTransferControl, inBandBytes), ct);
 
@@ -1444,6 +1446,7 @@ public sealed class SwarmPeerLiveness
 
 | Application Port / Contract | Infrastructure Adapter / Concrete Artifact | Target Persistence / Transport |
 | :--- | :--- | :--- |
+| `IPayloadSerializer` (`PluginSdk`) | `ProtobufPayloadSerializer` | Binary Protobuf wire serialization (`Protos/file_transfer.proto`) |
 | `ITransferStreamPool` | `TcpMultiStreamPool` | 4–8 multiplexed TCP/QUIC sockets (`TCP_NODELAY = true`) |
 | `IDistributedTrackerPort` | Distributed Relay Swarm Tracker / PEX Client | Swarm rendezvous on relay or out-of-band PEX |
 | `IDesktopFileStorage` | `PortableDesktopFileStore` | Staging with `.percolator-part`, pre-allocation, bitfield scanning, atomic rename |
@@ -1464,8 +1467,8 @@ public sealed class SwarmPeerLiveness
 2. Implement `ServiceCollectionExtensions.cs` registering application dependencies.
 3. Implement `FileTransferPlugin` implementing `IAppPlugin` (`AppId.FileTransferControl = 0x03`).
 4. Implement `FileTransferIngressFilter` implementing `IAppIngressFilter` (`PluginSdk`) for ingress pre-filtering before deserialization.
-5. Implement `FileTransferPayloadHandler` for ingress processing with 1-byte control opcodes (`0x01` Offer, `0x02` Accept, `0x03` Cancel).
-6. Implement in-band payloads: `FileTransferOfferPayload`, `FileTransferAcceptPayload`, `FileTransferCancelPayload`.
+5. Implement `FileTransferPayloadHandler` for ingress processing with 1-byte control opcodes (`0x01` Offer, `0x02` Accept, `0x03` Cancel) and injected `IPayloadSerializer`.
+6. Implement pure in-band payload records: `FileTransferOfferPayload`, `FileTransferAcceptPayload`, `FileTransferCancelPayload` (serialized via `ProtobufPayloadSerializer` in `Percolator.Infrastructure`).
 
 ### Milestone 2: Multi-Stream Engine & Out-of-Band Framing
 1. Implement Application Value Objects and Transport Models, strictly verifying **zero implicit or explicit conversion operators** across all types.
@@ -1546,6 +1549,7 @@ In strict adherence to the Percolator architecture and testing standards, applic
 | **UT-NEG-05** | Egress candidate gathering under explicit opt-in policy | User initiates transfer with `DirectWanPolicy.ExplicitlyAllowed`. | Generated `FileTransferOfferPayload.DirectCandidates` contains resolved WAN candidates (`DirectCandidateKind.DirectWanUpnp` / `DirectWanStun`). | Verifies Tier 3 opt-in candidate emission. |
 | **UT-NEG-06** | Dialing pool fault tolerance on partial batch failure | Coordinator dials 4 endpoint candidates (2 LAN direct, 2 relay pipes). One LAN dial fails with connection timeout; 3 remaining succeed. | Failed connection does not abort transfer; 3 active streams are registered in pool; session state progresses to `InFlight`. | Verifies fault-tolerant batch connection dialing without brittle single-point abort. |
 | **UT-NEG-07** | Remote manifest blob deceptive overflow abort | Inbound offer advertises `PlaintextSizeBytes = 500 KB`, but relay HTTP stream emits $> 8\text{ MB}$ of ciphertext. | Counting stream detects byte count exceeding `MaxRemoteManifestBlobBytes` (8 MB), aborts connection immediately, and deletes incomplete payload. | Defends against malicious seeders attempting heap exhaustion via false manifest size claims. |
+| **UT-NEG-08** | Protobuf binary payload serialization roundtrip | `TransferManifest`, `FileTransferOfferPayload` (inline & remote blob), `FileTransferAcceptPayload`, and `FileTransferCancelPayload` serialized and deserialized via `ProtobufPayloadSerializer` (`IPayloadSerializer`). | Deserialized domain/application records preserve exact byte-for-byte identity, Merkle tree leaf hashes, bitfields, candidate endpoints, and corrupted inputs return `DomainResult.Failure` without unhandled exceptions. | Verifies binary Protobuf wire compatibility across Infrastructure and Application boundaries. |
 
 ---
 

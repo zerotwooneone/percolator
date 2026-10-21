@@ -6,6 +6,7 @@ using Percolator.Apps.FileTransfer.Ports;
 using Percolator.Apps.FileTransfer.Tests.TestDoubles;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Infrastructure2.Serialization;
 
 namespace Percolator.Apps.FileTransfer.Tests.Ports.Tests;
 
@@ -34,6 +35,7 @@ public sealed class ActionHandlerAndQueryTests
             _sessionRepo,
             _fileStorage,
             _payloadSender,
+            new ProtobufPayloadSerializer(),
             _trackerPort,
             _clock);
 

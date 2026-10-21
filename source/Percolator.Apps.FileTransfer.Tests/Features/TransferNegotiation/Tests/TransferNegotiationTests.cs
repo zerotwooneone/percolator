@@ -8,6 +8,7 @@ using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Tests.TestDoubles;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Infrastructure2.Serialization;
 using Percolator.PluginSdk;
 
 namespace Percolator.Apps.FileTransfer.Tests.Features.TransferNegotiation.Tests;
@@ -35,6 +36,7 @@ public sealed class TransferNegotiationTests
             _sessionRepo,
             _fileStorage,
             _payloadSender,
+            new ProtobufPayloadSerializer(),
             _trackerPort,
             _clock);
     }
@@ -220,5 +222,77 @@ public sealed class TransferNegotiationTests
 
         ValidationResult validation = IngressTransferOfferValidator.ValidateOffer(offer);
         validation.IsValid.Should().BeFalse();
+    }
+
+    [Test]
+    public void UT_NEG_08_ProtobufPayloadSerializationRoundtrip_ManifestOfferAcceptCancel()
+    {
+        ProtobufPayloadSerializer serializer = new();
+        TransferSessionId sessionId = TransferSessionId.New();
+
+        List<FileEntry> entries =
+        [
+            new FileEntry(FileIndex.FromInt(0), SanitizedRelativePath.Parse("docs/spec.pdf"), FileSizeBytes.FromBytes(1024 * 1024), BundleByteOffset.Zero, FileLastModifiedUtc.FromUnixSeconds(1700000000)),
+            new FileEntry(FileIndex.FromInt(1), SanitizedRelativePath.Parse("docs/notes.txt"), FileSizeBytes.FromBytes(512 * 1024), BundleByteOffset.FromOffset(1024 * 1024), FileLastModifiedUtc.FromUnixSeconds(1700000100))
+        ];
+
+        ChunkHash leaf0 = MerkleTreeBuilder.HashLeaf(new byte[] { 0x01, 0x02 });
+        ChunkHash leaf1 = MerkleTreeBuilder.HashLeaf(new byte[] { 0x03, 0x04 });
+        MerkleTreeIndex tree = MerkleTreeBuilder.BuildFromLeaves([leaf0, leaf1]);
+
+        TransferManifest manifest = TransferManifest.Create(
+            sessionId,
+            RootBundleName.Parse("ReleasePackage"),
+            ChunkSizeBytes.Default,
+            tree,
+            entries);
+
+        // 1. Manifest roundtrip
+        ReadOnlyMemory<byte> manifestBytes = serializer.Serialize(manifest);
+        DomainResult<TransferManifest> manifestRoundtrip = serializer.Deserialize<TransferManifest>(manifestBytes);
+        manifestRoundtrip.IsSuccess.Should().BeTrue();
+        manifestRoundtrip.Value.ManifestId.Should().Be(sessionId);
+        manifestRoundtrip.Value.RootName.Should().Be(manifest.RootName);
+        manifestRoundtrip.Value.MerkleTree.Should().Be(manifest.MerkleTree);
+        manifestRoundtrip.Value.Files.Should().HaveCount(2);
+
+        // 2. Offer roundtrip
+        FileTransferOfferPayload offer = new(
+            sessionId,
+            TransferBundleSummary.Create(manifest.RootName, manifest.TotalSize, manifest.TotalFiles, manifest.ChunkSize, manifest.TotalChunks, manifest.MerkleTree.Root),
+            ManifestDistribution.FromInline(InlineManifestData.FromSpan(manifestBytes.Span)),
+            TransferKey.Generate(),
+            BaseNonce.Generate(),
+            StreamAuthToken.Generate(),
+            new RelayRendezvousDescriptor(RelayPipeEndpointUri.Parse("https://relay.percolator.net/pipe"), RelayPipeToken.Generate()),
+            [new DirectEndpointCandidate(EndpointHost.Parse("192.168.1.25"), PortNumber.FromInt(5200), DirectCandidateKind.DirectLan)]);
+
+        ReadOnlyMemory<byte> offerBytes = serializer.Serialize(offer);
+        DomainResult<FileTransferOfferPayload> offerRoundtrip = serializer.Deserialize<FileTransferOfferPayload>(offerBytes);
+        offerRoundtrip.IsSuccess.Should().BeTrue();
+        offerRoundtrip.Value.TransferSessionId.Should().Be(sessionId);
+        offerRoundtrip.Value.Summary.Should().Be(offer.Summary);
+        offerRoundtrip.Value.DirectCandidates.Should().ContainSingle();
+
+        // 3. Accept roundtrip
+        Bitfield resumptionBitfield = Bitfield.Empty(manifest.TotalChunks).WithChunk(ChunkIndex.FromInt(0));
+        FileTransferAcceptPayload accept = new(
+            sessionId,
+            [new DirectEndpointCandidate(EndpointHost.Parse("192.168.1.30"), PortNumber.FromInt(5201), DirectCandidateKind.DirectLan)],
+            TransportRoutingPreference.DirectPreferred,
+            resumptionBitfield);
+
+        ReadOnlyMemory<byte> acceptBytes = serializer.Serialize(accept);
+        DomainResult<FileTransferAcceptPayload> acceptRoundtrip = serializer.Deserialize<FileTransferAcceptPayload>(acceptBytes);
+        acceptRoundtrip.IsSuccess.Should().BeTrue();
+        acceptRoundtrip.Value.TransferSessionId.Should().Be(sessionId);
+        acceptRoundtrip.Value.ResumptionBitfield.Should().Be(resumptionBitfield);
+
+        // 4. Cancel roundtrip
+        FileTransferCancelPayload cancel = new(sessionId, TransferTerminationReason.SenderCancelled);
+        ReadOnlyMemory<byte> cancelBytes = serializer.Serialize(cancel);
+        DomainResult<FileTransferCancelPayload> cancelRoundtrip = serializer.Deserialize<FileTransferCancelPayload>(cancelBytes);
+        cancelRoundtrip.IsSuccess.Should().BeTrue();
+        cancelRoundtrip.Value.Should().Be(cancel);
     }
 }
