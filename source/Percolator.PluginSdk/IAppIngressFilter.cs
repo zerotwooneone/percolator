@@ -11,4 +11,6 @@ public interface IAppIngressFilter
     AppId TargetAppId { get; }
     bool IsEnabled { get; set; }
     IngressDecision Evaluate(InboundPayloadContext context);
+    ValueTask<IngressDecision> EvaluateAsync(InboundPayloadContext context, CancellationToken ct = default) =>
+        ValueTask.FromResult(Evaluate(context));
 }

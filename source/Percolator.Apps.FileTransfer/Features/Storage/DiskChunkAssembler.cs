@@ -24,13 +24,20 @@ public sealed class DiskChunkAssembler
         IDateTimeProvider clock,
         CancellationToken ct = default)
     {
+        // Verify chunk cryptographic leaf hash and record in domain aggregate BEFORE touching disk
+        DomainResult verifyResult = session.VerifyAndRecordChunk(chunkIndex, plaintextData, clock);
+        if (verifyResult.IsFailure)
+        {
+            return verifyResult;
+        }
+
         // Compute file slice boundaries across continuous bundle
         IReadOnlyList<FileChunkSlice> slices = ChunkBoundaryCalculator.CalculateSlices(
             session.Manifest,
             chunkIndex,
             ChunkByteLength.FromBytes(plaintextData.Length));
 
-        // Write each slice to target file on disk
+        // Write each verified slice to target file on disk
         foreach (FileChunkSlice slice in slices)
         {
             FileEntry entry = session.Manifest.Files[slice.FileIndex.Value];
@@ -40,7 +47,6 @@ public sealed class DiskChunkAssembler
             await _fileStorage.WriteChunkAsync(targetFile, slice.OffsetInFile, PlaintextChunkData.FromMemory(sliceMemory), ct);
         }
 
-        // Record chunk verification in domain aggregate (detects file and session completion)
-        return session.VerifyAndRecordChunk(chunkIndex, plaintextData, clock);
+        return verifyResult;
     }
 }

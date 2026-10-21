@@ -19,6 +19,7 @@ public sealed class MultiStreamEngineTests
     private InMemoryDesktopFileStorage _fileStorage = null!;
     private ChunkPipelineScheduler _scheduler = null!;
     private DiskChunkAssembler _assembler = null!;
+    private RecordingTransferRateLimiter _rateLimiter = null!;
     private TransferSessionCoordinator _coordinator = null!;
 
     [SetUp]
@@ -28,7 +29,8 @@ public sealed class MultiStreamEngineTests
         _fileStorage = new InMemoryDesktopFileStorage();
         _scheduler = new ChunkPipelineScheduler();
         _assembler = new DiskChunkAssembler(_fileStorage);
-        _coordinator = new TransferSessionCoordinator(_scheduler, _assembler, _clock);
+        _rateLimiter = new RecordingTransferRateLimiter();
+        _coordinator = new TransferSessionCoordinator(_scheduler, _assembler, _clock, _rateLimiter);
     }
 
     [Test]
@@ -166,12 +168,13 @@ public sealed class MultiStreamEngineTests
         result.IsFailure.Should().BeTrue();
         result.Error.Code.Should().Be("MultiStream.CorruptedChunk");
 
-        // Assert peer choked, offenses incremented, stream terminated/disposed, chunk rescheduled/released
+        // Assert peer choked, offenses incremented, stream terminated/disposed, chunk released, and ZERO disk writes occurred
         SwarmMember member = session.SwarmMembers.First(m => m.PeerId == peerId);
         member.WeChokingPeer.Should().Be(PeerChokeStatus.Choked);
         _coordinator.GetPeerOffenses(peerId).Should().Be(1);
         stream.IsDisposed.Should().BeTrue();
         _scheduler.IsChunkInFlight(chunkIdx).Should().BeFalse();
+        _fileStorage.FilesOnDisk.Should().BeEmpty();
     }
 
     [Test]
@@ -250,6 +253,59 @@ public sealed class MultiStreamEngineTests
         session.LocalBitfield.HasChunk(ChunkIndex.FromInt(1)).Should().BeTrue();
         session.LocalBitfield.HasChunk(ChunkIndex.FromInt(4)).Should().BeTrue();
         session.LocalBitfield.HasChunk(ChunkIndex.FromInt(0)).Should().BeFalse();
+    }
+
+    [Test]
+    public async Task UT_MSE_08_MultiStreamConcurrentPumpWithRateLimiting()
+    {
+        TransferSessionId sessionId = TransferSessionId.New();
+        PublicIdentityId peerId = PublicIdentityId.New();
+        TransferKey key = TransferKey.Generate();
+        BaseNonce baseNonce = BaseNonce.Generate();
+        RootDirectoryPath dest = RootDirectoryPath.Parse(@"C:\DestPump");
+
+        int chunkCount = 8;
+        TransferSession session = CreateActiveSession(sessionId, peerId, chunkCount);
+
+        // Unchoke peer so RarestFirstChunkSelector selects chunks from this peer
+        session.RecordPeerChokingUs(peerId, PeerChokeStatus.Unchoked);
+
+        FakeTransferStreamPool pool = new();
+        for (int s = 0; s < 4; s++)
+        {
+            var stream = new FakeTransferStream
+            {
+                Index = StreamIndex.FromInt(s),
+                AutoResponder = frame =>
+                {
+                    if (frame is RequestChunkFrame req)
+                    {
+                        byte[] zeroPlaintext = new byte[session.Manifest.ChunkSize.Bytes];
+                        EncryptedChunkData enc = ChunkCryptoService.EncryptChunk(
+                            PlaintextChunkData.FromBytes(zeroPlaintext),
+                            key,
+                            baseNonce,
+                            req.ChunkIndex);
+                        return new ChunkDataFrame(req.ChunkIndex, enc);
+                    }
+                    return null;
+                }
+            };
+            pool.Streams.Add(stream);
+        }
+
+        DomainResult pumpResult = await _coordinator.PumpPeerStreamsAsync(
+            session,
+            peerId,
+            pool,
+            key,
+            baseNonce,
+            dest);
+
+        pumpResult.IsSuccess.Should().BeTrue();
+        session.IsDownloadComplete.Should().BeTrue();
+        session.State.Should().Be(TransferSessionState.Completed);
+        _rateLimiter.TotalDownloadedBytes.Should().Be((long)chunkCount * session.Manifest.ChunkSize.Bytes);
     }
 
     private TransferSession CreateActiveSession(TransferSessionId sessionId, PublicIdentityId peerId, int chunkCount)

@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Security.Cryptography;
 using Percolator.Apps.FileTransfer.Domain.Common;
 using Percolator.Apps.FileTransfer.Domain.ManifestManagement;
@@ -19,6 +20,7 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
     private readonly IPayloadSerializer _serializer;
     private readonly IDistributedTrackerPort _trackerPort;
     private readonly IDateTimeProvider _clock;
+    private readonly IBlobStorageService? _blobStorage;
 
     public FileTransferActionHandler(
         ITransferSessionRepository sessionRepository,
@@ -26,7 +28,8 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         IPayloadSender payloadSender,
         IPayloadSerializer serializer,
         IDistributedTrackerPort trackerPort,
-        IDateTimeProvider clock)
+        IDateTimeProvider clock,
+        IBlobStorageService? blobStorage = null)
     {
         _sessionRepository = sessionRepository ?? throw new ArgumentNullException(nameof(sessionRepository));
         _fileStorage = fileStorage ?? throw new ArgumentNullException(nameof(fileStorage));
@@ -34,9 +37,37 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         _serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
         _trackerPort = trackerPort ?? throw new ArgumentNullException(nameof(trackerPort));
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
+        _blobStorage = blobStorage;
+    }
+
+    public ValueTask<DomainResult<TransferSessionId>> InitiateTransferAsync(
+        IReadOnlyList<PublicIdentityId> recipients,
+        RootDirectoryPath sourceRoot,
+        IReadOnlyList<SanitizedRelativePath> filePaths,
+        DirectWanPolicy wanPolicy,
+        RootBundleName? customBundleName = null,
+        SeedRatio? targetSeedRatio = null,
+        CancellationToken ct = default)
+    {
+        // Derive a deterministic local initiator distinct from all recipients when not explicitly provided
+        PublicIdentityId defaultInitiator = CreateDistinctLocalInitiator(recipients);
+        ChannelId defaultChannelId = ChannelId.New();
+
+        return InitiateTransferAsync(
+            defaultChannelId,
+            defaultInitiator,
+            recipients,
+            sourceRoot,
+            filePaths,
+            wanPolicy,
+            customBundleName,
+            targetSeedRatio,
+            ct);
     }
 
     public async ValueTask<DomainResult<TransferSessionId>> InitiateTransferAsync(
+        ChannelId channelId,
+        PublicIdentityId localInitiator,
         IReadOnlyList<PublicIdentityId> recipients,
         RootDirectoryPath sourceRoot,
         IReadOnlyList<SanitizedRelativePath> filePaths,
@@ -54,51 +85,60 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         if (filePaths.Count > IngressTransferOfferValidator.MaxFilesPerBundle)
             return DomainResult<TransferSessionId>.Failure(new DomainError("Transfer.FileLimitExceeded", $"File count ({filePaths.Count}) exceeds maximum allowed ({IngressTransferOfferValidator.MaxFilesPerBundle})."));
 
-        // Scan files and build contiguous FileEntries
-        List<FileEntry> entries = [];
+        // Scan files via IDesktopFileStorage and build contiguous FileEntries
+        List<FileEntry> entries = new(filePaths.Count);
         long cumulativeOffset = 0;
         for (int i = 0; i < filePaths.Count; i++)
         {
             SanitizedRelativePath relPath = filePaths[i];
             ResolvedFilePath absPath = ResolvedFilePath.Resolve(sourceRoot, relPath);
-            FileInfo info = new(absPath.AbsolutePath);
-            if (!info.Exists)
+            FileMetadataResult metadata = await _fileStorage.GetFileMetadataAsync(absPath, ct);
+            if (!metadata.Exists)
                 return DomainResult<TransferSessionId>.Failure(new DomainError("Transfer.FileNotFound", $"File not found: '{relPath.Value}'."));
 
-            FileSizeBytes size = FileSizeBytes.FromBytes(info.Length);
             BundleByteOffset startOffset = BundleByteOffset.FromOffset(cumulativeOffset);
-            FileLastModifiedUtc lastModified = FileLastModifiedUtc.FromDateTimeOffset(info.LastWriteTimeUtc);
-
-            entries.Add(new FileEntry(FileIndex.FromInt(i), relPath, size, startOffset, lastModified));
-            cumulativeOffset += size.Bytes;
+            entries.Add(new FileEntry(FileIndex.FromInt(i), relPath, metadata.Size, startOffset, metadata.LastModifiedUtc));
+            cumulativeOffset += metadata.Size.Bytes;
         }
 
         if (cumulativeOffset > IngressTransferOfferValidator.MaxBundleSizeBytes)
             return DomainResult<TransferSessionId>.Failure(new DomainError("Transfer.SizeLimitExceeded", "Bundle total size exceeds 16 TB."));
 
-        ChunkSizeBytes chunkSize = ChunkSizeBytes.Default;
+        TotalBundleBytes totalBundleBytes = TotalBundleBytes.FromBytes(cumulativeOffset);
+        ChunkSizeBytes chunkSize = ChunkSizeBytes.SelectOptimalForBundle(totalBundleBytes);
         int chunkCount = (int)Math.Max(1, (cumulativeOffset + chunkSize.Bytes - 1) / chunkSize.Bytes);
         if (chunkCount > IngressTransferOfferValidator.MaxChunksPerBundle)
             return DomainResult<TransferSessionId>.Failure(new DomainError("Transfer.ChunkLimitExceeded", "Bundle total chunk count exceeds 1,000,000."));
 
-        // Build leaf hashes and Merkle tree
+        // Build leaf hashes and Merkle tree using pooled buffers (zero LOH thrashing)
         List<ChunkHash> leafHashes = new(chunkCount);
-        for (int c = 0; c < chunkCount; c++)
+        byte[] rentedChunkBuffer = ArrayPool<byte>.Shared.Rent(chunkSize.Bytes);
+        try
         {
-            ChunkIndex chunkIdx = ChunkIndex.FromInt(c);
-            ChunkByteLength expectedSize = ChunkByteLength.FromBytes((int)Math.Min((long)chunkSize.Bytes, cumulativeOffset - ((long)c * chunkSize.Bytes)));
-
-            byte[] chunkBuffer = new byte[expectedSize.Bytes];
-            IReadOnlyList<FileChunkSlice> slices = ChunkBoundaryCalculator.CalculateSlicesFromEntries(entries, chunkSize, chunkIdx, expectedSize);
-            foreach (FileChunkSlice slice in slices)
+            for (int c = 0; c < chunkCount; c++)
             {
-                FileEntry entry = entries[slice.FileIndex.Value];
-                ResolvedFilePath filePath = ResolvedFilePath.Resolve(sourceRoot, entry.RelativePath);
-                PlaintextChunkData sliceData = await _fileStorage.ReadChunkAsync(filePath, slice.OffsetInFile, slice.SliceLength, ct);
-                sliceData.Span.CopyTo(chunkBuffer.AsSpan(slice.BufferOffset, slice.SliceLength.Bytes));
-            }
+                ChunkIndex chunkIdx = ChunkIndex.FromInt(c);
+                int expectedBytes = (int)Math.Min((long)chunkSize.Bytes, cumulativeOffset - ((long)c * chunkSize.Bytes));
+                ChunkByteLength expectedSize = ChunkByteLength.FromBytes(expectedBytes);
 
-            leafHashes.Add(MerkleTreeBuilder.HashLeaf(chunkBuffer));
+                Span<byte> activeSpan = rentedChunkBuffer.AsSpan(0, expectedBytes);
+                activeSpan.Clear();
+
+                IReadOnlyList<FileChunkSlice> slices = ChunkBoundaryCalculator.CalculateSlicesFromEntries(entries, chunkSize, chunkIdx, expectedSize);
+                foreach (FileChunkSlice slice in slices)
+                {
+                    FileEntry entry = entries[slice.FileIndex.Value];
+                    ResolvedFilePath filePath = ResolvedFilePath.Resolve(sourceRoot, entry.RelativePath);
+                    PlaintextChunkData sliceData = await _fileStorage.ReadChunkAsync(filePath, slice.OffsetInFile, slice.SliceLength, ct);
+                    sliceData.Span.CopyTo(rentedChunkBuffer.AsSpan(slice.BufferOffset, slice.SliceLength.Bytes));
+                }
+
+                leafHashes.Add(MerkleTreeBuilder.HashLeaf(rentedChunkBuffer.AsSpan(0, expectedBytes)));
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(rentedChunkBuffer, clearArray: true);
         }
 
         MerkleTreeIndex merkleTree = MerkleTreeBuilder.BuildFromLeaves(leafHashes);
@@ -113,12 +153,9 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         StreamAuthToken streamAuthToken = StreamAuthToken.Generate();
         SeedRatio enforcedSeedRatio = targetSeedRatio ?? SeedRatio.Zero;
 
-        PublicIdentityId localInitiator = recipients[0]; // Bound to local identity
         TransferSession session = recipients.Count == 1
             ? TransferSession.CreateOutgoing1to1(sessionId, localInitiator, recipients[0], manifest, enforcedSeedRatio, _clock)
             : TransferSession.CreateOutgoingMultiPeer(sessionId, localInitiator, recipients, manifest, enforcedSeedRatio, _clock);
-
-        await _sessionRepository.SaveSessionAsync(session, ct);
 
         List<DirectEndpointCandidate> candidates = [];
         if (wanPolicy == DirectWanPolicy.ExplicitlyAllowed)
@@ -126,14 +163,56 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
             candidates.Add(new DirectEndpointCandidate(EndpointHost.Parse("wan.example.com"), PortNumber.FromInt(50000), DirectCandidateKind.DirectWanUpnp));
         }
 
+        var transportContext = new TransferSessionTransportContext(
+            sessionId,
+            channelId,
+            localInitiator,
+            sessionKey,
+            baseNonce,
+            streamAuthToken,
+            wanPolicy,
+            RelayRendezvous: null,
+            candidates,
+            sourceRoot);
+
+        await _sessionRepository.SaveSessionAsync(session, ct);
+        await _sessionRepository.SaveTransportContextAsync(transportContext, ct);
+
         ReadOnlyMemory<byte> serializedManifest = _serializer.Serialize(manifest);
-        ManifestDistribution manifestDist = serializedManifest.Length <= IngressTransferOfferValidator.MaxInlineManifestBytes
-            ? ManifestDistribution.FromInline(InlineManifestData.FromSpan(serializedManifest.Span))
-            : ManifestDistribution.FromBlob(new ManifestBlobDescriptor(
-                BlobId.FromSha256(SHA256.HashData(serializedManifest.Span)),
-                ChunkHash.FromBytes(SHA256.HashData(serializedManifest.Span)),
-                manifest.TotalSize,
+        ManifestDistribution manifestDist;
+        if (serializedManifest.Length <= IngressTransferOfferValidator.MaxInlineManifestBytes)
+        {
+            manifestDist = ManifestDistribution.FromInline(InlineManifestData.FromSpan(serializedManifest.Span));
+        }
+        else if (_blobStorage != null)
+        {
+            using MemoryStream manifestStream = new(serializedManifest.ToArray(), writable: false);
+            var uploadRequest = new BlobUploadRequest(
+                manifestStream,
+                "application/x-percolator-manifest",
+                serializedManifest.Length,
+                channelId);
+
+            DomainResult<BlobUploadResult> uploadResult = await _blobStorage.UploadBlobAsync(uploadRequest, ct: ct);
+            if (uploadResult.IsFailure)
+                return DomainResult<TransferSessionId>.Failure(uploadResult.Error);
+
+            BlobReference blobRef = uploadResult.Value.Reference;
+            manifestDist = ManifestDistribution.FromBlob(new ManifestBlobDescriptor(
+                blobRef.Id,
+                ChunkHash.FromBytes(blobRef.CiphertextSha256),
+                TotalBundleBytes.FromBytes(serializedManifest.Length),
+                RelayPipeEndpointUri.Parse(blobRef.RelayEndpointUri ?? "https://relay.percolator.net/pipes")));
+        }
+        else
+        {
+            byte[] sha256 = SHA256.HashData(serializedManifest.Span);
+            manifestDist = ManifestDistribution.FromBlob(new ManifestBlobDescriptor(
+                BlobId.FromSha256(sha256),
+                ChunkHash.FromBytes(sha256),
+                TotalBundleBytes.FromBytes(serializedManifest.Length),
                 RelayPipeEndpointUri.Parse("https://relay.percolator.net/pipes")));
+        }
 
         FileTransferOfferPayload offerPayload = new(
             sessionId,
@@ -150,7 +229,7 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         foreach (PublicIdentityId recipient in recipients)
         {
             var outboundContext = new OutboundPayloadContext(
-                ChannelId.FromGuid(sessionId.Value),
+                channelId,
                 localInitiator,
                 recipient,
                 DeviceId.Primary,
@@ -215,7 +294,18 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         await _fileStorage.PreAllocateFilesAsync(destinationFolder, session.Manifest, chosenFiles, ct);
         await _sessionRepository.SaveSessionAsync(session, ct);
 
-        // Send in-band accept payload
+        TransferSessionTransportContext? transportContext = await _sessionRepository.GetTransportContextAsync(sessionId, ct);
+        if (transportContext != null)
+        {
+            await _sessionRepository.SaveTransportContextAsync(
+                transportContext with { LocalRootPath = destinationFolder },
+                ct);
+        }
+
+        ChannelId channelId = transportContext?.ChannelId ?? ChannelId.FromGuid(sessionId.Value);
+        PublicIdentityId localSenderId = transportContext?.LocalIdentityId ?? CreateDistinctLocalInitiator([session.InitiatorId]);
+
+        // Send in-band accept payload from local recipient back to session.InitiatorId
         FileTransferAcceptPayload acceptPayload = new(
             sessionId,
             ReceiverCandidates: [],
@@ -225,8 +315,8 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         byte[] inBandBytes = PrependOpcode(FileTransferControlOpcode.Accept, _serializer.Serialize(acceptPayload).Span);
 
         var outboundContext = new OutboundPayloadContext(
-            ChannelId.FromGuid(sessionId.Value),
-            session.InitiatorId,
+            channelId,
+            localSenderId,
             session.InitiatorId,
             DeviceId.Primary,
             AppId.FileTransferControl,
@@ -267,18 +357,25 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         if (result.IsSuccess)
         {
             await _sessionRepository.SaveSessionAsync(session, ct);
-            // Proactive tracker unregistration
-            SwarmRendezvousId rendezvous = SwarmRendezvousId.Derive(TransferKey.Generate());
-            await _trackerPort.UnregisterAsync(rendezvous, session.InitiatorId, ct);
+
+            TransferSessionTransportContext? transportContext = await _sessionRepository.GetTransportContextAsync(sessionId, ct);
+            TransferKey sessionKey = transportContext?.SessionEncryptionKey ?? TransferKey.FromBytes(new byte[32]);
+            PublicIdentityId localIdentity = transportContext?.LocalIdentityId ?? session.InitiatorId;
+            ChannelId channelId = transportContext?.ChannelId ?? ChannelId.FromGuid(sessionId.Value);
+
+            // Proactive tracker unregistration using the actual session TransferKey
+            SwarmRendezvousId rendezvous = SwarmRendezvousId.Derive(sessionKey);
+            await _trackerPort.UnregisterAsync(rendezvous, localIdentity, ct);
 
             // Send in-band cancel payload
             FileTransferCancelPayload cancelPayload = new(sessionId, reason);
             byte[] inBandBytes = PrependOpcode(FileTransferControlOpcode.Cancel, _serializer.Serialize(cancelPayload).Span);
 
+            PublicIdentityId targetRecipient = DetermineCancelTarget(session, localIdentity);
             var outboundContext = new OutboundPayloadContext(
-                ChannelId.FromGuid(sessionId.Value),
-                session.InitiatorId,
-                session.InitiatorId,
+                channelId,
+                localIdentity,
+                targetRecipient,
                 DeviceId.Primary,
                 AppId.FileTransferControl,
                 inBandBytes,
@@ -287,6 +384,38 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
             await _payloadSender.SendPayloadAsync(outboundContext, ct);
         }
         return result;
+    }
+
+    private static PublicIdentityId DetermineCancelTarget(TransferSession session, PublicIdentityId localIdentity)
+    {
+        if (localIdentity != session.InitiatorId)
+            return session.InitiatorId;
+
+        return session.Topology switch
+        {
+            TransferTopology.OneToOne oneToOne => oneToOne.RecipientId,
+            TransferTopology.MultiPeer multiPeer => multiPeer.Recipients[0],
+            _ => session.InitiatorId
+        };
+    }
+
+    private static PublicIdentityId CreateDistinctLocalInitiator(IReadOnlyList<PublicIdentityId>? recipients)
+    {
+        byte[] bytes = new byte[16];
+        bytes[0] = 0xFE;
+        bytes[15] = 0x01;
+        PublicIdentityId candidate = PublicIdentityId.FromBytes(bytes);
+
+        if (recipients != null)
+        {
+            while (recipients.Contains(candidate))
+            {
+                bytes[1]++;
+                candidate = PublicIdentityId.FromBytes(bytes);
+            }
+        }
+
+        return candidate;
     }
 
     private static byte[] PrependOpcode(FileTransferControlOpcode opcode, ReadOnlySpan<byte> payload)

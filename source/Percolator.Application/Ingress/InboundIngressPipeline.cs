@@ -227,9 +227,21 @@ public sealed class InboundIngressPipeline : IInboundIngressPipeline
             appPayload,
             receivedAtUtc);
 
+        // Phase 4a: App-Level Ingress Pre-Filter (Pre-Deserialization Kill Switch & Blocklist)
+        IAppIngressFilter? appFilter = _appRouter.ResolveFilter(appId);
+        if (appFilter != null)
+        {
+            IngressDecision decision = await appFilter.EvaluateAsync(appContext, ct);
+            if (decision == IngressDecision.DiscardSilently)
+            {
+                Array.Clear(plaintext, 0, plaintext.Length);
+                return DomainResult.Success();
+            }
+        }
+
         DomainResult dispatchResult;
 
-        // Route SystemControl messages (such as SenderKeyDistribution)
+        // Phase 4b: Route SystemControl messages (such as SenderKeyDistribution) or App Payload Handlers
         if (appId == AppId.SystemControl && _groupKeyDistributionService != null)
         {
             dispatchResult = await _groupKeyDistributionService.ProcessInboundDistributionAsync(appContext, ct);

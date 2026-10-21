@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Security.Cryptography;
 using Percolator.Apps.FileTransfer.Domain.Common;
 using Percolator.Apps.FileTransfer.Domain.ManifestManagement;
@@ -16,6 +17,8 @@ public sealed class TransferSessionCoordinator
     private readonly ChunkPipelineScheduler _scheduler;
     private readonly DiskChunkAssembler _assembler;
     private readonly IDateTimeProvider _clock;
+    private readonly ITransferRateLimiter? _rateLimiter;
+    private readonly object _sessionSync = new();
     private readonly Dictionary<PublicIdentityId, int> _peerOffenses = [];
 
     public ChunkPipelineScheduler Scheduler => _scheduler;
@@ -23,15 +26,22 @@ public sealed class TransferSessionCoordinator
     public TransferSessionCoordinator(
         ChunkPipelineScheduler scheduler,
         DiskChunkAssembler assembler,
-        IDateTimeProvider clock)
+        IDateTimeProvider clock,
+        ITransferRateLimiter? rateLimiter = null)
     {
         _scheduler = scheduler;
         _assembler = assembler;
         _clock = clock;
+        _rateLimiter = rateLimiter;
     }
 
-    public int GetPeerOffenses(PublicIdentityId peerId) =>
-        _peerOffenses.TryGetValue(peerId, out int count) ? count : 0;
+    public int GetPeerOffenses(PublicIdentityId peerId)
+    {
+        lock (_sessionSync)
+        {
+            return _peerOffenses.TryGetValue(peerId, out int count) ? count : 0;
+        }
+    }
 
     public async ValueTask<bool> AuthenticateHandshakeAsync(
         HandshakeFrame handshake,
@@ -65,14 +75,16 @@ public sealed class TransferSessionCoordinator
     {
         if (!_scheduler.TryRecordInboundRequest(requesterId))
         {
-            // Bounded queue exceeded: choke peer and drop request
-            session.SetWeChokingPeer(requesterId, PeerChokeStatus.Choked);
+            lock (_sessionSync)
+            {
+                session.SetWeChokingPeer(requesterId, PeerChokeStatus.Choked);
+            }
             return DomainResult.Failure(new DomainError("MultiStream.QueueFull", $"Peer '{requesterId}' exceeded in-flight request limit."));
         }
 
+        byte[]? rentedPlaintext = null;
         try
         {
-            // Read chunk slices across files and assemble plaintext
             ChunkSizeBytes chunkSize = session.Manifest.ChunkSize;
             ChunkIndex chunkIdx = request.ChunkIndex;
             long startOffset = (long)chunkIdx.Value * chunkSize.Bytes;
@@ -80,25 +92,45 @@ public sealed class TransferSessionCoordinator
             int length = (int)Math.Min((long)chunkSize.Bytes, Math.Max(0, remainingBytes));
             ChunkByteLength actualLength = ChunkByteLength.FromBytes(length);
 
+            if (_rateLimiter != null)
+            {
+                await _rateLimiter.ThrottleUploadAsync(session.Id, TransferByteLength.FromBytes(length), ct);
+            }
+
             IReadOnlyList<FileChunkSlice> slices = ChunkBoundaryCalculator.CalculateSlices(session.Manifest, chunkIdx, actualLength);
-            byte[] chunkBuffer = new byte[length];
+            rentedPlaintext = ArrayPool<byte>.Shared.Rent(length);
+
             foreach (FileChunkSlice slice in slices)
             {
                 FileEntry entry = session.Manifest.Files[slice.FileIndex.Value];
                 ResolvedFilePath filePath = ResolvedFilePath.Resolve(rootPath, entry.RelativePath);
                 PlaintextChunkData sliceData = await fileStorage.ReadChunkAsync(filePath, slice.OffsetInFile, slice.SliceLength, ct);
-                sliceData.Span.CopyTo(chunkBuffer.AsSpan(slice.BufferOffset, slice.SliceLength.Bytes));
+                sliceData.Span.CopyTo(rentedPlaintext.AsSpan(slice.BufferOffset, slice.SliceLength.Bytes));
             }
 
-            PlaintextChunkData plaintext = PlaintextChunkData.FromBytes(chunkBuffer);
-            EncryptedChunkData encrypted = ChunkCryptoService.EncryptChunk(plaintext, key, baseNonce, chunkIdx);
+            byte[] encryptedBuffer = new byte[length + ChunkCryptoService.TagSizeBytes];
+            ChunkCryptoService.EncryptChunkInto(
+                rentedPlaintext.AsSpan(0, length),
+                key,
+                baseNonce,
+                chunkIdx,
+                encryptedBuffer);
 
+            EncryptedChunkData encrypted = EncryptedChunkData.FromMemory(encryptedBuffer);
             await stream.SendFrameAsync(new ChunkDataFrame(chunkIdx, encrypted), ct);
-            session.RecordUploadedBytes(TransferByteLength.FromBytes(length), _clock);
+
+            lock (_sessionSync)
+            {
+                session.RecordUploadedBytes(TransferByteLength.FromBytes(length), _clock);
+            }
             return DomainResult.Success();
         }
         finally
         {
+            if (rentedPlaintext != null)
+            {
+                ArrayPool<byte>.Shared.Return(rentedPlaintext);
+            }
             _scheduler.DecrementInboundRequest(requesterId);
         }
     }
@@ -119,52 +151,213 @@ public sealed class TransferSessionCoordinator
             return DomainResult.Failure(new DomainError("MultiStream.UnsolicitedChunk", $"Received unsolicited chunk index {chunkFrame.ChunkIndex.Value}."));
         }
 
-        PlaintextChunkData plaintext;
-        try
+        if (chunkFrame.Data.Length < ChunkCryptoService.TagSizeBytes)
         {
-            plaintext = ChunkCryptoService.DecryptChunk(chunkFrame.Data, key, baseNonce, chunkFrame.ChunkIndex);
-        }
-        catch (CryptographicException)
-        {
-            // Cryptographic authentication failed: choke peer, record offense, terminate stream, reschedule chunk
-            session.SetWeChokingPeer(senderId, PeerChokeStatus.Choked);
-            _peerOffenses[senderId] = GetPeerOffenses(senderId) + 1;
-            _scheduler.ReleaseChunk(chunkFrame.ChunkIndex);
-            await stream.DisposeAsync();
+            await HandlePeerCryptoOrHashFailureAsync(session, senderId, chunkFrame.ChunkIndex, stream);
             return DomainResult.Failure(new DomainError("MultiStream.CryptoAuthFailed", "Chunk AES-GCM authentication failed."));
         }
 
-        // 2. Merkle leaf hash check
-        ChunkHash expectedHash = session.Manifest.MerkleTree.GetLeaf(chunkFrame.ChunkIndex);
-        ChunkHash actualHash = MerkleTreeBuilder.HashLeaf(plaintext.Span);
-        if (actualHash != expectedHash)
+        int plaintextLength = chunkFrame.Data.Length - ChunkCryptoService.TagSizeBytes;
+        if (_rateLimiter != null)
         {
-            // Corrupted chunk verification: choke peer, increment offense, terminate stream, reschedule chunk
+            await _rateLimiter.ThrottleDownloadAsync(session.Id, TransferByteLength.FromBytes(plaintextLength), ct);
+        }
+
+        byte[] rentedPlaintext = ArrayPool<byte>.Shared.Rent(Math.Max(1, plaintextLength));
+        try
+        {
+            try
+            {
+                ChunkCryptoService.DecryptChunkInto(
+                    chunkFrame.Data.Span,
+                    key,
+                    baseNonce,
+                    chunkFrame.ChunkIndex,
+                    rentedPlaintext.AsSpan(0, plaintextLength));
+            }
+            catch (CryptographicException)
+            {
+                await HandlePeerCryptoOrHashFailureAsync(session, senderId, chunkFrame.ChunkIndex, stream);
+                return DomainResult.Failure(new DomainError("MultiStream.CryptoAuthFailed", "Chunk AES-GCM authentication failed."));
+            }
+
+            PlaintextChunkData plaintext = PlaintextChunkData.FromMemory(rentedPlaintext.AsMemory(0, plaintextLength));
+
+            // 2. Verify Merkle leaf hash ONCE inside session.VerifyAndRecordChunk (via DiskChunkAssembler) BEFORE writing to disk
+            DomainResult assembleResult = await _assembler.AssembleChunkAsync(
+                session,
+                destinationFolder,
+                chunkFrame.ChunkIndex,
+                plaintext,
+                _clock,
+                ct);
+
+            if (assembleResult.IsSuccess)
+            {
+                _scheduler.MarkCompleted(chunkFrame.ChunkIndex);
+                return assembleResult;
+            }
+
+            if (assembleResult.Error.Code == "Transfer.CryptographicVerificationFailed")
+            {
+                await HandlePeerCryptoOrHashFailureAsync(session, senderId, chunkFrame.ChunkIndex, stream);
+                return DomainResult.Failure(new DomainError("MultiStream.CorruptedChunk", "Merkle leaf hash mismatch."));
+            }
+
+            _scheduler.ReleaseChunk(chunkFrame.ChunkIndex);
+            return assembleResult;
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(rentedPlaintext);
+        }
+    }
+
+    public async ValueTask<DomainResult> PumpPeerStreamsAsync(
+        TransferSession session,
+        PublicIdentityId peerId,
+        ITransferStreamPool streamPool,
+        TransferKey key,
+        BaseNonce baseNonce,
+        RootDirectoryPath destinationFolder,
+        CancellationToken ct = default)
+    {
+        int streamCount = streamPool.ActiveStreams.Count;
+        Task<DomainResult>[] workerTasks = new Task<DomainResult>[streamCount];
+
+        for (int i = 0; i < streamCount; i++)
+        {
+            ITransferStream stream = streamPool.GetStream(StreamIndex.FromInt(i));
+            workerTasks[i] = PumpSingleStreamAsync(
+                session,
+                peerId,
+                stream,
+                key,
+                baseNonce,
+                destinationFolder,
+                ct);
+        }
+
+        DomainResult[] results = await Task.WhenAll(workerTasks);
+        foreach (DomainResult result in results)
+        {
+            if (result.IsFailure)
+            {
+                return result;
+            }
+        }
+
+        return DomainResult.Success();
+    }
+
+    private async Task<DomainResult> PumpSingleStreamAsync(
+        TransferSession session,
+        PublicIdentityId peerId,
+        ITransferStream stream,
+        TransferKey key,
+        BaseNonce baseNonce,
+        RootDirectoryPath destinationFolder,
+        CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            bool isComplete;
+            lock (_sessionSync)
+            {
+                isComplete = session.IsDownloadComplete ||
+                             session.State == TransferSessionState.Completed ||
+                             session.State == TransferSessionState.Seeding ||
+                             session.State == TransferSessionState.Cancelled ||
+                             session.State == TransferSessionState.Failed;
+            }
+
+            if (isComplete)
+            {
+                return DomainResult.Success();
+            }
+
+            // Fill pipeline window on this stream
+            bool scheduledAny = false;
+            while (_scheduler.CanRequest(peerId))
+            {
+                ChunkIndex? nextChunk;
+                lock (_sessionSync)
+                {
+                    Bitfield required = session.SelectedFiles != null
+                        ? session.Manifest.GetRequiredChunks(session.SelectedFiles)
+                        : Bitfield.Full(session.Manifest.TotalChunks);
+
+                    nextChunk = RarestFirstChunkSelector.SelectNextChunk(
+                        session.LocalBitfield,
+                        required,
+                        session.SwarmMembers,
+                        _scheduler.InFlightChunks);
+
+                    if (nextChunk.HasValue && !_scheduler.TrySchedule(peerId, nextChunk.Value))
+                    {
+                        nextChunk = null;
+                    }
+                }
+
+                if (!nextChunk.HasValue)
+                {
+                    break;
+                }
+
+                await stream.SendFrameAsync(new RequestChunkFrame(nextChunk.Value), ct);
+                scheduledAny = true;
+            }
+
+            if (!scheduledAny && _scheduler.GetPendingCount(peerId) == 0)
+            {
+                return DomainResult.Success();
+            }
+
+            IStreamFramePayload frame = await stream.ReceiveFrameAsync(ct);
+            if (frame is ChunkDataFrame chunkData)
+            {
+                DomainResult result = await HandleIncomingChunkDataAsync(
+                    session,
+                    peerId,
+                    chunkData,
+                    stream,
+                    key,
+                    baseNonce,
+                    destinationFolder,
+                    ct);
+
+                if (result.IsFailure)
+                {
+                    return result;
+                }
+            }
+            else if (frame is ChokeFrame)
+            {
+                lock (_sessionSync)
+                {
+                    session.RecordPeerChokingUs(peerId, PeerChokeStatus.Choked);
+                }
+                _scheduler.ReleasePeer(peerId);
+                return DomainResult.Success();
+            }
+        }
+
+        return DomainResult.Success();
+    }
+
+    private async ValueTask HandlePeerCryptoOrHashFailureAsync(
+        TransferSession session,
+        PublicIdentityId senderId,
+        ChunkIndex chunkIndex,
+        ITransferStream stream)
+    {
+        lock (_sessionSync)
+        {
             session.SetWeChokingPeer(senderId, PeerChokeStatus.Choked);
-            _peerOffenses[senderId] = GetPeerOffenses(senderId) + 1;
-            _scheduler.ReleaseChunk(chunkFrame.ChunkIndex);
-            await stream.DisposeAsync();
-            return DomainResult.Failure(new DomainError("MultiStream.CorruptedChunk", "Merkle leaf hash mismatch."));
+            int current = _peerOffenses.TryGetValue(senderId, out int count) ? count : 0;
+            _peerOffenses[senderId] = current + 1;
         }
-
-        // 3. Assemble chunk to disk
-        DomainResult assembleResult = await _assembler.AssembleChunkAsync(
-            session,
-            destinationFolder,
-            chunkFrame.ChunkIndex,
-            plaintext,
-            _clock,
-            ct);
-
-        if (assembleResult.IsSuccess)
-        {
-            _scheduler.MarkCompleted(chunkFrame.ChunkIndex);
-        }
-        else
-        {
-            _scheduler.ReleaseChunk(chunkFrame.ChunkIndex);
-        }
-
-        return assembleResult;
+        _scheduler.ReleaseChunk(chunkIndex);
+        await stream.DisposeAsync();
     }
 }

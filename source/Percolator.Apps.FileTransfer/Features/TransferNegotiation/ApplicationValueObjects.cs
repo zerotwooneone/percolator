@@ -4,7 +4,9 @@ using Percolator.Apps.FileTransfer.Domain.Common;
 using Percolator.Apps.FileTransfer.Domain.Exceptions;
 using Percolator.Apps.FileTransfer.Domain.ManifestManagement;
 using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
+using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
+using Percolator.Domain.Identities.ValueObjects;
 using Percolator.PluginSdk;
 using Percolator.SourceGenerators;
 
@@ -249,3 +251,27 @@ public sealed record DiskSpacePreflightResult(
     public static DiskSpacePreflightResult Insufficient(TotalBundleBytes required, TotalBundleBytes available) =>
         new(false, required, available);
 }
+
+public sealed record FileMetadataResult(
+    bool Exists,
+    FileSizeBytes Size,
+    FileLastModifiedUtc LastModifiedUtc)
+{
+    public static FileMetadataResult NotFound() =>
+        new(false, FileSizeBytes.FromBytes(0), FileLastModifiedUtc.FromUnixSeconds(0));
+
+    public static FileMetadataResult Found(FileSizeBytes size, FileLastModifiedUtc lastModifiedUtc) =>
+        new(true, size, lastModifiedUtc);
+}
+
+public sealed record TransferSessionTransportContext(
+    TransferSessionId SessionId,
+    ChannelId ChannelId,
+    PublicIdentityId LocalIdentityId,
+    TransferKey SessionEncryptionKey,
+    BaseNonce BaseNonce,
+    StreamAuthToken StreamAuthToken,
+    DirectWanPolicy WanPolicy,
+    RelayRendezvousDescriptor? RelayRendezvous,
+    IReadOnlyList<DirectEndpointCandidate> DirectCandidates,
+    RootDirectoryPath? LocalRootPath = null);

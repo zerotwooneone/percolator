@@ -13,6 +13,7 @@ public sealed class SwarmCoordinator
     public static readonly TimeSpan KeepAliveInterval = TimeSpan.FromSeconds(30);
     public static readonly TimeSpan DeadPeerTimeout = TimeSpan.FromSeconds(60);
 
+    private readonly object _sync = new();
     private readonly Dictionary<PublicIdentityId, SwarmPeerLiveness> _peerLiveness = [];
     private readonly PexRateLimiter _pexRateLimiter = new();
     private readonly IDateTimeProvider _clock;
@@ -24,18 +25,24 @@ public sealed class SwarmCoordinator
 
     public void RegisterPeer(PublicIdentityId peerId)
     {
-        _peerLiveness[peerId] = new SwarmPeerLiveness(peerId, _clock.UtcNow);
+        lock (_sync)
+        {
+            _peerLiveness[peerId] = new SwarmPeerLiveness(peerId, _clock.UtcNow);
+        }
     }
 
     public void RecordPeerActivity(PublicIdentityId peerId)
     {
-        if (_peerLiveness.TryGetValue(peerId, out var liveness))
+        lock (_sync)
         {
-            liveness.RecordActivity(_clock);
-        }
-        else
-        {
-            _peerLiveness[peerId] = new SwarmPeerLiveness(peerId, _clock.UtcNow);
+            if (_peerLiveness.TryGetValue(peerId, out var liveness))
+            {
+                liveness.RecordActivity(_clock);
+            }
+            else
+            {
+                _peerLiveness[peerId] = new SwarmPeerLiveness(peerId, _clock.UtcNow);
+            }
         }
     }
 
@@ -44,12 +51,23 @@ public sealed class SwarmCoordinator
         CancellationToken ct = default)
     {
         DateTimeOffset now = _clock.UtcNow;
-        foreach (var (peerId, liveness) in _peerLiveness)
+        bool shouldBroadcast = false;
+
+        lock (_sync)
         {
-            if (now - liveness.LastSeenUtc >= KeepAliveInterval && now - liveness.LastSeenUtc < DeadPeerTimeout)
+            foreach (var (_, liveness) in _peerLiveness)
             {
-                await streamPool.BroadcastFrameAsync(new KeepAliveFrame(), ct);
+                if (now - liveness.LastSeenUtc >= KeepAliveInterval && now - liveness.LastSeenUtc < DeadPeerTimeout)
+                {
+                    shouldBroadcast = true;
+                    break;
+                }
             }
+        }
+
+        if (shouldBroadcast)
+        {
+            await streamPool.BroadcastFrameAsync(new KeepAliveFrame(), ct);
         }
     }
 
@@ -57,17 +75,21 @@ public sealed class SwarmCoordinator
     {
         DateTimeOffset now = _clock.UtcNow;
         List<PublicIdentityId> deadPeers = [];
-        foreach (var (peerId, liveness) in _peerLiveness)
-        {
-            if (!liveness.IsActive(now, DeadPeerTimeout))
-            {
-                deadPeers.Add(peerId);
-            }
-        }
 
-        foreach (var dead in deadPeers)
+        lock (_sync)
         {
-            _peerLiveness.Remove(dead);
+            foreach (var (peerId, liveness) in _peerLiveness)
+            {
+                if (!liveness.IsActive(now, DeadPeerTimeout))
+                {
+                    deadPeers.Add(peerId);
+                }
+            }
+
+            foreach (var dead in deadPeers)
+            {
+                _peerLiveness.Remove(dead);
+            }
         }
 
         return deadPeers;
@@ -81,9 +103,12 @@ public sealed class SwarmCoordinator
         out IReadOnlyList<DirectEndpointCandidate> acceptedCandidates)
     {
         acceptedCandidates = [];
-        if (!_pexRateLimiter.CanReceivePex(senderId, _clock))
+        lock (_sync)
         {
-            return false;
+            if (!_pexRateLimiter.CanReceivePex(senderId, _clock))
+            {
+                return false;
+            }
         }
 
         acceptedCandidates = PexRateLimiter.FilterAndDeduplicate(candidates, wanPolicy, localEndpoints);
@@ -94,6 +119,7 @@ public sealed class SwarmCoordinator
         TransferSession session,
         IDistributedTrackerPort trackerPort,
         ITransferStreamPool streamPool,
+        TransferKey? sessionKey = null,
         CancellationToken ct = default)
     {
         if (session.State == TransferSessionState.Completed || session.HasReachedTargetSeedRatio)
@@ -104,7 +130,9 @@ public sealed class SwarmCoordinator
             }
 
             await streamPool.DisposeAsync();
-            SwarmRendezvousId rendezvous = SwarmRendezvousId.Derive(TransferKey.Generate());
+            SwarmRendezvousId rendezvous = sessionKey != null
+                ? SwarmRendezvousId.Derive(sessionKey)
+                : SwarmRendezvousId.FromBytes(System.Security.Cryptography.SHA256.HashData(session.Id.Value.ToByteArray()));
             await trackerPort.UnregisterAsync(rendezvous, session.InitiatorId, ct);
             return true;
         }

@@ -7,88 +7,137 @@ public sealed class ChunkPipelineScheduler
 {
     public const int MaxPendingRequestsPerPeer = 32;
 
+    private readonly object _sync = new();
     private readonly Dictionary<PublicIdentityId, HashSet<ChunkIndex>> _inFlightByPeer = [];
     private readonly HashSet<ChunkIndex> _allInFlight = [];
     private readonly Dictionary<PublicIdentityId, int> _inboundPendingByPeer = [];
 
-    public IReadOnlySet<ChunkIndex> InFlightChunks => _allInFlight;
+    public IReadOnlySet<ChunkIndex> InFlightChunks
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return new HashSet<ChunkIndex>(_allInFlight);
+            }
+        }
+    }
 
-    public int GetPendingCount(PublicIdentityId peerId) =>
-        _inFlightByPeer.TryGetValue(peerId, out var set) ? set.Count : 0;
+    public int GetPendingCount(PublicIdentityId peerId)
+    {
+        lock (_sync)
+        {
+            return _inFlightByPeer.TryGetValue(peerId, out var set) ? set.Count : 0;
+        }
+    }
 
-    public int GetInboundPendingCount(PublicIdentityId peerId) =>
-        _inboundPendingByPeer.TryGetValue(peerId, out var count) ? count : 0;
+    public int GetInboundPendingCount(PublicIdentityId peerId)
+    {
+        lock (_sync)
+        {
+            return _inboundPendingByPeer.TryGetValue(peerId, out var count) ? count : 0;
+        }
+    }
 
-    public bool CanRequest(PublicIdentityId peerId) =>
-        GetPendingCount(peerId) < MaxPendingRequestsPerPeer;
+    public bool CanRequest(PublicIdentityId peerId)
+    {
+        lock (_sync)
+        {
+            return (_inFlightByPeer.TryGetValue(peerId, out var set) ? set.Count : 0) < MaxPendingRequestsPerPeer;
+        }
+    }
 
     public bool TryRecordInboundRequest(PublicIdentityId peerId)
     {
-        int current = GetInboundPendingCount(peerId);
-        if (current >= MaxPendingRequestsPerPeer)
-            return false;
+        lock (_sync)
+        {
+            int current = _inboundPendingByPeer.TryGetValue(peerId, out var count) ? count : 0;
+            if (current >= MaxPendingRequestsPerPeer)
+                return false;
 
-        _inboundPendingByPeer[peerId] = current + 1;
-        return true;
+            _inboundPendingByPeer[peerId] = current + 1;
+            return true;
+        }
     }
 
     public void DecrementInboundRequest(PublicIdentityId peerId)
     {
-        if (_inboundPendingByPeer.TryGetValue(peerId, out int current) && current > 0)
+        lock (_sync)
         {
-            _inboundPendingByPeer[peerId] = current - 1;
+            if (_inboundPendingByPeer.TryGetValue(peerId, out int current) && current > 0)
+            {
+                _inboundPendingByPeer[peerId] = current - 1;
+            }
         }
     }
 
-    public bool IsChunkInFlight(ChunkIndex chunkIndex) =>
-        _allInFlight.Contains(chunkIndex);
+    public bool IsChunkInFlight(ChunkIndex chunkIndex)
+    {
+        lock (_sync)
+        {
+            return _allInFlight.Contains(chunkIndex);
+        }
+    }
 
     public bool TrySchedule(PublicIdentityId peerId, ChunkIndex chunkIndex)
     {
-        if (!CanRequest(peerId) || _allInFlight.Contains(chunkIndex))
-            return false;
-
-        if (!_inFlightByPeer.TryGetValue(peerId, out var set))
+        lock (_sync)
         {
-            set = [];
-            _inFlightByPeer[peerId] = set;
-        }
+            int pending = _inFlightByPeer.TryGetValue(peerId, out var set) ? set.Count : 0;
+            if (pending >= MaxPendingRequestsPerPeer || _allInFlight.Contains(chunkIndex))
+                return false;
 
-        set.Add(chunkIndex);
-        _allInFlight.Add(chunkIndex);
-        return true;
+            if (set == null)
+            {
+                set = [];
+                _inFlightByPeer[peerId] = set;
+            }
+
+            set.Add(chunkIndex);
+            _allInFlight.Add(chunkIndex);
+            return true;
+        }
     }
 
     public void MarkCompleted(ChunkIndex chunkIndex)
     {
-        _allInFlight.Remove(chunkIndex);
-        foreach (var set in _inFlightByPeer.Values)
+        lock (_sync)
         {
-            set.Remove(chunkIndex);
+            _allInFlight.Remove(chunkIndex);
+            foreach (var set in _inFlightByPeer.Values)
+            {
+                set.Remove(chunkIndex);
+            }
         }
     }
 
     public void ReleaseChunk(ChunkIndex chunkIndex)
     {
-        _allInFlight.Remove(chunkIndex);
-        foreach (var set in _inFlightByPeer.Values)
+        lock (_sync)
         {
-            set.Remove(chunkIndex);
+            _allInFlight.Remove(chunkIndex);
+            foreach (var set in _inFlightByPeer.Values)
+            {
+                set.Remove(chunkIndex);
+            }
         }
     }
 
     public IReadOnlyList<ChunkIndex> ReleasePeer(PublicIdentityId peerId)
     {
-        _inboundPendingByPeer.Remove(peerId);
-        if (!_inFlightByPeer.Remove(peerId, out var set))
-            return [];
-
-        List<ChunkIndex> released = [];
-        foreach (ChunkIndex chunk in set)
+        lock (_sync)
         {
-            _allInFlight.Remove(chunk);
-            released.Add(chunk);
+            _inboundPendingByPeer.Remove(peerId);
+            if (!_inFlightByPeer.Remove(peerId, out var set))
+                return [];
+
+            List<ChunkIndex> released = [];
+            foreach (ChunkIndex chunk in set)
+            {
+                _allInFlight.Remove(chunk);
+                released.Add(chunk);
+            }
+            return released;
         }
-        return released;
     }
 }

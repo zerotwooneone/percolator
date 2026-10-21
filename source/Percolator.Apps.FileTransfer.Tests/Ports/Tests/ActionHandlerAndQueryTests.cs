@@ -1,12 +1,15 @@
 using Percolator.Apps.FileTransfer.Domain.Common;
 using Percolator.Apps.FileTransfer.Domain.ManifestManagement;
 using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
+using Percolator.Apps.FileTransfer.Features.IngressControl;
 using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Ports;
 using Percolator.Apps.FileTransfer.Tests.TestDoubles;
+using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Infrastructure2.Serialization;
+using Percolator.PluginSdk;
 
 namespace Percolator.Apps.FileTransfer.Tests.Ports.Tests;
 
@@ -18,6 +21,8 @@ public sealed class ActionHandlerAndQueryTests
     private InMemoryDesktopFileStorage _fileStorage = null!;
     private RecordingPayloadSender _payloadSender = null!;
     private RecordingTrackerPort _trackerPort = null!;
+    private InMemoryBlobStorageService _blobStorage = null!;
+    private ProtobufPayloadSerializer _serializer = null!;
     private FileTransferActionHandler _handler = null!;
     private FileTransferQueryService _queryService = null!;
     private TransferOfferReaperService _reaperService = null!;
@@ -30,14 +35,17 @@ public sealed class ActionHandlerAndQueryTests
         _fileStorage = new InMemoryDesktopFileStorage();
         _payloadSender = new RecordingPayloadSender();
         _trackerPort = new RecordingTrackerPort();
+        _blobStorage = new InMemoryBlobStorageService();
+        _serializer = new ProtobufPayloadSerializer();
 
         _handler = new FileTransferActionHandler(
             _sessionRepo,
             _fileStorage,
             _payloadSender,
-            new ProtobufPayloadSerializer(),
+            _serializer,
             _trackerPort,
-            _clock);
+            _clock,
+            _blobStorage);
 
         _queryService = new FileTransferQueryService(_sessionRepo);
         _reaperService = new TransferOfferReaperService(_sessionRepo, _clock);
@@ -90,6 +98,115 @@ public sealed class ActionHandlerAndQueryTests
         cancelResult.IsSuccess.Should().BeTrue();
         session.State.Should().Be(TransferSessionState.Cancelled);
         _trackerPort.Unregistered.Should().ContainSingle(u => u.MemberId == initiator);
+    }
+
+    [Test]
+    public async Task UT_CMD_03_InitiateTransferEndToEndWithChannelAndDistinctIdentities()
+    {
+        ChannelId channelId = ChannelId.New();
+        PublicIdentityId localInitiator = PublicIdentityId.New();
+        PublicIdentityId recipient = PublicIdentityId.New();
+        RootDirectoryPath sourceRoot = RootDirectoryPath.Parse(@"C:\Bundle");
+        SanitizedRelativePath relPath = SanitizedRelativePath.Parse("archive.bin");
+
+        ResolvedFilePath fullPath = ResolvedFilePath.Resolve(sourceRoot, relPath);
+        byte[] content = new byte[4096];
+        Random.Shared.NextBytes(content);
+        _fileStorage.FilesOnDisk[fullPath.AbsolutePath] = content;
+
+        DomainResult<TransferSessionId> initResult = await _handler.InitiateTransferAsync(
+            channelId,
+            localInitiator,
+            [recipient],
+            sourceRoot,
+            [relPath],
+            DirectWanPolicy.DisabledByDefault);
+
+        initResult.IsSuccess.Should().BeTrue();
+        TransferSessionId sessionId = initResult.Value;
+
+        // Verify OutboundPayloadContext carries real ChannelId and distinct Sender/Recipient
+        _payloadSender.SentPayloads.Should().ContainSingle();
+        OutboundPayloadContext sentOffer = _payloadSender.SentPayloads[0];
+        sentOffer.ChannelId.Should().Be(channelId);
+        sentOffer.SenderIdentityId.Should().Be(localInitiator);
+        sentOffer.RecipientIdentityId.Should().Be(recipient);
+        sentOffer.AppId.Should().Be(AppId.FileTransferControl);
+
+        // Verify transport context was persisted with session encryption key
+        TransferSessionTransportContext? transportCtx = await _sessionRepo.GetTransportContextAsync(sessionId);
+        transportCtx.Should().NotBeNull();
+        SwarmRendezvousId expectedRendezvous = SwarmRendezvousId.Derive(transportCtx!.SessionEncryptionKey);
+
+        // Cancel and verify tracker unregisters deterministic SwarmRendezvousId derived from session key
+        DomainResult cancelResult = await _handler.CancelTransferAsync(sessionId, TransferTerminationReason.SenderCancelled);
+        cancelResult.IsSuccess.Should().BeTrue();
+        _trackerPort.Unregistered.Should().ContainSingle(u => u.Rendezvous == expectedRendezvous && u.MemberId == localInitiator);
+    }
+
+    [Test]
+    public void UT_CMD_04_AdaptiveChunkSizingScalesWithBundleSize()
+    {
+        ChunkSizeBytes.SelectOptimalForBundle(TotalBundleBytes.FromBytes(10L * 1024 * 1024)).Bytes.Should().Be(262_144);          // 10 MB -> 256 KB
+        ChunkSizeBytes.SelectOptimalForBundle(TotalBundleBytes.FromBytes(500L * 1024 * 1024)).Bytes.Should().Be(1_048_576);       // 500 MB -> 1 MB
+        ChunkSizeBytes.SelectOptimalForBundle(TotalBundleBytes.FromBytes(4L * 1024 * 1024 * 1024)).Bytes.Should().Be(2_097_152);  // 4 GB -> 2 MB
+        ChunkSizeBytes.SelectOptimalForBundle(TotalBundleBytes.FromBytes(100L * 1024 * 1024 * 1024)).Bytes.Should().Be(4_194_304);// 100 GB -> 4 MB
+    }
+
+    [Test]
+    public async Task UT_CMD_05_LargeManifestUploadsToBlobStorageAndResolvesOnRecipient()
+    {
+        ChannelId channelId = ChannelId.New();
+        PublicIdentityId senderId = PublicIdentityId.New();
+        PublicIdentityId recipientId = PublicIdentityId.New();
+        RootDirectoryPath sourceRoot = RootDirectoryPath.Parse(@"C:\LargeManifestBundle");
+
+        // Create 1,200 small files so serialized manifest exceeds 48 KB inline threshold
+        List<SanitizedRelativePath> files = new(1200);
+        for (int i = 0; i < 1200; i++)
+        {
+            var rel = SanitizedRelativePath.Parse($"folder_{i / 50}/document_item_{i:D4}.txt");
+            files.Add(rel);
+            ResolvedFilePath abs = ResolvedFilePath.Resolve(sourceRoot, rel);
+            _fileStorage.FilesOnDisk[abs.AbsolutePath] = new byte[128];
+        }
+
+        DomainResult<TransferSessionId> initResult = await _handler.InitiateTransferAsync(
+            channelId,
+            senderId,
+            [recipientId],
+            sourceRoot,
+            files,
+            DirectWanPolicy.DisabledByDefault);
+
+        initResult.IsSuccess.Should().BeTrue();
+        _payloadSender.SentPayloads.Should().ContainSingle();
+
+        // Dispatch the offer payload on the recipient's FileTransferPayloadHandler
+        InMemoryTransferSessionRepository recipientRepo = new();
+        InMemoryFilterPolicyRepository policyRepo = new();
+        var payloadHandler = new FileTransferPayloadHandler(
+            recipientRepo,
+            policyRepo,
+            _serializer,
+            _clock,
+            _blobStorage);
+
+        var inboundCtx = new InboundPayloadContext(
+            channelId,
+            senderId,
+            DeviceId.Primary,
+            AppId.FileTransferControl,
+            _payloadSender.SentPayloads[0].Payload,
+            _clock.UtcNow);
+
+        DomainResult handleResult = await payloadHandler.HandleInboundAsync(inboundCtx);
+        handleResult.IsSuccess.Should().BeTrue();
+
+        TransferSession? stagedSession = await recipientRepo.GetSessionByIdAsync(initResult.Value);
+        stagedSession.Should().NotBeNull();
+        stagedSession!.Manifest.TotalFiles.Count.Should().Be(1200);
+        stagedSession.State.Should().Be(TransferSessionState.PendingConsent);
     }
 
     [Test]

@@ -13,4 +13,15 @@ public interface IDesktopFileStorage
     ValueTask<Bitfield> ScanAndComputeBitfieldAsync(RootDirectoryPath rootPath, TransferManifest manifest, SelectedFileIndices? selectedIndices = null, CancellationToken ct = default);
     ValueTask FinalizeFileAsync(ResolvedFilePath targetPath, FileLastModifiedUtc lastModifiedUtc, CancellationToken ct = default);
     ValueTask<DiskSpacePreflightResult> CheckDiskSpaceAsync(RootDirectoryPath rootPath, TotalBundleBytes requiredBytes, CancellationToken ct = default);
+
+    ValueTask<FileMetadataResult> GetFileMetadataAsync(ResolvedFilePath sourcePath, CancellationToken ct = default)
+    {
+        FileInfo info = new(sourcePath.AbsolutePath);
+        if (!info.Exists)
+            return ValueTask.FromResult(FileMetadataResult.NotFound());
+
+        return ValueTask.FromResult(FileMetadataResult.Found(
+            FileSizeBytes.FromBytes(info.Length),
+            FileLastModifiedUtc.FromDateTimeOffset(info.LastWriteTimeUtc)));
+    }
 }
