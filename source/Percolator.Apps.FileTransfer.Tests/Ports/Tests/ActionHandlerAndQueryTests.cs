@@ -1,0 +1,165 @@
+using Percolator.Apps.FileTransfer.Domain.Common;
+using Percolator.Apps.FileTransfer.Domain.ManifestManagement;
+using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
+using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
+using Percolator.Apps.FileTransfer.Ports;
+using Percolator.Apps.FileTransfer.Tests.TestDoubles;
+using Percolator.Domain.Common;
+using Percolator.Domain.Identities.ValueObjects;
+
+namespace Percolator.Apps.FileTransfer.Tests.Ports.Tests;
+
+[TestFixture]
+public sealed class ActionHandlerAndQueryTests
+{
+    private FakeDateTimeProvider _clock = null!;
+    private InMemoryTransferSessionRepository _sessionRepo = null!;
+    private InMemoryDesktopFileStorage _fileStorage = null!;
+    private RecordingPayloadSender _payloadSender = null!;
+    private RecordingTrackerPort _trackerPort = null!;
+    private FileTransferActionHandler _handler = null!;
+    private FileTransferQueryService _queryService = null!;
+    private TransferOfferReaperService _reaperService = null!;
+
+    [SetUp]
+    public void SetUp()
+    {
+        _clock = new FakeDateTimeProvider();
+        _sessionRepo = new InMemoryTransferSessionRepository();
+        _fileStorage = new InMemoryDesktopFileStorage();
+        _payloadSender = new RecordingPayloadSender();
+        _trackerPort = new RecordingTrackerPort();
+
+        _handler = new FileTransferActionHandler(
+            _sessionRepo,
+            _fileStorage,
+            _payloadSender,
+            _trackerPort,
+            _clock);
+
+        _queryService = new FileTransferQueryService(_sessionRepo);
+        _reaperService = new TransferOfferReaperService(_sessionRepo, _clock);
+    }
+
+    [Test]
+    public async Task UT_CMD_01_InitiateTransferBoundsEnforcement()
+    {
+        // 50,001 files (exceeds 50,000 maximum allowed)
+        List<SanitizedRelativePath> tooManyFiles = [];
+        for (int i = 0; i < 50_001; i++)
+        {
+            tooManyFiles.Add(SanitizedRelativePath.Parse($"f{i}.bin"));
+        }
+
+        PublicIdentityId recipient = PublicIdentityId.New();
+
+        DomainResult<TransferSessionId> result = await _handler.InitiateTransferAsync(
+            [recipient],
+            RootDirectoryPath.Parse(@"C:\Files"),
+            tooManyFiles,
+            DirectWanPolicy.DisabledByDefault);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("Transfer.FileLimitExceeded");
+
+        IReadOnlyList<TransferSession> sessions = await _sessionRepo.GetActiveSessionsAsync();
+        sessions.Should().BeEmpty();
+    }
+
+    [Test]
+    public async Task UT_CMD_02_ProactiveTrackerEndpointUnregistrationOnCancellation()
+    {
+        TransferSessionId sessionId = TransferSessionId.New();
+        PublicIdentityId initiator = PublicIdentityId.New();
+        PublicIdentityId recipient = PublicIdentityId.New();
+
+        TransferManifest manifest = TransferManifest.Create(
+            sessionId,
+            RootBundleName.Parse("TrackerCancelTest"),
+            ChunkSizeBytes.Default,
+            MerkleTreeBuilder.BuildFromLeaves([ChunkHash.FromBytes(new byte[32])]),
+            [new FileEntry(FileIndex.FromInt(0), SanitizedRelativePath.Parse("test.bin"), FileSizeBytes.FromBytes(100), BundleByteOffset.Zero, FileLastModifiedUtc.FromDateTimeOffset(DateTimeOffset.UtcNow))]);
+
+        TransferSession session = TransferSession.CreateOutgoing1to1(sessionId, initiator, recipient, manifest, SeedRatio.Zero, _clock);
+        await _sessionRepo.SaveSessionAsync(session);
+
+        DomainResult cancelResult = await _handler.CancelTransferAsync(sessionId, TransferTerminationReason.UserDeclined);
+
+        cancelResult.IsSuccess.Should().BeTrue();
+        session.State.Should().Be(TransferSessionState.Cancelled);
+        _trackerPort.Unregistered.Should().ContainSingle(u => u.MemberId == initiator);
+    }
+
+    [Test]
+    public async Task UT_REP_01_StaleOfferReapingServiceSweepViaVirtualClock()
+    {
+        PublicIdentityId sender = PublicIdentityId.New();
+
+        TransferManifest manifest1 = TransferManifest.Create(
+            TransferSessionId.New(),
+            RootBundleName.Parse("OldOffer"),
+            ChunkSizeBytes.Default,
+            MerkleTreeBuilder.BuildFromLeaves([ChunkHash.FromBytes(new byte[32])]),
+            [new FileEntry(FileIndex.FromInt(0), SanitizedRelativePath.Parse("test.bin"), FileSizeBytes.FromBytes(100), BundleByteOffset.Zero, FileLastModifiedUtc.FromDateTimeOffset(DateTimeOffset.UtcNow))]);
+
+        TransferManifest manifest2 = TransferManifest.Create(
+            TransferSessionId.New(),
+            RootBundleName.Parse("RecentOffer"),
+            ChunkSizeBytes.Default,
+            MerkleTreeBuilder.BuildFromLeaves([ChunkHash.FromBytes(new byte[32])]),
+            [new FileEntry(FileIndex.FromInt(0), SanitizedRelativePath.Parse("test.bin"), FileSizeBytes.FromBytes(100), BundleByteOffset.Zero, FileLastModifiedUtc.FromDateTimeOffset(DateTimeOffset.UtcNow))]);
+
+        // Offer 1 created 25 hours ago
+        _clock.UtcNow = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        TransferSession staleSession = TransferSession.CreateIncomingStaged(manifest1.ManifestId, sender, manifest1, SeedRatio.Zero, _clock);
+        await _sessionRepo.SaveSessionAsync(staleSession);
+
+        // Advance clock by 23 hours -> now offer 2 created 2 hours before current time
+        _clock.Advance(TimeSpan.FromHours(23));
+        TransferSession recentSession = TransferSession.CreateIncomingStaged(manifest2.ManifestId, sender, manifest2, SeedRatio.Zero, _clock);
+        await _sessionRepo.SaveSessionAsync(recentSession);
+
+        // Advance clock by 2 hours -> stale offer is 25 hours old, recent offer is 2 hours old
+        _clock.Advance(TimeSpan.FromHours(2));
+
+        int expired = await _reaperService.SweepAndExpireStaleOffersAsync(TimeSpan.FromHours(24));
+
+        expired.Should().Be(1);
+        staleSession.State.Should().Be(TransferSessionState.Cancelled);
+        recentSession.State.Should().Be(TransferSessionState.PendingConsent);
+    }
+
+    [Test]
+    public async Task UT_QRY_01_TransferSessionQueryProjectionAccuracy()
+    {
+        TransferSessionId sessionId = TransferSessionId.New();
+        PublicIdentityId initiator = PublicIdentityId.New();
+        PublicIdentityId recipient = PublicIdentityId.New();
+
+        TransferManifest manifest = TransferManifest.Create(
+            sessionId,
+            RootBundleName.Parse("ProjectionTest"),
+            ChunkSizeBytes.FromBytes(65536),
+            MerkleTreeBuilder.BuildFromLeaves([ChunkHash.FromBytes(new byte[32]), ChunkHash.FromBytes(new byte[32])]),
+            [
+                new FileEntry(FileIndex.FromInt(0), SanitizedRelativePath.Parse("f0.bin"), FileSizeBytes.FromBytes(65536), BundleByteOffset.Zero, FileLastModifiedUtc.FromDateTimeOffset(DateTimeOffset.UtcNow)),
+                new FileEntry(FileIndex.FromInt(1), SanitizedRelativePath.Parse("f1.bin"), FileSizeBytes.FromBytes(65536), BundleByteOffset.FromOffset(65536), FileLastModifiedUtc.FromDateTimeOffset(DateTimeOffset.UtcNow))
+            ]);
+
+        TransferSession session = TransferSession.CreateOutgoing1to1(sessionId, initiator, recipient, manifest, SeedRatio.FromMultiplier(2.0), _clock);
+        session.RecordUploadedBytes(TransferByteLength.FromBytes(65536), _clock);
+        await _sessionRepo.SaveSessionAsync(session);
+
+        TransferSessionReadModel? readModel = await _queryService.GetTransferByIdAsync(sessionId);
+
+        readModel.Should().NotBeNull();
+        readModel!.SessionId.Should().Be(sessionId);
+        readModel.RootName.Value.Should().Be("ProjectionTest");
+        readModel.TotalBytes.Bytes.Should().Be(131072);
+        readModel.UploadedBytes.Bytes.Should().Be(65536);
+        readModel.CurrentSeedRatio.Multiplier.Should().Be(0.5);
+        readModel.TargetSeedRatio.Multiplier.Should().Be(2.0);
+        readModel.TotalChunks.Count.Should().Be(2);
+        readModel.Status.Should().Be(TransferSessionState.Offered);
+    }
+}
