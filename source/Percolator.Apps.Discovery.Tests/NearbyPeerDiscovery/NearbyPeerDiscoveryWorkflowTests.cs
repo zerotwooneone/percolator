@@ -69,6 +69,7 @@ public sealed class NearbyPeerDiscoveryWorkflowTests
         var results = await _workflow.QueryNearbyPeersAsync(_targetRelayId, limit);
 
         results.Should().HaveCount(3);
+        _queryClient.LastRequestedLimit.Should().Be(limit);
     }
 
     [Test]
@@ -135,12 +136,14 @@ public sealed class NearbyPeerDiscoveryWorkflowTests
     private sealed class FakeQueryClient : INearbyDiscoveryQueryClientPort
     {
         public List<PeerDiscoveryDescriptor> Candidates { get; } = new();
+        public DiscoveryResultLimit LastRequestedLimit { get; private set; }
 
         public Task<IReadOnlyList<PeerDiscoveryDescriptor>> SendNearbyQueryAsync(
             PublicIdentityId targetPeerOrRelayId,
-            int requestedLimit,
+            DiscoveryResultLimit limit,
             CancellationToken ct = default)
         {
+            LastRequestedLimit = limit;
             return Task.FromResult<IReadOnlyList<PeerDiscoveryDescriptor>>(Candidates);
         }
     }

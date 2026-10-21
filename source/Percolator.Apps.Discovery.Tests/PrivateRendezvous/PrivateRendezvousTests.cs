@@ -28,6 +28,7 @@ public sealed class PrivateRendezvousTests
         loc1.Should().Be(loc2);
         loc1.Value.Should().Be(loc2.Value);
         loc1.Value.Length.Should().Be(64); // 32 bytes hex
+        loc1.Span.Length.Should().Be(BlindedLocator.ByteLength);
     }
 
     [Test]
@@ -55,6 +56,19 @@ public sealed class PrivateRendezvousTests
         var loc2 = BlindedLocator.Derive(peerId, differentSecret, epoch);
 
         loc1.Should().NotBe(loc2);
+    }
+
+    [Test]
+    public void BlindedLocator_DeriveWindow_ReturnsAdjacentEpochsForMidnightClockSkew()
+    {
+        var peerId = PublicIdentityId.New();
+        var currentEpoch = new DiscoveryEpoch(20000);
+
+        var window = BlindedLocator.DeriveWindow(peerId, SharedSecret, currentEpoch);
+        window.Should().HaveCount(3);
+        window[0].Should().Be(BlindedLocator.Derive(peerId, SharedSecret, new DiscoveryEpoch(19999)));
+        window[1].Should().Be(BlindedLocator.Derive(peerId, SharedSecret, new DiscoveryEpoch(20000)));
+        window[2].Should().Be(BlindedLocator.Derive(peerId, SharedSecret, new DiscoveryEpoch(20001)));
     }
 
     [Test]
@@ -90,6 +104,39 @@ public sealed class PrivateRendezvousTests
         var result = DiscoveryEpoch.Create(-1);
         result.IsSuccess.Should().BeFalse();
         result.Error.Code.Should().Be("INVALID_EPOCH");
+    }
+
+    [Test]
+    public async Task PrivateRendezvousService_PublishEncryptedAndResolve_PreservesZeroKnowledgeRoutePrivacy()
+    {
+        var service = new PrivateRendezvousService();
+        var publisherId = PublicIdentityId.New();
+        var epoch = new DiscoveryEpoch(20000);
+        var route = new RelayRouteDescriptor("relay://primary.percolator.net:443");
+
+        var locator = service.DeriveLocator(publisherId, SharedSecret, epoch);
+        var encryptedRoute = EncryptedRendezvousRoute.Encrypt(route, locator, SharedSecret, epoch, publisherId);
+
+        var publishResult = await service.PublishEncryptedRendezvousAsync(locator, encryptedRoute);
+        publishResult.IsSuccess.Should().BeTrue();
+
+        // Query using 3-epoch clock-skew window
+        var queryWindow = service.DeriveLocatorWindow(publisherId, SharedSecret, epoch);
+        var matches = await service.ResolveRendezvousAsync(queryWindow);
+        matches.Should().ContainSingle();
+        matches[0].Locator.Should().Be(locator);
+
+        // Mutual contact with sharedSecret can decrypt the route
+        var decrypted = matches[0].EncryptedRoute.Decrypt(locator, SharedSecret, epoch, publisherId);
+        decrypted.IsSuccess.Should().BeTrue();
+        decrypted.Value.Value.Should().Be("relay://primary.percolator.net:443");
+
+        // Third party or wrong locator AAD cannot decrypt
+        var wrongSecret = (byte[])SharedSecret.Clone();
+        wrongSecret[0] ^= 0xFF;
+        var failedDecrypt = matches[0].EncryptedRoute.Decrypt(locator, wrongSecret, epoch, publisherId);
+        failedDecrypt.IsSuccess.Should().BeFalse();
+        failedDecrypt.Error.Code.Should().Be("RENDEZVOUS_DECRYPTION_FAILED");
     }
 
     [Test]

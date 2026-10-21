@@ -25,6 +25,6 @@ public interface INearbyDiscoveryQueryClientPort
 {
     Task<IReadOnlyList<PeerDiscoveryDescriptor>> SendNearbyQueryAsync(
         PublicIdentityId targetPeerOrRelayId,
-        int requestedLimit,
+        DiscoveryResultLimit limit,
         CancellationToken ct = default);
 }

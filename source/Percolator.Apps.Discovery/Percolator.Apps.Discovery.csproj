@@ -3,6 +3,9 @@
   <ItemGroup>
     <ProjectReference Include="..\Percolator.Domain\Percolator.Domain.csproj" />
     <ProjectReference Include="..\Percolator.PluginSdk\Percolator.PluginSdk.csproj" />
+    <ProjectReference Include="..\Percolator.SourceGenerators\Percolator.SourceGenerators.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <PropertyGroup>

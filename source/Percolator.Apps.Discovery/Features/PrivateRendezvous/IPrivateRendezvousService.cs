@@ -10,6 +10,16 @@ public interface IPrivateRendezvousService
         ReadOnlySpan<byte> sharedSecret,
         DiscoveryEpoch epoch);
 
+    IReadOnlyList<BlindedLocator> DeriveLocatorWindow(
+        PublicIdentityId peerId,
+        ReadOnlySpan<byte> sharedSecret,
+        DiscoveryEpoch currentEpoch);
+
+    ValueTask<DomainResult> PublishEncryptedRendezvousAsync(
+        BlindedLocator locator,
+        EncryptedRendezvousRoute encryptedRoute,
+        CancellationToken ct = default);
+
     ValueTask<DomainResult> PublishRendezvousAsync(
         BlindedLocator locator,
         string relayRouteDescriptor,

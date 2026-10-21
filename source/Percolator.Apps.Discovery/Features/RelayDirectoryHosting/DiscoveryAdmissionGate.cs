@@ -24,6 +24,13 @@ public sealed class DiscoveryAdmissionGate : IDiscoveryAdmissionGate
                 "RELAY_DISCOVERY_DISABLED", "The relay has discovery services disabled."));
         }
 
+        if (relayPolicy == RelayDiscoveryPolicy.BlindedContactsOnly)
+        {
+            return DomainResult.Failure(new DomainError(
+                "OPEN_DISCOVERY_PROHIBITED",
+                "Open directory listing is prohibited when relay policy is BlindedContactsOnly."));
+        }
+
         if (peerVisibility == PeerDiscoveryVisibility.Hidden)
         {
             return DomainResult.Failure(new DomainError(

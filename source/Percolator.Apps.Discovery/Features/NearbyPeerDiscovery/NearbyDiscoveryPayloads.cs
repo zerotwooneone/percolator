@@ -6,9 +6,10 @@ namespace Percolator.Apps.Discovery.Features.NearbyPeerDiscovery;
 public sealed record NearbyDiscoveryQueryPayload
 {
     public PublicIdentityId RequesterId { get; }
-    public int RequestedLimit { get; }
+    public DiscoveryResultLimit Limit { get; }
+    public int RequestedLimit => Limit.Value;
 
-    public NearbyDiscoveryQueryPayload(PublicIdentityId requesterId, int requestedLimit)
+    public NearbyDiscoveryQueryPayload(PublicIdentityId requesterId, DiscoveryResultLimit limit)
     {
         if (!requesterId.IsValid)
         {
@@ -16,7 +17,33 @@ public sealed record NearbyDiscoveryQueryPayload
         }
 
         RequesterId = requesterId;
-        RequestedLimit = requestedLimit;
+        Limit = limit.Value is >= DiscoveryResultLimit.Min and <= DiscoveryResultLimit.Max
+            ? limit
+            : DiscoveryResultLimit.Default;
+    }
+
+    public NearbyDiscoveryQueryPayload(PublicIdentityId requesterId, int requestedLimit)
+        : this(requesterId, DiscoveryResultLimit.Clamp(requestedLimit))
+    {
+    }
+
+    public static DomainResult<NearbyDiscoveryQueryPayload> Create(
+        PublicIdentityId requesterId,
+        DiscoveryResultLimit limit)
+    {
+        if (!requesterId.IsValid)
+        {
+            return DomainResult<NearbyDiscoveryQueryPayload>.Failure(new DomainError(
+                "INVALID_REQUESTER_ID", "RequesterId must be valid and non-empty."));
+        }
+
+        var limitCheck = DiscoveryResultLimit.Create(limit.Value);
+        if (limitCheck.IsFailure)
+        {
+            return DomainResult<NearbyDiscoveryQueryPayload>.Failure(limitCheck.Error);
+        }
+
+        return DomainResult<NearbyDiscoveryQueryPayload>.Success(new NearbyDiscoveryQueryPayload(requesterId, limit));
     }
 
     public static DomainResult<NearbyDiscoveryQueryPayload> Create(PublicIdentityId requesterId, int requestedLimit)
@@ -27,7 +54,14 @@ public sealed record NearbyDiscoveryQueryPayload
                 "INVALID_REQUESTER_ID", "RequesterId must be valid and non-empty."));
         }
 
-        return DomainResult<NearbyDiscoveryQueryPayload>.Success(new NearbyDiscoveryQueryPayload(requesterId, requestedLimit));
+        var limitResult = DiscoveryResultLimit.Create(requestedLimit);
+        if (limitResult.IsFailure)
+        {
+            return DomainResult<NearbyDiscoveryQueryPayload>.Failure(limitResult.Error);
+        }
+
+        return DomainResult<NearbyDiscoveryQueryPayload>.Success(
+            new NearbyDiscoveryQueryPayload(requesterId, limitResult.Value));
     }
 }
 

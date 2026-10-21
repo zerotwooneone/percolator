@@ -45,6 +45,20 @@ public sealed class DiscoveryAdmissionGateTests
     }
 
     [Test]
+    public void EvaluateAdmission_WhenRelayPolicyBlindedContactsOnly_ReturnsFailureForOpenDirectory()
+    {
+        var result = _gate.EvaluateAdmission(
+            _validPeerId,
+            RelayDiscoveryPolicy.BlindedContactsOnly,
+            PeerDiscoveryVisibility.Discoverable,
+            hasAuthenticatedHandshake: true,
+            hasActiveSignedPreKey: true);
+
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Code.Should().Be("OPEN_DISCOVERY_PROHIBITED");
+    }
+
+    [Test]
     public void EvaluateAdmission_WhenPeerHidden_ReturnsFailure()
     {
         var result = _gate.EvaluateAdmission(

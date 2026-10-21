@@ -33,7 +33,7 @@ public sealed class NearbyPeerDiscoveryWorkflow : INearbyPeerDiscoveryWorkflow
 
         var descriptors = await _queryClient.SendNearbyQueryAsync(
             targetPeerOrRelayId,
-            limit.Value,
+            limit,
             ct).ConfigureAwait(false);
 
         // Clamp to limit
