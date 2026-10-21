@@ -1,11 +1,12 @@
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Identities.ValueObjects;
 
 namespace Percolator.Domain.Identities.Model;
 
-public sealed class PreKeyBundleState : AggregateRoot<DeviceId>
+public sealed class PreKeyBundleState : AggregateRoot<HostedPreKeyRecordId>
 {
-    public override DeviceId Id => DeviceId;
+    public override HostedPreKeyRecordId Id => new(OwnerIdentityId, DeviceId);
     public PublicIdentityId OwnerIdentityId { get; }
     public DeviceId DeviceId { get; }
     public uint AvailableOneTimePreKeysCount { get; private set; }

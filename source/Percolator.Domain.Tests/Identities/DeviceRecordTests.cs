@@ -104,6 +104,18 @@ public class DeviceRecordTests
     }
 
     [Test]
+    public void DeviceLinkProof_BuildSignablePayload_IncludesDomainSeparationPrefix()
+    {
+        var secondaryId = new DeviceId(2);
+        Span<byte> payload = stackalloc byte[DeviceLinkProof.SignablePayloadLength];
+        DeviceLinkProof.BuildSignablePayload(secondaryId, _dummyKey, payload);
+
+        payload[..DeviceLinkProof.DomainPrefix.Length].SequenceEqual(DeviceLinkProof.DomainPrefix).Should().BeTrue();
+        var signedProof = DeviceLinkProof.CreateSigned(secondaryId, _dummyKey, new byte[32], _cryptoEngine);
+        signedProof.Verify(secondaryId, _dummyKey, _primaryKey, _cryptoEngine).Should().BeTrue();
+    }
+
+    [Test]
     public void TouchLastSeen_UpdatesTimestamp()
     {
         var device = DeviceRecord.CreatePrimary(_dummyKey, "Laptop", _timeProvider).Value;

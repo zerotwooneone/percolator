@@ -359,6 +359,25 @@ public class GroupChannelTests
     }
 
     [Test]
+    public void AppendPayload_WithDuplicatePayloadId_ReturnsDuplicatePayloadIdError()
+    {
+        var group = GroupChannel.CreateGenesis(
+            _channelId,
+            _ownerId,
+            "Security Team",
+            _timeProvider).Value;
+
+        var payloadId = PayloadId.New();
+        var payload = new ChannelPayload(payloadId, group.Id, _ownerId, DeviceId.Primary, new byte[] { 1 }, _timeProvider.UtcNow);
+
+        group.AppendPayload(payload, _timeProvider).IsSuccess.Should().BeTrue();
+        var duplicate = group.AppendPayload(payload, _timeProvider);
+
+        duplicate.IsFailure.Should().BeTrue();
+        duplicate.Error.Code.Should().Be("DUPLICATE_PAYLOAD_ID");
+    }
+
+    [Test]
     public void AppendPayload_WithMismatchedChannelId_ReturnsError()
     {
         var group = GroupChannel.CreateGenesis(
@@ -418,9 +437,31 @@ public class GroupChannelTests
         var remoteMember = new ChannelMember(PublicIdentityId.New(), ChannelRole.Member, _timeProvider.UtcNow);
         var latestEpoch = new EpochNumber(5);
 
-        group.Rebase(latestEpoch, [new ChannelMember(_ownerId, ChannelRole.Admin, _timeProvider.UtcNow), remoteMember], _timeProvider);
+        var rebaseResult = group.Rebase(latestEpoch, [new ChannelMember(_ownerId, ChannelRole.Admin, _timeProvider.UtcNow), remoteMember], _timeProvider);
 
+        rebaseResult.IsSuccess.Should().BeTrue();
         group.CurrentEpoch.Should().Be(latestEpoch);
         group.Members.Should().HaveCount(2);
+    }
+
+    [Test]
+    public void Rebase_WhenEpochRollbackOrMissingAdmin_ReturnsFailure()
+    {
+        var group = GroupChannel.CreateGenesis(
+            _channelId,
+            _ownerId,
+            "Security Team",
+            _timeProvider).Value;
+
+        group.RenameChannel(_adminId, "Updated", _timeProvider);
+        group.CurrentEpoch.Value.Should().Be(1);
+
+        var rollbackResult = group.Rebase(EpochNumber.Genesis, [new ChannelMember(_ownerId, ChannelRole.Admin, _timeProvider.UtcNow)], _timeProvider);
+        rollbackResult.IsFailure.Should().BeTrue();
+        rollbackResult.Error.Code.Should().Be("EPOCH_ROLLBACK_NOT_ALLOWED");
+
+        var noAdminResult = group.Rebase(new EpochNumber(2), [new ChannelMember(_ownerId, ChannelRole.Member, _timeProvider.UtcNow)], _timeProvider);
+        noAdminResult.IsFailure.Should().BeTrue();
+        noAdminResult.Error.Code.Should().Be("NO_ADMIN_IN_ROSTER");
     }
 }

@@ -165,6 +165,43 @@ public class RelayGroupLedgerTests
     }
 
     [Test]
+    public void VerifyDispatch_WhenReplayedWithSameCiphertextAndProof_ReturnsReplayDetectedError()
+    {
+        var token = BlindedRoutingToken.New();
+        var ledger = RelayGroupLedger.CreateGenesis(
+            _channelId,
+            _relayIdentityId,
+            _dummyBlob,
+            new HashSet<BlindedRoutingToken> { token },
+            _dummyParams,
+            _timeProvider).Value;
+
+        byte[] ciphertext = new byte[] { 1, 2, 3, 4 };
+        ledger.VerifyDispatch(_dummyProof, ciphertext, _zkEngine).IsSuccess.Should().BeTrue();
+
+        var replayResult = ledger.VerifyDispatch(_dummyProof, ciphertext, _zkEngine);
+        replayResult.IsFailure.Should().BeTrue();
+        replayResult.Error.Code.Should().Be("DISPATCH_REPLAY_DETECTED");
+    }
+
+    [Test]
+    public void VerifyDispatch_WithEmptyCiphertext_ReturnsEmptyCiphertextError()
+    {
+        var token = BlindedRoutingToken.New();
+        var ledger = RelayGroupLedger.CreateGenesis(
+            _channelId,
+            _relayIdentityId,
+            _dummyBlob,
+            new HashSet<BlindedRoutingToken> { token },
+            _dummyParams,
+            _timeProvider).Value;
+
+        var result = ledger.VerifyDispatch(_dummyProof, ReadOnlySpan<byte>.Empty, _zkEngine);
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("EMPTY_CIPHERTEXT");
+    }
+
+    [Test]
     public void CommitMutation_WhenTokensExceedMaxCapacity_ReturnsError()
     {
         var token1 = BlindedRoutingToken.New();

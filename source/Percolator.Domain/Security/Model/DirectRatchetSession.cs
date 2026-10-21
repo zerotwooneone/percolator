@@ -1,10 +1,11 @@
-using System.Security.Cryptography;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
 
 namespace Percolator.Domain.Security.Model;
+
+public readonly record struct SkippedMessageKeyId(DhPublicKey? EphemeralPublicKey, uint Counter);
 
 public sealed class DirectRatchetSession : AggregateRoot<SessionId>, ISensitiveSecret
 {
@@ -35,7 +36,10 @@ public sealed class DirectRatchetSession : AggregateRoot<SessionId>, ISensitiveS
     private readonly Dictionary<uint, MessageKey> _skippedMessageKeys = [];
     public IReadOnlyDictionary<uint, MessageKey> SkippedMessageKeys => _skippedMessageKeys;
 
-    private readonly Queue<uint> _skippedKeyOrder = new();
+    private readonly Dictionary<SkippedMessageKeyId, MessageKey> _epochSkippedMessageKeys = [];
+    public IReadOnlyDictionary<SkippedMessageKeyId, MessageKey> EpochSkippedMessageKeys => _epochSkippedMessageKeys;
+
+    private readonly Queue<SkippedMessageKeyId> _skippedKeyOrder = new();
 
     public uint SendingCounter { get; private set; }
     public uint ReceivingCounter { get; private set; }
@@ -56,7 +60,8 @@ public sealed class DirectRatchetSession : AggregateRoot<SessionId>, ISensitiveS
         uint sendingCounter = 0,
         uint receivingCounter = 0,
         SessionId? sessionId = null,
-        IEnumerable<KeyValuePair<uint, MessageKey>>? skippedKeys = null)
+        IEnumerable<KeyValuePair<uint, MessageKey>>? skippedKeys = null,
+        IEnumerable<KeyValuePair<SkippedMessageKeyId, MessageKey>>? epochSkippedKeys = null)
     {
         Id = sessionId ?? SessionId.New();
         OwnerIdentityId = ownerIdentityId;
@@ -73,11 +78,18 @@ public sealed class DirectRatchetSession : AggregateRoot<SessionId>, ISensitiveS
         SendingCounter = sendingCounter;
         ReceivingCounter = receivingCounter;
 
-        if (skippedKeys != null)
+        if (epochSkippedKeys != null)
+        {
+            foreach (var kvp in epochSkippedKeys)
+            {
+                StoreSkippedKey(kvp.Key.EphemeralPublicKey, kvp.Key.Counter, MessageKey.FromSpan(kvp.Value.Span));
+            }
+        }
+        else if (skippedKeys != null)
         {
             foreach (var kvp in skippedKeys)
             {
-                StoreSkippedKey(kvp.Key, MessageKey.FromSpan(kvp.Value.Span));
+                StoreSkippedKey(remoteEphemeralPublicKey, kvp.Key, MessageKey.FromSpan(kvp.Value.Span));
             }
         }
     }
@@ -174,7 +186,7 @@ public sealed class DirectRatchetSession : AggregateRoot<SessionId>, ISensitiveS
 
     /// <summary>
     /// Initiates an outbound Double Ratchet session using the remote peer's pre-key bundle.
-    /// Derives the initial sending chain and root key, and records the initial ephemeral public key.
+    /// Verifies the signed pre-key signature against the peer's identity key before deriving the initial sending chain.
     /// </summary>
     public static DomainResult<DirectRatchetSession> InitiateOutbound(
         PublicIdentityId ownerIdentityId,
@@ -183,10 +195,27 @@ public sealed class DirectRatchetSession : AggregateRoot<SessionId>, ISensitiveS
         ICryptoEngine engine,
         SessionId? sessionId = null)
     {
+        if (peerBundle == null)
+        {
+            return DomainResult<DirectRatchetSession>.Failure(new DomainError(
+                "NULL_PREKEY_BUNDLE", "Remote pre-key bundle cannot be null."));
+        }
+
+        ArgumentNullException.ThrowIfNull(engine);
+
         if (ownerIdentityId == peerBundle.IdentityId)
         {
             return DomainResult<DirectRatchetSession>.Failure(new DomainError(
                 "SELF_SESSION_NOT_ALLOWED", "Cannot initiate Double Ratchet session with self."));
+        }
+
+        if (!engine.VerifyEd25519Signature(
+                peerBundle.IdentityKey,
+                peerBundle.SignedPreKey.Span,
+                peerBundle.SignedPreKeySignature.Span))
+        {
+            return DomainResult<DirectRatchetSession>.Failure(new DomainError(
+                "INVALID_SIGNED_PREKEY_SIGNATURE", "Remote signed prekey signature is invalid or forged."));
         }
 
         // Generate Alice's initial ephemeral key pair
@@ -322,7 +351,7 @@ public sealed class DirectRatchetSession : AggregateRoot<SessionId>, ISensitiveS
             _receivingChainKey = nextChainKey;
             prevKey.Dispose();
 
-            StoreSkippedKey(ReceivingCounter, skippedMessageKey);
+            StoreSkippedKey(RemoteEphemeralPublicKey, ReceivingCounter, skippedMessageKey);
             ReceivingCounter++;
         }
 
@@ -337,7 +366,10 @@ public sealed class DirectRatchetSession : AggregateRoot<SessionId>, ISensitiveS
         return DomainResult<(uint, MessageKey)>.Success((current, targetMessageKey));
     }
 
-    public DomainResult StepDhRatchet(DhPublicKey newRemoteEphemeralKey, ICryptoEngine engine)
+    public DomainResult StepDhRatchet(
+        DhPublicKey newRemoteEphemeralKey,
+        ICryptoEngine engine,
+        uint previousChainLength = 0)
     {
         if (IsZeroized || _rootKey == null)
         {
@@ -353,6 +385,30 @@ public sealed class DirectRatchetSession : AggregateRoot<SessionId>, ISensitiveS
         {
             // Already ratcheted to this ephemeral key and sending chain is ready
             return DomainResult.Success();
+        }
+
+        // Signal Double Ratchet specification: Before replacing the receiving chain on a DH ratchet step,
+        // stage any remaining skipped message keys from the previous receiving chain up to PN (previousChainLength).
+        if (_receivingChainKey != null && RemoteEphemeralPublicKey != newRemoteEphemeralKey && previousChainLength > ReceivingCounter)
+        {
+            if (previousChainLength - ReceivingCounter > MaxSkipThreshold)
+            {
+                return DomainResult.Failure(new DomainError(
+                    "SKIP_THRESHOLD_EXCEEDED",
+                    $"Skipping {previousChainLength - ReceivingCounter} previous-chain messages exceeds max threshold of {MaxSkipThreshold}."));
+            }
+
+            while (ReceivingCounter < previousChainLength)
+            {
+                var prevKey = _receivingChainKey;
+                var (nextChainKey, skippedMessageKey) = engine.StepRatchet(prevKey);
+
+                _receivingChainKey = nextChainKey;
+                prevKey.Dispose();
+
+                StoreSkippedKey(RemoteEphemeralPublicKey, ReceivingCounter, skippedMessageKey);
+                ReceivingCounter++;
+            }
         }
 
         // 1. DH Receive step using existing local private key and new remote public key
@@ -395,34 +451,76 @@ public sealed class DirectRatchetSession : AggregateRoot<SessionId>, ISensitiveS
         return DomainResult.Success();
     }
 
-    public DomainResult<MessageKey> TryGetSkippedKey(uint counter)
+    public DomainResult<MessageKey> TryGetSkippedKey(uint counter, DhPublicKey? remoteEphemeralKey = null)
     {
         if (IsZeroized)
         {
             return DomainResult<MessageKey>.Failure(new DomainError("INVALID_SESSION_STATE", "Session has been zeroized."));
         }
 
-        if (_skippedMessageKeys.Remove(counter, out var key))
+        // 1. If explicit header ephemeral key is provided, look up exact (ephemeralKey, counter) pair
+        if (remoteEphemeralKey != null)
         {
+            var exactId = new SkippedMessageKeyId(remoteEphemeralKey, counter);
+            if (_epochSkippedMessageKeys.Remove(exactId, out var exactKey))
+            {
+                if (_skippedMessageKeys.TryGetValue(counter, out var currentIndexed) && ReferenceEquals(currentIndexed, exactKey))
+                {
+                    _skippedMessageKeys.Remove(counter);
+                }
+
+                return DomainResult<MessageKey>.Success(exactKey);
+            }
+        }
+
+        // 2. Check current RemoteEphemeralPublicKey + counter
+        var currentChainId = new SkippedMessageKeyId(RemoteEphemeralPublicKey, counter);
+        if (_epochSkippedMessageKeys.Remove(currentChainId, out var key))
+        {
+            _skippedMessageKeys.Remove(counter);
             return DomainResult<MessageKey>.Success(key);
+        }
+
+        // 3. Fallback when caller omitted remoteEphemeralKey: check _skippedMessageKeys index
+        if (remoteEphemeralKey == null && _skippedMessageKeys.Remove(counter, out var fallbackKey))
+        {
+            var matchingEntry = _epochSkippedMessageKeys.FirstOrDefault(kvp => kvp.Key.Counter == counter && ReferenceEquals(kvp.Value, fallbackKey));
+            if (matchingEntry.Value != null)
+            {
+                _epochSkippedMessageKeys.Remove(matchingEntry.Key);
+            }
+
+            return DomainResult<MessageKey>.Success(fallbackKey);
         }
 
         return DomainResult<MessageKey>.Failure(new DomainError("SKIPPED_KEY_NOT_FOUND", $"No skipped key cached for counter {counter}."));
     }
 
-    private void StoreSkippedKey(uint counter, MessageKey key)
+    private void StoreSkippedKey(DhPublicKey? ephemeralKey, uint counter, MessageKey key)
     {
-        while (_skippedMessageKeys.Count >= MaxTotalSkippedKeys && _skippedKeyOrder.TryDequeue(out var oldestCounter))
+        while (_epochSkippedMessageKeys.Count >= MaxTotalSkippedKeys && _skippedKeyOrder.TryDequeue(out var oldestId))
         {
-            if (_skippedMessageKeys.Remove(oldestCounter, out var evictedKey))
+            if (_epochSkippedMessageKeys.Remove(oldestId, out var evictedKey))
             {
+                if (_skippedMessageKeys.TryGetValue(oldestId.Counter, out var indexed) && ReferenceEquals(indexed, evictedKey))
+                {
+                    _skippedMessageKeys.Remove(oldestId.Counter);
+                }
+
                 evictedKey.Dispose();
                 break;
             }
         }
 
+        var id = new SkippedMessageKeyId(ephemeralKey, counter);
+        if (_epochSkippedMessageKeys.Remove(id, out var existingKey))
+        {
+            existingKey.Dispose();
+        }
+
+        _epochSkippedMessageKeys[id] = key;
         _skippedMessageKeys[counter] = key;
-        _skippedKeyOrder.Enqueue(counter);
+        _skippedKeyOrder.Enqueue(id);
     }
 
     public void Zeroize()
@@ -443,10 +541,17 @@ public sealed class DirectRatchetSession : AggregateRoot<SessionId>, ISensitiveS
         _receivingChainKey?.Dispose();
         _receivingChainKey = null;
 
+        foreach (var key in _epochSkippedMessageKeys.Values)
+        {
+            key.Dispose();
+        }
+
         foreach (var key in _skippedMessageKeys.Values)
         {
             key.Dispose();
         }
+
+        _epochSkippedMessageKeys.Clear();
         _skippedMessageKeys.Clear();
         _skippedKeyOrder.Clear();
 

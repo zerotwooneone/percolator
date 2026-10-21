@@ -1,4 +1,3 @@
-using System.Buffers.Binary;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Ports;
@@ -78,11 +77,7 @@ public sealed class DeviceRecord : IEntity<DeviceId>
             return DomainResult<DeviceRecord>.Failure(new DomainError("NULL_PRIMARY_KEY", "Primary identity public key is required to verify link proof."));
         }
 
-        Span<byte> messageToVerify = stackalloc byte[4 + 32];
-        BinaryPrimitives.WriteUInt32LittleEndian(messageToVerify[..4], deviceId.Value);
-        devicePublicKey.Span.CopyTo(messageToVerify[4..]);
-
-        if (!cryptoEngine.VerifyEd25519Signature(primaryIdentityPublicKey, messageToVerify, linkProof.Span))
+        if (!linkProof.Verify(deviceId, devicePublicKey, primaryIdentityPublicKey, cryptoEngine))
         {
             return DomainResult<DeviceRecord>.Failure(new DomainError("INVALID_LINK_PROOF_SIGNATURE", "The device link proof signature is invalid or forged."));
         }

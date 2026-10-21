@@ -95,4 +95,41 @@ public sealed class DirectSessionScenarioTests
             failStep.Error.Code.Should().Be("INVALID_SESSION_STATE");
         }
     }
+
+    [Test]
+    public void DirectSession_CrossDhEpoch_OutOfOrderDelivery_StagesPreviousChainViaPN_AndDecryptsDelayedPackets()
+    {
+        using var alice = ScenarioParticipant.Create("Alice", _engine);
+        using var bob = ScenarioParticipant.Create("Bob", _engine);
+
+        var (aliceSession, bobSession) = ScenarioSessionPairBuilder
+            .Between(alice, bob, _engine)
+            .ViaDirectX3dh();
+
+        using (aliceSession)
+        using (bobSession)
+        {
+            // 1. Alice sends 3 messages in Epoch 0; Bob receives only message 0 (messages 1 and 2 are delayed in P2P transit)
+            var a0 = WirePacketSimulator.PackDirect(aliceSession, "Alice Epoch0 Msg0", _engine);
+            var a1Delayed = WirePacketSimulator.PackDirect(aliceSession, "Alice Epoch0 Msg1 (Delayed)", _engine);
+            var a2Delayed = WirePacketSimulator.PackDirect(aliceSession, "Alice Epoch0 Msg2 (Delayed)", _engine);
+
+            WirePacketSimulator.UnpackDirect(bobSession, a0, _engine).Should().Be("Alice Epoch0 Msg0");
+
+            // 2. Bob replies to Alice (stepping his DH ratchet), and Alice receives Bob's reply
+            var b0 = WirePacketSimulator.PackDirect(bobSession, "Bob Reply 0", _engine);
+            WirePacketSimulator.UnpackDirect(aliceSession, b0, _engine).Should().Be("Bob Reply 0");
+
+            // 3. Alice sends 2 messages in Epoch 1 (with PN = 3!). Bob receives Epoch 1 Msg 1 BEFORE Epoch 0 Msg 1 & 2!
+            var aEpoch1Msg0Delayed = WirePacketSimulator.PackDirect(aliceSession, "Alice Epoch1 Msg0 (Delayed)", _engine);
+            var aEpoch1Msg1 = WirePacketSimulator.PackDirect(aliceSession, "Alice Epoch1 Msg1", _engine);
+
+            WirePacketSimulator.UnpackDirect(bobSession, aEpoch1Msg1, _engine).Should().Be("Alice Epoch1 Msg1");
+
+            // 4. Now the delayed packets from both Epoch 0 (a1Delayed, a2Delayed) and Epoch 1 (aEpoch1Msg0Delayed) arrive!
+            WirePacketSimulator.UnpackDirect(bobSession, a1Delayed, _engine).Should().Be("Alice Epoch0 Msg1 (Delayed)");
+            WirePacketSimulator.UnpackDirect(bobSession, aEpoch1Msg0Delayed, _engine).Should().Be("Alice Epoch1 Msg0 (Delayed)");
+            WirePacketSimulator.UnpackDirect(bobSession, a2Delayed, _engine).Should().Be("Alice Epoch0 Msg2 (Delayed)");
+        }
+    }
 }

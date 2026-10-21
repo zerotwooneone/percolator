@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Security.Cryptography;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
@@ -12,6 +13,7 @@ namespace Percolator.Domain.Delivery.Hosting;
 public sealed class RelayGroupLedger : AggregateRoot<ChannelId>
 {
     public const int MaxGroupMembers = 1000;
+    public const int MaxTrackedDispatches = 1024;
 
     public override ChannelId Id => ChannelId;
     public ChannelId ChannelId { get; }
@@ -23,6 +25,9 @@ public sealed class RelayGroupLedger : AggregateRoot<ChannelId>
 
     private readonly HashSet<BlindedRoutingToken> _activeRoutingTokens = [];
     public IReadOnlySet<BlindedRoutingToken> ActiveRoutingTokens => _activeRoutingTokens;
+
+    private readonly HashSet<Guid> _recentDispatchDigests = [];
+    private readonly Queue<Guid> _recentDispatchOrder = new();
 
     private RelayGroupLedger(
         ChannelId channelId,
@@ -119,6 +124,9 @@ public sealed class RelayGroupLedger : AggregateRoot<ChannelId>
             _activeRoutingTokens.Add(token);
         }
 
+        _recentDispatchDigests.Clear();
+        _recentDispatchOrder.Clear();
+
         CurrentEpoch = CurrentEpoch.Next();
         LastUpdatedUtc = timeProvider.UtcNow;
 
@@ -132,18 +140,44 @@ public sealed class RelayGroupLedger : AggregateRoot<ChannelId>
         ReadOnlySpan<byte> envelopeCiphertext,
         IZkProofEngine proofEngine)
     {
+        if (proof == null)
+        {
+            return DomainResult.Failure(new DomainError("INVALID_ZK_PROOF", "ZK presentation proof cannot be null."));
+        }
+
+        if (envelopeCiphertext.IsEmpty)
+        {
+            return DomainResult.Failure(new DomainError("EMPTY_CIPHERTEXT", "Group dispatch ciphertext cannot be empty."));
+        }
+
         Span<byte> challengeHash = stackalloc byte[32];
-        SHA256.HashData(envelopeCiphertext, challengeHash);
+        ComputeDispatchChallenge(envelopeCiphertext, challengeHash);
+
+        var replayDigest = ComputeDispatchReplayDigest(CurrentEpoch.Value, challengeHash, proof.Span);
+        if (_recentDispatchDigests.Contains(replayDigest))
+        {
+            return DomainResult.Failure(new DomainError(
+                "DISPATCH_REPLAY_DETECTED",
+                "Duplicate group dispatch envelope and ZK proof detected."));
+        }
 
         if (!proofEngine.VerifyGroupPresentation(CurrentEpoch.Value, proof, challengeHash, PublicParams))
         {
             return DomainResult.Failure(new DomainError("INVALID_ZK_PROOF", "The ZK membership presentation proof is invalid for group message dispatch."));
         }
 
+        RecordDispatchDigest(replayDigest);
         return DomainResult.Success();
     }
 
-    private static void ComputeMutationChallenge(
+    public static void ComputeDispatchChallenge(
+        ReadOnlySpan<byte> envelopeCiphertext,
+        Span<byte> destination)
+    {
+        SHA256.HashData(envelopeCiphertext, destination);
+    }
+
+    public static void ComputeMutationChallenge(
         EncryptedEntriesBlob newBlob,
         IReadOnlySet<BlindedRoutingToken> newTokens,
         Span<byte> destination)
@@ -159,5 +193,36 @@ public sealed class RelayGroupLedger : AggregateRoot<ChannelId>
         }
 
         sha.GetHashAndReset(destination);
+    }
+
+    private Guid ComputeDispatchReplayDigest(
+        uint epoch,
+        ReadOnlySpan<byte> challengeHash,
+        ReadOnlySpan<byte> proofBytes)
+    {
+        using var sha = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        Span<byte> header = stackalloc byte[20];
+        ChannelId.TryWriteBytes(header[..16]);
+        BinaryPrimitives.WriteUInt32LittleEndian(header[16..20], epoch);
+        sha.AppendData(header);
+        sha.AppendData(challengeHash);
+        sha.AppendData(proofBytes);
+
+        Span<byte> fullHash = stackalloc byte[32];
+        sha.GetHashAndReset(fullHash);
+        return new Guid(fullHash[..16]);
+    }
+
+    private void RecordDispatchDigest(Guid digest)
+    {
+        while (_recentDispatchDigests.Count >= MaxTrackedDispatches && _recentDispatchOrder.TryDequeue(out var oldest))
+        {
+            _recentDispatchDigests.Remove(oldest);
+        }
+
+        if (_recentDispatchDigests.Add(digest))
+        {
+            _recentDispatchOrder.Enqueue(digest);
+        }
     }
 }

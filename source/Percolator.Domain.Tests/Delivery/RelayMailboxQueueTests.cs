@@ -43,6 +43,21 @@ public class RelayMailboxQueueTests
     }
 
     [Test]
+    public void Enqueue_WithDuplicateEnvelopeId_ReturnsDuplicateEnvelopeIdError()
+    {
+        var duplicateId = EnvelopeId.New();
+        var env1 = new MailboxEnvelope(duplicateId, _recipientToken, new byte[] { 1 }, _timeProvider.UtcNow, _timeProvider.UtcNow.AddDays(7));
+        var env2 = new MailboxEnvelope(duplicateId, _recipientToken, new byte[] { 2 }, _timeProvider.UtcNow, _timeProvider.UtcNow.AddDays(7));
+
+        _queue.Enqueue(env1, _deliveryToken, _timeProvider).IsSuccess.Should().BeTrue();
+        var duplicateResult = _queue.Enqueue(env2, _deliveryToken, _timeProvider);
+
+        duplicateResult.IsFailure.Should().BeTrue();
+        duplicateResult.Error.Code.Should().Be("DUPLICATE_ENVELOPE_ID");
+        _queue.TotalCount.Should().Be(1);
+    }
+
+    [Test]
     public void Enqueue_WhenEnvelopeAlreadyExpired_ReturnsEnvelopeExpiredError()
     {
         var expiredEnvelope = new MailboxEnvelope(
@@ -191,5 +206,34 @@ public class RelayMailboxQueueTests
 
         drained.Should().BeEmpty();
         _queue.TotalCount.Should().Be(1);
+    }
+
+    [Test]
+    public void TryDrainForToken_WhenDistinctDrainTokenRegistered_RejectsSenderDeliveryTokenAndAllowsRecipientDrainToken()
+    {
+        var securedRoutingToken = BlindedRoutingToken.New();
+        var senderDeliveryToken = DeliveryToken.FromSpan(Enumerable.Repeat((byte)0x11, 32).ToArray());
+        var recipientDrainToken = DeliveryToken.FromSpan(Enumerable.Repeat((byte)0x22, 32).ToArray());
+
+        _queue.RegisterRecipient(securedRoutingToken, senderDeliveryToken, recipientDrainToken);
+
+        var env = new MailboxEnvelope(EnvelopeId.New(), securedRoutingToken, new byte[] { 42 }, _timeProvider.UtcNow, _timeProvider.UtcNow.AddDays(1));
+        _queue.Enqueue(env, senderDeliveryToken, _timeProvider).IsSuccess.Should().BeTrue();
+
+        // Unauthenticated drain must not return or delete envelopes
+        _queue.DrainForToken(securedRoutingToken).Should().BeEmpty();
+        _queue.TotalCount.Should().Be(1);
+
+        // Sender attempting to drain using the sender DeliveryToken must be rejected
+        var unauthorizedDrain = _queue.TryDrainForToken(securedRoutingToken, senderDeliveryToken);
+        unauthorizedDrain.IsFailure.Should().BeTrue();
+        unauthorizedDrain.Error.Code.Should().Be("UNAUTHORIZED_DRAIN_TOKEN");
+        _queue.TotalCount.Should().Be(1);
+
+        // Recipient draining with secret DrainToken succeeds
+        var authorizedDrain = _queue.TryDrainForToken(securedRoutingToken, recipientDrainToken);
+        authorizedDrain.IsSuccess.Should().BeTrue();
+        authorizedDrain.Value.Should().ContainSingle(e => e.Id == env.Id);
+        _queue.TotalCount.Should().Be(0);
     }
 }

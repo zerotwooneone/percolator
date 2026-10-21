@@ -13,7 +13,8 @@ public sealed record WirePacket(
     DhPublicKey? EphemeralPublicKey,
     byte[]? Signature = null,
     byte[]? AssociatedData = null,
-    string? Plaintext = null)
+    string? Plaintext = null,
+    uint PreviousChainLength = 0)
 {
     public byte[] Ciphertext { get; set; } = Ciphertext;
     public byte[] Nonce { get; set; } = Nonce;
@@ -71,7 +72,14 @@ public static class WirePacketSimulator
                 Encoding.UTF8.GetBytes(plaintext),
                 aad);
 
-            return new WirePacket(counter, ciphertext, nonce, ephemKey, AssociatedData: aad, Plaintext: plaintext);
+            return new WirePacket(
+                counter,
+                ciphertext,
+                nonce,
+                ephemKey,
+                AssociatedData: aad,
+                Plaintext: plaintext,
+                PreviousChainLength: senderSession.PreviousSendingChainLength);
         }
     }
 
@@ -80,9 +88,26 @@ public static class WirePacketSimulator
         WirePacket packet,
         ScenarioCryptoEngine engine)
     {
+        // First check if this packet belongs to a previously skipped key (e.g. from an earlier DH epoch)
+        var preRatchetSkipped = receiverSession.TryGetSkippedKey(packet.Counter, packet.EphemeralPublicKey);
+        if (preRatchetSkipped.IsSuccess)
+        {
+            using var skippedKey = preRatchetSkipped.Value;
+            var decryptedSkipped = engine.DecryptAesGcm(
+                skippedKey.Span,
+                packet.Nonce,
+                packet.Ciphertext,
+                packet.AssociatedData ?? Encoding.UTF8.GetBytes($"aad-{packet.Counter}"));
+
+            return Encoding.UTF8.GetString(decryptedSkipped);
+        }
+
         if (packet.EphemeralPublicKey != null && packet.EphemeralPublicKey != receiverSession.RemoteEphemeralPublicKey)
         {
-            var ratchetResult = receiverSession.StepDhRatchet(packet.EphemeralPublicKey, engine);
+            var ratchetResult = receiverSession.StepDhRatchet(
+                packet.EphemeralPublicKey,
+                engine,
+                packet.PreviousChainLength);
             if (ratchetResult.IsFailure)
             {
                 throw new InvalidOperationException($"DH ratchet failed: {ratchetResult.Error.Description}");
@@ -101,7 +126,7 @@ public static class WirePacketSimulator
         }
         else
         {
-            var skipped = receiverSession.TryGetSkippedKey(packet.Counter);
+            var skipped = receiverSession.TryGetSkippedKey(packet.Counter, packet.EphemeralPublicKey);
             if (skipped.IsFailure)
             {
                 throw new InvalidOperationException($"Try get skipped key failed: {skipped.Error.Description}");

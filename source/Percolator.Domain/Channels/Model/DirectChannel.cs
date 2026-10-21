@@ -7,6 +7,8 @@ namespace Percolator.Domain.Channels.Model;
 
 public sealed class DirectChannel : AggregateRoot<ChannelId>
 {
+    public const int MaxRetainedPayloads = 1000;
+
     public override ChannelId Id { get; }
     public PublicIdentityId OwnerIdentityId { get; }
     public PublicIdentityId RemotePeerId { get; }
@@ -14,6 +16,7 @@ public sealed class DirectChannel : AggregateRoot<ChannelId>
     public DateTimeOffset LastActivityUtc { get; private set; }
 
     private readonly List<ChannelPayload> _payloads = [];
+    private readonly HashSet<PayloadId> _payloadIds = [];
     public IReadOnlyList<ChannelPayload> Payloads => _payloads.AsReadOnly();
 
     private DirectChannel(
@@ -61,6 +64,13 @@ public sealed class DirectChannel : AggregateRoot<ChannelId>
 
     public DomainResult AppendPayload(ChannelPayload payload, IDateTimeProvider timeProvider)
     {
+        ArgumentNullException.ThrowIfNull(payload);
+
+        if (!payload.Id.IsValid)
+        {
+            return DomainResult.Failure(new DomainError("INVALID_PAYLOAD_ID", "Payload identifier cannot be empty."));
+        }
+
         if (payload.ChannelId != Id)
         {
             return DomainResult.Failure(new DomainError("CHANNEL_MISMATCH", "Payload does not belong to this channel."));
@@ -69,6 +79,18 @@ public sealed class DirectChannel : AggregateRoot<ChannelId>
         if (payload.AuthorId != OwnerIdentityId && payload.AuthorId != RemotePeerId)
         {
             return DomainResult.Failure(new DomainError("SENDER_NOT_PARTICIPANT", "Payload author is not a participant in this direct channel."));
+        }
+
+        if (!_payloadIds.Add(payload.Id))
+        {
+            return DomainResult.Failure(new DomainError("DUPLICATE_PAYLOAD_ID", "A payload with this identifier has already been appended to the channel."));
+        }
+
+        while (_payloads.Count >= MaxRetainedPayloads)
+        {
+            var oldest = _payloads[0];
+            _payloads.RemoveAt(0);
+            _payloadIds.Remove(oldest.Id);
         }
 
         _payloads.Add(payload);

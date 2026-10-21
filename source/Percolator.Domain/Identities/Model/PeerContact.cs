@@ -1,4 +1,3 @@
-using System.Buffers.Binary;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Ports;
@@ -20,11 +19,14 @@ public enum ContactState
     Rejected = 2
 }
 
+public readonly record struct PeerContactId(PublicIdentityId OwnerIdentityId, PublicIdentityId RemotePeerId);
+
 public sealed class PeerContact : AggregateRoot<PublicIdentityId>
 {
     public const int MaxRegisteredDevicesPerPeer = 32;
 
     public override PublicIdentityId Id => RemotePeerId;
+    public PeerContactId ContactId => new(OwnerIdentityId, RemotePeerId);
     public PublicIdentityId OwnerIdentityId { get; }
     public PublicIdentityId RemotePeerId { get; }
     public IdentityKey? PrimaryPublicKey { get; private set; }
@@ -155,9 +157,24 @@ public sealed class PeerContact : AggregateRoot<PublicIdentityId>
         return DomainResult.Success();
     }
 
-    public void UpdateTrust(PeerTrustLevel trustLevel)
+    public DomainResult UpdateTrust(PeerTrustLevel trustLevel)
     {
+        if (State != ContactState.Active)
+        {
+            return DomainResult.Failure(new DomainError(
+                "CONTACT_NOT_ACTIVE",
+                "Cannot update trust level of a non-active contact. Approve the contact first."));
+        }
+
+        if (TrustLevel == PeerTrustLevel.Blocked && trustLevel != PeerTrustLevel.Blocked)
+        {
+            return DomainResult.Failure(new DomainError(
+                "CONTACT_BLOCKED",
+                "Cannot update trust level of a blocked contact without unblocking first."));
+        }
+
         TrustLevel = trustLevel;
+        return DomainResult.Success();
     }
 
     public DomainResult RotatePrimaryPublicKey(IdentityKey newKey)
@@ -195,6 +212,11 @@ public sealed class PeerContact : AggregateRoot<PublicIdentityId>
             return DomainResult.Failure(new DomainError("INVALID_DEVICE_ID", "Secondary device must have a valid non-zero DeviceId and cannot be Primary DeviceId(1)."));
         }
 
+        if (secondaryDevicePublicKey == null || linkProof == null || primaryPeerPublicKey == null)
+        {
+            return DomainResult.Failure(new DomainError("NULL_KEY_MATERIAL", "Device keys and link proof cannot be null."));
+        }
+
         if (_registeredDevices.Contains(deviceId))
         {
             return DomainResult.Success();
@@ -205,11 +227,7 @@ public sealed class PeerContact : AggregateRoot<PublicIdentityId>
             return DomainResult.Failure(new DomainError("DEVICE_LIMIT_EXCEEDED", $"Cannot exceed maximum registered devices ({MaxRegisteredDevicesPerPeer})."));
         }
 
-        Span<byte> messageToVerify = stackalloc byte[4 + 32];
-        BinaryPrimitives.WriteUInt32LittleEndian(messageToVerify[..4], deviceId.Value);
-        secondaryDevicePublicKey.Span.CopyTo(messageToVerify[4..]);
-
-        if (!cryptoEngine.VerifyEd25519Signature(primaryPeerPublicKey, messageToVerify, linkProof.Span))
+        if (!linkProof.Verify(deviceId, secondaryDevicePublicKey, primaryPeerPublicKey, cryptoEngine))
         {
             return DomainResult.Failure(new DomainError("INVALID_LINK_PROOF_SIGNATURE", "The device link proof signature is invalid or forged."));
         }

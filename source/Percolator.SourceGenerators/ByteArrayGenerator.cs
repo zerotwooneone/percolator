@@ -434,7 +434,7 @@ public sealed class ByteArrayGenerator : IIncrementalGenerator
             sb.AppendLine("    {");
             sb.AppendLine("        if (other is null) return false;");
             sb.AppendLine("        if (global::System.Object.ReferenceEquals(this, other)) return true;");
-            sb.AppendLine("        return _value.Span.SequenceEqual(other._value.Span);");
+            sb.AppendLine("        return global::System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(_value.Span, other._value.Span);");
             sb.AppendLine("    }");
             sb.AppendLine();
 
@@ -596,7 +596,7 @@ namespace Percolator.SourceGenerators;
 /// Supported targets: <c>public</c>/<c>internal</c> top-level, non-generic, <c>sealed partial record</c>.
 /// The generator emits a defensive-copy construction method (<c>FromBytes</c>/<c>FromSpan</c>) and an ownership-transfer method (<c>FromBytesOwned</c>).
 /// </remarks>
-public sealed class ByteArrayAttribute : global::System.Attribute
+internal sealed class ByteArrayAttribute : global::System.Attribute
 {
     public int? Length { get; }
     public int? MinLength { get; }

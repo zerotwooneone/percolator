@@ -190,6 +190,48 @@ public class DirectRatchetSessionTests
     }
 
     [Test]
+    public void StepDhRatchet_WithPreviousChainLength_StagesSkippedKeysAcrossEpochsWithoutCollision()
+    {
+        Span<byte> privBytes = stackalloc byte[32];
+        privBytes.Fill(0xAA);
+        using var localPriv = EphemeralPrivateKey.FromSpan(privBytes);
+        var epoch0RemotePub = DhPublicKey.FromSpan(Enumerable.Repeat((byte)0x11, 32).ToArray());
+        var epoch1RemotePub = DhPublicKey.FromSpan(Enumerable.Repeat((byte)0x22, 32).ToArray());
+
+        var session = new DirectRatchetSession(
+            _aliceId, _device1,
+            _bobId, _device1,
+            rootKey: _rootKey,
+            sendingChainKey: _initialChainKey,
+            receivingChainKey: _initialChainKey,
+            remoteEphemeralPublicKey: epoch0RemotePub,
+            localEphemeralPrivateKey: localPriv);
+
+        // Receive counter 0 on epoch 0; counters 1 and 2 on epoch 0 are delayed in flight.
+        session.StepReceivingChain(_engine, targetCounter: 0).IsSuccess.Should().BeTrue();
+        session.ReceivingCounter.Should().Be(1);
+
+        // Epoch 1 arrives with PN = 3 -> stages counters 1 and 2 under epoch0RemotePub before DH ratchet step
+        var dhResult = session.StepDhRatchet(epoch1RemotePub, _engine, previousChainLength: 3);
+        dhResult.IsSuccess.Should().BeTrue();
+        session.ReceivingCounter.Should().Be(0);
+
+        // Epoch 1 also skips counter 1 (by receiving counter 2 directly)
+        session.StepReceivingChain(_engine, targetCounter: 2).IsSuccess.Should().BeTrue();
+
+        // Both (epoch0RemotePub, 1) and (epoch1RemotePub, 1) must be independently retrievable and distinct!
+        var epoch0Key1 = session.TryGetSkippedKey(1, epoch0RemotePub);
+        var epoch1Key1 = session.TryGetSkippedKey(1, epoch1RemotePub);
+
+        epoch0Key1.IsSuccess.Should().BeTrue();
+        epoch1Key1.IsSuccess.Should().BeTrue();
+        epoch0Key1.Value.Span.ToArray().Should().NotBeEquivalentTo(epoch1Key1.Value.Span.ToArray());
+
+        epoch0Key1.Value.Dispose();
+        epoch1Key1.Value.Dispose();
+    }
+
+    [Test]
     public void Dispose_ZeroizesActiveSecretsAndSkippedKeys()
     {
         var session = new DirectRatchetSession(
@@ -246,5 +288,20 @@ public class DirectRatchetSessionTests
 
         // 6. Assert mutual cryptographic convergence: Alice's message key == Bob's message key!
         aliceStep.Value.Key.Span.ToArray().Should().BeEquivalentTo(bobStep.Value.Key.Span.ToArray());
+    }
+
+    [Test]
+    public void InitiateOutbound_WithForgedSignedPreKeySignature_ReturnsInvalidSignatureError()
+    {
+        _engine.SignaturesAlwaysValid = false;
+        var (_, bobSignedPreKeyPub) = _engine.GenerateEphemeralKeyPair();
+        var bobIdentityKey = IdentityKey.FromSpan(new byte[32]);
+        var forgedProof = DeviceLinkProof.FromSpan(new byte[64]);
+        var bobBundle = new PreKeyBundle(_bobId, _device1, bobIdentityKey, bobSignedPreKeyPub, forgedProof);
+
+        var result = DirectRatchetSession.InitiateOutbound(_aliceId, _device1, bobBundle, _engine);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("INVALID_SIGNED_PREKEY_SIGNATURE");
     }
 }

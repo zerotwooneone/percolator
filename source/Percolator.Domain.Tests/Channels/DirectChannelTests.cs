@@ -63,6 +63,20 @@ public class DirectChannelTests
     }
 
     [Test]
+    public void AppendPayload_WithDuplicatePayloadId_ReturnsDuplicatePayloadIdError()
+    {
+        var channel = DirectChannel.Create(_channelId, _ownerId, _peerId, _timeProvider).Value;
+        var payloadId = PayloadId.New();
+        var payload = new ChannelPayload(payloadId, channel.Id, _ownerId, DeviceId.Primary, new byte[] { 42 }, _timeProvider.UtcNow);
+
+        channel.AppendPayload(payload, _timeProvider).IsSuccess.Should().BeTrue();
+        var duplicate = channel.AppendPayload(payload, _timeProvider);
+
+        duplicate.IsFailure.Should().BeTrue();
+        duplicate.Error.Code.Should().Be("DUPLICATE_PAYLOAD_ID");
+    }
+
+    [Test]
     public void AppendPayload_WithMismatchedChannelId_ReturnsError()
     {
         var channel = DirectChannel.Create(_channelId, _ownerId, _peerId, _timeProvider).Value;

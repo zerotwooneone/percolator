@@ -110,8 +110,30 @@ public class PeerContactTests
     public void UpdateTrust_ChangesTrustLevel()
     {
         _contact.TrustLevel.Should().Be(PeerTrustLevel.Tofu);
-        _contact.UpdateTrust(PeerTrustLevel.Verified);
+        var result = _contact.UpdateTrust(PeerTrustLevel.Verified);
+        result.IsSuccess.Should().BeTrue();
         _contact.TrustLevel.Should().Be(PeerTrustLevel.Verified);
+    }
+
+    [Test]
+    public void UpdateTrust_WhenPendingApprovalOrBlocked_ReturnsError()
+    {
+        var timeProvider = new FakeDateTimeProvider(FixedCreatedAt);
+        var pending = PeerContact.CreateInboundRequest(
+            PublicIdentityId.New(),
+            PublicIdentityId.New(),
+            _primaryPeerKey,
+            "Bob",
+            timeProvider).Value;
+
+        var pendingResult = pending.UpdateTrust(PeerTrustLevel.Verified);
+        pendingResult.IsFailure.Should().BeTrue();
+        pendingResult.Error.Code.Should().Be("CONTACT_NOT_ACTIVE");
+
+        _contact.Block();
+        var blockedResult = _contact.UpdateTrust(PeerTrustLevel.Verified);
+        blockedResult.IsFailure.Should().BeTrue();
+        blockedResult.Error.Code.Should().Be("CONTACT_BLOCKED");
     }
 
     [Test]
@@ -155,6 +177,7 @@ public class PeerContactTests
         var contact = result.Value;
         contact.OwnerIdentityId.Should().Be(ownerId);
         contact.RemotePeerId.Should().Be(peerId);
+        contact.ContactId.Should().Be(new PeerContactId(ownerId, peerId));
         contact.State.Should().Be(ContactState.PendingApproval);
         contact.TrustLevel.Should().Be(PeerTrustLevel.Untrusted);
         contact.Nickname.Value.Should().Be("Bob");
