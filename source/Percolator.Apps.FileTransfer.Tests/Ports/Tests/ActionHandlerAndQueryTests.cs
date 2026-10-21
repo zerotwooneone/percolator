@@ -1,5 +1,6 @@
 using Percolator.Apps.FileTransfer.Domain.Common;
 using Percolator.Apps.FileTransfer.Domain.ManifestManagement;
+using Percolator.Apps.FileTransfer.Domain.SwarmCoordination;
 using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Features.IngressControl;
 using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
@@ -22,6 +23,8 @@ public sealed class ActionHandlerAndQueryTests
     private RecordingPayloadSender _payloadSender = null!;
     private RecordingTrackerPort _trackerPort = null!;
     private InMemoryBlobStorageService _blobStorage = null!;
+    private FakeNetworkEndpointDiscoveryPort _endpointDiscovery = null!;
+    private FakeTransferStreamPool _streamPool = null!;
     private ProtobufPayloadSerializer _serializer = null!;
     private FileTransferActionHandler _handler = null!;
     private FileTransferQueryService _queryService = null!;
@@ -36,6 +39,8 @@ public sealed class ActionHandlerAndQueryTests
         _payloadSender = new RecordingPayloadSender();
         _trackerPort = new RecordingTrackerPort();
         _blobStorage = new InMemoryBlobStorageService();
+        _endpointDiscovery = new FakeNetworkEndpointDiscoveryPort();
+        _streamPool = new FakeTransferStreamPool();
         _serializer = new ProtobufPayloadSerializer();
 
         _handler = new FileTransferActionHandler(
@@ -45,10 +50,18 @@ public sealed class ActionHandlerAndQueryTests
             _serializer,
             _trackerPort,
             _clock,
-            _blobStorage);
+            _blobStorage,
+            _endpointDiscovery,
+            _streamPool);
 
         _queryService = new FileTransferQueryService(_sessionRepo);
         _reaperService = new TransferOfferReaperService(_sessionRepo, _clock);
+    }
+
+    [TearDown]
+    public async Task TearDown()
+    {
+        await _streamPool.DisposeAsync();
     }
 
     [Test]
@@ -133,10 +146,11 @@ public sealed class ActionHandlerAndQueryTests
         sentOffer.RecipientIdentityId.Should().Be(recipient);
         sentOffer.AppId.Should().Be(AppId.FileTransferControl);
 
-        // Verify transport context was persisted with session encryption key
+        // Verify transport context was persisted with session encryption key and tracker announced Seeder role
         TransferSessionTransportContext? transportCtx = await _sessionRepo.GetTransportContextAsync(sessionId);
         transportCtx.Should().NotBeNull();
         SwarmRendezvousId expectedRendezvous = SwarmRendezvousId.Derive(transportCtx!.SessionEncryptionKey);
+        _trackerPort.Announced.Should().ContainSingle(a => a.Rendezvous == expectedRendezvous && a.MemberId == localInitiator && a.Role == SwarmPeerRole.Seeder);
 
         // Cancel and verify tracker unregisters deterministic SwarmRendezvousId derived from session key
         DomainResult cancelResult = await _handler.CancelTransferAsync(sessionId, TransferTerminationReason.SenderCancelled);
@@ -207,6 +221,86 @@ public sealed class ActionHandlerAndQueryTests
         stagedSession.Should().NotBeNull();
         stagedSession!.Manifest.TotalFiles.Count.Should().Be(1200);
         stagedSession.State.Should().Be(TransferSessionState.PendingConsent);
+    }
+
+    [Test]
+    public async Task UT_CMD_06_CrocResumptionBitfieldAndDirectToRelayFallback()
+    {
+        ChannelId channelId = ChannelId.New();
+        PublicIdentityId senderId = PublicIdentityId.New();
+        RootDirectoryPath sourceRoot = RootDirectoryPath.Parse(@"C:\SourceMultiChunk");
+        SanitizedRelativePath relPath = SanitizedRelativePath.Parse("movie.mkv");
+
+        ResolvedFilePath fullPath = ResolvedFilePath.Resolve(sourceRoot, relPath);
+        _fileStorage.FilesOnDisk[fullPath.AbsolutePath] = new byte[600_000]; // 3 chunks at 256 KB
+
+        PublicIdentityId recipientId = PublicIdentityId.New();
+        DomainResult<TransferSessionId> initResult = await _handler.InitiateTransferAsync(
+            channelId,
+            senderId,
+            [recipientId],
+            sourceRoot,
+            [relPath],
+            DirectWanPolicy.DisabledByDefault);
+
+        initResult.IsSuccess.Should().BeTrue();
+        TransferSessionId sessionId = initResult.Value;
+
+        // Stage offer on recipient
+        InMemoryTransferSessionRepository recipientRepo = new();
+        InMemoryFilterPolicyRepository policyRepo = new()
+        {
+            Policy = FileTransferFilterPolicy.DefaultPermissive(recipientId)
+        };
+        var payloadHandler = new FileTransferPayloadHandler(recipientRepo, policyRepo, _serializer, _clock, _blobStorage);
+        await payloadHandler.HandleInboundAsync(new InboundPayloadContext(
+            channelId,
+            senderId,
+            DeviceId.Primary,
+            AppId.FileTransferControl,
+            _payloadSender.SentPayloads[0].Payload,
+            _clock.UtcNow));
+
+        // Simulate partial resumption on disk (chunk 0 already verified on disk) and direct P2P failure -> relay fallback
+        InMemoryDesktopFileStorage recipientStorage = new()
+        {
+            ConfiguredResumptionBitfield = Bitfield.Empty(ChunkCount.FromInt(3)).WithChunk(ChunkIndex.FromInt(0))
+        };
+        await using FakeTransferStreamPool recipientPool = new()
+        {
+            SimulateDirectConnectionFailure = true
+        };
+        RecordingPayloadSender recipientSender = new();
+        RecordingTrackerPort recipientTracker = new();
+
+        var recipientActionHandler = new FileTransferActionHandler(
+            recipientRepo,
+            recipientStorage,
+            recipientSender,
+            _serializer,
+            recipientTracker,
+            _clock,
+            _blobStorage,
+            _endpointDiscovery,
+            recipientPool);
+
+        DomainResult acceptResult = await recipientActionHandler.AcceptTransferAsync(
+            sessionId,
+            RootDirectoryPath.Parse(@"C:\Downloads"));
+
+        acceptResult.IsSuccess.Should().BeTrue();
+
+        // 1. Verify resumption bitfield was applied to session and transmitted in Accept payload
+        TransferSession? acceptedSession = await recipientRepo.GetSessionByIdAsync(sessionId);
+        acceptedSession!.LocalBitfield.HasChunk(ChunkIndex.FromInt(0)).Should().BeTrue();
+        acceptedSession.LocalBitfield.HasChunk(ChunkIndex.FromInt(1)).Should().BeFalse();
+
+        // 2. Verify Leecher announced to tracker
+        recipientTracker.Announced.Should().ContainSingle(a => a.MemberId == recipientId && a.Role == SwarmPeerRole.Leecher);
+
+        // 3. Verify croc-style direct-to-relay fallback connected to the relay pipe when direct failed
+        recipientPool.ConnectedRelayRendezvous.Should().NotBeNull();
+        recipientPool.ConnectedRelayRendezvous!.EndpointUri.Value.Should().Be("https://relay.percolator.net/pipe/session");
     }
 
     [Test]

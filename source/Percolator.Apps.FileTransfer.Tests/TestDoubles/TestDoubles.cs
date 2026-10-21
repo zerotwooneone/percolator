@@ -65,6 +65,7 @@ public sealed class InMemoryDesktopFileStorage : IDesktopFileStorage
 {
     private readonly object _sync = new();
     public DiskSpacePreflightResult DiskSpaceResult { get; set; } = DiskSpacePreflightResult.Sufficient();
+    public Bitfield? ConfiguredResumptionBitfield { get; set; }
     public TotalBundleBytes? LastCheckedBytes { get; private set; }
     public List<ResolvedFilePath> FinalizedFiles { get; } = [];
     public Dictionary<string, byte[]> FilesOnDisk { get; } = [];
@@ -136,7 +137,7 @@ public sealed class InMemoryDesktopFileStorage : IDesktopFileStorage
 
     public ValueTask<Bitfield> ScanAndComputeBitfieldAsync(RootDirectoryPath rootPath, TransferManifest manifest, SelectedFileIndices? selectedIndices = null, CancellationToken ct = default)
     {
-        return ValueTask.FromResult(Bitfield.Empty(manifest.TotalChunks));
+        return ValueTask.FromResult(ConfiguredResumptionBitfield ?? Bitfield.Empty(manifest.TotalChunks));
     }
 
     public ValueTask FinalizeFileAsync(ResolvedFilePath targetPath, FileLastModifiedUtc lastModifiedUtc, CancellationToken ct = default)
@@ -169,7 +170,7 @@ public sealed class RecordingPayloadSender : IPayloadSender
 public sealed class RecordingTrackerPort : IDistributedTrackerPort
 {
     public List<(SwarmRendezvousId Rendezvous, PublicIdentityId MemberId)> Unregistered { get; } = [];
-    public List<(SwarmRendezvousId Rendezvous, PublicIdentityId MemberId)> Announced { get; } = [];
+    public List<(SwarmRendezvousId Rendezvous, PublicIdentityId MemberId, SwarmPeerRole Role)> Announced { get; } = [];
 
     public ValueTask<IReadOnlyList<DirectEndpointCandidate>> AnnounceAsync(
         SwarmRendezvousId rendezvousId,
@@ -178,7 +179,7 @@ public sealed class RecordingTrackerPort : IDistributedTrackerPort
         SwarmPeerRole role,
         CancellationToken ct = default)
     {
-        Announced.Add((rendezvousId, memberId));
+        Announced.Add((rendezvousId, memberId, role));
         return ValueTask.FromResult(candidates);
     }
 
@@ -189,6 +190,27 @@ public sealed class RecordingTrackerPort : IDistributedTrackerPort
     {
         Unregistered.Add((rendezvousId, memberId));
         return ValueTask.CompletedTask;
+    }
+}
+
+public sealed class FakeNetworkEndpointDiscoveryPort : INetworkEndpointDiscoveryPort
+{
+    public List<DirectEndpointCandidate> LocalCandidates { get; set; } =
+    [
+        new DirectEndpointCandidate(EndpointHost.Parse("192.168.1.50"), PortNumber.FromInt(49152), DirectCandidateKind.DirectLan)
+    ];
+
+    public RelayRendezvousDescriptor? AllocatedRelay { get; set; } =
+        new RelayRendezvousDescriptor(RelayPipeEndpointUri.Parse("https://relay.percolator.net/pipe/session"), RelayPipeToken.Generate());
+
+    public ValueTask<IReadOnlyList<DirectEndpointCandidate>> DiscoverLocalCandidatesAsync(DirectWanPolicy wanPolicy, CancellationToken ct = default)
+    {
+        return ValueTask.FromResult<IReadOnlyList<DirectEndpointCandidate>>(LocalCandidates);
+    }
+
+    public ValueTask<RelayRendezvousDescriptor?> AllocateRelayRendezvousAsync(TransferSessionId sessionId, CancellationToken ct = default)
+    {
+        return ValueTask.FromResult(AllocatedRelay);
     }
 }
 
@@ -235,18 +257,27 @@ public sealed class FakeTransferStream : ITransferStream
 
 public sealed class FakeTransferStreamPool : ITransferStreamPool
 {
+    private readonly object _sync = new();
     public StreamCount ActiveStreams => StreamCount.FromInt(Streams.Count);
     public List<ITransferStream> Streams { get; } = [];
     public List<IStreamFramePayload> BroadcastFrames { get; } = [];
+    public List<DirectEndpointCandidate> ConnectedDirectCandidates { get; } = [];
+    public RelayRendezvousDescriptor? ConnectedRelayRendezvous { get; private set; }
+    public bool SimulateDirectConnectionFailure { get; set; }
     public bool IsDisposed { get; private set; }
 
     public ValueTask ConnectDirectAsync(IReadOnlyList<DirectEndpointCandidate> candidates, CancellationToken ct = default)
     {
+        if (SimulateDirectConnectionFailure)
+            throw new IOException("Simulated symmetric NAT / firewall timeout.");
+
+        ConnectedDirectCandidates.AddRange(candidates);
         return ValueTask.CompletedTask;
     }
 
     public ValueTask ConnectRelayPipeAsync(RelayRendezvousDescriptor rendezvous, CancellationToken ct = default)
     {
+        ConnectedRelayRendezvous = rendezvous;
         return ValueTask.CompletedTask;
     }
 
@@ -254,7 +285,10 @@ public sealed class FakeTransferStreamPool : ITransferStreamPool
 
     public ValueTask BroadcastFrameAsync(IStreamFramePayload frame, CancellationToken ct = default)
     {
-        BroadcastFrames.Add(frame);
+        lock (_sync)
+        {
+            BroadcastFrames.Add(frame);
+        }
         return ValueTask.CompletedTask;
     }
 

@@ -1,6 +1,7 @@
 using Percolator.Apps.FileTransfer.Domain.Common;
 using Percolator.Apps.FileTransfer.Domain.ManifestManagement;
 using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
+using Percolator.Apps.FileTransfer.Features.SwarmCoordination;
 using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Ports;
 using Percolator.Domain.Channels.ValueObjects;
@@ -17,6 +18,7 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
     private readonly IPayloadSerializer _serializer;
     private readonly IDateTimeProvider _clock;
     private readonly IBlobStorageService? _blobStorage;
+    private readonly ITransferStreamPool? _streamPool;
 
     public AppId TargetAppId => AppId.FileTransferControl;
 
@@ -25,13 +27,15 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
         IFileTransferFilterPolicyRepository policyRepository,
         IPayloadSerializer serializer,
         IDateTimeProvider clock,
-        IBlobStorageService? blobStorage = null)
+        IBlobStorageService? blobStorage = null,
+        ITransferStreamPool? streamPool = null)
     {
         _sessionRepository = sessionRepository ?? throw new ArgumentNullException(nameof(sessionRepository));
         _policyRepository = policyRepository ?? throw new ArgumentNullException(nameof(policyRepository));
         _serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
         _blobStorage = blobStorage;
+        _streamPool = streamPool;
     }
 
     public async ValueTask<DomainResult> HandleInboundAsync(InboundPayloadContext context, CancellationToken ct = default)
@@ -86,6 +90,10 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
             SeedRatio.Zero,
             _clock);
 
+        IReadOnlyList<DirectEndpointCandidate> filteredCandidates = PexRateLimiter.FilterAndDeduplicate(
+            offer.DirectCandidates,
+            DirectWanPolicy.DisabledByDefault);
+
         var transportContext = new TransferSessionTransportContext(
             offer.TransferSessionId,
             channelId,
@@ -95,7 +103,7 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
             offer.StreamAuthToken,
             DirectWanPolicy.DisabledByDefault,
             offer.RelayRendezvous,
-            offer.DirectCandidates);
+            filteredCandidates);
 
         await _sessionRepository.SaveSessionAsync(session, ct);
         await _sessionRepository.SaveTransportContextAsync(transportContext, ct);
@@ -177,6 +185,23 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
             return result;
 
         await _sessionRepository.SaveSessionAsync(session, ct);
+
+        if (_streamPool != null)
+        {
+            TransferSessionTransportContext? transportContext = await _sessionRepository.GetTransportContextAsync(accept.TransferSessionId, ct);
+            DirectWanPolicy wanPolicy = transportContext?.WanPolicy ?? DirectWanPolicy.DisabledByDefault;
+
+            IReadOnlyList<DirectEndpointCandidate> filteredCandidates = accept.RoutingPreference == TransportRoutingPreference.RelayOnly
+                ? []
+                : PexRateLimiter.FilterAndDeduplicate(accept.ReceiverCandidates, wanPolicy, transportContext?.DirectCandidates);
+
+            await FileTransferActionHandler.ConnectDirectWithRelayFallbackAsync(
+                _streamPool,
+                filteredCandidates,
+                transportContext?.RelayRendezvous,
+                ct);
+        }
+
         return DomainResult.Success();
     }
 

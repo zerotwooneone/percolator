@@ -5,6 +5,7 @@ using Percolator.Apps.FileTransfer.Domain.ManifestManagement;
 using Percolator.Apps.FileTransfer.Domain.SwarmCoordination;
 using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Features.Storage;
+using Percolator.Apps.FileTransfer.Features.SwarmCoordination;
 using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Ports;
 using Percolator.Domain.Common;
@@ -85,6 +86,14 @@ public sealed class TransferSessionCoordinator
         byte[]? rentedPlaintext = null;
         try
         {
+            lock (_sessionSync)
+            {
+                if (!session.LocalBitfield.HasChunk(request.ChunkIndex))
+                {
+                    return DomainResult.Failure(new DomainError("MultiStream.ChunkNotAvailable", $"Local node does not possess chunk {request.ChunkIndex.Value}."));
+                }
+            }
+
             ChunkSizeBytes chunkSize = session.Manifest.ChunkSize;
             ChunkIndex chunkIdx = request.ChunkIndex;
             long startOffset = (long)chunkIdx.Value * chunkSize.Bytes;
@@ -143,6 +152,7 @@ public sealed class TransferSessionCoordinator
         TransferKey key,
         BaseNonce baseNonce,
         RootDirectoryPath destinationFolder,
+        ITransferStreamPool? streamPool = null,
         CancellationToken ct = default)
     {
         // 1. Unsolicited check: if chunk was not scheduled/in-flight, drop immediately without disk write
@@ -195,6 +205,10 @@ public sealed class TransferSessionCoordinator
             if (assembleResult.IsSuccess)
             {
                 _scheduler.MarkCompleted(chunkFrame.ChunkIndex);
+                if (streamPool != null)
+                {
+                    await streamPool.BroadcastFrameAsync(new HaveFrame(chunkFrame.ChunkIndex), ct);
+                }
                 return assembleResult;
             }
 
@@ -220,6 +234,9 @@ public sealed class TransferSessionCoordinator
         TransferKey key,
         BaseNonce baseNonce,
         RootDirectoryPath destinationFolder,
+        IDesktopFileStorage? fileStorage = null,
+        SwarmCoordinator? swarmCoordinator = null,
+        DirectWanPolicy wanPolicy = DirectWanPolicy.DisabledByDefault,
         CancellationToken ct = default)
     {
         int streamCount = streamPool.ActiveStreams.Count;
@@ -232,9 +249,13 @@ public sealed class TransferSessionCoordinator
                 session,
                 peerId,
                 stream,
+                streamPool,
                 key,
                 baseNonce,
                 destinationFolder,
+                fileStorage,
+                swarmCoordinator,
+                wanPolicy,
                 ct);
         }
 
@@ -254,48 +275,58 @@ public sealed class TransferSessionCoordinator
         TransferSession session,
         PublicIdentityId peerId,
         ITransferStream stream,
+        ITransferStreamPool streamPool,
         TransferKey key,
         BaseNonce baseNonce,
         RootDirectoryPath destinationFolder,
+        IDesktopFileStorage? fileStorage,
+        SwarmCoordinator? swarmCoordinator,
+        DirectWanPolicy wanPolicy,
         CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
         {
-            bool isComplete;
+            bool isTerminal;
             lock (_sessionSync)
             {
-                isComplete = session.IsDownloadComplete ||
-                             session.State == TransferSessionState.Completed ||
-                             session.State == TransferSessionState.Seeding ||
+                isTerminal = session.State == TransferSessionState.Completed ||
                              session.State == TransferSessionState.Cancelled ||
                              session.State == TransferSessionState.Failed;
             }
 
-            if (isComplete)
+            if (isTerminal)
             {
                 return DomainResult.Success();
             }
 
-            // Fill pipeline window on this stream
+            // Fill pipeline window on this stream with chunks possessed by THIS peer
             bool scheduledAny = false;
             while (_scheduler.CanRequest(peerId))
             {
                 ChunkIndex? nextChunk;
                 lock (_sessionSync)
                 {
-                    Bitfield required = session.SelectedFiles != null
-                        ? session.Manifest.GetRequiredChunks(session.SelectedFiles)
-                        : Bitfield.Full(session.Manifest.TotalChunks);
-
-                    nextChunk = RarestFirstChunkSelector.SelectNextChunk(
-                        session.LocalBitfield,
-                        required,
-                        session.SwarmMembers,
-                        _scheduler.InFlightChunks);
-
-                    if (nextChunk.HasValue && !_scheduler.TrySchedule(peerId, nextChunk.Value))
+                    if (session.IsDownloadComplete)
                     {
                         nextChunk = null;
+                    }
+                    else
+                    {
+                        Bitfield required = session.SelectedFiles != null
+                            ? session.Manifest.GetRequiredChunks(session.SelectedFiles)
+                            : Bitfield.Full(session.Manifest.TotalChunks);
+
+                        nextChunk = RarestFirstChunkSelector.SelectNextChunkForPeer(
+                            peerId,
+                            session.LocalBitfield,
+                            required,
+                            session.SwarmMembers,
+                            _scheduler.InFlightChunks);
+
+                        if (nextChunk.HasValue && !_scheduler.TrySchedule(peerId, nextChunk.Value))
+                        {
+                            nextChunk = null;
+                        }
                     }
                 }
 
@@ -308,37 +339,147 @@ public sealed class TransferSessionCoordinator
                 scheduledAny = true;
             }
 
-            if (!scheduledAny && _scheduler.GetPendingCount(peerId) == 0)
+            bool isDownloadDone;
+            lock (_sessionSync)
+            {
+                isDownloadDone = session.IsDownloadComplete && session.State != TransferSessionState.Seeding;
+            }
+
+            if (isDownloadDone || (!scheduledAny && _scheduler.GetPendingCount(peerId) == 0))
             {
                 return DomainResult.Success();
             }
 
             IStreamFramePayload frame = await stream.ReceiveFrameAsync(ct);
-            if (frame is ChunkDataFrame chunkData)
-            {
-                DomainResult result = await HandleIncomingChunkDataAsync(
-                    session,
-                    peerId,
-                    chunkData,
-                    stream,
-                    key,
-                    baseNonce,
-                    destinationFolder,
-                    ct);
+            swarmCoordinator?.RecordPeerActivity(peerId);
 
-                if (result.IsFailure)
-                {
-                    return result;
-                }
-            }
-            else if (frame is ChokeFrame)
+            switch (frame)
             {
-                lock (_sessionSync)
+                case ChunkDataFrame chunkData:
                 {
-                    session.RecordPeerChokingUs(peerId, PeerChokeStatus.Choked);
+                    DomainResult result = await HandleIncomingChunkDataAsync(
+                        session,
+                        peerId,
+                        chunkData,
+                        stream,
+                        key,
+                        baseNonce,
+                        destinationFolder,
+                        streamPool,
+                        ct);
+
+                    if (result.IsFailure)
+                    {
+                        return result;
+                    }
+                    break;
                 }
-                _scheduler.ReleasePeer(peerId);
-                return DomainResult.Success();
+
+                case RequestChunkFrame reqFrame when fileStorage != null:
+                {
+                    bool weChokingPeer;
+                    lock (_sessionSync)
+                    {
+                        SwarmMember? member = session.SwarmMembers.FirstOrDefault(m => m.PeerId == peerId);
+                        weChokingPeer = member != null && member.WeChokingPeer == PeerChokeStatus.Choked;
+                    }
+
+                    if (!weChokingPeer)
+                    {
+                        DomainResult uploadResult = await HandleRequestChunkAsync(
+                            session,
+                            peerId,
+                            reqFrame,
+                            stream,
+                            fileStorage,
+                            destinationFolder,
+                            key,
+                            baseNonce,
+                            ct);
+
+                        if (uploadResult.IsFailure && uploadResult.Error.Code == "MultiStream.QueueFull")
+                        {
+                            return uploadResult;
+                        }
+                    }
+                    break;
+                }
+
+                case HaveFrame haveFrame:
+                {
+                    lock (_sessionSync)
+                    {
+                        session.RecordPeerHave(peerId, haveFrame.ChunkIndex);
+                    }
+                    break;
+                }
+
+                case BitfieldFrame bitfieldFrame:
+                {
+                    lock (_sessionSync)
+                    {
+                        session.RecordPeerBitfield(peerId, bitfieldFrame.Bitfield);
+                    }
+                    break;
+                }
+
+                case UnchokeFrame:
+                {
+                    lock (_sessionSync)
+                    {
+                        session.RecordPeerChokingUs(peerId, PeerChokeStatus.Unchoked);
+                    }
+                    break;
+                }
+
+                case ChokeFrame:
+                {
+                    lock (_sessionSync)
+                    {
+                        session.RecordPeerChokingUs(peerId, PeerChokeStatus.Choked);
+                    }
+                    _scheduler.ReleasePeer(peerId);
+                    return DomainResult.Success();
+                }
+
+                case InterestedFrame:
+                {
+                    lock (_sessionSync)
+                    {
+                        session.RecordPeerInterestedInUs(peerId, PeerInterestStatus.Interested);
+                        session.SetWeChokingPeer(peerId, PeerChokeStatus.Unchoked);
+                    }
+                    await stream.SendFrameAsync(new UnchokeFrame(), ct);
+                    break;
+                }
+
+                case NotInterestedFrame:
+                {
+                    lock (_sessionSync)
+                    {
+                        session.RecordPeerInterestedInUs(peerId, PeerInterestStatus.NotInterested);
+                    }
+                    break;
+                }
+
+                case CancelChunkFrame cancelFrame:
+                {
+                    _scheduler.ReleaseChunk(cancelFrame.ChunkIndex);
+                    break;
+                }
+
+                case PexPeersFrame pexFrame when swarmCoordinator != null:
+                {
+                    if (swarmCoordinator.ProcessIncomingPex(peerId, pexFrame.Candidates, wanPolicy, null, out var accepted) &&
+                        accepted.Count > 0)
+                    {
+                        await streamPool.ConnectDirectAsync(accepted, ct);
+                    }
+                    break;
+                }
+
+                case KeepAliveFrame:
+                    break;
             }
         }
 

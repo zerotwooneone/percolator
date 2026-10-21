@@ -2,8 +2,10 @@ using System.Buffers;
 using System.Security.Cryptography;
 using Percolator.Apps.FileTransfer.Domain.Common;
 using Percolator.Apps.FileTransfer.Domain.ManifestManagement;
+using Percolator.Apps.FileTransfer.Domain.SwarmCoordination;
 using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Features.IngressControl;
+using Percolator.Apps.FileTransfer.Features.SwarmCoordination;
 using Percolator.Apps.FileTransfer.Ports;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
@@ -21,6 +23,8 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
     private readonly IDistributedTrackerPort _trackerPort;
     private readonly IDateTimeProvider _clock;
     private readonly IBlobStorageService? _blobStorage;
+    private readonly INetworkEndpointDiscoveryPort? _endpointDiscovery;
+    private readonly ITransferStreamPool? _streamPool;
 
     public FileTransferActionHandler(
         ITransferSessionRepository sessionRepository,
@@ -29,7 +33,9 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         IPayloadSerializer serializer,
         IDistributedTrackerPort trackerPort,
         IDateTimeProvider clock,
-        IBlobStorageService? blobStorage = null)
+        IBlobStorageService? blobStorage = null,
+        INetworkEndpointDiscoveryPort? endpointDiscovery = null,
+        ITransferStreamPool? streamPool = null)
     {
         _sessionRepository = sessionRepository ?? throw new ArgumentNullException(nameof(sessionRepository));
         _fileStorage = fileStorage ?? throw new ArgumentNullException(nameof(fileStorage));
@@ -38,6 +44,8 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         _trackerPort = trackerPort ?? throw new ArgumentNullException(nameof(trackerPort));
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
         _blobStorage = blobStorage;
+        _endpointDiscovery = endpointDiscovery;
+        _streamPool = streamPool;
     }
 
     public ValueTask<DomainResult<TransferSessionId>> InitiateTransferAsync(
@@ -157,11 +165,18 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
             ? TransferSession.CreateOutgoing1to1(sessionId, localInitiator, recipients[0], manifest, enforcedSeedRatio, _clock)
             : TransferSession.CreateOutgoingMultiPeer(sessionId, localInitiator, recipients, manifest, enforcedSeedRatio, _clock);
 
-        List<DirectEndpointCandidate> candidates = [];
-        if (wanPolicy == DirectWanPolicy.ExplicitlyAllowed)
-        {
-            candidates.Add(new DirectEndpointCandidate(EndpointHost.Parse("wan.example.com"), PortNumber.FromInt(50000), DirectCandidateKind.DirectWanUpnp));
-        }
+        IReadOnlyList<DirectEndpointCandidate> rawCandidates = _endpointDiscovery != null
+            ? await _endpointDiscovery.DiscoverLocalCandidatesAsync(wanPolicy, ct)
+            : [];
+        IReadOnlyList<DirectEndpointCandidate> candidates = PexRateLimiter.FilterAndDeduplicate(rawCandidates, wanPolicy);
+
+        RelayRendezvousDescriptor? relayRendezvous = _endpointDiscovery != null
+            ? await _endpointDiscovery.AllocateRelayRendezvousAsync(sessionId, ct)
+            : null;
+
+        // Announce as Seeder to the swarm tracker (BitTorrent swarm bootstrap)
+        SwarmRendezvousId rendezvousId = SwarmRendezvousId.Derive(sessionKey);
+        await _trackerPort.AnnounceAsync(rendezvousId, localInitiator, candidates, SwarmPeerRole.Seeder, ct);
 
         var transportContext = new TransferSessionTransportContext(
             sessionId,
@@ -171,7 +186,7 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
             baseNonce,
             streamAuthToken,
             wanPolicy,
-            RelayRendezvous: null,
+            relayRendezvous,
             candidates,
             sourceRoot);
 
@@ -221,7 +236,7 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
             sessionKey,
             baseNonce,
             streamAuthToken,
-            RelayRendezvous: null,
+            relayRendezvous,
             candidates);
 
         byte[] inBandBytes = PrependOpcode(FileTransferControlOpcode.Offer, _serializer.Serialize(offerPayload).Span);
@@ -275,15 +290,25 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         if (!diskCheck.HasSufficientSpace)
             return DomainResult.Failure(new DomainError("Storage.InsufficientSpace", $"Insufficient disk space. Required: {requiredBytes} bytes."));
 
-        DomainResult acceptResult = session.AcceptTransfer(chosenFiles, _clock);
+        // Scan existing partial files on disk to compute resumption bitfield (croc-style fast resumption)
+        Bitfield resumptionBitfield = await _fileStorage.ScanAndComputeBitfieldAsync(
+            destinationFolder,
+            session.Manifest,
+            chosenFiles,
+            ct);
+
+        DomainResult acceptResult = session.AcceptTransfer(chosenFiles, _clock, resumptionBitfield);
         if (acceptResult.IsFailure)
             return acceptResult;
 
-        // Immediate Finalization for Zero-Byte Files
+        // Register sender in local swarm roster with full bitfield so we can schedule chunks from sender
+        session.RegisterSwarmMember(session.InitiatorId, Bitfield.Full(session.Manifest.TotalChunks), _clock);
+
+        // Immediate Finalization for Zero-Byte or Already-Verified Resumed Files
         foreach (FileIndex idx in chosenFiles.Indices)
         {
             FileEntry file = session.Manifest.Files[idx.Value];
-            if (file.FileSize.Bytes == 0)
+            if (file.FileSize.Bytes == 0 || session.IsFileComplete(file))
             {
                 ResolvedFilePath path = ResolvedFilePath.Resolve(destinationFolder, file.RelativePath);
                 await _fileStorage.FinalizeFileAsync(path, file.LastModifiedUtc, ct);
@@ -295,21 +320,55 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         await _sessionRepository.SaveSessionAsync(session, ct);
 
         TransferSessionTransportContext? transportContext = await _sessionRepository.GetTransportContextAsync(sessionId, ct);
+        DirectWanPolicy wanPolicy = transportContext?.WanPolicy ?? DirectWanPolicy.DisabledByDefault;
+
+        IReadOnlyList<DirectEndpointCandidate> rawReceiverCandidates = _endpointDiscovery != null
+            ? await _endpointDiscovery.DiscoverLocalCandidatesAsync(wanPolicy, ct)
+            : [];
+        IReadOnlyList<DirectEndpointCandidate> receiverCandidates = PexRateLimiter.FilterAndDeduplicate(rawReceiverCandidates, wanPolicy);
+
+        ChannelId channelId = transportContext?.ChannelId ?? ChannelId.FromGuid(sessionId.Value);
+        PublicIdentityId localSenderId = transportContext?.LocalIdentityId ?? CreateDistinctLocalInitiator([session.InitiatorId]);
+
         if (transportContext != null)
         {
             await _sessionRepository.SaveTransportContextAsync(
                 transportContext with { LocalRootPath = destinationFolder },
                 ct);
+
+            // Announce to distributed swarm tracker and merge any discovered swarm peer candidates
+            SwarmRendezvousId rendezvousId = SwarmRendezvousId.Derive(transportContext.SessionEncryptionKey);
+            SwarmPeerRole role = session.IsDownloadComplete ? SwarmPeerRole.Seeder : SwarmPeerRole.Leecher;
+            IReadOnlyList<DirectEndpointCandidate> trackerCandidates = await _trackerPort.AnnounceAsync(
+                rendezvousId,
+                localSenderId,
+                receiverCandidates,
+                role,
+                ct);
+
+            // Establish out-of-band multi-stream connection (croc-style direct P2P with blind relay fallback)
+            if (_streamPool != null && !session.IsDownloadComplete)
+            {
+                List<DirectEndpointCandidate> combinedDirect = [.. transportContext.DirectCandidates];
+                foreach (var tc in PexRateLimiter.FilterAndDeduplicate(trackerCandidates, wanPolicy, receiverCandidates))
+                {
+                    if (!combinedDirect.Contains(tc))
+                        combinedDirect.Add(tc);
+                }
+
+                await ConnectDirectWithRelayFallbackAsync(_streamPool, combinedDirect, transportContext.RelayRendezvous, ct);
+            }
         }
 
-        ChannelId channelId = transportContext?.ChannelId ?? ChannelId.FromGuid(sessionId.Value);
-        PublicIdentityId localSenderId = transportContext?.LocalIdentityId ?? CreateDistinctLocalInitiator([session.InitiatorId]);
+        TransportRoutingPreference routingPref = (transportContext?.DirectCandidates.Count > 0 || receiverCandidates.Count > 0)
+            ? TransportRoutingPreference.DirectPreferred
+            : TransportRoutingPreference.RelayOnly;
 
         // Send in-band accept payload from local recipient back to session.InitiatorId
         FileTransferAcceptPayload acceptPayload = new(
             sessionId,
-            ReceiverCandidates: [],
-            TransportRoutingPreference.DirectPreferred,
+            receiverCandidates,
+            routingPref,
             session.LocalBitfield);
 
         byte[] inBandBytes = PrependOpcode(FileTransferControlOpcode.Accept, _serializer.Serialize(acceptPayload).Span);
@@ -326,6 +385,31 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         await _payloadSender.SendPayloadAsync(outboundContext, ct);
 
         return DomainResult.Success();
+    }
+
+    internal static async ValueTask ConnectDirectWithRelayFallbackAsync(
+        ITransferStreamPool streamPool,
+        IReadOnlyList<DirectEndpointCandidate> directCandidates,
+        RelayRendezvousDescriptor? relayRendezvous,
+        CancellationToken ct)
+    {
+        if (directCandidates.Count > 0)
+        {
+            try
+            {
+                await streamPool.ConnectDirectAsync(directCandidates, ct);
+                return;
+            }
+            catch (Exception) when (relayRendezvous != null)
+            {
+                // Direct P2P failed (symmetric NAT / firewall): fall back to blind relay pipe
+            }
+        }
+
+        if (relayRendezvous != null)
+        {
+            await streamPool.ConnectRelayPipeAsync(relayRendezvous, ct);
+        }
     }
 
     public async ValueTask<DomainResult> PauseTransferAsync(TransferSessionId sessionId, CancellationToken ct = default)

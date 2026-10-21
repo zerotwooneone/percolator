@@ -192,7 +192,10 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
         return required.Difference(LocalBitfield);
     }
 
-    public DomainResult AcceptTransfer(SelectedFileIndices selectedFiles, IDateTimeProvider clock)
+    public DomainResult AcceptTransfer(
+        SelectedFileIndices selectedFiles,
+        IDateTimeProvider clock,
+        Bitfield? resumptionBitfield = null)
     {
         ArgumentNullException.ThrowIfNull(clock);
         if (State != TransferSessionState.PendingConsent)
@@ -201,12 +204,42 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
         if (selectedFiles == null || selectedFiles.SelectedCount == 0)
             return DomainResult.Failure(new DomainError("Transfer.EmptySelection", "Must select at least one file to accept transfer."));
 
+        if (resumptionBitfield != null)
+        {
+            if (resumptionBitfield.TotalChunks != Manifest.TotalChunks)
+                return DomainResult.Failure(new DomainError("Transfer.MismatchedBitfield", "Resumption bitfield total chunk count does not match session manifest."));
+
+            LocalBitfield = resumptionBitfield;
+        }
+
         SelectedFiles = selectedFiles;
-        State = TransferSessionState.InFlight;
-        ReevaluateAllPeerInterests();
         DateTimeOffset now = clock.UtcNow;
 
+        if (IsDownloadComplete)
+        {
+            if (TargetSeedRatio.IsZero)
+            {
+                State = TransferSessionState.Completed;
+                CompletedAtUtc = now;
+            }
+            else
+            {
+                State = TransferSessionState.Seeding;
+            }
+        }
+        else
+        {
+            State = TransferSessionState.InFlight;
+        }
+
+        ReevaluateAllPeerInterests();
         AddDomainEvent(new TransferAcceptedLocallyDomainEvent(Id, selectedFiles, now));
+
+        if (IsDownloadComplete)
+        {
+            AddDomainEvent(new TransferCompletedDomainEvent(Id, Manifest.TotalSize, now));
+        }
+
         return DomainResult.Success();
     }
 
@@ -217,7 +250,7 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
     {
         ArgumentNullException.ThrowIfNull(resumptionBitfield);
         ArgumentNullException.ThrowIfNull(clock);
-        if (State != TransferSessionState.Offered)
+        if (State != TransferSessionState.Offered && State != TransferSessionState.InFlight && State != TransferSessionState.Seeding)
             return DomainResult.Failure(new DomainError("Transfer.InvalidState", $"Cannot record peer acceptance in state '{State}'."));
 
         if (!Topology.ContainsParticipant(recipientId))
@@ -229,7 +262,10 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
         SwarmMember member = new(recipientId, resumptionBitfield);
         _swarmMembers[recipientId] = member;
         UpdatePeerInterestAndCheckStallRecovery(member);
-        State = TransferSessionState.InFlight;
+        if (State == TransferSessionState.Offered)
+        {
+            State = TransferSessionState.InFlight;
+        }
         DateTimeOffset now = clock.UtcNow;
 
         AddDomainEvent(new PeerAcceptedTransferDomainEvent(Id, recipientId, resumptionBitfield, now));
@@ -432,8 +468,9 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
         return DomainResult.Success();
     }
 
-    private bool IsFileComplete(FileEntry file)
+    public bool IsFileComplete(FileEntry file)
     {
+        ArgumentNullException.ThrowIfNull(file);
         if (file.FileSize.Bytes == 0) return true;
         int firstChunk = (int)(file.StartOffset.Offset / Manifest.ChunkSize.Bytes);
         int lastChunk = (int)((file.EndOffset.Offset - 1) / Manifest.ChunkSize.Bytes);

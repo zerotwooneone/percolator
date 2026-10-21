@@ -306,6 +306,98 @@ public sealed class MultiStreamEngineTests
         session.IsDownloadComplete.Should().BeTrue();
         session.State.Should().Be(TransferSessionState.Completed);
         _rateLimiter.TotalDownloadedBytes.Should().Be((long)chunkCount * session.Manifest.ChunkSize.Bytes);
+        pool.BroadcastFrames.OfType<HaveFrame>().Should().HaveCount(chunkCount);
+        _fileStorage.FinalizedFiles.Should().ContainSingle();
+    }
+
+    [Test]
+    public async Task UT_MSE_09_PeerAwareRarestFirstAndDynamicHaveFrameHandling()
+    {
+        TransferSessionId sessionId = TransferSessionId.New();
+        PublicIdentityId peerA = PublicIdentityId.New();
+        PublicIdentityId peerB = PublicIdentityId.New();
+        PublicIdentityId localRecipient = PublicIdentityId.New();
+        TransferKey key = TransferKey.Generate();
+        BaseNonce baseNonce = BaseNonce.Generate();
+        RootDirectoryPath dest = RootDirectoryPath.Parse(@"C:\DestSwarm");
+
+        // 2 chunks total: Peer A initially only has Chunk 0, Peer B has Chunk 1
+        List<ChunkHash> leaves =
+        [
+            MerkleTreeBuilder.HashLeaf(new byte[ChunkSizeBytes.Default.Bytes]),
+            MerkleTreeBuilder.HashLeaf(new byte[ChunkSizeBytes.Default.Bytes])
+        ];
+        TransferManifest manifest = TransferManifest.Create(
+            sessionId,
+            RootBundleName.Parse("SwarmTest"),
+            ChunkSizeBytes.Default,
+            MerkleTreeBuilder.BuildFromLeaves(leaves),
+            [new FileEntry(FileIndex.FromInt(0), SanitizedRelativePath.Parse("swarm.bin"), FileSizeBytes.FromBytes(2L * ChunkSizeBytes.Default.Bytes), BundleByteOffset.Zero, FileLastModifiedUtc.FromDateTimeOffset(DateTimeOffset.UtcNow))]);
+
+        TransferSession session = TransferSession.Rehydrate(
+            sessionId,
+            TransferRole.Recipient,
+            TransferSessionState.InFlight,
+            new TransferTopology.MultiPeer(peerA, [peerB, localRecipient]),
+            manifest,
+            Bitfield.Empty(ChunkCount.FromInt(2)),
+            SelectedFileIndices.All(FileCount.FromInt(1)),
+            SeedRatio.Zero,
+            TotalBundleBytes.Zero,
+            [],
+            _clock.UtcNow,
+            null);
+
+        Bitfield peerABitfield = Bitfield.Empty(ChunkCount.FromInt(2)).WithChunk(ChunkIndex.FromInt(0));
+        Bitfield peerBBitfield = Bitfield.Empty(ChunkCount.FromInt(2)).WithChunk(ChunkIndex.FromInt(1));
+
+        session.RegisterSwarmMember(peerA, peerABitfield, _clock);
+        session.RegisterSwarmMember(peerB, peerBBitfield, _clock);
+        session.RecordPeerChokingUs(peerA, PeerChokeStatus.Unchoked);
+        session.RecordPeerChokingUs(peerB, PeerChokeStatus.Unchoked);
+
+        // Verify Peer-Aware Rarest-First only picks Chunk 0 for Peer A (never Chunk 1) and Chunk 1 for Peer B
+        ChunkIndex? choiceForA = RarestFirstChunkSelector.SelectNextChunkForPeer(
+            peerA, session.LocalBitfield, Bitfield.Full(ChunkCount.FromInt(2)), session.SwarmMembers, _scheduler.InFlightChunks);
+        ChunkIndex? choiceForB = RarestFirstChunkSelector.SelectNextChunkForPeer(
+            peerB, session.LocalBitfield, Bitfield.Full(ChunkCount.FromInt(2)), session.SwarmMembers, _scheduler.InFlightChunks);
+
+        choiceForA.Should().Be(ChunkIndex.FromInt(0));
+        choiceForB.Should().Be(ChunkIndex.FromInt(1));
+
+        // Pump Peer A: after delivering Chunk 0, Peer A also sends HaveFrame(1), allowing Peer A to serve Chunk 1 too!
+        FakeTransferStreamPool poolA = new();
+        FakeTransferStream streamA = null!;
+        streamA = new FakeTransferStream
+        {
+            Index = StreamIndex.FromInt(0),
+            AutoResponder = frame =>
+            {
+                if (frame is RequestChunkFrame req)
+                {
+                    byte[] zeroPlaintext = new byte[session.Manifest.ChunkSize.Bytes];
+                    EncryptedChunkData enc = ChunkCryptoService.EncryptChunk(
+                        PlaintextChunkData.FromBytes(zeroPlaintext),
+                        key,
+                        baseNonce,
+                        req.ChunkIndex);
+
+                    if (req.ChunkIndex.Value == 0)
+                    {
+                        // Peer A announces it just acquired Chunk 1 right before sending Chunk 0 data
+                        streamA.InboundFrames.Enqueue(new HaveFrame(ChunkIndex.FromInt(1)));
+                    }
+                    return new ChunkDataFrame(req.ChunkIndex, enc);
+                }
+                return null;
+            }
+        };
+        poolA.Streams.Add(streamA);
+
+        DomainResult result = await _coordinator.PumpPeerStreamsAsync(session, peerA, poolA, key, baseNonce, dest);
+        result.IsSuccess.Should().BeTrue();
+        session.IsDownloadComplete.Should().BeTrue();
+        session.State.Should().Be(TransferSessionState.Completed);
     }
 
     private TransferSession CreateActiveSession(TransferSessionId sessionId, PublicIdentityId peerId, int chunkCount)

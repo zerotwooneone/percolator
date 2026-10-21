@@ -37,7 +37,7 @@ public sealed class DiskChunkAssembler
             chunkIndex,
             ChunkByteLength.FromBytes(plaintextData.Length));
 
-        // Write each verified slice to target file on disk
+        // Write each verified slice to target file on disk and finalize any file that just completed
         foreach (FileChunkSlice slice in slices)
         {
             FileEntry entry = session.Manifest.Files[slice.FileIndex.Value];
@@ -45,6 +45,11 @@ public sealed class DiskChunkAssembler
 
             ReadOnlyMemory<byte> sliceMemory = plaintextData.Memory.Slice(slice.BufferOffset, slice.SliceLength.Bytes);
             await _fileStorage.WriteChunkAsync(targetFile, slice.OffsetInFile, PlaintextChunkData.FromMemory(sliceMemory), ct);
+
+            if (session.IsFileComplete(entry))
+            {
+                await _fileStorage.FinalizeFileAsync(targetFile, entry.LastModifiedUtc, ct);
+            }
         }
 
         return verifyResult;
