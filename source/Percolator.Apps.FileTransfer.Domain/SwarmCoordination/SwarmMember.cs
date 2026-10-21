@@ -20,21 +20,26 @@ public sealed class SwarmMember : IEntity<PublicIdentityId>
 
     public SwarmMember(
         PublicIdentityId peerId,
-        Bitfield bitfield)
+        Bitfield bitfield,
+        PeerChokeStatus peerChokingUs = PeerChokeStatus.Choked,
+        PeerChokeStatus weChokingPeer = PeerChokeStatus.Choked,
+        PeerInterestStatus peerInterestedInUs = PeerInterestStatus.NotInterested,
+        PeerInterestStatus weInterestedInPeer = PeerInterestStatus.NotInterested)
     {
+        ArgumentNullException.ThrowIfNull(bitfield);
         PeerId = peerId;
         Bitfield = bitfield;
-        PeerChokingUs = PeerChokeStatus.Choked;
-        WeChokingPeer = PeerChokeStatus.Choked;
-        PeerInterestedInUs = PeerInterestStatus.NotInterested;
-        WeInterestedInPeer = PeerInterestStatus.NotInterested;
+        PeerChokingUs = peerChokingUs;
+        WeChokingPeer = weChokingPeer;
+        PeerInterestedInUs = peerInterestedInUs;
+        WeInterestedInPeer = weInterestedInPeer;
     }
 
-    public void UpdateBitfield(Bitfield bitfield) => Bitfield = bitfield;
-    public void RecordHave(ChunkIndex chunkIndex) => Bitfield = Bitfield.WithChunk(chunkIndex);
+    internal void UpdateBitfield(Bitfield bitfield) => Bitfield = bitfield;
+    internal void RecordHave(ChunkIndex chunkIndex) => Bitfield = Bitfield.WithChunk(chunkIndex);
     
-    public void SetPeerChokingUs(PeerChokeStatus status) => PeerChokingUs = status;
-    public void SetWeChokingPeer(PeerChokeStatus status) => WeChokingPeer = status;
-    public void SetPeerInterestedInUs(PeerInterestStatus status) => PeerInterestedInUs = status;
-    public void SetWeInterestedInPeer(PeerInterestStatus status) => WeInterestedInPeer = status;
+    internal void SetPeerChokingUs(PeerChokeStatus status) => PeerChokingUs = status;
+    internal void SetWeChokingPeer(PeerChokeStatus status) => WeChokingPeer = status;
+    internal void SetPeerInterestedInUs(PeerInterestStatus status) => PeerInterestedInUs = status;
+    internal void SetWeInterestedInPeer(PeerInterestStatus status) => WeInterestedInPeer = status;
 }

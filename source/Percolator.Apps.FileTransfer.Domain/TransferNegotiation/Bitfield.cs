@@ -36,7 +36,7 @@ public sealed record Bitfield
         int len = (totalChunks.Count + 7) / 8;
         byte[] bytes = new byte[len];
         for (int i = 0; i < len; i++) bytes[i] = 0xFF;
-        
+
         // Invariant: Trailing unused bits in the final byte must be strictly zeroed:
         int remainder = totalChunks.Count % 8;
         if (remainder != 0)
@@ -55,7 +55,7 @@ public sealed record Bitfield
             throw new DomainValidationException($"Bitfield byte length ({source.Length}) does not match expected ({expectedLen}) for {totalChunks.Count} chunks.");
 
         byte[] copy = source.ToArray();
-        
+
         // Strict Invariant: Trailing unused bits must be 0:
         int remainder = totalChunks.Count % 8;
         if (remainder != 0)
@@ -79,6 +79,9 @@ public sealed record Bitfield
 
     public Bitfield WithChunk(ChunkIndex index)
     {
+        if (index.Value < 0 || index.Value >= TotalChunks.Count)
+            throw new DomainValidationException($"Chunk index {index.Value} is out of bounds for {TotalChunks.Count} total chunks.");
+
         if (HasChunk(index)) return this;
         byte[] next = (byte[])_bytes.Clone();
         int byteIdx = index.Value / 8;
@@ -89,6 +92,9 @@ public sealed record Bitfield
 
     public Bitfield WithoutChunk(ChunkIndex index)
     {
+        if (index.Value < 0 || index.Value >= TotalChunks.Count)
+            throw new DomainValidationException($"Chunk index {index.Value} is out of bounds for {TotalChunks.Count} total chunks.");
+
         if (!HasChunk(index)) return this;
         byte[] next = (byte[])_bytes.Clone();
         int byteIdx = index.Value / 8;
@@ -126,6 +132,23 @@ public sealed record Bitfield
     }
 
     public byte[] ToByteArray() => (byte[])_bytes.Clone();
+
+    public bool Equals(Bitfield? other)
+    {
+        if (other is null) return false;
+        if (ReferenceEquals(this, other)) return true;
+        return TotalChunks == other.TotalChunks
+               && PopCount == other.PopCount
+               && _bytes.AsSpan().SequenceEqual(other._bytes);
+    }
+
+    public override int GetHashCode()
+    {
+        HashCode hash = new();
+        hash.Add(TotalChunks);
+        hash.AddBytes(_bytes);
+        return hash.ToHashCode();
+    }
 
     private static int CountBits(byte[] bytes)
     {

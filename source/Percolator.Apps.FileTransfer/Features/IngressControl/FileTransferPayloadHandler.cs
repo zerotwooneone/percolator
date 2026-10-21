@@ -63,16 +63,10 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
         if (offer.RelayRendezvous != null && policy.EvaluateRelay(offer.RelayRendezvous.EndpointUri) == RelayFilterDecision.Blocked)
             return DomainResult.Success(); // Silent drop on blocked relay
 
-        // Build inline manifest if provided inline, otherwise placeholder
-        TransferManifest manifest;
-        if (offer.Manifest.Kind == ManifestDistributionKind.Inline && offer.Manifest.InlineData != null)
-        {
-            manifest = TransferManifestDeserializer.Deserialize(offer.Manifest.InlineData.Span, offer.TransferSessionId);
-        }
-        else
-        {
-            manifest = TransferManifest.CreatePlaceholder(offer.TransferSessionId, offer.Summary);
-        }
+        if (offer.Manifest.Kind != ManifestDistributionKind.Inline || offer.Manifest.InlineData == null)
+            return DomainResult.Success(); // Out-of-band blob manifest requires asynchronous blob fetch before session staging
+
+        TransferManifest manifest = TransferManifestDeserializer.Deserialize(offer.Manifest.InlineData.Span, offer.TransferSessionId);
 
         TransferSession session = TransferSession.CreateIncomingStaged(
             offer.TransferSessionId,

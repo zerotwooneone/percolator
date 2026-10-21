@@ -125,7 +125,7 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
             candidates.Add(new DirectEndpointCandidate(EndpointHost.Parse("wan.example.com"), PortNumber.FromInt(50000), DirectCandidateKind.DirectWanUpnp));
         }
 
-        byte[] serializedManifest = manifest.Serialize();
+        byte[] serializedManifest = TransferManifestSerializer.Serialize(manifest);
         ManifestDistribution manifestDist = serializedManifest.Length <= IngressTransferOfferValidator.MaxInlineManifestBytes
             ? ManifestDistribution.FromInline(InlineManifestData.FromBytes(serializedManifest))
             : ManifestDistribution.FromBlob(new ManifestBlobDescriptor(BlobId.FromSha256(SHA256.HashData(serializedManifest)), ChunkHash.FromBytes(SHA256.HashData(serializedManifest)), manifest.TotalSize, RelayPipeEndpointUri.Parse("https://relay.percolator.net/pipes")));
@@ -242,7 +242,7 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         TransferSession? session = await _sessionRepository.GetSessionByIdAsync(sessionId, ct);
         if (session == null) return DomainResult.Failure(new DomainError("Transfer.NotFound", "Session not found."));
 
-        DomainResult result = session.Pause();
+        DomainResult result = session.Pause(_clock);
         if (result.IsSuccess) await _sessionRepository.SaveSessionAsync(session, ct);
         return result;
     }
@@ -252,7 +252,7 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         TransferSession? session = await _sessionRepository.GetSessionByIdAsync(sessionId, ct);
         if (session == null) return DomainResult.Failure(new DomainError("Transfer.NotFound", "Session not found."));
 
-        DomainResult result = session.Resume();
+        DomainResult result = session.Resume(_clock);
         if (result.IsSuccess) await _sessionRepository.SaveSessionAsync(session, ct);
         return result;
     }

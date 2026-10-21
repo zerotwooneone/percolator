@@ -11,7 +11,7 @@ namespace Percolator.Apps.FileTransfer.Domain.Tests;
 public sealed class BitfieldTests
 {
     [Test]
-    public void DT_BIT_01_StructuralImmutability_BitfieldMutationsReturnNewInstances()
+    public void DT_BIT_01_StructuralImmutability_BitfieldMutationsReturnNewInstancesAndEnforceBounds()
     {
         ChunkCount total = ChunkCount.FromInt(16);
         Bitfield initial = Bitfield.Empty(total);
@@ -28,6 +28,13 @@ public sealed class BitfieldTests
         cleared.PopCount.Should().Be(0);
         cleared.HasChunk(ChunkIndex.FromInt(5)).Should().BeFalse();
         mutated.PopCount.Should().Be(1);
+
+        // Out-of-bounds mutation attempts must throw DomainValidationException
+        Action actNegative = () => initial.WithChunk(ChunkIndex.FromInt(-1));
+        actNegative.Should().Throw<DomainValidationException>();
+
+        Action actOutOfRange = () => initial.WithChunk(ChunkIndex.FromInt(16));
+        actOutOfRange.Should().Throw<DomainValidationException>();
     }
 
     [Test]
@@ -75,6 +82,7 @@ public sealed class BitfieldTests
         Bitfield roundtrip = Bitfield.FromBytes(bytes, total);
         roundtrip.PopCount.Should().Be(chunkCountInt);
         roundtrip.IsComplete.Should().BeTrue();
+        roundtrip.Should().Be(full);
     }
 
     [Test]
@@ -170,5 +178,27 @@ public sealed class BitfieldTests
 
         Action actTooLong = () => Bitfield.FromBytes([0xFF, 0x00, 0x00], total);
         actTooLong.Should().Throw<DomainValidationException>();
+    }
+
+    [Test]
+    public void DT_BIT_08_BitfieldAndSelectedFileIndices_ValueObjectStructuralEquality()
+    {
+        ChunkCount total = ChunkCount.FromInt(12);
+        Bitfield bf1 = Bitfield.Empty(total).WithChunk(ChunkIndex.FromInt(2)).WithChunk(ChunkIndex.FromInt(9));
+        Bitfield bf2 = Bitfield.Empty(total).WithChunk(ChunkIndex.FromInt(9)).WithChunk(ChunkIndex.FromInt(2));
+        Bitfield bfDifferent = Bitfield.Empty(total).WithChunk(ChunkIndex.FromInt(2));
+
+        (bf1 == bf2).Should().BeTrue();
+        bf1.GetHashCode().Should().Be(bf2.GetHashCode());
+        (bf1 == bfDifferent).Should().BeFalse();
+
+        FileCount files = FileCount.FromInt(5);
+        SelectedFileIndices sel1 = SelectedFileIndices.FromIndices([FileIndex.FromInt(0), FileIndex.FromInt(3)], files);
+        SelectedFileIndices sel2 = SelectedFileIndices.FromIndices([FileIndex.FromInt(3), FileIndex.FromInt(0), FileIndex.FromInt(3)], files);
+        SelectedFileIndices selDifferent = SelectedFileIndices.FromIndices([FileIndex.FromInt(0)], files);
+
+        (sel1 == sel2).Should().BeTrue();
+        sel1.GetHashCode().Should().Be(sel2.GetHashCode());
+        (sel1 == selDifferent).Should().BeFalse();
     }
 }

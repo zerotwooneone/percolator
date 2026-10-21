@@ -71,6 +71,7 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
         SeedRatio targetSeedRatio,
         IDateTimeProvider clock)
     {
+        ArgumentNullException.ThrowIfNull(manifest);
         ArgumentNullException.ThrowIfNull(clock);
         if (initiatorId == recipientId)
             throw new DomainValidationException("Recipient identity cannot be the same as initiator.");
@@ -114,6 +115,7 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
         SeedRatio targetSeedRatio,
         IDateTimeProvider clock)
     {
+        ArgumentNullException.ThrowIfNull(manifest);
         ArgumentNullException.ThrowIfNull(clock);
         if (recipients == null || recipients.Count == 0)
             throw new DomainValidationException("Multi-peer transfer must specify at least one recipient.");
@@ -162,6 +164,7 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
         SeedRatio targetSeedRatio,
         IDateTimeProvider clock)
     {
+        ArgumentNullException.ThrowIfNull(manifest);
         ArgumentNullException.ThrowIfNull(clock);
 
         TransferTopology.IncomingStaged topology = new(initiatorId);
@@ -181,6 +184,14 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
             now);
     }
 
+    public Bitfield GetMissingRequiredChunks()
+    {
+        Bitfield required = SelectedFiles != null
+            ? Manifest.GetRequiredChunks(SelectedFiles)
+            : Bitfield.Full(Manifest.TotalChunks);
+        return required.Difference(LocalBitfield);
+    }
+
     public DomainResult AcceptTransfer(SelectedFileIndices selectedFiles, IDateTimeProvider clock)
     {
         ArgumentNullException.ThrowIfNull(clock);
@@ -192,6 +203,7 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
 
         SelectedFiles = selectedFiles;
         State = TransferSessionState.InFlight;
+        ReevaluateAllPeerInterests();
         DateTimeOffset now = clock.UtcNow;
 
         AddDomainEvent(new TransferAcceptedLocallyDomainEvent(Id, selectedFiles, now));
@@ -203,6 +215,7 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
         Bitfield resumptionBitfield,
         IDateTimeProvider clock)
     {
+        ArgumentNullException.ThrowIfNull(resumptionBitfield);
         ArgumentNullException.ThrowIfNull(clock);
         if (State != TransferSessionState.Offered)
             return DomainResult.Failure(new DomainError("Transfer.InvalidState", $"Cannot record peer acceptance in state '{State}'."));
@@ -213,7 +226,9 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
         if (resumptionBitfield.TotalChunks != Manifest.TotalChunks)
             return DomainResult.Failure(new DomainError("Transfer.MismatchedBitfield", "Peer bitfield total chunk count does not match session manifest."));
 
-        _swarmMembers[recipientId] = new SwarmMember(recipientId, resumptionBitfield);
+        SwarmMember member = new(recipientId, resumptionBitfield);
+        _swarmMembers[recipientId] = member;
+        UpdatePeerInterestAndCheckStallRecovery(member);
         State = TransferSessionState.InFlight;
         DateTimeOffset now = clock.UtcNow;
 
@@ -226,7 +241,11 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
         Bitfield initialBitfield,
         IDateTimeProvider clock)
     {
+        ArgumentNullException.ThrowIfNull(initialBitfield);
         ArgumentNullException.ThrowIfNull(clock);
+        if (IsTerminalState())
+            return DomainResult.Failure(new DomainError("Transfer.TerminalState", $"Cannot register swarm member in terminal state '{State}'."));
+
         if (!Topology.ContainsParticipant(peerId))
             return DomainResult.Failure(new DomainError("Swarm.UnauthorizedPeer", $"Peer '{peerId}' is not authorized to join this swarm."));
 
@@ -236,7 +255,9 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
         if (_swarmMembers.ContainsKey(peerId))
             return DomainResult.Success();
 
-        _swarmMembers[peerId] = new SwarmMember(peerId, initialBitfield);
+        SwarmMember member = new(peerId, initialBitfield);
+        _swarmMembers[peerId] = member;
+        UpdatePeerInterestAndCheckStallRecovery(member);
         DateTimeOffset now = clock.UtcNow;
 
         AddDomainEvent(new SwarmMemberJoinedDomainEvent(Id, peerId, initialBitfield, now));
@@ -245,6 +266,10 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
 
     public DomainResult RecordPeerBitfield(PublicIdentityId peerId, Bitfield bitfield)
     {
+        ArgumentNullException.ThrowIfNull(bitfield);
+        if (IsTerminalState())
+            return DomainResult.Failure(new DomainError("Transfer.TerminalState", $"Cannot update peer bitfield in terminal state '{State}'."));
+
         if (!_swarmMembers.TryGetValue(peerId, out SwarmMember? member))
             return DomainResult.Failure(new DomainError("Swarm.UnknownPeer", $"Peer '{peerId}' is not a registered swarm member."));
 
@@ -252,11 +277,15 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
             return DomainResult.Failure(new DomainError("Swarm.MismatchedBitfield", "Bitfield total chunk count does not match session manifest."));
 
         member.UpdateBitfield(bitfield);
+        UpdatePeerInterestAndCheckStallRecovery(member);
         return DomainResult.Success();
     }
 
     public DomainResult RecordPeerHave(PublicIdentityId peerId, ChunkIndex chunkIndex)
     {
+        if (IsTerminalState())
+            return DomainResult.Failure(new DomainError("Transfer.TerminalState", $"Cannot record peer piece in terminal state '{State}'."));
+
         if (!_swarmMembers.TryGetValue(peerId, out SwarmMember? member))
             return DomainResult.Failure(new DomainError("Swarm.UnknownPeer", $"Peer '{peerId}' is not a registered swarm member."));
 
@@ -264,11 +293,15 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
             return DomainResult.Failure(new DomainError("Swarm.InvalidChunkIndex", $"Chunk index {chunkIndex.Value} is out of bounds."));
 
         member.RecordHave(chunkIndex);
+        UpdatePeerInterestAndCheckStallRecovery(member);
         return DomainResult.Success();
     }
 
     public DomainResult SetWeChokingPeer(PublicIdentityId peerId, PeerChokeStatus status)
     {
+        if (IsTerminalState())
+            return DomainResult.Failure(new DomainError("Transfer.TerminalState", $"Cannot mutate choke state in terminal state '{State}'."));
+
         if (!_swarmMembers.TryGetValue(peerId, out SwarmMember? member))
             return DomainResult.Failure(new DomainError("Swarm.UnknownPeer", $"Peer '{peerId}' is not a registered swarm member."));
 
@@ -278,6 +311,9 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
 
     public DomainResult RecordPeerChokingUs(PublicIdentityId peerId, PeerChokeStatus status)
     {
+        if (IsTerminalState())
+            return DomainResult.Failure(new DomainError("Transfer.TerminalState", $"Cannot mutate choke state in terminal state '{State}'."));
+
         if (!_swarmMembers.TryGetValue(peerId, out SwarmMember? member))
             return DomainResult.Failure(new DomainError("Swarm.UnknownPeer", $"Peer '{peerId}' is not a registered swarm member."));
 
@@ -287,6 +323,9 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
 
     public DomainResult SetWeInterestedInPeer(PublicIdentityId peerId, PeerInterestStatus status)
     {
+        if (IsTerminalState())
+            return DomainResult.Failure(new DomainError("Transfer.TerminalState", $"Cannot mutate interest state in terminal state '{State}'."));
+
         if (!_swarmMembers.TryGetValue(peerId, out SwarmMember? member))
             return DomainResult.Failure(new DomainError("Swarm.UnknownPeer", $"Peer '{peerId}' is not a registered swarm member."));
 
@@ -296,6 +335,9 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
 
     public DomainResult RecordPeerInterestedInUs(PublicIdentityId peerId, PeerInterestStatus status)
     {
+        if (IsTerminalState())
+            return DomainResult.Failure(new DomainError("Transfer.TerminalState", $"Cannot mutate interest state in terminal state '{State}'."));
+
         if (!_swarmMembers.TryGetValue(peerId, out SwarmMember? member))
             return DomainResult.Failure(new DomainError("Swarm.UnknownPeer", $"Peer '{peerId}' is not a registered swarm member."));
 
@@ -306,6 +348,9 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
     public DomainResult RecordUploadedBytes(TransferByteLength bytes, IDateTimeProvider clock)
     {
         ArgumentNullException.ThrowIfNull(clock);
+        if (IsTerminalState())
+            return DomainResult.Failure(new DomainError("Transfer.TerminalState", $"Cannot record uploaded bytes in terminal state '{State}'."));
+
         if (bytes.Bytes < 0)
             return DomainResult.Failure(new DomainError("Transfer.NegativeBytes", "Uploaded bytes cannot be negative."));
 
@@ -324,6 +369,9 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
 
     public DomainResult SetTargetSeedRatio(SeedRatio seedRatio)
     {
+        if (IsTerminalState())
+            return DomainResult.Failure(new DomainError("Transfer.TerminalState", $"Cannot change seed ratio in terminal state '{State}'."));
+
         TargetSeedRatio = seedRatio;
         return DomainResult.Success();
     }
@@ -351,6 +399,7 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
             return DomainResult.Failure(new DomainError("Transfer.CryptographicVerificationFailed", $"Leaf hash verification failed for chunk {chunkIndex.Value}."));
 
         LocalBitfield = LocalBitfield.WithChunk(chunkIndex);
+        ReevaluateAllPeerInterests();
         DateTimeOffset now = clock.UtcNow;
 
         AddDomainEvent(new ChunkVerifiedDomainEvent(Id, chunkIndex, Manifest.MerkleTree.GetLeaf(chunkIndex), now));
@@ -397,6 +446,38 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
         return true;
     }
 
+    private void UpdatePeerInterestAndCheckStallRecovery(SwarmMember member)
+    {
+        Bitfield missingRequired = GetMissingRequiredChunks();
+        bool peerHasNeededChunk = !member.Bitfield.Intersect(missingRequired).IsEmpty;
+
+        member.SetWeInterestedInPeer(peerHasNeededChunk
+            ? PeerInterestStatus.Interested
+            : PeerInterestStatus.NotInterested);
+
+        if (State == TransferSessionState.Stalled && peerHasNeededChunk)
+        {
+            State = TransferSessionState.InFlight;
+        }
+    }
+
+    private void ReevaluateAllPeerInterests()
+    {
+        Bitfield missingRequired = GetMissingRequiredChunks();
+        foreach (SwarmMember member in _swarmMembers.Values)
+        {
+            bool peerHasNeededChunk = !member.Bitfield.Intersect(missingRequired).IsEmpty;
+            member.SetWeInterestedInPeer(peerHasNeededChunk
+                ? PeerInterestStatus.Interested
+                : PeerInterestStatus.NotInterested);
+        }
+    }
+
+    private bool IsTerminalState() =>
+        State == TransferSessionState.Completed
+        || State == TransferSessionState.Cancelled
+        || State == TransferSessionState.Failed;
+
     public DomainResult CompleteTransfer(IDateTimeProvider clock)
     {
         ArgumentNullException.ThrowIfNull(clock);
@@ -424,7 +505,7 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
     public DomainResult MarkFailed(TransferTerminationReason reason, IDateTimeProvider clock)
     {
         ArgumentNullException.ThrowIfNull(clock);
-        if (State == TransferSessionState.Completed || State == TransferSessionState.Cancelled || State == TransferSessionState.Failed)
+        if (IsTerminalState())
             return DomainResult.Failure(new DomainError("Transfer.TerminalState", $"Cannot fail transfer in terminal state '{State}'."));
 
         State = TransferSessionState.Failed;
@@ -432,30 +513,35 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
         return DomainResult.Success();
     }
 
-    public DomainResult Pause()
+    public DomainResult Pause(IDateTimeProvider clock)
     {
+        ArgumentNullException.ThrowIfNull(clock);
         if (State != TransferSessionState.InFlight && State != TransferSessionState.Seeding && State != TransferSessionState.Stalled)
             return DomainResult.Failure(new DomainError("Transfer.InvalidState", $"Cannot pause transfer in state '{State}'."));
 
         State = TransferSessionState.Paused;
-        AddDomainEvent(new TransferPausedDomainEvent(Id, DateTimeOffset.UtcNow));
+        AddDomainEvent(new TransferPausedDomainEvent(Id, clock.UtcNow));
         return DomainResult.Success();
     }
 
-    public DomainResult Resume()
+    public DomainResult Resume(IDateTimeProvider clock)
     {
+        ArgumentNullException.ThrowIfNull(clock);
         if (State != TransferSessionState.Paused)
             return DomainResult.Failure(new DomainError("Transfer.InvalidState", $"Cannot resume transfer in state '{State}'."));
 
-        State = TransferSessionState.InFlight;
-        AddDomainEvent(new TransferResumedDomainEvent(Id, DateTimeOffset.UtcNow));
+        State = Role == TransferRole.Recipient && IsDownloadComplete && !TargetSeedRatio.IsZero
+            ? TransferSessionState.Seeding
+            : TransferSessionState.InFlight;
+
+        AddDomainEvent(new TransferResumedDomainEvent(Id, clock.UtcNow));
         return DomainResult.Success();
     }
 
     public DomainResult Cancel(TransferTerminationReason reason, IDateTimeProvider clock)
     {
         ArgumentNullException.ThrowIfNull(clock);
-        if (State == TransferSessionState.Completed || State == TransferSessionState.Cancelled || State == TransferSessionState.Failed)
+        if (IsTerminalState())
             return DomainResult.Failure(new DomainError("Transfer.TerminalState", $"Cannot cancel transfer in terminal state '{State}'."));
 
         State = TransferSessionState.Cancelled;

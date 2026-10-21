@@ -1,9 +1,10 @@
 using System.Text.Json;
 using Percolator.Apps.FileTransfer.Domain.Common;
 using Percolator.Apps.FileTransfer.Domain.Exceptions;
+using Percolator.Apps.FileTransfer.Domain.ManifestManagement;
 using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
 
-namespace Percolator.Apps.FileTransfer.Domain.ManifestManagement;
+namespace Percolator.Apps.FileTransfer.Features.TransferNegotiation;
 
 public static class TransferManifestDeserializer
 {

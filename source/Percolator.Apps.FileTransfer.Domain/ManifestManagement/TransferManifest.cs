@@ -1,5 +1,3 @@
-using System.Text;
-using System.Text.Json;
 using Percolator.Apps.FileTransfer.Domain.Common;
 using Percolator.Apps.FileTransfer.Domain.Exceptions;
 using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
@@ -46,13 +44,18 @@ public sealed class TransferManifest : IEntity<TransferSessionId>
         MerkleTreeIndex merkleTree,
         IReadOnlyList<FileEntry> files)
     {
+        ArgumentNullException.ThrowIfNull(rootName);
+        ArgumentNullException.ThrowIfNull(merkleTree);
+
         if (files == null || files.Count == 0)
         {
             throw new DomainValidationException("Transfer bundle must contain at least one file entry.");
         }
 
+        FileEntry[] copiedFiles = files.ToArray();
+
         long totalBytes = 0;
-        foreach (FileEntry file in files)
+        foreach (FileEntry file in copiedFiles)
         {
             totalBytes += file.FileSize.Bytes;
         }
@@ -63,9 +66,9 @@ public sealed class TransferManifest : IEntity<TransferSessionId>
         }
 
         long expectedOffset = 0;
-        for (int i = 0; i < files.Count; i++)
+        for (int i = 0; i < copiedFiles.Length; i++)
         {
-            FileEntry file = files[i];
+            FileEntry file = copiedFiles[i];
             if (file.Index.Value != i)
             {
                 throw new DomainValidationException($"File entry at index {i} has non-sequential index {file.Index.Value}.");
@@ -95,34 +98,11 @@ public sealed class TransferManifest : IEntity<TransferSessionId>
             manifestId,
             rootName,
             bundleBytes,
-            FileCount.FromInt(files.Count),
+            FileCount.FromInt(copiedFiles.Length),
             chunkSize,
             ChunkCount.FromInt(chunkCount),
             merkleTree,
-            files);
-    }
-
-    public static TransferManifest CreatePlaceholder(TransferSessionId manifestId, TransferBundleSummary summary)
-    {
-        MerkleTreeIndex singleIndex = MerkleTreeIndex.Create(summary.MerkleRoot, [ChunkHash.FromSpan(summary.MerkleRoot.Span)]);
-        List<FileEntry> placeholderFiles = [
-            new FileEntry(
-                FileIndex.FromInt(0),
-                SanitizedRelativePath.Parse("bundle.bin"),
-                FileSizeBytes.FromBytes(summary.TotalSize.Bytes),
-                BundleByteOffset.Zero,
-                FileLastModifiedUtc.FromDateTimeOffset(DateTimeOffset.UtcNow))
-        ];
-
-        return new TransferManifest(
-            manifestId,
-            summary.RootName,
-            summary.TotalSize,
-            summary.TotalFiles,
-            summary.ChunkSizeBytes,
-            summary.TotalChunks,
-            singleIndex,
-            placeholderFiles);
+            copiedFiles);
     }
 
     public ChunkByteLength GetExpectedChunkSize(ChunkIndex chunkIndex)
@@ -137,6 +117,8 @@ public sealed class TransferManifest : IEntity<TransferSessionId>
 
     public Bitfield GetRequiredChunks(SelectedFileIndices selectedFiles)
     {
+        ArgumentNullException.ThrowIfNull(selectedFiles);
+
         Bitfield required = Bitfield.Empty(TotalChunks);
         foreach (FileIndex index in selectedFiles.Indices)
         {
@@ -152,43 +134,5 @@ public sealed class TransferManifest : IEntity<TransferSessionId>
             }
         }
         return required;
-    }
-
-    public byte[] Serialize()
-    {
-        using MemoryStream ms = new();
-        using (Utf8JsonWriter writer = new(ms))
-        {
-            writer.WriteStartObject();
-            writer.WriteString("manifestId", ManifestId.Value);
-            writer.WriteString("rootName", RootName.Value);
-            writer.WriteNumber("totalSize", TotalSize.Bytes);
-            writer.WriteNumber("chunkSize", ChunkSize.Bytes);
-            writer.WriteString("merkleRoot", Convert.ToBase64String(MerkleTree.Root.Span));
-            
-            writer.WriteStartArray("leaves");
-            for (int i = 0; i < MerkleTree.Leaves.Count; i++)
-            {
-                writer.WriteStringValue(Convert.ToBase64String(MerkleTree.Leaves[i].Span));
-            }
-            writer.WriteEndArray();
-
-            writer.WriteStartArray("files");
-            foreach (FileEntry file in Files)
-            {
-                writer.WriteStartObject();
-                writer.WriteNumber("index", file.Index.Value);
-                writer.WriteString("path", file.RelativePath.Value);
-                writer.WriteNumber("size", file.FileSize.Bytes);
-                writer.WriteNumber("startOffset", file.StartOffset.Offset);
-                writer.WriteNumber("lastModified", file.LastModifiedUtc.UnixSeconds);
-                writer.WriteEndObject();
-            }
-            writer.WriteEndArray();
-
-            writer.WriteEndObject();
-        }
-
-        return ms.ToArray();
     }
 }

@@ -99,6 +99,7 @@ Percolator.Apps.FileTransfer.Domain/
 ├── SwarmCoordination/
 │   ├── PeerChokeStatus.cs
 │   ├── PeerInterestStatus.cs
+│   ├── RarestFirstChunkSelector.cs
 │   ├── SwarmMember.cs
 │   └── SwarmPeerRole.cs
 └── TransferNegotiation/
@@ -330,6 +331,14 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
             now);
     }
 
+    public Bitfield GetMissingRequiredChunks()
+    {
+        Bitfield required = SelectedFiles != null
+            ? Manifest.GetRequiredChunks(SelectedFiles)
+            : Bitfield.Full(Manifest.TotalChunks);
+        return required.Difference(LocalBitfield);
+    }
+
     // Encapsulated Domain Mutation Methods:
     public DomainResult AcceptTransfer(SelectedFileIndices selectedFiles, IDateTimeProvider clock)
     {
@@ -342,6 +351,7 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
 
         SelectedFiles = selectedFiles;
         State = TransferSessionState.InFlight;
+        ReevaluateAllPeerInterests();
         DateTimeOffset now = clock.GetUtcNow();
 
         AddDomainEvent(new TransferAcceptedLocallyDomainEvent(Id, selectedFiles, now));
@@ -363,7 +373,9 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
         if (resumptionBitfield.TotalChunks != Manifest.TotalChunks)
             return DomainResult.Failure(new DomainError("Transfer.MismatchedBitfield", "Peer bitfield total chunk count does not match session manifest."));
 
-        _swarmMembers[recipientId] = new SwarmMember(recipientId, resumptionBitfield);
+        SwarmMember member = new(recipientId, resumptionBitfield);
+        _swarmMembers[recipientId] = member;
+        UpdatePeerInterestAndCheckStallRecovery(member);
         State = TransferSessionState.InFlight;
         DateTimeOffset now = clock.GetUtcNow();
 
@@ -386,7 +398,9 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
         if (_swarmMembers.ContainsKey(peerId))
             return DomainResult.Success();
 
-        _swarmMembers[peerId] = new SwarmMember(peerId, initialBitfield);
+        SwarmMember member = new(peerId, initialBitfield);
+        _swarmMembers[peerId] = member;
+        UpdatePeerInterestAndCheckStallRecovery(member);
         DateTimeOffset now = clock.GetUtcNow();
 
         AddDomainEvent(new SwarmMemberJoinedDomainEvent(Id, peerId, initialBitfield, now));
@@ -402,6 +416,7 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
             return DomainResult.Failure(new DomainError("Swarm.MismatchedBitfield", "Bitfield total chunk count does not match session manifest."));
 
         member.UpdateBitfield(bitfield);
+        UpdatePeerInterestAndCheckStallRecovery(member);
         return DomainResult.Success();
     }
 
@@ -414,6 +429,7 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
             return DomainResult.Failure(new DomainError("Swarm.InvalidChunkIndex", $"Chunk index {chunkIndex.Value} is out of bounds."));
 
         member.RecordHave(chunkIndex);
+        UpdatePeerInterestAndCheckStallRecovery(member);
         return DomainResult.Success();
     }
 
@@ -503,6 +519,7 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
             return DomainResult.Failure(new DomainError("Transfer.CryptographicVerificationFailed", $"Leaf hash verification failed for chunk {chunkIndex.Value}."));
 
         LocalBitfield = LocalBitfield.WithChunk(chunkIndex);
+        ReevaluateAllPeerInterests();
         DateTimeOffset now = clock.GetUtcNow();
 
         AddDomainEvent(new ChunkVerifiedDomainEvent(Id, chunkIndex, Manifest.MerkleTree.GetLeaf(chunkIndex), now));
@@ -586,23 +603,28 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
         return DomainResult.Success();
     }
 
-    public DomainResult Pause()
+    public DomainResult Pause(IDateTimeProvider clock)
     {
+        ArgumentNullException.ThrowIfNull(clock);
         if (State != TransferSessionState.InFlight && State != TransferSessionState.Seeding && State != TransferSessionState.Stalled)
             return DomainResult.Failure(new DomainError("Transfer.InvalidState", $"Cannot pause transfer in state '{State}'."));
 
         State = TransferSessionState.Paused;
-        AddDomainEvent(new TransferPausedDomainEvent(Id, DateTimeOffset.UtcNow));
+        AddDomainEvent(new TransferPausedDomainEvent(Id, clock.GetUtcNow()));
         return DomainResult.Success();
     }
 
-    public DomainResult Resume()
+    public DomainResult Resume(IDateTimeProvider clock)
     {
+        ArgumentNullException.ThrowIfNull(clock);
         if (State != TransferSessionState.Paused)
             return DomainResult.Failure(new DomainError("Transfer.InvalidState", $"Cannot resume transfer in state '{State}'."));
 
-        State = TransferSessionState.InFlight;
-        AddDomainEvent(new TransferResumedDomainEvent(Id, DateTimeOffset.UtcNow));
+        State = Role == TransferRole.Recipient && IsDownloadComplete && !TargetSeedRatio.IsZero
+            ? TransferSessionState.Seeding
+            : TransferSessionState.InFlight;
+
+        AddDomainEvent(new TransferResumedDomainEvent(Id, clock.GetUtcNow()));
         return DomainResult.Success();
     }
 
@@ -692,17 +714,17 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
 | `InFlight` | `VerifyAndRecordChunk(index, data, clock)` | `InFlight` | Piece verified. Emits `ChunkVerifiedDomainEvent`. If last chunk of file, emits `FileCompletedDomainEvent`. |
 | `InFlight` | `VerifyAndRecordChunk(index, data, clock)` | `Completed` | Last required chunk verified, and `TargetSeedRatio.IsZero`. Emits `TransferCompletedDomainEvent`. |
 | `InFlight` | `VerifyAndRecordChunk(index, data, clock)` | `Seeding` | Last required chunk verified, and `TargetSeedRatio > 0`. Emits `TransferCompletedDomainEvent`. |
-| `InFlight` | `Pause()` | `Paused` | Suspends active chunk verification. Emits `TransferPausedDomainEvent`. |
+| `InFlight` | `Pause(clock)` | `Paused` | Suspends active chunk verification. Emits `TransferPausedDomainEvent`. |
 | `InFlight` | `MarkStalled(clock)` | `Stalled` | Triggered when zero connected peers possess remaining missing pieces. Emits `TransferStalledDomainEvent`. |
 | `InFlight` | `Cancel(reason, clock)` | `Cancelled` | User or timeout abortion. Emits `TransferCancelledDomainEvent`. Terminal state. |
 | `InFlight` | `MarkFailed(reason, clock)` | `Failed` | Cryptographic verification or bundle corruption. Emits `TransferFailedDomainEvent`. Terminal state. |
-| `Paused` | `Resume()` | `InFlight` | Resumes verification. Emits `TransferResumedDomainEvent`. |
+| `Paused` | `Resume(clock)` | `InFlight` / `Seeding` | Resumes verification (`InFlight`) or restores `Seeding` if download is already complete. Emits `TransferResumedDomainEvent`. |
 | `Paused` | `Cancel(reason, clock)` | `Cancelled` | Terminal state. |
 | `Stalled` | `RecordPeerHave` / `Bitfield` | `InFlight` | Transition occurs automatically when a newly recorded piece resolves stall condition. |
-| `Stalled` | `Pause()` | `Paused` | Emits `TransferPausedDomainEvent`. |
+| `Stalled` | `Pause(clock)` | `Paused` | Emits `TransferPausedDomainEvent`. |
 | `Stalled` | `Cancel(reason, clock)` | `Cancelled` | Terminal state. |
 | `Seeding` | `RecordUploadedBytes(bytes, clock)` | `Completed` | Transition occurs when `CurrentSeedRatio >= TargetSeedRatio`. Terminal state. |
-| `Seeding` | `Pause()` | `Paused` | Temporarily halts seeding. Emits `TransferPausedDomainEvent`. |
+| `Seeding` | `Pause(clock)` | `Paused` | Temporarily halts seeding. Emits `TransferPausedDomainEvent`. |
 | `Seeding` | `Cancel(reason, clock)` | `Cancelled` | Terminal state. |
 | `Completed` | *(Any mutation)* | `Completed` | **Terminal State**: `IsSuccess = false` / throws `DomainValidationException`. State is immutable. |
 | `Cancelled` | *(Any mutation)* | `Cancelled` | **Terminal State**: `IsSuccess = false` / throws `DomainValidationException`. State is immutable. |
@@ -760,14 +782,14 @@ public sealed class SwarmMember : IEntity<PublicIdentityId>
         WeInterestedInPeer = PeerInterestStatus.NotInterested;
     }
 
-    public void UpdateBitfield(Bitfield bitfield) => Bitfield = bitfield;
-    public void RecordHave(ChunkIndex chunkIndex) => Bitfield = Bitfield.WithChunk(chunkIndex);
+    internal void UpdateBitfield(Bitfield bitfield) => Bitfield = bitfield;
+    internal void RecordHave(ChunkIndex chunkIndex) => Bitfield = Bitfield.WithChunk(chunkIndex);
     
     // Directional flow control setters:
-    public void SetPeerChokingUs(PeerChokeStatus status) => PeerChokingUs = status;
-    public void SetWeChokingPeer(PeerChokeStatus status) => WeChokingPeer = status;
-    public void SetPeerInterestedInUs(PeerInterestStatus status) => PeerInterestedInUs = status;
-    public void SetWeInterestedInPeer(PeerInterestStatus status) => WeInterestedInPeer = status;
+    internal void SetPeerChokingUs(PeerChokeStatus status) => PeerChokingUs = status;
+    internal void SetWeChokingPeer(PeerChokeStatus status) => WeChokingPeer = status;
+    internal void SetPeerInterestedInUs(PeerInterestStatus status) => PeerInterestedInUs = status;
+    internal void SetWeInterestedInPeer(PeerInterestStatus status) => WeInterestedInPeer = status;
 }
 ```
 

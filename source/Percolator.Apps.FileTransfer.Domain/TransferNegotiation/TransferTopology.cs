@@ -34,7 +34,8 @@ public abstract record TransferTopology
         public MultiPeer(PublicIdentityId initiatorId, IReadOnlyList<PublicIdentityId> recipients) 
             : base(initiatorId)
         {
-            Recipients = recipients;
+            ArgumentNullException.ThrowIfNull(recipients);
+            Recipients = recipients.ToArray();
         }
 
         public override bool ContainsParticipant(PublicIdentityId peerId)

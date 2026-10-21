@@ -56,14 +56,9 @@ public sealed class SwarmCoordinationTests
         Bitfield b3 = Bitfield.Empty(total)
             .WithChunk(ChunkIndex.FromInt(0));
 
-        SwarmMember m1 = new(p1, b1);
-        m1.SetPeerChokingUs(PeerChokeStatus.Unchoked);
-
-        SwarmMember m2 = new(p2, b2);
-        m2.SetPeerChokingUs(PeerChokeStatus.Unchoked);
-
-        SwarmMember m3 = new(p3, b3);
-        m3.SetPeerChokingUs(PeerChokeStatus.Unchoked);
+        SwarmMember m1 = new(p1, b1, peerChokingUs: PeerChokeStatus.Unchoked);
+        SwarmMember m2 = new(p2, b2, peerChokingUs: PeerChokeStatus.Unchoked);
+        SwarmMember m3 = new(p3, b3, peerChokingUs: PeerChokeStatus.Unchoked);
 
         ChunkIndex? selected = RarestFirstChunkSelector.SelectNextChunk(
             local,

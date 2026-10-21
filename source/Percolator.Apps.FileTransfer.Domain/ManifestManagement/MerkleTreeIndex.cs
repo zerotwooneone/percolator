@@ -23,7 +23,7 @@ public sealed record MerkleTreeIndex
         if (leaves.Count == 0)
             throw new DomainValidationException("Merkle tree leaves cannot be empty.");
 
-        return new MerkleTreeIndex(root, leaves);
+        return new MerkleTreeIndex(root, leaves.ToArray());
     }
 
     public ChunkHash GetLeaf(ChunkIndex index)
@@ -41,4 +41,18 @@ public sealed record MerkleTreeIndex
         ChunkHash computed = MerkleTreeBuilder.HashLeaf(plaintextChunk);
         return computed.Span.SequenceEqual(Leaves[index.Value].Span);
     }
+
+    public bool Equals(MerkleTreeIndex? other)
+    {
+        if (other is null) return false;
+        if (ReferenceEquals(this, other)) return true;
+        if (Root != other.Root || Leaves.Count != other.Leaves.Count) return false;
+        for (int i = 0; i < Leaves.Count; i++)
+        {
+            if (Leaves[i] != other.Leaves[i]) return false;
+        }
+        return true;
+    }
+
+    public override int GetHashCode() => Root.GetHashCode();
 }

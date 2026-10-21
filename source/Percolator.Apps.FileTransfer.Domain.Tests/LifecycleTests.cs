@@ -1,6 +1,7 @@
 using Percolator.Apps.FileTransfer.Domain.Common;
 using Percolator.Apps.FileTransfer.Domain.Exceptions;
 using Percolator.Apps.FileTransfer.Domain.ManifestManagement;
+using Percolator.Apps.FileTransfer.Domain.SwarmCoordination;
 using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Domain.TransferNegotiation.Events;
 using Percolator.Apps.FileTransfer.Domain.Tests.TestDoubles;
@@ -97,30 +98,44 @@ public sealed class LifecycleTests
     }
 
     [Test]
-    public void DT_LIF_04_ValidPauseAndResumeLifecycleTransitions()
+    public void DT_LIF_04_ValidPauseAndResumeLifecycleTransitions_WithDeterministicClockAndStateRestoration()
     {
-        // Arrange
-        TransferSession session = TransferSession.CreateOutgoing1to1(
+        // Arrange: Recipient session that completes download with non-zero seed ratio -> transitions to Seeding
+        TransferSession session = TransferSession.CreateIncomingStaged(
             TransferSessionId.New(),
             _initiatorId,
-            _recipientId,
             _manifest,
-            SeedRatio.Zero,
+            SeedRatio.FromMultiplier(1.0),
             _clock);
-        session.RecordPeerAcceptance(_recipientId, Bitfield.Empty(_manifest.TotalChunks), _clock);
+        session.AcceptTransfer(SelectedFileIndices.FromIndices([FileIndex.FromInt(0)], _manifest.TotalFiles), _clock);
         session.State.Should().Be(TransferSessionState.InFlight);
 
-        // Act 1: Pause
-        DomainResult pauseResult = session.Pause();
+        // Act 1: Pause from InFlight and resume back to InFlight
+        _clock.Advance(TimeSpan.FromMinutes(5));
+        DateTimeOffset expectedPauseTime = _clock.UtcNow;
+        DomainResult pauseResult = session.Pause(_clock);
         pauseResult.IsSuccess.Should().BeTrue();
         session.State.Should().Be(TransferSessionState.Paused);
-        session.DomainEvents.Should().ContainSingle(e => e is TransferPausedDomainEvent);
+        session.DomainEvents.OfType<TransferPausedDomainEvent>().Single().OccurredOnUtc.Should().Be(expectedPauseTime);
 
-        // Act 2: Resume
-        DomainResult resumeResult = session.Resume();
+        _clock.Advance(TimeSpan.FromMinutes(2));
+        DateTimeOffset expectedResumeTime = _clock.UtcNow;
+        DomainResult resumeResult = session.Resume(_clock);
         resumeResult.IsSuccess.Should().BeTrue();
         session.State.Should().Be(TransferSessionState.InFlight);
-        session.DomainEvents.Should().ContainSingle(e => e is TransferResumedDomainEvent);
+        session.DomainEvents.OfType<TransferResumedDomainEvent>().Single().OccurredOnUtc.Should().Be(expectedResumeTime);
+
+        // Act 2: Complete required file (Chunk 0) -> session enters Seeding, then Pause -> Resume restores Seeding
+        byte[] chunk0Data = new byte[1024 * 1024];
+        BitConverter.GetBytes(0).CopyTo(chunk0Data, 0);
+        session.VerifyAndRecordChunk(ChunkIndex.FromInt(0), PlaintextChunkData.FromBytes(chunk0Data), _clock);
+        session.State.Should().Be(TransferSessionState.Seeding);
+
+        session.Pause(_clock).IsSuccess.Should().BeTrue();
+        session.State.Should().Be(TransferSessionState.Paused);
+
+        session.Resume(_clock).IsSuccess.Should().BeTrue();
+        session.State.Should().Be(TransferSessionState.Seeding);
     }
 
     [Test]
@@ -174,7 +189,7 @@ public sealed class LifecycleTests
             null);
 
         // Act: Pause is only valid from InFlight, Seeding, Stalled
-        DomainResult result = session.Pause();
+        DomainResult result = session.Pause(_clock);
 
         // Assert
         result.IsSuccess.Should().BeFalse();
@@ -197,42 +212,56 @@ public sealed class LifecycleTests
             SelectedFileIndices.All(_manifest.TotalFiles),
             SeedRatio.Zero,
             TotalBundleBytes.FromBytes(0),
-            [],
+            [new SwarmMember(_recipientId, Bitfield.Empty(_manifest.TotalChunks))],
             _clock.UtcNow,
             terminalState == TransferSessionState.Completed ? _clock.UtcNow : null);
 
         int initialEventsCount = session.DomainEvents.Count;
 
-        // Act & Assert
-        session.Pause().IsSuccess.Should().BeFalse();
-        session.Resume().IsSuccess.Should().BeFalse();
+        // Act & Assert: All lifecycle & swarm mutations must be rejected in terminal state
+        session.Pause(_clock).IsSuccess.Should().BeFalse();
+        session.Resume(_clock).IsSuccess.Should().BeFalse();
         session.Cancel(TransferTerminationReason.UserDeclined, _clock).IsSuccess.Should().BeFalse();
         session.MarkFailed(TransferTerminationReason.VerificationFailed, _clock).IsSuccess.Should().BeFalse();
-        
+        session.RegisterSwarmMember(_recipientId, Bitfield.Empty(_manifest.TotalChunks), _clock).IsSuccess.Should().BeFalse();
+        session.RecordPeerBitfield(_recipientId, Bitfield.Full(_manifest.TotalChunks)).IsSuccess.Should().BeFalse();
+        session.RecordPeerHave(_recipientId, ChunkIndex.FromInt(0)).IsSuccess.Should().BeFalse();
+        session.SetWeChokingPeer(_recipientId, PeerChokeStatus.Unchoked).IsSuccess.Should().BeFalse();
+        session.RecordUploadedBytes(TransferByteLength.FromBytes(1024), _clock).IsSuccess.Should().BeFalse();
+
         session.State.Should().Be(terminalState);
         session.DomainEvents.Count.Should().Be(initialEventsCount);
     }
 
     [Test]
-    public void DT_LIF_08_StalledStateDetectionAndEventEmission()
+    public void DT_LIF_08_StalledStateDetectionAndAutomaticRecovery_WhenPeerAnnouncesRequiredPiece()
     {
-        // Arrange
-        TransferSession session = TransferSession.CreateOutgoing1to1(
+        // Arrange: Recipient selects ONLY File 1 (Chunk 1)
+        TransferSession session = TransferSession.CreateIncomingStaged(
             TransferSessionId.New(),
             _initiatorId,
-            _recipientId,
             _manifest,
             SeedRatio.Zero,
             _clock);
-        session.RecordPeerAcceptance(_recipientId, Bitfield.Empty(_manifest.TotalChunks), _clock);
-        session.State.Should().Be(TransferSessionState.InFlight);
 
-        // Act
-        DomainResult result = session.MarkStalled(_clock);
+        SelectedFileIndices file1Only = SelectedFileIndices.FromIndices([FileIndex.FromInt(1)], _manifest.TotalFiles);
+        session.AcceptTransfer(file1Only, _clock);
+        session.RegisterSwarmMember(_initiatorId, Bitfield.Empty(_manifest.TotalChunks), _clock);
 
-        // Assert
-        result.IsSuccess.Should().BeTrue();
+        // Act 1: Mark stalled
+        DomainResult stallResult = session.MarkStalled(_clock);
+        stallResult.IsSuccess.Should().BeTrue();
         session.State.Should().Be(TransferSessionState.Stalled);
         session.DomainEvents.Should().ContainSingle(e => e is TransferStalledDomainEvent);
+
+        // Act 2: Peer announces Chunk 0 (not required because recipient only selected File 1) -> remains Stalled
+        session.RecordPeerHave(_initiatorId, ChunkIndex.FromInt(0)).IsSuccess.Should().BeTrue();
+        session.State.Should().Be(TransferSessionState.Stalled);
+        session.SwarmMembers.Single().WeInterestedInPeer.Should().Be(PeerInterestStatus.NotInterested);
+
+        // Act 3: Peer announces Chunk 1 (required!) -> automatically recovers from Stalled to InFlight and marks Interested
+        session.RecordPeerHave(_initiatorId, ChunkIndex.FromInt(1)).IsSuccess.Should().BeTrue();
+        session.State.Should().Be(TransferSessionState.InFlight);
+        session.SwarmMembers.Single().WeInterestedInPeer.Should().Be(PeerInterestStatus.Interested);
     }
 }

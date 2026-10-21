@@ -1,8 +1,7 @@
 using Percolator.Apps.FileTransfer.Domain.Common;
-using Percolator.Apps.FileTransfer.Domain.SwarmCoordination;
 using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
 
-namespace Percolator.Apps.FileTransfer.Features.SwarmCoordination;
+namespace Percolator.Apps.FileTransfer.Domain.SwarmCoordination;
 
 public static class RarestFirstChunkSelector
 {
@@ -12,6 +11,11 @@ public static class RarestFirstChunkSelector
         IReadOnlyCollection<SwarmMember> swarmMembers,
         IReadOnlySet<ChunkIndex> inFlightChunks)
     {
+        ArgumentNullException.ThrowIfNull(localBitfield);
+        ArgumentNullException.ThrowIfNull(requiredMask);
+        ArgumentNullException.ThrowIfNull(swarmMembers);
+        ArgumentNullException.ThrowIfNull(inFlightChunks);
+
         Bitfield missingChunks = requiredMask.Difference(localBitfield);
         if (missingChunks.IsEmpty) return null;
 

@@ -51,4 +51,21 @@ public sealed record SelectedFileIndices
 
         return new SelectedFileIndices(set);
     }
+
+    public bool Equals(SelectedFileIndices? other)
+    {
+        if (other is null) return false;
+        if (ReferenceEquals(this, other)) return true;
+        return _indices.SetEquals(other._indices);
+    }
+
+    public override int GetHashCode()
+    {
+        int hash = 0;
+        foreach (FileIndex index in _indices)
+        {
+            hash ^= index.GetHashCode();
+        }
+        return HashCode.Combine(_indices.Count, hash);
+    }
 }
