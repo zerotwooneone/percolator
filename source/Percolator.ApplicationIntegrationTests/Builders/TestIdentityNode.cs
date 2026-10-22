@@ -1,0 +1,347 @@
+using Percolator.Application2.Delivery;
+using Percolator.Application2.Delivery.Ports;
+using Percolator.Application2.Egress;
+using Percolator.Application2.Handshake;
+using Percolator.Application2.Ingress;
+using Percolator.Application2.Ports;
+using Percolator.Application2.Profiles;
+using Percolator.Application2.Services;
+using Percolator.Application2IntegrationTests.Adapters;
+using Percolator.Application2IntegrationTests.Adapters.Queries;
+using Percolator.Application2IntegrationTests.Infrastructure;
+using Percolator.Apps.Chat.Features.GroupInvitations;
+using Percolator.Apps.Chat.Features.Messaging;
+using Percolator.Apps.Chat.Ingress;
+using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
+using Percolator.Domain.Channels.Model;
+using Percolator.Domain.Channels.Ports;
+using Percolator.Domain.Channels.ValueObjects;
+using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.ValueObjects;
+using Percolator.Domain.Identities.Model;
+using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Domain.Security;
+using Percolator.Domain.Security.Model;
+using Percolator.Domain.Security.Ports;
+using Percolator.Domain.Security.ValueObjects;
+using Percolator.PluginSdk;
+
+namespace Percolator.Application2IntegrationTests.Builders;
+
+public sealed class TestIdentityNode
+{
+    public string Name { get; }
+    public EndpointPort Port { get; }
+    public DirectEndpointCandidate LocalEndpointCandidate { get; }
+    public PublicIdentityId IdentityId { get; }
+    public DeviceId DeviceId { get; } = DeviceId.Primary;
+
+    public IdentityKey IdentityPublicKey { get; }
+    public EphemeralPrivateKey IdentityPrivateKey { get; }
+
+    public DhPublicKey SignedPreKeyPublic { get; }
+    public EphemeralPrivateKey SignedPreKeyPrivate { get; }
+    public DeviceLinkProof SignedPreKeySignature { get; }
+
+    public BlindedRoutingToken MailboxRoutingToken { get; }
+    public DeliveryToken MailboxDeliveryToken { get; }
+    public DeliveryToken MailboxDrainToken { get; }
+
+    public IDateTimeProvider TimeProvider { get; }
+    public ICryptoEngine CryptoEngine { get; }
+
+    // Driving Ports
+    public IChatService ChatService { get; }
+    public IHandshakeService HandshakeService { get; }
+    public IContactRequestCoordinator ContactRequestCoordinator { get; }
+    public OutboxWorker OutboxWorker { get; }
+    public InboundIngressPipeline IngressPipeline { get; }
+    public IStreamRegistry StreamRegistry { get; }
+    public ITransportDispatcher TransportDispatcher { get; }
+
+    // CQRS Query Ports
+    public IChatMessageQueryService ChatQueries { get; }
+    public IConversationListQueryService ConversationQueries { get; }
+    public IOutboxQueryService OutboxQueries { get; }
+    public IPeerContactQueryService ContactQueries { get; }
+    public IGroupInvitationQueryService GroupInvitationQueries { get; }
+
+    // Encapsulated Stores & Adapters (Strict Encapsulation: Hidden from tests)
+    private readonly InMemoryChatMessageRepository _chatRepo;
+    private readonly InMemoryChannelRepository _channelRepo;
+    private readonly InMemoryOutboxRepository _outboxRepo;
+    private readonly InMemoryPeerContactRepository _contactRepo;
+    private readonly InMemoryRatchetSessionRepository _sessionRepo;
+    private readonly InMemoryPendingHandshakeRepository _pendingHandshakeRepo;
+    private readonly InMemoryLocalIdentityKeyStore _identityKeyStore;
+    private readonly InMemoryPrivatePreKeyStore _preKeyStore;
+    private readonly InMemoryGroupSenderKeyRepository _groupSenderKeyRepo;
+    private readonly InMemoryGroupReceiverSessionRepository _groupReceiverSessionRepo;
+    private readonly InMemoryGroupInvitationRepository _groupInvitationRepo;
+    private readonly InMemoryIngressFilterService _ingressFilterService;
+
+    private readonly SealedEnvelopeUnwrapper _envelopeUnwrapper;
+    private readonly InMemoryLoopbackNetworkSwitch _networkSwitch;
+
+    public TestIdentityNode(
+        string name,
+        EndpointPort port,
+        InMemoryLoopbackNetworkSwitch networkSwitch,
+        ScenarioCryptoEngine? cryptoEngine = null,
+        IDateTimeProvider? timeProvider = null)
+    {
+        Name = name;
+        Port = port;
+        _networkSwitch = networkSwitch ?? throw new ArgumentNullException(nameof(networkSwitch));
+        CryptoEngine = cryptoEngine ?? new ScenarioCryptoEngine();
+        TimeProvider = timeProvider ?? new TestDateTimeProvider();
+
+        IdentityId = PublicIdentityId.New();
+        LocalEndpointCandidate = new DirectEndpointCandidate(
+            EndpointHost.Parse("localhost"),
+            PortNumber.FromInt(Port.Value),
+            DirectCandidateKind.DirectLan);
+
+        // Generate Identity KeyPair
+        var (ikPriv, ikPub) = CryptoEngine.GenerateEphemeralKeyPair();
+        IdentityPrivateKey = ikPriv;
+        IdentityPublicKey = IdentityKey.FromSpan(ikPub.Span);
+
+        // Generate Signed PreKey & Sign with Identity Private Key
+        var (spkPriv, spkPub) = CryptoEngine.GenerateEphemeralKeyPair();
+        SignedPreKeyPrivate = spkPriv;
+        SignedPreKeyPublic = spkPub;
+        var sigBytes = CryptoEngine.SignEd25519(IdentityPrivateKey.Span, SignedPreKeyPublic.Span);
+        SignedPreKeySignature = DeviceLinkProof.FromSpan(sigBytes);
+
+        // Generate Blinded Routing Tokens
+        MailboxRoutingToken = BlindedRoutingToken.New();
+
+        var deliveryBytes = new byte[32];
+        var drainBytes = new byte[32];
+        Random.Shared.NextBytes(deliveryBytes);
+        Random.Shared.NextBytes(drainBytes);
+        MailboxDeliveryToken = DeliveryToken.FromSpan(deliveryBytes);
+        MailboxDrainToken = DeliveryToken.FromSpan(drainBytes);
+
+        // Initialize Stores
+        _chatRepo = new InMemoryChatMessageRepository();
+        _channelRepo = new InMemoryChannelRepository();
+        _outboxRepo = new InMemoryOutboxRepository();
+        _contactRepo = new InMemoryPeerContactRepository();
+        _sessionRepo = new InMemoryRatchetSessionRepository();
+        _pendingHandshakeRepo = new InMemoryPendingHandshakeRepository();
+        _identityKeyStore = new InMemoryLocalIdentityKeyStore();
+        _preKeyStore = new InMemoryPrivatePreKeyStore();
+        _groupSenderKeyRepo = new InMemoryGroupSenderKeyRepository();
+        _groupReceiverSessionRepo = new InMemoryGroupReceiverSessionRepository();
+        _groupInvitationRepo = new InMemoryGroupInvitationRepository();
+        _ingressFilterService = new InMemoryIngressFilterService();
+
+        // Populate local key stores
+        _identityKeyStore.RegisterKey(IdentityId, IdentityPrivateKey.Span.ToArray(), IdentityPublicKey);
+        _preKeyStore.StoreSignedPreKeyPrivateAsync(IdentityId, DeviceId, SignedPreKeyPrivate).GetAwaiter().GetResult();
+
+        // Wire packing & unwrapping
+        var wirePacker = new DefaultSessionWirePacker();
+        _envelopeUnwrapper = new SealedEnvelopeUnwrapper(wirePacker, IdentityId, TimeProvider);
+
+        // Networking adapters
+        StreamRegistry = new LoopbackStreamRegistry(IdentityId, DeviceId, _networkSwitch, _channelRepo);
+        TransportDispatcher = new LoopbackTransportDispatcher(_networkSwitch);
+
+        // Egress & Locks
+        var channelLockService = new KeyedSemaphoreLockService();
+        var egressPipeline = new OutboundEgressPipeline(
+            _sessionRepo,
+            _groupSenderKeyRepo,
+            wirePacker,
+            CryptoEngine,
+            _outboxRepo,
+            StreamRegistry,
+            TimeProvider,
+            channelLockService);
+
+        // Application Routing & Ingress
+        var appRouter = new AppRouter();
+        var serializer = new TestPayloadSerializer();
+        var chatHandler = new ChatPayloadHandler(
+            _chatRepo,
+            _channelRepo,
+            _groupInvitationRepo,
+            serializer,
+            TimeProvider);
+        appRouter.RegisterHandler(chatHandler);
+
+        // Driving Services
+        ChatService = new ChatService(
+            _chatRepo,
+            _channelRepo,
+            egressPipeline,
+            serializer,
+            TimeProvider);
+
+        ContactRequestCoordinator = new ContactRequestCoordinator(
+            _contactRepo,
+            TimeProvider);
+
+        var replayFilter = new MemoryHandshakeReplayFilter();
+        HandshakeService = new HandshakeService(
+            _identityKeyStore,
+            _preKeyStore,
+            _contactRepo,
+            ContactRequestCoordinator,
+            _sessionRepo,
+            _pendingHandshakeRepo,
+            replayFilter,
+            _outboxRepo,
+            CryptoEngine,
+            TimeProvider,
+            appRouter,
+            wirePacker,
+            routingCoordinator: null);
+
+        IngressPipeline = new InboundIngressPipeline(
+            _ingressFilterService,
+            _sessionRepo,
+            _groupReceiverSessionRepo,
+            HandshakeService,
+            CryptoEngine,
+            appRouter,
+            channelLockService);
+
+        OutboxWorker = new OutboxWorker(
+            _outboxRepo,
+            TransportDispatcher,
+            TimeProvider);
+
+        // CQRS Query Ports
+        ChatQueries = new InMemoryChatMessageQueryService(_chatRepo);
+        ConversationQueries = new InMemoryConversationListQueryService(_channelRepo, _chatRepo, _contactRepo);
+        OutboxQueries = new InMemoryOutboxQueryService(_outboxRepo);
+        ContactQueries = new InMemoryPeerContactQueryService(_contactRepo);
+        GroupInvitationQueries = new InMemoryGroupInvitationQueryService(_groupInvitationRepo, IdentityId);
+
+        // Register on network switch
+        _networkSwitch.RegisterNode(Port, IdentityId, ReceiveWireBytesAsync);
+    }
+
+    public InvitationLink CreateInvitationLink()
+    {
+        return new InvitationLink("localhost", Port.Value, Convert.ToHexString(IdentityPublicKey.Span));
+    }
+
+    public PreKeyBundle CreatePreKeyBundle(uint? oneTimeKeyId = null)
+    {
+        DhPublicKey? opk = null;
+        uint opkId = 0;
+        if (oneTimeKeyId.HasValue)
+        {
+            var (opkPriv, opkPub) = CryptoEngine.GenerateEphemeralKeyPair();
+            opk = opkPub;
+            opkId = oneTimeKeyId.Value;
+            _preKeyStore.StoreOneTimePreKeysPrivateAsync(IdentityId, DeviceId, [(opkId, opkPriv)]).GetAwaiter().GetResult();
+        }
+
+        return new PreKeyBundle(
+            IdentityId,
+            DeviceId,
+            IdentityPublicKey,
+            SignedPreKeyPublic,
+            SignedPreKeySignature,
+            opk,
+            opkId);
+    }
+
+    public async Task ReceiveWireBytesAsync(ReadOnlyMemory<byte> frameBytes)
+    {
+        var unwrapResult = _envelopeUnwrapper.UnwrapFrame(frameBytes, IdentityId, TimeProvider.UtcNow);
+        if (unwrapResult.IsSuccess)
+        {
+            await IngressPipeline.ProcessInboundAsync(unwrapResult.Value!).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Helper to bootstrap an active 1:1 Double Ratchet session, shared DirectChannel,
+    /// mutual verified contact, and direct loopback stream connection between this node and a peer.
+    /// </summary>
+    public async Task<ChannelId> EstablishDirectSessionWithAsync(TestIdentityNode peer)
+    {
+        var channelId = ChannelId.New();
+
+        // 1. Mutual Contacts
+        var myContactOfPeer = new PeerContact(
+            IdentityId,
+            peer.IdentityId,
+            ContactNickname.Create(peer.Name, peer.IdentityId),
+            PeerTrustLevel.Verified,
+            TimeProvider.UtcNow,
+            peer.IdentityPublicKey,
+            ContactState.Active);
+
+        var peerContactOfMe = new PeerContact(
+            peer.IdentityId,
+            IdentityId,
+            ContactNickname.Create(Name, IdentityId),
+            PeerTrustLevel.Verified,
+            TimeProvider.UtcNow,
+            IdentityPublicKey,
+            ContactState.Active);
+
+        await _contactRepo.SaveAsync(myContactOfPeer).ConfigureAwait(false);
+        await peer.SaveDirectContactInternalAsync(peerContactOfMe).ConfigureAwait(false);
+
+        // 2. Mutual Direct Channels
+        var myChannel = DirectChannel.Create(channelId, IdentityId, peer.IdentityId, TimeProvider).Value!;
+        var peerChannel = DirectChannel.Create(channelId, peer.IdentityId, IdentityId, TimeProvider).Value!;
+        await _channelRepo.SaveDirectAsync(myChannel).ConfigureAwait(false);
+        await peer.SaveDirectChannelInternalAsync(peerChannel).ConfigureAwait(false);
+
+        // 3. Mutual X3DH / Double Ratchet Session
+        var peerBundle = peer.CreatePreKeyBundle();
+        var initiatorResult = X3dhAgreement.Initiate(
+            IdentityPrivateKey.Span,
+            IdentityPublicKey,
+            peerBundle,
+            CryptoEngine).Value!;
+
+        var initiatorSession = DirectRatchetSession.CreateFromX3dhInitiator(
+            IdentityId,
+            DeviceId,
+            peer.IdentityId,
+            peer.DeviceId,
+            initiatorResult,
+            peerBundle.SignedPreKey,
+            CryptoEngine).Value!;
+
+        var responderMasterSecret = X3dhAgreement.Receive(
+            peer.IdentityPrivateKey.Span,
+            peer.SignedPreKeyPrivate.Span,
+            ReadOnlySpan<byte>.Empty,
+            IdentityPublicKey,
+            initiatorResult.EphemeralPublicKey,
+            CryptoEngine).Value!;
+
+        var responderSession = DirectRatchetSession.CreateFromX3dhResponder(
+            peer.IdentityId,
+            peer.DeviceId,
+            IdentityId,
+            DeviceId,
+            responderMasterSecret,
+            initiatorResult.EphemeralPublicKey,
+            CryptoEngine).Value!;
+
+        await _sessionRepo.SaveSessionAsync(initiatorSession).ConfigureAwait(false);
+        await peer.SaveRatchetSessionInternalAsync(responderSession).ConfigureAwait(false);
+
+        // 4. Open Direct Stream on Loopback Switch
+        _networkSwitch.OpenDirectStream(Port, peer.Port);
+
+        return channelId;
+    }
+
+    internal Task SaveDirectContactInternalAsync(PeerContact contact) => _contactRepo.SaveAsync(contact);
+    internal Task SaveDirectChannelInternalAsync(DirectChannel channel) => _channelRepo.SaveDirectAsync(channel);
+    internal Task SaveRatchetSessionInternalAsync(DirectRatchetSession session) => _sessionRepo.SaveSessionAsync(session);
+}

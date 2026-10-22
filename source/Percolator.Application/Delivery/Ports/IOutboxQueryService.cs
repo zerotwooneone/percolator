@@ -20,4 +20,5 @@ public interface IOutboxQueryService
     Task<IReadOnlyList<OutboxJobSummaryReadModel>> GetPendingJobsAsync(int limit = 50, CancellationToken ct = default);
     Task<IReadOnlyList<OutboxJobSummaryReadModel>> GetFailedJobsAsync(int limit = 50, CancellationToken ct = default);
     Task<OutboxJobSummaryReadModel?> GetJobSummaryByIdAsync(Guid jobId, CancellationToken ct = default);
+    Task<IReadOnlyList<OutboxJobSummaryReadModel>> GetJobsForOwnerAsync(PublicIdentityId ownerId, CancellationToken ct = default);
 }

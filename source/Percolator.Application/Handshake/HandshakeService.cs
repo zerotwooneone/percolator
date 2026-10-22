@@ -4,6 +4,7 @@ using Percolator.Application2.Delivery.Ports;
 using Percolator.Application2.Ingress;
 using Percolator.Application2.Ports;
 using Percolator.Application2.Profiles;
+using Percolator.Application2.Routing;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.Model;
@@ -31,6 +32,8 @@ public sealed class HandshakeService : IHandshakeService
     private readonly ICryptoEngine _cryptoEngine;
     private readonly IDateTimeProvider _timeProvider;
     private readonly IAppRouter _appRouter;
+    private readonly ISessionWirePacker? _wirePacker;
+    private readonly IRoutingCoordinator? _routingCoordinator;
 
     public HandshakeService(
         ILocalIdentityKeyStore identityKeyStore,
@@ -43,7 +46,9 @@ public sealed class HandshakeService : IHandshakeService
         IOutboxRepository outboxRepo,
         ICryptoEngine cryptoEngine,
         IDateTimeProvider timeProvider,
-        IAppRouter appRouter)
+        IAppRouter appRouter,
+        ISessionWirePacker? wirePacker = null,
+        IRoutingCoordinator? routingCoordinator = null)
     {
         _identityKeyStore = identityKeyStore ?? throw new ArgumentNullException(nameof(identityKeyStore));
         _preKeyStore = preKeyStore ?? throw new ArgumentNullException(nameof(preKeyStore));
@@ -56,6 +61,8 @@ public sealed class HandshakeService : IHandshakeService
         _cryptoEngine = cryptoEngine ?? throw new ArgumentNullException(nameof(cryptoEngine));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _appRouter = appRouter ?? throw new ArgumentNullException(nameof(appRouter));
+        _wirePacker = wirePacker;
+        _routingCoordinator = routingCoordinator;
     }
 
     public async ValueTask<DomainResult<DirectRatchetSession>> InitiateHandshakeAsync(
@@ -137,14 +144,44 @@ public sealed class HandshakeService : IHandshakeService
         await _sessionRepo.SaveSessionAsync(session, ct);
 
         // Assemble handshake outbox package
-        var handshakePackage = new byte[32 + (encryptedInitialPayload?.Length ?? 0)];
-        initiatorResult.EphemeralPublicKey.Span.CopyTo(handshakePackage.AsSpan(0, 32));
-        if (encryptedInitialPayload != null)
+        byte[] handshakePackage;
+        uint signedPreKeyId = 1;
+        uint? oneTimePreKeyId = remoteBundle.OneTimePreKey != null ? remoteBundle.OneTimePreKeyId : null;
+
+        var header = new HandshakeHeader(
+            ownerPublicKey,
+            initiatorResult.EphemeralPublicKey,
+            signedPreKeyId,
+            oneTimePreKeyId);
+
+        if (_wirePacker != null)
         {
-            Buffer.BlockCopy(encryptedInitialPayload, 0, handshakePackage, 32, encryptedInitialPayload.Length);
+            var packed = _wirePacker.PackHandshakeMessage(header, encryptedInitialPayload ?? ReadOnlyMemory<byte>.Empty);
+            handshakePackage = packed.ToArray();
+        }
+        else
+        {
+            handshakePackage = new byte[32 + (encryptedInitialPayload?.Length ?? 0)];
+            initiatorResult.EphemeralPublicKey.Span.CopyTo(handshakePackage.AsSpan(0, 32));
+            if (encryptedInitialPayload != null)
+            {
+                Buffer.BlockCopy(encryptedInitialPayload, 0, handshakePackage, 32, encryptedInitialPayload.Length);
+            }
         }
 
         var route = new DeliveryRoute(DeliveryRouteType.DirectP2P, null, null);
+        if (_routingCoordinator != null)
+        {
+            var routeResult = await _routingCoordinator.ResolveRouteAsync(remoteBundle.IdentityId, ct);
+            if (routeResult.IsSuccess)
+            {
+                var resolved = routeResult.Value;
+                route = resolved.Mode == DeliveryRoutingMode.RelayMailbox
+                    ? new DeliveryRoute(DeliveryRouteType.RelayedOneToOne, null, null)
+                    : new DeliveryRoute(DeliveryRouteType.DirectP2P, null, null);
+            }
+        }
+
         var jobResult = OutboxJob.Create(
             ChannelId.New(),
             ownerId,
