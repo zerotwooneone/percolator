@@ -1,0 +1,185 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Percolator.Desktop.Features.IdentityGate.ViewModels"
+        xmlns:models="using:Percolator.Desktop.Features.IdentityGate.Models"
+        xmlns:controls="using:Percolator.Desktop.Common.Controls"
+        xmlns:ui="using:FluentAvalonia.UI.Controls"
+        x:Class="Percolator.Desktop.Features.IdentityGate.Views.IdentityGateWindow"
+        x:DataType="vm:IdentityGateViewModel"
+        Title="Percolator - Identity Gatekeeper"
+        Width="780" Height="620"
+        MinWidth="600" MinHeight="500"
+        WindowStartupLocation="CenterScreen">
+
+    <Grid RowDefinitions="Auto,*,Auto">
+        <!-- Top Stealth Header Banner -->
+        <Border Grid.Row="0"
+                Background="{DynamicResource LayerOnAcrylicFillColorDefaultBrush}"
+                BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                BorderThickness="0,0,0,1"
+                Padding="24,20">
+            <Grid ColumnDefinitions="Auto,*">
+                <Border Width="48" Height="48"
+                        CornerRadius="24"
+                        Background="{DynamicResource AccentFillColorDefaultBrush}"
+                        Margin="0,0,16,0"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center">
+                    <controls:NerdIcon GlyphType="Shield"
+                                       FontSize="22"
+                                       Foreground="White"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center" />
+                </Border>
+
+                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="4">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="Identity Gatekeeper"
+                                   Theme="{StaticResource SubtitleTextBlockStyle}" />
+                        <controls:StatusChip Text="Stealth Mode: Unbound"
+                                             Variant="Warning"
+                                             IconGlyph="CloudLock" />
+                    </StackPanel>
+                    <TextBlock Text="Total network stealth active. Zero listening ports or probes until you confirm your identity."
+                               Theme="{StaticResource CaptionTextBlockStyle}"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Main Body: Identities List -->
+        <Grid Grid.Row="1" Margin="24,16">
+            <Grid RowDefinitions="Auto,*">
+                <TextBlock Grid.Row="0"
+                           Text="Local Cryptographic Identities"
+                           Theme="{StaticResource BodyStrongTextBlockStyle}"
+                           Margin="0,0,0,8" />
+
+                <!-- Empty State Message -->
+                <TextBlock Grid.Row="1"
+                           Text="No local identities found. Create your first cryptographic identity below."
+                           Theme="{StaticResource BodyTextBlockStyle}"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"
+                           IsVisible="{Binding !Identities.Count}" />
+
+                <!-- List of Identities -->
+                <ScrollViewer Grid.Row="1" IsVisible="{Binding !!Identities.Count}">
+                    <ItemsControl ItemsSource="{Binding Identities}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="models:SelectableIdentityModel">
+                                <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="8"
+                                        Padding="14,12"
+                                        Margin="0,0,0,8">
+                                    <Grid ColumnDefinitions="Auto,Auto,*,Auto">
+                                        <!-- Selection Checkbox -->
+                                        <CheckBox Grid.Column="0"
+                                                  IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                                  VerticalAlignment="Center"
+                                                  Margin="0,0,12,0" />
+
+                                        <!-- Peer Avatar -->
+                                        <controls:PeerAvatar Grid.Column="1"
+                                                             DisplayName="{Binding DisplayName}"
+                                                             IdentityKeyHex="{Binding PublicKeyHex}"
+                                                             ShowPresence="False"
+                                                             AvatarSize="38"
+                                                             Margin="0,0,12,0" />
+
+                                        <!-- Name & Public Key Hex -->
+                                        <StackPanel Grid.Column="2" VerticalAlignment="Center" Spacing="2">
+                                            <TextBlock Text="{Binding DisplayName}"
+                                                       Theme="{StaticResource BodyStrongTextBlockStyle}" />
+                                            <TextBlock Text="{Binding PublicKeyHex}"
+                                                       FontFamily="Consolas, monospace"
+                                                       FontSize="11"
+                                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                                       TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+
+                                        <!-- Status Chip -->
+                                        <controls:StatusChip Grid.Column="3"
+                                                             Text="Ed25519"
+                                                             Variant="Normal"
+                                                             IconGlyph="Key"
+                                                             VerticalAlignment="Center" />
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Grid>
+        </Grid>
+
+        <!-- Bottom Actions & Error Banner -->
+        <Border Grid.Row="2"
+                Background="{DynamicResource LayerOnAcrylicFillColorDefaultBrush}"
+                BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                BorderThickness="0,1,0,0"
+                Padding="24,16">
+            <Grid RowDefinitions="Auto,Auto">
+                <!-- Error Banner -->
+                <Border Grid.Row="0"
+                        Background="#33FF0000"
+                        BorderBrush="#88FF0000"
+                        BorderThickness="1"
+                        CornerRadius="6"
+                        Padding="12,8"
+                        Margin="0,0,0,12"
+                        IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                    <TextBlock Text="{Binding ErrorMessage}"
+                               Foreground="#FFFF8888"
+                               Theme="{StaticResource CaptionTextBlockStyle}" />
+                </Border>
+
+                <!-- Actions Bar -->
+                <Grid Grid.Row="1" ColumnDefinitions="Auto,*,Auto">
+                    <Button Grid.Column="0"
+                            Content="Create New Identity"
+                            Command="{Binding OpenCreateIdentityDialogCommand}" />
+
+                    <Button Grid.Column="2"
+                            Content="Activate Network &amp; Enter Shell"
+                            Classes="accent"
+                            Command="{Binding ActivateSessionCommand}" />
+                </Grid>
+            </Grid>
+        </Border>
+
+        <!-- Inline Create Identity Modal Overlay -->
+        <Border Grid.Row="0" Grid.RowSpan="3"
+                Background="#88000000"
+                IsVisible="{Binding IsCreateDialogOpen}">
+            <Border Background="{DynamicResource SolidBackgroundFillColorBaseBrush}"
+                    BorderBrush="{DynamicResource SurfaceStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Width="400"
+                    Padding="24"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center">
+                <StackPanel Spacing="16">
+                    <TextBlock Text="Create Cryptographic Identity"
+                               Theme="{StaticResource SubtitleTextBlockStyle}" />
+
+                    <TextBlock Text="Generates a local Ed25519 identity keypair and X3DH prekey material."
+                               Theme="{StaticResource CaptionTextBlockStyle}"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+                    <TextBox Watermark="Identity Display Name (e.g. Alice)"
+                             Text="{Binding NewDisplayName, Mode=TwoWay}" />
+
+                    <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right">
+                        <Button Content="Cancel" Command="{Binding CancelCreateIdentityCommand}" />
+                        <Button Content="Create" Classes="accent" Command="{Binding ConfirmCreateIdentityCommand}" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Border>
+    </Grid>
+</Window>

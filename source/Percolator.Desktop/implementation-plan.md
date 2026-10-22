@@ -204,46 +204,25 @@ Percolator.Desktop/
 ├── Assets/                        # Platform icons, branding
 │   └── Fonts/                     # FiraCodeNerdFontMono-Regular.ttf
 ├── Common/
-│   ├── Behaviors/                 # BadgeAttachedBehavior.cs (notification badges & pulse)
-│   ├── Controls/                  # NerdIcon.cs, NerdIconSource.cs, PeerAvatar.axaml, StatusChip.axaml
-│   ├── Converters/                # Value converters (AvatarColorConverter, StatusColor, RelativeTime)
-│   ├── Extensions/                # R3 and Avalonia binding extensions
+│   ├── Behaviors/                 # Badge.cs (attached properties for count & pulse)
+│   ├── Controls/                  # NerdGlyph.cs, NerdIcon.cs, NerdIconSource.cs, PeerAvatar.axaml, StatusChip.axaml
+│   ├── Converters/                # Value converters (IdentityHashToBrushConverter)
 │   ├── Navigation/                # INavigationService.cs, NavigationService.cs
-│   ├── Services/                  # DialogService, NetworkStealthGate
+│   ├── Services/                  # NetworkStealthGate, DesktopIdentityProfileRepository, DesktopLocalIdentityKeyStore
 │   └── Windowing/                 # IWindowManager.cs, WindowManager.cs (child-scoped window lifecycle)
 ├── Features/
 │   ├── IdentityGate/              # Privacy Gatekeeper: First screen before any network activation
-│   │   ├── IdentityGateViewModel.cs
-│   │   ├── IdentityGateView.axaml
-│   │   └── IdentityCreationDialog.axaml
+│   │   ├── Models/                # SelectableIdentityModel.cs
+│   │   ├── ViewModels/            # IdentityGateViewModel.cs, CreateIdentityDialogViewModel.cs
+│   │   └── Views/                 # IdentityGateWindow.axaml, CreateIdentityDialog.axaml
 │   ├── Shell/                     # Main app shell (loaded only after identity is activated)
-│   │   ├── ShellViewModel.cs
-│   │   └── ShellView.axaml
+│   │   ├── ViewModels/            # ShellViewModel.cs
+│   │   └── Views/                 # ShellView.axaml
 │   ├── Chat/                      # Direct Messaging & Group Channels
-│   │   ├── Controls/              # ChatComposer.axaml (auto-expand, keyboard send behavior)
-│   │   ├── State/                 # ChatStateService, ChatReloadCoordinator.cs
-│   │   ├── Models/                # ChatMessageModel, ChatMessageSnapshot (UI-only)
-│   │   ├── ViewModels/            # ChatViewModel, ChatMessageViewModel
-│   │   └── Views/                 # ChatView.axaml, MessageBubbleView.axaml
 │   ├── Sessions/                  # Session routing, connection management, LRU scopes
-│   │   ├── Scopes/                # ISessionScopeFactory.cs, SessionScopeFactory.cs (LRU cache)
-│   │   ├── Dialogs/               # ConnectionManagementDialogView.axaml, ConnectionManagementDialogViewModel.cs
-│   │   ├── Menus/                 # PendingHandshakesMenuView.axaml, PendingHandshakesMenuViewModel.cs
-│   │   ├── State/                 # PeerConnectionStateService.cs, PeerConnectionReloadCoordinator.cs
-│   │   └── ViewModels/            # SessionSidebarViewModel.cs, PeerConnectionListItemViewModel.cs
 │   ├── Discovery/                 # Peer Discovery & Swarm Inspector
-│   │   ├── State/                 # DiscoveryStateService
-│   │   ├── Models/                # PeerNodeModel (UI-only)
-│   │   ├── ViewModels/            # DiscoveryViewModel, PeerNodeItemViewModel
-│   │   └── Views/                 # DiscoveryView.axaml
 │   ├── FileTransfer/              # P2P Swarm File Sharing
-│   │   ├── State/                 # FileTransferStateService
-│   │   ├── Models/                # TransferProgressModel (UI-only)
-│   │   ├── ViewModels/            # FileTransferViewModel, TransferItemViewModel
-│   │   └── Views/                 # FileTransferView.axaml, BitfieldProgressControl.axaml
 │   └── Settings/                  # Identity, Network, and Theme settings
-│       ├── ViewModels/            # SettingsViewModel, IdentityProfileViewModel
-│       └── Views/                 # SettingsView.axaml
 ├── ViewModels/
 │   ├── ViewModelBase.cs           # ObservableObject + DisposableBag base
 │   └── MainWindowViewModel.cs     # Shell window view model
@@ -263,21 +242,21 @@ Percolator.Desktop/
 ### Milestone 1: Stealth Mode Startup, Identity Gatekeeper & Shell Lifecycle (Sprint 1)
 - [x] Scaffold `Percolator.Desktop` with Avalonia, FluentAvalonia, CommunityToolkit.Mvvm, R3, ObservableCollections.
 - [x] Configure `Program.cs`, `App.axaml`, and FluentAvalonia theme.
-- [ ] Implement `ObservableSystem.RegisterUnhandledExceptionHandler` in `App.axaml.cs` to prevent silent reactive crashes.
-- [ ] Implement `NetworkStealthGate` ensuring all network listener sockets remain unbound until identity confirmation.
-- [ ] Implement `IdentityGateView.axaml` and `IdentityGateViewModel.cs` as the initial startup window:
+- [x] Implement `ObservableSystem.RegisterUnhandledExceptionHandler` in `App.axaml.cs` to prevent silent reactive crashes.
+- [x] Implement `NetworkStealthGate` ensuring all network listener sockets remain unbound until identity confirmation.
+- [x] Implement `IdentityGateWindow.axaml` and `IdentityGateViewModel.cs` as the initial startup window:
   - Display available local identities with activation checkboxes.
   - "Create New Identity" wizard (generating Ed25519/X25519 keys via `Percolator.Domain`).
   - Passphrase unlock prompt for encrypted identity vaults.
-- [ ] Wire user confirmation: only upon selecting >=1 active identity do network listeners bind and the main `MainWindow` shell open.
-- [ ] Link `FiraCodeNerdFontMono-Regular.ttf` as an embedded resource and declare `NerdFontFamily`.
-- [ ] Implement `NerdGlyph` enum, `NerdIcon` control, and `NerdIconSource` extending FluentAvalonia `FontIcon`.
-- [ ] Implement `StatusChip` and `PeerAvatar` controls with presence dot and hash-color palette.
-- [ ] Implement `BadgeAttachedBehavior` (notification count & pulse animation on buttons).
-- [ ] Implement `IHost` configuration with `Microsoft.Extensions.Hosting` in `App.axaml.cs`.
-- [ ] Implement `IWindowManager` with single-instance activation and child DI scope lifecycle.
-- [ ] Configure `NavigationView` navigation routing in `MainWindow` with `Frame` page switching.
-- [ ] Set up Dark/Light/HighContrast theme switching and OS accent color auto-detection.
+- [x] Wire user confirmation: only upon selecting >=1 active identity do network listeners bind and the main `MainWindow` shell open.
+- [x] Link embedded Nerd Font definitions and declare `NerdFontFamily`.
+- [x] Implement `NerdGlyph` enum, `NerdIcon` control, and `NerdIconSource` extending FluentAvalonia `FontIcon`.
+- [x] Implement `StatusChip` and `PeerAvatar` controls with presence dot and hash-color palette.
+- [x] Implement `Badge` attached behavior (notification count & pulse animation on buttons).
+- [x] Implement `IHost` configuration with `Microsoft.Extensions.Hosting` in `App.axaml.cs`.
+- [x] Implement `IWindowManager` with single-instance activation and child DI scope lifecycle.
+- [x] Configure `NavigationView` navigation routing in `MainWindow` with `Frame` page switching.
+- [x] Set up Dark/Light/HighContrast theme switching and OS accent color auto-detection.
 
 ### Milestone 2: Identity Management, Handshakes & Session Shell (Sprint 2)
 - [ ] Port `IdentityStateService` and `ActiveIdentityContext` into UI state layer.
@@ -311,7 +290,7 @@ Percolator.Desktop/
 - [ ] Throttled UI projection using `.Sample(16ms)` to handle DHT burst traffic without UI lag.
 
 ### Milestone 5: P2P File Transfer Dashboard (Sprint 5)
-- [ ] Integrate with `Percolator.Apps.FileTransfer`.
+- [ ] Integrate with `Percolator.Apps.FileTransfer``.
 - [ ] Build swarm transfer manager:
   - Active downloads and uploads list.
   - Chunk piece-map visualization (custom Avalonia control rendering piece bitfields).

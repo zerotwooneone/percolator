@@ -1,0 +1,30 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="using:Percolator.Desktop.Common.Controls"
+             x:Class="Percolator.Desktop.Common.Controls.StatusChip"
+             x:Name="RootChip">
+
+    <Border Background="{Binding ChipBackgroundBrush, ElementName=RootChip}"
+            BorderBrush="{Binding ChipBorderBrush, ElementName=RootChip}"
+            BorderThickness="1"
+            CornerRadius="12"
+            Padding="8,3"
+            HorizontalAlignment="Left"
+            VerticalAlignment="Center">
+        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+            <!-- Icon -->
+            <controls:NerdIcon GlyphType="{Binding IconGlyph, ElementName=RootChip}"
+                               FontSize="12"
+                               Foreground="{Binding ChipForegroundBrush, ElementName=RootChip}"
+                               VerticalAlignment="Center"
+                               IsVisible="{Binding HasIcon, ElementName=RootChip}" />
+
+            <!-- Text -->
+            <TextBlock Text="{Binding Text, ElementName=RootChip}"
+                       FontSize="11"
+                       FontWeight="Medium"
+                       Foreground="{Binding ChipForegroundBrush, ElementName=RootChip}"
+                       VerticalAlignment="Center" />
+        </StackPanel>
+    </Border>
+</UserControl>

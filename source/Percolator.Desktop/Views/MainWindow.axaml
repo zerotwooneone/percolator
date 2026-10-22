@@ -2,6 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:Percolator.Desktop.ViewModels"
         xmlns:ui="using:FluentAvalonia.UI.Controls"
+        xmlns:controls="using:Percolator.Desktop.Common.Controls"
         x:Class="Percolator.Desktop.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Title="Percolator Desktop"
@@ -9,29 +10,68 @@
         WindowStartupLocation="CenterScreen">
 
     <Design.DataContext>
-        <vm:MainWindowViewModel />
+        <!-- Mock design context will be provided at runtime -->
     </Design.DataContext>
 
     <Grid RowDefinitions="Auto,*">
         <!-- Top TitleBar / Header Area -->
-        <Border Grid.Row="0" Height="32" Background="Transparent" />
+        <Border Grid.Row="0" Height="36" Background="Transparent" Padding="16,4">
+            <Grid ColumnDefinitions="Auto,*,Auto">
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <TextBlock Text="Percolator"
+                               FontWeight="SemiBold"
+                               FontSize="13"
+                               VerticalAlignment="Center" />
+                    <controls:StatusChip Text="{Binding StatusText}"
+                                         Variant="Success"
+                                         IconGlyph="MeshNetwork" />
+                </StackPanel>
+
+                <Button Grid.Column="2"
+                        Content="Lock &amp; Stealth"
+                        Command="{Binding LockSessionCommand}"
+                        Padding="8,4"
+                        FontSize="12">
+                    <Button.ContentTemplate>
+                        <DataTemplate>
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <controls:NerdIcon GlyphType="Lock" FontSize="12" />
+                                <TextBlock Text="Lock Session" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </Button.ContentTemplate>
+                </Button>
+            </Grid>
+        </Border>
 
         <!-- Main Navigation Shell -->
         <ui:NavigationView Grid.Row="1"
-                           x:Name="NavView"
-                           PaneDisplayMode="Left"
-                           IsSettingsVisible="True"
-                           SelectedItem="{Binding SelectedNavigationItem, Mode=TwoWay}">
+                            x:Name="NavView"
+                            PaneDisplayMode="Left"
+                            IsSettingsVisible="True"
+                            SelectedItem="{Binding SelectedNavigationItem, Mode=TwoWay}">
             <ui:NavigationView.MenuItems>
                 <ui:NavigationViewItem Content="Chats" Tag="Chats" IconSource="Chat" />
-                <ui:NavigationViewItem Content="Discovery" Tag="Discovery" IconSource="People" />
-                <ui:NavigationViewItem Content="File Transfers" Tag="Files" IconSource="Folder" />
+                <ui:NavigationViewItem Content="Discovery" Tag="Discovery">
+                    <ui:NavigationViewItem.IconSource>
+                        <controls:NerdIconSource GlyphType="MeshNetwork" />
+                    </ui:NavigationViewItem.IconSource>
+                </ui:NavigationViewItem>
+                <ui:NavigationViewItem Content="File Transfers" Tag="Files">
+                    <ui:NavigationViewItem.IconSource>
+                        <controls:NerdIconSource GlyphType="Swarm" />
+                    </ui:NavigationViewItem.IconSource>
+                </ui:NavigationViewItem>
             </ui:NavigationView.MenuItems>
 
             <ui:Frame x:Name="ContentFrame">
                 <!-- Fallback content if no navigation page selected yet -->
                 <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
                     <StackPanel Spacing="12" HorizontalAlignment="Center">
+                        <controls:NerdIcon GlyphType="MeshNetwork"
+                                           FontSize="48"
+                                           Foreground="{DynamicResource AccentFillColorDefaultBrush}"
+                                           HorizontalAlignment="Center" />
                         <TextBlock Text="Welcome to Percolator"
                                    Theme="{StaticResource TitleTextBlockStyle}"
                                    HorizontalAlignment="Center" />
