@@ -133,15 +133,16 @@ public sealed class AppHostPipelineTests
             stepResult.MessageCounter,
             senderSession.PreviousSendingChainLength);
 
-        byte[] nonce = new byte[12];
-        nonce[0] = 0xAA;
-
         byte[] inner = new byte[1 + appContent.Length];
         inner[0] = appId.Value;
         Buffer.BlockCopy(appContent, 0, inner, 1, appContent.Length);
 
-        byte[] ciphertext = _cryptoEngine.EncryptAesGcm(stepResult.Key.Span, nonce, inner, header.EphemeralPublicKey.Span);
-        stepResult.Key.Dispose();
+        byte[] ciphertext;
+        using (stepResult.Key)
+        using (var expanded = stepResult.Key.Expand(stepResult.MessageCounter))
+        {
+            ciphertext = _cryptoEngine.EncryptAesGcm(expanded.CipherKey, expanded.Nonce, inner, header.EphemeralPublicKey.Span);
+        }
 
         return new InboundDirectEnvelope(
             _channelId,
@@ -149,7 +150,6 @@ public sealed class AppHostPipelineTests
             _aliceId,
             _aliceDeviceId,
             header,
-            nonce,
             ciphertext,
             DateTimeOffset.UtcNow);
     }
@@ -211,7 +211,6 @@ public sealed class AppHostPipelineTests
             _aliceId,
             _aliceDeviceId,
             new RatchetHeader(DhPublicKey.FromBytes(new byte[32]), 0, 0),
-            new byte[12],
             oversized,
             DateTimeOffset.UtcNow);
 
@@ -262,7 +261,6 @@ public sealed class AppHostPipelineTests
             validEnvelope.SenderIdentityId,
             validEnvelope.SenderDeviceId,
             validEnvelope.Header,
-            validEnvelope.Nonce,
             tamperedCiphertext,
             validEnvelope.ReceivedAtUtc);
 
@@ -320,9 +318,12 @@ public sealed class AppHostPipelineTests
         inner[0] = AppId.Chat.Value;
         Buffer.BlockCopy(appContent, 0, inner, 1, appContent.Length);
 
-        byte[] nonce = new byte[12];
-        byte[] ciphertext = _cryptoEngine.EncryptAesGcm(messageKey.Span, nonce, inner, ReadOnlySpan<byte>.Empty);
-        messageKey.Dispose();
+        byte[] ciphertext;
+        using (messageKey)
+        using (var expanded = messageKey.Expand(0))
+        {
+            ciphertext = _cryptoEngine.EncryptAesGcm(expanded.CipherKey, expanded.Nonce, inner, ReadOnlySpan<byte>.Empty);
+        }
 
         byte[] signature = _cryptoEngine.SignEd25519(authorPriv.Span, ciphertext);
 

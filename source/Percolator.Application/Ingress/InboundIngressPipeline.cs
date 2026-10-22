@@ -2,6 +2,7 @@ using Percolator.Application2.Ports;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Security.Ports;
+using Percolator.Domain.Security.ValueObjects;
 using Percolator.PluginSdk;
 
 namespace Percolator.Application2.Ingress;
@@ -95,29 +96,55 @@ public sealed class InboundIngressPipeline : IInboundIngressPipeline
                     "SESSION_NOT_FOUND", "No active ratchet session exists for sender."));
             }
 
-            // Advance DH ratchet if new ephemeral key received
-            if (session.RemoteEphemeralPublicKey != null && session.RemoteEphemeralPublicKey != direct.Header.EphemeralPublicKey)
+            MessageKey messageKey;
+            var preRatchetSkipped = session.TryGetSkippedKey(direct.Header.Counter, direct.Header.EphemeralPublicKey);
+            if (preRatchetSkipped.IsSuccess)
             {
-                var dhResult = session.StepDhRatchet(direct.Header.EphemeralPublicKey, _cryptoEngine);
-                if (!dhResult.IsSuccess)
+                messageKey = preRatchetSkipped.Value!;
+            }
+            else
+            {
+                // Advance DH ratchet if new ephemeral key received
+                if (session.RemoteEphemeralPublicKey != null && session.RemoteEphemeralPublicKey != direct.Header.EphemeralPublicKey)
                 {
-                    return DomainResult.Failure(dhResult.Error!);
+                    var dhResult = session.StepDhRatchet(
+                        direct.Header.EphemeralPublicKey,
+                        _cryptoEngine,
+                        direct.Header.PreviousChainLength);
+                    if (!dhResult.IsSuccess)
+                    {
+                        return DomainResult.Failure(dhResult.Error!);
+                    }
+                }
+
+                if (direct.Header.Counter >= session.ReceivingCounter)
+                {
+                    var stepResult = session.StepReceivingChain(_cryptoEngine, direct.Header.Counter);
+                    if (!stepResult.IsSuccess)
+                    {
+                        return DomainResult.Failure(stepResult.Error!);
+                    }
+
+                    messageKey = stepResult.Value.Key;
+                }
+                else
+                {
+                    var skippedResult = session.TryGetSkippedKey(direct.Header.Counter, direct.Header.EphemeralPublicKey);
+                    if (!skippedResult.IsSuccess)
+                    {
+                        return DomainResult.Failure(skippedResult.Error!);
+                    }
+
+                    messageKey = skippedResult.Value!;
                 }
             }
 
-            var stepResult = session.StepReceivingChain(_cryptoEngine, direct.Header.Counter);
-            if (!stepResult.IsSuccess)
-            {
-                return DomainResult.Failure(stepResult.Error!);
-            }
-
-            var (_, messageKey) = stepResult.Value;
-
             try
             {
+                using var expanded = messageKey.Expand(direct.Header.Counter);
                 plaintext = _cryptoEngine.DecryptAesGcm(
-                    messageKey.Span,
-                    direct.Nonce.Span,
+                    expanded.CipherKey,
+                    expanded.Nonce,
                     direct.Ciphertext.Span,
                     direct.Header.EphemeralPublicKey.Span);
             }
@@ -184,10 +211,10 @@ public sealed class InboundIngressPipeline : IInboundIngressPipeline
 
             try
             {
-                var nonce = new byte[12];
+                using var expanded = messageKey.Expand(group.Iteration);
                 plaintext = _cryptoEngine.DecryptAesGcm(
-                    messageKey.Span,
-                    nonce,
+                    expanded.CipherKey,
+                    expanded.Nonce,
                     group.Ciphertext.Span,
                     ReadOnlySpan<byte>.Empty);
             }

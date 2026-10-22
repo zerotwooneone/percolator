@@ -264,9 +264,12 @@ public sealed class HandshakeServiceTests
         inner[0] = AppId.Chat.Value;
         Buffer.BlockCopy(payloadData, 0, inner, 1, payloadData.Length);
 
-        byte[] nonce = new byte[12];
-        byte[] initialCiphertext = _cryptoEngine.EncryptAesGcm(messageKey.Span, nonce, inner, ReadOnlySpan<byte>.Empty);
-        messageKey.Dispose();
+        byte[] initialCiphertext;
+        using (messageKey)
+        using (var expanded = messageKey.Expand(counter))
+        {
+            initialCiphertext = _cryptoEngine.EncryptAesGcm(expanded.CipherKey, expanded.Nonce, inner, ReadOnlySpan<byte>.Empty);
+        }
 
         var envelope = new InboundHandshakeEnvelope(
             RecipientIdentityId: _bobId,
@@ -320,9 +323,12 @@ public sealed class HandshakeServiceTests
         inner[0] = AppId.Chat.Value;
         Buffer.BlockCopy(payloadData, 0, inner, 1, payloadData.Length);
 
-        byte[] nonce = new byte[12];
-        byte[] initialCiphertext = _cryptoEngine.EncryptAesGcm(messageKey.Span, nonce, inner, ReadOnlySpan<byte>.Empty);
-        messageKey.Dispose();
+        byte[] initialCiphertext;
+        using (messageKey)
+        using (var expanded = messageKey.Expand(counter))
+        {
+            initialCiphertext = _cryptoEngine.EncryptAesGcm(expanded.CipherKey, expanded.Nonce, inner, ReadOnlySpan<byte>.Empty);
+        }
 
         var envelope = new InboundHandshakeEnvelope(
             RecipientIdentityId: _bobId,

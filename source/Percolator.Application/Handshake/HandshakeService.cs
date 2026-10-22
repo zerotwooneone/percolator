@@ -118,14 +118,20 @@ public sealed class HandshakeService : IHandshakeService
                 return DomainResult<DirectRatchetSession>.Failure(stepResult.Error!);
             }
 
-            var (_, messageKey, _) = stepResult.Value;
+            var (counter, messageKey, _) = stepResult.Value;
             var inner = new byte[1 + initialPayload.Value.Length];
             inner[0] = initialAppId.Value.Value;
             initialPayload.Value.Span.CopyTo(inner.AsSpan(1));
 
-            var nonce = new byte[12];
-            encryptedInitialPayload = _cryptoEngine.EncryptAesGcm(messageKey.Span, nonce, inner, ReadOnlySpan<byte>.Empty);
-            messageKey.Dispose();
+            using (messageKey)
+            using (var expanded = messageKey.Expand(counter))
+            {
+                encryptedInitialPayload = _cryptoEngine.EncryptAesGcm(
+                    expanded.CipherKey,
+                    expanded.Nonce,
+                    inner,
+                    ReadOnlySpan<byte>.Empty);
+            }
         }
 
         await _sessionRepo.SaveSessionAsync(session, ct);
@@ -286,14 +292,14 @@ public sealed class HandshakeService : IHandshakeService
                 return DomainResult.Failure(stepResult.Error!);
             }
 
-            var (_, messageKey) = stepResult.Value;
-            var nonce = new byte[12];
+            var (counter, messageKey) = stepResult.Value;
             byte[] decrypted;
             try
             {
+                using var expanded = messageKey.Expand(counter);
                 decrypted = _cryptoEngine.DecryptAesGcm(
-                    messageKey.Span,
-                    nonce,
+                    expanded.CipherKey,
+                    expanded.Nonce,
                     envelope.EncryptedPayload.Span,
                     ReadOnlySpan<byte>.Empty);
             }

@@ -61,13 +61,13 @@ public static class WirePacketSimulator
 
         var (counter, messageKey, ephemKey) = step.Value;
         using (messageKey)
+        using (var expanded = messageKey.Expand(counter))
         {
-            var nonce = new byte[12];
-            BitConverter.GetBytes((ulong)counter).CopyTo(nonce, 0);
+            var nonce = expanded.Nonce.ToArray();
 
             var aad = associatedData ?? Encoding.UTF8.GetBytes($"aad-{counter}");
             var ciphertext = engine.EncryptAesGcm(
-                messageKey.Span,
+                expanded.CipherKey,
                 nonce,
                 Encoding.UTF8.GetBytes(plaintext),
                 aad);
@@ -93,9 +93,10 @@ public static class WirePacketSimulator
         if (preRatchetSkipped.IsSuccess)
         {
             using var skippedKey = preRatchetSkipped.Value;
+            using var expandedSkipped = skippedKey.Expand(packet.Counter);
             var decryptedSkipped = engine.DecryptAesGcm(
-                skippedKey.Span,
-                packet.Nonce,
+                expandedSkipped.CipherKey,
+                expandedSkipped.Nonce,
                 packet.Ciphertext,
                 packet.AssociatedData ?? Encoding.UTF8.GetBytes($"aad-{packet.Counter}"));
 
@@ -135,10 +136,11 @@ public static class WirePacketSimulator
         }
 
         using (decryptionKey)
+        using (var expanded = decryptionKey.Expand(packet.Counter))
         {
             var decryptedBytes = engine.DecryptAesGcm(
-                decryptionKey.Span,
-                packet.Nonce,
+                expanded.CipherKey,
+                expanded.Nonce,
                 packet.Ciphertext,
                 packet.AssociatedData ?? Encoding.UTF8.GetBytes($"aad-{packet.Counter}"));
 
@@ -160,6 +162,7 @@ public static class WirePacketSimulator
 
         var (iteration, messageKey) = advance.Value;
         using (messageKey)
+        using (var expanded = messageKey.Expand(iteration))
         {
             var textBytes = Encoding.UTF8.GetBytes(plaintext);
             var sigResult = senderRatchet.SignPayload(textBytes, engine);
@@ -168,12 +171,11 @@ public static class WirePacketSimulator
                 throw new InvalidOperationException($"Signing failed: {sigResult.Error.Description}");
             }
 
-            var nonce = new byte[12];
-            BitConverter.GetBytes((ulong)iteration).CopyTo(nonce, 0);
+            var nonce = expanded.Nonce.ToArray();
 
             var aad = associatedData ?? Encoding.UTF8.GetBytes($"group-{senderRatchet.ChannelId}-{iteration}");
             var ciphertext = engine.EncryptAesGcm(
-                messageKey.Span,
+                expanded.CipherKey,
                 nonce,
                 textBytes,
                 aad);
@@ -194,11 +196,12 @@ public static class WirePacketSimulator
         }
 
         using var messageKey = advance.Value;
+        using var expanded = messageKey.Expand(packet.Counter);
         var aad = packet.AssociatedData ?? Encoding.UTF8.GetBytes($"group-{receiverSession.ChannelId}-{packet.Counter}");
 
         var decryptedBytes = engine.DecryptAesGcm(
-            messageKey.Span,
-            packet.Nonce,
+            expanded.CipherKey,
+            expanded.Nonce,
             packet.Ciphertext,
             aad);
 

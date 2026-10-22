@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using Percolator.Application2.Delivery;
 using Percolator.Application2.Delivery.Ports;
 using Percolator.Application2.Ports;
@@ -82,15 +81,20 @@ public sealed class OutboundEgressPipeline : IPayloadSender
                     msgCounter,
                     session.PreviousSendingChainLength);
 
-                byte[] nonce = new byte[12];
-                RandomNumberGenerator.Fill(nonce);
-
-                byte[] ciphertext = _cryptoEngine.EncryptAesGcm(msgKey.Span, nonce, innerPlaintext, header.EphemeralPublicKey.Span);
-                msgKey.Dispose();
+                byte[] ciphertext;
+                using (msgKey)
+                using (var expanded = msgKey.Expand(msgCounter))
+                {
+                    ciphertext = _cryptoEngine.EncryptAesGcm(
+                        expanded.CipherKey,
+                        expanded.Nonce,
+                        innerPlaintext,
+                        header.EphemeralPublicKey.Span);
+                }
 
                 await _sessionRepo.SaveSessionAsync(session, ct);
 
-                packedWireBytes = _sessionWirePacker.PackDirectRatchetMessage(header, nonce, ciphertext);
+                packedWireBytes = _sessionWirePacker.PackDirectRatchetMessage(header, ciphertext);
             }
             else
             {
@@ -111,11 +115,16 @@ public sealed class OutboundEgressPipeline : IPayloadSender
                 }
 
                 var (iteration, msgKey) = advanceResult.Value;
-                byte[] nonce = new byte[12];
-                RandomNumberGenerator.Fill(nonce);
-
-                byte[] ciphertext = _cryptoEngine.EncryptAesGcm(msgKey.Span, nonce, innerPlaintext, ReadOnlySpan<byte>.Empty);
-                msgKey.Dispose();
+                byte[] ciphertext;
+                using (msgKey)
+                using (var expanded = msgKey.Expand(iteration))
+                {
+                    ciphertext = _cryptoEngine.EncryptAesGcm(
+                        expanded.CipherKey,
+                        expanded.Nonce,
+                        innerPlaintext,
+                        ReadOnlySpan<byte>.Empty);
+                }
 
                 var signResult = ratchet.SignPayload(ciphertext, _cryptoEngine);
                 if (!signResult.IsSuccess)

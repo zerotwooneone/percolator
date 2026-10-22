@@ -17,7 +17,6 @@ public sealed record InboundDirectEnvelope(
     PublicIdentityId SenderIdentityId,
     DeviceId SenderDeviceId,
     RatchetHeader Header,
-    ReadOnlyMemory<byte> Nonce,
     ReadOnlyMemory<byte> Ciphertext,
     DateTimeOffset ReceivedAtUtc)
     : InboundEnvelope(ChannelId, RecipientIdentityId, SenderIdentityId, SenderDeviceId, ReceivedAtUtc);
