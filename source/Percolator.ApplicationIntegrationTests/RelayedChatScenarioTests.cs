@@ -6,6 +6,7 @@ using Percolator.Application2IntegrationTests.Builders;
 using Percolator.Application2IntegrationTests.Infrastructure;
 using Percolator.Apps.Chat.Features.Messaging;
 using Percolator.Domain.Identities.Model;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using DeliveryRoute = Percolator.PluginSdk.DeliveryRoute;
 
@@ -56,7 +57,7 @@ public sealed class RelayedChatScenarioTests
         parsedInvite.PeerIdentityId.Should().Be(charlie.IdentityId);
         parsedInvite.PeerDeviceId.Should().Be(charlie.DeviceId);
         parsedInvite.IdentityKey.Should().Be(charlie.IdentityPublicKey);
-        parsedInvite.RelayEndpoint.Should().Be($"localhost:{relay.Port.Value}");
+        parsedInvite.RelayEndpoint.Should().Be(RelayEndpoint.FromHostAndPort("localhost", relay.Port.Value));
         parsedInvite.RoutingToken.Should().Be(charlie.MailboxRoutingToken);
         parsedInvite.DeliveryToken.Should().Be(charlie.MailboxDeliveryToken);
 

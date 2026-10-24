@@ -1,7 +1,8 @@
+using Percolator.Application2.Ports;
 using Percolator.Application2IntegrationTests.Builders;
 using Percolator.Application2IntegrationTests.Infrastructure;
 using Percolator.Domain.Common;
-using Percolator.Domain.Delivery.Ports;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Model;
 
@@ -16,20 +17,21 @@ public sealed class LoopbackPreKeyBundleProvider : IPreKeyBundleProvider
         _networkSwitch = networkSwitch ?? throw new ArgumentNullException(nameof(networkSwitch));
     }
 
-    public async ValueTask<DomainResult<PreKeyBundle>> FetchConsumableBundleAsync(
+    public async Task<DomainResult<PreKeyBundle>> FetchConsumableBundleAsync(
         PublicIdentityId targetPeerId,
         DeviceId? deviceId = null,
-        string? relayEndpoint = null,
+        RelayEndpoint? relayEndpoint = null,
         CancellationToken ct = default)
     {
         var targetDevice = deviceId ?? DeviceId.Primary;
 
         RelayNode? relay = null;
-        if (!string.IsNullOrWhiteSpace(relayEndpoint))
+        if (relayEndpoint != null)
         {
             relay = _networkSwitch.AllRelays.FirstOrDefault(r =>
-                $"localhost:{r.Port.Value}".Equals(relayEndpoint, StringComparison.OrdinalIgnoreCase) ||
-                r.RelayIdentityId.ToString().Equals(relayEndpoint, StringComparison.OrdinalIgnoreCase));
+                $"localhost:{r.Port.Value}".Equals(relayEndpoint.Value, StringComparison.OrdinalIgnoreCase) ||
+                r.RelayIdentityId.ToString().Equals(relayEndpoint.Value, StringComparison.OrdinalIgnoreCase) ||
+                (relayEndpoint.Port.HasValue && r.Port.Value == relayEndpoint.Port.Value));
         }
 
         relay ??= _networkSwitch.AllRelays.FirstOrDefault();
@@ -45,12 +47,5 @@ public sealed class LoopbackPreKeyBundleProvider : IPreKeyBundleProvider
         }
 
         return hostedBundle.ConsumeBundle();
-    }
-
-    public ValueTask<DomainResult<PreKeyBundle>> FetchConsumableBundleAsync(
-        PublicIdentityId targetPeerId,
-        CancellationToken ct = default)
-    {
-        return FetchConsumableBundleAsync(targetPeerId, DeviceId.Primary, null, ct);
     }
 }

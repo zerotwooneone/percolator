@@ -41,9 +41,9 @@ public sealed class TestPeerMailboxRoutingRepository : IPeerMailboxRoutingReposi
         return Task.FromResult(best);
     }
 
-    public Task RecordBackpressureAsync(PublicIdentityId peerId, string relayEndpoint, TimeSpan retryAfter, DateTimeOffset nowUtc, CancellationToken ct = default)
+    public Task RecordBackpressureAsync(PublicIdentityId peerId, RelayEndpoint relayEndpoint, TimeSpan retryAfter, DateTimeOffset nowUtc, CancellationToken ct = default)
     {
-        var idx = _routes.FindIndex(r => r.PeerId == peerId && string.Equals(r.RelayEndpoint, relayEndpoint, StringComparison.OrdinalIgnoreCase));
+        var idx = _routes.FindIndex(r => r.PeerId == peerId && r.RelayEndpoint != null && r.RelayEndpoint.Equals(relayEndpoint));
         if (idx >= 0)
         {
             _routes[idx] = _routes[idx] with { BackpressureCooldownUntilUtc = nowUtc.Add(retryAfter) };
@@ -51,9 +51,9 @@ public sealed class TestPeerMailboxRoutingRepository : IPeerMailboxRoutingReposi
         return Task.CompletedTask;
     }
 
-    public Task RecordSuccessAsync(PublicIdentityId peerId, string relayEndpoint, DateTimeOffset nowUtc, CancellationToken ct = default)
+    public Task RecordSuccessAsync(PublicIdentityId peerId, RelayEndpoint relayEndpoint, DateTimeOffset nowUtc, CancellationToken ct = default)
     {
-        var idx = _routes.FindIndex(r => r.PeerId == peerId && string.Equals(r.RelayEndpoint, relayEndpoint, StringComparison.OrdinalIgnoreCase));
+        var idx = _routes.FindIndex(r => r.PeerId == peerId && r.RelayEndpoint != null && r.RelayEndpoint.Equals(relayEndpoint));
         if (idx >= 0)
         {
             _routes[idx] = _routes[idx] with { LastSuccessAtUtc = nowUtc, BackpressureCooldownUntilUtc = null };
@@ -122,7 +122,7 @@ public sealed class RoutingCoordinatorTests
             _peerId,
             _token1,
             _deliveryToken1,
-            RelayEndpoint: "relay-1.example.com",
+            RelayEndpoint: RelayEndpoint.Parse("relay-1.example.com"),
             LastObservedAtUtc: _timeProvider.UtcNow);
         await _routingRepo.SaveAsync(route);
 
@@ -132,7 +132,7 @@ public sealed class RoutingCoordinatorTests
         // Assert
         result.IsSuccess.Should().BeTrue();
         result.Value!.Mode.Should().Be(DeliveryRoutingMode.RelayMailbox);
-        result.Value!.TargetRelayEndpoint.Should().Be("relay-1.example.com");
+        result.Value!.TargetRelayEndpoint.Should().Be(RelayEndpoint.Parse("relay-1.example.com"));
         result.Value!.TargetRoutingToken.Should().Be(_token1);
         result.Value!.TargetDeliveryToken.Should().Be(_deliveryToken1);
     }
@@ -148,7 +148,7 @@ public sealed class RoutingCoordinatorTests
             _peerId,
             _token1,
             _deliveryToken1,
-            RelayEndpoint: "relay-1.example.com",
+            RelayEndpoint: RelayEndpoint.Parse("relay-1.example.com"),
             LastObservedAtUtc: _timeProvider.UtcNow);
 
         // Route 2 (Older observed route)
@@ -156,14 +156,14 @@ public sealed class RoutingCoordinatorTests
             _peerId,
             _token2,
             _deliveryToken2,
-            RelayEndpoint: "relay-2.example.com",
+            RelayEndpoint: RelayEndpoint.Parse("relay-2.example.com"),
             LastObservedAtUtc: _timeProvider.UtcNow.AddMinutes(-5));
 
         await _routingRepo.SaveAsync(fallbackRoute);
         await _routingRepo.SaveAsync(primaryRoute);
 
         // Primary route is placed under 60-second backpressure cooldown
-        await _routingRepo.RecordBackpressureAsync(_peerId, "relay-1.example.com", TimeSpan.FromSeconds(60), _timeProvider.UtcNow);
+        await _routingRepo.RecordBackpressureAsync(_peerId, RelayEndpoint.Parse("relay-1.example.com"), TimeSpan.FromSeconds(60), _timeProvider.UtcNow);
 
         // Act
         var result = await _coordinator.ResolveRouteAsync(_peerId);
@@ -171,7 +171,7 @@ public sealed class RoutingCoordinatorTests
         // Assert: coordinator bypasses relay-1 and resolves to relay-2
         result.IsSuccess.Should().BeTrue();
         result.Value!.Mode.Should().Be(DeliveryRoutingMode.RelayMailbox);
-        result.Value!.TargetRelayEndpoint.Should().Be("relay-2.example.com");
+        result.Value!.TargetRelayEndpoint.Should().Be(RelayEndpoint.Parse("relay-2.example.com"));
         result.Value!.TargetRoutingToken.Should().Be(_token2);
     }
 
@@ -184,7 +184,7 @@ public sealed class RoutingCoordinatorTests
             _peerId,
             _token1,
             _deliveryToken1,
-            RelayEndpoint: "relay-1.example.com",
+            RelayEndpoint: RelayEndpoint.Parse("relay-1.example.com"),
             LastObservedAtUtc: _timeProvider.UtcNow,
             BackpressureCooldownUntilUtc: _timeProvider.UtcNow.AddMinutes(5));
         await _routingRepo.SaveAsync(route);

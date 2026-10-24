@@ -31,7 +31,7 @@ public sealed record InvitationLink
     public PublicIdentityId? PeerIdentityId { get; }
     public DeviceId? PeerDeviceId { get; }
     public IdentityKey? IdentityKey { get; }
-    public string? RelayEndpoint { get; }
+    public RelayEndpoint? RelayEndpoint { get; }
     public BlindedRoutingToken? RoutingToken { get; }
     public DeliveryToken? DeliveryToken { get; }
 
@@ -67,7 +67,7 @@ public sealed record InvitationLink
         PublicIdentityId peerIdentityId,
         DeviceId peerDeviceId,
         IdentityKey identityKey,
-        string relayEndpoint,
+        RelayEndpoint relayEndpoint,
         BlindedRoutingToken routingToken,
         DeliveryToken deliveryToken)
     {
@@ -79,8 +79,8 @@ public sealed record InvitationLink
         RoutingToken = routingToken;
         DeliveryToken = deliveryToken;
 
-        Host = relayEndpoint;
-        Port = null;
+        Host = relayEndpoint.Value;
+        Port = relayEndpoint.Port;
         PublicKey = Convert.ToHexString(identityKey.Span);
     }
 
@@ -88,14 +88,14 @@ public sealed record InvitationLink
         PublicIdentityId peerIdentityId,
         DeviceId peerDeviceId,
         IdentityKey identityKey,
-        string relayEndpoint,
+        RelayEndpoint relayEndpoint,
         BlindedRoutingToken routingToken,
         DeliveryToken deliveryToken)
     {
         if (!peerIdentityId.IsValid) throw new ArgumentException("Invalid peer identity ID.", nameof(peerIdentityId));
         if (!peerDeviceId.IsValid) throw new ArgumentException("Invalid peer device ID.", nameof(peerDeviceId));
         ArgumentNullException.ThrowIfNull(identityKey);
-        if (string.IsNullOrWhiteSpace(relayEndpoint)) throw new ArgumentException("Relay endpoint cannot be empty.", nameof(relayEndpoint));
+        ArgumentNullException.ThrowIfNull(relayEndpoint);
         if (!routingToken.IsValid) throw new ArgumentException("Invalid routing token.", nameof(routingToken));
         ArgumentNullException.ThrowIfNull(deliveryToken);
 
@@ -103,7 +103,7 @@ public sealed record InvitationLink
             peerIdentityId,
             peerDeviceId,
             identityKey,
-            relayEndpoint.Trim(),
+            relayEndpoint,
             routingToken,
             deliveryToken);
     }
@@ -115,7 +115,7 @@ public sealed record InvitationLink
             throw new InvalidOperationException("Only relayed invitations can be serialized to Base64.");
         }
 
-        var endpointBytes = Encoding.UTF8.GetBytes(RelayEndpoint!);
+        var endpointBytes = Encoding.UTF8.GetBytes(RelayEndpoint!.Value);
         var totalLen = 1 + 16 + 4 + 32 + 16 + 32 + 2 + endpointBytes.Length;
         var buffer = new byte[totalLen];
         var span = buffer.AsSpan();
@@ -255,9 +255,15 @@ public sealed record InvitationLink
             return false;
         }
 
-        var endpoint = Encoding.UTF8.GetString(span.Slice(103, endpointLen));
+        var endpointStr = Encoding.UTF8.GetString(span.Slice(103, endpointLen));
+        var endpointResult = RelayEndpoint.Create(endpointStr);
+        if (endpointResult.IsFailure)
+        {
+            errorMessage = $"Malformed invitation payload: {endpointResult.Error.Description}";
+            return false;
+        }
 
-        result = new InvitationLink(peerId, deviceId, ik, endpoint, routingToken, deliveryToken);
+        result = new InvitationLink(peerId, deviceId, ik, endpointResult.Value!, routingToken, deliveryToken);
         return true;
     }
 }

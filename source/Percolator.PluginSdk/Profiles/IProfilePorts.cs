@@ -58,7 +58,7 @@ public sealed record PeerMailboxRoutingCapability(
     PublicIdentityId PeerId,
     BlindedRoutingToken RoutingToken,
     DeliveryToken DeliveryToken,
-    string? RelayEndpoint = null,
+    RelayEndpoint? RelayEndpoint = null,
     DateTimeOffset LastObservedAtUtc = default,
     DateTimeOffset? LastSuccessAtUtc = null,
     DateTimeOffset? BackpressureCooldownUntilUtc = null)
@@ -76,8 +76,8 @@ public interface IPeerMailboxRoutingRepository
     Task<PeerMailboxRoutingCapability?> GetByPeerIdAsync(PublicIdentityId peerId, CancellationToken ct = default);
     Task<IReadOnlyList<PeerMailboxRoutingCapability>> GetRoutesForPeerAsync(PublicIdentityId peerId, CancellationToken ct = default);
     Task<PeerMailboxRoutingCapability?> GetBestRouteAsync(PublicIdentityId peerId, DateTimeOffset nowUtc, CancellationToken ct = default);
-    Task RecordBackpressureAsync(PublicIdentityId peerId, string relayEndpoint, TimeSpan retryAfter, DateTimeOffset nowUtc, CancellationToken ct = default);
-    Task RecordSuccessAsync(PublicIdentityId peerId, string relayEndpoint, DateTimeOffset nowUtc, CancellationToken ct = default);
+    Task RecordBackpressureAsync(PublicIdentityId peerId, RelayEndpoint relayEndpoint, TimeSpan retryAfter, DateTimeOffset nowUtc, CancellationToken ct = default);
+    Task RecordSuccessAsync(PublicIdentityId peerId, RelayEndpoint relayEndpoint, DateTimeOffset nowUtc, CancellationToken ct = default);
 }
 
 /// <summary>

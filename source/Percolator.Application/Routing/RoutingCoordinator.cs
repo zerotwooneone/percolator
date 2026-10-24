@@ -15,7 +15,7 @@ public enum DeliveryRoutingMode
 public readonly record struct ResolvedDeliveryRoute(
     DeliveryRoutingMode Mode,
     PublicIdentityId TargetPeerId,
-    string? TargetRelayEndpoint = null,
+    RelayEndpoint? TargetRelayEndpoint = null,
     BlindedRoutingToken? TargetRoutingToken = null,
     DeliveryToken? TargetDeliveryToken = null);
 

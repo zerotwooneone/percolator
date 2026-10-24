@@ -248,10 +248,11 @@ public sealed class ProfileIntegrationScenarioTests
         bob.RegisterMailbox(relay);
         charlie.RegisterMailbox(relay);
 
-        alice.AddPeerMailboxRoute(bob.IdentityId, $"localhost:{relay.Port.Value}", bob.MailboxRoutingToken, bob.MailboxDeliveryToken);
-        bob.AddPeerMailboxRoute(alice.IdentityId, $"localhost:{relay.Port.Value}", alice.MailboxRoutingToken, alice.MailboxDeliveryToken);
-        alice.AddPeerMailboxRoute(charlie.IdentityId, $"localhost:{relay.Port.Value}", charlie.MailboxRoutingToken, charlie.MailboxDeliveryToken);
-        charlie.AddPeerMailboxRoute(alice.IdentityId, $"localhost:{relay.Port.Value}", alice.MailboxRoutingToken, alice.MailboxDeliveryToken);
+        var relayEndpoint = RelayEndpoint.FromHostAndPort("localhost", relay.Port.Value);
+        alice.AddPeerMailboxRoute(bob.IdentityId, relayEndpoint, bob.MailboxRoutingToken, bob.MailboxDeliveryToken);
+        bob.AddPeerMailboxRoute(alice.IdentityId, relayEndpoint, alice.MailboxRoutingToken, alice.MailboxDeliveryToken);
+        alice.AddPeerMailboxRoute(charlie.IdentityId, relayEndpoint, charlie.MailboxRoutingToken, charlie.MailboxDeliveryToken);
+        charlie.AddPeerMailboxRoute(alice.IdentityId, relayEndpoint, alice.MailboxRoutingToken, alice.MailboxDeliveryToken);
 
         // Bootstrap sessions
         var aliceBobChannel = await alice.EstablishDirectSessionWithAsync(bob);

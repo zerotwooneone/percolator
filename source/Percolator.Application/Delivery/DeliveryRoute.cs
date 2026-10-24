@@ -13,5 +13,5 @@ public readonly record struct DeliveryRoute(
     DeliveryRouteType Type,
     Uri? DirectEndpoint,
     BlindedRoutingToken? TargetToken,
-    string? RelayEndpoint = null,
+    RelayEndpoint? RelayEndpoint = null,
     DeliveryToken? TargetDeliveryToken = null);

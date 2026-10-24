@@ -50,8 +50,9 @@ public sealed class GroupChatScenarioTests
         charlie.RegisterMailbox(relay);
 
         // Configure routing paths for relayed communication
-        bob.AddPeerMailboxRoute(charlie.IdentityId, $"localhost:{relay.Port.Value}", charlie.MailboxRoutingToken, charlie.MailboxDeliveryToken);
-        charlie.AddPeerMailboxRoute(bob.IdentityId, $"localhost:{relay.Port.Value}", bob.MailboxRoutingToken, bob.MailboxDeliveryToken);
+        var relayEndpoint = RelayEndpoint.FromHostAndPort("localhost", relay.Port.Value);
+        bob.AddPeerMailboxRoute(charlie.IdentityId, relayEndpoint, charlie.MailboxRoutingToken, charlie.MailboxDeliveryToken);
+        charlie.AddPeerMailboxRoute(bob.IdentityId, relayEndpoint, bob.MailboxRoutingToken, bob.MailboxDeliveryToken);
 
         // 1. Establish pairwise 1:1 sessions
         // Alice <-> Bob via direct stream

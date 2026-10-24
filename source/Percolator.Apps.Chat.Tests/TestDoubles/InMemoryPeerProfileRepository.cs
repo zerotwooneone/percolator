@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.PluginSdk;
 
@@ -79,8 +80,8 @@ public sealed class InMemoryPeerMailboxRoutingRepository : IPeerMailboxRoutingRe
         {
             var routes = _peerRoutes.GetOrAdd(capability.PeerId, _ => new List<PeerMailboxRoutingCapability>());
             var existingIndex = routes.FindIndex(r =>
-                string.Equals(r.RelayEndpoint, capability.RelayEndpoint, StringComparison.OrdinalIgnoreCase) ||
-                (r.RelayEndpoint == null && capability.RelayEndpoint == null));
+                (r.RelayEndpoint == null && capability.RelayEndpoint == null) ||
+                (r.RelayEndpoint != null && capability.RelayEndpoint != null && r.RelayEndpoint.Equals(capability.RelayEndpoint)));
 
             if (existingIndex >= 0)
             {
@@ -148,13 +149,13 @@ public sealed class InMemoryPeerMailboxRoutingRepository : IPeerMailboxRoutingRe
         }
     }
 
-    public Task RecordBackpressureAsync(PublicIdentityId peerId, string relayEndpoint, TimeSpan retryAfter, DateTimeOffset nowUtc, CancellationToken ct = default)
+    public Task RecordBackpressureAsync(PublicIdentityId peerId, RelayEndpoint relayEndpoint, TimeSpan retryAfter, DateTimeOffset nowUtc, CancellationToken ct = default)
     {
         lock (_lock)
         {
             if (_peerRoutes.TryGetValue(peerId, out var routes))
             {
-                var idx = routes.FindIndex(r => string.Equals(r.RelayEndpoint, relayEndpoint, StringComparison.OrdinalIgnoreCase));
+                var idx = routes.FindIndex(r => r.RelayEndpoint != null && r.RelayEndpoint.Equals(relayEndpoint));
                 if (idx >= 0)
                 {
                     var existing = routes[idx];
@@ -170,13 +171,13 @@ public sealed class InMemoryPeerMailboxRoutingRepository : IPeerMailboxRoutingRe
         return Task.CompletedTask;
     }
 
-    public Task RecordSuccessAsync(PublicIdentityId peerId, string relayEndpoint, DateTimeOffset nowUtc, CancellationToken ct = default)
+    public Task RecordSuccessAsync(PublicIdentityId peerId, RelayEndpoint relayEndpoint, DateTimeOffset nowUtc, CancellationToken ct = default)
     {
         lock (_lock)
         {
             if (_peerRoutes.TryGetValue(peerId, out var routes))
             {
-                var idx = routes.FindIndex(r => string.Equals(r.RelayEndpoint, relayEndpoint, StringComparison.OrdinalIgnoreCase));
+                var idx = routes.FindIndex(r => r.RelayEndpoint != null && r.RelayEndpoint.Equals(relayEndpoint));
                 if (idx >= 0)
                 {
                     var existing = routes[idx];

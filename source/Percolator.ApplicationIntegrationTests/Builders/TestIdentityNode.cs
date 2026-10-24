@@ -20,7 +20,6 @@ using Percolator.Domain.Channels.Ports;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Hosting;
-using Percolator.Domain.Delivery.Ports;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.ValueObjects;
@@ -67,6 +66,7 @@ public sealed class TestIdentityNode
     // Driving Ports
     public IChatService ChatService { get; }
     public IHandshakeService HandshakeService { get; }
+    public IPeerConnectionService PeerConnectionService { get; }
     public IPreKeyBundleProvider PreKeyBundleProvider { get; }
     public IContactRequestCoordinator ContactRequestCoordinator { get; }
     public GroupKeyDistributionService GroupKeyDistributionService { get; }
@@ -250,6 +250,14 @@ public sealed class TestIdentityNode
             wirePacker,
             routingCoordinator: RoutingCoordinator);
 
+        PeerConnectionService = new PeerConnectionService(
+            IdentityId,
+            DeviceId,
+            PreKeyBundleProvider,
+            HandshakeService,
+            _channelRepo,
+            TimeProvider);
+
         IngressPipeline = new InboundIngressPipeline(
             _ingressFilterService,
             _sessionRepo,
@@ -278,7 +286,7 @@ public sealed class TestIdentityNode
 
     public void AddPeerMailboxRoute(
         PublicIdentityId peerId,
-        string relayEndpoint,
+        RelayEndpoint relayEndpoint,
         BlindedRoutingToken routingToken,
         DeliveryToken deliveryToken)
     {
@@ -372,7 +380,7 @@ public sealed class TestIdentityNode
             IdentityId,
             DeviceId,
             IdentityPublicKey,
-            $"localhost:{relay.Port.Value}",
+            RelayEndpoint.FromHostAndPort("localhost", relay.Port.Value),
             MailboxRoutingToken,
             MailboxDeliveryToken);
     }
@@ -617,30 +625,19 @@ public sealed class TestIdentityNode
         // 3. Initiator receives Base64 invitation out-of-band and parses it
         var parsedInvite = InvitationLink.Parse(inviteBase64);
 
-        // 4. Initiator fetches consumable prekey bundle via IPreKeyBundleProvider
-        var bundleResult = await PreKeyBundleProvider.FetchConsumableBundleAsync(
+        // 4. Initiator connects via PeerConnectionService (fetches prekey bundle, initiates handshake, provisions channel)
+        var connectResult = await PeerConnectionService.ConnectToPeerAsync(
             parsedInvite.PeerIdentityId!.Value,
-            parsedInvite.PeerDeviceId!.Value,
+            parsedInvite.PeerDeviceId,
             parsedInvite.RelayEndpoint).ConfigureAwait(false);
-
-        if (bundleResult.IsFailure)
-        {
-            throw new InvalidOperationException($"Failed to fetch prekey bundle for {responder.Name}: {bundleResult.Error.Code} - {bundleResult.Error.Description}");
-        }
 
         // 5. Register mutual mailbox routing paths
         AddPeerMailboxRoute(parsedInvite.PeerIdentityId.Value, parsedInvite.RelayEndpoint!, parsedInvite.RoutingToken!.Value, parsedInvite.DeliveryToken!);
         responder.AddPeerMailboxRoute(IdentityId, parsedInvite.RelayEndpoint!, MailboxRoutingToken, MailboxDeliveryToken);
 
-        // 6. Initiator initiates X3DH handshake
-        var handshakeResult = await HandshakeService.InitiateHandshakeAsync(
-            IdentityId,
-            DeviceId,
-            bundleResult.Value!).ConfigureAwait(false);
-
-        if (!handshakeResult.IsSuccess)
+        if (!connectResult.IsSuccess)
         {
-            throw new InvalidOperationException($"InitiateHandshake failed: {handshakeResult.Error.Code} - {handshakeResult.Error.Description}");
+            throw new InvalidOperationException($"ConnectToPeer failed: {connectResult.Error.Code} - {connectResult.Error.Description}");
         }
 
         // 7. Initiator outbox worker flushes envelope to Relay mailbox

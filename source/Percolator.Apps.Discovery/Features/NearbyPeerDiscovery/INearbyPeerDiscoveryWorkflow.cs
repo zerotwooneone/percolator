@@ -1,11 +1,11 @@
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
-using Percolator.Domain.Security.Model;
+using Percolator.PluginSdk;
 
 namespace Percolator.Apps.Discovery.Features.NearbyPeerDiscovery;
 
 /// <summary>
-/// Workflow coordinating Step 1 (Query nearby peers) and Step 2 (Fetch bundle & handshake).
+/// Workflow coordinating Step 1 (Query nearby peers) and Step 2 (Connect to discovered peer via host IPeerConnectionService).
 /// </summary>
 public interface INearbyPeerDiscoveryWorkflow
 {
@@ -19,9 +19,9 @@ public interface INearbyPeerDiscoveryWorkflow
         CancellationToken ct = default);
 
     /// <summary>
-    /// Step 2: Fetches consumable prekey bundle for candidate peer and initiates an X3DH handshake session.
+    /// Step 2: Connects to candidate peer via host IPeerConnectionService.
     /// </summary>
-    Task<DomainResult<DirectRatchetSession>> ConnectToDiscoveredPeerAsync(
+    Task<DomainResult<PeerConnectionResult>> ConnectToDiscoveredPeerAsync(
         PublicIdentityId localOwnerId,
         DeviceId localDeviceId,
         PeerDiscoveryDescriptor candidate,

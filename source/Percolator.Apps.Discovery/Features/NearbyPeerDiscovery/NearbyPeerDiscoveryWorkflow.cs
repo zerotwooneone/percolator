@@ -1,6 +1,6 @@
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
-using Percolator.Domain.Security.Model;
+using Percolator.PluginSdk;
 using Percolator.Apps.Discovery.Ports;
 
 namespace Percolator.Apps.Discovery.Features.NearbyPeerDiscovery;
@@ -8,17 +8,14 @@ namespace Percolator.Apps.Discovery.Features.NearbyPeerDiscovery;
 public sealed class NearbyPeerDiscoveryWorkflow : INearbyPeerDiscoveryWorkflow
 {
     private readonly INearbyDiscoveryQueryClientPort _queryClient;
-    private readonly IPreKeyBundleProvider _preKeyProvider;
-    private readonly IDiscoveryHandshakePort _handshakePort;
+    private readonly IPeerConnectionService _connectionService;
 
     public NearbyPeerDiscoveryWorkflow(
         INearbyDiscoveryQueryClientPort queryClient,
-        IPreKeyBundleProvider preKeyProvider,
-        IDiscoveryHandshakePort handshakePort)
+        IPeerConnectionService connectionService)
     {
         _queryClient = queryClient ?? throw new ArgumentNullException(nameof(queryClient));
-        _preKeyProvider = preKeyProvider ?? throw new ArgumentNullException(nameof(preKeyProvider));
-        _handshakePort = handshakePort ?? throw new ArgumentNullException(nameof(handshakePort));
+        _connectionService = connectionService ?? throw new ArgumentNullException(nameof(connectionService));
     }
 
     public async Task<IReadOnlyList<PeerDiscoveryDescriptor>> QueryNearbyPeersAsync(
@@ -45,7 +42,7 @@ public sealed class NearbyPeerDiscoveryWorkflow : INearbyPeerDiscoveryWorkflow
         return descriptors;
     }
 
-    public async Task<DomainResult<DirectRatchetSession>> ConnectToDiscoveredPeerAsync(
+    public async Task<DomainResult<PeerConnectionResult>> ConnectToDiscoveredPeerAsync(
         PublicIdentityId localOwnerId,
         DeviceId localDeviceId,
         PeerDiscoveryDescriptor candidate,
@@ -55,31 +52,22 @@ public sealed class NearbyPeerDiscoveryWorkflow : INearbyPeerDiscoveryWorkflow
 
         if (!localOwnerId.IsValid)
         {
-            return DomainResult<DirectRatchetSession>.Failure(new DomainError(
+            return DomainResult<PeerConnectionResult>.Failure(new DomainError(
                 "INVALID_OWNER_ID", "Local owner identity must be valid."));
         }
 
         if (!candidate.PeerId.IsValid)
         {
-            return DomainResult<DirectRatchetSession>.Failure(new DomainError(
+            return DomainResult<PeerConnectionResult>.Failure(new DomainError(
                 "INVALID_CANDIDATE_ID", "Candidate peer identity must be valid."));
         }
 
-        // 1. Fetch consumable prekey bundle (pops an OPK)
-        var bundleResult = await _preKeyProvider.FetchConsumableBundleAsync(candidate.PeerId, ct).ConfigureAwait(false);
-        if (bundleResult.IsFailure)
-        {
-            return DomainResult<DirectRatchetSession>.Failure(bundleResult.Error);
-        }
-
-        // 2. Initiate X3DH handshake session
-        var sessionResult = await _handshakePort.InitiateHandshakeAsync(
-            localOwnerId,
-            localDeviceId,
-            bundleResult.Value,
+        // Delegate pairwise session establishment and channel creation entirely to host
+        return await _connectionService.ConnectToPeerAsync(
+            candidate.PeerId,
+            targetDeviceId: null,
+            relayEndpoint: null,
             ct).ConfigureAwait(false);
-
-        return sessionResult;
     }
 
     public async Task<DiscoveredPeerConnectionResult> DiscoverAndConnectAsync(

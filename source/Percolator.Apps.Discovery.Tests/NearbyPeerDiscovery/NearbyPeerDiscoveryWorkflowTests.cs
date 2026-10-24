@@ -2,10 +2,10 @@ using FluentAssertions;
 using NUnit.Framework;
 using Percolator.Apps.Discovery.Features.NearbyPeerDiscovery;
 using Percolator.Apps.Discovery.Ports;
+using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
-using Percolator.Domain.Security.Model;
-using Percolator.Domain.Security.ValueObjects;
 using Percolator.PluginSdk;
 
 namespace Percolator.Apps.Discovery.Tests.NearbyPeerDiscovery;
@@ -14,8 +14,7 @@ namespace Percolator.Apps.Discovery.Tests.NearbyPeerDiscovery;
 public sealed class NearbyPeerDiscoveryWorkflowTests
 {
     private FakeQueryClient _queryClient = null!;
-    private FakePreKeyProvider _preKeyProvider = null!;
-    private FakeHandshakePort _handshakePort = null!;
+    private FakePeerConnectionService _connectionService = null!;
     private NearbyPeerDiscoveryWorkflow _workflow = null!;
 
     private readonly PublicIdentityId _ownerId = PublicIdentityId.New();
@@ -26,23 +25,15 @@ public sealed class NearbyPeerDiscoveryWorkflowTests
     public void SetUp()
     {
         _queryClient = new FakeQueryClient();
-        _preKeyProvider = new FakePreKeyProvider();
-        _handshakePort = new FakeHandshakePort();
+        _connectionService = new FakePeerConnectionService();
 
         _workflow = new NearbyPeerDiscoveryWorkflow(
             _queryClient,
-            _preKeyProvider,
-            _handshakePort);
-    }
-
-    [TearDown]
-    public void TearDown()
-    {
-        _handshakePort.Dispose();
+            _connectionService);
     }
 
     [Test]
-    public async Task QueryNearbyPeersAsync_DoesNotConsumePreKeys()
+    public async Task QueryNearbyPeersAsync_DoesNotConsumePreKeysOrInitiateConnections()
     {
         var peerA = PublicIdentityId.New();
         var peerB = PublicIdentityId.New();
@@ -53,8 +44,8 @@ public sealed class NearbyPeerDiscoveryWorkflowTests
         var results = await _workflow.QueryNearbyPeersAsync(_targetRelayId, DiscoveryResultLimit.Default);
 
         results.Should().HaveCount(2);
-        // OPK Starvation check: Querying must NEVER call the prekey bundle provider
-        _preKeyProvider.FetchCallCount.Should().Be(0);
+        // OPK Starvation check: Querying must NEVER initiate a connection or consume prekeys
+        _connectionService.ConnectCallCount.Should().Be(0);
     }
 
     [Test]
@@ -89,8 +80,7 @@ public sealed class NearbyPeerDiscoveryWorkflowTests
 
         result.ConnectedPeers.Should().HaveCount(2);
         result.Failures.Should().BeEmpty();
-        _preKeyProvider.FetchCallCount.Should().Be(2);
-        _handshakePort.HandshakeCallCount.Should().Be(2);
+        _connectionService.ConnectCallCount.Should().Be(2);
     }
 
     [Test]
@@ -102,8 +92,8 @@ public sealed class NearbyPeerDiscoveryWorkflowTests
         _queryClient.Candidates.Add(new PeerDiscoveryDescriptor(peerFailing, DeliveryRoute.RelayedOneToOne));
         _queryClient.Candidates.Add(new PeerDiscoveryDescriptor(peerSuccess, DeliveryRoute.RelayedOneToOne));
 
-        // Configure peerFailing to fail prekey fetch
-        _preKeyProvider.FailForPeer(peerFailing, "PREKEY_NOT_FOUND");
+        // Configure peerFailing to fail connection
+        _connectionService.FailForPeer(peerFailing, "PREKEY_NOT_FOUND");
 
         var result = await _workflow.DiscoverAndConnectAsync(
             _ownerId,
@@ -113,6 +103,7 @@ public sealed class NearbyPeerDiscoveryWorkflowTests
 
         result.ConnectedPeers.Should().ContainSingle(p => p.PeerId == peerSuccess);
         result.Failures.Should().ContainSingle(f => f.PeerId == peerFailing && f.Error.Code == "PREKEY_NOT_FOUND");
+        _connectionService.ConnectCallCount.Should().Be(2);
     }
 
     [Test]
@@ -148,9 +139,9 @@ public sealed class NearbyPeerDiscoveryWorkflowTests
         }
     }
 
-    private sealed class FakePreKeyProvider : IPreKeyBundleProvider
+    private sealed class FakePeerConnectionService : IPeerConnectionService
     {
-        public int FetchCallCount { get; private set; }
+        public int ConnectCallCount { get; private set; }
         private readonly HashSet<PublicIdentityId> _failingPeers = new();
         private string _failureCode = "ERROR";
 
@@ -160,67 +151,24 @@ public sealed class NearbyPeerDiscoveryWorkflowTests
             _failureCode = errorCode;
         }
 
-        public ValueTask<DomainResult<PreKeyBundle>> FetchConsumableBundleAsync(
+        public Task<DomainResult<PeerConnectionResult>> ConnectToPeerAsync(
             PublicIdentityId targetPeerId,
+            DeviceId? targetDeviceId = null,
+            RelayEndpoint? relayEndpoint = null,
             CancellationToken ct = default)
         {
-            FetchCallCount++;
+            ConnectCallCount++;
 
             if (_failingPeers.Contains(targetPeerId))
             {
-                return ValueTask.FromResult(DomainResult<PreKeyBundle>.Failure(new DomainError(_failureCode, "Simulated prekey error.")));
+                return Task.FromResult(DomainResult<PeerConnectionResult>.Failure(
+                    new DomainError(_failureCode, "Simulated connection error.")));
             }
 
-            var identityKey = IdentityKey.FromSpan(new byte[32]);
-            var signedPreKey = DhPublicKey.FromSpan(new byte[32]);
-            var signature = DeviceLinkProof.FromSpan(new byte[64]);
-            var bundle = new PreKeyBundle(
-                targetPeerId,
-                new DeviceId(1),
-                identityKey,
-                signedPreKey,
-                signature);
-
-            return ValueTask.FromResult(DomainResult<PreKeyBundle>.Success(bundle));
-        }
-    }
-
-    private sealed class FakeHandshakePort : IDiscoveryHandshakePort, IDisposable
-    {
-        public int HandshakeCallCount { get; private set; }
-        private readonly List<ChainKey> _createdKeys = new();
-
-        public ValueTask<DomainResult<DirectRatchetSession>> InitiateHandshakeAsync(
-            PublicIdentityId ownerId,
-            DeviceId ownerDeviceId,
-            PreKeyBundle remoteBundle,
-            CancellationToken ct = default)
-        {
-            HandshakeCallCount++;
-
-            var rootKey = ChainKey.FromSpan(new byte[32]);
-            var sendingChain = ChainKey.FromSpan(new byte[32]);
-            _createdKeys.Add(rootKey);
-            _createdKeys.Add(sendingChain);
-
-            var session = new DirectRatchetSession(
-                ownerId,
-                ownerDeviceId,
-                remoteBundle.IdentityId,
-                remoteBundle.DeviceId,
-                rootKey: rootKey,
-                sendingChainKey: sendingChain,
-                receivingChainKey: null);
-
-            return ValueTask.FromResult(DomainResult<DirectRatchetSession>.Success(session));
-        }
-
-        public void Dispose()
-        {
-            foreach (var key in _createdKeys)
-            {
-                key.Dispose();
-            }
+            var channelId = ChannelId.New();
+            var deviceId = targetDeviceId ?? new DeviceId(1);
+            return Task.FromResult(DomainResult<PeerConnectionResult>.Success(
+                new PeerConnectionResult(channelId, deviceId)));
         }
     }
 }

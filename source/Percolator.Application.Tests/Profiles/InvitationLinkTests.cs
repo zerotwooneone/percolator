@@ -55,7 +55,7 @@ public sealed class InvitationLinkTests
         var identityKey = IdentityKey.FromSpan(new byte[32]);
         var routingToken = BlindedRoutingToken.New();
         var deliveryToken = DeliveryToken.FromSpan(new byte[32]);
-        const string relayEndpoint = "relay.percolator.net:15003";
+        var relayEndpoint = RelayEndpoint.Parse("relay.percolator.net:15003");
 
         var relayed = InvitationLink.CreateRelayed(
             peerId,
