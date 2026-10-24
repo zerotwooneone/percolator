@@ -57,7 +57,15 @@ public interface IPeerProfileRepository
 public sealed record PeerMailboxRoutingCapability(
     PublicIdentityId PeerId,
     BlindedRoutingToken RoutingToken,
-    DeliveryToken DeliveryToken);
+    DeliveryToken DeliveryToken,
+    string? RelayEndpoint = null,
+    DateTimeOffset LastObservedAtUtc = default,
+    DateTimeOffset? LastSuccessAtUtc = null,
+    DateTimeOffset? BackpressureCooldownUntilUtc = null)
+{
+    public bool IsAvailable(DateTimeOffset nowUtc) =>
+        BackpressureCooldownUntilUtc == null || BackpressureCooldownUntilUtc.Value <= nowUtc;
+}
 
 /// <summary>
 /// Persistence port for storing and retrieving peer mailbox routing capabilities derived from profile capabilities.
@@ -66,6 +74,10 @@ public interface IPeerMailboxRoutingRepository
 {
     Task SaveAsync(PeerMailboxRoutingCapability capability, CancellationToken ct = default);
     Task<PeerMailboxRoutingCapability?> GetByPeerIdAsync(PublicIdentityId peerId, CancellationToken ct = default);
+    Task<IReadOnlyList<PeerMailboxRoutingCapability>> GetRoutesForPeerAsync(PublicIdentityId peerId, CancellationToken ct = default);
+    Task<PeerMailboxRoutingCapability?> GetBestRouteAsync(PublicIdentityId peerId, DateTimeOffset nowUtc, CancellationToken ct = default);
+    Task RecordBackpressureAsync(PublicIdentityId peerId, string relayEndpoint, TimeSpan retryAfter, DateTimeOffset nowUtc, CancellationToken ct = default);
+    Task RecordSuccessAsync(PublicIdentityId peerId, string relayEndpoint, DateTimeOffset nowUtc, CancellationToken ct = default);
 }
 
 /// <summary>

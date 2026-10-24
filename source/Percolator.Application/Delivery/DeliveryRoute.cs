@@ -12,4 +12,6 @@ public enum DeliveryRouteType
 public readonly record struct DeliveryRoute(
     DeliveryRouteType Type,
     Uri? DirectEndpoint,
-    BlindedRoutingToken? TargetToken);
+    BlindedRoutingToken? TargetToken,
+    string? RelayEndpoint = null,
+    DeliveryToken? TargetDeliveryToken = null);

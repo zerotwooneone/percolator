@@ -177,7 +177,12 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
                 if (authorPublicKey is not null)
                 {
                     var deliveryToken = DeliveryToken.DeriveFromProfileKey(authorPublicKey, profileKey, _cryptoEngine);
-                    var capability = new PeerMailboxRoutingCapability(dto.AuthorId, routingToken, deliveryToken);
+                    var capability = new PeerMailboxRoutingCapability(
+                        dto.AuthorId,
+                        routingToken,
+                        deliveryToken,
+                        dto.SourceEndpoint,
+                        _timeProvider.UtcNow);
                     await _peerMailboxRoutingRepo.SaveAsync(capability, ct).ConfigureAwait(false);
                 }
             }

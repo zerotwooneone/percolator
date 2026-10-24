@@ -177,7 +177,7 @@ public sealed class HandshakeService : IHandshakeService
             {
                 var resolved = routeResult.Value;
                 route = resolved.Mode == DeliveryRoutingMode.RelayMailbox
-                    ? new DeliveryRoute(DeliveryRouteType.RelayedOneToOne, null, null)
+                    ? new DeliveryRoute(DeliveryRouteType.RelayedOneToOne, null, resolved.TargetRoutingToken, resolved.TargetRelayEndpoint, resolved.TargetDeliveryToken)
                     : new DeliveryRoute(DeliveryRouteType.DirectP2P, null, null);
             }
         }

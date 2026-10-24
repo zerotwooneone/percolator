@@ -1,6 +1,8 @@
 using Percolator.Application2.Ports;
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
+using Percolator.PluginSdk;
 
 namespace Percolator.Application2.Routing;
 
@@ -13,7 +15,9 @@ public enum DeliveryRoutingMode
 public readonly record struct ResolvedDeliveryRoute(
     DeliveryRoutingMode Mode,
     PublicIdentityId TargetPeerId,
-    PublicIdentityId? TargetRelayId = null);
+    string? TargetRelayEndpoint = null,
+    BlindedRoutingToken? TargetRoutingToken = null,
+    DeliveryToken? TargetDeliveryToken = null);
 
 public interface IRoutingCoordinator
 {
@@ -22,23 +26,20 @@ public interface IRoutingCoordinator
         CancellationToken ct = default);
 }
 
-public interface IPeerReachabilityService
-{
-    ValueTask<bool> IsDirectlyReachableAsync(PublicIdentityId peerId, CancellationToken ct = default);
-    ValueTask<PublicIdentityId?> GetHomeRelayAsync(PublicIdentityId peerId, CancellationToken ct = default);
-}
-
 public sealed class RoutingCoordinator : IRoutingCoordinator
 {
     private readonly IStreamRegistry _streamRegistry;
-    private readonly IPeerReachabilityService _reachabilityService;
+    private readonly IPeerMailboxRoutingRepository _routingRepo;
+    private readonly IDateTimeProvider _timeProvider;
 
     public RoutingCoordinator(
         IStreamRegistry streamRegistry,
-        IPeerReachabilityService reachabilityService)
+        IPeerMailboxRoutingRepository routingRepo,
+        IDateTimeProvider timeProvider)
     {
         _streamRegistry = streamRegistry ?? throw new ArgumentNullException(nameof(streamRegistry));
-        _reachabilityService = reachabilityService ?? throw new ArgumentNullException(nameof(reachabilityService));
+        _routingRepo = routingRepo ?? throw new ArgumentNullException(nameof(routingRepo));
+        _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
     }
 
     public async ValueTask<DomainResult<ResolvedDeliveryRoute>> ResolveRouteAsync(
@@ -52,23 +53,20 @@ public sealed class RoutingCoordinator : IRoutingCoordinator
                 new ResolvedDeliveryRoute(DeliveryRoutingMode.DirectPeer, targetPeerId));
         }
 
-        // 2. Check if peer endpoint is directly reachable
-        bool directlyReachable = await _reachabilityService.IsDirectlyReachableAsync(targetPeerId, ct);
-        if (directlyReachable)
+        // 2. Query peer routing repository for best available relay route (filtering out backpressure cooldowns)
+        var bestRoute = await _routingRepo.GetBestRouteAsync(targetPeerId, _timeProvider.UtcNow, ct).ConfigureAwait(false);
+        if (bestRoute != null)
         {
             return DomainResult<ResolvedDeliveryRoute>.Success(
-                new ResolvedDeliveryRoute(DeliveryRoutingMode.DirectPeer, targetPeerId));
-        }
-
-        // 3. Fallback to relay mailbox
-        var relayId = await _reachabilityService.GetHomeRelayAsync(targetPeerId, ct);
-        if (relayId != null)
-        {
-            return DomainResult<ResolvedDeliveryRoute>.Success(
-                new ResolvedDeliveryRoute(DeliveryRoutingMode.RelayMailbox, targetPeerId, relayId));
+                new ResolvedDeliveryRoute(
+                    DeliveryRoutingMode.RelayMailbox,
+                    targetPeerId,
+                    bestRoute.RelayEndpoint,
+                    bestRoute.RoutingToken,
+                    bestRoute.DeliveryToken));
         }
 
         return DomainResult<ResolvedDeliveryRoute>.Failure(new DomainError(
-            "UNRESOLVABLE_ROUTE", $"Unable to resolve direct route or home relay for peer {targetPeerId}."));
+            "UNRESOLVABLE_ROUTE", $"Unable to resolve direct route or available relay route for peer {targetPeerId}."));
     }
 }

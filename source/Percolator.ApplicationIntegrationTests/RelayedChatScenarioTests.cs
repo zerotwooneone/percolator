@@ -53,9 +53,9 @@ public sealed class RelayedChatScenarioTests
         fetchedHostedBundle.AvailableOneTimePreKeyCount.Should().Be(4, "Consuming a bundle should decrement the available OTPKs on the relay");
         var charlieBundle = consumeResult.Value!;
 
-        // Configure routing reachability so Alice and Charlie know their home relay
-        alice.ReachabilityService.SetHomeRelay(charlie.IdentityId, relay.RelayIdentityId);
-        charlie.ReachabilityService.SetHomeRelay(alice.IdentityId, relay.RelayIdentityId);
+        // Configure routing paths so Alice and Charlie know each other's relay mailbox routes
+        alice.AddPeerMailboxRoute(charlie.IdentityId, $"localhost:{relay.Port.Value}", charlie.MailboxRoutingToken, charlie.MailboxDeliveryToken);
+        charlie.AddPeerMailboxRoute(alice.IdentityId, $"localhost:{relay.Port.Value}", alice.MailboxRoutingToken, alice.MailboxDeliveryToken);
 
         // Alice initiates X3DH handshake targeting Charlie
         var handshakeResult = await alice.HandshakeService.InitiateHandshakeAsync(

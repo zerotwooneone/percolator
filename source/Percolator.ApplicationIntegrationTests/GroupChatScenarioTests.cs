@@ -50,11 +50,11 @@ public sealed class GroupChatScenarioTests
         bob.RegisterMailbox(relay);
         charlie.RegisterMailbox(relay);
 
-        // Configure reachability for relayed communication
-        alice.ReachabilityService.SetHomeRelay(charlie.IdentityId, relay.RelayIdentityId);
-        charlie.ReachabilityService.SetHomeRelay(alice.IdentityId, relay.RelayIdentityId);
-        bob.ReachabilityService.SetHomeRelay(charlie.IdentityId, relay.RelayIdentityId);
-        charlie.ReachabilityService.SetHomeRelay(bob.IdentityId, relay.RelayIdentityId);
+        // Configure routing paths for relayed communication
+        alice.AddPeerMailboxRoute(charlie.IdentityId, $"localhost:{relay.Port.Value}", charlie.MailboxRoutingToken, charlie.MailboxDeliveryToken);
+        charlie.AddPeerMailboxRoute(alice.IdentityId, $"localhost:{relay.Port.Value}", alice.MailboxRoutingToken, alice.MailboxDeliveryToken);
+        bob.AddPeerMailboxRoute(charlie.IdentityId, $"localhost:{relay.Port.Value}", charlie.MailboxRoutingToken, charlie.MailboxDeliveryToken);
+        charlie.AddPeerMailboxRoute(bob.IdentityId, $"localhost:{relay.Port.Value}", bob.MailboxRoutingToken, bob.MailboxDeliveryToken);
 
         // 1. Establish pairwise 1:1 sessions
         // Alice <-> Bob via direct stream

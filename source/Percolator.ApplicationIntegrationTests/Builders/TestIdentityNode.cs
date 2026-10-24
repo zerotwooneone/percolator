@@ -73,7 +73,6 @@ public sealed class TestIdentityNode
     public InboundIngressPipeline IngressPipeline { get; }
     public IStreamRegistry StreamRegistry { get; }
     public ITransportDispatcher TransportDispatcher { get; }
-    public TestPeerReachabilityService ReachabilityService { get; }
     public RoutingCoordinator RoutingCoordinator { get; }
 
     // CQRS Query Ports
@@ -174,8 +173,7 @@ public sealed class TestIdentityNode
         // Networking adapters
         StreamRegistry = new LoopbackStreamRegistry(IdentityId, DeviceId, _networkSwitch, _channelRepo);
         TransportDispatcher = new LoopbackTransportDispatcher(_networkSwitch);
-        ReachabilityService = new TestPeerReachabilityService(_networkSwitch, IdentityId);
-        RoutingCoordinator = new RoutingCoordinator(StreamRegistry, ReachabilityService);
+        RoutingCoordinator = new RoutingCoordinator(StreamRegistry, PeerMailboxRoutingRepo, TimeProvider);
 
         // Egress & Locks
         var channelLockService = new KeyedSemaphoreLockService();
@@ -273,6 +271,21 @@ public sealed class TestIdentityNode
 
         // Register on network switch
         _networkSwitch.RegisterNode(Port, IdentityId, ReceiveWireBytesAsync);
+    }
+
+    public void AddPeerMailboxRoute(
+        PublicIdentityId peerId,
+        string relayEndpoint,
+        BlindedRoutingToken routingToken,
+        DeliveryToken deliveryToken)
+    {
+        var capability = new PeerMailboxRoutingCapability(
+            peerId,
+            routingToken,
+            deliveryToken,
+            relayEndpoint,
+            LastObservedAtUtc: TimeProvider.UtcNow);
+        PeerMailboxRoutingRepo.SaveAsync(capability).GetAwaiter().GetResult();
     }
 
     public void RotateProfileKey()

@@ -1,40 +1,64 @@
+using FluentAssertions;
+using NUnit.Framework;
 using Percolator.Application2.Ports;
 using Percolator.Application2.Routing;
 using Percolator.Application2.Tests.TestDoubles;
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
+using Percolator.PluginSdk;
 
 namespace Percolator.Application2.Tests.Routing;
 
-public sealed class InMemoryPeerReachabilityService : IPeerReachabilityService
+public sealed class TestPeerMailboxRoutingRepository : IPeerMailboxRoutingRepository
 {
-    private readonly HashSet<PublicIdentityId> _reachablePeers = [];
-    private readonly Dictionary<PublicIdentityId, PublicIdentityId> _homeRelays = [];
+    private readonly List<PeerMailboxRoutingCapability> _routes = [];
 
-    public void SetReachable(PublicIdentityId peerId, bool reachable = true)
+    public Task SaveAsync(PeerMailboxRoutingCapability capability, CancellationToken ct = default)
     {
-        if (reachable) _reachablePeers.Add(peerId);
-        else _reachablePeers.Remove(peerId);
+        _routes.Add(capability);
+        return Task.CompletedTask;
     }
 
-    public void SetHomeRelay(PublicIdentityId peerId, PublicIdentityId relayId)
+    public Task<PeerMailboxRoutingCapability?> GetByPeerIdAsync(PublicIdentityId peerId, CancellationToken ct = default)
     {
-        _homeRelays[peerId] = relayId;
+        var found = _routes.Where(r => r.PeerId == peerId).OrderByDescending(r => r.LastSuccessAtUtc ?? r.LastObservedAtUtc).FirstOrDefault();
+        return Task.FromResult(found);
     }
 
-    public ValueTask<bool> IsDirectlyReachableAsync(PublicIdentityId peerId, CancellationToken ct = default)
+    public Task<IReadOnlyList<PeerMailboxRoutingCapability>> GetRoutesForPeerAsync(PublicIdentityId peerId, CancellationToken ct = default)
     {
-        return ValueTask.FromResult(_reachablePeers.Contains(peerId));
+        IReadOnlyList<PeerMailboxRoutingCapability> list = _routes.Where(r => r.PeerId == peerId).ToList();
+        return Task.FromResult(list);
     }
 
-    public ValueTask<PublicIdentityId?> GetHomeRelayAsync(PublicIdentityId peerId, CancellationToken ct = default)
+    public Task<PeerMailboxRoutingCapability?> GetBestRouteAsync(PublicIdentityId peerId, DateTimeOffset nowUtc, CancellationToken ct = default)
     {
-        if (_homeRelays.TryGetValue(peerId, out var relayId))
+        var best = _routes
+            .Where(r => r.PeerId == peerId && r.IsAvailable(nowUtc))
+            .OrderByDescending(r => r.LastSuccessAtUtc ?? r.LastObservedAtUtc)
+            .FirstOrDefault();
+        return Task.FromResult(best);
+    }
+
+    public Task RecordBackpressureAsync(PublicIdentityId peerId, string relayEndpoint, TimeSpan retryAfter, DateTimeOffset nowUtc, CancellationToken ct = default)
+    {
+        var idx = _routes.FindIndex(r => r.PeerId == peerId && string.Equals(r.RelayEndpoint, relayEndpoint, StringComparison.OrdinalIgnoreCase));
+        if (idx >= 0)
         {
-            return ValueTask.FromResult<PublicIdentityId?>(relayId);
+            _routes[idx] = _routes[idx] with { BackpressureCooldownUntilUtc = nowUtc.Add(retryAfter) };
         }
+        return Task.CompletedTask;
+    }
 
-        return ValueTask.FromResult<PublicIdentityId?>(null);
+    public Task RecordSuccessAsync(PublicIdentityId peerId, string relayEndpoint, DateTimeOffset nowUtc, CancellationToken ct = default)
+    {
+        var idx = _routes.FindIndex(r => r.PeerId == peerId && string.Equals(r.RelayEndpoint, relayEndpoint, StringComparison.OrdinalIgnoreCase));
+        if (idx >= 0)
+        {
+            _routes[idx] = _routes[idx] with { LastSuccessAtUtc = nowUtc, BackpressureCooldownUntilUtc = null };
+        }
+        return Task.CompletedTask;
     }
 }
 
@@ -42,21 +66,36 @@ public sealed class InMemoryPeerReachabilityService : IPeerReachabilityService
 public sealed class RoutingCoordinatorTests
 {
     private InMemoryStreamRegistry _streamRegistry = null!;
-    private InMemoryPeerReachabilityService _reachabilityService = null!;
+    private TestPeerMailboxRoutingRepository _routingRepo = null!;
+    private TestDateTimeProvider _timeProvider = null!;
     private RoutingCoordinator _coordinator = null!;
 
     private PublicIdentityId _peerId;
-    private PublicIdentityId _relayId;
+    private BlindedRoutingToken _token1;
+    private BlindedRoutingToken _token2;
+    private DeliveryToken _deliveryToken1;
+    private DeliveryToken _deliveryToken2;
 
     [SetUp]
     public void SetUp()
     {
         _streamRegistry = new InMemoryStreamRegistry();
-        _reachabilityService = new InMemoryPeerReachabilityService();
-        _coordinator = new RoutingCoordinator(_streamRegistry, _reachabilityService);
+        _routingRepo = new TestPeerMailboxRoutingRepository();
+        _timeProvider = new TestDateTimeProvider();
+        _coordinator = new RoutingCoordinator(_streamRegistry, _routingRepo, _timeProvider);
 
         _peerId = PublicIdentityId.New();
-        _relayId = PublicIdentityId.New();
+        _token1 = BlindedRoutingToken.New();
+        _token2 = BlindedRoutingToken.New();
+        _deliveryToken1 = DeliveryToken.FromSpan(new byte[32]);
+        _deliveryToken2 = DeliveryToken.FromSpan(new byte[32]);
+    }
+
+    [TearDown]
+    public void TearDown()
+    {
+        _deliveryToken1.Dispose();
+        _deliveryToken2.Dispose();
     }
 
     [Test]
@@ -75,27 +114,17 @@ public sealed class RoutingCoordinatorTests
     }
 
     [Test]
-    public async Task ResolveRoute_WhenPeerOnlineAndReachable_SelectsDirect()
+    public async Task ResolveRoute_WhenNoStreamButRelayRouteExists_SelectsRelay()
     {
         // Arrange
         _streamRegistry.SetStreamActive(_peerId, false);
-        _reachabilityService.SetReachable(_peerId, true);
-
-        // Act
-        var result = await _coordinator.ResolveRouteAsync(_peerId);
-
-        // Assert
-        result.IsSuccess.Should().BeTrue();
-        result.Value!.Mode.Should().Be(DeliveryRoutingMode.DirectPeer);
-    }
-
-    [Test]
-    public async Task ResolveRoute_WhenPeerOfflineOrSuspect_SelectsRelay()
-    {
-        // Arrange
-        _streamRegistry.SetStreamActive(_peerId, false);
-        _reachabilityService.SetReachable(_peerId, false);
-        _reachabilityService.SetHomeRelay(_peerId, _relayId);
+        var route = new PeerMailboxRoutingCapability(
+            _peerId,
+            _token1,
+            _deliveryToken1,
+            RelayEndpoint: "relay-1.example.com",
+            LastObservedAtUtc: _timeProvider.UtcNow);
+        await _routingRepo.SaveAsync(route);
 
         // Act
         var result = await _coordinator.ResolveRouteAsync(_peerId);
@@ -103,7 +132,69 @@ public sealed class RoutingCoordinatorTests
         // Assert
         result.IsSuccess.Should().BeTrue();
         result.Value!.Mode.Should().Be(DeliveryRoutingMode.RelayMailbox);
-        result.Value!.TargetRelayId.Should().Be(_relayId);
+        result.Value!.TargetRelayEndpoint.Should().Be("relay-1.example.com");
+        result.Value!.TargetRoutingToken.Should().Be(_token1);
+        result.Value!.TargetDeliveryToken.Should().Be(_deliveryToken1);
+    }
+
+    [Test]
+    public async Task ResolveRoute_WhenPrimaryRelayInBackpressureCooldown_SwitchesToNextAvailableRelay()
+    {
+        // Arrange
+        _streamRegistry.SetStreamActive(_peerId, false);
+
+        // Route 1 (Most recently observed)
+        var primaryRoute = new PeerMailboxRoutingCapability(
+            _peerId,
+            _token1,
+            _deliveryToken1,
+            RelayEndpoint: "relay-1.example.com",
+            LastObservedAtUtc: _timeProvider.UtcNow);
+
+        // Route 2 (Older observed route)
+        var fallbackRoute = new PeerMailboxRoutingCapability(
+            _peerId,
+            _token2,
+            _deliveryToken2,
+            RelayEndpoint: "relay-2.example.com",
+            LastObservedAtUtc: _timeProvider.UtcNow.AddMinutes(-5));
+
+        await _routingRepo.SaveAsync(fallbackRoute);
+        await _routingRepo.SaveAsync(primaryRoute);
+
+        // Primary route is placed under 60-second backpressure cooldown
+        await _routingRepo.RecordBackpressureAsync(_peerId, "relay-1.example.com", TimeSpan.FromSeconds(60), _timeProvider.UtcNow);
+
+        // Act
+        var result = await _coordinator.ResolveRouteAsync(_peerId);
+
+        // Assert: coordinator bypasses relay-1 and resolves to relay-2
+        result.IsSuccess.Should().BeTrue();
+        result.Value!.Mode.Should().Be(DeliveryRoutingMode.RelayMailbox);
+        result.Value!.TargetRelayEndpoint.Should().Be("relay-2.example.com");
+        result.Value!.TargetRoutingToken.Should().Be(_token2);
+    }
+
+    [Test]
+    public async Task ResolveRoute_WhenAllRelaysInBackpressureCooldown_ReturnsFailure()
+    {
+        // Arrange
+        _streamRegistry.SetStreamActive(_peerId, false);
+        var route = new PeerMailboxRoutingCapability(
+            _peerId,
+            _token1,
+            _deliveryToken1,
+            RelayEndpoint: "relay-1.example.com",
+            LastObservedAtUtc: _timeProvider.UtcNow,
+            BackpressureCooldownUntilUtc: _timeProvider.UtcNow.AddMinutes(5));
+        await _routingRepo.SaveAsync(route);
+
+        // Act
+        var result = await _coordinator.ResolveRouteAsync(_peerId);
+
+        // Assert
+        result.IsSuccess.Should().BeFalse();
+        result.Error!.Code.Should().Be("UNRESOLVABLE_ROUTE");
     }
 
     [Test]
@@ -111,7 +202,6 @@ public sealed class RoutingCoordinatorTests
     {
         // Arrange
         _streamRegistry.SetStreamActive(_peerId, false);
-        _reachabilityService.SetReachable(_peerId, false);
 
         // Act
         var result = await _coordinator.ResolveRouteAsync(_peerId);

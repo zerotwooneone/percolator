@@ -13,7 +13,7 @@ public sealed class OutboxJob : AggregateRoot<Guid>
     public ChannelId ChannelId { get; }
     public PublicIdentityId OwnerIdentityId { get; }
     public PublicIdentityId? RecipientIdentityId { get; }
-    public DeliveryRoute Route { get; }
+    public DeliveryRoute Route { get; private set; }
     public ReadOnlyMemory<byte> Payload { get; }
     public OutboxStatus Status { get; private set; }
     public int RetryCount { get; private set; }
@@ -66,6 +66,11 @@ public sealed class OutboxJob : AggregateRoot<Guid>
 
         job.AddDomainEvent(new OutboxJobEnqueuedEvent(job.Id, ownerIdentityId, timeProvider.UtcNow));
         return DomainResult<OutboxJob>.Success(job);
+    }
+
+    public void RebindRoute(DeliveryRoute newRoute)
+    {
+        Route = newRoute;
     }
 
     public DomainResult PauseForDormancy(IDateTimeProvider timeProvider)

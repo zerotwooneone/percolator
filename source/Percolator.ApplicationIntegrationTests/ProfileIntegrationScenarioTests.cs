@@ -160,9 +160,9 @@ public sealed class ProfileIntegrationScenarioTests
         alice.RegisterMailbox(relay);
         charlie.RegisterMailbox(relay);
 
-        // Configure reachability so both nodes route via home relay
-        alice.ReachabilityService.SetHomeRelay(charlie.IdentityId, relay.RelayIdentityId);
-        charlie.ReachabilityService.SetHomeRelay(alice.IdentityId, relay.RelayIdentityId);
+        // Configure routing paths so both nodes route via relay mailbox
+        alice.AddPeerMailboxRoute(charlie.IdentityId, $"localhost:{relay.Port.Value}", charlie.MailboxRoutingToken, charlie.MailboxDeliveryToken);
+        charlie.AddPeerMailboxRoute(alice.IdentityId, $"localhost:{relay.Port.Value}", alice.MailboxRoutingToken, alice.MailboxDeliveryToken);
 
         // Establish mutual approved contacts and direct channel
         await alice.AddApprovedContactAsync(charlie);
@@ -295,10 +295,10 @@ public sealed class ProfileIntegrationScenarioTests
         bob.RegisterMailbox(relay);
         charlie.RegisterMailbox(relay);
 
-        alice.ReachabilityService.SetHomeRelay(bob.IdentityId, relay.RelayIdentityId);
-        bob.ReachabilityService.SetHomeRelay(alice.IdentityId, relay.RelayIdentityId);
-        alice.ReachabilityService.SetHomeRelay(charlie.IdentityId, relay.RelayIdentityId);
-        charlie.ReachabilityService.SetHomeRelay(alice.IdentityId, relay.RelayIdentityId);
+        alice.AddPeerMailboxRoute(bob.IdentityId, $"localhost:{relay.Port.Value}", bob.MailboxRoutingToken, bob.MailboxDeliveryToken);
+        bob.AddPeerMailboxRoute(alice.IdentityId, $"localhost:{relay.Port.Value}", alice.MailboxRoutingToken, alice.MailboxDeliveryToken);
+        alice.AddPeerMailboxRoute(charlie.IdentityId, $"localhost:{relay.Port.Value}", charlie.MailboxRoutingToken, charlie.MailboxDeliveryToken);
+        charlie.AddPeerMailboxRoute(alice.IdentityId, $"localhost:{relay.Port.Value}", alice.MailboxRoutingToken, alice.MailboxDeliveryToken);
 
         // Bootstrap sessions
         var aliceBobChannel = await alice.EstablishDirectSessionWithAsync(bob);
