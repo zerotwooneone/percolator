@@ -26,6 +26,12 @@ public class RelayMailboxQueueTests
         _queue.RegisterRecipient(_recipientToken, _deliveryToken);
     }
 
+    [TearDown]
+    public void TearDown()
+    {
+        _deliveryToken?.Dispose();
+    }
+
     [Test]
     public void Enqueue_WithValidDeliveryToken_StoresEnvelope()
     {
@@ -77,7 +83,7 @@ public class RelayMailboxQueueTests
     [Test]
     public void Enqueue_WithUnauthorizedDeliveryToken_ReturnsError()
     {
-        var invalidToken = DeliveryToken.FromSpan(Enumerable.Repeat((byte)0xFF, 32).ToArray());
+        using var invalidToken = DeliveryToken.FromSpan(Enumerable.Repeat((byte)0xFF, 32).ToArray());
         var envelope = new MailboxEnvelope(
             EnvelopeId.New(),
             _recipientToken,
@@ -176,7 +182,7 @@ public class RelayMailboxQueueTests
     public void DrainForToken_RemovesAndReturnsMatchingEnvelopes()
     {
         var otherToken = BlindedRoutingToken.New();
-        var otherDeliveryToken = DeliveryToken.FromSpan(new byte[32]);
+        using var otherDeliveryToken = DeliveryToken.FromSpan(new byte[32]);
         _queue.RegisterRecipient(otherToken, otherDeliveryToken);
 
         var env1 = new MailboxEnvelope(EnvelopeId.New(), _recipientToken, new byte[] { 1 }, _timeProvider.UtcNow, _timeProvider.UtcNow.AddDays(1));
@@ -212,8 +218,8 @@ public class RelayMailboxQueueTests
     public void TryDrainForToken_WhenDistinctDrainTokenRegistered_RejectsSenderDeliveryTokenAndAllowsRecipientDrainToken()
     {
         var securedRoutingToken = BlindedRoutingToken.New();
-        var senderDeliveryToken = DeliveryToken.FromSpan(Enumerable.Repeat((byte)0x11, 32).ToArray());
-        var recipientDrainToken = DeliveryToken.FromSpan(Enumerable.Repeat((byte)0x22, 32).ToArray());
+        using var senderDeliveryToken = DeliveryToken.FromSpan(Enumerable.Repeat((byte)0x11, 32).ToArray());
+        using var recipientDrainToken = DeliveryToken.FromSpan(Enumerable.Repeat((byte)0x22, 32).ToArray());
 
         _queue.RegisterRecipient(securedRoutingToken, senderDeliveryToken, recipientDrainToken);
 

@@ -1,3 +1,6 @@
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
@@ -11,7 +14,7 @@ namespace Percolator.Domain.Delivery.ValueObjects;
 /// message enqueue without revealing the sender's identity.
 /// </summary>
 [ByteArray(length: 32)]
-public sealed partial record DeliveryToken
+public sealed partial record DeliveryToken : ISensitiveSecret
 {
     public static DeliveryToken DeriveFromProfileKey(IdentityKey ownerPublicKey, ProfileKey profileKey, ICryptoEngine engine)
     {
@@ -26,5 +29,18 @@ public sealed partial record DeliveryToken
             32);
 
         return FromSpan(bytes);
+    }
+
+    public void Zeroize()
+    {
+        if (MemoryMarshal.TryGetArray(_value, out var segment) && segment.Array != null)
+        {
+            CryptographicOperations.ZeroMemory(segment.Array.AsSpan(segment.Offset, segment.Count));
+        }
+    }
+
+    public void Dispose()
+    {
+        Zeroize();
     }
 }

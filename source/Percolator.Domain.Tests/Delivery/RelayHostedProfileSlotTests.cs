@@ -35,8 +35,9 @@ public sealed class RelayHostedProfileSlotTests
     [TearDown]
     public void TearDown()
     {
-        _profileKey.Dispose();
-        _ownerPrivateKey.Dispose();
+        _writeToken?.Dispose();
+        _profileKey?.Dispose();
+        _ownerPrivateKey?.Dispose();
     }
 
     [Test]
@@ -88,7 +89,7 @@ public sealed class RelayHostedProfileSlotTests
         var slot = RelayHostedProfileSlot.Create(_locator, _writeToken, _validPackage, revision: 1, expiry).Value;
 
         using var differentKey = ProfileKey.Generate();
-        var invalidWriteToken = ProfileWriteToken.Derive(_ownerPrivateKey, differentKey, _cryptoEngine);
+        using var invalidWriteToken = ProfileWriteToken.Derive(_ownerPrivateKey, differentKey, _cryptoEngine);
         var newPackage = new ProfileCiphertextPackage(new byte[12], new byte[1040]);
 
         var updateResult = slot.Update(invalidWriteToken, newPackage, newRevision: 2, expiry);

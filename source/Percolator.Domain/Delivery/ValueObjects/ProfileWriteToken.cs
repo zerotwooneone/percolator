@@ -1,3 +1,6 @@
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using Percolator.Domain.Common;
 using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.SourceGenerators;
@@ -11,7 +14,7 @@ namespace Percolator.Domain.Delivery.ValueObjects;
 /// and strictly prevents contacts from forging the write token to modify or delete the slot.
 /// </summary>
 [ByteArray(length: 32)]
-public sealed partial record ProfileWriteToken
+public sealed partial record ProfileWriteToken : ISensitiveSecret
 {
     public static ProfileWriteToken Derive(EphemeralPrivateKey ownerPrivateKey, ProfileKey profileKey, ICryptoEngine engine)
     {
@@ -26,5 +29,18 @@ public sealed partial record ProfileWriteToken
             32);
 
         return FromSpan(bytes);
+    }
+
+    public void Zeroize()
+    {
+        if (MemoryMarshal.TryGetArray(_value, out var segment) && segment.Array != null)
+        {
+            CryptographicOperations.ZeroMemory(segment.Array.AsSpan(segment.Offset, segment.Count));
+        }
+    }
+
+    public void Dispose()
+    {
+        Zeroize();
     }
 }
