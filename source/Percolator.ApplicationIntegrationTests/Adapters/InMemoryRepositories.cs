@@ -118,6 +118,7 @@ public sealed class InMemoryChannelRepository : IChannelRepository
         _groupChannels[channel.Id] = channel;
         return Task.CompletedTask;
     }
+
 }
 
 public sealed class InMemoryOutboxRepository : IOutboxRepository
@@ -154,6 +155,7 @@ public sealed class InMemoryOutboxRepository : IOutboxRepository
         _jobs[job.Id] = job;
         return Task.CompletedTask;
     }
+
 }
 
 public sealed class InMemoryPeerContactRepository : IPeerContactRepository
@@ -598,5 +600,14 @@ public sealed class InMemoryPeerMailboxRoutingRepository : IPeerMailboxRoutingRe
         }
 
         return Task.CompletedTask;
+    }
+
+    public Task<IReadOnlyList<PeerMailboxRoutingCapability>> GetAllAsync(CancellationToken ct = default)
+    {
+        lock (_lock)
+        {
+            var all = _peerRoutes.Values.SelectMany(r => r).ToList();
+            return Task.FromResult<IReadOnlyList<PeerMailboxRoutingCapability>>(all);
+        }
     }
 }

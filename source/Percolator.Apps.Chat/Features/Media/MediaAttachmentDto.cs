@@ -10,4 +10,5 @@ public sealed record MediaAttachmentDto(
     int? Width,
     int? Height,
     byte[]? Waveform,
-    ReadOnlyMemory<byte>? InlineBytes);
+    ReadOnlyMemory<byte>? InlineBytes,
+    BlobReference? OutOfBandReference = null);

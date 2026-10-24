@@ -1,5 +1,6 @@
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
+using Percolator.Domain.Identities.ValueObjects;
 using Percolator.PluginSdk;
 
 namespace Percolator.Apps.Chat.Features.Media;
@@ -136,9 +137,34 @@ public sealed class ChatMediaService
             width,
             height,
             waveform,
-            InlineBytes: null);
+            InlineBytes: null,
+            OutOfBandReference: uploadResult.Value.Reference);
 
         return DomainResult<MediaAttachmentDto>.Success(attachment);
+    }
+
+    public async ValueTask<DomainResult<BlobDownloadResult>> DownloadOutOfBandAttachmentAsync(
+        MediaAttachmentDto attachment,
+        PublicIdentityId? remotePeerId = null,
+        IProgress<TransferProgress>? progress = null,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(attachment);
+
+        if (attachment.OutOfBandReference is null)
+        {
+            return DomainResult<BlobDownloadResult>.Failure(new DomainError(
+                "MISSING_BLOB_REFERENCE", "Attachment does not contain an out-of-band blob reference."));
+        }
+
+        if (_blobStorage is null)
+        {
+            return DomainResult<BlobDownloadResult>.Failure(new DomainError(
+                "BLOB_STORAGE_UNAVAILABLE", "Out-of-band blob storage service is not configured."));
+        }
+
+        var downloadRequest = new BlobDownloadRequest(attachment.OutOfBandReference, ct, remotePeerId);
+        return await _blobStorage.DownloadBlobAsync(downloadRequest, progress, ct).ConfigureAwait(false);
     }
 
     public async ValueTask PurgeLocalAttachmentBlobsAsync(

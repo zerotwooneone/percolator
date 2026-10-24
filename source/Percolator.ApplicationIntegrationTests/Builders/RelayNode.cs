@@ -22,6 +22,7 @@ public sealed class RelayNode
     public InMemoryRelayPreKeyRepository PreKeyRepository { get; }
     public InMemoryRelayProfileRepository ProfileRepository { get; } = new();
     public InMemoryRelayLedgerRepository LedgerRepository { get; } = new();
+    public InMemoryRelayBlobStore BlobStore { get; } = new();
     public ScenarioZkProofEngine ZkEngine { get; } = new();
     public RelayHostingPolicy Policy { get; }
     public IDateTimeProvider TimeProvider { get; }

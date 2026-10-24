@@ -11,6 +11,7 @@ using Percolator.Application2IntegrationTests.Adapters;
 using Percolator.Application2IntegrationTests.Adapters.Queries;
 using Percolator.Application2IntegrationTests.Infrastructure;
 using Percolator.Apps.Chat.Features.GroupInvitations;
+using Percolator.Apps.Chat.Features.Media;
 using Percolator.Apps.Chat.Features.Messaging;
 using Percolator.Apps.Chat.Features.Profiles;
 using Percolator.Apps.Chat.Ingress;
@@ -62,6 +63,14 @@ public sealed class TestIdentityNode
     public IPeerProfileQueryService PeerProfileQueries { get; }
     public IProfileDeliveryClient ProfileDeliveryClient { get; }
     public InMemoryRelayProfileRepository LocalProfileRepository { get; } = new();
+
+    // Media & Out-of-band Blob Storage
+    public ChatMediaService MediaService { get; }
+    public IBlobStorageService BlobStorage { get; }
+    public InMemoryLocalChunkStore LocalChunkStore { get; } = new();
+    public ScenarioBlobCryptoService BlobCryptoService { get; } = new();
+    public LoopbackRelayBlobClient RelayBlobClient { get; }
+    public LoopbackChannelRelayResolver ChannelRelayResolver { get; }
 
     // Driving Ports
     public IChatService ChatService { get; }
@@ -150,6 +159,9 @@ public sealed class TestIdentityNode
         ProfileDeliveryClient = new LoopbackProfileDeliveryClient(_networkSwitch, TimeProvider);
         _networkSwitch.RegisterPeerProfileStore(IdentityId, LocalProfileRepository);
 
+        // Register local chunk store on network switch
+        _networkSwitch.RegisterChunkStore(IdentityId, LocalChunkStore);
+
         // Initialize Stores
         _chatRepo = new InMemoryChatMessageRepository();
         _channelRepo = new InMemoryChannelRepository();
@@ -178,6 +190,24 @@ public sealed class TestIdentityNode
         RoutingCoordinator = new RoutingCoordinator(StreamRegistry, PeerMailboxRoutingRepo, TimeProvider);
         PreKeyBundleProvider = new LoopbackPreKeyBundleProvider(_networkSwitch);
 
+        // Blob & Media Storage
+        RelayBlobClient = new LoopbackRelayBlobClient(_networkSwitch);
+        ChannelRelayResolver = new LoopbackChannelRelayResolver(_networkSwitch, PeerMailboxRoutingRepo);
+        var peerStreamBlobClient = new LoopbackPeerStreamBlobClient(peerId =>
+            _networkSwitch.TryGetChunkStore(peerId, out var cs) ? cs : null);
+
+        BlobStorage = new BlobStorageService(
+            _channelRepo,
+            ChannelRelayResolver,
+            StreamRegistry,
+            BlobCryptoService,
+            RelayBlobClient,
+            peerStreamBlobClient,
+            LocalChunkStore,
+            TimeProvider);
+
+        MediaService = new ChatMediaService(BlobStorage);
+
         // Egress & Locks
         var channelLockService = new KeyedSemaphoreLockService();
         var egressPipeline = new OutboundEgressPipeline(
@@ -200,7 +230,7 @@ public sealed class TestIdentityNode
             serializer,
             TimeProvider,
             unknownGroupCache: null,
-            blobStorage: null,
+            blobStorage: BlobStorage,
             peerProfileRepo: PeerProfileRepo,
             profileDeliveryClient: ProfileDeliveryClient,
             profileManager: ProfileManager,
@@ -214,7 +244,8 @@ public sealed class TestIdentityNode
             _channelRepo,
             egressPipeline,
             serializer,
-            TimeProvider);
+            TimeProvider,
+            BlobStorage);
 
         ContactRequestCoordinator = new ContactRequestCoordinator(
             _contactRepo,

@@ -258,7 +258,7 @@ Prior to implementing Phase 2 and subsequent phases, the following core defects 
   - `Relay.RelayGroupLedger.VerifyDispatch` verifies proof and fans out opaque `MailboxEnvelope`s to Bob and Charlie's routing tokens.
   - Bob and Charlie drain/receive the broadcast, decrypt with Alice's sender key, and verify Alice's author signature.
 
-### Phase 5: Chat Media & Out-of-Band Encrypted Attachment Storage
+### Phase 5: Chat Media & Out-of-Band Encrypted Attachment Storage [COMPLETED in MediaAttachmentScenarioTests.cs]
 - **Step 5.1**: Alice uploads 128 KB binary payload via `ChatMediaService.UploadOutOfBandAttachmentAsync`.
 - **Step 5.2**: Relay blob store stores encrypted chunks and returns `BlobReference`.
 - **Step 5.3**: Alice sends chat message with attachment metadata and `BlobReference`.

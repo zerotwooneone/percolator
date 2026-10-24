@@ -1,4 +1,5 @@
 using Percolator.Domain.Channels.ValueObjects;
+using Percolator.Domain.Identities.ValueObjects;
 
 namespace Percolator.PluginSdk;
 
@@ -21,7 +22,8 @@ public sealed record BlobUploadResult(
 
 public sealed record BlobDownloadRequest(
     BlobReference Reference,
-    CancellationToken CancellationToken = default);
+    CancellationToken CancellationToken = default,
+    PublicIdentityId? RemotePeerId = null);
 
 public sealed record BlobDownloadResult(
     Stream ContentStream,

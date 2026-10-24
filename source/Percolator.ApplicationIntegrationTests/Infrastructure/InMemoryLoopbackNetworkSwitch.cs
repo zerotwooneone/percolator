@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Percolator.Application2.Ports;
 using Percolator.Application2IntegrationTests.Builders;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
@@ -19,6 +20,7 @@ public sealed class InMemoryLoopbackNetworkSwitch
     private readonly ConcurrentDictionary<ChannelId, RelayNode> _channelToRelay = new();
     private readonly ConcurrentDictionary<ChannelId, (GroupMasterKey MasterKey, AuthCredentialMacBytes AuthMac)> _channelCredentials = new();
     private readonly ConcurrentDictionary<PublicIdentityId, IRelayProfileRepository> _peerProfileStores = new();
+    private readonly ConcurrentDictionary<PublicIdentityId, ILocalChunkStore> _peerChunkStores = new();
 
     public IReadOnlyCollection<RelayNode> AllRelays => _relaysById.Values.ToList();
     public IReadOnlyCollection<IRelayProfileRepository> AllPeerProfileStores => _peerProfileStores.Values.ToList();
@@ -83,6 +85,16 @@ public sealed class InMemoryLoopbackNetworkSwitch
     public bool TryGetPeerProfileStore(PublicIdentityId peerId, out IRelayProfileRepository? profileRepo)
     {
         return _peerProfileStores.TryGetValue(peerId, out profileRepo);
+    }
+
+    public void RegisterChunkStore(PublicIdentityId peerId, ILocalChunkStore chunkStore)
+    {
+        _peerChunkStores[peerId] = chunkStore;
+    }
+
+    public bool TryGetChunkStore(PublicIdentityId peerId, out ILocalChunkStore? chunkStore)
+    {
+        return _peerChunkStores.TryGetValue(peerId, out chunkStore);
     }
 
     public void OpenDirectStream(EndpointPort sourcePort, EndpointPort targetPort)

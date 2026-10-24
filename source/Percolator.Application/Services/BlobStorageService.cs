@@ -236,6 +236,21 @@ public sealed class BlobStorageService : IBlobStorageService
                 await _localChunkStore.SaveBlobAsync(request.Reference.Id, ciphertextStream, ct).ConfigureAwait(false);
                 ciphertextStream.Position = 0;
             }
+            else if (request.Reference.StorageMode == BlobStorageMode.DirectP2P && request.RemotePeerId.HasValue)
+            {
+                var downloadResult = await _peerStreamBlobClient.RequestBlobFromPeerAsync(
+                    request.RemotePeerId.Value, request.Reference.Id, progress, ct).ConfigureAwait(false);
+
+                if (!downloadResult.IsSuccess)
+                {
+                    return DomainResult<BlobDownloadResult>.Failure(downloadResult.Error!);
+                }
+
+                ciphertextStream = downloadResult.Value!;
+                ciphertextStream.Position = 0;
+                await _localChunkStore.SaveBlobAsync(request.Reference.Id, ciphertextStream, ct).ConfigureAwait(false);
+                ciphertextStream.Position = 0;
+            }
             else
             {
                 return DomainResult<BlobDownloadResult>.Failure(new DomainError(
