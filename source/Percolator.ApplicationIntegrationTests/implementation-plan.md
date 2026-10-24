@@ -40,174 +40,196 @@ Build a progressive, 6-phase integration test suite in `Percolator.ApplicationIn
 
 ---
 
-## 2. Prerequisite Application & Plugin Layer Fixes
+## 2. Vertical Feature Slice Architecture
 
-*(Note: Deterministic AEAD nonce derivation via `MessageKey.Expand(uint counterOrIteration)` is already implemented in `Percolator.Domain` and wired into `OutboundEgressPipeline` and `InboundIngressPipeline`.)*
-
-Before writing the Phase 1–6 tests, apply these **4 minimal fixes** adhering strictly to our hexagonal ports and value objects:
-
-### 2.1 Preserve `BlobReference` in `MediaAttachmentDto` & Add `DownloadOutOfBandAttachmentAsync` (`Percolator.Apps.Chat` + `Percolator.Application`)
-- **Current Gap**:
-  - `ChatMediaService.UploadOutOfBandAttachmentAsync` (`Percolator.Apps.Chat/Features/Media/ChatMediaService.cs`) calls `IBlobStorageService.UploadBlobAsync` and gets `BlobUploadResult(BlobReference Reference, BlobStorageMode StorageMode)`, but discards `Reference` (`EncryptionKey`, `BaseNonce`, `CiphertextSha256`, `CiphertextSizeBytes`, `StorageMode`, `RelayEndpointUri`) and only stores `BlobId` on `MediaAttachmentDto`.
-  - `ChatMediaService` has no download method.
-  - `BlobStorageService.DownloadBlobAsync` (`Percolator.Application/Services/BlobStorageService.cs:240`) injects `IPeerStreamBlobClient` (`_peerStreamBlobClient`) + `IChannelRepository` (`_channelRepo`) but returns `"P2P_DOWNLOAD_NOT_FOUND"` instead of calling `_peerStreamBlobClient.RequestBlobFromPeerAsync` when `StorageMode == BlobStorageMode.DirectP2P`.
-- **Fix**:
-  1. Add `BlobReference? OutOfBandReference = null` to `MediaAttachmentDto` (`Percolator.Apps.Chat/Features/Media/MediaAttachmentDto.cs`) and populate `OutOfBandReference: uploadResult.Value.Reference` in `ChatMediaService.UploadOutOfBandAttachmentAsync`.
-  2. Add `DownloadOutOfBandAttachmentAsync(MediaAttachmentDto attachment, CancellationToken ct = default)` to `ChatMediaService` that validates `attachment.OutOfBandReference`, calls `_blobStorage.DownloadBlobAsync(new BlobDownloadRequest(attachment.OutOfBandReference, ct), ct: ct)`, and verifies the decrypted stream length matches `attachment.ByteSize`.
-  3. In `BlobStorageService.DownloadBlobAsync`, when `request.Reference.StorageMode == BlobStorageMode.DirectP2P` and the blob is not in `_localChunkStore`, resolve the remote peer via `IChannelRepository` / `request.Reference` and invoke `_peerStreamBlobClient.RequestBlobFromPeerAsync`.
-
-### 2.2 Resolve Pairwise `DirectChannel` & `DeliveryRoute` via `IChannelRepository` and `IRoutingCoordinator` in `GroupKeyDistributionService` (`Percolator.Application`)
-- **Current Gap**:
-  - `GroupKeyDistributionService.DistributeSenderKeyAsync` (`Percolator.Application/Services/GroupKeyDistributionService.cs:86-93`) hardcodes `DeliveryRoute.DirectP2P` and passes the group's `channelId` in `OutboundPayloadContext`.
-- **Fix (Hexagonal Port Injection, No Delegates)**:
-  - Inject optional `IChannelRepository? channelRepo = null` and `IRoutingCoordinator? routingCoordinator = null` into `GroupKeyDistributionService`.
-  - For each `recipientId`, resolve the pairwise 1:1 `DirectChannel` via `_channelRepo.GetDirectByPeerAsync(senderId, recipientId, ct)` (using `directChannel.Id` as `OutboundPayloadContext.ChannelId` so 1:1 channel locks don't contend with the group channel lock) and resolve the route via `_routingCoordinator.ResolveRouteAsync(recipientId, ct)` (`DeliveryRoutingMode.RelayMailbox` -> `DeliveryRoute.RelayedOneToOne`, `DeliveryRoutingMode.DirectPeer` -> `DeliveryRoute.DirectP2P`).
-
-### 2.3 Add Strongly-Typed `HandshakeHeader` Packing to `ISessionWirePacker` (`Percolator.Domain` + `Percolator.Application`)
-- **Current Gap**:
-  - `HandshakeService.InitiateHandshakeAsync` (`Percolator.Application/Handshake/HandshakeService.cs:140-145`) manually copies `[EphemeralPublicKey (32B)][EncryptedInitialPayload]` using `Buffer.BlockCopy`, violating `ISessionWirePacker` encapsulation and omitting `SenderIdentityKey`, `SignedPreKeyId`, and `OneTimePreKeyId` needed for `InboundHandshakeEnvelope`.
-- **Fix**:
-  - Define a `HandshakeHeader(IdentityKey SenderIdentityKey, DhPublicKey SenderEphemeralKey, uint SignedPreKeyId, uint? OneTimePreKeyId)` value object in `Percolator.Domain.Security.ValueObjects`.
-  - Add `PackHandshakeMessage(HandshakeHeader header, ReadOnlyMemory<byte> encryptedPayload)` and `UnpackHandshakeMessage(PublicIdentityId recipientId, PublicIdentityId senderId, DeviceId senderDeviceId, ReadOnlyMemory<byte> wireBytes, DateTimeOffset receivedAtUtc)` to `ISessionWirePacker` (`Percolator.Application/Ports/ISessionWirePacker.cs`).
-  - Update `HandshakeService.InitiateHandshakeAsync` to call `_wirePacker.PackHandshakeMessage(...)` and resolve the outbound route via `IRoutingCoordinator` (falling back to `DirectP2P` if not injected).
-
-### 2.4 Allow `TransferSessionCoordinator` Seeder Pump in `Uploading` State (`Percolator.Apps.FileTransfer`)
-- **Current Gap**:
-  - In `TransferSessionCoordinator.PumpSingleStreamAsync` (`Percolator.Apps.FileTransfer/Features/MultiStreamEngine/TransferSessionCoordinator.cs:345-351`), a seeder has `session.IsDownloadComplete == true`. When `HandleAcceptAsync` transitions the sender's session from `WaitingForPeer` to `TransferSessionState.Uploading`, `isDownloadDone` evaluates `session.IsDownloadComplete && session.State != TransferSessionState.Seeding` (`true`), causing the sender's stream pump to exit immediately before reading `RequestChunkFrame`s from the receiver.
-- **Fix**:
-  - Update line 345 in `TransferSessionCoordinator.PumpSingleStreamAsync` so `isDownloadDone` is `session.IsDownloadComplete && session.State is not (TransferSessionState.Uploading or TransferSessionState.Seeding)`.
-
----
-
-## 3. Fluent Builder Architecture (`TestIdentityNode`, `TestClusterBuilder`, `InMemoryLoopbackNetworkSwitch`)
-
-### 3.1 `TestIdentityNode` (`Percolator.ApplicationIntegrationTests/Builders/TestIdentityNode.cs`)
-Each node built by `TestIdentityBuilder` encapsulates an isolated Hexagonal application instance bound to an `EndpointPort` (`15001`..`15005`):
-- **Identity & Value-Object Addressing**:
-  - `string Name`, `EndpointPort Port`, `DirectEndpointCandidate LocalEndpointCandidate` (`localhost:{Port}`)
-  - `PublicIdentityId IdentityId`, `DeviceId DeviceId = DeviceId.Primary`
-  - `IdentityKey IdentityPublicKey`, `EphemeralPrivateKey IdentityPrivateKey`
-  - `DhPublicKey SignedPreKeyPublic`, `EphemeralPrivateKey SignedPreKeyPrivate`, `DeviceLinkProof SignedPreKeySignature`
-  - `BlindedRoutingToken MailboxRoutingToken`, `DeliveryToken MailboxDeliveryToken`, `DeliveryToken MailboxDrainToken`
-  - `InvitationLink CreateInvitationLink()` -> `new InvitationLink("localhost", Port.Value, Convert.ToHexString(IdentityPublicKey.Span))`
-  - `PreKeyBundle CreatePreKeyBundle(uint? oneTimeKeyId = null)`
-- **Exposed Driving Ports (Commands / Actions)**:
-  - `IChatService ChatService`
-  - `ChatMediaService ChatMediaService`
-  - `GroupInvitationService GroupInvitationService`
-  - `IHandshakeService HandshakeService`
-  - `IContactRequestCoordinator ContactRequestCoordinator`
-  - `IGroupKeyDistributionService GroupKeyDistributionService`
-  - `NearbyPeerDiscoveryWorkflow NearbyDiscoveryWorkflow`
-  - `IFileTransferActionHandler FileTransferActions`
-  - `TransferSessionCoordinator FileTransferCoordinator`
-  - `OutboxWorker OutboxWorker`
-  - `InboundIngressPipeline IngressPipeline`
-- **Exposed CQRS Query Ports (Read-Only Assertions — Used by Tests)**:
-  - `IChatMessageQueryService ChatQueries` (`GetMessagesAsync` -> `IReadOnlyList<ChatMessageReadModel>`)
-  - `IConversationListQueryService ConversationQueries` (`GetConversationsAsync` -> `IReadOnlyList<ConversationSummaryReadModel>`)
-  - `IGroupInvitationQueryService GroupInvitationQueries` (`GetPendingInvitationsAsync` -> `IReadOnlyList<GroupInvitationSummaryReadModel>`)
-  - `IPeerContactQueryService ContactQueries` (`GetContactSummariesAsync`, `GetContactDetailAsync` -> `PeerContactDetailReadModel`)
-  - `IOutboxQueryService OutboxQueries` (`GetPendingJobsAsync`, `GetFailedJobsAsync`, `GetJobSummaryByIdAsync` -> `OutboxJobSummaryReadModel`)
-  - `IFileTransferQueryService FileTransferQueries` (`GetAllTransfersAsync`, `GetTransferByIdAsync`, `GetManifestFilesAsync` -> `TransferSessionReadModel`, `ManifestFileReadModel`)
-- **Internal Driven Adapters (Encapsulated Inside Node)**:
-  - Write repositories (`IRatchetSessionRepository`, `IGroupSenderKeyRepository`, `IGroupReceiverSessionRepository`, `IChannelRepository`, `IOutboxRepository`, `IPeerContactRepository`, `IPendingHandshakeRepository`, `IChatMessageRepository`, `IGroupInvitationRepository`, `ITransferSessionRepository`) and in-memory query adapters projecting those stores into the `*ReadModel`s above.
-- **Relay Hosting State (when `.AsRelayNode()` is configured on `localhost:15003`)**:
-  - `RelayMailboxQueue`, `IRelayLedgerRepository`, `IRelayPreKeyRepository`, `RelayHostingPolicy`, `InMemoryRelayPeerDirectory`, `PrivateRendezvousService`, and an in-memory relay blob store backing `IRelayBlobClient`.
-
-### 3.2 Stateless Privacy-Preserving Wire Framing (`ISessionWirePacker`, `ISealedEnvelopeUnwrapper`, `InMemoryLoopbackNetworkSwitch`)
-To ensure `Relay` (`localhost:15003`) never sees cleartext sender or channel metadata on `MailboxEnvelope` and `InMemoryLoopbackNetworkSwitch` never relies on length heuristics or out-of-band test dictionaries:
-1. **Explicit `WireFrameKind` Discriminator**:
-   - Every inner transport envelope wrapped for `IStreamRegistry` or `MailboxEnvelope.Ciphertext` starts with a 53-byte inner sealed header decoded exclusively by the recipient's `ISealedEnvelopeUnwrapper`:
-     - `[WireFrameKind (1B: 0x01=DirectRatchet, 0x02=GroupBroadcast, 0x03=X3dhHandshake)]`
-     - `[ChannelId (16B)]`
-     - `[SenderIdentityId (16B)]`
-     - `[SenderDeviceId (16B)]`
-     - `[PayloadLength (4B LE)]`
-     - `[PackedSessionWireBytes (from ISessionWirePacker)]`
-2. **Direct P2P Delivery (`DeliveryRouteType.DirectP2P`)**:
-   - When Node A's `OutboundEgressPipeline` (via `IStreamRegistry.TryWriteAsync`) or `OutboxWorker` (via `ITransportDispatcher.SendAsync`) sends to Node B over an active `localhost:{port}` connection, `ISealedEnvelopeUnwrapper` on Node B decodes the `WireFrameKind`, delegates to `ISessionWirePacker.UnpackDirectRatchetMessage` or `UnpackHandshakeMessage`, and passes the resulting `InboundEnvelope` into `NodeB.IngressPipeline.ProcessInboundAsync(...)`.
-3. **Relayed 1:1 Store-and-Forward (`DeliveryRouteType.RelayedOneToOne`)**:
-   - `ITransportDispatcher` wraps the sealed frame into `MailboxEnvelope(EnvelopeId.New(), recipientBlindedRoutingToken, sealedBytes, expiresAtUtc)` and calls `Relay.MailboxQueue.Enqueue(envelope, recipientDeliveryToken, timeProvider)`.
-   - `Relay` only sees `BlindedRoutingToken` and opaque `sealedBytes`.
-   - When the recipient drains `Relay.MailboxQueue.TryDrainForToken(recipientBlindedRoutingToken, recipientDrainToken)`, the recipient passes each `MailboxEnvelope` to `ISealedEnvelopeUnwrapper.Unwrap(envelope)` and feeds the resulting `InboundEnvelope` into `IngressPipeline.ProcessInboundAsync(...)`.
-4. **Relayed Group Broadcast (`DeliveryRouteType.RelayedGroup`)**:
-   - `ISessionWirePacker.PackGroupMessage` produces `[Iteration (4B LE)][Ed25519 Signature (64B)][Ciphertext]`.
-   - The sender's `ITransportDispatcher` computes `RelayGroupLedger.ComputeDispatchChallenge(sealedBytes, challengeSpan)`, generates a `ZkPresentationBytes` proof via `IZkProofEngine`, and submits `(channelId, proof, sealedBytes)` to `Relay` (`localhost:15003`).
-   - `Relay` loads `RelayGroupLedger` for `channelId`, verifies `ledger.VerifyDispatch(proof, sealedBytes, zkEngine)` (enforcing zero-knowledge membership and anti-replay), and enqueues a `MailboxEnvelope` for each `BlindedRoutingToken` in `ledger.ActiveRoutingTokens` (excluding the sender's routing token).
+```
+Percolator.ApplicationIntegrationTests/
+├── Features/
+│   ├── DirectMessaging/                     # Phase 1: 1:1 Direct Loopback Chat
+│   │   ├── DirectChatScenarioTests.cs
+│   │   └── DirectStreamTestFixtures.cs
+│   ├── RelayedMessaging/                    # Phase 2: Relayed Handshake & Chat
+│   │   ├── RelayedChatScenarioTests.cs
+│   │   ├── RelayNode.cs                     # Dedicated autonomous relay node
+│   │   ├── RelayMailboxQueueAdapter.cs
+│   │   └── RelayedTransportDispatcher.cs
+│   ├── GroupMessaging/                      # Phase 3: Relayed Group Chat & Sender Keys
+│   │   ├── GroupChatScenarioTests.cs
+│   │   ├── RelayGroupLedgerAdapter.cs
+│   │   └── ZkPresentationTestDouble.cs
+│   ├── MediaAttachments/                    # Phase 4: Encrypted Media Attachments
+│   │   ├── MediaAttachmentScenarioTests.cs
+│   │   └── RelayBlobStoreAdapter.cs
+│   ├── PeerDiscovery/                       # Phase 5: Sovereign Directory & Rendezvous
+│   │   ├── PeerDiscoveryScenarioTests.cs
+│   │   └── RelayPeerDirectoryAdapter.cs
+│   └── BulkFileTransfer/                    # Phase 6: Multi-Stream Swarm File Transfer
+│       ├── FileTransferScenarioTests.cs
+│       └── LoopbackStreamPoolAdapter.cs
+├── Common/
+│   ├── Builders/
+│   │   ├── TestClusterBuilder.cs            # Fluent builder with AddNode & AddRelayNode
+│   │   ├── TestIdentityNode.cs              # Client participant node
+│   │   └── RelayNode.cs                     # Autonomous infrastructure relay node
+│   ├── Infrastructure/
+│   │   ├── EndpointPort.cs
+│   │   ├── InMemoryLoopbackNetworkSwitch.cs
+│   │   ├── ScenarioCryptoEngine.cs
+│   │   ├── SealedWireFraming.cs
+│   │   ├── TestDateTimeProvider.cs
+│   │   └── TestPayloadSerializer.cs
+│   ├── Adapters/
+│   │   ├── InMemoryRepositories.cs
+│   │   ├── LoopbackStreamRegistry.cs
+│   │   ├── LoopbackTransportDispatcher.cs
+│   │   ├── SealedEnvelopeUnwrapper.cs
+│   │   ├── DefaultSessionWirePacker.cs
+│   │   └── Queries/
+│   │       └── InMemoryQueryAdapters.cs
+│   └── Routing/
+│       ├── TestPeerReachabilityService.cs
+│       └── DeterministicChannelId.cs        # Deterministic 1:1 ChannelId generator
+```
 
 ---
 
-## 4. Phased Implementation & Test Progression
+## 3. Prerequisite Application & Domain Fixes (Critical Review Findings)
+
+Prior to implementing Phase 2 and subsequent phases, the following core defects must be addressed:
+
+### 3.1 Deterministic Direct Channel Creation in Handshake Flow (`Percolator.Application`)
+- **Identified Failure Mode**:
+  - In Phase 1, `EstablishDirectSessionWithAsync` artificially generated a `ChannelId.New()` and inserted `DirectChannel` records directly into both nodes' `IChannelRepository`.
+  - In Phase 2, Alice calls `HandshakeService.InitiateHandshakeAsync`. `HandshakeService` creates a `DirectRatchetSession`, but **never** provisions a `DirectChannel` in `IChannelRepository`.
+  - When Charlie receives and completes the handshake (`HandshakeService.ProcessActiveInvitationAsync`), it passes `ChannelId.New()` in `InboundPayloadContext`.
+  - When `ChatPayloadHandler.HandleInboundAsync` executes, it compares `dto.ChannelId != context.ChannelId` and fails with `CHANNEL_MISMATCH`, and `_channelRepo.GetDirectByIdAsync(context.ChannelId)` returns null.
+- **Architectural Solution**:
+  1. Inject `IChannelRepository` into `HandshakeService`.
+  2. Use deterministic channel derivation for 1:1 direct channels: `DeterministicChannelId.ForDirect(aliceId, peerId)` (sorting the pair of `PublicIdentityId`s lexicographically so both nodes independently derive the identical `ChannelId`).
+  3. In `InitiateHandshakeAsync`, create and save the `DirectChannel` in `IChannelRepository` if not already present.
+  4. In `ProcessActiveInvitationAsync`, create and save the `DirectChannel` for the recipient before dispatching the initial greeting payload to `IAppRouter`.
+
+### 3.2 Relayed Delivery Routing & Transport Dispatcher Support (`Percolator.ApplicationIntegrationTests`)
+- **Identified Failure Mode**:
+  - `LoopbackTransportDispatcher` only handles `DeliveryRouteType.DirectP2P`.
+  - When Alice's outbox processes a job for Charlie (`DeliveryRouteType.RelayedOneToOne`), `LoopbackTransportDispatcher` returns `UNSUPPORTED_ROUTE`.
+  - `TestIdentityNode` currently injects `routingCoordinator: null` into `HandshakeService`, defaulting all handshakes to `DirectP2P`.
+- **Architectural Solution**:
+  1. Implement `TestPeerReachabilityService` that knows which nodes have direct streams vs which use a home relay (`localhost:15003`).
+  2. Wire `RoutingCoordinator` with `TestPeerReachabilityService` into `TestIdentityNode`.
+  3. Extend `LoopbackTransportDispatcher` to handle `DeliveryRouteType.RelayedOneToOne`:
+     - Resolves the recipient's `BlindedRoutingToken` and `DeliveryToken`.
+     - Packages the sealed frame into a `MailboxEnvelope(EnvelopeId.New(), recipientToken, sealedBytes, expiresAtUtc)`.
+     - Enqueues directly to the target relay's `RelayMailboxQueue.Enqueue(envelope, deliveryToken, timeProvider)`.
+
+### 3.3 Autonomous Relay Node Representation (`TestClusterBuilder`)
+- **Identified Failure Mode**:
+  - `TestIdentityNode` creates client applications with user identities, chat services, and contact managers.
+  - A Relay node is an autonomous infrastructure server, not an end-user client.
+- **Architectural Solution**:
+  - Add `RelayNode` to `TestClusterBuilder` via `.AddRelayNode("Relay", port, policy)`.
+  - `RelayNode` encapsulates:
+    - `RelayMailboxQueue`
+    - `IRelayPreKeyRepository` (holding `RelayHostedPreKeyBundle`s)
+    - `IRelayLedgerRepository` (holding `RelayGroupLedger`s)
+    - `InMemoryRelayPeerDirectory` (for Phase 5 discovery)
+    - In-memory relay blob store (for Phase 4 attachments)
+
+### 3.4 Wire Framing Cleanliness & Single Discriminator (`SealedWireFraming` & `DefaultSessionWirePacker`)
+- **Identified Failure Mode**:
+  - `DefaultSessionWirePacker` prepends `WireFrameKind` byte, and `SealedWireFraming` also prepends `WireFrameKind` byte.
+  - This creates duplicate headers that risk off-by-one errors when processing relayed envelopes.
+- **Architectural Solution**:
+  - Standardize `SealedWireFraming` as the outer framing envelope for transport dispatch and loopback switch.
+  - The outer frame contains `[WireFrameKind (1B)][ChannelId (16B)][SenderIdentityId (16B)][SenderDeviceId (16B)][PayloadLength (4B)][PackedSessionWireBytes]`.
+  - For store-and-forward privacy over relay, the relay sees only `MailboxEnvelope.Ciphertext = sealedWireBytes` without inspecting inner fields.
+
+### 3.5 Media Attachment Blob Reference Preservation (`Percolator.Apps.Chat` + `Percolator.Application`)
+- Add `BlobReference? OutOfBandReference = null` to `MediaAttachmentDto` and preserve it in `ChatMediaService.UploadOutOfBandAttachmentAsync`.
+- Add `DownloadOutOfBandAttachmentAsync(MediaAttachmentDto attachment, CancellationToken ct = default)` to `ChatMediaService`.
+- When `StorageMode == BlobStorageMode.DirectP2P`, resolve peer and invoke `_peerStreamBlobClient.RequestBlobFromPeerAsync`.
+
+### 3.6 Allow `TransferSessionCoordinator` Seeder Pump in `Uploading` State (`Percolator.Apps.FileTransfer`)
+- Fix line 345 in `TransferSessionCoordinator.PumpSingleStreamAsync` so `isDownloadDone` is `session.IsDownloadComplete && session.State is not (TransferSessionState.Uploading or TransferSessionState.Seeding)`.
+
+---
+
+## 4. Decomposed Multi-Step Orchestration by Phase
 
 ### Phase 1: 2 Identities (`Alice` & `Bob`) — Direct Connection & 1:1 Double Ratchet Chat
-- **Arrange**:
-  - Build `Alice` (`localhost:15001`) and `Bob` (`localhost:15002`) via `TestClusterBuilder`.
-  - Exchange `InvitationLink` (`percolator://localhost:15001/<hex>` and `percolator://localhost:15002/<hex>`) and `PreKeyBundle` out of band.
-  - Establish mutual X3DH / `DirectRatchetSession` and shared `DirectChannel` between `Alice` and `Bob`, and open a direct stream between `localhost:15001` and `localhost:15002`.
-- **Act & Assert (via CQRS Query Ports)**:
-  - `Alice` sends `"Hello Bob over direct localhost!"` via `Alice.ChatService.SendMessageAsync(new SendMessageCommand(channelId, alice.IdentityId, bob.IdentityId, DeviceId.Primary, "Hello Bob over direct localhost!", DeliveryRoute.DirectP2P))`.
-  - Query `Alice.OutboxQueries.GetJobSummaryByIdAsync(...)` (or `GetPendingJobsAsync`) and verify the job transitioned to `OutboxStatus.Delivered` via fast-path `IStreamRegistry.TryWriteAsync`.
-  - Query `Bob.ChatQueries.GetMessagesAsync(channelId, null, 50, nowMs)` and `Bob.ConversationQueries.GetConversationsAsync(bob.IdentityId, nowMs)`; verify `ChatMessageReadModel.Content == "Hello Bob over direct localhost!"` and `ConversationSummaryReadModel.UnreadCount == 1`.
-  - `Bob` replies `"Hi Alice, loud and clear!"` via `Bob.ChatService.SendMessageAsync`.
-  - Query `Alice.ChatQueries.GetMessagesAsync(channelId, null, 50, nowMs)` and verify both messages appear in chronological order after the Double Ratchet DH turnaround (`StepDhRatchet`).
+- **Step 1.1**: Build cluster with `Alice` (`15001`) and `Bob` (`15002`) over loopback switch.
+- **Step 1.2**: Exchange invitation links out-of-band and open direct loopback stream.
+- **Step 1.3**: Establish pairwise Double Ratchet session and direct channel.
+- **Step 1.4**: Alice sends 1:1 chat message over `DirectP2P`; assert immediate delivery via fast-path stream write (`IStreamRegistry.TryWriteAsync`).
+- **Step 1.5**: Bob asserts inbound message via `ChatQueries` and conversation unread count via `ConversationQueries`.
+- **Step 1.6**: Bob replies; assert ratchet turnaround (`StepDhRatchet`) and causal ordering on Alice.
 
-### Phase 2: 3rd (`Relay`) & 4th Identity (`Charlie`) — X3DH Handshake & Chat Over Relay
-- **Arrange**:
-  - Add `Relay` (`localhost:15003`, `.AsRelayNode()`) and `Charlie` (`localhost:15004`, reachable via `Relay`).
-  - `Charlie` publishes a `RelayHostedPreKeyBundle` to `Relay` (`RelayHostedPreKeyBundle.Create(...)` with 5 one-time prekeys) and registers his `(MailboxRoutingToken, MailboxDeliveryToken, MailboxDrainToken)` in `Relay.MailboxQueue`.
-- **Act & Assert (via CQRS Query Ports)**:
-  - `Alice` consumes a `PreKeyBundle` for `Charlie` from `Relay` (`RelayHostedPreKeyBundle.ConsumeBundle()`, verifying `AvailableOneTimePreKeyCount` decrements from 5 to 4).
-  - `Alice` serializes a greeting `ChatPayloadEnvelopeDto` (`"Hi Charlie, reaching out via Relay!"`) and calls `Alice.HandshakeService.InitiateHandshakeAsync(alice.IdentityId, DeviceId.Primary, charlieBundle, AppId.Chat, greetingBytes)`.
-  - `Alice.OutboxWorker.ProcessBatchAsync()` dispatches the handshake job into `Relay.MailboxQueue.Enqueue(...)`.
-  - `Charlie` drains his mailbox on `Relay` (`TryDrainForToken`), unwraps via `ISealedEnvelopeUnwrapper`, and processes the `InboundHandshakeEnvelope` via `Charlie.IngressPipeline.ProcessInboundAsync`.
-  - Query `Charlie.ContactQueries.GetContactDetailAsync(charlie.IdentityId, alice.IdentityId)` and verify `State == ContactState.PendingApproval`; query `Charlie.ChatQueries.GetMessagesAsync` and verify the greeting is not yet visible before consent.
-  - `Charlie` calls `Charlie.ContactRequestCoordinator.ApproveRequestAsync(charlie.IdentityId, alice.IdentityId)` and `Charlie.HandshakeService.CompletePendingHandshakeAsync(charlie.IdentityId, alice.IdentityId)`.
-  - Query `Charlie.ContactQueries.GetContactDetailAsync(charlie.IdentityId, alice.IdentityId)` (`State == ContactState.Approved`) and `Charlie.ChatQueries.GetMessagesAsync(...)` (verifying `"Hi Charlie, reaching out via Relay!"` is now decrypted and projected in `ChatMessageReadModel`).
-  - `Charlie` and `Alice` exchange follow-up 1:1 messages using `DeliveryRoute.RelayedOneToOne` routed through `RelayMailboxQueue`.
+### Phase 2: 3rd (`Relay`) & 4th Identity (`Charlie`) — Relayed Handshake & Chat
+- **Step 2.1: Relay Provisioning & Charlie Registration**:
+  - Build cluster with `Relay` (`localhost:15003`, `RelayNode`) and `Charlie` (`localhost:15004`, client node).
+  - Charlie registers `(MailboxRoutingToken, MailboxDeliveryToken, MailboxDrainToken)` in `Relay.MailboxQueue`.
+  - Charlie publishes `RelayHostedPreKeyBundle` with 5 one-time prekeys to `Relay`.
+- **Step 2.2: Alice PreKey Consumption & Handshake Initiation**:
+  - Alice queries `Relay` and consumes Charlie's `PreKeyBundle` (asserting OTPK count decrements from 5 to 4).
+  - Alice creates deterministic `DirectChannel(aliceId, charlieId)` and initiates handshake with initial greeting (`ChatPayloadEnvelopeDto: "Hi Charlie, reaching out via Relay!"`).
+  - Handshake package is saved to Alice's outbox with route `RelayedOneToOne(TargetRelayId = relay.Id, TargetToken = charlie.MailboxRoutingToken)`.
+- **Step 2.3: Relayed Outbox Dispatch**:
+  - Alice runs `OutboxWorker.ProcessBatchAsync()`.
+  - `LoopbackTransportDispatcher` packages the sealed handshake into `MailboxEnvelope` and enqueues on `Relay.MailboxQueue.Enqueue(envelope, charlie.MailboxDeliveryToken, timeProvider)`.
+  - Assert `Alice.OutboxQueries.GetPendingJobsAsync()` is empty and job status is `Delivered`.
+  - Assert `Relay.MailboxQueue.TotalCount` is 1 and envelope has zero sender metadata.
+- **Step 2.4: Charlie Mailbox Drain & Pending Request Reception**:
+  - Charlie drains `Relay.MailboxQueue.TryDrainForToken(charlie.MailboxRoutingToken, charlie.MailboxDrainToken)`.
+  - Charlie unwraps the envelope via `ISealedEnvelopeUnwrapper` and feeds to `IngressPipeline.ProcessInboundAsync`.
+  - Assert `Charlie.ContactQueries.GetContactDetailAsync(charlie.Id, alice.Id)` has `State == ContactState.PendingApproval`.
+  - Assert greeting message is NOT yet visible in `Charlie.ChatQueries.GetMessagesAsync` (held in pending handshake store).
+- **Step 2.5: Charlie Consent Approval & Handshake Completion**:
+  - Charlie calls `ContactRequestCoordinator.ApproveRequestAsync(charlie.Id, alice.Id)`.
+  - Charlie calls `HandshakeService.CompletePendingHandshakeAsync(charlie.Id, alice.Id)`.
+  - Charlie derives master secret, provisions local `DirectChannel`, decrypts initial greeting, and routes to `ChatPayloadHandler`.
+  - Assert `Charlie.ContactQueries` shows `ContactState.Approved`.
+  - Assert `Charlie.ChatQueries.GetMessagesAsync` contains `"Hi Charlie, reaching out via Relay!"`.
+- **Step 2.6: Bidirectional Relayed Chat**:
+  - Charlie sends reply `"Hello Alice via Relay!"` using route `DeliveryRoute.RelayedOneToOne`.
+  - Charlie's outbox dispatches envelope to `Relay.MailboxQueue`.
+  - Alice drains `Relay.MailboxQueue`, processes inbound envelope, and asserts Charlie's reply in `Alice.ChatQueries`.
 
 ### Phase 3: Group Chat (`Alice`, `Bob`, `Charlie`) Hosted on `Relay`
-- **Arrange**:
-  - `Alice` creates a `GroupChannel` (`"Percolator Builders"`), `GroupCredentials` (`GroupMasterKey`), and registers a `RelayGroupLedger` on `Relay` (`localhost:15003`) with `BlindedRoutingToken`s for `Alice`, `Bob`, and `Charlie`.
-- **Act & Assert (via CQRS Query Ports)**:
-  - `Alice` invites `Bob` (over `DeliveryRoute.DirectP2P`) and `Charlie` (over `DeliveryRoute.RelayedOneToOne`) using `Alice.GroupInvitationService.SendInvitationAsync`.
-  - Query `Bob.GroupInvitationQueries.GetPendingInvitationsAsync()` and `Charlie.GroupInvitationQueries.GetPendingInvitationsAsync()`; verify each returns a `GroupInvitationSummaryReadModel` with `GroupName == "Percolator Builders"` and `Status == GroupInvitationStatus.Pending`.
-  - `Bob` and `Charlie` call `GroupInvitationService.AcceptInvitationAsync(invitation.InvitationId, ...)`.
-  - `Alice`, `Bob`, and `Charlie` each call `GroupKeyDistributionService.DistributeSenderKeyAsync(groupChannelId, senderId, DeviceId.Primary, rosterIds)` (which uses `IRoutingCoordinator` + `IChannelRepository` to route `AppId.SystemControl` over `DirectP2P` to `Bob` and `RelayedOneToOne` to `Charlie`).
-  - `Alice` broadcasts `"Welcome to the group, Bob and Charlie!"` via `Alice.ChatService.SendMessageAsync` with `RecipientIdentityId: null` and `Route: DeliveryRoute.RelayedGroup`.
-  - `Bob` broadcasts `"Hey everyone from Bob!"` and `Charlie` broadcasts `"Hey everyone from Charlie!"`.
-  - Query `ChatQueries.GetMessagesAsync(groupChannelId, null, 50, nowMs)` on `Alice`, `Bob`, and `Charlie` and verify all 3 `ChatMessageReadModel`s are present with verified author identities, while `Relay` only ever processed `ZkPresentationBytes` and opaque ciphertexts.
+- **Step 3.1: Group Creation & Ledger Registration**:
+  - Alice creates `GroupChannel("Percolator Builders")` with `GroupMasterKey`.
+  - Alice registers `RelayGroupLedger` on `Relay` with `ActiveRoutingTokens` for Alice, Bob, and Charlie.
+- **Step 3.2: Pairwise Invitation & Acceptance**:
+  - Alice sends invitations: Bob over `DirectP2P`, Charlie over `RelayedOneToOne`.
+  - Bob and Charlie query `GroupInvitationQueries.GetPendingInvitationsAsync()` and accept.
+- **Step 3.3: Pairwise Sender Key Distribution**:
+  - Alice, Bob, and Charlie each call `GroupKeyDistributionService.DistributeSenderKeyAsync(...)`.
+  - Keys are distributed pairwise via 1:1 Double Ratchet channels (`AppId.SystemControl = 0x00`).
+  - Recipients process inbound system messages and import sender keys into `IGroupReceiverSessionRepository`.
+- **Step 3.4: Zero-Knowledge Relayed Broadcast**:
+  - Alice broadcasts `"Welcome to the group, Bob and Charlie!"` via `ChatService.SendMessageAsync(Route: DeliveryRoute.RelayedGroup)`.
+  - Dispatcher computes ZK proof / dispatch challenge and submits `(channelId, proof, sealedPayload)` to `Relay`.
+  - `Relay.RelayGroupLedger.VerifyDispatch` verifies proof and fans out opaque `MailboxEnvelope`s to Bob and Charlie's routing tokens.
+  - Bob and Charlie drain/receive the broadcast, decrypt with Alice's sender key, and verify Alice's author signature.
 
 ### Phase 4: Chat Media & Out-of-Band Encrypted Attachment Storage
-- **Act & Assert (via CQRS Query Ports)**:
-  - `Alice` generates a 128 KB binary payload (`"architecture-spec.pdf"`, `application/pdf`) and calls `Alice.ChatMediaService.UploadOutOfBandAttachmentAsync(stream, 131072, groupChannelId, "architecture-spec.pdf", "application/pdf")`.
-  - `Alice` sends a group chat message with `Attachments: [mediaAttachmentDto]` via `Alice.ChatService.SendMessageAsync`.
-  - `Bob` and `Charlie` query `ChatQueries.GetMessagesAsync(groupChannelId, null, 50, nowMs)`, extract `readModel.Attachments[0]`, and call `ChatMediaService.DownloadOutOfBandAttachmentAsync(readModel.Attachments[0])`.
-  - Verify `Relay`'s `IRelayBlobClient.DownloadBlobAsync` serves the encrypted chunks, `IBlobCryptoService.DecryptStreamAsync` verifies the AEAD tags and decrypts the stream, and the downloaded bytes on `Bob` and `Charlie` match `Alice`'s 128 KB payload byte-for-byte.
+- **Step 4.1**: Alice uploads 128 KB binary payload via `ChatMediaService.UploadOutOfBandAttachmentAsync`.
+- **Step 4.2**: Relay blob store stores encrypted chunks and returns `BlobReference`.
+- **Step 4.3**: Alice sends chat message with attachment metadata and `BlobReference`.
+- **Step 4.4**: Bob and Charlie download attachment via `ChatMediaService.DownloadOutOfBandAttachmentAsync`.
+- **Step 4.5**: Verify byte-for-byte fidelity and AEAD tag verification.
 
-### Phase 5: Peer Discovery (`Apps.Discovery` — Opcode Wire Protocol, Directory & Blinded Rendezvous)
-- **Arrange**:
-  - Add a 5th identity `Dave` (`localhost:15005`) who has an authenticated session with `Relay` (`localhost:15003`) for `AppId.Discovery` (`0x02`), and a LAN/direct discovery channel to `Bob` (`localhost:15002`).
-- **Act & Assert (via Driving & Query Ports)**:
-  1. **Relay Visibility Registration & Nearby Discovery (`DiscoveryOpcode.RegisterVisibility` & `NearbyQuery`)**:
-     - `Bob` sends a `DiscoveryOpcode.RegisterVisibility` (`0x01`) frame with `PeerDiscoveryVisibility.Discoverable` to `Relay`'s `DiscoveryPayloadHandler`.
-     - `Dave` runs `Dave.NearbyDiscoveryWorkflow.DiscoverAndConnectAsync(dave.IdentityId, DeviceId.Primary, relay.IdentityId, DiscoveryResultLimit.From(10))`, which queries `Relay`, discovers `Bob`, fetches `Bob`'s `PreKeyBundle` via `IPreKeyBundleProvider`, and initiates an X3DH handshake with `Bob`.
-     - Verify `Bob.ContactQueries.GetContactDetailAsync(bob.IdentityId, dave.IdentityId)` shows `Dave`'s inbound handshake request.
-  2. **Private Blinded Rendezvous (`DiscoveryOpcode.RendezvousPublish` & `RendezvousQuery`)**:
-     - `Alice` and `Dave` share an out-of-band passphrase secret (`sharedSecret`) and derive a `BlindedLocator` for the current `DiscoveryEpoch` via `PrivateRendezvousService.DeriveLocator(alice.IdentityId, sharedSecret, epoch)`.
-     - `Alice` publishes her `EncryptedRendezvousRoute` to `Relay` via `DiscoveryOpcode.RendezvousPublish` (`0x04`).
-     - `Dave` queries `Relay` via `DiscoveryOpcode.RendezvousQuery` (`0x05`) with `PrivateRendezvousService.DeriveLocatorWindow(alice.IdentityId, sharedSecret, epoch)`, receives `BlindedRendezvousMatch`, handshakes with `Alice`, and exchanges a verified 1:1 chat message asserted via `Alice.ChatQueries.GetMessagesAsync`.
+### Phase 5: Peer Discovery (`Apps.Discovery` — Sovereign Directory & Rendezvous)
+- **Step 5.1: Directory Visibility Registration**:
+  - Bob registers discoverable profile with `Relay` via `DiscoveryOpcode.RegisterVisibility`.
+- **Step 5.2: Nearby Discovery Workflow**:
+  - Dave queries `Relay` via `NearbyDiscoveryWorkflow`, discovers Bob, retrieves `PreKeyBundle`, and initiates handshake.
+- **Step 5.3: Blinded Rendezvous Matching**:
+  - Alice and Dave derive rotating epoch locators via `PrivateRendezvousService.DeriveLocator`.
+  - Alice publishes rendezvous route; Dave queries window, matches, and establishes direct session.
 
-### Phase 6: Multi-Stream Bulk File Transfer (`Apps.FileTransfer`)
-- **Arrange**:
-  - `Alice` (`localhost:15001`) stages a 3.5 MB file (`"release-bundle.bin"`, spanning four 1 MB chunks under `ChunkSizeBytes`) in her `IDesktopFileStorage` under `RootDirectoryPath.Parse("/alice-share")`.
-- **Act & Assert (via Driving & CQRS Query Ports)**:
-  - `Alice` calls `Alice.FileTransferActions.InitiateTransferAsync(aliceBobChannelId, alice.IdentityId, [bob.IdentityId], RootDirectoryPath.Parse("/alice-share"), [SanitizedRelativePath.Parse("release-bundle.bin")], DirectWanPolicy.AllowDirectWan)`.
-  - Query `Alice.FileTransferQueries.GetTransferByIdAsync(sessionId)` and verify `TransferSessionReadModel.Status == TransferSessionState.WaitingForPeer` and `TotalChunks.Count == 4`.
-  - Query `Bob.FileTransferQueries.GetTransferByIdAsync(sessionId)` and `GetManifestFilesAsync(sessionId)` after `Bob`'s `FileTransferPayloadHandler` processes the in-band `FileTransferControlOpcode.Offer`; verify `Status == TransferSessionState.PendingConsent` and `ManifestFileReadModel` lists `"release-bundle.bin"` (`3,670,016` bytes).
-  - `Bob` calls `Bob.FileTransferActions.AcceptTransferAsync(sessionId, RootDirectoryPath.Parse("/bob-downloads"))`.
-  - Query `Alice.FileTransferQueries.GetTransferByIdAsync(sessionId)` and verify `Status == TransferSessionState.Uploading`.
-  - Run `TransferSessionCoordinator.PumpPeerStreamsAsync` concurrently across `Alice` and `Bob`'s connected `ITransferStreamPool` (`localhost:15001` <-> `localhost:15002`).
-  - Query `Bob.FileTransferQueries.GetTransferByIdAsync(sessionId)` and `GetManifestFilesAsync(sessionId)`; verify `Status == TransferSessionState.Completed`, `CompletedChunks == TotalChunks`, `DownloadedBytes == TotalBytes`, `ManifestFileReadModel.IsCompleted == true`, and the assembled file in `Bob`'s `IDesktopFileStorage` matches `Alice`'s 3.5 MB payload byte-for-byte.
-
-
+### Phase 6: Multi-Stream Swarm Bulk File Transfer (`Apps.FileTransfer`)
+- **Step 6.1**: Alice stages 3.5 MB file (4 x 1 MB chunks) in `IDesktopFileStorage`.
+- **Step 6.2**: Alice initiates transfer via `FileTransferActions.InitiateTransferAsync`.
+- **Step 6.3**: Bob receives in-band offer and calls `AcceptTransferAsync`.
+- **Step 6.4**: Concurrently pump multi-stream chunks across connected stream pool.
+- **Step 6.5**: Bob verifies completed manifest and byte-for-byte SHA256 integrity.
