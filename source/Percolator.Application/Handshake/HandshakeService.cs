@@ -216,11 +216,8 @@ public sealed class HandshakeService : IHandshakeService
 
         if (contact == null || contact.State == ContactState.PendingApproval)
         {
-            if (envelope.EncryptedPayload.Length > 0)
-            {
-                await _pendingHandshakeRepo.SavePendingHandshakeAsync(
-                    envelope.RecipientIdentityId, envelope.SenderIdentityId, envelope, ct);
-            }
+            await _pendingHandshakeRepo.SavePendingHandshakeAsync(
+                envelope.RecipientIdentityId, envelope.SenderIdentityId, envelope, ct);
 
             var coordResult = await _contactCoordinator.HandleInboundRequestAsync(
                 envelope.RecipientIdentityId,
@@ -249,7 +246,8 @@ public sealed class HandshakeService : IHandshakeService
         var envelope = await _pendingHandshakeRepo.GetPendingHandshakeAsync(recipientId, senderId, ct);
         if (envelope == null)
         {
-            return DomainResult.Success();
+            return DomainResult.Failure(new DomainError(
+                "PENDING_HANDSHAKE_NOT_FOUND", $"No pending handshake envelope found for sender '{senderId}'."));
         }
 
         var result = await ProcessActiveInvitationAsync(envelope, ct);

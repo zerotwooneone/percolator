@@ -5,6 +5,7 @@ using Percolator.Application2.Handshake;
 using Percolator.Application2.Ingress;
 using Percolator.Application2.Ports;
 using Percolator.Application2.Profiles;
+using Percolator.Application2.Routing;
 using Percolator.Application2.Services;
 using Percolator.Application2IntegrationTests.Adapters;
 using Percolator.Application2IntegrationTests.Adapters.Queries;
@@ -17,6 +18,7 @@ using Percolator.Domain.Channels.Model;
 using Percolator.Domain.Channels.Ports;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.ValueObjects;
@@ -58,6 +60,8 @@ public sealed class TestIdentityNode
     public InboundIngressPipeline IngressPipeline { get; }
     public IStreamRegistry StreamRegistry { get; }
     public ITransportDispatcher TransportDispatcher { get; }
+    public TestPeerReachabilityService ReachabilityService { get; }
+    public RoutingCoordinator RoutingCoordinator { get; }
 
     // CQRS Query Ports
     public IChatMessageQueryService ChatQueries { get; }
@@ -149,6 +153,8 @@ public sealed class TestIdentityNode
         // Networking adapters
         StreamRegistry = new LoopbackStreamRegistry(IdentityId, DeviceId, _networkSwitch, _channelRepo);
         TransportDispatcher = new LoopbackTransportDispatcher(_networkSwitch);
+        ReachabilityService = new TestPeerReachabilityService(_networkSwitch, IdentityId);
+        RoutingCoordinator = new RoutingCoordinator(StreamRegistry, ReachabilityService);
 
         // Egress & Locks
         var channelLockService = new KeyedSemaphoreLockService();
@@ -199,7 +205,7 @@ public sealed class TestIdentityNode
             TimeProvider,
             appRouter,
             wirePacker,
-            routingCoordinator: null);
+            routingCoordinator: RoutingCoordinator);
 
         IngressPipeline = new InboundIngressPipeline(
             _ingressFilterService,
@@ -251,6 +257,92 @@ public sealed class TestIdentityNode
             SignedPreKeySignature,
             opk,
             opkId);
+    }
+
+    public void RegisterMailbox(RelayNode relay)
+    {
+        ArgumentNullException.ThrowIfNull(relay);
+        relay.RegisterClientMailbox(IdentityId, MailboxRoutingToken, MailboxDeliveryToken, MailboxDrainToken);
+        _networkSwitch.BindRecipientToRelay(IdentityId, relay);
+    }
+
+    public RelayHostedPreKeyBundle PublishHostedPreKeys(RelayNode relay, int oneTimeKeyCount = 5)
+    {
+        ArgumentNullException.ThrowIfNull(relay);
+
+        var otpkList = new List<(uint KeyId, DhPublicKey Key)>();
+        var otpkPrivList = new List<(uint KeyId, EphemeralPrivateKey Key)>();
+        for (uint i = 1; i <= (uint)oneTimeKeyCount; i++)
+        {
+            var (priv, pub) = CryptoEngine.GenerateEphemeralKeyPair();
+            otpkList.Add((i, pub));
+            otpkPrivList.Add((i, priv));
+        }
+
+        _preKeyStore.StoreOneTimePreKeysPrivateAsync(IdentityId, DeviceId, otpkPrivList).GetAwaiter().GetResult();
+
+        var bundle = RelayHostedPreKeyBundle.Create(
+            IdentityId,
+            DeviceId,
+            IdentityPublicKey,
+            SignedPreKeyPublic,
+            SignedPreKeySignature,
+            otpkList,
+            relay.Policy,
+            CryptoEngine).Value!;
+
+        RegisterMailbox(relay);
+        relay.PreKeyRepository.SaveAsync(bundle).GetAwaiter().GetResult();
+
+        return bundle;
+    }
+
+    public async Task<int> DrainMailboxAsync(RelayNode relay)
+    {
+        ArgumentNullException.ThrowIfNull(relay);
+        var drainResult = relay.MailboxQueue.TryDrainForToken(MailboxRoutingToken, MailboxDrainToken);
+        if (!drainResult.IsSuccess)
+        {
+            return 0;
+        }
+
+        int processed = 0;
+        foreach (var envelope in drainResult.Value!)
+        {
+            var unwrapResult = _envelopeUnwrapper.Unwrap(envelope);
+            if (unwrapResult.IsSuccess)
+            {
+                await IngressPipeline.ProcessInboundAsync(unwrapResult.Value!).ConfigureAwait(false);
+                processed++;
+            }
+        }
+
+        return processed;
+    }
+
+    public async Task AddApprovedContactAsync(TestIdentityNode peer)
+    {
+        var contact = new PeerContact(
+            IdentityId,
+            peer.IdentityId,
+            ContactNickname.Create(peer.Name, peer.IdentityId),
+            PeerTrustLevel.Verified,
+            TimeProvider.UtcNow,
+            peer.IdentityPublicKey,
+            ContactState.Active);
+
+        await _contactRepo.SaveAsync(contact).ConfigureAwait(false);
+    }
+
+    public async Task<ChannelId> EstablishDirectChannelWithAsync(TestIdentityNode peer)
+    {
+        var channelId = ChannelId.New();
+        var myChannel = DirectChannel.Create(channelId, IdentityId, peer.IdentityId, TimeProvider).Value!;
+        var peerChannel = DirectChannel.Create(channelId, peer.IdentityId, IdentityId, TimeProvider).Value!;
+
+        await _channelRepo.SaveDirectAsync(myChannel).ConfigureAwait(false);
+        await peer.SaveDirectChannelInternalAsync(peerChannel).ConfigureAwait(false);
+        return channelId;
     }
 
     public async Task ReceiveWireBytesAsync(ReadOnlyMemory<byte> frameBytes)

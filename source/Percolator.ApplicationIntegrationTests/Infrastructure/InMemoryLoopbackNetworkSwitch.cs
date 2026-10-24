@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Percolator.Application2IntegrationTests.Builders;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
 
@@ -10,12 +11,37 @@ public sealed class InMemoryLoopbackNetworkSwitch
     private readonly ConcurrentDictionary<PublicIdentityId, EndpointPort> _identityToPort = new();
     private readonly ConcurrentDictionary<EndpointPort, PublicIdentityId> _portToIdentity = new();
     private readonly ConcurrentDictionary<(EndpointPort Source, EndpointPort Target), bool> _activeStreams = new();
+    private readonly ConcurrentDictionary<PublicIdentityId, RelayNode> _relaysById = new();
+    private readonly ConcurrentDictionary<PublicIdentityId, RelayNode> _recipientToRelay = new();
 
     public void RegisterNode(EndpointPort port, PublicIdentityId identityId, Func<ReadOnlyMemory<byte>, Task> inboundReceiver)
     {
         _portReceivers[port] = inboundReceiver ?? throw new ArgumentNullException(nameof(inboundReceiver));
         _identityToPort[identityId] = port;
         _portToIdentity[port] = identityId;
+    }
+
+    public void RegisterRelay(RelayNode relay)
+    {
+        ArgumentNullException.ThrowIfNull(relay);
+        _relaysById[relay.RelayIdentityId] = relay;
+    }
+
+    public void BindRecipientToRelay(PublicIdentityId recipientId, RelayNode relay)
+    {
+        ArgumentNullException.ThrowIfNull(relay);
+        _recipientToRelay[recipientId] = relay;
+        _relaysById[relay.RelayIdentityId] = relay;
+    }
+
+    public bool TryGetRelay(PublicIdentityId relayId, out RelayNode? relay)
+    {
+        return _relaysById.TryGetValue(relayId, out relay);
+    }
+
+    public bool TryGetRelayForRecipient(PublicIdentityId recipientId, out RelayNode? relay)
+    {
+        return _recipientToRelay.TryGetValue(recipientId, out relay);
     }
 
     public void OpenDirectStream(EndpointPort sourcePort, EndpointPort targetPort)

@@ -2,6 +2,7 @@ using Percolator.Application2.Delivery;
 using Percolator.Application2.Delivery.Ports;
 using Percolator.Application2IntegrationTests.Infrastructure;
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 
 namespace Percolator.Application2IntegrationTests.Adapters;
@@ -49,6 +50,36 @@ public sealed class LoopbackTransportDispatcher : ITransportDispatcher
                     job.Payload);
 
                 return await _networkSwitch.SendToPeerAsync(recipientId, sealedBytes).ConfigureAwait(false);
+            }
+            case DeliveryRouteType.RelayedOneToOne:
+            {
+                if (!_networkSwitch.TryGetRelayForRecipient(recipientId, out var relay) || relay is null)
+                {
+                    return DomainResult.Failure(new DomainError("RELAY_NOT_FOUND", $"No relay found for recipient {recipientId}."));
+                }
+
+                if (!relay.TryGetClientTokens(recipientId, out var tokens))
+                {
+                    return DomainResult.Failure(new DomainError("TOKENS_NOT_FOUND", $"Recipient {recipientId} is not registered on relay {relay.Name}."));
+                }
+
+                var kind = (WireFrameKind)job.Payload.Span[0];
+                var sealedBytes = SealedWireFraming.Encode(
+                    kind,
+                    job.ChannelId,
+                    job.OwnerIdentityId,
+                    DeviceId.Primary,
+                    job.Payload);
+
+                var now = relay.TimeProvider.UtcNow;
+                var envelope = new MailboxEnvelope(
+                    EnvelopeId.New(),
+                    tokens.RoutingToken,
+                    sealedBytes,
+                    now,
+                    now.AddMinutes(10));
+
+                return relay.MailboxQueue.Enqueue(envelope, tokens.DeliveryToken, relay.TimeProvider);
             }
             default:
                 return DomainResult.Failure(new DomainError("UNSUPPORTED_ROUTE", $"Route {job.Route.Type} not yet supported in direct loopback."));
