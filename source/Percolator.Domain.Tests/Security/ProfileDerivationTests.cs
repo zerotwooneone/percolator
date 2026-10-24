@@ -40,6 +40,10 @@ public sealed class ProfileDerivationTests
         ikBytes[0] = 0xAA;
         var identityKey = IdentityKey.FromSpan(ikBytes);
 
+        var privBytes = new byte[32];
+        privBytes[0] = 0xBB;
+        using var ownerPrivateKey = EphemeralPrivateKey.FromSpan(privBytes);
+
         var keyBytes = new byte[32];
         keyBytes[0] = 0x55;
         using var profileKey = ProfileKey.FromSpan(keyBytes);
@@ -48,8 +52,8 @@ public sealed class ProfileDerivationTests
         var locator2 = BlindedProfileLocator.Derive(identityKey, profileKey, _cryptoEngine);
         Assert.That(locator1, Is.EqualTo(locator2));
 
-        var writeToken1 = ProfileWriteToken.Derive(identityKey, profileKey, _cryptoEngine);
-        var writeToken2 = ProfileWriteToken.Derive(identityKey, profileKey, _cryptoEngine);
+        var writeToken1 = ProfileWriteToken.Derive(ownerPrivateKey, profileKey, _cryptoEngine);
+        var writeToken2 = ProfileWriteToken.Derive(ownerPrivateKey, profileKey, _cryptoEngine);
         Assert.That(writeToken1, Is.EqualTo(writeToken2));
 
         var deliveryToken1 = DeliveryToken.DeriveFromProfileKey(identityKey, profileKey, _cryptoEngine);

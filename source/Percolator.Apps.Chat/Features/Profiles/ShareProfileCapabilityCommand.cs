@@ -15,4 +15,6 @@ public sealed record ShareProfileCapabilityCommand(
     BlindedProfileLocator BlindedLocator,
     BlindedRoutingToken MailboxRoutingToken,
     uint Revision,
-    DeliveryRoute Route);
+    DeliveryRoute Route,
+    IdentityKey? AuthorPublicKey = null,
+    string? SourceEndpoint = null);

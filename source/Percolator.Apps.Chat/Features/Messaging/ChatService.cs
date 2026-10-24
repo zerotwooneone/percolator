@@ -430,6 +430,9 @@ public sealed class ChatService : IChatService
 
         ulong timestampUnixMs = (ulong)_timeProvider.UtcNow.ToUnixTimeMilliseconds();
 
+        var sourceType = command.Route == DeliveryRoute.DirectP2P ? ProfileSourceType.DirectP2P : ProfileSourceType.Relay;
+        var sourceEndpoint = command.SourceEndpoint ?? (sourceType == ProfileSourceType.DirectP2P ? "direct-p2p" : "relay");
+
         var dto = new ProfileCapabilityDto(
             command.ChannelId,
             command.AuthorId,
@@ -437,7 +440,10 @@ public sealed class ChatService : IChatService
             command.BlindedLocator.ToArray(),
             command.MailboxRoutingToken.Value.ToByteArray(),
             command.Revision,
-            timestampUnixMs);
+            timestampUnixMs,
+            command.AuthorPublicKey?.Span.ToArray(),
+            sourceEndpoint,
+            sourceType);
 
         var envelopeBytes = SteppedPadding.CreatePaddedEnvelopeBytes(_serializer, ChatPayloadType.ProfileCapability, dto);
 

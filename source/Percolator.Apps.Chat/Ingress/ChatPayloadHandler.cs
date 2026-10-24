@@ -8,6 +8,7 @@ using Percolator.Domain.Channels.Ports;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.ValueObjects;
+using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.PluginSdk;
@@ -31,6 +32,7 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
     private readonly IProfileDeliveryClient? _profileDeliveryClient;
     private readonly IProfileManager? _profileManager;
     private readonly ICryptoEngine? _cryptoEngine;
+    private readonly IPeerMailboxRoutingRepository? _peerMailboxRoutingRepo;
 
     public ChatPayloadHandler(
         IChatMessageRepository chatRepo,
@@ -43,7 +45,8 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
         IPeerProfileRepository? peerProfileRepo = null,
         IProfileDeliveryClient? profileDeliveryClient = null,
         IProfileManager? profileManager = null,
-        ICryptoEngine? cryptoEngine = null)
+        ICryptoEngine? cryptoEngine = null,
+        IPeerMailboxRoutingRepository? peerMailboxRoutingRepo = null)
     {
         _chatRepo = chatRepo ?? throw new ArgumentNullException(nameof(chatRepo));
         _channelRepo = channelRepo ?? throw new ArgumentNullException(nameof(channelRepo));
@@ -56,6 +59,7 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
         _profileDeliveryClient = profileDeliveryClient;
         _profileManager = profileManager;
         _cryptoEngine = cryptoEngine;
+        _peerMailboxRoutingRepo = peerMailboxRoutingRepo;
     }
 
     public async ValueTask<DomainResult> HandleInboundAsync(InboundPayloadContext context, CancellationToken ct = default)
@@ -148,6 +152,35 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
                 _timeProvider.UtcNow);
 
             await _peerProfileRepo.SaveAsync(record, ct).ConfigureAwait(false);
+
+            // Record multi-source snapshot without remote-provided expiry heuristics
+            var snapshot = new PeerProfileSourceSnapshot(
+                dto.AuthorId,
+                dto.SourceEndpoint ?? (dto.SourceType == ProfileSourceType.DirectP2P ? "direct-p2p" : "relay"),
+                dto.SourceType,
+                decrypted,
+                locator,
+                _timeProvider.UtcNow);
+
+            await _peerProfileRepo.SaveSourceSnapshotAsync(snapshot, ct: ct).ConfigureAwait(false);
+
+            // Sealed Sender Delivery Token Derivation & Storage
+            if (_peerMailboxRoutingRepo is not null && dto.MailboxRoutingTokenBytes.Length == 16)
+            {
+                var routingToken = BlindedRoutingToken.FromGuid(new Guid(dto.MailboxRoutingTokenBytes));
+                IdentityKey? authorPublicKey = null;
+                if (dto.AuthorPublicKeyBytes is not null && dto.AuthorPublicKeyBytes.Length == 32)
+                {
+                    authorPublicKey = IdentityKey.FromSpan(dto.AuthorPublicKeyBytes);
+                }
+
+                if (authorPublicKey is not null)
+                {
+                    var deliveryToken = DeliveryToken.DeriveFromProfileKey(authorPublicKey, profileKey, _cryptoEngine);
+                    var capability = new PeerMailboxRoutingCapability(dto.AuthorId, routingToken, deliveryToken);
+                    await _peerMailboxRoutingRepo.SaveAsync(capability, ct).ConfigureAwait(false);
+                }
+            }
         }
 
         return DomainResult.Success();

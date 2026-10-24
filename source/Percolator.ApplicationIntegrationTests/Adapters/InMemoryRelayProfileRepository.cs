@@ -30,7 +30,7 @@ public sealed class InMemoryRelayProfileRepository : IRelayProfileRepository
             return ValueTask.FromResult(DomainResult.Failure(new DomainError("PROFILE_NOT_FOUND", "Profile slot not found.")));
         }
 
-        if (slot.WriteToken != writeToken)
+        if (!slot.VerifyWriteToken(writeToken))
         {
             return ValueTask.FromResult(DomainResult.Failure(new DomainError("UNAUTHORIZED_PROFILE_WRITE", "Invalid write token for profile slot.")));
         }

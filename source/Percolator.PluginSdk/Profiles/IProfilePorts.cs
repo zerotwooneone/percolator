@@ -7,6 +7,15 @@ using Percolator.Domain.Security.ValueObjects;
 namespace Percolator.PluginSdk;
 
 /// <summary>
+/// Identifies the network source type through which a peer profile was observed.
+/// </summary>
+public enum ProfileSourceType
+{
+    DirectP2P = 1,
+    Relay = 2
+}
+
+/// <summary>
 /// Domain model record representing a cached decrypted profile of a remote peer.
 /// </summary>
 public sealed record PeerProfileRecord(
@@ -18,12 +27,45 @@ public sealed record PeerProfileRecord(
     DateTimeOffset UpdatedAtUtc);
 
 /// <summary>
-/// Persistence port for storing and retrieving decrypted peer profile records on the client.
+/// Multi-source snapshot representing an observed profile from a specific source endpoint.
+/// Bounded per peer without trusting any remote-provided expiration timestamps.
+/// </summary>
+public sealed record PeerProfileSourceSnapshot(
+    PublicIdentityId PeerId,
+    string SourceEndpoint,
+    ProfileSourceType SourceType,
+    ProfileMetadata Metadata,
+    BlindedProfileLocator BlindedLocator,
+    DateTimeOffset LastObservedAtUtc);
+
+/// <summary>
+/// Persistence port for storing and retrieving decrypted peer profile records and multi-source snapshots on the client.
 /// </summary>
 public interface IPeerProfileRepository
 {
     Task SaveAsync(PeerProfileRecord record, CancellationToken ct = default);
     Task<PeerProfileRecord?> GetByPeerIdAsync(PublicIdentityId peerId, CancellationToken ct = default);
+
+    Task SaveSourceSnapshotAsync(PeerProfileSourceSnapshot snapshot, int maxSnapshotsPerPeer = 5, CancellationToken ct = default);
+    Task<IReadOnlyList<PeerProfileSourceSnapshot>> GetSourceSnapshotsAsync(PublicIdentityId peerId, CancellationToken ct = default);
+}
+
+/// <summary>
+/// Cached routing capability for delivering sealed messages to a peer's relay mailbox.
+/// Holds the peer's mailbox routing token and the derived sealed-sender delivery token.
+/// </summary>
+public sealed record PeerMailboxRoutingCapability(
+    PublicIdentityId PeerId,
+    BlindedRoutingToken RoutingToken,
+    DeliveryToken DeliveryToken);
+
+/// <summary>
+/// Persistence port for storing and retrieving peer mailbox routing capabilities derived from profile capabilities.
+/// </summary>
+public interface IPeerMailboxRoutingRepository
+{
+    Task SaveAsync(PeerMailboxRoutingCapability capability, CancellationToken ct = default);
+    Task<PeerMailboxRoutingCapability?> GetByPeerIdAsync(PublicIdentityId peerId, CancellationToken ct = default);
 }
 
 /// <summary>

@@ -72,6 +72,20 @@ public sealed class ProfileIntegrationScenarioTests
         bobStoredProfile.StatusBio.Should().Be(aliceBio);
         bobStoredProfile.Revision.Should().Be(rev1);
 
+        // Multi-Source Profile Storage: Bob records snapshot from DirectP2P endpoint
+        var bobSnapshots = await bob.PeerProfileRepo.GetSourceSnapshotsAsync(alice.IdentityId);
+        bobSnapshots.Should().HaveCount(1);
+        bobSnapshots[0].SourceEndpoint.Should().Be($"localhost:{alice.Port.Value}");
+        bobSnapshots[0].SourceType.Should().Be(ProfileSourceType.DirectP2P);
+        bobSnapshots[0].Metadata.DisplayName.Should().Be(aliceDisplayName);
+
+        // Sealed Sender Delivery Capability: Bob derived and stored mailbox routing info
+        var bobRoutingCap = await bob.PeerMailboxRoutingRepo.GetByPeerIdAsync(alice.IdentityId);
+        bobRoutingCap.Should().NotBeNull();
+        bobRoutingCap!.RoutingToken.Should().Be(alice.MailboxRoutingToken);
+        var expectedDeliveryToken = DeliveryToken.DeriveFromProfileKey(alice.IdentityPublicKey, alice.ProfileKey, alice.CryptoEngine);
+        bobRoutingCap.DeliveryToken.Should().Be(expectedDeliveryToken);
+
         // Strict CQRS: Query Bob's PeerProfileQueries read model
         var bobProfileQuery = await bob.PeerProfileQueries.GetProfileAsync(alice.IdentityId);
         bobProfileQuery.Should().NotBeNull();
@@ -240,6 +254,13 @@ public sealed class ProfileIntegrationScenarioTests
         charlieProfile.StatusBio.Should().Be(aliceRelayedBio);
         charlieProfile.Revision.Should().Be(rev1);
 
+        // Multi-Source Profile Storage: Charlie records snapshot from relay endpoint
+        var charlieSnapshots = await charlie.PeerProfileRepo.GetSourceSnapshotsAsync(alice.IdentityId);
+        charlieSnapshots.Should().HaveCount(1);
+        charlieSnapshots[0].SourceEndpoint.Should().Be("relay");
+        charlieSnapshots[0].SourceType.Should().Be(ProfileSourceType.Relay);
+        charlieSnapshots[0].Metadata.DisplayName.Should().Be(aliceRelayedName);
+
         // Verify Charlie's local contact nickname is preserved
         var charlieContactAfter = await charlie.ContactQueries.GetContactDetailAsync(charlie.IdentityId, alice.IdentityId);
         charlieContactAfter!.DisplayName.Should().Be("Alice");
@@ -297,7 +318,7 @@ public sealed class ProfileIntegrationScenarioTests
         // Capture Bob's held stale keys & locators
         var staleProfileKey = alice.ProfileKey;
         var staleLocator = BlindedProfileLocator.Derive(alice.IdentityPublicKey, staleProfileKey, alice.CryptoEngine);
-        var staleWriteToken = ProfileWriteToken.Derive(alice.IdentityPublicKey, staleProfileKey, alice.CryptoEngine);
+        var staleWriteToken = ProfileWriteToken.Derive(alice.IdentityPrivateKey, staleProfileKey, alice.CryptoEngine);
 
         // ----------------------------------------------------------------------------------
         // Act 1: Alice Revocation & Key Rotation
@@ -312,7 +333,7 @@ public sealed class ProfileIntegrationScenarioTests
         alice.RotateProfileKey();
         var newProfileKey = alice.ProfileKey;
         var newLocator = BlindedProfileLocator.Derive(alice.IdentityPublicKey, newProfileKey, alice.CryptoEngine);
-        var newWriteToken = ProfileWriteToken.Derive(alice.IdentityPublicKey, newProfileKey, alice.CryptoEngine);
+        var newWriteToken = ProfileWriteToken.Derive(alice.IdentityPrivateKey, newProfileKey, alice.CryptoEngine);
 
         newLocator.Should().NotBe(staleLocator);
         newWriteToken.Should().NotBe(staleWriteToken);

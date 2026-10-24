@@ -58,6 +58,7 @@ public sealed class TestIdentityNode
     public ProfileKey ProfileKey { get; private set; }
     public IProfileManager ProfileManager { get; }
     public InMemoryPeerProfileRepository PeerProfileRepo { get; }
+    public InMemoryPeerMailboxRoutingRepository PeerMailboxRoutingRepo { get; } = new();
     public IPeerProfileQueryService PeerProfileQueries { get; }
     public IProfileDeliveryClient ProfileDeliveryClient { get; }
     public InMemoryRelayProfileRepository LocalProfileRepository { get; } = new();
@@ -200,7 +201,8 @@ public sealed class TestIdentityNode
             peerProfileRepo: PeerProfileRepo,
             profileDeliveryClient: ProfileDeliveryClient,
             profileManager: ProfileManager,
-            cryptoEngine: CryptoEngine);
+            cryptoEngine: CryptoEngine,
+            peerMailboxRoutingRepo: PeerMailboxRoutingRepo);
         appRouter.RegisterHandler(chatHandler);
 
         // Driving Services
@@ -273,7 +275,7 @@ public sealed class TestIdentityNode
         if (encResult.IsFailure) return DomainResult.Failure(encResult.Error);
 
         var locator = BlindedProfileLocator.Derive(IdentityPublicKey, ProfileKey, CryptoEngine);
-        var writeToken = ProfileWriteToken.Derive(IdentityPublicKey, ProfileKey, CryptoEngine);
+        var writeToken = ProfileWriteToken.Derive(IdentityPrivateKey, ProfileKey, CryptoEngine);
         var expiresAtUtc = TimeProvider.UtcNow.AddDays(14);
 
         return relay.UploadProfile(locator, writeToken, encResult.Value, revision, expiresAtUtc);
@@ -289,7 +291,7 @@ public sealed class TestIdentityNode
         if (encResult.IsFailure) return DomainResult.Failure(encResult.Error);
 
         var locator = BlindedProfileLocator.Derive(IdentityPublicKey, ProfileKey, CryptoEngine);
-        var writeToken = ProfileWriteToken.Derive(IdentityPublicKey, ProfileKey, CryptoEngine);
+        var writeToken = ProfileWriteToken.Derive(IdentityPrivateKey, ProfileKey, CryptoEngine);
         var expiresAtUtc = TimeProvider.UtcNow.AddDays(14);
 
         var slotResult = RelayHostedProfileSlot.Create(locator, writeToken, encResult.Value, revision, expiresAtUtc);
@@ -306,6 +308,9 @@ public sealed class TestIdentityNode
         uint revision = 1)
     {
         var locator = BlindedProfileLocator.Derive(IdentityPublicKey, ProfileKey, CryptoEngine);
+        var sourceEndpoint = route == Percolator.PluginSdk.DeliveryRoute.DirectP2P
+            ? $"localhost:{Port.Value}"
+            : "relay";
         var cmd = new ShareProfileCapabilityCommand(
             channelId,
             IdentityId,
@@ -315,7 +320,9 @@ public sealed class TestIdentityNode
             locator,
             MailboxRoutingToken,
             Revision: revision,
-            route);
+            route,
+            AuthorPublicKey: IdentityPublicKey,
+            SourceEndpoint: sourceEndpoint);
 
         return await ChatService.ShareProfileCapabilityAsync(cmd).ConfigureAwait(false);
     }

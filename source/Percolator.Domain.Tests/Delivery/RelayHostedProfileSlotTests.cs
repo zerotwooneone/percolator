@@ -13,6 +13,7 @@ public sealed class RelayHostedProfileSlotTests
     private DeterministicCryptoEngine _cryptoEngine = null!;
     private FakeDateTimeProvider _dateTimeProvider = null!;
     private IdentityKey _ownerIdentityKey = null!;
+    private EphemeralPrivateKey _ownerPrivateKey = null!;
     private ProfileKey _profileKey = null!;
     private BlindedProfileLocator _locator = null!;
     private ProfileWriteToken _writeToken = null!;
@@ -24,9 +25,10 @@ public sealed class RelayHostedProfileSlotTests
         _cryptoEngine = new DeterministicCryptoEngine();
         _dateTimeProvider = new FakeDateTimeProvider(DateTimeOffset.UtcNow);
         _ownerIdentityKey = IdentityKey.FromSpan(new byte[32]);
+        _ownerPrivateKey = EphemeralPrivateKey.FromSpan(new byte[32]);
         _profileKey = ProfileKey.Generate();
         _locator = BlindedProfileLocator.Derive(_ownerIdentityKey, _profileKey, _cryptoEngine);
-        _writeToken = ProfileWriteToken.Derive(_ownerIdentityKey, _profileKey, _cryptoEngine);
+        _writeToken = ProfileWriteToken.Derive(_ownerPrivateKey, _profileKey, _cryptoEngine);
         _validPackage = new ProfileCiphertextPackage(new byte[12], new byte[1040]);
     }
 
@@ -34,6 +36,7 @@ public sealed class RelayHostedProfileSlotTests
     public void TearDown()
     {
         _profileKey.Dispose();
+        _ownerPrivateKey.Dispose();
     }
 
     [Test]
@@ -45,7 +48,7 @@ public sealed class RelayHostedProfileSlotTests
         Assert.That(result.IsSuccess, Is.True);
         var slot = result.Value;
         Assert.That(slot.Id, Is.EqualTo(_locator));
-        Assert.That(slot.WriteToken, Is.EqualTo(_writeToken));
+        Assert.That(slot.VerifyWriteToken(_writeToken), Is.True);
         Assert.That(slot.Revision, Is.EqualTo(1u));
         Assert.That(slot.ExpiresAtUtc, Is.EqualTo(expiry));
     }
@@ -85,7 +88,7 @@ public sealed class RelayHostedProfileSlotTests
         var slot = RelayHostedProfileSlot.Create(_locator, _writeToken, _validPackage, revision: 1, expiry).Value;
 
         using var differentKey = ProfileKey.Generate();
-        var invalidWriteToken = ProfileWriteToken.Derive(_ownerIdentityKey, differentKey, _cryptoEngine);
+        var invalidWriteToken = ProfileWriteToken.Derive(_ownerPrivateKey, differentKey, _cryptoEngine);
         var newPackage = new ProfileCiphertextPackage(new byte[12], new byte[1040]);
 
         var updateResult = slot.Update(invalidWriteToken, newPackage, newRevision: 2, expiry);
