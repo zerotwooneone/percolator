@@ -1,4 +1,4 @@
-﻿﻿# Percolator.Infrastructure2 Implementation Plan
+﻿# Percolator.Infrastructure2 Implementation Plan
 
 ## 1. Overview & Architectural Role
 
@@ -44,7 +44,7 @@ The legacy codebase contains dated, overlapping modules marked for total deletio
 4. **Resilient Network Handling**: All gRPC network calls must obey cancellation tokens, transport timeouts, and surface transient vs. permanent network failures cleanly to `OutboxRetryPolicy`.
 5. **Cryptographic Logging Guardrails**: Honor `CryptographyOptions.EnableCryptographicMaterialLogging = false` by default across all infrastructure loggers and diagnostics. Sensitive cryptographic keys, KDF digests, and plaintexts must never be emitted to logs.
 6. **Strict Authentication & Metadata Isolation**:
-   - **Public Edge / Ingress & Deposit (Sealed Sender)**: Must be unauthenticated (zero sender identity or channel ID leakage on the wire). Relies on recipient-issued `DeliveryToken`s and Sealed Sender cryptography. Relays see strictly routing tokens.
+   - **Public Edge / Ingress & Deposit (Sealed Sender & Capability Ingress)**: Must be unauthenticated (zero sender identity or channel ID leakage on the wire). Relies on recipient-issued `DeliveryToken`s, `ProfileKey`-derived blinded locators, and Sealed Sender cryptography. Relays see strictly routing tokens and blinded capability locators.
    - **Mailbox Retrieval, Directory & Management**: Must be strictly authenticated via challenge-response or signature cryptographic proofs to prevent unauthorized message draining, OPK exhaustion attacks, and mass directory scraping (mirroring Signal's security model).
    - **Group Operations**: Must be protected via Zero-Knowledge presentation proofs against `RelayGroupLedger` epochs without revealing individual member identities to relays.
 7. **Zero Platform Lock-in (Cross-Platform Architecture)**: Core infrastructure contracts, cryptographic flows, and persistence abstractions must run seamlessly across Windows, Linux, and macOS. Windows-only optimizations live behind clean ports and are supplied by `Percolator.Infrastructure.Windows`.
@@ -81,23 +81,26 @@ Rather than blindly cloning legacy contracts, `Infrastructure2` defines purpose-
                                   └───────────────────┬────────────────────┘
                                       │                   │              │
                    (Unauthenticated / │       (Auth via   │   (Auth via  │
-                    Delivery Token)   │        Signature) │    ZK-Proof) │
+                    Capability Token) │        Signature) │    ZK-Proof) │
                                       ▼                   ▼              ▼
 ┌──────────────────────────────────────┐ ┌──────────────────┐ ┌─────────────────────┐
 │    UnauthenticatedDeliveryService    │ │ Authenticated    │ │ AnonymousGroupRelay │
 ├──────────────────────────────────────┤ │ RelayService     │ │ Service             │
 │ • DeliverDirect(SealedEnvelope)      │ ├──────────────────┤ ├─────────────────────┤
 │ • EnqueueMailbox(SealedEnvelope)     │ │ • ConnectMailbox │ │ • SubscribeGroup    │
-│                                      │ │   Stream()       │ │   Stream()          │
-│                                      │ │ • DrainMailbox() │ │ • DispatchGroupMsg()│
-│                                      │ │ • RegisterMbox() │ │ • CommitMutation()  │
-│                                      │ │ • PublishPreKey()│ │ • FetchGroupState() │
+│ • GetProfile(ProfileFetch)           │ │   Stream()       │ │   Stream()          │
+│ • UploadProfile(ProfileUpload)       │ │ • DrainMailbox() │ │ • DispatchGroupMsg()│
+│ • DeleteProfile(ProfileDelete)       │ │ • RegisterMbox() │ │ • CommitMutation()  │
+│ • DownloadBlindBlob(BlindBlobReq)    │ │ • PublishPreKey()│ │ • FetchGroupState() │
 │                                      │ │ • FetchPreKey()  │ └─────────────────────┘
 └──────────────────────────────────────┘ └──────────────────┘
 ```
 
-#### 1. `unauthenticated_delivery.proto` (Public Edge / Sealed Sender Ingress & Deposit)
-- **Trust Boundary & Sealed Sender Invariant**: Open to peers and anonymous senders. **Zero sender identity metadata** and **zero channel identifiers** are exposed to transport headers, outer envelopes, or relay logs. The relay only observes `recipient_routing_token` and `delivery_token`. Sender identity and ChannelId live strictly inside the encrypted package (`DirectSessionPackageProto` / `GroupSessionPackageProto` under Double Ratchet E2EE). Protected by rate limiting and recipient-issued `DeliveryToken`s.
+#### 1. `unauthenticated_delivery.proto` (Public Edge / Sealed Sender & Capability Ingress)
+- **Trust Boundary & Sealed Sender Invariant**: Open to peers, anonymous senders, and capability token holders. **Zero sender identity metadata** and **zero channel identifiers** are exposed to transport headers, outer envelopes, or relay logs. The relay only observes routing tokens, blinded capability locators, or content hashes:
+  - **Envelope Ingress**: Senders provide `recipient_routing_token` and `delivery_token`. Sender identity and ChannelId live strictly inside the encrypted package (`DirectSessionPackageProto` / `GroupSessionPackageProto` under Double Ratchet E2EE). Protected by rate limiting and recipient-issued `DeliveryToken`s.
+  - **Unauthenticated Profile Capability Ingress**: Peers fetch encrypted profile packages using unauthenticated capability lookups (`GetProfile(ProfileFetchRequestProto)`) presenting strictly a 32-byte `BlindedLocator` ($\text{HKDF-SHA256}(\text{IK}_{\text{Owner}}, \text{ProfileKey}, \text{"PercolatorProfileLocatorV2"}, 32)$). No caller identity, auth ticket, or session signature is provided or logged, preventing the relay from building a social graph of who views whose profile. Profile updates (`UploadProfile(ProfileUploadRequestProto)`) and deletions (`DeleteProfile(ProfileDeleteRequestProto)`) require presenting strictly a 32-byte `WriteToken` ($\text{HKDF-SHA256}(\text{IK}_{\text{Owner}}, \text{ProfileKey}, \text{"PercolatorProfileWriteTokenV1"}, 32)$) proving possession of the write authorization secret without identifying the owner to the relay.
+  - **Unauthenticated Blind Blob Retrieval**: Avatars and media blobs stored under `StorageMode.PublicRelayBlob` are retrieved out-of-band via unauthenticated capability streaming (`DownloadBlindBlob(BlindBlobDownloadRequestProto)`) referencing strictly the content-addressed `blob_id` without presenting caller identity or `ChannelId`.
 - **Messages**:
   - `SealedEnvelopeProto`:
     - `bytes recipient_routing_token = 1;` (16-byte `BlindedRoutingToken` for mailbox routing)
@@ -106,10 +109,44 @@ Rather than blindly cloning legacy contracts, `Infrastructure2` defines purpose-
     - `google.protobuf.Timestamp expires_at_utc = 4;` (Enforces queue purge TTL and limits replay windows)
   - `DeliveryAckProto`: `bool success = 1;`, `string error_message = 2;`
   - `EnqueueAckProto`: `bool accepted = 1;`, `google.protobuf.Timestamp expires_at_utc = 2;`
+  - `ProfileFetchRequestProto`:
+    - `bytes blinded_locator = 1;` (32-byte `BlindedLocator`)
+  - `ProfileFetchResponseProto`:
+    - `bool found = 1;`
+    - `bytes nonce = 2;` (12-byte AES-GCM nonce)
+    - `bytes ciphertext = 3;` (Fixed 1040-byte padded ciphertext block: 1024 B payload + 16 B tag)
+    - `uint32 revision = 4;` (Monotonic slot revision)
+    - `google.protobuf.Timestamp expires_at_utc = 5;`
+  - `ProfileUploadRequestProto`:
+    - `bytes blinded_locator = 1;` (32-byte `BlindedLocator`)
+    - `bytes write_token = 2;` (32-byte `WriteToken` capability)
+    - `uint32 revision = 3;` (Monotonic slot revision)
+    - `bytes nonce = 4;` (12-byte AES-GCM nonce)
+    - `bytes ciphertext = 5;` (Fixed 1040-byte padded ciphertext block: 1024 B payload + 16 B tag)
+    - `google.protobuf.Timestamp expires_at_utc = 6;`
+  - `ProfileUploadResponseProto`:
+    - `bool success = 1;`
+    - `string error_message = 2;`
+  - `ProfileDeleteRequestProto`:
+    - `bytes blinded_locator = 1;` (32-byte `BlindedLocator`)
+    - `bytes write_token = 2;` (32-byte `WriteToken` capability)
+  - `ProfileDeleteResponseProto`:
+    - `bool success = 1;`
+    - `string error_message = 2;`
+  - `BlindBlobDownloadRequestProto`:
+    - `bytes blob_id = 1;` (32-byte SHA-256 blob locator)
+  - `BlindBlobChunkProto`:
+    - `bytes chunk_data = 1;`
+    - `uint32 chunk_index = 2;`
+    - `bool is_final_chunk = 3;`
 - **Service**:
   - `service UnauthenticatedDeliveryService`:
     - `rpc DeliverDirect(SealedEnvelopeProto) returns (DeliveryAckProto);` (Direct 1:1 P2P ingress over ephemeral TLS)
     - `rpc EnqueueMailbox(SealedEnvelopeProto) returns (EnqueueAckProto);` (Deposit into recipient's store-and-forward relay queue)
+    - `rpc GetProfile(ProfileFetchRequestProto) returns (ProfileFetchResponseProto);` (Unauthenticated capability profile fetch; zero requester auth/metadata)
+    - `rpc UploadProfile(ProfileUploadRequestProto) returns (ProfileUploadResponseProto);` (Unauthenticated capability profile upload authenticated solely by `WriteToken`)
+    - `rpc DeleteProfile(ProfileDeleteRequestProto) returns (ProfileDeleteResponseProto);` (Unauthenticated profile slot deletion on key rotation)
+    - `rpc DownloadBlindBlob(BlindBlobDownloadRequestProto) returns (stream BlindBlobChunkProto);` (Unauthenticated channel-independent blind blob retrieval)
 
 #### 2. `authenticated_relay.proto` (Mailbox Ownership, Pre-Key Directory & Stream Management)
 - **Trust Boundary**: Challenge-response / signature authenticated. Restricted exclusively to the private key holder of the `PublicIdentityId` / caller identity.
@@ -367,6 +404,8 @@ Database Engine: Encrypted SQLite using SQLCipher (`SQLitePCLRaw.bundle_e_sqlcip
   - Persists direct channels (`DirectChannel`) and group channels (`GroupChannel`) with member roles, epochs, and encrypted payload logs (`ChannelPayload`). Serves as the single authoritative persistence store for all channel state across applications.
 - **`IRelayPreKeyDirectoryRepository`** (`Percolator.Domain.Relays.Ports`):
   - Backs the relay pre-key hosting directory with paging, expiration cleanup, and quota enforcement.
+- **`IRelayProfileRepository`** (`Percolator.Domain.Delivery.Ports`):
+  - **Adapter**: `SqliteRelayProfileRepository`. Backs `RelayHostedProfileSlot` aggregates on the `relay_profile_slots` table (`blinded_locator` BLOB PRIMARY KEY, `write_token` BLOB, `nonce` BLOB, `ciphertext` BLOB, `revision` INTEGER, `updated_at_utc` INTEGER, `expires_at_utc` INTEGER). Supports $O(1)$ indexed slot lookups (`GetSlotAsync`), atomic slot creation/updates (`SaveSlotAsync`), and write-token verified deletion (`DeleteSlotAsync`).
 - **`IChatMessageRepository`** (`Percolator.Apps.Chat.Ports`):
   - **Adapter**: `SqlChatMessageRepository`. Persists and updates rich chat messages (`chat_messages`), mentions (`chat_message_mentions`), attachments (`chat_message_attachments`), reactions (`chat_reactions`), and read cursors (`chat_read_receipts`). Handles atomic message insertions, 24-hour edits, tombstones, and soft/hard expiration.
 - **`IGroupInvitationRepository`** (`Percolator.Apps.Chat.Ports`):
@@ -392,7 +431,7 @@ Database Engine: Encrypted SQLite using SQLCipher (`SQLitePCLRaw.bundle_e_sqlcip
 - **`SqliteRelayPeerDirectory`** (`Percolator.Apps.Discovery.Features.RelayDirectoryHosting.IRelayPeerDirectory`):
   - Fast-path paged SQL query over `disc_relay_peer_registrations` projecting candidate discoverable peers directly into lightweight `PeerDiscoveryDescriptor` instances without hydrating domain aggregates.
 - **`SqlFileTransferQueryService`** (`Percolator.Apps.FileTransfer.Ports.IFileTransferQueryService`):
-  - Reads active file transfer task progress, byte rates, and manifest catalogs without locking active chunk transfer state machines.
+  - Reads active file transfer task progress, byte rates, and manifest catalogs without locking active chunk transfer state machines.\
 
 ---
 
@@ -417,8 +456,10 @@ Database Engine: Encrypted SQLite using SQLCipher (`SQLitePCLRaw.bundle_e_sqlcip
     - Relayed 1:1: Invokes `UnauthenticatedDeliveryService.EnqueueMailbox` against recipient's home relay using `DeliveryToken``.
     - Relayed Group: Invokes `AnonymousGroupRelayService.DispatchGroupMessage` against shared channel relay with ZK membership proof.
   - **`UnauthenticatedDeliveryEndpoint` (ASP.NET Core gRPC Service)**:
-    - Implements `UnauthenticatedDeliveryService`.
+    - Implements `UnauthenticatedDeliveryService` on **both Relay nodes and Direct Peer nodes** (running on their local ephemeral listening port).
     - Validates packet size and `DeliveryToken` validity, invokes ingress edge filters (`IIngressFilterService`), and hands unpacked envelopes to `InboundIngressPipeline`.
+    - Handles unauthenticated profile capability lookups (`GetProfile`), capability uploads (`UploadProfile`), and slot deletions (`DeleteProfile`) delegating directly to `IRelayProfileRepository.GetSlotAsync / SaveSlotAsync / DeleteSlotAsync`. Enforces anti-scraping IP rate limits, write token verification, and maximum payload size bounds ($\le 1040$ B).
+    - Streams unauthenticated blind avatar/media blobs (`DownloadBlindBlob`) via `IBlobStorageService` under `StorageMode.PublicRelayBlob` without requiring peer authentication or channel associations.
   - **Primary Container Service Activator (`PrimaryContainerServiceActivator<T>`)**:
     - *Pattern*: Implements `IGrpcServiceActivator<T>` to bridge Kestrel's secondary gRPC listener container to the host application's primary DI container (`IServiceProvider`).
     - *Lifecycle*: Dynamically creates an `IServiceScope` from the primary container per incoming gRPC request, resolves service dependencies, and guarantees deterministic scope cleanup in `ReleaseAsync()`.
@@ -457,10 +498,13 @@ Database Engine: Encrypted SQLite using SQLCipher (`SQLitePCLRaw.bundle_e_sqlcip
       - On application startup, generates a fresh, disposable ECDSA P-256 (`ECCurve.NamedCurves.nistP256`) keypair and in-memory self-signed certificate with `CN=Percolator-Ephemeral`, `KeyUsageFlags.DigitalSignature`, and loopback SANs (`localhost`, `127.0.0.1`, `::1`).
       - On Linux, macOS, and portable Kestrel OpenSSL servers, certificates remain purely in-memory with zero disk I/O.
       - *(Note: On Windows SChannel, ephemeral in-memory certificates fail TLS 1.3 handshakes. `Percolator.Infrastructure.Windows` provides `WindowsSChannelCertificateProvider` to handle PKCS#12 disk loading, Windows Defender write-retry backoff, and CNG key deletion).*
-  - **Relay Client Adapter**:
+  - **Relay & Peer Client Adapters**:
     - Publishes `PreKeyBundle` uploads to relay identities via `AuthenticatedRelayService.PublishPreKeyBundle`.
     - Fetches remote peer pre-key bundles from relays out-of-band via `AuthenticatedRelayService.FetchPreKeyBundle`, authenticating with local `IdentityKey` signature to defeat OPK exhaustion attacks.
     - Queues store-and-forward mailbox envelopes via `UnauthenticatedDeliveryService.EnqueueMailbox` using recipient `DeliveryToken` / `BlindedRoutingToken`.
+    - Fetches encrypted profile ciphertext packages anonymously from relays or direct peers out-of-band via `UnauthenticatedDeliveryService.GetProfile` presenting solely the recipient `BlindedLocator`.
+    - Publishes encrypted profile ciphertext packages to relays out-of-band via `UnauthenticatedDeliveryService.UploadProfile` presenting solely `BlindedLocator` and `WriteToken`.
+    - Deletes stale profile slots from relays upon key rotation via `UnauthenticatedDeliveryService.DeleteProfile` presenting `BlindedLocator` and `WriteToken`.
   - **Discovery Client & PreKey Adapters (`Percolator.Apps.Discovery.Ports`)**:
     - **`DiscoveryQueryClient`** (`INearbyDiscoveryQueryClientPort`):
       - Connects to a target relay or peer gRPC endpoint to execute `NearbyDiscoveryQueryProto` requests. Enforces `DiscoveryResultLimit` clamping (1–100), deserializes `NearbyDiscoveryResponseProto`, and returns sanitized `IReadOnlyList<PeerDiscoveryDescriptor>` with `DeliveryRoute.RelayedOneToOne`.
@@ -490,6 +534,7 @@ Database Engine: Encrypted SQLite using SQLCipher (`SQLitePCLRaw.bundle_e_sqlcip
   - **`DisappearingMessageEvictionWorker`**: Scheduled cron worker (running every 30 seconds) calling `IChatMessageRepository.PurgeExpiredMessagesAsync(now)` to delete messages past `expires_at_utc` and invoking `IBlobStorageService.DeleteLocalCacheAsync` for deleted media blobs.
   - **`OutboxRetentionPruner`**: Evaluates retention window policies for `OutboxJob` rows (e.g., pruning `Delivered` jobs older than 7 days, purging dead-letter jobs that have exceeded `MaxRetryCount` and manual inspection windows).
   - **`RelayPreKeyDirectoryPruner`**: Evicts expired signed pre-key bundles and consumed or timed-out one-time pre-keys from `IRelayPreKeyDirectoryRepository` environmental records.\
+  - **`RelayProfileSlotPruner`**: Scheduled background worker running periodically on relays. Evicts expired profile slots from `relay_profile_slots` in `SqliteRelayProfileRepository` where `expires_at_utc < now` or slots abandoned past retention windows (e.g. 30 days without update), reclaiming storage without locking active lookups.
   - **`UnknownGroupMessageCachePruner`**: Purges buffered group chat frames from `IUnknownGroupMessageCacheRepository` that exceed maximum TTL (e.g. 48 hours) where the author's sender key distribution was never received.
   - **`AbandonedInvitePruner`**: Scans inbound contact requests (`PeerContactState.PendingApproval`), pending handshake envelopes in `IPendingHandshakeRepository`, and group invitations (`PendingGroupInvitation`) exceeding local expiration policies (e.g. 14 days without user response) and marks or purges them.
   - **`RelayDiscoveryRegistrationPruner`**: Scans `disc_relay_peer_registrations` table in `Apps.Discovery` to evict expired registrations (e.g., registrations older than 7 days without renewal) or registrations whose corresponding Signed PreKey has expired.
@@ -513,6 +558,9 @@ Database Engine: Encrypted SQLite using SQLCipher (`SQLitePCLRaw.bundle_e_sqlcip
   - **Stepped Bucket Padding**: Applies PKCS#7 or ISO/IEC 7816-4 padding to discrete boundaries (< 1 MB to 32 KB; 1–10 MB to 256 KB; > 10 MB to 1 MB) to prevent traffic analysis and file fingerprinting.
   - **Chunked STREAM AEAD**: Encrypts and decrypts in fixed $64\text{ KB}$ chunks using .NET `AesGcm` with sequential counter nonces ($\text{Nonce}_i = N_{\text{base}} \oplus i$) and 16-byte authentication tags.
   - **Bounded Memory & Zero LOH Allocations**: Rents chunk buffers from `ArrayPool<byte>.Shared`, ensuring memory consumption never exceeds $\le 64\text{ KB}$ regardless of multi-megabyte file size.
+- **`StorageMode.PublicRelayBlob` Support**:
+  - In addition to authenticated channel-bound blob storage, supports channel-independent blind blob hosting (such as encrypted user profile avatars).
+  - Blobs uploaded under this mode are keyed purely by their SHA-256 ciphertext hash (`BlobId`) and served out-of-band to anyone with the locator via `UnauthenticatedDeliveryService.DownloadBlindBlob`, eliminating `ChannelId` leakage on the wire and decoupling avatar retrieval from chat channels.
 - **`RelayBlobClient`** (`Percolator.Application.Ports.IRelayBlobClient`):
   - High-performance HTTP/2 or gRPC streaming client communicating with the channel's designated relay.
   - **Streaming Upload (`POST /blobs`)**: Streams chunked ciphertext out-of-band with real-time `TransferProgress` telemetry (bytes transferred, rate, ETA) and cancellation support. Attaches authentication headers (signed ticket for 1:1 relay; Group Epoch Token for group channels).
