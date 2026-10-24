@@ -67,6 +67,8 @@ public sealed class TestIdentityNode
     public IChatService ChatService { get; }
     public IHandshakeService HandshakeService { get; }
     public IContactRequestCoordinator ContactRequestCoordinator { get; }
+    public GroupKeyDistributionService GroupKeyDistributionService { get; }
+    public GroupInvitationService GroupInvitationService { get; }
     public OutboxWorker OutboxWorker { get; }
     public InboundIngressPipeline IngressPipeline { get; }
     public IStreamRegistry StreamRegistry { get; }
@@ -217,6 +219,20 @@ public sealed class TestIdentityNode
             _contactRepo,
             TimeProvider);
 
+        GroupKeyDistributionService = new GroupKeyDistributionService(
+            _groupSenderKeyRepo,
+            _groupReceiverSessionRepo,
+            egressPipeline,
+            CryptoEngine,
+            RoutingCoordinator);
+
+        GroupInvitationService = new GroupInvitationService(
+            _groupInvitationRepo,
+            _channelRepo,
+            egressPipeline,
+            serializer,
+            TimeProvider);
+
         var replayFilter = new MemoryHandshakeReplayFilter();
         HandshakeService = new HandshakeService(
             _identityKeyStore,
@@ -240,7 +256,8 @@ public sealed class TestIdentityNode
             HandshakeService,
             CryptoEngine,
             appRouter,
-            channelLockService);
+            channelLockService,
+            GroupKeyDistributionService);
 
         OutboxWorker = new OutboxWorker(
             _outboxRepo,
@@ -407,8 +424,16 @@ public sealed class TestIdentityNode
             var unwrapResult = _envelopeUnwrapper.Unwrap(envelope);
             if (unwrapResult.IsSuccess)
             {
-                await IngressPipeline.ProcessInboundAsync(unwrapResult.Value!).ConfigureAwait(false);
+                var res = await IngressPipeline.ProcessInboundAsync(unwrapResult.Value!).ConfigureAwait(false);
+                if (!res.IsSuccess)
+                {
+                    throw new InvalidOperationException($"IngressPipeline drain error on {Name}: {res.Error.Code} - {res.Error.Description}");
+                }
                 processed++;
+            }
+            else
+            {
+                throw new InvalidOperationException($"Unwrap drain error on {Name}: {unwrapResult.Error.Code} - {unwrapResult.Error.Description}");
             }
         }
 
@@ -440,12 +465,25 @@ public sealed class TestIdentityNode
         return channelId;
     }
 
+    public async Task SaveGroupChannelInternalAsync(GroupChannel channel)
+    {
+        await _channelRepo.SaveGroupAsync(channel).ConfigureAwait(false);
+    }
+
     public async Task ReceiveWireBytesAsync(ReadOnlyMemory<byte> frameBytes)
     {
         var unwrapResult = _envelopeUnwrapper.UnwrapFrame(frameBytes, IdentityId, TimeProvider.UtcNow);
         if (unwrapResult.IsSuccess)
         {
-            await IngressPipeline.ProcessInboundAsync(unwrapResult.Value!).ConfigureAwait(false);
+            var res = await IngressPipeline.ProcessInboundAsync(unwrapResult.Value!).ConfigureAwait(false);
+            if (!res.IsSuccess)
+            {
+                throw new InvalidOperationException($"IngressPipeline error on {Name}: {res.Error.Code} - {res.Error.Description}");
+            }
+        }
+        else
+        {
+            throw new InvalidOperationException($"UnwrapFrame error on {Name}: {unwrapResult.Error.Code} - {unwrapResult.Error.Description}");
         }
     }
 

@@ -1,10 +1,12 @@
 using System.Collections.Concurrent;
 using Percolator.Application2IntegrationTests.Adapters;
 using Percolator.Application2IntegrationTests.Infrastructure;
+using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
 
 namespace Percolator.Application2IntegrationTests.Builders;
@@ -19,6 +21,8 @@ public sealed class RelayNode
     public RelayMailboxQueue MailboxQueue { get; }
     public InMemoryRelayPreKeyRepository PreKeyRepository { get; }
     public InMemoryRelayProfileRepository ProfileRepository { get; } = new();
+    public InMemoryRelayLedgerRepository LedgerRepository { get; } = new();
+    public ScenarioZkProofEngine ZkEngine { get; } = new();
     public RelayHostingPolicy Policy { get; }
     public IDateTimeProvider TimeProvider { get; }
 
@@ -53,6 +57,62 @@ public sealed class RelayNode
         out (BlindedRoutingToken RoutingToken, DeliveryToken DeliveryToken) tokens)
     {
         return _registeredClientTokens.TryGetValue(clientId, out tokens);
+    }
+
+    public void RegisterGroupLedger(RelayGroupLedger ledger)
+    {
+        ArgumentNullException.ThrowIfNull(ledger);
+        LedgerRepository.SaveAsync(ledger).GetAwaiter().GetResult();
+    }
+
+    public DomainResult DispatchGroupMessage(
+        ChannelId channelId,
+        ZkPresentationBytes proof,
+        ReadOnlyMemory<byte> sealedPayload,
+        IZkProofEngine? proofEngine = null)
+    {
+        var ledger = LedgerRepository.GetByChannelIdAsync(channelId).GetAwaiter().GetResult();
+        if (ledger is null)
+        {
+            return DomainResult.Failure(new DomainError("LEDGER_NOT_FOUND", $"No group ledger found for channel {channelId}."));
+        }
+
+        var engine = proofEngine ?? ZkEngine;
+        var verifyResult = ledger.VerifyDispatch(proof, sealedPayload.Span, engine);
+        if (verifyResult.IsFailure)
+        {
+            return verifyResult;
+        }
+
+        var now = TimeProvider.UtcNow;
+        var expiresAt = now.AddDays(7);
+
+        foreach (var routingToken in ledger.ActiveRoutingTokens)
+        {
+            DeliveryToken? deliveryToken = null;
+            foreach (var kvp in _registeredClientTokens)
+            {
+                if (kvp.Value.RoutingToken == routingToken)
+                {
+                    deliveryToken = kvp.Value.DeliveryToken;
+                    break;
+                }
+            }
+
+            if (deliveryToken is not null)
+            {
+                var envelope = new MailboxEnvelope(
+                    EnvelopeId.New(),
+                    routingToken,
+                    sealedPayload.ToArray(),
+                    now,
+                    expiresAt);
+
+                MailboxQueue.Enqueue(envelope, deliveryToken, TimeProvider);
+            }
+        }
+
+        return DomainResult.Success();
     }
 
     public DomainResult<ProfileCiphertextPackage> GetProfile(BlindedProfileLocator locator)

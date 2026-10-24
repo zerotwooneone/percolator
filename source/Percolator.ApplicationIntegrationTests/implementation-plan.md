@@ -241,7 +241,7 @@ Prior to implementing Phase 2 and subsequent phases, the following core defects 
     3. Even if Bob intercepted the new locator, Bob's stale `ProfileKey` fails AEAD decryption.
     4. Relays reject envelopes presented with invalid/revoked `DeliveryToken`.
 
-### Phase 4: Group Chat (`Alice`, `Bob`, `Charlie`) Hosted on `Relay`
+### Phase 4: Group Chat (`Alice`, `Bob`, `Charlie`) Hosted on `Relay` [COMPLETED in GroupChatScenarioTests.cs]
 - **Step 4.1: Group Creation & Ledger Registration**:
   - Alice creates `GroupChannel(\"Percolator Builders\")` with `GroupMasterKey`.
   - Alice registers `RelayGroupLedger` on `Relay` with `ActiveRoutingTokens` for Alice, Bob, and Charlie.

@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Percolator.Apps.Chat.Features.GroupInvitations;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
@@ -21,6 +22,7 @@ public sealed class TestPayloadSerializer : IPayloadSerializer
         options.Converters.Add(new GuidIdJsonConverter<PublicIdentityId>());
         options.Converters.Add(new GuidIdJsonConverter<ChannelId>());
         options.Converters.Add(new GuidIdJsonConverter<PayloadId>());
+        options.Converters.Add(new InvitationIdJsonConverter());
         return options;
     }
 
@@ -84,6 +86,40 @@ public sealed class TestPayloadSerializer : IPayloadSerializer
         public override void Write(Utf8JsonWriter writer, T value, JsonSerializerOptions options)
         {
             writer.WriteStringValue(value.ToString());
+        }
+    }
+
+    private sealed class InvitationIdJsonConverter : JsonConverter<InvitationId>
+    {
+        public override InvitationId Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            if (reader.TokenType == JsonTokenType.String)
+            {
+                var str = reader.GetString();
+                if (!string.IsNullOrEmpty(str))
+                {
+                    return new InvitationId(str);
+                }
+            }
+            else if (reader.TokenType == JsonTokenType.StartObject)
+            {
+                using var doc = JsonDocument.ParseValue(ref reader);
+                if (doc.RootElement.TryGetProperty("value", out var val) || doc.RootElement.TryGetProperty("Value", out val))
+                {
+                    var str = val.GetString();
+                    if (!string.IsNullOrEmpty(str))
+                    {
+                        return new InvitationId(str);
+                    }
+                }
+            }
+
+            return default;
+        }
+
+        public override void Write(Utf8JsonWriter writer, InvitationId value, JsonSerializerOptions options)
+        {
+            writer.WriteStringValue(value.Value);
         }
     }
 }

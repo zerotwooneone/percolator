@@ -1,8 +1,10 @@
 using System.Collections.Concurrent;
 using Percolator.Application2IntegrationTests.Builders;
+using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Ports;
 using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Domain.Security.ValueObjects;
 
 namespace Percolator.Application2IntegrationTests.Infrastructure;
 
@@ -14,6 +16,8 @@ public sealed class InMemoryLoopbackNetworkSwitch
     private readonly ConcurrentDictionary<(EndpointPort Source, EndpointPort Target), bool> _activeStreams = new();
     private readonly ConcurrentDictionary<PublicIdentityId, RelayNode> _relaysById = new();
     private readonly ConcurrentDictionary<PublicIdentityId, RelayNode> _recipientToRelay = new();
+    private readonly ConcurrentDictionary<ChannelId, RelayNode> _channelToRelay = new();
+    private readonly ConcurrentDictionary<ChannelId, (GroupMasterKey MasterKey, AuthCredentialMacBytes AuthMac)> _channelCredentials = new();
     private readonly ConcurrentDictionary<PublicIdentityId, IRelayProfileRepository> _peerProfileStores = new();
 
     public IReadOnlyCollection<RelayNode> AllRelays => _relaysById.Values.ToList();
@@ -47,6 +51,28 @@ public sealed class InMemoryLoopbackNetworkSwitch
     public bool TryGetRelayForRecipient(PublicIdentityId recipientId, out RelayNode? relay)
     {
         return _recipientToRelay.TryGetValue(recipientId, out relay);
+    }
+
+    public void RegisterRelayForChannel(ChannelId channelId, RelayNode relay)
+    {
+        ArgumentNullException.ThrowIfNull(relay);
+        _channelToRelay[channelId] = relay;
+        _relaysById[relay.RelayIdentityId] = relay;
+    }
+
+    public bool TryGetRelayForChannel(ChannelId channelId, out RelayNode? relay)
+    {
+        return _channelToRelay.TryGetValue(channelId, out relay);
+    }
+
+    public void RegisterGroupCredentials(ChannelId channelId, GroupMasterKey masterKey, AuthCredentialMacBytes authMac)
+    {
+        _channelCredentials[channelId] = (masterKey, authMac);
+    }
+
+    public bool TryGetGroupCredentials(ChannelId channelId, out (GroupMasterKey MasterKey, AuthCredentialMacBytes AuthMac) creds)
+    {
+        return _channelCredentials.TryGetValue(channelId, out creds);
     }
 
     public void RegisterPeerProfileStore(PublicIdentityId peerId, IRelayProfileRepository profileRepo)
