@@ -156,55 +156,8 @@ public sealed class ProfileIntegrationScenarioTests
         var charlie = cluster["Charlie"];
         var relay = cluster.GetRelay("Relay");
 
-        // Alice and Charlie register mailboxes on Relay
-        alice.RegisterMailbox(relay);
-        charlie.RegisterMailbox(relay);
-
-        // Configure routing paths so both nodes route via relay mailbox
-        alice.AddPeerMailboxRoute(charlie.IdentityId, $"localhost:{relay.Port.Value}", charlie.MailboxRoutingToken, charlie.MailboxDeliveryToken);
-        charlie.AddPeerMailboxRoute(alice.IdentityId, $"localhost:{relay.Port.Value}", alice.MailboxRoutingToken, alice.MailboxDeliveryToken);
-
-        // Establish mutual approved contacts and direct channel
-        await alice.AddApprovedContactAsync(charlie);
-        await charlie.AddApprovedContactAsync(alice);
-        var channelId = await alice.EstablishDirectChannelWithAsync(charlie);
-
-        // Mutual X3DH / Double Ratchet session over Relay
-        var charlieBundle = charlie.CreatePreKeyBundle();
-        var initiatorResult = X3dhAgreement.Initiate(
-            alice.IdentityPrivateKey.Span,
-            alice.IdentityPublicKey,
-            charlieBundle,
-            alice.CryptoEngine).Value!;
-
-        var initiatorSession = DirectRatchetSession.CreateFromX3dhInitiator(
-            alice.IdentityId,
-            alice.DeviceId,
-            charlie.IdentityId,
-            charlie.DeviceId,
-            initiatorResult,
-            charlieBundle.SignedPreKey,
-            alice.CryptoEngine).Value!;
-
-        var responderMasterSecret = X3dhAgreement.Receive(
-            charlie.IdentityPrivateKey.Span,
-            charlie.SignedPreKeyPrivate.Span,
-            ReadOnlySpan<byte>.Empty,
-            alice.IdentityPublicKey,
-            initiatorResult.EphemeralPublicKey,
-            charlie.CryptoEngine).Value!;
-
-        var responderSession = DirectRatchetSession.CreateFromX3dhResponder(
-            charlie.IdentityId,
-            charlie.DeviceId,
-            alice.IdentityId,
-            alice.DeviceId,
-            responderMasterSecret,
-            initiatorResult.EphemeralPublicKey,
-            charlie.CryptoEngine).Value!;
-
-        await alice.SaveRatchetSessionInternalAsync(initiatorSession);
-        await charlie.SaveRatchetSessionInternalAsync(responderSession);
+        // Establish mutual approved contacts, direct channel, and relayed session via Base64 invite & prekey bundle
+        var channelId = await alice.EstablishRelayedSessionWithAsync(charlie, relay);
 
         // Charlie has a local nickname for Alice
         var charlieContactBefore = await charlie.ContactQueries.GetContactDetailAsync(charlie.IdentityId, alice.IdentityId);

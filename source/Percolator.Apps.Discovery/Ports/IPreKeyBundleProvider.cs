@@ -1,15 +1,12 @@
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Domain.Security.Model;
 
 namespace Percolator.Apps.Discovery.Ports;
 
 /// <summary>
-/// Port for fetching a consumable PreKeyBundle when the user intends to initiate a handshake session.
-/// Pops an ephemeral One-Time PreKey (OPK) if available, or returns SPK-only bundle for 3DH.
+/// Discovery port forwarding to Domain-level IPreKeyBundleProvider for backward compatibility.
 /// </summary>
-public interface IPreKeyBundleProvider
+public interface IPreKeyBundleProvider : Percolator.Domain.Delivery.Ports.IPreKeyBundleProvider
 {
-    ValueTask<DomainResult<PreKeyBundle>> FetchConsumableBundleAsync(
-        PublicIdentityId targetPeerId,
-        CancellationToken ct = default);
 }

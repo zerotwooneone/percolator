@@ -1,4 +1,8 @@
+using FluentAssertions;
+using NUnit.Framework;
 using Percolator.Application2.Profiles;
+using Percolator.Domain.Delivery.ValueObjects;
+using Percolator.Domain.Identities.ValueObjects;
 
 namespace Percolator.Application2.Tests.Profiles;
 
@@ -28,6 +32,7 @@ public sealed class InvitationLinkTests
         parsed.Host.Should().Be("192.168.1.100");
         parsed.Port.Should().Be(8080);
         parsed.PublicKey.Should().Be("MyIdentityKeyHex");
+        parsed.Kind.Should().Be(InvitationKind.Direct);
     }
 
     [Test]
@@ -39,6 +44,53 @@ public sealed class InvitationLinkTests
         parsed.Host.Should().Be("peer.percolator.net");
         parsed.Port.Should().BeNull();
         parsed.PublicKey.Should().Be("MyIdentityKeyHex");
+        parsed.Kind.Should().Be(InvitationKind.Direct);
+    }
+
+    [Test]
+    public void CreateRelayed_Base64Roundtrip_ParsesCorrectly()
+    {
+        var peerId = PublicIdentityId.New();
+        var deviceId = DeviceId.Primary;
+        var identityKey = IdentityKey.FromSpan(new byte[32]);
+        var routingToken = BlindedRoutingToken.New();
+        var deliveryToken = DeliveryToken.FromSpan(new byte[32]);
+        const string relayEndpoint = "relay.percolator.net:15003";
+
+        var relayed = InvitationLink.CreateRelayed(
+            peerId,
+            deviceId,
+            identityKey,
+            relayEndpoint,
+            routingToken,
+            deliveryToken);
+
+        relayed.Kind.Should().Be(InvitationKind.Relayed);
+        var base64 = relayed.ToBase64();
+        base64.Should().NotBeNullOrWhiteSpace();
+
+        // 1. Parse raw Base64
+        var parsedFromBase64 = InvitationLink.Parse(base64);
+        parsedFromBase64.Kind.Should().Be(InvitationKind.Relayed);
+        parsedFromBase64.PeerIdentityId.Should().Be(peerId);
+        parsedFromBase64.PeerDeviceId.Should().Be(deviceId);
+        parsedFromBase64.IdentityKey.Should().Be(identityKey);
+        parsedFromBase64.RelayEndpoint.Should().Be(relayEndpoint);
+        parsedFromBase64.RoutingToken.Should().Be(routingToken);
+        parsedFromBase64.DeliveryToken.Should().Be(deliveryToken);
+
+        // 2. Parse URI format: percolator://invite/{Base64}
+        var uriString = relayed.ToString();
+        uriString.Should().StartWith("percolator://invite/");
+
+        var parsedFromUri = InvitationLink.Parse(uriString);
+        parsedFromUri.Kind.Should().Be(InvitationKind.Relayed);
+        parsedFromUri.PeerIdentityId.Should().Be(peerId);
+        parsedFromUri.PeerDeviceId.Should().Be(deviceId);
+        parsedFromUri.IdentityKey.Should().Be(identityKey);
+        parsedFromUri.RelayEndpoint.Should().Be(relayEndpoint);
+        parsedFromUri.RoutingToken.Should().Be(routingToken);
+        parsedFromUri.DeliveryToken.Should().Be(deliveryToken);
     }
 
     [TestCase("http://peer.percolator.net/Key", "Invalid scheme")]

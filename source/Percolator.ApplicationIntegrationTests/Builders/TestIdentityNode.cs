@@ -20,6 +20,7 @@ using Percolator.Domain.Channels.Ports;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Hosting;
+using Percolator.Domain.Delivery.Ports;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.ValueObjects;
@@ -66,6 +67,7 @@ public sealed class TestIdentityNode
     // Driving Ports
     public IChatService ChatService { get; }
     public IHandshakeService HandshakeService { get; }
+    public IPreKeyBundleProvider PreKeyBundleProvider { get; }
     public IContactRequestCoordinator ContactRequestCoordinator { get; }
     public GroupKeyDistributionService GroupKeyDistributionService { get; }
     public GroupInvitationService GroupInvitationService { get; }
@@ -174,6 +176,7 @@ public sealed class TestIdentityNode
         StreamRegistry = new LoopbackStreamRegistry(IdentityId, DeviceId, _networkSwitch, _channelRepo);
         TransportDispatcher = new LoopbackTransportDispatcher(_networkSwitch);
         RoutingCoordinator = new RoutingCoordinator(StreamRegistry, PeerMailboxRoutingRepo, TimeProvider);
+        PreKeyBundleProvider = new LoopbackPreKeyBundleProvider(_networkSwitch);
 
         // Egress & Locks
         var channelLockService = new KeyedSemaphoreLockService();
@@ -360,6 +363,18 @@ public sealed class TestIdentityNode
     public InvitationLink CreateInvitationLink()
     {
         return new InvitationLink("localhost", Port.Value, Convert.ToHexString(IdentityPublicKey.Span));
+    }
+
+    public InvitationLink CreateRelayedInvitation(RelayNode relay)
+    {
+        ArgumentNullException.ThrowIfNull(relay);
+        return InvitationLink.CreateRelayed(
+            IdentityId,
+            DeviceId,
+            IdentityPublicKey,
+            $"localhost:{relay.Port.Value}",
+            MailboxRoutingToken,
+            MailboxDeliveryToken);
     }
 
     public PreKeyBundle CreatePreKeyBundle(uint? oneTimeKeyId = null)
@@ -577,6 +592,71 @@ public sealed class TestIdentityNode
         _networkSwitch.OpenDirectStream(Port, peer.Port);
 
         return channelId;
+    }
+
+    /// <summary>
+    /// Establishes an active 1:1 Double Ratchet session, shared DirectChannel, and mutual verified contacts
+    /// between this node (initiator) and a responder over a zero-knowledge relay using a realistic offline
+    /// prekey bundle publication and Base64 invitation flow.
+    /// </summary>
+    public async Task<ChannelId> EstablishRelayedSessionWithAsync(
+        TestIdentityNode responder,
+        RelayNode relay)
+    {
+        ArgumentNullException.ThrowIfNull(responder);
+        ArgumentNullException.ThrowIfNull(relay);
+
+        // 1. Responder registers mailbox & publishes prekeys to Relay
+        responder.PublishHostedPreKeys(relay, oneTimeKeyCount: 5);
+        RegisterMailbox(relay);
+
+        // 2. Responder creates Base64 invitation out-of-band
+        var invite = responder.CreateRelayedInvitation(relay);
+        var inviteBase64 = invite.ToBase64();
+
+        // 3. Initiator receives Base64 invitation out-of-band and parses it
+        var parsedInvite = InvitationLink.Parse(inviteBase64);
+
+        // 4. Initiator fetches consumable prekey bundle via IPreKeyBundleProvider
+        var bundleResult = await PreKeyBundleProvider.FetchConsumableBundleAsync(
+            parsedInvite.PeerIdentityId!.Value,
+            parsedInvite.PeerDeviceId!.Value,
+            parsedInvite.RelayEndpoint).ConfigureAwait(false);
+
+        if (bundleResult.IsFailure)
+        {
+            throw new InvalidOperationException($"Failed to fetch prekey bundle for {responder.Name}: {bundleResult.Error.Code} - {bundleResult.Error.Description}");
+        }
+
+        // 5. Register mutual mailbox routing paths
+        AddPeerMailboxRoute(parsedInvite.PeerIdentityId.Value, parsedInvite.RelayEndpoint!, parsedInvite.RoutingToken!.Value, parsedInvite.DeliveryToken!);
+        responder.AddPeerMailboxRoute(IdentityId, parsedInvite.RelayEndpoint!, MailboxRoutingToken, MailboxDeliveryToken);
+
+        // 6. Initiator initiates X3DH handshake
+        var handshakeResult = await HandshakeService.InitiateHandshakeAsync(
+            IdentityId,
+            DeviceId,
+            bundleResult.Value!).ConfigureAwait(false);
+
+        if (!handshakeResult.IsSuccess)
+        {
+            throw new InvalidOperationException($"InitiateHandshake failed: {handshakeResult.Error.Code} - {handshakeResult.Error.Description}");
+        }
+
+        // 7. Initiator outbox worker flushes envelope to Relay mailbox
+        await OutboxWorker.ProcessBatchAsync().ConfigureAwait(false);
+
+        // 8. Responder comes online, drains mailbox, and completes handshake
+        await responder.DrainMailboxAsync(relay).ConfigureAwait(false);
+        await responder.ContactRequestCoordinator.ApproveRequestAsync(
+            responder.IdentityId, IdentityId, PeerTrustLevel.Verified).ConfigureAwait(false);
+        await responder.HandshakeService.CompletePendingHandshakeAsync(
+            responder.IdentityId, IdentityId).ConfigureAwait(false);
+
+        // 9. Establish mutual approved contacts and channels
+        await AddApprovedContactAsync(responder).ConfigureAwait(false);
+        await responder.AddApprovedContactAsync(this).ConfigureAwait(false);
+        return await EstablishDirectChannelWithAsync(responder).ConfigureAwait(false);
     }
 
     internal Task SaveDirectContactInternalAsync(PeerContact contact) => _contactRepo.SaveAsync(contact);

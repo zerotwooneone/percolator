@@ -1,6 +1,7 @@
 using FluentAssertions;
 using NUnit.Framework;
 using Percolator.Application2.Delivery.Ports;
+using Percolator.Application2.Profiles;
 using Percolator.Application2IntegrationTests.Builders;
 using Percolator.Application2IntegrationTests.Infrastructure;
 using Percolator.Apps.Chat.Features.Messaging;
@@ -42,20 +43,36 @@ public sealed class RelayedChatScenarioTests
         charlieHostedBundle.AvailableOneTimePreKeyCount.Should().Be(5);
         relay.MailboxQueue.TotalCount.Should().Be(0);
 
-        // ----------------------------------------------------------------------------------
-        // Step 2.2: Alice Consumes Charlie's PreKey Bundle from Relay & Initiates Handshake
-        // ----------------------------------------------------------------------------------
-        var fetchedHostedBundle = await relay.PreKeyRepository.GetAsync(charlie.IdentityId, charlie.DeviceId);
-        fetchedHostedBundle.Should().NotBeNull();
+        // Charlie generates an out-of-band Relayed invitation (Base64 encoded)
+        var charlieInvite = charlie.CreateRelayedInvitation(relay);
+        var charlieInviteBase64 = charlieInvite.ToBase64();
+        charlieInviteBase64.Should().NotBeNullOrWhiteSpace();
 
-        var consumeResult = fetchedHostedBundle!.ConsumeBundle();
-        consumeResult.IsSuccess.Should().BeTrue();
-        fetchedHostedBundle.AvailableOneTimePreKeyCount.Should().Be(4, "Consuming a bundle should decrement the available OTPKs on the relay");
-        var charlieBundle = consumeResult.Value!;
+        // ----------------------------------------------------------------------------------
+        // Step 2.2: Alice Parses Charlie's Base64 Invitation & Consumes PreKey Bundle from Relay
+        // ----------------------------------------------------------------------------------
+        var parsedInvite = InvitationLink.Parse(charlieInviteBase64);
+        parsedInvite.Kind.Should().Be(InvitationKind.Relayed);
+        parsedInvite.PeerIdentityId.Should().Be(charlie.IdentityId);
+        parsedInvite.PeerDeviceId.Should().Be(charlie.DeviceId);
+        parsedInvite.IdentityKey.Should().Be(charlie.IdentityPublicKey);
+        parsedInvite.RelayEndpoint.Should().Be($"localhost:{relay.Port.Value}");
+        parsedInvite.RoutingToken.Should().Be(charlie.MailboxRoutingToken);
+        parsedInvite.DeliveryToken.Should().Be(charlie.MailboxDeliveryToken);
 
-        // Configure routing paths so Alice and Charlie know each other's relay mailbox routes
-        alice.AddPeerMailboxRoute(charlie.IdentityId, $"localhost:{relay.Port.Value}", charlie.MailboxRoutingToken, charlie.MailboxDeliveryToken);
-        charlie.AddPeerMailboxRoute(alice.IdentityId, $"localhost:{relay.Port.Value}", alice.MailboxRoutingToken, alice.MailboxDeliveryToken);
+        // Alice fetches Charlie's consumable PreKeyBundle from Relay via IPreKeyBundleProvider client port
+        var bundleResult = await alice.PreKeyBundleProvider.FetchConsumableBundleAsync(
+            parsedInvite.PeerIdentityId!.Value,
+            parsedInvite.PeerDeviceId!.Value,
+            parsedInvite.RelayEndpoint);
+
+        bundleResult.IsSuccess.Should().BeTrue();
+        var charlieBundle = bundleResult.Value!;
+        charlieHostedBundle.AvailableOneTimePreKeyCount.Should().Be(4, "Consuming a bundle through IPreKeyBundleProvider should decrement available OTPKs on the relay");
+
+        // Configure routing paths using the tokens from the parsed invitation
+        alice.AddPeerMailboxRoute(parsedInvite.PeerIdentityId.Value, parsedInvite.RelayEndpoint!, parsedInvite.RoutingToken!.Value, parsedInvite.DeliveryToken!);
+        charlie.AddPeerMailboxRoute(alice.IdentityId, parsedInvite.RelayEndpoint!, alice.MailboxRoutingToken, alice.MailboxDeliveryToken);
 
         // Alice initiates X3DH handshake targeting Charlie
         var handshakeResult = await alice.HandshakeService.InitiateHandshakeAsync(

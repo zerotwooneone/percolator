@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using FluentAssertions;
 using NUnit.Framework;
+using Percolator.Application2.Delivery;
 using Percolator.Application2.Delivery.Ports;
 using Percolator.Application2IntegrationTests.Builders;
 using Percolator.Application2IntegrationTests.Infrastructure;
@@ -12,8 +13,6 @@ using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.ValueObjects;
-using Percolator.Domain.Security;
-using Percolator.Domain.Security.Model;
 using Percolator.Domain.Security.ValueObjects;
 using DeliveryRoute = Percolator.PluginSdk.DeliveryRoute;
 
@@ -51,8 +50,6 @@ public sealed class GroupChatScenarioTests
         charlie.RegisterMailbox(relay);
 
         // Configure routing paths for relayed communication
-        alice.AddPeerMailboxRoute(charlie.IdentityId, $"localhost:{relay.Port.Value}", charlie.MailboxRoutingToken, charlie.MailboxDeliveryToken);
-        charlie.AddPeerMailboxRoute(alice.IdentityId, $"localhost:{relay.Port.Value}", alice.MailboxRoutingToken, alice.MailboxDeliveryToken);
         bob.AddPeerMailboxRoute(charlie.IdentityId, $"localhost:{relay.Port.Value}", charlie.MailboxRoutingToken, charlie.MailboxDeliveryToken);
         charlie.AddPeerMailboxRoute(bob.IdentityId, $"localhost:{relay.Port.Value}", bob.MailboxRoutingToken, bob.MailboxDeliveryToken);
 
@@ -61,46 +58,8 @@ public sealed class GroupChatScenarioTests
         var aliceBobChannelId = await alice.EstablishDirectSessionWithAsync(bob);
         cluster.Switch.HasActiveStream(alice.Port, bob.Port).Should().BeTrue();
 
-        // Alice <-> Charlie via RelayedOneToOne session
-        await alice.AddApprovedContactAsync(charlie);
-        await charlie.AddApprovedContactAsync(alice);
-        var aliceCharlieChannelId = await alice.EstablishDirectChannelWithAsync(charlie);
-
-        var charlieBundle = charlie.CreatePreKeyBundle();
-        var initiatorResult = X3dhAgreement.Initiate(
-            alice.IdentityPrivateKey.Span,
-            alice.IdentityPublicKey,
-            charlieBundle,
-            alice.CryptoEngine).Value!;
-
-        var initiatorSession = DirectRatchetSession.CreateFromX3dhInitiator(
-            alice.IdentityId,
-            alice.DeviceId,
-            charlie.IdentityId,
-            charlie.DeviceId,
-            initiatorResult,
-            charlieBundle.SignedPreKey,
-            alice.CryptoEngine).Value!;
-
-        var responderMasterSecret = X3dhAgreement.Receive(
-            charlie.IdentityPrivateKey.Span,
-            charlie.SignedPreKeyPrivate.Span,
-            ReadOnlySpan<byte>.Empty,
-            alice.IdentityPublicKey,
-            initiatorResult.EphemeralPublicKey,
-            charlie.CryptoEngine).Value!;
-
-        var responderSession = DirectRatchetSession.CreateFromX3dhResponder(
-            charlie.IdentityId,
-            charlie.DeviceId,
-            alice.IdentityId,
-            alice.DeviceId,
-            responderMasterSecret,
-            initiatorResult.EphemeralPublicKey,
-            charlie.CryptoEngine).Value!;
-
-        await alice.SaveRatchetSessionInternalAsync(initiatorSession);
-        await charlie.SaveRatchetSessionInternalAsync(responderSession);
+        // Alice <-> Charlie via RelayedOneToOne session (simulated offline prekey & Base64 invite handshake)
+        var aliceCharlieChannelId = await alice.EstablishRelayedSessionWithAsync(charlie, relay);
 
         // ----------------------------------------------------------------------------------
         // Step 1: Group Creation & Relay Ledger Registration
@@ -177,7 +136,7 @@ public sealed class GroupChatScenarioTests
 
         bobInviteResult.IsSuccess.Should().BeTrue();
         var aliceJobs = await alice.OutboxQueries.GetJobsForOwnerAsync(alice.IdentityId);
-        aliceJobs[0].Status.Should().Be(Percolator.Application2.Delivery.OutboxStatus.Delivered);
+        aliceJobs.Should().Contain(j => j.RecipientIdentityId == bob.IdentityId && j.Status == OutboxStatus.Delivered);
 
         // 2. Alice invites Charlie (RelayedOneToOne)
         var charlieInvitationId = InvitationId.New();
