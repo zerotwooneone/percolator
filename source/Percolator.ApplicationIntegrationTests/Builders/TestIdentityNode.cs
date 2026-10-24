@@ -12,6 +12,7 @@ using Percolator.Application2IntegrationTests.Adapters.Queries;
 using Percolator.Application2IntegrationTests.Infrastructure;
 using Percolator.Apps.Chat.Features.GroupInvitations;
 using Percolator.Apps.Chat.Features.Messaging;
+using Percolator.Apps.Chat.Features.Profiles;
 using Percolator.Apps.Chat.Ingress;
 using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
 using Percolator.Domain.Channels.Model;
@@ -26,6 +27,7 @@ using Percolator.Domain.Security;
 using Percolator.Domain.Security.Model;
 using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
+using Percolator.Infrastructure2.Serialization;
 using Percolator.PluginSdk;
 
 namespace Percolator.Application2IntegrationTests.Builders;
@@ -51,6 +53,14 @@ public sealed class TestIdentityNode
 
     public IDateTimeProvider TimeProvider { get; }
     public ICryptoEngine CryptoEngine { get; }
+
+    // Profile Capabilities
+    public ProfileKey ProfileKey { get; private set; }
+    public IProfileManager ProfileManager { get; }
+    public InMemoryPeerProfileRepository PeerProfileRepo { get; }
+    public IPeerProfileQueryService PeerProfileQueries { get; }
+    public IProfileDeliveryClient ProfileDeliveryClient { get; }
+    public InMemoryRelayProfileRepository LocalProfileRepository { get; } = new();
 
     // Driving Ports
     public IChatService ChatService { get; }
@@ -128,6 +138,14 @@ public sealed class TestIdentityNode
         MailboxDeliveryToken = DeliveryToken.FromSpan(deliveryBytes);
         MailboxDrainToken = DeliveryToken.FromSpan(drainBytes);
 
+        // Initialize Profile Components
+        ProfileKey = ProfileKey.Generate();
+        ProfileManager = new ProfileManager(new ProtobufProfileSerializer());
+        PeerProfileRepo = new InMemoryPeerProfileRepository();
+        PeerProfileQueries = new PeerProfileQueryService(PeerProfileRepo);
+        ProfileDeliveryClient = new LoopbackProfileDeliveryClient(_networkSwitch, TimeProvider);
+        _networkSwitch.RegisterPeerProfileStore(IdentityId, LocalProfileRepository);
+
         // Initialize Stores
         _chatRepo = new InMemoryChatMessageRepository();
         _channelRepo = new InMemoryChannelRepository();
@@ -176,7 +194,13 @@ public sealed class TestIdentityNode
             _channelRepo,
             _groupInvitationRepo,
             serializer,
-            TimeProvider);
+            TimeProvider,
+            unknownGroupCache: null,
+            blobStorage: null,
+            peerProfileRepo: PeerProfileRepo,
+            profileDeliveryClient: ProfileDeliveryClient,
+            profileManager: ProfileManager,
+            cryptoEngine: CryptoEngine);
         appRouter.RegisterHandler(chatHandler);
 
         // Driving Services
@@ -230,6 +254,70 @@ public sealed class TestIdentityNode
 
         // Register on network switch
         _networkSwitch.RegisterNode(Port, IdentityId, ReceiveWireBytesAsync);
+    }
+
+    public void RotateProfileKey()
+    {
+        ProfileKey.Dispose();
+        ProfileKey = ProfileKey.Generate();
+    }
+
+    public DomainResult PublishProfileToRelay(
+        RelayNode relay,
+        string displayName,
+        string? statusBio = null,
+        uint revision = 1)
+    {
+        var metadata = new ProfileMetadata(displayName, null, statusBio, revision);
+        var encResult = ProfileManager.EncryptProfile(metadata, ProfileKey, CryptoEngine);
+        if (encResult.IsFailure) return DomainResult.Failure(encResult.Error);
+
+        var locator = BlindedProfileLocator.Derive(IdentityPublicKey, ProfileKey, CryptoEngine);
+        var writeToken = ProfileWriteToken.Derive(IdentityPublicKey, ProfileKey, CryptoEngine);
+        var expiresAtUtc = TimeProvider.UtcNow.AddDays(14);
+
+        return relay.UploadProfile(locator, writeToken, encResult.Value, revision, expiresAtUtc);
+    }
+
+    public async Task<DomainResult> PublishProfileDirectAsync(
+        string displayName,
+        string? statusBio = null,
+        uint revision = 1)
+    {
+        var metadata = new ProfileMetadata(displayName, null, statusBio, revision);
+        var encResult = ProfileManager.EncryptProfile(metadata, ProfileKey, CryptoEngine);
+        if (encResult.IsFailure) return DomainResult.Failure(encResult.Error);
+
+        var locator = BlindedProfileLocator.Derive(IdentityPublicKey, ProfileKey, CryptoEngine);
+        var writeToken = ProfileWriteToken.Derive(IdentityPublicKey, ProfileKey, CryptoEngine);
+        var expiresAtUtc = TimeProvider.UtcNow.AddDays(14);
+
+        var slotResult = RelayHostedProfileSlot.Create(locator, writeToken, encResult.Value, revision, expiresAtUtc);
+        if (slotResult.IsFailure) return DomainResult.Failure(slotResult.Error);
+
+        await LocalProfileRepository.SaveSlotAsync(slotResult.Value!).ConfigureAwait(false);
+        return DomainResult.Success();
+    }
+
+    public async Task<DomainResult> ShareProfileCapabilityAsync(
+        ChannelId channelId,
+        TestIdentityNode recipient,
+        Percolator.PluginSdk.DeliveryRoute route,
+        uint revision = 1)
+    {
+        var locator = BlindedProfileLocator.Derive(IdentityPublicKey, ProfileKey, CryptoEngine);
+        var cmd = new ShareProfileCapabilityCommand(
+            channelId,
+            IdentityId,
+            recipient.IdentityId,
+            recipient.DeviceId,
+            ProfileKey,
+            locator,
+            MailboxRoutingToken,
+            Revision: revision,
+            route);
+
+        return await ChatService.ShareProfileCapabilityAsync(cmd).ConfigureAwait(false);
     }
 
     public InvitationLink CreateInvitationLink()

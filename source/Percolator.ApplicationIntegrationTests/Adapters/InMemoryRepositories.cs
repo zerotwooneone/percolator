@@ -15,6 +15,7 @@ using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Model;
 using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
+using Percolator.PluginSdk;
 
 namespace Percolator.Application2IntegrationTests.Adapters;
 
@@ -406,5 +407,22 @@ public sealed class InMemoryIngressFilterService : IIngressFilterService
         }
 
         return ValueTask.FromResult(DomainResult.Success());
+    }
+}
+
+public sealed class InMemoryPeerProfileRepository : IPeerProfileRepository
+{
+    private readonly ConcurrentDictionary<PublicIdentityId, PeerProfileRecord> _profiles = new();
+
+    public Task SaveAsync(PeerProfileRecord record, CancellationToken ct = default)
+    {
+        _profiles[record.PeerId] = record;
+        return Task.CompletedTask;
+    }
+
+    public Task<PeerProfileRecord?> GetByPeerIdAsync(PublicIdentityId peerId, CancellationToken ct = default)
+    {
+        _profiles.TryGetValue(peerId, out var record);
+        return Task.FromResult(record);
     }
 }

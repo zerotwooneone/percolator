@@ -1,4 +1,6 @@
 using Percolator.Apps.Chat.Features.Media;
+using Percolator.Apps.Chat.Features.Messaging;
+using Percolator.Apps.Chat.Features.Profiles;
 using Percolator.Apps.Chat.Features.Reactions;
 using Percolator.Domain.Channels.Model;
 using Percolator.Domain.Channels.Ports;
@@ -87,7 +89,6 @@ public sealed class ChatService : IChatService
 
         var envelopeBytes = SteppedPadding.CreatePaddedEnvelopeBytes(_serializer, ChatPayloadType.Message, messageDto);
 
-        // Append to domain channel aggregate to maintain consistency
         var directChannel = await _channelRepo.GetDirectByIdAsync(command.ChannelId, ct).ConfigureAwait(false);
         if (directChannel is not null)
         {
@@ -134,7 +135,6 @@ public sealed class ChatService : IChatService
             }
         }
 
-        // Sender timer starts immediately upon dispatch (README Section 4.4)
         ulong? expiresAtUnixMs = command.ExpireAfterSeconds.HasValue
             ? timestampUnixMs + ((ulong)command.ExpireAfterSeconds.Value * 1000UL)
             : null;
@@ -264,7 +264,6 @@ public sealed class ChatService : IChatService
 
         await _chatRepo.UpdateAsync(message, ct).ConfigureAwait(false);
 
-        // README Section 4.2: Tombstone triggers permanent deletion of local cached media blobs
         if (_blobStorage is not null && attachmentsToPurge.Count > 0)
         {
             foreach (var attachment in attachmentsToPurge)
@@ -384,7 +383,6 @@ public sealed class ChatService : IChatService
 
         ulong nowMs = (ulong)_timeProvider.UtcNow.ToUnixTimeMilliseconds();
 
-        // Start disappearing message timer on local messages up to UpToPayloadId (README Section 4.4)
         var targetMessage = await _chatRepo.GetByIdAsync(command.UpToPayloadId, ct).ConfigureAwait(false);
         if (targetMessage is not null && targetMessage.ChannelId == command.ChannelId)
         {
@@ -415,6 +413,37 @@ public sealed class ChatService : IChatService
         var outboundContext = new OutboundPayloadContext(
             command.ChannelId,
             command.ReaderId,
+            command.RecipientIdentityId,
+            command.RecipientDeviceId,
+            AppId.Chat,
+            envelopeBytes,
+            command.Route);
+
+        return await _payloadSender.SendPayloadAsync(outboundContext, ct).ConfigureAwait(false);
+    }
+
+    public async ValueTask<DomainResult> ShareProfileCapabilityAsync(
+        ShareProfileCapabilityCommand command,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+
+        ulong timestampUnixMs = (ulong)_timeProvider.UtcNow.ToUnixTimeMilliseconds();
+
+        var dto = new ProfileCapabilityDto(
+            command.ChannelId,
+            command.AuthorId,
+            command.ProfileKey.ToArray(),
+            command.BlindedLocator.ToArray(),
+            command.MailboxRoutingToken.Value.ToByteArray(),
+            command.Revision,
+            timestampUnixMs);
+
+        var envelopeBytes = SteppedPadding.CreatePaddedEnvelopeBytes(_serializer, ChatPayloadType.ProfileCapability, dto);
+
+        var outboundContext = new OutboundPayloadContext(
+            command.ChannelId,
+            command.AuthorId,
             command.RecipientIdentityId,
             command.RecipientDeviceId,
             AppId.Chat,

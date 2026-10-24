@@ -1,62 +1,24 @@
+using System.Buffers.Binary;
 using System.Security.Cryptography;
 using Percolator.Domain.Common;
 using Percolator.Domain.Security.Ports;
+using Percolator.Domain.Security.ValueObjects;
+using Percolator.PluginSdk;
 
 namespace Percolator.Application2.Profiles;
 
-public readonly record struct ProfileMetadata(
-    string DisplayName,
-    byte[]? AvatarBytes,
-    string? StatusBio,
-    uint Revision);
-
-public readonly record struct ProfileCiphertextPackage(
-    byte[] Nonce,
-    byte[] Ciphertext);
-
-public sealed class ProfileKey : IDisposable
-{
-    private readonly byte[] _keyBytes;
-    public ReadOnlySpan<byte> Span => _keyBytes;
-
-    public ProfileKey(byte[] keyBytes)
-    {
-        if (keyBytes.Length != 32)
-        {
-            throw new ArgumentException("Profile key must be 32 bytes.", nameof(keyBytes));
-        }
-
-        _keyBytes = (byte[])keyBytes.Clone();
-    }
-
-    public static ProfileKey Generate()
-    {
-        var bytes = new byte[32];
-        RandomNumberGenerator.Fill(bytes);
-        return new ProfileKey(bytes);
-    }
-
-    public void Dispose()
-    {
-        CryptographicOperations.ZeroMemory(_keyBytes);
-    }
-}
-
-public interface IProfileManager
-{
-    DomainResult<ProfileCiphertextPackage> EncryptProfile(
-        ProfileMetadata metadata,
-        ProfileKey profileKey,
-        ICryptoEngine engine);
-
-    DomainResult<ProfileMetadata> DecryptProfile(
-        ProfileCiphertextPackage package,
-        ProfileKey profileKey,
-        ICryptoEngine engine);
-}
-
 public sealed class ProfileManager : IProfileManager
 {
+    public const int PaddedBlockSizeBytes = 1024;
+    public const int CiphertextPackageSizeBytes = 1040; // 1024 padded payload + 16 AEAD tag
+
+    private readonly IProfileMetadataSerializer _serializer;
+
+    public ProfileManager(IProfileMetadataSerializer serializer)
+    {
+        _serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
+    }
+
     public DomainResult<ProfileCiphertextPackage> EncryptProfile(
         ProfileMetadata metadata,
         ProfileKey profileKey,
@@ -66,61 +28,79 @@ public sealed class ProfileManager : IProfileManager
         ArgumentNullException.ThrowIfNull(profileKey);
         ArgumentNullException.ThrowIfNull(engine);
 
-        // Pack metadata: [4 bytes revision] + [2 bytes name len] + [name bytes] + [bio len] + [bio bytes] + [avatar bytes]
-        using var ms = new MemoryStream();
-        using var writer = new BinaryWriter(ms);
-
-        writer.Write(metadata.Revision);
-        writer.Write(metadata.DisplayName);
-        writer.Write(metadata.StatusBio ?? string.Empty);
-        writer.Write(metadata.AvatarBytes?.Length ?? 0);
-        if (metadata.AvatarBytes is { Length: > 0 })
+        var plaintext = _serializer.Serialize(metadata);
+        if (plaintext.Length >= PaddedBlockSizeBytes)
         {
-            writer.Write(metadata.AvatarBytes);
+            return DomainResult<ProfileCiphertextPackage>.Failure(
+                new DomainError("PROFILE_METADATA_TOO_LARGE", $"Profile metadata ({plaintext.Length} bytes) exceeds maximum padded block capacity of {PaddedBlockSizeBytes - 1} bytes."));
         }
-        writer.Flush();
 
-        var plaintext = ms.ToArray();
+        // ISO/IEC 7816-4 padding to exactly 1024 bytes: 0x80 delimiter followed by 0x00 bytes
+        var padded = new byte[PaddedBlockSizeBytes];
+        plaintext.CopyTo(padded, 0);
+        padded[plaintext.Length] = 0x80;
+
         var nonce = new byte[12];
         RandomNumberGenerator.Fill(nonce);
 
-        var ciphertext = engine.EncryptAesGcm(profileKey.Span, nonce, plaintext, ReadOnlySpan<byte>.Empty);
+        // Bind 4-byte big-endian revision into AEAD Associated Data (AD) for tamper/rollback resistance
+        Span<byte> ad = stackalloc byte[4];
+        BinaryPrimitives.WriteUInt32BigEndian(ad, metadata.Revision);
+
+        var ciphertext = engine.EncryptAesGcm(profileKey.Span, nonce, padded, ad);
         return DomainResult<ProfileCiphertextPackage>.Success(new ProfileCiphertextPackage(nonce, ciphertext));
     }
 
     public DomainResult<ProfileMetadata> DecryptProfile(
         ProfileCiphertextPackage package,
         ProfileKey profileKey,
-        ICryptoEngine engine)
+        ICryptoEngine engine,
+        uint? expectedRevision = null)
     {
         ArgumentNullException.ThrowIfNull(package.Nonce);
         ArgumentNullException.ThrowIfNull(package.Ciphertext);
         ArgumentNullException.ThrowIfNull(profileKey);
         ArgumentNullException.ThrowIfNull(engine);
 
+        if (package.Ciphertext.Length != CiphertextPackageSizeBytes)
+        {
+            return DomainResult<ProfileMetadata>.Failure(
+                new DomainError("INVALID_PACKAGE_SIZE", $"Profile package ciphertext must be exactly {CiphertextPackageSizeBytes} bytes."));
+        }
+
+        if (!expectedRevision.HasValue)
+        {
+            return DomainResult<ProfileMetadata>.Failure(
+                new DomainError("MISSING_EXPECTED_REVISION", "Decryption requires an explicit expected revision to verify AEAD associated data."));
+        }
+
+        // Associated Data strictly binds big-endian revision to prevent rollback/tampering
+        Span<byte> ad = stackalloc byte[4];
+        BinaryPrimitives.WriteUInt32BigEndian(ad, expectedRevision.Value);
+
         byte[] plaintext;
         try
         {
-            plaintext = engine.DecryptAesGcm(profileKey.Span, package.Nonce, package.Ciphertext, ReadOnlySpan<byte>.Empty);
+            plaintext = engine.DecryptAesGcm(profileKey.Span, package.Nonce, package.Ciphertext, ad);
         }
         catch (Exception ex)
         {
             return DomainResult<ProfileMetadata>.Failure(new DomainError("PROFILE_DECRYPT_FAILED", ex.Message));
         }
 
-        using var ms = new MemoryStream(plaintext);
-        using var reader = new BinaryReader(ms);
+        // Remove ISO/IEC 7816-4 padding
+        int i = plaintext.Length - 1;
+        while (i >= 0 && plaintext[i] == 0x00)
+        {
+            i--;
+        }
 
-        uint revision = reader.ReadUInt32();
-        string displayName = reader.ReadString();
-        string statusBio = reader.ReadString();
-        int avatarLength = reader.ReadInt32();
-        byte[]? avatarBytes = avatarLength > 0 ? reader.ReadBytes(avatarLength) : null;
+        if (i < 0 || plaintext[i] != 0x80)
+        {
+            return DomainResult<ProfileMetadata>.Failure(new DomainError("INVALID_PADDING", "Invalid ISO/IEC 7816-4 profile padding."));
+        }
 
-        return DomainResult<ProfileMetadata>.Success(new ProfileMetadata(
-            displayName,
-            avatarBytes,
-            string.IsNullOrEmpty(statusBio) ? null : statusBio,
-            revision));
+        var unpaddedSpan = plaintext.AsSpan(0, i);
+        return _serializer.Deserialize(unpaddedSpan);
     }
 }

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Percolator.Application2IntegrationTests.Builders;
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.Ports;
 using Percolator.Domain.Identities.ValueObjects;
 
 namespace Percolator.Application2IntegrationTests.Infrastructure;
@@ -13,6 +14,10 @@ public sealed class InMemoryLoopbackNetworkSwitch
     private readonly ConcurrentDictionary<(EndpointPort Source, EndpointPort Target), bool> _activeStreams = new();
     private readonly ConcurrentDictionary<PublicIdentityId, RelayNode> _relaysById = new();
     private readonly ConcurrentDictionary<PublicIdentityId, RelayNode> _recipientToRelay = new();
+    private readonly ConcurrentDictionary<PublicIdentityId, IRelayProfileRepository> _peerProfileStores = new();
+
+    public IReadOnlyCollection<RelayNode> AllRelays => _relaysById.Values.ToList();
+    public IReadOnlyCollection<IRelayProfileRepository> AllPeerProfileStores => _peerProfileStores.Values.ToList();
 
     public void RegisterNode(EndpointPort port, PublicIdentityId identityId, Func<ReadOnlyMemory<byte>, Task> inboundReceiver)
     {
@@ -42,6 +47,16 @@ public sealed class InMemoryLoopbackNetworkSwitch
     public bool TryGetRelayForRecipient(PublicIdentityId recipientId, out RelayNode? relay)
     {
         return _recipientToRelay.TryGetValue(recipientId, out relay);
+    }
+
+    public void RegisterPeerProfileStore(PublicIdentityId peerId, IRelayProfileRepository profileRepo)
+    {
+        _peerProfileStores[peerId] = profileRepo;
+    }
+
+    public bool TryGetPeerProfileStore(PublicIdentityId peerId, out IRelayProfileRepository? profileRepo)
+    {
+        return _peerProfileStores.TryGetValue(peerId, out profileRepo);
     }
 
     public void OpenDirectStream(EndpointPort sourcePort, EndpointPort targetPort)

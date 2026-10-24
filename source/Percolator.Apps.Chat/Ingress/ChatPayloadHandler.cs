@@ -1,11 +1,15 @@
 using Percolator.Apps.Chat.Features.GroupInvitations;
 using Percolator.Apps.Chat.Features.Media;
 using Percolator.Apps.Chat.Features.Messaging;
+using Percolator.Apps.Chat.Features.Profiles;
 using Percolator.Apps.Chat.Features.Reactions;
 using Percolator.Domain.Channels.Model;
 using Percolator.Domain.Channels.Ports;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.ValueObjects;
+using Percolator.Domain.Security.Ports;
+using Percolator.Domain.Security.ValueObjects;
 using Percolator.PluginSdk;
 
 namespace Percolator.Apps.Chat.Ingress;
@@ -23,6 +27,10 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
     private readonly IDateTimeProvider _timeProvider;
     private readonly IUnknownGroupMessageCacheRepository? _unknownGroupCache;
     private readonly IBlobStorageService? _blobStorage;
+    private readonly IPeerProfileRepository? _peerProfileRepo;
+    private readonly IProfileDeliveryClient? _profileDeliveryClient;
+    private readonly IProfileManager? _profileManager;
+    private readonly ICryptoEngine? _cryptoEngine;
 
     public ChatPayloadHandler(
         IChatMessageRepository chatRepo,
@@ -31,7 +39,11 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
         IPayloadSerializer serializer,
         IDateTimeProvider timeProvider,
         IUnknownGroupMessageCacheRepository? unknownGroupCache = null,
-        IBlobStorageService? blobStorage = null)
+        IBlobStorageService? blobStorage = null,
+        IPeerProfileRepository? peerProfileRepo = null,
+        IProfileDeliveryClient? profileDeliveryClient = null,
+        IProfileManager? profileManager = null,
+        ICryptoEngine? cryptoEngine = null)
     {
         _chatRepo = chatRepo ?? throw new ArgumentNullException(nameof(chatRepo));
         _channelRepo = channelRepo ?? throw new ArgumentNullException(nameof(channelRepo));
@@ -40,6 +52,10 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _unknownGroupCache = unknownGroupCache;
         _blobStorage = blobStorage;
+        _peerProfileRepo = peerProfileRepo;
+        _profileDeliveryClient = profileDeliveryClient;
+        _profileManager = profileManager;
+        _cryptoEngine = cryptoEngine;
     }
 
     public async ValueTask<DomainResult> HandleInboundAsync(InboundPayloadContext context, CancellationToken ct = default)
@@ -67,8 +83,74 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
             ChatPayloadType.GroupInvitation => await HandleGroupInvitationAsync(envelope.Data, context, ct).ConfigureAwait(false),
             ChatPayloadType.GroupInvitationResponse => await HandleGroupInvitationResponseAsync(envelope.Data, context, ct).ConfigureAwait(false),
             ChatPayloadType.SystemNotice => await HandleSystemNoticeAsync(envelope.Data, context, ct).ConfigureAwait(false),
+            ChatPayloadType.ProfileCapability => await HandleProfileCapabilityAsync(envelope.Data, context, ct).ConfigureAwait(false),
             _ => DomainResult.Success() // Forward compatibility: ignore unknown types
         };
+    }
+
+    private async ValueTask<DomainResult> HandleProfileCapabilityAsync(
+        ReadOnlyMemory<byte> data,
+        InboundPayloadContext context,
+        CancellationToken ct)
+    {
+        var result = _serializer.Deserialize<ProfileCapabilityDto>(data);
+        if (result.IsFailure)
+        {
+            return DomainResult.Failure(result.Error);
+        }
+
+        var dto = result.Value;
+
+        if (dto.AuthorId != context.SenderIdentityId)
+        {
+            return DomainResult.Failure(new DomainError("UNAUTHORIZED_AUTHOR", "Inbound profile capability author does not match sender identity."));
+        }
+
+        if (dto.ChannelId != context.ChannelId)
+        {
+            return DomainResult.Failure(new DomainError("CHANNEL_MISMATCH", "Target profile capability belongs to a different channel."));
+        }
+
+        // Conditional Fetch: check if cached profile is up-to-date
+        if (_peerProfileRepo is not null)
+        {
+            var cached = await _peerProfileRepo.GetByPeerIdAsync(dto.AuthorId, ct).ConfigureAwait(false);
+            if (cached is not null && cached.Revision >= dto.Revision)
+            {
+                return DomainResult.Success();
+            }
+        }
+
+        // Fetch and decrypt profile package if delivery client, manager, and engine are configured
+        if (_profileDeliveryClient is not null && _profileManager is not null && _cryptoEngine is not null && _peerProfileRepo is not null)
+        {
+            var locator = BlindedProfileLocator.FromBytes(dto.BlindedLocatorBytes);
+            var fetchResult = await _profileDeliveryClient.FetchProfileAsync(null, locator, ct).ConfigureAwait(false);
+            if (fetchResult.IsFailure)
+            {
+                return DomainResult.Failure(fetchResult.Error);
+            }
+
+            using var profileKey = ProfileKey.FromBytes(dto.ProfileKeyBytes);
+            var decryptResult = _profileManager.DecryptProfile(fetchResult.Value, profileKey, _cryptoEngine, dto.Revision);
+            if (decryptResult.IsFailure)
+            {
+                return DomainResult.Failure(decryptResult.Error);
+            }
+
+            var decrypted = decryptResult.Value;
+            var record = new PeerProfileRecord(
+                dto.AuthorId,
+                decrypted.DisplayName,
+                decrypted.StatusBio,
+                decrypted.AvatarReference,
+                dto.Revision,
+                _timeProvider.UtcNow);
+
+            await _peerProfileRepo.SaveAsync(record, ct).ConfigureAwait(false);
+        }
+
+        return DomainResult.Success();
     }
 
     private async ValueTask<DomainResult> HandleMessageAsync(ReadOnlyMemory<byte> data, InboundPayloadContext context, CancellationToken ct)
@@ -81,13 +163,11 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
 
         var dto = msgResult.Value;
 
-        // Author validation against cryptographic transport sender identity
         if (dto.AuthorId != context.SenderIdentityId)
         {
             return DomainResult.Failure(new DomainError("UNAUTHORIZED_AUTHOR", "Inbound message author does not match sender identity."));
         }
 
-        // Cross-channel isolation check
         if (dto.ChannelId != context.ChannelId)
         {
             return DomainResult.Failure(new DomainError("CHANNEL_MISMATCH", "Target message belongs to a different channel."));
@@ -101,17 +181,14 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
                 $"ExpireAfterSeconds must be between 1 and {ChatMessage.MaxExpireAfterSeconds} seconds."));
         }
 
-        // Replay & duplicate ingestion guard
         var existing = await _chatRepo.GetByIdAsync(dto.Id, ct).ConfigureAwait(false);
         if (existing is not null)
         {
             return DomainResult.Success();
         }
 
-        // Single-pass UTF-8 mention validation
         var validMentions = MentionHelper.FilterValidSpans(dto.Content, dto.Mentions);
 
-        // Append to domain channel aggregate
         var directChannel = await _channelRepo.GetDirectByIdAsync(context.ChannelId, ct).ConfigureAwait(false);
         if (directChannel is not null)
         {

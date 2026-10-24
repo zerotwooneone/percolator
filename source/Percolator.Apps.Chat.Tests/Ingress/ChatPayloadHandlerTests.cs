@@ -4,11 +4,15 @@ using NUnit.Framework;
 using Percolator.Apps.Chat.Features.GroupInvitations;
 using Percolator.Apps.Chat.Features.Media;
 using Percolator.Apps.Chat.Features.Messaging;
+using Percolator.Apps.Chat.Features.Profiles;
 using Percolator.Apps.Chat.Features.Reactions;
 using Percolator.Apps.Chat.Ingress;
 using Percolator.Apps.Chat.Tests.TestDoubles;
 using Percolator.Domain.Channels.ValueObjects;
+using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Domain.Security.ValueObjects;
 using Percolator.PluginSdk;
 
 namespace Percolator.Apps.Chat.Tests.Ingress;
@@ -22,6 +26,10 @@ public class ChatPayloadHandlerTests
     private InMemoryUnknownGroupCache _unknownGroupCache = null!;
     private TestPayloadSerializer _serializer = null!;
     private FakeDateTimeProvider _timeProvider = null!;
+    private InMemoryPeerProfileRepository _peerProfileRepo = null!;
+    private FakeProfileDeliveryClient _profileDeliveryClient = null!;
+    private FakeProfileManager _profileManager = null!;
+    private ChatTestCryptoEngine _cryptoEngine = null!;
     private ChatPayloadHandler _sut = null!;
 
     [SetUp]
@@ -33,6 +41,10 @@ public class ChatPayloadHandlerTests
         _unknownGroupCache = new InMemoryUnknownGroupCache();
         _serializer = new TestPayloadSerializer();
         _timeProvider = new FakeDateTimeProvider(new DateTimeOffset(2026, 10, 10, 12, 0, 0, TimeSpan.Zero));
+        _peerProfileRepo = new InMemoryPeerProfileRepository();
+        _profileDeliveryClient = new FakeProfileDeliveryClient();
+        _profileManager = new FakeProfileManager();
+        _cryptoEngine = new ChatTestCryptoEngine();
 
         _sut = new ChatPayloadHandler(
             _chatRepo,
@@ -40,7 +52,12 @@ public class ChatPayloadHandlerTests
             _invitationRepo,
             _serializer,
             _timeProvider,
-            _unknownGroupCache);
+            _unknownGroupCache,
+            blobStorage: null,
+            _peerProfileRepo,
+            _profileDeliveryClient,
+            _profileManager,
+            _cryptoEngine);
     }
 
     [Test]
@@ -471,6 +488,180 @@ public class ChatPayloadHandlerTests
 
         result.IsSuccess.Should().BeTrue();
     }
+
+    #region Profile Capability Tests
+
+    [Test]
+    public async Task HandleInboundAsync_ProfileCapability_SpoofedAuthor_ReturnsUnauthorizedAuthor()
+    {
+        var channel = ChatTestFactory.CreateDirectChannel(_timeProvider);
+        await _channelRepo.SaveDirectAsync(channel);
+
+        var profileKey = ProfileKey.Generate();
+        var locator = BlindedProfileLocator.FromBytes(new byte[32]);
+        var routingToken = BlindedRoutingToken.New();
+
+        var dto = new ProfileCapabilityDto(
+            channel.Id,
+            channel.OwnerIdentityId, // Spoofed: context is from Bob, but DTO author is Alice
+            profileKey.ToArray(),
+            locator.ToArray(),
+            routingToken.Value.ToByteArray(),
+            Revision: 1,
+            _timeProvider.UtcNowUnixMs);
+
+        var envelope = new ChatPayloadEnvelopeDto(ChatPayloadType.ProfileCapability, _serializer.Serialize(dto), Array.Empty<byte>());
+        var context = new InboundPayloadContext(channel.Id, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
+
+        var result = await _sut.HandleInboundAsync(context);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("UNAUTHORIZED_AUTHOR");
+    }
+
+    [Test]
+    public async Task HandleInboundAsync_ProfileCapability_ChannelMismatch_ReturnsChannelMismatch()
+    {
+        var channel = ChatTestFactory.CreateDirectChannel(_timeProvider);
+        await _channelRepo.SaveDirectAsync(channel);
+
+        var profileKey = ProfileKey.Generate();
+        var locator = BlindedProfileLocator.FromBytes(new byte[32]);
+        var routingToken = BlindedRoutingToken.New();
+
+        var dto = new ProfileCapabilityDto(
+            ChannelId.New(), // Mismatching channel
+            channel.RemotePeerId,
+            profileKey.ToArray(),
+            locator.ToArray(),
+            routingToken.Value.ToByteArray(),
+            Revision: 1,
+            _timeProvider.UtcNowUnixMs);
+
+        var envelope = new ChatPayloadEnvelopeDto(ChatPayloadType.ProfileCapability, _serializer.Serialize(dto), Array.Empty<byte>());
+        var context = new InboundPayloadContext(channel.Id, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
+
+        var result = await _sut.HandleInboundAsync(context);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("CHANNEL_MISMATCH");
+    }
+
+    [Test]
+    public async Task HandleInboundAsync_ProfileCapability_CachedRevisionEqualOrGreater_SkipsFetch()
+    {
+        var channel = ChatTestFactory.CreateDirectChannel(_timeProvider);
+        await _channelRepo.SaveDirectAsync(channel);
+
+        // Seed repository with revision 2
+        var existing = new PeerProfileRecord(
+            channel.RemotePeerId,
+            "Bob",
+            "Current bio",
+            null,
+            Revision: 2,
+            _timeProvider.UtcNow);
+        await _peerProfileRepo.SaveAsync(existing);
+
+        var profileKey = ProfileKey.Generate();
+        var locator = BlindedProfileLocator.FromBytes(new byte[32]);
+        var routingToken = BlindedRoutingToken.New();
+
+        // Inbound DTO advertises revision 2 (same as cached)
+        var dto = new ProfileCapabilityDto(
+            channel.Id,
+            channel.RemotePeerId,
+            profileKey.ToArray(),
+            locator.ToArray(),
+            routingToken.Value.ToByteArray(),
+            Revision: 2,
+            _timeProvider.UtcNowUnixMs);
+
+        var envelope = new ChatPayloadEnvelopeDto(ChatPayloadType.ProfileCapability, _serializer.Serialize(dto), Array.Empty<byte>());
+        var context = new InboundPayloadContext(channel.Id, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
+
+        var result = await _sut.HandleInboundAsync(context);
+
+        result.IsSuccess.Should().BeTrue();
+        _profileDeliveryClient.FetchCallCount.Should().Be(0);
+    }
+
+    [Test]
+    public async Task HandleInboundAsync_ProfileCapability_NewerRevision_FetchesDecryptsAndPersistsProfile()
+    {
+        var channel = ChatTestFactory.CreateDirectChannel(_timeProvider);
+        await _channelRepo.SaveDirectAsync(channel);
+
+        var profileKey = ProfileKey.Generate();
+        var locator = BlindedProfileLocator.FromBytes(new byte[32]);
+        var routingToken = BlindedRoutingToken.New();
+
+        // Host ciphertext in delivery client
+        var fakePackage = new ProfileCiphertextPackage(new byte[12], new byte[1040]);
+        _profileDeliveryClient.HostedProfiles[locator] = fakePackage;
+
+        _profileManager.OnDecryptProfile = (pkg, key, engine, rev) =>
+            DomainResult<ProfileMetadata>.Success(new ProfileMetadata("Bob Updated", null, "New status bio", rev ?? 5));
+
+        var dto = new ProfileCapabilityDto(
+            channel.Id,
+            channel.RemotePeerId,
+            profileKey.ToArray(),
+            locator.ToArray(),
+            routingToken.Value.ToByteArray(),
+            Revision: 5,
+            _timeProvider.UtcNowUnixMs);
+
+        var envelope = new ChatPayloadEnvelopeDto(ChatPayloadType.ProfileCapability, _serializer.Serialize(dto), Array.Empty<byte>());
+        var context = new InboundPayloadContext(channel.Id, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
+
+        var result = await _sut.HandleInboundAsync(context);
+
+        result.IsSuccess.Should().BeTrue();
+        _profileDeliveryClient.FetchCallCount.Should().Be(1);
+
+        var persisted = await _peerProfileRepo.GetByPeerIdAsync(channel.RemotePeerId);
+        persisted.Should().NotBeNull();
+        persisted!.DisplayName.Should().Be("Bob Updated");
+        persisted.StatusBio.Should().Be("New status bio");
+        persisted.Revision.Should().Be(5);
+    }
+
+    [Test]
+    public async Task HandleInboundAsync_ProfileCapability_DecryptionFailure_ReturnsFailure()
+    {
+        var channel = ChatTestFactory.CreateDirectChannel(_timeProvider);
+        await _channelRepo.SaveDirectAsync(channel);
+
+        var profileKey = ProfileKey.Generate();
+        var locator = BlindedProfileLocator.FromBytes(new byte[32]);
+        var routingToken = BlindedRoutingToken.New();
+
+        var fakePackage = new ProfileCiphertextPackage(new byte[12], new byte[1040]);
+        _profileDeliveryClient.HostedProfiles[locator] = fakePackage;
+
+        _profileManager.OnDecryptProfile = (pkg, key, engine, rev) =>
+            DomainResult<ProfileMetadata>.Failure(new DomainError("DECRYPTION_FAILED", "Authentication tag mismatch"));
+
+        var dto = new ProfileCapabilityDto(
+            channel.Id,
+            channel.RemotePeerId,
+            profileKey.ToArray(),
+            locator.ToArray(),
+            routingToken.Value.ToByteArray(),
+            Revision: 1,
+            _timeProvider.UtcNowUnixMs);
+
+        var envelope = new ChatPayloadEnvelopeDto(ChatPayloadType.ProfileCapability, _serializer.Serialize(dto), Array.Empty<byte>());
+        var context = new InboundPayloadContext(channel.Id, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
+
+        var result = await _sut.HandleInboundAsync(context);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("DECRYPTION_FAILED");
+    }
+
+    #endregion
 
     #region Security Tests (Step 2.3)
 

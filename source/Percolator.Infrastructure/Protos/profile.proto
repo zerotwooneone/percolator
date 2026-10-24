@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package percolator.infrastructure2.protos;
+
+option csharp_namespace = "Percolator.Infrastructure2.Protos";
+
+message BlobReferenceProto {
+  string id = 1;
+  bytes ciphertext_sha256 = 2;
+  bytes encryption_key = 3;
+  bytes base_nonce = 4;
+  int64 plaintext_size_bytes = 5;
+  int64 ciphertext_size_bytes = 6;
+  string mime_type = 7;
+  int64 expires_at_unix_seconds = 8;
+  uint32 storage_mode = 9;
+  string relay_endpoint_uri = 10;
+  string blur_hash = 11;
+  bytes inline_thumbnail = 12;
+  bytes waveform = 13;
+  int32 width = 14;
+  int32 height = 15;
+  int32 duration_seconds = 16;
+}
+
+message ProfileMetadataPayloadProto {
+  uint32 revision = 1;
+  string display_name = 2;
+  string status_bio = 3;
+  bytes avatar_bytes = 4;
+  BlobReferenceProto avatar_reference = 5;
+}

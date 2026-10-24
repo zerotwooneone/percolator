@@ -14,4 +14,5 @@ public interface ICryptoEngine
     byte[] DecryptAesGcm(ReadOnlySpan<byte> key, ReadOnlySpan<byte> nonce, ReadOnlySpan<byte> ciphertext, ReadOnlySpan<byte> associatedData);
     bool VerifyEd25519Signature(IdentityKey publicKey, ReadOnlySpan<byte> message, ReadOnlySpan<byte> signature);
     byte[] SignEd25519(ReadOnlySpan<byte> privateKey, ReadOnlySpan<byte> message);
+    byte[] HkdfSha256(ReadOnlySpan<byte> ikm, ReadOnlySpan<byte> salt, ReadOnlySpan<byte> info, int outputLength);
 }

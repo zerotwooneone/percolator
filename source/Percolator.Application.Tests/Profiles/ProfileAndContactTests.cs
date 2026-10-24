@@ -2,6 +2,8 @@ using Percolator.Application2.Profiles;
 using Percolator.Application2.Tests.TestDoubles;
 using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Domain.Security.ValueObjects;
+using Percolator.PluginSdk;
 
 namespace Percolator.Application2.Tests.Profiles;
 
@@ -24,7 +26,7 @@ public sealed class ProfileAndContactTests
         _cryptoEngine = new ApplicationTestCryptoEngine();
         _contactRepo = new InMemoryPeerContactRepository();
         _timeProvider = new TestDateTimeProvider();
-        _profileManager = new ProfileManager();
+        _profileManager = new ProfileManager(new TestProfileMetadataSerializer());
         _contactCoordinator = new ContactRequestCoordinator(_contactRepo, _timeProvider);
 
         _aliceId = PublicIdentityId.New();
@@ -50,10 +52,10 @@ public sealed class ProfileAndContactTests
         encryptResult.IsSuccess.Should().BeTrue();
         var package = encryptResult.Value!;
         package.Nonce.Should().HaveCount(12);
-        package.Ciphertext.Should().NotBeEmpty();
+        package.Ciphertext.Should().HaveCount(1040); // 1024 B padded block + 16 B tag
 
         // Act Decrypt
-        var decryptResult = _profileManager.DecryptProfile(package, profileKey, _cryptoEngine);
+        var decryptResult = _profileManager.DecryptProfile(package, profileKey, _cryptoEngine, expectedRevision: 1);
 
         // Assert Decrypt
         decryptResult.IsSuccess.Should().BeTrue();

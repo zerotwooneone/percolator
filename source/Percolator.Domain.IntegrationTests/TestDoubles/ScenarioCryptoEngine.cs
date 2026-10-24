@@ -191,4 +191,11 @@ public sealed class ScenarioCryptoEngine : ICryptoEngine
 
         return CryptographicOperations.FixedTimeEquals(expected, signature);
     }
+
+    public byte[] HkdfSha256(ReadOnlySpan<byte> ikm, ReadOnlySpan<byte> salt, ReadOnlySpan<byte> info, int outputLength)
+    {
+        var output = new byte[outputLength];
+        HKDF.DeriveKey(HashAlgorithmName.SHA256, ikm, output, salt, info);
+        return output;
+    }
 }

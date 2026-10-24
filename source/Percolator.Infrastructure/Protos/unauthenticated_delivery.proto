@@ -1,0 +1,82 @@
+syntax = "proto3";
+
+package percolator.infrastructure;
+
+import "google/protobuf/timestamp.proto";
+
+service UnauthenticatedDeliveryService {
+    // Sealed sender envelope ingress
+    rpc DeliverDirect (SealedEnvelopeProto) returns (DeliveryAckProto);
+    rpc EnqueueMailbox (SealedEnvelopeProto) returns (EnqueueAckProto);
+
+    // Unauthenticated profile hosting ingress
+    rpc GetProfile (ProfileFetchRequestProto) returns (ProfileFetchResponseProto);
+    rpc UploadProfile (ProfileUploadRequestProto) returns (ProfileUploadResponseProto);
+    rpc DeleteProfile (ProfileDeleteRequestProto) returns (ProfileDeleteResponseProto);
+
+    // Channel-independent blind media blob retrieval
+    rpc DownloadBlindBlob (BlindBlobDownloadRequestProto) returns (stream BlindBlobChunkProto);
+}
+
+message SealedEnvelopeProto {
+    bytes recipient_routing_token = 1; // 16-byte BlindedRoutingToken
+    bytes delivery_token = 2;          // 32-byte DeliveryToken
+    bytes encrypted_package = 3;       // Opaque encrypted package
+    google.protobuf.Timestamp expires_at_utc = 4;
+}
+
+message DeliveryAckProto {
+    bool success = 1;
+    string error_message = 2;
+}
+
+message EnqueueAckProto {
+    bool accepted = 1;
+    google.protobuf.Timestamp expires_at_utc = 2;
+}
+
+message ProfileFetchRequestProto {
+    bytes blinded_locator = 1; // 32-byte BlindedProfileLocator (No caller identity metadata)
+}
+
+message ProfileFetchResponseProto {
+    bool found = 1;
+    bytes nonce = 2;           // 12-byte AEAD Nonce
+    bytes ciphertext = 3;      // AEAD CiphertextPackage (fixed 1040-byte padded block)
+    uint32 revision = 4;
+    google.protobuf.Timestamp expires_at_utc = 5;
+}
+
+message ProfileUploadRequestProto {
+    bytes blinded_locator = 1;     // 32-byte BlindedProfileLocator
+    bytes write_token = 2;         // 32-byte ProfileWriteToken
+    uint32 revision = 3;           // Monotonic revision
+    bytes nonce = 4;
+    bytes ciphertext = 5;          // AEAD CiphertextPackage (fixed 1040-byte padded block)
+    google.protobuf.Timestamp expires_at_utc = 6;
+}
+
+message ProfileUploadResponseProto {
+    bool success = 1;
+    string error_message = 2;
+}
+
+message ProfileDeleteRequestProto {
+    bytes blinded_locator = 1;     // 32-byte BlindedProfileLocator
+    bytes write_token = 2;         // 32-byte ProfileWriteToken
+}
+
+message ProfileDeleteResponseProto {
+    bool success = 1;
+    string error_message = 2;
+}
+
+message BlindBlobDownloadRequestProto {
+    bytes blob_id = 1;             // 32-byte content hash (No ChannelId)
+}
+
+message BlindBlobChunkProto {
+    bytes chunk_data = 1;
+    uint32 chunk_index = 2;
+    bool is_final_chunk = 3;
+}

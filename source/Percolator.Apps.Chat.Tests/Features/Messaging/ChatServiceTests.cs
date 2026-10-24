@@ -2,11 +2,14 @@ using FluentAssertions;
 using NUnit.Framework;
 using Percolator.Apps.Chat.Features.Media;
 using Percolator.Apps.Chat.Features.Messaging;
+using Percolator.Apps.Chat.Features.Profiles;
 using Percolator.Apps.Chat.Features.Reactions;
 using Percolator.Apps.Chat.Tests.TestDoubles;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Domain.Security.ValueObjects;
 using Percolator.PluginSdk;
 
 namespace Percolator.Apps.Chat.Tests.Features.Messaging;
@@ -383,6 +386,52 @@ public class ChatServiceTests
         var lastSent = _payloadSender.SentPayloads.Last();
         var envelope = _serializer.Deserialize<ChatPayloadEnvelopeDto>(lastSent.Payload).Value;
         envelope.Type.Should().Be(ChatPayloadType.ReadReceipt);
+    }
+
+    [Test]
+    public async Task ShareProfileCapabilityAsync_DispatchesProfileCapabilityWithPadding()
+    {
+        var channel = ChatTestFactory.CreateDirectChannel(_timeProvider);
+        await _channelRepo.SaveDirectAsync(channel);
+
+        var profileKey = ProfileKey.Generate();
+        var locator = BlindedProfileLocator.FromBytes(new byte[32]);
+        var routingToken = BlindedRoutingToken.New();
+
+        var cmd = new ShareProfileCapabilityCommand(
+            channel.Id,
+            channel.OwnerIdentityId,
+            channel.RemotePeerId,
+            ChatTestFactory.BobDeviceId,
+            profileKey,
+            locator,
+            routingToken,
+            Revision: 1,
+            DeliveryRoute.DirectP2P);
+
+        var result = await _sut.ShareProfileCapabilityAsync(cmd);
+        result.IsSuccess.Should().BeTrue();
+
+        _payloadSender.SentPayloads.Should().ContainSingle();
+        var sent = _payloadSender.SentPayloads[0];
+        sent.ChannelId.Should().Be(channel.Id);
+        sent.AppId.Should().Be(AppId.Chat);
+
+        var envResult = _serializer.Deserialize<ChatPayloadEnvelopeDto>(sent.Payload);
+        envResult.IsSuccess.Should().BeTrue();
+        var env = envResult.Value;
+        env.Type.Should().Be(ChatPayloadType.ProfileCapability);
+        env.Padding.Length.Should().BeGreaterThan(0);
+
+        var dtoResult = _serializer.Deserialize<ProfileCapabilityDto>(env.Data);
+        dtoResult.IsSuccess.Should().BeTrue();
+        var dto = dtoResult.Value;
+        dto.AuthorId.Should().Be(channel.OwnerIdentityId);
+        dto.ChannelId.Should().Be(channel.Id);
+        dto.Revision.Should().Be(1);
+        dto.ProfileKeyBytes.Should().Equal(profileKey.ToArray());
+        dto.BlindedLocatorBytes.Should().Equal(locator.ToArray());
+        dto.MailboxRoutingTokenBytes.Should().Equal(routingToken.Value.ToByteArray());
     }
 
     private sealed class FakeBlobStorageService : IBlobStorageService

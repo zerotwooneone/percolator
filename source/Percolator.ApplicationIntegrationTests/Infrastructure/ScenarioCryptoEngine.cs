@@ -184,4 +184,11 @@ public sealed class ScenarioCryptoEngine : ICryptoEngine
         var expectedSig = hmac.ComputeHash(message.ToArray());
         return CryptographicOperations.FixedTimeEquals(expectedSig, signature);
     }
+
+    public byte[] HkdfSha256(ReadOnlySpan<byte> ikm, ReadOnlySpan<byte> salt, ReadOnlySpan<byte> info, int outputLength)
+    {
+        var output = new byte[outputLength];
+        HKDF.DeriveKey(HashAlgorithmName.SHA256, ikm, output, salt, info);
+        return output;
+    }
 }
