@@ -17,6 +17,10 @@ public interface IRelayPreKeyRepository
         PublicIdentityId ownerId,
         CancellationToken cancellationToken = default);
 
+    Task<bool> HasActivePreKeyAsync(
+        PublicIdentityId ownerId,
+        CancellationToken cancellationToken = default);
+
     Task SaveAsync(RelayHostedPreKeyBundle bundle, CancellationToken cancellationToken = default);
 
     Task DeleteAsync(

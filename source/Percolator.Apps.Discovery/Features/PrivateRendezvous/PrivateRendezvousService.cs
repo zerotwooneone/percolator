@@ -13,7 +13,7 @@ public sealed class PrivateRendezvousService : IPrivateRendezvousService
     private sealed record StoredRendezvousEntry(
         BlindedLocator Locator,
         EncryptedRendezvousRoute EncryptedRoute,
-        string LegacyRouteDescriptor,
+        RelayRouteDescriptor? RouteDescriptor,
         DateTimeOffset PublishedAtUtc);
 
     private readonly ConcurrentDictionary<BlindedLocator, StoredRendezvousEntry> _rendezvousTable = new();
@@ -39,6 +39,12 @@ public sealed class PrivateRendezvousService : IPrivateRendezvousService
         return BlindedLocator.Derive(peerId, sharedSecret, epoch);
     }
 
+    public BlindedLocator DeriveLocator(
+        PublicIdentityId peerId,
+        RendezvousSharedSecret sharedSecret,
+        DiscoveryEpoch epoch) =>
+        DeriveLocator(peerId, sharedSecret.Span, epoch);
+
     public IReadOnlyList<BlindedLocator> DeriveLocatorWindow(
         PublicIdentityId peerId,
         ReadOnlySpan<byte> sharedSecret,
@@ -46,6 +52,12 @@ public sealed class PrivateRendezvousService : IPrivateRendezvousService
     {
         return BlindedLocator.DeriveWindow(peerId, sharedSecret, currentEpoch);
     }
+
+    public IReadOnlyList<BlindedLocator> DeriveLocatorWindow(
+        PublicIdentityId peerId,
+        RendezvousSharedSecret sharedSecret,
+        DiscoveryEpoch currentEpoch) =>
+        DeriveLocatorWindow(peerId, sharedSecret.Span, currentEpoch);
 
     public ValueTask<DomainResult> PublishEncryptedRendezvousAsync(
         BlindedLocator locator,
@@ -76,7 +88,7 @@ public sealed class PrivateRendezvousService : IPrivateRendezvousService
         _rendezvousTable[locator] = new StoredRendezvousEntry(
             locator,
             encryptedRoute,
-            Convert.ToBase64String(encryptedRoute.Span),
+            null,
             nowUtc);
 
         return ValueTask.FromResult(DomainResult.Success());
@@ -111,7 +123,7 @@ public sealed class PrivateRendezvousService : IPrivateRendezvousService
         _rendezvousTable[locator] = new StoredRendezvousEntry(
             locator,
             default,
-            routeCheck.Value.Value,
+            routeCheck.Value,
             nowUtc);
 
         return ValueTask.FromResult(DomainResult.Success());
@@ -144,7 +156,7 @@ public sealed class PrivateRendezvousService : IPrivateRendezvousService
                 matches.Add(new BlindedRendezvousMatch(
                     loc,
                     entry.EncryptedRoute,
-                    entry.LegacyRouteDescriptor));
+                    entry.RouteDescriptor));
             }
         }
 

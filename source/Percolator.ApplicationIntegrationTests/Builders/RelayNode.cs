@@ -1,9 +1,15 @@
 using System.Collections.Concurrent;
 using Percolator.Application2IntegrationTests.Adapters;
+using Percolator.Apps.Discovery.Features.PrivateRendezvous;
+using Percolator.Apps.Discovery.Features.RelayDirectoryHosting;
+using Percolator.Apps.Discovery.Ingress;
+using Percolator.Apps.Discovery.Ports;
+using Percolator.PluginSdk;
 using Percolator.Application2IntegrationTests.Infrastructure;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Hosting;
+using Percolator.Domain.Delivery.Ports;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Ports;
@@ -24,6 +30,9 @@ public sealed class RelayNode
     public InMemoryRelayLedgerRepository LedgerRepository { get; } = new();
     public InMemoryRelayBlobStore BlobStore { get; } = new();
     public ScenarioZkProofEngine ZkEngine { get; } = new();
+    public InMemoryRelayPeerDirectory Directory { get; }
+    public PrivateRendezvousService RendezvousService { get; }
+    public DiscoveryPayloadHandler DiscoveryHandler { get; }
     public RelayHostingPolicy Policy { get; }
     public IDateTimeProvider TimeProvider { get; }
 
@@ -41,6 +50,20 @@ public sealed class RelayNode
         RelayIdentityId = PublicIdentityId.New();
         MailboxQueue = new RelayMailboxQueue(RelayIdentityId);
         PreKeyRepository = new InMemoryRelayPreKeyRepository();
+        var preKeyAdapter = new RelayPreKeyAvailabilityAdapter(PreKeyRepository);
+        var admissionGate = new DiscoveryAdmissionGate();
+        Directory = new InMemoryRelayPeerDirectory(
+            admissionGate,
+            RelayDiscoveryPolicy.Open,
+            preKeyAdapter,
+            TimeProvider);
+        RendezvousService = new PrivateRendezvousService(TimeProvider);
+        DiscoveryHandler = new DiscoveryPayloadHandler(
+            Directory,
+            RendezvousService,
+            new TestPayloadSerializer(),
+            null,
+            RelayIdentityId);
     }
 
     public void RegisterClientMailbox(
@@ -152,5 +175,35 @@ public sealed class RelayNode
     public DomainResult DeleteProfile(BlindedProfileLocator locator, ProfileWriteToken writeToken)
     {
         return ProfileRepository.DeleteSlotAsync(locator, writeToken).GetAwaiter().GetResult();
+    }
+
+    public async Task<DomainResult> RegisterPeerDiscoveryAsync(
+        PublicIdentityId peerId,
+        PeerDiscoveryVisibility visibility = PeerDiscoveryVisibility.Discoverable,
+        CancellationToken ct = default)
+    {
+        var registration = RelayPeerRegistration.Create(
+            peerId,
+            visibility,
+            hasAuthenticatedHandshake: true,
+            hasActiveSignedPreKey: true,
+            TimeProvider.UtcNow).Value!;
+
+        return await Directory.RegisterPeerAsync(registration, ct).ConfigureAwait(false);
+    }
+
+    public ValueTask<DomainResult> HandleDiscoveryInboundAsync(
+        InboundPayloadContext context,
+        CancellationToken ct = default)
+    {
+        return DiscoveryHandler.HandleInboundAsync(context, ct);
+    }
+
+    private sealed class RelayPreKeyAvailabilityAdapter(IRelayPreKeyRepository repo) : IPreKeyAvailabilityPort
+    {
+        public async ValueTask<bool> HasActiveSignedPreKeyAsync(PublicIdentityId peerId, CancellationToken ct = default)
+        {
+            return await repo.HasActivePreKeyAsync(peerId, ct).ConfigureAwait(false);
+        }
     }
 }

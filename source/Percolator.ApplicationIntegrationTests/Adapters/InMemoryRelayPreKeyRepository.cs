@@ -27,6 +27,13 @@ public sealed class InMemoryRelayPreKeyRepository : IRelayPreKeyRepository
         return Task.FromResult<IReadOnlyList<RelayHostedPreKeyBundle>>(list);
     }
 
+    public Task<bool> HasActivePreKeyAsync(
+        PublicIdentityId ownerId,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(_bundles.Values.Any(b => b.OwnerId == ownerId));
+    }
+
     public Task SaveAsync(RelayHostedPreKeyBundle bundle, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(bundle);

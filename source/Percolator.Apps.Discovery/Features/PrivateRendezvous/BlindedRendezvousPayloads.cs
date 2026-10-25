@@ -127,6 +127,14 @@ public readonly struct EncryptedRendezvousRoute : IEquatable<EncryptedRendezvous
         return new EncryptedRendezvousRoute(output);
     }
 
+    public static EncryptedRendezvousRoute Encrypt(
+        RelayRouteDescriptor route,
+        BlindedLocator locator,
+        RendezvousSharedSecret secret,
+        DiscoveryEpoch epoch,
+        PublicIdentityId publisherPeerId) =>
+        Encrypt(route, locator, secret.Span, epoch, publisherPeerId);
+
     public DomainResult<RelayRouteDescriptor> Decrypt(
         BlindedLocator locator,
         ReadOnlySpan<byte> sharedSecret,
@@ -172,6 +180,13 @@ public readonly struct EncryptedRendezvousRoute : IEquatable<EncryptedRendezvous
             CryptographicOperations.ZeroMemory(aeadKey);
         }
     }
+
+    public DomainResult<RelayRouteDescriptor> Decrypt(
+        BlindedLocator locator,
+        RendezvousSharedSecret secret,
+        DiscoveryEpoch epoch,
+        PublicIdentityId publisherPeerId) =>
+        Decrypt(locator, secret.Span, epoch, publisherPeerId);
 
     private static void DeriveAeadKey(
         ReadOnlySpan<byte> sharedSecret,
@@ -219,31 +234,36 @@ public sealed record BlindedRendezvousMatch
 {
     public BlindedLocator Locator { get; }
     public EncryptedRendezvousRoute EncryptedRoute { get; }
-    public string RelayRouteDescriptor { get; }
+    public RelayRouteDescriptor? RelayRouteDescriptor { get; }
 
     public BlindedRendezvousMatch(BlindedLocator locator, EncryptedRendezvousRoute encryptedRoute)
     {
         Locator = locator;
         EncryptedRoute = encryptedRoute;
-        RelayRouteDescriptor = encryptedRoute.IsValid
-            ? Convert.ToBase64String(encryptedRoute.Span)
-            : string.Empty;
+        RelayRouteDescriptor = null;
     }
 
     public BlindedRendezvousMatch(BlindedLocator locator, string relayRouteDescriptor)
+        : this(locator, Percolator.Apps.Discovery.Features.PrivateRendezvous.RelayRouteDescriptor.Create(relayRouteDescriptor).Value)
+    {
+    }
+
+    public BlindedRendezvousMatch(
+        BlindedLocator locator,
+        RelayRouteDescriptor relayRouteDescriptor)
     {
         Locator = locator;
-        RelayRouteDescriptor = relayRouteDescriptor ?? string.Empty;
+        RelayRouteDescriptor = relayRouteDescriptor;
         EncryptedRoute = default;
     }
 
     public BlindedRendezvousMatch(
         BlindedLocator locator,
         EncryptedRendezvousRoute encryptedRoute,
-        string relayRouteDescriptor)
+        RelayRouteDescriptor? relayRouteDescriptor)
     {
         Locator = locator;
         EncryptedRoute = encryptedRoute;
-        RelayRouteDescriptor = relayRouteDescriptor ?? string.Empty;
+        RelayRouteDescriptor = relayRouteDescriptor;
     }
 }

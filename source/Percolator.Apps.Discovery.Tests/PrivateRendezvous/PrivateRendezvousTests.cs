@@ -153,6 +153,6 @@ public sealed class PrivateRendezvousTests
         var matches = await service.ResolveRendezvousAsync(new[] { locator });
         matches.Should().ContainSingle();
         matches[0].Locator.Should().Be(locator);
-        matches[0].RelayRouteDescriptor.Should().Be("relay://primary.percolator.net:443");
+        matches[0].RelayRouteDescriptor.Should().Be(new RelayRouteDescriptor("relay://primary.percolator.net:443"));
     }
 }

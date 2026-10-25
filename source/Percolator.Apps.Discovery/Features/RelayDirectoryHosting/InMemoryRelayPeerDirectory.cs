@@ -109,9 +109,10 @@ public sealed class InMemoryRelayPeerDirectory : IRelayPeerDirectory
     }
 
     public async ValueTask<IReadOnlyList<RelayPeerRegistration>> GetDiscoverablePeersAsync(
+        int? limit = null,
         CancellationToken ct = default)
     {
-        if (Policy != RelayDiscoveryPolicy.Open)
+        if (Policy != RelayDiscoveryPolicy.Open || (limit.HasValue && limit.Value <= 0))
         {
             return Array.Empty<RelayPeerRegistration>();
         }
@@ -122,6 +123,11 @@ public sealed class InMemoryRelayPeerDirectory : IRelayPeerDirectory
         var results = new List<RelayPeerRegistration>();
         foreach (var reg in _registrations.Values)
         {
+            if (limit.HasValue && results.Count >= limit.Value)
+            {
+                break;
+            }
+
             bool hasActiveSpk = reg.HasActiveSignedPreKey;
             if (_preKeyAvailabilityPort is not null)
             {

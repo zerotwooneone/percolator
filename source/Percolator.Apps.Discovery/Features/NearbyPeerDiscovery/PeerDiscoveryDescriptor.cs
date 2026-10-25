@@ -1,3 +1,4 @@
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.PluginSdk;
 
@@ -10,4 +11,7 @@ namespace Percolator.Apps.Discovery.Features.NearbyPeerDiscovery;
 /// </summary>
 public sealed record PeerDiscoveryDescriptor(
     PublicIdentityId PeerId,
-    DeliveryRoute Route);
+    DeliveryRoute Route,
+    RelayEndpoint? RelayEndpoint = null,
+    BlindedRoutingToken? RoutingToken = null,
+    DeliveryToken? DeliveryToken = null);

@@ -209,7 +209,7 @@ public sealed class DiscoveryPayloadHandler : IAppPayloadHandler
         }
 
         var limit = query.Limit;
-        var discoverable = await _directory.GetDiscoverablePeersAsync(ct).ConfigureAwait(false);
+        var discoverable = await _directory.GetDiscoverablePeersAsync(limit.Value + 1, ct).ConfigureAwait(false);
 
         var descriptors = new List<PeerDiscoveryDescriptor>();
         foreach (var reg in discoverable)

@@ -24,5 +24,6 @@ public interface IRelayPeerDirectory
         CancellationToken ct = default);
 
     ValueTask<IReadOnlyList<RelayPeerRegistration>> GetDiscoverablePeersAsync(
+        int? limit = null,
         CancellationToken ct = default);
 }

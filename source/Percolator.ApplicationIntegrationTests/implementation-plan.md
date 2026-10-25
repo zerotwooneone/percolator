@@ -265,7 +265,7 @@ Prior to implementing Phase 2 and subsequent phases, the following core defects 
 - **Step 5.4**: Bob and Charlie download attachment via `ChatMediaService.DownloadOutOfBandAttachmentAsync`.
 - **Step 5.5**: Verify byte-for-byte fidelity and AEAD tag verification.
 
-### Phase 6: Peer Discovery (`Apps.Discovery` — Sovereign Directory & Rendezvous)
+### Phase 6: Peer Discovery (`Apps.Discovery` — Sovereign Directory & Rendezvous) [COMPLETED in PeerDiscoveryScenarioTests.cs]
 - **Step 6.1: Directory Visibility Registration**:
   - Bob registers discoverable profile with `Relay` via `DiscoveryOpcode.RegisterVisibility`.
 - **Step 6.2: Nearby Discovery Workflow**:

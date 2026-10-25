@@ -15,6 +15,10 @@ using Percolator.Apps.Chat.Features.Media;
 using Percolator.Apps.Chat.Features.Messaging;
 using Percolator.Apps.Chat.Features.Profiles;
 using Percolator.Apps.Chat.Ingress;
+using Percolator.Apps.Discovery.Features.NearbyPeerDiscovery;
+using Percolator.Apps.Discovery.Features.PrivateRendezvous;
+using Percolator.Apps.Discovery.Features.RelayDirectoryHosting;
+using Percolator.Apps.Discovery.Ingress;
 using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Features.IngressControl;
 using Percolator.Apps.FileTransfer.Features.MultiStreamEngine;
@@ -82,6 +86,10 @@ public sealed class TestIdentityNode
     public IFileTransferActionHandler FileTransferActions { get; }
     public IFileTransferQueryService FileTransferQueries { get; }
     public TransferSessionCoordinator FileTransferCoordinator { get; }
+
+    // Discovery Capabilities
+    public NearbyPeerDiscoveryWorkflow NearbyDiscovery { get; }
+    public PrivateRendezvousService RendezvousService { get; }
 
     // Driving Ports
     public IChatService ChatService { get; }
@@ -339,6 +347,10 @@ public sealed class TestIdentityNode
             HandshakeService,
             _channelRepo,
             TimeProvider);
+
+        var discoveryClient = new LoopbackNearbyDiscoveryQueryClient(_networkSwitch);
+        NearbyDiscovery = new NearbyPeerDiscoveryWorkflow(discoveryClient, PeerConnectionService);
+        RendezvousService = new PrivateRendezvousService(TimeProvider);
 
         IngressPipeline = new InboundIngressPipeline(
             _ingressFilterService,
@@ -736,6 +748,22 @@ public sealed class TestIdentityNode
         await AddApprovedContactAsync(responder).ConfigureAwait(false);
         await responder.AddApprovedContactAsync(this).ConfigureAwait(false);
         return await EstablishDirectChannelWithAsync(responder).ConfigureAwait(false);
+    }
+
+    public async Task<DomainResult> RegisterDiscoveryVisibilityAsync(
+        RelayNode relay,
+        PeerDiscoveryVisibility visibility,
+        CancellationToken ct = default)
+    {
+        await relay.RegisterPeerDiscoveryAsync(IdentityId, visibility, ct).ConfigureAwait(false);
+        var payload = new DiscoveryRegistrationPayload(IdentityId, visibility);
+        var serializer = new TestPayloadSerializer();
+        var body = serializer.Serialize(payload);
+        var framed = new byte[1 + body.Length];
+        framed[0] = (byte)DiscoveryOpcode.RegisterVisibility;
+        body.Span.CopyTo(framed.AsSpan(1));
+        var context = new InboundPayloadContext(ChannelId.New(), IdentityId, DeviceId, AppId.Discovery, framed, TimeProvider.UtcNow);
+        return await relay.HandleDiscoveryInboundAsync(context, ct).ConfigureAwait(false);
     }
 
     public async Task<DomainResult> PumpTransferAsync(
