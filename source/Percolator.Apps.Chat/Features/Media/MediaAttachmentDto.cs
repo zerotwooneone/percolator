@@ -11,4 +11,22 @@ public sealed record MediaAttachmentDto(
     int? Height,
     byte[]? Waveform,
     ReadOnlyMemory<byte>? InlineBytes,
-    BlobReference? OutOfBandReference = null);
+    BlobReference? OutOfBandReference = null)
+{
+    public static MediaAttachmentDto FromOutOfBand(
+        BlobReference reference,
+        string? fileName = null)
+    {
+        ArgumentNullException.ThrowIfNull(reference);
+        return new MediaAttachmentDto(
+            reference.Id,
+            fileName,
+            reference.MimeType,
+            reference.PlaintextSizeBytes,
+            reference.Width,
+            reference.Height,
+            reference.Waveform,
+            InlineBytes: null,
+            OutOfBandReference: reference);
+    }
+}

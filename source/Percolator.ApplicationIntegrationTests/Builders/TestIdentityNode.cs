@@ -67,8 +67,7 @@ public sealed class TestIdentityNode
     // Media & Out-of-band Blob Storage
     public ChatMediaService MediaService { get; }
     public IBlobStorageService BlobStorage { get; }
-    public InMemoryLocalChunkStore LocalChunkStore { get; } = new();
-    public ScenarioBlobCryptoService BlobCryptoService { get; } = new();
+    public ScenarioBlobCryptoService BlobCryptoService { get; }
     public LoopbackRelayBlobClient RelayBlobClient { get; }
     public LoopbackChannelRelayResolver ChannelRelayResolver { get; }
 
@@ -94,6 +93,7 @@ public sealed class TestIdentityNode
     public IGroupInvitationQueryService GroupInvitationQueries { get; }
 
     // Encapsulated Stores & Adapters (Strict Encapsulation: Hidden from tests)
+    private readonly InMemoryLocalChunkStore _localChunkStore = new();
     private readonly InMemoryChatMessageRepository _chatRepo;
     private readonly InMemoryChannelRepository _channelRepo;
     private readonly InMemoryOutboxRepository _outboxRepo;
@@ -159,8 +159,15 @@ public sealed class TestIdentityNode
         ProfileDeliveryClient = new LoopbackProfileDeliveryClient(_networkSwitch, TimeProvider);
         _networkSwitch.RegisterPeerProfileStore(IdentityId, LocalProfileRepository);
 
-        // Register local chunk store on network switch
-        _networkSwitch.RegisterChunkStore(IdentityId, LocalChunkStore);
+        // Register peer blob transfer responder on network switch
+        _networkSwitch.RegisterPeerBlobResponder(IdentityId, async (blobId, ct) =>
+        {
+            if (await _localChunkStore.HasBlobAsync(blobId, ct).ConfigureAwait(false))
+            {
+                return await _localChunkStore.OpenReadAsync(blobId, ct).ConfigureAwait(false);
+            }
+            return null;
+        });
 
         // Initialize Stores
         _chatRepo = new InMemoryChatMessageRepository();
@@ -192,9 +199,9 @@ public sealed class TestIdentityNode
 
         // Blob & Media Storage
         RelayBlobClient = new LoopbackRelayBlobClient(_networkSwitch);
-        ChannelRelayResolver = new LoopbackChannelRelayResolver(_networkSwitch, PeerMailboxRoutingRepo);
-        var peerStreamBlobClient = new LoopbackPeerStreamBlobClient(peerId =>
-            _networkSwitch.TryGetChunkStore(peerId, out var cs) ? cs : null);
+        ChannelRelayResolver = new LoopbackChannelRelayResolver(_networkSwitch, _channelRepo, PeerMailboxRoutingRepo, TimeProvider);
+        var peerStreamBlobClient = new LoopbackPeerStreamBlobClient(IdentityId, _networkSwitch);
+        BlobCryptoService = new ScenarioBlobCryptoService(CryptoEngine);
 
         BlobStorage = new BlobStorageService(
             _channelRepo,
@@ -203,7 +210,7 @@ public sealed class TestIdentityNode
             BlobCryptoService,
             RelayBlobClient,
             peerStreamBlobClient,
-            LocalChunkStore,
+            _localChunkStore,
             TimeProvider);
 
         MediaService = new ChatMediaService(BlobStorage);

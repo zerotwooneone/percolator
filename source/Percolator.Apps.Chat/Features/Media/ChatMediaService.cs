@@ -129,16 +129,7 @@ public sealed class ChatMediaService
         }
 
         var sanitizedFileName = SanitizeMediaFileName(originalFileName, contentType);
-        var attachment = new MediaAttachmentDto(
-            uploadResult.Value.Reference.Id,
-            sanitizedFileName,
-            contentType,
-            byteSize,
-            width,
-            height,
-            waveform,
-            InlineBytes: null,
-            OutOfBandReference: uploadResult.Value.Reference);
+        var attachment = MediaAttachmentDto.FromOutOfBand(uploadResult.Value.Reference, sanitizedFileName);
 
         return DomainResult<MediaAttachmentDto>.Success(attachment);
     }
@@ -163,7 +154,7 @@ public sealed class ChatMediaService
                 "BLOB_STORAGE_UNAVAILABLE", "Out-of-band blob storage service is not configured."));
         }
 
-        var downloadRequest = new BlobDownloadRequest(attachment.OutOfBandReference, ct, remotePeerId);
+        var downloadRequest = new BlobDownloadRequest(attachment.OutOfBandReference, remotePeerId);
         return await _blobStorage.DownloadBlobAsync(downloadRequest, progress, ct).ConfigureAwait(false);
     }
 

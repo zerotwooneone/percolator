@@ -6,6 +6,7 @@ using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Ports;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.ValueObjects;
+using Percolator.PluginSdk;
 
 namespace Percolator.Application2IntegrationTests.Infrastructure;
 
@@ -20,7 +21,7 @@ public sealed class InMemoryLoopbackNetworkSwitch
     private readonly ConcurrentDictionary<ChannelId, RelayNode> _channelToRelay = new();
     private readonly ConcurrentDictionary<ChannelId, (GroupMasterKey MasterKey, AuthCredentialMacBytes AuthMac)> _channelCredentials = new();
     private readonly ConcurrentDictionary<PublicIdentityId, IRelayProfileRepository> _peerProfileStores = new();
-    private readonly ConcurrentDictionary<PublicIdentityId, ILocalChunkStore> _peerChunkStores = new();
+    private readonly ConcurrentDictionary<PublicIdentityId, Func<BlobId, CancellationToken, ValueTask<Stream?>>> _peerBlobResponders = new();
 
     public IReadOnlyCollection<RelayNode> AllRelays => _relaysById.Values.ToList();
     public IReadOnlyCollection<IRelayProfileRepository> AllPeerProfileStores => _peerProfileStores.Values.ToList();
@@ -87,14 +88,41 @@ public sealed class InMemoryLoopbackNetworkSwitch
         return _peerProfileStores.TryGetValue(peerId, out profileRepo);
     }
 
-    public void RegisterChunkStore(PublicIdentityId peerId, ILocalChunkStore chunkStore)
+    public void RegisterPeerBlobResponder(PublicIdentityId peerId, Func<BlobId, CancellationToken, ValueTask<Stream?>> responder)
     {
-        _peerChunkStores[peerId] = chunkStore;
+        _peerBlobResponders[peerId] = responder;
     }
 
-    public bool TryGetChunkStore(PublicIdentityId peerId, out ILocalChunkStore? chunkStore)
+    public async ValueTask<DomainResult<Stream>> TransferBlobAcrossStreamAsync(
+        PublicIdentityId requesterId,
+        PublicIdentityId peerId,
+        BlobId blobId,
+        CancellationToken ct = default)
     {
-        return _peerChunkStores.TryGetValue(peerId, out chunkStore);
+        if (!HasActiveStreamForPeer(requesterId, peerId))
+        {
+            return DomainResult<Stream>.Failure(new DomainError(
+                "STREAM_NOT_CONNECTED", $"No direct active stream between {requesterId} and {peerId}."));
+        }
+
+        if (!_peerBlobResponders.TryGetValue(peerId, out var responder))
+        {
+            return DomainResult<Stream>.Failure(new DomainError(
+                "PEER_BLOB_SERVICE_UNAVAILABLE", $"Peer {peerId} has no active blob transfer responder."));
+        }
+
+        var sourceStream = await responder(blobId, ct).ConfigureAwait(false);
+        if (sourceStream is null)
+        {
+            return DomainResult<Stream>.Failure(new DomainError(
+                "BLOB_NOT_FOUND_ON_PEER", $"Blob {blobId} not found on peer {peerId}."));
+        }
+
+        var wireBuffer = new MemoryStream();
+        await sourceStream.CopyToAsync(wireBuffer, ct).ConfigureAwait(false);
+        wireBuffer.Position = 0;
+
+        return DomainResult<Stream>.Success(wireBuffer);
     }
 
     public void OpenDirectStream(EndpointPort sourcePort, EndpointPort targetPort)

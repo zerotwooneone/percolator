@@ -137,7 +137,7 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
                 RelayEndpointUri = blob.RelayEndpointUri.Value
             };
 
-            DomainResult<BlobDownloadResult> downloadResult = await _blobStorage.DownloadBlobAsync(new BlobDownloadRequest(reference, ct), ct: ct);
+            DomainResult<BlobDownloadResult> downloadResult = await _blobStorage.DownloadBlobAsync(new BlobDownloadRequest(reference), ct: ct);
             if (downloadResult.IsFailure)
                 return null;
 

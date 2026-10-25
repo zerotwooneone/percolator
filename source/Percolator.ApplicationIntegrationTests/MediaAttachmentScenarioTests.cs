@@ -84,7 +84,7 @@ public sealed class MediaAttachmentScenarioTests
         relayBlob!.Length.Should().Be((int)blobRef.CiphertextSizeBytes);
 
         // Assert Alice's local chunk store cached the ciphertext for replay
-        (await alice.LocalChunkStore.HasBlobAsync(blobRef.Id)).Should().BeTrue();
+        alice.BlobStorage.IsCachedLocally(blobRef.Id).Should().BeTrue();
 
         // ----------------------------------------------------------------------------------
         // Step 5.3: Alice sends chat message containing the attachment metadata
@@ -127,7 +127,7 @@ public sealed class MediaAttachmentScenarioTests
         receivedAttachment.OutOfBandReference!.CiphertextSha256.Should().Equal(blobRef.CiphertextSha256);
 
         // Charlie does not have the ciphertext cached yet
-        (await charlie.LocalChunkStore.HasBlobAsync(blobRef.Id)).Should().BeFalse();
+        charlie.BlobStorage.IsCachedLocally(blobRef.Id).Should().BeFalse();
 
         // Charlie downloads the attachment via ChatMediaService
         var downloadResult = await charlie.MediaService.DownloadOutOfBandAttachmentAsync(receivedAttachment);
@@ -141,7 +141,7 @@ public sealed class MediaAttachmentScenarioTests
         // Step 5.5: Byte-for-byte fidelity and Local Chunk Store Caching
         // ----------------------------------------------------------------------------------
         downloadedBytes.Should().Equal(originalData, "Downloaded plaintext must match original uploaded bytes byte-for-byte");
-        (await charlie.LocalChunkStore.HasBlobAsync(blobRef.Id)).Should().BeTrue("Downloaded blob should now be cached locally");
+        charlie.BlobStorage.IsCachedLocally(blobRef.Id).Should().BeTrue("Downloaded blob should now be cached locally");
 
         // Verify local chunk cache resilience: delete blob from relay, Charlie should still download from local cache
         relay.BlobStore.DeleteBlob(blobRef.Id);
@@ -155,7 +155,7 @@ public sealed class MediaAttachmentScenarioTests
 
         // Verify local cache purge when message is tombstoned/deleted
         await charlie.MediaService.PurgeLocalAttachmentBlobsAsync([receivedAttachment]);
-        (await charlie.LocalChunkStore.HasBlobAsync(blobRef.Id)).Should().BeFalse("Purge should remove cached blob from local chunk store");
+        charlie.BlobStorage.IsCachedLocally(blobRef.Id).Should().BeFalse("Purge should remove cached blob from local chunk store");
     }
 
     [Test]
@@ -202,7 +202,7 @@ public sealed class MediaAttachmentScenarioTests
         relay.BlobStore.SaveBlob(blobRef.Id, tamperedCiphertext);
 
         // Charlie attempts to download without local cache
-        (await charlie.LocalChunkStore.HasBlobAsync(blobRef.Id)).Should().BeFalse();
+        charlie.BlobStorage.IsCachedLocally(blobRef.Id).Should().BeFalse();
         var downloadResult = await charlie.MediaService.DownloadOutOfBandAttachmentAsync(attachment);
 
         // AEAD verification must fail
@@ -249,7 +249,7 @@ public sealed class MediaAttachmentScenarioTests
         attachment.OutOfBandReference!.StorageMode.Should().Be(BlobStorageMode.DirectP2P);
 
         // Alice stages blob in her local chunk store
-        (await alice.LocalChunkStore.HasBlobAsync(attachment.BlobId)).Should().BeTrue();
+        alice.BlobStorage.IsCachedLocally(attachment.BlobId).Should().BeTrue();
 
         // Alice sends chat message to Bob directly
         var sendCmd = new SendMessageCommand(
@@ -284,7 +284,7 @@ public sealed class MediaAttachmentScenarioTests
         downloadedStream.ToArray().Should().Equal(originalData);
 
         // Bob now has it cached locally
-        (await bob.LocalChunkStore.HasBlobAsync(attachment.BlobId)).Should().BeTrue();
+        bob.BlobStorage.IsCachedLocally(attachment.BlobId).Should().BeTrue();
     }
 
     [Test]

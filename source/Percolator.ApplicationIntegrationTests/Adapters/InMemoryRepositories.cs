@@ -602,12 +602,4 @@ public sealed class InMemoryPeerMailboxRoutingRepository : IPeerMailboxRoutingRe
         return Task.CompletedTask;
     }
 
-    public Task<IReadOnlyList<PeerMailboxRoutingCapability>> GetAllAsync(CancellationToken ct = default)
-    {
-        lock (_lock)
-        {
-            var all = _peerRoutes.Values.SelectMany(r => r).ToList();
-            return Task.FromResult<IReadOnlyList<PeerMailboxRoutingCapability>>(all);
-        }
-    }
 }

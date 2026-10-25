@@ -231,10 +231,8 @@ public sealed class BlobStorageService : IBlobStorageService
                     return DomainResult<BlobDownloadResult>.Failure(downloadResult.Error!);
                 }
 
-                ciphertextStream = downloadResult.Value!;
-                ciphertextStream.Position = 0;
-                await _localChunkStore.SaveBlobAsync(request.Reference.Id, ciphertextStream, ct).ConfigureAwait(false);
-                ciphertextStream.Position = 0;
+                await _localChunkStore.SaveBlobAsync(request.Reference.Id, downloadResult.Value!, ct).ConfigureAwait(false);
+                ciphertextStream = await _localChunkStore.OpenReadAsync(request.Reference.Id, ct).ConfigureAwait(false);
             }
             else if (request.Reference.StorageMode == BlobStorageMode.DirectP2P && request.RemotePeerId.HasValue)
             {
@@ -246,10 +244,8 @@ public sealed class BlobStorageService : IBlobStorageService
                     return DomainResult<BlobDownloadResult>.Failure(downloadResult.Error!);
                 }
 
-                ciphertextStream = downloadResult.Value!;
-                ciphertextStream.Position = 0;
-                await _localChunkStore.SaveBlobAsync(request.Reference.Id, ciphertextStream, ct).ConfigureAwait(false);
-                ciphertextStream.Position = 0;
+                await _localChunkStore.SaveBlobAsync(request.Reference.Id, downloadResult.Value!, ct).ConfigureAwait(false);
+                ciphertextStream = await _localChunkStore.OpenReadAsync(request.Reference.Id, ct).ConfigureAwait(false);
             }
             else
             {

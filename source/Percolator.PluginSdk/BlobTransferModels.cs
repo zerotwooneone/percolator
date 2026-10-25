@@ -22,7 +22,6 @@ public sealed record BlobUploadResult(
 
 public sealed record BlobDownloadRequest(
     BlobReference Reference,
-    CancellationToken CancellationToken = default,
     PublicIdentityId? RemotePeerId = null);
 
 public sealed record BlobDownloadResult(

@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using Percolator.Application2.Ports;
 using Percolator.Application2IntegrationTests.Builders;
 using Percolator.Application2IntegrationTests.Infrastructure;
+using Percolator.Domain.Channels.Ports;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
@@ -162,14 +163,20 @@ public sealed class InMemoryLocalChunkStore : ILocalChunkStore
 public sealed class LoopbackChannelRelayResolver : IChannelRelayResolver
 {
     private readonly InMemoryLoopbackNetworkSwitch _networkSwitch;
-    private readonly InMemoryPeerMailboxRoutingRepository _mailboxRoutingRepo;
+    private readonly IChannelRepository _channelRepo;
+    private readonly IPeerMailboxRoutingRepository _mailboxRoutingRepo;
+    private readonly IDateTimeProvider _timeProvider;
 
     public LoopbackChannelRelayResolver(
         InMemoryLoopbackNetworkSwitch networkSwitch,
-        InMemoryPeerMailboxRoutingRepository mailboxRoutingRepo)
+        IChannelRepository channelRepo,
+        IPeerMailboxRoutingRepository mailboxRoutingRepo,
+        IDateTimeProvider timeProvider)
     {
         _networkSwitch = networkSwitch ?? throw new ArgumentNullException(nameof(networkSwitch));
+        _channelRepo = channelRepo ?? throw new ArgumentNullException(nameof(channelRepo));
         _mailboxRoutingRepo = mailboxRoutingRepo ?? throw new ArgumentNullException(nameof(mailboxRoutingRepo));
+        _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
     }
 
     public async ValueTask<Uri?> ResolveRelayForChannelAsync(ChannelId channelId, CancellationToken ct = default)
@@ -180,22 +187,15 @@ public sealed class LoopbackChannelRelayResolver : IChannelRelayResolver
             return new Uri($"percolator://localhost:{relay.Port.Value}");
         }
 
-        // 2. Peer mailbox routing repository (for 1:1 direct relayed channels)
-        var allCaps = await _mailboxRoutingRepo.GetAllAsync(ct).ConfigureAwait(false);
-        if (allCaps.Count > 0)
+        // 2. Direct channel -> resolve remote peer and lookup their specific mailbox relay
+        var directChannel = await _channelRepo.GetDirectByIdAsync(channelId, ct).ConfigureAwait(false);
+        if (directChannel is not null)
         {
-            var firstCap = allCaps[0];
-            if (firstCap.RelayEndpoint is not null)
+            var route = await _mailboxRoutingRepo.GetBestRouteAsync(directChannel.RemotePeerId, _timeProvider.UtcNow, ct).ConfigureAwait(false);
+            if (route?.RelayEndpoint is not null)
             {
-                return new Uri($"percolator://{firstCap.RelayEndpoint.Host}:{firstCap.RelayEndpoint.Port}");
+                return new Uri($"percolator://{route.RelayEndpoint.Host}:{route.RelayEndpoint.Port}");
             }
-        }
-
-        // 3. Fallback to any registered relay on the switch
-        var defaultRelay = _networkSwitch.AllRelays.FirstOrDefault();
-        if (defaultRelay is not null)
-        {
-            return new Uri($"percolator://localhost:{defaultRelay.Port.Value}");
         }
 
         return null;
@@ -204,11 +204,15 @@ public sealed class LoopbackChannelRelayResolver : IChannelRelayResolver
 
 public sealed class LoopbackPeerStreamBlobClient : IPeerStreamBlobClient
 {
-    private readonly Func<PublicIdentityId, ILocalChunkStore?> _peerStoreResolver;
+    private readonly PublicIdentityId _localIdentityId;
+    private readonly InMemoryLoopbackNetworkSwitch _networkSwitch;
 
-    public LoopbackPeerStreamBlobClient(Func<PublicIdentityId, ILocalChunkStore?> peerStoreResolver)
+    public LoopbackPeerStreamBlobClient(
+        PublicIdentityId localIdentityId,
+        InMemoryLoopbackNetworkSwitch networkSwitch)
     {
-        _peerStoreResolver = peerStoreResolver ?? throw new ArgumentNullException(nameof(peerStoreResolver));
+        _localIdentityId = localIdentityId;
+        _networkSwitch = networkSwitch ?? throw new ArgumentNullException(nameof(networkSwitch));
     }
 
     public async ValueTask<DomainResult<Stream>> RequestBlobFromPeerAsync(
@@ -217,14 +221,6 @@ public sealed class LoopbackPeerStreamBlobClient : IPeerStreamBlobClient
         IProgress<TransferProgress>? progress = null,
         CancellationToken ct = default)
     {
-        var store = _peerStoreResolver(peerId);
-        if (store is null || !await store.HasBlobAsync(blobId, ct).ConfigureAwait(false))
-        {
-            return DomainResult<Stream>.Failure(new DomainError(
-                "BLOB_NOT_FOUND_ON_PEER", $"Blob {blobId} not found on peer {peerId}."));
-        }
-
-        var stream = await store.OpenReadAsync(blobId, ct).ConfigureAwait(false);
-        return DomainResult<Stream>.Success(stream);
+        return await _networkSwitch.TransferBlobAcrossStreamAsync(_localIdentityId, peerId, blobId, ct).ConfigureAwait(false);
     }
 }

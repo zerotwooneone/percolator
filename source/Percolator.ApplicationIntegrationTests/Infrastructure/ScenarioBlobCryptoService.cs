@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Security.Cryptography;
 using Percolator.Application2.Ports;
 using Percolator.Domain.Common;
+using Percolator.Domain.Security.Ports;
 
 namespace Percolator.Application2IntegrationTests.Infrastructure;
 
@@ -9,6 +10,13 @@ public sealed class ScenarioBlobCryptoService : IBlobCryptoService
 {
     public const int ChunkSize = 64 * 1024; // 64 KB chunks
     public const int TagSize = 16;          // 16-byte AES-GCM tag
+
+    private readonly ICryptoEngine _cryptoEngine;
+
+    public ScenarioBlobCryptoService(ICryptoEngine? cryptoEngine = null)
+    {
+        _cryptoEngine = cryptoEngine ?? new ScenarioCryptoEngine();
+    }
 
     public async ValueTask<DomainResult<EncryptedBlobPackage>> EncryptAndPackageAsync(
         Stream plaintextStream,
@@ -27,7 +35,6 @@ public sealed class ScenarioBlobCryptoService : IBlobCryptoService
         RandomNumberGenerator.Fill(key);
         RandomNumberGenerator.Fill(baseNonce);
 
-        using var aes = new AesGcm(key, TagSize);
         using var ciphertextMs = new MemoryStream();
 
         int offset = 0;
@@ -42,17 +49,13 @@ public sealed class ScenarioBlobCryptoService : IBlobCryptoService
             int currentChunkLen = Math.Min(remaining, ChunkSize);
 
             var chunkPlaintext = plaintextBytes.AsSpan(offset, currentChunkLen);
-            var chunkCiphertext = new byte[currentChunkLen];
-            var tag = new byte[TagSize];
 
             baseNonce.CopyTo(chunkNonce);
             BinaryPrimitives.WriteUInt32BigEndian(chunkNonce[8..12], (uint)chunkIndex);
             BinaryPrimitives.WriteUInt32BigEndian(aad, (uint)chunkIndex);
 
-            aes.Encrypt(chunkNonce, chunkPlaintext, chunkCiphertext, tag, aad);
-
-            ciphertextMs.Write(chunkCiphertext);
-            ciphertextMs.Write(tag);
+            var encryptedChunk = _cryptoEngine.EncryptAesGcm(key, chunkNonce, chunkPlaintext.ToArray(), aad.ToArray());
+            ciphertextMs.Write(encryptedChunk);
 
             offset += currentChunkLen;
             chunkIndex++;
@@ -87,7 +90,6 @@ public sealed class ScenarioBlobCryptoService : IBlobCryptoService
         await ciphertextStream.CopyToAsync(memory, ct).ConfigureAwait(false);
         var ciphertextBytes = memory.ToArray();
 
-        using var aes = new AesGcm(encryptionKey, TagSize);
         using var plaintextMs = new MemoryStream();
 
         int offset = 0;
@@ -101,7 +103,6 @@ public sealed class ScenarioBlobCryptoService : IBlobCryptoService
             while (offset < ciphertextBytes.Length)
             {
                 int remaining = ciphertextBytes.Length - offset;
-                // Wire chunk size: at most (ChunkSize + TagSize)
                 int wireChunkLen = Math.Min(remaining, ChunkSize + TagSize);
                 if (wireChunkLen < TagSize)
                 {
@@ -109,17 +110,14 @@ public sealed class ScenarioBlobCryptoService : IBlobCryptoService
                         "AEAD_VERIFICATION_FAILED", "Malformed ciphertext chunk: smaller than tag size."));
                 }
 
-                int ctLen = wireChunkLen - TagSize;
-                var chunkCt = ciphertextBytes.AsSpan(offset, ctLen);
-                var tag = ciphertextBytes.AsSpan(offset + ctLen, TagSize);
-                var chunkPlaintext = new byte[ctLen];
+                var chunkCiphertextAndTag = ciphertextBytes.AsSpan(offset, wireChunkLen);
 
                 baseNonce.CopyTo(chunkNonce);
                 BinaryPrimitives.WriteUInt32BigEndian(chunkNonce[8..12], (uint)chunkIndex);
                 BinaryPrimitives.WriteUInt32BigEndian(aad, (uint)chunkIndex);
 
-                aes.Decrypt(chunkNonce, chunkCt, tag, chunkPlaintext, aad);
-                plaintextMs.Write(chunkPlaintext);
+                var decryptedChunk = _cryptoEngine.DecryptAesGcm(encryptionKey, chunkNonce, chunkCiphertextAndTag.ToArray(), aad.ToArray());
+                plaintextMs.Write(decryptedChunk);
 
                 offset += wireChunkLen;
                 chunkIndex++;
