@@ -232,6 +232,7 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
             State = TransferSessionState.InFlight;
         }
 
+
         ReevaluateAllPeerInterests();
         AddDomainEvent(new TransferAcceptedLocallyDomainEvent(Id, selectedFiles, now));
 
@@ -275,7 +276,9 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
     public DomainResult RegisterSwarmMember(
         PublicIdentityId peerId,
         Bitfield initialBitfield,
-        IDateTimeProvider clock)
+        IDateTimeProvider clock,
+        PeerChokeStatus peerChokingUs = PeerChokeStatus.Choked,
+        PeerChokeStatus weChokingPeer = PeerChokeStatus.Choked)
     {
         ArgumentNullException.ThrowIfNull(initialBitfield);
         ArgumentNullException.ThrowIfNull(clock);
@@ -288,10 +291,16 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
         if (initialBitfield.TotalChunks != Manifest.TotalChunks)
             return DomainResult.Failure(new DomainError("Swarm.MismatchedBitfield", "Initial bitfield does not match manifest chunk count."));
 
-        if (_swarmMembers.ContainsKey(peerId))
+        if (_swarmMembers.TryGetValue(peerId, out SwarmMember? existing))
+        {
+            existing.UpdateBitfield(initialBitfield);
+            existing.SetPeerChokingUs(peerChokingUs);
+            existing.SetWeChokingPeer(weChokingPeer);
+            UpdatePeerInterestAndCheckStallRecovery(existing);
             return DomainResult.Success();
+        }
 
-        SwarmMember member = new(peerId, initialBitfield);
+        SwarmMember member = new(peerId, initialBitfield, peerChokingUs, weChokingPeer);
         _swarmMembers[peerId] = member;
         UpdatePeerInterestAndCheckStallRecovery(member);
         DateTimeOffset now = clock.UtcNow;

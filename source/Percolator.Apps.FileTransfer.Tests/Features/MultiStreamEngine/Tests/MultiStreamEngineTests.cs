@@ -433,4 +433,101 @@ public sealed class MultiStreamEngineTests
         session.RegisterSwarmMember(peerId, Bitfield.Full(manifest.TotalChunks), _clock);
         return session;
     }
+
+    [Test]
+    public async Task UT_MSE_08_BoundaryChunkSeeding_FromDiskAndBoundaryPartStorage_ProducesCryptographicallyValidChunk()
+    {
+        TransferSessionId sessionId = TransferSessionId.New();
+        PublicIdentityId initiatorId = PublicIdentityId.New();
+        PublicIdentityId charlieId = PublicIdentityId.New();
+
+        // 2 files: docs/readme.txt (64 KB) and data/dataset.bin (512 KB) -> Chunk 0 is 256 KB spanning both
+        int file0Size = 64 * 1024;
+        int file1Size = 512 * 1024;
+        byte[] file0Bytes = new byte[file0Size];
+        byte[] file1Bytes = new byte[file1Size];
+        Random.Shared.NextBytes(file0Bytes);
+        Random.Shared.NextBytes(file1Bytes);
+
+        List<FileEntry> entries =
+        [
+            new FileEntry(FileIndex.FromInt(0), SanitizedRelativePath.Parse("docs/readme.txt"), FileSizeBytes.FromBytes(file0Size), BundleByteOffset.FromOffset(0), FileLastModifiedUtc.FromUnixSeconds(1_700_000_000)),
+            new FileEntry(FileIndex.FromInt(1), SanitizedRelativePath.Parse("data/dataset.bin"), FileSizeBytes.FromBytes(file1Size), BundleByteOffset.FromOffset(file0Size), FileLastModifiedUtc.FromUnixSeconds(1_700_000_000))
+        ];
+
+        ChunkSizeBytes chunkSize = ChunkSizeBytes.FromBytes(256 * 1024);
+        int totalBytes = file0Size + file1Size;
+        int totalChunks = (totalBytes + chunkSize.Bytes - 1) / chunkSize.Bytes;
+
+        // Build leaf hashes
+        byte[] chunk0Bytes = new byte[chunkSize.Bytes];
+        file0Bytes.CopyTo(chunk0Bytes, 0);
+        Array.Copy(file1Bytes, 0, chunk0Bytes, file0Size, chunkSize.Bytes - file0Size);
+
+        List<ChunkHash> leafHashes = [MerkleTreeBuilder.HashLeaf(chunk0Bytes)];
+        for (int c = 1; c < totalChunks; c++)
+        {
+            int offsetInBundle = c * chunkSize.Bytes;
+            int len = Math.Min(chunkSize.Bytes, totalBytes - offsetInBundle);
+            byte[] cBytes = new byte[len];
+            Array.Copy(file1Bytes, offsetInBundle - file0Size, cBytes, 0, len);
+            leafHashes.Add(MerkleTreeBuilder.HashLeaf(cBytes));
+        }
+
+        MerkleTreeIndex merkleTree = MerkleTreeBuilder.BuildFromLeaves(leafHashes);
+        TransferManifest manifest = TransferManifest.Create(sessionId, RootBundleName.Parse("Bundle"), chunkSize, merkleTree, entries);
+
+        // Bob accepts ONLY File 0 (docs/readme.txt)
+        TransferSession bobSession = TransferSession.CreateIncomingStaged(sessionId, initiatorId, manifest, SeedRatio.Zero, _clock);
+        bobSession.AcceptTransfer(SelectedFileIndices.FromIndices([FileIndex.FromInt(0)], manifest.TotalFiles), _clock);
+        bobSession.RegisterSwarmMember(charlieId, Bitfield.Empty(manifest.TotalChunks), _clock);
+
+        RootDirectoryPath bobRoot = RootDirectoryPath.Parse(@"C:\Bob");
+
+        // Bob receives Chunk 0 (which spans both files)
+        DomainResult assembleResult = await _assembler.AssembleChunkAsync(
+            bobSession,
+            bobRoot,
+            ChunkIndex.FromInt(0),
+            PlaintextChunkData.FromBytes(chunk0Bytes),
+            _clock);
+
+        assembleResult.IsSuccess.Should().BeTrue();
+
+        // Verify Bob's disk storage: file 0 exists, file 1 does NOT exist on disk
+        ResolvedFilePath file0Path = ResolvedFilePath.Resolve(bobRoot, entries[0].RelativePath);
+        ResolvedFilePath file1Path = ResolvedFilePath.Resolve(bobRoot, entries[1].RelativePath);
+        _fileStorage.GetFileBytes(file0Path).Should().NotBeNull();
+        _fileStorage.GetFileBytes(file0Path)!.Should().Equal(file0Bytes);
+        _fileStorage.GetFileBytes(file1Path).Should().BeNull();
+
+        // Charlie requests Chunk 0 from Bob
+        FakeTransferStream stream = new();
+        TransferKey key = TransferKey.Generate();
+        BaseNonce baseNonce = BaseNonce.Generate();
+
+        DomainResult serveResult = await _coordinator.HandleRequestChunkAsync(
+            bobSession,
+            charlieId,
+            new RequestChunkFrame(ChunkIndex.FromInt(0)),
+            stream,
+            _fileStorage,
+            bobRoot,
+            key,
+            baseNonce);
+
+        serveResult.IsSuccess.Should().BeTrue();
+        stream.SentFrames.Should().ContainSingle(f => f is ChunkDataFrame);
+
+        ChunkDataFrame sentFrame = (ChunkDataFrame)stream.SentFrames.Single(f => f is ChunkDataFrame);
+        sentFrame.ChunkIndex.Value.Should().Be(0);
+
+        // Verify Charlie can decrypt and verify Merkle leaf hash of Bob's seeded chunk
+        int ptLen = sentFrame.Data.Length - ChunkCryptoService.TagSizeBytes;
+        byte[] decrypted = new byte[ptLen];
+        ChunkCryptoService.DecryptChunkInto(sentFrame.Data.Span, key, baseNonce, sentFrame.ChunkIndex, decrypted);
+
+        decrypted.Should().Equal(chunk0Bytes);
+        manifest.MerkleTree.VerifyLeaf(sentFrame.ChunkIndex, decrypted).Should().BeTrue();
+    }
 }

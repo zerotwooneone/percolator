@@ -17,7 +17,7 @@ public sealed record TransferSessionReadModel(
     TotalBundleBytes UploadedBytes,
     SeedRatio CurrentSeedRatio,
     SeedRatio TargetSeedRatio,
-    ChunkCount CompletedChunks,
+    CompletedChunkCount CompletedChunks,
     ChunkCount TotalChunks,
     TransferBandwidth DownloadSpeed,
     TransferBandwidth UploadSpeed,

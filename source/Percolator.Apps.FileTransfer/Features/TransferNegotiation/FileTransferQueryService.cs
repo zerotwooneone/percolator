@@ -81,7 +81,7 @@ public sealed class FileTransferQueryService : IFileTransferQueryService
             session.UploadedBytes,
             session.CurrentSeedRatio,
             session.TargetSeedRatio,
-            ChunkCount.FromInt(completedChunks),
+            CompletedChunkCount.FromInt(completedChunks),
             session.Manifest.TotalChunks,
             TransferBandwidth.FromBytesPerSecond(0),
             TransferBandwidth.FromBytesPerSecond(0),

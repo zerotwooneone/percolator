@@ -301,10 +301,12 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         if (acceptResult.IsFailure)
             return acceptResult;
 
-        // Register sender in local swarm roster with full bitfield so we can schedule chunks from sender
-        session.RegisterSwarmMember(session.InitiatorId, Bitfield.Full(session.Manifest.TotalChunks), _clock);
-        session.RecordPeerChokingUs(session.InitiatorId, PeerChokeStatus.Unchoked);
-        session.SetWeChokingPeer(session.InitiatorId, PeerChokeStatus.Unchoked);
+        session.RegisterSwarmMember(
+            session.InitiatorId,
+            Bitfield.Full(session.Manifest.TotalChunks),
+            _clock,
+            peerChokingUs: PeerChokeStatus.Unchoked,
+            weChokingPeer: PeerChokeStatus.Unchoked);
 
         // Immediate Finalization for Zero-Byte or Already-Verified Resumed Files
         foreach (FileIndex idx in chosenFiles.Indices)

@@ -163,6 +163,7 @@ public sealed class InMemoryDesktopFileStorage : IDesktopFileStorage
     public TotalBundleBytes? LastCheckedBytes { get; private set; }
     public List<ResolvedFilePath> FinalizedFiles { get; } = [];
     public Dictionary<string, byte[]> FilesOnDisk { get; } = [];
+    private readonly Dictionary<(TransferSessionId, ChunkIndex, FileIndex), byte[]> _boundaryParts = new();
 
     public void StageFile(ResolvedFilePath path, byte[] contents)
     {
@@ -261,6 +262,40 @@ public sealed class InMemoryDesktopFileStorage : IDesktopFileStorage
     {
         LastCheckedBytes = requiredBytes;
         return ValueTask.FromResult(DiskSpaceResult);
+    }
+
+    public ValueTask WriteBoundarySliceAsync(TransferSessionId sessionId, ChunkIndex chunkIndex, FileIndex fileIndex, PlaintextChunkData data, CancellationToken ct = default)
+    {
+        lock (_sync)
+        {
+            _boundaryParts[(sessionId, chunkIndex, fileIndex)] = data.Span.ToArray();
+        }
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask<PlaintextChunkData?> ReadBoundarySliceAsync(TransferSessionId sessionId, ChunkIndex chunkIndex, FileIndex fileIndex, TransferByteLength length, CancellationToken ct = default)
+    {
+        lock (_sync)
+        {
+            if (_boundaryParts.TryGetValue((sessionId, chunkIndex, fileIndex), out var bytes))
+            {
+                return ValueTask.FromResult<PlaintextChunkData?>(PlaintextChunkData.FromBytes(bytes));
+            }
+            return ValueTask.FromResult<PlaintextChunkData?>(null);
+        }
+    }
+
+    public ValueTask DeleteBoundaryPartsAsync(TransferSessionId sessionId, CancellationToken ct = default)
+    {
+        lock (_sync)
+        {
+            var keysToRemove = _boundaryParts.Keys.Where(k => k.Item1 == sessionId).ToList();
+            foreach (var key in keysToRemove)
+            {
+                _boundaryParts.Remove(key);
+            }
+        }
+        return ValueTask.CompletedTask;
     }
 }
 

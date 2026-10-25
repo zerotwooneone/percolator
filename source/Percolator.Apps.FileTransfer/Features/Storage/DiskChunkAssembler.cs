@@ -13,7 +13,7 @@ public sealed class DiskChunkAssembler
 
     public DiskChunkAssembler(IDesktopFileStorage fileStorage)
     {
-        _fileStorage = fileStorage;
+        _fileStorage = fileStorage ?? throw new ArgumentNullException(nameof(fileStorage));
     }
 
     public async ValueTask<DomainResult> AssembleChunkAsync(
@@ -37,19 +37,23 @@ public sealed class DiskChunkAssembler
             chunkIndex,
             ChunkByteLength.FromBytes(plaintextData.Length));
 
-        // Write each verified slice to target file on disk and finalize any file that just completed
+        // Write each verified slice to target file on disk (or boundary part storage in the file storage adapter for unselected files)
         foreach (FileChunkSlice slice in slices)
         {
+            ReadOnlyMemory<byte> sliceMemory = plaintextData.Memory.Slice(slice.BufferOffset, slice.SliceLength.Bytes);
+            PlaintextChunkData sliceData = PlaintextChunkData.FromMemory(sliceMemory);
+
             if (session.SelectedFiles != null && !session.SelectedFiles.Contains(slice.FileIndex))
             {
+                // Boundary slice for unselected file: delegate caching to storage adapter to enable future chunk seeding without polluting user folders
+                await _fileStorage.WriteBoundarySliceAsync(session.Id, chunkIndex, slice.FileIndex, sliceData, ct);
                 continue;
             }
 
             FileEntry entry = session.Manifest.Files[slice.FileIndex.Value];
             ResolvedFilePath targetFile = ResolvedFilePath.Resolve(rootPath, entry.RelativePath);
 
-            ReadOnlyMemory<byte> sliceMemory = plaintextData.Memory.Slice(slice.BufferOffset, slice.SliceLength.Bytes);
-            await _fileStorage.WriteChunkAsync(targetFile, slice.OffsetInFile, PlaintextChunkData.FromMemory(sliceMemory), ct);
+            await _fileStorage.WriteChunkAsync(targetFile, slice.OffsetInFile, sliceData, ct);
 
             if (session.IsFileComplete(entry))
             {

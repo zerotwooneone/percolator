@@ -112,8 +112,18 @@ public sealed class TransferSessionCoordinator
             foreach (FileChunkSlice slice in slices)
             {
                 FileEntry entry = session.Manifest.Files[slice.FileIndex.Value];
-                ResolvedFilePath filePath = ResolvedFilePath.Resolve(rootPath, entry.RelativePath);
-                PlaintextChunkData sliceData = await fileStorage.ReadChunkAsync(filePath, slice.OffsetInFile, slice.SliceLength, ct);
+                PlaintextChunkData? sliceData = null;
+
+                if (session.SelectedFiles != null && !session.SelectedFiles.Contains(slice.FileIndex))
+                {
+                    sliceData = await fileStorage.ReadBoundarySliceAsync(session.Id, chunkIdx, slice.FileIndex, slice.SliceLength, ct);
+                }
+
+                if (sliceData == null)
+                {
+                    ResolvedFilePath filePath = ResolvedFilePath.Resolve(rootPath, entry.RelativePath);
+                    sliceData = await fileStorage.ReadChunkAsync(filePath, slice.OffsetInFile, slice.SliceLength, ct);
+                }
                 sliceData.Span.CopyTo(rentedPlaintext.AsSpan(slice.BufferOffset, slice.SliceLength.Bytes));
             }
 
