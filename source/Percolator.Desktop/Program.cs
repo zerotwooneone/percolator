@@ -1,5 +1,6 @@
 using System;
 using Avalonia;
+using R3;
 
 namespace Percolator.Desktop;
 
@@ -20,5 +21,6 @@ internal static class Program
             .WithDeveloperTools()
 #endif
             .WithInterFont()
-            .LogToTrace();
+            .LogToTrace()
+            .UseR3();
 }
