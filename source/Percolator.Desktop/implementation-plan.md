@@ -6,19 +6,35 @@
 
 ### 1.1 Architectural & Security Invariants
 
-1. **Total Network Stealth Startup Invariant**:
+1. **Two-Stage Container Architecture & Zero-Repository Pre-Unlock Gate**:
+   * **Unified Encrypted SQLite (`percolator.db`)**: All application data resides in a single database encrypted with SQLCipher AES-256-CBC.
+   * **Bootstrap Container (Root DI)**: On startup, `App.axaml.cs` builds a lightweight container hosting only core presentation and bootstrap infrastructure (`WindowManager`, `WindowHandoffCoordinator`, `ICryptoEngine`, `SystemDateTimeProvider`, and `IDatabaseUnlockCoordinator`). **Zero SQLite DbContexts, repositories, or background sync workers exist in memory.**
+   * **Mandatory Unlock First Screen (`UnlockWindow`)**: The initial window presented on launch.
+     * *First-Time Setup*: Guides user to create a master password. An empty password (`""`) is supported, but triggers an explicit UI confirmation warning before creating the database.
+     * *Subsequent Launches (Explicit Unlock)*: Always presents an empty password field requiring the user to explicitly click "Unlock" (even if the master password is blank).
+   * **Canary Verification & Post-Unlock Migration**:
+     * Derives a 256-bit key using Argon2id (3 iterations, 64 MB RAM, 4 lanes).
+     * Validates passphrase with canary query `SELECT count(*) FROM sqlite_master;`.
+     * On success, pending EF Core / SQLite migrations (`Database.MigrateAsync()`) execute immediately before any repositories are resolved.
+   * **Authenticated Host (`IHost`)**:
+     * Instantiates a child `IHost` containing `PercolatorDbContext`, all 57 repositories/query services, and background workers.
+     * `await session.StartAsync()` automatically discovers and launches all registered `IHostedService` instances.
+   * **Window Handoff & Relocking**:
+     * `UnlockWindow` closes and `MainWindow` is resolved from `session.Services` and shown.
+     * Locking triggers graceful `session.StopAsync()`, flushes connection pools via `SqliteConnection.ClearAllPools()`, zeroizes the key span via `CryptographicOperations.ZeroMemory`, disposes the authenticated `IHost`, closes `MainWindow`, and re-opens `UnlockWindow`.
+2. **Total Network Stealth Startup Invariant**:
    * On launch, the application operates in **total network stealth**—zero sockets bound, zero UDP DHT packets, zero STUN probes, and zero gRPC listeners active.
-   * Sockets bind **only after** the user selects and activates at least one cryptographic identity in `IdentityGateWindow`.
+   * Sockets bind **only after** database unlock and subsequent identity selection in `IdentityGateWindow`.
    * Session lock or deactivating all identities immediately terminates all listening sockets and tears down active network sessions, returning the application to stealth mode.
-2. **Domain Purity & Presentation Model Isolation**:
+3. **Domain Purity & Presentation Model Isolation**:
    * `Percolator.Domain` is strictly isolated from UI dependencies (zero UI interfaces, zero dispatcher calls, zero snapshotting methods on domain entities).
    * All reactive UI models (`ChatMessageModel`, `PeerSessionSummaryModel`, `DiscoveredPeerModel`, `FileTransferTaskModel`, `TimelineCardModel`) live exclusively in `Percolator.Desktop.Features.*.Models`.
    * Presentation models implement `.ToSnapshot()` returning immutable C# `record` types for lock-free background reads, caching, and export.
-3. **State Ownership Boundary (Stateful UI Services vs. Local ViewModels)**:
+4. **State Ownership Boundary (Stateful UI Services vs. Local ViewModels)**:
    * **Local State (Owned by ViewModels)**: Transient view state (input text, validation errors, accordion expansion, dialog visibility, scroll offsets) is private to the ViewModel.
    * **Shared State (Owned by Stateful UI Services)**: Cross-cutting application state (active identities, peer sessions, message queues, DHT discovery tables, swarm file transfers) is owned exclusively by singleton/scoped **Stateful UI Services** (`IdentityStateService`, `PeerConnectionStateService`, `ChatStateService`, `DiscoveryStateService`, `FileTransferStateService`, `TimelineCardStateService`).
    * Stateful UI Services are **100% UI-agnostic**—they operate on background worker threads, guard mutations with concurrency gates (`SemaphoreSlim`), and expose canonical `ObservableList<T>` / `ObservableDictionary<TKey, TValue>` collections.
-4. **Strict R3 Reactive Programming Rules**:
+5. **Strict R3 Reactive Programming Rules**:
    * **Avalonia Dispatcher Integration**: Configured in `Program.cs` via `.UseR3()`, wiring `AvaloniaDispatcherTimeProvider` and `AvaloniaDispatcherFrameProvider` into `ObservableSystem`.
    * **Filter Early, Marshal Late**: Perform filtering, deduplication, debounce, and sorting on background worker threads; only marshal to the UI thread at the terminal step via `.ObserveOn(AvaloniaSynchronizationContext.Current)`.
    * **Throttle the Firehose**: High-frequency streaming events (network packet rates, DHT search hops, file piece bitfields) must be sampled (`.Sample(TimeSpan.FromMilliseconds(16), _timeProvider)`) to protect the UI thread from 60fps+ inundation.
@@ -27,13 +43,13 @@
      ```csharp
      _view.ObserveRemove().Subscribe(e => e.Value.View.Dispose()).AddTo(ref Bag);
      ```
-5. **Deterministic Virtualized Time Invariant**:
+6. **Deterministic Virtualized Time Invariant**:
    * Replace all wall-clock `Task.Delay` and real-time timers with `System.TimeProvider`.
    * Enables instantaneous, deterministic unit and UI testing via `FakeTimeProvider` without wall-clock sleep delays.
-6. **LRU-Cached DI Session Scoping (`SessionScopeFactory`)**:
+7. **LRU-Cached DI Session Scoping (`SessionScopeFactory`)**:
    * To prevent memory bloat while preserving uncommitted message drafts and scroll positions, active conversation scopes are managed by an LRU cache (capacity 3–5).
    * Navigating away from a chat keeps its child `IServiceScope` hot in memory; opening a 6th conversation evicts and disposes the least recently used scope.
-7. **Reactive Debounced Reload Coordination (`ReloadCoordinator`)**:
+8. **Reactive Debounced Reload Coordination (`ReloadCoordinator`)**:
    * Network and database sync bursts are coalesced using debounced triggers (`50ms`) combined with `AwaitOperation.Drop` to guarantee that while a read query is in-flight, redundant requests are dropped and the latest state is captured in a single roundtrip.
 
 ---
@@ -44,6 +60,8 @@
 |---|---|---|
 | **Presentation Framework** | Avalonia UI 11.2 | Hardware-accelerated, cross-platform XAML engine |
 | **Theme & Controls** | FluentAvaloniaUI 2.1 | Fluent Design System: Win11 NavigationView, ContentDialog, CommandBar |
+| **Database Security Gate** | `IDatabaseUnlockCoordinator` | SQLCipher master key derivation, canary verification, and migration |
+| **Session Lifecycle** | `IWindowHandoffCoordinator` | Orchestrates two-stage DI transition, window swap, and secure relock |
 | **Privacy & Security** | `INetworkStealthGate` | Gated listener activation ensuring zero open ports until identity selection |
 | **Iconography** | Segoe Fluent Icons + FiraCode Nerd Font | Fluent icons for general UX; embedded Nerd Font for P2P mesh & route telemetry |
 | **Custom UI Primitives** | `PeerAvatar`, `StatusChip`, `Badge`, `ChatComposer`, `PieceMapControl` | Reusable custom controls for peer presence, route badges, notification pulse |
@@ -52,7 +70,7 @@
 | **MVVM Tooling** | CommunityToolkit.Mvvm 8.4 | Source-generated `[ObservableProperty]`, `[RelayCommand]` |
 | **Reactive Pipelines** | R3 (v1.3.1) + R3Extensions.Avalonia (v1.3.1) | Next-generation reactive pipelines and Avalonia Dispatcher providers |
 | **Collection Sync** | ObservableCollections.R3 (v3.3.4) | Synchronized collection projections and free-threaded `ObservableList<T>` |
-| **Hosting & DI** | `Microsoft.Extensions.Hosting` | Dependency injection, configuration, logging, and application lifecycle |
+| **Hosting & DI** | `Microsoft.Extensions.Hosting` | Two-stage dependency injection (`BootstrapHost` vs. `AuthenticatedHost`) |
 | **Domain & App Core** | `Percolator.Domain`, `Percolator.Application`, `Percolator.PluginSdk` | Core messaging, cryptographic identities, session managers |
 | **App Plugins** | `Percolator.Apps.Chat`, `Percolator.Apps.Discovery`, `Percolator.Apps.FileTransfer` | Modular P2P feature applications |
 
@@ -71,9 +89,13 @@ Percolator.Desktop/
 │   ├── Converters/                       # IdentityHashToBrushConverter, RouteToColorConverter
 │   ├── Navigation/                       # INavigationService.cs, NavigationService.cs, PageViewModelFactory
 │   ├── Services/                         # NetworkStealthGate, DesktopIdentityKeyStore, SystemDateTimeProvider
-│   └── Windowing/                        # IWindowManager.cs, WindowManager.cs, IDialogWindow.cs
+│   └── Windowing/                        # IWindowManager.cs, WindowManager.cs, IWindowHandoffCoordinator.cs, WindowHandoffCoordinator.cs, IDialogWindow.cs
 ├── Features/
-│   ├── IdentityGate/                     # Total Network Stealth Gatekeeper (First Screen)
+│   ├── Unlock/                           # Database Decryption & Master Passphrase Gate (First Screen)
+│   │   ├── Models/                       # UnlockStateModel.cs
+│   │   ├── ViewModels/                   # UnlockViewModel.cs
+│   │   └── Views/                        # UnlockWindow.axaml
+│   ├── IdentityGate/                     # Total Network Stealth Gatekeeper
 │   │   ├── Models/                       # SelectableIdentityModel.cs
 │   │   ├── ViewModels/                   # IdentityGateViewModel.cs, CreateIdentityDialogViewModel.cs
 │   │   └── Views/                        # IdentityGateWindow.axaml, CreateIdentityDialog.axaml
@@ -118,12 +140,13 @@ Percolator.Desktop/
 └── Percolator.Desktop.csproj
 ```
 
----\n
+---
+
 ## 4. Sequential Implementation Chunks
 
 ```mermaid
 flowchart TD
-    C1["Chunk 1: Core Shell, Navigation & Theme Infrastructure"] --> C2["Chunk 2: Multi-Persona Identity & Stealth Gate"]
+    C1["Chunk 1: Core Shell, Unlock Gate & Theme Infrastructure"] --> C2["Chunk 2: Multi-Persona Identity & Stealth Gate"]
     C2 --> C3["Chunk 3: Peer Connections, Handshake Lifecycle & Sidebar"]
     C3 --> C4["Chunk 4: Real-Time Messaging & Chat Experience"]
     C3 --> C5["Chunk 5: Sovereign Peer Discovery & Swarm Telemetry"]
@@ -136,9 +159,9 @@ flowchart TD
 
 ---
 
-### Chunk 1: Core Shell, Navigation Framework & Theme Infrastructure
+### Chunk 1: Core Shell, Unlock Gate, Navigation Framework & Theme Infrastructure
 
-**Goal**: Establish the cross-platform application shell, robust navigation routing between views with cached pages, and FluentAvalonia theme switching.
+**Goal**: Establish the cross-platform application shell, theme switching, the mandatory pre-unlock `UnlockWindow`, the two-stage DI composition root, and the `WindowHandoffCoordinator`.
 
 #### Tasks
 - [x] Configure `Program.cs` with `.UseR3()`, `App.axaml`, and FluentAvalonia theme.
@@ -147,6 +170,26 @@ flowchart TD
 - [x] Implement `StatusChip` and `PeerAvatar` controls with presence dot and hash-color palette.
 - [x] Implement `Badge` attached behavior (notification count & pulse animation).
 - [x] Implement `IWindowManager` with single-instance activation and child DI scope lifecycle.
+- [ ] Implement `Features/Unlock/UnlockWindow.axaml` and `Features/Unlock/UnlockViewModel.cs`:
+  - Interacts with `IDatabaseUnlockCoordinator`:
+    - Calls `DetermineStatusAsync()` on load to toggle between First-Launch Setup and Subsequent Unlock modes.
+    - Password entry field with show/hide password toggle.
+    - Explicit blank password warning: If user leaves password empty and clicks \"Unlock\" / \"Set Password\", present an explicit confirmation dialog (`ContentDialog` alert: *\"Using an empty password leaves your local SQLite database unencrypted at rest. Are you sure you want to proceed?\"*).
+    - Asynchronous unlock execution with loading spinner (`IsBusy` state).
+    - Inline error alert displaying validation failures (e.g., *\"Invalid passphrase: could not decrypt percolator.db\"*).
+    - On success, delegates to `IWindowHandoffCoordinator.TransitionToAuthenticatedAsync(session)`.
+- [ ] Implement `IWindowHandoffCoordinator` & `WindowHandoffCoordinator`:
+  - `Task TransitionToAuthenticatedAsync(IAuthenticatedSession session)`:
+    - Calls `await session.StartAsync()` (launching all registered `IHostedService` instances).
+    - Resolves `MainWindow` from `session.Services`.
+    - Updates `ApplicationLifetime.MainWindow = mainWindow`, displays `mainWindow.Show()`, and closes `unlockWindow`.
+  - `Task LockSessionAsync()`:
+    - Deactivates network listeners via `INetworkStealthGate.DeactivateAsync()`.
+    - Awaits `IDatabaseUnlockCoordinator.LockAsync()` (stopping `IHost`, clearing SQLite pools, zeroizing key span, disposing host).
+    - Closes `MainWindow`, instantiates a fresh `UnlockWindow` from the root bootstrap container, and displays it.
+- [ ] Configure Two-Stage DI Composition in `App.axaml.cs`:
+  - Build `BootstrapContainer` containing logging, crypto engine, `SystemDateTimeProvider`, `WindowManager`, `WindowHandoffCoordinator`, `IDatabaseUnlockCoordinator`, and `UnlockViewModel`.
+  - Configure `OnFrameworkInitializationCompleted()` to instantiate and display `UnlockWindow` as the initial application window.
 - [ ] Implement `INavigationService` and `NavigationService`:
   - Target interface in `Common/Navigation/INavigationService.cs`:
     - `void NavigateTo(string pageKey, object? parameter = null);`
@@ -162,18 +205,19 @@ flowchart TD
 - [ ] Refactor `MainWindow.axaml` & `MainWindowViewModel.cs`:
   - Bind `NavigationView.SelectedItem` cleanly to `NavigationService`.
   - Wire header status chip with live identity count and network state.
-  - Add "Lock Session" action with confirmation flyout.
+  - Add `LockSessionCommand` bound to the header lock button, delegating to `IWindowHandoffCoordinator.LockSessionAsync()`.
 
 #### Verification
-- App boots cleanly in dark and light themes without missing resource warnings.
-- Switching tabs between Navigation items transitions `Frame.Content` smoothly without memory leaks.
-- Clicking "Lock Session" triggers session teardown and returns to the gatekeeper.
+- Launching the app presents `UnlockWindow` without opening SQLite handles or binding network ports.
+- Entering an incorrect passphrase displays an error without crashing.
+- Entering the correct passphrase unlocks the database, runs migrations, launches `IHostedService` workers, opens `MainWindow`, and closes `UnlockWindow`.
+- Clicking "Lock" in `MainWindow` executes complete teardown (stops host, clears pools, zeroizes key) and returns to `UnlockWindow`.
 
 ---
 
 ### Chunk 2: Multi-Persona Identity Management & Stealth Mode Gate
 
-**Goal**: Deliver the privacy gatekeeper ensuring total network stealth before identity activation, multi-persona selection, encrypted vault unlocking, and identity key creation.
+**Goal**: Deliver the privacy gatekeeper ensuring total network stealth before identity activation, multi-persona selection, encrypted vault unlocking, and identity key creation (operating within the authenticated container).
 
 #### Tasks
 - [x] Implement `NetworkStealthGate` ensuring all network listener sockets remain unbound until identity confirmation.
@@ -185,7 +229,7 @@ flowchart TD
   - Provides thread-safe lookup for currently active signing and prekey credentials.
 - [ ] Implement `IIdentityStateService` / `IdentityStateService`:
   - Manages cached local identity profiles and cryptographic key metadata.
-  - Synchronizes with `IIdentityProfileRepository` and `ILocalIdentityKeyStore`.
+  - Synchronizes with `IIdentityProfileRepository` and `ILocalIdentityKeyStore` within the decrypted database.
   - Exposes `ObservableList<SelectableIdentityModel> AvailableIdentities`.
 - [ ] Refactor `CreateIdentityDialog.axaml` and `CreateIdentityDialogViewModel.cs`:
   - Dedicated modal dialog spawned via `IWindowManager.ShowDialogAsync<CreateIdentityDialogViewModel, PublicIdentityId?>()`.
@@ -220,8 +264,7 @@ flowchart TD
   - Manages child `IServiceScope` instances for active conversation tabs.
   - LRU cache with capacity = 5.
   - Evicts and disposes the least recently used `IServiceScope` and its `ChatViewModel` when capacity is exceeded.
-- [ ] `ConnectionManagementDialog.axaml` & `ConnectionManagementDialogViewModel.cs`:
-  - Out-of-band invitation token generation and display (Base64 string + QR code render).
+- [ ] `ConnectionManagementDialog.axaml` & `ConnectionManagementDialogViewModel.cs`:\n  - Out-of-band invitation token generation and display (Base64 string + QR code render).
   - Invitation token decoder importing peer identity keys and route descriptors.
   - Multi-route connection initiator: Direct IP:Port vs. Relayed route via sovereign relay selection.
 - [ ] `PendingHandshakesMenuView.axaml` & `PendingHandshakesMenuViewModel.cs`:
@@ -263,7 +306,7 @@ flowchart TD
   - Virtualized message list using `ListBox` / `ItemsRepeater` with smooth scroll-to-bottom on new messages.
   - Asymmetric message bubbles: Right-aligned accent bubble for outgoing messages; left-aligned surface bubble for incoming messages.
   - Message status icons: Single tick (Sent), Double tick (Delivered), Colored double tick (Read), Exclamation (Failed).
-  - Message edit inline editor and tombstone ("This message was deleted") placeholder.
+  - Message edit inline editor and tombstone (\"This message was deleted\") placeholder.
   - Reaction summary pills with click-to-toggle reaction.
   - Synchronous projection pipeline:
     ```csharp
@@ -297,8 +340,8 @@ flowchart TD
   - Live candidate peer cards with:
     - Peer public key preview and avatar color hash.
     - NAT status badge (`DirectPublic` = Green, `StunTraversed` = Blue, `RelayedOnly` = Orange).
-    - Latency meter with `NerdIcon GlyphType="Latency"`.
-    - One-click "Connect / Handshake" action button triggering Step 2 on-demand prekey retrieval.
+    - Latency meter with `NerdIcon GlyphType=\"Latency\"`.
+    - One-click \"Connect / Handshake\" action button triggering Step 2 on-demand prekey retrieval.
   - Blinded Rendezvous Panel:
     - Current 24-hr UTC epoch countdown timer.
     - Matched sovereign contacts count.
@@ -306,7 +349,7 @@ flowchart TD
 
 #### Verification
 - High-frequency discovery stream (100 candidates/sec) is sampled down to 60fps without freezing the UI thread.
-- Clicking "Connect" on a candidate invokes `INearbyPeerDiscoveryWorkflow` to retrieve the Signed PreKey and initiate the X3DH handshake.
+- Clicking \"Connect\" on a candidate invokes `INearbyPeerDiscoveryWorkflow` to retrieve the Signed PreKey and initiate the X3DH handshake.
 - Latency updates update the UI reactively via `BindableReactiveProperty`.
 
 ---
@@ -340,7 +383,7 @@ flowchart TD
 #### Verification
 - Dropping a 50 MB file onto `FileTransferView` creates a transfer manifest and stages the upload task.
 - Accepting an inbound file offer creates the zero-byte target file and updates `PieceMapControl` dynamically as chunks arrive.
-- Completed transfers rename `.percolator-part` staging files to target file names atomically and show "Completed" status.
+- Completed transfers rename `.percolator-part` staging files to target file names atomically and show \"Completed\" status.
 
 ---
 
@@ -382,7 +425,7 @@ flowchart TD
 #### Tasks
 - [ ] System Tray Integration (`TrayIcon`):
   - Cross-platform system tray icon configured in `App.axaml`.
-  - Context menu: "Open Percolator", "Lock Session (Stealth)", "Exit".
+  - Context menu: \"Open Percolator\", \"Lock Session (Stealth)\", \"Exit\".
   - Window behavior: Minimize-to-tray on close when enabled in settings.
 - [ ] Desktop Notifications:
   - Cross-platform in-app notification toasts (`FluentAvalonia.UI.Controls.InfoBar` banner or notification popup).
@@ -395,7 +438,7 @@ flowchart TD
   - Persist window position, width, height, and maximized state across restarts in encrypted local settings.
 
 #### Verification
-- Closing window with "Minimize to tray" enabled hides window to notification area without terminating background services.
+- Closing window with \"Minimize to tray\" enabled hides window to notification area without terminating background services.
 - Clicking tray icon restores window to foreground.
 - Inbound chat message triggers OS notification toast when window is not focused.
 
@@ -409,6 +452,15 @@ flowchart TD
 - [ ] Scaffold `Percolator.Desktop.Tests` project:
   - Package references: `Avalonia.Headless.XUnit`, `Microsoft.NET.Test.Sdk`, `xunit`, `FluentAssertions`, `NSubstitute`, `R3`.
   - Headless test bootstrap: `[assembly: AvaloniaTestApplication(typeof(TestAppBuilder))]`.
+- [ ] Unlock & Two-Stage Lifecycle Headless Tests:
+  - Test `UnlockViewModel`:
+    - Assert `DetermineStatusAsync` correctly toggles `Uninitialized` vs `Locked` modes.
+    - Assert blank password entry prompts confirmation dialog.
+    - Assert invalid passphrase sets error message without crashing.
+    - Assert valid passphrase calls `IWindowHandoffCoordinator.TransitionToAuthenticatedAsync`.
+  - Test `WindowHandoffCoordinator`:
+    - Assert `TransitionToAuthenticatedAsync` awaits `session.StartAsync()`, opens `MainWindow`, and closes `UnlockWindow`.
+    - Assert `LockSessionAsync` awaits `coordinator.LockAsync()`, closes `MainWindow`, and opens fresh `UnlockWindow`.
 - [ ] Stealth Mode & Network Gate Verification Tests:
   - Assert zero network sockets are initialized upon test app startup.
   - Assert `INetworkStealthGate.ActivateAsync` is called only after `IdentityGateViewModel.ActivateSessionCommand.Execute()`.
@@ -430,17 +482,21 @@ flowchart TD
 
 ## 5. Port-to-Adapter Realization Matrix
 
-This matrix maps all 48 infrastructure ports and 6 desktop adapters across their owning chunks, ensuring zero architectural disconnects between domain, infrastructure, plugins, and UI.
+This matrix maps all infrastructure ports and desktop adapters across their owning chunks, ensuring zero architectural disconnects between domain, infrastructure, plugins, and UI.
 
 | Interface / Port | Layer / Source | Concrete Realization / Adapter | Chunk |
 | :--- | :--- | :--- | :--- |
+| `IDatabaseUnlockCoordinator` | Application Ports | `SqlCipherDatabaseUnlockCoordinator` (Infrastructure) | Chunk 1 |
+| `IAuthenticatedSession` | Application Ports | `AuthenticatedSession` (Infrastructure) | Chunk 1 |
+| `IMasterKeyProtector` | Application Ports | `MasterKeyProtector` (Infrastructure) | Chunk 1 |
+| `IWindowHandoffCoordinator` | Desktop Windowing | `WindowHandoffCoordinator` | Chunk 1 |
+| `INavigationService` | Desktop Shell | `NavigationService` | Chunk 1 |
+| `IWindowManager` | Desktop Shell | `WindowManager` | Chunk 1 |
+| `IDialogWindow<TResult>` | Desktop Shell | Implemented by dialog views | Chunk 1 |
 | `INetworkStealthGate` | Desktop Core | `NetworkStealthGate` | Chunk 2 |
 | `IDesktopIdentityKeyStore` | Desktop Core | `DesktopLocalIdentityKeyStore` | Chunk 2 |
 | `IIdentityProfileRepository` | Domain Identities | `DesktopIdentityProfileRepository` (SQLite) | Chunk 2 |
 | `ILocalIdentityKeyStore` | Domain Identities | `DesktopLocalIdentityKeyStore` (SQLite / DPAPI) | Chunk 2 |
-| `INavigationService` | Desktop Shell | `NavigationService` | Chunk 1 |
-| `IWindowManager` | Desktop Shell | `WindowManager` | Chunk 1 |
-| `IDialogWindow<TResult>` | Desktop Shell | Implemented by dialog views | Chunk 1 |
 | `IPeerConnectionStateService` | Desktop Sessions | `PeerConnectionStateService` | Chunk 3 |
 | `IPeerContactQueryService` | Application Delivery | `SqlPeerContactQueryService` (Infrastructure) | Chunk 3 |
 | `IPendingHandshakeRepository`| Domain Delivery | `SqlitePendingHandshakeRepository` | Chunk 3 |

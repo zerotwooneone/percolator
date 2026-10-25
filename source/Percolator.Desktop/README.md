@@ -15,19 +15,40 @@
 
 ## 2. Core Architectural & Privacy Invariants
 
-### 2.1 Total Network Stealth Startup Invariant
-Privacy and zero unauthorized disclosure are foundational requirements of the client:
+### 2.1 Two-Stage Container Lifecycle & Database Encryption Gate
+Privacy and cryptographic isolation at rest are foundational to the client:
+* **Unified Encrypted SQLite (`percolator.db`)**: All application data (identities, prekeys, ratchets, channels, messages, transfers, outbox) resides in a single database file encrypted with SQLCipher AES-256-CBC.
+* **Two-Stage Container Architecture**:
+  * **Bootstrap Container (Root DI)**: Configured at application startup in `App.axaml.cs`. Hosts only presentation and utility services (logging, window management, crypto engine, virtualized time, and `IDatabaseUnlockCoordinator`). **Zero SQLite DbContexts, repositories, or background sync workers exist in memory.**
+  * **Authenticated Host (Child `IHost`)**: Instantiated strictly upon successful database decryption. Hosts `PercolatorDbContext`, connection pools, all 57 domain repositories/query services, and background workers.
+* **Mandatory Initial Unlock (`UnlockWindow`)**:
+  * The first screen presented on application launch.
+  * **First-Time Setup**: If `percolator.db` does not exist, guides the user to establish a master password. A blank password (`""`) is supported, but triggers an explicit UI confirmation warning before database creation.
+  * **Subsequent Launches (Explicit Unlock)**: Always presents an empty password field requiring the user to explicitly click "Unlock" (even when configured with a blank password).
+* **Canary Verification & Schema Migration**:
+  * Password derivation runs via Argon2id (3 iterations, 64 MB RAM, 4 parallelism lanes).
+  * Key validity is verified via canary query (`SELECT count(*) FROM sqlite_master;`).
+  * On verification success, pending EF Core / SQLite migrations (`Database.MigrateAsync()`) execute immediately before any repositories are resolved.
+* **Background Worker Auto-Start**:
+  * The authenticated session encapsulates a .NET `IHost`. Calling `await session.StartAsync()` automatically discovers and starts all registered `IHostedService` implementations (message outbox dispatchers, swarm transfer workers, DHT pollers).
+* **Window Handoff**:
+  * On unlock, `UnlockWindow` closes and `MainWindow` is resolved from `session.Services` and shown.
+* **In-Session Secure Lock & Relock**:
+  * A prominent "Lock" button in the shell header allows the user to lock the session at any time.
+  * Locking performs an orderly security teardown: stops `IHost` (`IHostedService` workers terminate gracefully), drops all SQLite connection pools (`SqliteConnection.ClearAllPools()`), zeroizes the 256-bit master key span in memory via `CryptographicOperations.ZeroMemory`, disposes the authenticated `IHost`, closes `MainWindow`, and reopens `UnlockWindow` from the root bootstrap container.
+
+### 2.2 Total Network Stealth Startup Invariant
+Privacy and zero unauthorized network disclosure are strictly enforced:
 * **Zero Network Fingerprinting on Startup**: When `Percolator.Desktop` launches, **it does not bind, listen on, broadcast to, or probe any network port** (no UDP DHT packets, no STUN client probes, no gRPC listener sockets, no P2P TCP/QUIC transports). The application remains completely dark and invisible to LAN scanners, port sniffers, and WAN adversaries until identity selection.
-* **Identity Gatekeeper (`IdentityGateWindow`)**: The mandatory first screen presented on startup. Users select which local cryptographic persona(s) to activate, unlock encrypted keystores with a passphrase, or create new Ed25519/X25519 identity keypairs.
+* **Identity Selection Gate (`IdentityGateWindow`)**: Once the database is unlocked, users select which local cryptographic persona(s) to activate or create new Ed25519/X25519 identity keypairs.
 * **Gated Network Activation (`INetworkStealthGate`)**: Network subsystems, gRPC listeners, and DHT bootstrapping bind **strictly after** the user confirms identity activation.
 * **Instant Stealth Session Lock**: Locking the session or deactivating all active identities immediately terminates all listening sockets, tears down active peer streams, and returns the application to total network stealth.
 
-### 2.2 Domain Purity & UI Presentation Isolation
+### 2.3 Domain Purity & UI Presentation Isolation
 * **Strict Domain Boundary**: `Percolator.Domain` is strictly isolated from UI dependencies. It contains zero UI interfaces, zero dispatcher invocations, and zero UI-specific snapshotting or freezing methods. Domain aggregates enforce pure business rules and cryptographic transitions.
-* **Presentation-Owned Reactive Models**: All models required for UI reactivity, collection synchronization, and thread-safe binding (`ChatMessageModel`, `PeerSessionSummaryModel`, `DiscoveredPeerModel`, `FileTransferTaskModel`, `TimelineCardModel`) live exclusively in `Percolator.Desktop.Features.*.Models`.
-* **Immutable UI Presentation Snapshots**: Where background tasks (search indexing, local history caching, export) require UI state, presentation models implement `.ToSnapshot()` returning immutable C# `record` types (`ChatMessageSnapshot`, `TransferBitfieldSnapshot`), eliminating lock contention on live reactive properties.
+* **Presentation-Owned Reactive Models**: All models required for UI reactivity, collection synchronization, and thread-safe binding (`ChatMessageModel`, `PeerSessionSummaryModel`, `DiscoveredPeerModel`, `FileTransferTaskModel`, `TimelineCardModel`) live exclusively in `Percolator.Desktop.Features.*.Models`.\n* **Immutable UI Presentation Snapshots**: Where background tasks (search indexing, local history caching, export) require UI state, presentation models implement `.ToSnapshot()` returning immutable C# `record` types (`ChatMessageSnapshot`, `TransferBitfieldSnapshot`), eliminating lock contention on live reactive properties.
 
-### 2.3 State Ownership: Local ViewModel State vs. Shared UI State Services
+### 2.4 State Ownership: Local ViewModel State vs. Shared UI State Services
 * **Local State (Owned by ViewModels)**:
   * State private to a single view (e.g., composer text input, transient dialog forms, validation errors, accordion expansion, local search queries, scroll position) is authoritatively owned by the local ViewModel using `[ObservableProperty]` or `BindableReactiveProperty<T>`.
 * **Shared State (Owned by Stateful UI Services)**:
@@ -37,7 +58,7 @@ Privacy and zero unauthorized disclosure are foundational requirements of the cl
   * They execute mutations concurrently on background worker threads guarded by concurrency gates (`SemaphoreSlim`).
   * Services expose canonical `ObservableList<T>` / `ObservableDictionary<TKey, TValue>` collections and emit fine-grained mutation signals (`Observable<Unit>` or typed event streams).
 
-### 2.4 Strict MVVM & Synchronized Collection Projections
+### 2.5 Strict MVVM & Synchronized Collection Projections
 * **ViewModels as Transient Projections**: ViewModels projecting shared state are transient constructs instantiated when views open and disposed when views close.
 * **Projection Pipeline**:
   ```csharp
@@ -53,7 +74,7 @@ Privacy and zero unauthorized disclosure are foundational requirements of the cl
 * **No Manual Re-Querying**: Never subscribe to a generic "state changed" event to clear and re-populate collections. `ISynchronizedView` automatically propagates additions, removals, and replacements.
 * **Sorting & Filtering**: Domain and presentation lists maintain canonical arrival/causal order. Filtering and sorting are view-layer concerns handled via projected views or XAML collections.
 
-### 2.5 R3 Reactive Programming Rules & Avalonia Integration
+### 2.6 R3 Reactive Programming Rules & Avalonia Integration
 * **`R3Extensions.Avalonia` Dispatcher Integration**:
   In `Program.cs`, the application calls `.UseR3()` on `AppBuilder`:
   ```csharp
@@ -84,17 +105,17 @@ Privacy and zero unauthorized disclosure are foundational requirements of the cl
       .AddTo(ref Bag);
   ```
 
-### 2.6 Virtualized Time Provider
+### 2.7 Virtualized Time Provider
 * Direct calls to `Task.Delay` and real-time timers are replaced with `System.TimeProvider`.
 * Enables instantaneous, deterministic unit and UI testing via `FakeTimeProvider` without wall-clock sleep delays.
 
-### 2.7 LRU-Cached DI Session Scoping (`SessionScopeFactory`)
+### 2.8 LRU-Cached DI Session Scoping (`SessionScopeFactory`)
 * **Problem**: In a client with dozens of peer conversations, creating a global singleton `ChatViewModel` for every chat consumes excessive RAM and keeps hundreds of background reactive streams alive. Conversely, recreating ViewModels from scratch on tab switches destroys message drafts and scroll positions.
 * **Solution**: An LRU-cached session scope manager (`SessionScopeFactory` with capacity 3–5):
   * Navigating between active chats (Alice → Bob → Alice) keeps the child `IServiceScope`, `SessionContext`, and `ChatViewModel` hot in memory.
   * When a 6th conversation is opened, the least recently used scope is evicted and disposed (`scope.Dispose()`), freeing memory and unsubscribing its `DisposableBag` cleanly.
 
-### 2.8 Reactive Debounced Reload Coordinators (`ChatReloadCoordinator`)
+### 2.9 Reactive Debounced Reload Coordinators (`ChatReloadCoordinator`)
 * Rapid bursts of inbound events (multiple messages per second, read receipts, delivery confirmations, sync ticks) can trigger rapid-fire database queries, resulting in SQLite lock contention and UI stutter.
 * The Reload Coordinator pattern debounces triggers and uses `AwaitOperation.Drop`:
   ```csharp
@@ -110,11 +131,11 @@ Privacy and zero unauthorized disclosure are foundational requirements of the cl
   ```
   `AwaitOperation.Drop` ensures that while a database read is in flight, redundant intermediate triggers are dropped. When the read completes, the latest debounced trigger captures all recent commits in a single roundtrip.
 
-### 2.9 Window Lifecycle & Child DI Containers (`WindowManager`)
+### 2.10 Window Lifecycle & Child DI Containers (`WindowManager`)
 * Secondary windows (Settings, Diagnostics, Connection Management) enforce single-instance focus: calling `Show<TViewModel>()` activates an existing window rather than spawning duplicates.
 * Each window is instantiated within its own child `IServiceScope`. When the window is closed, its DI scope is immediately disposed to prevent memory leaks.
 
-### 2.10 Global Reactive Exception Plumbing
+### 2.11 Global Reactive Exception Plumbing
 * Unhandled exceptions inside R3 reactive pipelines do not automatically surface on the UI thread; if unobserved, they crash the host process.
 * `ObservableSystem.RegisterUnhandledExceptionHandler` is registered in `App.axaml.cs` alongside `TaskScheduler.UnobservedTaskException` and `AppDomain.CurrentDomain.UnhandledException`, piping errors into `ILogger`.
 
@@ -197,9 +218,13 @@ Percolator.Desktop/
 │   ├── Converters/                       # IdentityHashToBrushConverter, RouteToColorConverter
 │   ├── Navigation/                       # INavigationService.cs, NavigationService.cs
 │   ├── Services/                         # NetworkStealthGate, DesktopIdentityKeyStore, SystemDateTimeProvider
-│   └── Windowing/                        # IWindowManager.cs, WindowManager.cs, IDialogWindow.cs
+│   └── Windowing/                        # IWindowManager.cs, WindowManager.cs, IWindowHandoffCoordinator.cs, IDialogWindow.cs
 ├── Features/
-│   ├── IdentityGate/                     # Total Network Stealth Gatekeeper (First Screen)
+│   ├── Unlock/                           # Database Decryption & Master Passphrase Gate (First Screen)
+│   │   ├── Models/                       # UnlockStateModel.cs
+│   │   ├── ViewModels/                   # UnlockViewModel.cs
+│   │   └── Views/                        # UnlockWindow.axaml
+│   ├── IdentityGate/                     # Total Network Stealth Gatekeeper
 │   │   ├── Models/                       # SelectableIdentityModel.cs
 │   │   ├── ViewModels/                   # IdentityGateViewModel.cs, CreateIdentityDialogViewModel.cs
 │   │   └── Views/                        # IdentityGateWindow.axaml, CreateIdentityDialog.axaml

@@ -18,6 +18,7 @@ Following Clean Architecture & Onion Architecture principles:
 - **Target Framework**: Targets standard `net10.0` with **zero Windows-specific, macOS-specific, or platform-locked dependencies**. Runs uniformly on headless Linux Docker containers (relay hosts), macOS, and cross-platform desktop runtimes.
 - **Dependencies Flow Inward**: `Percolator.Infrastructure` references `Percolator.Domain`, `Percolator.Domain.Kernel`, `Percolator.Application`, and `Percolator.PluginSdk`. It does NOT expose infrastructure-specific types (e.g., SQLite connections, gRPC stubs, Protobuf classes, raw sockets) to the domain or application layers.
 - **Port Realization & Swappability**: Every component in this project implements an interface (port) defined by `Percolator.Domain`, `Percolator.Application`, `Percolator.PluginSdk`, or application plugins (`Percolator.Apps.*`).
+- **Two-Stage Container Separation**: Supports the Two-Stage DI architecture detailed in [`dblock-plan.md`](file:///C:/Users/squir/source/repos/percolator/source/Percolator.Infrastructure/dblock-plan.md). Pre-unlock primitives (`ICryptoEngine`, `IDateTimeProvider`, `IDatabaseUnlockCoordinator`) register in the bootstrap container; all database contexts, repositories, query services, and background workers register strictly in the authenticated `IHost` after user unlock.
 - **Clear Platform Boundary (`Percolator.Infrastructure.Windows`)**:
   - Core `Percolator.Infrastructure` provides complete, 100% portable baseline implementations.
   - Platform-specific optimizations are decoupled into `Percolator.Infrastructure.Windows` (`net10.0-windows`) and swapped in via dependency injection.
@@ -49,20 +50,18 @@ Following Clean Architecture & Onion Architecture principles:
 
 ## 3. Deep Technical Specifications
 
-### 3.1 Partitioned SQLite SQLCipher Database Schemas
+### 3.1 Unified Encrypted SQLite Database Schema (`percolator.db`)
 
-The persistence layer partitions storage into four distinct SQLite database files to isolate cryptographic secrets from high-throughput chat timelines and bulk file transfers.
+As detailed in [`dblock-plan.md`](file:///C:/Users/squir/source/repos/percolator/source/Percolator.Infrastructure/dblock-plan.md), local storage is unified into a single SQLCipher-encrypted SQLite database file (`percolator.db`). This eliminates 4x connection pool and multi-database migration overhead, ensures atomic transactional integrity across domain aggregates, and utilizes SQLite Write-Ahead Logging (WAL) for lock-free concurrent reads and writes.
 
 ```
 AppData / Data Directory
-├── ops.db        # OperationalDbContext: Outbox jobs, ingress queues, port leases (Unencrypted WAL)
-├── vault.db      # VaultDbContext: Private keys, prekeys, ratchet states (SQLCipher AES-256-CBC)
-├── chat.db       # ChatHistoryDbContext: Messages, reactions, attachments (SQLCipher AES-256-CBC)
-└── transfers.db  # FileTransferDbContext: Manifests, piece bitfields, endpoints (Unencrypted WAL)
+├── percolator.db    # Unified SQLCipher AES-256-CBC database with WAL mode
+└── percolator.salt  # 16-byte cryptographically secure salt for Argon2id key derivation
 ```
 
 #### SQLCipher Connection PRAGMAs
-Every encrypted context (`VaultDbContext`, `ChatHistoryDbContext`) configures SQLCipher on connection open:
+Configured on connection open via `SqlCipherConnectionFactory`:
 ```sql
 PRAGMA key = "x'derived_master_key_hex'";
 PRAGMA cipher_page_size = 4096;
@@ -73,7 +72,9 @@ PRAGMA journal_mode = WAL;
 PRAGMA synchronous = NORMAL;
 ```
 
-#### 1. `OperationalDbContext` (`ops.db`)
+#### Table Definitions by Subsystem Namespace
+
+##### 1. Operational Outbox & Ingress (`ops_*`)
 * `ops_outbox_jobs`:
   - `id` (`TEXT` GUID, PK)
   - `recipient_id` (`BLOB` 32 bytes, indexed)
@@ -97,7 +98,7 @@ PRAGMA synchronous = NORMAL;
   - `allocated_at_utc` (`TEXT` ISO 8601)
   - `lease_expiry_utc` (`TEXT` ISO 8601)
 
-#### 2. `VaultDbContext` (`vault.db` - SQLCipher Encrypted)
+##### 2. Cryptographic Vault (`vault_*`)
 * `vault_identity_keys`:
   - `id` (`BLOB` 32 bytes PublicIdentityId, PK)
   - `private_key_ciphertext` (`BLOB`, column-encrypted)
@@ -131,7 +132,7 @@ PRAGMA synchronous = NORMAL;
   - `updated_at_utc` (`TEXT` ISO 8601)
   - *Composite PK*: `PRIMARY KEY(group_id, author_identity_id)`
 
-#### 3. `ChatHistoryDbContext` (`chat.db` - SQLCipher Encrypted)
+##### 3. Chat History & Timelines (`chat_*`)
 * `chat_messages`:
   - `id` (`TEXT` GUID, PK)
   - `channel_id` (`TEXT` GUID, indexed)
@@ -166,7 +167,7 @@ PRAGMA synchronous = NORMAL;
   - `created_at_utc` (`TEXT` ISO 8601)
   - `expires_at_utc` (`TEXT` ISO 8601)
 
-#### 4. `FileTransferDbContext` (`transfers.db`)
+##### 4. Swarm File Transfers (`ft_*`)
 * `ft_transfer_sessions`:
   - `transfer_id` (`TEXT` GUID, PK)
   - `channel_id` (`TEXT` GUID)
@@ -231,7 +232,7 @@ The swarm file transfer engine operates over a binary framing protocol with a fi
 ### 3.3 Dynamic Port Range Probing & gRPC Interceptors
 
 #### Dynamic Port Range Probing (5200–5299)
-1. On node activation, query `ops_reserved_ports` in `OperationalDbContext` to filter out currently leased ports.
+1. On node activation, query `ops_reserved_ports` in `PercolatorDbContext` to filter out currently leased ports.
 2. Probe ports sequentially using `TcpListener`:
    ```csharp
    var listener = new TcpListener(IPAddress.IPv6Any, port);
@@ -245,7 +246,7 @@ The swarm file transfer engine operates over a binary framing protocol with a fi
 #### gRPC Interceptors
 1. **`IdentityReadinessInterceptor`**:
    - Executes before every incoming RPC.
-   - Evaluates `INetworkStealthGate.IsNetworkActive` and checks whether `VaultDbContext` is unlocked.
+   - Evaluates `INetworkStealthGate.IsNetworkActive` and checks whether the database is unlocked.
    - If false, short-circuits with `Status(StatusCode.Unavailable, "Node operates in total network stealth. Unlock identity to proceed.")`.
 2. **`DeliveryCertificateAuthInterceptor`**:
    - Executes on authenticated relay calls (`authenticated_relay.proto`).
@@ -379,6 +380,17 @@ Carried inside `SealedEnvelopeProto.encrypted_package` (opaque to relays and pas
 - [ ] Implement `PortablePassphraseCredentialStorage` (`Percolator.Application.Ports.ICredentialStorage`):
   - Argon2id key derivation from user passphrase.
   - Encrypted local master key storage via AES-256-GCM.
+- [ ] Implement `SqlCipherDatabaseUnlockCoordinator` (`Percolator.Application.Ports.IDatabaseUnlockCoordinator`):
+  - Tracks `DatabaseSetupStatus` (`Uninitialized`, `Locked`, `Unlocked`).
+  - Derives 256-bit database key via Argon2id from password (including blank strings `""`).
+  - Runs SQLCipher canary probe `SELECT count(*) FROM sqlite_master;` against `percolator.db`.
+  - Executes EF Core database schema migrations (`Database.MigrateAsync()`).
+  - Builds `AuthenticatedHost` (`IHost`), starts all registered `IHostedService` instances, and returns `IAuthenticatedSession`.
+  - Implements `LockAsync()`: cleanly stops all hosted services, clears connection pools (`SqliteConnection.ClearAllPools()`), zeroizes key memory, and tears down `AuthenticatedHost`.
+- [ ] Implement `AuthenticatedSession` (`Percolator.Application.Ports.IAuthenticatedSession`):
+  - Encapsulates inner `IHost` and exposes `IServiceProvider Services`.
+- [ ] Implement `MasterKeyProtector` (`Percolator.Application.Ports.IMasterKeyProtector`):
+  - Holds 32-byte key span in pinned memory with `CryptographicOperations.ZeroMemory` upon disposal.
 - [ ] Implement `SystemDateTimeProvider` (`Percolator.Domain.Common.IDateTimeProvider`):
   - Returns `DateTimeOffset.UtcNow`.
 
@@ -402,8 +414,9 @@ Carried inside `SealedEnvelopeProto.encrypted_package` (opaque to relays and pas
   - Stepped bucket padding for `ChatPayloadEnvelopeProto` (padded to 256, 512, 1024, 2048, 4096 B).
 
 ### Chunk 3: SQLite Persistence Engine & Domain Aggregate Repositories
-- [ ] Configure SQLCipher via `SQLitePCLRaw.bundle_e_sqlcipher` with EF Core and Dapper.
-- [ ] Configure partitioned database contexts (`OperationalDbContext`, `VaultDbContext`, `ChatHistoryDbContext`, `FileTransferDbContext`).
+- [ ] Configure SQLCipher via `SQLitePCLRaw.bundle_e_sqlcipher` with EF Core and Dapper on unified `percolator.db`.
+- [ ] Implement `PercolatorDbContext` with model configurations across operational outbox, cryptographic vault, chat history, and file transfer partitions.
+- [ ] Implement `SqlCipherConnectionFactory` (`Percolator.Application.Ports.ISqliteConnectionFactory`) gated by `IMasterKeyProtector`.
 - [ ] Implement EF Core deterministic BLOB mapping with `ValueComparer<byte[]>`.
 - [ ] Implement column-level encryption for private keys, chain keys, and master keys derived from `ICredentialStorage`.
 - [ ] Implement Domain & Application Repositories:
@@ -480,7 +493,8 @@ Carried inside `SealedEnvelopeProto.encrypted_package` (opaque to relays and pas
   - `DiscoveryQueryClient` (`Percolator.Apps.Discovery.Ports.INearbyDiscoveryQueryClientPort`)
   - `DiscoveryHandshakeAdapter` (`Percolator.Apps.Discovery.Ports.IDiscoveryHandshakePort`)
   - `PreKeyAvailabilityAdapter` (`Percolator.Apps.Discovery.Ports.IPreKeyAvailabilityPort`)
-  - `PreKeyBundleProviderAdapter` (`Percolator.Application.Ports.IPreKeyBundleProvider`)\n  - `GrpcProfileDeliveryClient` (`Percolator.PluginSdk.Profiles.IProfileDeliveryClient`)
+  - `PreKeyBundleProviderAdapter` (`Percolator.Application.Ports.IPreKeyBundleProvider`)
+  - `GrpcProfileDeliveryClient` (`Percolator.PluginSdk.Profiles.IProfileDeliveryClient`)
   - `PrivateRendezvousService`: 24-hour UTC epoch blinded locators.
 
 ### Chunk 7: Encrypted Blob Storage & Streaming Adapters
@@ -532,9 +546,11 @@ Carried inside `SealedEnvelopeProto.encrypted_package` (opaque to relays and pas
   - `RelayBlobRetentionPruner`: Daily pruner for expired relay blobs and disk watermark enforcement.
   - `TransferOfferReaperWorker` (`ITransferOfferReaperService`): Runs every 15m, sweeps stale transfer offers older than 24h.
   - `SwarmEndpointRetentionPruner`: Daily pruner for transient `ft_swarm_endpoints` older than 7 days.
-- [ ] Implement Composition Root:
-  - `InfrastructureServiceCollectionExtensions.AddInfrastructure(IServiceCollection, IConfiguration)`:
-    - Registers partitioned DbContexts, connection factories, and SQLCipher encryption.
+- [ ] Implement Two-Stage Composition Root:
+  - `InfrastructureServiceCollectionExtensions.AddBootstrapInfrastructure(IServiceCollection, IConfiguration)`:
+    - Registers non-DB primitives: `SignalCryptoEngine`, `SystemDateTimeProvider`, `SqlCipherDatabaseUnlockCoordinator`.
+  - `InfrastructureServiceCollectionExtensions.AddAuthenticatedInfrastructure(IServiceCollection, IConfiguration, IMasterKeyProtector)`:
+    - Registers `PercolatorDbContext`, `SqlCipherConnectionFactory`, and SQLCipher encryption.
     - Registers cryptographic engines, wire packers, serializers, repositories, and query services.
     - Registers transport dispatchers, gRPC channels, interceptors, and background workers.
 
@@ -554,6 +570,7 @@ To guarantee robust infrastructure without introducing brittle tests that break 
 | **C1** | RFC Vector | Ed25519 / X25519 Crypto | Known test vectors match RFC 8032 / RFC 7748 | Tests mathematical output; zero implementation coupling. |
 | **C1** | Memory Invariant | Sensitive Key Disposal | Buffer memory zeroized on dispose | Checks memory content directly before and after dispose. |
 | **C1** | Normalization | RFC 4122 Big-Endian UUID | GUID bytes match big-endian RFC 4122 order | Verifies byte order output array. |
+| **C1** | Unlock Gate | Master Password Unlock & Canary | Rejects incorrect password with `Failure` result | Asserts `Result.IsFailure` without opening DB connection. |
 | **C2** | Traffic Padding | Stepped Bucket Serialization | Serialized frames expand to 256/512/1024/2048/4096 B | Asserts length bounds; ignores padding payload contents. |
 | **C2** | Deniability | Reply Wire Frame | Quote snippet text is strictly absent from wire payload | Asserts wire message contains only parent ID and author ID. |
 | **C3** | Security at Rest | SQLCipher Column Encryption | Private keys and chain keys stored as ciphertext | Direct byte inspection of raw DB confirms plaintext is absent. |
@@ -575,7 +592,7 @@ To guarantee robust infrastructure without introducing brittle tests that break 
 | **C8** | Swarm Framing | Multiplexed TCP Framing | Serializes and deserializes all 12 frames (0x01–0x0C) | Roundtrip byte parsing asserting typed frame equality. |
 | **C9** | Deterministic Time | Disappearing Message Pruner | Expired messages deleted after advancing `FakeTimeProvider` | Advances virtual clock by 31s; asserts expired messages purged. |
 | **C9** | Lock Defense | Retention Pruning Batching | Deletion uses `LIMIT` clauses to avoid SQLite lock escalation | Asserts batch execution succeeds under concurrent read workload. |
-| **C9** | DI Composition | `AddInfrastructure` Root | All 48 planned infrastructure ports resolve from DI container | Resolves every interface; asserts non-null without circular dependency. |
+| **C9** | DI Composition | `AddAuthenticatedInfrastructure` Root | All planned infrastructure ports resolve from DI container | Resolves every interface; asserts non-null without circular dependency. |
 
 ---
 
@@ -587,52 +604,56 @@ To guarantee robust infrastructure without introducing brittle tests that break 
 | 2 | `IZkProofEngine` | `Percolator.Domain` | `ZkgroupCryptographyService` | Chunk 1 |
 | 3 | `ICredentialStorage` | `Percolator.Application` | `PortablePassphraseCredentialStorage` | Chunk 1 |
 | 4 | `IDateTimeProvider` | `Percolator.Domain.Common` | `SystemDateTimeProvider` | Chunk 1 |
-| 5 | `ISessionWirePacker` | `Percolator.Application` | `ProtobufSessionWirePacker` | Chunk 2 |
-| 6 | `IPayloadSerializer` | `Percolator.PluginSdk` | `ProtobufPayloadSerializer` | Chunk 2 |
-| 7 | `IOutboxRepository` | `Percolator.Application` | `SqliteOutboxRepository` | Chunk 3 |
-| 8 | `IPeerContactRepository` | `Percolator.Domain` | `SqlitePeerContactRepository` | Chunk 3 |
-| 9 | `IRatchetSessionRepository` | `Percolator.Application` | `SqliteRatchetSessionRepository` | Chunk 3 |
-| 10 | `IGroupReceiverSessionRepository` | `Percolator.Application` | `SqliteGroupReceiverSessionRepository` | Chunk 3 |
-| 11 | `IGroupSenderKeyRepository` | `Percolator.Application` | `SqliteGroupSenderKeyRepository` | Chunk 3 |
-| 12 | `IPendingHandshakeRepository` | `Percolator.Application` | `SqlitePendingHandshakeRepository` | Chunk 3 |
-| 13 | `IPrivatePreKeyStore` | `Percolator.Domain` | `SqlitePrivatePreKeyStore` | Chunk 3 |
-| 14 | `ILocalIdentityKeyStore` | `Percolator.Application` | `SqliteLocalIdentityKeyStore` | Chunk 3 |
-| 15 | `IGroupCredentialsRepository` | `Percolator.Domain` | `SqliteGroupCredentialsRepository` | Chunk 3 |
-| 16 | `IChannelRepository` | `Percolator.Domain` | `SqliteChannelRepository` | Chunk 3 |
-| 17 | `IRelayPreKeyRepository` | `Percolator.Domain` | `SqliteRelayPreKeyRepository` | Chunk 3 |
-| 18 | `IRelayProfileRepository` | `Percolator.Domain` | `SqliteRelayProfileRepository` | Chunk 3 |
-| 19 | `IPeerProfileRepository` | `Percolator.PluginSdk` | `SqlitePeerProfileRepository` | Chunk 3 |
-| 20 | `IPeerMailboxRoutingRepository` | `Percolator.PluginSdk` | `SqlitePeerMailboxRoutingRepository` | Chunk 3 |
-| 21 | `IRelayLedgerRepository` | `Percolator.Domain` | `SqliteRelayLedgerRepository` | Chunk 3 |
-| 22 | `IChatMessageRepository` | `Percolator.Apps.Chat` | `SqlChatMessageRepository` | Chunk 3 |
-| 23 | `IGroupInvitationRepository` | `Percolator.Apps.Chat` | `SqlGroupInvitationRepository` | Chunk 3 |
-| 24 | `IUnknownGroupMessageCacheRepository` | `Percolator.Apps.Chat` | `SqlUnknownGroupMessageCacheRepository` | Chunk 3 |
-| 25 | `ITransferSessionRepository` | `Percolator.Apps.FileTransfer` | `SqliteTransferSessionRepository` | Chunk 3 |
-| 26 | `IFileTransferFilterPolicyRepository` | `Percolator.Apps.FileTransfer` | `SqliteFilterPolicyRepository` | Chunk 3 |
-| 27 | `IRelayPeerDirectory` | `Percolator.Apps.Discovery` | `SqliteRelayPeerDirectory` | Chunk 3 |
-| 28 | `IChatMessageQueryService` | `Percolator.Apps.Chat` | `SqlChatMessageQueryService` | Chunk 4 |
-| 29 | `IConversationListQueryService` | `Percolator.Apps.Chat` | `SqlConversationListQueryService` | Chunk 4 |
-| 30 | `IGroupInvitationQueryService` | `Percolator.Apps.Chat` | `SqlGroupInvitationQueryService` | Chunk 4 |
-| 31 | `IOutboxQueryService` | `Percolator.Application` | `SqlOutboxQueryService` | Chunk 4 |
-| 32 | `IPeerContactQueryService` | `Percolator.Application` | `SqlPeerContactQueryService` | Chunk 4 |
-| 33 | `IFileTransferQueryService` | `Percolator.Apps.FileTransfer` | `SqlFileTransferQueryService` | Chunk 4 |
-| 34 | `IIngressFilterService` | `Percolator.Application` | `IngressFilterService` | Chunk 5 |
-| 35 | `IStreamRegistry` | `Percolator.Application` | `StreamRegistry` | Chunk 5 |
-| 36 | `ITransportDispatcher` | `Percolator.Application` | `TransportDispatcher` | Chunk 5 |
-| 37 | `ISealedEnvelopeUnwrapper` | `Percolator.Application` | `SealedEnvelopeUnwrapper` | Chunk 5 |
-| 38 | `INearbyDiscoveryQueryClientPort` | `Percolator.Apps.Discovery` | `DiscoveryQueryClient` | Chunk 6 |
-| 39 | `IDiscoveryHandshakePort` | `Percolator.Apps.Discovery` | `DiscoveryHandshakeAdapter` | Chunk 6 |
-| 40 | `IPreKeyAvailabilityPort` | `Percolator.Apps.Discovery` | `PreKeyAvailabilityAdapter` | Chunk 6 |
-| 41 | `IPreKeyBundleProvider` | `Percolator.Application` | `PreKeyBundleProviderAdapter` | Chunk 6 |
-| 42 | `IProfileDeliveryClient` | `Percolator.PluginSdk` | `GrpcProfileDeliveryClient` | Chunk 6 |
-| 43 | `IBlobCryptoService` | `Percolator.Application` | `StreamingAesGcmCryptoService` | Chunk 7 |
-| 44 | `IRelayBlobClient` | `Percolator.Application` | `RelayBlobClient` | Chunk 7 |
-| 45 | `IPeerStreamBlobClient` | `Percolator.Application` | `PeerStreamBlobClient` | Chunk 7 |
-| 46 | `ILocalChunkStore` | `Percolator.Application` | `LocalFileChunkStore` | Chunk 7 |
-| 47 | `IChannelRelayResolver` | `Percolator.Application` | `ChannelRelayResolver` | Chunk 7 |
-| 48 | `ITransferStreamPool` / `Factory` / `Stream` | `Percolator.Apps.FileTransfer` | `TcpMultiStreamPool` & `TransferStream` | Chunk 8 |
-| 49 | `INetworkEndpointDiscoveryPort` | `Percolator.Apps.FileTransfer` | `NetworkInterfaceEndpointDiscoveryPort` | Chunk 8 |
-| 50 | `IDesktopFileStorage` | `Percolator.Apps.FileTransfer` | `PortableDesktopFileStore` | Chunk 8 |
-| 51 | `ITransferRateLimiter` | `Percolator.Apps.FileTransfer` | `TokenBucketRateLimiter` | Chunk 8 |
-| 52 | `IDistributedTrackerPort` | `Percolator.Apps.FileTransfer` | `RelaySwarmTrackerClient` | Chunk 8 |
-| 53 | `ITransferOfferReaperService` | `Percolator.Apps.FileTransfer` | `TransferOfferReaperWorker` | Chunk 9 |
+| 5 | `IDatabaseUnlockCoordinator` | `Percolator.Application` | `SqlCipherDatabaseUnlockCoordinator` | Chunk 1 |
+| 6 | `IAuthenticatedSession` | `Percolator.Application` | `AuthenticatedSession` | Chunk 1 |
+| 7 | `IMasterKeyProtector` | `Percolator.Application` | `MasterKeyProtector` | Chunk 1 |
+| 8 | `ISessionWirePacker` | `Percolator.Application` | `ProtobufSessionWirePacker` | Chunk 2 |
+| 9 | `IPayloadSerializer` | `Percolator.PluginSdk` | `ProtobufPayloadSerializer` | Chunk 2 |
+| 10 | `ISqliteConnectionFactory` | `Percolator.Application` | `SqlCipherConnectionFactory` | Chunk 3 |
+| 11 | `IOutboxRepository` | `Percolator.Application` | `SqliteOutboxRepository` | Chunk 3 |
+| 12 | `IPeerContactRepository` | `Percolator.Domain` | `SqlitePeerContactRepository` | Chunk 3 |
+| 13 | `IRatchetSessionRepository` | `Percolator.Application` | `SqliteRatchetSessionRepository` | Chunk 3 |
+| 14 | `IGroupReceiverSessionRepository` | `Percolator.Application` | `SqliteGroupReceiverSessionRepository` | Chunk 3 |
+| 15 | `IGroupSenderKeyRepository` | `Percolator.Application` | `SqliteGroupSenderKeyRepository` | Chunk 3 |
+| 16 | `IPendingHandshakeRepository` | `Percolator.Application` | `SqlitePendingHandshakeRepository` | Chunk 3 |
+| 17 | `IPrivatePreKeyStore` | `Percolator.Domain` | `SqlitePrivatePreKeyStore` | Chunk 3 |
+| 18 | `ILocalIdentityKeyStore` | `Percolator.Application` | `SqliteLocalIdentityKeyStore` | Chunk 3 |
+| 19 | `IGroupCredentialsRepository` | `Percolator.Domain` | `SqliteGroupCredentialsRepository` | Chunk 3 |
+| 20 | `IChannelRepository` | `Percolator.Domain` | `SqliteChannelRepository` | Chunk 3 |
+| 21 | `IRelayPreKeyRepository` | `Percolator.Domain` | `SqliteRelayPreKeyRepository` | Chunk 3 |
+| 22 | `IRelayProfileRepository` | `Percolator.Domain` | `SqliteRelayProfileRepository` | Chunk 3 |
+| 23 | `IPeerProfileRepository` | `Percolator.PluginSdk` | `SqlitePeerProfileRepository` | Chunk 3 |
+| 24 | `IPeerMailboxRoutingRepository` | `Percolator.PluginSdk` | `SqlitePeerMailboxRoutingRepository` | Chunk 3 |
+| 25 | `IRelayLedgerRepository` | `Percolator.Domain` | `SqliteRelayLedgerRepository` | Chunk 3 |
+| 26 | `IChatMessageRepository` | `Percolator.Apps.Chat` | `SqlChatMessageRepository` | Chunk 3 |
+| 27 | `IGroupInvitationRepository` | `Percolator.Apps.Chat` | `SqlGroupInvitationRepository` | Chunk 3 |
+| 28 | `IUnknownGroupMessageCacheRepository` | `Percolator.Apps.Chat` | `SqlUnknownGroupMessageCacheRepository` | Chunk 3 |
+| 29 | `ITransferSessionRepository` | `Percolator.Apps.FileTransfer` | `SqliteTransferSessionRepository` | Chunk 3 |
+| 30 | `IFileTransferFilterPolicyRepository` | `Percolator.Apps.FileTransfer` | `SqliteFilterPolicyRepository` | Chunk 3 |
+| 31 | `IRelayPeerDirectory` | `Percolator.Apps.Discovery` | `SqliteRelayPeerDirectory` | Chunk 3 |
+| 32 | `IChatMessageQueryService` | `Percolator.Apps.Chat` | `SqlChatMessageQueryService` | Chunk 4 |
+| 33 | `IConversationListQueryService` | `Percolator.Apps.Chat` | `SqlConversationListQueryService` | Chunk 4 |
+| 34 | `IGroupInvitationQueryService` | `Percolator.Apps.Chat` | `SqlGroupInvitationQueryService` | Chunk 4 |
+| 35 | `IOutboxQueryService` | `Percolator.Application` | `SqlOutboxQueryService` | Chunk 4 |
+| 36 | `IPeerContactQueryService` | `Percolator.Application` | `SqlPeerContactQueryService` | Chunk 4 |
+| 37 | `IFileTransferQueryService` | `Percolator.Apps.FileTransfer` | `SqlFileTransferQueryService` | Chunk 4 |
+| 38 | `IIngressFilterService` | `Percolator.Application` | `IngressFilterService` | Chunk 5 |
+| 39 | `IStreamRegistry` | `Percolator.Application` | `StreamRegistry` | Chunk 5 |
+| 40 | `ITransportDispatcher` | `Percolator.Application` | `TransportDispatcher` | Chunk 5 |
+| 41 | `ISealedEnvelopeUnwrapper` | `Percolator.Application` | `SealedEnvelopeUnwrapper` | Chunk 5 |
+| 42 | `INearbyDiscoveryQueryClientPort` | `Percolator.Apps.Discovery` | `DiscoveryQueryClient` | Chunk 6 |
+| 43 | `IDiscoveryHandshakePort` | `Percolator.Apps.Discovery` | `DiscoveryHandshakeAdapter` | Chunk 6 |
+| 44 | `IPreKeyAvailabilityPort` | `Percolator.Apps.Discovery` | `PreKeyAvailabilityAdapter` | Chunk 6 |
+| 45 | `IPreKeyBundleProvider` | `Percolator.Application` | `PreKeyBundleProviderAdapter` | Chunk 6 |
+| 46 | `IProfileDeliveryClient` | `Percolator.PluginSdk` | `GrpcProfileDeliveryClient` | Chunk 6 |
+| 47 | `IBlobCryptoService` | `Percolator.Application` | `StreamingAesGcmCryptoService` | Chunk 7 |
+| 48 | `IRelayBlobClient` | `Percolator.Application` | `RelayBlobClient` | Chunk 7 |
+| 49 | `IPeerStreamBlobClient` | `Percolator.Application` | `PeerStreamBlobClient` | Chunk 7 |
+| 50 | `ILocalChunkStore` | `Percolator.Application` | `LocalFileChunkStore` | Chunk 7 |
+| 51 | `IChannelRelayResolver` | `Percolator.Application` | `ChannelRelayResolver` | Chunk 7 |
+| 52 | `ITransferStreamPool` / `Factory` / `Stream` | `Percolator.Apps.FileTransfer` | `TcpMultiStreamPool` & `TransferStream` | Chunk 8 |
+| 53 | `INetworkEndpointDiscoveryPort` | `Percolator.Apps.FileTransfer` | `NetworkInterfaceEndpointDiscoveryPort` | Chunk 8 |
+| 54 | `IDesktopFileStorage` | `Percolator.Apps.FileTransfer` | `PortableDesktopFileStore` | Chunk 8 |
+| 55 | `ITransferRateLimiter` | `Percolator.Apps.FileTransfer` | `TokenBucketRateLimiter` | Chunk 8 |
+| 56 | `IDistributedTrackerPort` | `Percolator.Apps.FileTransfer` | `RelaySwarmTrackerClient` | Chunk 8 |
+| 57 | `ITransferOfferReaperService` | `Percolator.Apps.FileTransfer` | `TransferOfferReaperWorker` | Chunk 9 |
