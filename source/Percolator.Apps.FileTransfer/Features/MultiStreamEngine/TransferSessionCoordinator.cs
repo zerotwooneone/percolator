@@ -239,6 +239,7 @@ public sealed class TransferSessionCoordinator
         DirectWanPolicy wanPolicy = DirectWanPolicy.DisabledByDefault,
         CancellationToken ct = default)
     {
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         int streamCount = streamPool.ActiveStreams.Count;
         Task<DomainResult>[] workerTasks = new Task<DomainResult>[streamCount];
 
@@ -256,7 +257,8 @@ public sealed class TransferSessionCoordinator
                 fileStorage,
                 swarmCoordinator,
                 wanPolicy,
-                ct);
+                linkedCts,
+                linkedCts.Token);
         }
 
         DomainResult[] results = await Task.WhenAll(workerTasks);
@@ -282,6 +284,7 @@ public sealed class TransferSessionCoordinator
         IDesktopFileStorage? fileStorage,
         SwarmCoordinator? swarmCoordinator,
         DirectWanPolicy wanPolicy,
+        CancellationTokenSource linkedCts,
         CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
@@ -296,11 +299,11 @@ public sealed class TransferSessionCoordinator
 
             if (isTerminal)
             {
+                try { linkedCts.Cancel(); } catch (ObjectDisposedException) { }
                 return DomainResult.Success();
             }
 
             // Fill pipeline window on this stream with chunks possessed by THIS peer
-            bool scheduledAny = false;
             while (_scheduler.CanRequest(peerId))
             {
                 ChunkIndex? nextChunk;
@@ -336,21 +339,44 @@ public sealed class TransferSessionCoordinator
                 }
 
                 await stream.SendFrameAsync(new RequestChunkFrame(nextChunk.Value), ct);
-                scheduledAny = true;
             }
 
             bool isDownloadDone;
             lock (_sessionSync)
             {
-                isDownloadDone = session.IsDownloadComplete && session.State != TransferSessionState.Seeding;
+                isDownloadDone = session.Role == TransferRole.Recipient &&
+                                 session.IsDownloadComplete &&
+                                 session.State != TransferSessionState.Seeding;
             }
 
-            if (isDownloadDone || (!scheduledAny && _scheduler.GetPendingCount(peerId) == 0))
+            if (isDownloadDone)
+            {
+                try { linkedCts.Cancel(); } catch (ObjectDisposedException) { }
+                return DomainResult.Success();
+            }
+
+            IStreamFramePayload frame;
+            try
+            {
+                frame = await stream.ReceiveFrameAsync(ct);
+            }
+            catch (OperationCanceledException)
+            {
+                return DomainResult.Success();
+            }
+            catch (Exception) when (ct.IsCancellationRequested || session.State == TransferSessionState.Completed)
+            {
+                return DomainResult.Success();
+            }
+            catch (System.Threading.Channels.ChannelClosedException)
+            {
+                return DomainResult.Success();
+            }
+            catch (InvalidOperationException ex) when (ex.Message.Contains("Queue empty") || ex.Message.Contains("closed"))
             {
                 return DomainResult.Success();
             }
 
-            IStreamFramePayload frame = await stream.ReceiveFrameAsync(ct);
             swarmCoordinator?.RecordPeerActivity(peerId);
 
             switch (frame)
@@ -371,6 +397,12 @@ public sealed class TransferSessionCoordinator
                     if (result.IsFailure)
                     {
                         return result;
+                    }
+
+                    if (session.Role == TransferRole.Recipient && session.IsDownloadComplete)
+                    {
+                        try { linkedCts.Cancel(); } catch (ObjectDisposedException) { }
+                        return DomainResult.Success();
                     }
                     break;
                 }

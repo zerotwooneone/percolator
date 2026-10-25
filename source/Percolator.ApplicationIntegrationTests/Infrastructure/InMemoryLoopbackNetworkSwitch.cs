@@ -1,4 +1,7 @@
 using System.Collections.Concurrent;
+using System.Threading.Channels;
+using Percolator.Apps.FileTransfer.Features.MultiStreamEngine;
+using Percolator.Apps.FileTransfer.Ports;
 using Percolator.Application2.Ports;
 using Percolator.Application2IntegrationTests.Builders;
 using Percolator.Domain.Channels.ValueObjects;
@@ -16,6 +19,7 @@ public sealed class InMemoryLoopbackNetworkSwitch
     private readonly ConcurrentDictionary<PublicIdentityId, EndpointPort> _identityToPort = new();
     private readonly ConcurrentDictionary<EndpointPort, PublicIdentityId> _portToIdentity = new();
     private readonly ConcurrentDictionary<(EndpointPort Source, EndpointPort Target), bool> _activeStreams = new();
+    private readonly ConcurrentDictionary<(EndpointPort, EndpointPort, int), (Channel<IStreamFramePayload> Forward, Channel<IStreamFramePayload> Reverse)> _streamChannels = new();
     private readonly ConcurrentDictionary<PublicIdentityId, RelayNode> _relaysById = new();
     private readonly ConcurrentDictionary<PublicIdentityId, RelayNode> _recipientToRelay = new();
     private readonly ConcurrentDictionary<ChannelId, RelayNode> _channelToRelay = new();
@@ -177,5 +181,29 @@ public sealed class InMemoryLoopbackNetworkSwitch
     public EndpointPort? TryGetPortForPeer(PublicIdentityId peerId)
     {
         return _identityToPort.TryGetValue(peerId, out var port) ? port : null;
+    }
+
+    public (ChannelWriter<IStreamFramePayload> Outgoing, ChannelReader<IStreamFramePayload> Incoming) GetOrCreateStreamPair(
+        EndpointPort localPort,
+        EndpointPort remotePort,
+        int streamIndex)
+    {
+        var key = localPort.Value < remotePort.Value
+            ? (localPort, remotePort, streamIndex)
+            : (remotePort, localPort, streamIndex);
+
+        var (lowToHigh, highToLow) = _streamChannels.GetOrAdd(key, _ =>
+        {
+            var options = new UnboundedChannelOptions
+            {
+                SingleWriter = false,
+                SingleReader = false
+            };
+            return (Channel.CreateUnbounded<IStreamFramePayload>(options), Channel.CreateUnbounded<IStreamFramePayload>(options));
+        });
+
+        return localPort.Value < remotePort.Value
+            ? (lowToHigh.Writer, highToLow.Reader)
+            : (highToLow.Writer, lowToHigh.Reader);
     }
 }

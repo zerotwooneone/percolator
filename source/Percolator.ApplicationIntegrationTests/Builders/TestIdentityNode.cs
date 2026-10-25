@@ -15,7 +15,12 @@ using Percolator.Apps.Chat.Features.Media;
 using Percolator.Apps.Chat.Features.Messaging;
 using Percolator.Apps.Chat.Features.Profiles;
 using Percolator.Apps.Chat.Ingress;
+using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
+using Percolator.Apps.FileTransfer.Features.IngressControl;
+using Percolator.Apps.FileTransfer.Features.MultiStreamEngine;
+using Percolator.Apps.FileTransfer.Features.Storage;
 using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
+using Percolator.Apps.FileTransfer.Ports;
 using Percolator.Domain.Channels.Model;
 using Percolator.Domain.Channels.Ports;
 using Percolator.Domain.Channels.ValueObjects;
@@ -71,6 +76,13 @@ public sealed class TestIdentityNode
     public LoopbackRelayBlobClient RelayBlobClient { get; }
     public LoopbackChannelRelayResolver ChannelRelayResolver { get; }
 
+    // File Transfer Capabilities
+    public InMemoryDesktopFileStorage DesktopFileStorage { get; } = new();
+    public LoopbackStreamPoolAdapter StreamPool { get; }
+    public IFileTransferActionHandler FileTransferActions { get; }
+    public IFileTransferQueryService FileTransferQueries { get; }
+    public TransferSessionCoordinator FileTransferCoordinator { get; }
+
     // Driving Ports
     public IChatService ChatService { get; }
     public IHandshakeService HandshakeService { get; }
@@ -106,6 +118,8 @@ public sealed class TestIdentityNode
     private readonly InMemoryGroupReceiverSessionRepository _groupReceiverSessionRepo;
     private readonly InMemoryGroupInvitationRepository _groupInvitationRepo;
     private readonly InMemoryIngressFilterService _ingressFilterService;
+    private readonly InMemoryTransferSessionRepository _transferSessionRepo = new();
+    private readonly InMemoryFilterPolicyRepository _filterPolicyRepo;
 
     private readonly SealedEnvelopeUnwrapper _envelopeUnwrapper;
     private readonly InMemoryLoopbackNetworkSwitch _networkSwitch;
@@ -124,6 +138,7 @@ public sealed class TestIdentityNode
         TimeProvider = timeProvider ?? new TestDateTimeProvider();
 
         IdentityId = PublicIdentityId.New();
+        _filterPolicyRepo = new InMemoryFilterPolicyRepository(IdentityId);
         LocalEndpointCandidate = new DirectEndpointCandidate(
             EndpointHost.Parse("localhost"),
             PortNumber.FromInt(Port.Value),
@@ -244,6 +259,35 @@ public sealed class TestIdentityNode
             cryptoEngine: CryptoEngine,
             peerMailboxRoutingRepo: PeerMailboxRoutingRepo);
         appRouter.RegisterHandler(chatHandler);
+
+        // File Transfer Wiring
+        StreamPool = new LoopbackStreamPoolAdapter(Port, _networkSwitch);
+        var discoveryPort = new LoopbackNetworkEndpointDiscoveryPort(LocalEndpointCandidate);
+        var trackerPort = new LoopbackDistributedTrackerPort();
+        FileTransferQueries = new FileTransferQueryService(_transferSessionRepo);
+        FileTransferActions = new FileTransferActionHandler(
+            _transferSessionRepo,
+            DesktopFileStorage,
+            egressPipeline,
+            serializer,
+            trackerPort,
+            TimeProvider,
+            blobStorage: BlobStorage,
+            endpointDiscovery: discoveryPort,
+            streamPool: StreamPool);
+
+        var scheduler = new ChunkPipelineScheduler();
+        var assembler = new DiskChunkAssembler(DesktopFileStorage);
+        FileTransferCoordinator = new TransferSessionCoordinator(scheduler, assembler, TimeProvider);
+
+        var fileTransferHandler = new FileTransferPayloadHandler(
+            _transferSessionRepo,
+            _filterPolicyRepo,
+            serializer,
+            TimeProvider,
+            blobStorage: BlobStorage,
+            streamPool: StreamPool);
+        appRouter.RegisterHandler(fileTransferHandler);
 
         // Driving Services
         ChatService = new ChatService(
@@ -692,6 +736,39 @@ public sealed class TestIdentityNode
         await AddApprovedContactAsync(responder).ConfigureAwait(false);
         await responder.AddApprovedContactAsync(this).ConfigureAwait(false);
         return await EstablishDirectChannelWithAsync(responder).ConfigureAwait(false);
+    }
+
+    public async Task<DomainResult> PumpTransferAsync(
+        TransferSessionId sessionId,
+        PublicIdentityId peerId,
+        CancellationToken ct = default)
+    {
+        var session = await _transferSessionRepo.GetSessionByIdAsync(sessionId, ct).ConfigureAwait(false);
+        if (session == null)
+            return DomainResult.Failure(new DomainError("Transfer.NotFound", "Session not found"));
+
+        var transportCtx = await _transferSessionRepo.GetTransportContextAsync(sessionId, ct).ConfigureAwait(false);
+        if (transportCtx == null)
+            return DomainResult.Failure(new DomainError("Transfer.NotFound", "Transport context not found"));
+
+        var rootPath = transportCtx.LocalRootPath ?? RootDirectoryPath.Parse(@"C:\temp");
+        var result = await FileTransferCoordinator.PumpPeerStreamsAsync(
+            session,
+            peerId,
+            StreamPool,
+            transportCtx.SessionEncryptionKey,
+            transportCtx.BaseNonce,
+            rootPath,
+            DesktopFileStorage,
+            wanPolicy: transportCtx.WanPolicy,
+            ct: ct).ConfigureAwait(false);
+
+        if (session.Role == TransferRole.Recipient && session.IsDownloadComplete)
+        {
+            await StreamPool.DisposeAsync().ConfigureAwait(false);
+        }
+
+        return result;
     }
 
     internal Task SaveDirectContactInternalAsync(PeerContact contact) => _contactRepo.SaveAsync(contact);

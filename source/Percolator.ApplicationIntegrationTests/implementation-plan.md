@@ -139,7 +139,7 @@ Prior to implementing Phase 2 and subsequent phases, the following core defects 
   - `TestIdentityNode` creates client applications with user identities, chat services, and contact managers.
   - A Relay node is an autonomous infrastructure server, not an end-user client.
 - **Architectural Solution**:
-  - Add `RelayNode` to `TestClusterBuilder` via `.AddRelayNode(\"Relay\", port, policy)`.
+  - Add `RelayNode` to `TestClusterBuilder` via `.AddRelayNode("Relay", port, policy)`.
   - `RelayNode` encapsulates:
     - `RelayMailboxQueue`
     - `IRelayPreKeyRepository` (holding `RelayHostedPreKeyBundle`s)
@@ -165,7 +165,7 @@ Prior to implementing Phase 2 and subsequent phases, the following core defects 
 ### 3.6 Allow `TransferSessionCoordinator` Seeder Pump in `Uploading` State (`Percolator.Apps.FileTransfer`)
 - Fix line 345 in `TransferSessionCoordinator.PumpSingleStreamAsync` so `isDownloadDone` is `session.IsDownloadComplete && session.State is not (TransferSessionState.Uploading or TransferSessionState.Seeding)`.
 
----\
+---
 
 ## 4. Decomposed Multi-Step Orchestration by Phase
 
@@ -184,7 +184,7 @@ Prior to implementing Phase 2 and subsequent phases, the following core defects 
   - Charlie publishes `RelayHostedPreKeyBundle` with 5 one-time prekeys to `Relay`.
 - **Step 2.2: Alice PreKey Consumption & Handshake Initiation**:
   - Alice queries `Relay` and consumes Charlie's `PreKeyBundle` (asserting OTPK count decrements from 5 to 4).
-  - Alice creates deterministic `DirectChannel(aliceId, charlieId)` and initiates handshake with initial greeting (`ChatPayloadEnvelopeDto: \"Hi Charlie, reaching out via Relay!\"`).
+  - Alice creates deterministic `DirectChannel(aliceId, charlieId)` and initiates handshake with initial greeting (`ChatPayloadEnvelopeDto: "Hi Charlie, reaching out via Relay!"`).
   - Handshake package is saved to Alice's outbox with route `RelayedOneToOne(TargetRelayId = relay.Id, TargetToken = charlie.MailboxRoutingToken)`.
 - **Step 2.3: Relayed Outbox Dispatch**:
   - Alice runs `OutboxWorker.ProcessBatchAsync()`.
@@ -201,9 +201,9 @@ Prior to implementing Phase 2 and subsequent phases, the following core defects 
   - Charlie calls `HandshakeService.CompletePendingHandshakeAsync(charlie.Id, alice.Id)`.
   - Charlie derives master secret, provisions local `DirectChannel`, decrypts initial greeting, and routes to `ChatPayloadHandler`.
   - Assert `Charlie.ContactQueries` shows `ContactState.Approved`.
-  - Assert `Charlie.ChatQueries.GetMessagesAsync` contains `\"Hi Charlie, reaching out via Relay!\"`.
+  - Assert `Charlie.ChatQueries.GetMessagesAsync` contains `"Hi Charlie, reaching out via Relay!"`.
 - **Step 2.6: Bidirectional Relayed Chat**:
-  - Charlie sends reply `\"Hello Alice via Relay!\"` using route `DeliveryRoute.RelayedOneToOne`.
+  - Charlie sends reply `"Hello Alice via Relay!"` using route `DeliveryRoute.RelayedOneToOne`.
   - Charlie's outbox dispatches envelope to `Relay.MailboxQueue`.
   - Alice drains `Relay.MailboxQueue`, processes inbound envelope, and asserts Charlie's reply in `Alice.ChatQueries`.
 
@@ -216,7 +216,7 @@ Prior to implementing Phase 2 and subsequent phases, the following core defects 
   - Bob records snapshot in multi-source storage with `ProfileSourceType.DirectP2P` and endpoint `localhost:15001`.
   - Strict CQRS: `Bob.PeerProfileQueries.GetProfileAsync(alice.Id)` projects updated display name, bio, and `rev: 1`.
   - Local Nickname Immutability: Assert Bob's user-assigned local contact nickname for Alice remains intact in `Bob.ContactQueries.GetContactDetailAsync`.
-  - Conditional Fetch: Alice re-sends identical capability (`rev: 1`); Bob skips redundant network fetch.
+  - Conditional Fetch: Alice re-sends identical capability (`rev: 1`); Bob skips redundant network fetch`.
   - Revision Update: Alice updates profile to `rev: 2` (DisplayName: `"Alice Liddell"`, Bio: `"Through the Looking-Glass"`) and re-shares; Bob detects higher revision and performs in-place atomic update.
 - **Step 3.2: Zero-Knowledge Relayed Profile Hosting & Mailbox Capability Dispatch**:
   - Build cluster with Alice, Charlie, and zero-knowledge `RelayNode` (`localhost:15003`).
@@ -243,7 +243,7 @@ Prior to implementing Phase 2 and subsequent phases, the following core defects 
 
 ### Phase 4: Group Chat (`Alice`, `Bob`, `Charlie`) Hosted on `Relay` [COMPLETED in GroupChatScenarioTests.cs]
 - **Step 4.1: Group Creation & Ledger Registration**:
-  - Alice creates `GroupChannel(\"Percolator Builders\")` with `GroupMasterKey`.
+  - Alice creates `GroupChannel("Percolator Builders")` with `GroupMasterKey`.
   - Alice registers `RelayGroupLedger` on `Relay` with `ActiveRoutingTokens` for Alice, Bob, and Charlie.
 - **Step 4.2: Pairwise Invitation & Acceptance**:
   - Alice sends invitations: Bob over `DirectP2P`, Charlie over `RelayedOneToOne`.
@@ -253,7 +253,7 @@ Prior to implementing Phase 2 and subsequent phases, the following core defects 
   - Keys are distributed pairwise via 1:1 Double Ratchet channels (`AppId.SystemControl = 0x00`).
   - Recipients process inbound system messages and import sender keys into `IGroupReceiverSessionRepository`.
 - **Step 4.4: Zero-Knowledge Relayed Broadcast**:
-  - Alice broadcasts `\"Welcome to the group, Bob and Charlie!\"` via `ChatService.SendMessageAsync(Route: DeliveryRoute.RelayedGroup)`.
+  - Alice broadcasts `"Welcome to the group, Bob and Charlie!"` via `ChatService.SendMessageAsync(Route: DeliveryRoute.RelayedGroup)`.
   - Dispatcher computes ZK proof / dispatch challenge and submits `(channelId, proof, sealedPayload)` to `Relay`.
   - `Relay.RelayGroupLedger.VerifyDispatch` verifies proof and fans out opaque `MailboxEnvelope`s to Bob and Charlie's routing tokens.
   - Bob and Charlie drain/receive the broadcast, decrypt with Alice's sender key, and verify Alice's author signature.
@@ -274,9 +274,12 @@ Prior to implementing Phase 2 and subsequent phases, the following core defects 
   - Alice and Dave derive rotating epoch locators via `PrivateRendezvousService.DeriveLocator`.
   - Alice publishes rendezvous route; Dave queries window, matches, and establishes direct session.
 
-### Phase 7: Multi-Stream Swarm Bulk File Transfer (`Apps.FileTransfer`)
-- **Step 7.1**: Alice stages 3.5 MB file (4 x 1 MB chunks) in `IDesktopFileStorage`.
-- **Step 7.2**: Alice initiates transfer via `FileTransferActions.InitiateTransferAsync`.
-- **Step 7.3**: Bob receives in-band offer and calls `AcceptTransferAsync`.
-- **Step 7.4**: Concurrently pump multi-stream chunks across connected stream pool.
-- **Step 7.5**: Bob verifies completed manifest and byte-for-byte SHA256 integrity.
+### Phase 7: Multi-Stream Swarm Bulk File Transfer (`Apps.FileTransfer`) [COMPLETED in FileTransferScenarioTests.cs]
+- **Step 7.1: Staging Large Dataset**: Alice stages a 3.5 MB file (14 x 256 KB chunks via `ChunkSizeBytes.SelectOptimalForBundle`) in `IDesktopFileStorage`.
+- **Step 7.2: Transfer Initiation & In-Band Offer**: Alice initiates transfer via driving port `IFileTransferActionHandler.InitiateTransferAsync` (1:1 with Bob over direct channel). Alice verifies initial state via CQRS `IFileTransferQueryService` (`TransferSessionState.Offered`, `TransferRole.Sender`).
+- **Step 7.3: In-Band Offer Reception & Acceptance**: Bob receives in-band offer, verifies pending state via `IFileTransferQueryService` (`TransferSessionState.PendingConsent`, `TransferRole.Recipient`), and accepts transfer via `IFileTransferActionHandler.AcceptTransferAsync`, transitioning to `TransferSessionState.InFlight`.
+- **Step 7.4: Multi-Stream Swarm Pumping**: Concurrently pump multi-stream chunks across connected stream pool (`ITransferStreamPool`). `TransferSessionCoordinator` schedules rarest-first chunk requests, exchanges `HaveFrame`s, verifies Merkle tree hashes upon chunk completion, and terminates promptly via cooperative cancellation once recipient completes.
+- **Step 7.5: Integrity Verification & Selective Download**:
+  - Bob asserts completed transfer state and manifest projections via `IFileTransferQueryService` (`TransferSessionState.Completed`).
+  - Bob asserts byte-for-byte SHA-256 integrity of the reassembled file against Alice's original data.
+  - Multi-file selective download test (`Phase7_Selective_File_Transfer_Downloads_Only_Selected_Files`) validates that unselected files are not assembled or written to disk.

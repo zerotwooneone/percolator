@@ -2,6 +2,9 @@ using System.Buffers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Percolator.Apps.Chat.Features.GroupInvitations;
+using Percolator.Apps.FileTransfer.Domain.ManifestManagement;
+using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
+using Percolator.Infrastructure2.Serialization;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
@@ -12,6 +15,7 @@ namespace Percolator.Application2IntegrationTests.Infrastructure;
 public sealed class TestPayloadSerializer : IPayloadSerializer
 {
     private static readonly JsonSerializerOptions Options = CreateOptions();
+    private readonly ProtobufPayloadSerializer _protobufSerializer = new();
 
     private static JsonSerializerOptions CreateOptions()
     {
@@ -35,11 +39,25 @@ public sealed class TestPayloadSerializer : IPayloadSerializer
 
     public ReadOnlyMemory<byte> Serialize<T>(T payload)
     {
+        if (typeof(T) == typeof(TransferManifest) ||
+            typeof(T) == typeof(FileTransferOfferPayload) ||
+            typeof(T) == typeof(FileTransferAcceptPayload) ||
+            typeof(T) == typeof(FileTransferCancelPayload))
+        {
+            return _protobufSerializer.Serialize(payload);
+        }
         return JsonSerializer.SerializeToUtf8Bytes(payload, Options);
     }
 
     public DomainResult<T> Deserialize<T>(ReadOnlyMemory<byte> data)
     {
+        if (typeof(T) == typeof(TransferManifest) ||
+            typeof(T) == typeof(FileTransferOfferPayload) ||
+            typeof(T) == typeof(FileTransferAcceptPayload) ||
+            typeof(T) == typeof(FileTransferCancelPayload))
+        {
+            return _protobufSerializer.Deserialize<T>(data);
+        }
         try
         {
             var result = JsonSerializer.Deserialize<T>(data.Span, Options);

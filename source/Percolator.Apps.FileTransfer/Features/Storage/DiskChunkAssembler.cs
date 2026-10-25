@@ -40,6 +40,11 @@ public sealed class DiskChunkAssembler
         // Write each verified slice to target file on disk and finalize any file that just completed
         foreach (FileChunkSlice slice in slices)
         {
+            if (session.SelectedFiles != null && !session.SelectedFiles.Contains(slice.FileIndex))
+            {
+                continue;
+            }
+
             FileEntry entry = session.Manifest.Files[slice.FileIndex.Value];
             ResolvedFilePath targetFile = ResolvedFilePath.Resolve(rootPath, entry.RelativePath);
 

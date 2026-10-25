@@ -259,7 +259,7 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
         if (resumptionBitfield.TotalChunks != Manifest.TotalChunks)
             return DomainResult.Failure(new DomainError("Transfer.MismatchedBitfield", "Peer bitfield total chunk count does not match session manifest."));
 
-        SwarmMember member = new(recipientId, resumptionBitfield);
+        SwarmMember member = new(recipientId, resumptionBitfield, peerChokingUs: PeerChokeStatus.Unchoked, weChokingPeer: PeerChokeStatus.Unchoked);
         _swarmMembers[recipientId] = member;
         UpdatePeerInterestAndCheckStallRecovery(member);
         if (State == TransferSessionState.Offered)
