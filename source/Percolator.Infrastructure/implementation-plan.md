@@ -402,8 +402,16 @@ Database Engine: Encrypted SQLite using SQLCipher (`SQLitePCLRaw.bundle_e_sqlcip
   - Persists client-side `GroupCredentials` (master keys, auth credential MACs, blob keys) under encryption.
 - **`IChannelRepository`** (`Percolator.Domain.Channels.Ports`):
   - Persists direct channels (`DirectChannel`) and group channels (`GroupChannel`) with member roles, epochs, and encrypted payload logs (`ChannelPayload`). Serves as the single authoritative persistence store for all channel state across applications.
-- **`IRelayPreKeyDirectoryRepository`** (`Percolator.Domain.Relays.Ports`):
+- **`IRelayPreKeyRepository`** (`Percolator.Domain.Delivery.Ports`):
   - Backs the relay pre-key hosting directory with paging, expiration cleanup, and quota enforcement.
+- **`ILocalIdentityKeyStore`** (`Percolator.Application.Ports`):
+  - **Adapter**: `SqliteLocalIdentityKeyStore`. Persists and retrieves local identity private key material under column-level encryption via `VaultDbContext` for X3DH handshakes and cryptographic signatures.
+- **`IPeerMailboxRoutingRepository`** (`Percolator.PluginSdk.Profiles`):
+  - **Adapter**: `SqlitePeerMailboxRoutingRepository`. Persists `PeerMailboxRoutingCapability` records (`peer_id`, `routing_token`, `delivery_token`, `relay_endpoint_uri`) for direct and store-and-forward message routing.
+- **`IPeerProfileRepository`** (`Percolator.PluginSdk.Profiles`):
+  - **Adapter**: `SqlitePeerProfileRepository`. Client-side repository and cache for discovered and contact peer profiles (`PeerProfile`).
+- **`IRelayLedgerRepository`** (`Percolator.Domain.Delivery.Ports`):
+  - **Adapter**: `SqliteRelayLedgerRepository`. Relay-side persistence for `RelayGroupLedger` aggregate roots, tracking epoch state transitions and group roster mutation logs.
 - **`IRelayProfileRepository`** (`Percolator.Domain.Delivery.Ports`):
   - **Adapter**: `SqliteRelayProfileRepository`. Backs `RelayHostedProfileSlot` aggregates on the `relay_profile_slots` table (`blinded_locator` BLOB PRIMARY KEY, `write_token` BLOB, `nonce` BLOB, `ciphertext` BLOB, `revision` INTEGER, `updated_at_utc` INTEGER, `expires_at_utc` INTEGER). Supports $O(1)$ indexed slot lookups (`GetSlotAsync`), atomic slot creation/updates (`SaveSlotAsync`), and write-token verified deletion (`DeleteSlotAsync`).
 - **`IChatMessageRepository`** (`Percolator.Apps.Chat.Ports`):
@@ -505,13 +513,15 @@ Database Engine: Encrypted SQLite using SQLCipher (`SQLitePCLRaw.bundle_e_sqlcip
     - Fetches encrypted profile ciphertext packages anonymously from relays or direct peers out-of-band via `UnauthenticatedDeliveryService.GetProfile` presenting solely the recipient `BlindedLocator`.
     - Publishes encrypted profile ciphertext packages to relays out-of-band via `UnauthenticatedDeliveryService.UploadProfile` presenting solely `BlindedLocator` and `WriteToken`.
     - Deletes stale profile slots from relays upon key rotation via `UnauthenticatedDeliveryService.DeleteProfile` presenting `BlindedLocator` and `WriteToken`.
+  - **`IProfileDeliveryClient`** (`Percolator.PluginSdk.Profiles`):
+    - **Adapter**: `GrpcProfileDeliveryClient`. Dispatches unauthenticated profile capability RPCs (`GetProfile`, `UploadProfile`, `DeleteProfile`) to remote relays and direct peer nodes over gRPC.
   - **Discovery Client & PreKey Adapters (`Percolator.Apps.Discovery.Ports`)**:
     - **`DiscoveryQueryClient`** (`INearbyDiscoveryQueryClientPort`):
       - Connects to a target relay or peer gRPC endpoint to execute `NearbyDiscoveryQueryProto` requests. Enforces `DiscoveryResultLimit` clamping (1–100), deserializes `NearbyDiscoveryResponseProto`, and returns sanitized `IReadOnlyList<PeerDiscoveryDescriptor>` with `DeliveryRoute.RelayedOneToOne`.
     - **`DiscoveryHandshakeAdapter`** (`IDiscoveryHandshakePort`):
       - Initiates mutual X3DH / Double Ratchet handshake with a discovered candidate peer. Bridges to the application handshake workflow / pending handshake queue to establish an authenticated direct or relayed E2EE session.
     - **`PreKeyAvailabilityAdapter`** (`IPreKeyAvailabilityPort`):
-      - Checks local relay directory (`IRelayPreKeyDirectoryRepository`) or prekey registry to verify whether an active Signed PreKey (SPK) is available for admission gate validation.
+      - Checks local relay directory (`IRelayPreKeyRepository`) or prekey registry to verify whether an active Signed PreKey (SPK) is available for admission gate validation.
     - **`PreKeyBundleProviderAdapter`** (`IPreKeyBundleProvider`):
       - Fetches the active prekey bundle (Identity Key, Signed PreKey + signature, and optional One-Time PreKey) for a discovered peer upon user connection intent, deferring bundle retrieval until Step 2 to prevent OPK exhaustion.
 
@@ -533,7 +543,7 @@ Database Engine: Encrypted SQLite using SQLCipher (`SQLitePCLRaw.bundle_e_sqlcip
 - **Research Scope & Target Adapters**:
   - **`DisappearingMessageEvictionWorker`**: Scheduled cron worker (running every 30 seconds) calling `IChatMessageRepository.PurgeExpiredMessagesAsync(now)` to delete messages past `expires_at_utc` and invoking `IBlobStorageService.DeleteLocalCacheAsync` for deleted media blobs.
   - **`OutboxRetentionPruner`**: Evaluates retention window policies for `OutboxJob` rows (e.g., pruning `Delivered` jobs older than 7 days, purging dead-letter jobs that have exceeded `MaxRetryCount` and manual inspection windows).
-  - **`RelayPreKeyDirectoryPruner`**: Evicts expired signed pre-key bundles and consumed or timed-out one-time pre-keys from `IRelayPreKeyDirectoryRepository` environmental records.\
+  - **`RelayPreKeyDirectoryPruner`**: Evicts expired signed pre-key bundles and consumed or timed-out one-time pre-keys from `IRelayPreKeyRepository` environmental records.\
   - **`RelayProfileSlotPruner`**: Scheduled background worker running periodically on relays. Evicts expired profile slots from `relay_profile_slots` in `SqliteRelayProfileRepository` where `expires_at_utc < now` or slots abandoned past retention windows (e.g. 30 days without update), reclaiming storage without locking active lookups.
   - **`UnknownGroupMessageCachePruner`**: Purges buffered group chat frames from `IUnknownGroupMessageCacheRepository` that exceed maximum TTL (e.g. 48 hours) where the author's sender key distribution was never received.
   - **`AbandonedInvitePruner`**: Scans inbound contact requests (`PeerContactState.PendingApproval`), pending handshake envelopes in `IPendingHandshakeRepository`, and group invitations (`PendingGroupInvitation`) exceeding local expiration policies (e.g. 14 days without user response) and marks or purges them.
@@ -568,6 +578,8 @@ Database Engine: Encrypted SQLite using SQLCipher (`SQLitePCLRaw.bundle_e_sqlcip
 - **`PeerStreamBlobClient`** (`Percolator.Application.Ports.IPeerStreamBlobClient`):
   - Multiplexed data stream client operating over active direct peer connections registered in `IStreamRegistry`.
   - Serves chunks on demand for 1:1 Direct P2P channels where both peers are online.
+- **`IChannelRelayResolver`** (`Percolator.Application.Ports`):
+  - **Adapter**: `ChannelRelayResolver`. Resolves active relay endpoints for out-of-band blob storage on a per-channel basis from channel metadata or local routing configurations.
 - **`LocalFileChunkStore`** (`Percolator.Application.Ports.ILocalChunkStore`):
   - Persistent file-system backed chunk store located in the application data directory (`%AppData%/Percolator/Blobs/`).
   - **Atomic File Writes**: Writes incoming chunks to a `.tmp` file and atomically commits via `File.Move(..., overwrite: true)` upon completion to prevent corrupted partial files.
@@ -585,6 +597,8 @@ Concrete realization of out-of-band high-speed croc-inspired and BitTorrent swar
 #### 1. Multi-Stream Sockets & Binary Framing Engine
 - **`TcpMultiStreamPool` & `TransferStream`** (`ITransferStreamPool`, `ITransferStreamPoolFactory`, `ITransferStream`):
   - Opens and manages a pool of 4 to 8 parallel multiplexed TCP/QUIC connections with `TCP_NODELAY = true`.
+- **`INetworkEndpointDiscoveryPort`** (`Percolator.Apps.FileTransfer.Ports`):
+  - **Adapter**: `NetworkInterfaceEndpointDiscoveryPort`. Discovers local LAN candidate endpoints by querying non-loopback active `NetworkInterface` unicast IP addresses, enabling direct P2P socket stream dialing.
   - Implements the binary length-prefixed framing wire protocol using `StreamAuthToken`, `BaseNonce`, `ChunkNonce`, and `TransferKey`:
     - `0x01 STREAM_HANDSHAKE`: Handshake with `SessionId`, `StreamIndex`, `StreamAuthToken`, and `SenderPeerId`.
     - `0x02 BITFIELD`: Bitfield declaration of possessed chunks.
