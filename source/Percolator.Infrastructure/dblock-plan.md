@@ -5,8 +5,8 @@
 - [x] Lens 2: Onion Architecture & Primitive Obsession (Status: Approved)
 - [x] Lens 3: Threat Modeling & Security Posture (Status: Approved)
 - [x] Lens 4: High-Value, Low-Brittle Unit Test Design (Status: Approved)
-- [ ] Lens 5: Cross-Layer Infrastructure Alignment (Status: Pending)
-- [ ] Implementation Gate: LOCKED (Requires Approval of Lenses 1-5)
+- [x] Lens 5: Cross-Layer Infrastructure Alignment (Status: Approved)
+- [ ] Implementation Gate: LOCKED (Awaiting Final User Confirmation to Begin Implementation)
 
 ---
 
@@ -45,7 +45,9 @@
 - **No Master Password Persistence**: The master passphrase is never cached on disk, DPAPI, or OS keychain without explicit user unlock.
 - **No Repository Resolution in Bootstrap Container**: No repository or DbContext may be registered or resolved in the root DI container.
 
----\n## 2. Cross-Layer Architecture & Strict Onion Boundaries
+---
+
+## 2. Cross-Layer Architecture & Strict Onion Boundaries
 
 All dependencies point strictly inward toward `Percolator.Domain`. `Percolator.Application` has zero references to `Percolator.Infrastructure` or `Google.Protobuf`.
 
@@ -271,7 +273,7 @@ public interface IDatabaseUnlockCoordinator
     /// Initializes new database with master passphrase and optional duress passphrase.
     /// Generates salt, derives master key, encrypts slots, verifies canary, runs initial migrations.
     /// </summary>
-    Task<Result<IAuthenticatedSession>> InitializeAsync(
+    Task<DomainResult<IAuthenticatedSession>> InitializeAsync(
         VaultPassphrase masterPassword, 
         VaultPassphrase? duressPassword = null, 
         CancellationToken ct = default);
@@ -288,7 +290,7 @@ public interface IDatabaseUnlockCoordinator
     /// Updates the master password within an active authenticated session by re-wrapping the database key in the master slot.
     /// Does not require re-encrypting the underlying SQLite database file (O(1) operation).
     /// </summary>
-    Task<Result> ChangeMasterPasswordAsync(
+    Task<DomainResult> ChangeMasterPasswordAsync(
         VaultPassphrase currentPassword, 
         VaultPassphrase newPassword, 
         CancellationToken ct = default);
@@ -296,7 +298,7 @@ public interface IDatabaseUnlockCoordinator
     /// <summary>
     /// Sets, updates, or clears (if null or empty) the emergency duress passphrase within an active session.
     /// </summary>
-    Task<Result> ConfigureDuressPasswordAsync(
+    Task<DomainResult> ConfigureDuressPasswordAsync(
         VaultPassphrase? duressPassword, 
         CancellationToken ct = default);
 
@@ -350,17 +352,17 @@ internal interface IHeaderStorage
     /// <summary>
     /// Reads and deserializes percolator.header. Returns failure if file is missing or corrupted.
     /// </summary>
-    Task<Result<DatabaseHeader>> ReadHeaderAsync(CancellationToken ct = default);
+    Task<DomainResult<DatabaseHeader>> ReadHeaderAsync(CancellationToken ct = default);
 
     /// <summary>
     /// Atomically writes DatabaseHeader to percolator.header via temporary file flush and replace.
     /// </summary>
-    Task<Result> WriteHeaderAsync(DatabaseHeader header, CancellationToken ct = default);
+    Task<DomainResult> WriteHeaderAsync(DatabaseHeader header, CancellationToken ct = default);
 
     /// <summary>
     /// Overwrites percolator.header with random bytes before deleting it from disk.
     /// </summary>
-    Task<Result> OverwriteAndWipeAsync(CancellationToken ct = default);
+    Task<DomainResult> OverwriteAndWipeAsync(CancellationToken ct = default);
 }
 ```
 
@@ -516,8 +518,7 @@ public async Task ExecuteWipeAsync(CancellationToken ct = default)
    - Validates `currentPassword` against active `IMasterKeyHandle` in the authenticated session.
    - Derives new $K_{\text{new\_master}} = \text{Argon2id}(\text{newPassword}, \text{header.Salt})$.
    - Uses `IMasterKeyHandle.WithKeySpan` to retrieve the active 32-byte $K_{\text{db}}$.
-   - Re-encrypts $K_{\text{db}}$ using ChaCha20-Poly1305 under $K_{\text{new\_master}}$ with a fresh 12-byte nonce.
-   - **Duress Slot Preservation**: Because `header.Salt` is retained, the existing duress slot remains 100% valid without requiring the user to re-enter their duress passphrase!
+   - Re-encrypts $K_{\text{db}}$ using ChaCha20-Poly1305 under $K_{\text{new\_master}}$ with a fresh 12-byte nonce.\n   - **Duress Slot Preservation**: Because `header.Salt` is retained, the existing duress slot remains 100% valid without requiring the user to re-enter their duress passphrase!
    - Atomically overwrites `percolator.header` via `IHeaderStorage`.
    - Zeroizes temporary keys via `ISensitiveSecret.Zeroize()`.
    - **Performance Guarantee**: Because $K_{\text{db}}$ remains identical, zero SQLite tables or pages are rewritten. Operation completes in $< 200\text{ ms}$ with zero risk of database corruption.
@@ -550,33 +551,83 @@ public async Task ExecuteWipeAsync(CancellationToken ct = default)
 | **Explicit SQLite Canary Error Verification** | Corrupted database file or invalid key | Canary probe traps `SqliteException` with `SqliteErrorCode == 26` (`SQLITE_NOTADB`) and returns controlled failure without crashing process | Directly tests researched native SQLite error code 26 trap |
 | **In-Session Locking & Memory Zeroization** | Active authenticated session | Calling `LockAsync()` flushes connection pools (`ClearAllPools()`), marks `MasterKeyHandle.IsZeroized == true`, disposes host container, transitions status to `Locked`; subsequent calls to `IMasterKeyHandle` throw `ObjectDisposedException` | Asserts security invariant that unmanaged key memory is zeroized and post-lock access is strictly blocked |
 | **Master Password Change & Duress Preservation** | Valid current master + New master | Re-wraps master slot with new key; underlying database remains readable; subsequent unlock requires new master password; **existing duress password still successfully triggers duress wipe** | Verifies envelope re-wrapping and duress slot retention across salt reuse |
-| **Master Password Change Rejection** | Invalid current master + New master | Returns `Result.Failure`; `percolator.header` remains byte-for-byte identical on disk; original master password remains valid | Asserts rejection and guarantees zero disk mutations on invalid current credentials |
-| **Cross-Passphrase Collision Rejection** | Duress == Master password | `InitializeAsync` or `ConfigureDuressPasswordAsync` detects identical passphrases via constant-time comparison and returns `Result.Failure`; header is untouched | Asserts domain invariant preventing ambiguous master/duress slot collisions |
+| **Master Password Change Rejection** | Invalid current master + New master | Returns `DomainResult.Failure`; `percolator.header` remains byte-for-byte identical on disk; original master password remains valid | Asserts rejection and guarantees zero disk mutations on invalid current credentials |
+| **Cross-Passphrase Collision Rejection** | Duress == Master password | `InitializeAsync` or `ConfigureDuressPasswordAsync` detects identical passphrases via constant-time comparison and returns `DomainResult.Failure`; header is untouched | Asserts domain invariant preventing ambiguous master/duress slot collisions |
 | **Duress Clear in Session** | Active session clears duress (`null`) | Overwrites duress slot with CSPRNG noise; previous duress password returns `UnlockResult.InvalidCredentials` on subsequent attempt | Verifies duress deactivation wipes duress capability cleanly |
 | **Corrupted / Truncated Header Trapping** | 0-byte or corrupted `percolator.header` | `DetermineStatusAsync` traps `InvalidProtocolBufferException` or invalid header lengths gracefully, returning structured failure without process crash | Asserts fault tolerance against disk corruption |
 | **`VaultPassphrase` UTF-8 & Exception Zeroization** | Multi-byte Unicode (emojis `🔑🛡️`); callback throwing exception | Extracts exact UTF-8 byte span; `finally` block guarantees zeroization even when consumer delegate throws; post-dispose access throws `ObjectDisposedException` | Asserts memory hygiene and encoding correctness of core secret value object |
 
 ---
 
-## 6. Cross-Layer Infrastructure Alignment
+## 6. Cross-Layer Infrastructure Alignment (Lens 5)
 
+### 6.1 Package & Assembly Tooling Alignment
 - **Required NuGet Packages in `Percolator.Infrastructure.csproj`**:
-  - `Microsoft.EntityFrameworkCore.Sqlite.Core` (EF Core SQLite)
-  - `SQLitePCLRaw.bundle_e_sqlcipher` (Native SQLCipher bundle)
-  - `Konscious.Security.Cryptography.Argon2` (Argon2id key derivation)
-  - `Google.Protobuf` (Existing - serializes `DatabaseHeader`)
-- **Bootstrap Initialization Call**:
-  - `SQLitePCL.Batteries_V2.Init()` executed in `AddBootstrapInfrastructure()`.
-- **Database File Layout**:
-  - `%LocalAppData%/Percolator/percolator.header` (Protobuf header containing salt + slots)
-  - `%LocalAppData%/Percolator/percolator.db` (Encrypted database)
-  - `%LocalAppData%/Percolator/percolator.db-wal` (WAL journal)
-  - `%LocalAppData%/Percolator/percolator.db-shm` (Shared memory index)
-- **Adapters Registered in DI**:
-  - *Bootstrap Container*:
-    - `IDatabaseUnlockCoordinator` $\rightarrow$ `SqlCipherDatabaseUnlockCoordinator`
-    - `IDuressWipeHandler` $\rightarrow$ `DuressWipeHandler`
-  - *Authenticated Container*:
-    - `IMasterKeyHandle` $\rightarrow$ `MasterKeyHandle`
-    - `DbConnectionInterceptor` $\rightarrow$ `SqlCipherPragmaInterceptor`
-    - `IAuthenticatedSession` $\rightarrow$ `AuthenticatedSession`
+  - `Microsoft.EntityFrameworkCore.Sqlite.Core` (v10.x): EF Core SQLite provider without pulling in bundled unencrypted SQLite.
+  - `SQLitePCLRaw.bundle_e_sqlcipher` (v2.1.x+): Native SQLCipher C-library bundle and C-API bindings (`SQLitePCL.raw.sqlite3_key`).
+  - `Konscious.Security.Cryptography.Argon2` (v1.3.x): Managed memory-hard Argon2id key derivation engine.
+  - `Google.Protobuf` (v3.25.2, existing): Compiles `DatabaseHeader.proto`.
+  - `Grpc.Tools` (v2.57.0, existing): Protobuf code generator.
+- **Native SQLCipher Bootstrap Initialization**:
+  - Executed in `InfrastructureServiceCollectionExtensions.AddBootstrapInfrastructure()`:
+    ```csharp
+    SQLitePCL.Batteries_V2.Init();
+    ```
+  - Initializes unmanaged SQLite provider hooks before any connection handles or canary probes are allocated.
+
+### 6.2 Domain Kernel & Port Alignment
+- **Result Type Standardization**: All application ports and infrastructure adapters standardize strictly on `Percolator.Domain.Common.DomainResult` and `DomainResult<T>` from `Percolator.Domain.Kernel`.
+- **In-Memory Key Port Deprecation**:
+  - Legacy references to `IMasterKeyProtector` / `MasterKeyProtector` across all plans are superseded by `Percolator.Domain.Security.Ports.IMasterKeyHandle` and `Percolator.Infrastructure.Vault.MasterKeyHandle`.
+  - Eliminates managed string allocations by applying keys directly via `SQLitePCL.raw.sqlite3_key(connection.Handle, key32Bytes)`.
+- **Unlock Result Representation**:
+  - Legacy enum representations (`UnlockOutcome`) are superseded by the discriminated record union `Percolator.Domain.Security.ValueObjects.UnlockResult` (`Success(IAuthenticatedSession Session)`, `DuressActivated`, `InvalidCredentials`).
+- **Protobuf Storage Encapsulation**:
+  - `IHeaderStorage` is internal to `Percolator.Infrastructure.Vault`. `Percolator.Application` contains zero references to `Google.Protobuf` or `DatabaseHeader`.
+- **Zero DPAPI Master Key Persistence**:
+  - The vault master key $K_{\text{db}}$ is never persisted to disk or Windows DPAPI. It exists only in pinned memory via `IMasterKeyHandle` for the active duration of the authenticated session.
+
+### 6.3 Two-Stage DI Registration & Container Boundaries
+
+```mermaid
+flowchart TD
+    subgraph Stage1["Stage 1: Bootstrap Container (App.axaml.cs)"]
+        direction TB
+        B1["IDatabaseUnlockCoordinator -> SqlCipherDatabaseUnlockCoordinator (Singleton)"]
+        B2["IDuressWipeHandler -> DuressWipeHandler (Transient)"]
+        B3["IHeaderStorage -> ProtobufHeaderStorage (Internal Transient)"]
+        B4["IDateTimeProvider -> SystemDateTimeProvider"]
+        B5["UnlockViewModel & WindowHandoffCoordinator"]
+    end
+
+    subgraph Stage2["Stage 2: Authenticated Host (Stage2HostFactory)"]
+        direction TB
+        A1["IMasterKeyHandle -> MasterKeyHandle (Scoped to Session, Pinned Memory)"]
+        A2["DbConnectionInterceptor -> SqlCipherPragmaInterceptor"]
+        A3["PercolatorDbContext (Scoped / Pooled with Interceptor)"]
+        A4["All 57 Domain Repositories & Query Services"]
+        A5["All IHostedService Background Workers"]
+    end
+
+    Stage1 -->|"UnlockAsync() Success"| Stage2
+    Stage2 -->|"LockAsync() Teardown"| Stage1
+```
+
+- **Stage 1 (Bootstrap Container)**: Zero DbContexts, zero repositories, zero background sync workers.
+- **Stage 2 (Authenticated Host - `IHost`)**: Built post-canary inside `CompleteMasterUnlockAsync`. Instantiates `PercolatorDbContext`, binds `SqlCipherPragmaInterceptor`, executes `Database.MigrateAsync()`, and launches `IHostedService` instances upon `session.StartAsync()`.
+
+### 6.4 Relocking & Teardown Lifecycle Flow
+
+When `IDatabaseUnlockCoordinator.LockAsync()` is called:
+1. `await _authenticatedHost.StopAsync()`: Gracefully halts all running `IHostedService` background workers.
+2. `SqliteConnection.ClearAllPools()`: Forcibly closes and evicts all pooled unmanaged SQLite connections, releasing physical disk handles on `percolator.db`.
+3. `_masterKeyHandle.Dispose()`: Invokes `CryptographicOperations.ZeroMemory` on the pinned 32-byte key buffer.
+4. `await _authenticatedHost.DisposeAsync()`: Disposes the Stage 2 container and purges all repository instances from RAM.
+5. `Status = DatabaseSetupStatus.Locked`: Updates coordinator state.
+6. `WindowHandoffCoordinator` closes `MainWindow` and re-opens `UnlockWindow`.
+
+### 6.5 Physical Disk Layout
+- `%LocalAppData%/Percolator/percolator.header` (Protobuf header containing Argon2id salt + twin slots)
+- `%LocalAppData%/Percolator/percolator.db` (AES-256-CBC encrypted SQLite database)
+- `%LocalAppData%/Percolator/percolator.db-wal` (SQLite WAL journal)
+- `%LocalAppData%/Percolator/percolator.db-shm` (SQLite shared memory index)
