@@ -3,8 +3,8 @@
 ## Refinement Status Gate
 - [x] Lens 1: Scope & Feature Slice Framing (Status: Approved)
 - [x] Lens 2: Onion Architecture & Primitive Obsession (Status: Approved)
-- [x] Lens 3: Threat Modeling & Security Posture (Status: In Review)
-- [ ] Lens 4: High-Value, Low-Brittle Unit Test Design (Status: Pending)
+- [x] Lens 3: Threat Modeling & Security Posture (Status: Approved)
+- [x] Lens 4: High-Value, Low-Brittle Unit Test Design (Status: Approved)
 - [ ] Lens 5: Cross-Layer Infrastructure Alignment (Status: Pending)
 - [ ] Implementation Gate: LOCKED (Requires Approval of Lenses 1-5)
 
@@ -26,7 +26,7 @@
   - When the duress passphrase is typed at `UnlockWindow`, the system triggers an immediate **Crypto-Shredding Pipeline** destroying the header in $< 2\text{ ms}$ and smoothly transitions the UI to a **Decoy State (Fresh App)** without disk thrashing, error popups, or crash signatures.
 - **$O(1)$ Master Password Envelope Re-Wrapping**:
   - Because the database encryption key $K_{\text{db}}$ is stored wrapped in the Master Slot using $K_{\text{master}} = \text{Argon2id}(\text{passphrase}, \text{salt})$, changing the master password in an authenticated session does **not** require re-encrypting the underlying SQLite database file (`PRAGMA rekey`).
-  - Changing the master password is an instantaneous $O(1)$ operation: derive new $K_{\text{master}}$, re-encrypt the 32-byte $K_{\text{db}}$, and atomically rewrite `percolator.header`.
+  - Changing the master password is an instantaneous $O(1)$ operation: derive new $K_{\text{master}}$, re-encrypt the 32-byte $K_{\text{db}}$ with a fresh nonce, and atomically rewrite `percolator.header`. The duress slot remains completely intact.
 - **Argon2id Key Derivation**: Derive 256-bit keys from passphrases using Argon2id ($m=64\text{ MB}$, $t=3\text{ iterations}$, $p=4\text{ lanes}$) salted with the 16-byte random salt from `percolator.header`.
 - **Canary Validation**: Verify the derived master key on an isolated probe connection using `SELECT count(*) FROM sqlite_master;` before initializing EF Core or connection pools, explicitly trapping native error code 26 (`SQLITE_NOTADB`).
 - **Dynamic Post-Canary Schema Migrations**: Execute EF Core / SQLite migrations (`Database.MigrateAsync()`) immediately post-canary prior to resolving application repositories.
@@ -45,9 +45,7 @@
 - **No Master Password Persistence**: The master passphrase is never cached on disk, DPAPI, or OS keychain without explicit user unlock.
 - **No Repository Resolution in Bootstrap Container**: No repository or DbContext may be registered or resolved in the root DI container.
 
----
-
-## 2. Cross-Layer Architecture & Strict Onion Boundaries
+---\n## 2. Cross-Layer Architecture & Strict Onion Boundaries
 
 All dependencies point strictly inward toward `Percolator.Domain`. `Percolator.Application` has zero references to `Percolator.Infrastructure` or `Google.Protobuf`.
 
@@ -492,12 +490,22 @@ public async Task ExecuteWipeAsync(CancellationToken ct = default)
     var dbFiles = new[] { GetPath("percolator.db"), GetPath("percolator.db-wal"), GetPath("percolator.db-shm") };
     foreach (var path in dbFiles)
     {
-        if (File.Exists(path)) File.Delete(path);
+        try
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+        catch (IOException)
+        {
+            // Even if file deletion is blocked by OS lock, Kdb is already destroyed permanently
+        }
     }
 
     // 4. Purge local cache and staging directories
     var cacheDir = GetPath("cache");
-    if (Directory.Exists(cacheDir)) Directory.Delete(cacheDir, recursive: true);
+    if (Directory.Exists(cacheDir))
+    {
+        try { Directory.Delete(cacheDir, recursive: true); } catch (IOException) { }
+    }
 }
 ```
 
@@ -506,11 +514,10 @@ public async Task ExecuteWipeAsync(CancellationToken ct = default)
 2. User provides `currentPassword` and `newPassword`.
 3. `ChangeMasterPasswordAsync`:
    - Validates `currentPassword` against active `IMasterKeyHandle` in the authenticated session.
-   - Generates a fresh 16-byte random salt.
-   - Derives new $K_{\text{new\_master}} = \text{Argon2id}(\text{newPassword}, \text{newSalt})$.
+   - Derives new $K_{\text{new\_master}} = \text{Argon2id}(\text{newPassword}, \text{header.Salt})$.
    - Uses `IMasterKeyHandle.WithKeySpan` to retrieve the active 32-byte $K_{\text{db}}$.
    - Re-encrypts $K_{\text{db}}$ using ChaCha20-Poly1305 under $K_{\text{new\_master}}$ with a fresh 12-byte nonce.
-   - Preserves or re-encrypts the duress slot under the new salt.
+   - **Duress Slot Preservation**: Because `header.Salt` is retained, the existing duress slot remains 100% valid without requiring the user to re-enter their duress passphrase!
    - Atomically overwrites `percolator.header` via `IHeaderStorage`.
    - Zeroizes temporary keys via `ISensitiveSecret.Zeroize()`.
    - **Performance Guarantee**: Because $K_{\text{db}}$ remains identical, zero SQLite tables or pages are rewritten. Operation completes in $< 200\text{ ms}$ with zero risk of database corruption.
@@ -521,7 +528,7 @@ public async Task ExecuteWipeAsync(CancellationToken ct = default)
 
 | Threat / Vulnerability | Concrete Protocol Defense | Verification Mechanism |
 | :--- | :--- | :--- |
-| **Forensic Plausible Deniability** | **Twin-Slot Layout**: Both Master and Duress slots are fixed at exactly 48 bytes (32-byte payload + 16-byte Poly1305 tag). When duress is inactive, the slot is filled with uniform CSPRNG random bytes. No flags, hashes, or boolean markers exist on disk. | Forensic entropy unit test compares active vs. dummy duress slots, asserting statistical indistinguishability. |
+| **Forensic Plausible Deniability** | **Twin-Slot Layout**: Both Master and Duress slots are fixed at exactly 48 bytes (32-byte payload + 16-byte Poly1305 tag). When duress is inactive, the slot is filled with uniform CSPRNG random bytes. No flags, hashes, or boolean markers exist on disk. | Cryptographic wire invariant unit test asserts identical serialized message structure and payload length; candidate key trial against dummy slot throws `AuthenticationTagMismatchException`. |
 | **SSD Wear-Leveling & Remanence** | **Instant Key Envelope Destruction**: `percolator.db` is encrypted with the 32-byte AES-256 key $K_{\text{db}}$. Overwriting the 120-byte `percolator.header` with hardware flush (`flushToDisk: true`) permanently destroys $K_{\text{db}}$ in $< 2\text{ ms}$, rendering all physical NAND blocks unrecoverable without observable disk latency. | Unit test executes `ExecuteWipeAsync`, asserting header is overwritten with random bytes and all files deleted. |
 | **Timing Side-Channel Attacks** | **Single-KDF Pass**: Argon2id is computed exactly once per candidate attempt ($K_{\text{cand}}$). ChaCha20-Poly1305 trials on Master vs. Duress slots take sub-microsecond time. Sentinel verification uses `CryptographicOperations.FixedTimeEquals`. | Unit test verifies candidate key is derived only once; asserts constant-time equality evaluation. |
 | **Coercion & Decoy Safety** | **Silent Decoy Transition**: Entering the duress passphrase executes shredding ($< 20\text{ ms}$) and immediately transitions the UI into a clean first-run setup window (`IdentityGateWindow`) without alerts or abnormal crash logs. | UI integration test verifies `UnlockResult.DuressActivated` transitions directly to decoy setup without crash signatures. |
@@ -531,20 +538,23 @@ public async Task ExecuteWipeAsync(CancellationToken ct = default)
 
 ---
 
-## 5. High-Value Unit Testing Matrix
+## 5. High-Value Unit Testing Matrix (Lens 4)
 
 | Test Scenario | Input / State | Expected Observable Behavior | Low-Brittle Guarantee |
 | :--- | :--- | :--- | :--- |
-| **First-Time Setup (With Duress)** | Master password + Duress password | Creates `DatabaseHeader` with valid master slot and encrypted duress slot; returns session | Asserts result success; verifies header file exists |
-| **First-Time Setup (Without Duress)** | Master password only | Creates `DatabaseHeader` with valid master slot and dummy random duress slot; returns session | Asserts dummy slot length == 48 bytes |
-| **Normal Unlock** | Valid master password | Unlocks master slot, canary passes, migrations execute, returns `UnlockResult.Success(session)` | Asserts session is non-null and ready |
-| **Duress Unlock Triggered** | Valid duress password | Decrypts duress slot, executes `IDuressWipeHandler`, deletes database/header files, returns `UnlockResult.DuressActivated` | Verifies disk files are deleted and status is `Uninitialized` |
-| **Invalid Passphrase Attempt** | Incorrect password | Fails both master and duress slots, returns `UnlockResult.InvalidCredentials`, zero wipe occurs | Asserts result type; verifies database files remain intact |
-| **Canary Error Verification** | Corrupted database file or bad key | Traps `SqliteException` with `SqliteErrorCode == 26`, returns failure without crashing | Tests explicit `SQLITE_NOTADB` error trap |
-| **Master Password Change** | Current password + New password | Re-wraps master slot with new key; database remains fully readable; subsequent unlock requires new password | Tests end-to-end master password re-wrap |
-| **Duress Update in Session** | Authenticated session sets new duress key | Re-encrypts duress slot in `DatabaseHeader`; subsequent duress unlock succeeds with new key | Tests end-to-end configuration transition |
-| **Duress Clear in Session** | Authenticated session clears duress key | Overwrites duress slot with random noise; prior duress password no longer triggers wipe | Verifies former duress password returns invalid passphrase |
-| **Crypto-Shredding Performance & Removal** | Invoking `ExecuteWipeAsync` | Overwrites header with random bytes + hardware flush, deletes files, purges cache directory in < 50ms | Verifies target files are absent post-execution |
+| **Blank Password Setup & SQLCipher Enforcement** | `VaultPassphrase.Empty` (`""`) | Creates `percolator.header` with valid salt + encrypted master slot; raw unkeyed SQLite connection to `percolator.db` fails with native code 26 (`SQLITE_NOTADB`); unlocking with `VaultPassphrase.Empty` succeeds and returns active session | Verifies database is genuinely encrypted under SQLCipher even with a blank password |
+| **Happy Path Master Unlock** | Correct master password | Unlocks master slot, canary probe succeeds, migrations execute, returns `UnlockResult.Success(session)` with operational service provider | Asserts observable session creation and service provider resolution |
+| **Plausible Deniability Wire & Decryption Invariant** | Setup with master password only | Duress slot serialized wire size is identical (12-byte nonce + 48-byte payload); attempting decryption with any key throws `AuthenticationTagMismatchException`; bytes are non-zero | Tests structural wire parity and cryptographic failure invariants without brittle statistical entropy bounds |
+| **Duress Shredding & File-Lock Fault Tolerance** | Valid duress password with OS file lock on `percolator.db` | Overwrites `percolator.header` with random bytes and flushes to disk in $< 2\text{ ms}$; catches secondary `IOException` on locked DB file without throwing; transitions status to `Uninitialized`; returns `UnlockResult.DuressActivated` | Verifies key destruction takes absolute precedence over secondary file deletion and survives external OS locks |
+| **Invalid Passphrase Attempt** | Incorrect password | Fails both master and duress slot decryption; returns `UnlockResult.InvalidCredentials`; zero files modified or deleted | Asserts negative authentication result; verifies zero side-effects on disk |
+| **Explicit SQLite Canary Error Verification** | Corrupted database file or invalid key | Canary probe traps `SqliteException` with `SqliteErrorCode == 26` (`SQLITE_NOTADB`) and returns controlled failure without crashing process | Directly tests researched native SQLite error code 26 trap |
+| **In-Session Locking & Memory Zeroization** | Active authenticated session | Calling `LockAsync()` flushes connection pools (`ClearAllPools()`), marks `MasterKeyHandle.IsZeroized == true`, disposes host container, transitions status to `Locked`; subsequent calls to `IMasterKeyHandle` throw `ObjectDisposedException` | Asserts security invariant that unmanaged key memory is zeroized and post-lock access is strictly blocked |
+| **Master Password Change & Duress Preservation** | Valid current master + New master | Re-wraps master slot with new key; underlying database remains readable; subsequent unlock requires new master password; **existing duress password still successfully triggers duress wipe** | Verifies envelope re-wrapping and duress slot retention across salt reuse |
+| **Master Password Change Rejection** | Invalid current master + New master | Returns `Result.Failure`; `percolator.header` remains byte-for-byte identical on disk; original master password remains valid | Asserts rejection and guarantees zero disk mutations on invalid current credentials |
+| **Cross-Passphrase Collision Rejection** | Duress == Master password | `InitializeAsync` or `ConfigureDuressPasswordAsync` detects identical passphrases via constant-time comparison and returns `Result.Failure`; header is untouched | Asserts domain invariant preventing ambiguous master/duress slot collisions |
+| **Duress Clear in Session** | Active session clears duress (`null`) | Overwrites duress slot with CSPRNG noise; previous duress password returns `UnlockResult.InvalidCredentials` on subsequent attempt | Verifies duress deactivation wipes duress capability cleanly |
+| **Corrupted / Truncated Header Trapping** | 0-byte or corrupted `percolator.header` | `DetermineStatusAsync` traps `InvalidProtocolBufferException` or invalid header lengths gracefully, returning structured failure without process crash | Asserts fault tolerance against disk corruption |
+| **`VaultPassphrase` UTF-8 & Exception Zeroization** | Multi-byte Unicode (emojis `🔑🛡️`); callback throwing exception | Extracts exact UTF-8 byte span; `finally` block guarantees zeroization even when consumer delegate throws; post-dispose access throws `ObjectDisposedException` | Asserts memory hygiene and encoding correctness of core secret value object |
 
 ---
 
