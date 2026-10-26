@@ -6,7 +6,7 @@
 - [x] Lens 3: Threat Modeling & Security Posture (Status: Approved)
 - [x] Lens 4: High-Value, Low-Brittle Unit Test Design (Status: Approved)
 - [x] Lens 5: Cross-Layer Infrastructure Alignment (Status: Approved)
-- [ ] Implementation Gate: LOCKED (Awaiting Final User Confirmation to Begin Implementation)
+- [x] Implementation Gate: UNLOCKED
 
 ---
 
@@ -21,8 +21,7 @@
   - Binary header format using Protocol Buffers (`DatabaseHeader.proto`) compiled exclusively in `Percolator.Infrastructure`.
   - Contains an Argon2id salt and two fixed-size cryptographic slots: **Master Slot** and **Duress Slot**.
   - **Plausible Deniability Invariant**: When no duress password is set, the Duress Slot is filled with cryptographically secure random bytes of identical length. To forensic disk inspection, the header format and byte distribution are 100% indistinguishable regardless of whether a duress password is configured.
-- **Optional Duress Passphrase & Instant Decoy Transition**:
-  - Users can optionally establish a duress passphrase (cannot be empty or whitespace) during setup or update it later in authenticated Settings.
+- **Optional Duress Passphrase & Instant Decoy Transition**:\n  - Users can optionally establish a duress passphrase (cannot be empty or whitespace) during setup or update it later in authenticated Settings.
   - When the duress passphrase is typed at `UnlockWindow`, the system triggers an immediate **Crypto-Shredding Pipeline** destroying the header in $< 2\text{ ms}$ and smoothly transitions the UI to a **Decoy State (Fresh App)** without disk thrashing, error popups, or crash signatures.
 - **$O(1)$ Master Password Envelope Re-Wrapping**:
   - Because the database encryption key $K_{\text{db}}$ is stored wrapped in the Master Slot using $K_{\text{master}} = \text{Argon2id}(\text{passphrase}, \text{salt})$, changing the master password in an authenticated session does **not** require re-encrypting the underlying SQLite database file (`PRAGMA rekey`).
