@@ -33,6 +33,9 @@ Privacy and cryptographic isolation at rest are foundational to the client:
   * The authenticated session encapsulates a .NET `IHost`. Calling `await session.StartAsync()` automatically discovers and starts all registered `IHostedService` implementations (message outbox dispatchers, swarm transfer workers, DHT pollers).
 * **Window Handoff**:
   * On unlock, `UnlockWindow` closes and `MainWindow` is resolved from `session.Services` and shown.
+* **Emergency Duress Passphrase & Decoy State**:
+  * Users can optionally establish a non-empty emergency duress passphrase distinct from the master password.
+  * Entering this passphrase triggers cryptographic shredding of the database and twin-slot header, followed by a seamless transition to a clean, uninitialized first-launch setup state (decoy state) with zero forensic alerts or crash signatures.
 * **In-Session Secure Lock & Relock**:
   * A prominent "Lock" button in the shell header allows the user to lock the session at any time.
   * Locking performs an orderly security teardown: stops `IHost` (`IHostedService` workers terminate gracefully), drops all SQLite connection pools (`SqliteConnection.ClearAllPools()`), zeroizes the 256-bit master key span in memory via `CryptographicOperations.ZeroMemory`, disposes the authenticated `IHost`, closes `MainWindow`, and reopens `UnlockWindow` from the root bootstrap container.

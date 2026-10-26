@@ -10,8 +10,9 @@
    * **Unified Encrypted SQLite (`percolator.db`)**: All application data resides in a single database encrypted with SQLCipher AES-256-CBC.
    * **Bootstrap Container (Root DI)**: On startup, `App.axaml.cs` builds a lightweight container hosting only core presentation and bootstrap infrastructure (`WindowManager`, `WindowHandoffCoordinator`, `ICryptoEngine`, `SystemDateTimeProvider`, and `IDatabaseUnlockCoordinator`). **Zero SQLite DbContexts, repositories, or background sync workers exist in memory.**
    * **Mandatory Unlock First Screen (`UnlockWindow`)**: The initial window presented on launch.
-     * *First-Time Setup*: Guides user to create a master password. An empty password (`""`) is supported, but triggers an explicit UI confirmation warning before creating the database.
+     * *First-Time Setup*: Guides user to create a master password and optional emergency duress passphrase. An empty master password (`""`) is supported, but triggers an explicit UI confirmation warning before creating the database.
      * *Subsequent Launches (Explicit Unlock)*: Always presents an empty password field requiring the user to explicitly click "Unlock" (even if the master password is blank).
+     * *Duress Kill Switch & Decoy State*: Entering an established duress passphrase triggers cryptographic shredding of the header and SQLite database files, followed by immediate, seamless transition to an uninitialized first-launch setup view (decoy state) with zero forensic alerts or crash signatures.
    * **Canary Verification & Post-Unlock Migration**:
      * Derives a 256-bit key using Argon2id (3 iterations, 64 MB RAM, 4 lanes).
      * Validates passphrase with canary query `SELECT count(*) FROM sqlite_master;`.
@@ -174,15 +175,21 @@ flowchart TD
   - Interacts with `IDatabaseUnlockCoordinator`:
     - Calls `DetermineStatusAsync()` on load to toggle between First-Launch Setup and Subsequent Unlock modes.
     - Password entry field with show/hide password toggle.
-    - Explicit blank password warning: If user leaves password empty and clicks \"Unlock\" / \"Set Password\", present an explicit confirmation dialog (`ContentDialog` alert: *\"Using an empty password leaves your local SQLite database unencrypted at rest. Are you sure you want to proceed?\"*).
+    - Optional expandable Duress Passphrase field during first-time setup (validates non-empty/non-whitespace and distinct from master password).
+    - Explicit blank password warning: If user leaves master password empty and clicks \"Unlock\" / \"Set Password\", present an explicit confirmation dialog (`ContentDialog` alert: *\"Using an empty password leaves your local SQLite database unencrypted at rest. Are you sure you want to proceed?\"*).
     - Asynchronous unlock execution with loading spinner (`IsBusy` state).
-    - Inline error alert displaying validation failures (e.g., *\"Invalid passphrase: could not decrypt percolator.db\"*).
-    - On success, delegates to `IWindowHandoffCoordinator.TransitionToAuthenticatedAsync(session)`.
+    - Evaluates `UnlockResult`:
+      - `UnlockOutcome.Success`: delegates to `IWindowHandoffCoordinator.TransitionToAuthenticatedAsync(session)`.
+      - `UnlockOutcome.DuressDecoyActivated`: delegates to `IWindowHandoffCoordinator.TransitionToDecoyFreshStateAsync()` (presenting a fresh uninitialized setup view).
+      - `UnlockOutcome.InvalidPassphrase`: inline error alert displaying validation failures (*\"Invalid passphrase: could not decrypt percolator.db\"*).
 - [ ] Implement `IWindowHandoffCoordinator` & `WindowHandoffCoordinator`:
   - `Task TransitionToAuthenticatedAsync(IAuthenticatedSession session)`:
     - Calls `await session.StartAsync()` (launching all registered `IHostedService` instances).
     - Resolves `MainWindow` from `session.Services`.
     - Updates `ApplicationLifetime.MainWindow = mainWindow`, displays `mainWindow.Show()`, and closes `unlockWindow`.
+  - `Task TransitionToDecoyFreshStateAsync()`:
+    - Executed upon `UnlockOutcome.DuressDecoyActivated`.
+    - Smoothly transitions the UI back to the uninitialized First-Launch Setup view with zero error popups, alert badges, or forensic crash indicators.
   - `Task LockSessionAsync()`:
     - Deactivates network listeners via `INetworkStealthGate.DeactivateAsync()`.
     - Awaits `IDatabaseUnlockCoordinator.LockAsync()` (stopping `IHost`, clearing SQLite pools, zeroizing key span, disposing host).
@@ -202,6 +209,7 @@ flowchart TD
   - Dark / Light / HighContrast theme switcher utilizing `FluentAvalonia.Styling.FluentAvaloniaTheme`.
   - System accent color auto-detection and custom palette selector.
   - Diagnostic logging level selector (`Information`, `Debug`, `Trace`).
+  - Emergency Duress Passphrase Configuration: allows setting, updating, or removing an emergency duress passphrase via `IDatabaseUnlockCoordinator.ConfigureDuressPasswordAsync(duressPassword)` within the active authenticated session. Enforces non-empty/non-whitespace validation.
 - [ ] Refactor `MainWindow.axaml` & `MainWindowViewModel.cs`:
   - Bind `NavigationView.SelectedItem` cleanly to `NavigationService`.
   - Wire header status chip with live identity count and network state.
@@ -458,8 +466,10 @@ flowchart TD
     - Assert blank password entry prompts confirmation dialog.
     - Assert invalid passphrase sets error message without crashing.
     - Assert valid passphrase calls `IWindowHandoffCoordinator.TransitionToAuthenticatedAsync`.
+    - Assert duress passphrase triggers `IDuressWipeHandler.ExecuteWipeAsync()` and transitions cleanly to `TransitionToDecoyFreshStateAsync` without error popups.
   - Test `WindowHandoffCoordinator`:
     - Assert `TransitionToAuthenticatedAsync` awaits `session.StartAsync()`, opens `MainWindow`, and closes `UnlockWindow`.
+    - Assert `TransitionToDecoyFreshStateAsync` resets UI to clean first-launch setup state.
     - Assert `LockSessionAsync` awaits `coordinator.LockAsync()`, closes `MainWindow`, and opens fresh `UnlockWindow`.
 - [ ] Stealth Mode & Network Gate Verification Tests:
   - Assert zero network sockets are initialized upon test app startup.
