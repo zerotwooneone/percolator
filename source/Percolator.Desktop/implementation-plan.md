@@ -1,5 +1,15 @@
 # Percolator.Desktop Implementation Plan
 
+## Refinement Status Gate
+- [ ] Lens 1: Scope & Feature Slice Framing (Status: Approved)
+- [ ] Lens 2: Onion Architecture & Primitive Obsession (Status: Approved)
+- [ ] Lens 3: Threat Modeling & Security Posture (Status: Approved)
+- [ ] Lens 4: High-Value, Low-Brittle Unit Test Design (Status: Approved)
+- [ ] Lens 5: Cross-Layer Infrastructure Alignment (Status: Approved)
+- [ ] Implementation Gate: LOCKED (Awaiting Final User Confirmation of Chunk Execution Order)
+
+---
+
 ## 1. Executive Summary & Core Architectural Invariants
 
 `Percolator.Desktop` is the cross-platform desktop UI for the Percolator peer-to-peer ecosystem, targeting **Windows, Linux, and macOS** using **Avalonia UI 11.2**, **FluentAvalonia 2.1**, **CommunityToolkit.Mvvm 8.4**, **R3 1.3.1**, **R3Extensions.Avalonia 1.3.1**, and **ObservableCollections.R3 3.3.4** on **.NET 10**.
@@ -7,22 +17,23 @@
 ### 1.1 Architectural & Security Invariants
 
 1. **Two-Stage Container Architecture & Zero-Repository Pre-Unlock Gate**:
-   * **Unified Encrypted SQLite (`percolator.db`)**: All application data resides in a single database encrypted with SQLCipher AES-256-CBC.
-   * **Bootstrap Container (Root DI)**: On startup, `App.axaml.cs` builds a lightweight container hosting only core presentation and bootstrap infrastructure (`WindowManager`, `WindowHandoffCoordinator`, `ICryptoEngine`, `SystemDateTimeProvider`, and `IDatabaseUnlockCoordinator`). **Zero SQLite DbContexts, repositories, or background sync workers exist in memory.**
-   * **Mandatory Unlock First Screen (`UnlockWindow`)**: The initial window presented on launch.
-     * *First-Time Setup*: Guides user to create a master password and optional emergency duress passphrase. An empty master password (`""`) is supported, but triggers an explicit UI confirmation warning before creating the database.
-     * *Subsequent Launches (Explicit Unlock)*: Always presents an empty password field requiring the user to explicitly click "Unlock" (even if the master password is blank).
-     * *Duress Kill Switch & Decoy State*: Entering an established duress passphrase triggers cryptographic shredding of the header and SQLite database files, followed by immediate, seamless transition to an uninitialized first-launch setup view (decoy state) with zero forensic alerts or crash signatures.
+   * **Unified Encrypted SQLite (`percolator.db`)**: All application data resides in a single database encrypted with SQLCipher AES-256-CBC with WAL mode.
+   * **Bootstrap Container (Root DI)**: On startup, `App.axaml.cs` builds a lightweight container hosting only core presentation and bootstrap infrastructure (`WindowManager`, `WindowHandoffCoordinator`, `ICryptoEngine`, `SystemDateTimeProvider`, and `IDatabaseUnlockCoordinator`). **Zero SQLite DbContexts, repositories, or background sync workers exist in memory prior to unlock.**
+   * **First-Screen Routing & Mandatory Unlock Gate**:
+     * On launch, the application calls `IDatabaseUnlockCoordinator.DetermineStatusAsync()`.
+     * *First-Time Setup (`DatabaseSetupStatus.Uninitialized`)*: Displays `MasterPasswordSetupWindow`. Guides the user to create a master password and optional emergency duress passphrase. An empty master password (`""`) is supported, but triggers an explicit UI confirmation warning (`ContentDialog`) before creating the vault. The duress passphrase cannot be empty/whitespace and cannot match the master password.
+     * *Subsequent Launches (`DatabaseSetupStatus.Locked`)*: Displays `UnlockWindow`. Presents a clean passphrase field requiring explicit interaction ("Unlock" button click), even if the master password was established as blank.
+     * *Duress Kill Switch & Decoy Transition*: Entering an established duress passphrase triggers instant cryptographic shredding of `percolator.header` and database files in $< 2\text{ ms}$, immediately followed by a seamless transition to a clean first-launch setup view (`TransitionToDecoyFreshStateAsync`) with zero error popups, alert badges, or forensic crash signatures.
    * **Canary Verification & Post-Unlock Migration**:
-     * Derives a 256-bit key using Argon2id (3 iterations, 64 MB RAM, 4 lanes).
-     * Validates passphrase with canary query `SELECT count(*) FROM sqlite_master;`.
-     * On success, pending EF Core / SQLite migrations (`Database.MigrateAsync()`) execute immediately before any repositories are resolved.
+     * Derives a 256-bit candidate key using Argon2id ($m=64\text{ MB}$, $t=3\text{ iterations}$, $p=4\text{ lanes}$) and evaluates AEAD slots.
+     * Validates passphrase with an isolated canary query `SELECT count(*) FROM sqlite_master;`, explicitly trapping native error code `26` (`SQLITE_NOTADB`).
+     * On success, pending EF Core / SQLite migrations (`Database.MigrateAsync()`) execute immediately before any domain repositories are resolved.
    * **Authenticated Host (`IHost`)**:
-     * Instantiates a child `IHost` containing `PercolatorDbContext`, all 57 repositories/query services, and background workers.
+     * Instantiates a child `IHost` containing `PercolatorDbContext`, connection pools with native `SQLitePCL.raw.sqlite3_key` interceptor, all 57 repositories/query services, and background workers.
      * `await session.StartAsync()` automatically discovers and launches all registered `IHostedService` instances.
    * **Window Handoff & Relocking**:
-     * `UnlockWindow` closes and `MainWindow` is resolved from `session.Services` and shown.
-     * Locking triggers graceful `session.StopAsync()`, flushes connection pools via `SqliteConnection.ClearAllPools()`, zeroizes the key span via `CryptographicOperations.ZeroMemory`, disposes the authenticated `IHost`, closes `MainWindow`, and re-opens `UnlockWindow`.
+     * `UnlockWindow` or `MasterPasswordSetupWindow` closes and `MainWindow` is resolved from `session.Services` and shown.
+     * Locking triggers graceful `session.StopAsync()`, flushes connection pools via `SqliteConnection.ClearAllPools()`, zeroizes the key buffer via `CryptographicOperations.ZeroMemory`, disposes the authenticated `IHost`, closes `MainWindow`, and re-opens `UnlockWindow`.
 2. **Total Network Stealth Startup Invariant**:
    * On launch, the application operates in **total network stealth**—zero sockets bound, zero UDP DHT packets, zero STUN probes, and zero gRPC listeners active.
    * Sockets bind **only after** database unlock and subsequent identity selection in `IdentityGateWindow`.
@@ -52,6 +63,9 @@
    * Navigating away from a chat keeps its child `IServiceScope` hot in memory; opening a 6th conversation evicts and disposes the least recently used scope.
 8. **Reactive Debounced Reload Coordination (`ReloadCoordinator`)**:
    * Network and database sync bursts are coalesced using debounced triggers (`50ms`) combined with `AwaitOperation.Drop` to guarantee that while a read query is in-flight, redundant requests are dropped and the latest state is captured in a single roundtrip.
+9. **Zero Managed Key Strings & Memory Hygiene**:
+   * Master passwords and candidate passphrases entered in UI text boxes are promptly transferred to `VaultPassphrase` instances and scrubbed from managed strings where feasible.
+   * Key material is never formatted into SQL connection strings (`PRAGMA key = ...`); the UI delegates all crypto and session handling to `IDatabaseUnlockCoordinator`.
 
 ---
 
@@ -92,7 +106,10 @@ Percolator.Desktop/
 │   ├── Services/                         # NetworkStealthGate, DesktopIdentityKeyStore, SystemDateTimeProvider
 │   └── Windowing/                        # IWindowManager.cs, WindowManager.cs, IWindowHandoffCoordinator.cs, WindowHandoffCoordinator.cs, IDialogWindow.cs
 ├── Features/
-│   ├── Unlock/                           # Database Decryption & Master Passphrase Gate (First Screen)
+│   ├── Setup/                            # First-Time Master Password & Vault Setup (Initial Run / Decoy)
+│   │   ├── ViewModels/                   # MasterPasswordSetupViewModel.cs
+│   │   └── Views/                        # MasterPasswordSetupWindow.axaml
+│   ├── Unlock/                           # Vault Unlock Gate (Subsequent Launches)
 │   │   ├── Models/                       # UnlockStateModel.cs
 │   │   ├── ViewModels/                   # UnlockViewModel.cs
 │   │   └── Views/                        # UnlockWindow.axaml
@@ -130,7 +147,7 @@ Percolator.Desktop/
 │   │   ├── Services/                     # ITimelineCardStateService.cs, TimelineCardStateService.cs, DesktopTimelinePostSink.cs, DesktopPluginActionHandler.cs
 │   │   ├── ViewModels/                   # TimelineViewModel.cs, TimelineCardViewModel.cs
 │   │   └── Views/                        # TimelineView.axaml
-│   └── Settings/                         # Identity, Network & Display Settings
+│   └── Settings/                         # Identity, Security, Network & Display Settings
 │       ├── ViewModels/                   # SettingsViewModel.cs
 │       └── Views/                        # SettingsView.axaml
 ├── ViewModels/
@@ -162,7 +179,7 @@ flowchart TD
 
 ### Chunk 1: Core Shell, Unlock Gate, Navigation Framework & Theme Infrastructure
 
-**Goal**: Establish the cross-platform application shell, theme switching, the mandatory pre-unlock `UnlockWindow`, the two-stage DI composition root, and the `WindowHandoffCoordinator`.
+**Goal**: Establish the cross-platform application shell, theme switching, first-time vault setup, the mandatory pre-unlock `UnlockWindow`, the two-stage DI composition root, and the `WindowHandoffCoordinator`.
 
 #### Tasks
 - [x] Configure `Program.cs` with `.UseR3()`, `App.axaml`, and FluentAvalonia theme.
@@ -171,32 +188,36 @@ flowchart TD
 - [x] Implement `StatusChip` and `PeerAvatar` controls with presence dot and hash-color palette.
 - [x] Implement `Badge` attached behavior (notification count & pulse animation).
 - [x] Implement `IWindowManager` with single-instance activation and child DI scope lifecycle.
+- [ ] Implement `Features/Setup/MasterPasswordSetupWindow.axaml` and `Features/Setup/MasterPasswordSetupViewModel.cs`:
+  - Displayed when `IDatabaseUnlockCoordinator.DetermineStatusAsync()` returns `DatabaseSetupStatus.Uninitialized`.
+  - Master password entry field with confirm password verification.
+  - Expandable optional Duress Passphrase field (validates non-empty/non-whitespace and distinct from master password using `VaultPassphrase.ConstantTimeEquals`).
+  - Blank password confirmation: If user leaves master password empty and confirms setup, present explicit `ContentDialog` alert: *"Using an empty password leaves your local SQLite database unencrypted at rest. Are you sure you want to proceed?"*.
+  - Calls `IDatabaseUnlockCoordinator.InitializeAsync(masterPassword, duressPassword, ct)`.
+  - On success (`DomainResult<IAuthenticatedSession>.IsSuccess`), delegates to `IWindowHandoffCoordinator.TransitionToAuthenticatedAsync(session)`.
 - [ ] Implement `Features/Unlock/UnlockWindow.axaml` and `Features/Unlock/UnlockViewModel.cs`:
-  - Interacts with `IDatabaseUnlockCoordinator`:
-    - Calls `DetermineStatusAsync()` on load to toggle between First-Launch Setup and Subsequent Unlock modes.
-    - Password entry field with show/hide password toggle.
-    - Optional expandable Duress Passphrase field during first-time setup (validates non-empty/non-whitespace and distinct from master password).
-    - Explicit blank password warning: If user leaves master password empty and clicks \"Unlock\" / \"Set Password\", present an explicit confirmation dialog (`ContentDialog` alert: *\"Using an empty password leaves your local SQLite database unencrypted at rest. Are you sure you want to proceed?\"*).
-    - Asynchronous unlock execution with loading spinner (`IsBusy` state).
-    - Evaluates `UnlockResult`:
-      - `UnlockOutcome.Success`: delegates to `IWindowHandoffCoordinator.TransitionToAuthenticatedAsync(session)`.
-      - `UnlockOutcome.DuressDecoyActivated`: delegates to `IWindowHandoffCoordinator.TransitionToDecoyFreshStateAsync()` (presenting a fresh uninitialized setup view).
-      - `UnlockOutcome.InvalidPassphrase`: inline error alert displaying validation failures (*\"Invalid passphrase: could not decrypt percolator.db\"*).
+  - Displayed when `IDatabaseUnlockCoordinator.DetermineStatusAsync()` returns `DatabaseSetupStatus.Locked`.
+  - Password entry field with show/hide password toggle.
+  - Asynchronous unlock execution with loading spinner (`IsBusy` state).
+  - Calls `IDatabaseUnlockCoordinator.UnlockAsync(candidatePassword, ct)` and matches on polymorphic `UnlockResult`:
+    - `UnlockResult.Success success`: delegates to `IWindowHandoffCoordinator.TransitionToAuthenticatedAsync(success.Session)`.
+    - `UnlockResult.DuressActivated`: delegates to `IWindowHandoffCoordinator.TransitionToDecoyFreshStateAsync()` (presenting a fresh uninitialized setup view).
+    - `UnlockResult.InvalidCredentials`: inline error alert displaying validation failure (*"Invalid passphrase: could not decrypt percolator.db"*).
 - [ ] Implement `IWindowHandoffCoordinator` & `WindowHandoffCoordinator`:
   - `Task TransitionToAuthenticatedAsync(IAuthenticatedSession session)`:
     - Calls `await session.StartAsync()` (launching all registered `IHostedService` instances).
     - Resolves `MainWindow` from `session.Services`.
-    - Updates `ApplicationLifetime.MainWindow = mainWindow`, displays `mainWindow.Show()`, and closes `unlockWindow`.
+    - Updates `ApplicationLifetime.MainWindow = mainWindow`, displays `mainWindow.Show()`, and closes `unlockWindow` or `setupWindow`.
   - `Task TransitionToDecoyFreshStateAsync()`:
-    - Executed upon `UnlockOutcome.DuressDecoyActivated`.
-    - Smoothly transitions the UI back to the uninitialized First-Launch Setup view with zero error popups, alert badges, or forensic crash indicators.
+    - Executed upon `UnlockResult.DuressActivated`.
+    - Smoothly transitions the UI back to the uninitialized First-Launch Setup view (`MasterPasswordSetupWindow`) with zero error popups, alert badges, or forensic crash indicators.
   - `Task LockSessionAsync()`:
     - Deactivates network listeners via `INetworkStealthGate.DeactivateAsync()`.
     - Awaits `IDatabaseUnlockCoordinator.LockAsync()` (stopping `IHost`, clearing SQLite pools, zeroizing key span, disposing host).
     - Closes `MainWindow`, instantiates a fresh `UnlockWindow` from the root bootstrap container, and displays it.
 - [ ] Configure Two-Stage DI Composition in `App.axaml.cs`:
-  - Build `BootstrapContainer` containing logging, crypto engine, `SystemDateTimeProvider`, `WindowManager`, `WindowHandoffCoordinator`, `IDatabaseUnlockCoordinator`, and `UnlockViewModel`.
-  - Configure `OnFrameworkInitializationCompleted()` to instantiate and display `UnlockWindow` as the initial application window.
+  - Build `BootstrapContainer` containing logging, crypto engine, `SystemDateTimeProvider`, `WindowManager`, `WindowHandoffCoordinator`, `IDatabaseUnlockCoordinator`, `MasterPasswordSetupViewModel`, and `UnlockViewModel`.
+  - Configure `OnFrameworkInitializationCompleted()` to query `DetermineStatusAsync()` and display `MasterPasswordSetupWindow` or `UnlockWindow` as the initial application window.
 - [ ] Implement `INavigationService` and `NavigationService`:
   - Target interface in `Common/Navigation/INavigationService.cs`:
     - `void NavigateTo(string pageKey, object? parameter = null);`
@@ -209,17 +230,19 @@ flowchart TD
   - Dark / Light / HighContrast theme switcher utilizing `FluentAvalonia.Styling.FluentAvaloniaTheme`.
   - System accent color auto-detection and custom palette selector.
   - Diagnostic logging level selector (`Information`, `Debug`, `Trace`).
-  - Master Password Change: allows changing master password via `IDatabaseUnlockCoordinator.ChangeMasterPasswordAsync(currentPassword, newPassword)`, performing an instantaneous O(1) envelope re-wrap without touching the SQLite database.
-  - Emergency Duress Passphrase Configuration: allows setting, updating, or removing an emergency duress passphrase via `IDatabaseUnlockCoordinator.ConfigureDuressPasswordAsync(duressPassword)` within the active authenticated session. Enforces non-empty/non-whitespace validation.
+  - Master Password Change: allows changing master password via `IDatabaseUnlockCoordinator.ChangeMasterPasswordAsync(currentPassword, newPassword, ct)`, performing an instantaneous $O(1)$ envelope re-wrap without touching the SQLite database and preserving the existing duress slot.
+  - Emergency Duress Passphrase Configuration: allows setting, updating, or clearing an emergency duress passphrase via `IDatabaseUnlockCoordinator.ConfigureDuressPasswordAsync(duressPassword, ct)` within the active authenticated session. Enforces non-empty/non-whitespace validation.
 - [ ] Refactor `MainWindow.axaml` & `MainWindowViewModel.cs`:
   - Bind `NavigationView.SelectedItem` cleanly to `NavigationService`.
   - Wire header status chip with live identity count and network state.
   - Add `LockSessionCommand` bound to the header lock button, delegating to `IWindowHandoffCoordinator.LockSessionAsync()`.
 
 #### Verification
-- Launching the app presents `UnlockWindow` without opening SQLite handles or binding network ports.
+- Launching the app on a fresh directory displays `MasterPasswordSetupWindow` without opening SQLite handles or binding network ports.
+- Launching the app on an initialized vault presents `UnlockWindow`.
 - Entering an incorrect passphrase displays an error without crashing.
 - Entering the correct passphrase unlocks the database, runs migrations, launches `IHostedService` workers, opens `MainWindow`, and closes `UnlockWindow`.
+- Entering duress passphrase wipes the vault and smoothly transitions to `MasterPasswordSetupWindow` without crash signatures.
 - Clicking "Lock" in `MainWindow` executes complete teardown (stops host, clears pools, zeroizes key) and returns to `UnlockWindow`.
 
 ---
@@ -273,7 +296,8 @@ flowchart TD
   - Manages child `IServiceScope` instances for active conversation tabs.
   - LRU cache with capacity = 5.
   - Evicts and disposes the least recently used `IServiceScope` and its `ChatViewModel` when capacity is exceeded.
-- [ ] `ConnectionManagementDialog.axaml` & `ConnectionManagementDialogViewModel.cs`:\n  - Out-of-band invitation token generation and display (Base64 string + QR code render).
+- [ ] `ConnectionManagementDialog.axaml` & `ConnectionManagementDialogViewModel.cs`:
+  - Out-of-band invitation token generation and display (Base64 string + QR code render).
   - Invitation token decoder importing peer identity keys and route descriptors.
   - Multi-route connection initiator: Direct IP:Port vs. Relayed route via sovereign relay selection.
 - [ ] `PendingHandshakesMenuView.axaml` & `PendingHandshakesMenuViewModel.cs`:
@@ -315,7 +339,7 @@ flowchart TD
   - Virtualized message list using `ListBox` / `ItemsRepeater` with smooth scroll-to-bottom on new messages.
   - Asymmetric message bubbles: Right-aligned accent bubble for outgoing messages; left-aligned surface bubble for incoming messages.
   - Message status icons: Single tick (Sent), Double tick (Delivered), Colored double tick (Read), Exclamation (Failed).
-  - Message edit inline editor and tombstone (\"This message was deleted\") placeholder.
+  - Message edit inline editor and tombstone ("This message was deleted") placeholder.
   - Reaction summary pills with click-to-toggle reaction.
   - Synchronous projection pipeline:
     ```csharp
@@ -349,8 +373,8 @@ flowchart TD
   - Live candidate peer cards with:
     - Peer public key preview and avatar color hash.
     - NAT status badge (`DirectPublic` = Green, `StunTraversed` = Blue, `RelayedOnly` = Orange).
-    - Latency meter with `NerdIcon GlyphType=\"Latency\"`.
-    - One-click \"Connect / Handshake\" action button triggering Step 2 on-demand prekey retrieval.
+    - Latency meter with `NerdIcon GlyphType="Latency"`.
+    - One-click "Connect / Handshake" action button triggering Step 2 on-demand prekey retrieval.
   - Blinded Rendezvous Panel:
     - Current 24-hr UTC epoch countdown timer.
     - Matched sovereign contacts count.
@@ -358,7 +382,7 @@ flowchart TD
 
 #### Verification
 - High-frequency discovery stream (100 candidates/sec) is sampled down to 60fps without freezing the UI thread.
-- Clicking \"Connect\" on a candidate invokes `INearbyPeerDiscoveryWorkflow` to retrieve the Signed PreKey and initiate the X3DH handshake.
+- Clicking "Connect" on a candidate invokes `INearbyPeerDiscoveryWorkflow` to retrieve the Signed PreKey and initiate the X3DH handshake.
 - Latency updates update the UI reactively via `BindableReactiveProperty`.
 
 ---
@@ -392,7 +416,7 @@ flowchart TD
 #### Verification
 - Dropping a 50 MB file onto `FileTransferView` creates a transfer manifest and stages the upload task.
 - Accepting an inbound file offer creates the zero-byte target file and updates `PieceMapControl` dynamically as chunks arrive.
-- Completed transfers rename `.percolator-part` staging files to target file names atomically and show \"Completed\" status.
+- Completed transfers rename `.percolator-part` staging files to target file names atomically and show "Completed" status.
 
 ---
 
@@ -434,7 +458,7 @@ flowchart TD
 #### Tasks
 - [ ] System Tray Integration (`TrayIcon`):
   - Cross-platform system tray icon configured in `App.axaml`.
-  - Context menu: \"Open Percolator\", \"Lock Session (Stealth)\", \"Exit\".
+  - Context menu: "Open Percolator", "Lock Session (Stealth)", "Exit".
   - Window behavior: Minimize-to-tray on close when enabled in settings.
 - [ ] Desktop Notifications:
   - Cross-platform in-app notification toasts (`FluentAvalonia.UI.Controls.InfoBar` banner or notification popup).
@@ -447,7 +471,7 @@ flowchart TD
   - Persist window position, width, height, and maximized state across restarts in encrypted local settings.
 
 #### Verification
-- Closing window with \"Minimize to tray\" enabled hides window to notification area without terminating background services.
+- Closing window with "Minimize to tray" enabled hides window to notification area without terminating background services.
 - Clicking tray icon restores window to foreground.
 - Inbound chat message triggers OS notification toast when window is not focused.
 
@@ -461,13 +485,17 @@ flowchart TD
 - [ ] Scaffold `Percolator.Desktop.Tests` project:
   - Package references: `Avalonia.Headless.XUnit`, `Microsoft.NET.Test.Sdk`, `xunit`, `FluentAssertions`, `NSubstitute`, `R3`.
   - Headless test bootstrap: `[assembly: AvaloniaTestApplication(typeof(TestAppBuilder))]`.
-- [ ] Unlock & Two-Stage Lifecycle Headless Tests:
+- [ ] Unlock, Setup & Two-Stage Lifecycle Headless Tests:
+  - Test `MasterPasswordSetupViewModel`:
+    - Assert `DetermineStatusAsync` returning `DatabaseSetupStatus.Uninitialized` presents setup view.
+    - Assert empty password prompts confirmation dialog alert.
+    - Assert duress password matching master password fails validation.
+    - Assert successful initialization calls `IWindowHandoffCoordinator.TransitionToAuthenticatedAsync`.
   - Test `UnlockViewModel`:
-    - Assert `DetermineStatusAsync` correctly toggles `Uninitialized` vs `Locked` modes.
-    - Assert blank password entry prompts confirmation dialog.
+    - Assert `DetermineStatusAsync` returning `DatabaseSetupStatus.Locked` presents unlock view.
     - Assert invalid passphrase sets error message without crashing.
     - Assert valid passphrase calls `IWindowHandoffCoordinator.TransitionToAuthenticatedAsync`.
-    - Assert duress passphrase triggers `IDuressWipeHandler.ExecuteWipeAsync()` and transitions cleanly to `TransitionToDecoyFreshStateAsync` without error popups.
+    - Assert duress passphrase triggers `TransitionToDecoyFreshStateAsync` without error popups.
   - Test `WindowHandoffCoordinator`:
     - Assert `TransitionToAuthenticatedAsync` awaits `session.StartAsync()`, opens `MainWindow`, and closes `UnlockWindow`.
     - Assert `TransitionToDecoyFreshStateAsync` resets UI to clean first-launch setup state.
@@ -499,7 +527,6 @@ This matrix maps all infrastructure ports and desktop adapters across their owni
 | :--- | :--- | :--- | :--- |
 | `IDatabaseUnlockCoordinator` | Application Ports | `SqlCipherDatabaseUnlockCoordinator` (Infrastructure) | Chunk 1 |
 | `IAuthenticatedSession` | Application Ports | `AuthenticatedSession` (Infrastructure) | Chunk 1 |
-| `IMasterKeyProtector` | Application Ports | `MasterKeyProtector` (Infrastructure) | Chunk 1 |
 | `IWindowHandoffCoordinator` | Desktop Windowing | `WindowHandoffCoordinator` | Chunk 1 |
 | `INavigationService` | Desktop Shell | `NavigationService` | Chunk 1 |
 | `IWindowManager` | Desktop Shell | `WindowManager` | Chunk 1 |
@@ -507,7 +534,7 @@ This matrix maps all infrastructure ports and desktop adapters across their owni
 | `INetworkStealthGate` | Desktop Core | `NetworkStealthGate` | Chunk 2 |
 | `IDesktopIdentityKeyStore` | Desktop Core | `DesktopLocalIdentityKeyStore` | Chunk 2 |
 | `IIdentityProfileRepository` | Domain Identities | `DesktopIdentityProfileRepository` (SQLite) | Chunk 2 |
-| `ILocalIdentityKeyStore` | Domain Identities | `DesktopLocalIdentityKeyStore` (SQLite / DPAPI) | Chunk 2 |
+| `ILocalIdentityKeyStore` | Domain Identities | `DesktopLocalIdentityKeyStore` (SQLite) | Chunk 2 |
 | `IPeerConnectionStateService` | Desktop Sessions | `PeerConnectionStateService` | Chunk 3 |
 | `IPeerContactQueryService` | Application Delivery | `SqlPeerContactQueryService` (Infrastructure) | Chunk 3 |
 | `IPendingHandshakeRepository`| Domain Delivery | `SqlitePendingHandshakeRepository` | Chunk 3 |
