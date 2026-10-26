@@ -2,8 +2,8 @@
 
 ## Refinement Status Gate
 - [x] Lens 1: Scope & Feature Slice Framing (Status: Approved)
-- [ ] Lens 2: Onion Architecture & Primitive Obsession (Status: In Review)
-- [ ] Lens 3: Threat Modeling & Security Posture (Status: Pending)
+- [x] Lens 2: Onion Architecture & Primitive Obsession (Status: Approved)
+- [ ] Lens 3: Threat Modeling & Security Posture (Status: In Review)
 - [ ] Lens 4: High-Value, Low-Brittle Unit Test Design (Status: Pending)
 - [ ] Lens 5: Cross-Layer Infrastructure Alignment (Status: Pending)
 - [ ] Implementation Gate: LOCKED (Requires Approval of Lenses 1-5)
