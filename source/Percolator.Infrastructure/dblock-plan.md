@@ -34,86 +34,77 @@
 - **Explicit Unlock for Blank Passwords**: Support empty master password (`""`) with mandatory first-launch UI warning confirmation, and require explicit interaction ("Unlock" click) on every subsequent launch.
 - **Orderly In-Session Relock & Memory Scrubbing**: Provide graceful teardown via `LockAsync`: stop all `IHostedService` instances, flush SQLite pools (`SqliteConnection.ClearAllPools()`), zeroize raw key bytes via `CryptographicOperations.ZeroMemory`, dispose `AuthenticatedHost`, and return UI to `UnlockWindow`.
 
-### 1.2 Explicit Non-Goals
+### 1.2 Explicit Non-Goals (Negative Scope)
 - **No Presentation Layer Business Logic**: All database unlocking, envelope decryption, key derivation, and wipe orchestration live in `Percolator.Application` and `Percolator.Infrastructure`. The `Percolator.Desktop` UI layer is strictly a thin presentation client.
 - **No Disk Indicators of Duress Configuration**: No separate `duress.hash` or marker files on disk. The header schema and file size remain completely invariant.
-- **No Multi-Database Partitioning**: All domain aggregates share `percolator.db` to eliminate redundant KDF overhead and guarantee atomic schema migrations.
+- **No Multi-Database or Multi-Tenant Partitioning**: All domain aggregates share `percolator.db`. Multi-user tenancy or partitioned per-aggregate SQLite databases are excluded to avoid redundant KDF latency and complex distributed transactions.
+- **No Cloud Escrow or Passphrase Recovery**: Zero server-side escrow or remote recovery mechanisms exist. If the user forgets their master passphrase, data cannot be recovered.
+- **No Configurable KDF Algorithms**: Argon2id ($m=64\text{ MB}$, $t=3$, $p=4$) is strictly fixed. No runtime selection of legacy algorithms (PBKDF2, scrypt, bcrypt) is permitted.
+- **No In-Memory SQLite Modes**: SQLCipher must operate against persistent disk files; in-memory database modes are excluded from production vault operation.
 - **No Master Password Persistence**: The master passphrase is never cached on disk, DPAPI, or OS keychain without explicit user unlock.
 - **No Repository Resolution in Bootstrap Container**: No repository or DbContext may be registered or resolved in the root DI container.
 
 ---
 
-## 2. Vertical Feature Slice Architecture Across Onion Layers
+## 2. Cross-Layer Architecture & Solution Placement
 
-Rather than grouping components into horizontal technical folders, the database lock and vault subsystem is structured as a vertical feature slice crossing the architectural layers:
+The vault and encryption subsystem is structured across the existing solution projects according to real project conventions:
 
 ```
 01 - Domain (Percolator.Domain):
 └── Security/
-    └── Vault/
-        ├── MasterPassword.cs          # Value object: passphrase validation & memory protection
-        ├── DuressPassword.cs          # Value object: non-empty, non-whitespace invariant
-        ├── Argon2Salt.cs              # Value object: 16-byte cryptographic salt
-        ├── MasterKeyPragma.cs         # Value object: sanitized hex pragma string
-        ├── UnlockOutcome.cs           # Discriminated outcome: Success, DuressDecoyActivated, InvalidPassphrase
-        ├── DatabaseSetupStatus.cs     # State enum: Uninitialized, Locked, Unlocked
-        ├── HeaderPresenceStatus.cs    # State enum: Present, Absent
+    ├── ValueObjects/
+    │   ├── MasterPassword.cs          # Value object: passphrase validation & memory protection
+    │   ├── DuressPassword.cs          # Value object: non-empty, non-whitespace invariant
+    │   ├── Argon2Salt.cs              # Value object: 16-byte cryptographic salt
+    │   ├── MasterKeyPragma.cs         # Value object: sanitized hex pragma string
+    │   ├── UnlockOutcome.cs           # Discriminated outcome: Success, DuressDecoyActivated, InvalidPassphrase
+    │   ├── DatabaseSetupStatus.cs     # State enum: Uninitialized, Locked, Unlocked
+    │   └── HeaderPresenceStatus.cs    # State enum: Present, Absent
+    └── Ports/
         └── IMasterKeyProtector.cs     # Pure in-memory key protector port (visitor pattern)
 
 02 - Application (Percolator.Application):
-└── Security/
-    └── Vault/
-        ├── Ports/
-        │   ├── IDatabaseUnlockCoordinator.cs # High-level vault lifecycle & session coordination
-        │   ├── IAuthenticatedSession.cs      # Token/handle to Stage 2 container
-        │   ├── IHeaderStorage.cs             # Reads/writes DatabaseHeader
-        │   ├── ISlotCipherService.cs         # Derives keys & encrypts/decrypts slot envelopes
-        │   ├── ICanaryProbeService.cs        # Verifies key on isolated probe connection
-        │   ├── IDuressWipeHandler.cs         # Multi-phase crypto-shredding orchestrator
-        │   └── IAuthenticatedHostFactory.cs  # Creates Stage 2 IHost & executes migrations
-        └── UseCases/
-            ├── UnlockDatabaseUseCase.cs
-            ├── InitializeMasterPasswordUseCase.cs
-            ├── ChangeMasterPasswordUseCase.cs
-            ├── ConfigureDuressPasswordUseCase.cs
-            └── LockDatabaseUseCase.cs
+├── Ports/                             # Driving and driven vault ports
+│   ├── IDatabaseUnlockCoordinator.cs # Primary driving port for vault lifecycle & unlock coordination
+│   ├── IAuthenticatedSession.cs      # Token/handle to Stage 2 container
+│   ├── IDuressWipeHandler.cs         # Driven port: multi-phase crypto-shredding orchestrator
+│   └── IHeaderStorage.cs             # Driven port: reads/writes binary header payload
+└── Vault/
+    ├── DatabaseHeaderPayload.cs      # Header DTO (salt, nonces, encrypted slot payloads)
+    └── DecoyTransitionSignal.cs      # Signal sent to UI upon duress wipe completion
 
 03 - Infrastructure (Percolator.Infrastructure):
-└── Security/
-    └── Vault/
-        ├── Protos/
-        │   └── DatabaseHeader.proto          # Protobuf schema for twin-slot header
-        ├── Storage/
-        │   └── ProtobufHeaderStorage.cs      # Protobuf header read/write adapter
-        ├── Cryptography/
-        │   ├── Argon2idKeyDeriver.cs         # Argon2id KDF adapter
-        │   ├── ChaCha20Poly1305SlotCipher.cs # ChaCha20-Poly1305 slot encryption adapter
-        │   └── EphemeralMasterKeyProtector.cs# In-memory DPAPI/protected memory key protector
-        ├── Persistence/
-        │   ├── SqlCipherCanaryProbe.cs       # Raw probe connection PRAGMA test
-        │   ├── SqlCipherPragmaInterceptor.cs # Pooled connection PRAGMA key interceptor
-        │   ├── Stage2HostFactory.cs          # Constructs Stage 2 Host & runs migrations
-        │   └── PercolatorDbContext.cs        # Post-unlock EF Core DbContext
-        ├── Duress/
-        │   └── DuressWipeHandler.cs          # Multi-pass crypto-shredding adapter
-        └── Coordination/
-            └── SqlCipherDatabaseUnlockCoordinator.cs # Application port implementation
+├── Protos/
+│   └── DatabaseHeader.proto          # Protobuf schema for twin-slot header
+├── Vault/
+│   ├── ProtobufHeaderStorage.cs      # Implements IHeaderStorage using DatabaseHeader.proto
+│   ├── DuressWipeHandler.cs          # Implements IDuressWipeHandler (overwrites header & DB files)
+│   ├── EphemeralMasterKeyProtector.cs# Implements IMasterKeyProtector (in-memory protected key span)
+│   └── SqlCipherDatabaseUnlockCoordinator.cs # Implements IDatabaseUnlockCoordinator
+└── Persistence/
+    ├── PercolatorDbContext.cs        # Stage 2 post-unlock EF Core DbContext
+    ├── SqlCipherPragmaInterceptor.cs # Pooled connection PRAGMA key interceptor
+    ├── SqlCipherCanaryProbe.cs       # Isolated probe connection PRAGMA validator
+    └── Stage2HostFactory.cs          # Constructs Stage 2 IHost & executes Database.MigrateAsync
 
 05 - Desktop (Percolator.Desktop):
-└── Features/
-    └── Security/
-        ├── Unlock/
-        │   ├── UnlockView.axaml
-        │   ├── UnlockView.axaml.cs
-        │   └── UnlockViewModel.cs            # Thin presentation: delegates to IDatabaseUnlockCoordinator
-        ├── Setup/
-        │   ├── MasterPasswordSetupView.axaml
-        │   └── MasterPasswordSetupViewModel.cs
-        ├── Settings/
-        │   ├── SecuritySettingsView.axaml
-        │   └── SecuritySettingsViewModel.cs  # Invokes ChangeMasterPassword & ConfigureDuressPassword
-        └── Navigation/
-            └── WindowHandoffCoordinator.cs   # Manages UnlockWindow -> MainWindow -> Decoy transitions
+├── Features/
+│   ├── Unlock/
+│   │   ├── UnlockWindow.axaml
+│   │   ├── UnlockWindow.axaml.cs
+│   │   └── UnlockViewModel.cs        # Thin presentation: delegates to IDatabaseUnlockCoordinator
+│   ├── Setup/
+│   │   ├── MasterPasswordSetupWindow.axaml
+│   │   ├── MasterPasswordSetupWindow.axaml.cs
+│   │   └── MasterPasswordSetupViewModel.cs
+│   └── Settings/
+│       ├── SettingsView.axaml
+│       ├── SettingsView.axaml.cs
+│       └── SettingsViewModel.cs      # Change master password & emergency duress configuration
+└── Common/
+    └── Windowing/
+        └── WindowHandoffCoordinator.cs # Manages UnlockWindow -> MainWindow -> Decoy transitions
 ```
 
 ### 2.1 Protobuf Header Contract (`Protos/DatabaseHeader.proto`)
@@ -135,14 +126,16 @@ message DatabaseHeader {
 * **Slot Payload Sizing**: Both `master_slot_payload` and `duress_slot_payload` are exactly 48 bytes (32-byte plaintext + 16-byte Poly1305 auth tag).
 * **Dummy Invariant**: If no duress password is configured, `duress_slot_nonce` (12 bytes) and `duress_slot_payload` (48 bytes) are filled with `RandomNumberGenerator.GetBytes(60)`. An adversary reading the Protobuf stream cannot distinguish active duress protection from dummy noise.
 
-### 2.2 Domain Contracts & Value Objects (`Percolator.Domain.Security.Vault`)
+### 2.2 Domain Value Objects & Ports (`Percolator.Domain.Security`)
 
+#### Value Objects (`Percolator.Domain.Security.ValueObjects`)
 * **`MasterPassword`**: Encapsulates user passphrase (empty string permitted). Provides zeroized buffer extraction.
 * **`DuressPassword`**: Encapsulates optional duress passphrase. Invariant: must be non-empty, non-whitespace, and cannot match master password.
 * **`Argon2Salt`**: 16-byte cryptographically secure salt.
+* **`MasterKeyPragma`**: Sanitized hexadecimal pragma string (`PRAGMA key = "x'<hex>'"`).
 * **`UnlockOutcome`**: Explicit discriminated outcome of an unlock attempt:
   ```csharp
-  namespace Percolator.Domain.Security.Vault;
+  namespace Percolator.Domain.Security.ValueObjects;
 
   public enum UnlockOutcome
   {
@@ -153,7 +146,7 @@ message DatabaseHeader {
   ```
 * **`DatabaseSetupStatus`**:
   ```csharp
-  namespace Percolator.Domain.Security.Vault;
+  namespace Percolator.Domain.Security.ValueObjects;
 
   public enum DatabaseSetupStatus
   {
@@ -164,7 +157,7 @@ message DatabaseHeader {
   ```
 * **`HeaderPresenceStatus`**:
   ```csharp
-  namespace Percolator.Domain.Security.Vault;
+  namespace Percolator.Domain.Security.ValueObjects;
 
   public enum HeaderPresenceStatus
   {
@@ -172,9 +165,11 @@ message DatabaseHeader {
       Absent = 1
   }
   ```
+
+#### Domain Port (`Percolator.Domain.Security.Ports`)
 * **`IMasterKeyProtector`**: Pure in-memory key protector port:
   ```csharp
-  namespace Percolator.Domain.Security.Vault;
+  namespace Percolator.Domain.Security.Ports;
 
   public interface IMasterKeyProtector : IDisposable
   {
@@ -184,15 +179,19 @@ message DatabaseHeader {
   }
   ```
 
-### 2.3 Application Ports (`Percolator.Application.Security.Vault.Ports`)
+### 2.3 Application Ports & Models (`Percolator.Application`)
 
-#### `IDatabaseUnlockCoordinator`
+#### `IDatabaseUnlockCoordinator` (`Percolator.Application.Ports`)
 ```csharp
-namespace Percolator.Application.Security.Vault.Ports;
+namespace Percolator.Application.Ports;
+
+using Percolator.Domain.Security.Ports;
+using Percolator.Domain.Security.ValueObjects;
 
 public interface IDatabaseUnlockCoordinator
 {
     DatabaseSetupStatus Status { get; }
+    IAuthenticatedSession? ActiveSession { get; }
 
     /// <summary>
     /// Checks disk for existing header and database files to determine initial setup state.
@@ -210,10 +209,11 @@ public interface IDatabaseUnlockCoordinator
 
     /// <summary>
     /// Evaluates candidate password against master slot and duress slot.
-    /// If master matches: runs migrations and returns active session.
-    /// If duress matches: executes crypto-shredding and returns duress decoy signal.
+    /// If master matches: runs canary probe, builds Stage 2 container, runs migrations, sets ActiveSession, returns Success.
+    /// If duress matches: executes crypto-shredding, purges disk files, returns DuressDecoyActivated.
+    /// If neither matches: returns InvalidPassphrase.
     /// </summary>
-    Task<Result<UnlockResult>> UnlockAsync(MasterPassword candidatePassword, CancellationToken ct = default);
+    Task<Result<UnlockOutcome>> UnlockAsync(MasterPassword candidatePassword, CancellationToken ct = default);
 
     /// <summary>
     /// Updates the master password within an active authenticated session by re-wrapping the database key in the master slot.
@@ -236,9 +236,9 @@ public interface IDatabaseUnlockCoordinator
 }
 ```
 
-#### `IDuressWipeHandler`
+#### `IDuressWipeHandler` (`Percolator.Application.Ports`)
 ```csharp
-namespace Percolator.Application.Security.Vault.Ports;
+namespace Percolator.Application.Ports;
 
 public interface IDuressWipeHandler
 {
@@ -252,9 +252,12 @@ public interface IDuressWipeHandler
 }
 ```
 
-#### `IHeaderStorage`
+#### `IHeaderStorage` (`Percolator.Application.Ports`)
 ```csharp
-namespace Percolator.Application.Security.Vault.Ports;
+namespace Percolator.Application.Ports;
+
+using Percolator.Application.Vault;
+using Percolator.Domain.Security.ValueObjects;
 
 public interface IHeaderStorage
 {
@@ -265,55 +268,80 @@ public interface IHeaderStorage
 }
 ```
 
+#### `DatabaseHeaderPayload` (`Percolator.Application.Vault`)
+```csharp
+namespace Percolator.Application.Vault;
+
+using Percolator.Domain.Security.ValueObjects;
+
+public sealed record DatabaseHeaderPayload(
+    int Version,
+    Argon2Salt Salt,
+    byte[] MasterSlotNonce,
+    byte[] MasterSlotPayload,
+    byte[] DuressSlotNonce,
+    byte[] DuressSlotPayload);
+```
+
+#### `IAuthenticatedSession` (`Percolator.Application.Ports`)
+```csharp
+namespace Percolator.Application.Ports;
+
+public interface IAuthenticatedSession : IAsyncDisposable
+{
+    IServiceProvider Services { get; }
+}
+```
+
 ---
 
 ## 3. Workflow Decomposition & Orchestration
 
-The unlock and vault orchestration is decomposed into discrete, composable steps:
+The unlock and vault orchestration is decomposed into discrete, observable pipeline phases:
 
 ```
 [UnlockAsync Workflow]
   │
-  ├─ 1. Header Retrieval (IHeaderStorage.ReadHeaderAsync)
+  ├─ Phase 1: Header Loading (IHeaderStorage.ReadHeaderAsync)
   │     Reads percolator.header and extracts salt + twin slots.
   │
-  ├─ 2. Key Derivation (ISlotCipherService.DeriveCandidateKey)
+  ├─ Phase 2: Key Derivation & Slot Decryption
   │     Derives Kcand via Argon2id(candidatePassword, header.Salt).
-  │
-  ├─ 3. Master Slot Evaluation (ISlotCipherService.TryDecryptMasterSlot)
-  │     ChaCha20Poly1305.Decrypt(MasterSlotNonce, MasterSlotPayload, Kcand)
-  │     ├─ Success -> Master Key (Kdb) recovered!
-  │     │             ├─ 3a. Probe Canary (ICanaryProbeService.ProbeAsync)
-  │     │             │      PRAGMA key = "x'<Kdb>'"; SELECT count(*) FROM sqlite_master;
-  │     │             ├─ 3b. Build Authenticated Host (IAuthenticatedHostFactory.CreateHostAsync)
-  │     │             │      Registers EphemeralMasterKeyProtector and EF Core DbContext.
-  │     │             ├─ 3c. Run Migrations (Database.MigrateAsync)
-  │     │             │      Executes any pending schema migrations dynamically.
-  │     │             └─ 3d. Return UnlockResult.AsSuccess(session)
   │     │
-  │     └─ Auth Failed -> Proceed to Duress Check (Step 4)
-  │
-  ├─ 4. Duress Slot Evaluation (ISlotCipherService.TryDecryptDuressSlot)
-  │     ChaCha20Poly1305.Decrypt(DuressSlotNonce, DuressSlotPayload, Kcand)
-  │     ├─ Success & Payload == "PERCOLATOR_DURESS_SENTINEL_OK" ->
-  │     │     ├─ 4a. Trigger Crypto-Shredding (IDuressWipeHandler.ExecuteWipeAsync)
-  │     │     │      ├─ Overwrite percolator.header with random bytes & flush
-  │     │     │      ├─ Overwrite percolator.db, wal, shm with random bytes & delete
-  │     │     │      └─ Purge avatar/attachment cache directories
-  │     │     ├─ 4b. Status = DatabaseSetupStatus.Uninitialized
-  │     │     └─ 4c. Return UnlockResult.AsDuressDecoy()
+  │     ├─ Branch A: Master Slot Evaluation
+  │     │     ChaCha20Poly1305.Decrypt(MasterSlotNonce, MasterSlotPayload, Kcand)
+  │     │     ├─ Success -> Master Key (Kdb) recovered!
+  │     │     │             ├─ Step 3a: Canary Probe: PRAGMA key = "x'<Kdb>'"; SELECT count(*) FROM sqlite_master;
+  │     │     │             ├─ Step 3b: Build Authenticated Host (Stage2HostFactory)
+  │     │     │             │      Registers EphemeralMasterKeyProtector and EF Core DbContext.
+  │     │     │             ├─ Step 3c: Run Migrations (Database.MigrateAsync)
+  │     │     │             │      Executes any pending schema migrations dynamically.
+  │     │     │             ├─ Step 3d: Store ActiveSession on coordinator
+  │     │     │             └─ Step 3e: Return UnlockOutcome.Success
+  │     │     │
+  │     │     └─ Auth Failed -> Proceed to Duress Check (Branch B)
   │     │
-  │     └─ Auth Failed -> Return Result.Failure("Invalid passphrase")
+  │     └─ Branch B: Duress Slot Evaluation
+  │           ChaCha20Poly1305.Decrypt(DuressSlotNonce, DuressSlotPayload, Kcand)
+  │           ├─ Success & Payload == "PERCOLATOR_DURESS_SENTINEL_OK" ->
+  │           │     ├─ Step 4a: Trigger Crypto-Shredding (IDuressWipeHandler.ExecuteWipeAsync)
+  │           │     │      ├─ Overwrite percolator.header with random bytes & flush
+  │           │     │      ├─ Overwrite percolator.db, wal, shm with random bytes & delete
+  │           │     │      └─ Purge avatar/attachment cache directories
+  │           │     ├─ Step 4b: Status = DatabaseSetupStatus.Uninitialized
+  │           │     └─ Step 4c: Return UnlockOutcome.DuressDecoyActivated
+  │           │
+  │           └─ Auth Failed -> Return UnlockOutcome.InvalidPassphrase
 ```
 
 ### 3.1 Post-Duress Decoy State UI Handoff
-When `UnlockResult.AsDuressDecoy()` is returned:
+When `UnlockOutcome.DuressDecoyActivated` is returned:
 1. `UnlockViewModel` receives the decoy signal without displaying an alert or error popup.
-2. The coordinator informs `IWindowHandoffCoordinator`.
+2. The coordinator informs `WindowHandoffCoordinator`.
 3. The UI smoothly transitions into `IdentityGateWindow` / First-Time Setup mode as a clean, blank slate.
-4. The adversary observes an empty, unconfigured installation.
+4. An adversary observing the system sees an empty, unconfigured installation.
 
-### 3.2 Master Password Update ($O(1)$ Re-Wrap)
+### 3.2 Master Password Update ($O(1)$ Re-Wrap Workflow)
 1. User navigates to Settings $\rightarrow$ Security $\rightarrow$ *Change Master Password*.
 2. User provides `currentPassword` and `newPassword`.
 3. `ChangeMasterPasswordAsync`:
@@ -327,7 +355,7 @@ When `UnlockResult.AsDuressDecoy()` is returned:
    - Zeroizes temporary keys.
    - **Performance Guarantee**: Because $K_{\text{db}}$ remains identical, zero SQLite tables or pages are rewritten. Operation completes in $< 200\text{ ms}$ with zero risk of database corruption.
 
-### 3.3 Duress Password Configuration within Authenticated Session
+### 3.3 Duress Password Configuration Workflow
 1. User navigates to Settings $\rightarrow$ Security $\rightarrow$ *Emergency Duress Passphrase*.
 2. User provides new duress password (or leaves blank to clear).
 3. `ConfigureDuressPasswordAsync`:
@@ -349,7 +377,7 @@ When `UnlockResult.AsDuressDecoy()` is returned:
 - **Memory Security**:
   - Passphrase buffers and intermediate keys are scrubbed with `CryptographicOperations.ZeroMemory` immediately upon completion of derivation/decryption.
 - **Zero Headless Coupling**:
-  - All vault coordination lives in `Percolator.Application` and `Percolator.Infrastructure`. Headless Linux relay hosts, integration tests, and desktop clients use the exact same secure unlock code.
+  - All vault coordination lives in `Percolator.Application` and `Percolator.Infrastructure`. Headless Linux relay hosts, integration tests, and desktop clients use the exact same secure unlock code without any UI dependency.
 
 ---
 
@@ -361,7 +389,7 @@ When `UnlockResult.AsDuressDecoy()` is returned:
 | **First-Time Setup (Without Duress)** | Master password only | Creates `DatabaseHeader` with valid master slot and dummy random duress slot; returns session | Asserts dummy slot length == 48 bytes |
 | **Normal Unlock** | Valid master password | Unlocks master slot, canary passes, migrations execute, returns `UnlockOutcome.Success` | Asserts successful session creation |
 | **Duress Unlock Triggered** | Valid duress password | Decrypts duress slot, executes `IDuressWipeHandler`, deletes database/header files, returns `UnlockOutcome.DuressDecoyActivated` | Verifies disk files are deleted and status is `Uninitialized` |
-| **Invalid Passphrase Attempt** | Incorrect password | Fails both master and duress slots, returns `Result.Failure("Invalid passphrase")`, zero wipe occurs | Asserts failure result; verifies database files remain intact |
+| **Invalid Passphrase Attempt** | Incorrect password | Fails both master and duress slots, returns `UnlockOutcome.InvalidPassphrase`, zero wipe occurs | Asserts outcome enum; verifies database files remain intact |
 | **Master Password Change** | Current password + New password | Re-wraps master slot with new key; database remains fully readable; subsequent unlock requires new password | Tests end-to-end master password re-wrap |
 | **Duress Update in Session** | Authenticated session sets new duress key | Re-encrypts duress slot in `DatabaseHeader`; subsequent duress unlock succeeds with new key | Tests end-to-end configuration transition |
 | **Duress Clear in Session** | Authenticated session clears duress key | Overwrites duress slot with random noise; prior duress password no longer triggers wipe | Verifies former duress password returns invalid passphrase |
@@ -387,10 +415,7 @@ When `UnlockResult.AsDuressDecoy()` is returned:
   - *Bootstrap Container*:
     - `IDatabaseUnlockCoordinator` $\rightarrow$ `SqlCipherDatabaseUnlockCoordinator`
     - `IHeaderStorage` $\rightarrow$ `ProtobufHeaderStorage`
-    - `ISlotCipherService` $\rightarrow$ `ChaCha20Poly1305SlotCipher`
-    - `ICanaryProbeService` $\rightarrow$ `SqlCipherCanaryProbe`
     - `IDuressWipeHandler` $\rightarrow$ `DuressWipeHandler`
-    - `IAuthenticatedHostFactory` $\rightarrow$ `Stage2HostFactory`
   - *Authenticated Container*:
     - `IMasterKeyProtector` $\rightarrow$ `EphemeralMasterKeyProtector`
     - `DbConnectionInterceptor` $\rightarrow$ `SqlCipherPragmaInterceptor`
