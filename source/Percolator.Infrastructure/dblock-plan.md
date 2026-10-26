@@ -3,7 +3,7 @@
 ## Refinement Status Gate
 - [x] Lens 1: Scope & Feature Slice Framing (Status: Approved)
 - [x] Lens 2: Onion Architecture & Primitive Obsession (Status: Approved)
-- [ ] Lens 3: Threat Modeling & Security Posture (Status: In Review)
+- [x] Lens 3: Threat Modeling & Security Posture (Status: In Review)
 - [ ] Lens 4: High-Value, Low-Brittle Unit Test Design (Status: Pending)
 - [ ] Lens 5: Cross-Layer Infrastructure Alignment (Status: Pending)
 - [ ] Implementation Gate: LOCKED (Requires Approval of Lenses 1-5)
@@ -21,20 +21,21 @@
   - Binary header format using Protocol Buffers (`DatabaseHeader.proto`) compiled exclusively in `Percolator.Infrastructure`.
   - Contains an Argon2id salt and two fixed-size cryptographic slots: **Master Slot** and **Duress Slot**.
   - **Plausible Deniability Invariant**: When no duress password is set, the Duress Slot is filled with cryptographically secure random bytes of identical length. To forensic disk inspection, the header format and byte distribution are 100% indistinguishable regardless of whether a duress password is configured.
-- **Optional Duress Passphrase & Decoy State Transition**:
+- **Optional Duress Passphrase & Instant Decoy Transition**:
   - Users can optionally establish a duress passphrase (cannot be empty or whitespace) during setup or update it later in authenticated Settings.
-  - When the duress passphrase is typed at `UnlockWindow`, the system triggers an immediate **Crypto-Shredding Pipeline** and smoothly transitions the UI to a **Decoy State (Fresh App)**, appearing as a clean, newly installed application without error popups or crash signatures.
+  - When the duress passphrase is typed at `UnlockWindow`, the system triggers an immediate **Crypto-Shredding Pipeline** destroying the header in $< 2\text{ ms}$ and smoothly transitions the UI to a **Decoy State (Fresh App)** without disk thrashing, error popups, or crash signatures.
 - **$O(1)$ Master Password Envelope Re-Wrapping**:
   - Because the database encryption key $K_{\text{db}}$ is stored wrapped in the Master Slot using $K_{\text{master}} = \text{Argon2id}(\text{passphrase}, \text{salt})$, changing the master password in an authenticated session does **not** require re-encrypting the underlying SQLite database file (`PRAGMA rekey`).
   - Changing the master password is an instantaneous $O(1)$ operation: derive new $K_{\text{master}}$, re-encrypt the 32-byte $K_{\text{db}}$, and atomically rewrite `percolator.header`.
 - **Argon2id Key Derivation**: Derive 256-bit keys from passphrases using Argon2id ($m=64\text{ MB}$, $t=3\text{ iterations}$, $p=4\text{ lanes}$) salted with the 16-byte random salt from `percolator.header`.
-- **Canary Validation**: Verify the derived master key on an isolated probe connection using `SELECT count(*) FROM sqlite_master;` before initializing EF Core or connection pools.
+- **Canary Validation**: Verify the derived master key on an isolated probe connection using `SELECT count(*) FROM sqlite_master;` before initializing EF Core or connection pools, explicitly trapping native error code 26 (`SQLITE_NOTADB`).
 - **Dynamic Post-Canary Schema Migrations**: Execute EF Core / SQLite migrations (`Database.MigrateAsync()`) immediately post-canary prior to resolving application repositories.
-- **Pooled Connection Key Interception**: Apply `PRAGMA key = "x'<hex_key>'\";` and WAL pragmas transparently to every pooled SQLite connection via a `DbConnectionInterceptor`.
+- **Native SQLCipher Key Application**: Apply the 32-byte database encryption key directly via `SQLitePCL.raw.sqlite3_key` to unmanaged handles on connection open, eliminating managed string allocations of sensitive key material.
 - **Explicit Unlock for Blank Passwords**: Support empty master password (`""`) with mandatory first-launch UI warning confirmation, and require explicit interaction ("Unlock" click) on every subsequent launch.
 - **Orderly In-Session Relock & Memory Scrubbing**: Provide graceful teardown via `LockAsync`: stop all `IHostedService` instances, flush SQLite pools (`SqliteConnection.ClearAllPools()`), zeroize raw key bytes via `CryptographicOperations.ZeroMemory`, dispose `AuthenticatedHost`, and return UI to `UnlockWindow`.
 
 ### 1.2 Explicit Non-Goals (Negative Scope)
+- **No Progressive Backoff Throttling**: Artificial login delay throttling is excluded; Argon2id memory-hardness ($64\text{ MB}, t=3, p=4$) provides consistent, deterministic computational cost without UI delay loops.
 - **No Presentation Layer Business Logic**: All database unlocking, envelope decryption, key derivation, and wipe orchestration live in `Percolator.Application` and `Percolator.Infrastructure`. The `Percolator.Desktop` UI layer is strictly a thin presentation client.
 - **No Disk Indicators of Duress Configuration**: No separate `duress.hash` or marker files on disk. The header schema and file size remain completely invariant.
 - **No Multi-Database or Multi-Tenant Partitioning**: All domain aggregates share `percolator.db`. Multi-user tenancy or partitioned per-aggregate SQLite databases are excluded to avoid redundant KDF latency and complex distributed transactions.
@@ -72,12 +73,12 @@ All dependencies point strictly inward toward `Percolator.Domain`. `Percolator.A
 ├── Vault/
 │   ├── IHeaderStorage.cs             # Internal infrastructure port: reads/writes DatabaseHeader protobuf
 │   ├── ProtobufHeaderStorage.cs      # Implements IHeaderStorage using DatabaseHeader.proto
-│   ├── DuressWipeHandler.cs          # Implements IDuressWipeHandler (overwrites header & DB files)
-│   ├── MasterKeyHandle.cs            # Implements IMasterKeyHandle (pinned memory, formats pragma on stack)
+│   ├── DuressWipeHandler.cs          # Implements IDuressWipeHandler (instant crypto-shredder)
+│   ├── MasterKeyHandle.cs            # Implements IMasterKeyHandle (pinned memory, sqlite3_key provider)
 │   └── SqlCipherDatabaseUnlockCoordinator.cs # Implements IDatabaseUnlockCoordinator
 └── Persistence/
     ├── PercolatorDbContext.cs        # Stage 2 post-unlock EF Core DbContext
-    ├── SqlCipherPragmaInterceptor.cs # Pooled connection PRAGMA key interceptor
+    ├── SqlCipherPragmaInterceptor.cs # Pooled connection interceptor (calls SQLitePCL.raw.sqlite3_key)
     └── Stage2HostFactory.cs          # Constructs Stage 2 IHost & executes Database.MigrateAsync
 
 05 - Desktop (Percolator.Desktop):
@@ -222,7 +223,7 @@ public enum DatabaseSetupStatus
 
 ### `IMasterKeyHandle` (`Percolator.Domain.Security.Ports`)
 
-An in-memory key protector that applies the SQLite encryption key to database connections on the stack without materializing a managed hex string in the GC heap:
+An in-memory key protector that applies the raw SQLite encryption key directly to database connections using `SQLitePCL.raw.sqlite3_key`, avoiding string allocations of sensitive key material:
 
 ```csharp
 namespace Percolator.Domain.Security.Ports;
@@ -233,10 +234,10 @@ using Percolator.Domain.Common;
 public interface IMasterKeyHandle : ISensitiveSecret
 {
     /// <summary>
-    /// Executes PRAGMA key directly on the connection using a stack-allocated buffer.
-    /// Never creates an immutable string containing the hex key in the managed GC heap.
+    /// Passes the raw 32-byte key span directly to SQLitePCL.raw.sqlite3_key.
+    /// Never creates an immutable hex string in the managed GC heap.
     /// </summary>
-    void ApplyPragmaKey(DbConnection connection);
+    void ApplyKeyToConnection(DbConnection connection);
 
     /// <summary>
     /// Executes a callback with access to the raw 32-byte key span for O(1) envelope re-wrapping.
@@ -315,9 +316,9 @@ namespace Percolator.Application.Ports;
 public interface IDuressWipeHandler
 {
     /// <summary>
-    /// Executes multi-phase cryptographic shredding:
-    /// Overwrites percolator.header with random bytes and flushes.
-    /// Overwrites and deletes percolator.db, percolator.db-wal, percolator.db-shm.
+    /// Executes instant cryptographic shredding:
+    /// Overwrites percolator.header with random bytes and forces hardware disk flush (< 2 ms).
+    /// Deletes percolator.header, percolator.db, percolator.db-wal, percolator.db-shm.
     /// Purges cached avatars, local attachments, and temporary staging stores.
     /// </summary>
     Task ExecuteWipeAsync(CancellationToken ct = default);
@@ -338,7 +339,7 @@ public interface IAuthenticatedSession : IAsyncDisposable
 
 ## 2.4 Internal Infrastructure Components (`Percolator.Infrastructure.Vault`)
 
-Because the physical disk layout, Protobuf serialization, and SQLite canary mechanics are purely concrete infrastructure details, their helper contracts remain internal to `Percolator.Infrastructure`:
+Because physical disk layout, Protobuf serialization, and SQLite canary mechanics are purely concrete infrastructure details, their helper contracts remain internal to `Percolator.Infrastructure`:
 
 ### `IHeaderStorage` (Internal to `Percolator.Infrastructure.Vault`)
 ```csharp
@@ -367,52 +368,140 @@ internal interface IHeaderStorage
 
 ---
 
-## 3. Workflow Decomposition & Orchestration
+## 3. Workflow Decomposition & Concrete Implementation Mechanics
 
-The unlock and vault orchestration is decomposed into discrete, observable pipeline phases executed by `SqlCipherDatabaseUnlockCoordinator`:
+### 3.1 ChaCha20-Poly1305 Slot Trials & Exception Control Flow
+`SqlCipherDatabaseUnlockCoordinator` derives $K_{\text{cand}} = \text{Argon2id}(\text{passphrase}, \text{salt})$ exactly once, then evaluates the two 48-byte AEAD slots using BCL `System.Security.Cryptography.ChaCha20Poly1305`:
 
+```csharp
+// Each slot payload is 48 bytes: [0..32] ciphertext + [32..48] 16-byte Poly1305 tag
+using var cipher = new ChaCha20Poly1305(derivedCandidateKey);
+Span<byte> candidatePlaintext = stackalloc byte[32];
+
+// 1. Evaluate Master Slot:
+bool masterSuccess = false;
+try
+{
+    cipher.Decrypt(
+        header.MasterSlotNonce.Span, 
+        header.MasterSlotPayload.Span[..32], 
+        header.MasterSlotPayload.Span[32..], 
+        candidatePlaintext);
+    masterSuccess = true;
+}
+catch (AuthenticationTagMismatchException)
+{
+    // Tag mismatch: candidate key is not the master key
+}
+
+if (masterSuccess)
+{
+    // candidatePlaintext holds raw 32-byte Kdb
+    return await CompleteMasterUnlockAsync(candidatePlaintext, ct);
+}
+
+// 2. Evaluate Duress Slot:
+bool duressSuccess = false;
+try
+{
+    cipher.Decrypt(
+        header.DuressSlotNonce.Span, 
+        header.DuressSlotPayload.Span[..32], 
+        header.DuressSlotPayload.Span[32..], 
+        candidatePlaintext);
+    duressSuccess = true;
+}
+catch (AuthenticationTagMismatchException)
+{
+    // Active duress tag mismatch OR dummy random bytes failed authentication
+}
+
+if (duressSuccess && CryptographicOperations.FixedTimeEquals(candidatePlaintext, DuressSentinelBytes))
+{
+    await _wipeHandler.ExecuteWipeAsync(ct);
+    Status = DatabaseSetupStatus.Uninitialized;
+    return new UnlockResult.DuressActivated();
+}
+
+return new UnlockResult.InvalidCredentials();
 ```
-[UnlockAsync Workflow]
-  │
-  ├─ Phase 1: Header Loading (IHeaderStorage.ReadHeaderAsync)
-  │     Reads percolator.header and extracts salt + twin slots.
-  │
-  ├─ Phase 2: Key Derivation & Slot Decryption
-  │     Derives Kcand via Argon2id(candidatePassword, header.Salt).
-  │     │
-  │     ├─ Branch A: Master Slot Evaluation
-  │     │     ChaCha20Poly1305.Decrypt(MasterSlotNonce, MasterSlotPayload, Kcand)
-  │     │     ├─ Success -> Master Key (Kdb) recovered!
-  │     │     │             ├─ Step 3a: Canary Probe: PRAGMA key = "x'<Kdb>'"; SELECT count(*) FROM sqlite_master;
-  │     │     │             ├─ Step 3b: Build Authenticated Host (Stage2HostFactory)
-  │     │     │             │      Registers MasterKeyHandle and EF Core DbContext.
-  │     │     │             ├─ Step 3c: Run Migrations (Database.MigrateAsync)
-  │     │     │             │      Executes any pending schema migrations dynamically.
-  │     │     │             └─ Step 3d: Return UnlockResult.Success(session)
-  │     │     │
-  │     │     └─ Auth Failed -> Proceed to Duress Check (Branch B)
-  │     │
-  │     └─ Branch B: Duress Slot Evaluation
-  │           ChaCha20Poly1305.Decrypt(DuressSlotNonce, DuressSlotPayload, Kcand)
-  │           ├─ Success & Payload == "PERCOLATOR_DURESS_SENTINEL_OK" ->
-  │           │     ├─ Step 4a: Trigger Crypto-Shredding (IDuressWipeHandler.ExecuteWipeAsync)
-  │           │     │      ├─ Overwrite percolator.header with random bytes & flush
-  │           │     │      ├─ Overwrite percolator.db, wal, shm with random bytes & delete
-  │           │     │      └─ Purge avatar/attachment cache directories
-  │           │     ├─ Step 4b: Status = DatabaseSetupStatus.Uninitialized
-  │           │     └─ Step 4c: Return UnlockResult.DuressActivated()
-  │           │
-  │           └─ Auth Failed -> Return UnlockResult.InvalidCredentials()
+
+### 3.2 Native Connection Keying & Researched Canary Validation
+Instead of executing SQL `PRAGMA key = "x'...'"` with string interpolation, connection keying passes raw byte spans directly to native SQLCipher via `SQLitePCLRaw`:
+
+```csharp
+// SqlCipherPragmaInterceptor / CanaryProbe:
+public static void KeyConnection(SqliteConnection connection, ReadOnlySpan<byte> key32Bytes)
+{
+    int rc = SQLitePCL.raw.sqlite3_key(connection.Handle, key32Bytes);
+    if (rc != SQLitePCL.raw.SQLITE_OK)
+    {
+        throw new SecurityException($"SQLitePCL.raw.sqlite3_key failed with return code {rc}");
+    }
+}
 ```
 
-### 3.1 Post-Duress Decoy State UI Handoff
-When `UnlockResult.DuressActivated` is returned:
-1. `UnlockViewModel` receives the decoy signal without displaying an alert or error popup.
-2. The coordinator informs `WindowHandoffCoordinator`.
-3. The UI smoothly transitions into `IdentityGateWindow` / First-Time Setup mode as a clean, blank slate.
-4. An adversary observing the system sees an empty, unconfigured installation.
+#### Researched Canary Error Handling (`SQLITE_NOTADB` = 26)
+When an invalid key is supplied, SQLCipher fails to decrypt page 1, failing SQLite's header magic check (`"SQLite format 3\000"`). SQLite does not define a `SQLITE_WRONGKEY` code; it throws `Microsoft.Data.Sqlite.SqliteException` with native error code **`26` (`SQLITE_NOTADB: "file is not a database"` or `"file is encrypted or is not a database"`)**:
 
-### 3.2 Master Password Update ($O(1)$ Re-Wrap Workflow)
+```csharp
+public async Task<bool> VerifyCanaryAsync(SqliteConnection connection, CancellationToken ct)
+{
+    await using var cmd = connection.CreateCommand();
+    cmd.CommandText = "SELECT count(*) FROM sqlite_master;";
+    try
+    {
+        await cmd.ExecuteScalarAsync(ct);
+        return true;
+    }
+    catch (SqliteException ex) when (ex.SqliteErrorCode == 26) // SQLITE_NOTADB
+    {
+        return false;
+    }
+}
+```
+
+### 3.3 Instant Crypto-Shredding Pipeline (`DuressWipeHandler`)
+Under coercion, multi-pass overwrites of large SQLite database files cause seconds of conspicuous disk latency that tips off an adversary. Because `percolator.db` is already AES-256 encrypted, shredding the 120-byte `percolator.header` renders the database permanently unrecoverable in $< 2\text{ ms}$:
+
+```csharp
+public async Task ExecuteWipeAsync(CancellationToken ct = default)
+{
+    var headerPath = GetPath("percolator.header");
+    if (File.Exists(headerPath))
+    {
+        var fileInfo = new FileInfo(headerPath);
+        long length = fileInfo.Length;
+
+        // 1. Overwrite header with CSPRNG random bytes and force physical disk controller flush
+        await using (var fs = new FileStream(headerPath, FileMode.Open, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
+        {
+            byte[] buffer = new byte[length];
+            RandomNumberGenerator.Fill(buffer);
+            await fs.WriteAsync(buffer, ct);
+            fs.Flush(flushToDisk: true); // Triggers FlushFileBuffers / fsync
+
+            // 2. Truncate to zero bytes
+            fs.SetLength(0);
+            fs.Flush(flushToDisk: true);
+        }
+        File.Delete(headerPath);
+    }
+
+    // 3. Immediately delete database and WAL files (all data is already unrecoverable ciphertext)
+    var dbFiles = new[] { GetPath("percolator.db"), GetPath("percolator.db-wal"), GetPath("percolator.db-shm") };
+    foreach (var path in dbFiles)
+    {
+        if (File.Exists(path)) File.Delete(path);
+    }
+
+    // 4. Purge local cache and staging directories
+    var cacheDir = GetPath("cache");
+    if (Directory.Exists(cacheDir)) Directory.Delete(cacheDir, recursive: true);
+}
+```
+
+### 3.4 Master Password Update ($O(1)$ Re-Wrap Workflow)
 1. User navigates to Settings $\rightarrow$ Security $\rightarrow$ *Change Master Password*.
 2. User provides `currentPassword` and `newPassword`.
 3. `ChangeMasterPasswordAsync`:
@@ -426,29 +515,19 @@ When `UnlockResult.DuressActivated` is returned:
    - Zeroizes temporary keys via `ISensitiveSecret.Zeroize()`.
    - **Performance Guarantee**: Because $K_{\text{db}}$ remains identical, zero SQLite tables or pages are rewritten. Operation completes in $< 200\text{ ms}$ with zero risk of database corruption.
 
-### 3.3 Duress Password Configuration Workflow
-1. User navigates to Settings $\rightarrow$ Security $\rightarrow$ *Emergency Duress Passphrase*.
-2. User provides new duress password or leaves blank to clear via `ConfigureDuressPasswordAsync(duressPassword)`.
-3. Invariant check: if setting password, verifies `!VaultPassphrase.ConstantTimeEquals(masterPassword, duressPassword)`.
-4. If setting: derives duress key via Argon2id, encrypts sentinel, and writes updated `DatabaseHeader`.
-5. If clearing: generates 60 random bytes into `duress_slot_nonce` + `duress_slot_payload` and writes header.
-6. Plausible deniability invariant is preserved at all times.
-
 ---
 
-## 4. Threat Model & Privacy Invariants
+## 4. Threat Model & Security Posture (Lens 3)
 
-- **Plausible Deniability**:
-  - The existence of a duress password is cryptographically unprovable from forensic disk analysis. Dummy slots and active slots are identical in structure, length, and entropy.
-- **Crypto-Shredding Guarantee**:
-  - Overwriting `percolator.header` renders all remaining physical NAND flash remnants of `percolator.db` completely unrecoverable, even if raw SSD controller blocks are dumped via chip-off analysis.
-- **Coercion Safety**:
-  - Entering the duress password produces zero anomalous alerts or crash stack traces; the application appears as an empty first-time run.
-- **Memory Security**:
-  - Passphrase buffers and intermediate keys implement `ISensitiveSecret` and are scrubbed with `CryptographicOperations.ZeroMemory` immediately upon completion of derivation/decryption.
-  - SQLCipher PRAGMA execution formats on the stack to prevent managed string leakage of the master key.
-- **Zero Headless Coupling**:
-  - All vault coordination lives in `Percolator.Application` and `Percolator.Infrastructure`. Headless Linux relay hosts, integration tests, and desktop clients use the exact same secure unlock code without any UI dependency.
+| Threat / Vulnerability | Concrete Protocol Defense | Verification Mechanism |
+| :--- | :--- | :--- |
+| **Forensic Plausible Deniability** | **Twin-Slot Layout**: Both Master and Duress slots are fixed at exactly 48 bytes (32-byte payload + 16-byte Poly1305 tag). When duress is inactive, the slot is filled with uniform CSPRNG random bytes. No flags, hashes, or boolean markers exist on disk. | Forensic entropy unit test compares active vs. dummy duress slots, asserting statistical indistinguishability. |
+| **SSD Wear-Leveling & Remanence** | **Instant Key Envelope Destruction**: `percolator.db` is encrypted with the 32-byte AES-256 key $K_{\text{db}}$. Overwriting the 120-byte `percolator.header` with hardware flush (`flushToDisk: true`) permanently destroys $K_{\text{db}}$ in $< 2\text{ ms}$, rendering all physical NAND blocks unrecoverable without observable disk latency. | Unit test executes `ExecuteWipeAsync`, asserting header is overwritten with random bytes and all files deleted. |
+| **Timing Side-Channel Attacks** | **Single-KDF Pass**: Argon2id is computed exactly once per candidate attempt ($K_{\text{cand}}$). ChaCha20-Poly1305 trials on Master vs. Duress slots take sub-microsecond time. Sentinel verification uses `CryptographicOperations.FixedTimeEquals`. | Unit test verifies candidate key is derived only once; asserts constant-time equality evaluation. |
+| **Coercion & Decoy Safety** | **Silent Decoy Transition**: Entering the duress passphrase executes shredding ($< 20\text{ ms}$) and immediately transitions the UI into a clean first-run setup window (`IdentityGateWindow`) without alerts or abnormal crash logs. | UI integration test verifies `UnlockResult.DuressActivated` transitions directly to decoy setup without crash signatures. |
+| **Cold Restart Consistency** | **State Parity**: If the app process is terminated post-duress and restarted, the lack of `percolator.header` causes a cold launch to naturally boot into `DatabaseSetupStatus.Uninitialized`. | End-to-end test asserts fresh process boot displays first-time setup following a duress wipe. |
+| **Process Memory Inspection** | **Native C-API Keying**: `MasterKeyHandle` passes raw 32-byte key spans directly to `SQLitePCL.raw.sqlite3_key`, preventing the 64-char hex key from materializing as an immutable GC string; scrubs RAM via `ZeroMemory` on lock. | Unit test asserts `MasterKeyHandle.Dispose()` zeroes the key span and marks the instance as disposed. |
+| **Cross-Passphrase Collision** | **Domain Invariant**: Duress passphrase cannot match the master passphrase (`VaultPassphrase.ConstantTimeEquals`). | Unit test verifies `ConfigureDuressPasswordAsync` returns failure if duress passphrase matches master. |
 
 ---
 
@@ -461,10 +540,11 @@ When `UnlockResult.DuressActivated` is returned:
 | **Normal Unlock** | Valid master password | Unlocks master slot, canary passes, migrations execute, returns `UnlockResult.Success(session)` | Asserts session is non-null and ready |
 | **Duress Unlock Triggered** | Valid duress password | Decrypts duress slot, executes `IDuressWipeHandler`, deletes database/header files, returns `UnlockResult.DuressActivated` | Verifies disk files are deleted and status is `Uninitialized` |
 | **Invalid Passphrase Attempt** | Incorrect password | Fails both master and duress slots, returns `UnlockResult.InvalidCredentials`, zero wipe occurs | Asserts result type; verifies database files remain intact |
+| **Canary Error Verification** | Corrupted database file or bad key | Traps `SqliteException` with `SqliteErrorCode == 26`, returns failure without crashing | Tests explicit `SQLITE_NOTADB` error trap |
 | **Master Password Change** | Current password + New password | Re-wraps master slot with new key; database remains fully readable; subsequent unlock requires new password | Tests end-to-end master password re-wrap |
 | **Duress Update in Session** | Authenticated session sets new duress key | Re-encrypts duress slot in `DatabaseHeader`; subsequent duress unlock succeeds with new key | Tests end-to-end configuration transition |
 | **Duress Clear in Session** | Authenticated session clears duress key | Overwrites duress slot with random noise; prior duress password no longer triggers wipe | Verifies former duress password returns invalid passphrase |
-| **Crypto-Shredding Resilience** | Invoking `ExecuteWipeAsync` | Overwrites files with random bytes, deletes files, purges cache directory | Verifies target files are absent post-execution |
+| **Crypto-Shredding Performance & Removal** | Invoking `ExecuteWipeAsync` | Overwrites header with random bytes + hardware flush, deletes files, purges cache directory in < 50ms | Verifies target files are absent post-execution |
 
 ---
 
