@@ -1,8 +1,8 @@
 # Percolator Database Encryption & Authenticated Session Lifecycle Plan
 
 ## Refinement Status Gate
-- [ ] Lens 1: Scope & Feature Slice Framing (Status: In Review)
-- [ ] Lens 2: Onion Architecture & Primitive Obsession (Status: Pending)
+- [x] Lens 1: Scope & Feature Slice Framing (Status: Approved)
+- [ ] Lens 2: Onion Architecture & Primitive Obsession (Status: In Review)
 - [ ] Lens 3: Threat Modeling & Security Posture (Status: Pending)
 - [ ] Lens 4: High-Value, Low-Brittle Unit Test Design (Status: Pending)
 - [ ] Lens 5: Cross-Layer Infrastructure Alignment (Status: Pending)
@@ -48,21 +48,24 @@
 
 ## 2. Cross-Layer Architecture & Solution Placement
 
-The vault and encryption subsystem is structured across the existing solution projects according to real project conventions:
+The vault and encryption subsystem is structured across existing solution projects according to Onion Architecture principles:
 
 ```
 01 - Domain (Percolator.Domain):
 └── Security/
     ├── ValueObjects/
-    │   ├── MasterPassword.cs          # Value object: passphrase validation & memory protection
-    │   ├── DuressPassword.cs          # Value object: non-empty, non-whitespace invariant
-    │   ├── Argon2Salt.cs              # Value object: 16-byte cryptographic salt
-    │   ├── MasterKeyPragma.cs         # Value object: sanitized hex pragma string
+    │   ├── MasterPassword.cs          # ISensitiveSecret: validated passphrase buffer with zeroization
+    │   ├── DuressPassword.cs          # ISensitiveSecret: non-empty, non-whitespace invariant
+    │   ├── Argon2Salt.cs              # [ByteArray(16)] cryptographic salt
+    │   ├── EncryptedSlotPayload.cs    # [ByteArray(48)] 32-byte ciphertext + 16-byte Poly1305 auth tag
+    │   ├── DatabaseEncryptionKey.cs   # [ByteArray(32)] ISensitiveSecret raw database key
+    │   ├── MasterKeyPragma.cs         # Sanitized hex pragma string: PRAGMA key = "x'<hex>'"
     │   ├── UnlockOutcome.cs           # Discriminated outcome: Success, DuressDecoyActivated, InvalidPassphrase
     │   ├── DatabaseSetupStatus.cs     # State enum: Uninitialized, Locked, Unlocked
-    │   └── HeaderPresenceStatus.cs    # State enum: Present, Absent
+    │   ├── HeaderPresenceStatus.cs    # State enum: Present, Absent
+    │   └── HeaderVersion.cs           # Enum: V1 = 1
     └── Ports/
-        └── IMasterKeyProtector.cs     # Pure in-memory key protector port (visitor pattern)
+        └── IMasterKeyProtector.cs     # Pure in-memory key protector port (visitor pattern, ISensitiveSecret)
 
 02 - Application (Percolator.Application):
 ├── Ports/                             # Driving and driven vault ports
@@ -71,7 +74,7 @@ The vault and encryption subsystem is structured across the existing solution pr
 │   ├── IDuressWipeHandler.cs         # Driven port: multi-phase crypto-shredding orchestrator
 │   └── IHeaderStorage.cs             # Driven port: reads/writes binary header payload
 └── Vault/
-    ├── DatabaseHeaderPayload.cs      # Header DTO (salt, nonces, encrypted slot payloads)
+    ├── DatabaseHeaderPayload.cs      # Header DTO (strongly typed value objects, zero naked primitives)
     └── DecoyTransitionSignal.cs      # Signal sent to UI upon duress wipe completion
 
 03 - Infrastructure (Percolator.Infrastructure):
@@ -126,62 +129,212 @@ message DatabaseHeader {
 * **Slot Payload Sizing**: Both `master_slot_payload` and `duress_slot_payload` are exactly 48 bytes (32-byte plaintext + 16-byte Poly1305 auth tag).
 * **Dummy Invariant**: If no duress password is configured, `duress_slot_nonce` (12 bytes) and `duress_slot_payload` (48 bytes) are filled with `RandomNumberGenerator.GetBytes(60)`. An adversary reading the Protobuf stream cannot distinguish active duress protection from dummy noise.
 
-### 2.2 Domain Value Objects & Ports (`Percolator.Domain.Security`)
+---
 
-#### Value Objects (`Percolator.Domain.Security.ValueObjects`)
-* **`MasterPassword`**: Encapsulates user passphrase (empty string permitted). Provides zeroized buffer extraction.
-* **`DuressPassword`**: Encapsulates optional duress passphrase. Invariant: must be non-empty, non-whitespace, and cannot match master password.
-* **`Argon2Salt`**: 16-byte cryptographically secure salt.
-* **`MasterKeyPragma`**: Sanitized hexadecimal pragma string (`PRAGMA key = "x'<hex>'"`).
-* **`UnlockOutcome`**: Explicit discriminated outcome of an unlock attempt:
-  ```csharp
-  namespace Percolator.Domain.Security.ValueObjects;
+## 2.2 Domain Value Objects & Ports (`Percolator.Domain.Security`)
 
-  public enum UnlockOutcome
-  {
-      Success = 0,
-      DuressDecoyActivated = 1,
-      InvalidPassphrase = 2
-  }
-  ```
-* **`DatabaseSetupStatus`**:
-  ```csharp
-  namespace Percolator.Domain.Security.ValueObjects;
+### Value Objects (`Percolator.Domain.Security.ValueObjects`)
 
-  public enum DatabaseSetupStatus
-  {
-      Uninitialized = 0,
-      Locked = 1,
-      Unlocked = 2
-  }
-  ```
-* **`HeaderPresenceStatus`**:
-  ```csharp
-  namespace Percolator.Domain.Security.ValueObjects;
+All value objects enforce structural immutability, explicit factory construction, and **zero implicit or explicit cast operators**. Sensitive memory buffers implement `ISensitiveSecret` to guarantee deterministic memory zeroization.
 
-  public enum HeaderPresenceStatus
-  {
-      Present = 0,
-      Absent = 1
-  }
-  ```
+#### `MasterPassword`
+```csharp
+namespace Percolator.Domain.Security.ValueObjects;
+
+using Percolator.Domain.Common;
+
+public sealed class MasterPassword : ISensitiveSecret
+{
+    private char[] _chars;
+    public bool IsZeroized { get; private set; }
+    public bool IsEmpty => _chars.Length == 0;
+
+    private MasterPassword(char[] chars) => _chars = chars;
+
+    public static MasterPassword Create(string? input) => 
+        new(input?.ToCharArray() ?? Array.Empty<char>());
+
+    public static MasterPassword Empty => new(Array.Empty<char>());
+
+    public void WithCharSpan(Action<ReadOnlySpan<char>> action)
+    {
+        ObjectDisposedException.ThrowIf(IsZeroized, this);
+        action(_chars.AsSpan());
+    }
+
+    public T WithCharSpan<T>(Func<ReadOnlySpan<char>, T> func)
+    {
+        ObjectDisposedException.ThrowIf(IsZeroized, this);
+        return func(_chars.AsSpan());
+    }
+
+    public void Zeroize()
+    {
+        if (IsZeroized) return;
+        CryptographicOperations.ZeroMemory(MemoryMarshal.AsBytes(_chars.AsSpan()));
+        _chars = Array.Empty<char>();
+        IsZeroized = true;
+    }
+
+    public void Dispose() => Zeroize();
+}
+```
+
+#### `DuressPassword`
+```csharp
+namespace Percolator.Domain.Security.ValueObjects;
+
+using Percolator.Domain.Common;
+
+public sealed class DuressPassword : ISensitiveSecret
+{
+    private char[] _chars;
+    public bool IsZeroized { get; private set; }
+
+    private DuressPassword(char[] chars) => _chars = chars;
+
+    public static Result<DuressPassword> Create(string? input)
+    {
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            return Result.Failure<DuressPassword>("Duress passphrase cannot be empty or whitespace.");
+        }
+        return Result.Success(new DuressPassword(input.ToCharArray()));
+    }
+
+    public void WithCharSpan(Action<ReadOnlySpan<char>> action)
+    {
+        ObjectDisposedException.ThrowIf(IsZeroized, this);
+        action(_chars.AsSpan());
+    }
+
+    public T WithCharSpan<T>(Func<ReadOnlySpan<char>, T> func)
+    {
+        ObjectDisposedException.ThrowIf(IsZeroized, this);
+        return func(_chars.AsSpan());
+    }
+
+    public void Zeroize()
+    {
+        if (IsZeroized) return;
+        CryptographicOperations.ZeroMemory(MemoryMarshal.AsBytes(_chars.AsSpan()));
+        _chars = Array.Empty<char>();
+        IsZeroized = true;
+    }
+
+    public void Dispose() => Zeroize();
+}
+```
+
+#### Fixed-Length Byte Value Objects (Generated via `[ByteArray]`)
+```csharp
+namespace Percolator.Domain.Security.ValueObjects;
+
+using Percolator.Domain.Common;
+using Percolator.SourceGenerators;
+
+/// <summary>16-byte random salt for Argon2id key derivation.</summary>
+[ByteArray(length: 16)]
+public sealed partial record Argon2Salt;
+
+/// <summary>48-byte AEAD envelope payload (32-byte payload + 16-byte Poly1305 authentication tag).</summary>
+[ByteArray(length: 48)]
+public sealed partial record EncryptedSlotPayload;
+
+/// <summary>32-byte raw AES-256-CBC database encryption key.</summary>
+[ByteArray(length: 32)]
+public sealed partial record DatabaseEncryptionKey : ISensitiveSecret
+{
+    public void Zeroize()
+    {
+        if (MemoryMarshal.TryGetArray(_value, out var segment) && segment.Array != null)
+        {
+            CryptographicOperations.ZeroMemory(segment.Array.AsSpan(segment.Offset, segment.Count));
+        }
+    }
+
+    public void Dispose() => Zeroize();
+}
+```
+
+#### `MasterKeyPragma`
+```csharp
+namespace Percolator.Domain.Security.ValueObjects;
+
+/// <summary>
+/// Encapsulates a validated, sanitized hex PRAGMA key statement.
+/// Prevents SQL injection and raw string manipulation in database connection interceptors.
+/// </summary>
+public sealed record MasterKeyPragma
+{
+    public string PragmaStatement { get; }
+
+    private MasterKeyPragma(string statement) => PragmaStatement = statement;
+
+    public static MasterKeyPragma Create(ReadOnlySpan<byte> raw32Bytes)
+    {
+        if (raw32Bytes.Length != 32)
+        {
+            throw new ArgumentException("Master key must be exactly 32 bytes.", nameof(raw32Bytes));
+        }
+        return new MasterKeyPragma($"PRAGMA key = \"x'{Convert.ToHexString(raw32Bytes)}'\";");
+    }
+}
+```
+
+#### Domain State Enums
+```csharp
+namespace Percolator.Domain.Security.ValueObjects;
+
+public enum UnlockOutcome
+{
+    Success = 0,
+    DuressDecoyActivated = 1,
+    InvalidPassphrase = 2
+}
+
+public enum DatabaseSetupStatus
+{
+    Uninitialized = 0,
+    Locked = 1,
+    Unlocked = 2
+}
+
+public enum HeaderPresenceStatus
+{
+    Present = 0,
+    Absent = 1
+}
+
+public enum HeaderVersion
+{
+    V1 = 1
+}
+```
 
 #### Domain Port (`Percolator.Domain.Security.Ports`)
-* **`IMasterKeyProtector`**: Pure in-memory key protector port:
-  ```csharp
-  namespace Percolator.Domain.Security.Ports;
+```csharp
+namespace Percolator.Domain.Security.Ports;
 
-  public interface IMasterKeyProtector : IDisposable
-  {
-      MasterKeyPragma GetPragmaLiteral();
-      void WithKeySpan(Action<ReadOnlySpan<byte>> action);
-      T WithKeySpan<T>(Func<ReadOnlySpan<byte>, T> func);
-  }
-  ```
+using Percolator.Domain.Common;
+using Percolator.Domain.Security.ValueObjects;
 
-### 2.3 Application Ports & Models (`Percolator.Application`)
+public interface IMasterKeyProtector : ISensitiveSecret
+{
+    MasterKeyPragma GetPragmaLiteral();
+    void WithKeySpan(Action<ReadOnlySpan<byte>> action);
+    T WithKeySpan<T>(Func<ReadOnlySpan<byte>, T> func);
+}
+```
 
-#### `IDatabaseUnlockCoordinator` (`Percolator.Application.Ports`)
+---
+
+## 2.3 Application Ports & Models (`Percolator.Application`)
+
+### `IDatabaseUnlockCoordinator` (`Percolator.Application.Ports`)
+
+The coordinator interface eliminates control-coupling boolean flags and nullable doublets by providing explicit, intent-revealing methods:
+
 ```csharp
 namespace Percolator.Application.Ports;
 
@@ -199,12 +352,18 @@ public interface IDatabaseUnlockCoordinator
     Task<DatabaseSetupStatus> DetermineStatusAsync(CancellationToken ct = default);
 
     /// <summary>
-    /// Initializes new database with master password and optional duress password.
-    /// Generates salt, derives master key, encrypts slots, verifies canary, runs initial migrations.
+    /// Initializes a new database with only a master password (duress slot padded with dummy random noise).
     /// </summary>
-    Task<Result<IAuthenticatedSession>> InitializeMasterPasswordAsync(
+    Task<Result<IAuthenticatedSession>> InitializeAsync(
         MasterPassword masterPassword, 
-        DuressPassword? duressPassword = null, 
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Initializes a new database with both a master password and an emergency duress password.
+    /// </summary>
+    Task<Result<IAuthenticatedSession>> InitializeWithDuressAsync(
+        MasterPassword masterPassword, 
+        DuressPassword duressPassword, 
         CancellationToken ct = default);
 
     /// <summary>
@@ -225,9 +384,14 @@ public interface IDatabaseUnlockCoordinator
         CancellationToken ct = default);
 
     /// <summary>
-    /// Updates or clears duress password within an active authenticated session.
+    /// Sets or updates the emergency duress password within an active authenticated session.
     /// </summary>
-    Task<Result> ConfigureDuressPasswordAsync(DuressPassword? duressPassword, CancellationToken ct = default);
+    Task<Result> SetDuressPasswordAsync(DuressPassword duressPassword, CancellationToken ct = default);
+
+    /// <summary>
+    /// Clears the duress password and overwrites the duress slot with cryptographically secure dummy noise.
+    /// </summary>
+    Task<Result> ClearDuressPasswordAsync(CancellationToken ct = default);
 
     /// <summary>
     /// Gracefully stops workers, flushes connection pools, zeroizes master key, disposes AuthenticatedHost.
@@ -236,7 +400,7 @@ public interface IDatabaseUnlockCoordinator
 }
 ```
 
-#### `IDuressWipeHandler` (`Percolator.Application.Ports`)
+### `IDuressWipeHandler` (`Percolator.Application.Ports`)
 ```csharp
 namespace Percolator.Application.Ports;
 
@@ -252,7 +416,7 @@ public interface IDuressWipeHandler
 }
 ```
 
-#### `IHeaderStorage` (`Percolator.Application.Ports`)
+### `IHeaderStorage` (`Percolator.Application.Ports`)
 ```csharp
 namespace Percolator.Application.Ports;
 
@@ -268,22 +432,26 @@ public interface IHeaderStorage
 }
 ```
 
-#### `DatabaseHeaderPayload` (`Percolator.Application.Vault`)
+### `DatabaseHeaderPayload` (`Percolator.Application.Vault`)
 ```csharp
 namespace Percolator.Application.Vault;
 
 using Percolator.Domain.Security.ValueObjects;
 
+/// <summary>
+/// Domain-level payload representation of the twin-slot header.
+/// Encapsulates all cryptographic slot material in strongly typed value objects with zero naked primitives.
+/// </summary>
 public sealed record DatabaseHeaderPayload(
-    int Version,
+    HeaderVersion Version,
     Argon2Salt Salt,
-    byte[] MasterSlotNonce,
-    byte[] MasterSlotPayload,
-    byte[] DuressSlotNonce,
-    byte[] DuressSlotPayload);
+    AeadNonce MasterSlotNonce,
+    EncryptedSlotPayload MasterSlotPayload,
+    AeadNonce DuressSlotNonce,
+    EncryptedSlotPayload DuressSlotPayload);
 ```
 
-#### `IAuthenticatedSession` (`Percolator.Application.Ports`)
+### `IAuthenticatedSession` (`Percolator.Application.Ports`)
 ```csharp
 namespace Percolator.Application.Ports;
 
@@ -303,14 +471,14 @@ The unlock and vault orchestration is decomposed into discrete, observable pipel
 [UnlockAsync Workflow]
   │
   ├─ Phase 1: Header Loading (IHeaderStorage.ReadHeaderAsync)
-  │     Reads percolator.header and extracts salt + twin slots.
+  │     Reads percolator.header and extracts strongly typed DatabaseHeaderPayload.
   │
   ├─ Phase 2: Key Derivation & Slot Decryption
   │     Derives Kcand via Argon2id(candidatePassword, header.Salt).
   │     │
   │     ├─ Branch A: Master Slot Evaluation
   │     │     ChaCha20Poly1305.Decrypt(MasterSlotNonce, MasterSlotPayload, Kcand)
-  │     │     ├─ Success -> Master Key (Kdb) recovered!
+  │     │     ├─ Success -> Master Key (DatabaseEncryptionKey) recovered!
   │     │     │             ├─ Step 3a: Canary Probe: PRAGMA key = "x'<Kdb>'"; SELECT count(*) FROM sqlite_master;
   │     │     │             ├─ Step 3b: Build Authenticated Host (Stage2HostFactory)
   │     │     │             │      Registers EphemeralMasterKeyProtector and EF Core DbContext.
@@ -352,17 +520,15 @@ When `UnlockOutcome.DuressDecoyActivated` is returned:
    - Re-encrypts $K_{\text{db}}$ using ChaCha20-Poly1305 under $K_{\text{new\_master}}$ with a fresh 12-byte nonce.
    - Preserves or re-encrypts the duress slot under the new salt.
    - Atomically overwrites `percolator.header` via `IHeaderStorage`.
-   - Zeroizes temporary keys.
+   - Zeroizes temporary keys via `ISensitiveSecret.Zeroize()`.
    - **Performance Guarantee**: Because $K_{\text{db}}$ remains identical, zero SQLite tables or pages are rewritten. Operation completes in $< 200\text{ ms}$ with zero risk of database corruption.
 
 ### 3.3 Duress Password Configuration Workflow
 1. User navigates to Settings $\rightarrow$ Security $\rightarrow$ *Emergency Duress Passphrase*.
-2. User provides new duress password (or leaves blank to clear).
-3. `ConfigureDuressPasswordAsync`:
-   - Reads existing `DatabaseHeader`.
-   - If setting password: derives duress key via Argon2id, encrypts sentinel, and writes updated `DatabaseHeader`.
-   - If clearing password: generates 60 random bytes into `duress_slot_nonce` + `duress_slot_payload` and writes header.
-   - Preserves plausible deniability invariant at all times.
+2. User sets new duress password via `SetDuressPasswordAsync(duressPassword)` or clears via `ClearDuressPasswordAsync()`.
+3. If setting: derives duress key via Argon2id, encrypts sentinel into `EncryptedSlotPayload`, and writes updated `DatabaseHeaderPayload`.
+4. If clearing: generates 60 random bytes into `duress_slot_nonce` + `duress_slot_payload` and writes header.
+5. Plausible deniability invariant is preserved at all times.
 
 ---
 
@@ -375,7 +541,7 @@ When `UnlockOutcome.DuressDecoyActivated` is returned:
 - **Coercion Safety**:
   - Entering the duress password produces zero anomalous alerts or crash stack traces; the application appears as an empty first-time run.
 - **Memory Security**:
-  - Passphrase buffers and intermediate keys are scrubbed with `CryptographicOperations.ZeroMemory` immediately upon completion of derivation/decryption.
+  - Passphrase buffers and intermediate keys implement `ISensitiveSecret` and are scrubbed with `CryptographicOperations.ZeroMemory` immediately upon completion of derivation/decryption.
 - **Zero Headless Coupling**:
   - All vault coordination lives in `Percolator.Application` and `Percolator.Infrastructure`. Headless Linux relay hosts, integration tests, and desktop clients use the exact same secure unlock code without any UI dependency.
 
