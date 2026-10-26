@@ -33,6 +33,7 @@
 - **Native SQLCipher Key Application**: Apply the 32-byte database encryption key directly via `SQLitePCL.raw.sqlite3_key` to unmanaged handles on connection open, eliminating managed string allocations of sensitive key material.
 - **Explicit Unlock for Blank Passwords**: Support empty master password (`""`) with mandatory first-launch UI warning confirmation, and require explicit interaction ("Unlock" click) on every subsequent launch.
 - **Orderly In-Session Relock & Memory Scrubbing**: Provide graceful teardown via `LockAsync`: stop all `IHostedService` instances, flush SQLite pools (`SqliteConnection.ClearAllPools()`), zeroize raw key bytes via `CryptographicOperations.ZeroMemory`, dispose `AuthenticatedHost`, and return UI to `UnlockWindow`.
+- **Cold Launch Self-Healing Invariant**: If `percolator.header` is missing (e.g. after a duress wipe where `percolator.db` was locked by an external OS process), `DetermineStatusAsync` returns `DatabaseSetupStatus.Uninitialized`. Upon new setup, `InitializeAsync` force-unlinks any orphaned ciphertext DB files before initializing.
 
 ### 1.2 Explicit Non-Goals (Negative Scope)
 - **No Progressive Backoff Throttling**: Artificial login delay throttling is excluded; Argon2id memory-hardness ($64\text{ MB}, t=3, p=4$) provides consistent, deterministic computational cost without UI delay loops.
@@ -54,6 +55,8 @@ All dependencies point strictly inward toward `Percolator.Domain`. `Percolator.A
 ```
 01 - Domain (Percolator.Domain):
 └── Security/
+    ├── Delegates/
+    │   └── ReadOnlySpanFunc.cs       # Generic delegate supporting ref struct byte spans without allocations
     ├── ValueObjects/
     │   ├── VaultPassphrase.cs        # ISensitiveSecret: validated passphrase buffer with zeroization
     │   ├── DatabaseSetupStatus.cs    # State enum: Uninitialized, Locked, Unlocked
@@ -64,7 +67,7 @@ All dependencies point strictly inward toward `Percolator.Domain`. `Percolator.A
 02 - Application (Percolator.Application):
 └── Ports/
     ├── IDatabaseUnlockCoordinator.cs # Primary driving port for vault lifecycle & session coordination
-    ├── IAuthenticatedSession.cs      # Token/handle to Stage 2 container
+    ├── IAuthenticatedSession.cs      # Token/handle to Stage 2 container with lifecycle StartAsync/StopAsync
     └── IDuressWipeHandler.cs         # Driven port: multi-phase crypto-shredding orchestrator
 
 03 - Infrastructure (Percolator.Infrastructure):
@@ -78,7 +81,7 @@ All dependencies point strictly inward toward `Percolator.Domain`. `Percolator.A
 │   └── SqlCipherDatabaseUnlockCoordinator.cs # Implements IDatabaseUnlockCoordinator
 └── Persistence/
     ├── PercolatorDbContext.cs        # Stage 2 post-unlock EF Core DbContext
-    ├── SqlCipherPragmaInterceptor.cs # Pooled connection interceptor (calls SQLitePCL.raw.sqlite3_key)
+    ├── SqlCipherPragmaInterceptor.cs # Pooled connection interceptor (calls SQLitePCL.raw.sqlite3_key + WAL)
     └── Stage2HostFactory.cs          # Constructs Stage 2 IHost & executes Database.MigrateAsync
 
 05 - Desktop (Percolator.Desktop):
@@ -125,6 +128,16 @@ message DatabaseHeader {
 
 ## 2.2 Domain Contracts & Value Objects (`Percolator.Domain.Security`)
 
+### `ReadOnlySpanFunc` (`Percolator.Domain.Security.Delegates`)
+
+In C#, `ReadOnlySpan<T>` is a `ref struct` and cannot be used as a type argument in standard `Func<T, TResult>`. This delegate allows zero-allocation consumption of byte spans returning arbitrary result types:
+
+```csharp
+namespace Percolator.Domain.Security.Delegates;
+
+public delegate TResult ReadOnlySpanFunc<in T, out TResult>(ReadOnlySpan<T> span);
+```
+
 ### `VaultPassphrase` (`Percolator.Domain.Security.ValueObjects`)
 
 A unified, memory-scrubbing passphrase wrapper that extracts UTF-8 spans directly into temporary buffers without leaving string or byte artifacts on the managed GC heap:
@@ -135,6 +148,7 @@ namespace Percolator.Domain.Security.ValueObjects;
 using System.Security.Cryptography;
 using System.Text;
 using Percolator.Domain.Common;
+using Percolator.Domain.Security.Delegates;
 
 public sealed class VaultPassphrase : ISensitiveSecret
 {
@@ -155,13 +169,26 @@ public sealed class VaultPassphrase : ISensitiveSecret
     /// </summary>
     public void WithUtf8Span(Action<ReadOnlySpan<byte>> action)
     {
+        WithUtf8Span(span =>
+        {
+            action(span);
+            return 0;
+        });
+    }
+
+    /// <summary>
+    /// Executes a function with the UTF-8 encoded bytes of the passphrase in a temporary stack/rented buffer,
+    /// deterministically zeroizing the memory immediately upon completion and returning the result.
+    /// </summary>
+    public TResult WithUtf8Span<TResult>(ReadOnlySpanFunc<byte, TResult> func)
+    {
         ObjectDisposedException.ThrowIf(IsZeroized, this);
         int maxByteCount = Encoding.UTF8.GetMaxByteCount(_chars.Length);
         Span<byte> buffer = maxByteCount <= 256 ? stackalloc byte[maxByteCount] : new byte[maxByteCount];
         try
         {
             int written = Encoding.UTF8.GetBytes(_chars.AsSpan(), buffer);
-            action(buffer[..written]);
+            return func(buffer[..written]);
         }
         finally
         {
@@ -230,6 +257,7 @@ namespace Percolator.Domain.Security.Ports;
 
 using System.Data.Common;
 using Percolator.Domain.Common;
+using Percolator.Domain.Security.Delegates;
 
 public interface IMasterKeyHandle : ISensitiveSecret
 {
@@ -243,6 +271,11 @@ public interface IMasterKeyHandle : ISensitiveSecret
     /// Executes a callback with access to the raw 32-byte key span for O(1) envelope re-wrapping.
     /// </summary>
     void WithKeySpan(Action<ReadOnlySpan<byte>> action);
+
+    /// <summary>
+    /// Executes a function with access to the raw 32-byte key span, returning a result.
+    /// </summary>
+    TResult WithKeySpan<TResult>(ReadOnlySpanFunc<byte, TResult> func);
 }
 ```
 
@@ -266,11 +299,13 @@ public interface IDatabaseUnlockCoordinator
 
     /// <summary>
     /// Checks disk for existing header and database files to determine initial setup state.
+    /// If percolator.header is missing, always returns DatabaseSetupStatus.Uninitialized.
     /// </summary>
     Task<DatabaseSetupStatus> DetermineStatusAsync(CancellationToken ct = default);
 
     /// <summary>
     /// Initializes new database with master passphrase and optional duress passphrase.
+    /// Forcefully unlinks any orphaned percolator.db* files if header was missing.
     /// Generates salt, derives master key, encrypts slots, verifies canary, runs initial migrations.
     /// </summary>
     Task<DomainResult<IAuthenticatedSession>> InitializeAsync(
@@ -332,6 +367,16 @@ namespace Percolator.Application.Ports;
 public interface IAuthenticatedSession : IAsyncDisposable
 {
     IServiceProvider Services { get; }
+
+    /// <summary>
+    /// Launches all registered IHostedService instances in the Stage 2 container.
+    /// </summary>
+    Task StartAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Gracefully stops all registered IHostedService instances prior to container teardown.
+    /// </summary>
+    Task StopAsync(CancellationToken ct = default);
 }
 ```
 
@@ -374,6 +419,10 @@ internal interface IHeaderStorage
 `SqlCipherDatabaseUnlockCoordinator` derives $K_{\text{cand}} = \text{Argon2id}(\text{passphrase}, \text{salt})$ exactly once, then evaluates the two 48-byte AEAD slots using BCL `System.Security.Cryptography.ChaCha20Poly1305`:
 
 ```csharp
+// Standard fixed 32-byte sentinel for duress slot verification:
+private static readonly byte[] DuressSentinelBytes = 
+    SHA256.HashData(Encoding.UTF8.GetBytes("PERCOLATOR_VAULT_DURESS_SENTINEL_V1"));
+
 // Each slot payload is 48 bytes: [0..32] ciphertext + [32..48] 16-byte Poly1305 tag
 using var cipher = new ChaCha20Poly1305(derivedCandidateKey);
 Span<byte> candidatePlaintext = stackalloc byte[32];
@@ -427,16 +476,28 @@ return new UnlockResult.InvalidCredentials();
 ```
 
 ### 3.2 Native Connection Keying & Researched Canary Validation
-Instead of executing SQL `PRAGMA key = "x'...'"` with string interpolation, connection keying passes raw byte spans directly to native SQLCipher via `SQLitePCLRaw`:
+Instead of executing SQL `PRAGMA key = "x'...'"` with string interpolation, connection keying passes raw byte spans directly to native SQLCipher via `SQLitePCLRaw` and enforces WAL pragmas immediately on open:
 
 ```csharp
-// SqlCipherPragmaInterceptor / CanaryProbe:
-public static void KeyConnection(SqliteConnection connection, ReadOnlySpan<byte> key32Bytes)
+// SqlCipherPragmaInterceptor:
+public sealed class SqlCipherPragmaInterceptor : DbConnectionInterceptor
 {
-    int rc = SQLitePCL.raw.sqlite3_key(connection.Handle, key32Bytes);
-    if (rc != SQLitePCL.raw.SQLITE_OK)
+    private readonly IMasterKeyHandle _keyHandle;
+
+    public SqlCipherPragmaInterceptor(IMasterKeyHandle keyHandle) => _keyHandle = keyHandle;
+
+    public override void ConnectionOpened(DbConnection connection, ConnectionEndEventData eventData)
     {
-        throw new SecurityException($"SQLitePCL.raw.sqlite3_key failed with return code {rc}");
+        if (connection is SqliteConnection sqliteConn)
+        {
+            // 1. Pass raw 32-byte key span directly to SQLite C-API
+            _keyHandle.ApplyKeyToConnection(sqliteConn);
+
+            // 2. Configure SQLite engine parameters
+            using var cmd = sqliteConn.CreateCommand();
+            cmd.CommandText = "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;";
+            cmd.ExecuteNonQuery();
+        }
     }
 }
 ```
@@ -518,7 +579,8 @@ public async Task ExecuteWipeAsync(CancellationToken ct = default)
    - Validates `currentPassword` against active `IMasterKeyHandle` in the authenticated session.
    - Derives new $K_{\text{new\_master}} = \text{Argon2id}(\text{newPassword}, \text{header.Salt})$.
    - Uses `IMasterKeyHandle.WithKeySpan` to retrieve the active 32-byte $K_{\text{db}}$.
-   - Re-encrypts $K_{\text{db}}$ using ChaCha20-Poly1305 under $K_{\text{new\_master}}$ with a fresh 12-byte nonce.\n   - **Duress Slot Preservation**: Because `header.Salt` is retained, the existing duress slot remains 100% valid without requiring the user to re-enter their duress passphrase!
+   - Re-encrypts $K_{\text{db}}$ using ChaCha20-Poly1305 under $K_{\text{new\_master}}$ with a fresh 12-byte nonce.
+   - **Duress Slot Preservation**: Because `header.Salt` is retained, the existing duress slot remains 100% valid without requiring the user to re-enter their duress passphrase!
    - Atomically overwrites `percolator.header` via `IHeaderStorage`.
    - Zeroizes temporary keys via `ISensitiveSecret.Zeroize()`.
    - **Performance Guarantee**: Because $K_{\text{db}}$ remains identical, zero SQLite tables or pages are rewritten. Operation completes in $< 200\text{ ms}$ with zero risk of database corruption.
