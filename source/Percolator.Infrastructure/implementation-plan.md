@@ -393,6 +393,7 @@ Carried inside `SealedEnvelopeProto.encrypted_package` (opaque to relays and pas
   - `InitializeMasterPasswordAsync(masterPassword, duressPassword)`: derives master key, encrypts master slot and duress slot (or pads with dummy random noise), creates `percolator.header`, executes EF Core migrations (`Database.MigrateAsync()`).
   - `UnlockAsync(candidatePassword)`: derives candidate key, attempts master slot ChaCha20-Poly1305 decryption; if match, probes canary `SELECT count(*) FROM sqlite_master;`, runs migrations, builds `AuthenticatedHost`, and returns `UnlockResult.AsSuccess(session)`.
   - If master slot fails, attempts duress slot decryption: if duress sentinel matches, executes `IDuressWipeHandler.ExecuteWipeAsync()` and returns `UnlockResult.AsDuressDecoy()`. Otherwise returns `UnlockResult.AsInvalid()`.
+  - `ChangeMasterPasswordAsync(currentPassword, newPassword)`: re-wraps the 32-byte database encryption key under a fresh Argon2id key and updates `percolator.header` in an instantaneous O(1) operation without re-encrypting the SQLite database.
   - `ConfigureDuressPasswordAsync(duressPassword)`: updates or clears duress slot from active authenticated session, enforcing non-empty/non-whitespace validation.
   - Implements `LockAsync()`: cleanly stops all hosted services, clears connection pools (`SqliteConnection.ClearAllPools()`), zeroizes key memory, and tears down `AuthenticatedHost`.
 - [ ] Implement `AuthenticatedSession` (`Percolator.Application.Ports.IAuthenticatedSession`):

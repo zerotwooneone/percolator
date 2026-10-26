@@ -209,6 +209,7 @@ flowchart TD
   - Dark / Light / HighContrast theme switcher utilizing `FluentAvalonia.Styling.FluentAvaloniaTheme`.
   - System accent color auto-detection and custom palette selector.
   - Diagnostic logging level selector (`Information`, `Debug`, `Trace`).
+  - Master Password Change: allows changing master password via `IDatabaseUnlockCoordinator.ChangeMasterPasswordAsync(currentPassword, newPassword)`, performing an instantaneous O(1) envelope re-wrap without touching the SQLite database.
   - Emergency Duress Passphrase Configuration: allows setting, updating, or removing an emergency duress passphrase via `IDatabaseUnlockCoordinator.ConfigureDuressPasswordAsync(duressPassword)` within the active authenticated session. Enforces non-empty/non-whitespace validation.
 - [ ] Refactor `MainWindow.axaml` & `MainWindowViewModel.cs`:
   - Bind `NavigationView.SelectedItem` cleanly to `NavigationService`.
