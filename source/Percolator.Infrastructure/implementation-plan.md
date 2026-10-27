@@ -1381,25 +1381,102 @@
 ### Phase 5: Operational Workers, Two-Stage Composition Root & System Alignment
 
 #### Chunk 5.1: Scheduled Operational Pruning Workers
+- **Technical Specifications & Database Maintenance Mechanics**:
+  - **SQLite WAL Concurrency & Lock Escalation Avoidance**:
+    - Under SQLite WAL mode, large unbatched `DELETE` operations lock the database against writer concurrency, stall checkpointing, and lead to UI thread latency.
+    - All background pruning workers MUST consume `IDbContextFactory<PercolatorDbContext>` (from Chunk 2.1) rather than a long-lived scoped `DbContext` or `IServiceScopeFactory`, creating short-lived, single-operation contexts.
+    - Eviction runs in chunks using `LIMIT` (batch size: 500 rows per transaction) looping until zero rows match or `CancellationToken` cancels:
+      ```csharp
+      // Batch deletion pattern in background workers:
+      while (!ct.IsCancellationRequested)
+      {
+          await using var context = await _contextFactory.CreateDbContextAsync(ct);
+          var expiredIds = await context.OutboxJobs
+              .Where(j => j.Status == OutboxJobStatus.Delivered && j.CreatedAtUtc <= cutoffTime)
+              .OrderBy(j => j.CreatedAtUtc)
+              .Select(j => j.Id)
+              .Take(500)
+              .ToListAsync(ct);
+
+          if (expiredIds.Count == 0) break;
+
+          context.OutboxJobs.RemoveRange(expiredIds.Select(id => new OutboxJob { Id = id }));
+          await context.SaveChangesAsync(ct);
+          
+          if (expiredIds.Count < 500) break;
+      }
+      ```
+  - **Pruning Worker Implementations**:
+    - `OutboxRetentionPruner` (`IHostedService`):
+      - Sweeps delivered outbox jobs (`ops_outbox_jobs`) older than 7 days (`TimeSpan.FromDays(7)`). Preserves pending, in-flight, or failed jobs for inspection/retry.
+      - Scheduled interval: 24 hours (or on virtual clock tick via `TimeProvider`).
+    - `RelayPreKeyDirectoryPruner` (`IHostedService`):
+      - Sweeps consumed or stale one-time prekeys and expired signed prekey bundles from `relay_prekeys` where `updated_at_utc <= cutoffTime` (older than 30 days).
+      - Scheduled interval: 24 hours.
+    - `RelayProfileSlotPruner` (`IHostedService`):
+      - Sweeps expired profile slots from `relay_profile_slots` where `expires_at_utc <= DateTimeOffset.UtcNow`.
+      - Scheduled interval: 1 hour (utilizes indexed lookup on `expires_at_utc`).
 - **Scope & Deliverables**:
   - [ ] Implement Scheduled `IHostedService` Pruning Workers:
-    - `OutboxRetentionPruner`: Daily pruner for delivered outbox jobs older than 7 days.
-    - `RelayPreKeyDirectoryPruner`: Daily pruner for expired prekey bundles from `IRelayPreKeyRepository`.
-    - `RelayProfileSlotPruner`: Daily pruner for expired profile slots from `relay_profile_slots`.
+    - `OutboxRetentionPruner` (`Microsoft.Extensions.Hosting.BackgroundService`)
+    - `RelayPreKeyDirectoryPruner` (`Microsoft.Extensions.Hosting.BackgroundService`)
+    - `RelayProfileSlotPruner` (`Microsoft.Extensions.Hosting.BackgroundService`)
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Maintenance/`)**:
   - `OutboxRetentionPrunerTests.DeliveredJobs_OlderThan7Days_Purged`: advances virtual clock by 8 days with `FakeTimeProvider`; asserts old delivered jobs purged while recent jobs preserved.
+  - `OutboxRetentionPrunerTests.FailedAndPendingJobs_PreservedRegardlessOfAge`: asserts failed/queued jobs are never deleted by retention pruner.
+  - `RelayProfileSlotPrunerTests.ExpiredSlots_PurgedInBatches`: seeds 1,200 expired profile slots; executes pruner; verifies all 1,200 slots deleted across 500-item batches without SQLite lock exceptions.
   - `PrunerLockSafetyTests.RetentionPruning_UsesBatchingUnderConcurrency`: deletion uses `LIMIT` clauses to avoid SQLite lock escalation under concurrent read workload.
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Maintenance`
 
 #### Chunk 5.2: Stage 2 DI Composition Root & Infrastructure Verification
+- **Technical Specifications & Lifetime Architecture**:
+  - **Two-Stage Container Separation Protocol**:
+    - *Stage 1 (Pre-Unlock Bootstrap Container)*: Contains zero SQLite DbContexts, zero repositories, and zero network/sync workers. Registers `SQLitePCL.Batteries_V2.Init()`, `SignalCryptoEngine`, `SystemDateTimeProvider`, `ProtobufHeaderStorage`, `DuressWipeHandler`, and `SqlCipherDatabaseUnlockCoordinator`.
+    - *Stage 2 (Authenticated Host - `IHost`)*: Built post-unlock via `Stage2HostFactory`. Hosts `IMasterKeyHandle` (scoped to session in pinned unmanaged memory), `SqlCipherPragmaInterceptor`, `PercolatorDbContext` (scoped/pooled), all 58 infrastructure ports, and `IHostedService` background workers.
+  - **Service Lifetime Registration Topology**:
+    - **Singletons**:
+      - `IMasterKeyHandle` (instance passed from unlock coordinator)
+      - `IDbContextFactory<PercolatorDbContext>` & `PercolatorDbContextOptions`
+      - Core Cryptography & Time: `ICryptoEngine`, `IZkProofEngine`, `IDateTimeProvider`
+      - Networking & Stream Management: `StreamRegistry`, `TcpMultiStreamPool`, `TokenBucketRateLimiter`, `LocalFileChunkStore`
+      - Interceptors & Gateways: `IdentityReadinessInterceptor`, `DeliveryCertificateAuthInterceptor`, `NetworkStealthGate`
+      - Protocol Serializers: `ProtobufSessionWirePacker`, `ProtobufPayloadSerializer`, `ChatPayloadFramingDecorator`
+    - **Scoped**:
+      - `PercolatorDbContext` (pooled context per scope)
+      - All 58 Repositories & CQRS Query Services (Outbox, Contacts, Ratchet, Channels, Relay prekeys/profiles/ledger, Chat, File Transfer)
+      - Workflow & Dispatching: `TransportDispatcher`, `IngressFilterService`, `SealedEnvelopeUnwrapper`, `DiscoveryQueryClient`, `DiscoveryHandshakeAdapter`, `StreamingAesGcmCryptoService`, `RelayBlobClient`, `PeerStreamBlobClient`, `ChannelRelayResolver`, `RelayTransferPipeClient`, `RelaySwarmTrackerClient`
+    - **Hosted Services (`services.AddHostedService<T>()`)**:
+      - All 10 background pruning, syncing, and lifecycle workers across the application:
+        1. `OutboxRetentionPruner` (Chunk 5.1)
+        2. `RelayPreKeyDirectoryPruner` (Chunk 5.1)
+        3. `RelayProfileSlotPruner` (Chunk 5.1)
+        4. `DisappearingMessageEvictionWorker` (Chunk 4.1)
+        5. `UnknownGroupMessageCachePruner` (Chunk 4.1)
+        6. `AbandonedInvitePruner` (Chunk 4.1)
+        7. `RelayDiscoveryRegistrationPruner` (Chunk 4.2)
+        8. `RelayBlobRetentionPruner` (Chunk 4.3)
+        9. `TransferOfferReaperWorker` (Chunk 4.4)
+        10. `SwarmEndpointRetentionPruner` (Chunk 4.4)
+  - **Platform Separation Boundary & Windows Extensibility Hook**:
+    - Standard `AddAuthenticatedInfrastructure` registers 100% portable baseline implementations: `PortableDesktopFileStore` (`IDesktopFileStorage`) and `DefaultTlsCertificateProvider` (`ITlsCertificateProvider`).
+    - Extensibility point: `Percolator.Infrastructure.Windows` (`net10.0-windows`) provides extension method `AddWindowsInfrastructureOverrides(this IServiceCollection services)` which swaps in:
+      1. `WindowsSparseDesktopFileStore`: Win32 `FSCTL_SET_SPARSE` (`DeviceIoControl` `0x000900C4`) for instant zero-write file pre-allocation on NTFS.
+      2. `WindowsSChannelCertificateProvider`: Temporary PKCS#12 `.pfx` on-disk export with CNG key deletion and antivirus lock retries for Windows SChannel TLS.
+  - **Full Container Verification Guarantee**:
+    - `Stage2HostFactory` builds `IHost` with service provider validation (`ValidateScopes = true`, `ValidateOnBuild = true`), guaranteeing zero captive dependencies, zero missing registrations, and zero circular dependencies.
 - **Scope & Deliverables**:
   - [ ] Implement `Stage2HostFactory`:
     - Extends `BaselineStage2HostFactory` to wire the full suite of operational adapters, repositories, query services, gRPC channels, and background pruners across all feature slices.
   - [ ] Implement `InfrastructureServiceCollectionExtensions.AddAuthenticatedInfrastructure(IServiceCollection, IConfiguration, IMasterKeyHandle)`:
-    - Registers all 58 infrastructure ports into the Stage 2 container.
+    - Registers all 58 infrastructure ports into the Stage 2 container with correct lifetime scopes.
+    - Registers all 10 background `IHostedService` workers.
+    - Exposes extension point for `Percolator.Infrastructure.Windows` overrides.
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Composition/`)**:
   - `DependencyInjectionTests.All58Ports_ResolveFromContainerWithoutCycles`: resolves every planned infrastructure port from DI container; asserts non-null without circular dependency or missing registration.
+  - `DependencyInjectionTests.NoCaptiveDependencies_ScopedServicesNeverInjectedIntoSingletons`: enforces container scope validation (`ValidateScopes = true`); verifies no scoped DbContext or repository is injected into singleton services or pruners.
+  - `DependencyInjectionTests.All10HostedServices_RegisteredAndStartable`: resolves `IEnumerable<IHostedService>` and asserts exact count of 10 registered background workers.
+  - `DependencyInjectionTests.WindowsOverrides_CanSwapFileStoreAndCertProvider`: calls optional Windows overlay registrations; asserts `IDesktopFileStorage` resolves to `WindowsSparseDesktopFileStore`.
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Composition`
 
