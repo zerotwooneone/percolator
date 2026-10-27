@@ -1331,14 +1331,15 @@
     - Background workers (`IHostedService`): `DisappearingMessageEvictionWorker` (sweeps expired messages every 30s using `ix_chat_expiry`), `UnknownGroupMessageCachePruner` (sweeps unreferenced group messages older than 48h), and `AbandonedInvitePruner`.
 - **Scope & Deliverables**:
   - [ ] Author Protobuf schema `Percolator.Infrastructure/Protos/chat.proto`.
+  - [ ] Configure `<ProjectReference>` to `Percolator.Apps.Chat` and `Percolator.Apps.Discovery` in `Percolator.Infrastructure.csproj`.
   - [ ] Implement `ChatPayloadFramingDecorator` implementing stepped bucket padding (256, 512, 1024, 2048, 4096 B).
   - [ ] Implement Chat Persistence & Fast-Path CQRS Query Services:
-    - `SqlChatMessageRepository` (`Percolator.Apps.Chat.Ports.IChatMessageRepository`)
-    - `SqlChatMessageQueryService` (`Percolator.Apps.Chat.Ports.IChatMessageQueryService`)
-    - `SqlConversationListQueryService` (`Percolator.Apps.Chat.Ports.IConversationListQueryService`)
-    - `SqlGroupInvitationRepository` (`Percolator.Apps.Chat.Ports.IGroupInvitationRepository`)
-    - `SqlGroupInvitationQueryService` (`Percolator.Apps.Chat.Ports.IGroupInvitationQueryService`)
-    - `SqlUnknownGroupMessageCacheRepository` (`Percolator.Apps.Chat.Ports.IUnknownGroupMessageCacheRepository`)
+    - `SqlChatMessageRepository` (`Percolator.Apps.Chat.Features.Messaging.IChatMessageRepository`)
+    - `SqlChatMessageQueryService` (`Percolator.Apps.Chat.Features.Messaging.IChatMessageQueryService`)
+    - `SqlConversationListQueryService` (`Percolator.Apps.Chat.Features.Messaging.IConversationListQueryService`)
+    - `SqlGroupInvitationRepository` (`Percolator.Apps.Chat.Features.GroupInvitations.IGroupInvitationRepository`)
+    - `SqlGroupInvitationQueryService` (`Percolator.Apps.Chat.Features.GroupInvitations.IGroupInvitationQueryService`)
+    - `SqlUnknownGroupMessageCacheRepository` (`Percolator.Apps.Chat.Ingress.IUnknownGroupMessageCacheRepository`)
   - [ ] Implement Chat Lifecycle Background Pruners:
     - `DisappearingMessageEvictionWorker`
     - `UnknownGroupMessageCachePruner`
@@ -1363,8 +1364,8 @@
     - `DiscoveryRegistrationProto`: `bytes peer_identity_id = 1;`, `PeerDiscoveryDescriptorProto descriptor = 2;`, `google.protobuf.Timestamp lease_expiry_utc = 3;`, `bytes signature = 4;`
     - `BlindedRendezvousQueryProto`: `bytes blinded_locator = 1;`
     - `BlindedRendezvousResponseProto`: `bool found = 1;`, `bytes encrypted_contact_card = 2;`
-  - **Private Rendezvous Service**:
-    - 24-hour UTC epoch locator rotation: computes deterministic blinded rendezvous locators via $\text{HMAC-SHA256}(\text{IdentityPublicKey}, \text{EpochBytes})$ where $\text{Epoch} = \lfloor\text{UnixTime} / 86400\rfloor$.
+  - **Private Rendezvous Coordination**:
+    - Relies on application-layer `IPrivateRendezvousService` (`Percolator.Apps.Discovery`) for 24-hour UTC epoch locator rotation via $\text{HMAC-SHA256}(\text{IdentityPublicKey}, \text{EpochBytes})$ where $\text{Epoch} = \lfloor\text{UnixTime} / 86400\rfloor$.
     - Enables contact discovery without public identity leakage on directory servers.
   - **Relay Directory Persistence & Maintenance**:
     - `relay_peer_directory`:
@@ -1380,14 +1381,11 @@
   - [ ] Author Protobuf schema `Percolator.Infrastructure/Protos/discovery.proto`.
   - [ ] Implement `SqliteRelayPeerDirectory` (`Percolator.Apps.Discovery.Features.RelayDirectoryHosting.IRelayPeerDirectory`).
   - [ ] Implement `DiscoveryQueryClient` (`Percolator.Apps.Discovery.Ports.INearbyDiscoveryQueryClientPort`).
-  - [ ] Implement `DiscoveryHandshakeAdapter` (`Percolator.Apps.Discovery.Ports.IDiscoveryHandshakePort`).
   - [ ] Implement `PreKeyAvailabilityAdapter` (`Percolator.Apps.Discovery.Ports.IPreKeyAvailabilityPort`).
   - [ ] Implement `PreKeyBundleProviderAdapter` (`Percolator.Application.Ports.IPreKeyBundleProvider`).
   - [ ] Implement `GrpcProfileDeliveryClient` (`Percolator.PluginSdk.Profiles.IProfileDeliveryClient`).
-  - [ ] Implement `PrivateRendezvousService`: 24-hour UTC epoch blinded locator generator.
   - [ ] Implement `RelayDiscoveryRegistrationPruner` (`IHostedService`).
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Plugins/Discovery/`)**:
-  - `PrivateRendezvousServiceTests.BlindedLocator_DeterministicWithin24hEpoch`: computes matching blinded locator within epoch; rolls over deterministically across 24h boundary.
   - `DiscoveryQueryClientTests.NearbyQuery_ClampsCountTo100`: verifies query parameters are strictly clamped to max 100 results.
   - `SqliteRelayPeerDirectoryTests.RegisterAndQuery_MatchesLocator`: registers peer descriptor and queries by blinded locator.
   - `RelayDiscoveryRegistrationPrunerTests.StaleRegistrations_PurgedOnSchedule`: verifies expired peer directory leases are deleted.
@@ -1450,15 +1448,18 @@
       - `total_pieces` (`INTEGER`)
       - `verified_pieces` (`INTEGER`)
     - `ft_swarm_endpoints`:
-      - `transfer_id` (`TEXT` GUID)
-      - `peer_id` (`BLOB` 32 bytes)
-      - `endpoint` (`TEXT`)
+      - `rendezvous_id` (`BLOB` 32 bytes SwarmRendezvousId)
+      - `peer_id` (`BLOB` 32 bytes PublicIdentityId)
+      - `endpoint` (`TEXT` candidate IP/port or URI)
+      - `peer_role` (`INTEGER`: `Leecher=0`, `Seeder=1`)
       - `last_seen_utc` (`TEXT` ISO 8601)
-      - *Composite PK*: `PRIMARY KEY(transfer_id, peer_id)`
+      - *Composite PK*: `PRIMARY KEY(rendezvous_id, peer_id)`
+      - *Lease Expiry Index*: `CREATE INDEX ix_swarm_endpoints_expiry ON ft_swarm_endpoints(last_seen_utc);`
     - `ft_filter_policies`:
-      - `peer_id` (`BLOB` 32 bytes, PK)
-      - `auto_accept_under_bytes` (`INTEGER`)
-      - `is_blocked` (`INTEGER` boolean)
+      - `owner_id` (`BLOB` 32 bytes PublicIdentityId, PK)
+      - `blocked_peers_json` (`TEXT` serialized set of PublicIdentityId)
+      - `blocked_relays_json` (`TEXT` serialized set of RelayPipeEndpointUri)
+      - `updated_at_utc` (`TEXT` ISO 8601)
   - **Swarm Binary Framing Protocol (0x01–0x0C)**:
     - Fixed 5-byte header: `[Opcode: 1 Byte] [Payload Length: 4 Bytes Big-Endian UInt] [Payload: Variable Length]`
     - Maximum payload size: `262,144 bytes` (256 KB); standard piece chunk size: `65,536 bytes` (64 KB).
@@ -1574,7 +1575,6 @@
   - **Two-Stage Container Separation Protocol**:
     - *Stage 1 (Pre-Unlock Bootstrap Container)*: Contains zero SQLite DbContexts, zero repositories, and zero network/sync workers. Registers `SQLitePCL.Batteries_V2.Init()`, `SignalCryptoEngine`, `SystemDateTimeProvider`, `ProtobufHeaderStorage`, `DuressWipeHandler`, and `SqlCipherDatabaseUnlockCoordinator`.
     - *Stage 2 (Authenticated Host - `IHost`)*: Built post-unlock via `Stage2HostFactory`. Hosts `IMasterKeyHandle` (scoped to session in pinned unmanaged memory), `SqlCipherPragmaInterceptor`, `PercolatorDbContext` (scoped/pooled), all 58 infrastructure ports, and `IHostedService` background workers.
-    - *Stage 2 (Authenticated Host - `IHost`)*: Built post-unlock via `Stage2HostFactory`. Hosts `IMasterKeyHandle` (scoped to session in pinned unmanaged memory), `SqlCipherPragmaInterceptor`, `PercolatorDbContext` (scoped/pooled), all 59 infrastructure ports, and `IHostedService` background workers.
   - **Service Lifetime Registration Topology**:
     - **Singletons**:
       - `IMasterKeyHandle` (instance passed from unlock coordinator)
@@ -1585,8 +1585,8 @@
       - Protocol Serializers: `ProtobufSessionWirePacker`, `ProtobufPayloadSerializer`, `ChatPayloadFramingDecorator`
     - **Scoped**:
       - `PercolatorDbContext` (pooled context per scope)
-      - All 59 Repositories & CQRS Query Services (Outbox, Contacts, Ratchet, Channels, Relay prekeys/profiles/ledger, Chat, File Transfer)
-      - Workflow & Dispatching: `TransportDispatcher`, `IngressFilterService`, `SealedEnvelopeUnwrapper`, `DiscoveryQueryClient`, `DiscoveryHandshakeAdapter`, `StreamingAesGcmCryptoService`, `RelayBlobClient`, `PeerStreamBlobClient`, `ChannelRelayResolver`, `RelayTransferPipeClient`, `RelaySwarmTrackerClient`
+      - All Repositories & CQRS Query Services (Outbox, Contacts, Ratchet, Channels, Relay prekeys/profiles/ledger, Chat, File Transfer)
+      - Workflow & Dispatching: `TransportDispatcher`, `IngressFilterService`, `SealedEnvelopeUnwrapper`, `DiscoveryQueryClient`, `StreamingAesGcmCryptoService`, `RelayBlobClient`, `PeerStreamBlobClient`, `ChannelRelayResolver`, `RelayTransferPipeClient`, `RelaySwarmTrackerClient`
     - **Hosted Services (`services.AddHostedService<T>()`)**:
       - All 10 background pruning, syncing, and lifecycle workers across the application:
         1. `OutboxRetentionPruner` (Chunk 5.1)
@@ -1610,11 +1610,11 @@
   - [ ] Implement `Stage2HostFactory`:
     - Extends `BaselineStage2HostFactory` to wire the full suite of operational adapters, repositories, query services, gRPC channels, and background pruners across all feature slices.
   - [ ] Implement `InfrastructureServiceCollectionExtensions.AddAuthenticatedInfrastructure(IServiceCollection, IConfiguration, IMasterKeyHandle)`:
-    - Registers all 59 infrastructure ports into the Stage 2 container with correct lifetime scopes.
+    - Registers all 58 infrastructure ports into the Stage 2 container with correct lifetime scopes.
     - Registers all 10 background `IHostedService` workers.
     - Exposes extension point for `Percolator.Infrastructure.Windows` overrides.
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Composition/`)**:
-  - `DependencyInjectionTests.All59Ports_ResolveFromContainerWithoutCycles`: resolves every planned infrastructure port from DI container; asserts non-null without circular dependency or missing registration.
+  - `DependencyInjectionTests.All58Ports_ResolveFromContainerWithoutCycles`: resolves every planned infrastructure port from DI container; asserts non-null without circular dependency or missing registration.
   - `DependencyInjectionTests.NoCaptiveDependencies_ScopedServicesNeverInjectedIntoSingletons`: enforces container scope validation (`ValidateScopes = true`); verifies no scoped DbContext or repository is injected into singleton services or pruners.
   - `DependencyInjectionTests.All10HostedServices_RegisteredAndStartable`: resolves `IEnumerable<IHostedService>` and asserts exact count of 10 registered background workers.
   - `DependencyInjectionTests.WindowsOverrides_CanSwapFileStoreAndCertProvider`: calls optional Windows overlay registrations; asserts `IDesktopFileStorage` resolves to `WindowsSparseDesktopFileStore`.
@@ -1681,19 +1681,18 @@ To guarantee robust infrastructure without introducing brittle tests that break 
 | 41 | `ITransportDispatcher` | `Percolator.Application.Delivery.Ports.ITransportDispatcher` | `TransportDispatcher` | Chunk 3.5 |
 | 42 | `ISealedEnvelopeUnwrapper` | `Percolator.Application` | `SealedEnvelopeUnwrapper` | Chunk 3.5 |
 | 43 | `INearbyDiscoveryQueryClientPort` | `Percolator.Apps.Discovery` | `DiscoveryQueryClient` | Chunk 4.2 |
-| 44 | `IDiscoveryHandshakePort` | `Percolator.Apps.Discovery` | `DiscoveryHandshakeAdapter` | Chunk 4.2 |
-| 45 | `IPreKeyAvailabilityPort` | `Percolator.Apps.Discovery` | `PreKeyAvailabilityAdapter` | Chunk 4.2 |
-| 46 | `IPreKeyBundleProvider` | `Percolator.Application` | `PreKeyBundleProviderAdapter` | Chunk 4.2 |
-| 47 | `IProfileDeliveryClient` | `Percolator.PluginSdk` | `GrpcProfileDeliveryClient` | Chunk 4.2 |
-| 48 | `IBlobCryptoService` | `Percolator.Application` | `StreamingAesGcmCryptoService` | Chunk 4.3 |
-| 49 | `IRelayBlobClient` | `Percolator.Application` | `RelayBlobClient` | Chunk 4.3 |
-| 50 | `IPeerStreamBlobClient` | `Percolator.Application` | `PeerStreamBlobClient` | Chunk 4.3 |
-| 51 | `ILocalChunkStore` | `Percolator.Application` | `LocalFileChunkStore` | Chunk 4.3 |
-| 52 | `IChannelRelayResolver` | `Percolator.Application` | `ChannelRelayResolver` | Chunk 4.3 |
-| 53 | `ITransferStreamPool` / `Factory` / `Stream` | `Percolator.Apps.FileTransfer` | `TcpMultiStreamPool` & `TransferStream` | Chunk 4.4 |
-| 54 | `INetworkEndpointDiscoveryPort` | `Percolator.Apps.FileTransfer` | `NetworkInterfaceEndpointDiscoveryPort` | Chunk 4.4 |
-| 55 | `IDesktopFileStorage` | `Percolator.Apps.FileTransfer` | `PortableDesktopFileStore` | Chunk 4.4 |
-| 56 | `ITransferRateLimiter` | `Percolator.Apps.FileTransfer` | `TokenBucketRateLimiter` | Chunk 4.4 |
-| 57 | `IDistributedTrackerPort` | `Percolator.Apps.FileTransfer` | `RelaySwarmTrackerClient` | Chunk 4.4 |
-| 58 | `ITransferOfferReaperService` | `Percolator.Apps.FileTransfer` | `TransferOfferReaperWorker` | Chunk 4.4 |
-| 59 | `IIdentityProfileRepository` | `Percolator.Domain` | `SqliteIdentityProfileRepository` | Chunk 2.2 |
+| 44 | `IPreKeyAvailabilityPort` | `Percolator.Apps.Discovery` | `PreKeyAvailabilityAdapter` | Chunk 4.2 |
+| 45 | `IPreKeyBundleProvider` | `Percolator.Application` | `PreKeyBundleProviderAdapter` | Chunk 4.2 |
+| 46 | `IProfileDeliveryClient` | `Percolator.PluginSdk` | `GrpcProfileDeliveryClient` | Chunk 4.2 |
+| 47 | `IBlobCryptoService` | `Percolator.Application` | `StreamingAesGcmCryptoService` | Chunk 4.3 |
+| 48 | `IRelayBlobClient` | `Percolator.Application` | `RelayBlobClient` | Chunk 4.3 |
+| 49 | `IPeerStreamBlobClient` | `Percolator.Application` | `PeerStreamBlobClient` | Chunk 4.3 |
+| 50 | `ILocalChunkStore` | `Percolator.Application` | `LocalFileChunkStore` | Chunk 4.3 |
+| 51 | `IChannelRelayResolver` | `Percolator.Application` | `ChannelRelayResolver` | Chunk 4.3 |
+| 52 | `ITransferStreamPool` / `Factory` / `Stream` | `Percolator.Apps.FileTransfer` | `TcpMultiStreamPool` & `TransferStream` | Chunk 4.4 |
+| 53 | `INetworkEndpointDiscoveryPort` | `Percolator.Apps.FileTransfer` | `NetworkInterfaceEndpointDiscoveryPort` | Chunk 4.4 |
+| 54 | `IDesktopFileStorage` | `Percolator.Apps.FileTransfer` | `PortableDesktopFileStore` | Chunk 4.4 |
+| 55 | `ITransferRateLimiter` | `Percolator.Apps.FileTransfer` | `TokenBucketRateLimiter` | Chunk 4.4 |
+| 56 | `IDistributedTrackerPort` | `Percolator.Apps.FileTransfer` | `RelaySwarmTrackerClient` | Chunk 4.4 |
+| 57 | `ITransferOfferReaperService` | `Percolator.Apps.FileTransfer` | `TransferOfferReaperWorker` | Chunk 4.4 |
+| 58 | `IIdentityProfileRepository` | `Percolator.Domain` | `SqliteIdentityProfileRepository` | Chunk 2.2 |
