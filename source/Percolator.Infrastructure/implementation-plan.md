@@ -520,19 +520,28 @@
 
               return masterKeyHandle.WithKeySpan(keySpan =>
               {
-                  using var aes = new AesGcm(keySpan, AesGcm.TagByteSizes.MaxSize);
-                  byte[] nonce = RandomNumberGenerator.GetBytes(AesGcm.NonceByteSizes.MaxSize); // 12 bytes
-                  byte[] tag = new byte[AesGcm.TagByteSizes.MaxSize]; // 16 bytes
-                  byte[] ciphertext = new byte[plaintext.Length];
+                  Span<byte> colKey = stackalloc byte[32];
+                  HKDF.DeriveKey(HashAlgorithmName.SHA256, keySpan, colKey, salt: default, info: "Percolator.ColumnLevelEncryption.v1"u8);
+                  try
+                  {
+                      using var aes = new AesGcm(colKey, AesGcm.TagByteSizes.MaxSize);
+                      byte[] nonce = RandomNumberGenerator.GetBytes(AesGcm.NonceByteSizes.MaxSize); // 12 bytes
+                      byte[] tag = new byte[AesGcm.TagByteSizes.MaxSize]; // 16 bytes
+                      byte[] ciphertext = new byte[plaintext.Length];
 
-                  aes.Encrypt(nonce, plaintext, ciphertext, tag);
+                      aes.Encrypt(nonce, plaintext, ciphertext, tag);
 
-                  // Payload layout: [12-byte Nonce] [16-byte Tag] [N-byte Ciphertext]
+                      // Payload layout: [12-byte Nonce] [16-byte Tag] [N-byte Ciphertext]
                   byte[] result = new byte[nonce.Length + tag.Length + ciphertext.Length];
                   Buffer.BlockCopy(nonce, 0, result, 0, nonce.Length);
                   Buffer.BlockCopy(tag, 0, result, nonce.Length, tag.Length);
                   Buffer.BlockCopy(ciphertext, 0, result, nonce.Length + tag.Length, ciphertext.Length);
-                  return result;
+                      return result;
+                  }
+                  finally
+                  {
+                      CryptographicOperations.ZeroMemory(colKey);
+                  }
               });
           }
 
@@ -542,14 +551,23 @@
 
               return masterKeyHandle.WithKeySpan(keySpan =>
               {
-                  using var aes = new AesGcm(keySpan, AesGcm.TagByteSizes.MaxSize);
-                  ReadOnlySpan<byte> nonce = payload.AsSpan(0, 12);
-                  ReadOnlySpan<byte> tag = payload.AsSpan(12, 16);
-                  ReadOnlySpan<byte> ciphertext = payload.AsSpan(28);
+                  Span<byte> colKey = stackalloc byte[32];
+                  HKDF.DeriveKey(HashAlgorithmName.SHA256, keySpan, colKey, salt: default, info: "Percolator.ColumnLevelEncryption.v1"u8);
+                  try
+                  {
+                      using var aes = new AesGcm(colKey, AesGcm.TagByteSizes.MaxSize);
+                      ReadOnlySpan<byte> nonce = payload.AsSpan(0, 12);
+                      ReadOnlySpan<byte> tag = payload.AsSpan(12, 16);
+                      ReadOnlySpan<byte> ciphertext = payload.AsSpan(28);
 
-                  byte[] plaintext = new byte[ciphertext.Length];
-                  aes.Decrypt(nonce, ciphertext, tag, plaintext);
-                  return plaintext;
+                      byte[] plaintext = new byte[ciphertext.Length];
+                      aes.Decrypt(nonce, ciphertext, tag, plaintext);
+                      return plaintext;
+                  }
+                  finally
+                  {
+                      CryptographicOperations.ZeroMemory(colKey);
+                  }
               });
           }
       }
@@ -566,7 +584,7 @@
   - [ ] Create initial EF Core database migration for `percolator.db`.
   - [ ] Implement `BaselineStage2HostFactory` (`Percolator.Infrastructure.Vault.IStage2HostFactory`) registering scoped `PercolatorDbContext` and `IDbContextFactory<PercolatorDbContext>`.
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Persistence/Core/`)**:
-  - `AesGcmValueConverterTests.EncryptAndDecrypt_RoundtripsSuccessfully`: asserts plaintext roundtrips through BCL `AesGcmValueConverter` and validates ciphertext layout (`[12B Nonce][16B Tag][Ciphertext]`).
+  - `AesGcmValueConverterTests.EncryptAndDecrypt_RoundtripsSuccessfully`: asserts plaintext roundtrips through BCL `AesGcmValueConverter` with HKDF subkey derivation and validates ciphertext layout (`[12B Nonce][16B Tag][Ciphertext]`).
   - `PercolatorDbContextTests.ColumnLevelEncryption_StoresKeysAsCiphertextAtRest`: direct byte inspection of raw SQLite database confirms plaintext private keys are absent.
   - `PercolatorDbContextTests.BlobValueComparer_DetectsByteArrayEquality`: queries by byte array values and asserts match success.
   - `SqliteDatabaseMigratorTests.MigrateAsync_AppliesInitialSchema`: executes migration and verifies table existence.
@@ -637,7 +655,7 @@
       - `previous_chain_length` (`INTEGER`)
       - `ratchet_state_blob` (`BLOB`, encrypted domain binary snapshot via `AesGcmValueConverter`)
       - `updated_at_utc` (`TEXT` ISO 8601)
-      - *Route Index*: `CREATE UNIQUE INDEX ix_vault_ratchet_route ON vault_ratchet_sessions(owner_identity_id, remote_peer_id, remote_device_id);`
+      - *Route Index*: `CREATE UNIQUE INDEX ix_vault_ratchet_route ON vault_ratchet_sessions(owner_identity_id, owner_device_id, remote_peer_id, remote_device_id);`
     - `vault_group_sender_keys`:
       - `channel_id` (`TEXT` GUID ChannelId)
       - `author_identity_id` (`BLOB` 32 bytes PublicIdentityId)
@@ -671,7 +689,7 @@
       - `sender_identity_id` (`BLOB` 32 bytes PublicIdentityId)
       - `envelope_payload` (`BLOB`, encrypted via `AesGcmValueConverter`)
       - `created_at_utc` (`TEXT` ISO 8601)
-      - *Composite PK*: `PRIMARY KEY(recipient_identity_id, sender_identity_id)`
+      - *Composite PK*: `PRIMARY KEY(recipient_identity_id, sender_identity_id)` (persisted with upsert semantics in `SqlitePendingHandshakeRepository` to replace existing in-flight invitations upon subsequent contact requests from the same sender).
   - **Zero Phase 3 Wire Serializer Dependency**: Repositories persist domain value object byte arrays or internal binary representations directly. State encryption is handled by `AesGcmValueConverter` at the EF Core mapping boundary; repositories do not depend on Phase 3 `ISessionWirePacker` or protobuf schemas (`session.proto`).
 - **Scope & Deliverables**:
   - [ ] Implement Cryptographic Vault Repositories:
@@ -1672,6 +1690,12 @@
   - `DependencyInjectionTests.WindowsOverrides_CanSwapFileStoreAndCertProvider`: calls optional Windows overlay registrations; asserts `IDesktopFileStorage` resolves to `WindowsSparseDesktopFileStore`.
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Composition`
+
+### Deferred Scope & Future Hardening (Post-Phase 5 Backlog)
+
+> [!NOTE] Deferred Operational Items to Revisit Post-Phase 5
+> - **`ops_inbound_queue` Payload & Retention Lifecycle**: Revisit indexing on `processed_at_utc` and scheduled background sweeping for processed inbound envelopes to prevent unbounded table growth.
+> - **`vault_pending_handshakes` Eviction & Retention**: Revisit explicit `expires_at_utc` TTL timestamps and automated pruning for stale unapproved contact invitations.
 
 ---
 
