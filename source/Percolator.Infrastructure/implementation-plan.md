@@ -2,10 +2,10 @@
 
 ## Refinement Status Gate
 - [x] Lens 1: Scope & Feature Slice Framing (Status: Approved)
-- [ ] Lens 2: Onion Architecture & Primitive Obsession (Status: Approved)
-- [ ] Lens 3: Threat Modeling & Security Posture (Status: Approved)
-- [ ] Lens 4: High-Value, Low-Brittle Unit Test Design (Status: Approved)
-- [ ] Lens 5: Cross-Layer Infrastructure Alignment (Status: Approved)
+- [ ] Lens 2: Onion Architecture & Primitive Obsession (Status: in progress)
+- [ ] Lens 3: Threat Modeling & Security Posture (Status: in progress)
+- [ ] Lens 4: High-Value, Low-Brittle Unit Test Design (Status: in progress)
+- [ ] Lens 5: Cross-Layer Infrastructure Alignment (Status: in progress)
 - [ ] Implementation Gate: LOCKED (Refinement in progress)
 
 ---
@@ -1506,7 +1506,7 @@
     - `RelayTransferPipeClient`
     - `RelaySwarmTrackerClient` (`Percolator.Apps.FileTransfer.Ports.IDistributedTrackerPort`)
   - [ ] Implement Swarm Lifecycle Pruners:
-    - `TransferOfferReaperWorker` (`Percolator.Apps.FileTransfer.Ports.ITransferOfferReaperService`)
+    - `TransferOfferReaperWorker` (`Microsoft.Extensions.Hosting.BackgroundService` scheduled worker invoking `ITransferOfferReaperService`)
     - `SwarmEndpointRetentionPruner` (`IHostedService`)
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Plugins/FileTransfer/`)**:
   - `TcpMultiStreamPoolTests.FrameSerialization_All12Frames_RoundtripsSuccessfully`: serializes and deserializes all 12 frames (0x01–0x0C).
@@ -1541,8 +1541,9 @@
 
           if (expiredIds.Count == 0) break;
 
-          context.OutboxJobs.RemoveRange(expiredIds.Select(id => new OutboxJob { Id = id }));
-          await context.SaveChangesAsync(ct);
+          await context.OutboxJobs
+              .Where(j => expiredIds.Contains(j.Id))
+              .ExecuteDeleteAsync(ct);
           
           if (expiredIds.Count < 500) break;
       }
@@ -1580,7 +1581,7 @@
       - `IMasterKeyHandle` (instance passed from unlock coordinator)
       - `IDbContextFactory<PercolatorDbContext>` & `PercolatorDbContextOptions`
       - Core Cryptography & Time: `ICryptoEngine`, `IZkProofEngine`, `IDateTimeProvider`
-      - Networking & Stream Management: `StreamRegistry`, `TcpMultiStreamPool`, `TokenBucketRateLimiter`, `LocalFileChunkStore`
+      - Networking & Stream Management: `StreamRegistry`, `ITransferStreamPoolFactory` (`TcpMultiStreamPoolFactory`), `TokenBucketRateLimiter`, `LocalFileChunkStore`, `ITransportCertificateProvider` (`InMemoryTransportCertificateProvider`)
       - Interceptors: `DeliveryCertificateAuthInterceptor`
       - Protocol Serializers: `ProtobufSessionWirePacker`, `ProtobufPayloadSerializer`, `ChatPayloadFramingDecorator`
     - **Scoped**:
@@ -1588,7 +1589,7 @@
       - All Repositories & CQRS Query Services (Outbox, Contacts, Ratchet, Channels, Relay prekeys/profiles/ledger, Chat, File Transfer)
       - Workflow & Dispatching: `TransportDispatcher`, `IngressFilterService`, `SealedEnvelopeUnwrapper`, `DiscoveryQueryClient`, `StreamingAesGcmCryptoService`, `RelayBlobClient`, `PeerStreamBlobClient`, `ChannelRelayResolver`, `RelayTransferPipeClient`, `RelaySwarmTrackerClient`
     - **Hosted Services (`services.AddHostedService<T>()`)**:
-      - All 10 background pruning, syncing, and lifecycle workers across the application:
+      - All 12 background streaming, pruning, syncing, and lifecycle workers across the application:
         1. `OutboxRetentionPruner` (Chunk 5.1)
         2. `RelayPreKeyDirectoryPruner` (Chunk 5.1)
         3. `RelayProfileSlotPruner` (Chunk 5.1)
@@ -1599,8 +1600,10 @@
         8. `RelayBlobRetentionPruner` (Chunk 4.3)
         9. `TransferOfferReaperWorker` (Chunk 4.4)
         10. `SwarmEndpointRetentionPruner` (Chunk 4.4)
+        11. `RelayMailboxStreamWorker` (Chunk 3.6)
+        12. `RelayGroupStreamWorker` (Chunk 3.6)
   - **Platform Separation Boundary & Windows Extensibility Hook**:
-    - Standard `AddAuthenticatedInfrastructure` registers 100% portable baseline implementations: `PortableDesktopFileStore` (`IDesktopFileStorage`) and `DefaultTlsCertificateProvider` (`ITlsCertificateProvider`).
+    - Standard `AddAuthenticatedInfrastructure` registers 100% portable baseline implementations: `PortableDesktopFileStore` (`IDesktopFileStorage`) and `InMemoryTransportCertificateProvider` (`ITransportCertificateProvider`).
     - Extensibility point: `Percolator.Infrastructure.Windows` (`net10.0-windows`) provides extension method `AddWindowsInfrastructureOverrides(this IServiceCollection services)` which swaps in:
       1. `WindowsSparseDesktopFileStore`: Win32 `FSCTL_SET_SPARSE` (`DeviceIoControl` `0x000900C4`) for instant zero-write file pre-allocation on NTFS.
       2. `WindowsSChannelCertificateProvider`: Temporary PKCS#12 `.pfx` on-disk export with CNG key deletion and antivirus lock retries for Windows SChannel TLS.
@@ -1611,12 +1614,12 @@
     - Extends `BaselineStage2HostFactory` to wire the full suite of operational adapters, repositories, query services, gRPC channels, and background pruners across all feature slices.
   - [ ] Implement `InfrastructureServiceCollectionExtensions.AddAuthenticatedInfrastructure(IServiceCollection, IConfiguration, IMasterKeyHandle)`:
     - Registers all 58 infrastructure ports into the Stage 2 container with correct lifetime scopes.
-    - Registers all 10 background `IHostedService` workers.
+    - Registers all 12 background `IHostedService` workers.
     - Exposes extension point for `Percolator.Infrastructure.Windows` overrides.
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Composition/`)**:
   - `DependencyInjectionTests.All58Ports_ResolveFromContainerWithoutCycles`: resolves every planned infrastructure port from DI container; asserts non-null without circular dependency or missing registration.
   - `DependencyInjectionTests.NoCaptiveDependencies_ScopedServicesNeverInjectedIntoSingletons`: enforces container scope validation (`ValidateScopes = true`); verifies no scoped DbContext or repository is injected into singleton services or pruners.
-  - `DependencyInjectionTests.All10HostedServices_RegisteredAndStartable`: resolves `IEnumerable<IHostedService>` and asserts exact count of 10 registered background workers.
+  - `DependencyInjectionTests.All12HostedServices_RegisteredAndStartable`: resolves `IEnumerable<IHostedService>` and asserts exact count of 12 registered background workers.
   - `DependencyInjectionTests.WindowsOverrides_CanSwapFileStoreAndCertProvider`: calls optional Windows overlay registrations; asserts `IDesktopFileStorage` resolves to `WindowsSparseDesktopFileStore`.
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Composition`
@@ -1689,10 +1692,10 @@ To guarantee robust infrastructure without introducing brittle tests that break 
 | 49 | `IPeerStreamBlobClient` | `Percolator.Application` | `PeerStreamBlobClient` | Chunk 4.3 |
 | 50 | `ILocalChunkStore` | `Percolator.Application` | `LocalFileChunkStore` | Chunk 4.3 |
 | 51 | `IChannelRelayResolver` | `Percolator.Application` | `ChannelRelayResolver` | Chunk 4.3 |
-| 52 | `ITransferStreamPool` / `Factory` / `Stream` | `Percolator.Apps.FileTransfer` | `TcpMultiStreamPool` & `TransferStream` | Chunk 4.4 |
+| 52 | `ITransferStreamPoolFactory` | `Percolator.Apps.FileTransfer` | `TcpMultiStreamPoolFactory` | Chunk 4.4 |
 | 53 | `INetworkEndpointDiscoveryPort` | `Percolator.Apps.FileTransfer` | `NetworkInterfaceEndpointDiscoveryPort` | Chunk 4.4 |
 | 54 | `IDesktopFileStorage` | `Percolator.Apps.FileTransfer` | `PortableDesktopFileStore` | Chunk 4.4 |
 | 55 | `ITransferRateLimiter` | `Percolator.Apps.FileTransfer` | `TokenBucketRateLimiter` | Chunk 4.4 |
 | 56 | `IDistributedTrackerPort` | `Percolator.Apps.FileTransfer` | `RelaySwarmTrackerClient` | Chunk 4.4 |
-| 57 | `ITransferOfferReaperService` | `Percolator.Apps.FileTransfer` | `TransferOfferReaperWorker` | Chunk 4.4 |
+| 57 | `ITransportCertificateProvider` | `Percolator.Infrastructure` | `InMemoryTransportCertificateProvider` | Chunk 3.4 |
 | 58 | `IIdentityProfileRepository` | `Percolator.Domain` | `SqliteIdentityProfileRepository` | Chunk 2.2 |
