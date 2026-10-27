@@ -824,9 +824,9 @@
 - **Technical Specifications & Cryptographic Invariants**:
   - **Cryptographic Port Implementation (`SignalCryptoEngine` / `SodiumCryptoEngine`)**:
     - Realizes `Percolator.Domain.Security.Ports.ICryptoEngine`.
-    - **Ed25519 Signatures (RFC 8032)**: `VerifyEd25519Signature(ReadOnlySpan<byte> publicKey, ReadOnlySpan<byte> message, ReadOnlySpan<byte> signature)` and `SignEd25519(ReadOnlySpan<byte> privateKey, ReadOnlySpan<byte> message, Span<byte> destinationSignature)`.
-    - **Curve25519 / X25519 Diffie-Hellman (RFC 7748)**: `ComputeDiffieHellman(ReadOnlySpan<byte> privateKey, ReadOnlySpan<byte> peerPublicKey, Span<byte> destinationSharedSecret)` and `DeriveX3dhMasterSecret(...)`.
-    - **Symmetric Ratchet Advances**: HKDF SHA-256 HMAC root key updates (`KdfRk`) and symmetric chain key steps (`StepRatchet`).
+    - **Ed25519 Signatures (RFC 8032)**: `VerifyEd25519Signature(IdentityKey publicKey, ReadOnlySpan<byte> message, ReadOnlySpan<byte> signature)` (using domain value object `IdentityKey`) and `SignEd25519(ReadOnlySpan<byte> privateKey, ReadOnlySpan<byte> message)` returning `byte[]`.
+    - **Curve25519 / X25519 Diffie-Hellman (RFC 7748)**: `ComputeDiffieHellman(ReadOnlySpan<byte> privateKey, ReadOnlySpan<byte> publicKey)` returning domain value object `SharedSecret`, and `DeriveX3dhMasterSecret(...)`.
+    - **Symmetric Ratchet Advances**: HKDF SHA-256 HMAC root key updates returning `(ChainKey NextRootKey, ChainKey DerivedChainKey) KdfRk(ChainKey currentRootKey, SharedSecret dhSecret)` and symmetric chain key steps returning `(ChainKey NextChainKey, MessageKey DerivedMessageKey) StepRatchet(ChainKey currentChainKey)`.
     - **AES-256-GCM AEAD**: Authenticated encryption/decryption with 12-byte nonce and 16-byte Poly1305/GCM tag (`EncryptAesGcm`, `DecryptAesGcm`).
     - **Deterministic Memory Zeroization (Invariant 3)**: Wipe sensitive ephemeral key spans, secret scalars, and intermediate KDF buffers via `CryptographicOperations.ZeroMemory`.
     - **Cryptographic Logging Guardrail (Invariant 5)**: Redact all keys, hashes, and sensitive spans when `CryptographyOptions.EnableCryptographicMaterialLogging = false`.
@@ -1159,10 +1159,9 @@
 #### Chunk 3.3: Generic Session Wire Packaging & Payload Serializer
 - **Technical Specifications & Interface Boundaries**:
   - **`ProtobufSessionWirePacker` (`Percolator.Application.Ports.ISessionWirePacker`)**:
-    - Packs typed session structures into `DirectSessionPackageProto` and `GroupSessionPackageProto`.
-    - Envelopes them into `SealedEnvelopeProto` carrying recipient `BlindedRoutingToken` and `DeliveryToken`.
-    - Unpacks incoming `SealedEnvelopeProto.encrypted_package` into typed `InboundDirectEnvelope` or `InboundGroupEnvelope`.
-    - **Strict Phase 4 Independence**: Packs domain-level binary byte slices (`ReadOnlyMemory<byte>`) into `session.proto` wire structures with zero dependency on `chat.proto` or application-layer plugins.
+    - Packs typed session structures into wire bytes (`ReadOnlyMemory<byte>`): `PackDirectRatchetMessage(RatchetHeader, ReadOnlyMemory<byte>)`, `PackGroupMessage(ChannelId, uint, ReadOnlyMemory<byte>, ReadOnlyMemory<byte>)`, and `PackHandshakeMessage(HandshakeHeader, ReadOnlyMemory<byte>)` using `session.proto` wire structures (`DirectSessionPackageProto`, `GroupSessionPackageProto`, `HandshakeInvitationPackageProto`).
+    - Unpacks incoming session wire frames into typed domain envelopes: `UnpackDirectRatchetMessage`, `UnpackGroupMessage`, and `UnpackHandshakeMessage` returning `DomainResult<InboundDirectEnvelope>`, `DomainResult<InboundGroupEnvelope>`, and `DomainResult<InboundHandshakeEnvelope>`.
+    - **Strict Phase 4 & Transport Decoupling**: Exclusively handles inner cryptographic session framing. Completely decoupled from outer sealed envelope dispatching (`SealedEnvelopeProto`, routing tokens) and application-layer plugins (`chat.proto`).
   - **`ProtobufPayloadSerializer` (`Percolator.PluginSdk.IPayloadSerializer`)**:
     - High-performance binary serialization using `Google.Protobuf.CodedOutputStream` and `IBufferWriter<byte>`.
     - Generic span-based deserialization using `Google.Protobuf.MessageParser<T>`.
@@ -1171,7 +1170,7 @@
   - [ ] Implement `ProtobufSessionWirePacker` (`Percolator.Application.Ports.ISessionWirePacker`).
   - [ ] Implement `ProtobufPayloadSerializer` (`Percolator.PluginSdk.IPayloadSerializer`).
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Packaging/`)**:
-  - `ProtobufSessionWirePackerTests.RoundtripDirectSession_PacksAndUnpacksCorrectly`: wraps and unwraps typed `InboundDirectEnvelope`.
+  - `ProtobufSessionWirePackerTests.RoundtripDirectSession_PacksAndUnpacksCorrectly`: packs ratchet header and ciphertext into wire bytes and unwraps into typed `InboundDirectEnvelope`.
   - `ProtobufSessionWirePackerTests.GroupSessionPackage_PacksIterationAndSignature`: packages group message iteration, signature, and ciphertext into `GroupSessionPackageProto`.
   - `ProtobufPayloadSerializerTests.GenericPayloadSerialization_RoundtripsCorrectly`: serializes and deserializes generic payloads.
 - **Verification Gate**:
@@ -1192,10 +1191,6 @@
       3. If `SocketException` (`AddressAlreadyInUse`), advance to next port.
       4. Upon successful bind, commit lease to `ops_reserved_ports` with 30-minute renewal heartbeat.
   - **gRPC Interceptor Pipeline**:
-    - **`IdentityReadinessInterceptor`**:
-      - Executes before every incoming RPC.
-      - Evaluates `INetworkStealthGate.IsNetworkActive` and checks whether the database vault is unlocked.
-      - If false, short-circuits with `Status(StatusCode.Unavailable, "Node operates in total network stealth. Unlock identity to proceed.")`.
     - **`DeliveryCertificateAuthInterceptor`**:
       - Executes on authenticated relay calls (`authenticated_relay.proto`).
       - Extracts metadata headers: `x-percolator-identity` (hex-encoded `PublicIdentityId`), `x-percolator-timestamp` (Unix ms), and `x-percolator-signature`.
@@ -1211,11 +1206,10 @@
   - [ ] Implement `CallbackEndpointValidator`.
   - [ ] Implement dynamic port range probing (5200–5299) and lease renewal on `ops_reserved_ports`.
   - [ ] Implement `PeerGrpcChannelFactory`.
-  - [ ] Implement `IdentityReadinessInterceptor` and `DeliveryCertificateAuthInterceptor`.
+  - [ ] Implement `DeliveryCertificateAuthInterceptor`.
   - [ ] Implement `PrimaryContainerServiceActivator<T>`.
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Transport/Primitives/`)**:
   - `CallbackEndpointValidatorTests.RejectsPrivateAndLoopbackIps_UnlessDevFlag`: rejects loopback and RFC 1918 IPs by default.
-  - `IdentityReadinessInterceptorTests.VaultLocked_ReturnsUnavailable`: incoming RPC returns `StatusCode.Unavailable` when vault is locked or stealth active.
   - `DeliveryCertificateAuthInterceptorTests.TimestampSkewExceeded_RejectsRequest`: rejects signatures with timestamp delta > 60s.
   - `PortProberTests.PortContention_BindsNextAvailablePort`: simulates port collision and verifies lease assignment on subsequent free port.
 - **Verification Gate**:
@@ -1227,7 +1221,7 @@
     - Edge filtering before cryptographic operations: queries `IPeerContactRepository` (from Phase 2 Chunk 2.4) to check `PeerTrustLevel.Blocked`. Enforces sender rate limits and identity dormancy status.
   - **`StreamRegistry` (`Percolator.Application.Ports.IStreamRegistry`)**:
     - Tracks active gRPC duplex and server-streaming connections for direct peers and home relays.
-    - Detects connection drops and handles flow-control saturation (`StreamWriteResult.Dropped`).
+    - Detects connection drops and handles flow-control saturation (`StreamWriteResult.Backpressured`).
   - **`TransportDispatcher` (`Percolator.Application.Delivery.Ports.ITransportDispatcher`)**:
     - Consumes domain delivery ports and routes messages across three transport paths:
       1. Direct 1:1: dispatches `DeliverDirect` over ephemeral TLS via `UnauthenticatedDeliveryService.DeliverDirect`.
@@ -1242,7 +1236,7 @@
   - [ ] Implement `SealedEnvelopeUnwrapper` (`Percolator.Application.Ports.ISealedEnvelopeUnwrapper`).
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Transport/Dispatching/`)**:
   - `IngressFilterServiceTests.BlockedSender_RejectsEnvelopeBeforeCrypto`: envelopes from blocked identities rejected before any cryptographic operations.
-  - `StreamRegistryTests.BackpressureSaturation_ReturnsDropped`: queue overflow returns `StreamWriteResult.Dropped`.
+  - `StreamRegistryTests.BackpressureSaturation_ReturnsBackpressured`: queue overflow returns `StreamWriteResult.Backpressured`.
   - `TransportDispatcherTests.DirectVsRelayRoute_ResolvesCorrectAdapter`: resolves direct TLS vs relay delivery token cleanly.
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Transport.Dispatching`
@@ -1587,7 +1581,7 @@
       - `IDbContextFactory<PercolatorDbContext>` & `PercolatorDbContextOptions`
       - Core Cryptography & Time: `ICryptoEngine`, `IZkProofEngine`, `IDateTimeProvider`
       - Networking & Stream Management: `StreamRegistry`, `TcpMultiStreamPool`, `TokenBucketRateLimiter`, `LocalFileChunkStore`
-      - Interceptors & Gateways: `IdentityReadinessInterceptor`, `DeliveryCertificateAuthInterceptor`, `NetworkStealthGate`
+      - Interceptors: `DeliveryCertificateAuthInterceptor`
       - Protocol Serializers: `ProtobufSessionWirePacker`, `ProtobufPayloadSerializer`, `ChatPayloadFramingDecorator`
     - **Scoped**:
       - `PercolatorDbContext` (pooled context per scope)
