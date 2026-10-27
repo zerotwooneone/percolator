@@ -102,14 +102,18 @@
 
     message DatabaseHeader {
       int32 version = 1;
-      bytes salt = 2;               // 16-byte random salt for Argon2id
-      bytes master_slot_nonce = 3;  // 12-byte ChaCha20-Poly1305 nonce
-      bytes master_slot_payload = 4;// 48 bytes: Encrypted 32-byte master key + 16-byte Poly1305 tag
-      bytes duress_slot_nonce = 5;  // 12-byte nonce (or random noise)
-      bytes duress_slot_payload = 6;// 48 bytes: Encrypted 32-byte sentinel + tag (or dummy random noise)
+      int32 argon2_memory_kb = 2;   // e.g. 65536 (64 MB)
+      int32 argon2_iterations = 3;  // e.g. 3
+      int32 argon2_parallelism = 4; // e.g. 4
+      bytes master_slot_salt = 5;   // 16-byte random salt for Argon2id
+      bytes master_slot_nonce = 6;  // 12-byte ChaCha20-Poly1305 nonce
+      bytes master_slot_payload = 7;// 48 bytes: Encrypted 32-byte master key + 16-byte Poly1305 tag
+      bytes duress_slot_salt = 8;   // 16-byte random salt (or CSPRNG noise if disabled)
+      bytes duress_slot_nonce = 9;  // 12-byte nonce (or random noise)
+      bytes duress_slot_payload = 10;// 48 bytes: Encrypted 32-byte sentinel + tag (or dummy random noise)
     }
     ```
-  - **Plausible Deniability Invariant**: When no duress password is set, `duress_slot_nonce` (12 bytes) and `duress_slot_payload` (48 bytes) are filled with `RandomNumberGenerator.GetBytes(60)`. Wire length is strictly ~120 bytes in all configurations.
+  - **Plausible Deniability Invariant**: When no duress password is set, `duress_slot_salt` (16 bytes), `duress_slot_nonce` (12 bytes), and `duress_slot_payload` (48 bytes) are filled with `RandomNumberGenerator.GetBytes(76)`. Wire length is strictly ~140 bytes in all configurations.
   - **Header Storage Interface (`Percolator.Infrastructure.Vault.IHeaderStorage`)**:
     ```csharp
     namespace Percolator.Infrastructure.Vault;
@@ -177,7 +181,7 @@
   - [ ] Implement `ProtobufHeaderStorage` (`IHeaderStorage`): reads/writes header with temp file staging and atomic replace.
   - [ ] Implement `DuressWipeHandler` (`Percolator.Application.Ports.IDuressWipeHandler`): instant crypto-shredding pipeline.
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Vault/`)**:
-  - `ProtobufHeaderStorageTests.PlausibleDeniability_WireSize_IdenticalWithOrWithoutDuress`: header with dummy random noise vs active duress has identical 48-byte payload wire size; decryption of dummy duress slot throws `AuthenticationTagMismatchException`.
+  - `ProtobufHeaderStorageTests.PlausibleDeniability_WireSize_IdenticalWithOrWithoutDuress`: header with dummy random noise vs active duress has identical 76-byte duress slot wire size and uniform total header length; decryption of dummy duress slot throws `AuthenticationTagMismatchException`.
   - `ProtobufHeaderStorageTests.CorruptedHeader_TrapsGracefully`: 0-byte or truncated `percolator.header` traps `InvalidProtocolBufferException` returning structured failure without uncaught crashes.
   - `DuressWipeHandlerTests.ExecuteWipeAsync_OverwritesHeaderAndFlushes_InLessThan2Ms`: overwrites header with random bytes and flushes to disk in $< 2\text{ ms}$.
   - `DuressWipeHandlerTests.ExecuteWipeAsync_LockedDbFile_ContinuesWithoutThrowing`: simulates external file lock on `percolator.db`; catches `IOException` without throwing; destroys header permanently.
@@ -205,8 +209,19 @@
             {
                 _keyHandle.ApplyKeyToConnection(sqliteConn);
                 using var cmd = sqliteConn.CreateCommand();
-                cmd.CommandText = "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;";
+                cmd.CommandText = "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA cipher_memory_security = ON;";
                 cmd.ExecuteNonQuery();
+            }
+        }
+
+        public override async Task ConnectionOpenedAsync(DbConnection connection, ConnectionEndEventData eventData, CancellationToken cancellationToken = default)
+        {
+            if (connection is SqliteConnection sqliteConn)
+            {
+                _keyHandle.ApplyKeyToConnection(sqliteConn);
+                await using var cmd = sqliteConn.CreateCommand();
+                cmd.CommandText = "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA cipher_memory_security = ON;";
+                await cmd.ExecuteNonQueryAsync(cancellationToken);
             }
         }
     }
@@ -217,7 +232,8 @@
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Vault/Keying/`)**:
   - `MasterKeyHandleTests.Dispose_ZeroizesPinnedMemory`: unmanaged buffer memory is zeroized on dispose; subsequent access throws `ObjectDisposedException`.
   - `MasterKeyHandleTests.WithKeySpan_YieldsValid32ByteKeySpan`: visitor executes with exact 32-byte key span matching initial key.
-  - `SqlCipherPragmaInterceptorTests.ConnectionOpened_AppliesKeyAndWalPragmas`: verifies interceptor applies raw key and WAL journal mode.
+  - `SqlCipherPragmaInterceptorTests.ConnectionOpened_AppliesKeyAndSecurityPragmas`: verifies interceptor applies raw key, WAL/synchronous, foreign keys, and memory security PRAGMAs.
+  - `SqlCipherPragmaInterceptorTests.ConnectionOpenedAsync_AppliesKeyAndSecurityPragmas`: verifies asynchronous interceptor hook applies raw key and security PRAGMAs.
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Vault.Keying`
 
@@ -304,10 +320,16 @@
         VaultPassphrase candidatePassword,
         Span<byte> destinationDatabaseKeyBuffer)
     {
-        byte[] derivedCandidateKey = DeriveArgon2idKey(candidatePassword, header.Salt.Span);
+        // 1. Evaluate Master Slot (derive with master_slot_salt and header KDF parameters)
+        byte[] derivedMasterCandidateKey = DeriveArgon2idKey(
+            candidatePassword,
+            header.MasterSlotSalt.Span,
+            header.Argon2MemoryKb,
+            header.Argon2Iterations,
+            header.Argon2Parallelism);
         try
         {
-            using var cipher = new ChaCha20Poly1305(derivedCandidateKey);
+            using var cipher = new ChaCha20Poly1305(derivedMasterCandidateKey);
             Span<byte> candidatePlaintext = stackalloc byte[32];
 
             // 1. Evaluate Master Slot (48 bytes: [..32] ciphertext + [32..] tag)
@@ -327,8 +349,23 @@
             {
                 // Tag mismatch: candidate key is not the master key
             }
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(derivedMasterCandidateKey);
+        }
 
-            // 2. Evaluate Duress Slot
+        // 2. Evaluate Duress Slot (derive with duress_slot_salt and header KDF parameters)
+        byte[] derivedDuressCandidateKey = DeriveArgon2idKey(
+            candidatePassword,
+            header.DuressSlotSalt.Span,
+            header.Argon2MemoryKb,
+            header.Argon2Iterations,
+            header.Argon2Parallelism);
+        try
+        {
+            using var cipher = new ChaCha20Poly1305(derivedDuressCandidateKey);
+            Span<byte> candidatePlaintext = stackalloc byte[32];
             try
             {
                 cipher.Decrypt(
@@ -347,13 +384,13 @@
             {
                 // Active duress tag mismatch OR dummy random bytes failed authentication
             }
-
-            return new SlotTrialResult(SlotTrialOutcome.InvalidCredentials);
         }
         finally
         {
-            CryptographicOperations.ZeroMemory(derivedCandidateKey);
+            CryptographicOperations.ZeroMemory(derivedDuressCandidateKey);
         }
+
+            return new SlotTrialResult(SlotTrialOutcome.InvalidCredentials);
     }
     ```
   - **Native SQLCipher Canary Error Handling (`DatabaseCanaryProbe.ProbeAsync`)**:
@@ -384,31 +421,33 @@
 - **Step-by-Step Collaborator Workflow Mapping**:
   - **`InitializeAsync(masterPassword, duressPassword, ct)`**:
     1. Generate random 32-byte $K_{\text{db}}$ into unmanaged memory via `MasterKeyHandle`.
-    2. Call `_envelopePacker.CreateEnvelope(masterPassword, duressPassword, keySpan)` using Argon2id ($m=64\text{MB}, t=3, p=4$) and ChaCha20-Poly1305.
+    2. Call `_envelopePacker.CreateEnvelope(masterPassword, duressPassword, keySpan)` generating decoupled 16-byte salts for master and duress slots, encoding Argon2id parameters ($m=64\text{MB}, t=3, p=4$) and ChaCha20-Poly1305 ciphertexts.
     3. Atomically write `DatabaseHeader` via `_headerStorage.WriteHeaderAsync`.
     4. **Cold Launch Self-Healing Invariant**: If `percolator.header` was missing or wiped, force unlink any orphaned `.db*` ciphertext files before creating the new database.
-    5. Probe canary using probe connection keyed via `_keyHandle.ApplyKeyToConnection` through `_canaryProbe.ProbeAsync`.
-    6. Execute `_migrator.MigrateAsync(ct)` to apply baseline schemas.
-    7. Invoke `_hostFactory.BuildAuthenticatedHost(_masterKeyHandle)` and return `UnlockResult.Success(new AuthenticatedSession(host))`.
+    5. **Canary & Migration Memory Guard**: Probe canary via `_canaryProbe.ProbeAsync` and execute `_migrator.MigrateAsync(ct)` inside a `try-catch/finally` block. If canary verification fails (`FailedNotADatabase` / `Corrupted`) or `MigrateAsync` fails/throws, immediately dispose `_masterKeyHandle` (zeroizing unmanaged memory), reset `_masterKeyHandle = null`, and abort initialization.
+    6. On verified completion, invoke `_hostFactory.BuildAuthenticatedHost(_masterKeyHandle)` and return `UnlockResult.Success(new AuthenticatedSession(host))`.
   - **`UnlockAsync(candidatePassword, ct)`**:
     1. Read `DatabaseHeader` via `_headerStorage.ReadHeaderAsync`.
     2. Allocate unmanaged pinned buffer in `MasterKeyHandle`.
     3. Evaluate slots via `_envelopePacker.EvaluateSlots(header, candidatePassword, keySpanBuffer)`:
-       - Master slot decrypted $\rightarrow$ probe canary via `_canaryProbe.ProbeAsync`. If `Verified`, execute `_migrator.MigrateAsync(ct)`, assemble host via `_hostFactory.BuildAuthenticatedHost`, and return `UnlockResult.Success(session)`.
-       - Duress slot decrypted and matches `DuressSentinelBytes` $\rightarrow$ execute `_wipeHandler.ExecuteWipeAsync(ct)`, transition status to `Uninitialized`, return `UnlockResult.DuressActivated()`.
-       - All slot trials fail $\rightarrow$ zeroize key memory, return `UnlockResult.InvalidCredentials()`.
+       - Master slot decrypted $\rightarrow$ **Canary & Migration Guard**: Probe canary via `_canaryProbe.ProbeAsync`. If canary returns `FailedNotADatabase` or `Corrupted`, or if `_migrator.MigrateAsync(ct)` fails/throws, immediately dispose `_masterKeyHandle`, zeroize unmanaged memory, reset `_masterKeyHandle = null`, and return `UnlockResult.InvalidCredentials()`. If `Verified` and migrated successfully, assemble host via `_hostFactory.BuildAuthenticatedHost` and return `UnlockResult.Success(session)`.
+       - Duress slot decrypted and matches `DuressSentinelBytes` $\rightarrow$ zeroize key memory, execute `_wipeHandler.ExecuteWipeAsync(ct)`, transition status to `Uninitialized`, return `UnlockResult.DuressActivated()`.
+       - All slot trials fail $\rightarrow$ zeroize key memory, dispose `MasterKeyHandle`, return `UnlockResult.InvalidCredentials()`.
   - **`ChangeMasterPasswordAsync(currentPassword, newPassword, ct)` ($O(1)$ Re-Wrap)**:
     1. Validate active session is unlocked.
     2. Validate `currentPassword` against active key handle via slot trial.
     3. Call `_envelopePacker.RewrapMasterSlot(currentHeader, newPassword, activeKeySpan)`.
-    4. **Duress Slot Preservation & Performance Guarantee**: Because `header.Salt` is retained, the existing duress slot remains 100% valid without requiring the user to re-enter their duress passphrase. Because $K_{\text{db}}$ remains identical, zero SQLite tables or pages are rewritten ($O(1)$ re-wrap completes in $< 200\text{ ms}$).
+    4. **Salt Rotation & Duress Slot Preservation**: Generates a fresh random 16-byte `master_slot_salt` and fresh nonce for the master slot. Because `header.DuressSlotSalt` and duress payload remain completely untouched, the duress slot remains 100% valid without requiring the user to supply or re-enter the duress passphrase. Because $K_{\text{db}}$ remains identical, zero SQLite tables or pages are rewritten ($O(1)$ re-wrap completes in $< 200\text{ ms}$).
     5. Atomically overwrite header via `_headerStorage.WriteHeaderAsync`.
     6. Zeroize temporary key spans via `CryptographicOperations.ZeroMemory`.
-  - **`ConfigureDuressPasswordAsync(duressPassword, ct)`**:
+  - **`ConfigureDuressPasswordAsync(currentMasterPassword, duressPassword, ct)`**:
     1. Validate active session is unlocked.
-    2. Validate `duressPassword` is not empty/whitespace and distinct from master password.
-    3. Call `_envelopePacker.ConfigureDuressSlot(currentHeader, duressPassword)`.
-    4. Atomically overwrite header via `_headerStorage.WriteHeaderAsync`.
+    2. **Re-Authentication Guard**: Validate `currentMasterPassword` unlocks master slot before permitting duress reconfiguration (prevents malicious duress trap or sabotage on unattended unlocked terminals).
+    3. Validate `duressPassword` is distinct from `currentMasterPassword` (`!VaultPassphrase.ConstantTimeEquals(currentMasterPassword, duressPassword)`).
+    4. If setting/updating: derive fresh 16-byte `duress_slot_salt`, fresh nonce, and encrypt `DuressSentinelBytes`. If clearing (`null` or empty): populate duress slot with 76 bytes of CSPRNG noise.
+    5. Call `_envelopePacker.ConfigureDuressSlot(currentHeader, duressPassword)`.
+    6. Atomically overwrite header via `_headerStorage.WriteHeaderAsync`.
+    7. *Port Note*: Update `IDatabaseUnlockCoordinator.ConfigureDuressPasswordAsync(VaultPassphrase currentMasterPassword, VaultPassphrase? duressPassword, CancellationToken ct = default)` to enforce re-authentication.
   - **`LockAsync()`**:
     1. Stop all hosted services in Stage 2 `IHost`.
     2. Clear connection pools via `SqliteConnection.ClearAllPools()`.
@@ -426,12 +465,14 @@
     - Registers `SystemDateTimeProvider`, `ProtobufHeaderStorage`, `DuressWipeHandler`, `VaultEnvelopePacker`, `DatabaseCanaryProbe`, and `SqlCipherDatabaseUnlockCoordinator`.
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Vault/Unlock/`)**:
   - `DatabaseCanaryProbeTests.InvalidKey_TrapsSqliteErrorCode26`: invalid key traps `SqliteException` with `SqliteErrorCode == 26` (`SQLITE_NOTADB`) and returns `CanaryProbeResult.FailedNotADatabase`.
-  - `VaultEnvelopePackerTests.MasterPasswordChange_RewrapsSlot_PreservesDuress`: re-wraps master slot with new key; preserves salt and duress slot; decrypts successfully.
+  - `VaultEnvelopePackerTests.MasterPasswordChange_RotatesMasterSalt_PreservesDuress`: generates fresh master salt, re-wraps master slot with new key, preserves independent duress salt and duress slot; both decrypt successfully.
   - `SqlCipherUnlockTests.HappyPathMasterUnlock_CoordinatesCollaborators`: correct master password derives key, evaluates master slot, executes canary probe, invokes migrator, and returns `UnlockResult.Success(session)`.
   - `SqlCipherUnlockTests.InvalidPassword_ReturnsInvalidCredentials`: incorrect password fails master and duress slots; returns `UnlockResult.InvalidCredentials`.
+  - `SqlCipherUnlockTests.CanaryOrMigrationFailure_DisposesAndZeroizesMasterKeyHandle`: verifies handle disposal and unmanaged memory zeroization when canary returns not a database or migration throws.
   - `SqlCipherUnlockTests.BlankPassword_CreatesEncryptedDatabase_AndUnkeyedConnectionFails`: setup with `VaultPassphrase.Empty` creates encrypted database; raw unkeyed connection fails with native code 26 (`SQLITE_NOTADB`); unlock with empty passphrase succeeds.
   - `SqlCipherUnlockTests.LockAsync_ScrubsMemoryAndClearsPools`: calling `LockAsync()` clears connection pools (`SqliteConnection.ClearAllPools()`), zeroizes `MasterKeyHandle`, disposes host, transitions status to `Locked`.
   - `SqlCipherUnlockTests.ChangeMasterPasswordAsync_RewrapsMasterSlot_PreservesDuressSlot`: re-wraps master slot with new key; database remains readable; subsequent unlock requires new password; existing duress password remains valid.
+  - `SqlCipherUnlockTests.ConfigureDuressPasswordAsync_RequiresMasterReAuthentication`: validates master password re-authentication before updating duress slot; rejects invalid master password.
   - `SqlCipherUnlockTests.ConfigureDuressPasswordAsync_IdenticalToMaster_RejectsCollision`: rejects duress password identical to master; header is untouched.
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Vault.Unlock`
