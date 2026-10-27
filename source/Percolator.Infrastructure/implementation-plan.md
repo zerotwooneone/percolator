@@ -528,41 +528,105 @@
 #### Chunk 2.2: Vertical Slice: Identity Key Stores & Ratchet Sessions
 - **Technical Specifications & Table Schemas (`vault_*`)**:
   - **DDL & Schema Definitions**:
+    - `identity_profiles`:
+      - `id` (`BLOB` 32 bytes PublicIdentityId, PK)
+      - `display_name` (`TEXT`)
+      - `role` (`INTEGER`: `Standard=0`, `RelayOperator=1`, `Bot=2`)
+      - `state` (`INTEGER`: `Active=0`, `Suspended=1`, `Disabled=2`)
+      - `created_at_utc` (`TEXT` ISO 8601)
+      - `disabled_at_utc` (`TEXT` ISO 8601 nullable)
+    - `local_devices`:
+      - `owner_identity_id` (`BLOB` 32 bytes PublicIdentityId)
+      - `device_id` (`INTEGER`: `Primary=1`, `Secondary>1`)
+      - `device_name` (`TEXT`)
+      - `device_public_key` (`BLOB` 32 bytes IdentityKey)
+      - `link_proof_signature` (`BLOB` 64 bytes DeviceLinkProof nullable)
+      - `created_at_utc` (`TEXT` ISO 8601)
+      - `last_seen_at_utc` (`TEXT` ISO 8601 nullable)
+      - *Composite PK*: `PRIMARY KEY(owner_identity_id, device_id)`
+      - *FK*: `FOREIGN KEY(owner_identity_id) REFERENCES identity_profiles(id) ON DELETE CASCADE`
     - `vault_identity_keys`:
       - `id` (`BLOB` 32 bytes PublicIdentityId, PK)
       - `private_key_ciphertext` (`BLOB`, encrypted via `AesGcmValueConverter`)
       - `public_key` (`BLOB` 32 bytes)
       - `created_at_utc` (`TEXT` ISO 8601)
     - `vault_signed_prekeys`:
-      - `id` (`INTEGER` PK)
-      - `identity_id` (`BLOB` 32 bytes, FK to `vault_identity_keys(id)` ON DELETE CASCADE)
+      - `owner_identity_id` (`BLOB` 32 bytes PublicIdentityId)
+      - `device_id` (`INTEGER` DeviceId)
       - `private_key_ciphertext` (`BLOB`, encrypted via `AesGcmValueConverter`)
       - `public_key` (`BLOB` 32 bytes)
       - `signature` (`BLOB` 64 bytes)
       - `created_at_utc` (`TEXT` ISO 8601)
+      - *Composite PK*: `PRIMARY KEY(owner_identity_id, device_id)`
+      - *FK*: `FOREIGN KEY(owner_identity_id) REFERENCES vault_identity_keys(id) ON DELETE CASCADE`
     - `vault_onetime_prekeys`:
-      - `id` (`INTEGER` PK)
-      - `identity_id` (`BLOB` 32 bytes, FK to `vault_identity_keys(id)` ON DELETE CASCADE)
+      - `owner_identity_id` (`BLOB` 32 bytes PublicIdentityId)
+      - `device_id` (`INTEGER` DeviceId)
+      - `key_id` (`INTEGER` uint32 OPK Identifier)
       - `private_key_ciphertext` (`BLOB`, encrypted via `AesGcmValueConverter`)
       - `public_key` (`BLOB` 32 bytes)
-      - `is_consumed` (`INTEGER` boolean, indexed: `CREATE INDEX ix_vault_opk_consumed ON vault_onetime_prekeys(identity_id, is_consumed);`)
+      - `is_consumed` (`INTEGER` boolean: `0=Available`, `1=Consumed`)
+      - `consumed_at_utc` (`TEXT` ISO 8601 nullable)
+      - `created_at_utc` (`TEXT` ISO 8601)
+      - *Composite PK*: `PRIMARY KEY(owner_identity_id, device_id, key_id)`
+      - *FK*: `FOREIGN KEY(owner_identity_id) REFERENCES vault_identity_keys(id) ON DELETE CASCADE`
+      - *Index*: `CREATE INDEX ix_vault_opk_unconsumed ON vault_onetime_prekeys(owner_identity_id, device_id, is_consumed);`
     - `vault_ratchet_sessions`:
       - `session_id` (`TEXT` GUID, PK)
-      - `peer_identity_id` (`BLOB` 32 bytes, indexed: `CREATE INDEX ix_vault_ratchet_peer ON vault_ratchet_sessions(peer_identity_id);`)
+      - `owner_identity_id` (`BLOB` 32 bytes PublicIdentityId)
+      - `owner_device_id` (`INTEGER` DeviceId)
+      - `remote_peer_id` (`BLOB` 32 bytes PublicIdentityId)
+      - `remote_device_id` (`INTEGER` DeviceId)
       - `root_key_ciphertext` (`BLOB`, encrypted via `AesGcmValueConverter`)
       - `send_chain_key_ciphertext` (`BLOB`, encrypted via `AesGcmValueConverter`)
       - `recv_chain_key_ciphertext` (`BLOB`, encrypted via `AesGcmValueConverter`)
+      - `local_ephemeral_priv_ciphertext` (`BLOB` nullable, encrypted via `AesGcmValueConverter`)
+      - `local_ephemeral_pub` (`BLOB` 32 bytes nullable)
+      - `remote_ephemeral_pub` (`BLOB` 32 bytes nullable)
+      - `sending_counter` (`INTEGER`)
+      - `receiving_counter` (`INTEGER`)
+      - `previous_chain_length` (`INTEGER`)
       - `ratchet_state_blob` (`BLOB`, encrypted domain binary snapshot via `AesGcmValueConverter`)
       - `updated_at_utc` (`TEXT` ISO 8601)
+      - *Route Index*: `CREATE UNIQUE INDEX ix_vault_ratchet_route ON vault_ratchet_sessions(owner_identity_id, remote_peer_id, remote_device_id);`
     - `vault_group_sender_keys`:
-      - `group_id` (`TEXT` GUID)
-      - `author_identity_id` (`BLOB` 32 bytes)
-      - `sender_key_state_ciphertext` (`BLOB`, encrypted via `AesGcmValueConverter`)
+      - `channel_id` (`TEXT` GUID ChannelId)
+      - `author_identity_id` (`BLOB` 32 bytes PublicIdentityId)
+      - `author_device_id` (`INTEGER` DeviceId)
+      - `key_id` (`INTEGER` uint32)
+      - `iteration` (`INTEGER` uint32)
+      - `chain_key_ciphertext` (`BLOB`, encrypted via `AesGcmValueConverter`)
+      - `signing_priv_ciphertext` (`BLOB` nullable, encrypted via `AesGcmValueConverter`)
+      - `author_signing_pub` (`BLOB` 32 bytes nullable)
       - `updated_at_utc` (`TEXT` ISO 8601)
-      - *Composite PK*: `PRIMARY KEY(group_id, author_identity_id)`
+      - *Composite PK*: `PRIMARY KEY(channel_id, author_identity_id, author_device_id)`
+    - `vault_group_receiver_sessions`:
+      - `channel_id` (`TEXT` GUID ChannelId)
+      - `author_identity_id` (`BLOB` 32 bytes PublicIdentityId)
+      - `author_device_id` (`INTEGER` DeviceId)
+      - `key_id` (`INTEGER` uint32)
+      - `author_signing_pub` (`BLOB` 32 bytes nullable)
+      - `chain_key_ciphertext` (`BLOB`, encrypted via `AesGcmValueConverter`)
+      - `receiving_counter` (`INTEGER`)
+      - `skipped_keys_blob` (`BLOB` nullable, encrypted via `AesGcmValueConverter`)
+      - `updated_at_utc` (`TEXT` ISO 8601)
+      - *Composite PK*: `PRIMARY KEY(channel_id, author_identity_id, author_device_id)`
+    - `vault_group_credentials`:
+      - `channel_id` (`TEXT` GUID ChannelId, PK)
+      - `master_key_ciphertext` (`BLOB`, encrypted via `AesGcmValueConverter`)
+      - `auth_credential_mac` (`BLOB` 32 bytes)
+      - `local_blob_key_ciphertext` (`BLOB` nullable, encrypted via `AesGcmValueConverter`)
+      - `updated_at_utc` (`TEXT` ISO 8601)
+    - `vault_pending_handshakes`:
+      - `recipient_identity_id` (`BLOB` 32 bytes PublicIdentityId)
+      - `sender_identity_id` (`BLOB` 32 bytes PublicIdentityId)
+      - `envelope_payload` (`BLOB`, encrypted via `AesGcmValueConverter`)
+      - `created_at_utc` (`TEXT` ISO 8601)
+      - *Composite PK*: `PRIMARY KEY(recipient_identity_id, sender_identity_id)`
   - **Zero Phase 3 Wire Serializer Dependency**: Repositories persist domain value object byte arrays or internal binary representations directly. State encryption is handled by `AesGcmValueConverter` at the EF Core mapping boundary; repositories do not depend on Phase 3 `ISessionWirePacker` or protobuf schemas (`session.proto`).
 - **Scope & Deliverables**:
   - [ ] Implement Cryptographic Vault Repositories:
+    - `SqliteIdentityProfileRepository` (`Percolator.Domain.Identities.Ports.IIdentityProfileRepository`)
     - `SqliteLocalIdentityKeyStore` (`Percolator.Application.Ports.ILocalIdentityKeyStore`)
     - `SqlitePrivatePreKeyStore` (`Percolator.Domain.Identities.Ports.IPrivatePreKeyStore`)
     - `SqliteRatchetSessionRepository` (`Percolator.Application.Ports.IRatchetSessionRepository`)
@@ -583,15 +647,19 @@
   - **DDL & Schema Definitions**:
     - `ops_outbox_jobs`:
       - `id` (`TEXT` GUID, PK)
-      - `recipient_id` (`BLOB` 32 bytes, indexed)
-      - `delivery_route` (`INTEGER`)
+      - `owner_identity_id` (`BLOB` 32 bytes PublicIdentityId, indexed)
+      - `channel_id` (`TEXT` GUID ChannelId)
+      - `recipient_id` (`BLOB` 32 bytes nullable)
+      - `delivery_route` (`INTEGER`: `Direct=0`, `Relay=1`)
       - `payload` (`BLOB`)
-      - `status` (`INTEGER`: `Queued=0`, `InFlight=1`, `Delivered=2`, `Failed=3`, `Paused=4`)
-      - `attempt_count` (`INTEGER`)
-      - `next_retry_at_utc` (`TEXT` ISO 8601, indexed)
+      - `status` (`INTEGER`: `Pending=0`, `InFlight=1`, `Delivered=2`, `Failed=3`, `PausedDormant=4`)
+      - `retry_count` (`INTEGER` default 0)
+      - `max_attempts` (`INTEGER` default 5)
+      - `next_attempt_at_utc` (`TEXT` ISO 8601 nullable, indexed)
       - `created_at_utc` (`TEXT` ISO 8601)
       - `last_error` (`TEXT` nullable)
-      - *Composite Index*: `CREATE INDEX ix_ops_outbox_retry ON ops_outbox_jobs(status, next_retry_at_utc);`
+      - *Composite Index*: `CREATE INDEX ix_ops_outbox_due ON ops_outbox_jobs(status, next_attempt_at_utc);`
+      - *Owner Index*: `CREATE INDEX ix_ops_outbox_owner ON ops_outbox_jobs(owner_identity_id, status);`
     - `ops_inbound_queue`:
       - `id` (`TEXT` GUID, PK)
       - `sender_id` (`BLOB` 32 bytes)
@@ -620,18 +688,47 @@
 - **Technical Specifications & Table Schemas (`peer_contacts`, `chat_channels`)**:
   - **DDL & Schema Definitions**:
     - `peer_contacts`:
-      - `id` (`BLOB` 32 bytes PK)
-      - `alias` (`TEXT`)
-      - `trust_level` (`INTEGER`: `Default=0`, `Verified=1`, `Blocked=2`)
-      - `profile_key` (`BLOB` 32 bytes)
+      - `owner_identity_id` (`BLOB` 32 bytes PublicIdentityId)
+      - `remote_peer_id` (`BLOB` 32 bytes PublicIdentityId)
+      - `nickname` (`TEXT`)
+      - `trust_level` (`INTEGER`: `Untrusted=0`, `Tofu=1`, `Verified=2`, `Blocked=3`)
+      - `state` (`INTEGER`: `Active=0`, `PendingApproval=1`, `Rejected=2`)
+      - `primary_public_key` (`BLOB` 32 bytes nullable IdentityKey)
       - `created_at_utc` (`TEXT` ISO 8601)
+      - `last_seen_at_utc` (`TEXT` ISO 8601 nullable)
       - `updated_at_utc` (`TEXT` ISO 8601)
+      - *Composite PK*: `PRIMARY KEY(owner_identity_id, remote_peer_id)`
+    - `peer_contact_devices`:
+      - `owner_identity_id` (`BLOB` 32 bytes)
+      - `remote_peer_id` (`BLOB` 32 bytes)
+      - `device_id` (`INTEGER` DeviceId)
+      - `registered_at_utc` (`TEXT` ISO 8601)
+      - *Composite PK*: `PRIMARY KEY(owner_identity_id, remote_peer_id, device_id)`
+      - *FK*: `FOREIGN KEY(owner_identity_id, remote_peer_id) REFERENCES peer_contacts(owner_identity_id, remote_peer_id) ON DELETE CASCADE`
     - `chat_channels`:
       - `id` (`TEXT` GUID PK)
       - `type` (`INTEGER`: `Direct=0`, `Group=1`)
-      - `display_name` (`TEXT`)
+      - `name` (`TEXT`)
+      - `owner_identity_id` (`BLOB` 32 bytes nullable, DirectChannel local owner)
+      - `remote_peer_id` (`BLOB` 32 bytes nullable, DirectChannel remote peer)
+      - `current_epoch` (`INTEGER` nullable, GroupChannel EpochNumber default 1)
       - `created_at_utc` (`TEXT` ISO 8601)
-      - `updated_at_utc` (`TEXT` ISO 8601)
+      - `last_activity_utc` (`TEXT` ISO 8601)
+      - *Direct Channel Index*: `CREATE INDEX ix_chat_channels_direct ON chat_channels(owner_identity_id, remote_peer_id);`
+    - `chat_channel_members`:
+      - `channel_id` (`TEXT` GUID ChannelId, FK to `chat_channels(id)` ON DELETE CASCADE)
+      - `member_identity_id` (`BLOB` 32 bytes PublicIdentityId)
+      - `role` (`INTEGER`: `Admin=0`, `Member=1`)
+      - `joined_at_utc` (`TEXT` ISO 8601)
+      - *Composite PK*: `PRIMARY KEY(channel_id, member_identity_id)`
+    - `chat_channel_payloads`:
+      - `id` (`TEXT` GUID PayloadId, PK)
+      - `channel_id` (`TEXT` GUID ChannelId, FK to `chat_channels(id)` ON DELETE CASCADE)
+      - `author_id` (`BLOB` 32 bytes PublicIdentityId)
+      - `author_device_id` (`INTEGER` DeviceId)
+      - `encrypted_payload` (`BLOB`)
+      - `sent_at_utc` (`TEXT` ISO 8601)
+      - *Payload History Index*: `CREATE INDEX ix_channel_payloads_history ON chat_channel_payloads(channel_id, sent_at_utc DESC);`
 - **Scope & Deliverables**:
   - [ ] Implement Contacts & Channel Repositories:
     - `SqlitePeerContactRepository` (`Percolator.Domain.Identities.Ports.IPeerContactRepository`): persists contact trust and profile key metadata.
@@ -648,12 +745,14 @@
 - **Technical Specifications & Table Schemas (`relay_*`, `peer_profiles`, `peer_mailbox_routing`)**:
   - **DDL & Schema Definitions**:
     - `relay_prekeys`:
-      - `routing_token` (`BLOB` 32 bytes PK)
+      - `owner_identity_id` (`BLOB` 32 bytes PublicIdentityId)
+      - `device_id` (`INTEGER` DeviceId)
       - `identity_key` (`BLOB` 32 bytes)
       - `signed_prekey` (`BLOB`)
-      - `signature` (`BLOB` 64 bytes)
+      - `signed_prekey_signature` (`BLOB` 64 bytes DeviceLinkProof)
       - `one_time_prekeys_json` (`TEXT` serialized via BCL `System.Text.Json`)
       - `updated_at_utc` (`TEXT` ISO 8601)
+      - *Composite PK*: `PRIMARY KEY(owner_identity_id, device_id)`
     - `relay_profile_slots`:
       - `blinded_locator` (`BLOB` 32 bytes PK)
       - `write_token_hash` (`BLOB` 32 bytes)
@@ -661,21 +760,44 @@
       - `nonce` (`BLOB` 12 bytes)
       - `revision` (`INTEGER`)
       - `expires_at_utc` (`TEXT` ISO 8601)
+      - *Expiry Index*: `CREATE INDEX ix_relay_profile_expiry ON relay_profile_slots(expires_at_utc);`
     - `relay_ledger_epochs`:
-      - `group_id` (`TEXT` GUID PK)
-      - `epoch` (`INTEGER`)
-      - `roster_blob` (`BLOB`)
+      - `channel_id` (`TEXT` GUID ChannelId, PK)
+      - `relay_identity_id` (`BLOB` 32 bytes PublicIdentityId)
+      - `current_epoch` (`INTEGER` EpochNumber)
+      - `encrypted_roster_blob` (`BLOB` EncryptedEntriesBlob)
+      - `zk_public_params` (`BLOB` ZkGroupPublicParams)
       - `updated_at_utc` (`TEXT` ISO 8601)
+      - *Relay Ledger Index*: `CREATE INDEX ix_relay_ledger_relay ON relay_ledger_epochs(relay_identity_id);`
+    - `relay_ledger_routing_tokens`:
+      - `channel_id` (`TEXT` GUID ChannelId, FK to `relay_ledger_epochs(channel_id)` ON DELETE CASCADE)
+      - `routing_token` (`BLOB` 32 bytes BlindedRoutingToken)
+      - *Composite PK*: `PRIMARY KEY(channel_id, routing_token)`
     - `peer_profiles`:
       - `peer_id` (`BLOB` 32 bytes PK)
-      - `encrypted_profile_blob` (`BLOB`)
-      - `version` (`INTEGER`)
+      - `display_name` (`TEXT`)
+      - `status_bio` (`TEXT` nullable)
+      - `avatar_reference_blob_id` (`BLOB` 32 bytes nullable BlobReference)
+      - `revision` (`INTEGER` uint32)
       - `updated_at_utc` (`TEXT` ISO 8601)
+    - `peer_profile_snapshots`:
+      - `peer_id` (`BLOB` 32 bytes PublicIdentityId)
+      - `source_endpoint` (`TEXT`)
+      - `source_type` (`INTEGER`: `DirectP2P=1`, `Relay=2`)
+      - `blinded_locator` (`BLOB` 32 bytes BlindedProfileLocator)
+      - `metadata_json` (`TEXT`)
+      - `last_observed_at_utc` (`TEXT` ISO 8601)
+      - *Composite PK*: `PRIMARY KEY(peer_id, source_endpoint)`
     - `peer_mailbox_routing`:
-      - `peer_id` (`BLOB` 32 bytes PK)
+      - `peer_id` (`BLOB` 32 bytes PublicIdentityId)
       - `relay_endpoint` (`TEXT`)
-      - `routing_token` (`BLOB` 32 bytes)
+      - `routing_token` (`BLOB` 32 bytes BlindedRoutingToken)
+      - `delivery_token` (`BLOB` 32 bytes DeliveryToken)
+      - `last_observed_at_utc` (`TEXT` ISO 8601)
+      - `last_success_at_utc` (`TEXT` ISO 8601 nullable)
+      - `backpressure_cooldown_until_utc` (`TEXT` ISO 8601 nullable)
       - `updated_at_utc` (`TEXT` ISO 8601)
+      - *Composite PK*: `PRIMARY KEY(peer_id, relay_endpoint)`
   - **Strict Persistence Scope & Zero Network Service Coupling**:
     - Chunk 2.5 is strictly bounded to relational SQLite EF Core entities, migrations, and local storage repositories.
     - All network transport endpoints (`UnauthenticatedDeliveryEndpoint`), gRPC stubs, and duplex relay workers (`RelayMailboxStreamWorker`) are strictly excluded and located in Phase 3 (Chunk 3.6).
@@ -876,7 +998,7 @@
       }
 
       message OneTimePreKeyProto {
-        bytes key_id = 1;
+        uint32 key_id = 1;
         bytes public_key = 2;
       }
 
@@ -884,7 +1006,7 @@
         bytes identity_key = 1;
         bytes signed_prekey = 2;
         bytes prekey_signature = 3;
-        bytes signed_prekey_id = 4;
+        uint32 signed_prekey_id = 4;
         repeated OneTimePreKeyProto one_time_prekeys = 5;
         bytes signature = 6;
       }
@@ -904,9 +1026,9 @@
         bytes identity_key = 1;
         bytes signed_prekey = 2;
         bytes prekey_signature = 3;
-        bytes signed_prekey_id = 4;
+        uint32 signed_prekey_id = 4;
         optional bytes one_time_prekey = 5;
-        optional bytes one_time_prekey_id = 6;
+        optional uint32 one_time_prekey_id = 6;
       }
 
       service AuthenticatedRelayService {
@@ -1018,8 +1140,8 @@
       message HandshakeInvitationPackageProto {
         bytes initiator_identity_key = 1;
         bytes initiator_ephemeral_key = 2;
-        bytes signed_prekey_id = 3;
-        bytes onetime_prekey_id = 4;
+        uint32 signed_prekey_id = 3;
+        optional uint32 onetime_prekey_id = 4;
         bytes encrypted_payload = 5;
       }
       ```
@@ -1153,23 +1275,31 @@
 - **Technical Specifications & Table Schemas (`chat_*`)**:
   - **DDL & Schema Definitions**:
     - `chat_messages`:
-      - `id` (`TEXT` GUID, PK)
+      - `id` (`TEXT` GUID PayloadId, PK)
       - `channel_id` (`TEXT` GUID, indexed)
-      - `sender_id` (`BLOB` 32 bytes)
+      - `author_id` (`BLOB` 32 bytes PublicIdentityId)
+      - `timestamp_unix_ms` (`INTEGER` ulong)
       - `content` (`TEXT`)
-      - `timestamp_utc` (`TEXT` ISO 8601)
-      - `delivery_status` (`INTEGER`: `Sending=0`, `Sent=1`, `Delivered=2`, `Read=3`, `Failed=4`)
-      - `is_edited` (`INTEGER` boolean)
-      - `is_deleted` (`INTEGER` boolean)
-      - `expires_at_utc` (`TEXT` ISO 8601 nullable, indexed)
-      - *Composite Timeline Index*: `CREATE INDEX ix_chat_timeline ON chat_messages(channel_id, timestamp_utc);`
-      - *Disappearing Message Eviction Index*: `CREATE INDEX ix_chat_expiry ON chat_messages(expires_at_utc) WHERE expires_at_utc IS NOT NULL;`
+      - `reply_parent_id` (`TEXT` GUID nullable)
+      - `reply_author_id` (`BLOB` 32 bytes nullable PublicIdentityId)
+      - `mentions_json` (`TEXT` nullable)
+      - `link_preview_json` (`TEXT` nullable)
+      - `expire_after_seconds` (`INTEGER` nullable)
+      - `expires_at_unix_ms` (`INTEGER` ulong nullable, indexed)
+      - `read_at_unix_ms` (`INTEGER` ulong nullable)
+      - `edited_at_unix_ms` (`INTEGER` ulong nullable)
+      - `is_tombstone` (`INTEGER` boolean default 0)
+      - `deleted_at_unix_ms` (`INTEGER` ulong nullable)
+      - `deleted_by` (`BLOB` 32 bytes nullable PublicIdentityId)
+      - *Composite Timeline Index*: `CREATE INDEX ix_chat_timeline ON chat_messages(channel_id, timestamp_unix_ms);`
+      - *Disappearing Message Eviction Index*: `CREATE INDEX ix_chat_expiry ON chat_messages(expires_at_unix_ms) WHERE expires_at_unix_ms IS NOT NULL;`
     - `chat_reactions`:
       - `message_id` (`TEXT` GUID)
       - `reactor_id` (`BLOB` 32 bytes)
       - `emoji` (`TEXT` 32 chars)
-      - `created_at_utc` (`TEXT` ISO 8601)
+      - `timestamp_unix_ms` (`INTEGER` ulong)
       - *Composite PK*: `PRIMARY KEY(message_id, reactor_id, emoji)`
+      - *FK*: `FOREIGN KEY(message_id) REFERENCES chat_messages(id) ON DELETE CASCADE`
     - `chat_attachments`:
       - `id` (`TEXT` GUID, PK)
       - `message_id` (`TEXT` GUID, FK to `chat_messages(id)` ON DELETE CASCADE)
@@ -1178,13 +1308,22 @@
       - `file_size_bytes` (`INTEGER`)
       - `mime_type` (`TEXT`)
     - `chat_group_invitations`:
-      - `id` (`TEXT` GUID, PK)
-      - `channel_id` (`TEXT` GUID)
+      - `id` (`TEXT` GUID InvitationId, PK)
+      - `target_group_channel_id` (`TEXT` GUID ChannelId)
+      - `group_name` (`TEXT`)
       - `inviter_id` (`BLOB` 32 bytes)
-      - `invitee_id` (`BLOB` 32 bytes)
+      - `relay_endpoint` (`TEXT` nullable)
+      - `expires_at_unix_ms` (`INTEGER` ulong)
       - `status` (`INTEGER`: `Pending=0`, `Accepted=1`, `Declined=2`, `Expired=3`)
-      - `created_at_utc` (`TEXT` ISO 8601)
-      - `expires_at_utc` (`TEXT` ISO 8601)
+      - `responded_at_unix_ms` (`INTEGER` ulong nullable)
+    - `chat_unknown_group_messages`:
+      - `id` (`TEXT` GUID PayloadId, PK)
+      - `channel_id` (`TEXT` GUID ChannelId)
+      - `author_id` (`BLOB` 32 bytes PublicIdentityId)
+      - `encrypted_payload` (`BLOB`)
+      - `received_at_unix_ms` (`INTEGER` ulong)
+      - `expires_at_unix_ms` (`INTEGER` ulong)
+      - *Expiry Index*: `CREATE INDEX ix_unknown_group_expiry ON chat_unknown_group_messages(expires_at_unix_ms);`
   - **Wire Contracts (`Percolator.Infrastructure/Protos/chat.proto`)**:
     - `ChatPayloadEnvelopeProto`: carries payload type and byte array wrapped with stepped bucket padding.
     - `ChatMessageProto`: text content, timestamp, and message flags.
@@ -1234,6 +1373,13 @@
     - 24-hour UTC epoch locator rotation: computes deterministic blinded rendezvous locators via $\text{HMAC-SHA256}(\text{IdentityPublicKey}, \text{EpochBytes})$ where $\text{Epoch} = \lfloor\text{UnixTime} / 86400\rfloor$.
     - Enables contact discovery without public identity leakage on directory servers.
   - **Relay Directory Persistence & Maintenance**:
+    - `relay_peer_directory`:
+      - `blinded_locator` (`BLOB` 32 bytes BlindedLocator, PK)
+      - `peer_identity_id` (`BLOB` 32 bytes PublicIdentityId)
+      - `descriptor_blob` (`BLOB`)
+      - `lease_expiry_utc` (`TEXT` ISO 8601, indexed)
+      - `signature` (`BLOB` 64 bytes)
+      - *Lease Index*: `CREATE INDEX ix_peer_directory_lease ON relay_peer_directory(lease_expiry_utc);`
     - `SqliteRelayPeerDirectory`: stores peer discovery descriptors mapped to blinded locators with TTL leases.
     - `RelayDiscoveryRegistrationPruner`: scheduled worker purging registrations past `lease_expiry_utc`.
 - **Scope & Deliverables**:
@@ -1392,7 +1538,7 @@
       {
           await using var context = await _contextFactory.CreateDbContextAsync(ct);
           var expiredIds = await context.OutboxJobs
-              .Where(j => j.Status == OutboxJobStatus.Delivered && j.CreatedAtUtc <= cutoffTime)
+              .Where(j => j.Status == OutboxStatus.Delivered && j.CreatedAtUtc <= cutoffTime)
               .OrderBy(j => j.CreatedAtUtc)
               .Select(j => j.Id)
               .Take(500)
@@ -1434,6 +1580,7 @@
   - **Two-Stage Container Separation Protocol**:
     - *Stage 1 (Pre-Unlock Bootstrap Container)*: Contains zero SQLite DbContexts, zero repositories, and zero network/sync workers. Registers `SQLitePCL.Batteries_V2.Init()`, `SignalCryptoEngine`, `SystemDateTimeProvider`, `ProtobufHeaderStorage`, `DuressWipeHandler`, and `SqlCipherDatabaseUnlockCoordinator`.
     - *Stage 2 (Authenticated Host - `IHost`)*: Built post-unlock via `Stage2HostFactory`. Hosts `IMasterKeyHandle` (scoped to session in pinned unmanaged memory), `SqlCipherPragmaInterceptor`, `PercolatorDbContext` (scoped/pooled), all 58 infrastructure ports, and `IHostedService` background workers.
+    - *Stage 2 (Authenticated Host - `IHost`)*: Built post-unlock via `Stage2HostFactory`. Hosts `IMasterKeyHandle` (scoped to session in pinned unmanaged memory), `SqlCipherPragmaInterceptor`, `PercolatorDbContext` (scoped/pooled), all 59 infrastructure ports, and `IHostedService` background workers.
   - **Service Lifetime Registration Topology**:
     - **Singletons**:
       - `IMasterKeyHandle` (instance passed from unlock coordinator)
@@ -1444,7 +1591,7 @@
       - Protocol Serializers: `ProtobufSessionWirePacker`, `ProtobufPayloadSerializer`, `ChatPayloadFramingDecorator`
     - **Scoped**:
       - `PercolatorDbContext` (pooled context per scope)
-      - All 58 Repositories & CQRS Query Services (Outbox, Contacts, Ratchet, Channels, Relay prekeys/profiles/ledger, Chat, File Transfer)
+      - All 59 Repositories & CQRS Query Services (Outbox, Contacts, Ratchet, Channels, Relay prekeys/profiles/ledger, Chat, File Transfer)
       - Workflow & Dispatching: `TransportDispatcher`, `IngressFilterService`, `SealedEnvelopeUnwrapper`, `DiscoveryQueryClient`, `DiscoveryHandshakeAdapter`, `StreamingAesGcmCryptoService`, `RelayBlobClient`, `PeerStreamBlobClient`, `ChannelRelayResolver`, `RelayTransferPipeClient`, `RelaySwarmTrackerClient`
     - **Hosted Services (`services.AddHostedService<T>()`)**:
       - All 10 background pruning, syncing, and lifecycle workers across the application:
@@ -1469,11 +1616,11 @@
   - [ ] Implement `Stage2HostFactory`:
     - Extends `BaselineStage2HostFactory` to wire the full suite of operational adapters, repositories, query services, gRPC channels, and background pruners across all feature slices.
   - [ ] Implement `InfrastructureServiceCollectionExtensions.AddAuthenticatedInfrastructure(IServiceCollection, IConfiguration, IMasterKeyHandle)`:
-    - Registers all 58 infrastructure ports into the Stage 2 container with correct lifetime scopes.
+    - Registers all 59 infrastructure ports into the Stage 2 container with correct lifetime scopes.
     - Registers all 10 background `IHostedService` workers.
     - Exposes extension point for `Percolator.Infrastructure.Windows` overrides.
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Composition/`)**:
-  - `DependencyInjectionTests.All58Ports_ResolveFromContainerWithoutCycles`: resolves every planned infrastructure port from DI container; asserts non-null without circular dependency or missing registration.
+  - `DependencyInjectionTests.All59Ports_ResolveFromContainerWithoutCycles`: resolves every planned infrastructure port from DI container; asserts non-null without circular dependency or missing registration.
   - `DependencyInjectionTests.NoCaptiveDependencies_ScopedServicesNeverInjectedIntoSingletons`: enforces container scope validation (`ValidateScopes = true`); verifies no scoped DbContext or repository is injected into singleton services or pruners.
   - `DependencyInjectionTests.All10HostedServices_RegisteredAndStartable`: resolves `IEnumerable<IHostedService>` and asserts exact count of 10 registered background workers.
   - `DependencyInjectionTests.WindowsOverrides_CanSwapFileStoreAndCertProvider`: calls optional Windows overlay registrations; asserts `IDesktopFileStorage` resolves to `WindowsSparseDesktopFileStore`.
@@ -1555,3 +1702,4 @@ To guarantee robust infrastructure without introducing brittle tests that break 
 | 56 | `ITransferRateLimiter` | `Percolator.Apps.FileTransfer` | `TokenBucketRateLimiter` | Chunk 4.4 |
 | 57 | `IDistributedTrackerPort` | `Percolator.Apps.FileTransfer` | `RelaySwarmTrackerClient` | Chunk 4.4 |
 | 58 | `ITransferOfferReaperService` | `Percolator.Apps.FileTransfer` | `TransferOfferReaperWorker` | Chunk 4.4 |
+| 59 | `IIdentityProfileRepository` | `Percolator.Domain` | `SqliteIdentityProfileRepository` | Chunk 2.2 |
