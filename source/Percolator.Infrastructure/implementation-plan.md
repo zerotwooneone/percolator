@@ -29,35 +29,38 @@
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│ Phase 1: Bootstrapping & Cryptographic Primitives                      │
+│ Phase 1: Bootstrapping & Database Vault Lifecycle                      │
 │ ├─ Chunk 1.1: Project Scaffolding & Core Platform Primitives           │
-│ ├─ Chunk 1.2: Core Cryptographic & ZK-Proof Engines                    │
-│ ├─ Chunk 1.3: Vault Protobuf Schema, Header Storage & Crypto-Shredder  │
-│ └─ Chunk 1.4: Composable SQLCipher Unlock Orchestration                │
+│ ├─ Chunk 1.2: Vault Protobuf Schema, Header Storage & Crypto-Shredder  │
+│ ├─ Chunk 1.3: SQLCipher Native Keying & Connection Interceptor         │
+│ └─ Chunk 1.4: Composable SQLCipher Unlock Orchestration Pipeline       │
 └───────────────────────────────────┬────────────────────────────────────┘
                                     ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │ Phase 2: Core Relational Persistence & Identity Vault                  │
-│ ├─ Chunk 2.1: SQLite DbContext, Value Comparers & Baseline Migrations  │
+│ ├─ Chunk 2.1: SQLite DbContext, Baseline Migrations & Host Factory     │
 │ ├─ Chunk 2.2: Vertical Slice: Identity Key Stores & Ratchet Sessions   │
 │ ├─ Chunk 2.3: Vertical Slice: Outbox Jobs & Fast-Path Query Engine     │
-│ └─ Chunk 2.4: Vertical Slice: Contacts & Channel Repositories          │
+│ ├─ Chunk 2.4: Vertical Slice: Contacts & Channel Repositories          │
+│ └─ Chunk 2.5: Vertical Slice: Profiles & Relay Delivery Repositories   │
 └───────────────────────────────────┬────────────────────────────────────┘
                                     ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │ Phase 3: Network Transport, Wire Protocols & Delivery Dispatching      │
-│ ├─ Chunk 3.1: Core Delivery & Session Wire Schemas (Protos/)           │
-│ ├─ Chunk 3.2: Session Wire Packaging & Stepped Bucket Serializer       │
-│ ├─ Chunk 3.3: Transport Primitives, Interceptors & Endpoint Validation │
-│ ├─ Chunk 3.4: Ingress Filtering & Transport Route Dispatching          │
-│ └─ Chunk 3.5: gRPC Ingress Endpoints & Hosted Relay Workers            │
+│ ├─ Chunk 3.1: Core Cryptographic & ZK-Proof Engines (Signal & ZkGroup) │
+│ ├─ Chunk 3.2: Core Delivery & Session Wire Schemas (Protos/)           │
+│ ├─ Chunk 3.3: Generic Session Wire Packaging & Payload Serializer      │
+│ ├─ Chunk 3.4: Transport Primitives, Interceptors & Endpoint Validation │
+│ ├─ Chunk 3.5: Ingress Filtering & Transport Route Dispatching          │
+│ └─ Chunk 3.6: gRPC Ingress Endpoints & Hosted Relay Workers            │
 └───────────────────────────────────┬────────────────────────────────────┘
                                     ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │ Phase 4: Vertical Plugin Slices (End-to-End Capabilities)              │
-│ ├─ Chunk 4.1: Vertical Slice: Chat Messaging, History & Query Engine   │
+│ ├─ Chunk 4.1: Vertical Slice: Chat Messaging, History & Padding Engine │
 │ ├─ Chunk 4.2: Vertical Slice: Peer Discovery & Rendezvous Engine       │
-│ └─ Chunk 4.3: Vertical Slice: Media Streaming & Swarm File Transfers   │
+│ ├─ Chunk 4.3: Vertical Slice: Encrypted Media Streaming & Blob Store   │
+│ └─ Chunk 4.4: Vertical Slice: Swarm Multi-Stream File Transfer Engine  │
 └───────────────────────────────────┬────────────────────────────────────┘
                                     ▼
 ┌────────────────────────────────────────────────────────────────────────┐
@@ -69,7 +72,7 @@
 
 ---
 
-### Phase 1: Bootstrapping & Cryptographic Primitives
+### Phase 1: Bootstrapping & Database Vault Lifecycle
 
 #### Chunk 1.1: Project Scaffolding & Core Platform Primitives
 - **Scope & Deliverables**:
@@ -90,35 +93,88 @@
   - `dotnet build Percolator.Infrastructure`
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Common`
 
-#### Chunk 1.2: Core Cryptographic & ZK-Proof Engines
-- **Scope & Deliverables**:
-  - [ ] Implement `SignalCryptoEngine` / `SodiumCryptoEngine` (`Percolator.Domain.Security.Ports.ICryptoEngine`):
-    - Ed25519 signatures and verification (`VerifyEd25519Signature`, `SignEd25519`).
-    - Curve25519 (X25519) Diffie-Hellman scalar multiplication (`ComputeDiffieHellman`, `DeriveX3dhMasterSecret`).
-    - HKDF SHA-256 HMAC root key update (`KdfRk`) and symmetric chain key advances (`StepRatchet`).
-    - AES-256-GCM authenticated encryption/decryption (`EncryptAesGcm`, `DecryptAesGcm`).
-    - Memory zeroization with `CryptographicOperations.ZeroMemory` on sensitive spans.
-    - Logging guardrail: redact all keys when `CryptographyOptions.EnableCryptographicMaterialLogging = false`.
-  - [ ] Implement `ZkgroupCryptographyService` (`Percolator.Domain.Security.Ports.IZkProofEngine`):
-    - Wraps native `Signal.Interop` / `libzkgroup` C-ABI with safe handle management.
-    - Generates and verifies zero-knowledge group membership proofs (`VerifyGroupPresentation`, `GenerateGroupPresentation`).
-- **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Security/`)**:
-  - `SignalCryptoEngineTests.Ed25519_SignAndVerify_MatchesRfc8032Vectors`: known test vectors match RFC 8032. Low-brittle guarantee: asserts mathematical outputs; zero mock coupling.
-  - `SignalCryptoEngineTests.Curve25519_DiffieHellman_MatchesRfc7748Vectors`: known test vectors match RFC 7748. Low-brittle guarantee: asserts mathematical outputs.
-  - `SignalCryptoEngineTests.AesGcm_EncryptDecrypt_SucceedsAndRejectsBitflip`: encrypts payload, decrypts successfully; single bitflip throws authenticated tag mismatch.
-  - `ZkgroupCryptographyServiceTests.VerifyGroupPresentation_ValidProof_ReturnsSuccess`: presentation proof generates and validates against group public credentials.
-  - `SignalCryptoEngineTests.LoggingGuardrail_RedactsSensitiveKeys_WhenLoggingDisabled`: asserts logger redacts all key bytes when material logging is disabled.
-- **Verification Gate**:
-  - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Security.Crypto`
+#### Chunk 1.2: Vault Protobuf Schema, Header Storage & Crypto-Shredder
+- **Technical Specifications & Wire Contracts**:
+  - **Protobuf Layout (`Percolator.Infrastructure/Protos/DatabaseHeader.proto`)**:
+    ```protobuf
+    syntax = "proto3";
+    package percolator.infrastructure;
 
-#### Chunk 1.3: Vault Protobuf Schema, Header Storage & Crypto-Shredder
-- **Technical Specifications**:
-  - Protobuf layout in `DatabaseHeader.proto`: `version` (int32), `salt` (16 bytes), `master_slot_nonce` (12 bytes), `master_slot_payload` (48 bytes: 32-byte master key + 16-byte Poly1305 tag), `duress_slot_nonce` (12 bytes), `duress_slot_payload` (48 bytes: 32-byte sentinel + tag, or uniform dummy random noise).
-  - Plausible deniability invariant: dummy duress slot is filled with CSPRNG random bytes of identical length.
-  - Shredding pipeline: overwrite header with random bytes and `Flush(flushToDisk: true)` before truncation and deletion in $< 2\text{ ms}$; catch `IOException` on locked DB files without failing.
+    message DatabaseHeader {
+      int32 version = 1;
+      bytes salt = 2;               // 16-byte random salt for Argon2id
+      bytes master_slot_nonce = 3;  // 12-byte ChaCha20-Poly1305 nonce
+      bytes master_slot_payload = 4;// 48 bytes: Encrypted 32-byte master key + 16-byte Poly1305 tag
+      bytes duress_slot_nonce = 5;  // 12-byte nonce (or random noise)
+      bytes duress_slot_payload = 6;// 48 bytes: Encrypted 32-byte sentinel + tag (or dummy random noise)
+    }
+    ```
+  - **Plausible Deniability Invariant**: When no duress password is set, `duress_slot_nonce` (12 bytes) and `duress_slot_payload` (48 bytes) are filled with `RandomNumberGenerator.GetBytes(60)`. Wire length is strictly ~120 bytes in all configurations.
+  - **Header Storage Interface (`Percolator.Infrastructure.Vault.IHeaderStorage`)**:
+    ```csharp
+    namespace Percolator.Infrastructure.Vault;
+
+    using Percolator.Domain.Common;
+
+    internal interface IHeaderStorage
+    {
+        Task<DomainResult<DatabaseHeader>> ReadHeaderAsync(CancellationToken ct = default);
+        Task<DomainResult> WriteHeaderAsync(DatabaseHeader header, CancellationToken ct = default);
+        Task<DomainResult> OverwriteAndWipeAsync(CancellationToken ct = default);
+    }
+    ```
+  - **Crypto-Shredding Pipeline (`DuressWipeHandler.ExecuteWipeAsync`)**:
+    Under coercion, multi-pass overwrites of large SQLite database files cause conspicuous disk latency that tips off an adversary. Because `percolator.db` is already AES-256 encrypted, shredding the 120-byte `percolator.header` renders the database permanently unrecoverable in $< 2\text{ ms}$:
+    ```csharp
+    public async Task ExecuteWipeAsync(CancellationToken ct = default)
+    {
+        var headerPath = GetPath("percolator.header");
+        if (File.Exists(headerPath))
+        {
+            var fileInfo = new FileInfo(headerPath);
+            long length = fileInfo.Length;
+
+            // 1. Overwrite header with CSPRNG random bytes and force physical disk controller flush
+            await using (var fs = new FileStream(headerPath, FileMode.Open, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
+            {
+                byte[] buffer = new byte[length];
+                RandomNumberGenerator.Fill(buffer);
+                await fs.WriteAsync(buffer, ct);
+                fs.Flush(flushToDisk: true); // Triggers FlushFileBuffers / fsync
+
+                // 2. Truncate to zero bytes
+                fs.SetLength(0);
+                fs.Flush(flushToDisk: true);
+            }
+            File.Delete(headerPath);
+        }
+
+        // 3. Immediately delete database and WAL files (all data is already unrecoverable ciphertext)
+        var dbFiles = new[] { GetPath("percolator.db"), GetPath("percolator.db-wal"), GetPath("percolator.db-shm") };
+        foreach (var path in dbFiles)
+        {
+            try
+            {
+                if (File.Exists(path)) File.Delete(path);
+            }
+            catch (IOException)
+            {
+                // Even if file deletion is blocked by OS lock, Kdb is already destroyed permanently
+            }
+        }
+
+        // 4. Purge local cache and staging directories
+        var cacheDir = GetPath("cache");
+        if (Directory.Exists(cacheDir))
+        {
+            try { Directory.Delete(cacheDir, recursive: true); } catch (IOException) { }
+        }
+    }
+    ```
 - **Scope & Deliverables**:
   - [ ] Author Protobuf schema `Percolator.Infrastructure/Protos/DatabaseHeader.proto`.
-  - [ ] Implement `ProtobufHeaderStorage` (`Percolator.Infrastructure.Vault.IHeaderStorage`): reads/writes header with temp file staging and atomic replace.
+  - [ ] Define internal interface `Percolator.Infrastructure.Vault.IHeaderStorage`.
+  - [ ] Implement `ProtobufHeaderStorage` (`IHeaderStorage`): reads/writes header with temp file staging and atomic replace.
   - [ ] Implement `DuressWipeHandler` (`Percolator.Application.Ports.IDuressWipeHandler`): instant crypto-shredding pipeline.
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Vault/`)**:
   - `ProtobufHeaderStorageTests.PlausibleDeniability_WireSize_IdenticalWithOrWithoutDuress`: header with dummy random noise vs active duress has identical 48-byte payload wire size; decryption of dummy duress slot throws `AuthenticationTagMismatchException`.
@@ -128,31 +184,255 @@
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Vault.Storage`
 
-#### Chunk 1.4: Composable SQLCipher Unlock Orchestration
+#### Chunk 1.3: SQLCipher Native Keying & Connection Interceptor
 - **Technical Specifications**:
-  - Decompose unlock orchestration into composable, single-responsibility collaborators:
-    1. `IVaultEnvelopePacker`: Derives Argon2id keys and evaluates ChaCha20-Poly1305 master/duress slots.
-    2. `IDatabaseCanaryProbe`: Executes `SELECT count(*) FROM sqlite_master;` on isolated probe connection, explicitly trapping native error code 26 (`SQLITE_NOTADB`).
-    3. `IDatabaseMigrator`: Responsible for executing EF Core migrations (`Database.MigrateAsync()`).
-    4. `IStage2HostFactory`: Assembles the Stage 2 authenticated host.
-  - `MasterKeyHandle`: Allocates and pins 32-byte unmanaged memory; passes raw span to `SQLitePCL.raw.sqlite3_key`.
-  - `SqlCipherPragmaInterceptor`: Configures `PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;`.
-  - `SqlCipherDatabaseUnlockCoordinator`: Coordinates status determination, initialization, unlock, envelope re-wrapping, and session relock.
+  - **Memory Pinned Key Handle (`MasterKeyHandle`)**:
+    - Allocates 32 bytes in unmanaged memory via `Marshal.AllocHGlobal(32)` and pins it to prevent GC relocation or managed string leakage.
+    - Implements `ApplyKeyToConnection(DbConnection connection)`: casts to `SqliteConnection`, obtains raw unmanaged SQLite handle, and passes raw pointer directly to `SQLitePCL.raw.sqlite3_key`.
+    - Implements `WithKeySpan(Action<ReadOnlySpan<byte>> action)` and `WithKeySpan<TResult>(ReadOnlySpanFunc<byte, TResult> func)` visitor methods for $O(1)$ envelope re-wrapping without heap allocation.
+    - Implements `Dispose()`: scrubs unmanaged memory via `CryptographicOperations.ZeroMemory` before freeing handle. Subsequent access throws `ObjectDisposedException`.
+  - **Connection Interceptor (`SqlCipherPragmaInterceptor`)**:
+    ```csharp
+    public sealed class SqlCipherPragmaInterceptor : DbConnectionInterceptor
+    {
+        private readonly IMasterKeyHandle _keyHandle;
+
+        public SqlCipherPragmaInterceptor(IMasterKeyHandle keyHandle) => _keyHandle = keyHandle;
+
+        public override void ConnectionOpened(DbConnection connection, ConnectionEndEventData eventData)
+        {
+            if (connection is SqliteConnection sqliteConn)
+            {
+                _keyHandle.ApplyKeyToConnection(sqliteConn);
+                using var cmd = sqliteConn.CreateCommand();
+                cmd.CommandText = "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;";
+                cmd.ExecuteNonQuery();
+            }
+        }
+    }
+    ```
 - **Scope & Deliverables**:
   - [ ] Implement `MasterKeyHandle` (`Percolator.Domain.Security.Ports.IMasterKeyHandle`).
   - [ ] Implement `SqlCipherPragmaInterceptor` (`Microsoft.EntityFrameworkCore.Diagnostics.DbConnectionInterceptor`).
-  - [ ] Implement `VaultEnvelopePacker` (`Percolator.Infrastructure.Vault.IVaultEnvelopePacker`).
-  - [ ] Implement `DatabaseCanaryProbe` (`Percolator.Infrastructure.Vault.IDatabaseCanaryProbe`).
+- **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Vault/Keying/`)**:
+  - `MasterKeyHandleTests.Dispose_ZeroizesPinnedMemory`: unmanaged buffer memory is zeroized on dispose; subsequent access throws `ObjectDisposedException`.
+  - `MasterKeyHandleTests.WithKeySpan_YieldsValid32ByteKeySpan`: visitor executes with exact 32-byte key span matching initial key.
+  - `SqlCipherPragmaInterceptorTests.ConnectionOpened_AppliesKeyAndWalPragmas`: verifies interceptor applies raw key and WAL journal mode.
+- **Verification Gate**:
+  - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Vault.Keying`
+
+#### Chunk 1.4: Composable SQLCipher Unlock Orchestration Pipeline
+- **Collaborator Interface Specifications**:
+  - `IVaultEnvelopePacker`:
+    ```csharp
+    namespace Percolator.Infrastructure.Vault;
+
+    using Percolator.Domain.Common;
+    using Percolator.Domain.Security.ValueObjects;
+
+    public enum SlotTrialOutcome { MasterUnlocked, DuressTriggered, InvalidCredentials }
+    public readonly record struct SlotTrialResult(SlotTrialOutcome Outcome);
+
+    internal interface IVaultEnvelopePacker
+    {
+        DomainResult<DatabaseHeader> CreateEnvelope(
+            VaultPassphrase masterPassword,
+            VaultPassphrase? duressPassword,
+            ReadOnlySpan<byte> databaseKeySpan);
+
+        SlotTrialResult EvaluateSlots(
+            DatabaseHeader header,
+            VaultPassphrase candidatePassword,
+            Span<byte> destinationDatabaseKeyBuffer);
+
+        DomainResult<DatabaseHeader> RewrapMasterSlot(
+            DatabaseHeader currentHeader,
+            VaultPassphrase newPassword,
+            ReadOnlySpan<byte> databaseKeySpan);
+
+        DomainResult<DatabaseHeader> ConfigureDuressSlot(
+            DatabaseHeader currentHeader,
+            VaultPassphrase? duressPassword);
+    }
+    ```
+  - `IDatabaseCanaryProbe`:
+    ```csharp
+    namespace Percolator.Infrastructure.Vault;
+
+    using Microsoft.Data.Sqlite;
+
+    public enum CanaryProbeResult { Verified, FailedNotADatabase, Corrupted }
+
+    internal interface IDatabaseCanaryProbe
+    {
+        Task<CanaryProbeResult> ProbeAsync(SqliteConnection connection, CancellationToken ct = default);
+    }
+    ```
+  - `IDatabaseMigrator`:
+    ```csharp
+    namespace Percolator.Infrastructure.Vault;
+
+    using Percolator.Domain.Common;
+
+    internal interface IDatabaseMigrator
+    {
+        Task<DomainResult> MigrateAsync(CancellationToken ct = default);
+    }
+    ```
+  - `IStage2HostFactory`:
+    ```csharp
+    namespace Percolator.Infrastructure.Vault;
+
+    using Microsoft.Extensions.Hosting;
+    using Percolator.Domain.Security.Ports;
+
+    internal interface IStage2HostFactory
+    {
+        IHost BuildAuthenticatedHost(IMasterKeyHandle masterKeyHandle);
+    }
+    ```
+- **Technical Mechanics & Wire Decryption Code**:
+  - **ChaCha20-Poly1305 Slot Trials & Exception Control Flow (`VaultEnvelopePacker.EvaluateSlots`)**:
+    ```csharp
+    // Fixed 32-byte sentinel for duress slot verification:
+    private static readonly byte[] DuressSentinelBytes =
+        SHA256.HashData(Encoding.UTF8.GetBytes("PERCOLATOR_VAULT_DURESS_SENTINEL_V1"));
+
+    // Slot evaluation logic inside VaultEnvelopePacker:
+    public SlotTrialResult EvaluateSlots(
+        DatabaseHeader header,
+        VaultPassphrase candidatePassword,
+        Span<byte> destinationDatabaseKeyBuffer)
+    {
+        byte[] derivedCandidateKey = DeriveArgon2idKey(candidatePassword, header.Salt.Span);
+        try
+        {
+            using var cipher = new ChaCha20Poly1305(derivedCandidateKey);
+            Span<byte> candidatePlaintext = stackalloc byte[32];
+
+            // 1. Evaluate Master Slot (48 bytes: [..32] ciphertext + [32..] tag)
+            try
+            {
+                cipher.Decrypt(
+                    header.MasterSlotNonce.Span,
+                    header.MasterSlotPayload.Span[..32],
+                    header.MasterSlotPayload.Span[32..],
+                    candidatePlaintext);
+
+                candidatePlaintext.CopyTo(destinationDatabaseKeyBuffer);
+                CryptographicOperations.ZeroMemory(candidatePlaintext);
+                return new SlotTrialResult(SlotTrialOutcome.MasterUnlocked);
+            }
+            catch (AuthenticationTagMismatchException)
+            {
+                // Tag mismatch: candidate key is not the master key
+            }
+
+            // 2. Evaluate Duress Slot
+            try
+            {
+                cipher.Decrypt(
+                    header.DuressSlotNonce.Span,
+                    header.DuressSlotPayload.Span[..32],
+                    header.DuressSlotPayload.Span[32..],
+                    candidatePlaintext);
+
+                if (CryptographicOperations.FixedTimeEquals(candidatePlaintext, DuressSentinelBytes))
+                {
+                    CryptographicOperations.ZeroMemory(candidatePlaintext);
+                    return new SlotTrialResult(SlotTrialOutcome.DuressTriggered);
+                }
+            }
+            catch (AuthenticationTagMismatchException)
+            {
+                // Active duress tag mismatch OR dummy random bytes failed authentication
+            }
+
+            return new SlotTrialResult(SlotTrialOutcome.InvalidCredentials);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(derivedCandidateKey);
+        }
+    }
+    ```
+  - **Native SQLCipher Canary Error Handling (`DatabaseCanaryProbe.ProbeAsync`)**:
+    When an invalid key is supplied, SQLCipher fails to decrypt page 1, failing SQLite's header magic check (`"SQLite format 3\000"`). SQLite does not define a `SQLITE_WRONGKEY` code; it throws `Microsoft.Data.Sqlite.SqliteException` with native error code `26` (`SQLITE_NOTADB: "file is not a database"` or `"file is encrypted or is not a database"`):
+    ```csharp
+    public sealed class DatabaseCanaryProbe : IDatabaseCanaryProbe
+    {
+        public async Task<CanaryProbeResult> ProbeAsync(SqliteConnection connection, CancellationToken ct = default)
+        {
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = "SELECT count(*) FROM sqlite_master;";
+            try
+            {
+                await cmd.ExecuteScalarAsync(ct);
+                return CanaryProbeResult.Verified;
+            }
+            catch (SqliteException ex) when (ex.SqliteErrorCode == 26) // SQLITE_NOTADB
+            {
+                return CanaryProbeResult.FailedNotADatabase;
+            }
+            catch (SqliteException)
+            {
+                return CanaryProbeResult.Corrupted;
+            }
+        }
+    }
+    ```
+- **Step-by-Step Collaborator Workflow Mapping**:
+  - **`InitializeAsync(masterPassword, duressPassword, ct)`**:
+    1. Generate random 32-byte $K_{\text{db}}$ into unmanaged memory via `MasterKeyHandle`.
+    2. Call `_envelopePacker.CreateEnvelope(masterPassword, duressPassword, keySpan)` using Argon2id ($m=64\text{MB}, t=3, p=4$) and ChaCha20-Poly1305.
+    3. Atomically write `DatabaseHeader` via `_headerStorage.WriteHeaderAsync`.
+    4. **Cold Launch Self-Healing Invariant**: If `percolator.header` was missing or wiped, force unlink any orphaned `.db*` ciphertext files before creating the new database.
+    5. Probe canary using probe connection keyed via `_keyHandle.ApplyKeyToConnection` through `_canaryProbe.ProbeAsync`.
+    6. Execute `_migrator.MigrateAsync(ct)` to apply baseline schemas.
+    7. Invoke `_hostFactory.BuildAuthenticatedHost(_masterKeyHandle)` and return `UnlockResult.Success(new AuthenticatedSession(host))`.
+  - **`UnlockAsync(candidatePassword, ct)`**:
+    1. Read `DatabaseHeader` via `_headerStorage.ReadHeaderAsync`.
+    2. Allocate unmanaged pinned buffer in `MasterKeyHandle`.
+    3. Evaluate slots via `_envelopePacker.EvaluateSlots(header, candidatePassword, keySpanBuffer)`:
+       - Master slot decrypted $\rightarrow$ probe canary via `_canaryProbe.ProbeAsync`. If `Verified`, execute `_migrator.MigrateAsync(ct)`, assemble host via `_hostFactory.BuildAuthenticatedHost`, and return `UnlockResult.Success(session)`.
+       - Duress slot decrypted and matches `DuressSentinelBytes` $\rightarrow$ execute `_wipeHandler.ExecuteWipeAsync(ct)`, transition status to `Uninitialized`, return `UnlockResult.DuressActivated()`.
+       - All slot trials fail $\rightarrow$ zeroize key memory, return `UnlockResult.InvalidCredentials()`.
+  - **`ChangeMasterPasswordAsync(currentPassword, newPassword, ct)` ($O(1)$ Re-Wrap)**:
+    1. Validate active session is unlocked.
+    2. Validate `currentPassword` against active key handle via slot trial.
+    3. Call `_envelopePacker.RewrapMasterSlot(currentHeader, newPassword, activeKeySpan)`.
+    4. **Duress Slot Preservation & Performance Guarantee**: Because `header.Salt` is retained, the existing duress slot remains 100% valid without requiring the user to re-enter their duress passphrase. Because $K_{\text{db}}$ remains identical, zero SQLite tables or pages are rewritten ($O(1)$ re-wrap completes in $< 200\text{ ms}$).
+    5. Atomically overwrite header via `_headerStorage.WriteHeaderAsync`.
+    6. Zeroize temporary key spans via `CryptographicOperations.ZeroMemory`.
+  - **`ConfigureDuressPasswordAsync(duressPassword, ct)`**:
+    1. Validate active session is unlocked.
+    2. Validate `duressPassword` is not empty/whitespace and distinct from master password.
+    3. Call `_envelopePacker.ConfigureDuressSlot(currentHeader, duressPassword)`.
+    4. Atomically overwrite header via `_headerStorage.WriteHeaderAsync`.
+  - **`LockAsync()`**:
+    1. Stop all hosted services in Stage 2 `IHost`.
+    2. Clear connection pools via `SqliteConnection.ClearAllPools()`.
+    3. Dispose `_masterKeyHandle` (zeroizing unmanaged memory).
+    4. Dispose Stage 2 `IHost`.
+    5. Transition status to `Locked`.
+- **Scope & Deliverables**:
+  - [ ] Define interfaces `IVaultEnvelopePacker`, `IDatabaseCanaryProbe`, `IDatabaseMigrator`, and `IStage2HostFactory`.
+  - [ ] Implement `VaultEnvelopePacker` (`IVaultEnvelopePacker`): Argon2id derivation ($m=64\text{MB}, t=3, p=4$), ChaCha20-Poly1305 slot encryption, and fixed 32-byte `DuressSentinelBytes` matching (`SHA256("PERCOLATOR_VAULT_DURESS_SENTINEL_V1")`).
+  - [ ] Implement `DatabaseCanaryProbe` (`IDatabaseCanaryProbe`): executes `SELECT count(*) FROM sqlite_master;` on isolated probe connection, explicitly trapping native error code 26 (`SQLITE_NOTADB`).
   - [ ] Implement `SqlCipherDatabaseUnlockCoordinator` (`Percolator.Application.Ports.IDatabaseUnlockCoordinator`).
   - [ ] Implement `AuthenticatedSession` (`Percolator.Application.Ports.IAuthenticatedSession`).
-  - [ ] Implement `InfrastructureServiceCollectionExtensions.AddBootstrapInfrastructure(IServiceCollection, IConfiguration)`.
+  - [ ] Implement `InfrastructureServiceCollectionExtensions.AddBootstrapInfrastructure(IServiceCollection, IConfiguration)`:
+    - Calls `SQLitePCL.Batteries_V2.Init()`.
+    - Registers `SystemDateTimeProvider`, `ProtobufHeaderStorage`, `DuressWipeHandler`, `VaultEnvelopePacker`, `DatabaseCanaryProbe`, and `SqlCipherDatabaseUnlockCoordinator`.
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Vault/Unlock/`)**:
-  - `MasterKeyHandleTests.Dispose_ZeroizesPinnedMemory`: unmanaged buffer memory is zeroized on dispose; subsequent access throws `ObjectDisposedException`.
-  - `DatabaseCanaryProbeTests.InvalidKey_TrapsSqliteErrorCode26`: invalid key traps `SqliteException` with `SqliteErrorCode == 26` (`SQLITE_NOTADB`) and returns controlled failure.
+  - `DatabaseCanaryProbeTests.InvalidKey_TrapsSqliteErrorCode26`: invalid key traps `SqliteException` with `SqliteErrorCode == 26` (`SQLITE_NOTADB`) and returns `CanaryProbeResult.FailedNotADatabase`.
   - `VaultEnvelopePackerTests.MasterPasswordChange_RewrapsSlot_PreservesDuress`: re-wraps master slot with new key; preserves salt and duress slot; decrypts successfully.
   - `SqlCipherUnlockTests.HappyPathMasterUnlock_CoordinatesCollaborators`: correct master password derives key, evaluates master slot, executes canary probe, invokes migrator, and returns `UnlockResult.Success(session)`.
   - `SqlCipherUnlockTests.InvalidPassword_ReturnsInvalidCredentials`: incorrect password fails master and duress slots; returns `UnlockResult.InvalidCredentials`.
+  - `SqlCipherUnlockTests.BlankPassword_CreatesEncryptedDatabase_AndUnkeyedConnectionFails`: setup with `VaultPassphrase.Empty` creates encrypted database; raw unkeyed connection fails with native code 26 (`SQLITE_NOTADB`); unlock with empty passphrase succeeds.
   - `SqlCipherUnlockTests.LockAsync_ScrubsMemoryAndClearsPools`: calling `LockAsync()` clears connection pools (`SqliteConnection.ClearAllPools()`), zeroizes `MasterKeyHandle`, disposes host, transitions status to `Locked`.
+  - `SqlCipherUnlockTests.ChangeMasterPasswordAsync_RewrapsMasterSlot_PreservesDuressSlot`: re-wraps master slot with new key; database remains readable; subsequent unlock requires new password; existing duress password remains valid.
+  - `SqlCipherUnlockTests.ConfigureDuressPasswordAsync_IdenticalToMaster_RejectsCollision`: rejects duress password identical to master; header is untouched.
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Vault.Unlock`
 
@@ -160,21 +440,38 @@
 
 ### Phase 2: Core Relational Persistence & Identity Vault
 
-#### Chunk 2.1: SQLite DbContext, Value Comparers & Baseline Migrations
+#### Chunk 2.1: SQLite DbContext, Baseline Migrations & Host Factory
+- **Technical Specifications & Database Schema**:
+  - **`PercolatorDbContext` Architecture**:
+    - Inherits `DbContext`, configured with `SqlCipherPragmaInterceptor` and connection pooling.
+    - Configured with `ValueComparer<byte[]>` across all BLOB keys to prevent false dirty change-tracking mutations.
+    - Column-Level Encryption Value Converter (`AesGcmValueConverter`): encrypts private keys and chain keys at rest before writing to SQLite BLOB columns.
+  - **`SqliteDatabaseMigrator` (`IDatabaseMigrator`)**:
+    - Executes `await dbContext.Database.MigrateAsync(ct)` on the encrypted database connection.
+  - **`BaselineStage2HostFactory` (`IStage2HostFactory`)**:
+    - Configures post-unlock Stage 2 `IHost` with active `IMasterKeyHandle`, `SqlCipherPragmaInterceptor`, and `PercolatorDbContext`.
 - **Scope & Deliverables**:
-  - [ ] Implement `PercolatorDbContext` with configurations for operational outbox (`ops_*`), cryptographic vault (`vault_*`), and channels/contacts.
+  - [ ] Implement `PercolatorDbContext` with baseline entity mappings.
   - [ ] Implement EF Core deterministic BLOB mapping with `ValueComparer<byte[]>`.
   - [ ] Implement column-level encryption value converters for private keys and chain keys.
-  - [ ] Implement `SqliteDatabaseMigrator` (`Percolator.Infrastructure.Vault.IDatabaseMigrator`): executes EF Core migrations against `PercolatorDbContext`.
+  - [ ] Implement `SqliteDatabaseMigrator` (`Percolator.Infrastructure.Vault.IDatabaseMigrator`).
   - [ ] Create initial EF Core database migration for `percolator.db`.
+  - [ ] Implement `BaselineStage2HostFactory` (`Percolator.Infrastructure.Vault.IStage2HostFactory`).
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Persistence/Core/`)**:
   - `PercolatorDbContextTests.ColumnLevelEncryption_StoresKeysAsCiphertextAtRest`: direct byte inspection of raw SQLite database confirms plaintext private keys are absent.
   - `PercolatorDbContextTests.BlobValueComparer_DetectsByteArrayEquality`: queries by byte array values and asserts match success.
   - `SqliteDatabaseMigratorTests.MigrateAsync_AppliesInitialSchema`: executes migration and verifies table existence.
+  - `BaselineStage2HostFactoryTests.BuildHost_ResolvesDbContextWithKey`: builds authenticated host and resolves operational `PercolatorDbContext`.
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Persistence.Core`
 
 #### Chunk 2.2: Vertical Slice: Identity Key Stores & Ratchet Sessions
+- **Technical Specifications & Table Schemas (`vault_*`)**:
+  - `vault_identity_keys`: `id` (`BLOB` 32 bytes PK), `private_key_ciphertext` (`BLOB`), `public_key` (`BLOB` 32 bytes), `created_at_utc` (`TEXT`).
+  - `vault_signed_prekeys`: `id` (`INTEGER` PK), `identity_id` (`BLOB` 32 bytes FK), `private_key_ciphertext` (`BLOB`), `public_key` (`BLOB` 32 bytes), `signature` (`BLOB` 64 bytes), `created_at_utc` (`TEXT`).
+  - `vault_onetime_prekeys`: `id` (`INTEGER` PK), `identity_id` (`BLOB` 32 bytes FK), `private_key_ciphertext` (`BLOB`), `public_key` (`BLOB` 32 bytes), `is_consumed` (`INTEGER` boolean, indexed).
+  - `vault_ratchet_sessions`: `session_id` (`TEXT` GUID PK), `peer_identity_id` (`BLOB` 32 bytes, indexed), `root_key_ciphertext` (`BLOB`), `send_chain_key_ciphertext` (`BLOB`), `recv_chain_key_ciphertext` (`BLOB`), `ratchet_state_blob` (`BLOB`), `updated_at_utc` (`TEXT`).
+  - `vault_group_sender_keys`: `group_id` (`TEXT` GUID), `author_identity_id` (`BLOB` 32 bytes), `sender_key_state_ciphertext` (`BLOB`), `updated_at_utc` (`TEXT`), composite PK `PRIMARY KEY(group_id, author_identity_id)`.
 - **Scope & Deliverables**:
   - [ ] Implement Cryptographic Vault Repositories:
     - `SqliteLocalIdentityKeyStore` (`Percolator.Application.Ports.ILocalIdentityKeyStore`)
@@ -192,6 +489,10 @@
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Persistence.Vault`
 
 #### Chunk 2.3: Vertical Slice: Outbox Jobs & Fast-Path Query Engine
+- **Technical Specifications & Table Schemas (`ops_*`)**:
+  - `ops_outbox_jobs`: `id` (`TEXT` GUID PK), `recipient_id` (`BLOB` 32 bytes, indexed), `delivery_route` (`INTEGER`), `payload` (`BLOB`), `status` (`INTEGER`: `Queued=0`, `InFlight=1`, `Delivered=2`, `Failed=3`, `Paused=4`), `attempt_count` (`INTEGER`), `next_retry_at_utc` (`TEXT`, indexed), `created_at_utc` (`TEXT`), `last_error` (`TEXT` nullable). Composite Index: `CREATE INDEX ix_ops_outbox_retry ON ops_outbox_jobs(status, next_retry_at_utc);`
+  - `ops_inbound_queue`: `id` (`TEXT` GUID PK), `sender_id` (`BLOB` 32 bytes), `app_id` (`INTEGER`), `raw_payload` (`BLOB`), `received_at_utc` (`TEXT`), `processed_at_utc` (`TEXT` nullable).
+  - `ops_reserved_ports`: `port_number` (`INTEGER` PK), `allocated_at_utc` (`TEXT`), `lease_expiry_utc` (`TEXT`).
 - **Scope & Deliverables**:
   - [ ] Implement Outbox Persistence & CQRS Read Model:
     - `SqliteOutboxRepository` (`Percolator.Application.Delivery.Ports.IOutboxRepository`): write-side enqueue, dequeue, retry tracking.
@@ -203,16 +504,14 @@
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Persistence.Outbox`
 
 #### Chunk 2.4: Vertical Slice: Contacts & Channel Repositories
+- **Technical Specifications & Table Schemas (`chat_channels`, `peer_contacts`)**:
+  - `peer_contacts`: `id` (`BLOB` 32 bytes PK), `alias` (`TEXT`), `trust_level` (`INTEGER`), `profile_key` (`BLOB` 32 bytes), `created_at_utc` (`TEXT`), `updated_at_utc` (`TEXT`).
+  - `chat_channels`: `id` (`TEXT` GUID PK), `type` (`INTEGER`: `Direct=0`, `Group=1`), `display_name` (`TEXT`), `created_at_utc` (`TEXT`), `updated_at_utc` (`TEXT`).
 - **Scope & Deliverables**:
-  - [ ] Implement Contacts, Channels & Relay Ledger Repositories:
+  - [ ] Implement Contacts & Channel Repositories:
     - `SqlitePeerContactRepository` (`Percolator.Domain.Identities.Ports.IPeerContactRepository`)
     - `SqlPeerContactQueryService` (`Percolator.Application.Ports.IPeerContactQueryService`): fast-path summary and detail read models.
     - `SqliteChannelRepository` (`Percolator.Domain.Channels.Ports.IChannelRepository`)
-    - `SqliteRelayPreKeyRepository` (`Percolator.Domain.Delivery.Ports.IRelayPreKeyRepository`)
-    - `SqliteRelayProfileRepository` (`Percolator.Domain.Delivery.Ports.IRelayProfileRepository`)
-    - `SqliteRelayLedgerRepository` (`Percolator.Domain.Delivery.Ports.IRelayLedgerRepository`)
-    - `SqlitePeerProfileRepository` (`Percolator.PluginSdk.Profiles.IPeerProfileRepository`)
-    - `SqlitePeerMailboxRoutingRepository` (`Percolator.PluginSdk.Profiles.IPeerMailboxRoutingRepository`)
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Persistence/Contacts/`)**:
   - `SqlitePeerContactRepositoryTests.SaveContact_UpdatesTrustLevelAndTimestamps`: updates contact state and persists atomically.
   - `SqlPeerContactQueryServiceTests.GetContacts_ProjectsSummaryList`: projects contacts and pending requests into summary view.
@@ -220,11 +519,53 @@
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Persistence.Contacts`
 
+#### Chunk 2.5: Vertical Slice: Profiles & Relay Delivery Repositories
+- **Technical Specifications & Table Schemas (`relay_*`, `peer_profiles`)**:
+  - `relay_prekeys`: `routing_token` (`BLOB` 32 bytes PK), `identity_key` (`BLOB` 32 bytes), `signed_prekey` (`BLOB`), `signature` (`BLOB`), `one_time_prekeys_json` (`TEXT`), `updated_at_utc` (`TEXT`).
+  - `relay_profile_slots`: `blinded_locator` (`BLOB` 32 bytes PK), `write_token_hash` (`BLOB` 32 bytes), `ciphertext` (`BLOB`), `nonce` (`BLOB` 12 bytes), `revision` (`INTEGER`), `expires_at_utc` (`TEXT`).
+  - `relay_ledger_epochs`: `group_id` (`TEXT` GUID PK), `epoch` (`INTEGER`), `roster_blob` (`BLOB`), `updated_at_utc` (`TEXT`).
+  - `peer_profiles`: `peer_id` (`BLOB` 32 bytes PK), `encrypted_profile_blob` (`BLOB`), `version` (`INTEGER`), `updated_at_utc` (`TEXT`).
+  - `peer_mailbox_routing`: `peer_id` (`BLOB` 32 bytes PK), `relay_endpoint` (`TEXT`), `routing_token` (`BLOB` 32 bytes), `updated_at_utc` (`TEXT`).
+- **Scope & Deliverables**:
+  - [ ] Implement Profiles & Relay Delivery Repositories:
+    - `SqliteRelayPreKeyRepository` (`Percolator.Domain.Delivery.Ports.IRelayPreKeyRepository`)
+    - `SqliteRelayProfileRepository` (`Percolator.Domain.Delivery.Ports.IRelayProfileRepository`)
+    - `SqliteRelayLedgerRepository` (`Percolator.Domain.Delivery.Ports.IRelayLedgerRepository`)
+    - `SqlitePeerProfileRepository` (`Percolator.PluginSdk.Profiles.IPeerProfileRepository`)
+    - `SqlitePeerMailboxRoutingRepository` (`Percolator.PluginSdk.Profiles.IPeerMailboxRoutingRepository`)
+- **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Persistence/Relay/`)**:
+  - `SqliteRelayPreKeyRepositoryTests.PublishAndFetch_MatchesBundle`: publishes prekey bundle and verifies retrieval by routing token.
+  - `SqliteRelayProfileRepositoryTests.CommitProfile_ValidatesWriteToken`: verifies write token hash check on profile upload.
+  - `SqlitePeerMailboxRoutingRepositoryTests.UpdateRouting_PersistsEndpoint`: stores and updates peer mailbox routing endpoint.
+- **Verification Gate**:
+  - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Persistence.Relay`
+
 ---
 
 ### Phase 3: Network Transport, Wire Protocols & Delivery Dispatching
 
-#### Chunk 3.1: Core Delivery & Session Wire Schemas (`Protos/`)
+#### Chunk 3.1: Core Cryptographic & ZK-Proof Engines (Signal & ZkGroup)
+- **Scope & Deliverables**:
+  - [ ] Implement `SignalCryptoEngine` / `SodiumCryptoEngine` (`Percolator.Domain.Security.Ports.ICryptoEngine`):
+    - Ed25519 signatures and verification (`VerifyEd25519Signature`, `SignEd25519`).
+    - Curve25519 (X25519) Diffie-Hellman scalar multiplication (`ComputeDiffieHellman`, `DeriveX3dhMasterSecret`).
+    - HKDF SHA-256 HMAC root key update (`KdfRk`) and symmetric chain key advances (`StepRatchet`).
+    - AES-256-GCM authenticated encryption/decryption (`EncryptAesGcm`, `DecryptAesGcm`).
+    - Memory zeroization with `CryptographicOperations.ZeroMemory` on sensitive spans.
+    - Logging guardrail: redact all keys when `CryptographyOptions.EnableCryptographicMaterialLogging = false`.
+  - [ ] Implement `ZkgroupCryptographyService` (`Percolator.Domain.Security.Ports.IZkProofEngine`):
+    - Wraps native `Signal.Interop` / `libzkgroup` C-ABI via safe handle management.
+    - Generates and verifies zero-knowledge group membership proofs (`VerifyGroupPresentation`, `GenerateGroupPresentation`).
+- **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Security/`)**:
+  - `SignalCryptoEngineTests.Ed25519_SignAndVerify_MatchesRfc8032Vectors`: known test vectors match RFC 8032. Low-brittle guarantee: asserts mathematical outputs; zero mock coupling.
+  - `SignalCryptoEngineTests.Curve25519_DiffieHellman_MatchesRfc7748Vectors`: known test vectors match RFC 7748. Low-brittle guarantee: asserts mathematical outputs.
+  - `SignalCryptoEngineTests.AesGcm_EncryptDecrypt_SucceedsAndRejectsBitflip`: encrypts payload, decrypts successfully; single bitflip throws authenticated tag mismatch.
+  - `ZkgroupCryptographyServiceTests.VerifyGroupPresentation_ValidProof_ReturnsSuccess`: presentation proof generates and validates against group public credentials.
+  - `SignalCryptoEngineTests.LoggingGuardrail_RedactsSensitiveKeys_WhenLoggingDisabled`: asserts logger redacts all key bytes when material logging is disabled.
+- **Verification Gate**:
+  - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Security.Crypto`
+
+#### Chunk 3.2: Core Delivery & Session Wire Schemas (`Protos/`)
 - **Scope & Deliverables**:
   - [ ] Configure `Google.Protobuf` and `Grpc.Tools` in `Percolator.Infrastructure.csproj`.
   - [ ] Author Protobuf schemas in `Percolator.Infrastructure/Protos/`:
@@ -238,22 +579,24 @@
 - **Verification Gate**:
   - `dotnet build Percolator.Infrastructure`
 
-#### Chunk 3.2: Session Wire Packaging & Stepped Bucket Serializer
+#### Chunk 3.3: Generic Session Wire Packaging & Payload Serializer
 - **Scope & Deliverables**:
   - [ ] Implement `ProtobufSessionWirePacker` (`Percolator.Application.Ports.ISessionWirePacker`):
     - Packs `DirectSessionPackageProto` and `GroupSessionPackageProto`.
     - Wraps into `SealedEnvelopeProto` with recipient `BlindedRoutingToken` and `DeliveryToken`.
     - Unpacks incoming `SealedEnvelopeProto` records into typed `InboundDirectEnvelope` or `InboundGroupEnvelope`.
   - [ ] Implement `ProtobufPayloadSerializer` (`Percolator.PluginSdk.IPayloadSerializer`):
-    - Binary serialization via `Google.Protobuf.CodedOutputStream` and `IBufferWriter<byte>`.
-    - Span-based deserialization via `Google.Protobuf.MessageParser<T>`.
+    - Generic binary serialization via `Google.Protobuf.CodedOutputStream` and `IBufferWriter<byte>`.
+    - Generic span-based deserialization via `Google.Protobuf.MessageParser<T>`.
+    - Completely decoupled from specific plugin schemas (clean compile-time boundary).
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Packaging/`)**:
   - `ProtobufSessionWirePackerTests.RoundtripDirectSession_PacksAndUnpacksCorrectly`: wraps and unwraps typed `InboundDirectEnvelope`.
   - `ProtobufSessionWirePackerTests.ReplyContext_ExcludesQuoteSnippetFromWire`: quote snippet text is strictly absent from wire payload (only parent ID and author ID).
+  - `ProtobufPayloadSerializerTests.GenericPayloadSerialization_RoundtripsCorrectly`: serializes and deserializes generic payloads.
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Packaging`
 
-#### Chunk 3.3: Transport Primitives, Interceptors & Endpoint Validation
+#### Chunk 3.4: Transport Primitives, Interceptors & Endpoint Validation
 - **Scope & Deliverables**:
   - [ ] Implement `InMemoryTransportCertificateProvider`:
     - Generates disposable ECDSA P-256 self-signed certificate with loopback SANs in memory with zero disk I/O.
@@ -275,7 +618,7 @@
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Transport.Primitives`
 
-#### Chunk 3.4: Ingress Filtering & Transport Route Dispatching
+#### Chunk 3.5: Ingress Filtering & Transport Route Dispatching
 - **Scope & Deliverables**:
   - [ ] Implement `IngressFilterService` (`Percolator.Application.Ports.IIngressFilterService`):
     - Enforces blacklist filtering (`PeerTrustLevel.Blocked`), sender rate limits, and identity dormancy status.
@@ -295,7 +638,7 @@
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Transport.Dispatching`
 
-#### Chunk 3.5: gRPC Ingress Endpoints & Hosted Relay Workers
+#### Chunk 3.6: gRPC Ingress Endpoints & Hosted Relay Workers
 - **Scope & Deliverables**:
   - [ ] Implement `UnauthenticatedDeliveryEndpoint` (ASP.NET Core gRPC Service on relays and direct peer listening ports):
     - Handles `DeliverDirect`, `EnqueueMailbox`, `GetProfile`, `UploadProfile`, `DeleteProfile`, and `DownloadBlindBlob`.
@@ -312,9 +655,12 @@
 
 ### Phase 4: Vertical Plugin Slices (End-to-End Capabilities)
 
-#### Chunk 4.1: Vertical Slice: Chat Messaging, History & Query Engine
+#### Chunk 4.1: Vertical Slice: Chat Messaging, History & Padding Engine
 - **Scope & Deliverables**:
-  - [ ] Author Protobuf schema `Percolator.Infrastructure/Protos/chat.proto` with stepped bucket padding.
+  - [ ] Author Protobuf schema `Percolator.Infrastructure/Protos/chat.proto`.
+  - [ ] Implement `ChatPayloadFramingDecorator`:
+    - Wraps `IPayloadSerializer` for `ChatPayloadEnvelopeProto`.
+    - Applies stepped bucket padding (expands frame to 256, 512, 1024, 2048, 4096 B boundaries).
   - [ ] Implement Chat Persistence & Fast-Path CQRS Query Services:
     - `SqlChatMessageRepository` (`Percolator.Apps.Chat.Ports.IChatMessageRepository`)
     - `SqlChatMessageQueryService` (`Percolator.Apps.Chat.Ports.IChatMessageQueryService`): paged SQL timeline read model.
@@ -327,7 +673,7 @@
     - `UnknownGroupMessageCachePruner`: 48h out-of-order buffer pruner.
     - `AbandonedInvitePruner`: stale invitation pruner.
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Plugins/Chat/`)**:
-  - `ProtobufPayloadSerializerTests.SteppedBucketPadding_ExpandsToExpectedBucketSize`: serialized chat frames expand to discrete 256/512/1024/2048/4096 B boundaries.
+  - `ChatPayloadFramingDecoratorTests.SteppedBucketPadding_ExpandsToExpectedBucketSize`: serialized chat frames expand to discrete 256/512/1024/2048/4096 B boundaries.
   - `SqlChatMessageRepositoryTests.DeleteMessage_CascadesAttachmentDeletion`: deleting a message cascades and deletes attachment records in SQLite.
   - `SqlChatMessageQueryServiceTests.PagedTimeline_ClampsToLimitAndOffset`: limit/offset paging clamps accurately to boundary without aggregate hydration.
   - `SqlConversationListQueryServiceTests.UnreadBadgeCount_AggregatesPastReadReceipt`: count aggregates messages strictly past read receipt timestamp.
@@ -356,37 +702,46 @@
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Plugins.Discovery`
 
-#### Chunk 4.3: Vertical Slice: Media Streaming & Swarm File Transfers
+#### Chunk 4.3: Vertical Slice: Encrypted Media Streaming & Blob Store
+- **Scope & Deliverables**:
+  - [ ] Implement Encrypted Blob Streaming Engine:
+    - `StreamingAesGcmCryptoService` (`Percolator.Application.Ports.IBlobCryptoService`): EXIF & geolocation metadata scrubbing from raw media streams before encryption; chunked STREAM AEAD (64 KB blocks).
+    - `LocalFileChunkStore` (`Percolator.Application.Ports.ILocalChunkStore`): content-addressed disk chunk storage (`%AppData%/Percolator/Blobs/{sha256Hex}.blob`) with atomic `.tmp` staging.
+    - `RelayBlobClient` (`Percolator.Application.Ports.IRelayBlobClient`): resumable upload (`POST /blobs`) and download (`GET /blobs/{sha256}`) with HTTP Range headers.
+    - `PeerStreamBlobClient` (`Percolator.Application.Ports.IPeerStreamBlobClient`): on-demand direct peer chunk streaming.
+    - `ChannelRelayResolver` (`Percolator.Application.Ports.IChannelRelayResolver`): resolves designated blob relay endpoints.
+  - [ ] Implement Blob Retention Pruner:
+    - `RelayBlobRetentionPruner`: daily pruner for expired relay blobs and disk watermark enforcement.
+- **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Plugins/BlobStorage/`)**:
+  - `StreamingAesGcmCryptoServiceTests.ExifScrubbing_StripsGpsAndDeviceMetadata`: strips GPS and device tags from JPEG/PNG before upload.
+  - `StreamingAesGcmCryptoServiceTests.ChunkedAead_SingleBitflip_FailsAuthentication`: injects 1 bitflip in 64 KB block; asserts authenticated decryption failure.
+  - `RelayBlobClientTests.ResumableDownload_AppliesRangeHeader`: HTTP Range header returns byte slice from requested offset without re-downloading from byte 0.
+  - `LocalFileChunkStoreTests.AtomicCommit_WritesTempFileAndRenames`: validates atomic write to `%AppData%/Percolator/Blobs/{sha256Hex}.blob`.
+- **Verification Gate**:
+  - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Plugins.BlobStorage`
+
+#### Chunk 4.4: Vertical Slice: Swarm Multi-Stream File Transfer Engine
 - **Scope & Deliverables**:
   - [ ] Author Protobuf schema `Percolator.Infrastructure/Protos/file_transfer.proto`.
-  - [ ] Implement Encrypted Blob Storage:
-    - `StreamingAesGcmCryptoService` (`Percolator.Application.Ports.IBlobCryptoService`): EXIF scrubbing, chunked STREAM AEAD (64 KB blocks).
-    - `LocalFileChunkStore` (`Percolator.Application.Ports.ILocalChunkStore`): content-addressed disk chunk storage (`%AppData%/Percolator/Blobs/{sha256Hex}.blob`).
-    - `RelayBlobClient` (`Percolator.Application.Ports.IRelayBlobClient`): resumable upload and download with HTTP Range.
-    - `PeerStreamBlobClient` (`Percolator.Application.Ports.IPeerStreamBlobClient`)
-    - `ChannelRelayResolver` (`Percolator.Application.Ports.IChannelRelayResolver`)
   - [ ] Implement File Transfer Persistence & CQRS Query Services:
     - `SqliteTransferSessionRepository` (`Percolator.Apps.FileTransfer.Ports.ITransferSessionRepository`)
     - `SqliteFilterPolicyRepository` (`Percolator.Apps.FileTransfer.Ports.IFileTransferFilterPolicyRepository`)
     - `SqlFileTransferQueryService` (`Percolator.Apps.FileTransfer.Ports.IFileTransferQueryService`)
-  - [ ] Implement Swarm Multi-Stream Engine & Desktop File Store:
-    - `TcpMultiStreamPool` (`Percolator.Apps.FileTransfer.Ports.ITransferStreamPool`, `ITransferStreamPoolFactory`, `ITransferStream`): frames 0x01–0x0C.
-    - `PortableDesktopFileStore` (`Percolator.Apps.FileTransfer.Ports.IDesktopFileStorage`): pre-allocation, Merkle leaf scanner, Win32 reserved name sanitization.
-    - `TokenBucketRateLimiter` (`Percolator.Apps.FileTransfer.Ports.ITransferRateLimiter`)
-    - `NetworkInterfaceEndpointDiscoveryPort` (`Percolator.Apps.FileTransfer.Ports.INetworkEndpointDiscoveryPort`)
-    - `RelayTransferPipeClient` & Server Pipe Service
-    - `RelaySwarmTrackerClient` (`Percolator.Apps.FileTransfer.Ports.IDistributedTrackerPort`)
-  - [ ] Implement Transfer Maintenance Pruners:
+  - [ ] Implement Swarm Multi-Stream Protocol Engine & Desktop File Store:
+    - `TcpMultiStreamPool` (`Percolator.Apps.FileTransfer.Ports.ITransferStreamPool`, `ITransferStreamPoolFactory`, `ITransferStream`): 4–8 multiplexed TCP connections with `TCP_NODELAY = true`; binary framing 0x01–0x0C (`STREAM_HANDSHAKE` through `PEX_PEERS`).
+    - `PortableDesktopFileStore` (`Percolator.Apps.FileTransfer.Ports.IDesktopFileStorage`): pre-allocation via `FileStream.SetLength`; zero-byte file immediate materialization; `.percolator-part` staging and atomic move; Merkle leaf bitfield scanner; Win32 reserved device name sanitization (`CON`, `PRN`, `AUX`, `:` ADS).
+    - `TokenBucketRateLimiter` (`Percolator.Apps.FileTransfer.Ports.ITransferRateLimiter`): token-bucket speed limiter.
+    - `NetworkInterfaceEndpointDiscoveryPort` (`Percolator.Apps.FileTransfer.Ports.INetworkEndpointDiscoveryPort`): local candidate endpoint discovery.
+    - `RelayTransferPipeClient` & Server Pipe Service: 4–8 parallel streams with `X-Pipe-Auth`.
+    - `RelaySwarmTrackerClient` (`Percolator.Apps.FileTransfer.Ports.IDistributedTrackerPort`): sliding-expiration tracker.
+  - [ ] Implement Swarm Lifecycle Pruners:
     - `TransferOfferReaperWorker` (`Percolator.Apps.FileTransfer.Ports.ITransferOfferReaperService`): sweeps stale transfer offers older than 24h.
     - `SwarmEndpointRetentionPruner`: daily pruner for transient endpoints.
-    - `RelayBlobRetentionPruner`: daily pruner for expired blobs and disk watermarks.
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Plugins/FileTransfer/`)**:
-  - `StreamingAesGcmCryptoServiceTests.ExifScrubbing_StripsGpsAndDeviceMetadata`: strips GPS and device tags from JPEG/PNG before upload.
-  - `StreamingAesGcmCryptoServiceTests.ChunkedAead_SingleBitflip_FailsAuthentication`: injects 1 bitflip in 64 KB block; asserts authenticated decryption failure.
+  - `TcpMultiStreamPoolTests.FrameSerialization_All12Frames_RoundtripsSuccessfully`: serializes and deserializes all 12 frames (0x01–0x0C).
   - `PortableDesktopFileStoreTests.Sanitization_RejectsReservedWin32NamesAndAds`: rejects `CON`, `PRN`, `AUX`, `:` ADS, and path traversals without touching disk.
   - `PortableDesktopFileStoreTests.ZeroByteFile_MaterializesImmediately`: creates zero-byte file immediately without `.percolator-part`.
   - `PortableDesktopFileStoreTests.BitfieldScanner_MatchesMerkleLeaves`: validates existing chunks against Merkle leaf hashes.
-  - `TcpMultiStreamPoolTests.FrameSerialization_All12Frames_RoundtripsSuccessfully`: serializes and deserializes all 12 frames (0x01–0x0C).
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Plugins.FileTransfer`
 
@@ -409,15 +764,9 @@
 #### Chunk 5.2: Stage 2 DI Composition Root & Infrastructure Verification
 - **Scope & Deliverables**:
   - [ ] Implement `Stage2HostFactory`:
-    - Assembles the Stage 2 post-unlock `IHost`.
-    - Binds the active `IMasterKeyHandle`, registers `SqlCipherPragmaInterceptor` with `PercolatorDbContext`, and executes `Database.MigrateAsync()` prior to yielding the operational container.
+    - Extends `BaselineStage2HostFactory` to wire the full suite of operational adapters, repositories, query services, gRPC channels, and background pruners across all feature slices.
   - [ ] Implement `InfrastructureServiceCollectionExtensions.AddAuthenticatedInfrastructure(IServiceCollection, IConfiguration, IMasterKeyHandle)`:
-    - Registers `IMasterKeyHandle` (instance passed from unlock).
-    - Registers `SqlCipherPragmaInterceptor`.
-    - Registers `PercolatorDbContext` configured with `SqlCipherPragmaInterceptor`.
-    - Registers cryptographic engines, wire packers, serializers, repositories, and query services.
-    - Registers transport dispatchers, gRPC channels, interceptors, and background workers.
-    - Registers `Stage2HostFactory`.
+    - Registers all 58 infrastructure ports into the Stage 2 container.
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Composition/`)**:
   - `DependencyInjectionTests.All58Ports_ResolveFromContainerWithoutCycles`: resolves every planned infrastructure port from DI container; asserts non-null without circular dependency or missing registration.
 - **Verification Gate**:
@@ -440,17 +789,17 @@ To guarantee robust infrastructure without introducing brittle tests that break 
 
 | # | Port (Interface) | Defining Project | Concrete Adapter | Target Chunk |
 |---|---|---|---|---|
-| 1 | `ICryptoEngine` | `Percolator.Domain` | `SignalCryptoEngine` / `SodiumCryptoEngine` | Chunk 1.2 |
-| 2 | `IZkProofEngine` | `Percolator.Domain` | `ZkgroupCryptographyService` | Chunk 1.2 |
+| 1 | `ICryptoEngine` | `Percolator.Domain` | `SignalCryptoEngine` / `SodiumCryptoEngine` | Chunk 3.1 |
+| 2 | `IZkProofEngine` | `Percolator.Domain` | `ZkgroupCryptographyService` | Chunk 3.1 |
 | 3 | `IDateTimeProvider` | `Percolator.Domain.Common` | `SystemDateTimeProvider` | Chunk 1.1 |
 | 4 | `IDatabaseUnlockCoordinator` | `Percolator.Application` | `SqlCipherDatabaseUnlockCoordinator` | Chunk 1.4 |
 | 5 | `IAuthenticatedSession` | `Percolator.Application` | `AuthenticatedSession` | Chunk 1.4 |
-| 6 | `IMasterKeyHandle` | `Percolator.Domain.Security.Ports` | `MasterKeyHandle` | Chunk 1.4 |
-| 7 | `IDuressWipeHandler` | `Percolator.Application` | `DuressWipeHandler` | Chunk 1.3 |
-| 8 | `IHeaderStorage` | `Percolator.Infrastructure.Vault` (Internal) | `ProtobufHeaderStorage` | Chunk 1.3 |
-| 9 | `ISessionWirePacker` | `Percolator.Application` | `ProtobufSessionWirePacker` | Chunk 3.2 |
-| 10 | `IPayloadSerializer` | `Percolator.PluginSdk` | `ProtobufPayloadSerializer` | Chunk 3.2 |
-| 11 | `DbConnectionInterceptor` | `Microsoft.EntityFrameworkCore.Diagnostics` | `SqlCipherPragmaInterceptor` | Chunk 1.4 |
+| 6 | `IMasterKeyHandle` | `Percolator.Domain.Security.Ports` | `MasterKeyHandle` | Chunk 1.3 |
+| 7 | `IDuressWipeHandler` | `Percolator.Application` | `DuressWipeHandler` | Chunk 1.2 |
+| 8 | `IHeaderStorage` | `Percolator.Infrastructure.Vault` (Internal) | `ProtobufHeaderStorage` | Chunk 1.2 |
+| 9 | `ISessionWirePacker` | `Percolator.Application` | `ProtobufSessionWirePacker` | Chunk 3.3 |
+| 10 | `IPayloadSerializer` | `Percolator.PluginSdk` | `ProtobufPayloadSerializer` | Chunk 3.3 |
+| 11 | `DbConnectionInterceptor` | `Microsoft.EntityFrameworkCore.Diagnostics` | `SqlCipherPragmaInterceptor` | Chunk 1.3 |
 | 12 | `IOutboxRepository` | `Percolator.Application` | `SqliteOutboxRepository` | Chunk 2.3 |
 | 13 | `IPeerContactRepository` | `Percolator.Domain` | `SqlitePeerContactRepository` | Chunk 2.4 |
 | 14 | `IRatchetSessionRepository` | `Percolator.Application` | `SqliteRatchetSessionRepository` | Chunk 2.2 |
@@ -461,27 +810,27 @@ To guarantee robust infrastructure without introducing brittle tests that break 
 | 19 | `ILocalIdentityKeyStore` | `Percolator.Application` | `SqliteLocalIdentityKeyStore` | Chunk 2.2 |
 | 20 | `IGroupCredentialsRepository` | `Percolator.Domain` | `SqliteGroupCredentialsRepository` | Chunk 2.2 |
 | 21 | `IChannelRepository` | `Percolator.Domain` | `SqliteChannelRepository` | Chunk 2.4 |
-| 22 | `IRelayPreKeyRepository` | `Percolator.Domain` | `SqliteRelayPreKeyRepository` | Chunk 2.4 |
-| 23 | `IRelayProfileRepository` | `Percolator.Domain` | `SqliteRelayProfileRepository` | Chunk 2.4 |
-| 24 | `IPeerProfileRepository` | `Percolator.PluginSdk` | `SqlitePeerProfileRepository` | Chunk 2.4 |
-| 25 | `IPeerMailboxRoutingRepository` | `Percolator.PluginSdk` | `SqlitePeerMailboxRoutingRepository` | Chunk 2.4 |
-| 26 | `IRelayLedgerRepository` | `Percolator.Domain` | `SqliteRelayLedgerRepository` | Chunk 2.4 |
+| 22 | `IRelayPreKeyRepository` | `Percolator.Domain` | `SqliteRelayPreKeyRepository` | Chunk 2.5 |
+| 23 | `IRelayProfileRepository` | `Percolator.Domain` | `SqliteRelayProfileRepository` | Chunk 2.5 |
+| 24 | `IPeerProfileRepository` | `Percolator.PluginSdk` | `SqlitePeerProfileRepository` | Chunk 2.5 |
+| 25 | `IPeerMailboxRoutingRepository` | `Percolator.PluginSdk` | `SqlitePeerMailboxRoutingRepository` | Chunk 2.5 |
+| 26 | `IRelayLedgerRepository` | `Percolator.Domain` | `SqliteRelayLedgerRepository` | Chunk 2.5 |
 | 27 | `IChatMessageRepository` | `Percolator.Apps.Chat` | `SqlChatMessageRepository` | Chunk 4.1 |
 | 28 | `IGroupInvitationRepository` | `Percolator.Apps.Chat` | `SqlGroupInvitationRepository` | Chunk 4.1 |
 | 29 | `IUnknownGroupMessageCacheRepository` | `Percolator.Apps.Chat` | `SqlUnknownGroupMessageCacheRepository` | Chunk 4.1 |
-| 30 | `ITransferSessionRepository` | `Percolator.Apps.FileTransfer` | `SqliteTransferSessionRepository` | Chunk 4.3 |
-| 31 | `IFileTransferFilterPolicyRepository` | `Percolator.Apps.FileTransfer` | `SqliteFilterPolicyRepository` | Chunk 4.3 |
+| 30 | `ITransferSessionRepository` | `Percolator.Apps.FileTransfer` | `SqliteTransferSessionRepository` | Chunk 4.4 |
+| 31 | `IFileTransferFilterPolicyRepository` | `Percolator.Apps.FileTransfer` | `SqliteFilterPolicyRepository` | Chunk 4.4 |
 | 32 | `IRelayPeerDirectory` | `Percolator.Apps.Discovery` | `SqliteRelayPeerDirectory` | Chunk 4.2 |
 | 33 | `IChatMessageQueryService` | `Percolator.Apps.Chat` | `SqlChatMessageQueryService` | Chunk 4.1 |
 | 34 | `IConversationListQueryService` | `Percolator.Apps.Chat` | `SqlConversationListQueryService` | Chunk 4.1 |
 | 35 | `IGroupInvitationQueryService` | `Percolator.Apps.Chat` | `SqlGroupInvitationQueryService` | Chunk 4.1 |
 | 36 | `IOutboxQueryService` | `Percolator.Application` | `SqlOutboxQueryService` | Chunk 2.3 |
 | 37 | `IPeerContactQueryService` | `Percolator.Application` | `SqlPeerContactQueryService` | Chunk 2.4 |
-| 38 | `IFileTransferQueryService` | `Percolator.Apps.FileTransfer` | `SqlFileTransferQueryService` | Chunk 4.3 |
-| 39 | `IIngressFilterService` | `Percolator.Application` | `IngressFilterService` | Chunk 3.4 |
-| 40 | `IStreamRegistry` | `Percolator.Application` | `StreamRegistry` | Chunk 3.4 |
-| 41 | `ITransportDispatcher` | `Percolator.Application` | `TransportDispatcher` | Chunk 3.4 |
-| 42 | `ISealedEnvelopeUnwrapper` | `Percolator.Application` | `SealedEnvelopeUnwrapper` | Chunk 3.4 |
+| 38 | `IFileTransferQueryService` | `Percolator.Apps.FileTransfer` | `SqlFileTransferQueryService` | Chunk 4.4 |
+| 39 | `IIngressFilterService` | `Percolator.Application` | `IngressFilterService` | Chunk 3.5 |
+| 40 | `IStreamRegistry` | `Percolator.Application` | `StreamRegistry` | Chunk 3.5 |
+| 41 | `ITransportDispatcher` | `Percolator.Application.Delivery.Ports.ITransportDispatcher` | `TransportDispatcher` | Chunk 3.5 |
+| 42 | `ISealedEnvelopeUnwrapper` | `Percolator.Application` | `SealedEnvelopeUnwrapper` | Chunk 3.5 |
 | 43 | `INearbyDiscoveryQueryClientPort` | `Percolator.Apps.Discovery` | `DiscoveryQueryClient` | Chunk 4.2 |
 | 44 | `IDiscoveryHandshakePort` | `Percolator.Apps.Discovery` | `DiscoveryHandshakeAdapter` | Chunk 4.2 |
 | 45 | `IPreKeyAvailabilityPort` | `Percolator.Apps.Discovery` | `PreKeyAvailabilityAdapter` | Chunk 4.2 |
@@ -492,9 +841,9 @@ To guarantee robust infrastructure without introducing brittle tests that break 
 | 50 | `IPeerStreamBlobClient` | `Percolator.Application` | `PeerStreamBlobClient` | Chunk 4.3 |
 | 51 | `ILocalChunkStore` | `Percolator.Application` | `LocalFileChunkStore` | Chunk 4.3 |
 | 52 | `IChannelRelayResolver` | `Percolator.Application` | `ChannelRelayResolver` | Chunk 4.3 |
-| 53 | `ITransferStreamPool` / `Factory` / `Stream` | `Percolator.Apps.FileTransfer` | `TcpMultiStreamPool` & `TransferStream` | Chunk 4.3 |
-| 54 | `INetworkEndpointDiscoveryPort` | `Percolator.Apps.FileTransfer` | `NetworkInterfaceEndpointDiscoveryPort` | Chunk 4.3 |
-| 55 | `IDesktopFileStorage` | `Percolator.Apps.FileTransfer` | `PortableDesktopFileStore` | Chunk 4.3 |
-| 56 | `ITransferRateLimiter` | `Percolator.Apps.FileTransfer` | `TokenBucketRateLimiter` | Chunk 4.3 |
-| 57 | `IDistributedTrackerPort` | `Percolator.Apps.FileTransfer` | `RelaySwarmTrackerClient` | Chunk 4.3 |
-| 58 | `ITransferOfferReaperService` | `Percolator.Apps.FileTransfer` | `TransferOfferReaperWorker` | Chunk 4.3 |
+| 53 | `ITransferStreamPool` / `Factory` / `Stream` | `Percolator.Apps.FileTransfer` | `TcpMultiStreamPool` & `TransferStream` | Chunk 4.4 |
+| 54 | `INetworkEndpointDiscoveryPort` | `Percolator.Apps.FileTransfer` | `NetworkInterfaceEndpointDiscoveryPort` | Chunk 4.4 |
+| 55 | `IDesktopFileStorage` | `Percolator.Apps.FileTransfer` | `PortableDesktopFileStore` | Chunk 4.4 |
+| 56 | `ITransferRateLimiter` | `Percolator.Apps.FileTransfer` | `TokenBucketRateLimiter` | Chunk 4.4 |
+| 57 | `IDistributedTrackerPort` | `Percolator.Apps.FileTransfer` | `RelaySwarmTrackerClient` | Chunk 4.4 |
+| 58 | `ITransferOfferReaperService` | `Percolator.Apps.FileTransfer` | `TransferOfferReaperWorker` | Chunk 4.4 |
