@@ -429,8 +429,7 @@
   - `VaultEnvelopePackerTests.MasterPasswordChange_RewrapsSlot_PreservesDuress`: re-wraps master slot with new key; preserves salt and duress slot; decrypts successfully.
   - `SqlCipherUnlockTests.HappyPathMasterUnlock_CoordinatesCollaborators`: correct master password derives key, evaluates master slot, executes canary probe, invokes migrator, and returns `UnlockResult.Success(session)`.
   - `SqlCipherUnlockTests.InvalidPassword_ReturnsInvalidCredentials`: incorrect password fails master and duress slots; returns `UnlockResult.InvalidCredentials`.
-  - `SqlCipherUnlockTests.BlankPassword_CreatesEncryptedDatabase_AndUnkeyedConnectionFails`: setup with `VaultPassphrase.Empty` creates encrypted database; raw unkeyed connection fails with native code 26 (`SQLITE_NOTADB`); unlock with empty passphrase succeeds.
-  - `SqlCipherUnlockTests.LockAsync_ScrubsMemoryAndClearsPools`: calling `LockAsync()` clears connection pools (`SqliteConnection.ClearAllPools()`), zeroizes `MasterKeyHandle`, disposes host, transitions status to `Locked`.
+  - `SqlCipherUnlockTests.BlankPassword_CreatesEncryptedDatabase_AndUnkeyedConnectionFails`: setup with `VaultPassphrase.Empty` creates encrypted database; raw unkeyed connection fails with native code 26 (`SQLITE_NOTADB`); unlock with empty passphrase succeeds.\n  - `SqlCipherUnlockTests.LockAsync_ScrubsMemoryAndClearsPools`: calling `LockAsync()` clears connection pools (`SqliteConnection.ClearAllPools()`), zeroizes `MasterKeyHandle`, disposes host, transitions status to `Locked`.
   - `SqlCipherUnlockTests.ChangeMasterPasswordAsync_RewrapsMasterSlot_PreservesDuressSlot`: re-wraps master slot with new key; database remains readable; subsequent unlock requires new password; existing duress password remains valid.
   - `SqlCipherUnlockTests.ConfigureDuressPasswordAsync_IdenticalToMaster_RejectsCollision`: rejects duress password identical to master; header is untouched.
 - **Verification Gate**:
@@ -441,37 +440,126 @@
 ### Phase 2: Core Relational Persistence & Identity Vault
 
 #### Chunk 2.1: SQLite DbContext, Baseline Migrations & Host Factory
-- **Technical Specifications & Database Schema**:
+- **Technical Specifications & Database Architecture**:
   - **`PercolatorDbContext` Architecture**:
     - Inherits `DbContext`, configured with `SqlCipherPragmaInterceptor` and connection pooling.
     - Configured with `ValueComparer<byte[]>` across all BLOB keys to prevent false dirty change-tracking mutations.
-    - Column-Level Encryption Value Converter (`AesGcmValueConverter`): encrypts private keys and chain keys at rest before writing to SQLite BLOB columns.
+    - **Native Interop Thread Safety (Invariant 8)**: Register `IDbContextFactory<PercolatorDbContext>` alongside scoped `PercolatorDbContext`. Interop bridge adapters consume `IDbContextFactory<T>` to spin up short-lived isolated database contexts on unmanaged native callback threads, preventing concurrency clashes and cross-thread context contamination.
+  - **Column-Level Encryption Value Converter (`AesGcmValueConverter`)**:
+    - Encrypts private keys, ratchet chain keys, and sensitive secrets at rest before persisting to SQLite BLOB columns (Invariant 2).
+    - **Strict Phase 3 Independence**: Zero dependency on Phase 3 `ICryptoEngine` or `SignalCryptoEngine`. Implemented purely using BCL `System.Security.Cryptography.AesGcm` (standard AES-256-GCM: 12-byte nonce, 16-byte authentication tag) and `RandomNumberGenerator`, consuming `IMasterKeyHandle.WithKeySpan` from Phase 1 (Chunk 1.3):
+      ```csharp
+      namespace Percolator.Infrastructure.Persistence.Converters;
+
+      using System.Security.Cryptography;
+      using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
+      using Percolator.Domain.Security.Ports;
+
+      public sealed class AesGcmValueConverter : ValueConverter<byte[], byte[]>
+      {
+          public AesGcmValueConverter(IMasterKeyHandle masterKeyHandle)
+              : base(
+                  plainBytes => Encrypt(plainBytes, masterKeyHandle),
+                  cipherBytes => Decrypt(cipherBytes, masterKeyHandle))
+          {
+          }
+
+          private static byte[] Encrypt(byte[]? plaintext, IMasterKeyHandle masterKeyHandle)
+          {
+              if (plaintext == null || plaintext.Length == 0) return Array.Empty<byte>();
+
+              return masterKeyHandle.WithKeySpan(keySpan =>
+              {
+                  using var aes = new AesGcm(keySpan, AesGcm.TagByteSizes.MaxSize);
+                  byte[] nonce = RandomNumberGenerator.GetBytes(AesGcm.NonceByteSizes.MaxSize); // 12 bytes
+                  byte[] tag = new byte[AesGcm.TagByteSizes.MaxSize]; // 16 bytes
+                  byte[] ciphertext = new byte[plaintext.Length];
+
+                  aes.Encrypt(nonce, plaintext, ciphertext, tag);
+
+                  // Payload layout: [12-byte Nonce] [16-byte Tag] [N-byte Ciphertext]
+                  byte[] result = new byte[nonce.Length + tag.Length + ciphertext.Length];
+                  Buffer.BlockCopy(nonce, 0, result, 0, nonce.Length);
+                  Buffer.BlockCopy(tag, 0, result, nonce.Length, tag.Length);
+                  Buffer.BlockCopy(ciphertext, 0, result, nonce.Length + tag.Length, ciphertext.Length);
+                  return result;
+              });
+          }
+
+          private static byte[] Decrypt(byte[]? payload, IMasterKeyHandle masterKeyHandle)
+          {
+              if (payload == null || payload.Length < 28) return Array.Empty<byte>();
+
+              return masterKeyHandle.WithKeySpan(keySpan =>
+              {
+                  using var aes = new AesGcm(keySpan, AesGcm.TagByteSizes.MaxSize);
+                  ReadOnlySpan<byte> nonce = payload.AsSpan(0, 12);
+                  ReadOnlySpan<byte> tag = payload.AsSpan(12, 16);
+                  ReadOnlySpan<byte> ciphertext = payload.AsSpan(28);
+
+                  byte[] plaintext = new byte[ciphertext.Length];
+                  aes.Decrypt(nonce, ciphertext, tag, plaintext);
+                  return plaintext;
+              });
+          }
+      }
+      ```
   - **`SqliteDatabaseMigrator` (`IDatabaseMigrator`)**:
-    - Executes `await dbContext.Database.MigrateAsync(ct)` on the encrypted database connection.
+    - Executes `await dbContext.Database.MigrateAsync(ct)` on the authenticated, encrypted connection.
   - **`BaselineStage2HostFactory` (`IStage2HostFactory`)**:
-    - Configures post-unlock Stage 2 `IHost` with active `IMasterKeyHandle`, `SqlCipherPragmaInterceptor`, and `PercolatorDbContext`.
+    - Configures post-unlock Stage 2 `IHost` with active `IMasterKeyHandle`, `SqlCipherPragmaInterceptor`, `PercolatorDbContext`, and `IDbContextFactory<PercolatorDbContext>`.
 - **Scope & Deliverables**:
   - [ ] Implement `PercolatorDbContext` with baseline entity mappings.
   - [ ] Implement EF Core deterministic BLOB mapping with `ValueComparer<byte[]>`.
-  - [ ] Implement column-level encryption value converters for private keys and chain keys.
+  - [ ] Implement `AesGcmValueConverter` for column-level encryption of private keys and ratchet chain keys using BCL `AesGcm` and `IMasterKeyHandle`.
   - [ ] Implement `SqliteDatabaseMigrator` (`Percolator.Infrastructure.Vault.IDatabaseMigrator`).
   - [ ] Create initial EF Core database migration for `percolator.db`.
-  - [ ] Implement `BaselineStage2HostFactory` (`Percolator.Infrastructure.Vault.IStage2HostFactory`).
+  - [ ] Implement `BaselineStage2HostFactory` (`Percolator.Infrastructure.Vault.IStage2HostFactory`) registering scoped `PercolatorDbContext` and `IDbContextFactory<PercolatorDbContext>`.
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Persistence/Core/`)**:
+  - `AesGcmValueConverterTests.EncryptAndDecrypt_RoundtripsSuccessfully`: asserts plaintext roundtrips through BCL `AesGcmValueConverter` and validates ciphertext layout (`[12B Nonce][16B Tag][Ciphertext]`).
   - `PercolatorDbContextTests.ColumnLevelEncryption_StoresKeysAsCiphertextAtRest`: direct byte inspection of raw SQLite database confirms plaintext private keys are absent.
   - `PercolatorDbContextTests.BlobValueComparer_DetectsByteArrayEquality`: queries by byte array values and asserts match success.
   - `SqliteDatabaseMigratorTests.MigrateAsync_AppliesInitialSchema`: executes migration and verifies table existence.
-  - `BaselineStage2HostFactoryTests.BuildHost_ResolvesDbContextWithKey`: builds authenticated host and resolves operational `PercolatorDbContext`.
+  - `BaselineStage2HostFactoryTests.BuildHost_ResolvesDbContextAndFactoryWithKey`: builds authenticated host and resolves operational `PercolatorDbContext` and `IDbContextFactory<PercolatorDbContext>`.
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Persistence.Core`
 
 #### Chunk 2.2: Vertical Slice: Identity Key Stores & Ratchet Sessions
 - **Technical Specifications & Table Schemas (`vault_*`)**:
-  - `vault_identity_keys`: `id` (`BLOB` 32 bytes PK), `private_key_ciphertext` (`BLOB`), `public_key` (`BLOB` 32 bytes), `created_at_utc` (`TEXT`).
-  - `vault_signed_prekeys`: `id` (`INTEGER` PK), `identity_id` (`BLOB` 32 bytes FK), `private_key_ciphertext` (`BLOB`), `public_key` (`BLOB` 32 bytes), `signature` (`BLOB` 64 bytes), `created_at_utc` (`TEXT`).
-  - `vault_onetime_prekeys`: `id` (`INTEGER` PK), `identity_id` (`BLOB` 32 bytes FK), `private_key_ciphertext` (`BLOB`), `public_key` (`BLOB` 32 bytes), `is_consumed` (`INTEGER` boolean, indexed).
-  - `vault_ratchet_sessions`: `session_id` (`TEXT` GUID PK), `peer_identity_id` (`BLOB` 32 bytes, indexed), `root_key_ciphertext` (`BLOB`), `send_chain_key_ciphertext` (`BLOB`), `recv_chain_key_ciphertext` (`BLOB`), `ratchet_state_blob` (`BLOB`), `updated_at_utc` (`TEXT`).
-  - `vault_group_sender_keys`: `group_id` (`TEXT` GUID), `author_identity_id` (`BLOB` 32 bytes), `sender_key_state_ciphertext` (`BLOB`), `updated_at_utc` (`TEXT`), composite PK `PRIMARY KEY(group_id, author_identity_id)`.
+  - **DDL & Schema Definitions**:
+    - `vault_identity_keys`:
+      - `id` (`BLOB` 32 bytes PublicIdentityId, PK)
+      - `private_key_ciphertext` (`BLOB`, encrypted via `AesGcmValueConverter`)
+      - `public_key` (`BLOB` 32 bytes)
+      - `created_at_utc` (`TEXT` ISO 8601)
+    - `vault_signed_prekeys`:
+      - `id` (`INTEGER` PK)
+      - `identity_id` (`BLOB` 32 bytes, FK to `vault_identity_keys(id)` ON DELETE CASCADE)
+      - `private_key_ciphertext` (`BLOB`, encrypted via `AesGcmValueConverter`)
+      - `public_key` (`BLOB` 32 bytes)
+      - `signature` (`BLOB` 64 bytes)
+      - `created_at_utc` (`TEXT` ISO 8601)
+    - `vault_onetime_prekeys`:
+      - `id` (`INTEGER` PK)
+      - `identity_id` (`BLOB` 32 bytes, FK to `vault_identity_keys(id)` ON DELETE CASCADE)
+      - `private_key_ciphertext` (`BLOB`, encrypted via `AesGcmValueConverter`)
+      - `public_key` (`BLOB` 32 bytes)
+      - `is_consumed` (`INTEGER` boolean, indexed: `CREATE INDEX ix_vault_opk_consumed ON vault_onetime_prekeys(identity_id, is_consumed);`)
+    - `vault_ratchet_sessions`:
+      - `session_id` (`TEXT` GUID, PK)
+      - `peer_identity_id` (`BLOB` 32 bytes, indexed: `CREATE INDEX ix_vault_ratchet_peer ON vault_ratchet_sessions(peer_identity_id);`)
+      - `root_key_ciphertext` (`BLOB`, encrypted via `AesGcmValueConverter`)
+      - `send_chain_key_ciphertext` (`BLOB`, encrypted via `AesGcmValueConverter`)
+      - `recv_chain_key_ciphertext` (`BLOB`, encrypted via `AesGcmValueConverter`)
+      - `ratchet_state_blob` (`BLOB`, encrypted domain binary snapshot via `AesGcmValueConverter`)
+      - `updated_at_utc` (`TEXT` ISO 8601)
+    - `vault_group_sender_keys`:
+      - `group_id` (`TEXT` GUID)
+      - `author_identity_id` (`BLOB` 32 bytes)
+      - `sender_key_state_ciphertext` (`BLOB`, encrypted via `AesGcmValueConverter`)
+      - `updated_at_utc` (`TEXT` ISO 8601)
+      - *Composite PK*: `PRIMARY KEY(group_id, author_identity_id)`
+  - **Zero Phase 3 Wire Serializer Dependency**: Repositories persist domain value object byte arrays or internal binary representations directly. State encryption is handled by `AesGcmValueConverter` at the EF Core mapping boundary; repositories do not depend on Phase 3 `ISessionWirePacker` or protobuf schemas (`session.proto`).
 - **Scope & Deliverables**:
   - [ ] Implement Cryptographic Vault Repositories:
     - `SqliteLocalIdentityKeyStore` (`Percolator.Application.Ports.ILocalIdentityKeyStore`)
@@ -482,36 +570,72 @@
     - `SqlitePendingHandshakeRepository` (`Percolator.Application.Ports.IPendingHandshakeRepository`)
     - `SqliteGroupCredentialsRepository` (`Percolator.Domain.Security.Ports.IGroupCredentialsRepository`)
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Persistence/Vault/`)**:
-  - `SqliteRatchetSessionRepositoryTests.SaveAndLoad_PreservesCiphertextAndState`: saves and reloads ratchet session state atomically.
-  - `SqliteGroupSenderKeyRepositoryTests.AtomicCommit_RollsBackOnFailure`: asserts all child records update together or throw without orphan rows.
+  - `SqliteRatchetSessionRepositoryTests.SaveAndLoad_PreservesCiphertextAndState`: saves and reloads ratchet session state atomically; verifies stored fields are ciphertext at rest.
+  - `SqliteGroupSenderKeyRepositoryTests.AtomicCommit_RollsBackOnFailure`: asserts all child records update together or roll back cleanly without orphan rows.
   - `SqliteLocalIdentityKeyStoreTests.StoreAndRetrieveIdentity_MatchesKey`: stores local identity key and asserts decrypted roundtrip.
+  - `SqlitePrivatePreKeyStoreTests.MarkConsumed_UpdatesOpkStatus`: flags one-time prekey as consumed and asserts query excludes consumed keys.
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Persistence.Vault`
 
 #### Chunk 2.3: Vertical Slice: Outbox Jobs & Fast-Path Query Engine
 - **Technical Specifications & Table Schemas (`ops_*`)**:
-  - `ops_outbox_jobs`: `id` (`TEXT` GUID PK), `recipient_id` (`BLOB` 32 bytes, indexed), `delivery_route` (`INTEGER`), `payload` (`BLOB`), `status` (`INTEGER`: `Queued=0`, `InFlight=1`, `Delivered=2`, `Failed=3`, `Paused=4`), `attempt_count` (`INTEGER`), `next_retry_at_utc` (`TEXT`, indexed), `created_at_utc` (`TEXT`), `last_error` (`TEXT` nullable). Composite Index: `CREATE INDEX ix_ops_outbox_retry ON ops_outbox_jobs(status, next_retry_at_utc);`
-  - `ops_inbound_queue`: `id` (`TEXT` GUID PK), `sender_id` (`BLOB` 32 bytes), `app_id` (`INTEGER`), `raw_payload` (`BLOB`), `received_at_utc` (`TEXT`), `processed_at_utc` (`TEXT` nullable).
-  - `ops_reserved_ports`: `port_number` (`INTEGER` PK), `allocated_at_utc` (`TEXT`), `lease_expiry_utc` (`TEXT`).
+  - **DDL & Schema Definitions**:
+    - `ops_outbox_jobs`:
+      - `id` (`TEXT` GUID, PK)
+      - `recipient_id` (`BLOB` 32 bytes, indexed)
+      - `delivery_route` (`INTEGER`)
+      - `payload` (`BLOB`)
+      - `status` (`INTEGER`: `Queued=0`, `InFlight=1`, `Delivered=2`, `Failed=3`, `Paused=4`)
+      - `attempt_count` (`INTEGER`)
+      - `next_retry_at_utc` (`TEXT` ISO 8601, indexed)
+      - `created_at_utc` (`TEXT` ISO 8601)
+      - `last_error` (`TEXT` nullable)
+      - *Composite Index*: `CREATE INDEX ix_ops_outbox_retry ON ops_outbox_jobs(status, next_retry_at_utc);`
+    - `ops_inbound_queue`:
+      - `id` (`TEXT` GUID, PK)
+      - `sender_id` (`BLOB` 32 bytes)
+      - `app_id` (`INTEGER`)
+      - `raw_payload` (`BLOB`)
+      - `received_at_utc` (`TEXT` ISO 8601)
+      - `processed_at_utc` (`TEXT` ISO 8601 nullable)
+    - `ops_reserved_ports`:
+      - `port_number` (`INTEGER` PK)
+      - `allocated_at_utc` (`TEXT` ISO 8601)
+      - `lease_expiry_utc` (`TEXT` ISO 8601)
+  - **CQRS Read-Side Fast Path**:
+    - `SqlOutboxQueryService` projects lightweight status summaries, counts, and retry timings via EF Core `.Select()` projection, strictly omitting the `payload` column to prevent LOH (Large Object Heap) memory churn during UI diagnostic polling.
 - **Scope & Deliverables**:
   - [ ] Implement Outbox Persistence & CQRS Read Model:
-    - `SqliteOutboxRepository` (`Percolator.Application.Delivery.Ports.IOutboxRepository`): write-side enqueue, dequeue, retry tracking.
-    - `SqlOutboxQueryService` (`Percolator.Application.Delivery.Ports.IOutboxQueryService`): fast-path diagnostic summary without hydrating byte payload buffers.
+    - `SqliteOutboxRepository` (`Percolator.Application.Delivery.Ports.IOutboxRepository`): write-side enqueue, dequeue batching, retry calculation tracking.
+    - `SqlOutboxQueryService` (`Percolator.Application.Delivery.Ports.IOutboxQueryService`): fast-path diagnostic summary projecting without hydrating byte payload buffers.
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Persistence/Outbox/`)**:
   - `SqliteOutboxRepositoryTests.EnqueueAndDequeue_TransitionsStateCleanly`: jobs advance cleanly from `Queued` to `InFlight` and `Delivered`.
+  - `SqliteOutboxRepositoryTests.RetryIndex_OptimizesPendingJobQueries`: executes pending retry query and verifies index usage on `ix_ops_outbox_retry`.
   - `SqlOutboxQueryServiceTests.GetOutboxSummary_ProjectsLightweightModel`: verifies projection contains counts and statuses without payload loading.
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Persistence.Outbox`
 
 #### Chunk 2.4: Vertical Slice: Contacts & Channel Repositories
-- **Technical Specifications & Table Schemas (`chat_channels`, `peer_contacts`)**:
-  - `peer_contacts`: `id` (`BLOB` 32 bytes PK), `alias` (`TEXT`), `trust_level` (`INTEGER`), `profile_key` (`BLOB` 32 bytes), `created_at_utc` (`TEXT`), `updated_at_utc` (`TEXT`).
-  - `chat_channels`: `id` (`TEXT` GUID PK), `type` (`INTEGER`: `Direct=0`, `Group=1`), `display_name` (`TEXT`), `created_at_utc` (`TEXT`), `updated_at_utc` (`TEXT`).
+- **Technical Specifications & Table Schemas (`peer_contacts`, `chat_channels`)**:
+  - **DDL & Schema Definitions**:
+    - `peer_contacts`:
+      - `id` (`BLOB` 32 bytes PK)
+      - `alias` (`TEXT`)
+      - `trust_level` (`INTEGER`: `Default=0`, `Verified=1`, `Blocked=2`)
+      - `profile_key` (`BLOB` 32 bytes)
+      - `created_at_utc` (`TEXT` ISO 8601)
+      - `updated_at_utc` (`TEXT` ISO 8601)
+    - `chat_channels`:
+      - `id` (`TEXT` GUID PK)
+      - `type` (`INTEGER`: `Direct=0`, `Group=1`)
+      - `display_name` (`TEXT`)
+      - `created_at_utc` (`TEXT` ISO 8601)
+      - `updated_at_utc` (`TEXT` ISO 8601)
 - **Scope & Deliverables**:
   - [ ] Implement Contacts & Channel Repositories:
-    - `SqlitePeerContactRepository` (`Percolator.Domain.Identities.Ports.IPeerContactRepository`)
+    - `SqlitePeerContactRepository` (`Percolator.Domain.Identities.Ports.IPeerContactRepository`): persists contact trust and profile key metadata.
     - `SqlPeerContactQueryService` (`Percolator.Application.Ports.IPeerContactQueryService`): fast-path summary and detail read models.
-    - `SqliteChannelRepository` (`Percolator.Domain.Channels.Ports.IChannelRepository`)
+    - `SqliteChannelRepository` (`Percolator.Domain.Channels.Ports.IChannelRepository`): persists channel identity, type, and metadata.
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Persistence/Contacts/`)**:
   - `SqlitePeerContactRepositoryTests.SaveContact_UpdatesTrustLevelAndTimestamps`: updates contact state and persists atomically.
   - `SqlPeerContactQueryServiceTests.GetContacts_ProjectsSummaryList`: projects contacts and pending requests into summary view.
@@ -520,12 +644,41 @@
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Persistence.Contacts`
 
 #### Chunk 2.5: Vertical Slice: Profiles & Relay Delivery Repositories
-- **Technical Specifications & Table Schemas (`relay_*`, `peer_profiles`)**:
-  - `relay_prekeys`: `routing_token` (`BLOB` 32 bytes PK), `identity_key` (`BLOB` 32 bytes), `signed_prekey` (`BLOB`), `signature` (`BLOB`), `one_time_prekeys_json` (`TEXT`), `updated_at_utc` (`TEXT`).
-  - `relay_profile_slots`: `blinded_locator` (`BLOB` 32 bytes PK), `write_token_hash` (`BLOB` 32 bytes), `ciphertext` (`BLOB`), `nonce` (`BLOB` 12 bytes), `revision` (`INTEGER`), `expires_at_utc` (`TEXT`).
-  - `relay_ledger_epochs`: `group_id` (`TEXT` GUID PK), `epoch` (`INTEGER`), `roster_blob` (`BLOB`), `updated_at_utc` (`TEXT`).
-  - `peer_profiles`: `peer_id` (`BLOB` 32 bytes PK), `encrypted_profile_blob` (`BLOB`), `version` (`INTEGER`), `updated_at_utc` (`TEXT`).
-  - `peer_mailbox_routing`: `peer_id` (`BLOB` 32 bytes PK), `relay_endpoint` (`TEXT`), `routing_token` (`BLOB` 32 bytes), `updated_at_utc` (`TEXT`).
+- **Technical Specifications & Table Schemas (`relay_*`, `peer_profiles`, `peer_mailbox_routing`)**:
+  - **DDL & Schema Definitions**:
+    - `relay_prekeys`:
+      - `routing_token` (`BLOB` 32 bytes PK)
+      - `identity_key` (`BLOB` 32 bytes)
+      - `signed_prekey` (`BLOB`)
+      - `signature` (`BLOB` 64 bytes)
+      - `one_time_prekeys_json` (`TEXT` serialized via BCL `System.Text.Json`)
+      - `updated_at_utc` (`TEXT` ISO 8601)
+    - `relay_profile_slots`:
+      - `blinded_locator` (`BLOB` 32 bytes PK)
+      - `write_token_hash` (`BLOB` 32 bytes)
+      - `ciphertext` (`BLOB` 1040 bytes padded)
+      - `nonce` (`BLOB` 12 bytes)
+      - `revision` (`INTEGER`)
+      - `expires_at_utc` (`TEXT` ISO 8601)
+    - `relay_ledger_epochs`:
+      - `group_id` (`TEXT` GUID PK)
+      - `epoch` (`INTEGER`)
+      - `roster_blob` (`BLOB`)
+      - `updated_at_utc` (`TEXT` ISO 8601)
+    - `peer_profiles`:
+      - `peer_id` (`BLOB` 32 bytes PK)
+      - `encrypted_profile_blob` (`BLOB`)
+      - `version` (`INTEGER`)
+      - `updated_at_utc` (`TEXT` ISO 8601)
+    - `peer_mailbox_routing`:
+      - `peer_id` (`BLOB` 32 bytes PK)
+      - `relay_endpoint` (`TEXT`)
+      - `routing_token` (`BLOB` 32 bytes)
+      - `updated_at_utc` (`TEXT` ISO 8601)
+  - **Strict Persistence Scope & Zero Network Service Coupling**:
+    - Chunk 2.5 is strictly bounded to relational SQLite EF Core entities, migrations, and local storage repositories.
+    - All network transport endpoints (`UnauthenticatedDeliveryEndpoint`), gRPC stubs, and duplex relay workers (`RelayMailboxStreamWorker`) are strictly excluded and located in Phase 3 (Chunk 3.6).
+    - Serialized prekeys use BCL `System.Text.Json` for `one_time_prekeys_json`, eliminating any dependency on Phase 3 Protobuf types.
 - **Scope & Deliverables**:
   - [ ] Implement Profiles & Relay Delivery Repositories:
     - `SqliteRelayPreKeyRepository` (`Percolator.Domain.Delivery.Ports.IRelayPreKeyRepository`)
@@ -715,8 +868,7 @@
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Plugins/BlobStorage/`)**:
   - `StreamingAesGcmCryptoServiceTests.ExifScrubbing_StripsGpsAndDeviceMetadata`: strips GPS and device tags from JPEG/PNG before upload.
   - `StreamingAesGcmCryptoServiceTests.ChunkedAead_SingleBitflip_FailsAuthentication`: injects 1 bitflip in 64 KB block; asserts authenticated decryption failure.
-  - `RelayBlobClientTests.ResumableDownload_AppliesRangeHeader`: HTTP Range header returns byte slice from requested offset without re-downloading from byte 0.
-  - `LocalFileChunkStoreTests.AtomicCommit_WritesTempFileAndRenames`: validates atomic write to `%AppData%/Percolator/Blobs/{sha256Hex}.blob`.
+  - `RelayBlobClientTests.ResumableDownload_AppliesRangeHeader`: HTTP Range header returns byte slice from requested offset without re-downloading from byte 0.\n  - `LocalFileChunkStoreTests.AtomicCommit_WritesTempFileAndRenames`: validates atomic write to `%AppData%/Percolator/Blobs/{sha256Hex}.blob`.
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Plugins.BlobStorage`
 
