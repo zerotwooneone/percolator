@@ -207,9 +207,13 @@
         {
             if (connection is SqliteConnection sqliteConn)
             {
-                _keyHandle.ApplyKeyToConnection(sqliteConn);
                 using var cmd = sqliteConn.CreateCommand();
-                cmd.CommandText = "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA cipher_memory_security = ON;";
+                cmd.CommandText = "PRAGMA cipher_memory_security = ON;";
+                cmd.ExecuteNonQuery();
+
+                _keyHandle.ApplyKeyToConnection(sqliteConn);
+
+                cmd.CommandText = "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;";
                 cmd.ExecuteNonQuery();
             }
         }
@@ -218,9 +222,13 @@
         {
             if (connection is SqliteConnection sqliteConn)
             {
-                _keyHandle.ApplyKeyToConnection(sqliteConn);
                 await using var cmd = sqliteConn.CreateCommand();
-                cmd.CommandText = "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA cipher_memory_security = ON;";
+                cmd.CommandText = "PRAGMA cipher_memory_security = ON;";
+                await cmd.ExecuteNonQueryAsync(cancellationToken);
+
+                _keyHandle.ApplyKeyToConnection(sqliteConn);
+
+                cmd.CommandText = "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;";
                 await cmd.ExecuteNonQueryAsync(cancellationToken);
             }
         }
