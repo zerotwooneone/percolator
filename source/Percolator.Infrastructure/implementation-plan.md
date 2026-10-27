@@ -1,7 +1,7 @@
 # Percolator.Infrastructure Implementation Plan
 
 ## Refinement Status Gate
-- [ ] Lens 1: Scope & Feature Slice Framing (Status: Approved)
+- [x] Lens 1: Scope & Feature Slice Framing (Status: Approved)
 - [ ] Lens 2: Onion Architecture & Primitive Obsession (Status: Approved)
 - [ ] Lens 3: Threat Modeling & Security Posture (Status: Approved)
 - [ ] Lens 4: High-Value, Low-Brittle Unit Test Design (Status: Approved)
