@@ -14,7 +14,7 @@
 
 `Percolator.Infrastructure` provides concrete technical adapters, persistent storage repositories, network transport clients/servers, cryptographic primitives, and binary serialization engines for the Percolator microkernel.
 
-- **Deep Technical Reference**: For complete database schemas, wire framing protocols, Protobuf definitions, and cryptographic invariants, see [technical-notes.md](file:///C:/Users/squir/source/repos/percolator/source/Percolator.Infrastructure/technical-notes.md).
+- **Technical Specifications**: All database schemas, wire framing protocols, Protobuf definitions, and cryptographic invariants are fully self-contained within this phased implementation roadmap.
 - **Core Guardrails**:
   - Target standard `net10.0` with zero Windows/macOS locks.
   - Two-Stage Container: Stage 1 (Pre-Unlock Bootstrap) $\rightarrow$ Stage 2 (Authenticated Host via `IStage2HostFactory`).
