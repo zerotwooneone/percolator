@@ -429,7 +429,8 @@
   - `VaultEnvelopePackerTests.MasterPasswordChange_RewrapsSlot_PreservesDuress`: re-wraps master slot with new key; preserves salt and duress slot; decrypts successfully.
   - `SqlCipherUnlockTests.HappyPathMasterUnlock_CoordinatesCollaborators`: correct master password derives key, evaluates master slot, executes canary probe, invokes migrator, and returns `UnlockResult.Success(session)`.
   - `SqlCipherUnlockTests.InvalidPassword_ReturnsInvalidCredentials`: incorrect password fails master and duress slots; returns `UnlockResult.InvalidCredentials`.
-  - `SqlCipherUnlockTests.BlankPassword_CreatesEncryptedDatabase_AndUnkeyedConnectionFails`: setup with `VaultPassphrase.Empty` creates encrypted database; raw unkeyed connection fails with native code 26 (`SQLITE_NOTADB`); unlock with empty passphrase succeeds.\n  - `SqlCipherUnlockTests.LockAsync_ScrubsMemoryAndClearsPools`: calling `LockAsync()` clears connection pools (`SqliteConnection.ClearAllPools()`), zeroizes `MasterKeyHandle`, disposes host, transitions status to `Locked`.
+  - `SqlCipherUnlockTests.BlankPassword_CreatesEncryptedDatabase_AndUnkeyedConnectionFails`: setup with `VaultPassphrase.Empty` creates encrypted database; raw unkeyed connection fails with native code 26 (`SQLITE_NOTADB`); unlock with empty passphrase succeeds.
+  - `SqlCipherUnlockTests.LockAsync_ScrubsMemoryAndClearsPools`: calling `LockAsync()` clears connection pools (`SqliteConnection.ClearAllPools()`), zeroizes `MasterKeyHandle`, disposes host, transitions status to `Locked`.
   - `SqlCipherUnlockTests.ChangeMasterPasswordAsync_RewrapsMasterSlot_PreservesDuressSlot`: re-wraps master slot with new key; database remains readable; subsequent unlock requires new password; existing duress password remains valid.
   - `SqlCipherUnlockTests.ConfigureDuressPasswordAsync_IdenticalToMaster_RejectsCollision`: rejects duress password identical to master; header is untouched.
 - **Verification Gate**:
@@ -698,17 +699,25 @@
 ### Phase 3: Network Transport, Wire Protocols & Delivery Dispatching
 
 #### Chunk 3.1: Core Cryptographic & ZK-Proof Engines (Signal & ZkGroup)
+- **Technical Specifications & Cryptographic Invariants**:
+  - **Cryptographic Port Implementation (`SignalCryptoEngine` / `SodiumCryptoEngine`)**:
+    - Realizes `Percolator.Domain.Security.Ports.ICryptoEngine`.
+    - **Ed25519 Signatures (RFC 8032)**: `VerifyEd25519Signature(ReadOnlySpan<byte> publicKey, ReadOnlySpan<byte> message, ReadOnlySpan<byte> signature)` and `SignEd25519(ReadOnlySpan<byte> privateKey, ReadOnlySpan<byte> message, Span<byte> destinationSignature)`.
+    - **Curve25519 / X25519 Diffie-Hellman (RFC 7748)**: `ComputeDiffieHellman(ReadOnlySpan<byte> privateKey, ReadOnlySpan<byte> peerPublicKey, Span<byte> destinationSharedSecret)` and `DeriveX3dhMasterSecret(...)`.
+    - **Symmetric Ratchet Advances**: HKDF SHA-256 HMAC root key updates (`KdfRk`) and symmetric chain key steps (`StepRatchet`).
+    - **AES-256-GCM AEAD**: Authenticated encryption/decryption with 12-byte nonce and 16-byte Poly1305/GCM tag (`EncryptAesGcm`, `DecryptAesGcm`).
+    - **Deterministic Memory Zeroization (Invariant 3)**: Wipe sensitive ephemeral key spans, secret scalars, and intermediate KDF buffers via `CryptographicOperations.ZeroMemory`.
+    - **Cryptographic Logging Guardrail (Invariant 5)**: Redact all keys, hashes, and sensitive spans when `CryptographyOptions.EnableCryptographicMaterialLogging = false`.
+    - **RFC 4122 Big-Endian UUID Normalization (Invariant 7)**: Utilize `Guid.ToByteArray(bigEndian: true)` (from Chunk 1.1) when converting CLR `Guid` identifiers into raw cryptographic byte arrays.
+  - **Zero-Knowledge Presentation Proofs (`ZkgroupCryptographyService`)**:
+    - Realizes `Percolator.Domain.Security.Ports.IZkProofEngine`.
+    - Wraps native `Signal.Interop` / `libzkgroup` C-ABI using safe unmanaged handles.
+    - Generates and verifies zero-knowledge group membership proofs (`VerifyGroupPresentation`, `GenerateGroupPresentation`) against `RelayGroupLedger` epochs without leaking individual member identity keys to relays.
+  - **Strict Forward Independence**:
+    - Depends strictly on standard BCL cryptography (`System.Security.Cryptography`) and native interop bindings. Zero dependency on network transports, outbox repositories, or Phase 4 plugins.
 - **Scope & Deliverables**:
-  - [ ] Implement `SignalCryptoEngine` / `SodiumCryptoEngine` (`Percolator.Domain.Security.Ports.ICryptoEngine`):
-    - Ed25519 signatures and verification (`VerifyEd25519Signature`, `SignEd25519`).
-    - Curve25519 (X25519) Diffie-Hellman scalar multiplication (`ComputeDiffieHellman`, `DeriveX3dhMasterSecret`).
-    - HKDF SHA-256 HMAC root key update (`KdfRk`) and symmetric chain key advances (`StepRatchet`).
-    - AES-256-GCM authenticated encryption/decryption (`EncryptAesGcm`, `DecryptAesGcm`).
-    - Memory zeroization with `CryptographicOperations.ZeroMemory` on sensitive spans.
-    - Logging guardrail: redact all keys when `CryptographyOptions.EnableCryptographicMaterialLogging = false`.
-  - [ ] Implement `ZkgroupCryptographyService` (`Percolator.Domain.Security.Ports.IZkProofEngine`):
-    - Wraps native `Signal.Interop` / `libzkgroup` C-ABI via safe handle management.
-    - Generates and verifies zero-knowledge group membership proofs (`VerifyGroupPresentation`, `GenerateGroupPresentation`).
+  - [ ] Implement `SignalCryptoEngine` (`Percolator.Domain.Security.Ports.ICryptoEngine`).
+  - [ ] Implement `ZkgroupCryptographyService` (`Percolator.Domain.Security.Ports.IZkProofEngine`).
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Security/`)**:
   - `SignalCryptoEngineTests.Ed25519_SignAndVerify_MatchesRfc8032Vectors`: known test vectors match RFC 8032. Low-brittle guarantee: asserts mathematical outputs; zero mock coupling.
   - `SignalCryptoEngineTests.Curve25519_DiffieHellman_MatchesRfc7748Vectors`: known test vectors match RFC 7748. Low-brittle guarantee: asserts mathematical outputs.
@@ -719,71 +728,396 @@
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Security.Crypto`
 
 #### Chunk 3.2: Core Delivery & Session Wire Schemas (`Protos/`)
+- **Technical Specifications & Wire Contracts**:
+  - Configure `Google.Protobuf` (v3.25.2) and `Grpc.Tools` (v2.57.0) in `Percolator.Infrastructure.csproj`.
+  - **Core Wire Schemas (Organized by Trust Boundary & Authentication Model)**:
+    - **1. `unauthenticated_delivery.proto` (Public Edge / Sealed Sender & Capability Ingress)**:
+      ```protobuf
+      syntax = "proto3";
+      package percolator.infrastructure;
+      import "google/protobuf/timestamp.proto";
+
+      message SealedEnvelopeProto {
+        bytes recipient_routing_token = 1;
+        bytes delivery_token = 2;
+        bytes encrypted_package = 3;
+        google.protobuf.Timestamp expires_at_utc = 4;
+      }
+
+      message DeliveryAckProto {
+        bool success = 1;
+        string error_message = 2;
+      }
+
+      message EnqueueAckProto {
+        bool accepted = 1;
+        google.protobuf.Timestamp expires_at_utc = 2;
+      }
+
+      message ProfileFetchRequestProto {
+        bytes blinded_locator = 1;
+      }
+
+      message ProfileFetchResponseProto {
+        bool found = 1;
+        bytes nonce = 2;
+        bytes ciphertext = 3; // 1040 B padded block
+        uint32 revision = 4;
+        google.protobuf.Timestamp expires_at_utc = 5;
+      }
+
+      message ProfileUploadRequestProto {
+        bytes blinded_locator = 1;
+        bytes write_token = 2;
+        uint32 revision = 3;
+        bytes nonce = 4;
+        bytes ciphertext = 5;
+        google.protobuf.Timestamp expires_at_utc = 6;
+      }
+
+      message ProfileUploadResponseProto {
+        bool success = 1;
+        string error_message = 2;
+      }
+
+      message ProfileDeleteRequestProto {
+        bytes blinded_locator = 1;
+        bytes write_token = 2;
+      }
+
+      message ProfileDeleteResponseProto {
+        bool success = 1;
+        string error_message = 2;
+      }
+
+      message BlindBlobDownloadRequestProto {
+        bytes blob_id = 1; // 32-byte SHA-256 blob locator
+      }
+
+      message BlindBlobChunkProto {
+        bytes chunk_data = 1;
+        uint32 chunk_index = 2;
+        bool is_final_chunk = 3;
+      }
+
+      service UnauthenticatedDeliveryService {
+        rpc DeliverDirect(SealedEnvelopeProto) returns (DeliveryAckProto);
+        rpc EnqueueMailbox(SealedEnvelopeProto) returns (EnqueueAckProto);
+        rpc GetProfile(ProfileFetchRequestProto) returns (ProfileFetchResponseProto);
+        rpc UploadProfile(ProfileUploadRequestProto) returns (ProfileUploadResponseProto);
+        rpc DeleteProfile(ProfileDeleteRequestProto) returns (ProfileDeleteResponseProto);
+        rpc DownloadBlindBlob(BlindBlobDownloadRequestProto) returns (stream BlindBlobChunkProto);
+      }
+      ```
+    - **2. `authenticated_relay.proto` (Mailbox Ownership, Pre-Key Directory & Stream Management)**:
+      ```protobuf
+      syntax = "proto3";
+      package percolator.infrastructure;
+      import "google/protobuf/timestamp.proto";
+
+      message QueuedSealedEnvelopeProto {
+        string queue_id = 1;
+        bytes envelope_payload = 2;
+        google.protobuf.Timestamp enqueued_at_utc = 3;
+      }
+
+      message AuthChallengeProto {
+        bytes nonce = 1;
+        google.protobuf.Timestamp expires_at_utc = 2;
+      }
+
+      message AuthResponseProto {
+        bytes signature = 1;
+      }
+
+      message AuthResultProto {
+        bool authenticated = 1;
+        string reason = 2;
+      }
+
+      message MailboxAckProto {
+        string queue_id = 1;
+        bool acknowledged = 2;
+      }
+
+      message MailboxStreamClientMessage {
+        oneof payload {
+          AuthResponseProto auth_response = 1;
+          MailboxAckProto ack = 2;
+        }
+      }
+
+      message MailboxStreamServerMessage {
+        oneof payload {
+          AuthChallengeProto auth_challenge = 1;
+          AuthResultProto auth_result = 2;
+          QueuedSealedEnvelopeProto envelope = 3;
+        }
+      }
+
+      message RegisterMailboxRequest {
+        bytes owner_identity_key = 1;
+        bytes routing_token = 2;
+        bytes authorized_delivery_token = 3;
+        bytes signature = 4;
+      }
+
+      message RegisterMailboxResponse {
+        bool success = 1;
+      }
+
+      message DrainMailboxRequest {
+        bytes routing_token = 1;
+        bytes auth_token = 2;
+      }
+
+      message DrainMailboxResponse {
+        repeated QueuedSealedEnvelopeProto envelopes = 1;
+      }
+
+      message OneTimePreKeyProto {
+        bytes key_id = 1;
+        bytes public_key = 2;
+      }
+
+      message PublishPreKeyBundleRequest {
+        bytes identity_key = 1;
+        bytes signed_prekey = 2;
+        bytes prekey_signature = 3;
+        bytes signed_prekey_id = 4;
+        repeated OneTimePreKeyProto one_time_prekeys = 5;
+        bytes signature = 6;
+      }
+
+      message PublishPreKeyBundleResponse {
+        bool success = 1;
+      }
+
+      message FetchPreKeyBundleRequest {
+        bytes recipient_routing_token = 1;
+        bytes requester_identity_key = 2;
+        bytes requester_signature = 3;
+        google.protobuf.Timestamp timestamp_utc = 4;
+      }
+
+      message FetchPreKeyBundleResponse {
+        bytes identity_key = 1;
+        bytes signed_prekey = 2;
+        bytes prekey_signature = 3;
+        bytes signed_prekey_id = 4;
+        optional bytes one_time_prekey = 5;
+        optional bytes one_time_prekey_id = 6;
+      }
+
+      service AuthenticatedRelayService {
+        rpc ConnectMailboxStream(stream MailboxStreamClientMessage) returns (stream MailboxStreamServerMessage);
+        rpc RegisterMailbox(RegisterMailboxRequest) returns (RegisterMailboxResponse);
+        rpc DrainMailbox(DrainMailboxRequest) returns (DrainMailboxResponse);
+        rpc PublishPreKeyBundle(PublishPreKeyBundleRequest) returns (PublishPreKeyBundleResponse);
+        rpc FetchPreKeyBundle(FetchPreKeyBundleRequest) returns (FetchPreKeyBundleResponse);
+      }
+      ```
+    - **3. `anonymous_group.proto` (Zero-Knowledge Group Relay Service)**:
+      ```protobuf
+      syntax = "proto3";
+      package percolator.infrastructure;
+
+      message GroupStreamClientMessage {
+        bytes conversation_id = 1;
+        uint32 current_epoch = 2;
+        bytes zk_presentation_proof = 3;
+      }
+
+      message GroupBroadcastEnvelope {
+        bytes conversation_id = 1;
+        uint32 epoch = 2;
+        uint32 sender_key_iteration = 3;
+        bytes ciphertext = 4;
+        bytes author_signature = 5;
+      }
+
+      message EpochMutationNotification {
+        bytes conversation_id = 1;
+        uint32 new_epoch = 2;
+      }
+
+      message GroupStreamServerMessage {
+        oneof payload {
+          GroupBroadcastEnvelope broadcast = 1;
+          EpochMutationNotification mutation = 2;
+        }
+      }
+
+      message DispatchGroupMessageRequest {
+        bytes conversation_id = 1;
+        uint32 epoch = 2;
+        bytes zk_presentation_proof = 3;
+        uint32 sender_key_iteration = 4;
+        bytes ciphertext = 5;
+        bytes author_signature = 6;
+      }
+
+      message DispatchGroupMessageResponse {
+        bool accepted = 1;
+      }
+
+      message CommitRosterMutationRequest {
+        bytes conversation_id = 1;
+        uint32 base_epoch = 2;
+        bytes new_roster_blob = 3;
+        repeated bytes new_routing_tokens = 4;
+        bytes zk_presentation_proof = 5;
+      }
+
+      message CommitRosterMutationResponse {
+        bool committed = 1;
+        uint32 new_epoch = 2;
+      }
+
+      message FetchGroupStateRequest {
+        bytes conversation_id = 1;
+        bytes zk_presentation_proof = 2;
+      }
+
+      message FetchGroupStateResponse {
+        uint32 current_epoch = 1;
+        bytes encrypted_roster_blob = 2;
+      }
+
+      service AnonymousGroupRelayService {
+        rpc SubscribeGroupStream(GroupStreamClientMessage) returns (stream GroupStreamServerMessage);
+        rpc DispatchGroupMessage(DispatchGroupMessageRequest) returns (DispatchGroupMessageResponse);
+        rpc CommitRosterMutation(CommitRosterMutationRequest) returns (CommitRosterMutationResponse);
+        rpc FetchGroupState(FetchGroupStateRequest) returns (FetchGroupStateResponse);
+      }
+      ```
+    - **4. `session.proto` (Inner Cryptographic Packaging)**:
+      ```protobuf
+      syntax = "proto3";
+      package percolator.infrastructure;
+
+      message RatchetHeaderProto {
+        bytes ratchet_public_key = 1;
+        uint32 counter = 2;
+        uint32 previous_chain_length = 3;
+      }
+
+      message DirectSessionPackageProto {
+        RatchetHeaderProto header = 1;
+        bytes nonce = 2;
+        bytes ciphertext = 3;
+      }
+
+      message GroupSessionPackageProto {
+        bytes conversation_id = 1;
+        uint32 iteration = 2;
+        bytes ciphertext = 3;
+        bytes author_signature = 4;
+      }
+
+      message HandshakeInvitationPackageProto {
+        bytes initiator_identity_key = 1;
+        bytes initiator_ephemeral_key = 2;
+        bytes signed_prekey_id = 3;
+        bytes onetime_prekey_id = 4;
+        bytes encrypted_payload = 5;
+      }
+      ```
+  - **Explicit Phase 4 Boundary Exclusion**:
+    - Application plugin schemas (`chat.proto`, `discovery.proto`, `file_transfer.proto`) are strictly excluded from Phase 3 and deferred to Phase 4 (Chunks 4.1, 4.2, 4.4).
 - **Scope & Deliverables**:
   - [ ] Configure `Google.Protobuf` and `Grpc.Tools` in `Percolator.Infrastructure.csproj`.
-  - [ ] Author Protobuf schemas in `Percolator.Infrastructure/Protos/`:
-    - `unauthenticated_delivery.proto`
-    - `authenticated_relay.proto`
-    - `anonymous_group.proto`
-    - `session.proto`
-  - [ ] Verify clean compilation of generated C# classes.
+  - [ ] Author Protobuf schemas in `Percolator.Infrastructure/Protos/`: `unauthenticated_delivery.proto`, `authenticated_relay.proto`, `anonymous_group.proto`, and `session.proto`.
+  - [ ] Verify clean compilation and code generation of typed C# messages and gRPC base services.
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Protos/`)**:
-  - `CoreProtoCompilationTests.AllProtos_GenerateValidClrTypes`: tests that message types instantiate and default-serialize without schema errors.
+  - `CoreProtoCompilationTests.AllProtos_GenerateValidClrTypes`: tests that core message types instantiate and default-serialize without schema errors.
 - **Verification Gate**:
   - `dotnet build Percolator.Infrastructure`
 
 #### Chunk 3.3: Generic Session Wire Packaging & Payload Serializer
+- **Technical Specifications & Interface Boundaries**:
+  - **`ProtobufSessionWirePacker` (`Percolator.Application.Ports.ISessionWirePacker`)**:
+    - Packs typed session structures into `DirectSessionPackageProto` and `GroupSessionPackageProto`.
+    - Envelopes them into `SealedEnvelopeProto` carrying recipient `BlindedRoutingToken` and `DeliveryToken`.
+    - Unpacks incoming `SealedEnvelopeProto.encrypted_package` into typed `InboundDirectEnvelope` or `InboundGroupEnvelope`.
+    - **Strict Phase 4 Independence**: Packs domain-level binary byte slices (`ReadOnlyMemory<byte>`) into `session.proto` wire structures with zero dependency on `chat.proto` or application-layer plugins.
+  - **`ProtobufPayloadSerializer` (`Percolator.PluginSdk.IPayloadSerializer`)**:
+    - High-performance binary serialization using `Google.Protobuf.CodedOutputStream` and `IBufferWriter<byte>`.
+    - Generic span-based deserialization using `Google.Protobuf.MessageParser<T>`.
+    - Completely decoupled from concrete plugin schemas; implements a clean compile-time boundary for arbitrary protobuf-serializable plugin payloads.
 - **Scope & Deliverables**:
-  - [ ] Implement `ProtobufSessionWirePacker` (`Percolator.Application.Ports.ISessionWirePacker`):
-    - Packs `DirectSessionPackageProto` and `GroupSessionPackageProto`.
-    - Wraps into `SealedEnvelopeProto` with recipient `BlindedRoutingToken` and `DeliveryToken`.
-    - Unpacks incoming `SealedEnvelopeProto` records into typed `InboundDirectEnvelope` or `InboundGroupEnvelope`.
-  - [ ] Implement `ProtobufPayloadSerializer` (`Percolator.PluginSdk.IPayloadSerializer`):
-    - Generic binary serialization via `Google.Protobuf.CodedOutputStream` and `IBufferWriter<byte>`.
-    - Generic span-based deserialization via `Google.Protobuf.MessageParser<T>`.
-    - Completely decoupled from specific plugin schemas (clean compile-time boundary).
+  - [ ] Implement `ProtobufSessionWirePacker` (`Percolator.Application.Ports.ISessionWirePacker`).
+  - [ ] Implement `ProtobufPayloadSerializer` (`Percolator.PluginSdk.IPayloadSerializer`).
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Packaging/`)**:
   - `ProtobufSessionWirePackerTests.RoundtripDirectSession_PacksAndUnpacksCorrectly`: wraps and unwraps typed `InboundDirectEnvelope`.
-  - `ProtobufSessionWirePackerTests.ReplyContext_ExcludesQuoteSnippetFromWire`: quote snippet text is strictly absent from wire payload (only parent ID and author ID).
+  - `ProtobufSessionWirePackerTests.GroupSessionPackage_PacksIterationAndSignature`: packages group message iteration, signature, and ciphertext into `GroupSessionPackageProto`.
   - `ProtobufPayloadSerializerTests.GenericPayloadSerialization_RoundtripsCorrectly`: serializes and deserializes generic payloads.
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Packaging`
 
 #### Chunk 3.4: Transport Primitives, Interceptors & Endpoint Validation
+- **Technical Specifications & Concrete Mechanics**:
+  - **Dynamic Port Range Probing (5200–5299)**:
+    - Coordinates with Phase 2's `ops_reserved_ports` table:
+      1. Query `ops_reserved_ports` via `PercolatorDbContext` to filter out currently leased ports.
+      2. Probe ports sequentially using `TcpListener` with dual-mode IPv6 and exclusive binding:
+         ```csharp
+         var listener = new TcpListener(IPAddress.IPv6Any, port);
+         listener.Server.DualMode = true;
+         listener.Server.ExclusiveAddressUse = true;
+         listener.Start();
+         ```
+      3. If `SocketException` (`AddressAlreadyInUse`), advance to next port.
+      4. Upon successful bind, commit lease to `ops_reserved_ports` with 30-minute renewal heartbeat.
+  - **gRPC Interceptor Pipeline**:
+    - **`IdentityReadinessInterceptor`**:
+      - Executes before every incoming RPC.
+      - Evaluates `INetworkStealthGate.IsNetworkActive` and checks whether the database vault is unlocked.
+      - If false, short-circuits with `Status(StatusCode.Unavailable, "Node operates in total network stealth. Unlock identity to proceed.")`.
+    - **`DeliveryCertificateAuthInterceptor`**:
+      - Executes on authenticated relay calls (`authenticated_relay.proto`).
+      - Extracts metadata headers: `x-percolator-identity` (hex-encoded `PublicIdentityId`), `x-percolator-timestamp` (Unix ms), and `x-percolator-signature`.
+      - Rejects if timestamp delta exceeds $\pm 60\text{ seconds}$ from relay UTC.
+      - Verifies Ed25519 signature over `method_path || timestamp_bytes || request_payload_hash` using `SignalCryptoEngine` (Chunk 3.1).
+  - **Transport Primitives**:
+    - `InMemoryTransportCertificateProvider`: Ephemeral ECDSA P-256 self-signed certificate with loopback SANs generated in memory with zero disk I/O.
+    - `CallbackEndpointValidator`: Validates peer endpoints before connecting; blocks loopback, RFC 1918 private subnets, and link-local addresses unless explicit dev flags (`AllowLoopback = true`, `AllowLan = true`) are set.
+    - `PeerGrpcChannelFactory`: Thread-safe channel cache using `ConcurrentDictionary<string, Lazy<GrpcChannel>>` with 2-second timeout and clean socket disposal.
+    - `PrimaryContainerServiceActivator<T>`: Bridges Kestrel gRPC listener container to host DI container (`IServiceProvider`) with scoped lifetime cleanup.
 - **Scope & Deliverables**:
-  - [ ] Implement `InMemoryTransportCertificateProvider`:
-    - Generates disposable ECDSA P-256 self-signed certificate with loopback SANs in memory with zero disk I/O.
-  - [ ] Implement `CallbackEndpointValidator`:
-    - Validates endpoints before connection; blocks loopback, RFC1918 private subnets, link-local unless explicit dev flags (`AllowLoopback = true`, `AllowLan = true`).
-  - [ ] Implement dynamic port range probing (5200–5299) and port contention resolution via `ops_reserved_ports`.
-  - [ ] Implement `PeerGrpcChannelFactory`:
-    - Thread-safe channel cache using `ConcurrentDictionary<string, Lazy<GrpcChannel>>`.
-    - Teardown policy with 2-second timeout and clean socket disposal.
-  - [ ] Implement gRPC Interceptor Pipeline:
-    - `IdentityReadinessInterceptor`: Rejects incoming RPCs with `StatusCode.Unavailable` if no active identity or vault locked.
-    - `DeliveryCertificateAuthInterceptor`: Validates caller identity metadata, anti-replay timestamp, and signature proof.
-  - [ ] Implement `PrimaryContainerServiceActivator<T>`:
-    - Bridges Kestrel gRPC listener container to host DI container (`IServiceProvider`) with scoped lifetime cleanup.
+  - [ ] Implement `InMemoryTransportCertificateProvider`.
+  - [ ] Implement `CallbackEndpointValidator`.
+  - [ ] Implement dynamic port range probing (5200–5299) and lease renewal on `ops_reserved_ports`.
+  - [ ] Implement `PeerGrpcChannelFactory`.
+  - [ ] Implement `IdentityReadinessInterceptor` and `DeliveryCertificateAuthInterceptor`.
+  - [ ] Implement `PrimaryContainerServiceActivator<T>`.
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Transport/Primitives/`)**:
-  - `CallbackEndpointValidatorTests.RejectsPrivateAndLoopbackIps_UnlessDevFlag`: rejects loopback and RFC1918 IPs by default.
-  - `IdentityReadinessInterceptorTests.VaultLocked_ReturnsUnavailable`: incoming RPC returns `StatusCode.Unavailable` when vault locked or stealth active.
+  - `CallbackEndpointValidatorTests.RejectsPrivateAndLoopbackIps_UnlessDevFlag`: rejects loopback and RFC 1918 IPs by default.
+  - `IdentityReadinessInterceptorTests.VaultLocked_ReturnsUnavailable`: incoming RPC returns `StatusCode.Unavailable` when vault is locked or stealth active.
   - `DeliveryCertificateAuthInterceptorTests.TimestampSkewExceeded_RejectsRequest`: rejects signatures with timestamp delta > 60s.
+  - `PortProberTests.PortContention_BindsNextAvailablePort`: simulates port collision and verifies lease assignment on subsequent free port.
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Transport.Primitives`
 
 #### Chunk 3.5: Ingress Filtering & Transport Route Dispatching
-- **Scope & Deliverables**:
-  - [ ] Implement `IngressFilterService` (`Percolator.Application.Ports.IIngressFilterService`):
-    - Enforces blacklist filtering (`PeerTrustLevel.Blocked`), sender rate limits, and identity dormancy status.
-  - [ ] Implement `StreamRegistry` (`Percolator.Application.Ports.IStreamRegistry`):
+- **Technical Specifications & Collaborator Mapping**:
+  - **`IngressFilterService` (`Percolator.Application.Ports.IIngressFilterService`)**:
+    - Edge filtering before cryptographic operations: queries `IPeerContactRepository` (from Phase 2 Chunk 2.4) to check `PeerTrustLevel.Blocked`. Enforces sender rate limits and identity dormancy status.
+  - **`StreamRegistry` (`Percolator.Application.Ports.IStreamRegistry`)**:
     - Tracks active gRPC duplex and server-streaming connections for direct peers and home relays.
     - Detects connection drops and handles flow-control saturation (`StreamWriteResult.Dropped`).
-  - [ ] Implement `TransportDispatcher` (`Percolator.Application.Delivery.Ports.ITransportDispatcher`):
-    - Direct 1:1: dispatches `DeliverDirect` over ephemeral TLS.
-    - Relayed 1:1: dispatches `EnqueueMailbox` to recipient's home relay using `DeliveryToken`.
-    - Relayed Group: dispatches `DispatchGroupMessage` to shared group relay with ZK membership proof.
-  - [ ] Implement `SealedEnvelopeUnwrapper` (`Percolator.Application.Ports.ISealedEnvelopeUnwrapper`):
-    - Bridges relay `MailboxEnvelope` instances to strongly typed `InboundEnvelope` objects.
+  - **`TransportDispatcher` (`Percolator.Application.Delivery.Ports.ITransportDispatcher`)**:
+    - Consumes domain delivery ports and routes messages across three transport paths:
+      1. Direct 1:1: dispatches `DeliverDirect` over ephemeral TLS via `UnauthenticatedDeliveryService.DeliverDirect`.
+      2. Relayed 1:1: dispatches `EnqueueMailbox` to recipient's designated home relay using `DeliveryToken`.
+      3. Relayed Group: dispatches `DispatchGroupMessage` to shared group relay accompanied by ZK presentation proof from `IZkProofEngine` (Chunk 3.1).
+  - **`SealedEnvelopeUnwrapper` (`Percolator.Application.Ports.ISealedEnvelopeUnwrapper`)**:
+    - Bridges relay `MailboxEnvelope` instances to strongly typed `InboundEnvelope` domain objects.
+- **Scope & Deliverables**:
+  - [ ] Implement `IngressFilterService` (`Percolator.Application.Ports.IIngressFilterService`).
+  - [ ] Implement `StreamRegistry` (`Percolator.Application.Ports.IStreamRegistry`).
+  - [ ] Implement `TransportDispatcher` (`Percolator.Application.Delivery.Ports.ITransportDispatcher`).
+  - [ ] Implement `SealedEnvelopeUnwrapper` (`Percolator.Application.Ports.ISealedEnvelopeUnwrapper`).
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Transport/Dispatching/`)**:
   - `IngressFilterServiceTests.BlockedSender_RejectsEnvelopeBeforeCrypto`: envelopes from blocked identities rejected before any cryptographic operations.
   - `StreamRegistryTests.BackpressureSaturation_ReturnsDropped`: queue overflow returns `StreamWriteResult.Dropped`.
@@ -792,14 +1126,21 @@
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Transport.Dispatching`
 
 #### Chunk 3.6: gRPC Ingress Endpoints & Hosted Relay Workers
-- **Scope & Deliverables**:
-  - [ ] Implement `UnauthenticatedDeliveryEndpoint` (ASP.NET Core gRPC Service on relays and direct peer listening ports):
+- **Technical Specifications & Service Endpoints**:
+  - **`UnauthenticatedDeliveryEndpoint` (ASP.NET Core gRPC Service on relays and direct peer listening ports)**:
+    - Realizes `UnauthenticatedDeliveryService.UnauthenticatedDeliveryServiceBase`.
     - Handles `DeliverDirect`, `EnqueueMailbox`, `GetProfile`, `UploadProfile`, `DeleteProfile`, and `DownloadBlindBlob`.
-  - [ ] Implement Duplex & Streaming Workers (`IHostedService`):
-    - `RelayMailboxStreamWorker`: Duplex stream to home relay with automatic reconnection and jittered exponential backoff.
-    - `RelayGroupStreamWorker`: Live subscription stream with ZK proofs for active group channels.
+    - **Strict Boundary Framing**: Interacts strictly with transport layer pipes and Phase 2 repositories (`relay_profile_slots` via `IRelayProfileRepository`). Zero application-level media decoding, image transformations, or file reassembly (strictly located in Phase 4 Chunks 4.3 and 4.4).
+  - **Duplex & Streaming Background Workers (`IHostedService`)**:
+    - `RelayMailboxStreamWorker`: Duplex streaming connection to home relay (`ConnectMailboxStream`) with automatic reconnection and jittered exponential backoff.
+    - `RelayGroupStreamWorker`: Live subscription stream (`SubscribeGroupStream`) with ZK presentation proofs for active group channels.
+- **Scope & Deliverables**:
+  - [ ] Implement `UnauthenticatedDeliveryEndpoint` (`UnauthenticatedDeliveryService.UnauthenticatedDeliveryServiceBase`).
+  - [ ] Implement `RelayMailboxStreamWorker` (`IHostedService`).
+  - [ ] Implement `RelayGroupStreamWorker` (`IHostedService`).
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Transport/Endpoints/`)**:
   - `UnauthenticatedDeliveryEndpointTests.DeliverDirect_ValidEnvelope_ReturnsSuccessAck`: validates RPC execution and ack generation.
+  - `UnauthenticatedDeliveryEndpointTests.UploadProfile_PersistsSlot`: verifies profile slot persistence via `IRelayProfileRepository`.
   - `RelayMailboxStreamWorkerTests.ConnectionDrop_RetriesWithExponentialBackoff`: tests automatic reconnection retry sequence.
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Transport.Endpoints`
@@ -817,8 +1158,7 @@
   - [ ] Implement Chat Persistence & Fast-Path CQRS Query Services:
     - `SqlChatMessageRepository` (`Percolator.Apps.Chat.Ports.IChatMessageRepository`)
     - `SqlChatMessageQueryService` (`Percolator.Apps.Chat.Ports.IChatMessageQueryService`): paged SQL timeline read model.
-    - `SqlConversationListQueryService` (`Percolator.Apps.Chat.Ports.IConversationListQueryService`): unread badges and last message snippet rollups.
-    - `SqlGroupInvitationRepository` (`Percolator.Apps.Chat.Ports.IGroupInvitationRepository`)
+    - `SqlConversationListQueryService` (`Percolator.Apps.Chat.Ports.IConversationListQueryService`): unread badges and last message snippet rollups.\n    - `SqlGroupInvitationRepository` (`Percolator.Apps.Chat.Ports.IGroupInvitationRepository`)
     - `SqlGroupInvitationQueryService` (`Percolator.Apps.Chat.Ports.IGroupInvitationQueryService`)
     - `SqlUnknownGroupMessageCacheRepository` (`Percolator.Apps.Chat.Ports.IUnknownGroupMessageCacheRepository`)
   - [ ] Implement Chat Lifecycle Background Pruners:
@@ -868,7 +1208,8 @@
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Plugins/BlobStorage/`)**:
   - `StreamingAesGcmCryptoServiceTests.ExifScrubbing_StripsGpsAndDeviceMetadata`: strips GPS and device tags from JPEG/PNG before upload.
   - `StreamingAesGcmCryptoServiceTests.ChunkedAead_SingleBitflip_FailsAuthentication`: injects 1 bitflip in 64 KB block; asserts authenticated decryption failure.
-  - `RelayBlobClientTests.ResumableDownload_AppliesRangeHeader`: HTTP Range header returns byte slice from requested offset without re-downloading from byte 0.\n  - `LocalFileChunkStoreTests.AtomicCommit_WritesTempFileAndRenames`: validates atomic write to `%AppData%/Percolator/Blobs/{sha256Hex}.blob`.
+  - `RelayBlobClientTests.ResumableDownload_AppliesRangeHeader`: HTTP Range header returns byte slice from requested offset without re-downloading from byte 0.
+  - `LocalFileChunkStoreTests.AtomicCommit_WritesTempFileAndRenames`: validates atomic write to `%AppData%/Percolator/Blobs/{sha256Hex}.blob`.
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Plugins.BlobStorage`
 
