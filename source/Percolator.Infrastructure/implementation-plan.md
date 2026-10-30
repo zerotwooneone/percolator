@@ -736,6 +736,7 @@
       - `processed_at_utc` (`TEXT` ISO 8601 nullable)
     - `ops_reserved_ports`:
       - `port_number` (`INTEGER` PK)
+      - `lease_token` (`TEXT` GUID PortLeaseToken)
       - `allocated_at_utc` (`TEXT` ISO 8601)
       - `lease_expiry_utc` (`TEXT` ISO 8601)
   - **CQRS Read-Side Fast Path**:
@@ -989,9 +990,24 @@
         bool is_final_chunk = 3;
       }
 
+      message FetchPreKeyBundleRequest {
+        bytes recipient_routing_token = 1;
+        bytes delivery_token = 2; // Capability token preventing anonymous OPK starvation
+      }
+
+      message FetchPreKeyBundleResponse {
+        bytes identity_key = 1;
+        bytes signed_prekey = 2;
+        bytes prekey_signature = 3;
+        uint32 signed_prekey_id = 4;
+        optional bytes one_time_prekey = 5;
+        optional uint32 one_time_prekey_id = 6;
+      }
+
       service UnauthenticatedDeliveryService {
         rpc DeliverDirect(SealedEnvelopeProto) returns (DeliveryAckProto);
         rpc EnqueueMailbox(SealedEnvelopeProto) returns (EnqueueAckProto);
+        rpc FetchPreKeyBundle(FetchPreKeyBundleRequest) returns (FetchPreKeyBundleResponse);
         rpc GetProfile(ProfileFetchRequestProto) returns (ProfileFetchResponseProto);
         rpc UploadProfile(ProfileUploadRequestProto) returns (ProfileUploadResponseProto);
         rpc DeleteProfile(ProfileDeleteRequestProto) returns (ProfileDeleteResponseProto);
@@ -1016,7 +1032,8 @@
       }
 
       message AuthResponseProto {
-        bytes signature = 1;
+        bytes routing_token = 1;
+        bytes challenge_hmac = 2; // HMAC-SHA256(drain_token, challenge_nonce)
       }
 
       message AuthResultProto {
@@ -1045,10 +1062,9 @@
       }
 
       message RegisterMailboxRequest {
-        bytes owner_identity_key = 1;
-        bytes routing_token = 2;
-        bytes authorized_delivery_token = 3;
-        bytes signature = 4;
+        bytes routing_token = 1;
+        bytes authorized_delivery_token = 2;
+        bytes drain_token = 3;
       }
 
       message RegisterMailboxResponse {
@@ -1057,7 +1073,7 @@
 
       message DrainMailboxRequest {
         bytes routing_token = 1;
-        bytes auth_token = 2;
+        bytes drain_token = 2;
       }
 
       message DrainMailboxResponse {
@@ -1069,33 +1085,24 @@
         bytes public_key = 2;
       }
 
-      message PublishPreKeyBundleRequest {
-        bytes identity_key = 1;
-        bytes signed_prekey = 2;
-        bytes prekey_signature = 3;
+      message PreKeyBundlePayloadProto {
+        bytes owner_identity_id = 1;
+        uint32 device_id = 2;
+        bytes identity_key = 3;
         uint32 signed_prekey_id = 4;
-        repeated OneTimePreKeyProto one_time_prekeys = 5;
-        bytes signature = 6;
+        bytes signed_prekey = 5;
+        bytes prekey_signature = 6;
+        repeated OneTimePreKeyProto one_time_prekeys = 7;
+        google.protobuf.Timestamp published_at_utc = 8;
+      }
+
+      message PublishPreKeyBundleRequest {
+        bytes payload_bytes = 1; // Serialized PreKeyBundlePayloadProto wire bytes
+        bytes signature = 2;     // Ed25519 signature over payload_bytes
       }
 
       message PublishPreKeyBundleResponse {
         bool success = 1;
-      }
-
-      message FetchPreKeyBundleRequest {
-        bytes recipient_routing_token = 1;
-        bytes requester_identity_key = 2;
-        bytes requester_signature = 3;
-        google.protobuf.Timestamp timestamp_utc = 4;
-      }
-
-      message FetchPreKeyBundleResponse {
-        bytes identity_key = 1;
-        bytes signed_prekey = 2;
-        bytes prekey_signature = 3;
-        uint32 signed_prekey_id = 4;
-        optional bytes one_time_prekey = 5;
-        optional uint32 one_time_prekey_id = 6;
       }
 
       service AuthenticatedRelayService {
@@ -1103,7 +1110,6 @@
         rpc RegisterMailbox(RegisterMailboxRequest) returns (RegisterMailboxResponse);
         rpc DrainMailbox(DrainMailboxRequest) returns (DrainMailboxResponse);
         rpc PublishPreKeyBundle(PublishPreKeyBundleRequest) returns (PublishPreKeyBundleResponse);
-        rpc FetchPreKeyBundle(FetchPreKeyBundleRequest) returns (FetchPreKeyBundleResponse);
       }
       ```
     - **3. `anonymous_group.proto` (Zero-Knowledge Group Relay Service)**:
@@ -1245,40 +1251,59 @@
 
 #### Chunk 3.4: Transport Primitives, Interceptors & Endpoint Validation
 - **Technical Specifications & Concrete Mechanics**:
-  - **Dynamic Port Range Probing (5200–5299)**:
-    - Coordinates with Phase 2's `ops_reserved_ports` table:
-      1. Query `ops_reserved_ports` via `PercolatorDbContext` to filter out currently leased ports.
-      2. Probe ports sequentially using `TcpListener` with dual-mode IPv6 and exclusive binding:
+  - **Hexagonal Port Reservation Architecture**:
+    - *Scope Note*: Implementing application code is not normally a part of the infrastructure implementation plan, but defining the application port `IPortReservationService` in `Percolator.Application.Ports` has been explicitly approved by the user to enforce strict Hexagonal / Onion architecture boundaries.
+    - **Application Port (`Percolator.Application.Ports.IPortReservationService`)**:
+      ```csharp
+      public readonly record struct PortNumber(int Value);
+      public readonly record struct PortLeaseToken(Guid Value);
+      public readonly record struct PortRange(PortNumber Start, PortNumber End);
+      public sealed record PortLease(PortNumber Port, PortLeaseToken LeaseToken, DateTimeOffset ExpiresAtUtc);
+
+      public interface IPortReservationService
+      {
+          Task<DomainResult<PortLease>> AcquirePortLeaseAsync(PortRange range, CancellationToken ct = default);
+          Task<DomainResult> RenewPortLeaseAsync(PortNumber port, PortLeaseToken leaseToken, CancellationToken ct = default);
+          Task<DomainResult> ReleasePortLeaseAsync(PortNumber port, PortLeaseToken leaseToken, CancellationToken ct = default);
+          Task<DomainResult> PurgeExpiredLeasesAsync(CancellationToken ct = default);
+      }
+      ```
+    - **Infrastructure Adapter (`Percolator.Infrastructure.Transport.SqlitePortReservationService`)**:
+      - Implements `IPortReservationService` coordinating transactional SQLite leases in `ops_reserved_ports` with OS socket probing.
+      - 1. Queries `ops_reserved_ports` via `PercolatorDbContext` to filter out currently active leases (`WHERE lease_expiry_utc > UtcNow`).
+      - 2. Probes candidate ports sequentially using `TcpListener` with dual-mode IPv6 and exclusive binding (`Stop()` immediately after availability verification so Kestrel can bind the socket without `AddressAlreadyInUse` contention):
          ```csharp
          var listener = new TcpListener(IPAddress.IPv6Any, port);
          listener.Server.DualMode = true;
          listener.Server.ExclusiveAddressUse = true;
          listener.Start();
+         listener.Stop();
          ```
-      3. If `SocketException` (`AddressAlreadyInUse`), advance to next port.
-      4. Upon successful bind, commit lease to `ops_reserved_ports` with 30-minute renewal heartbeat.
-  - **gRPC Interceptor Pipeline**:
-    - **`DeliveryCertificateAuthInterceptor`**:
-      - Executes on authenticated relay calls (`authenticated_relay.proto`).
-      - Extracts metadata headers: `x-percolator-identity` (hex-encoded `PublicIdentityId`), `x-percolator-timestamp` (Unix ms), and `x-percolator-signature`.
-      - Rejects if timestamp delta exceeds $\pm 60\text{ seconds}$ from relay UTC.
-      - Verifies Ed25519 signature over `method_path || timestamp_bytes || request_payload_hash` using `SignalCryptoEngine` (Chunk 3.1).
+      - 3. If `SocketException` (`AddressAlreadyInUse`), advances to next port.
+      - 4. Upon successful probe, commits `(port_number, lease_token, allocated_at_utc, lease_expiry_utc)` to `ops_reserved_ports` with a 30-minute renewal heartbeat and returns `DomainResult<PortLease>.Success(...)`.
+      - 5. `PurgeExpiredLeasesAsync`: executes `DELETE FROM ops_reserved_ports WHERE lease_expiry_utc <= UtcNow`.
+    - **Startup Lease Purging**: During Stage 2 bootstrap initialization (prior to Kestrel listener startup), the coordinator invokes `_portReservationService.PurgeExpiredLeasesAsync()`, preventing port exhaustion following abnormal termination without adding an extra long-running `IHostedService`.
+  - **Native In-Band Relay Authentication**:
+    - Endpoints on `AuthenticatedRelayService` (`authenticated_relay.proto`) utilize native, cryptographic in-band authentication instead of transport header-signing interceptors:
+      - **Capability-Authenticated Mailbox RPCs (`RegisterMailbox`, `DrainMailbox`, `ConnectMailboxStream`)**: Align directly with `RelayMailboxQueue` capability tokens (`DeliveryToken` and secret `DrainToken`), ensuring the relay never correlates a `BlindedRoutingToken` with an `IdentityKey`. `RegisterMailbox` registers `(routing_token, authorized_delivery_token, drain_token)`. `ConnectMailboxStream` issues a single-use CSPRNG `AuthChallengeProto` (`nonce`, `expires_at_utc`) and verifies `AuthResponseProto` (`routing_token`, `challenge_hmac = HMAC-SHA256(drain_token, nonce)`), which is inherently immune to clock drift and replay attacks.
+      - **Protobuf-Native Signed PreKey Publication (`PublishPreKeyBundle`)**: Client serializes `PreKeyBundlePayloadProto` (containing `owner_identity_id`, `device_id`, `identity_key`, `signed_prekey`, `prekey_signature`, `one_time_prekeys`, and `published_at_utc`) into `payload_bytes` and signs `payload_bytes` with Ed25519. The relay verifies `signature` directly over raw `payload_bytes` before deserializing, and enforces `published_at_utc > stored.updated_at_utc` to prevent key rollback/replay attacks.
   - **Transport Primitives**:
     - `InMemoryTransportCertificateProvider`: Ephemeral ECDSA P-256 self-signed certificate with loopback SANs generated in memory with zero disk I/O.
-    - `CallbackEndpointValidator`: Validates peer endpoints before connecting; blocks loopback, RFC 1918 private subnets, and link-local addresses unless explicit dev flags (`AllowLoopback = true`, `AllowLan = true`) are set.
-    - `PeerGrpcChannelFactory`: Thread-safe channel cache using `ConcurrentDictionary<string, Lazy<GrpcChannel>>` with 2-second timeout and clean socket disposal.
+    - `CallbackEndpointValidator`: Validates peer endpoints before connecting; blocks loopback (`127.0.0.0/8`, `::1`), RFC 1918 private subnets, IPv4-mapped IPv6, IPv6 Unique Local Addresses (`fc00::/7`), link-local (`169.254.0.0/16`, `fe80::/10`), and unspecified wildcard addresses (`0.0.0.0`, `::`) unless explicit dev flags (`AllowLoopback = true`, `AllowLan = true`) are set. Mitigates DNS rebinding by resolving hostnames once during validation and connecting directly to the validated `IPEndPoint`.
+    - `PeerGrpcChannelFactory`: Thread-safe bounded channel cache (capacity: 100 channels) with 5-minute sliding expiration for idle connections, 2-second connect timeout, and clean socket disposal upon eviction.
     - `PrimaryContainerServiceActivator<T>`: Bridges Kestrel gRPC listener container to host DI container (`IServiceProvider`) with scoped lifetime cleanup.
 - **Scope & Deliverables**:
+  - [ ] Implement `IPortReservationService` (`Percolator.Application.Ports.IPortReservationService`) in `Percolator.Application` (approved application port extension).
+  - [ ] Implement `SqlitePortReservationService` (`IPortReservationService`).
   - [ ] Implement `InMemoryTransportCertificateProvider`.
   - [ ] Implement `CallbackEndpointValidator`.
-  - [ ] Implement dynamic port range probing (5200–5299) and lease renewal on `ops_reserved_ports`.
   - [ ] Implement `PeerGrpcChannelFactory`.
-  - [ ] Implement `DeliveryCertificateAuthInterceptor`.
   - [ ] Implement `PrimaryContainerServiceActivator<T>`.
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Transport/Primitives/`)**:
-  - `CallbackEndpointValidatorTests.RejectsPrivateAndLoopbackIps_UnlessDevFlag`: rejects loopback and RFC 1918 IPs by default.
-  - `DeliveryCertificateAuthInterceptorTests.TimestampSkewExceeded_RejectsRequest`: rejects signatures with timestamp delta > 60s.
-  - `PortProberTests.PortContention_BindsNextAvailablePort`: simulates port collision and verifies lease assignment on subsequent free port.
+  - `CallbackEndpointValidatorTests.RejectsPrivateAndLoopbackIps_UnlessDevFlag`: rejects loopback, RFC 1918, IPv4-mapped IPv6, IPv6 ULA, and unspecified addresses by default; verifies direct `IPEndPoint` connection target.
+  - `PeerGrpcChannelFactoryTests.IdleChannel_EvictedAfterSlidingExpiration`: verifies channel eviction and disposal after idle period and respects capacity ceiling.
+  - `SqlitePortReservationServiceTests.PortContention_BindsNextAvailablePort`: simulates port collision and verifies lease assignment on subsequent free port.
+  - `SqlitePortReservationServiceTests.PurgeExpiredLeases_RemovesStaleEntries_PreservesActiveLeases`: verifies stale leases are purged while active leases remain untouched.
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Transport.Primitives`
 
@@ -1312,18 +1337,27 @@
 - **Technical Specifications & Service Endpoints**:
   - **`UnauthenticatedDeliveryEndpoint` (ASP.NET Core gRPC Service on relays and direct peer listening ports)**:
     - Realizes `UnauthenticatedDeliveryService.UnauthenticatedDeliveryServiceBase`.
-    - Handles `DeliverDirect`, `EnqueueMailbox`, `GetProfile`, `UploadProfile`, `DeleteProfile`, and `DownloadBlindBlob`.
-    - **Strict Boundary Framing**: Interacts strictly with transport layer pipes and Phase 2 repositories (`relay_profile_slots` via `IRelayProfileRepository`). Zero application-level media decoding, image transformations, or file reassembly (strictly located in Phase 4 Chunks 4.3 and 4.4).
+    - Handles `DeliverDirect`, `EnqueueMailbox`, `FetchPreKeyBundle`, `GetProfile`, `UploadProfile`, `DeleteProfile`, and `DownloadBlindBlob`.
+    - **Anonymous Capability-Gated PreKey Fetch**: `FetchPreKeyBundle` requires both `recipient_routing_token` and the recipient's `delivery_token` capability (verified in constant time before calling `RelayHostedPreKeyBundle.ConsumeBundle()`), preventing anonymous One-Time PreKey starvation while keeping the initiator's identity hidden from the relay.
+    - **Strict Boundary Framing & Blob Edge Validation**: Interacts strictly with transport layer pipes, Phase 2 repositories (`IRelayProfileRepository`, `IRelayPreKeyRepository`), and `ILocalChunkStore`. In `DownloadBlindBlob`, incoming `blob_id` is validated at the edge to be strictly 32 bytes (`BlobId.FromSha256`), rejecting malformed lengths with `RpcException(new Status(StatusCode.InvalidArgument, ...))` and addressing by lowercase hex (`[0-9a-f]{64}`). Resolution delegates to application port `ILocalChunkStore` (implemented in Phase 4 Chunk 4.3 by `LocalFileChunkStore`) to stream raw content-addressed ciphertext blocks with zero transport filesystem access and zero application-level media decoding.
+  - **`AuthenticatedRelayEndpoint` & `AnonymousGroupRelayEndpoint` (ASP.NET Core gRPC Services on relays)**:
+    - `AuthenticatedRelayEndpoint` (`AuthenticatedRelayService.AuthenticatedRelayServiceBase`): handles `ConnectMailboxStream`, `RegisterMailbox`, `DrainMailbox`, and `PublishPreKeyBundle` using in-band capability and Protobuf-native signature verification.
+    - `AnonymousGroupRelayEndpoint` (`AnonymousGroupRelayService.AnonymousGroupRelayServiceBase`): handles `SubscribeGroupStream`, `DispatchGroupMessage`, `CommitRosterMutation`, and `FetchGroupState` gated by `IZkProofEngine` presentation proofs against `IRelayLedgerRepository`.
   - **Duplex & Streaming Background Workers (`IHostedService`)**:
     - `RelayMailboxStreamWorker`: Duplex streaming connection to home relay (`ConnectMailboxStream`) with automatic reconnection and jittered exponential backoff.
     - `RelayGroupStreamWorker`: Live subscription stream (`SubscribeGroupStream`) with ZK presentation proofs for active group channels.
 - **Scope & Deliverables**:
   - [ ] Implement `UnauthenticatedDeliveryEndpoint` (`UnauthenticatedDeliveryService.UnauthenticatedDeliveryServiceBase`).
+  - [ ] Implement `AuthenticatedRelayEndpoint` (`AuthenticatedRelayService.AuthenticatedRelayServiceBase`).
+  - [ ] Implement `AnonymousGroupRelayEndpoint` (`AnonymousGroupRelayService.AnonymousGroupRelayServiceBase`).
   - [ ] Implement `RelayMailboxStreamWorker` (`IHostedService`).
   - [ ] Implement `RelayGroupStreamWorker` (`IHostedService`).
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Transport/Endpoints/`)**:
   - `UnauthenticatedDeliveryEndpointTests.DeliverDirect_ValidEnvelope_ReturnsSuccessAck`: validates RPC execution and ack generation.
   - `UnauthenticatedDeliveryEndpointTests.UploadProfile_PersistsSlot`: verifies profile slot persistence via `IRelayProfileRepository`.
+  - `UnauthenticatedDeliveryEndpointTests.DownloadBlindBlob_MalformedId_ThrowsInvalidArgument`: verifies non-32-byte blob identifiers return `StatusCode.InvalidArgument` at the edge before lookup.
+  - `UnauthenticatedDeliveryEndpointTests.FetchPreKeyBundle_InvalidDeliveryToken_RejectsWithoutConsumingOpk`: verifies invalid capability token is rejected before dequeuing a One-Time PreKey.
+  - `AuthenticatedRelayEndpointTests.PublishPreKeyBundle_StaleTimestamp_RejectsRollbackReplay`: verifies replayed bundle with older `published_at_utc` is rejected.
   - `RelayMailboxStreamWorkerTests.ConnectionDrop_RetriesWithExponentialBackoff`: tests automatic reconnection retry sequence.
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Transport.Endpoints`
@@ -1642,19 +1676,18 @@
 - **Technical Specifications & Lifetime Architecture**:
   - **Two-Stage Container Separation Protocol**:
     - *Stage 1 (Pre-Unlock Bootstrap Container)*: Contains zero SQLite DbContexts, zero repositories, and zero network/sync workers. Registers `SQLitePCL.Batteries_V2.Init()`, `SignalCryptoEngine`, `SystemDateTimeProvider`, `ProtobufHeaderStorage`, `DuressWipeHandler`, and `SqlCipherDatabaseUnlockCoordinator`.
-    - *Stage 2 (Authenticated Host - `IHost`)*: Built post-unlock via `Stage2HostFactory`. Hosts `IMasterKeyHandle` (scoped to session in pinned unmanaged memory), `SqlCipherPragmaInterceptor`, `PercolatorDbContext` (scoped/pooled), all 58 infrastructure ports, and `IHostedService` background workers.
+    - *Stage 2 (Authenticated Host - `IHost`)*: Built post-unlock via `Stage2HostFactory`. Hosts `IMasterKeyHandle` (scoped to session in pinned unmanaged memory), `SqlCipherPragmaInterceptor`, `PercolatorDbContext` (scoped/pooled), all 59 infrastructure ports, and `IHostedService` background workers.
   - **Service Lifetime Registration Topology**:
     - **Singletons**:
       - `IMasterKeyHandle` (instance passed from unlock coordinator)
       - `IDbContextFactory<PercolatorDbContext>` & `PercolatorDbContextOptions`
       - Core Cryptography & Time: `ICryptoEngine`, `IZkProofEngine`, `IDateTimeProvider`
       - Networking & Stream Management: `StreamRegistry`, `ITransferStreamPoolFactory` (`TcpMultiStreamPoolFactory`), `TokenBucketRateLimiter`, `LocalFileChunkStore`, `ITransportCertificateProvider` (`InMemoryTransportCertificateProvider`)
-      - Interceptors: `DeliveryCertificateAuthInterceptor`
       - Protocol Serializers: `ProtobufSessionWirePacker`, `ProtobufPayloadSerializer`, `ChatPayloadFramingDecorator`
     - **Scoped**:
       - `PercolatorDbContext` (pooled context per scope)
       - All Repositories & CQRS Query Services (Outbox, Contacts, Ratchet, Channels, Relay prekeys/profiles/ledger, Chat, File Transfer)
-      - Workflow & Dispatching: `TransportDispatcher`, `IngressFilterService`, `SealedEnvelopeUnwrapper`, `DiscoveryQueryClient`, `StreamingAesGcmCryptoService`, `RelayBlobClient`, `PeerStreamBlobClient`, `ChannelRelayResolver`, `RelayTransferPipeClient`, `RelaySwarmTrackerClient`
+      - Workflow & Dispatching: `SqlitePortReservationService`, `TransportDispatcher`, `IngressFilterService`, `SealedEnvelopeUnwrapper`, `DiscoveryQueryClient`, `StreamingAesGcmCryptoService`, `RelayBlobClient`, `PeerStreamBlobClient`, `ChannelRelayResolver`, `RelayTransferPipeClient`, `RelaySwarmTrackerClient`
     - **Hosted Services (`services.AddHostedService<T>()`)**:
       - All 12 background streaming, pruning, syncing, and lifecycle workers across the application:
         1. `OutboxRetentionPruner` (Chunk 5.1)
@@ -1680,11 +1713,11 @@
   - [ ] Implement `Stage2HostFactory`:
     - Extends `BaselineStage2HostFactory` to wire the full suite of operational adapters, repositories, query services, gRPC channels, and background pruners across all feature slices.
   - [ ] Implement `InfrastructureServiceCollectionExtensions.AddAuthenticatedInfrastructure(IServiceCollection, IConfiguration, IMasterKeyHandle)`:
-    - Registers all 58 infrastructure ports into the Stage 2 container with correct lifetime scopes.
+    - Registers all 59 infrastructure ports into the Stage 2 container with correct lifetime scopes.
     - Registers all 12 background `IHostedService` workers.
     - Exposes extension point for `Percolator.Infrastructure.Windows` overrides.
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Composition/`)**:
-  - `DependencyInjectionTests.All58Ports_ResolveFromContainerWithoutCycles`: resolves every planned infrastructure port from DI container; asserts non-null without circular dependency or missing registration.
+  - `DependencyInjectionTests.All59Ports_ResolveFromContainerWithoutCycles`: resolves every planned infrastructure port from DI container; asserts non-null without circular dependency or missing registration.
   - `DependencyInjectionTests.NoCaptiveDependencies_ScopedServicesNeverInjectedIntoSingletons`: enforces container scope validation (`ValidateScopes = true`); verifies no scoped DbContext or repository is injected into singleton services or pruners.
   - `DependencyInjectionTests.All12HostedServices_RegisteredAndStartable`: resolves `IEnumerable<IHostedService>` and asserts exact count of 12 registered background workers.
   - `DependencyInjectionTests.WindowsOverrides_CanSwapFileStoreAndCertProvider`: calls optional Windows overlay registrations; asserts `IDesktopFileStorage` resolves to `WindowsSparseDesktopFileStore`.
@@ -1772,3 +1805,4 @@ To guarantee robust infrastructure without introducing brittle tests that break 
 | 56 | `IDistributedTrackerPort` | `Percolator.Apps.FileTransfer` | `RelaySwarmTrackerClient` | Chunk 4.4 |
 | 57 | `ITransportCertificateProvider` | `Percolator.Infrastructure` | `InMemoryTransportCertificateProvider` | Chunk 3.4 |
 | 58 | `IIdentityProfileRepository` | `Percolator.Domain` | `SqliteIdentityProfileRepository` | Chunk 2.2 |
+| 59 | `IPortReservationService` | `Percolator.Application` | `SqlitePortReservationService` | Chunk 3.4 |
