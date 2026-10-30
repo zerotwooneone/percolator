@@ -4,7 +4,7 @@
 - [x] Lens 1: Scope & Feature Slice Framing (Status: Approved)
 - [x] Lens 2: Onion Architecture & Primitive Obsession (Status: Approved)
 - [x] Lens 3: Threat Modeling & Security Posture (Status: Approved)
-- [ ] Lens 4: High-Value, Low-Brittle Unit Test Design (Status: in progress)
+- [x] Lens 4: High-Value, Low-Brittle Unit Test Design (Status: Approved)
 - [ ] Lens 5: Cross-Layer Infrastructure Alignment (Status: in progress)
 - [ ] Implementation Gate: LOCKED (Refinement in progress)
 
@@ -183,7 +183,7 @@
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Vault/`)**:
   - `ProtobufHeaderStorageTests.PlausibleDeniability_WireSize_IdenticalWithOrWithoutDuress`: header with dummy random noise vs active duress has identical 76-byte duress slot wire size and uniform total header length; decryption of dummy duress slot throws `AuthenticationTagMismatchException`.
   - `ProtobufHeaderStorageTests.CorruptedHeader_TrapsGracefully`: 0-byte or truncated `percolator.header` traps `InvalidProtocolBufferException` returning structured failure without uncaught crashes.
-  - `DuressWipeHandlerTests.ExecuteWipeAsync_OverwritesHeaderAndFlushes_InLessThan2Ms`: overwrites header with random bytes and flushes to disk in $< 2\text{ ms}$.
+  - `DuressWipeHandlerTests.ExecuteWipeAsync_DestroysHeaderAndDeletesDatabaseAndCacheFiles`: asserts observable state changes—`percolator.header` is destroyed, `percolator.db*` and `cache/` are deleted, and subsequent `ProtobufHeaderStorage.ReadHeaderAsync` returns failure without flaky wall-clock timing assertions.
   - `DuressWipeHandlerTests.ExecuteWipeAsync_LockedDbFile_ContinuesWithoutThrowing`: simulates external file lock on `percolator.db`; catches `IOException` without throwing; destroys header permanently.
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Vault.Storage`
@@ -748,7 +748,8 @@
     - `SqlOutboxQueryService` (`Percolator.Application.Delivery.Ports.IOutboxQueryService`): fast-path diagnostic summary projecting without hydrating byte payload buffers.
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Persistence/Outbox/`)**:
   - `SqliteOutboxRepositoryTests.EnqueueAndDequeue_TransitionsStateCleanly`: jobs advance cleanly from `Queued` to `InFlight` and `Delivered`.
-  - `SqliteOutboxRepositoryTests.RetryIndex_OptimizesPendingJobQueries`: executes pending retry query and verifies index usage on `ix_ops_outbox_retry`.
+  - `SqliteOutboxRepositoryTests.GetDuePendingJobsAsync_ReturnsOnlyDuePendingJobs_OrderedByNextAttempt`: seeds `Pending` (due vs. future `NextAttemptAtUtc`), `InFlight`, `Delivered`, and `PausedDormant` jobs; asserts only due `Pending` jobs are returned up to `limit`.
+  - `SqliteOutboxRepositoryTests.SaveAsync_WhenDelivered_ScrubsPayloadBytesInStorage`: verifies that transitioning a job to `OutboxStatus.Delivered` scrubs `ops_outbox_jobs.payload` to empty bytes while `SqlOutboxQueryService` still projects `OutboxJobSummaryReadModel`.
   - `SqlOutboxQueryServiceTests.GetOutboxSummary_ProjectsLightweightModel`: verifies projection contains counts and statuses without payload loading.
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Persistence.Outbox`
@@ -880,8 +881,9 @@
     - `SqlitePeerProfileRepository` (`Percolator.PluginSdk.Profiles.IPeerProfileRepository`)
     - `SqlitePeerMailboxRoutingRepository` (`Percolator.PluginSdk.Profiles.IPeerMailboxRoutingRepository`)
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Persistence/Relay/`)**:
-  - `SqliteRelayPreKeyRepositoryTests.PublishAndFetch_MatchesBundle`: publishes prekey bundle and verifies retrieval by routing token.
+  - `SqliteRelayPreKeyRepositoryTests.SaveAndConsumeBundle_DequeuesOneTimePreKeyAtomically`: saves `RelayHostedPreKeyBundle` by `(OwnerId, DeviceId)` with multiple OPKs, consumes once and saves, and asserts `AvailableOneTimePreKeyCount` decrements and the consumed OPK is never re-served.
   - `SqliteRelayProfileRepositoryTests.CommitProfile_ValidatesWriteToken`: verifies write token hash check on profile upload.
+  - `SqliteRelayLedgerRepositoryTests.SaveAndLoadLedger_PreservesEpochAndActiveRoutingTokens`: saves and reloads `RelayGroupLedger` across epoch mutations, verifying `CurrentEpoch`, `EncryptedRosterBlob`, and `ActiveRoutingTokens` round-trip accurately.
   - `SqlitePeerMailboxRoutingRepositoryTests.UpdateRouting_PersistsEndpoint`: stores and updates peer mailbox routing endpoint.
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Persistence.Relay`
@@ -915,7 +917,7 @@
   - `SignalCryptoEngineTests.Curve25519_DiffieHellman_MatchesRfc7748Vectors`: known test vectors match RFC 7748. Low-brittle guarantee: asserts mathematical outputs.
   - `SignalCryptoEngineTests.AesGcm_EncryptDecrypt_SucceedsAndRejectsBitflip`: encrypts payload, decrypts successfully; single bitflip throws authenticated tag mismatch.
   - `ZkgroupCryptographyServiceTests.VerifyGroupPresentation_ValidProof_ReturnsSuccess`: presentation proof generates and validates against group public credentials.
-  - `SignalCryptoEngineTests.LoggingGuardrail_RedactsSensitiveKeys_WhenLoggingDisabled`: asserts logger redacts all key bytes when material logging is disabled.
+  - `ZkgroupCryptographyServiceTests.VerifyGroupPresentation_WrongEpochOrTamperedChallenge_ReturnsFalse`: verifies negative cryptographic boundary—proofs generated for epoch $E$ or challenge $C_1$ are rejected when verified against epoch $E+1$ or challenge $C_2$.
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Security.Crypto`
 
@@ -1332,6 +1334,7 @@
   - `IngressFilterServiceTests.BlockedSender_RejectsEnvelopeBeforeCrypto`: envelopes from blocked identities rejected before any cryptographic operations.
   - `StreamRegistryTests.BackpressureSaturation_ReturnsBackpressured`: queue overflow returns `StreamWriteResult.Backpressured`.
   - `TransportDispatcherTests.DirectVsRelayRoute_ResolvesCorrectAdapter`: resolves direct TLS vs relay delivery token cleanly.
+  - `SealedEnvelopeUnwrapperTests.Unwrap_CorruptedWirePayload_ReturnsDomainFailureWithoutThrowing`: verifies malformed wire bytes return a structured `DomainResult.Failure` instead of throwing uncaught exceptions.
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Transport.Dispatching`
 
@@ -1360,6 +1363,7 @@
   - `UnauthenticatedDeliveryEndpointTests.DownloadBlindBlob_MalformedId_ThrowsInvalidArgument`: verifies non-32-byte blob identifiers return `StatusCode.InvalidArgument` at the edge before lookup.
   - `UnauthenticatedDeliveryEndpointTests.FetchPreKeyBundle_InvalidDeliveryToken_RejectsWithoutConsumingOpk`: verifies invalid capability token is rejected before dequeuing a One-Time PreKey.
   - `AuthenticatedRelayEndpointTests.PublishPreKeyBundle_StaleTimestamp_RejectsRollbackReplay`: verifies replayed bundle with older `published_at_utc` is rejected.
+  - `AnonymousGroupRelayEndpointTests.CommitRosterMutation_ValidProofAdvancesEpoch_StaleEpochReturnsConflict`: covers positive epoch advancement and negative `EPOCH_CONFLICT` / invalid ZK proof rejection on `AnonymousGroupRelayEndpoint`.
   - `RelayMailboxStreamWorkerTests.ConnectionDrop_RetriesWithExponentialBackoff`: tests automatic reconnection retry sequence.
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Transport.Endpoints`
@@ -1509,7 +1513,9 @@
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Plugins/Discovery/`)**:
   - `DiscoveryQueryClientTests.NearbyQuery_ClampsCountTo100`: verifies query parameters are strictly clamped to max 100 results.
   - `SqlitePrivateRendezvousServiceTests.PublishAndResolve_MatchesBlindedLocatorAndEnforces100QueryCap`: publishes `BlindedLocator` + `EncryptedRendezvousRoute` and resolves across batch query while clamping batch size to 100.
-  - `SqliteRelayPeerDirectoryTests.Register_MissingSignedPreKeyOrUnauthenticated_RejectsRegistration`: verifies admission gate rejects registrations from peers without active Signed PreKeys or handshakes.
+  - `SqliteRelayPeerDirectoryTests.RegisterAndQuery_EnforcesAdmissionMatrixAndDynamicPreKeyCheck`: verifies admission gate rejects missing Signed PreKeys or unauthenticated handshakes, removes peers when visibility changes to `Hidden`, and dynamically excludes peers whose Signed PreKey expires before `GetDiscoverablePeersAsync`.
+  - `PreKeyAvailabilityAdapterTests.HasActiveSignedPreKey_ChecksPresenceWithoutConsumingOneTimePreKeys`: verifies discovery prekey availability checks never dequeue or deplete One-Time PreKeys from `RelayHostedPreKeyBundle`.
+  - `GrpcProfileDeliveryClientTests.BatchProfileFetch_SinglePeerFailure_DoesNotAbortRemainingPeers`: verifies fault tolerance across multi-peer profile fetches when an individual peer or relay endpoint fails.
   - `RelayDiscoveryRegistrationPrunerTests.StaleRegistrations_PurgedOnSchedule`: verifies expired peer directory leases are deleted.
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Plugins.Discovery`
@@ -1543,7 +1549,7 @@
   - `StreamingAesGcmCryptoServiceTests.ExifScrubbing_StripsGpsAndDeviceMetadata`: strips GPS and device tags from JPEG/PNG before upload.
   - `StreamingAesGcmCryptoServiceTests.ChunkedAead_SingleBitflip_FailsAuthentication`: injects 1 bitflip in 64 KB block; asserts authenticated decryption failure.
   - `StreamingAesGcmCryptoServiceTests.ChunkedAead_Truncation_FailsFinalBlockAuthentication`: truncated stream missing final block flag fails verification.
-  - `RelayBlobClientTests.ResumableDownload_AppliesRangeHeader`: HTTP Range header returns byte slice from requested offset without re-downloading from byte 0.
+  - `RelayBlobClientTests.StreamUploadAndDownload_RoundtripsChunksAndRejectsOversizedStream`: verifies gRPC `BlindBlobChunkProto` streaming round-trip and asserts streams exceeding 100 MB abort with `DomainResult.Failure`.
   - `LocalFileChunkStoreTests.AtomicCommit_WritesTempFileAndRenames`: validates atomic write to `%AppData%/Percolator/Blobs/{sha256Hex}.blob`.
   - `LocalFileChunkStoreTests.UploadExceedingQuota_ReturnsDomainFailureAndDeletesTempFile`: verifies writes exceeding 100 MB blob size or 5 GB storage quota return `DomainResult.Failure` and clean up `.tmp` files without disk exhaustion.
 - **Verification Gate**:
