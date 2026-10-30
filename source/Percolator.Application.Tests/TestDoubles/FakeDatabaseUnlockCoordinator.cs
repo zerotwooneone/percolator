@@ -24,6 +24,29 @@ public sealed class FakeDatabaseUnlockCoordinator : IDatabaseUnlockCoordinator
         Status = initialStatus;
     }
 
+    public Task<DomainResult> ConfigureDuressPasswordAsync(
+        VaultPassphrase currentMasterPassword,
+        VaultPassphrase? duressPassword,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        ArgumentNullException.ThrowIfNull(currentMasterPassword);
+
+        if (Status != DatabaseSetupStatus.Unlocked || _masterPassword == null)
+        {
+            return Task.FromResult(DomainResult.Failure(
+                new DomainError("Vault.InvalidState", "Cannot configure duress password when database is not unlocked.")));
+        }
+
+        if (!VaultPassphrase.ConstantTimeEquals(currentMasterPassword, _masterPassword))
+        {
+            return Task.FromResult(DomainResult.Failure(
+                new DomainError("Vault.InvalidCredentials", "Current master passphrase does not match.")));
+        }
+
+        return ConfigureDuressPasswordAsync(duressPassword, ct);
+    }
+
     public Task<DatabaseSetupStatus> DetermineStatusAsync(CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();

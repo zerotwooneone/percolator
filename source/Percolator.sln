@@ -74,6 +74,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Apps.FileTransfe
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Apps.FileTransfer.Domain.Tests", "Percolator.Apps.FileTransfer.Domain.Tests\Percolator.Apps.FileTransfer.Domain.Tests.csproj", "{C8F0E427-0B1A-439D-9F31-52D4D3A16A99}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Infrastructure.Tests", "Percolator.Infrastructure.Tests\Percolator.Infrastructure.Tests.csproj", "{FC74F5B9-86BC-47EA-94C7-E46F9C55924F}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -360,6 +362,18 @@ Global
 		{C8F0E427-0B1A-439D-9F31-52D4D3A16A99}.Release|x64.Build.0 = Release|Any CPU
 		{C8F0E427-0B1A-439D-9F31-52D4D3A16A99}.Release|x86.ActiveCfg = Release|Any CPU
 		{C8F0E427-0B1A-439D-9F31-52D4D3A16A99}.Release|x86.Build.0 = Release|Any CPU
+		{FC74F5B9-86BC-47EA-94C7-E46F9C55924F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FC74F5B9-86BC-47EA-94C7-E46F9C55924F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FC74F5B9-86BC-47EA-94C7-E46F9C55924F}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{FC74F5B9-86BC-47EA-94C7-E46F9C55924F}.Debug|x64.Build.0 = Debug|Any CPU
+		{FC74F5B9-86BC-47EA-94C7-E46F9C55924F}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{FC74F5B9-86BC-47EA-94C7-E46F9C55924F}.Debug|x86.Build.0 = Debug|Any CPU
+		{FC74F5B9-86BC-47EA-94C7-E46F9C55924F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FC74F5B9-86BC-47EA-94C7-E46F9C55924F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FC74F5B9-86BC-47EA-94C7-E46F9C55924F}.Release|x64.ActiveCfg = Release|Any CPU
+		{FC74F5B9-86BC-47EA-94C7-E46F9C55924F}.Release|x64.Build.0 = Release|Any CPU
+		{FC74F5B9-86BC-47EA-94C7-E46F9C55924F}.Release|x86.ActiveCfg = Release|Any CPU
+		{FC74F5B9-86BC-47EA-94C7-E46F9C55924F}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -388,5 +402,6 @@ Global
 		{F4C8B81C-9BE3-41B7-A653-2B5DD7D84220} = {D4096C37-2151-4956-B164-18F7A5736F56}
 		{8DD7EC08-571F-4114-8768-5630B7473BC5} = {D4096C37-2151-4956-B164-18F7A5736F56}
 		{C8F0E427-0B1A-439D-9F31-52D4D3A16A99} = {D4096C37-2151-4956-B164-18F7A5736F56}
+		{FC74F5B9-86BC-47EA-94C7-E46F9C55924F} = {1BA0BC13-1FAC-43E6-8485-EB8EA00CD072}
 	EndGlobalSection
 EndGlobal

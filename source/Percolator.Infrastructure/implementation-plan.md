@@ -76,16 +76,16 @@
 
 #### Chunk 1.1: Project Scaffolding & Core Platform Primitives
 - **Scope & Deliverables**:
-  - [ ] Scaffold `Percolator.Infrastructure/Percolator.Infrastructure.csproj` targeting `net10.0`, nullable enabled, referencing `Percolator.Domain`, `Percolator.Application`, and `Percolator.PluginSdk`.
+  - [x] Scaffold `Percolator.Infrastructure/Percolator.Infrastructure.csproj` targeting `net10.0`, nullable enabled, referencing `Percolator.Domain`, `Percolator.Application`, and `Percolator.PluginSdk`.
     - Package dependencies:
       - `Microsoft.EntityFrameworkCore.Sqlite.Core` (v10.x)
       - `SQLitePCLRaw.bundle_e_sqlcipher` (v2.1.x+)
       - `Konscious.Security.Cryptography.Argon2` (v1.3.x)
       - `Google.Protobuf` (v3.25.2)
       - `Grpc.Tools` (v2.57.0)
-  - [ ] Implement `SystemDateTimeProvider` (`Percolator.Domain.Common.IDateTimeProvider`) returning `DateTimeOffset.UtcNow`.
-  - [ ] Implement RFC 4122 Big-Endian UUID extension (`Guid.ToByteArray(bigEndian: true)`).
-  - [ ] Scaffold `Percolator.Infrastructure.Tests` test project targeting `net10.0` with xUnit, FluentAssertions, and FakeItEasy.
+  - [x] Implement `SystemDateTimeProvider` (`Percolator.Domain.Common.IDateTimeProvider`) returning `DateTimeOffset.UtcNow`.
+  - [x] Implement RFC 4122 Big-Endian UUID extension (`Guid.ToByteArray(bigEndian: true)`).
+  - [x] Scaffold `Percolator.Infrastructure.Tests` test project targeting `net10.0` with xUnit, FluentAssertions, and FakeItEasy.
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Common/`)**:
   - `GuidExtensionsTests.ToBigEndianByteArray_Formats_ValidRfc4122ByteOrder`: GUID bytes match big-endian RFC 4122 byte order. Low-brittle guarantee: asserts raw byte ordering against RFC vector.
   - `SystemDateTimeProviderTests.UtcNow_ReturnsCurrentTime`: returns `DateTimeOffset.UtcNow` within reasonable system clock tolerance.
@@ -176,10 +176,10 @@
     }
     ```
 - **Scope & Deliverables**:
-  - [ ] Author Protobuf schema `Percolator.Infrastructure/Protos/DatabaseHeader.proto`.
-  - [ ] Define internal interface `Percolator.Infrastructure.Vault.IHeaderStorage`.
-  - [ ] Implement `ProtobufHeaderStorage` (`IHeaderStorage`): reads/writes header with temp file staging and atomic replace.
-  - [ ] Implement `DuressWipeHandler` (`Percolator.Application.Ports.IDuressWipeHandler`): instant crypto-shredding pipeline.
+  - [x] Author Protobuf schema `Percolator.Infrastructure/Protos/DatabaseHeader.proto`.
+  - [x] Define internal interface `Percolator.Infrastructure.Vault.IHeaderStorage`.
+  - [x] Implement `ProtobufHeaderStorage` (`IHeaderStorage`): reads/writes header with temp file staging and atomic replace.
+  - [x] Implement `DuressWipeHandler` (`Percolator.Application.Ports.IDuressWipeHandler`): instant crypto-shredding pipeline.
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Vault/`)**:
   - `ProtobufHeaderStorageTests.PlausibleDeniability_WireSize_IdenticalWithOrWithoutDuress`: header with dummy random noise vs active duress has identical 76-byte duress slot wire size and uniform total header length; decryption of dummy duress slot throws `AuthenticationTagMismatchException`.
   - `ProtobufHeaderStorageTests.CorruptedHeader_TrapsGracefully`: 0-byte or truncated `percolator.header` traps `InvalidProtocolBufferException` returning structured failure without uncaught crashes.
@@ -235,8 +235,8 @@
     }
     ```
 - **Scope & Deliverables**:
-  - [ ] Implement `MasterKeyHandle` (`Percolator.Domain.Security.Ports.IMasterKeyHandle`).
-  - [ ] Implement `SqlCipherPragmaInterceptor` (`Microsoft.EntityFrameworkCore.Diagnostics.DbConnectionInterceptor`).
+  - [x] Implement `MasterKeyHandle` (`Percolator.Domain.Security.Ports.IMasterKeyHandle`).
+  - [x] Implement `SqlCipherPragmaInterceptor` (`Microsoft.EntityFrameworkCore.Diagnostics.DbConnectionInterceptor`).
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Vault/Keying/`)**:
   - `MasterKeyHandleTests.Dispose_ZeroizesPinnedMemory`: unmanaged buffer memory is zeroized on dispose; subsequent access throws `ObjectDisposedException`.
   - `MasterKeyHandleTests.WithKeySpan_YieldsValid32ByteKeySpan`: visitor executes with exact 32-byte key span matching initial key.
@@ -463,12 +463,12 @@
     4. Dispose `_masterKeyHandle` (zeroizing unmanaged memory last to prevent `ObjectDisposedException` during host teardown).
     5. Transition status to `Locked`.
 - **Scope & Deliverables**:
-  - [ ] Define interfaces `IVaultEnvelopePacker`, `IDatabaseCanaryProbe`, `IDatabaseMigrator`, and `IStage2HostFactory`.
-  - [ ] Implement `VaultEnvelopePacker` (`IVaultEnvelopePacker`): Argon2id derivation ($m=64\text{MB}, t=3, p=4$), ChaCha20-Poly1305 slot encryption, and fixed 32-byte `DuressSentinelBytes` matching (`SHA256("PERCOLATOR_VAULT_DURESS_SENTINEL_V1")`).
-  - [ ] Implement `DatabaseCanaryProbe` (`IDatabaseCanaryProbe`): executes `SELECT count(*) FROM sqlite_master;` on isolated probe connection, explicitly trapping native error code 26 (`SQLITE_NOTADB`).
-  - [ ] Implement `SqlCipherDatabaseUnlockCoordinator` (`Percolator.Application.Ports.IDatabaseUnlockCoordinator`).
-  - [ ] Implement `AuthenticatedSession` (`Percolator.Application.Ports.IAuthenticatedSession`).
-  - [ ] Implement `InfrastructureServiceCollectionExtensions.AddBootstrapInfrastructure(IServiceCollection, IConfiguration)`:
+  - [x] Define interfaces `IVaultEnvelopePacker`, `IDatabaseCanaryProbe`, `IDatabaseMigrator`, and `IStage2HostFactory`.
+  - [x] Implement `VaultEnvelopePacker` (`IVaultEnvelopePacker`): Argon2id derivation ($m=64\text{MB}, t=3, p=4$), ChaCha20-Poly1305 slot encryption, and fixed 32-byte `DuressSentinelBytes` matching (`SHA256("PERCOLATOR_VAULT_DURESS_SENTINEL_V1")`).
+  - [x] Implement `DatabaseCanaryProbe` (`IDatabaseCanaryProbe`): executes `SELECT count(*) FROM sqlite_master;` on isolated probe connection, explicitly trapping native error code 26 (`SQLITE_NOTADB`).
+  - [x] Implement `SqlCipherDatabaseUnlockCoordinator` (`Percolator.Application.Ports.IDatabaseUnlockCoordinator`).
+  - [x] Implement `AuthenticatedSession` (`Percolator.Application.Ports.IAuthenticatedSession`).
+  - [x] Implement `InfrastructureServiceCollectionExtensions.AddBootstrapInfrastructure(IServiceCollection, IConfiguration)`:
     - Calls `SQLitePCL.Batteries_V2.Init()`.
     - Registers `SystemDateTimeProvider`, `ProtobufHeaderStorage`, `DuressWipeHandler`, `VaultEnvelopePacker`, `DatabaseCanaryProbe`, and `SqlCipherDatabaseUnlockCoordinator`.
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Vault/Unlock/`)**:

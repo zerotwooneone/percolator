@@ -74,6 +74,18 @@ public interface IDatabaseUnlockCoordinator
         CancellationToken ct = default);
 
     /// <summary>
+    /// Sets, updates, or clears (if null or empty) the emergency duress passphrase within an active session,
+    /// requiring re-authentication with the current master passphrase.
+    /// </summary>
+    /// <param name="currentMasterPassword">The current master passphrase to re-authenticate.</param>
+    /// <param name="duressPassword">The new duress passphrase to configure, or null/empty to disable duress protection.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<DomainResult> ConfigureDuressPasswordAsync(
+        VaultPassphrase currentMasterPassword,
+        VaultPassphrase? duressPassword,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Gracefully stops background workers, flushes connection pools, zeroizes master key memory, and disposes the authenticated host.
     /// Transitions status to <see cref="DatabaseSetupStatus.Locked"/>.
     /// </summary>
