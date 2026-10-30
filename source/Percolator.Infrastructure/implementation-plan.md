@@ -5,7 +5,7 @@
 - [x] Lens 2: Onion Architecture & Primitive Obsession (Status: Approved)
 - [x] Lens 3: Threat Modeling & Security Posture (Status: Approved)
 - [x] Lens 4: High-Value, Low-Brittle Unit Test Design (Status: Approved)
-- [ ] Lens 5: Cross-Layer Infrastructure Alignment (Status: in progress)
+- [x] Lens 5: Cross-Layer Infrastructure Alignment (Status: Approved)
 - [ ] Implementation Gate: LOCKED (Refinement in progress)
 
 ---
@@ -1222,11 +1222,29 @@
         bytes encrypted_payload = 5;
       }
       ```
+    - **5. `profile.proto` (Profile Metadata & Blob Reference Packaging)**:
+      ```protobuf
+      syntax = "proto3";
+      package percolator.profile.v1;
+
+      message BlobReferenceProto {
+        bytes blob_id_sha256 = 1;
+        bytes decryption_key = 2;
+        string mime_type = 3;
+      }
+
+      message ProfileMetadataPayloadProto {
+        string display_name = 1;
+        string bio = 2;
+        optional string status_text = 3;
+        optional BlobReferenceProto avatar_blob = 4;
+      }
+      ```
   - **Explicit Phase 4 Boundary Exclusion**:
     - Application plugin schemas (`chat.proto`, `discovery.proto`, `file_transfer.proto`) are strictly excluded from Phase 3 and deferred to Phase 4 (Chunks 4.1, 4.2, 4.4).
 - **Scope & Deliverables**:
   - [ ] Configure `Google.Protobuf` and `Grpc.Tools` in `Percolator.Infrastructure.csproj`.
-  - [ ] Author Protobuf schemas in `Percolator.Infrastructure/Protos/`: `unauthenticated_delivery.proto`, `authenticated_relay.proto`, `anonymous_group.proto`, and `session.proto`.
+  - [ ] Author Protobuf schemas in `Percolator.Infrastructure/Protos/`: `unauthenticated_delivery.proto`, `authenticated_relay.proto`, `anonymous_group.proto`, `session.proto`, and `profile.proto`.
   - [ ] Verify clean compilation and code generation of typed C# messages and gRPC base services.
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Protos/`)**:
   - `CoreProtoCompilationTests.AllProtos_GenerateValidClrTypes`: tests that core message types instantiate and default-serialize without schema errors.
@@ -1243,13 +1261,18 @@
     - High-performance binary serialization using `Google.Protobuf.CodedOutputStream` and `IBufferWriter<byte>`.
     - Generic span-based deserialization using `Google.Protobuf.MessageParser<T>`.
     - Completely decoupled from concrete plugin schemas; implements a clean compile-time boundary for arbitrary protobuf-serializable plugin payloads.
+  - **`ProtobufProfileSerializer` (`Percolator.PluginSdk.Profiles.IProfileMetadataSerializer`)**:
+    - Serializes and deserializes `ProfileMetadataPayload` (`DisplayName`, `Bio`, optional `StatusText`, optional `BlobReference`) using `profile.proto` (`ProfileMetadataPayloadProto`, `BlobReferenceProto`).
+    - Enforces domain value object boundaries (`BlobId`, `AttachmentKey`, `MimeType`) during deserialization.
 - **Scope & Deliverables**:
   - [ ] Implement `ProtobufSessionWirePacker` (`Percolator.Application.Ports.ISessionWirePacker`).
   - [ ] Implement `ProtobufPayloadSerializer` (`Percolator.PluginSdk.IPayloadSerializer`).
+  - [ ] Implement `ProtobufProfileSerializer` (`Percolator.PluginSdk.Profiles.IProfileMetadataSerializer`).
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Packaging/`)**:
   - `ProtobufSessionWirePackerTests.RoundtripDirectSession_PacksAndUnpacksCorrectly`: packs ratchet header and ciphertext into wire bytes and unwraps into typed `InboundDirectEnvelope`.
   - `ProtobufSessionWirePackerTests.GroupSessionPackage_PacksIterationAndSignature`: packages group message iteration, signature, and ciphertext into `GroupSessionPackageProto`.
   - `ProtobufPayloadSerializerTests.GenericPayloadSerialization_RoundtripsCorrectly`: serializes and deserializes generic payloads.
+  - `ProtobufProfileSerializerTests.ProfileMetadataAndBlobReference_RoundtripsCorrectly`: serializes and deserializes `ProfileMetadataPayload` with optional `BlobReference` via `profile.proto`.
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Packaging`
 
@@ -1434,7 +1457,8 @@
     - `ChatPayloadEnvelopeProto`: `string type = 1;`, `bytes data = 2;`, `bytes padding = 3;` (maps 1:1 with `Percolator.Apps.Chat.Features.Messaging.ChatPayloadEnvelopeDto`).
     - `ChatMessageProto`: text content, timestamp, and message flags.
     - `ReplyContextProto`: strictly carries `parent_message_id` (16 bytes GUID) and `author_identity_id` (32 bytes); quote snippet text is strictly omitted from the wire (Invariant 6).
-    - `MentionProto`, `MediaAttachmentProto` (includes `blob_sha256`, `encryption_key`, `base_nonce`, `storage_mode`, `relay_endpoint_uri`, `ciphertext_size_bytes`, `file_name`, `file_size_bytes`, `mime_type`), `MessageEditProto`, `MessageTombstoneProto`, `ReactionUpdateProto`, `ReadReceiptProto`, `SystemNoticeProto`, `GroupInvitationProto`, `GroupInvitationResponseProto`.
+    - `MentionProto`, `LinkPreviewProto` (`url`, `title`, `description`, `thumbnail_blob_sha256`, `thumbnail_encryption_key`, `thumbnail_base_nonce`, `thumbnail_storage_mode`, `thumbnail_relay_endpoint_uri`, `thumbnail_ciphertext_size_bytes`, `thumbnail_mime_type`), `MediaAttachmentProto` (includes `blob_sha256`, `encryption_key`, `base_nonce`, `storage_mode`, `relay_endpoint_uri`, `ciphertext_size_bytes`, `file_name`, `file_size_bytes`, `mime_type`), `MessageEditProto`, `MessageTombstoneProto`, `ReactionUpdateProto`, `ReadReceiptProto`, `SystemNoticeProto`, `GroupInvitationProto`, `GroupInvitationResponseProto`.
+    - `ProfileCapabilityProto`: `channel_id`, `author_id`, `profile_key_bytes`, `blinded_locator_bytes`, `mailbox_routing_token_bytes`, `revision`, `timestamp_unix_ms`, `author_public_key_bytes`, `source_endpoint`, `source_type` (maps 1:1 with `Percolator.Apps.Chat.Features.Profiles.ProfileCapabilityDto` for `ChatPayloadType.ProfileCapability = 9`).
   - **Application-Layer Stepped Bucket Padding Integration**:
     - Application-layer `ChatService` (`Percolator.Apps.Chat.Features.Messaging.ChatService`) already wraps and pads every outbound chat payload via `SteppedPadding.CreatePaddedEnvelopeBytes` to discrete buckets (`256 B`, `512 B`, `1024 B`, `2048 B`, `4096 B`, and multiples of `4096 B` via `((unpaddedLength + 4095) / 4096) * 4096` for messages up to `ChatMessage.MaxContentLength = 16_000` chars).
     - `ProtobufPayloadSerializer` (from Chunk 3.3) serializes `ChatPayloadEnvelopeDto` (`Type`, `Data`, `Padding`) and inner chat DTOs directly to `chat.proto` binary messages without double-padding or artificially rejecting valid `> 4096 B` multi-block frames.
@@ -1559,24 +1583,40 @@
 - **Technical Specifications, Table Schemas & Binary Framing**:
   - **DDL & Schema Definitions (`ft_*`)**:
     - `ft_transfer_sessions`:
-      - `transfer_id` (`TEXT` GUID, PK)
-      - `channel_id` (`TEXT` GUID)
-      - `manifest_hash` (`BLOB` 32 bytes)
-      - `total_size_bytes` (`INTEGER`)
-      - `transferred_size_bytes` (`INTEGER`)
-      - `status` (`INTEGER`: `Pending=0`, `InProgress=1`, `Completed=2`, `Failed=3`, `Cancelled=4`)
-      - `direction` (`INTEGER`: `Inbound=0`, `Outbound=1`)
+      - `transfer_id` (`TEXT` GUID `TransferSessionId`, PK)
+      - `channel_id` (`TEXT` GUID `ChannelId`)
+      - `local_identity_id` (`BLOB` 32 bytes `PublicIdentityId`)
+      - `initiator_id` (`BLOB` 32 bytes `PublicIdentityId`)
+      - `topology_type` (`INTEGER`: `OneToOne=1`, `MultiPeerSwarm=2`)
+      - `recipients_json` (`TEXT` serialized list of `PublicIdentityId`)
+      - `role` (`INTEGER` `TransferRole`: `Sender=1`, `Receiver=2`)
+      - `state` (`INTEGER` `TransferSessionState`: `Offered=1`, `PendingConsent=2`, `Active=3`, `Paused=4`, `Completed=5`, `SeedComplete=6`, `Cancelled=7`, `Rejected=8`, `Expired=9`, `Failed=10`)
+      - `root_name` (`TEXT` `RootBundleName`)
+      - `total_size_bytes` (`INTEGER` `TotalBundleBytes`)
+      - `chunk_size_bytes` (`INTEGER` `ChunkSizeBytes`)
+      - `merkle_root` (`BLOB` 32 bytes `MerkleRoot`)
+      - `concatenated_leaves` (`BLOB` $N \times 32$ bytes `ChunkHash` leaf array)
+      - `selected_files_json` (`TEXT` nullable `SelectedFileIndices`)
+      - `target_seed_ratio` (`REAL` `SeedRatio`)
+      - `uploaded_size_bytes` (`INTEGER` `TotalBundleBytes`)
+      - `local_root_path` (`TEXT` nullable `RootDirectoryPath`)
+      - `wan_policy` (`INTEGER` `DirectWanPolicy`: `DisabledByDefault=1`, `ExplicitlyAllowed=2`)
       - `transfer_key_ciphertext` (`BLOB`, 32-byte `TransferKey` encrypted at rest via `AesGcmValueConverter`)
-      - `base_nonce` (`BLOB` 12 bytes, `ChunkBaseNonce`)
+      - `base_nonce` (`BLOB` 12 bytes `BaseNonce`)
       - `stream_auth_token_ciphertext` (`BLOB`, 32-byte `StreamAuthToken` encrypted at rest via `AesGcmValueConverter`)
-      - `relay_pipe_token_ciphertext` (`BLOB` nullable, 32-byte `RelayPipeAuthToken` encrypted at rest via `AesGcmValueConverter`)
+      - `relay_endpoint_uri` (`TEXT` nullable `RelayPipeEndpointUri`)
+      - `relay_pipe_token_ciphertext` (`BLOB` nullable, 32-byte `RelayPipeToken` encrypted at rest via `AesGcmValueConverter`)
+      - `direct_candidates_json` (`TEXT` serialized `IReadOnlyList<DirectEndpointCandidate>`)
       - `created_at_utc` (`TEXT` ISO 8601)
+      - `completed_at_utc` (`TEXT` ISO 8601 nullable)
     - `ft_manifest_files`:
-      - `id` (`TEXT` GUID, PK)
       - `transfer_id` (`TEXT` GUID, FK to `ft_transfer_sessions(transfer_id)` ON DELETE CASCADE)
-      - `relative_path` (`TEXT`)
-      - `file_size_bytes` (`INTEGER`) // Path sanitization: rejects paths with '..', leading slashes, Win32 reserved names, or ADS streams
-      - `merkle_root` (`BLOB` 32 bytes)
+      - `file_index` (`INTEGER` `FileIndex`)
+      - `relative_path` (`TEXT` `SanitizedRelativePath`)
+      - `file_size_bytes` (`INTEGER` `FileSizeBytes`) // Path sanitization: rejects paths with '..', leading slashes, Win32 reserved names, or ADS streams
+      - `start_offset` (`INTEGER` `BundleByteOffset`)
+      - `last_modified_unix_seconds` (`INTEGER` `FileLastModifiedUtc`)
+      - *Composite PK*: `PRIMARY KEY(transfer_id, file_index)`
     - `ft_transfer_bitfields`:
       - `transfer_id` (`TEXT` GUID, PK, FK to `ft_transfer_sessions(transfer_id)` ON DELETE CASCADE)
       - `bitfield_bytes` (`BLOB`)
@@ -1613,11 +1653,14 @@
       - `0x0B` `KEEP_ALIVE`: (Zero payload)
       - `0x0C` `PEX_PEERS` (`PexPeersFrame`): `[CandidateCount: 1 B] repeated: [PeerIdLength: 1 B] [PeerIdBytes: 16/32 B] [EndpointLength: UInt16 BE] [EndpointUtf8Bytes: M B]` (clamped by `PexRateLimiter` to `MaxCandidatesPerFrame = 16` and `MinPexInterval = 10s`, dropping WAN candidates when `DirectWanPolicy.DisabledByDefault` and validating endpoints via `CallbackEndpointValidator`).
   - **Wire Contracts (`Percolator.Infrastructure/Protos/file_transfer.proto`)**:
-    - `TransferManifestProto`: concatenated 32-byte leaf array without per-leaf tags, total size, piece count, piece hash list.
-    - `FileEntryProto`: relative file path, size, Merkle root.
-    - `FileTransferOfferProto`: transfer ID, manifest, encrypted `transfer_key`, `base_nonce`, `stream_auth_token`, optional `relay_pipe_token`, sender identity ID, total bytes.
-    - `FileTransferAcceptProto`: transfer ID, receiver bitfield, candidate endpoints.
-    - `FileTransferCancelProto`: transfer ID, cancellation reason code.
+    - `FileEntryProto`: `file_index`, `relative_path`, `file_size_bytes`, `start_offset`, `last_modified_unix_seconds`.
+    - `TransferManifestProto`: `root_name`, `total_size_bytes`, `chunk_size_bytes`, `merkle_root`, `concatenated_leaves` (concatenated 32-byte leaf array without per-leaf tags), `repeated FileEntryProto files`.
+    - `TransferBundleSummaryProto`: `root_name`, `total_size_bytes`, `file_count`, `chunk_size_bytes`, `merkle_root`.
+    - `ManifestBlobDescriptorProto` & `ManifestDistributionProto`: `is_inline`, `inline_manifest`, or `external_blob` (`blob_id`, `manifest_key`, `manifest_nonce`, `ciphertext_size_bytes`, `relay_endpoint_uri`).
+    - `RelayRendezvousDescriptorProto` & `DirectEndpointCandidateProto`: relay pipe endpoint/token and candidate endpoint/priority descriptors.
+    - `FileTransferOfferProto`: `session_id`, `channel_id`, `sender_id`, `topology_type`, `repeated bytes recipient_ids`, `summary`, `manifest_distribution`, `transfer_key`, `base_nonce`, `stream_auth_token`, `relay_rendezvous`, `repeated DirectEndpointCandidateProto direct_candidates`, `expires_at_unix_seconds`.
+    - `FileTransferAcceptProto`: `session_id`, `responder_id`, `repeated int32 selected_file_indices`, `repeated DirectEndpointCandidateProto responder_candidates`, `accepted_at_unix_seconds`.
+    - `FileTransferCancelProto`: `session_id`, `sender_id`, `reason` (`UserCancelled`, `RejectedByPeer`, `OfferExpired`, `IntegrityFailure`, `StorageExhausted`, `TransportFailure`), `cancelled_at_unix_seconds`.
   - **Portable Desktop File Store Guarantees**:
     - Pre-allocation via `FileStream.SetLength` for cross-platform zero-fill file sizing.
     - Zero-byte files materialize immediately without temporary staging.
@@ -1633,6 +1676,7 @@
       - Application-layer `TransferSessionCoordinator.AuthenticateHandshakeAsync` performs constant-time `CryptographicOperations.FixedTimeEquals` validation on the `0x01 HandshakeFrame` `StreamAuthToken` and verifies `SenderPeerId` against the session's `authorizedPeers` set (`InvalidStreamAuthToken` / `UnauthorizedSwarmPeer`), immediately closing unauthenticated streams before bitfield or chunk exchange.
 - **Scope & Deliverables**:
   - [ ] Author Protobuf schema `Percolator.Infrastructure/Protos/file_transfer.proto`.
+  - [ ] Configure `<ProjectReference>` to `Percolator.Apps.FileTransfer` and `Percolator.Apps.FileTransfer.Domain` in `Percolator.Infrastructure.csproj`.
   - [ ] Implement File Transfer Persistence & CQRS Query Services:
     - `SqliteTransferSessionRepository` (`Percolator.Apps.FileTransfer.Ports.ITransferSessionRepository`)
     - `SqliteFilterPolicyRepository` (`Percolator.Apps.FileTransfer.Ports.IFileTransferFilterPolicyRepository`)
@@ -1715,7 +1759,7 @@
 - **Technical Specifications & Lifetime Architecture**:
   - **Two-Stage Container Separation Protocol**:
     - *Stage 1 (Pre-Unlock Bootstrap Container)*: Contains zero SQLite DbContexts, zero repositories, and zero network/sync workers. Registers `SQLitePCL.Batteries_V2.Init()`, `SignalCryptoEngine`, `SystemDateTimeProvider`, `ProtobufHeaderStorage`, `DuressWipeHandler`, and `SqlCipherDatabaseUnlockCoordinator`.
-    - *Stage 2 (Authenticated Host - `IHost`)*: Built post-unlock via `Stage2HostFactory`. Hosts `IMasterKeyHandle` (scoped to session in pinned unmanaged memory), `SqlCipherPragmaInterceptor`, `PercolatorDbContext` (scoped/pooled), all 60 infrastructure ports, and `IHostedService` background workers.
+    - *Stage 2 (Authenticated Host - `IHost`)*: Built post-unlock via `Stage2HostFactory`. Hosts `IMasterKeyHandle` (scoped to session in pinned unmanaged memory), `SqlCipherPragmaInterceptor`, `PercolatorDbContext` (scoped/pooled), all 61 infrastructure ports, and `IHostedService` background workers.
     - *Deterministic Session Teardown Ordering*: `AuthenticatedSession.DisposeAsync()` and `SqlCipherDatabaseUnlockCoordinator.LockAsync()` enforce the strict teardown sequence: (1) `await host.StopAsync(ct)`, (2) `await host.DisposeAsync()`, (3) `SqliteConnection.ClearAllPools()`, and (4) `masterKeyHandle.Dispose()`.
   - **Service Lifetime Registration Topology**:
     - **Singletons**:
@@ -1723,7 +1767,7 @@
       - `IDbContextFactory<PercolatorDbContext>` & `PercolatorDbContextOptions`
       - Core Cryptography & Time: `ICryptoEngine`, `IZkProofEngine`, `IDateTimeProvider`
       - Networking & Stream Management: `StreamRegistry`, `ITransferStreamPoolFactory` (`TcpMultiStreamPoolFactory`), `TokenBucketRateLimiter`, `LocalFileChunkStore`, `ITransportCertificateProvider` (`InMemoryTransportCertificateProvider`)
-      - Protocol Serializers: `ProtobufSessionWirePacker`, `ProtobufPayloadSerializer`
+      - Protocol Serializers: `ProtobufSessionWirePacker`, `ProtobufPayloadSerializer`, `ProtobufProfileSerializer`
     - **Scoped**:
       - `PercolatorDbContext` (pooled context per scope)
       - All Repositories & CQRS Query Services (Outbox, Contacts, Ratchet, Channels, Relay prekeys/profiles/ledger, Chat, File Transfer)
@@ -1753,11 +1797,11 @@
   - [ ] Implement `Stage2HostFactory`:
     - Extends `BaselineStage2HostFactory` to wire the full suite of operational adapters, repositories, query services, gRPC channels, and background pruners across all feature slices.
   - [ ] Implement `InfrastructureServiceCollectionExtensions.AddAuthenticatedInfrastructure(IServiceCollection, IConfiguration, IMasterKeyHandle)`:
-    - Registers all 60 infrastructure ports into the Stage 2 container with correct lifetime scopes.
+    - Registers all 61 infrastructure ports into the Stage 2 container with correct lifetime scopes.
     - Registers all 12 background `IHostedService` workers.
     - Exposes extension point for `Percolator.Infrastructure.Windows` overrides.
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Composition/`)**:
-  - `DependencyInjectionTests.All60Ports_ResolveFromContainerWithoutCycles`: resolves every planned infrastructure port from DI container; asserts non-null without circular dependency or missing registration.
+  - `DependencyInjectionTests.All61Ports_ResolveFromContainerWithoutCycles`: resolves every planned infrastructure port from DI container; asserts non-null without circular dependency or missing registration.
   - `DependencyInjectionTests.NoCaptiveDependencies_ScopedServicesNeverInjectedIntoSingletons`: enforces container scope validation (`ValidateScopes = true`); verifies no scoped DbContext or repository is injected into singleton services or pruners.
   - `DependencyInjectionTests.All12HostedServices_RegisteredAndStartable`: resolves `IEnumerable<IHostedService>` and asserts exact count of 12 registered background workers.
   - `DependencyInjectionTests.WindowsOverrides_CanSwapFileStoreAndCertProvider`: calls optional Windows overlay registrations; asserts `IDesktopFileStorage` resolves to `WindowsSparseDesktopFileStore`.
@@ -1847,3 +1891,4 @@ To guarantee robust infrastructure without introducing brittle tests that break 
 | 58 | `IIdentityProfileRepository` | `Percolator.Domain` | `SqliteIdentityProfileRepository` | Chunk 2.2 |
 | 59 | `IPortReservationService` | `Percolator.Application` | `SqlitePortReservationService` | Chunk 3.4 |
 | 60 | `IPrivateRendezvousService` | `Percolator.Apps.Discovery` | `SqlitePrivateRendezvousService` | Chunk 4.2 |
+| 61 | `IProfileMetadataSerializer` | `Percolator.PluginSdk` | `ProtobufProfileSerializer` | Chunk 3.3 |
