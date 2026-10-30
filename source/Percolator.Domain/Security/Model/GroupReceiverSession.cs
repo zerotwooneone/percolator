@@ -23,6 +23,7 @@ public sealed class GroupReceiverSession : AggregateRoot<SessionId>, ISensitiveS
     public IdentityKey? AuthorSigningKey { get; }
 
     private ChainKey? _chainKey;
+    public ChainKey? CurrentChainKey => _chainKey;
     public uint ReceivingCounter { get; private set; }
     public bool IsZeroized { get; private set; }
 

@@ -36,6 +36,25 @@ public sealed class RelayHostedPreKeyBundle : AggregateRoot<HostedPreKeyRecordId
         SignedPreKeySignature = signedPreKeySignature;
     }
 
+    public static RelayHostedPreKeyBundle Rehydrate(
+        PublicIdentityId ownerId,
+        DeviceId deviceId,
+        IdentityKey identityKey,
+        DhPublicKey signedPreKey,
+        DeviceLinkProof signedPreKeySignature,
+        IEnumerable<(uint KeyId, DhPublicKey Key)>? oneTimePreKeys = null)
+    {
+        var bundle = new RelayHostedPreKeyBundle(ownerId, deviceId, identityKey, signedPreKey, signedPreKeySignature);
+        if (oneTimePreKeys != null)
+        {
+            foreach (var key in oneTimePreKeys)
+            {
+                bundle._oneTimePreKeys.Enqueue(key);
+            }
+        }
+        return bundle;
+    }
+
     public static DomainResult<RelayHostedPreKeyBundle> Create(
         PublicIdentityId ownerId,
         DeviceId deviceId,

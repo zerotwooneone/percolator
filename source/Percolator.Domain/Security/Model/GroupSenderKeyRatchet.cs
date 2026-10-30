@@ -18,6 +18,7 @@ public sealed class GroupSenderKeyRatchet : AggregateRoot<SessionId>, ISensitive
     private ChainKey? _chainKey;
     private EphemeralPrivateKey? _signingPrivateKey;
     public IdentityKey? AuthorSigningPublicKey { get; }
+    public EphemeralPrivateKey? SigningPrivateKey => _signingPrivateKey;
     public ChainKey? CurrentChainKey => _chainKey;
 
     public uint Iteration { get; private set; }

@@ -577,12 +577,12 @@
   - **`BaselineStage2HostFactory` (`IStage2HostFactory`)**:
     - Configures post-unlock Stage 2 `IHost` with active `IMasterKeyHandle`, `SqlCipherPragmaInterceptor`, `PercolatorDbContext`, and `IDbContextFactory<PercolatorDbContext>`.
 - **Scope & Deliverables**:
-  - [ ] Implement `PercolatorDbContext` with baseline entity mappings.
-  - [ ] Implement EF Core deterministic BLOB mapping with `ValueComparer<byte[]>`.
-  - [ ] Implement `AesGcmValueConverter` for column-level encryption of private keys and ratchet chain keys using BCL `AesGcm` and `IMasterKeyHandle`.
-  - [ ] Implement `SqliteDatabaseMigrator` (`Percolator.Infrastructure.Vault.IDatabaseMigrator`).
-  - [ ] Create initial EF Core database migration for `percolator.db`.
-  - [ ] Implement `BaselineStage2HostFactory` (`Percolator.Infrastructure.Vault.IStage2HostFactory`) registering scoped `PercolatorDbContext` and `IDbContextFactory<PercolatorDbContext>`.
+  - [x] Implement `PercolatorDbContext` with baseline entity mappings.
+  - [x] Implement EF Core deterministic BLOB mapping with `ValueComparer<byte[]>`.
+  - [x] Implement `AesGcmValueConverter` for column-level encryption of private keys and ratchet chain keys using BCL `AesGcm` and `IMasterKeyHandle`.
+  - [x] Implement `SqliteDatabaseMigrator` (`Percolator.Infrastructure.Vault.IDatabaseMigrator`).
+  - [x] Create initial EF Core database migration for `percolator.db`.
+  - [x] Implement `BaselineStage2HostFactory` (`Percolator.Infrastructure.Vault.IStage2HostFactory`) registering scoped `PercolatorDbContext` and `IDbContextFactory<PercolatorDbContext>`.
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Persistence/Core/`)**:
   - `AesGcmValueConverterTests.EncryptAndDecrypt_RoundtripsSuccessfully`: asserts plaintext roundtrips through BCL `AesGcmValueConverter` with HKDF subkey derivation and validates ciphertext layout (`[12B Nonce][16B Tag][Ciphertext]`).
   - `PercolatorDbContextTests.ColumnLevelEncryption_StoresKeysAsCiphertextAtRest`: direct byte inspection of raw SQLite database confirms plaintext private keys are absent.
@@ -692,7 +692,7 @@
       - *Composite PK*: `PRIMARY KEY(recipient_identity_id, sender_identity_id)` (persisted with upsert semantics in `SqlitePendingHandshakeRepository` to replace existing in-flight invitations upon subsequent contact requests from the same sender).
   - **Zero Phase 3 Wire Serializer Dependency**: Repositories persist domain value object byte arrays or internal binary representations directly. State encryption is handled by `AesGcmValueConverter` at the EF Core mapping boundary; repositories do not depend on Phase 3 `ISessionWirePacker` or protobuf schemas (`session.proto`).
 - **Scope & Deliverables**:
-  - [ ] Implement Cryptographic Vault Repositories:
+  - [x] Implement Cryptographic Vault Repositories:
     - `SqliteIdentityProfileRepository` (`Percolator.Domain.Identities.Ports.IIdentityProfileRepository`)
     - `SqliteLocalIdentityKeyStore` (`Percolator.Application.Ports.ILocalIdentityKeyStore`)
     - `SqlitePrivatePreKeyStore` (`Percolator.Domain.Identities.Ports.IPrivatePreKeyStore`)
@@ -743,7 +743,7 @@
     - `SqlOutboxQueryService` projects lightweight status summaries, counts, and retry timings via EF Core `.Select()` projection, strictly omitting the `payload` column to prevent LOH (Large Object Heap) memory churn during UI diagnostic polling.
     - **Delivered Payload Scrubbing**: When `SqliteOutboxRepository.SaveAsync` persists a job with `OutboxStatus.Delivered`, it clears `payload = Array.Empty<byte>()` in SQLite so delivered message wire bytes are not retained during the 7-day diagnostic summary window.
 - **Scope & Deliverables**:
-  - [ ] Implement Outbox Persistence & CQRS Read Model:
+  - [x] Implement Outbox Persistence & CQRS Read Model:
     - `SqliteOutboxRepository` (`Percolator.Application.Delivery.Ports.IOutboxRepository`): write-side enqueue, dequeue batching, retry calculation tracking.
     - `SqlOutboxQueryService` (`Percolator.Application.Delivery.Ports.IOutboxQueryService`): fast-path diagnostic summary projecting without hydrating byte payload buffers.
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Persistence/Outbox/`)**:
@@ -800,7 +800,7 @@
       - `sent_at_utc` (`TEXT` ISO 8601)
       - *Payload History Index*: `CREATE INDEX ix_channel_payloads_history ON chat_channel_payloads(channel_id, sent_at_utc DESC);`
 - **Scope & Deliverables**:
-  - [ ] Implement Contacts & Channel Repositories:
+  - [x] Implement Contacts & Channel Repositories:
     - `SqlitePeerContactRepository` (`Percolator.Domain.Identities.Ports.IPeerContactRepository`): persists contact trust and profile key metadata.
     - `SqlPeerContactQueryService` (`Percolator.Application.Ports.IPeerContactQueryService`): fast-path summary and detail read models.
     - `SqliteChannelRepository` (`Percolator.Domain.Channels.Ports.IChannelRepository`): persists channel identity, type, and metadata.
@@ -874,7 +874,7 @@
     - All network transport endpoints (`UnauthenticatedDeliveryEndpoint`), gRPC stubs, and duplex relay workers (`RelayMailboxStreamWorker`) are strictly excluded and located in Phase 3 (Chunk 3.6).
     - Serialized prekeys use BCL `System.Text.Json` for `one_time_prekeys_json`, eliminating any dependency on Phase 3 Protobuf types.
 - **Scope & Deliverables**:
-  - [ ] Implement Profiles & Relay Delivery Repositories:
+  - [x] Implement Profiles & Relay Delivery Repositories:
     - `SqliteRelayPreKeyRepository` (`Percolator.Domain.Delivery.Ports.IRelayPreKeyRepository`)
     - `SqliteRelayProfileRepository` (`Percolator.Domain.Delivery.Ports.IRelayProfileRepository`)
     - `SqliteRelayLedgerRepository` (`Percolator.Domain.Delivery.Ports.IRelayLedgerRepository`)

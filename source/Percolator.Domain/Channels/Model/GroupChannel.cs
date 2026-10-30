@@ -55,6 +55,35 @@ public sealed class GroupChannel : AggregateRoot<ChannelId>
         return DomainResult<GroupChannel>.Success(group);
     }
 
+    public static GroupChannel Rehydrate(
+        ChannelId id,
+        string name,
+        EpochNumber epoch,
+        DateTimeOffset createdAtUtc,
+        DateTimeOffset lastActivityUtc,
+        IEnumerable<ChannelMember> members,
+        IEnumerable<ChannelPayload>? payloads = null)
+    {
+        var channel = new GroupChannel(id, name, epoch, createdAtUtc)
+        {
+            LastActivityUtc = lastActivityUtc
+        };
+        foreach (var member in members)
+        {
+            channel._members.Add(member);
+            channel._membersById[member.Id] = member;
+        }
+        if (payloads != null)
+        {
+            foreach (var payload in payloads)
+            {
+                channel._payloads.Add(payload);
+                channel._payloadIds.Add(payload.Id);
+            }
+        }
+        return channel;
+    }
+
     public DomainResult RenameChannel(
         PublicIdentityId actorId,
         string newName,

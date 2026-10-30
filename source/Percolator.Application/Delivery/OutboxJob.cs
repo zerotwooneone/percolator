@@ -68,6 +68,28 @@ public sealed class OutboxJob : AggregateRoot<Guid>
         return DomainResult<OutboxJob>.Success(job);
     }
 
+    public static OutboxJob Rehydrate(
+        Guid id,
+        ChannelId channelId,
+        PublicIdentityId ownerIdentityId,
+        PublicIdentityId? recipientIdentityId,
+        DeliveryRoute route,
+        ReadOnlyMemory<byte> payload,
+        OutboxStatus status,
+        int retryCount,
+        int maxAttempts,
+        DateTimeOffset createdAtUtc,
+        DateTimeOffset? nextAttemptAtUtc)
+    {
+        var job = new OutboxJob(id, channelId, ownerIdentityId, recipientIdentityId, route, payload, createdAtUtc, maxAttempts)
+        {
+            Status = status,
+            RetryCount = retryCount,
+            NextAttemptAtUtc = nextAttemptAtUtc
+        };
+        return job;
+    }
+
     public void RebindRoute(DeliveryRoute newRoute)
     {
         Route = newRoute;

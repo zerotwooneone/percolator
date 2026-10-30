@@ -101,6 +101,31 @@ public sealed class PeerContact : AggregateRoot<PublicIdentityId>
         return DomainResult<PeerContact>.Success(contact);
     }
 
+    public static PeerContact Rehydrate(
+        PublicIdentityId ownerIdentityId,
+        PublicIdentityId remotePeerId,
+        ContactNickname nickname,
+        PeerTrustLevel trustLevel,
+        ContactState state,
+        DateTimeOffset createdAtUtc,
+        DateTimeOffset? lastSeenAtUtc,
+        IdentityKey? primaryPublicKey,
+        IEnumerable<DeviceId>? registeredDevices = null)
+    {
+        var contact = new PeerContact(ownerIdentityId, remotePeerId, nickname, trustLevel, createdAtUtc, primaryPublicKey, state)
+        {
+            LastSeenAtUtc = lastSeenAtUtc
+        };
+        if (registeredDevices != null)
+        {
+            foreach (var device in registeredDevices)
+            {
+                contact._registeredDevices.Add(device);
+            }
+        }
+        return contact;
+    }
+
     public DomainResult SetNickname(ContactNickname newNickname)
     {
         if (TrustLevel == PeerTrustLevel.Blocked)

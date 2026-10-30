@@ -51,6 +51,18 @@ public sealed class RelayGroupLedger : AggregateRoot<ChannelId>
         }
     }
 
+    public static RelayGroupLedger Rehydrate(
+        ChannelId channelId,
+        PublicIdentityId relayIdentityId,
+        EpochNumber epoch,
+        EncryptedEntriesBlob rosterBlob,
+        IEnumerable<BlindedRoutingToken> activeTokens,
+        ZkGroupPublicParams publicParams,
+        DateTimeOffset lastUpdatedUtc)
+    {
+        return new RelayGroupLedger(channelId, relayIdentityId, epoch, rosterBlob, activeTokens, publicParams, lastUpdatedUtc);
+    }
+
     public static DomainResult<RelayGroupLedger> CreateGenesis(
         ChannelId channelId,
         PublicIdentityId relayIdentityId,

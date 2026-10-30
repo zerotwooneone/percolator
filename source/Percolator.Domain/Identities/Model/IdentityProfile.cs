@@ -28,6 +28,21 @@ public sealed class IdentityProfile : AggregateRoot<PublicIdentityId>
         DisabledAtUtc = null;
     }
 
+    public static IdentityProfile Rehydrate(
+        PublicIdentityId id,
+        string displayName,
+        IdentityRole role,
+        IdentityState state,
+        DateTimeOffset createdAtUtc,
+        DateTimeOffset? disabledAtUtc = null)
+    {
+        var profile = new IdentityProfile(id, displayName, role, state, createdAtUtc)
+        {
+            DisabledAtUtc = disabledAtUtc
+        };
+        return profile;
+    }
+
     public static DomainResult<IdentityProfile> Create(
         PublicIdentityId id,
         string displayName,

@@ -62,6 +62,29 @@ public sealed class DirectChannel : AggregateRoot<ChannelId>
         return DomainResult<DirectChannel>.Success(channel);
     }
 
+    public static DirectChannel Rehydrate(
+        ChannelId id,
+        PublicIdentityId ownerIdentityId,
+        PublicIdentityId remotePeerId,
+        DateTimeOffset createdAtUtc,
+        DateTimeOffset lastActivityUtc,
+        IEnumerable<ChannelPayload>? payloads = null)
+    {
+        var channel = new DirectChannel(id, ownerIdentityId, remotePeerId, createdAtUtc)
+        {
+            LastActivityUtc = lastActivityUtc
+        };
+        if (payloads != null)
+        {
+            foreach (var payload in payloads)
+            {
+                channel._payloads.Add(payload);
+                channel._payloadIds.Add(payload.Id);
+            }
+        }
+        return channel;
+    }
+
     public DomainResult AppendPayload(ChannelPayload payload, IDateTimeProvider timeProvider)
     {
         ArgumentNullException.ThrowIfNull(payload);
