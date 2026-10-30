@@ -1302,7 +1302,10 @@
          ```csharp
          var listener = new TcpListener(IPAddress.IPv6Any, port);
          listener.Server.DualMode = true;
-         listener.Server.ExclusiveAddressUse = true;
+         if (OperatingSystem.IsWindows())
+         {
+             listener.Server.ExclusiveAddressUse = true;
+         }
          listener.Start();
          listener.Stop();
          ```
@@ -1315,14 +1318,14 @@
       - **Capability-Authenticated Mailbox RPCs (`RegisterMailbox`, `DrainMailbox`, `ConnectMailboxStream`)**: Align directly with `RelayMailboxQueue` capability tokens (`DeliveryToken` and secret `DrainToken`), ensuring the relay never correlates a `BlindedRoutingToken` with an `IdentityKey`. `RegisterMailbox` registers `(routing_token, authorized_delivery_token, drain_token)`. `ConnectMailboxStream` issues a single-use CSPRNG `AuthChallengeProto` (`nonce`, `expires_at_utc`) and verifies `AuthResponseProto` (`routing_token`, `challenge_hmac = HMAC-SHA256(drain_token, nonce)`), which is inherently immune to clock drift and replay attacks.
       - **Protobuf-Native Signed PreKey Publication (`PublishPreKeyBundle`)**: Client serializes `PreKeyBundlePayloadProto` (containing `owner_identity_id`, `device_id`, `identity_key`, `signed_prekey`, `prekey_signature`, `one_time_prekeys`, and `published_at_utc`) into `payload_bytes` and signs `payload_bytes` with Ed25519. The relay verifies `signature` directly over raw `payload_bytes` before deserializing, and enforces `published_at_utc > stored.updated_at_utc` to prevent key rollback/replay attacks.
   - **Transport Primitives**:
-    - `InMemoryTransportCertificateProvider`: Ephemeral ECDSA P-256 self-signed certificate with loopback SANs generated in memory with zero disk I/O.
+    - `InMemoryTransportCertificateProvider` (`Percolator.Infrastructure.Transport.ITransportCertificateProvider`): Ephemeral ECDSA P-256 self-signed certificate with loopback SANs generated in memory with zero disk I/O.
     - `CallbackEndpointValidator`: Validates peer endpoints before connecting; blocks loopback (`127.0.0.0/8`, `::1`), RFC 1918 private subnets, IPv4-mapped IPv6, IPv6 Unique Local Addresses (`fc00::/7`), link-local (`169.254.0.0/16`, `fe80::/10`), and unspecified wildcard addresses (`0.0.0.0`, `::`) unless explicit dev flags (`AllowLoopback = true`, `AllowLan = true`) are set. Mitigates DNS rebinding by resolving hostnames once during validation and connecting directly to the validated `IPEndPoint`.
     - `PeerGrpcChannelFactory`: Thread-safe bounded channel cache (capacity: 100 channels) with 5-minute sliding expiration for idle connections, 2-second connect timeout, and clean socket disposal upon eviction.
     - `PrimaryContainerServiceActivator<T>`: Bridges Kestrel gRPC listener container to host DI container (`IServiceProvider`) with scoped lifetime cleanup.
 - **Scope & Deliverables**:
   - [ ] Implement `IPortReservationService` (`Percolator.Application.Ports.IPortReservationService`) in `Percolator.Application` (approved application port extension).
   - [ ] Implement `SqlitePortReservationService` (`IPortReservationService`).
-  - [ ] Implement `InMemoryTransportCertificateProvider`.
+  - [ ] Define `ITransportCertificateProvider` (`Percolator.Infrastructure.Transport.ITransportCertificateProvider`) and implement `InMemoryTransportCertificateProvider`.
   - [ ] Implement `CallbackEndpointValidator`.
   - [ ] Implement `PeerGrpcChannelFactory`.
   - [ ] Implement `PrimaryContainerServiceActivator<T>`.
@@ -1661,11 +1664,12 @@
     - `FileTransferOfferProto`: `session_id`, `channel_id`, `sender_id`, `topology_type`, `repeated bytes recipient_ids`, `summary`, `manifest_distribution`, `transfer_key`, `base_nonce`, `stream_auth_token`, `relay_rendezvous`, `repeated DirectEndpointCandidateProto direct_candidates`, `expires_at_unix_seconds`.
     - `FileTransferAcceptProto`: `session_id`, `responder_id`, `repeated int32 selected_file_indices`, `repeated DirectEndpointCandidateProto responder_candidates`, `accepted_at_unix_seconds`.
     - `FileTransferCancelProto`: `session_id`, `sender_id`, `reason` (`UserCancelled`, `RejectedByPeer`, `OfferExpired`, `IntegrityFailure`, `StorageExhausted`, `TransportFailure`), `cancelled_at_unix_seconds`.
-  - **Portable Desktop File Store Guarantees**:
-    - Pre-allocation via `FileStream.SetLength` for cross-platform zero-fill file sizing.
+  - **Portable Desktop File Store Guarantees (`PortableDesktopFileStore : IDesktopFileStorage`)**:
+    - Implements all 10 port methods on `Percolator.Apps.FileTransfer.Ports.IDesktopFileStorage` (`PreAllocateFilesAsync`, `WriteChunkAsync`, `ReadChunkAsync`, `WriteBoundarySliceAsync`, `ReadBoundarySliceAsync`, `DeleteBoundaryPartsAsync`, `ScanAndComputeBitfieldAsync`, `FinalizeFileAsync`, `CheckDiskSpaceAsync`, `GetFileMetadataAsync`).
+    - Pre-allocation via portable `FileStream.SetLength` for cross-platform file sizing (whereas Windows-specific NTFS `FSCTL_SET_SPARSE` kernel pre-allocation is implemented in `Percolator.Infrastructure.Windows`).
     - Zero-byte files materialize immediately without temporary staging.
     - Active piece staging via `.percolator-part` extension with atomic rename upon full verification.
-    - Win32 reserved device name and NTFS ADS sanitization: rejects paths containing `CON`, `PRN`, `AUX`, `NUL`, `COM1-9`, `LPT1-9`, `:` ADS streams, or directory traversals (`..`).
+    - Portable canonical root-containment and path traversal defense: verifies `Path.GetFullPath(resolvedPath)` stays strictly under `Path.GetFullPath(rootDirectory)` and rejects relative traversal segments (`..`), null bytes, and invalid path characters (while Windows-specific Win32 reserved device names and NTFS ADS stream checks are enforced in `Percolator.Infrastructure.Windows`).
   - **Swarm Multiplexing & Rate Limiting**:
     - `TcpMultiStreamPool`: manages 4–8 multiplexed TCP connections with `TCP_NODELAY = true`.
     - `TokenBucketRateLimiter`: smooth bandwidth allocation across active streams.
@@ -1693,7 +1697,7 @@
     - `SwarmEndpointRetentionPruner` (`IHostedService`)
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Plugins/FileTransfer/`)**:
   - `TcpMultiStreamPoolTests.FrameSerialization_All12Frames_RoundtripsSuccessfully`: serializes and deserializes all 12 frames (0x01–0x0C).
-  - `PortableDesktopFileStoreTests.Sanitization_RejectsReservedWin32NamesAndAds`: rejects `CON`, `PRN`, `AUX`, `:` ADS, and path traversals without touching disk.
+  - `PortableDesktopFileStoreTests.PathValidation_RejectsDirectoryTraversalAndRootEscape`: rejects `..` traversal and paths escaping the target root directory without touching disk.
   - `PortableDesktopFileStoreTests.ZeroByteFile_MaterializesImmediately`: creates zero-byte file immediately without `.percolator-part`.
   - `PortableDesktopFileStoreTests.BitfieldScanner_MatchesMerkleLeaves`: validates existing chunks against Merkle leaf hashes.
   - `TransferOfferReaperWorkerTests.StaleOffers_OlderThan24h_Reaped`: advances virtual clock by 25h with `FakeTimeProvider`; asserts stale offers marked cancelled.
@@ -1787,10 +1791,8 @@
         11. `RelayMailboxStreamWorker` (Chunk 3.6)
         12. `RelayGroupStreamWorker` (Chunk 3.6)
   - **Platform Separation Boundary & Windows Extensibility Hook**:
-    - Standard `AddAuthenticatedInfrastructure` registers 100% portable baseline implementations: `PortableDesktopFileStore` (`IDesktopFileStorage`) and `InMemoryTransportCertificateProvider` (`ITransportCertificateProvider`).
-    - Extensibility point: `Percolator.Infrastructure.Windows` (`net10.0-windows`) provides extension method `AddWindowsInfrastructureOverrides(this IServiceCollection services)` which swaps in:
-      1. `WindowsSparseDesktopFileStore`: Win32 `FSCTL_SET_SPARSE` (`DeviceIoControl` `0x000900C4`) for instant zero-write file pre-allocation on NTFS.
-      2. `WindowsSChannelCertificateProvider`: Temporary PKCS#12 `.pfx` export encrypted with a per-export 32-byte CSPRNG password (zeroized via `CryptographicOperations.ZeroMemory` immediately after import), deterministic CNG key container deletion (`ECDsaCng.Key.Delete()`) on `Dispose()`, and antivirus lock retries for Windows SChannel TLS.
+    - `Percolator.Infrastructure` (`net10.0`) remains 100% OS-agnostic and registers portable baseline implementations: `PortableDesktopFileStore` (`IDesktopFileStorage`) and `InMemoryTransportCertificateProvider` (`ITransportCertificateProvider`).
+    - Windows-specific adapter specifications, P/Invoke / SChannel mechanics, and tests are defined exclusively in [`Percolator.Infrastructure.Windows/implementation-plan.md`](../Percolator.Infrastructure.Windows/implementation-plan.md), which overrides those two registrations via `AddWindowsInfrastructureOverrides(this IServiceCollection services)`.
   - **Full Container Verification Guarantee**:
     - `Stage2HostFactory` builds `IHost` with service provider validation (`ValidateScopes = true`, `ValidateOnBuild = true`), guaranteeing zero captive dependencies, zero missing registrations, and zero circular dependencies.
 - **Scope & Deliverables**:
@@ -1799,12 +1801,10 @@
   - [ ] Implement `InfrastructureServiceCollectionExtensions.AddAuthenticatedInfrastructure(IServiceCollection, IConfiguration, IMasterKeyHandle)`:
     - Registers all 61 infrastructure ports into the Stage 2 container with correct lifetime scopes.
     - Registers all 12 background `IHostedService` workers.
-    - Exposes extension point for `Percolator.Infrastructure.Windows` overrides.
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Composition/`)**:
   - `DependencyInjectionTests.All61Ports_ResolveFromContainerWithoutCycles`: resolves every planned infrastructure port from DI container; asserts non-null without circular dependency or missing registration.
   - `DependencyInjectionTests.NoCaptiveDependencies_ScopedServicesNeverInjectedIntoSingletons`: enforces container scope validation (`ValidateScopes = true`); verifies no scoped DbContext or repository is injected into singleton services or pruners.
   - `DependencyInjectionTests.All12HostedServices_RegisteredAndStartable`: resolves `IEnumerable<IHostedService>` and asserts exact count of 12 registered background workers.
-  - `DependencyInjectionTests.WindowsOverrides_CanSwapFileStoreAndCertProvider`: calls optional Windows overlay registrations; asserts `IDesktopFileStorage` resolves to `WindowsSparseDesktopFileStore`.
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Composition`
 
@@ -1887,7 +1887,7 @@ To guarantee robust infrastructure without introducing brittle tests that break 
 | 54 | `IDesktopFileStorage` | `Percolator.Apps.FileTransfer` | `PortableDesktopFileStore` | Chunk 4.4 |
 | 55 | `ITransferRateLimiter` | `Percolator.Apps.FileTransfer` | `TokenBucketRateLimiter` | Chunk 4.4 |
 | 56 | `IDistributedTrackerPort` | `Percolator.Apps.FileTransfer` | `RelaySwarmTrackerClient` | Chunk 4.4 |
-| 57 | `ITransportCertificateProvider` | `Percolator.Infrastructure` | `InMemoryTransportCertificateProvider` | Chunk 3.4 |
+| 57 | `ITransportCertificateProvider` | `Percolator.Infrastructure.Transport` | `InMemoryTransportCertificateProvider` | Chunk 3.4 |
 | 58 | `IIdentityProfileRepository` | `Percolator.Domain` | `SqliteIdentityProfileRepository` | Chunk 2.2 |
 | 59 | `IPortReservationService` | `Percolator.Application` | `SqlitePortReservationService` | Chunk 3.4 |
 | 60 | `IPrivateRendezvousService` | `Percolator.Apps.Discovery` | `SqlitePrivateRendezvousService` | Chunk 4.2 |
