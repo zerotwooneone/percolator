@@ -3,7 +3,7 @@
 ## Refinement Status Gate
 - [x] Lens 1: Scope & Feature Slice Framing (Status: Approved)
 - [x] Lens 2: Onion Architecture & Primitive Obsession (Status: Approved)
-- [ ] Lens 3: Threat Modeling & Security Posture (Status: in progress)
+- [x] Lens 3: Threat Modeling & Security Posture (Status: Approved)
 - [ ] Lens 4: High-Value, Low-Brittle Unit Test Design (Status: in progress)
 - [ ] Lens 5: Cross-Layer Infrastructure Alignment (Status: in progress)
 - [ ] Implementation Gate: LOCKED (Refinement in progress)
@@ -457,10 +457,10 @@
     6. Atomically overwrite header via `_headerStorage.WriteHeaderAsync`.
     7. *Port Note*: Update `IDatabaseUnlockCoordinator.ConfigureDuressPasswordAsync(VaultPassphrase currentMasterPassword, VaultPassphrase? duressPassword, CancellationToken ct = default)` to enforce re-authentication.
   - **`LockAsync()`**:
-    1. Stop all hosted services in Stage 2 `IHost`.
-    2. Clear connection pools via `SqliteConnection.ClearAllPools()`.
-    3. Dispose `_masterKeyHandle` (zeroizing unmanaged memory).
-    4. Dispose Stage 2 `IHost`.
+    1. Stop all hosted services in Stage 2 `IHost` (`await host.StopAsync(ct)`).
+    2. Dispose Stage 2 `IHost` (releasing all pooled `PercolatorDbContext` and `IDbContextFactory` connections back to the ADO.NET pool).
+    3. Clear connection pools via `SqliteConnection.ClearAllPools()` (closing all physical SQLCipher connections and purging decrypted page caches).
+    4. Dispose `_masterKeyHandle` (zeroizing unmanaged memory last to prevent `ObjectDisposedException` during host teardown).
     5. Transition status to `Locked`.
 - **Scope & Deliverables**:
   - [ ] Define interfaces `IVaultEnvelopePacker`, `IDatabaseCanaryProbe`, `IDatabaseMigrator`, and `IStage2HostFactory`.
@@ -630,7 +630,7 @@
       - `owner_identity_id` (`BLOB` 32 bytes PublicIdentityId)
       - `device_id` (`INTEGER` DeviceId)
       - `key_id` (`INTEGER` uint32 OPK Identifier)
-      - `private_key_ciphertext` (`BLOB`, encrypted via `AesGcmValueConverter`)
+      - `private_key_ciphertext` (`BLOB`, encrypted via `AesGcmValueConverter`; immediately wiped to `Array.Empty<byte>()` when `TryConsumeOneTimePreKeyPrivateAsync` sets `is_consumed = 1` to enforce X3DH forward secrecy)
       - `public_key` (`BLOB` 32 bytes)
       - `is_consumed` (`INTEGER` boolean: `0=Available`, `1=Consumed`)
       - `consumed_at_utc` (`TEXT` ISO 8601 nullable)
@@ -705,7 +705,7 @@
   - `SqliteRatchetSessionRepositoryTests.SaveAndLoad_PreservesCiphertextAndState`: saves and reloads ratchet session state atomically; verifies stored fields are ciphertext at rest.
   - `SqliteGroupSenderKeyRepositoryTests.AtomicCommit_RollsBackOnFailure`: asserts all child records update together or roll back cleanly without orphan rows.
   - `SqliteLocalIdentityKeyStoreTests.StoreAndRetrieveIdentity_MatchesKey`: stores local identity key and asserts decrypted roundtrip.
-  - `SqlitePrivatePreKeyStoreTests.MarkConsumed_UpdatesOpkStatus`: flags one-time prekey as consumed and asserts query excludes consumed keys.
+  - `SqlitePrivatePreKeyStoreTests.MarkConsumed_WipesPrivateKeyAndUpdatesOpkStatus`: flags one-time prekey as consumed, wipes `private_key_ciphertext` for X3DH forward secrecy, and asserts subsequent queries exclude consumed keys.
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Persistence.Vault`
 
@@ -741,6 +741,7 @@
       - `lease_expiry_utc` (`TEXT` ISO 8601)
   - **CQRS Read-Side Fast Path**:
     - `SqlOutboxQueryService` projects lightweight status summaries, counts, and retry timings via EF Core `.Select()` projection, strictly omitting the `payload` column to prevent LOH (Large Object Heap) memory churn during UI diagnostic polling.
+    - **Delivered Payload Scrubbing**: When `SqliteOutboxRepository.SaveAsync` persists a job with `OutboxStatus.Delivered`, it clears `payload = Array.Empty<byte>()` in SQLite so delivered message wire bytes are not retained during the 7-day diagnostic summary window.
 - **Scope & Deliverables**:
   - [ ] Implement Outbox Persistence & CQRS Read Model:
     - `SqliteOutboxRepository` (`Percolator.Application.Delivery.Ports.IOutboxRepository`): write-side enqueue, dequeue batching, retry calculation tracking.
@@ -821,6 +822,7 @@
       - `one_time_prekeys_json` (`TEXT` serialized via BCL `System.Text.Json`)
       - `updated_at_utc` (`TEXT` ISO 8601)
       - *Composite PK*: `PRIMARY KEY(owner_identity_id, device_id)`
+      - *Retention Index*: `CREATE INDEX ix_relay_prekeys_updated ON relay_prekeys(updated_at_utc);`
     - `relay_profile_slots`:
       - `blinded_locator` (`BLOB` 32 bytes PK)
       - `write_token_hash` (`BLOB` 32 bytes)
@@ -1682,10 +1684,10 @@
       ```
   - **Pruning Worker Implementations**:
     - `OutboxRetentionPruner` (`IHostedService`):
-      - Sweeps delivered outbox jobs (`ops_outbox_jobs`) older than 7 days (`TimeSpan.FromDays(7)`). Preserves pending, in-flight, or failed jobs for inspection/retry.
+      - Sweeps delivered outbox jobs (`ops_outbox_jobs`, whose `payload` bytes were already scrubbed upon delivery) older than 7 days (`TimeSpan.FromDays(7)`). Preserves pending, in-flight, or failed jobs for inspection/retry via `IOutboxQueryService`.
       - Scheduled interval: 24 hours (or on virtual clock tick via `TimeProvider`).
     - `RelayPreKeyDirectoryPruner` (`IHostedService`):
-      - Sweeps consumed or stale one-time prekeys and expired signed prekey bundles from `relay_prekeys` where `updated_at_utc <= cutoffTime` (older than 30 days).
+      - Sweeps unrefreshed relay prekey bundle records from `relay_prekeys` where `updated_at_utc <= cutoffTime` (older than 30 days, utilizing `ix_relay_prekeys_updated`), while consumed One-Time PreKeys are removed immediately upon `RelayHostedPreKeyBundle.ConsumeBundle()` persistence.
       - Scheduled interval: 24 hours.
     - `RelayProfileSlotPruner` (`IHostedService`):
       - Sweeps expired profile slots from `relay_profile_slots` where `expires_at_utc <= DateTimeOffset.UtcNow`.
@@ -1708,6 +1710,7 @@
   - **Two-Stage Container Separation Protocol**:
     - *Stage 1 (Pre-Unlock Bootstrap Container)*: Contains zero SQLite DbContexts, zero repositories, and zero network/sync workers. Registers `SQLitePCL.Batteries_V2.Init()`, `SignalCryptoEngine`, `SystemDateTimeProvider`, `ProtobufHeaderStorage`, `DuressWipeHandler`, and `SqlCipherDatabaseUnlockCoordinator`.
     - *Stage 2 (Authenticated Host - `IHost`)*: Built post-unlock via `Stage2HostFactory`. Hosts `IMasterKeyHandle` (scoped to session in pinned unmanaged memory), `SqlCipherPragmaInterceptor`, `PercolatorDbContext` (scoped/pooled), all 60 infrastructure ports, and `IHostedService` background workers.
+    - *Deterministic Session Teardown Ordering*: `AuthenticatedSession.DisposeAsync()` and `SqlCipherDatabaseUnlockCoordinator.LockAsync()` enforce the strict teardown sequence: (1) `await host.StopAsync(ct)`, (2) `await host.DisposeAsync()`, (3) `SqliteConnection.ClearAllPools()`, and (4) `masterKeyHandle.Dispose()`.
   - **Service Lifetime Registration Topology**:
     - **Singletons**:
       - `IMasterKeyHandle` (instance passed from unlock coordinator)
@@ -1737,7 +1740,7 @@
     - Standard `AddAuthenticatedInfrastructure` registers 100% portable baseline implementations: `PortableDesktopFileStore` (`IDesktopFileStorage`) and `InMemoryTransportCertificateProvider` (`ITransportCertificateProvider`).
     - Extensibility point: `Percolator.Infrastructure.Windows` (`net10.0-windows`) provides extension method `AddWindowsInfrastructureOverrides(this IServiceCollection services)` which swaps in:
       1. `WindowsSparseDesktopFileStore`: Win32 `FSCTL_SET_SPARSE` (`DeviceIoControl` `0x000900C4`) for instant zero-write file pre-allocation on NTFS.
-      2. `WindowsSChannelCertificateProvider`: Temporary PKCS#12 `.pfx` on-disk export with CNG key deletion and antivirus lock retries for Windows SChannel TLS.
+      2. `WindowsSChannelCertificateProvider`: Temporary PKCS#12 `.pfx` export encrypted with a per-export 32-byte CSPRNG password (zeroized via `CryptographicOperations.ZeroMemory` immediately after import), deterministic CNG key container deletion (`ECDsaCng.Key.Delete()`) on `Dispose()`, and antivirus lock retries for Windows SChannel TLS.
   - **Full Container Verification Guarantee**:
     - `Stage2HostFactory` builds `IHost` with service provider validation (`ValidateScopes = true`, `ValidateOnBuild = true`), guaranteeing zero captive dependencies, zero missing registrations, and zero circular dependencies.
 - **Scope & Deliverables**:
