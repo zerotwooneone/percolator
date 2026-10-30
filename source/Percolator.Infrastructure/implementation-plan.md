@@ -1402,6 +1402,11 @@
       - `file_name` (`TEXT`)
       - `file_size_bytes` (`INTEGER`)
       - `mime_type` (`TEXT`)
+      - `encryption_key_ciphertext` (`BLOB`, 32-byte out-of-band attachment AEAD key encrypted at rest via `AesGcmValueConverter`)
+      - `base_nonce` (`BLOB` 12 bytes, `BlobReference.BaseNonce`)
+      - `storage_mode` (`INTEGER`: `Inline=0`, `RelayBlob=1`, `DirectPeerStream=2`)
+      - `relay_endpoint_uri` (`TEXT` nullable)
+      - `ciphertext_size_bytes` (`INTEGER`)
     - `chat_group_invitations`:
       - `id` (`TEXT` GUID InvitationId, PK)
       - `target_group_channel_id` (`TEXT` GUID ChannelId)
@@ -1420,20 +1425,21 @@
       - `expires_at_unix_ms` (`INTEGER` ulong)
       - *Expiry Index*: `CREATE INDEX ix_unknown_group_expiry ON chat_unknown_group_messages(expires_at_unix_ms);`
   - **Wire Contracts (`Percolator.Infrastructure/Protos/chat.proto`)**:
-    - `ChatPayloadEnvelopeProto`: carries payload type and byte array wrapped with stepped bucket padding.
+    - `ChatPayloadEnvelopeProto`: `string type = 1;`, `bytes data = 2;`, `bytes padding = 3;` (maps 1:1 with `Percolator.Apps.Chat.Features.Messaging.ChatPayloadEnvelopeDto`).
     - `ChatMessageProto`: text content, timestamp, and message flags.
     - `ReplyContextProto`: strictly carries `parent_message_id` (16 bytes GUID) and `author_identity_id` (32 bytes); quote snippet text is strictly omitted from the wire (Invariant 6).
-    - `MentionProto`, `MediaAttachmentProto`, `MessageEditProto`, `MessageTombstoneProto`, `ReactionUpdateProto`, `ReadReceiptProto`, `SystemNoticeProto`, `GroupInvitationProto`, `GroupInvitationResponseProto`.
-  - **Stepped Bucket Padding Framing**:
-    - `ChatPayloadFramingDecorator` decorates `IPayloadSerializer` (from Phase 3 Chunk 3.3).
-    - Serialized frames are padded out to discrete power-of-two / stepped bucket sizes: 256 B, 512 B, 1024 B, 2048 B, and 4096 B. Payloads exceeding 4096 B are rejected or split into attachment blobs.
+    - `MentionProto`, `MediaAttachmentProto` (includes `blob_sha256`, `encryption_key`, `base_nonce`, `storage_mode`, `relay_endpoint_uri`, `ciphertext_size_bytes`, `file_name`, `file_size_bytes`, `mime_type`), `MessageEditProto`, `MessageTombstoneProto`, `ReactionUpdateProto`, `ReadReceiptProto`, `SystemNoticeProto`, `GroupInvitationProto`, `GroupInvitationResponseProto`.
+  - **Application-Layer Stepped Bucket Padding Integration**:
+    - Application-layer `ChatService` (`Percolator.Apps.Chat.Features.Messaging.ChatService`) already wraps and pads every outbound chat payload via `SteppedPadding.CreatePaddedEnvelopeBytes` to discrete buckets (`256 B`, `512 B`, `1024 B`, `2048 B`, `4096 B`, and multiples of `4096 B` via `((unpaddedLength + 4095) / 4096) * 4096` for messages up to `ChatMessage.MaxContentLength = 16_000` chars).
+    - `ProtobufPayloadSerializer` (from Chunk 3.3) serializes `ChatPayloadEnvelopeDto` (`Type`, `Data`, `Padding`) and inner chat DTOs directly to `chat.proto` binary messages without double-padding or artificially rejecting valid `> 4096 B` multi-block frames.
   - **CQRS Fast-Path Read Models & Background Pruners**:
     - CQRS read model `SqlChatMessageQueryService` projects timeline pages with keyset / offset pagination without hydrating heavy attachment blobs.
-    - Background workers (`IHostedService`): `DisappearingMessageEvictionWorker` (sweeps expired messages every 30s using `ix_chat_expiry`), `UnknownGroupMessageCachePruner` (sweeps unreferenced group messages older than 48h), and `AbandonedInvitePruner`.
+    - **Disappearing Message Cryptographic Purge**: When `DisappearingMessageEvictionWorker` sweeps expired messages (every 30s via `ix_chat_expiry`), it queries `chat_attachments.blob_sha256` prior to cascade deletion, invokes `ILocalChunkStore.DeleteBlobAsync(blobId)` to shred any locally cached encrypted media files, and purges corresponding `chat_channel_payloads` rows so expired messages and their attachment keys are permanently unrecoverable on disk.
+    - **Unknown Group Message Cache Quota & TTL**: `UnknownGroupMessageCachePruner` aligns with `ChatPayloadHandler.DefaultUnknownGroupCacheTtlMs` (`24 hours`), and `SqlUnknownGroupMessageCacheRepository` enforces a bounded capacity limit (max `500` cached envelopes in `chat_unknown_group_messages`, evicting oldest by `received_at_unix_ms`) to prevent disk exhaustion from random `ChannelId` floods.
 - **Scope & Deliverables**:
   - [ ] Author Protobuf schema `Percolator.Infrastructure/Protos/chat.proto`.
   - [ ] Configure `<ProjectReference>` to `Percolator.Apps.Chat` and `Percolator.Apps.Discovery` in `Percolator.Infrastructure.csproj`.
-  - [ ] Implement `ChatPayloadFramingDecorator` implementing stepped bucket padding (256, 512, 1024, 2048, 4096 B).
+  - [ ] Extend `ProtobufPayloadSerializer` with deterministic `chat.proto` mappings for `ChatPayloadEnvelopeDto` and all `Percolator.Apps.Chat` wire DTOs.
   - [ ] Implement Chat Persistence & Fast-Path CQRS Query Services:
     - `SqlChatMessageRepository` (`Percolator.Apps.Chat.Features.Messaging.IChatMessageRepository`)
     - `SqlChatMessageQueryService` (`Percolator.Apps.Chat.Features.Messaging.IChatMessageQueryService`)
@@ -1446,41 +1452,53 @@
     - `UnknownGroupMessageCachePruner`
     - `AbandonedInvitePruner`
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Plugins/Chat/`)**:
-  - `ChatPayloadFramingDecoratorTests.SteppedBucketPadding_ExpandsToExpectedBucketSize`: serialized chat frames expand to discrete 256/512/1024/2048/4096 B boundaries.
+  - `ProtobufChatSerializerTests.PaddedEnvelope_PreservesSteppedBucketSizeAndSupports16KCharMessages`: round-trips `SteppedPadding`-wrapped `ChatPayloadEnvelopeDto` across 256–4096 B buckets and 4096 B multiples (up to 16,000-char messages) without double-padding or truncation.
   - `ProtobufChatSerializerTests.ReplyContext_ExcludesQuoteSnippetFromWire`: quote snippet text is strictly absent from wire payload (only parent ID and author ID).
-  - `SqlChatMessageRepositoryTests.DeleteMessage_CascadesAttachmentDeletion`: deleting a message cascades and deletes attachment records in SQLite.
+  - `SqlChatMessageRepositoryTests.SaveAndDeleteMessage_EncryptsAttachmentKeyAtRestAndCascadesDeletion`: verifies `chat_attachments.encryption_key_ciphertext` is encrypted in raw SQLite storage and cascade-deleted with the parent message.
   - `SqlChatMessageQueryServiceTests.PagedTimeline_ClampsToLimitAndOffset`: limit/offset paging clamps accurately to boundary without aggregate hydration.
   - `SqlConversationListQueryServiceTests.UnreadBadgeCount_AggregatesPastReadReceipt`: count aggregates messages strictly past read receipt timestamp.
-  - `DisappearingMessageEvictionWorkerTests.ExpiredMessages_PurgedAfterVirtualClockAdvance`: advances virtual clock by 31s with `FakeTimeProvider`; asserts expired messages are deleted.
+  - `DisappearingMessageEvictionWorkerTests.ExpiredMessages_PurgesRowsChannelPayloadsAndLocalCachedBlobs`: advances virtual clock by 31s with `FakeTimeProvider`; asserts expired messages, `chat_attachments`, `chat_channel_payloads`, and local cached blobs via `ILocalChunkStore` are purged.
+  - `SqlUnknownGroupMessageCacheRepositoryTests.CacheEnvelope_Exceeding500Cap_EvictsOldestAndPrunesAt24Hours`: verifies 500-envelope bounded quota and 24-hour TTL pruning.
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Plugins.Chat`
 
 #### Chunk 4.2: Vertical Slice: Peer Discovery & Rendezvous Engine
 - **Technical Specifications & Wire Contracts**:
   - **Wire Contracts (`Percolator.Infrastructure/Protos/discovery.proto`)**:
-    - `NearbyDiscoveryQueryProto`: `uint32 max_results = 1;` (strictly clamped to range 1–100 to prevent denial-of-service/scraping), `bytes requester_token = 2;`
-    - `NearbyDiscoveryResponseProto`: `repeated PeerDiscoveryDescriptorProto peers = 1;`
-    - `PeerDiscoveryDescriptorProto`: `bytes peer_identity_id = 1;`, `string alias = 2;`, `repeated DeliveryRouteProto routes = 3;`, `bytes profile_key = 4;`
-    - `DeliveryRouteProto`: `int32 route_type = 1;`, `string endpoint = 2;`, `bytes routing_token = 3;`
-    - `DiscoveryRegistrationProto`: `bytes peer_identity_id = 1;`, `PeerDiscoveryDescriptorProto descriptor = 2;`, `google.protobuf.Timestamp lease_expiry_utc = 3;`, `bytes signature = 4;`
-    - `BlindedRendezvousQueryProto`: `bytes blinded_locator = 1;`
-    - `BlindedRendezvousResponseProto`: `bool found = 1;`, `bytes encrypted_contact_card = 2;`
-  - **Private Rendezvous Coordination**:
-    - Relies on application-layer `IPrivateRendezvousService` (`Percolator.Apps.Discovery`) for 24-hour UTC epoch locator rotation via $\text{HMAC-SHA256}(\text{IdentityPublicKey}, \text{EpochBytes})$ where $\text{Epoch} = \lfloor\text{UnixTime} / 86400\rfloor$.
-    - Enables contact discovery without public identity leakage on directory servers.
-  - **Relay Directory Persistence & Maintenance**:
+    - `DiscoveryRegistrationProto`: `bytes peer_id = 1;` (16/32-byte `PublicIdentityId`), `int32 visibility = 2;` (`Hidden = 0`, `Public = 1`, maps to `DiscoveryRegistrationPayload`).
+    - `NearbyDiscoveryQueryProto`: `bytes requester_id = 1;`, `int32 requested_limit = 2;` (strictly clamped to range `1–100` via `DiscoveryResultLimit` to prevent scraping/DoS).
+    - `NearbyDiscoveryResponseProto`: `repeated bytes discoverable_peer_ids = 1;` (maps to `NearbyDiscoveryResponsePayload`).
+    - `BlindedRendezvousPublishProto`: `bytes blinded_locator = 1;` (32 bytes), `bytes encrypted_route = 2;` (29–2076 bytes: `[12B Nonce || Ciphertext || 16B Tag]`, maps to `BlindedRendezvousPublishPayload`).
+    - `BlindedRendezvousQueryProto`: `repeated bytes blinded_locators = 1;` (batch query strictly clamped to `MaxQueryLocators = 100`, maps to `BlindedRendezvousQueryPayload`).
+    - `BlindedRendezvousMatchProto`: `bytes blinded_locator = 1;`, `bytes encrypted_route = 2;`
+    - `BlindedRendezvousResponseProto`: `repeated BlindedRendezvousMatchProto matches = 1;` (maps to `BlindedRendezvousResponsePayload`).
+  - **Private Rendezvous Cryptographic Invariants (`BlindedLocator` & `EncryptedRendezvousRoute`)**:
+    - Relies on `BlindedLocator.Derive` (`Percolator.Apps.Discovery.Features.PrivateRendezvous`) for 24-hour UTC epoch locator rotation across the 3-epoch clock-skew tolerance window $[E - 1, E, E + 1]$ where $E = \lfloor\text{UnixSeconds} / 86400\rfloor$:
+      $$\text{BlindedLocator} = \text{HMAC-SHA256}\bigl(K_{\text{rendezvous}}, \text{"percolator-discovery-rendezvous-v1"} \parallel \text{EpochDay}_{\text{BE64}} \parallel \text{PublicIdentityId}_{16\text{B}}\bigr)$$
+    - Route payloads (`EncryptedRendezvousRoute`) are encrypted with AES-256-GCM (`[12B Nonce || Ciphertext || 16B Tag]`) using a key derived via $\text{HKDF-SHA256}(\text{ikm}: K_{\text{rendezvous}}, \text{salt}: \text{EpochDay}_{\text{BE64}}, \text{info}: \text{"percolator-rendezvous-route-key-v1"} \parallel \text{PublisherPeerId}_{16\text{B}})$ and bind `BlindedLocator.Span` (32 bytes) as **Associated Authenticated Data (AAD)** so a relay or third party cannot transplant an encrypted route to another locator.
+  - **Decoupled Relay Persistence (`relay_peer_directory` vs. `relay_rendezvous_entries`)**:
     - `relay_peer_directory`:
-      - `blinded_locator` (`BLOB` 32 bytes BlindedLocator, PK)
-      - `peer_identity_id` (`BLOB` 32 bytes PublicIdentityId)
-      - `descriptor_blob` (`BLOB`)
-      - `lease_expiry_utc` (`TEXT` ISO 8601, indexed)
-      - `signature` (`BLOB` 64 bytes)
-      - *Lease Index*: `CREATE INDEX ix_peer_directory_lease ON relay_peer_directory(lease_expiry_utc);`
-    - `SqliteRelayPeerDirectory`: stores peer discovery descriptors mapped to blinded locators with TTL leases.
-    - `RelayDiscoveryRegistrationPruner`: scheduled worker purging registrations past `lease_expiry_utc`.
+      - `peer_id` (`BLOB` 16/32 bytes `PublicIdentityId`, PK)
+      - `visibility` (`INTEGER`: `Hidden = 0`, `Public = 1`)
+      - `has_authenticated_handshake` (`INTEGER` boolean)
+      - `has_active_signed_prekey` (`INTEGER` boolean)
+      - `registered_at_utc` (`TEXT` ISO 8601)
+      - `last_updated_at_utc` (`TEXT` ISO 8601, indexed for 24-hour TTL eviction)
+      - *Lease Index*: `CREATE INDEX ix_peer_directory_updated ON relay_peer_directory(last_updated_at_utc);`
+    - `relay_rendezvous_entries`:
+      - `blinded_locator` (`BLOB` 32 bytes `BlindedLocator`, PK)
+      - `encrypted_route` (`BLOB` 29–2076 bytes `EncryptedRendezvousRoute`)
+      - `published_at_utc` (`TEXT` ISO 8601, indexed for 48-hour TTL eviction)
+      - *Expiry Index*: `CREATE INDEX ix_rendezvous_published ON relay_rendezvous_entries(published_at_utc);`
+    - `SqliteRelayPeerDirectory` (`IRelayPeerDirectory`): persists opt-in public directory registrations (`relay_peer_directory`), enforces 24-hour TTL (`DefaultRegistrationTtl`), re-verifies `IPreKeyAvailabilityPort.HasActiveSignedPreKeyAsync` and `IDiscoveryAdmissionGate.Evaluate` both on registration and dynamically during `GetDiscoverablePeersAsync`, and excludes the querying `requesterId` from results.
+    - `SqlitePrivateRendezvousService` (`IPrivateRendezvousService`): persists blinded rendezvous locators (`relay_rendezvous_entries`) with 48-hour TTL (`DefaultEntryTtl`), enforces a bounded table capacity (`DefaultMaxEntries = 10_000`), and clamps batch resolution queries in `ResolveRendezvousAsync` to `MaxQueryLocators = 100`.
+    - `RelayDiscoveryRegistrationPruner`: scheduled worker purging `relay_peer_directory` rows older than 24h and `relay_rendezvous_entries` rows older than 48h.
+    - **Discovery Admission Gating & Anti-Impersonation**:
+      - Anti-impersonation is enforced by the authenticated E2EE session ingress layer (`DiscoveryPayloadHandler` verifies `payload.PeerId.Equals(context.SenderIdentityId)` on registration and `query.RequesterId.Equals(context.SenderIdentityId)` on queries before delegating to `IRelayPeerDirectory`). Setting visibility to `Hidden` immediately removes the peer's row from `relay_peer_directory`.
 - **Scope & Deliverables**:
   - [ ] Author Protobuf schema `Percolator.Infrastructure/Protos/discovery.proto`.
   - [ ] Implement `SqliteRelayPeerDirectory` (`Percolator.Apps.Discovery.Features.RelayDirectoryHosting.IRelayPeerDirectory`).
+  - [ ] Implement `SqlitePrivateRendezvousService` (`Percolator.Apps.Discovery.Features.PrivateRendezvous.IPrivateRendezvousService`).
   - [ ] Implement `DiscoveryQueryClient` (`Percolator.Apps.Discovery.Ports.INearbyDiscoveryQueryClientPort`).
   - [ ] Implement `PreKeyAvailabilityAdapter` (`Percolator.Apps.Discovery.Ports.IPreKeyAvailabilityPort`).
   - [ ] Implement `PreKeyBundleProviderAdapter` (`Percolator.Application.Ports.IPreKeyBundleProvider`).
@@ -1488,7 +1506,8 @@
   - [ ] Implement `RelayDiscoveryRegistrationPruner` (`IHostedService`).
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Plugins/Discovery/`)**:
   - `DiscoveryQueryClientTests.NearbyQuery_ClampsCountTo100`: verifies query parameters are strictly clamped to max 100 results.
-  - `SqliteRelayPeerDirectoryTests.RegisterAndQuery_MatchesLocator`: registers peer descriptor and queries by blinded locator.
+  - `SqlitePrivateRendezvousServiceTests.PublishAndResolve_MatchesBlindedLocatorAndEnforces100QueryCap`: publishes `BlindedLocator` + `EncryptedRendezvousRoute` and resolves across batch query while clamping batch size to 100.
+  - `SqliteRelayPeerDirectoryTests.Register_MissingSignedPreKeyOrUnauthenticated_RejectsRegistration`: verifies admission gate rejects registrations from peers without active Signed PreKeys or handshakes.
   - `RelayDiscoveryRegistrationPrunerTests.StaleRegistrations_PurgedOnSchedule`: verifies expired peer directory leases are deleted.
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Plugins.Discovery`
@@ -1501,14 +1520,16 @@
     - Final block flag encoded into authenticated additional data (AAD) to prevent truncation or stream splicing attacks.
   - **Media Privacy & Metadata Sanitization**:
     - JPEG / PNG / MP4 privacy scrub: EXIF, IPTC, XMP, GPS coordinates, and camera serial numbers are scrubbed from raw media streams prior to chunking and encryption.
+    - **Resource Starvation & Storage Quotas (`DomainResult` Enforcement)**:
+      - `StreamingAesGcmCryptoService`, `RelayBlobClient`, `PeerStreamBlobClient`, and `LocalFileChunkStore` enforce a maximum single-blob size ceiling (default: `100 MB`) while reading/writing streams, and `LocalFileChunkStore` enforces a configurable local cache quota ceiling (default: `5 GB`). Streams exceeding the 100 MB ceiling or 5 GB quota abort immediately, delete incomplete `.tmp` staging files, and return `DomainResult.Failure` (`BLOB_TOO_LARGE` / `BLOB_QUOTA_EXCEEDED`) rather than throwing unhandled exceptions.
   - **Content-Addressed Local Blob Store**:
     - Files stored at `%AppData%/Percolator/Blobs/{sha256Hex}.blob`.
     - Commits use atomic file staging: payload written to `.tmp` extension, flushed to disk, and moved into place via atomic file replace.
   - **Network Blob Transfer Clients**:
-    - `RelayBlobClient` (`IRelayBlobClient`): uploads via `POST /blobs` and downloads via `GET /blobs/{sha256}` supporting HTTP `Range` headers for resumption.
-    - `PeerStreamBlobClient` (`IPeerStreamBlobClient`): direct peer-to-peer chunk streaming over ephemeral TLS.
+    - `RelayBlobClient` (`IRelayBlobClient`): uploads and downloads encrypted blind blobs via `UnauthenticatedDeliveryService` (`UploadBlindBlob` / `DownloadBlindBlob` client/server gRPC streaming) with byte-offset resumption and pre-flight `ciphertext_size_bytes <= 100 MB` validation.
+    - `PeerStreamBlobClient` (`IPeerStreamBlobClient`): direct peer-to-peer chunk streaming over ephemeral TLS with strict 100 MB stream read caps.
     - `ChannelRelayResolver` (`IChannelRelayResolver`): resolves designated blob relay endpoints.
-    - `RelayBlobRetentionPruner`: background pruner enforcing blob expiration and local storage quota watermarks.
+    - `RelayBlobRetentionPruner`: background pruner enforcing blob TTL expiration and sweeping oldest-accessed `.blob` files when total storage exceeds the 5 GB local cache watermark.
 - **Scope & Deliverables**:
   - [ ] Implement `StreamingAesGcmCryptoService` (`Percolator.Application.Ports.IBlobCryptoService`).
   - [ ] Implement `LocalFileChunkStore` (`Percolator.Application.Ports.ILocalChunkStore`).
@@ -1522,6 +1543,7 @@
   - `StreamingAesGcmCryptoServiceTests.ChunkedAead_Truncation_FailsFinalBlockAuthentication`: truncated stream missing final block flag fails verification.
   - `RelayBlobClientTests.ResumableDownload_AppliesRangeHeader`: HTTP Range header returns byte slice from requested offset without re-downloading from byte 0.
   - `LocalFileChunkStoreTests.AtomicCommit_WritesTempFileAndRenames`: validates atomic write to `%AppData%/Percolator/Blobs/{sha256Hex}.blob`.
+  - `LocalFileChunkStoreTests.UploadExceedingQuota_ReturnsDomainFailureAndDeletesTempFile`: verifies writes exceeding 100 MB blob size or 5 GB storage quota return `DomainResult.Failure` and clean up `.tmp` files without disk exhaustion.
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Plugins.BlobStorage`
 
@@ -1536,12 +1558,16 @@
       - `transferred_size_bytes` (`INTEGER`)
       - `status` (`INTEGER`: `Pending=0`, `InProgress=1`, `Completed=2`, `Failed=3`, `Cancelled=4`)
       - `direction` (`INTEGER`: `Inbound=0`, `Outbound=1`)
+      - `transfer_key_ciphertext` (`BLOB`, 32-byte `TransferKey` encrypted at rest via `AesGcmValueConverter`)
+      - `base_nonce` (`BLOB` 12 bytes, `ChunkBaseNonce`)
+      - `stream_auth_token_ciphertext` (`BLOB`, 32-byte `StreamAuthToken` encrypted at rest via `AesGcmValueConverter`)
+      - `relay_pipe_token_ciphertext` (`BLOB` nullable, 32-byte `RelayPipeAuthToken` encrypted at rest via `AesGcmValueConverter`)
       - `created_at_utc` (`TEXT` ISO 8601)
     - `ft_manifest_files`:
       - `id` (`TEXT` GUID, PK)
       - `transfer_id` (`TEXT` GUID, FK to `ft_transfer_sessions(transfer_id)` ON DELETE CASCADE)
       - `relative_path` (`TEXT`)
-      - `file_size_bytes` (`INTEGER`)
+      - `file_size_bytes` (`INTEGER`) // Path sanitization: rejects paths with '..', leading slashes, Win32 reserved names, or ADS streams
       - `merkle_root` (`BLOB` 32 bytes)
     - `ft_transfer_bitfields`:
       - `transfer_id` (`TEXT` GUID, PK, FK to `ft_transfer_sessions(transfer_id)` ON DELETE CASCADE)
@@ -1564,23 +1590,24 @@
   - **Swarm Binary Framing Protocol (0x01–0x0C)**:
     - Fixed 5-byte header: `[Opcode: 1 Byte] [Payload Length: 4 Bytes Big-Endian UInt] [Payload: Variable Length]`
     - Maximum payload size: `262,144 bytes` (256 KB); standard piece chunk size: `65,536 bytes` (64 KB).
-    - Opcode framing definitions:
-      - `0x01` `STREAM_HANDSHAKE`: `[TransferId: 16 B GUID] [PeerIdentityId: 32 B] [SessionAuthToken: 32 B]` (big-endian UUID normalization via `Guid.ToByteArray(bigEndian: true)`)
-      - `0x02` `BITFIELD`: `[BitfieldBytes: N B]` (1 bit per piece, byte-padded)
-      - `0x03` `HAVE`: `[PieceIndex: UInt32 BE]`
-      - `0x04` `REQUEST_CHUNK`: `[PieceIndex: UInt32 BE] [ChunkOffset: UInt32 BE] [Length: UInt32 BE]`
-      - `0x05` `CHUNK_DATA`: `[PieceIndex: UInt32 BE] [ChunkOffset: UInt32 BE] [RawBytes: N B]`
-      - `0x06` `CANCEL_CHUNK`: `[PieceIndex: UInt32 BE] [ChunkOffset: UInt32 BE]`
+    - Opcode framing definitions (aligned with `Percolator.Apps.FileTransfer.Features.MultiStreamEngine.StreamFramePayloads` & `ChunkCryptoService`):
+      - `0x01` `STREAM_HANDSHAKE` (`HandshakeFrame`): `[AuthToken: 32 B] [SessionId: 16 B GUID BE] [StreamIndex: Int32 BE (4 B)] [SenderPeerId: 16/32 B]`
+      - `0x02` `BITFIELD` (`BitfieldFrame`): `[BitfieldBytes: N B]` (1 bit per chunk, bounded to `(TotalChunks + 7) / 8` bytes)
+      - `0x03` `HAVE` (`HaveFrame`): `[ChunkIndex: Int32 BE (4 B)]` (validated `< TotalChunks`)
+      - `0x04` `REQUEST_CHUNK` (`RequestChunkFrame`): `[ChunkIndex: Int32 BE (4 B)]`
+      - `0x05` `CHUNK_DATA` (`ChunkDataFrame`): `[ChunkIndex: Int32 BE (4 B)] [CiphertextWithAuthTag: N + 16 B]`
+        - **Per-Chunk AEAD & Merkle Verification**: Each chunk is AES-256-GCM encrypted via `ChunkCryptoService` using `TransferKey` and a deterministic 12-byte chunk nonce (`BaseNonce[0..8] || (BaseNonce[8..12] ^ ChunkIndex_BE32)`). `TransferSessionCoordinator` drops unsolicited chunks (`!ChunkPipelineScheduler.IsChunkInFlight(chunkIndex)`), verifies and decrypts the 16-byte AES-GCM authentication tag first, and then verifies the 32-byte SHA-256 Merkle leaf hash via `DiskChunkAssembler` before writing to disk.
+      - `0x06` `CANCEL_CHUNK` (`CancelChunkFrame`): `[ChunkIndex: Int32 BE (4 B)]`
       - `0x07` `CHOKE`: (Zero payload)
       - `0x08` `UNCHOKE`: (Zero payload)
       - `0x09` `INTERESTED`: (Zero payload)
       - `0x0A` `NOT_INTERESTED`: (Zero payload)
       - `0x0B` `KEEP_ALIVE`: (Zero payload)
-      - `0x0C` `PEX_PEERS`: `[Count: UInt16 BE] repeated: [IPLength: 1 B] [IPBytes: 4 or 16 B] [Port: UInt16 BE] [Flags: 1 B]`
+      - `0x0C` `PEX_PEERS` (`PexPeersFrame`): `[CandidateCount: 1 B] repeated: [PeerIdLength: 1 B] [PeerIdBytes: 16/32 B] [EndpointLength: UInt16 BE] [EndpointUtf8Bytes: M B]` (clamped by `PexRateLimiter` to `MaxCandidatesPerFrame = 16` and `MinPexInterval = 10s`, dropping WAN candidates when `DirectWanPolicy.DisabledByDefault` and validating endpoints via `CallbackEndpointValidator`).
   - **Wire Contracts (`Percolator.Infrastructure/Protos/file_transfer.proto`)**:
     - `TransferManifestProto`: concatenated 32-byte leaf array without per-leaf tags, total size, piece count, piece hash list.
     - `FileEntryProto`: relative file path, size, Merkle root.
-    - `FileTransferOfferProto`: transfer ID, manifest hash, sender identity ID, total bytes.
+    - `FileTransferOfferProto`: transfer ID, manifest, encrypted `transfer_key`, `base_nonce`, `stream_auth_token`, optional `relay_pipe_token`, sender identity ID, total bytes.
     - `FileTransferAcceptProto`: transfer ID, receiver bitfield, candidate endpoints.
     - `FileTransferCancelProto`: transfer ID, cancellation reason code.
   - **Portable Desktop File Store Guarantees**:
@@ -1593,6 +1620,9 @@
     - `TokenBucketRateLimiter`: smooth bandwidth allocation across active streams.
     - `RelayTransferPipeClient`: 4–8 parallel streams over relay transport with `X-Pipe-Auth` authentication.
     - `RelaySwarmTrackerClient`: tracker client with sliding lease expirations.
+    - **Transport Frame Hardening & Swarm Peer Authentication**:
+      - `TcpMultiStreamPool` enforces transport-level DoS defenses: (1) validates the 5-byte frame header length (`<= 262,144 B`) before allocating receive buffers to prevent OOM attacks, (2) enforces a 5-second handshake read timeout on newly accepted sockets to prevent Slowloris socket exhaustion, and (3) invokes `CallbackEndpointValidator` inside `ConnectDirectAsync` to block SSRF/loopback/link-local connections on WAN candidates.
+      - Application-layer `TransferSessionCoordinator.AuthenticateHandshakeAsync` performs constant-time `CryptographicOperations.FixedTimeEquals` validation on the `0x01 HandshakeFrame` `StreamAuthToken` and verifies `SenderPeerId` against the session's `authorizedPeers` set (`InvalidStreamAuthToken` / `UnauthorizedSwarmPeer`), immediately closing unauthenticated streams before bitfield or chunk exchange.
 - **Scope & Deliverables**:
   - [ ] Author Protobuf schema `Percolator.Infrastructure/Protos/file_transfer.proto`.
   - [ ] Implement File Transfer Persistence & CQRS Query Services:
@@ -1615,6 +1645,7 @@
   - `PortableDesktopFileStoreTests.ZeroByteFile_MaterializesImmediately`: creates zero-byte file immediately without `.percolator-part`.
   - `PortableDesktopFileStoreTests.BitfieldScanner_MatchesMerkleLeaves`: validates existing chunks against Merkle leaf hashes.
   - `TransferOfferReaperWorkerTests.StaleOffers_OlderThan24h_Reaped`: advances virtual clock by 25h with `FakeTimeProvider`; asserts stale offers marked cancelled.
+  - `TcpMultiStreamPoolTests.StreamHandshake_InvalidAuthToken_TerminatesConnection`: asserts unauthenticated swarm peer connections are closed before bitfield exchange.
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Plugins.FileTransfer`
 
@@ -1676,14 +1707,14 @@
 - **Technical Specifications & Lifetime Architecture**:
   - **Two-Stage Container Separation Protocol**:
     - *Stage 1 (Pre-Unlock Bootstrap Container)*: Contains zero SQLite DbContexts, zero repositories, and zero network/sync workers. Registers `SQLitePCL.Batteries_V2.Init()`, `SignalCryptoEngine`, `SystemDateTimeProvider`, `ProtobufHeaderStorage`, `DuressWipeHandler`, and `SqlCipherDatabaseUnlockCoordinator`.
-    - *Stage 2 (Authenticated Host - `IHost`)*: Built post-unlock via `Stage2HostFactory`. Hosts `IMasterKeyHandle` (scoped to session in pinned unmanaged memory), `SqlCipherPragmaInterceptor`, `PercolatorDbContext` (scoped/pooled), all 59 infrastructure ports, and `IHostedService` background workers.
+    - *Stage 2 (Authenticated Host - `IHost`)*: Built post-unlock via `Stage2HostFactory`. Hosts `IMasterKeyHandle` (scoped to session in pinned unmanaged memory), `SqlCipherPragmaInterceptor`, `PercolatorDbContext` (scoped/pooled), all 60 infrastructure ports, and `IHostedService` background workers.
   - **Service Lifetime Registration Topology**:
     - **Singletons**:
       - `IMasterKeyHandle` (instance passed from unlock coordinator)
       - `IDbContextFactory<PercolatorDbContext>` & `PercolatorDbContextOptions`
       - Core Cryptography & Time: `ICryptoEngine`, `IZkProofEngine`, `IDateTimeProvider`
       - Networking & Stream Management: `StreamRegistry`, `ITransferStreamPoolFactory` (`TcpMultiStreamPoolFactory`), `TokenBucketRateLimiter`, `LocalFileChunkStore`, `ITransportCertificateProvider` (`InMemoryTransportCertificateProvider`)
-      - Protocol Serializers: `ProtobufSessionWirePacker`, `ProtobufPayloadSerializer`, `ChatPayloadFramingDecorator`
+      - Protocol Serializers: `ProtobufSessionWirePacker`, `ProtobufPayloadSerializer`
     - **Scoped**:
       - `PercolatorDbContext` (pooled context per scope)
       - All Repositories & CQRS Query Services (Outbox, Contacts, Ratchet, Channels, Relay prekeys/profiles/ledger, Chat, File Transfer)
@@ -1713,11 +1744,11 @@
   - [ ] Implement `Stage2HostFactory`:
     - Extends `BaselineStage2HostFactory` to wire the full suite of operational adapters, repositories, query services, gRPC channels, and background pruners across all feature slices.
   - [ ] Implement `InfrastructureServiceCollectionExtensions.AddAuthenticatedInfrastructure(IServiceCollection, IConfiguration, IMasterKeyHandle)`:
-    - Registers all 59 infrastructure ports into the Stage 2 container with correct lifetime scopes.
+    - Registers all 60 infrastructure ports into the Stage 2 container with correct lifetime scopes.
     - Registers all 12 background `IHostedService` workers.
     - Exposes extension point for `Percolator.Infrastructure.Windows` overrides.
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Composition/`)**:
-  - `DependencyInjectionTests.All59Ports_ResolveFromContainerWithoutCycles`: resolves every planned infrastructure port from DI container; asserts non-null without circular dependency or missing registration.
+  - `DependencyInjectionTests.All60Ports_ResolveFromContainerWithoutCycles`: resolves every planned infrastructure port from DI container; asserts non-null without circular dependency or missing registration.
   - `DependencyInjectionTests.NoCaptiveDependencies_ScopedServicesNeverInjectedIntoSingletons`: enforces container scope validation (`ValidateScopes = true`); verifies no scoped DbContext or repository is injected into singleton services or pruners.
   - `DependencyInjectionTests.All12HostedServices_RegisteredAndStartable`: resolves `IEnumerable<IHostedService>` and asserts exact count of 12 registered background workers.
   - `DependencyInjectionTests.WindowsOverrides_CanSwapFileStoreAndCertProvider`: calls optional Windows overlay registrations; asserts `IDesktopFileStorage` resolves to `WindowsSparseDesktopFileStore`.
@@ -1806,3 +1837,4 @@ To guarantee robust infrastructure without introducing brittle tests that break 
 | 57 | `ITransportCertificateProvider` | `Percolator.Infrastructure` | `InMemoryTransportCertificateProvider` | Chunk 3.4 |
 | 58 | `IIdentityProfileRepository` | `Percolator.Domain` | `SqliteIdentityProfileRepository` | Chunk 2.2 |
 | 59 | `IPortReservationService` | `Percolator.Application` | `SqlitePortReservationService` | Chunk 3.4 |
+| 60 | `IPrivateRendezvousService` | `Percolator.Apps.Discovery` | `SqlitePrivateRendezvousService` | Chunk 4.2 |
