@@ -6,6 +6,8 @@ This repository contains the Percolator project, a collection of libraries and a
 
 Architectural governance and documentation across this repository follow a formal specification hierarchy inspired by Medical Device Quality Management Systems (IEC 62304, ISO 13485 Clause 7.3, ISO 14971, and FDA 21 CFR 820.30):
 
+- **System Charter & Requirements**:
+  - [`IntendedUse.md`](IntendedUse.md) — System purpose, target user profiles, adversarial operating environment, and contraindications (implements [`spec/intended-use-spec.md`](spec/intended-use-spec.md))
 - **Meta-Specifications (`/spec`)**: Standardized document specifications, strict dependency DAGs, and allowed headings in [`spec/`](spec/):
   - [`spec/fact-spec.md`](spec/fact-spec.md) — Immutable external axioms and standards
   - [`spec/intended-use-spec.md`](spec/intended-use-spec.md) — System purpose and boundaries
@@ -14,7 +16,7 @@ Architectural governance and documentation across this repository follow a forma
   - [`spec/system-requirements-spec.md`](spec/system-requirements-spec.md) — Black-box verifiable system design inputs
   - [`spec/deployable-requirements-spec.md`](spec/deployable-requirements-spec.md) — Software Item allocation and port contracts
   - [`spec/design-spec.md`](spec/design-spec.md) — Software Design Output specifications
-- **Project Design Documents (`Design.md`)**: Each deployable project in the solution contains a dedicated `Design.md` at its root implementing `design-spec.md`, documenting layer boundaries, structural decomposition, and key technical design decisions.
+- **Project Design Documents (`Design.md`)**: Each deployable project in the solution contains a dedicated `Design.md` at its root implementing `design-spec.md`, documenting layer boundaries, architectural invariants, and key technical design choices.
 
 ## Key Projects
 
