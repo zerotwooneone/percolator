@@ -13,18 +13,18 @@ Spec: [design-spec](../spec/design-spec.md)
 
 ## 2. Architectural Invariants and Encapsulation
 
-1. **Strict Platform Guarding (`[SupportedOSPlatform("windows")]`):** All native P/Invoke (`[LibraryImport("kernel32.dll")]`) and Windows CNG operations are encapsulated inside internal/sealed adapters annotated with `[SupportedOSPlatform("windows")]`.
-2. **Zero Orphaned OS Resources:** Every temporary `.pfx` file or Windows CNG key container created to satisfy OS subsystem requirements must be deterministically deleted and zeroized on rotation or disposal.
+1. **`INV-WINDOWS-PLATFORM-GUARD` (Strict Platform Guarding):** All native P/Invoke (`[LibraryImport("kernel32.dll")]`) and Windows CNG operations are encapsulated inside internal/sealed adapters annotated with `[SupportedOSPlatform("windows")]`.
+2. **`INV-ZERO-ORPHANED-OS-KEYS` (Zero Orphaned OS Resources):** Every temporary `.pfx` file or Windows CNG key container created to satisfy OS subsystem requirements must be deterministically deleted and zeroized on rotation or disposal. `#session-lock`
 
 ---
 
 ## 3. Key Technical Design Choices
 
-1. **CNG UserKeySet Ephemeral PFX Import with Immediate Zeroization & `CngKey.Delete()`:**
+1. **`DEC-CNG-USERKEYSET-CLEANUP` (CNG UserKeySet Ephemeral PFX Import with Immediate Zeroization & `CngKey.Delete()`):**
    - *Design Choice:* Because Windows SChannel (`lsass.exe` / `sspicli.dll`) executes TLS handshakes out-of-process and rejects in-memory ephemeral private keys, the provider exports the generated ECDSA certificate with a CSPRNG one-time password, loads it into `X509KeyStorageFlags.UserKeySet` with retry backoff (tolerating transient antivirus scan locks), immediately zeroizes the password/PFX buffers and deletes the temp file in `finally`, and invokes `cngKey.Key.Delete()` upon rotation or disposal.
    - *Rejected Alternative:* Using `X509KeyStorageFlags.EphemeralKeySet` on Windows (which fails SChannel handshakes with `Win32Exception`) or leaving imported keys in `%AppData%\Microsoft\Crypto\Keys` without explicit CNG container deletion.
-2. **Win32 `FSCTL_SET_SPARSE` Pre-Allocation over Physical Zero-Fill:**
+2. **`DEC-NTFS-SPARSE-IOCTL` (Win32 `FSCTL_SET_SPARSE` Pre-Allocation over Physical Zero-Fill):**
    - *Design Choice:* Issues `DeviceIoControl(..., FSCTL_SET_SPARSE, ...)` on `.percolator-part` file handles prior to calling `FileStream.SetLength`, turning multi-gigabyte out-of-order file pre-allocation into an $O(1)$ metadata operation on NTFS/ReFS.
    - *Rejected Alternative:* Calling `SetLength` on non-sparse NTFS files, which blocks disk threads while the OS kernel physically writes gigabytes of zeros before chunk 0 can be processed.
-3. **Win32 Reserved Device Name & NTFS Alternate Data Stream (ADS) Hardening:**
-   - Extending the cross-platform path rules in [`Percolator.Apps.FileTransfer.Domain`](../Percolator.Apps.FileTransfer.Domain/Design.md), Windows storage rejects any path segment containing `:` (NTFS Alternate Data Streams) or matching DOS reserved device names (`CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9`, and superscript variants) regardless of file extension.
+3. **`DEC-WIN32-ADS-PATH-GUARD` (Win32 Reserved Device Name & NTFS Alternate Data Stream Hardening):**
+   - Extending [`INV-PORTABLE-PATH-SANITIZATION`](../Percolator.Apps.FileTransfer.Domain/Design.md#2-architectural-invariants-and-encapsulation), Windows storage rejects any path segment containing `:` (NTFS Alternate Data Streams) or matching DOS reserved device names (`CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9`, and superscript variants) regardless of file extension.

@@ -13,20 +13,20 @@ Spec: [design-spec](../spec/design-spec.md)
 
 ## 2. Architectural Invariants and Encapsulation
 
-1. **Total Network Stealth Until Explicit Identity Activation:** Launching the application and unlocking the database binds **zero** network sockets. Kestrel listeners and outbound transport channels start strictly after the user activates a persona in the identity gate. Locking the session immediately tears down all sockets, clears SQLite connection pools, zeroizes the master key handle (per [`Percolator.Infrastructure`](../Percolator.Infrastructure/Design.md)), disposes the Stage 2 `IHost`, and returns to the unlock screen.
-2. **Domain Isolation & Presentation-Owned Reactive Models:** Domain models are never bound directly to XAML views. Reactive presentation models (`*Model`) and immutable `.ToSnapshot()` records live exclusively in `Percolator.Desktop`.
-3. **UI-Agnostic Stateful Services vs. Transient ViewModels:** Shared cross-view state is owned by thread-safe stateful services (`ObservableList<T>` / `ObservableDictionary<TKey, TValue>`) that never reference UI dispatchers; ViewModels are transient projections created via `ISynchronizedView` and deterministically disposed on view/item removal (`.ObserveRemove()`).
-4. **R3 Reactive Threading Discipline:** High-frequency streams are filtered, debounced, or frame-sampled on background threads using injected `System.TimeProvider` before marshaling to `AvaloniaSynchronizationContext` at the terminal subscription step. Worker threads never enumerate UI-bound `NotifyCollectionChangedSynchronizedViewList` wrappers.
+1. **`INV-STEALTH-STARTUP-GATE` (Total Network Stealth Until Explicit Identity Activation):** Launching the application and unlocking the database binds **zero** network sockets. Kestrel listeners and outbound transport channels start strictly after the user activates a persona in the identity gate. Locking the session immediately tears down all sockets, clears SQLite connection pools, zeroizes the master key handle (per [`DEC-PINNED-SQLITE-KEY`](../Percolator.Infrastructure/Design.md#3-key-technical-design-choices)), disposes the Stage 2 `IHost` (per [`INV-STAGE2-HOST-ISOLATION`](../Percolator.Infrastructure/Design.md#2-architectural-invariants-and-encapsulation)), and returns to the unlock screen. `#session-lock`
+2. **`INV-PRESENTATION-SNAPSHOT-MODELS` (Domain Isolation & Presentation-Owned Reactive Models):** Domain models are never bound directly to XAML views. Reactive presentation models (`*Model`) and immutable `.ToSnapshot()` records live exclusively in `Percolator.Desktop`.
+3. **`INV-STATEFUL-SERVICE-PROJECTION` (UI-Agnostic Stateful Services vs. Transient ViewModels):** Shared cross-view state is owned by thread-safe stateful presentation services (`ObservableList<T>` / `ObservableDictionary<TKey, TValue>`) that never reference UI dispatchers; ViewModels are transient projections created via `ISynchronizedView` and deterministically disposed on view/item removal (`.ObserveRemove()`).
+4. **`INV-R3-THREAD-DISCIPLINE` (R3 Reactive Threading Discipline):** High-frequency streams are filtered, debounced, or frame-sampled on background threads using injected `System.TimeProvider` before marshaling to `AvaloniaSynchronizationContext` at the terminal subscription step. Worker threads never enumerate UI-bound `NotifyCollectionChangedSynchronizedViewList` wrappers.
 
 ---
 
 ## 3. Key Technical Design Choices
 
-1. **Debounced `AwaitOperation.Drop` Reload Coordinators:**
-   - *Design Choice:* Bursts of inbound domain events trigger read-model refreshes through an R3 `.Debounce(...).SelectAwait(..., AwaitOperation.Drop)` pipeline so redundant triggers arriving while a database read is already in flight are dropped rather than queued.
+1. **`DEC-DEBOUNCED-DROP-RELOAD` (Debounced `AwaitOperation.Drop` Reload Coordinators):**
+   - *Design Choice:* Bursts of inbound domain events trigger read-model refreshes through an R3 `.Debounce(...).SelectAwait(..., AwaitOperation.Drop)` pipeline so redundant triggers arriving while a database read is already in flight are dropped rather than queued. `#cqrs-projection`
    - *Rejected Alternative:* Firing a database query per inbound event or subscribing to a global "state changed" event that clears and repopulates UI collections, causing SQLite lock contention and UI frame stutter.
-2. **LRU-Cached Conversation Scopes (`SessionScopeFactory`):**
-   - *Design Choice:* Active conversation child DI scopes (`IServiceScope` + `ChatViewModel`) are held in a bounded LRU cache so switching between recent chats preserves message drafts and scroll position while evicting and disposing older scopes cleanly.
+2. **`DEC-LRU-SESSION-SCOPES` (LRU-Cached Conversation Scopes):**
+   - *Design Choice:* Active conversation child DI scopes (`IServiceScope` + `ChatViewModel` via `SessionScopeFactory`) are held in a bounded LRU cache so switching between recent chats preserves message drafts and scroll position while evicting and disposing older scopes cleanly.
    - *Rejected Alternative:* Singleton ViewModels per conversation (unbounded RAM/subscription growth) or recreating ViewModels on every tab switch (destroying drafts and scroll state).
-3. **Direct-Canvas Bitfield Rendering (`PieceMapControl`):**
-   - Large file transfer bitfields render directly onto an Avalonia `DrawingContext` rather than instantiating thousands of individual XAML visual tree elements.
+3. **`DEC-DIRECT-CANVAS-BITFIELD` (Direct-Canvas Bitfield Rendering):**
+   - Large file transfer bitfields (`PieceMapControl`) render directly onto an Avalonia `DrawingContext` rather than instantiating thousands of individual XAML visual tree elements. `#bitfield-swarm`

@@ -13,15 +13,15 @@ Spec: [design-spec](../spec/design-spec.md)
 
 ## 2. Architectural Invariants and Encapsulation
 
-1. **True Process & Container Separation:** The production desktop client interacts with simulator-hosted personas over real loopback gRPC/TCP sockets (enabled via the `--allow-localhost` development flag) exactly as it communicates with remote WAN peers.
-2. **Per-Persona Host Isolation:** Each simulated peer or relay runs inside its own isolated `IHost` with its own Kestrel listener port and isolated database instance.
+1. **`INV-SIMULATOR-PROCESS-SEPARATION` (True Process & Container Separation):** The production desktop client interacts with simulator-hosted personas over real loopback gRPC/TCP sockets (enabled via the `--allow-localhost` development flag) exactly as it communicates with remote WAN peers.
+2. **`INV-SIMULATOR-HOST-ISOLATION` (Per-Persona Host Isolation):** Each simulated peer or relay runs inside its own isolated `IHost` with its own Kestrel listener port and isolated database instance.
 
 ---
 
 ## 3. Key Technical Design Choices
 
-1. **Out-of-Process Segregation over In-App Simulator Hooks:**
+1. **`DEC-OUT-OF-PROCESS-SIMULATOR` (Out-of-Process Segregation over In-App Simulator Hooks):**
    - *Design Choice:* Running the simulator as an independent executable eliminates `ISimulatorOutboundInterceptor` hooks, magic loopback IP reservations, and DI container bloat from the production desktop client.
    - *Rejected Alternative:* Embedding a simulator tab and mock transport interceptors inside the production client, which compromises the security boundary and distorts real socket behavior.
-2. **Real Stack Execution over Mock Protocol Engines:**
+2. **`DEC-REAL-STACK-EXECUTION` (Real Stack Execution over Mock Protocol Engines):**
    - Simulated nodes execute the real [`Percolator.Domain`](../Percolator.Domain/Design.md), [`Percolator.Application`](../Percolator.Application/Design.md), and [`Percolator.Infrastructure`](../Percolator.Infrastructure/Design.md) pipelines rather than a parallel mock engine, guaranteeing that simulator tests exercise production wire serialization, ratchet state transitions, and concurrency gates.

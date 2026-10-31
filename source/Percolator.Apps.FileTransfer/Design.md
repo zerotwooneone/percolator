@@ -13,18 +13,18 @@ Spec: [design-spec](../spec/design-spec.md)
 
 ## 2. Architectural Invariants and Encapsulation
 
-1. **Verify-Before-Write Disk Hygiene:** Every inbound chunk must pass both per-chunk AEAD authentication and domain `MerkleTree` leaf verification in memory *before* any byte slice is written via `IDesktopFileStorage`. Unauthenticated or corrupted chunks immediately choke the offending peer and drop the stream with zero disk writes.
-2. **Zero-Allocation Pooled Streaming Path:** Chunk reads, encryption, decryption, and Merkle hashing rent and return buffers from `ArrayPool<byte>.Shared` to prevent Large Object Heap (LOH) fragmentation during multi-stream saturation.
-3. **Silent Pre-Consent Staging (Anti-Presence-Probing):** Inbound transfer offers are filtered at the edge and staged locally in `PendingConsent` without emitting any automatic network receipt or probing direct peer endpoints until the user explicitly accepts.
+1. **`INV-VERIFY-BEFORE-WRITE` (Verify-Before-Write Disk Hygiene):** Every inbound chunk must pass both per-chunk AEAD authentication and domain `MerkleTree` leaf verification in memory (per [`DEC-DOMAIN-SEPARATED-MERKLE`](../Percolator.Apps.FileTransfer.Domain/Design.md#3-key-technical-design-choices)) *before* any byte slice is written via `IDesktopFileStorage`. Unauthenticated or corrupted chunks immediately choke the offending peer and drop the stream with zero disk writes.
+2. **`INV-POOLED-STREAM-BUFFERS` (Zero-Allocation Pooled Streaming Path):** Chunk reads, encryption, decryption, and Merkle hashing rent and return buffers from `ArrayPool<byte>.Shared` to prevent Large Object Heap (LOH) fragmentation during multi-stream saturation.
+3. **`INV-SILENT-OFFER-STAGING` (Silent Pre-Consent Staging — Anti-Presence-Probing):** Inbound transfer offers are filtered at the edge and staged locally in `PendingConsent` without emitting any automatic network receipt or probing direct peer endpoints until the user explicitly accepts.
 
 ---
 
 ## 3. Key Technical Design Choices
 
-1. **Dual-Plane Bifurcation (In-Band Control vs. Out-of-Band Bulk Data):**
-   - *Design Choice:* Lightweight control frames (offer, selective accept, cancel) travel over the host's ratcheted messaging channel, whereas bulk file chunks stream over dedicated out-of-band connections authenticated via a constant-time session token and encrypted with an ephemeral session key and deterministic per-chunk nonce (`BaseNonce XOR ChunkIndex`).
+1. **`DEC-DUAL-PLANE-TRANSFER` (Dual-Plane Bifurcation — In-Band Control vs. Out-of-Band Bulk Data):**
+   - *Design Choice:* Lightweight control frames (offer, selective accept, cancel) travel over the host's ratcheted messaging channel, whereas bulk file chunks stream over dedicated out-of-band connections authenticated via a constant-time session token and encrypted with an ephemeral session key and deterministic per-chunk nonce (`BaseNonce XOR ChunkIndex`). `#bitfield-swarm`
    - *Rejected Alternative:* Streaming bulk file chunks through the Double Ratchet pipeline, which causes severe head-of-line blocking for interactive chat and millions of redundant ratchet KDF steps.
-2. **Two-Tier Manifest Distribution (Inline vs. Out-of-Band Blob):**
-   - Small manifests travel inline inside the offer control frame for single-roundtrip startup, while large multi-file manifests are uploaded once via `IMediaBlobService` (per [`Percolator.PluginSdk`](../Percolator.PluginSdk/Design.md)) with a bounded stream reader on download to prevent memory-exhaustion bombs.
-3. **Privacy-Gated Peer Exchange (PEX):**
-   - Direct WAN endpoint candidates are excluded by default unless explicitly permitted by session policy, and incoming PEX announcements are rate-limited and scrubbed of loopback, link-local, and unspecified addresses.
+2. **`DEC-TWO-TIER-MANIFEST` (Two-Tier Manifest Distribution — Inline vs. Out-of-Band Blob):**
+   - Small manifests travel inline inside the offer control frame for single-roundtrip startup, while large multi-file manifests are uploaded once via `IMediaBlobService` (per [`DEC-OOB-BLOB-REFERENCE`](../Percolator.PluginSdk/Design.md#3-key-technical-design-choices)) with a bounded stream reader on download to prevent memory-exhaustion bombs.
+3. **`DEC-PRIVACY-GATED-PEX` (Privacy-Gated Peer Exchange):**
+   - Direct WAN endpoint candidates are excluded by default unless explicitly permitted by session policy, and incoming PEX announcements are rate-limited and scrubbed of loopback, link-local, and unspecified addresses. `#relay-privacy`

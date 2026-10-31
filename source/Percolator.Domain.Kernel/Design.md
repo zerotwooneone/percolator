@@ -13,16 +13,16 @@ Spec: [design-spec](../spec/design-spec.md)
 
 ## 2. Architectural Invariants and Encapsulation
 
-1. **Zero Primitive Obsession Baseline:** Building on [`Percolator.SourceGenerators`](../Percolator.SourceGenerators/Design.md), all domain identifiers, byte buffers, counters, offsets, and timestamps across the kernel and downstream domains must be represented as self-validating value objects rather than raw primitives.
-2. **Explicit Temporal Inversion (`IDateTimeProvider`):** Domain models never query `DateTimeOffset.UtcNow` or `TimeProvider.System` directly; current time is always passed into domain operations via `IDateTimeProvider` or value-object timestamps so state transitions are 100% deterministic.
-3. **Domain-Owned Secret Zeroization (`ISensitiveSecret`):** Any domain model holding sensitive cryptographic material implements `ISensitiveSecret` (`IDisposable` + `IsZeroed`) and is responsible for zeroizing its own memory buffers upon state progression or disposal.
+1. **`INV-DOMAIN-VALUE-TYPES` (Zero Primitive Obsession Baseline):** Building on [`INV-ZERO-PRIMITIVES`](../Percolator.SourceGenerators/Design.md#2-architectural-invariants-and-encapsulation), all domain identifiers, byte buffers, counters, offsets, and timestamps across the kernel and downstream domains must be represented as self-validating value objects rather than raw primitives.
+2. **`INV-TIME-INVERSION` (Explicit Temporal Inversion):** Domain models never query `DateTimeOffset.UtcNow` or `TimeProvider.System` directly; current time is always passed into domain operations via `IDateTimeProvider` or value-object timestamps so state transitions are 100% deterministic.
+3. **`INV-SECRET-ZEROIZATION` (Domain-Owned Secret Zeroization):** Any domain model holding sensitive cryptographic material implements `ISensitiveSecret` (`IDisposable` + `IsZeroed`) and is responsible for zeroizing its own memory buffers upon state progression or disposal. `#session-lock`
 
 ---
 
 ## 3. Key Technical Design Choices
 
-1. **Value-Type `DomainResult<T>` for Expected Business Rejections:**
+1. **`DEC-STRUCT-DOMAIN-RESULT` (Value-Type `DomainResult<T>` for Expected Business Rejections):**
    - *Design Choice:* Expected domain rule rejections (unauthorized role, invalid state transition, verification failure) return a `readonly record struct` `DomainResult<T>` carrying a structured `DomainError`, reserving exceptions strictly for unrecoverable programmer contract defects.
    - *Rejected Alternative:* Throwing exceptions for domain rule rejections or allocating heap-based result wrappers on hot cryptographic/streaming paths.
-2. **In-Memory Domain Event Recording on `AggregateRoot<TId>`:**
+2. **`DEC-AGGREGATE-EVENTS` (In-Memory Domain Event Recording on `AggregateRoot<TId>`):**
    - Aggregates record state-transition events in an encapsulated collection (`AddDomainEvent` / `ClearDomainEvents`) without depending on an external event bus or mediator framework inside the domain layer.

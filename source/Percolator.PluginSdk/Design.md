@@ -15,16 +15,16 @@ Spec: [design-spec](../spec/design-spec.md)
 
 Inherits the value-object and result conventions from [`Percolator.Domain`](../Percolator.Domain/Design.md), plus:
 
-1. **Strict Tenant Isolation by `AppId`:** Every plugin registers under a unique application identifier; payloads are routed exclusively to their owning plugin and never cross-contaminate across application streams.
-2. **Cryptographic Agnosticism for Plugins:** Plugins exchange structured domain payloads and delivery routes through SDK ports while remaining completely decoupled from underlying X3DH, Double Ratchet, Sender Key, and blind-token state machines.
-3. **Log Redaction on Capability Descriptors:** Out-of-band descriptors carrying ephemeral symmetric keys or nonces (`BlobReference`) override `ToString()` to redact secret material from diagnostic logs.
+1. **`INV-APPID-ISOLATION` (Strict Tenant Isolation by `AppId`):** Every plugin registers under a unique application identifier; payloads are routed exclusively to their owning plugin and never cross-contaminate across application streams.
+2. **`INV-PLUGIN-CRYPTO-AGNOSTIC` (Cryptographic Agnosticism for Plugins):** Plugins exchange structured domain payloads and delivery routes through SDK ports while remaining completely decoupled from underlying X3DH, Double Ratchet, Sender Key, and blind-token state machines.
+3. **`INV-DESCRIPTOR-REDACTION` (Log Redaction on Capability Descriptors):** Out-of-band descriptors carrying ephemeral symmetric keys or nonces (`BlobReference`) override `ToString()` to redact secret material from diagnostic logs.
 
 ---
 
 ## 3. Key Technical Design Choices
 
-1. **Bounded In-Band Envelope vs. Out-of-Band Encrypted Blob Reference:**
-   - *Design Choice:* To prevent head-of-line blocking in message ratchets and bound transactional outbox row sizes, in-band channel envelopes enforce a strict size ceiling. Attachments or manifests exceeding the inline threshold are encrypted into content-addressed chunks via `IMediaBlobService`, while the in-band envelope carries only a compact `BlobReference` (digest, ephemeral key, nonce, unpadded size).
+1. **`DEC-OOB-BLOB-REFERENCE` (Bounded In-Band Envelope vs. Out-of-Band Encrypted Blob Reference):**
+   - *Design Choice:* To prevent head-of-line blocking in message ratchets and bound transactional outbox row sizes, in-band channel envelopes enforce a strict size ceiling. Attachments or manifests exceeding the inline threshold are encrypted into content-addressed chunks via `IMediaBlobService`, while the in-band envelope carries only a compact `BlobReference` (digest, ephemeral key, nonce, unpadded size). `#offline-delivery`
    - *Rejected Alternative:* Streaming large attachments directly inside ratcheted message envelopes, which stalls real-time messaging and bloats SQLite outbox tables.
-2. **Topology-Explicit Delivery Contracts (`DeliveryRoute`):**
-   - SDK contracts explicitly surface whether a session is direct peer-to-peer (requiring simultaneous online presence for media streaming) or relay-mediated (supporting asynchronous store-and-forward blob caching).
+2. **`DEC-TOPOLOGY-DELIVERY-ROUTE` (Topology-Explicit Delivery Contracts):**
+   - SDK contracts (`DeliveryRoute`) explicitly surface whether a session is direct peer-to-peer (requiring simultaneous online presence for media streaming) or relay-mediated (supporting asynchronous store-and-forward blob caching). `#relay-privacy`

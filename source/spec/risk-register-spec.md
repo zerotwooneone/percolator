@@ -1,35 +1,36 @@
 # Risk Register Specification (`risk-register-spec`)
 
+Spec: [qms-spec](qms-spec.md)
+
 ## 1. Purpose and QMS Basis
 
-A **Risk Register Specification** (`risk-register`) document identifies systemic hazards, threat actors, and failure modes arising from the system's `intended-use` and defines the **Risk Control Measures (`RCM-*`)** that downstream requirements and designs must enforce.
-
-In a Medical Device QMS, risk management is co-equal with `user-needs` as a primary driver of engineering design and architectural segregation.
-
-- **ISO 14971:2019 Clauses 5, 6, 7, & 8** (*Risk analysis, evaluation, control, and residual risk*): Identifying hazards, estimating severity/likelihood, applying risk controls in priority order (*Inherent Design* $\rightarrow$ *Protective Measures* $\rightarrow$ *Information for Safety*), and evaluating residual risk.
-- **IEC 62304:2006+AMD1:2015 Clause 7.1 – 7.3**: Identifying software hazard causes, specifying risk control measures, and enforcing architectural segregation.
-- **ISO 13485:2016 Clause 7.3.3(c)** & **FDA 21 CFR 820.30(c) / AAMI TIR57**: Feeding security and safety risk controls into design inputs.
+A **Risk Register Specification** (`risk-register`) document identifies systemic hazards, threat actors, and failure modes arising from the system's `intended-use` and defines the **Risk Control Measures (`RCM-*`)** that downstream requirements and designs must enforce (**ISO 14971:2019 Clauses 5–8**, **IEC 62304 Clauses 7.1–7.3**, **ISO 13485 Clause 7.3.3(c)**, **AAMI TIR57**).
 
 ---
 
-## 2. Dependency Rules (Acyclic Control Direction)
+## 2. Dependency & Identification Rules (Acyclic Control Direction)
 
-- **Permitted Outbound QMS References:** `intended-use`, `user-needs`, and `fact` documents only.
-- **Prohibited Outbound References (Keeping the Graph Acyclic):** A `risk-register` **MUST NOT** link downward to `system-requirements`, `deployable-requirements`, or `design` files. Instead, the risk register defines concise `RCM-<SLUG>` control identifiers, and downstream requirements/design documents link *upward* to those `RCM-<SLUG>` identifiers where they are realized.
+- **Item Identifier Prefixes:**
+  - `HAZ-<SLUG>` for systemic hazards and threats (Section 1)
+  - `RCM-<SLUG>` for risk control measures (Section 2)
+  - Governed by [Change Control](qms-spec.md#32-design-change-control-never-move-the-goalposts) (no deletion or weakening without human approval).
+- **Permitted Outbound QMS References:** `intended-use` (`IU-*`, `USR-*`, `ENV-*`, `CONTRA-*`), `user-needs` (`UN-*`), and `fact` (`FACT-*`) documents only.
+- **Prohibited Outbound References:** **MUST NOT** link downward to `system-requirements`, `deployable-requirements`, or `design` files. Downstream documents link *upward* to `RCM-<SLUG>`.
 
 ---
 
-## 3. Anti-Duplication & Stability Rules
+## 3. Document-Specific Inclusion & Exclusion Rules
 
-1. **Single Header Spec Link:** Reference this spec once immediately below the H1 title:
-   `Spec: [risk-register-spec](<relative-path>/spec/risk-register-spec.md)`
-2. **Systemic Hazards Only (Not a Bug Tracker):** Record architectural-level hazards and threat classes (e.g., *Pre-Key Starvation DoS*, *Social Graph Metadata Correlation at Relays*, *Ratchet State Desynchronization on Crash*, *Forensic Key Extraction at Rest*). Do not add entries for routine coding bugs or individual CVE patches.
-3. **Define Each Risk Control Measure Once:** When multiple hazards share a mitigation (e.g., *Total Network Stealth Gate* or *Bounded Quota Enforcement*), define the `RCM-<SLUG>` once in Section 2 and reference its ID from Section 1.
-4. **Standardized Scoring Rubric (Defined Once Here):** Implementing documents use these codes without redefining them:
-   - **Severity:** `S4 (Catastrophic: long-term identity compromise / RCE / permanent data loss)`, `S3 (Critical: session compromise / IP or social-graph deanonymization / persistent DoS)`, `S2 (Moderate: transient DoS / resource exhaustion / single-transfer failure)`, `S1 (Minor: degraded UX with auto-recovery)`.
+In addition to the universal rules in [`qms-spec`](qms-spec.md):
+
+1. **Systemic Hazards & Barrier-Level Controls Only:**
+   - *Include:* Architectural-level security, privacy, and availability hazards (`HAZ-<SLUG>`) and the protective/inherent barriers (`RCM-<SLUG>`) required to mitigate them—including technical security properties excluded from `user-needs` (forward secrecy, post-compromise recovery, MITM key-change warnings, metadata blinding, wire-level indistinguishability, and DoS resource quotas).
+   - *Exclude Routine Bugs & Code Mechanics:* Do not add entries for ordinary coding defects, compiler-enforced syntax, or specific C# class/database/wire-field implementation details. State the required *barrier* in `RCM-<SLUG>`, leaving internal realization to `design`.
+2. **Define Each Risk Control Measure Once:** When multiple `HAZ-<SLUG>` entries share a mitigation, define the `RCM-<SLUG>` once in Section 2 and reference its ID from Section 1.
+3. **Standardized Scoring Rubric (Defined Once Here):** Implementing documents use these codes without redefining them:
+   - **Severity:** `S4 (Catastrophic: long-term identity compromise / RCE / permanent data loss)`, `S3 (Critical: session compromise / IP or social-graph deanonymization / persistent DoS)`, `S2 (Moderate: transient DoS / resource exhaustion / single-operation failure)`, `S1 (Minor: degraded UX with auto-recovery)`.
    - **Likelihood:** `L3 (High: unauthenticated remote/relay attacker)`, `L2 (Medium: authenticated peer, malicious relay, or foreseeable user error)`, `L1 (Low: requires local OS/physical access or computationally infeasible attack)`.
    - **Control Priority (ISO 14971 7.1):** `Inherent` (eliminated structurally by design) $>$ `Protective` (guarded by runtime crypto/quotas/validation) $>$ `Information` (user warning/consent UI).
-5. **History Policy (Git vs. In-File Exception):** Prose edit changelogs are prohibited (`git log` is authoritative). **QMS Exception (ISO 14971 Clauses 7.3 & 8):** Each hazard entry must include its current state (`Identified` | `Controlled` | `Verified`) and a brief residual risk justification in-file.
 
 ---
 
@@ -41,7 +42,7 @@ Implementing documents **MUST** use only the headings below and **MUST NOT** rep
 `Spec: [risk-register-spec](<relative-path>/spec/risk-register-spec.md)`
 
 ### `## 1. Hazard and Threat Analysis`
-A concise catalogue of systemic hazards (`HAZ-<SLUG>`). Each entry states: the threat/failure cause, hazardous situation & harm, initial risk (`S`/`L`), assigned `RCM-<SLUG>` control ID(s), and residual risk (`S`/`L`, status, and brief justification).
+A concise catalogue of systemic hazards (`HAZ-<SLUG>`). Each entry states: the threat/failure cause (referencing `ENV-*` / `USR-*`), hazardous situation & harm, initial risk (`S`/`L`), assigned `RCM-<SLUG>` control ID(s), and residual risk (`S`/`L`, status: `Identified` | `Controlled` | `Verified`, and brief justification).
 
 ### `## 2. Risk Control Measures (`RCM`)`
-The single normative definitions of each Risk Control Measure (`RCM-<SLUG>`), specifying its ISO 14971 priority (`Inherent` | `Protective` | `Information`) and the invariant barrier that downstream requirements/designs must uphold.
+The single normative definitions of each Risk Control Measure (`RCM-<SLUG>`), specifying its ISO 14971 priority (`Inherent` | `Protective` | `Information`) and the invariant barrier that downstream `system-requirements` and `design` documents must uphold.

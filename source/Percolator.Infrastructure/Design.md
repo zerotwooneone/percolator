@@ -13,18 +13,18 @@ Spec: [design-spec](../spec/design-spec.md)
 
 ## 2. Architectural Invariants and Encapsulation
 
-1. **Two-Stage DI Host Isolation (`IStage2HostFactory`):** The pre-unlock bootstrap container registers only Stage 1 vault unlock services. `PercolatorDbContext`, domain repositories, query services, and background workers exist exclusively inside the child `IStage2Host` created *after* the database key is verified and schema migrations succeed.
-2. **Internal-Only Domain Reconstitution & Protobuf Isolation:** Persistence adapters reconstitute domain aggregates via the `internal` hydration factories defined in [`Percolator.Domain`](../Percolator.Domain/Design.md) and [`Percolator.Apps.FileTransfer.Domain`](../Percolator.Apps.FileTransfer.Domain/Design.md). Compiled Protobuf classes and EF Core entities remain `internal` to infrastructure and never leak across port interfaces.
-3. **Vertical Persistence Slices:** Each feature slice co-locates its EF Core entity mapping, aggregate write repository, and zero-hydration SQL read-model query service.
+1. **`INV-STAGE2-HOST-ISOLATION` (Two-Stage DI Host Isolation):** The pre-unlock bootstrap container (`IStage2HostFactory`) registers only Stage 1 vault unlock services. `PercolatorDbContext`, domain repositories, query services, and background workers exist exclusively inside the child `IStage2Host` created *after* the database key is verified and schema migrations succeed. `#session-lock`
+2. **`INV-ADAPTER-HYDRATION-BOUNDARY` (Internal-Only Domain Reconstitution & Protobuf Isolation):** Persistence adapters reconstitute domain aggregates via [`INV-INTERNAL-REHYDRATION`](../Percolator.Domain/Design.md#2-architectural-invariants-and-encapsulation) in `Percolator.Domain` and `Percolator.Apps.FileTransfer.Domain`. Compiled Protobuf classes and EF Core entities remain `internal` to infrastructure and never leak across port interfaces.
+3. **`INV-VERTICAL-PERSISTENCE-SLICES` (Vertical Persistence Slices):** Each feature slice co-locates its EF Core entity mapping, aggregate write repository, and zero-hydration SQL read-model query service (realizing [`INV-CQRS-SEPARATION`](../Percolator.Application/Design.md#2-architectural-invariants-and-encapsulation)).
 
 ---
 
 ## 3. Key Technical Design Choices
 
-1. **Zero OS Keyring Persistence & Pinned Master Key (`IMasterKeyHandle`) + Native `sqlite3_key`:**
-   - *Design Choice:* The SQLCipher master key is never stored in OS credential vaults (DPAPI/Keychain) or passed in connection strings. It is unwrapped in memory from `percolator.header` during Stage 1 unlock, held in a pinned byte array (`GC.AllocateArray<byte>(..., pinned: true)`), applied to SQLite connections via native C-API `SQLitePCL.raw.sqlite3_key` inside an EF Core connection interceptor, and cryptographically zeroized upon session lock or disposal.
+1. **`DEC-PINNED-SQLITE-KEY` (Zero OS Keyring Persistence & Pinned Master Key + Native `sqlite3_key`):**
+   - *Design Choice:* The SQLCipher master key (`IMasterKeyHandle`) is never stored in OS credential vaults (DPAPI/Keychain) or passed in connection strings. It is unwrapped in memory from `percolator.header` during Stage 1 unlock, held in a pinned byte array (`GC.AllocateArray<byte>(..., pinned: true)`), applied to SQLite connections via native C-API `SQLitePCL.raw.sqlite3_key` inside an EF Core connection interceptor, and cryptographically zeroized upon session lock or disposal. `#session-lock`
    - *Rejected Alternative:* Passing hex keys via connection strings (which leaves uncollectable immutable `string` copies on the managed heap) or persisting keys in OS keyrings.
-2. **Constant-Size Twin-Slot Header for Plausible Deniability:**
+2. **`DEC-TWIN-SLOT-DURESS-HEADER` (Constant-Size Twin-Slot Header for Plausible Deniability):**
    - The vault header always serializes both a master key slot and a duress slot; when no duress passphrase is set, the duress slot is populated with CSPRNG noise so file size and entropy are indistinguishable from an active duress configuration. Entering the duress passphrase cryptographically shreds the vault before initializing a clean decoy database.
-3. **RFC 4122 Big-Endian `BLOB(16)` UUID Storage:**
-   - All `[GuidId]` primary and foreign keys are stored as 16-byte big-endian `BLOB` columns (`Guid.ToByteArray(bigEndian: true)`), cutting index footprint in half compared to text UUIDs while preserving lexicographical B-Tree sort order for sequential UUIDv7 keys (per [`Percolator.SourceGenerators`](../Percolator.SourceGenerators/Design.md)).
+3. **`DEC-BIG-ENDIAN-BLOB-UUID` (RFC 4122 Big-Endian `BLOB(16)` UUID Storage):**
+   - All `[GuidId]` primary and foreign keys are stored as 16-byte big-endian `BLOB` columns (`Guid.ToByteArray(bigEndian: true)`), cutting index footprint in half compared to text UUIDs while preserving lexicographical B-Tree sort order for sequential UUIDv7 keys (per [`DEC-BIFURCATED-UUID`](../Percolator.SourceGenerators/Design.md#3-key-technical-design-choices)).
