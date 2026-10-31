@@ -423,6 +423,9 @@ public sealed class SignalCryptoEngine : ICryptoEngine
 
             CryptographicOperations.ZeroMemory(aBytes);
             CryptographicOperations.ZeroMemory(h);
+            CryptographicOperations.ZeroMemory(rInput);
+            CryptographicOperations.ZeroMemory(rHash);
+            CryptographicOperations.ZeroMemory(sEncoded);
         }
 
         public static bool Verify(ReadOnlySpan<byte> publicKey, ReadOnlySpan<byte> message, ReadOnlySpan<byte> signature)

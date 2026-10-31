@@ -99,18 +99,22 @@ public sealed class SealedEnvelopeUnwrapper : ISealedEnvelopeUnwrapper
         {
             ReadOnlyMemory<byte> rawPayload = envelope.Ciphertext;
 
-            // Check if envelope.Ciphertext contains a SealedEnvelopeProto wrapper
-            try
+            // Fast path: SealedWireFraming frames start with 0x01, 0x02, or 0x03.
+            // If the first byte is not a known frame kind, check if it is a SealedEnvelopeProto wrapper.
+            if (envelope.Ciphertext.Length > 0 && envelope.Ciphertext.Span[0] > 0x03)
             {
-                var proto = SealedEnvelopeProto.Parser.ParseFrom(envelope.Ciphertext.Span);
-                if (proto != null && !proto.EncryptedPackage.IsEmpty)
+                try
                 {
-                    rawPayload = proto.EncryptedPackage.Memory;
+                    var proto = SealedEnvelopeProto.Parser.ParseFrom(envelope.Ciphertext.Span);
+                    if (proto != null && !proto.EncryptedPackage.IsEmpty)
+                    {
+                        rawPayload = proto.EncryptedPackage.Memory;
+                    }
                 }
-            }
-            catch
-            {
-                // Not a protobuf wrapper, proceed with raw bytes
+                catch
+                {
+                    // Not a protobuf wrapper, proceed with raw bytes
+                }
             }
 
             return UnwrapFrame(rawPayload, _recipientId, _timeProvider.UtcNow);

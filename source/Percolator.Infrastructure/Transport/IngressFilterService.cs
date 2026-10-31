@@ -2,6 +2,7 @@ namespace Percolator.Infrastructure.Transport;
 
 using System;
 using System.Collections.Concurrent;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Percolator.Application2.Ports;
@@ -14,6 +15,7 @@ public sealed class IngressFilterOptions
 {
     public int MaxRequestsPerMinute { get; set; } = 120;
     public bool EnableRateLimiting { get; set; } = true;
+    public int MaxTrackedSenders { get; set; } = 10_000;
 }
 
 public sealed class IngressFilterService : IIngressFilterService
@@ -22,6 +24,7 @@ public sealed class IngressFilterService : IIngressFilterService
     private readonly IngressFilterOptions _options;
     private readonly IDateTimeProvider _timeProvider;
     private readonly ConcurrentDictionary<PublicIdentityId, RateLimitTracker> _rateLimiters = new();
+    private int _lastCleanupMinute;
 
     private sealed class RateLimitTracker
     {
@@ -37,6 +40,7 @@ public sealed class IngressFilterService : IIngressFilterService
         _contactRepository = contactRepository ?? throw new ArgumentNullException(nameof(contactRepository));
         _options = options ?? new IngressFilterOptions();
         _timeProvider = timeProvider ?? new DefaultDateTimeProvider();
+        _lastCleanupMinute = (int)(_timeProvider.UtcNow.ToUnixTimeSeconds() / 60);
     }
 
     public async ValueTask<DomainResult> CheckIngressAllowedAsync(
@@ -57,6 +61,13 @@ public sealed class IngressFilterService : IIngressFilterService
             var now = _timeProvider.UtcNow;
             int currentMinute = (int)(now.ToUnixTimeSeconds() / 60);
 
+            // Periodic bounded cleanup of stale window entries to prevent memory leak
+            if (currentMinute > _lastCleanupMinute || _rateLimiters.Count > _options.MaxTrackedSenders)
+            {
+                _lastCleanupMinute = currentMinute;
+                CleanupStaleTrackers(currentMinute);
+            }
+
             var tracker = _rateLimiters.GetOrAdd(senderId, _ => new RateLimitTracker { WindowMinute = currentMinute, RequestCount = 0 });
 
             lock (tracker)
@@ -76,6 +87,17 @@ public sealed class IngressFilterService : IIngressFilterService
         }
 
         return DomainResult.Success();
+    }
+
+    private void CleanupStaleTrackers(int currentMinute)
+    {
+        foreach (var kvp in _rateLimiters)
+        {
+            if (kvp.Value.WindowMinute < currentMinute)
+            {
+                _rateLimiters.TryRemove(kvp.Key, out _);
+            }
+        }
     }
 
     private sealed class DefaultDateTimeProvider : IDateTimeProvider
