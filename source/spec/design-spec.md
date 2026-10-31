@@ -14,8 +14,8 @@ A **Design Specification** (`design`) document—placed as `Design.md` at the ro
   - `INV-<SLUG>` for architectural invariants (Section 2)
   - `DEC-<SLUG>` for key technical design choices (Section 3)
   - Governed by [Change Control](qms-spec.md#32-design-change-control-never-move-the-goalposts) (no deletion, renaming, or weakening without human approval).
-- **Permitted Outbound QMS References:** Its corresponding `deployable-requirements` (`DEP-*`) or `system-requirements` (`SYS-*`), `risk-register` (`RCM-*`), `fact` (`FACT-*`), and **inward `design` documents** (`INV-*`, `DEC-*`) strictly matching compile-time project references.
-- **Prohibited Outbound References:** **MUST NOT** reference `intended-use` or `user-needs` directly, and **MUST NOT** link to outward or peer `design` documents that this project does not depend on at compile time (use non-authoritative [cross-cutting tags](qms-spec.md#4-non-authoritative-cross-cutting-tags-tag-name) instead).
+- **Permitted Outbound QMS References:** Its corresponding `deployable-requirements` (`DEP-*`) or `system-requirements` (`SYS-*`), `fact` (`FACT-*`), and **inward `design` documents** (`INV-*`, `DEC-*`) strictly matching compile-time project references.
+- **Prohibited Outbound References:** **MUST NOT** reference `intended-use`, `user-needs`, or `risk-register` directly (traces through `SYS-*` / `DEP-*`), and **MUST NOT** link to outward or peer `design` documents that this project does not depend on at compile time (use non-authoritative [cross-cutting tags](qms-spec.md#4-non-authoritative-cross-cutting-tags-tag-name) instead).
 
 ---
 
