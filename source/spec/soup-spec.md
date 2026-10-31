@@ -9,20 +9,20 @@ A **SOUP Specification** (`soup`) defines the configuration identification, arch
 In medical device and safety-critical software, third-party code cannot be assumed to have been developed under formal design controls. Consequently, international standards and regulatory guidance mandate rigorous evaluation of third-party software to ensure it does not compromise system safety, security, or performance:
 
 - **IEC 62304:2006+AMD1:2015 Clause 3.24**: Defines SOUP as software already developed and generally available that was not developed specifically for incorporation into the medical device, or software previously developed for which adequate development process records are unavailable.
-- **IEC 62304:2006+AMD1:2015 Clause 4.3 & 5.1.4 (Software Safety Classification)**: Establishes that documentation and verification rigor scales with the component's assigned safety class (**Class A, B, or C**), or inherits the classification of the system unless architecturally segregated.
+- **IEC 62304:2006+AMD1:2015 Clause 4.3 & 5.1.4 (Software Safety Classification)**: Establishes that documentation and verification rigor scales with the component's assigned safety class (**Class A, B, or C**), or inherits the classification of the system unless architecturally segregated. Explicit justification of the classification rationale is mandatory.
 - **IEC 62304:2006+AMD1:2015 Clause 5.3.3 & 5.3.4**: Mandates specifying the functional, performance, system hardware, and software prerequisites (operating environment, runtimes, memory, architecture) necessary for proper operation of each SOUP item.
 - **IEC 62304:2006+AMD1:2015 Clause 5.3.5 & 7.1.4 (Architectural Segregation)**: Requires explicit architectural isolation mechanisms so that a failure in a SOUP item cannot compromise adjacent safety-critical functions.
 - **IEC 62304:2006+AMD1:2015 Clause 7.1.2 & 7.1.3**: Mandates identifying potential failure modes and sequences of events leading to hazards caused by SOUP, including formal evaluation of the supplier's published list of **known anomalies** (bugs, errata, vulnerabilities).
-- **IEC 62304:2006+AMD1:2015 Clause 8.1.2**: Requires precise configuration identification (title, supplier, complete version number, build/commit hash).
+- **IEC 62304:2006+AMD1:2015 Clause 8.1.2**: Requires precise configuration identification (title, supplier, complete version number, build/commit hash, package/binary digests).
 - **IEC 62304:2006+AMD1:2015 Clause 6.1 & 9.5**: Requires monitoring post-market vendor updates, evaluating known residual anomalies at release, and maintaining a patch/obsolescence plan.
-- **FDA Guidance: *Off-The-Shelf Software Use in Medical Devices* (August 2023)**: Replaces legacy "Level of Concern" with Basic vs. Enhanced Documentation, mandating product description, environmental prerequisites, hazard mitigation, boundary verification, and continuous maintenance.
+- **FDA Guidance: *Off-The-Shelf Software Use in Medical Devices* (August 2023)**: Replaces legacy "Level of Concern" with Basic vs. Enhanced Documentation, mandating product description, environmental prerequisites, hazard mitigation, boundary verification, and continuous maintenance. Section V.A.2 explicitly mandates documenting unused/restricted functions and how inadvertent execution is prevented.
 - **ISO 14971:2019 Clause 5.4 & 7.1**: Requires hazard analysis of third-party dependency failures and implementation of risk controls (e.g., defensive wrappers, input sanitization, fail-safe fallbacks) residing *outside* the unverified component.
 
 ---
 
 ## 2. Dependency & Identification Rules
 
-- **Item Identifier Prefix:** `SOUP-<SLUG>`, tagged with a boundary verification method (`[Verify: Integration | Simulation | StaticAnalysis]`) per [`qms-spec`](qms-spec.md#33-lightweight-verification--risk-control-tags-verify--control-) and governed by [Change Control](qms-spec.md#32-design-change-control-never-move-the-goalposts).
+- **Item Identifier Prefix:** `SOUP-<SLUG>`, tagged with a boundary verification method (`[Verify: Integration | Simulation | StaticAnalysis]`) per [`qms-spec`](qms-spec.md#33-lightweight-verification--risk-control-tags-verify--control-) and governed by [Change Control](qms-spec.md#32-design-change-control-never-move-the-goalposts). Evaluated anomaly items utilize `SOUP-<SLUG>-ANO-<NAME>` (or cite official external defect identifiers such as `CVE-YYYY-XXXX`).
 - **Permitted Outbound QMS References:**
   - `fact` (`FACT-*`): Links to documented platform runtime invariants, hardware properties, or external protocol specifications.
   - `risk-register` (`HAZ-*`): Links to hazards that can be triggered or exacerbated by SOUP anomalies, crashes, or unhandled exceptions.
@@ -41,7 +41,7 @@ In addition to the universal rules in [`qms-spec`](qms-spec.md):
 Documentation rigor must match the component's assigned safety class:
 - **Class A (No Injury / Pure Utility)**: Trivial utilities, UI styling/icon packs, or development-only tools where failure cannot cause harm or privacy compromise. Requires only Section 1 (Identification & Provenance) and Section 2 (Prerequisites). Exempt from itemized `SOUP-*` functional envelopes and anomaly matrices.
 - **Class B (Non-Serious Harm / Operational Disruption)**: Components whose failure causes recoverable system errors, denial of service, or non-critical message delivery delay. Requires all sections (1 through 5).
-- **Class C (Critical Safety / Severe Privacy Compromise)**: Cryptographic engines, core persistence databases, credential storage, or network transport primitives where failure, crash, or memory corruption directly leads to secret key compromise, identity leak, or irrecoverable data loss. Requires comprehensive Section 1–5 documentation with mandatory architectural quarantine.
+- **Class C (Critical Safety / Severe Privacy Compromise)**: Cryptographic engines, core persistence databases, credential storage, or network transport primitives where failure, crash, or memory corruption directly leads to secret key compromise, identity leak, or irrecoverable data loss. Requires comprehensive Section 1–5 documentation with mandatory architectural quarantine and explicit classification rationale.
 
 ### 3.2 Architectural Quarantine & Hexagonal Segregation (IEC 62304 Clause 5.3.5)
 In strict Hexagonal / Onion DDD architectures:
@@ -83,8 +83,8 @@ Implementing documents **MUST** use only the headings below and **MUST NOT** rep
 A structured table defining the provenance, safety class, and immutable identity of the third-party software item:
 - **Component Name:** Title of the library, runtime, or subsystem.
 - **Supplier / Maintainer:** Organization, company, or open-source community maintaining the component.
-- **Safety Classification:** `Class A` (Exempt from §3–§5), `Class B`, or `Class C` (IEC 62304 Clause 4.3).
-- **Approved Version & Hash:** Pinned semantic version number and cryptographic hash (git commit SHA or package SHA-256).
+- **Safety Classification & Rationale:** `Class A` (Exempt from §3–§5), `Class B`, or `Class C` (IEC 62304 Clause 4.3) with explicit hazard rationale justifying why failure does or does not cause critical harm.
+- **Approved Version & Hash:** Pinned semantic version number and cryptographic hash (git commit SHA or package/binary SHA-256).
 - **License Model:** Software license terms (e.g., MIT, Apache-2.0, BSD-3-Clause, Commercial).
 - **Delivery & Linking Format:** Source, pre-compiled static/dynamic library (`.dll`, `.so`), NuGet package, or OS system library.
 - **Upstream Repository URL:** Authoritative primary source location.
@@ -98,17 +98,21 @@ System environment and platform requirements necessary to support proper operati
 ### `## 3. Specified Functional and Performance Capabilities`
 *(Required for Class B and C; exempt for Class A)*
 
-Atomic, numbered specifications (`SOUP-<SLUG>`) defining the exact functional subset, API capabilities, throughput, latency, or capacity constraints utilized by the device (IEC 62304 Clause 5.3.3). 
+#### `### 3.1 Active Functional & Capacity Envelope`
+Atomic, numbered specifications (`SOUP-<SLUG>`) defining the exact functional subset, API capabilities, throughput, latency, concurrency model (thread-safety constraints), and capacity constraints utilized by the device (IEC 62304 Clause 5.3.3).
 
 Each item must include:
 - Its boundary verification method tag (`[Verify: Integration | Simulation | StaticAnalysis]`).
 - The enclosing **Architectural Quarantine Adapter** or outbound Domain Port that isolates this capability from the domain core (IEC 62304 Clause 5.3.5).
 
+#### `### 3.2 Unused and Prohibited Capabilities (FDA OTS Guidance §V.A.2)`
+Itemized list of functions, classes, or subsystem capabilities that are present within the SOUP package/binary but are **not used** by the application, accompanied by the architectural quarantine mechanism ensuring they cannot be inadvertently invoked from application code.
+
 ### `## 4. Known Anomalies and Cybersecurity Evaluation`
 *(Required for Class B and C; exempt for Class A)*
 
-Formal assessment of supplier-published bugs, issue tracker records, and NVD/CVE entries (IEC 62304 Clause 7.1.3 & 9.5, FDA OTS Guidance):
-- **Anomaly Identifier / CVE:** External reference number or defect ID.
+Formal assessment of supplier-published bugs, issue tracker records, and NVD/CVE entries (IEC 62304 Clause 7.1.3 & 9.5, FDA OTS Guidance). Each evaluated defect is identified either by official supplier identifier (`CVE-YYYY-XXXX`, `GH-#<ID>`) or repository anomaly identifier (`SOUP-<SLUG>-ANO-<NAME>`):
+- **External Reference / Defect:** External reference number or defect ID.
 - **Supplier Summary:** Description of the defect or vulnerability.
 - **Relevance & Reachability:** Assessment of whether the defect is reachable within the application's constrained functional usage envelope.
 - **Safety & Security Impact:** Evaluation of whether the anomaly can trigger a hazard (`HAZ-*`).
