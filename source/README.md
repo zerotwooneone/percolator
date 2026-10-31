@@ -7,16 +7,18 @@ This repository contains the Percolator project, a collection of libraries and a
 Architectural governance and documentation across this repository follow a formal specification hierarchy inspired by Medical Device Quality Management Systems (IEC 62304, ISO 13485 Clause 7.3, ISO 14971, and FDA 21 CFR 820.30):
 
 - **System Charter & Requirements**:
-  - [`IntendedUse.md`](IntendedUse.md) — System purpose, target user profiles, adversarial operating environment, and contraindications (implements [`spec/intended-use-spec.md`](spec/intended-use-spec.md))
-- **Meta-Specifications (`/spec`)**: Standardized document specifications, strict dependency DAGs, and allowed headings in [`spec/`](spec/):
-  - [`spec/fact-spec.md`](spec/fact-spec.md) — Immutable external axioms and standards
-  - [`spec/intended-use-spec.md`](spec/intended-use-spec.md) — System purpose and boundaries
-  - [`spec/user-needs-spec.md`](spec/user-needs-spec.md) — Stakeholder value and capabilities
-  - [`spec/risk-register-spec.md`](spec/risk-register-spec.md) — Hazard analysis and Risk Control Measures (`RCM-*`)
-  - [`spec/system-requirements-spec.md`](spec/system-requirements-spec.md) — Black-box verifiable system design inputs
-  - [`spec/deployable-requirements-spec.md`](spec/deployable-requirements-spec.md) — Software Item allocation and port contracts
-  - [`spec/design-spec.md`](spec/design-spec.md) — Software Design Output specifications
-- **Project Design Documents (`Design.md`)**: Each deployable project in the solution contains a dedicated `Design.md` at its root implementing `design-spec.md`, documenting layer boundaries, architectural invariants, and key technical design choices.
+  - [`IntendedUse.md`](IntendedUse.md) — System purpose (`IU-*`), target user profiles (`USR-*`), operating environment (`ENV-*`), and contraindications (`CONTRA-*`) (implements [`spec/intended-use-spec.md`](spec/intended-use-spec.md))
+  - [`UserNeeds.md`](UserNeeds.md) — Essential stakeholder functional and operational trust needs (`UN-*`) (implements [`spec/user-needs-spec.md`](spec/user-needs-spec.md))
+- **Meta-Specifications (`/spec`)**: Standardized document specifications, strict dependency DAGs, semantic item IDs, non-authoritative cross-cutting tags, and change-control rules in [`spec/`](spec/):
+  - [`spec/qms-spec.md`](spec/qms-spec.md) — Root QMS governance, master traceability DAG, semantic ID & human-approval change control policy, and tagging rules
+  - [`spec/fact-spec.md`](spec/fact-spec.md) — Immutable external axioms and standards (`FACT-*`)
+  - [`spec/intended-use-spec.md`](spec/intended-use-spec.md) — System purpose and boundaries (`IU-*`, `USR-*`, `ENV-*`, `CONTRA-*`)
+  - [`spec/user-needs-spec.md`](spec/user-needs-spec.md) — Stakeholder capabilities and validation baseline (`UN-*`)
+  - [`spec/risk-register-spec.md`](spec/risk-register-spec.md) — Hazard analysis (`HAZ-*`) and Risk Control Measures (`RCM-*`)
+  - [`spec/system-requirements-spec.md`](spec/system-requirements-spec.md) — Black-box verifiable system design inputs (`SYS-*`)
+  - [`spec/deployable-requirements-spec.md`](spec/deployable-requirements-spec.md) — Software Item allocation and port contracts (`DEP-*`)
+  - [`spec/design-spec.md`](spec/design-spec.md) — Software Design Output specifications (`INV-*`, `DEC-*`)
+- **Project Design Documents (`Design.md`)**: Each deployable project in the solution contains a dedicated `Design.md` at its root implementing `design-spec.md`, documenting layer boundaries, architectural invariants (`INV-*`), and key technical design choices (`DEC-*`).
 
 ## Key Projects
 
