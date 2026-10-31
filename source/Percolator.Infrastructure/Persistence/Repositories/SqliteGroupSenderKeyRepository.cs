@@ -51,7 +51,7 @@ public sealed class SqliteGroupSenderKeyRepository : IGroupSenderKeyRepository
             ? IdentityKey.FromSpan(entity.AuthorSigningPub)
             : null;
 
-        return new GroupSenderKeyRatchet(
+        return GroupSenderKeyRatchet.Rehydrate(
             channelId,
             authorId,
             authorDeviceId,
@@ -79,9 +79,10 @@ public sealed class SqliteGroupSenderKeyRepository : IGroupSenderKeyRepository
                          s.AuthorDeviceId == ratchet.AuthorDeviceId.Value,
                     ct);
 
-            var chainBytes = ratchet.CurrentChainKey != null ? ratchet.CurrentChainKey.Span.ToArray() : Array.Empty<byte>();
-            var signingPrivBytes = ratchet.SigningPrivateKey != null ? ratchet.SigningPrivateKey.Span.ToArray() : null;
-            var signingPubBytes = ratchet.AuthorSigningPublicKey != null ? ratchet.AuthorSigningPublicKey.Span.ToArray() : null;
+            var snapshot = ratchet.ExportSnapshot();
+            var chainBytes = snapshot.ChainKeyBytes;
+            var signingPrivBytes = snapshot.SigningPrivateKeyBytes;
+            var signingPubBytes = snapshot.AuthorSigningPublicKey != null ? snapshot.AuthorSigningPublicKey.Span.ToArray() : null;
 
             if (existing == null)
             {

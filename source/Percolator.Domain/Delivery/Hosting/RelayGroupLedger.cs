@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Security.Cryptography;
+using System.ComponentModel;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Events;
@@ -51,6 +52,7 @@ public sealed class RelayGroupLedger : AggregateRoot<ChannelId>
         }
     }
 
+    [EditorBrowsable(EditorBrowsableState.Never)]
     public static RelayGroupLedger Rehydrate(
         ChannelId channelId,
         PublicIdentityId relayIdentityId,
@@ -60,7 +62,24 @@ public sealed class RelayGroupLedger : AggregateRoot<ChannelId>
         ZkGroupPublicParams publicParams,
         DateTimeOffset lastUpdatedUtc)
     {
-        return new RelayGroupLedger(channelId, relayIdentityId, epoch, rosterBlob, activeTokens, publicParams, lastUpdatedUtc);
+        if (!channelId.IsValid) throw new ArgumentException("ChannelId cannot be empty.", nameof(channelId));
+        if (!relayIdentityId.IsValid) throw new ArgumentException("RelayIdentityId cannot be empty.", nameof(relayIdentityId));
+        ArgumentNullException.ThrowIfNull(rosterBlob);
+        ArgumentNullException.ThrowIfNull(activeTokens);
+        ArgumentNullException.ThrowIfNull(publicParams);
+
+        if (rosterBlob.Length == 0)
+        {
+            throw new ArgumentException("Encrypted roster blob cannot be empty.", nameof(rosterBlob));
+        }
+
+        var tokenList = activeTokens as IList<BlindedRoutingToken> ?? activeTokens.ToList();
+        if (tokenList.Count == 0 || tokenList.Count > MaxGroupMembers)
+        {
+            throw new ArgumentException($"Active routing token count must be between 1 and {MaxGroupMembers}.", nameof(activeTokens));
+        }
+
+        return new RelayGroupLedger(channelId, relayIdentityId, epoch, rosterBlob, tokenList, publicParams, lastUpdatedUtc);
     }
 
     public static DomainResult<RelayGroupLedger> CreateGenesis(

@@ -82,9 +82,8 @@ public class SqliteRatchetSessionRepositoryTests
         loaded.RemotePeerId.Should().Be(remoteId);
         loaded.SendingCounter.Should().Be(5);
         loaded.ReceivingCounter.Should().Be(2);
-        loaded.RootKey.Should().NotBeNull();
-        loaded.RootKey!.Span.ToArray().Should().Equal(rootKeyBytes);
-        loaded.SendingChainKey.Should().NotBeNull();
-        loaded.SendingChainKey!.Span.ToArray().Should().Equal(sendKeyBytes);
+        var snapshot = loaded.ExportSnapshot();
+        snapshot.RootKeyBytes.Should().Equal(rootKeyBytes);
+        snapshot.SendingChainKeyBytes.Should().Equal(sendKeyBytes);
     }
 }

@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using Percolator.Domain.Channels.Events;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
@@ -8,6 +9,7 @@ namespace Percolator.Domain.Channels.Model;
 public sealed class GroupChannel : AggregateRoot<ChannelId>
 {
     public const int MaxRetainedPayloads = 1000;
+    public const int MaxGroupMembers = 1000;
 
     public override ChannelId Id { get; }
     public string Name { get; private set; }
@@ -55,6 +57,7 @@ public sealed class GroupChannel : AggregateRoot<ChannelId>
         return DomainResult<GroupChannel>.Success(group);
     }
 
+    [EditorBrowsable(EditorBrowsableState.Never)]
     public static GroupChannel Rehydrate(
         ChannelId id,
         string name,
@@ -64,21 +67,60 @@ public sealed class GroupChannel : AggregateRoot<ChannelId>
         IEnumerable<ChannelMember> members,
         IEnumerable<ChannelPayload>? payloads = null)
     {
+        if (!id.IsValid) throw new ArgumentException("ChannelId cannot be empty.", nameof(id));
+        if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException("Group name cannot be null or whitespace.", nameof(name));
+        ArgumentNullException.ThrowIfNull(members);
+
         var channel = new GroupChannel(id, name, epoch, createdAtUtc)
         {
             LastActivityUtc = lastActivityUtc
         };
+
+        bool hasAdmin = false;
         foreach (var member in members)
         {
+            ArgumentNullException.ThrowIfNull(member);
+            if (!channel._membersById.TryAdd(member.Id, member))
+            {
+                throw new ArgumentException($"Duplicate member with identity {member.Id} cannot be rehydrated.", nameof(members));
+            }
             channel._members.Add(member);
-            channel._membersById[member.Id] = member;
+            if (member.Role == ChannelRole.Admin)
+            {
+                hasAdmin = true;
+            }
         }
+
+        if (channel._members.Count == 0)
+        {
+            throw new ArgumentException("GroupChannel must contain at least one member upon rehydration.", nameof(members));
+        }
+
+        if (channel._members.Count > MaxGroupMembers)
+        {
+            throw new ArgumentException($"GroupChannel cannot have more than {MaxGroupMembers} members.", nameof(members));
+        }
+
+        if (!hasAdmin)
+        {
+            throw new ArgumentException("GroupChannel must contain at least one admin upon rehydration.", nameof(members));
+        }
+
         if (payloads != null)
         {
             foreach (var payload in payloads)
             {
+                ArgumentNullException.ThrowIfNull(payload);
+                if (!channel._payloadIds.Add(payload.Id))
+                {
+                    throw new ArgumentException($"Duplicate payload with ID {payload.Id} cannot be rehydrated.", nameof(payloads));
+                }
                 channel._payloads.Add(payload);
-                channel._payloadIds.Add(payload.Id);
+            }
+
+            if (channel._payloads.Count > MaxRetainedPayloads)
+            {
+                throw new ArgumentException($"GroupChannel cannot retain more than {MaxRetainedPayloads} payloads.", nameof(payloads));
             }
         }
         return channel;

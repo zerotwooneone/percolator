@@ -66,7 +66,7 @@ public sealed class GroupKeyDistributionService : IGroupKeyDistributionService
             await _senderKeyRepo.SaveSenderKeyRatchetAsync(ratchet, ct);
         }
 
-        if (ratchet.CurrentChainKey == null || ratchet.AuthorSigningPublicKey == null)
+        if (ratchet.AuthorSigningPublicKey == null)
         {
             return DomainResult.Failure(new DomainError(
                 "SENDER_KEY_CORRUPT", "Sender key ratchet has no valid chain key or author signing key."));
@@ -77,7 +77,13 @@ public sealed class GroupKeyDistributionService : IGroupKeyDistributionService
         channelId.TryWriteBytes(payload.AsSpan(1, 16));
         BinaryPrimitives.WriteUInt32BigEndian(payload.AsSpan(17, 4), ratchet.KeyId);
         BinaryPrimitives.WriteUInt32BigEndian(payload.AsSpan(21, 4), ratchet.Iteration);
-        ratchet.CurrentChainKey.Span.CopyTo(payload.AsSpan(25, 32));
+
+        if (!ratchet.TryExportChainKey(payload.AsSpan(25, 32)))
+        {
+            return DomainResult.Failure(new DomainError(
+                "SENDER_KEY_CORRUPT", "Sender key ratchet has no valid chain key or author signing key."));
+        }
+
         ratchet.AuthorSigningPublicKey.Span.CopyTo(payload.AsSpan(57, 32));
 
         foreach (var recipient in recipientMemberIds)

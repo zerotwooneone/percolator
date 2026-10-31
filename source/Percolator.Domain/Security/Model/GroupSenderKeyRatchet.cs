@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Security.Cryptography;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
@@ -6,6 +7,13 @@ using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
 
 namespace Percolator.Domain.Security.Model;
+
+public sealed record GroupSenderKeySnapshot(
+    uint KeyId,
+    uint Iteration,
+    byte[] ChainKeyBytes,
+    byte[]? SigningPrivateKeyBytes,
+    IdentityKey? AuthorSigningPublicKey);
 
 public sealed class GroupSenderKeyRatchet : AggregateRoot<SessionId>, ISensitiveSecret
 {
@@ -18,8 +26,6 @@ public sealed class GroupSenderKeyRatchet : AggregateRoot<SessionId>, ISensitive
     private ChainKey? _chainKey;
     private EphemeralPrivateKey? _signingPrivateKey;
     public IdentityKey? AuthorSigningPublicKey { get; }
-    public EphemeralPrivateKey? SigningPrivateKey => _signingPrivateKey;
-    public ChainKey? CurrentChainKey => _chainKey;
 
     public uint Iteration { get; private set; }
     public bool IsZeroized { get; private set; }
@@ -44,6 +50,58 @@ public sealed class GroupSenderKeyRatchet : AggregateRoot<SessionId>, ISensitive
         _signingPrivateKey = signingPrivateKey != null ? EphemeralPrivateKey.FromSpan(signingPrivateKey.Span) : null;
         AuthorSigningPublicKey = authorSigningPublicKey;
         Iteration = initialIteration;
+    }
+
+    public bool TryExportChainKey(Span<byte> destination)
+    {
+        if (IsZeroized || _chainKey == null || destination.Length < 32)
+        {
+            return false;
+        }
+
+        _chainKey.Span.CopyTo(destination);
+        return true;
+    }
+
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public GroupSenderKeySnapshot ExportSnapshot()
+    {
+        return new GroupSenderKeySnapshot(
+            KeyId,
+            Iteration,
+            _chainKey != null && !IsZeroized ? _chainKey.Span.ToArray() : [],
+            _signingPrivateKey != null && !IsZeroized ? _signingPrivateKey.Span.ToArray() : null,
+            AuthorSigningPublicKey);
+    }
+
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public static GroupSenderKeyRatchet Rehydrate(
+        ChannelId channelId,
+        PublicIdentityId authorId,
+        DeviceId authorDeviceId,
+        ChainKey chainKey,
+        uint iteration,
+        uint keyId,
+        EphemeralPrivateKey? signingPrivateKey = null,
+        IdentityKey? authorSigningPublicKey = null,
+        SessionId? id = null)
+    {
+        if (!channelId.IsValid) throw new ArgumentException("ChannelId cannot be empty.", nameof(channelId));
+        if (!authorId.IsValid) throw new ArgumentException("AuthorId cannot be empty.", nameof(authorId));
+        if (!authorDeviceId.IsValid) throw new ArgumentException("AuthorDeviceId cannot be empty.", nameof(authorDeviceId));
+        ArgumentNullException.ThrowIfNull(chainKey);
+        if (keyId == 0) throw new ArgumentException("KeyId must be greater than zero.", nameof(keyId));
+
+        return new GroupSenderKeyRatchet(
+            channelId,
+            authorId,
+            authorDeviceId,
+            chainKey,
+            iteration,
+            keyId,
+            signingPrivateKey,
+            authorSigningPublicKey,
+            id);
     }
 
     public DomainResult<(uint Iteration, MessageKey Key)> Advance(ICryptoEngine engine)

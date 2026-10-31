@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Ports;
@@ -11,6 +12,7 @@ namespace Percolator.Domain.Delivery.Hosting;
 /// </summary>
 public sealed class RelayHostedPreKeyBundle : AggregateRoot<HostedPreKeyRecordId>
 {
+    public const int MaxOneTimePreKeyCapacity = 100;
     public override HostedPreKeyRecordId Id => new(OwnerId, DeviceId);
     public PublicIdentityId OwnerId { get; }
     public DeviceId DeviceId { get; }
@@ -36,6 +38,7 @@ public sealed class RelayHostedPreKeyBundle : AggregateRoot<HostedPreKeyRecordId
         SignedPreKeySignature = signedPreKeySignature;
     }
 
+    [EditorBrowsable(EditorBrowsableState.Never)]
     public static RelayHostedPreKeyBundle Rehydrate(
         PublicIdentityId ownerId,
         DeviceId deviceId,
@@ -44,12 +47,28 @@ public sealed class RelayHostedPreKeyBundle : AggregateRoot<HostedPreKeyRecordId
         DeviceLinkProof signedPreKeySignature,
         IEnumerable<(uint KeyId, DhPublicKey Key)>? oneTimePreKeys = null)
     {
+        if (!ownerId.IsValid) throw new ArgumentException("OwnerId cannot be empty.", nameof(ownerId));
+        if (!deviceId.IsValid) throw new ArgumentException("DeviceId cannot be empty.", nameof(deviceId));
+        ArgumentNullException.ThrowIfNull(identityKey);
+        ArgumentNullException.ThrowIfNull(signedPreKey);
+        ArgumentNullException.ThrowIfNull(signedPreKeySignature);
+
         var bundle = new RelayHostedPreKeyBundle(ownerId, deviceId, identityKey, signedPreKey, signedPreKeySignature);
         if (oneTimePreKeys != null)
         {
+            var seenIds = new HashSet<uint>();
             foreach (var key in oneTimePreKeys)
             {
+                if (!seenIds.Add(key.KeyId))
+                {
+                    throw new ArgumentException($"Duplicate one-time prekey ID {key.KeyId}.", nameof(oneTimePreKeys));
+                }
                 bundle._oneTimePreKeys.Enqueue(key);
+            }
+
+            if (bundle._oneTimePreKeys.Count > MaxOneTimePreKeyCapacity)
+            {
+                throw new ArgumentException($"Cannot rehydrate more than {MaxOneTimePreKeyCapacity} one-time prekeys.", nameof(oneTimePreKeys));
             }
         }
         return bundle;

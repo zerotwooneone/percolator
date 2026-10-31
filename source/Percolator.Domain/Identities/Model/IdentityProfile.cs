@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.Events;
 using Percolator.Domain.Identities.ValueObjects;
@@ -28,6 +29,7 @@ public sealed class IdentityProfile : AggregateRoot<PublicIdentityId>
         DisabledAtUtc = null;
     }
 
+    [EditorBrowsable(EditorBrowsableState.Never)]
     public static IdentityProfile Rehydrate(
         PublicIdentityId id,
         string displayName,
@@ -36,6 +38,11 @@ public sealed class IdentityProfile : AggregateRoot<PublicIdentityId>
         DateTimeOffset createdAtUtc,
         DateTimeOffset? disabledAtUtc = null)
     {
+        if (!id.IsValid) throw new ArgumentException("PublicIdentityId cannot be empty.", nameof(id));
+        if (string.IsNullOrWhiteSpace(displayName)) throw new ArgumentException("DisplayName cannot be null or whitespace.", nameof(displayName));
+        if (state == IdentityState.Disabled && !disabledAtUtc.HasValue) throw new ArgumentException("Disabled identity must have a DisabledAtUtc timestamp.", nameof(disabledAtUtc));
+        if (state != IdentityState.Disabled && disabledAtUtc.HasValue) throw new ArgumentException("Non-disabled identity cannot have a DisabledAtUtc timestamp.", nameof(disabledAtUtc));
+
         var profile = new IdentityProfile(id, displayName, role, state, createdAtUtc)
         {
             DisabledAtUtc = disabledAtUtc

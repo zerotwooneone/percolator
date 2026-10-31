@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using Percolator.Apps.FileTransfer.Domain.Common;
 using Percolator.Apps.FileTransfer.Domain.Exceptions;
 using Percolator.Apps.FileTransfer.Domain.ManifestManagement;
@@ -606,6 +607,7 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
         return DomainResult.Success();
     }
 
+    [EditorBrowsable(EditorBrowsableState.Never)]
     public static TransferSession Rehydrate(
         TransferSessionId id,
         TransferRole role,
@@ -647,6 +649,8 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
                 session._swarmMembers[member.PeerId] = member;
             }
         }
+
+        session.ReevaluateAllPeerInterests();
 
         return session;
     }

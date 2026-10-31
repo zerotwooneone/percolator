@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Ports;
@@ -6,6 +7,23 @@ using Percolator.Domain.Security.ValueObjects;
 namespace Percolator.Domain.Security.Model;
 
 public readonly record struct SkippedMessageKeyId(DhPublicKey? EphemeralPublicKey, uint Counter);
+
+public sealed record DirectRatchetSessionSnapshot(
+    SessionId SessionId,
+    PublicIdentityId OwnerIdentityId,
+    DeviceId OwnerDeviceId,
+    PublicIdentityId RemotePeerId,
+    DeviceId RemoteDeviceId,
+    byte[]? RootKeyBytes,
+    byte[]? SendingChainKeyBytes,
+    byte[]? ReceivingChainKeyBytes,
+    DhPublicKey? RemoteEphemeralPublicKey,
+    byte[]? LocalEphemeralPrivateKeyBytes,
+    DhPublicKey? LocalEphemeralPublicKey,
+    uint SendingCounter,
+    uint ReceivingCounter,
+    uint PreviousSendingChainLength,
+    IReadOnlyDictionary<uint, byte[]> SkippedMessageKeys);
 
 public sealed class DirectRatchetSession : AggregateRoot<SessionId>, ISensitiveSecret
 {
@@ -19,32 +37,21 @@ public sealed class DirectRatchetSession : AggregateRoot<SessionId>, ISensitiveS
     public DeviceId RemoteDeviceId { get; }
 
     private ChainKey? _rootKey;
-    public ChainKey? RootKey => _rootKey;
-
     private EphemeralPrivateKey? _localEphemeralPrivateKey;
-    public EphemeralPrivateKey? LocalEphemeralPrivateKey => _localEphemeralPrivateKey;
-
     public DhPublicKey? LocalEphemeralPublicKey { get; private set; }
     public DhPublicKey? RemoteEphemeralPublicKey { get; private set; }
-
     private ChainKey? _sendingChainKey;
-    public ChainKey? SendingChainKey => _sendingChainKey;
-
     private ChainKey? _receivingChainKey;
-    public ChainKey? ReceivingChainKey => _receivingChainKey;
-
     private readonly Dictionary<uint, MessageKey> _skippedMessageKeys = [];
-    public IReadOnlyDictionary<uint, MessageKey> SkippedMessageKeys => _skippedMessageKeys;
-
     private readonly Dictionary<SkippedMessageKeyId, MessageKey> _epochSkippedMessageKeys = [];
-    public IReadOnlyDictionary<SkippedMessageKeyId, MessageKey> EpochSkippedMessageKeys => _epochSkippedMessageKeys;
-
     private readonly Queue<SkippedMessageKeyId> _skippedKeyOrder = new();
 
     public uint SendingCounter { get; private set; }
     public uint ReceivingCounter { get; private set; }
     public uint PreviousSendingChainLength { get; private set; }
     public bool IsZeroized { get; private set; }
+    public int SkippedKeyCount => _skippedMessageKeys.Count;
+    public int EpochSkippedKeyCount => _epochSkippedMessageKeys.Count;
 
     public DirectRatchetSession(
         PublicIdentityId ownerIdentityId,
@@ -92,6 +99,79 @@ public sealed class DirectRatchetSession : AggregateRoot<SessionId>, ISensitiveS
                 StoreSkippedKey(remoteEphemeralPublicKey, kvp.Key, MessageKey.FromSpan(kvp.Value.Span));
             }
         }
+    }
+
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public DirectRatchetSessionSnapshot ExportSnapshot()
+    {
+        var skippedDict = new Dictionary<uint, byte[]>(_skippedMessageKeys.Count);
+        foreach (var (k, v) in _skippedMessageKeys)
+        {
+            skippedDict[k] = v.Span.ToArray();
+        }
+
+        return new DirectRatchetSessionSnapshot(
+            Id,
+            OwnerIdentityId,
+            OwnerDeviceId,
+            RemotePeerId,
+            RemoteDeviceId,
+            _rootKey != null && !IsZeroized ? _rootKey.Span.ToArray() : [],
+            _sendingChainKey != null && !IsZeroized ? _sendingChainKey.Span.ToArray() : null,
+            _receivingChainKey != null && !IsZeroized ? _receivingChainKey.Span.ToArray() : null,
+            RemoteEphemeralPublicKey,
+            _localEphemeralPrivateKey != null && !IsZeroized ? _localEphemeralPrivateKey.Span.ToArray() : null,
+            LocalEphemeralPublicKey,
+            SendingCounter,
+            ReceivingCounter,
+            PreviousSendingChainLength,
+            skippedDict);
+    }
+
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public static DirectRatchetSession Rehydrate(
+        PublicIdentityId ownerIdentityId,
+        DeviceId ownerDeviceId,
+        PublicIdentityId remotePeerId,
+        DeviceId remoteDeviceId,
+        ChainKey? rootKey,
+        ChainKey? sendingChainKey,
+        ChainKey? receivingChainKey,
+        DhPublicKey? remoteEphemeralPublicKey = null,
+        EphemeralPrivateKey? localEphemeralPrivateKey = null,
+        DhPublicKey? localEphemeralPublicKey = null,
+        uint sendingCounter = 0,
+        uint receivingCounter = 0,
+        uint previousSendingChainLength = 0,
+        SessionId? sessionId = null,
+        IEnumerable<KeyValuePair<uint, MessageKey>>? skippedKeys = null)
+    {
+        if (!ownerIdentityId.IsValid) throw new ArgumentException("OwnerIdentityId cannot be empty.", nameof(ownerIdentityId));
+        if (!remotePeerId.IsValid) throw new ArgumentException("RemotePeerId cannot be empty.", nameof(remotePeerId));
+        if (ownerIdentityId == remotePeerId) throw new ArgumentException("Cannot rehydrate session with self.", nameof(remotePeerId));
+        if (!ownerDeviceId.IsValid) throw new ArgumentException("OwnerDeviceId cannot be empty.", nameof(ownerDeviceId));
+        if (!remoteDeviceId.IsValid) throw new ArgumentException("RemoteDeviceId cannot be empty.", nameof(remoteDeviceId));
+
+        var session = new DirectRatchetSession(
+            ownerIdentityId,
+            ownerDeviceId,
+            remotePeerId,
+            remoteDeviceId,
+            rootKey,
+            sendingChainKey,
+            receivingChainKey,
+            remoteEphemeralPublicKey,
+            localEphemeralPrivateKey,
+            localEphemeralPublicKey,
+            sendingCounter,
+            receivingCounter,
+            sessionId,
+            skippedKeys)
+        {
+            PreviousSendingChainLength = previousSendingChainLength
+        };
+
+        return session;
     }
 
     /// <summary>

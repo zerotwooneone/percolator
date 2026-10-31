@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Ports;
@@ -48,6 +49,10 @@ public sealed class PeerContact : AggregateRoot<PublicIdentityId>
         IdentityKey? primaryPublicKey = null,
         ContactState state = ContactState.Active)
     {
+        if (!ownerIdentityId.IsValid) throw new ArgumentException("OwnerIdentityId cannot be empty.", nameof(ownerIdentityId));
+        if (!remotePeerId.IsValid) throw new ArgumentException("RemotePeerId cannot be empty.", nameof(remotePeerId));
+        if (ownerIdentityId == remotePeerId) throw new ArgumentException("Owner cannot add self as contact.", nameof(remotePeerId));
+
         OwnerIdentityId = ownerIdentityId;
         RemotePeerId = remotePeerId;
         Nickname = nickname;
@@ -101,6 +106,7 @@ public sealed class PeerContact : AggregateRoot<PublicIdentityId>
         return DomainResult<PeerContact>.Success(contact);
     }
 
+    [EditorBrowsable(EditorBrowsableState.Never)]
     public static PeerContact Rehydrate(
         PublicIdentityId ownerIdentityId,
         PublicIdentityId remotePeerId,
@@ -112,6 +118,10 @@ public sealed class PeerContact : AggregateRoot<PublicIdentityId>
         IdentityKey? primaryPublicKey,
         IEnumerable<DeviceId>? registeredDevices = null)
     {
+        if (!ownerIdentityId.IsValid) throw new ArgumentException("OwnerIdentityId cannot be empty.", nameof(ownerIdentityId));
+        if (!remotePeerId.IsValid) throw new ArgumentException("RemotePeerId cannot be empty.", nameof(remotePeerId));
+        if (ownerIdentityId == remotePeerId) throw new ArgumentException("Owner cannot add self as contact.", nameof(remotePeerId));
+
         var contact = new PeerContact(ownerIdentityId, remotePeerId, nickname, trustLevel, createdAtUtc, primaryPublicKey, state)
         {
             LastSeenAtUtc = lastSeenAtUtc
@@ -120,7 +130,13 @@ public sealed class PeerContact : AggregateRoot<PublicIdentityId>
         {
             foreach (var device in registeredDevices)
             {
+                if (!device.IsValid) throw new ArgumentException("DeviceId cannot be empty.", nameof(registeredDevices));
                 contact._registeredDevices.Add(device);
+            }
+
+            if (contact._registeredDevices.Count > MaxRegisteredDevicesPerPeer)
+            {
+                throw new ArgumentException($"Cannot register more than {MaxRegisteredDevicesPerPeer} devices per peer.", nameof(registeredDevices));
             }
         }
         return contact;

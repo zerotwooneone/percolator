@@ -144,18 +144,18 @@ public class DirectRatchetSessionTests
 
         // Step receiving chain to targetCounter: 1000 -> stores 1000 skipped keys (counters 0..999)
         session.StepReceivingChain(_engine, targetCounter: 1000);
-        session.SkippedMessageKeys.Count.Should().Be(1000);
+        session.SkippedKeyCount.Should().Be(1000);
 
         // Consume key 0 early via TryGetSkippedKey -> leaves a ghost entry in _skippedKeyOrder
         var earlyGet = session.TryGetSkippedKey(0);
         earlyGet.IsSuccess.Should().BeTrue();
-        session.SkippedMessageKeys.Count.Should().Be(999);
+        session.SkippedKeyCount.Should().Be(999);
 
         // Step receiving chain by 2 more messages (targetCounter: 1002) -> skips 1000, 1001
         session.StepReceivingChain(_engine, targetCounter: 1002);
 
         // The while loop in StoreSkippedKey must evict past the ghost entry and keep the total strictly bounded by MaxTotalSkippedKeys (1000)
-        session.SkippedMessageKeys.Count.Should().BeLessThanOrEqualTo(DirectRatchetSession.MaxTotalSkippedKeys);
+        session.SkippedKeyCount.Should().BeLessThanOrEqualTo(DirectRatchetSession.MaxTotalSkippedKeys);
     }
 
     [Test]

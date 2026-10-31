@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using Percolator.Application2.Delivery.Events;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
@@ -68,6 +69,7 @@ public sealed class OutboxJob : AggregateRoot<Guid>
         return DomainResult<OutboxJob>.Success(job);
     }
 
+    [EditorBrowsable(EditorBrowsableState.Never)]
     public static OutboxJob Rehydrate(
         Guid id,
         ChannelId channelId,
@@ -81,6 +83,12 @@ public sealed class OutboxJob : AggregateRoot<Guid>
         DateTimeOffset createdAtUtc,
         DateTimeOffset? nextAttemptAtUtc)
     {
+        if (id == Guid.Empty) throw new ArgumentException("OutboxJob ID cannot be empty.", nameof(id));
+        if (!channelId.IsValid) throw new ArgumentException("ChannelId cannot be empty.", nameof(channelId));
+        if (!ownerIdentityId.IsValid) throw new ArgumentException("OwnerIdentityId cannot be empty.", nameof(ownerIdentityId));
+        if (maxAttempts <= 0) throw new ArgumentException("Max attempts must be positive.", nameof(maxAttempts));
+        if (retryCount < 0) throw new ArgumentException("Retry count cannot be negative.", nameof(retryCount));
+
         var job = new OutboxJob(id, channelId, ownerIdentityId, recipientIdentityId, route, payload, createdAtUtc, maxAttempts)
         {
             Status = status,

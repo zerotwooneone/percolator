@@ -168,46 +168,35 @@ public sealed class AdvancedSessionScenarioTests
             }
 
             // 2. Capture snapshot of Alice's session state
-            var snapshotSessionId = aliceSession.Id;
-            var ownerId = aliceSession.OwnerIdentityId;
-            var ownerDevice = aliceSession.OwnerDeviceId;
-            var remoteId = aliceSession.RemotePeerId;
-            var remoteDevice = aliceSession.RemoteDeviceId;
-            var rootKey = aliceSession.RootKey != null ? ChainKey.FromSpan(aliceSession.RootKey.Span) : null;
-            var sendingChain = aliceSession.SendingChainKey != null ? ChainKey.FromSpan(aliceSession.SendingChainKey.Span) : null;
-            var receivingChain = aliceSession.ReceivingChainKey != null ? ChainKey.FromSpan(aliceSession.ReceivingChainKey.Span) : null;
-            var remoteEphem = aliceSession.RemoteEphemeralPublicKey;
-            var localEphemPriv = aliceSession.LocalEphemeralPrivateKey != null ? EphemeralPrivateKey.FromSpan(aliceSession.LocalEphemeralPrivateKey.Span) : null;
-            var localEphemPub = aliceSession.LocalEphemeralPublicKey;
-            var sendCounter = aliceSession.SendingCounter;
-            var recvCounter = aliceSession.ReceivingCounter;
-            var skippedKeys = aliceSession.SkippedMessageKeys.ToDictionary(k => k.Key, v => v.Value);
+            var snapshot = aliceSession.ExportSnapshot();
 
             // Zeroize old session (simulating app shutdown / memory eviction)
             aliceSession.Zeroize();
             aliceSession.IsZeroized.Should().BeTrue();
 
             // 3. Hydrate a brand new DirectRatchetSession from the snapshot
-            using var hydratedAliceSession = new DirectRatchetSession(
-                ownerId,
-                ownerDevice,
-                remoteId,
-                remoteDevice,
+            using var rootKey = snapshot.RootKeyBytes != null && snapshot.RootKeyBytes.Length > 0 ? ChainKey.FromSpan(snapshot.RootKeyBytes) : null;
+            using var sendingChain = snapshot.SendingChainKeyBytes != null ? ChainKey.FromSpan(snapshot.SendingChainKeyBytes) : null;
+            using var receivingChain = snapshot.ReceivingChainKeyBytes != null ? ChainKey.FromSpan(snapshot.ReceivingChainKeyBytes) : null;
+            using var localEphemPriv = snapshot.LocalEphemeralPrivateKeyBytes != null ? EphemeralPrivateKey.FromSpan(snapshot.LocalEphemeralPrivateKeyBytes) : null;
+            var skipped = snapshot.SkippedMessageKeys.Select(k => new KeyValuePair<uint, MessageKey>(k.Key, MessageKey.FromSpan(k.Value)));
+
+            using var hydratedAliceSession = DirectRatchetSession.Rehydrate(
+                snapshot.OwnerIdentityId,
+                snapshot.OwnerDeviceId,
+                snapshot.RemotePeerId,
+                snapshot.RemoteDeviceId,
                 rootKey: rootKey,
                 sendingChainKey: sendingChain,
                 receivingChainKey: receivingChain,
-                remoteEphemeralPublicKey: remoteEphem,
+                remoteEphemeralPublicKey: snapshot.RemoteEphemeralPublicKey,
                 localEphemeralPrivateKey: localEphemPriv,
-                localEphemeralPublicKey: localEphemPub,
-                sendingCounter: sendCounter,
-                receivingCounter: recvCounter,
-                sessionId: snapshotSessionId,
-                skippedKeys: skippedKeys);
-
-            rootKey?.Dispose();
-            sendingChain?.Dispose();
-            receivingChain?.Dispose();
-            localEphemPriv?.Dispose();
+                localEphemeralPublicKey: snapshot.LocalEphemeralPublicKey,
+                sendingCounter: snapshot.SendingCounter,
+                receivingCounter: snapshot.ReceivingCounter,
+                previousSendingChainLength: snapshot.PreviousSendingChainLength,
+                sessionId: snapshot.SessionId,
+                skippedKeys: skipped);
 
             // 4. Continue communication seamlessly from hydrated session
             const string postHydrationMessage = "Turn 5 post-hydration message from Alice";

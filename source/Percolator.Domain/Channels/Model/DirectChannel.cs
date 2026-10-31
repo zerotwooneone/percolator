@@ -1,4 +1,5 @@
 using Percolator.Domain.Channels.Events;
+using System.ComponentModel;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
@@ -62,6 +63,7 @@ public sealed class DirectChannel : AggregateRoot<ChannelId>
         return DomainResult<DirectChannel>.Success(channel);
     }
 
+    [EditorBrowsable(EditorBrowsableState.Never)]
     public static DirectChannel Rehydrate(
         ChannelId id,
         PublicIdentityId ownerIdentityId,
@@ -70,6 +72,11 @@ public sealed class DirectChannel : AggregateRoot<ChannelId>
         DateTimeOffset lastActivityUtc,
         IEnumerable<ChannelPayload>? payloads = null)
     {
+        if (!id.IsValid) throw new ArgumentException("ChannelId cannot be empty.", nameof(id));
+        if (!ownerIdentityId.IsValid) throw new ArgumentException("OwnerIdentityId cannot be empty.", nameof(ownerIdentityId));
+        if (!remotePeerId.IsValid) throw new ArgumentException("RemotePeerId cannot be empty.", nameof(remotePeerId));
+        if (ownerIdentityId == remotePeerId) throw new ArgumentException("Owner cannot establish a direct channel with self.", nameof(remotePeerId));
+
         var channel = new DirectChannel(id, ownerIdentityId, remotePeerId, createdAtUtc)
         {
             LastActivityUtc = lastActivityUtc
@@ -78,8 +85,17 @@ public sealed class DirectChannel : AggregateRoot<ChannelId>
         {
             foreach (var payload in payloads)
             {
+                ArgumentNullException.ThrowIfNull(payload);
+                if (!channel._payloadIds.Add(payload.Id))
+                {
+                    throw new ArgumentException($"Duplicate payload with ID {payload.Id} cannot be rehydrated.", nameof(payloads));
+                }
                 channel._payloads.Add(payload);
-                channel._payloadIds.Add(payload.Id);
+            }
+
+            if (channel._payloads.Count > MaxRetainedPayloads)
+            {
+                throw new ArgumentException($"DirectChannel cannot retain more than {MaxRetainedPayloads} payloads.", nameof(payloads));
             }
         }
         return channel;

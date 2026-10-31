@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
@@ -5,6 +6,13 @@ using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
 
 namespace Percolator.Domain.Security.Model;
+
+public sealed record GroupReceiverSessionSnapshot(
+    uint KeyId,
+    uint ReceivingCounter,
+    byte[] ChainKeyBytes,
+    IdentityKey? AuthorSigningKey,
+    IReadOnlyDictionary<uint, byte[]> SkippedMessageKeys);
 
 /// <summary>
 /// Aggregate root representing the recipient-side tracking of a remote peer's group sender key chain.
@@ -23,9 +31,9 @@ public sealed class GroupReceiverSession : AggregateRoot<SessionId>, ISensitiveS
     public IdentityKey? AuthorSigningKey { get; }
 
     private ChainKey? _chainKey;
-    public ChainKey? CurrentChainKey => _chainKey;
     public uint ReceivingCounter { get; private set; }
     public bool IsZeroized { get; private set; }
+    public int SkippedKeyCount => _skippedMessageKeys.Count;
 
     private readonly Dictionary<uint, MessageKey> _skippedMessageKeys = [];
     private readonly Queue<uint> _skippedKeyOrder = new();
@@ -48,6 +56,70 @@ public sealed class GroupReceiverSession : AggregateRoot<SessionId>, ISensitiveS
         AuthorSigningKey = authorSigningKey;
         _chainKey = ChainKey.FromSpan(initialChainKey.Span);
         ReceivingCounter = initialIteration;
+    }
+
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public GroupReceiverSessionSnapshot ExportSnapshot()
+    {
+        var skippedDict = new Dictionary<uint, byte[]>(_skippedMessageKeys.Count);
+        foreach (var (iteration, key) in _skippedMessageKeys)
+        {
+            skippedDict[iteration] = key.Span.ToArray();
+        }
+
+        return new GroupReceiverSessionSnapshot(
+            KeyId,
+            ReceivingCounter,
+            _chainKey != null && !IsZeroized ? _chainKey.Span.ToArray() : [],
+            AuthorSigningKey,
+            skippedDict);
+    }
+
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public static GroupReceiverSession Rehydrate(
+        ChannelId channelId,
+        PublicIdentityId authorId,
+        DeviceId authorDeviceId,
+        ChainKey chainKey,
+        uint receivingCounter,
+        uint keyId,
+        IdentityKey? authorSigningKey = null,
+        SessionId? id = null,
+        IEnumerable<KeyValuePair<uint, MessageKey>>? skippedKeys = null)
+    {
+        if (!channelId.IsValid) throw new ArgumentException("ChannelId cannot be empty.", nameof(channelId));
+        if (!authorId.IsValid) throw new ArgumentException("AuthorId cannot be empty.", nameof(authorId));
+        if (!authorDeviceId.IsValid) throw new ArgumentException("AuthorDeviceId cannot be empty.", nameof(authorDeviceId));
+        ArgumentNullException.ThrowIfNull(chainKey);
+        if (keyId == 0) throw new ArgumentException("KeyId must be greater than zero.", nameof(keyId));
+
+        var session = new GroupReceiverSession(
+            channelId,
+            authorId,
+            authorDeviceId,
+            chainKey,
+            receivingCounter,
+            keyId,
+            authorSigningKey,
+            id);
+
+        if (skippedKeys != null)
+        {
+            int count = 0;
+            foreach (var kvp in skippedKeys)
+            {
+                count++;
+                if (count > MaxTotalSkippedKeys)
+                {
+                    throw new ArgumentException($"Cannot rehydrate more than {MaxTotalSkippedKeys} skipped message keys.", nameof(skippedKeys));
+                }
+
+                session._skippedMessageKeys[kvp.Key] = kvp.Value;
+                session._skippedKeyOrder.Enqueue(kvp.Key);
+            }
+        }
+
+        return session;
     }
 
     public DomainResult<MessageKey> TryAdvanceToIteration(uint targetIteration, ICryptoEngine engine)

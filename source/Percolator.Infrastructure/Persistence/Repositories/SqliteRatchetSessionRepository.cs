@@ -55,7 +55,7 @@ public sealed class SqliteRatchetSessionRepository : IRatchetSessionRepository
         var skippedKeys = DeserializeSkippedKeys(entity.RatchetStateBlob);
         var sessionId = SessionId.Parse(entity.SessionId, null);
 
-        return new DirectRatchetSession(
+        return DirectRatchetSession.Rehydrate(
             new PublicIdentityId(entity.OwnerIdentityId),
             new DeviceId(entity.OwnerDeviceId),
             new PublicIdentityId(entity.RemotePeerId),
@@ -68,6 +68,7 @@ public sealed class SqliteRatchetSessionRepository : IRatchetSessionRepository
             localPub,
             entity.SendingCounter,
             entity.ReceivingCounter,
+            entity.PreviousChainLength,
             sessionId,
             skippedKeys);
     }
@@ -83,13 +84,14 @@ public sealed class SqliteRatchetSessionRepository : IRatchetSessionRepository
         var existing = await _dbContext.VaultRatchetSessions
             .FirstOrDefaultAsync(s => s.SessionId == sessionIdStr, ct);
 
-        var rootBytes = session.RootKey != null ? session.RootKey.Span.ToArray() : Array.Empty<byte>();
-        var sendBytes = session.SendingChainKey != null ? session.SendingChainKey.Span.ToArray() : null;
-        var recvBytes = session.ReceivingChainKey != null ? session.ReceivingChainKey.Span.ToArray() : null;
-        var privBytes = session.LocalEphemeralPrivateKey != null ? session.LocalEphemeralPrivateKey.Span.ToArray() : null;
-        var localPubBytes = session.LocalEphemeralPublicKey != null ? session.LocalEphemeralPublicKey.Span.ToArray() : null;
-        var remotePubBytes = session.RemoteEphemeralPublicKey != null ? session.RemoteEphemeralPublicKey.Span.ToArray() : null;
-        var stateBlob = SerializeSkippedKeys(session.SkippedMessageKeys);
+        var snapshot = session.ExportSnapshot();
+        var rootBytes = snapshot.RootKeyBytes ?? Array.Empty<byte>();
+        var sendBytes = snapshot.SendingChainKeyBytes;
+        var recvBytes = snapshot.ReceivingChainKeyBytes;
+        var privBytes = snapshot.LocalEphemeralPrivateKeyBytes;
+        var localPubBytes = snapshot.LocalEphemeralPublicKey != null ? snapshot.LocalEphemeralPublicKey.Span.ToArray() : null;
+        var remotePubBytes = snapshot.RemoteEphemeralPublicKey != null ? snapshot.RemoteEphemeralPublicKey.Span.ToArray() : null;
+        var stateBlob = SerializeSkippedKeys(snapshot.SkippedMessageKeys);
 
         if (existing == null)
         {
@@ -136,18 +138,18 @@ public sealed class SqliteRatchetSessionRepository : IRatchetSessionRepository
         await _dbContext.SaveChangesAsync(ct);
     }
 
-    private static byte[]? SerializeSkippedKeys(IReadOnlyDictionary<uint, MessageKey> skippedKeys)
+    private static byte[]? SerializeSkippedKeys(IReadOnlyDictionary<uint, byte[]> skippedKeys)
     {
         if (skippedKeys == null || skippedKeys.Count == 0) return null;
 
         using var ms = new MemoryStream();
         using var writer = new BinaryWriter(ms);
         writer.Write(skippedKeys.Count);
-        foreach (var (counter, key) in skippedKeys)
+        foreach (var (counter, keyBytes) in skippedKeys)
         {
             writer.Write(counter);
-            writer.Write(key.Span.Length);
-            writer.Write(key.Span);
+            writer.Write(keyBytes.Length);
+            writer.Write(keyBytes);
         }
         return ms.ToArray();
     }

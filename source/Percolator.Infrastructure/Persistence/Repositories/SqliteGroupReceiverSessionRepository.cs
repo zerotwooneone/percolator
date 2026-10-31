@@ -1,6 +1,8 @@
 namespace Percolator.Infrastructure.Persistence.Repositories;
 
 using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
@@ -48,14 +50,17 @@ public sealed class SqliteGroupReceiverSessionRepository : IGroupReceiverSession
             ? IdentityKey.FromSpan(entity.AuthorSigningPub)
             : null;
 
-        return new GroupReceiverSession(
+        var skippedKeys = DeserializeSkippedKeys(entity.SkippedKeysBlob);
+
+        return GroupReceiverSession.Rehydrate(
             channelId,
             authorId,
             authorDeviceId,
             chainKey,
             entity.ReceivingCounter,
             entity.KeyId,
-            signingKey);
+            signingKey,
+            skippedKeys: skippedKeys);
     }
 
     public async Task SaveReceiverSessionAsync(GroupReceiverSession session, CancellationToken ct = default)
@@ -72,8 +77,10 @@ public sealed class SqliteGroupReceiverSessionRepository : IGroupReceiverSession
                      s.AuthorDeviceId == session.AuthorDeviceId.Value,
                 ct);
 
-        var chainBytes = session.CurrentChainKey != null ? session.CurrentChainKey.Span.ToArray() : Array.Empty<byte>();
-        var signingPubBytes = session.AuthorSigningKey != null ? session.AuthorSigningKey.Span.ToArray() : null;
+        var snapshot = session.ExportSnapshot();
+        var chainBytes = snapshot.ChainKeyBytes;
+        var signingPubBytes = snapshot.AuthorSigningKey != null ? snapshot.AuthorSigningKey.Span.ToArray() : null;
+        var skippedBlob = SerializeSkippedKeys(snapshot.SkippedMessageKeys);
 
         if (existing == null)
         {
@@ -86,6 +93,7 @@ public sealed class SqliteGroupReceiverSessionRepository : IGroupReceiverSession
                 AuthorSigningPub = signingPubBytes,
                 ChainKeyCiphertext = chainBytes,
                 ReceivingCounter = session.ReceivingCounter,
+                SkippedKeysBlob = skippedBlob,
                 UpdatedAtUtc = DateTimeOffset.UtcNow
             };
             await _dbContext.VaultGroupReceiverSessions.AddAsync(entity, ct);
@@ -96,9 +104,44 @@ public sealed class SqliteGroupReceiverSessionRepository : IGroupReceiverSession
             existing.AuthorSigningPub = signingPubBytes;
             existing.ChainKeyCiphertext = chainBytes;
             existing.ReceivingCounter = session.ReceivingCounter;
+            existing.SkippedKeysBlob = skippedBlob;
             existing.UpdatedAtUtc = DateTimeOffset.UtcNow;
         }
 
         await _dbContext.SaveChangesAsync(ct);
+    }
+
+    private static byte[]? SerializeSkippedKeys(IReadOnlyDictionary<uint, byte[]> skippedKeys)
+    {
+        if (skippedKeys == null || skippedKeys.Count == 0) return null;
+
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms);
+        writer.Write(skippedKeys.Count);
+        foreach (var (counter, keyBytes) in skippedKeys)
+        {
+            writer.Write(counter);
+            writer.Write(keyBytes.Length);
+            writer.Write(keyBytes);
+        }
+        return ms.ToArray();
+    }
+
+    private static List<KeyValuePair<uint, MessageKey>>? DeserializeSkippedKeys(byte[]? blob)
+    {
+        if (blob == null || blob.Length < 4) return null;
+
+        using var ms = new MemoryStream(blob);
+        using var reader = new BinaryReader(ms);
+        int count = reader.ReadInt32();
+        var list = new List<KeyValuePair<uint, MessageKey>>(count);
+        for (int i = 0; i < count; i++)
+        {
+            uint counter = reader.ReadUInt32();
+            int len = reader.ReadInt32();
+            byte[] keyBytes = reader.ReadBytes(len);
+            list.Add(new KeyValuePair<uint, MessageKey>(counter, MessageKey.FromSpan(keyBytes)));
+        }
+        return list;
     }
 }

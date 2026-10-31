@@ -64,7 +64,7 @@ public class SqliteGroupSenderKeyRepositoryTests
         loaded.AuthorDeviceId.Should().Be(deviceId);
         loaded.Iteration.Should().Be(3);
         loaded.KeyId.Should().Be(10);
-        loaded.CurrentChainKey.Should().NotBeNull();
-        loaded.CurrentChainKey!.Span.ToArray().Should().Equal(chainBytes);
+        var snapshot = loaded.ExportSnapshot();
+        snapshot.ChainKeyBytes.Should().Equal(chainBytes);
     }
 }
