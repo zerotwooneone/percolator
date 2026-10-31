@@ -1264,6 +1264,8 @@
   - **`ProtobufProfileSerializer` (`Percolator.PluginSdk.Profiles.IProfileMetadataSerializer`)**:
     - Serializes and deserializes `ProfileMetadataPayload` (`DisplayName`, `Bio`, optional `StatusText`, optional `BlobReference`) using `profile.proto` (`ProfileMetadataPayloadProto`, `BlobReferenceProto`).
     - Enforces domain value object boundaries (`BlobId`, `AttachmentKey`, `MimeType`) during deserialization.
+  - **Domain Boundary & Value Object Construction Guardrail**:
+    - `ProtobufSessionWirePacker` and `ProtobufProfileSerializer` unpack untrusted wire bytes and MUST construct inner-ring types exclusively via validated Domain Value Object factories (`DhPublicKey.FromSpan`, `IdentityKey.FromSpan`, `EphemeralPublicKey.FromSpan`, `PreKeyId.Create`, `BlobId.FromSha256`, `AttachmentKey.FromSpan`, `MimeType.Create`), returning `DomainResult.Failure` when lengths or structural invariants fail. Zero `Rehydrate` methods or modifications to `Percolator.Domain`, `Percolator.Application`, or `Percolator.PluginSdk` are permitted in this chunk.
 - **Scope & Deliverables**:
   - [ ] Implement `ProtobufSessionWirePacker` (`Percolator.Application.Ports.ISessionWirePacker`).
   - [ ] Implement `ProtobufPayloadSerializer` (`Percolator.PluginSdk.IPayloadSerializer`).
@@ -1279,7 +1281,7 @@
 #### Chunk 3.4: Transport Primitives, Interceptors & Endpoint Validation
 - **Technical Specifications & Concrete Mechanics**:
   - **Hexagonal Port Reservation Architecture**:
-    - *Scope Note*: Implementing application code is not normally a part of the infrastructure implementation plan, but defining the application port `IPortReservationService` in `Percolator.Application.Ports` has been explicitly approved by the user to enforce strict Hexagonal / Onion architecture boundaries.
+    - *Scope Note*: Implementing application code is not normally a part of the infrastructure implementation plan, but defining the application port `IPortReservationService` in `Percolator.Application.Ports` has been explicitly approved by the user to enforce strict Hexagonal / Onion architecture boundaries. Across all of Phase 3, `IPortReservationService` is the **sole** permitted addition to `Percolator.Application` or `Percolator.Domain`.
     - **Application Port (`Percolator.Application.Ports.IPortReservationService`)**:
       ```csharp
       public readonly record struct PortNumber(int Value);
@@ -1351,6 +1353,7 @@
       3. Relayed Group: dispatches `DispatchGroupMessage` to shared group relay accompanied by ZK presentation proof from `IZkProofEngine` (Chunk 3.1).
   - **`SealedEnvelopeUnwrapper` (`Percolator.Application.Ports.ISealedEnvelopeUnwrapper`)**:
     - Bridges relay `MailboxEnvelope` instances to strongly typed `InboundEnvelope` domain objects.
+    - Constructs `InboundEnvelope` strictly through its validated domain constructor/factory and returns `DomainResult.Failure` on malformed wire inputs without modifying `Percolator.Domain` or `Percolator.Application`.
 - **Scope & Deliverables**:
   - [ ] Implement `IngressFilterService` (`Percolator.Application.Ports.IIngressFilterService`).
   - [ ] Implement `StreamRegistry` (`Percolator.Application.Ports.IStreamRegistry`).
@@ -1374,6 +1377,8 @@
   - **`AuthenticatedRelayEndpoint` & `AnonymousGroupRelayEndpoint` (ASP.NET Core gRPC Services on relays)**:
     - `AuthenticatedRelayEndpoint` (`AuthenticatedRelayService.AuthenticatedRelayServiceBase`): handles `ConnectMailboxStream`, `RegisterMailbox`, `DrainMailbox`, and `PublishPreKeyBundle` using in-band capability and Protobuf-native signature verification.
     - `AnonymousGroupRelayEndpoint` (`AnonymousGroupRelayService.AnonymousGroupRelayServiceBase`): handles `SubscribeGroupStream`, `DispatchGroupMessage`, `CommitRosterMutation`, and `FetchGroupState` gated by `IZkProofEngine` presentation proofs against `IRelayLedgerRepository`.
+  - **Domain Command vs. Persistence Rehydration Guardrail**:
+    - Network ingress endpoints (`UnauthenticatedDeliveryEndpoint`, `AuthenticatedRelayEndpoint`, `AnonymousGroupRelayEndpoint`) process untrusted network requests and MUST invoke domain factory/command methods that enforce cryptographic and state-transition invariants (`RelayHostedPreKeyBundle.Create(...)` which verifies Ed25519 signatures, `RelayGroupLedger.CommitMutation(...)` which verifies ZK proofs and epoch monotonicity)—**never** persistence `Rehydrate` methods (which are restricted exclusively to `Percolator.Infrastructure.Persistence.Repositories`).
   - **Duplex & Streaming Background Workers (`IHostedService`)**:
     - `RelayMailboxStreamWorker`: Duplex streaming connection to home relay (`ConnectMailboxStream`) with automatic reconnection and jittered exponential backoff.
     - `RelayGroupStreamWorker`: Live subscription stream (`SubscribeGroupStream`) with ZK presentation proofs for active group channels.
@@ -1469,6 +1474,8 @@
     - CQRS read model `SqlChatMessageQueryService` projects timeline pages with keyset / offset pagination without hydrating heavy attachment blobs.
     - **Disappearing Message Cryptographic Purge**: When `DisappearingMessageEvictionWorker` sweeps expired messages (every 30s via `ix_chat_expiry`), it queries `chat_attachments.blob_sha256` prior to cascade deletion, invokes `ILocalChunkStore.DeleteBlobAsync(blobId)` to shred any locally cached encrypted media files, and purges corresponding `chat_channel_payloads` rows so expired messages and their attachment keys are permanently unrecoverable on disk.
     - **Unknown Group Message Cache Quota & TTL**: `UnknownGroupMessageCachePruner` aligns with `ChatPayloadHandler.DefaultUnknownGroupCacheTtlMs` (`24 hours`), and `SqlUnknownGroupMessageCacheRepository` enforces a bounded capacity limit (max `500` cached envelopes in `chat_unknown_group_messages`, evicting oldest by `received_at_unix_ms`) to prevent disk exhaustion from random `ChannelId` floods.
+  - **Aggregate Hydration & Zero Inner-Ring Mutation Guardrail**:
+    - `ChatMessage` (`Percolator.Apps.Chat.Features.Messaging.ChatMessage`), `PendingGroupInvitation` (`Percolator.Apps.Chat.Features.GroupInvitations.PendingGroupInvitation`), and `UnknownGroupMessageRecord` already provide full, invariant-enforcing public constructors that accept all persisted state (`editedAtUnixMs`, `isTombstone`, `deletedAtUnixMs`, `deletedBy`, `reactions`, `readAtUnixMs`, `status`, `respondedAtUnixMs`). `SqlChatMessageRepository`, `SqlGroupInvitationRepository`, and `SqlUnknownGroupMessageCacheRepository` MUST hydrate domain models using these existing validated constructors; zero `Rehydrate` backdoors or modifications to `Percolator.Apps.Chat` are permitted.
 - **Scope & Deliverables**:
   - [ ] Author Protobuf schema `Percolator.Infrastructure/Protos/chat.proto`.
   - [ ] Configure `<ProjectReference>` to `Percolator.Apps.Chat` and `Percolator.Apps.Discovery` in `Percolator.Infrastructure.csproj`.
@@ -1528,6 +1535,8 @@
     - `RelayDiscoveryRegistrationPruner`: scheduled worker purging `relay_peer_directory` rows older than 24h and `relay_rendezvous_entries` rows older than 48h.
     - **Discovery Admission Gating & Anti-Impersonation**:
       - Anti-impersonation is enforced by the authenticated E2EE session ingress layer (`DiscoveryPayloadHandler` verifies `payload.PeerId.Equals(context.SenderIdentityId)` on registration and `query.RequesterId.Equals(context.SenderIdentityId)` on queries before delegating to `IRelayPeerDirectory`). Setting visibility to `Hidden` immediately removes the peer's row from `relay_peer_directory`.
+    - **Aggregate Hydration & Zero Inner-Ring Mutation Guardrail**:
+      - `RelayPeerRegistration` (`Percolator.Apps.Discovery.Features.RelayDirectoryHosting.RelayPeerRegistration`), `BlindedLocator`, and `EncryptedRendezvousRoute` already expose full, validated public constructors/factories (`RegisteredAtUtc`, `LastUpdatedAtUtc`, `BlindedLocator.FromSpan`, `EncryptedRendezvousRoute.FromCiphertext`). `SqliteRelayPeerDirectory` and `SqlitePrivateRendezvousService` must use these existing constructors/factories with zero modifications to `Percolator.Apps.Discovery`.
 - **Scope & Deliverables**:
   - [ ] Author Protobuf schema `Percolator.Infrastructure/Protos/discovery.proto`.
   - [ ] Implement `SqliteRelayPeerDirectory` (`Percolator.Apps.Discovery.Features.RelayDirectoryHosting.IRelayPeerDirectory`).
@@ -1678,6 +1687,10 @@
     - **Transport Frame Hardening & Swarm Peer Authentication**:
       - `TcpMultiStreamPool` enforces transport-level DoS defenses: (1) validates the 5-byte frame header length (`<= 262,144 B`) before allocating receive buffers to prevent OOM attacks, (2) enforces a 5-second handshake read timeout on newly accepted sockets to prevent Slowloris socket exhaustion, and (3) invokes `CallbackEndpointValidator` inside `ConnectDirectAsync` to block SSRF/loopback/link-local connections on WAN candidates.
       - Application-layer `TransferSessionCoordinator.AuthenticateHandshakeAsync` performs constant-time `CryptographicOperations.FixedTimeEquals` validation on the `0x01 HandshakeFrame` `StreamAuthToken` and verifies `SenderPeerId` against the session's `authorizedPeers` set (`InvalidStreamAuthToken` / `UnauthorizedSwarmPeer`), immediately closing unauthenticated streams before bitfield or chunk exchange.
+  - **Aggregate Reconstitution & Zero Inner-Ring Mutation Guardrail**:
+    - `SqliteTransferSessionRepository` MUST reconstruct `TransferManifest` using its existing deterministic factory `TransferManifest.Create(manifestId, rootName, chunkSize, merkleTree, files)` (which recomputes `TotalSize`, `TotalFiles`, and `TotalChunks` and validates contiguous byte offsets and Merkle leaf count without emitting domain events or requiring `IDateTimeProvider`) and pass the resulting manifest to the existing `TransferSession.Rehydrate(...)` method. Never add a separate unvalidated `Rehydrate` method to `TransferManifest`.
+    - `SqliteFilterPolicyRepository` MUST construct `FileTransferFilterPolicy` via its existing primary record constructor `new FileTransferFilterPolicy(ownerId, blockedPeers, blockedRelays)`.
+    - Zero modifications to `Percolator.Apps.FileTransfer` or `Percolator.Apps.FileTransfer.Domain` are permitted during Chunk 4.4 implementation.
 - **Scope & Deliverables**:
   - [ ] Author Protobuf schema `Percolator.Infrastructure/Protos/file_transfer.proto`.
   - [ ] Configure `<ProjectReference>` to `Percolator.Apps.FileTransfer` and `Percolator.Apps.FileTransfer.Domain` in `Percolator.Infrastructure.csproj`.
@@ -1805,6 +1818,8 @@
   - `DependencyInjectionTests.All61Ports_ResolveFromContainerWithoutCycles`: resolves every planned infrastructure port from DI container; asserts non-null without circular dependency or missing registration.
   - `DependencyInjectionTests.NoCaptiveDependencies_ScopedServicesNeverInjectedIntoSingletons`: enforces container scope validation (`ValidateScopes = true`); verifies no scoped DbContext or repository is injected into singleton services or pruners.
   - `DependencyInjectionTests.All12HostedServices_RegisteredAndStartable`: resolves `IEnumerable<IHostedService>` and asserts exact count of 12 registered background workers.
+  - `ArchitectureBoundaryTests.RehydrateMethods_AreRestrictedToPersistenceRepositories`: inspects compiled assemblies to verify that `[EditorBrowsable(EditorBrowsableState.Never)]` `Rehydrate` methods on Domain and Application aggregates are invoked exclusively by repository adapters in `Percolator.Infrastructure.Persistence.Repositories` (and `SqliteTransferSessionRepository`), and never by gRPC endpoints, transport services, or application command handlers.
+  - `ArchitectureBoundaryTests.CryptographicSessionAggregates_DoNotExposeRawMutableSecretProperties`: verifies via reflection that `DirectRatchetSession`, `GroupSenderKeyRatchet`, and `GroupReceiverSession` do not expose public properties returning live mutable `ISensitiveSecret` references directly.
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Composition`
 
@@ -1824,6 +1839,7 @@ To guarantee robust infrastructure without introducing brittle tests that break 
   - Never use private member reflection.
   - Never assert serialized JSON or raw string output format; assert observable typed properties and state changes.
   - Never rely on wall-clock `Task.Delay` or timers; inject and advance `FakeTimeProvider`.
+  - Never weaken Domain or Application aggregate encapsulation (such as adding unvalidated `public static Rehydrate` methods or exposing live `ISensitiveSecret` fields as public properties) to simplify Infrastructure persistence or testing.
 
 ---
 
