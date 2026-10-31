@@ -2,7 +2,7 @@
 
 ## 1. Overview & Architectural Scope
 
-`Percolator.Desktop` is the cross-platform desktop client for the Percolator sovereign peer-to-peer messaging and file-sharing ecosystem, targeting **Windows, Linux, and macOS**. It replaces the legacy Windows-only WPF client (`Desktop.Wpf`) with a modern, hardware-accelerated presentation layer built on:
+`Percolator.Desktop` is the cross-platform desktop client for the Percolator sovereign peer-to-peer messaging and file-sharing ecosystem, targeting **Windows, Linux, and macOS**. It provides a hardware-accelerated presentation layer built on:
 
 * **Avalonia UI (11.2+)**: Hardware-accelerated, cross-platform XAML layout and rendering engine.
 * **FluentAvalonia (2.1+)**: Fluent Design System implementation providing native-feeling Windows 11 controls (`NavigationView`, `ContentDialog`, `CommandBar`, `MenuFlyout`, Acrylic/Mica backdrops) across all operating systems.
@@ -10,6 +10,8 @@
 * **R3 (1.3.1+) & R3Extensions.Avalonia (1.3.1+)**: Zero-allocation reactive pipelines, custom Avalonia dispatcher time/frame providers via `.UseR3()`, and two-way UI bindings.
 * **ObservableCollections.R3 (3.3.4+)**: High-throughput collection structures (`ObservableList<T>`, `ObservableDictionary<TKey, TValue>`) with synchronous collection projections for UI data binding.
 * **.NET 10 (`net10.0`)**: Modern runtime performance and unified application hosting via `Microsoft.Extensions.Hosting`.
+
+For formal architectural layer boundaries, upstream QMS dependency rules, and key technical design decisions (such as total network stealth gates, R3 pipeline discipline, and LRU-cached session scopes), see the project [Design Document](Design.md).
 
 ---
 
@@ -49,7 +51,8 @@ Privacy and zero unauthorized network disclosure are strictly enforced:
 
 ### 2.3 Domain Purity & UI Presentation Isolation
 * **Strict Domain Boundary**: `Percolator.Domain` is strictly isolated from UI dependencies. It contains zero UI interfaces, zero dispatcher invocations, and zero UI-specific snapshotting or freezing methods. Domain aggregates enforce pure business rules and cryptographic transitions.
-* **Presentation-Owned Reactive Models**: All models required for UI reactivity, collection synchronization, and thread-safe binding (`ChatMessageModel`, `PeerSessionSummaryModel`, `DiscoveredPeerModel`, `FileTransferTaskModel`, `TimelineCardModel`) live exclusively in `Percolator.Desktop.Features.*.Models`.\n* **Immutable UI Presentation Snapshots**: Where background tasks (search indexing, local history caching, export) require UI state, presentation models implement `.ToSnapshot()` returning immutable C# `record` types (`ChatMessageSnapshot`, `TransferBitfieldSnapshot`), eliminating lock contention on live reactive properties.
+* **Presentation-Owned Reactive Models**: All models required for UI reactivity, collection synchronization, and thread-safe binding (`ChatMessageModel`, `PeerSessionSummaryModel`, `DiscoveredPeerModel`, `FileTransferTaskModel`, `TimelineCardModel`) live exclusively in `Percolator.Desktop.Features.*.Models`.
+* **Immutable UI Presentation Snapshots**: Where background tasks (search indexing, local history caching, export) require UI state, presentation models implement `.ToSnapshot()` returning immutable C# `record` types (`ChatMessageSnapshot`, `TransferBitfieldSnapshot`), eliminating lock contention on live reactive properties.
 
 ### 2.4 State Ownership: Local ViewModel State vs. Shared UI State Services
 * **Local State (Owned by ViewModels)**:
@@ -88,7 +91,6 @@ Privacy and zero unauthorized network disclosure are strictly enforced:
           .LogToTrace()
           .UseR3(); // Configures AvaloniaDispatcherTimeProvider & AvaloniaDispatcherFrameProvider
   ```
-  This automatically ties R3's default scheduling and frame-based loops to Avalonia's Dispatcher loop.
 * **Filter Early, Marshal Late**:
   Perform CPU-intensive work (filtering, deduplication, JSON parsing, debounce, rate-limiting) on worker threads. Only marshal to the UI thread at the terminal step before binding:
   ```csharp
@@ -100,7 +102,7 @@ Privacy and zero unauthorized network disclosure are strictly enforced:
       .AddTo(ref Bag);
   ```
 * **Throttle the Firehose**: Real-time streaming feeds (DHT candidate pings, network packet metrics, swarm piece bitfields) must be sampled (`.Sample(TimeSpan.FromMilliseconds(16), _timeProvider)`) to protect the UI thread from 60fps+ inundation.
-* **Thread-Safety Invariant**: **Never enumerate UI-bound collections (`NotifyCollectionChangedSynchronizedViewList`) on background threads.** Iterating UI-bound collections from worker threads throws cross-thread exceptions. Background operations must query the raw `ObservableList<T>` or take an immutable snapshot.
+* **Thread-Safety Invariant**: **Never enumerate UI-bound collections (`NotifyCollectionChangedSynchronizedViewList`) on background threads.** Background operations must query the raw `ObservableList<T>` or take an immutable snapshot.
 * **Removal Disposal Pattern (`CreateView` Trap)**: When an item is removed from an `ObservableList`, `ISynchronizedView` removes it from the projected view but **does not dispose** the projected ViewModel. Subscriptions must explicitly observe removal:
   ```csharp
   _messagesView.ObserveRemove()
@@ -113,14 +115,11 @@ Privacy and zero unauthorized network disclosure are strictly enforced:
 * Enables instantaneous, deterministic unit and UI testing via `FakeTimeProvider` without wall-clock sleep delays.
 
 ### 2.8 LRU-Cached DI Session Scoping (`SessionScopeFactory`)
-* **Problem**: In a client with dozens of peer conversations, creating a global singleton `ChatViewModel` for every chat consumes excessive RAM and keeps hundreds of background reactive streams alive. Conversely, recreating ViewModels from scratch on tab switches destroys message drafts and scroll positions.
-* **Solution**: An LRU-cached session scope manager (`SessionScopeFactory` with capacity 3–5):
-  * Navigating between active chats (Alice → Bob → Alice) keeps the child `IServiceScope`, `SessionContext`, and `ChatViewModel` hot in memory.
-  * When a 6th conversation is opened, the least recently used scope is evicted and disposed (`scope.Dispose()`), freeing memory and unsubscribing its `DisposableBag` cleanly.
+* Navigating between active chats keeps the child `IServiceScope`, `SessionContext`, and `ChatViewModel` hot in memory via an LRU cache (capacity 3–5).
+* When a new conversation exceeds capacity, the least recently used scope is evicted and disposed (`scope.Dispose()`), freeing memory and unsubscribing cleanly.
 
 ### 2.9 Reactive Debounced Reload Coordinators (`ChatReloadCoordinator`)
-* Rapid bursts of inbound events (multiple messages per second, read receipts, delivery confirmations, sync ticks) can trigger rapid-fire database queries, resulting in SQLite lock contention and UI stutter.
-* The Reload Coordinator pattern debounces triggers and uses `AwaitOperation.Drop`:
+* Rapid bursts of inbound events are debounced and coordinated using `AwaitOperation.Drop`:
   ```csharp
   _reloadTrigger
       .Debounce(TimeSpan.FromMilliseconds(50), _timeProvider)
@@ -132,15 +131,13 @@ Privacy and zero unauthorized network disclosure are strictly enforced:
       .Subscribe()
       .AddTo(ref Bag);
   ```
-  `AwaitOperation.Drop` ensures that while a database read is in flight, redundant intermediate triggers are dropped. When the read completes, the latest debounced trigger captures all recent commits in a single roundtrip.
 
 ### 2.10 Window Lifecycle & Child DI Containers (`WindowManager`)
-* Secondary windows (Settings, Diagnostics, Connection Management) enforce single-instance focus: calling `Show<TViewModel>()` activates an existing window rather than spawning duplicates.
+* Secondary windows enforce single-instance focus: calling `Show<TViewModel>()` activates an existing window rather than spawning duplicates.
 * Each window is instantiated within its own child `IServiceScope`. When the window is closed, its DI scope is immediately disposed to prevent memory leaks.
 
 ### 2.11 Global Reactive Exception Plumbing
-* Unhandled exceptions inside R3 reactive pipelines do not automatically surface on the UI thread; if unobserved, they crash the host process.
-* `ObservableSystem.RegisterUnhandledExceptionHandler` is registered in `App.axaml.cs` alongside `TaskScheduler.UnobservedTaskException` and `AppDomain.CurrentDomain.UnhandledException`, piping errors into `ILogger`.
+* Unhandled exceptions inside R3 reactive pipelines are registered in `App.axaml.cs` via `ObservableSystem.RegisterUnhandledExceptionHandler` alongside `TaskScheduler.UnobservedTaskException` and `AppDomain.CurrentDomain.UnhandledException`, piping errors into `ILogger`.
 
 ---
 
@@ -148,30 +145,21 @@ Privacy and zero unauthorized network disclosure are strictly enforced:
 
 ### 3.1 Custom Controls & UI Primitives Evaluation (WPF vs. Avalonia)
 
-Moving from classic WPF to Avalonia + FluentAvalonia simplifies the custom control footprint by adopting native platform capabilities:
-
 | Legacy WPF Custom Control | Modern Avalonia / FluentAvalonia Equivalent | Architectural Rationale |
 |---|---|---|
-| `MatSlideToggle` | Built-in Avalonia `<ToggleSwitch />` | Native animated slide thumb, accessibility support, and `OnContent`/`OffContent` templates. |
+| `MatSlideToggle` | Built-in Avalonia `<ToggleSwitch />` | Native animated slide thumb, accessibility support, and templates. |
 | `MatInput` | Built-in Avalonia `<TextBox UseFloatingWatermark="True" Classes="clearButton" />` | Native floating watermark labels, clear buttons, and inner icon slots. |
-| `MatMenu` | FluentAvalonia `MenuFlyout` & `CommandBarFlyout` | Win11 fluent flyouts with rounded geometry, elevation shadow, and keyboard shortcuts. |
-| Custom Button Variants | FluentAvalonia Button Styles | Native styles: `Classes="accent"`, hyper-link buttons, icon buttons. |
-| `BadgedButton` | `Badge` Attached Behavior (`Common/Behaviors/Badge.cs`) | Attached properties (`Badge.Count`, `Badge.Pulse`) applicable to any button or icon with pulse animations. |
-| `InitialsAvatar` | `PeerAvatar` Control (`Common/Controls/PeerAvatar.axaml`) | Multi-state presence dot (Online, Relayed, Direct, Offline) + deterministic background brush generated from public key hashes. |
-| `MatChip` | `StatusChip` Control (`Common/Controls/StatusChip.axaml`) | Reusable status pill combining an icon, label, and semantic brushes (Direct P2P, Relayed, STUN punch, Swarm healthy). |
-| Custom Chat Composer | `ChatComposer` Control (`Features/Chat/Controls/ChatComposer.axaml`) | Encapsulates auto-expanding input (1–6 lines), Enter-to-send vs Shift+Enter-newline, and attachment/reaction flyouts. |
-| Bitfield Grid | `PieceMapControl` (`Features/FileTransfer/Controls/PieceMapControl.axaml`) | Custom control rendering 10,000+ chunk bitfields directly on a `DrawingContext` without XAML visual element overhead. |
+| `MatMenu` | FluentAvalonia `MenuFlyout` & `CommandBarFlyout` | Win11 fluent flyouts with rounded geometry and elevation shadow. |
+| `InitialsAvatar` | `PeerAvatar` Control (`Common/Controls/PeerAvatar.axaml`) | Multi-state presence dot + deterministic background brush generated from public key hashes. |
+| `MatChip` | `StatusChip` Control (`Common/Controls/StatusChip.axaml`) | Reusable status pill combining an icon, label, and semantic brushes. |
+| Bitfield Grid | `PieceMapControl` (`Features/FileTransfer/Controls/PieceMapControl.axaml`) | Custom control rendering 10,000+ chunk bitfields directly on a `DrawingContext` without visual element overhead. |
 
 ### 3.2 Hybrid Iconography Architecture (Fluent Icons + Nerd Font)
 
-* **The Problem**: FluentAvalonia includes Segoe Fluent Icons (`SymbolIcon`, `SymbolIconSource`) for standard desktop actions (Chat, Settings, Search, Folders). However, decentralized P2P networks require specialized technical iconography:
-  * Route topologies: Direct P2P Route (`0xF0B45`) vs. Relayed Route (`0xF50F`).
-  * Swarm metrics: Network Mesh (`0xEF09`), Latency meter (`0xF0128`), Tree Graph routing (`0xF104A`), Cloud Lock (`0xF11F1`).
-* **The Solution**:
-  1. **Cross-Platform Font Embedding**: Embed `FiraCodeNerdFontMono-Regular.ttf` as an Avalonia resource (`avares://Percolator.Desktop/Assets/Fonts/FiraCodeNerdFontMono-Regular.ttf#FiraCode Nerd Font Mono`). Guarantees identical rendering across Windows, Linux, and macOS without host OS font dependencies.
-  2. **Strongly Typed `NerdGlyph` Enum**: Replaces raw hex literals with typed symbols (`NerdGlyph.RelayedRoute`, `NerdGlyph.DirectRoute`, `NerdGlyph.Latency`, `NerdGlyph.MeshNetwork`, `NerdGlyph.Swarm`, `NerdGlyph.Lock`).
-  3. **Custom `NerdIcon` and `NerdIconSource`**: Subclasses FluentAvalonia's `FontIcon` and `FontIconSource`, defaulting the font family to the embedded Nerd Font while plugging into `NavigationViewItem.IconSource`, `CommandBarButton.IconSource`, and `ContentDialog.IconSource`.
-  4. **Usage Rule**: Use FluentAvalonia `SymbolIcon` for universal UX actions; use `NerdIcon` for domain-specific P2P mesh status, routing indicators, and swarm telemetry.
+1. **Cross-Platform Font Embedding**: Embed `FiraCodeNerdFontMono-Regular.ttf` as an Avalonia resource (`avares://Percolator.Desktop/Assets/Fonts/FiraCodeNerdFontMono-Regular.ttf#FiraCode Nerd Font Mono`).
+2. **Strongly Typed `NerdGlyph` Enum**: Replaces raw hex literals with typed symbols (`NerdGlyph.RelayedRoute`, `NerdGlyph.DirectRoute`, `NerdGlyph.Latency`, `NerdGlyph.MeshNetwork`, `NerdGlyph.Swarm`, `NerdGlyph.Lock`).
+3. **Custom `NerdIcon` and `NerdIconSource`**: Subclasses FluentAvalonia's `FontIcon` and `FontIconSource`, defaulting the font family to the embedded Nerd Font.
+4. **Usage Rule**: Use FluentAvalonia `SymbolIcon` for universal UX actions; use `NerdIcon` for domain-specific P2P mesh status, routing indicators, and swarm telemetry.
 
 ---
 
@@ -192,7 +180,7 @@ Moving from classic WPF to Avalonia + FluentAvalonia simplifies the custom contr
 
 ## 5. Developer Tooling & Simulation Interoperability
 
-Testing multi-peer network topologies, relays, and handshakes is handled by the standalone companion project **`Percolator.Simulator`** (see [`Percolator.Simulator/implementation-plan.md`](../Percolator.Simulator/implementation-plan.md)).
+Testing multi-peer network topologies, relays, and handshakes is handled by the standalone companion project **`Percolator.Simulator`** (see [`Percolator.Simulator/Design.md`](../Percolator.Simulator/Design.md)).
 
 * `Percolator.Desktop` contains **zero simulator code** or mock interceptors.
 * To interoperate with the simulator during development, `Percolator.Desktop` supports a development configuration flag:
@@ -213,63 +201,26 @@ Testing multi-peer network topologies, relays, and handshakes is handled by the 
 ```
 Percolator.Desktop/
 ├── Assets/                               # Platform icons, branding
-│   └── Fonts/
-│       └── FiraCodeNerdFontMono-Regular.ttf
 ├── Common/
 │   ├── Behaviors/                        # Badge.cs (attached properties for count & pulse)
-│   ├── Controls/                         # NerdGlyph.cs, NerdIcon.cs, NerdIconSource.cs, PeerAvatar, StatusChip
-│   ├── Converters/                       # IdentityHashToBrushConverter, RouteToColorConverter
+│   ├── Controls/                         # NerdGlyph.cs, NerdIcon.cs, PeerAvatar, StatusChip
 │   ├── Navigation/                       # INavigationService.cs, NavigationService.cs
 │   ├── Services/                         # NetworkStealthGate, DesktopIdentityKeyStore, SystemDateTimeProvider
-│   └── Windowing/                        # IWindowManager.cs, WindowManager.cs, IWindowHandoffCoordinator.cs, IDialogWindow.cs
+│   └── Windowing/                        # IWindowManager.cs, WindowManager.cs, IDialogWindow.cs
 ├── Features/
 │   ├── Unlock/                           # Database Decryption & Master Passphrase Gate (First Screen)
-│   │   ├── Models/                       # UnlockStateModel.cs
-│   │   ├── ViewModels/                   # UnlockViewModel.cs
-│   │   └── Views/                        # UnlockWindow.axaml
 │   ├── IdentityGate/                     # Total Network Stealth Gatekeeper
-│   │   ├── Models/                       # SelectableIdentityModel.cs
-│   │   ├── ViewModels/                   # IdentityGateViewModel.cs, CreateIdentityDialogViewModel.cs
-│   │   └── Views/                        # IdentityGateWindow.axaml, CreateIdentityDialog.axaml
 │   ├── Shell/                            # Main Application Shell
-│   │   ├── ViewModels/                   # MainWindowViewModel.cs
-│   │   └── Views/                        # MainWindow.axaml
 │   ├── Sessions/                         # Peer Sessions, Handshakes & Connection Management
-│   │   ├── Models/                       # PeerSessionSummaryModel.cs, PendingHandshakeModel.cs
-│   │   ├── Services/                     # IPeerConnectionStateService.cs, SessionScopeFactory.cs
-│   │   ├── ViewModels/                   # SessionsSidebarViewModel.cs, ConnectionManagementDialogViewModel.cs
-│   │   └── Views/                        # SessionsSidebarView.axaml, ConnectionManagementDialog.axaml
 │   ├── Chat/                             # Real-Time Messaging & Channels
-│   │   ├── Controls/                     # ChatComposer.axaml, ReactionPickerFlyout.axaml
-│   │   ├── Models/                       # ChatMessageModel.cs, ChatMessageSnapshot.cs
-│   │   ├── Services/                     # IChatStateService.cs, ChatReloadCoordinator.cs
-│   │   ├── ViewModels/                   # ChatViewModel.cs, ChatMessageViewModel.cs
-│   │   └── Views/                        # ChatView.axaml
 │   ├── Discovery/                        # Sovereign Peer Discovery & Telemetry
-│   │   ├── Models/                       # DiscoveredPeerModel.cs, BlindedRendezvousModel.cs
-│   │   ├── Services/                     # IDiscoveryStateService.cs
-│   │   ├── ViewModels/                   # DiscoveryViewModel.cs
-│   │   └── Views/                        # DiscoveryView.axaml
-│   ├── FileTransfer/                     # P2P Swarm File Sharing
-│   │   ├── Controls/                     # PieceMapControl.axaml (direct canvas bitfield renderer)
-│   │   ├── Models/                       # FileTransferTaskModel.cs, TransferBitfieldSnapshot.cs
-│   │   ├── Services/                     # IFileTransferStateService.cs
-│   │   ├── ViewModels/                   # FileTransferViewModel.cs
-│   │   └── Views/                        # FileTransferView.axaml
+│   ├── FileTransfer/                     # P2P Swarm File Sharing (PieceMapControl)
 │   ├── Timeline/                         # Plugin Timeline & Card Host
-│   │   ├── Models/                       # TimelineCardModel.cs, TimelineActionModel.cs
-│   │   ├── Services/                     # ITimelineCardStateService.cs, DesktopTimelinePostSink.cs
-│   │   ├── ViewModels/                   # TimelineViewModel.cs, TimelineCardViewModel.cs
-│   │   └── Views/                        # TimelineView.axaml
 │   └── Settings/                         # Identity, Network & Display Settings
-│       ├── ViewModels/                   # SettingsViewModel.cs
-│       └── Views/                        # SettingsView.axaml
-├── ViewModels/
-│   └── ViewModelBase.cs                  # ObservableObject + DisposableBag base class
-├── App.axaml                             # Application styles and FluentAvalonia theme
-├── App.axaml.cs                          # App bootstrap, R3 unhandled exceptions, DI composition root
+├── ViewModels/                           # ViewModelBase.cs (ObservableObject + DisposableBag)
+├── App.axaml / App.axaml.cs              # App bootstrap, R3 unhandled exceptions, DI composition root
 ├── Program.cs                            # Avalonia entry point with .UseR3()
-├── implementation-plan.md                # 9-chunk implementation plan
-├── README.md                             # Architectural specification & guide
+├── Design.md                             # Architectural specification & QMS design output
+├── README.md                             # Developer & presentation guide
 └── Percolator.Desktop.csproj
 ```

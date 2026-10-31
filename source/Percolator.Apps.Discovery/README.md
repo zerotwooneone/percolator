@@ -14,6 +14,8 @@ Discovery provides two primary interaction models:
 - **Continuous Presence & Heartbeats**: Discovery explicitly rejects online/offline indicators, heartbeat leases, or live activity tracking. In alignment with Signal Protocol parity, nodes function as asynchronous store-and-forward actors.
 - **Global Network Crawling & Multicast**: Distributed hash table (DHT) routing networks (e.g., Kademlia) and UDP multicast/broadcast LAN scanning are excluded to prevent network fingerprinting, ISP censorship, and metadata correlation.
 
+For formal architectural boundaries, upstream dependency rules, and key technical design choices (such as two-phase discovery against OPK exhaustion and 24-hour time-ratcheted locators), see the project [Design Document](Design.md).
+
 ---
 
 ## 2. Privacy & Threat Model
@@ -91,12 +93,11 @@ sequenceDiagram
 ## 4. Functional Domain Architecture
 
 The Discovery subsystem is divided into focused functional domains:
-
 1. **Nearby Peer Discovery**: Manages candidate querying, result bounding, route sanitization, and the two-phase connection workflow that bridges candidate lookup to cryptographic handshakes.
 2. **Relay Directory Hosting**: Manages relay-side directory registrations, enforcing admission gates, sovereign relay policies, stealth visibility filtering, and query result clamping.
 3. **Private Rendezvous**: Implements zero-knowledge contact matching, computing deterministic time-ratcheted locators and handling anonymous rendezvous lookups.
 4. **Ingress & Anti-Impersonation**: Demultiplexes incoming discovery payloads, verifying cryptographic sender fidelity before routing to hosting or rendezvous services.
-5. **Architectural Ports**: Defines clean, decoupled port interfaces for prekey verification, bundle retrieval, client queries, and handshake initiation, allowing infrastructure adapters (gRPC, SQLite, in-memory) to be plugged in without domain coupling.
+5. **Architectural Ports**: Defines clean, decoupled port interfaces for prekey verification, bundle retrieval, client queries, and handshake initiation, allowing infrastructure adapters to be plugged in without domain coupling.
 
 ---
 

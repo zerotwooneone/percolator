@@ -3,6 +3,8 @@
 ## Purpose
 `Percolator.Domain.Kernel` provides the shared domain kernel for the Percolator architecture. It defines the foundational tactical DDD abstractions and universal identity tokens that must be shared across autonomous domain libraries without introducing domain-to-domain coupling.
 
+For detailed architectural layer boundaries, structural decomposition, and key technical design choices, see the project [Design Document](Design.md).
+
 ## Contributor & AI Guardrails
 **DO NOT ADD CODE HERE FOR CONVENIENCE.**
 - This project must NEVER reference any other project except the compile-time `Percolator.SourceGenerators` analyzer.

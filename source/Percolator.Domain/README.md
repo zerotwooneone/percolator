@@ -4,6 +4,8 @@
 
 As the architectural anchor, this project contains pure domain logic strictly decoupled from frameworks, transport mechanisms, wire serializations, and storage engines.
 
+For formal layer boundaries, aggregate hydration rules, and key technical design decisions (including persistence encapsulation and zero-knowledge verification), see the project [Design Document](Design.md).
+
 ---
 
 ## 1. Architectural Invariants
@@ -22,54 +24,24 @@ In end-to-end encrypted messaging, cryptographic state management is a domain in
 
 ---
 
-## 2. What Belongs in the Domain (In Scope)
+## 2. Scope & Layer Boundaries
 
-The domain contains only enterprise business logic and cryptographic invariants that are true regardless of network transport, storage engine, or UI presentation:
+The domain is strictly partitioned between business logic and infrastructure concerns. For the complete, formal breakdown of in-scope capabilities versus out-of-scope technical concerns, refer to [Design.md](Design.md#1-purpose-and-layer-boundary).
 
-| Concept | High-Level Scope & Guidelines |
-| :--- | :--- |
-| **Aggregates & Entities** | Conceptual consistency boundaries that encapsulate state and enforce business invariants. State mutations occur exclusively through domain methods that maintain invariant validity. |
-| **Value Objects** | Immutable types identified solely by their attributes and validation rules rather than an entity identifier. Value objects enforce structural validity upon creation, guarantee value equality, and encapsulate domain validation. |
-| **Domain Events** | Immutable notifications capturing significant business and cryptographic occurrences within an aggregate boundary. Used to communicate state changes to outer layers without coupling. |
-| **Cryptographic Protocol State Machines** | In-memory representations of end-to-end cryptographic state transitions (Double Ratchet symmetric chain advancing, Diffie-Hellman ratchet steps, out-of-order skipped key cache limits, and key rotation lifecycle). |
-| **Key Exchange & Agreement Invariants** | Extended Triple Diffie-Hellman (X3DH) mutual authentication state logic, pre-key bundle validation, signature verification, and master secret derivation. |
-| **Channel Invariants & Governance** | Communication channel membership rosters, administrative roles, admin-gated mutations (membership changes, channel name updates, role promotions/demotions), and the invariant that a channel must never be left without an active administrator. |
-| **Epoch Advancement & Forward Secrecy** | Epoch advancement rules upon channel membership removal, ensuring cryptographic forward secrecy across channel state changes. |
-| **Relay Ledger & Mailbox Governance** | Relay-hosted pre-key quotas, atomic pre-key consumption with signed fallback, hold-and-forward mailbox queues, and blinded token routing authorization without social graph linkage. |
-| **Domain Ports (Interfaces)** | Outward-facing abstractions defining required capabilities (such as cryptographic engines, zero-knowledge proof engines, or aggregate repositories) without leaking external implementation details. |
-| **Domain Results & Errors** | Strongly typed, allocation-conscious result representations for expected domain rejections, returning explicit error codes rather than throwing exceptions for ordinary rule violations. |
+In brief:
+- **In Scope**: Aggregates, value objects, domain events, Double Ratchet state machines, X3DH key agreement, group channel governance, epoch forward secrecy, and sovereign relay pre-key ledgers.
+- **Out of Scope**: Protobuf serialization, SQL queries/migrations, gRPC streaming, outbox delivery retries, UI ViewModels, and platform credential vaults.
 
 ---
 
-## 3. What Does NOT Belong in the Domain (Out of Scope)
-
-The following concerns are explicitly excluded from `Percolator.Domain` and are handled by outer layers:
-
-| Excluded Concern | Responsible Layer | Architectural Reason |
-| :--- | :--- | :--- |
-| **Wire & Transport Framing** | Application / Infrastructure | Protobuf DTOs, wire byte framing, packet delimiters, and Associated Data (AD) byte construction belong in the application pipeline before delegating to domain cryptographic ports. |
-| **Protobuf Serialization** | Infrastructure | Compiling `.proto` definitions and serializing binary wire contracts belongs strictly in infrastructure technical adapters. |
-| **Database & ORM Plumbing** | Infrastructure / Persistence | SQL queries, migrations, table schemas, change tracking, and database engines (SQLCipher/SQLite/EF Core) are storage details. |
-| **Transport Delivery & Retries** | Application / Infrastructure | Transactional outbox queues, retry policies, exponential backoff with jitter, socket management, and delivery channel routing (direct P2P vs. relay) belong to application orchestration. |
-| **Payload Ordering Buffers** | Application | Caching out-of-order payloads while awaiting sender key distribution payloads is an application ingress buffering responsibility. |
-| **Profile Metadata & Media** | Application | Display profiles (nicknames, avatar images, bio status, profile key symmetric encryption packages) are application-level user metadata, not core cryptographic protocol invariants. |
-| **Channel Invitation Consent Workflows** | Application | Managing inbound invitation requests (pending approval, acceptance, rejection) is an application user-consent state machine. |
-| **Peer & Network Discovery** | Application / Infrastructure | Kademlia DHT routing tables, UDP broadcast listeners, rendezvous ping/pong protocols, and network reachability probing belong in application plugins and infrastructure network adapters. |
-| **Out-of-Band Data Streaming** | Application / Infrastructure | Large file chunk streaming, torrent-like peer exchanges, and high-bandwidth socket transports belong in dedicated application and infrastructure adapters, outside of ratcheted domain channels. |
-| **OS Security & Secret Storage** | Infrastructure | Platform-specific credential encryption (DPAPI, macOS Keychain, Linux Keyutils) and file system ACLs belong to platform security adapters. |
-| **Transport Streaming & Sockets** | Infrastructure | Resilient server-streaming gRPC connections, stream reconnection loops, keep-alives, and TLS certificate thumbprint pinning callbacks are infrastructure concerns. |
-| **Presentation & UI State** | Presentation / UI | ViewModels, UI bindings, view formatting, localization, and user input validation must never touch domain models. |
-
----
-
-## 4. Error Handling Philosophy
+## 3. Error Handling Philosophy
 
 - **Result Pattern for Business Rejections:** When an operation violates a domain invariant (such as an unauthorized role, mismatched epoch, exhausted pre-keys, or invalid cryptographic signature), the method returns a typed failure result carrying an explicit error code and description.
 - **Exceptions Reserved for System Failures:** Exceptions in the domain are reserved strictly for non-recoverable coding defects (such as null argument contract violations in internal constructors) or severe unrecoverable faults, never for ordinary business flow control.
 
 ---
 
-## 5. Testing Philosophy
+## 4. Testing Philosophy
 
 Because `Percolator.Domain` is completely isolated from I/O and external systems:
 - All domain tests are fast, deterministic in-memory unit tests.
@@ -78,39 +50,19 @@ Because `Percolator.Domain` is completely isolated from I/O and external systems
 
 ---
 
-## 6. Functional Capabilities & Protocol Alignment
+## 5. Functional Capabilities & Protocol Alignment
 
 Percolator models the security guarantees of the **Signal Protocol** (Extended Triple Diffie-Hellman, Double Ratchet, multi-device linking, and Signal Private Groups), extended to support **direct peer-to-peer handshakes**, **decentralized arbitrary relays**, and **opaque byte transport across multi-party communication channels**.
 
-### 6.1 Core Domain Capabilities
+### Core Domain Capabilities
 
-1. **Independent Identity Management:**
-   - Supports independent creation and lifecycle management of multiple local cryptographic identities without relying on phone numbers or centralized authority.
-2. **Key Rotation & Safety Number Invariants:**
-   - Identities rotate long-term identity keys, signed pre-keys, and one-time pre-key pools over time.
-   - When a remote peer's public identity key changes, existing verification is invalidated and trust is automatically downgraded to untrusted, requiring re-verification of the contact's safety number.
-3. **Mutual Key Agreement (X3DH):**
-   - Direct or relayed mutual authentication establishes shared secrets between identities using ephemeral keys, identity keys, signed pre-keys, and optional one-time pre-keys.
-   - Distinct cryptographic key roles separate digital signatures from Diffie-Hellman key exchange.
-   - Derived master secrets initialize end-to-end symmetric ratchet sessions.
-4. **Relay Pre-Key Hosting & Fine-Grained Boundaries:**
-   - Any node acting as a relay can host pre-key material for peers on an opt-in basis.
-   - Pre-key hosting is scoped per identity and per device, preventing unbounded in-memory registry growth and eliminating lock contention across unrelated peers.
-5. **Relay Quota Limits & DoS Resistance:**
-   - Relays enforce configurable maximum quotas on stored one-time pre-keys per identity to defend against storage exhaustion attacks.
-6. **Atomic Pre-Key Consumption & Fallback:**
-   - Relays dispense one-time pre-keys atomically on a first-in, first-out basis.
-   - When one-time pre-keys are exhausted, relays gracefully fall back to serving the valid signed pre-key, preserving forward secrecy while maintaining service continuity.
-7. **Asynchronous Hold-and-Forward Mailboxes:**
-   - Relays store and forward opaque handshake payloads and messages for offline or unreachable peers.
-   - Routing and delivery authorization rely on cryptographic blind tokens, preventing relays from associating senders with recipients.
-8. **Decentralized Relay Group Genesis:**
-   - Identities that have established secure sessions with a common relay can establish multi-party communication channels.
-   - The relay manages channel genesis, recording channel identity, initial routing tokens, and starting epoch.
-9. **Private Channel Governance & Epoch Forward Secrecy:**
-   - Channel administration enforces role-based authorization for membership changes, channel name updates, and administrative promotions/demotions.
-   - Enforces the core invariant that an active channel can never have its last remaining administrator removed or demoted.
-   - Removing a channel member automatically advances the channel epoch, discarding previous sender keys to ensure former members cannot decrypt future communications (forward secrecy).
-   - Channel roster updates on relays are verified anonymously using zero-knowledge proofs, preventing the relay from reconstructing the social graph.
-10. **Direct P2P & Multi-Relay Architectural Feasibility:**
-    - The domain operates strictly on abstract cryptographic state machines and opaque byte spans, remaining completely agnostic to physical network topology (direct socket, local mesh, or multi-hop relays).
+1. **Independent Identity Management:** Supports independent creation and lifecycle management of multiple local cryptographic identities without relying on phone numbers or centralized authority.
+2. **Key Rotation & Safety Number Invariants:** Identities rotate long-term identity keys, signed pre-keys, and one-time pre-key pools over time. Trust is automatically downgraded when an identity key changes.
+3. **Mutual Key Agreement (X3DH):** Direct or relayed mutual authentication establishes shared secrets using ephemeral keys, identity keys, signed pre-keys, and optional one-time pre-keys.
+4. **Relay Pre-Key Hosting & Fine-Grained Boundaries:** Pre-key hosting is scoped per identity and per device, preventing unbounded in-memory registry growth and eliminating lock contention across unrelated peers.
+5. **Relay Quota Limits & DoS Resistance:** Relays enforce configurable maximum quotas on stored one-time pre-keys per identity to defend against storage exhaustion attacks.
+6. **Atomic Pre-Key Consumption & Fallback:** Relays dispense one-time pre-keys atomically on a FIFO basis, gracefully falling back to the valid signed pre-key when one-time pre-keys are exhausted.
+7. **Asynchronous Hold-and-Forward Mailboxes:** Relays store and forward opaque handshake payloads and messages for offline peers using cryptographic blind tokens.
+8. **Decentralized Relay Group Genesis:** Identities establish multi-party channels through common relays with initial routing tokens and starting epochs.
+9. **Private Channel Governance & Epoch Forward Secrecy:** Channel administration enforces role-based authorization, ensures an active channel is never left without an admin, and advances channel epochs upon member removal to preserve forward secrecy.
+10. **Direct P2P & Multi-Relay Architectural Feasibility:** The domain operates strictly on abstract cryptographic state machines and opaque byte spans, remaining completely agnostic to physical network topology.

@@ -11,6 +11,8 @@ The Chat Application (`AppId: 0x01`) is the core messaging subsystem within the 
 - **Out-of-Band Large File Swarms**: Bulk multi-peer file transfers and BitTorrent-style swarms are governed exclusively by the File Transfer subsystem (`AppId: 0x03`). Chat handles inline media and conversational attachments ($\le 50\text{ MB}$) only.
 - **Rendezvous & DHT Operations**: Peer discovery and DHT routing pings are isolated to the Discovery subsystem (`AppId: 0x02`).
 
+For formal architectural boundaries, upstream dependency rules, and key technical design choices (such as stepped bucket padding and zero-plaintext reply quotes), see the project [Design Document](Design.md).
+
 ---
 
 ## 2. Privacy & Threat Model
