@@ -894,6 +894,9 @@
 
 #### Chunk 3.1: Core Cryptographic & ZK-Proof Engines (Signal & ZkGroup)
 - **Technical Specifications & Cryptographic Invariants**:
+  - **Cryptographic Library Standard (`vendor/Signal.Interop`)**:
+    - All cryptographic operations supported by `vendor/Signal.Interop` (including native Ed25519 key generation/signing/verification, Groups V2 credentials, and group cipher sender keys) MUST be consumed directly through `Signal.Interop.SignalCrypto` backed by `signal_shim.dll`.
+    - Hand-rolled cryptographic math, synthetic P/Invokes, or placeholder BigInteger curves are strictly prohibited in all current and future infrastructure steps.
   - **Cryptographic Port Implementation (`SignalCryptoEngine` / `SodiumCryptoEngine`)**:
     - Realizes `Percolator.Domain.Security.Ports.ICryptoEngine`.
     - **Ed25519 Signatures (RFC 8032)**: `VerifyEd25519Signature(IdentityKey publicKey, ReadOnlySpan<byte> message, ReadOnlySpan<byte> signature)` (using domain value object `IdentityKey`) and `SignEd25519(ReadOnlySpan<byte> privateKey, ReadOnlySpan<byte> message)` returning `byte[]`.

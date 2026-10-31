@@ -8,6 +8,7 @@ using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
+using Signal.Interop;
 
 public sealed class CryptographyOptions
 {
@@ -149,12 +150,19 @@ public sealed class SignalCryptoEngine : ICryptoEngine
 
     public bool VerifyEd25519Signature(IdentityKey publicKey, ReadOnlySpan<byte> message, ReadOnlySpan<byte> signature)
     {
-        if (signature.Length != 64)
+        if (signature.Length != 64 || publicKey.Length != 32)
         {
             return false;
         }
 
-        return Ed25519Core.Verify(publicKey.Span, message, signature);
+        try
+        {
+            return SignalCrypto.Ed25519Verify(publicKey.Span, message, signature);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     public byte[] SignEd25519(ReadOnlySpan<byte> privateKey, ReadOnlySpan<byte> message)
@@ -165,7 +173,7 @@ public sealed class SignalCryptoEngine : ICryptoEngine
         }
 
         byte[] sig = new byte[64];
-        Ed25519Core.Sign(sig, privateKey, message);
+        SignalCrypto.Ed25519Sign(privateKey, message, sig);
         return sig;
     }
 
@@ -269,189 +277,6 @@ public sealed class SignalCryptoEngine : ICryptoEngine
             byte[] bytes = value.ToByteArray();
             int copyLen = Math.Min(32, bytes.Length);
             bytes.AsSpan(0, copyLen).CopyTo(destination);
-        }
-    }
-
-    internal static class Ed25519Core
-    {
-        private static readonly BigInteger P = BigInteger.Pow(2, 255) - 19;
-        private static readonly BigInteger L = BigInteger.Pow(2, 252) + BigInteger.Parse("27742317777372353535851937790883648493");
-        private static readonly BigInteger D;
-        private static readonly BigInteger Bx;
-        private static readonly BigInteger By;
-
-        private static BigInteger Mod(BigInteger a, BigInteger m)
-        {
-            BigInteger r = a % m;
-            return r < 0 ? r + m : r;
-        }
-
-        static Ed25519Core()
-        {
-            D = Mod(-121665 * BigInteger.ModPow(121666, P - 2, P), P);
-            By = Mod(4 * BigInteger.ModPow(5, P - 2, P), P);
-            Bx = RecoverX(By, 0);
-        }
-
-        private readonly record struct Point(BigInteger X, BigInteger Y);
-
-        private static Point PointAdd(Point p1, Point p2)
-        {
-            BigInteger x1 = p1.X, y1 = p1.Y;
-            BigInteger x2 = p2.X, y2 = p2.Y;
-
-            BigInteger x1x2 = Mod(x1 * x2, P);
-            BigInteger y1y2 = Mod(y1 * y2, P);
-            BigInteger dxxyy = Mod(D * Mod(x1x2 * y1y2, P), P);
-
-            BigInteger xNum = Mod(x1 * y2 + y1 * x2, P);
-            BigInteger xDen = Mod(1 + dxxyy, P);
-            BigInteger yNum = Mod(y1 * y2 + x1 * x2, P);
-            BigInteger yDen = Mod(1 - dxxyy, P);
-
-            BigInteger x3 = Mod(xNum * BigInteger.ModPow(xDen, P - 2, P), P);
-            BigInteger y3 = Mod(yNum * BigInteger.ModPow(yDen, P - 2, P), P);
-            return new Point(x3, y3);
-        }
-
-        private static Point ScalarMult(BigInteger s, Point p)
-        {
-            Point res = new Point(0, 1);
-            Point cur = p;
-            while (s > 0)
-            {
-                if (!s.IsEven)
-                {
-                    res = PointAdd(res, cur);
-                }
-                cur = PointAdd(cur, cur);
-                s >>= 1;
-            }
-            return res;
-        }
-
-        private static BigInteger RecoverX(BigInteger y, int sign)
-        {
-            if (y >= P) return -1;
-            BigInteger u = Mod(y * y - 1, P);
-            BigInteger v = Mod(D * y * y + 1, P);
-            BigInteger v3 = BigInteger.ModPow(v, 3, P);
-            BigInteger v7 = BigInteger.ModPow(v, 7, P);
-            BigInteger x = Mod(Mod(u * v3, P) * BigInteger.ModPow(Mod(u * v7, P), (P - 5) / 8, P), P);
-
-            BigInteger check = Mod(v * x * x, P);
-            if (check != u)
-            {
-                BigInteger sqrtM1 = BigInteger.ModPow(2, (P - 1) / 4, P);
-                x = Mod(x * sqrtM1, P);
-                check = Mod(v * x * x, P);
-                if (check != u)
-                {
-                    return -1;
-                }
-            }
-
-            if ((x % 2 == 1 ? 1 : 0) != sign)
-            {
-                x = Mod(P - x, P);
-            }
-            return x;
-        }
-
-        private static byte[] EncodePoint(Point pt)
-        {
-            byte[] encoded = new byte[32];
-            Curve25519Core.To32BytesLittleEndian(pt.Y, encoded);
-            if ((pt.X % 2) != 0)
-            {
-                encoded[31] |= 0x80;
-            }
-            return encoded;
-        }
-
-        private static Point? DecodePoint(ReadOnlySpan<byte> bytes)
-        {
-            if (bytes.Length != 32) return null;
-            byte[] copy = bytes.ToArray();
-            int sign = (copy[31] >> 7) & 1;
-            copy[31] &= 0x7F;
-
-            BigInteger y = Curve25519Core.ToUnsignedBigInteger(copy);
-            if (y >= P) return null;
-
-            BigInteger x = RecoverX(y, sign);
-            if (x < 0) return null;
-
-            return new Point(x, y);
-        }
-
-        public static void Sign(Span<byte> destination, ReadOnlySpan<byte> secretKeySeed, ReadOnlySpan<byte> message)
-        {
-            byte[] h = SHA512.HashData(secretKeySeed);
-            Span<byte> aBytes = stackalloc byte[32];
-            h.AsSpan(0, 32).CopyTo(aBytes);
-            aBytes[0] &= 248;
-            aBytes[31] &= 63;
-            aBytes[31] |= 64;
-
-            BigInteger a = Curve25519Core.ToUnsignedBigInteger(aBytes);
-            Point A = ScalarMult(a, new Point(Bx, By));
-            byte[] pubEncoded = EncodePoint(A);
-
-            byte[] rInput = new byte[32 + message.Length];
-            Buffer.BlockCopy(h, 32, rInput, 0, 32);
-            message.CopyTo(rInput.AsSpan(32));
-            byte[] rHash = SHA512.HashData(rInput);
-            BigInteger r = Mod(Curve25519Core.ToUnsignedBigInteger(rHash), L);
-
-            Point R = ScalarMult(r, new Point(Bx, By));
-            byte[] rEncoded = EncodePoint(R);
-
-            byte[] kInput = new byte[32 + 32 + message.Length];
-            Buffer.BlockCopy(rEncoded, 0, kInput, 0, 32);
-            Buffer.BlockCopy(pubEncoded, 0, kInput, 32, 32);
-            message.CopyTo(kInput.AsSpan(64));
-            byte[] kHash = SHA512.HashData(kInput);
-            BigInteger k = Mod(Curve25519Core.ToUnsignedBigInteger(kHash), L);
-
-            BigInteger s = Mod(r + k * a, L);
-            Span<byte> sEncoded = stackalloc byte[32];
-            Curve25519Core.To32BytesLittleEndian(s, sEncoded);
-
-            rEncoded.CopyTo(destination[..32]);
-            sEncoded.CopyTo(destination[32..64]);
-
-            CryptographicOperations.ZeroMemory(aBytes);
-            CryptographicOperations.ZeroMemory(h);
-            CryptographicOperations.ZeroMemory(rInput);
-            CryptographicOperations.ZeroMemory(rHash);
-            CryptographicOperations.ZeroMemory(sEncoded);
-        }
-
-        public static bool Verify(ReadOnlySpan<byte> publicKey, ReadOnlySpan<byte> message, ReadOnlySpan<byte> signature)
-        {
-            if (signature.Length != 64 || publicKey.Length != 32) return false;
-
-            Point? R = DecodePoint(signature[..32]);
-            if (R == null) return false;
-
-            BigInteger s = Curve25519Core.ToUnsignedBigInteger(signature[32..64]);
-            if (s >= L) return false;
-
-            Point? A = DecodePoint(publicKey);
-            if (A == null) return false;
-
-            byte[] kInput = new byte[32 + 32 + message.Length];
-            signature[..32].CopyTo(kInput.AsSpan(0, 32));
-            publicKey.CopyTo(kInput.AsSpan(32, 32));
-            message.CopyTo(kInput.AsSpan(64));
-            byte[] kHash = SHA512.HashData(kInput);
-            BigInteger k = Mod(Curve25519Core.ToUnsignedBigInteger(kHash), L);
-
-            Point left = ScalarMult(s, new Point(Bx, By));
-            Point right = PointAdd(R.Value, ScalarMult(k, A.Value));
-
-            return left.X == right.X && left.Y == right.Y;
         }
     }
 }

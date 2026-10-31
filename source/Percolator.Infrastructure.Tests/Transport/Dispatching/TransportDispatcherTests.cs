@@ -11,6 +11,8 @@ using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Domain.Security.Ports;
+using Percolator.Domain.Security.ValueObjects;
 using Percolator.Infrastructure.Protos;
 using Percolator.Infrastructure.Transport;
 
@@ -47,6 +49,19 @@ public sealed class TransportDispatcherTests
             LastGroupEndpoint = endpoint;
             LastGroupRequest = request;
             return Task.FromResult(new DispatchGroupMessageResponse { Accepted = true });
+        }
+    }
+
+    private sealed class MockZkProofEngine : IZkProofEngine
+    {
+        public bool VerifyGroupPresentation(uint epoch, ZkPresentationBytes presentation, ReadOnlySpan<byte> transcriptChallenge, ZkGroupPublicParams publicParams)
+        {
+            return true;
+        }
+
+        public ZkPresentationBytes GenerateGroupPresentation(uint epoch, ReadOnlySpan<byte> transcriptChallenge, ReadOnlySpan<byte> groupMasterSecret32, ReadOnlySpan<byte> authCredentialMac)
+        {
+            return ZkPresentationBytes.FromSpan(new byte[72]);
         }
     }
 
@@ -90,7 +105,34 @@ public sealed class TransportDispatcherTests
         relayResult.IsSuccess.Should().BeTrue();
         invoker.LastRelayEndpoint.Should().Be(new Uri("https://relay.example.com:443"));
         invoker.LastRelayRequest.Should().NotBeNull();
-        invoker.LastRelayRequest!.RecipientRoutingToken.ToByteArray().Should().Equal(routingToken.Value.ToByteArray());
+        invoker.LastRelayRequest!.RecipientRoutingToken.ToByteArray().Should().Equal(routingToken.Value.ToByteArray(bigEndian: true));
         invoker.LastRelayRequest.DeliveryToken.ToByteArray().Should().Equal(deliveryToken.Span.ToArray());
+    }
+
+    [Test]
+    public async Task RelayedGroupRoute_DispatchesWithZkProof()
+    {
+        var invoker = new MockTransportInvoker();
+        var zkEngine = new MockZkProofEngine();
+        var dispatcher = new TransportDispatcher(invoker, zkEngine);
+        var timeProvider = new FixedTimeProvider();
+
+        var channelId = ChannelId.New();
+        var ownerId = PublicIdentityId.New();
+        var recipientId = PublicIdentityId.New();
+        var payload = Encoding.UTF8.GetBytes("EncryptedGroupMessage");
+
+        var relayEndpoint = RelayEndpoint.Create("https://group-relay.example.com:443").Value!;
+        var groupRoute = new DeliveryRoute(DeliveryRouteType.RelayedGroup, null, null, relayEndpoint, null);
+        var groupJob = OutboxJob.Create(channelId, ownerId, recipientId, groupRoute, payload, timeProvider).Value!;
+
+        var result = await dispatcher.SendAsync(groupJob);
+        result.IsSuccess.Should().BeTrue();
+
+        invoker.LastGroupEndpoint.Should().Be(new Uri("https://group-relay.example.com:443"));
+        invoker.LastGroupRequest.Should().NotBeNull();
+        invoker.LastGroupRequest!.ConversationId.ToByteArray().Should().Equal(channelId.Value.ToByteArray(bigEndian: true));
+        invoker.LastGroupRequest.Ciphertext.ToByteArray().Should().Equal(payload);
+        invoker.LastGroupRequest.ZkPresentationProof.Length.Should().Be(72);
     }
 }

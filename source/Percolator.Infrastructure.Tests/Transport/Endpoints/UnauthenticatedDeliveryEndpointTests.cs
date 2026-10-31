@@ -24,6 +24,7 @@ using Percolator.Infrastructure.Security;
 using Percolator.Infrastructure.Transport;
 using Percolator.Infrastructure.Transport.Endpoints;
 using Percolator.PluginSdk;
+using Signal.Interop;
 
 [TestFixture]
 public sealed class UnauthenticatedDeliveryEndpointTests
@@ -202,9 +203,10 @@ public sealed class UnauthenticatedDeliveryEndpointTests
         // Register mailbox with owner association
         await _capabilityStore.RegisterAsync(routingToken, correctDeliveryToken, drainToken, ownerId, deviceId);
 
-        // Known RFC 8032 Ed25519 keypair
-        byte[] privId = Convert.FromHexString("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60");
-        var pubId = IdentityKey.FromSpan(Convert.FromHexString("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a"));
+        byte[] privId = new byte[32];
+        byte[] pubIdBytes = new byte[32];
+        SignalCrypto.GenerateEd25519KeyPair(privId, pubIdBytes);
+        var pubId = IdentityKey.FromSpan(pubIdBytes);
 
         var (_, pubSigned) = _cryptoEngine.GenerateEphemeralKeyPair();
         var sig = _cryptoEngine.SignEd25519(privId, pubSigned.Span);

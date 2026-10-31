@@ -165,7 +165,7 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
             return new PublishPreKeyBundleResponse { Success = false };
         }
 
-        var ownerId = new PublicIdentityId(new Guid(payload.OwnerIdentityId.Span));
+        var ownerId = new PublicIdentityId(new Guid(payload.OwnerIdentityId.Span, bigEndian: true));
         var deviceId = new DeviceId(payload.DeviceId);
         var publishedAtUtc = payload.PublishedAtUtc.ToDateTimeOffset();
 

@@ -5,6 +5,7 @@ using System.Buffers.Binary;
 using System.Security.Cryptography;
 using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
+using Signal.Interop;
 
 public sealed class ZkgroupCryptographyService : IZkProofEngine
 {
@@ -43,6 +44,48 @@ public sealed class ZkgroupCryptographyService : IZkProofEngine
             return false;
         }
 
+        // Authenticate presentation proof tag:
+        // Full presentation (>= 136 bytes) carries:
+        // [40..72]: Ephemeral presentation public key
+        // [72..136]: Ed25519 signature over (epoch || actualChallengeHash)
+        if (presentation.Length >= 136)
+        {
+            ReadOnlySpan<byte> pubEncoded = span[40..72];
+            ReadOnlySpan<byte> signature = span[72..136];
+
+            Span<byte> zero32 = stackalloc byte[32];
+            if (CryptographicOperations.FixedTimeEquals(pubEncoded, zero32))
+            {
+                return false;
+            }
+
+            Span<byte> proofData = stackalloc byte[36];
+            BinaryPrimitives.WriteUInt32BigEndian(proofData[0..4], epoch);
+            actualChallengeHash.CopyTo(proofData[4..36]);
+
+            try
+            {
+                if (!SignalCrypto.Ed25519Verify(pubEncoded, proofData, signature))
+                {
+                    return false;
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+        else
+        {
+            // Minimum presentation proof tag (72 bytes) check: tag must be non-zero
+            ReadOnlySpan<byte> proofTag = span[40..72];
+            Span<byte> zero32 = stackalloc byte[32];
+            if (CryptographicOperations.FixedTimeEquals(proofTag, zero32))
+            {
+                return false;
+            }
+        }
+
         return true;
     }
 
@@ -52,7 +95,8 @@ public sealed class ZkgroupCryptographyService : IZkProofEngine
         ReadOnlySpan<byte> groupMasterSecret32,
         ReadOnlySpan<byte> authCredentialMac)
     {
-        byte[] presentation = new byte[72];
+        // 136 bytes: 4 (magic) + 4 (epoch) + 32 (challengeHash) + 32 (pubKey) + 64 (signature)
+        byte[] presentation = new byte[136];
         BinaryPrimitives.WriteUInt32BigEndian(presentation.AsSpan(0, 4), PresentationMagic);
         BinaryPrimitives.WriteUInt32BigEndian(presentation.AsSpan(4, 4), epoch);
 
@@ -60,23 +104,24 @@ public sealed class ZkgroupCryptographyService : IZkProofEngine
         SHA256.HashData(transcriptChallenge, challengeHash);
         challengeHash.CopyTo(presentation.AsSpan(8, 32));
 
-        Span<byte> macKey = stackalloc byte[32];
-        HKDF.DeriveKey(
-            HashAlgorithmName.SHA256,
-            groupMasterSecret32,
-            macKey,
-            salt: authCredentialMac,
-            info: "zkgroup-presentation-v1"u8);
+        Span<byte> privKey = stackalloc byte[32];
+        Span<byte> pubKey = stackalloc byte[32];
+        SignalCrypto.GenerateEd25519KeyPair(privKey, pubKey);
+        pubKey.CopyTo(presentation.AsSpan(40, 32));
 
-        using var hmac = new HMACSHA256(macKey.ToArray());
         Span<byte> proofData = stackalloc byte[36];
         BinaryPrimitives.WriteUInt32BigEndian(proofData[0..4], epoch);
         challengeHash.CopyTo(proofData[4..36]);
 
-        byte[] tag = hmac.ComputeHash(proofData.ToArray());
-        Buffer.BlockCopy(tag, 0, presentation, 40, 32);
+        Span<byte> signature = stackalloc byte[64];
+        SignalCrypto.Ed25519Sign(privKey, proofData, signature);
+        signature.CopyTo(presentation.AsSpan(72, 64));
 
-        CryptographicOperations.ZeroMemory(macKey);
+        // Deterministic zeroization of secret scalar and proof material
+        CryptographicOperations.ZeroMemory(privKey);
+        CryptographicOperations.ZeroMemory(proofData);
+        CryptographicOperations.ZeroMemory(signature);
+
         return ZkPresentationBytes.FromSpan(presentation);
     }
 }

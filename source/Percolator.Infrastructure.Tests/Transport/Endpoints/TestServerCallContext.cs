@@ -42,4 +42,10 @@ public sealed class TestServerStreamWriter<T> : IServerStreamWriter<T>
         WrittenMessages.Add(message);
         return Task.CompletedTask;
     }
+
+    public Task WriteAsync(T message, CancellationToken cancellationToken)
+    {
+        WrittenMessages.Add(message);
+        return Task.CompletedTask;
+    }
 }

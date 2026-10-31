@@ -1,6 +1,7 @@
 namespace Percolator.Infrastructure.Transport;
 
 using System;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Google.Protobuf;
@@ -9,6 +10,7 @@ using Grpc.Core;
 using Percolator.Application2.Delivery;
 using Percolator.Application2.Delivery.Ports;
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Security.Ports;
 using Percolator.Infrastructure.Protos;
 
@@ -54,13 +56,16 @@ public sealed class TransportDispatcher : ITransportDispatcher
 {
     private readonly ITransportClientInvoker _invoker;
     private readonly IZkProofEngine? _zkProofEngine;
+    private readonly IGroupCredentialsRepository? _groupCredentialsRepository;
 
     public TransportDispatcher(
         ITransportClientInvoker invoker,
-        IZkProofEngine? zkProofEngine = null)
+        IZkProofEngine? zkProofEngine = null,
+        IGroupCredentialsRepository? groupCredentialsRepository = null)
     {
         _invoker = invoker ?? throw new ArgumentNullException(nameof(invoker));
         _zkProofEngine = zkProofEngine;
+        _groupCredentialsRepository = groupCredentialsRepository;
     }
 
     public async ValueTask<DomainResult> SendAsync(OutboxJob job, CancellationToken ct = default)
@@ -82,7 +87,7 @@ public sealed class TransportDispatcher : ITransportDispatcher
                     var envelopeProto = new SealedEnvelopeProto
                     {
                         RecipientRoutingToken = route.TargetToken.HasValue
-                            ? ByteString.CopyFrom(route.TargetToken.Value.Value.ToByteArray())
+                            ? ByteString.CopyFrom(route.TargetToken.Value.Value.ToByteArray(bigEndian: true))
                             : ByteString.Empty,
                         DeliveryToken = route.TargetDeliveryToken != null
                             ? ByteString.CopyFrom(route.TargetDeliveryToken.Span)
@@ -115,7 +120,7 @@ public sealed class TransportDispatcher : ITransportDispatcher
                     var envelopeProto = new SealedEnvelopeProto
                     {
                         RecipientRoutingToken = route.TargetToken.HasValue
-                            ? ByteString.CopyFrom(route.TargetToken.Value.Value.ToByteArray())
+                            ? ByteString.CopyFrom(route.TargetToken.Value.Value.ToByteArray(bigEndian: true))
                             : ByteString.Empty,
                         DeliveryToken = route.TargetDeliveryToken != null
                             ? ByteString.CopyFrom(route.TargetDeliveryToken.Span)
@@ -145,21 +150,43 @@ public sealed class TransportDispatcher : ITransportDispatcher
                         ? new Uri(endpointStr)
                         : new Uri($"https://{endpointStr}");
 
+                    byte[]? masterKeyBytes = null;
+                    byte[]? authMacBytes = null;
+
+                    if (_zkProofEngine != null && _groupCredentialsRepository != null)
+                    {
+                        var creds = await _groupCredentialsRepository.GetAsync(job.ChannelId, ct);
+                        if (creds != null)
+                        {
+                            masterKeyBytes = creds.MasterKey.Span.ToArray();
+                            authMacBytes = creds.AuthCredentialMac.Span.ToArray();
+                        }
+                    }
+
                     byte[] zkProof = Array.Empty<byte>();
+                    uint epoch = 0;
                     if (_zkProofEngine != null)
                     {
+                        Span<byte> challengeHash = stackalloc byte[32];
+                        RelayGroupLedger.ComputeDispatchChallenge(job.Payload.Span, challengeHash);
+
                         var proofBytes = _zkProofEngine.GenerateGroupPresentation(
-                            0,
-                            ReadOnlySpan<byte>.Empty,
-                            ReadOnlySpan<byte>.Empty,
-                            ReadOnlySpan<byte>.Empty);
+                            epoch,
+                            challengeHash,
+                            masterKeyBytes ?? ReadOnlySpan<byte>.Empty,
+                            authMacBytes ?? ReadOnlySpan<byte>.Empty);
                         zkProof = proofBytes.Span.ToArray();
+
+                        if (masterKeyBytes != null)
+                        {
+                            CryptographicOperations.ZeroMemory(masterKeyBytes);
+                        }
                     }
 
                     var groupRequest = new DispatchGroupMessageRequest
                     {
                         ConversationId = ByteString.CopyFrom(job.ChannelId.Value.ToByteArray(bigEndian: true)),
-                        Epoch = 0,
+                        Epoch = epoch,
                         ZkPresentationProof = ByteString.CopyFrom(zkProof),
                         SenderKeyIteration = 0,
                         Ciphertext = ByteString.CopyFrom(job.Payload.Span),

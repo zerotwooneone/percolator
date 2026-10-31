@@ -23,41 +23,85 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
     private readonly IRelayPreKeyRepository _preKeyRepository;
     private readonly ILocalChunkStore _chunkStore;
     private readonly IRelayMailboxCapabilityStore _capabilityStore;
+    private readonly IIngressFilterService? _ingressFilter;
+    private readonly ISealedEnvelopeUnwrapper? _unwrapper;
 
     public UnauthenticatedDeliveryEndpoint(
         IRelayProfileRepository profileRepository,
         IRelayPreKeyRepository preKeyRepository,
         ILocalChunkStore chunkStore,
-        IRelayMailboxCapabilityStore? capabilityStore = null)
+        IRelayMailboxCapabilityStore? capabilityStore = null,
+        IIngressFilterService? ingressFilter = null,
+        ISealedEnvelopeUnwrapper? unwrapper = null)
     {
         _profileRepository = profileRepository ?? throw new ArgumentNullException(nameof(profileRepository));
         _preKeyRepository = preKeyRepository ?? throw new ArgumentNullException(nameof(preKeyRepository));
         _chunkStore = chunkStore ?? throw new ArgumentNullException(nameof(chunkStore));
         _capabilityStore = capabilityStore ?? new InMemoryRelayMailboxCapabilityStore();
+        _ingressFilter = ingressFilter;
+        _unwrapper = unwrapper;
     }
 
-    public override Task<DeliveryAckProto> DeliverDirect(SealedEnvelopeProto request, ServerCallContext context)
+    public override async Task<DeliveryAckProto> DeliverDirect(SealedEnvelopeProto request, ServerCallContext context)
     {
         if (request.EncryptedPackage.IsEmpty)
         {
-            return Task.FromResult(new DeliveryAckProto
+            return new DeliveryAckProto
             {
                 Success = false,
                 ErrorMessage = "Encrypted package cannot be empty."
-            });
+            };
         }
 
-        return Task.FromResult(new DeliveryAckProto
+        if (_unwrapper != null && _ingressFilter != null)
+        {
+            var unwrapResult = _unwrapper.Unwrap(new MailboxEnvelope(
+                EnvelopeId.New(),
+                BlindedRoutingToken.New(),
+                request.EncryptedPackage.Memory,
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow.AddDays(1)));
+
+            if (unwrapResult.IsSuccess)
+            {
+                var envelope = unwrapResult.Value!;
+                var filterResult = await _ingressFilter.CheckIngressAllowedAsync(
+                    envelope.RecipientIdentityId,
+                    envelope.SenderIdentityId,
+                    context.CancellationToken);
+
+                if (filterResult.IsFailure)
+                {
+                    return new DeliveryAckProto
+                    {
+                        Success = false,
+                        ErrorMessage = filterResult.Error!.Description
+                    };
+                }
+            }
+        }
+
+        return new DeliveryAckProto
         {
             Success = true
-        });
+        };
     }
 
     public override async Task<EnqueueAckProto> EnqueueMailbox(SealedEnvelopeProto request, ServerCallContext context)
     {
-        if (request.RecipientRoutingToken.IsEmpty)
+        if (request.RecipientRoutingToken.IsEmpty || request.DeliveryToken.IsEmpty)
         {
-            throw new RpcException(new Status(StatusCode.InvalidArgument, "Recipient routing token cannot be empty."));
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "Recipient routing token and delivery token are required."));
+        }
+
+        bool isAuthorized = await _capabilityStore.VerifyDeliveryTokenAsync(
+            request.RecipientRoutingToken.Memory,
+            request.DeliveryToken.Memory,
+            context.CancellationToken);
+
+        if (!isAuthorized)
+        {
+            throw new RpcException(new Status(StatusCode.PermissionDenied, "Invalid delivery token capability."));
         }
 
         var queued = new QueuedSealedEnvelopeProto

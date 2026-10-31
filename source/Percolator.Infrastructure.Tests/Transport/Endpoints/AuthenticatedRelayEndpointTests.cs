@@ -17,6 +17,7 @@ using Percolator.Infrastructure.Protos;
 using Percolator.Infrastructure.Security;
 using Percolator.Infrastructure.Transport;
 using Percolator.Infrastructure.Transport.Endpoints;
+using Signal.Interop;
 
 [TestFixture]
 public sealed class AuthenticatedRelayEndpointTests
@@ -63,8 +64,10 @@ public sealed class AuthenticatedRelayEndpointTests
         var cryptoEngine = new SignalCryptoEngine();
         var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
 
-        byte[] privId = Convert.FromHexString("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60");
-        var pubId = IdentityKey.FromSpan(Convert.FromHexString("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a"));
+        byte[] privId = new byte[32];
+        byte[] pubIdBytes = new byte[32];
+        SignalCrypto.GenerateEd25519KeyPair(privId, pubIdBytes);
+        var pubId = IdentityKey.FromSpan(pubIdBytes);
 
         var (_, pubSigned) = cryptoEngine.GenerateEphemeralKeyPair();
         var prekeySig = cryptoEngine.SignEd25519(privId, pubSigned.Span);
@@ -76,7 +79,7 @@ public sealed class AuthenticatedRelayEndpointTests
         // 1. Initial valid bundle publication at T=now
         var payload1 = new PreKeyBundlePayloadProto
         {
-            OwnerIdentityId = ByteString.CopyFrom(ownerId.Value.ToByteArray()),
+            OwnerIdentityId = ByteString.CopyFrom(ownerId.Value.ToByteArray(bigEndian: true)),
             DeviceId = deviceId,
             IdentityKey = ByteString.CopyFrom(pubId.Span),
             SignedPrekeyId = 1,
@@ -100,7 +103,7 @@ public sealed class AuthenticatedRelayEndpointTests
         // 2. Replay attack with older timestamp (T=now - 1 hour)
         var stalePayload = new PreKeyBundlePayloadProto
         {
-            OwnerIdentityId = ByteString.CopyFrom(ownerId.Value.ToByteArray()),
+            OwnerIdentityId = ByteString.CopyFrom(ownerId.Value.ToByteArray(bigEndian: true)),
             DeviceId = deviceId,
             IdentityKey = ByteString.CopyFrom(pubId.Span),
             SignedPrekeyId = 1,
@@ -124,7 +127,7 @@ public sealed class AuthenticatedRelayEndpointTests
         // 3. Newer timestamp (T=now + 1 hour) succeeds
         var newerPayload = new PreKeyBundlePayloadProto
         {
-            OwnerIdentityId = ByteString.CopyFrom(ownerId.Value.ToByteArray()),
+            OwnerIdentityId = ByteString.CopyFrom(ownerId.Value.ToByteArray(bigEndian: true)),
             DeviceId = deviceId,
             IdentityKey = ByteString.CopyFrom(pubId.Span),
             SignedPrekeyId = 2,

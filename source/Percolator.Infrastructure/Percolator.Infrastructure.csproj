@@ -24,6 +24,17 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Reference Include="Signal.Interop">
+      <HintPath>..\vendor\Signal.Interop\Signal.Interop.dll</HintPath>
+    </Reference>
+    <Content Include="..\vendor\Signal.Interop\signal_shim.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>signal_shim.dll</Link>
+      <Visible>false</Visible>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="Percolator.Infrastructure.Tests" />
   </ItemGroup>
 
