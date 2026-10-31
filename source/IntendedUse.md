@@ -4,12 +4,12 @@ Spec: [intended-use-spec](spec/intended-use-spec.md)
 
 ## 1. Intended Purpose
 
-Percolator is a decentralized, peer-to-peer (P2P) communication and data-sharing system. Its purpose is to enable individuals and groups to discover peers, converse, and exchange data directly across untrusted networks without relying on centralized identity authorities, cloud storage providers, or trusted third-party servers.
+Percolator is a decentralized, peer-to-peer (P2P) communication and data-sharing system. Its purpose is to enable individuals and groups to establish contact, converse, and exchange data directly across untrusted networks without relying on centralized identity authorities, cloud storage providers, or trusted third-party servers.
 
 The system is intended to provide:
 - **Self-Sovereign Identity:** Users establish and control their own identities locally without central registration or external account bindings (such as phone numbers or email addresses).
 - **Confidential and Authentic Communication:** Interpersonal and group communications are protected end-to-end so that only intended participants can read content or verify its origin.
-- **Minimal Metadata Exposure:** Peer discovery, routing, and offline delivery minimize the exposure of social graphs and communication patterns to network observers and intermediate nodes.
+- **Minimal Metadata Exposure:** Peer connection, routing, and offline delivery minimize the exposure of social graphs and communication patterns to network observers and intermediate nodes.
 - **Protected Local State:** Sensitive local data and credentials remain protected at rest when the application is not actively in use, and no network presence is exposed without explicit user intent.
 
 ---
