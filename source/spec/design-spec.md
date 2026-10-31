@@ -12,9 +12,9 @@ A **Design Specification** (`design`) document—placed as `Design.md` at the ro
 
 - **Item Identifier Prefixes:**
   - `INV-<SLUG>` for architectural invariants (Section 2)
-  - `DEC-<SLUG>` for key technical design choices (Section 3)
+  - `DEC-<SLUG>` for deployable-internal technical design choices (Section 3)
   - Governed by [Change Control](qms-spec.md#32-design-change-control-never-move-the-goalposts) (no deletion, renaming, or weakening without human approval).
-- **Permitted Outbound QMS References:** Its corresponding `deployable-requirements` (`DEP-*`) or `system-requirements` (`SYS-*`), `fact` (`FACT-*`), and **inward `design` documents** (`INV-*`, `DEC-*`) strictly matching compile-time project references.
+- **Permitted Outbound QMS References:** Its corresponding `deployable-requirements` (`DEP-*`), `system-requirements` (`SYS-*`), `decision-register` (`DEC-*`), `soup` (`SOUP-*`), `fact` (`FACT-*`), and **inward `design` documents** (`INV-*`, `DEC-*`) strictly matching compile-time project references.
 - **Prohibited Outbound References:** **MUST NOT** reference `intended-use`, `user-needs`, or `risk-register` directly (traces through `SYS-*` / `DEP-*`), and **MUST NOT** link to outward or peer `design` documents that this project does not depend on at compile time (use non-authoritative [cross-cutting tags](qms-spec.md#4-non-authoritative-cross-cutting-tags-tag-name) instead).
 
 ---
@@ -30,6 +30,8 @@ In addition to the universal rules in [`qms-spec`](qms-spec.md):
    - Each of the 3 allowed sections has a distinct job. If a concept is listed as an In-Scope responsibility in Section 1, do not re-list it as a folder/module in Section 2 and re-explain it in Section 3.
 3. **Define Shared Rules Once in the Innermost Deployable (DRY Inheritance):**
    - Cross-cutting architectural invariants (such as primitive-obsession guards, result types, clock inversion, or persistence rehydration visibility) **MUST** be defined **once** in the innermost deployable's `Design.md`. Downstream `Design.md` files may link inline to that inward `INV-<SLUG>` or `DEC-<SLUG>` when extending the pattern, never restating it.
+4. **Deployable Technical Choices vs. System Decisions (`decision-register-spec`):**
+   - Cross-cutting, multi-deployable architectural decisions, protocol selections, and SOUP evaluations belong centrally in [`decision-register-spec`](decision-register-spec.md) (`DEC-*`). Section 3 of a deployable `Design.md` realizes those system decisions by linking inline (`[DEC-<SLUG>]`) or defines localized engineering mechanisms (`DEC-<SLUG>`) strictly internal to that deployable.
 
 ---
 

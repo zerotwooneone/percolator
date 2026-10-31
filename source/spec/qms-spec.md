@@ -5,9 +5,10 @@
 This document is the root meta-specification governing all specification, requirements, risk, and design documents in a repository. It establishes a lightweight, Git-native architecture and traceability framework inspired by Medical Device Quality Management Systems (QMS) so humans and AI assistants can acquire accurate architectural context rapidly without maintaining brittle, repetitive documentation.
 
 - **IEC 62304:2006+AMD1:2015** (*Medical device software — Software life cycle processes*): Software item decomposition, architectural segregation, SOUP management (Clauses 3.24, 5.3.3, 5.3.4, 7.1.3, 8.1.2), requirements allocation, and bidirectional traceability (Clauses 5.1–5.4, 7.1–7.3, 8).
-- **ISO 13485:2016 Clause 7.3** & **FDA 21 CFR 820.30** (*Design Controls*): Design inputs, design outputs, design verification, design validation, and formal design change control.
+- **ISO 13485:2016 Clause 7.3** & **FDA 21 CFR 820.30** (*Design Controls*): Design inputs, design outputs, design review, design verification, design validation, control of design changes, and Design History File / Design and Development Files.
 - **FDA Guidance: *Off-The-Shelf Software Use in Medical Devices* (August 2023)**: Specification, risk assessment, verification, and lifecycle maintenance for third-party / off-the-shelf software.
 - **ISO 14971:2019** (*Application of risk management to medical devices*): Hazard identification, risk control priority order (*Inherent* $\rightarrow$ *Protective* $\rightarrow$ *Information*), and residual risk evaluation.
+- **AAMI TIR45:2023** (*Guidance on the use of AGILE practices in the development of medical device software*): Evolutionary architecture, continuous design review records, and Architecture Decision Records (ADRs) as living design artifacts.
 
 ---
 
@@ -23,6 +24,7 @@ flowchart BT
     RR["risk-register-spec<br/>(HAZ-*)"]
     SYS["system-requirements-spec<br/>(SYS-*)"]
     DEP["deployable-requirements-spec<br/>(DEP-*)"]
+    DEC["decision-register-spec<br/>(DEC-*)"]
     DSN["design-spec<br/>(INV-*, DEC-*)"]
     SOUP["soup-spec<br/>(SOUP-*)"]
 
@@ -40,8 +42,14 @@ flowchart BT
     DEP -->|wraps / allocates| SOUP
     DEP -->|inward compile-time only| DEP
     DEP -.->|optional inline| FACT
+    DEC -->|resolves / evaluates| SYS
+    DEC -->|resolves / evaluates| DEP
+    DEC -->|assesses impact on| RR
+    DEC -->|selects / quarantines| SOUP
+    DEC -.->|optional inline| FACT
     DSN -->|implements| DEP
     DSN -->|implements| SYS
+    DSN -->|realizes / references| DEC
     DSN -->|segregates / adapts| SOUP
     DSN -->|inward compile-time only| DSN
     DSN -.->|optional inline| FACT
@@ -63,7 +71,8 @@ Every normative item in an implementing QMS document **MUST** begin with a self-
 | [`risk-register-spec`](risk-register-spec.md) | `HAZ-<SLUG>` |
 | [`system-requirements-spec`](system-requirements-spec.md) | `SYS-<SLUG>` |
 | [`deployable-requirements-spec`](deployable-requirements-spec.md) | `DEP-<SLUG>` |
-| [`design-spec`](design-spec.md) | `INV-<SLUG>` (Invariants), `DEC-<SLUG>` (Choices) |
+| [`decision-register-spec`](decision-register-spec.md) | `DEC-<SLUG>` (System & Architectural Decisions) |
+| [`design-spec`](design-spec.md) | `INV-<SLUG>` (Invariants), `DEC-<SLUG>` (Local Deployable Choices) |
 | [`soup-spec`](soup-spec.md) | `SOUP-<SLUG>` |
 
 ### 3.2 Design Change Control ("Never Move the Goalposts")
@@ -117,4 +126,4 @@ All specifications and implementing documents **MUST** obey these five baseline 
 5. **Git-Authoritative History Policy:** In-file revision history tables are prohibited across all documents (`git log` is authoritative). Only three specific QMS metadata records are permitted in-file:
    - Pinned external standard revisions/years in [`fact-spec`](fact-spec.md).
    - Hazard control state and residual risk evaluation in [`risk-register-spec`](risk-register-spec.md).
-   - Brief *Rejected Alternatives* under technical design choices in [`design-spec`](design-spec.md).
+   - Brief *Rejected Alternatives* and lifecycle status under architectural decisions in [`decision-register-spec`](decision-register-spec.md) and technical design choices in [`design-spec`](design-spec.md).
