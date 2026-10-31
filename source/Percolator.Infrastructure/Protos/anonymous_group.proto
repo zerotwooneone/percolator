@@ -1,0 +1,74 @@
+syntax = "proto3";
+
+package percolator.infrastructure;
+
+option csharp_namespace = "Percolator.Infrastructure.Protos";
+
+message GroupStreamClientMessage {
+  bytes conversation_id = 1;
+  uint32 current_epoch = 2;
+  bytes zk_presentation_proof = 3;
+}
+
+message GroupBroadcastEnvelope {
+  bytes conversation_id = 1;
+  uint32 epoch = 2;
+  uint32 sender_key_iteration = 3;
+  bytes ciphertext = 4;
+  bytes author_signature = 5;
+}
+
+message EpochMutationNotification {
+  bytes conversation_id = 1;
+  uint32 new_epoch = 2;
+}
+
+message GroupStreamServerMessage {
+  oneof payload {
+    GroupBroadcastEnvelope broadcast = 1;
+    EpochMutationNotification mutation = 2;
+  }
+}
+
+message DispatchGroupMessageRequest {
+  bytes conversation_id = 1;
+  uint32 epoch = 2;
+  bytes zk_presentation_proof = 3;
+  uint32 sender_key_iteration = 4;
+  bytes ciphertext = 5;
+  bytes author_signature = 6;
+}
+
+message DispatchGroupMessageResponse {
+  bool accepted = 1;
+}
+
+message CommitRosterMutationRequest {
+  bytes conversation_id = 1;
+  uint32 base_epoch = 2;
+  bytes new_roster_blob = 3;
+  repeated bytes new_routing_tokens = 4;
+  bytes zk_presentation_proof = 5;
+}
+
+message CommitRosterMutationResponse {
+  bool committed = 1;
+  uint32 new_epoch = 2;
+}
+
+message FetchGroupStateRequest {
+  bytes conversation_id = 1;
+  bytes zk_presentation_proof = 2;
+}
+
+message FetchGroupStateResponse {
+  uint32 current_epoch = 1;
+  bytes encrypted_roster_blob = 2;
+}
+
+service AnonymousGroupRelayService {
+  rpc SubscribeGroupStream(GroupStreamClientMessage) returns (stream GroupStreamServerMessage);
+  rpc DispatchGroupMessage(DispatchGroupMessageRequest) returns (DispatchGroupMessageResponse);
+  rpc CommitRosterMutation(CommitRosterMutationRequest) returns (CommitRosterMutationResponse);
+  rpc FetchGroupState(FetchGroupStateRequest) returns (FetchGroupStateResponse);
+}

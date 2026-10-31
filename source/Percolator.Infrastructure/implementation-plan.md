@@ -910,8 +910,8 @@
   - **Strict Forward Independence**:
     - Depends strictly on standard BCL cryptography (`System.Security.Cryptography`) and native interop bindings. Zero dependency on network transports, outbox repositories, or Phase 4 plugins.
 - **Scope & Deliverables**:
-  - [ ] Implement `SignalCryptoEngine` (`Percolator.Domain.Security.Ports.ICryptoEngine`).
-  - [ ] Implement `ZkgroupCryptographyService` (`Percolator.Domain.Security.Ports.IZkProofEngine`).
+  - [x] Implement `SignalCryptoEngine` (`Percolator.Domain.Security.Ports.ICryptoEngine`).
+  - [x] Implement `ZkgroupCryptographyService` (`Percolator.Domain.Security.Ports.IZkProofEngine`).
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Security/`)**:
   - `SignalCryptoEngineTests.Ed25519_SignAndVerify_MatchesRfc8032Vectors`: known test vectors match RFC 8032. Low-brittle guarantee: asserts mathematical outputs; zero mock coupling.
   - `SignalCryptoEngineTests.Curve25519_DiffieHellman_MatchesRfc7748Vectors`: known test vectors match RFC 7748. Low-brittle guarantee: asserts mathematical outputs.
@@ -1243,9 +1243,9 @@
   - **Explicit Phase 4 Boundary Exclusion**:
     - Application plugin schemas (`chat.proto`, `discovery.proto`, `file_transfer.proto`) are strictly excluded from Phase 3 and deferred to Phase 4 (Chunks 4.1, 4.2, 4.4).
 - **Scope & Deliverables**:
-  - [ ] Configure `Google.Protobuf` and `Grpc.Tools` in `Percolator.Infrastructure.csproj`.
-  - [ ] Author Protobuf schemas in `Percolator.Infrastructure/Protos/`: `unauthenticated_delivery.proto`, `authenticated_relay.proto`, `anonymous_group.proto`, `session.proto`, and `profile.proto`.
-  - [ ] Verify clean compilation and code generation of typed C# messages and gRPC base services.
+  - [x] Configure `Google.Protobuf` and `Grpc.Tools` in `Percolator.Infrastructure.csproj`.
+  - [x] Author Protobuf schemas in `Percolator.Infrastructure/Protos/`: `unauthenticated_delivery.proto`, `authenticated_relay.proto`, `anonymous_group.proto`, `session.proto`, and `profile.proto`.
+  - [x] Verify clean compilation and code generation of typed C# messages and gRPC base services.
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Protos/`)**:
   - `CoreProtoCompilationTests.AllProtos_GenerateValidClrTypes`: tests that core message types instantiate and default-serialize without schema errors.
 - **Verification Gate**:
@@ -1267,9 +1267,9 @@
   - **Domain Boundary & Value Object Construction Guardrail**:
     - `ProtobufSessionWirePacker` and `ProtobufProfileSerializer` unpack untrusted wire bytes and MUST construct inner-ring types exclusively via validated Domain Value Object factories (`DhPublicKey.FromSpan`, `IdentityKey.FromSpan`, `EphemeralPublicKey.FromSpan`, `PreKeyId.Create`, `BlobId.FromSha256`, `AttachmentKey.FromSpan`, `MimeType.Create`), returning `DomainResult.Failure` when lengths or structural invariants fail. Zero `Rehydrate` methods or modifications to `Percolator.Domain`, `Percolator.Application`, or `Percolator.PluginSdk` are permitted in this chunk.
 - **Scope & Deliverables**:
-  - [ ] Implement `ProtobufSessionWirePacker` (`Percolator.Application.Ports.ISessionWirePacker`).
-  - [ ] Implement `ProtobufPayloadSerializer` (`Percolator.PluginSdk.IPayloadSerializer`).
-  - [ ] Implement `ProtobufProfileSerializer` (`Percolator.PluginSdk.Profiles.IProfileMetadataSerializer`).
+  - [x] Implement `ProtobufSessionWirePacker` (`Percolator.Application.Ports.ISessionWirePacker`).
+  - [x] Implement `ProtobufPayloadSerializer` (`Percolator.PluginSdk.IPayloadSerializer`).
+  - [x] Implement `ProtobufProfileSerializer` (`Percolator.PluginSdk.Profiles.IProfileMetadataSerializer`).
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Packaging/`)**:
   - `ProtobufSessionWirePackerTests.RoundtripDirectSession_PacksAndUnpacksCorrectly`: packs ratchet header and ciphertext into wire bytes and unwraps into typed `InboundDirectEnvelope`.
   - `ProtobufSessionWirePackerTests.GroupSessionPackage_PacksIterationAndSignature`: packages group message iteration, signature, and ciphertext into `GroupSessionPackageProto`.
@@ -1325,12 +1325,12 @@
     - `PeerGrpcChannelFactory`: Thread-safe bounded channel cache (capacity: 100 channels) with 5-minute sliding expiration for idle connections, 2-second connect timeout, and clean socket disposal upon eviction.
     - `PrimaryContainerServiceActivator<T>`: Bridges Kestrel gRPC listener container to host DI container (`IServiceProvider`) with scoped lifetime cleanup.
 - **Scope & Deliverables**:
-  - [ ] Implement `IPortReservationService` (`Percolator.Application.Ports.IPortReservationService`) in `Percolator.Application` (approved application port extension).
-  - [ ] Implement `SqlitePortReservationService` (`IPortReservationService`).
-  - [ ] Define `ITransportCertificateProvider` (`Percolator.Infrastructure.Transport.ITransportCertificateProvider`) and implement `InMemoryTransportCertificateProvider`.
-  - [ ] Implement `CallbackEndpointValidator`.
-  - [ ] Implement `PeerGrpcChannelFactory`.
-  - [ ] Implement `PrimaryContainerServiceActivator<T>`.
+  - [x] Implement `IPortReservationService` (`Percolator.Application.Ports.IPortReservationService`) in `Percolator.Application` (approved application port extension).
+  - [x] Implement `SqlitePortReservationService` (`IPortReservationService`).
+  - [x] Define `ITransportCertificateProvider` (`Percolator.Infrastructure.Transport.ITransportCertificateProvider`) and implement `InMemoryTransportCertificateProvider`.
+  - [x] Implement `CallbackEndpointValidator`.
+  - [x] Implement `PeerGrpcChannelFactory`.
+  - [x] Implement `PrimaryContainerServiceActivator<T>`.
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Transport/Primitives/`)**:
   - `CallbackEndpointValidatorTests.RejectsPrivateAndLoopbackIps_UnlessDevFlag`: rejects loopback, RFC 1918, IPv4-mapped IPv6, IPv6 ULA, and unspecified addresses by default; verifies direct `IPEndPoint` connection target.
   - `PeerGrpcChannelFactoryTests.IdleChannel_EvictedAfterSlidingExpiration`: verifies channel eviction and disposal after idle period and respects capacity ceiling.
@@ -1355,10 +1355,10 @@
     - Bridges relay `MailboxEnvelope` instances to strongly typed `InboundEnvelope` domain objects.
     - Constructs `InboundEnvelope` strictly through its validated domain constructor/factory and returns `DomainResult.Failure` on malformed wire inputs without modifying `Percolator.Domain` or `Percolator.Application`.
 - **Scope & Deliverables**:
-  - [ ] Implement `IngressFilterService` (`Percolator.Application.Ports.IIngressFilterService`).
-  - [ ] Implement `StreamRegistry` (`Percolator.Application.Ports.IStreamRegistry`).
-  - [ ] Implement `TransportDispatcher` (`Percolator.Application.Delivery.Ports.ITransportDispatcher`).
-  - [ ] Implement `SealedEnvelopeUnwrapper` (`Percolator.Application.Ports.ISealedEnvelopeUnwrapper`).
+  - [x] Implement `IngressFilterService` (`Percolator.Application.Ports.IIngressFilterService`).
+  - [x] Implement `StreamRegistry` (`Percolator.Application.Ports.IStreamRegistry`).
+  - [x] Implement `TransportDispatcher` (`Percolator.Application.Delivery.Ports.ITransportDispatcher`).
+  - [x] Implement `SealedEnvelopeUnwrapper` (`Percolator.Application.Ports.ISealedEnvelopeUnwrapper`).
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Transport/Dispatching/`)**:
   - `IngressFilterServiceTests.BlockedSender_RejectsEnvelopeBeforeCrypto`: envelopes from blocked identities rejected before any cryptographic operations.
   - `StreamRegistryTests.BackpressureSaturation_ReturnsBackpressured`: queue overflow returns `StreamWriteResult.Backpressured`.
@@ -1383,11 +1383,11 @@
     - `RelayMailboxStreamWorker`: Duplex streaming connection to home relay (`ConnectMailboxStream`) with automatic reconnection and jittered exponential backoff.
     - `RelayGroupStreamWorker`: Live subscription stream (`SubscribeGroupStream`) with ZK presentation proofs for active group channels.
 - **Scope & Deliverables**:
-  - [ ] Implement `UnauthenticatedDeliveryEndpoint` (`UnauthenticatedDeliveryService.UnauthenticatedDeliveryServiceBase`).
-  - [ ] Implement `AuthenticatedRelayEndpoint` (`AuthenticatedRelayService.AuthenticatedRelayServiceBase`).
-  - [ ] Implement `AnonymousGroupRelayEndpoint` (`AnonymousGroupRelayService.AnonymousGroupRelayServiceBase`).
-  - [ ] Implement `RelayMailboxStreamWorker` (`IHostedService`).
-  - [ ] Implement `RelayGroupStreamWorker` (`IHostedService`).
+  - [x] Implement `UnauthenticatedDeliveryEndpoint` (`UnauthenticatedDeliveryService.UnauthenticatedDeliveryServiceBase`).
+  - [x] Implement `AuthenticatedRelayEndpoint` (`AuthenticatedRelayService.AuthenticatedRelayServiceBase`).
+  - [x] Implement `AnonymousGroupRelayEndpoint` (`AnonymousGroupRelayService.AnonymousGroupRelayServiceBase`).
+  - [x] Implement `RelayMailboxStreamWorker` (`IHostedService`).
+  - [x] Implement `RelayGroupStreamWorker` (`IHostedService`).
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Transport/Endpoints/`)**:
   - `UnauthenticatedDeliveryEndpointTests.DeliverDirect_ValidEnvelope_ReturnsSuccessAck`: validates RPC execution and ack generation.
   - `UnauthenticatedDeliveryEndpointTests.UploadProfile_PersistsSlot`: verifies profile slot persistence via `IRelayProfileRepository`.

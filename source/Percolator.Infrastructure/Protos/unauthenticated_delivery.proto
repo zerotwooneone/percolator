@@ -2,12 +2,17 @@ syntax = "proto3";
 
 package percolator.infrastructure;
 
+option csharp_namespace = "Percolator.Infrastructure.Protos";
+
 import "google/protobuf/timestamp.proto";
 
 service UnauthenticatedDeliveryService {
     // Sealed sender envelope ingress
     rpc DeliverDirect (SealedEnvelopeProto) returns (DeliveryAckProto);
     rpc EnqueueMailbox (SealedEnvelopeProto) returns (EnqueueAckProto);
+
+    // Pre-key bundle capability ingress
+    rpc FetchPreKeyBundle (FetchPreKeyBundleRequest) returns (FetchPreKeyBundleResponse);
 
     // Unauthenticated profile hosting ingress
     rpc GetProfile (ProfileFetchRequestProto) returns (ProfileFetchResponseProto);
@@ -79,4 +84,18 @@ message BlindBlobChunkProto {
     bytes chunk_data = 1;
     uint32 chunk_index = 2;
     bool is_final_chunk = 3;
+}
+
+message FetchPreKeyBundleRequest {
+    bytes recipient_routing_token = 1;
+    bytes delivery_token = 2;      // Capability token preventing anonymous OPK starvation
+}
+
+message FetchPreKeyBundleResponse {
+    bytes identity_key = 1;
+    bytes signed_prekey = 2;
+    bytes prekey_signature = 3;
+    uint32 signed_prekey_id = 4;
+    optional bytes one_time_prekey = 5;
+    optional uint32 one_time_prekey_id = 6;
 }

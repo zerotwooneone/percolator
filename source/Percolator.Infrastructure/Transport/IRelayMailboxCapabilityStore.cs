@@ -1,0 +1,202 @@
+namespace Percolator.Infrastructure.Transport;
+
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Security.Cryptography;
+using System.Threading;
+using System.Threading.Tasks;
+using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Infrastructure.Protos;
+
+public interface IRelayMailboxCapabilityStore
+{
+    ValueTask RegisterAsync(
+        ReadOnlyMemory<byte> routingToken,
+        ReadOnlyMemory<byte> deliveryToken,
+        ReadOnlyMemory<byte> drainToken,
+        PublicIdentityId? ownerId = null,
+        DeviceId? deviceId = null,
+        CancellationToken ct = default);
+
+    ValueTask AssociateOwnerAsync(
+        ReadOnlyMemory<byte> routingToken,
+        PublicIdentityId ownerId,
+        DeviceId deviceId,
+        CancellationToken ct = default);
+
+    ValueTask<(PublicIdentityId? OwnerId, DeviceId? DeviceId)> GetOwnerAsync(
+        ReadOnlyMemory<byte> routingToken,
+        CancellationToken ct = default);
+
+    ValueTask<bool> VerifyDeliveryTokenAsync(
+        ReadOnlyMemory<byte> routingToken,
+        ReadOnlyMemory<byte> deliveryToken,
+        CancellationToken ct = default);
+
+    ValueTask<bool> VerifyDrainTokenAsync(
+        ReadOnlyMemory<byte> routingToken,
+        ReadOnlyMemory<byte> drainToken,
+        CancellationToken ct = default);
+
+    ValueTask<ReadOnlyMemory<byte>?> GetDrainTokenAsync(
+        ReadOnlyMemory<byte> routingToken,
+        CancellationToken ct = default);
+
+    ValueTask EnqueueEnvelopeAsync(
+        ReadOnlyMemory<byte> routingToken,
+        QueuedSealedEnvelopeProto envelope,
+        CancellationToken ct = default);
+
+    ValueTask<IReadOnlyList<QueuedSealedEnvelopeProto>> DrainEnvelopesAsync(
+        ReadOnlyMemory<byte> routingToken,
+        CancellationToken ct = default);
+}
+
+public sealed class InMemoryRelayMailboxCapabilityStore : IRelayMailboxCapabilityStore
+{
+    private sealed class MailboxEntry
+    {
+        public byte[] DeliveryToken { get; set; } = Array.Empty<byte>();
+        public byte[] DrainToken { get; set; } = Array.Empty<byte>();
+        public PublicIdentityId? OwnerId { get; set; }
+        public DeviceId? DeviceId { get; set; }
+        public List<QueuedSealedEnvelopeProto> Envelopes { get; } = new();
+        public object Lock { get; } = new();
+    }
+
+    private readonly ConcurrentDictionary<string, MailboxEntry> _mailboxes = new();
+
+    private static string ToHexKey(ReadOnlyMemory<byte> token) => Convert.ToHexString(token.Span).ToLowerInvariant();
+
+    public ValueTask RegisterAsync(
+        ReadOnlyMemory<byte> routingToken,
+        ReadOnlyMemory<byte> deliveryToken,
+        ReadOnlyMemory<byte> drainToken,
+        PublicIdentityId? ownerId = null,
+        DeviceId? deviceId = null,
+        CancellationToken ct = default)
+    {
+        var key = ToHexKey(routingToken);
+        var entry = _mailboxes.GetOrAdd(key, _ => new MailboxEntry());
+        lock (entry.Lock)
+        {
+            entry.DeliveryToken = deliveryToken.ToArray();
+            entry.DrainToken = drainToken.ToArray();
+            if (ownerId.HasValue) entry.OwnerId = ownerId;
+            if (deviceId.HasValue) entry.DeviceId = deviceId;
+        }
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask AssociateOwnerAsync(
+        ReadOnlyMemory<byte> routingToken,
+        PublicIdentityId ownerId,
+        DeviceId deviceId,
+        CancellationToken ct = default)
+    {
+        var key = ToHexKey(routingToken);
+        var entry = _mailboxes.GetOrAdd(key, _ => new MailboxEntry());
+        lock (entry.Lock)
+        {
+            entry.OwnerId = ownerId;
+            entry.DeviceId = deviceId;
+        }
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask<(PublicIdentityId? OwnerId, DeviceId? DeviceId)> GetOwnerAsync(
+        ReadOnlyMemory<byte> routingToken,
+        CancellationToken ct = default)
+    {
+        var key = ToHexKey(routingToken);
+        if (_mailboxes.TryGetValue(key, out var entry))
+        {
+            lock (entry.Lock)
+            {
+                return ValueTask.FromResult((entry.OwnerId, entry.DeviceId));
+            }
+        }
+        return ValueTask.FromResult<(PublicIdentityId?, DeviceId?)>((null, null));
+    }
+
+    public ValueTask<bool> VerifyDeliveryTokenAsync(ReadOnlyMemory<byte> routingToken, ReadOnlyMemory<byte> deliveryToken, CancellationToken ct = default)
+    {
+        var key = ToHexKey(routingToken);
+        if (!_mailboxes.TryGetValue(key, out var entry))
+        {
+            return ValueTask.FromResult(false);
+        }
+
+        lock (entry.Lock)
+        {
+            if (entry.DeliveryToken.Length == 0 || entry.DeliveryToken.Length != deliveryToken.Length)
+            {
+                return ValueTask.FromResult(false);
+            }
+
+            bool match = CryptographicOperations.FixedTimeEquals(entry.DeliveryToken, deliveryToken.Span);
+            return ValueTask.FromResult(match);
+        }
+    }
+
+    public ValueTask<bool> VerifyDrainTokenAsync(ReadOnlyMemory<byte> routingToken, ReadOnlyMemory<byte> drainToken, CancellationToken ct = default)
+    {
+        var key = ToHexKey(routingToken);
+        if (!_mailboxes.TryGetValue(key, out var entry))
+        {
+            return ValueTask.FromResult(false);
+        }
+
+        lock (entry.Lock)
+        {
+            if (entry.DrainToken.Length == 0 || entry.DrainToken.Length != drainToken.Length)
+            {
+                return ValueTask.FromResult(false);
+            }
+
+            bool match = CryptographicOperations.FixedTimeEquals(entry.DrainToken, drainToken.Span);
+            return ValueTask.FromResult(match);
+        }
+    }
+
+    public ValueTask<ReadOnlyMemory<byte>?> GetDrainTokenAsync(ReadOnlyMemory<byte> routingToken, CancellationToken ct = default)
+    {
+        var key = ToHexKey(routingToken);
+        if (_mailboxes.TryGetValue(key, out var entry))
+        {
+            lock (entry.Lock)
+            {
+                return ValueTask.FromResult<ReadOnlyMemory<byte>?>(entry.DrainToken.ToArray());
+            }
+        }
+        return ValueTask.FromResult<ReadOnlyMemory<byte>?>(null);
+    }
+
+    public ValueTask EnqueueEnvelopeAsync(ReadOnlyMemory<byte> routingToken, QueuedSealedEnvelopeProto envelope, CancellationToken ct = default)
+    {
+        var key = ToHexKey(routingToken);
+        var entry = _mailboxes.GetOrAdd(key, _ => new MailboxEntry());
+        lock (entry.Lock)
+        {
+            entry.Envelopes.Add(envelope);
+        }
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask<IReadOnlyList<QueuedSealedEnvelopeProto>> DrainEnvelopesAsync(ReadOnlyMemory<byte> routingToken, CancellationToken ct = default)
+    {
+        var key = ToHexKey(routingToken);
+        if (!_mailboxes.TryGetValue(key, out var entry))
+        {
+            return ValueTask.FromResult<IReadOnlyList<QueuedSealedEnvelopeProto>>(Array.Empty<QueuedSealedEnvelopeProto>());
+        }
+
+        lock (entry.Lock)
+        {
+            var drained = entry.Envelopes.ToArray();
+            entry.Envelopes.Clear();
+            return ValueTask.FromResult<IReadOnlyList<QueuedSealedEnvelopeProto>>(drained);
+        }
+    }
+}

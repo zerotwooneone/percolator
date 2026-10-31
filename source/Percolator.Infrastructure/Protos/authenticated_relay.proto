@@ -1,0 +1,99 @@
+syntax = "proto3";
+
+package percolator.infrastructure;
+
+option csharp_namespace = "Percolator.Infrastructure.Protos";
+
+import "google/protobuf/timestamp.proto";
+
+message QueuedSealedEnvelopeProto {
+  string queue_id = 1;
+  bytes envelope_payload = 2;
+  google.protobuf.Timestamp enqueued_at_utc = 3;
+}
+
+message AuthChallengeProto {
+  bytes nonce = 1;
+  google.protobuf.Timestamp expires_at_utc = 2;
+}
+
+message AuthResponseProto {
+  bytes routing_token = 1;
+  bytes challenge_hmac = 2; // HMAC-SHA256(drain_token, challenge_nonce)
+}
+
+message AuthResultProto {
+  bool authenticated = 1;
+  string reason = 2;
+}
+
+message MailboxAckProto {
+  string queue_id = 1;
+  bool acknowledged = 2;
+}
+
+message MailboxStreamClientMessage {
+  oneof payload {
+    AuthResponseProto auth_response = 1;
+    MailboxAckProto ack = 2;
+  }
+}
+
+message MailboxStreamServerMessage {
+  oneof payload {
+    AuthChallengeProto auth_challenge = 1;
+    AuthResultProto auth_result = 2;
+    QueuedSealedEnvelopeProto envelope = 3;
+  }
+}
+
+message RegisterMailboxRequest {
+  bytes routing_token = 1;
+  bytes authorized_delivery_token = 2;
+  bytes drain_token = 3;
+}
+
+message RegisterMailboxResponse {
+  bool success = 1;
+}
+
+message DrainMailboxRequest {
+  bytes routing_token = 1;
+  bytes drain_token = 2;
+}
+
+message DrainMailboxResponse {
+  repeated QueuedSealedEnvelopeProto envelopes = 1;
+}
+
+message OneTimePreKeyProto {
+  uint32 key_id = 1;
+  bytes public_key = 2;
+}
+
+message PreKeyBundlePayloadProto {
+  bytes owner_identity_id = 1;
+  uint32 device_id = 2;
+  bytes identity_key = 3;
+  uint32 signed_prekey_id = 4;
+  bytes signed_prekey = 5;
+  bytes prekey_signature = 6;
+  repeated OneTimePreKeyProto one_time_prekeys = 7;
+  google.protobuf.Timestamp published_at_utc = 8;
+}
+
+message PublishPreKeyBundleRequest {
+  bytes payload_bytes = 1; // Serialized PreKeyBundlePayloadProto wire bytes
+  bytes signature = 2;     // Ed25519 signature over payload_bytes
+}
+
+message PublishPreKeyBundleResponse {
+  bool success = 1;
+}
+
+service AuthenticatedRelayService {
+  rpc ConnectMailboxStream(stream MailboxStreamClientMessage) returns (stream MailboxStreamServerMessage);
+  rpc RegisterMailbox(RegisterMailboxRequest) returns (RegisterMailboxResponse);
+  rpc DrainMailbox(DrainMailboxRequest) returns (DrainMailboxResponse);
+  rpc PublishPreKeyBundle(PublishPreKeyBundleRequest) returns (PublishPreKeyBundleResponse);
+}

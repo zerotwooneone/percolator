@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package percolator.infrastructure;
+
+option csharp_namespace = "Percolator.Infrastructure.Protos";
+
+message RatchetHeaderProto {
+  bytes ratchet_public_key = 1;
+  uint32 counter = 2;
+  uint32 previous_chain_length = 3;
+}
+
+message DirectSessionPackageProto {
+  RatchetHeaderProto header = 1;
+  bytes nonce = 2;
+  bytes ciphertext = 3;
+}
+
+message GroupSessionPackageProto {
+  bytes conversation_id = 1;
+  uint32 iteration = 2;
+  bytes ciphertext = 3;
+  bytes author_signature = 4;
+}
+
+message HandshakeInvitationPackageProto {
+  bytes initiator_identity_key = 1;
+  bytes initiator_ephemeral_key = 2;
+  uint32 signed_prekey_id = 3;
+  optional uint32 onetime_prekey_id = 4;
+  bytes encrypted_payload = 5;
+}
