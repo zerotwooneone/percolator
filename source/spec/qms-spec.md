@@ -4,8 +4,9 @@
 
 This document is the root meta-specification governing all specification, requirements, risk, and design documents in a repository. It establishes a lightweight, Git-native architecture and traceability framework inspired by Medical Device Quality Management Systems (QMS) so humans and AI assistants can acquire accurate architectural context rapidly without maintaining brittle, repetitive documentation.
 
-- **IEC 62304:2006+AMD1:2015** (*Medical device software — Software life cycle processes*): Software item decomposition, architectural segregation, requirements allocation, and bidirectional traceability (Clauses 5.1–5.4, 7.1–7.3, 8).
+- **IEC 62304:2006+AMD1:2015** (*Medical device software — Software life cycle processes*): Software item decomposition, architectural segregation, SOUP management (Clauses 3.24, 5.3.3, 5.3.4, 7.1.3, 8.1.2), requirements allocation, and bidirectional traceability (Clauses 5.1–5.4, 7.1–7.3, 8).
 - **ISO 13485:2016 Clause 7.3** & **FDA 21 CFR 820.30** (*Design Controls*): Design inputs, design outputs, design verification, design validation, and formal design change control.
+- **FDA Guidance: *Off-The-Shelf Software Use in Medical Devices* (August 2023)**: Specification, risk assessment, verification, and lifecycle maintenance for third-party / off-the-shelf software.
 - **ISO 14971:2019** (*Application of risk management to medical devices*): Hazard identification, risk control priority order (*Inherent* $\rightarrow$ *Protective* $\rightarrow$ *Information*), and residual risk evaluation.
 
 ---
@@ -23,23 +24,28 @@ flowchart BT
     SYS["system-requirements-spec<br/>(SYS-*)"]
     DEP["deployable-requirements-spec<br/>(DEP-*)"]
     DSN["design-spec<br/>(INV-*, DEC-*)"]
+    SOUP["soup-spec<br/>(SOUP-*)"]
 
     IU -.->|optional inline| FACT
     UN -->|traces to| IU
     UN -.->|optional inline| FACT
     RR -->|analyzes| IU
     RR -->|analyzes| UN
+    RR -->|analyzes anomalies of| SOUP
     RR -.->|optional inline| FACT
     SYS -->|realizes| UN
     SYS -->|mitigates| RR
     SYS -.->|optional inline| FACT
     DEP -->|allocates| SYS
+    DEP -->|wraps / allocates| SOUP
     DEP -->|inward compile-time only| DEP
     DEP -.->|optional inline| FACT
     DSN -->|implements| DEP
     DSN -->|implements| SYS
+    DSN -->|segregates / adapts| SOUP
     DSN -->|inward compile-time only| DSN
     DSN -.->|optional inline| FACT
+    SOUP -.->|optional inline| FACT
 ```
 
 ---
@@ -58,6 +64,7 @@ Every normative item in an implementing QMS document **MUST** begin with a self-
 | [`system-requirements-spec`](system-requirements-spec.md) | `SYS-<SLUG>` |
 | [`deployable-requirements-spec`](deployable-requirements-spec.md) | `DEP-<SLUG>` |
 | [`design-spec`](design-spec.md) | `INV-<SLUG>` (Invariants), `DEC-<SLUG>` (Choices) |
+| [`soup-spec`](soup-spec.md) | `SOUP-<SLUG>` |
 
 ### 3.2 Design Change Control ("Never Move the Goalposts")
 In accordance with **ISO 13485 Clause 7.3.9**, **FDA 21 CFR 820.30(i)**, and **ISO 14971 Clauses 4.4, 7.3, & 8**:
@@ -67,7 +74,7 @@ In accordance with **ISO 13485 Clause 7.3.9**, **FDA 21 CFR 820.30(i)**, and **I
 4. **Identifier Non-Reuse:** When a human approves retiring an item, its `<PREFIX>-<SLUG>` identifier must never be reassigned to a different concept.
 
 ### 3.3 Lightweight Verification & Risk Control Tags (`[Verify: ...]`, `[Control: ...]`)
-In accordance with **IEC 62304 Clause 5.2.2(k) & 5.3.6** and **ISO 14971 Clause 7.1**, requirements in `system-requirements` (`SYS-*`) and `deployable-requirements` (`DEP-*`) **MUST** include a verification method tag indicating how the obligation is verified without hardcoding brittle test method names:
+In accordance with **IEC 62304 Clause 5.2.2(k) & 5.3.6** and **ISO 14971 Clause 7.1**, requirements in `system-requirements` (`SYS-*`), `deployable-requirements` (`DEP-*`), and `soup` (`SOUP-*`) **MUST** include a verification method tag indicating how the obligation is verified without hardcoding brittle test method names:
 - **Allowed on `SYS-*` (Black-Box System Boundary):**
   - `[Verify: Integration]` — End-to-end system boundary, persistence, or transport verification.
   - `[Verify: Simulation]` — Multi-node, environmental, or fault-injection harness verification.
@@ -76,6 +83,10 @@ In accordance with **IEC 62304 Clause 5.2.2(k) & 5.3.6** and **ISO 14971 Clause 
   - `[Verify: Unit]` — Deterministic in-memory unit test.
   - `[Verify: Integration]` — Component boundary or adapter integration test.
   - `[Verify: StaticAnalysis]` — Enforced at compile time by compiler diagnostics, code generators, or type/visibility constraints.
+- **Allowed on `SOUP-*` (Third-Party Boundary & Capabilities):**
+  - `[Verify: Integration]` — Component boundary adapter or runtime linkage verification.
+  - `[Verify: Simulation]` — Fault injection or adverse environmental condition verification.
+  - `[Verify: StaticAnalysis]` — Compile-time check, dependency vulnerability scanner, or ABI signature check.
 
 ---
 
@@ -89,7 +100,7 @@ While `<PREFIX>-<SLUG>` links enforce authoritative DAG traceability, related co
    - **Multi-hop vertical slices** across layers that cannot link directly in the DAG (e.g., connecting a `UserNeed` to a `Design` choice), or
    - **Lateral sibling concerns** across peer deployables that do not depend on one another at compile time.
 3. **Default is Zero Tags (Sparse Budget):** Tags are the exception, not the default. **At least half of the items in any document should have zero tags**, and no item may carry more than **1 or 2 tags**. Never add an orphan tag that appears in only one document.
-4. **Problem-Domain Naming for Cross-Layer Tags:** When a tag bridges upstream documents (`IntendedUse`, `UserNeeds`) and downstream `Design` documents, name the tag after the **capability or boundary** rather than internal code mechanics so implementation jargon never leaks into `UserNeeds`.
+4. **Problem-Domain Naming for Cross-Layer Tags:** When a tag bridges upstream documents (`IntendedUse`, `UserNeeds`) and downstream `Design` documents, name the tag after the **capability or boundary** rather than internal code mechanics so implementation jargon never leaks into `UserNeeds` achievements.
 5. **Forbidden Umbrella & Structural Tags:** Never use broad domain nouns (`#security`, `#crypto`, `#privacy`, `#network`, `#database`, `#ui`) or layer/deployable names (`#domain`, `#infrastructure`, `#application`, `#user-need`).
 6. **Non-Authoritative End-of-Item Formatting:** Tags carry zero compliance weight and never replace required `<PREFIX>-<SLUG>` links. Format tags as plain inline backtick tokens at the **very end** of an item—**never** as markdown hyperlinks (`[#tag](...)`) and never in the middle of a sentence.
 
