@@ -15,7 +15,7 @@ An **Intended Use Specification** (`intended-use`) document is the foundational 
   - `USR-<SLUG>` for target user profiles (Section 2)
   - `ENV-<SLUG>` for operating environment boundaries (Section 3)
   - `CONTRA-<SLUG>` for contraindications and out-of-scope uses (Section 4)
-  - All identifiers are governed by [Change Control](qms-spec.md#32-design-change-control-never-move-the-goalposts) (no deletion or weakening without human approval).
+  - All identifiers are governed by [Change Control](qms-spec.md#32-design-change-control-never-move-the-goalposts) (no deletion, renaming, or weakening without human approval).
 - **Permitted Outbound QMS References:** `fact` documents only (`FACT-*`).
 - **Prohibited Outbound References:** **MUST NOT** reference `user-needs`, `risk-register`, `system-requirements`, `deployable-requirements`, or `design` documents.
 
@@ -25,12 +25,12 @@ An **Intended Use Specification** (`intended-use`) document is the foundational 
 
 In addition to the universal rules in [`qms-spec`](qms-spec.md):
 
-1. **Charter-Level Stability (No Implementation Reverse-Engineering):** Define only the enduring problem domain, external operator classes, and trust boundary—**never** what happens to be implemented today:
-   - *Include:* High-level system purpose (`IU-*`), external user/operator profiles (`USR-*`), physical/network operating environment (`ENV-*`), and explicit contraindications/non-goals (`CONTRA-*`).
-   - *Exclude Specific Features & UX Flows:* Disappearing messages, automated peer discovery, two-stage unlock screens, multi-persona switchers, or safety-number dialogs.
-   - *Exclude Cryptographic & Protocol Mechanisms:* Forward secrecy, post-compromise security, group epochs, blinded tokens, message padding, or TCP/UDP framing (which belong in `risk-register`, `system-requirements`, or `design`).
-   - *Exclude Internal Verification Tooling:* Engineering simulators or test harnesses are verification tools, not intended operational user profiles of the product.
-2. **Define Personas, Environments, and Contraindications Once:** Downstream `user-needs` and `risk-register` documents must reference `IU-*`, `USR-*`, `ENV-*`, and `CONTRA-*` IDs inline rather than re-describing user profiles or threat environments.
+1. **Charter-Level Stability (No Implementation Reverse-Engineering):** Define only the enduring problem domain, external operator classes, and trust/safety boundary—**never** what happens to be implemented today:
+   - *Include:* High-level system purpose (`IU-*`), external user/operator profiles (`USR-*`), physical/network/host operating environment (`ENV-*`), and explicit contraindications/non-goals (`CONTRA-*`).
+   - *Exclude Specific Features & UX Flows:* Granular feature catalogs, UI screens, or workflow sequences.
+   - *Exclude Technical & Protocol Mechanisms:* Internal algorithms, specific cryptographic primitives, or wire framing protocols (which belong in `risk-register`, `system-requirements`, or `design`).
+   - *Exclude Non-Product Verification Tooling:* Internal engineering simulators, bench harnesses, or test runners are verification tools (**ISO 13485 Clause 7.5.6**), not intended operational uses or user profiles of the product.
+2. **Define Personas, Environments, and Contraindications Once:** Downstream `user-needs` and `risk-register` documents must reference `IU-*`, `USR-*`, `ENV-*`, and `CONTRA-*` IDs inline rather than re-describing user profiles or operating environments.
 
 ---
 
@@ -42,13 +42,13 @@ Implementing documents **MUST** use only the headings below and **MUST NOT** rep
 `Spec: [intended-use-spec](<relative-path>/spec/intended-use-spec.md)`
 
 ### `## 1. Intended Purpose`
-A concise, solution-agnostic statement of the core problem the system solves and the high-level security, privacy, or operational guarantees (`IU-<SLUG>`) it provides.
+A concise, solution-agnostic statement of the core problem the system solves and the high-level safety, security, privacy, or operational guarantees (`IU-<SLUG>`) it provides.
 
 ### `## 2. Target User Profiles`
-The distinct external classes of human users or node operators (`USR-<SLUG>`), their skill/trust assumptions, and their operational roles.
+The distinct external classes of human users or operators (`USR-<SLUG>`), their skill/trust assumptions, and their operational roles.
 
 ### `## 3. Operating Environment`
-The physical, network, and host endpoint conditions (`ENV-<SLUG>`) in which the software is designed to operate.
+The physical, network, and host environment conditions (`ENV-<SLUG>`) in which the software is designed to operate.
 
 ### `## 4. Contraindications and Out-of-Scope Uses`
-Explicit scenarios, threat models, or use cases (`CONTRA-<SLUG>`) for which the system is **not** intended and must not be relied upon.
+Explicit scenarios, threat/hazard models, or use cases (`CONTRA-<SLUG>`) for which the system is **not** intended and must not be relied upon.

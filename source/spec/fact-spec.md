@@ -23,9 +23,9 @@ In a Medical Device QMS, separating external axioms from engineered requirements
 In addition to the universal rules in [`qms-spec`](qms-spec.md):
 
 1. **Decision-Constraining External Truths Only:**
-   - *Include:* Specific external mathematical, protocol, or OS platform invariants (e.g., `FACT-SCHANNEL-CNG-ISOLATION` for Windows SChannel's out-of-process CNG key container requirement, or `FACT-AEAD-LENGTH-PRESERVATION`) that directly force a risk control or architectural choice in the repository.
-   - *Exclude Textbook Trivia & Spec Dumps:* Do not copy-paste RFC sections or record generic computer-science facts that do not drive a non-obvious design trade-off.
-   - *Exclude Engineered Choices & Requirements:* A `fact` document **MUST NOT** contain normative verbs (`SHALL`, `MUST`) directed at our software, internal architectural choices, or tunable application constants.
+   - *Include:* Specific external mathematical, protocol, hardware, or OS platform invariants that directly force a risk control or architectural choice in the repository.
+   - *Exclude Textbook Trivia & Spec Dumps:* Do not copy-paste external specification sections or record generic computer-science facts that do not drive a non-obvious design trade-off.
+   - *Exclude Engineered Choices & Requirements:* A `fact` document **MUST NOT** contain normative verbs (`SHALL`, `MUST`) directed at the system under design, internal architectural choices, or tunable application constants.
 
 ---
 
@@ -40,4 +40,4 @@ Implementing documents **MUST** use only the headings below and **MUST NOT** rep
 A concise list of the authoritative external specifications or platform docs cited in the file, pinning the identifier, title, and revision/date.
 
 ### `## 2. Axioms and Platform Invariants`
-Atomic declarative statements of objective external truths prefixed with `FACT-<SLUG>` (and optional non-authoritative [cross-cutting tags](qms-spec.md#4-non-authoritative-cross-cutting-tags-tag-name)) so downstream documents can cite the axiom in one link instead of re-explaining the external physics, math, or OS kernel quirk.
+Atomic declarative statements of objective external truths prefixed with `FACT-<SLUG>` so downstream documents can cite the axiom in one link instead of re-explaining the external physics, math, or platform behavior.
