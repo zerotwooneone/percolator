@@ -1569,23 +1569,47 @@
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Plugins.Discovery`
 
 #### Chunk 4.3: Vertical Slice: Encrypted Media Streaming & Blob Store
+- **Traceability & QMS Realization**:
+  - Realizes [`DEP-INFRA-LOCAL-BLOB-STORE`](Requirements.md#3-functional-and-interface-requirements) (`SYS-STREAM-AEAD-CHUNKED-TRANSFER`, `SYS-BOUNDED-RELAY-QUOTAS`).
+  - Realizes [`DEP-INFRA-MEDIA-METADATA-SANITIZATION`](Requirements.md#3-functional-and-interface-requirements) (`SYS-MEDIA-METADATA-SANITIZATION`, `SYS-DETERMINISTIC-ZEROIZATION`).
+  - Mitigates [`HAZ-PAYLOAD-METADATA-EXPOSURE`](../RiskRegister.md#1-cryptographic-identity-and-privacy-hazards) and [`HAZ-INGRESS-RESOURCE-EXHAUSTION`](../RiskRegister.md#2-endpoint-availability-and-integrity-hazards).
 - **Technical Specifications & Chunked STREAM AEAD**:
   - **STREAM AEAD Binary Framing**:
-    - Chunked encryption using AES-256-GCM in 64 KB (65,536 B) blocks.
-    - Per-chunk 12-byte nonce composed of 8-byte stream prefix + 4-byte big-endian sequential chunk counter.
-    - Final block flag encoded into authenticated additional data (AAD) to prevent truncation or stream splicing attacks.
-  - **Media Privacy & Metadata Sanitization**:
-    - JPEG / PNG / MP4 privacy scrub: EXIF, IPTC, XMP, GPS coordinates, and camera serial numbers are scrubbed from raw media streams prior to chunking and encryption.
-    - **Resource Starvation & Storage Quotas (`DomainResult` Enforcement)**:
-      - `StreamingAesGcmCryptoService`, `RelayBlobClient`, `PeerStreamBlobClient`, and `LocalFileChunkStore` enforce a maximum single-blob size ceiling (default: `100 MB`) while reading/writing streams, and `LocalFileChunkStore` enforces a configurable local cache quota ceiling (default: `5 GB`). Streams exceeding the 100 MB ceiling or 5 GB quota abort immediately, delete incomplete `.tmp` staging files, and return `DomainResult.Failure` (`BLOB_TOO_LARGE` / `BLOB_QUOTA_EXCEEDED`) rather than throwing unhandled exceptions.
+    - Chunked encryption using AES-256-GCM in 64 KB (65,536 B) blocks (`ChunkSize = 64 * 1024`).
+    - Per-chunk 12-byte nonce composed of 8-byte stream prefix (`baseNonce`) + 4-byte big-endian sequential chunk counter (`BinaryPrimitives.WriteUInt32BigEndian`).
+    - Final block flag encoded into authenticated additional data (AAD: `[0x01]` for final chunk, `[0x00]` for intermediate chunks) to prevent truncation or stream splicing attacks.
+    - Serialized chunk framing: `[Ciphertext (up to 64 KB) || 16-byte GCM Tag]`.
+    - Content address `BlobId` computed as the incremental SHA-256 digest of the entire ciphertext stream (`BlobId.FromSha256(ciphertextSha256)`).
+    - Cryptographic buffers (`cipherBuffer`, `plainBuffer`, `tagBuffer`, `nonceBuffer`) are deterministically zeroized via `CryptographicOperations.ZeroMemory` upon completion (`SYS-DETERMINISTIC-ZEROIZATION`).
+  - **Media Privacy & Metadata Sanitization (ISO 14971 Risk-Benefit Analysis)**:
+    - **JPEG / PNG Sanitization**: Pure C# zero-allocation byte-level segment stripping without image decoding.
+      - JPEG: Scans SOI marker (`0xFFD8`), removes `APP1` (`0xFFE1`, EXIF/XMP) and `APP13` (`0xFFED`, IPTC) segments, preserving `APP0` (JFIF), quantization tables, and scan data (`SOS`).
+      - PNG: Scans 8-byte PNG header (`89 50 4E 47 0D 0A 1A 0A`), drops `eXIf`, `tEXt`, `zTXt`, and `iTXt` chunks with valid CRC calculations, copying all essential chunks (`IHDR`, `IDAT`, `IEND`).
+    - **MP4 / Video Container Risk-Benefit Decision (ISO 14971 Clause 7.4)**: Complex containers (MP4/MOV) encode sample tables (`stco`/`co64`) as absolute byte offsets pointing to media data (`mdat`). Stripping `moov.udta` metadata atoms alters offsets and corrupts video playback unless entirely re-muxed. Re-muxing requires bundling external native binaries (FFmpeg) or extensive video parsing engines, which introduces significant attack surface and supply-chain risk. Under ISO 14971 Clause 7.4, this risk is accepted as residual; complex containers pass through without in-memory atom re-writing.
+  - **Resource Starvation, Bounded Memory & Storage Quotas**:
+    - **$O(1)$ Memory Invariant**: `StreamingAesGcmCryptoService`, `RelayBlobClient`, and `LocalFileChunkStore` operate on streams without buffering multi-megabyte payloads in RAM. Payloads <= 1 MB use `MemoryStream`; payloads > 1 MB must spill to disk via temporary streams created with `FileOptions.DeleteOnClose`.
+    - **Error Boundary Separation**:
+      - Application Ports (`IBlobCryptoService`, `IRelayBlobClient`, `IPeerStreamBlobClient`): Enforce a 100 MB single-blob ceiling, returning `DomainResult<T>.Failure` (`BLOB_TOO_LARGE`, `AUTHENTICATION_FAILED`, `NOT_FOUND`).
+      - Physical Storage (`ILocalChunkStore`): Returns `ValueTask` per `Percolator.Application2.Ports.ILocalChunkStore`. Throws `InvalidOperationException` if a blob stream exceeds 100 MB or exceeds the 5 GB cache quota, deleting the incomplete `.tmp` file in a `try/finally` block. Calling endpoints and services catch and translate this into gRPC/domain error responses.
+    - **Algorithmic Quota Accounting ($O(1)$ vs $O(N)$)**: `LocalFileChunkStore` maintains an in-memory atomic counter (`long _currentCacheSizeBytes`) initialized once at startup by scanning `.blob` files, and updated via `Interlocked.Add` upon atomic commit and file deletion.
   - **Content-Addressed Local Blob Store**:
     - Files stored at `%AppData%/Percolator/Blobs/{sha256Hex}.blob`.
-    - Commits use atomic file staging: payload written to `.tmp` extension, flushed to disk, and moved into place via atomic file replace.
-  - **Network Blob Transfer Clients**:
-    - `RelayBlobClient` (`IRelayBlobClient`): uploads and downloads encrypted blind blobs via `UnauthenticatedDeliveryService` (`UploadBlindBlob` / `DownloadBlindBlob` client/server gRPC streaming) with byte-offset resumption and pre-flight `ciphertext_size_bytes <= 100 MB` validation.
-    - `PeerStreamBlobClient` (`IPeerStreamBlobClient`): direct peer-to-peer chunk streaming over ephemeral TLS with strict 100 MB stream read caps.
-    - `ChannelRelayResolver` (`IChannelRelayResolver`): resolves designated blob relay endpoints.
-    - `RelayBlobRetentionPruner`: background pruner enforcing blob TTL expiration and sweeping oldest-accessed `.blob` files when total storage exceeds the 5 GB local cache watermark.
+    - Commits use atomic file staging: payload written to `{sha256Hex}_{guid}.tmp`, flushed to disk, and moved into place via atomic file replace (`File.Move(temp, target, overwrite: true)`).
+  - **Network Blob Transfer Clients & Protocol**:
+    - Protobuf RPCs (`unauthenticated_delivery.proto`):
+      - `rpc UploadBlindBlob (stream BlindBlobChunkProto) returns (BlindBlobUploadResponseProto);`
+      - `rpc DownloadBlindBlob (BlindBlobDownloadRequestProto) returns (stream BlindBlobChunkProto);`
+      - `rpc DeleteBlindBlob (BlindBlobDeleteRequestProto) returns (BlindBlobDeleteResponseProto);`
+    - `RelayBlobClient` (`IRelayBlobClient`):
+      - Streams real 64 KB chunks across `IClientStreamWriter<BlindBlobChunkProto>` with `chunk_index`, `is_final_chunk`, and `IProgress<TransferProgress>` updates.
+      - Streams downloads with 1 MB memory rollover to `FileOptions.DeleteOnClose` staging.
+      - Strictly tested with in-process streaming channels; zero fake mocks or synthetic return strings.
+    - `PeerStreamBlobClient` (`IPeerStreamBlobClient`): Direct peer-to-peer chunk streaming over ephemeral TLS with strict 100 MB read caps.
+    - `ChannelRelayResolver` (`IChannelRelayResolver`): Lightweight CQRS read-path query resolver; strictly prohibited from loading heavy write-side domain aggregates (e.g. `IChannelRepository`).
+    - `RelayBlobRetentionPruner` (`IHostedService`):
+      - Scheduled worker executing every 30 minutes via `PeriodicTimer`.
+      - TTL Expiry: Sweeps `.blob` files older than 30 days based on `LastWriteTimeUtc`.
+      - Quota Eviction: If `_currentCacheSizeBytes > 5 GB` (`WatermarkHigh`), sorts `.blob` files by `LastAccessTimeUtc` ascending (LRU) and deletes files until cache drops below 4.5 GB (`WatermarkLow` = 90%).
 - **Scope & Deliverables**:
   - [x] Implement `StreamingAesGcmCryptoService` (`Percolator.Application.Ports.IBlobCryptoService`).
   - [x] Implement `LocalFileChunkStore` (`Percolator.Application.Ports.ILocalChunkStore`).
@@ -1594,12 +1618,13 @@
   - [x] Implement `ChannelRelayResolver` (`Percolator.Application.Ports.IChannelRelayResolver`).
   - [x] Implement `RelayBlobRetentionPruner` (`IHostedService`).
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Plugins/BlobStorage/`)**:
-  - `StreamingAesGcmCryptoServiceTests.ExifScrubbing_StripsGpsAndDeviceMetadata`: strips GPS and device tags from JPEG/PNG before upload.
+  - `StreamingAesGcmCryptoServiceTests.ExifScrubbing_StripsGpsAndDeviceMetadata`: strips GPS, IPTC, and device tags from JPEG/PNG before upload.
   - `StreamingAesGcmCryptoServiceTests.ChunkedAead_SingleBitflip_FailsAuthentication`: injects 1 bitflip in 64 KB block; asserts authenticated decryption failure.
   - `StreamingAesGcmCryptoServiceTests.ChunkedAead_Truncation_FailsFinalBlockAuthentication`: truncated stream missing final block flag fails verification.
-  - `RelayBlobClientTests.StreamUploadAndDownload_RoundtripsChunksAndRejectsOversizedStream`: verifies gRPC `BlindBlobChunkProto` streaming round-trip and asserts streams exceeding 100 MB abort with `DomainResult.Failure`.
-  - `LocalFileChunkStoreTests.AtomicCommit_WritesTempFileAndRenames`: validates atomic write to `%AppData%/Percolator/Blobs/{sha256Hex}.blob`.
-  - `LocalFileChunkStoreTests.UploadExceedingQuota_ReturnsDomainFailureAndDeletesTempFile`: verifies writes exceeding 100 MB blob size or 5 GB storage quota return `DomainResult.Failure` and clean up `.tmp` files without disk exhaustion.
+  - `RelayBlobClientTests.RoundTrip_UploadDownloadAndDelete_TransfersRealChunksSuccessfully`: verifies real multi-chunk client streaming upload to `UnauthenticatedDeliveryEndpoint`, disk persistence, download verification, progress reporting, and deletion.
+  - `RelayBlobClientTests.UploadBlobAsync_StreamExceeds100Mb_ReturnsFailureWithoutNetworkCall`: asserts streams exceeding 100 MB abort with `DomainResult.Failure("BLOB_TOO_LARGE")`.
+  - `LocalFileChunkStoreTests.AtomicCommit_WritesTempFileAndRenames`: validates atomic write to `%AppData%/Percolator/Blobs/{sha256Hex}.blob` with zero lingering `.tmp` files.
+  - `LocalFileChunkStoreTests.UploadExceedingQuota_ThrowsAndDeletesTempFile`: verifies writes exceeding 100 MB blob size or local cache quota throw `InvalidOperationException` and clean up `.tmp` files without disk exhaustion.
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Plugins.BlobStorage`
 
