@@ -28,6 +28,9 @@ Spec: [risk-register-spec](spec/risk-register-spec.md)
 8. **`HAZ-COMPROMISED-SECONDARY-DEVICE` (Loss or Compromise of an Authorized Multi-Device Endpoint):**
    - **Cause & Harm:** One personal device in a multi-device identity ([`UN-MULTI-DEVICE`](UserNeeds.md#1-core-functional-needs)) is lost or stolen, allowing an attacker with access to that device to continue receiving synchronized conversations.
    - **Initial Risk:** `S4 / L2` | **Residual Risk:** `S3 / L1` (`Controlled` — device revocation bounds exposure to prior synced state rather than permanent identity loss).
+9. **`HAZ-PAYLOAD-METADATA-EXPOSURE` (Physical Location and Device Fingerprint Leakage via Media Attachments):**
+   - **Cause & Harm:** Outbound image or video attachments retain EXIF, IPTC, XMP metadata, GPS coordinates, camera serials, or device identifiers, exposing the user's physical residence, real-time location, or hardware identity to conversation participants, relay servers, or storage hosts (violating [`IU-METADATA-MINIMIZATION`](IntendedUse.md#1-intended-purpose) and [`UN-CONVERSATIONS`](UserNeeds.md#1-core-functional-needs)).
+   - **Initial Risk:** `S3 / L3` | **Residual Risk:** `S3 / L1` (`Controlled` — protective metadata sanitization strips EXIF/GPS tags prior to chunking and encryption).
 
 ---
 
@@ -46,8 +49,11 @@ Spec: [risk-register-spec](spec/risk-register-spec.md)
    - **Cause & Harm:** Remote attackers flood a peer or [`USR-RELAY-OPERATOR`](IntendedUse.md#2-target-user-profiles) with replayed handshakes, oversized frames, or unbounded relay storage requests, exhausting local CPU, memory, or disk space (violating [`UN-BOUNDED-RELAY`](UserNeeds.md#2-sovereignty-privacy-and-operational-trust-needs)).
    - **Initial Risk:** `S2 / L3` | **Residual Risk:** `S2 / L1` (`Controlled`).
 5. **`HAZ-PREKEY-POOL-STARVATION` (Asynchronous One-Time Pre-Key Exhaustion):**
-   - **Cause & Harm:** An attacker rapidly drains a peer's published one-time pre-key pool on relays, preventing legitimate contacts from establishing offline sessions under [`UN-ASYNC-MESSAGING`](UserNeeds.md#1-core-functional-needs).
+   - **Cause & Harm:** An attacker rapidly drains a peer's published one-time pre-key pool on relays, preventing legitimate contacts from establishing offline sessions under [`UN-ASYNC-MESSAGING`](UserNeeds.md#1-core-functional-needs)).
    - **Initial Risk:** `S3 / L3` | **Residual Risk:** `S3 / L1` (`Controlled`). `#offline-delivery`
 6. **`HAZ-CRASH-STATE-DESYNC` (Non-Atomic Crash Between Cryptographic Step and Outbound Queue):**
    - **Cause & Harm:** Process termination, power loss, or transient link failure occurs after advancing cryptographic session state but before the outbound message is durably queued, causing silent message loss or permanent session desynchronization.
    - **Initial Risk:** `S3 / L2` | **Residual Risk:** `S3 / L1` (`Controlled`). `#offline-delivery`
+7. **`HAZ-PATH-TRAVERSAL-OVERWRITE` (Arbitrary File Overwrite via Malicious Manifest Paths):**
+   - **Cause & Harm:** An adversarial peer sends a file transfer manifest containing relative traversal segments (`../`), absolute paths, or OS reserved device names, causing file chunk writes to escape the download root and overwrite host operating system files, executables, or user documents (violating [`IU-PROTECTED-LOCAL-STATE`](IntendedUse.md#1-intended-purpose)).
+   - **Initial Risk:** `S4 / L3` | **Residual Risk:** `S4 / L1` (`Controlled` — inherent canonical root containment and path sanitization in the file storage adapter permanently block escaping writes).

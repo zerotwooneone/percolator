@@ -13,6 +13,15 @@ Spec: [decision-register-spec](spec/decision-register-spec.md)
      2. *Plaintext SQLite with Application-Level Column Encryption:* Rejected because unencrypted database page headers, indexes, and B-tree metadata leak communication frequency, peer identifiers, and timestamps.
    - **Safety, Risk, and Security Impact:** Protective control (ISO 14971 Clause 7.1) directly mitigating [`HAZ-OFFLINE-DISK-EXTRACTION`](RiskRegister.md#2-endpoint-availability-and-integrity-hazards) and [`HAZ-POST-LOCK-MEMORY-RESIDUE`](RiskRegister.md#2-endpoint-availability-and-integrity-hazards).
 
+2. **`DEC-CHUNKED-STREAM-AEAD-TRANSFER` (Chunked 64 KB STREAM AEAD & Merkle-Rooted Bulk Transfer):**
+   - **Status & Review Record:** `Approved` (2026-10-31 | Architecture Review)
+   - **Context & Problem Statement:** Bulk data, media blobs, and multi-gigabyte file transfers must execute over untrusted networks with integrity verification, corruption recovery, and bounded RAM consumption ([`SYS-STREAM-AEAD-CHUNKED-TRANSFER`](SystemRequirements.md#2-security-privacy-and-risk-control-invariants)).
+   - **Decision & Technical Rationale:** Stream bulk data in discrete 64 KB blocks using chunked AES-256-GCM AEAD encryption with deterministic sequential nonces and authenticated final-block flags. Verify individual chunks against a pre-computed SHA-256 Merkle tree leaf array, writing received pieces atomically via temporary staging files (`.percolator-part` / `.tmp`). This ensures constant $O(1)$ memory usage and enables immediate per-chunk corruption detection without restarting entire multi-gigabyte transfers.
+   - **Rejected Alternatives:**
+     1. *In-Memory Whole-File Encryption / Buffering:* Rejected due to severe memory exhaustion (OOM crashes) when handling files exceeding 500 MB.
+     2. *Unauthenticated TCP Byte Streaming with End-of-File Hash:* Rejected because bitflips or network corruption cannot be localized, requiring complete transfer restarts upon failure.
+   - **Safety, Risk, and Security Impact:** Inherent safety control (ISO 14971 Clause 7.1) mitigating [`HAZ-INGRESS-RESOURCE-EXHAUSTION`](RiskRegister.md#2-endpoint-availability-and-integrity-hazards) and [`HAZ-CRASH-STATE-DESYNC`](RiskRegister.md#2-endpoint-availability-and-integrity-hazards).
+
 ## 2. Cryptographic, Protocol, and Security Decisions
 
 1. **`DEC-SIGNAL-INTEROP-ADOPTION` (Adoption of Signal.Interop Rust C-ABI Wrapper as Class C SOUP):**
@@ -33,6 +42,15 @@ Spec: [decision-register-spec](spec/decision-register-spec.md)
      1. *Authenticated Relay Transport (Client TLS / Bearer Tokens):* Rejected because transport authentication links sender network sessions to recipient delivery tokens at the relay layer, exposing communication metadata.
      2. *Tor Onion Routing for All Frames:* Rejected as the primary transport due to high latency, mobile battery drain, and unreliability for real-time mobile messaging, while sealed sender provides metadata minimization over standard IP transport.
    - **Safety, Risk, and Security Impact:** Inherent safety control (ISO 14971 Clause 7.1) directly mitigating [`HAZ-RELAY-HEADER-CORRELATION`](RiskRegister.md#1-cryptographic-identity-and-privacy-hazards) and [`HAZ-PREKEY-POOL-STARVATION`](RiskRegister.md#2-endpoint-availability-and-integrity-hazards).
+
+3. **`DEC-BLINDED-RENDEZVOUS-ROTATION` (Rotating Ephemeral Blinded Rendezvous Locators):**
+   - **Status & Review Record:** `Approved` (2026-10-31 | Security Review)
+   - **Context & Problem Statement:** Staging discovery and contact exchange routes on untrusted relay servers exposes persistent user locators to linkability and traffic correlation over time ([`SYS-RELAY-ONLY-CLOAKING`](SystemRequirements.md#2-security-privacy-and-risk-control-invariants)).
+   - **Decision & Technical Rationale:** Implement rotating blinded rendezvous locators derived via HMAC-SHA256 over 24-hour UTC day epochs ($E = \lfloor\text{UnixSeconds}/86400\rfloor$) with a 3-epoch clock tolerance window $[E-1, E, E+1]$. Rendezvous route payloads are encrypted via AES-256-GCM using an HKDF-derived key that binds the 32-byte `BlindedLocator` as Associated Authenticated Data (AAD) to prevent route transplantation across locators.
+   - **Rejected Alternatives:**
+     1. *Static Public Rendezvous Keys:* Rejected because unchanging locator keys allow relay operators to track peer query patterns and correlate rendezvous frequency indefinitely.
+     2. *Unauthenticated Plaintext Routing Descriptors:* Rejected because untrusted relays could tamper with candidate IPs or inject forged rendezvous endpoints.
+   - **Safety, Risk, and Security Impact:** Inherent safety control (ISO 14971 Clause 7.1) directly mitigating [`HAZ-RELAY-HEADER-CORRELATION`](RiskRegister.md#1-cryptographic-identity-and-privacy-hazards) and [`HAZ-PRESENCE-AND-BLOCK-ORACLE`](RiskRegister.md#1-cryptographic-identity-and-privacy-hazards).
 
 ## 3. Integration, Transport, and Platform Decisions
 

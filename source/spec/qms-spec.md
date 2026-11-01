@@ -87,6 +87,7 @@ In accordance with **IEC 62304 Clause 5.2.2(k) & 5.3.6** and **ISO 14971 Clause 
 - **Allowed on `SYS-*` (Black-Box System Boundary):**
   - `[Verify: Integration]` — End-to-end system boundary, persistence, or transport verification.
   - `[Verify: Simulation]` — Multi-node, environmental, or fault-injection harness verification.
+  - `[Verify: Unit]` — Permitted on pure-software algorithmic, path sanitization, or memory barrier zeroization constraints where verification is established deterministically via automated test harness.
   - When a `SYS-*` requirement mitigates a hazard (`HAZ-*`), it **MUST** also declare its ISO 14971 control priority tag: `[Control: Inherent | Protective | Information]`.
 - **Allowed on `DEP-*` (Software Item / Deployable Boundary):**
   - `[Verify: Unit]` — Deterministic in-memory unit test.

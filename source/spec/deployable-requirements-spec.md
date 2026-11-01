@@ -29,6 +29,7 @@ In addition to the universal rules in [`qms-spec`](qms-spec.md):
    - **Domain Core Deployables (`Domain`, `Domain.Kernel`):** Boundary constraints in Section 1 **MUST** prohibit database engines, network transports, OS-specific APIs, UI frameworks, and third-party SOUP.
    - **Adapter Deployables (`Infrastructure`, `Desktop`, `Simulator`):** Boundary constraints in Section 1 **MUST** prohibit domain business rules and forbid unquarantined SOUP handles (`IntPtr`, `SafeHandle`), vendor DTOs, or native exceptions from crossing domain port implementations.
 3. **DRY Kernel Inheritance:** If a boundary rule is already mandated by an inward kernel deployable, reference that inward `DEP-<SLUG>` once rather than restating the rule in every downstream deployable.
+4. **Traceability Completeness Rule (IEC 62304 Clause 5.3.1):** Every system requirement (`SYS-*`) that is realized by this deployable's design outputs (`Design.md`) **MUST** be explicitly allocated in Section 2 (`Allocated Responsibilities`) or Section 3 (`Public Contract Invariants`). No deployable design output may cite a `SYS-*` without an allocated `DEP-*` establishing the software item requirement.
 
 ---
 

@@ -21,6 +21,21 @@ Spec: [deployable-requirements-spec](../spec/deployable-requirements-spec.md)
 4. **`DEP-INFRA-VAULT-ENCRYPTION` (SQLCipher Database Vault Persistence):** `[Verify: Integration]`
    The deployable encapsulates SQLCipher relational persistence, executing native `sqlite3_key` binding inside EF Core connection interceptors using pinned memory keys derived during Stage 1 unlock (realizes [`SYS-AT-REST-VAULT-ENCRYPTION`](../SystemRequirements.md#2-security-privacy-and-risk-control-invariants)).
 
+5. **`DEP-INFRA-CHAT-PERSISTENCE` (Chat History, Keyset Pagination, and Cascade Purge):** `[Verify: Integration]`
+   The deployable implements relational persistence and fast-path CQRS query projections for chat conversations, messages, reactions, and attachments (`SqlChatMessageRepository`, `SqlChatMessageQueryService`), enforcing composite timeline indexing (`ix_chat_timeline`), cryptographic deletion cascades, and scheduled disappearing message purging across disk caches (realizes [`SYS-RETENTION-PURGE`](../SystemRequirements.md#1-functional-system-capabilities)).
+
+6. **`DEP-INFRA-DISCOVERY-RENDEZVOUS-STORE` (Blinded Rendezvous Table & Lease Eviction):** `[Verify: Integration]`
+   The deployable persists discovery directory leases (`relay_peer_directory`) and blinded rendezvous locators (`relay_rendezvous_entries`) with sliding TTL eviction (24h/48h) and strict capacity clamping (max 10,000 entries), enforcing pre-key presence checks and clamping batch query results to 100 entries (realizes [`SYS-RELAY-ONLY-CLOAKING`](../SystemRequirements.md#2-security-privacy-and-risk-control-invariants) and [`SYS-BOUNDED-RELAY-QUOTAS`](../SystemRequirements.md#3-external-interfaces-and-resource-boundaries)).
+
+7. **`DEP-INFRA-LOCAL-BLOB-STORE` (Content-Addressed Blind Blob Storage & Quota Guard):** `[Verify: Integration]`
+   The deployable implements content-addressed local chunk and media blob storage (`LocalFileChunkStore`, `RelayBlobClient`) at `%AppData%/Percolator/Blobs/{sha256Hex}.blob` using atomic temporary file staging, enforcing a 100 MB single-blob ceiling and 5 GB local cache quota returning `DomainResult.Failure` without process termination (realizes [`SYS-STREAM-AEAD-CHUNKED-TRANSFER`](../SystemRequirements.md#2-security-privacy-and-risk-control-invariants) and [`SYS-BOUNDED-RELAY-QUOTAS`](../SystemRequirements.md#3-external-interfaces-and-resource-boundaries)).
+
+8. **`DEP-INFRA-PORTABLE-FILE-STORAGE` (Canonical Root Containment & Staged Piece Assembly):** `[Verify: Unit]`
+   The deployable implements desktop file transfer storage (`PortableDesktopFileStore`), verifying that all written and read chunk paths remain strictly under the canonical root directory to prevent directory traversal attacks, and staging in-flight piece downloads via `.percolator-part` extensions with atomic rename upon full verification (realizes [`SYS-PATH-TRAVERSAL-DEFENSE`](../SystemRequirements.md#2-security-privacy-and-risk-control-invariants)).
+
+9. **`DEP-INFRA-MEDIA-METADATA-SANITIZATION` (Media Attachment EXIF and Geolocation Sanitization):** `[Verify: Unit]`
+   The deployable strips EXIF, IPTC, XMP metadata, GPS coordinates, camera serials, and device identifiers from outbound image and video streams inside `StreamingAesGcmCryptoService` prior to chunking and AEAD encryption, preventing geolocation and device fingerprint leakage (realizes [`SYS-MEDIA-METADATA-SANITIZATION`](../SystemRequirements.md#2-security-privacy-and-risk-control-invariants)).
+
 ## 3. Public Contract Invariants
 
 1. **`DEP-INFRA-CONCURRENCY-MODEL` (Adapter Thread-Safety and Lifetime Scoping):** `[Verify: StaticAnalysis]`
@@ -30,7 +45,7 @@ Spec: [deployable-requirements-spec](../spec/deployable-requirements-spec.md)
    All cryptographic adapter entrypoints must validate that destination and source byte spans are non-empty and match exact buffer sizes (32 bytes for keys, 64 bytes for signatures) before transitioning to native Rust FFI code, preventing native status code 1 rejections ([`SOUP-SIGNAL-ANO-EMPTY-SPAN`](../soup/signal-interop.md#4-known-anomalies-and-cybersecurity-evaluation)).
 
 3. **`DEP-INFRA-NATIVE-FAULT-TRANSLATION` (Fault Containment and DomainResult Conversion):** `[Verify: Unit]`
-   All native return status codes and unmanaged exceptions must be caught and converted into value-type `DomainResult` failures or logged without crashing the host process, satisfying [`SYS-RESULT-DRIVEN-INGRESS`](../SystemRequirements.md#3-external-interfaces-and-resource-boundaries).
+   All native return status codes and unmanaged exceptions must be caught and converted into value-type `DomainResult` failures or logged without crashing the host process, satisfying [`SYS-RESULT-DRIVEN-INGRESS`](../SystemRequirements.md#3-external-interfaces-and-resource-boundaries)).
 
 4. **`DEP-INFRA-VOLATILE-ZEROIZATION` (Memory-Barrier Sensitive Buffer Erasure):** `[Verify: Unit]`
    All ephemeral stack buffers and pinned arrays containing private keys or decrypted secrets must be explicitly overwritten with zeros via `CryptographicOperations.ZeroMemory` immediately upon completion of the operation (realizing [`SYS-DETERMINISTIC-ZEROIZATION`](../SystemRequirements.md#2-security-privacy-and-risk-control-invariants); constrained by [`FACT-DEAD-STORE-ELIMINATION`](../facts/platform-runtime.md#2-axioms-and-platform-invariants)).

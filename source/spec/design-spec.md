@@ -31,7 +31,7 @@ In addition to the universal rules in [`qms-spec`](qms-spec.md):
 3. **Define Shared Rules Once in the Innermost Deployable (DRY Inheritance):**
    - Cross-cutting architectural invariants (such as primitive-obsession guards, result types, clock inversion, or persistence rehydration visibility) **MUST** be defined **once** in the innermost deployable's `Design.md`. Downstream `Design.md` files may link inline to that inward `INV-<SLUG>` or `DEC-<SLUG>` when extending the pattern, never restating it.
 4. **Deployable Technical Choices vs. System Decisions (`decision-register-spec`):**
-   - Cross-cutting, multi-deployable architectural decisions, protocol selections, and SOUP evaluations belong centrally in [`decision-register-spec`](decision-register-spec.md) (`DEC-*`). Section 3 of a deployable `Design.md` realizes those system decisions by linking inline (`[DEC-<SLUG>]`) or defines localized engineering mechanisms (`DEC-<SLUG>`) strictly internal to that deployable.
+   - Cross-cutting, multi-deployable architectural decisions, protocol selections, and SOUP evaluations belong centrally in [`decision-register-spec`](decision-register-spec.md) (`DEC-*`). Section 3 of a deployable `Design.md` realizes those system decisions by linking inline (`[DEC-<SLUG>]`) or defines localized engineering mechanisms (`DEC-<SLUG>`) strictly internal to that deployable. Local choices must maintain globally unique semantic slugs across the repository and must never collide with system decision slugs.
 
 ---
 
