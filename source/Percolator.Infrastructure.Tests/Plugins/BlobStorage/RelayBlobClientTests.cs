@@ -9,13 +9,17 @@ using System.Threading.Tasks;
 using FluentAssertions;
 using Google.Protobuf;
 using Grpc.Core;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using NUnit.Framework;
+using Percolator.Application2.Ports;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Delivery.Ports;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Infrastructure.DependencyInjection;
 using Percolator.Infrastructure.Plugins.BlobStorage;
 using Percolator.Infrastructure.Protos;
 using Percolator.Infrastructure.Tests.Transport.Endpoints;
@@ -136,6 +140,28 @@ public sealed class RelayBlobClientTests
 
         // Verify blob no longer in store
         (await _chunkStore.HasBlobAsync(blobId)).Should().BeFalse();
+    }
+
+    [Test]
+    public void AddBlobStorageInfrastructure_RegistersAllPortsAndHostedServices()
+    {
+        var services = new ServiceCollection();
+        services.AddBlobStorageInfrastructure();
+        var provider = services.BuildServiceProvider(new ServiceProviderOptions
+        {
+            ValidateScopes = true,
+            ValidateOnBuild = true
+        });
+
+        using var scope = provider.CreateScope();
+        scope.ServiceProvider.GetRequiredService<IBlobCryptoService>().Should().BeOfType<StreamingAesGcmCryptoService>();
+        scope.ServiceProvider.GetRequiredService<ILocalChunkStore>().Should().BeOfType<LocalFileChunkStore>();
+        scope.ServiceProvider.GetRequiredService<IRelayBlobClient>().Should().BeOfType<RelayBlobClient>();
+        scope.ServiceProvider.GetRequiredService<IPeerStreamBlobClient>().Should().BeOfType<PeerStreamBlobClient>();
+        scope.ServiceProvider.GetRequiredService<IChannelRelayResolver>().Should().BeOfType<ChannelRelayResolver>();
+
+        var hostedServices = provider.GetServices<IHostedService>();
+        hostedServices.Should().ContainSingle(s => s is RelayBlobRetentionPruner);
     }
 
     private sealed class FakeOversizedStream : MemoryStream

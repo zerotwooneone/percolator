@@ -13,6 +13,7 @@ using Percolator.Domain.Common;
 using Percolator.Infrastructure.Adapters;
 using Percolator.Infrastructure.Common;
 using Percolator.Infrastructure.Persistence.Repositories;
+using Percolator.Infrastructure.Plugins.BlobStorage;
 using Percolator.Infrastructure.Transport;
 using Percolator.Infrastructure.Transport.Workers;
 using Percolator.Infrastructure.Vault;
@@ -65,6 +66,19 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IProfileDeliveryClient, GrpcProfileDeliveryClient>();
 
         services.AddHostedService<RelayDiscoveryRegistrationPruner>();
+
+        return services;
+    }
+
+    public static IServiceCollection AddBlobStorageInfrastructure(this IServiceCollection services)
+    {
+        services.AddSingleton<IBlobCryptoService, StreamingAesGcmCryptoService>();
+        services.AddSingleton<ILocalChunkStore, LocalFileChunkStore>();
+        services.AddScoped<IRelayBlobClient, RelayBlobClient>();
+        services.AddScoped<IPeerStreamBlobClient, PeerStreamBlobClient>();
+        services.AddScoped<IChannelRelayResolver, ChannelRelayResolver>();
+
+        services.AddHostedService<RelayBlobRetentionPruner>();
 
         return services;
     }
