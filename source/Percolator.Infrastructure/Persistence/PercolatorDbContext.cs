@@ -77,6 +77,10 @@ public class PercolatorDbContext : DbContext
     public DbSet<ChatGroupInvitationEntity> ChatGroupInvitations => Set<ChatGroupInvitationEntity>();
     public DbSet<ChatUnknownGroupMessageEntity> ChatUnknownGroupMessages => Set<ChatUnknownGroupMessageEntity>();
 
+    // Chunk 4.2 Discovery & Rendezvous Entities
+    public DbSet<RelayPeerDirectoryEntity> RelayPeerDirectory => Set<RelayPeerDirectoryEntity>();
+    public DbSet<RelayRendezvousEntryEntity> RelayRendezvousEntries => Set<RelayRendezvousEntryEntity>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -443,7 +447,7 @@ public class PercolatorDbContext : DbContext
                 .HasDatabaseName("ix_chat_expiry");
         });
 
-        // 28. Chat Message Mentions
+        // 27. Chat Message Mentions
         modelBuilder.Entity<ChatMessageMentionEntity>(entity =>
         {
             entity.ToTable("chat_message_mentions");
@@ -456,7 +460,7 @@ public class PercolatorDbContext : DbContext
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
-        // 27. Chat Reactions
+        // 28. Chat Reactions
         modelBuilder.Entity<ChatReactionEntity>(entity =>
         {
             entity.ToTable("chat_reactions");
@@ -505,6 +509,27 @@ public class PercolatorDbContext : DbContext
                 .HasDatabaseName("ix_unknown_group_expiry");
             entity.HasIndex(e => e.ReceivedAtUnixMs)
                 .HasDatabaseName("ix_unknown_group_received");
+        });
+
+        // 32. Relay Peer Directory (Chunk 4.2)
+        modelBuilder.Entity<RelayPeerDirectoryEntity>(entity =>
+        {
+            entity.ToTable("relay_peer_directory");
+            entity.HasKey(e => e.PeerId);
+            entity.Property(e => e.PeerId).HasColumnType("BLOB");
+            entity.HasIndex(e => e.LastUpdatedAtUtc)
+                .HasDatabaseName("ix_peer_directory_updated");
+        });
+
+        // 33. Relay Rendezvous Entries (Chunk 4.2)
+        modelBuilder.Entity<RelayRendezvousEntryEntity>(entity =>
+        {
+            entity.ToTable("relay_rendezvous_entries");
+            entity.HasKey(e => e.BlindedLocator);
+            entity.Property(e => e.BlindedLocator).HasColumnType("BLOB");
+            entity.Property(e => e.EncryptedRoute).HasColumnType("BLOB");
+            entity.HasIndex(e => e.PublishedAtUtc)
+                .HasDatabaseName("ix_rendezvous_published");
         });
 
         // Apply snake_case naming convention to all columns

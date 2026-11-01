@@ -38,3 +38,21 @@ public sealed class RelayLedgerRoutingTokenEntity
     public Guid ChannelId { get; set; }
     public Guid RoutingToken { get; set; }
 }
+
+public sealed class RelayPeerDirectoryEntity
+{
+    public byte[] PeerId { get; set; } = Array.Empty<byte>();
+    public int Visibility { get; set; }
+    public bool HasAuthenticatedHandshake { get; set; }
+    public bool HasActiveSignedPreKey { get; set; }
+    public DateTimeOffset RegisteredAtUtc { get; set; }
+    public DateTimeOffset LastUpdatedAtUtc { get; set; }
+}
+
+public sealed class RelayRendezvousEntryEntity
+{
+    public byte[] BlindedLocator { get; set; } = Array.Empty<byte>();
+    public byte[]? EncryptedRoute { get; set; }
+    public string? RouteDescriptor { get; set; }
+    public DateTimeOffset PublishedAtUtc { get; set; }
+}

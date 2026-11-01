@@ -1550,14 +1550,14 @@
     - **Aggregate Hydration & Zero Inner-Ring Mutation Guardrail**:
       - `RelayPeerRegistration` (`Percolator.Apps.Discovery.Features.RelayDirectoryHosting.RelayPeerRegistration`), `BlindedLocator`, and `EncryptedRendezvousRoute` already expose full, validated public constructors/factories (`RegisteredAtUtc`, `LastUpdatedAtUtc`, `BlindedLocator.FromSpan`, `EncryptedRendezvousRoute.FromCiphertext`). `SqliteRelayPeerDirectory` and `SqlitePrivateRendezvousService` must use these existing constructors/factories with zero modifications to `Percolator.Apps.Discovery`.
 - **Scope & Deliverables**:
-  - [ ] Author Protobuf schema `Percolator.Infrastructure/Protos/discovery.proto`.
-  - [ ] Implement `SqliteRelayPeerDirectory` (`Percolator.Apps.Discovery.Features.RelayDirectoryHosting.IRelayPeerDirectory`).
-  - [ ] Implement `SqlitePrivateRendezvousService` (`Percolator.Apps.Discovery.Features.PrivateRendezvous.IPrivateRendezvousService`).
-  - [ ] Implement `DiscoveryQueryClient` (`Percolator.Apps.Discovery.Ports.INearbyDiscoveryQueryClientPort`).
-  - [ ] Implement `PreKeyAvailabilityAdapter` (`Percolator.Apps.Discovery.Ports.IPreKeyAvailabilityPort`).
-  - [ ] Implement `PreKeyBundleProviderAdapter` (`Percolator.Application.Ports.IPreKeyBundleProvider`).
-  - [ ] Implement `GrpcProfileDeliveryClient` (`Percolator.PluginSdk.Profiles.IProfileDeliveryClient`).
-  - [ ] Implement `RelayDiscoveryRegistrationPruner` (`IHostedService`).
+  - [x] Author Protobuf schema `Percolator.Infrastructure/Protos/discovery.proto`.
+  - [x] Implement `SqliteRelayPeerDirectory` (`Percolator.Apps.Discovery.Features.RelayDirectoryHosting.IRelayPeerDirectory`).
+  - [x] Implement `SqlitePrivateRendezvousService` (`Percolator.Apps.Discovery.Features.PrivateRendezvous.IPrivateRendezvousService`).
+  - [x] Implement `DiscoveryQueryClient` (`Percolator.Apps.Discovery.Ports.INearbyDiscoveryQueryClientPort`).
+  - [x] Implement `PreKeyAvailabilityAdapter` (`Percolator.Apps.Discovery.Ports.IPreKeyAvailabilityPort`).
+  - [x] Implement `PreKeyBundleProviderAdapter` (`Percolator.Application.Ports.IPreKeyBundleProvider`).
+  - [x] Implement `GrpcProfileDeliveryClient` (`Percolator.PluginSdk.Profiles.IProfileDeliveryClient`).
+  - [x] Implement `RelayDiscoveryRegistrationPruner` (`IHostedService`).
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Plugins/Discovery/`)**:
   - `DiscoveryQueryClientTests.NearbyQuery_ClampsCountTo100`: verifies query parameters are strictly clamped to max 100 results.
   - `SqlitePrivateRendezvousServiceTests.PublishAndResolve_MatchesBlindedLocatorAndEnforces100QueryCap`: publishes `BlindedLocator` + `EncryptedRendezvousRoute` and resolves across batch query while clamping batch size to 100.

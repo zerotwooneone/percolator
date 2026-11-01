@@ -6,11 +6,17 @@ using Percolator.Application2.Ports;
 using Percolator.Apps.Chat.Features.GroupInvitations;
 using Percolator.Apps.Chat.Features.Messaging;
 using Percolator.Apps.Chat.Ingress;
+using Percolator.Apps.Discovery.Features.PrivateRendezvous;
+using Percolator.Apps.Discovery.Features.RelayDirectoryHosting;
+using Percolator.Apps.Discovery.Ports;
 using Percolator.Domain.Common;
+using Percolator.Infrastructure.Adapters;
 using Percolator.Infrastructure.Common;
 using Percolator.Infrastructure.Persistence.Repositories;
+using Percolator.Infrastructure.Transport;
 using Percolator.Infrastructure.Transport.Workers;
 using Percolator.Infrastructure.Vault;
+using Percolator.PluginSdk;
 
 public static class InfrastructureServiceCollectionExtensions
 {
@@ -45,6 +51,20 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddHostedService<DisappearingMessageEvictionWorker>();
         services.AddHostedService<UnknownGroupMessageCachePruner>();
         services.AddHostedService<AbandonedInvitePruner>();
+
+        return services;
+    }
+
+    public static IServiceCollection AddDiscoveryInfrastructure(this IServiceCollection services)
+    {
+        services.AddScoped<IRelayPeerDirectory, SqliteRelayPeerDirectory>();
+        services.AddScoped<IPrivateRendezvousService, SqlitePrivateRendezvousService>();
+        services.AddScoped<INearbyDiscoveryQueryClientPort, DiscoveryQueryClient>();
+        services.AddScoped<IPreKeyAvailabilityPort, PreKeyAvailabilityAdapter>();
+        services.AddScoped<IPreKeyBundleProvider, PreKeyBundleProviderAdapter>();
+        services.AddScoped<IProfileDeliveryClient, GrpcProfileDeliveryClient>();
+
+        services.AddHostedService<RelayDiscoveryRegistrationPruner>();
 
         return services;
     }

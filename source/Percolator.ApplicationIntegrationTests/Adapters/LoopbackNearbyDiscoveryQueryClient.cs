@@ -18,6 +18,7 @@ public sealed class LoopbackNearbyDiscoveryQueryClient : INearbyDiscoveryQueryCl
     }
 
     public async Task<IReadOnlyList<PeerDiscoveryDescriptor>> SendNearbyQueryAsync(
+        PublicIdentityId requesterId,
         PublicIdentityId targetPeerOrRelayId,
         DiscoveryResultLimit limit,
         CancellationToken ct = default)

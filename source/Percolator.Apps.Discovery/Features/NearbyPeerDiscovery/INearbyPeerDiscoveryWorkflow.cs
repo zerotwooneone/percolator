@@ -14,6 +14,7 @@ public interface INearbyPeerDiscoveryWorkflow
     /// Never touches or consumes One-Time PreKeys (OPKs).
     /// </summary>
     Task<IReadOnlyList<PeerDiscoveryDescriptor>> QueryNearbyPeersAsync(
+        PublicIdentityId requesterId,
         PublicIdentityId targetPeerOrRelayId,
         DiscoveryResultLimit limit,
         CancellationToken ct = default);

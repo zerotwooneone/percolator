@@ -41,9 +41,11 @@ public sealed class NearbyPeerDiscoveryWorkflowTests
         _queryClient.Candidates.Add(new PeerDiscoveryDescriptor(peerA, DeliveryRoute.RelayedOneToOne));
         _queryClient.Candidates.Add(new PeerDiscoveryDescriptor(peerB, DeliveryRoute.RelayedOneToOne));
 
-        var results = await _workflow.QueryNearbyPeersAsync(_targetRelayId, DiscoveryResultLimit.Default);
+        var results = await _workflow.QueryNearbyPeersAsync(_ownerId, _targetRelayId, DiscoveryResultLimit.Default);
 
         results.Should().HaveCount(2);
+        _queryClient.LastRequesterId.Should().Be(_ownerId);
+        _queryClient.LastTargetId.Should().Be(_targetRelayId);
         // OPK Starvation check: Querying must NEVER initiate a connection or consume prekeys
         _connectionService.ConnectCallCount.Should().Be(0);
     }
@@ -57,9 +59,11 @@ public sealed class NearbyPeerDiscoveryWorkflowTests
         }
 
         var limit = new DiscoveryResultLimit(3);
-        var results = await _workflow.QueryNearbyPeersAsync(_targetRelayId, limit);
+        var results = await _workflow.QueryNearbyPeersAsync(_ownerId, _targetRelayId, limit);
 
         results.Should().HaveCount(3);
+        _queryClient.LastRequesterId.Should().Be(_ownerId);
+        _queryClient.LastTargetId.Should().Be(_targetRelayId);
         _queryClient.LastRequestedLimit.Should().Be(limit);
     }
 
@@ -80,6 +84,7 @@ public sealed class NearbyPeerDiscoveryWorkflowTests
 
         result.ConnectedPeers.Should().HaveCount(2);
         result.Failures.Should().BeEmpty();
+        _queryClient.LastRequesterId.Should().Be(_ownerId);
         _connectionService.ConnectCallCount.Should().Be(2);
     }
 
@@ -103,6 +108,7 @@ public sealed class NearbyPeerDiscoveryWorkflowTests
 
         result.ConnectedPeers.Should().ContainSingle(p => p.PeerId == peerSuccess);
         result.Failures.Should().ContainSingle(f => f.PeerId == peerFailing && f.Error.Code == "PREKEY_NOT_FOUND");
+        _queryClient.LastRequesterId.Should().Be(_ownerId);
         _connectionService.ConnectCallCount.Should().Be(2);
     }
 
@@ -128,12 +134,17 @@ public sealed class NearbyPeerDiscoveryWorkflowTests
     {
         public List<PeerDiscoveryDescriptor> Candidates { get; } = new();
         public DiscoveryResultLimit LastRequestedLimit { get; private set; }
+        public PublicIdentityId LastRequesterId { get; private set; }
+        public PublicIdentityId LastTargetId { get; private set; }
 
         public Task<IReadOnlyList<PeerDiscoveryDescriptor>> SendNearbyQueryAsync(
+            PublicIdentityId requesterId,
             PublicIdentityId targetPeerOrRelayId,
             DiscoveryResultLimit limit,
             CancellationToken ct = default)
         {
+            LastRequesterId = requesterId;
+            LastTargetId = targetPeerOrRelayId;
             LastRequestedLimit = limit;
             return Task.FromResult<IReadOnlyList<PeerDiscoveryDescriptor>>(Candidates);
         }

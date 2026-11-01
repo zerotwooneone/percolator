@@ -19,16 +19,18 @@ public sealed class NearbyPeerDiscoveryWorkflow : INearbyPeerDiscoveryWorkflow
     }
 
     public async Task<IReadOnlyList<PeerDiscoveryDescriptor>> QueryNearbyPeersAsync(
+        PublicIdentityId requesterId,
         PublicIdentityId targetPeerOrRelayId,
         DiscoveryResultLimit limit,
         CancellationToken ct = default)
     {
-        if (!targetPeerOrRelayId.IsValid)
+        if (!requesterId.IsValid || !targetPeerOrRelayId.IsValid)
         {
             return Array.Empty<PeerDiscoveryDescriptor>();
         }
 
         var descriptors = await _queryClient.SendNearbyQueryAsync(
+            requesterId,
             targetPeerOrRelayId,
             limit,
             ct).ConfigureAwait(false);
@@ -77,7 +79,7 @@ public sealed class NearbyPeerDiscoveryWorkflow : INearbyPeerDiscoveryWorkflow
         DiscoveryResultLimit limit,
         CancellationToken ct = default)
     {
-        var candidates = await QueryNearbyPeersAsync(targetPeerOrRelayId, limit, ct).ConfigureAwait(false);
+        var candidates = await QueryNearbyPeersAsync(localOwnerId, targetPeerOrRelayId, limit, ct).ConfigureAwait(false);
 
         var connected = new List<DiscoveredPeerConnectionSummary>();
         var failures = new List<DiscoveredPeerConnectionFailure>();

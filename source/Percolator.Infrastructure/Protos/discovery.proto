@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package percolator.infrastructure;
+
+option csharp_namespace = "Percolator.Infrastructure.Protos";
+
+message DiscoveryRegistrationProto {
+  bytes peer_id = 1;
+  int32 visibility = 2;
+}
+
+message PeerDiscoveryDescriptorProto {
+  bytes peer_id = 1;
+  int32 route = 2;
+  string relay_endpoint = 3;
+  bytes routing_token = 4;
+  bytes delivery_token = 5;
+}
+
+message NearbyDiscoveryQueryProto {
+  bytes requester_id = 1;
+  int32 requested_limit = 2;
+}
+
+message NearbyDiscoveryResponseProto {
+  repeated bytes discoverable_peer_ids = 1;
+  repeated PeerDiscoveryDescriptorProto descriptors = 2;
+}
+
+message BlindedRendezvousPublishProto {
+  bytes blinded_locator = 1;
+  bytes encrypted_route = 2;
+  string route_descriptor = 3;
+}
+
+message BlindedRendezvousQueryProto {
+  repeated bytes blinded_locators = 1;
+}
+
+message BlindedRendezvousMatchProto {
+  bytes blinded_locator = 1;
+  bytes encrypted_route = 2;
+  string route_descriptor = 3;
+}
+
+message BlindedRendezvousResponseProto {
+  repeated BlindedRendezvousMatchProto matches = 1;
+}
+
+service NearbyDiscoveryService {
+  rpc QueryNearby(NearbyDiscoveryQueryProto) returns (NearbyDiscoveryResponseProto);
+}
+
+service PrivateRendezvousRelayService {
+  rpc PublishRendezvous(BlindedRendezvousPublishProto) returns (BlindedRendezvousResponseProto);
+  rpc QueryRendezvous(BlindedRendezvousQueryProto) returns (BlindedRendezvousResponseProto);
+}

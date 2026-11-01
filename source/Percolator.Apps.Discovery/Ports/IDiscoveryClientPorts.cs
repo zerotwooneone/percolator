@@ -9,6 +9,7 @@ namespace Percolator.Apps.Discovery.Ports;
 public interface INearbyDiscoveryQueryClientPort
 {
     Task<IReadOnlyList<PeerDiscoveryDescriptor>> SendNearbyQueryAsync(
+        PublicIdentityId requesterId,
         PublicIdentityId targetPeerOrRelayId,
         DiscoveryResultLimit limit,
         CancellationToken ct = default);

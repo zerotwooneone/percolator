@@ -81,7 +81,7 @@ public sealed class PeerDiscoveryScenarioTests
 
         await relay.Directory.RegisterPeerAsync(preAdmissionReg);
 
-        var preAdmissionDiscoverable = await dave.NearbyDiscovery.QueryNearbyPeersAsync(relay.RelayIdentityId, queryLimit);
+        var preAdmissionDiscoverable = await dave.NearbyDiscovery.QueryNearbyPeersAsync(dave.IdentityId, relay.RelayIdentityId, queryLimit);
         preAdmissionDiscoverable.Should().NotContain(p => p.PeerId == bob.IdentityId,
             "Peer without active signed prekey must fail admission gate evaluation");
 
@@ -93,7 +93,7 @@ public sealed class PeerDiscoveryScenarioTests
         var registerResult = await bob.RegisterDiscoveryVisibilityAsync(relay, PeerDiscoveryVisibility.Discoverable);
         registerResult.IsSuccess.Should().BeTrue();
 
-        var discoverablePeers = await dave.NearbyDiscovery.QueryNearbyPeersAsync(relay.RelayIdentityId, queryLimit);
+        var discoverablePeers = await dave.NearbyDiscovery.QueryNearbyPeersAsync(dave.IdentityId, relay.RelayIdentityId, queryLimit);
         discoverablePeers.Should().ContainSingle(p => p.PeerId == bob.IdentityId);
 
         // ----------------------------------------------------------------------------------
@@ -102,7 +102,7 @@ public sealed class PeerDiscoveryScenarioTests
         var hideResult = await bob.RegisterDiscoveryVisibilityAsync(relay, PeerDiscoveryVisibility.Hidden);
         hideResult.IsSuccess.Should().BeTrue();
 
-        var hiddenDiscoverablePeers = await dave.NearbyDiscovery.QueryNearbyPeersAsync(relay.RelayIdentityId, queryLimit);
+        var hiddenDiscoverablePeers = await dave.NearbyDiscovery.QueryNearbyPeersAsync(dave.IdentityId, relay.RelayIdentityId, queryLimit);
         hiddenDiscoverablePeers.Should().NotContain(p => p.PeerId == bob.IdentityId,
             "Hidden peer must be excluded from discoverable listings");
 
@@ -112,7 +112,7 @@ public sealed class PeerDiscoveryScenarioTests
         var restoreResult = await bob.RegisterDiscoveryVisibilityAsync(relay, PeerDiscoveryVisibility.Discoverable);
         restoreResult.IsSuccess.Should().BeTrue();
 
-        var restoredPeers = await dave.NearbyDiscovery.QueryNearbyPeersAsync(relay.RelayIdentityId, queryLimit);
+        var restoredPeers = await dave.NearbyDiscovery.QueryNearbyPeersAsync(dave.IdentityId, relay.RelayIdentityId, queryLimit);
         restoredPeers.Should().ContainSingle(p => p.PeerId == bob.IdentityId);
     }
 
@@ -148,7 +148,7 @@ public sealed class PeerDiscoveryScenarioTests
         // Step 6.2a: Dave queries Relay via NearbyPeerDiscoveryWorkflow driving port
         // ----------------------------------------------------------------------------------
         var queryLimit = DiscoveryResultLimit.Create(10).Value;
-        var candidates = await dave.NearbyDiscovery.QueryNearbyPeersAsync(relay.RelayIdentityId, queryLimit);
+        var candidates = await dave.NearbyDiscovery.QueryNearbyPeersAsync(dave.IdentityId, relay.RelayIdentityId, queryLimit);
 
         candidates.Should().NotBeEmpty();
         candidates.Should().ContainSingle(c => c.PeerId == bob.IdentityId);
