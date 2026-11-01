@@ -288,10 +288,94 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
             {
                 ChunkIndex = chunkIndex++,
                 ChunkData = ByteString.CopyFrom(buffer, 0, bytesRead),
-                IsFinalChunk = stream.Position >= stream.Length
+                IsFinalChunk = stream.Position >= stream.Length,
+                BlobId = request.BlobId
             };
 
             await responseStream.WriteAsync(chunk);
         }
+    }
+
+    public override async Task<BlindBlobUploadResponseProto> UploadBlindBlob(
+        IAsyncStreamReader<BlindBlobChunkProto> requestStream,
+        ServerCallContext context)
+    {
+        string tempPath = Path.Combine(Path.GetTempPath(), $"blob_up_{Guid.NewGuid():N}.tmp");
+        byte[]? blobIdBytes = null;
+        long totalBytes = 0;
+        const long maxBlobSize = 100 * 1024 * 1024; // 100 MB
+
+        try
+        {
+            using (var tempFile = new FileStream(
+                tempPath,
+                FileMode.CreateNew,
+                FileAccess.ReadWrite,
+                FileShare.None,
+                bufferSize: 64 * 1024,
+                FileOptions.DeleteOnClose))
+            {
+                while (await requestStream.MoveNext(context.CancellationToken))
+                {
+                    var chunk = requestStream.Current;
+                    if (blobIdBytes == null && chunk.BlobId != null && chunk.BlobId.Length == 32)
+                    {
+                        blobIdBytes = chunk.BlobId.ToByteArray();
+                    }
+
+                    totalBytes += chunk.ChunkData.Length;
+                    if (totalBytes > maxBlobSize)
+                    {
+                        throw new RpcException(new Status(StatusCode.InvalidArgument, "Stream exceeds 100 MB limit."));
+                    }
+
+                    await tempFile.WriteAsync(chunk.ChunkData.Memory, context.CancellationToken);
+                    if (chunk.IsFinalChunk)
+                    {
+                        break;
+                    }
+                }
+
+                if (blobIdBytes == null)
+                {
+                    throw new RpcException(new Status(StatusCode.InvalidArgument, "Missing or invalid Blob ID in stream chunks."));
+                }
+
+                tempFile.Position = 0;
+                var blobId = BlobId.FromSha256(blobIdBytes);
+                await _chunkStore.SaveBlobAsync(blobId, tempFile, context.CancellationToken);
+
+                return new BlindBlobUploadResponseProto
+                {
+                    Success = true,
+                    BlobUri = $"/blobs/{blobId}"
+                };
+            }
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                try { File.Delete(tempPath); } catch { }
+            }
+        }
+    }
+
+    public override async Task<BlindBlobDeleteResponseProto> DeleteBlindBlob(
+        BlindBlobDeleteRequestProto request,
+        ServerCallContext context)
+    {
+        if (request.BlobId.Length != 32)
+        {
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "Blob ID must be exactly 32 bytes (SHA-256)."));
+        }
+
+        var blobId = BlobId.FromSha256(request.BlobId.ToByteArray());
+        await _chunkStore.DeleteBlobAsync(blobId, context.CancellationToken);
+
+        return new BlindBlobDeleteResponseProto
+        {
+            Success = true
+        };
     }
 }

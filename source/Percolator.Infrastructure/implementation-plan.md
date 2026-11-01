@@ -1587,12 +1587,12 @@
     - `ChannelRelayResolver` (`IChannelRelayResolver`): resolves designated blob relay endpoints.
     - `RelayBlobRetentionPruner`: background pruner enforcing blob TTL expiration and sweeping oldest-accessed `.blob` files when total storage exceeds the 5 GB local cache watermark.
 - **Scope & Deliverables**:
-  - [ ] Implement `StreamingAesGcmCryptoService` (`Percolator.Application.Ports.IBlobCryptoService`).
-  - [ ] Implement `LocalFileChunkStore` (`Percolator.Application.Ports.ILocalChunkStore`).
-  - [ ] Implement `RelayBlobClient` (`Percolator.Application.Ports.IRelayBlobClient`).
-  - [ ] Implement `PeerStreamBlobClient` (`Percolator.Application.Ports.IPeerStreamBlobClient`).
-  - [ ] Implement `ChannelRelayResolver` (`Percolator.Application.Ports.IChannelRelayResolver`).
-  - [ ] Implement `RelayBlobRetentionPruner` (`IHostedService`).
+  - [x] Implement `StreamingAesGcmCryptoService` (`Percolator.Application.Ports.IBlobCryptoService`).
+  - [x] Implement `LocalFileChunkStore` (`Percolator.Application.Ports.ILocalChunkStore`).
+  - [x] Implement `RelayBlobClient` (`Percolator.Application.Ports.IRelayBlobClient`).
+  - [x] Implement `PeerStreamBlobClient` (`Percolator.Application.Ports.IPeerStreamBlobClient`).
+  - [x] Implement `ChannelRelayResolver` (`Percolator.Application.Ports.IChannelRelayResolver`).
+  - [x] Implement `RelayBlobRetentionPruner` (`IHostedService`).
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Plugins/BlobStorage/`)**:
   - `StreamingAesGcmCryptoServiceTests.ExifScrubbing_StripsGpsAndDeviceMetadata`: strips GPS and device tags from JPEG/PNG before upload.
   - `StreamingAesGcmCryptoServiceTests.ChunkedAead_SingleBitflip_FailsAuthentication`: injects 1 bitflip in 64 KB block; asserts authenticated decryption failure.
