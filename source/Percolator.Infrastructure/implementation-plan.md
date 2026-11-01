@@ -1629,6 +1629,12 @@
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Plugins.BlobStorage`
 
 #### Chunk 4.4: Vertical Slice: Swarm Multi-Stream File Transfer Engine
+- **Traceability & QMS Realization**:
+  - Realizes [`DEP-INFRA-PORTABLE-FILE-STORAGE`](Requirements.md#3-functional-and-interface-requirements) (`SYS-PATH-TRAVERSAL-DEFENSE`).
+  - Realizes [`SYS-STREAM-AEAD-CHUNKED-TRANSFER`](../SystemRequirements.md#2-security-privacy-and-risk-control-invariants) (64 KB chunked AEAD and Merkle leaf verification).
+  - Realizes [`SYS-RESULT-DRIVEN-INGRESS`](../SystemRequirements.md#3-external-interfaces-and-resource-boundaries) (non-throwing wire ingress decoding).
+  - Mitigates [`HAZ-PATH-TRAVERSAL-OVERWRITE`](../RiskRegister.md#2-endpoint-availability-and-integrity-hazards) and [`HAZ-INGRESS-RESOURCE-EXHAUSTION`](../RiskRegister.md#2-endpoint-availability-and-integrity-hazards).
+  - Mitigates [`HAZ-STORAGE-RESOURCE-STARVATION`](../RiskRegister.md#2-endpoint-availability-and-integrity-hazards) (disk space pre-flight validation).
 - **Technical Specifications, Table Schemas & Binary Framing**:
   - **DDL & Schema Definitions (`ft_*`)**:
     - `ft_transfer_sessions`:
@@ -1662,7 +1668,7 @@
       - `transfer_id` (`TEXT` GUID, FK to `ft_transfer_sessions(transfer_id)` ON DELETE CASCADE)
       - `file_index` (`INTEGER` `FileIndex`)
       - `relative_path` (`TEXT` `SanitizedRelativePath`)
-      - `file_size_bytes` (`INTEGER` `FileSizeBytes`) // Path sanitization: rejects paths with '..', leading slashes, Win32 reserved names, or ADS streams
+      - `file_size_bytes` (`INTEGER` `FileSizeBytes`)
       - `start_offset` (`INTEGER` `BundleByteOffset`)
       - `last_modified_unix_seconds` (`INTEGER` `FileLastModifiedUtc`)
       - *Composite PK*: `PRIMARY KEY(transfer_id, file_index)`
@@ -1684,23 +1690,24 @@
       - `blocked_peers_json` (`TEXT` serialized set of PublicIdentityId)
       - `blocked_relays_json` (`TEXT` serialized set of RelayPipeEndpointUri)
       - `updated_at_utc` (`TEXT` ISO 8601)
-  - **Swarm Binary Framing Protocol (0x01–0x0C)**:
-    - Fixed 5-byte header: `[Opcode: 1 Byte] [Payload Length: 4 Bytes Big-Endian UInt] [Payload: Variable Length]`
-    - Maximum payload size: `262,144 bytes` (256 KB); standard piece chunk size: `65,536 bytes` (64 KB).
-    - Opcode framing definitions (aligned with `Percolator.Apps.FileTransfer.Features.MultiStreamEngine.StreamFramePayloads` & `ChunkCryptoService`):
-      - `0x01` `STREAM_HANDSHAKE` (`HandshakeFrame`): `[AuthToken: 32 B] [SessionId: 16 B GUID BE] [StreamIndex: Int32 BE (4 B)] [SenderPeerId: 16/32 B]`
-      - `0x02` `BITFIELD` (`BitfieldFrame`): `[BitfieldBytes: N B]` (1 bit per chunk, bounded to `(TotalChunks + 7) / 8` bytes)
-      - `0x03` `HAVE` (`HaveFrame`): `[ChunkIndex: Int32 BE (4 B)]` (validated `< TotalChunks`)
-      - `0x04` `REQUEST_CHUNK` (`RequestChunkFrame`): `[ChunkIndex: Int32 BE (4 B)]`
-      - `0x05` `CHUNK_DATA` (`ChunkDataFrame`): `[ChunkIndex: Int32 BE (4 B)] [CiphertextWithAuthTag: N + 16 B]`
-        - **Per-Chunk AEAD & Merkle Verification**: Each chunk is AES-256-GCM encrypted via `ChunkCryptoService` using `TransferKey` and a deterministic 12-byte chunk nonce (`BaseNonce[0..8] || (BaseNonce[8..12] ^ ChunkIndex_BE32)`). `TransferSessionCoordinator` drops unsolicited chunks (`!ChunkPipelineScheduler.IsChunkInFlight(chunkIndex)`), verifies and decrypts the 16-byte AES-GCM authentication tag first, and then verifies the 32-byte SHA-256 Merkle leaf hash via `DiskChunkAssembler` before writing to disk.
-      - `0x06` `CANCEL_CHUNK` (`CancelChunkFrame`): `[ChunkIndex: Int32 BE (4 B)]`
-      - `0x07` `CHOKE`: (Zero payload)
-      - `0x08` `UNCHOKE`: (Zero payload)
-      - `0x09` `INTERESTED`: (Zero payload)
-      - `0x0A` `NOT_INTERESTED`: (Zero payload)
-      - `0x0B` `KEEP_ALIVE`: (Zero payload)
-      - `0x0C` `PEX_PEERS` (`PexPeersFrame`): `[CandidateCount: 1 B] repeated: [PeerIdLength: 1 B] [PeerIdBytes: 16/32 B] [EndpointLength: UInt16 BE] [EndpointUtf8Bytes: M B]` (clamped by `PexRateLimiter` to `MaxCandidatesPerFrame = 16` and `MinPexInterval = 10s`, dropping WAN candidates when `DirectWanPolicy.DisabledByDefault` and validating endpoints via `CallbackEndpointValidator`).
+  - **Swarm Binary Wire Framing Protocol (0x01–0x0C)**:
+    - Fixed 5-byte header: `[Opcode: 1 Byte] [Payload Length: 4 Bytes Big-Endian UInt] [Payload: Variable Length]`.
+    - **Pre-Allocation DoS Defense**: The frame reader validates `PayloadLength <= 262,144` bytes (256 KB) BEFORE allocating or renting receive buffers.
+    - **Opcode-Specific Length Invariants & Framing**:
+      - `0x01` `STREAM_HANDSHAKE` (`HandshakeFrame`): `[AuthToken: 32 B] [SessionId: 16 B GUID BE] [StreamIndex: Int32 BE (4 B)] [SenderPeerId: 32 B]` (Exact Length: 84 B).
+      - `0x02` `BITFIELD` (`BitfieldFrame`): `[BitfieldBytes: N B]` (Length: `(TotalChunks + 7) / 8` B).
+      - `0x03` `HAVE` (`HaveFrame`): `[ChunkIndex: Int32 BE (4 B)]` (Exact Length: 4 B, validated `< TotalChunks`).
+      - `0x04` `REQUEST_CHUNK` (`RequestChunkFrame`): `[ChunkIndex: Int32 BE (4 B)]` (Exact Length: 4 B).
+      - `0x05` `CHUNK_DATA` (`ChunkDataFrame`): `[ChunkIndex: Int32 BE (4 B)] [CiphertextWithAuthTag: N + 16 B]` (Length: $\ge 20$ B).
+        - **Per-Chunk AEAD & Merkle Verification**: AES-256-GCM encrypted via `ChunkCryptoService` using `TransferKey` and deterministic nonce (`BaseNonce[0..8] || (BaseNonce[8..12] ^ ChunkIndex_BE32)`). `TransferSessionCoordinator` drops unsolicited chunks, verifies 16-byte AES-GCM authentication tag first, and verifies 32-byte SHA-256 Merkle leaf hash via `DiskChunkAssembler` before disk commit.
+      - `0x06` `CANCEL_CHUNK` (`CancelChunkFrame`): `[ChunkIndex: Int32 BE (4 B)]` (Exact Length: 4 B).
+      - `0x07` `CHOKE`: (Exact Length: 0 B).
+      - `0x08` `UNCHOKE`: (Exact Length: 0 B).
+      - `0x09` `INTERESTED`: (Exact Length: 0 B).
+      - `0x0A` `NOT_INTERESTED`: (Exact Length: 0 B).
+      - `0x0B` `KEEP_ALIVE`: (Exact Length: 0 B).
+      - `0x0C` `PEX_PEERS` (`PexPeersFrame`): `[CandidateCount: 1 B] repeated: [PeerIdLength: 1 B] [PeerIdBytes: 32 B] [EndpointLength: UInt16 BE] [EndpointUtf8Bytes: M B]` (clamped to `MaxCandidatesPerFrame = 16` and `MinPexInterval = 10s`).
+    - **Stream Fragmentation Resilience**: Decoding implements a strict `ReadExactAsync(buffer, offset, count, ct)` loop to guarantee complete 5-byte header and full payload reconstruction across fragmented TCP packets without throwing CLR exceptions.
   - **Wire Contracts (`Percolator.Infrastructure/Protos/file_transfer.proto`)**:
     - `FileEntryProto`: `file_index`, `relative_path`, `file_size_bytes`, `start_offset`, `last_modified_unix_seconds`.
     - `TransferManifestProto`: `root_name`, `total_size_bytes`, `chunk_size_bytes`, `merkle_root`, `concatenated_leaves` (concatenated 32-byte leaf array without per-leaf tags), `repeated FileEntryProto files`.
@@ -1711,26 +1718,28 @@
     - `FileTransferAcceptProto`: `session_id`, `responder_id`, `repeated int32 selected_file_indices`, `repeated DirectEndpointCandidateProto responder_candidates`, `accepted_at_unix_seconds`.
     - `FileTransferCancelProto`: `session_id`, `sender_id`, `reason` (`UserCancelled`, `RejectedByPeer`, `OfferExpired`, `IntegrityFailure`, `StorageExhausted`, `TransportFailure`), `cancelled_at_unix_seconds`.
   - **Portable Desktop File Store Guarantees (`PortableDesktopFileStore : IDesktopFileStorage`)**:
-    - Implements all 10 port methods on `Percolator.Apps.FileTransfer.Ports.IDesktopFileStorage` (`PreAllocateFilesAsync`, `WriteChunkAsync`, `ReadChunkAsync`, `WriteBoundarySliceAsync`, `ReadBoundarySliceAsync`, `DeleteBoundaryPartsAsync`, `ScanAndComputeBitfieldAsync`, `FinalizeFileAsync`, `CheckDiskSpaceAsync`, `GetFileMetadataAsync`).
-    - Pre-allocation via portable `FileStream.SetLength` for cross-platform file sizing (whereas Windows-specific NTFS `FSCTL_SET_SPARSE` kernel pre-allocation is implemented in `Percolator.Infrastructure.Windows`).
-    - Zero-byte files materialize immediately without temporary staging.
-    - Active piece staging via `.percolator-part` extension with atomic rename upon full verification.
-    - Portable canonical root-containment and path traversal defense: verifies `Path.GetFullPath(resolvedPath)` stays strictly under `Path.GetFullPath(rootDirectory)` and rejects relative traversal segments (`..`), null bytes, and invalid path characters (while Windows-specific Win32 reserved device names and NTFS ADS stream checks are enforced in `Percolator.Infrastructure.Windows`).
+    - Implements all 10 port methods on `Percolator.Apps.FileTransfer.Ports.IDesktopFileStorage`.
+    - **Canonical Root Containment & Path Traversal Defense**: Validates that `Path.GetFullPath(resolvedPath).StartsWith(canonicalRoot + Path.DirectorySeparatorChar, StringComparison.Ordinal)` and rejects relative traversal segments (`..`), null bytes, and leading slashes. (Windows-specific Win32 reserved device names and NTFS ADS stream checks are isolated to `WindowsSparseDesktopFileStore` in `Percolator.Infrastructure.Windows`).
+    - **Pre-Allocation**: Portable `FileStream.SetLength` for cross-platform file sizing.
+    - **In-Flight Piece Staging**: Writes active downloads to `{targetPath}.percolator-part`, atomically renamed in `FinalizeFileAsync` upon complete piece verification. Zero-byte files materialize immediately without staging.
+    - **Unselected Boundary Slice Caching**: Slicing logic is orchestrated by `DiskChunkAssembler` and `ChunkBoundaryCalculator`. `PortableDesktopFileStore` implements `WriteBoundarySliceAsync` and `ReadBoundarySliceAsync` specifically to cache boundary slices of unselected files (`!session.SelectedFiles.Contains(slice.FileIndex)`) under `%AppData%/Percolator/Partials/{sessionId}/{chunkIndex}_{fileIndex}.slice`, purged by `DeleteBoundaryPartsAsync` upon session completion or cancellation.
   - **Swarm Multiplexing & Rate Limiting**:
     - `TcpMultiStreamPool`: manages 4–8 multiplexed TCP connections with `TCP_NODELAY = true`.
-    - `TokenBucketRateLimiter`: smooth bandwidth allocation across active streams.
+    - `TokenBucketRateLimiter`: non-blocking token replenishment based on timestamp deltas (`Stopwatch` or `TimeProvider`), using `ValueTask` and `Task.Delay` with `CancellationToken` when throttled—strictly zero `Thread.Sleep`.
     - `RelayTransferPipeClient`: 4–8 parallel streams over relay transport with `X-Pipe-Auth` authentication.
     - `RelaySwarmTrackerClient`: tracker client with sliding lease expirations.
     - **Transport Frame Hardening & Swarm Peer Authentication**:
-      - `TcpMultiStreamPool` enforces transport-level DoS defenses: (1) validates the 5-byte frame header length (`<= 262,144 B`) before allocating receive buffers to prevent OOM attacks, (2) enforces a 5-second handshake read timeout on newly accepted sockets to prevent Slowloris socket exhaustion, and (3) invokes `CallbackEndpointValidator` inside `ConnectDirectAsync` to block SSRF/loopback/link-local connections on WAN candidates.
-      - Application-layer `TransferSessionCoordinator.AuthenticateHandshakeAsync` performs constant-time `CryptographicOperations.FixedTimeEquals` validation on the `0x01 HandshakeFrame` `StreamAuthToken` and verifies `SenderPeerId` against the session's `authorizedPeers` set (`InvalidStreamAuthToken` / `UnauthorizedSwarmPeer`), immediately closing unauthenticated streams before bitfield or chunk exchange.
+      - `TcpMultiStreamPool` enforces transport-level DoS defenses: (1) validates frame header length (`<= 262,144 B`) before allocating receive buffers, (2) enforces a 5-second handshake read timeout on newly accepted sockets to prevent Slowloris socket exhaustion, and (3) invokes `CallbackEndpointValidator` inside `ConnectDirectAsync` to block SSRF/loopback/link-local connections on WAN candidates.
+      - Application-layer `TransferSessionCoordinator.AuthenticateHandshakeAsync` performs constant-time `CryptographicOperations.FixedTimeEquals` validation on the `0x01 HandshakeFrame` `StreamAuthToken` and verifies `SenderPeerId` against the session's `authorizedPeers` set, immediately closing unauthenticated streams before bitfield or chunk exchange.
   - **Aggregate Reconstitution & Zero Inner-Ring Mutation Guardrail**:
-    - `SqliteTransferSessionRepository` MUST reconstruct `TransferManifest` using its existing deterministic factory `TransferManifest.Create(manifestId, rootName, chunkSize, merkleTree, files)` (which recomputes `TotalSize`, `TotalFiles`, and `TotalChunks` and validates contiguous byte offsets and Merkle leaf count without emitting domain events or requiring `IDateTimeProvider`) and pass the resulting manifest to the existing `TransferSession.Rehydrate(...)` method. Never add a separate unvalidated `Rehydrate` method to `TransferManifest`.
+    - `SqliteTransferSessionRepository` MUST reconstruct `TransferManifest` using its existing deterministic factory `TransferManifest.Create(manifestId, rootName, chunkSize, merkleTree, files)` and pass the resulting manifest to `TransferSession.Rehydrate(...)`. Never add a separate unvalidated `Rehydrate` method or mutable setters to `TransferManifest` or `TransferSession`.
     - `SqliteFilterPolicyRepository` MUST construct `FileTransferFilterPolicy` via its existing primary record constructor `new FileTransferFilterPolicy(ownerId, blockedPeers, blockedRelays)`.
-    - Zero modifications to `Percolator.Apps.FileTransfer` or `Percolator.Apps.FileTransfer.Domain` are permitted during Chunk 4.4 implementation.
+    - Zero modifications to `Percolator.Apps.FileTransfer` or `Percolator.Apps.FileTransfer.Domain` are permitted.
+  - **Scheduled Lifecycle Workers**:
+    - `TransferOfferReaperWorker` (`BackgroundService`): Scheduled worker executing every 15 minutes (`PeriodicTimer`), invoking `ITransferOfferReaperService` to mark sessions with state `Offered` or `PendingConsent` whose `expires_at_unix_seconds < DateTimeOffset.UtcNow.ToUnixTimeSeconds()` as `Expired`.
+    - `SwarmEndpointRetentionPruner` (`IHostedService`): Scheduled worker executing every 30 minutes, purging rows from `ft_swarm_endpoints` where `last_seen_utc` is older than 24 hours.
 - **Scope & Deliverables**:
   - [ ] Author Protobuf schema `Percolator.Infrastructure/Protos/file_transfer.proto`.
-  - [ ] Configure `<ProjectReference>` to `Percolator.Apps.FileTransfer` and `Percolator.Apps.FileTransfer.Domain` in `Percolator.Infrastructure.csproj`.
   - [ ] Implement File Transfer Persistence & CQRS Query Services:
     - `SqliteTransferSessionRepository` (`Percolator.Apps.FileTransfer.Ports.ITransferSessionRepository`)
     - `SqliteFilterPolicyRepository` (`Percolator.Apps.FileTransfer.Ports.IFileTransferFilterPolicyRepository`)
@@ -1746,12 +1755,14 @@
     - `TransferOfferReaperWorker` (`Microsoft.Extensions.Hosting.BackgroundService` scheduled worker invoking `ITransferOfferReaperService`)
     - `SwarmEndpointRetentionPruner` (`IHostedService`)
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Plugins/FileTransfer/`)**:
-  - `TcpMultiStreamPoolTests.FrameSerialization_All12Frames_RoundtripsSuccessfully`: serializes and deserializes all 12 frames (0x01–0x0C).
-  - `PortableDesktopFileStoreTests.PathValidation_RejectsDirectoryTraversalAndRootEscape`: rejects `..` traversal and paths escaping the target root directory without touching disk.
-  - `PortableDesktopFileStoreTests.ZeroByteFile_MaterializesImmediately`: creates zero-byte file immediately without `.percolator-part`.
-  - `PortableDesktopFileStoreTests.BitfieldScanner_MatchesMerkleLeaves`: validates existing chunks against Merkle leaf hashes.
-  - `TransferOfferReaperWorkerTests.StaleOffers_OlderThan24h_Reaped`: advances virtual clock by 25h with `FakeTimeProvider`; asserts stale offers marked cancelled.
+  - `TcpMultiStreamPoolTests.FrameSerialization_All12Frames_RoundtripsSuccessfully`: serializes and deserializes all 12 frames (0x01–0x0C) verifying exact payload round-trip.
+  - `TcpMultiStreamPoolTests.FrameValidation_OversizedPayload_ClosesStreamWithoutAllocation`: asserts frames exceeding 262,144 bytes terminate connection without allocating memory.
   - `TcpMultiStreamPoolTests.StreamHandshake_InvalidAuthToken_TerminatesConnection`: asserts unauthenticated swarm peer connections are closed before bitfield exchange.
+  - `PortableDesktopFileStoreTests.PathValidation_RejectsDirectoryTraversalAndRootEscape`: rejects `..` traversal, leading slashes, null bytes, and paths escaping target root directory without touching disk.
+  - `PortableDesktopFileStoreTests.ZeroByteFile_MaterializesImmediately`: creates zero-byte file immediately without `.percolator-part`.
+  - `PortableDesktopFileStoreTests.BoundarySlice_WriteAndReadForUnselectedFile_PersistsAndCleansUp`: validates partial slice disk persistence and cleanup for unselected boundary files.
+  - `PortableDesktopFileStoreTests.BitfieldScanner_MatchesMerkleLeaves`: validates existing chunks against Merkle leaf hashes.
+  - `TransferOfferReaperWorkerTests.StaleOffers_OlderThan24h_Reaped`: advances virtual clock by 25h with `FakeTimeProvider`; asserts stale offers marked cancelled/expired.
 - **Verification Gate**:
   - `dotnet test Percolator.Infrastructure.Tests --filter FullyQualifiedName~Plugins.FileTransfer`
 
