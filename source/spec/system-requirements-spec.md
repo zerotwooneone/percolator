@@ -22,7 +22,7 @@ In addition to the universal rules in [`qms-spec`](qms-spec.md):
 
 1. **Product Black-Box Boundary (System "What", Never Internal "How"):** Every `SYS-<SLUG>` specifies an obligation of the integrated product black box observable at its external user/OS boundary or external communication boundary via Design Verification:
    - *Include:* System-level functional obligations realizing `UN-*`, verifiable security/safety/resilience Risk Control Measures mitigating `HAZ-*`, and external interface/resource-boundary obligations.
-   - *Exclude Internal Assembly / Code Architecture:* Never mention internal project/assembly names, source code interfaces, database table schemas, UI framework classes, or specific internal design mechanisms (e.g., stepped bucket padding tiers or OS keyring implementation details), which belong in `deployable-requirements` and `design`.
+   - *Exclude Internal Assembly / Code Architecture:* Never mention internal project/assembly names, source code interfaces (`IPortName`), database table schemas, UI framework classes, or specific internal design mechanisms (e.g., stepped bucket padding tiers or OS keyring implementation details), which belong in `deployable-requirements` and `design`.
    - *Exclude Non-Product Verification Tooling:* Standalone test or simulation harnesses are external verification test equipment (**ISO 13485 Clause 7.5.6** / **FDA 21 CFR 820.70(i)**), not part of the product system under specification.
 2. **Legitimate Upstream Backing (No Unbacked / Reverse-Engineered Requirements):** Every `SYS-<SLUG>` **MUST** be justified by at least one of the three QMS Design Input sources (**ISO 13485 Clause 7.3.3**):
    - A stakeholder User Need (`UN-*`),
@@ -44,7 +44,6 @@ Implementing documents **MUST** use only the headings below and **MUST NOT** rep
 Atomic, black-box functional obligations (`SYS-<SLUG>`) of the integrated system that realize `UN-*` (and cite any `HAZ-*` they directly mitigate).
 
 ### `## 2. Security, Privacy, and Risk Control Invariants`
-Atomic, system-wide security, safety, privacy, and resilience Risk Control Measures (`SYS-<SLUG>`) that mitigate `HAZ-*` hazards from the `risk-register`.
-
+Atomic, system-wide security, safety, privacy, and resilience Risk Control Measures (`SYS-<SLUG>`) that mitigate `HAZ-*` hazards from the `risk-register`.\n
 ### `## 3. External Interfaces and Resource Boundaries`
 Black-box external interface protocols, trust boundaries, and resource-protection envelopes (`SYS-<SLUG>`, IEC 62304 Clause 5.2.2(a)–(c)).

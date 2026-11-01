@@ -6,9 +6,19 @@ This document is the root meta-specification governing all specification, requir
 
 - **IEC 62304:2006+AMD1:2015** (*Medical device software — Software life cycle processes*): Software item decomposition, architectural segregation, SOUP management (Clauses 3.24, 5.3.3, 5.3.4, 7.1.3, 8.1.2), requirements allocation, and bidirectional traceability (Clauses 5.1–5.4, 7.1–7.3, 8).
 - **ISO 13485:2016 Clause 7.3** & **FDA 21 CFR 820.30** (*Design Controls*): Design inputs, design outputs, design review, design verification, design validation, control of design changes, and Design History File / Design and Development Files.
-- **FDA Guidance: *Off-The-Shelf Software Use in Medical Devices* (August 2023)**: Specification, risk assessment, verification, and lifecycle maintenance for third-party / off-the-shelf software.
+- **FDA Guidance: *Off-The-Shelf Software Use in Medical Devices* (August 2023)** & ***Content of Premarket Submissions for Device Software Functions* (June 2023)**: Specification, risk assessment, verification, and software architecture interfaces for medical device software items and third-party software.
 - **ISO 14971:2019** (*Application of risk management to medical devices*): Hazard identification, risk control priority order (*Inherent* $\rightarrow$ *Protective* $\rightarrow$ *Information*), and residual risk evaluation.
 - **AAMI TIR45:2023** (*Guidance on the use of AGILE practices in the development of medical device software*): Evolutionary architecture, continuous design review records, and Architecture Decision Records (ADRs) as living design artifacts.
+
+### 1.1 Regulatory Lifecycle Hierarchy & Code Symbol Permissions
+
+To prevent abstraction breakdown between system requirements, software item architecture, and detailed design, all documents adhere to this strict three-tier regulatory mapping:
+
+| QMS Document Tier | Identifier Prefix | IEC 62304 Lifecycle Role | FDA 21 CFR 820.30 Level | Permitted Code Symbols in Requirement Text |
+| :--- | :--- | :--- | :--- | :--- |
+| **System Requirements** (`SystemRequirements.md`) | `SYS-*` | **Clause 5.2** (Software System Requirements Analysis) | **Design Input** (820.30(c)) | **Zero** code symbols. Strictly black-box system behavior (no C# interfaces, classes, or database schemas). |
+| **Deployable Requirements** (`<Project>/Requirements.md`) | `DEP-*` | **Clause 5.3** (Software Architecture: 5.3.1 Allocation & 5.3.2 Item Interfaces) | **Software Item Architecture** / Design Output (820.30(d)) | Public port interfaces (`IPortName`) and domain value objects from **inward compile-time dependencies only**; **zero concrete implementing classes**. |
+| **Technical Design** (`<Project>/Design.md`) | `INV-*`, `DEC-*` | **Clause 5.4** (Software Detailed Design) | **Detailed Design Output** (820.30(d)) | Concrete realizing classes, internal algorithms, database table schemas, and unmanaged FFI bindings. |
 
 ---
 
@@ -121,7 +131,7 @@ While `<PREFIX>-<SLUG>` links enforce authoritative DAG traceability, related co
 All specifications and implementing documents **MUST** obey these five baseline rules:
 
 1. **Single Header Spec Link:** Every implementing document must link to its governing `*-spec.md` once immediately below the H1 title (`Spec: [<name>-spec](<relative-path>/spec/<name>-spec.md)`) and **MUST NOT** repeat the section definitions from the spec.
-2. **Code-as-Truth (Never Duplicate the Compiler or Filesystem):** Never list build-file dependency manifests, package versions, directory trees, class/file inventories, or copy-pasted code interface signatures in markdown documents.
+2. **Code-as-Truth (Never Duplicate the Compiler or Filesystem):** Never list build-file dependency manifests, package versions, directory trees, class/file inventories, or copy-pasted code interface signatures in markdown documents. In specifications and requirements documents (`SYS-*`, `DEP-*`), **never cite concrete implementing classes, records, structs, or database table names**; specify obligations strictly against public boundaries and contracts (`IPortName`, domain value objects). Concrete realizing types belong exclusively in `design` documents (`INV-*`, `DEC-*`) and the code itself (IEC 62304 Clause 5.4).
 3. **Zero Feature-Churn (Mechanisms Over Magic Numbers):** Never hardcode tunable implementation constants (buffer sizes, timeout durations, cryptographic parameters, or component counts) that belong in code or `README.md`.
 4. **Inline Contextual Reference Rule (No Link-Dump Tables):** Never create standalone "Upstream References" or "Permitted Inward References" link-dump sections. Link inline to an allowed upstream `<PREFIX>-<SLUG>` only where a specific rule is inherited or realized.
 5. **Git-Authoritative History Policy:** In-file revision history tables are prohibited across all documents (`git log` is authoritative). Only three specific QMS metadata records are permitted in-file:

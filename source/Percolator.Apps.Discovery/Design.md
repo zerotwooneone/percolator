@@ -22,7 +22,7 @@ Spec: [design-spec](../spec/design-spec.md)
 ## 3. Key Technical Design Choices
 
 1. **`DEC-TWO-PHASE-DISCOVERY` (Two-Phase Discovery to Defeat One-Time Pre-Key Starvation):**
-   - *Design Choice:* Discovery is split into Phase 1 (candidate queries returning only public identity and delivery route descriptors, consuming **zero** One-Time Pre-Keys) and Phase 2 (fetching a candidate's pre-key bundle and initiating an X3DH handshake strictly upon explicit user intent to connect).
+   - *Design Choice:* Discovery is split into Phase 1 (candidate queries returning only public identity and delivery route descriptors, consuming **zero** One-Time Pre-Keys) and Phase 2 (fetching a candidate's pre-key bundle and initiating an X3DH handshake strictly upon explicit user intent to connect), realizing [`SYS-DISCOVERY-PREKEY-ISOLATION`](../SystemRequirements.md#2-security-privacy-and-risk-control-invariants).
    - *Rejected Alternative:* Returning pre-key bundles directly inside directory search results, which allows an attacker to scrape the directory and exhaust every listed peer's OPK pool.
 2. **`DEC-BLINDED-RENDEZVOUS` (Time-Ratcheted Blinded Rendezvous Locators):**
    - Mutual contacts who share an out-of-band secret compute a daily UTC-ratcheted `HMAC-SHA256` blinded locator to deposit and query rendezvous descriptors on a common relay, enabling contact discovery with zero identity or social-graph disclosure to the relay. `#relay-privacy`

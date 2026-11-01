@@ -15,6 +15,7 @@ While `system-requirements` defines what the entire integrated system must do an
 - **Item Identifier Prefix:** `DEP-<SLUG>`, tagged with `[Verify: Unit | Integration | StaticAnalysis]` per [`qms-spec`](qms-spec.md#33-lightweight-verification--risk-control-tags-verify--control-) and governed by [Change Control](qms-spec.md#32-design-change-control-never-move-the-goalposts).
 - **Permitted Outbound QMS References:** `system-requirements` (`SYS-*`), `soup` (`SOUP-*`), `fact` (`FACT-*`), and inward `deployable-requirements` (`DEP-*`) strictly matching compile-time project dependencies.
 - **Prohibited Outbound References:** **MUST NOT** reference `intended-use`, `user-needs`, `risk-register` directly (traces through `SYS-*`), `design` documents, or outward/peer `deployable-requirements` outside its compile-time dependency graph.
+- **Software Item Interface Referencing Rule (IEC 62304 Clause 5.3.2):** An adapter deployable requirement (`DEP-*`) may reference public port interfaces (`IPortName`) and domain value objects defined by an **inward compile-time dependency** that it implements or encapsulates. It **MUST NOT** reference interfaces from sibling or outward deployables (preserving Dependency Inversion), and **MUST NOT** cite concrete realizing types (which belong in `Design.md`).
 
 ---
 
@@ -24,7 +25,7 @@ In addition to the universal rules in [`qms-spec`](qms-spec.md):
 
 1. **Module-Edge Verification Boundary (Boundary "What", Never Internal "How"):**
    - *Include:* The deployable's architectural segregation role (what frameworks, dependencies, or side effects are forbidden inside it per *IEC 62304 Clause 5.3.4*), the `SYS-*` obligations allocated to it, any third-party SOUP components ([`SOUP-*`](soup-spec.md)) it encapsulates, and the semantic invariants of its public ports and types.
-   - *Exclude Internal `design` Details:* Do not describe internal classes, private/internal algorithms, state machine mechanics, or storage schemas here; those belong in the deployable's `design` document.
+   - *Strict Prohibition on Concrete Types & Internal Details:* Concrete implementing classes, records, structs, internal database table names, or private file paths **MUST NOT** appear in `deployable-requirements` (`DEP-*`). Requirements must be defined strictly against public port interfaces (`IPortName`), domain value objects, or abstract module boundaries. Concrete realizing types, algorithms, and storage schemas belong exclusively in `Design.md` (IEC 62304 Clause 5.4 Detailed Design).
 2. **Two Software Item Archetypes (Clean / Onion Architecture):**
    - **Domain Core Deployables (`Domain`, `Domain.Kernel`):** Boundary constraints in Section 1 **MUST** prohibit database engines, network transports, OS-specific APIs, UI frameworks, and third-party SOUP.
    - **Adapter Deployables (`Infrastructure`, `Desktop`, `Simulator`):** Boundary constraints in Section 1 **MUST** prohibit domain business rules and forbid unquarantined SOUP handles (`IntPtr`, `SafeHandle`), vendor DTOs, or native exceptions from crossing domain port implementations.
