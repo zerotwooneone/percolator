@@ -1,45 +1,60 @@
 ---
 name: qms-implementation-review-cycle
 description: >-
-  Use this skill whenever planning, designing, or implementing features in a
-  medical-device-grade or high-assurance codebase. Enforces a streamlined, 5-step
-  developer lifecycle: (1) QMS Impact Analysis with a high burden of proof (default:
-  no changes), (2) Upfront QMS Update (before implementation, if change was proven),
-  (3) Jira-Style Implementation Slice (reviewed via chat or plan file), (4) Implementation
-  under Minimum Necessary Realization & TDD (100% clean code, zero in-code QMS tags),
-  and (5) Lightweight Mechanical Verification (automated test execution and compliance check).
+  Use this skill whenever planning, implementing, or auditing software components in
+  a medical-device-grade or high-assurance codebase. Enforces two disciplined workflows:
+  Workflow A (Forward Implementation Lifecycle: QMS impact analysis, Jira-style ticket,
+  anti-shortcut TDD implementation, and mechanical verification) and Workflow B
+  (Retrospective Code & Integrity Audit: detecting fake stubs, test evasion, memory
+  leaks, and QMS gaps in existing implementations).
 ---
 
 # QMS Implementation, Review & Specification Refinement Cycle
 
-This skill guides engineers and AI assistants through a disciplined, developer-friendly software lifecycle for medical-device-grade and high-assurance architectures. It front-loads regulatory design controls (**FDA 21 CFR 820.30** / **IEC 62304**) *before* coding begins, keeps source code and unit tests 100% clean of bureaucratic comment clutter, and respects the boundary between developer unit implementation and formal quality engineering.
+This skill guides engineers and AI assistants through a disciplined, dual-mode software lifecycle for medical-device-grade and high-assurance architectures:
+1. **Workflow A: Forward Implementation Lifecycle** (for planning and implementing new feature slices).
+2. **Workflow B: Retrospective Code & Integrity Audit** (for critically reviewing and hardening existing code with fresh eyes).
 
 ---
 
 ## Cardinal Principles
 
 1. **Design Controls Are Front-Loaded (QMS-First)**:
-   In medical device software, **Design Inputs precede Design Outputs**. If a technical design requires a QMS change, that change **MUST be documented and approved upfront**, before any production code is written. Never reverse-engineer QMS compliance after coding.
+   In medical device software (**FDA 21 CFR 820.30** / **IEC 62304**), **Design Inputs precede Design Outputs**. If a design idea requires a QMS change, that change **MUST be documented and approved upfront**, before any production code is written. Never reverse-engineer QMS compliance after coding.
 2. **Presumption of QMS Adequacy (High Burden of Proof)**:
    **The default assumption is that NO QMS document needs to change.** Most implementation tasks are simply realizations of existing requirements (`DEP-*`, `SYS-*`) or internal detailed design choices (`Design.md`). An AI assistant must explicitly *prove* that existing QMS documents are deficient before proposing additions. Not every feature is a user need, and not every exception is a hazard.
-3. **Strict Prohibition on In-Code QMS Comments (100% Clean Code)**:
-   **DO NOT** embed requirement tags (e.g. `// Implements DEP-*`, `// Verifies SYS-*`, `// Req: ...`) in source code or unit test comments. In-code requirement tagging is a known industry anti-pattern that leads to comment rot and auditor non-conformities. Traceability is maintained exclusively at the document and ticket level; source code and tests must remain 100% idiomatic C#.
-4. **Developer Implementation vs. Quality Engineering Separation**:
-   Developers write software units and automated unit tests. Do not burden developer tickets with artificial Quality Engineer (QE) sign-offs or pasted terminal transcripts. When tests pass, simply check off deliverables and mark the ticket resolved. Formal verification records belong to CI pipelines and QE release protocols.
-5. **Mandatory Human Review Gate Before Coding**:
+3. **Anti-Stub & Implementation Integrity (Zero Fake Returns)**:
+   AI assistants **SHALL NOT** write production adapters that simulate operations via empty loops, fake return strings (e.g. `ValueTask.FromResult(DomainResult.Success())`), or hardcoded error stubs without attempting the boundary operation. If an external contract or proto is blocked or missing, the AI **MUST halt and escalate** to the human user rather than writing a fake implementation.
+4. **Mandatory Happy-Path Round-Trip Test**:
+   Every outward adapter (e.g. gRPC client, store, crypto service) **MUST** include at least one happy-path unit or integration test proving that data actually traverses the adapter and returns expected results. Tests that only verify error guards (`> 100 MB`) or argument null exceptions are **insufficient to close a ticket**.
+5. **Strict Prohibition on In-Code QMS Comments (100% Clean Code)**:
+   **DO NOT** embed requirement tags (e.g. `// Implements DEP-*`, `// Verifies SYS-*`, `// Req: ...`) in source code or unit test comments. In-code requirement tagging is a known industry anti-pattern that leads to comment rot and auditor non-conformities (ISO 13485 Clause 7.3.9). Traceability is maintained exclusively at the document and ticket level; source code and tests must remain 100% idiomatic C#.
+6. **CQRS Read-Path Guidance**:
+   Write-heavy domain repositories (`IChannelRepository`) must not be loaded for read-only routing or resolution queries. Use lightweight query interfaces or cached lookup resolvers to prevent performance bottlenecks.
+7. **Escalation Over Silent Downgrade**:
+   If an AI discovers that a specification requirement is technically impractical or requires disproportionate external dependencies (e.g., pure C# video transcoding requiring FFmpeg), it **SHALL NOT silently downgrade or fake the code**. It must present the technical trade-off and propose an **ISO 14971 Risk-Benefit / Accepted Residual Risk** resolution to the human user.
+8. **Mandatory Human Review Gate Before Coding**:
    The implementation ticket must be presented to the user (via interactive chat or a plan file) and approved *before* touching any code.
 
 ---
 
-## The 5-Step Streamlined Life Cycle
+## Workflow Selection
+
+Choose the appropriate workflow based on your current task:
+* **Workflow A: Forward Implementation** $\longrightarrow$ Use when building a new feature slice, chunk, or architectural component from scratch or from a plan.
+* **Workflow B: Retrospective Code & Integrity Audit** $\longrightarrow$ Use when critically reviewing, verifying, or auditing existing code slices, PRs, or previously completed chunks.
+
+---
+
+## Workflow A: Forward Implementation Lifecycle
 
 ```mermaid
 flowchart TD
     S1["Step 1: QMS Impact Analysis (High Burden of Proof)<br/>• Presume existing QMS is adequate.<br/>• AI must PROVE a document change is required.<br/>• Default: Zero QMS modifications."]
     S2["Step 2: Upfront QMS Update (Only If Proven)<br/>• Update RiskRegister, SystemRequirements, or Requirements.md<br/>• Maintain 3-tier regulatory rules before writing code."]
-    S3["Step 3: Jira-Style Implementation Slice & User Review Gate<br/>• Mode A (Chat Ticket) or Mode B (Plan File).<br/>• MANDATORY GATE: User reviews and approves before coding."]
-    S4["Step 4: Implementation (Clean Code & TDD)<br/>• TDD Red-Green-Refactor.<br/>• Zero in-code QMS comments (100% clean C#).<br/>• Minimum Necessary Realization (zero speculative wrappers)."]
-    S5["Step 5: Lightweight Mechanical Verification<br/>• Run dotnet test (all pass).<br/>• Run validate-qms-compliance.ps1.<br/>• Mark ticket deliverables complete [x]."]
+    S3["Step 3: Jira-Style Implementation Slice & User Review Gate<br/>• Mode A (Chat Ticket) or Mode B (Plan File).<br/>• Mandate Happy-Path Round-Trip Test in test plan.<br/>• MANDATORY GATE: User reviews and approves before coding."]
+    S4["Step 4: Implementation (Clean Code & TDD)<br/>• TDD Red-Green-Refactor.<br/>• Zero in-code QMS comments (100% clean C#).<br/>• Zero fake stubs (execute real boundary calls).<br/>• Minimum Necessary Realization (zero speculative wrappers)."]
+    S5["Step 5: Lightweight Mechanical Verification<br/>• Run dotnet test (all pass, including round-trip tests).<br/>• Run validate-qms-compliance.ps1.<br/>• Mark ticket deliverables complete [x]."]
 
     S1 -->|Change Proven| S2
     S1 -->|No Change Needed| S3
@@ -48,139 +63,71 @@ flowchart TD
     S4 --> S5
 ```
 
----
+### Step 1: QMS Impact Analysis (High Burden of Proof)
+1. **The Presumption of Adequacy**: Assume existing QMS documents are complete unless proven otherwise.
+2. **The 3-Question Proving Rubric**:
+   - *Hazard Impact (`HAZ-*`)*: Does this design introduce a new safety, cryptographic, or privacy hazard not covered by existing hazards? (If ordinary bug $\rightarrow$ Exclude).
+   - *System Requirement Impact (`SYS-*`)*: Does this introduce a new black-box capability or safety boundary? (If internal plumbing $\rightarrow$ Exclude).
+   - *Software Item Allocation (`DEP-*`)*: Does this allocate a new public port interface between software items (IEC 62304 Clause 5.3)? (If internal helper $\rightarrow$ Exclude).
+3. **Decision Gate**: If no QMS change is proven, state: *"QMS Impact Analysis: No QMS updates required. Work is covered by existing requirements [`DEP-XXX`, `SYS-XXX`]. Proceeding directly to Implementation Slice."* $\longrightarrow$ Proceed to Step 3.
 
-## Step 1: QMS Impact Analysis (High Burden of Proof)
+### Step 2: Upfront QMS Update (Only If Proven)
+- Update `RiskRegister.md`, `SystemRequirements.md`, or `<Project>/Requirements.md` *before* coding.
+- Maintain the 3-Tier Symbol Rules (zero code symbols in `SYS-*`, inward port interfaces only in `DEP-*`, zero concrete classes).
+- Attach verification tags (`[Verify: ...]`) and control tags (`[Control: ...]`).
 
-**Objective**: Determine whether a technical design (from a chat prompt, idea, or design plan) genuinely impacts the formal QMS.
+### Step 3: Jira-Style Implementation Slice & User Review Gate
+Format as an actionable ticket in Chat (Mode A) or in a Plan File (Mode B).
+**MANDATORY**: Test plan must include at least one **Happy-Path Round-Trip Test** for outward adapters.
+**MANDATORY GATE**: Halt and obtain user approval before writing code.
 
-### The Presumption of Adequacy
-Assume the current QMS documents are complete and adequate for this task unless proven otherwise. 
+### Step 4: Implementation (Clean Code & TDD)
+- **Zero in-code QMS comments**: 100% clean, idiomatic C#.
+- **Zero fake stubs**: Real boundary calls, real gRPC streaming, real file I/O.
+- **Bounded $O(1)$ memory streaming**: Never buffer unbounded payloads into `MemoryStream`; stream in bounded chunks.
+- **CQRS read-path purity**: Do not load write-side domain aggregates for read-only routing queries.
+- **Escalation over silent downgrade**: If an obstacle arises (e.g. proto mismatch), escalate to the user immediately.
 
-### The 3-Question Proving Rubric:
-The AI must evaluate the proposed design against these three questions. To recommend a QMS change, the AI **MUST provide concrete proof** answering:
-
-1. **Hazard Impact (`HAZ-*` in `RiskRegister.md`)**:
-   - *Question*: Does this technical design introduce or address a genuinely new systemic safety, cryptographic, or privacy hazard?
-   - *Burden of Proof*: The AI must cite why existing hazards (e.g., DoS, replay, disk extraction, memory residue) do not already cover this vector. If it is an ordinary software bug or transient exception, it is **excluded**.
-2. **System Requirement Impact (`SYS-*` in `SystemRequirements.md`)**:
-   - *Question*: Does this introduce a new black-box system capability, external boundary, or risk control measure?
-   - *Burden of Proof*: The AI must prove why existing system requirements do not already mandate this behavior. If it is internal framework plumbing, it is **excluded**.
-3. **Software Item Allocation (`DEP-*` in `<Project>/Requirements.md`)**:
-   - *Question*: Does this allocate a new architectural responsibility or define a new public port interface between software items (IEC 62304 Clause 5.3.1 / 5.3.2)?
-   - *Burden of Proof*: The AI must prove that existing port contracts cannot satisfy the requirement. If it is an internal realizing class or helper, it belongs strictly in `Design.md`, **not** in `Requirements.md`.
-
-### Decision Gate:
-* **If NO QMS change is proven**: Explicitly state:
-  > *"QMS Impact Analysis: No QMS updates required. Work is covered by existing requirements [`DEP-XXX`, `SYS-XXX`]. Proceeding directly to Implementation Slice."*
-  $\longrightarrow$ Proceed immediately to **Step 3**.
-* **If a QMS change is proven**:
-  $\longrightarrow$ Proceed to **Step 2**.
-
----
-
-## Step 2: Upfront QMS Update (Only If Proven)
-
-**Objective**: Update the governing QMS documents *before* writing any implementation or test code.
-
-### Rules for Upfront Updates:
-1. **Assign Semantic Slug IDs**: Use globally unique IDs (`HAZ-<SLUG>`, `SYS-<SLUG>`, `DEP-<SLUG>`).
-2. **Maintain the 3-Tier Symbol Rules**:
-   - `SystemRequirements.md` (`SYS-*`): Strictly black-box behavior. **Zero C# interfaces, classes, or database schemas**.
-   - `<Project>/Requirements.md` (`DEP-*`): Software Item requirements. **Public port interfaces (`IPortName`) and domain value objects from inward compile-time dependencies only**. **Zero concrete implementing classes**.
-3. **Attach Verification & Control Tags**:
-   - `[Verify: Integration | Simulation | Unit]` on `SYS-*`
-   - `[Control: Inherent | Protective | Information]` on risk-mitigating requirements
-   - `[Verify: Unit | Integration | StaticAnalysis]` on `DEP-*`
-4. **Link Upward in the DAG**:
-   - `DEP-*` $\longrightarrow$ `SYS-*` $\longrightarrow$ `UN-*` / `HAZ-*`.
-5. **Human Approval Gate**: If a change alters existing risk scores or weakens an existing requirement, halt and obtain explicit human approval before proceeding.
+### Step 5: Lightweight Mechanical Verification
+1. Run `dotnet test <TargetTestProject> --no-build` (confirm all pass).
+2. Run `pwsh -File scripts/validate-qms-compliance.ps1` (confirm audit passes).
+3. Mark ticket checkboxes complete (`- [x]`).
 
 ---
 
-## Step 3: Jira-Style Implementation Slice & User Review Gate
+## Workflow B: Retrospective Code & Integrity Audit
 
-**Objective**: Format the intended work as a self-contained, actionable engineering ticket and obtain user sign-off before coding.
+Use this workflow to audit existing implementations, newly submitted PRs, or completed chunks with a "fresh set of eyes" to catch corner-cutting, architectural erosion, and spec drift.
 
-### Delivery Formats (Choose Based on Scope):
+```mermaid
+flowchart TD
+    B1["Step B1: Reality vs. Spec Inspection<br/>• Read actual source code and test files on disk.<br/>• Compare implementation against Requirements.md and Design.md."]
+    B2["Step B2: Anti-Shortcut & Integrity Scrutiny<br/>• Check for fake network/store loops.<br/>• Check for empty stub returns.<br/>• Check for test evasion (only error tests, no happy-path).<br/>• Check for memory scaling bugs (unbounded MemoryStream)."]
+    B3["Step B3: QMS Gap & Risk-Benefit Analysis<br/>• Check for unmitigated hazards or leaked symbols.<br/>• Evaluate over-specified requirements (e.g. FFmpeg vs ISO 14971 risk acceptance)."]
+    B4["Step B4: Remediation Plan & Human Gate<br/>• Formulate crisp Jira remediation ticket.<br/>• Present findings and trade-offs to user.<br/>• Execute approved remediation."]
 
-#### Mode A: Interactive Chat Ticket (For Single Slices / Ad-Hoc Tasks)
-Format the ticket directly in the conversation turn and halt execution (using `ask_question` or a review prompt). The AI **MUST NOT** proceed to Step 4 until the user reviews and approves the ticket.
-
-#### Mode B: Plan File Ticket (For Multi-Chunk Features)
-Create or update the ticket inside a project roadmap file (e.g., `<Project>/implementation-plan.md` like `Percolator.Infrastructure/implementation-plan.md`). This allows the user to review deliverables directly in their IDE. The AI proceeds chunk by chunk only upon user confirmation.
-
-### Ticket Template:
-```markdown
-### [TASK-XXX] <Slice Title>
-
-- **Status**: Ready for Implementation (Pending User Review)
-- **QMS Traceability**: 
-  - Implements: [`DEP-XXX`](<PathToRequirements>#L10)
-  - Allocates: [`SYS-XXX`](../SystemRequirements.md#L20)
-  - Mitigates: [`HAZ-XXX`](../RiskRegister.md#L30) (if applicable)
-  - Invariants: [`INV-XXX`](<PathToDesign>#L40)
-
-- **Scope & Deliverables**:
-  - [ ] `<Project>/Path/To/IPortInterface.cs`
-  - [ ] `<Project>/Path/To/ConcreteRealization.cs`
-  - [ ] `<Project>.Tests/Path/To/UnitTests.cs`
-
-- **Technical Specifications & Inward Ports**:
-  - Existing inward port interfaces and strongly-typed value objects to consume.
-  - Public method contracts, signatures, and expected exceptions.
-
-- **Embedded Unit Test Plan**:
-  - `Method_Condition_ExpectedBehavior`: Verifies domain outcome.
-  - `Method_BoundaryOrError_ThrowsOrRejects`: Verifies negative path.
-
-- **Verification Gate**:
-  - `dotnet build <Project>`
-  - `dotnet test <Project.Tests> --filter FullyQualifiedName~<TestNamespace>`
+    B1 --> B2
+    B2 --> B3
+    B3 --> B4
 ```
 
----
+### Step B1: Reality vs. Spec Inspection
+- Do not trust comments, PR descriptions, or green badges.
+- Read the actual concrete class realizations and test methods.
+- Check: Did the code actually implement the port contract, or did it merely compile?
 
-## Step 4: Implementation (Clean Code & TDD)
+### Step B2: Anti-Shortcut & Integrity Scrutiny
+Examine the implementation through the **4 AI Anti-Patterns Checklist**:
+- [ ] **Fake Operation Check**: Does any client or adapter loop through data without calling the underlying transport or database?
+- [ ] **Empty Stub Check**: Does any method return `Task.FromResult(DomainResult.Success())` or a hardcoded string without doing real work?
+- [ ] **Test Evasion Check**: Do the tests only assert error guards (e.g. `> 100 MB` or `null` checks) while avoiding testing the happy-path round-trip?
+- [ ] **Memory Scalability Check**: Does the implementation buffer multi-megabyte payloads in contiguous RAM (`new MemoryStream()`) instead of streaming in bounded $O(1)$ buffers?
 
-**Objective**: Execute the approved ticket using Test-Driven Development (TDD) while adhering to strict code hygiene and Onion Architecture.
+### Step B3: QMS Gap & Risk-Benefit Analysis
+- Check for leaked concrete classes in `Requirements.md` or leaked code in `SystemRequirements.md`.
+- Evaluate over-specified requirements: If a requirement is technically unachievable in pure portable C# (e.g., MP4 metadata scrubbing without FFmpeg), formulate an **ISO 14971 Clause 7.4 Risk-Benefit Analysis** proposing inherent controls on practical formats (JPEG/PNG) and documented accepted residual risk on complex formats.
 
-### Implementation Rules:
-1. **100% Clean Code (Zero In-Code QMS Comments)**:
-   - **NEVER** write comments referencing QMS IDs (e.g. `// Implements DEP-...`, `// Verifies SYS-...`).
-   - Write clean, idiomatic C# and readable test method names (e.g., `Decrypt_WithTamperedCiphertext_ThrowsCryptoException`).
-2. **Minimum Necessary Realization**:
-   - Implement strictly the public port contract demanded by the ticket.
-   - **DO NOT** introduce speculative wrapper interfaces, abstract factories, builder patterns, or redundant indirection. Prefer a single, robust concrete class implementing the port.
-3. **Onion Architecture Purity**:
-   - Domain layers have **zero outward dependencies** on databases, serializers, or transport sockets.
-4. **Primitive Obsession Elimination**:
-   - Cryptographic keys, tokens, hashes, and IDs must be wrapped in strongly-typed Value Objects (`[ByteArray]`, `[GuidId]`). Zero raw `byte[]` or `Guid` primitives in public APIs.
-5. **TDD Red-Green-Refactor**:
-   - Write failing unit/integration tests first.
-   - Implement minimal code to pass.
-   - Refactor cleanly while keeping tests green.
-
----
-
-## Step 5: Lightweight Mechanical Verification
-
-**Objective**: Verify software unit execution and confirm zero repository QMS regression.
-
-Developer verification is fast and lightweight. Do not write artificial QE compliance essays:
-
-### Actions:
-1. **Execute Tests**:
-   Run the test runner and verify 100% pass rate:
-   ```powershell
-   dotnet test <TargetTestProject> --no-build
-   ```
-   *Requirement*: Confirm all tests pass.
-2. **Run Automated QMS Compliance Script**:
-   Execute the repository audit script to confirm zero leaked concrete classes or invalid symbols in documentation:
-   ```powershell
-   pwsh -File ".agents/skills/qms-implementation-review-cycle/scripts/validate-qms-compliance.ps1"
-   ```
-   *Requirement*: Script exits with code 0 (`AUDIT PASSED`).
-3. **Close Deliverables**:
-   Mark the deliverable checkboxes complete (`- [x]`) in the ticket / plan file. Report a concise completion summary to the user.
+### Step B4: Remediation Plan & Human Gate
+- Format all identified defects as a structured **Remediation Slice**.
+- Present the findings, technical trade-offs, and proposed fixes to the user for explicit approval.
+- Upon approval, execute the fixes using Workflow A (TDD + Mechanical Verification).
