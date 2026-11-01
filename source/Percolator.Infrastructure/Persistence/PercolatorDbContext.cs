@@ -69,6 +69,14 @@ public class PercolatorDbContext : DbContext
     public DbSet<PeerProfileSnapshotEntity> PeerProfileSnapshots => Set<PeerProfileSnapshotEntity>();
     public DbSet<PeerMailboxRoutingEntity> PeerMailboxRouting => Set<PeerMailboxRoutingEntity>();
 
+    // Chunk 4.1 Chat Messaging Entities
+    public DbSet<ChatMessageEntity> ChatMessages => Set<ChatMessageEntity>();
+    public DbSet<ChatReactionEntity> ChatReactions => Set<ChatReactionEntity>();
+    public DbSet<ChatMessageMentionEntity> ChatMessageMentions => Set<ChatMessageMentionEntity>();
+    public DbSet<ChatAttachmentEntity> ChatAttachments => Set<ChatAttachmentEntity>();
+    public DbSet<ChatGroupInvitationEntity> ChatGroupInvitations => Set<ChatGroupInvitationEntity>();
+    public DbSet<ChatUnknownGroupMessageEntity> ChatUnknownGroupMessages => Set<ChatUnknownGroupMessageEntity>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -416,6 +424,87 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.DeliveryToken).HasColumnType("BLOB");
             entity.HasIndex(e => new { e.PeerId, e.LastObservedAtUtc })
                 .HasDatabaseName("ix_peer_mailbox_observed");
+        });
+
+        // 26. Chat Messages
+        modelBuilder.Entity<ChatMessageEntity>(entity =>
+        {
+            entity.ToTable("chat_messages");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.AuthorId).HasColumnType("BLOB");
+            entity.Property(e => e.ReplyAuthorId).HasColumnType("BLOB");
+            entity.Property(e => e.DeletedBy).HasColumnType("BLOB");
+            entity.Property(e => e.LinkPreviewThumbnailSha256).HasColumnType("BLOB");
+            entity.Property(e => e.LinkPreviewThumbnailKey).HasColumnType("BLOB");
+            entity.Property(e => e.LinkPreviewThumbnailNonce).HasColumnType("BLOB");
+            entity.HasIndex(e => new { e.ChannelId, e.TimestampUnixMs })
+                .HasDatabaseName("ix_chat_timeline");
+            entity.HasIndex(e => e.ExpiresAtUnixMs)
+                .HasDatabaseName("ix_chat_expiry");
+        });
+
+        // 28. Chat Message Mentions
+        modelBuilder.Entity<ChatMessageMentionEntity>(entity =>
+        {
+            entity.ToTable("chat_message_mentions");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.IdentityId).HasColumnType("BLOB");
+            entity.HasIndex(e => e.IdentityId).HasDatabaseName("ix_chat_mention_identity");
+            entity.HasOne<ChatMessageEntity>()
+                .WithMany()
+                .HasForeignKey(e => e.MessageId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // 27. Chat Reactions
+        modelBuilder.Entity<ChatReactionEntity>(entity =>
+        {
+            entity.ToTable("chat_reactions");
+            entity.HasKey(e => new { e.MessageId, e.ReactorId, e.Emoji });
+            entity.Property(e => e.ReactorId).HasColumnType("BLOB");
+            entity.Property(e => e.Emoji).HasMaxLength(32).IsRequired();
+            entity.HasOne<ChatMessageEntity>()
+                .WithMany()
+                .HasForeignKey(e => e.MessageId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // 29. Chat Attachments
+        modelBuilder.Entity<ChatAttachmentEntity>(entity =>
+        {
+            entity.ToTable("chat_attachments");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.BlobSha256).HasColumnType("BLOB");
+            entity.Property(e => e.BaseNonce).HasColumnType("BLOB");
+            entity.Property(e => e.EncryptionKey).HasColumnType("BLOB");
+            entity.Property(e => e.Waveform).HasColumnType("BLOB");
+            entity.Property(e => e.InlineBytes).HasColumnType("BLOB");
+            entity.HasOne<ChatMessageEntity>()
+                .WithMany()
+                .HasForeignKey(e => e.MessageId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // 30. Chat Group Invitations
+        modelBuilder.Entity<ChatGroupInvitationEntity>(entity =>
+        {
+            entity.ToTable("chat_group_invitations");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.InviterId).HasColumnType("BLOB");
+            entity.Property(e => e.GroupName).IsRequired();
+        });
+
+        // 31. Chat Unknown Group Messages
+        modelBuilder.Entity<ChatUnknownGroupMessageEntity>(entity =>
+        {
+            entity.ToTable("chat_unknown_group_messages");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.AuthorId).HasColumnType("BLOB");
+            entity.Property(e => e.EncryptedPayload).HasColumnType("BLOB");
+            entity.HasIndex(e => e.ExpiresAtUnixMs)
+                .HasDatabaseName("ix_unknown_group_expiry");
+            entity.HasIndex(e => e.ReceivedAtUnixMs)
+                .HasDatabaseName("ix_unknown_group_received");
         });
 
         // Apply snake_case naming convention to all columns

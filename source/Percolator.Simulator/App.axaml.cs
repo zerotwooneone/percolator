@@ -6,7 +6,7 @@ using Percolator.Simulator.Views;
 
 namespace Percolator.Simulator;
 
-public partial class App : Application
+public partial class App : Avalonia.Application
 {
     public override void Initialize()
     {
@@ -19,7 +19,7 @@ public partial class App : Application
         {
             desktop.MainWindow = new MainWindow
             {
-                DataContext = new MainViewModel(),
+                DataContext = new MainWindowViewModel(),
             };
         }
 

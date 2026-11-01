@@ -1,10 +1,17 @@
 using System.Buffers;
 using Google.Protobuf;
+using Percolator.Apps.Chat.Features.GroupInvitations;
+using Percolator.Apps.Chat.Features.Media;
+using Percolator.Apps.Chat.Features.Messaging;
+using Percolator.Apps.Chat.Features.Profiles;
+using Percolator.Apps.Chat.Features.Reactions;
 using Percolator.Apps.FileTransfer.Domain.Common;
 using Percolator.Apps.FileTransfer.Domain.ManifestManagement;
 using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
+using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
+using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Infrastructure2.Protos;
 using Percolator.PluginSdk;
 
@@ -42,6 +49,16 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
                 Type t when t == typeof(FileTransferOfferPayload) => FromOfferProto(FileTransferOfferProto.Parser.ParseFrom(data.Span)),
                 Type t when t == typeof(FileTransferAcceptPayload) => FromAcceptProto(FileTransferAcceptProto.Parser.ParseFrom(data.Span)),
                 Type t when t == typeof(FileTransferCancelPayload) => FromCancelProto(FileTransferCancelProto.Parser.ParseFrom(data.Span)),
+                Type t when t == typeof(ChatPayloadEnvelopeDto) => FromEnvelopeProto(ChatPayloadEnvelopeProto.Parser.ParseFrom(data.Span)),
+                Type t when t == typeof(ChatMessageDto) => FromChatMessageProto(ChatMessageProto.Parser.ParseFrom(data.Span)),
+                Type t when t == typeof(MessageEditDto) => FromEditProto(MessageEditProto.Parser.ParseFrom(data.Span)),
+                Type t when t == typeof(MessageTombstoneDto) => FromTombstoneProto(MessageTombstoneProto.Parser.ParseFrom(data.Span)),
+                Type t when t == typeof(ReactionUpdateDto) => FromReactionProto(ReactionUpdateProto.Parser.ParseFrom(data.Span)),
+                Type t when t == typeof(ReadReceiptDto) => FromReadReceiptProto(ReadReceiptProto.Parser.ParseFrom(data.Span)),
+                Type t when t == typeof(SystemNoticeDto) => FromNoticeProto(SystemNoticeProto.Parser.ParseFrom(data.Span)),
+                Type t when t == typeof(GroupInvitationDto) => FromInviteProto(GroupInvitationProto.Parser.ParseFrom(data.Span)),
+                Type t when t == typeof(GroupInvitationResponseDto) => FromInviteResponseProto(GroupInvitationResponseProto.Parser.ParseFrom(data.Span)),
+                Type t when t == typeof(ProfileCapabilityDto) => FromProfileCapabilityProto(ProfileCapabilityProto.Parser.ParseFrom(data.Span)),
                 _ => throw new NotSupportedException($"Payload type '{typeof(T).FullName}' is not registered in ProtobufPayloadSerializer.")
             };
 
@@ -63,6 +80,16 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
             FileTransferOfferPayload offer => ToOfferProto(offer),
             FileTransferAcceptPayload accept => ToAcceptProto(accept),
             FileTransferCancelPayload cancel => ToCancelProto(cancel),
+            ChatPayloadEnvelopeDto envelope => ToEnvelopeProto(envelope),
+            ChatMessageDto msg => ToChatMessageProto(msg),
+            MessageEditDto edit => ToEditProto(edit),
+            MessageTombstoneDto tomb => ToTombstoneProto(tomb),
+            ReactionUpdateDto rx => ToReactionProto(rx),
+            ReadReceiptDto rr => ToReadReceiptProto(rr),
+            SystemNoticeDto notice => ToNoticeProto(notice),
+            GroupInvitationDto invite => ToInviteProto(invite),
+            GroupInvitationResponseDto inviteResp => ToInviteResponseProto(inviteResp),
+            ProfileCapabilityDto profCap => ToProfileCapabilityProto(profCap),
             _ => throw new NotSupportedException($"Payload type '{typeof(T).FullName}' is not registered in ProtobufPayloadSerializer.")
         };
     }
@@ -303,4 +330,423 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
         new(
             TransferSessionId.FromGuid(new Guid(proto.TransferSessionId.Span, bigEndian: true)),
             TransferTerminationReason.FromText(proto.Reason));
+
+    // Chat DTO Serialization
+
+    private static ChatPayloadEnvelopeProto ToEnvelopeProto(ChatPayloadEnvelopeDto dto) =>
+        new()
+        {
+            Type = (int)dto.Type,
+            Data = ByteString.CopyFrom(dto.Data.Span),
+            Padding = ByteString.CopyFrom(dto.Padding.Span)
+        };
+
+    private static ChatPayloadEnvelopeDto FromEnvelopeProto(ChatPayloadEnvelopeProto proto) =>
+        new(
+            (ChatPayloadType)proto.Type,
+            proto.Data.ToByteArray(),
+            proto.Padding.ToByteArray());
+
+    private static ChatMessageProto ToChatMessageProto(ChatMessageDto dto)
+    {
+        ChatMessageProto proto = new()
+        {
+            Id = ByteString.CopyFrom(dto.Id.Value.ToByteArray(bigEndian: true)),
+            ChannelId = ByteString.CopyFrom(dto.ChannelId.Value.ToByteArray(bigEndian: true)),
+            AuthorId = ByteString.CopyFrom(dto.AuthorId.Value.ToByteArray(bigEndian: true)),
+            TimestampUnixMs = dto.TimestampUnixMs,
+            Content = dto.Content ?? string.Empty,
+        };
+
+        if (dto.ExpireAfterSeconds.HasValue)
+        {
+            proto.ExpireAfterSeconds = dto.ExpireAfterSeconds.Value;
+        }
+
+        if (dto.EditedAtUnixMs.HasValue)
+        {
+            proto.EditedAtUnixMs = dto.EditedAtUnixMs.Value;
+        }
+
+        if (dto.ReplyContext != null)
+        {
+            proto.ReplyContext = new ReplyContextProto
+            {
+                ParentPayloadId = ByteString.CopyFrom(dto.ReplyContext.ParentPayloadId.Value.ToByteArray(bigEndian: true)),
+                ParentAuthorId = ByteString.CopyFrom(dto.ReplyContext.ParentAuthorId.Value.ToByteArray(bigEndian: true))
+            };
+        }
+
+        if (dto.Mentions != null)
+        {
+            foreach (MentionDto m in dto.Mentions)
+            {
+                proto.Mentions.Add(new MentionProto
+                {
+                    IdentityId = ByteString.CopyFrom(m.IdentityId.Value.ToByteArray(bigEndian: true)),
+                    StartOffset = m.StartOffset,
+                    Length = m.Length
+                });
+            }
+        }
+
+        if (dto.LinkPreview != null)
+        {
+            proto.LinkPreview = new LinkPreviewProto
+            {
+                Title = dto.LinkPreview.Title ?? string.Empty,
+                Description = dto.LinkPreview.Description ?? string.Empty,
+                CanonicalUrl = dto.LinkPreview.CanonicalUrl ?? string.Empty,
+                ThumbnailBlob = dto.LinkPreview.ThumbnailBlob != null ? ToBlobRefProto(dto.LinkPreview.ThumbnailBlob) : null
+            };
+        }
+
+        if (dto.Attachments != null)
+        {
+            foreach (MediaAttachmentDto a in dto.Attachments)
+            {
+                MediaAttachmentProto ap = new()
+                {
+                    BlobId = a.BlobId.HexDigest,
+                    ContentType = a.ContentType ?? string.Empty,
+                    ByteSize = a.ByteSize,
+                    OutOfBandReference = a.OutOfBandReference != null ? ToBlobRefProto(a.OutOfBandReference) : null
+                };
+
+                if (a.FileName != null)
+                {
+                    ap.FileName = a.FileName;
+                }
+
+                if (a.Width.HasValue)
+                {
+                    ap.Width = a.Width.Value;
+                }
+
+                if (a.Height.HasValue)
+                {
+                    ap.Height = a.Height.Value;
+                }
+
+                if (a.Waveform != null)
+                {
+                    ap.Waveform = ByteString.CopyFrom(a.Waveform);
+                }
+
+                if (a.InlineBytes.HasValue)
+                {
+                    ap.InlineBytes = ByteString.CopyFrom(a.InlineBytes.Value.Span);
+                }
+
+                proto.Attachments.Add(ap);
+            }
+        }
+
+        return proto;
+    }
+
+    private static ChatMessageDto FromChatMessageProto(ChatMessageProto proto)
+    {
+        PayloadId id = PayloadId.FromGuid(new Guid(proto.Id.Span, bigEndian: true));
+        ChannelId channelId = ChannelId.FromGuid(new Guid(proto.ChannelId.Span, bigEndian: true));
+        PublicIdentityId authorId = PublicIdentityId.FromGuid(new Guid(proto.AuthorId.Span, bigEndian: true));
+
+        ReplyContextDto? replyContext = proto.ReplyContext != null
+            ? new ReplyContextDto(
+                PayloadId.FromGuid(new Guid(proto.ReplyContext.ParentPayloadId.Span, bigEndian: true)),
+                PublicIdentityId.FromGuid(new Guid(proto.ReplyContext.ParentAuthorId.Span, bigEndian: true)))
+            : null;
+
+        List<MentionDto> mentions = new(proto.Mentions.Count);
+        foreach (MentionProto m in proto.Mentions)
+        {
+            mentions.Add(new MentionDto(
+                PublicIdentityId.FromGuid(new Guid(m.IdentityId.Span, bigEndian: true)),
+                m.StartOffset,
+                m.Length));
+        }
+
+        LinkPreviewDto? linkPreview = proto.LinkPreview != null
+            ? new LinkPreviewDto(
+                proto.LinkPreview.Title,
+                proto.LinkPreview.Description,
+                proto.LinkPreview.CanonicalUrl,
+                proto.LinkPreview.ThumbnailBlob != null ? FromBlobRefProto(proto.LinkPreview.ThumbnailBlob) : null)
+            : null;
+
+        List<MediaAttachmentDto> attachments = new(proto.Attachments.Count);
+        foreach (MediaAttachmentProto a in proto.Attachments)
+        {
+            attachments.Add(new MediaAttachmentDto(
+                new BlobId(a.BlobId),
+                a.HasFileName ? a.FileName : null,
+                a.ContentType,
+                a.ByteSize,
+                a.HasWidth ? a.Width : null,
+                a.HasHeight ? a.Height : null,
+                a.Waveform is { IsEmpty: false } ? a.Waveform.ToByteArray() : null,
+                a.InlineBytes is { IsEmpty: false } ? a.InlineBytes.ToByteArray() : null,
+                a.OutOfBandReference != null ? FromBlobRefProto(a.OutOfBandReference) : null));
+        }
+
+        return new ChatMessageDto(
+            id,
+            channelId,
+            authorId,
+            proto.TimestampUnixMs,
+            proto.Content,
+            mentions,
+            replyContext,
+            linkPreview,
+            attachments,
+            proto.HasExpireAfterSeconds ? proto.ExpireAfterSeconds : null,
+            proto.HasEditedAtUnixMs ? proto.EditedAtUnixMs : null);
+    }
+
+    private static MessageEditProto ToEditProto(MessageEditDto dto)
+    {
+        MessageEditProto proto = new()
+        {
+            TargetPayloadId = ByteString.CopyFrom(dto.TargetPayloadId.Value.ToByteArray(bigEndian: true)),
+            ChannelId = ByteString.CopyFrom(dto.ChannelId.Value.ToByteArray(bigEndian: true)),
+            AuthorId = ByteString.CopyFrom(dto.AuthorId.Value.ToByteArray(bigEndian: true)),
+            NewContent = dto.NewContent ?? string.Empty,
+            EditedAtUnixMs = dto.EditedAtUnixMs
+        };
+
+        if (dto.NewMentions != null)
+        {
+            foreach (MentionDto m in dto.NewMentions)
+            {
+                proto.NewMentions.Add(new MentionProto
+                {
+                    IdentityId = ByteString.CopyFrom(m.IdentityId.Value.ToByteArray(bigEndian: true)),
+                    StartOffset = m.StartOffset,
+                    Length = m.Length
+                });
+            }
+        }
+
+        return proto;
+    }
+
+    private static MessageEditDto FromEditProto(MessageEditProto proto)
+    {
+        List<MentionDto> mentions = new(proto.NewMentions.Count);
+        foreach (MentionProto m in proto.NewMentions)
+        {
+            mentions.Add(new MentionDto(
+                PublicIdentityId.FromGuid(new Guid(m.IdentityId.Span, bigEndian: true)),
+                m.StartOffset,
+                m.Length));
+        }
+
+        return new MessageEditDto(
+            PayloadId.FromGuid(new Guid(proto.TargetPayloadId.Span, bigEndian: true)),
+            ChannelId.FromGuid(new Guid(proto.ChannelId.Span, bigEndian: true)),
+            PublicIdentityId.FromGuid(new Guid(proto.AuthorId.Span, bigEndian: true)),
+            proto.NewContent,
+            mentions,
+            proto.EditedAtUnixMs);
+    }
+
+    private static MessageTombstoneProto ToTombstoneProto(MessageTombstoneDto dto) =>
+        new()
+        {
+            TargetPayloadId = ByteString.CopyFrom(dto.TargetPayloadId.Value.ToByteArray(bigEndian: true)),
+            ChannelId = ByteString.CopyFrom(dto.ChannelId.Value.ToByteArray(bigEndian: true)),
+            RequestedBy = ByteString.CopyFrom(dto.RequestedBy.Value.ToByteArray(bigEndian: true)),
+            DeletedAtUnixMs = dto.DeletedAtUnixMs
+        };
+
+    private static MessageTombstoneDto FromTombstoneProto(MessageTombstoneProto proto) =>
+        new(
+            PayloadId.FromGuid(new Guid(proto.TargetPayloadId.Span, bigEndian: true)),
+            ChannelId.FromGuid(new Guid(proto.ChannelId.Span, bigEndian: true)),
+            PublicIdentityId.FromGuid(new Guid(proto.RequestedBy.Span, bigEndian: true)),
+            proto.DeletedAtUnixMs);
+
+    private static ReactionUpdateProto ToReactionProto(ReactionUpdateDto dto) =>
+        new()
+        {
+            TargetPayloadId = ByteString.CopyFrom(dto.TargetPayloadId.Value.ToByteArray(bigEndian: true)),
+            ChannelId = ByteString.CopyFrom(dto.ChannelId.Value.ToByteArray(bigEndian: true)),
+            AuthorId = ByteString.CopyFrom(dto.AuthorId.Value.ToByteArray(bigEndian: true)),
+            Emoji = dto.Emoji ?? string.Empty,
+            Action = (int)dto.Action,
+            TimestampUnixMs = dto.TimestampUnixMs
+        };
+
+    private static ReactionUpdateDto FromReactionProto(ReactionUpdateProto proto) =>
+        new(
+            PayloadId.FromGuid(new Guid(proto.TargetPayloadId.Span, bigEndian: true)),
+            ChannelId.FromGuid(new Guid(proto.ChannelId.Span, bigEndian: true)),
+            PublicIdentityId.FromGuid(new Guid(proto.AuthorId.Span, bigEndian: true)),
+            proto.Emoji,
+            (ReactionAction)proto.Action,
+            proto.TimestampUnixMs);
+
+    private static ReadReceiptProto ToReadReceiptProto(ReadReceiptDto dto) =>
+        new()
+        {
+            ChannelId = ByteString.CopyFrom(dto.ChannelId.Value.ToByteArray(bigEndian: true)),
+            ReaderId = ByteString.CopyFrom(dto.ReaderId.Value.ToByteArray(bigEndian: true)),
+            UpToPayloadId = ByteString.CopyFrom(dto.UpToPayloadId.Value.ToByteArray(bigEndian: true)),
+            ReadAtUnixMs = dto.ReadAtUnixMs
+        };
+
+    private static ReadReceiptDto FromReadReceiptProto(ReadReceiptProto proto) =>
+        new(
+            ChannelId.FromGuid(new Guid(proto.ChannelId.Span, bigEndian: true)),
+            PublicIdentityId.FromGuid(new Guid(proto.ReaderId.Span, bigEndian: true)),
+            PayloadId.FromGuid(new Guid(proto.UpToPayloadId.Span, bigEndian: true)),
+            proto.ReadAtUnixMs);
+
+    private static SystemNoticeProto ToNoticeProto(SystemNoticeDto dto) =>
+        new()
+        {
+            ChannelId = ByteString.CopyFrom(dto.ChannelId.Value.ToByteArray(bigEndian: true)),
+            NoticeType = (int)dto.NoticeType,
+            AffectedIdentity = dto.AffectedIdentity.HasValue
+                ? ByteString.CopyFrom(dto.AffectedIdentity.Value.Value.ToByteArray(bigEndian: true))
+                : ByteString.Empty,
+            TimestampUnixMs = dto.TimestampUnixMs
+        };
+
+    private static SystemNoticeDto FromNoticeProto(SystemNoticeProto proto) =>
+        new(
+            ChannelId.FromGuid(new Guid(proto.ChannelId.Span, bigEndian: true)),
+            (SystemNoticeType)proto.NoticeType,
+            proto.AffectedIdentity is { IsEmpty: false }
+                ? PublicIdentityId.FromGuid(new Guid(proto.AffectedIdentity.Span, bigEndian: true))
+                : null,
+            proto.TimestampUnixMs);
+
+    private static GroupInvitationProto ToInviteProto(GroupInvitationDto dto)
+    {
+        GroupInvitationProto proto = new()
+        {
+            InvitationId = dto.InvitationId.Value,
+            TargetGroupChannelId = ByteString.CopyFrom(dto.TargetGroupChannelId.Value.ToByteArray(bigEndian: true)),
+            GroupName = dto.GroupName ?? string.Empty,
+            InviterId = ByteString.CopyFrom(dto.InviterId.Value.ToByteArray(bigEndian: true)),
+            ExpiresAtUnixMs = dto.ExpiresAtUnixMs
+        };
+
+        if (dto.RelayEndpoint != null)
+        {
+            proto.RelayEndpoint = dto.RelayEndpoint;
+        }
+
+        return proto;
+    }
+
+    private static GroupInvitationDto FromInviteProto(GroupInvitationProto proto) =>
+        new(
+            new InvitationId(proto.InvitationId),
+            ChannelId.FromGuid(new Guid(proto.TargetGroupChannelId.Span, bigEndian: true)),
+            proto.GroupName,
+            PublicIdentityId.FromGuid(new Guid(proto.InviterId.Span, bigEndian: true)),
+            proto.HasRelayEndpoint ? proto.RelayEndpoint : null,
+            proto.ExpiresAtUnixMs);
+
+    private static GroupInvitationResponseProto ToInviteResponseProto(GroupInvitationResponseDto dto) =>
+        new()
+        {
+            InvitationId = dto.InvitationId.Value,
+            TargetGroupChannelId = ByteString.CopyFrom(dto.TargetGroupChannelId.Value.ToByteArray(bigEndian: true)),
+            ResponderId = ByteString.CopyFrom(dto.ResponderId.Value.ToByteArray(bigEndian: true)),
+            Accepted = dto.Accepted,
+            RespondedAtUnixMs = dto.RespondedAtUnixMs
+        };
+
+    private static GroupInvitationResponseDto FromInviteResponseProto(GroupInvitationResponseProto proto) =>
+        new(
+            new InvitationId(proto.InvitationId),
+            ChannelId.FromGuid(new Guid(proto.TargetGroupChannelId.Span, bigEndian: true)),
+            PublicIdentityId.FromGuid(new Guid(proto.ResponderId.Span, bigEndian: true)),
+            proto.Accepted,
+            proto.RespondedAtUnixMs);
+
+    private static ProfileCapabilityProto ToProfileCapabilityProto(ProfileCapabilityDto dto)
+    {
+        ProfileCapabilityProto proto = new()
+        {
+            ChannelId = ByteString.CopyFrom(dto.ChannelId.Value.ToByteArray(bigEndian: true)),
+            AuthorId = ByteString.CopyFrom(dto.AuthorId.Value.ToByteArray(bigEndian: true)),
+            ProfileKeyBytes = ByteString.CopyFrom(dto.ProfileKeyBytes),
+            BlindedLocatorBytes = ByteString.CopyFrom(dto.BlindedLocatorBytes),
+            MailboxRoutingTokenBytes = ByteString.CopyFrom(dto.MailboxRoutingTokenBytes),
+            Revision = dto.Revision,
+            TimestampUnixMs = dto.TimestampUnixMs,
+            SourceType = (int)dto.SourceType
+        };
+
+        if (dto.AuthorPublicKeyBytes != null)
+        {
+            proto.AuthorPublicKeyBytes = ByteString.CopyFrom(dto.AuthorPublicKeyBytes);
+        }
+
+        if (dto.SourceEndpoint != null)
+        {
+            proto.SourceEndpoint = dto.SourceEndpoint;
+        }
+
+        return proto;
+    }
+
+    private static ProfileCapabilityDto FromProfileCapabilityProto(ProfileCapabilityProto proto) =>
+        new(
+            ChannelId.FromGuid(new Guid(proto.ChannelId.Span, bigEndian: true)),
+            PublicIdentityId.FromGuid(new Guid(proto.AuthorId.Span, bigEndian: true)),
+            proto.ProfileKeyBytes.ToByteArray(),
+            proto.BlindedLocatorBytes.ToByteArray(),
+            proto.MailboxRoutingTokenBytes.ToByteArray(),
+            proto.Revision,
+            proto.TimestampUnixMs,
+            proto.AuthorPublicKeyBytes is { IsEmpty: false } ? proto.AuthorPublicKeyBytes.ToByteArray() : null,
+            proto.HasSourceEndpoint ? proto.SourceEndpoint : null,
+            (ProfileSourceType)proto.SourceType);
+
+    private static BlobReferenceProto ToBlobRefProto(BlobReference b) =>
+        new()
+        {
+            Id = b.Id.HexDigest,
+            CiphertextSha256 = ByteString.CopyFrom(b.CiphertextSha256),
+            EncryptionKey = ByteString.CopyFrom(b.EncryptionKey),
+            BaseNonce = ByteString.CopyFrom(b.BaseNonce),
+            PlaintextSizeBytes = b.PlaintextSizeBytes,
+            CiphertextSizeBytes = b.CiphertextSizeBytes,
+            MimeType = b.MimeType ?? string.Empty,
+            ExpiresAtUnixSeconds = b.ExpiresAtUtc.ToUnixTimeSeconds(),
+            StorageMode = (uint)b.StorageMode,
+            RelayEndpointUri = b.RelayEndpointUri ?? string.Empty,
+            BlurHash = b.BlurHash ?? string.Empty,
+            InlineThumbnail = b.InlineThumbnail != null ? ByteString.CopyFrom(b.InlineThumbnail) : ByteString.Empty,
+            Waveform = b.Waveform != null ? ByteString.CopyFrom(b.Waveform) : ByteString.Empty,
+            Width = b.Width ?? 0,
+            Height = b.Height ?? 0,
+            DurationSeconds = b.DurationSeconds ?? 0
+        };
+
+    private static BlobReference FromBlobRefProto(BlobReferenceProto p) =>
+        new()
+        {
+            Id = new BlobId(p.Id),
+            CiphertextSha256 = p.CiphertextSha256.ToByteArray(),
+            EncryptionKey = p.EncryptionKey.ToByteArray(),
+            BaseNonce = p.BaseNonce.ToByteArray(),
+            PlaintextSizeBytes = p.PlaintextSizeBytes,
+            CiphertextSizeBytes = p.CiphertextSizeBytes,
+            MimeType = p.MimeType,
+            ExpiresAtUtc = DateTimeOffset.FromUnixTimeSeconds(p.ExpiresAtUnixSeconds),
+            StorageMode = (BlobStorageMode)p.StorageMode,
+            RelayEndpointUri = string.IsNullOrEmpty(p.RelayEndpointUri) ? null : p.RelayEndpointUri,
+            BlurHash = string.IsNullOrEmpty(p.BlurHash) ? null : p.BlurHash,
+            InlineThumbnail = p.InlineThumbnail.IsEmpty ? null : p.InlineThumbnail.ToByteArray(),
+            Waveform = p.Waveform.IsEmpty ? null : p.Waveform.ToByteArray(),
+            Width = p.Width > 0 ? p.Width : null,
+            Height = p.Height > 0 ? p.Height : null,
+            DurationSeconds = p.DurationSeconds > 0 ? p.DurationSeconds : null
+        };
 }

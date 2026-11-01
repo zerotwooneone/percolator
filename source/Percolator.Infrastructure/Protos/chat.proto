@@ -1,0 +1,126 @@
+syntax = "proto3";
+
+package percolator.infrastructure2.protos;
+
+import "profile.proto";
+
+option csharp_namespace = "Percolator.Infrastructure2.Protos";
+
+message ChatPayloadEnvelopeProto {
+  int32 type = 1;
+  bytes data = 2;
+  bytes padding = 3;
+}
+
+message ReplyContextProto {
+  bytes parent_payload_id = 1;
+  bytes parent_author_id = 2;
+}
+
+message MentionProto {
+  bytes identity_id = 1;
+  int32 start_offset = 2;
+  int32 length = 3;
+}
+
+message LinkPreviewProto {
+  string title = 1;
+  string description = 2;
+  string canonical_url = 3;
+  BlobReferenceProto thumbnail_blob = 4;
+}
+
+message MediaAttachmentProto {
+  string blob_id = 1;
+  optional string file_name = 2;
+  string content_type = 3;
+  int64 byte_size = 4;
+  optional int32 width = 5;
+  optional int32 height = 6;
+  optional bytes waveform = 7;
+  optional bytes inline_bytes = 8;
+  BlobReferenceProto out_of_band_reference = 9;
+}
+
+message ChatMessageProto {
+  bytes id = 1;
+  bytes channel_id = 2;
+  bytes author_id = 3;
+  uint64 timestamp_unix_ms = 4;
+  string content = 5;
+  ReplyContextProto reply_context = 6;
+  repeated MentionProto mentions = 7;
+  LinkPreviewProto link_preview = 8;
+  repeated MediaAttachmentProto attachments = 9;
+  optional int32 expire_after_seconds = 10;
+  optional uint64 edited_at_unix_ms = 11;
+}
+
+message MessageEditProto {
+  bytes target_payload_id = 1;
+  bytes channel_id = 2;
+  bytes author_id = 3;
+  string new_content = 4;
+  repeated MentionProto new_mentions = 5;
+  uint64 edited_at_unix_ms = 6;
+}
+
+message MessageTombstoneProto {
+  bytes target_payload_id = 1;
+  bytes channel_id = 2;
+  bytes requested_by = 3;
+  uint64 deleted_at_unix_ms = 4;
+}
+
+message ReactionUpdateProto {
+  bytes target_payload_id = 1;
+  bytes channel_id = 2;
+  bytes author_id = 3;
+  string emoji = 4;
+  int32 action = 5;
+  uint64 timestamp_unix_ms = 6;
+}
+
+message ReadReceiptProto {
+  bytes channel_id = 1;
+  bytes reader_id = 2;
+  bytes up_to_payload_id = 3;
+  uint64 read_at_unix_ms = 4;
+}
+
+message SystemNoticeProto {
+  bytes channel_id = 1;
+  int32 notice_type = 2;
+  bytes affected_identity = 3;
+  uint64 timestamp_unix_ms = 4;
+}
+
+message GroupInvitationProto {
+  string invitation_id = 1;
+  bytes target_group_channel_id = 2;
+  string group_name = 3;
+  bytes inviter_id = 4;
+  optional string relay_endpoint = 5;
+  uint64 expires_at_unix_ms = 6;
+}
+
+message GroupInvitationResponseProto {
+  string invitation_id = 1;
+  bytes target_group_channel_id = 2;
+  bytes responder_id = 3;
+  bool accepted = 4;
+  uint64 responded_at_unix_ms = 5;
+}
+
+message ProfileCapabilityProto {
+  bytes channel_id = 1;
+  bytes author_id = 2;
+  bytes profile_key_bytes = 3;
+  bytes blinded_locator_bytes = 4;
+  bytes mailbox_routing_token_bytes = 5;
+  uint32 revision = 6;
+  uint64 timestamp_unix_ms = 7;
+  optional bytes author_public_key_bytes = 8;
+  optional string source_endpoint = 9;
+  int32 source_type = 10;
+}

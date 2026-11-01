@@ -1417,9 +1417,11 @@
       - `content` (`TEXT`)
       - `reply_parent_id` (`TEXT` GUID nullable)
       - `reply_author_id` (`BLOB` 32 bytes nullable PublicIdentityId)
-      - `mentions_json` (`TEXT` nullable)
-      - `link_preview_json` (`TEXT` nullable)
-      - `expire_after_seconds` (`INTEGER` nullable)
+       - `link_preview_title` (`TEXT` nullable)
+       - `link_preview_description` (`TEXT` nullable)
+       - `link_preview_canonical_url` (`TEXT` nullable)
+       - `link_preview_thumbnail_blob_id` (`TEXT` nullable)
+       - `expire_after_seconds` (`INTEGER` nullable)
       - `expires_at_unix_ms` (`INTEGER` ulong nullable, indexed)
       - `read_at_unix_ms` (`INTEGER` ulong nullable)
       - `edited_at_unix_ms` (`INTEGER` ulong nullable)
@@ -1434,15 +1436,22 @@
       - `emoji` (`TEXT` 32 chars)
       - `timestamp_unix_ms` (`INTEGER` ulong)
       - *Composite PK*: `PRIMARY KEY(message_id, reactor_id, emoji)`
-      - *FK*: `FOREIGN KEY(message_id) REFERENCES chat_messages(id) ON DELETE CASCADE`
+       - *FK*: `FOREIGN KEY(message_id) REFERENCES chat_messages(id) ON DELETE CASCADE`
+    - `chat_message_mentions`:
+       - `id` (`TEXT` GUID, PK)
+       - `message_id` (`TEXT` GUID, FK to `chat_messages(id)` ON DELETE CASCADE)
+       - `identity_id` (`BLOB` 16 bytes PublicIdentityId, indexed)
+       - `start_offset` (`INTEGER`)
+       - `length` (`INTEGER`)
+       - *Index*: `CREATE INDEX ix_chat_mention_identity ON chat_message_mentions(identity_id);`
     - `chat_attachments`:
-      - `id` (`TEXT` GUID, PK)
+       - `id` (`TEXT` GUID, PK)
       - `message_id` (`TEXT` GUID, FK to `chat_messages(id)` ON DELETE CASCADE)
       - `blob_sha256` (`BLOB` 32 bytes)
       - `file_name` (`TEXT`)
       - `file_size_bytes` (`INTEGER`)
       - `mime_type` (`TEXT`)
-      - `encryption_key_ciphertext` (`BLOB`, 32-byte out-of-band attachment AEAD key encrypted at rest via `AesGcmValueConverter`)
+       - `encryption_key` (`BLOB`, 32-byte out-of-band attachment AEAD key protected at rest by SQLCipher)
       - `base_nonce` (`BLOB` 12 bytes, `BlobReference.BaseNonce`)
       - `storage_mode` (`INTEGER`: `Inline=0`, `RelayBlob=1`, `DirectPeerStream=2`)
       - `relay_endpoint_uri` (`TEXT` nullable)
@@ -1480,24 +1489,24 @@
   - **Aggregate Hydration & Zero Inner-Ring Mutation Guardrail**:
     - `ChatMessage` (`Percolator.Apps.Chat.Features.Messaging.ChatMessage`), `PendingGroupInvitation` (`Percolator.Apps.Chat.Features.GroupInvitations.PendingGroupInvitation`), and `UnknownGroupMessageRecord` already provide full, invariant-enforcing public constructors that accept all persisted state (`editedAtUnixMs`, `isTombstone`, `deletedAtUnixMs`, `deletedBy`, `reactions`, `readAtUnixMs`, `status`, `respondedAtUnixMs`). `SqlChatMessageRepository`, `SqlGroupInvitationRepository`, and `SqlUnknownGroupMessageCacheRepository` MUST hydrate domain models using these existing validated constructors; zero `Rehydrate` backdoors or modifications to `Percolator.Apps.Chat` are permitted.
 - **Scope & Deliverables**:
-  - [ ] Author Protobuf schema `Percolator.Infrastructure/Protos/chat.proto`.
-  - [ ] Configure `<ProjectReference>` to `Percolator.Apps.Chat` and `Percolator.Apps.Discovery` in `Percolator.Infrastructure.csproj`.
-  - [ ] Extend `ProtobufPayloadSerializer` with deterministic `chat.proto` mappings for `ChatPayloadEnvelopeDto` and all `Percolator.Apps.Chat` wire DTOs.
-  - [ ] Implement Chat Persistence & Fast-Path CQRS Query Services:
+  - [x] Author Protobuf schema `Percolator.Infrastructure/Protos/chat.proto`.
+  - [x] Configure `<ProjectReference>` to `Percolator.Apps.Chat` and `Percolator.Apps.Discovery` in `Percolator.Infrastructure.csproj`.
+  - [x] Extend `ProtobufPayloadSerializer` with deterministic `chat.proto` mappings for `ChatPayloadEnvelopeDto` and all `Percolator.Apps.Chat` wire DTOs.
+  - [x] Implement Chat Persistence & Fast-Path CQRS Query Services:
     - `SqlChatMessageRepository` (`Percolator.Apps.Chat.Features.Messaging.IChatMessageRepository`)
     - `SqlChatMessageQueryService` (`Percolator.Apps.Chat.Features.Messaging.IChatMessageQueryService`)
     - `SqlConversationListQueryService` (`Percolator.Apps.Chat.Features.Messaging.IConversationListQueryService`)
     - `SqlGroupInvitationRepository` (`Percolator.Apps.Chat.Features.GroupInvitations.IGroupInvitationRepository`)
     - `SqlGroupInvitationQueryService` (`Percolator.Apps.Chat.Features.GroupInvitations.IGroupInvitationQueryService`)
     - `SqlUnknownGroupMessageCacheRepository` (`Percolator.Apps.Chat.Ingress.IUnknownGroupMessageCacheRepository`)
-  - [ ] Implement Chat Lifecycle Background Pruners:
+  - [x] Implement Chat Lifecycle Background Pruners:
     - `DisappearingMessageEvictionWorker`
     - `UnknownGroupMessageCachePruner`
     - `AbandonedInvitePruner`
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Plugins/Chat/`)**:
   - `ProtobufChatSerializerTests.PaddedEnvelope_PreservesSteppedBucketSizeAndSupports16KCharMessages`: round-trips `SteppedPadding`-wrapped `ChatPayloadEnvelopeDto` across 256–4096 B buckets and 4096 B multiples (up to 16,000-char messages) without double-padding or truncation.
   - `ProtobufChatSerializerTests.ReplyContext_ExcludesQuoteSnippetFromWire`: quote snippet text is strictly absent from wire payload (only parent ID and author ID).
-  - `SqlChatMessageRepositoryTests.SaveAndDeleteMessage_EncryptsAttachmentKeyAtRestAndCascadesDeletion`: verifies `chat_attachments.encryption_key_ciphertext` is encrypted in raw SQLite storage and cascade-deleted with the parent message.
+  - `SqlChatMessageRepositoryTests.SaveAndDeleteMessage_PersistsAttachmentsAndCascadesDeletion`: verifies `chat_attachments` rows are stored relationally and cascade-deleted with the parent message.
   - `SqlChatMessageQueryServiceTests.PagedTimeline_ClampsToLimitAndOffset`: limit/offset paging clamps accurately to boundary without aggregate hydration.
   - `SqlConversationListQueryServiceTests.UnreadBadgeCount_AggregatesPastReadReceipt`: count aggregates messages strictly past read receipt timestamp.
   - `DisappearingMessageEvictionWorkerTests.ExpiredMessages_PurgesRowsChannelPayloadsAndLocalCachedBlobs`: advances virtual clock by 31s with `FakeTimeProvider`; asserts expired messages, `chat_attachments`, `chat_channel_payloads`, and local cached blobs via `ILocalChunkStore` are purged.
