@@ -13,7 +13,7 @@ While `system-requirements` defines what the entire integrated system must do an
 ## 2. Dependency & Identification Rules
 
 - **Item Identifier Prefix:** `DEP-<SLUG>`, tagged with `[Verify: Unit | Integration | StaticAnalysis]` per [`qms-spec`](qms-spec.md#33-lightweight-verification--risk-control-tags-verify--control-) and governed by [Change Control](qms-spec.md#32-design-change-control-never-move-the-goalposts).
-- **Permitted Outbound QMS References:** `system-requirements` (`SYS-*`), `fact` (`FACT-*`), and inward `deployable-requirements` (`DEP-*`) strictly matching compile-time project dependencies.
+- **Permitted Outbound QMS References:** `system-requirements` (`SYS-*`), `soup` (`SOUP-*`), `fact` (`FACT-*`), and inward `deployable-requirements` (`DEP-*`) strictly matching compile-time project dependencies.
 - **Prohibited Outbound References:** **MUST NOT** reference `intended-use`, `user-needs`, `risk-register` directly (traces through `SYS-*`), `design` documents, or outward/peer `deployable-requirements` outside its compile-time dependency graph.
 
 ---
@@ -23,9 +23,12 @@ While `system-requirements` defines what the entire integrated system must do an
 In addition to the universal rules in [`qms-spec`](qms-spec.md):
 
 1. **Module-Edge Verification Boundary (Boundary "What", Never Internal "How"):**
-   - *Include:* The deployable's architectural segregation rules (what dependencies/side-effects are forbidden inside it per *IEC 62304 Clause 5.3.4*), the `SYS-*` obligations allocated to it, and the semantic invariants of its public ports and types.
+   - *Include:* The deployable's architectural segregation role (what frameworks, dependencies, or side effects are forbidden inside it per *IEC 62304 Clause 5.3.4*), the `SYS-*` obligations allocated to it, any third-party SOUP components ([`SOUP-*`](soup-spec.md)) it encapsulates, and the semantic invariants of its public ports and types.
    - *Exclude Internal `design` Details:* Do not describe internal classes, private/internal algorithms, state machine mechanics, or storage schemas here; those belong in the deployable's `design` document.
-2. **DRY Kernel Inheritance:** If a boundary rule is already mandated by an inward kernel deployable, reference that inward `DEP-<SLUG>` once rather than restating the rule in every downstream deployable.
+2. **Two Software Item Archetypes (Clean / Onion Architecture):**
+   - **Domain Core Deployables (`Domain`, `Domain.Kernel`):** Boundary constraints in Section 1 **MUST** prohibit database engines, network transports, OS-specific APIs, UI frameworks, and third-party SOUP.
+   - **Adapter Deployables (`Infrastructure`, `Desktop`, `Simulator`):** Boundary constraints in Section 1 **MUST** prohibit domain business rules and forbid unquarantined SOUP handles (`IntPtr`, `SafeHandle`), vendor DTOs, or native exceptions from crossing domain port implementations.
+3. **DRY Kernel Inheritance:** If a boundary rule is already mandated by an inward kernel deployable, reference that inward `DEP-<SLUG>` once rather than restating the rule in every downstream deployable.
 
 ---
 
@@ -40,7 +43,7 @@ Implementing documents **MUST** use only the headings below and **MUST NOT** rep
 Explains why this deployable is isolated as its own module (`DEP-<SLUG>`, IEC 62304 Clause 5.3.4) and what side effects, frameworks, or outward dependencies are strictly forbidden inside it.
 
 ### `## 2. Allocated Responsibilities`
-The atomic, black-box functional and risk-control obligations (`DEP-<SLUG>`) allocated to this deployable from `SYS-*`.
+The atomic, black-box functional and risk-control obligations (`DEP-<SLUG>`) allocated to this deployable from `SYS-*`. If this deployable encapsulates third-party SOUP components ([`SOUP-*`](soup-spec.md)), it **MUST** define the allocated requirement that wraps and isolates those capabilities.
 
 ### `## 3. Public Contract Invariants`
-The semantic guarantees, thread-safety expectations, error/result conventions, and resource-ownership rules (`DEP-<SLUG>`) required across the public ports and types exposed by this deployable (IEC 62304 Clause 5.3.2).
+The semantic guarantees, concurrency model (declaring stateless reentrancy vs. single-threaded/scoped lifecycle per IEC 62304 Clause 5.3.2), error/result conventions, and resource-ownership rules (`DEP-<SLUG>`) required across the public ports and types exposed by this deployable.
