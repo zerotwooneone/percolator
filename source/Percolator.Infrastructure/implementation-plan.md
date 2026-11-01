@@ -1739,19 +1739,19 @@
     - `TransferOfferReaperWorker` (`BackgroundService`): Scheduled worker executing every 15 minutes (`PeriodicTimer`), invoking `ITransferOfferReaperService` to mark sessions with state `Offered` or `PendingConsent` whose `expires_at_unix_seconds < DateTimeOffset.UtcNow.ToUnixTimeSeconds()` as `Expired`.
     - `SwarmEndpointRetentionPruner` (`IHostedService`): Scheduled worker executing every 30 minutes, purging rows from `ft_swarm_endpoints` where `last_seen_utc` is older than 24 hours.
 - **Scope & Deliverables**:
-  - [ ] Author Protobuf schema `Percolator.Infrastructure/Protos/file_transfer.proto`.
-  - [ ] Implement File Transfer Persistence & CQRS Query Services:
+  - [x] Author Protobuf schema `Percolator.Infrastructure/Protos/file_transfer.proto`.
+  - [x] Implement File Transfer Persistence & CQRS Query Services:
     - `SqliteTransferSessionRepository` (`Percolator.Apps.FileTransfer.Ports.ITransferSessionRepository`)
     - `SqliteFilterPolicyRepository` (`Percolator.Apps.FileTransfer.Ports.IFileTransferFilterPolicyRepository`)
     - `SqlFileTransferQueryService` (`Percolator.Apps.FileTransfer.Ports.IFileTransferQueryService`)
-  - [ ] Implement Swarm Multi-Stream Protocol Engine & Desktop File Store:
+  - [x] Implement Swarm Multi-Stream Protocol Engine & Desktop File Store:
     - `TcpMultiStreamPool` (`Percolator.Apps.FileTransfer.Ports.ITransferStreamPool`, `ITransferStreamPoolFactory`, `ITransferStream`)
     - `PortableDesktopFileStore` (`Percolator.Apps.FileTransfer.Ports.IDesktopFileStorage`)
     - `TokenBucketRateLimiter` (`Percolator.Apps.FileTransfer.Ports.ITransferRateLimiter`)
     - `NetworkInterfaceEndpointDiscoveryPort` (`Percolator.Apps.FileTransfer.Ports.INetworkEndpointDiscoveryPort`)
     - `RelayTransferPipeClient`
     - `RelaySwarmTrackerClient` (`Percolator.Apps.FileTransfer.Ports.IDistributedTrackerPort`)
-  - [ ] Implement Swarm Lifecycle Pruners:
+  - [x] Implement Swarm Lifecycle Pruners:
     - `TransferOfferReaperWorker` (`Microsoft.Extensions.Hosting.BackgroundService` scheduled worker invoking `ITransferOfferReaperService`)
     - `SwarmEndpointRetentionPruner` (`IHostedService`)
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Plugins/FileTransfer/`)**:

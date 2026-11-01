@@ -81,6 +81,13 @@ public class PercolatorDbContext : DbContext
     public DbSet<RelayPeerDirectoryEntity> RelayPeerDirectory => Set<RelayPeerDirectoryEntity>();
     public DbSet<RelayRendezvousEntryEntity> RelayRendezvousEntries => Set<RelayRendezvousEntryEntity>();
 
+    // Chunk 4.4 File Transfer Entities
+    public DbSet<TransferSessionEntity> TransferSessions => Set<TransferSessionEntity>();
+    public DbSet<ManifestFileEntity> ManifestFiles => Set<ManifestFileEntity>();
+    public DbSet<TransferBitfieldEntity> TransferBitfields => Set<TransferBitfieldEntity>();
+    public DbSet<SwarmEndpointEntity> SwarmEndpoints => Set<SwarmEndpointEntity>();
+    public DbSet<FilterPolicyEntity> FilterPolicies => Set<FilterPolicyEntity>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -530,6 +537,72 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.EncryptedRoute).HasColumnType("BLOB");
             entity.HasIndex(e => e.PublishedAtUtc)
                 .HasDatabaseName("ix_rendezvous_published");
+        });
+
+        // 34. File Transfer Sessions (Chunk 4.4)
+        modelBuilder.Entity<TransferSessionEntity>(entity =>
+        {
+            entity.ToTable("ft_transfer_sessions");
+            entity.HasKey(e => e.TransferId);
+            entity.Property(e => e.LocalIdentityId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.InitiatorId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.MerkleRoot).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.ConcatenatedLeaves).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.BaseNonce).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.TransferKeyCiphertext).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.StreamAuthTokenCiphertext).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.RelayPipeTokenCiphertext).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+
+            if (_valueConverter != null)
+            {
+                entity.Property(e => e.TransferKeyCiphertext).HasConversion(_valueConverter);
+                entity.Property(e => e.StreamAuthTokenCiphertext).HasConversion(_valueConverter);
+            }
+            if (_nullableValueConverter != null)
+            {
+                entity.Property(e => e.RelayPipeTokenCiphertext).HasConversion(_nullableValueConverter);
+            }
+        });
+
+        // 35. File Transfer Manifest Files (Chunk 4.4)
+        modelBuilder.Entity<ManifestFileEntity>(entity =>
+        {
+            entity.ToTable("ft_manifest_files");
+            entity.HasKey(e => new { e.TransferId, e.FileIndex });
+            entity.HasOne<TransferSessionEntity>()
+                .WithMany()
+                .HasForeignKey(e => e.TransferId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // 36. File Transfer Bitfields (Chunk 4.4)
+        modelBuilder.Entity<TransferBitfieldEntity>(entity =>
+        {
+            entity.ToTable("ft_transfer_bitfields");
+            entity.HasKey(e => e.TransferId);
+            entity.Property(e => e.BitfieldBytes).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.HasOne<TransferSessionEntity>()
+                .WithOne()
+                .HasForeignKey<TransferBitfieldEntity>(e => e.TransferId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // 37. Swarm Endpoints (Chunk 4.4)
+        modelBuilder.Entity<SwarmEndpointEntity>(entity =>
+        {
+            entity.ToTable("ft_swarm_endpoints");
+            entity.HasKey(e => new { e.RendezvousId, e.PeerId });
+            entity.Property(e => e.RendezvousId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.PeerId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.HasIndex(e => e.LastSeenUtc).HasDatabaseName("ix_swarm_endpoints_expiry");
+        });
+
+        // 38. File Transfer Filter Policies (Chunk 4.4)
+        modelBuilder.Entity<FilterPolicyEntity>(entity =>
+        {
+            entity.ToTable("ft_filter_policies");
+            entity.HasKey(e => e.OwnerId);
+            entity.Property(e => e.OwnerId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
         });
 
         // Apply snake_case naming convention to all columns

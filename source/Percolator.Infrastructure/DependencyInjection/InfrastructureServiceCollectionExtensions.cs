@@ -9,11 +9,13 @@ using Percolator.Apps.Chat.Ingress;
 using Percolator.Apps.Discovery.Features.PrivateRendezvous;
 using Percolator.Apps.Discovery.Features.RelayDirectoryHosting;
 using Percolator.Apps.Discovery.Ports;
+using Percolator.Apps.FileTransfer.Ports;
 using Percolator.Domain.Common;
 using Percolator.Infrastructure.Adapters;
 using Percolator.Infrastructure.Common;
 using Percolator.Infrastructure.Persistence.Repositories;
 using Percolator.Infrastructure.Plugins.BlobStorage;
+using Percolator.Infrastructure.Plugins.FileTransfer;
 using Percolator.Infrastructure.Transport;
 using Percolator.Infrastructure.Transport.Workers;
 using Percolator.Infrastructure.Vault;
@@ -79,6 +81,24 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IChannelRelayResolver, ChannelRelayResolver>();
 
         services.AddHostedService<RelayBlobRetentionPruner>();
+
+        return services;
+    }
+
+    public static IServiceCollection AddFileTransferInfrastructure(this IServiceCollection services)
+    {
+        services.AddSingleton<IDesktopFileStorage, PortableDesktopFileStore>();
+        services.AddSingleton<ITransferStreamPoolFactory, TcpMultiStreamPoolFactory>();
+        services.AddSingleton<ITransferRateLimiter, TokenBucketRateLimiter>();
+        services.AddSingleton<INetworkEndpointDiscoveryPort, NetworkInterfaceEndpointDiscoveryPort>();
+        services.AddScoped<RelayTransferPipeClient>();
+        services.AddScoped<IDistributedTrackerPort, RelaySwarmTrackerClient>();
+        services.AddScoped<ITransferSessionRepository, SqliteTransferSessionRepository>();
+        services.AddScoped<IFileTransferFilterPolicyRepository, SqliteFilterPolicyRepository>();
+        services.AddScoped<IFileTransferQueryService, SqlFileTransferQueryService>();
+
+        services.AddHostedService<TransferOfferReaperWorker>();
+        services.AddHostedService<SwarmEndpointRetentionPruner>();
 
         return services;
     }
