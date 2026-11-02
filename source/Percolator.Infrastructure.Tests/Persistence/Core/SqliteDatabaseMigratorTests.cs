@@ -7,7 +7,6 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using NUnit.Framework;
 using Percolator.Infrastructure.Persistence;
-using Percolator.Infrastructure.Vault;
 
 [TestFixture]
 public class SqliteDatabaseMigratorTests
@@ -17,7 +16,6 @@ public class SqliteDatabaseMigratorTests
     {
         // Arrange
         SQLitePCL.Batteries_V2.Init();
-        using var handle = MasterKeyHandle.GenerateRandom();
         using var conn = new SqliteConnection("Data Source=:memory:");
         conn.Open();
 
@@ -25,7 +23,7 @@ public class SqliteDatabaseMigratorTests
             .UseSqlite(conn)
             .Options;
 
-        using var dbContext = new PercolatorDbContext(options, handle);
+        using var dbContext = new PercolatorDbContext(options);
         var migrator = new SqliteDatabaseMigrator(dbContext);
 
         // Act

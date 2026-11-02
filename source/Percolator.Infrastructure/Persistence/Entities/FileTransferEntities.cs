@@ -22,11 +22,11 @@ public sealed class TransferSessionEntity
     public long UploadedSizeBytes { get; set; }
     public string? LocalRootPath { get; set; }
     public int WanPolicy { get; set; }
-    public byte[] TransferKeyCiphertext { get; set; } = Array.Empty<byte>();
+    public byte[] TransferKey { get; set; } = Array.Empty<byte>();
     public byte[] BaseNonce { get; set; } = Array.Empty<byte>();
-    public byte[] StreamAuthTokenCiphertext { get; set; } = Array.Empty<byte>();
+    public byte[] StreamAuthToken { get; set; } = Array.Empty<byte>();
     public string? RelayEndpointUri { get; set; }
-    public byte[]? RelayPipeTokenCiphertext { get; set; }
+    public byte[]? RelayPipeToken { get; set; }
     public string DirectCandidatesJson { get; set; } = string.Empty;
     public DateTimeOffset CreatedAtUtc { get; set; }
     public DateTimeOffset? CompletedAtUtc { get; set; }

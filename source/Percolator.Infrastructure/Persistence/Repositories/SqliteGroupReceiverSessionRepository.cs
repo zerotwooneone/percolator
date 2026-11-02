@@ -40,12 +40,12 @@ public sealed class SqliteGroupReceiverSessionRepository : IGroupReceiverSession
                      s.AuthorDeviceId == authorDeviceId.Value,
                 ct);
 
-        if (entity == null || entity.ChainKeyCiphertext.Length == 0)
+        if (entity == null || entity.ChainKey.Length == 0)
         {
             return null;
         }
 
-        using var chainKey = ChainKey.FromSpan(entity.ChainKeyCiphertext);
+        using var chainKey = ChainKey.FromSpan(entity.ChainKey);
         var signingKey = entity.AuthorSigningPub != null && entity.AuthorSigningPub.Length > 0
             ? IdentityKey.FromSpan(entity.AuthorSigningPub)
             : null;
@@ -91,7 +91,7 @@ public sealed class SqliteGroupReceiverSessionRepository : IGroupReceiverSession
                 AuthorDeviceId = session.AuthorDeviceId.Value,
                 KeyId = session.KeyId,
                 AuthorSigningPub = signingPubBytes,
-                ChainKeyCiphertext = chainBytes,
+                ChainKey = chainBytes,
                 ReceivingCounter = session.ReceivingCounter,
                 SkippedKeysBlob = skippedBlob,
                 UpdatedAtUtc = DateTimeOffset.UtcNow
@@ -102,7 +102,7 @@ public sealed class SqliteGroupReceiverSessionRepository : IGroupReceiverSession
         {
             existing.KeyId = session.KeyId;
             existing.AuthorSigningPub = signingPubBytes;
-            existing.ChainKeyCiphertext = chainBytes;
+            existing.ChainKey = chainBytes;
             existing.ReceivingCounter = session.ReceivingCounter;
             existing.SkippedKeysBlob = skippedBlob;
             existing.UpdatedAtUtc = DateTimeOffset.UtcNow;

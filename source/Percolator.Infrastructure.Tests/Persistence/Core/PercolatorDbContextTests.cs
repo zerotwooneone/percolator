@@ -28,7 +28,7 @@ public class PercolatorDbContextTests
     }
 
     [Test]
-    public async Task ColumnLevelEncryption_StoresKeysAsCiphertextAtRest()
+    public async Task VaultIdentityKeys_StoresAndRetrievesKey_RoundtripsSuccessfully()
     {
         // Arrange
         var keyId = Guid.NewGuid();
@@ -40,30 +40,28 @@ public class PercolatorDbContextTests
         {
             Id = keyId,
             PublicKey = publicKey,
-            PrivateKeyCiphertext = rawPlaintextKey,
+            PrivateKey = rawPlaintextKey,
             CreatedAtUtc = DateTimeOffset.UtcNow
         };
 
         await _testDb.DbContext.VaultIdentityKeys.AddAsync(entity);
         await _testDb.DbContext.SaveChangesAsync();
 
-        // Act - Direct raw ADO.NET query inspecting bytes at rest
+        // Act - Direct raw ADO.NET query inspecting bytes in vault
         await using var cmd = _testDb.Connection.CreateCommand();
-        cmd.CommandText = "SELECT private_key_ciphertext FROM vault_identity_keys WHERE id = @id;";
+        cmd.CommandText = "SELECT private_key FROM vault_identity_keys WHERE id = @id;";
         cmd.Parameters.AddWithValue("@id", keyId);
         var storedBytes = (byte[]?)await cmd.ExecuteScalarAsync();
 
-        // Assert - The stored bytes in SQLite must NOT contain the plaintext key string
+        // Assert - The stored bytes in SQLCipher container match raw binary value directly
         storedBytes.Should().NotBeNull();
-        storedBytes!.Length.Should().Be(12 + 16 + rawPlaintextKey.Length);
-        storedBytes.Should().NotEqual(rawPlaintextKey);
-        Encoding.UTF8.GetString(storedBytes).Should().NotContain("SuperSecretIdentityPrivateKey123");
+        storedBytes.Should().Equal(rawPlaintextKey);
 
-        // Decryption round-trip via new context instance with the same master key
+        // Verification round-trip via new context instance
         using var readContext = _testDb.CreateNewContext();
         var retrieved = await readContext.VaultIdentityKeys.FindAsync(keyId);
         retrieved.Should().NotBeNull();
-        retrieved!.PrivateKeyCiphertext.Should().Equal(rawPlaintextKey);
+        retrieved!.PrivateKey.Should().Equal(rawPlaintextKey);
     }
 
     [Test]

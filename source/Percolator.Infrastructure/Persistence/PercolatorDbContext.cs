@@ -5,35 +5,14 @@ using System.Linq;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
-using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
-using Percolator.Domain.Security.Ports;
-using Percolator.Infrastructure.Persistence.Converters;
 using Percolator.Infrastructure.Persistence.Entities;
 
 public class PercolatorDbContext : DbContext
 {
-    private readonly IMasterKeyHandle? _masterKeyHandle;
-    private readonly AesGcmValueConverter? _valueConverter;
-    private readonly NullableAesGcmValueConverter? _nullableValueConverter;
-
-    public IMasterKeyHandle? MasterKeyHandle => _masterKeyHandle;
-
-    public PercolatorDbContext(DbContextOptions<PercolatorDbContext> options, IMasterKeyHandle? masterKeyHandle = null)
+    public PercolatorDbContext(DbContextOptions<PercolatorDbContext> options)
         : base(options)
     {
-        _masterKeyHandle = masterKeyHandle;
-        if (_masterKeyHandle != null)
-        {
-            _valueConverter = new AesGcmValueConverter(_masterKeyHandle);
-            _nullableValueConverter = new NullableAesGcmValueConverter(_masterKeyHandle);
-        }
-    }
-
-    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
-    {
-        base.OnConfiguring(optionsBuilder);
-        optionsBuilder.ReplaceService<IModelCacheKeyFactory, PercolatorModelCacheKeyFactory>();
     }
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
@@ -124,11 +103,7 @@ public class PercolatorDbContext : DbContext
             entity.ToTable("vault_identity_keys");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.PublicKey).HasColumnType("BLOB");
-            entity.Property(e => e.PrivateKeyCiphertext).HasColumnType("BLOB");
-            if (_valueConverter != null)
-            {
-                entity.Property(e => e.PrivateKeyCiphertext).HasConversion(_valueConverter);
-            }
+            entity.Property(e => e.PrivateKey).HasColumnType("BLOB");
         });
 
         // 4. Vault Signed Prekeys
@@ -138,11 +113,7 @@ public class PercolatorDbContext : DbContext
             entity.HasKey(e => new { e.OwnerIdentityId, e.DeviceId });
             entity.Property(e => e.PublicKey).HasColumnType("BLOB");
             entity.Property(e => e.Signature).HasColumnType("BLOB");
-            entity.Property(e => e.PrivateKeyCiphertext).HasColumnType("BLOB");
-            if (_valueConverter != null)
-            {
-                entity.Property(e => e.PrivateKeyCiphertext).HasConversion(_valueConverter);
-            }
+            entity.Property(e => e.PrivateKey).HasColumnType("BLOB");
             entity.HasOne<VaultIdentityKeyEntity>()
                 .WithMany()
                 .HasForeignKey(e => e.OwnerIdentityId)
@@ -155,11 +126,7 @@ public class PercolatorDbContext : DbContext
             entity.ToTable("vault_onetime_prekeys");
             entity.HasKey(e => new { e.OwnerIdentityId, e.DeviceId, e.KeyId });
             entity.Property(e => e.PublicKey).HasColumnType("BLOB");
-            entity.Property(e => e.PrivateKeyCiphertext).HasColumnType("BLOB");
-            if (_valueConverter != null)
-            {
-                entity.Property(e => e.PrivateKeyCiphertext).HasConversion(_valueConverter);
-            }
+            entity.Property(e => e.PrivateKey).HasColumnType("BLOB");
             entity.HasIndex(e => new { e.OwnerIdentityId, e.DeviceId, e.IsConsumed })
                 .HasDatabaseName("ix_vault_opk_unconsumed");
             entity.HasOne<VaultIdentityKeyEntity>()
@@ -175,23 +142,11 @@ public class PercolatorDbContext : DbContext
             entity.HasKey(e => e.SessionId);
             entity.Property(e => e.LocalEphemeralPub).HasColumnType("BLOB");
             entity.Property(e => e.RemoteEphemeralPub).HasColumnType("BLOB");
-            entity.Property(e => e.RootKeyCiphertext).HasColumnType("BLOB");
-            entity.Property(e => e.SendChainKeyCiphertext).HasColumnType("BLOB");
-            entity.Property(e => e.RecvChainKeyCiphertext).HasColumnType("BLOB");
-            entity.Property(e => e.LocalEphemeralPrivCiphertext).HasColumnType("BLOB");
+            entity.Property(e => e.RootKey).HasColumnType("BLOB");
+            entity.Property(e => e.SendChainKey).HasColumnType("BLOB");
+            entity.Property(e => e.RecvChainKey).HasColumnType("BLOB");
+            entity.Property(e => e.LocalEphemeralPriv).HasColumnType("BLOB");
             entity.Property(e => e.RatchetStateBlob).HasColumnType("BLOB");
-
-            if (_valueConverter != null)
-            {
-                entity.Property(e => e.RootKeyCiphertext).HasConversion(_valueConverter);
-            }
-            if (_nullableValueConverter != null)
-            {
-                entity.Property(e => e.SendChainKeyCiphertext).HasConversion(_nullableValueConverter);
-                entity.Property(e => e.RecvChainKeyCiphertext).HasConversion(_nullableValueConverter);
-                entity.Property(e => e.LocalEphemeralPrivCiphertext).HasConversion(_nullableValueConverter);
-                entity.Property(e => e.RatchetStateBlob).HasConversion(_nullableValueConverter);
-            }
 
             entity.HasIndex(e => new { e.OwnerIdentityId, e.OwnerDeviceId, e.RemotePeerId, e.RemoteDeviceId })
                 .IsUnique()
@@ -204,17 +159,8 @@ public class PercolatorDbContext : DbContext
             entity.ToTable("vault_group_sender_keys");
             entity.HasKey(e => new { e.ChannelId, e.AuthorIdentityId, e.AuthorDeviceId });
             entity.Property(e => e.AuthorSigningPub).HasColumnType("BLOB");
-            entity.Property(e => e.ChainKeyCiphertext).HasColumnType("BLOB");
-            entity.Property(e => e.SigningPrivCiphertext).HasColumnType("BLOB");
-
-            if (_valueConverter != null)
-            {
-                entity.Property(e => e.ChainKeyCiphertext).HasConversion(_valueConverter);
-            }
-            if (_nullableValueConverter != null)
-            {
-                entity.Property(e => e.SigningPrivCiphertext).HasConversion(_nullableValueConverter);
-            }
+            entity.Property(e => e.ChainKey).HasColumnType("BLOB");
+            entity.Property(e => e.SigningPriv).HasColumnType("BLOB");
         });
 
         // 8. Vault Group Receiver Sessions
@@ -223,17 +169,8 @@ public class PercolatorDbContext : DbContext
             entity.ToTable("vault_group_receiver_sessions");
             entity.HasKey(e => new { e.ChannelId, e.AuthorIdentityId, e.AuthorDeviceId });
             entity.Property(e => e.AuthorSigningPub).HasColumnType("BLOB");
-            entity.Property(e => e.ChainKeyCiphertext).HasColumnType("BLOB");
+            entity.Property(e => e.ChainKey).HasColumnType("BLOB");
             entity.Property(e => e.SkippedKeysBlob).HasColumnType("BLOB");
-
-            if (_valueConverter != null)
-            {
-                entity.Property(e => e.ChainKeyCiphertext).HasConversion(_valueConverter);
-            }
-            if (_nullableValueConverter != null)
-            {
-                entity.Property(e => e.SkippedKeysBlob).HasConversion(_nullableValueConverter);
-            }
         });
 
         // 9. Vault Group Credentials
@@ -242,17 +179,8 @@ public class PercolatorDbContext : DbContext
             entity.ToTable("vault_group_credentials");
             entity.HasKey(e => e.ChannelId);
             entity.Property(e => e.AuthCredentialMac).HasColumnType("BLOB");
-            entity.Property(e => e.MasterKeyCiphertext).HasColumnType("BLOB");
-            entity.Property(e => e.LocalBlobKeyCiphertext).HasColumnType("BLOB");
-
-            if (_valueConverter != null)
-            {
-                entity.Property(e => e.MasterKeyCiphertext).HasConversion(_valueConverter);
-            }
-            if (_nullableValueConverter != null)
-            {
-                entity.Property(e => e.LocalBlobKeyCiphertext).HasConversion(_nullableValueConverter);
-            }
+            entity.Property(e => e.MasterKey).HasColumnType("BLOB");
+            entity.Property(e => e.LocalBlobKey).HasColumnType("BLOB");
         });
 
         // 10. Vault Pending Handshakes
@@ -261,11 +189,6 @@ public class PercolatorDbContext : DbContext
             entity.ToTable("vault_pending_handshakes");
             entity.HasKey(e => new { e.RecipientIdentityId, e.SenderIdentityId });
             entity.Property(e => e.EnvelopePayload).HasColumnType("BLOB");
-
-            if (_valueConverter != null)
-            {
-                entity.Property(e => e.EnvelopePayload).HasConversion(_valueConverter);
-            }
         });
 
         // 11. Ops Outbox Jobs
@@ -556,19 +479,9 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.MerkleRoot).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
             entity.Property(e => e.ConcatenatedLeaves).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
             entity.Property(e => e.BaseNonce).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
-            entity.Property(e => e.TransferKeyCiphertext).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
-            entity.Property(e => e.StreamAuthTokenCiphertext).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
-            entity.Property(e => e.RelayPipeTokenCiphertext).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
-
-            if (_valueConverter != null)
-            {
-                entity.Property(e => e.TransferKeyCiphertext).HasConversion(_valueConverter);
-                entity.Property(e => e.StreamAuthTokenCiphertext).HasConversion(_valueConverter);
-            }
-            if (_nullableValueConverter != null)
-            {
-                entity.Property(e => e.RelayPipeTokenCiphertext).HasConversion(_nullableValueConverter);
-            }
+            entity.Property(e => e.TransferKey).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.StreamAuthToken).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.RelayPipeToken).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
         });
 
         // 35. File Transfer Manifest Files (Chunk 4.4)
@@ -663,20 +576,5 @@ public sealed class NullableDateTimeOffsetToTicksConverter : ValueConverter<Date
             d => d.HasValue ? d.Value.UtcTicks : null,
             ticks => ticks.HasValue ? new DateTimeOffset(ticks.Value, TimeSpan.Zero) : null)
     {
-    }
-}
-
-public class PercolatorModelCacheKeyFactory : ModelCacheKeyFactory
-{
-    public PercolatorModelCacheKeyFactory(ModelCacheKeyFactoryDependencies dependencies)
-        : base(dependencies)
-    {
-    }
-
-    public override object Create(DbContext context, bool designTime)
-    {
-        return context is PercolatorDbContext pContext && pContext.MasterKeyHandle != null
-            ? (context.GetType(), (object)pContext.MasterKeyHandle, designTime)
-            : base.Create(context, designTime);
     }
 }

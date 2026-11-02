@@ -32,7 +32,7 @@ public class SqlitePrivatePreKeyStoreTests
         {
             Id = _ownerId.Value,
             PublicKey = new byte[32],
-            PrivateKeyCiphertext = new byte[32],
+            PrivateKey = new byte[32],
             CreatedAtUtc = DateTimeOffset.UtcNow
         });
         await _testDb.DbContext.SaveChangesAsync();
@@ -66,12 +66,12 @@ public class SqlitePrivatePreKeyStoreTests
         var secondAttempt = await _store.TryConsumeOneTimePreKeyPrivateAsync(_ownerId, _deviceId, keyId);
         secondAttempt.Should().BeNull();
 
-        // Direct DB inspection confirms private key ciphertext is scrubbed to empty
+        // Direct DB inspection confirms private key is scrubbed to empty
         using var newContext = _testDb.CreateNewContext();
         var entity = await newContext.VaultOneTimePreKeys.FindAsync(_ownerId.Value, _deviceId.Value, keyId);
         entity.Should().NotBeNull();
         entity!.IsConsumed.Should().BeTrue();
-        entity.PrivateKeyCiphertext.Should().BeEmpty();
+        entity.PrivateKey.Should().BeEmpty();
     }
 
     [Test]

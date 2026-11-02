@@ -26,15 +26,15 @@ public sealed class SqliteGroupCredentialsRepository : IGroupCredentialsReposito
             .AsNoTracking()
             .FirstOrDefaultAsync(c => c.ChannelId == channelIdGuid, cancellationToken);
 
-        if (entity == null || entity.MasterKeyCiphertext.Length == 0)
+        if (entity == null || entity.MasterKey.Length == 0)
         {
             return null;
         }
 
-        var masterKey = GroupMasterKey.FromSpan(entity.MasterKeyCiphertext);
+        var masterKey = GroupMasterKey.FromSpan(entity.MasterKey);
         var authMac = AuthCredentialMacBytes.FromSpan(entity.AuthCredentialMac);
-        var blobKey = entity.LocalBlobKeyCiphertext != null && entity.LocalBlobKeyCiphertext.Length > 0
-            ? BlobKey.FromSpan(entity.LocalBlobKeyCiphertext)
+        var blobKey = entity.LocalBlobKey != null && entity.LocalBlobKey.Length > 0
+            ? BlobKey.FromSpan(entity.LocalBlobKey)
             : null;
 
         return new GroupCredentials(channelId, masterKey, authMac, blobKey);
@@ -57,18 +57,18 @@ public sealed class SqliteGroupCredentialsRepository : IGroupCredentialsReposito
             var entity = new VaultGroupCredentialsEntity
             {
                 ChannelId = channelIdGuid,
-                MasterKeyCiphertext = masterBytes,
+                MasterKey = masterBytes,
                 AuthCredentialMac = authMacBytes,
-                LocalBlobKeyCiphertext = blobKeyBytes,
+                LocalBlobKey = blobKeyBytes,
                 UpdatedAtUtc = DateTimeOffset.UtcNow
             };
             await _dbContext.VaultGroupCredentials.AddAsync(entity, cancellationToken);
         }
         else
         {
-            existing.MasterKeyCiphertext = masterBytes;
+            existing.MasterKey = masterBytes;
             existing.AuthCredentialMac = authMacBytes;
-            existing.LocalBlobKeyCiphertext = blobKeyBytes;
+            existing.LocalBlobKey = blobKeyBytes;
             existing.UpdatedAtUtc = DateTimeOffset.UtcNow;
         }
 

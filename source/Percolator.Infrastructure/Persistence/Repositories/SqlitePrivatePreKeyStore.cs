@@ -29,12 +29,12 @@ public sealed class SqlitePrivatePreKeyStore : IPrivatePreKeyStore
             .AsNoTracking()
             .FirstOrDefaultAsync(k => k.OwnerIdentityId == ownerGuid && k.DeviceId == deviceId.Value, cancellationToken);
 
-        if (entity == null || entity.PrivateKeyCiphertext.Length == 0)
+        if (entity == null || entity.PrivateKey.Length == 0)
         {
             return null;
         }
 
-        return EphemeralPrivateKey.FromSpan(entity.PrivateKeyCiphertext);
+        return EphemeralPrivateKey.FromSpan(entity.PrivateKey);
     }
 
     public async Task<EphemeralPrivateKey?> TryConsumeOneTimePreKeyPrivateAsync(
@@ -47,17 +47,17 @@ public sealed class SqlitePrivatePreKeyStore : IPrivatePreKeyStore
         var entity = await _dbContext.VaultOneTimePreKeys
             .FirstOrDefaultAsync(k => k.OwnerIdentityId == ownerGuid && k.DeviceId == deviceId.Value && k.KeyId == keyId, cancellationToken);
 
-        if (entity == null || entity.IsConsumed || entity.PrivateKeyCiphertext.Length == 0)
+        if (entity == null || entity.IsConsumed || entity.PrivateKey.Length == 0)
         {
             return null;
         }
 
-        var privateKey = EphemeralPrivateKey.FromSpan(entity.PrivateKeyCiphertext);
+        var privateKey = EphemeralPrivateKey.FromSpan(entity.PrivateKey);
 
-        // Enforce X3DH forward secrecy by zeroizing the stored ciphertext immediately upon consumption
+        // Enforce X3DH forward secrecy by zeroizing the stored key immediately upon consumption
         entity.IsConsumed = true;
         entity.ConsumedAtUtc = DateTimeOffset.UtcNow;
-        entity.PrivateKeyCiphertext = Array.Empty<byte>();
+        entity.PrivateKey = Array.Empty<byte>();
 
         await _dbContext.SaveChangesAsync(cancellationToken);
         return privateKey;
@@ -83,7 +83,7 @@ public sealed class SqlitePrivatePreKeyStore : IPrivatePreKeyStore
             {
                 OwnerIdentityId = ownerGuid,
                 DeviceId = deviceId.Value,
-                PrivateKeyCiphertext = privBytes,
+                PrivateKey = privBytes,
                 PublicKey = Array.Empty<byte>(),
                 Signature = Array.Empty<byte>(),
                 CreatedAtUtc = DateTimeOffset.UtcNow
@@ -92,7 +92,7 @@ public sealed class SqlitePrivatePreKeyStore : IPrivatePreKeyStore
         }
         else
         {
-            existing.PrivateKeyCiphertext = privBytes;
+            existing.PrivateKey = privBytes;
         }
 
         await _dbContext.SaveChangesAsync(cancellationToken);
@@ -122,7 +122,7 @@ public sealed class SqlitePrivatePreKeyStore : IPrivatePreKeyStore
                     OwnerIdentityId = ownerGuid,
                     DeviceId = deviceId.Value,
                     KeyId = keyId,
-                    PrivateKeyCiphertext = privBytes,
+                    PrivateKey = privBytes,
                     PublicKey = Array.Empty<byte>(),
                     IsConsumed = false,
                     CreatedAtUtc = now
@@ -131,7 +131,7 @@ public sealed class SqlitePrivatePreKeyStore : IPrivatePreKeyStore
             }
             else
             {
-                existing.PrivateKeyCiphertext = privBytes;
+                existing.PrivateKey = privBytes;
                 existing.IsConsumed = false;
                 existing.ConsumedAtUtc = null;
             }

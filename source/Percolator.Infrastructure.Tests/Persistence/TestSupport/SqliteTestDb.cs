@@ -3,7 +3,6 @@ namespace Percolator.Infrastructure.Tests.Persistence.TestSupport;
 using System;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Infrastructure;
 using Percolator.Infrastructure.Persistence;
 using Percolator.Infrastructure.Vault;
 
@@ -22,10 +21,9 @@ public sealed class SqliteTestDb : IDisposable
 
         var options = new DbContextOptionsBuilder<PercolatorDbContext>()
             .UseSqlite(Connection)
-            .ReplaceService<IModelCacheKeyFactory, PercolatorModelCacheKeyFactory>()
             .Options;
 
-        DbContext = new PercolatorDbContext(options, MasterKeyHandle);
+        DbContext = new PercolatorDbContext(options);
         DbContext.Database.EnsureCreated();
     }
 
@@ -33,10 +31,9 @@ public sealed class SqliteTestDb : IDisposable
     {
         var options = new DbContextOptionsBuilder<PercolatorDbContext>()
             .UseSqlite(Connection)
-            .ReplaceService<IModelCacheKeyFactory, PercolatorModelCacheKeyFactory>()
             .Options;
 
-        return new PercolatorDbContext(options, MasterKeyHandle);
+        return new PercolatorDbContext(options);
     }
 
     public void Dispose()

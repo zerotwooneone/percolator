@@ -45,10 +45,10 @@ public sealed class SqliteRatchetSessionRepository : IRatchetSessionRepository
             return null;
         }
 
-        var rootKey = entity.RootKeyCiphertext.Length > 0 ? ChainKey.FromSpan(entity.RootKeyCiphertext) : null;
-        var sendKey = entity.SendChainKeyCiphertext != null && entity.SendChainKeyCiphertext.Length > 0 ? ChainKey.FromSpan(entity.SendChainKeyCiphertext) : null;
-        var recvKey = entity.RecvChainKeyCiphertext != null && entity.RecvChainKeyCiphertext.Length > 0 ? ChainKey.FromSpan(entity.RecvChainKeyCiphertext) : null;
-        var localPriv = entity.LocalEphemeralPrivCiphertext != null && entity.LocalEphemeralPrivCiphertext.Length > 0 ? EphemeralPrivateKey.FromSpan(entity.LocalEphemeralPrivCiphertext) : null;
+        var rootKey = entity.RootKey.Length > 0 ? ChainKey.FromSpan(entity.RootKey) : null;
+        var sendKey = entity.SendChainKey != null && entity.SendChainKey.Length > 0 ? ChainKey.FromSpan(entity.SendChainKey) : null;
+        var recvKey = entity.RecvChainKey != null && entity.RecvChainKey.Length > 0 ? ChainKey.FromSpan(entity.RecvChainKey) : null;
+        var localPriv = entity.LocalEphemeralPriv != null && entity.LocalEphemeralPriv.Length > 0 ? EphemeralPrivateKey.FromSpan(entity.LocalEphemeralPriv) : null;
         var localPub = entity.LocalEphemeralPub != null && entity.LocalEphemeralPub.Length > 0 ? DhPublicKey.FromSpan(entity.LocalEphemeralPub) : null;
         var remotePub = entity.RemoteEphemeralPub != null && entity.RemoteEphemeralPub.Length > 0 ? DhPublicKey.FromSpan(entity.RemoteEphemeralPub) : null;
 
@@ -102,10 +102,10 @@ public sealed class SqliteRatchetSessionRepository : IRatchetSessionRepository
                 OwnerDeviceId = session.OwnerDeviceId.Value,
                 RemotePeerId = remoteGuid,
                 RemoteDeviceId = session.RemoteDeviceId.Value,
-                RootKeyCiphertext = rootBytes,
-                SendChainKeyCiphertext = sendBytes,
-                RecvChainKeyCiphertext = recvBytes,
-                LocalEphemeralPrivCiphertext = privBytes,
+                RootKey = rootBytes,
+                SendChainKey = sendBytes,
+                RecvChainKey = recvBytes,
+                LocalEphemeralPriv = privBytes,
                 LocalEphemeralPub = localPubBytes,
                 RemoteEphemeralPub = remotePubBytes,
                 SendingCounter = session.SendingCounter,
@@ -122,10 +122,10 @@ public sealed class SqliteRatchetSessionRepository : IRatchetSessionRepository
             existing.OwnerDeviceId = session.OwnerDeviceId.Value;
             existing.RemotePeerId = remoteGuid;
             existing.RemoteDeviceId = session.RemoteDeviceId.Value;
-            existing.RootKeyCiphertext = rootBytes;
-            existing.SendChainKeyCiphertext = sendBytes;
-            existing.RecvChainKeyCiphertext = recvBytes;
-            existing.LocalEphemeralPrivCiphertext = privBytes;
+            existing.RootKey = rootBytes;
+            existing.SendChainKey = sendBytes;
+            existing.RecvChainKey = recvBytes;
+            existing.LocalEphemeralPriv = privBytes;
             existing.LocalEphemeralPub = localPubBytes;
             existing.RemoteEphemeralPub = remotePubBytes;
             existing.SendingCounter = session.SendingCounter;

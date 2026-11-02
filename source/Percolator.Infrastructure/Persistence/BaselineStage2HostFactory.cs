@@ -3,7 +3,6 @@ namespace Percolator.Infrastructure.Persistence;
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
-using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
@@ -39,21 +38,14 @@ public sealed class BaselineStage2HostFactory : IStage2HostFactory
             services.AddDbContextFactory<PercolatorDbContext>((sp, dbOptions) =>
             {
                 var interceptor = sp.GetRequiredService<DbConnectionInterceptor>();
-                var keyHandle = sp.GetRequiredService<IMasterKeyHandle>();
-                dbOptions.UseSqlite($"Data Source={_options.DatabaseFilePath};Mode=ReadWriteCreate", sqliteOptions =>
-                {
-                })
-                .AddInterceptors(interceptor)
-                .ReplaceService<IModelCacheKeyFactory, PercolatorModelCacheKeyFactory>();
+                dbOptions.UseSqlite($"Data Source={_options.DatabaseFilePath};Mode=ReadWriteCreate")
+                    .AddInterceptors(interceptor);
             });
 
             services.AddScoped(sp =>
             {
                 var factory = sp.GetRequiredService<IDbContextFactory<PercolatorDbContext>>();
-                var keyHandle = sp.GetRequiredService<IMasterKeyHandle>();
-                return new PercolatorDbContext(
-                    sp.GetRequiredService<DbContextOptions<PercolatorDbContext>>(),
-                    keyHandle);
+                return factory.CreateDbContext();
             });
 
             services.AddScoped<IDatabaseMigrator, SqliteDatabaseMigrator>();

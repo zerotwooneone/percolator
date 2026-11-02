@@ -31,7 +31,7 @@ public class SqliteRatchetSessionRepositoryTests
     }
 
     [Test]
-    public async Task SaveAndLoad_PreservesCiphertextAndState()
+    public async Task SaveAndLoad_PreservesKeysAndState()
     {
         // Arrange
         var ownerId = PublicIdentityId.New();
@@ -61,22 +61,21 @@ public class SqliteRatchetSessionRepositoryTests
         // Act - Save session
         await _repository.SaveSessionAsync(session);
 
-        // Assert - Direct raw DB inspection verifies root_key_ciphertext is encrypted at rest
+        // Assert - Direct raw DB inspection verifies root_key is stored directly as binary in SQLCipher store
         await using var cmd = _testDb.Connection.CreateCommand();
-        cmd.CommandText = "SELECT root_key_ciphertext FROM vault_ratchet_sessions WHERE session_id = @sid;";
+        cmd.CommandText = "SELECT root_key FROM vault_ratchet_sessions WHERE session_id = @sid;";
         cmd.Parameters.AddWithValue("@sid", session.Id.ToString());
         var rawBytes = (byte[]?)await cmd.ExecuteScalarAsync();
 
         rawBytes.Should().NotBeNull();
-        rawBytes!.Length.Should().Be(12 + 16 + 32); // [Nonce 12B][Tag 16B][Ciphertext 32B]
-        rawBytes.Should().NotEqual(rootKeyBytes);
+        rawBytes.Should().Equal(rootKeyBytes);
 
         // Act - Reload via repository
         using var newContext = _testDb.CreateNewContext();
         var newRepo = new SqliteRatchetSessionRepository(newContext);
         var loaded = await newRepo.GetSessionAsync(ownerId, remoteId, remoteDevice);
 
-        // Assert - Decrypted roundtrip matches original session state
+        // Assert - Reloaded roundtrip matches original session state
         loaded.Should().NotBeNull();
         loaded!.OwnerIdentityId.Should().Be(ownerId);
         loaded.RemotePeerId.Should().Be(remoteId);

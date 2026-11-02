@@ -24,7 +24,7 @@ public sealed class SqliteLocalIdentityKeyStore : ILocalIdentityKeyStore
             .AsNoTracking()
             .FirstOrDefaultAsync(k => k.Id == idGuid, ct);
 
-        return entity?.PrivateKeyCiphertext;
+        return entity?.PrivateKey;
     }
 
     public async Task<IdentityKey?> GetIdentityPublicKeyAsync(PublicIdentityId identityId, CancellationToken ct = default)
@@ -58,7 +58,7 @@ public sealed class SqliteLocalIdentityKeyStore : ILocalIdentityKeyStore
             var entity = new VaultIdentityKeyEntity
             {
                 Id = idGuid,
-                PrivateKeyCiphertext = (byte[])privateKey.Clone(),
+                PrivateKey = (byte[])privateKey.Clone(),
                 PublicKey = pubBytes,
                 CreatedAtUtc = DateTimeOffset.UtcNow
             };
@@ -66,7 +66,7 @@ public sealed class SqliteLocalIdentityKeyStore : ILocalIdentityKeyStore
         }
         else
         {
-            existing.PrivateKeyCiphertext = (byte[])privateKey.Clone();
+            existing.PrivateKey = (byte[])privateKey.Clone();
             existing.PublicKey = pubBytes;
         }
 

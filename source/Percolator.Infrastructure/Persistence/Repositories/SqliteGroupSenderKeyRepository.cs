@@ -38,14 +38,14 @@ public sealed class SqliteGroupSenderKeyRepository : IGroupSenderKeyRepository
                      s.AuthorDeviceId == authorDeviceId.Value,
                 ct);
 
-        if (entity == null || entity.ChainKeyCiphertext.Length == 0)
+        if (entity == null || entity.ChainKey.Length == 0)
         {
             return null;
         }
 
-        using var chainKey = ChainKey.FromSpan(entity.ChainKeyCiphertext);
-        var signingPriv = entity.SigningPrivCiphertext != null && entity.SigningPrivCiphertext.Length > 0
-            ? EphemeralPrivateKey.FromSpan(entity.SigningPrivCiphertext)
+        using var chainKey = ChainKey.FromSpan(entity.ChainKey);
+        var signingPriv = entity.SigningPriv != null && entity.SigningPriv.Length > 0
+            ? EphemeralPrivateKey.FromSpan(entity.SigningPriv)
             : null;
         var signingPub = entity.AuthorSigningPub != null && entity.AuthorSigningPub.Length > 0
             ? IdentityKey.FromSpan(entity.AuthorSigningPub)
@@ -93,8 +93,8 @@ public sealed class SqliteGroupSenderKeyRepository : IGroupSenderKeyRepository
                     AuthorDeviceId = ratchet.AuthorDeviceId.Value,
                     KeyId = ratchet.KeyId,
                     Iteration = ratchet.Iteration,
-                    ChainKeyCiphertext = chainBytes,
-                    SigningPrivCiphertext = signingPrivBytes,
+                    ChainKey = chainBytes,
+                    SigningPriv = signingPrivBytes,
                     AuthorSigningPub = signingPubBytes,
                     UpdatedAtUtc = DateTimeOffset.UtcNow
                 };
@@ -104,8 +104,8 @@ public sealed class SqliteGroupSenderKeyRepository : IGroupSenderKeyRepository
             {
                 existing.KeyId = ratchet.KeyId;
                 existing.Iteration = ratchet.Iteration;
-                existing.ChainKeyCiphertext = chainBytes;
-                existing.SigningPrivCiphertext = signingPrivBytes;
+                existing.ChainKey = chainBytes;
+                existing.SigningPriv = signingPrivBytes;
                 existing.AuthorSigningPub = signingPubBytes;
                 existing.UpdatedAtUtc = DateTimeOffset.UtcNow;
             }
