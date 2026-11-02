@@ -448,6 +448,11 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.LinkPreviewThumbnailSha256).HasColumnType("BLOB");
             entity.Property(e => e.LinkPreviewThumbnailKey).HasColumnType("BLOB");
             entity.Property(e => e.LinkPreviewThumbnailNonce).HasColumnType("BLOB");
+            entity.Property(e => e.TimestampUnixMs).HasConversion<long>();
+            entity.Property(e => e.ExpiresAtUnixMs).HasConversion<long?>();
+            entity.Property(e => e.ReadAtUnixMs).HasConversion<long?>();
+            entity.Property(e => e.EditedAtUnixMs).HasConversion<long?>();
+            entity.Property(e => e.DeletedAtUnixMs).HasConversion<long?>();
             entity.HasIndex(e => new { e.ChannelId, e.TimestampUnixMs })
                 .HasDatabaseName("ix_chat_timeline");
             entity.HasIndex(e => e.ExpiresAtUnixMs)
@@ -512,6 +517,8 @@ public class PercolatorDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.AuthorId).HasColumnType("BLOB");
             entity.Property(e => e.EncryptedPayload).HasColumnType("BLOB");
+            entity.Property(e => e.ReceivedAtUnixMs).HasConversion<long>();
+            entity.Property(e => e.ExpiresAtUnixMs).HasConversion<long>();
             entity.HasIndex(e => e.ExpiresAtUnixMs)
                 .HasDatabaseName("ix_unknown_group_expiry");
             entity.HasIndex(e => e.ReceivedAtUnixMs)

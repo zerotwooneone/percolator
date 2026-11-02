@@ -95,12 +95,12 @@ public sealed class AnonymousGroupRelayEndpointTests
         var newToken = BlindedRoutingToken.New();
         var mutationRequest = new CommitRosterMutationRequest
         {
-            ConversationId = ByteString.CopyFrom(channelId.Value.ToByteArray(bigEndian: true)),
+            ConversationId = ByteString.CopyFrom(channelId.ToByteArray()),
             BaseEpoch = 0,
             NewRosterBlob = ByteString.CopyFrom(new byte[] { 4, 5, 6 }),
             ZkPresentationProof = ByteString.CopyFrom(new byte[64])
         };
-        mutationRequest.NewRoutingTokens.Add(ByteString.CopyFrom(newToken.Value.ToByteArray(bigEndian: true)));
+        mutationRequest.NewRoutingTokens.Add(ByteString.CopyFrom(newToken.ToByteArray()));
 
         var mutationResponse = await endpoint.CommitRosterMutation(mutationRequest, new TestServerCallContext());
         mutationResponse.Committed.Should().BeTrue();
@@ -112,12 +112,12 @@ public sealed class AnonymousGroupRelayEndpointTests
         // 2. Negative: Stale BaseEpoch = 0 (current is now 1) -> EPOCH_CONFLICT
         var staleRequest = new CommitRosterMutationRequest
         {
-            ConversationId = ByteString.CopyFrom(channelId.Value.ToByteArray(bigEndian: true)),
+            ConversationId = ByteString.CopyFrom(channelId.ToByteArray()),
             BaseEpoch = 0, // stale!
             NewRosterBlob = ByteString.CopyFrom(new byte[] { 7, 8, 9 }),
             ZkPresentationProof = ByteString.CopyFrom(new byte[64])
         };
-        staleRequest.NewRoutingTokens.Add(ByteString.CopyFrom(newToken.Value.ToByteArray(bigEndian: true)));
+        staleRequest.NewRoutingTokens.Add(ByteString.CopyFrom(newToken.ToByteArray()));
 
         Func<Task> actStale = async () =>
             await endpoint.CommitRosterMutation(staleRequest, new TestServerCallContext());
@@ -130,12 +130,12 @@ public sealed class AnonymousGroupRelayEndpointTests
         zkEngine.ReturnValid = false;
         var invalidProofRequest = new CommitRosterMutationRequest
         {
-            ConversationId = ByteString.CopyFrom(channelId.Value.ToByteArray(bigEndian: true)),
+            ConversationId = ByteString.CopyFrom(channelId.ToByteArray()),
             BaseEpoch = 1, // current epoch
             NewRosterBlob = ByteString.CopyFrom(new byte[] { 7, 8, 9 }),
             ZkPresentationProof = ByteString.CopyFrom(new byte[64])
         };
-        invalidProofRequest.NewRoutingTokens.Add(ByteString.CopyFrom(newToken.Value.ToByteArray(bigEndian: true)));
+        invalidProofRequest.NewRoutingTokens.Add(ByteString.CopyFrom(newToken.ToByteArray()));
 
         Func<Task> actInvalid = async () =>
             await endpoint.CommitRosterMutation(invalidProofRequest, new TestServerCallContext());
@@ -164,7 +164,7 @@ public sealed class AnonymousGroupRelayEndpointTests
 
         var dispatchRequest = new DispatchGroupMessageRequest
         {
-            ConversationId = ByteString.CopyFrom(channelId.Value.ToByteArray(bigEndian: true)),
+            ConversationId = ByteString.CopyFrom(channelId.ToByteArray()),
             Epoch = 0,
             Ciphertext = ByteString.CopyFrom(new byte[] { 10, 20, 30, 40 }),
             ZkPresentationProof = ByteString.CopyFrom(new byte[64]),
@@ -201,7 +201,7 @@ public sealed class AnonymousGroupRelayEndpointTests
 
         var dispatchRequest = new DispatchGroupMessageRequest
         {
-            ConversationId = ByteString.CopyFrom(channelId.Value.ToByteArray(bigEndian: true)),
+            ConversationId = ByteString.CopyFrom(channelId.ToByteArray()),
             Epoch = 0,
             Ciphertext = ByteString.CopyFrom(new byte[] { 10, 20, 30 }),
             ZkPresentationProof = ByteString.CopyFrom(new byte[64])
@@ -235,7 +235,7 @@ public sealed class AnonymousGroupRelayEndpointTests
 
         var subRequest = new GroupStreamClientMessage
         {
-            ConversationId = ByteString.CopyFrom(channelId.Value.ToByteArray(bigEndian: true)),
+            ConversationId = ByteString.CopyFrom(channelId.ToByteArray()),
             CurrentEpoch = 0
         };
 
@@ -245,7 +245,7 @@ public sealed class AnonymousGroupRelayEndpointTests
         // Dispatch group message
         var dispatchRequest = new DispatchGroupMessageRequest
         {
-            ConversationId = ByteString.CopyFrom(channelId.Value.ToByteArray(bigEndian: true)),
+            ConversationId = ByteString.CopyFrom(channelId.ToByteArray()),
             Epoch = 0,
             Ciphertext = ByteString.CopyFrom(new byte[] { 99, 88, 77 }),
             ZkPresentationProof = ByteString.CopyFrom(new byte[64]),

@@ -31,7 +31,7 @@ public sealed class SqlChatMessageRepository : IChatMessageRepository
         {
             Id = record.Id.Value,
             ChannelId = record.ChannelId.Value,
-            AuthorId = record.AuthorId.Value.ToByteArray(bigEndian: true),
+            AuthorId = record.AuthorId.ToByteArray(),
             TimestampUnixMs = record.TimestampUnixMs,
             Content = record.Content ?? string.Empty,
             ExpireAfterSeconds = record.ExpireAfterSeconds,
@@ -40,10 +40,10 @@ public sealed class SqlChatMessageRepository : IChatMessageRepository
             EditedAtUnixMs = record.EditedAtUnixMs,
             IsTombstone = record.IsTombstone,
             DeletedAtUnixMs = record.DeletedAtUnixMs,
-            DeletedBy = record.DeletedBy.HasValue ? record.DeletedBy.Value.Value.ToByteArray(bigEndian: true) : null,
+            DeletedBy = record.DeletedBy.HasValue ? record.DeletedBy.Value.ToByteArray() : null,
             ReplyParentId = record.ReplyContext?.ParentPayloadId.Value,
             ReplyAuthorId = record.ReplyContext != null
-                ? record.ReplyContext.ParentAuthorId.Value.ToByteArray(bigEndian: true)
+                ? record.ReplyContext.ParentAuthorId.ToByteArray()
                 : null
         };
 
@@ -77,7 +77,7 @@ public sealed class SqlChatMessageRepository : IChatMessageRepository
                 {
                     Id = Guid.NewGuid(),
                     MessageId = record.Id.Value,
-                    IdentityId = mention.IdentityId.Value.ToByteArray(bigEndian: true),
+                    IdentityId = mention.IdentityId.ToByteArray(),
                     StartOffset = mention.StartOffset,
                     Length = mention.Length
                 });
@@ -91,7 +91,7 @@ public sealed class SqlChatMessageRepository : IChatMessageRepository
                 _dbContext.ChatReactions.Add(new ChatReactionEntity
                 {
                     MessageId = record.Id.Value,
-                    ReactorId = reaction.ReactorId.Value.ToByteArray(bigEndian: true),
+                    ReactorId = reaction.ReactorId.ToByteArray(),
                     Emoji = reaction.Emoji.Value,
                     TimestampUnixMs = reaction.ReactedAtUnixMs
                 });
@@ -228,7 +228,7 @@ public sealed class SqlChatMessageRepository : IChatMessageRepository
         entity.EditedAtUnixMs = record.EditedAtUnixMs;
         entity.IsTombstone = record.IsTombstone;
         entity.DeletedAtUnixMs = record.DeletedAtUnixMs;
-        entity.DeletedBy = record.DeletedBy.HasValue ? record.DeletedBy.Value.Value.ToByteArray(bigEndian: true) : null;
+        entity.DeletedBy = record.DeletedBy.HasValue ? record.DeletedBy.Value.ToByteArray() : null;
 
         // If tombstoned, clear link preview and attachments
         if (record.IsTombstone)
@@ -271,7 +271,7 @@ public sealed class SqlChatMessageRepository : IChatMessageRepository
                     {
                         Id = Guid.NewGuid(),
                         MessageId = guid,
-                        IdentityId = mention.IdentityId.Value.ToByteArray(bigEndian: true),
+                        IdentityId = mention.IdentityId.ToByteArray(),
                         StartOffset = mention.StartOffset,
                         Length = mention.Length
                     });
@@ -292,7 +292,7 @@ public sealed class SqlChatMessageRepository : IChatMessageRepository
                 _dbContext.ChatReactions.Add(new ChatReactionEntity
                 {
                     MessageId = guid,
-                    ReactorId = reaction.ReactorId.Value.ToByteArray(bigEndian: true),
+                    ReactorId = reaction.ReactorId.ToByteArray(),
                     Emoji = reaction.Emoji.Value,
                     TimestampUnixMs = reaction.ReactedAtUnixMs
                 });
@@ -327,7 +327,7 @@ public sealed class SqlChatMessageRepository : IChatMessageRepository
         ReplyContextDto? replyContext = entity.ReplyParentId.HasValue && entity.ReplyAuthorId != null && entity.ReplyAuthorId.Length == 16
             ? new ReplyContextDto(
                 PayloadId.FromGuid(entity.ReplyParentId.Value),
-                PublicIdentityId.FromGuid(new Guid(entity.ReplyAuthorId, bigEndian: true)))
+                PublicIdentityId.FromBytes(entity.ReplyAuthorId))
             : null;
 
         var mentions = new List<MentionDto>(mentionEntities.Count);
@@ -336,7 +336,7 @@ public sealed class SqlChatMessageRepository : IChatMessageRepository
             if (m.IdentityId.Length == 16)
             {
                 mentions.Add(new MentionDto(
-                    PublicIdentityId.FromGuid(new Guid(m.IdentityId, bigEndian: true)),
+                    PublicIdentityId.FromBytes(m.IdentityId),
                     m.StartOffset,
                     m.Length));
             }
@@ -410,7 +410,7 @@ public sealed class SqlChatMessageRepository : IChatMessageRepository
         }
 
         PublicIdentityId? deletedBy = entity.DeletedBy != null && entity.DeletedBy.Length == 16
-            ? PublicIdentityId.FromGuid(new Guid(entity.DeletedBy, bigEndian: true))
+            ? PublicIdentityId.FromBytes(entity.DeletedBy)
             : null;
 
         var chatReactions = new List<ChatReaction>(reactionEntities.Count);
@@ -420,7 +420,7 @@ public sealed class SqlChatMessageRepository : IChatMessageRepository
             if (emojiResult.IsSuccess && r.ReactorId.Length == 16)
             {
                 chatReactions.Add(new ChatReaction(
-                    PublicIdentityId.FromGuid(new Guid(r.ReactorId, bigEndian: true)),
+                    PublicIdentityId.FromBytes(r.ReactorId),
                     emojiResult.Value,
                     r.TimestampUnixMs));
             }
@@ -429,7 +429,7 @@ public sealed class SqlChatMessageRepository : IChatMessageRepository
         return new ChatMessage(
             PayloadId.FromGuid(entity.Id),
             ChannelId.FromGuid(entity.ChannelId),
-            PublicIdentityId.FromGuid(new Guid(entity.AuthorId, bigEndian: true)),
+            PublicIdentityId.FromBytes(entity.AuthorId),
             entity.TimestampUnixMs,
             entity.Content,
             mentions,

@@ -31,7 +31,7 @@ public sealed class SqlGroupInvitationQueryService : IGroupInvitationQueryServic
             new InvitationId(e.Id),
             ChannelId.FromGuid(e.TargetGroupChannelId),
             e.GroupName,
-            PublicIdentityId.FromGuid(new Guid(e.InviterId, bigEndian: true)),
+            PublicIdentityId.FromBytes(e.InviterId),
             e.ExpiresAtUnixMs,
             (GroupInvitationStatus)e.Status)).ToList();
     }

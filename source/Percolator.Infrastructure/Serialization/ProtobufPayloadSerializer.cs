@@ -104,7 +104,7 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
 
         TransferManifestProto proto = new()
         {
-            ManifestId = ByteString.CopyFrom(manifest.ManifestId.Value.ToByteArray(bigEndian: true)),
+            ManifestId = ByteString.CopyFrom(manifest.ManifestId.ToByteArray()),
             RootName = manifest.RootName.Value,
             TotalSizeBytes = manifest.TotalSize.Bytes,
             ChunkSizeBytes = manifest.ChunkSize.Bytes,
@@ -129,7 +129,7 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
 
     private static TransferManifest FromManifestProto(TransferManifestProto proto)
     {
-        TransferSessionId manifestId = TransferSessionId.FromGuid(new Guid(proto.ManifestId.Span, bigEndian: true));
+        TransferSessionId manifestId = TransferSessionId.FromBytes(proto.ManifestId.Span);
         RootBundleName rootName = RootBundleName.Parse(proto.RootName);
         ChunkSizeBytes chunkSize = ChunkSizeBytes.FromBytes(proto.ChunkSizeBytes);
         MerkleRoot merkleRoot = MerkleRoot.FromSpan(proto.MerkleRoot.Span);
@@ -185,7 +185,7 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
 
         FileTransferOfferProto proto = new()
         {
-            TransferSessionId = ByteString.CopyFrom(offer.TransferSessionId.Value.ToByteArray(bigEndian: true)),
+            TransferSessionId = ByteString.CopyFrom(offer.TransferSessionId.ToByteArray()),
             Summary = new TransferBundleSummaryProto
             {
                 RootName = offer.Summary.RootName.Value,
@@ -225,7 +225,7 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
 
     private static FileTransferOfferPayload FromOfferProto(FileTransferOfferProto proto)
     {
-        TransferSessionId sessionId = TransferSessionId.FromGuid(new Guid(proto.TransferSessionId.Span, bigEndian: true));
+        TransferSessionId sessionId = TransferSessionId.FromBytes(proto.TransferSessionId.Span);
 
         TransferBundleSummary summary = TransferBundleSummary.Create(
             RootBundleName.Parse(proto.Summary.RootName),
@@ -282,7 +282,7 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
     {
         FileTransferAcceptProto proto = new()
         {
-            TransferSessionId = ByteString.CopyFrom(accept.TransferSessionId.Value.ToByteArray(bigEndian: true)),
+            TransferSessionId = ByteString.CopyFrom(accept.TransferSessionId.ToByteArray()),
             RoutingPreference = (uint)accept.RoutingPreference,
             TotalChunks = accept.ResumptionBitfield.TotalChunks.Count,
             ResumptionBitfield = ByteString.CopyFrom(accept.ResumptionBitfield.ToByteArray())
@@ -303,7 +303,7 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
 
     private static FileTransferAcceptPayload FromAcceptProto(FileTransferAcceptProto proto)
     {
-        TransferSessionId sessionId = TransferSessionId.FromGuid(new Guid(proto.TransferSessionId.Span, bigEndian: true));
+        TransferSessionId sessionId = TransferSessionId.FromBytes(proto.TransferSessionId.Span);
         TransportRoutingPreference routing = (TransportRoutingPreference)proto.RoutingPreference;
 
         List<DirectEndpointCandidate> candidates = new(proto.ReceiverCandidates.Count);
@@ -322,13 +322,13 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
     private static FileTransferCancelProto ToCancelProto(FileTransferCancelPayload cancel) =>
         new()
         {
-            TransferSessionId = ByteString.CopyFrom(cancel.TransferSessionId.Value.ToByteArray(bigEndian: true)),
+            TransferSessionId = ByteString.CopyFrom(cancel.TransferSessionId.ToByteArray()),
             Reason = cancel.Reason.Value
         };
 
     private static FileTransferCancelPayload FromCancelProto(FileTransferCancelProto proto) =>
         new(
-            TransferSessionId.FromGuid(new Guid(proto.TransferSessionId.Span, bigEndian: true)),
+            TransferSessionId.FromBytes(proto.TransferSessionId.Span),
             TransferTerminationReason.FromText(proto.Reason));
 
     // Chat DTO Serialization
@@ -351,9 +351,9 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
     {
         ChatMessageProto proto = new()
         {
-            Id = ByteString.CopyFrom(dto.Id.Value.ToByteArray(bigEndian: true)),
-            ChannelId = ByteString.CopyFrom(dto.ChannelId.Value.ToByteArray(bigEndian: true)),
-            AuthorId = ByteString.CopyFrom(dto.AuthorId.Value.ToByteArray(bigEndian: true)),
+            Id = ByteString.CopyFrom(dto.Id.ToByteArray()),
+            ChannelId = ByteString.CopyFrom(dto.ChannelId.ToByteArray()),
+            AuthorId = ByteString.CopyFrom(dto.AuthorId.ToByteArray()),
             TimestampUnixMs = dto.TimestampUnixMs,
             Content = dto.Content ?? string.Empty,
         };
@@ -372,8 +372,8 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
         {
             proto.ReplyContext = new ReplyContextProto
             {
-                ParentPayloadId = ByteString.CopyFrom(dto.ReplyContext.ParentPayloadId.Value.ToByteArray(bigEndian: true)),
-                ParentAuthorId = ByteString.CopyFrom(dto.ReplyContext.ParentAuthorId.Value.ToByteArray(bigEndian: true))
+                ParentPayloadId = ByteString.CopyFrom(dto.ReplyContext.ParentPayloadId.ToByteArray()),
+                ParentAuthorId = ByteString.CopyFrom(dto.ReplyContext.ParentAuthorId.ToByteArray())
             };
         }
 
@@ -383,7 +383,7 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
             {
                 proto.Mentions.Add(new MentionProto
                 {
-                    IdentityId = ByteString.CopyFrom(m.IdentityId.Value.ToByteArray(bigEndian: true)),
+                    IdentityId = ByteString.CopyFrom(m.IdentityId.ToByteArray()),
                     StartOffset = m.StartOffset,
                     Length = m.Length
                 });
@@ -447,21 +447,21 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
 
     private static ChatMessageDto FromChatMessageProto(ChatMessageProto proto)
     {
-        PayloadId id = PayloadId.FromGuid(new Guid(proto.Id.Span, bigEndian: true));
-        ChannelId channelId = ChannelId.FromGuid(new Guid(proto.ChannelId.Span, bigEndian: true));
-        PublicIdentityId authorId = PublicIdentityId.FromGuid(new Guid(proto.AuthorId.Span, bigEndian: true));
+        PayloadId id = PayloadId.FromBytes(proto.Id.Span);
+        ChannelId channelId = ChannelId.FromBytes(proto.ChannelId.Span);
+        PublicIdentityId authorId = PublicIdentityId.FromBytes(proto.AuthorId.Span);
 
         ReplyContextDto? replyContext = proto.ReplyContext != null
             ? new ReplyContextDto(
-                PayloadId.FromGuid(new Guid(proto.ReplyContext.ParentPayloadId.Span, bigEndian: true)),
-                PublicIdentityId.FromGuid(new Guid(proto.ReplyContext.ParentAuthorId.Span, bigEndian: true)))
+                PayloadId.FromBytes(proto.ReplyContext.ParentPayloadId.Span),
+                PublicIdentityId.FromBytes(proto.ReplyContext.ParentAuthorId.Span))
             : null;
 
         List<MentionDto> mentions = new(proto.Mentions.Count);
         foreach (MentionProto m in proto.Mentions)
         {
             mentions.Add(new MentionDto(
-                PublicIdentityId.FromGuid(new Guid(m.IdentityId.Span, bigEndian: true)),
+                PublicIdentityId.FromBytes(m.IdentityId.Span),
                 m.StartOffset,
                 m.Length));
         }
@@ -507,9 +507,9 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
     {
         MessageEditProto proto = new()
         {
-            TargetPayloadId = ByteString.CopyFrom(dto.TargetPayloadId.Value.ToByteArray(bigEndian: true)),
-            ChannelId = ByteString.CopyFrom(dto.ChannelId.Value.ToByteArray(bigEndian: true)),
-            AuthorId = ByteString.CopyFrom(dto.AuthorId.Value.ToByteArray(bigEndian: true)),
+            TargetPayloadId = ByteString.CopyFrom(dto.TargetPayloadId.ToByteArray()),
+            ChannelId = ByteString.CopyFrom(dto.ChannelId.ToByteArray()),
+            AuthorId = ByteString.CopyFrom(dto.AuthorId.ToByteArray()),
             NewContent = dto.NewContent ?? string.Empty,
             EditedAtUnixMs = dto.EditedAtUnixMs
         };
@@ -520,7 +520,7 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
             {
                 proto.NewMentions.Add(new MentionProto
                 {
-                    IdentityId = ByteString.CopyFrom(m.IdentityId.Value.ToByteArray(bigEndian: true)),
+                    IdentityId = ByteString.CopyFrom(m.IdentityId.ToByteArray()),
                     StartOffset = m.StartOffset,
                     Length = m.Length
                 });
@@ -536,15 +536,15 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
         foreach (MentionProto m in proto.NewMentions)
         {
             mentions.Add(new MentionDto(
-                PublicIdentityId.FromGuid(new Guid(m.IdentityId.Span, bigEndian: true)),
+                PublicIdentityId.FromBytes(m.IdentityId.Span),
                 m.StartOffset,
                 m.Length));
         }
 
         return new MessageEditDto(
-            PayloadId.FromGuid(new Guid(proto.TargetPayloadId.Span, bigEndian: true)),
-            ChannelId.FromGuid(new Guid(proto.ChannelId.Span, bigEndian: true)),
-            PublicIdentityId.FromGuid(new Guid(proto.AuthorId.Span, bigEndian: true)),
+            PayloadId.FromBytes(proto.TargetPayloadId.Span),
+            ChannelId.FromBytes(proto.ChannelId.Span),
+            PublicIdentityId.FromBytes(proto.AuthorId.Span),
             proto.NewContent,
             mentions,
             proto.EditedAtUnixMs);
@@ -553,25 +553,25 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
     private static MessageTombstoneProto ToTombstoneProto(MessageTombstoneDto dto) =>
         new()
         {
-            TargetPayloadId = ByteString.CopyFrom(dto.TargetPayloadId.Value.ToByteArray(bigEndian: true)),
-            ChannelId = ByteString.CopyFrom(dto.ChannelId.Value.ToByteArray(bigEndian: true)),
-            RequestedBy = ByteString.CopyFrom(dto.RequestedBy.Value.ToByteArray(bigEndian: true)),
+            TargetPayloadId = ByteString.CopyFrom(dto.TargetPayloadId.ToByteArray()),
+            ChannelId = ByteString.CopyFrom(dto.ChannelId.ToByteArray()),
+            RequestedBy = ByteString.CopyFrom(dto.RequestedBy.ToByteArray()),
             DeletedAtUnixMs = dto.DeletedAtUnixMs
         };
 
     private static MessageTombstoneDto FromTombstoneProto(MessageTombstoneProto proto) =>
         new(
-            PayloadId.FromGuid(new Guid(proto.TargetPayloadId.Span, bigEndian: true)),
-            ChannelId.FromGuid(new Guid(proto.ChannelId.Span, bigEndian: true)),
-            PublicIdentityId.FromGuid(new Guid(proto.RequestedBy.Span, bigEndian: true)),
+            PayloadId.FromBytes(proto.TargetPayloadId.Span),
+            ChannelId.FromBytes(proto.ChannelId.Span),
+            PublicIdentityId.FromBytes(proto.RequestedBy.Span),
             proto.DeletedAtUnixMs);
 
     private static ReactionUpdateProto ToReactionProto(ReactionUpdateDto dto) =>
         new()
         {
-            TargetPayloadId = ByteString.CopyFrom(dto.TargetPayloadId.Value.ToByteArray(bigEndian: true)),
-            ChannelId = ByteString.CopyFrom(dto.ChannelId.Value.ToByteArray(bigEndian: true)),
-            AuthorId = ByteString.CopyFrom(dto.AuthorId.Value.ToByteArray(bigEndian: true)),
+            TargetPayloadId = ByteString.CopyFrom(dto.TargetPayloadId.ToByteArray()),
+            ChannelId = ByteString.CopyFrom(dto.ChannelId.ToByteArray()),
+            AuthorId = ByteString.CopyFrom(dto.AuthorId.ToByteArray()),
             Emoji = dto.Emoji ?? string.Empty,
             Action = (int)dto.Action,
             TimestampUnixMs = dto.TimestampUnixMs
@@ -579,9 +579,9 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
 
     private static ReactionUpdateDto FromReactionProto(ReactionUpdateProto proto) =>
         new(
-            PayloadId.FromGuid(new Guid(proto.TargetPayloadId.Span, bigEndian: true)),
-            ChannelId.FromGuid(new Guid(proto.ChannelId.Span, bigEndian: true)),
-            PublicIdentityId.FromGuid(new Guid(proto.AuthorId.Span, bigEndian: true)),
+            PayloadId.FromBytes(proto.TargetPayloadId.Span),
+            ChannelId.FromBytes(proto.ChannelId.Span),
+            PublicIdentityId.FromBytes(proto.AuthorId.Span),
             proto.Emoji,
             (ReactionAction)proto.Action,
             proto.TimestampUnixMs);
@@ -589,36 +589,36 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
     private static ReadReceiptProto ToReadReceiptProto(ReadReceiptDto dto) =>
         new()
         {
-            ChannelId = ByteString.CopyFrom(dto.ChannelId.Value.ToByteArray(bigEndian: true)),
-            ReaderId = ByteString.CopyFrom(dto.ReaderId.Value.ToByteArray(bigEndian: true)),
-            UpToPayloadId = ByteString.CopyFrom(dto.UpToPayloadId.Value.ToByteArray(bigEndian: true)),
+            ChannelId = ByteString.CopyFrom(dto.ChannelId.ToByteArray()),
+            ReaderId = ByteString.CopyFrom(dto.ReaderId.ToByteArray()),
+            UpToPayloadId = ByteString.CopyFrom(dto.UpToPayloadId.ToByteArray()),
             ReadAtUnixMs = dto.ReadAtUnixMs
         };
 
     private static ReadReceiptDto FromReadReceiptProto(ReadReceiptProto proto) =>
         new(
-            ChannelId.FromGuid(new Guid(proto.ChannelId.Span, bigEndian: true)),
-            PublicIdentityId.FromGuid(new Guid(proto.ReaderId.Span, bigEndian: true)),
-            PayloadId.FromGuid(new Guid(proto.UpToPayloadId.Span, bigEndian: true)),
+            ChannelId.FromBytes(proto.ChannelId.Span),
+            PublicIdentityId.FromBytes(proto.ReaderId.Span),
+            PayloadId.FromBytes(proto.UpToPayloadId.Span),
             proto.ReadAtUnixMs);
 
     private static SystemNoticeProto ToNoticeProto(SystemNoticeDto dto) =>
         new()
         {
-            ChannelId = ByteString.CopyFrom(dto.ChannelId.Value.ToByteArray(bigEndian: true)),
+            ChannelId = ByteString.CopyFrom(dto.ChannelId.ToByteArray()),
             NoticeType = (int)dto.NoticeType,
             AffectedIdentity = dto.AffectedIdentity.HasValue
-                ? ByteString.CopyFrom(dto.AffectedIdentity.Value.Value.ToByteArray(bigEndian: true))
+                ? ByteString.CopyFrom(dto.AffectedIdentity.Value.ToByteArray())
                 : ByteString.Empty,
             TimestampUnixMs = dto.TimestampUnixMs
         };
 
     private static SystemNoticeDto FromNoticeProto(SystemNoticeProto proto) =>
         new(
-            ChannelId.FromGuid(new Guid(proto.ChannelId.Span, bigEndian: true)),
+            ChannelId.FromBytes(proto.ChannelId.Span),
             (SystemNoticeType)proto.NoticeType,
             proto.AffectedIdentity is { IsEmpty: false }
-                ? PublicIdentityId.FromGuid(new Guid(proto.AffectedIdentity.Span, bigEndian: true))
+                ? PublicIdentityId.FromBytes(proto.AffectedIdentity.Span)
                 : null,
             proto.TimestampUnixMs);
 
@@ -627,9 +627,9 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
         GroupInvitationProto proto = new()
         {
             InvitationId = dto.InvitationId.Value,
-            TargetGroupChannelId = ByteString.CopyFrom(dto.TargetGroupChannelId.Value.ToByteArray(bigEndian: true)),
+            TargetGroupChannelId = ByteString.CopyFrom(dto.TargetGroupChannelId.ToByteArray()),
             GroupName = dto.GroupName ?? string.Empty,
-            InviterId = ByteString.CopyFrom(dto.InviterId.Value.ToByteArray(bigEndian: true)),
+            InviterId = ByteString.CopyFrom(dto.InviterId.ToByteArray()),
             ExpiresAtUnixMs = dto.ExpiresAtUnixMs
         };
 
@@ -644,9 +644,9 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
     private static GroupInvitationDto FromInviteProto(GroupInvitationProto proto) =>
         new(
             new InvitationId(proto.InvitationId),
-            ChannelId.FromGuid(new Guid(proto.TargetGroupChannelId.Span, bigEndian: true)),
+            ChannelId.FromBytes(proto.TargetGroupChannelId.Span),
             proto.GroupName,
-            PublicIdentityId.FromGuid(new Guid(proto.InviterId.Span, bigEndian: true)),
+            PublicIdentityId.FromBytes(proto.InviterId.Span),
             proto.HasRelayEndpoint ? proto.RelayEndpoint : null,
             proto.ExpiresAtUnixMs);
 
@@ -654,8 +654,8 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
         new()
         {
             InvitationId = dto.InvitationId.Value,
-            TargetGroupChannelId = ByteString.CopyFrom(dto.TargetGroupChannelId.Value.ToByteArray(bigEndian: true)),
-            ResponderId = ByteString.CopyFrom(dto.ResponderId.Value.ToByteArray(bigEndian: true)),
+            TargetGroupChannelId = ByteString.CopyFrom(dto.TargetGroupChannelId.ToByteArray()),
+            ResponderId = ByteString.CopyFrom(dto.ResponderId.ToByteArray()),
             Accepted = dto.Accepted,
             RespondedAtUnixMs = dto.RespondedAtUnixMs
         };
@@ -663,8 +663,8 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
     private static GroupInvitationResponseDto FromInviteResponseProto(GroupInvitationResponseProto proto) =>
         new(
             new InvitationId(proto.InvitationId),
-            ChannelId.FromGuid(new Guid(proto.TargetGroupChannelId.Span, bigEndian: true)),
-            PublicIdentityId.FromGuid(new Guid(proto.ResponderId.Span, bigEndian: true)),
+            ChannelId.FromBytes(proto.TargetGroupChannelId.Span),
+            PublicIdentityId.FromBytes(proto.ResponderId.Span),
             proto.Accepted,
             proto.RespondedAtUnixMs);
 
@@ -672,8 +672,8 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
     {
         ProfileCapabilityProto proto = new()
         {
-            ChannelId = ByteString.CopyFrom(dto.ChannelId.Value.ToByteArray(bigEndian: true)),
-            AuthorId = ByteString.CopyFrom(dto.AuthorId.Value.ToByteArray(bigEndian: true)),
+            ChannelId = ByteString.CopyFrom(dto.ChannelId.ToByteArray()),
+            AuthorId = ByteString.CopyFrom(dto.AuthorId.ToByteArray()),
             ProfileKeyBytes = ByteString.CopyFrom(dto.ProfileKeyBytes),
             BlindedLocatorBytes = ByteString.CopyFrom(dto.BlindedLocatorBytes),
             MailboxRoutingTokenBytes = ByteString.CopyFrom(dto.MailboxRoutingTokenBytes),
@@ -697,8 +697,8 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
 
     private static ProfileCapabilityDto FromProfileCapabilityProto(ProfileCapabilityProto proto) =>
         new(
-            ChannelId.FromGuid(new Guid(proto.ChannelId.Span, bigEndian: true)),
-            PublicIdentityId.FromGuid(new Guid(proto.AuthorId.Span, bigEndian: true)),
+            ChannelId.FromBytes(proto.ChannelId.Span),
+            PublicIdentityId.FromBytes(proto.AuthorId.Span),
             proto.ProfileKeyBytes.ToByteArray(),
             proto.BlindedLocatorBytes.ToByteArray(),
             proto.MailboxRoutingTokenBytes.ToByteArray(),

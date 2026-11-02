@@ -93,10 +93,10 @@ public sealed class DiscoveryQueryClientTests
         invoker.ResponseHandler = query =>
         {
             query.RequestedLimit.Should().Be(100, "requested limit above 100 must be clamped to 100");
-            query.RequesterId.ToByteArray().Should().Equal(requester.Value.ToByteArray());
+            query.RequesterId.ToByteArray().Should().Equal(requester.ToByteArray());
 
             var resp = new NearbyDiscoveryResponseProto();
-            resp.DiscoverablePeerIds.Add(ByteString.CopyFrom(peerB.Value.ToByteArray()));
+            resp.DiscoverablePeerIds.Add(ByteString.CopyFrom(peerB.ToByteArray()));
             return resp;
         };
 
@@ -115,7 +115,7 @@ public sealed class DiscoveryQueryClientTests
         invoker.LastRequest.Should().BeOfType<NearbyDiscoveryQueryProto>();
         var sentProto = (NearbyDiscoveryQueryProto)invoker.LastRequest!;
         sentProto.RequestedLimit.Should().Be(100);
-        sentProto.RequesterId.ToByteArray().Should().Equal(requester.Value.ToByteArray());
+        sentProto.RequesterId.ToByteArray().Should().Equal(requester.ToByteArray());
     }
 
     [Test]
@@ -137,9 +137,9 @@ public sealed class DiscoveryQueryClientTests
         var invoker = new TestCallInvoker();
         invoker.ResponseHandler = query =>
         {
-            query.RequesterId.ToByteArray().Should().Equal(requester.Value.ToByteArray());
+            query.RequesterId.ToByteArray().Should().Equal(requester.ToByteArray());
             var resp = new NearbyDiscoveryResponseProto();
-            resp.DiscoverablePeerIds.Add(ByteString.CopyFrom(peerB.Value.ToByteArray()));
+            resp.DiscoverablePeerIds.Add(ByteString.CopyFrom(peerB.ToByteArray()));
             return resp;
         };
 

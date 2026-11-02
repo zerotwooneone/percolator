@@ -31,8 +31,8 @@ public static class SealedWireFraming
         var output = new byte[HeaderSize + packedWireBytes.Length];
         output[0] = (byte)kind;
 
-        channelId.Value.TryWriteBytes(output.AsSpan(1, 16));
-        senderId.Value.TryWriteBytes(output.AsSpan(17, 16));
+        channelId.TryWriteBytes(output.AsSpan(1, 16));
+        senderId.TryWriteBytes(output.AsSpan(17, 16));
 
         BinaryPrimitives.WriteUInt32LittleEndian(output.AsSpan(33, 4), senderDeviceId.Value);
         output.AsSpan(37, 12).Clear();
@@ -60,8 +60,8 @@ public static class SealedWireFraming
                 new DomainError("UNKNOWN_FRAME_KIND", $"Unknown WireFrameKind byte: 0x{span[0]:X2}."));
         }
 
-        var channelGuid = new Guid(span.Slice(1, 16));
-        var senderGuid = new Guid(span.Slice(17, 16));
+        var channelId = ChannelId.FromBytes(span.Slice(1, 16));
+        var senderId = PublicIdentityId.FromBytes(span.Slice(17, 16));
         uint deviceVal = BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(33, 4));
         uint payloadLength = BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(49, 4));
 
@@ -73,7 +73,7 @@ public static class SealedWireFraming
 
         var packedPayload = frameBytes.Slice(HeaderSize, (int)payloadLength);
         return DomainResult<(WireFrameKind, ChannelId, PublicIdentityId, DeviceId, ReadOnlyMemory<byte>)>.Success(
-            (kind, new ChannelId(channelGuid), new PublicIdentityId(senderGuid), new DeviceId(deviceVal), packedPayload));
+            (kind, channelId, senderId, new DeviceId(deviceVal), packedPayload));
     }
 }
 

@@ -27,7 +27,7 @@ public sealed class SqliteFilterPolicyRepository : IFileTransferFilterPolicyRepo
     {
         ArgumentNullException.ThrowIfNull(policy);
 
-        byte[] ownerBytes = policy.OwnerId.Value.ToByteArray();
+        byte[] ownerBytes = policy.OwnerId.ToByteArray();
         FilterPolicyEntity? existing = await _dbContext.FilterPolicies
             .FirstOrDefaultAsync(p => p.OwnerId == ownerBytes, ct)
             .ConfigureAwait(false);
@@ -54,7 +54,7 @@ public sealed class SqliteFilterPolicyRepository : IFileTransferFilterPolicyRepo
 
     public async ValueTask<FileTransferFilterPolicy> GetPolicyAsync(PublicIdentityId ownerId, CancellationToken ct = default)
     {
-        byte[] ownerBytes = ownerId.Value.ToByteArray();
+        byte[] ownerBytes = ownerId.ToByteArray();
         FilterPolicyEntity? entity = await _dbContext.FilterPolicies
             .AsNoTracking()
             .FirstOrDefaultAsync(p => p.OwnerId == ownerBytes, ct)

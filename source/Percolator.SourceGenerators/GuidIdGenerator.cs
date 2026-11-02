@@ -224,8 +224,9 @@ internal sealed class GuidIdAttribute : global::System.Attribute
             sb.AppendLine();
 
             sb.AppendLine($"    public static {typeName} FromGuid(global::System.Guid value) => new(value);");
-            sb.AppendLine($"    public static {typeName} FromBytes(global::System.ReadOnlySpan<byte> bytes) => new(new global::System.Guid(bytes));");
-            sb.AppendLine("    public bool TryWriteBytes(global::System.Span<byte> destination) => Value.TryWriteBytes(destination);");
+            sb.AppendLine($"    public static {typeName} FromBytes(global::System.ReadOnlySpan<byte> bytes) => new(new global::System.Guid(bytes, bigEndian: true));");
+            sb.AppendLine("    public bool TryWriteBytes(global::System.Span<byte> destination) => Value.TryWriteBytes(destination, bigEndian: true, out _);");
+            sb.AppendLine("    public byte[] ToByteArray() => Value.ToByteArray(bigEndian: true);");
             sb.AppendLine();
 
             if (kind == 1) // SequentialTimeBased

@@ -60,7 +60,7 @@ public sealed class SqliteRelayPeerDirectory : IRelayPeerDirectory
         }
 
         DateTimeOffset nowUtc = _clock?.UtcNow ?? (registration.LastUpdatedAtUtc == DateTimeOffset.UnixEpoch ? DateTimeOffset.UtcNow : registration.LastUpdatedAtUtc);
-        byte[] peerIdBytes = registration.PeerId.Value.ToByteArray();
+        byte[] peerIdBytes = registration.PeerId.ToByteArray();
 
         // Privacy invariant: Setting visibility to Hidden immediately removes the peer's row from relay_peer_directory
         // and succeeds without running admission gating (which is only for discoverability listing).
@@ -140,7 +140,7 @@ public sealed class SqliteRelayPeerDirectory : IRelayPeerDirectory
         }
 
         DateTimeOffset nowUtc = _clock?.UtcNow ?? DateTimeOffset.UtcNow;
-        byte[] peerIdBytes = peerId.Value.ToByteArray();
+        byte[] peerIdBytes = peerId.ToByteArray();
         var existing = await _dbContext.RelayPeerDirectory
             .FirstOrDefaultAsync(e => e.PeerId == peerIdBytes, ct)
             .ConfigureAwait(false);
@@ -177,7 +177,7 @@ public sealed class SqliteRelayPeerDirectory : IRelayPeerDirectory
         }
 
         DateTimeOffset nowUtc = _clock?.UtcNow ?? DateTimeOffset.UtcNow;
-        byte[] peerIdBytes = peerId.Value.ToByteArray();
+        byte[] peerIdBytes = peerId.ToByteArray();
 
         var existing = await _dbContext.RelayPeerDirectory
             .FirstOrDefaultAsync(e => e.PeerId == peerIdBytes, ct)

@@ -36,7 +36,7 @@ public sealed class AnonymousGroupRelayEndpoint : AnonymousGroupRelayService.Ano
 
     private static ChannelId ParseConversationId(ByteString conversationId)
     {
-        return new ChannelId(new Guid(conversationId.Span, bigEndian: true));
+        return ChannelId.FromBytes(conversationId.Span);
     }
 
     public override async Task<FetchGroupStateResponse> FetchGroupState(FetchGroupStateRequest request, ServerCallContext context)
@@ -79,7 +79,7 @@ public sealed class AnonymousGroupRelayEndpoint : AnonymousGroupRelayService.Ano
         {
             if (tok.Length == 16)
             {
-                newTokens.Add(new BlindedRoutingToken(new Guid(tok.Span, bigEndian: true)));
+                newTokens.Add(BlindedRoutingToken.FromBytes(tok.Span));
             }
         }
 

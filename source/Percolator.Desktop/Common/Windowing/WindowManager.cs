@@ -27,7 +27,7 @@ public sealed class WindowManager : IWindowManager
     }
 
     private static IClassicDesktopStyleApplicationLifetime? DesktopLifetime =>
-        Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime;
+        Avalonia.Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime;
 
     public void Show<TViewModel>() where TViewModel : ViewModelBase
     {

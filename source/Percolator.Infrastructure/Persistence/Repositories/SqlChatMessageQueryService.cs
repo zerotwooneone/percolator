@@ -40,7 +40,7 @@ public sealed class SqlChatMessageQueryService : IChatMessageQueryService
         var query = _dbContext.ChatMessages
             .AsNoTracking()
             .Where(m => m.ChannelId == channelGuid &&
-                        (m.ExpiresAtUnixMs == null || m.ExpiresAtUnixMs > currentTimestampMs));
+                        (m.ExpiresAtUnixMs == null || (long)m.ExpiresAtUnixMs > (long)currentTimestampMs));
 
         if (beforeTimestampMs.HasValue)
         {
@@ -87,7 +87,7 @@ public sealed class SqlChatMessageQueryService : IChatMessageQueryService
             ReplyContextDto? replyContext = entity.ReplyParentId.HasValue && entity.ReplyAuthorId != null && entity.ReplyAuthorId.Length == 16
                 ? new ReplyContextDto(
                     PayloadId.FromGuid(entity.ReplyParentId.Value),
-                    PublicIdentityId.FromGuid(new Guid(entity.ReplyAuthorId, bigEndian: true)))
+                    PublicIdentityId.FromBytes(entity.ReplyAuthorId))
                 : null;
 
             mentionsByMessage.TryGetValue(entity.Id, out var msgMentions);
@@ -99,7 +99,7 @@ public sealed class SqlChatMessageQueryService : IChatMessageQueryService
                     if (m.IdentityId.Length == 16)
                     {
                         mentionDtos.Add(new MentionDto(
-                            PublicIdentityId.FromGuid(new Guid(m.IdentityId, bigEndian: true)),
+                            PublicIdentityId.FromBytes(m.IdentityId),
                             m.StartOffset,
                             m.Length));
                     }
@@ -183,7 +183,7 @@ public sealed class SqlChatMessageQueryService : IChatMessageQueryService
             result.Add(new ChatMessageReadModel(
                 PayloadId.FromGuid(entity.Id),
                 ChannelId.FromGuid(entity.ChannelId),
-                PublicIdentityId.FromGuid(new Guid(entity.AuthorId, bigEndian: true)),
+                PublicIdentityId.FromBytes(entity.AuthorId),
                 entity.TimestampUnixMs,
                 entity.Content,
                 mentionDtos,
@@ -211,7 +211,7 @@ public sealed class SqlChatMessageQueryService : IChatMessageQueryService
                 g.Key,
                 g.Count(),
                 g.Where(r => r.ReactorId.Length == 16)
-                 .Select(r => PublicIdentityId.FromGuid(new Guid(r.ReactorId, bigEndian: true)))
+                 .Select(r => PublicIdentityId.FromBytes(r.ReactorId))
                  .ToList(),
                 HasReactedByCurrentUser: false))
             .ToList();

@@ -76,17 +76,17 @@ public sealed class SqliteTransferSessionRepository : ITransferSessionRepository
         {
             case TransferTopology.OneToOne oto:
                 existing.TopologyType = 1;
-                existing.InitiatorId = oto.InitiatorId.Value.ToByteArray();
+                existing.InitiatorId = oto.InitiatorId.ToByteArray();
                 existing.RecipientsJson = JsonSerializer.Serialize(new[] { oto.RecipientId.Value.ToString() });
                 break;
             case TransferTopology.MultiPeer mp:
                 existing.TopologyType = 2;
-                existing.InitiatorId = mp.InitiatorId.Value.ToByteArray();
+                existing.InitiatorId = mp.InitiatorId.ToByteArray();
                 existing.RecipientsJson = JsonSerializer.Serialize(mp.Recipients.Select(r => r.Value.ToString()).ToList());
                 break;
             case TransferTopology.IncomingStaged incoming:
                 existing.TopologyType = 3;
-                existing.InitiatorId = incoming.InitiatorId.Value.ToByteArray();
+                existing.InitiatorId = incoming.InitiatorId.ToByteArray();
                 existing.RecipientsJson = "[]";
                 break;
         }

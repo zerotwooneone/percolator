@@ -25,7 +25,7 @@ public sealed class SqlConversationListQueryService : IConversationListQueryServ
         CancellationToken ct = default)
     {
         var currentUserGuid = currentUserId.Value;
-        byte[] currentUserBytes = currentUserGuid.ToByteArray(bigEndian: true);
+        byte[] currentUserBytes = currentUserId.ToByteArray();
 
         // 1. Identify channels accessible to current user
         var directChannelIds = await _dbContext.ChatChannels
@@ -58,20 +58,21 @@ public sealed class SqlConversationListQueryService : IConversationListQueryServ
             return Array.Empty<ConversationSummaryReadModel>();
         }
 
+        // 2. Fetch channel metadata
         var channels = await _dbContext.ChatChannels
             .AsNoTracking()
             .Where(c => userChannelIds.Contains(c.Id))
             .ToDictionaryAsync(c => c.Id, ct);
 
-        var summaries = new List<ConversationSummaryReadModel>();
+        // 3. For each channel, find the latest message and unread count
+        var summaries = new List<ConversationSummaryReadModel>(userChannelIds.Count);
 
         foreach (var channelId in userChannelIds)
         {
-            // Query latest unexpired message for this channel using ix_chat_timeline
             var latest = await _dbContext.ChatMessages
                 .AsNoTracking()
                 .Where(m => m.ChannelId == channelId &&
-                            (m.ExpiresAtUnixMs == null || m.ExpiresAtUnixMs > currentTimestampMs))
+                            (m.ExpiresAtUnixMs == null || (long)m.ExpiresAtUnixMs > (long)currentTimestampMs))
                 .OrderByDescending(m => m.TimestampUnixMs)
                 .FirstOrDefaultAsync(ct);
 
@@ -106,13 +107,13 @@ public sealed class SqlConversationListQueryService : IConversationListQueryServ
             int unreadCount = await _dbContext.ChatMessages
                 .AsNoTracking()
                 .Where(m => m.ChannelId == channelId &&
-                            (m.ExpiresAtUnixMs == null || m.ExpiresAtUnixMs > currentTimestampMs) &&
+                            (m.ExpiresAtUnixMs == null || (long)m.ExpiresAtUnixMs > (long)currentTimestampMs) &&
                             m.ReadAtUnixMs == null &&
                             m.AuthorId != currentUserBytes)
                 .CountAsync(ct);
 
             PublicIdentityId? lastAuthorId = latest.AuthorId.Length == 16
-                ? PublicIdentityId.FromGuid(new Guid(latest.AuthorId, bigEndian: true))
+                ? PublicIdentityId.FromBytes(latest.AuthorId)
                 : null;
 
             summaries.Add(new ConversationSummaryReadModel(

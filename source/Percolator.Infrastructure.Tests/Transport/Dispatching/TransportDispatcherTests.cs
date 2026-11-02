@@ -105,7 +105,7 @@ public sealed class TransportDispatcherTests
         relayResult.IsSuccess.Should().BeTrue();
         invoker.LastRelayEndpoint.Should().Be(new Uri("https://relay.example.com:443"));
         invoker.LastRelayRequest.Should().NotBeNull();
-        invoker.LastRelayRequest!.RecipientRoutingToken.ToByteArray().Should().Equal(routingToken.Value.ToByteArray(bigEndian: true));
+        invoker.LastRelayRequest!.RecipientRoutingToken.ToByteArray().Should().Equal(routingToken.ToByteArray());
         invoker.LastRelayRequest.DeliveryToken.ToByteArray().Should().Equal(deliveryToken.Span.ToArray());
     }
 
@@ -131,7 +131,7 @@ public sealed class TransportDispatcherTests
 
         invoker.LastGroupEndpoint.Should().Be(new Uri("https://group-relay.example.com:443"));
         invoker.LastGroupRequest.Should().NotBeNull();
-        invoker.LastGroupRequest!.ConversationId.ToByteArray().Should().Equal(channelId.Value.ToByteArray(bigEndian: true));
+        invoker.LastGroupRequest!.ConversationId.ToByteArray().Should().Equal(channelId.ToByteArray());
         invoker.LastGroupRequest.Ciphertext.ToByteArray().Should().Equal(payload);
         invoker.LastGroupRequest.ZkPresentationProof.Length.Should().Be(72);
     }

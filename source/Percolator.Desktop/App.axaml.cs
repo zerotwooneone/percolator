@@ -29,76 +29,68 @@ public partial class App : Avalonia.Application
         // R3 Global unhandled exception handler to prevent silent reactive crashes
         ObservableSystem.RegisterUnhandledExceptionHandler(ex =>
         {
-            Console.Error.WriteLine($"[FATAL UNHANDLED REACTIVE EXCEPTION]: {ex}");
+            Console.Error.WriteLine($"[R3 Unhandled Exception] {ex}");
         });
+
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+        {
+            Console.Error.WriteLine($"[AppDomain Unhandled Exception] {e.ExceptionObject}");
+        };
+
+        TaskScheduler.UnobservedTaskException += (_, e) =>
+        {
+            Console.Error.WriteLine($"[TaskScheduler Unobserved Exception] {e.Exception}");
+            e.SetObserved();
+        };
     }
 
     public override void OnFrameworkInitializationCompleted()
     {
+        // Build and start Microsoft.Extensions.Hosting host
+        _host = Host.CreateDefaultBuilder()
+            .ConfigureServices((_, services) =>
+            {
+                // Core Infrastructure & Utilities
+                services.AddSingleton<IDateTimeProvider>(SystemDateTimeProvider.Instance);
+
+                // Privacy & Network Stealth Subsystems
+                services.AddSingleton<INetworkStealthGate, NetworkStealthGate>();
+
+                // Identity & Profile Repositories
+                services.AddSingleton<IDesktopIdentityKeyStore, DesktopLocalIdentityKeyStore>();
+                services.AddSingleton<ILocalIdentityKeyStore>(sp => sp.GetRequiredService<IDesktopIdentityKeyStore>());
+                services.AddSingleton<IIdentityProfileRepository, DesktopIdentityProfileRepository>();
+
+                // Window Lifecycle & Scoping
+                services.AddSingleton<IWindowManager, WindowManager>();
+
+                // ViewModels
+                services.AddTransient<IdentityGateViewModel>();
+                services.AddTransient<MainWindowViewModel>();
+            })
+            .Build();
+
+        _host.Start();
+
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            // Set AppShutdownMode.OnExplicitShutdown so the process doesn't terminate
-            // when the Gate window closes during the transition to the Main window.
-            desktop.ShutdownMode = Avalonia.Controls.ShutdownMode.OnExplicitShutdown;
-
-            // Instantiate IdentityGate Window and ViewModel
-            var gateViewModel = new IdentityGateViewModel(
-                onUnlocked: OnVaultUnlocked,
-                onCreated: OnVaultCreated);
-
-            var gateWindow = new IdentityGateWindow
+            // Initial Window is strictly the IdentityGateWindow to enforce total network stealth on launch
+            var identityGateVm = _host.Services.GetRequiredService<IdentityGateViewModel>();
+            desktop.MainWindow = new IdentityGateWindow
             {
-                DataContext = gateViewModel
+                DataContext = identityGateVm
             };
 
-            desktop.MainWindow = gateWindow;
-            gateWindow.Show();
+            desktop.Exit += async (_, _) =>
+            {
+                if (_host != null)
+                {
+                    await _host.StopAsync();
+                    _host.Dispose();
+                }
+            };
         }
 
         base.OnFrameworkInitializationCompleted();
-    }
-
-    private async Task OnVaultUnlocked(AuthenticatedSession session)
-    {
-        var desktop = (IClassicDesktopStyleApplicationLifetime)ApplicationLifetime!;
-        var previousWindow = desktop.MainWindow;
-
-        // Build Stage 2 Host using the unlocked session credentials
-        _host = BuildStage2Host(session);
-        await _host.StartAsync();
-
-        // Instantiate MainWindow with MainViewModel from Host DI
-        var mainWindow = new MainWindow
-        {
-            DataContext = _host.Services.GetRequiredService<MainViewModel>()
-        };
-
-        desktop.MainWindow = mainWindow;
-        mainWindow.Show();
-
-        // Close the unlock gate
-        previousWindow?.Close();
-
-        // Restore normal shutdown behavior when the main window closes
-        desktop.ShutdownMode = Avalonia.Controls.ShutdownMode.OnMainWindowClose;
-    }
-
-    private async Task OnVaultCreated(AuthenticatedSession session)
-    {
-        // Vault creation flows straight into the unlocked state
-        await OnVaultUnlocked(session);
-    }
-
-    private static IHost BuildStage2Host(AuthenticatedSession session)
-    {
-        return Host.CreateDefaultBuilder()
-            .ConfigureServices((context, services) =>
-            {
-                // Register session and Stage 2 authenticated services
-                services.AddSingleton(session);
-                services.AddSingleton<MainViewModel>();
-                // Stage 2 services will be registered here as infrastructure expands
-            })
-            .Build();
     }
 }

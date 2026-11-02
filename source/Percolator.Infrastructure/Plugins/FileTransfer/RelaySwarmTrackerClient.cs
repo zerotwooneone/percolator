@@ -34,7 +34,7 @@ public sealed class RelaySwarmTrackerClient : IDistributedTrackerPort
         ArgumentNullException.ThrowIfNull(candidates);
 
         byte[] rendezvousBytes = rendezvousId.Span.ToArray();
-        byte[] memberBytes = memberId.Value.ToByteArray();
+        byte[] memberBytes = memberId.ToByteArray();
 
         SwarmEndpointEntity? existing = await _dbContext.SwarmEndpoints
             .FirstOrDefaultAsync(e => e.RendezvousId == rendezvousBytes && e.PeerId == memberBytes, ct)
@@ -115,7 +115,7 @@ public sealed class RelaySwarmTrackerClient : IDistributedTrackerPort
         ArgumentNullException.ThrowIfNull(rendezvousId);
 
         byte[] rendezvousBytes = rendezvousId.Span.ToArray();
-        byte[] memberBytes = memberId.Value.ToByteArray();
+        byte[] memberBytes = memberId.ToByteArray();
 
         SwarmEndpointEntity? existing = await _dbContext.SwarmEndpoints
             .FirstOrDefaultAsync(e => e.RendezvousId == rendezvousBytes && e.PeerId == memberBytes, ct)

@@ -79,7 +79,7 @@ public sealed class AuthenticatedRelayEndpointTests
         // 1. Initial valid bundle publication at T=now
         var payload1 = new PreKeyBundlePayloadProto
         {
-            OwnerIdentityId = ByteString.CopyFrom(ownerId.Value.ToByteArray(bigEndian: true)),
+            OwnerIdentityId = ByteString.CopyFrom(ownerId.ToByteArray()),
             DeviceId = deviceId,
             IdentityKey = ByteString.CopyFrom(pubId.Span),
             SignedPrekeyId = 1,
@@ -103,7 +103,7 @@ public sealed class AuthenticatedRelayEndpointTests
         // 2. Replay attack with older timestamp (T=now - 1 hour)
         var stalePayload = new PreKeyBundlePayloadProto
         {
-            OwnerIdentityId = ByteString.CopyFrom(ownerId.Value.ToByteArray(bigEndian: true)),
+            OwnerIdentityId = ByteString.CopyFrom(ownerId.ToByteArray()),
             DeviceId = deviceId,
             IdentityKey = ByteString.CopyFrom(pubId.Span),
             SignedPrekeyId = 1,
@@ -127,7 +127,7 @@ public sealed class AuthenticatedRelayEndpointTests
         // 3. Newer timestamp (T=now + 1 hour) succeeds
         var newerPayload = new PreKeyBundlePayloadProto
         {
-            OwnerIdentityId = ByteString.CopyFrom(ownerId.Value.ToByteArray(bigEndian: true)),
+            OwnerIdentityId = ByteString.CopyFrom(ownerId.ToByteArray()),
             DeviceId = deviceId,
             IdentityKey = ByteString.CopyFrom(pubId.Span),
             SignedPrekeyId = 2,

@@ -68,7 +68,7 @@ public sealed class PreKeyBundleProviderAdapter : IPreKeyBundleProvider
 
                     var request = new FetchPreKeyBundleRequest
                     {
-                        RecipientRoutingToken = ByteString.CopyFrom(routingCapability.RoutingToken.Value.ToByteArray()),
+                        RecipientRoutingToken = ByteString.CopyFrom(routingCapability.RoutingToken.ToByteArray()),
                         DeliveryToken = ByteString.CopyFrom(routingCapability.DeliveryToken.Span)
                     };
 

@@ -76,9 +76,9 @@ public static class SwarmFrameCodec
     {
         byte[] payload = new byte[HandshakePayloadSizeBytes];
         frame.AuthToken.Span.CopyTo(payload.AsSpan(0, 32));
-        frame.SessionId.Value.TryWriteBytes(payload.AsSpan(32, 16), bigEndian: true, out _);
+        frame.SessionId.TryWriteBytes(payload.AsSpan(32, 16));
         BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(48, 4), frame.StreamIndex.Value);
-        frame.SenderPeerId.Value.TryWriteBytes(payload.AsSpan(52, 16), bigEndian: true, out _);
+        frame.SenderPeerId.TryWriteBytes(payload.AsSpan(52, 16));
         return payload;
     }
 
@@ -90,9 +90,9 @@ public static class SwarmFrameCodec
         }
 
         var authToken = StreamAuthToken.FromSpan(payload.Slice(0, 32));
-        var sessionId = TransferSessionId.FromGuid(new Guid(payload.Slice(32, 16), bigEndian: true));
+        var sessionId = TransferSessionId.FromBytes(payload.Slice(32, 16));
         var streamIndex = StreamIndex.FromInt(BinaryPrimitives.ReadInt32BigEndian(payload.Slice(48, 4)));
-        var senderPeerId = PublicIdentityId.FromGuid(new Guid(payload.Slice(52, 16), bigEndian: true));
+        var senderPeerId = PublicIdentityId.FromBytes(payload.Slice(52, 16));
 
         return new HandshakeFrame(authToken, sessionId, streamIndex, senderPeerId);
     }

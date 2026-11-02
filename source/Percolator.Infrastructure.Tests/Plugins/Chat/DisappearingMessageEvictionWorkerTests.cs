@@ -112,7 +112,14 @@ public sealed class DisappearingMessageEvictionWorkerTests
         await repo.AddAsync(expiredMsg);
         await repo.AddAsync(normalMsg);
 
-        // Add corresponding ChatChannelPayloadEntity
+        // Add corresponding ChatChannelEntity and ChatChannelPayloadEntity
+        testDb.DbContext.ChatChannels.Add(new ChatChannelEntity
+        {
+            Id = channelId.Value,
+            Type = 1,
+            CreatedAtUtc = startTime,
+            LastActivityUtc = startTime
+        });
         testDb.DbContext.ChatChannelPayloads.Add(new ChatChannelPayloadEntity
         {
             Id = expiredMsgId.Value,

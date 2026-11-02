@@ -33,7 +33,7 @@ public sealed class ProtobufSessionWirePacker : ISessionWirePacker
     {
         var proto = new GroupSessionPackageProto
         {
-            ConversationId = ByteString.CopyFrom(channelId.Value.ToByteArray(bigEndian: true)),
+            ConversationId = ByteString.CopyFrom(channelId.ToByteArray()),
             Iteration = iteration,
             Ciphertext = ByteString.CopyFrom(ciphertext.Span),
             AuthorSignature = ByteString.CopyFrom(signature.Span)

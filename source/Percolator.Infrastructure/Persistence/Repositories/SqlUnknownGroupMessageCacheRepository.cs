@@ -31,7 +31,7 @@ public sealed class SqlUnknownGroupMessageCacheRepository : IUnknownGroupMessage
         {
             int toEvictCount = currentCount - MaxCacheCapacity + 1;
             var oldestToEvict = await _dbContext.ChatUnknownGroupMessages
-                .OrderBy(m => m.ReceivedAtUnixMs)
+                .OrderBy(m => (long)m.ReceivedAtUnixMs)
                 .Take(toEvictCount)
                 .ToListAsync(ct);
 
@@ -45,7 +45,7 @@ public sealed class SqlUnknownGroupMessageCacheRepository : IUnknownGroupMessage
         {
             Id = record.Id.Value,
             ChannelId = record.ChannelId.Value,
-            AuthorId = record.AuthorId.Value.ToByteArray(bigEndian: true),
+            AuthorId = record.AuthorId.ToByteArray(),
             EncryptedPayload = record.EncryptedPayload.ToArray(),
             ReceivedAtUnixMs = record.ReceivedAtUnixMs,
             ExpiresAtUnixMs = record.ExpiresAtUnixMs
@@ -61,7 +61,7 @@ public sealed class SqlUnknownGroupMessageCacheRepository : IUnknownGroupMessage
         var entities = await _dbContext.ChatUnknownGroupMessages
             .AsNoTracking()
             .Where(m => m.ChannelId == channelGuid)
-            .OrderBy(m => m.ReceivedAtUnixMs)
+            .OrderBy(m => (long)m.ReceivedAtUnixMs)
             .ToListAsync(ct);
 
         return entities.Select(ToDomainModel).ToList();
@@ -83,7 +83,7 @@ public sealed class SqlUnknownGroupMessageCacheRepository : IUnknownGroupMessage
     public async Task<int> PurgeExpiredAsync(ulong currentTimestampUnixMs, CancellationToken ct = default)
     {
         var expired = await _dbContext.ChatUnknownGroupMessages
-            .Where(m => m.ExpiresAtUnixMs <= currentTimestampUnixMs)
+            .Where(m => (long)m.ExpiresAtUnixMs <= (long)currentTimestampUnixMs)
             .ToListAsync(ct);
 
         if (expired.Count == 0)
@@ -101,7 +101,7 @@ public sealed class SqlUnknownGroupMessageCacheRepository : IUnknownGroupMessage
         return new UnknownGroupMessageRecord(
             PayloadId.FromGuid(entity.Id),
             ChannelId.FromGuid(entity.ChannelId),
-            PublicIdentityId.FromGuid(new Guid(entity.AuthorId, bigEndian: true)),
+            PublicIdentityId.FromBytes(entity.AuthorId),
             entity.EncryptedPayload,
             entity.ReceivedAtUnixMs,
             entity.ExpiresAtUnixMs);

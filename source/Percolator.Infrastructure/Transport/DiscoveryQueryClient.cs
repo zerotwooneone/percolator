@@ -42,7 +42,7 @@ public sealed class DiscoveryQueryClient : INearbyDiscoveryQueryClientPort
 
         var request = new NearbyDiscoveryQueryProto
         {
-            RequesterId = ByteString.CopyFrom(requesterId.Value.ToByteArray()),
+            RequesterId = ByteString.CopyFrom(requesterId.ToByteArray()),
             RequestedLimit = clampedLimit
         };
 

@@ -87,7 +87,7 @@ public sealed class TransportDispatcher : ITransportDispatcher
                     var envelopeProto = new SealedEnvelopeProto
                     {
                         RecipientRoutingToken = route.TargetToken.HasValue
-                            ? ByteString.CopyFrom(route.TargetToken.Value.Value.ToByteArray(bigEndian: true))
+                            ? ByteString.CopyFrom(route.TargetToken.Value.ToByteArray())
                             : ByteString.Empty,
                         DeliveryToken = route.TargetDeliveryToken != null
                             ? ByteString.CopyFrom(route.TargetDeliveryToken.Span)
@@ -120,7 +120,7 @@ public sealed class TransportDispatcher : ITransportDispatcher
                     var envelopeProto = new SealedEnvelopeProto
                     {
                         RecipientRoutingToken = route.TargetToken.HasValue
-                            ? ByteString.CopyFrom(route.TargetToken.Value.Value.ToByteArray(bigEndian: true))
+                            ? ByteString.CopyFrom(route.TargetToken.Value.ToByteArray())
                             : ByteString.Empty,
                         DeliveryToken = route.TargetDeliveryToken != null
                             ? ByteString.CopyFrom(route.TargetDeliveryToken.Span)
@@ -185,7 +185,7 @@ public sealed class TransportDispatcher : ITransportDispatcher
 
                     var groupRequest = new DispatchGroupMessageRequest
                     {
-                        ConversationId = ByteString.CopyFrom(job.ChannelId.Value.ToByteArray(bigEndian: true)),
+                        ConversationId = ByteString.CopyFrom(job.ChannelId.ToByteArray()),
                         Epoch = epoch,
                         ZkPresentationProof = ByteString.CopyFrom(zkProof),
                         SenderKeyIteration = 0,
