@@ -1808,7 +1808,7 @@
       - Sweeps expired profile slots from `relay_profile_slots` where `expires_at_utc <= DateTimeOffset.UtcNow`.
       - Scheduled interval: 1 hour (utilizes indexed lookup on `expires_at_utc`).
 - **Scope & Deliverables**:
-  - [ ] Implement Scheduled `IHostedService` Pruning Workers:
+  - [x] Implement Scheduled `IHostedService` Pruning Workers:
     - `OutboxRetentionPruner` (`Microsoft.Extensions.Hosting.BackgroundService`)
     - `RelayPreKeyDirectoryPruner` (`Microsoft.Extensions.Hosting.BackgroundService`)
     - `RelayProfileSlotPruner` (`Microsoft.Extensions.Hosting.BackgroundService`)

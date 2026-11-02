@@ -202,6 +202,8 @@ public class PercolatorDbContext : DbContext
                 .HasDatabaseName("ix_ops_outbox_due");
             entity.HasIndex(e => new { e.OwnerIdentityId, e.Status })
                 .HasDatabaseName("ix_ops_outbox_owner");
+            entity.HasIndex(e => new { e.Status, e.CreatedAtUtc })
+                .HasDatabaseName("ix_ops_outbox_retention");
         });
 
         // 12. Ops Inbound Queue
@@ -293,6 +295,8 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.SignedPreKey).HasColumnType("BLOB");
             entity.Property(e => e.SignedPreKeySignature).HasColumnType("BLOB");
             entity.Property(e => e.OneTimePreKeysJson).IsRequired();
+            entity.HasIndex(e => e.UpdatedAtUtc)
+                .HasDatabaseName("ix_relay_prekeys_updated");
         });
 
         // 20. Relay Profile Slots
