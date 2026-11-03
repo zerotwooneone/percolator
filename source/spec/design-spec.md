@@ -25,6 +25,7 @@ In addition to the universal rules in [`qms-spec`](qms-spec.md):
 
 1. **Internal Architecture & Trade-Offs Only:**
    - *Include:* The deployable's architectural boundary (In-Scope vs. Out-of-Scope segregation), enduring internal encapsulation/concurrency/state-ownership invariants (`INV-<SLUG>`), and non-obvious engineering mechanisms (`DEC-<SLUG>`) together with *Rejected Alternatives* explaining why simpler or naïve designs were ruled out.
+   - *The Significance Filter for `DEC-<SLUG>`:* Only document choices that (a) mitigate a concrete software failure mode (e.g., deadlocks, thread pool exhaustion, captive lifetime leaks, race conditions), (b) embody a non-trivial trade-off (sacrificing one architectural quality for another), or (c) prevent regression against intuitive but flawed patterns (Chesterton's fence). Do not document routine implementation choices, language idioms, or standard data structures.
    - *Exclude Upstream Problem/Requirement Narratives:* Do not re-state user stories or black-box system requirements; explain *how* this deployable's internal design satisfies them.
 2. **Zero Intra-Document Repetition Across Sections:**
    - Each of the 3 allowed sections has a distinct job. If a concept is listed as an In-Scope responsibility in Section 1, do not re-list it as a folder/module in Section 2 and re-explain it in Section 3.
@@ -49,4 +50,8 @@ States why this deployable exists as a distinct module in the architecture, what
 Defines the timeless structural, visibility, concurrency, and state-ownership rules (`INV-<SLUG>`) that all code inside this deployable must obey, linking inline to an inward `Design.md` for inherited kernel rules rather than repeating them.
 
 ### `## 3. Key Technical Design Choices`
-Records the non-obvious architectural mechanisms and trade-offs (`DEC-<SLUG>`) chosen to solve core problems in this deployable—along with brief *Rejected Alternatives* where it prevents regression—without repeating Section 1/2 or hardcoding tunable code constants.
+Records the non-obvious architectural mechanisms and trade-offs (`DEC-<SLUG>`) chosen to solve core problems in this deployable without repeating Section 1/2 or hardcoding tunable code constants.
+- **Entry Structure:** Each `DEC-<SLUG>` entry should be compact (2–4 sentences) covering:
+  1. **Mechanism / Choice:** The technical design selected.
+  2. **Mitigation / Trade-Off:** The software failure mode mitigated or quality attribute balanced.
+  3. **Rejected Alternative:** The simpler or alternative approach ruled out and why.
