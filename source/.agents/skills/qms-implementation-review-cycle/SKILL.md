@@ -51,7 +51,7 @@ Choose the appropriate workflow based on your current task:
 ```mermaid
 flowchart TD
     S1["Step 1: QMS Impact Analysis (High Burden of Proof)<br/>• Presume existing QMS is adequate.<br/>• AI must PROVE a document change is required.<br/>• Default: Zero QMS modifications."]
-    S2["Step 2: Upfront QMS Update (Only If Proven)<br/>• Update RiskRegister, SystemRequirements, or Requirements.md<br/>• Maintain 3-tier regulatory rules before writing code."]
+    S2["Step 2: Upfront QMS Update (Only If Proven)<br/>• Update RiskRegister, SystemRequirements, Requirements.md, or Design.md<br/>• Maintain 3-tier regulatory rules before writing code."]
     S3["Step 3: Jira-Style Implementation Slice & User Review Gate<br/>• Mode A (Chat Ticket) or Mode B (Plan File).<br/>• Mandate Happy-Path Round-Trip Test in test plan.<br/>• MANDATORY GATE: User reviews and approves before coding."]
     S4["Step 4: Implementation (Clean Code & TDD)<br/>• TDD Red-Green-Refactor.<br/>• Zero in-code QMS comments (100% clean C#).<br/>• Zero fake stubs (execute real boundary calls).<br/>• Minimum Necessary Realization (zero speculative wrappers)."]
     S5["Step 5: Lightweight Mechanical Verification<br/>• Run dotnet test (all pass, including round-trip tests).<br/>• Run validate-qms-compliance.ps1.<br/>• Mark ticket deliverables complete [x]."]
@@ -65,15 +65,16 @@ flowchart TD
 
 ### Step 1: QMS Impact Analysis (High Burden of Proof)
 1. **The Presumption of Adequacy**: Assume existing QMS documents are complete unless proven otherwise.
-2. **The 3-Question Proving Rubric**:
-   - *Hazard Impact (`HAZ-*`)*: Does this design introduce a new safety, cryptographic, or privacy hazard not covered by existing hazards? (If ordinary bug $\rightarrow$ Exclude).
-   - *System Requirement Impact (`SYS-*`)*: Does this introduce a new black-box capability or safety boundary? (If internal plumbing $\rightarrow$ Exclude).
-   - *Software Item Allocation (`DEP-*`)*: Does this allocate a new public port interface between software items (IEC 62304 Clause 5.3)? (If internal helper $\rightarrow$ Exclude).
-3. **Decision Gate**: If no QMS change is proven, state: *"QMS Impact Analysis: No QMS updates required. Work is covered by existing requirements [`DEP-XXX`, `SYS-XXX`]. Proceeding directly to Implementation Slice."* $\longrightarrow$ Proceed to Step 3.
+2. **The 4-Question Proving Rubric**:
+   - *Hazard Impact (`HAZ-*`)*: Does this design introduce a new safety, cryptographic, or privacy hazard not covered by existing hazards? (If ordinary bug or software failure mode $\rightarrow$ Exclude).
+   - *System Requirement Impact (`SYS-*`)*: Does this introduce a new black-box capability or safety boundary? (If internal plumbing or software item design $\rightarrow$ Exclude).
+   - *Software Item Allocation (`DEP-*`)*: Does this allocate a new public port interface between software items (IEC 62304 Clause 5.3)? (If internal component helper $\rightarrow$ Exclude).
+   - *Detailed Design Invariants (`INV-*`, `DEC-*`)*: Does this implementation establish enduring architectural constraints, concurrency invariants, or non-obvious engineering trade-offs that mitigate software failure modes (IEC 62304 Clause 5.4 / FDA 21 CFR 820.30(d))? (If routine boilerplate $\rightarrow$ Exclude; if architectural rule or trade-off $\rightarrow$ Include in `<Project>/Design.md`).
+3. **Decision Gate**: If no QMS change is proven, state: *"QMS Impact Analysis: No QMS updates required. Work is covered by existing requirements [`DEP-XXX`, `SYS-XXX`] and design invariants. Proceeding directly to Implementation Slice."* $\longrightarrow$ Proceed to Step 3.
 
 ### Step 2: Upfront QMS Update (Only If Proven)
-- Update `RiskRegister.md`, `SystemRequirements.md`, or `<Project>/Requirements.md` *before* coding.
-- Maintain the 3-Tier Symbol Rules (zero code symbols in `SYS-*`, inward port interfaces only in `DEP-*`, zero concrete classes).
+- Update `RiskRegister.md`, `SystemRequirements.md`, `<Project>/Requirements.md`, or `<Project>/Design.md` *before* coding.
+- Maintain the 3-Tier Symbol Rules (zero code symbols in `SYS-*`, inward port interfaces only in `DEP-*`, concrete design details in `Design.md`).
 - Attach verification tags (`[Verify: ...]`) and control tags (`[Control: ...]`).
 
 ### Step 3: Jira-Style Implementation Slice & User Review Gate
@@ -115,6 +116,7 @@ flowchart TD
 - Do not trust comments, PR descriptions, or green badges.
 - Read the actual concrete class realizations and test methods.
 - Check: Did the code actually implement the port contract, or did it merely compile?
+- Compare the code against `Requirements.md` (`DEP-*`) and `Design.md` (`INV-*`, `DEC-*`).
 
 ### Step B2: Anti-Shortcut & Integrity Scrutiny
 Examine the implementation through the **4 AI Anti-Patterns Checklist**:
@@ -125,6 +127,7 @@ Examine the implementation through the **4 AI Anti-Patterns Checklist**:
 
 ### Step B3: QMS Gap & Risk-Benefit Analysis
 - Check for leaked concrete classes in `Requirements.md` or leaked code in `SystemRequirements.md`.
+- Check for undocumented architectural failure modes or missing `INV-*` / `DEC-*` entries in `Design.md`.
 - Evaluate over-specified requirements: If a requirement is technically unachievable in pure portable C# (e.g., MP4 metadata scrubbing without FFmpeg), formulate an **ISO 14971 Clause 7.4 Risk-Benefit Analysis** proposing inherent controls on practical formats (JPEG/PNG) and documented accepted residual risk on complex formats.
 
 ### Step B4: Remediation Plan & Human Gate
