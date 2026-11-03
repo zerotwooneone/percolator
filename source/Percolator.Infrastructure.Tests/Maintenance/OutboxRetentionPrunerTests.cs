@@ -8,6 +8,7 @@ using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using NUnit.Framework;
 using Percolator.Application2.Delivery;
+using Percolator.Application2.Delivery.Events;
 using Percolator.Infrastructure.Maintenance;
 using Percolator.Infrastructure.Persistence.Entities;
 using Percolator.Infrastructure.Tests.Persistence.TestSupport;
@@ -16,6 +17,16 @@ using Percolator.Infrastructure.Tests.Persistence.TestSupport;
 public sealed class OutboxRetentionPrunerTests
 {
     [Test]
+    public void Constructor_WithNullPublisher_ThrowsArgumentNullException()
+    {
+        using var testDb = new SqliteTestDb();
+        var factory = new TestDbContextFactory(testDb);
+
+        var act = () => new OutboxRetentionPruner(factory, null!);
+        act.Should().Throw<ArgumentNullException>();
+    }
+
+    [Test]
     public async Task DeliveredJobs_OlderThan7Days_Purged()
     {
         using var testDb = new SqliteTestDb();
@@ -23,7 +34,8 @@ public sealed class OutboxRetentionPrunerTests
 
         var t0 = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
         var timeProvider = new TestTimeProvider(t0);
-        var pruner = new OutboxRetentionPruner(factory, timeProvider);
+        var publisher = new FakeEventPublisher();
+        var pruner = new OutboxRetentionPruner(factory, publisher, timeProvider);
 
         var oldDeliveredId = Guid.NewGuid();
         var recentDeliveredId = Guid.NewGuid();
@@ -56,6 +68,9 @@ public sealed class OutboxRetentionPrunerTests
         int purgedCount = await pruner.SweepAsync();
 
         purgedCount.Should().Be(1);
+        publisher.PublishedEvents.Should().ContainSingle()
+            .Which.Should().BeOfType<OutboxJobsPrunedEvent>()
+            .Which.PurgedCount.Should().Be(1);
 
         var remainingJobs = await testDb.DbContext.OpsOutboxJobs.ToListAsync();
         remainingJobs.Should().ContainSingle(j => j.Id == recentDeliveredId);
@@ -70,7 +85,8 @@ public sealed class OutboxRetentionPrunerTests
 
         var t0 = new DateTimeOffset(2026, 1, 15, 12, 0, 0, TimeSpan.Zero);
         var timeProvider = new TestTimeProvider(t0);
-        var pruner = new OutboxRetentionPruner(factory, timeProvider);
+        var publisher = new FakeEventPublisher();
+        var pruner = new OutboxRetentionPruner(factory, publisher, timeProvider);
 
         var cutoffTime = t0 - TimeSpan.FromDays(7);
         var atCutoffId = Guid.NewGuid();
@@ -101,6 +117,9 @@ public sealed class OutboxRetentionPrunerTests
         int purgedCount = await pruner.SweepAsync();
 
         purgedCount.Should().Be(1);
+        publisher.PublishedEvents.Should().ContainSingle()
+            .Which.Should().BeOfType<OutboxJobsPrunedEvent>()
+            .Which.PurgedCount.Should().Be(1);
 
         var remaining = await testDb.DbContext.OpsOutboxJobs.ToListAsync();
         remaining.Should().ContainSingle(j => j.Id == oneSecAfterCutoffId);
@@ -115,7 +134,8 @@ public sealed class OutboxRetentionPrunerTests
 
         var t0 = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
         var timeProvider = new TestTimeProvider(t0);
-        var pruner = new OutboxRetentionPruner(factory, timeProvider);
+        var publisher = new FakeEventPublisher();
+        var pruner = new OutboxRetentionPruner(factory, publisher, timeProvider);
 
         var pendingId = Guid.NewGuid();
         var inFlightId = Guid.NewGuid();
@@ -178,6 +198,9 @@ public sealed class OutboxRetentionPrunerTests
         int purgedCount = await pruner.SweepAsync();
 
         purgedCount.Should().Be(1);
+        publisher.PublishedEvents.Should().ContainSingle()
+            .Which.Should().BeOfType<OutboxJobsPrunedEvent>()
+            .Which.PurgedCount.Should().Be(1);
 
         var remainingJobs = await testDb.DbContext.OpsOutboxJobs.ToListAsync();
         remainingJobs.Should().HaveCount(4);
@@ -186,12 +209,30 @@ public sealed class OutboxRetentionPrunerTests
     }
 
     [Test]
+    public async Task SweepAsync_WhenZeroPurged_DoesNotPublishEvent()
+    {
+        using var testDb = new SqliteTestDb();
+        var factory = new TestDbContextFactory(testDb);
+
+        var t0 = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var timeProvider = new TestTimeProvider(t0);
+        var publisher = new FakeEventPublisher();
+        var pruner = new OutboxRetentionPruner(factory, publisher, timeProvider);
+
+        int purgedCount = await pruner.SweepAsync();
+
+        purgedCount.Should().Be(0);
+        publisher.PublishedEvents.Should().BeEmpty();
+    }
+
+    [Test]
     public async Task SweepAsync_WhenCancelled_ReturnsImmediately()
     {
         using var testDb = new SqliteTestDb();
         var factory = new TestDbContextFactory(testDb);
 
-        var pruner = new OutboxRetentionPruner(factory);
+        var publisher = new FakeEventPublisher();
+        var pruner = new OutboxRetentionPruner(factory, publisher);
 
         using var cts = new CancellationTokenSource();
         cts.Cancel();
@@ -199,5 +240,6 @@ public sealed class OutboxRetentionPrunerTests
         int purgedCount = await pruner.SweepAsync(cts.Token);
 
         purgedCount.Should().Be(0);
+        publisher.PublishedEvents.Should().BeEmpty();
     }
 }

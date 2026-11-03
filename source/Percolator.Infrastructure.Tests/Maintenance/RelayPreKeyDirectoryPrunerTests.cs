@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using NUnit.Framework;
+using Percolator.Application2.Delivery.Events;
 using Percolator.Infrastructure.Maintenance;
 using Percolator.Infrastructure.Persistence.Entities;
 using Percolator.Infrastructure.Tests.Persistence.TestSupport;
@@ -15,6 +16,16 @@ using Percolator.Infrastructure.Tests.Persistence.TestSupport;
 public sealed class RelayPreKeyDirectoryPrunerTests
 {
     [Test]
+    public void Constructor_WithNullPublisher_ThrowsArgumentNullException()
+    {
+        using var testDb = new SqliteTestDb();
+        var factory = new TestDbContextFactory(testDb);
+
+        var act = () => new RelayPreKeyDirectoryPruner(factory, null!);
+        act.Should().Throw<ArgumentNullException>();
+    }
+
+    [Test]
     public async Task StalePreKeys_OlderThan30Days_Purged()
     {
         using var testDb = new SqliteTestDb();
@@ -22,7 +33,8 @@ public sealed class RelayPreKeyDirectoryPrunerTests
 
         var t0 = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
         var timeProvider = new TestTimeProvider(t0);
-        var pruner = new RelayPreKeyDirectoryPruner(factory, timeProvider);
+        var publisher = new FakeEventPublisher();
+        var pruner = new RelayPreKeyDirectoryPruner(factory, publisher, timeProvider);
 
         var staleOwnerId = Guid.NewGuid();
         var activeOwnerId = Guid.NewGuid();
@@ -57,6 +69,9 @@ public sealed class RelayPreKeyDirectoryPrunerTests
         int purgedCount = await pruner.SweepAsync();
 
         purgedCount.Should().Be(1);
+        publisher.PublishedEvents.Should().ContainSingle()
+            .Which.Should().BeOfType<RelayPreKeysPrunedEvent>()
+            .Which.PurgedCount.Should().Be(1);
 
         var remaining = await testDb.DbContext.RelayPreKeys.ToListAsync();
         remaining.Should().ContainSingle(k => k.OwnerIdentityId == activeOwnerId);
@@ -71,7 +86,8 @@ public sealed class RelayPreKeyDirectoryPrunerTests
 
         var t0 = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
         var timeProvider = new TestTimeProvider(t0);
-        var pruner = new RelayPreKeyDirectoryPruner(factory, timeProvider);
+        var publisher = new FakeEventPublisher();
+        var pruner = new RelayPreKeyDirectoryPruner(factory, publisher, timeProvider);
 
         const int staleCount = 1100;
         const int activeCount = 5;
@@ -116,9 +132,29 @@ public sealed class RelayPreKeyDirectoryPrunerTests
         int totalPurged = await pruner.SweepAsync();
 
         totalPurged.Should().Be(staleCount);
+        publisher.PublishedEvents.Should().ContainSingle()
+            .Which.Should().BeOfType<RelayPreKeysPrunedEvent>()
+            .Which.PurgedCount.Should().Be(staleCount);
 
         var remaining = await testDb.DbContext.RelayPreKeys.ToListAsync();
         remaining.Should().HaveCount(activeCount);
         remaining.All(k => k.UpdatedAtUtc > t0.AddDays(1)).Should().BeTrue();
+    }
+
+    [Test]
+    public async Task SweepAsync_WhenZeroPurged_DoesNotPublishEvent()
+    {
+        using var testDb = new SqliteTestDb();
+        var factory = new TestDbContextFactory(testDb);
+
+        var t0 = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var timeProvider = new TestTimeProvider(t0);
+        var publisher = new FakeEventPublisher();
+        var pruner = new RelayPreKeyDirectoryPruner(factory, publisher, timeProvider);
+
+        int purgedCount = await pruner.SweepAsync();
+
+        purgedCount.Should().Be(0);
+        publisher.PublishedEvents.Should().BeEmpty();
     }
 }

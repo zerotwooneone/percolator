@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using NUnit.Framework;
+using Percolator.Application2.Delivery.Events;
 using Percolator.Infrastructure.Maintenance;
 using Percolator.Infrastructure.Persistence.Entities;
 using Percolator.Infrastructure.Tests.Persistence.TestSupport;
@@ -15,6 +16,16 @@ using Percolator.Infrastructure.Tests.Persistence.TestSupport;
 public sealed class RelayProfileSlotPrunerTests
 {
     [Test]
+    public void Constructor_WithNullPublisher_ThrowsArgumentNullException()
+    {
+        using var testDb = new SqliteTestDb();
+        var factory = new TestDbContextFactory(testDb);
+
+        var act = () => new RelayProfileSlotPruner(factory, null!);
+        act.Should().Throw<ArgumentNullException>();
+    }
+
+    [Test]
     public async Task ExpiredSlots_PurgedInBatches()
     {
         using var testDb = new SqliteTestDb();
@@ -22,7 +33,8 @@ public sealed class RelayProfileSlotPrunerTests
 
         var t0 = new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
         var timeProvider = new TestTimeProvider(t0);
-        var pruner = new RelayProfileSlotPruner(factory, timeProvider);
+        var publisher = new FakeEventPublisher();
+        var pruner = new RelayProfileSlotPruner(factory, publisher, timeProvider);
 
         const int expiredCount = 1200;
         const int activeCount = 5;
@@ -68,9 +80,29 @@ public sealed class RelayProfileSlotPrunerTests
         int totalPurged = await pruner.SweepAsync();
 
         totalPurged.Should().Be(expiredCount);
+        publisher.PublishedEvents.Should().ContainSingle()
+            .Which.Should().BeOfType<RelayProfileSlotsPrunedEvent>()
+            .Which.PurgedCount.Should().Be(expiredCount);
 
         var remaining = await testDb.DbContext.RelayProfileSlots.ToListAsync();
         remaining.Should().HaveCount(activeCount);
         remaining.All(s => s.ExpiresAtUtc > t0).Should().BeTrue();
+    }
+
+    [Test]
+    public async Task SweepAsync_WhenZeroPurged_DoesNotPublishEvent()
+    {
+        using var testDb = new SqliteTestDb();
+        var factory = new TestDbContextFactory(testDb);
+
+        var t0 = new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
+        var timeProvider = new TestTimeProvider(t0);
+        var publisher = new FakeEventPublisher();
+        var pruner = new RelayProfileSlotPruner(factory, publisher, timeProvider);
+
+        int purgedCount = await pruner.SweepAsync();
+
+        purgedCount.Should().Be(0);
+        publisher.PublishedEvents.Should().BeEmpty();
     }
 }

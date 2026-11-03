@@ -6,12 +6,15 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
+using Percolator.Application2.Delivery.Events;
+using Percolator.Application2.Ports;
 using Percolator.Infrastructure.Persistence;
 using Percolator.Infrastructure.Persistence.Entities;
 
 public sealed class RelayPreKeyDirectoryPruner : BackgroundService
 {
     private readonly IDbContextFactory<PercolatorDbContext> _contextFactory;
+    private readonly IEventPublisher _eventPublisher;
     private readonly TimeProvider _timeProvider;
     private readonly TimeSpan _pruneInterval;
     private readonly TimeSpan _retentionWindow;
@@ -20,11 +23,13 @@ public sealed class RelayPreKeyDirectoryPruner : BackgroundService
 
     public RelayPreKeyDirectoryPruner(
         IDbContextFactory<PercolatorDbContext> contextFactory,
+        IEventPublisher eventPublisher,
         TimeProvider? timeProvider = null,
         TimeSpan? pruneInterval = null,
         TimeSpan? retentionWindow = null)
     {
         _contextFactory = contextFactory ?? throw new ArgumentNullException(nameof(contextFactory));
+        _eventPublisher = eventPublisher ?? throw new ArgumentNullException(nameof(eventPublisher));
         _timeProvider = timeProvider ?? TimeProvider.System;
         _pruneInterval = pruneInterval ?? TimeSpan.FromHours(24);
         _retentionWindow = retentionWindow ?? TimeSpan.FromDays(30);
@@ -64,6 +69,13 @@ public sealed class RelayPreKeyDirectoryPruner : BackgroundService
             {
                 break;
             }
+        }
+
+        if (totalPurged > 0)
+        {
+            await _eventPublisher.PublishAsync(
+                new RelayPreKeysPrunedEvent(Guid.NewGuid(), _timeProvider.GetUtcNow(), totalPurged),
+                ct).ConfigureAwait(false);
         }
 
         return totalPurged;

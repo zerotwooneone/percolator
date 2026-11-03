@@ -7,11 +7,14 @@ using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Percolator.Application2.Delivery;
+using Percolator.Application2.Delivery.Events;
+using Percolator.Application2.Ports;
 using Percolator.Infrastructure.Persistence;
 
 public sealed class OutboxRetentionPruner : BackgroundService
 {
     private readonly IDbContextFactory<PercolatorDbContext> _contextFactory;
+    private readonly IEventPublisher _eventPublisher;
     private readonly TimeProvider _timeProvider;
     private readonly TimeSpan _pruneInterval;
     private readonly TimeSpan _retentionWindow;
@@ -20,11 +23,13 @@ public sealed class OutboxRetentionPruner : BackgroundService
 
     public OutboxRetentionPruner(
         IDbContextFactory<PercolatorDbContext> contextFactory,
+        IEventPublisher eventPublisher,
         TimeProvider? timeProvider = null,
         TimeSpan? pruneInterval = null,
         TimeSpan? retentionWindow = null)
     {
         _contextFactory = contextFactory ?? throw new ArgumentNullException(nameof(contextFactory));
+        _eventPublisher = eventPublisher ?? throw new ArgumentNullException(nameof(eventPublisher));
         _timeProvider = timeProvider ?? TimeProvider.System;
         _pruneInterval = pruneInterval ?? TimeSpan.FromHours(24);
         _retentionWindow = retentionWindow ?? TimeSpan.FromDays(7);
@@ -62,6 +67,13 @@ public sealed class OutboxRetentionPruner : BackgroundService
             {
                 break;
             }
+        }
+
+        if (totalPurged > 0)
+        {
+            await _eventPublisher.PublishAsync(
+                new OutboxJobsPrunedEvent(Guid.NewGuid(), _timeProvider.GetUtcNow(), totalPurged),
+                ct).ConfigureAwait(false);
         }
 
         return totalPurged;

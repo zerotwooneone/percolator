@@ -59,7 +59,8 @@ public sealed class PrunerLockSafetyTests
         {
             var t0 = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
             var timeProvider = new TestTimeProvider(t0);
-            var pruner = new OutboxRetentionPruner(factory, timeProvider);
+            var publisher = new FakeEventPublisher();
+            var pruner = new OutboxRetentionPruner(factory, publisher, timeProvider);
 
             const int deliveredCount = 1200;
             const int pendingCount = 50;

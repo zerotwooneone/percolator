@@ -12,6 +12,8 @@ using Percolator.Domain.Channels.Ports;
 using Percolator.Domain.Delivery.Ports;
 using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Security.Ports;
+using Percolator.Infrastructure.Events;
+using Percolator.Infrastructure.Maintenance;
 using Percolator.Infrastructure.Persistence.Repositories;
 using Percolator.Infrastructure.Vault;
 using Percolator.PluginSdk;
@@ -34,6 +36,12 @@ public sealed class BaselineStage2HostFactory : IStage2HostFactory
         {
             services.AddSingleton(masterKeyHandle);
             services.AddSingleton<DbConnectionInterceptor, SqlCipherPragmaInterceptor>();
+
+            // Event Bus
+            services.AddSingleton<InMemoryEventBus>();
+            services.AddSingleton<IEventBus>(sp => sp.GetRequiredService<InMemoryEventBus>());
+            services.AddSingleton<IEventPublisher>(sp => sp.GetRequiredService<InMemoryEventBus>());
+            services.AddSingleton<IEventSubscriber>(sp => sp.GetRequiredService<InMemoryEventBus>());
 
             services.AddDbContextFactory<PercolatorDbContext>((sp, dbOptions) =>
             {
@@ -72,6 +80,11 @@ public sealed class BaselineStage2HostFactory : IStage2HostFactory
             services.AddScoped<IRelayLedgerRepository, SqliteRelayLedgerRepository>();
             services.AddScoped<IPeerProfileRepository, SqlitePeerProfileRepository>();
             services.AddScoped<IPeerMailboxRoutingRepository, SqlitePeerMailboxRoutingRepository>();
+
+            // Background Maintenance Pruners
+            services.AddHostedService<OutboxRetentionPruner>();
+            services.AddHostedService<RelayPreKeyDirectoryPruner>();
+            services.AddHostedService<RelayProfileSlotPruner>();
         });
 
         return builder.Build();
