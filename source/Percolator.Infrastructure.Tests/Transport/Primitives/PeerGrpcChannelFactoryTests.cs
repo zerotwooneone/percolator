@@ -1,6 +1,8 @@
 namespace Percolator.Infrastructure.Tests.Transport.Primitives;
 
 using System;
+using System.Net.Http;
+using System.Security.Authentication;
 using FluentAssertions;
 using Grpc.Net.Client;
 using NUnit.Framework;
@@ -71,5 +73,47 @@ public sealed class PeerGrpcChannelFactoryTests
 
         factory.Dispose();
         factory.ActiveChannelCount.Should().Be(0);
+    }
+
+    [Test]
+    public void InvalidateChannel_DisposesAndEvictsChannel()
+    {
+        var uri = new Uri("https://127.0.0.1:5050");
+        using var factory = new PeerGrpcChannelFactory();
+
+        var channel1 = factory.GetOrCreateChannel(uri);
+        factory.ActiveChannelCount.Should().Be(1);
+
+        factory.InvalidateChannel(uri);
+        factory.ActiveChannelCount.Should().Be(0);
+
+        var channel2 = factory.GetOrCreateChannel(uri);
+        factory.ActiveChannelCount.Should().Be(1);
+        channel2.Should().NotBeSameAs(channel1);
+    }
+
+    [Test]
+    public void ChannelCreation_ConfiguresTls13AndBlindValidationCallback()
+    {
+        GrpcChannelOptions? capturedOptions = null;
+        var uri = new Uri("https://127.0.0.1:5050");
+
+        using var factory = new PeerGrpcChannelFactory(
+            channelFactory: (addr, opts) =>
+            {
+                capturedOptions = opts;
+                return GrpcChannel.ForAddress(addr, opts);
+            });
+
+        factory.GetOrCreateChannel(uri);
+
+        capturedOptions.Should().NotBeNull();
+        capturedOptions!.HttpHandler.Should().BeOfType<SocketsHttpHandler>();
+
+        var handler = (SocketsHttpHandler)capturedOptions.HttpHandler!;
+        handler.SslOptions.EnabledSslProtocols.Should().Be(SslProtocols.Tls13);
+        handler.SslOptions.RemoteCertificateValidationCallback.Should().NotBeNull();
+        handler.SslOptions.RemoteCertificateValidationCallback!(null!, null!, null!, default)
+            .Should().BeTrue();
     }
 }

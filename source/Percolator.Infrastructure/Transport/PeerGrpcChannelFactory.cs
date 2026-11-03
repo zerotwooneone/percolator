@@ -4,6 +4,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
+using System.Net.Security;
+using System.Security.Authentication;
 using Grpc.Net.Client;
 using Percolator.Domain.Common;
 
@@ -17,6 +19,7 @@ public sealed class PeerGrpcChannelFactoryOptions
 public interface IPeerGrpcChannelFactory : IDisposable
 {
     GrpcChannel GetOrCreateChannel(Uri address);
+    void InvalidateChannel(Uri address);
     int EvictIdleChannels();
     int ActiveChannelCount { get; }
 }
@@ -84,7 +87,12 @@ public sealed class PeerGrpcChannelFactory : IPeerGrpcChannelFactory
                 HttpHandler = new SocketsHttpHandler
                 {
                     ConnectTimeout = _options.ConnectTimeout,
-                    EnableMultipleHttp2Connections = true
+                    EnableMultipleHttp2Connections = true,
+                    SslOptions = new SslClientAuthenticationOptions
+                    {
+                        EnabledSslProtocols = SslProtocols.Tls13,
+                        RemoteCertificateValidationCallback = (_, _, _, _) => true
+                    }
                 },
                 DisposeHttpClient = true
             };
@@ -97,6 +105,24 @@ public sealed class PeerGrpcChannelFactory : IPeerGrpcChannelFactory
             };
 
             return channel;
+        }
+    }
+
+    public void InvalidateChannel(Uri address)
+    {
+        ArgumentNullException.ThrowIfNull(address);
+
+        lock (_lock)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            if (_channels.Remove(address, out var entry))
+            {
+                entry.Channel.Dispose();
+            }
         }
     }
 

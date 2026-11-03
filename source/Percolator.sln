@@ -76,6 +76,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Apps.FileTransfe
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Infrastructure.Tests", "Percolator.Infrastructure.Tests\Percolator.Infrastructure.Tests.csproj", "{FC74F5B9-86BC-47EA-94C7-E46F9C55924F}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Infrastructure.Windows.Tests", "Percolator.Infrastructure.Windows.Tests\Percolator.Infrastructure.Windows.Tests.csproj", "{25EB9979-3B02-431F-ADEB-2222D33F9D23}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -374,6 +376,18 @@ Global
 		{FC74F5B9-86BC-47EA-94C7-E46F9C55924F}.Release|x64.Build.0 = Release|Any CPU
 		{FC74F5B9-86BC-47EA-94C7-E46F9C55924F}.Release|x86.ActiveCfg = Release|Any CPU
 		{FC74F5B9-86BC-47EA-94C7-E46F9C55924F}.Release|x86.Build.0 = Release|Any CPU
+		{25EB9979-3B02-431F-ADEB-2222D33F9D23}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{25EB9979-3B02-431F-ADEB-2222D33F9D23}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{25EB9979-3B02-431F-ADEB-2222D33F9D23}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{25EB9979-3B02-431F-ADEB-2222D33F9D23}.Debug|x64.Build.0 = Debug|Any CPU
+		{25EB9979-3B02-431F-ADEB-2222D33F9D23}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{25EB9979-3B02-431F-ADEB-2222D33F9D23}.Debug|x86.Build.0 = Debug|Any CPU
+		{25EB9979-3B02-431F-ADEB-2222D33F9D23}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{25EB9979-3B02-431F-ADEB-2222D33F9D23}.Release|Any CPU.Build.0 = Release|Any CPU
+		{25EB9979-3B02-431F-ADEB-2222D33F9D23}.Release|x64.ActiveCfg = Release|Any CPU
+		{25EB9979-3B02-431F-ADEB-2222D33F9D23}.Release|x64.Build.0 = Release|Any CPU
+		{25EB9979-3B02-431F-ADEB-2222D33F9D23}.Release|x86.ActiveCfg = Release|Any CPU
+		{25EB9979-3B02-431F-ADEB-2222D33F9D23}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

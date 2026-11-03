@@ -1,8 +1,12 @@
 namespace Percolator.Infrastructure.Transport;
 
+using System;
 using System.Security.Cryptography.X509Certificates;
+using System.Threading;
+using System.Threading.Tasks;
 
-public interface ITransportCertificateProvider
+public interface ITransportCertificateProvider : IDisposable
 {
-    X509Certificate2 GetCertificate();
+    ValueTask<X509Certificate2> GetOrCreateServerCertificateAsync(CancellationToken ct = default);
+    ValueTask<X509Certificate2> RotateCertificateAsync(CancellationToken ct = default);
 }

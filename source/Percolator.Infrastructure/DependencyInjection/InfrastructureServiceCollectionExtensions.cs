@@ -36,6 +36,7 @@ using Percolator.Infrastructure.Security;
 using Percolator.Infrastructure.Serialization;
 using Percolator.Infrastructure2.Serialization;
 using Percolator.Infrastructure.Transport;
+using Percolator.Infrastructure.Transport.Endpoints;
 using Percolator.Infrastructure.Transport.Workers;
 using Percolator.Infrastructure.Vault;
 using Percolator.PluginSdk;
@@ -105,6 +106,9 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<StreamRegistry>();
         services.AddSingleton<IStreamRegistry>(sp => sp.GetRequiredService<StreamRegistry>());
         services.AddSingleton<IStreamRegistryManagement>(sp => sp.GetRequiredService<StreamRegistry>());
+        services.AddSingleton<KestrelPeerTransportServer>();
+        services.AddSingleton<IPeerTransportServer>(sp => sp.GetRequiredService<KestrelPeerTransportServer>());
+        services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<KestrelPeerTransportServer>());
 
         // Storage & Transfer Singletons
         services.AddSingleton<IBlobCryptoService, StreamingAesGcmCryptoService>();
@@ -180,6 +184,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<ITransportDispatcher, TransportDispatcher>();
         services.AddScoped<ISealedEnvelopeUnwrapper, SealedEnvelopeUnwrapper>();
         services.AddScoped<IPortReservationService, SqlitePortReservationService>();
+        services.AddScoped<UnauthenticatedDeliveryEndpoint>();
 
         // 5. Phase 4 Vertical Plugins
         // Chat
