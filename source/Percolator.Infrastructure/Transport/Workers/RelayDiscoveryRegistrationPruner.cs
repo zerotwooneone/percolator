@@ -22,6 +22,7 @@ public sealed class RelayDiscoveryRegistrationPruner : BackgroundService
     private readonly TimeSpan _entryTtl;
     private readonly TimeSpan _interval;
 
+    [ActivatorUtilitiesConstructor]
     public RelayDiscoveryRegistrationPruner(
         IServiceScopeFactory scopeFactory,
         TimeProvider? timeProvider = null,

@@ -14,6 +14,7 @@ public sealed class AbandonedInvitePruner : BackgroundService
     private readonly TimeProvider _timeProvider;
     private readonly TimeSpan _interval;
 
+    [ActivatorUtilitiesConstructor]
     public AbandonedInvitePruner(
         IServiceScopeFactory scopeFactory,
         TimeProvider? timeProvider = null,

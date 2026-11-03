@@ -14,6 +14,7 @@ public sealed class UnknownGroupMessageCachePruner : BackgroundService
     private readonly TimeProvider _timeProvider;
     private readonly TimeSpan _interval;
 
+    [ActivatorUtilitiesConstructor]
     public UnknownGroupMessageCachePruner(
         IServiceScopeFactory scopeFactory,
         TimeProvider? timeProvider = null,

@@ -36,8 +36,9 @@ public sealed class RelayMailboxStreamWorker : BackgroundService
             try
             {
                 await _streamSessionRunner(stoppingToken);
-                // Reset backoff on successful completion
+                // Reset backoff on successful completion and pause briefly before next poll cycle to prevent tight CPU spin
                 currentBackoff = _options.InitialBackoff;
+                await Task.Delay(currentBackoff, stoppingToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

@@ -19,6 +19,7 @@ public sealed class DisappearingMessageEvictionWorker : BackgroundService
     private readonly ILocalChunkStore? _chunkStore;
     private readonly TimeSpan _interval;
 
+    [ActivatorUtilitiesConstructor]
     public DisappearingMessageEvictionWorker(
         IServiceScopeFactory scopeFactory,
         TimeProvider? timeProvider = null,

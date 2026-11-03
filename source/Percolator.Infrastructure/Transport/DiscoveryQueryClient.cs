@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Google.Protobuf;
+using Microsoft.Extensions.DependencyInjection;
 using Percolator.Apps.Discovery.Features.NearbyPeerDiscovery;
 using Percolator.Apps.Discovery.Ports;
 using Percolator.Domain.Delivery.ValueObjects;
@@ -24,6 +25,7 @@ public sealed class DiscoveryQueryClient : INearbyDiscoveryQueryClientPort
         _client = client ?? throw new ArgumentNullException(nameof(client));
     }
 
+    [ActivatorUtilitiesConstructor]
     public DiscoveryQueryClient(
         IPeerGrpcChannelFactory channelFactory,
         IPeerMailboxRoutingRepository? routingRepository = null)

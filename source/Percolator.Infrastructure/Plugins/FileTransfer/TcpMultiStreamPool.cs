@@ -271,7 +271,7 @@ public sealed class TcpMultiStreamPool : ITransferStreamPool
 
         if (_pipeClient == null)
         {
-            return;
+            throw new InvalidOperationException("RelayTransferPipeClient is required to connect via relay pipe.");
         }
 
         await _poolLock.WaitAsync(ct).ConfigureAwait(false);
@@ -374,14 +374,14 @@ public sealed class TcpMultiStreamPool : ITransferStreamPool
 public sealed class TcpMultiStreamPoolFactory : ITransferStreamPoolFactory
 {
     private readonly CallbackEndpointValidator _validator;
-    private readonly RelayTransferPipeClient? _pipeClient;
+    private readonly RelayTransferPipeClient _pipeClient;
 
     public TcpMultiStreamPoolFactory(
-        CallbackEndpointValidator? validator = null,
-        RelayTransferPipeClient? pipeClient = null)
+        RelayTransferPipeClient pipeClient,
+        CallbackEndpointValidator? validator = null)
     {
+        _pipeClient = pipeClient ?? throw new ArgumentNullException(nameof(pipeClient));
         _validator = validator ?? new CallbackEndpointValidator();
-        _pipeClient = pipeClient;
     }
 
     public ITransferStreamPool CreatePool(TransferSessionId sessionId, PublicIdentityId peerId, StreamCount streamCount)

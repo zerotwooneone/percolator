@@ -7,15 +7,15 @@ using Percolator.Infrastructure.Persistence;
 
 internal sealed class DefaultStage2HostFactory : IStage2HostFactory
 {
-    private readonly BaselineStage2HostFactory _baselineFactory;
+    private readonly Stage2HostFactory _stage2Factory;
 
     public DefaultStage2HostFactory(IOptions<VaultStorageOptions>? options = null)
     {
-        _baselineFactory = new BaselineStage2HostFactory(options);
+        _stage2Factory = new Stage2HostFactory(options);
     }
 
     public IHost BuildAuthenticatedHost(IMasterKeyHandle masterKeyHandle)
     {
-        return _baselineFactory.BuildAuthenticatedHost(masterKeyHandle);
+        return _stage2Factory.BuildAuthenticatedHost(masterKeyHandle);
     }
 }

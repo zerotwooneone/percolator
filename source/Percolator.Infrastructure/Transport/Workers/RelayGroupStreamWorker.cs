@@ -8,7 +8,6 @@ using Microsoft.Extensions.Hosting;
 public sealed class RelayGroupStreamWorkerOptions
 {
     public TimeSpan InitialBackoff { get; set; } = TimeSpan.FromMilliseconds(50);
-    public TimeSpan MaxBackoff { get; set; } = TimeSpan.FromSeconds(5);
 }
 
 public sealed class RelayGroupStreamWorker : BackgroundService
@@ -31,6 +30,8 @@ public sealed class RelayGroupStreamWorker : BackgroundService
             try
             {
                 await _subscriptionRunner(stoppingToken);
+                // Pause briefly after completed runner cycle to prevent tight CPU spin
+                await Task.Delay(_options.InitialBackoff, stoppingToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

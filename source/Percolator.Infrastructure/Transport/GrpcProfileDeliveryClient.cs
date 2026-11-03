@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
+using Microsoft.Extensions.DependencyInjection;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Security.ValueObjects;
@@ -19,6 +20,7 @@ public sealed class GrpcProfileDeliveryClient : IProfileDeliveryClient
     private readonly IPeerGrpcChannelFactory? _channelFactory;
     private readonly UnauthenticatedDeliveryService.UnauthenticatedDeliveryServiceClient? _directClient;
 
+    [ActivatorUtilitiesConstructor]
     public GrpcProfileDeliveryClient(IPeerGrpcChannelFactory channelFactory)
     {
         _channelFactory = channelFactory ?? throw new ArgumentNullException(nameof(channelFactory));

@@ -1857,9 +1857,9 @@
   - **Full Container Verification Guarantee**:
     - `Stage2HostFactory` builds `IHost` with service provider validation (`ValidateScopes = true`, `ValidateOnBuild = true`), guaranteeing zero captive dependencies, zero missing registrations, and zero circular dependencies.
 - **Scope & Deliverables**:
-  - [ ] Implement `Stage2HostFactory`:
+  - [x] Implement `Stage2HostFactory`:
     - Extends `BaselineStage2HostFactory` to wire the full suite of operational adapters, repositories, query services, gRPC channels, and background pruners across all feature slices.
-  - [ ] Implement `InfrastructureServiceCollectionExtensions.AddAuthenticatedInfrastructure(IServiceCollection, IConfiguration, IMasterKeyHandle)`:
+  - [x] Implement `InfrastructureServiceCollectionExtensions.AddAuthenticatedInfrastructure(IServiceCollection, IConfiguration, IMasterKeyHandle)`:
     - Registers all 61 infrastructure ports into the Stage 2 container with correct lifetime scopes.
     - Registers all 12 background `IHostedService` workers.
 - **Embedded Unit Tests (`Percolator.Infrastructure.Tests/Composition/`)**:
