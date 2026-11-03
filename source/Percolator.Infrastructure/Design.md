@@ -4,16 +4,16 @@ Spec: [design-spec](../spec/design-spec.md)
 
 ## 1. Purpose and Layer Boundary
 
-`Percolator.Infrastructure` is the portable, cross-platform (`net10.0`) technical adapter deployable. It realizes the outbound persistence, cryptographic math, wire serialization, and network transport ports defined by the inner Domain and Application layers without introducing operating-system-specific P/Invoke locks (realizing [`DEP-INFRA-SEGREGATION-ROLE`](Requirements.md#1-segregation-role-and-boundary-constraints)).
+`Percolator.Infrastructure` is the portable, cross-platform (`net10.0`) technical adapter deployable. It realizes the outbound persistence, cryptographic math, wire serialization, in-memory pub/sub event bus, and network transport ports defined by the inner Domain and Application layers without introducing operating-system-specific P/Invoke locks (realizing [`DEP-INFRA-SEGREGATION-ROLE`](Requirements.md#1-segregation-role-and-boundary-constraints)).
 
-- **In Scope:** Pre-unlock database vault & plausible-deniability header management, SQLCipher relational persistence & CQRS query projections, concrete cryptographic/ZK math engines, Protobuf wire serialization, gRPC/TLS streaming adapters, portable file storage, and background maintenance workers.
+- **In Scope:** Pre-unlock database vault & plausible-deniability header management, SQLCipher relational persistence & CQRS query projections, concrete cryptographic/ZK math engines, Protobuf wire serialization, gRPC/TLS streaming adapters, in-memory event bus technical adapter (`InMemoryEventBus`), portable file storage, and background maintenance workers.
 - **Out of Scope:** Windows-specific kernel/CNG APIs (segregated into `Percolator.Infrastructure.Windows`), domain business rules, and UI reactive state.
 
 ---
 
 ## 2. Architectural Invariants and Encapsulation
 
-1. **`INV-STAGE2-HOST-ISOLATION` (Two-Stage DI Host Isolation):** The pre-unlock bootstrap container (`IStage2HostFactory`) registers only Stage 1 vault unlock services. `PercolatorDbContext`, domain repositories, query services, and background workers exist exclusively inside the child `IStage2Host` created *after* the database key is verified and schema migrations succeed. `#session-lock`
+1. **`INV-STAGE2-HOST-ISOLATION` (Two-Stage DI Host Isolation):** The pre-unlock bootstrap container (`IStage2HostFactory`) registers only Stage 1 vault unlock services. `PercolatorDbContext`, domain repositories, query services, event bus singletons, and background workers exist exclusively inside the child `IStage2Host` created *after* the database key is verified and schema migrations succeed. `#session-lock`
 2. **`INV-ADAPTER-HYDRATION-BOUNDARY` (Internal-Only Domain Reconstitution & Protobuf Isolation):** Persistence adapters reconstitute domain aggregates via [`INV-INTERNAL-REHYDRATION`](../Percolator.Domain/Design.md#2-architectural-invariants-and-encapsulation) in `Percolator.Domain` and `Percolator.Apps.FileTransfer.Domain`. Compiled Protobuf classes and EF Core entities remain `internal` to infrastructure and never leak across port interfaces.
 3. **`INV-VERTICAL-PERSISTENCE-SLICES` (Vertical Persistence Slices):** Each feature slice co-locates its EF Core entity mapping, aggregate write repository, and zero-hydration SQL read-model query service (realizing [`INV-CQRS-SEPARATION`](../Percolator.Application/Design.md#2-architectural-invariants-and-encapsulation)).
 
@@ -43,3 +43,6 @@ Spec: [design-spec](../spec/design-spec.md)
 8. **`DEC-RELATIONAL-OVER-JSON` (Relational Schema Normalization over JSON Blobs):**
    - *Design Choice:* Domain aggregate components (mentions, attachments, link previews) are mapped to normalized relational tables and first-class columns rather than serialized JSON blobs, preserving referential integrity, database indexing, and efficient keyset CQRS queries.
    - *Rejected Alternative:* Storing structured domain collections in `*_json` text columns.
+9. **`DEC-BOUNDED-CHANNEL-EVENT-BUS` (Non-Blocking Fault Pipeline & Lock-Free Concurrent Dispatch):**
+   - *Design Choice:* `InMemoryEventBus` realizes [`INV-APP-EVENT-BUS-DECOUPLING`](../Percolator.Application/Design.md#2-architectural-invariants-and-encapsulation) via CAS updates on immutable list snapshots within a concurrent dictionary for lock-free subscription registration, caches the type hierarchy to prevent hot-path reflection, fast-paths zero-subscriber events synchronously, and streams subscriber exceptions into a bounded `Channel<EventDispatchError>` (capacity 1,000, `DropOldest`) processed by a background worker task. This guarantees $O(1)$ non-blocking fault recording without publisher latency.
+   - *Rejected Alternative:* Synchronous invocation of fault handlers on the publisher's thread (which induces cumulative Head-of-Line blocking if an error handler is slow) or unbounded thread pool task spawning (`Task.WhenAll`) which risks thread pool starvation under event bursts.

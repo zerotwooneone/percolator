@@ -4,9 +4,9 @@ Spec: [design-spec](../spec/design-spec.md)
 
 ## 1. Purpose and Layer Boundary
 
-`Percolator.SourceGenerators` is the compile-time Roslyn metaprogramming deployable at the root of the build graph. It executes strictly as a compiler analyzer (`PrivateAssets="all"`, `IncludeBuildOutput="false"`) to emit strongly typed value-object boilerplate into consuming assemblies without introducing a runtime binary dependency.
+`Percolator.SourceGenerators` is the compile-time Roslyn metaprogramming deployable at the root of the build graph. It executes strictly as a compiler analyzer (`PrivateAssets="all"`, `IncludeBuildOutput="false"`) to emit strongly typed value-object boilerplate and event mapping code into consuming assemblies without introducing a runtime binary dependency.
 
-- **In Scope:** Incremental source generation (`IIncrementalGenerator`) and compile-time structural diagnostics for byte-backed value objects (`[ByteArray]`) and GUID-backed identifiers (`[GuidId]`).
+- **In Scope:** Incremental source generation (`IIncrementalGenerator`) and compile-time structural diagnostics for byte-backed value objects (`[ByteArray]`), GUID-backed identifiers (`[GuidId]`), and domain-to-application event mappers (`[MapFromDomainEvent]`).
 - **Out of Scope:** Runtime domain logic, cryptographic operations, or I/O.
 
 ---
@@ -16,6 +16,7 @@ Spec: [design-spec](../spec/design-spec.md)
 1. **`INV-ZERO-PRIMITIVES` (Zero Implicit or Explicit Primitive Casts):** Generated `[ByteArray]` and `[GuidId]` types omit `implicit` and `explicit` cast operators to or from raw `byte[]`, `ReadOnlySpan<byte>`, or `Guid`. Callers must use explicit named factories (`FromBytes`, `FromSpan`, `FromGuid`, `New`) so boundary validation and unit transitions are visible at every call site.
 2. **`INV-ENCAPSULATED-BYTES` (Encapsulated Backing Memory):** `[ByteArray]` types wrap a `private readonly ReadOnlyMemory<byte>` with a `private` constructor, enforcing length constraints on every construction path before an instance can exist.
 3. **`INV-SYNTAX-FIRST-FILTER` (Syntax-First Incremental Filtering):** Generators filter candidate syntax nodes via `ForAttributeWithMetadataName` prior to semantic model binding to prevent IDE compilation lag.
+4. **`INV-RECORD-EVENT-ENFORCEMENT` (Record-Only Application Event Mapping):** Target application events decorated with `[MapFromDomainEvent]` must be declared as `partial record` types (`PERC204`). Plain classes are rejected at compile time to ensure non-destructive mutation (`target = target with { ... }`) in `CustomMap` hooks is always syntactically and semantically valid.
 
 ---
 
@@ -28,3 +29,6 @@ Spec: [design-spec](../spec/design-spec.md)
    - Standard factories (`FromBytes`) copy the input buffer to guarantee immutability, while `FromBytesOwned` is provided as an explicit opt-in for performance-critical paths where a freshly allocated buffer's ownership is transferred directly.
 3. **`DEC-BIFURCATED-UUID` (Bifurcated UUID Semantics — `CryptographicRandom` vs. `SequentialTimeBased`):**
    - `[GuidId]` requires choosing between uncorrelatable random UUIDv4 (for identities and wire-visible tokens where creation timestamps must not leak) and time-ordered UUIDv7 (for local database append-only records to avoid B-Tree page fragmentation).
+4. **`DEC-SHALLOW-VALUE-OBJECT-UNBOXING` (1-Level Value Object Unboxing & Custom Partial Method Hooks):**
+   - *Design Choice:* `DomainEventMapperGenerator` maps matching property names, unboxes 1-level primitive Value Objects (`.Value` and `?.Value`), and emits a companion static `FromDomain` factory with a `static partial void CustomMap(source, ref target)` hook for developer-controlled customizations.
+   - *Rejected Alternative:* Deep multi-level object graph cloning (which risks pinning large aggregate graphs in memory) or runtime reflection mappers like AutoMapper (which incur reflection overhead and hide mapping failures until runtime).

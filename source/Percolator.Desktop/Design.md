@@ -30,3 +30,6 @@ Spec: [design-spec](../spec/design-spec.md)
    - *Rejected Alternative:* Singleton ViewModels per conversation (unbounded RAM/subscription growth) or recreating ViewModels on every tab switch (destroying drafts and scroll state).
 3. **`DEC-DIRECT-CANVAS-BITFIELD` (Direct-Canvas Bitfield Rendering):**
    - Large file transfer bitfields (`PieceMapControl`) render directly onto an Avalonia `DrawingContext` rather than instantiating thousands of individual XAML visual tree elements. `#bitfield-swarm`
+4. **`DEC-REACTIVE-EVENT-BUS-BRIDGE` (R3 Event Observable Bridge & Explicit UI Thread Marshaling):**
+   - *Design Choice:* Presentation components bridge to the inward application event bus via `ObserveEvent<TEvent>()` and `ObserveEventOnUIThread<TEvent>()` in `EventBusExtensions` (consuming [`INV-APP-EVENT-BUS-DECOUPLING`](../Percolator.Application/Design.md#2-architectural-invariants-and-encapsulation)). Subscriptions observing UI-bound state must marshal to `AvaloniaSynchronizationContext`, preserving the thread-agnostic core of the application bus while preventing cross-thread Avalonia UI mutation exceptions.
+   - *Rejected Alternative:* Forcing the application event bus to be aware of Avalonia UI dispatchers or `SynchronizationContext`, which breaks headless unit tests, introduces UI deadlock hazards, and violates Onion Architecture.
