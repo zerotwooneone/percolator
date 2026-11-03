@@ -35,6 +35,13 @@ This skill guides engineers and AI assistants through a disciplined, dual-mode s
    If an AI discovers that a specification requirement is technically impractical or requires disproportionate external dependencies (e.g., pure C# video transcoding requiring FFmpeg), it **SHALL NOT silently downgrade or fake the code**. It must present the technical trade-off and propose an **ISO 14971 Risk-Benefit / Accepted Residual Risk** resolution to the human user.
 8. **Mandatory Human Review Gate Before Coding**:
    The implementation ticket must be presented to the user (via interactive chat or a plan file) and approved *before* touching any code.
+9. **Strict Prohibition on Nullable Evasion for Required Parameters**:
+   AI assistants **SHALL NOT** make required collaborator dependencies nullable with a default null value (e.g. `Type? dep = null`) in constructors or public method signatures to avoid updating call sites, tests, or DI configuration. Required dependencies **MUST** be explicitly typed as non-nullable. If a dependency is functionally necessary for any operation or code branch, making it nullable with a silent fallback or no-op (`if (dep == null) return;`) is an unacceptable anti-pattern that conceals configuration bugs and disables runtime features. If a parameter is genuinely optional by domain design, its absence must be handled safely and explicitly without breaking or silently bypassing port contracts.
+10. **Idiomatic & Resilient Unit Testing (Anti-Brittle Test Assertions)**:
+    Unit tests **SHALL NOT** assert rigid magic-number counts (e.g. `services.Should().HaveCount(12)`) on DI containers, registries, or service collections where future features will legitimately add registrations. Magic-number count assertions create brittle tests that break upon unrelated enhancements, training engineers to treat test failures as noise. Instead, idiomatic unit tests must assert:
+    - **Specific capability containment**: Assert that the specific required types are registered using collection assertions (e.g. `services.Select(s => s.ServiceType).Should().Contain(...)`).
+    - **Operational lifecycle execution**: Actively test execution contracts (e.g. `await host.StartAsync()` and `await host.StopAsync()`) rather than merely counting service descriptors in memory.
+    - **Behavioral and boundary contracts**: Test positive and negative functional pathways rather than testing the compiler's or reflection's container count.
 
 ---
 
@@ -53,8 +60,8 @@ flowchart TD
     S1["Step 1: QMS Impact Analysis (High Burden of Proof)<br/>• Presume existing QMS is adequate.<br/>• AI must PROVE a document change is required.<br/>• Default: Zero QMS modifications."]
     S2["Step 2: Upfront QMS Update (Only If Proven)<br/>• Update RiskRegister, SystemRequirements, Requirements.md, or Design.md<br/>• Maintain 3-tier regulatory rules before writing code."]
     S3["Step 3: Jira-Style Implementation Slice & User Review Gate<br/>• Mode A (Chat Ticket) or Mode B (Plan File).<br/>• Mandate Happy-Path Round-Trip Test in test plan.<br/>• MANDATORY GATE: User reviews and approves before coding."]
-    S4["Step 4: Implementation (Clean Code & TDD)<br/>• TDD Red-Green-Refactor.<br/>• Zero in-code QMS comments (100% clean C#).<br/>• Zero fake stubs (execute real boundary calls).<br/>• Minimum Necessary Realization (zero speculative wrappers)."]
-    S5["Step 5: Lightweight Mechanical Verification<br/>• Run dotnet test (all pass, including round-trip tests).<br/>• Run validate-qms-compliance.ps1.<br/>• Mark ticket deliverables complete [x]."]
+    S4["Step 4: Implementation (Clean Code & TDD)<br/>• TDD Red-Green-Refactor.<br/>• Zero in-code QMS comments (100% clean C#).<br/>• Zero fake stubs (execute real boundary calls).<br/>• Zero nullable evasion (required dependencies non-nullable).<br/>• Minimum Necessary Realization (zero speculative wrappers)."]
+    S5["Step 5: Lightweight Mechanical Verification<br/>• Run dotnet test (all pass, resilient non-brittle assertions).<br/>• Run validate-qms-compliance.ps1.<br/>• Mark ticket deliverables complete [x]."]
 
     S1 -->|Change Proven| S2
     S1 -->|No Change Needed| S3
@@ -79,18 +86,19 @@ flowchart TD
 
 ### Step 3: Jira-Style Implementation Slice & User Review Gate
 Format as an actionable ticket in Chat (Mode A) or in a Plan File (Mode B).
-**MANDATORY**: Test plan must include at least one **Happy-Path Round-Trip Test** for outward adapters.
+**MANDATORY**: Test plan must include at least one **Happy-Path Round-Trip Test** for outward adapters and resilient (non-brittle) assertions.
 **MANDATORY GATE**: Halt and obtain user approval before writing code.
 
 ### Step 4: Implementation (Clean Code & TDD)
 - **Zero in-code QMS comments**: 100% clean, idiomatic C#.
 - **Zero fake stubs**: Real boundary calls, real gRPC streaming, real file I/O.
+- **Zero nullable evasion**: Declare required dependencies non-nullable; never add `? = null` with silent no-ops to dodge updating call sites.
 - **Bounded $O(1)$ memory streaming**: Never buffer unbounded payloads into `MemoryStream`; stream in bounded chunks.
 - **CQRS read-path purity**: Do not load write-side domain aggregates for read-only routing queries.
 - **Escalation over silent downgrade**: If an obstacle arises (e.g. proto mismatch), escalate to the user immediately.
 
 ### Step 5: Lightweight Mechanical Verification
-1. Run `dotnet test <TargetTestProject> --no-build` (confirm all pass).
+1. Run `dotnet test <TargetTestProject> --no-build` (confirm all pass, including round-trip tests).
 2. Run `pwsh -File scripts/validate-qms-compliance.ps1` (confirm audit passes).
 3. Mark ticket checkboxes complete (`- [x]`).
 
@@ -103,7 +111,7 @@ Use this workflow to audit existing implementations, newly submitted PRs, or com
 ```mermaid
 flowchart TD
     B1["Step B1: Reality vs. Spec Inspection<br/>• Read actual source code and test files on disk.<br/>• Compare implementation against Requirements.md and Design.md."]
-    B2["Step B2: Anti-Shortcut & Integrity Scrutiny<br/>• Check for fake network/store loops.<br/>• Check for empty stub returns.<br/>• Check for test evasion (only error tests, no happy-path).<br/>• Check for memory scaling bugs (unbounded MemoryStream)."]
+    B2["Step B2: Anti-Shortcut & Integrity Scrutiny<br/>• Check for fake network/store loops.<br/>• Check for empty stub returns.<br/>• Check for nullable parameter evasion.<br/>• Check for brittle test assertions (magic counts).<br/>• Check for tight unyielding worker loops.<br/>• Check for memory scaling bugs (unbounded MemoryStream)."]
     B3["Step B3: QMS Gap & Risk-Benefit Analysis<br/>• Check for unmitigated hazards or leaked symbols.<br/>• Evaluate over-specified requirements (e.g. FFmpeg vs ISO 14971 risk acceptance)."]
     B4["Step B4: Remediation Plan & Human Gate<br/>• Formulate crisp Jira remediation ticket.<br/>• Present findings and trade-offs to user.<br/>• Execute approved remediation."]
 
@@ -119,10 +127,12 @@ flowchart TD
 - Compare the code against `Requirements.md` (`DEP-*`) and `Design.md` (`INV-*`, `DEC-*`).
 
 ### Step B2: Anti-Shortcut & Integrity Scrutiny
-Examine the implementation through the **4 AI Anti-Patterns Checklist**:
+Examine the implementation through the **AI Anti-Patterns Checklist**:
 - [ ] **Fake Operation Check**: Does any client or adapter loop through data without calling the underlying transport or database?
-- [ ] **Empty Stub Check**: Does any method return `Task.FromResult(DomainResult.Success())` or a hardcoded string without doing real work?
-- [ ] **Test Evasion Check**: Do the tests only assert error guards (e.g. `> 100 MB` or `null` checks) while avoiding testing the happy-path round-trip?
+- [ ] **Empty Stub Check**: Does any method return `Task.FromResult(DomainResult.Success())` or a hardcoded string or a fake hollow host without doing real work?
+- [ ] **Nullable Parameter Evasion Check**: Were required parameters made nullable with default `null` (e.g. `Type? dep = null`) to avoid updating call sites, accompanied by silent no-ops (`if (dep == null) return;`)?
+- [ ] **Test Evasion & Brittle Assertion Check**: Do the tests only assert error guards or rigid magic numbers (e.g. `HaveCount(12)`) instead of testing operational execution (`StartAsync`/`StopAsync`) and required capabilities idiomatically?
+- [ ] **Tight Unyielding Loop Check**: Do background workers or runners contain `while (!stoppingToken.IsCancellationRequested)` loops that lack delays or yields on successful execution, risking 100% CPU starvation?
 - [ ] **Memory Scalability Check**: Does the implementation buffer multi-megabyte payloads in contiguous RAM (`new MemoryStream()`) instead of streaming in bounded $O(1)$ buffers?
 
 ### Step B3: QMS Gap & Risk-Benefit Analysis
