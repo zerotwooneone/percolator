@@ -1,0 +1,89 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:shell="using:Percolator.Simulator.Features.Shell"
+             x:Class="Percolator.Simulator.Features.Shell.RosterTreeView">
+
+    <Border Background="{DynamicResource SolidBackgroundFillColorSecondaryBrush}"
+            BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+            BorderThickness="0,0,1,0"
+            Width="260"
+            Padding="8">
+        <ScrollViewer>
+            <StackPanel Spacing="12">
+                <!-- Section: Personas -->
+                <TextBlock Text="PERSONAS" FontWeight="Bold" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                <ItemsControl ItemsSource="{Binding Personas}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="shell:SimulatedNodeSummary">
+                            <Border Background="{DynamicResource ControlFillColorDefaultBrush}"
+                                    CornerRadius="6" Padding="8,6" Margin="0,2">
+                                <Grid ColumnDefinitions="Auto,*,Auto">
+                                    <!-- Role Selectors CTL-ROS-02 -->
+                                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="4">
+                                        <Button Content="1️⃣"
+                                                Padding="4,2"
+                                                ToolTip.Tip="Set as 1️⃣ Initiator"
+                                                Click="OnSelectPrimaryClicked" />
+                                        <Button Content="2️⃣"
+                                                Padding="4,2"
+                                                ToolTip.Tip="Set as 2️⃣ Target"
+                                                Click="OnSelectSecondaryClicked" />
+                                    </StackPanel>
+
+                                    <!-- Name & Address -->
+                                    <StackPanel Grid.Column="1" Margin="8,0" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" FontSize="12" />
+                                        <TextBlock Text="{Binding Subtitle}" FontSize="10" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                    </StackPanel>
+
+                                    <!-- Pin & Ingress CTL-ROS-01, 03 -->
+                                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4">
+                                        <Button Content="🟢"
+                                                Padding="4,2"
+                                                ToolTip.Tip="Toggle Listening / Muted"
+                                                Click="OnToggleMuteClicked" />
+                                        <Button Content="📌"
+                                                Padding="4,2"
+                                                ToolTip.Tip="Pin to Center Workbench"
+                                                Click="OnTogglePinClicked" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <!-- Section: Relays -->
+                <TextBlock Text="RELAYS" FontWeight="Bold" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,8,0,0" />
+                <ItemsControl ItemsSource="{Binding Relays}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="shell:SimulatedNodeSummary">
+                            <Border Background="{DynamicResource ControlFillColorDefaultBrush}"
+                                    CornerRadius="6" Padding="8,6" Margin="0,2">
+                                <Grid ColumnDefinitions="*,Auto">
+                                    <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" FontSize="12" />
+                                        <TextBlock Text="{Binding Subtitle}" FontSize="10" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                    </StackPanel>
+                                    <Button Grid.Column="1" Content="📌"
+                                            Padding="4,2"
+                                            ToolTip.Tip="Pin Relay Card to Workbench"
+                                            Click="OnTogglePinClicked" />
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <!-- Section: Group & Swarm Inspectors CTL-ROS-04, 05 -->
+                <TextBlock Text="CHANNELS &amp; SWARMS" FontWeight="Bold" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,8,0,0" />
+                <Button Content="👥 Group Channels (Phase 7)"
+                        HorizontalAlignment="Stretch"
+                        Command="{Binding SelectGroupCommand}" />
+                <Button Content="🌐 Active Swarms (Phase 9)"
+                        HorizontalAlignment="Stretch"
+                        Command="{Binding SelectSwarmCommand}" />
+            </StackPanel>
+        </ScrollViewer>
+    </Border>
+</UserControl>

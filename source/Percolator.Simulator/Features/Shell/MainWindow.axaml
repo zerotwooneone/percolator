@@ -1,0 +1,50 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Percolator.Simulator.Features.Shell"
+        xmlns:shell="using:Percolator.Simulator.Features.Shell"
+        xmlns:scenarios="using:Percolator.Simulator.Features.Scenarios"
+        xmlns:logging="using:Percolator.Simulator.Features.Logging"
+        x:Class="Percolator.Simulator.Features.Shell.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="Percolator Simulator (QA Sandbox)"
+        Width="1400" Height="900"
+        WindowStartupLocation="CenterScreen">
+
+    <Grid RowDefinitions="Auto,Auto,*,Auto,Auto">
+        <!-- Zone 1: Top Global Toolbar -->
+        <shell:TopGlobalToolbarView Grid.Row="0" DataContext="{Binding Toolbar}" />
+
+        <!-- Zone 2: Contextual Action Bar -->
+        <shell:ContextualActionBarView Grid.Row="1" DataContext="{Binding ActionBar}" />
+
+        <!-- Zones 3, 4, 5A: Main Working Area (Left Roster, Center Workbench, Right Flight Recorder) -->
+        <Grid Grid.Row="2" ColumnDefinitions="Auto,*,Auto">
+            <!-- Zone 3: Left Roster Tree -->
+            <shell:RosterTreeView Grid.Column="0" DataContext="{Binding Roster}" />
+
+            <!-- Zone 4: Center Workbench -->
+            <shell:WorkbenchView Grid.Column="1" DataContext="{Binding Workbench}" />
+
+            <!-- Zone 5A: Right Flight Recorder Drawer -->
+            <scenarios:FlightRecorderView Grid.Column="2" DataContext="{Binding FlightRecorder}" />
+        </Grid>
+
+        <!-- Status Toast Banner -->
+        <Border Grid.Row="3"
+                Background="#2B579A"
+                Padding="12,6"
+                IsVisible="{Binding IsStatusToastOpen}">
+            <Grid ColumnDefinitions="*,Auto">
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
+                    <TextBlock Text="ℹ️" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding StatusToastTitle}" FontWeight="Bold" Foreground="White" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding StatusToastMessage}" Foreground="White" VerticalAlignment="Center" />
+                </StackPanel>
+                <Button Grid.Column="1" Content="✕" Padding="6,2" Command="{Binding DismissToastCommand}" />
+            </Grid>
+        </Border>
+
+        <!-- Zone 5B: Bottom Log Dock -->
+        <logging:LogDockView Grid.Row="4" DataContext="{Binding LogDock}" />
+    </Grid>
+</Window>

@@ -1,0 +1,35 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Percolator.Simulator.Features.RelayedChat"
+             x:Class="Percolator.Simulator.Features.RelayedChat.RelayCardView"
+             x:DataType="vm:RelayCardViewModel">
+
+    <Border Background="{DynamicResource SolidBackgroundFillColorSecondaryBrush}"
+            BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Padding="12"
+            Margin="6">
+        <Grid RowDefinitions="Auto,Auto,*,Auto">
+            <StackPanel Grid.Row="0" Margin="0,0,0,8">
+                <TextBlock Text="{Binding DisplayName}" FontWeight="Bold" FontSize="14" />
+                <TextBlock Text="{Binding BoundEndpoint}" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+            </StackPanel>
+
+            <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="12" Margin="0,0,0,8">
+                <TextBlock Text="{Binding HeldEnvelopeCount, StringFormat='Held Envelopes: {0}'}" FontSize="12" FontWeight="SemiBold" />
+                <TextBlock Text="{Binding HostedOpkCount, StringFormat='Hosted OPKs: {0}/25'}" FontSize="12" FontWeight="SemiBold" />
+            </StackPanel>
+
+            <Border Grid.Row="2" Background="{DynamicResource ControlFillColorDefaultBrush}" CornerRadius="6" Padding="8">
+                <TextBlock Text="Mailbox Queue &amp; Chaos Controls (Fleshed out in Phase 5)" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+            </Border>
+
+            <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="6" Margin="0,8,0,0">
+                <Button Content="👯 Duplicate" Command="{Binding DuplicateEnvelopeCommand}" />
+                <Button Content="⚡ Flip 1 Bit" Command="{Binding FlipBitCommand}" />
+                <Button Content="🔀 Shuffle Queue" Command="{Binding ShuffleQueueCommand}" />
+            </StackPanel>
+        </Grid>
+    </Border>
+</UserControl>

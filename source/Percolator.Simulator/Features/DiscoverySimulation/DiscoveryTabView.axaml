@@ -1,0 +1,22 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Percolator.Simulator.Features.DiscoverySimulation"
+             x:Class="Percolator.Simulator.Features.DiscoverySimulation.DiscoveryTabView"
+             x:DataType="vm:DiscoveryTabViewModel">
+
+    <Border Background="{DynamicResource SolidBackgroundFillColorSecondaryBrush}"
+            BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Padding="12"
+            Margin="6">
+        <StackPanel Spacing="8">
+            <TextBlock Text="🔍 Peer Discovery (Phase 8)" FontWeight="Bold" FontSize="14" />
+            <TextBlock Text="Blinded Rendezvous &amp; Nearby Directory" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+            <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,8,0,0">
+                <Button Content="📍 Publish Blinded Locator" Command="{Binding PublishBlindedLocatorCommand}" />
+                <Button Content="📡 Query Nearby Peers" Command="{Binding QueryNearbyPeersCommand}" />
+            </StackPanel>
+        </StackPanel>
+    </Border>
+</UserControl>

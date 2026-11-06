@@ -1,0 +1,24 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Percolator.Simulator.Features.SwarmSimulation"
+             x:Class="Percolator.Simulator.Features.SwarmSimulation.SwarmPanelView"
+             x:DataType="vm:SwarmPanelViewModel">
+
+    <Border Background="{DynamicResource SolidBackgroundFillColorSecondaryBrush}"
+            BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Padding="12"
+            Margin="6">
+        <StackPanel Spacing="8">
+            <TextBlock Text="🌐 Swarm File Transfer (Phase 9)" FontWeight="Bold" FontSize="14" />
+            <TextBlock Text="SHA-256 Merkle Piece Heatmap &amp; Bitfield Swarm Progress" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+            <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,8,0,0">
+                <Button Content="⏸️ Pause" Command="{Binding PauseTransferCommand}" />
+                <Button Content="▶️ Resume" Command="{Binding ResumeTransferCommand}" />
+                <Button Content="✕ Cancel" Command="{Binding CancelTransferCommand}" />
+                <Button Content="➕ Inject Late Downloader ▼" Command="{Binding InjectLateDownloaderCommand}" />
+            </StackPanel>
+        </StackPanel>
+    </Border>
+</UserControl>

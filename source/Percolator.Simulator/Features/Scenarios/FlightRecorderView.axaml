@@ -1,0 +1,42 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Percolator.Simulator.Features.Scenarios"
+             x:Class="Percolator.Simulator.Features.Scenarios.FlightRecorderView"
+             x:DataType="vm:FlightRecorderViewModel">
+
+    <Border Background="{DynamicResource SolidBackgroundFillColorSecondaryBrush}"
+            BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1,0,0,0"
+            Width="240"
+            Padding="8">
+        <Grid RowDefinitions="Auto,*,Auto">
+            <!-- Header & CTL-REC-01 -->
+            <StackPanel Grid.Row="0" Spacing="6" Margin="0,0,0,8">
+                <TextBlock Text="FLIGHT RECORDER" FontWeight="Bold" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                <Grid ColumnDefinitions="*,Auto">
+                    <Button Grid.Column="0" Content="🔴 Record" Command="{Binding ToggleRecordCommand}" HorizontalAlignment="Stretch" />
+                    <Button Grid.Column="1" Content="🗑️" Command="{Binding ClearStepsCommand}" Margin="4,0,0,0" ToolTip.Tip="Clear Steps" />
+                </Grid>
+            </StackPanel>
+
+            <!-- Steps List -->
+            <Border Grid.Row="1" Background="{DynamicResource ControlFillColorDefaultBrush}" CornerRadius="6" Padding="6">
+                <ScrollViewer>
+                    <ItemsControl ItemsSource="{Binding RecordedSteps}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding}" FontSize="11" Margin="0,2" FontFamily="Consolas" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Border>
+
+            <!-- CTL-REC-02: Save & Load -->
+            <StackPanel Grid.Row="2" Spacing="4" Margin="0,8,0,0">
+                <Button Content="💾 Save Scenario..." Command="{Binding SaveScenarioCommand}" HorizontalAlignment="Stretch" />
+                <Button Content="📂 Load &amp; Replay..." Command="{Binding LoadReplayCommand}" HorizontalAlignment="Stretch" />
+            </StackPanel>
+        </Grid>
+    </Border>
+</UserControl>

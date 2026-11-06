@@ -1,6 +1,6 @@
 using Avalonia.Controls;
 
-namespace Percolator.Simulator.Views;
+namespace Percolator.Simulator.Features.Shell;
 
 public partial class MainWindow : Window
 {

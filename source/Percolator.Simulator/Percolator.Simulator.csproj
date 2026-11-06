@@ -8,7 +8,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Folder Include="Models\" />
     <AvaloniaResource Include="Assets\**" />
   </ItemGroup>
 
@@ -29,10 +28,11 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" />
   </ItemGroup>
 
-  <!-- Real Infrastructure Project References -->
+  <!-- Real Infrastructure & Protocol Project References -->
   <ItemGroup>
     <ProjectReference Include="..\Percolator.Domain\Percolator.Domain.csproj" />
     <ProjectReference Include="..\Percolator.Application\Percolator.Application.csproj" />
+    <ProjectReference Include="..\Percolator.Infrastructure\Percolator.Infrastructure.csproj" />
     <ProjectReference Include="..\Percolator.PluginSdk\Percolator.PluginSdk.csproj" />
     <ProjectReference Include="..\Percolator.Apps.Chat\Percolator.Apps.Chat.csproj" />
     <ProjectReference Include="..\Percolator.Apps.Discovery\Percolator.Apps.Discovery.csproj" />

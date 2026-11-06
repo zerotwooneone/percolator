@@ -1,0 +1,27 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Percolator.Simulator.Features.Shell"
+             xmlns:topology="using:Percolator.Simulator.Features.Topology"
+             xmlns:relayed="using:Percolator.Simulator.Features.RelayedChat"
+             x:Class="Percolator.Simulator.Features.Shell.WorkbenchView"
+             x:DataType="vm:WorkbenchViewModel">
+
+    <UserControl.DataTemplates>
+        <DataTemplate DataType="{x:Type topology:PersonaCardViewModel}">
+            <topology:PersonaCardView />
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type relayed:RelayCardViewModel}">
+            <relayed:RelayCardView />
+        </DataTemplate>
+    </UserControl.DataTemplates>
+
+    <Border Background="{DynamicResource SolidBackgroundFillColorBaseBrush}" Padding="8">
+        <ItemsControl ItemsSource="{Binding PinnedCardViewModels}">
+            <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <UniformGrid Columns="2" Rows="2" />
+                </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+        </ItemsControl>
+    </Border>
+</UserControl>

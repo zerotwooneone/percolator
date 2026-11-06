@@ -1,0 +1,120 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Percolator.Simulator.Features.Topology"
+             x:Class="Percolator.Simulator.Features.Topology.PersonaCardView"
+             x:DataType="vm:PersonaCardViewModel">
+
+    <Border Background="{DynamicResource SolidBackgroundFillColorSecondaryBrush}"
+            BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Padding="12"
+            Margin="6">
+        <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
+            <!-- Header: Avatar, Name, Endpoint, Reroll, Listening CTL-PER-01, 02 -->
+            <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,10">
+                <Border Grid.Column="0" Width="36" Height="36" Background="#0078D4" CornerRadius="18">
+                    <TextBlock Text="👤" FontSize="18" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <StackPanel Grid.Column="1" Margin="10,0" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding DisplayName}" FontWeight="Bold" FontSize="14" />
+                    <TextBlock Text="{Binding BoundEndpoint}" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                </StackPanel>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                    <!-- CTL-PER-01: Reroll Profile -->
+                    <Button Content="🎲"
+                            Command="{Binding RerollProfileCommand}"
+                            Padding="6,4"
+                            ToolTip.Tip="Reroll Profile (Phase 6B)" />
+                    <!-- CTL-PER-02: Listening Toggle -->
+                    <ToggleSwitch IsChecked="{Binding IsListening}"
+                                  OnContent="Listening" OffContent="Muted" />
+                </StackPanel>
+            </Grid>
+
+            <!-- Features & Autopilot Flyouts (CTL-PER-03..12) -->
+            <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
+                <!-- Features Dropdown -->
+                <DropDownButton Content="⚙️ Features ▼">
+                    <DropDownButton.Flyout>
+                        <Flyout Placement="Bottom">
+                            <StackPanel Spacing="6" MinWidth="200" Margin="4">
+                                <TextBlock Text="Capabilities &amp; Routing" FontWeight="Bold" FontSize="11" />
+                                <CheckBox Content="Allow Peer Discovery" IsChecked="{Binding AllowPeerDiscovery}" />
+                                <CheckBox Content="Allow File Transfers" IsChecked="{Binding AllowFileTransfers}" />
+                                <CheckBox Content="Send Read Receipts" IsChecked="{Binding SendReadReceipts}" />
+                                <CheckBox Content="Relay-Only Routing (Hide IP)" IsChecked="{Binding RelayOnlyRouting}" />
+                            </StackPanel>
+                        </Flyout>
+                    </DropDownButton.Flyout>
+                </DropDownButton>
+
+                <!-- Autopilot Dropdown -->
+                <DropDownButton Content="🤖 Autopilot ▼">
+                    <DropDownButton.Flyout>
+                        <Flyout Placement="Bottom">
+                            <StackPanel Spacing="6" MinWidth="220" Margin="4">
+                                <TextBlock Text="Automated Bot Responses" FontWeight="Bold" FontSize="11" />
+                                <CheckBox Content="Auto-Accept Handshakes" IsChecked="{Binding AutoAcceptHandshakes}" />
+                                <CheckBox Content="Auto-Reply 'Pong'" IsChecked="{Binding AutoReplyPong}" />
+                                <CheckBox Content="Auto-Replenish PreKeys" IsChecked="{Binding AutoReplenishPreKeys}" />
+                                <CheckBox Content="Auto-Share Profile on Connect" IsChecked="{Binding AutoShareProfile}" />
+                                <CheckBox Content="Auto-Accept Group Invites" IsChecked="{Binding AutoAcceptGroupInvites}" />
+                                <CheckBox Content="Auto-Accept File Transfers" IsChecked="{Binding AutoAcceptFileTransfers}" />
+                            </StackPanel>
+                        </Flyout>
+                    </DropDownButton.Flyout>
+                </DropDownButton>
+
+                <!-- CTL-PER-13: Relay Bar -->
+                <Button Content="📬 Register Relay" Command="{Binding RegisterRelayCommand}" />
+                <Button Content="🔑 Publish PreKeys" Command="{Binding PublishPreKeysCommand}" />
+            </StackPanel>
+
+            <!-- Pending Banner CTL-PER-14 -->
+            <Border Grid.Row="2" Background="#263859" CornerRadius="6" Padding="8,6" Margin="0,0,0,8">
+                <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Grid.Column="0" Text="Pending Handshake from Silent Otter" VerticalAlignment="Center" FontSize="11" FontWeight="SemiBold" />
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
+                        <Button Content="✓ Accept" Command="{Binding AcceptPendingHandshakeCommand}" Classes="accent" Padding="6,2" />
+                        <Button Content="✕ Reject" Command="{Binding RejectPendingHandshakeCommand}" Padding="6,2" />
+                        <Button Content="🚫 Block" Command="{Binding BlockPendingHandshakeCommand}" Padding="6,2" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <!-- Chat Tab Transcript CTL-PER-17, 18, 20 -->
+            <Border Grid.Row="3" Background="{DynamicResource ControlFillColorDefaultBrush}" CornerRadius="6" Padding="8">
+                <ScrollViewer>
+                    <ItemsControl ItemsSource="{Binding ChatMessages}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                                        CornerRadius="4" Padding="6,4" Margin="0,2">
+                                    <TextBlock Text="{Binding}" FontSize="12" />
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Border>
+
+            <!-- Compose Bar CTL-PER-18, 19 -->
+            <Grid Grid.Row="4" ColumnDefinitions="Auto,*,Auto" Margin="0,8,0,0">
+                <ComboBox Grid.Column="0" SelectedIndex="0" Margin="0,0,6,0">
+                    <ComboBoxItem Content="Timer: Off" />
+                    <ComboBoxItem Content="Timer: 1m" />
+                    <ComboBoxItem Content="Timer: 1h" />
+                </ComboBox>
+                <TextBox Grid.Column="1"
+                         Text="{Binding ComposeMessageText}"
+                         Watermark="Type a message (CTL-PER-18)..." />
+                <Button Grid.Column="2"
+                        Content="Send"
+                        Command="{Binding SendMessageCommand}"
+                        Classes="accent"
+                        Margin="6,0,0,0" />
+            </Grid>
+        </Grid>
+    </Border>
+</UserControl>

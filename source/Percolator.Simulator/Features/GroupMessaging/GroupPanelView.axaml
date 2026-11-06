@@ -1,0 +1,22 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Percolator.Simulator.Features.GroupMessaging"
+             x:Class="Percolator.Simulator.Features.GroupMessaging.GroupPanelView"
+             x:DataType="vm:GroupPanelViewModel">
+
+    <Border Background="{DynamicResource SolidBackgroundFillColorSecondaryBrush}"
+            BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Padding="12"
+            Margin="6">
+        <StackPanel Spacing="8">
+            <TextBlock Text="👥 Group Messaging Inspector (Phase 7)" FontWeight="Bold" FontSize="14" />
+            <TextBlock Text="ZK Presentation Proofs &amp; SenderKey Ratchet Fanout" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+            <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,8,0,0">
+                <Button Content="+ Add Member ▼" Command="{Binding AddMemberCommand}" />
+                <Button Content="🌊 Flood 25 Messages" Command="{Binding FloodMessagesCommand}" />
+            </StackPanel>
+        </StackPanel>
+    </Border>
+</UserControl>
