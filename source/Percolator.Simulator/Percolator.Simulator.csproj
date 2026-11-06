@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('Windows'))">net10.0-windows10.0.19041.0;net10.0</TargetFrameworks>
