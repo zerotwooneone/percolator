@@ -8,6 +8,8 @@ using Percolator.Application2.Delivery;
 using Percolator.Application2.Delivery.Ports;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.ValueObjects;
+using Percolator.Domain.Delivery.Hosting;
+using Percolator.PluginSdk;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.Infrastructure.Protos;
@@ -19,17 +21,20 @@ namespace Percolator.Simulator.Features.Topology;
 internal sealed class SimulatorTransportDispatcher : ITransportDispatcher
 {
     private readonly ITransportClientInvoker _invoker;
+    private readonly IPeerMailboxRoutingRepository _routingRepo;
     private readonly ISimulatedWorldStateService _worldState;
     private readonly ISimulatorLogSink _logSink;
     private readonly string _senderDisplayName;
 
     public SimulatorTransportDispatcher(
         ITransportClientInvoker invoker,
+        IPeerMailboxRoutingRepository routingRepo,
         ISimulatedWorldStateService worldState,
         ISimulatorLogSink logSink,
         string senderDisplayName)
     {
         _invoker = invoker ?? throw new ArgumentNullException(nameof(invoker));
+        _routingRepo = routingRepo ?? throw new ArgumentNullException(nameof(routingRepo));
         _worldState = worldState ?? throw new ArgumentNullException(nameof(worldState));
         _logSink = logSink ?? throw new ArgumentNullException(nameof(logSink));
         _senderDisplayName = senderDisplayName;
@@ -114,18 +119,23 @@ internal sealed class SimulatorTransportDispatcher : ITransportDispatcher
 
                     if (relayEndpoint == null || !targetRoutingToken.HasValue || targetDeliveryToken == null)
                     {
-                        var targetHost = job.RecipientIdentityId.HasValue ? _worldState.FindPersonaHostByIdentity(job.RecipientIdentityId.Value) : null;
-                        if (targetHost?.HomeRelay != null)
+                        if (job.RecipientIdentityId.HasValue)
                         {
-                            relayEndpoint ??= RelayEndpoint.FromHostAndPort("127.0.0.1", targetHost.HomeRelay.BoundPort);
-                            targetRoutingToken ??= targetHost.MailboxRoutingToken;
-                            targetDeliveryToken ??= targetHost.MailboxDeliveryToken;
+                            var capability = await _routingRepo.GetByPeerIdAsync(job.RecipientIdentityId.Value, ct);
+                            if (capability != null)
+                            {
+                                relayEndpoint ??= capability.RelayEndpoint;
+                                targetRoutingToken ??= capability.RoutingToken;
+                                targetDeliveryToken ??= capability.DeliveryToken;
+                            }
                         }
                     }
 
-                    if (relayEndpoint == null)
+                    if (relayEndpoint == null || !targetRoutingToken.HasValue || targetDeliveryToken == null)
                     {
-                        return DomainResult.Failure(new DomainError("MISSING_RELAY_ENDPOINT", "Relay endpoint is required for RelayedOneToOne route."));
+                        return DomainResult.Failure(new DomainError(
+                            "MISSING_RELAY_ROUTING_CAPABILITY",
+                            $"No relay routing capability found in local repository for peer '{(job.RecipientIdentityId.HasValue ? job.RecipientIdentityId.Value.ToString() : "unknown")}'."));
                     }
 
                     var endpointStr = relayEndpoint.Value;

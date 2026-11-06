@@ -237,7 +237,8 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             services.AddScoped<ITransportDispatcher>(sp =>
             {
                 var invoker = sp.GetRequiredService<ITransportClientInvoker>();
-                return new SimulatorTransportDispatcher(invoker, _worldState, _logSink, DisplayName);
+                var routingRepo = sp.GetRequiredService<IPeerMailboxRoutingRepository>();
+                return new SimulatorTransportDispatcher(invoker, routingRepo, _worldState, _logSink, DisplayName);
             });
 
             services.AddScoped<OutboxWorker>();
