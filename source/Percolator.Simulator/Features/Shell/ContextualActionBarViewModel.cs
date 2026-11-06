@@ -1,5 +1,7 @@
+using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Percolator.Simulator.Features.DirectChat;
 using R3;
 
 namespace Percolator.Simulator.Features.Shell;
@@ -8,6 +10,9 @@ internal sealed partial class ContextualActionBarViewModel : ViewModelBase
 {
     private readonly ISelectionStateService _selectionState;
     private readonly IStatusToastService _toastService;
+    private readonly DirectHandshakeOrchestrator _handshakeOrchestrator;
+    private SimulatedNodeSummary? _currentPrimary;
+    private SimulatedNodeSummary? _currentSecondary;
 
     [ObservableProperty]
     private string _initiatorText = "(None selected)";
@@ -20,10 +25,12 @@ internal sealed partial class ContextualActionBarViewModel : ViewModelBase
 
     public ContextualActionBarViewModel(
         ISelectionStateService selectionState,
-        IStatusToastService toastService)
+        IStatusToastService toastService,
+        DirectHandshakeOrchestrator handshakeOrchestrator)
     {
         _selectionState = selectionState;
         _toastService = toastService;
+        _handshakeOrchestrator = handshakeOrchestrator;
 
         Observable.CombineLatest(
             _selectionState.PrimarySelectedNode,
@@ -31,6 +38,8 @@ internal sealed partial class ContextualActionBarViewModel : ViewModelBase
             (primary, secondary) => (Primary: primary, Secondary: secondary))
             .Subscribe(pair =>
             {
+                _currentPrimary = pair.Primary;
+                _currentSecondary = pair.Secondary;
                 InitiatorText = pair.Primary?.DisplayName ?? "(None selected)";
                 TargetText = pair.Secondary?.DisplayName ?? "(None selected)";
                 HasPairSelected = pair.Primary is not null && pair.Secondary is not null;
@@ -45,7 +54,19 @@ internal sealed partial class ContextualActionBarViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private void DirectHandshake() => _toastService.ShowPlaceholder("Direct Handshake", "Phase 3B");
+    private async Task DirectHandshakeAsync()
+    {
+        if (_currentPrimary is null || _currentSecondary is null)
+        {
+            _toastService.ShowToast(
+                "Selection Required",
+                "Select an Initiator (1°) and Target (2°) persona in the Roster first.",
+                ToastSeverity.Warning);
+            return;
+        }
+
+        await _handshakeOrchestrator.InitiateDirectHandshakeAsync(_currentPrimary.Id, _currentSecondary.Id);
+    }
 
     [RelayCommand]
     private void RelayedHandshake() => _toastService.ShowPlaceholder("Relayed Handshake", "Phase 5");

@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using ObservableCollections;
+using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Simulator.Features.Shell;
 
 namespace Percolator.Simulator.Features.Topology;
@@ -22,6 +23,7 @@ internal interface ISimulatedWorldStateService : IDisposable
     void RegisterSwarm(SimulatedNodeSummary swarm);
 
     ISimulatedPersonaHost? GetPersonaHost(SimulatedNodeId id);
+    ISimulatedPersonaHost? FindPersonaHostByIdentity(PublicIdentityId identityId);
 
     void TogglePinCard(SimulatedNodeSummary node);
     void UnpinCard(SimulatedNodeId nodeId);
@@ -74,6 +76,11 @@ internal sealed class SimulatedWorldStateService : ISimulatedWorldStateService
     {
         _personaHosts.TryGetValue(id, out var host);
         return host;
+    }
+
+    public ISimulatedPersonaHost? FindPersonaHostByIdentity(PublicIdentityId identityId)
+    {
+        return _personaHosts.Values.FirstOrDefault(h => h.PublicIdentityId == identityId);
     }
 
     public void TogglePinCard(SimulatedNodeSummary node)

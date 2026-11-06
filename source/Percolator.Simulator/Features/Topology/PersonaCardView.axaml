@@ -1,66 +1,56 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:vm="using:Percolator.Simulator.Features.Topology"
+             mc:Ignorable="d" d:DesignWidth="450" d:DesignHeight="550"
              x:Class="Percolator.Simulator.Features.Topology.PersonaCardView"
              x:DataType="vm:PersonaCardViewModel">
 
-    <Border Background="{DynamicResource SolidBackgroundFillColorSecondaryBrush}"
+    <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
             BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
             BorderThickness="1"
             CornerRadius="8"
-            Padding="12"
+            Padding="14"
             Margin="6">
         <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
-            <!-- Header: Avatar, Name, Endpoint, Reroll, Listening CTL-PER-01, 02 -->
+            <!-- Header CTL-PER-01, 02 -->
             <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,10">
-                <Border Grid.Column="0" Width="36" Height="36" Background="#0078D4" CornerRadius="18" ClipToBounds="True">
-                    <Panel>
-                        <!-- Fallback Emoji if Bitmap not set -->
-                        <TextBlock Text="👤" FontSize="18" HorizontalAlignment="Center" VerticalAlignment="Center"
-                                   IsVisible="{Binding IdenticonBitmap, Converter={x:Static ObjectConverters.IsNull}}" />
-                        <!-- Real Identicon Bitmap -->
-                        <Image Source="{Binding IdenticonBitmap}" Width="36" Height="36"
-                               IsVisible="{Binding IdenticonBitmap, Converter={x:Static ObjectConverters.IsNotNull}}" />
-                    </Panel>
+                <Border Grid.Column="0" Width="44" Height="44" CornerRadius="6" ClipToBounds="True" Background="#333333" Margin="0,0,10,0">
+                    <Image Source="{Binding IdenticonBitmap}" Stretch="UniformToFill" />
                 </Border>
-                <StackPanel Grid.Column="1" Margin="10,0" VerticalAlignment="Center">
+                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
                     <TextBlock Text="{Binding DisplayName}" FontWeight="Bold" FontSize="14" />
                     <TextBlock Text="{Binding BoundEndpoint}" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                 </StackPanel>
-                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                    <!-- CTL-PER-01: Reroll Profile -->
-                    <Button Content="🎲"
-                            Command="{Binding RerollProfileCommand}"
-                            Padding="6,4"
-                            ToolTip.Tip="Reroll Profile (Phase 6B)" />
-                    <!-- CTL-PER-02: Listening Toggle -->
-                    <ToggleSwitch IsChecked="{Binding IsListening}"
-                                  OnContent="Listening" OffContent="Muted" />
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                    <Button Content="🎲" ToolTip.Tip="Reroll Profile (CTL-PER-01)" Command="{Binding RerollProfileCommand}" Padding="6,4" />
+                    <ToggleButton Content="🟢" IsChecked="{Binding IsListening}" ToolTip.Tip="Toggle Ingress (Listening/Muted) (CTL-PER-02)" Padding="6,4" />
                 </StackPanel>
             </Grid>
 
-            <!-- Features & Autopilot Flyouts (CTL-PER-03..12) -->
-            <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
-                <!-- Features Dropdown -->
-                <DropDownButton Content="⚙️ Features ▼">
+            <!-- Toggles & Action Toolbar CTL-PER-03..12 -->
+            <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="6" Margin="0,0,0,10">
+                <!-- Dropdown for Capabilities -->
+                <DropDownButton Content="⚙️ Capabilities ▼">
                     <DropDownButton.Flyout>
                         <Flyout Placement="Bottom">
                             <StackPanel Spacing="6" MinWidth="200" Margin="4">
-                                <TextBlock Text="Capabilities &amp; Routing" FontWeight="Bold" FontSize="11" />
-                                <CheckBox Content="Allow Peer Discovery" IsChecked="{Binding AllowPeerDiscovery}" />
-                                <CheckBox Content="Allow File Transfers" IsChecked="{Binding AllowFileTransfers}" />
-                                <CheckBox Content="Send Read Receipts" IsChecked="{Binding SendReadReceipts}" />
-                                <CheckBox Content="Relay-Only Routing (Hide IP)" IsChecked="{Binding RelayOnlyRouting}" />
+                                <TextBlock Text="Protocol Capabilities" FontWeight="Bold" FontSize="11" />
+                                <CheckBox Content="Allow Peer Discovery (CTL-PER-03)" IsChecked="{Binding AllowPeerDiscovery}" />
+                                <CheckBox Content="Allow File Transfers (CTL-PER-04)" IsChecked="{Binding AllowFileTransfers}" />
+                                <CheckBox Content="Send Read Receipts (CTL-PER-05)" IsChecked="{Binding SendReadReceipts}" />
+                                <CheckBox Content="Relay-Only Routing (CTL-PER-06)" IsChecked="{Binding RelayOnlyRouting}" />
                             </StackPanel>
                         </Flyout>
                     </DropDownButton.Flyout>
                 </DropDownButton>
 
-                <!-- Autopilot Dropdown -->
+                <!-- Dropdown for Autopilot -->
                 <DropDownButton Content="🤖 Autopilot ▼">
                     <DropDownButton.Flyout>
                         <Flyout Placement="Bottom">
-                            <StackPanel Spacing="6" MinWidth="220" Margin="4">
+                            <StackPanel Spacing="6" MinWidth="200" Margin="4">
                                 <TextBlock Text="Automated Bot Responses" FontWeight="Bold" FontSize="11" />
                                 <CheckBox Content="Auto-Accept Handshakes" IsChecked="{Binding AutoAcceptHandshakes}" />
                                 <CheckBox Content="Auto-Reply 'Pong'" IsChecked="{Binding AutoReplyPong}" />
@@ -79,9 +69,10 @@
             </StackPanel>
 
             <!-- Pending Banner CTL-PER-14 -->
-            <Border Grid.Row="2" Background="#263859" CornerRadius="6" Padding="8,6" Margin="0,0,0,8">
+            <Border Grid.Row="2" Background="#263859" CornerRadius="6" Padding="8,6" Margin="0,0,0,8"
+                    IsVisible="{Binding HasPendingHandshake}">
                 <Grid ColumnDefinitions="*,Auto">
-                    <TextBlock Grid.Column="0" Text="Pending Handshake from Silent Otter" VerticalAlignment="Center" FontSize="11" FontWeight="SemiBold" />
+                    <TextBlock Grid.Column="0" Text="{Binding PendingHandshakeText}" VerticalAlignment="Center" FontSize="11" FontWeight="SemiBold" />
                     <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
                         <Button Content="✓ Accept" Command="{Binding AcceptPendingHandshakeCommand}" Classes="accent" Padding="6,2" />
                         <Button Content="✕ Reject" Command="{Binding RejectPendingHandshakeCommand}" Padding="6,2" />
@@ -98,7 +89,7 @@
                             <DataTemplate>
                                 <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
                                         CornerRadius="4" Padding="6,4" Margin="0,2">
-                                    <TextBlock Text="{Binding}" FontSize="12" />
+                                    <TextBlock Text="{Binding DisplayText}" FontSize="12" />
                                 </Border>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>

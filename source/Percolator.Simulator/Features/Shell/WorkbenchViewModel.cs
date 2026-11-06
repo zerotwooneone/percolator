@@ -5,6 +5,8 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ObservableCollections;
+using Percolator.Simulator.Features.DirectChat;
+using Percolator.Simulator.Features.Logging;
 using Percolator.Simulator.Features.RelayedChat;
 using Percolator.Simulator.Features.Topology;
 using R3;
@@ -15,15 +17,33 @@ internal sealed partial class WorkbenchViewModel : ViewModelBase
 {
     private readonly ISimulatedWorldStateService _worldState;
     private readonly IStatusToastService _toastService;
+    private readonly ISimulatorStateBus _stateBus;
+    private readonly DirectHandshakeOrchestrator _handshakeOrchestrator;
+    private readonly DirectChatCoordinator _chatCoordinator;
+    private readonly AutopilotPongResponder _pongResponder;
+    private readonly ISelectionStateService _selectionState;
+    private readonly ISimulatorLogSink _logSink;
 
     public ObservableCollection<object> PinnedCardViewModels { get; } = new();
 
     public WorkbenchViewModel(
         ISimulatedWorldStateService worldState,
-        IStatusToastService toastService)
+        IStatusToastService toastService,
+        ISimulatorStateBus stateBus,
+        DirectHandshakeOrchestrator handshakeOrchestrator,
+        DirectChatCoordinator chatCoordinator,
+        AutopilotPongResponder pongResponder,
+        ISelectionStateService selectionState,
+        ISimulatorLogSink logSink)
     {
         _worldState = worldState;
         _toastService = toastService;
+        _stateBus = stateBus;
+        _handshakeOrchestrator = handshakeOrchestrator;
+        _chatCoordinator = chatCoordinator;
+        _pongResponder = pongResponder;
+        _selectionState = selectionState;
+        _logSink = logSink;
 
         // Initialize pinned cards from world state
         foreach (var card in _worldState.PinnedCards)
@@ -66,7 +86,17 @@ internal sealed partial class WorkbenchViewModel : ViewModelBase
         return node.NodeType switch
         {
             SimulatedNodeType.Relay => new RelayCardViewModel(node, _toastService),
-            _ => new PersonaCardViewModel(node, _toastService, _worldState.GetPersonaHost(node.Id))
+            _ => new PersonaCardViewModel(
+                node,
+                _toastService,
+                _stateBus,
+                _handshakeOrchestrator,
+                _chatCoordinator,
+                _pongResponder,
+                _selectionState,
+                _worldState,
+                _worldState.GetPersonaHost(node.Id),
+                _logSink)
         };
     }
 }

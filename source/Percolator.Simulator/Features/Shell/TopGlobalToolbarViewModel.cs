@@ -9,20 +9,26 @@ namespace Percolator.Simulator.Features.Shell;
 internal sealed partial class TopGlobalToolbarViewModel : ViewModelBase
 {
     private readonly ISimulatedWorldStateService _worldState;
+    private readonly ISelectionStateService _selectionState;
     private readonly IStatusToastService _toastService;
     private readonly ISimulatorLogSink _logSink;
+    private readonly ISimulatorStateBus _stateBus;
     private readonly DesignDataService _designData;
     private bool _hasAddedRealPersona;
 
     public TopGlobalToolbarViewModel(
         ISimulatedWorldStateService worldState,
+        ISelectionStateService selectionState,
         IStatusToastService toastService,
         ISimulatorLogSink logSink,
+        ISimulatorStateBus stateBus,
         DesignDataService designData)
     {
         _worldState = worldState;
+        _selectionState = selectionState;
         _toastService = toastService;
         _logSink = logSink;
+        _stateBus = stateBus;
         _designData = designData;
     }
 
@@ -44,7 +50,7 @@ internal sealed partial class TopGlobalToolbarViewModel : ViewModelBase
         var port = LoopbackPortAllocator.AllocateAvailablePort();
 
         // 3. Create and bootstrap isolated SimulatedPersonaHost
-        var host = new SimulatedPersonaHost(nodeId, name, identiconBytes, port, _logSink);
+        var host = new SimulatedPersonaHost(nodeId, name, identiconBytes, port, _logSink, _stateBus, _worldState);
         await host.StartAsync();
 
         // 4. Register persona in world state and pin to workbench
@@ -58,6 +64,17 @@ internal sealed partial class TopGlobalToolbarViewModel : ViewModelBase
         _worldState.RegisterPersona(summary, host);
         _worldState.TogglePinCard(summary);
 
+        // 5. Auto-assign to Primary (1°) or Secondary (2°) selection slot if empty
+        if (_selectionState.PrimarySelectedNode.CurrentValue is null)
+        {
+            _selectionState.SetPrimary(summary);
+        }
+        else if (_selectionState.SecondarySelectedNode.CurrentValue is null &&
+                 _selectionState.PrimarySelectedNode.CurrentValue.Id != summary.Id)
+        {
+            _selectionState.SetSecondary(summary);
+        }
+
         _toastService.ShowToast("Persona Spawned", $"Spawned '{name}' on port {host.BoundPort}.", ToastSeverity.Success);
     }
 
@@ -66,6 +83,9 @@ internal sealed partial class TopGlobalToolbarViewModel : ViewModelBase
 
     [RelayCommand]
     private void AddRelay() => _toastService.ShowPlaceholder("Add Relay", "Phase 5");
+
+    [RelayCommand]
+    private void RunScenario() => _toastService.ShowPlaceholder("Run Scenario", "Phase 4");
 
     [RelayCommand]
     private void AdvanceOneMinute() => _toastService.ShowPlaceholder("+1 Minute", "Phase 6A");
@@ -81,6 +101,9 @@ internal sealed partial class TopGlobalToolbarViewModel : ViewModelBase
     {
         _hasAddedRealPersona = false;
         await _worldState.ClearAllAsync();
+        _selectionState.SetPrimary(null);
+        _selectionState.SetSecondary(null);
+        _selectionState.ClearMultiSelection();
         _toastService.ShowToast("World Reset", "All simulated hosts, ports, and cards have been cleared.", ToastSeverity.Warning);
     }
 }

@@ -3,6 +3,7 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Percolator.Simulator.Features.DirectChat;
 using Percolator.Simulator.Features.Logging;
 using Percolator.Simulator.Features.Scenarios;
 using Percolator.Simulator.Features.Shell;
@@ -38,8 +39,11 @@ public partial class App : Avalonia.Application
         services.AddSingleton<ISimulatedWorldStateService, SimulatedWorldStateService>();
         services.AddSingleton<IStatusToastService, StatusToastService>();
 
-        // 3. Shell & Domain Services
+        // 3. Shell & Orchestration Services
         services.AddSingleton<DesignDataService>();
+        services.AddSingleton<DirectHandshakeOrchestrator>();
+        services.AddSingleton<DirectChatCoordinator>();
+        services.AddSingleton<AutopilotPongResponder>();
 
         // 4. ViewModels
         services.AddTransient<TopGlobalToolbarViewModel>();
@@ -51,6 +55,9 @@ public partial class App : Avalonia.Application
         services.AddTransient<MainWindowViewModel>();
 
         _services = services.BuildServiceProvider();
+
+        // Eagerly resolve autopilot pong responder so it activates its state bus listener
+        _services.GetRequiredService<AutopilotPongResponder>();
 
         // Log initialization event
         logEngine.Log(new SimulatorLogEntry(
@@ -74,6 +81,9 @@ public partial class App : Avalonia.Application
 
             desktop.Exit += async (_, _) =>
             {
+                var pong = _services?.GetService<AutopilotPongResponder>();
+                pong?.Dispose();
+
                 var worldState = _services?.GetService<ISimulatedWorldStateService>();
                 if (worldState != null)
                 {
