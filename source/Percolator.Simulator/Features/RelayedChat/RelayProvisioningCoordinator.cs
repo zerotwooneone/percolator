@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -122,11 +122,7 @@ internal sealed class RelayProvisioningCoordinator
         try
         {
             var existingBundle = await relay.PreKeyRepository.GetAsync(persona.PublicIdentityId, DeviceId.Primary, ct);
-            uint startId = 1;
-            if (existingBundle != null && existingBundle.OneTimePreKeys.Count > 0)
-            {
-                startId = existingBundle.OneTimePreKeys.Max(k => k.KeyId) + 1;
-            }
+            uint startId = persona.AllocateNextOpkIdRange(count);
 
             // 1. Generate OTPKs
             var otpkList = new List<(uint KeyId, DhPublicKey Key)>();
@@ -149,7 +145,7 @@ internal sealed class RelayProvisioningCoordinator
             // 3. Ensure mailbox is registered via gRPC
             await RegisterMailboxAsync(persona, relay, ct);
 
-            // 4. Construct PreKeyBundlePayloadProto with existing unconsumed OPKs + newly generated OPKs
+            // 4. Construct PreKeyBundlePayloadProto with newly generated OPKs
             var payload = new PreKeyBundlePayloadProto
             {
                 OwnerIdentityId = ByteString.CopyFrom(persona.PublicIdentityId.ToByteArray()),
@@ -160,6 +156,8 @@ internal sealed class RelayProvisioningCoordinator
                 PrekeySignature = ByteString.CopyFrom(persona.SignedPreKeySignature.Span),
                 PublishedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow)
             };
+
+
 
             if (existingBundle != null)
             {

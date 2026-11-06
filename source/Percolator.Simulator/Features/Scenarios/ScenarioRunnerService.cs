@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -515,11 +515,7 @@ internal sealed class ScenarioRunnerService
         if (!aliasMap.TryGetValue(step.Alias, out var host))
             throw new ScenarioExecutionException($"Persona '{step.Alias}' not found.");
 
-        host.SetListening(step.IsListening);
-        if (step.IsListening && host.HomeRelay != null)
-        {
-            await host.DrainMailboxAsync(ct);
-        }
+        await host.SetListeningAsync(step.IsListening, ct);
     }
 
     private async Task ExecuteSendDirectMessageAsync(

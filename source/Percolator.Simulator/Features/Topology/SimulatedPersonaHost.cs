@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
@@ -63,6 +63,9 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
     private readonly ISimulatorStateBus _stateBus;
     private readonly ISimulatedWorldStateService _worldState;
     private readonly ReactiveProperty<bool> _isListening = new(true);
+    private readonly SemaphoreSlim _listeningGate = new(1, 1);
+    private readonly object _opkIdLock = new();
+    private uint _nextOpkId = 1;
     private readonly string _nodeTempDirectory;
     private readonly EphemeralPrivateKey _identityPrivateKey;
     private readonly EphemeralPrivateKey _signedPreKeyPrivate;
@@ -345,6 +348,17 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             $"Persona host started and listening on https://127.0.0.1:{BoundPort} (Identity: {PublicIdentityId})"));
     }
 
+    public uint AllocateNextOpkIdRange(int count)
+    {
+        if (count <= 0) throw new ArgumentOutOfRangeException(nameof(count), "Count must be positive.");
+        lock (_opkIdLock)
+        {
+            uint start = _nextOpkId;
+            _nextOpkId += (uint)count;
+            return start;
+        }
+    }
+
     public PreKeyBundle CreatePreKeyBundle(uint? oneTimeKeyId = null)
     {
         return new PreKeyBundle(
@@ -499,51 +513,51 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         }
     }
 
-    public void SetListening(bool isListening)
+    public async Task SetListeningAsync(bool isListening, CancellationToken ct = default)
     {
-        _isListening.Value = isListening;
-        UiTaskRunner.FireAndForget(
-            async () =>
-            {
-                if (isListening)
-                {
-                    if (_transportServer is not null && !_transportServer.IsRunning)
-                    {
-                        await _transportServer.StartAsync(new PortNumber(BoundPort));
-                        _logSink.Log(new SimulatorLogEntry(
-                            DateTimeOffset.UtcNow,
-                            LogLevel.Information,
-                            DisplayName,
-                            Id,
-                            "HostLifecycle",
-                            "Ingress resumed (Listening)."));
-                    }
+        await _listeningGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            _isListening.Value = isListening;
 
-                    // Immediately drain any pending envelopes waiting in home relay mailbox
-                    if (HomeRelay != null)
-                    {
-                        await DrainMailboxAsync();
-                    }
-                }
-                else
+            if (isListening)
+            {
+                if (_transportServer is not null && !_transportServer.IsRunning)
                 {
-                    if (_transportServer is not null && _transportServer.IsRunning)
-                    {
-                        await _transportServer.StopAsync();
-                        _logSink.Log(new SimulatorLogEntry(
-                            DateTimeOffset.UtcNow,
-                            LogLevel.Information,
-                            DisplayName,
-                            Id,
-                            "HostLifecycle",
-                            "Ingress muted (Transport stopped)."));
-                    }
+                    await _transportServer.StartAsync(new PortNumber(BoundPort), ct).ConfigureAwait(false);
+                    _logSink.Log(new SimulatorLogEntry(
+                        DateTimeOffset.UtcNow,
+                        LogLevel.Information,
+                        DisplayName,
+                        Id,
+                        "HostLifecycle",
+                        "Ingress resumed (Listening)."));
                 }
-            },
-            category: "HostLifecycle",
-            logSink: _logSink,
-            nodeName: DisplayName,
-            nodeId: Id);
+
+                if (HomeRelay != null)
+                {
+                    await DrainMailboxAsync(ct).ConfigureAwait(false);
+                }
+            }
+            else
+            {
+                if (_transportServer is not null && _transportServer.IsRunning)
+                {
+                    await _transportServer.StopAsync(ct).ConfigureAwait(false);
+                    _logSink.Log(new SimulatorLogEntry(
+                        DateTimeOffset.UtcNow,
+                        LogLevel.Information,
+                        DisplayName,
+                        Id,
+                        "HostLifecycle",
+                        "Ingress muted (Transport stopped)."));
+                }
+            }
+        }
+        finally
+        {
+            _listeningGate.Release();
+        }
     }
 
     public async ValueTask StopAsync(CancellationToken ct = default)
@@ -578,6 +592,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         await StopAsync();
 
         _host?.Dispose();
+        _listeningGate.Dispose();
         _masterKeyHandle.Dispose();
         _isListening.Dispose();
         _identityPrivateKey.Dispose();

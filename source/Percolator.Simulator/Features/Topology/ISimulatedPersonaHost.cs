@@ -31,7 +31,8 @@ internal interface ISimulatedPersonaHost : IAsyncDisposable
     ISimulatedRelayHost? HomeRelay { get; set; }
 
     ReadOnlyReactiveProperty<bool> IsListening { get; }
-    void SetListening(bool isListening);
+    Task SetListeningAsync(bool isListening, CancellationToken ct = default);
+    uint AllocateNextOpkIdRange(int count);
 
     PreKeyBundle CreatePreKeyBundle(uint? oneTimeKeyId = null);
     Task<DomainResult> FlushOutboxAsync(CancellationToken ct = default);

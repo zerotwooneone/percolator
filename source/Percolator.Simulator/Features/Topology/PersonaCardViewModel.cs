@@ -363,7 +363,10 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
 
     partial void OnIsListeningChanged(bool value)
     {
-        _host?.SetListening(value);
+        if (_host != null)
+        {
+            UiTaskRunner.FireAndForget(() => _host.SetListeningAsync(value), "HostLifecycle");
+        }
         _flightRecorder?.RecordStep(new SetListeningStateStep(DisplayName, value));
     }
 
