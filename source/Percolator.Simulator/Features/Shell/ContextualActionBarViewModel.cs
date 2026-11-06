@@ -1,7 +1,13 @@
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Percolator.Simulator.Features.DirectChat;
+using Percolator.Simulator.Features.RelayedChat;
+using Percolator.Simulator.Features.Scenarios;
+using Percolator.Simulator.Features.Scenarios.Model;
+using Percolator.Simulator.Features.Topology;
 using R3;
 
 namespace Percolator.Simulator.Features.Shell;
@@ -11,6 +17,9 @@ internal sealed partial class ContextualActionBarViewModel : ViewModelBase
     private readonly ISelectionStateService _selectionState;
     private readonly IStatusToastService _toastService;
     private readonly DirectHandshakeOrchestrator _handshakeOrchestrator;
+    private readonly RelayProvisioningCoordinator _relayCoordinator;
+    private readonly ISimulatedWorldStateService _worldState;
+    private readonly IFlightRecorderStateService? _flightRecorder;
     private SimulatedNodeSummary? _currentPrimary;
     private SimulatedNodeSummary? _currentSecondary;
 
@@ -26,11 +35,17 @@ internal sealed partial class ContextualActionBarViewModel : ViewModelBase
     public ContextualActionBarViewModel(
         ISelectionStateService selectionState,
         IStatusToastService toastService,
-        DirectHandshakeOrchestrator handshakeOrchestrator)
+        DirectHandshakeOrchestrator handshakeOrchestrator,
+        RelayProvisioningCoordinator relayCoordinator,
+        ISimulatedWorldStateService worldState,
+        IFlightRecorderStateService? flightRecorder = null)
     {
         _selectionState = selectionState;
         _toastService = toastService;
         _handshakeOrchestrator = handshakeOrchestrator;
+        _relayCoordinator = relayCoordinator;
+        _worldState = worldState;
+        _flightRecorder = flightRecorder;
 
         Observable.CombineLatest(
             _selectionState.PrimarySelectedNode,
@@ -75,16 +90,115 @@ internal sealed partial class ContextualActionBarViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private void RelayedHandshake() => _toastService.ShowPlaceholder("Relayed Handshake", "Phase 5");
+    private async Task RelayedHandshakeAsync()
+    {
+        if (_currentPrimary is null || _currentSecondary is null)
+        {
+            _toastService.ShowToast(
+                "Selection Required",
+                "Select an Initiator (1°) and Target (2°) persona in the Roster first.",
+                ToastSeverity.Warning);
+            return;
+        }
+
+        var relay = _worldState.GetAllRelayHosts().FirstOrDefault();
+        if (relay == null)
+        {
+            _toastService.ShowToast(
+                "Relay Required",
+                "Spawn a Relay node first using '+ Add Relay' in the top toolbar.",
+                ToastSeverity.Warning);
+            return;
+        }
+
+        var primaryId = _currentPrimary.Id;
+        var secondaryId = _currentSecondary.Id;
+
+        var success = await UiTaskRunner.RunAsync(
+            () => _relayCoordinator.InitiateRelayedHandshakeAsync(primaryId, secondaryId, relay.Id),
+            category: "RelayedHandshake",
+            toastService: _toastService);
+
+        if (success)
+        {
+            _flightRecorder?.RecordStep(new InitiateRelayedHandshakeStep(_currentPrimary.DisplayName, _currentSecondary.DisplayName, relay.DisplayName));
+        }
+    }
+
+    [RelayCommand]
+    private async Task BulkRegisterMailboxesAsync()
+    {
+        var relay = _worldState.GetAllRelayHosts().FirstOrDefault();
+        if (relay == null)
+        {
+            _toastService.ShowToast(
+                "Relay Required",
+                "Spawn a Relay node first using '+ Add Relay' in the top toolbar.",
+                ToastSeverity.Warning);
+            return;
+        }
+
+        var personas = _worldState.Personas
+            .Select(p => _worldState.GetPersonaHost(p.Id))
+            .Where(h => h != null)
+            .Cast<ISimulatedPersonaHost>()
+            .ToList();
+
+        if (personas.Count == 0)
+        {
+            _toastService.ShowToast("No Personas", "Add personas to the world first.", ToastSeverity.Warning);
+            return;
+        }
+
+        var count = await UiTaskRunner.RunAsync(
+            () => _relayCoordinator.BulkRegisterMailboxesAsync(personas, relay),
+            category: "RelayProvisioning",
+            toastService: _toastService);
+
+        var names = personas.Select(p => p.DisplayName).ToList();
+        _flightRecorder?.RecordStep(new RegisterMailboxesStep(relay.DisplayName, names));
+
+        _toastService.ShowToast("Mailboxes Registered", $"Registered {count} mailboxes on relay '{relay.DisplayName}'.", ToastSeverity.Success);
+    }
+
+    [RelayCommand]
+    private async Task BulkPublishPreKeysAsync()
+    {
+        var relay = _worldState.GetAllRelayHosts().FirstOrDefault();
+        if (relay == null)
+        {
+            _toastService.ShowToast(
+                "Relay Required",
+                "Spawn a Relay node first using '+ Add Relay' in the top toolbar.",
+                ToastSeverity.Warning);
+            return;
+        }
+
+        var personas = _worldState.Personas
+            .Select(p => _worldState.GetPersonaHost(p.Id))
+            .Where(h => h != null)
+            .Cast<ISimulatedPersonaHost>()
+            .ToList();
+
+        if (personas.Count == 0)
+        {
+            _toastService.ShowToast("No Personas", "Add personas to the world first.", ToastSeverity.Warning);
+            return;
+        }
+
+        var count = await UiTaskRunner.RunAsync(
+            () => _relayCoordinator.BulkPublishPreKeysAsync(personas, relay, 25),
+            category: "RelayProvisioning",
+            toastService: _toastService);
+
+        var names = personas.Select(p => p.DisplayName).ToList();
+        _flightRecorder?.RecordStep(new PublishPreKeysStep(relay.DisplayName, names, 25));
+
+        _toastService.ShowToast("PreKeys Published", $"Published 25 OPKs for {count} personas on relay '{relay.DisplayName}'.", ToastSeverity.Success);
+    }
 
     [RelayCommand]
     private void SendFilePreset() => _toastService.ShowPlaceholder("Send File Preset", "Phase 9");
-
-    [RelayCommand]
-    private void BulkRegisterMailboxes() => _toastService.ShowPlaceholder("Bulk Register Mailboxes", "Phase 5");
-
-    [RelayCommand]
-    private void BulkPublishPreKeys() => _toastService.ShowPlaceholder("Bulk Publish PreKeys", "Phase 5");
 
     [RelayCommand]
     private void CreateGroupOnRelay() => _toastService.ShowPlaceholder("Create Group on Relay", "Phase 7");

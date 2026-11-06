@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "name": "02 Relayed Stealth and Chat",
+  "description": "Verifies relay node hosting, mailbox registration, prekey publication, stealth store-and-forward queued handshake with OPK consumption, unmuting auto-drain, and relayed chat delivery.",
+  "steps": [
+    {
+      "$type": "SpawnPersonas",
+      "aliases": [
+        "Alice",
+        "Bob"
+      ]
+    },
+    {
+      "$type": "SpawnRelay",
+      "relayAlias": "Relay-1"
+    },
+    {
+      "$type": "RegisterMailboxes",
+      "relayAlias": "Relay-1",
+      "personaAliases": [
+        "Alice",
+        "Bob"
+      ]
+    },
+    {
+      "$type": "PublishPreKeys",
+      "relayAlias": "Relay-1",
+      "personaAliases": [
+        "Alice",
+        "Bob"
+      ],
+      "oneTimeKeyCount": 25
+    },
+    {
+      "$type": "SetListeningState",
+      "alias": "Bob",
+      "isListening": false
+    },
+    {
+      "$type": "InitiateRelayedHandshake",
+      "initiatorAlias": "Alice",
+      "targetAlias": "Bob",
+      "relayAlias": "Relay-1"
+    },
+    {
+      "$type": "SetListeningState",
+      "alias": "Bob",
+      "isListening": true
+    },
+    {
+      "$type": "ApprovePendingHandshake",
+      "ownerAlias": "Bob",
+      "senderAlias": "Alice"
+    },
+    {
+      "$type": "SendDirectMessage",
+      "senderAlias": "Alice",
+      "recipientAlias": "Bob",
+      "text": "Hello from relayed mailbox!"
+    }
+  ],
+  "assertions": [
+    {
+      "$type": "AssertHostedOpkCount",
+      "relayAlias": "Relay-1",
+      "personaAlias": "Bob",
+      "expectedCount": 24
+    },
+    {
+      "$type": "AssertMailboxQueueDepth",
+      "relayAlias": "Relay-1",
+      "expectedDepth": 0
+    },
+    {
+      "$type": "AssertDirectRatchetSession",
+      "alias1": "Alice",
+      "alias2": "Bob"
+    },
+    {
+      "$type": "AssertMessageDelivered",
+      "recipientAlias": "Bob",
+      "expectedText": "Hello from relayed mailbox!"
+    },
+    {
+      "$type": "AssertZeroErrors"
+    }
+  ]
+}

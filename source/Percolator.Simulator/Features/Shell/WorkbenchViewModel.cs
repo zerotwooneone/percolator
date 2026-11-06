@@ -20,6 +20,7 @@ internal sealed class WorkbenchViewModel : ViewModelBase
     private readonly DirectHandshakeOrchestrator _handshakeOrchestrator;
     private readonly DirectChatCoordinator _chatCoordinator;
     private readonly AutopilotPongResponder _pongResponder;
+    private readonly RelayProvisioningCoordinator _relayCoordinator;
     private readonly ISelectionStateService _selectionState;
     private readonly ISimulatorLogSink _logSink;
     private readonly IFlightRecorderStateService? _flightRecorder;
@@ -33,6 +34,7 @@ internal sealed class WorkbenchViewModel : ViewModelBase
         DirectHandshakeOrchestrator handshakeOrchestrator,
         DirectChatCoordinator chatCoordinator,
         AutopilotPongResponder pongResponder,
+        RelayProvisioningCoordinator relayCoordinator,
         ISelectionStateService selectionState,
         ISimulatorLogSink logSink,
         IFlightRecorderStateService? flightRecorder = null)
@@ -43,6 +45,7 @@ internal sealed class WorkbenchViewModel : ViewModelBase
         _handshakeOrchestrator = handshakeOrchestrator;
         _chatCoordinator = chatCoordinator;
         _pongResponder = pongResponder;
+        _relayCoordinator = relayCoordinator;
         _selectionState = selectionState;
         _logSink = logSink;
         _flightRecorder = flightRecorder;
@@ -90,7 +93,12 @@ internal sealed class WorkbenchViewModel : ViewModelBase
     {
         return node.NodeType switch
         {
-            SimulatedNodeType.Relay => new RelayCardViewModel(node, _toastService),
+            SimulatedNodeType.Relay => new RelayCardViewModel(
+                node,
+                _toastService,
+                _stateBus,
+                _worldState.GetRelayHost(node.Id),
+                _logSink),
             _ => new PersonaCardViewModel(
                 node,
                 _toastService,
@@ -102,7 +110,8 @@ internal sealed class WorkbenchViewModel : ViewModelBase
                 _worldState,
                 _worldState.GetPersonaHost(node.Id),
                 _logSink,
-                _flightRecorder)
+                _flightRecorder,
+                _relayCoordinator)
         };
     }
 }

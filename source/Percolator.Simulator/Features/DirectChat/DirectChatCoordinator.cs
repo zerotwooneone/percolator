@@ -10,6 +10,7 @@ using Percolator.Domain.Channels.Model;
 using Percolator.Domain.Channels.Ports;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
+using Percolator.PluginSdk;
 using Percolator.Simulator.Features.Logging;
 using Percolator.Simulator.Features.Shell;
 using Percolator.Simulator.Features.Topology;
@@ -64,6 +65,18 @@ internal sealed class DirectChatCoordinator
                 using var scope = sender.Services.CreateScope();
                 var chatService = scope.ServiceProvider.GetRequiredService<IChatService>();
 
+                // Auto-detect whether to route via DirectP2P or RelayedOneToOne based on peer mailbox routing capability
+                var route = DeliveryRoute.DirectP2P;
+                var routingRepo = scope.ServiceProvider.GetService<IPeerMailboxRoutingRepository>();
+                if (routingRepo != null)
+                {
+                    var bestRoute = await routingRepo.GetBestRouteAsync(recipient.PublicIdentityId, DateTimeOffset.UtcNow, ct);
+                    if (bestRoute != null)
+                    {
+                        route = DeliveryRoute.RelayedOneToOne;
+                    }
+                }
+
                 var command = new SendMessageCommand(
                     ChannelId: channelId,
                     AuthorId: sender.PublicIdentityId,
@@ -75,7 +88,7 @@ internal sealed class DirectChatCoordinator
                     Attachments: null,
                     ExpireAfterSeconds: null,
                     LinkPreview: null,
-                    Route: Percolator.PluginSdk.DeliveryRoute.DirectP2P);
+                    Route: route);
 
                 var result = await chatService.SendMessageAsync(command, ct);
                 if (!result.IsSuccess)
@@ -89,7 +102,7 @@ internal sealed class DirectChatCoordinator
                     SignalCategory.ChatTranscriptChanged,
                     Details: recipient.PublicIdentityId.ToString()));
 
-                // Immediately flush outbox to deliver encrypted payload via loopback gRPC TLS
+                // Immediately flush outbox to deliver encrypted payload via loopback gRPC TLS or Relay mailbox
                 var flushResult = await sender.FlushOutboxAsync(ct);
                 if (!flushResult.IsSuccess)
                 {
@@ -103,7 +116,7 @@ internal sealed class DirectChatCoordinator
                     sender.DisplayName,
                     sender.Id,
                     "DirectChat",
-                    $"Direct message sent to '{recipient.DisplayName}': \"{text}\""));
+                    $"Message ({route}) sent to '{recipient.DisplayName}': \"{text}\""));
 
                 return true;
             }

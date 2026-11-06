@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Percolator.Simulator.Features.DirectChat;
 using Percolator.Simulator.Features.Logging;
+using Percolator.Simulator.Features.RelayedChat;
 using Percolator.Simulator.Features.Scenarios;
 using Percolator.Simulator.Features.Shell;
 using Percolator.Simulator.Features.Topology;
@@ -46,6 +47,7 @@ public partial class App : Avalonia.Application
         services.AddSingleton<DirectHandshakeOrchestrator>();
         services.AddSingleton<DirectChatCoordinator>();
         services.AddSingleton<AutopilotPongResponder>();
+        services.AddSingleton<RelayProvisioningCoordinator>();
         services.AddSingleton<ScenarioRunnerService>();
 
         // 4. ViewModels
@@ -100,11 +102,12 @@ public partial class App : Avalonia.Application
                 var pong = _services?.GetService<AutopilotPongResponder>();
                 pong?.Dispose();
 
-                var worldState = _services?.GetService<ISimulatedWorldStateService>();
-                if (worldState != null)
+                var world = _services?.GetService<ISimulatedWorldStateService>();
+                if (world != null)
                 {
-                    await worldState.ClearAllAsync();
+                    await world.ClearAllAsync();
                 }
+
                 logEngine.Dispose();
             };
         }

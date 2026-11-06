@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using ObservableCollections;
 using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Simulator.Features.RelayedChat;
 using Percolator.Simulator.Features.Shell;
 
 namespace Percolator.Simulator.Features.Topology;
@@ -18,12 +19,16 @@ internal interface ISimulatedWorldStateService : IDisposable
     IReadOnlyObservableList<SimulatedNodeSummary> PinnedCards { get; }
 
     void RegisterPersona(SimulatedNodeSummary persona, ISimulatedPersonaHost? host = null);
-    void RegisterRelay(SimulatedNodeSummary relay);
+    void RegisterRelay(SimulatedNodeSummary relay, ISimulatedRelayHost? host = null);
     void RegisterGroup(SimulatedNodeSummary group);
     void RegisterSwarm(SimulatedNodeSummary swarm);
 
     ISimulatedPersonaHost? GetPersonaHost(SimulatedNodeId id);
     ISimulatedPersonaHost? FindPersonaHostByIdentity(PublicIdentityId identityId);
+
+    ISimulatedRelayHost? GetRelayHost(SimulatedNodeId id);
+    ISimulatedRelayHost? FindRelayHostByName(string name);
+    IReadOnlyCollection<ISimulatedRelayHost> GetAllRelayHosts();
 
     void TogglePinCard(SimulatedNodeSummary node);
     void UnpinCard(SimulatedNodeId nodeId);
@@ -42,6 +47,7 @@ internal sealed class SimulatedWorldStateService : ISimulatedWorldStateService
     private readonly ObservableList<SimulatedNodeSummary> _swarms = new();
     private readonly ObservableList<SimulatedNodeSummary> _pinnedCards = new();
     private readonly ConcurrentDictionary<SimulatedNodeId, ISimulatedPersonaHost> _personaHosts = new();
+    private readonly ConcurrentDictionary<SimulatedNodeId, ISimulatedRelayHost> _relayHosts = new();
 
     public IReadOnlyObservableList<SimulatedNodeSummary> Personas => _personas;
     public IReadOnlyObservableList<SimulatedNodeSummary> Relays => _relays;
@@ -63,8 +69,12 @@ internal sealed class SimulatedWorldStateService : ISimulatedWorldStateService
         UiTaskRunner.PostToUi(() => _personas.Add(persona));
     }
 
-    public void RegisterRelay(SimulatedNodeSummary relay)
+    public void RegisterRelay(SimulatedNodeSummary relay, ISimulatedRelayHost? host = null)
     {
+        if (host is not null)
+        {
+            _relayHosts[relay.Id] = host;
+        }
         UiTaskRunner.PostToUi(() => _relays.Add(relay));
     }
 
@@ -87,6 +97,22 @@ internal sealed class SimulatedWorldStateService : ISimulatedWorldStateService
     public ISimulatedPersonaHost? FindPersonaHostByIdentity(PublicIdentityId identityId)
     {
         return _personaHosts.Values.FirstOrDefault(h => h.PublicIdentityId == identityId);
+    }
+
+    public ISimulatedRelayHost? GetRelayHost(SimulatedNodeId id)
+    {
+        _relayHosts.TryGetValue(id, out var host);
+        return host;
+    }
+
+    public ISimulatedRelayHost? FindRelayHostByName(string name)
+    {
+        return _relayHosts.Values.FirstOrDefault(h => string.Equals(h.DisplayName, name, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public IReadOnlyCollection<ISimulatedRelayHost> GetAllRelayHosts()
+    {
+        return _relayHosts.Values.ToArray();
     }
 
     public void TogglePinCard(SimulatedNodeSummary node)
@@ -123,8 +149,11 @@ internal sealed class SimulatedWorldStateService : ISimulatedWorldStateService
 
     public async Task ClearAllAsync()
     {
-        var hosts = _personaHosts.Values.ToArray();
+        var personaHosts = _personaHosts.Values.ToArray();
         _personaHosts.Clear();
+
+        var relayHosts = _relayHosts.Values.ToArray();
+        _relayHosts.Clear();
 
         UiTaskRunner.PostToUi(() =>
         {
@@ -140,11 +169,20 @@ internal sealed class SimulatedWorldStateService : ISimulatedWorldStateService
 
         await Task.Run(async () =>
         {
-            foreach (var host in hosts)
+            foreach (var host in personaHosts)
             {
                 try
                 {
                     await host.DisposeAsync();
+                }
+                catch { }
+            }
+
+            foreach (var relay in relayHosts)
+            {
+                try
+                {
+                    await relay.DisposeAsync();
                 }
                 catch { }
             }

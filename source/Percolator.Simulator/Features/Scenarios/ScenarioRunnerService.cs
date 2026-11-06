@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -11,8 +11,10 @@ using Percolator.Domain.Channels.Ports;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Domain.Security.ValueObjects;
 using Percolator.Simulator.Features.DirectChat;
 using Percolator.Simulator.Features.Logging;
+using Percolator.Simulator.Features.RelayedChat;
 using Percolator.Simulator.Features.Scenarios.Model;
 using Percolator.Simulator.Features.Shell;
 using Percolator.Simulator.Features.Topology;
@@ -26,6 +28,7 @@ internal sealed class ScenarioRunnerService
     private readonly ISimulatorStateBus _stateBus;
     private readonly DirectHandshakeOrchestrator _handshakeOrchestrator;
     private readonly DirectChatCoordinator _chatCoordinator;
+    private readonly RelayProvisioningCoordinator _relayCoordinator;
     private readonly ISimulatorLogSink _logSink;
     private readonly IFlightRecorderStateService? _flightRecorder;
     private readonly ISelectionStateService? _selectionState;
@@ -35,6 +38,7 @@ internal sealed class ScenarioRunnerService
         ISimulatorStateBus stateBus,
         DirectHandshakeOrchestrator handshakeOrchestrator,
         DirectChatCoordinator chatCoordinator,
+        RelayProvisioningCoordinator relayCoordinator,
         ISimulatorLogSink logSink,
         IFlightRecorderStateService? flightRecorder = null,
         ISelectionStateService? selectionState = null)
@@ -43,6 +47,7 @@ internal sealed class ScenarioRunnerService
         _stateBus = stateBus ?? throw new ArgumentNullException(nameof(stateBus));
         _handshakeOrchestrator = handshakeOrchestrator ?? throw new ArgumentNullException(nameof(handshakeOrchestrator));
         _chatCoordinator = chatCoordinator ?? throw new ArgumentNullException(nameof(chatCoordinator));
+        _relayCoordinator = relayCoordinator ?? throw new ArgumentNullException(nameof(relayCoordinator));
         _logSink = logSink ?? throw new ArgumentNullException(nameof(logSink));
         _flightRecorder = flightRecorder;
         _selectionState = selectionState;
@@ -63,13 +68,17 @@ internal sealed class ScenarioRunnerService
         _flightRecorder?.SetReplayStatus($"Replaying: '{scenario.Name}'...");
 
         var errorLogs = new List<SimulatorLogEntry>();
+        var allSessionLogs = new List<SimulatorLogEntry>();
         using var logSub = _logSink.LogStream
-            .Where(l => l.Level >= LogLevel.Error)
             .Subscribe(entry =>
             {
-                lock (errorLogs)
+                lock (allSessionLogs)
                 {
-                    errorLogs.Add(entry);
+                    allSessionLogs.Add(entry);
+                    if (entry.Level >= LogLevel.Warning)
+                    {
+                        errorLogs.Add(entry);
+                    }
                 }
             });
 
@@ -82,6 +91,7 @@ internal sealed class ScenarioRunnerService
             _selectionState.ClearMultiSelection();
         }
         var aliasMap = new Dictionary<string, ISimulatedPersonaHost>(StringComparer.OrdinalIgnoreCase);
+        var relayAliasMap = new Dictionary<string, ISimulatedRelayHost>(StringComparer.OrdinalIgnoreCase);
 
         try
         {
@@ -119,11 +129,39 @@ internal sealed class ScenarioRunnerService
                         break;
 
                     case SetListeningStateStep listeningStep:
-                        ExecuteSetListeningState(listeningStep, aliasMap);
+                        await ExecuteSetListeningStateAsync(listeningStep, aliasMap, ct);
                         break;
 
                     case SendDirectMessageStep messageStep:
                         await ExecuteSendDirectMessageAsync(messageStep, aliasMap, ct);
+                        break;
+
+                    case SpawnRelayStep spawnRelayStep:
+                        await ExecuteSpawnRelayAsync(spawnRelayStep, relayAliasMap, ct);
+                        break;
+
+                    case RegisterMailboxesStep regMailboxesStep:
+                        await ExecuteRegisterMailboxesAsync(regMailboxesStep, aliasMap, relayAliasMap, ct);
+                        break;
+
+                    case PublishPreKeysStep pubKeysStep:
+                        await ExecutePublishPreKeysAsync(pubKeysStep, aliasMap, relayAliasMap, ct);
+                        break;
+
+                    case InitiateRelayedHandshakeStep relayedHsStep:
+                        await ExecuteInitiateRelayedHandshakeAsync(relayedHsStep, aliasMap, relayAliasMap, ct);
+                        break;
+
+                    case DuplicateRelayEnvelopeStep dupStep:
+                        ExecuteDuplicateRelayEnvelope(dupStep, relayAliasMap);
+                        break;
+
+                    case FlipRelayEnvelopeBitStep flipStep:
+                        ExecuteFlipRelayEnvelopeBit(flipStep, relayAliasMap);
+                        break;
+
+                    case ShuffleRelayQueueStep shuffleStep:
+                        ExecuteShuffleRelayQueue(shuffleStep, relayAliasMap);
                         break;
 
                     default:
@@ -158,6 +196,18 @@ internal sealed class ScenarioRunnerService
 
                     case AssertZeroErrorsAssertion:
                         ExecuteAssertZeroErrors(errorLogs);
+                        break;
+
+                    case AssertHostedOpkCountAssertion opkAssert:
+                        await ExecuteAssertHostedOpkCountAsync(opkAssert, aliasMap, relayAliasMap, ct);
+                        break;
+
+                    case AssertMailboxQueueDepthAssertion queueAssert:
+                        ExecuteAssertMailboxQueueDepth(queueAssert, relayAliasMap);
+                        break;
+
+                    case AssertLogContainsCodeAssertion logAssert:
+                        ExecuteAssertLogContainsCode(logAssert, allSessionLogs);
                         break;
 
                     default:
@@ -200,10 +250,10 @@ internal sealed class ScenarioRunnerService
         {
             var nodeId = SimulatedNodeId.CreateNew();
             var seed = (uint)Random.Shared.Next();
-            var identiconBytes = IdenticonGenerator.CreatePng(seed);
+            var identicon = IdenticonGenerator.CreatePng(seed);
             var port = LoopbackPortAllocator.AllocateAvailablePort();
 
-            var host = new SimulatedPersonaHost(nodeId, alias, identiconBytes, port, _logSink, _stateBus, _worldState);
+            var host = new SimulatedPersonaHost(nodeId, alias, identicon, port, _logSink, _stateBus, _worldState);
             await host.StartAsync(ct);
 
             var summary = new SimulatedNodeSummary(
@@ -232,37 +282,186 @@ internal sealed class ScenarioRunnerService
         }
     }
 
+    private async Task ExecuteSpawnRelayAsync(
+        SpawnRelayStep step,
+        Dictionary<string, ISimulatedRelayHost> relayAliasMap,
+        CancellationToken ct)
+    {
+        var nodeId = SimulatedNodeId.CreateNew();
+        var port = LoopbackPortAllocator.AllocateAvailablePort();
+        var host = new SimulatedRelayHost(nodeId, step.RelayAlias, port, _logSink, _stateBus);
+        await host.StartAsync(ct);
+
+        var summary = new SimulatedNodeSummary(
+            host.Id,
+            host.DisplayName,
+            SimulatedNodeType.Relay,
+            $"127.0.0.1:{host.BoundPort} (Relay)",
+            IsPinned: true);
+
+        _worldState.RegisterRelay(summary, host);
+        _worldState.TogglePinCard(summary);
+        relayAliasMap[step.RelayAlias] = host;
+    }
+
+    private async Task ExecuteRegisterMailboxesAsync(
+        RegisterMailboxesStep step,
+        Dictionary<string, ISimulatedPersonaHost> aliasMap,
+        Dictionary<string, ISimulatedRelayHost> relayAliasMap,
+        CancellationToken ct)
+    {
+        if (!relayAliasMap.TryGetValue(step.RelayAlias, out var relay))
+        {
+            throw new ScenarioExecutionException($"Relay '{step.RelayAlias}' not found in scenario.");
+        }
+
+        foreach (var alias in step.PersonaAliases)
+        {
+            if (!aliasMap.TryGetValue(alias, out var persona))
+            {
+                throw new ScenarioExecutionException($"Persona '{alias}' not found in scenario.");
+            }
+
+            var success = await _relayCoordinator.RegisterMailboxAsync(persona, relay, ct);
+            if (!success)
+            {
+                throw new ScenarioExecutionException($"Failed to register mailbox for '{alias}' on relay '{step.RelayAlias}'.");
+            }
+        }
+    }
+
+    private async Task ExecutePublishPreKeysAsync(
+        PublishPreKeysStep step,
+        Dictionary<string, ISimulatedPersonaHost> aliasMap,
+        Dictionary<string, ISimulatedRelayHost> relayAliasMap,
+        CancellationToken ct)
+    {
+        if (!relayAliasMap.TryGetValue(step.RelayAlias, out var relay))
+        {
+            throw new ScenarioExecutionException($"Relay '{step.RelayAlias}' not found in scenario.");
+        }
+
+        foreach (var alias in step.PersonaAliases)
+        {
+            if (!aliasMap.TryGetValue(alias, out var persona))
+            {
+                throw new ScenarioExecutionException($"Persona '{alias}' not found in scenario.");
+            }
+
+            var success = await _relayCoordinator.PublishPreKeysAsync(persona, relay, step.OneTimeKeyCount, ct);
+            if (!success)
+            {
+                throw new ScenarioExecutionException($"Failed to publish prekeys for '{alias}' to relay '{step.RelayAlias}'.");
+            }
+        }
+    }
+
+    private async Task ExecuteInitiateRelayedHandshakeAsync(
+        InitiateRelayedHandshakeStep step,
+        Dictionary<string, ISimulatedPersonaHost> aliasMap,
+        Dictionary<string, ISimulatedRelayHost> relayAliasMap,
+        CancellationToken ct)
+    {
+        if (!aliasMap.TryGetValue(step.InitiatorAlias, out var initiator))
+            throw new ScenarioExecutionException($"Initiator '{step.InitiatorAlias}' not found.");
+        if (!aliasMap.TryGetValue(step.TargetAlias, out var target))
+            throw new ScenarioExecutionException($"Target '{step.TargetAlias}' not found.");
+        if (!relayAliasMap.TryGetValue(step.RelayAlias, out var relay))
+            throw new ScenarioExecutionException($"Relay '{step.RelayAlias}' not found.");
+
+        var targetListening = target.IsListening.CurrentValue;
+
+        Task signalTask = targetListening
+            ? _stateBus.Signals
+                .Where(s => s.NodeId == target.Id && s.Category == SignalCategory.PendingHandshakeChanged)
+                .FirstAsync(cancellationToken: ct)
+            : Task.CompletedTask;
+
+        var success = await _relayCoordinator.InitiateRelayedHandshakeAsync(initiator.Id, target.Id, relay.Id, ct);
+        if (!success)
+        {
+            throw new ScenarioExecutionException($"Relayed handshake failed: '{step.InitiatorAlias}' ➔ '{step.TargetAlias}'.");
+        }
+
+        if (targetListening)
+        {
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
+            await signalTask.WaitAsync(linkedCts.Token);
+        }
+    }
+
+    private static void ExecuteDuplicateRelayEnvelope(
+        DuplicateRelayEnvelopeStep step,
+        Dictionary<string, ISimulatedRelayHost> relayAliasMap)
+    {
+        if (!relayAliasMap.TryGetValue(step.RelayAlias, out var relay))
+            throw new ScenarioExecutionException($"Relay '{step.RelayAlias}' not found.");
+
+        var success = relay.ChaosController.DuplicateEnvelope(step.QueueId);
+        if (!success)
+        {
+            throw new ScenarioExecutionException($"DuplicateEnvelope on '{step.RelayAlias}' failed (queue may be empty).");
+        }
+    }
+
+    private static void ExecuteFlipRelayEnvelopeBit(
+        FlipRelayEnvelopeBitStep step,
+        Dictionary<string, ISimulatedRelayHost> relayAliasMap)
+    {
+        if (!relayAliasMap.TryGetValue(step.RelayAlias, out var relay))
+            throw new ScenarioExecutionException($"Relay '{step.RelayAlias}' not found.");
+
+        var success = relay.ChaosController.FlipBit(step.QueueId, step.ByteOffset);
+        if (!success)
+        {
+            throw new ScenarioExecutionException($"FlipBit on '{step.RelayAlias}' failed (queue may be empty).");
+        }
+    }
+
+    private static void ExecuteShuffleRelayQueue(
+        ShuffleRelayQueueStep step,
+        Dictionary<string, ISimulatedRelayHost> relayAliasMap)
+    {
+        if (!relayAliasMap.TryGetValue(step.RelayAlias, out var relay))
+            throw new ScenarioExecutionException($"Relay '{step.RelayAlias}' not found.");
+
+        var success = relay.ChaosController.ShuffleQueue();
+        if (!success)
+        {
+            throw new ScenarioExecutionException($"ShuffleQueue on '{step.RelayAlias}' failed (need >= 2 envelopes in mailbox).");
+        }
+    }
+
     private async Task ExecuteInitiateDirectHandshakeAsync(
         InitiateDirectHandshakeStep step,
         Dictionary<string, ISimulatedPersonaHost> aliasMap,
         CancellationToken ct)
     {
-        var initiator = GetHostOrThrow(step.InitiatorAlias, aliasMap);
-        var target = GetHostOrThrow(step.TargetAlias, aliasMap);
+        if (!aliasMap.TryGetValue(step.InitiatorAlias, out var initiator))
+            throw new ScenarioExecutionException($"Initiator persona '{step.InitiatorAlias}' not found.");
+        if (!aliasMap.TryGetValue(step.TargetAlias, out var target))
+            throw new ScenarioExecutionException($"Target persona '{step.TargetAlias}' not found.");
 
-        using var stepCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        stepCts.CancelAfter(TimeSpan.FromSeconds(10));
+        var targetListening = target.IsListening.CurrentValue;
 
-        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        using var reg = stepCts.Token.Register(() => tcs.TrySetCanceled(stepCts.Token));
+        Task signalTask = targetListening
+            ? _stateBus.Signals
+                .Where(s => s.NodeId == target.Id && s.Category == SignalCategory.PendingHandshakeChanged)
+                .FirstAsync(cancellationToken: ct)
+            : Task.CompletedTask;
 
-        using var sub = _stateBus.Signals
-            .Where(s => s.NodeId == target.Id && s.Category == SignalCategory.PendingHandshakeChanged)
-            .Subscribe(_ => tcs.TrySetResult(true));
-
-        var success = await _handshakeOrchestrator.InitiateDirectHandshakeAsync(initiator.Id, target.Id, stepCts.Token);
+        var success = await _handshakeOrchestrator.InitiateDirectHandshakeAsync(initiator.Id, target.Id, ct);
         if (!success)
         {
-            throw new ScenarioExecutionException($"InitiateDirectHandshakeAsync from '{step.InitiatorAlias}' to '{step.TargetAlias}' failed.");
+            throw new ScenarioExecutionException($"InitiateDirectHandshakeAsync failed for '{step.InitiatorAlias}' -> '{step.TargetAlias}'.");
         }
 
-        try
+        if (targetListening)
         {
-            await tcs.Task;
-        }
-        catch (OperationCanceledException) when (stepCts.IsCancellationRequested && !ct.IsCancellationRequested)
-        {
-            throw new TimeoutException($"Timed out after 10s waiting for target '{step.TargetAlias}' to receive pending handshake.");
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
+            await signalTask.WaitAsync(linkedCts.Token);
         }
     }
 
@@ -271,33 +470,24 @@ internal sealed class ScenarioRunnerService
         Dictionary<string, ISimulatedPersonaHost> aliasMap,
         CancellationToken ct)
     {
-        var owner = GetHostOrThrow(step.OwnerAlias, aliasMap);
-        var sender = GetHostOrThrow(step.SenderAlias, aliasMap);
+        if (!aliasMap.TryGetValue(step.OwnerAlias, out var owner))
+            throw new ScenarioExecutionException($"Owner persona '{step.OwnerAlias}' not found.");
+        if (!aliasMap.TryGetValue(step.SenderAlias, out var sender))
+            throw new ScenarioExecutionException($"Sender persona '{step.SenderAlias}' not found.");
 
-        using var stepCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        stepCts.CancelAfter(TimeSpan.FromSeconds(10));
+        var signalTask = _stateBus.Signals
+            .Where(s => s.NodeId == owner.Id && s.Category == SignalCategory.RatchetSessionChanged)
+            .FirstAsync(cancellationToken: ct);
 
-        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        using var reg = stepCts.Token.Register(() => tcs.TrySetCanceled(stepCts.Token));
-
-        using var sub = _stateBus.Signals
-            .Where(s => s.Category == SignalCategory.RatchetSessionChanged && (s.NodeId == owner.Id || s.NodeId == sender.Id))
-            .Subscribe(_ => tcs.TrySetResult(true));
-
-        var success = await _handshakeOrchestrator.AcceptHandshakeAsync(owner.Id, sender.PublicIdentityId, stepCts.Token);
+        var success = await _handshakeOrchestrator.AcceptHandshakeAsync(owner.Id, sender.PublicIdentityId, ct);
         if (!success)
         {
-            throw new ScenarioExecutionException($"AcceptHandshakeAsync for '{step.OwnerAlias}' approving '{step.SenderAlias}' failed.");
+            throw new ScenarioExecutionException($"AcceptHandshakeAsync failed: '{step.OwnerAlias}' could not accept '{step.SenderAlias}'.");
         }
 
-        try
-        {
-            await tcs.Task;
-        }
-        catch (OperationCanceledException) when (stepCts.IsCancellationRequested && !ct.IsCancellationRequested)
-        {
-            throw new TimeoutException($"Timed out after 10s waiting for RatchetSessionChanged after '{step.OwnerAlias}' approved '{step.SenderAlias}'.");
-        }
+        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
+        await signalTask.WaitAsync(linkedCts.Token);
     }
 
     private async Task ExecuteRejectPendingHandshakeAsync(
@@ -305,22 +495,31 @@ internal sealed class ScenarioRunnerService
         Dictionary<string, ISimulatedPersonaHost> aliasMap,
         CancellationToken ct)
     {
-        var owner = GetHostOrThrow(step.OwnerAlias, aliasMap);
-        var sender = GetHostOrThrow(step.SenderAlias, aliasMap);
+        if (!aliasMap.TryGetValue(step.OwnerAlias, out var owner))
+            throw new ScenarioExecutionException($"Owner persona '{step.OwnerAlias}' not found.");
+        if (!aliasMap.TryGetValue(step.SenderAlias, out var sender))
+            throw new ScenarioExecutionException($"Sender persona '{step.SenderAlias}' not found.");
 
         var success = await _handshakeOrchestrator.RejectHandshakeAsync(owner.Id, sender.PublicIdentityId, step.Block, ct);
         if (!success)
         {
-            throw new ScenarioExecutionException($"RejectHandshakeAsync for '{step.OwnerAlias}' rejecting '{step.SenderAlias}' failed.");
+            throw new ScenarioExecutionException($"RejectHandshakeAsync failed: '{step.OwnerAlias}' rejecting '{step.SenderAlias}'.");
         }
     }
 
-    private static void ExecuteSetListeningState(
+    private static async Task ExecuteSetListeningStateAsync(
         SetListeningStateStep step,
-        Dictionary<string, ISimulatedPersonaHost> aliasMap)
+        Dictionary<string, ISimulatedPersonaHost> aliasMap,
+        CancellationToken ct)
     {
-        var host = GetHostOrThrow(step.Alias, aliasMap);
+        if (!aliasMap.TryGetValue(step.Alias, out var host))
+            throw new ScenarioExecutionException($"Persona '{step.Alias}' not found.");
+
         host.SetListening(step.IsListening);
+        if (step.IsListening && host.HomeRelay != null)
+        {
+            await host.DrainMailboxAsync(ct);
+        }
     }
 
     private async Task ExecuteSendDirectMessageAsync(
@@ -328,32 +527,28 @@ internal sealed class ScenarioRunnerService
         Dictionary<string, ISimulatedPersonaHost> aliasMap,
         CancellationToken ct)
     {
-        var sender = GetHostOrThrow(step.SenderAlias, aliasMap);
-        var recipient = GetHostOrThrow(step.RecipientAlias, aliasMap);
+        if (!aliasMap.TryGetValue(step.SenderAlias, out var sender))
+            throw new ScenarioExecutionException($"Sender persona '{step.SenderAlias}' not found.");
+        if (!aliasMap.TryGetValue(step.RecipientAlias, out var recipient))
+            throw new ScenarioExecutionException($"Recipient persona '{step.RecipientAlias}' not found.");
 
-        using var stepCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        stepCts.CancelAfter(TimeSpan.FromSeconds(10));
+        Task signalTask = recipient.IsListening.CurrentValue
+            ? _stateBus.Signals
+                .Where(s => s.NodeId == recipient.Id && s.Category == SignalCategory.ChatTranscriptChanged)
+                .FirstAsync(cancellationToken: ct)
+            : Task.CompletedTask;
 
-        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        using var reg = stepCts.Token.Register(() => tcs.TrySetCanceled(stepCts.Token));
-
-        using var sub = _stateBus.Signals
-            .Where(s => s.NodeId == recipient.Id && s.Category == SignalCategory.ChatTranscriptChanged)
-            .Subscribe(_ => tcs.TrySetResult(true));
-
-        var success = await _chatCoordinator.SendDirectMessageAsync(sender.Id, recipient.Id, step.Text, stepCts.Token);
+        var success = await _chatCoordinator.SendDirectMessageAsync(sender.Id, recipient.Id, step.Text, ct);
         if (!success)
         {
-            throw new ScenarioExecutionException($"SendDirectMessageAsync from '{step.SenderAlias}' to '{step.RecipientAlias}' failed.");
+            throw new ScenarioExecutionException($"SendDirectMessageAsync failed: '{step.SenderAlias}' -> '{step.RecipientAlias}'.");
         }
 
-        try
+        if (recipient.IsListening.CurrentValue)
         {
-            await tcs.Task;
-        }
-        catch (OperationCanceledException) when (stepCts.IsCancellationRequested && !ct.IsCancellationRequested)
-        {
-            throw new TimeoutException($"Timed out after 10s waiting for recipient '{step.RecipientAlias}' to receive chat message.");
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
+            await signalTask.WaitAsync(linkedCts.Token);
         }
     }
 
@@ -371,7 +566,7 @@ internal sealed class ScenarioRunnerService
 
         if (session1 == null)
         {
-            throw new ScenarioAssertionException($"AssertDirectRatchetSession failed: Node '{assertion.Alias1}' does not have an active Double Ratchet session with '{assertion.Alias2}'.");
+            throw new ScenarioExecutionException($"AssertDirectRatchetSession failed: Node '{assertion.Alias1}' does not have an active Double Ratchet session with '{assertion.Alias2}'.");
         }
 
         using var scope2 = h2.Services.CreateScope();
@@ -380,7 +575,7 @@ internal sealed class ScenarioRunnerService
 
         if (session2 == null)
         {
-            throw new ScenarioAssertionException($"AssertDirectRatchetSession failed: Node '{assertion.Alias2}' does not have an active Double Ratchet session with '{assertion.Alias1}'.");
+            throw new ScenarioExecutionException($"AssertDirectRatchetSession failed: Node '{assertion.Alias2}' does not have an active Double Ratchet session with '{assertion.Alias1}'.");
         }
     }
 
@@ -413,7 +608,58 @@ internal sealed class ScenarioRunnerService
 
         if (!found)
         {
-            throw new ScenarioAssertionException($"AssertMessageDelivered failed: Node '{assertion.RecipientAlias}' did not receive expected message text: \"{assertion.ExpectedText}\".");
+            throw new ScenarioExecutionException($"AssertMessageDelivered failed: Node '{assertion.RecipientAlias}' has not received expected message: \"{assertion.ExpectedText}\".");
+        }
+    }
+
+    private static async Task ExecuteAssertHostedOpkCountAsync(
+        AssertHostedOpkCountAssertion assertion,
+        Dictionary<string, ISimulatedPersonaHost> aliasMap,
+        Dictionary<string, ISimulatedRelayHost> relayAliasMap,
+        CancellationToken ct)
+    {
+        if (!relayAliasMap.TryGetValue(assertion.RelayAlias, out var relay))
+            throw new ScenarioExecutionException($"Relay '{assertion.RelayAlias}' not found in scenario.");
+        if (!aliasMap.TryGetValue(assertion.PersonaAlias, out var persona))
+            throw new ScenarioExecutionException($"Persona '{assertion.PersonaAlias}' not found in scenario.");
+
+        var bundle = await relay.PreKeyRepository.GetAsync(persona.PublicIdentityId, DeviceId.Primary, ct);
+        var actualCount = bundle?.AvailableOneTimePreKeyCount ?? 0;
+
+        if (actualCount != assertion.ExpectedCount)
+        {
+            throw new ScenarioExecutionException($"AssertHostedOpkCount failed: expected {assertion.ExpectedCount} OPKs for '{assertion.PersonaAlias}' on '{assertion.RelayAlias}', but got {actualCount}.");
+        }
+    }
+
+    private static void ExecuteAssertMailboxQueueDepth(
+        AssertMailboxQueueDepthAssertion assertion,
+        Dictionary<string, ISimulatedRelayHost> relayAliasMap)
+    {
+        if (!relayAliasMap.TryGetValue(assertion.RelayAlias, out var relay))
+            throw new ScenarioExecutionException($"Relay '{assertion.RelayAlias}' not found in scenario.");
+
+        var actual = relay.TotalHeldEnvelopeCount;
+        if (actual != assertion.ExpectedDepth)
+        {
+            throw new ScenarioExecutionException($"AssertMailboxQueueDepth failed on '{assertion.RelayAlias}': expected depth {assertion.ExpectedDepth}, got {actual}.");
+        }
+    }
+
+    private static void ExecuteAssertLogContainsCode(
+        AssertLogContainsCodeAssertion assertion,
+        List<SimulatorLogEntry> logs)
+    {
+        lock (logs)
+        {
+            var found = logs.Any(l =>
+                (l.Message != null && l.Message.Contains(assertion.ExpectedCode, StringComparison.OrdinalIgnoreCase)) ||
+                (l.Exception != null && l.Exception.Contains(assertion.ExpectedCode, StringComparison.OrdinalIgnoreCase)));
+
+            if (!found)
+            {
+                throw new ScenarioExecutionException($"AssertLogContainsCode failed: expected log containing \"{assertion.ExpectedCode}\", but no matching log entry was found.");
+            }
         }
     }
 
@@ -423,17 +669,17 @@ internal sealed class ScenarioRunnerService
         {
             if (errorLogs.Count > 0)
             {
-                var first = errorLogs[0];
-                throw new ScenarioAssertionException($"AssertZeroErrors failed: {errorLogs.Count} error logs recorded during execution. First error: [{first.Category}] {first.Message}");
+                var summary = string.Join("; ", errorLogs.Take(3).Select(e => $"[{e.NodeName}] {e.Message}"));
+                throw new ScenarioExecutionException($"AssertZeroErrors failed: {errorLogs.Count} error logs recorded. First: {summary}");
             }
         }
     }
 
-    private static ISimulatedPersonaHost GetHostOrThrow(string alias, Dictionary<string, ISimulatedPersonaHost> aliasMap)
+    private static ISimulatedPersonaHost GetHostOrThrow(string alias, Dictionary<string, ISimulatedPersonaHost> map)
     {
-        if (!aliasMap.TryGetValue(alias, out var host))
+        if (!map.TryGetValue(alias, out var host))
         {
-            throw new ScenarioExecutionException($"Alias '{alias}' is not registered in the active scenario persona map. Available: [{string.Join(", ", aliasMap.Keys)}]");
+            throw new ScenarioExecutionException($"Persona '{alias}' not found in scenario.");
         }
         return host;
     }

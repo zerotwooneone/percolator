@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Percolator.Simulator.Features.DirectChat;
 using Percolator.Simulator.Features.Logging;
+using Percolator.Simulator.Features.RelayedChat;
 using Percolator.Simulator.Features.Scenarios.Model;
 using Percolator.Simulator.Features.Shell;
 using Percolator.Simulator.Features.Topology;
@@ -72,6 +73,7 @@ internal static class ScenarioCliRunner
         services.AddSingleton<IStatusToastService, StatusToastService>();
         services.AddSingleton<DirectHandshakeOrchestrator>();
         services.AddSingleton<DirectChatCoordinator>();
+        services.AddSingleton<RelayProvisioningCoordinator>();
         services.AddSingleton<ScenarioRunnerService>();
 
         await using var provider = services.BuildServiceProvider();
@@ -98,61 +100,67 @@ internal static class ScenarioCliRunner
             {
                 var json = await File.ReadAllTextAsync(file);
                 var scenario = JsonSerializer.Deserialize<ScenarioDocument>(json, jsonOptions);
+
                 if (scenario == null)
                 {
-                    throw new InvalidOperationException($"Failed to deserialize scenario document from '{file}'.");
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine($"[ScenarioCliRunner] FAILED: Unable to parse '{fileName}'.");
+                    Console.ResetColor();
+                    allPassed = false;
+                    failedCount++;
+                    continue;
                 }
 
                 await runner.RunScenarioAsync(scenario);
 
                 Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine($"[ScenarioCliRunner] ✔ PASS: '{scenario.Name}' ({fileName})");
+                Console.WriteLine($"[ScenarioCliRunner] PASS: '{scenario.Name}' ({fileName})");
                 Console.ResetColor();
                 passedCount++;
             }
             catch (Exception ex)
             {
                 Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"[ScenarioCliRunner] ✖ FAIL: '{fileName}' - {ex.Message}");
+                Console.WriteLine($"[ScenarioCliRunner] FAILED: '{fileName}' - {ex.Message}");
                 Console.ResetColor();
                 allPassed = false;
                 failedCount++;
             }
-        }
-
-        await worldState.ClearAllAsync();
-        logEngine.Dispose();
-
-        Console.WriteLine("\n==========================================");
-        Console.WriteLine($" Replay Summary: Total: {scenarioFiles.Count}, Passed: {passedCount}, Failed: {failedCount}");
-        Console.WriteLine("==========================================");
-
-        return allPassed ? 0 : 1;
-    }
-
-    private static string ResolvePath(string rawPath)
-    {
-        if (File.Exists(rawPath) || Directory.Exists(rawPath))
-        {
-            return rawPath;
-        }
-
-        var candidates = new[]
-        {
-            Path.Combine(AppContext.BaseDirectory, rawPath),
-            Path.Combine(Directory.GetCurrentDirectory(), "Percolator.Simulator", rawPath),
-            Path.Combine(AppContext.BaseDirectory, "Scenarios", Path.GetFileName(rawPath)),
-            Path.Combine(Directory.GetCurrentDirectory(), "Percolator.Simulator", "Scenarios", Path.GetFileName(rawPath))
-        };
-
-        foreach (var candidate in candidates)
-        {
-            if (File.Exists(candidate) || Directory.Exists(candidate))
+            finally
             {
-                return candidate;
+                await worldState.ClearAllAsync();
             }
         }
 
-        return rawPath;
+        Console.WriteLine("\n==================================================");
+        Console.WriteLine($"Scenario Replay Summary: Total: {scenarioFiles.Count}, Passed: {passedCount}, Failed: {failedCount}");
+        Console.WriteLine("==================================================");
+
+        logEngine.Dispose();
+        return allPassed ? 0 : 1;
+    }
+
+    private static string ResolvePath(string path)
+    {
+        if (Path.IsPathRooted(path))
+        {
+            return path;
+        }
+
+        // Check relative to current working directory
+        var cwdCandidate = Path.GetFullPath(path);
+        if (File.Exists(cwdCandidate) || Directory.Exists(cwdCandidate))
+        {
+            return cwdCandidate;
+        }
+
+        // Check relative to AppContext.BaseDirectory
+        var appBaseCandidate = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, path));
+        if (File.Exists(appBaseCandidate) || Directory.Exists(appBaseCandidate))
+        {
+            return appBaseCandidate;
+        }
+
+        return cwdCandidate;
     }
 }

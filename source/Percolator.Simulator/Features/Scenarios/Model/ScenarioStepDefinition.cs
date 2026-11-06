@@ -10,6 +10,13 @@ namespace Percolator.Simulator.Features.Scenarios.Model;
 [JsonDerivedType(typeof(RejectPendingHandshakeStep), "RejectPendingHandshake")]
 [JsonDerivedType(typeof(SetListeningStateStep), "SetListeningState")]
 [JsonDerivedType(typeof(SendDirectMessageStep), "SendDirectMessage")]
+[JsonDerivedType(typeof(SpawnRelayStep), "SpawnRelay")]
+[JsonDerivedType(typeof(RegisterMailboxesStep), "RegisterMailboxes")]
+[JsonDerivedType(typeof(PublishPreKeysStep), "PublishPreKeys")]
+[JsonDerivedType(typeof(InitiateRelayedHandshakeStep), "InitiateRelayedHandshake")]
+[JsonDerivedType(typeof(DuplicateRelayEnvelopeStep), "DuplicateRelayEnvelope")]
+[JsonDerivedType(typeof(FlipRelayEnvelopeBitStep), "FlipRelayEnvelopeBit")]
+[JsonDerivedType(typeof(ShuffleRelayQueueStep), "ShuffleRelayQueue")]
 public abstract record ScenarioStepDefinition
 {
     public abstract string DisplayText { get; }
@@ -44,4 +51,43 @@ public sealed record SetListeningStateStep(string Alias, bool IsListening) : Sce
 public sealed record SendDirectMessageStep(string SenderAlias, string RecipientAlias, string Text) : ScenarioStepDefinition
 {
     public override string DisplayText => $"Send Message: '{SenderAlias}' ➔ '{RecipientAlias}': \"{Text}\"";
+}
+
+// -----------------------------------------------------------------------------
+// Phase 5 Scenario Steps: Relayed Chat, PreKeys & Queue Chaos
+// -----------------------------------------------------------------------------
+
+public sealed record SpawnRelayStep(string RelayAlias) : ScenarioStepDefinition
+{
+    public override string DisplayText => $"Spawn Relay: '{RelayAlias}'";
+}
+
+public sealed record RegisterMailboxesStep(string RelayAlias, IReadOnlyList<string> PersonaAliases) : ScenarioStepDefinition
+{
+    public override string DisplayText => $"Register Mailboxes on '{RelayAlias}': [{string.Join(", ", PersonaAliases)}]";
+}
+
+public sealed record PublishPreKeysStep(string RelayAlias, IReadOnlyList<string> PersonaAliases, int OneTimeKeyCount = 25) : ScenarioStepDefinition
+{
+    public override string DisplayText => $"Publish {OneTimeKeyCount} PreKeys to '{RelayAlias}': [{string.Join(", ", PersonaAliases)}]";
+}
+
+public sealed record InitiateRelayedHandshakeStep(string InitiatorAlias, string TargetAlias, string RelayAlias) : ScenarioStepDefinition
+{
+    public override string DisplayText => $"Relayed Handshake: '{InitiatorAlias}' ➔ '{TargetAlias}' via '{RelayAlias}'";
+}
+
+public sealed record DuplicateRelayEnvelopeStep(string RelayAlias, string? QueueId = null) : ScenarioStepDefinition
+{
+    public override string DisplayText => $"Duplicate Envelope on '{RelayAlias}'";
+}
+
+public sealed record FlipRelayEnvelopeBitStep(string RelayAlias, string? QueueId = null, int ByteOffset = 10) : ScenarioStepDefinition
+{
+    public override string DisplayText => $"Flip Bit (Offset {ByteOffset}) on '{RelayAlias}'";
+}
+
+public sealed record ShuffleRelayQueueStep(string RelayAlias) : ScenarioStepDefinition
+{
+    public override string DisplayText => $"Shuffle Queue on '{RelayAlias}'";
 }

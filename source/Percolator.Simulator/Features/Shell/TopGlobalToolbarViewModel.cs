@@ -1,9 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.Input;
 using Percolator.Simulator.Features.Logging;
+using Percolator.Simulator.Features.RelayedChat;
 using Percolator.Simulator.Features.Scenarios;
 using Percolator.Simulator.Features.Scenarios.Model;
 using Percolator.Simulator.Features.Topology;
@@ -101,10 +103,98 @@ internal sealed partial class TopGlobalToolbarViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private void BulkAddPeople() => _toastService.ShowPlaceholder("Bulk Add People", "Phase 5");
+    private async Task BulkAddPeopleAsync()
+    {
+        if (!_hasAddedRealPersona)
+        {
+            _hasAddedRealPersona = true;
+            _designData.ClearPreviewData();
+        }
+
+        var spawnedHosts = await UiTaskRunner.RunAsync(
+            async () =>
+            {
+                var list = new List<ISimulatedPersonaHost>();
+                for (int i = 0; i < 3; i++)
+                {
+                    var nodeId = SimulatedNodeId.CreateNew();
+                    var name = WordPairNameGenerator.Generate();
+                    var seed = (uint)Random.Shared.Next();
+                    var identiconBytes = IdenticonGenerator.CreatePng(seed);
+                    var port = LoopbackPortAllocator.AllocateAvailablePort();
+
+                    var personaHost = new SimulatedPersonaHost(nodeId, name, identiconBytes, port, _logSink, _stateBus, _worldState);
+                    await personaHost.StartAsync();
+                    list.Add(personaHost);
+                }
+                return list;
+            },
+            category: "HostLifecycle",
+            logSink: _logSink,
+            toastService: _toastService);
+
+        if (spawnedHosts == null || spawnedHosts.Count == 0) return;
+
+        var names = new List<string>();
+        foreach (var host in spawnedHosts)
+        {
+            var summary = new SimulatedNodeSummary(
+                host.Id,
+                host.DisplayName,
+                SimulatedNodeType.Persona,
+                $"127.0.0.1:{host.BoundPort} (Direct Loopback)",
+                IsPinned: true);
+
+            _worldState.RegisterPersona(summary, host);
+            _worldState.TogglePinCard(summary);
+            names.Add(host.DisplayName);
+        }
+
+        _flightRecorder.RecordStep(new SpawnPersonasStep(names));
+
+        _toastService.ShowToast("Bulk Personas Spawned", $"Spawned {spawnedHosts.Count} personas.", ToastSeverity.Success);
+    }
 
     [RelayCommand]
-    private void AddRelay() => _toastService.ShowPlaceholder("Add Relay", "Phase 5");
+    private async Task AddRelayAsync()
+    {
+        if (!_hasAddedRealPersona)
+        {
+            _hasAddedRealPersona = true;
+            _designData.ClearPreviewData();
+        }
+
+        var relay = await UiTaskRunner.RunAsync(
+            async () =>
+            {
+                var nodeId = SimulatedNodeId.CreateNew();
+                var name = $"Relay-{_worldState.Relays.Count + 1}";
+                var port = LoopbackPortAllocator.AllocateAvailablePort();
+
+                var host = new SimulatedRelayHost(nodeId, name, port, _logSink, _stateBus);
+                await host.StartAsync();
+                return host;
+            },
+            category: "HostLifecycle",
+            logSink: _logSink,
+            toastService: _toastService);
+
+        if (relay is null) return;
+
+        var summary = new SimulatedNodeSummary(
+            relay.Id,
+            relay.DisplayName,
+            SimulatedNodeType.Relay,
+            $"127.0.0.1:{relay.BoundPort} (Relay)",
+            IsPinned: true);
+
+        _worldState.RegisterRelay(summary, relay);
+        _worldState.TogglePinCard(summary);
+
+        _flightRecorder.RecordStep(new SpawnRelayStep(relay.DisplayName));
+
+        _toastService.ShowToast("Relay Spawned", $"Spawned '{relay.DisplayName}' on port {relay.BoundPort}.", ToastSeverity.Success);
+    }
 
     [RelayCommand]
     private async Task RunScenarioAsync()

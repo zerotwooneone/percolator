@@ -18,11 +18,30 @@
 
             <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="12" Margin="0,0,0,8">
                 <TextBlock Text="{Binding HeldEnvelopeCount, StringFormat='Held Envelopes: {0}'}" FontSize="12" FontWeight="SemiBold" />
-                <TextBlock Text="{Binding HostedOpkCount, StringFormat='Hosted OPKs: {0}/25'}" FontSize="12" FontWeight="SemiBold" />
+                <TextBlock Text="{Binding HostedOpkCount, StringFormat='Hosted OPKs: {0}'}" FontSize="12" FontWeight="SemiBold" />
             </StackPanel>
 
-            <Border Grid.Row="2" Background="{DynamicResource ControlFillColorDefaultBrush}" CornerRadius="6" Padding="8">
-                <TextBlock Text="Mailbox Queue &amp; Chaos Controls (Fleshed out in Phase 5)" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+            <Border Grid.Row="2" Background="{DynamicResource ControlFillColorDefaultBrush}" CornerRadius="6" Padding="8" MinHeight="100" MaxHeight="220">
+                <ScrollViewer>
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Mailbox Queue:" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        <TextBlock Text="(Queue is empty)"
+                                   FontSize="11"
+                                   FontStyle="Italic"
+                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                   IsVisible="{Binding !HeldEnvelopes.Count}" />
+                        <ItemsControl ItemsSource="{Binding HeldEnvelopes}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                                            CornerRadius="4" Padding="6,4" Margin="0,2">
+                                        <TextBlock Text="{Binding DisplayText}" FontSize="11" FontFamily="Consolas, monospace" />
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </ScrollViewer>
             </Border>
 
             <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="6" Margin="0,8,0,0">

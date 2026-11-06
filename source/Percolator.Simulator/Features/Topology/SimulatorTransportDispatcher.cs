@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Google.Protobuf;
@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using Percolator.Application2.Delivery;
 using Percolator.Application2.Delivery.Ports;
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.Infrastructure.Protos;
@@ -48,7 +49,7 @@ internal sealed class SimulatorTransportDispatcher : ITransportDispatcher
                     Uri? targetEndpoint = route.DirectEndpoint;
                     if (targetEndpoint == null && job.RecipientIdentityId.HasValue)
                     {
-                        var targetHost = _worldState.FindPersonaHostByIdentity(job.RecipientIdentityId.Value);
+                        var targetHost = job.RecipientIdentityId.HasValue ? _worldState.FindPersonaHostByIdentity(job.RecipientIdentityId.Value) : null;
                         if (targetHost != null)
                         {
                             if (!targetHost.IsListening.CurrentValue)
@@ -66,23 +67,7 @@ internal sealed class SimulatorTransportDispatcher : ITransportDispatcher
                             "MISSING_DIRECT_ENDPOINT", $"Unable to resolve direct P2P endpoint for recipient {job.RecipientIdentityId}."));
                     }
 
-                    WireFrameKind kind;
-                    try
-                    {
-                        var hs = HandshakeInvitationPackageProto.Parser.ParseFrom(job.Payload.Span);
-                        if (hs.InitiatorIdentityKey.Length == 32 && hs.InitiatorEphemeralKey.Length == 32)
-                        {
-                            kind = WireFrameKind.X3dhHandshake;
-                        }
-                        else
-                        {
-                            kind = WireFrameKind.DirectRatchet;
-                        }
-                    }
-                    catch
-                    {
-                        kind = WireFrameKind.DirectRatchet;
-                    }
+                    WireFrameKind kind = DetermineWireFrameKind(job.Payload);
 
                     byte[] framedPayload = SealedWireFraming.Encode(
                         kind,
@@ -121,9 +106,74 @@ internal sealed class SimulatorTransportDispatcher : ITransportDispatcher
                     return DomainResult.Success();
                 }
 
+                case DeliveryRouteType.RelayedOneToOne:
+                {
+                    var relayEndpoint = route.RelayEndpoint;
+                    var targetRoutingToken = route.TargetToken;
+                    var targetDeliveryToken = route.TargetDeliveryToken;
+
+                    if (relayEndpoint == null || !targetRoutingToken.HasValue || targetDeliveryToken == null)
+                    {
+                        var targetHost = job.RecipientIdentityId.HasValue ? _worldState.FindPersonaHostByIdentity(job.RecipientIdentityId.Value) : null;
+                        if (targetHost?.HomeRelay != null)
+                        {
+                            relayEndpoint ??= RelayEndpoint.FromHostAndPort("127.0.0.1", targetHost.HomeRelay.BoundPort);
+                            targetRoutingToken ??= targetHost.MailboxRoutingToken;
+                            targetDeliveryToken ??= targetHost.MailboxDeliveryToken;
+                        }
+                    }
+
+                    if (relayEndpoint == null)
+                    {
+                        return DomainResult.Failure(new DomainError("MISSING_RELAY_ENDPOINT", "Relay endpoint is required for RelayedOneToOne route."));
+                    }
+
+                    var endpointStr = relayEndpoint.Value;
+                    var relayUri = endpointStr.Contains("://")
+                        ? new Uri(endpointStr)
+                        : new Uri($"https://{endpointStr}");
+
+                    WireFrameKind kind = DetermineWireFrameKind(job.Payload);
+
+                    byte[] framedPayload = SealedWireFraming.Encode(
+                        kind,
+                        job.ChannelId,
+                        job.OwnerIdentityId,
+                        DeviceId.Primary,
+                        job.Payload);
+
+                    var envelopeProto = new SealedEnvelopeProto
+                    {
+                        RecipientRoutingToken = targetRoutingToken.HasValue
+                            ? ByteString.CopyFrom(targetRoutingToken.Value.ToByteArray())
+                            : ByteString.Empty,
+                        DeliveryToken = targetDeliveryToken != null
+                            ? ByteString.CopyFrom(targetDeliveryToken.Span)
+                            : ByteString.Empty,
+                        EncryptedPackage = ByteString.CopyFrom(framedPayload),
+                        ExpiresAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow.AddDays(7))
+                    };
+
+                    var ack = await _invoker.EnqueueMailboxAsync(relayUri, envelopeProto, ct);
+                    if (!ack.Accepted)
+                    {
+                        return DomainResult.Failure(new DomainError("RELAY_ENQUEUE_REJECTED", "Relay rejected mailbox enqueue."));
+                    }
+
+                    _logSink.Log(new SimulatorLogEntry(
+                        DateTimeOffset.UtcNow,
+                        LogLevel.Debug,
+                        _senderDisplayName,
+                        null,
+                        "TransportOutbox",
+                        $"Relayed envelope ({kind}) enqueued to {relayUri} successfully."));
+
+                    return DomainResult.Success();
+                }
+
                 default:
                     return DomainResult.Failure(new DomainError(
-                        "UNSUPPORTED_ROUTE", $"Route type {route.Type} not yet supported in Direct P2P slice."));
+                        "UNSUPPORTED_ROUTE", $"Route type {route.Type} not yet supported in transport dispatcher."));
             }
         }
         catch (Exception ex)
@@ -139,5 +189,23 @@ internal sealed class SimulatorTransportDispatcher : ITransportDispatcher
 
             return DomainResult.Failure(new DomainError("TRANSPORT_ERROR", ex.Message));
         }
+    }
+
+    private static WireFrameKind DetermineWireFrameKind(ReadOnlyMemory<byte> payload)
+    {
+        try
+        {
+            var hs = HandshakeInvitationPackageProto.Parser.ParseFrom(payload.Span);
+            if (hs.InitiatorIdentityKey.Length == 32 && hs.InitiatorEphemeralKey.Length == 32)
+            {
+                return WireFrameKind.X3dhHandshake;
+            }
+        }
+        catch
+        {
+            // Direct ratchet or other wire format
+        }
+
+        return WireFrameKind.DirectRatchet;
     }
 }

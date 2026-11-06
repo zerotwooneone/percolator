@@ -6,17 +6,17 @@ using System.Threading.Tasks;
 using Avalonia.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using ObservableCollections;
+using Percolator.Domain.Channels.Ports;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Identities.ValueObjects;
-using Percolator.Infrastructure.Persistence;
 using Percolator.Simulator.Features.DirectChat;
 using Percolator.Simulator.Features.Logging;
+using Percolator.Simulator.Features.RelayedChat;
 using Percolator.Simulator.Features.Scenarios;
 using Percolator.Simulator.Features.Scenarios.Model;
 using Percolator.Simulator.Features.Shell;
@@ -36,6 +36,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
     private readonly ISimulatedPersonaHost? _host;
     private readonly ISimulatorLogSink? _logSink;
     private readonly IFlightRecorderStateService? _flightRecorder;
+    private readonly RelayProvisioningCoordinator? _relayCoordinator;
 
     private readonly CoalescedActionGate _chatTranscriptGate;
     private readonly CoalescedActionGate _pendingHandshakeGate;
@@ -75,7 +76,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
     private bool _autoReplyPong = false;
 
     [ObservableProperty]
-    private bool _autoReplenishPreKeys = false;
+    private bool _autoReplenishPreKeys = true;
 
     [ObservableProperty]
     private bool _autoShareProfile = true;
@@ -112,7 +113,8 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
         ISimulatedWorldStateService? worldState = null,
         ISimulatedPersonaHost? host = null,
         ISimulatorLogSink? logSink = null,
-        IFlightRecorderStateService? flightRecorder = null)
+        IFlightRecorderStateService? flightRecorder = null,
+        RelayProvisioningCoordinator? relayCoordinator = null)
     {
         NodeId = summary.Id;
         _displayName = summary.DisplayName;
@@ -127,6 +129,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
         _host = host;
         _logSink = logSink;
         _flightRecorder = flightRecorder;
+        _relayCoordinator = relayCoordinator;
 
         // 30 Hz refresh ceiling for chat transcript with 0ms leading edge
         _chatTranscriptGate = new CoalescedActionGate(
@@ -191,6 +194,39 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
                 {
                     RefreshPendingHandshakes();
                     RefreshChatTranscript();
+                })
+                .AddTo(ref Disposables);
+
+            _stateBus.Signals
+                .Where(s => s.Category == SignalCategory.HostedPreKeyCountChanged)
+                .Subscribe(signal =>
+                {
+                    if (AutoReplenishPreKeys && _host?.HomeRelay != null && _relayCoordinator != null)
+                    {
+                        if (signal.Details != null && signal.Details.StartsWith(_host.PublicIdentityId.ToString()))
+                        {
+                            var parts = signal.Details.Split(':');
+                            if (parts.Length == 2 && int.TryParse(parts[1], out var available) && available < 5)
+                            {
+                                UiTaskRunner.FireAndForget(async () =>
+                                {
+                                    _logSink?.Log(new SimulatorLogEntry(
+                                        DateTimeOffset.UtcNow,
+                                        LogLevel.Information,
+                                        DisplayName,
+                                        NodeId,
+                                        "Autopilot",
+                                        $"Auto-replenishing prekeys: hosted OPK count dropped to {available} (< 5). Uploading 25 fresh OPKs."));
+
+                                    await _relayCoordinator.PublishPreKeysAsync(_host, _host.HomeRelay, 25);
+                                },
+                                category: "Autopilot",
+                                logSink: _logSink,
+                                nodeName: DisplayName,
+                                nodeId: NodeId);
+                            }
+                        }
+                    }
                 })
                 .AddTo(ref Disposables);
 
@@ -346,10 +382,50 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private void RegisterRelay() => _toastService.ShowPlaceholder("Register Relay", "Phase 5");
+    private async Task RegisterRelayAsync()
+    {
+        if (_host == null || _relayCoordinator == null || _worldState == null) return;
+        var relay = _host.HomeRelay ?? _worldState.GetAllRelayHosts().FirstOrDefault();
+        if (relay == null)
+        {
+            _toastService.ShowToast("Relay Missing", "Spawn a Relay node first in the top toolbar.", ToastSeverity.Warning);
+            return;
+        }
+
+        var success = await UiTaskRunner.RunAsync(
+            () => _relayCoordinator.RegisterMailboxAsync(_host, relay),
+            category: "RelayProvisioning",
+            toastService: _toastService);
+
+        if (success)
+        {
+            _flightRecorder?.RecordStep(new RegisterMailboxesStep(relay.DisplayName, new[] { DisplayName }));
+            _toastService.ShowToast("Relay Registered", $"Mailbox registered on '{relay.DisplayName}'.", ToastSeverity.Success);
+        }
+    }
 
     [RelayCommand]
-    private void PublishPreKeys() => _toastService.ShowPlaceholder("Publish PreKeys", "Phase 5");
+    private async Task PublishPreKeysAsync()
+    {
+        if (_host == null || _relayCoordinator == null || _worldState == null) return;
+        var relay = _host.HomeRelay ?? _worldState.GetAllRelayHosts().FirstOrDefault();
+        if (relay == null)
+        {
+            _toastService.ShowToast("Relay Missing", "Spawn a Relay node first in the top toolbar.", ToastSeverity.Warning);
+            return;
+        }
+
+        var success = await UiTaskRunner.RunAsync(
+            () => _relayCoordinator.PublishPreKeysAsync(_host, relay, 25),
+            category: "RelayProvisioning",
+            toastService: _toastService);
+
+        if (success)
+        {
+            _flightRecorder?.RecordStep(new PublishPreKeysStep(relay.DisplayName, new[] { DisplayName }, 25));
+            _toastService.ShowToast("PreKeys Published", $"Published 25 OPKs to '{relay.DisplayName}'.", ToastSeverity.Success);
+        }
+    }
 
     [RelayCommand]
     private async Task AcceptPendingHandshakeAsync()

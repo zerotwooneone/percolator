@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "name": "03 PreKey Depletion and Queue Chaos",
+  "description": "Verifies relay mailbox queue chaos mutations (bit flip corruption, duplication), recipient unwrap tamper detection and rejection, and OPK depletion and replenishment.",
+  "steps": [
+    {
+      "$type": "SpawnPersonas",
+      "aliases": [
+        "Alice",
+        "Bob"
+      ]
+    },
+    {
+      "$type": "SpawnRelay",
+      "relayAlias": "Relay-1"
+    },
+    {
+      "$type": "RegisterMailboxes",
+      "relayAlias": "Relay-1",
+      "personaAliases": [
+        "Alice",
+        "Bob"
+      ]
+    },
+    {
+      "$type": "PublishPreKeys",
+      "relayAlias": "Relay-1",
+      "personaAliases": [
+        "Alice",
+        "Bob"
+      ],
+      "oneTimeKeyCount": 25
+    },
+    {
+      "$type": "SetListeningState",
+      "alias": "Bob",
+      "isListening": false
+    },
+    {
+      "$type": "InitiateRelayedHandshake",
+      "initiatorAlias": "Alice",
+      "targetAlias": "Bob",
+      "relayAlias": "Relay-1"
+    },
+    {
+      "$type": "FlipRelayEnvelopeBit",
+      "relayAlias": "Relay-1"
+    },
+    {
+      "$type": "DuplicateRelayEnvelope",
+      "relayAlias": "Relay-1"
+    },
+    {
+      "$type": "SetListeningState",
+      "alias": "Bob",
+      "isListening": true
+    },
+    {
+      "$type": "PublishPreKeys",
+      "relayAlias": "Relay-1",
+      "personaAliases": [
+        "Bob"
+      ],
+      "oneTimeKeyCount": 25
+    }
+  ],
+  "assertions": [
+    {
+      "$type": "AssertHostedOpkCount",
+      "relayAlias": "Relay-1",
+      "personaAlias": "Bob",
+      "expectedCount": 49
+    },
+    {
+      "$type": "AssertMailboxQueueDepth",
+      "relayAlias": "Relay-1",
+      "expectedDepth": 0
+    },
+    {
+      "$type": "AssertLogContainsCode",
+      "expectedCode": "CORRUPTED"
+    }
+  ]
+}

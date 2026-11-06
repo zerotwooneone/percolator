@@ -6,6 +6,9 @@ namespace Percolator.Simulator.Features.Scenarios.Model;
 [JsonDerivedType(typeof(AssertDirectRatchetSessionAssertion), "AssertDirectRatchetSession")]
 [JsonDerivedType(typeof(AssertMessageDeliveredAssertion), "AssertMessageDelivered")]
 [JsonDerivedType(typeof(AssertZeroErrorsAssertion), "AssertZeroErrors")]
+[JsonDerivedType(typeof(AssertHostedOpkCountAssertion), "AssertHostedOpkCount")]
+[JsonDerivedType(typeof(AssertMailboxQueueDepthAssertion), "AssertMailboxQueueDepth")]
+[JsonDerivedType(typeof(AssertLogContainsCodeAssertion), "AssertLogContainsCode")]
 public abstract record ScenarioAssertionDefinition
 {
     public abstract string DisplayText { get; }
@@ -25,4 +28,23 @@ public sealed record AssertMessageDeliveredAssertion(string RecipientAlias, stri
 public sealed record AssertZeroErrorsAssertion() : ScenarioAssertionDefinition
 {
     public override string DisplayText => "Assert Zero Errors in Session Logs";
+}
+
+// -----------------------------------------------------------------------------
+// Phase 5 Scenario Assertions: Hosted PreKeys, Queue Depth & Log Verification
+// -----------------------------------------------------------------------------
+
+public sealed record AssertHostedOpkCountAssertion(string RelayAlias, string PersonaAlias, int ExpectedCount) : ScenarioAssertionDefinition
+{
+    public override string DisplayText => $"Assert Hosted OPK Count on '{RelayAlias}' for '{PersonaAlias}' == {ExpectedCount}";
+}
+
+public sealed record AssertMailboxQueueDepthAssertion(string RelayAlias, int ExpectedDepth) : ScenarioAssertionDefinition
+{
+    public override string DisplayText => $"Assert Mailbox Queue Depth on '{RelayAlias}' == {ExpectedDepth}";
+}
+
+public sealed record AssertLogContainsCodeAssertion(string ExpectedCode) : ScenarioAssertionDefinition
+{
+    public override string DisplayText => $"Assert Log Contains: \"{ExpectedCode}\"";
 }
