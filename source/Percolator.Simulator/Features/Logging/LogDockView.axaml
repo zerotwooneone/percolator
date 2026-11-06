@@ -1,20 +1,21 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Percolator.Simulator.Features.Logging"
+             xmlns:logging="using:Percolator.Simulator.Features.Logging"
              x:Class="Percolator.Simulator.Features.Logging.LogDockView"
              x:DataType="vm:LogDockViewModel">
 
     <Border Background="{DynamicResource SolidBackgroundFillColorSecondaryBrush}"
             BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
             BorderThickness="0,1,0,0"
-            Height="140"
+            Height="160"
             Padding="8,6">
         <Grid RowDefinitions="Auto,*">
             <!-- Header with Level Filter CTL-LOG-01 and Clear CTL-LOG-02 -->
             <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,4">
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
                     <TextBlock Text="LOG VIEWER" FontWeight="Bold" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
-                    <!-- CTL-LOG-01 -->
+                    <!-- CTL-LOG-01: Minimum Log Level -->
                     <ComboBox SelectedIndex="{Binding SelectedLogLevelIndex}" Height="24" Padding="6,2">
                         <ComboBoxItem Content="Trace" />
                         <ComboBoxItem Content="Debug" />
@@ -33,8 +34,13 @@
                 <ScrollViewer>
                     <ItemsControl ItemsSource="{Binding LogEntries}">
                         <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <TextBlock Text="{Binding}" FontSize="11" FontFamily="Consolas" Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,1" />
+                            <DataTemplate x:DataType="logging:UiLogItem">
+                                <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,1">
+                                    <Border Background="{Binding BadgeColor}" CornerRadius="3" Padding="4,1" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Level}" FontSize="9" FontWeight="Bold" Foreground="White" />
+                                    </Border>
+                                    <TextBlock Text="{Binding FormattedText}" FontSize="11" FontFamily="Consolas" Foreground="{DynamicResource TextFillColorPrimaryBrush}" VerticalAlignment="Center" />
+                                </StackPanel>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
