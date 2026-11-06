@@ -22,6 +22,7 @@ internal sealed partial class TopGlobalToolbarViewModel : ViewModelBase
     private readonly DesignDataService _designData;
     private readonly IFlightRecorderStateService _flightRecorder;
     private readonly ScenarioRunnerService _scenarioRunner;
+    private readonly ISimulatedNodeFactory _nodeFactory;
     private bool _hasAddedRealPersona;
 
     public TopGlobalToolbarViewModel(
@@ -32,7 +33,8 @@ internal sealed partial class TopGlobalToolbarViewModel : ViewModelBase
         ISimulatorStateBus stateBus,
         DesignDataService designData,
         IFlightRecorderStateService flightRecorder,
-        ScenarioRunnerService scenarioRunner)
+        ScenarioRunnerService scenarioRunner,
+        ISimulatedNodeFactory nodeFactory)
     {
         _worldState = worldState;
         _selectionState = selectionState;
@@ -42,6 +44,7 @@ internal sealed partial class TopGlobalToolbarViewModel : ViewModelBase
         _designData = designData;
         _flightRecorder = flightRecorder;
         _scenarioRunner = scenarioRunner;
+        _nodeFactory = nodeFactory ?? throw new ArgumentNullException(nameof(nodeFactory));
     }
 
     [RelayCommand]
@@ -54,20 +57,9 @@ internal sealed partial class TopGlobalToolbarViewModel : ViewModelBase
             _designData.ClearPreviewData();
         }
 
-        // 2. Offload key generation, identicon rendering, port allocation, SQLCipher DB init, and Kestrel startup to background thread
+        // 2. Offload persona generation to shared node factory on background thread
         var host = await UiTaskRunner.RunAsync(
-            async () =>
-            {
-                var nodeId = SimulatedNodeId.CreateNew();
-                var name = WordPairNameGenerator.Generate();
-                var seed = (uint)Random.Shared.Next();
-                var identiconBytes = IdenticonGenerator.CreatePng(seed);
-                var port = LoopbackPortAllocator.AllocateAvailablePort();
-
-                var personaHost = new SimulatedPersonaHost(nodeId, name, identiconBytes, port, _logSink, _stateBus, _worldState);
-                await personaHost.StartAsync();
-                return personaHost;
-            },
+            () => _nodeFactory.CreatePersonaHostAsync(),
             category: "HostLifecycle",
             logSink: _logSink,
             toastService: _toastService);
@@ -117,15 +109,7 @@ internal sealed partial class TopGlobalToolbarViewModel : ViewModelBase
                 var list = new List<ISimulatedPersonaHost>();
                 for (int i = 0; i < 3; i++)
                 {
-                    var nodeId = SimulatedNodeId.CreateNew();
-                    var name = WordPairNameGenerator.Generate();
-                    var seed = (uint)Random.Shared.Next();
-                    var identiconBytes = IdenticonGenerator.CreatePng(seed);
-                    var port = LoopbackPortAllocator.AllocateAvailablePort();
-
-                    var personaHost = new SimulatedPersonaHost(nodeId, name, identiconBytes, port, _logSink, _stateBus, _worldState);
-                    await personaHost.StartAsync();
-                    list.Add(personaHost);
+                    list.Add(await _nodeFactory.CreatePersonaHostAsync());
                 }
                 return list;
             },
@@ -165,16 +149,7 @@ internal sealed partial class TopGlobalToolbarViewModel : ViewModelBase
         }
 
         var relay = await UiTaskRunner.RunAsync(
-            async () =>
-            {
-                var nodeId = SimulatedNodeId.CreateNew();
-                var name = $"Relay-{_worldState.Relays.Count + 1}";
-                var port = LoopbackPortAllocator.AllocateAvailablePort();
-
-                var host = new SimulatedRelayHost(nodeId, name, port, _logSink, _stateBus);
-                await host.StartAsync();
-                return host;
-            },
+            () => _nodeFactory.CreateRelayHostAsync(),
             category: "HostLifecycle",
             logSink: _logSink,
             toastService: _toastService);

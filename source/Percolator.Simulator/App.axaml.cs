@@ -41,6 +41,7 @@ public partial class App : Avalonia.Application
         services.AddSingleton<ISimulatedWorldStateService, SimulatedWorldStateService>();
         services.AddSingleton<IStatusToastService, StatusToastService>();
         services.AddSingleton<IFlightRecorderStateService, FlightRecorderStateService>();
+        services.AddSingleton<ISimulatedNodeFactory, SimulatedNodeFactory>();
 
         // 3. Shell & Orchestration Services
         services.AddSingleton<DesignDataService>();

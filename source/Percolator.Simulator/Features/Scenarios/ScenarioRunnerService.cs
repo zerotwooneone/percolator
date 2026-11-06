@@ -30,6 +30,7 @@ internal sealed class ScenarioRunnerService
     private readonly DirectChatCoordinator _chatCoordinator;
     private readonly RelayProvisioningCoordinator _relayCoordinator;
     private readonly ISimulatorLogSink _logSink;
+    private readonly ISimulatedNodeFactory _nodeFactory;
     private readonly IFlightRecorderStateService? _flightRecorder;
     private readonly ISelectionStateService? _selectionState;
 
@@ -40,6 +41,7 @@ internal sealed class ScenarioRunnerService
         DirectChatCoordinator chatCoordinator,
         RelayProvisioningCoordinator relayCoordinator,
         ISimulatorLogSink logSink,
+        ISimulatedNodeFactory nodeFactory,
         IFlightRecorderStateService? flightRecorder = null,
         ISelectionStateService? selectionState = null)
     {
@@ -49,6 +51,7 @@ internal sealed class ScenarioRunnerService
         _chatCoordinator = chatCoordinator ?? throw new ArgumentNullException(nameof(chatCoordinator));
         _relayCoordinator = relayCoordinator ?? throw new ArgumentNullException(nameof(relayCoordinator));
         _logSink = logSink ?? throw new ArgumentNullException(nameof(logSink));
+        _nodeFactory = nodeFactory ?? throw new ArgumentNullException(nameof(nodeFactory));
         _flightRecorder = flightRecorder;
         _selectionState = selectionState;
     }
@@ -248,13 +251,7 @@ internal sealed class ScenarioRunnerService
     {
         foreach (var alias in step.Aliases)
         {
-            var nodeId = SimulatedNodeId.CreateNew();
-            var seed = (uint)Random.Shared.Next();
-            var identicon = IdenticonGenerator.CreatePng(seed);
-            var port = LoopbackPortAllocator.AllocateAvailablePort();
-
-            var host = new SimulatedPersonaHost(nodeId, alias, identicon, port, _logSink, _stateBus, _worldState);
-            await host.StartAsync(ct);
+            var host = await _nodeFactory.CreatePersonaHostAsync(alias, ct);
 
             var summary = new SimulatedNodeSummary(
                 host.Id,
@@ -287,10 +284,7 @@ internal sealed class ScenarioRunnerService
         Dictionary<string, ISimulatedRelayHost> relayAliasMap,
         CancellationToken ct)
     {
-        var nodeId = SimulatedNodeId.CreateNew();
-        var port = LoopbackPortAllocator.AllocateAvailablePort();
-        var host = new SimulatedRelayHost(nodeId, step.RelayAlias, port, _logSink, _stateBus);
-        await host.StartAsync(ct);
+        var host = await _nodeFactory.CreateRelayHostAsync(step.RelayAlias, ct);
 
         var summary = new SimulatedNodeSummary(
             host.Id,
