@@ -1,3 +1,4 @@
+using System;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
@@ -67,6 +68,19 @@ public partial class App : Avalonia.Application
             null,
             "Lifecycle",
             "Percolator Simulator MultiSinkLogEngine initialized. Logging active."));
+
+#if !WINDOWS
+        if (OperatingSystem.IsWindows())
+        {
+            logEngine.Log(new SimulatorLogEntry(
+                System.DateTimeOffset.UtcNow,
+                LogLevel.Error,
+                "Simulator",
+                null,
+                "PlatformGuard",
+                "PLATFORM TARGET MISMATCH: Running on Windows with generic 'net10.0' target. WindowsSChannelCertificateProvider and WindowsSparseDesktopFileStore are NOT compiled in. Use target 'net10.0-windows10.0.19041.0' instead."));
+        }
+#endif
 
         // Seed preview design data in Phase 1
         var designData = _services.GetRequiredService<DesignDataService>();

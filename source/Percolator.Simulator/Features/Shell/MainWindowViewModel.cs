@@ -1,3 +1,4 @@
+using System;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Percolator.Simulator.Features.Logging;
@@ -25,6 +26,12 @@ internal sealed partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty]
     private bool _isStatusToastOpen;
 
+    [ObservableProperty]
+    private bool _isPlatformMismatchWarningVisible;
+
+    [ObservableProperty]
+    private string _platformMismatchWarningMessage = string.Empty;
+
     public MainWindowViewModel(
         TopGlobalToolbarViewModel toolbar,
         ContextualActionBarViewModel actionBar,
@@ -40,6 +47,17 @@ internal sealed partial class MainWindowViewModel : ViewModelBase
         Workbench = workbench;
         FlightRecorder = flightRecorder;
         LogDock = logDock;
+
+#if !WINDOWS
+        if (OperatingSystem.IsWindows())
+        {
+            IsPlatformMismatchWarningVisible = true;
+            PlatformMismatchWarningMessage =
+                "PLATFORM TARGET MISMATCH: Running on Windows with the generic 'net10.0' build target. " +
+                "SChannel TLS 1.3 and NTFS sparse files require 'net10.0-windows10.0.19041.0'. " +
+                "In Rider, switch the Run Configuration Target Framework to 'net10.0-windows10.0.19041.0'.";
+        }
+#endif
 
         toastService.Toasts
             .Subscribe(toast =>
@@ -58,5 +76,11 @@ internal sealed partial class MainWindowViewModel : ViewModelBase
     private void DismissToast()
     {
         IsStatusToastOpen = false;
+    }
+
+    [RelayCommand]
+    private void DismissPlatformWarning()
+    {
+        IsPlatformMismatchWarningVisible = false;
     }
 }

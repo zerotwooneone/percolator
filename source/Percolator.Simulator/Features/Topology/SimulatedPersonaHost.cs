@@ -114,6 +114,22 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
 
     public async ValueTask StartAsync(CancellationToken ct = default)
     {
+#if !WINDOWS
+        if (OperatingSystem.IsWindows())
+        {
+            var errorMsg = "Persona host cannot start: Running on Windows under the generic 'net10.0' build target without Windows SChannel TLS infrastructure. " +
+                           "Please build and launch using the 'net10.0-windows10.0.19041.0' target framework.";
+            _logSink.Log(new SimulatorLogEntry(
+                DateTimeOffset.UtcNow,
+                LogLevel.Critical,
+                DisplayName,
+                Id,
+                "PlatformGuard",
+                errorMsg));
+            throw new PlatformNotSupportedException(errorMsg);
+        }
+#endif
+
         var storageOptions = new VaultStorageOptions
         {
             BaseDirectory = _nodeTempDirectory
