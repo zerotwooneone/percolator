@@ -106,7 +106,8 @@ internal sealed class SimulatorNotifyingHandshakeDecorator : IHandshakeService
             _stateBus.Publish(new SimulatorStateSignal(
                 _nodeId,
                 SignalCategory.RatchetSessionChanged,
-                Details: remoteBundle.IdentityId.ToString()));
+                Details: remoteBundle.IdentityId.ToString(),
+                Payload: new HandshakeSignalPayload(remoteBundle.IdentityId, "Initiate")));
         }
 
         return result;
@@ -123,12 +124,14 @@ internal sealed class SimulatorNotifyingHandshakeDecorator : IHandshakeService
             _stateBus.Publish(new SimulatorStateSignal(
                 _nodeId,
                 SignalCategory.PendingHandshakeChanged,
-                Details: envelope.SenderIdentityId.ToString()));
+                Details: envelope.SenderIdentityId.ToString(),
+                Payload: new HandshakeSignalPayload(envelope.SenderIdentityId, "ReceiveInvitation")));
 
             _stateBus.Publish(new SimulatorStateSignal(
                 _nodeId,
                 SignalCategory.RatchetSessionChanged,
-                Details: envelope.SenderIdentityId.ToString()));
+                Details: envelope.SenderIdentityId.ToString(),
+                Payload: new HandshakeSignalPayload(envelope.SenderIdentityId, "ReceiveInvitation")));
         }
 
         return result;
@@ -146,12 +149,14 @@ internal sealed class SimulatorNotifyingHandshakeDecorator : IHandshakeService
             _stateBus.Publish(new SimulatorStateSignal(
                 _nodeId,
                 SignalCategory.PendingHandshakeChanged,
-                Details: senderId.ToString()));
+                Details: senderId.ToString(),
+                Payload: new HandshakeSignalPayload(senderId, "CompletePending")));
 
             _stateBus.Publish(new SimulatorStateSignal(
                 _nodeId,
                 SignalCategory.RatchetSessionChanged,
-                Details: senderId.ToString()));
+                Details: senderId.ToString(),
+                Payload: new HandshakeSignalPayload(senderId, "CompletePending")));
         }
 
         return result;

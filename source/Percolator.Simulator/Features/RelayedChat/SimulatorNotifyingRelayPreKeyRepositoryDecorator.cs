@@ -73,7 +73,8 @@ internal sealed class SimulatorNotifyingRelayPreKeyRepositoryDecorator : IRelayP
         _stateBus.Publish(new SimulatorStateSignal(
             _nodeId,
             SignalCategory.HostedPreKeyCountChanged,
-            $"{bundle.OwnerId}:{bundle.AvailableOneTimePreKeyCount}"));
+            $"{bundle.OwnerId}:{bundle.AvailableOneTimePreKeyCount}",
+            Payload: new HostedPreKeyCountPayload(bundle.OwnerId, bundle.AvailableOneTimePreKeyCount)));
     }
 
     public async Task DeleteAsync(
@@ -87,7 +88,8 @@ internal sealed class SimulatorNotifyingRelayPreKeyRepositoryDecorator : IRelayP
         _stateBus.Publish(new SimulatorStateSignal(
             _nodeId,
             SignalCategory.HostedPreKeyCountChanged,
-            $"{ownerId}:0"));
+            $"{ownerId}:0",
+            Payload: new HostedPreKeyCountPayload(ownerId, 0)));
     }
 
     public int GetAvailableOpkCount(PublicIdentityId ownerId, DeviceId deviceId)

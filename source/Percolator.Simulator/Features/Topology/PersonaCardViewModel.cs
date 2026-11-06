@@ -183,7 +183,9 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
                 .AddTo(ref Disposables);
 
             _stateBus.Signals
-                .Where(s => (s.NodeId == NodeId || s.Details == _host.PublicIdentityId.ToString()) &&
+                .Where(s => (s.NodeId == NodeId ||
+                             s.Details == _host.PublicIdentityId.ToString() ||
+                             (s.Payload is ChatTranscriptSignalPayload cp && cp.RemotePeerId == _host.PublicIdentityId)) &&
                             s.Category == SignalCategory.ChatTranscriptChanged)
                 .Subscribe(_ => RefreshChatTranscript())
                 .AddTo(ref Disposables);
@@ -203,28 +205,38 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
                 {
                     if (AutoReplenishPreKeys && _host?.HomeRelay != null && _relayCoordinator != null)
                     {
-                        if (signal.Details != null && signal.Details.StartsWith(_host.PublicIdentityId.ToString()))
+                        PublicIdentityId? ownerId = (signal.Payload as HostedPreKeyCountPayload)?.OwnerId;
+                        int? available = (signal.Payload as HostedPreKeyCountPayload)?.AvailableCount;
+
+                        if (!ownerId.HasValue && signal.Details != null && signal.Details.StartsWith(_host.PublicIdentityId.ToString()))
                         {
                             var parts = signal.Details.Split(':');
-                            if (parts.Length == 2 && int.TryParse(parts[1], out var available) && available < 5)
+                            if (parts.Length == 2 && int.TryParse(parts[1], out var parsedCount))
                             {
-                                UiTaskRunner.FireAndForget(async () =>
-                                {
-                                    _logSink?.Log(new SimulatorLogEntry(
-                                        DateTimeOffset.UtcNow,
-                                        LogLevel.Information,
-                                        DisplayName,
-                                        NodeId,
-                                        "Autopilot",
-                                        $"Auto-replenishing prekeys: hosted OPK count dropped to {available} (< 5). Uploading 25 fresh OPKs."));
-
-                                    await _relayCoordinator.PublishPreKeysAsync(_host, _host.HomeRelay, 25);
-                                },
-                                category: "Autopilot",
-                                logSink: _logSink,
-                                nodeName: DisplayName,
-                                nodeId: NodeId);
+                                ownerId = _host.PublicIdentityId;
+                                available = parsedCount;
                             }
+                        }
+
+                        if (ownerId == _host.PublicIdentityId && available.HasValue && available.Value < 5)
+                        {
+                            int count = available.Value;
+                            UiTaskRunner.FireAndForget(async () =>
+                            {
+                                _logSink?.Log(new SimulatorLogEntry(
+                                    DateTimeOffset.UtcNow,
+                                    LogLevel.Information,
+                                    DisplayName,
+                                    NodeId,
+                                    "Autopilot",
+                                    $"Auto-replenishing prekeys: hosted OPK count dropped to {count} (< 5). Uploading 25 fresh OPKs."));
+
+                                await _relayCoordinator.PublishPreKeysAsync(_host, _host.HomeRelay, 25);
+                            },
+                            category: "Autopilot",
+                            logSink: _logSink,
+                            nodeName: DisplayName,
+                            nodeId: NodeId);
                         }
                     }
                 })
@@ -300,14 +312,14 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
                 UiTaskRunner.PostToUi(() =>
                 {
                     if (ChatMessages.Count == transcript.Count &&
-                        ChatMessages.Zip(transcript).All(pair => pair.First.Content == pair.Second.Content))
+                        ChatMessages.SequenceEqual(transcript))
                     {
                         return; // No-op: transcript already up to date
                     }
 
                     if (ChatMessages.Count > 0 &&
                         transcript.Count > ChatMessages.Count &&
-                        ChatMessages.Zip(transcript).All(pair => pair.First.Content == pair.Second.Content))
+                        ChatMessages.Zip(transcript).All(pair => pair.First == pair.Second))
                     {
                         // Append new items smoothly
                         var newItems = transcript.Skip(ChatMessages.Count).ToList();

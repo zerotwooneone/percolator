@@ -100,7 +100,8 @@ internal sealed class DirectChatCoordinator
                 _stateBus.Publish(new SimulatorStateSignal(
                     sender.Id,
                     SignalCategory.ChatTranscriptChanged,
-                    Details: recipient.PublicIdentityId.ToString()));
+                    Details: recipient.PublicIdentityId.ToString(),
+                    Payload: new ChatTranscriptSignalPayload(recipient.PublicIdentityId)));
 
                 // Immediately flush outbox to deliver encrypted payload via loopback gRPC TLS or Relay mailbox
                 var flushResult = await sender.FlushOutboxAsync(ct);
@@ -165,14 +166,23 @@ internal sealed class DirectChatCoordinator
                             var isOutgoing = m.AuthorId == host.PublicIdentityId;
                             var senderName = isOutgoing ? host.DisplayName : peerHost.DisplayName;
                             var timeText = DateTimeOffset.FromUnixTimeMilliseconds((long)m.TimestampUnixMs).ToLocalTime().ToString("HH:mm:ss");
+                            var isRead = m.ReadAtUnixMs.HasValue;
+                            var statusText = isOutgoing ? (isRead ? "✓✓" : "✓") : string.Empty;
+                            var reactionsSummary = m.Reactions.Count > 0
+                                ? string.Join(" ", m.Reactions.GroupBy(r => r.Emoji).Select(g => $"{{g.Key}} {{g.Count()}}"))
+                                : string.Empty;
 
                             return new ChatMessageItemViewModel
                             {
+                                MessageId = m.Id.Value.ToString(),
                                 SenderName = senderName,
                                 Content = m.Content,
                                 TimestampText = timeText,
                                 IsOutgoing = isOutgoing,
-                                StatusText = "✓"
+                                StatusText = statusText,
+                                IsEdited = m.EditedAtUnixMs.HasValue,
+                                IsRead = isRead,
+                                ReactionsSummary = reactionsSummary
                             };
                         }).ToList();
                     }

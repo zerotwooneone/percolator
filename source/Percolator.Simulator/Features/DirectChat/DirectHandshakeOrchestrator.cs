@@ -212,7 +212,8 @@ internal sealed class DirectHandshakeOrchestrator
                     _stateBus.Publish(new SimulatorStateSignal(
                         senderHost.Id,
                         SignalCategory.RatchetSessionChanged,
-                        Details: target.PublicIdentityId.ToString()));
+                        Details: target.PublicIdentityId.ToString(),
+                        Payload: new HandshakeSignalPayload(target.PublicIdentityId, "Accept")));
                 }
 
                 _logSink.Log(new SimulatorLogEntry(
@@ -229,12 +230,14 @@ internal sealed class DirectHandshakeOrchestrator
                 _stateBus.Publish(new SimulatorStateSignal(
                     target.Id,
                     SignalCategory.PendingHandshakeChanged,
-                    Details: senderId.ToString()));
+                    Details: senderId.ToString(),
+                    Payload: new HandshakeSignalPayload(senderId, "Accept")));
 
                 _stateBus.Publish(new SimulatorStateSignal(
                     target.Id,
                     SignalCategory.RatchetSessionChanged,
-                    Details: senderId.ToString()));
+                    Details: senderId.ToString(),
+                    Payload: new HandshakeSignalPayload(senderId, "Accept")));
 
                 return true;
             }
@@ -311,7 +314,8 @@ internal sealed class DirectHandshakeOrchestrator
                 _stateBus.Publish(new SimulatorStateSignal(
                     target.Id,
                     SignalCategory.PendingHandshakeChanged,
-                    Details: senderId.ToString()));
+                    Details: senderId.ToString(),
+                    Payload: new HandshakeSignalPayload(senderId, block ? "Block" : "Reject")));
 
                 return true;
             }
