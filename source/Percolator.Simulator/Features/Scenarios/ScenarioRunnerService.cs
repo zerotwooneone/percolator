@@ -28,6 +28,7 @@ internal sealed class ScenarioRunnerService
     private readonly DirectChatCoordinator _chatCoordinator;
     private readonly ISimulatorLogSink _logSink;
     private readonly IFlightRecorderStateService? _flightRecorder;
+    private readonly ISelectionStateService? _selectionState;
 
     public ScenarioRunnerService(
         ISimulatedWorldStateService worldState,
@@ -35,7 +36,8 @@ internal sealed class ScenarioRunnerService
         DirectHandshakeOrchestrator handshakeOrchestrator,
         DirectChatCoordinator chatCoordinator,
         ISimulatorLogSink logSink,
-        IFlightRecorderStateService? flightRecorder = null)
+        IFlightRecorderStateService? flightRecorder = null,
+        ISelectionStateService? selectionState = null)
     {
         _worldState = worldState ?? throw new ArgumentNullException(nameof(worldState));
         _stateBus = stateBus ?? throw new ArgumentNullException(nameof(stateBus));
@@ -43,6 +45,7 @@ internal sealed class ScenarioRunnerService
         _chatCoordinator = chatCoordinator ?? throw new ArgumentNullException(nameof(chatCoordinator));
         _logSink = logSink ?? throw new ArgumentNullException(nameof(logSink));
         _flightRecorder = flightRecorder;
+        _selectionState = selectionState;
     }
 
     public async Task RunScenarioAsync(ScenarioDocument scenario, CancellationToken ct = default)
@@ -72,6 +75,12 @@ internal sealed class ScenarioRunnerService
 
         // 1. Clean slate reset
         await _worldState.ClearAllAsync();
+        if (_selectionState != null)
+        {
+            _selectionState.SetPrimary(null);
+            _selectionState.SetSecondary(null);
+            _selectionState.ClearMultiSelection();
+        }
         var aliasMap = new Dictionary<string, ISimulatedPersonaHost>(StringComparer.OrdinalIgnoreCase);
 
         try
@@ -143,8 +152,8 @@ internal sealed class ScenarioRunnerService
                         await ExecuteAssertDirectRatchetSessionAsync(ratchetAssert, aliasMap, ct);
                         break;
 
-                    case AssertMessageDeliveredAssertion msgAssert:
-                        await ExecuteAssertMessageDeliveredAsync(msgAssert, aliasMap, ct);
+                    case AssertMessageDeliveredAssertion messageAssert:
+                        await ExecuteAssertMessageDeliveredAsync(messageAssert, aliasMap, ct);
                         break;
 
                     case AssertZeroErrorsAssertion:
@@ -164,7 +173,7 @@ internal sealed class ScenarioRunnerService
                 "Scenario",
                 $"=== Scenario Replay PASSED: '{scenario.Name}' ==="));
 
-            _flightRecorder?.SetReplayStatus($"Passed: '{scenario.Name}'");
+            _flightRecorder?.SetReplayStatus($"PASS: '{scenario.Name}'");
         }
         catch (Exception ex)
         {
@@ -207,6 +216,19 @@ internal sealed class ScenarioRunnerService
             _worldState.RegisterPersona(summary, host);
             _worldState.TogglePinCard(summary);
             aliasMap[alias] = host;
+
+            if (_selectionState != null)
+            {
+                if (_selectionState.PrimarySelectedNode.CurrentValue is null)
+                {
+                    _selectionState.SetPrimary(summary);
+                }
+                else if (_selectionState.SecondarySelectedNode.CurrentValue is null &&
+                         _selectionState.PrimarySelectedNode.CurrentValue.Id != summary.Id)
+                {
+                    _selectionState.SetSecondary(summary);
+                }
+            }
         }
     }
 
@@ -344,19 +366,21 @@ internal sealed class ScenarioRunnerService
         var h2 = GetHostOrThrow(assertion.Alias2, aliasMap);
 
         using var scope1 = h1.Services.CreateScope();
-        var repo1 = scope1.ServiceProvider.GetRequiredService<IRatchetSessionRepository>();
-        var s1 = await repo1.GetSessionAsync(h1.PublicIdentityId, h2.PublicIdentityId, DeviceId.Primary, ct);
-        if (s1 == null)
+        var ratchetRepo1 = scope1.ServiceProvider.GetRequiredService<IRatchetSessionRepository>();
+        var session1 = await ratchetRepo1.GetSessionAsync(h1.PublicIdentityId, h2.PublicIdentityId, DeviceId.Primary, ct);
+
+        if (session1 == null)
         {
-            throw new ScenarioAssertionException($"AssertDirectRatchetSession failed: Node '{assertion.Alias1}' has no ratchet session for peer '{assertion.Alias2}'.");
+            throw new ScenarioAssertionException($"AssertDirectRatchetSession failed: Node '{assertion.Alias1}' does not have an active Double Ratchet session with '{assertion.Alias2}'.");
         }
 
         using var scope2 = h2.Services.CreateScope();
-        var repo2 = scope2.ServiceProvider.GetRequiredService<IRatchetSessionRepository>();
-        var s2 = await repo2.GetSessionAsync(h2.PublicIdentityId, h1.PublicIdentityId, DeviceId.Primary, ct);
-        if (s2 == null)
+        var ratchetRepo2 = scope2.ServiceProvider.GetRequiredService<IRatchetSessionRepository>();
+        var session2 = await ratchetRepo2.GetSessionAsync(h2.PublicIdentityId, h1.PublicIdentityId, DeviceId.Primary, ct);
+
+        if (session2 == null)
         {
-            throw new ScenarioAssertionException($"AssertDirectRatchetSession failed: Node '{assertion.Alias2}' has no ratchet session for peer '{assertion.Alias1}'.");
+            throw new ScenarioAssertionException($"AssertDirectRatchetSession failed: Node '{assertion.Alias2}' does not have an active Double Ratchet session with '{assertion.Alias1}'.");
         }
     }
 

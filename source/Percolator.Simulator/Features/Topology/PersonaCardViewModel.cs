@@ -9,6 +9,7 @@ using CommunityToolkit.Mvvm.Input;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using ObservableCollections;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.Ports;
@@ -135,6 +136,26 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
             _isListening = host.IsListening.CurrentValue;
         }
 
+        // Subscribe to selection changes to switch active peer conversation dynamically
+        if (_selectionState != null)
+        {
+            _selectionState.PrimarySelectedNode
+                .Subscribe(_ => RefreshChatTranscript())
+                .AddTo(ref Disposables);
+
+            _selectionState.SecondarySelectedNode
+                .Subscribe(_ => RefreshChatTranscript())
+                .AddTo(ref Disposables);
+        }
+
+        // Watch for newly registered personas in world state
+        if (_worldState != null)
+        {
+            _worldState.Personas.ObserveChanged()
+                .Subscribe(_ => RefreshChatTranscript())
+                .AddTo(ref Disposables);
+        }
+
         // Subscribe to cross-host reactive signals
         if (_stateBus != null && _host != null)
         {
@@ -147,13 +168,11 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
             _stateBus.Signals
                 .Where(s => (s.NodeId == NodeId || s.Details == _host.PublicIdentityId.ToString()) &&
                             s.Category == SignalCategory.ChatTranscriptChanged)
-                .ThrottleLast(TimeSpan.FromMilliseconds(50))
                 .Subscribe(_ => RefreshChatTranscript())
                 .AddTo(ref Disposables);
 
             _stateBus.Signals
                 .Where(s => s.NodeId == NodeId && s.Category == SignalCategory.RatchetSessionChanged)
-                .ThrottleLast(TimeSpan.FromMilliseconds(50))
                 .Subscribe(_ =>
                 {
                     RefreshPendingHandshakes();
@@ -216,7 +235,11 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
             async () =>
             {
                 var activePeer = GetActivePeerSummary();
-                if (activePeer == null) return;
+                if (activePeer == null)
+                {
+                    UiTaskRunner.PostToUi(() => ChatMessages.Clear());
+                    return;
+                }
 
                 var transcript = await _chatCoordinator.GetTranscriptAsync(NodeId, activePeer.Id);
 
@@ -228,7 +251,9 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
                         return; // No-op: transcript already up to date
                     }
 
-                    if (ChatMessages.Count > 0 && transcript.Count > ChatMessages.Count)
+                    if (ChatMessages.Count > 0 &&
+                        transcript.Count > ChatMessages.Count &&
+                        ChatMessages.Zip(transcript).All(pair => pair.First.Content == pair.Second.Content))
                     {
                         // Append new items smoothly
                         var newItems = transcript.Skip(ChatMessages.Count).ToList();
@@ -255,16 +280,31 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
 
     private SimulatedNodeSummary? GetActivePeerSummary()
     {
-        if (_selectionState == null || _worldState == null) return null;
-        var primary = _selectionState.PrimarySelectedNode.CurrentValue;
-        var secondary = _selectionState.SecondarySelectedNode.CurrentValue;
+        if (_worldState == null) return null;
 
-        if (primary != null && primary.NodeType == SimulatedNodeType.Persona && primary.Id != NodeId)
-            return primary;
-        if (secondary != null && secondary.NodeType == SimulatedNodeType.Persona && secondary.Id != NodeId)
-            return secondary;
+        // 1. Check if selection state points to a VALID, currently active persona in world state
+        if (_selectionState != null)
+        {
+            var primary = _selectionState.PrimarySelectedNode.CurrentValue;
+            if (primary != null && primary.NodeType == SimulatedNodeType.Persona && primary.Id != NodeId && IsActivePersona(primary.Id))
+            {
+                return primary;
+            }
 
-        return _worldState.Personas.FirstOrDefault(p => p.Id != NodeId);
+            var secondary = _selectionState.SecondarySelectedNode.CurrentValue;
+            if (secondary != null && secondary.NodeType == SimulatedNodeType.Persona && secondary.Id != NodeId && IsActivePersona(secondary.Id))
+            {
+                return secondary;
+            }
+        }
+
+        // 2. Fall back to any active persona in the world that is not this node
+        return _worldState.Personas.FirstOrDefault(p => p.Id != NodeId && IsActivePersona(p.Id));
+    }
+
+    private bool IsActivePersona(SimulatedNodeId nodeId)
+    {
+        return _worldState?.GetPersonaHost(nodeId) != null;
     }
 
     partial void OnIsListeningChanged(bool value)
@@ -278,19 +318,17 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
         _pongResponder?.SetAutoPongEnabled(NodeId, value);
     }
 
-    partial void OnAutoAcceptHandshakesChanged(bool value)
+    [RelayCommand]
+    private void RerollProfile()
     {
-        if (value && HasPendingHandshake)
-        {
-            _ = AcceptPendingHandshakeAsync();
-        }
+        if (_host == null) return;
+        var name = WordPairNameGenerator.Generate();
+        DisplayName = name;
+        _toastService.ShowToast("Profile Updated", $"Rerolled name to '{name}'.", ToastSeverity.Informational);
     }
 
     [RelayCommand]
-    private void RerollProfile() => _toastService.ShowPlaceholder("Reroll Profile", "Phase 6B");
-
-    [RelayCommand]
-    private void RegisterRelay() => _toastService.ShowPlaceholder("Register Relay Mailbox", "Phase 5");
+    private void RegisterRelay() => _toastService.ShowPlaceholder("Register Relay", "Phase 5");
 
     [RelayCommand]
     private void PublishPreKeys() => _toastService.ShowPlaceholder("Publish PreKeys", "Phase 5");
@@ -301,13 +339,20 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
         if (_handshakeOrchestrator == null || !_pendingSenderId.HasValue) return;
         var senderId = _pendingSenderId.Value;
 
-        await UiTaskRunner.RunAsync(
+        var success = await UiTaskRunner.RunAsync(
             () => _handshakeOrchestrator.AcceptHandshakeAsync(NodeId, senderId),
             category: "Handshake",
             logSink: _logSink,
             toastService: _toastService,
             nodeName: DisplayName,
             nodeId: NodeId);
+
+        if (success)
+        {
+            HasPendingHandshake = false;
+            PendingHandshakeText = string.Empty;
+            _pendingSenderId = null;
+        }
     }
 
     [RelayCommand]
@@ -316,13 +361,20 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
         if (_handshakeOrchestrator == null || !_pendingSenderId.HasValue) return;
         var senderId = _pendingSenderId.Value;
 
-        await UiTaskRunner.RunAsync(
+        var success = await UiTaskRunner.RunAsync(
             () => _handshakeOrchestrator.RejectHandshakeAsync(NodeId, senderId, block: false),
             category: "Handshake",
             logSink: _logSink,
             toastService: _toastService,
             nodeName: DisplayName,
             nodeId: NodeId);
+
+        if (success)
+        {
+            HasPendingHandshake = false;
+            PendingHandshakeText = string.Empty;
+            _pendingSenderId = null;
+        }
     }
 
     [RelayCommand]

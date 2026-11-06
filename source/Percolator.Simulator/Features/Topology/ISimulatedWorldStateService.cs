@@ -35,6 +35,7 @@ internal sealed class SimulatedWorldStateService : ISimulatedWorldStateService
 {
     private const int MaxPinnedCards = 4;
 
+    private readonly ISelectionStateService? _selectionState;
     private readonly ObservableList<SimulatedNodeSummary> _personas = new();
     private readonly ObservableList<SimulatedNodeSummary> _relays = new();
     private readonly ObservableList<SimulatedNodeSummary> _groups = new();
@@ -47,6 +48,11 @@ internal sealed class SimulatedWorldStateService : ISimulatedWorldStateService
     public IReadOnlyObservableList<SimulatedNodeSummary> Groups => _groups;
     public IReadOnlyObservableList<SimulatedNodeSummary> ActiveSwarms => _swarms;
     public IReadOnlyObservableList<SimulatedNodeSummary> PinnedCards => _pinnedCards;
+
+    public SimulatedWorldStateService(ISelectionStateService? selectionState = null)
+    {
+        _selectionState = selectionState;
+    }
 
     public void RegisterPersona(SimulatedNodeSummary persona, ISimulatedPersonaHost? host = null)
     {
@@ -127,6 +133,9 @@ internal sealed class SimulatedWorldStateService : ISimulatedWorldStateService
             _groups.Clear();
             _swarms.Clear();
             _pinnedCards.Clear();
+            _selectionState?.SetPrimary(null);
+            _selectionState?.SetSecondary(null);
+            _selectionState?.ClearMultiSelection();
         });
 
         await Task.Run(async () =>
