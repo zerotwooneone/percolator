@@ -75,6 +75,23 @@ Because `Percolator.Simulator` hosts multiple isolated DI containers (`Simulated
    - Because `Microsoft.Data.Sqlite` executes all native SQLite C-API calls synchronously on the calling thread (even inside `*Async` ADO.NET / EF Core methods), and because Signal cryptography (`libsignal`), SChannel X.509 certificate creation, and DI host bootstrapping are CPU-bound, **no ViewModel `[RelayCommand]` or `ISimulatorStateBus` signal handler may execute host, database, cryptographic, or network operations on the Avalonia UI thread**.
    - All ViewModel commands and orchestrators (`TopGlobalToolbarViewModel`, `ContextualActionBarViewModel`, `PersonaCardViewModel`, `DirectHandshakeOrchestrator`, `DirectChatCoordinator`, and all future Phase 4–9 coordinators) must offload execution to the `.NET ThreadPool` via `UiTaskRunner.RunAsync(...)` or `UiTaskRunner.FireAndForget(...)` and marshal observable UI state mutations back via `UiTaskRunner.PostToUi(...)`.
 
+### 1.5 Strict Architectural Integrity, Anti-Lazy Implementation & Zero-Shortcut Policy
+> [!CAUTION] Mandatory Architecture & Boundary Execution Rule
+> `Percolator.Simulator` exists specifically to validate real protocol boundaries under chaotic and production-like conditions. Violations of architectural boundaries and lazy AI shortcuts are **strictly forbidden** in all phases:
+> 1. **Real Network & gRPC Boundaries (No In-Memory Cheating)**:
+>    - Persona-to-relay and persona-to-peer interactions must traverse real Kestrel HTTP/2 TLS endpoints (`AuthenticatedRelayEndpoint`, `UnauthenticatedDeliveryEndpoint`, `AnonymousGroupRelayEndpoint`, `KestrelPeerTransportServer`) via gRPC/HTTP clients.
+>    - Reaching across host containers into peer/relay internal memory (`relay.MailboxStore.*`, `relay.PreKeyRepository.*`, `targetHost.HomeRelay.*`) to bypass wire framing, request signing, or gRPC streaming is **strictly prohibited**.
+> 2. **Effort Budget & Stop-and-Ask Directive**:
+>    - If the AI cannot implement a feature or protocol boundary cleanly within its effort budget, **it MUST stop and ask the user for guidance or a scope adjustment immediately**, rather than resorting to lazy, dangerous shortcuts, fake stubs, or in-memory bypasses.
+> 3. **Zero Nullable Parameter Evasion (QMS Principle #9)**:
+>    - Never make required dependencies nullable with `= null` defaults in ViewModels or Services just to bypass call-site updates or design-time preview wiring. Maintain an explicit, parameterless design-time constructor if needed, and keep runtime constructors strictly non-nullable and compiler-enforced.
+> 4. **No Unstructured String-Splitting on Reactive Signals**:
+>    - Multi-field signal state must use strongly-typed payload records or discriminated event types rather than concatenating and splitting strings in `SimulatorStateSignal.Details`.
+> 5. **Scenario Alias Stability**:
+>    - Personas are identified by immutable scenario aliases. Profile display name rerolls (`RerollProfile`) must never mutate or break the scenario alias resolution key.
+> 6. **Mandatory Disposal of ViewModels and Stateful Subscriptions**:
+>    - All ViewModels managing R3 subscriptions, timers, or action gates must be disposed upon unpinning or workbench clearing.
+
 ---
 
 ## 2. Complete UI Control Inventory & 100% Phase-Mapping Ledger
@@ -298,6 +315,10 @@ Phase 5 introduces `SimulatedRelayHost`, store-and-forward relayed messaging, OP
 ### 3.7 Phase 6A: Virtual Clock, Disappearing Messages, Reactions, Edits/Deletes & Read Receipts
 Phase 6A wires controllable time acceleration and rich 1-on-1 chat mutations.
 
+> [!IMPORTANT] Phase 6A Integrity Constraints:
+> - All delivery/read receipts and reactions must travel through real outbox/ingress pipelines; do not bypass Double Ratchet encryption.
+> - Chat message view models and UI diffing logic must reflect reaction collections, delivery ticks (`✓` -> `✓✓`), and edit states, rather than diffing `.Content` string equality alone.
+
 1. **Virtual Clock Service (`IVirtualClockStateService`, `BTN-TOP-04`, `BTN-TOP-05`)**:
    - Exposes `ReadOnlyReactiveProperty<DateTimeOffset> CurrentUtcNow` and `AdvanceTime(TimeSpan delta)` (`+1 Min`, `+1 Hour`), triggering outbox retry backoffs and `DisappearingMessagePruner` sweeps across all hosts.
 2. **Disappearing Messages (`CTL-PER-19`)**:
@@ -313,6 +334,10 @@ Phase 6A wires controllable time acceleration and rich 1-on-1 chat mutations.
 ### 3.8 Phase 6B: Encrypted Profile & 64x64 Identicon Blind Blob Sync
 Phase 6B wires AES-GCM avatar blind blob storage, ISO/IEC 7816-4 padded profile encryption, and live profile rerolling.
 
+> [!IMPORTANT] Phase 6B Integrity Constraints:
+> - Encrypted avatar blobs and profiles must upload to and download from the relay's actual `UnauthenticatedDeliveryEndpoint` blob/profile storage over gRPC.
+> - Profile reroll operations must update public profile state and notify peers over the protocol without mutating the host's immutable scenario alias or breaking Flight Recorder recording/replay.
+
 1. **Encrypted Profile & Avatar Upload/Download (`CTL-PER-01`, `CTL-PER-10`)**:
    - Encrypts the persona's 64x64 PNG Identicon via `IBlobCryptoService` (`UploadBlindBlob`) and encrypts `ProfileMetadata` into a 1040-byte padded block via `ProfileManager.EncryptProfile` (`UploadProfile`).
    - When `[x] Auto-Share Profile on Connect` (`CTL-PER-10`) is enabled, dispatches `ShareProfileCapabilityCommand` upon contact approval so the peer downloads, decrypts, and renders the remote Identicon and display name.
@@ -325,6 +350,9 @@ Phase 6B wires AES-GCM avatar blind blob storage, ISO/IEC 7816-4 padded profile 
 
 ### 3.9 Phase 7: Group Messaging, ZK Relay Ledger, Roster Mutations & Group Flood
 Phase 7 wires SenderKey ratchets, zero-knowledge presentation proofs on the home relay, epoch rotation on member eviction, and 25-message flood testing.
+
+> [!IMPORTANT] Phase 7 Integrity Constraints:
+> - Group message distribution must use `AnonymousGroupRelayEndpoint.DispatchGroupMessage` and streaming over gRPC with zero-knowledge presentation proofs, not direct in-memory fan-out to peer hosts.
 
 1. **Group Genesis, Invitations & Out-of-Order Cache (`BTN-ACT-07`, `CTL-ROS-04`, `CTL-PER-11`, `CTL-PER-15`)**:
    - Fleshes out `GroupPanelView` / `GroupPanelViewModel`.
@@ -343,6 +371,9 @@ Phase 7 wires SenderKey ratchets, zero-knowledge presentation proofs on the home
 ### 3.10 Phase 8: Peer Discovery (Blinded Rendezvous, Nearby Directory & 24h Epoch Rotation)
 Phase 8 wires private blinded rendezvous locators, public nearby peer discovery on the relay, and 24-hour epoch rotation.
 
+> [!IMPORTANT] Phase 8 Integrity Constraints:
+> - Rendezvous publication and discovery queries must be executed against the relay's Kestrel endpoints via gRPC channels, without cheating by reading `_worldState.Personas`.
+
 1. **Discovery Tab UI & Private Blinded Rendezvous (`CTL-PER-21`)**:
    - Fleshes out `DiscoveryTabView` / `DiscoveryTabViewModel`.
    - Computes daily rotating `BlindedLocator = HMAC-SHA256(currentEpoch.Value, sharedSecret)` and wires `[ 📍 Publish Blinded Locator ]` and `[ 🔍 Resolve Peer Locator ]` via `IPrivateRendezvousService`.
@@ -359,6 +390,9 @@ Phase 8 wires private blinded rendezvous locators, public nearby peer discovery 
 
 ### 3.11 Phase 9: Swarm File Transfer, Custom Piece Heatmap & Late Downloader Injection
 Phase 9 completes the simulator with BitTorrent-style multi-stream file transfers, a custom 30 FPS piece heatmap control, and dynamic 50% late joiner injection.
+
+> [!IMPORTANT] Phase 9 Integrity Constraints:
+> - File chunk transfers must transfer real binary slices over multi-stream TCP/gRPC pipes and verify SHA-256 Merkle proofs, never spoofing transfer completion in memory.
 
 1. **Synthetic Merkle Presets & Transfer Negotiation (`BTN-ACT-04`, `CTL-PER-04`, `CTL-PER-06`, `CTL-PER-12`, `CTL-PER-16`)**:
    - Fleshes out `SwarmPanelView` / `SwarmPanelViewModel`.
