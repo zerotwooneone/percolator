@@ -32,7 +32,7 @@ To prevent speculative bloat and architectural drift, the following capabilities
 - **No Production Vault Passphrase / Argon2id Unlock Ceremony**: Simulated personas use in-memory synthetic master keys (`InMemoryMasterKeyHandle`) to allow instant 1-click identity creation without interactive password prompts.
 - **No WAN NAT Traversal (UPnP / STUN) or Multi-Machine Network Bridging**: All simulated nodes and relays bind strictly to `127.0.0.1` loopback endpoints.
 - **No Continuous Online Presence or Heartbeat Pings**: Personas act strictly as store-and-forward actors (Signal Protocol parity); muting ingress (`IsListening = false`) never emits "offline" presence notifications to peers or relays.
-- **No Custom Protocol or Cryptographic Primitives**: The simulator must never invent mock encryption or custom wire framing; it exclusively orchestrates the real `Percolator.Domain`, `Percolator.Application`, `Percolator.Infrastructure`, and `Percolator.Apps.*` assemblies.
+- **No Custom Protocol or Cryptographic Primitives**: The simulator must never invent mock encryption or custom wire framing; it exclusively orchestrates the real `Percolator.Domain`, `Percolator.Application`, `Percolator.Infrastructure`, `Percolator.Infrastructure.Windows`, and `Percolator.Apps.*` assemblies.
 
 ### 1.3 Pragmatic Type Usage (Zero Ceremonial Wrapper Bloat)
 - **Reuse Existing `Percolator.Domain` Value Objects**: Whenever calling into the Percolator stack, the simulator uses the existing domain types directly (`IdentityId`, `ChannelId`, `TransferId`, `EndpointAddress`, `BlindedRoutingToken`, `DiscoveryEpoch`, `RoutingPreference`).
@@ -164,7 +164,7 @@ Phase 1 establishes the visual shell, DI wiring, `R3` reactive bus, and Angular-
 
 1. **Project Dependencies, Legacy Template Cleanup & Styling**:
    - **Legacy Horizontal Folder Excise**: Delete the template-generated horizontal folders `Models/`, `ViewModels/`, `Views/`, and `ViewLocator.cs` from `Percolator.Simulator` (and remove `<Folder Include="Models\" />` from `Percolator.Simulator.csproj`) so 100% of code resides inside `Features/<SliceName>/`.
-   - `Percolator.Simulator.csproj` includes `R3`, `ObservableCollections.R3`, and `<ProjectReference Include="..\Percolator.Infrastructure\Percolator.Infrastructure.csproj" />`.
+   - `Percolator.Simulator.csproj` targets `net10.0-windows10.0.19041.0` and includes `R3`, `ObservableCollections.R3`, `<ProjectReference Include="..\Percolator.Infrastructure\Percolator.Infrastructure.csproj" />`, and `<ProjectReference Include="..\Percolator.Infrastructure.Windows\Percolator.Infrastructure.Windows.csproj" />` so the simulator directly leverages `AddWindowsInfrastructureOverrides()`, `WindowsSChannelCertificateProvider`, and `WindowsSparseDesktopFileStore`.
    - `App.axaml` configures FluentAvalonia styling (`avares://FluentAvaloniaUI/Styling/Styles.axaml`) and `DataTemplates` mapping ViewModels to Views.
 2. **Core Shell Views & Right-Sized Sub-Panel Shells (`Features/Shell/`, `Features/Topology/`)**:
    - **Fully Laid Out in Phase 1**:
@@ -223,14 +223,14 @@ Phase 3A focuses exclusively on spinning up real isolated Percolator persona hos
 
 1. **Host Lifecycle & DI Container Isolation (`SimulatedPersonaHost`)**:
    - Each persona runs in an isolated `IServiceProvider` / `IHost` owning:
-     - In-memory SQLite (`Data Source=persona_{nodeId};Mode=Memory;Cache=Shared`) with `InMemoryMasterKeyHandle` and `SqlCipherPragmaInterceptor`.
-     - Full `AddAuthenticatedInfrastructure(...)` and `Percolator.Apps.Chat` registration.
+     - Per-node isolated SQLCipher database (`VaultStorageOptions.BaseDirectory = _nodeTempDirectory`) with `MasterKeyHandle.GenerateRandom()` and `SqlCipherPragmaInterceptor`.
+     - Full `AddAuthenticatedInfrastructure(...)`, `AddWindowsInfrastructureOverrides()` (`WindowsSChannelCertificateProvider` and `WindowsSparseDesktopFileStore` scoped to `_nodeTempDirectory`), and `Percolator.Apps.Chat` registration.
      - `NodeScopedLoggerProvider` (Phase 2) forwarding all host logs to `ISimulatorLogSink`.
      - Reactive `IsListening` (`ReactiveProperty<bool>`) capability toggle (`CTL-ROS-03` / `CTL-PER-02`).
 2. **Procedural Name, Identicon & Loopback Kestrel Transport**:
    - `WordPairNameGenerator.Generate()` produces display names (`"Crimson Falcon"`).
    - `IdenticonGenerator.CreatePng(uint seed)` renders a symmetric 5×5 blocky avatar as a `64x64` PNG `byte[]` loaded into an Avalonia `Bitmap`.
-   - `LoopbackPortAllocator` leases an available port on `127.0.0.1` and binds `KestrelPeerTransportServer` on `https://127.0.0.1:{port}` (HTTP/2 + TLS 1.3, using `WindowsSChannelCertificateProvider` on Windows and `InMemoryTransportCertificateProvider` on Linux/macOS, plus TOFU validation on `PeerGrpcChannelFactory`).
+   - `LoopbackPortAllocator` leases an available port on `127.0.0.1` and binds `KestrelPeerTransportServer` on `https://127.0.0.1:{port}` (HTTP/2 + TLS 1.3 using `WindowsSChannelCertificateProvider` from `Percolator.Infrastructure.Windows`, plus TOFU validation on `PeerGrpcChannelFactory`).
 3. **Toolbar & Roster Wiring (`BTN-TOP-01`, `BTN-TOP-07`, `CTL-ROS-03`, `CTL-PER-02`)**:
    - Clicking `[ + Add Person ]` (`BTN-TOP-01`) clears Phase 1's `DesignDataService` mock preview seed, starts a real `SimulatedPersonaHost`, and pins its `PersonaCardViewModel` to the Workbench.
    - Clicking `[ 🔄 Reset World ]` (`BTN-TOP-07`) disposes all active hosts, releases loopback ports, and resets UI state.
@@ -285,7 +285,7 @@ Phase 4 captures interactive user actions into repeatable JSON scenarios and int
 Phase 5 introduces `SimulatedRelayHost`, store-and-forward relayed messaging, OPK depletion/replenishment, and relay queue chaos mutations.
 
 1. **Relay Host & Reactive Store Decorators (`SimulatedRelayHost`, `BTN-TOP-03`)**:
-   - Spawns an isolated Kestrel host registering `UnauthenticatedDeliveryEndpoint`, `AuthenticatedRelayEndpoint`, and `AnonymousGroupRelayEndpoint`.
+   - Spawns an isolated Kestrel host registering `WindowsSChannelCertificateProvider` (from `Percolator.Infrastructure.Windows`), `UnauthenticatedDeliveryEndpoint`, `AuthenticatedRelayEndpoint`, and `AnonymousGroupRelayEndpoint`.
    - Wraps `InMemoryRelayMailboxCapabilityStore` and `SqliteRelayPreKeyRepository` with decorators publishing `RelayQueueChanged` and `HostedPreKeyCountChanged` to `ISimulatorStateBus`.
    - Fleshes out `RelayCardView` / `RelayCardViewModel` to display live held envelopes and hosted OPK counts (`N / 25`).
 2. **Single & Bulk Provisioning (`CTL-PER-13`, `BTN-TOP-02`, `BTN-ACT-05`, `BTN-ACT-06`)**:
@@ -369,7 +369,7 @@ Phase 9 completes the simulator with BitTorrent-style multi-stream file transfer
 
 1. **Synthetic Merkle Presets & Transfer Negotiation (`BTN-ACT-04`, `CTL-PER-04`, `CTL-PER-06`, `CTL-PER-12`, `CTL-PER-16`)**:
    - Fleshes out `SwarmPanelView` / `SwarmPanelViewModel`.
-   - Generates deterministic `2 MB`, `25 MB`, and `100 MB` files with SHA-256 Merkle trees in the node's temp directory and calls `IFileTransferActionHandler.InitiateTransferAsync`.
+   - Uses `WindowsSparseDesktopFileStore` (from `Percolator.Infrastructure.Windows`) for NTFS sparse file pre-allocation (`FSCTL_SET_SPARSE`) and boundary slice storage in the node's temp directory, generates deterministic `2 MB`, `25 MB`, and `100 MB` files with SHA-256 Merkle trees, and calls `IFileTransferActionHandler.InitiateTransferAsync`.
    - Honors `Allow File Transfers` (`CTL-PER-04`), `Auto-Accept File Transfers` (`CTL-PER-12`), Pending Offer banner (`CTL-PER-16`), and `Relay-Only Routing (Hide IP)` (`CTL-PER-06`: `RelayTransferPipeClient` vs. `TcpMultiStreamPoolFactory`).
 2. **30 FPS `SwarmHeatmapControl` & Participant Controls (`CTL-ROS-05`, `CTL-SWM-01`, `CTL-SWM-02`, `CTL-SWM-03`)**:
    - Coalesces chunk progress via `Channel<SwarmChunkProgressSignal>` into 33ms UI ticks rendering `SwarmHeatmapControl` (`Grey`: missing, `Blue`: in-flight, `Green`: verified, `Red`: corrupted).

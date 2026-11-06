@@ -20,6 +20,7 @@ using Percolator.Application2.Ports;
 using Percolator.Application2.Profiles;
 using Percolator.Application2.Services;
 using Percolator.Apps.Chat.DependencyInjection;
+using Percolator.Apps.FileTransfer.Ports;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Delivery.Ports;
@@ -35,6 +36,9 @@ using Percolator.Infrastructure.Persistence.Repositories;
 using Percolator.Infrastructure.Security;
 using Percolator.Infrastructure.Transport;
 using Percolator.Infrastructure.Vault;
+using Percolator.Infrastructure.Windows.DependencyInjection;
+using Percolator.Infrastructure.Windows.Security;
+using Percolator.Infrastructure.Windows.Storage;
 using Percolator.PluginSdk;
 using Percolator.Simulator.Features.Logging;
 using Percolator.Simulator.Features.Shell;
@@ -117,9 +121,12 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             // 1. Core infrastructure with random in-memory master key
             services.AddAuthenticatedInfrastructure(_masterKeyHandle, storageOptions);
 
-            // Override certificate provider with CNG/SChannel-compatible provider on Windows
+            // 1b. Windows-specific infrastructure overrides (SChannel TLS 1.3 cert provider & Sparse Desktop File Store)
+            services.AddWindowsInfrastructureOverrides();
             services.AddSingleton<ITransportCertificateProvider>(
-                _ => new SimulatorTransportCertificateProvider(_nodeTempDirectory));
+                _ => new WindowsSChannelCertificateProvider(Path.Combine(_nodeTempDirectory, "Certs")));
+            services.AddSingleton<IDesktopFileStorage>(
+                _ => new WindowsSparseDesktopFileStore(Path.Combine(_nodeTempDirectory, "Partials")));
 
             // 2. Chat vertical app registration
             services.AddChatApp();

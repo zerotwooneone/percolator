@@ -1,7 +1,8 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
     <Nullable>enable</Nullable>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
@@ -33,6 +34,7 @@
     <ProjectReference Include="..\Percolator.Domain\Percolator.Domain.csproj" />
     <ProjectReference Include="..\Percolator.Application\Percolator.Application.csproj" />
     <ProjectReference Include="..\Percolator.Infrastructure\Percolator.Infrastructure.csproj" />
+    <ProjectReference Include="..\Percolator.Infrastructure.Windows\Percolator.Infrastructure.Windows.csproj" />
     <ProjectReference Include="..\Percolator.PluginSdk\Percolator.PluginSdk.csproj" />
     <ProjectReference Include="..\Percolator.Apps.Chat\Percolator.Apps.Chat.csproj" />
     <ProjectReference Include="..\Percolator.Apps.Discovery\Percolator.Apps.Discovery.csproj" />
