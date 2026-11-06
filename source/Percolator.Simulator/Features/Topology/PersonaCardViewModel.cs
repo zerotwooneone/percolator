@@ -104,32 +104,26 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
 
     public PersonaCardViewModel(
         SimulatedNodeSummary summary,
-        IStatusToastService toastService,
-        ISimulatorStateBus? stateBus = null,
-        DirectHandshakeOrchestrator? handshakeOrchestrator = null,
-        DirectChatCoordinator? chatCoordinator = null,
-        AutopilotPongResponder? pongResponder = null,
-        ISelectionStateService? selectionState = null,
-        ISimulatedWorldStateService? worldState = null,
-        ISimulatedPersonaHost? host = null,
-        ISimulatorLogSink? logSink = null,
-        IFlightRecorderStateService? flightRecorder = null,
-        RelayProvisioningCoordinator? relayCoordinator = null)
+        PersonaCardDependencies deps,
+        ISimulatedPersonaHost? host = null)
     {
+        ArgumentNullException.ThrowIfNull(summary);
+        ArgumentNullException.ThrowIfNull(deps);
+
         NodeId = summary.Id;
         _displayName = summary.DisplayName;
         _boundEndpoint = summary.Subtitle;
-        _toastService = toastService;
-        _stateBus = stateBus;
-        _handshakeOrchestrator = handshakeOrchestrator;
-        _chatCoordinator = chatCoordinator;
-        _pongResponder = pongResponder;
-        _selectionState = selectionState;
-        _worldState = worldState;
+        _toastService = deps.ToastService;
+        _stateBus = deps.StateBus;
+        _handshakeOrchestrator = deps.HandshakeOrchestrator;
+        _chatCoordinator = deps.ChatCoordinator;
+        _pongResponder = deps.PongResponder;
+        _selectionState = deps.SelectionState;
+        _worldState = deps.WorldState;
         _host = host;
-        _logSink = logSink;
-        _flightRecorder = flightRecorder;
-        _relayCoordinator = relayCoordinator;
+        _logSink = deps.LogSink;
+        _flightRecorder = deps.FlightRecorder;
+        _relayCoordinator = deps.RelayCoordinator;
 
         // 30 Hz refresh ceiling for chat transcript with 0ms leading edge
         _chatTranscriptGate = new CoalescedActionGate(

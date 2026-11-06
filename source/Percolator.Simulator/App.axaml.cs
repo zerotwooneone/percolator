@@ -50,6 +50,7 @@ public partial class App : Avalonia.Application
         services.AddSingleton<AutopilotPongResponder>();
         services.AddSingleton<RelayProvisioningCoordinator>();
         services.AddSingleton<ScenarioRunnerService>();
+        services.AddSingleton<PersonaCardDependencies>();
 
         // 4. ViewModels
         services.AddTransient<TopGlobalToolbarViewModel>();

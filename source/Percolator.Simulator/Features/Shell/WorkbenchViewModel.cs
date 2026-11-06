@@ -3,10 +3,7 @@ using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.Linq;
 using ObservableCollections;
-using Percolator.Simulator.Features.DirectChat;
-using Percolator.Simulator.Features.Logging;
 using Percolator.Simulator.Features.RelayedChat;
-using Percolator.Simulator.Features.Scenarios;
 using Percolator.Simulator.Features.Topology;
 using R3;
 
@@ -15,40 +12,16 @@ namespace Percolator.Simulator.Features.Shell;
 internal sealed class WorkbenchViewModel : ViewModelBase
 {
     private readonly ISimulatedWorldStateService _worldState;
-    private readonly IStatusToastService _toastService;
-    private readonly ISimulatorStateBus _stateBus;
-    private readonly DirectHandshakeOrchestrator _handshakeOrchestrator;
-    private readonly DirectChatCoordinator _chatCoordinator;
-    private readonly AutopilotPongResponder _pongResponder;
-    private readonly RelayProvisioningCoordinator _relayCoordinator;
-    private readonly ISelectionStateService _selectionState;
-    private readonly ISimulatorLogSink _logSink;
-    private readonly IFlightRecorderStateService? _flightRecorder;
+    private readonly PersonaCardDependencies _cardDependencies;
 
     public ObservableCollection<object> PinnedCardViewModels { get; } = new();
 
     public WorkbenchViewModel(
         ISimulatedWorldStateService worldState,
-        IStatusToastService toastService,
-        ISimulatorStateBus stateBus,
-        DirectHandshakeOrchestrator handshakeOrchestrator,
-        DirectChatCoordinator chatCoordinator,
-        AutopilotPongResponder pongResponder,
-        RelayProvisioningCoordinator relayCoordinator,
-        ISelectionStateService selectionState,
-        ISimulatorLogSink logSink,
-        IFlightRecorderStateService? flightRecorder = null)
+        PersonaCardDependencies cardDependencies)
     {
-        _worldState = worldState;
-        _toastService = toastService;
-        _stateBus = stateBus;
-        _handshakeOrchestrator = handshakeOrchestrator;
-        _chatCoordinator = chatCoordinator;
-        _pongResponder = pongResponder;
-        _relayCoordinator = relayCoordinator;
-        _selectionState = selectionState;
-        _logSink = logSink;
-        _flightRecorder = flightRecorder;
+        _worldState = worldState ?? throw new ArgumentNullException(nameof(worldState));
+        _cardDependencies = cardDependencies ?? throw new ArgumentNullException(nameof(cardDependencies));
 
         // Initialize pinned cards from world state
         foreach (var card in _worldState.PinnedCards)
@@ -77,10 +50,17 @@ internal sealed class WorkbenchViewModel : ViewModelBase
                                     (vm is PersonaCardViewModel p && p.NodeId == e.OldItem.Id) ||
                                     (vm is RelayCardViewModel r && r.DisplayName == e.OldItem.DisplayName));
                                 if (existing is not null)
+                                {
                                     PinnedCardViewModels.Remove(existing);
+                                    (existing as IDisposable)?.Dispose();
+                                }
                             }
                             break;
                         case NotifyCollectionChangedAction.Reset:
+                            foreach (var card in PinnedCardViewModels)
+                            {
+                                (card as IDisposable)?.Dispose();
+                            }
                             PinnedCardViewModels.Clear();
                             break;
                     }
@@ -95,23 +75,24 @@ internal sealed class WorkbenchViewModel : ViewModelBase
         {
             SimulatedNodeType.Relay => new RelayCardViewModel(
                 node,
-                _toastService,
-                _stateBus,
+                _cardDependencies.ToastService,
+                _cardDependencies.StateBus,
                 _worldState.GetRelayHost(node.Id),
-                _logSink),
+                _cardDependencies.LogSink),
             _ => new PersonaCardViewModel(
                 node,
-                _toastService,
-                _stateBus,
-                _handshakeOrchestrator,
-                _chatCoordinator,
-                _pongResponder,
-                _selectionState,
-                _worldState,
-                _worldState.GetPersonaHost(node.Id),
-                _logSink,
-                _flightRecorder,
-                _relayCoordinator)
+                _cardDependencies,
+                _worldState.GetPersonaHost(node.Id))
         };
+    }
+
+    public override void Dispose()
+    {
+        foreach (var card in PinnedCardViewModels)
+        {
+            (card as IDisposable)?.Dispose();
+        }
+        PinnedCardViewModels.Clear();
+        base.Dispose();
     }
 }
