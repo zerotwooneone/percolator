@@ -1,7 +1,9 @@
 using System;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Percolator.Application2.Ports;
@@ -12,6 +14,7 @@ using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Infrastructure.Persistence;
 using Percolator.Simulator.Features.Logging;
 using Percolator.Simulator.Features.Shell;
 using Percolator.Simulator.Features.Topology;
@@ -261,9 +264,25 @@ internal sealed class DirectHandshakeOrchestrator
                 using var scope = target.Services.CreateScope();
                 var contactCoord = scope.ServiceProvider.GetRequiredService<IContactRequestCoordinator>();
                 var pendingRepo = scope.ServiceProvider.GetRequiredService<IPendingHandshakeRepository>();
+                var dbContext = scope.ServiceProvider.GetRequiredService<PercolatorDbContext>();
 
                 await contactCoord.RejectRequestAsync(target.PublicIdentityId, senderId, block, ct);
                 await pendingRepo.DeletePendingHandshakeAsync(target.PublicIdentityId, senderId, ct);
+
+                // If rejected without blocking, remove the Rejected contact record so future handshakes can be re-requested cleanly
+                if (!block)
+                {
+                    var rejectedEntity = await dbContext.PeerContacts
+                        .FirstOrDefaultAsync(
+                            c => c.OwnerIdentityId == target.PublicIdentityId.Value &&
+                                 c.RemotePeerId == senderId.Value,
+                            ct);
+                    if (rejectedEntity != null)
+                    {
+                        dbContext.PeerContacts.Remove(rejectedEntity);
+                        await dbContext.SaveChangesAsync(ct);
+                    }
+                }
 
                 _logSink.Log(new SimulatorLogEntry(
                     DateTimeOffset.UtcNow,

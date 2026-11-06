@@ -1,8 +1,8 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
-    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('Windows'))">net10.0-windows10.0.19041.0;net10.0</TargetFrameworks>
+    <TargetFrameworks Condition="!$([MSBuild]::IsOSPlatform('Windows'))">net10.0</TargetFrameworks>
     <Nullable>enable</Nullable>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
@@ -29,15 +29,19 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" />
   </ItemGroup>
 
-  <!-- Real Infrastructure & Protocol Project References -->
+  <!-- Real Infrastructure & Protocol Project References (Cross-Platform Core) -->
   <ItemGroup>
     <ProjectReference Include="..\Percolator.Domain\Percolator.Domain.csproj" />
     <ProjectReference Include="..\Percolator.Application\Percolator.Application.csproj" />
     <ProjectReference Include="..\Percolator.Infrastructure\Percolator.Infrastructure.csproj" />
-    <ProjectReference Include="..\Percolator.Infrastructure.Windows\Percolator.Infrastructure.Windows.csproj" />
     <ProjectReference Include="..\Percolator.PluginSdk\Percolator.PluginSdk.csproj" />
     <ProjectReference Include="..\Percolator.Apps.Chat\Percolator.Apps.Chat.csproj" />
     <ProjectReference Include="..\Percolator.Apps.Discovery\Percolator.Apps.Discovery.csproj" />
     <ProjectReference Include="..\Percolator.Apps.FileTransfer\Percolator.Apps.FileTransfer.csproj" />
+  </ItemGroup>
+
+  <!-- Windows-Specific Infrastructure Overrides (SChannel TLS & NTFS Sparse Files) -->
+  <ItemGroup Condition="$(TargetFramework.StartsWith('net10.0-windows'))">
+    <ProjectReference Include="..\Percolator.Infrastructure.Windows\Percolator.Infrastructure.Windows.csproj" />
   </ItemGroup>
 </Project>

@@ -34,12 +34,15 @@ using Percolator.Domain.Security.ValueObjects;
 using Percolator.Infrastructure.DependencyInjection;
 using Percolator.Infrastructure.Persistence;
 using Percolator.Infrastructure.Persistence.Repositories;
+using Percolator.Infrastructure.Plugins.FileTransfer;
 using Percolator.Infrastructure.Security;
 using Percolator.Infrastructure.Transport;
 using Percolator.Infrastructure.Vault;
+#if WINDOWS
 using Percolator.Infrastructure.Windows.DependencyInjection;
 using Percolator.Infrastructure.Windows.Security;
 using Percolator.Infrastructure.Windows.Storage;
+#endif
 using Percolator.PluginSdk;
 using Percolator.Simulator.Features.Logging;
 using Percolator.Simulator.Features.Shell;
@@ -119,18 +122,24 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         var builder = Host.CreateDefaultBuilder();
         builder.ConfigureServices((_, services) =>
         {
-            // 1. Core infrastructure with random in-memory master key
+            // 1. Core infrastructure registration
             services.AddAuthenticatedInfrastructure(_masterKeyHandle, storageOptions);
 
-            // 1a. Override SQLCipher pragma interceptor to use kdf_iter = 1 (avoids 500ms+ 256k-iteration PBKDF2 on every EF Core pooled query checkout)
+            // 1a. Override DbConnectionInterceptor so SQLite operates in plain unencrypted mode (no sqlite3_key / SQLCipher encryption)
             services.AddSingleton<DbConnectionInterceptor, SimulatorSqlCipherPragmaInterceptor>();
 
-            // 1b. Windows-specific infrastructure overrides (SChannel TLS 1.3 cert provider & Sparse Desktop File Store)
+#if WINDOWS
+            // 1b. Windows-specific infrastructure overrides (SChannel TLS 1.3 cert provider & NTFS Sparse Desktop File Store)
             services.AddWindowsInfrastructureOverrides();
             services.AddSingleton<ITransportCertificateProvider>(
                 _ => new WindowsSChannelCertificateProvider(Path.Combine(_nodeTempDirectory, "Certs")));
             services.AddSingleton<IDesktopFileStorage>(
                 _ => new WindowsSparseDesktopFileStore(Path.Combine(_nodeTempDirectory, "Partials")));
+#else
+            // 1b. Linux / Cross-platform overrides (uses InMemoryTransportCertificateProvider for OpenSSL and node-scoped PortableDesktopFileStore)
+            services.AddSingleton<IDesktopFileStorage>(
+                _ => new PortableDesktopFileStore(Path.Combine(_nodeTempDirectory, "Partials")));
+#endif
 
             // 2. Chat vertical app registration
             services.AddChatApp();
@@ -153,6 +162,13 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             services.AddScoped<IContactRequestCoordinator, ContactRequestCoordinator>();
             services.AddScoped<IPayloadSender, OutboundEgressPipeline>();
             services.AddScoped(sp => (SqliteLocalIdentityKeyStore)sp.GetRequiredService<ILocalIdentityKeyStore>());
+
+            // 4a. Upsert decorator for IRatchetSessionRepository so re-handshaking / crossed handshakes replace the old SessionId row cleanly
+            services.AddScoped<SqliteRatchetSessionRepository>();
+            services.AddScoped<IRatchetSessionRepository>(sp =>
+                new SimulatorRatchetSessionRepositoryDecorator(
+                    sp.GetRequiredService<SqliteRatchetSessionRepository>(),
+                    sp.GetRequiredService<PercolatorDbContext>()));
 
             // 5. Decorators & Ingress / Egress Pipelines
             services.AddScoped<AppRouter>();
