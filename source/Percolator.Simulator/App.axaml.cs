@@ -39,12 +39,14 @@ public partial class App : Avalonia.Application
         services.AddSingleton<ISelectionStateService, SelectionStateService>();
         services.AddSingleton<ISimulatedWorldStateService, SimulatedWorldStateService>();
         services.AddSingleton<IStatusToastService, StatusToastService>();
+        services.AddSingleton<IFlightRecorderStateService, FlightRecorderStateService>();
 
         // 3. Shell & Orchestration Services
         services.AddSingleton<DesignDataService>();
         services.AddSingleton<DirectHandshakeOrchestrator>();
         services.AddSingleton<DirectChatCoordinator>();
         services.AddSingleton<AutopilotPongResponder>();
+        services.AddSingleton<ScenarioRunnerService>();
 
         // 4. ViewModels
         services.AddTransient<TopGlobalToolbarViewModel>();

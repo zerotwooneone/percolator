@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "name": "01 Direct Handshake and Chat",
+  "description": "End-to-end regression scenario verifying persona spawning, direct loopback gRPC TLS handshake, Double Ratchet session establishment, and bidirectional 1-on-1 chat delivery.",
+  "steps": [
+    {
+      "$type": "SpawnPersonas",
+      "aliases": [
+        "Alice",
+        "Bob"
+      ]
+    },
+    {
+      "$type": "InitiateDirectHandshake",
+      "initiatorAlias": "Alice",
+      "targetAlias": "Bob"
+    },
+    {
+      "$type": "ApprovePendingHandshake",
+      "ownerAlias": "Bob",
+      "senderAlias": "Alice"
+    },
+    {
+      "$type": "SendDirectMessage",
+      "senderAlias": "Alice",
+      "recipientAlias": "Bob",
+      "text": "Hello Bob!"
+    },
+    {
+      "$type": "SendDirectMessage",
+      "senderAlias": "Bob",
+      "recipientAlias": "Alice",
+      "text": "Hello Alice, secure session verified."
+    }
+  ],
+  "assertions": [
+    {
+      "$type": "AssertDirectRatchetSession",
+      "alias1": "Alice",
+      "alias2": "Bob"
+    },
+    {
+      "$type": "AssertMessageDelivered",
+      "recipientAlias": "Bob",
+      "expectedText": "Hello Bob!"
+    },
+    {
+      "$type": "AssertMessageDelivered",
+      "recipientAlias": "Alice",
+      "expectedText": "Hello Alice, secure session verified."
+    },
+    {
+      "$type": "AssertZeroErrors"
+    }
+  ]
+}

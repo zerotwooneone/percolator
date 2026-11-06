@@ -16,6 +16,8 @@ using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Infrastructure.Persistence;
 using Percolator.Simulator.Features.Logging;
+using Percolator.Simulator.Features.Scenarios;
+using Percolator.Simulator.Features.Scenarios.Model;
 using Percolator.Simulator.Features.Shell;
 using Percolator.Simulator.Features.Topology;
 
@@ -41,17 +43,20 @@ internal sealed class DirectHandshakeOrchestrator
     private readonly ISimulatorStateBus _stateBus;
     private readonly IStatusToastService _toastService;
     private readonly ISimulatorLogSink _logSink;
+    private readonly IFlightRecorderStateService? _flightRecorder;
 
     public DirectHandshakeOrchestrator(
         ISimulatedWorldStateService worldState,
         ISimulatorStateBus stateBus,
         IStatusToastService toastService,
-        ISimulatorLogSink logSink)
+        ISimulatorLogSink logSink,
+        IFlightRecorderStateService? flightRecorder = null)
     {
         _worldState = worldState ?? throw new ArgumentNullException(nameof(worldState));
         _stateBus = stateBus ?? throw new ArgumentNullException(nameof(stateBus));
         _toastService = toastService ?? throw new ArgumentNullException(nameof(toastService));
         _logSink = logSink ?? throw new ArgumentNullException(nameof(logSink));
+        _flightRecorder = flightRecorder;
     }
 
     public Task<bool> InitiateDirectHandshakeAsync(
@@ -101,18 +106,18 @@ internal sealed class DirectHandshakeOrchestrator
                 var channelId = ChannelIdUtility.DeterministicFor(initiator.PublicIdentityId, target.PublicIdentityId);
                 var channelRepo = scope.ServiceProvider.GetRequiredService<IChannelRepository>();
                 var timeProvider = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>();
-                var existingChannel = await channelRepo.GetDirectByIdAsync(channelId, ct);
-                if (existingChannel == null)
+                var directChannel = await channelRepo.GetDirectByIdAsync(channelId, ct);
+                if (directChannel == null)
                 {
                     var channel = DirectChannel.Create(channelId, initiator.PublicIdentityId, target.PublicIdentityId, timeProvider).Value!;
                     await channelRepo.SaveDirectAsync(channel, ct);
                 }
 
-                // Immediately flush outbox to deliver the handshake packet via loopback gRPC TLS
+                // Immediately flush outbox to deliver handshake envelope via loopback gRPC TLS
                 var flushResult = await initiator.FlushOutboxAsync(ct);
                 if (!flushResult.IsSuccess)
                 {
-                    _toastService.ShowToast("Handshake Delivery Failed", flushResult.Error.Description, ToastSeverity.Error);
+                    _toastService.ShowToast("Handshake Deferred", flushResult.Error.Description, ToastSeverity.Warning);
                     return false;
                 }
 
@@ -124,6 +129,7 @@ internal sealed class DirectHandshakeOrchestrator
                     "Handshake",
                     $"Direct handshake invitation sent to '{target.DisplayName}'."));
 
+                _flightRecorder?.RecordStep(new InitiateDirectHandshakeStep(initiator.DisplayName, target.DisplayName));
                 _toastService.ShowToast("Handshake Sent", $"⚡ Direct handshake sent to {target.DisplayName}.", ToastSeverity.Success);
                 return true;
             }
@@ -217,6 +223,7 @@ internal sealed class DirectHandshakeOrchestrator
                     "Handshake",
                     $"Accepted handshake from {senderId}. Double Ratchet session established."));
 
+                _flightRecorder?.RecordStep(new ApprovePendingHandshakeStep(target.DisplayName, senderHost?.DisplayName ?? senderId.ToString()));
                 _toastService.ShowToast("Handshake Accepted", "✓ Direct secure session established.", ToastSeverity.Success);
 
                 _stateBus.Publish(new SimulatorStateSignal(
@@ -284,6 +291,8 @@ internal sealed class DirectHandshakeOrchestrator
                     }
                 }
 
+                var senderHost = _worldState.FindPersonaHostByIdentity(senderId);
+
                 _logSink.Log(new SimulatorLogEntry(
                     DateTimeOffset.UtcNow,
                     LogLevel.Information,
@@ -291,6 +300,8 @@ internal sealed class DirectHandshakeOrchestrator
                     target.Id,
                     "Handshake",
                     $"Rejected handshake from {senderId} (Blocked: {block})."));
+
+                _flightRecorder?.RecordStep(new RejectPendingHandshakeStep(target.DisplayName, senderHost?.DisplayName ?? senderId.ToString(), block));
 
                 _toastService.ShowToast(
                     block ? "Handshake Blocked" : "Handshake Rejected",

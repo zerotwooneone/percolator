@@ -1,19 +1,18 @@
+using System;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.Linq;
-using Avalonia.Threading;
-using CommunityToolkit.Mvvm.ComponentModel;
-using CommunityToolkit.Mvvm.Input;
 using ObservableCollections;
 using Percolator.Simulator.Features.DirectChat;
 using Percolator.Simulator.Features.Logging;
 using Percolator.Simulator.Features.RelayedChat;
+using Percolator.Simulator.Features.Scenarios;
 using Percolator.Simulator.Features.Topology;
 using R3;
 
 namespace Percolator.Simulator.Features.Shell;
 
-internal sealed partial class WorkbenchViewModel : ViewModelBase
+internal sealed class WorkbenchViewModel : ViewModelBase
 {
     private readonly ISimulatedWorldStateService _worldState;
     private readonly IStatusToastService _toastService;
@@ -23,6 +22,7 @@ internal sealed partial class WorkbenchViewModel : ViewModelBase
     private readonly AutopilotPongResponder _pongResponder;
     private readonly ISelectionStateService _selectionState;
     private readonly ISimulatorLogSink _logSink;
+    private readonly IFlightRecorderStateService? _flightRecorder;
 
     public ObservableCollection<object> PinnedCardViewModels { get; } = new();
 
@@ -34,7 +34,8 @@ internal sealed partial class WorkbenchViewModel : ViewModelBase
         DirectChatCoordinator chatCoordinator,
         AutopilotPongResponder pongResponder,
         ISelectionStateService selectionState,
-        ISimulatorLogSink logSink)
+        ISimulatorLogSink logSink,
+        IFlightRecorderStateService? flightRecorder = null)
     {
         _worldState = worldState;
         _toastService = toastService;
@@ -44,6 +45,7 @@ internal sealed partial class WorkbenchViewModel : ViewModelBase
         _pongResponder = pongResponder;
         _selectionState = selectionState;
         _logSink = logSink;
+        _flightRecorder = flightRecorder;
 
         // Initialize pinned cards from world state
         foreach (var card in _worldState.PinnedCards)
@@ -54,13 +56,16 @@ internal sealed partial class WorkbenchViewModel : ViewModelBase
         _worldState.PinnedCards.ObserveChanged()
             .Subscribe(e =>
             {
-                Dispatcher.UIThread.Post(() =>
+                UiTaskRunner.PostToUi(() =>
                 {
                     switch (e.Action)
                     {
                         case NotifyCollectionChangedAction.Add:
                             if (e.NewItem is not null)
-                                PinnedCardViewModels.Add(CreateCardViewModel(e.NewItem));
+                            {
+                                var vm = CreateCardViewModel(e.NewItem);
+                                PinnedCardViewModels.Add(vm);
+                            }
                             break;
                         case NotifyCollectionChangedAction.Remove:
                             if (e.OldItem is not null)
@@ -96,7 +101,8 @@ internal sealed partial class WorkbenchViewModel : ViewModelBase
                 _selectionState,
                 _worldState,
                 _worldState.GetPersonaHost(node.Id),
-                _logSink)
+                _logSink,
+                _flightRecorder)
         };
     }
 }

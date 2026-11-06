@@ -4,16 +4,20 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Media.Imaging;
-using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Percolator.Domain.Common;
 using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Infrastructure.Persistence;
 using Percolator.Simulator.Features.DirectChat;
 using Percolator.Simulator.Features.Logging;
+using Percolator.Simulator.Features.Scenarios;
+using Percolator.Simulator.Features.Scenarios.Model;
 using Percolator.Simulator.Features.Shell;
 using R3;
 
@@ -23,29 +27,30 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
 {
     private readonly IStatusToastService _toastService;
     private readonly ISimulatorStateBus? _stateBus;
-    private readonly ISimulatedPersonaHost? _host;
     private readonly DirectHandshakeOrchestrator? _handshakeOrchestrator;
     private readonly DirectChatCoordinator? _chatCoordinator;
     private readonly AutopilotPongResponder? _pongResponder;
     private readonly ISelectionStateService? _selectionState;
     private readonly ISimulatedWorldStateService? _worldState;
+    private readonly ISimulatedPersonaHost? _host;
     private readonly ISimulatorLogSink? _logSink;
+    private readonly IFlightRecorderStateService? _flightRecorder;
 
     public SimulatedNodeId NodeId { get; }
 
     [ObservableProperty]
-    private string _displayName = string.Empty;
+    private string _displayName;
 
     [ObservableProperty]
-    private string _boundEndpoint = string.Empty;
-
-    [ObservableProperty]
-    private bool _isListening = true;
+    private string _boundEndpoint;
 
     [ObservableProperty]
     private Bitmap? _identiconBitmap;
 
-    // Feature Toggles (CTL-PER-03..06)
+    [ObservableProperty]
+    private bool _isListening = true;
+
+    // Feature Flags (CTL-PER-03..06)
     [ObservableProperty]
     private bool _allowPeerDiscovery = true;
 
@@ -102,7 +107,8 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
         ISelectionStateService? selectionState = null,
         ISimulatedWorldStateService? worldState = null,
         ISimulatedPersonaHost? host = null,
-        ISimulatorLogSink? logSink = null)
+        ISimulatorLogSink? logSink = null,
+        IFlightRecorderStateService? flightRecorder = null)
     {
         NodeId = summary.Id;
         _displayName = summary.DisplayName;
@@ -116,6 +122,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
         _worldState = worldState;
         _host = host;
         _logSink = logSink;
+        _flightRecorder = flightRecorder;
 
         if (host?.IdenticonPng is not null && host.IdenticonPng.Length > 0)
         {
@@ -128,55 +135,41 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
             _isListening = host.IsListening.CurrentValue;
         }
 
-        ChatMessages.Add(new ChatMessageItemViewModel
-        {
-            SenderName = "System",
-            Content = "Ready for direct/relayed handshake.",
-            TimestampText = DateTime.Now.ToString("HH:mm:ss")
-        });
-
-        if (_stateBus is not null)
+        // Subscribe to cross-host reactive signals
+        if (_stateBus != null && _host != null)
         {
             _stateBus.Signals
-                .Where(s => s.NodeId == NodeId)
-                .Subscribe(signal => HandleSignal(signal))
+                .Where(s => s.NodeId == NodeId && s.Category == SignalCategory.PendingHandshakeChanged)
+                .ThrottleLast(TimeSpan.FromMilliseconds(50))
+                .Subscribe(_ => RefreshPendingHandshakes())
                 .AddTo(ref Disposables);
-        }
 
-        if (_selectionState is not null)
-        {
-            Observable.CombineLatest(
-                _selectionState.PrimarySelectedNode,
-                _selectionState.SecondarySelectedNode,
-                (p, s) => (p, s))
-                .Subscribe(_ => RefreshTranscript())
+            _stateBus.Signals
+                .Where(s => (s.NodeId == NodeId || s.Details == _host.PublicIdentityId.ToString()) &&
+                            s.Category == SignalCategory.ChatTranscriptChanged)
+                .ThrottleLast(TimeSpan.FromMilliseconds(50))
+                .Subscribe(_ => RefreshChatTranscript())
                 .AddTo(ref Disposables);
-        }
 
-        if (_host is not null)
-        {
-            RefreshPendingHandshake();
-            RefreshTranscript();
+            _stateBus.Signals
+                .Where(s => s.NodeId == NodeId && s.Category == SignalCategory.RatchetSessionChanged)
+                .ThrottleLast(TimeSpan.FromMilliseconds(50))
+                .Subscribe(_ =>
+                {
+                    RefreshPendingHandshakes();
+                    RefreshChatTranscript();
+                })
+                .AddTo(ref Disposables);
+
+            // Initial refresh
+            RefreshPendingHandshakes();
+            RefreshChatTranscript();
         }
     }
 
-    private void HandleSignal(SimulatorStateSignal signal)
+    private void RefreshPendingHandshakes()
     {
-        switch (signal.Category)
-        {
-            case SignalCategory.PendingHandshakeChanged:
-                RefreshPendingHandshake();
-                break;
-            case SignalCategory.RatchetSessionChanged:
-            case SignalCategory.ChatTranscriptChanged:
-                RefreshTranscript();
-                break;
-        }
-    }
-
-    private void RefreshPendingHandshake()
-    {
-        if (_host == null || _worldState == null) return;
+        if (_host == null) return;
 
         UiTaskRunner.FireAndForget(
             async () =>
@@ -191,9 +184,9 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
                     if (pending != null)
                     {
                         _pendingSenderId = pending.RemotePeerId;
-                        var senderHost = _worldState.FindPersonaHostByIdentity(pending.RemotePeerId);
-                        var senderName = senderHost?.DisplayName ?? pending.RemotePeerId.ToString();
-                        PendingHandshakeText = $"Pending Handshake from {senderName}";
+                        var senderHost = _worldState?.FindPersonaHostByIdentity(pending.RemotePeerId);
+                        var senderName = senderHost?.DisplayName ?? pending.RemotePeerId.ToString()[..8];
+                        PendingHandshakeText = $"Pending handshake from {senderName}";
                         HasPendingHandshake = true;
 
                         if (AutoAcceptHandshakes)
@@ -203,8 +196,8 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
                     }
                     else
                     {
-                        HasPendingHandshake = false;
                         _pendingSenderId = null;
+                        HasPendingHandshake = false;
                         PendingHandshakeText = string.Empty;
                     }
                 });
@@ -215,32 +208,38 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
             nodeId: NodeId);
     }
 
-    private void RefreshTranscript()
+    private void RefreshChatTranscript()
     {
         if (_host == null || _chatCoordinator == null) return;
 
         UiTaskRunner.FireAndForget(
             async () =>
             {
-                var peer = GetActivePeerSummary();
-                if (peer == null) return;
+                var activePeer = GetActivePeerSummary();
+                if (activePeer == null) return;
 
-                var transcript = await _chatCoordinator.GetTranscriptAsync(NodeId, peer.Id);
+                var transcript = await _chatCoordinator.GetTranscriptAsync(NodeId, activePeer.Id);
 
                 UiTaskRunner.PostToUi(() =>
                 {
-                    ChatMessages.Clear();
-                    if (transcript.Count == 0)
+                    if (ChatMessages.Count == transcript.Count &&
+                        ChatMessages.Zip(transcript).All(pair => pair.First.Content == pair.Second.Content))
                     {
-                        ChatMessages.Add(new ChatMessageItemViewModel
+                        return; // No-op: transcript already up to date
+                    }
+
+                    if (ChatMessages.Count > 0 && transcript.Count > ChatMessages.Count)
+                    {
+                        // Append new items smoothly
+                        var newItems = transcript.Skip(ChatMessages.Count).ToList();
+                        foreach (var msg in newItems)
                         {
-                            SenderName = "System",
-                            Content = "Secure session active. Ready to chat.",
-                            TimestampText = DateTime.Now.ToString("HH:mm:ss")
-                        });
+                            ChatMessages.Add(msg);
+                        }
                     }
                     else
                     {
+                        ChatMessages.Clear();
                         foreach (var msg in transcript)
                         {
                             ChatMessages.Add(msg);
@@ -271,6 +270,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
     partial void OnIsListeningChanged(bool value)
     {
         _host?.SetListening(value);
+        _flightRecorder?.RecordStep(new SetListeningStateStep(DisplayName, value));
     }
 
     partial void OnAutoReplyPongChanged(bool value)
@@ -355,13 +355,18 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
         }
 
         var peerId = peer.Id;
-        await UiTaskRunner.RunAsync(
+        var success = await UiTaskRunner.RunAsync(
             () => _chatCoordinator.SendDirectMessageAsync(NodeId, peerId, text),
             category: "DirectChat",
             logSink: _logSink,
             toastService: _toastService,
             nodeName: DisplayName,
             nodeId: NodeId);
+
+        if (success)
+        {
+            _flightRecorder?.RecordStep(new SendDirectMessageStep(DisplayName, peer.DisplayName, text));
+        }
     }
 
     [RelayCommand]

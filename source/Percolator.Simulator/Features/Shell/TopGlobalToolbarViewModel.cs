@@ -1,7 +1,11 @@
 using System;
+using System.IO;
+using System.Text.Json;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.Input;
 using Percolator.Simulator.Features.Logging;
+using Percolator.Simulator.Features.Scenarios;
+using Percolator.Simulator.Features.Scenarios.Model;
 using Percolator.Simulator.Features.Topology;
 
 namespace Percolator.Simulator.Features.Shell;
@@ -14,6 +18,8 @@ internal sealed partial class TopGlobalToolbarViewModel : ViewModelBase
     private readonly ISimulatorLogSink _logSink;
     private readonly ISimulatorStateBus _stateBus;
     private readonly DesignDataService _designData;
+    private readonly IFlightRecorderStateService _flightRecorder;
+    private readonly ScenarioRunnerService _scenarioRunner;
     private bool _hasAddedRealPersona;
 
     public TopGlobalToolbarViewModel(
@@ -22,7 +28,9 @@ internal sealed partial class TopGlobalToolbarViewModel : ViewModelBase
         IStatusToastService toastService,
         ISimulatorLogSink logSink,
         ISimulatorStateBus stateBus,
-        DesignDataService designData)
+        DesignDataService designData,
+        IFlightRecorderStateService flightRecorder,
+        ScenarioRunnerService scenarioRunner)
     {
         _worldState = worldState;
         _selectionState = selectionState;
@@ -30,6 +38,8 @@ internal sealed partial class TopGlobalToolbarViewModel : ViewModelBase
         _logSink = logSink;
         _stateBus = stateBus;
         _designData = designData;
+        _flightRecorder = flightRecorder;
+        _scenarioRunner = scenarioRunner;
     }
 
     [RelayCommand]
@@ -73,6 +83,9 @@ internal sealed partial class TopGlobalToolbarViewModel : ViewModelBase
         _worldState.RegisterPersona(summary, host);
         _worldState.TogglePinCard(summary);
 
+        // Record interactive step in flight recorder if active
+        _flightRecorder.RecordStep(new SpawnPersonasStep(new[] { host.DisplayName }));
+
         // 4. Auto-assign to Primary (1°) or Secondary (2°) selection slot if empty
         if (_selectionState.PrimarySelectedNode.CurrentValue is null)
         {
@@ -94,7 +107,34 @@ internal sealed partial class TopGlobalToolbarViewModel : ViewModelBase
     private void AddRelay() => _toastService.ShowPlaceholder("Add Relay", "Phase 5");
 
     [RelayCommand]
-    private void RunScenario() => _toastService.ShowPlaceholder("Run Scenario", "Phase 4");
+    private async Task RunScenarioAsync()
+    {
+        var scenariosDir = Path.Combine(Directory.GetCurrentDirectory(), "Scenarios");
+        var defaultScenarioPath = Path.Combine(scenariosDir, "01-direct-handshake-and-chat.json");
+        if (!File.Exists(defaultScenarioPath))
+        {
+            _toastService.ShowToast("Scenario Missing", "01-direct-handshake-and-chat.json not found.", ToastSeverity.Warning);
+            return;
+        }
+
+        var json = await File.ReadAllTextAsync(defaultScenarioPath);
+        var jsonOptions = new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true,
+            ReadCommentHandling = JsonCommentHandling.Skip,
+            AllowTrailingCommas = true
+        };
+
+        var doc = JsonSerializer.Deserialize<ScenarioDocument>(json, jsonOptions);
+        if (doc != null)
+        {
+            await UiTaskRunner.RunAsync(
+                () => _scenarioRunner.RunScenarioAsync(doc),
+                category: "ScenarioReplay",
+                logSink: _logSink,
+                toastService: _toastService);
+        }
+    }
 
     [RelayCommand]
     private void AdvanceOneMinute() => _toastService.ShowPlaceholder("+1 Minute", "Phase 6A");
@@ -119,6 +159,6 @@ internal sealed partial class TopGlobalToolbarViewModel : ViewModelBase
             logSink: _logSink,
             toastService: _toastService);
 
-        _toastService.ShowToast("World Reset", "All simulated hosts, ports, and cards have been cleared.", ToastSeverity.Warning);
+        _toastService.ShowToast("World Reset", "All active hosts and loopback ports released.", ToastSeverity.Informational);
     }
 }
