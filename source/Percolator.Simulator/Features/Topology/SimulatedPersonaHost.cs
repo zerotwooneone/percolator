@@ -4,6 +4,8 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
+using Google.Protobuf;
+using Grpc.Core;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
@@ -390,10 +392,38 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
 
         try
         {
-            var drained = await HomeRelay.MailboxStore.DrainEnvelopesAsync(MailboxRoutingToken.ToByteArray(), ct);
+            using var scope = _host.Services.CreateScope();
+            var channelFactory = scope.ServiceProvider.GetRequiredService<IPeerGrpcChannelFactory>();
+            var relayUri = new Uri($"https://127.0.0.1:{HomeRelay.BoundPort}");
+            var channel = channelFactory.GetOrCreateChannel(relayUri);
+            var client = new AuthenticatedRelayService.AuthenticatedRelayServiceClient(channel);
+
+            var drainRequest = new DrainMailboxRequest
+            {
+                RoutingToken = ByteString.CopyFrom(MailboxRoutingToken.ToByteArray()),
+                DrainToken = ByteString.CopyFrom(MailboxDrainToken.Span)
+            };
+
+            DrainMailboxResponse drainResponse;
+            try
+            {
+                drainResponse = await client.DrainMailboxAsync(drainRequest, cancellationToken: ct);
+            }
+            catch (RpcException ex)
+            {
+                _logSink.Log(new SimulatorLogEntry(
+                    DateTimeOffset.UtcNow,
+                    LogLevel.Error,
+                    DisplayName,
+                    Id,
+                    "MailboxDrain",
+                    $"gRPC error draining relay mailbox: {ex.Status.Detail ?? ex.Message}"));
+                return 0;
+            }
+
+            var drained = drainResponse.Envelopes;
             if (drained.Count == 0) return 0;
 
-            using var scope = _host.Services.CreateScope();
             var unwrapper = scope.ServiceProvider.GetRequiredService<ISealedEnvelopeUnwrapper>();
             var ingress = scope.ServiceProvider.GetRequiredService<IInboundIngressPipeline>();
 

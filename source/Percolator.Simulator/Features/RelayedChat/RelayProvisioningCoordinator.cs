@@ -3,6 +3,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
+using Grpc.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Percolator.Application2.Ports;
@@ -14,6 +17,8 @@ using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.Infrastructure.Security;
+using Percolator.Infrastructure.Protos;
+using Percolator.Infrastructure.Transport;
 using Percolator.PluginSdk;
 using Percolator.Simulator.Features.Logging;
 using Percolator.Simulator.Features.Shell;
@@ -51,13 +56,27 @@ internal sealed class RelayProvisioningCoordinator
 
         try
         {
-            await relay.MailboxStore.RegisterAsync(
-                persona.MailboxRoutingToken.ToByteArray(),
-                persona.MailboxDeliveryToken.Span.ToArray(),
-                persona.MailboxDrainToken.Span.ToArray(),
-                persona.PublicIdentityId,
-                DeviceId.Primary,
-                ct);
+            using (var scope = persona.Services.CreateScope())
+            {
+                var channelFactory = scope.ServiceProvider.GetRequiredService<IPeerGrpcChannelFactory>();
+                var relayUri = new Uri($"https://127.0.0.1:{relay.BoundPort}");
+                var channel = channelFactory.GetOrCreateChannel(relayUri);
+                var client = new AuthenticatedRelayService.AuthenticatedRelayServiceClient(channel);
+
+                var regReq = new RegisterMailboxRequest
+                {
+                    RoutingToken = ByteString.CopyFrom(persona.MailboxRoutingToken.ToByteArray()),
+                    AuthorizedDeliveryToken = ByteString.CopyFrom(persona.MailboxDeliveryToken.Span),
+                    DrainToken = ByteString.CopyFrom(persona.MailboxDrainToken.Span)
+                };
+
+                var regResp = await client.RegisterMailboxAsync(regReq, cancellationToken: ct);
+                if (!regResp.Success)
+                {
+                    _toastService.ShowToast("Registration Failed", "Relay rejected mailbox registration.", ToastSeverity.Error);
+                    return false;
+                }
+            }
 
             await relay.MailboxStore.AssociateOwnerAsync(
                 persona.MailboxRoutingToken.ToByteArray(),
@@ -127,43 +146,66 @@ internal sealed class RelayProvisioningCoordinator
                 await preKeyStore.StoreOneTimePreKeysPrivateAsync(persona.PublicIdentityId, DeviceId.Primary, otpkPrivList, ct);
             }
 
-            // 3. Create or replenish RelayHostedPreKeyBundle and save on Relay
-            RelayHostedPreKeyBundle targetBundle;
-            if (existingBundle != null)
-            {
-                var repResult = existingBundle.ReplenishOneTimePreKeys(otpkList, RelayHostingPolicy.Default);
-                if (!repResult.IsSuccess)
-                {
-                    _toastService.ShowToast("Publish Error", repResult.Error.Description, ToastSeverity.Error);
-                    return false;
-                }
-                targetBundle = existingBundle;
-            }
-            else
-            {
-                var bundleResult = RelayHostedPreKeyBundle.Create(
-                    persona.PublicIdentityId,
-                    DeviceId.Primary,
-                    persona.IdentityPublicKey,
-                    persona.SignedPreKeyPublic,
-                    persona.SignedPreKeySignature,
-                    otpkList,
-                    RelayHostingPolicy.Default,
-                    _crypto);
-
-                if (!bundleResult.IsSuccess)
-                {
-                    _toastService.ShowToast("Publish Error", bundleResult.Error.Description, ToastSeverity.Error);
-                    return false;
-                }
-                targetBundle = bundleResult.Value!;
-            }
-
-            // 4. Ensure mailbox is registered
+            // 3. Ensure mailbox is registered via gRPC
             await RegisterMailboxAsync(persona, relay, ct);
 
-            // 5. Save on Relay's prekey repo
-            await relay.PreKeyRepository.SaveAsync(targetBundle, ct);
+            // 4. Construct PreKeyBundlePayloadProto with existing unconsumed OPKs + newly generated OPKs
+            var payload = new PreKeyBundlePayloadProto
+            {
+                OwnerIdentityId = ByteString.CopyFrom(persona.PublicIdentityId.ToByteArray()),
+                DeviceId = DeviceId.Primary.Value,
+                IdentityKey = ByteString.CopyFrom(persona.IdentityPublicKey.Span),
+                SignedPrekeyId = 1,
+                SignedPrekey = ByteString.CopyFrom(persona.SignedPreKeyPublic.Span),
+                PrekeySignature = ByteString.CopyFrom(persona.SignedPreKeySignature.Span),
+                PublishedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow)
+            };
+
+            if (existingBundle != null)
+            {
+                foreach (var opk in existingBundle.OneTimePreKeys)
+                {
+                    payload.OneTimePrekeys.Add(new OneTimePreKeyProto
+                    {
+                        KeyId = opk.KeyId,
+                        PublicKey = ByteString.CopyFrom(opk.Key.Span)
+                    });
+                }
+            }
+
+            foreach (var (keyId, pubKey) in otpkList)
+            {
+                payload.OneTimePrekeys.Add(new OneTimePreKeyProto
+                {
+                    KeyId = keyId,
+                    PublicKey = ByteString.CopyFrom(pubKey.Span)
+                });
+            }
+
+            byte[] payloadBytes = payload.ToByteArray();
+            byte[] signature = _crypto.SignEd25519(persona.IdentityPrivateKey.Span, payloadBytes);
+
+            var publishRequest = new PublishPreKeyBundleRequest
+            {
+                PayloadBytes = ByteString.CopyFrom(payloadBytes),
+                Signature = ByteString.CopyFrom(signature)
+            };
+
+            // 5. Invoke AuthenticatedRelayService.PublishPreKeyBundle over gRPC
+            using (var scope = persona.Services.CreateScope())
+            {
+                var channelFactory = scope.ServiceProvider.GetRequiredService<IPeerGrpcChannelFactory>();
+                var relayUri = new Uri($"https://127.0.0.1:{relay.BoundPort}");
+                var channel = channelFactory.GetOrCreateChannel(relayUri);
+                var client = new AuthenticatedRelayService.AuthenticatedRelayServiceClient(channel);
+
+                var publishResponse = await client.PublishPreKeyBundleAsync(publishRequest, cancellationToken: ct);
+                if (!publishResponse.Success)
+                {
+                    _toastService.ShowToast("Publish Error", "Relay rejected PreKey bundle publication.", ToastSeverity.Error);
+                    return false;
+                }
+            }
 
             _logSink.Log(new SimulatorLogEntry(
                 DateTimeOffset.UtcNow,
@@ -171,7 +213,7 @@ internal sealed class RelayProvisioningCoordinator
                 persona.DisplayName,
                 persona.Id,
                 "RelayProvisioning",
-                $"Published {count} OPKs to relay '{relay.DisplayName}' (Available: {targetBundle.AvailableOneTimePreKeyCount})."));
+                $"Published {count} OPKs to relay '{relay.DisplayName}' (Available: {payload.OneTimePrekeys.Count})."));
 
             return true;
         }
@@ -271,32 +313,48 @@ internal sealed class RelayProvisioningCoordinator
                 await RegisterMailboxAsync(initiator, relay, ct);
             }
 
-            // 3. Fetch consumable PreKeyBundle from Relay (decrements OPK count by 1)
-            var hostedBundle = await relay.PreKeyRepository.GetAsync(target.PublicIdentityId, DeviceId.Primary, ct);
-            if (hostedBundle == null)
+            // 3. Fetch consumable PreKeyBundle from Relay over gRPC (consumes 1 OPK)
+            PreKeyBundle remoteBundle;
+            using (var scope = initiator.Services.CreateScope())
             {
-                _toastService.ShowToast("PreKey Missing", $"No prekey bundle found on relay for {target.DisplayName}.", ToastSeverity.Error);
-                return false;
+                var channelFactory = scope.ServiceProvider.GetRequiredService<IPeerGrpcChannelFactory>();
+                var relayUri = new Uri($"https://127.0.0.1:{relay.BoundPort}");
+                var channel = channelFactory.GetOrCreateChannel(relayUri);
+                var client = new UnauthenticatedDeliveryService.UnauthenticatedDeliveryServiceClient(channel);
+
+                var fetchRequest = new FetchPreKeyBundleRequest
+                {
+                    RecipientRoutingToken = ByteString.CopyFrom(target.MailboxRoutingToken.ToByteArray()),
+                    DeliveryToken = ByteString.CopyFrom(target.MailboxDeliveryToken.Span)
+                };
+
+                FetchPreKeyBundleResponse fetchResponse;
+                try
+                {
+                    fetchResponse = await client.FetchPreKeyBundleAsync(fetchRequest, cancellationToken: ct);
+                }
+                catch (RpcException ex) when (ex.StatusCode == StatusCode.NotFound && ex.Status.Detail?.Contains("Unable to consume") == true)
+                {
+                    _toastService.ShowToast("OPK Depleted", "No available one-time prekeys left on relay.", ToastSeverity.Warning);
+                    return false;
+                }
+                catch (RpcException ex)
+                {
+                    _toastService.ShowToast("PreKey Missing", $"Failed to fetch prekey from relay: {ex.Status.Detail ?? ex.Message}", ToastSeverity.Error);
+                    return false;
+                }
+
+                remoteBundle = new PreKeyBundle(
+                    target.PublicIdentityId,
+                    DeviceId.Primary,
+                    IdentityKey.FromSpan(fetchResponse.IdentityKey.Span),
+                    DhPublicKey.FromSpan(fetchResponse.SignedPrekey.Span),
+                    DeviceLinkProof.FromSpan(fetchResponse.PrekeySignature.Span),
+                    fetchResponse.OneTimePrekey != null && !fetchResponse.OneTimePrekey.IsEmpty
+                        ? DhPublicKey.FromSpan(fetchResponse.OneTimePrekey.Span)
+                        : null,
+                    fetchResponse.OneTimePrekeyId);
             }
-
-            var consumeResult = hostedBundle.ConsumeBundle();
-            if (!consumeResult.IsSuccess)
-            {
-                _toastService.ShowToast("OPK Depleted", "No available one-time prekeys left on relay.", ToastSeverity.Warning);
-                return false;
-            }
-
-            await relay.PreKeyRepository.SaveAsync(hostedBundle, ct);
-            var consumed = consumeResult.Value!;
-
-            var remoteBundle = new PreKeyBundle(
-                target.PublicIdentityId,
-                DeviceId.Primary,
-                target.IdentityPublicKey,
-                target.SignedPreKeyPublic,
-                target.SignedPreKeySignature,
-                consumed.OneTimePreKey,
-                consumed.OneTimePreKeyId);
 
             // 4. Save mailbox routing capabilities on both peers
             var relayEndpoint = RelayEndpoint.FromHostAndPort("127.0.0.1", relay.BoundPort);
