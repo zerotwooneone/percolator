@@ -37,6 +37,9 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
     private readonly ISimulatorLogSink? _logSink;
     private readonly IFlightRecorderStateService? _flightRecorder;
 
+    private readonly CoalescedActionGate _chatTranscriptGate;
+    private readonly CoalescedActionGate _pendingHandshakeGate;
+
     public SimulatedNodeId NodeId { get; }
 
     [ObservableProperty]
@@ -125,6 +128,18 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
         _logSink = logSink;
         _flightRecorder = flightRecorder;
 
+        // 30 Hz refresh ceiling for chat transcript with 0ms leading edge
+        _chatTranscriptGate = new CoalescedActionGate(
+            TimeSpan.FromMilliseconds(33),
+            ExecuteRefreshChatTranscript);
+        _chatTranscriptGate.AddTo(ref Disposables);
+
+        // 20 Hz refresh ceiling for pending handshakes
+        _pendingHandshakeGate = new CoalescedActionGate(
+            TimeSpan.FromMilliseconds(50),
+            ExecuteRefreshPendingHandshakes);
+        _pendingHandshakeGate.AddTo(ref Disposables);
+
         if (host?.IdenticonPng is not null && host.IdenticonPng.Length > 0)
         {
             using var ms = new MemoryStream(host.IdenticonPng);
@@ -161,7 +176,6 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
         {
             _stateBus.Signals
                 .Where(s => s.NodeId == NodeId && s.Category == SignalCategory.PendingHandshakeChanged)
-                .ThrottleLast(TimeSpan.FromMilliseconds(50))
                 .Subscribe(_ => RefreshPendingHandshakes())
                 .AddTo(ref Disposables);
 
@@ -186,7 +200,9 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
         }
     }
 
-    private void RefreshPendingHandshakes()
+    private void RefreshPendingHandshakes() => _pendingHandshakeGate.RequestExecution();
+
+    private void ExecuteRefreshPendingHandshakes()
     {
         if (_host == null) return;
 
@@ -227,7 +243,9 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
             nodeId: NodeId);
     }
 
-    private void RefreshChatTranscript()
+    private void RefreshChatTranscript() => _chatTranscriptGate.RequestExecution();
+
+    private void ExecuteRefreshChatTranscript()
     {
         if (_host == null || _chatCoordinator == null) return;
 

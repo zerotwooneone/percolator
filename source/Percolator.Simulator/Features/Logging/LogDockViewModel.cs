@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -23,6 +24,7 @@ internal sealed partial class LogDockViewModel : ViewModelBase
     private const int MaxLogCapacity = 500;
 
     private readonly ISimulatorLogSink _logSink;
+    private readonly BatchAccumulator<UiLogItem> _logAccumulator;
 
     [ObservableProperty]
     private int _selectedLogLevelIndex = 2; // Default Information
@@ -33,6 +35,30 @@ internal sealed partial class LogDockViewModel : ViewModelBase
     {
         _logSink = logSink;
 
+        // 30 Hz UI batching accumulator with leading-edge immediate dispatch
+        _logAccumulator = new BatchAccumulator<UiLogItem>(
+            TimeSpan.FromMilliseconds(33),
+            maxBatchSize: 100,
+            flushAction: batch =>
+            {
+                Dispatcher.UIThread.Post(() =>
+                {
+                    var excess = (LogEntries.Count + batch.Count) - MaxLogCapacity;
+                    while (excess > 0 && LogEntries.Count > 0)
+                    {
+                        LogEntries.RemoveAt(0);
+                        excess--;
+                    }
+
+                    foreach (var item in batch)
+                    {
+                        LogEntries.Add(item);
+                    }
+                });
+            });
+
+        _logAccumulator.AddTo(ref Disposables);
+
         // Ingestion-time forward filter + UI batching
         _logSink.LogStream
             .Subscribe(entry =>
@@ -41,15 +67,7 @@ internal sealed partial class LogDockViewModel : ViewModelBase
                 if (entry.Level < minLevel) return;
 
                 var uiItem = FormatUiLogItem(entry);
-
-                Dispatcher.UIThread.Post(() =>
-                {
-                    if (LogEntries.Count >= MaxLogCapacity)
-                    {
-                        LogEntries.RemoveAt(0); // FIFO eviction at 500 items
-                    }
-                    LogEntries.Add(uiItem);
-                });
+                _logAccumulator.Enqueue(uiItem);
             })
             .AddTo(ref Disposables);
     }
