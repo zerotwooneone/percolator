@@ -13,8 +13,15 @@
         <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
             <!-- Header: Avatar, Name, Endpoint, Reroll, Listening CTL-PER-01, 02 -->
             <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,10">
-                <Border Grid.Column="0" Width="36" Height="36" Background="#0078D4" CornerRadius="18">
-                    <TextBlock Text="👤" FontSize="18" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                <Border Grid.Column="0" Width="36" Height="36" Background="#0078D4" CornerRadius="18" ClipToBounds="True">
+                    <Panel>
+                        <!-- Fallback Emoji if Bitmap not set -->
+                        <TextBlock Text="👤" FontSize="18" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   IsVisible="{Binding IdenticonBitmap, Converter={x:Static ObjectConverters.IsNull}}" />
+                        <!-- Real Identicon Bitmap -->
+                        <Image Source="{Binding IdenticonBitmap}" Width="36" Height="36"
+                               IsVisible="{Binding IdenticonBitmap, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                    </Panel>
                 </Border>
                 <StackPanel Grid.Column="1" Margin="10,0" VerticalAlignment="Center">
                     <TextBlock Text="{Binding DisplayName}" FontWeight="Bold" FontSize="14" />

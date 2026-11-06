@@ -72,8 +72,13 @@ public partial class App : Avalonia.Application
                 DataContext = _services.GetRequiredService<MainWindowViewModel>()
             };
 
-            desktop.Exit += (_, _) =>
+            desktop.Exit += async (_, _) =>
             {
+                var worldState = _services?.GetService<ISimulatedWorldStateService>();
+                if (worldState != null)
+                {
+                    await worldState.ClearAllAsync();
+                }
                 logEngine.Dispose();
             };
         }

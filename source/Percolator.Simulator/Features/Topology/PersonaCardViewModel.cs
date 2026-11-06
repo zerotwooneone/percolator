@@ -1,4 +1,5 @@
-using System.Collections.ObjectModel;
+using System.IO;
+using Avalonia.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Percolator.Simulator.Features.Shell;
@@ -8,6 +9,9 @@ namespace Percolator.Simulator.Features.Topology;
 internal sealed partial class PersonaCardViewModel : ViewModelBase
 {
     private readonly IStatusToastService _toastService;
+    private readonly ISimulatedPersonaHost? _host;
+
+    public SimulatedNodeId NodeId { get; }
 
     [ObservableProperty]
     private string _displayName = string.Empty;
@@ -17,6 +21,9 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
 
     [ObservableProperty]
     private bool _isListening = true;
+
+    [ObservableProperty]
+    private Bitmap? _identiconBitmap;
 
     // Feature Toggles (CTL-PER-03..06)
     [ObservableProperty]
@@ -54,16 +61,36 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
     [ObservableProperty]
     private string _composeMessageText = string.Empty;
 
-    public ObservableCollection<string> ChatMessages { get; } = new();
+    public System.Collections.ObjectModel.ObservableCollection<string> ChatMessages { get; } = new();
 
-    public PersonaCardViewModel(SimulatedNodeSummary summary, IStatusToastService toastService)
+    public PersonaCardViewModel(
+        SimulatedNodeSummary summary,
+        IStatusToastService toastService,
+        ISimulatedPersonaHost? host = null)
     {
+        NodeId = summary.Id;
         _displayName = summary.DisplayName;
         _boundEndpoint = summary.Subtitle;
         _toastService = toastService;
+        _host = host;
 
-        // Seed sample chat messages in preview mode
+        if (host?.IdenticonPng is not null && host.IdenticonPng.Length > 0)
+        {
+            using var ms = new MemoryStream(host.IdenticonPng);
+            _identiconBitmap = new Bitmap(ms);
+        }
+
+        if (host is not null)
+        {
+            _isListening = host.IsListening.CurrentValue;
+        }
+
         ChatMessages.Add("[System] Ready for direct/relayed handshake.");
+    }
+
+    partial void OnIsListeningChanged(bool value)
+    {
+        _host?.SetListening(value);
     }
 
     [RelayCommand]

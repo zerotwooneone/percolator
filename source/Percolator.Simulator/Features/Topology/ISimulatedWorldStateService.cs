@@ -1,5 +1,8 @@
 using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using ObservableCollections;
 using Percolator.Simulator.Features.Shell;
 
@@ -13,13 +16,16 @@ internal interface ISimulatedWorldStateService : IDisposable
     IReadOnlyObservableList<SimulatedNodeSummary> ActiveSwarms { get; }
     IReadOnlyObservableList<SimulatedNodeSummary> PinnedCards { get; }
 
-    void RegisterPersona(SimulatedNodeSummary persona);
+    void RegisterPersona(SimulatedNodeSummary persona, ISimulatedPersonaHost? host = null);
     void RegisterRelay(SimulatedNodeSummary relay);
     void RegisterGroup(SimulatedNodeSummary group);
     void RegisterSwarm(SimulatedNodeSummary swarm);
 
+    ISimulatedPersonaHost? GetPersonaHost(SimulatedNodeId id);
+
     void TogglePinCard(SimulatedNodeSummary node);
     void UnpinCard(SimulatedNodeId nodeId);
+    Task ClearAllAsync();
     void ClearAll();
 }
 
@@ -32,6 +38,7 @@ internal sealed class SimulatedWorldStateService : ISimulatedWorldStateService
     private readonly ObservableList<SimulatedNodeSummary> _groups = new();
     private readonly ObservableList<SimulatedNodeSummary> _swarms = new();
     private readonly ObservableList<SimulatedNodeSummary> _pinnedCards = new();
+    private readonly ConcurrentDictionary<SimulatedNodeId, ISimulatedPersonaHost> _personaHosts = new();
 
     public IReadOnlyObservableList<SimulatedNodeSummary> Personas => _personas;
     public IReadOnlyObservableList<SimulatedNodeSummary> Relays => _relays;
@@ -39,9 +46,13 @@ internal sealed class SimulatedWorldStateService : ISimulatedWorldStateService
     public IReadOnlyObservableList<SimulatedNodeSummary> ActiveSwarms => _swarms;
     public IReadOnlyObservableList<SimulatedNodeSummary> PinnedCards => _pinnedCards;
 
-    public void RegisterPersona(SimulatedNodeSummary persona)
+    public void RegisterPersona(SimulatedNodeSummary persona, ISimulatedPersonaHost? host = null)
     {
         _personas.Add(persona);
+        if (host is not null)
+        {
+            _personaHosts[persona.Id] = host;
+        }
     }
 
     public void RegisterRelay(SimulatedNodeSummary relay)
@@ -57,6 +68,12 @@ internal sealed class SimulatedWorldStateService : ISimulatedWorldStateService
     public void RegisterSwarm(SimulatedNodeSummary swarm)
     {
         _swarms.Add(swarm);
+    }
+
+    public ISimulatedPersonaHost? GetPersonaHost(SimulatedNodeId id)
+    {
+        _personaHosts.TryGetValue(id, out var host);
+        return host;
     }
 
     public void TogglePinCard(SimulatedNodeSummary node)
@@ -85,13 +102,28 @@ internal sealed class SimulatedWorldStateService : ISimulatedWorldStateService
         }
     }
 
-    public void ClearAll()
+    public async Task ClearAllAsync()
     {
+        foreach (var host in _personaHosts.Values)
+        {
+            try
+            {
+                await host.DisposeAsync();
+            }
+            catch { }
+        }
+        _personaHosts.Clear();
+
         _personas.Clear();
         _relays.Clear();
         _groups.Clear();
         _swarms.Clear();
         _pinnedCards.Clear();
+    }
+
+    public void ClearAll()
+    {
+        ClearAllAsync().GetAwaiter().GetResult();
     }
 
     public void Dispose()

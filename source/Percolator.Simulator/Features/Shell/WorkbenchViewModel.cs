@@ -46,7 +46,7 @@ internal sealed partial class WorkbenchViewModel : ViewModelBase
                             if (e.OldItem is not null)
                             {
                                 var existing = PinnedCardViewModels.FirstOrDefault(vm =>
-                                    (vm is PersonaCardViewModel p && p.DisplayName == e.OldItem.DisplayName) ||
+                                    (vm is PersonaCardViewModel p && p.NodeId == e.OldItem.Id) ||
                                     (vm is RelayCardViewModel r && r.DisplayName == e.OldItem.DisplayName));
                                 if (existing is not null)
                                     PinnedCardViewModels.Remove(existing);
@@ -66,7 +66,7 @@ internal sealed partial class WorkbenchViewModel : ViewModelBase
         return node.NodeType switch
         {
             SimulatedNodeType.Relay => new RelayCardViewModel(node, _toastService),
-            _ => new PersonaCardViewModel(node, _toastService)
+            _ => new PersonaCardViewModel(node, _toastService, _worldState.GetPersonaHost(node.Id))
         };
     }
 }
