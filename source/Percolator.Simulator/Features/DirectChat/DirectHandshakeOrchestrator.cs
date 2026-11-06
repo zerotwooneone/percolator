@@ -51,236 +51,245 @@ internal sealed class DirectHandshakeOrchestrator
         _logSink = logSink ?? throw new ArgumentNullException(nameof(logSink));
     }
 
-    public async Task<bool> InitiateDirectHandshakeAsync(
+    public Task<bool> InitiateDirectHandshakeAsync(
         SimulatedNodeId initiatorNodeId,
         SimulatedNodeId targetNodeId,
         CancellationToken ct = default)
     {
-        var initiator = _worldState.GetPersonaHost(initiatorNodeId);
-        var target = _worldState.GetPersonaHost(targetNodeId);
-
-        if (initiator == null || target == null)
+        return Task.Run(async () =>
         {
-            _toastService.ShowToast("Handshake Failed", "Both initiator and target must be active personas.", ToastSeverity.Error);
-            return false;
-        }
+            var initiator = _worldState.GetPersonaHost(initiatorNodeId);
+            var target = _worldState.GetPersonaHost(targetNodeId);
 
-        if (initiator.Id == target.Id)
-        {
-            _toastService.ShowToast("Invalid Handshake", "Cannot initiate handshake with self.", ToastSeverity.Warning);
-            return false;
-        }
-
-        try
-        {
-            var targetBundle = target.CreatePreKeyBundle();
-
-            using var scope = initiator.Services.CreateScope();
-            var handshakeService = scope.ServiceProvider.GetRequiredService<IHandshakeService>();
-
-            var result = await handshakeService.InitiateHandshakeAsync(
-                initiator.PublicIdentityId,
-                DeviceId.Primary,
-                targetBundle,
-                initialAppId: null,
-                initialPayload: null,
-                ct: ct);
-
-            if (!result.IsSuccess)
+            if (initiator == null || target == null)
             {
-                _toastService.ShowToast("Handshake Failed", result.Error.Description, ToastSeverity.Error);
+                _toastService.ShowToast("Handshake Failed", "Both initiator and target must be active personas.", ToastSeverity.Error);
                 return false;
             }
 
-            // Ensure channel exists on initiator side
-            var channelId = ChannelIdUtility.DeterministicFor(initiator.PublicIdentityId, target.PublicIdentityId);
-            var channelRepo = scope.ServiceProvider.GetRequiredService<IChannelRepository>();
-            var timeProvider = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>();
-            var existingChannel = await channelRepo.GetDirectByIdAsync(channelId, ct);
-            if (existingChannel == null)
+            if (initiator.Id == target.Id)
             {
-                var channel = DirectChannel.Create(channelId, initiator.PublicIdentityId, target.PublicIdentityId, timeProvider).Value!;
-                await channelRepo.SaveDirectAsync(channel, ct);
-            }
-
-            // Immediately flush outbox to deliver the handshake packet via loopback gRPC TLS
-            var flushResult = await initiator.FlushOutboxAsync(ct);
-            if (!flushResult.IsSuccess)
-            {
-                _toastService.ShowToast("Handshake Delivery Failed", flushResult.Error.Description, ToastSeverity.Error);
+                _toastService.ShowToast("Invalid Handshake", "Cannot initiate handshake with self.", ToastSeverity.Warning);
                 return false;
             }
 
-            _logSink.Log(new SimulatorLogEntry(
-                DateTimeOffset.UtcNow,
-                LogLevel.Information,
-                initiator.DisplayName,
-                initiator.Id,
-                "Handshake",
-                $"Direct handshake invitation sent to '{target.DisplayName}'."));
+            try
+            {
+                var targetBundle = target.CreatePreKeyBundle();
 
-            _toastService.ShowToast("Handshake Sent", $"⚡ Direct handshake sent to {target.DisplayName}.", ToastSeverity.Success);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logSink.Log(new SimulatorLogEntry(
-                DateTimeOffset.UtcNow,
-                LogLevel.Error,
-                initiator.DisplayName,
-                initiator.Id,
-                "Handshake",
-                $"Failed to initiate handshake: {ex.Message}",
-                ex.ToString()));
+                using var scope = initiator.Services.CreateScope();
+                var handshakeService = scope.ServiceProvider.GetRequiredService<IHandshakeService>();
 
-            _toastService.ShowToast("Handshake Error", ex.Message, ToastSeverity.Error);
-            return false;
-        }
+                var result = await handshakeService.InitiateHandshakeAsync(
+                    initiator.PublicIdentityId,
+                    DeviceId.Primary,
+                    targetBundle,
+                    initialAppId: null,
+                    initialPayload: null,
+                    ct: ct);
+
+                if (!result.IsSuccess)
+                {
+                    _toastService.ShowToast("Handshake Failed", result.Error.Description, ToastSeverity.Error);
+                    return false;
+                }
+
+                // Ensure channel exists on initiator side
+                var channelId = ChannelIdUtility.DeterministicFor(initiator.PublicIdentityId, target.PublicIdentityId);
+                var channelRepo = scope.ServiceProvider.GetRequiredService<IChannelRepository>();
+                var timeProvider = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>();
+                var existingChannel = await channelRepo.GetDirectByIdAsync(channelId, ct);
+                if (existingChannel == null)
+                {
+                    var channel = DirectChannel.Create(channelId, initiator.PublicIdentityId, target.PublicIdentityId, timeProvider).Value!;
+                    await channelRepo.SaveDirectAsync(channel, ct);
+                }
+
+                // Immediately flush outbox to deliver the handshake packet via loopback gRPC TLS
+                var flushResult = await initiator.FlushOutboxAsync(ct);
+                if (!flushResult.IsSuccess)
+                {
+                    _toastService.ShowToast("Handshake Delivery Failed", flushResult.Error.Description, ToastSeverity.Error);
+                    return false;
+                }
+
+                _logSink.Log(new SimulatorLogEntry(
+                    DateTimeOffset.UtcNow,
+                    LogLevel.Information,
+                    initiator.DisplayName,
+                    initiator.Id,
+                    "Handshake",
+                    $"Direct handshake invitation sent to '{target.DisplayName}'."));
+
+                _toastService.ShowToast("Handshake Sent", $"⚡ Direct handshake sent to {target.DisplayName}.", ToastSeverity.Success);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logSink.Log(new SimulatorLogEntry(
+                    DateTimeOffset.UtcNow,
+                    LogLevel.Error,
+                    initiator.DisplayName,
+                    initiator.Id,
+                    "Handshake",
+                    $"Failed to initiate handshake: {ex.Message}",
+                    ex.ToString()));
+
+                _toastService.ShowToast("Handshake Error", ex.Message, ToastSeverity.Error);
+                return false;
+            }
+        }, ct);
     }
 
-    public async Task<bool> AcceptHandshakeAsync(
+    public Task<bool> AcceptHandshakeAsync(
         SimulatedNodeId targetNodeId,
         PublicIdentityId senderId,
         CancellationToken ct = default)
     {
-        var target = _worldState.GetPersonaHost(targetNodeId);
-        if (target == null) return false;
-
-        try
+        return Task.Run(async () =>
         {
-            using var scope = target.Services.CreateScope();
-            var contactCoord = scope.ServiceProvider.GetRequiredService<IContactRequestCoordinator>();
-            var handshakeService = scope.ServiceProvider.GetRequiredService<IHandshakeService>();
-            var timeProvider = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>();
-            var channelRepo = scope.ServiceProvider.GetRequiredService<IChannelRepository>();
+            var target = _worldState.GetPersonaHost(targetNodeId);
+            if (target == null) return false;
 
-            var approveResult = await contactCoord.ApproveRequestAsync(target.PublicIdentityId, senderId, PeerTrustLevel.Tofu, ct);
-            if (!approveResult.IsSuccess)
+            try
             {
-                _toastService.ShowToast("Accept Failed", approveResult.Error.Description, ToastSeverity.Error);
-                return false;
-            }
+                using var scope = target.Services.CreateScope();
+                var contactCoord = scope.ServiceProvider.GetRequiredService<IContactRequestCoordinator>();
+                var handshakeService = scope.ServiceProvider.GetRequiredService<IHandshakeService>();
+                var timeProvider = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>();
+                var channelRepo = scope.ServiceProvider.GetRequiredService<IChannelRepository>();
 
-            var completeResult = await handshakeService.CompletePendingHandshakeAsync(target.PublicIdentityId, senderId, ct);
-            if (!completeResult.IsSuccess)
-            {
-                _toastService.ShowToast("Accept Failed", completeResult.Error.Description, ToastSeverity.Error);
-                return false;
-            }
-
-            // Ensure channel exists on target
-            var channelId = ChannelIdUtility.DeterministicFor(target.PublicIdentityId, senderId);
-            var directChannel = await channelRepo.GetDirectByIdAsync(channelId, ct);
-            if (directChannel == null)
-            {
-                var channel = DirectChannel.Create(channelId, target.PublicIdentityId, senderId, timeProvider).Value!;
-                await channelRepo.SaveDirectAsync(channel, ct);
-            }
-
-            // Flush outbox in case any reply packets were queued
-            await target.FlushOutboxAsync(ct);
-
-            var senderHost = _worldState.FindPersonaHostByIdentity(senderId);
-            if (senderHost != null)
-            {
-                // Ensure sender also has the channel created
-                using var senderScope = senderHost.Services.CreateScope();
-                var senderChannelRepo = senderScope.ServiceProvider.GetRequiredService<IChannelRepository>();
-                var senderTimeProvider = senderScope.ServiceProvider.GetRequiredService<IDateTimeProvider>();
-                var sc = await senderChannelRepo.GetDirectByIdAsync(channelId, ct);
-                if (sc == null)
+                var approveResult = await contactCoord.ApproveRequestAsync(target.PublicIdentityId, senderId, PeerTrustLevel.Tofu, ct);
+                if (!approveResult.IsSuccess)
                 {
-                    var channel = DirectChannel.Create(channelId, senderId, target.PublicIdentityId, senderTimeProvider).Value!;
-                    await senderChannelRepo.SaveDirectAsync(channel, ct);
+                    _toastService.ShowToast("Accept Failed", approveResult.Error.Description, ToastSeverity.Error);
+                    return false;
                 }
-                await senderHost.FlushOutboxAsync(ct);
+
+                var completeResult = await handshakeService.CompletePendingHandshakeAsync(target.PublicIdentityId, senderId, ct);
+                if (!completeResult.IsSuccess)
+                {
+                    _toastService.ShowToast("Accept Failed", completeResult.Error.Description, ToastSeverity.Error);
+                    return false;
+                }
+
+                // Ensure channel exists on target
+                var channelId = ChannelIdUtility.DeterministicFor(target.PublicIdentityId, senderId);
+                var directChannel = await channelRepo.GetDirectByIdAsync(channelId, ct);
+                if (directChannel == null)
+                {
+                    var channel = DirectChannel.Create(channelId, target.PublicIdentityId, senderId, timeProvider).Value!;
+                    await channelRepo.SaveDirectAsync(channel, ct);
+                }
+
+                // Flush outbox in case any reply packets were queued
+                await target.FlushOutboxAsync(ct);
+
+                var senderHost = _worldState.FindPersonaHostByIdentity(senderId);
+                if (senderHost != null)
+                {
+                    // Ensure sender also has the channel created
+                    using var senderScope = senderHost.Services.CreateScope();
+                    var senderChannelRepo = senderScope.ServiceProvider.GetRequiredService<IChannelRepository>();
+                    var senderTimeProvider = senderScope.ServiceProvider.GetRequiredService<IDateTimeProvider>();
+                    var sc = await senderChannelRepo.GetDirectByIdAsync(channelId, ct);
+                    if (sc == null)
+                    {
+                        var channel = DirectChannel.Create(channelId, senderId, target.PublicIdentityId, senderTimeProvider).Value!;
+                        await senderChannelRepo.SaveDirectAsync(channel, ct);
+                    }
+                    await senderHost.FlushOutboxAsync(ct);
+
+                    _stateBus.Publish(new SimulatorStateSignal(
+                        senderHost.Id,
+                        SignalCategory.RatchetSessionChanged,
+                        Details: target.PublicIdentityId.ToString()));
+                }
+
+                _logSink.Log(new SimulatorLogEntry(
+                    DateTimeOffset.UtcNow,
+                    LogLevel.Information,
+                    target.DisplayName,
+                    target.Id,
+                    "Handshake",
+                    $"Accepted handshake from {senderId}. Double Ratchet session established."));
+
+                _toastService.ShowToast("Handshake Accepted", "✓ Direct secure session established.", ToastSeverity.Success);
 
                 _stateBus.Publish(new SimulatorStateSignal(
-                    senderHost.Id,
+                    target.Id,
+                    SignalCategory.PendingHandshakeChanged,
+                    Details: senderId.ToString()));
+
+                _stateBus.Publish(new SimulatorStateSignal(
+                    target.Id,
                     SignalCategory.RatchetSessionChanged,
-                    Details: target.PublicIdentityId.ToString()));
+                    Details: senderId.ToString()));
+
+                return true;
             }
+            catch (Exception ex)
+            {
+                _logSink.Log(new SimulatorLogEntry(
+                    DateTimeOffset.UtcNow,
+                    LogLevel.Error,
+                    target.DisplayName,
+                    target.Id,
+                    "Handshake",
+                    $"Error accepting handshake: {ex.Message}",
+                    ex.ToString()));
 
-            _logSink.Log(new SimulatorLogEntry(
-                DateTimeOffset.UtcNow,
-                LogLevel.Information,
-                target.DisplayName,
-                target.Id,
-                "Handshake",
-                $"Accepted handshake from {senderId}. Double Ratchet session established."));
-
-            _toastService.ShowToast("Handshake Accepted", "✓ Direct secure session established.", ToastSeverity.Success);
-
-            _stateBus.Publish(new SimulatorStateSignal(
-                target.Id,
-                SignalCategory.PendingHandshakeChanged,
-                Details: senderId.ToString()));
-
-            _stateBus.Publish(new SimulatorStateSignal(
-                target.Id,
-                SignalCategory.RatchetSessionChanged,
-                Details: senderId.ToString()));
-
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logSink.Log(new SimulatorLogEntry(
-                DateTimeOffset.UtcNow,
-                LogLevel.Error,
-                target.DisplayName,
-                target.Id,
-                "Handshake",
-                $"Error accepting handshake: {ex.Message}",
-                ex.ToString()));
-
-            _toastService.ShowToast("Accept Error", ex.Message, ToastSeverity.Error);
-            return false;
-        }
+                _toastService.ShowToast("Accept Error", ex.Message, ToastSeverity.Error);
+                return false;
+            }
+        }, ct);
     }
 
-    public async Task<bool> RejectHandshakeAsync(
+    public Task<bool> RejectHandshakeAsync(
         SimulatedNodeId targetNodeId,
         PublicIdentityId senderId,
         bool block = false,
         CancellationToken ct = default)
     {
-        var target = _worldState.GetPersonaHost(targetNodeId);
-        if (target == null) return false;
-
-        try
+        return Task.Run(async () =>
         {
-            using var scope = target.Services.CreateScope();
-            var contactCoord = scope.ServiceProvider.GetRequiredService<IContactRequestCoordinator>();
-            var pendingRepo = scope.ServiceProvider.GetRequiredService<IPendingHandshakeRepository>();
+            var target = _worldState.GetPersonaHost(targetNodeId);
+            if (target == null) return false;
 
-            await contactCoord.RejectRequestAsync(target.PublicIdentityId, senderId, block, ct);
-            await pendingRepo.DeletePendingHandshakeAsync(target.PublicIdentityId, senderId, ct);
+            try
+            {
+                using var scope = target.Services.CreateScope();
+                var contactCoord = scope.ServiceProvider.GetRequiredService<IContactRequestCoordinator>();
+                var pendingRepo = scope.ServiceProvider.GetRequiredService<IPendingHandshakeRepository>();
 
-            _logSink.Log(new SimulatorLogEntry(
-                DateTimeOffset.UtcNow,
-                LogLevel.Information,
-                target.DisplayName,
-                target.Id,
-                "Handshake",
-                $"Rejected handshake from {senderId} (Blocked: {block})."));
+                await contactCoord.RejectRequestAsync(target.PublicIdentityId, senderId, block, ct);
+                await pendingRepo.DeletePendingHandshakeAsync(target.PublicIdentityId, senderId, ct);
 
-            _toastService.ShowToast(
-                block ? "Handshake Blocked" : "Handshake Rejected",
-                $"Handshake from {senderId} has been {(block ? "blocked" : "rejected")}.",
-                ToastSeverity.Warning);
+                _logSink.Log(new SimulatorLogEntry(
+                    DateTimeOffset.UtcNow,
+                    LogLevel.Information,
+                    target.DisplayName,
+                    target.Id,
+                    "Handshake",
+                    $"Rejected handshake from {senderId} (Blocked: {block})."));
 
-            _stateBus.Publish(new SimulatorStateSignal(
-                target.Id,
-                SignalCategory.PendingHandshakeChanged,
-                Details: senderId.ToString()));
+                _toastService.ShowToast(
+                    block ? "Handshake Blocked" : "Handshake Rejected",
+                    $"Handshake from {senderId} has been {(block ? "blocked" : "rejected")}.",
+                    ToastSeverity.Warning);
 
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _toastService.ShowToast("Reject Error", ex.Message, ToastSeverity.Error);
-            return false;
-        }
+                _stateBus.Publish(new SimulatorStateSignal(
+                    target.Id,
+                    SignalCategory.PendingHandshakeChanged,
+                    Details: senderId.ToString()));
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _toastService.ShowToast("Reject Error", ex.Message, ToastSeverity.Error);
+                return false;
+            }
+        }, ct);
     }
 }

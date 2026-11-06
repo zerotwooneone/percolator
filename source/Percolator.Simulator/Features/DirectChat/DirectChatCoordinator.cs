@@ -35,145 +35,151 @@ internal sealed class DirectChatCoordinator
         _logSink = logSink ?? throw new ArgumentNullException(nameof(logSink));
     }
 
-    public async Task<bool> SendDirectMessageAsync(
+    public Task<bool> SendDirectMessageAsync(
         SimulatedNodeId senderNodeId,
         SimulatedNodeId recipientNodeId,
         string text,
         CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(text)) return false;
+        if (string.IsNullOrWhiteSpace(text)) return Task.FromResult(false);
 
-        var sender = _worldState.GetPersonaHost(senderNodeId);
-        var recipient = _worldState.GetPersonaHost(recipientNodeId);
-
-        if (sender == null || recipient == null)
+        return Task.Run(async () =>
         {
-            _toastService.ShowToast("Send Failed", "Both sender and recipient must be active.", ToastSeverity.Error);
-            return false;
-        }
+            var sender = _worldState.GetPersonaHost(senderNodeId);
+            var recipient = _worldState.GetPersonaHost(recipientNodeId);
 
-        try
-        {
-            var channelId = ChannelIdUtility.DeterministicFor(sender.PublicIdentityId, recipient.PublicIdentityId);
-
-            // Ensure channel exists in repositories
-            await EnsureChannelAsync(sender, recipient, channelId, ct);
-
-            using var scope = sender.Services.CreateScope();
-            var chatService = scope.ServiceProvider.GetRequiredService<IChatService>();
-
-            var command = new SendMessageCommand(
-                ChannelId: channelId,
-                AuthorId: sender.PublicIdentityId,
-                RecipientIdentityId: recipient.PublicIdentityId,
-                RecipientDeviceId: DeviceId.Primary,
-                Content: text,
-                Mentions: null,
-                ReplyContext: null,
-                Attachments: null,
-                ExpireAfterSeconds: null,
-                LinkPreview: null,
-                Route: Percolator.PluginSdk.DeliveryRoute.DirectP2P);
-
-            var result = await chatService.SendMessageAsync(command, ct);
-            if (!result.IsSuccess)
+            if (sender == null || recipient == null)
             {
-                _toastService.ShowToast("Send Error", result.Error.Description, ToastSeverity.Error);
+                _toastService.ShowToast("Send Failed", "Both sender and recipient must be active.", ToastSeverity.Error);
                 return false;
             }
 
-            _stateBus.Publish(new SimulatorStateSignal(
-                sender.Id,
-                SignalCategory.ChatTranscriptChanged,
-                Details: recipient.PublicIdentityId.ToString()));
-
-            // Immediately flush outbox to deliver encrypted payload via loopback gRPC TLS
-            var flushResult = await sender.FlushOutboxAsync(ct);
-            if (!flushResult.IsSuccess)
+            try
             {
-                _toastService.ShowToast("Delivery Deferred", flushResult.Error.Description, ToastSeverity.Warning);
+                var channelId = ChannelIdUtility.DeterministicFor(sender.PublicIdentityId, recipient.PublicIdentityId);
+
+                // Ensure channel exists in repositories
+                await EnsureChannelAsync(sender, recipient, channelId, ct);
+
+                using var scope = sender.Services.CreateScope();
+                var chatService = scope.ServiceProvider.GetRequiredService<IChatService>();
+
+                var command = new SendMessageCommand(
+                    ChannelId: channelId,
+                    AuthorId: sender.PublicIdentityId,
+                    RecipientIdentityId: recipient.PublicIdentityId,
+                    RecipientDeviceId: DeviceId.Primary,
+                    Content: text,
+                    Mentions: null,
+                    ReplyContext: null,
+                    Attachments: null,
+                    ExpireAfterSeconds: null,
+                    LinkPreview: null,
+                    Route: Percolator.PluginSdk.DeliveryRoute.DirectP2P);
+
+                var result = await chatService.SendMessageAsync(command, ct);
+                if (!result.IsSuccess)
+                {
+                    _toastService.ShowToast("Send Error", result.Error.Description, ToastSeverity.Error);
+                    return false;
+                }
+
+                _stateBus.Publish(new SimulatorStateSignal(
+                    sender.Id,
+                    SignalCategory.ChatTranscriptChanged,
+                    Details: recipient.PublicIdentityId.ToString()));
+
+                // Immediately flush outbox to deliver encrypted payload via loopback gRPC TLS
+                var flushResult = await sender.FlushOutboxAsync(ct);
+                if (!flushResult.IsSuccess)
+                {
+                    _toastService.ShowToast("Delivery Deferred", flushResult.Error.Description, ToastSeverity.Warning);
+                    return false;
+                }
+
+                _logSink.Log(new SimulatorLogEntry(
+                    DateTimeOffset.UtcNow,
+                    LogLevel.Information,
+                    sender.DisplayName,
+                    sender.Id,
+                    "DirectChat",
+                    $"Direct message sent to '{recipient.DisplayName}': \"{text}\""));
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logSink.Log(new SimulatorLogEntry(
+                    DateTimeOffset.UtcNow,
+                    LogLevel.Error,
+                    sender.DisplayName,
+                    sender.Id,
+                    "DirectChat",
+                    $"Failed to send message: {ex.Message}",
+                    ex.ToString()));
+
+                _toastService.ShowToast("Send Exception", ex.Message, ToastSeverity.Error);
                 return false;
             }
-
-            _logSink.Log(new SimulatorLogEntry(
-                DateTimeOffset.UtcNow,
-                LogLevel.Information,
-                sender.DisplayName,
-                sender.Id,
-                "DirectChat",
-                $"Direct message sent to '{recipient.DisplayName}': \"{text}\""));
-
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logSink.Log(new SimulatorLogEntry(
-                DateTimeOffset.UtcNow,
-                LogLevel.Error,
-                sender.DisplayName,
-                sender.Id,
-                "DirectChat",
-                $"Failed to send message: {ex.Message}",
-                ex.ToString()));
-
-            _toastService.ShowToast("Send Exception", ex.Message, ToastSeverity.Error);
-            return false;
-        }
+        }, ct);
     }
 
-    public async Task<IReadOnlyList<ChatMessageItemViewModel>> GetTranscriptAsync(
+    public Task<IReadOnlyList<ChatMessageItemViewModel>> GetTranscriptAsync(
         SimulatedNodeId nodeId,
         SimulatedNodeId? peerNodeId = null,
         CancellationToken ct = default)
     {
-        var host = _worldState.GetPersonaHost(nodeId);
-        if (host == null) return Array.Empty<ChatMessageItemViewModel>();
-
-        try
+        return Task.Run<IReadOnlyList<ChatMessageItemViewModel>>(async () =>
         {
-            using var scope = host.Services.CreateScope();
-            var chatRepo = scope.ServiceProvider.GetRequiredService<IChatMessageRepository>();
+            var host = _worldState.GetPersonaHost(nodeId);
+            if (host == null) return Array.Empty<ChatMessageItemViewModel>();
 
-            if (peerNodeId.HasValue)
+            try
             {
-                var peerHost = _worldState.GetPersonaHost(peerNodeId.Value);
-                if (peerHost != null)
+                using var scope = host.Services.CreateScope();
+                var chatRepo = scope.ServiceProvider.GetRequiredService<IChatMessageRepository>();
+
+                if (peerNodeId.HasValue)
                 {
-                    var channelId = ChannelIdUtility.DeterministicFor(host.PublicIdentityId, peerHost.PublicIdentityId);
-                    var messages = await chatRepo.GetByChannelIdAsync(channelId, ct);
-
-                    return messages.Select(m =>
+                    var peerHost = _worldState.GetPersonaHost(peerNodeId.Value);
+                    if (peerHost != null)
                     {
-                        var isOutgoing = m.AuthorId == host.PublicIdentityId;
-                        var senderName = isOutgoing ? host.DisplayName : peerHost.DisplayName;
-                        var timeText = DateTimeOffset.FromUnixTimeMilliseconds((long)m.TimestampUnixMs).ToLocalTime().ToString("HH:mm:ss");
+                        var channelId = ChannelIdUtility.DeterministicFor(host.PublicIdentityId, peerHost.PublicIdentityId);
+                        var messages = await chatRepo.GetByChannelIdAsync(channelId, ct);
 
-                        return new ChatMessageItemViewModel
+                        return messages.Select(m =>
                         {
-                            SenderName = senderName,
-                            Content = m.Content,
-                            TimestampText = timeText,
-                            IsOutgoing = isOutgoing,
-                            StatusText = "✓"
-                        };
-                    }).ToList();
+                            var isOutgoing = m.AuthorId == host.PublicIdentityId;
+                            var senderName = isOutgoing ? host.DisplayName : peerHost.DisplayName;
+                            var timeText = DateTimeOffset.FromUnixTimeMilliseconds((long)m.TimestampUnixMs).ToLocalTime().ToString("HH:mm:ss");
+
+                            return new ChatMessageItemViewModel
+                            {
+                                SenderName = senderName,
+                                Content = m.Content,
+                                TimestampText = timeText,
+                                IsOutgoing = isOutgoing,
+                                StatusText = "✓"
+                            };
+                        }).ToList();
+                    }
                 }
+
+                return Array.Empty<ChatMessageItemViewModel>();
             }
+            catch (Exception ex)
+            {
+                _logSink.Log(new SimulatorLogEntry(
+                    DateTimeOffset.UtcNow,
+                    LogLevel.Warning,
+                    host.DisplayName,
+                    host.Id,
+                    "DirectChat",
+                    $"Error fetching chat transcript: {ex.Message}"));
 
-            return Array.Empty<ChatMessageItemViewModel>();
-        }
-        catch (Exception ex)
-        {
-            _logSink.Log(new SimulatorLogEntry(
-                DateTimeOffset.UtcNow,
-                LogLevel.Warning,
-                host.DisplayName,
-                host.Id,
-                "DirectChat",
-                $"Error fetching chat transcript: {ex.Message}"));
-
-            return Array.Empty<ChatMessageItemViewModel>();
-        }
+                return Array.Empty<ChatMessageItemViewModel>();
+            }
+        }, ct);
     }
 
     private static async Task EnsureChannelAsync(

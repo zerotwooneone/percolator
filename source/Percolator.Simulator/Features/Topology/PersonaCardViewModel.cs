@@ -139,10 +139,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
         {
             _stateBus.Signals
                 .Where(s => s.NodeId == NodeId)
-                .Subscribe(signal =>
-                {
-                    Dispatcher.UIThread.Post(() => HandleSignal(signal));
-                })
+                .Subscribe(signal => HandleSignal(signal))
                 .AddTo(ref Disposables);
         }
 
@@ -152,10 +149,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
                 _selectionState.PrimarySelectedNode,
                 _selectionState.SecondarySelectedNode,
                 (p, s) => (p, s))
-                .Subscribe(_ =>
-                {
-                    Dispatcher.UIThread.Post(RefreshTranscript);
-                })
+                .Subscribe(_ => RefreshTranscript())
                 .AddTo(ref Disposables);
         }
 
@@ -183,16 +177,16 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
     private void RefreshPendingHandshake()
     {
         if (_host == null || _worldState == null) return;
-        _ = Task.Run(async () =>
-        {
-            try
+
+        UiTaskRunner.FireAndForget(
+            async () =>
             {
                 using var scope = _host.Services.CreateScope();
                 var contactRepo = scope.ServiceProvider.GetRequiredService<IPeerContactRepository>();
                 var contacts = await contactRepo.GetAllForOwnerAsync(_host.PublicIdentityId);
                 var pending = contacts.FirstOrDefault(c => c.State == ContactState.PendingApproval);
 
-                Dispatcher.UIThread.Post(async () =>
+                UiTaskRunner.PostToUi(() =>
                 {
                     if (pending != null)
                     {
@@ -204,7 +198,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
 
                         if (AutoAcceptHandshakes)
                         {
-                            await AcceptPendingHandshakeAsync();
+                            _ = AcceptPendingHandshakeAsync();
                         }
                     }
                     else
@@ -214,34 +208,26 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
                         PendingHandshakeText = string.Empty;
                     }
                 });
-            }
-            catch (Exception ex)
-            {
-                _logSink?.Log(new SimulatorLogEntry(
-                    DateTimeOffset.UtcNow,
-                    LogLevel.Error,
-                    DisplayName,
-                    NodeId,
-                    "PersonaCard",
-                    $"Failed to refresh pending handshake state: {ex.Message}",
-                    ex.ToString()));
-            }
-        });
+            },
+            category: "PersonaCard",
+            logSink: _logSink,
+            nodeName: DisplayName,
+            nodeId: NodeId);
     }
 
     private void RefreshTranscript()
     {
         if (_host == null || _chatCoordinator == null) return;
-        _ = Task.Run(async () =>
-        {
-            try
+
+        UiTaskRunner.FireAndForget(
+            async () =>
             {
                 var peer = GetActivePeerSummary();
                 if (peer == null) return;
 
                 var transcript = await _chatCoordinator.GetTranscriptAsync(NodeId, peer.Id);
 
-                Dispatcher.UIThread.Post(() =>
+                UiTaskRunner.PostToUi(() =>
                 {
                     ChatMessages.Clear();
                     if (transcript.Count == 0)
@@ -261,19 +247,11 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
                         }
                     }
                 });
-            }
-            catch (Exception ex)
-            {
-                _logSink?.Log(new SimulatorLogEntry(
-                    DateTimeOffset.UtcNow,
-                    LogLevel.Error,
-                    DisplayName,
-                    NodeId,
-                    "PersonaCard",
-                    $"Failed to refresh chat transcript: {ex.Message}",
-                    ex.ToString()));
-            }
-        });
+            },
+            category: "PersonaCard",
+            logSink: _logSink,
+            nodeName: DisplayName,
+            nodeId: NodeId);
     }
 
     private SimulatedNodeSummary? GetActivePeerSummary()
@@ -321,21 +299,45 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
     private async Task AcceptPendingHandshakeAsync()
     {
         if (_handshakeOrchestrator == null || !_pendingSenderId.HasValue) return;
-        await _handshakeOrchestrator.AcceptHandshakeAsync(NodeId, _pendingSenderId.Value);
+        var senderId = _pendingSenderId.Value;
+
+        await UiTaskRunner.RunAsync(
+            () => _handshakeOrchestrator.AcceptHandshakeAsync(NodeId, senderId),
+            category: "Handshake",
+            logSink: _logSink,
+            toastService: _toastService,
+            nodeName: DisplayName,
+            nodeId: NodeId);
     }
 
     [RelayCommand]
     private async Task RejectPendingHandshakeAsync()
     {
         if (_handshakeOrchestrator == null || !_pendingSenderId.HasValue) return;
-        await _handshakeOrchestrator.RejectHandshakeAsync(NodeId, _pendingSenderId.Value, block: false);
+        var senderId = _pendingSenderId.Value;
+
+        await UiTaskRunner.RunAsync(
+            () => _handshakeOrchestrator.RejectHandshakeAsync(NodeId, senderId, block: false),
+            category: "Handshake",
+            logSink: _logSink,
+            toastService: _toastService,
+            nodeName: DisplayName,
+            nodeId: NodeId);
     }
 
     [RelayCommand]
     private async Task BlockPendingHandshakeAsync()
     {
         if (_handshakeOrchestrator == null || !_pendingSenderId.HasValue) return;
-        await _handshakeOrchestrator.RejectHandshakeAsync(NodeId, _pendingSenderId.Value, block: true);
+        var senderId = _pendingSenderId.Value;
+
+        await UiTaskRunner.RunAsync(
+            () => _handshakeOrchestrator.RejectHandshakeAsync(NodeId, senderId, block: true),
+            category: "Handshake",
+            logSink: _logSink,
+            toastService: _toastService,
+            nodeName: DisplayName,
+            nodeId: NodeId);
     }
 
     [RelayCommand]
@@ -352,7 +354,14 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
             return;
         }
 
-        await _chatCoordinator.SendDirectMessageAsync(NodeId, peer.Id, text);
+        var peerId = peer.Id;
+        await UiTaskRunner.RunAsync(
+            () => _chatCoordinator.SendDirectMessageAsync(NodeId, peerId, text),
+            category: "DirectChat",
+            logSink: _logSink,
+            toastService: _toastService,
+            nodeName: DisplayName,
+            nodeId: NodeId);
     }
 
     [RelayCommand]

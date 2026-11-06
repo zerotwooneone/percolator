@@ -50,26 +50,26 @@ internal sealed class SimulatedWorldStateService : ISimulatedWorldStateService
 
     public void RegisterPersona(SimulatedNodeSummary persona, ISimulatedPersonaHost? host = null)
     {
-        _personas.Add(persona);
         if (host is not null)
         {
             _personaHosts[persona.Id] = host;
         }
+        UiTaskRunner.PostToUi(() => _personas.Add(persona));
     }
 
     public void RegisterRelay(SimulatedNodeSummary relay)
     {
-        _relays.Add(relay);
+        UiTaskRunner.PostToUi(() => _relays.Add(relay));
     }
 
     public void RegisterGroup(SimulatedNodeSummary group)
     {
-        _groups.Add(group);
+        UiTaskRunner.PostToUi(() => _groups.Add(group));
     }
 
     public void RegisterSwarm(SimulatedNodeSummary swarm)
     {
-        _swarms.Add(swarm);
+        UiTaskRunner.PostToUi(() => _swarms.Add(swarm));
     }
 
     public ISimulatedPersonaHost? GetPersonaHost(SimulatedNodeId id)
@@ -85,52 +85,66 @@ internal sealed class SimulatedWorldStateService : ISimulatedWorldStateService
 
     public void TogglePinCard(SimulatedNodeSummary node)
     {
-        var existing = _pinnedCards.FirstOrDefault(x => x.Id == node.Id);
-        if (existing is not null)
+        UiTaskRunner.PostToUi(() =>
         {
-            _pinnedCards.Remove(existing);
-            return;
-        }
+            var existing = _pinnedCards.FirstOrDefault(x => x.Id == node.Id);
+            if (existing is not null)
+            {
+                _pinnedCards.Remove(existing);
+                return;
+            }
 
-        if (_pinnedCards.Count >= MaxPinnedCards)
-        {
-            _pinnedCards.RemoveAt(0); // FIFO eviction
-        }
+            if (_pinnedCards.Count >= MaxPinnedCards)
+            {
+                _pinnedCards.RemoveAt(0); // FIFO eviction
+            }
 
-        _pinnedCards.Add(node with { IsPinned = true });
+            _pinnedCards.Add(node with { IsPinned = true });
+        });
     }
 
     public void UnpinCard(SimulatedNodeId nodeId)
     {
-        var existing = _pinnedCards.FirstOrDefault(x => x.Id == nodeId);
-        if (existing is not null)
+        UiTaskRunner.PostToUi(() =>
         {
-            _pinnedCards.Remove(existing);
-        }
+            var existing = _pinnedCards.FirstOrDefault(x => x.Id == nodeId);
+            if (existing is not null)
+            {
+                _pinnedCards.Remove(existing);
+            }
+        });
     }
 
     public async Task ClearAllAsync()
     {
-        foreach (var host in _personaHosts.Values)
-        {
-            try
-            {
-                await host.DisposeAsync();
-            }
-            catch { }
-        }
+        var hosts = _personaHosts.Values.ToArray();
         _personaHosts.Clear();
 
-        _personas.Clear();
-        _relays.Clear();
-        _groups.Clear();
-        _swarms.Clear();
-        _pinnedCards.Clear();
+        UiTaskRunner.PostToUi(() =>
+        {
+            _personas.Clear();
+            _relays.Clear();
+            _groups.Clear();
+            _swarms.Clear();
+            _pinnedCards.Clear();
+        });
+
+        await Task.Run(async () =>
+        {
+            foreach (var host in hosts)
+            {
+                try
+                {
+                    await host.DisposeAsync();
+                }
+                catch { }
+            }
+        });
     }
 
     public void ClearAll()
     {
-        ClearAllAsync().GetAwaiter().GetResult();
+        Task.Run(ClearAllAsync).GetAwaiter().GetResult();
     }
 
     public void Dispose()

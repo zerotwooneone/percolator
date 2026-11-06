@@ -44,9 +44,12 @@ internal sealed partial class MainWindowViewModel : ViewModelBase
         toastService.Toasts
             .Subscribe(toast =>
             {
-                StatusToastTitle = toast.Title;
-                StatusToastMessage = toast.Message;
-                IsStatusToastOpen = true;
+                UiTaskRunner.PostToUi(() =>
+                {
+                    StatusToastTitle = toast.Title;
+                    StatusToastMessage = toast.Message;
+                    IsStatusToastOpen = true;
+                });
             })
             .AddTo(ref Disposables);
     }

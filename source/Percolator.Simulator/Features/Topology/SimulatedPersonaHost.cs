@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
@@ -121,6 +122,9 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             // 1. Core infrastructure with random in-memory master key
             services.AddAuthenticatedInfrastructure(_masterKeyHandle, storageOptions);
 
+            // 1a. Override SQLCipher pragma interceptor to use kdf_iter = 1 (avoids 500ms+ 256k-iteration PBKDF2 on every EF Core pooled query checkout)
+            services.AddSingleton<DbConnectionInterceptor, SimulatorSqlCipherPragmaInterceptor>();
+
             // 1b. Windows-specific infrastructure overrides (SChannel TLS 1.3 cert provider & Sparse Desktop File Store)
             services.AddWindowsInfrastructureOverrides();
             services.AddSingleton<ITransportCertificateProvider>(
@@ -131,11 +135,15 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             // 2. Chat vertical app registration
             services.AddChatApp();
 
-            // 3. Node-scoped logger provider routing all Kestrel/Percolator logs to multi-sink
+            // 3. Node-scoped logger provider routing Percolator logs to multi-sink while suppressing EF Core / Kestrel connection spam
             services.AddLogging(lb =>
             {
                 lb.ClearProviders();
                 lb.SetMinimumLevel(LogLevel.Trace);
+                lb.AddFilter("Microsoft.EntityFrameworkCore", LogLevel.Warning);
+                lb.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
+                lb.AddFilter("Microsoft.Extensions.Hosting", LogLevel.Information);
+                lb.AddFilter("System.Net.Http", LogLevel.Warning);
                 lb.AddProvider(new NodeScopedLoggerProvider(DisplayName, Id, _logSink));
             });
 
@@ -311,34 +319,42 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
     public void SetListening(bool isListening)
     {
         _isListening.Value = isListening;
-        if (isListening)
-        {
-            if (_transportServer is not null && !_transportServer.IsRunning)
+        UiTaskRunner.FireAndForget(
+            async () =>
             {
-                _transportServer.StartAsync(new PortNumber(BoundPort)).GetAwaiter().GetResult();
-                _logSink.Log(new SimulatorLogEntry(
-                    DateTimeOffset.UtcNow,
-                    LogLevel.Information,
-                    DisplayName,
-                    Id,
-                    "HostLifecycle",
-                    "Ingress resumed (Listening)."));
-            }
-        }
-        else
-        {
-            if (_transportServer is not null && _transportServer.IsRunning)
-            {
-                _transportServer.StopAsync().GetAwaiter().GetResult();
-                _logSink.Log(new SimulatorLogEntry(
-                    DateTimeOffset.UtcNow,
-                    LogLevel.Information,
-                    DisplayName,
-                    Id,
-                    "HostLifecycle",
-                    "Ingress muted (Transport stopped)."));
-            }
-        }
+                if (isListening)
+                {
+                    if (_transportServer is not null && !_transportServer.IsRunning)
+                    {
+                        await _transportServer.StartAsync(new PortNumber(BoundPort));
+                        _logSink.Log(new SimulatorLogEntry(
+                            DateTimeOffset.UtcNow,
+                            LogLevel.Information,
+                            DisplayName,
+                            Id,
+                            "HostLifecycle",
+                            "Ingress resumed (Listening)."));
+                    }
+                }
+                else
+                {
+                    if (_transportServer is not null && _transportServer.IsRunning)
+                    {
+                        await _transportServer.StopAsync();
+                        _logSink.Log(new SimulatorLogEntry(
+                            DateTimeOffset.UtcNow,
+                            LogLevel.Information,
+                            DisplayName,
+                            Id,
+                            "HostLifecycle",
+                            "Ingress muted (Transport stopped)."));
+                    }
+                }
+            },
+            category: "HostLifecycle",
+            logSink: _logSink,
+            nodeName: DisplayName,
+            nodeId: Id);
     }
 
     public async ValueTask StopAsync(CancellationToken ct = default)

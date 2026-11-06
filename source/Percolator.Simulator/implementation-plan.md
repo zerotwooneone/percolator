@@ -40,7 +40,7 @@ To prevent speculative bloat and architectural drift, the following capabilities
 - **Zero Invasion of Core Assemblies**: `Percolator.Simulator` never adds simulator-only properties or UI events to `Percolator.Domain` or `Percolator.Application`. All cross-host reactive observation is wired via Decorator classes inside the simulator project.
 
 ### 1.4 Strict MVVM State Ownership, Angular-Style Stateful Services & R3 Reactive Bus
-Because `Percolator.Simulator` hosts multiple isolated DI containers (`SimulatedPersonaHost`, `SimulatedRelayHost`) whose databases are mutated asynchronously by background gRPC/TCP threads—and because core repositories (`ChatPayloadHandler`, `HandshakeService`, `SqliteRelayPreKeyRepository`) write directly to SQLite without raising UI events—the simulator enforces a **4-part Reactive MVVM Architecture**:
+Because `Percolator.Simulator` hosts multiple isolated DI containers (`SimulatedPersonaHost`, `SimulatedRelayHost`) whose databases are mutated asynchronously by background gRPC/TCP threads—and because core repositories (`ChatPayloadHandler`, `HandshakeService`, `SqliteRelayPreKeyRepository`) write directly to SQLite without raising UI events—the simulator enforces a **5-part Reactive & Background-Offloaded MVVM Architecture**:
 
 1. **Strict ViewModel State Ownership (Local vs. Shared State)**:
    - **ViewModel-Owned State**: A ViewModel exclusively owns transient UI state that belongs strictly to its own view (`ComposeMessageText`, `SelectedDisappearingTimer`, `ActiveCardTab`, `IsFlyoutOpen`, `InlineEditingMessageId`). No external service or peer ViewModel may read or mutate ViewModel-local state.
@@ -71,6 +71,9 @@ Because `Percolator.Simulator` hosts multiple isolated DI containers (`Simulated
      - `Channel<SimulatorLogEntry>` in `MultiSinkLogEngine` (decoupling hot gRPC/Kestrel threads from disk JSONL I/O and UI ring-buffer ingestion).
      - `Channel<SwarmChunkProgressSignal>` in Phase 9 (coalescing high-frequency multi-stream TCP chunk completions into 30 FPS `SwarmHeatmapControl.InvalidateVisual()` passes).
    - **`R3` (`ReactiveProperty<T>`, `ObservableList<T>`, `Subject<T>`)** is used for all reactive state sharing, UI data binding (`CreateView().ToNotifyCollectionChanged()`), and deterministic `FirstAsync()` waiters in `ScenarioRunnerService`.
+5. **Mandatory Background Thread Offloading (`UiTaskRunner`)**:
+   - Because `Microsoft.Data.Sqlite` executes all native SQLite/SQLCipher C-API calls synchronously on the calling thread (even inside `*Async` ADO.NET / EF Core methods), and because Signal cryptography (`libsignal`), SChannel X.509 certificate creation, and DI host bootstrapping are CPU-bound, **no ViewModel `[RelayCommand]` or `ISimulatorStateBus` signal handler may execute host, database, cryptographic, or network operations on the Avalonia UI thread**.
+   - All ViewModel commands and orchestrators (`TopGlobalToolbarViewModel`, `ContextualActionBarViewModel`, `PersonaCardViewModel`, `DirectHandshakeOrchestrator`, `DirectChatCoordinator`, and all future Phase 4–9 coordinators) must offload execution to the `.NET ThreadPool` via `UiTaskRunner.RunAsync(...)` or `UiTaskRunner.FireAndForget(...)` and marshal observable UI state mutations back via `UiTaskRunner.PostToUi(...)`.
 
 ---
 
@@ -168,53 +171,41 @@ Phase 1 establishes the visual shell, DI wiring, `R3` reactive bus, and Angular-
    - `App.axaml` configures FluentAvalonia styling (`avares://FluentAvaloniaUI/Styling/Styles.axaml`) and `DataTemplates` mapping ViewModels to Views.
 2. **Core Shell Views & Right-Sized Sub-Panel Shells (`Features/Shell/`, `Features/Topology/`)**:
    - **Fully Laid Out in Phase 1**:
-     - `MainWindow` / `MainWindowViewModel`: 4-zone grid layout.
-     - `TopGlobalToolbarView` / `TopGlobalToolbarViewModel`: Zone 1 toolbar buttons (`BTN-TOP-01`..`07`).
-     - `ContextualActionBarView` / `ContextualActionBarViewModel`: Zone 2 directional action bar (`BTN-ACT-01`..`07`) subscribing to `ISelectionStateService` via `R3.Observable.CombineLatest`.
-     - `RosterTreeView` / `RosterViewModel`: Zone 3 left roster (`CTL-ROS-01`..`05`).
-     - `WorkbenchView` / `WorkbenchViewModel`: Zone 4 adaptive 1–4 card split-viewport binding to `ISimulatedWorldStateService.PinnedCards`.
-     - `PersonaCardView` / `PersonaCardViewModel`: Header, Features/Autopilot flyout checkboxes (`CTL-PER-01`..`14`), and Chat Tab (`CTL-PER-17`..`20`).
-     - `FlightRecorderView` & `LogDockView`: Zone 5 right drawer and bottom log dock shells (`CTL-REC-01`..`02`, `CTL-LOG-01`..`02`).
-   - **Lightweight Placeholder Shells in Phase 1 (Fleshed Out in Target Phases)**:
-     - `RelayCardView` (fleshed out in Phase 5), `GroupPanelView` (Phase 7), `DiscoveryTabView` (Phase 8), and `SwarmPanelView` (Phase 9) are created as minimal stub views in Phase 1 so all 53 control commands exist without front-loading 2,000 lines of complex sub-panel XAML into Phase 1.
-3. **Shared Stateful Services & Reactive Bus**:
-   - `ISelectionStateService`: exposes `ReadOnlyReactiveProperty<SimulatedNodeSummary?> PrimarySelectedNode` (`1️⃣ Initiator`), `ReadOnlyReactiveProperty<SimulatedNodeSummary?> SecondarySelectedNode` (`2️⃣ Target`), and `IReadOnlyObservableList<SimulatedNodeSummary> MultiSelectedNodes` (`☑️ Bulk`). `BTN-ACT-01` swaps Primary and Secondary nodes atomically.
-   - `ISimulatedWorldStateService`: owns the `ObservableList` collections for `Personas`, `Relays`, `Groups`, `ActiveSwarms`, and `PinnedCards` (enforcing Max 4 Cards eviction).
-   - `ISimulatorStateBus`: singleton `R3.Subject<SimulatorStateSignal>` cross-host reactive bus.
-4. **Design Data Seed (`DesignDataService`) & Placeholder Toast (`IStatusToastService`)**:
-   - Seeds `"Crimson Falcon" [1️⃣]`, `"Silent Otter" [2️⃣]`, and `"Relay-Alpha"` on startup for visual layout inspection.
-   - Clicking any stubbed Phase 2–9 control invokes `ShowPlaceholder(actionName, scheduledPhase)` to display a FluentAvalonia `InfoBar` toast.
-5. **Phase 1 Acceptance Criteria**:
-   - `dotnet build Percolator.Simulator` succeeds with 0 warnings/errors.
-   - Launching opens the 4-zone UI showing seeded mock cards, role swapping (`BTN-ACT-01`), card pinning (`CTL-ROS-01`), and informative toasts on stubbed buttons.
+     - `MainWindow.axaml` / `MainWindowViewModel` (4-zone dock shell + non-modal status toast bar).
+     - `TopGlobalToolbarView` / `TopGlobalToolbarViewModel` (`BTN-TOP-01`..`07`).
+     - `ContextualActionBarView` / `ContextualActionBarViewModel` (`BTN-ACT-01`..`07`).
+     - `RosterTreeView` / `RosterViewModel` (`CTL-ROS-01`..`05`).
+     - `WorkbenchView` / `WorkbenchViewModel` (1–4 card responsive grid).
+     - `PersonaCardView` / `PersonaCardViewModel` (`CTL-PER-01`..`20` chat & header controls).
+   - **Lightweight Placeholder Shells in Phase 1** (fleshed out in their dedicated feature phases to keep Phase 1 fast and clean):
+     - `RelayCardView` (fleshed out in Phase 5).
+     - `GroupPanelView` (fleshed out in Phase 7).
+     - `DiscoveryTabView` (fleshed out in Phase 8).
+     - `SwarmPanelView` (fleshed out in Phase 9).
+     - `FlightRecorderView` (fleshed out in Phase 4).
+     - `LogDockView` (fleshed out in Phase 2).
+3. **Stateful Services & Mock Preview Seed (`DesignDataService`)**:
+   - Registers `SelectionStateService`, `SimulatedWorldStateService`, `SimulatorStateBus`, and `StatusToastService`.
+   - Seeds 2 mock preview personas (`"Crimson Falcon"`, `"Azure Badger"`) and 1 mock relay (`"Relay-Alpha"`) on startup so the workbench layout, selection badges (`1️⃣`, `2️⃣`), role swapping (`BTN-ACT-01`), and card pinning (`CTL-ROS-01`) can be inspected immediately.
+   - Any button scheduled for Phases 2–9 invokes `IStatusToastService.ShowPlaceholder(actionName, targetPhase)`.
+4. **Phase 1 Acceptance Criteria**:
+   - `dotnet build Percolator.Simulator` compiles with 0 warnings and 0 errors.
+   - App launches into the 4-zone shell; pinning/unpinning cards and swapping `1️⃣`/`2️⃣` roles work immediately.
 
 ---
 
-### 3.2 Phase 2: Multi-Sink Logging Engine & Bounded UI Log Dock
-Phase 2 establishes full observability so all Kestrel, SQLite, and protocol events in Phase 3+ are immediately visible in both the UI and `logs/simulator-latest.jsonl`.
+### 3.2 Phase 2: Multi-Sink Structured Logging & UI Log Dock
+Phase 2 replaces the bottom log dock placeholder with the real `System.Threading.Channels`-backed logging engine.
 
-1. **Structured JSONL Schema (`logs/simulator-latest.jsonl`)**:
-   ```csharp
-   internal sealed record SimulatorLogEntry(
-       DateTimeOffset TimestampUtc,
-       LogLevel Level,
-       string? NodeName,
-       SimulatedNodeId? NodeId,
-       string Category,
-       string Message,
-       string? Exception = null);
-   ```
-2. **Rolling File Retention & Thread-Safe `Channel<T>` Sink (`MultiSinkLogEngine`)**:
-   - On startup, renames existing `logs/simulator-latest.jsonl` to `logs/simulator-YYYYMMDD-HHmmss.jsonl` and retains the 10 most recent files.
-   - Background threads push entries to `Channel<SimulatorLogEntry>.CreateUnbounded(new UnboundedChannelOptions { SingleReader = true })`; a single background reader writes batches to `logs/simulator-latest.jsonl` and `stdout`.
-3. **Node-Scoped Logger Provider (`NodeScopedLoggerProvider`)**:
-   - Implements `ILoggerProvider` so every `SimulatedPersonaHost` (Phase 3A) and `SimulatedRelayHost` (Phase 5) automatically tags internal logs (`HandshakeService`, `OutboxProcessor`, `Kestrel`) with its node name (`[Crimson Falcon]`).
-4. **Forward-Only UI Log Gate & 500-Item Ring Buffer (`LogDockViewModel`)**:
-   - `CTL-LOG-01` (`MinimumLogLevel` dropdown: `Trace`, `Debug`, `Information` [Default], `Warning`, `Error`) filters incoming entries **at ingestion time** (`if (entry.Level < MinimumLogLevel) return;`).
-   - `ObservableList<UiLogEntry>` is batched via `R3` (`Chunk(TimeSpan.FromMilliseconds(50)).ObserveOnUIThreadDispatcher()`) and capped at 500 items.
-   - `CTL-LOG-02` (`[ 🧹 Clear UI Log ]`) clears the UI collection without touching `logs/simulator-latest.jsonl`.
-5. **Phase 2 Acceptance Criteria**:
-   - `dotnet build Percolator.Simulator` compiles with 0 warnings/errors; startup creates `logs/simulator-latest.jsonl`, enforces the 500-item UI cap, and honors `MinimumLogLevel`.
+1. **`MultiSinkLogEngine` & `NodeScopedLoggerProvider` (`Features/Logging/`)**:
+   - Single `Channel.CreateBounded<SimulatorLogEntry>(5000)` background consumer writing concurrently to:
+     - **Sink 1 (File)**: `logs/simulator-latest.jsonl` (`FileShare.ReadWrite`, `AutoFlush = true`).
+     - **Sink 2 (Console)**: `Console.Out` formatted as `[HH:mm:ss.fff] [LEVEL] [Node] Category: Message`.
+     - **Sink 3 (UI Ring Buffer)**: `ObservableList<SimulatorLogEntry>` capped at 500 entries, marshaled onto `Dispatcher.UIThread` in 50ms batches.
+2. **Bottom Log Dock UI (`LogDockView` / `LogDockViewModel`)**:
+   - Wires `CTL-LOG-01` (`Minimum Log Level` dropdown: forward-only ingestion filter) and `CTL-LOG-02` (`[ 🧹 Clear UI Log ]` button).
+3. **Phase 2 Acceptance Criteria**:
+   - Every toolbar/action click logs a structured entry visible in `LogDockView`, `stdout`, and `logs/simulator-latest.jsonl`.
 
 ---
 
@@ -223,21 +214,21 @@ Phase 3A focuses exclusively on spinning up real isolated Percolator persona hos
 
 1. **Host Lifecycle & DI Container Isolation (`SimulatedPersonaHost`)**:
    - Each persona runs in an isolated `IServiceProvider` / `IHost` owning:
-     - Per-node isolated SQLCipher database (`VaultStorageOptions.BaseDirectory = _nodeTempDirectory`) with `MasterKeyHandle.GenerateRandom()` and `SqlCipherPragmaInterceptor`.
+     - Per-node isolated SQLCipher database (`VaultStorageOptions.BaseDirectory = _nodeTempDirectory`) with `MasterKeyHandle.GenerateRandom()` and `SimulatorSqlCipherPragmaInterceptor` (which configures `PRAGMA kdf_iter = 1` and one-time `WAL` initialization so EF Core pooled connection checkouts complete in $< 1\text{ ms}$ instead of triggering 256,000 PBKDF2 iterations on every query).
      - Full `AddAuthenticatedInfrastructure(...)`, `AddWindowsInfrastructureOverrides()` (`WindowsSChannelCertificateProvider` and `WindowsSparseDesktopFileStore` scoped to `_nodeTempDirectory`), and `Percolator.Apps.Chat` registration.
-     - `NodeScopedLoggerProvider` (Phase 2) forwarding all host logs to `ISimulatorLogSink`.
+     - `NodeScopedLoggerProvider` (Phase 2) forwarding all `Percolator.*` logs at `LogLevel.Trace` to `ISimulatorLogSink` while filtering noisy framework categories (`Microsoft.EntityFrameworkCore`, `Microsoft.AspNetCore`, `System.Net.Http`) to `LogLevel.Warning`.
      - Reactive `IsListening` (`ReactiveProperty<bool>`) capability toggle (`CTL-ROS-03` / `CTL-PER-02`).
 2. **Procedural Name, Identicon & Loopback Kestrel Transport**:
    - `WordPairNameGenerator.Generate()` produces display names (`"Crimson Falcon"`).
    - `IdenticonGenerator.CreatePng(uint seed)` renders a symmetric 5×5 blocky avatar as a `64x64` PNG `byte[]` loaded into an Avalonia `Bitmap`.
    - `LoopbackPortAllocator` leases an available port on `127.0.0.1` and binds `KestrelPeerTransportServer` on `https://127.0.0.1:{port}` (HTTP/2 + TLS 1.3 using `WindowsSChannelCertificateProvider` from `Percolator.Infrastructure.Windows`, plus TOFU validation on `PeerGrpcChannelFactory`).
 3. **Toolbar & Roster Wiring (`BTN-TOP-01`, `BTN-TOP-07`, `CTL-ROS-03`, `CTL-PER-02`)**:
-   - Clicking `[ + Add Person ]` (`BTN-TOP-01`) clears Phase 1's `DesignDataService` mock preview seed, starts a real `SimulatedPersonaHost`, and pins its `PersonaCardViewModel` to the Workbench.
-   - Clicking `[ 🔄 Reset World ]` (`BTN-TOP-07`) disposes all active hosts, releases loopback ports, and resets UI state.
-   - Toggling `[ 🟢 Listening / ⏸️ Muted ]` (`CTL-ROS-03` / `CTL-PER-02`) stops or restarts inbound Kestrel transport without notifying peers.
+   - Clicking `[ + Add Person ]` (`BTN-TOP-01`) clears Phase 1's `DesignDataService` mock preview seed, offloads `SimulatedPersonaHost` creation and startup to a background thread via `UiTaskRunner.RunAsync`, and pins its `PersonaCardViewModel` to the Workbench on the UI thread.
+   - Clicking `[ 🔄 Reset World ]` (`BTN-TOP-07`) disposes all active hosts on a background thread via `UiTaskRunner.RunAsync`, releases loopback ports, and resets UI state.
+   - Toggling `[ 🟢 Listening / ⏸️ Muted ]` (`CTL-ROS-03` / `CTL-PER-02`) asynchronously stops or restarts inbound Kestrel transport via `UiTaskRunner.FireAndForget` without blocking the UI thread or notifying peers.
 4. **Phase 3A Acceptance Criteria**:
    - `dotnet build Percolator.Simulator` compiles with 0 warnings/errors.
-   - Clicking `[ + Add Person ]` spawns real personas with unique Identicons and Kestrel ports, logging startup cleanly to the UI Log Dock and `logs/simulator-latest.jsonl`.
+   - Clicking `[ + Add Person ]` spawns real personas with unique Identicons and Kestrel ports without freezing the UI, logging startup cleanly to the UI Log Dock and `logs/simulator-latest.jsonl`.
 
 ---
 
@@ -403,6 +394,7 @@ Percolator.Simulator/
 │   │   ├── SimulatorStateSignal.cs
 │   │   ├── IStatusToastService.cs
 │   │   ├── StatusToastService.cs
+│   │   ├── UiTaskRunner.cs
 │   │   └── DesignDataService.cs
 │   ├── Logging/
 │   │   ├── SimulatorLogEntry.cs
@@ -417,6 +409,7 @@ Percolator.Simulator/
 │   │   ├── SimulatedWorldStateService.cs
 │   │   ├── ISimulatedPersonaHost.cs
 │   │   ├── SimulatedPersonaHost.cs
+│   │   ├── SimulatorSqlCipherPragmaInterceptor.cs
 │   │   ├── SimulatorNotifyingAppRouterDecorator.cs
 │   │   ├── SimulatorNotifyingHandshakeDecorator.cs
 │   │   ├── LoopbackPortAllocator.cs

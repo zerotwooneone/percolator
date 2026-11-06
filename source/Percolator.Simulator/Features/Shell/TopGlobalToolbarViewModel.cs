@@ -35,28 +35,37 @@ internal sealed partial class TopGlobalToolbarViewModel : ViewModelBase
     [RelayCommand]
     private async Task AddPersonAsync()
     {
-        // 1. If this is the first real persona added, clear Phase 1 design preview seed
+        // 1. If this is the first real persona added, clear Phase 1 design preview seed on UI thread
         if (!_hasAddedRealPersona)
         {
             _hasAddedRealPersona = true;
             _designData.ClearPreviewData();
         }
 
-        // 2. Generate procedural identity & allocate loopback port
-        var nodeId = SimulatedNodeId.CreateNew();
-        var name = WordPairNameGenerator.Generate();
-        var seed = (uint)Random.Shared.Next();
-        var identiconBytes = IdenticonGenerator.CreatePng(seed);
-        var port = LoopbackPortAllocator.AllocateAvailablePort();
+        // 2. Offload key generation, identicon rendering, port allocation, SQLCipher DB init, and Kestrel startup to background thread
+        var host = await UiTaskRunner.RunAsync(
+            async () =>
+            {
+                var nodeId = SimulatedNodeId.CreateNew();
+                var name = WordPairNameGenerator.Generate();
+                var seed = (uint)Random.Shared.Next();
+                var identiconBytes = IdenticonGenerator.CreatePng(seed);
+                var port = LoopbackPortAllocator.AllocateAvailablePort();
 
-        // 3. Create and bootstrap isolated SimulatedPersonaHost
-        var host = new SimulatedPersonaHost(nodeId, name, identiconBytes, port, _logSink, _stateBus, _worldState);
-        await host.StartAsync();
+                var personaHost = new SimulatedPersonaHost(nodeId, name, identiconBytes, port, _logSink, _stateBus, _worldState);
+                await personaHost.StartAsync();
+                return personaHost;
+            },
+            category: "HostLifecycle",
+            logSink: _logSink,
+            toastService: _toastService);
 
-        // 4. Register persona in world state and pin to workbench
+        if (host is null) return;
+
+        // 3. Register persona in world state and pin to workbench on UI thread
         var summary = new SimulatedNodeSummary(
-            nodeId,
-            name,
+            host.Id,
+            host.DisplayName,
             SimulatedNodeType.Persona,
             $"127.0.0.1:{host.BoundPort} (Direct Loopback)",
             IsPinned: true);
@@ -64,7 +73,7 @@ internal sealed partial class TopGlobalToolbarViewModel : ViewModelBase
         _worldState.RegisterPersona(summary, host);
         _worldState.TogglePinCard(summary);
 
-        // 5. Auto-assign to Primary (1°) or Secondary (2°) selection slot if empty
+        // 4. Auto-assign to Primary (1°) or Secondary (2°) selection slot if empty
         if (_selectionState.PrimarySelectedNode.CurrentValue is null)
         {
             _selectionState.SetPrimary(summary);
@@ -75,7 +84,7 @@ internal sealed partial class TopGlobalToolbarViewModel : ViewModelBase
             _selectionState.SetSecondary(summary);
         }
 
-        _toastService.ShowToast("Persona Spawned", $"Spawned '{name}' on port {host.BoundPort}.", ToastSeverity.Success);
+        _toastService.ShowToast("Persona Spawned", $"Spawned '{host.DisplayName}' on port {host.BoundPort}.", ToastSeverity.Success);
     }
 
     [RelayCommand]
@@ -100,10 +109,16 @@ internal sealed partial class TopGlobalToolbarViewModel : ViewModelBase
     private async Task ResetWorldAsync()
     {
         _hasAddedRealPersona = false;
-        await _worldState.ClearAllAsync();
         _selectionState.SetPrimary(null);
         _selectionState.SetSecondary(null);
         _selectionState.ClearMultiSelection();
+
+        await UiTaskRunner.RunAsync(
+            () => _worldState.ClearAllAsync(),
+            category: "HostLifecycle",
+            logSink: _logSink,
+            toastService: _toastService);
+
         _toastService.ShowToast("World Reset", "All simulated hosts, ports, and cards have been cleared.", ToastSeverity.Warning);
     }
 }

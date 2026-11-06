@@ -65,7 +65,13 @@ internal sealed partial class ContextualActionBarViewModel : ViewModelBase
             return;
         }
 
-        await _handshakeOrchestrator.InitiateDirectHandshakeAsync(_currentPrimary.Id, _currentSecondary.Id);
+        var primaryId = _currentPrimary.Id;
+        var secondaryId = _currentSecondary.Id;
+
+        await UiTaskRunner.RunAsync(
+            () => _handshakeOrchestrator.InitiateDirectHandshakeAsync(primaryId, secondaryId),
+            category: "Handshake",
+            toastService: _toastService);
     }
 
     [RelayCommand]
