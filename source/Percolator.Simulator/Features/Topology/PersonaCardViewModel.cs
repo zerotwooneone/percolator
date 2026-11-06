@@ -9,10 +9,10 @@ using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using ObservableCollections;
+using Percolator.Application2.Ports;
 using Percolator.Domain.Channels.Ports;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.Model;
-using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Simulator.Features.DirectChat;
 using Percolator.Simulator.Features.Logging;
@@ -252,17 +252,17 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
             async () =>
             {
                 using var scope = _host.Services.CreateScope();
-                var contactRepo = scope.ServiceProvider.GetRequiredService<IPeerContactRepository>();
-                var contacts = await contactRepo.GetAllForOwnerAsync(_host.PublicIdentityId);
+                var contactQuery = scope.ServiceProvider.GetRequiredService<IPeerContactQueryService>();
+                var contacts = await contactQuery.GetContactSummariesAsync(_host.PublicIdentityId);
                 var pending = contacts.FirstOrDefault(c => c.State == ContactState.PendingApproval);
 
                 UiTaskRunner.PostToUi(() =>
                 {
                     if (pending != null)
                     {
-                        _pendingSenderId = pending.RemotePeerId;
-                        var senderHost = _worldState?.FindPersonaHostByIdentity(pending.RemotePeerId);
-                        var senderName = senderHost?.DisplayName ?? pending.RemotePeerId.ToString()[..8];
+                        _pendingSenderId = pending.IdentityId;
+                        var senderHost = _worldState?.FindPersonaHostByIdentity(pending.IdentityId);
+                        var senderName = senderHost?.DisplayName ?? pending.IdentityId.ToString()[..8];
                         PendingHandshakeText = $"Pending handshake from {senderName}";
                         HasPendingHandshake = true;
 

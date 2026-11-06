@@ -5,8 +5,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Percolator.Apps.Chat.Features.Messaging;
-using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Simulator.Features.Logging;
 using Percolator.Simulator.Features.Shell;
 using Percolator.Simulator.Features.Topology;
@@ -22,7 +20,7 @@ internal sealed class AutopilotPongResponder : IDisposable
     private readonly ISimulatorLogSink _logSink;
     private readonly ConcurrentDictionary<SimulatedNodeId, bool> _autoPongEnabled = new();
     private readonly ConcurrentDictionary<SimulatedNodeId, int> _pongCounters = new();
-    private readonly ConcurrentDictionary<SimulatedNodeId, PayloadId> _lastRespondedPayload = new();
+    private readonly ConcurrentDictionary<SimulatedNodeId, Guid> _lastRespondedPayload = new();
     private readonly IDisposable _subscription;
 
     public AutopilotPongResponder(
@@ -64,12 +62,12 @@ internal sealed class AutopilotPongResponder : IDisposable
                 if (host == null) return;
 
                 using var scope = host.Services.CreateScope();
-                var chatRepo = scope.ServiceProvider.GetRequiredService<IChatMessageRepository>();
+                var chatQuery = scope.ServiceProvider.GetRequiredService<ISimulatorChatQueryService>();
 
                 // Query all channels or find latest incoming message
                 // In direct chat, check messages across channels for this host
                 var peers = _worldState.Personas.Where(p => p.Id != nodeId).ToList();
-                ChatMessage? latestIncoming = null;
+                SimulatorChatMessageReadModel? latestIncoming = null;
                 ISimulatedPersonaHost? senderHost = null;
 
                 foreach (var peer in peers)
@@ -78,7 +76,7 @@ internal sealed class AutopilotPongResponder : IDisposable
                     if (peerHost == null) continue;
 
                     var channelId = ChannelIdUtility.DeterministicFor(host.PublicIdentityId, peerHost.PublicIdentityId);
-                    var messages = await chatRepo.GetByChannelIdAsync(channelId);
+                    var messages = await chatQuery.GetTranscriptAsync(channelId);
                     var candidate = messages
                         .Where(m => m.AuthorId != host.PublicIdentityId)
                         .OrderByDescending(m => m.TimestampUnixMs)
@@ -94,12 +92,12 @@ internal sealed class AutopilotPongResponder : IDisposable
                 if (latestIncoming == null || senderHost == null) return;
 
                 // Deduplicate responses: don't reply twice to the same payload
-                if (_lastRespondedPayload.TryGetValue(nodeId, out var lastId) && lastId == latestIncoming.Id)
+                if (_lastRespondedPayload.TryGetValue(nodeId, out var lastId) && lastId == latestIncoming.MessageId)
                 {
                     return;
                 }
 
-                _lastRespondedPayload[nodeId] = latestIncoming.Id;
+                _lastRespondedPayload[nodeId] = latestIncoming.MessageId;
 
                 // 250ms cadence per plan spec
                 await Task.Delay(250);

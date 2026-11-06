@@ -49,6 +49,7 @@ using Percolator.Infrastructure.Windows.Security;
 using Percolator.Infrastructure.Windows.Storage;
 #endif
 using Percolator.PluginSdk;
+using Percolator.Simulator.Features.DirectChat;
 using Percolator.Simulator.Features.Logging;
 using Percolator.Simulator.Features.RelayedChat;
 using Percolator.Simulator.Features.Shell;
@@ -211,6 +212,10 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                 new SimulatorRatchetSessionRepositoryDecorator(
                     sp.GetRequiredService<SqliteRatchetSessionRepository>(),
                     sp.GetRequiredService<PercolatorDbContext>()));
+
+            // 4b. Simulator-only read-model query services (isolated from core application/domain layers)
+            services.AddScoped<ISimulatorChatQueryService, SimulatorChatQueryService>();
+            services.AddScoped<ISimulatorRatchetQueryService, SimulatorRatchetQueryService>();
 
             // 5. Cross-Host Virtual Transport & Ingress Hooks
             // Decorate IAppRouter so chat messages notify ISimulatorStateBus (ChatTranscriptChanged)

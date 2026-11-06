@@ -151,7 +151,7 @@ internal sealed class DirectChatCoordinator
             try
             {
                 using var scope = host.Services.CreateScope();
-                var chatRepo = scope.ServiceProvider.GetRequiredService<IChatMessageRepository>();
+                var chatQuery = scope.ServiceProvider.GetRequiredService<ISimulatorChatQueryService>();
 
                 if (peerNodeId.HasValue)
                 {
@@ -159,7 +159,7 @@ internal sealed class DirectChatCoordinator
                     if (peerHost != null)
                     {
                         var channelId = ChannelIdUtility.DeterministicFor(host.PublicIdentityId, peerHost.PublicIdentityId);
-                        var messages = await chatRepo.GetByChannelIdAsync(channelId, ct);
+                        var messages = await chatQuery.GetTranscriptAsync(channelId, ct);
 
                         return messages.Select(m =>
                         {
@@ -169,12 +169,12 @@ internal sealed class DirectChatCoordinator
                             var isRead = m.ReadAtUnixMs.HasValue;
                             var statusText = isOutgoing ? (isRead ? "✓✓" : "✓") : string.Empty;
                             var reactionsSummary = m.Reactions.Count > 0
-                                ? string.Join(" ", m.Reactions.GroupBy(r => r.Emoji).Select(g => $"{{g.Key}} {{g.Count()}}"))
+                                ? string.Join(" ", m.Reactions.GroupBy(r => r).Select(g => $"{g.Key} {g.Count()}"))
                                 : string.Empty;
 
                             return new ChatMessageItemViewModel
                             {
-                                MessageId = m.Id.Value.ToString(),
+                                MessageId = m.MessageId.ToString(),
                                 SenderName = senderName,
                                 Content = m.Content,
                                 TimestampText = timeText,

@@ -6,8 +6,6 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Percolator.Application2.Ports;
-using Percolator.Apps.Chat.Features.Messaging;
-using Percolator.Domain.Channels.Ports;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Identities.ValueObjects;
@@ -551,19 +549,19 @@ internal sealed class ScenarioRunnerService
         var h2 = GetHostOrThrow(assertion.Alias2, aliasMap);
 
         using var scope1 = h1.Services.CreateScope();
-        var ratchetRepo1 = scope1.ServiceProvider.GetRequiredService<IRatchetSessionRepository>();
-        var session1 = await ratchetRepo1.GetSessionAsync(h1.PublicIdentityId, h2.PublicIdentityId, DeviceId.Primary, ct);
+        var ratchetQuery1 = scope1.ServiceProvider.GetRequiredService<ISimulatorRatchetQueryService>();
+        var hasSession1 = await ratchetQuery1.HasActiveSessionAsync(h1.PublicIdentityId, h2.PublicIdentityId, DeviceId.Primary, ct);
 
-        if (session1 == null)
+        if (!hasSession1)
         {
             throw new ScenarioExecutionException($"AssertDirectRatchetSession failed: Node '{assertion.Alias1}' does not have an active Double Ratchet session with '{assertion.Alias2}'.");
         }
 
         using var scope2 = h2.Services.CreateScope();
-        var ratchetRepo2 = scope2.ServiceProvider.GetRequiredService<IRatchetSessionRepository>();
-        var session2 = await ratchetRepo2.GetSessionAsync(h2.PublicIdentityId, h1.PublicIdentityId, DeviceId.Primary, ct);
+        var ratchetQuery2 = scope2.ServiceProvider.GetRequiredService<ISimulatorRatchetQueryService>();
+        var hasSession2 = await ratchetQuery2.HasActiveSessionAsync(h2.PublicIdentityId, h1.PublicIdentityId, DeviceId.Primary, ct);
 
-        if (session2 == null)
+        if (!hasSession2)
         {
             throw new ScenarioExecutionException($"AssertDirectRatchetSession failed: Node '{assertion.Alias2}' does not have an active Double Ratchet session with '{assertion.Alias1}'.");
         }
@@ -577,24 +575,8 @@ internal sealed class ScenarioRunnerService
         var recipient = GetHostOrThrow(assertion.RecipientAlias, aliasMap);
 
         using var scope = recipient.Services.CreateScope();
-        var chatRepo = scope.ServiceProvider.GetRequiredService<IChatMessageRepository>();
-        var channelRepo = scope.ServiceProvider.GetRequiredService<IChannelRepository>();
-
-        var found = false;
-        foreach (var (_, peerHost) in aliasMap)
-        {
-            if (peerHost.Id == recipient.Id) continue;
-            var directChannel = await channelRepo.GetDirectByPeerAsync(recipient.PublicIdentityId, peerHost.PublicIdentityId, ct);
-            if (directChannel != null)
-            {
-                var messages = await chatRepo.GetByChannelIdAsync(directChannel.Id, ct);
-                if (messages.Any(m => m.Content.Contains(assertion.ExpectedText, StringComparison.Ordinal)))
-                {
-                    found = true;
-                    break;
-                }
-            }
-        }
+        var chatQuery = scope.ServiceProvider.GetRequiredService<ISimulatorChatQueryService>();
+        var found = await chatQuery.HasMessageContainingAsync(assertion.ExpectedText, ct);
 
         if (!found)
         {
@@ -613,8 +595,7 @@ internal sealed class ScenarioRunnerService
         if (!aliasMap.TryGetValue(assertion.PersonaAlias, out var persona))
             throw new ScenarioExecutionException($"Persona '{assertion.PersonaAlias}' not found in scenario.");
 
-        var bundle = await relay.PreKeyRepository.GetAsync(persona.PublicIdentityId, DeviceId.Primary, ct);
-        var actualCount = bundle?.AvailableOneTimePreKeyCount ?? 0;
+        var actualCount = await relay.QueryService.GetHostedOpkCountAsync(persona.PublicIdentityId, DeviceId.Primary, ct);
 
         if (actualCount != assertion.ExpectedCount)
         {

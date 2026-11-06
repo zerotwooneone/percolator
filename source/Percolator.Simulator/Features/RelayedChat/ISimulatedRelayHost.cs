@@ -16,7 +16,7 @@ internal interface ISimulatedRelayHost : IAsyncDisposable
     IServiceProvider Services { get; }
 
     IRelayMailboxCapabilityStore MailboxStore { get; }
-    IRelayPreKeyRepository PreKeyRepository { get; }
+    ISimulatorRelayQueryService QueryService { get; }
     IRelayQueueChaosController ChaosController { get; }
 
     int TotalHeldEnvelopeCount { get; }

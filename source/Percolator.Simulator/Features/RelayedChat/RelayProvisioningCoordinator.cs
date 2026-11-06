@@ -121,7 +121,7 @@ internal sealed class RelayProvisioningCoordinator
 
         try
         {
-            var existingBundle = await relay.PreKeyRepository.GetAsync(persona.PublicIdentityId, DeviceId.Primary, ct);
+            var existingOpks = await relay.QueryService.GetHostedOneTimePreKeysAsync(persona.PublicIdentityId, DeviceId.Primary, ct);
             uint startId = persona.AllocateNextOpkIdRange(count);
 
             // 1. Generate OTPKs
@@ -157,16 +157,14 @@ internal sealed class RelayProvisioningCoordinator
                 PublishedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow)
             };
 
-
-
-            if (existingBundle != null)
+            if (existingOpks.Count > 0)
             {
-                foreach (var opk in existingBundle.OneTimePreKeys)
+                foreach (var opk in existingOpks)
                 {
                     payload.OneTimePrekeys.Add(new OneTimePreKeyProto
                     {
                         KeyId = opk.KeyId,
-                        PublicKey = ByteString.CopyFrom(opk.Key.Span)
+                        PublicKey = ByteString.CopyFrom(opk.PublicKey)
                     });
                 }
             }
@@ -300,7 +298,7 @@ internal sealed class RelayProvisioningCoordinator
         try
         {
             // 1. Ensure target has mailbox registered and prekeys published on this relay
-            if (target.HomeRelay == null || !await relay.PreKeyRepository.HasActivePreKeyAsync(target.PublicIdentityId, ct))
+            if (target.HomeRelay == null || !await relay.QueryService.HasActivePreKeyAsync(target.PublicIdentityId, ct))
             {
                 await PublishPreKeysAsync(target, relay, 25, ct);
             }

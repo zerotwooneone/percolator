@@ -39,6 +39,7 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
     private readonly string _relayTempDirectory;
     private readonly SimulatorNotifyingRelayCapabilityStoreDecorator _capabilityStore;
     private SimulatorNotifyingRelayPreKeyRepositoryDecorator? _preKeyRepository;
+    private SimulatorRelayQueryService? _queryService;
     private PercolatorDbContext? _dbContext;
     private WebApplication? _app;
     private bool _isRunning;
@@ -51,6 +52,7 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
     public IServiceProvider Services => _app?.Services ?? throw new InvalidOperationException("Relay host not started.");
 
     public IRelayMailboxCapabilityStore MailboxStore => _capabilityStore;
+    public ISimulatorRelayQueryService QueryService => _queryService ?? throw new InvalidOperationException("Relay host not started.");
     public IRelayPreKeyRepository PreKeyRepository => _preKeyRepository ?? throw new InvalidOperationException("Relay host not started.");
     public IRelayQueueChaosController ChaosController => _capabilityStore;
 
@@ -123,6 +125,8 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
             // Tables already created
         }
 
+        _queryService = new SimulatorRelayQueryService(_dbContext);
+
         var sqlitePreKeyRepo = new SqliteRelayPreKeyRepository(_dbContext);
         _preKeyRepository = new SimulatorNotifyingRelayPreKeyRepositoryDecorator(sqlitePreKeyRepo, _stateBus, Id);
 
@@ -194,6 +198,8 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
         {
             _app = null;
         }
+
+        _queryService = null;
 
         if (_dbContext != null)
         {
