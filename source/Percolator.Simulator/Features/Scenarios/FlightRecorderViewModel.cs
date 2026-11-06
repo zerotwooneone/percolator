@@ -3,6 +3,9 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Avalonia;
+using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Platform.Storage;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ObservableCollections;
@@ -79,42 +82,138 @@ internal sealed partial class FlightRecorderViewModel : ViewModelBase
             $"Interactive Scenario {DateTime.Now:yyyyMMdd_HHmmss}",
             "Recorded interactively from Percolator Simulator workbench.");
 
-        var scenariosDir = Path.Combine(Directory.GetCurrentDirectory(), "Scenarios");
-        Directory.CreateDirectory(scenariosDir);
-
-        var filePath = Path.Combine(scenariosDir, $"recorded-{DateTime.Now:yyyyMMdd-HHmmss}.json");
+        var storageProvider = GetStorageProvider();
+        var scenariosDir = ResolveScenariosDirectory();
+        string? targetPath = null;
 
         var jsonOptions = new JsonSerializerOptions
         {
             WriteIndented = true
         };
 
-        var json = JsonSerializer.Serialize(doc, jsonOptions);
-        await File.WriteAllTextAsync(filePath, json);
+        if (storageProvider != null && storageProvider.CanSave)
+        {
+            IStorageFolder? startFolder = null;
+            try
+            {
+                startFolder = await storageProvider.TryGetFolderFromPathAsync(scenariosDir);
+            }
+            catch
+            {
+                // Ignore folder lookup failure
+            }
 
-        _toastService.ShowToast("Scenario Saved", $"Saved to '{Path.GetFileName(filePath)}'.", ToastSeverity.Success);
+            var file = await storageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+            {
+                Title = "Save Recorded Scenario",
+                DefaultExtension = "json",
+                SuggestedFileName = $"scenario-{DateTime.Now:yyyyMMdd-HHmmss}.json",
+                SuggestedStartLocation = startFolder,
+                FileTypeChoices = new[]
+                {
+                    new FilePickerFileType("Scenario JSON (*.json)")
+                    {
+                        Patterns = new[] { "*.json" },
+                        MimeTypes = new[] { "application/json" }
+                    }
+                }
+            });
+
+            if (file == null)
+            {
+                return; // User cancelled dialog
+            }
+
+            targetPath = file.TryGetLocalPath() ?? file.Path.LocalPath;
+        }
+        else
+        {
+            Directory.CreateDirectory(scenariosDir);
+            targetPath = Path.Combine(scenariosDir, $"recorded-{DateTime.Now:yyyyMMdd-HHmmss}.json");
+        }
+
+        var json = JsonSerializer.Serialize(doc, jsonOptions);
+        await File.WriteAllTextAsync(targetPath, json);
+
+        _toastService.ShowToast("Scenario Saved", $"Saved to '{Path.GetFileName(targetPath)}'.", ToastSeverity.Success);
     }
 
     [RelayCommand]
     private async Task LoadReplayAsync()
     {
-        var scenariosDir = Path.Combine(Directory.GetCurrentDirectory(), "Scenarios");
-        if (!Directory.Exists(scenariosDir))
+        var storageProvider = GetStorageProvider();
+        var scenariosDir = ResolveScenariosDirectory();
+        string? targetFile = null;
+        string? json = null;
+
+        if (storageProvider != null && storageProvider.CanOpen)
         {
-            _toastService.ShowToast("Replay", "No 'Scenarios' directory found.", ToastSeverity.Warning);
-            return;
+            IStorageFolder? startFolder = null;
+            try
+            {
+                startFolder = await storageProvider.TryGetFolderFromPathAsync(scenariosDir);
+            }
+            catch
+            {
+                // Ignore folder lookup failure
+            }
+
+            var files = await storageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = "Select Scenario to Replay",
+                AllowMultiple = false,
+                SuggestedStartLocation = startFolder,
+                FileTypeFilter = new[]
+                {
+                    new FilePickerFileType("Scenario JSON (*.json)")
+                    {
+                        Patterns = new[] { "*.json" },
+                        MimeTypes = new[] { "application/json" }
+                    },
+                    new FilePickerFileType("All Files (*.*)")
+                    {
+                        Patterns = new[] { "*.*" }
+                    }
+                }
+            });
+
+            if (files == null || files.Count == 0)
+            {
+                return; // User cancelled dialog
+            }
+
+            var selectedFile = files[0];
+            targetFile = selectedFile.TryGetLocalPath() ?? selectedFile.Path.LocalPath;
+
+            await using var stream = await selectedFile.OpenReadAsync();
+            using var reader = new StreamReader(stream);
+            json = await reader.ReadToEndAsync();
+        }
+        else
+        {
+            // Fallback for headless or environments without active window
+            if (!Directory.Exists(scenariosDir))
+            {
+                _toastService.ShowToast("Replay", "No 'Scenarios' directory found.", ToastSeverity.Warning);
+                return;
+            }
+
+            var files = Directory.GetFiles(scenariosDir, "*.json").OrderBy(f => f).ToArray();
+            if (files.Length == 0)
+            {
+                _toastService.ShowToast("Replay", "No scenario JSON files found in 'Scenarios/'.", ToastSeverity.Warning);
+                return;
+            }
+
+            targetFile = files.FirstOrDefault(f => f.Contains("01-direct-handshake")) ?? files.Last();
+            json = await File.ReadAllTextAsync(targetFile);
         }
 
-        var files = Directory.GetFiles(scenariosDir, "*.json").OrderBy(f => f).ToArray();
-        if (files.Length == 0)
+        if (string.IsNullOrWhiteSpace(json))
         {
-            _toastService.ShowToast("Replay", "No scenario JSON files found in 'Scenarios/'.", ToastSeverity.Warning);
+            _toastService.ShowToast("Replay Failed", "Selected scenario file is empty.", ToastSeverity.Error);
             return;
         }
-
-        // Replay the first / latest scenario
-        var targetFile = files.FirstOrDefault(f => f.Contains("01-direct-handshake")) ?? files.Last();
-        var json = await File.ReadAllTextAsync(targetFile);
 
         var jsonOptions = new JsonSerializerOptions
         {
@@ -123,17 +222,117 @@ internal sealed partial class FlightRecorderViewModel : ViewModelBase
             AllowTrailingCommas = true
         };
 
-        var doc = JsonSerializer.Deserialize<ScenarioDocument>(json, jsonOptions);
+        ScenarioDocument? doc;
+        try
+        {
+            doc = JsonSerializer.Deserialize<ScenarioDocument>(json, jsonOptions);
+        }
+        catch (Exception ex)
+        {
+            _toastService.ShowToast("Replay Failed", $"Invalid JSON format: {ex.Message}", ToastSeverity.Error);
+            return;
+        }
+
         if (doc == null)
         {
             _toastService.ShowToast("Replay Failed", "Failed to deserialize scenario.", ToastSeverity.Error);
             return;
         }
 
+        var name = !string.IsNullOrWhiteSpace(doc.Name) ? doc.Name : Path.GetFileName(targetFile ?? "scenario");
+        _toastService.ShowToast("Scenario Replay", $"Starting replay of '{name}'...", ToastSeverity.Informational);
+
         await UiTaskRunner.RunAsync(
             () => _runner.RunScenarioAsync(doc),
             category: "ScenarioReplay",
             logSink: _logSink,
             toastService: _toastService);
+    }
+
+    private static IStorageProvider? GetStorageProvider()
+    {
+        if (Avalonia.Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+        {
+            return desktop.MainWindow?.StorageProvider;
+        }
+        return null;
+    }
+
+    private static string ResolveScenariosDirectory()
+    {
+        EnsureAppDataScenariosMirrored();
+
+        var candidates = new[]
+        {
+            Path.Combine(AppContext.BaseDirectory, "Scenarios"),
+            Path.Combine(Directory.GetCurrentDirectory(), "Percolator.Simulator", "Scenarios"),
+            Path.Combine(Directory.GetCurrentDirectory(), "Scenarios"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PercolatorSim", "Scenarios")
+        };
+
+        foreach (var dir in candidates)
+        {
+            if (Directory.Exists(dir) && Directory.GetFiles(dir, "*.json").Length > 0)
+            {
+                return Path.GetFullPath(dir);
+            }
+        }
+
+        foreach (var dir in candidates)
+        {
+            if (Directory.Exists(dir))
+            {
+                return Path.GetFullPath(dir);
+            }
+        }
+
+        var fallback = Path.Combine(AppContext.BaseDirectory, "Scenarios");
+        try
+        {
+            Directory.CreateDirectory(fallback);
+            return Path.GetFullPath(fallback);
+        }
+        catch
+        {
+            return Directory.GetCurrentDirectory();
+        }
+    }
+
+    private static void EnsureAppDataScenariosMirrored()
+    {
+        try
+        {
+            var appDataDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "PercolatorSim",
+                "Scenarios");
+
+            Directory.CreateDirectory(appDataDir);
+
+            var sourceDirs = new[]
+            {
+                Path.Combine(AppContext.BaseDirectory, "Scenarios"),
+                Path.Combine(Directory.GetCurrentDirectory(), "Percolator.Simulator", "Scenarios")
+            };
+
+            foreach (var sDir in sourceDirs)
+            {
+                if (Directory.Exists(sDir))
+                {
+                    foreach (var file in Directory.GetFiles(sDir, "*.json"))
+                    {
+                        var dest = Path.Combine(appDataDir, Path.GetFileName(file));
+                        if (!File.Exists(dest))
+                        {
+                            File.Copy(file, dest);
+                        }
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Best effort copy to AppData
+        }
     }
 }
