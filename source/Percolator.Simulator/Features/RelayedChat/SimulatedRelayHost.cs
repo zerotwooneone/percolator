@@ -32,6 +32,18 @@ using Percolator.Simulator.Features.Topology;
 
 namespace Percolator.Simulator.Features.RelayedChat;
 
+internal sealed class SimulatorRelayDbContextFactory : IDbContextFactory<PercolatorDbContext>
+{
+    private readonly DbContextOptions<PercolatorDbContext> _options;
+
+    public SimulatorRelayDbContextFactory(DbContextOptions<PercolatorDbContext> options)
+    {
+        _options = options ?? throw new ArgumentNullException(nameof(options));
+    }
+
+    public PercolatorDbContext CreateDbContext() => new(_options);
+}
+
 internal sealed class SimulatedRelayHost : ISimulatedRelayHost
 {
     private readonly ISimulatorLogSink _logSink;
@@ -40,7 +52,6 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
     private readonly SimulatorNotifyingRelayCapabilityStoreDecorator _capabilityStore;
     private SimulatorNotifyingRelayPreKeyRepositoryDecorator? _preKeyRepository;
     private SimulatorRelayQueryService? _queryService;
-    private PercolatorDbContext? _dbContext;
     private WebApplication? _app;
     private bool _isRunning;
     private bool _disposed;
@@ -107,32 +118,36 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
 
         var cert = await certProvider.GetOrCreateServerCertificateAsync(ct);
 
-        // 1. Initialize SQLite DbContext for Relay
+        // 1. Initialize SQLite DbContext factory for Relay
         var dbPath = Path.Combine(_relayTempDirectory, "relay.db");
         var dbOptions = new DbContextOptionsBuilder<PercolatorDbContext>()
             .UseSqlite($"Data Source={dbPath}")
             .AddInterceptors(new SimulatorSqlCipherPragmaInterceptor())
             .Options;
 
-        _dbContext = new PercolatorDbContext(dbOptions);
-        try
+        var contextFactory = new SimulatorRelayDbContextFactory(dbOptions);
+
+        using (var initContext = contextFactory.CreateDbContext())
         {
-            var creator = _dbContext.GetService<IRelationalDatabaseCreator>();
-            await creator.CreateTablesAsync(ct);
-        }
-        catch (SqliteException ex) when (ex.SqliteErrorCode == 1)
-        {
-            // Tables already created
+            try
+            {
+                var creator = initContext.GetService<IRelationalDatabaseCreator>();
+                await creator.CreateTablesAsync(ct);
+            }
+            catch (SqliteException ex) when (ex.SqliteErrorCode == 1)
+            {
+                // Tables already created
+            }
         }
 
-        _queryService = new SimulatorRelayQueryService(_dbContext);
+        _queryService = new SimulatorRelayQueryService(contextFactory);
 
-        var sqlitePreKeyRepo = new SqliteRelayPreKeyRepository(_dbContext);
+        var sqlitePreKeyRepo = new SqliteRelayPreKeyRepository(contextFactory);
         _preKeyRepository = new SimulatorNotifyingRelayPreKeyRepositoryDecorator(sqlitePreKeyRepo, _stateBus, Id);
 
-        var profileRepo = new SqliteRelayProfileRepository(_dbContext);
+        var profileRepo = new SqliteRelayProfileRepository(contextFactory);
         var chunkStore = new LocalFileChunkStore(Path.Combine(_relayTempDirectory, "Chunks"));
-        var ledgerRepo = new SqliteRelayLedgerRepository(_dbContext);
+        var ledgerRepo = new SqliteRelayLedgerRepository(contextFactory);
         var cryptoEngine = new SignalCryptoEngine();
         var zkEngine = new ZkgroupCryptographyService();
 
@@ -200,19 +215,6 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
         }
 
         _queryService = null;
-
-        if (_dbContext != null)
-        {
-            try
-            {
-                await _dbContext.DisposeAsync();
-            }
-            catch { }
-            finally
-            {
-                _dbContext = null;
-            }
-        }
 
         _logSink.Log(new SimulatorLogEntry(
             DateTimeOffset.UtcNow,

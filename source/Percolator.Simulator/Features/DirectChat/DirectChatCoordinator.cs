@@ -11,6 +11,7 @@ using Percolator.Domain.Channels.Ports;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Ports;
+using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.PluginSdk;
 using Percolator.Simulator.Features.Logging;
@@ -71,7 +72,7 @@ internal sealed class DirectChatCoordinator
                 // Auto-detect whether to route via DirectP2P or RelayedOneToOne based on peer mailbox routing capability
                 var route = DeliveryRoute.DirectP2P;
                 var routingRepo = scope.ServiceProvider.GetService<IPeerMailboxRoutingRepository>();
-                if (routingRepo != null)
+                if (routingRepo != null && recipient.HomeRelay != null)
                 {
                     var now = scope.ServiceProvider.GetService<IDateTimeProvider>()?.UtcNow ?? DateTimeOffset.UtcNow;
                     var bestRoute = await routingRepo.GetBestRouteAsync(recipient.PublicIdentityId, now, ct);
@@ -115,6 +116,11 @@ internal sealed class DirectChatCoordinator
                     return false;
                 }
 
+                if (route == DeliveryRoute.RelayedOneToOne && recipient.HomeRelay != null)
+                {
+                    await recipient.DrainMailboxAsync(ct);
+                }
+
                 _logSink.Log(new SimulatorLogEntry(
                     DateTimeOffset.UtcNow,
                     LogLevel.Information,
@@ -156,6 +162,8 @@ internal sealed class DirectChatCoordinator
             {
                 using var scope = host.Services.CreateScope();
                 var chatQuery = scope.ServiceProvider.GetRequiredService<ISimulatorChatQueryService>();
+                var contactRepo = scope.ServiceProvider.GetService<IPeerContactRepository>();
+                var profileRepo = scope.ServiceProvider.GetService<IPeerProfileRepository>();
 
                 if (peerNodeId.HasValue)
                 {
@@ -165,10 +173,28 @@ internal sealed class DirectChatCoordinator
                         var channelId = ChannelIdUtility.DeterministicFor(host.PublicIdentityId, peerHost.PublicIdentityId);
                         var messages = await chatQuery.GetTranscriptAsync(channelId, ct);
 
+                        // Resolve remote peer display name from local observer store (contact nickname first, then synced profile, then fallback)
+                        var contact = contactRepo != null
+                            ? await contactRepo.GetByPeerIdAsync(host.PublicIdentityId, peerHost.PublicIdentityId, ct)
+                            : null;
+                        var profile = profileRepo != null
+                            ? await profileRepo.GetByPeerIdAsync(peerHost.PublicIdentityId, ct)
+                            : null;
+
+                        var isExplicitNickname = contact != null &&
+                            !string.IsNullOrWhiteSpace(contact.Nickname.Value) &&
+                            contact.Nickname.Value != peerHost.PublicIdentityId.ToString();
+
+                        var peerDisplayName = isExplicitNickname
+                            ? contact!.Nickname.Value
+                            : (profile != null && !string.IsNullOrWhiteSpace(profile.DisplayName)
+                                ? profile.DisplayName
+                                : (peerHost.DisplayName ?? peerHost.PublicIdentityId.ToString()[..8]));
+
                         return messages.Select(m =>
                         {
                             var isOutgoing = m.AuthorId == host.PublicIdentityId;
-                            var senderName = isOutgoing ? host.DisplayName : peerHost.DisplayName;
+                            var senderName = isOutgoing ? host.DisplayName : peerDisplayName;
                             var timeText = DateTimeOffset.FromUnixTimeMilliseconds((long)m.TimestampUnixMs).ToLocalTime().ToString("HH:mm:ss");
                             var isRead = m.ReadAtUnixMs.HasValue;
                             var isDelivered = m.DeliveredAtUnixMs.HasValue || isRead;
@@ -231,7 +257,7 @@ internal sealed class DirectChatCoordinator
 
                 var route = DeliveryRoute.DirectP2P;
                 var routingRepo = scope.ServiceProvider.GetService<IPeerMailboxRoutingRepository>();
-                if (routingRepo != null)
+                if (routingRepo != null && sender.HomeRelay != null)
                 {
                     var now = scope.ServiceProvider.GetService<IDateTimeProvider>()?.UtcNow ?? DateTimeOffset.UtcNow;
                     var bestRoute = await routingRepo.GetBestRouteAsync(sender.PublicIdentityId, now, ct);
@@ -254,6 +280,11 @@ internal sealed class DirectChatCoordinator
 
                 var flushResult = await reader.FlushOutboxAsync(ct);
                 if (!flushResult.IsSuccess) return false;
+
+                if (route == DeliveryRoute.RelayedOneToOne && sender.HomeRelay != null)
+                {
+                    await sender.DrainMailboxAsync(ct);
+                }
 
                 _stateBus.Publish(new SimulatorStateSignal(
                     reader.Id,

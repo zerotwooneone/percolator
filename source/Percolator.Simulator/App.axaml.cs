@@ -44,6 +44,7 @@ public partial class App : Avalonia.Application
         services.AddSingleton<IFlightRecorderStateService, FlightRecorderStateService>();
         services.AddSingleton<IVirtualClockStateService, VirtualClockStateService>();
         services.AddSingleton<RichChatActionCoordinator>();
+        services.AddSingleton<ProfileSyncCoordinator>();
         services.AddSingleton<ISimulatedNodeFactory, SimulatedNodeFactory>();
 
         // 3. Shell & Orchestration Services
@@ -113,7 +114,14 @@ public partial class App : Avalonia.Application
                     await world.ClearAllAsync();
                 }
 
-                logEngine.Dispose();
+                if (_services is IAsyncDisposable asyncDisposable)
+                {
+                    await asyncDisposable.DisposeAsync();
+                }
+                else
+                {
+                    _services?.Dispose();
+                }
             };
         }
 

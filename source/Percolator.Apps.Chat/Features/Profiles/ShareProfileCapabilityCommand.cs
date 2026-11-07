@@ -17,4 +17,5 @@ public sealed record ShareProfileCapabilityCommand(
     uint Revision,
     DeliveryRoute Route,
     IdentityKey? AuthorPublicKey = null,
-    string? SourceEndpoint = null);
+    string? SourceEndpoint = null,
+    ProfileSourceType? SourceType = null);

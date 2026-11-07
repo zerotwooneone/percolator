@@ -9,6 +9,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Percolator.Application.Ports;
+using Percolator.Application2.Profiles;
+using Percolator.Application2.Services;
 using Percolator.Application2.Delivery.Ports;
 using Percolator.Application2.Ports;
 using Percolator.Apps.Chat.Features.GroupInvitations;
@@ -173,9 +175,12 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IPeerContactQueryService, SqlPeerContactQueryService>();
         services.AddScoped<IChannelRepository, SqliteChannelRepository>();
 
-        services.AddScoped<IRelayPreKeyRepository, SqliteRelayPreKeyRepository>();
-        services.AddScoped<IRelayProfileRepository, SqliteRelayProfileRepository>();
-        services.AddScoped<IRelayLedgerRepository, SqliteRelayLedgerRepository>();
+        services.AddScoped(sp => new SqliteRelayPreKeyRepository(sp.GetRequiredService<PercolatorDbContext>()));
+        services.AddScoped<IRelayPreKeyRepository>(sp => sp.GetRequiredService<SqliteRelayPreKeyRepository>());
+        services.AddScoped(sp => new SqliteRelayProfileRepository(sp.GetRequiredService<PercolatorDbContext>()));
+        services.AddScoped<IRelayProfileRepository>(sp => sp.GetRequiredService<SqliteRelayProfileRepository>());
+        services.AddScoped(sp => new SqliteRelayLedgerRepository(sp.GetRequiredService<PercolatorDbContext>()));
+        services.AddScoped<IRelayLedgerRepository>(sp => sp.GetRequiredService<SqliteRelayLedgerRepository>());
         services.AddScoped<IPeerProfileRepository, SqlitePeerProfileRepository>();
         services.AddScoped<IPeerMailboxRoutingRepository, SqlitePeerMailboxRoutingRepository>();
 
@@ -203,8 +208,10 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IPreKeyAvailabilityPort, PreKeyAvailabilityAdapter>();
         services.AddScoped<IPreKeyBundleProvider, PreKeyBundleProviderAdapter>();
         services.AddScoped<IProfileDeliveryClient, GrpcProfileDeliveryClient>();
+        services.AddScoped<IProfileManager, ProfileManager>();
 
         // Blob Storage
+        services.AddScoped<IBlobStorageService, BlobStorageService>();
         services.AddScoped<IRelayBlobClient, RelayBlobClient>();
         services.AddScoped<IPeerStreamBlobClient, PeerStreamBlobClient>();
         services.AddScoped<IChannelRelayResolver, ChannelRelayResolver>();

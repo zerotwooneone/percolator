@@ -434,7 +434,7 @@ public sealed class ChatService : IChatService
 
         ulong timestampUnixMs = (ulong)_timeProvider.UtcNow.ToUnixTimeMilliseconds();
 
-        var sourceType = command.Route == DeliveryRoute.DirectP2P ? ProfileSourceType.DirectP2P : ProfileSourceType.Relay;
+        var sourceType = command.SourceType ?? (command.Route == DeliveryRoute.DirectP2P ? ProfileSourceType.DirectP2P : ProfileSourceType.Relay);
         var sourceEndpoint = command.SourceEndpoint ?? (sourceType == ProfileSourceType.DirectP2P ? "direct-p2p" : "relay");
 
         var dto = new ProfileCapabilityDto(

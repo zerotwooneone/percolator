@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "name": "05 Advanced Chat and Profiles",
+  "description": "Verifies Phase 6B AES-GCM encrypted avatar blind blob storage, ISO/IEC 7816-4 padded profile encryption, automatic profile sharing upon contact approval, dynamic profile reroll over relayed outbox/mailbox, and contact nickname immutability.",
+  "steps": [
+    {
+      "$type": "SpawnPersonas",
+      "aliases": [
+        "Alice",
+        "Bob"
+      ]
+    },
+    {
+      "$type": "SpawnRelay",
+      "relayAlias": "Relay-1"
+    },
+    {
+      "$type": "RegisterMailboxes",
+      "relayAlias": "Relay-1",
+      "personaAliases": [
+        "Alice",
+        "Bob"
+      ]
+    },
+    {
+      "$type": "PublishPreKeys",
+      "relayAlias": "Relay-1",
+      "personaAliases": [
+        "Alice",
+        "Bob"
+      ],
+      "oneTimeKeyCount": 25
+    },
+    {
+      "$type": "InitiateDirectHandshake",
+      "initiatorAlias": "Alice",
+      "targetAlias": "Bob"
+    },
+    {
+      "$type": "ApprovePendingHandshake",
+      "ownerAlias": "Bob",
+      "senderAlias": "Alice"
+    },
+    {
+      "$type": "SendDirectMessage",
+      "senderAlias": "Alice",
+      "recipientAlias": "Bob",
+      "text": "Hello Bob with initial profile!"
+    },
+    {
+      "$type": "RerollProfile",
+      "personaAlias": "Alice",
+      "newDisplayName": "Alice-Wonderland"
+    }
+  ],
+  "assertions": [
+    {
+      "$type": "AssertMessageDelivered",
+      "recipientAlias": "Bob",
+      "expectedText": "Hello Bob with initial profile!"
+    },
+    {
+      "$type": "AssertProfileSynced",
+      "observerAlias": "Bob",
+      "targetAlias": "Alice",
+      "expectedDisplayName": "Alice-Wonderland"
+    },
+    {
+      "$type": "AssertZeroErrors"
+    }
+  ]
+}

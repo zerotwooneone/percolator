@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Infrastructure.Persistence;
 
@@ -12,11 +13,29 @@ namespace Percolator.Simulator.Features.RelayedChat;
 
 internal sealed class SimulatorRelayQueryService : ISimulatorRelayQueryService
 {
-    private readonly PercolatorDbContext _dbContext;
+    private readonly IDbContextFactory<PercolatorDbContext>? _contextFactory;
+    private readonly PercolatorDbContext? _dbContext;
 
+    [ActivatorUtilitiesConstructor]
     public SimulatorRelayQueryService(PercolatorDbContext dbContext)
     {
         _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+    }
+
+    public SimulatorRelayQueryService(IDbContextFactory<PercolatorDbContext> contextFactory)
+    {
+        _contextFactory = contextFactory ?? throw new ArgumentNullException(nameof(contextFactory));
+    }
+
+    private async Task<TResult> WithContextAsync<TResult>(Func<PercolatorDbContext, Task<TResult>> action)
+    {
+        if (_contextFactory != null)
+        {
+            await using var context = await _contextFactory.CreateDbContextAsync().ConfigureAwait(false);
+            return await action(context).ConfigureAwait(false);
+        }
+
+        return await action(_dbContext!).ConfigureAwait(false);
     }
 
     public async Task<int> GetHostedOpkCountAsync(
@@ -28,42 +47,48 @@ internal sealed class SimulatorRelayQueryService : ISimulatorRelayQueryService
         return opks.Count;
     }
 
-    public async Task<bool> HasActivePreKeyAsync(
+    public Task<bool> HasActivePreKeyAsync(
         PublicIdentityId ownerId,
         CancellationToken ct = default)
     {
         var ownerGuid = ownerId.Value;
-        return await _dbContext.RelayPreKeys
-            .AsNoTracking()
-            .AnyAsync(k => k.OwnerIdentityId == ownerGuid, ct);
+        return WithContextAsync(async dbContext =>
+        {
+            return await dbContext.RelayPreKeys
+                .AsNoTracking()
+                .AnyAsync(k => k.OwnerIdentityId == ownerGuid, ct);
+        });
     }
 
-    public async Task<IReadOnlyList<SimulatorHostedPreKeyReadModel>> GetHostedOneTimePreKeysAsync(
+    public Task<IReadOnlyList<SimulatorHostedPreKeyReadModel>> GetHostedOneTimePreKeysAsync(
         PublicIdentityId ownerId,
         DeviceId deviceId,
         CancellationToken ct = default)
     {
         var ownerGuid = ownerId.Value;
-        var entity = await _dbContext.RelayPreKeys
-            .AsNoTracking()
-            .FirstOrDefaultAsync(k => k.OwnerIdentityId == ownerGuid && k.DeviceId == deviceId.Value, ct);
-
-        if (entity == null || string.IsNullOrEmpty(entity.OneTimePreKeysJson))
+        return WithContextAsync<IReadOnlyList<SimulatorHostedPreKeyReadModel>>(async dbContext =>
         {
-            return Array.Empty<SimulatorHostedPreKeyReadModel>();
-        }
+            var entity = await dbContext.RelayPreKeys
+                .AsNoTracking()
+                .FirstOrDefaultAsync(k => k.OwnerIdentityId == ownerGuid && k.DeviceId == deviceId.Value, ct);
 
-        try
-        {
-            var dtos = JsonSerializer.Deserialize<List<OpkDto>>(entity.OneTimePreKeysJson);
-            if (dtos == null) return Array.Empty<SimulatorHostedPreKeyReadModel>();
+            if (entity == null || string.IsNullOrEmpty(entity.OneTimePreKeysJson))
+            {
+                return Array.Empty<SimulatorHostedPreKeyReadModel>();
+            }
 
-            return dtos.Select(d => new SimulatorHostedPreKeyReadModel(d.KeyId, Convert.FromHexString(d.KeyHex))).ToList();
-        }
-        catch
-        {
-            return Array.Empty<SimulatorHostedPreKeyReadModel>();
-        }
+            try
+            {
+                var dtos = JsonSerializer.Deserialize<List<OpkDto>>(entity.OneTimePreKeysJson);
+                if (dtos == null) return Array.Empty<SimulatorHostedPreKeyReadModel>();
+
+                return dtos.Select(d => new SimulatorHostedPreKeyReadModel(d.KeyId, Convert.FromHexString(d.KeyHex))).ToList();
+            }
+            catch
+            {
+                return Array.Empty<SimulatorHostedPreKeyReadModel>();
+            }
+        });
     }
 
     private sealed class OpkDto

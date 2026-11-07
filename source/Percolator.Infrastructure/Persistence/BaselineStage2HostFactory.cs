@@ -75,9 +75,12 @@ public sealed class BaselineStage2HostFactory : IStage2HostFactory
             services.AddScoped<IPeerContactQueryService, SqlPeerContactQueryService>();
             services.AddScoped<IChannelRepository, SqliteChannelRepository>();
 
-            services.AddScoped<IRelayPreKeyRepository, SqliteRelayPreKeyRepository>();
-            services.AddScoped<IRelayProfileRepository, SqliteRelayProfileRepository>();
-            services.AddScoped<IRelayLedgerRepository, SqliteRelayLedgerRepository>();
+            services.AddScoped(sp => new SqliteRelayPreKeyRepository(sp.GetRequiredService<PercolatorDbContext>()));
+            services.AddScoped<IRelayPreKeyRepository>(sp => sp.GetRequiredService<SqliteRelayPreKeyRepository>());
+            services.AddScoped(sp => new SqliteRelayProfileRepository(sp.GetRequiredService<PercolatorDbContext>()));
+            services.AddScoped<IRelayProfileRepository>(sp => sp.GetRequiredService<SqliteRelayProfileRepository>());
+            services.AddScoped(sp => new SqliteRelayLedgerRepository(sp.GetRequiredService<PercolatorDbContext>()));
+            services.AddScoped<IRelayLedgerRepository>(sp => sp.GetRequiredService<SqliteRelayLedgerRepository>());
             services.AddScoped<IPeerProfileRepository, SqlitePeerProfileRepository>();
             services.AddScoped<IPeerMailboxRoutingRepository, SqlitePeerMailboxRoutingRepository>();
 

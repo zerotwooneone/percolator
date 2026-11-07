@@ -26,6 +26,7 @@ using Percolator.Application2.Routing;
 using Percolator.Application2.Services;
 using Percolator.Apps.Chat.DependencyInjection;
 using Percolator.Apps.FileTransfer.Ports;
+using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Delivery.Ports;
@@ -67,6 +68,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
     private readonly IVirtualClockStateService _virtualClock;
     private readonly ReactiveProperty<bool> _isListening = new(true);
     private readonly SemaphoreSlim _listeningGate = new(1, 1);
+    private readonly SemaphoreSlim _drainGate = new(1, 1);
     private readonly object _opkIdLock = new();
     private uint _nextOpkId = 1;
     private readonly string _nodeTempDirectory;
@@ -78,10 +80,10 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
     private bool _disposed;
 
     public SimulatedNodeId Id { get; }
-    public string DisplayName { get; }
+    public string DisplayName { get; private set; }
     public int BoundPort { get; private set; }
     public Uri BoundEndpoint => new($"https://127.0.0.1:{BoundPort}");
-    public byte[] IdenticonPng { get; }
+    public byte[] IdenticonPng { get; private set; }
     public IServiceProvider Services => _host?.Services ?? throw new InvalidOperationException("Host not started.");
     public ReadOnlyReactiveProperty<bool> IsListening => _isListening;
 
@@ -92,9 +94,13 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
     public EphemeralPrivateKey IdentityPrivateKey => _identityPrivateKey;
 
     public BlindedRoutingToken MailboxRoutingToken { get; }
-    public DeliveryToken MailboxDeliveryToken { get; }
+    public DeliveryToken MailboxDeliveryToken { get; private set; }
     public DeliveryToken MailboxDrainToken { get; }
     public ISimulatedRelayHost? HomeRelay { get; set; }
+
+    public ProfileKey ProfileKey { get; private set; }
+    public uint ProfileRevision { get; private set; } = 1;
+    public bool AutoShareProfile { get; set; } = true;
 
     public SimulatedPersonaHost(
         SimulatedNodeId id,
@@ -132,14 +138,15 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         var sigBytes = crypto.SignEd25519(_identityPrivateKey.Span, SignedPreKeyPublic.Span);
         SignedPreKeySignature = DeviceLinkProof.FromSpan(sigBytes);
 
+        // Phase 6B ProfileKey
+        ProfileKey = ProfileKey.Generate();
+
         // Phase 5 Relay tokens
         MailboxRoutingToken = BlindedRoutingToken.New();
-        var deliveryBytes = new byte[32];
         var drainBytes = new byte[32];
-        RandomNumberGenerator.Fill(deliveryBytes);
         RandomNumberGenerator.Fill(drainBytes);
-        MailboxDeliveryToken = DeliveryToken.FromSpan(deliveryBytes);
         MailboxDrainToken = DeliveryToken.FromSpan(drainBytes);
+        MailboxDeliveryToken = DeliveryToken.DeriveFromProfileKey(IdentityPublicKey, ProfileKey, crypto);
     }
 
     public async ValueTask StartAsync(CancellationToken ct = default)
@@ -339,12 +346,15 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         // 3. Start remaining background hosted services
         await _host.StartAsync(ct);
 
+        // 3a. Publish initial profile (revision 1) and avatar blind blob
+        await PublishProfileAsync(ct);
+
         // 4. Reactive listener: auto-drain mailbox when relay queue changes
         _relayQueueSubscription = _stateBus.Signals
             .Where(s => s.Category == SignalCategory.RelayQueueChanged)
             .Subscribe(_ =>
             {
-                if (_isListening.CurrentValue && HomeRelay != null)
+                if (_isListening.CurrentValue && HomeRelay != null && !_disposed)
                 {
                     UiTaskRunner.FireAndForget(() => DrainMailboxAsync(), "MailboxDrain", _logSink);
                 }
@@ -357,6 +367,171 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             Id,
             "HostLifecycle",
             $"Persona host started and listening on https://127.0.0.1:{BoundPort} (Identity: {PublicIdentityId})"));
+    }
+
+    public void RotateProfileKey()
+    {
+        ProfileKey.Dispose();
+        ProfileKey = ProfileKey.Generate();
+        MailboxDeliveryToken.Dispose();
+        MailboxDeliveryToken = DeliveryToken.DeriveFromProfileKey(IdentityPublicKey, ProfileKey, new SignalCryptoEngine());
+    }
+
+    public void UpdateProfile(string newDisplayName, byte[] newIdenticonPng)
+    {
+        DisplayName = newDisplayName ?? throw new ArgumentNullException(nameof(newDisplayName));
+        IdenticonPng = newIdenticonPng ?? throw new ArgumentNullException(nameof(newIdenticonPng));
+        ProfileRevision++;
+        RotateProfileKey();
+    }
+
+    public async Task<DomainResult> PublishProfileAsync(CancellationToken ct = default)
+    {
+        if (_host is null)
+        {
+            return DomainResult.Failure(new DomainError("HOST_NOT_STARTED", "Persona host is not started."));
+        }
+
+        try
+        {
+            using var scope = _host.Services.CreateScope();
+            var cryptoService = scope.ServiceProvider.GetRequiredService<IBlobCryptoService>();
+            var blobClient = scope.ServiceProvider.GetRequiredService<IRelayBlobClient>();
+            var profileManager = scope.ServiceProvider.GetRequiredService<IProfileManager>();
+            var cryptoEngine = scope.ServiceProvider.GetRequiredService<ICryptoEngine>();
+            var profileDeliveryClient = scope.ServiceProvider.GetRequiredService<IProfileDeliveryClient>();
+            var timeProvider = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>();
+
+            // 1. Encrypt persona's 64x64 Identicon PNG via IBlobCryptoService
+            using var pngStream = new MemoryStream(IdenticonPng);
+            var encAvatarResult = await cryptoService.EncryptAndPackageAsync(pngStream, "image/png", ct).ConfigureAwait(false);
+            if (!encAvatarResult.IsSuccess)
+            {
+                return DomainResult.Failure(encAvatarResult.Error!);
+            }
+
+            var avatarPkg = encAvatarResult.Value;
+            var avatarBlobId = BlobId.FromSha256(avatarPkg.CiphertextSha256);
+
+            // Determine target upload endpoint
+            var targetRelayUri = HomeRelay != null
+                ? new Uri($"https://127.0.0.1:{HomeRelay.BoundPort}")
+                : (_worldState.GetAllRelayHosts().FirstOrDefault() is { } r
+                    ? new Uri($"https://127.0.0.1:{r.BoundPort}")
+                    : BoundEndpoint);
+
+            // 2. Upload avatar blind blob via IRelayBlobClient (UploadBlindBlob over gRPC)
+            var uploadBlobResult = await blobClient.UploadBlobAsync(
+                targetRelayUri,
+                avatarBlobId,
+                avatarPkg.CiphertextStream,
+                default(ChannelId),
+                ct: ct).ConfigureAwait(false);
+
+            if (!uploadBlobResult.IsSuccess)
+            {
+                return DomainResult.Failure(uploadBlobResult.Error!);
+            }
+
+            var avatarRef = new BlobReference
+            {
+                Id = avatarBlobId,
+                CiphertextSha256 = avatarPkg.CiphertextSha256,
+                EncryptionKey = avatarPkg.EncryptionKey,
+                BaseNonce = avatarPkg.BaseNonce,
+                PlaintextSizeBytes = avatarPkg.PlaintextSize,
+                CiphertextSizeBytes = avatarPkg.CiphertextSize,
+                MimeType = "image/png",
+                ExpiresAtUtc = timeProvider.UtcNow.AddDays(30),
+                StorageMode = BlobStorageMode.PublicRelayBlob,
+                RelayEndpointUri = targetRelayUri.ToString()
+            };
+
+            // 3. Encrypt ProfileMetadata into 1040-byte padded block via IProfileManager
+            var metadata = new ProfileMetadata(
+                DisplayName,
+                IdenticonPng,
+                $"Status bio for {DisplayName}",
+                ProfileRevision,
+                avatarRef);
+
+            var encProfileResult = profileManager.EncryptProfile(metadata, ProfileKey, cryptoEngine);
+            if (!encProfileResult.IsSuccess)
+            {
+                return DomainResult.Failure(encProfileResult.Error!);
+            }
+
+            var profilePkg = encProfileResult.Value;
+            var locator = BlindedProfileLocator.Derive(IdentityPublicKey, ProfileKey, cryptoEngine);
+            var writeToken = ProfileWriteToken.Derive(_identityPrivateKey, ProfileKey, cryptoEngine);
+
+            // 4. Upload profile via IProfileDeliveryClient.UploadProfileAsync (UploadProfile over gRPC)
+            var uploadProfileResult = await profileDeliveryClient.UploadProfileAsync(
+                targetRelayUri,
+                locator,
+                writeToken,
+                profilePkg,
+                ProfileRevision,
+                timeProvider.UtcNow.AddDays(30),
+                ct).ConfigureAwait(false);
+
+            if (!uploadProfileResult.IsSuccess)
+            {
+                return DomainResult.Failure(uploadProfileResult.Error!);
+            }
+
+            if (HomeRelay != null)
+            {
+                var channelFactory = scope.ServiceProvider.GetRequiredService<IPeerGrpcChannelFactory>();
+                var relayUri = new Uri($"https://127.0.0.1:{HomeRelay.BoundPort}");
+                var channel = channelFactory.GetOrCreateChannel(relayUri);
+                var client = new AuthenticatedRelayService.AuthenticatedRelayServiceClient(channel);
+                var regReq = new RegisterMailboxRequest
+                {
+                    RoutingToken = ByteString.CopyFrom(MailboxRoutingToken.ToByteArray()),
+                    AuthorizedDeliveryToken = ByteString.CopyFrom(MailboxDeliveryToken.Span),
+                    DrainToken = ByteString.CopyFrom(MailboxDrainToken.Span)
+                };
+                await client.RegisterMailboxAsync(regReq, cancellationToken: ct).ConfigureAwait(false);
+            }
+
+            // Also save locally in IRelayProfileRepository for direct P2P queries
+            var localProfileRepo = scope.ServiceProvider.GetRequiredService<IRelayProfileRepository>();
+            var localSlot = RelayHostedProfileSlot.Create(locator, writeToken, profilePkg, ProfileRevision, timeProvider.UtcNow.AddDays(30));
+            if (localSlot.IsSuccess)
+            {
+                await localProfileRepo.SaveSlotAsync(localSlot.Value!, ct).ConfigureAwait(false);
+            }
+
+            // And update local identity profile
+            var idProfileRepo = scope.ServiceProvider.GetRequiredService<IIdentityProfileRepository>();
+            var identityProfile = IdentityProfile.Create(PublicIdentityId, DisplayName, IdentityRole.UserPersona, timeProvider);
+            if (identityProfile.IsSuccess)
+            {
+                await idProfileRepo.SaveAsync(identityProfile.Value!, ct).ConfigureAwait(false);
+            }
+
+            _logSink.Log(new SimulatorLogEntry(
+                DateTimeOffset.UtcNow,
+                LogLevel.Information,
+                DisplayName,
+                Id,
+                "ProfileSync",
+                $"Published profile revision {ProfileRevision} with locator {Convert.ToHexString(locator.Span)[..8]} and avatar blob {avatarBlobId} to {targetRelayUri}"));
+
+            return DomainResult.Success();
+        }
+        catch (Exception ex)
+        {
+            _logSink.Log(new SimulatorLogEntry(
+                DateTimeOffset.UtcNow,
+                LogLevel.Error,
+                DisplayName,
+                Id,
+                "ProfileSync",
+                $"Failed to publish profile: {ex.Message}"));
+            return DomainResult.Failure(new DomainError("PROFILE_PUBLISH_FAILED", ex.Message));
+        }
     }
 
     public uint AllocateNextOpkIdRange(int count)
@@ -411,13 +586,20 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
 
     public async Task<int> DrainMailboxAsync(CancellationToken ct = default)
     {
-        if (!_isListening.CurrentValue || HomeRelay == null || _host == null)
+        if (!_isListening.CurrentValue || HomeRelay == null || _host == null || _disposed)
         {
             return 0;
         }
 
+        await _drainGate.WaitAsync(ct).ConfigureAwait(false);
+
         try
         {
+            if (!_isListening.CurrentValue || HomeRelay == null || _host == null || _disposed)
+            {
+                return 0;
+            }
+
             using var scope = _host.Services.CreateScope();
             var channelFactory = scope.ServiceProvider.GetRequiredService<IPeerGrpcChannelFactory>();
             var relayUri = new Uri($"https://127.0.0.1:{HomeRelay.BoundPort}");
@@ -516,6 +698,10 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
 
             return processed;
         }
+        catch (ObjectDisposedException) when (_disposed)
+        {
+            return 0;
+        }
         catch (Exception ex)
         {
             _logSink.Log(new SimulatorLogEntry(
@@ -527,6 +713,10 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                 $"Exception draining relay mailbox: {ex.Message}",
                 ex.ToString()));
             return 0;
+        }
+        finally
+        {
+            _drainGate.Release();
         }
     }
 
@@ -610,10 +800,12 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
 
         _host?.Dispose();
         _listeningGate.Dispose();
+        _drainGate.Dispose();
         _masterKeyHandle.Dispose();
         _isListening.Dispose();
         _identityPrivateKey.Dispose();
         _signedPreKeyPrivate.Dispose();
+        ProfileKey.Dispose();
         MailboxDeliveryToken.Dispose();
         MailboxDrainToken.Dispose();
 

@@ -65,7 +65,7 @@ internal sealed class RichChatActionCoordinator
 
             var route = DeliveryRoute.DirectP2P;
             var routingRepo = scope.ServiceProvider.GetService<IPeerMailboxRoutingRepository>();
-            if (routingRepo != null)
+            if (routingRepo != null && peer.HomeRelay != null)
             {
                 var now = scope.ServiceProvider.GetService<IDateTimeProvider>()?.UtcNow ?? DateTimeOffset.UtcNow;
                 var bestRoute = await routingRepo.GetBestRouteAsync(peer.PublicIdentityId, now, ct);
@@ -102,6 +102,11 @@ internal sealed class RichChatActionCoordinator
             {
                 _toastService.ShowToast("Reaction Delivery Deferred", flushResult.Error.Description, ToastSeverity.Warning);
                 return false;
+            }
+
+            if (route == DeliveryRoute.RelayedOneToOne && peer.HomeRelay != null)
+            {
+                await peer.DrainMailboxAsync(ct);
             }
 
             _logSink.Log(new SimulatorLogEntry(
@@ -151,7 +156,7 @@ internal sealed class RichChatActionCoordinator
 
             var route = DeliveryRoute.DirectP2P;
             var routingRepo = scope.ServiceProvider.GetService<IPeerMailboxRoutingRepository>();
-            if (routingRepo != null)
+            if (routingRepo != null && peer.HomeRelay != null)
             {
                 var now = scope.ServiceProvider.GetService<IDateTimeProvider>()?.UtcNow ?? DateTimeOffset.UtcNow;
                 var bestRoute = await routingRepo.GetBestRouteAsync(peer.PublicIdentityId, now, ct);
@@ -188,6 +193,11 @@ internal sealed class RichChatActionCoordinator
             {
                 _toastService.ShowToast("Edit Delivery Deferred", flushResult.Error.Description, ToastSeverity.Warning);
                 return false;
+            }
+
+            if (route == DeliveryRoute.RelayedOneToOne && peer.HomeRelay != null)
+            {
+                await peer.DrainMailboxAsync(ct);
             }
 
             _logSink.Log(new SimulatorLogEntry(
@@ -234,7 +244,7 @@ internal sealed class RichChatActionCoordinator
 
             var route = DeliveryRoute.DirectP2P;
             var routingRepo = scope.ServiceProvider.GetService<IPeerMailboxRoutingRepository>();
-            if (routingRepo != null)
+            if (routingRepo != null && peer.HomeRelay != null)
             {
                 var now = scope.ServiceProvider.GetService<IDateTimeProvider>()?.UtcNow ?? DateTimeOffset.UtcNow;
                 var bestRoute = await routingRepo.GetBestRouteAsync(peer.PublicIdentityId, now, ct);
@@ -270,6 +280,11 @@ internal sealed class RichChatActionCoordinator
             {
                 _toastService.ShowToast("Delete Delivery Deferred", flushResult.Error.Description, ToastSeverity.Warning);
                 return false;
+            }
+
+            if (route == DeliveryRoute.RelayedOneToOne && peer.HomeRelay != null)
+            {
+                await peer.DrainMailboxAsync(ct);
             }
 
             _logSink.Log(new SimulatorLogEntry(

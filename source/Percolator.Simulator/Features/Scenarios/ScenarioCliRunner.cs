@@ -74,6 +74,7 @@ internal static class ScenarioCliRunner
         services.AddSingleton<IStatusToastService, StatusToastService>();
         services.AddSingleton<IVirtualClockStateService, VirtualClockStateService>();
         services.AddSingleton<RichChatActionCoordinator>();
+        services.AddSingleton<ProfileSyncCoordinator>();
         services.AddSingleton<ISimulatedNodeFactory, SimulatedNodeFactory>();
         services.AddSingleton<DirectHandshakeOrchestrator>();
         services.AddSingleton<DirectChatCoordinator>();

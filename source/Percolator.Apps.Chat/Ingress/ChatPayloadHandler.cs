@@ -132,8 +132,21 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
         // Fetch and decrypt profile package if delivery client, manager, and engine are configured
         if (_profileDeliveryClient is not null && _profileManager is not null && _cryptoEngine is not null && _peerProfileRepo is not null)
         {
+            Uri? fetchEndpointUri = null;
+            if (!string.IsNullOrWhiteSpace(dto.SourceEndpoint))
+            {
+                if (Uri.TryCreate(dto.SourceEndpoint, UriKind.Absolute, out var parsedUri))
+                {
+                    fetchEndpointUri = parsedUri;
+                }
+                else if (Uri.TryCreate($"https://{dto.SourceEndpoint}", UriKind.Absolute, out var fallbackUri))
+                {
+                    fetchEndpointUri = fallbackUri;
+                }
+            }
+
             var locator = BlindedProfileLocator.FromBytes(dto.BlindedLocatorBytes);
-            var fetchResult = await _profileDeliveryClient.FetchProfileAsync(null, locator, ct).ConfigureAwait(false);
+            var fetchResult = await _profileDeliveryClient.FetchProfileAsync(fetchEndpointUri, locator, ct).ConfigureAwait(false);
             if (fetchResult.IsFailure)
             {
                 return DomainResult.Failure(fetchResult.Error);
@@ -157,6 +170,18 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
 
             await _peerProfileRepo.SaveAsync(record, ct).ConfigureAwait(false);
 
+            if (_blobStorage != null && decrypted.AvatarReference != null)
+            {
+                try
+                {
+                    await _blobStorage.DownloadBlobAsync(new BlobDownloadRequest(decrypted.AvatarReference), ct: ct).ConfigureAwait(false);
+                }
+                catch
+                {
+                    // Non-fatal: avatar blob fetch failure must not reject valid profile capability ingestion
+                }
+            }
+
             // Record multi-source snapshot without remote-provided expiry heuristics
             var snapshot = new PeerProfileSourceSnapshot(
                 dto.AuthorId,
@@ -169,35 +194,36 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
             await _peerProfileRepo.SaveSourceSnapshotAsync(snapshot, ct: ct).ConfigureAwait(false);
 
             // Sealed Sender Delivery Token Derivation & Storage
-            if (_peerMailboxRoutingRepo is not null && dto.MailboxRoutingTokenBytes.Length == 16)
+            if (_peerMailboxRoutingRepo is not null &&
+                dto.MailboxRoutingTokenBytes.Length == 16)
             {
                 var routingToken = BlindedRoutingToken.FromGuid(new Guid(dto.MailboxRoutingTokenBytes));
-                IdentityKey? authorPublicKey = null;
-                if (dto.AuthorPublicKeyBytes is not null && dto.AuthorPublicKeyBytes.Length == 32)
+                if (routingToken.Value != Guid.Empty)
                 {
-                    authorPublicKey = IdentityKey.FromSpan(dto.AuthorPublicKeyBytes);
-                }
-
-                if (authorPublicKey is not null)
-                {
-                    var deliveryToken = DeliveryToken.DeriveFromProfileKey(authorPublicKey, profileKey, _cryptoEngine);
-                    RelayEndpoint? relayEndpoint = null;
-                    if (!string.IsNullOrWhiteSpace(dto.SourceEndpoint))
+                    IdentityKey? authorPublicKey = null;
+                    if (dto.AuthorPublicKeyBytes is not null && dto.AuthorPublicKeyBytes.Length == 32)
                     {
+                        authorPublicKey = IdentityKey.FromSpan(dto.AuthorPublicKeyBytes);
+                    }
+
+                    if (authorPublicKey is not null && !string.IsNullOrWhiteSpace(dto.SourceEndpoint))
+                    {
+                        RelayEndpoint? relayEndpoint = null;
                         var endpointResult = RelayEndpoint.Create(dto.SourceEndpoint);
                         if (endpointResult.IsSuccess)
                         {
                             relayEndpoint = endpointResult.Value;
                         }
-                    }
 
-                    var capability = new PeerMailboxRoutingCapability(
-                        dto.AuthorId,
-                        routingToken,
-                        deliveryToken,
-                        relayEndpoint,
-                        _timeProvider.UtcNow);
-                    await _peerMailboxRoutingRepo.SaveAsync(capability, ct).ConfigureAwait(false);
+                        var deliveryToken = DeliveryToken.DeriveFromProfileKey(authorPublicKey, profileKey, _cryptoEngine);
+                        var capability = new PeerMailboxRoutingCapability(
+                            dto.AuthorId,
+                            routingToken,
+                            deliveryToken,
+                            relayEndpoint,
+                            _timeProvider.UtcNow);
+                        await _peerMailboxRoutingRepo.SaveAsync(capability, ct).ConfigureAwait(false);
+                    }
                 }
             }
         }

@@ -214,7 +214,7 @@ public sealed class BlobStorageService : IBlobStorageService
         else
         {
             // 2. Fetch based on storage mode
-            if (request.Reference.StorageMode == BlobStorageMode.ChannelRelay)
+            if (request.Reference.StorageMode is BlobStorageMode.ChannelRelay or BlobStorageMode.PublicRelayBlob)
             {
                 if (string.IsNullOrWhiteSpace(request.Reference.RelayEndpointUri) ||
                     !Uri.TryCreate(request.Reference.RelayEndpointUri, UriKind.Absolute, out var relayUri))

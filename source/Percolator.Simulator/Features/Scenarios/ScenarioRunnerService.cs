@@ -5,11 +5,13 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Percolator.Application.Ports;
 using Percolator.Application2.Ports;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.ValueObjects;
+using Percolator.PluginSdk;
 using Percolator.Simulator.Features.DirectChat;
 using Percolator.Simulator.Features.Logging;
 using Percolator.Simulator.Features.RelayedChat;
@@ -32,6 +34,7 @@ internal sealed class ScenarioRunnerService
     private readonly ISimulatedNodeFactory _nodeFactory;
     private readonly IVirtualClockStateService _virtualClock;
     private readonly RichChatActionCoordinator _richChatCoordinator;
+    private readonly ProfileSyncCoordinator _profileCoordinator;
     private readonly IFlightRecorderStateService? _flightRecorder;
     private readonly ISelectionStateService? _selectionState;
 
@@ -45,6 +48,7 @@ internal sealed class ScenarioRunnerService
         ISimulatedNodeFactory nodeFactory,
         IVirtualClockStateService virtualClock,
         RichChatActionCoordinator richChatCoordinator,
+        ProfileSyncCoordinator profileCoordinator,
         IFlightRecorderStateService? flightRecorder = null,
         ISelectionStateService? selectionState = null)
     {
@@ -57,6 +61,7 @@ internal sealed class ScenarioRunnerService
         _nodeFactory = nodeFactory ?? throw new ArgumentNullException(nameof(nodeFactory));
         _virtualClock = virtualClock ?? throw new ArgumentNullException(nameof(virtualClock));
         _richChatCoordinator = richChatCoordinator ?? throw new ArgumentNullException(nameof(richChatCoordinator));
+        _profileCoordinator = profileCoordinator ?? throw new ArgumentNullException(nameof(profileCoordinator));
         _flightRecorder = flightRecorder;
         _selectionState = selectionState;
     }
@@ -196,6 +201,10 @@ internal sealed class ScenarioRunnerService
                         await ExecuteMarkConversationReadAsync(readStep, aliasMap, ct);
                         break;
 
+                    case RerollProfileStep rerollStep:
+                        await ExecuteRerollProfileAsync(rerollStep, aliasMap, ct);
+                        break;
+
                     default:
                         throw new ScenarioExecutionException($"Unsupported scenario step type: {step.GetType().Name}");
                 }
@@ -260,6 +269,10 @@ internal sealed class ScenarioRunnerService
 
                     case AssertMessageReadAssertion readAssert:
                         await ExecuteAssertMessageReadAsync(readAssert, aliasMap, ct);
+                        break;
+
+                    case AssertProfileSyncedAssertion profileAssert:
+                        await ExecuteAssertProfileSyncedAsync(profileAssert, aliasMap, ct);
                         break;
 
                     default:
@@ -606,7 +619,6 @@ internal sealed class ScenarioRunnerService
 
     private async Task ExecuteAdvanceVirtualTimeAsync(AdvanceVirtualTimeStep step, CancellationToken ct)
     {
-
         await _virtualClock.AdvanceTimeAsync(TimeSpan.FromSeconds(step.Seconds), ct);
     }
 
@@ -755,6 +767,19 @@ internal sealed class ScenarioRunnerService
             () => _chatCoordinator.MarkConversationAsReadAsync(owner.Id, peer.Id, lastIncoming.MessageId, ct),
             $"MarkConversationAsReadAsync failed for '{step.OwnerAlias}'.",
             ct);
+    }
+
+    private async Task ExecuteRerollProfileAsync(
+        RerollProfileStep step,
+        Dictionary<string, ISimulatedPersonaHost> aliasMap,
+        CancellationToken ct)
+    {
+        var persona = GetHostOrThrow(step.PersonaAlias, aliasMap);
+        var success = await _profileCoordinator.RerollProfileAsync(persona.Id, step.NewDisplayName, ct: ct);
+        if (!success)
+        {
+            throw new ScenarioExecutionException($"RerollProfileStep failed for '{step.PersonaAlias}'.");
+        }
     }
 
     private static async Task ExecuteAssertDirectRatchetSessionAsync(
@@ -941,6 +966,87 @@ internal sealed class ScenarioRunnerService
         if (!isRead)
         {
             throw new ScenarioExecutionException($"AssertMessageRead failed: Message containing \"{assertion.MessageText}\" has not been marked as read on '{assertion.PersonaAlias}'.");
+        }
+    }
+
+    private static async Task ExecuteAssertProfileSyncedAsync(
+        AssertProfileSyncedAssertion assertion,
+        Dictionary<string, ISimulatedPersonaHost> aliasMap,
+        CancellationToken ct)
+    {
+        var observer = GetHostOrThrow(assertion.ObserverAlias, aliasMap);
+        var target = GetHostOrThrow(assertion.TargetAlias, aliasMap);
+
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        PeerProfileRecord? profileRecord = null;
+
+        while (DateTime.UtcNow < deadline)
+        {
+            using (var scope = observer.Services.CreateScope())
+            {
+                var profileRepo = scope.ServiceProvider.GetRequiredService<IPeerProfileRepository>();
+                profileRecord = await profileRepo.GetByPeerIdAsync(target.PublicIdentityId, ct);
+                if (profileRecord != null && profileRecord.DisplayName == assertion.ExpectedDisplayName)
+                {
+                    break;
+                }
+            }
+
+            await Task.Delay(100, ct);
+        }
+
+        if (profileRecord == null)
+        {
+            throw new ScenarioExecutionException(
+                $"AssertProfileSynced failed: Observer '{assertion.ObserverAlias}' has no cached profile record for target '{assertion.TargetAlias}'.");
+        }
+
+        if (profileRecord.DisplayName != assertion.ExpectedDisplayName)
+        {
+            throw new ScenarioExecutionException(
+                $"AssertProfileSynced failed: Observer '{assertion.ObserverAlias}' profile DisplayName is '{profileRecord.DisplayName}', expected '{assertion.ExpectedDisplayName}'.");
+        }
+
+        if (profileRecord.AvatarReference == null)
+        {
+            throw new ScenarioExecutionException(
+                $"AssertProfileSynced failed: Observer '{assertion.ObserverAlias}' profile has null AvatarReference for '{assertion.TargetAlias}'.");
+        }
+
+        using (var scope = observer.Services.CreateScope())
+        {
+            var contactRepo = scope.ServiceProvider.GetService<IPeerContactRepository>();
+            if (contactRepo != null)
+            {
+                var contact = await contactRepo.GetByPeerIdAsync(observer.PublicIdentityId, target.PublicIdentityId, ct);
+                if (contact != null)
+                {
+                    if (contact.Nickname.Value == assertion.ExpectedDisplayName && assertion.TargetAlias != assertion.ExpectedDisplayName)
+                    {
+                        throw new ScenarioExecutionException(
+                            $"AssertProfileSynced failed: Local contact Nickname on '{assertion.ObserverAlias}' was mutated to '{contact.Nickname.Value}'. Contact nicknames must remain immutable against remote profile syncs.");
+                    }
+                }
+            }
+
+            var chunkStore = scope.ServiceProvider.GetService<ILocalChunkStore>();
+            if (chunkStore != null && profileRecord.AvatarReference != null)
+            {
+                var avatarDeadline = DateTime.UtcNow.AddSeconds(5);
+                var hasAvatar = false;
+                while (DateTime.UtcNow < avatarDeadline)
+                {
+                    hasAvatar = await chunkStore.HasBlobAsync(profileRecord.AvatarReference.Id, ct);
+                    if (hasAvatar) break;
+                    await Task.Delay(100, ct);
+                }
+
+                if (!hasAvatar)
+                {
+                    throw new ScenarioExecutionException(
+                        $"AssertProfileSynced failed: Avatar blob '{profileRecord.AvatarReference.Id}' was not downloaded to local chunk store on '{assertion.ObserverAlias}'.");
+                }
+            }
         }
     }
 

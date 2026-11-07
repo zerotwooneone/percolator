@@ -23,6 +23,7 @@ namespace Percolator.Simulator.Features.Scenarios.Model;
 [JsonDerivedType(typeof(EditMessageStep), "EditMessage")]
 [JsonDerivedType(typeof(DeleteMessageStep), "DeleteMessage")]
 [JsonDerivedType(typeof(MarkConversationReadStep), "MarkConversationRead")]
+[JsonDerivedType(typeof(RerollProfileStep), "RerollProfile")]
 public abstract record ScenarioStepDefinition
 {
     public abstract string DisplayText { get; }
@@ -130,4 +131,15 @@ public sealed record DeleteMessageStep(string SenderAlias, string RecipientAlias
 public sealed record MarkConversationReadStep(string OwnerAlias, string PeerAlias) : ScenarioStepDefinition
 {
     public override string DisplayText => $"Mark Conversation Read: '{OwnerAlias}' ⇄ '{PeerAlias}'";
+}
+
+// -----------------------------------------------------------------------------
+// Phase 6B Scenario Steps: Profile Reroll
+// -----------------------------------------------------------------------------
+
+public sealed record RerollProfileStep(string PersonaAlias, string? NewDisplayName = null) : ScenarioStepDefinition
+{
+    public override string DisplayText => NewDisplayName != null
+        ? $"Reroll Profile for '{PersonaAlias}' ➔ '{NewDisplayName}'"
+        : $"Reroll Profile for '{PersonaAlias}'";
 }

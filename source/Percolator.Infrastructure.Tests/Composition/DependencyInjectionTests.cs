@@ -135,6 +135,7 @@ public sealed class DependencyInjectionTests
         sp.GetRequiredService<IPreKeyAvailabilityPort>().Should().NotBeNull();
         sp.GetRequiredService<IPreKeyBundleProvider>().Should().NotBeNull();
         sp.GetRequiredService<IProfileDeliveryClient>().Should().NotBeNull();
+        sp.GetRequiredService<IProfileManager>().Should().NotBeNull();
 
         // 9. Blob Storage
         sp.GetRequiredService<IBlobCryptoService>().Should().NotBeNull();
@@ -142,6 +143,7 @@ public sealed class DependencyInjectionTests
         sp.GetRequiredService<IPeerStreamBlobClient>().Should().NotBeNull();
         sp.GetRequiredService<ILocalChunkStore>().Should().NotBeNull();
         sp.GetRequiredService<IChannelRelayResolver>().Should().NotBeNull();
+        sp.GetRequiredService<IBlobStorageService>().Should().NotBeNull();
 
         // 10. File Transfer & Swarm
         sp.GetRequiredService<ITransferStreamPoolFactory>().Should().NotBeNull();

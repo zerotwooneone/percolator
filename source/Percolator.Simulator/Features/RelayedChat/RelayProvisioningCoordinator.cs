@@ -85,6 +85,7 @@ internal sealed class RelayProvisioningCoordinator
                 ct);
 
             persona.HomeRelay = relay;
+            await persona.PublishProfileAsync(ct);
 
             _logSink.Log(new SimulatorLogEntry(
                 DateTimeOffset.UtcNow,

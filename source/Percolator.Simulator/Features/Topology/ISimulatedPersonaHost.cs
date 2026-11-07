@@ -30,6 +30,13 @@ internal interface ISimulatedPersonaHost : IAsyncDisposable
     DeliveryToken MailboxDrainToken { get; }
     ISimulatedRelayHost? HomeRelay { get; set; }
 
+    ProfileKey ProfileKey { get; }
+    uint ProfileRevision { get; }
+    bool AutoShareProfile { get; set; }
+    void RotateProfileKey();
+    void UpdateProfile(string newDisplayName, byte[] newIdenticonPng);
+    Task<DomainResult> PublishProfileAsync(CancellationToken ct = default);
+
     ReadOnlyReactiveProperty<bool> IsListening { get; }
     Task SetListeningAsync(bool isListening, CancellationToken ct = default);
     uint AllocateNextOpkIdRange(int count);

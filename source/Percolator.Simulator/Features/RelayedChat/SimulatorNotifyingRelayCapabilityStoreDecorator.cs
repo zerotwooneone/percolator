@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -19,6 +19,7 @@ internal sealed class SimulatorNotifyingRelayCapabilityStoreDecorator : IRelayMa
     private sealed class MailboxEntry
     {
         public byte[] DeliveryToken { get; set; } = Array.Empty<byte>();
+        public List<byte[]> AuthorizedDeliveryTokens { get; } = new();
         public byte[] DrainToken { get; set; } = Array.Empty<byte>();
         public PublicIdentityId? OwnerId { get; set; }
         public DeviceId? DeviceId { get; set; }
@@ -80,6 +81,11 @@ internal sealed class SimulatorNotifyingRelayCapabilityStoreDecorator : IRelayMa
         lock (entry.Lock)
         {
             entry.DeliveryToken = deliveryToken.ToArray();
+            entry.AuthorizedDeliveryTokens.Add(deliveryToken.ToArray());
+            if (entry.AuthorizedDeliveryTokens.Count > 10)
+            {
+                entry.AuthorizedDeliveryTokens.RemoveAt(0);
+            }
             entry.DrainToken = drainToken.ToArray();
             if (ownerId.HasValue) entry.OwnerId = ownerId;
             if (deviceId.HasValue) entry.DeviceId = deviceId;
@@ -135,9 +141,20 @@ internal sealed class SimulatorNotifyingRelayCapabilityStoreDecorator : IRelayMa
 
         lock (entry.Lock)
         {
-            if (entry.DeliveryToken.Length == 0 || entry.DeliveryToken.Length != deliveryToken.Length)
+            if (entry.DeliveryToken.Length > 0 && entry.DeliveryToken.Length == deliveryToken.Length &&
+                CryptographicOperations.FixedTimeEquals(entry.DeliveryToken, deliveryToken.Span))
             {
-                return ValueTask.FromResult(false);
+                return ValueTask.FromResult(true);
+            }
+
+            for (int i = 0; i < entry.AuthorizedDeliveryTokens.Count; i++)
+            {
+                var tok = entry.AuthorizedDeliveryTokens[i];
+                if (tok.Length == deliveryToken.Length &&
+                    CryptographicOperations.FixedTimeEquals(tok, deliveryToken.Span))
+                {
+                    return ValueTask.FromResult(true);
+                }
             }
 
             bool match = CryptographicOperations.FixedTimeEquals(entry.DeliveryToken, deliveryToken.Span);

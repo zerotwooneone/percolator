@@ -102,7 +102,27 @@ public sealed class SqlitePeerMailboxRoutingRepository : IPeerMailboxRoutingRepo
             existing.UpdatedAtUtc = now;
         }
 
-        await _dbContext.SaveChangesAsync(ct);
+        try
+        {
+            await _dbContext.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is Microsoft.Data.Sqlite.SqliteException { SqliteErrorCode: 19 })
+        {
+            // Concurrent insert race condition: reload existing entity and update
+            _dbContext.ChangeTracker.Clear();
+            var reloaded = await _dbContext.PeerMailboxRouting
+                .FirstOrDefaultAsync(r => r.PeerId == peerGuid && r.RelayEndpoint == endpointStr, ct);
+            if (reloaded != null)
+            {
+                reloaded.RoutingToken = routingGuid;
+                reloaded.DeliveryToken = deliveryBytes;
+                reloaded.LastObservedAtUtc = capability.LastObservedAtUtc;
+                reloaded.LastSuccessAtUtc = capability.LastSuccessAtUtc;
+                reloaded.BackpressureCooldownUntilUtc = capability.BackpressureCooldownUntilUtc;
+                reloaded.UpdatedAtUtc = now;
+                await _dbContext.SaveChangesAsync(ct);
+            }
+        }
     }
 
     public async Task RecordBackpressureAsync(

@@ -185,22 +185,33 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
             throw new RpcException(new Status(StatusCode.InvalidArgument, "Blinded locator must be exactly 32 bytes."));
         }
 
-        var locator = BlindedProfileLocator.FromSpan(request.BlindedLocator.Span);
-        var slot = await _profileRepository.GetSlotAsync(locator, context.CancellationToken);
-
-        if (slot == null)
+        try
         {
-            return new ProfileFetchResponseProto { Found = false };
+            var locator = BlindedProfileLocator.FromSpan(request.BlindedLocator.Span);
+            var slot = await _profileRepository.GetSlotAsync(locator, context.CancellationToken);
+
+            if (slot == null)
+            {
+                return new ProfileFetchResponseProto { Found = false };
+            }
+
+            return new ProfileFetchResponseProto
+            {
+                Found = true,
+                Nonce = ByteString.CopyFrom(slot.Package.Nonce),
+                Ciphertext = ByteString.CopyFrom(slot.Package.Ciphertext),
+                Revision = slot.Revision,
+                ExpiresAtUtc = Timestamp.FromDateTimeOffset(slot.ExpiresAtUtc)
+            };
         }
-
-        return new ProfileFetchResponseProto
+        catch (RpcException)
         {
-            Found = true,
-            Nonce = ByteString.CopyFrom(slot.Package.Nonce),
-            Ciphertext = ByteString.CopyFrom(slot.Package.Ciphertext),
-            Revision = slot.Revision,
-            ExpiresAtUtc = Timestamp.FromDateTimeOffset(slot.ExpiresAtUtc)
-        };
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new RpcException(new Status(StatusCode.Internal, $"GetProfile handler failed: {ex.GetType().Name} - {ex.Message}"));
+        }
     }
 
     public override async Task<ProfileUploadResponseProto> UploadProfile(ProfileUploadRequestProto request, ServerCallContext context)
@@ -220,27 +231,38 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
             throw new RpcException(new Status(StatusCode.InvalidArgument, $"Ciphertext package must be exactly {RelayHostedProfileSlot.ExactPackageSizeBytes} bytes."));
         }
 
-        var locator = BlindedProfileLocator.FromSpan(request.BlindedLocator.Span);
-        var writeToken = ProfileWriteToken.FromSpan(request.WriteToken.Span);
-        var package = new ProfileCiphertextPackage(request.Nonce.ToByteArray(), request.Ciphertext.ToByteArray());
-
-        var expiresAtUtc = DateTimeOffset.UtcNow.AddDays(30);
-        var createResult = RelayHostedProfileSlot.Create(locator, writeToken, package, request.Revision, expiresAtUtc);
-        if (createResult.IsFailure)
+        try
         {
-            throw new RpcException(new Status(StatusCode.InvalidArgument, createResult.Error!.Description));
+            var locator = BlindedProfileLocator.FromSpan(request.BlindedLocator.Span);
+            var writeToken = ProfileWriteToken.FromSpan(request.WriteToken.Span);
+            var package = new ProfileCiphertextPackage(request.Nonce.ToByteArray(), request.Ciphertext.ToByteArray());
+
+            var expiresAtUtc = DateTimeOffset.UtcNow.AddDays(30);
+            var createResult = RelayHostedProfileSlot.Create(locator, writeToken, package, request.Revision, expiresAtUtc);
+            if (createResult.IsFailure)
+            {
+                throw new RpcException(new Status(StatusCode.InvalidArgument, createResult.Error!.Description));
+            }
+
+            var saveResult = await _profileRepository.SaveSlotAsync(createResult.Value!, context.CancellationToken);
+            if (saveResult.IsFailure)
+            {
+                throw new RpcException(new Status(StatusCode.Aborted, saveResult.Error!.Description));
+            }
+
+            return new ProfileUploadResponseProto
+            {
+                Success = true
+            };
         }
-
-        var saveResult = await _profileRepository.SaveSlotAsync(createResult.Value!, context.CancellationToken);
-        if (saveResult.IsFailure)
+        catch (RpcException)
         {
-            throw new RpcException(new Status(StatusCode.Aborted, saveResult.Error!.Description));
+            throw;
         }
-
-        return new ProfileUploadResponseProto
+        catch (Exception ex)
         {
-            Success = true
-        };
+            throw new RpcException(new Status(StatusCode.Internal, $"UploadProfile handler failed: {ex.GetType().Name} - {ex.Message}"));
+        }
     }
 
     public override async Task<ProfileDeleteResponseProto> DeleteProfile(ProfileDeleteRequestProto request, ServerCallContext context)

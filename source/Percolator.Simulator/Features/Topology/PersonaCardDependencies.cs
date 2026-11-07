@@ -21,6 +21,7 @@ internal sealed class PersonaCardDependencies
     public RelayProvisioningCoordinator RelayCoordinator { get; }
     public IFlightRecorderStateService? FlightRecorder { get; }
     public RichChatActionCoordinator RichChatCoordinator { get; }
+    public ProfileSyncCoordinator ProfileCoordinator { get; }
 
     public PersonaCardDependencies(
         IStatusToastService toastService,
@@ -33,6 +34,7 @@ internal sealed class PersonaCardDependencies
         ISimulatorLogSink logSink,
         RelayProvisioningCoordinator relayCoordinator,
         RichChatActionCoordinator richChatCoordinator,
+        ProfileSyncCoordinator profileCoordinator,
         IFlightRecorderStateService? flightRecorder = null)
     {
         ToastService = toastService ?? throw new ArgumentNullException(nameof(toastService));
@@ -45,6 +47,7 @@ internal sealed class PersonaCardDependencies
         LogSink = logSink ?? throw new ArgumentNullException(nameof(logSink));
         RelayCoordinator = relayCoordinator ?? throw new ArgumentNullException(nameof(relayCoordinator));
         RichChatCoordinator = richChatCoordinator ?? throw new ArgumentNullException(nameof(richChatCoordinator));
+        ProfileCoordinator = profileCoordinator ?? throw new ArgumentNullException(nameof(profileCoordinator));
         FlightRecorder = flightRecorder;
     }
 }

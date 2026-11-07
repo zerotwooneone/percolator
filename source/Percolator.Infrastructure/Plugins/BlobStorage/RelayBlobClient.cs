@@ -7,10 +7,12 @@ using System.Threading.Tasks;
 using Google.Protobuf;
 using Grpc.Core;
 using Grpc.Net.Client;
+using Microsoft.Extensions.DependencyInjection;
 using Percolator.Application2.Ports;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Infrastructure.Protos;
+using Percolator.Infrastructure.Transport;
 using Percolator.PluginSdk;
 
 public sealed class RelayBlobClient : IRelayBlobClient
@@ -20,10 +22,21 @@ public sealed class RelayBlobClient : IRelayBlobClient
     private const long InMemoryThresholdBytes = 1024 * 1024; // 1 MB
 
     private readonly Func<Uri, UnauthenticatedDeliveryService.UnauthenticatedDeliveryServiceClient>? _clientFactory;
+    private readonly IPeerGrpcChannelFactory? _channelFactory;
 
-    public RelayBlobClient(Func<Uri, UnauthenticatedDeliveryService.UnauthenticatedDeliveryServiceClient>? clientFactory = null)
+    [ActivatorUtilitiesConstructor]
+    public RelayBlobClient(IPeerGrpcChannelFactory channelFactory)
     {
-        _clientFactory = clientFactory;
+        _channelFactory = channelFactory ?? throw new ArgumentNullException(nameof(channelFactory));
+    }
+
+    public RelayBlobClient(Func<Uri, UnauthenticatedDeliveryService.UnauthenticatedDeliveryServiceClient> clientFactory)
+    {
+        _clientFactory = clientFactory ?? throw new ArgumentNullException(nameof(clientFactory));
+    }
+
+    public RelayBlobClient()
+    {
     }
 
     public async ValueTask<DomainResult<string>> UploadBlobAsync(
@@ -233,7 +246,10 @@ public sealed class RelayBlobClient : IRelayBlobClient
             return _clientFactory(relayUri);
         }
 
-        var channel = GrpcChannel.ForAddress(relayUri);
+        var channel = _channelFactory != null
+            ? _channelFactory.GetOrCreateChannel(relayUri)
+            : GrpcChannel.ForAddress(relayUri);
+
         return new UnauthenticatedDeliveryService.UnauthenticatedDeliveryServiceClient(channel);
     }
 }

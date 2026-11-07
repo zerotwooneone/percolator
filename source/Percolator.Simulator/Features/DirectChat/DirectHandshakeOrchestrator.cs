@@ -13,9 +13,11 @@ using Percolator.Domain.Channels.Ports;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.Model;
+using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Infrastructure.Persistence;
 using Percolator.Simulator.Features.Logging;
+using Percolator.Simulator.Features.RichChatAndProfiles;
 using Percolator.Simulator.Features.Scenarios;
 using Percolator.Simulator.Features.Scenarios.Model;
 using Percolator.Simulator.Features.Shell;
@@ -43,6 +45,7 @@ internal sealed class DirectHandshakeOrchestrator
     private readonly ISimulatorStateBus _stateBus;
     private readonly IStatusToastService _toastService;
     private readonly ISimulatorLogSink _logSink;
+    private readonly ProfileSyncCoordinator _profileCoordinator;
     private readonly IFlightRecorderStateService? _flightRecorder;
 
     public DirectHandshakeOrchestrator(
@@ -50,12 +53,14 @@ internal sealed class DirectHandshakeOrchestrator
         ISimulatorStateBus stateBus,
         IStatusToastService toastService,
         ISimulatorLogSink logSink,
+        ProfileSyncCoordinator profileCoordinator,
         IFlightRecorderStateService? flightRecorder = null)
     {
         _worldState = worldState ?? throw new ArgumentNullException(nameof(worldState));
         _stateBus = stateBus ?? throw new ArgumentNullException(nameof(stateBus));
         _toastService = toastService ?? throw new ArgumentNullException(nameof(toastService));
         _logSink = logSink ?? throw new ArgumentNullException(nameof(logSink));
+        _profileCoordinator = profileCoordinator ?? throw new ArgumentNullException(nameof(profileCoordinator));
         _flightRecorder = flightRecorder;
     }
 
@@ -102,15 +107,30 @@ internal sealed class DirectHandshakeOrchestrator
                     return false;
                 }
 
-                // Ensure channel exists on initiator side
+                // Ensure channel and contact exist on initiator side
                 var channelId = ChannelIdUtility.DeterministicFor(initiator.PublicIdentityId, target.PublicIdentityId);
                 var channelRepo = scope.ServiceProvider.GetRequiredService<IChannelRepository>();
+                var contactRepo = scope.ServiceProvider.GetRequiredService<IPeerContactRepository>();
                 var timeProvider = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>();
                 var directChannel = await channelRepo.GetDirectByIdAsync(channelId, ct);
                 if (directChannel == null)
                 {
                     var channel = DirectChannel.Create(channelId, initiator.PublicIdentityId, target.PublicIdentityId, timeProvider).Value!;
                     await channelRepo.SaveDirectAsync(channel, ct);
+                }
+
+                var existingContact = await contactRepo.GetByPeerIdAsync(initiator.PublicIdentityId, target.PublicIdentityId, ct);
+                if (existingContact == null)
+                {
+                    var newContact = new PeerContact(
+                        initiator.PublicIdentityId,
+                        target.PublicIdentityId,
+                        ContactNickname.Create(null, target.PublicIdentityId),
+                        PeerTrustLevel.Tofu,
+                        timeProvider.UtcNow,
+                        targetBundle.IdentityKey,
+                        ContactState.Active);
+                    await contactRepo.SaveAsync(newContact, ct);
                 }
 
                 // Immediately flush outbox to deliver handshake envelope via loopback gRPC TLS
@@ -197,15 +217,35 @@ internal sealed class DirectHandshakeOrchestrator
                 var senderHost = _worldState.FindPersonaHostByIdentity(senderId);
                 if (senderHost != null)
                 {
-                    // Ensure sender also has the channel created
+                    if (senderHost.HomeRelay != null)
+                    {
+                        await senderHost.DrainMailboxAsync(ct);
+                    }
+
+                    // Ensure sender also has the channel and active contact created
                     using var senderScope = senderHost.Services.CreateScope();
                     var senderChannelRepo = senderScope.ServiceProvider.GetRequiredService<IChannelRepository>();
+                    var senderContactRepo = senderScope.ServiceProvider.GetRequiredService<IPeerContactRepository>();
                     var senderTimeProvider = senderScope.ServiceProvider.GetRequiredService<IDateTimeProvider>();
                     var sc = await senderChannelRepo.GetDirectByIdAsync(channelId, ct);
                     if (sc == null)
                     {
                         var channel = DirectChannel.Create(channelId, senderId, target.PublicIdentityId, senderTimeProvider).Value!;
                         await senderChannelRepo.SaveDirectAsync(channel, ct);
+                    }
+
+                    var senderContact = await senderContactRepo.GetByPeerIdAsync(senderId, target.PublicIdentityId, ct);
+                    if (senderContact == null)
+                    {
+                        var newContact = new PeerContact(
+                            senderId,
+                            target.PublicIdentityId,
+                            ContactNickname.Create(null, target.PublicIdentityId),
+                            PeerTrustLevel.Tofu,
+                            senderTimeProvider.UtcNow,
+                            target.IdentityPublicKey,
+                            ContactState.Active);
+                        await senderContactRepo.SaveAsync(newContact, ct);
                     }
                     await senderHost.FlushOutboxAsync(ct);
 
@@ -214,6 +254,9 @@ internal sealed class DirectHandshakeOrchestrator
                         SignalCategory.RatchetSessionChanged,
                         Details: target.PublicIdentityId.ToString(),
                         Payload: new HandshakeSignalPayload(target.PublicIdentityId, "Accept")));
+
+                    // Phase 6B: Auto-Share Profile on Connect
+                    await _profileCoordinator.AutoShareProfileOnConnectAsync(target, senderHost, ct);
                 }
 
                 _logSink.Log(new SimulatorLogEntry(

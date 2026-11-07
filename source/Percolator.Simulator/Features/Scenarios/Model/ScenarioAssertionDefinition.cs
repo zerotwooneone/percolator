@@ -14,6 +14,7 @@ namespace Percolator.Simulator.Features.Scenarios.Model;
 [JsonDerivedType(typeof(AssertMessageEditedAssertion), "AssertMessageEdited")]
 [JsonDerivedType(typeof(AssertMessageTombstonedAssertion), "AssertMessageTombstoned")]
 [JsonDerivedType(typeof(AssertMessageReadAssertion), "AssertMessageRead")]
+[JsonDerivedType(typeof(AssertProfileSyncedAssertion), "AssertProfileSynced")]
 public abstract record ScenarioAssertionDefinition
 {
     public abstract string DisplayText { get; }
@@ -81,4 +82,13 @@ public sealed record AssertMessageTombstonedAssertion(string PersonaAlias, strin
 public sealed record AssertMessageReadAssertion(string PersonaAlias, string MessageText) : ScenarioAssertionDefinition
 {
     public override string DisplayText => $"Assert Message Marked Read on '{PersonaAlias}': \"{MessageText}\"";
+}
+
+// -----------------------------------------------------------------------------
+// Phase 6B Scenario Assertions: Profile & Identicon Sync
+// -----------------------------------------------------------------------------
+
+public sealed record AssertProfileSyncedAssertion(string ObserverAlias, string TargetAlias, string ExpectedDisplayName) : ScenarioAssertionDefinition
+{
+    public override string DisplayText => $"Assert Profile Synced on '{ObserverAlias}' for '{TargetAlias}' == \"{ExpectedDisplayName}\"";
 }

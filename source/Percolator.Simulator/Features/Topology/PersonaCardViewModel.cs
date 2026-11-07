@@ -39,6 +39,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
     private readonly IFlightRecorderStateService? _flightRecorder;
     private readonly RelayProvisioningCoordinator _relayCoordinator;
     private readonly RichChatActionCoordinator _richChatCoordinator;
+    private readonly ProfileSyncCoordinator _profileCoordinator;
 
     private readonly CoalescedActionGate _chatTranscriptGate;
     private readonly CoalescedActionGate _pendingHandshakeGate;
@@ -131,6 +132,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
         _flightRecorder = deps.FlightRecorder;
         _relayCoordinator = deps.RelayCoordinator;
         _richChatCoordinator = deps.RichChatCoordinator;
+        _profileCoordinator = deps.ProfileCoordinator;
 
         // 30 Hz refresh ceiling for chat transcript with 0ms leading edge
         _chatTranscriptGate = new CoalescedActionGate(
@@ -153,6 +155,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
         if (host is not null)
         {
             _isListening = host.IsListening.CurrentValue;
+            _autoShareProfile = host.AutoShareProfile;
         }
 
         // Subscribe to selection changes to switch active peer conversation dynamically
@@ -201,6 +204,26 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
                 .AddTo(ref Disposables);
 
             _stateBus.Signals
+                .Where(s => s.Category == SignalCategory.ProfileChanged)
+                .Subscribe(signal =>
+                {
+                    if (signal.NodeId == NodeId && _host != null)
+                    {
+                        UiTaskRunner.PostToUi(() =>
+                        {
+                            DisplayName = _host.DisplayName;
+                            if (_host.IdenticonPng is { Length: > 0 })
+                            {
+                                using var ms = new MemoryStream(_host.IdenticonPng);
+                                IdenticonBitmap = new Bitmap(ms);
+                            }
+                        });
+                    }
+                    RefreshChatTranscript();
+                })
+                .AddTo(ref Disposables);
+
+            _stateBus.Signals
                 .Where(s => s.Category == SignalCategory.HostedPreKeyCountChanged)
                 .Subscribe(signal =>
                 {
@@ -224,7 +247,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
                             int count = available.Value;
                             UiTaskRunner.FireAndForget(async () =>
                             {
-                                _logSink?.Log(new SimulatorLogEntry(
+                                _logSink.Log(new SimulatorLogEntry(
                                     DateTimeOffset.UtcNow,
                                     LogLevel.Information,
                                     DisplayName,
@@ -268,7 +291,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
                     if (pending != null)
                     {
                         _pendingSenderId = pending.IdentityId;
-                        var senderHost = _worldState?.FindPersonaHostByIdentity(pending.IdentityId);
+                        var senderHost = _worldState.FindPersonaHostByIdentity(pending.IdentityId);
                         var senderName = senderHost?.DisplayName ?? pending.IdentityId.ToString()[..8];
                         PendingHandshakeText = $"Pending handshake from {senderName}";
                         HasPendingHandshake = true;
@@ -428,16 +451,39 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
 
     partial void OnAutoReplyPongChanged(bool value)
     {
-        _pongResponder?.SetAutoPongEnabled(NodeId, value);
+        _pongResponder.SetAutoPongEnabled(NodeId, value);
+    }
+
+    partial void OnAutoShareProfileChanged(bool value)
+    {
+        if (_host != null)
+        {
+            _host.AutoShareProfile = value;
+        }
     }
 
     [RelayCommand]
-    private void RerollProfile()
+    private async Task RerollProfileAsync()
     {
         if (_host == null) return;
-        var name = WordPairNameGenerator.Generate();
-        DisplayName = name;
-        _toastService.ShowToast("Profile Updated", $"Rerolled name to '{name}'.", ToastSeverity.Informational);
+
+        var success = await UiTaskRunner.RunAsync(
+            () => _profileCoordinator.RerollProfileAsync(NodeId),
+            category: "ProfileSync",
+            logSink: _logSink,
+            toastService: _toastService,
+            nodeName: DisplayName,
+            nodeId: NodeId);
+
+        if (success)
+        {
+            DisplayName = _host.DisplayName;
+            if (_host.IdenticonPng is { Length: > 0 })
+            {
+                using var ms = new MemoryStream(_host.IdenticonPng);
+                IdenticonBitmap = new Bitmap(ms);
+            }
+        }
     }
 
     [RelayCommand]
