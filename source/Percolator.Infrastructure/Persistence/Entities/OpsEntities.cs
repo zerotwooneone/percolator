@@ -4,6 +4,7 @@ using System;
 
 public sealed class OpsOutboxJobEntity
 {
+    public long SequenceNumber { get; set; }
     public Guid Id { get; set; }
     public Guid OwnerIdentityId { get; set; }
     public Guid ChannelId { get; set; }

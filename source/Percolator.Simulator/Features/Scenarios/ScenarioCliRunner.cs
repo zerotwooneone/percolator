@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Percolator.Simulator.Features.DirectChat;
+using Percolator.Simulator.Features.GroupMessaging;
 using Percolator.Simulator.Features.Logging;
 using Percolator.Simulator.Features.RichChatAndProfiles;
 using Percolator.Simulator.Features.RelayedChat;
@@ -79,6 +80,7 @@ internal static class ScenarioCliRunner
         services.AddSingleton<DirectHandshakeOrchestrator>();
         services.AddSingleton<DirectChatCoordinator>();
         services.AddSingleton<RelayProvisioningCoordinator>();
+        services.AddSingleton<GroupChatCoordinator>();
         services.AddSingleton<ScenarioRunnerService>();
 
         await using var provider = services.BuildServiceProvider();

@@ -656,17 +656,34 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
             proto.RelayEndpoint = dto.RelayEndpoint;
         }
 
+        if (dto.Members != null)
+        {
+            foreach (var m in dto.Members)
+            {
+                proto.MemberIds.Add(ByteString.CopyFrom(m.ToByteArray()));
+            }
+        }
+
         return proto;
     }
 
-    private static GroupInvitationDto FromInviteProto(GroupInvitationProto proto) =>
-        new(
+    private static GroupInvitationDto FromInviteProto(GroupInvitationProto proto)
+    {
+        List<PublicIdentityId>? members = null;
+        if (proto.MemberIds.Count > 0)
+        {
+            members = proto.MemberIds.Select(m => PublicIdentityId.FromBytes(m.Span)).ToList();
+        }
+
+        return new(
             new InvitationId(proto.InvitationId),
             ChannelId.FromBytes(proto.TargetGroupChannelId.Span),
             proto.GroupName,
             PublicIdentityId.FromBytes(proto.InviterId.Span),
             proto.HasRelayEndpoint ? proto.RelayEndpoint : null,
-            proto.ExpiresAtUnixMs);
+            proto.ExpiresAtUnixMs,
+            members);
+    }
 
     private static GroupInvitationResponseProto ToInviteResponseProto(GroupInvitationResponseDto dto) =>
         new()

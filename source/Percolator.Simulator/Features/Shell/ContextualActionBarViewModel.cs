@@ -1,9 +1,11 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Percolator.Simulator.Features.DirectChat;
+using Percolator.Simulator.Features.GroupMessaging;
 using Percolator.Simulator.Features.RelayedChat;
 using Percolator.Simulator.Features.Scenarios;
 using Percolator.Simulator.Features.Scenarios.Model;
@@ -18,6 +20,7 @@ internal sealed partial class ContextualActionBarViewModel : ViewModelBase
     private readonly IStatusToastService _toastService;
     private readonly DirectHandshakeOrchestrator _handshakeOrchestrator;
     private readonly RelayProvisioningCoordinator _relayCoordinator;
+    private readonly GroupChatCoordinator _groupCoordinator;
     private readonly ISimulatedWorldStateService _worldState;
     private readonly IFlightRecorderStateService? _flightRecorder;
     private SimulatedNodeSummary? _currentPrimary;
@@ -37,14 +40,16 @@ internal sealed partial class ContextualActionBarViewModel : ViewModelBase
         IStatusToastService toastService,
         DirectHandshakeOrchestrator handshakeOrchestrator,
         RelayProvisioningCoordinator relayCoordinator,
+        GroupChatCoordinator groupCoordinator,
         ISimulatedWorldStateService worldState,
         IFlightRecorderStateService? flightRecorder = null)
     {
-        _selectionState = selectionState;
-        _toastService = toastService;
-        _handshakeOrchestrator = handshakeOrchestrator;
-        _relayCoordinator = relayCoordinator;
-        _worldState = worldState;
+        _selectionState = selectionState ?? throw new ArgumentNullException(nameof(selectionState));
+        _toastService = toastService ?? throw new ArgumentNullException(nameof(toastService));
+        _handshakeOrchestrator = handshakeOrchestrator ?? throw new ArgumentNullException(nameof(handshakeOrchestrator));
+        _relayCoordinator = relayCoordinator ?? throw new ArgumentNullException(nameof(relayCoordinator));
+        _groupCoordinator = groupCoordinator ?? throw new ArgumentNullException(nameof(groupCoordinator));
+        _worldState = worldState ?? throw new ArgumentNullException(nameof(worldState));
         _flightRecorder = flightRecorder;
 
         Observable.CombineLatest(
@@ -198,8 +203,46 @@ internal sealed partial class ContextualActionBarViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private void SendFilePreset() => _toastService.ShowPlaceholder("Send File Preset", "Phase 9");
+    private async Task CreateGroupOnRelayAsync()
+    {
+        var relay = _worldState.GetAllRelayHosts().FirstOrDefault();
+        if (relay == null)
+        {
+            _toastService.ShowToast(
+                "Relay Required",
+                "Spawn a Relay node first using '+ Add Relay' in the top toolbar.",
+                ToastSeverity.Warning);
+            return;
+        }
+
+        var personas = _worldState.GetAllPersonaHosts();
+        if (personas.Count < 2)
+        {
+            _toastService.ShowToast(
+                "Personas Required",
+                "At least 2 personas are needed to create a group.",
+                ToastSeverity.Warning);
+            return;
+        }
+
+        var admin = _currentPrimary != null ? _worldState.GetPersonaHost(_currentPrimary.Id) : personas.First();
+        if (admin == null) admin = personas.First();
+
+        var members = personas.Where(p => p.Id != admin.Id).ToList();
+        var groupName = "Dev Group";
+
+        var channelId = await UiTaskRunner.RunAsync(
+            () => _groupCoordinator.CreateGroupOnRelayAsync(admin, relay, groupName, members),
+            category: "GroupProvisioning",
+            toastService: _toastService);
+
+        if (channelId != default)
+        {
+            var memberNames = members.Select(m => m.DisplayName).ToList();
+            _flightRecorder?.RecordStep(new CreateGroupStep(admin.DisplayName, relay.DisplayName, groupName, memberNames));
+        }
+    }
 
     [RelayCommand]
-    private void CreateGroupOnRelay() => _toastService.ShowPlaceholder("Create Group on Relay", "Phase 7");
+    private void SendFilePreset() => _toastService.ShowPlaceholder("Send File Preset", "Phase 9");
 }

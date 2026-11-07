@@ -19,6 +19,7 @@ using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.Infrastructure.Protos;
+using Percolator.Infrastructure.Transport;
 using Percolator.Infrastructure.Transport.Endpoints;
 
 [TestFixture]
@@ -79,7 +80,8 @@ public sealed class AnonymousGroupRelayEndpointTests
         var repo = new InMemoryLedgerRepo();
         var zkEngine = new TestZkProofEngine();
         var timeProvider = new FixedTimeProvider();
-        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, timeProvider);
+        var mailboxStore = new InMemoryRelayMailboxCapabilityStore();
+        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider);
 
         var channelId = ChannelId.New();
         var relayId = PublicIdentityId.New();
@@ -151,7 +153,8 @@ public sealed class AnonymousGroupRelayEndpointTests
         var repo = new InMemoryLedgerRepo();
         var zkEngine = new TestZkProofEngine();
         var timeProvider = new FixedTimeProvider();
-        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, timeProvider);
+        var mailboxStore = new InMemoryRelayMailboxCapabilityStore();
+        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider);
 
         var channelId = ChannelId.New();
         var relayId = PublicIdentityId.New();
@@ -189,7 +192,8 @@ public sealed class AnonymousGroupRelayEndpointTests
         var repo = new InMemoryLedgerRepo();
         var zkEngine = new TestZkProofEngine { ReturnValid = false };
         var timeProvider = new FixedTimeProvider();
-        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, timeProvider);
+        var mailboxStore = new InMemoryRelayMailboxCapabilityStore();
+        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider);
 
         var channelId = ChannelId.New();
         var relayId = PublicIdentityId.New();
@@ -220,7 +224,8 @@ public sealed class AnonymousGroupRelayEndpointTests
         var repo = new InMemoryLedgerRepo();
         var zkEngine = new TestZkProofEngine();
         var timeProvider = new FixedTimeProvider();
-        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, timeProvider);
+        var mailboxStore = new InMemoryRelayMailboxCapabilityStore();
+        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider);
 
         var channelId = ChannelId.New();
         var relayId = PublicIdentityId.New();
@@ -263,5 +268,73 @@ public sealed class AnonymousGroupRelayEndpointTests
         streamWriter.WrittenMessages.Should().ContainSingle(m =>
             m.PayloadCase == GroupStreamServerMessage.PayloadOneofCase.Broadcast &&
             m.Broadcast.SenderKeyIteration == 5);
+    }
+
+    [Test]
+    public async Task DispatchGroupMessage_WithOfflineMember_EnqueuesToMailboxStoreWhileStreamingToOnlineMember()
+    {
+        var repo = new InMemoryLedgerRepo();
+        var zkEngine = new TestZkProofEngine();
+        var timeProvider = new FixedTimeProvider();
+        var mailboxStore = new InMemoryRelayMailboxCapabilityStore();
+        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider);
+
+        var channelId = ChannelId.New();
+        var relayId = PublicIdentityId.New();
+        var genesisBlob = EncryptedEntriesBlob.FromSpan(new byte[] { 1, 2, 3 });
+        var publicParams = ZkGroupPublicParams.FromSpan(new byte[32]);
+        var tokenOnline = BlindedRoutingToken.New();
+        var tokenOffline = BlindedRoutingToken.New();
+
+        var initialTokens = new HashSet<BlindedRoutingToken> { tokenOnline, tokenOffline };
+        var genesis = RelayGroupLedger.CreateGenesis(channelId, relayId, genesisBlob, initialTokens, publicParams, timeProvider).Value!;
+        await repo.SaveAsync(genesis);
+
+        using var cts = new CancellationTokenSource();
+        var streamWriter = new TestServerStreamWriter<GroupStreamServerMessage>();
+
+        var subRequest = new GroupStreamClientMessage
+        {
+            ConversationId = ByteString.CopyFrom(channelId.ToByteArray()),
+            CurrentEpoch = 0,
+            SubscriberRoutingToken = ByteString.CopyFrom(tokenOnline.ToByteArray())
+        };
+
+        // Start subscription for online member
+        var subTask = endpoint.SubscribeGroupStream(subRequest, streamWriter, new TestServerCallContext(cts.Token));
+
+        // Dispatch group message
+        var payloadBytes = new byte[] { 101, 102, 103 };
+        var dispatchRequest = new DispatchGroupMessageRequest
+        {
+            ConversationId = ByteString.CopyFrom(channelId.ToByteArray()),
+            Epoch = 0,
+            Ciphertext = ByteString.CopyFrom(payloadBytes),
+            ZkPresentationProof = ByteString.CopyFrom(new byte[64]),
+            SenderKeyIteration = 42
+        };
+
+        var dispatchResponse = await endpoint.DispatchGroupMessage(dispatchRequest, new TestServerCallContext());
+        dispatchResponse.Accepted.Should().BeTrue();
+
+        // Let subscriber process
+        await Task.Delay(50);
+        cts.Cancel();
+        await subTask;
+
+        // 1. Online member received via stream
+        streamWriter.WrittenMessages.Should().ContainSingle(m =>
+            m.PayloadCase == GroupStreamServerMessage.PayloadOneofCase.Broadcast &&
+            m.Broadcast.SenderKeyIteration == 42);
+
+        // 2. Offline member had envelope enqueued to mailbox
+        var offlineEnvelopes = await mailboxStore.DrainEnvelopesAsync(tokenOffline.ToByteArray());
+        offlineEnvelopes.Should().HaveCount(1);
+        var sealedEnv = SealedEnvelopeProto.Parser.ParseFrom(offlineEnvelopes[0].EnvelopePayload);
+        sealedEnv.EncryptedPackage.ToByteArray().Should().Equal(payloadBytes);
+
+        // 3. Online member was NOT enqueued to mailbox (received via live stream)
+        var onlineEnvelopes = await mailboxStore.DrainEnvelopesAsync(tokenOnline.ToByteArray());
+        onlineEnvelopes.Should().BeEmpty();
     }
 }

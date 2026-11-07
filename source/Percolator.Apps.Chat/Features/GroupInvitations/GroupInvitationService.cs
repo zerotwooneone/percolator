@@ -1,3 +1,7 @@
+using System;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Percolator.Apps.Chat.Features.Messaging;
 using Percolator.Apps.Chat.Ingress;
 using Percolator.Domain.Channels.Model;
@@ -11,6 +15,8 @@ namespace Percolator.Apps.Chat.Features.GroupInvitations;
 
 public sealed class GroupInvitationService
 {
+    private static readonly DomainError DuplicateInvitationError = new("DUPLICATE_INVITATION", "Group invitation already exists.");
+
     private readonly IGroupInvitationRepository _invitationRepo;
     private readonly IChannelRepository _channelRepo;
     private readonly IPayloadSender _payloadSender;
@@ -53,7 +59,8 @@ public sealed class GroupInvitationService
             dto.GroupName,
             dto.InviterId,
             dto.RelayEndpoint,
-            dto.ExpiresAtUnixMs);
+            dto.ExpiresAtUnixMs,
+            initialMembers: dto.Members);
 
         await _invitationRepo.AddAsync(invitation, ct).ConfigureAwait(false);
 
@@ -74,13 +81,20 @@ public sealed class GroupInvitationService
     {
         ArgumentNullException.ThrowIfNull(dto);
 
+        var existing = await _invitationRepo.GetByIdAsync(dto.InvitationId, ct).ConfigureAwait(false);
+        if (existing is not null)
+        {
+            return DomainResult.Failure(DuplicateInvitationError);
+        }
+
         var invitation = new PendingGroupInvitation(
             dto.InvitationId,
             dto.TargetGroupChannelId,
             dto.GroupName,
             dto.InviterId,
             dto.RelayEndpoint,
-            dto.ExpiresAtUnixMs);
+            dto.ExpiresAtUnixMs,
+            initialMembers: dto.Members);
 
         await _invitationRepo.AddAsync(invitation, ct).ConfigureAwait(false);
         return DomainResult.Success();
@@ -127,13 +141,45 @@ public sealed class GroupInvitationService
                     groupChannel.AddMember(invitation.InviterId, responderId, ChannelRole.Member, _timeProvider);
                 }
 
+                if (invitation.InitialMembers != null)
+                {
+                    foreach (var memberId in invitation.InitialMembers)
+                    {
+                        if (memberId != invitation.InviterId && memberId != responderId && !groupChannel.Members.Any(m => m.Id == memberId))
+                        {
+                            groupChannel.AddMember(invitation.InviterId, memberId, ChannelRole.Member, _timeProvider);
+                        }
+                    }
+                }
+
                 await _channelRepo.SaveGroupAsync(groupChannel, ct).ConfigureAwait(false);
             }
         }
-        else if (!groupChannel.Members.Any(m => m.Id == responderId))
+        else
         {
-            groupChannel.AddMember(invitation.InviterId, responderId, ChannelRole.Member, _timeProvider);
-            await _channelRepo.SaveGroupAsync(groupChannel, ct).ConfigureAwait(false);
+            bool modified = false;
+            if (!groupChannel.Members.Any(m => m.Id == responderId))
+            {
+                groupChannel.AddMember(invitation.InviterId, responderId, ChannelRole.Member, _timeProvider);
+                modified = true;
+            }
+
+            if (invitation.InitialMembers != null)
+            {
+                foreach (var memberId in invitation.InitialMembers)
+                {
+                    if (memberId != invitation.InviterId && !groupChannel.Members.Any(m => m.Id == memberId))
+                    {
+                        groupChannel.AddMember(invitation.InviterId, memberId, ChannelRole.Member, _timeProvider);
+                        modified = true;
+                    }
+                }
+            }
+
+            if (modified)
+            {
+                await _channelRepo.SaveGroupAsync(groupChannel, ct).ConfigureAwait(false);
+            }
         }
 
         // Drain and replay any out-of-order group messages cached before invitation acceptance

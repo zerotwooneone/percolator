@@ -24,6 +24,16 @@ public sealed class SqlGroupInvitationRepository : IGroupInvitationRepository
     {
         ArgumentNullException.ThrowIfNull(invitation);
 
+        byte[]? initialMembersBytes = null;
+        if (invitation.InitialMembers != null && invitation.InitialMembers.Count > 0)
+        {
+            initialMembersBytes = new byte[invitation.InitialMembers.Count * 16];
+            for (int i = 0; i < invitation.InitialMembers.Count; i++)
+            {
+                invitation.InitialMembers[i].TryWriteBytes(initialMembersBytes.AsSpan(i * 16, 16));
+            }
+        }
+
         var entity = new ChatGroupInvitationEntity
         {
             Id = invitation.InvitationId.Value,
@@ -33,7 +43,8 @@ public sealed class SqlGroupInvitationRepository : IGroupInvitationRepository
             RelayEndpoint = invitation.RelayEndpoint,
             ExpiresAtUnixMs = invitation.ExpiresAtUnixMs,
             Status = (int)invitation.Status,
-            RespondedAtUnixMs = invitation.RespondedAtUnixMs
+            RespondedAtUnixMs = invitation.RespondedAtUnixMs,
+            InitialMembersBytes = initialMembersBytes
         };
 
         _dbContext.ChatGroupInvitations.Add(entity);
@@ -97,6 +108,16 @@ public sealed class SqlGroupInvitationRepository : IGroupInvitationRepository
 
     private static PendingGroupInvitation ToDomainModel(ChatGroupInvitationEntity entity)
     {
+        List<PublicIdentityId>? initialMembers = null;
+        if (entity.InitialMembersBytes != null && entity.InitialMembersBytes.Length >= 16)
+        {
+            initialMembers = new List<PublicIdentityId>();
+            for (int i = 0; i <= entity.InitialMembersBytes.Length - 16; i += 16)
+            {
+                initialMembers.Add(PublicIdentityId.FromBytes(entity.InitialMembersBytes.AsSpan(i, 16)));
+            }
+        }
+
         return new PendingGroupInvitation(
             new InvitationId(entity.Id),
             ChannelId.FromGuid(entity.TargetGroupChannelId),
@@ -105,6 +126,7 @@ public sealed class SqlGroupInvitationRepository : IGroupInvitationRepository
             entity.RelayEndpoint,
             entity.ExpiresAtUnixMs,
             (GroupInvitationStatus)entity.Status,
-            entity.RespondedAtUnixMs);
+            entity.RespondedAtUnixMs,
+            initialMembers: initialMembers);
     }
 }

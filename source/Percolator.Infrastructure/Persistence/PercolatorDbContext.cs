@@ -1,5 +1,4 @@
 namespace Percolator.Infrastructure.Persistence;
-
 using System;
 using System.Linq;
 using System.Text;
@@ -7,21 +6,18 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Percolator.Infrastructure.Persistence.Entities;
-
 public class PercolatorDbContext : DbContext
 {
     public PercolatorDbContext(DbContextOptions<PercolatorDbContext> options)
         : base(options)
     {
     }
-
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
         base.ConfigureConventions(configurationBuilder);
         configurationBuilder.Properties<DateTimeOffset>().HaveConversion<DateTimeOffsetToTicksConverter>();
         configurationBuilder.Properties<DateTimeOffset?>().HaveConversion<NullableDateTimeOffsetToTicksConverter>();
     }
-
     public DbSet<IdentityProfileEntity> IdentityProfiles => Set<IdentityProfileEntity>();
     public DbSet<LocalDeviceEntity> LocalDevices => Set<LocalDeviceEntity>();
     public DbSet<VaultIdentityKeyEntity> VaultIdentityKeys => Set<VaultIdentityKeyEntity>();
@@ -47,7 +43,6 @@ public class PercolatorDbContext : DbContext
     public DbSet<PeerProfileEntity> PeerProfiles => Set<PeerProfileEntity>();
     public DbSet<PeerProfileSnapshotEntity> PeerProfileSnapshots => Set<PeerProfileSnapshotEntity>();
     public DbSet<PeerMailboxRoutingEntity> PeerMailboxRouting => Set<PeerMailboxRoutingEntity>();
-
     // Chunk 4.1 Chat Messaging Entities
     public DbSet<ChatMessageEntity> ChatMessages => Set<ChatMessageEntity>();
     public DbSet<ChatReactionEntity> ChatReactions => Set<ChatReactionEntity>();
@@ -55,27 +50,22 @@ public class PercolatorDbContext : DbContext
     public DbSet<ChatAttachmentEntity> ChatAttachments => Set<ChatAttachmentEntity>();
     public DbSet<ChatGroupInvitationEntity> ChatGroupInvitations => Set<ChatGroupInvitationEntity>();
     public DbSet<ChatUnknownGroupMessageEntity> ChatUnknownGroupMessages => Set<ChatUnknownGroupMessageEntity>();
-
     // Chunk 4.2 Discovery & Rendezvous Entities
     public DbSet<RelayPeerDirectoryEntity> RelayPeerDirectory => Set<RelayPeerDirectoryEntity>();
     public DbSet<RelayRendezvousEntryEntity> RelayRendezvousEntries => Set<RelayRendezvousEntryEntity>();
-
     // Chunk 4.4 File Transfer Entities
     public DbSet<TransferSessionEntity> TransferSessions => Set<TransferSessionEntity>();
     public DbSet<ManifestFileEntity> ManifestFiles => Set<ManifestFileEntity>();
     public DbSet<TransferBitfieldEntity> TransferBitfields => Set<TransferBitfieldEntity>();
     public DbSet<SwarmEndpointEntity> SwarmEndpoints => Set<SwarmEndpointEntity>();
     public DbSet<FilterPolicyEntity> FilterPolicies => Set<FilterPolicyEntity>();
-
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
-
         var byteArrayComparer = new ValueComparer<byte[]>(
             (c1, c2) => c1 == null ? c2 == null : c2 != null && c1.SequenceEqual(c2),
             c => c.Aggregate(0, (a, v) => HashCode.Combine(a, v.GetHashCode())),
             c => c == null ? Array.Empty<byte>() : c.ToArray());
-
         // 1. Identity Profiles
         modelBuilder.Entity<IdentityProfileEntity>(entity =>
         {
@@ -83,7 +73,6 @@ public class PercolatorDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.DisplayName).HasMaxLength(64).IsRequired();
         });
-
         // 2. Local Devices
         modelBuilder.Entity<LocalDeviceEntity>(entity =>
         {
@@ -96,7 +85,6 @@ public class PercolatorDbContext : DbContext
                 .HasForeignKey(e => e.OwnerIdentityId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
-
         // 3. Vault Identity Keys
         modelBuilder.Entity<VaultIdentityKeyEntity>(entity =>
         {
@@ -105,7 +93,6 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.PublicKey).HasColumnType("BLOB");
             entity.Property(e => e.PrivateKey).HasColumnType("BLOB");
         });
-
         // 4. Vault Signed Prekeys
         modelBuilder.Entity<VaultSignedPreKeyEntity>(entity =>
         {
@@ -119,7 +106,6 @@ public class PercolatorDbContext : DbContext
                 .HasForeignKey(e => e.OwnerIdentityId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
-
         // 5. Vault OneTime Prekeys
         modelBuilder.Entity<VaultOneTimePreKeyEntity>(entity =>
         {
@@ -134,7 +120,6 @@ public class PercolatorDbContext : DbContext
                 .HasForeignKey(e => e.OwnerIdentityId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
-
         // 6. Vault Ratchet Sessions
         modelBuilder.Entity<VaultRatchetSessionEntity>(entity =>
         {
@@ -147,12 +132,10 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.RecvChainKey).HasColumnType("BLOB");
             entity.Property(e => e.LocalEphemeralPriv).HasColumnType("BLOB");
             entity.Property(e => e.RatchetStateBlob).HasColumnType("BLOB");
-
             entity.HasIndex(e => new { e.OwnerIdentityId, e.OwnerDeviceId, e.RemotePeerId, e.RemoteDeviceId })
                 .IsUnique()
                 .HasDatabaseName("ix_vault_ratchet_route");
         });
-
         // 7. Vault Group Sender Keys
         modelBuilder.Entity<VaultGroupSenderKeyEntity>(entity =>
         {
@@ -162,7 +145,6 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.ChainKey).HasColumnType("BLOB");
             entity.Property(e => e.SigningPriv).HasColumnType("BLOB");
         });
-
         // 8. Vault Group Receiver Sessions
         modelBuilder.Entity<VaultGroupReceiverSessionEntity>(entity =>
         {
@@ -172,7 +154,6 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.ChainKey).HasColumnType("BLOB");
             entity.Property(e => e.SkippedKeysBlob).HasColumnType("BLOB");
         });
-
         // 9. Vault Group Credentials
         modelBuilder.Entity<VaultGroupCredentialsEntity>(entity =>
         {
@@ -182,7 +163,6 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.MasterKey).HasColumnType("BLOB");
             entity.Property(e => e.LocalBlobKey).HasColumnType("BLOB");
         });
-
         // 10. Vault Pending Handshakes
         modelBuilder.Entity<VaultPendingHandshakeEntity>(entity =>
         {
@@ -190,22 +170,19 @@ public class PercolatorDbContext : DbContext
             entity.HasKey(e => new { e.RecipientIdentityId, e.SenderIdentityId });
             entity.Property(e => e.EnvelopePayload).HasColumnType("BLOB");
         });
-
         // 11. Ops Outbox Jobs
         modelBuilder.Entity<OpsOutboxJobEntity>(entity =>
         {
             entity.ToTable("ops_outbox_jobs");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Payload).HasColumnType("BLOB");
-
-            entity.HasIndex(e => new { e.Status, e.NextAttemptAtUtc })
+            entity.HasIndex(e => new { e.Status, e.NextAttemptAtUtc, e.SequenceNumber })
                 .HasDatabaseName("ix_ops_outbox_due");
-            entity.HasIndex(e => new { e.OwnerIdentityId, e.Status })
+            entity.HasIndex(e => new { e.OwnerIdentityId, e.Status, e.SequenceNumber })
                 .HasDatabaseName("ix_ops_outbox_owner");
             entity.HasIndex(e => new { e.Status, e.CreatedAtUtc })
                 .HasDatabaseName("ix_ops_outbox_retention");
         });
-
         // 12. Ops Inbound Queue
         modelBuilder.Entity<OpsInboundQueueEntity>(entity =>
         {
@@ -215,7 +192,6 @@ public class PercolatorDbContext : DbContext
             entity.HasIndex(e => e.ProcessedAtUtc)
                 .HasDatabaseName("ix_ops_inbound_unprocessed");
         });
-
         // 13. Ops Reserved Ports
         modelBuilder.Entity<OpsReservedPortEntity>(entity =>
         {
@@ -224,7 +200,6 @@ public class PercolatorDbContext : DbContext
             entity.HasIndex(e => e.LeaseExpiryUtc)
                 .HasDatabaseName("ix_ops_port_lease");
         });
-
         // 14. Peer Contacts
         modelBuilder.Entity<PeerContactEntity>(entity =>
         {
@@ -235,7 +210,6 @@ public class PercolatorDbContext : DbContext
             entity.HasIndex(e => new { e.OwnerIdentityId, e.Nickname })
                 .HasDatabaseName("ix_peer_contact_nickname");
         });
-
         // 15. Peer Contact Devices
         modelBuilder.Entity<PeerContactDeviceEntity>(entity =>
         {
@@ -246,7 +220,6 @@ public class PercolatorDbContext : DbContext
                 .HasForeignKey(e => new { e.OwnerIdentityId, e.RemotePeerId })
                 .OnDelete(DeleteBehavior.Cascade);
         });
-
         // 16. Chat Channels
         modelBuilder.Entity<ChatChannelEntity>(entity =>
         {
@@ -258,7 +231,6 @@ public class PercolatorDbContext : DbContext
             entity.HasIndex(e => new { e.Type, e.OwnerIdentityId, e.RemotePeerId })
                 .HasDatabaseName("ix_chat_channel_direct");
         });
-
         // 17. Chat Channel Members
         modelBuilder.Entity<ChatChannelMemberEntity>(entity =>
         {
@@ -271,7 +243,6 @@ public class PercolatorDbContext : DbContext
             entity.HasIndex(e => e.MemberIdentityId)
                 .HasDatabaseName("ix_chat_member_identity");
         });
-
         // 18. Chat Channel Payloads
         modelBuilder.Entity<ChatChannelPayloadEntity>(entity =>
         {
@@ -285,7 +256,6 @@ public class PercolatorDbContext : DbContext
             entity.HasIndex(e => new { e.ChannelId, e.SentAtUtc })
                 .HasDatabaseName("ix_chat_payload_chronological");
         });
-
         // 19. Relay Prekeys
         modelBuilder.Entity<RelayPreKeyEntity>(entity =>
         {
@@ -298,7 +268,6 @@ public class PercolatorDbContext : DbContext
             entity.HasIndex(e => e.UpdatedAtUtc)
                 .HasDatabaseName("ix_relay_prekeys_updated");
         });
-
         // 20. Relay Profile Slots
         modelBuilder.Entity<RelayProfileSlotEntity>(entity =>
         {
@@ -311,7 +280,6 @@ public class PercolatorDbContext : DbContext
             entity.HasIndex(e => e.ExpiresAtUtc)
                 .HasDatabaseName("ix_relay_profile_expiry");
         });
-
         // 21. Relay Ledger Epochs
         modelBuilder.Entity<RelayLedgerEpochEntity>(entity =>
         {
@@ -322,7 +290,6 @@ public class PercolatorDbContext : DbContext
             entity.HasIndex(e => e.RelayIdentityId)
                 .HasDatabaseName("ix_relay_ledger_relay");
         });
-
         // 22. Relay Ledger Routing Tokens
         modelBuilder.Entity<RelayLedgerRoutingTokenEntity>(entity =>
         {
@@ -333,7 +300,6 @@ public class PercolatorDbContext : DbContext
                 .HasForeignKey(e => e.ChannelId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
-
         // 23. Peer Profiles
         modelBuilder.Entity<PeerProfileEntity>(entity =>
         {
@@ -342,7 +308,6 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.DisplayName).HasMaxLength(64).IsRequired();
             entity.Property(e => e.StatusBio).HasMaxLength(512);
         });
-
         // 24. Peer Profile Snapshots
         modelBuilder.Entity<PeerProfileSnapshotEntity>(entity =>
         {
@@ -353,7 +318,6 @@ public class PercolatorDbContext : DbContext
             entity.HasIndex(e => new { e.PeerId, e.LastObservedAtUtc })
                 .HasDatabaseName("ix_peer_snapshot_recency");
         });
-
         // 25. Peer Mailbox Routing
         modelBuilder.Entity<PeerMailboxRoutingEntity>(entity =>
         {
@@ -363,7 +327,6 @@ public class PercolatorDbContext : DbContext
             entity.HasIndex(e => new { e.PeerId, e.LastObservedAtUtc })
                 .HasDatabaseName("ix_peer_mailbox_observed");
         });
-
         // 26. Chat Messages
         modelBuilder.Entity<ChatMessageEntity>(entity =>
         {
@@ -386,7 +349,6 @@ public class PercolatorDbContext : DbContext
             entity.HasIndex(e => e.ExpiresAtUnixMs)
                 .HasDatabaseName("ix_chat_expiry");
         });
-
         // 27. Chat Message Mentions
         modelBuilder.Entity<ChatMessageMentionEntity>(entity =>
         {
@@ -399,7 +361,6 @@ public class PercolatorDbContext : DbContext
                 .HasForeignKey(e => e.MessageId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
-
         // 28. Chat Reactions
         modelBuilder.Entity<ChatReactionEntity>(entity =>
         {
@@ -412,7 +373,6 @@ public class PercolatorDbContext : DbContext
                 .HasForeignKey(e => e.MessageId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
-
         // 29. Chat Attachments
         modelBuilder.Entity<ChatAttachmentEntity>(entity =>
         {
@@ -428,7 +388,6 @@ public class PercolatorDbContext : DbContext
                 .HasForeignKey(e => e.MessageId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
-
         // 30. Chat Group Invitations
         modelBuilder.Entity<ChatGroupInvitationEntity>(entity =>
         {
@@ -436,8 +395,8 @@ public class PercolatorDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.InviterId).HasColumnType("BLOB");
             entity.Property(e => e.GroupName).IsRequired();
+            entity.Property(e => e.InitialMembersBytes).HasColumnType("BLOB");
         });
-
         // 31. Chat Unknown Group Messages
         modelBuilder.Entity<ChatUnknownGroupMessageEntity>(entity =>
         {
@@ -452,7 +411,6 @@ public class PercolatorDbContext : DbContext
             entity.HasIndex(e => e.ReceivedAtUnixMs)
                 .HasDatabaseName("ix_unknown_group_received");
         });
-
         // 32. Relay Peer Directory (Chunk 4.2)
         modelBuilder.Entity<RelayPeerDirectoryEntity>(entity =>
         {
@@ -462,7 +420,6 @@ public class PercolatorDbContext : DbContext
             entity.HasIndex(e => e.LastUpdatedAtUtc)
                 .HasDatabaseName("ix_peer_directory_updated");
         });
-
         // 33. Relay Rendezvous Entries (Chunk 4.2)
         modelBuilder.Entity<RelayRendezvousEntryEntity>(entity =>
         {
@@ -473,7 +430,6 @@ public class PercolatorDbContext : DbContext
             entity.HasIndex(e => e.PublishedAtUtc)
                 .HasDatabaseName("ix_rendezvous_published");
         });
-
         // 34. File Transfer Sessions (Chunk 4.4)
         modelBuilder.Entity<TransferSessionEntity>(entity =>
         {
@@ -488,7 +444,6 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.StreamAuthToken).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
             entity.Property(e => e.RelayPipeToken).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
         });
-
         // 35. File Transfer Manifest Files (Chunk 4.4)
         modelBuilder.Entity<ManifestFileEntity>(entity =>
         {
@@ -499,7 +454,6 @@ public class PercolatorDbContext : DbContext
                 .HasForeignKey(e => e.TransferId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
-
         // 36. File Transfer Bitfields (Chunk 4.4)
         modelBuilder.Entity<TransferBitfieldEntity>(entity =>
         {
@@ -511,7 +465,6 @@ public class PercolatorDbContext : DbContext
                 .HasForeignKey<TransferBitfieldEntity>(e => e.TransferId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
-
         // 37. Swarm Endpoints (Chunk 4.4)
         modelBuilder.Entity<SwarmEndpointEntity>(entity =>
         {
@@ -521,7 +474,6 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.PeerId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
             entity.HasIndex(e => e.LastSeenUtc).HasDatabaseName("ix_swarm_endpoints_expiry");
         });
-
         // 38. File Transfer Filter Policies (Chunk 4.4)
         modelBuilder.Entity<FilterPolicyEntity>(entity =>
         {
@@ -529,7 +481,6 @@ public class PercolatorDbContext : DbContext
             entity.HasKey(e => e.OwnerId);
             entity.Property(e => e.OwnerId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
         });
-
         // Apply snake_case naming convention to all columns
         foreach (var entity in modelBuilder.Model.GetEntityTypes())
         {
@@ -539,7 +490,6 @@ public class PercolatorDbContext : DbContext
             }
         }
     }
-
     private static string ToSnakeCase(string input)
     {
         if (string.IsNullOrEmpty(input)) return input;
@@ -563,7 +513,6 @@ public class PercolatorDbContext : DbContext
         return sb.ToString();
     }
 }
-
 public sealed class DateTimeOffsetToTicksConverter : ValueConverter<DateTimeOffset, long>
 {
     public DateTimeOffsetToTicksConverter()
@@ -573,7 +522,6 @@ public sealed class DateTimeOffsetToTicksConverter : ValueConverter<DateTimeOffs
     {
     }
 }
-
 public sealed class NullableDateTimeOffsetToTicksConverter : ValueConverter<DateTimeOffset?, long?>
 {
     public NullableDateTimeOffsetToTicksConverter()

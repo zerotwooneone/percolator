@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
@@ -15,6 +17,7 @@ public sealed class PendingGroupInvitation
     public PublicIdentityId InviterId { get; }
     public string? RelayEndpoint { get; }
     public ulong ExpiresAtUnixMs { get; }
+    public IReadOnlyList<PublicIdentityId>? InitialMembers { get; }
     public GroupInvitationStatus Status { get; private set; }
     public ulong? RespondedAtUnixMs { get; private set; }
 
@@ -26,7 +29,8 @@ public sealed class PendingGroupInvitation
         string? relayEndpoint,
         ulong expiresAtUnixMs,
         GroupInvitationStatus status = GroupInvitationStatus.Pending,
-        ulong? respondedAtUnixMs = null)
+        ulong? respondedAtUnixMs = null,
+        IReadOnlyList<PublicIdentityId>? initialMembers = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(groupName);
 
@@ -38,6 +42,7 @@ public sealed class PendingGroupInvitation
         ExpiresAtUnixMs = expiresAtUnixMs;
         Status = status;
         RespondedAtUnixMs = respondedAtUnixMs;
+        InitialMembers = initialMembers;
     }
 
     public DomainResult Accept(ulong timestampUnixMs)

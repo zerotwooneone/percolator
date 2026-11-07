@@ -1,4 +1,5 @@
 using System;
+using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Simulator.Features.Topology;
 
@@ -27,7 +28,8 @@ internal sealed record SimulatorStateSignal(
     SignalCategory Category,
     string? Details = null,
     DateTimeOffset TimestampUtc = default,
-    object? Payload = null)
+    object? Payload = null,
+    ChannelId? TargetChannelId = null)
 {
     public DateTimeOffset TimestampUtc { get; init; } = TimestampUtc == default ? DateTimeOffset.UtcNow : TimestampUtc;
 }

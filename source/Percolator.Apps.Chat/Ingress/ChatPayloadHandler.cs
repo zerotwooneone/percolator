@@ -702,7 +702,8 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
             dto.GroupName,
             dto.InviterId,
             dto.RelayEndpoint,
-            dto.ExpiresAtUnixMs);
+            dto.ExpiresAtUnixMs,
+            initialMembers: dto.Members);
 
         await _invitationRepo.AddAsync(invitation, ct).ConfigureAwait(false);
         return DomainResult.Success();
@@ -751,20 +752,51 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
         return DomainResult.Success();
     }
 
-    private ValueTask<DomainResult> HandleSystemNoticeAsync(ReadOnlyMemory<byte> data, InboundPayloadContext context, CancellationToken ct)
+    private async ValueTask<DomainResult> HandleSystemNoticeAsync(ReadOnlyMemory<byte> data, InboundPayloadContext context, CancellationToken ct)
     {
         var noticeResult = _serializer.Deserialize<SystemNoticeDto>(data);
         if (noticeResult.IsFailure)
         {
-            return ValueTask.FromResult(DomainResult.Failure(noticeResult.Error));
+            return DomainResult.Failure(noticeResult.Error);
         }
 
         var dto = noticeResult.Value;
-        if (dto.ChannelId != context.ChannelId)
+        if (dto.ChannelId != context.ChannelId && dto.NoticeType != SystemNoticeType.SafetyNumberChanged)
         {
-            return ValueTask.FromResult(DomainResult.Failure(new DomainError("CHANNEL_MISMATCH", "System notice belongs to a different channel.")));
+            // Allow group system notices delivered either over the group channel or a pairwise 1:1 channel
         }
 
-        return ValueTask.FromResult(DomainResult.Success());
+        if (dto.AffectedIdentity.HasValue)
+        {
+            var group = await _channelRepo.GetGroupByIdAsync(dto.ChannelId, ct).ConfigureAwait(false);
+            if (group is not null)
+            {
+                if (dto.NoticeType == SystemNoticeType.MemberLeft)
+                {
+                    var removeResult = group.RemoveMember(context.SenderIdentityId, dto.AffectedIdentity.Value, _timeProvider);
+                    if (removeResult.IsFailure)
+                    {
+                        return removeResult;
+                    }
+
+                    await _channelRepo.SaveGroupAsync(group, ct).ConfigureAwait(false);
+                }
+                else if (dto.NoticeType == SystemNoticeType.MemberJoined)
+                {
+                    if (!group.Members.Any(m => m.Id == dto.AffectedIdentity.Value))
+                    {
+                        var addResult = group.AddMember(context.SenderIdentityId, dto.AffectedIdentity.Value, ChannelRole.Member, _timeProvider);
+                        if (addResult.IsFailure)
+                        {
+                            return addResult;
+                        }
+
+                        await _channelRepo.SaveGroupAsync(group, ct).ConfigureAwait(false);
+                    }
+                }
+            }
+        }
+
+        return DomainResult.Success();
     }
 }

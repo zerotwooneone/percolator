@@ -83,7 +83,8 @@ internal sealed class SimulatorNotifyingPayloadHandlerDecorator : IAppPayloadHan
                 _nodeId,
                 category,
                 Details: context.SenderIdentityId.ToString(),
-                Payload: new ChatTranscriptSignalPayload(context.SenderIdentityId)));
+                Payload: new ChatTranscriptSignalPayload(context.SenderIdentityId),
+                TargetChannelId: context.ChannelId));
         }
 
         return result;

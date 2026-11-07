@@ -69,57 +69,87 @@
                 <Button Content="🔑 Publish PreKeys" Command="{Binding PublishPreKeysCommand}" />
             </StackPanel>
 
-            <!-- Pending Banner CTL-PER-14 -->
-            <Border Grid.Row="2" Background="#263859" CornerRadius="6" Padding="8,6" Margin="0,0,0,8"
-                    IsVisible="{Binding HasPendingHandshake}">
-                <Grid ColumnDefinitions="*,Auto">
-                    <TextBlock Grid.Column="0" Text="{Binding PendingHandshakeText}" VerticalAlignment="Center" FontSize="11" FontWeight="SemiBold" />
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
-                        <Button Content="✓ Accept" Command="{Binding AcceptPendingHandshakeCommand}" Classes="accent" Padding="6,2" />
-                        <Button Content="✕ Reject" Command="{Binding RejectPendingHandshakeCommand}" Padding="6,2" />
-                        <Button Content="🚫 Block" Command="{Binding BlockPendingHandshakeCommand}" Padding="6,2" />
-                    </StackPanel>
-                </Grid>
-            </Border>
+            <!-- Pending Banners CTL-PER-14, 15 -->
+            <StackPanel Grid.Row="2" Spacing="4" Margin="0,0,0,8">
+                <!-- Pending Handshake Banner CTL-PER-14 -->
+                <Border Background="#263859" CornerRadius="6" Padding="8,6"
+                        IsVisible="{Binding HasPendingHandshake}">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Grid.Column="0" Text="{Binding PendingHandshakeText}" VerticalAlignment="Center" FontSize="11" FontWeight="SemiBold" />
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
+                            <Button Content="✓ Accept" Command="{Binding AcceptPendingHandshakeCommand}" Classes="accent" Padding="6,2" />
+                            <Button Content="✕ Reject" Command="{Binding RejectPendingHandshakeCommand}" Padding="6,2" />
+                            <Button Content="🚫 Block" Command="{Binding BlockPendingHandshakeCommand}" Padding="6,2" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <!-- Pending Group Invite Banner CTL-PER-15 -->
+                <Border Background="#3D2B56" CornerRadius="6" Padding="8,6"
+                        IsVisible="{Binding HasPendingGroupInvite}">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Grid.Column="0" Text="{Binding PendingGroupInviteText}" VerticalAlignment="Center" FontSize="11" FontWeight="SemiBold" />
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
+                            <Button Content="✓ Join Group" Command="{Binding AcceptPendingGroupInviteCommand}" Classes="accent" Padding="6,2" />
+                            <Button Content="✕ Decline" Command="{Binding DeclinePendingGroupInviteCommand}" Padding="6,2" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+            </StackPanel>
 
             <!-- Chat Tab Transcript CTL-PER-17, 18, 20 -->
             <Border Grid.Row="3" Background="{DynamicResource ControlFillColorDefaultBrush}" CornerRadius="6" Padding="8">
-                <ScrollViewer>
-                    <ItemsControl ItemsSource="{Binding ChatMessages}">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate x:CompileBindings="False">
-                                <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
-                                        CornerRadius="4" Padding="6,4" Margin="0,2">
-                                    <Grid ColumnDefinitions="*,Auto">
-                                        <TextBlock Grid.Column="0" Text="{Binding BodyText}" FontSize="12" TextWrapping="Wrap" />
-                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center" Margin="6,0,0,0">
-                                            <TextBlock Text="{Binding StatusText}"
-                                                       Foreground="{Binding StatusColor}"
-                                                       ToolTip.Tip="{Binding StatusTooltip}"
-                                                       FontWeight="Bold" FontSize="12"
-                                                       VerticalAlignment="Center"
-                                                       IsVisible="{Binding IsOutgoing}" />
-                                            <Button Content="👍" ToolTip.Tip="React (CTL-PER-20)"
-                                                    Command="{Binding #PersonaCardRoot.DataContext.ReactCommand}"
-                                                    CommandParameter="{Binding}"
-                                                    Padding="4,2" FontSize="10" />
-                                            <Button Content="✏️" ToolTip.Tip="Edit Message (CTL-PER-20)"
-                                                    Command="{Binding #PersonaCardRoot.DataContext.EditMessageCommand}"
-                                                    CommandParameter="{Binding}"
-                                                    IsVisible="{Binding IsOutgoing}"
-                                                    Padding="4,2" FontSize="10" />
-                                            <Button Content="🗑️" ToolTip.Tip="Delete Message (CTL-PER-20)"
-                                                    Command="{Binding #PersonaCardRoot.DataContext.DeleteMessageCommand}"
-                                                    CommandParameter="{Binding}"
-                                                    IsVisible="{Binding IsOutgoing}"
-                                                    Padding="4,2" FontSize="10" />
-                                        </StackPanel>
-                                    </Grid>
-                                </Border>
+                <Grid RowDefinitions="Auto,*">
+                    <!-- Conversation Selector Dropdown CTL-PER-17 -->
+                    <ComboBox Grid.Row="0"
+                              ItemsSource="{Binding AvailableConversations}"
+                              SelectedItem="{Binding SelectedConversation}"
+                              HorizontalAlignment="Stretch"
+                              Margin="0,0,0,6">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate x:DataType="vm:ConversationItemViewModel">
+                                <TextBlock Text="{Binding DisplayTitle}" FontSize="12" />
                             </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </ScrollViewer>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+
+                    <ScrollViewer Grid.Row="1">
+                        <ItemsControl ItemsSource="{Binding ChatMessages}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:CompileBindings="False">
+                                    <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                                            CornerRadius="4" Padding="6,4" Margin="0,2">
+                                        <Grid ColumnDefinitions="*,Auto">
+                                            <TextBlock Grid.Column="0" Text="{Binding BodyText}" FontSize="12" TextWrapping="Wrap" />
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center" Margin="6,0,0,0">
+                                                <TextBlock Text="{Binding StatusText}"
+                                                           Foreground="{Binding StatusColor}"
+                                                           ToolTip.Tip="{Binding StatusTooltip}"
+                                                           FontWeight="Bold" FontSize="12"
+                                                           VerticalAlignment="Center"
+                                                           IsVisible="{Binding IsOutgoing}" />
+                                                <Button Content="👍" ToolTip.Tip="React (CTL-PER-20)"
+                                                        Command="{Binding #PersonaCardRoot.DataContext.ReactCommand}"
+                                                        CommandParameter="{Binding}"
+                                                        Padding="4,2" FontSize="10" />
+                                                <Button Content="✏️" ToolTip.Tip="Edit Message (CTL-PER-20)"
+                                                        Command="{Binding #PersonaCardRoot.DataContext.EditMessageCommand}"
+                                                        CommandParameter="{Binding}"
+                                                        IsVisible="{Binding IsOutgoing}"
+                                                        Padding="4,2" FontSize="10" />
+                                                <Button Content="🗑️" ToolTip.Tip="Delete Message (CTL-PER-20)"
+                                                        Command="{Binding #PersonaCardRoot.DataContext.DeleteMessageCommand}"
+                                                        CommandParameter="{Binding}"
+                                                        IsVisible="{Binding IsOutgoing}"
+                                                        Padding="4,2" FontSize="10" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </Grid>
             </Border>
 
             <!-- Compose Bar CTL-PER-18, 19 -->
@@ -133,10 +163,10 @@
                          Text="{Binding ComposeMessageText}"
                          Watermark="Type a message (CTL-PER-18)..." />
                 <Button Grid.Column="2"
-                        Content="Send"
-                        Command="{Binding SendMessageCommand}"
-                        Classes="accent"
-                        Margin="6,0,0,0" />
+                         Content="Send"
+                         Command="{Binding SendMessageCommand}"
+                         Classes="accent"
+                         Margin="6,0,0,0" />
             </Grid>
         </Grid>
     </Border>

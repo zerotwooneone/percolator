@@ -36,6 +36,10 @@ internal static class UiTaskRunner
         {
             // Ignore cancellation
         }
+        catch (ObjectDisposedException)
+        {
+            // Ignore teardown disposal
+        }
         catch (Exception ex)
         {
             logSink?.Log(new SimulatorLogEntry(
@@ -70,6 +74,10 @@ internal static class UiTaskRunner
             return await Task.Run(backgroundWork);
         }
         catch (OperationCanceledException)
+        {
+            return default;
+        }
+        catch (ObjectDisposedException)
         {
             return default;
         }

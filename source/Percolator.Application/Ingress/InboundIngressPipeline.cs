@@ -198,7 +198,9 @@ public sealed class InboundIngressPipeline : IInboundIngressPipeline
             var keyResult = receiverSession.TryAdvanceToIteration(group.Iteration, _cryptoEngine);
             if (!keyResult.IsSuccess)
             {
-                return DomainResult.Failure(keyResult.Error!);
+                return DomainResult.Failure(new DomainError(
+                    keyResult.Error!.Code,
+                    $"{keyResult.Error!.Description} (TargetIter: {group.Iteration}, ReceivingCounter: {receiverSession.ReceivingCounter})"));
             }
 
             using var messageKey = keyResult.Value!;

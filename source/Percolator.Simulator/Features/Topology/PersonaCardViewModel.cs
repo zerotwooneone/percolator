@@ -1,4 +1,5 @@
-using System;
+﻿using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
@@ -10,11 +11,15 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using ObservableCollections;
 using Percolator.Application2.Ports;
+using Percolator.Apps.Chat.Features.GroupInvitations;
+using Percolator.Apps.Chat.Features.Messaging;
 using Percolator.Domain.Channels.Ports;
+using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Simulator.Features.DirectChat;
+using Percolator.Simulator.Features.GroupMessaging;
 using Percolator.Simulator.Features.Logging;
 using Percolator.Simulator.Features.RichChatAndProfiles;
 using Percolator.Simulator.Features.RelayedChat;
@@ -25,6 +30,15 @@ using R3;
 
 namespace Percolator.Simulator.Features.Topology;
 
+internal sealed record ConversationItemViewModel(
+    string DisplayTitle,
+    bool IsGroup,
+    SimulatedNodeId? PeerNodeId,
+    ChannelId? GroupChannelId)
+{
+    public override string ToString() => DisplayTitle;
+}
+
 internal sealed partial class PersonaCardViewModel : ViewModelBase
 {
     private readonly IStatusToastService _toastService;
@@ -32,14 +46,15 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
     private readonly DirectHandshakeOrchestrator _handshakeOrchestrator;
     private readonly DirectChatCoordinator _chatCoordinator;
     private readonly AutopilotPongResponder _pongResponder;
-    private readonly ISelectionStateService _selectionState;
-    private readonly ISimulatedWorldStateService _worldState;
+    private readonly ISelectionStateService _selectionState = null!;
+    private readonly ISimulatedWorldStateService _worldState = null!;
     private readonly ISimulatedPersonaHost? _host;
     private readonly ISimulatorLogSink _logSink;
     private readonly IFlightRecorderStateService? _flightRecorder;
     private readonly RelayProvisioningCoordinator _relayCoordinator;
     private readonly RichChatActionCoordinator _richChatCoordinator;
     private readonly ProfileSyncCoordinator _profileCoordinator;
+    private readonly GroupChatCoordinator _groupCoordinator;
 
     private readonly CoalescedActionGate _chatTranscriptGate;
     private readonly CoalescedActionGate _pendingHandshakeGate;
@@ -97,8 +112,22 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
     [ObservableProperty]
     private string _pendingHandshakeText = string.Empty;
 
+    // Pending Group Invite Banner State (CTL-PER-15)
+    [ObservableProperty]
+    private bool _hasPendingGroupInvite;
+
+    [ObservableProperty]
+    private string _pendingGroupInviteText = string.Empty;
+
     private PublicIdentityId? _pendingSenderId;
+    private InvitationId? _pendingInvitationId;
     private Guid _lastMarkedReadMessageId;
+
+    // Conversation Selector (CTL-PER-17)
+    public ObservableCollection<ConversationItemViewModel> AvailableConversations { get; } = new();
+
+    [ObservableProperty]
+    private ConversationItemViewModel? _selectedConversation;
 
     // Compose State (CTL-PER-18)
     [ObservableProperty]
@@ -125,14 +154,15 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
         _handshakeOrchestrator = deps.HandshakeOrchestrator;
         _chatCoordinator = deps.ChatCoordinator;
         _pongResponder = deps.PongResponder;
-        _selectionState = deps.SelectionState;
-        _worldState = deps.WorldState;
+        _selectionState = deps.SelectionState ?? throw new ArgumentNullException(nameof(deps.SelectionState));
+        _worldState = deps.WorldState ?? throw new ArgumentNullException(nameof(deps.WorldState));
         _host = host;
         _logSink = deps.LogSink;
         _flightRecorder = deps.FlightRecorder;
         _relayCoordinator = deps.RelayCoordinator;
         _richChatCoordinator = deps.RichChatCoordinator;
         _profileCoordinator = deps.ProfileCoordinator;
+        _groupCoordinator = deps.GroupCoordinator ?? throw new ArgumentNullException(nameof(deps.GroupCoordinator));
 
         // 30 Hz refresh ceiling for chat transcript with 0ms leading edge
         _chatTranscriptGate = new CoalescedActionGate(
@@ -140,7 +170,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
             ExecuteRefreshChatTranscript);
         _chatTranscriptGate.AddTo(ref Disposables);
 
-        // 20 Hz refresh ceiling for pending handshakes
+        // 20 Hz refresh ceiling for pending handshakes and group invites
         _pendingHandshakeGate = new CoalescedActionGate(
             TimeSpan.FromMilliseconds(50),
             ExecuteRefreshPendingHandshakes);
@@ -156,17 +186,26 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
         {
             _isListening = host.IsListening.CurrentValue;
             _autoShareProfile = host.AutoShareProfile;
+            _autoAcceptGroupInvites = host.AutoAcceptGroupInvites;
         }
 
         // Subscribe to selection changes to switch active peer conversation dynamically
         if (_selectionState != null)
         {
             _selectionState.PrimarySelectedNode
-                .Subscribe(_ => RefreshChatTranscript())
+                .Subscribe(_ =>
+                {
+                    RefreshConversations();
+                    RefreshChatTranscript();
+                })
                 .AddTo(ref Disposables);
 
             _selectionState.SecondarySelectedNode
-                .Subscribe(_ => RefreshChatTranscript())
+                .Subscribe(_ =>
+                {
+                    RefreshConversations();
+                    RefreshChatTranscript();
+                })
                 .AddTo(ref Disposables);
         }
 
@@ -174,7 +213,19 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
         if (_worldState != null)
         {
             _worldState.Personas.ObserveChanged()
-                .Subscribe(_ => RefreshChatTranscript())
+                .Subscribe(_ =>
+                {
+                    RefreshConversations();
+                    RefreshChatTranscript();
+                })
+                .AddTo(ref Disposables);
+
+            _worldState.Groups.ObserveChanged()
+                .Subscribe(_ =>
+                {
+                    RefreshConversations();
+                    RefreshChatTranscript();
+                })
                 .AddTo(ref Disposables);
         }
 
@@ -191,7 +242,20 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
                              s.Details == _host.PublicIdentityId.ToString() ||
                              (s.Payload is ChatTranscriptSignalPayload cp && cp.RemotePeerId == _host.PublicIdentityId)) &&
                             s.Category == SignalCategory.ChatTranscriptChanged)
-                .Subscribe(_ => RefreshChatTranscript())
+                .Subscribe(_ =>
+                {
+                    RefreshConversations();
+                    RefreshChatTranscript();
+                })
+                .AddTo(ref Disposables);
+
+            _stateBus.Signals
+                .Where(s => s.Category == SignalCategory.GroupStateChanged)
+                .Subscribe(_ =>
+                {
+                    RefreshConversations();
+                    RefreshChatTranscript();
+                })
                 .AddTo(ref Disposables);
 
             _stateBus.Signals
@@ -267,6 +331,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
                 .AddTo(ref Disposables);
 
             // Initial refresh
+            RefreshConversations();
             RefreshPendingHandshakes();
             RefreshChatTranscript();
         }
@@ -282,9 +347,16 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
             async () =>
             {
                 using var scope = _host.Services.CreateScope();
+
+                // 1. Direct handshakes
                 var contactQuery = scope.ServiceProvider.GetRequiredService<IPeerContactQueryService>();
                 var contacts = await contactQuery.GetContactSummariesAsync(_host.PublicIdentityId);
                 var pending = contacts.FirstOrDefault(c => c.State == ContactState.PendingApproval);
+
+                // 2. Group invitations (CQRS Read Model)
+                var groupInviteQuery = scope.ServiceProvider.GetRequiredService<IGroupInvitationQueryService>();
+                var pendingInvites = await groupInviteQuery.GetPendingInvitationsAsync();
+                var pendingInvite = pendingInvites.FirstOrDefault(i => i.Status == GroupInvitationStatus.Pending);
 
                 UiTaskRunner.PostToUi(() =>
                 {
@@ -307,12 +379,117 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
                         HasPendingHandshake = false;
                         PendingHandshakeText = string.Empty;
                     }
+
+                    if (pendingInvite != null)
+                    {
+                        _pendingInvitationId = pendingInvite.InvitationId;
+                        var inviterHost = _worldState.FindPersonaHostByIdentity(pendingInvite.InviterId);
+                        var inviterName = inviterHost?.DisplayName ?? pendingInvite.InviterId.ToString()[..8];
+                        PendingGroupInviteText = $"Group invitation to '{pendingInvite.GroupName}' from {inviterName}";
+                        HasPendingGroupInvite = true;
+
+                        if (AutoAcceptGroupInvites)
+                        {
+                            _ = AcceptPendingGroupInviteAsync();
+                        }
+                    }
+                    else
+                    {
+                        _pendingInvitationId = null;
+                        HasPendingGroupInvite = false;
+                        PendingGroupInviteText = string.Empty;
+                    }
                 });
             },
             category: "PersonaCard",
             logSink: _logSink,
             nodeName: DisplayName,
             nodeId: NodeId);
+    }
+
+    private void RefreshConversations()
+    {
+        if (_worldState == null) return;
+
+        UiTaskRunner.FireAndForget(
+            async () =>
+            {
+                var list = new List<ConversationItemViewModel>();
+
+                // 1. Direct Peers
+                foreach (var persona in _worldState.Personas)
+                {
+                    if (persona.Id != NodeId && IsActivePersona(persona.Id))
+                    {
+                        list.Add(new ConversationItemViewModel($"👤 {persona.DisplayName}", IsGroup: false, persona.Id, null));
+                    }
+                }
+
+                // 2. Groups (Scoped strictly to this persona's joined groups)
+                if (_host != null)
+                {
+                    try
+                    {
+                        using var scope = _host.Services.CreateScope();
+                        var channelRepo = scope.ServiceProvider.GetRequiredService<IChannelRepository>();
+                        var groups = await channelRepo.GetAllGroupsForOwnerAsync(_host.PublicIdentityId);
+                        foreach (var group in groups)
+                        {
+                            list.Add(new ConversationItemViewModel($"👥 {group.Name}", IsGroup: true, null, group.Id));
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logSink.Log(new SimulatorLogEntry(
+                            DateTimeOffset.UtcNow,
+                            LogLevel.Debug,
+                            DisplayName,
+                            NodeId,
+                            "PersonaCard",
+                            $"Error loading joined groups for persona conversations: {ex.Message}"));
+                    }
+                }
+
+                UiTaskRunner.PostToUi(() =>
+                {
+                    var currentSelected = SelectedConversation;
+
+                    // Sync list
+                    if (!AvailableConversations.SequenceEqual(list))
+                    {
+                        AvailableConversations.Clear();
+                        foreach (var item in list)
+                        {
+                            AvailableConversations.Add(item);
+                        }
+                    }
+
+                    // Restore selection if still present in available conversations
+                    if (currentSelected != null)
+                    {
+                        var match = AvailableConversations.FirstOrDefault(c =>
+                            (c.IsGroup && currentSelected.IsGroup && c.GroupChannelId == currentSelected.GroupChannelId) ||
+                            (!c.IsGroup && !currentSelected.IsGroup && c.PeerNodeId == currentSelected.PeerNodeId));
+                        if (match != null)
+                        {
+                            SelectedConversation = match;
+                            return;
+                        }
+                    }
+
+                    // Otherwise fall back to the first available conversation (or null if none)
+                    SelectedConversation = AvailableConversations.FirstOrDefault();
+                });
+            },
+            category: "PersonaCard",
+            logSink: _logSink,
+            nodeName: DisplayName,
+            nodeId: NodeId);
+    }
+
+    partial void OnSelectedConversationChanged(ConversationItemViewModel? value)
+    {
+        RefreshChatTranscript();
     }
 
     private void RefreshChatTranscript() => _chatTranscriptGate.RequestExecution();
@@ -336,26 +513,36 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
         UiTaskRunner.FireAndForget(
             async () =>
             {
-                var activePeer = GetActivePeerSummary();
-                if (activePeer == null)
+                IReadOnlyList<ChatMessageItemViewModel> transcript;
+
+                if (SelectedConversation?.IsGroup == true && SelectedConversation.GroupChannelId.HasValue)
                 {
-                    UiTaskRunner.PostToUi(() => ChatMessages.Clear());
-                    return;
+                    var channelId = SelectedConversation.GroupChannelId.Value;
+                    transcript = await _groupCoordinator.GetGroupTranscriptAsync(_host, channelId);
                 }
-
-                var transcript = await _chatCoordinator.GetTranscriptAsync(NodeId, activePeer.Id);
-
-                if (SendReadReceipts && IsListening)
+                else
                 {
-                    var lastUnreadIncoming = transcript.LastOrDefault(m => !m.IsOutgoing && !m.IsRead);
-                    if (lastUnreadIncoming != null &&
-                        Guid.TryParse(lastUnreadIncoming.MessageId, out var msgGuid) &&
-                        msgGuid != _lastMarkedReadMessageId)
+                    var activePeer = GetActivePeerSummary();
+                    if (activePeer == null)
                     {
-                        var success = await _chatCoordinator.MarkConversationAsReadAsync(NodeId, activePeer.Id, msgGuid);
-                        if (success)
+                        UiTaskRunner.PostToUi(() => ChatMessages.Clear());
+                        return;
+                    }
+
+                    transcript = await _chatCoordinator.GetTranscriptAsync(NodeId, activePeer.Id);
+
+                    if (SendReadReceipts && IsListening)
+                    {
+                        var lastUnreadIncoming = transcript.LastOrDefault(m => !m.IsOutgoing && !m.IsRead);
+                        if (lastUnreadIncoming != null &&
+                            Guid.TryParse(lastUnreadIncoming.MessageId, out var msgGuid) &&
+                            msgGuid != _lastMarkedReadMessageId)
                         {
-                            _lastMarkedReadMessageId = msgGuid;
+                            var success = await _chatCoordinator.MarkConversationAsReadAsync(NodeId, activePeer.Id, msgGuid);
+                            if (success)
+                            {
+                                _lastMarkedReadMessageId = msgGuid;
+                            }
                         }
                     }
                 }
@@ -411,7 +598,14 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
     {
         if (_worldState == null) return null;
 
-        // 1. Check if selection state points to a VALID, currently active persona in world state
+        // 1. If a direct peer conversation is selected in dropdown, use that
+        if (SelectedConversation is { IsGroup: false, PeerNodeId: not null })
+        {
+            var peer = _worldState.Personas.FirstOrDefault(p => p.Id == SelectedConversation.PeerNodeId && IsActivePersona(p.Id));
+            if (peer != null) return peer;
+        }
+
+        // 2. Check if selection state points to a VALID, currently active persona in world state
         if (_selectionState != null)
         {
             var primary = _selectionState.PrimarySelectedNode.CurrentValue;
@@ -427,7 +621,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
             }
         }
 
-        // 2. Fall back to any active persona in the world that is not this node
+        // 3. Fall back to any active persona in the world that is not this node
         return _worldState.Personas.FirstOrDefault(p => p.Id != NodeId && IsActivePersona(p.Id));
     }
 
@@ -440,13 +634,16 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
     {
         if (_host != null)
         {
-            UiTaskRunner.FireAndForget(() => _host.SetListeningAsync(value), "HostLifecycle");
+            UiTaskRunner.FireAndForget(async () =>
+            {
+                await _host.SetListeningAsync(value).ConfigureAwait(false);
+                if (value)
+                {
+                    UiTaskRunner.PostToUi(() => RefreshChatTranscript());
+                }
+            }, "HostLifecycle");
         }
         _flightRecorder?.RecordStep(new SetListeningStateStep(DisplayName, value));
-        if (value)
-        {
-            RefreshChatTranscript();
-        }
     }
 
     partial void OnAutoReplyPongChanged(bool value)
@@ -459,6 +656,14 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
         if (_host != null)
         {
             _host.AutoShareProfile = value;
+        }
+    }
+
+    partial void OnAutoAcceptGroupInvitesChanged(bool value)
+    {
+        if (_host != null)
+        {
+            _host.AutoAcceptGroupInvites = value;
         }
     }
 
@@ -592,11 +797,82 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
     }
 
     [RelayCommand]
+    private async Task AcceptPendingGroupInviteAsync()
+    {
+        if (_host == null || !_pendingInvitationId.HasValue) return;
+        var inviteId = _pendingInvitationId.Value;
+
+        var success = await UiTaskRunner.RunAsync(
+            () => _groupCoordinator.AcceptGroupInviteAsync(_host, inviteId),
+            category: "GroupInvitation",
+            logSink: _logSink,
+            toastService: _toastService,
+            nodeName: DisplayName,
+            nodeId: NodeId);
+
+        if (success)
+        {
+            HasPendingGroupInvite = false;
+            PendingGroupInviteText = string.Empty;
+            _pendingInvitationId = null;
+            RefreshPendingHandshakes();
+            RefreshConversations();
+        }
+    }
+
+    [RelayCommand]
+    private async Task DeclinePendingGroupInviteAsync()
+    {
+        if (_host == null || !_pendingInvitationId.HasValue) return;
+        var inviteId = _pendingInvitationId.Value;
+
+        var success = await UiTaskRunner.RunAsync(
+            () => _groupCoordinator.DeclineGroupInviteAsync(_host, inviteId),
+            category: "GroupInvitation",
+            logSink: _logSink,
+            toastService: _toastService,
+            nodeName: DisplayName,
+            nodeId: NodeId);
+
+        if (success)
+        {
+            HasPendingGroupInvite = false;
+            PendingGroupInviteText = string.Empty;
+            _pendingInvitationId = null;
+            RefreshPendingHandshakes();
+        }
+    }
+
+    [RelayCommand]
     private async Task SendMessageAsync()
     {
         if (string.IsNullOrWhiteSpace(ComposeMessageText)) return;
         var text = ComposeMessageText;
         ComposeMessageText = string.Empty;
+
+        // Group message branch
+        if (SelectedConversation?.IsGroup == true && SelectedConversation.GroupChannelId.HasValue)
+        {
+            if (_host == null) return;
+            var channelId = SelectedConversation.GroupChannelId.Value;
+            var groupTitle = SelectedConversation.DisplayTitle.Replace("👥 ", "");
+
+            var success = await UiTaskRunner.RunAsync(
+                () => _groupCoordinator.SendGroupMessageAsync(_host, channelId, text),
+                category: "GroupChat",
+                logSink: _logSink,
+                toastService: _toastService,
+                nodeName: DisplayName,
+                nodeId: NodeId);
+
+            if (success)
+            {
+                _flightRecorder?.RecordStep(new SendGroupMessageStep(DisplayName, groupTitle, text));
+            }
+            return;
+        }
+
+        // Direct 1:1 message branch
         var expireSeconds = SelectedTimerIndex switch
         {
             1 => 60,
@@ -612,7 +888,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
         }
 
         var peerId = peer.Id;
-        var success = await UiTaskRunner.RunAsync(
+        var successDirect = await UiTaskRunner.RunAsync(
             () => _chatCoordinator.SendDirectMessageAsync(NodeId, peerId, text, expireSeconds),
             category: "DirectChat",
             logSink: _logSink,
@@ -620,7 +896,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
             nodeName: DisplayName,
             nodeId: NodeId);
 
-        if (success)
+        if (successDirect)
         {
             if (expireSeconds.HasValue && expireSeconds.Value > 0)
             {

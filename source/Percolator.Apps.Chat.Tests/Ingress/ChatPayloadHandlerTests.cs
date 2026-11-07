@@ -1164,6 +1164,79 @@ public class ChatPayloadHandlerTests
         unmutated!.DeliveredAtUnixMs.Should().BeNull();
     }
 
+    [Test]
+    public async Task HandleInboundAsync_SystemNotice_MemberLeft_DeliveredOverDirectChannel_RemovesMemberFromGroupChannel()
+    {
+        var group = ChatTestFactory.CreateGroupChannel(_timeProvider);
+        var adminId = group.Members.First().Id;
+        var memberToEvict = PublicIdentityId.New();
+        group.AddMember(adminId, memberToEvict, ChannelRole.Member, _timeProvider);
+        await _channelRepo.SaveGroupAsync(group);
+
+        var directChannelId = ChannelId.New();
+        var noticeDto = new SystemNoticeDto(
+            group.Id,
+            SystemNoticeType.MemberLeft,
+            memberToEvict,
+            _timeProvider.UtcNowUnixMs);
+
+        var envelope = new ChatPayloadEnvelopeDto(
+            ChatPayloadType.SystemNotice,
+            _serializer.Serialize(noticeDto),
+            Array.Empty<byte>());
+
+        var context = new InboundPayloadContext(
+            directChannelId,
+            adminId,
+            ChatTestFactory.AliceDeviceId,
+            AppId.Chat,
+            _serializer.Serialize(envelope),
+            _timeProvider.UtcNow);
+
+        var result = await _sut.HandleInboundAsync(context);
+        result.IsSuccess.Should().BeTrue();
+
+        var updatedGroup = await _channelRepo.GetGroupByIdAsync(group.Id);
+        updatedGroup.Should().NotBeNull();
+        updatedGroup!.Members.Select(m => m.Id).Should().NotContain(memberToEvict);
+    }
+
+    [Test]
+    public async Task HandleInboundAsync_SystemNotice_MemberJoined_DeliveredOverDirectChannel_AddsMemberToGroupChannel()
+    {
+        var group = ChatTestFactory.CreateGroupChannel(_timeProvider);
+        var adminId = group.Members.First().Id;
+        var newMemberId = PublicIdentityId.New();
+        await _channelRepo.SaveGroupAsync(group);
+
+        var directChannelId = ChannelId.New();
+        var noticeDto = new SystemNoticeDto(
+            group.Id,
+            SystemNoticeType.MemberJoined,
+            newMemberId,
+            _timeProvider.UtcNowUnixMs);
+
+        var envelope = new ChatPayloadEnvelopeDto(
+            ChatPayloadType.SystemNotice,
+            _serializer.Serialize(noticeDto),
+            Array.Empty<byte>());
+
+        var context = new InboundPayloadContext(
+            directChannelId,
+            adminId,
+            ChatTestFactory.AliceDeviceId,
+            AppId.Chat,
+            _serializer.Serialize(envelope),
+            _timeProvider.UtcNow);
+
+        var result = await _sut.HandleInboundAsync(context);
+        result.IsSuccess.Should().BeTrue();
+
+        var updatedGroup = await _channelRepo.GetGroupByIdAsync(group.Id);
+        updatedGroup.Should().NotBeNull();
+        updatedGroup!.Members.Select(m => m.Id).Should().Contain(newMemberId);
+    }
+
     #endregion
 
     private sealed class InMemoryUnknownGroupCache : IUnknownGroupMessageCacheRepository

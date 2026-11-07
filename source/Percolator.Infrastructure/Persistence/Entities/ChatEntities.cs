@@ -82,6 +82,7 @@ public sealed class ChatGroupInvitationEntity
     public ulong ExpiresAtUnixMs { get; set; }
     public int Status { get; set; }
     public ulong? RespondedAtUnixMs { get; set; }
+    public byte[]? InitialMembersBytes { get; set; }
 }
 
 public sealed class ChatUnknownGroupMessageEntity

@@ -1,19 +1,23 @@
 using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Percolator.Application2.Delivery;
 using Percolator.Application2.Delivery.Ports;
 using Percolator.Domain.Common;
-using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Delivery.Hosting;
-using Percolator.PluginSdk;
+using Percolator.Domain.Delivery.Ports;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.Infrastructure.Protos;
+using Percolator.Infrastructure.Security;
 using Percolator.Infrastructure.Transport;
+using Percolator.PluginSdk;
 using Percolator.Simulator.Features.Logging;
 
 namespace Percolator.Simulator.Features.Topology;
@@ -181,6 +185,91 @@ internal sealed class SimulatorTransportDispatcher : ITransportDispatcher
                     return DomainResult.Success();
                 }
 
+                case DeliveryRouteType.RelayedGroup:
+                {
+                    Uri? relayUri = null;
+                    if (route.RelayEndpoint != null)
+                    {
+                        var endpointStr = route.RelayEndpoint.Value;
+                        relayUri = endpointStr.Contains("://")
+                            ? new Uri(endpointStr)
+                            : new Uri($"https://{endpointStr}");
+                    }
+                    else
+                    {
+                        var defaultRelay = _worldState.GetAllRelayHosts().FirstOrDefault();
+                        if (defaultRelay != null)
+                        {
+                            relayUri = defaultRelay.BoundEndpoint;
+                        }
+                    }
+
+                    if (relayUri == null)
+                    {
+                        return DomainResult.Failure(new DomainError(
+                            "MISSING_RELAY_ENDPOINT", "Relay endpoint is required for RelayedGroup route."));
+                    }
+
+                    byte[] framedPayload = SealedWireFraming.Encode(
+                        WireFrameKind.GroupBroadcast,
+                        job.ChannelId,
+                        job.OwnerIdentityId,
+                        DeviceId.Primary,
+                        job.Payload);
+
+                    uint epoch = 0;
+                    var relayHost = _worldState.GetAllRelayHosts().FirstOrDefault(r => r.BoundEndpoint == relayUri)
+                                    ?? _worldState.GetAllRelayHosts().FirstOrDefault();
+                    if (relayHost != null)
+                    {
+                        var ledgerRepo = relayHost.Services.GetService<IRelayLedgerRepository>();
+                        if (ledgerRepo != null)
+                        {
+                            var ledger = await ledgerRepo.GetByChannelIdAsync(job.ChannelId, ct);
+                            if (ledger != null)
+                            {
+                                epoch = ledger.CurrentEpoch.Value;
+                            }
+                        }
+                    }
+
+                    var zkProofEngine = new ZkgroupCryptographyService();
+                    Span<byte> challengeHash = stackalloc byte[32];
+                    RelayGroupLedger.ComputeDispatchChallenge(framedPayload, challengeHash);
+
+                    var zkProof = zkProofEngine.GenerateGroupPresentation(
+                        epoch,
+                        challengeHash,
+                        ReadOnlySpan<byte>.Empty,
+                        ReadOnlySpan<byte>.Empty);
+
+                    var groupRequest = new DispatchGroupMessageRequest
+                    {
+                        ConversationId = ByteString.CopyFrom(job.ChannelId.ToByteArray()),
+                        Epoch = epoch,
+                        ZkPresentationProof = ByteString.CopyFrom(zkProof.Span),
+                        SenderKeyIteration = 0,
+                        Ciphertext = ByteString.CopyFrom(framedPayload),
+                        AuthorSignature = ByteString.Empty
+                    };
+
+                    var response = await _invoker.DispatchGroupMessageAsync(relayUri, groupRequest, ct);
+                    if (!response.Accepted)
+                    {
+                        return DomainResult.Failure(new DomainError("GROUP_DISPATCH_REJECTED", "Relay rejected group dispatch."));
+                    }
+
+                    _logSink.Log(new SimulatorLogEntry(
+                        DateTimeOffset.UtcNow,
+                        LogLevel.Debug,
+                        _senderDisplayName,
+                        null,
+                        "TransportOutbox",
+                        $"Group broadcast envelope (Epoch: {epoch}) dispatched to {relayUri} successfully."));
+
+                    return DomainResult.Success();
+                }
+
                 default:
                     return DomainResult.Failure(new DomainError(
                         "UNSUPPORTED_ROUTE", $"Route type {route.Type} not yet supported in transport dispatcher."));
@@ -214,6 +303,19 @@ internal sealed class SimulatorTransportDispatcher : ITransportDispatcher
         catch
         {
             // Direct ratchet or other wire format
+        }
+
+        try
+        {
+            var gp = GroupSessionPackageProto.Parser.ParseFrom(payload.Span);
+            if (gp.ConversationId.Length == 16 && !gp.Ciphertext.IsEmpty)
+            {
+                return WireFrameKind.GroupBroadcast;
+            }
+        }
+        catch
+        {
+            // Direct ratchet
         }
 
         return WireFrameKind.DirectRatchet;

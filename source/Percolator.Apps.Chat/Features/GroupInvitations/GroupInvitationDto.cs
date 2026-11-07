@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 
@@ -9,4 +10,5 @@ public sealed record GroupInvitationDto(
     string GroupName,
     PublicIdentityId InviterId,
     string? RelayEndpoint,
-    ulong ExpiresAtUnixMs);
+    ulong ExpiresAtUnixMs,
+    IReadOnlyList<PublicIdentityId>? Members = null);

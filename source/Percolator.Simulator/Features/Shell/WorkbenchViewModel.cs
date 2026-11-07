@@ -3,6 +3,7 @@ using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.Linq;
 using ObservableCollections;
+using Percolator.Simulator.Features.GroupMessaging;
 using Percolator.Simulator.Features.RelayedChat;
 using Percolator.Simulator.Features.Topology;
 using R3;
@@ -48,7 +49,8 @@ internal sealed class WorkbenchViewModel : ViewModelBase
                             {
                                 var existing = PinnedCardViewModels.FirstOrDefault(vm =>
                                     (vm is PersonaCardViewModel p && p.NodeId == e.OldItem.Id) ||
-                                    (vm is RelayCardViewModel r && r.DisplayName == e.OldItem.DisplayName));
+                                    (vm is RelayCardViewModel r && r.DisplayName == e.OldItem.DisplayName) ||
+                                    (vm is GroupPanelViewModel g && g.NodeId == e.OldItem.Id));
                                 if (existing is not null)
                                 {
                                     PinnedCardViewModels.Remove(existing);
@@ -79,6 +81,14 @@ internal sealed class WorkbenchViewModel : ViewModelBase
                 _cardDependencies.StateBus,
                 _worldState.GetRelayHost(node.Id),
                 _cardDependencies.LogSink),
+            SimulatedNodeType.Group => new GroupPanelViewModel(
+                node,
+                _cardDependencies.ToastService,
+                _cardDependencies.StateBus,
+                _worldState,
+                _cardDependencies.GroupCoordinator,
+                _cardDependencies.LogSink,
+                _cardDependencies.FlightRecorder),
             _ => new PersonaCardViewModel(
                 node,
                 _cardDependencies,

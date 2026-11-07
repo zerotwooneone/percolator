@@ -24,15 +24,16 @@ public sealed class SqlGroupInvitationQueryService : IGroupInvitationQueryServic
         var entities = await _dbContext.ChatGroupInvitations
             .AsNoTracking()
             .Where(i => i.Status == (int)GroupInvitationStatus.Pending)
-            .OrderBy(i => i.ExpiresAtUnixMs)
             .ToListAsync(ct);
 
-        return entities.Select(e => new GroupInvitationSummaryReadModel(
-            new InvitationId(e.Id),
-            ChannelId.FromGuid(e.TargetGroupChannelId),
-            e.GroupName,
-            PublicIdentityId.FromBytes(e.InviterId),
-            e.ExpiresAtUnixMs,
-            (GroupInvitationStatus)e.Status)).ToList();
+        return entities
+            .OrderBy(i => i.ExpiresAtUnixMs)
+            .Select(e => new GroupInvitationSummaryReadModel(
+                new InvitationId(e.Id),
+                ChannelId.FromGuid(e.TargetGroupChannelId),
+                e.GroupName,
+                PublicIdentityId.FromBytes(e.InviterId),
+                e.ExpiresAtUnixMs,
+                (GroupInvitationStatus)e.Status)).ToList();
     }
 }

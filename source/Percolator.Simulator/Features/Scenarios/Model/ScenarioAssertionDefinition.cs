@@ -15,6 +15,9 @@ namespace Percolator.Simulator.Features.Scenarios.Model;
 [JsonDerivedType(typeof(AssertMessageTombstonedAssertion), "AssertMessageTombstoned")]
 [JsonDerivedType(typeof(AssertMessageReadAssertion), "AssertMessageRead")]
 [JsonDerivedType(typeof(AssertProfileSyncedAssertion), "AssertProfileSynced")]
+[JsonDerivedType(typeof(AssertGroupEpochAssertion), "AssertGroupEpoch")]
+[JsonDerivedType(typeof(AssertGroupMessageDeliveredAssertion), "AssertGroupMessageDelivered")]
+[JsonDerivedType(typeof(AssertMemberCannotDecryptAssertion), "AssertMemberCannotDecrypt")]
 public abstract record ScenarioAssertionDefinition
 {
     public abstract string DisplayText { get; }
@@ -91,4 +94,23 @@ public sealed record AssertMessageReadAssertion(string PersonaAlias, string Mess
 public sealed record AssertProfileSyncedAssertion(string ObserverAlias, string TargetAlias, string ExpectedDisplayName) : ScenarioAssertionDefinition
 {
     public override string DisplayText => $"Assert Profile Synced on '{ObserverAlias}' for '{TargetAlias}' == \"{ExpectedDisplayName}\"";
+}
+
+// -----------------------------------------------------------------------------
+// Phase 7 Scenario Assertions: Group Epochs, Message Delivery & Forward Secrecy
+// -----------------------------------------------------------------------------
+
+public sealed record AssertGroupEpochAssertion(string GroupName, ulong ExpectedEpoch) : ScenarioAssertionDefinition
+{
+    public override string DisplayText => $"Assert Group Epoch for '{GroupName}' == {ExpectedEpoch}";
+}
+
+public sealed record AssertGroupMessageDeliveredAssertion(string PersonaAlias, string GroupName, string ExpectedText) : ScenarioAssertionDefinition
+{
+    public override string DisplayText => $"Assert Group Message Delivered: '{PersonaAlias}' in '{GroupName}' received \"{ExpectedText}\"";
+}
+
+public sealed record AssertMemberCannotDecryptAssertion(string PersonaAlias, string GroupName, string ExpectedText) : ScenarioAssertionDefinition
+{
+    public override string DisplayText => $"Assert Forward Secrecy: '{PersonaAlias}' CANNOT decrypt \"{ExpectedText}\" in '{GroupName}'";
 }

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -18,6 +18,11 @@ using Percolator.Simulator.Features.RelayedChat;
 using Percolator.Simulator.Features.RichChatAndProfiles;
 using Percolator.Simulator.Features.Scenarios.Model;
 using Percolator.Simulator.Features.Shell;
+using Percolator.Apps.Chat.Features.GroupInvitations;
+using Percolator.Domain.Channels.Model;
+using Percolator.Domain.Channels.Ports;
+using Percolator.Domain.Channels.ValueObjects;
+using Percolator.Simulator.Features.GroupMessaging;
 using Percolator.Simulator.Features.Topology;
 using R3;
 
@@ -35,6 +40,7 @@ internal sealed class ScenarioRunnerService
     private readonly IVirtualClockStateService _virtualClock;
     private readonly RichChatActionCoordinator _richChatCoordinator;
     private readonly ProfileSyncCoordinator _profileCoordinator;
+    private readonly GroupChatCoordinator _groupCoordinator;
     private readonly IFlightRecorderStateService? _flightRecorder;
     private readonly ISelectionStateService? _selectionState;
 
@@ -49,6 +55,7 @@ internal sealed class ScenarioRunnerService
         IVirtualClockStateService virtualClock,
         RichChatActionCoordinator richChatCoordinator,
         ProfileSyncCoordinator profileCoordinator,
+        GroupChatCoordinator groupCoordinator,
         IFlightRecorderStateService? flightRecorder = null,
         ISelectionStateService? selectionState = null)
     {
@@ -62,6 +69,7 @@ internal sealed class ScenarioRunnerService
         _virtualClock = virtualClock ?? throw new ArgumentNullException(nameof(virtualClock));
         _richChatCoordinator = richChatCoordinator ?? throw new ArgumentNullException(nameof(richChatCoordinator));
         _profileCoordinator = profileCoordinator ?? throw new ArgumentNullException(nameof(profileCoordinator));
+        _groupCoordinator = groupCoordinator ?? throw new ArgumentNullException(nameof(groupCoordinator));
         _flightRecorder = flightRecorder;
         _selectionState = selectionState;
     }
@@ -105,6 +113,7 @@ internal sealed class ScenarioRunnerService
         }
         var aliasMap = new Dictionary<string, ISimulatedPersonaHost>(StringComparer.OrdinalIgnoreCase);
         var relayAliasMap = new Dictionary<string, ISimulatedRelayHost>(StringComparer.OrdinalIgnoreCase);
+        var groupAliasMap = new Dictionary<string, ChannelId>(StringComparer.OrdinalIgnoreCase);
 
         try
         {
@@ -204,6 +213,37 @@ internal sealed class ScenarioRunnerService
                     case RerollProfileStep rerollStep:
                         await ExecuteRerollProfileAsync(rerollStep, aliasMap, ct);
                         break;
+                    case CreateGroupStep createGroup:
+                        await ExecuteCreateGroupAsync(createGroup, aliasMap, relayAliasMap, groupAliasMap, ct);
+                        break;
+
+                    case AcceptGroupInviteStep acceptInvite:
+                        await ExecuteAcceptGroupInviteAsync(acceptInvite, aliasMap, groupAliasMap, ct);
+                        break;
+
+                    case DeclineGroupInviteStep declineInvite:
+                        await ExecuteDeclineGroupInviteAsync(declineInvite, aliasMap, groupAliasMap, ct);
+                        break;
+
+                    case SendGroupMessageStep sendGroupMsg:
+                        await ExecuteSendGroupMessageAsync(sendGroupMsg, aliasMap, groupAliasMap, ct);
+                        break;
+
+                    case FloodGroupMessagesStep floodStep:
+                        await ExecuteFloodGroupMessagesAsync(floodStep, aliasMap, groupAliasMap, ct);
+                        break;
+
+                    case AddGroupMemberStep addMember:
+                        await ExecuteAddGroupMemberAsync(addMember, aliasMap, relayAliasMap, groupAliasMap, ct);
+                        break;
+
+                    case EvictGroupMemberStep evictMember:
+                        await ExecuteEvictGroupMemberAsync(evictMember, aliasMap, relayAliasMap, groupAliasMap, ct);
+                        break;
+
+                    case RenameGroupStep renameGroup:
+                        await ExecuteRenameGroupAsync(renameGroup, aliasMap, relayAliasMap, groupAliasMap, ct);
+                        break;
 
                     default:
                         throw new ScenarioExecutionException($"Unsupported scenario step type: {step.GetType().Name}");
@@ -273,6 +313,17 @@ internal sealed class ScenarioRunnerService
 
                     case AssertProfileSyncedAssertion profileAssert:
                         await ExecuteAssertProfileSyncedAsync(profileAssert, aliasMap, ct);
+                        break;
+                    case AssertGroupEpochAssertion epochAssert:
+                        await ExecuteAssertGroupEpochAsync(epochAssert, groupAliasMap, ct);
+                        break;
+
+                    case AssertGroupMessageDeliveredAssertion groupMsgAssert:
+                        await ExecuteAssertGroupMessageDeliveredAsync(groupMsgAssert, aliasMap, groupAliasMap, ct);
+                        break;
+
+                    case AssertMemberCannotDecryptAssertion forwardSecrecyAssert:
+                        await ExecuteAssertMemberCannotDecryptAsync(forwardSecrecyAssert, aliasMap, groupAliasMap, ct);
                         break;
 
                     default:
@@ -1057,5 +1108,307 @@ internal sealed class ScenarioRunnerService
             throw new ScenarioExecutionException($"Persona '{alias}' not found in scenario.");
         }
         return host;
+    }
+
+    private async Task ExecuteCreateGroupAsync(
+        CreateGroupStep step,
+        Dictionary<string, ISimulatedPersonaHost> aliasMap,
+        Dictionary<string, ISimulatedRelayHost> relayAliasMap,
+        Dictionary<string, ChannelId> groupAliasMap,
+        CancellationToken ct)
+    {
+        if (!aliasMap.TryGetValue(step.AdminAlias, out var admin))
+            throw new ScenarioExecutionException($"Persona '{step.AdminAlias}' not found.");
+        if (!relayAliasMap.TryGetValue(step.RelayAlias, out var relay))
+            throw new ScenarioExecutionException($"Relay '{step.RelayAlias}' not found.");
+
+        var members = new List<ISimulatedPersonaHost>();
+        foreach (var memberAlias in step.MemberAliases)
+        {
+            if (aliasMap.TryGetValue(memberAlias, out var m))
+            {
+                members.Add(m);
+            }
+            else
+            {
+                throw new ScenarioExecutionException($"Member persona '{memberAlias}' not found.");
+            }
+        }
+
+        var channelId = await _groupCoordinator.CreateGroupOnRelayAsync(admin, relay, step.GroupName, members, ct);
+        groupAliasMap[step.GroupName] = channelId;
+    }
+
+    private async Task ExecuteAcceptGroupInviteAsync(
+        AcceptGroupInviteStep step,
+        Dictionary<string, ISimulatedPersonaHost> aliasMap,
+        Dictionary<string, ChannelId> groupAliasMap,
+        CancellationToken ct)
+    {
+        if (!aliasMap.TryGetValue(step.PersonaAlias, out var persona))
+            throw new ScenarioExecutionException($"Persona '{step.PersonaAlias}' not found.");
+        if (!groupAliasMap.TryGetValue(step.GroupName, out var channelId))
+            throw new ScenarioExecutionException($"Group '{step.GroupName}' not found in scenario.");
+
+        using var scope = persona.Services.CreateScope();
+        var inviteRepo = scope.ServiceProvider.GetRequiredService<IGroupInvitationRepository>();
+        var queryService = scope.ServiceProvider.GetRequiredService<IGroupInvitationQueryService>();
+
+        PendingGroupInvitation? invitation = null;
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (DateTime.UtcNow < deadline && !ct.IsCancellationRequested)
+        {
+            var summaries = await queryService.GetPendingInvitationsAsync(ct);
+            var sum = summaries.FirstOrDefault(s => s.TargetGroupChannelId == channelId);
+            if (sum != null)
+            {
+                invitation = await inviteRepo.GetByIdAsync(sum.InvitationId, ct);
+                if (invitation != null) break;
+            }
+
+            using var loopCts = new CancellationTokenSource(TimeSpan.FromMilliseconds(250));
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, loopCts.Token);
+            try
+            {
+                await _stateBus.Signals.Where(s => s.NodeId == persona.Id).FirstAsync(cancellationToken: linked.Token);
+            }
+            catch (OperationCanceledException) when (loopCts.IsCancellationRequested) { }
+        }
+
+        if (invitation == null)
+            throw new ScenarioExecutionException($"No pending invitation found for '{step.PersonaAlias}' in '{step.GroupName}'.");
+
+        var success = await _groupCoordinator.AcceptGroupInviteAsync(persona, invitation.InvitationId, ct);
+        if (!success)
+            throw new ScenarioExecutionException($"Failed to accept group invitation for '{step.PersonaAlias}'.");
+    }
+
+    private async Task ExecuteDeclineGroupInviteAsync(
+        DeclineGroupInviteStep step,
+        Dictionary<string, ISimulatedPersonaHost> aliasMap,
+        Dictionary<string, ChannelId> groupAliasMap,
+        CancellationToken ct)
+    {
+        if (!aliasMap.TryGetValue(step.PersonaAlias, out var persona))
+            throw new ScenarioExecutionException($"Persona '{step.PersonaAlias}' not found.");
+        if (!groupAliasMap.TryGetValue(step.GroupName, out var channelId))
+            throw new ScenarioExecutionException($"Group '{step.GroupName}' not found in scenario.");
+
+        using var scope = persona.Services.CreateScope();
+        var queryService = scope.ServiceProvider.GetRequiredService<IGroupInvitationQueryService>();
+        var summaries = await queryService.GetPendingInvitationsAsync(ct);
+        var sum = summaries.FirstOrDefault(s => s.TargetGroupChannelId == channelId);
+        if (sum == null)
+            throw new ScenarioExecutionException($"No pending invitation found for '{step.PersonaAlias}' in '{step.GroupName}'.");
+
+        var success = await _groupCoordinator.DeclineGroupInviteAsync(persona, sum.InvitationId, ct);
+        if (!success)
+            throw new ScenarioExecutionException($"Failed to decline group invitation for '{step.PersonaAlias}'.");
+    }
+
+    private async Task ExecuteSendGroupMessageAsync(
+        SendGroupMessageStep step,
+        Dictionary<string, ISimulatedPersonaHost> aliasMap,
+        Dictionary<string, ChannelId> groupAliasMap,
+        CancellationToken ct)
+    {
+        if (!aliasMap.TryGetValue(step.SenderAlias, out var sender))
+            throw new ScenarioExecutionException($"Persona '{step.SenderAlias}' not found.");
+        if (!groupAliasMap.TryGetValue(step.GroupName, out var channelId))
+            throw new ScenarioExecutionException($"Group '{step.GroupName}' not found in scenario.");
+
+        var details = await _groupCoordinator.GetGroupDetailsAsync(channelId, ct);
+        var listeningRecipients = new List<ISimulatedPersonaHost>();
+        if (details != null)
+        {
+            foreach (var member in details.Value.Members)
+            {
+                if (member.IdentityId != sender.PublicIdentityId)
+                {
+                    var host = _worldState.FindPersonaHostByIdentity(member.IdentityId);
+                    if (host != null && host.IsListening.CurrentValue)
+                    {
+                        listeningRecipients.Add(host);
+                    }
+                }
+            }
+        }
+
+        var signalTasks = listeningRecipients
+            .Select(h => _stateBus.Signals
+                .Where(s => s.NodeId == h.Id && s.Category == SignalCategory.ChatTranscriptChanged && (s.TargetChannelId == null || s.TargetChannelId == channelId))
+                .FirstAsync(cancellationToken: ct))
+            .ToList();
+
+        var success = await _groupCoordinator.SendGroupMessageAsync(sender, channelId, step.Text, expireAfterSeconds: null, ct);
+        if (!success)
+            throw new ScenarioExecutionException($"Failed to send group message from '{step.SenderAlias}'.");
+
+        if (signalTasks.Count > 0)
+        {
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
+            await Task.WhenAll(signalTasks).WaitAsync(linkedCts.Token);
+        }
+    }
+
+    private async Task ExecuteFloodGroupMessagesAsync(
+        FloodGroupMessagesStep step,
+        Dictionary<string, ISimulatedPersonaHost> aliasMap,
+        Dictionary<string, ChannelId> groupAliasMap,
+        CancellationToken ct)
+    {
+        if (!aliasMap.TryGetValue(step.SenderAlias, out var sender))
+            throw new ScenarioExecutionException($"Persona '{step.SenderAlias}' not found.");
+        if (!groupAliasMap.TryGetValue(step.GroupName, out var channelId))
+            throw new ScenarioExecutionException($"Group '{step.GroupName}' not found in scenario.");
+
+        var count = await _groupCoordinator.FloodGroupMessagesAsync(sender, channelId, step.Count, ct);
+        if (count == 0)
+            throw new ScenarioExecutionException($"Failed to flood {step.Count} group messages from '{step.SenderAlias}'.");
+    }
+
+    private async Task ExecuteAddGroupMemberAsync(
+        AddGroupMemberStep step,
+        Dictionary<string, ISimulatedPersonaHost> aliasMap,
+        Dictionary<string, ISimulatedRelayHost> relayAliasMap,
+        Dictionary<string, ChannelId> groupAliasMap,
+        CancellationToken ct)
+    {
+        if (!aliasMap.TryGetValue(step.AdminAlias, out var admin))
+            throw new ScenarioExecutionException($"Admin persona '{step.AdminAlias}' not found.");
+        if (!aliasMap.TryGetValue(step.NewMemberAlias, out var newMember))
+            throw new ScenarioExecutionException($"New member persona '{step.NewMemberAlias}' not found.");
+        if (!groupAliasMap.TryGetValue(step.GroupName, out var channelId))
+            throw new ScenarioExecutionException($"Group '{step.GroupName}' not found in scenario.");
+
+        var relay = admin.HomeRelay ?? _worldState.GetAllRelayHosts().FirstOrDefault()
+            ?? throw new ScenarioExecutionException("No relay host available for group mutation.");
+
+        var success = await _groupCoordinator.AddGroupMemberAsync(admin, relay, channelId, newMember, ct);
+        if (!success)
+            throw new ScenarioExecutionException($"Failed to add '{step.NewMemberAlias}' to group '{step.GroupName}'.");
+    }
+
+    private async Task ExecuteEvictGroupMemberAsync(
+        EvictGroupMemberStep step,
+        Dictionary<string, ISimulatedPersonaHost> aliasMap,
+        Dictionary<string, ISimulatedRelayHost> relayAliasMap,
+        Dictionary<string, ChannelId> groupAliasMap,
+        CancellationToken ct)
+    {
+        if (!aliasMap.TryGetValue(step.AdminAlias, out var admin))
+            throw new ScenarioExecutionException($"Admin persona '{step.AdminAlias}' not found.");
+        if (!aliasMap.TryGetValue(step.EvictedMemberAlias, out var member))
+            throw new ScenarioExecutionException($"Evicted persona '{step.EvictedMemberAlias}' not found.");
+        if (!groupAliasMap.TryGetValue(step.GroupName, out var channelId))
+            throw new ScenarioExecutionException($"Group '{step.GroupName}' not found in scenario.");
+
+        var relay = admin.HomeRelay ?? _worldState.GetAllRelayHosts().FirstOrDefault()
+            ?? throw new ScenarioExecutionException("No relay host available for group mutation.");
+
+        var success = await _groupCoordinator.EvictGroupMemberAsync(admin, relay, channelId, member, ct);
+        if (!success)
+            throw new ScenarioExecutionException($"Failed to evict '{step.EvictedMemberAlias}' from group '{step.GroupName}'.");
+    }
+
+    private async Task ExecuteRenameGroupAsync(
+        RenameGroupStep step,
+        Dictionary<string, ISimulatedPersonaHost> aliasMap,
+        Dictionary<string, ISimulatedRelayHost> relayAliasMap,
+        Dictionary<string, ChannelId> groupAliasMap,
+        CancellationToken ct)
+    {
+        if (!aliasMap.TryGetValue(step.AdminAlias, out var admin))
+            throw new ScenarioExecutionException($"Admin persona '{step.AdminAlias}' not found.");
+        if (!groupAliasMap.TryGetValue(step.GroupName, out var channelId))
+            throw new ScenarioExecutionException($"Group '{step.GroupName}' not found in scenario.");
+
+        var relay = admin.HomeRelay ?? _worldState.GetAllRelayHosts().FirstOrDefault()
+            ?? throw new ScenarioExecutionException("No relay host available for group mutation.");
+
+        var success = await _groupCoordinator.RenameGroupAsync(admin, relay, channelId, step.NewGroupName, ct);
+        if (!success)
+            throw new ScenarioExecutionException($"Failed to rename group '{step.GroupName}'.");
+
+        groupAliasMap[step.NewGroupName] = channelId;
+    }
+
+    private async Task ExecuteAssertGroupEpochAsync(
+        AssertGroupEpochAssertion assertion,
+        Dictionary<string, ChannelId> groupAliasMap,
+        CancellationToken ct)
+    {
+        if (!groupAliasMap.TryGetValue(assertion.GroupName, out var channelId))
+            throw new ScenarioAssertionException($"Group '{assertion.GroupName}' not found in scenario.");
+
+        var details = await _groupCoordinator.GetGroupDetailsAsync(channelId, ct);
+        if (details == null)
+            throw new ScenarioAssertionException($"Group details for '{assertion.GroupName}' not found.");
+
+        if (details.Value.CurrentEpoch != assertion.ExpectedEpoch)
+        {
+            throw new ScenarioAssertionException(
+                $"Group '{assertion.GroupName}' epoch mismatch. Expected: {assertion.ExpectedEpoch}, Actual: {details.Value.CurrentEpoch}");
+        }
+    }
+
+    private async Task ExecuteAssertGroupMessageDeliveredAsync(
+        AssertGroupMessageDeliveredAssertion assertion,
+        Dictionary<string, ISimulatedPersonaHost> aliasMap,
+        Dictionary<string, ChannelId> groupAliasMap,
+        CancellationToken ct)
+    {
+        if (!aliasMap.TryGetValue(assertion.PersonaAlias, out var persona))
+            throw new ScenarioAssertionException($"Persona '{assertion.PersonaAlias}' not found.");
+        if (!groupAliasMap.TryGetValue(assertion.GroupName, out var channelId))
+            throw new ScenarioAssertionException($"Group '{assertion.GroupName}' not found in scenario.");
+
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        bool delivered = false;
+        while (DateTime.UtcNow < deadline && !ct.IsCancellationRequested)
+        {
+            var transcript = await _groupCoordinator.GetGroupTranscriptAsync(persona, channelId, ct);
+            if (transcript.Any(m => m.Content == assertion.ExpectedText))
+            {
+                delivered = true;
+                break;
+            }
+
+            using var loopCts = new CancellationTokenSource(TimeSpan.FromMilliseconds(250));
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, loopCts.Token);
+            try
+            {
+                await _stateBus.Signals
+                    .Where(s => s.NodeId == persona.Id && s.Category == SignalCategory.ChatTranscriptChanged)
+                    .FirstAsync(cancellationToken: linked.Token);
+            }
+            catch (OperationCanceledException) when (loopCts.IsCancellationRequested) { }
+        }
+
+        if (!delivered)
+        {
+            throw new ScenarioAssertionException(
+                $"Group message \"{assertion.ExpectedText}\" in '{assertion.GroupName}' was not delivered to '{assertion.PersonaAlias}' after 5 seconds.");
+        }
+    }
+
+    private async Task ExecuteAssertMemberCannotDecryptAsync(
+        AssertMemberCannotDecryptAssertion assertion,
+        Dictionary<string, ISimulatedPersonaHost> aliasMap,
+        Dictionary<string, ChannelId> groupAliasMap,
+        CancellationToken ct)
+    {
+        if (!aliasMap.TryGetValue(assertion.PersonaAlias, out var persona))
+            throw new ScenarioAssertionException($"Persona '{assertion.PersonaAlias}' not found.");
+        if (!groupAliasMap.TryGetValue(assertion.GroupName, out var channelId))
+            throw new ScenarioAssertionException($"Group '{assertion.GroupName}' not found in scenario.");
+
+        var transcript = await _groupCoordinator.GetGroupTranscriptAsync(persona, channelId, ct);
+        if (transcript.Any(m => m.Content == assertion.ExpectedText))
+        {
+            throw new ScenarioAssertionException(
+                $"Forward secrecy VIOLATION! Evicted member '{assertion.PersonaAlias}' was able to receive/decrypt group message \"{assertion.ExpectedText}\" in '{assertion.GroupName}'.");
+        }
     }
 }

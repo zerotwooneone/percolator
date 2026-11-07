@@ -33,6 +33,7 @@ internal interface ISimulatedPersonaHost : IAsyncDisposable
     ProfileKey ProfileKey { get; }
     uint ProfileRevision { get; }
     bool AutoShareProfile { get; set; }
+    bool AutoAcceptGroupInvites { get; set; }
     void RotateProfileKey();
     void UpdateProfile(string newDisplayName, byte[] newIdenticonPng);
     Task<DomainResult> PublishProfileAsync(CancellationToken ct = default);
@@ -44,6 +45,7 @@ internal interface ISimulatedPersonaHost : IAsyncDisposable
     PreKeyBundle CreatePreKeyBundle(uint? oneTimeKeyId = null);
     Task<DomainResult> FlushOutboxAsync(CancellationToken ct = default);
     Task<int> DrainMailboxAsync(CancellationToken ct = default);
+    ValueTask<DomainResult> IngestGroupBroadcastAsync(byte[] framedPayload, CancellationToken ct = default);
 
     ValueTask StartAsync(CancellationToken ct = default);
     ValueTask StopAsync(CancellationToken ct = default);

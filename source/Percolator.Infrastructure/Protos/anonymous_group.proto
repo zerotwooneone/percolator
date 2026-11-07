@@ -8,6 +8,7 @@ message GroupStreamClientMessage {
   bytes conversation_id = 1;
   uint32 current_epoch = 2;
   bytes zk_presentation_proof = 3;
+  bytes subscriber_routing_token = 4;
 }
 
 message GroupBroadcastEnvelope {

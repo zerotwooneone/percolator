@@ -56,9 +56,7 @@ using Percolator.Simulator.Features.Logging;
 using Percolator.Simulator.Features.RelayedChat;
 using Percolator.Simulator.Features.Shell;
 using R3;
-
 namespace Percolator.Simulator.Features.Topology;
-
 internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
 {
     private readonly MasterKeyHandle _masterKeyHandle;
@@ -69,6 +67,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
     private readonly ReactiveProperty<bool> _isListening = new(true);
     private readonly SemaphoreSlim _listeningGate = new(1, 1);
     private readonly SemaphoreSlim _drainGate = new(1, 1);
+    private readonly SemaphoreSlim _outboxGate = new(1, 1);
     private readonly object _opkIdLock = new();
     private uint _nextOpkId = 1;
     private readonly string _nodeTempDirectory;
@@ -78,7 +77,6 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
     private KestrelPeerTransportServer? _transportServer;
     private IDisposable? _relayQueueSubscription;
     private bool _disposed;
-
     public SimulatedNodeId Id { get; }
     public string DisplayName { get; private set; }
     public int BoundPort { get; private set; }
@@ -86,22 +84,19 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
     public byte[] IdenticonPng { get; private set; }
     public IServiceProvider Services => _host?.Services ?? throw new InvalidOperationException("Host not started.");
     public ReadOnlyReactiveProperty<bool> IsListening => _isListening;
-
     public PublicIdentityId PublicIdentityId { get; }
     public IdentityKey IdentityPublicKey { get; }
     public DhPublicKey SignedPreKeyPublic { get; }
     public DeviceLinkProof SignedPreKeySignature { get; }
     public EphemeralPrivateKey IdentityPrivateKey => _identityPrivateKey;
-
     public BlindedRoutingToken MailboxRoutingToken { get; }
     public DeliveryToken MailboxDeliveryToken { get; private set; }
     public DeliveryToken MailboxDrainToken { get; }
     public ISimulatedRelayHost? HomeRelay { get; set; }
-
     public ProfileKey ProfileKey { get; private set; }
     public uint ProfileRevision { get; private set; } = 1;
     public bool AutoShareProfile { get; set; } = true;
-
+    public bool AutoAcceptGroupInvites { get; set; } = false;
     public SimulatedPersonaHost(
         SimulatedNodeId id,
         string displayName,
@@ -121,26 +116,21 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         _worldState = worldState ?? throw new ArgumentNullException(nameof(worldState));
         _virtualClock = virtualClock ?? throw new ArgumentNullException(nameof(virtualClock));
         _masterKeyHandle = MasterKeyHandle.GenerateRandom();
-
         _nodeTempDirectory = Path.Combine(Path.GetTempPath(), "PercolatorSim", $"node_{Id.Value:N}");
         Directory.CreateDirectory(_nodeTempDirectory);
-
         // Procedural cryptographic identity initialization
         var crypto = new SignalCryptoEngine();
         var (ikPriv, ikPub) = crypto.GenerateEphemeralKeyPair();
         _identityPrivateKey = ikPriv;
         IdentityPublicKey = IdentityKey.FromSpan(ikPub.Span);
         PublicIdentityId = PublicIdentityId.New();
-
         var (spkPriv, spkPub) = crypto.GenerateEphemeralKeyPair();
         _signedPreKeyPrivate = spkPriv;
         SignedPreKeyPublic = spkPub;
         var sigBytes = crypto.SignEd25519(_identityPrivateKey.Span, SignedPreKeyPublic.Span);
         SignedPreKeySignature = DeviceLinkProof.FromSpan(sigBytes);
-
         // Phase 6B ProfileKey
         ProfileKey = ProfileKey.Generate();
-
         // Phase 5 Relay tokens
         MailboxRoutingToken = BlindedRoutingToken.New();
         var drainBytes = new byte[32];
@@ -148,7 +138,6 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         MailboxDrainToken = DeliveryToken.FromSpan(drainBytes);
         MailboxDeliveryToken = DeliveryToken.DeriveFromProfileKey(IdentityPublicKey, ProfileKey, crypto);
     }
-
     public async ValueTask StartAsync(CancellationToken ct = default)
     {
 #if !WINDOWS
@@ -166,22 +155,18 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             throw new PlatformNotSupportedException(errorMsg);
         }
 #endif
-
         var storageOptions = new VaultStorageOptions
         {
             BaseDirectory = _nodeTempDirectory
         };
-
         var builder = Host.CreateDefaultBuilder();
         builder.ConfigureServices((_, services) =>
         {
             // 1. Core infrastructure registration
             services.AddAuthenticatedInfrastructure(_masterKeyHandle, storageOptions);
-
             // 1a. Override DbConnectionInterceptor so SQLite operates in plain unencrypted mode (no sqlite3_key / SQLCipher encryption)
             services.AddSingleton<DbConnectionInterceptor, SimulatorSqlCipherPragmaInterceptor>();
             services.AddSingleton<IDateTimeProvider>(_virtualClock);
-
 #if WINDOWS
             // 1b. Windows-specific infrastructure overrides (SChannel TLS 1.3 cert provider & NTFS Sparse Desktop File Store)
             services.AddWindowsInfrastructureOverrides();
@@ -194,10 +179,8 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             services.AddSingleton<IDesktopFileStorage>(
                 _ => new PortableDesktopFileStore(Path.Combine(_nodeTempDirectory, "Partials")));
 #endif
-
             // 2. Chat vertical app registration
             services.AddChatApp();
-
             // 3. Node-scoped logger provider routing Percolator logs to multi-sink while suppressing EF Core / Kestrel connection spam
             services.AddLogging(lb =>
             {
@@ -209,26 +192,23 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                 lb.AddFilter("System.Net.Http", LogLevel.Warning);
                 lb.AddProvider(new NodeScopedLoggerProvider(DisplayName, Id, _logSink));
             });
-
             // 4. Platform & Cross-Host dependencies
             services.AddSingleton<IChannelLockService, KeyedSemaphoreLockService>();
             services.AddSingleton<IHandshakeReplayFilter, MemoryHandshakeReplayFilter>();
             services.AddScoped<IContactRequestCoordinator, ContactRequestCoordinator>();
             services.AddScoped<IRoutingCoordinator, RoutingCoordinator>();
             services.AddScoped<IPayloadSender, OutboundEgressPipeline>();
+            services.AddScoped<IGroupKeyDistributionService, GroupKeyDistributionService>();
             services.AddScoped(sp => (SqliteLocalIdentityKeyStore)sp.GetRequiredService<ILocalIdentityKeyStore>());
-
             // 4a. Upsert decorator for IRatchetSessionRepository so re-handshaking / crossed handshakes replace the old SessionId row cleanly
             services.AddScoped<SqliteRatchetSessionRepository>();
             services.AddScoped<IRatchetSessionRepository>(sp =>
                 new SimulatorRatchetSessionRepositoryDecorator(
                     sp.GetRequiredService<SqliteRatchetSessionRepository>(),
                     sp.GetRequiredService<PercolatorDbContext>()));
-
             // 4b. Simulator-only read-model query services (isolated from core application/domain layers)
             services.AddScoped<ISimulatorChatQueryService, SimulatorChatQueryService>();
             services.AddScoped<ISimulatorRatchetQueryService, SimulatorRatchetQueryService>();
-
             // 5. Cross-Host Virtual Transport & Ingress Hooks
             // Decorate IAppRouter so chat messages notify ISimulatorStateBus (ChatTranscriptChanged)
             services.AddScoped<AppRouter>();
@@ -245,7 +225,6 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                 }
                 return new SimulatorNotifyingAppRouterDecorator(inner, _stateBus, Id);
             });
-
             // Decorate IHandshakeService so incoming handshakes notify ISimulatorStateBus (PendingHandshakeChanged)
             services.AddScoped<HandshakeService>();
             services.AddScoped<IHandshakeService>(sp =>
@@ -253,19 +232,15 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                     sp.GetRequiredService<HandshakeService>(),
                     _stateBus,
                     Id));
-
             services.AddScoped<ITransportDispatcher>(sp =>
             {
                 var invoker = sp.GetRequiredService<ITransportClientInvoker>();
                 var routingRepo = sp.GetRequiredService<IPeerMailboxRoutingRepository>();
                 return new SimulatorTransportDispatcher(invoker, routingRepo, _worldState, _logSink, DisplayName);
             });
-
             services.AddScoped<OutboxWorker>();
-
             // 6. Direct Ingress Bridge for Kestrel Transport
             services.AddSingleton<InboundEnvelopeContextHolder>();
-
             services.AddScoped<SealedEnvelopeUnwrapper>(sp =>
             {
                 var wirePacker = sp.GetRequiredService<ISessionWirePacker>();
@@ -278,7 +253,6 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                 var holder = sp.GetRequiredService<InboundEnvelopeContextHolder>();
                 return new SimulatorDirectEnvelopeUnwrapper(inner, holder, _logSink, DisplayName);
             });
-
             services.AddScoped<IngressFilterService>();
             services.AddScoped<IInboundIngressPipeline>(sp =>
                 new InboundIngressPipeline(
@@ -299,9 +273,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                 return new SimulatorIngressDispatchingFilterService(inner, holder, pipeline, _logSink, DisplayName, outboxWorker);
             });
         });
-
         _host = builder.Build();
-
         // 1. Create SQLite tables and seed identity/prekey stores BEFORE starting background hosted services
         using (var scope = _host.Services.CreateScope())
         {
@@ -315,7 +287,6 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             {
                 // Idempotent: tables already created in a previous session
             }
-
             var profileRepo = scope.ServiceProvider.GetRequiredService<IIdentityProfileRepository>();
             var timeProvider = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>();
             var profileResult = IdentityProfile.Create(PublicIdentityId, DisplayName, IdentityRole.UserPersona, timeProvider);
@@ -323,32 +294,25 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             {
                 await profileRepo.SaveAsync(profileResult.Value, ct);
             }
-
             var idKeyStore = (SqliteLocalIdentityKeyStore)scope.ServiceProvider.GetRequiredService<ILocalIdentityKeyStore>();
             await idKeyStore.SaveKeyAsync(PublicIdentityId, _identityPrivateKey.Span.ToArray(), IdentityPublicKey, ct);
-
             var preKeyStore = scope.ServiceProvider.GetRequiredService<IPrivatePreKeyStore>();
             await preKeyStore.StoreSignedPreKeyPrivateAsync(PublicIdentityId, DeviceId.Primary, _signedPreKeyPrivate, ct);
         }
-
         // 2. Bind Kestrel transport server on the allocated BoundPort before IHostedService startup
         _transportServer = _host.Services.GetRequiredService<KestrelPeerTransportServer>();
         if (!_transportServer.IsRunning)
         {
             await _transportServer.StartAsync(new PortNumber(BoundPort), ct);
         }
-
         if (_transportServer.BoundPort.HasValue)
         {
             BoundPort = _transportServer.BoundPort.Value.Value;
         }
-
         // 3. Start remaining background hosted services
         await _host.StartAsync(ct);
-
         // 3a. Publish initial profile (revision 1) and avatar blind blob
         await PublishProfileAsync(ct);
-
         // 4. Reactive listener: auto-drain mailbox when relay queue changes
         _relayQueueSubscription = _stateBus.Signals
             .Where(s => s.Category == SignalCategory.RelayQueueChanged)
@@ -359,7 +323,6 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                     UiTaskRunner.FireAndForget(() => DrainMailboxAsync(), "MailboxDrain", _logSink);
                 }
             });
-
         _logSink.Log(new SimulatorLogEntry(
             DateTimeOffset.UtcNow,
             LogLevel.Information,
@@ -368,7 +331,6 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             "HostLifecycle",
             $"Persona host started and listening on https://127.0.0.1:{BoundPort} (Identity: {PublicIdentityId})"));
     }
-
     public void RotateProfileKey()
     {
         ProfileKey.Dispose();
@@ -376,7 +338,6 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         MailboxDeliveryToken.Dispose();
         MailboxDeliveryToken = DeliveryToken.DeriveFromProfileKey(IdentityPublicKey, ProfileKey, new SignalCryptoEngine());
     }
-
     public void UpdateProfile(string newDisplayName, byte[] newIdenticonPng)
     {
         DisplayName = newDisplayName ?? throw new ArgumentNullException(nameof(newDisplayName));
@@ -384,14 +345,12 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         ProfileRevision++;
         RotateProfileKey();
     }
-
     public async Task<DomainResult> PublishProfileAsync(CancellationToken ct = default)
     {
         if (_host is null)
         {
             return DomainResult.Failure(new DomainError("HOST_NOT_STARTED", "Persona host is not started."));
         }
-
         try
         {
             using var scope = _host.Services.CreateScope();
@@ -401,7 +360,6 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             var cryptoEngine = scope.ServiceProvider.GetRequiredService<ICryptoEngine>();
             var profileDeliveryClient = scope.ServiceProvider.GetRequiredService<IProfileDeliveryClient>();
             var timeProvider = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>();
-
             // 1. Encrypt persona's 64x64 Identicon PNG via IBlobCryptoService
             using var pngStream = new MemoryStream(IdenticonPng);
             var encAvatarResult = await cryptoService.EncryptAndPackageAsync(pngStream, "image/png", ct).ConfigureAwait(false);
@@ -409,17 +367,14 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             {
                 return DomainResult.Failure(encAvatarResult.Error!);
             }
-
             var avatarPkg = encAvatarResult.Value;
             var avatarBlobId = BlobId.FromSha256(avatarPkg.CiphertextSha256);
-
             // Determine target upload endpoint
             var targetRelayUri = HomeRelay != null
                 ? new Uri($"https://127.0.0.1:{HomeRelay.BoundPort}")
                 : (_worldState.GetAllRelayHosts().FirstOrDefault() is { } r
                     ? new Uri($"https://127.0.0.1:{r.BoundPort}")
                     : BoundEndpoint);
-
             // 2. Upload avatar blind blob via IRelayBlobClient (UploadBlindBlob over gRPC)
             var uploadBlobResult = await blobClient.UploadBlobAsync(
                 targetRelayUri,
@@ -427,12 +382,10 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                 avatarPkg.CiphertextStream,
                 default(ChannelId),
                 ct: ct).ConfigureAwait(false);
-
             if (!uploadBlobResult.IsSuccess)
             {
                 return DomainResult.Failure(uploadBlobResult.Error!);
             }
-
             var avatarRef = new BlobReference
             {
                 Id = avatarBlobId,
@@ -446,7 +399,6 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                 StorageMode = BlobStorageMode.PublicRelayBlob,
                 RelayEndpointUri = targetRelayUri.ToString()
             };
-
             // 3. Encrypt ProfileMetadata into 1040-byte padded block via IProfileManager
             var metadata = new ProfileMetadata(
                 DisplayName,
@@ -454,17 +406,14 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                 $"Status bio for {DisplayName}",
                 ProfileRevision,
                 avatarRef);
-
             var encProfileResult = profileManager.EncryptProfile(metadata, ProfileKey, cryptoEngine);
             if (!encProfileResult.IsSuccess)
             {
                 return DomainResult.Failure(encProfileResult.Error!);
             }
-
             var profilePkg = encProfileResult.Value;
             var locator = BlindedProfileLocator.Derive(IdentityPublicKey, ProfileKey, cryptoEngine);
             var writeToken = ProfileWriteToken.Derive(_identityPrivateKey, ProfileKey, cryptoEngine);
-
             // 4. Upload profile via IProfileDeliveryClient.UploadProfileAsync (UploadProfile over gRPC)
             var uploadProfileResult = await profileDeliveryClient.UploadProfileAsync(
                 targetRelayUri,
@@ -474,12 +423,10 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                 ProfileRevision,
                 timeProvider.UtcNow.AddDays(30),
                 ct).ConfigureAwait(false);
-
             if (!uploadProfileResult.IsSuccess)
             {
                 return DomainResult.Failure(uploadProfileResult.Error!);
             }
-
             if (HomeRelay != null)
             {
                 var channelFactory = scope.ServiceProvider.GetRequiredService<IPeerGrpcChannelFactory>();
@@ -494,7 +441,6 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                 };
                 await client.RegisterMailboxAsync(regReq, cancellationToken: ct).ConfigureAwait(false);
             }
-
             // Also save locally in IRelayProfileRepository for direct P2P queries
             var localProfileRepo = scope.ServiceProvider.GetRequiredService<IRelayProfileRepository>();
             var localSlot = RelayHostedProfileSlot.Create(locator, writeToken, profilePkg, ProfileRevision, timeProvider.UtcNow.AddDays(30));
@@ -502,7 +448,6 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             {
                 await localProfileRepo.SaveSlotAsync(localSlot.Value!, ct).ConfigureAwait(false);
             }
-
             // And update local identity profile
             var idProfileRepo = scope.ServiceProvider.GetRequiredService<IIdentityProfileRepository>();
             var identityProfile = IdentityProfile.Create(PublicIdentityId, DisplayName, IdentityRole.UserPersona, timeProvider);
@@ -510,7 +455,6 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             {
                 await idProfileRepo.SaveAsync(identityProfile.Value!, ct).ConfigureAwait(false);
             }
-
             _logSink.Log(new SimulatorLogEntry(
                 DateTimeOffset.UtcNow,
                 LogLevel.Information,
@@ -518,7 +462,6 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                 Id,
                 "ProfileSync",
                 $"Published profile revision {ProfileRevision} with locator {Convert.ToHexString(locator.Span)[..8]} and avatar blob {avatarBlobId} to {targetRelayUri}"));
-
             return DomainResult.Success();
         }
         catch (Exception ex)
@@ -533,7 +476,6 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             return DomainResult.Failure(new DomainError("PROFILE_PUBLISH_FAILED", ex.Message));
         }
     }
-
     public uint AllocateNextOpkIdRange(int count)
     {
         if (count <= 0) throw new ArgumentOutOfRangeException(nameof(count), "Count must be positive.");
@@ -544,7 +486,6 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             return start;
         }
     }
-
     public PreKeyBundle CreatePreKeyBundle(uint? oneTimeKeyId = null)
     {
         return new PreKeyBundle(
@@ -556,62 +497,66 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             OneTimePreKey: null,
             OneTimePreKeyId: 0);
     }
-
     public async Task<DomainResult> FlushOutboxAsync(CancellationToken ct = default)
     {
         if (_host is null)
         {
             return DomainResult.Failure(new DomainError("HOST_NOT_STARTED", "Persona host is not started."));
         }
-
-        using var scope = _host.Services.CreateScope();
+        await _outboxGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            using var scope = _host.Services.CreateScope();
         var outboxWorker = scope.ServiceProvider.GetRequiredService<OutboxWorker>();
         await outboxWorker.ProcessBatchAsync(50, ct);
-
         var outboxQuery = scope.ServiceProvider.GetRequiredService<IOutboxQueryService>();
         var ownerJobs = await outboxQuery.GetJobsForOwnerAsync(PublicIdentityId, ct);
         var failedOrRetrying = ownerJobs.FirstOrDefault(j =>
             j.Status == OutboxStatus.Failed ||
             (j.Status == OutboxStatus.Pending && j.RetryCount > 0));
-
         if (failedOrRetrying != null)
         {
             return DomainResult.Failure(new DomainError(
                 "OUTBOX_DELIVERY_FAILED",
                 $"Outbox delivery to peer failed (Status: {failedOrRetrying.Status}, Retries: {failedOrRetrying.RetryCount}). Check Log Dock for details."));
         }
-
-        return DomainResult.Success();
+            return DomainResult.Success();
+        }
+        finally
+        {
+            try { _outboxGate.Release(); } catch (ObjectDisposedException) { }
+        }
     }
-
     public async Task<int> DrainMailboxAsync(CancellationToken ct = default)
     {
         if (!_isListening.CurrentValue || HomeRelay == null || _host == null || _disposed)
         {
             return 0;
         }
-
-        await _drainGate.WaitAsync(ct).ConfigureAwait(false);
-
+        try
+        {
+            await _drainGate.WaitAsync(ct).ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException)
+        {
+            return 0;
+        }
         try
         {
             if (!_isListening.CurrentValue || HomeRelay == null || _host == null || _disposed)
             {
                 return 0;
             }
-
             using var scope = _host.Services.CreateScope();
             var channelFactory = scope.ServiceProvider.GetRequiredService<IPeerGrpcChannelFactory>();
             var relayUri = new Uri($"https://127.0.0.1:{HomeRelay.BoundPort}");
             var channel = channelFactory.GetOrCreateChannel(relayUri);
             var client = new AuthenticatedRelayService.AuthenticatedRelayServiceClient(channel);
-
             var drainRequest = new DrainMailboxRequest
             {
                 RoutingToken = ByteString.CopyFrom(MailboxRoutingToken.ToByteArray()),
                 DrainToken = ByteString.CopyFrom(MailboxDrainToken.Span)
             };
-
             DrainMailboxResponse drainResponse;
             try
             {
@@ -628,26 +573,27 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                     $"gRPC error draining relay mailbox: {ex.Status.Detail ?? ex.Message}"));
                 return 0;
             }
-
             var drained = drainResponse.Envelopes;
             if (drained.Count == 0) return 0;
-
             var unwrapper = scope.ServiceProvider.GetRequiredService<ISealedEnvelopeUnwrapper>();
             var ingress = scope.ServiceProvider.GetRequiredService<IInboundIngressPipeline>();
-
             int processed = 0;
             foreach (var queued in drained)
             {
                 try
                 {
                     var sealedEnv = SealedEnvelopeProto.Parser.ParseFrom(queued.EnvelopePayload);
+                    var decodeCheck = SealedWireFraming.Decode(sealedEnv.EncryptedPackage.Memory);
+                    if (decodeCheck.IsSuccess && decodeCheck.Value.SenderId == PublicIdentityId)
+                    {
+                        continue;
+                    }
                     var mailboxEnvelope = new MailboxEnvelope(
                         EnvelopeId.New(),
                         MailboxRoutingToken,
                         sealedEnv.EncryptedPackage.Memory,
                         DateTimeOffset.UtcNow,
                         DateTimeOffset.UtcNow.AddDays(7));
-
                     var unwrapResult = unwrapper.Unwrap(mailboxEnvelope);
                     if (unwrapResult.IsSuccess)
                     {
@@ -658,9 +604,12 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                         }
                         else
                         {
+                            var logLevel = ingressResult.Error.Code == "EXPIRED_OR_DUPLICATE_MESSAGE"
+                                ? LogLevel.Debug
+                                : LogLevel.Warning;
                             _logSink.Log(new SimulatorLogEntry(
                                 DateTimeOffset.UtcNow,
-                                LogLevel.Warning,
+                                logLevel,
                                 DisplayName,
                                 Id,
                                 "MailboxDrain",
@@ -689,13 +638,27 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                         $"Error processing drained envelope (Replay/Tamper): {ex.Message}"));
                 }
             }
-
             if (processed > 0)
             {
-                var outboxWorker = scope.ServiceProvider.GetRequiredService<OutboxWorker>();
-                await outboxWorker.ProcessBatchAsync(50, ct);
+                await _outboxGate.WaitAsync(ct).ConfigureAwait(false);
+                try
+                {
+                    var outboxWorker = scope.ServiceProvider.GetRequiredService<OutboxWorker>();
+                    await outboxWorker.ProcessBatchAsync(50, ct);
+                }
+                finally
+                {
+                    try { _outboxGate.Release(); } catch (ObjectDisposedException) { }
+                }
+                _stateBus.Publish(new SimulatorStateSignal(
+                    Id,
+                    SignalCategory.ChatTranscriptChanged,
+                    DisplayName));
+                _stateBus.Publish(new SimulatorStateSignal(
+                    Id,
+                    SignalCategory.GroupStateChanged,
+                    DisplayName));
             }
-
             return processed;
         }
         catch (ObjectDisposedException) when (_disposed)
@@ -716,17 +679,82 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         }
         finally
         {
-            _drainGate.Release();
+            try
+            {
+                _drainGate.Release();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
         }
     }
-
+    public async ValueTask<DomainResult> IngestGroupBroadcastAsync(byte[] framedPayload, CancellationToken ct = default)
+    {
+        if (!_isListening.CurrentValue || _host == null || _disposed)
+        {
+            return DomainResult.Failure(new DomainError("HOST_INACTIVE", "Persona host is not listening or disposed."));
+        }
+        using var scope = _host.Services.CreateScope();
+        var unwrapper = scope.ServiceProvider.GetRequiredService<ISealedEnvelopeUnwrapper>();
+        var ingress = scope.ServiceProvider.GetRequiredService<IInboundIngressPipeline>();
+        var mailboxEnvelope = new MailboxEnvelope(
+            EnvelopeId.New(),
+            MailboxRoutingToken,
+            framedPayload,
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow.AddDays(7));
+        var unwrapResult = unwrapper.Unwrap(mailboxEnvelope);
+        if (unwrapResult.IsFailure)
+        {
+            _logSink.Log(new SimulatorLogEntry(
+                DateTimeOffset.UtcNow,
+                LogLevel.Warning,
+                DisplayName,
+                Id,
+                "GroupIngress",
+                $"Group broadcast unwrap failed: {unwrapResult.Error.Code} - {unwrapResult.Error.Description}"));
+            return DomainResult.Failure(unwrapResult.Error);
+        }
+        var ingressResult = await ingress.ProcessInboundAsync(unwrapResult.Value!, ct);
+        if (ingressResult.IsFailure)
+        {
+            var logLevel = ingressResult.Error.Code == "EXPIRED_OR_DUPLICATE_MESSAGE"
+                ? LogLevel.Debug
+                : LogLevel.Warning;
+            _logSink.Log(new SimulatorLogEntry(
+                DateTimeOffset.UtcNow,
+                logLevel,
+                DisplayName,
+                Id,
+                "GroupIngress",
+                $"Group broadcast ingress failed: {ingressResult.Error.Code} - {ingressResult.Error.Description}"));
+            return DomainResult.Failure(ingressResult.Error);
+        }
+        await _outboxGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var outboxWorker = scope.ServiceProvider.GetRequiredService<OutboxWorker>();
+            await outboxWorker.ProcessBatchAsync(50, ct);
+        }
+        finally
+        {
+            try { _outboxGate.Release(); } catch (ObjectDisposedException) { }
+        }
+        return DomainResult.Success();
+    }
     public async Task SetListeningAsync(bool isListening, CancellationToken ct = default)
     {
-        await _listeningGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await _listeningGate.WaitAsync(ct).ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException)
+        {
+            return;
+        }
         try
         {
             _isListening.Value = isListening;
-
             if (isListening)
             {
                 if (_transportServer is not null && !_transportServer.IsRunning)
@@ -740,7 +768,6 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                         "HostLifecycle",
                         "Ingress resumed (Listening)."));
                 }
-
                 if (HomeRelay != null)
                 {
                     await DrainMailboxAsync(ct).ConfigureAwait(false);
@@ -763,25 +790,27 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         }
         finally
         {
-            _listeningGate.Release();
+            try
+            {
+                _listeningGate.Release();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
         }
     }
-
     public async ValueTask StopAsync(CancellationToken ct = default)
     {
         _relayQueueSubscription?.Dispose();
         _relayQueueSubscription = null;
-
         if (_transportServer is not null && _transportServer.IsRunning)
         {
             await _transportServer.StopAsync(ct);
         }
-
         if (_host is not null)
         {
             await _host.StopAsync(ct);
         }
-
         _logSink.Log(new SimulatorLogEntry(
             DateTimeOffset.UtcNow,
             LogLevel.Information,
@@ -790,17 +819,15 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             "HostLifecycle",
             "Persona host stopped."));
     }
-
     public async ValueTask DisposeAsync()
     {
         if (_disposed) return;
         _disposed = true;
-
         await StopAsync();
-
         _host?.Dispose();
         _listeningGate.Dispose();
         _drainGate.Dispose();
+        _outboxGate.Dispose();
         _masterKeyHandle.Dispose();
         _isListening.Dispose();
         _identityPrivateKey.Dispose();
@@ -808,7 +835,6 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         ProfileKey.Dispose();
         MailboxDeliveryToken.Dispose();
         MailboxDrainToken.Dispose();
-
         try
         {
             if (Directory.Exists(_nodeTempDirectory))
@@ -816,6 +842,9 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                 Directory.Delete(_nodeTempDirectory, recursive: true);
             }
         }
-        catch { }
+        catch
+        {
+            // Best-effort temporary directory cleanup on node disposal
+        }
     }
 }

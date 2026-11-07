@@ -16,6 +16,7 @@ using Microsoft.Extensions.Logging;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Delivery.Ports;
+using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Ports;
 using Percolator.Infrastructure.Persistence;
 using Percolator.Infrastructure.Persistence.Repositories;
@@ -51,6 +52,7 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
     private readonly string _relayTempDirectory;
     private readonly SimulatorNotifyingRelayCapabilityStoreDecorator _capabilityStore;
     private SimulatorNotifyingRelayPreKeyRepositoryDecorator? _preKeyRepository;
+    private SqliteRelayLedgerRepository? _ledgerRepository;
     private SimulatorRelayQueryService? _queryService;
     private WebApplication? _app;
     private bool _isRunning;
@@ -61,6 +63,7 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
     public int BoundPort { get; private set; }
     public Uri BoundEndpoint => new($"https://127.0.0.1:{BoundPort}");
     public IServiceProvider Services => _app?.Services ?? throw new InvalidOperationException("Relay host not started.");
+    public PublicIdentityId RelayIdentityId => new(Id.Value);
 
     public IRelayMailboxCapabilityStore MailboxStore => _capabilityStore;
     public ISimulatorRelayQueryService QueryService => _queryService ?? throw new InvalidOperationException("Relay host not started.");
@@ -148,6 +151,7 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
         var profileRepo = new SqliteRelayProfileRepository(contextFactory);
         var chunkStore = new LocalFileChunkStore(Path.Combine(_relayTempDirectory, "Chunks"));
         var ledgerRepo = new SqliteRelayLedgerRepository(contextFactory);
+        _ledgerRepository = ledgerRepo;
         var cryptoEngine = new SignalCryptoEngine();
         var zkEngine = new ZkgroupCryptographyService();
 
@@ -175,8 +179,12 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
 
         var unauthEndpoint = new UnauthenticatedDeliveryEndpoint(profileRepo, _preKeyRepository, chunkStore, _capabilityStore);
         var authEndpoint = new AuthenticatedRelayEndpoint(_capabilityStore, _preKeyRepository, cryptoEngine);
-        var groupEndpoint = new AnonymousGroupRelayEndpoint(ledgerRepo, zkEngine);
+        var groupEndpoint = new AnonymousGroupRelayEndpoint(ledgerRepo, zkEngine, _capabilityStore);
 
+        builder.Services.AddSingleton<IRelayLedgerRepository>(ledgerRepo);
+        builder.Services.AddSingleton<IRelayPreKeyRepository>(_preKeyRepository);
+        builder.Services.AddSingleton<IRelayMailboxCapabilityStore>(_capabilityStore);
+        builder.Services.AddSingleton<IDbContextFactory<PercolatorDbContext>>(contextFactory);
         builder.Services.AddSingleton(unauthEndpoint);
         builder.Services.AddSingleton(authEndpoint);
         builder.Services.AddSingleton(groupEndpoint);
@@ -198,23 +206,25 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
             $"Relay host started and listening on https://127.0.0.1:{BoundPort}"));
     }
 
+    public async Task ProvisionGroupLedgerAsync(RelayGroupLedger ledger, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(ledger);
+        if (_ledgerRepository == null)
+        {
+            throw new InvalidOperationException("Relay host not started.");
+        }
+
+        await _ledgerRepository.SaveAsync(ledger, ct);
+    }
+
     public async Task StopAsync(CancellationToken ct = default)
     {
         if (!_isRunning || _app == null) return;
+
+        await _app.StopAsync(ct);
+        await _app.DisposeAsync();
+        _app = null;
         _isRunning = false;
-
-        try
-        {
-            await _app.StopAsync(ct);
-            await _app.DisposeAsync();
-        }
-        catch { }
-        finally
-        {
-            _app = null;
-        }
-
-        _queryService = null;
 
         _logSink.Log(new SimulatorLogEntry(
             DateTimeOffset.UtcNow,
@@ -222,7 +232,7 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
             DisplayName,
             Id,
             "RelayLifecycle",
-            $"Relay host '{DisplayName}' stopped."));
+            "Relay host stopped."));
     }
 
     public async ValueTask DisposeAsync()
@@ -230,7 +240,12 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
         if (_disposed) return;
         _disposed = true;
 
-        await StopAsync();
+        if (_app != null)
+        {
+            await _app.StopAsync().ConfigureAwait(false);
+            await _app.DisposeAsync().ConfigureAwait(false);
+            _app = null;
+        }
 
         try
         {
@@ -239,6 +254,14 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
                 Directory.Delete(_relayTempDirectory, recursive: true);
             }
         }
-        catch { }
+        catch
+        {
+            // Best effort cleanup
+        }
+    }
+
+    public void Dispose()
+    {
+        DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
 }

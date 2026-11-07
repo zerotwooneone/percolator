@@ -5,6 +5,7 @@ using Avalonia.Markup.Xaml;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Percolator.Simulator.Features.DirectChat;
+using Percolator.Simulator.Features.GroupMessaging;
 using Percolator.Simulator.Features.Logging;
 using Percolator.Simulator.Features.RichChatAndProfiles;
 using Percolator.Simulator.Features.RelayedChat;
@@ -53,6 +54,7 @@ public partial class App : Avalonia.Application
         services.AddSingleton<DirectChatCoordinator>();
         services.AddSingleton<AutopilotPongResponder>();
         services.AddSingleton<RelayProvisioningCoordinator>();
+        services.AddSingleton<GroupChatCoordinator>();
         services.AddSingleton<ScenarioRunnerService>();
         services.AddSingleton<PersonaCardDependencies>();
 
@@ -64,6 +66,7 @@ public partial class App : Avalonia.Application
         services.AddTransient<FlightRecorderViewModel>();
         services.AddTransient<LogDockViewModel>();
         services.AddTransient<MainWindowViewModel>();
+        services.AddTransient<GroupPanelViewModel>();
 
         _services = services.BuildServiceProvider();
 
@@ -82,47 +85,26 @@ public partial class App : Avalonia.Application
 #if !WINDOWS
         if (OperatingSystem.IsWindows())
         {
+            var warning = "TARGET MISMATCH: Running on Windows with generic 'net10.0' target. WindowsSChannelCertificateProvider and WindowsSparseDesktopFileStore are NOT compiled in. Use target 'net10.0-windows10.0.19041.0' instead.";
             logEngine.Log(new SimulatorLogEntry(
                 System.DateTimeOffset.UtcNow,
-                LogLevel.Error,
+                LogLevel.Warning,
                 "Simulator",
                 null,
-                "PlatformGuard",
-                "PLATFORM TARGET MISMATCH: Running on Windows with generic 'net10.0' target. WindowsSChannelCertificateProvider and WindowsSparseDesktopFileStore are NOT compiled in. Use target 'net10.0-windows10.0.19041.0' instead."));
+                "PlatformWarning",
+                warning));
         }
 #endif
 
-        // Seed preview design data in Phase 1
-        var designData = _services.GetRequiredService<DesignDataService>();
-        designData.SeedPreviewData();
-
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            desktop.MainWindow = new MainWindow
+            // Normal UI startup
+            var mainWindow = new MainWindow
             {
                 DataContext = _services.GetRequiredService<MainWindowViewModel>()
             };
 
-            desktop.Exit += async (_, _) =>
-            {
-                var pong = _services?.GetService<AutopilotPongResponder>();
-                pong?.Dispose();
-
-                var world = _services?.GetService<ISimulatedWorldStateService>();
-                if (world != null)
-                {
-                    await world.ClearAllAsync();
-                }
-
-                if (_services is IAsyncDisposable asyncDisposable)
-                {
-                    await asyncDisposable.DisposeAsync();
-                }
-                else
-                {
-                    _services?.Dispose();
-                }
-            };
+            desktop.MainWindow = mainWindow;
         }
 
         base.OnFrameworkInitializationCompleted();

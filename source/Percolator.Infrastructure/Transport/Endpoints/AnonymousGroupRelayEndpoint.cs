@@ -7,6 +7,7 @@ using System.Linq;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
@@ -19,18 +20,26 @@ using Percolator.Infrastructure.Protos;
 
 public sealed class AnonymousGroupRelayEndpoint : AnonymousGroupRelayService.AnonymousGroupRelayServiceBase
 {
+    private sealed record GroupSubscriber(
+        Guid Id,
+        BlindedRoutingToken? RoutingToken,
+        ChannelWriter<GroupStreamServerMessage> Writer);
+
     private readonly IRelayLedgerRepository _ledgerRepository;
     private readonly IZkProofEngine _zkProofEngine;
+    private readonly IRelayMailboxCapabilityStore? _mailboxStore;
     private readonly IDateTimeProvider _timeProvider;
-    private readonly ConcurrentDictionary<ChannelId, ConcurrentDictionary<Guid, ChannelWriter<GroupStreamServerMessage>>> _subscribers = new();
+    private readonly ConcurrentDictionary<ChannelId, ConcurrentDictionary<Guid, GroupSubscriber>> _subscribers = new();
 
     public AnonymousGroupRelayEndpoint(
         IRelayLedgerRepository ledgerRepository,
         IZkProofEngine zkProofEngine,
+        IRelayMailboxCapabilityStore? mailboxStore = null,
         IDateTimeProvider? timeProvider = null)
     {
         _ledgerRepository = ledgerRepository ?? throw new ArgumentNullException(nameof(ledgerRepository));
         _zkProofEngine = zkProofEngine ?? throw new ArgumentNullException(nameof(zkProofEngine));
+        _mailboxStore = mailboxStore;
         _timeProvider = timeProvider ?? new DefaultDateTimeProvider();
     }
 
@@ -159,7 +168,7 @@ public sealed class AnonymousGroupRelayEndpoint : AnonymousGroupRelayService.Ano
 
         await _ledgerRepository.SaveAsync(ledger, context.CancellationToken);
 
-        BroadcastMessage(channelId, new GroupStreamServerMessage
+        var serverMessage = new GroupStreamServerMessage
         {
             Broadcast = new GroupBroadcastEnvelope
             {
@@ -169,7 +178,46 @@ public sealed class AnonymousGroupRelayEndpoint : AnonymousGroupRelayService.Ano
                 Ciphertext = request.Ciphertext,
                 AuthorSignature = request.AuthorSignature
             }
-        });
+        };
+
+        var activeTokensWithStreams = new HashSet<BlindedRoutingToken>();
+        if (_subscribers.TryGetValue(channelId, out var subs))
+        {
+            foreach (var sub in subs.Values)
+            {
+                if (sub.Writer.TryWrite(serverMessage) && sub.RoutingToken.HasValue)
+                {
+                    activeTokensWithStreams.Add(sub.RoutingToken.Value);
+                }
+            }
+        }
+
+        // Group Outbox / Mailbox fan-out for offline members or members without active streams
+        if (_mailboxStore != null && ledger.ActiveRoutingTokens.Count > 0)
+        {
+            foreach (var token in ledger.ActiveRoutingTokens)
+            {
+                if (!activeTokensWithStreams.Contains(token))
+                {
+                    var sealedEnvelope = new SealedEnvelopeProto
+                    {
+                        RecipientRoutingToken = ByteString.CopyFrom(token.ToByteArray()),
+                        DeliveryToken = ByteString.Empty,
+                        EncryptedPackage = request.Ciphertext,
+                        ExpiresAtUtc = Timestamp.FromDateTimeOffset(_timeProvider.UtcNow.AddDays(7))
+                    };
+
+                    var queued = new QueuedSealedEnvelopeProto
+                    {
+                        QueueId = Guid.NewGuid().ToString("N"),
+                        EnvelopePayload = sealedEnvelope.ToByteString(),
+                        EnqueuedAtUtc = Timestamp.FromDateTimeOffset(_timeProvider.UtcNow)
+                    };
+
+                    await _mailboxStore.EnqueueEnvelopeAsync(token.ToByteArray(), queued, context.CancellationToken);
+                }
+            }
+        }
 
         return new DispatchGroupMessageResponse { Accepted = true };
     }
@@ -197,8 +245,14 @@ public sealed class AnonymousGroupRelayEndpoint : AnonymousGroupRelayService.Ano
         });
 
         var subId = Guid.NewGuid();
-        var channelSubs = _subscribers.GetOrAdd(channelId, _ => new ConcurrentDictionary<Guid, ChannelWriter<GroupStreamServerMessage>>());
-        channelSubs[subId] = boundedChannel.Writer;
+        BlindedRoutingToken? routingToken = null;
+        if (request.SubscriberRoutingToken.Length == 16)
+        {
+            routingToken = BlindedRoutingToken.FromBytes(request.SubscriberRoutingToken.Span);
+        }
+
+        var channelSubs = _subscribers.GetOrAdd(channelId, _ => new ConcurrentDictionary<Guid, GroupSubscriber>());
+        channelSubs[subId] = new GroupSubscriber(subId, routingToken, boundedChannel.Writer);
 
         try
         {
@@ -224,9 +278,9 @@ public sealed class AnonymousGroupRelayEndpoint : AnonymousGroupRelayService.Ano
     {
         if (_subscribers.TryGetValue(channelId, out var subs))
         {
-            foreach (var writer in subs.Values)
+            foreach (var sub in subs.Values)
             {
-                writer.TryWrite(message);
+                sub.Writer.TryWrite(message);
             }
         }
     }

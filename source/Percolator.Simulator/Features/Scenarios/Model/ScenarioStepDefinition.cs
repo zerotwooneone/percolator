@@ -24,6 +24,14 @@ namespace Percolator.Simulator.Features.Scenarios.Model;
 [JsonDerivedType(typeof(DeleteMessageStep), "DeleteMessage")]
 [JsonDerivedType(typeof(MarkConversationReadStep), "MarkConversationRead")]
 [JsonDerivedType(typeof(RerollProfileStep), "RerollProfile")]
+[JsonDerivedType(typeof(CreateGroupStep), "CreateGroup")]
+[JsonDerivedType(typeof(AcceptGroupInviteStep), "AcceptGroupInvite")]
+[JsonDerivedType(typeof(DeclineGroupInviteStep), "DeclineGroupInvite")]
+[JsonDerivedType(typeof(SendGroupMessageStep), "SendGroupMessage")]
+[JsonDerivedType(typeof(FloodGroupMessagesStep), "FloodGroupMessages")]
+[JsonDerivedType(typeof(AddGroupMemberStep), "AddGroupMember")]
+[JsonDerivedType(typeof(EvictGroupMemberStep), "EvictGroupMember")]
+[JsonDerivedType(typeof(RenameGroupStep), "RenameGroup")]
 public abstract record ScenarioStepDefinition
 {
     public abstract string DisplayText { get; }
@@ -142,4 +150,48 @@ public sealed record RerollProfileStep(string PersonaAlias, string? NewDisplayNa
     public override string DisplayText => NewDisplayName != null
         ? $"Reroll Profile for '{PersonaAlias}' ➔ '{NewDisplayName}'"
         : $"Reroll Profile for '{PersonaAlias}'";
+}
+
+// -----------------------------------------------------------------------------
+// Phase 7 Scenario Steps: Group Messaging, ZK Presentation Proofs & Epochs
+// -----------------------------------------------------------------------------
+
+public sealed record CreateGroupStep(string AdminAlias, string RelayAlias, string GroupName, IReadOnlyList<string> MemberAliases) : ScenarioStepDefinition
+{
+    public override string DisplayText => $"Create Group: '{GroupName}' on '{RelayAlias}' by '{AdminAlias}' with [{string.Join(", ", MemberAliases)}]";
+}
+
+public sealed record AcceptGroupInviteStep(string PersonaAlias, string GroupName) : ScenarioStepDefinition
+{
+    public override string DisplayText => $"Accept Group Invite: '{PersonaAlias}' joins '{GroupName}'";
+}
+
+public sealed record DeclineGroupInviteStep(string PersonaAlias, string GroupName) : ScenarioStepDefinition
+{
+    public override string DisplayText => $"Decline Group Invite: '{PersonaAlias}' declines '{GroupName}'";
+}
+
+public sealed record SendGroupMessageStep(string SenderAlias, string GroupName, string Text) : ScenarioStepDefinition
+{
+    public override string DisplayText => $"Send Group Message: '{SenderAlias}' in '{GroupName}': \"{Text}\"";
+}
+
+public sealed record FloodGroupMessagesStep(string SenderAlias, string GroupName, int Count = 25) : ScenarioStepDefinition
+{
+    public override string DisplayText => $"Flood {Count} Group Messages: '{SenderAlias}' in '{GroupName}'";
+}
+
+public sealed record AddGroupMemberStep(string AdminAlias, string GroupName, string NewMemberAlias) : ScenarioStepDefinition
+{
+    public override string DisplayText => $"Add Group Member: '{AdminAlias}' adds '{NewMemberAlias}' to '{GroupName}'";
+}
+
+public sealed record EvictGroupMemberStep(string AdminAlias, string GroupName, string EvictedMemberAlias) : ScenarioStepDefinition
+{
+    public override string DisplayText => $"Evict Group Member: '{AdminAlias}' evicts '{EvictedMemberAlias}' from '{GroupName}'";
+}
+
+public sealed record RenameGroupStep(string AdminAlias, string GroupName, string NewGroupName) : ScenarioStepDefinition
+{
+    public override string DisplayText => $"Rename Group: '{AdminAlias}' renames '{GroupName}' ➔ '{NewGroupName}'";
 }

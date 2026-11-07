@@ -109,6 +109,7 @@ message GroupInvitationProto {
   bytes inviter_id = 4;
   optional string relay_endpoint = 5;
   uint64 expires_at_unix_ms = 6;
+  repeated bytes member_ids = 7;
 }
 
 message GroupInvitationResponseProto {
