@@ -5,7 +5,8 @@
              xmlns:vm="using:Percolator.Simulator.Features.Topology"
              mc:Ignorable="d" d:DesignWidth="450" d:DesignHeight="550"
              x:Class="Percolator.Simulator.Features.Topology.PersonaCardView"
-             x:DataType="vm:PersonaCardViewModel">
+             x:DataType="vm:PersonaCardViewModel"
+             x:Name="PersonaCardRoot">
 
     <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
             BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
@@ -86,17 +87,33 @@
                 <ScrollViewer>
                     <ItemsControl ItemsSource="{Binding ChatMessages}">
                         <ItemsControl.ItemTemplate>
-                            <DataTemplate>
+                            <DataTemplate x:CompileBindings="False">
                                 <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
                                         CornerRadius="4" Padding="6,4" Margin="0,2">
                                     <Grid ColumnDefinitions="*,Auto">
                                         <TextBlock Grid.Column="0" Text="{Binding BodyText}" FontSize="12" TextWrapping="Wrap" />
-                                        <TextBlock Grid.Column="1" Text="{Binding StatusText}"
-                                                   Foreground="{Binding StatusColor}"
-                                                   ToolTip.Tip="{Binding StatusTooltip}"
-                                                   FontWeight="Bold" FontSize="12"
-                                                   Margin="6,0,0,0" VerticalAlignment="Bottom"
-                                                   IsVisible="{Binding IsOutgoing}" />
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center" Margin="6,0,0,0">
+                                            <TextBlock Text="{Binding StatusText}"
+                                                       Foreground="{Binding StatusColor}"
+                                                       ToolTip.Tip="{Binding StatusTooltip}"
+                                                       FontWeight="Bold" FontSize="12"
+                                                       VerticalAlignment="Center"
+                                                       IsVisible="{Binding IsOutgoing}" />
+                                            <Button Content="👍" ToolTip.Tip="React (CTL-PER-20)"
+                                                    Command="{Binding #PersonaCardRoot.DataContext.ReactCommand}"
+                                                    CommandParameter="{Binding}"
+                                                    Padding="4,2" FontSize="10" />
+                                            <Button Content="✏️" ToolTip.Tip="Edit Message (CTL-PER-20)"
+                                                    Command="{Binding #PersonaCardRoot.DataContext.EditMessageCommand}"
+                                                    CommandParameter="{Binding}"
+                                                    IsVisible="{Binding IsOutgoing}"
+                                                    Padding="4,2" FontSize="10" />
+                                            <Button Content="🗑️" ToolTip.Tip="Delete Message (CTL-PER-20)"
+                                                    Command="{Binding #PersonaCardRoot.DataContext.DeleteMessageCommand}"
+                                                    CommandParameter="{Binding}"
+                                                    IsVisible="{Binding IsOutgoing}"
+                                                    Padding="4,2" FontSize="10" />
+                                        </StackPanel>
                                     </Grid>
                                 </Border>
                             </DataTemplate>
@@ -107,7 +124,7 @@
 
             <!-- Compose Bar CTL-PER-18, 19 -->
             <Grid Grid.Row="4" ColumnDefinitions="Auto,*,Auto" Margin="0,8,0,0">
-                <ComboBox Grid.Column="0" SelectedIndex="0" Margin="0,0,6,0">
+                <ComboBox Grid.Column="0" SelectedIndex="{Binding SelectedTimerIndex}" Margin="0,0,6,0">
                     <ComboBoxItem Content="Timer: Off" />
                     <ComboBoxItem Content="Timer: 1m" />
                     <ComboBoxItem Content="Timer: 1h" />

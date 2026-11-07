@@ -25,6 +25,7 @@ internal interface ISimulatedWorldStateService : IDisposable
 
     ISimulatedPersonaHost? GetPersonaHost(SimulatedNodeId id);
     ISimulatedPersonaHost? FindPersonaHostByIdentity(PublicIdentityId identityId);
+    IReadOnlyCollection<ISimulatedPersonaHost> GetAllPersonaHosts();
 
     ISimulatedRelayHost? GetRelayHost(SimulatedNodeId id);
     ISimulatedRelayHost? FindRelayHostByName(string name);
@@ -97,6 +98,11 @@ internal sealed class SimulatedWorldStateService : ISimulatedWorldStateService
     public ISimulatedPersonaHost? FindPersonaHostByIdentity(PublicIdentityId identityId)
     {
         return _personaHosts.Values.FirstOrDefault(h => h.PublicIdentityId == identityId);
+    }
+
+    public IReadOnlyCollection<ISimulatedPersonaHost> GetAllPersonaHosts()
+    {
+        return _personaHosts.Values.ToArray();
     }
 
     public ISimulatedRelayHost? GetRelayHost(SimulatedNodeId id)

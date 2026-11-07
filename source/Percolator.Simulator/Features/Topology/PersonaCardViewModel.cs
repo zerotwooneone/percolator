@@ -16,6 +16,7 @@ using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Simulator.Features.DirectChat;
 using Percolator.Simulator.Features.Logging;
+using Percolator.Simulator.Features.RichChatAndProfiles;
 using Percolator.Simulator.Features.RelayedChat;
 using Percolator.Simulator.Features.Scenarios;
 using Percolator.Simulator.Features.Scenarios.Model;
@@ -37,6 +38,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
     private readonly ISimulatorLogSink? _logSink;
     private readonly IFlightRecorderStateService? _flightRecorder;
     private readonly RelayProvisioningCoordinator? _relayCoordinator;
+    private readonly RichChatActionCoordinator? _richChatCoordinator;
 
     private readonly CoalescedActionGate _chatTranscriptGate;
     private readonly CoalescedActionGate _pendingHandshakeGate;
@@ -101,6 +103,9 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
     [ObservableProperty]
     private string _composeMessageText = string.Empty;
 
+    [ObservableProperty]
+    private int _selectedTimerIndex;
+
     public ObservableCollection<ChatMessageItemViewModel> ChatMessages { get; } = new();
 
     public PersonaCardViewModel(
@@ -125,6 +130,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
         _logSink = deps.LogSink;
         _flightRecorder = deps.FlightRecorder;
         _relayCoordinator = deps.RelayCoordinator;
+        _richChatCoordinator = deps.RichChatCoordinator;
 
         // 30 Hz refresh ceiling for chat transcript with 0ms leading edge
         _chatTranscriptGate = new CoalescedActionGate(
@@ -339,6 +345,18 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
                         return; // No-op: transcript already up to date
                     }
 
+                    if (ChatMessages.Count == transcript.Count)
+                    {
+                        for (int i = 0; i < transcript.Count; i++)
+                        {
+                            if (ChatMessages[i] != transcript[i])
+                            {
+                                ChatMessages[i] = transcript[i];
+                            }
+                        }
+                        return;
+                    }
+
                     if (ChatMessages.Count > 0 &&
                         transcript.Count > ChatMessages.Count &&
                         ChatMessages.Zip(transcript).All(pair => pair.First == pair.Second))
@@ -533,6 +551,12 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
         if (string.IsNullOrWhiteSpace(ComposeMessageText) || _chatCoordinator == null) return;
         var text = ComposeMessageText;
         ComposeMessageText = string.Empty;
+        var expireSeconds = SelectedTimerIndex switch
+        {
+            1 => 60,
+            2 => 3600,
+            _ => (int?)null
+        };
 
         var peer = GetActivePeerSummary();
         if (peer == null)
@@ -543,7 +567,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
 
         var peerId = peer.Id;
         var success = await UiTaskRunner.RunAsync(
-            () => _chatCoordinator.SendDirectMessageAsync(NodeId, peerId, text),
+            () => _chatCoordinator.SendDirectMessageAsync(NodeId, peerId, text, expireSeconds),
             category: "DirectChat",
             logSink: _logSink,
             toastService: _toastService,
@@ -554,6 +578,63 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
         {
             _flightRecorder?.RecordStep(new SendDirectMessageStep(DisplayName, peer.DisplayName, text));
         }
+    }
+
+    [RelayCommand]
+    private async Task ReactAsync(ChatMessageItemViewModel? item)
+    {
+        if (item == null || _richChatCoordinator == null || !Guid.TryParse(item.MessageId, out var msgGuid)) return;
+        var peer = GetActivePeerSummary();
+        if (peer == null) return;
+
+        await UiTaskRunner.RunAsync(
+            () => _richChatCoordinator.AddReactionAsync(NodeId, peer.Id, msgGuid, "👍"),
+            category: "RichChat",
+            logSink: _logSink,
+            toastService: _toastService,
+            nodeName: DisplayName,
+            nodeId: NodeId);
+    }
+
+    [RelayCommand]
+    private async Task EditMessageAsync(ChatMessageItemViewModel? item)
+    {
+        if (item == null || _richChatCoordinator == null || !item.IsOutgoing || !Guid.TryParse(item.MessageId, out var msgGuid)) return;
+        var peer = GetActivePeerSummary();
+        if (peer == null) return;
+
+        var newContent = !string.IsNullOrWhiteSpace(ComposeMessageText)
+            ? ComposeMessageText.Trim()
+            : $"{item.Content} (edited)";
+
+        if (!string.IsNullOrWhiteSpace(ComposeMessageText))
+        {
+            ComposeMessageText = string.Empty;
+        }
+
+        await UiTaskRunner.RunAsync(
+            () => _richChatCoordinator.EditMessageAsync(NodeId, peer.Id, msgGuid, newContent),
+            category: "RichChat",
+            logSink: _logSink,
+            toastService: _toastService,
+            nodeName: DisplayName,
+            nodeId: NodeId);
+    }
+
+    [RelayCommand]
+    private async Task DeleteMessageAsync(ChatMessageItemViewModel? item)
+    {
+        if (item == null || _richChatCoordinator == null || !item.IsOutgoing || !Guid.TryParse(item.MessageId, out var msgGuid)) return;
+        var peer = GetActivePeerSummary();
+        if (peer == null) return;
+
+        await UiTaskRunner.RunAsync(
+            () => _richChatCoordinator.DeleteMessageAsync(NodeId, peer.Id, msgGuid),
+            category: "RichChat",
+            logSink: _logSink,
+            toastService: _toastService,
+            nodeName: DisplayName,
+            nodeId: NodeId);
     }
 
     [RelayCommand]

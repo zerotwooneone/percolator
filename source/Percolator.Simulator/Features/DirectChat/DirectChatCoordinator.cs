@@ -42,6 +42,7 @@ internal sealed class DirectChatCoordinator
         SimulatedNodeId senderNodeId,
         SimulatedNodeId recipientNodeId,
         string text,
+        int? expireAfterSeconds = null,
         CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(text)) return Task.FromResult(false);
@@ -88,7 +89,7 @@ internal sealed class DirectChatCoordinator
                     Mentions: null,
                     ReplyContext: null,
                     Attachments: null,
-                    ExpireAfterSeconds: null,
+                    ExpireAfterSeconds: expireAfterSeconds,
                     LinkPreview: null,
                     Route: route);
 

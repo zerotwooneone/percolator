@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Percolator.Simulator.Features.DirectChat;
 using Percolator.Simulator.Features.Logging;
+using Percolator.Simulator.Features.RichChatAndProfiles;
 using Percolator.Simulator.Features.RelayedChat;
 using Percolator.Simulator.Features.Scenarios;
 using Percolator.Simulator.Features.Shell;
@@ -41,6 +42,8 @@ public partial class App : Avalonia.Application
         services.AddSingleton<ISimulatedWorldStateService, SimulatedWorldStateService>();
         services.AddSingleton<IStatusToastService, StatusToastService>();
         services.AddSingleton<IFlightRecorderStateService, FlightRecorderStateService>();
+        services.AddSingleton<IVirtualClockStateService, VirtualClockStateService>();
+        services.AddSingleton<RichChatActionCoordinator>();
         services.AddSingleton<ISimulatedNodeFactory, SimulatedNodeFactory>();
 
         // 3. Shell & Orchestration Services

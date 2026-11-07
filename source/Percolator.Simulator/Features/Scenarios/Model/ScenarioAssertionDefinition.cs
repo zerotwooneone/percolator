@@ -9,6 +9,11 @@ namespace Percolator.Simulator.Features.Scenarios.Model;
 [JsonDerivedType(typeof(AssertHostedOpkCountAssertion), "AssertHostedOpkCount")]
 [JsonDerivedType(typeof(AssertMailboxQueueDepthAssertion), "AssertMailboxQueueDepth")]
 [JsonDerivedType(typeof(AssertLogContainsCodeAssertion), "AssertLogContainsCode")]
+[JsonDerivedType(typeof(AssertMessageExpiredAssertion), "AssertMessageExpired")]
+[JsonDerivedType(typeof(AssertReactionPresentAssertion), "AssertReactionPresent")]
+[JsonDerivedType(typeof(AssertMessageEditedAssertion), "AssertMessageEdited")]
+[JsonDerivedType(typeof(AssertMessageTombstonedAssertion), "AssertMessageTombstoned")]
+[JsonDerivedType(typeof(AssertMessageReadAssertion), "AssertMessageRead")]
 public abstract record ScenarioAssertionDefinition
 {
     public abstract string DisplayText { get; }
@@ -47,4 +52,33 @@ public sealed record AssertMailboxQueueDepthAssertion(string RelayAlias, int Exp
 public sealed record AssertLogContainsCodeAssertion(string ExpectedCode) : ScenarioAssertionDefinition
 {
     public override string DisplayText => $"Assert Log Contains: \"{ExpectedCode}\"";
+}
+
+// -----------------------------------------------------------------------------
+// Phase 6A Scenario Assertions: Disappearing Messages, Reactions & Mutations
+// -----------------------------------------------------------------------------
+
+public sealed record AssertMessageExpiredAssertion(string PersonaAlias, string ExpectedText) : ScenarioAssertionDefinition
+{
+    public override string DisplayText => $"Assert Message Expired on '{PersonaAlias}': \"{ExpectedText}\"";
+}
+
+public sealed record AssertReactionPresentAssertion(string PersonaAlias, string MessageText, string ExpectedEmoji) : ScenarioAssertionDefinition
+{
+    public override string DisplayText => $"Assert Reaction on '{PersonaAlias}': '{ExpectedEmoji}' on \"{MessageText}\"";
+}
+
+public sealed record AssertMessageEditedAssertion(string PersonaAlias, string ExpectedNewText) : ScenarioAssertionDefinition
+{
+    public override string DisplayText => $"Assert Message Edited on '{PersonaAlias}': \"{ExpectedNewText}\"";
+}
+
+public sealed record AssertMessageTombstonedAssertion(string PersonaAlias, string OriginalMessageText) : ScenarioAssertionDefinition
+{
+    public override string DisplayText => $"Assert Message Tombstoned on '{PersonaAlias}': \"{OriginalMessageText}\"";
+}
+
+public sealed record AssertMessageReadAssertion(string PersonaAlias, string MessageText) : ScenarioAssertionDefinition
+{
+    public override string DisplayText => $"Assert Message Marked Read on '{PersonaAlias}': \"{MessageText}\"";
 }

@@ -27,4 +27,24 @@ public interface ISimulatorChatQueryService
     Task<bool> HasMessageContainingAsync(
         string expectedText,
         CancellationToken ct = default);
+
+    Task<SimulatorChatMessageReadModel?> FindMessageAsync(
+        string expectedText,
+        CancellationToken ct = default);
+
+    Task<bool> HasReactionAsync(
+        string expectedText,
+        string expectedEmoji,
+        CancellationToken ct = default);
+
+    Task<bool> IsMessageEditedAsync(
+        string expectedText,
+        CancellationToken ct = default);
+
+    Task<bool> HasAnyTombstoneAsync(
+        CancellationToken ct = default);
+
+    Task<bool> IsMessageReadAsync(
+        string expectedText,
+        CancellationToken ct = default);
 }

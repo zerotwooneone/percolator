@@ -1,6 +1,7 @@
 using System;
 using Percolator.Simulator.Features.DirectChat;
 using Percolator.Simulator.Features.Logging;
+using Percolator.Simulator.Features.RichChatAndProfiles;
 using Percolator.Simulator.Features.RelayedChat;
 using Percolator.Simulator.Features.Scenarios;
 using Percolator.Simulator.Features.Shell;
@@ -19,6 +20,7 @@ internal sealed class PersonaCardDependencies
     public ISimulatorLogSink LogSink { get; }
     public RelayProvisioningCoordinator RelayCoordinator { get; }
     public IFlightRecorderStateService? FlightRecorder { get; }
+    public RichChatActionCoordinator RichChatCoordinator { get; }
 
     public PersonaCardDependencies(
         IStatusToastService toastService,
@@ -30,6 +32,7 @@ internal sealed class PersonaCardDependencies
         ISimulatedWorldStateService worldState,
         ISimulatorLogSink logSink,
         RelayProvisioningCoordinator relayCoordinator,
+        RichChatActionCoordinator richChatCoordinator,
         IFlightRecorderStateService? flightRecorder = null)
     {
         ToastService = toastService ?? throw new ArgumentNullException(nameof(toastService));
@@ -41,6 +44,7 @@ internal sealed class PersonaCardDependencies
         WorldState = worldState ?? throw new ArgumentNullException(nameof(worldState));
         LogSink = logSink ?? throw new ArgumentNullException(nameof(logSink));
         RelayCoordinator = relayCoordinator ?? throw new ArgumentNullException(nameof(relayCoordinator));
+        RichChatCoordinator = richChatCoordinator ?? throw new ArgumentNullException(nameof(richChatCoordinator));
         FlightRecorder = flightRecorder;
     }
 }

@@ -48,6 +48,7 @@ using Percolator.Infrastructure.Windows.DependencyInjection;
 using Percolator.Infrastructure.Windows.Security;
 using Percolator.Infrastructure.Windows.Storage;
 #endif
+using Percolator.Simulator.Features.RichChatAndProfiles;
 using Percolator.PluginSdk;
 using Percolator.Simulator.Features.DirectChat;
 using Percolator.Simulator.Features.Logging;
@@ -63,6 +64,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
     private readonly ISimulatorLogSink _logSink;
     private readonly ISimulatorStateBus _stateBus;
     private readonly ISimulatedWorldStateService _worldState;
+    private readonly IVirtualClockStateService _virtualClock;
     private readonly ReactiveProperty<bool> _isListening = new(true);
     private readonly SemaphoreSlim _listeningGate = new(1, 1);
     private readonly object _opkIdLock = new();
@@ -101,7 +103,8 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         int port,
         ISimulatorLogSink logSink,
         ISimulatorStateBus stateBus,
-        ISimulatedWorldStateService worldState)
+        ISimulatedWorldStateService worldState,
+        IVirtualClockStateService virtualClock)
     {
         Id = id;
         DisplayName = displayName;
@@ -110,6 +113,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         _logSink = logSink ?? throw new ArgumentNullException(nameof(logSink));
         _stateBus = stateBus ?? throw new ArgumentNullException(nameof(stateBus));
         _worldState = worldState ?? throw new ArgumentNullException(nameof(worldState));
+        _virtualClock = virtualClock ?? throw new ArgumentNullException(nameof(virtualClock));
         _masterKeyHandle = MasterKeyHandle.GenerateRandom();
 
         _nodeTempDirectory = Path.Combine(Path.GetTempPath(), "PercolatorSim", $"node_{Id.Value:N}");
@@ -169,6 +173,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
 
             // 1a. Override DbConnectionInterceptor so SQLite operates in plain unencrypted mode (no sqlite3_key / SQLCipher encryption)
             services.AddSingleton<DbConnectionInterceptor, SimulatorSqlCipherPragmaInterceptor>();
+            services.AddSingleton<IDateTimeProvider>(_virtualClock);
 
 #if WINDOWS
             // 1b. Windows-specific infrastructure overrides (SChannel TLS 1.3 cert provider & NTFS Sparse Desktop File Store)

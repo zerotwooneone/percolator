@@ -17,6 +17,12 @@ namespace Percolator.Simulator.Features.Scenarios.Model;
 [JsonDerivedType(typeof(DuplicateRelayEnvelopeStep), "DuplicateRelayEnvelope")]
 [JsonDerivedType(typeof(FlipRelayEnvelopeBitStep), "FlipRelayEnvelopeBit")]
 [JsonDerivedType(typeof(ShuffleRelayQueueStep), "ShuffleRelayQueue")]
+[JsonDerivedType(typeof(AdvanceVirtualTimeStep), "AdvanceVirtualTime")]
+[JsonDerivedType(typeof(SendDisappearingMessageStep), "SendDisappearingMessage")]
+[JsonDerivedType(typeof(AddReactionStep), "AddReaction")]
+[JsonDerivedType(typeof(EditMessageStep), "EditMessage")]
+[JsonDerivedType(typeof(DeleteMessageStep), "DeleteMessage")]
+[JsonDerivedType(typeof(MarkConversationReadStep), "MarkConversationRead")]
 public abstract record ScenarioStepDefinition
 {
     public abstract string DisplayText { get; }
@@ -90,4 +96,38 @@ public sealed record FlipRelayEnvelopeBitStep(string RelayAlias, string? QueueId
 public sealed record ShuffleRelayQueueStep(string RelayAlias) : ScenarioStepDefinition
 {
     public override string DisplayText => $"Shuffle Queue on '{RelayAlias}'";
+}
+
+// -----------------------------------------------------------------------------
+// Phase 6A Scenario Steps: Virtual Clock, Disappearing Messages & Rich Chat
+// -----------------------------------------------------------------------------
+
+public sealed record AdvanceVirtualTimeStep(int Seconds) : ScenarioStepDefinition
+{
+    public override string DisplayText => $"Advance Virtual Time: +{Seconds}s";
+}
+
+public sealed record SendDisappearingMessageStep(string SenderAlias, string RecipientAlias, string Text, int ExpireAfterSeconds) : ScenarioStepDefinition
+{
+    public override string DisplayText => $"Send Disappearing Message: '{SenderAlias}' ➔ '{RecipientAlias}': \"{Text}\" (TTL: {ExpireAfterSeconds}s)";
+}
+
+public sealed record AddReactionStep(string SenderAlias, string RecipientAlias, string TargetMessageText, string Emoji) : ScenarioStepDefinition
+{
+    public override string DisplayText => $"Add Reaction: '{SenderAlias}' reacts '{Emoji}' to \"{TargetMessageText}\" on '{RecipientAlias}'";
+}
+
+public sealed record EditMessageStep(string SenderAlias, string RecipientAlias, string TargetMessageText, string NewText) : ScenarioStepDefinition
+{
+    public override string DisplayText => $"Edit Message: '{SenderAlias}' edits \"{TargetMessageText}\" ➔ \"{NewText}\" on '{RecipientAlias}'";
+}
+
+public sealed record DeleteMessageStep(string SenderAlias, string RecipientAlias, string TargetMessageText) : ScenarioStepDefinition
+{
+    public override string DisplayText => $"Delete Message: '{SenderAlias}' deletes \"{TargetMessageText}\" on '{RecipientAlias}'";
+}
+
+public sealed record MarkConversationReadStep(string OwnerAlias, string PeerAlias) : ScenarioStepDefinition
+{
+    public override string DisplayText => $"Mark Conversation Read: '{OwnerAlias}' ⇄ '{PeerAlias}'";
 }

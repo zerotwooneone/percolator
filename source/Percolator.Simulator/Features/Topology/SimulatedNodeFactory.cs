@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Percolator.Simulator.Features.Logging;
+using Percolator.Simulator.Features.RichChatAndProfiles;
 using Percolator.Simulator.Features.RelayedChat;
 using Percolator.Simulator.Features.Shell;
 
@@ -12,15 +13,18 @@ internal sealed class SimulatedNodeFactory : ISimulatedNodeFactory
     private readonly ISimulatorLogSink _logSink;
     private readonly ISimulatorStateBus _stateBus;
     private readonly ISimulatedWorldStateService _worldState;
+    private readonly IVirtualClockStateService _virtualClock;
 
     public SimulatedNodeFactory(
         ISimulatorLogSink logSink,
         ISimulatorStateBus stateBus,
-        ISimulatedWorldStateService worldState)
+        ISimulatedWorldStateService worldState,
+        IVirtualClockStateService virtualClock)
     {
         _logSink = logSink ?? throw new ArgumentNullException(nameof(logSink));
         _stateBus = stateBus ?? throw new ArgumentNullException(nameof(stateBus));
         _worldState = worldState ?? throw new ArgumentNullException(nameof(worldState));
+        _virtualClock = virtualClock ?? throw new ArgumentNullException(nameof(virtualClock));
     }
 
     public async Task<ISimulatedPersonaHost> CreatePersonaHostAsync(string? displayName = null, CancellationToken ct = default)
@@ -31,7 +35,7 @@ internal sealed class SimulatedNodeFactory : ISimulatedNodeFactory
         var identiconBytes = IdenticonGenerator.CreatePng(seed);
         var port = LoopbackPortAllocator.AllocateAvailablePort();
 
-        var host = new SimulatedPersonaHost(nodeId, name, identiconBytes, port, _logSink, _stateBus, _worldState);
+        var host = new SimulatedPersonaHost(nodeId, name, identiconBytes, port, _logSink, _stateBus, _worldState, _virtualClock);
         await host.StartAsync(ct);
         return host;
     }

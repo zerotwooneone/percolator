@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.Input;
 using Percolator.Simulator.Features.Logging;
+using Percolator.Simulator.Features.RichChatAndProfiles;
 using Percolator.Simulator.Features.RelayedChat;
 using Percolator.Simulator.Features.Scenarios;
 using Percolator.Simulator.Features.Scenarios.Model;
@@ -23,6 +24,7 @@ internal sealed partial class TopGlobalToolbarViewModel : ViewModelBase
     private readonly IFlightRecorderStateService _flightRecorder;
     private readonly ScenarioRunnerService _scenarioRunner;
     private readonly ISimulatedNodeFactory _nodeFactory;
+    private readonly IVirtualClockStateService _virtualClock;
     private bool _hasAddedRealPersona;
 
     public TopGlobalToolbarViewModel(
@@ -34,7 +36,8 @@ internal sealed partial class TopGlobalToolbarViewModel : ViewModelBase
         DesignDataService designData,
         IFlightRecorderStateService flightRecorder,
         ScenarioRunnerService scenarioRunner,
-        ISimulatedNodeFactory nodeFactory)
+        ISimulatedNodeFactory nodeFactory,
+        IVirtualClockStateService virtualClock)
     {
         _worldState = worldState;
         _selectionState = selectionState;
@@ -45,6 +48,7 @@ internal sealed partial class TopGlobalToolbarViewModel : ViewModelBase
         _flightRecorder = flightRecorder;
         _scenarioRunner = scenarioRunner;
         _nodeFactory = nodeFactory ?? throw new ArgumentNullException(nameof(nodeFactory));
+        _virtualClock = virtualClock ?? throw new ArgumentNullException(nameof(virtualClock));
     }
 
     [RelayCommand]
@@ -202,13 +206,25 @@ internal sealed partial class TopGlobalToolbarViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private void AdvanceOneMinute() => _toastService.ShowPlaceholder("+1 Minute", "Phase 6A");
+    private void AdvanceOneMinute()
+    {
+        _virtualClock.AdvanceTime(TimeSpan.FromMinutes(1));
+        _toastService.ShowToast("Virtual Clock", "Advanced virtual time by +1 Minute.", ToastSeverity.Informational);
+    }
 
     [RelayCommand]
-    private void AdvanceOneHour() => _toastService.ShowPlaceholder("+1 Hour", "Phase 6A");
+    private void AdvanceOneHour()
+    {
+        _virtualClock.AdvanceTime(TimeSpan.FromHours(1));
+        _toastService.ShowToast("Virtual Clock", "Advanced virtual time by +1 Hour.", ToastSeverity.Informational);
+    }
 
     [RelayCommand]
-    private void AdvanceTwentyFourHours() => _toastService.ShowPlaceholder("+24 Hours", "Phase 8");
+    private void AdvanceTwentyFourHours()
+    {
+        _virtualClock.AdvanceTime(TimeSpan.FromHours(24));
+        _toastService.ShowToast("Virtual Clock", "Advanced virtual time by +24 Hours (Discovery Epoch rotated).", ToastSeverity.Informational);
+    }
 
     [RelayCommand]
     private async Task ResetWorldAsync()

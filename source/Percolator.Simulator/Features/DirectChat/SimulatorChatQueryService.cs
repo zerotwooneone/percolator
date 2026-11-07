@@ -86,4 +86,95 @@ internal sealed class SimulatorChatQueryService : ISimulatorChatQueryService
             .AsNoTracking()
             .AnyAsync(m => !m.IsTombstone && m.Content.Contains(expectedText), ct);
     }
+
+    public async Task<SimulatorChatMessageReadModel?> FindMessageAsync(
+        string expectedText,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(expectedText)) return null;
+
+        var entity = await _dbContext.ChatMessages
+            .AsNoTracking()
+            .Where(m => !m.IsTombstone && m.Content.Contains(expectedText))
+            .OrderByDescending(m => m.TimestampUnixMs)
+            .FirstOrDefaultAsync(ct);
+
+        if (entity == null)
+        {
+            entity = await _dbContext.ChatMessages
+                .AsNoTracking()
+                .Where(m => m.Content.Contains(expectedText))
+                .OrderByDescending(m => m.TimestampUnixMs)
+                .FirstOrDefaultAsync(ct);
+
+            if (entity == null) return null;
+        }
+
+        var reactions = await _dbContext.ChatReactions
+            .AsNoTracking()
+            .Where(r => r.MessageId == entity.Id)
+            .Select(r => r.Emoji)
+            .ToListAsync(ct);
+
+        return new SimulatorChatMessageReadModel(
+            entity.Id,
+            entity.ChannelId,
+            PublicIdentityId.FromBytes(entity.AuthorId),
+            entity.Content,
+            entity.TimestampUnixMs,
+            entity.DeliveredAtUnixMs,
+            entity.ReadAtUnixMs,
+            entity.EditedAtUnixMs,
+            reactions);
+    }
+
+    public async Task<bool> HasReactionAsync(
+        string expectedText,
+        string expectedEmoji,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(expectedText) || string.IsNullOrEmpty(expectedEmoji)) return false;
+
+        var matchingMessageIds = await _dbContext.ChatMessages
+            .AsNoTracking()
+            .Where(m => !m.IsTombstone && m.Content.Contains(expectedText))
+            .Select(m => m.Id)
+            .ToListAsync(ct);
+
+        if (matchingMessageIds.Count == 0) return false;
+
+        return await _dbContext.ChatReactions
+            .AsNoTracking()
+            .AnyAsync(r => matchingMessageIds.Contains(r.MessageId) && r.Emoji == expectedEmoji, ct);
+    }
+
+    public async Task<bool> IsMessageEditedAsync(
+        string expectedText,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(expectedText)) return false;
+
+        return await _dbContext.ChatMessages
+            .AsNoTracking()
+            .AnyAsync(m => !m.IsTombstone && m.Content.Contains(expectedText) && m.EditedAtUnixMs.HasValue, ct);
+    }
+
+    public async Task<bool> HasAnyTombstoneAsync(
+        CancellationToken ct = default)
+    {
+        return await _dbContext.ChatMessages
+            .AsNoTracking()
+            .AnyAsync(m => m.IsTombstone, ct);
+    }
+
+    public async Task<bool> IsMessageReadAsync(
+        string expectedText,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(expectedText)) return false;
+
+        return await _dbContext.ChatMessages
+            .AsNoTracking()
+            .AnyAsync(m => !m.IsTombstone && m.Content.Contains(expectedText) && m.ReadAtUnixMs.HasValue, ct);
+    }
 }

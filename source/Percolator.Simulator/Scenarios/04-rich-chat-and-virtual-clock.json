@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "name": "04 Rich Chat and Virtual Clock",
+  "description": "End-to-end scenario verifying Phase 6A virtual clock time acceleration, disappearing message expiration sweeps, emoji reactions, in-place message edits, and tombstone deletions over Double Ratchet channels.",
+  "steps": [
+    {
+      "$type": "SpawnPersonas",
+      "aliases": [
+        "Alice",
+        "Bob"
+      ]
+    },
+    {
+      "$type": "InitiateDirectHandshake",
+      "initiatorAlias": "Alice",
+      "targetAlias": "Bob"
+    },
+    {
+      "$type": "ApprovePendingHandshake",
+      "ownerAlias": "Bob",
+      "senderAlias": "Alice"
+    },
+    {
+      "$type": "SendDirectMessage",
+      "senderAlias": "Alice",
+      "recipientAlias": "Bob",
+      "text": "Persistent message from Alice"
+    },
+    {
+      "$type": "SendDisappearingMessage",
+      "senderAlias": "Alice",
+      "recipientAlias": "Bob",
+      "text": "This will disappear in 60s",
+      "expireAfterSeconds": 60
+    },
+    {
+      "$type": "AddReaction",
+      "senderAlias": "Bob",
+      "recipientAlias": "Alice",
+      "targetMessageText": "Persistent message from Alice",
+      "emoji": "👍"
+    },
+    {
+      "$type": "EditMessage",
+      "senderAlias": "Alice",
+      "recipientAlias": "Bob",
+      "targetMessageText": "Persistent message from Alice",
+      "newText": "Updated message from Alice"
+    },
+    {
+      "$type": "SendDirectMessage",
+      "senderAlias": "Bob",
+      "recipientAlias": "Alice",
+      "text": "I will delete this message"
+    },
+    {
+      "$type": "DeleteMessage",
+      "senderAlias": "Bob",
+      "recipientAlias": "Alice",
+      "targetMessageText": "I will delete this message"
+    },
+    {
+      "$type": "AdvanceVirtualTime",
+      "seconds": 120
+    }
+  ],
+  "assertions": [
+    {
+      "$type": "AssertMessageDelivered",
+      "recipientAlias": "Bob",
+      "expectedText": "Updated message from Alice"
+    },
+    {
+      "$type": "AssertReactionPresent",
+      "personaAlias": "Alice",
+      "messageText": "Updated message from Alice",
+      "expectedEmoji": "👍"
+    },
+    {
+      "$type": "AssertMessageEdited",
+      "personaAlias": "Bob",
+      "expectedNewText": "Updated message from Alice"
+    },
+    {
+      "$type": "AssertMessageTombstoned",
+      "personaAlias": "Alice",
+      "originalMessageText": "I will delete this message"
+    },
+    {
+      "$type": "AssertMessageExpired",
+      "personaAlias": "Bob",
+      "expectedText": "This will disappear in 60s"
+    },
+    {
+      "$type": "AssertMessageExpired",
+      "personaAlias": "Alice",
+      "expectedText": "This will disappear in 60s"
+    },
+    {
+      "$type": "AssertZeroErrors"
+    }
+  ]
+}
