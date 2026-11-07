@@ -30,8 +30,8 @@ internal sealed class ScenarioRunnerService
     private readonly RelayProvisioningCoordinator _relayCoordinator;
     private readonly ISimulatorLogSink _logSink;
     private readonly ISimulatedNodeFactory _nodeFactory;
-    private readonly IVirtualClockStateService? _virtualClock;
-    private readonly RichChatActionCoordinator? _richChatCoordinator;
+    private readonly IVirtualClockStateService _virtualClock;
+    private readonly RichChatActionCoordinator _richChatCoordinator;
     private readonly IFlightRecorderStateService? _flightRecorder;
     private readonly ISelectionStateService? _selectionState;
 
@@ -43,8 +43,8 @@ internal sealed class ScenarioRunnerService
         RelayProvisioningCoordinator relayCoordinator,
         ISimulatorLogSink logSink,
         ISimulatedNodeFactory nodeFactory,
-        IVirtualClockStateService? virtualClock = null,
-        RichChatActionCoordinator? richChatCoordinator = null,
+        IVirtualClockStateService virtualClock,
+        RichChatActionCoordinator richChatCoordinator,
         IFlightRecorderStateService? flightRecorder = null,
         ISelectionStateService? selectionState = null)
     {
@@ -55,8 +55,8 @@ internal sealed class ScenarioRunnerService
         _relayCoordinator = relayCoordinator ?? throw new ArgumentNullException(nameof(relayCoordinator));
         _logSink = logSink ?? throw new ArgumentNullException(nameof(logSink));
         _nodeFactory = nodeFactory ?? throw new ArgumentNullException(nameof(nodeFactory));
-        _virtualClock = virtualClock;
-        _richChatCoordinator = richChatCoordinator;
+        _virtualClock = virtualClock ?? throw new ArgumentNullException(nameof(virtualClock));
+        _richChatCoordinator = richChatCoordinator ?? throw new ArgumentNullException(nameof(richChatCoordinator));
         _flightRecorder = flightRecorder;
         _selectionState = selectionState;
     }
@@ -561,26 +561,22 @@ internal sealed class ScenarioRunnerService
         await host.SetListeningAsync(step.IsListening, ct);
     }
 
-    private async Task ExecuteSendDirectMessageAsync(
-        SendDirectMessageStep step,
-        Dictionary<string, ISimulatedPersonaHost> aliasMap,
+    private async Task ExecuteWithTranscriptSignalWaitAsync(
+        ISimulatedPersonaHost recipient,
+        Func<Task<bool>> action,
+        string failureMessage,
         CancellationToken ct)
     {
-        if (!aliasMap.TryGetValue(step.SenderAlias, out var sender))
-            throw new ScenarioExecutionException($"Sender persona '{step.SenderAlias}' not found.");
-        if (!aliasMap.TryGetValue(step.RecipientAlias, out var recipient))
-            throw new ScenarioExecutionException($"Recipient persona '{step.RecipientAlias}' not found.");
-
         Task signalTask = recipient.IsListening.CurrentValue
             ? _stateBus.Signals
                 .Where(s => s.NodeId == recipient.Id && s.Category == SignalCategory.ChatTranscriptChanged)
                 .FirstAsync(cancellationToken: ct)
             : Task.CompletedTask;
 
-        var success = await _chatCoordinator.SendDirectMessageAsync(sender.Id, recipient.Id, step.Text, expireAfterSeconds: null, ct: ct);
+        var success = await action();
         if (!success)
         {
-            throw new ScenarioExecutionException($"SendDirectMessageAsync failed: '{step.SenderAlias}' -> '{step.RecipientAlias}'.");
+            throw new ScenarioExecutionException(failureMessage);
         }
 
         if (recipient.IsListening.CurrentValue)
@@ -591,12 +587,25 @@ internal sealed class ScenarioRunnerService
         }
     }
 
+    private async Task ExecuteSendDirectMessageAsync(
+        SendDirectMessageStep step,
+        Dictionary<string, ISimulatedPersonaHost> aliasMap,
+        CancellationToken ct)
+    {
+        if (!aliasMap.TryGetValue(step.SenderAlias, out var sender))
+            throw new ScenarioExecutionException($"Sender persona '{step.SenderAlias}' not found.");
+        if (!aliasMap.TryGetValue(step.RecipientAlias, out var recipient))
+            throw new ScenarioExecutionException($"Recipient persona '{step.RecipientAlias}' not found.");
+
+        await ExecuteWithTranscriptSignalWaitAsync(
+            recipient,
+            () => _chatCoordinator.SendDirectMessageAsync(sender.Id, recipient.Id, step.Text, expireAfterSeconds: null, ct: ct),
+            $"SendDirectMessageAsync failed: '{step.SenderAlias}' -> '{step.RecipientAlias}'.",
+            ct);
+    }
+
     private async Task ExecuteAdvanceVirtualTimeAsync(AdvanceVirtualTimeStep step, CancellationToken ct)
     {
-        if (_virtualClock == null)
-        {
-            throw new ScenarioExecutionException("VirtualClockStateService is not configured for scenario replay.");
-        }
 
         await _virtualClock.AdvanceTimeAsync(TimeSpan.FromSeconds(step.Seconds), ct);
     }
@@ -611,30 +620,11 @@ internal sealed class ScenarioRunnerService
         if (!aliasMap.TryGetValue(step.RecipientAlias, out var recipient))
             throw new ScenarioExecutionException($"Recipient persona '{step.RecipientAlias}' not found.");
 
-        Task signalTask = recipient.IsListening.CurrentValue
-            ? _stateBus.Signals
-                .Where(s => s.NodeId == recipient.Id && s.Category == SignalCategory.ChatTranscriptChanged)
-                .FirstAsync(cancellationToken: ct)
-            : Task.CompletedTask;
-
-        var success = await _chatCoordinator.SendDirectMessageAsync(
-            sender.Id,
-            recipient.Id,
-            step.Text,
-            step.ExpireAfterSeconds,
+        await ExecuteWithTranscriptSignalWaitAsync(
+            recipient,
+            () => _chatCoordinator.SendDirectMessageAsync(sender.Id, recipient.Id, step.Text, step.ExpireAfterSeconds, ct),
+            $"SendDisappearingMessageAsync failed: '{step.SenderAlias}' -> '{step.RecipientAlias}'.",
             ct);
-
-        if (!success)
-        {
-            throw new ScenarioExecutionException($"SendDisappearingMessageAsync failed: '{step.SenderAlias}' -> '{step.RecipientAlias}'.");
-        }
-
-        if (recipient.IsListening.CurrentValue)
-        {
-            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
-            await signalTask.WaitAsync(linkedCts.Token);
-        }
     }
 
     private async Task ExecuteAddReactionAsync(
@@ -669,30 +659,11 @@ internal sealed class ScenarioRunnerService
             throw new ScenarioExecutionException($"Cannot react: Message containing \"{step.TargetMessageText}\" was not found in conversation between '{step.SenderAlias}' and '{step.RecipientAlias}'.");
         }
 
-        Task signalTask = recipient.IsListening.CurrentValue
-            ? _stateBus.Signals
-                .Where(s => s.NodeId == recipient.Id && s.Category == SignalCategory.ChatTranscriptChanged)
-                .FirstAsync(cancellationToken: ct)
-            : Task.CompletedTask;
-
-        var success = await _richChatCoordinator.AddReactionAsync(
-            sender.Id,
-            recipient.Id,
-            targetMessage.MessageId,
-            step.Emoji,
+        await ExecuteWithTranscriptSignalWaitAsync(
+            recipient,
+            () => _richChatCoordinator.AddReactionAsync(sender.Id, recipient.Id, targetMessage.MessageId, step.Emoji, ct),
+            $"AddReactionAsync failed: '{step.SenderAlias}' -> '{step.RecipientAlias}'.",
             ct);
-
-        if (!success)
-        {
-            throw new ScenarioExecutionException($"AddReactionAsync failed: '{step.SenderAlias}' -> '{step.RecipientAlias}'.");
-        }
-
-        if (recipient.IsListening.CurrentValue)
-        {
-            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
-            await signalTask.WaitAsync(linkedCts.Token);
-        }
     }
 
     private async Task ExecuteEditMessageAsync(
@@ -720,30 +691,11 @@ internal sealed class ScenarioRunnerService
             throw new ScenarioExecutionException($"Cannot edit: Message containing \"{step.TargetMessageText}\" was not found on author '{step.SenderAlias}'.");
         }
 
-        Task signalTask = recipient.IsListening.CurrentValue
-            ? _stateBus.Signals
-                .Where(s => s.NodeId == recipient.Id && s.Category == SignalCategory.ChatTranscriptChanged)
-                .FirstAsync(cancellationToken: ct)
-            : Task.CompletedTask;
-
-        var success = await _richChatCoordinator.EditMessageAsync(
-            sender.Id,
-            recipient.Id,
-            targetMessage.MessageId,
-            step.NewText,
+        await ExecuteWithTranscriptSignalWaitAsync(
+            recipient,
+            () => _richChatCoordinator.EditMessageAsync(sender.Id, recipient.Id, targetMessage.MessageId, step.NewText, ct),
+            $"EditMessageAsync failed: '{step.SenderAlias}' -> '{step.RecipientAlias}'.",
             ct);
-
-        if (!success)
-        {
-            throw new ScenarioExecutionException($"EditMessageAsync failed: '{step.SenderAlias}' -> '{step.RecipientAlias}'.");
-        }
-
-        if (recipient.IsListening.CurrentValue)
-        {
-            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
-            await signalTask.WaitAsync(linkedCts.Token);
-        }
     }
 
     private async Task ExecuteDeleteMessageAsync(
@@ -771,29 +723,11 @@ internal sealed class ScenarioRunnerService
             throw new ScenarioExecutionException($"Cannot delete: Message containing \"{step.TargetMessageText}\" was not found on author '{step.SenderAlias}'.");
         }
 
-        Task signalTask = recipient.IsListening.CurrentValue
-            ? _stateBus.Signals
-                .Where(s => s.NodeId == recipient.Id && s.Category == SignalCategory.ChatTranscriptChanged)
-                .FirstAsync(cancellationToken: ct)
-            : Task.CompletedTask;
-
-        var success = await _richChatCoordinator.DeleteMessageAsync(
-            sender.Id,
-            recipient.Id,
-            targetMessage.MessageId,
+        await ExecuteWithTranscriptSignalWaitAsync(
+            recipient,
+            () => _richChatCoordinator.DeleteMessageAsync(sender.Id, recipient.Id, targetMessage.MessageId, ct),
+            $"DeleteMessageAsync failed: '{step.SenderAlias}' -> '{step.RecipientAlias}'.",
             ct);
-
-        if (!success)
-        {
-            throw new ScenarioExecutionException($"DeleteMessageAsync failed: '{step.SenderAlias}' -> '{step.RecipientAlias}'.");
-        }
-
-        if (recipient.IsListening.CurrentValue)
-        {
-            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
-            await signalTask.WaitAsync(linkedCts.Token);
-        }
     }
 
     private async Task ExecuteMarkConversationReadAsync(
@@ -816,24 +750,11 @@ internal sealed class ScenarioRunnerService
             throw new ScenarioExecutionException($"MarkConversationRead: No incoming messages from '{step.PeerAlias}' found on '{step.OwnerAlias}'.");
         }
 
-        Task signalTask = peer.IsListening.CurrentValue
-            ? _stateBus.Signals
-                .Where(s => s.NodeId == peer.Id && s.Category == SignalCategory.ChatTranscriptChanged)
-                .FirstAsync(cancellationToken: ct)
-            : Task.CompletedTask;
-
-        var success = await _chatCoordinator.MarkConversationAsReadAsync(owner.Id, peer.Id, lastIncoming.MessageId, ct);
-        if (!success)
-        {
-            throw new ScenarioExecutionException($"MarkConversationAsReadAsync failed for '{step.OwnerAlias}'.");
-        }
-
-        if (peer.IsListening.CurrentValue)
-        {
-            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
-            await signalTask.WaitAsync(linkedCts.Token);
-        }
+        await ExecuteWithTranscriptSignalWaitAsync(
+            peer,
+            () => _chatCoordinator.MarkConversationAsReadAsync(owner.Id, peer.Id, lastIncoming.MessageId, ct),
+            $"MarkConversationAsReadAsync failed for '{step.OwnerAlias}'.",
+            ct);
     }
 
     private static async Task ExecuteAssertDirectRatchetSessionAsync(

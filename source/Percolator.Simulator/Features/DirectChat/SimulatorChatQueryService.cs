@@ -164,7 +164,7 @@ internal sealed class SimulatorChatQueryService : ISimulatorChatQueryService
     {
         return await _dbContext.ChatMessages
             .AsNoTracking()
-            .AnyAsync(m => m.IsTombstone, ct);
+            .AnyAsync(m => m.IsTombstone && m.Content.Contains("deleted"), ct);
     }
 
     public async Task<bool> IsMessageReadAsync(

@@ -15,6 +15,7 @@ namespace Percolator.Simulator.Features.RichChatAndProfiles;
 internal sealed class VirtualClockStateService : IVirtualClockStateService, IDisposable
 {
     private readonly ReactiveProperty<DateTimeOffset> _currentTime;
+    private readonly SemaphoreSlim _advanceGate = new(1, 1);
     private readonly ISimulatedWorldStateService _worldState;
     private readonly ISimulatorStateBus _stateBus;
     private readonly ISimulatorLogSink _logSink;
@@ -38,59 +39,71 @@ internal sealed class VirtualClockStateService : IVirtualClockStateService, IDis
 
     public void AdvanceTime(TimeSpan delta)
     {
-        _ = AdvanceTimeAsync(delta);
+        UiTaskRunner.FireAndForget(
+            () => AdvanceTimeAsync(delta),
+            category: "VirtualClock",
+            logSink: _logSink);
     }
 
     public async Task AdvanceTimeAsync(TimeSpan delta, CancellationToken ct = default)
     {
-        var newTime = _currentTime.Value.Add(delta);
-        _currentTime.Value = newTime;
-
-        _logSink.Log(new SimulatorLogEntry(
-            newTime,
-            LogLevel.Information,
-            "VirtualClock",
-            null,
-            "TimeAcceleration",
-            $"Virtual clock advanced by {delta}. Current simulated UTC: {newTime:yyyy-MM-dd HH:mm:ss}"));
-
-        var hosts = _worldState.GetAllPersonaHosts();
-        foreach (var host in hosts)
+        await _advanceGate.WaitAsync(ct).ConfigureAwait(false);
+        try
         {
-            if (ct.IsCancellationRequested) break;
+            var newTime = _currentTime.Value.Add(delta);
+            _currentTime.Value = newTime;
 
-            try
+            _logSink.Log(new SimulatorLogEntry(
+                newTime,
+                LogLevel.Information,
+                "VirtualClock",
+                null,
+                "TimeAcceleration",
+                $"Virtual clock advanced by {delta}. Current simulated UTC: {newTime:yyyy-MM-dd HH:mm:ss}"));
+
+            var hosts = _worldState.GetAllPersonaHosts();
+            foreach (var host in hosts)
             {
-                using var scope = host.Services.CreateScope();
-                var chatRepo = scope.ServiceProvider.GetRequiredService<IChatMessageRepository>();
-                var nowMs = (ulong)newTime.ToUnixTimeMilliseconds();
-                var purgedCount = await chatRepo.PurgeExpiredMessagesAsync(nowMs, ct).ConfigureAwait(false);
-                if (purgedCount > 0)
+                if (ct.IsCancellationRequested) break;
+
+                try
                 {
-                    _stateBus.Publish(new SimulatorStateSignal(
-                        host.Id,
-                        SignalCategory.ChatTranscriptChanged,
-                        Details: host.PublicIdentityId.ToString()));
-                }
+                    using var scope = host.Services.CreateScope();
+                    var chatRepo = scope.ServiceProvider.GetRequiredService<IChatMessageRepository>();
+                    var nowMs = (ulong)newTime.ToUnixTimeMilliseconds();
+                    var purgedCount = await chatRepo.PurgeExpiredMessagesAsync(nowMs, ct).ConfigureAwait(false);
+                    if (purgedCount > 0)
+                    {
+                        _stateBus.Publish(new SimulatorStateSignal(
+                            host.Id,
+                            SignalCategory.ChatTranscriptChanged,
+                            Details: host.PublicIdentityId.ToString()));
+                    }
 
-                var outboxWorker = scope.ServiceProvider.GetRequiredService<OutboxWorker>();
-                await outboxWorker.ProcessBatchAsync(50, ct).ConfigureAwait(false);
+                    var outboxWorker = scope.ServiceProvider.GetRequiredService<OutboxWorker>();
+                    await outboxWorker.ProcessBatchAsync(50, ct).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logSink.Log(new SimulatorLogEntry(
+                        newTime,
+                        LogLevel.Warning,
+                        host.DisplayName,
+                        host.Id,
+                        "VirtualClock",
+                        $"Error processing clock advance on host {host.DisplayName}: {ex.Message}"));
+                }
             }
-            catch (Exception ex)
-            {
-                _logSink.Log(new SimulatorLogEntry(
-                    newTime,
-                    LogLevel.Warning,
-                    host.DisplayName,
-                    host.Id,
-                    "VirtualClock",
-                    $"Error processing clock advance on host {host.DisplayName}: {ex.Message}"));
-            }
+        }
+        finally
+        {
+            _advanceGate.Release();
         }
     }
 
     public void Dispose()
     {
         _currentTime.Dispose();
+        _advanceGate.Dispose();
     }
 }

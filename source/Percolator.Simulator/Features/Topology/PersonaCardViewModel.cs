@@ -28,17 +28,17 @@ namespace Percolator.Simulator.Features.Topology;
 internal sealed partial class PersonaCardViewModel : ViewModelBase
 {
     private readonly IStatusToastService _toastService;
-    private readonly ISimulatorStateBus? _stateBus;
-    private readonly DirectHandshakeOrchestrator? _handshakeOrchestrator;
-    private readonly DirectChatCoordinator? _chatCoordinator;
-    private readonly AutopilotPongResponder? _pongResponder;
-    private readonly ISelectionStateService? _selectionState;
-    private readonly ISimulatedWorldStateService? _worldState;
+    private readonly ISimulatorStateBus _stateBus;
+    private readonly DirectHandshakeOrchestrator _handshakeOrchestrator;
+    private readonly DirectChatCoordinator _chatCoordinator;
+    private readonly AutopilotPongResponder _pongResponder;
+    private readonly ISelectionStateService _selectionState;
+    private readonly ISimulatedWorldStateService _worldState;
     private readonly ISimulatedPersonaHost? _host;
-    private readonly ISimulatorLogSink? _logSink;
+    private readonly ISimulatorLogSink _logSink;
     private readonly IFlightRecorderStateService? _flightRecorder;
-    private readonly RelayProvisioningCoordinator? _relayCoordinator;
-    private readonly RichChatActionCoordinator? _richChatCoordinator;
+    private readonly RelayProvisioningCoordinator _relayCoordinator;
+    private readonly RichChatActionCoordinator _richChatCoordinator;
 
     private readonly CoalescedActionGate _chatTranscriptGate;
     private readonly CoalescedActionGate _pendingHandshakeGate;
@@ -176,7 +176,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
         }
 
         // Subscribe to cross-host reactive signals
-        if (_stateBus != null && _host != null)
+        if (_host != null)
         {
             _stateBus.Signals
                 .Where(s => s.NodeId == NodeId && s.Category == SignalCategory.PendingHandshakeChanged)
@@ -204,7 +204,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
                 .Where(s => s.Category == SignalCategory.HostedPreKeyCountChanged)
                 .Subscribe(signal =>
                 {
-                    if (AutoReplenishPreKeys && _host?.HomeRelay != null && _relayCoordinator != null)
+                    if (AutoReplenishPreKeys && _host?.HomeRelay != null)
                     {
                         PublicIdentityId? ownerId = (signal.Payload as HostedPreKeyCountPayload)?.OwnerId;
                         int? available = (signal.Payload as HostedPreKeyCountPayload)?.AvailableCount;
@@ -308,7 +308,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
 
     private void ExecuteRefreshChatTranscript()
     {
-        if (_host == null || _chatCoordinator == null) return;
+        if (_host == null) return;
 
         UiTaskRunner.FireAndForget(
             async () =>
@@ -443,7 +443,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
     [RelayCommand]
     private async Task RegisterRelayAsync()
     {
-        if (_host == null || _relayCoordinator == null || _worldState == null) return;
+        if (_host == null) return;
         var relay = _host.HomeRelay ?? _worldState.GetAllRelayHosts().FirstOrDefault();
         if (relay == null)
         {
@@ -466,7 +466,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
     [RelayCommand]
     private async Task PublishPreKeysAsync()
     {
-        if (_host == null || _relayCoordinator == null || _worldState == null) return;
+        if (_host == null) return;
         var relay = _host.HomeRelay ?? _worldState.GetAllRelayHosts().FirstOrDefault();
         if (relay == null)
         {
@@ -489,7 +489,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
     [RelayCommand]
     private async Task AcceptPendingHandshakeAsync()
     {
-        if (_handshakeOrchestrator == null || !_pendingSenderId.HasValue) return;
+        if (!_pendingSenderId.HasValue) return;
         var senderId = _pendingSenderId.Value;
 
         var success = await UiTaskRunner.RunAsync(
@@ -511,7 +511,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
     [RelayCommand]
     private async Task RejectPendingHandshakeAsync()
     {
-        if (_handshakeOrchestrator == null || !_pendingSenderId.HasValue) return;
+        if (!_pendingSenderId.HasValue) return;
         var senderId = _pendingSenderId.Value;
 
         var success = await UiTaskRunner.RunAsync(
@@ -533,7 +533,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
     [RelayCommand]
     private async Task BlockPendingHandshakeAsync()
     {
-        if (_handshakeOrchestrator == null || !_pendingSenderId.HasValue) return;
+        if (!_pendingSenderId.HasValue) return;
         var senderId = _pendingSenderId.Value;
 
         await UiTaskRunner.RunAsync(
@@ -548,7 +548,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
     [RelayCommand]
     private async Task SendMessageAsync()
     {
-        if (string.IsNullOrWhiteSpace(ComposeMessageText) || _chatCoordinator == null) return;
+        if (string.IsNullOrWhiteSpace(ComposeMessageText)) return;
         var text = ComposeMessageText;
         ComposeMessageText = string.Empty;
         var expireSeconds = SelectedTimerIndex switch
@@ -576,30 +576,42 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
 
         if (success)
         {
-            _flightRecorder?.RecordStep(new SendDirectMessageStep(DisplayName, peer.DisplayName, text));
+            if (expireSeconds.HasValue && expireSeconds.Value > 0)
+            {
+                _flightRecorder?.RecordStep(new SendDisappearingMessageStep(DisplayName, peer.DisplayName, text, expireSeconds.Value));
+            }
+            else
+            {
+                _flightRecorder?.RecordStep(new SendDirectMessageStep(DisplayName, peer.DisplayName, text));
+            }
         }
     }
 
     [RelayCommand]
     private async Task ReactAsync(ChatMessageItemViewModel? item)
     {
-        if (item == null || _richChatCoordinator == null || !Guid.TryParse(item.MessageId, out var msgGuid)) return;
+        if (item == null || !Guid.TryParse(item.MessageId, out var msgGuid)) return;
         var peer = GetActivePeerSummary();
         if (peer == null) return;
 
-        await UiTaskRunner.RunAsync(
+        var success = await UiTaskRunner.RunAsync(
             () => _richChatCoordinator.AddReactionAsync(NodeId, peer.Id, msgGuid, "👍"),
             category: "RichChat",
             logSink: _logSink,
             toastService: _toastService,
             nodeName: DisplayName,
             nodeId: NodeId);
+
+        if (success)
+        {
+            _flightRecorder?.RecordStep(new AddReactionStep(DisplayName, peer.DisplayName, item.Content, "👍"));
+        }
     }
 
     [RelayCommand]
     private async Task EditMessageAsync(ChatMessageItemViewModel? item)
     {
-        if (item == null || _richChatCoordinator == null || !item.IsOutgoing || !Guid.TryParse(item.MessageId, out var msgGuid)) return;
+        if (item == null || !item.IsOutgoing || !Guid.TryParse(item.MessageId, out var msgGuid)) return;
         var peer = GetActivePeerSummary();
         if (peer == null) return;
 
@@ -612,29 +624,41 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
             ComposeMessageText = string.Empty;
         }
 
-        await UiTaskRunner.RunAsync(
+        var oldContent = item.Content;
+        var success = await UiTaskRunner.RunAsync(
             () => _richChatCoordinator.EditMessageAsync(NodeId, peer.Id, msgGuid, newContent),
             category: "RichChat",
             logSink: _logSink,
             toastService: _toastService,
             nodeName: DisplayName,
             nodeId: NodeId);
+
+        if (success)
+        {
+            _flightRecorder?.RecordStep(new EditMessageStep(DisplayName, peer.DisplayName, oldContent, newContent));
+        }
     }
 
     [RelayCommand]
     private async Task DeleteMessageAsync(ChatMessageItemViewModel? item)
     {
-        if (item == null || _richChatCoordinator == null || !item.IsOutgoing || !Guid.TryParse(item.MessageId, out var msgGuid)) return;
+        if (item == null || !item.IsOutgoing || !Guid.TryParse(item.MessageId, out var msgGuid)) return;
         var peer = GetActivePeerSummary();
         if (peer == null) return;
 
-        await UiTaskRunner.RunAsync(
+        var messageContent = item.Content;
+        var success = await UiTaskRunner.RunAsync(
             () => _richChatCoordinator.DeleteMessageAsync(NodeId, peer.Id, msgGuid),
             category: "RichChat",
             logSink: _logSink,
             toastService: _toastService,
             nodeName: DisplayName,
             nodeId: NodeId);
+
+        if (success)
+        {
+            _flightRecorder?.RecordStep(new DeleteMessageStep(DisplayName, peer.DisplayName, messageContent));
+        }
     }
 
     [RelayCommand]

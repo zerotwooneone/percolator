@@ -73,7 +73,8 @@ internal sealed class DirectChatCoordinator
                 var routingRepo = scope.ServiceProvider.GetService<IPeerMailboxRoutingRepository>();
                 if (routingRepo != null)
                 {
-                    var bestRoute = await routingRepo.GetBestRouteAsync(recipient.PublicIdentityId, DateTimeOffset.UtcNow, ct);
+                    var now = scope.ServiceProvider.GetService<IDateTimeProvider>()?.UtcNow ?? DateTimeOffset.UtcNow;
+                    var bestRoute = await routingRepo.GetBestRouteAsync(recipient.PublicIdentityId, now, ct);
                     if (bestRoute != null)
                     {
                         route = DeliveryRoute.RelayedOneToOne;
@@ -232,7 +233,8 @@ internal sealed class DirectChatCoordinator
                 var routingRepo = scope.ServiceProvider.GetService<IPeerMailboxRoutingRepository>();
                 if (routingRepo != null)
                 {
-                    var bestRoute = await routingRepo.GetBestRouteAsync(sender.PublicIdentityId, DateTimeOffset.UtcNow, ct);
+                    var now = scope.ServiceProvider.GetService<IDateTimeProvider>()?.UtcNow ?? DateTimeOffset.UtcNow;
+                    var bestRoute = await routingRepo.GetBestRouteAsync(sender.PublicIdentityId, now, ct);
                     if (bestRoute != null)
                     {
                         route = DeliveryRoute.RelayedOneToOne;

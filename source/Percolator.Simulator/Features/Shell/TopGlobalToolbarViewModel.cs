@@ -39,14 +39,14 @@ internal sealed partial class TopGlobalToolbarViewModel : ViewModelBase
         ISimulatedNodeFactory nodeFactory,
         IVirtualClockStateService virtualClock)
     {
-        _worldState = worldState;
-        _selectionState = selectionState;
-        _toastService = toastService;
-        _logSink = logSink;
-        _stateBus = stateBus;
-        _designData = designData;
-        _flightRecorder = flightRecorder;
-        _scenarioRunner = scenarioRunner;
+        _worldState = worldState ?? throw new ArgumentNullException(nameof(worldState));
+        _selectionState = selectionState ?? throw new ArgumentNullException(nameof(selectionState));
+        _toastService = toastService ?? throw new ArgumentNullException(nameof(toastService));
+        _logSink = logSink ?? throw new ArgumentNullException(nameof(logSink));
+        _stateBus = stateBus ?? throw new ArgumentNullException(nameof(stateBus));
+        _designData = designData ?? throw new ArgumentNullException(nameof(designData));
+        _flightRecorder = flightRecorder ?? throw new ArgumentNullException(nameof(flightRecorder));
+        _scenarioRunner = scenarioRunner ?? throw new ArgumentNullException(nameof(scenarioRunner));
         _nodeFactory = nodeFactory ?? throw new ArgumentNullException(nameof(nodeFactory));
         _virtualClock = virtualClock ?? throw new ArgumentNullException(nameof(virtualClock));
     }
@@ -209,6 +209,7 @@ internal sealed partial class TopGlobalToolbarViewModel : ViewModelBase
     private void AdvanceOneMinute()
     {
         _virtualClock.AdvanceTime(TimeSpan.FromMinutes(1));
+        _flightRecorder.RecordStep(new AdvanceVirtualTimeStep(60));
         _toastService.ShowToast("Virtual Clock", "Advanced virtual time by +1 Minute.", ToastSeverity.Informational);
     }
 
@@ -216,6 +217,7 @@ internal sealed partial class TopGlobalToolbarViewModel : ViewModelBase
     private void AdvanceOneHour()
     {
         _virtualClock.AdvanceTime(TimeSpan.FromHours(1));
+        _flightRecorder.RecordStep(new AdvanceVirtualTimeStep(3600));
         _toastService.ShowToast("Virtual Clock", "Advanced virtual time by +1 Hour.", ToastSeverity.Informational);
     }
 
@@ -223,6 +225,7 @@ internal sealed partial class TopGlobalToolbarViewModel : ViewModelBase
     private void AdvanceTwentyFourHours()
     {
         _virtualClock.AdvanceTime(TimeSpan.FromHours(24));
+        _flightRecorder.RecordStep(new AdvanceVirtualTimeStep(86400));
         _toastService.ShowToast("Virtual Clock", "Advanced virtual time by +24 Hours (Discovery Epoch rotated).", ToastSeverity.Informational);
     }
 
