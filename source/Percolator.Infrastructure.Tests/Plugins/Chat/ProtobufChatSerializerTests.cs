@@ -105,4 +105,25 @@ public sealed class ProtobufChatSerializerTests
         deserialized.Value.ReplyContext!.ParentPayloadId.Should().Be(parentId);
         deserialized.Value.ReplyContext.ParentAuthorId.Should().Be(authorId);
     }
+
+    [Test]
+    public void DeliveryReceiptDto_RoundTripsThroughProtobufSerialization()
+    {
+        var channelId = ChannelId.New();
+        var delivererId = PublicIdentityId.New();
+        var upToPayloadId = PayloadId.New();
+        ulong deliveredAtMs = 1700000000000UL;
+
+        var dto = new DeliveryReceiptDto(channelId, delivererId, upToPayloadId, deliveredAtMs);
+
+        var serialized = _serializer.Serialize(dto);
+        var deserialized = _serializer.Deserialize<DeliveryReceiptDto>(serialized);
+
+        deserialized.IsSuccess.Should().BeTrue();
+        deserialized.Value.Should().NotBeNull();
+        deserialized.Value!.ChannelId.Should().Be(channelId);
+        deserialized.Value.DelivererId.Should().Be(delivererId);
+        deserialized.Value.UpToPayloadId.Should().Be(upToPayloadId);
+        deserialized.Value.DeliveredAtUnixMs.Should().Be(deliveredAtMs);
+    }
 }

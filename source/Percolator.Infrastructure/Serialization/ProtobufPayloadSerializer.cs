@@ -55,6 +55,7 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
                 Type t when t == typeof(MessageTombstoneDto) => FromTombstoneProto(MessageTombstoneProto.Parser.ParseFrom(data.Span)),
                 Type t when t == typeof(ReactionUpdateDto) => FromReactionProto(ReactionUpdateProto.Parser.ParseFrom(data.Span)),
                 Type t when t == typeof(ReadReceiptDto) => FromReadReceiptProto(ReadReceiptProto.Parser.ParseFrom(data.Span)),
+                Type t when t == typeof(DeliveryReceiptDto) => FromDeliveryReceiptProto(DeliveryReceiptProto.Parser.ParseFrom(data.Span)),
                 Type t when t == typeof(SystemNoticeDto) => FromNoticeProto(SystemNoticeProto.Parser.ParseFrom(data.Span)),
                 Type t when t == typeof(GroupInvitationDto) => FromInviteProto(GroupInvitationProto.Parser.ParseFrom(data.Span)),
                 Type t when t == typeof(GroupInvitationResponseDto) => FromInviteResponseProto(GroupInvitationResponseProto.Parser.ParseFrom(data.Span)),
@@ -86,6 +87,7 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
             MessageTombstoneDto tomb => ToTombstoneProto(tomb),
             ReactionUpdateDto rx => ToReactionProto(rx),
             ReadReceiptDto rr => ToReadReceiptProto(rr),
+            DeliveryReceiptDto dr => ToDeliveryReceiptProto(dr),
             SystemNoticeDto notice => ToNoticeProto(notice),
             GroupInvitationDto invite => ToInviteProto(invite),
             GroupInvitationResponseDto inviteResp => ToInviteResponseProto(inviteResp),
@@ -601,6 +603,22 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
             PublicIdentityId.FromBytes(proto.ReaderId.Span),
             PayloadId.FromBytes(proto.UpToPayloadId.Span),
             proto.ReadAtUnixMs);
+
+    private static DeliveryReceiptProto ToDeliveryReceiptProto(DeliveryReceiptDto dto) =>
+        new()
+        {
+            ChannelId = ByteString.CopyFrom(dto.ChannelId.ToByteArray()),
+            DelivererId = ByteString.CopyFrom(dto.DelivererId.ToByteArray()),
+            UpToPayloadId = ByteString.CopyFrom(dto.UpToPayloadId.ToByteArray()),
+            DeliveredAtUnixMs = dto.DeliveredAtUnixMs
+        };
+
+    private static DeliveryReceiptDto FromDeliveryReceiptProto(DeliveryReceiptProto proto) =>
+        new(
+            ChannelId.FromBytes(proto.ChannelId.Span),
+            PublicIdentityId.FromBytes(proto.DelivererId.Span),
+            PayloadId.FromBytes(proto.UpToPayloadId.Span),
+            proto.DeliveredAtUnixMs);
 
     private static SystemNoticeProto ToNoticeProto(SystemNoticeDto dto) =>
         new()

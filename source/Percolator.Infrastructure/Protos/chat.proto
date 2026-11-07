@@ -88,6 +88,13 @@ message ReadReceiptProto {
   uint64 read_at_unix_ms = 4;
 }
 
+message DeliveryReceiptProto {
+  bytes channel_id = 1;
+  bytes deliverer_id = 2;
+  bytes up_to_payload_id = 3;
+  uint64 delivered_at_unix_ms = 4;
+}
+
 message SystemNoticeProto {
   bytes channel_id = 1;
   int32 notice_type = 2;
