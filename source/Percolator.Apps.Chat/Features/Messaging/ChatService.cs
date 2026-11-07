@@ -386,13 +386,17 @@ public sealed class ChatService : IChatService
         var targetMessage = await _chatRepo.GetByIdAsync(command.UpToPayloadId, ct).ConfigureAwait(false);
         if (targetMessage is not null && targetMessage.ChannelId == command.ChannelId)
         {
-            targetMessage.MarkAsRead(nowMs);
-            await _chatRepo.UpdateAsync(targetMessage, ct).ConfigureAwait(false);
+            if (targetMessage.AuthorId != command.ReaderId)
+            {
+                targetMessage.MarkAsRead(nowMs);
+                await _chatRepo.UpdateAsync(targetMessage, ct).ConfigureAwait(false);
+            }
 
             var channelMessages = await _chatRepo.GetByChannelIdAsync(command.ChannelId, ct).ConfigureAwait(false);
             foreach (var msg in channelMessages)
             {
                 if (msg.Id != targetMessage.Id &&
+                    msg.AuthorId != command.ReaderId &&
                     msg.TimestampUnixMs <= targetMessage.TimestampUnixMs &&
                     msg.ReadAtUnixMs is null)
                 {

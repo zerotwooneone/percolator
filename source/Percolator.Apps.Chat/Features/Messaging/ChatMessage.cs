@@ -25,6 +25,7 @@ public sealed class ChatMessage
     public int? ExpireAfterSeconds { get; }
     public ulong? ExpiresAtUnixMs { get; private set; }
     public ulong? ReadAtUnixMs { get; private set; }
+    public ulong? DeliveredAtUnixMs { get; private set; }
     public ulong? EditedAtUnixMs { get; private set; }
     public bool IsTombstone { get; private set; }
     public ulong? DeletedAtUnixMs { get; private set; }
@@ -50,7 +51,8 @@ public sealed class ChatMessage
         ulong? deletedAtUnixMs = null,
         PublicIdentityId? deletedBy = null,
         IEnumerable<ChatReaction>? reactions = null,
-        ulong? readAtUnixMs = null)
+        ulong? readAtUnixMs = null,
+        ulong? deliveredAtUnixMs = null)
     {
         bool hasContent = !string.IsNullOrWhiteSpace(content);
         bool hasAttachments = attachments is not null && attachments.Count > 0;
@@ -83,6 +85,7 @@ public sealed class ChatMessage
         ExpireAfterSeconds = expireAfterSeconds;
         ExpiresAtUnixMs = expiresAtUnixMs;
         ReadAtUnixMs = readAtUnixMs;
+        DeliveredAtUnixMs = deliveredAtUnixMs ?? readAtUnixMs;
         EditedAtUnixMs = editedAtUnixMs;
         IsTombstone = isTombstone;
         DeletedAtUnixMs = deletedAtUnixMs;
@@ -178,11 +181,21 @@ public sealed class ChatMessage
     }
 
     /// <summary>
-    /// Marks the message as read at the given timestamp and starts the disappearing-message countdown
-    /// for 1:1 messages that defer expiration until read.
+    /// Marks the message as delivered to the recipient device at the given timestamp.
+    /// Does not start the disappearing-message expiration timer.
+    /// </summary>
+    public void MarkAsDelivered(ulong deliveredAtUnixMs)
+    {
+        DeliveredAtUnixMs ??= deliveredAtUnixMs;
+    }
+
+    /// <summary>
+    /// Marks the message as read at the given timestamp, implicitly ensuring delivery is recorded,
+    /// and starts the disappearing-message countdown for 1:1 messages that defer expiration until read.
     /// </summary>
     public void MarkAsRead(ulong readAtUnixMs)
     {
+        DeliveredAtUnixMs ??= readAtUnixMs;
         ReadAtUnixMs ??= readAtUnixMs;
 
         if (ExpireAfterSeconds is > 0)

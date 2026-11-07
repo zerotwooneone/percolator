@@ -288,4 +288,60 @@ public class ChatMessageTests
 
         message.Reactions.Should().BeEmpty();
     }
+
+    [Test]
+    public void MarkAsDelivered_SetsDeliveredAtUnixMs_Idempotently_WithoutStartingExpirationTimer()
+    {
+        var message = new ChatMessage(
+            MessageId,
+            TestChannelId,
+            Author,
+            SentAtMs,
+            "Hello",
+            expireAfterSeconds: 60);
+
+        message.DeliveredAtUnixMs.Should().BeNull();
+        message.ExpiresAtUnixMs.Should().BeNull();
+
+        var deliveredTime = SentAtMs + 500;
+        message.MarkAsDelivered(deliveredTime);
+
+        message.DeliveredAtUnixMs.Should().Be(deliveredTime);
+        message.ReadAtUnixMs.Should().BeNull();
+        message.ExpiresAtUnixMs.Should().BeNull();
+
+        // Idempotency: duplicate delivery receipt does not overwrite earlier timestamp or start timer
+        message.MarkAsDelivered(deliveredTime + 1000);
+        message.DeliveredAtUnixMs.Should().Be(deliveredTime);
+        message.ExpiresAtUnixMs.Should().BeNull();
+    }
+
+    [Test]
+    public void MarkAsRead_SetsBothReadAndDeliveredAtUnixMs_AndStartsExpirationTimer_WhenExpireAfterSecondsConfigured()
+    {
+        var message = new ChatMessage(
+            MessageId,
+            TestChannelId,
+            Author,
+            SentAtMs,
+            "Hello",
+            expireAfterSeconds: 30);
+
+        message.DeliveredAtUnixMs.Should().BeNull();
+        message.ReadAtUnixMs.Should().BeNull();
+        message.ExpiresAtUnixMs.Should().BeNull();
+
+        var readTime = SentAtMs + 2_000;
+        message.MarkAsRead(readTime);
+
+        message.ReadAtUnixMs.Should().Be(readTime);
+        message.DeliveredAtUnixMs.Should().Be(readTime);
+        message.ExpiresAtUnixMs.Should().Be(readTime + (30UL * 1000UL));
+
+        // Idempotency: duplicate read receipt does not overwrite timestamps or lengthen expiration
+        message.MarkAsRead(readTime + 5_000);
+        message.ReadAtUnixMs.Should().Be(readTime);
+        message.DeliveredAtUnixMs.Should().Be(readTime);
+        message.ExpiresAtUnixMs.Should().Be(readTime + (30UL * 1000UL));
+    }
 }

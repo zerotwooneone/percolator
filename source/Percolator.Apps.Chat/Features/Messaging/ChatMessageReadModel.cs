@@ -17,4 +17,6 @@ public sealed record ChatMessageReadModel(
     IReadOnlyList<MediaAttachmentDto> Attachments,
     ulong? EditedAtUnixMs,
     bool IsTombstone,
-    IReadOnlyList<ReactionGroupReadModel> Reactions);
+    IReadOnlyList<ReactionGroupReadModel> Reactions,
+    ulong? DeliveredAtUnixMs = null,
+    ulong? ReadAtUnixMs = null);
