@@ -89,7 +89,15 @@
                             <DataTemplate>
                                 <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
                                         CornerRadius="4" Padding="6,4" Margin="0,2">
-                                    <TextBlock Text="{Binding DisplayText}" FontSize="12" />
+                                    <Grid ColumnDefinitions="*,Auto">
+                                        <TextBlock Grid.Column="0" Text="{Binding BodyText}" FontSize="12" TextWrapping="Wrap" />
+                                        <TextBlock Grid.Column="1" Text="{Binding StatusText}"
+                                                   Foreground="{Binding StatusColor}"
+                                                   ToolTip.Tip="{Binding StatusTooltip}"
+                                                   FontWeight="Bold" FontSize="12"
+                                                   Margin="6,0,0,0" VerticalAlignment="Bottom"
+                                                   IsVisible="{Binding IsOutgoing}" />
+                                    </Grid>
                                 </Border>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>

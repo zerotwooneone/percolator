@@ -95,6 +95,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
     private string _pendingHandshakeText = string.Empty;
 
     private PublicIdentityId? _pendingSenderId;
+    private Guid _lastMarkedReadMessageId;
 
     // Compose State (CTL-PER-18)
     [ObservableProperty]
@@ -287,6 +288,14 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
 
     private void RefreshChatTranscript() => _chatTranscriptGate.RequestExecution();
 
+    partial void OnSendReadReceiptsChanged(bool value)
+    {
+        if (value)
+        {
+            RefreshChatTranscript();
+        }
+    }
+
     private void ExecuteRefreshChatTranscript()
     {
         if (_host == null || _chatCoordinator == null) return;
@@ -302,6 +311,18 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
                 }
 
                 var transcript = await _chatCoordinator.GetTranscriptAsync(NodeId, activePeer.Id);
+
+                if (SendReadReceipts && IsListening)
+                {
+                    var lastUnreadIncoming = transcript.LastOrDefault(m => !m.IsOutgoing && !m.IsRead);
+                    if (lastUnreadIncoming != null &&
+                        Guid.TryParse(lastUnreadIncoming.MessageId, out var msgGuid) &&
+                        msgGuid != _lastMarkedReadMessageId)
+                    {
+                        _lastMarkedReadMessageId = msgGuid;
+                        _ = _chatCoordinator.MarkConversationAsReadAsync(NodeId, activePeer.Id, msgGuid);
+                    }
+                }
 
                 UiTaskRunner.PostToUi(() =>
                 {

@@ -8,7 +8,9 @@ using Microsoft.Extensions.Logging;
 using Percolator.Apps.Chat.Features.Messaging;
 using Percolator.Domain.Channels.Model;
 using Percolator.Domain.Channels.Ports;
+using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.Ports;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.PluginSdk;
 using Percolator.Simulator.Features.Logging;
@@ -167,7 +169,8 @@ internal sealed class DirectChatCoordinator
                             var senderName = isOutgoing ? host.DisplayName : peerHost.DisplayName;
                             var timeText = DateTimeOffset.FromUnixTimeMilliseconds((long)m.TimestampUnixMs).ToLocalTime().ToString("HH:mm:ss");
                             var isRead = m.ReadAtUnixMs.HasValue;
-                            var statusText = isOutgoing ? (isRead ? "✓✓" : "✓") : string.Empty;
+                            var isDelivered = m.DeliveredAtUnixMs.HasValue || isRead;
+                            var statusText = isOutgoing ? (isDelivered ? "✓✓" : "✓") : string.Empty;
                             var reactionsSummary = m.Reactions.Count > 0
                                 ? string.Join(" ", m.Reactions.GroupBy(r => r).Select(g => $"{g.Key} {g.Count()}"))
                                 : string.Empty;
@@ -181,6 +184,7 @@ internal sealed class DirectChatCoordinator
                                 IsOutgoing = isOutgoing,
                                 StatusText = statusText,
                                 IsEdited = m.EditedAtUnixMs.HasValue,
+                                IsDelivered = isDelivered,
                                 IsRead = isRead,
                                 ReactionsSummary = reactionsSummary
                             };
@@ -201,6 +205,63 @@ internal sealed class DirectChatCoordinator
                     $"Error fetching chat transcript: {ex.Message}"));
 
                 return Array.Empty<ChatMessageItemViewModel>();
+            }
+        }, ct);
+    }
+
+    public Task<bool> MarkConversationAsReadAsync(
+        SimulatedNodeId readerNodeId,
+        SimulatedNodeId senderNodeId,
+        Guid upToMessageId,
+        CancellationToken ct = default)
+    {
+        return Task.Run(async () =>
+        {
+            var reader = _worldState.GetPersonaHost(readerNodeId);
+            var sender = _worldState.GetPersonaHost(senderNodeId);
+            if (reader == null || sender == null) return false;
+
+            try
+            {
+                var channelId = ChannelIdUtility.DeterministicFor(reader.PublicIdentityId, sender.PublicIdentityId);
+                using var scope = reader.Services.CreateScope();
+                var chatService = scope.ServiceProvider.GetRequiredService<IChatService>();
+
+                var route = DeliveryRoute.DirectP2P;
+                var routingRepo = scope.ServiceProvider.GetService<IPeerMailboxRoutingRepository>();
+                if (routingRepo != null)
+                {
+                    var bestRoute = await routingRepo.GetBestRouteAsync(sender.PublicIdentityId, DateTimeOffset.UtcNow, ct);
+                    if (bestRoute != null)
+                    {
+                        route = DeliveryRoute.RelayedOneToOne;
+                    }
+                }
+
+                var command = new MarkAsReadCommand(
+                    ChannelId: channelId,
+                    ReaderId: reader.PublicIdentityId,
+                    UpToPayloadId: PayloadId.FromGuid(upToMessageId),
+                    RecipientIdentityId: sender.PublicIdentityId,
+                    RecipientDeviceId: DeviceId.Primary,
+                    Route: route);
+
+                var result = await chatService.MarkAsReadAsync(command, ct);
+                if (!result.IsSuccess) return false;
+
+                var flushResult = await reader.FlushOutboxAsync(ct);
+                return flushResult.IsSuccess;
+            }
+            catch (Exception ex)
+            {
+                _logSink.Log(new SimulatorLogEntry(
+                    DateTimeOffset.UtcNow,
+                    LogLevel.Warning,
+                    reader.DisplayName,
+                    reader.Id,
+                    "DirectChat",
+                    $"Failed to send read receipt: {ex.Message}"));
+                return false;
             }
         }, ct);
     }
