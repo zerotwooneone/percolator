@@ -12,22 +12,25 @@ This skill enforces zero-tolerance standards against AI code shortcuts in Percol
 
 ---
 
-## The 12 Invariants at a Glance
+## The 15 Invariants at a Glance
 
 | # | Anti-Shortcut Rule | Detection Heuristic | Required Invariant |
 | :-: | :--- | :--- | :--- |
 | **1** | **No Nullable Required Parameters** | `Type? dep = null` in constructors | Required dependencies must be non-nullable without default values. Update DI/tests explicitly. |
-| **2** | **Observer Isolation (No RAM Peeking)** | `_worldState.GetPersonaHost(peerId).X` | Resolve peer state strictly from observer's local DB (`IPeerContactRepository`, `IPeerProfileRepository`). |
+| **2** | **Observer Isolation (No RAM Peeking)** | `_worldState.GetPersonaHost(peerId).X` or `host.Services.CreateScope()` | Resolve peer state strictly from observer's local DB (`IPeerContactRepository`, `IPeerProfileRepository`). Never resolve a remote host's DI container. |
 | **3** | **State Machine Integrity** | `DirectChannel.Create` inline on send/share | Fail fast if preconditions are missing. Aggregate creation belongs exclusively in dedicated protocol handlers. |
-| **4** | **Actor Boundary Scoping** | `_worldState.GetAllPersonaHosts()` for broadcasts | Broadcasts/rerolls must iterate only owned contacts (`contactRepo.GetAllForOwnerAsync(host.PublicIdentityId)`). |
+| **4** | **Actor Boundary Scoping** | `_worldState.GetAllPersonaHosts()` or `_worldState.Groups` | Broadcasts/lists must iterate only owned contacts (`contactRepo.GetAllForOwnerAsync(...)`) or joined channels. Never omnisciently query world state. |
 | **5** | **Autopilot Host Parity** | `[ObservableProperty]` toggle without host sync | Every autopilot toggle must exist on `ISimulatedPersonaHost`, init from it, and mutate it via partial callbacks. |
-| **6** | **Observable Failure Signaling** | Empty `catch { }` or unlogged `return false` | Boundary failures must log to `ISimulatorLogSink`, display toasts, and publish state signals to `ISimulatorStateBus`. |
+| **6** | **Observable Failure Signaling** | Empty `catch { }` or unlogged `return false` | Boundary failures must log to `ISimulatorLogSink`, display toasts, and publish state signals to `ISimulatorStateBus`. Zero bare `catch { }`. |
 | **7** | **Explicit Overrides vs Defaults** | `!string.IsNullOrEmpty(contact.Nickname.Value)` | Distinguish default fallback GUID strings from explicit user nicknames before shadowing synced profiles. |
 | **8** | **CQRS Read-Path Separation** | Injecting `IChannelRepository` into transcripts | Read paths and UI lists must query dedicated `*QueryService` returning flat DTOs. Domain repos are write-only. |
 | **9** | **Zero Service Locator Usage** | Injecting `IServiceProvider` or `sp.GetService` | Explicit constructor injection for all dependencies. Never inject `IServiceProvider` into domain/app services. |
 | **10** | **Anchored Reactive Subscriptions** | `.Subscribe(...)` without `.AddTo(...)` | Every observable subscription on a singleton bus must anchor to `ref Disposables` to prevent memory leaks. |
 | **11** | **Outbox Durability** | Direct external transport dispatch on egress | Outbound payloads must stage as durable `OutboxJob` records before or alongside outbox flush/drain operations. |
 | **12** | **Semantic Test Assertions** | `services.Should().HaveCount(N)` | Assert specific capability containment (`Should().Contain(...)`) and execution contracts, never magic numbers. |
+| **13** | **Zero In-Process Transport Bypasses** | `relay.Services.CreateScope()` in client/coordinator | In simulated multi-node environments, client-to-relay operations (e.g. roster mutations) must call real gRPC services (`AnonymousGroupRelayService`), never mutate the relay DB via DI. |
+| **14** | **No Coordinator State Backdoors** | `_groupMembers` dictionary in coordinator | The coordinator/harness must not maintain side-channel state dictionaries to spoon-feed state out-of-band to nodes. Node state transitions must occur solely through protocol messages or local storage. |
+| **15** | **Deterministic Signal Awaiting** | `await Task.Delay(150)` in scenario steps | Prohibit arbitrary sleep delays as synchronization substitutes. Await explicit reactive signals (`_stateBus.Signals`), outbox job completions, or deterministic task tokens. |
 
 ---
 
@@ -44,8 +47,9 @@ public PersonaCardDependencies(IStatusToastService toast, ProfileSyncCoordinator
 
 ### 2. Observer Isolation (No RAM Peeking)
 ```csharp
-// BAD: Reaching into remote node's memory
+// BAD: Reaching into remote node's memory or remote DI container
 var peerName = _worldState.GetPersonaHost(peerId).DisplayName;
+using var scope = remoteHost.Services.CreateScope();
 // GOOD: Querying local observer database
 var profile = await profileRepo.GetByPeerIdAsync(peerId, ct);
 var peerName = profile?.DisplayName ?? peerId.ToString()[..8];
@@ -63,7 +67,8 @@ var ch = await repo.GetDirectByIdAsync(id, ct) ?? throw new InvalidOperationExce
 ```csharp
 // BAD: Omniscient world fanout
 foreach (var host in _worldState.GetAllPersonaHosts()) await ShareAsync(host);
-// GOOD: Scoped strictly to actor's established contacts
+foreach (var group in _worldState.Groups) list.Add(group);
+// GOOD: Scoped strictly to actor's established contacts and joined channels
 var contacts = await contactRepo.GetAllForOwnerAsync(host.PublicIdentityId, ct);
 foreach (var contact in contacts) await ShareAsync(contact.RemotePeerId);
 ```
@@ -81,6 +86,7 @@ partial void OnAutoShareProfileChanged(bool value) => _host.AutoShareProfile = v
 ```csharp
 // BAD: Swallowing exceptions silently
 catch { return false; }
+catch { }
 // GOOD: Logged and signaled on state bus
 catch (Exception ex) {
     _logSink.Log(new SimulatorLogEntry(DateTimeOffset.UtcNow, LogLevel.Error, Name, Id, "Category", ex.Message));
@@ -141,6 +147,40 @@ services.Select(s => s.ServiceType).Should().Contain(typeof(IChatService));
 await host.StartAsync(); await host.StopAsync();
 ```
 
+### 13. Zero In-Process Transport Bypasses (Simulator Physical Boundary)
+```csharp
+// BAD: Peeking into Relay's DI container and directly mutating its SQLite DB
+using var relayScope = relay.Services.CreateScope();
+var ledgerRepo = relayScope.ServiceProvider.GetRequiredService<IRelayLedgerRepository>();
+await ledgerRepo.SaveAsync(ledger, ct);
+
+// GOOD: Calling the real gRPC endpoint over loopback TLS
+var client = new AnonymousGroupRelayService.AnonymousGroupRelayServiceClient(grpcChannel);
+var response = await client.CommitRosterMutationAsync(request, cancellationToken: ct);
+```
+
+### 14. No Coordinator State Backdoors
+```csharp
+// BAD: Coordinator maintains a private member dictionary to inject roster into joining nodes
+_groupMembers[channelId] = members;
+...
+if (_groupMembers.TryGetValue(channelId, out var m)) groupChannel.AddMember(m);
+
+// GOOD: Roster state transmitted via protocol payloads or synced through invitations
+var invite = new GroupInvitationDto(..., initialMembers);
+```
+
+### 15. Deterministic Signal Awaiting (Zero Magic Sleeps)
+```csharp
+// BAD: Arbitrary sleep delays hoping async work finished
+await Task.Delay(200, ct);
+
+// GOOD: Await deterministic signal on state bus with timeout
+await _stateBus.Signals
+    .Where(s => s.NodeId == recipient.Id && s.Category == SignalCategory.ChatTranscriptChanged)
+    .FirstAsync(cancellationToken: ct);
+```
+
 ---
 
 ## Anti-Shortcut Pre-Flight Checklist
@@ -148,16 +188,19 @@ await host.StartAsync(); await host.StopAsync();
 Before completing any task, ticket, or PR, verify:
 
 - [ ] **1. No Nullable Required Params**: Grep constructors for `= null`. Required dependencies must be mandatory.
-- [ ] **2. Observer Isolation**: Peer data in transcripts/views resolved from local observer DB, never `_worldState.GetPersonaHost(peer).X`.
+- [ ] **2. Observer Isolation**: Peer data in transcripts/views resolved from local observer DB, never `_worldState.GetPersonaHost(peer).X` or `remoteHost.Services`.
 - [ ] **3. State Preconditions**: Zero synthetic `DirectChannel.Create` or fake sessions in application services.
-- [ ] **4. Scoped Fanouts**: Updates iterate only `contactRepo.GetAllForOwnerAsync(host.PublicIdentityId)`.
+- [ ] **4. Scoped Fanouts**: Updates iterate only `contactRepo.GetAllForOwnerAsync(...)` or joined channels.
 - [ ] **5. Autopilot Parity**: UI toggles initialize from and mutate `ISimulatedPersonaHost`.
-- [ ] **6. Observable Failures**: Catch blocks log to `ISimulatorLogSink` and publish failure signals on `ISimulatorStateBus`.
+- [ ] **6. Observable Failures**: Catch blocks log to `ISimulatorLogSink` and publish failure signals on `ISimulatorStateBus`. Zero bare `catch { }`.
 - [ ] **7. Explicit Nicknames**: Default GUID fallback does not mask synced profile display names.
 - [ ] **8. CQRS Read Models**: Read paths use `*QueryService` returning DTOs, not domain aggregate repositories.
 - [ ] **9. No Service Locator**: Zero `IServiceProvider` injection in domain/app classes.
 - [ ] **10. Anchored Subscriptions**: All `.Subscribe(...)` calls anchored with `.AddTo(ref Disposables)`.
 - [ ] **11. Outbox Durability**: Outgoing packets staged as `OutboxJob` before network dispatch.
 - [ ] **12. Semantic Tests**: Zero `HaveCount(N)` assertions on service containers; assert specific capability containment.
+- [ ] **13. No Transport Bypasses**: Client-to-relay operations go through real gRPC endpoints, never `relay.Services`.
+- [ ] **14. No Coordinator Backdoors**: No central coordinator dictionaries to side-channel state between nodes.
+- [ ] **15. Deterministic Awaiting**: Scenarios await explicit reactive signals, never `Task.Delay(N)`.
 - [ ] **Verification**: Run `dotnet run --project Percolator.Simulator\Percolator.Simulator.csproj -f net10.0-windows10.0.19041.0 -- --replay Percolator.Simulator\Scenarios` (all pass).
 - [ ] **Regression**: Run all test projects (`dotnet test`) and verify 0 failures.
