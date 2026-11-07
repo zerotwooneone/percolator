@@ -13,6 +13,7 @@ public sealed record SimulatorChatMessageReadModel(
     PublicIdentityId AuthorId,
     string Content,
     ulong TimestampUnixMs,
+    ulong? DeliveredAtUnixMs,
     ulong? ReadAtUnixMs,
     ulong? EditedAtUnixMs,
     IReadOnlyList<string> Reactions);

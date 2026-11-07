@@ -283,7 +283,8 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                 var inner = sp.GetRequiredService<IngressFilterService>();
                 var holder = sp.GetRequiredService<InboundEnvelopeContextHolder>();
                 var pipeline = sp.GetRequiredService<IInboundIngressPipeline>();
-                return new SimulatorIngressDispatchingFilterService(inner, holder, pipeline, _logSink, DisplayName);
+                var outboxWorker = sp.GetRequiredService<OutboxWorker>();
+                return new SimulatorIngressDispatchingFilterService(inner, holder, pipeline, _logSink, DisplayName, outboxWorker);
             });
         });
 
@@ -500,6 +501,12 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                         "MailboxDrain",
                         $"Error processing drained envelope (Replay/Tamper): {ex.Message}"));
                 }
+            }
+
+            if (processed > 0)
+            {
+                var outboxWorker = scope.ServiceProvider.GetRequiredService<OutboxWorker>();
+                await outboxWorker.ProcessBatchAsync(50, ct);
             }
 
             return processed;

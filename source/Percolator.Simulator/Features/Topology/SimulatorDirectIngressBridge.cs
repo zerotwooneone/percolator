@@ -2,6 +2,8 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using Percolator.Application2.Delivery;
+using Percolator.Application2.Egress;
 using Percolator.Application2.Ingress;
 using Percolator.Application2.Ports;
 using Percolator.Domain.Common;
@@ -64,19 +66,22 @@ internal sealed class SimulatorIngressDispatchingFilterService : IIngressFilterS
     private readonly IInboundIngressPipeline _ingressPipeline;
     private readonly ISimulatorLogSink _logSink;
     private readonly string _nodeDisplayName;
+    private readonly OutboxWorker? _outboxWorker;
 
     public SimulatorIngressDispatchingFilterService(
         IIngressFilterService inner,
         InboundEnvelopeContextHolder contextHolder,
         IInboundIngressPipeline ingressPipeline,
         ISimulatorLogSink logSink,
-        string nodeDisplayName)
+        string nodeDisplayName,
+        OutboxWorker? outboxWorker = null)
     {
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));
         _contextHolder = contextHolder ?? throw new ArgumentNullException(nameof(contextHolder));
         _ingressPipeline = ingressPipeline ?? throw new ArgumentNullException(nameof(ingressPipeline));
         _logSink = logSink ?? throw new ArgumentNullException(nameof(logSink));
         _nodeDisplayName = nodeDisplayName;
+        _outboxWorker = outboxWorker;
     }
 
     public async ValueTask<DomainResult> CheckIngressAllowedAsync(
@@ -106,6 +111,11 @@ internal sealed class SimulatorIngressDispatchingFilterService : IIngressFilterS
                     $"Inbound envelope processing failed: {ingressResult.Error.Code} - {ingressResult.Error.Description}"));
 
                 return ingressResult;
+            }
+
+            if (_outboxWorker is not null)
+            {
+                await _outboxWorker.ProcessBatchAsync(50, ct);
             }
 
             _logSink.Log(new SimulatorLogEntry(

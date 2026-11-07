@@ -36,6 +36,7 @@ internal sealed class SimulatorChatQueryService : ISimulatorChatQueryService
                 m.AuthorId,
                 m.Content,
                 m.TimestampUnixMs,
+                m.DeliveredAtUnixMs,
                 m.ReadAtUnixMs,
                 m.EditedAtUnixMs
             })
@@ -66,6 +67,7 @@ internal sealed class SimulatorChatQueryService : ISimulatorChatQueryService
                 PublicIdentityId.FromBytes(m.AuthorId),
                 m.Content,
                 m.TimestampUnixMs,
+                m.DeliveredAtUnixMs,
                 m.ReadAtUnixMs,
                 m.EditedAtUnixMs,
                 msgReactions ?? (IReadOnlyList<string>)Array.Empty<string>()));
