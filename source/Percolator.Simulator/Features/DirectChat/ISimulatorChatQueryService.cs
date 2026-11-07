@@ -18,6 +18,10 @@ public sealed record SimulatorChatMessageReadModel(
     ulong? EditedAtUnixMs,
     IReadOnlyList<string> Reactions);
 
+public sealed record SimulatorGroupSummaryReadModel(
+    ChannelId ChannelId,
+    string Name);
+
 public interface ISimulatorChatQueryService
 {
     Task<IReadOnlyList<SimulatorChatMessageReadModel>> GetTranscriptAsync(
@@ -46,5 +50,9 @@ public interface ISimulatorChatQueryService
 
     Task<bool> IsMessageReadAsync(
         string expectedText,
+        CancellationToken ct = default);
+
+    Task<IReadOnlyList<SimulatorGroupSummaryReadModel>> GetJoinedGroupsAsync(
+        PublicIdentityId personaId,
         CancellationToken ct = default);
 }

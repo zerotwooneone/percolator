@@ -22,6 +22,7 @@ using Percolator.Infrastructure.Persistence;
 using Percolator.Infrastructure.Persistence.Repositories;
 using Percolator.Infrastructure.Plugins.BlobStorage;
 using Percolator.Infrastructure.Security;
+using Percolator.Infrastructure.Common;
 using Percolator.Infrastructure.Transport;
 using Percolator.Infrastructure.Transport.Endpoints;
 #if WINDOWS
@@ -179,7 +180,8 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
 
         var unauthEndpoint = new UnauthenticatedDeliveryEndpoint(profileRepo, _preKeyRepository, chunkStore, _capabilityStore);
         var authEndpoint = new AuthenticatedRelayEndpoint(_capabilityStore, _preKeyRepository, cryptoEngine);
-        var groupEndpoint = new AnonymousGroupRelayEndpoint(ledgerRepo, zkEngine, _capabilityStore);
+        var timeProvider = new SystemDateTimeProvider();
+        var groupEndpoint = new AnonymousGroupRelayEndpoint(ledgerRepo, zkEngine, _capabilityStore, timeProvider);
 
         builder.Services.AddSingleton<IRelayLedgerRepository>(ledgerRepo);
         builder.Services.AddSingleton<IRelayPreKeyRepository>(_preKeyRepository);

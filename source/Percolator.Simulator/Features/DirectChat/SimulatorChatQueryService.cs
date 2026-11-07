@@ -177,4 +177,28 @@ internal sealed class SimulatorChatQueryService : ISimulatorChatQueryService
             .AsNoTracking()
             .AnyAsync(m => !m.IsTombstone && m.Content.Contains(expectedText) && m.ReadAtUnixMs.HasValue, ct);
     }
+
+    public async Task<IReadOnlyList<SimulatorGroupSummaryReadModel>> GetJoinedGroupsAsync(
+        PublicIdentityId personaId,
+        CancellationToken ct = default)
+    {
+        var personaGuid = personaId.Value;
+        var groupChannelIds = await _dbContext.ChatChannelMembers
+            .AsNoTracking()
+            .Where(m => m.MemberIdentityId == personaGuid)
+            .Select(m => m.ChannelId)
+            .Distinct()
+            .ToListAsync(ct);
+
+        if (groupChannelIds.Count == 0)
+        {
+            return Array.Empty<SimulatorGroupSummaryReadModel>();
+        }
+
+        return await _dbContext.ChatChannels
+            .AsNoTracking()
+            .Where(c => groupChannelIds.Contains(c.Id))
+            .Select(c => new SimulatorGroupSummaryReadModel(new ChannelId(c.Id), c.Name))
+            .ToListAsync(ct);
+    }
 }

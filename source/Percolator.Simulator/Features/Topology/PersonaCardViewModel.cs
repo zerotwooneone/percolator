@@ -431,11 +431,11 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
                     try
                     {
                         using var scope = _host.Services.CreateScope();
-                        var channelRepo = scope.ServiceProvider.GetRequiredService<IChannelRepository>();
-                        var groups = await channelRepo.GetAllGroupsForOwnerAsync(_host.PublicIdentityId);
+                        var chatQuery = scope.ServiceProvider.GetRequiredService<ISimulatorChatQueryService>();
+                        var groups = await chatQuery.GetJoinedGroupsAsync(_host.PublicIdentityId);
                         foreach (var group in groups)
                         {
-                            list.Add(new ConversationItemViewModel($"👥 {group.Name}", IsGroup: true, null, group.Id));
+                            list.Add(new ConversationItemViewModel($"👥 {group.Name}", IsGroup: true, null, group.ChannelId));
                         }
                     }
                     catch (Exception ex)

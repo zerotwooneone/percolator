@@ -125,7 +125,8 @@ internal sealed partial class GroupPanelViewModel : ViewModelBase
     {
         UiTaskRunner.FireAndForget(async () =>
         {
-            var details = await _groupCoordinator.GetGroupDetailsAsync(ChannelId);
+            var (adminHost, _) = GetAdminAndRelay();
+            var details = await _groupCoordinator.GetGroupDetailsAsync(ChannelId, adminHost);
             if (details == null) return;
 
             UiTaskRunner.PostToUi(() =>

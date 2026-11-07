@@ -27,20 +27,20 @@ public sealed class AnonymousGroupRelayEndpoint : AnonymousGroupRelayService.Ano
 
     private readonly IRelayLedgerRepository _ledgerRepository;
     private readonly IZkProofEngine _zkProofEngine;
-    private readonly IRelayMailboxCapabilityStore? _mailboxStore;
+    private readonly IRelayMailboxCapabilityStore _mailboxStore;
     private readonly IDateTimeProvider _timeProvider;
     private readonly ConcurrentDictionary<ChannelId, ConcurrentDictionary<Guid, GroupSubscriber>> _subscribers = new();
 
     public AnonymousGroupRelayEndpoint(
         IRelayLedgerRepository ledgerRepository,
         IZkProofEngine zkProofEngine,
-        IRelayMailboxCapabilityStore? mailboxStore = null,
-        IDateTimeProvider? timeProvider = null)
+        IRelayMailboxCapabilityStore mailboxStore,
+        IDateTimeProvider timeProvider)
     {
         _ledgerRepository = ledgerRepository ?? throw new ArgumentNullException(nameof(ledgerRepository));
         _zkProofEngine = zkProofEngine ?? throw new ArgumentNullException(nameof(zkProofEngine));
-        _mailboxStore = mailboxStore;
-        _timeProvider = timeProvider ?? new DefaultDateTimeProvider();
+        _mailboxStore = mailboxStore ?? throw new ArgumentNullException(nameof(mailboxStore));
+        _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
     }
 
     private static ChannelId ParseConversationId(ByteString conversationId)
@@ -193,7 +193,7 @@ public sealed class AnonymousGroupRelayEndpoint : AnonymousGroupRelayService.Ano
         }
 
         // Group Outbox / Mailbox fan-out for offline members or members without active streams
-        if (_mailboxStore != null && ledger.ActiveRoutingTokens.Count > 0)
+        if (ledger.ActiveRoutingTokens.Count > 0)
         {
             foreach (var token in ledger.ActiveRoutingTokens)
             {

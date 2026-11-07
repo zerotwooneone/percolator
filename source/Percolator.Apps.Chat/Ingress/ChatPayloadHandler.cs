@@ -761,40 +761,59 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
         }
 
         var dto = noticeResult.Value;
-        if (dto.ChannelId != context.ChannelId && dto.NoticeType != SystemNoticeType.SafetyNumberChanged)
+        if (dto.NoticeType == SystemNoticeType.SafetyNumberChanged)
         {
-            // Allow group system notices delivered either over the group channel or a pairwise 1:1 channel
+            if (dto.ChannelId != context.ChannelId)
+            {
+                return DomainResult.Failure(new DomainError("CHANNEL_MISMATCH", "System notice belongs to a different channel."));
+            }
+
+            return DomainResult.Success();
         }
 
-        if (dto.AffectedIdentity.HasValue)
+        if (dto.NoticeType is SystemNoticeType.MemberLeft or SystemNoticeType.MemberJoined)
         {
-            var group = await _channelRepo.GetGroupByIdAsync(dto.ChannelId, ct).ConfigureAwait(false);
-            if (group is not null)
+            if (!dto.AffectedIdentity.HasValue)
             {
-                if (dto.NoticeType == SystemNoticeType.MemberLeft)
+                return DomainResult.Failure(new DomainError("INVALID_PAYLOAD", "AffectedIdentity is required for group roster system notices."));
+            }
+
+            var group = await _channelRepo.GetGroupByIdAsync(dto.ChannelId, ct).ConfigureAwait(false);
+            if (group is null)
+            {
+                return DomainResult.Failure(new DomainError("CHANNEL_NOT_FOUND", $"Target group channel {dto.ChannelId} was not found."));
+            }
+
+            if (dto.NoticeType == SystemNoticeType.MemberLeft)
+            {
+                var removeResult = group.RemoveMember(context.SenderIdentityId, dto.AffectedIdentity.Value, _timeProvider);
+                if (removeResult.IsFailure)
                 {
-                    var removeResult = group.RemoveMember(context.SenderIdentityId, dto.AffectedIdentity.Value, _timeProvider);
-                    if (removeResult.IsFailure)
+                    return removeResult;
+                }
+
+                await _channelRepo.SaveGroupAsync(group, ct).ConfigureAwait(false);
+            }
+            else
+            {
+                if (!group.Members.Any(m => m.Id == dto.AffectedIdentity.Value))
+                {
+                    var addResult = group.AddMember(context.SenderIdentityId, dto.AffectedIdentity.Value, ChannelRole.Member, _timeProvider);
+                    if (addResult.IsFailure)
                     {
-                        return removeResult;
+                        return addResult;
                     }
 
                     await _channelRepo.SaveGroupAsync(group, ct).ConfigureAwait(false);
                 }
-                else if (dto.NoticeType == SystemNoticeType.MemberJoined)
-                {
-                    if (!group.Members.Any(m => m.Id == dto.AffectedIdentity.Value))
-                    {
-                        var addResult = group.AddMember(context.SenderIdentityId, dto.AffectedIdentity.Value, ChannelRole.Member, _timeProvider);
-                        if (addResult.IsFailure)
-                        {
-                            return addResult;
-                        }
-
-                        await _channelRepo.SaveGroupAsync(group, ct).ConfigureAwait(false);
-                    }
-                }
             }
+
+        return DomainResult.Success();
+        }
+
+        if (dto.ChannelId != context.ChannelId)
+        {
+            return DomainResult.Failure(new DomainError("CHANNEL_MISMATCH", "System notice belongs to a different channel."));
         }
 
         return DomainResult.Success();

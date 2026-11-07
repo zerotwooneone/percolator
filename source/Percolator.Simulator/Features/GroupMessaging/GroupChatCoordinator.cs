@@ -504,38 +504,13 @@ internal sealed class GroupChatCoordinator : IDisposable
             var grpcChannel = channelFactory.GetOrCreateChannel(relay.BoundEndpoint);
             var client = new AnonymousGroupRelayService.AnonymousGroupRelayServiceClient(grpcChannel);
 
-            var stateResponse = await client.FetchGroupStateAsync(new FetchGroupStateRequest
-            {
-                ConversationId = ByteString.CopyFrom(channelId.ToByteArray()),
-                ZkPresentationProof = ByteString.Empty
-            }, cancellationToken: ct);
-
             var newTokens = groupChannel.Members
                 .Select(m => _worldState.FindPersonaHostByIdentity(m.Id)?.MailboxRoutingToken)
                 .Where(t => t != null)
                 .Cast<BlindedRoutingToken>()
                 .ToHashSet();
 
-            var zkEngine = new ZkgroupCryptographyService();
-            Span<byte> challenge = stackalloc byte[32];
-            var newBlob = EncryptedEntriesBlob.FromSpan(stateResponse.EncryptedRosterBlob.Span);
-            RelayGroupLedger.ComputeMutationChallenge(newBlob, newTokens, challenge);
-            var proof = zkEngine.GenerateGroupPresentation(stateResponse.CurrentEpoch, challenge, ReadOnlySpan<byte>.Empty, ReadOnlySpan<byte>.Empty);
-
-            var mutationReq = new CommitRosterMutationRequest
-            {
-                ConversationId = ByteString.CopyFrom(channelId.ToByteArray()),
-                BaseEpoch = stateResponse.CurrentEpoch,
-                NewRosterBlob = stateResponse.EncryptedRosterBlob,
-                ZkPresentationProof = ByteString.CopyFrom(proof.Span)
-            };
-
-            foreach (var token in newTokens)
-            {
-                mutationReq.NewRoutingTokens.Add(ByteString.CopyFrom(token.ToByteArray()));
-            }
-
-            var mutationResp = await client.CommitRosterMutationAsync(mutationReq, cancellationToken: ct);
+            var mutationResp = await CommitRosterMutationAsync(client, channelId, newTokens, ct);
             if (!mutationResp.Committed)
             {
                 _logSink.Log(new SimulatorLogEntry(
@@ -692,12 +667,6 @@ internal sealed class GroupChatCoordinator : IDisposable
             var grpcChannel = channelFactory.GetOrCreateChannel(relay.BoundEndpoint);
             var client = new AnonymousGroupRelayService.AnonymousGroupRelayServiceClient(grpcChannel);
 
-            var stateResponse = await client.FetchGroupStateAsync(new FetchGroupStateRequest
-            {
-                ConversationId = ByteString.CopyFrom(channelId.ToByteArray()),
-                ZkPresentationProof = ByteString.Empty
-            }, cancellationToken: ct);
-
             var remainingTokens = groupChannel.Members
                 .Where(m => m.Id != memberToEvict.PublicIdentityId)
                 .Select(m => _worldState.FindPersonaHostByIdentity(m.Id)?.MailboxRoutingToken)
@@ -705,26 +674,7 @@ internal sealed class GroupChatCoordinator : IDisposable
                 .Cast<BlindedRoutingToken>()
                 .ToHashSet();
 
-            var zkEngine = new ZkgroupCryptographyService();
-            Span<byte> challenge = stackalloc byte[32];
-            var newBlob = EncryptedEntriesBlob.FromSpan(stateResponse.EncryptedRosterBlob.Span);
-            RelayGroupLedger.ComputeMutationChallenge(newBlob, remainingTokens, challenge);
-            var proof = zkEngine.GenerateGroupPresentation(stateResponse.CurrentEpoch, challenge, ReadOnlySpan<byte>.Empty, ReadOnlySpan<byte>.Empty);
-
-            var mutationReq = new CommitRosterMutationRequest
-            {
-                ConversationId = ByteString.CopyFrom(channelId.ToByteArray()),
-                BaseEpoch = stateResponse.CurrentEpoch,
-                NewRosterBlob = stateResponse.EncryptedRosterBlob,
-                ZkPresentationProof = ByteString.CopyFrom(proof.Span)
-            };
-
-            foreach (var token in remainingTokens)
-            {
-                mutationReq.NewRoutingTokens.Add(ByteString.CopyFrom(token.ToByteArray()));
-            }
-
-            var mutationResp = await client.CommitRosterMutationAsync(mutationReq, cancellationToken: ct);
+            var mutationResp = await CommitRosterMutationAsync(client, channelId, remainingTokens, ct);
             if (!mutationResp.Committed)
             {
                 _logSink.Log(new SimulatorLogEntry(
@@ -901,38 +851,13 @@ internal sealed class GroupChatCoordinator : IDisposable
             var grpcChannel = channelFactory.GetOrCreateChannel(relay.BoundEndpoint);
             var client = new AnonymousGroupRelayService.AnonymousGroupRelayServiceClient(grpcChannel);
 
-            var stateResponse = await client.FetchGroupStateAsync(new FetchGroupStateRequest
-            {
-                ConversationId = ByteString.CopyFrom(channelId.ToByteArray()),
-                ZkPresentationProof = ByteString.Empty
-            }, cancellationToken: ct);
-
             var activeTokens = groupChannel.Members
                 .Select(m => _worldState.FindPersonaHostByIdentity(m.Id)?.MailboxRoutingToken)
                 .Where(t => t != null)
                 .Cast<BlindedRoutingToken>()
                 .ToHashSet();
 
-            var zkEngine = new ZkgroupCryptographyService();
-            Span<byte> challenge = stackalloc byte[32];
-            var newBlob = EncryptedEntriesBlob.FromSpan(stateResponse.EncryptedRosterBlob.Span);
-            RelayGroupLedger.ComputeMutationChallenge(newBlob, activeTokens, challenge);
-            var proof = zkEngine.GenerateGroupPresentation(stateResponse.CurrentEpoch, challenge, ReadOnlySpan<byte>.Empty, ReadOnlySpan<byte>.Empty);
-
-            var mutationReq = new CommitRosterMutationRequest
-            {
-                ConversationId = ByteString.CopyFrom(channelId.ToByteArray()),
-                BaseEpoch = stateResponse.CurrentEpoch,
-                NewRosterBlob = stateResponse.EncryptedRosterBlob,
-                ZkPresentationProof = ByteString.CopyFrom(proof.Span)
-            };
-
-            foreach (var token in activeTokens)
-            {
-                mutationReq.NewRoutingTokens.Add(ByteString.CopyFrom(token.ToByteArray()));
-            }
-
-            var mutationResp = await client.CommitRosterMutationAsync(mutationReq, cancellationToken: ct);
+            var mutationResp = await CommitRosterMutationAsync(client, channelId, activeTokens, ct);
             if (!mutationResp.Committed)
             {
                 _logSink.Log(new SimulatorLogEntry(
@@ -957,6 +882,40 @@ internal sealed class GroupChatCoordinator : IDisposable
         _stateBus.Publish(new SimulatorStateSignal(admin.Id, SignalCategory.GroupStateChanged, TargetChannelId: channelId));
         _toastService.ShowToast("Group Renamed", $"Renamed group to '{newName}'.", ToastSeverity.Success);
         return true;
+    }
+
+    private static async Task<CommitRosterMutationResponse> CommitRosterMutationAsync(
+        AnonymousGroupRelayService.AnonymousGroupRelayServiceClient client,
+        ChannelId channelId,
+        IReadOnlySet<BlindedRoutingToken> tokens,
+        CancellationToken ct)
+    {
+        var stateResponse = await client.FetchGroupStateAsync(new FetchGroupStateRequest
+        {
+            ConversationId = ByteString.CopyFrom(channelId.ToByteArray()),
+            ZkPresentationProof = ByteString.Empty
+        }, cancellationToken: ct);
+
+        var zkEngine = new ZkgroupCryptographyService();
+        Span<byte> challenge = stackalloc byte[32];
+        var newBlob = EncryptedEntriesBlob.FromSpan(stateResponse.EncryptedRosterBlob.Span);
+        RelayGroupLedger.ComputeMutationChallenge(newBlob, tokens, challenge);
+        var proof = zkEngine.GenerateGroupPresentation(stateResponse.CurrentEpoch, challenge, ReadOnlySpan<byte>.Empty, ReadOnlySpan<byte>.Empty);
+
+        var mutationReq = new CommitRosterMutationRequest
+        {
+            ConversationId = ByteString.CopyFrom(channelId.ToByteArray()),
+            BaseEpoch = stateResponse.CurrentEpoch,
+            NewRosterBlob = stateResponse.EncryptedRosterBlob,
+            ZkPresentationProof = ByteString.CopyFrom(proof.Span)
+        };
+
+        foreach (var token in tokens)
+        {
+            mutationReq.NewRoutingTokens.Add(ByteString.CopyFrom(token.ToByteArray()));
+        }
+
+        return await client.CommitRosterMutationAsync(mutationReq, cancellationToken: ct);
     }
 
     public async Task<IReadOnlyList<ChatMessageItemViewModel>> GetGroupTranscriptAsync(
@@ -1017,25 +976,40 @@ internal sealed class GroupChatCoordinator : IDisposable
     public async Task<(string Name, ulong CurrentEpoch, IReadOnlyList<(PublicIdentityId IdentityId, string DisplayName, ChannelRole Role)> Members)?> GetGroupDetailsAsync(
         ChannelId channelId,
         CancellationToken ct = default)
+        => await GetGroupDetailsAsync(channelId, observer: null, ct);
+
+    public async Task<(string Name, ulong CurrentEpoch, IReadOnlyList<(PublicIdentityId IdentityId, string DisplayName, ChannelRole Role)> Members)?> GetGroupDetailsAsync(
+        ChannelId channelId,
+        ISimulatedPersonaHost? observer = null,
+        CancellationToken ct = default)
     {
-        ISimulatedPersonaHost? personaHost = null;
+        ISimulatedPersonaHost? personaHost = observer;
         GroupChannel? group = null;
 
-        foreach (var host in _worldState.GetAllPersonaHosts())
+        if (personaHost != null)
         {
-            using var scope = host.Services.CreateScope();
+            using var scope = personaHost.Services.CreateScope();
             var channelRepo = scope.ServiceProvider.GetRequiredService<IChannelRepository>();
-            var candidate = await channelRepo.GetGroupByIdAsync(channelId, ct);
-            if (candidate != null)
+            group = await channelRepo.GetGroupByIdAsync(channelId, ct);
+        }
+        else
+        {
+            foreach (var host in _worldState.GetAllPersonaHosts())
             {
-                if (candidate.Members.Any(m => m.Id == host.PublicIdentityId && m.Role == ChannelRole.Admin))
+                using var scope = host.Services.CreateScope();
+                var channelRepo = scope.ServiceProvider.GetRequiredService<IChannelRepository>();
+                var candidate = await channelRepo.GetGroupByIdAsync(channelId, ct);
+                if (candidate != null)
                 {
-                    personaHost = host;
-                    group = candidate;
-                    break;
+                    if (candidate.Members.Any(m => m.Id == host.PublicIdentityId && m.Role == ChannelRole.Admin))
+                    {
+                        personaHost = host;
+                        group = candidate;
+                        break;
+                    }
+                    personaHost ??= host;
+                    group ??= candidate;
                 }
-                personaHost ??= host;
-                group ??= candidate;
             }
         }
 
@@ -1099,11 +1073,11 @@ internal sealed class GroupChatCoordinator : IDisposable
             var token = cts.Token;
             while (!token.IsCancellationRequested)
             {
-                while (!token.IsCancellationRequested && !persona.IsListening.CurrentValue)
+                if (!persona.IsListening.CurrentValue)
                 {
                     try
                     {
-                        await Task.Delay(100, token).ConfigureAwait(false);
+                        await persona.IsListening.Where(listening => listening).FirstAsync(token).ConfigureAwait(false);
                     }
                     catch (OperationCanceledException) when (token.IsCancellationRequested)
                     {
@@ -1183,6 +1157,11 @@ internal sealed class GroupChatCoordinator : IDisposable
                 catch (OperationCanceledException) when (listenCts.IsCancellationRequested && !token.IsCancellationRequested)
                 {
                     // Host went offline / muted; loop back to wait for listening == true
+                }
+                catch (ObjectDisposedException)
+                {
+                    // Persona host or DI provider disposed during teardown / shutdown; exit cleanly
+                    break;
                 }
                 catch (RpcException ex) when (listenCts.IsCancellationRequested || ex.StatusCode == StatusCode.Cancelled)
                 {

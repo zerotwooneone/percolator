@@ -1217,15 +1217,17 @@ internal sealed class ScenarioRunnerService
         if (!groupAliasMap.TryGetValue(step.GroupName, out var channelId))
             throw new ScenarioExecutionException($"Group '{step.GroupName}' not found in scenario.");
 
-        var details = await _groupCoordinator.GetGroupDetailsAsync(channelId, ct);
+        using var senderScope = sender.Services.CreateScope();
+        var channelRepo = senderScope.ServiceProvider.GetRequiredService<IChannelRepository>();
+        var groupChannel = await channelRepo.GetGroupByIdAsync(channelId, ct);
         var listeningRecipients = new List<ISimulatedPersonaHost>();
-        if (details != null)
+        if (groupChannel != null)
         {
-            foreach (var member in details.Value.Members)
+            foreach (var member in groupChannel.Members)
             {
-                if (member.IdentityId != sender.PublicIdentityId)
+                if (member.Id != sender.PublicIdentityId)
                 {
-                    var host = _worldState.FindPersonaHostByIdentity(member.IdentityId);
+                    var host = _worldState.FindPersonaHostByIdentity(member.Id);
                     if (host != null && host.IsListening.CurrentValue)
                     {
                         listeningRecipients.Add(host);
