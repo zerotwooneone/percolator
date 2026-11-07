@@ -33,6 +33,7 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
     private readonly IProfileManager? _profileManager;
     private readonly ICryptoEngine? _cryptoEngine;
     private readonly IPeerMailboxRoutingRepository? _peerMailboxRoutingRepo;
+    private readonly IPayloadSender? _payloadSender;
 
     public ChatPayloadHandler(
         IChatMessageRepository chatRepo,
@@ -46,7 +47,8 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
         IProfileDeliveryClient? profileDeliveryClient = null,
         IProfileManager? profileManager = null,
         ICryptoEngine? cryptoEngine = null,
-        IPeerMailboxRoutingRepository? peerMailboxRoutingRepo = null)
+        IPeerMailboxRoutingRepository? peerMailboxRoutingRepo = null,
+        IPayloadSender? payloadSender = null)
     {
         _chatRepo = chatRepo ?? throw new ArgumentNullException(nameof(chatRepo));
         _channelRepo = channelRepo ?? throw new ArgumentNullException(nameof(channelRepo));
@@ -60,6 +62,7 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
         _profileManager = profileManager;
         _cryptoEngine = cryptoEngine;
         _peerMailboxRoutingRepo = peerMailboxRoutingRepo;
+        _payloadSender = payloadSender;
     }
 
     public async ValueTask<DomainResult> HandleInboundAsync(InboundPayloadContext context, CancellationToken ct = default)
@@ -88,6 +91,7 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
             ChatPayloadType.GroupInvitationResponse => await HandleGroupInvitationResponseAsync(envelope.Data, context, ct).ConfigureAwait(false),
             ChatPayloadType.SystemNotice => await HandleSystemNoticeAsync(envelope.Data, context, ct).ConfigureAwait(false),
             ChatPayloadType.ProfileCapability => await HandleProfileCapabilityAsync(envelope.Data, context, ct).ConfigureAwait(false),
+            ChatPayloadType.DeliveryReceipt => await HandleDeliveryReceiptAsync(envelope.Data, context, ct).ConfigureAwait(false),
             _ => DomainResult.Success() // Forward compatibility: ignore unknown types
         };
     }
@@ -313,6 +317,56 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
             dto.EditedAtUnixMs);
 
         await _chatRepo.AddAsync(message, ct).ConfigureAwait(false);
+
+        if (directChannel is not null && _payloadSender is not null)
+        {
+            var delivererId = directChannel.OwnerIdentityId != dto.AuthorId
+                ? directChannel.OwnerIdentityId
+                : directChannel.RemotePeerId;
+
+            var route = DeliveryRoute.DirectP2P;
+            if (_peerMailboxRoutingRepo is not null)
+            {
+                var bestRoute = await _peerMailboxRoutingRepo
+                    .GetBestRouteAsync(dto.AuthorId, context.ReceivedAtUtc, ct)
+                    .ConfigureAwait(false);
+                if (bestRoute is not null)
+                {
+                    route = DeliveryRoute.RelayedOneToOne;
+                }
+            }
+
+            var receiptDto = new DeliveryReceiptDto(
+                context.ChannelId,
+                delivererId,
+                dto.Id,
+                receiptBaselineMs);
+
+            var envelopeBytes = SteppedPadding.CreatePaddedEnvelopeBytes(
+                _serializer,
+                ChatPayloadType.DeliveryReceipt,
+                receiptDto);
+
+            var outboundContext = new OutboundPayloadContext(
+                context.ChannelId,
+                delivererId,
+                dto.AuthorId,
+                context.SenderDeviceId,
+                AppId.Chat,
+                envelopeBytes,
+                route);
+
+            // Best-effort enqueue: receipt emission failure must not roll back message storage
+            try
+            {
+                await _payloadSender.SendPayloadAsync(outboundContext, ct).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Best-effort receipt emission must never throw or reject stored message
+            }
+        }
+
         return DomainResult.Success();
     }
 
@@ -522,17 +576,74 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
         var targetMessage = await _chatRepo.GetByIdAsync(dto.UpToPayloadId, ct).ConfigureAwait(false);
         if (targetMessage is not null && targetMessage.ChannelId == context.ChannelId)
         {
-            targetMessage.MarkAsRead(effectiveReadMs);
-            await _chatRepo.UpdateAsync(targetMessage, ct).ConfigureAwait(false);
+            if (targetMessage.AuthorId != dto.ReaderId)
+            {
+                targetMessage.MarkAsRead(effectiveReadMs);
+                await _chatRepo.UpdateAsync(targetMessage, ct).ConfigureAwait(false);
+            }
 
             var channelMessages = await _chatRepo.GetByChannelIdAsync(context.ChannelId, ct).ConfigureAwait(false);
             foreach (var msg in channelMessages)
             {
                 if (msg.Id != targetMessage.Id &&
+                    msg.AuthorId != dto.ReaderId &&
                     msg.TimestampUnixMs <= targetMessage.TimestampUnixMs &&
                     msg.ReadAtUnixMs is null)
                 {
                     msg.MarkAsRead(effectiveReadMs);
+                    await _chatRepo.UpdateAsync(msg, ct).ConfigureAwait(false);
+                }
+            }
+        }
+
+        return DomainResult.Success();
+    }
+
+    private async ValueTask<DomainResult> HandleDeliveryReceiptAsync(
+        ReadOnlyMemory<byte> data,
+        InboundPayloadContext context,
+        CancellationToken ct)
+    {
+        var receiptResult = _serializer.Deserialize<DeliveryReceiptDto>(data);
+        if (receiptResult.IsFailure)
+        {
+            return DomainResult.Failure(receiptResult.Error);
+        }
+
+        var dto = receiptResult.Value;
+        if (dto.DelivererId != context.SenderIdentityId)
+        {
+            return DomainResult.Failure(new DomainError(
+                "UNAUTHORIZED_AUTHOR",
+                "Delivery receipt deliverer does not match cryptographic sender."));
+        }
+
+        if (dto.ChannelId != context.ChannelId)
+        {
+            return DomainResult.Failure(new DomainError(
+                "CHANNEL_MISMATCH",
+                "Delivery receipt belongs to a different channel."));
+        }
+
+        ulong effectiveDeliveredMs = (ulong)context.ReceivedAtUtc.ToUnixTimeMilliseconds();
+        var targetMessage = await _chatRepo.GetByIdAsync(dto.UpToPayloadId, ct).ConfigureAwait(false);
+        if (targetMessage is not null && targetMessage.ChannelId == context.ChannelId)
+        {
+            if (targetMessage.AuthorId != dto.DelivererId)
+            {
+                targetMessage.MarkAsDelivered(effectiveDeliveredMs);
+                await _chatRepo.UpdateAsync(targetMessage, ct).ConfigureAwait(false);
+            }
+
+            var channelMessages = await _chatRepo.GetByChannelIdAsync(context.ChannelId, ct).ConfigureAwait(false);
+            foreach (var msg in channelMessages)
+            {
+                if (msg.Id != targetMessage.Id &&
+                    msg.AuthorId != dto.DelivererId &&
+                    msg.TimestampUnixMs <= targetMessage.TimestampUnixMs &&
+                    msg.DeliveredAtUnixMs is null)
+                {
+                    msg.MarkAsDelivered(effectiveDeliveredMs);
                     await _chatRepo.UpdateAsync(msg, ct).ConfigureAwait(false);
                 }
             }

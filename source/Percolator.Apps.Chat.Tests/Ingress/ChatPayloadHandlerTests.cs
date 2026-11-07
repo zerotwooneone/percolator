@@ -879,6 +879,288 @@ public class ChatPayloadHandlerTests
         group.Payloads.Should().ContainSingle(p => p.Id == msgId);
     }
 
+    [Test]
+    public async Task HandleInboundAsync_WhenMessageReceivedOnDirectChannel_WithPayloadSender_EnqueuesDeliveryReceipt()
+    {
+        var channel = ChatTestFactory.CreateDirectChannel(_timeProvider);
+        await _channelRepo.SaveDirectAsync(channel);
+
+        var payloadSender = new TestPayloadSender();
+        var handler = new ChatPayloadHandler(
+            _chatRepo,
+            _channelRepo,
+            _invitationRepo,
+            _serializer,
+            _timeProvider,
+            _unknownGroupCache,
+            blobStorage: null,
+            _peerProfileRepo,
+            _profileDeliveryClient,
+            _profileManager,
+            _cryptoEngine,
+            payloadSender: payloadSender);
+
+        var msgId = PayloadId.New();
+        var msgDto = new ChatMessageDto(
+            msgId,
+            channel.Id,
+            channel.RemotePeerId,
+            _timeProvider.UtcNowUnixMs,
+            "Hello, world!",
+            Array.Empty<MentionDto>(),
+            null,
+            null,
+            Array.Empty<MediaAttachmentDto>(),
+            null,
+            null);
+
+        var envelope = new ChatPayloadEnvelopeDto(
+            ChatPayloadType.Message,
+            _serializer.Serialize(msgDto),
+            new byte[128]);
+        var rawPayload = _serializer.Serialize(envelope);
+
+        var context = new InboundPayloadContext(
+            channel.Id,
+            channel.RemotePeerId,
+            ChatTestFactory.BobDeviceId,
+            AppId.Chat,
+            rawPayload,
+            _timeProvider.UtcNow);
+
+        var result = await handler.HandleInboundAsync(context);
+        result.IsSuccess.Should().BeTrue();
+
+        payloadSender.SentPayloads.Should().HaveCount(1);
+        var sent = payloadSender.SentPayloads[0];
+        sent.ChannelId.Should().Be(channel.Id);
+        sent.SenderIdentityId.Should().Be(channel.OwnerIdentityId);
+        sent.RecipientIdentityId.Should().Be(channel.RemotePeerId);
+        sent.RecipientDeviceId.Should().Be(ChatTestFactory.BobDeviceId);
+        sent.AppId.Should().Be(AppId.Chat);
+
+        var outerResult = _serializer.Deserialize<ChatPayloadEnvelopeDto>(sent.Payload);
+        outerResult.IsSuccess.Should().BeTrue();
+        var outerEnvelope = outerResult.Value;
+        outerEnvelope.Type.Should().Be(ChatPayloadType.DeliveryReceipt);
+
+        var innerResult = _serializer.Deserialize<DeliveryReceiptDto>(outerEnvelope.Data);
+        innerResult.IsSuccess.Should().BeTrue();
+        var receipt = innerResult.Value;
+        receipt.ChannelId.Should().Be(channel.Id);
+        receipt.DelivererId.Should().Be(channel.OwnerIdentityId);
+        receipt.UpToPayloadId.Should().Be(msgId);
+        receipt.DeliveredAtUnixMs.Should().Be((ulong)_timeProvider.UtcNow.ToUnixTimeMilliseconds());
+    }
+
+    [Test]
+    public async Task HandleInboundAsync_WhenDeliveryReceiptReceived_WithValidSender_MarksTargetAndPrecedingMessagesDelivered()
+    {
+        var channel = ChatTestFactory.CreateDirectChannel(_timeProvider);
+        await _channelRepo.SaveDirectAsync(channel);
+
+        var msg1 = new ChatMessage(
+            PayloadId.New(),
+            channel.Id,
+            channel.OwnerIdentityId,
+            1000,
+            "First message");
+        var msg2 = new ChatMessage(
+            PayloadId.New(),
+            channel.Id,
+            channel.OwnerIdentityId,
+            2000,
+            "Second message");
+        var msg3 = new ChatMessage(
+            PayloadId.New(),
+            channel.Id,
+            channel.OwnerIdentityId,
+            3000,
+            "Third message");
+
+        await _chatRepo.AddAsync(msg1);
+        await _chatRepo.AddAsync(msg2);
+        await _chatRepo.AddAsync(msg3);
+
+        _timeProvider.Advance(TimeSpan.FromSeconds(5));
+        ulong receiptReceivedAtMs = (ulong)_timeProvider.UtcNow.ToUnixTimeMilliseconds();
+
+        var receiptDto = new DeliveryReceiptDto(
+            channel.Id,
+            channel.RemotePeerId,
+            msg2.Id,
+            receiptReceivedAtMs);
+
+        var envelope = new ChatPayloadEnvelopeDto(
+            ChatPayloadType.DeliveryReceipt,
+            _serializer.Serialize(receiptDto),
+            Array.Empty<byte>());
+
+        var context = new InboundPayloadContext(
+            channel.Id,
+            channel.RemotePeerId,
+            ChatTestFactory.BobDeviceId,
+            AppId.Chat,
+            _serializer.Serialize(envelope),
+            _timeProvider.UtcNow);
+
+        var result = await _sut.HandleInboundAsync(context);
+        result.IsSuccess.Should().BeTrue();
+
+        var updated1 = await _chatRepo.GetByIdAsync(msg1.Id);
+        var updated2 = await _chatRepo.GetByIdAsync(msg2.Id);
+        var updated3 = await _chatRepo.GetByIdAsync(msg3.Id);
+
+        updated1!.DeliveredAtUnixMs.Should().Be(receiptReceivedAtMs);
+        updated1.ReadAtUnixMs.Should().BeNull();
+
+        updated2!.DeliveredAtUnixMs.Should().Be(receiptReceivedAtMs);
+        updated2.ReadAtUnixMs.Should().BeNull();
+
+        updated3!.DeliveredAtUnixMs.Should().BeNull();
+        updated3.ReadAtUnixMs.Should().BeNull();
+    }
+
+    [Test]
+    public async Task HandleInboundAsync_WhenReadReceiptReceived_WithValidSender_MarksTargetAndPrecedingMessagesReadAndDelivered()
+    {
+        var channel = ChatTestFactory.CreateDirectChannel(_timeProvider);
+        await _channelRepo.SaveDirectAsync(channel);
+
+        var msg1 = new ChatMessage(
+            PayloadId.New(),
+            channel.Id,
+            channel.OwnerIdentityId,
+            1000,
+            "First message");
+        var msg2 = new ChatMessage(
+            PayloadId.New(),
+            channel.Id,
+            channel.OwnerIdentityId,
+            2000,
+            "Second message");
+
+        await _chatRepo.AddAsync(msg1);
+        await _chatRepo.AddAsync(msg2);
+
+        _timeProvider.Advance(TimeSpan.FromSeconds(10));
+        ulong readTimeMs = (ulong)_timeProvider.UtcNow.ToUnixTimeMilliseconds();
+
+        var receiptDto = new ReadReceiptDto(
+            channel.Id,
+            channel.RemotePeerId,
+            msg2.Id,
+            readTimeMs);
+
+        var envelope = new ChatPayloadEnvelopeDto(
+            ChatPayloadType.ReadReceipt,
+            _serializer.Serialize(receiptDto),
+            Array.Empty<byte>());
+
+        var context = new InboundPayloadContext(
+            channel.Id,
+            channel.RemotePeerId,
+            ChatTestFactory.BobDeviceId,
+            AppId.Chat,
+            _serializer.Serialize(envelope),
+            _timeProvider.UtcNow);
+
+        var result = await _sut.HandleInboundAsync(context);
+        result.IsSuccess.Should().BeTrue();
+
+        var updated1 = await _chatRepo.GetByIdAsync(msg1.Id);
+        var updated2 = await _chatRepo.GetByIdAsync(msg2.Id);
+
+        updated1!.ReadAtUnixMs.Should().Be(readTimeMs);
+        updated1.DeliveredAtUnixMs.Should().Be(readTimeMs);
+
+        updated2!.ReadAtUnixMs.Should().Be(readTimeMs);
+        updated2.DeliveredAtUnixMs.Should().Be(readTimeMs);
+    }
+
+    [Test]
+    public async Task HandleInboundAsync_WhenDeliveryReceiptReceived_WithSpoofedSender_ReturnsUnauthorizedAuthorAndDoesNotMutate()
+    {
+        var channel = ChatTestFactory.CreateDirectChannel(_timeProvider);
+        await _channelRepo.SaveDirectAsync(channel);
+
+        var msg = new ChatMessage(
+            PayloadId.New(),
+            channel.Id,
+            channel.OwnerIdentityId,
+            1000,
+            "Outgoing message");
+        await _chatRepo.AddAsync(msg);
+
+        var spoofedReceipt = new DeliveryReceiptDto(
+            channel.Id,
+            channel.OwnerIdentityId, // spoofed deliverer id != cryptographic sender
+            msg.Id,
+            _timeProvider.UtcNowUnixMs);
+
+        var envelope = new ChatPayloadEnvelopeDto(
+            ChatPayloadType.DeliveryReceipt,
+            _serializer.Serialize(spoofedReceipt),
+            Array.Empty<byte>());
+
+        var context = new InboundPayloadContext(
+            channel.Id,
+            channel.RemotePeerId, // cryptographic sender
+            ChatTestFactory.BobDeviceId,
+            AppId.Chat,
+            _serializer.Serialize(envelope),
+            _timeProvider.UtcNow);
+
+        var result = await _sut.HandleInboundAsync(context);
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("UNAUTHORIZED_AUTHOR");
+
+        var unmutated = await _chatRepo.GetByIdAsync(msg.Id);
+        unmutated!.DeliveredAtUnixMs.Should().BeNull();
+    }
+
+    [Test]
+    public async Task HandleInboundAsync_WhenDeliveryReceiptReceived_WithMismatchedChannel_ReturnsChannelMismatchAndDoesNotMutate()
+    {
+        var channel = ChatTestFactory.CreateDirectChannel(_timeProvider);
+        await _channelRepo.SaveDirectAsync(channel);
+
+        var msg = new ChatMessage(
+            PayloadId.New(),
+            channel.Id,
+            channel.OwnerIdentityId,
+            1000,
+            "Outgoing message");
+        await _chatRepo.AddAsync(msg);
+
+        var otherChannelId = ChannelId.New();
+        var mismatchedReceipt = new DeliveryReceiptDto(
+            otherChannelId,
+            channel.RemotePeerId,
+            msg.Id,
+            _timeProvider.UtcNowUnixMs);
+
+        var envelope = new ChatPayloadEnvelopeDto(
+            ChatPayloadType.DeliveryReceipt,
+            _serializer.Serialize(mismatchedReceipt),
+            Array.Empty<byte>());
+
+        var context = new InboundPayloadContext(
+            channel.Id,
+            channel.RemotePeerId,
+            ChatTestFactory.BobDeviceId,
+            AppId.Chat,
+            _serializer.Serialize(envelope),
+            _timeProvider.UtcNow);
+
+        var result = await _sut.HandleInboundAsync(context);
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("CHANNEL_MISMATCH");
+
+        var unmutated = await _chatRepo.GetByIdAsync(msg.Id);
+        unmutated!.DeliveredAtUnixMs.Should().BeNull();
+    }
+
     #endregion
 
     private sealed class InMemoryUnknownGroupCache : IUnknownGroupMessageCacheRepository
