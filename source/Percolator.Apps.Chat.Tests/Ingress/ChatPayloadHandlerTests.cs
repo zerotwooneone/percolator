@@ -30,6 +30,7 @@ public class ChatPayloadHandlerTests
     private FakeProfileDeliveryClient _profileDeliveryClient = null!;
     private FakeProfileManager _profileManager = null!;
     private ChatTestCryptoEngine _cryptoEngine = null!;
+    private TestPayloadSender _payloadSender = null!;
     private ChatPayloadHandler _sut = null!;
 
     [SetUp]
@@ -45,6 +46,7 @@ public class ChatPayloadHandlerTests
         _profileDeliveryClient = new FakeProfileDeliveryClient();
         _profileManager = new FakeProfileManager();
         _cryptoEngine = new ChatTestCryptoEngine();
+        _payloadSender = new TestPayloadSender();
 
         _sut = new ChatPayloadHandler(
             _chatRepo,
@@ -52,6 +54,7 @@ public class ChatPayloadHandlerTests
             _invitationRepo,
             _serializer,
             _timeProvider,
+            _payloadSender,
             _unknownGroupCache,
             blobStorage: null,
             _peerProfileRepo,
@@ -892,13 +895,13 @@ public class ChatPayloadHandlerTests
             _invitationRepo,
             _serializer,
             _timeProvider,
+            payloadSender,
             _unknownGroupCache,
             blobStorage: null,
             _peerProfileRepo,
             _profileDeliveryClient,
             _profileManager,
-            _cryptoEngine,
-            payloadSender: payloadSender);
+            _cryptoEngine);
 
         var msgId = PayloadId.New();
         var msgDto = new ChatMessageDto(

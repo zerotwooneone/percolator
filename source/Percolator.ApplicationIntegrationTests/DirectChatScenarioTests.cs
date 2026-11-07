@@ -124,6 +124,7 @@ public sealed class DirectChatScenarioTests
         aliceMessages[0].Id.Should().Be(alicePayloadId);
         aliceMessages[0].AuthorId.Should().Be(alice.IdentityId);
         aliceMessages[0].Content.Should().Be(aliceMessage);
+        aliceMessages[0].DeliveredAtUnixMs.Should().NotBeNull("Bob automatically acknowledged delivery back to Alice via loopback stream");
 
         aliceMessages[1].Id.Should().Be(bobPayloadId);
         aliceMessages[1].AuthorId.Should().Be(bob.IdentityId);

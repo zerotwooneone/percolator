@@ -259,6 +259,7 @@ public sealed class TestIdentityNode
             _groupInvitationRepo,
             serializer,
             TimeProvider,
+            egressPipeline,
             unknownGroupCache: null,
             blobStorage: BlobStorage,
             peerProfileRepo: PeerProfileRepo,

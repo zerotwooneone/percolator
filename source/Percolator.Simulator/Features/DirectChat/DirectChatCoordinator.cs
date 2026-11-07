@@ -250,7 +250,15 @@ internal sealed class DirectChatCoordinator
                 if (!result.IsSuccess) return false;
 
                 var flushResult = await reader.FlushOutboxAsync(ct);
-                return flushResult.IsSuccess;
+                if (!flushResult.IsSuccess) return false;
+
+                _stateBus.Publish(new SimulatorStateSignal(
+                    reader.Id,
+                    SignalCategory.ChatTranscriptChanged,
+                    Details: sender.PublicIdentityId.ToString(),
+                    Payload: new ChatTranscriptSignalPayload(sender.PublicIdentityId)));
+
+                return true;
             }
             catch (Exception ex)
             {

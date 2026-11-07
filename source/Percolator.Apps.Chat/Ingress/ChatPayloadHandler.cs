@@ -26,6 +26,7 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
     private readonly IGroupInvitationRepository _invitationRepo;
     private readonly IPayloadSerializer _serializer;
     private readonly IDateTimeProvider _timeProvider;
+    private readonly IPayloadSender _payloadSender;
     private readonly IUnknownGroupMessageCacheRepository? _unknownGroupCache;
     private readonly IBlobStorageService? _blobStorage;
     private readonly IPeerProfileRepository? _peerProfileRepo;
@@ -33,7 +34,6 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
     private readonly IProfileManager? _profileManager;
     private readonly ICryptoEngine? _cryptoEngine;
     private readonly IPeerMailboxRoutingRepository? _peerMailboxRoutingRepo;
-    private readonly IPayloadSender? _payloadSender;
 
     public ChatPayloadHandler(
         IChatMessageRepository chatRepo,
@@ -41,20 +41,21 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
         IGroupInvitationRepository invitationRepo,
         IPayloadSerializer serializer,
         IDateTimeProvider timeProvider,
+        IPayloadSender payloadSender,
         IUnknownGroupMessageCacheRepository? unknownGroupCache = null,
         IBlobStorageService? blobStorage = null,
         IPeerProfileRepository? peerProfileRepo = null,
         IProfileDeliveryClient? profileDeliveryClient = null,
         IProfileManager? profileManager = null,
         ICryptoEngine? cryptoEngine = null,
-        IPeerMailboxRoutingRepository? peerMailboxRoutingRepo = null,
-        IPayloadSender? payloadSender = null)
+        IPeerMailboxRoutingRepository? peerMailboxRoutingRepo = null)
     {
         _chatRepo = chatRepo ?? throw new ArgumentNullException(nameof(chatRepo));
         _channelRepo = channelRepo ?? throw new ArgumentNullException(nameof(channelRepo));
         _invitationRepo = invitationRepo ?? throw new ArgumentNullException(nameof(invitationRepo));
         _serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
+        _payloadSender = payloadSender ?? throw new ArgumentNullException(nameof(payloadSender));
         _unknownGroupCache = unknownGroupCache;
         _blobStorage = blobStorage;
         _peerProfileRepo = peerProfileRepo;
@@ -62,7 +63,6 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
         _profileManager = profileManager;
         _cryptoEngine = cryptoEngine;
         _peerMailboxRoutingRepo = peerMailboxRoutingRepo;
-        _payloadSender = payloadSender;
     }
 
     public async ValueTask<DomainResult> HandleInboundAsync(InboundPayloadContext context, CancellationToken ct = default)
@@ -318,7 +318,7 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
 
         await _chatRepo.AddAsync(message, ct).ConfigureAwait(false);
 
-        if (directChannel is not null && _payloadSender is not null)
+        if (directChannel is not null)
         {
             var delivererId = directChannel.OwnerIdentityId != dto.AuthorId
                 ? directChannel.OwnerIdentityId
@@ -360,6 +360,10 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
             try
             {
                 await _payloadSender.SendPayloadAsync(outboundContext, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
             }
             catch
             {
@@ -576,7 +580,7 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
         var targetMessage = await _chatRepo.GetByIdAsync(dto.UpToPayloadId, ct).ConfigureAwait(false);
         if (targetMessage is not null && targetMessage.ChannelId == context.ChannelId)
         {
-            if (targetMessage.AuthorId != dto.ReaderId)
+            if (targetMessage.AuthorId != dto.ReaderId && targetMessage.ReadAtUnixMs is null)
             {
                 targetMessage.MarkAsRead(effectiveReadMs);
                 await _chatRepo.UpdateAsync(targetMessage, ct).ConfigureAwait(false);
@@ -629,7 +633,7 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
         var targetMessage = await _chatRepo.GetByIdAsync(dto.UpToPayloadId, ct).ConfigureAwait(false);
         if (targetMessage is not null && targetMessage.ChannelId == context.ChannelId)
         {
-            if (targetMessage.AuthorId != dto.DelivererId)
+            if (targetMessage.AuthorId != dto.DelivererId && targetMessage.DeliveredAtUnixMs is null)
             {
                 targetMessage.MarkAsDelivered(effectiveDeliveredMs);
                 await _chatRepo.UpdateAsync(targetMessage, ct).ConfigureAwait(false);

@@ -294,6 +294,10 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
         {
             RefreshChatTranscript();
         }
+        else
+        {
+            _lastMarkedReadMessageId = Guid.Empty;
+        }
     }
 
     private void ExecuteRefreshChatTranscript()
@@ -319,8 +323,11 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
                         Guid.TryParse(lastUnreadIncoming.MessageId, out var msgGuid) &&
                         msgGuid != _lastMarkedReadMessageId)
                     {
-                        _lastMarkedReadMessageId = msgGuid;
-                        _ = _chatCoordinator.MarkConversationAsReadAsync(NodeId, activePeer.Id, msgGuid);
+                        var success = await _chatCoordinator.MarkConversationAsReadAsync(NodeId, activePeer.Id, msgGuid);
+                        if (success)
+                        {
+                            _lastMarkedReadMessageId = msgGuid;
+                        }
                     }
                 }
 
@@ -395,6 +402,10 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
             UiTaskRunner.FireAndForget(() => _host.SetListeningAsync(value), "HostLifecycle");
         }
         _flightRecorder?.RecordStep(new SetListeningStateStep(DisplayName, value));
+        if (value)
+        {
+            RefreshChatTranscript();
+        }
     }
 
     partial void OnAutoReplyPongChanged(bool value)

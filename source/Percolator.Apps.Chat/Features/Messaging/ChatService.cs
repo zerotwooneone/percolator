@@ -386,7 +386,7 @@ public sealed class ChatService : IChatService
         var targetMessage = await _chatRepo.GetByIdAsync(command.UpToPayloadId, ct).ConfigureAwait(false);
         if (targetMessage is not null && targetMessage.ChannelId == command.ChannelId)
         {
-            if (targetMessage.AuthorId != command.ReaderId)
+            if (targetMessage.AuthorId != command.ReaderId && targetMessage.ReadAtUnixMs is null)
             {
                 targetMessage.MarkAsRead(nowMs);
                 await _chatRepo.UpdateAsync(targetMessage, ct).ConfigureAwait(false);

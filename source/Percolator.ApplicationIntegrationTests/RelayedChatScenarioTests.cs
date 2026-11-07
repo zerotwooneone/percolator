@@ -194,7 +194,7 @@ public sealed class RelayedChatScenarioTests
 
         // Charlie outbox dispatches to Relay
         await charlie.OutboxWorker.ProcessBatchAsync();
-        relay.MailboxQueue.TotalCount.Should().Be(1);
+        relay.MailboxQueue.TotalCount.Should().Be(2, "Charlie dispatched both the automated delivery receipt and the reply message");
 
         // Alice drains mailbox and receives reply
         await alice.DrainMailboxAsync(relay);
@@ -207,6 +207,7 @@ public sealed class RelayedChatScenarioTests
         aliceMessages[0].Id.Should().Be(alicePayloadId);
         aliceMessages[0].AuthorId.Should().Be(alice.IdentityId);
         aliceMessages[0].Content.Should().Be(aliceMessage);
+        aliceMessages[0].DeliveredAtUnixMs.Should().NotBeNull("Charlie acknowledged delivery back to Alice via Relay");
 
         aliceMessages[1].Id.Should().Be(charliePayloadId);
         aliceMessages[1].AuthorId.Should().Be(charlie.IdentityId);

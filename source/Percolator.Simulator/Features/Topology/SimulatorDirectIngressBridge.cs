@@ -66,7 +66,7 @@ internal sealed class SimulatorIngressDispatchingFilterService : IIngressFilterS
     private readonly IInboundIngressPipeline _ingressPipeline;
     private readonly ISimulatorLogSink _logSink;
     private readonly string _nodeDisplayName;
-    private readonly OutboxWorker? _outboxWorker;
+    private readonly OutboxWorker _outboxWorker;
 
     public SimulatorIngressDispatchingFilterService(
         IIngressFilterService inner,
@@ -74,14 +74,14 @@ internal sealed class SimulatorIngressDispatchingFilterService : IIngressFilterS
         IInboundIngressPipeline ingressPipeline,
         ISimulatorLogSink logSink,
         string nodeDisplayName,
-        OutboxWorker? outboxWorker = null)
+        OutboxWorker outboxWorker)
     {
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));
         _contextHolder = contextHolder ?? throw new ArgumentNullException(nameof(contextHolder));
         _ingressPipeline = ingressPipeline ?? throw new ArgumentNullException(nameof(ingressPipeline));
         _logSink = logSink ?? throw new ArgumentNullException(nameof(logSink));
         _nodeDisplayName = nodeDisplayName;
-        _outboxWorker = outboxWorker;
+        _outboxWorker = outboxWorker ?? throw new ArgumentNullException(nameof(outboxWorker));
     }
 
     public async ValueTask<DomainResult> CheckIngressAllowedAsync(
@@ -113,10 +113,7 @@ internal sealed class SimulatorIngressDispatchingFilterService : IIngressFilterS
                 return ingressResult;
             }
 
-            if (_outboxWorker is not null)
-            {
-                await _outboxWorker.ProcessBatchAsync(50, ct);
-            }
+            await _outboxWorker.ProcessBatchAsync(50, ct);
 
             _logSink.Log(new SimulatorLogEntry(
                 DateTimeOffset.UtcNow,
