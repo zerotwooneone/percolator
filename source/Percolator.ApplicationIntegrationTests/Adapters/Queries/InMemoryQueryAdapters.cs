@@ -50,7 +50,9 @@ public sealed class InMemoryChatMessageQueryService : IChatMessageQueryService
                 m.Attachments,
                 m.EditedAtUnixMs,
                 m.IsTombstone,
-                Array.Empty<ReactionGroupReadModel>()))
+                Array.Empty<ReactionGroupReadModel>(),
+                DeliveredAtUnixMs: m.DeliveredAtUnixMs,
+                ReadAtUnixMs: m.ReadAtUnixMs))
             .ToList();
 
         return list;

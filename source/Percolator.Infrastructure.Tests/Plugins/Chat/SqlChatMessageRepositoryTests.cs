@@ -114,4 +114,84 @@ public sealed class SqlChatMessageRepositoryTests
             count.Should().Be(0, "chat_message_mentions must be cascade deleted when message is deleted");
         }
     }
+
+    [Test]
+    public async Task AddAsync_And_UpdateAsync_PersistAndRetrieve_DeliveredAtUnixMs()
+    {
+        using var testDb = new SqliteTestDb();
+        var repo = new SqlChatMessageRepository(testDb.DbContext);
+
+        var msgId = PayloadId.New();
+        var channelId = ChannelId.New();
+        var authorId = PublicIdentityId.New();
+
+        // 1. Add message initially without delivery or read timestamps
+        var message = new ChatMessage(
+            msgId,
+            channelId,
+            authorId,
+            1700000000000UL,
+            "Testing delivery receipt persistence",
+            deliveredAtUnixMs: null,
+            readAtUnixMs: null);
+
+        await repo.AddAsync(message);
+
+        var loadedInitial = await repo.GetByIdAsync(msgId);
+        loadedInitial.Should().NotBeNull();
+        loadedInitial!.DeliveredAtUnixMs.Should().BeNull();
+        loadedInitial.ReadAtUnixMs.Should().BeNull();
+
+        // 2. Mark as delivered and update
+        const ulong deliveredAt = 1700000005000UL;
+        message.MarkAsDelivered(deliveredAt);
+        await repo.UpdateAsync(message);
+
+        var loadedAfterDelivery = await repo.GetByIdAsync(msgId);
+        loadedAfterDelivery.Should().NotBeNull();
+        loadedAfterDelivery!.DeliveredAtUnixMs.Should().Be(deliveredAt);
+        loadedAfterDelivery.ReadAtUnixMs.Should().BeNull();
+
+        // Verify direct SQLite column value via ADO.NET
+        using (var cmd = testDb.Connection.CreateCommand())
+        {
+            cmd.CommandText = "SELECT delivered_at_unix_ms, read_at_unix_ms FROM chat_messages WHERE id = @mid;";
+            cmd.Parameters.Add(new SqliteParameter("@mid", msgId.Value));
+
+            using var reader = await cmd.ExecuteReaderAsync();
+            reader.Read().Should().BeTrue();
+            Convert.ToInt64(reader["delivered_at_unix_ms"]).Should().Be((long)deliveredAt);
+            reader.IsDBNull(reader.GetOrdinal("read_at_unix_ms")).Should().BeTrue();
+        }
+
+        // 3. Mark as read and update
+        const ulong readAt = 1700000010000UL;
+        message.MarkAsRead(readAt);
+        await repo.UpdateAsync(message);
+
+        var loadedAfterRead = await repo.GetByIdAsync(msgId);
+        loadedAfterRead.Should().NotBeNull();
+        loadedAfterRead!.DeliveredAtUnixMs.Should().Be(deliveredAt);
+        loadedAfterRead.ReadAtUnixMs.Should().Be(readAt);
+
+        // 4. Also verify AddAsync with timestamps already populated
+        var msgId2 = PayloadId.New();
+        const ulong deliveredAt2 = 1700000020000UL;
+        const ulong readAt2 = 1700000025000UL;
+        var message2 = new ChatMessage(
+            msgId2,
+            channelId,
+            authorId,
+            1700000015000UL,
+            "Message with pre-existing delivery timestamps",
+            deliveredAtUnixMs: deliveredAt2,
+            readAtUnixMs: readAt2);
+
+        await repo.AddAsync(message2);
+
+        var loaded2 = await repo.GetByIdAsync(msgId2);
+        loaded2.Should().NotBeNull();
+        loaded2!.DeliveredAtUnixMs.Should().Be(deliveredAt2);
+        loaded2.ReadAtUnixMs.Should().Be(readAt2);
+    }
 }

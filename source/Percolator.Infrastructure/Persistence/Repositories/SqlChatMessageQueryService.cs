@@ -192,7 +192,9 @@ public sealed class SqlChatMessageQueryService : IChatMessageQueryService
                 attachmentDtos,
                 entity.EditedAtUnixMs,
                 entity.IsTombstone,
-                reactionGroups));
+                reactionGroups,
+                DeliveredAtUnixMs: entity.DeliveredAtUnixMs,
+                ReadAtUnixMs: entity.ReadAtUnixMs));
         }
 
         return result;

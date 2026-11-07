@@ -36,6 +36,7 @@ public sealed class SqlChatMessageRepository : IChatMessageRepository
             Content = record.Content ?? string.Empty,
             ExpireAfterSeconds = record.ExpireAfterSeconds,
             ExpiresAtUnixMs = record.ExpiresAtUnixMs,
+            DeliveredAtUnixMs = record.DeliveredAtUnixMs,
             ReadAtUnixMs = record.ReadAtUnixMs,
             EditedAtUnixMs = record.EditedAtUnixMs,
             IsTombstone = record.IsTombstone,
@@ -224,6 +225,7 @@ public sealed class SqlChatMessageRepository : IChatMessageRepository
 
         entity.Content = record.Content ?? string.Empty;
         entity.ExpiresAtUnixMs = record.ExpiresAtUnixMs;
+        entity.DeliveredAtUnixMs = record.DeliveredAtUnixMs;
         entity.ReadAtUnixMs = record.ReadAtUnixMs;
         entity.EditedAtUnixMs = record.EditedAtUnixMs;
         entity.IsTombstone = record.IsTombstone;
@@ -443,6 +445,7 @@ public sealed class SqlChatMessageRepository : IChatMessageRepository
             entity.DeletedAtUnixMs,
             deletedBy,
             chatReactions,
-            entity.ReadAtUnixMs);
+            readAtUnixMs: entity.ReadAtUnixMs,
+            deliveredAtUnixMs: entity.DeliveredAtUnixMs);
     }
 }

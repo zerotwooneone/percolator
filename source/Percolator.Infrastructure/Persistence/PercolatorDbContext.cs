@@ -377,6 +377,7 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.LinkPreviewThumbnailNonce).HasColumnType("BLOB");
             entity.Property(e => e.TimestampUnixMs).HasConversion<long>();
             entity.Property(e => e.ExpiresAtUnixMs).HasConversion<long?>();
+            entity.Property(e => e.DeliveredAtUnixMs).HasConversion<long?>();
             entity.Property(e => e.ReadAtUnixMs).HasConversion<long?>();
             entity.Property(e => e.EditedAtUnixMs).HasConversion<long?>();
             entity.Property(e => e.DeletedAtUnixMs).HasConversion<long?>();

@@ -27,6 +27,7 @@ public sealed class ChatMessageEntity
 
     public int? ExpireAfterSeconds { get; set; }
     public ulong? ExpiresAtUnixMs { get; set; }
+    public ulong? DeliveredAtUnixMs { get; set; }
     public ulong? ReadAtUnixMs { get; set; }
     public ulong? EditedAtUnixMs { get; set; }
     public bool IsTombstone { get; set; }
