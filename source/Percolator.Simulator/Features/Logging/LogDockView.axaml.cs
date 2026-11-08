@@ -1,4 +1,4 @@
-using System.Collections.Specialized;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
@@ -7,8 +7,7 @@ namespace Percolator.Simulator.Features.Logging;
 
 public partial class LogDockView : UserControl
 {
-    private ScrollViewer? _scrollViewer;
-    private LogDockViewModel? _attachedVm;
+    private TextBox? _textBox;
 
     public LogDockView()
     {
@@ -18,56 +17,38 @@ public partial class LogDockView : UserControl
     protected override void OnLoaded(RoutedEventArgs e)
     {
         base.OnLoaded(e);
-        _scrollViewer = this.FindControl<ScrollViewer>("LogScrollViewer");
-        AttachViewModel();
-    }
-
-    protected override void OnDataContextChanged(System.EventArgs e)
-    {
-        base.OnDataContextChanged(e);
-        AttachViewModel();
+        _textBox = this.FindControl<TextBox>("LogTextBox");
+        if (_textBox != null)
+        {
+            _textBox.PropertyChanged += OnTextBoxPropertyChanged;
+        }
     }
 
     protected override void OnUnloaded(RoutedEventArgs e)
     {
         base.OnUnloaded(e);
-        DetachViewModel();
-    }
-
-    private void AttachViewModel()
-    {
-        DetachViewModel();
-        if (DataContext is LogDockViewModel vm)
+        if (_textBox != null)
         {
-            _attachedVm = vm;
-            vm.LogEntries.CollectionChanged += OnLogEntriesChanged;
+            _textBox.PropertyChanged -= OnTextBoxPropertyChanged;
         }
     }
 
-    private void DetachViewModel()
+    private void OnTextBoxPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
     {
-        if (_attachedVm != null)
+        if (e.Property == TextBox.TextProperty && _textBox != null)
         {
-            _attachedVm.LogEntries.CollectionChanged -= OnLogEntriesChanged;
-            _attachedVm = null;
-        }
-    }
-
-    private void OnLogEntriesChanged(object? sender, NotifyCollectionChangedEventArgs e)
-    {
-        if (e.Action == NotifyCollectionChangedAction.Add && _scrollViewer != null)
-        {
-            Dispatcher.UIThread.Post(() =>
+            // Only auto-scroll to the end if the user does NOT have an active text selection
+            if (_textBox.SelectionStart == _textBox.SelectionEnd)
             {
-                if (_scrollViewer != null)
+                Dispatcher.UIThread.Post(() =>
                 {
-                    var isNearBottom = _scrollViewer.Offset.Y >= _scrollViewer.Extent.Height - _scrollViewer.Viewport.Height - 40;
-                    if (isNearBottom || _scrollViewer.Extent.Height <= _scrollViewer.Viewport.Height)
+                    if (_textBox != null && _textBox.SelectionStart == _textBox.SelectionEnd)
                     {
-                        _scrollViewer.ScrollToEnd();
+                        var len = _textBox.Text?.Length ?? 0;
+                        _textBox.CaretIndex = len;
                     }
-                }
-            }, DispatcherPriority.Background);
+                }, DispatcherPriority.Background);
+            }
         }
     }
 }

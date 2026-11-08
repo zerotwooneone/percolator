@@ -1,7 +1,6 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Percolator.Simulator.Features.Logging"
-             xmlns:logging="using:Percolator.Simulator.Features.Logging"
              x:Class="Percolator.Simulator.Features.Logging.LogDockView"
              x:DataType="vm:LogDockViewModel">
 
@@ -29,7 +28,7 @@
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6">
                     <Button Content="📋 Copy All"
                             Command="{Binding CopyAllLogsCommand}"
-                            ToolTip.Tip="Copy all visible log lines to clipboard"
+                            ToolTip.Tip="Copy all visible logs to clipboard (or drag inside the text box to copy any group of lines)"
                             Padding="8,2" />
                     <!-- CTL-LOG-02: Clear UI Log -->
                     <Button Content="🧹 Clear UI Log"
@@ -38,48 +37,23 @@
                 </StackPanel>
             </Grid>
 
-            <!-- Bounded Ring Buffer Display -->
-            <Border Grid.Row="1" Background="{DynamicResource ControlFillColorDefaultBrush}" CornerRadius="4" Padding="6">
-                <Border.ContextMenu>
-                    <ContextMenu>
-                        <MenuItem Header="📋 Copy All Logs" Command="{Binding CopyAllLogsCommand}" />
-                        <Separator />
-                        <MenuItem Header="🧹 Clear UI Log" Command="{Binding ClearLogCommand}" />
-                    </ContextMenu>
-                </Border.ContextMenu>
-                <ScrollViewer x:Name="LogScrollViewer">
-                    <ItemsControl ItemsSource="{Binding LogEntries}">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate x:DataType="logging:UiLogItem">
-                                <Grid ColumnDefinitions="Auto,*" Margin="0,1" Background="Transparent">
-                                    <Grid.ContextMenu>
-                                        <ContextMenu>
-                                            <MenuItem Header="📋 Copy Log Line"
-                                                      Command="{Binding CopyLineCommand}" />
-                                            <MenuItem Header="📄 Copy Message Only"
-                                                      Command="{Binding CopyMessageCommand}" />
-                                            <Separator />
-                                            <MenuItem Header="📑 Copy All Logs"
-                                                      Command="{Binding CopyAllLogsCommand}" />
-                                        </ContextMenu>
-                                    </Grid.ContextMenu>
-
-                                    <Border Grid.Column="0" Background="{Binding BadgeColor}" CornerRadius="3" Padding="4,1" Margin="0,0,6,0" VerticalAlignment="Top">
-                                        <TextBlock Text="{Binding Level}" FontSize="9" FontWeight="Bold" Foreground="White" />
-                                    </Border>
-                                    <SelectableTextBlock Grid.Column="1"
-                                                         Text="{Binding FormattedText}"
-                                                         FontSize="11"
-                                                         FontFamily="Consolas,Monospace"
-                                                         Foreground="{DynamicResource TextFillColorPrimaryBrush}"
-                                                         VerticalAlignment="Center"
-                                                         TextWrapping="Wrap" />
-                                </Grid>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </ScrollViewer>
-            </Border>
+            <!-- Unified Multi-Line Read-Only Log Buffer -->
+            <TextBox Grid.Row="1"
+                     x:Name="LogTextBox"
+                     Text="{Binding LogText, Mode=OneWay}"
+                     IsReadOnly="True"
+                     AcceptsReturn="True"
+                     FontFamily="Consolas,Cascadia Code,Monospace"
+                     FontSize="11"
+                     Background="{DynamicResource ControlFillColorDefaultBrush}"
+                     Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                     BorderThickness="1"
+                     BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                     CornerRadius="4"
+                     Padding="8,6"
+                     TextWrapping="NoWrap"
+                     ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                     ScrollViewer.VerticalScrollBarVisibility="Auto" />
         </Grid>
     </Border>
 </UserControl>

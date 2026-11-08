@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
-using System.Collections.ObjectModel;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Threading;
@@ -41,74 +41,21 @@ internal static class ClipboardHelper
     }
 }
 
-internal sealed partial class UiLogItem : ObservableObject
-{
-    public DateTimeOffset TimestampUtc { get; }
-    public LogLevel Level { get; }
-    public string? NodeName { get; }
-    public string Category { get; }
-    public string Message { get; }
-    public string BadgeColor { get; }
-    public string FormattedText { get; }
-    private readonly Func<Task>? _copyAllAction;
-    private readonly IStatusToastService? _toastService;
-
-    public UiLogItem(
-        DateTimeOffset timestampUtc,
-        LogLevel level,
-        string? nodeName,
-        string category,
-        string message,
-        string badgeColor,
-        string formattedText,
-        Func<Task>? copyAllAction = null,
-        IStatusToastService? toastService = null)
-    {
-        TimestampUtc = timestampUtc;
-        Level = level;
-        NodeName = nodeName;
-        Category = category;
-        Message = message;
-        BadgeColor = badgeColor;
-        FormattedText = formattedText;
-        _copyAllAction = copyAllAction;
-        _toastService = toastService;
-    }
-
-    [RelayCommand]
-    public async Task CopyLineAsync()
-    {
-        await ClipboardHelper.SetClipboardTextAsync(FormattedText, "Copied log line to clipboard.", _toastService);
-    }
-
-    [RelayCommand]
-    public async Task CopyMessageAsync()
-    {
-        await ClipboardHelper.SetClipboardTextAsync(Message, "Copied log message to clipboard.", _toastService);
-    }
-
-    [RelayCommand]
-    public async Task CopyAllLogsAsync()
-    {
-        if (_copyAllAction != null)
-        {
-            await _copyAllAction();
-        }
-    }
-}
-
 internal sealed partial class LogDockViewModel : ViewModelBase
 {
-    private const int MaxLogCapacity = 500;
+    private const int MaxLogCapacity = 1000;
 
     private readonly ISimulatorLogSink _logSink;
     private readonly IStatusToastService? _toastService;
-    private readonly BatchAccumulator<UiLogItem> _logAccumulator;
+    private readonly BatchAccumulator<SimulatorLogEntry> _logAccumulator;
+    private readonly List<SimulatorLogEntry> _allEntries = new();
+    private readonly StringBuilder _visibleBuffer = new();
 
     [ObservableProperty]
     private int _selectedLogLevelIndex = 2; // Default Information
 
-    public ObservableCollection<UiLogItem> LogEntries { get; } = new();
+    [ObservableProperty]
+    private string _logText = string.Empty;
 
     public LogDockViewModel(ISimulatorLogSink logSink, IStatusToastService? toastService = null)
     {
@@ -116,40 +63,92 @@ internal sealed partial class LogDockViewModel : ViewModelBase
         _toastService = toastService;
 
         // 30 Hz UI batching accumulator with leading-edge immediate dispatch
-        _logAccumulator = new BatchAccumulator<UiLogItem>(
+        _logAccumulator = new BatchAccumulator<SimulatorLogEntry>(
             TimeSpan.FromMilliseconds(33),
             maxBatchSize: 100,
             flushAction: batch =>
             {
                 Dispatcher.UIThread.Post(() =>
                 {
-                    var excess = (LogEntries.Count + batch.Count) - MaxLogCapacity;
-                    while (excess > 0 && LogEntries.Count > 0)
-                    {
-                        LogEntries.RemoveAt(0);
-                        excess--;
-                    }
-
-                    foreach (var item in batch)
-                    {
-                        LogEntries.Add(item);
-                    }
+                    ProcessBatch(batch);
                 });
             });
 
         _logAccumulator.AddTo(ref Disposables);
 
-        // Ingestion-time forward filter + UI batching
+        // Ingestion & forward to batch accumulator
         _logSink.LogStream
             .Subscribe(entry =>
             {
-                var minLevel = GetSelectedLogLevel();
-                if (entry.Level < minLevel) return;
-
-                var uiItem = FormatUiLogItem(entry);
-                _logAccumulator.Enqueue(uiItem);
+                _logAccumulator.Enqueue(entry);
             })
             .AddTo(ref Disposables);
+    }
+
+    partial void OnSelectedLogLevelIndexChanged(int value)
+    {
+        RebuildVisibleText();
+    }
+
+    private void ProcessBatch(IReadOnlyList<SimulatorLogEntry> batch)
+    {
+        _allEntries.AddRange(batch);
+        var excess = _allEntries.Count - MaxLogCapacity;
+        var needsFullRebuild = false;
+
+        if (excess > 0)
+        {
+            _allEntries.RemoveRange(0, excess);
+            needsFullRebuild = true;
+        }
+
+        var minLevel = GetSelectedLogLevel();
+
+        if (needsFullRebuild)
+        {
+            RebuildVisibleText();
+        }
+        else
+        {
+            var addedAny = false;
+            foreach (var entry in batch)
+            {
+                if (entry.Level >= minLevel)
+                {
+                    if (_visibleBuffer.Length > 0)
+                    {
+                        _visibleBuffer.AppendLine();
+                    }
+                    _visibleBuffer.Append(FormatLogLine(entry));
+                    addedAny = true;
+                }
+            }
+
+            if (addedAny)
+            {
+                LogText = _visibleBuffer.ToString();
+            }
+        }
+    }
+
+    private void RebuildVisibleText()
+    {
+        _visibleBuffer.Clear();
+        var minLevel = GetSelectedLogLevel();
+
+        foreach (var entry in _allEntries)
+        {
+            if (entry.Level >= minLevel)
+            {
+                if (_visibleBuffer.Length > 0)
+                {
+                    _visibleBuffer.AppendLine();
+                }
+                _visibleBuffer.Append(FormatLogLine(entry));
+            }
+        }
+
+        LogText = _visibleBuffer.ToString();
     }
 
     private LogLevel GetSelectedLogLevel() => SelectedLogLevelIndex switch
@@ -162,53 +161,34 @@ internal sealed partial class LogDockViewModel : ViewModelBase
         _ => LogLevel.Information
     };
 
-    private UiLogItem FormatUiLogItem(SimulatorLogEntry entry)
+    private static string FormatLogLine(SimulatorLogEntry entry)
     {
-        var badgeColor = entry.Level switch
-        {
-            LogLevel.Trace => "#888888",
-            LogLevel.Debug => "#3A96DD",
-            LogLevel.Information => "#4CAF50",
-            LogLevel.Warning => "#FF9800",
-            LogLevel.Error or LogLevel.Critical => "#F44336",
-            _ => "#AAAAAA"
-        };
-
         var nodePart = string.IsNullOrEmpty(entry.NodeName) ? "" : $"[{entry.NodeName}] ";
         var formatted = $"[{entry.TimestampUtc:HH:mm:ss.fff}] [{entry.Level}] {nodePart}{entry.Category}: {entry.Message}";
         if (!string.IsNullOrEmpty(entry.Exception))
         {
             formatted += $"{Environment.NewLine}  Ex: {entry.Exception}";
         }
-
-        return new UiLogItem(
-            entry.TimestampUtc,
-            entry.Level,
-            entry.NodeName,
-            entry.Category,
-            entry.Message,
-            badgeColor,
-            formatted,
-            CopyAllLogsAsync,
-            _toastService);
+        return formatted;
     }
 
     [RelayCommand]
     private void ClearLog()
     {
-        LogEntries.Clear();
+        _allEntries.Clear();
+        _visibleBuffer.Clear();
+        LogText = string.Empty;
     }
 
     [RelayCommand]
     public async Task CopyAllLogsAsync()
     {
-        if (LogEntries.Count == 0)
+        if (string.IsNullOrEmpty(LogText))
         {
             _toastService?.ShowToast("Log Viewer", "No log entries to copy.", ToastSeverity.Informational);
             return;
         }
 
-        var allText = string.Join(Environment.NewLine, LogEntries.Select(e => e.FormattedText));
-        await ClipboardHelper.SetClipboardTextAsync(allText, $"Copied {LogEntries.Count} log lines to clipboard.", _toastService);
+        await ClipboardHelper.SetClipboardTextAsync(LogText, "Copied all logs to clipboard.", _toastService);
     }
 }
