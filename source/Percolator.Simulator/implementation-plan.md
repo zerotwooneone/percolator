@@ -389,20 +389,45 @@ Phase 8 wires private blinded rendezvous locators, public nearby peer discovery 
 ---
 
 ### 3.11 Phase 9: Swarm File Transfer, Custom Piece Heatmap & Late Downloader Injection
-Phase 9 completes the simulator with BitTorrent-style multi-stream file transfers, a custom 30 FPS piece heatmap control, and dynamic 50% late joiner injection.
+Phase 9 completes the simulator with BitTorrent-style multi-stream file transfers, a custom 30 FPS piece heatmap control, real Merkle tree verification, and dynamic 50% late downloader swarm injection.
 
-> [!IMPORTANT] Phase 9 Integrity Constraints:
-> - File chunk transfers must transfer real binary slices over multi-stream TCP/gRPC pipes and verify SHA-256 Merkle proofs, never spoofing transfer completion in memory.
+> [!IMPORTANT] Phase 9 Integrity Constraints & Anti-Shortcut Rules:
+> 1. **Zero In-Memory Transfer Spoofing**: All file transfers must transfer real binary chunk slices over loopback TCP multi-stream pipes (`TcpMultiStreamPoolFactory`) or gRPC relay pipes (`RelayTransferPipeClient`), verifying SHA-256 Merkle root proofs on disk via `WindowsSparseDesktopFileStore` (Windows) or `PortableDesktopFileStore` (Linux). Never bypass the transport or mark transfers complete in memory without wire payload transfer.
+> 2. **Zero Cross-Host RAM Peeking (Principle #2)**: Initiator, seeders, and downloaders must interact strictly via protocol negotiation (`FileTransferOfferMessage`, `TransferAcceptanceDto`, `ChunkDataPayload`). Downloaders may not read the seeder's disk, memory, or chunk bitfields directly.
+> 3. **Autopilot Host Parity (Principle #5)**: Autopilot controls `[x] Allow File Transfers` (`CTL-PER-04`), `[x] Relay-Only Routing` (`CTL-PER-06`), and `[x] Auto-Accept File Transfers` (`CTL-PER-12`) must be declared on `ISimulatedPersonaHost`, synchronized bidirectionally with `PersonaCardViewModel`, and honored in background message handlers.
+> 4. **Deterministic Signal Awaiting (Principle #15)**: Scenario step execution must await deterministic reactive events on `_stateBus.Signals` (`SignalCategory.FileTransferProgressChanged`, `SignalCategory.FileTransferCompleted`), never relying on arbitrary `Task.Delay` sleeps.
+> 5. **High-Performance UI Decoupling**: Avalonia `ItemsControl` of 400 piece borders must NOT be used for chunk visualization (causes severe layout thrashing). Piece visualization must be rendered via custom `SwarmHeatmapControl` with immediate `DrawingContext` rendering (`context.FillRectangle`), throttled at 30 FPS via `Channel<SwarmChunkProgressSignal>` / `R3.ThrottleLast(33ms)`.
 
-1. **Synthetic Merkle Presets & Transfer Negotiation (`BTN-ACT-04`, `CTL-PER-04`, `CTL-PER-06`, `CTL-PER-12`, `CTL-PER-16`)**:
-   - Fleshes out `SwarmPanelView` / `SwarmPanelViewModel`.
-   - Uses `WindowsSparseDesktopFileStore` (on Windows via `Percolator.Infrastructure.Windows`) or `PortableDesktopFileStore` (on Linux via `Percolator.Infrastructure`) for file pre-allocation and boundary slice storage in the node's temp directory, generates deterministic `2 MB`, `25 MB`, and `100 MB` files with SHA-256 Merkle trees, and calls `IFileTransferActionHandler.InitiateTransferAsync`.
-   - Honors `Allow File Transfers` (`CTL-PER-04`), `Auto-Accept File Transfers` (`CTL-PER-12`), Pending Offer banner (`CTL-PER-16`), and `Relay-Only Routing (Hide IP)` (`CTL-PER-06`: `RelayTransferPipeClient` vs. `TcpMultiStreamPoolFactory`).
-2. **30 FPS `SwarmHeatmapControl` & Participant Controls (`CTL-ROS-05`, `CTL-SWM-01`, `CTL-SWM-02`, `CTL-SWM-03`)**:
-   - Coalesces chunk progress via `Channel<SwarmChunkProgressSignal>` into 33ms UI ticks rendering `SwarmHeatmapControl` (`Grey`: missing, `Blue`: in-flight, `Green`: verified, `Red`: corrupted).
-   - Wires `[ ⏸️ Pause ]`, `[ ▶️ Resume ]`, `[ ✕ Cancel ]` (`CTL-SWM-01`), and `[ ➕ Inject Late Downloader ▼ ]` (`CTL-SWM-02`) at 50% progress to prove multi-source swarm downloading from both seeder and partial peer.
-3. **Final Regression Gate & Zero Orphaned Stubs Audit**:
-   - Registers Phase 9 steps and assertions, replays all `Scenarios/01`..`07` with exit code `0`, and runs a mechanical check confirming **0 controls out of 53 remain bound to `ShowPlaceholder`**.
+1. **Host DI Registration & File Transfer Infrastructure (`SimulatedPersonaHost`)**:
+   - Register `services.AddFileTransferApp()` and `services.AddFileTransferInfrastructure()`, wiring `IFileTransferActionHandler`, `IFileTransferQueryService`, `WindowsSparseDesktopFileStore` / `PortableDesktopFileStore` scoped to each persona's temp directory (`AppData/Local/Temp/Percolator/Node-{Id}`).
+   - Register `SimulatorNotifyingFileTransferDecorator` around `IFileTransferActionHandler` / `IFileTransferIngressPort` publishing `SimulatorStateSignal` (`SignalCategory.FileTransferOfferReceived`, `SignalCategory.FileTransferProgressChanged`, `SignalCategory.FileTransferCompleted`).
+   - Expose reactive properties on `ISimulatedPersonaHost`: `AllowFileTransfers`, `RelayOnlyRouting`, and `AutoAcceptFileTransfers`.
+2. **Synthetic Merkle Presets & Transfer Negotiation (`BTN-ACT-04`, `CTL-PER-04`, `CTL-PER-06`, `CTL-PER-12`, `CTL-PER-16`)**:
+   - `SyntheticFilePresetGenerator`: Generates deterministic test files (`2 MB`, `25 MB`, `100 MB`) with deterministic pseudorandom byte streams and precomputed SHA-256 Merkle trees in the sender's node directory.
+   - Contextual action `[ 📁 Send File Preset ▼ ]` (`BTN-ACT-04`) initiates transfer from Primary Selected Node (`1️⃣ Initiator`) to all Secondary/Multi-Selected targets via `IFileTransferActionHandler.InitiateTransferAsync`.
+   - Receiver behavior:
+     - If `AllowFileTransfers` (`CTL-PER-04`) is false, transfer offer is rejected immediately with `TransferRejectionReason.Disabled`.
+     - If `AutoAcceptFileTransfers` (`CTL-PER-12`) is true, transfer is accepted automatically into receiver's temp directory.
+     - Otherwise, the Pending Offer banner (`CTL-PER-16`) surfaces in `PersonaCardView.axaml` with `[ ✓ Accept Download ]` and `[ ✕ Decline ]`.
+   - Routing: Honors `Relay-Only Routing (Hide IP)` (`CTL-PER-06`), routing slices via `RelayTransferPipeClient` through `SimulatedRelayHost` when enabled, or direct loopback `TcpMultiStreamPoolFactory` when disabled.
+3. **30 FPS `SwarmHeatmapControl` & Swarm Inspector Panel (`CTL-ROS-05`, `CTL-SWM-01`, `CTL-SWM-02`, `CTL-SWM-03`)**:
+   - Custom control `SwarmHeatmapControl : Control`:
+     - Overrides `Render(DrawingContext context)`, drawing a compact grid of piece rectangles using direct `Brush` fills (`Grey`: missing, `Blue`: downloading/in-flight, `Green`: Merkle-verified, `Red`: SHA-256 hash corrupted).
+     - Renders at a smooth 30 FPS using an internal dirty flag triggered by coalesced updates from `Channel<SwarmChunkProgressSignal>` / `R3.ThrottleLast(TimeSpan.FromMilliseconds(33))`.
+   - `SwarmPanelViewModel` / `SwarmPanelView`:
+     - Registered in `WorkbenchView.axaml` `DataTemplates`. Selecting a swarm row in `RosterTreeView` (`CTL-ROS-05`) activates `SwarmPanelView` in the center workbench.
+     - Displays transfer metrics: File Name, Total Bytes, Transferred Bytes, Piece Count, Active Connections, and Throughput (MB/s).
+     - Displays participant cards with individual piece heatmaps and participant control buttons: `[ ⏸️ Pause ]`, `[ ▶️ Resume ]`, `[ ✕ Cancel ]` (`CTL-SWM-01`).
+   - Dynamic Late Downloader Swarm Injection (`CTL-SWM-02`):
+     - `[ ➕ Inject Late Downloader ▼ ]` opens a dropdown of available personas and progress thresholds (default: 50%).
+     - When the primary download passes the threshold (e.g. 50%), the coordinator issues an offer to the late downloader. The late joiner downloads pieces concurrently from both the original seeder and the partial peer downloader, proving multi-source swarm distribution.
+4. **Scenario Extensions & Regression Verification Gate**:
+   - Registers Phase 9 scenario steps (`InitiateFileTransfer`, `AcceptFileTransfer`, `CancelFileTransfer`, `PauseFileTransfer`, `ResumeFileTransfer`, `InjectLateDownloader`) and assertions (`AssertFileTransferProgress`, `AssertFileTransferCompleted`, `AssertFileIntegrityVerified`).
+   - Author and commit `Scenarios/08-swarm-file-transfer.json`.
+   - Replay all scenarios `01` through `08` via `--replay` verifying `0` failures and `0` errors.
+5. **Zero Orphaned Stubs Audit**:
+   - Verify every single control in the 53-control UI ledger (`BTN-TOP-01..07`, `BTN-ACT-01..07`, `CTL-ROS-01..05`, `CTL-PER-01..22`, `CTL-REL-01..03`, `CTL-GRP-01..02`, `CTL-SWM-01..03`, `CTL-REC-01..02`, `CTL-LOG-01..02`) is wired to real functional logic.
+   - Run a mechanical scan across the codebase confirming **0 controls remain bound to `ShowPlaceholder`**.
 
 ---
 
@@ -505,10 +530,11 @@ Percolator.Simulator/
 │   ├── 01-direct-handshake-and-chat.json
 │   ├── 02-relayed-stealth-and-chat.json
 │   ├── 03-prekey-depletion.json
-│   ├── 04-advanced-chat-and-profiles.json
-│   ├── 05-group-chat-and-epochs.json
-│   ├── 06-peer-discovery.json
-│   └── 07-swarm-late-joiner.json
+│   ├── 04-rich-chat-and-virtual-clock.json
+│   ├── 05-advanced-chat-and-profiles.json
+│   ├── 06-group-chat-and-epochs.json
+│   ├── 07-peer-discovery.json
+│   └── 08-swarm-file-transfer.json
 ├── App.axaml / .cs
 └── Program.cs
 ```
