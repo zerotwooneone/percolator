@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
+using System.Linq;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -17,6 +18,7 @@ internal sealed partial class RosterViewModel : ViewModelBase
 
     public ObservableCollection<SimulatedNodeSummary> Personas { get; } = new();
     public ObservableCollection<SimulatedNodeSummary> Relays { get; } = new();
+    public ObservableCollection<SimulatedNodeSummary> Groups { get; } = new();
 
     public RosterViewModel(
         ISimulatedWorldStateService worldState,
@@ -27,9 +29,10 @@ internal sealed partial class RosterViewModel : ViewModelBase
         _selectionState = selectionState;
         _toastService = toastService;
 
-        // Bind personas and relays
+        // Bind personas, relays, and groups
         SyncCollection(_worldState.Personas, Personas);
         SyncCollection(_worldState.Relays, Relays);
+        SyncCollection(_worldState.Groups, Groups);
     }
 
     private void SyncCollection(IReadOnlyObservableList<SimulatedNodeSummary> source, ObservableCollection<SimulatedNodeSummary> target)
@@ -82,13 +85,28 @@ internal sealed partial class RosterViewModel : ViewModelBase
     [RelayCommand]
     public void ToggleMute(SimulatedNodeSummary node)
     {
-        _toastService.ShowPlaceholder("Listening/Muted Toggle", "Phase 3A");
+        var host = _worldState.GetPersonaHost(node.Id);
+        if (host != null)
+        {
+            var newState = !host.IsListening.CurrentValue;
+            UiTaskRunner.FireAndForget(() => host.SetListeningAsync(newState), "HostLifecycle");
+            _toastService.ShowToast("Ingress Toggled", $"{node.DisplayName} is now {(newState ? "listening" : "muted")}.", ToastSeverity.Informational);
+        }
     }
 
     [RelayCommand]
     private void SelectGroup()
     {
-        _toastService.ShowPlaceholder("Group Inspector", "Phase 7");
+        var group = _worldState.Groups.FirstOrDefault();
+        if (group != null)
+        {
+            _worldState.TogglePinCard(group);
+            _toastService.ShowToast("Group Inspector", $"Pinned group '{group.DisplayName}' to workbench.", ToastSeverity.Informational);
+        }
+        else
+        {
+            _toastService.ShowToast("No Groups", "Create a group first using '👥 Create Group on Relay...' in the action bar.", ToastSeverity.Warning);
+        }
     }
 
     [RelayCommand]

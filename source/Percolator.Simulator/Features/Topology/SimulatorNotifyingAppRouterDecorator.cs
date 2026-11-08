@@ -85,6 +85,11 @@ internal sealed class SimulatorNotifyingPayloadHandlerDecorator : IAppPayloadHan
                 Details: context.SenderIdentityId.ToString(),
                 Payload: new ChatTranscriptSignalPayload(context.SenderIdentityId),
                 TargetChannelId: context.ChannelId));
+
+            _stateBus.Publish(new SimulatorStateSignal(
+                _nodeId,
+                SignalCategory.PendingHandshakeChanged,
+                Details: context.SenderIdentityId.ToString()));
         }
 
         return result;

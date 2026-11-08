@@ -223,8 +223,14 @@ internal sealed class GroupChatCoordinator : IDisposable
             $"Relay: {relay.DisplayName} | Epoch 1",
             IsPinned: true);
         _worldState.RegisterGroup(summary);
+        _worldState.TogglePinCard(summary);
 
         _stateBus.Publish(new SimulatorStateSignal(admin.Id, SignalCategory.GroupStateChanged, TargetChannelId: channelId));
+        foreach (var member in members)
+        {
+            _stateBus.Publish(new SimulatorStateSignal(member.Id, SignalCategory.GroupStateChanged, TargetChannelId: channelId));
+            _stateBus.Publish(new SimulatorStateSignal(member.Id, SignalCategory.PendingHandshakeChanged));
+        }
         _toastService.ShowToast("Group Created", $"Group '{groupName}' created on {relay.DisplayName}.", ToastSeverity.Success);
         return channelId;
     }
@@ -473,13 +479,14 @@ internal sealed class GroupChatCoordinator : IDisposable
         ArgumentNullException.ThrowIfNull(relay);
         ArgumentNullException.ThrowIfNull(newMember);
 
+        var existingMemberIds = new List<PublicIdentityId>();
         using (var adminScope = admin.Services.CreateScope())
         {
             var channelRepo = adminScope.ServiceProvider.GetRequiredService<IChannelRepository>();
             var groupChannel = await channelRepo.GetGroupByIdAsync(channelId, ct);
             if (groupChannel == null) throw new InvalidOperationException("Group channel not found.");
 
-            var existingMemberIds = groupChannel.Members
+            existingMemberIds = groupChannel.Members
                 .Where(m => m.Id != admin.PublicIdentityId && m.Id != newMember.PublicIdentityId)
                 .Select(m => m.Id)
                 .ToList();
@@ -624,6 +631,16 @@ internal sealed class GroupChatCoordinator : IDisposable
             $"Added {newMember.DisplayName} to group {channelId}."));
 
         _stateBus.Publish(new SimulatorStateSignal(admin.Id, SignalCategory.GroupStateChanged, TargetChannelId: channelId));
+        _stateBus.Publish(new SimulatorStateSignal(newMember.Id, SignalCategory.GroupStateChanged, TargetChannelId: channelId));
+        _stateBus.Publish(new SimulatorStateSignal(newMember.Id, SignalCategory.PendingHandshakeChanged));
+        foreach (var existingMemberId in existingMemberIds)
+        {
+            var existingHost = _worldState.FindPersonaHostByIdentity(existingMemberId);
+            if (existingHost != null)
+            {
+                _stateBus.Publish(new SimulatorStateSignal(existingHost.Id, SignalCategory.GroupStateChanged, TargetChannelId: channelId));
+            }
+        }
         _toastService.ShowToast("Member Added", $"Added {newMember.DisplayName} to group.", ToastSeverity.Success);
         return true;
     }

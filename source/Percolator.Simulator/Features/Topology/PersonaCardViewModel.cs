@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
@@ -246,6 +246,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
                 {
                     RefreshConversations();
                     RefreshChatTranscript();
+                    RefreshPendingHandshakes();
                 })
                 .AddTo(ref Disposables);
 
@@ -255,6 +256,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
                 {
                     RefreshConversations();
                     RefreshChatTranscript();
+                    RefreshPendingHandshakes();
                 })
                 .AddTo(ref Disposables);
 
