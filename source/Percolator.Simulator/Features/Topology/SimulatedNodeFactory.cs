@@ -46,7 +46,7 @@ internal sealed class SimulatedNodeFactory : ISimulatedNodeFactory
         var name = string.IsNullOrWhiteSpace(displayName) ? $"Relay-{_worldState.Relays.Count + 1}" : displayName.Trim();
         var port = LoopbackPortAllocator.AllocateAvailablePort();
 
-        var host = new SimulatedRelayHost(nodeId, name, port, _logSink, _stateBus);
+        var host = new SimulatedRelayHost(nodeId, name, port, _logSink, _stateBus, _virtualClock);
         await host.StartAsync(ct);
         return host;
     }

@@ -95,6 +95,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
     public ISimulatedRelayHost? HomeRelay { get; set; }
     public ProfileKey ProfileKey { get; private set; }
     public uint ProfileRevision { get; private set; } = 1;
+    public bool AllowPeerDiscovery { get; set; } = true;
     public bool AutoShareProfile { get; set; } = true;
     public bool AutoAcceptGroupInvites { get; set; } = false;
     public SimulatedPersonaHost(

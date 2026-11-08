@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -13,6 +13,7 @@ using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.PluginSdk;
 using Percolator.Simulator.Features.DirectChat;
+using Percolator.Simulator.Features.DiscoverySimulation;
 using Percolator.Simulator.Features.Logging;
 using Percolator.Simulator.Features.RelayedChat;
 using Percolator.Simulator.Features.RichChatAndProfiles;
@@ -41,6 +42,7 @@ internal sealed class ScenarioRunnerService
     private readonly RichChatActionCoordinator _richChatCoordinator;
     private readonly ProfileSyncCoordinator _profileCoordinator;
     private readonly GroupChatCoordinator _groupCoordinator;
+    private readonly DiscoverySimulationCoordinator _discoveryCoordinator;
     private readonly IFlightRecorderStateService? _flightRecorder;
     private readonly ISelectionStateService? _selectionState;
 
@@ -56,6 +58,7 @@ internal sealed class ScenarioRunnerService
         RichChatActionCoordinator richChatCoordinator,
         ProfileSyncCoordinator profileCoordinator,
         GroupChatCoordinator groupCoordinator,
+        DiscoverySimulationCoordinator discoveryCoordinator,
         IFlightRecorderStateService? flightRecorder = null,
         ISelectionStateService? selectionState = null)
     {
@@ -70,6 +73,7 @@ internal sealed class ScenarioRunnerService
         _richChatCoordinator = richChatCoordinator ?? throw new ArgumentNullException(nameof(richChatCoordinator));
         _profileCoordinator = profileCoordinator ?? throw new ArgumentNullException(nameof(profileCoordinator));
         _groupCoordinator = groupCoordinator ?? throw new ArgumentNullException(nameof(groupCoordinator));
+        _discoveryCoordinator = discoveryCoordinator ?? throw new ArgumentNullException(nameof(discoveryCoordinator));
         _flightRecorder = flightRecorder;
         _selectionState = selectionState;
     }
@@ -245,6 +249,26 @@ internal sealed class ScenarioRunnerService
                         await ExecuteRenameGroupAsync(renameGroup, aliasMap, relayAliasMap, groupAliasMap, ct);
                         break;
 
+                    case SetDiscoveryVisibilityStep setVisibilityStep:
+                        await ExecuteSetDiscoveryVisibilityAsync(setVisibilityStep, aliasMap, ct);
+                        break;
+
+                    case PublishBlindedLocatorStep publishLocatorStep:
+                        await ExecutePublishBlindedLocatorAsync(publishLocatorStep, aliasMap, relayAliasMap, ct);
+                        break;
+
+                    case ResolveBlindedLocatorStep resolveLocatorStep:
+                        await ExecuteResolveBlindedLocatorAsync(resolveLocatorStep, aliasMap, relayAliasMap, ct);
+                        break;
+
+                    case QueryNearbyPeersStep queryNearbyStep:
+                        await ExecuteQueryNearbyPeersAsync(queryNearbyStep, aliasMap, relayAliasMap, ct);
+                        break;
+
+                    case ConnectDiscoveredPeerStep connectDiscoveredStep:
+                        await ExecuteConnectDiscoveredPeerAsync(connectDiscoveredStep, aliasMap, relayAliasMap, ct);
+                        break;
+
                     default:
                         throw new ScenarioExecutionException($"Unsupported scenario step type: {step.GetType().Name}");
                 }
@@ -324,6 +348,14 @@ internal sealed class ScenarioRunnerService
 
                     case AssertMemberCannotDecryptAssertion forwardSecrecyAssert:
                         await ExecuteAssertMemberCannotDecryptAsync(forwardSecrecyAssert, aliasMap, groupAliasMap, ct);
+                        break;
+
+                    case AssertBlindedLocatorResolvedAssertion rendezvousAssert:
+                        ExecuteAssertBlindedLocatorResolved(rendezvousAssert, aliasMap);
+                        break;
+
+                    case AssertNearbyCandidateCountAssertion nearbyAssert:
+                        ExecuteAssertNearbyCandidateCount(nearbyAssert, aliasMap);
                         break;
 
                     default:
@@ -1412,5 +1444,152 @@ internal sealed class ScenarioRunnerService
             throw new ScenarioAssertionException(
                 $"Forward secrecy VIOLATION! Evicted member '{assertion.PersonaAlias}' was able to receive/decrypt group message \"{assertion.ExpectedText}\" in '{assertion.GroupName}'.");
         }
+    }
+
+    private async Task ExecuteSetDiscoveryVisibilityAsync(
+        SetDiscoveryVisibilityStep step,
+        Dictionary<string, ISimulatedPersonaHost> aliasMap,
+        CancellationToken ct)
+    {
+        if (!aliasMap.TryGetValue(step.PersonaAlias, out var persona))
+            throw new ScenarioExecutionException($"Persona '{step.PersonaAlias}' not found.");
+
+        var success = await _discoveryCoordinator.SetDiscoveryVisibilityAsync(persona, step.IsDiscoverable, ct);
+        if (!success)
+            throw new ScenarioExecutionException($"Failed to set discovery visibility for '{step.PersonaAlias}'.");
+    }
+
+    private async Task ExecutePublishBlindedLocatorAsync(
+        PublishBlindedLocatorStep step,
+        Dictionary<string, ISimulatedPersonaHost> aliasMap,
+        Dictionary<string, ISimulatedRelayHost> relayAliasMap,
+        CancellationToken ct)
+    {
+        if (!aliasMap.TryGetValue(step.PersonaAlias, out var persona))
+            throw new ScenarioExecutionException($"Persona '{step.PersonaAlias}' not found.");
+        if (!relayAliasMap.TryGetValue(step.RelayAlias, out var relay))
+            throw new ScenarioExecutionException($"Relay '{step.RelayAlias}' not found.");
+
+        byte[] sharedSecret = ParseSharedSecret(step.SharedSecret);
+        await _discoveryCoordinator.PublishBlindedLocatorAsync(persona, relay, sharedSecret, step.RouteDescriptor, ct);
+    }
+
+    private async Task ExecuteResolveBlindedLocatorAsync(
+        ResolveBlindedLocatorStep step,
+        Dictionary<string, ISimulatedPersonaHost> aliasMap,
+        Dictionary<string, ISimulatedRelayHost> relayAliasMap,
+        CancellationToken ct)
+    {
+        if (!aliasMap.TryGetValue(step.PersonaAlias, out var persona))
+            throw new ScenarioExecutionException($"Persona '{step.PersonaAlias}' not found.");
+        if (!aliasMap.TryGetValue(step.TargetAlias, out var target))
+            throw new ScenarioExecutionException($"Target persona '{step.TargetAlias}' not found.");
+        if (!relayAliasMap.TryGetValue(step.RelayAlias, out var relay))
+            throw new ScenarioExecutionException($"Relay '{step.RelayAlias}' not found.");
+
+        byte[] sharedSecret = ParseSharedSecret(step.SharedSecret);
+        await _discoveryCoordinator.ResolveBlindedLocatorAsync(persona, relay, target.PublicIdentityId, sharedSecret, ct);
+    }
+
+    private async Task ExecuteQueryNearbyPeersAsync(
+        QueryNearbyPeersStep step,
+        Dictionary<string, ISimulatedPersonaHost> aliasMap,
+        Dictionary<string, ISimulatedRelayHost> relayAliasMap,
+        CancellationToken ct)
+    {
+        if (!aliasMap.TryGetValue(step.PersonaAlias, out var persona))
+            throw new ScenarioExecutionException($"Persona '{step.PersonaAlias}' not found.");
+        if (!relayAliasMap.TryGetValue(step.RelayAlias, out var relay))
+            throw new ScenarioExecutionException($"Relay '{step.RelayAlias}' not found.");
+
+        await _discoveryCoordinator.QueryNearbyPeersAsync(persona, relay, step.Limit, ct);
+    }
+
+    private async Task ExecuteConnectDiscoveredPeerAsync(
+        ConnectDiscoveredPeerStep step,
+        Dictionary<string, ISimulatedPersonaHost> aliasMap,
+        Dictionary<string, ISimulatedRelayHost> relayAliasMap,
+        CancellationToken ct)
+    {
+        if (!aliasMap.TryGetValue(step.InitiatorAlias, out var initiator))
+            throw new ScenarioExecutionException($"Initiator persona '{step.InitiatorAlias}' not found.");
+        if (!aliasMap.TryGetValue(step.CandidateAlias, out var candidate))
+            throw new ScenarioExecutionException($"Candidate persona '{step.CandidateAlias}' not found.");
+
+        string? relayEndpoint = null;
+        if (!string.IsNullOrWhiteSpace(step.RelayAlias) && relayAliasMap.TryGetValue(step.RelayAlias, out var relay))
+        {
+            relayEndpoint = $"https://127.0.0.1:{relay.BoundPort}";
+        }
+
+        var candidateListening = candidate.IsListening.CurrentValue;
+
+        Task signalTask = candidateListening
+            ? _stateBus.Signals
+                .Where(s => s.NodeId == candidate.Id && s.Category == SignalCategory.PendingHandshakeChanged)
+                .FirstAsync(cancellationToken: ct)
+            : Task.CompletedTask;
+
+        var success = await _discoveryCoordinator.ConnectDiscoveredPeerAsync(initiator, candidate.PublicIdentityId, relayEndpoint, ct);
+        if (!success)
+            throw new ScenarioExecutionException($"Failed to connect discovered peer '{step.CandidateAlias}' from '{step.InitiatorAlias}'.");
+
+        if (candidateListening)
+        {
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
+            await signalTask.WaitAsync(linkedCts.Token);
+        }
+    }
+
+    private void ExecuteAssertBlindedLocatorResolved(
+        AssertBlindedLocatorResolvedAssertion assertion,
+        Dictionary<string, ISimulatedPersonaHost> aliasMap)
+    {
+        if (!aliasMap.TryGetValue(assertion.ObserverAlias, out var observer))
+            throw new ScenarioAssertionException($"Observer persona '{assertion.ObserverAlias}' not found.");
+        if (!aliasMap.TryGetValue(assertion.TargetAlias, out var target))
+            throw new ScenarioAssertionException($"Target persona '{assertion.TargetAlias}' not found.");
+
+        var matches = _discoveryCoordinator.GetResolvedMatches(observer.PublicIdentityId);
+        if (matches.Count == 0)
+        {
+            throw new ScenarioAssertionException(
+                $"Blinded locator assertion failed: '{assertion.ObserverAlias}' has 0 resolved matches (expected match for '{assertion.TargetAlias}').");
+        }
+    }
+
+    private void ExecuteAssertNearbyCandidateCount(
+        AssertNearbyCandidateCountAssertion assertion,
+        Dictionary<string, ISimulatedPersonaHost> aliasMap)
+    {
+        if (!aliasMap.TryGetValue(assertion.ObserverAlias, out var observer))
+            throw new ScenarioAssertionException($"Observer persona '{assertion.ObserverAlias}' not found.");
+
+        var candidates = _discoveryCoordinator.GetLastDiscoveredPeers(observer.PublicIdentityId);
+        if (candidates.Count != assertion.ExpectedCount)
+        {
+            throw new ScenarioAssertionException(
+                $"Nearby candidate count mismatch on '{assertion.ObserverAlias}'. Expected: {assertion.ExpectedCount}, Actual: {candidates.Count}");
+        }
+    }
+
+    private static byte[] ParseSharedSecret(string input)
+    {
+        var trimmed = input?.Trim() ?? string.Empty;
+        if (trimmed.Length >= 32 && trimmed.All(Uri.IsHexDigit))
+        {
+            try
+            {
+                return Convert.FromHexString(trimmed);
+            }
+            catch { }
+        }
+        var utf8 = System.Text.Encoding.UTF8.GetBytes(trimmed);
+        if (utf8.Length >= 16)
+        {
+            return utf8;
+        }
+        return System.Security.Cryptography.SHA256.HashData(utf8);
     }
 }

@@ -14,7 +14,8 @@ internal enum SignalCategory
     HostedPreKeyCountChanged,
     ProfileChanged,
     GroupStateChanged,
-    SwarmProgressChanged
+    SwarmProgressChanged,
+    DiscoveryStateChanged
 }
 
 internal sealed record HostedPreKeyCountPayload(PublicIdentityId OwnerId, int AvailableCount);

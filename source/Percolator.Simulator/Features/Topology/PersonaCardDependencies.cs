@@ -1,5 +1,6 @@
 using System;
 using Percolator.Simulator.Features.DirectChat;
+using Percolator.Simulator.Features.DiscoverySimulation;
 using Percolator.Simulator.Features.GroupMessaging;
 using Percolator.Simulator.Features.Logging;
 using Percolator.Simulator.Features.RichChatAndProfiles;
@@ -24,6 +25,8 @@ internal sealed class PersonaCardDependencies
     public RichChatActionCoordinator RichChatCoordinator { get; }
     public ProfileSyncCoordinator ProfileCoordinator { get; }
     public GroupChatCoordinator GroupCoordinator { get; }
+    public DiscoverySimulationCoordinator DiscoveryCoordinator { get; }
+    public IVirtualClockStateService VirtualClock { get; }
 
     public PersonaCardDependencies(
         IStatusToastService toastService,
@@ -38,6 +41,8 @@ internal sealed class PersonaCardDependencies
         RichChatActionCoordinator richChatCoordinator,
         ProfileSyncCoordinator profileCoordinator,
         GroupChatCoordinator groupCoordinator,
+        DiscoverySimulationCoordinator discoveryCoordinator,
+        IVirtualClockStateService virtualClock,
         IFlightRecorderStateService? flightRecorder = null)
     {
         ToastService = toastService ?? throw new ArgumentNullException(nameof(toastService));
@@ -52,6 +57,8 @@ internal sealed class PersonaCardDependencies
         RichChatCoordinator = richChatCoordinator ?? throw new ArgumentNullException(nameof(richChatCoordinator));
         ProfileCoordinator = profileCoordinator ?? throw new ArgumentNullException(nameof(profileCoordinator));
         GroupCoordinator = groupCoordinator ?? throw new ArgumentNullException(nameof(groupCoordinator));
+        DiscoveryCoordinator = discoveryCoordinator ?? throw new ArgumentNullException(nameof(discoveryCoordinator));
+        VirtualClock = virtualClock ?? throw new ArgumentNullException(nameof(virtualClock));
         FlightRecorder = flightRecorder;
     }
 }

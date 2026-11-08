@@ -1,6 +1,8 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Percolator.Apps.Discovery.Features.PrivateRendezvous;
+using Percolator.Apps.Discovery.Features.RelayDirectoryHosting;
 using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Delivery.Ports;
 using Percolator.Domain.Identities.ValueObjects;
@@ -21,6 +23,8 @@ internal interface ISimulatedRelayHost : IAsyncDisposable
     IRelayMailboxCapabilityStore MailboxStore { get; }
     ISimulatorRelayQueryService QueryService { get; }
     IRelayQueueChaosController ChaosController { get; }
+    IRelayPeerDirectory PeerDirectory { get; }
+    IPrivateRendezvousService RendezvousService { get; }
 
     int TotalHeldEnvelopeCount { get; }
     int TotalHostedOpkCount { get; }

@@ -29,6 +29,10 @@ public interface IRelayMailboxCapabilityStore
         ReadOnlyMemory<byte> routingToken,
         CancellationToken ct = default);
 
+    ValueTask<(byte[] RoutingToken, byte[] DeliveryToken)?> GetMailboxTokensByOwnerAsync(
+        PublicIdentityId ownerId,
+        CancellationToken ct = default);
+
     ValueTask<bool> VerifyDeliveryTokenAsync(
         ReadOnlyMemory<byte> routingToken,
         ReadOnlyMemory<byte> deliveryToken,
@@ -126,6 +130,24 @@ public sealed class InMemoryRelayMailboxCapabilityStore : IRelayMailboxCapabilit
         return ValueTask.FromResult<(PublicIdentityId?, DeviceId?)>((null, null));
     }
 
+    public ValueTask<(byte[] RoutingToken, byte[] DeliveryToken)?> GetMailboxTokensByOwnerAsync(
+        PublicIdentityId ownerId,
+        CancellationToken ct = default)
+    {
+        foreach (var kvp in _mailboxes)
+        {
+            var entry = kvp.Value;
+            lock (entry.Lock)
+            {
+                if (entry.OwnerId == ownerId)
+                {
+                    return ValueTask.FromResult<(byte[] RoutingToken, byte[] DeliveryToken)?>((Convert.FromHexString(kvp.Key), entry.DeliveryToken));
+                }
+            }
+        }
+        return ValueTask.FromResult<(byte[] RoutingToken, byte[] DeliveryToken)?>(null);
+    }
+
     public ValueTask<bool> VerifyDeliveryTokenAsync(ReadOnlyMemory<byte> routingToken, ReadOnlyMemory<byte> deliveryToken, CancellationToken ct = default)
     {
         var key = ToHexKey(routingToken);
@@ -151,10 +173,9 @@ public sealed class InMemoryRelayMailboxCapabilityStore : IRelayMailboxCapabilit
                     return ValueTask.FromResult(true);
                 }
             }
-
-            bool match = CryptographicOperations.FixedTimeEquals(entry.DeliveryToken, deliveryToken.Span);
-            return ValueTask.FromResult(match);
         }
+
+        return ValueTask.FromResult(false);
     }
 
     public ValueTask<bool> VerifyDrainTokenAsync(ReadOnlyMemory<byte> routingToken, ReadOnlyMemory<byte> drainToken, CancellationToken ct = default)
@@ -167,26 +188,32 @@ public sealed class InMemoryRelayMailboxCapabilityStore : IRelayMailboxCapabilit
 
         lock (entry.Lock)
         {
-            if (entry.DrainToken.Length == 0 || entry.DrainToken.Length != drainToken.Length)
+            if (entry.DrainToken.Length > 0 && entry.DrainToken.Length == drainToken.Length &&
+                CryptographicOperations.FixedTimeEquals(entry.DrainToken, drainToken.Span))
             {
-                return ValueTask.FromResult(false);
+                return ValueTask.FromResult(true);
             }
-
-            bool match = CryptographicOperations.FixedTimeEquals(entry.DrainToken, drainToken.Span);
-            return ValueTask.FromResult(match);
         }
+
+        return ValueTask.FromResult(false);
     }
 
     public ValueTask<ReadOnlyMemory<byte>?> GetDrainTokenAsync(ReadOnlyMemory<byte> routingToken, CancellationToken ct = default)
     {
         var key = ToHexKey(routingToken);
-        if (_mailboxes.TryGetValue(key, out var entry))
+        if (!_mailboxes.TryGetValue(key, out var entry))
         {
-            lock (entry.Lock)
+            return ValueTask.FromResult<ReadOnlyMemory<byte>?>(null);
+        }
+
+        lock (entry.Lock)
+        {
+            if (entry.DrainToken.Length > 0)
             {
-                return ValueTask.FromResult<ReadOnlyMemory<byte>?>(entry.DrainToken.ToArray());
+                return ValueTask.FromResult<ReadOnlyMemory<byte>?>(entry.DrainToken);
             }
         }
+
         return ValueTask.FromResult<ReadOnlyMemory<byte>?>(null);
     }
 

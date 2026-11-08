@@ -5,6 +5,7 @@ using Avalonia.Markup.Xaml;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Percolator.Simulator.Features.DirectChat;
+using Percolator.Simulator.Features.DiscoverySimulation;
 using Percolator.Simulator.Features.GroupMessaging;
 using Percolator.Simulator.Features.Logging;
 using Percolator.Simulator.Features.RichChatAndProfiles;
@@ -55,6 +56,7 @@ public partial class App : Avalonia.Application
         services.AddSingleton<AutopilotPongResponder>();
         services.AddSingleton<RelayProvisioningCoordinator>();
         services.AddSingleton<GroupChatCoordinator>();
+        services.AddSingleton<DiscoverySimulationCoordinator>();
         services.AddSingleton<ScenarioRunnerService>();
         services.AddSingleton<PersonaCardDependencies>();
 

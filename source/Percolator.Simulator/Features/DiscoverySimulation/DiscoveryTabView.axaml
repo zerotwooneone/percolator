@@ -4,19 +4,115 @@
              x:Class="Percolator.Simulator.Features.DiscoverySimulation.DiscoveryTabView"
              x:DataType="vm:DiscoveryTabViewModel">
 
-    <Border Background="{DynamicResource SolidBackgroundFillColorSecondaryBrush}"
-            BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
-            BorderThickness="1"
-            CornerRadius="8"
-            Padding="12"
-            Margin="6">
-        <StackPanel Spacing="8">
-            <TextBlock Text="🔍 Peer Discovery (Phase 8)" FontWeight="Bold" FontSize="14" />
-            <TextBlock Text="Blinded Rendezvous &amp; Nearby Directory" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-            <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,8,0,0">
-                <Button Content="📍 Publish Blinded Locator" Command="{Binding PublishBlindedLocatorCommand}" />
-                <Button Content="📡 Query Nearby Peers" Command="{Binding QueryNearbyPeersCommand}" />
-            </StackPanel>
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Spacing="10" Margin="4">
+            <!-- Section 1: Private Blinded Rendezvous (CTL-PER-21) -->
+            <Border Background="{DynamicResource SolidBackgroundFillColorSecondaryBrush}"
+                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="12">
+                <StackPanel Spacing="8">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Grid.Column="0" Text="📍 Private Blinded Rendezvous (CTL-PER-21)" FontWeight="Bold" FontSize="13" />
+                        <TextBlock Grid.Column="1" Text="{Binding CurrentEpochText}" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontWeight="SemiBold" />
+                    </Grid>
+
+                    <TextBlock Text="Daily rotating HMAC-SHA256 blinded locators for unobservable contact rendezvous."
+                               FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+
+                    <!-- Shared Secret Input -->
+                    <TextBlock Text="Shared Rendezvous Secret (Hex):" FontSize="11" FontWeight="SemiBold" Margin="0,4,0,0" />
+                    <TextBox Text="{Binding SharedSecretHex}" FontSize="11" FontFamily="Consolas,Monospace" />
+
+                    <!-- Derived Blinded Locator -->
+                    <TextBlock Text="Your Derived Locator (Current Epoch):" FontSize="11" FontWeight="SemiBold" />
+                    <TextBox Text="{Binding DerivedLocatorHex}" IsReadOnly="True" FontSize="11" FontFamily="Consolas,Monospace" Background="#1A1A1A" />
+
+                    <!-- Target Peer ID to Resolve -->
+                    <TextBlock Text="Target Peer ID (Hex, optional if secondary persona selected):" FontSize="11" FontWeight="SemiBold" />
+                    <TextBox Text="{Binding TargetPeerIdInput}" Watermark="Target PublicIdentityId..." FontSize="11" FontFamily="Consolas,Monospace" />
+
+                    <!-- Actions -->
+                    <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,4,0,0">
+                        <Button Content="📍 Publish Blinded Locator"
+                                Command="{Binding PublishBlindedLocatorCommand}"
+                                IsEnabled="{Binding !IsPublishing}"
+                                Classes="accent" />
+                        <Button Content="🔍 Resolve Peer Locator"
+                                Command="{Binding ResolvePeerLocatorCommand}"
+                                IsEnabled="{Binding !IsResolving}" />
+                    </StackPanel>
+
+                    <!-- Resolution Result -->
+                    <TextBlock Text="{Binding ResolutionResultText}"
+                               FontSize="11" FontWeight="SemiBold"
+                               IsVisible="{Binding ResolutionResultText.Length}"
+                               Margin="0,4,0,0" />
+                </StackPanel>
+            </Border>
+
+            <!-- Section 2: Nearby Peer Directory & One-Click Connect (CTL-PER-03, CTL-PER-22) -->
+            <Border Background="{DynamicResource SolidBackgroundFillColorSecondaryBrush}"
+                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="12">
+                <StackPanel Spacing="8">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Grid.Column="0" Text="📡 Nearby Peer Directory (CTL-PER-22)" FontWeight="Bold" FontSize="13" />
+                        <Button Grid.Column="1"
+                                Content="📡 Query Nearby Peers"
+                                Command="{Binding QueryNearbyPeersCommand}"
+                                IsEnabled="{Binding !IsQueryingNearby}"
+                                Padding="8,4" />
+                    </Grid>
+
+                    <TextBlock Text="Query relay for discoverable peers who opted in via Allow Peer Discovery (CTL-PER-03)."
+                               FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+
+                    <!-- Candidate List -->
+                    <ItemsControl ItemsSource="{Binding NearbyCandidates}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:DiscoveredPeerItemViewModel">
+                                <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        Padding="8"
+                                        Margin="0,4">
+                                    <Grid ColumnDefinitions="Auto,*,Auto">
+                                        <!-- Identicon -->
+                                        <Border Grid.Column="0" Width="32" Height="32" CornerRadius="4" ClipToBounds="True" Background="#333333" Margin="0,0,8,0">
+                                            <Image Source="{Binding IdenticonBitmap}" Stretch="UniformToFill" />
+                                        </Border>
+
+                                        <!-- Name & Endpoint -->
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                            <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" FontSize="12" />
+                                            <TextBlock Text="{Binding RelayEndpoint}" FontSize="10" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                        </StackPanel>
+
+                                        <!-- Connect Button -->
+                                        <Button Grid.Column="2"
+                                                Content="{Binding ConnectButtonText}"
+                                                Command="{Binding ConnectCommand}"
+                                                IsEnabled="{Binding !IsConnected}"
+                                                Classes="accent"
+                                                Padding="8,4"
+                                                VerticalAlignment="Center" />
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <TextBlock Text="No peers discovered yet. Click 'Query Nearby Peers'."
+                               FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                               IsVisible="{Binding !NearbyCandidates.Count}"
+                               HorizontalAlignment="Center" Margin="0,8" />
+                </StackPanel>
+            </Border>
         </StackPanel>
-    </Border>
+    </ScrollViewer>
 </UserControl>

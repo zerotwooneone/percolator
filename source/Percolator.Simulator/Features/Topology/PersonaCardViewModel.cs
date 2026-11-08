@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
@@ -19,6 +19,7 @@ using Percolator.Domain.Common;
 using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Simulator.Features.DirectChat;
+using Percolator.Simulator.Features.DiscoverySimulation;
 using Percolator.Simulator.Features.GroupMessaging;
 using Percolator.Simulator.Features.Logging;
 using Percolator.Simulator.Features.RichChatAndProfiles;
@@ -55,6 +56,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
     private readonly RichChatActionCoordinator _richChatCoordinator;
     private readonly ProfileSyncCoordinator _profileCoordinator;
     private readonly GroupChatCoordinator _groupCoordinator;
+    private readonly DiscoverySimulationCoordinator _discoveryCoordinator;
 
     private readonly CoalescedActionGate _chatTranscriptGate;
     private readonly CoalescedActionGate _pendingHandshakeGate;
@@ -76,6 +78,12 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
     // Feature Flags (CTL-PER-03..06)
     [ObservableProperty]
     private bool _allowPeerDiscovery = true;
+
+    [ObservableProperty]
+    private bool _isChatTabActive = true;
+
+    [ObservableProperty]
+    private bool _isDiscoveryTabActive = false;
 
     [ObservableProperty]
     private bool _allowFileTransfers = true;
@@ -138,6 +146,8 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
 
     public ObservableCollection<ChatMessageItemViewModel> ChatMessages { get; } = new();
 
+    public DiscoveryTabViewModel? DiscoveryTab { get; }
+
     public PersonaCardViewModel(
         SimulatedNodeSummary summary,
         PersonaCardDependencies deps,
@@ -163,6 +173,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
         _richChatCoordinator = deps.RichChatCoordinator;
         _profileCoordinator = deps.ProfileCoordinator;
         _groupCoordinator = deps.GroupCoordinator ?? throw new ArgumentNullException(nameof(deps.GroupCoordinator));
+        _discoveryCoordinator = deps.DiscoveryCoordinator ?? throw new ArgumentNullException(nameof(deps.DiscoveryCoordinator));
 
         // 30 Hz refresh ceiling for chat transcript with 0ms leading edge
         _chatTranscriptGate = new CoalescedActionGate(
@@ -187,6 +198,13 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
             _isListening = host.IsListening.CurrentValue;
             _autoShareProfile = host.AutoShareProfile;
             _autoAcceptGroupInvites = host.AutoAcceptGroupInvites;
+            _allowPeerDiscovery = host.AllowPeerDiscovery;
+            DiscoveryTab = new DiscoveryTabViewModel(
+                host,
+                _discoveryCoordinator,
+                _worldState,
+                _toastService,
+                deps.VirtualClock);
         }
 
         // Subscribe to selection changes to switch active peer conversation dynamically
@@ -337,6 +355,34 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
             RefreshPendingHandshakes();
             RefreshChatTranscript();
         }
+    }
+
+    partial void OnAllowPeerDiscoveryChanged(bool value)
+    {
+        if (_host != null)
+        {
+            _host.AllowPeerDiscovery = value;
+            UiTaskRunner.FireAndForget(
+                () => _discoveryCoordinator.SetDiscoveryVisibilityAsync(_host, value),
+                category: "Discovery",
+                logSink: _logSink,
+                nodeName: DisplayName,
+                nodeId: NodeId);
+        }
+    }
+
+    [RelayCommand]
+    private void SelectChatTab()
+    {
+        IsChatTabActive = true;
+        IsDiscoveryTabActive = false;
+    }
+
+    [RelayCommand]
+    private void SelectDiscoveryTab()
+    {
+        IsChatTabActive = false;
+        IsDiscoveryTabActive = true;
     }
 
     private void RefreshPendingHandshakes() => _pendingHandshakeGate.RequestExecution();
@@ -985,12 +1031,9 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
         }
     }
 
-    [RelayCommand]
-    private void PublishBlindedLocator() => _toastService.ShowPlaceholder("Publish Blinded Locator", "Phase 8");
-
-    [RelayCommand]
-    private void ResolvePeerLocator() => _toastService.ShowPlaceholder("Resolve Peer Locator", "Phase 8");
-
-    [RelayCommand]
-    private void QueryNearbyPeers() => _toastService.ShowPlaceholder("Query Nearby Peers", "Phase 8");
+    public override void Dispose()
+    {
+        DiscoveryTab?.Dispose();
+        base.Dispose();
+    }
 }

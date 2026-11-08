@@ -32,6 +32,7 @@ internal interface ISimulatedPersonaHost : IAsyncDisposable
 
     ProfileKey ProfileKey { get; }
     uint ProfileRevision { get; }
+    bool AllowPeerDiscovery { get; set; }
     bool AutoShareProfile { get; set; }
     bool AutoAcceptGroupInvites { get; set; }
     void RotateProfileKey();

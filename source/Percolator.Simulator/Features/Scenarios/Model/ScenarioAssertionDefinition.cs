@@ -18,10 +18,26 @@ namespace Percolator.Simulator.Features.Scenarios.Model;
 [JsonDerivedType(typeof(AssertGroupEpochAssertion), "AssertGroupEpoch")]
 [JsonDerivedType(typeof(AssertGroupMessageDeliveredAssertion), "AssertGroupMessageDelivered")]
 [JsonDerivedType(typeof(AssertMemberCannotDecryptAssertion), "AssertMemberCannotDecrypt")]
+[JsonDerivedType(typeof(AssertBlindedLocatorResolvedAssertion), "AssertBlindedLocatorResolved")]
+[JsonDerivedType(typeof(AssertNearbyCandidateCountAssertion), "AssertNearbyCandidateCount")]
 public abstract record ScenarioAssertionDefinition
 {
     public abstract string DisplayText { get; }
     public override string ToString() => DisplayText;
+}
+
+// -----------------------------------------------------------------------------
+// Phase 8 Scenario Assertions: Blinded Rendezvous & Nearby Discovery
+// -----------------------------------------------------------------------------
+
+public sealed record AssertBlindedLocatorResolvedAssertion(string ObserverAlias, string TargetAlias) : ScenarioAssertionDefinition
+{
+    public override string DisplayText => $"Assert Blinded Locator Resolved: '{ObserverAlias}' resolved '{TargetAlias}'";
+}
+
+public sealed record AssertNearbyCandidateCountAssertion(string ObserverAlias, int ExpectedCount) : ScenarioAssertionDefinition
+{
+    public override string DisplayText => $"Assert Nearby Candidate Count on '{ObserverAlias}' == {ExpectedCount}";
 }
 
 public sealed record AssertDirectRatchetSessionAssertion(string Alias1, string Alias2) : ScenarioAssertionDefinition

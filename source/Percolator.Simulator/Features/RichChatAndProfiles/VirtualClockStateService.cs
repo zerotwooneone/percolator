@@ -5,11 +5,14 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Percolator.Application2.Delivery;
 using Percolator.Apps.Chat.Features.Messaging;
+using Percolator.Apps.Discovery.Features.PrivateRendezvous;
 using Percolator.Simulator.Features.Logging;
 using Percolator.Simulator.Features.Shell;
 using Percolator.Simulator.Features.Topology;
 using R3;
+
 namespace Percolator.Simulator.Features.RichChatAndProfiles;
+
 internal sealed class VirtualClockStateService : IVirtualClockStateService, IDisposable
 {
     private readonly ReactiveProperty<DateTimeOffset> _currentTime;
@@ -17,9 +20,11 @@ internal sealed class VirtualClockStateService : IVirtualClockStateService, IDis
     private readonly ISimulatedWorldStateService _worldState;
     private readonly ISimulatorStateBus _stateBus;
     private readonly ISimulatorLogSink _logSink;
+
     public ReadOnlyReactiveProperty<DateTimeOffset> CurrentUtcNow => _currentTime;
     public int CurrentDiscoveryEpoch => (int)(_currentTime.Value.ToUnixTimeSeconds() / 86400);
     public DateTimeOffset UtcNow => _currentTime.Value;
+
     public VirtualClockStateService(
         ISimulatedWorldStateService worldState,
         ISimulatorStateBus stateBus,
@@ -30,6 +35,7 @@ internal sealed class VirtualClockStateService : IVirtualClockStateService, IDis
         _logSink = logSink ?? throw new ArgumentNullException(nameof(logSink));
         _currentTime = new ReactiveProperty<DateTimeOffset>(DateTimeOffset.UtcNow);
     }
+
     public void AdvanceTime(TimeSpan delta)
     {
         UiTaskRunner.FireAndForget(
@@ -37,6 +43,7 @@ internal sealed class VirtualClockStateService : IVirtualClockStateService, IDis
             category: "VirtualClock",
             logSink: _logSink);
     }
+
     public async Task AdvanceTimeAsync(TimeSpan delta, CancellationToken ct = default)
     {
         await _advanceGate.WaitAsync(ct).ConfigureAwait(false);
@@ -44,6 +51,7 @@ internal sealed class VirtualClockStateService : IVirtualClockStateService, IDis
         {
             var newTime = _currentTime.Value.Add(delta);
             _currentTime.Value = newTime;
+
             _logSink.Log(new SimulatorLogEntry(
                 newTime,
                 LogLevel.Information,
@@ -51,6 +59,7 @@ internal sealed class VirtualClockStateService : IVirtualClockStateService, IDis
                 null,
                 "TimeAcceleration",
                 $"Virtual clock advanced by {delta}. Current simulated UTC: {newTime:yyyy-MM-dd HH:mm:ss}"));
+
             var hosts = _worldState.GetAllPersonaHosts();
             foreach (var host in hosts)
             {
@@ -68,6 +77,7 @@ internal sealed class VirtualClockStateService : IVirtualClockStateService, IDis
                             SignalCategory.ChatTranscriptChanged,
                             Details: host.PublicIdentityId.ToString()));
                     }
+
                     await host.FlushOutboxAsync(ct).ConfigureAwait(false);
                 }
                 catch (Exception ex)
@@ -81,12 +91,39 @@ internal sealed class VirtualClockStateService : IVirtualClockStateService, IDis
                         $"Error processing clock advance on host {host.DisplayName}: {ex.Message}"));
                 }
             }
+
+            var relays = _worldState.GetAllRelayHosts();
+            foreach (var relay in relays)
+            {
+                if (ct.IsCancellationRequested) break;
+                try
+                {
+                    await relay.PeerDirectory.GetDiscoverablePeersAsync(ct: ct).ConfigureAwait(false);
+                    await relay.RendezvousService.ResolveRendezvousAsync(Array.Empty<BlindedLocator>(), ct).ConfigureAwait(false);
+
+                    _stateBus.Publish(new SimulatorStateSignal(
+                        relay.Id,
+                        SignalCategory.DiscoveryStateChanged,
+                        Details: "EpochRotated"));
+                }
+                catch (Exception ex)
+                {
+                    _logSink.Log(new SimulatorLogEntry(
+                        newTime,
+                        LogLevel.Warning,
+                        relay.DisplayName,
+                        relay.Id,
+                        "VirtualClock",
+                        $"Error evicting expired discovery entries on relay {relay.DisplayName}: {ex.Message}"));
+                }
+            }
         }
         finally
         {
             _advanceGate.Release();
         }
     }
+
     public void Dispose()
     {
         _currentTime.Dispose();

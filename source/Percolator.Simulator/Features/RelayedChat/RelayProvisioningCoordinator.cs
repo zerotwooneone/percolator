@@ -87,6 +87,19 @@ internal sealed class RelayProvisioningCoordinator
             persona.HomeRelay = relay;
             await persona.PublishProfileAsync(ct);
 
+            using (var scope = persona.Services.CreateScope())
+            {
+                var channelFactory = scope.ServiceProvider.GetRequiredService<IPeerGrpcChannelFactory>();
+                var relayUri = new Uri($"https://127.0.0.1:{relay.BoundPort}");
+                var channel = channelFactory.GetOrCreateChannel(relayUri);
+                var discoveryClient = new NearbyDiscoveryService.NearbyDiscoveryServiceClient(channel);
+                await discoveryClient.RegisterVisibilityAsync(new DiscoveryRegistrationProto
+                {
+                    PeerId = ByteString.CopyFrom(persona.PublicIdentityId.ToByteArray()),
+                    Visibility = persona.AllowPeerDiscovery ? 1 : 0
+                }, cancellationToken: ct);
+            }
+
             _logSink.Log(new SimulatorLogEntry(
                 DateTimeOffset.UtcNow,
                 LogLevel.Information,

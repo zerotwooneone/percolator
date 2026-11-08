@@ -49,6 +49,7 @@ message BlindedRendezvousResponseProto {
 
 service NearbyDiscoveryService {
   rpc QueryNearby(NearbyDiscoveryQueryProto) returns (NearbyDiscoveryResponseProto);
+  rpc RegisterVisibility(DiscoveryRegistrationProto) returns (DiscoveryRegistrationProto);
 }
 
 service PrivateRendezvousRelayService {

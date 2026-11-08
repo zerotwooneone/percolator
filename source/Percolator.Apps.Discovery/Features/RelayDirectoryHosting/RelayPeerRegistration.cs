@@ -76,5 +76,5 @@ public sealed record RelayPeerRegistration
     public bool IsExpired(DateTimeOffset nowUtc, TimeSpan ttl) =>
         ttl > TimeSpan.Zero &&
         LastUpdatedAtUtc != DateTimeOffset.UnixEpoch &&
-        nowUtc - LastUpdatedAtUtc > ttl;
+        nowUtc - LastUpdatedAtUtc >= ttl;
 }

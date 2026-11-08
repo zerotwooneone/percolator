@@ -13,6 +13,9 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Percolator.Apps.Discovery.Features.PrivateRendezvous;
+using Percolator.Apps.Discovery.Features.RelayDirectoryHosting;
+using Percolator.Apps.Discovery.Ports;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Delivery.Ports;
@@ -29,6 +32,7 @@ using Percolator.Infrastructure.Transport.Endpoints;
 using Percolator.Infrastructure.Windows.Security;
 #endif
 using Percolator.Simulator.Features.Logging;
+using Percolator.Simulator.Features.RichChatAndProfiles;
 using Percolator.Simulator.Features.Shell;
 using Percolator.Simulator.Features.Topology;
 
@@ -50,11 +54,14 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
 {
     private readonly ISimulatorLogSink _logSink;
     private readonly ISimulatorStateBus _stateBus;
+    private readonly IVirtualClockStateService _virtualClock;
     private readonly string _relayTempDirectory;
     private readonly SimulatorNotifyingRelayCapabilityStoreDecorator _capabilityStore;
     private SimulatorNotifyingRelayPreKeyRepositoryDecorator? _preKeyRepository;
     private SqliteRelayLedgerRepository? _ledgerRepository;
     private SimulatorRelayQueryService? _queryService;
+    private InMemoryRelayPeerDirectory? _peerDirectory;
+    private PrivateRendezvousService? _rendezvousService;
     private WebApplication? _app;
     private bool _isRunning;
     private bool _disposed;
@@ -70,6 +77,8 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
     public ISimulatorRelayQueryService QueryService => _queryService ?? throw new InvalidOperationException("Relay host not started.");
     public IRelayPreKeyRepository PreKeyRepository => _preKeyRepository ?? throw new InvalidOperationException("Relay host not started.");
     public IRelayQueueChaosController ChaosController => _capabilityStore;
+    public IRelayPeerDirectory PeerDirectory => _peerDirectory ?? throw new InvalidOperationException("Relay host not started.");
+    public IPrivateRendezvousService RendezvousService => _rendezvousService ?? throw new InvalidOperationException("Relay host not started.");
 
     public int TotalHeldEnvelopeCount => _capabilityStore.TotalEnvelopeCount;
     public int TotalHostedOpkCount => _preKeyRepository?.GetTotalHostedOpkCount() ?? 0;
@@ -79,13 +88,15 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
         string displayName,
         int port,
         ISimulatorLogSink logSink,
-        ISimulatorStateBus stateBus)
+        ISimulatorStateBus stateBus,
+        IVirtualClockStateService virtualClock)
     {
         Id = id;
         DisplayName = displayName;
         BoundPort = port;
         _logSink = logSink ?? throw new ArgumentNullException(nameof(logSink));
         _stateBus = stateBus ?? throw new ArgumentNullException(nameof(stateBus));
+        _virtualClock = virtualClock ?? throw new ArgumentNullException(nameof(virtualClock));
 
         _relayTempDirectory = Path.Combine(Path.GetTempPath(), "PercolatorSim", $"relay_{Id.Value:N}");
         Directory.CreateDirectory(_relayTempDirectory);
@@ -156,7 +167,21 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
         var cryptoEngine = new SignalCryptoEngine();
         var zkEngine = new ZkgroupCryptographyService();
 
-        // 2. Build Kestrel WebApplication with gRPC endpoints
+        // 2. Initialize Peer Directory and Private Rendezvous services
+        var admissionGate = new DiscoveryAdmissionGate();
+        var preKeyAvailabilityAdapter = new RelayPreKeyAvailabilityAdapter(_preKeyRepository);
+        _peerDirectory = new InMemoryRelayPeerDirectory(
+            admissionGate,
+            policy: RelayDiscoveryPolicy.Open,
+            preKeyAvailabilityPort: preKeyAvailabilityAdapter,
+            clock: _virtualClock,
+            registrationTtl: TimeSpan.FromHours(24));
+
+        _rendezvousService = new PrivateRendezvousService(
+            clock: _virtualClock,
+            entryTtl: TimeSpan.FromHours(48));
+
+        // 3. Build Kestrel WebApplication with gRPC endpoints
         var builder = WebApplication.CreateBuilder();
 
         builder.WebHost.ConfigureKestrel(options =>
@@ -182,19 +207,27 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
         var authEndpoint = new AuthenticatedRelayEndpoint(_capabilityStore, _preKeyRepository, cryptoEngine);
         var timeProvider = new SystemDateTimeProvider();
         var groupEndpoint = new AnonymousGroupRelayEndpoint(ledgerRepo, zkEngine, _capabilityStore, timeProvider);
+        var nearbyEndpoint = new NearbyDiscoveryEndpoint(_peerDirectory, _capabilityStore, _preKeyRepository, _virtualClock, BoundPort);
+        var rendezvousEndpoint = new PrivateRendezvousRelayEndpoint(_rendezvousService);
 
         builder.Services.AddSingleton<IRelayLedgerRepository>(ledgerRepo);
         builder.Services.AddSingleton<IRelayPreKeyRepository>(_preKeyRepository);
         builder.Services.AddSingleton<IRelayMailboxCapabilityStore>(_capabilityStore);
         builder.Services.AddSingleton<IDbContextFactory<PercolatorDbContext>>(contextFactory);
+        builder.Services.AddSingleton<IRelayPeerDirectory>(_peerDirectory);
+        builder.Services.AddSingleton<IPrivateRendezvousService>(_rendezvousService);
         builder.Services.AddSingleton(unauthEndpoint);
         builder.Services.AddSingleton(authEndpoint);
         builder.Services.AddSingleton(groupEndpoint);
+        builder.Services.AddSingleton(nearbyEndpoint);
+        builder.Services.AddSingleton(rendezvousEndpoint);
 
         _app = builder.Build();
         _app.MapGrpcService<UnauthenticatedDeliveryEndpoint>();
         _app.MapGrpcService<AuthenticatedRelayEndpoint>();
         _app.MapGrpcService<AnonymousGroupRelayEndpoint>();
+        _app.MapGrpcService<NearbyDiscoveryEndpoint>();
+        _app.MapGrpcService<PrivateRendezvousRelayEndpoint>();
 
         await _app.StartAsync(ct);
         _isRunning = true;
@@ -265,5 +298,20 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
     public void Dispose()
     {
         DisposeAsync().AsTask().GetAwaiter().GetResult();
+    }
+
+    private sealed class RelayPreKeyAvailabilityAdapter : IPreKeyAvailabilityPort
+    {
+        private readonly IRelayPreKeyRepository _repo;
+
+        public RelayPreKeyAvailabilityAdapter(IRelayPreKeyRepository repo)
+        {
+            _repo = repo ?? throw new ArgumentNullException(nameof(repo));
+        }
+
+        public async ValueTask<bool> HasActiveSignedPreKeyAsync(PublicIdentityId peerId, CancellationToken ct = default)
+        {
+            return await _repo.HasActivePreKeyAsync(peerId, ct);
+        }
     }
 }

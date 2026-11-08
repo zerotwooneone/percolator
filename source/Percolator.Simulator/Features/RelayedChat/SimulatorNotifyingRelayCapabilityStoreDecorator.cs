@@ -128,6 +128,24 @@ internal sealed class SimulatorNotifyingRelayCapabilityStoreDecorator : IRelayMa
         return ValueTask.FromResult<(PublicIdentityId?, DeviceId?)>((null, null));
     }
 
+    public ValueTask<(byte[] RoutingToken, byte[] DeliveryToken)?> GetMailboxTokensByOwnerAsync(
+        PublicIdentityId ownerId,
+        CancellationToken ct = default)
+    {
+        foreach (var kvp in _mailboxes)
+        {
+            var entry = kvp.Value;
+            lock (entry.Lock)
+            {
+                if (entry.OwnerId == ownerId)
+                {
+                    return ValueTask.FromResult<(byte[] RoutingToken, byte[] DeliveryToken)?>((Convert.FromHexString(kvp.Key), entry.DeliveryToken));
+                }
+            }
+        }
+        return ValueTask.FromResult<(byte[] RoutingToken, byte[] DeliveryToken)?>(null);
+    }
+
     public ValueTask<bool> VerifyDeliveryTokenAsync(
         ReadOnlyMemory<byte> routingToken,
         ReadOnlyMemory<byte> deliveryToken,
@@ -190,9 +208,14 @@ internal sealed class SimulatorNotifyingRelayCapabilityStoreDecorator : IRelayMa
         CancellationToken ct = default)
     {
         var key = ToHexKey(routingToken);
-        if (_mailboxes.TryGetValue(key, out var entry))
+        if (!_mailboxes.TryGetValue(key, out var entry))
         {
-            lock (entry.Lock)
+            return ValueTask.FromResult<ReadOnlyMemory<byte>?>(null);
+        }
+
+        lock (entry.Lock)
+        {
+            if (entry.DrainToken.Length > 0)
             {
                 return ValueTask.FromResult<ReadOnlyMemory<byte>?>(entry.DrainToken.ToArray());
             }

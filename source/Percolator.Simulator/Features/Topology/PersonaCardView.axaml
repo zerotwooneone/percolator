@@ -3,6 +3,7 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:vm="using:Percolator.Simulator.Features.Topology"
+             xmlns:disc="using:Percolator.Simulator.Features.DiscoverySimulation"
              mc:Ignorable="d" d:DesignWidth="450" d:DesignHeight="550"
              x:Class="Percolator.Simulator.Features.Topology.PersonaCardView"
              x:DataType="vm:PersonaCardViewModel"
@@ -97,63 +98,83 @@
                 </Border>
             </StackPanel>
 
-            <!-- Chat Tab Transcript CTL-PER-17, 18, 20 -->
-            <Border Grid.Row="3" Background="{DynamicResource ControlFillColorDefaultBrush}" CornerRadius="6" Padding="8">
-                <Grid RowDefinitions="Auto,*">
-                    <!-- Conversation Selector Dropdown CTL-PER-17 -->
-                    <ComboBox Grid.Row="0"
-                              ItemsSource="{Binding AvailableConversations}"
-                              SelectedItem="{Binding SelectedConversation}"
-                              HorizontalAlignment="Stretch"
-                              Margin="0,0,0,6">
-                        <ComboBox.ItemTemplate>
-                            <DataTemplate x:DataType="vm:ConversationItemViewModel">
-                                <TextBlock Text="{Binding DisplayTitle}" FontSize="12" />
-                            </DataTemplate>
-                        </ComboBox.ItemTemplate>
-                    </ComboBox>
+            <!-- Card Tabs & Content CTL-PER-17, 18, 20, 21, 22 -->
+            <Grid Grid.Row="3" RowDefinitions="Auto,*">
+                <!-- Tab Selector Strip -->
+                <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="6" Margin="0,0,0,6">
+                    <Button Content="💬 Chat"
+                            Command="{Binding SelectChatTabCommand}"
+                            Padding="8,3" FontSize="11" />
+                    <Button Content="🔍 Discovery (Phase 8)"
+                            Command="{Binding SelectDiscoveryTabCommand}"
+                            Padding="8,3" FontSize="11" />
+                </StackPanel>
 
-                    <ScrollViewer Grid.Row="1">
-                        <ItemsControl ItemsSource="{Binding ChatMessages}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate x:CompileBindings="False">
-                                    <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
-                                            CornerRadius="4" Padding="6,4" Margin="0,2">
-                                        <Grid ColumnDefinitions="*,Auto">
-                                            <TextBlock Grid.Column="0" Text="{Binding BodyText}" FontSize="12" TextWrapping="Wrap" />
-                                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center" Margin="6,0,0,0">
-                                                <TextBlock Text="{Binding StatusText}"
-                                                           Foreground="{Binding StatusColor}"
-                                                           ToolTip.Tip="{Binding StatusTooltip}"
-                                                           FontWeight="Bold" FontSize="12"
-                                                           VerticalAlignment="Center"
-                                                           IsVisible="{Binding IsOutgoing}" />
-                                                <Button Content="👍" ToolTip.Tip="React (CTL-PER-20)"
-                                                        Command="{Binding #PersonaCardRoot.DataContext.ReactCommand}"
-                                                        CommandParameter="{Binding}"
-                                                        Padding="4,2" FontSize="10" />
-                                                <Button Content="✏️" ToolTip.Tip="Edit Message (CTL-PER-20)"
-                                                        Command="{Binding #PersonaCardRoot.DataContext.EditMessageCommand}"
-                                                        CommandParameter="{Binding}"
-                                                        IsVisible="{Binding IsOutgoing}"
-                                                        Padding="4,2" FontSize="10" />
-                                                <Button Content="🗑️" ToolTip.Tip="Delete Message (CTL-PER-20)"
-                                                        Command="{Binding #PersonaCardRoot.DataContext.DeleteMessageCommand}"
-                                                        CommandParameter="{Binding}"
-                                                        IsVisible="{Binding IsOutgoing}"
-                                                        Padding="4,2" FontSize="10" />
-                                            </StackPanel>
-                                        </Grid>
-                                    </Border>
+                <!-- Chat Tab Transcript CTL-PER-17, 18, 20 -->
+                <Border Grid.Row="1" Background="{DynamicResource ControlFillColorDefaultBrush}" CornerRadius="6" Padding="8"
+                        IsVisible="{Binding IsChatTabActive}">
+                    <Grid RowDefinitions="Auto,*">
+                        <!-- Conversation Selector Dropdown CTL-PER-17 -->
+                        <ComboBox Grid.Row="0"
+                                  ItemsSource="{Binding AvailableConversations}"
+                                  SelectedItem="{Binding SelectedConversation}"
+                                  HorizontalAlignment="Stretch"
+                                  Margin="0,0,0,6">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate x:DataType="vm:ConversationItemViewModel">
+                                    <TextBlock Text="{Binding DisplayTitle}" FontSize="12" />
                                 </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </ScrollViewer>
-                </Grid>
-            </Border>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+
+                        <ScrollViewer Grid.Row="1">
+                            <ItemsControl ItemsSource="{Binding ChatMessages}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:CompileBindings="False">
+                                        <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                                                CornerRadius="4" Padding="6,4" Margin="0,2">
+                                            <Grid ColumnDefinitions="*,Auto">
+                                                <TextBlock Grid.Column="0" Text="{Binding BodyText}" FontSize="12" TextWrapping="Wrap" />
+                                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center" Margin="6,0,0,0">
+                                                    <TextBlock Text="{Binding StatusText}"
+                                                               Foreground="{Binding StatusColor}"
+                                                               ToolTip.Tip="{Binding StatusTooltip}"
+                                                               FontWeight="Bold" FontSize="12"
+                                                               VerticalAlignment="Center"
+                                                               IsVisible="{Binding IsOutgoing}" />
+                                                    <Button Content="👍" ToolTip.Tip="React (CTL-PER-20)"
+                                                            Command="{Binding #PersonaCardRoot.DataContext.ReactCommand}"
+                                                            CommandParameter="{Binding}"
+                                                            Padding="4,2" FontSize="10" />
+                                                    <Button Content="✏️" ToolTip.Tip="Edit Message (CTL-PER-20)"
+                                                            Command="{Binding #PersonaCardRoot.DataContext.EditMessageCommand}"
+                                                            CommandParameter="{Binding}"
+                                                            IsVisible="{Binding IsOutgoing}"
+                                                            Padding="4,2" FontSize="10" />
+                                                    <Button Content="🗑️" ToolTip.Tip="Delete Message (CTL-PER-20)"
+                                                            Command="{Binding #PersonaCardRoot.DataContext.DeleteMessageCommand}"
+                                                            CommandParameter="{Binding}"
+                                                            IsVisible="{Binding IsOutgoing}"
+                                                            Padding="4,2" FontSize="10" />
+                                                </StackPanel>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </Grid>
+                </Border>
+
+                <!-- Discovery Tab Content CTL-PER-21, 22 -->
+                <Border Grid.Row="1" IsVisible="{Binding IsDiscoveryTabActive}">
+                    <disc:DiscoveryTabView DataContext="{Binding DiscoveryTab}" />
+                </Border>
+            </Grid>
 
             <!-- Compose Bar CTL-PER-18, 19 -->
-            <Grid Grid.Row="4" ColumnDefinitions="Auto,*,Auto" Margin="0,8,0,0">
+            <Grid Grid.Row="4" ColumnDefinitions="Auto,*,Auto" Margin="0,8,0,0"
+                  IsVisible="{Binding IsChatTabActive}">
                 <ComboBox Grid.Column="0" SelectedIndex="{Binding SelectedTimerIndex}" Margin="0,0,6,0">
                     <ComboBoxItem Content="Timer: Off" />
                     <ComboBoxItem Content="Timer: 1m" />

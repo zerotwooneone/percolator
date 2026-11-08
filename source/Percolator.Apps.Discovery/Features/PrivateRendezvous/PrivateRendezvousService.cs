@@ -133,13 +133,13 @@ public sealed class PrivateRendezvousService : IPrivateRendezvousService
         IReadOnlyList<BlindedLocator> locators,
         CancellationToken ct = default)
     {
+        DateTimeOffset nowUtc = _clock?.UtcNow ?? DateTimeOffset.UnixEpoch;
+        EvictExpired(nowUtc);
+
         if (locators == null || locators.Count == 0)
         {
             return ValueTask.FromResult<IReadOnlyList<BlindedRendezvousMatch>>(Array.Empty<BlindedRendezvousMatch>());
         }
-
-        DateTimeOffset nowUtc = _clock?.UtcNow ?? DateTimeOffset.UnixEpoch;
-        EvictExpired(nowUtc);
 
         int maxToInspect = Math.Min(locators.Count, MaxQueryLocators);
         var matches = new List<BlindedRendezvousMatch>();
@@ -173,7 +173,7 @@ public sealed class PrivateRendezvousService : IPrivateRendezvousService
         foreach (var kvp in _rendezvousTable)
         {
             if (kvp.Value.PublishedAtUtc != DateTimeOffset.UnixEpoch &&
-                nowUtc - kvp.Value.PublishedAtUtc > _entryTtl)
+                nowUtc - kvp.Value.PublishedAtUtc >= _entryTtl)
             {
                 _rendezvousTable.TryRemove(kvp.Key, out _);
             }

@@ -32,6 +32,11 @@ namespace Percolator.Simulator.Features.Scenarios.Model;
 [JsonDerivedType(typeof(AddGroupMemberStep), "AddGroupMember")]
 [JsonDerivedType(typeof(EvictGroupMemberStep), "EvictGroupMember")]
 [JsonDerivedType(typeof(RenameGroupStep), "RenameGroup")]
+[JsonDerivedType(typeof(SetDiscoveryVisibilityStep), "SetDiscoveryVisibility")]
+[JsonDerivedType(typeof(PublishBlindedLocatorStep), "PublishBlindedLocator")]
+[JsonDerivedType(typeof(ResolveBlindedLocatorStep), "ResolveBlindedLocator")]
+[JsonDerivedType(typeof(QueryNearbyPeersStep), "QueryNearbyPeers")]
+[JsonDerivedType(typeof(ConnectDiscoveredPeerStep), "ConnectDiscoveredPeer")]
 public abstract record ScenarioStepDefinition
 {
     public abstract string DisplayText { get; }
@@ -194,4 +199,33 @@ public sealed record EvictGroupMemberStep(string AdminAlias, string GroupName, s
 public sealed record RenameGroupStep(string AdminAlias, string GroupName, string NewGroupName) : ScenarioStepDefinition
 {
     public override string DisplayText => $"Rename Group: '{AdminAlias}' renames '{GroupName}' ➔ '{NewGroupName}'";
+}
+
+// -----------------------------------------------------------------------------
+// Phase 8 Scenario Steps: Peer Discovery, Blinded Rendezvous & Epoch Rotation
+// -----------------------------------------------------------------------------
+
+public sealed record SetDiscoveryVisibilityStep(string PersonaAlias, bool IsDiscoverable) : ScenarioStepDefinition
+{
+    public override string DisplayText => $"Set Discovery Visibility: '{PersonaAlias}' ➔ {(IsDiscoverable ? "Discoverable" : "Hidden")}";
+}
+
+public sealed record PublishBlindedLocatorStep(string PersonaAlias, string RelayAlias, string SharedSecret, string? RouteDescriptor = null) : ScenarioStepDefinition
+{
+    public override string DisplayText => $"Publish Blinded Locator: '{PersonaAlias}' to '{RelayAlias}'";
+}
+
+public sealed record ResolveBlindedLocatorStep(string PersonaAlias, string RelayAlias, string TargetAlias, string SharedSecret) : ScenarioStepDefinition
+{
+    public override string DisplayText => $"Resolve Blinded Locator: '{PersonaAlias}' queries '{RelayAlias}' for '{TargetAlias}'";
+}
+
+public sealed record QueryNearbyPeersStep(string PersonaAlias, string RelayAlias, int Limit = 10) : ScenarioStepDefinition
+{
+    public override string DisplayText => $"Query Nearby Peers: '{PersonaAlias}' on '{RelayAlias}' (Limit: {Limit})";
+}
+
+public sealed record ConnectDiscoveredPeerStep(string InitiatorAlias, string CandidateAlias, string RelayAlias) : ScenarioStepDefinition
+{
+    public override string DisplayText => $"Connect Discovered Peer: '{InitiatorAlias}' ➔ '{CandidateAlias}' via '{RelayAlias}'";
 }
