@@ -10,7 +10,7 @@ using Percolator.Domain.Identities.ValueObjects;
 
 public sealed class StreamRegistryOptions
 {
-    public int DefaultQueueCapacity { get; set; } = 32;
+    public int DefaultQueueCapacity { get; set; } = 1000;
 }
 
 public interface IStreamRegistryManagement : IStreamRegistry
@@ -19,6 +19,9 @@ public interface IStreamRegistryManagement : IStreamRegistry
     ChannelReader<ReadOnlyMemory<byte>> RegisterRelayStream(PublicIdentityId relayId, int? capacity = null);
     void UnregisterStream(PublicIdentityId targetId);
     void UnregisterRelayStream(PublicIdentityId relayId);
+    void RegisterDirectEndpoint(PublicIdentityId targetId, Uri directEndpoint);
+    void UnregisterDirectEndpoint(PublicIdentityId targetId);
+    Uri? GetDirectEndpoint(PublicIdentityId targetId);
 }
 
 public sealed class StreamRegistry : IStreamRegistryManagement
@@ -26,6 +29,7 @@ public sealed class StreamRegistry : IStreamRegistryManagement
     private readonly StreamRegistryOptions _options;
     private readonly ConcurrentDictionary<PublicIdentityId, Channel<ReadOnlyMemory<byte>>> _peerStreams = new();
     private readonly ConcurrentDictionary<PublicIdentityId, Channel<ReadOnlyMemory<byte>>> _relayStreams = new();
+    private readonly ConcurrentDictionary<PublicIdentityId, Uri> _directEndpoints = new();
 
     public StreamRegistry(StreamRegistryOptions? options = null)
     {
@@ -35,6 +39,22 @@ public sealed class StreamRegistry : IStreamRegistryManagement
     public bool HasActiveStream(PublicIdentityId targetId) => _peerStreams.ContainsKey(targetId);
 
     public bool HasActiveRelayStream(PublicIdentityId relayId) => _relayStreams.ContainsKey(relayId);
+
+    public void RegisterDirectEndpoint(PublicIdentityId targetId, Uri directEndpoint)
+    {
+        ArgumentNullException.ThrowIfNull(directEndpoint);
+        _directEndpoints[targetId] = directEndpoint;
+    }
+
+    public void UnregisterDirectEndpoint(PublicIdentityId targetId)
+    {
+        _directEndpoints.TryRemove(targetId, out _);
+    }
+
+    public Uri? GetDirectEndpoint(PublicIdentityId targetId)
+    {
+        return _directEndpoints.TryGetValue(targetId, out var uri) ? uri : null;
+    }
 
     public ChannelReader<ReadOnlyMemory<byte>> RegisterStream(PublicIdentityId targetId, int? capacity = null)
     {
@@ -62,6 +82,7 @@ public sealed class StreamRegistry : IStreamRegistryManagement
 
     public void UnregisterStream(PublicIdentityId targetId)
     {
+        _directEndpoints.TryRemove(targetId, out _);
         if (_peerStreams.TryRemove(targetId, out var channel))
         {
             channel.Writer.TryComplete();
@@ -96,9 +117,9 @@ public sealed class StreamRegistry : IStreamRegistryManagement
         // If TryWrite returned false, check if channel writer is closed or queue is saturated (backpressured)
         if (channel.Reader.Completion.IsCompleted)
         {
-            return ValueTask.FromResult(StreamWriteResult.Closed("Stream is closed."));
+            return ValueTask.FromResult(StreamWriteResult.Closed("Channel reader completion has ended."));
         }
 
-        return ValueTask.FromResult(StreamWriteResult.Backpressured("Stream queue buffer is saturated."));
+        return ValueTask.FromResult(StreamWriteResult.Backpressured());
     }
 }

@@ -2,6 +2,8 @@ namespace Percolator.Infrastructure.Transport;
 
 using System;
 using System.Buffers.Binary;
+using System.Security.Cryptography;
+using Google.Protobuf;
 using Percolator.Application2.Ingress;
 using Percolator.Application2.Ports;
 using Percolator.Domain.Channels.ValueObjects;
@@ -19,7 +21,13 @@ public enum WireFrameKind : byte
 
 public static class SealedWireFraming
 {
-    public const int HeaderSize = 1 + 16 + 16 + 16 + 4; // 53 bytes
+    public const byte SealedMagicByte = 0x53; // 'S'
+    public const int InnerHeaderSize = 1 + 16 + 16 + 4 + 12 + 4; // 53 bytes
+    public const int OuterAeadHeaderSize = 1 + 12 + 16; // 29 bytes: Magic (1B) + Nonce (12B) + Tag (16B)
+    public const int HeaderSize = OuterAeadHeaderSize + InnerHeaderSize; // 82 bytes
+
+    private static readonly byte[] DefaultKeyIkm =
+        SHA256.HashData("Percolator.SealedWireEnvelope.DefaultKey.v1"u8);
 
     public static byte[] Encode(
         WireFrameKind kind,
@@ -28,18 +36,48 @@ public static class SealedWireFraming
         DeviceId senderDeviceId,
         ReadOnlyMemory<byte> packedWireBytes)
     {
+        var plaintext = new byte[InnerHeaderSize + packedWireBytes.Length];
+        plaintext[0] = (byte)kind;
+
+        channelId.TryWriteBytes(plaintext.AsSpan(1, 16));
+        senderId.TryWriteBytes(plaintext.AsSpan(17, 16));
+
+        BinaryPrimitives.WriteUInt32LittleEndian(plaintext.AsSpan(33, 4), senderDeviceId.Value);
+        plaintext.AsSpan(37, 12).Clear();
+        BinaryPrimitives.WriteUInt32LittleEndian(plaintext.AsSpan(49, 4), (uint)packedWireBytes.Length);
+
+        packedWireBytes.Span.CopyTo(plaintext.AsSpan(InnerHeaderSize));
+
         var output = new byte[HeaderSize + packedWireBytes.Length];
-        output[0] = (byte)kind;
+        output[0] = SealedMagicByte;
 
-        channelId.TryWriteBytes(output.AsSpan(1, 16));
-        senderId.TryWriteBytes(output.AsSpan(17, 16));
+        var nonce = output.AsSpan(1, 12);
+        RandomNumberGenerator.Fill(nonce);
 
-        BinaryPrimitives.WriteUInt32LittleEndian(output.AsSpan(33, 4), senderDeviceId.Value);
-        output.AsSpan(37, 12).Clear();
+        var tag = output.AsSpan(13, 16);
+        Span<byte> derivedKey = stackalloc byte[32];
+        HKDF.DeriveKey(
+            HashAlgorithmName.SHA256,
+            DefaultKeyIkm,
+            derivedKey,
+            salt: nonce,
+            info: "Percolator.SealedWireFraming.AEAD.v2"u8);
 
-        BinaryPrimitives.WriteUInt32LittleEndian(output.AsSpan(49, 4), (uint)packedWireBytes.Length);
+        try
+        {
+            using var aes = new AesGcm(derivedKey, tagSizeInBytes: 16);
+            aes.Encrypt(
+                nonce,
+                plaintext,
+                output.AsSpan(OuterAeadHeaderSize),
+                tag,
+                associatedData: output.AsSpan(0, 1));
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(derivedKey);
+        }
 
-        packedWireBytes.Span.CopyTo(output.AsSpan(HeaderSize));
         return output;
     }
 
@@ -53,25 +91,59 @@ public static class SealedWireFraming
         }
 
         var span = frameBytes.Span;
-        var kind = (WireFrameKind)span[0];
+        if (span[0] != SealedMagicByte)
+        {
+            return DomainResult<(WireFrameKind, ChannelId, PublicIdentityId, DeviceId, ReadOnlyMemory<byte>)>.Failure(
+                new DomainError("UNKNOWN_FRAME_KIND", $"Unknown sealed frame magic byte: 0x{span[0]:X2}. Expected 0x{SealedMagicByte:X2}."));
+        }
+
+        var nonce = span.Slice(1, 12);
+        var tag = span.Slice(13, 16);
+        var ciphertext = span.Slice(OuterAeadHeaderSize);
+
+        Span<byte> derivedKey = stackalloc byte[32];
+        HKDF.DeriveKey(
+            HashAlgorithmName.SHA256,
+            DefaultKeyIkm,
+            derivedKey,
+            salt: nonce,
+            info: "Percolator.SealedWireFraming.AEAD.v2"u8);
+
+        byte[] plaintext = new byte[ciphertext.Length];
+        try
+        {
+            using var aes = new AesGcm(derivedKey, tagSizeInBytes: 16);
+            aes.Decrypt(nonce, ciphertext, tag, plaintext, associatedData: span.Slice(0, 1));
+        }
+        catch (CryptographicException)
+        {
+            return DomainResult<(WireFrameKind, ChannelId, PublicIdentityId, DeviceId, ReadOnlyMemory<byte>)>.Failure(
+                new DomainError("FRAME_TRUNCATED", "Sealed frame authentication failed or frame was truncated/corrupted."));
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(derivedKey);
+        }
+
+        var kind = (WireFrameKind)plaintext[0];
         if (kind is not (WireFrameKind.DirectRatchet or WireFrameKind.GroupBroadcast or WireFrameKind.X3dhHandshake))
         {
             return DomainResult<(WireFrameKind, ChannelId, PublicIdentityId, DeviceId, ReadOnlyMemory<byte>)>.Failure(
-                new DomainError("UNKNOWN_FRAME_KIND", $"Unknown WireFrameKind byte: 0x{span[0]:X2}."));
+                new DomainError("UNKNOWN_FRAME_KIND", $"Unknown WireFrameKind byte: 0x{plaintext[0]:X2}."));
         }
 
-        var channelId = ChannelId.FromBytes(span.Slice(1, 16));
-        var senderId = PublicIdentityId.FromBytes(span.Slice(17, 16));
-        uint deviceVal = BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(33, 4));
-        uint payloadLength = BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(49, 4));
+        var channelId = ChannelId.FromBytes(plaintext.AsSpan(1, 16));
+        var senderId = PublicIdentityId.FromBytes(plaintext.AsSpan(17, 16));
+        uint deviceVal = BinaryPrimitives.ReadUInt32LittleEndian(plaintext.AsSpan(33, 4));
+        uint payloadLength = BinaryPrimitives.ReadUInt32LittleEndian(plaintext.AsSpan(49, 4));
 
-        if (frameBytes.Length < HeaderSize + payloadLength)
+        if (InnerHeaderSize + payloadLength > plaintext.Length)
         {
             return DomainResult<(WireFrameKind, ChannelId, PublicIdentityId, DeviceId, ReadOnlyMemory<byte>)>.Failure(
-                new DomainError("FRAME_TRUNCATED", $"Frame payload length {payloadLength} exceeds available bytes {frameBytes.Length - HeaderSize}."));
+                new DomainError("FRAME_TRUNCATED", $"Frame payload length {payloadLength} exceeds available bytes {plaintext.Length - InnerHeaderSize}."));
         }
 
-        var packedPayload = frameBytes.Slice(HeaderSize, (int)payloadLength);
+        var packedPayload = new ReadOnlyMemory<byte>(plaintext, InnerHeaderSize, (int)payloadLength);
         return DomainResult<(WireFrameKind, ChannelId, PublicIdentityId, DeviceId, ReadOnlyMemory<byte>)>.Success(
             (kind, channelId, senderId, new DeviceId(deviceVal), packedPayload));
     }
@@ -95,23 +167,28 @@ public sealed class SealedEnvelopeUnwrapper : ISealedEnvelopeUnwrapper
 
     public DomainResult<InboundEnvelope> Unwrap(MailboxEnvelope envelope)
     {
+        return UnwrapDirect(envelope.Ciphertext);
+    }
+
+    public DomainResult<InboundEnvelope> UnwrapDirect(ReadOnlyMemory<byte> payloadBytes)
+    {
         try
         {
-            ReadOnlyMemory<byte> rawPayload = envelope.Ciphertext;
+            ReadOnlyMemory<byte> rawPayload = payloadBytes;
 
-            // Fast path: SealedWireFraming frames start with 0x01, 0x02, or 0x03.
-            // If the first byte is not a known frame kind, check if it is a SealedEnvelopeProto wrapper.
-            if (envelope.Ciphertext.Length > 0 && envelope.Ciphertext.Span[0] > 0x03)
+            // Fast path: SealedWireFraming frames start with SealedMagicByte (0x53).
+            // If the first byte is not SealedMagicByte, check if it is a SealedEnvelopeProto wrapper.
+            if (rawPayload.Length > 0 && rawPayload.Span[0] != SealedWireFraming.SealedMagicByte)
             {
                 try
                 {
-                    var proto = SealedEnvelopeProto.Parser.ParseFrom(envelope.Ciphertext.Span);
+                    var proto = SealedEnvelopeProto.Parser.ParseFrom(rawPayload.Span);
                     if (proto != null && !proto.EncryptedPackage.IsEmpty)
                     {
                         rawPayload = proto.EncryptedPackage.Memory;
                     }
                 }
-                catch
+                catch (InvalidProtocolBufferException)
                 {
                     // Not a protobuf wrapper, proceed with raw bytes
                 }

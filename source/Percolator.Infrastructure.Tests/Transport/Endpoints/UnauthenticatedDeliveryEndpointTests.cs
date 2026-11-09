@@ -11,7 +11,9 @@ using FluentAssertions;
 using Google.Protobuf;
 using Grpc.Core;
 using NUnit.Framework;
+using Percolator.Application2.Ingress;
 using Percolator.Application2.Ports;
+using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Delivery.Ports;
@@ -108,6 +110,43 @@ public sealed class UnauthenticatedDeliveryEndpointTests
         public ValueTask DeleteBlobAsync(BlobId blobId, CancellationToken ct = default) => ValueTask.CompletedTask;
     }
 
+    private sealed class MockIngressPipeline : IInboundIngressPipeline
+    {
+        public InboundEnvelope? LastProcessedEnvelope { get; private set; }
+        public DomainResult ReturnResult { get; set; } = DomainResult.Success();
+
+        public ValueTask<DomainResult> ProcessInboundAsync(InboundEnvelope envelope, CancellationToken ct = default)
+        {
+            LastProcessedEnvelope = envelope;
+            return ValueTask.FromResult(ReturnResult);
+        }
+    }
+
+    private sealed class MockEnvelopeUnwrapper : ISealedEnvelopeUnwrapper
+    {
+        public InboundEnvelope? ReturnEnvelope { get; set; }
+
+        public DomainResult<InboundEnvelope> Unwrap(MailboxEnvelope envelope)
+        {
+            if (ReturnEnvelope != null)
+            {
+                return DomainResult<InboundEnvelope>.Success(ReturnEnvelope);
+            }
+
+            return DomainResult<InboundEnvelope>.Failure(new DomainError("UNWRAP_FAILED", "Failed to unwrap sealed frame."));
+        }
+
+        public DomainResult<InboundEnvelope> UnwrapDirect(ReadOnlyMemory<byte> payloadBytes)
+        {
+            if (ReturnEnvelope != null)
+            {
+                return DomainResult<InboundEnvelope>.Success(ReturnEnvelope);
+            }
+
+            return DomainResult<InboundEnvelope>.Failure(new DomainError("UNWRAP_FAILED", "Failed to unwrap sealed frame."));
+        }
+    }
+
     private InMemoryProfileRepo _profileRepo = null!;
     private InMemoryPreKeyRepo _preKeyRepo = null!;
     private InMemoryChunkStore _chunkStore = null!;
@@ -136,6 +175,109 @@ public sealed class UnauthenticatedDeliveryEndpointTests
 
         var ack = await _endpoint.DeliverDirect(request, new TestServerCallContext());
         ack.Success.Should().BeTrue();
+    }
+
+    [Test]
+    public async Task DeliverDirect_ValidFramedEnvelope_InvokesIngressPipelineAndReturnsSuccess()
+    {
+        var unwrapper = new MockEnvelopeUnwrapper();
+        var pipeline = new MockIngressPipeline();
+        var endpoint = new UnauthenticatedDeliveryEndpoint(
+            _profileRepo,
+            _preKeyRepo,
+            _chunkStore,
+            _capabilityStore,
+            ingressFilter: null,
+            unwrapper: unwrapper,
+            ingressPipeline: pipeline);
+
+        var expectedEnvelope = new InboundGroupEnvelope(
+            ChannelId.New(),
+            PublicIdentityId.New(),
+            PublicIdentityId.New(),
+            DeviceId.Primary,
+            0,
+            new byte[] { 1, 2, 3, 4 },
+            Array.Empty<byte>(),
+            DateTimeOffset.UtcNow);
+
+        unwrapper.ReturnEnvelope = expectedEnvelope;
+
+        var request = new SealedEnvelopeProto
+        {
+            EncryptedPackage = ByteString.CopyFrom(new byte[] { 0x53, 1, 2, 3 })
+        };
+
+        var ack = await endpoint.DeliverDirect(request, new TestServerCallContext());
+
+        ack.Success.Should().BeTrue();
+        pipeline.LastProcessedEnvelope.Should().NotBeNull();
+        pipeline.LastProcessedEnvelope!.RecipientIdentityId.Should().Be(expectedEnvelope.RecipientIdentityId);
+        pipeline.LastProcessedEnvelope!.SenderIdentityId.Should().Be(expectedEnvelope.SenderIdentityId);
+    }
+
+    [Test]
+    public async Task DeliverDirect_PipelineFailure_ReturnsFailedAck()
+    {
+        var unwrapper = new MockEnvelopeUnwrapper();
+        var pipeline = new MockIngressPipeline
+        {
+            ReturnResult = DomainResult.Failure(new DomainError("PIPELINE_ERROR", "Pipeline processing failed."))
+        };
+        var endpoint = new UnauthenticatedDeliveryEndpoint(
+            _profileRepo,
+            _preKeyRepo,
+            _chunkStore,
+            _capabilityStore,
+            ingressFilter: null,
+            unwrapper: unwrapper,
+            ingressPipeline: pipeline);
+
+        unwrapper.ReturnEnvelope = new InboundGroupEnvelope(
+            ChannelId.New(),
+            PublicIdentityId.New(),
+            PublicIdentityId.New(),
+            DeviceId.Primary,
+            0,
+            new byte[] { 1, 2, 3, 4 },
+            Array.Empty<byte>(),
+            DateTimeOffset.UtcNow);
+
+        var request = new SealedEnvelopeProto
+        {
+            EncryptedPackage = ByteString.CopyFrom(new byte[] { 0x53, 1, 2, 3 })
+        };
+
+        var ack = await endpoint.DeliverDirect(request, new TestServerCallContext());
+
+        ack.Success.Should().BeFalse();
+        ack.ErrorMessage.Should().Be("Pipeline processing failed.");
+    }
+
+    [Test]
+    public async Task DeliverDirect_UnwrapFailure_ReturnsFailedAck()
+    {
+        var unwrapper = new MockEnvelopeUnwrapper(); // ReturnEnvelope is null, so Unwrap returns failure
+        var pipeline = new MockIngressPipeline();
+        var endpoint = new UnauthenticatedDeliveryEndpoint(
+            _profileRepo,
+            _preKeyRepo,
+            _chunkStore,
+            _capabilityStore,
+            ingressFilter: null,
+            unwrapper: unwrapper,
+            ingressPipeline: pipeline);
+
+        var request = new SealedEnvelopeProto
+        {
+            EncryptedPackage = ByteString.CopyFrom(new byte[] { 0x53, 1, 2, 3 })
+        };
+
+        var ack = await endpoint.DeliverDirect(request, new TestServerCallContext());
+
+        ack.Success.Should().BeFalse();
+        ack.ErrorMessage.Should().Be("Failed to unwrap sealed frame.");
+        pipeline.LastProcessedEnvelope.Should().BeNull();
     }
 
     [Test]

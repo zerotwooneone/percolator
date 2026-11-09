@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
+using Percolator.Application2.Ingress;
 using Percolator.Application2.Ports;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Hosting;
@@ -25,6 +26,7 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
     private readonly IRelayMailboxCapabilityStore _capabilityStore;
     private readonly IIngressFilterService? _ingressFilter;
     private readonly ISealedEnvelopeUnwrapper? _unwrapper;
+    private readonly IInboundIngressPipeline? _ingressPipeline;
 
     public UnauthenticatedDeliveryEndpoint(
         IRelayProfileRepository profileRepository,
@@ -32,7 +34,8 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
         ILocalChunkStore chunkStore,
         IRelayMailboxCapabilityStore? capabilityStore = null,
         IIngressFilterService? ingressFilter = null,
-        ISealedEnvelopeUnwrapper? unwrapper = null)
+        ISealedEnvelopeUnwrapper? unwrapper = null,
+        IInboundIngressPipeline? ingressPipeline = null)
     {
         _profileRepository = profileRepository ?? throw new ArgumentNullException(nameof(profileRepository));
         _preKeyRepository = preKeyRepository ?? throw new ArgumentNullException(nameof(preKeyRepository));
@@ -40,6 +43,7 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
         _capabilityStore = capabilityStore ?? new InMemoryRelayMailboxCapabilityStore();
         _ingressFilter = ingressFilter;
         _unwrapper = unwrapper;
+        _ingressPipeline = ingressPipeline;
     }
 
     public override async Task<DeliveryAckProto> DeliverDirect(SealedEnvelopeProto request, ServerCallContext context)
@@ -53,18 +57,22 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
             };
         }
 
-        if (_unwrapper != null && _ingressFilter != null)
+        if (_unwrapper != null)
         {
-            var unwrapResult = _unwrapper.Unwrap(new MailboxEnvelope(
-                EnvelopeId.New(),
-                BlindedRoutingToken.New(),
-                request.EncryptedPackage.Memory,
-                DateTimeOffset.UtcNow,
-                DateTimeOffset.UtcNow.AddDays(1)));
+            var unwrapResult = _unwrapper.UnwrapDirect(request.EncryptedPackage.Memory);
 
-            if (unwrapResult.IsSuccess)
+            if (!unwrapResult.IsSuccess)
             {
-                var envelope = unwrapResult.Value!;
+                return new DeliveryAckProto
+                {
+                    Success = false,
+                    ErrorMessage = unwrapResult.Error!.Description
+                };
+            }
+
+            var envelope = unwrapResult.Value!;
+            if (_ingressFilter != null)
+            {
                 var filterResult = await _ingressFilter.CheckIngressAllowedAsync(
                     envelope.RecipientIdentityId,
                     envelope.SenderIdentityId,
@@ -76,6 +84,19 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
                     {
                         Success = false,
                         ErrorMessage = filterResult.Error!.Description
+                    };
+                }
+            }
+
+            if (_ingressPipeline != null)
+            {
+                var ingressResult = await _ingressPipeline.ProcessInboundAsync(envelope, context.CancellationToken);
+                if (ingressResult.IsFailure && ingressResult.Error.Code != "EXPIRED_OR_DUPLICATE_MESSAGE")
+                {
+                    return new DeliveryAckProto
+                    {
+                        Success = false,
+                        ErrorMessage = ingressResult.Error.Description
                     };
                 }
             }
@@ -224,6 +245,11 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
         if (request.WriteToken.Length != 32)
         {
             throw new RpcException(new Status(StatusCode.InvalidArgument, "Write token must be exactly 32 bytes."));
+        }
+
+        if (request.Nonce.Length != 12)
+        {
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "Nonce must be 12 bytes."));
         }
 
         if (request.Ciphertext.Length != RelayHostedProfileSlot.ExactPackageSizeBytes)

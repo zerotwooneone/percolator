@@ -9,10 +9,15 @@ using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using Percolator.Application2.Delivery;
 using Percolator.Application2.Delivery.Ports;
+using Percolator.Application2.Ports;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Hosting;
+using Percolator.Domain.Delivery.ValueObjects;
+using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Ports;
+using Percolator.Domain.Security.ValueObjects;
 using Percolator.Infrastructure.Protos;
+using Percolator.PluginSdk;
 
 public interface ITransportClientInvoker
 {
@@ -55,17 +60,91 @@ public sealed class GrpcTransportClientInvoker : ITransportClientInvoker
 public sealed class TransportDispatcher : ITransportDispatcher
 {
     private readonly ITransportClientInvoker _invoker;
-    private readonly IZkProofEngine? _zkProofEngine;
-    private readonly IGroupCredentialsRepository? _groupCredentialsRepository;
+    private readonly IZkProofEngine _zkProofEngine;
+    private readonly IGroupCredentialsRepository _groupCredentialsRepository;
+    private readonly IPeerMailboxRoutingRepository _mailboxRoutingRepository;
+    private readonly IChannelRelayResolver _channelRelayResolver;
+    private readonly IStreamRegistryManagement _streamRegistry;
 
     public TransportDispatcher(
         ITransportClientInvoker invoker,
-        IZkProofEngine? zkProofEngine = null,
-        IGroupCredentialsRepository? groupCredentialsRepository = null)
+        IZkProofEngine zkProofEngine,
+        IGroupCredentialsRepository groupCredentialsRepository,
+        IPeerMailboxRoutingRepository mailboxRoutingRepository,
+        IChannelRelayResolver channelRelayResolver,
+        IStreamRegistryManagement streamRegistry)
     {
         _invoker = invoker ?? throw new ArgumentNullException(nameof(invoker));
-        _zkProofEngine = zkProofEngine;
-        _groupCredentialsRepository = groupCredentialsRepository;
+        _zkProofEngine = zkProofEngine ?? throw new ArgumentNullException(nameof(zkProofEngine));
+        _groupCredentialsRepository = groupCredentialsRepository ?? throw new ArgumentNullException(nameof(groupCredentialsRepository));
+        _mailboxRoutingRepository = mailboxRoutingRepository ?? throw new ArgumentNullException(nameof(mailboxRoutingRepository));
+        _channelRelayResolver = channelRelayResolver ?? throw new ArgumentNullException(nameof(channelRelayResolver));
+        _streamRegistry = streamRegistry ?? throw new ArgumentNullException(nameof(streamRegistry));
+    }
+
+    public static WireFrameKind DetermineWireFrameKind(ReadOnlyMemory<byte> payload, DeliveryRouteType routeType)
+    {
+        if (routeType == DeliveryRouteType.RelayedGroup)
+        {
+            return WireFrameKind.GroupBroadcast;
+        }
+
+        try
+        {
+            var handshakeProto = HandshakeInvitationPackageProto.Parser.ParseFrom(payload.Span);
+            if (handshakeProto != null &&
+                handshakeProto.InitiatorIdentityKey.Length == 32 &&
+                handshakeProto.InitiatorEphemeralKey.Length == 32)
+            {
+                return WireFrameKind.X3dhHandshake;
+            }
+        }
+        catch (InvalidProtocolBufferException)
+        {
+            // Not a HandshakeInvitationPackageProto
+        }
+
+        try
+        {
+            var groupProto = GroupSessionPackageProto.Parser.ParseFrom(payload.Span);
+            if (groupProto != null &&
+                groupProto.ConversationId.Length == 16 &&
+                !groupProto.Ciphertext.IsEmpty)
+            {
+                return WireFrameKind.GroupBroadcast;
+            }
+        }
+        catch (InvalidProtocolBufferException)
+        {
+            // Not a GroupSessionPackageProto
+        }
+
+        return WireFrameKind.DirectRatchet;
+    }
+
+    private static ReadOnlyMemory<byte> EnsureSealedFrame(OutboxJob job)
+    {
+        if (job.Payload.Length >= SealedWireFraming.HeaderSize && job.Payload.Span[0] == SealedWireFraming.SealedMagicByte)
+        {
+            return job.Payload;
+        }
+
+        var kind = DetermineWireFrameKind(job.Payload, job.Route.Type);
+        byte[] framed = SealedWireFraming.Encode(
+            kind,
+            job.ChannelId,
+            job.OwnerIdentityId,
+            DeviceId.Primary,
+            job.Payload);
+
+        return framed;
+    }
+
+    private static Uri ParseEndpointUri(string endpointStr)
+    {
+        return endpointStr.Contains("://")
+            ? new Uri(endpointStr)
+            : new Uri($"https://{endpointStr}");
     }
 
     public async ValueTask<DomainResult> SendAsync(OutboxJob job, CancellationToken ct = default)
@@ -79,10 +158,13 @@ public sealed class TransportDispatcher : ITransportDispatcher
             {
                 case DeliveryRouteType.DirectP2P:
                 {
-                    if (route.DirectEndpoint == null)
+                    var directEndpoint = route.DirectEndpoint ?? (job.RecipientIdentityId.HasValue ? _streamRegistry.GetDirectEndpoint(job.RecipientIdentityId.Value) : null);
+                    if (directEndpoint == null)
                     {
-                        return DomainResult.Failure(new DomainError("MISSING_DIRECT_ENDPOINT", "Direct endpoint is required for DirectP2P route."));
+                        return DomainResult.Failure(new DomainError("MISSING_DIRECT_ENDPOINT", "Direct endpoint is required for DirectP2P route and could not be resolved from StreamRegistry."));
                     }
+
+                    var framedPayload = EnsureSealedFrame(job);
 
                     var envelopeProto = new SealedEnvelopeProto
                     {
@@ -92,11 +174,11 @@ public sealed class TransportDispatcher : ITransportDispatcher
                         DeliveryToken = route.TargetDeliveryToken != null
                             ? ByteString.CopyFrom(route.TargetDeliveryToken.Span)
                             : ByteString.Empty,
-                        EncryptedPackage = ByteString.CopyFrom(job.Payload.Span),
+                        EncryptedPackage = ByteString.CopyFrom(framedPayload.Span),
                         ExpiresAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow.AddDays(7))
                     };
 
-                    var ack = await _invoker.DeliverDirectAsync(route.DirectEndpoint, envelopeProto, ct);
+                    var ack = await _invoker.DeliverDirectAsync(directEndpoint, envelopeProto, ct);
                     if (!ack.Success)
                     {
                         return DomainResult.Failure(new DomainError("DELIVERY_FAILED", ack.ErrorMessage ?? "Direct delivery rejected."));
@@ -107,25 +189,37 @@ public sealed class TransportDispatcher : ITransportDispatcher
 
                 case DeliveryRouteType.RelayedOneToOne:
                 {
-                    if (route.RelayEndpoint == null)
+                    Uri? relayUri = null;
+                    BlindedRoutingToken? targetToken = route.TargetToken;
+                    DeliveryToken? deliveryToken = route.TargetDeliveryToken;
+
+                    if (route.RelayEndpoint != null)
                     {
-                        return DomainResult.Failure(new DomainError("MISSING_RELAY_ENDPOINT", "Relay endpoint is required for RelayedOneToOne route."));
+                        relayUri = ParseEndpointUri(route.RelayEndpoint.Value);
+                    }
+                    else if (job.RecipientIdentityId.HasValue)
+                    {
+                        var routingInfo = await _mailboxRoutingRepository.GetByPeerIdAsync(job.RecipientIdentityId.Value, ct);
+                        if (routingInfo != null && routingInfo.RelayEndpoint != null)
+                        {
+                            relayUri = ParseEndpointUri(routingInfo.RelayEndpoint.Value);
+                            targetToken = routingInfo.RoutingToken;
+                            deliveryToken = routingInfo.DeliveryToken;
+                        }
                     }
 
-                    var endpointStr = route.RelayEndpoint.Value;
-                    var relayUri = endpointStr.Contains("://")
-                        ? new Uri(endpointStr)
-                        : new Uri($"https://{endpointStr}");
+                    if (relayUri == null || !targetToken.HasValue || deliveryToken == null)
+                    {
+                        return DomainResult.Failure(new DomainError("MISSING_RELAY_ENDPOINT", "Relay endpoint and tokens are required for RelayedOneToOne route."));
+                    }
+
+                    var framedPayload = EnsureSealedFrame(job);
 
                     var envelopeProto = new SealedEnvelopeProto
                     {
-                        RecipientRoutingToken = route.TargetToken.HasValue
-                            ? ByteString.CopyFrom(route.TargetToken.Value.ToByteArray())
-                            : ByteString.Empty,
-                        DeliveryToken = route.TargetDeliveryToken != null
-                            ? ByteString.CopyFrom(route.TargetDeliveryToken.Span)
-                            : ByteString.Empty,
-                        EncryptedPackage = ByteString.CopyFrom(job.Payload.Span),
+                        RecipientRoutingToken = ByteString.CopyFrom(targetToken.Value.ToByteArray()),
+                        DeliveryToken = ByteString.CopyFrom(deliveryToken.Span),
+                        EncryptedPackage = ByteString.CopyFrom(framedPayload.Span),
                         ExpiresAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow.AddDays(7))
                     };
 
@@ -140,47 +234,48 @@ public sealed class TransportDispatcher : ITransportDispatcher
 
                 case DeliveryRouteType.RelayedGroup:
                 {
-                    if (route.RelayEndpoint == null)
+                    Uri? relayUri = null;
+                    if (route.RelayEndpoint != null)
+                    {
+                        relayUri = ParseEndpointUri(route.RelayEndpoint.Value);
+                    }
+                    else
+                    {
+                        relayUri = await _channelRelayResolver.ResolveRelayForChannelAsync(job.ChannelId, ct);
+                    }
+
+                    if (relayUri == null)
                     {
                         return DomainResult.Failure(new DomainError("MISSING_RELAY_ENDPOINT", "Relay endpoint is required for RelayedGroup route."));
                     }
 
-                    var endpointStr = route.RelayEndpoint.Value;
-                    var relayUri = endpointStr.Contains("://")
-                        ? new Uri(endpointStr)
-                        : new Uri($"https://{endpointStr}");
-
                     byte[]? masterKeyBytes = null;
                     byte[]? authMacBytes = null;
 
-                    if (_zkProofEngine != null && _groupCredentialsRepository != null)
+                    var creds = await _groupCredentialsRepository.GetAsync(job.ChannelId, ct);
+                    if (creds != null)
                     {
-                        var creds = await _groupCredentialsRepository.GetAsync(job.ChannelId, ct);
-                        if (creds != null)
-                        {
-                            masterKeyBytes = creds.MasterKey.Span.ToArray();
-                            authMacBytes = creds.AuthCredentialMac.Span.ToArray();
-                        }
+                        masterKeyBytes = creds.MasterKey.Span.ToArray();
+                        authMacBytes = creds.AuthCredentialMac.Span.ToArray();
                     }
+
+                    var framedPayload = EnsureSealedFrame(job);
 
                     byte[] zkProof = Array.Empty<byte>();
                     uint epoch = 0;
-                    if (_zkProofEngine != null)
+                    Span<byte> challengeHash = stackalloc byte[32];
+                    RelayGroupLedger.ComputeDispatchChallenge(framedPayload.Span, challengeHash);
+
+                    var proofBytes = _zkProofEngine.GenerateGroupPresentation(
+                        epoch,
+                        challengeHash,
+                        masterKeyBytes ?? ReadOnlySpan<byte>.Empty,
+                        authMacBytes ?? ReadOnlySpan<byte>.Empty);
+                    zkProof = proofBytes.Span.ToArray();
+
+                    if (masterKeyBytes != null)
                     {
-                        Span<byte> challengeHash = stackalloc byte[32];
-                        RelayGroupLedger.ComputeDispatchChallenge(job.Payload.Span, challengeHash);
-
-                        var proofBytes = _zkProofEngine.GenerateGroupPresentation(
-                            epoch,
-                            challengeHash,
-                            masterKeyBytes ?? ReadOnlySpan<byte>.Empty,
-                            authMacBytes ?? ReadOnlySpan<byte>.Empty);
-                        zkProof = proofBytes.Span.ToArray();
-
-                        if (masterKeyBytes != null)
-                        {
-                            CryptographicOperations.ZeroMemory(masterKeyBytes);
-                        }
+                        CryptographicOperations.ZeroMemory(masterKeyBytes);
                     }
 
                     var groupRequest = new DispatchGroupMessageRequest
@@ -189,7 +284,7 @@ public sealed class TransportDispatcher : ITransportDispatcher
                         Epoch = epoch,
                         ZkPresentationProof = ByteString.CopyFrom(zkProof),
                         SenderKeyIteration = 0,
-                        Ciphertext = ByteString.CopyFrom(job.Payload.Span),
+                        Ciphertext = ByteString.CopyFrom(framedPayload.Span),
                         AuthorSignature = ByteString.Empty
                     };
 

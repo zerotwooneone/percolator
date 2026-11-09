@@ -22,6 +22,41 @@ public sealed class SealedEnvelopeUnwrapperTests
     }
 
     [Test]
+    public void Encode_EncryptsHeaderMetadata_DoesNotExposeSenderOrChannelIdInCleartext()
+    {
+        var channelId = ChannelId.New();
+        var senderId = PublicIdentityId.New();
+        var deviceId = new DeviceId(77);
+        var payload = new byte[] { 10, 20, 30, 40, 50 };
+
+        var frame = SealedWireFraming.Encode(
+            WireFrameKind.DirectRatchet,
+            channelId,
+            senderId,
+            deviceId,
+            payload);
+
+        frame[0].Should().Be(SealedWireFraming.SealedMagicByte);
+        frame.Length.Should().Be(SealedWireFraming.HeaderSize + payload.Length);
+
+        // Ensure cleartext ChannelId and SenderId byte sequences do NOT appear anywhere in the sealed frame
+        var channelBytes = channelId.ToByteArray();
+        var senderBytes = senderId.ToByteArray();
+
+        ContainsSubsequence(frame, channelBytes).Should().BeFalse("ChannelId must be encrypted under AEAD and not appear in cleartext");
+        ContainsSubsequence(frame, senderBytes).Should().BeFalse("SenderId must be encrypted under AEAD and not appear in cleartext");
+
+        // Verify successful decode
+        var decodeResult = SealedWireFraming.Decode(frame);
+        decodeResult.IsSuccess.Should().BeTrue();
+        decodeResult.Value.Kind.Should().Be(WireFrameKind.DirectRatchet);
+        decodeResult.Value.ChannelId.Should().Be(channelId);
+        decodeResult.Value.SenderId.Should().Be(senderId);
+        decodeResult.Value.SenderDeviceId.Should().Be(deviceId);
+        decodeResult.Value.PackedWireBytes.ToArray().Should().Equal(payload);
+    }
+
+    [Test]
     public void Unwrap_CorruptedWirePayload_ReturnsDomainFailureWithoutThrowing()
     {
         var packer = new ProtobufSessionWirePacker();
@@ -29,7 +64,7 @@ public sealed class SealedEnvelopeUnwrapperTests
         var recipientId = PublicIdentityId.New();
         var unwrapper = new SealedEnvelopeUnwrapper(packer, timeProvider, recipientId);
 
-        // Case 1: Frame too short (< 53 bytes)
+        // Case 1: Frame too short (< 82 bytes)
         var shortBytes = new byte[20];
         RandomNumberGenerator.Fill(shortBytes);
         var envelopeShort = new MailboxEnvelope(
@@ -43,9 +78,9 @@ public sealed class SealedEnvelopeUnwrapperTests
         res1.IsFailure.Should().BeTrue();
         res1.Error!.Code.Should().Be("FRAME_TOO_SHORT");
 
-        // Case 2: Unknown frame kind
-        var unknownKindFrame = new byte[60];
-        unknownKindFrame[0] = 0xAA; // invalid kind
+        // Case 2: Unknown frame kind (wrong magic byte)
+        var unknownKindFrame = new byte[90];
+        unknownKindFrame[0] = 0xAA; // invalid magic byte
         var envelopeUnknownKind = new MailboxEnvelope(
             EnvelopeId.New(),
             BlindedRoutingToken.New(),
@@ -57,21 +92,21 @@ public sealed class SealedEnvelopeUnwrapperTests
         res2.IsFailure.Should().BeTrue();
         res2.Error!.Code.Should().Be("UNKNOWN_FRAME_KIND");
 
-        // Case 3: Truncated frame (payload length header says 100, but only 5 bytes follow)
-        var headerOnly = SealedWireFraming.Encode(
+        // Case 3: Truncated / tampered frame (tag mismatch or truncated payload)
+        var validFrame = SealedWireFraming.Encode(
             WireFrameKind.DirectRatchet,
             ChannelId.New(),
             PublicIdentityId.New(),
             new DeviceId(1),
-            new byte[5]);
-        // Corrupt length field at offset 49 to say 1000
-        headerOnly[49] = 0xE8;
-        headerOnly[50] = 0x03;
+            new byte[10]);
+
+        // Tamper with ciphertext byte to trigger AEAD auth failure
+        validFrame[validFrame.Length - 1] ^= 0xFF;
 
         var envelopeTruncated = new MailboxEnvelope(
             EnvelopeId.New(),
             BlindedRoutingToken.New(),
-            headerOnly,
+            validFrame,
             timeProvider.UtcNow,
             timeProvider.UtcNow.AddHours(1));
 
@@ -79,7 +114,7 @@ public sealed class SealedEnvelopeUnwrapperTests
         res3.IsFailure.Should().BeTrue();
         res3.Error!.Code.Should().Be("FRAME_TRUNCATED");
 
-        // Case 4: Corrupted inner Protobuf bytes
+        // Case 4: Corrupted inner Protobuf bytes (inner payload is invalid protobuf)
         var corruptInner = SealedWireFraming.Encode(
             WireFrameKind.DirectRatchet,
             ChannelId.New(),
@@ -136,5 +171,18 @@ public sealed class SealedEnvelopeUnwrapperTests
         direct.SenderDeviceId.Should().Be(deviceId);
         direct.Header.Counter.Should().Be(5);
         direct.Ciphertext.ToArray().Should().Equal(ciphertext);
+    }
+
+    private static bool ContainsSubsequence(ReadOnlySpan<byte> haystack, ReadOnlySpan<byte> needle)
+    {
+        if (needle.IsEmpty || haystack.Length < needle.Length) return false;
+        for (int i = 0; i <= haystack.Length - needle.Length; i++)
+        {
+            if (haystack.Slice(i, needle.Length).SequenceEqual(needle))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 }
