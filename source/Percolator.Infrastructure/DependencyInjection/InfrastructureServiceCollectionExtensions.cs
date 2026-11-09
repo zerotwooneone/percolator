@@ -158,7 +158,7 @@ public static class InfrastructureServiceCollectionExtensions
 
         services.AddScoped<IDatabaseMigrator, SqliteDatabaseMigrator>();
 
-        // 3. Phase 2 Repositories & CQRS Query Services
+        // 3. Repositories & CQRS Query Services
         services.AddScoped<IIdentityProfileRepository, SqliteIdentityProfileRepository>();
         services.AddScoped<ILocalIdentityKeyStore, SqliteLocalIdentityKeyStore>();
         services.AddScoped<IPrivatePreKeyStore, SqlitePrivatePreKeyStore>();
@@ -184,14 +184,14 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IPeerProfileRepository, SqlitePeerProfileRepository>();
         services.AddScoped<IPeerMailboxRoutingRepository, SqlitePeerMailboxRoutingRepository>();
 
-        // 4. Phase 3 Transport & Ingress Scoped Services
+        // 4. Transport & Ingress Scoped Services
         services.AddScoped<IIngressFilterService, IngressFilterService>();
         services.AddScoped<ITransportDispatcher, TransportDispatcher>();
         services.AddScoped<ISealedEnvelopeUnwrapper, SealedEnvelopeUnwrapper>();
         services.AddScoped<IPortReservationService, SqlitePortReservationService>();
         services.AddScoped<UnauthenticatedDeliveryEndpoint>();
 
-        // 5. Phase 4 Vertical Plugins
+        // 5. Vertical Plugins
         // Chat
         services.AddScoped<IChatMessageRepository, SqlChatMessageRepository>();
         services.AddScoped<IChatMessageQueryService, SqlChatMessageQueryService>();

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "name": "05 Advanced Chat and Profiles",
-  "description": "Verifies Phase 6B AES-GCM encrypted avatar blind blob storage, ISO/IEC 7816-4 padded profile encryption, automatic profile sharing upon contact approval, dynamic profile reroll over relayed outbox/mailbox, and contact nickname immutability.",
+  "description": "Verifies AES-GCM encrypted avatar blind blob storage, ISO/IEC 7816-4 padded profile encryption, automatic profile sharing upon contact approval, dynamic profile reroll over relayed outbox/mailbox, and contact nickname immutability.",
   "steps": [
     {
       "$type": "SpawnPersonas",

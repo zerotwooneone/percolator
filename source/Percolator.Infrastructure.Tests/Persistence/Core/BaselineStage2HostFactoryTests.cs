@@ -61,7 +61,7 @@ public class BaselineStage2HostFactoryTests
         var dbContextFactory = scope.ServiceProvider.GetService<IDbContextFactory<PercolatorDbContext>>();
         dbContextFactory.Should().NotBeNull();
 
-        // Assert Phase 2 services resolved
+        // Assert repositories and query services resolved
         scope.ServiceProvider.GetService<IIdentityProfileRepository>().Should().NotBeNull();
         scope.ServiceProvider.GetService<ILocalIdentityKeyStore>().Should().NotBeNull();
         scope.ServiceProvider.GetService<IPrivatePreKeyStore>().Should().NotBeNull();

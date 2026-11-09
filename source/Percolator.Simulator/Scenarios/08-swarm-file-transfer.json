@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "name": "08 Swarm File Transfer and Late Downloader",
-  "description": "End-to-end Phase 9 regression scenario verifying 2 MB synthetic Merkle preset generation, multi-stream loopback TCP slice transport, 50% threshold late downloader injection (Charlie joining Alice & Bob), and full SHA-256 binary disk integrity verification.",
+  "description": "End-to-end regression scenario verifying 2 MB synthetic Merkle preset generation, multi-stream loopback TCP slice transport, 50% threshold late downloader injection (Charlie joining Alice & Bob), and full SHA-256 binary disk integrity verification.",
   "steps": [
     {
       "$type": "SpawnPersonas",

@@ -117,7 +117,7 @@
                     <Button Content="💬 Chat"
                             Command="{Binding SelectChatTabCommand}"
                             Padding="8,3" FontSize="11" />
-                    <Button Content="🔍 Discovery (Phase 8)"
+                    <Button Content="🔍 Discovery"
                             Command="{Binding SelectDiscoveryTabCommand}"
                             Padding="8,3" FontSize="11" />
                 </StackPanel>

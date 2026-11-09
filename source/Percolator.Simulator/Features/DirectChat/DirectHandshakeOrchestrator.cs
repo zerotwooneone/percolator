@@ -255,7 +255,7 @@ internal sealed class DirectHandshakeOrchestrator
                         Details: target.PublicIdentityId.ToString(),
                         Payload: new HandshakeSignalPayload(target.PublicIdentityId, "Accept")));
 
-                    // Phase 6B: Auto-Share Profile on Connect
+                    // Auto-Share Profile on Connect
                     await _profileCoordinator.AutoShareProfileOnConnectAsync(target, senderHost, ct);
                 }
 

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "name": "04 Rich Chat and Virtual Clock",
-  "description": "End-to-end scenario verifying Phase 6A virtual clock time acceleration, disappearing message expiration sweeps, emoji reactions, in-place message edits, and tombstone deletions over Double Ratchet channels.",
+  "description": "End-to-end scenario verifying virtual clock time acceleration, disappearing message expiration sweeps, emoji reactions, in-place message edits, and tombstone deletions over Double Ratchet channels.",
   "steps": [
     {
       "$type": "SpawnPersonas",

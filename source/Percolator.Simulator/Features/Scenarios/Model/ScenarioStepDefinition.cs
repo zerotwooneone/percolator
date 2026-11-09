@@ -80,7 +80,7 @@ public sealed record SendDirectMessageStep(string SenderAlias, string RecipientA
 }
 
 // -----------------------------------------------------------------------------
-// Phase 5 Scenario Steps: Relayed Chat, PreKeys & Queue Chaos
+// Relayed Chat, PreKeys & Queue Chaos Steps
 // -----------------------------------------------------------------------------
 
 public sealed record SpawnRelayStep(string RelayAlias) : ScenarioStepDefinition
@@ -119,7 +119,7 @@ public sealed record ShuffleRelayQueueStep(string RelayAlias) : ScenarioStepDefi
 }
 
 // -----------------------------------------------------------------------------
-// Phase 6A Scenario Steps: Virtual Clock, Disappearing Messages & Rich Chat
+// Virtual Clock, Disappearing Messages & Rich Chat Steps
 // -----------------------------------------------------------------------------
 
 public sealed record AdvanceVirtualTimeStep(int Seconds) : ScenarioStepDefinition
@@ -153,7 +153,7 @@ public sealed record MarkConversationReadStep(string OwnerAlias, string PeerAlia
 }
 
 // -----------------------------------------------------------------------------
-// Phase 6B Scenario Steps: Profile Reroll
+// Profile Reroll Steps
 // -----------------------------------------------------------------------------
 
 public sealed record RerollProfileStep(string PersonaAlias, string? NewDisplayName = null) : ScenarioStepDefinition
@@ -164,7 +164,7 @@ public sealed record RerollProfileStep(string PersonaAlias, string? NewDisplayNa
 }
 
 // -----------------------------------------------------------------------------
-// Phase 7 Scenario Steps: Group Messaging, ZK Presentation Proofs & Epochs
+// Group Messaging, ZK Presentation Proofs & Epochs Steps
 // -----------------------------------------------------------------------------
 
 public sealed record CreateGroupStep(string AdminAlias, string RelayAlias, string GroupName, IReadOnlyList<string> MemberAliases) : ScenarioStepDefinition
@@ -208,7 +208,7 @@ public sealed record RenameGroupStep(string AdminAlias, string GroupName, string
 }
 
 // -----------------------------------------------------------------------------
-// Phase 8 Scenario Steps: Peer Discovery, Blinded Rendezvous & Epoch Rotation
+// Peer Discovery, Blinded Rendezvous & Epoch Rotation Steps
 // -----------------------------------------------------------------------------
 
 public sealed record SetDiscoveryVisibilityStep(string PersonaAlias, bool IsDiscoverable) : ScenarioStepDefinition
@@ -237,7 +237,7 @@ public sealed record ConnectDiscoveredPeerStep(string InitiatorAlias, string Can
 }
 
 // -----------------------------------------------------------------------------
-// Phase 9 Scenario Steps: Swarm File Transfer, Piece Heatmap & Late Downloader
+// Swarm File Transfer, Piece Heatmap & Late Downloader Steps
 // -----------------------------------------------------------------------------
 
 public sealed record InitiateFileTransferStep(string InitiatorAlias, IReadOnlyList<string> RecipientAliases, string PresetSize = "2 MB") : ScenarioStepDefinition

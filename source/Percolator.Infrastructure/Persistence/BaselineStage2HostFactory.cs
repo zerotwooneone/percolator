@@ -58,7 +58,7 @@ public sealed class BaselineStage2HostFactory : IStage2HostFactory
 
             services.AddScoped<IDatabaseMigrator, SqliteDatabaseMigrator>();
 
-            // Phase 2 Repositories & Query Services
+            // Repositories & Query Services
             services.AddScoped<IIdentityProfileRepository, SqliteIdentityProfileRepository>();
             services.AddScoped<ILocalIdentityKeyStore, SqliteLocalIdentityKeyStore>();
             services.AddScoped<IPrivatePreKeyStore, SqlitePrivatePreKeyStore>();

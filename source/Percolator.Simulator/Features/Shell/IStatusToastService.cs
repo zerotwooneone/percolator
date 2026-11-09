@@ -20,7 +20,6 @@ internal interface IStatusToastService : IDisposable
 {
     Observable<ToastMessage> Toasts { get; }
     void ShowToast(string title, string message, ToastSeverity severity = ToastSeverity.Informational);
-    void ShowPlaceholder(string actionName, string scheduledPhase);
 }
 
 internal sealed class StatusToastService : IStatusToastService
@@ -32,14 +31,6 @@ internal sealed class StatusToastService : IStatusToastService
     public void ShowToast(string title, string message, ToastSeverity severity = ToastSeverity.Informational)
     {
         _subject.OnNext(new ToastMessage(title, message, severity));
-    }
-
-    public void ShowPlaceholder(string actionName, string scheduledPhase)
-    {
-        _subject.OnNext(new ToastMessage(
-            "Feature Scheduled",
-            $"Action '{actionName}' is scheduled for implementation in {scheduledPhase}.",
-            ToastSeverity.Informational));
     }
 
     public void Dispose()

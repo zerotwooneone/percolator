@@ -121,10 +121,10 @@
 
                 <!-- Section: Group & Swarm Inspectors CTL-ROS-04, 05 -->
                 <TextBlock Text="INSPECTORS" FontWeight="Bold" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,8,0,0" />
-                <Button Content="👥 Group Channels (Phase 7)"
+                <Button Content="👥 Group Channels"
                         HorizontalAlignment="Stretch"
                         Command="{Binding SelectGroupCommand}" />
-                <Button Content="🌐 Active Swarms (Phase 9)"
+                <Button Content="🌐 Active Swarms"
                         HorizontalAlignment="Stretch"
                         Command="{Binding SelectSwarmCommand}" />
             </StackPanel>

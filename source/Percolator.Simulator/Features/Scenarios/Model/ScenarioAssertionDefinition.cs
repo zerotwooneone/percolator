@@ -30,7 +30,7 @@ public abstract record ScenarioAssertionDefinition
 }
 
 // -----------------------------------------------------------------------------
-// Phase 8 Scenario Assertions: Blinded Rendezvous & Nearby Discovery
+// Blinded Rendezvous & Nearby Discovery Assertions
 // -----------------------------------------------------------------------------
 
 public sealed record AssertBlindedLocatorResolvedAssertion(string ObserverAlias, string TargetAlias) : ScenarioAssertionDefinition
@@ -59,7 +59,7 @@ public sealed record AssertZeroErrorsAssertion() : ScenarioAssertionDefinition
 }
 
 // -----------------------------------------------------------------------------
-// Phase 5 Scenario Assertions: Hosted PreKeys, Queue Depth & Log Verification
+// Hosted PreKeys, Queue Depth & Log Verification Assertions
 // -----------------------------------------------------------------------------
 
 public sealed record AssertHostedOpkCountAssertion(string RelayAlias, string PersonaAlias, int ExpectedCount) : ScenarioAssertionDefinition
@@ -78,7 +78,7 @@ public sealed record AssertLogContainsCodeAssertion(string ExpectedCode) : Scena
 }
 
 // -----------------------------------------------------------------------------
-// Phase 6A Scenario Assertions: Disappearing Messages, Reactions & Mutations
+// Disappearing Messages, Reactions & Mutations Assertions
 // -----------------------------------------------------------------------------
 
 public sealed record AssertMessageExpiredAssertion(string PersonaAlias, string ExpectedText) : ScenarioAssertionDefinition
@@ -107,7 +107,7 @@ public sealed record AssertMessageReadAssertion(string PersonaAlias, string Mess
 }
 
 // -----------------------------------------------------------------------------
-// Phase 6B Scenario Assertions: Profile & Identicon Sync
+// Profile & Identicon Sync Assertions
 // -----------------------------------------------------------------------------
 
 public sealed record AssertProfileSyncedAssertion(string ObserverAlias, string TargetAlias, string ExpectedDisplayName) : ScenarioAssertionDefinition
@@ -116,7 +116,7 @@ public sealed record AssertProfileSyncedAssertion(string ObserverAlias, string T
 }
 
 // -----------------------------------------------------------------------------
-// Phase 7 Scenario Assertions: Group Epochs, Message Delivery & Forward Secrecy
+// Group Epochs, Message Delivery & Forward Secrecy Assertions
 // -----------------------------------------------------------------------------
 
 public sealed record AssertGroupEpochAssertion(string GroupName, ulong ExpectedEpoch) : ScenarioAssertionDefinition
@@ -135,7 +135,7 @@ public sealed record AssertMemberCannotDecryptAssertion(string PersonaAlias, str
 }
 
 // -----------------------------------------------------------------------------
-// Phase 9 Scenario Assertions: Swarm Transfer & Disk Integrity Verification
+// Swarm Transfer & Disk Integrity Verification Assertions
 // -----------------------------------------------------------------------------
 
 public sealed record AssertFileTransferProgressAssertion(string PersonaAlias, double MinProgressRatio) : ScenarioAssertionDefinition

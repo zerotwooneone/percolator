@@ -54,7 +54,7 @@ internal sealed partial class TopGlobalToolbarViewModel : ViewModelBase
     [RelayCommand]
     private async Task AddPersonAsync()
     {
-        // 1. If this is the first real persona added, clear Phase 1 design preview seed on UI thread
+        // 1. If this is the first real persona added, clear design preview seed on UI thread
         if (!_hasAddedRealPersona)
         {
             _hasAddedRealPersona = true;

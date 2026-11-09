@@ -138,9 +138,9 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         SignedPreKeyPublic = spkPub;
         var sigBytes = crypto.SignEd25519(_identityPrivateKey.Span, SignedPreKeyPublic.Span);
         SignedPreKeySignature = DeviceLinkProof.FromSpan(sigBytes);
-        // Phase 6B ProfileKey
+        // ProfileKey
         ProfileKey = ProfileKey.Generate();
-        // Phase 5 Relay tokens
+        // Relay tokens
         MailboxRoutingToken = BlindedRoutingToken.New();
         var drainBytes = new byte[32];
         RandomNumberGenerator.Fill(drainBytes);
