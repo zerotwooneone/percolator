@@ -1,6 +1,7 @@
 namespace Percolator.Infrastructure.Persistence.Repositories;
 
 using System;
+using System.Buffers.Binary;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
@@ -12,6 +13,7 @@ using Percolator.Infrastructure.Persistence.Entities;
 
 public sealed class SqliteGroupCredentialsRepository : IGroupCredentialsRepository
 {
+    private static ReadOnlySpan<byte> EpochPrefix => "EPCH"u8;
     private readonly PercolatorDbContext _dbContext;
 
     public SqliteGroupCredentialsRepository(PercolatorDbContext dbContext)
@@ -32,12 +34,23 @@ public sealed class SqliteGroupCredentialsRepository : IGroupCredentialsReposito
         }
 
         var masterKey = GroupMasterKey.FromSpan(entity.MasterKey);
-        var authMac = AuthCredentialMacBytes.FromSpan(entity.AuthCredentialMac);
+        var authMacSpan = entity.AuthCredentialMac.AsSpan();
+        var currentEpoch = new EpochNumber(entity.CurrentEpoch);
+
+        // Backward-compatible fallback for any transitional payloads
+        if (currentEpoch.Value == 0 && authMacSpan.Length > 8 && authMacSpan[..4].SequenceEqual(EpochPrefix))
+        {
+            uint epochVal = BinaryPrimitives.ReadUInt32LittleEndian(authMacSpan.Slice(4, 4));
+            currentEpoch = new EpochNumber(epochVal);
+            authMacSpan = authMacSpan[8..];
+        }
+
+        var authMac = AuthCredentialMacBytes.FromSpan(authMacSpan);
         var blobKey = entity.LocalBlobKey != null && entity.LocalBlobKey.Length > 0
             ? BlobKey.FromSpan(entity.LocalBlobKey)
             : null;
 
-        return new GroupCredentials(channelId, masterKey, authMac, blobKey);
+        return new GroupCredentials(channelId, masterKey, authMac, blobKey, currentEpoch);
     }
 
     public async Task SaveAsync(GroupCredentials credentials, CancellationToken cancellationToken = default)
@@ -59,6 +72,7 @@ public sealed class SqliteGroupCredentialsRepository : IGroupCredentialsReposito
                 ChannelId = channelIdGuid,
                 MasterKey = masterBytes,
                 AuthCredentialMac = authMacBytes,
+                CurrentEpoch = credentials.CurrentEpoch.Value,
                 LocalBlobKey = blobKeyBytes,
                 UpdatedAtUtc = DateTimeOffset.UtcNow
             };
@@ -68,6 +82,7 @@ public sealed class SqliteGroupCredentialsRepository : IGroupCredentialsReposito
         {
             existing.MasterKey = masterBytes;
             existing.AuthCredentialMac = authMacBytes;
+            existing.CurrentEpoch = credentials.CurrentEpoch.Value;
             existing.LocalBlobKey = blobKeyBytes;
             existing.UpdatedAtUtc = DateTimeOffset.UtcNow;
         }

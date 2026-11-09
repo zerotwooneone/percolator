@@ -28,6 +28,11 @@ public sealed class SealedEnvelopeUnwrapper : ISealedEnvelopeUnwrapper
         return UnwrapFrame(envelope.Ciphertext, _recipientId, _timeProvider.UtcNow);
     }
 
+    public DomainResult<InboundEnvelope> UnwrapDirect(ReadOnlyMemory<byte> frameBytes)
+    {
+        return UnwrapFrame(frameBytes, _recipientId, _timeProvider.UtcNow);
+    }
+
     public DomainResult<InboundEnvelope> UnwrapFrame(
         ReadOnlyMemory<byte> frameBytes,
         PublicIdentityId recipientId,

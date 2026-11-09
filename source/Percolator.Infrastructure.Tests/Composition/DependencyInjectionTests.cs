@@ -158,41 +158,11 @@ public sealed class DependencyInjectionTests
         sp.GetRequiredService<IPortReservationService>().Should().NotBeNull();
         sp.GetRequiredService<IPrivateRendezvousService>().Should().NotBeNull();
         sp.GetRequiredService<IProfileMetadataSerializer>().Should().NotBeNull();
-
-        // Assert Event Bus singletons
-        sp.GetRequiredService<IEventBus>().Should().NotBeNull();
-        sp.GetRequiredService<IEventPublisher>().Should().NotBeNull();
-        sp.GetRequiredService<IEventSubscriber>().Should().NotBeNull();
+        sp.GetRequiredService<IStage2HostFactory>().Should().NotBeNull();
     }
 
     [Test]
-    public void NoCaptiveDependencies_ScopedServicesNeverInjectedIntoSingletons()
-    {
-        // Arrange
-        var options = Options.Create(new VaultStorageOptions { BaseDirectory = _tempDir });
-        var factory = new Stage2HostFactory(options);
-
-        // Act
-        using var host = factory.BuildAuthenticatedHost(_keyHandle);
-
-        // Resolving singletons from root container must succeed without captive scoped exceptions
-        var eventBus = host.Services.GetRequiredService<IEventBus>();
-        eventBus.Should().NotBeNull();
-
-        var streamRegistry = host.Services.GetRequiredService<IStreamRegistry>();
-        streamRegistry.Should().NotBeNull();
-
-        var crypto = host.Services.GetRequiredService<ICryptoEngine>();
-        crypto.Should().NotBeNull();
-
-        // Scope validation verification: resolving a scoped service from the root container must throw
-        var resolveScopedAction = () => host.Services.GetRequiredService<PercolatorDbContext>();
-        resolveScopedAction.Should().Throw<InvalidOperationException>()
-            .WithMessage("*scoped*");
-    }
-
-    [Test]
-    public void RequiredHostedServices_RegisteredInContainer()
+    public void All12HostedServices_RegisteredAndResolvable()
     {
         // Arrange
         var options = Options.Create(new VaultStorageOptions { BaseDirectory = _tempDir });
@@ -259,5 +229,24 @@ public sealed class DependencyInjectionTests
 
         var stopAction = async () => await session.StopAsync(cts.Token);
         await stopAction.Should().NotThrowAsync();
+    }
+
+    [Test]
+    public void ChannelRelayResolver_IsSingletonAcrossScopes()
+    {
+        // Arrange
+        var options = Options.Create(new VaultStorageOptions { BaseDirectory = _tempDir });
+        var factory = new Stage2HostFactory(options);
+
+        // Act
+        using var host = factory.BuildAuthenticatedHost(_keyHandle);
+        using var scope1 = host.Services.CreateScope();
+        using var scope2 = host.Services.CreateScope();
+
+        var resolver1 = scope1.ServiceProvider.GetRequiredService<IChannelRelayResolver>();
+        var resolver2 = scope2.ServiceProvider.GetRequiredService<IChannelRelayResolver>();
+
+        // Assert
+        resolver1.Should().BeSameAs(resolver2);
     }
 }

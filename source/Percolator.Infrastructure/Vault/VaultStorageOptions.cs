@@ -6,6 +6,8 @@ public sealed class VaultStorageOptions
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "Percolator");
 
+    public bool UseEncryption { get; set; } = true;
+
     public string HeaderFilePath => Path.Combine(BaseDirectory, "percolator.header");
     public string DatabaseFilePath => Path.Combine(BaseDirectory, "percolator.db");
     public string CacheDirectoryPath => Path.Combine(BaseDirectory, "cache");

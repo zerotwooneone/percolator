@@ -162,6 +162,7 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.AuthCredentialMac).HasColumnType("BLOB");
             entity.Property(e => e.MasterKey).HasColumnType("BLOB");
             entity.Property(e => e.LocalBlobKey).HasColumnType("BLOB");
+            entity.Property(e => e.CurrentEpoch).HasDefaultValue(0u);
         });
         // 10. Vault Pending Handshakes
         modelBuilder.Entity<VaultPendingHandshakeEntity>(entity =>

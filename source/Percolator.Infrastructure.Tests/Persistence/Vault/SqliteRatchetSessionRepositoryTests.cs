@@ -85,4 +85,58 @@ public class SqliteRatchetSessionRepositoryTests
         snapshot.RootKeyBytes.Should().Equal(rootKeyBytes);
         snapshot.SendingChainKeyBytes.Should().Equal(sendKeyBytes);
     }
+
+    [Test]
+    public async Task SaveSessionAsync_SupersededSession_ReplacesPreviousSessionOnSameRouteWithoutUniqueConstraintViolation()
+    {
+        // Arrange
+        var ownerId = PublicIdentityId.New();
+        var remoteId = PublicIdentityId.New();
+        var ownerDevice = DeviceId.Primary;
+        var remoteDevice = new DeviceId(2);
+
+        byte[] rootKeyBytes1 = new byte[32];
+        Array.Fill(rootKeyBytes1, (byte)0x11);
+        var session1 = new DirectRatchetSession(
+            ownerId,
+            ownerDevice,
+            remoteId,
+            remoteDevice,
+            ChainKey.FromSpan(rootKeyBytes1),
+            sendingChainKey: null,
+            receivingChainKey: null,
+            remoteEphemeralPublicKey: null,
+            localEphemeralPrivateKey: null,
+            localEphemeralPublicKey: null);
+
+        await _repository.SaveSessionAsync(session1);
+
+        // Act - Create and save session2 on the identical route (same owner, ownerDevice, remote, remoteDevice)
+        byte[] rootKeyBytes2 = new byte[32];
+        Array.Fill(rootKeyBytes2, (byte)0x22);
+        var session2 = new DirectRatchetSession(
+            ownerId,
+            ownerDevice,
+            remoteId,
+            remoteDevice,
+            ChainKey.FromSpan(rootKeyBytes2),
+            sendingChainKey: null,
+            receivingChainKey: null,
+            remoteEphemeralPublicKey: null,
+            localEphemeralPrivateKey: null,
+            localEphemeralPublicKey: null);
+
+        // This must not throw SQLite UNIQUE constraint violation
+        var act = async () => await _repository.SaveSessionAsync(session2);
+        await act.Should().NotThrowAsync();
+
+        // Assert - Only session2 exists for this route
+        using var newContext = _testDb.CreateNewContext();
+        var newRepo = new SqliteRatchetSessionRepository(newContext);
+        var loaded = await newRepo.GetSessionAsync(ownerId, remoteId, remoteDevice);
+
+        loaded.Should().NotBeNull();
+        loaded!.Id.Should().Be(session2.Id);
+        loaded.ExportSnapshot().RootKeyBytes.Should().Equal(rootKeyBytes2);
+    }
 }

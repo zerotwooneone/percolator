@@ -80,9 +80,8 @@ public sealed class SqliteRatchetSessionRepository : IRatchetSessionRepository
         var ownerGuid = session.OwnerIdentityId.Value;
         var remoteGuid = session.RemotePeerId.Value;
         var sessionIdStr = session.Id.ToString();
-
-        var existing = await _dbContext.VaultRatchetSessions
-            .FirstOrDefaultAsync(s => s.SessionId == sessionIdStr, ct);
+        var ownerDevVal = session.OwnerDeviceId.Value;
+        var remoteDevVal = session.RemoteDeviceId.Value;
 
         var snapshot = session.ExportSnapshot();
         var rootBytes = snapshot.RootKeyBytes ?? Array.Empty<byte>();
@@ -93,15 +92,34 @@ public sealed class SqliteRatchetSessionRepository : IRatchetSessionRepository
         var remotePubBytes = snapshot.RemoteEphemeralPublicKey != null ? snapshot.RemoteEphemeralPublicKey.Span.ToArray() : null;
         var stateBlob = SerializeSkippedKeys(snapshot.SkippedMessageKeys);
 
+        await using var tx = await _dbContext.Database.BeginTransactionAsync(ct);
+
+        var existing = await _dbContext.VaultRatchetSessions
+            .FirstOrDefaultAsync(s => s.SessionId == sessionIdStr, ct);
+
+        // Evict any superseded session on this route
+        var superseded = await _dbContext.VaultRatchetSessions
+            .Where(s => s.OwnerIdentityId == ownerGuid &&
+                        s.OwnerDeviceId == ownerDevVal &&
+                        s.RemotePeerId == remoteGuid &&
+                        s.RemoteDeviceId == remoteDevVal &&
+                        s.SessionId != sessionIdStr)
+            .ToListAsync(ct);
+
+        if (superseded.Count > 0)
+        {
+            _dbContext.VaultRatchetSessions.RemoveRange(superseded);
+        }
+
         if (existing == null)
         {
             var entity = new VaultRatchetSessionEntity
             {
                 SessionId = sessionIdStr,
                 OwnerIdentityId = ownerGuid,
-                OwnerDeviceId = session.OwnerDeviceId.Value,
+                OwnerDeviceId = ownerDevVal,
                 RemotePeerId = remoteGuid,
-                RemoteDeviceId = session.RemoteDeviceId.Value,
+                RemoteDeviceId = remoteDevVal,
                 RootKey = rootBytes,
                 SendChainKey = sendBytes,
                 RecvChainKey = recvBytes,
@@ -119,9 +137,9 @@ public sealed class SqliteRatchetSessionRepository : IRatchetSessionRepository
         else
         {
             existing.OwnerIdentityId = ownerGuid;
-            existing.OwnerDeviceId = session.OwnerDeviceId.Value;
+            existing.OwnerDeviceId = ownerDevVal;
             existing.RemotePeerId = remoteGuid;
-            existing.RemoteDeviceId = session.RemoteDeviceId.Value;
+            existing.RemoteDeviceId = remoteDevVal;
             existing.RootKey = rootBytes;
             existing.SendChainKey = sendBytes;
             existing.RecvChainKey = recvBytes;
@@ -136,6 +154,7 @@ public sealed class SqliteRatchetSessionRepository : IRatchetSessionRepository
         }
 
         await _dbContext.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
     }
 
     private static byte[]? SerializeSkippedKeys(IReadOnlyDictionary<uint, byte[]> skippedKeys)

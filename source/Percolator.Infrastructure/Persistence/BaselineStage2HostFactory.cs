@@ -35,6 +35,7 @@ public sealed class BaselineStage2HostFactory : IStage2HostFactory
         builder.ConfigureServices((_, services) =>
         {
             services.AddSingleton(masterKeyHandle);
+            services.AddSingleton(_options);
             services.AddSingleton<DbConnectionInterceptor, SqlCipherPragmaInterceptor>();
 
             // Event Bus

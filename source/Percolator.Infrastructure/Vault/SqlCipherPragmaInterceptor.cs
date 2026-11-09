@@ -1,17 +1,25 @@
 namespace Percolator.Infrastructure.Vault;
 
+using System;
 using System.Data.Common;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Percolator.Domain.Security.Ports;
 
 public sealed class SqlCipherPragmaInterceptor : DbConnectionInterceptor
 {
-    private readonly IMasterKeyHandle _keyHandle;
+    private const string CipherMemorySecurityPragma = "PRAGMA cipher_memory_security = ON;";
+    private const string StandardWalPragmas = "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;";
 
-    public SqlCipherPragmaInterceptor(IMasterKeyHandle keyHandle)
+    private readonly IMasterKeyHandle _keyHandle;
+    private readonly VaultStorageOptions _options;
+
+    public SqlCipherPragmaInterceptor(IMasterKeyHandle keyHandle, VaultStorageOptions options)
     {
         _keyHandle = keyHandle ?? throw new ArgumentNullException(nameof(keyHandle));
+        _options = options ?? throw new ArgumentNullException(nameof(options));
     }
 
     public override void ConnectionOpened(DbConnection connection, ConnectionEndEventData eventData)
@@ -19,12 +27,16 @@ public sealed class SqlCipherPragmaInterceptor : DbConnectionInterceptor
         if (connection is SqliteConnection sqliteConn)
         {
             using var cmd = sqliteConn.CreateCommand();
-            cmd.CommandText = "PRAGMA cipher_memory_security = ON;";
-            cmd.ExecuteNonQuery();
 
-            _keyHandle.ApplyKeyToConnection(sqliteConn);
+            if (_options.UseEncryption)
+            {
+                cmd.CommandText = CipherMemorySecurityPragma;
+                cmd.ExecuteNonQuery();
 
-            cmd.CommandText = "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;";
+                _keyHandle.ApplyKeyToConnection(sqliteConn);
+            }
+
+            cmd.CommandText = StandardWalPragmas;
             cmd.ExecuteNonQuery();
         }
     }
@@ -37,12 +49,16 @@ public sealed class SqlCipherPragmaInterceptor : DbConnectionInterceptor
         if (connection is SqliteConnection sqliteConn)
         {
             await using var cmd = sqliteConn.CreateCommand();
-            cmd.CommandText = "PRAGMA cipher_memory_security = ON;";
-            await cmd.ExecuteNonQueryAsync(cancellationToken);
 
-            _keyHandle.ApplyKeyToConnection(sqliteConn);
+            if (_options.UseEncryption)
+            {
+                cmd.CommandText = CipherMemorySecurityPragma;
+                await cmd.ExecuteNonQueryAsync(cancellationToken);
 
-            cmd.CommandText = "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;";
+                _keyHandle.ApplyKeyToConnection(sqliteConn);
+            }
+
+            cmd.CommandText = StandardWalPragmas;
             await cmd.ExecuteNonQueryAsync(cancellationToken);
         }
     }

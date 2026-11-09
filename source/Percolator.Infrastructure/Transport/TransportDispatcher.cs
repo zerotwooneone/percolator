@@ -251,18 +251,19 @@ public sealed class TransportDispatcher : ITransportDispatcher
 
                     byte[]? masterKeyBytes = null;
                     byte[]? authMacBytes = null;
+                    uint epoch = 0;
 
                     var creds = await _groupCredentialsRepository.GetAsync(job.ChannelId, ct);
                     if (creds != null)
                     {
                         masterKeyBytes = creds.MasterKey.Span.ToArray();
                         authMacBytes = creds.AuthCredentialMac.Span.ToArray();
+                        epoch = creds.CurrentEpoch.Value;
                     }
 
                     var framedPayload = EnsureSealedFrame(job);
 
                     byte[] zkProof = Array.Empty<byte>();
-                    uint epoch = 0;
                     Span<byte> challengeHash = stackalloc byte[32];
                     RelayGroupLedger.ComputeDispatchChallenge(framedPayload.Span, challengeHash);
 

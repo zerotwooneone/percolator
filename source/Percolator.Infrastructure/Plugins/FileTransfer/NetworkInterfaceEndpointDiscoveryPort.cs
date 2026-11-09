@@ -2,6 +2,7 @@ namespace Percolator.Infrastructure.Plugins.FileTransfer;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
@@ -13,19 +14,37 @@ using Percolator.Apps.FileTransfer.Ports;
 
 public sealed class NetworkInterfaceEndpointDiscoveryPort : INetworkEndpointDiscoveryPort
 {
-    private readonly int _listenPort;
-    private readonly string _relayBaseUri;
+    private readonly PortNumber _listenPort;
+    private readonly RelayPipeEndpointUri _relayPipeUri;
+    private readonly bool _allowLoopback;
 
-    public NetworkInterfaceEndpointDiscoveryPort(int listenPort = 50001, string relayBaseUri = "https://relay.percolator.net/pipes")
+    public NetworkInterfaceEndpointDiscoveryPort(
+        int listenPort = 50001,
+        string relayBaseUri = "https://relay.percolator.net/pipes",
+        bool allowLoopback = false)
     {
-        _listenPort = listenPort;
-        _relayBaseUri = relayBaseUri;
+        if (listenPort is < 1 or > 65535)
+        {
+            throw new ArgumentOutOfRangeException(nameof(listenPort), listenPort, "Port must be between 1 and 65535.");
+        }
+
+        ArgumentException.ThrowIfNullOrWhiteSpace(relayBaseUri);
+        if (!Uri.TryCreate(relayBaseUri, UriKind.Absolute, out _))
+        {
+            throw new ArgumentException("Relay base URI must be a valid absolute URI.", nameof(relayBaseUri));
+        }
+
+        _listenPort = PortNumber.FromInt(listenPort);
+        _relayPipeUri = RelayPipeEndpointUri.Parse(relayBaseUri);
+        _allowLoopback = allowLoopback;
     }
 
     public ValueTask<IReadOnlyList<DirectEndpointCandidate>> DiscoverLocalCandidatesAsync(
         DirectWanPolicy wanPolicy,
         CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
+
         var candidates = new List<DirectEndpointCandidate>();
 
         try
@@ -33,6 +52,8 @@ public sealed class NetworkInterfaceEndpointDiscoveryPort : INetworkEndpointDisc
             NetworkInterface[] interfaces = NetworkInterface.GetAllNetworkInterfaces();
             foreach (NetworkInterface ni in interfaces)
             {
+                ct.ThrowIfCancellationRequested();
+
                 if (ni.OperationalStatus != OperationalStatus.Up
                     || ni.NetworkInterfaceType == NetworkInterfaceType.Loopback
                     || ni.NetworkInterfaceType == NetworkInterfaceType.Tunnel)
@@ -47,25 +68,36 @@ public sealed class NetworkInterfaceEndpointDiscoveryPort : INetworkEndpointDisc
                     {
                         candidates.Add(new DirectEndpointCandidate(
                             EndpointHost.Parse(uni.Address.ToString()),
-                            PortNumber.FromInt(_listenPort),
+                            _listenPort,
                             DirectCandidateKind.DirectLan));
                     }
                 }
             }
         }
-        catch
+        catch (Exception ex) when (ex is SocketException or NetworkInformationException)
         {
-            // Fallback gracefully if network interface enumeration fails
+            // Transient or restricted network interface enumeration fallback
         }
 
-        if (candidates.Count == 0)
+        var loopbackV4 = IPAddress.Loopback.ToString();
+        var loopbackV6 = IPAddress.IPv6Loopback.ToString();
+
+        if (_allowLoopback && !candidates.Any(c => c.Host.Value == loopbackV4 || c.Host.Value == loopbackV6))
         {
             candidates.Add(new DirectEndpointCandidate(
-                EndpointHost.Parse("127.0.0.1"),
-                PortNumber.FromInt(_listenPort),
+                EndpointHost.Parse(loopbackV4),
+                _listenPort,
+                DirectCandidateKind.DirectLan));
+        }
+        else if (candidates.Count == 0)
+        {
+            candidates.Add(new DirectEndpointCandidate(
+                EndpointHost.Parse(loopbackV4),
+                _listenPort,
                 DirectCandidateKind.DirectLan));
         }
 
+        ct.ThrowIfCancellationRequested();
         return ValueTask.FromResult<IReadOnlyList<DirectEndpointCandidate>>(candidates);
     }
 
@@ -73,8 +105,10 @@ public sealed class NetworkInterfaceEndpointDiscoveryPort : INetworkEndpointDisc
         TransferSessionId sessionId,
         CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
+
         var descriptor = new RelayRendezvousDescriptor(
-            RelayPipeEndpointUri.Parse(_relayBaseUri),
+            _relayPipeUri,
             RelayPipeToken.Generate());
 
         return ValueTask.FromResult<RelayRendezvousDescriptor?>(descriptor);

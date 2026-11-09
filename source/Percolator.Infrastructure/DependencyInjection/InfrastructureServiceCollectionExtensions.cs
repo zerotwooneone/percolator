@@ -214,7 +214,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IBlobStorageService, BlobStorageService>();
         services.AddScoped<IRelayBlobClient, RelayBlobClient>();
         services.AddScoped<IPeerStreamBlobClient, PeerStreamBlobClient>();
-        services.AddScoped<IChannelRelayResolver, ChannelRelayResolver>();
+        services.AddSingleton<IChannelRelayResolver, ChannelRelayResolver>();
 
         // File Transfer
         services.AddScoped<IDistributedTrackerPort, RelaySwarmTrackerClient>();
@@ -308,7 +308,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<ILocalChunkStore, LocalFileChunkStore>();
         services.AddScoped<IRelayBlobClient, RelayBlobClient>();
         services.AddScoped<IPeerStreamBlobClient, PeerStreamBlobClient>();
-        services.AddScoped<IChannelRelayResolver, ChannelRelayResolver>();
+        services.AddSingleton<IChannelRelayResolver, ChannelRelayResolver>();
 
         services.AddHostedService<RelayBlobRetentionPruner>();
 

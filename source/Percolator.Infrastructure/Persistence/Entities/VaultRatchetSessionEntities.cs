@@ -53,6 +53,7 @@ public sealed class VaultGroupCredentialsEntity
     public Guid ChannelId { get; set; }
     public byte[] MasterKey { get; set; } = Array.Empty<byte>();
     public byte[] AuthCredentialMac { get; set; } = Array.Empty<byte>();
+    public uint CurrentEpoch { get; set; }
     public byte[]? LocalBlobKey { get; set; }
     public DateTimeOffset UpdatedAtUtc { get; set; }
 }
