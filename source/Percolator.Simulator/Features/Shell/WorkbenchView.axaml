@@ -4,6 +4,7 @@
              xmlns:topology="using:Percolator.Simulator.Features.Topology"
              xmlns:relayed="using:Percolator.Simulator.Features.RelayedChat"
              xmlns:group="using:Percolator.Simulator.Features.GroupMessaging"
+             xmlns:swarm="using:Percolator.Simulator.Features.SwarmSimulation"
              x:Class="Percolator.Simulator.Features.Shell.WorkbenchView"
              x:DataType="vm:WorkbenchViewModel">
 
@@ -16,6 +17,9 @@
         </DataTemplate>
         <DataTemplate DataType="{x:Type group:GroupPanelViewModel}">
             <group:GroupPanelView />
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type swarm:SwarmPanelViewModel}">
+            <swarm:SwarmPanelView />
         </DataTemplate>
     </UserControl.DataTemplates>
 

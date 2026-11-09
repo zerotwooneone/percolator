@@ -37,6 +37,12 @@ namespace Percolator.Simulator.Features.Scenarios.Model;
 [JsonDerivedType(typeof(ResolveBlindedLocatorStep), "ResolveBlindedLocator")]
 [JsonDerivedType(typeof(QueryNearbyPeersStep), "QueryNearbyPeers")]
 [JsonDerivedType(typeof(ConnectDiscoveredPeerStep), "ConnectDiscoveredPeer")]
+[JsonDerivedType(typeof(InitiateFileTransferStep), "InitiateFileTransfer")]
+[JsonDerivedType(typeof(AcceptFileTransferStep), "AcceptFileTransfer")]
+[JsonDerivedType(typeof(InjectLateDownloaderStep), "InjectLateDownloader")]
+[JsonDerivedType(typeof(PauseFileTransferStep), "PauseFileTransfer")]
+[JsonDerivedType(typeof(ResumeFileTransferStep), "ResumeFileTransfer")]
+[JsonDerivedType(typeof(CancelFileTransferStep), "CancelFileTransfer")]
 public abstract record ScenarioStepDefinition
 {
     public abstract string DisplayText { get; }
@@ -228,4 +234,38 @@ public sealed record QueryNearbyPeersStep(string PersonaAlias, string RelayAlias
 public sealed record ConnectDiscoveredPeerStep(string InitiatorAlias, string CandidateAlias, string RelayAlias) : ScenarioStepDefinition
 {
     public override string DisplayText => $"Connect Discovered Peer: '{InitiatorAlias}' ➔ '{CandidateAlias}' via '{RelayAlias}'";
+}
+
+// -----------------------------------------------------------------------------
+// Phase 9 Scenario Steps: Swarm File Transfer, Piece Heatmap & Late Downloader
+// -----------------------------------------------------------------------------
+
+public sealed record InitiateFileTransferStep(string InitiatorAlias, IReadOnlyList<string> RecipientAliases, string PresetSize = "2 MB") : ScenarioStepDefinition
+{
+    public override string DisplayText => $"Initiate File Transfer: '{InitiatorAlias}' ➔ [{string.Join(", ", RecipientAliases)}] ({PresetSize})";
+}
+
+public sealed record AcceptFileTransferStep(string RecipientAlias) : ScenarioStepDefinition
+{
+    public override string DisplayText => $"Accept File Transfer: '{RecipientAlias}'";
+}
+
+public sealed record InjectLateDownloaderStep(string LateJoinerAlias, double ProgressThreshold = 0.5) : ScenarioStepDefinition
+{
+    public override string DisplayText => $"Inject Late Downloader: '{LateJoinerAlias}' at {ProgressThreshold:P0} threshold";
+}
+
+public sealed record PauseFileTransferStep(string PersonaAlias) : ScenarioStepDefinition
+{
+    public override string DisplayText => $"Pause File Transfer: '{PersonaAlias}'";
+}
+
+public sealed record ResumeFileTransferStep(string PersonaAlias) : ScenarioStepDefinition
+{
+    public override string DisplayText => $"Resume File Transfer: '{PersonaAlias}'";
+}
+
+public sealed record CancelFileTransferStep(string PersonaAlias) : ScenarioStepDefinition
+{
+    public override string DisplayText => $"Cancel File Transfer: '{PersonaAlias}'";
 }

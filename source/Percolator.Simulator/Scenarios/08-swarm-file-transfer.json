@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "name": "08 Swarm File Transfer and Late Downloader",
+  "description": "End-to-end Phase 9 regression scenario verifying 2 MB synthetic Merkle preset generation, multi-stream loopback TCP slice transport, 50% threshold late downloader injection (Charlie joining Alice & Bob), and full SHA-256 binary disk integrity verification.",
+  "steps": [
+    {
+      "$type": "SpawnPersonas",
+      "aliases": [
+        "Alice",
+        "Bob",
+        "Charlie"
+      ]
+    },
+    {
+      "$type": "InitiateFileTransfer",
+      "initiatorAlias": "Alice",
+      "recipientAliases": [
+        "Bob"
+      ],
+      "presetSize": "2 MB"
+    },
+    {
+      "$type": "InjectLateDownloader",
+      "lateJoinerAlias": "Charlie",
+      "progressThreshold": 0.5
+    },
+    {
+      "$type": "AcceptFileTransfer",
+      "recipientAlias": "Bob"
+    }
+  ],
+  "assertions": [
+    {
+      "$type": "AssertFileTransferCompleted",
+      "personaAlias": "Bob"
+    },
+    {
+      "$type": "AssertFileIntegrityVerified",
+      "personaAlias": "Bob"
+    },
+    {
+      "$type": "AssertFileTransferCompleted",
+      "personaAlias": "Charlie"
+    },
+    {
+      "$type": "AssertFileIntegrityVerified",
+      "personaAlias": "Charlie"
+    },
+    {
+      "$type": "AssertZeroErrors"
+    }
+  ]
+}

@@ -7,6 +7,7 @@ using Percolator.Simulator.Features.RichChatAndProfiles;
 using Percolator.Simulator.Features.RelayedChat;
 using Percolator.Simulator.Features.Scenarios;
 using Percolator.Simulator.Features.Shell;
+using Percolator.Simulator.Features.SwarmSimulation;
 
 namespace Percolator.Simulator.Features.Topology;
 
@@ -21,12 +22,13 @@ internal sealed class PersonaCardDependencies
     public ISimulatedWorldStateService WorldState { get; }
     public ISimulatorLogSink LogSink { get; }
     public RelayProvisioningCoordinator RelayCoordinator { get; }
-    public IFlightRecorderStateService? FlightRecorder { get; }
+    public IFlightRecorderStateService FlightRecorder { get; }
     public RichChatActionCoordinator RichChatCoordinator { get; }
     public ProfileSyncCoordinator ProfileCoordinator { get; }
     public GroupChatCoordinator GroupCoordinator { get; }
     public DiscoverySimulationCoordinator DiscoveryCoordinator { get; }
     public IVirtualClockStateService VirtualClock { get; }
+    public SwarmSimulationCoordinator SwarmCoordinator { get; }
 
     public PersonaCardDependencies(
         IStatusToastService toastService,
@@ -43,7 +45,8 @@ internal sealed class PersonaCardDependencies
         GroupChatCoordinator groupCoordinator,
         DiscoverySimulationCoordinator discoveryCoordinator,
         IVirtualClockStateService virtualClock,
-        IFlightRecorderStateService? flightRecorder = null)
+        SwarmSimulationCoordinator swarmCoordinator,
+        IFlightRecorderStateService flightRecorder)
     {
         ToastService = toastService ?? throw new ArgumentNullException(nameof(toastService));
         StateBus = stateBus ?? throw new ArgumentNullException(nameof(stateBus));
@@ -59,6 +62,7 @@ internal sealed class PersonaCardDependencies
         GroupCoordinator = groupCoordinator ?? throw new ArgumentNullException(nameof(groupCoordinator));
         DiscoveryCoordinator = discoveryCoordinator ?? throw new ArgumentNullException(nameof(discoveryCoordinator));
         VirtualClock = virtualClock ?? throw new ArgumentNullException(nameof(virtualClock));
-        FlightRecorder = flightRecorder;
+        SwarmCoordinator = swarmCoordinator ?? throw new ArgumentNullException(nameof(swarmCoordinator));
+        FlightRecorder = flightRecorder ?? throw new ArgumentNullException(nameof(flightRecorder));
     }
 }

@@ -35,6 +35,13 @@ internal interface ISimulatedPersonaHost : IAsyncDisposable
     bool AllowPeerDiscovery { get; set; }
     bool AutoShareProfile { get; set; }
     bool AutoAcceptGroupInvites { get; set; }
+    bool AllowFileTransfers { get; set; }
+    bool RelayOnlyRouting { get; set; }
+    bool AutoAcceptFileTransfers { get; set; }
+
+    string NodeTempDirectory { get; }
+    string NodeDownloadsDirectory { get; }
+
     void RotateProfileKey();
     void UpdateProfile(string newDisplayName, byte[] newIdenticonPng);
     Task<DomainResult> PublishProfileAsync(CancellationToken ct = default);

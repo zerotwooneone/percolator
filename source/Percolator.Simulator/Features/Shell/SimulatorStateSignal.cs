@@ -15,7 +15,9 @@ internal enum SignalCategory
     ProfileChanged,
     GroupStateChanged,
     SwarmProgressChanged,
-    DiscoveryStateChanged
+    DiscoveryStateChanged,
+    FileTransferOfferReceived,
+    FileTransferCompleted
 }
 
 internal sealed record HostedPreKeyCountPayload(PublicIdentityId OwnerId, int AvailableCount);
@@ -23,6 +25,27 @@ internal sealed record HostedPreKeyCountPayload(PublicIdentityId OwnerId, int Av
 internal sealed record HandshakeSignalPayload(PublicIdentityId RemotePeerId, string? Action = null);
 
 internal sealed record ChatTranscriptSignalPayload(PublicIdentityId RemotePeerId);
+
+internal sealed record FileTransferOfferSignalPayload(
+    Guid SessionId,
+    PublicIdentityId SenderId,
+    string BundleTitle,
+    long TotalBytes,
+    int TotalChunks);
+
+internal sealed record FileTransferProgressSignalPayload(
+    Guid SessionId,
+    PublicIdentityId PeerId,
+    int CompletedChunks,
+    int TotalChunks,
+    long DownloadedBytes,
+    long TotalBytes);
+
+internal sealed record FileTransferCompletedSignalPayload(
+    Guid SessionId,
+    PublicIdentityId PeerId,
+    string FilePath,
+    string Sha256Hash);
 
 internal sealed record SimulatorStateSignal(
     SimulatedNodeId NodeId,

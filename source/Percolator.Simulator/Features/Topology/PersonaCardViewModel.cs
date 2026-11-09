@@ -27,6 +27,7 @@ using Percolator.Simulator.Features.RelayedChat;
 using Percolator.Simulator.Features.Scenarios;
 using Percolator.Simulator.Features.Scenarios.Model;
 using Percolator.Simulator.Features.Shell;
+using Percolator.Simulator.Features.SwarmSimulation;
 using R3;
 
 namespace Percolator.Simulator.Features.Topology;
@@ -51,12 +52,13 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
     private readonly ISimulatedWorldStateService _worldState = null!;
     private readonly ISimulatedPersonaHost? _host;
     private readonly ISimulatorLogSink _logSink;
-    private readonly IFlightRecorderStateService? _flightRecorder;
+    private readonly IFlightRecorderStateService _flightRecorder;
     private readonly RelayProvisioningCoordinator _relayCoordinator;
     private readonly RichChatActionCoordinator _richChatCoordinator;
     private readonly ProfileSyncCoordinator _profileCoordinator;
     private readonly GroupChatCoordinator _groupCoordinator;
     private readonly DiscoverySimulationCoordinator _discoveryCoordinator;
+    private readonly SwarmSimulationCoordinator _swarmCoordinator;
 
     private readonly CoalescedActionGate _chatTranscriptGate;
     private readonly CoalescedActionGate _pendingHandshakeGate;
@@ -131,6 +133,15 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
     private InvitationId? _pendingInvitationId;
     private Guid _lastMarkedReadMessageId;
 
+    // Pending File Offer Banner State (CTL-PER-16)
+    [ObservableProperty]
+    private bool _hasPendingFileOffer;
+
+    [ObservableProperty]
+    private string _pendingFileOfferText = string.Empty;
+
+    private Guid? _pendingFileTransferId;
+
     // Conversation Selector (CTL-PER-17)
     public ObservableCollection<ConversationItemViewModel> AvailableConversations { get; } = new();
 
@@ -168,12 +179,13 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
         _worldState = deps.WorldState ?? throw new ArgumentNullException(nameof(deps.WorldState));
         _host = host;
         _logSink = deps.LogSink;
-        _flightRecorder = deps.FlightRecorder;
+        _flightRecorder = deps.FlightRecorder ?? throw new ArgumentNullException(nameof(deps.FlightRecorder));
         _relayCoordinator = deps.RelayCoordinator;
         _richChatCoordinator = deps.RichChatCoordinator;
         _profileCoordinator = deps.ProfileCoordinator;
         _groupCoordinator = deps.GroupCoordinator ?? throw new ArgumentNullException(nameof(deps.GroupCoordinator));
         _discoveryCoordinator = deps.DiscoveryCoordinator ?? throw new ArgumentNullException(nameof(deps.DiscoveryCoordinator));
+        _swarmCoordinator = deps.SwarmCoordinator ?? throw new ArgumentNullException(nameof(deps.SwarmCoordinator));
 
         // 30 Hz refresh ceiling for chat transcript with 0ms leading edge
         _chatTranscriptGate = new CoalescedActionGate(
@@ -199,6 +211,9 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
             _autoShareProfile = host.AutoShareProfile;
             _autoAcceptGroupInvites = host.AutoAcceptGroupInvites;
             _allowPeerDiscovery = host.AllowPeerDiscovery;
+            _allowFileTransfers = host.AllowFileTransfers;
+            _relayOnlyRouting = host.RelayOnlyRouting;
+            _autoAcceptFileTransfers = host.AutoAcceptFileTransfers;
             DiscoveryTab = new DiscoveryTabViewModel(
                 host,
                 _discoveryCoordinator,
@@ -350,10 +365,61 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
                 })
                 .AddTo(ref Disposables);
 
+            _stateBus.Signals
+                .Where(s => s.NodeId == NodeId && s.Category == SignalCategory.FileTransferOfferReceived)
+                .Subscribe(signal =>
+                {
+                    if (signal.Payload is FileTransferOfferSignalPayload payload)
+                    {
+                        UiTaskRunner.PostToUi(() =>
+                        {
+                            _pendingFileTransferId = payload.SessionId;
+                            var senderHost = _worldState?.FindPersonaHostByIdentity(payload.SenderId);
+                            var senderName = senderHost?.DisplayName ?? payload.SenderId.ToString()[..8];
+                            PendingFileOfferText = $"File transfer offer from {senderName}: '{payload.BundleTitle}' ({payload.TotalBytes:N0} bytes, {payload.TotalChunks} chunks)";
+                            HasPendingFileOffer = true;
+
+                            if (AutoAcceptFileTransfers)
+                            {
+                                _ = AcceptPendingFileOfferAsync();
+                            }
+                        });
+                    }
+                })
+                .AddTo(ref Disposables);
+
             // Initial refresh
             RefreshConversations();
             RefreshPendingHandshakes();
             RefreshChatTranscript();
+        }
+    }
+
+    partial void OnAllowFileTransfersChanged(bool value)
+    {
+        if (_host != null)
+        {
+            _host.AllowFileTransfers = value;
+        }
+    }
+
+    partial void OnRelayOnlyRoutingChanged(bool value)
+    {
+        if (_host != null)
+        {
+            _host.RelayOnlyRouting = value;
+        }
+    }
+
+    partial void OnAutoAcceptFileTransfersChanged(bool value)
+    {
+        if (_host != null)
+        {
+            _host.AutoAcceptFileTransfers = value;
+            if (value && HasPendingFileOffer && _pendingFileTransferId.HasValue)
+            {
+                _ = AcceptPendingFileOfferAsync();
+            }
         }
     }
 
@@ -691,7 +757,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
                 }
             }, "HostLifecycle");
         }
-        _flightRecorder?.RecordStep(new SetListeningStateStep(DisplayName, value));
+        _flightRecorder.RecordStep(new SetListeningStateStep(DisplayName, value));
     }
 
     partial void OnAutoReplyPongChanged(bool value)
@@ -757,7 +823,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
 
         if (success)
         {
-            _flightRecorder?.RecordStep(new RegisterMailboxesStep(relay.DisplayName, new[] { DisplayName }));
+            _flightRecorder.RecordStep(new RegisterMailboxesStep(relay.DisplayName, new[] { DisplayName }));
             _toastService.ShowToast("Relay Registered", $"Mailbox registered on '{relay.DisplayName}'.", ToastSeverity.Success);
         }
     }
@@ -780,7 +846,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
 
         if (success)
         {
-            _flightRecorder?.RecordStep(new PublishPreKeysStep(relay.DisplayName, new[] { DisplayName }, 25));
+            _flightRecorder.RecordStep(new PublishPreKeysStep(relay.DisplayName, new[] { DisplayName }, 25));
             _toastService.ShowToast("PreKeys Published", $"Published 25 OPKs to '{relay.DisplayName}'.", ToastSeverity.Success);
         }
     }
@@ -892,6 +958,54 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
     }
 
     [RelayCommand]
+    private async Task AcceptPendingFileOfferAsync()
+    {
+        if (!_pendingFileTransferId.HasValue || _host == null) return;
+        var transferId = _pendingFileTransferId.Value;
+        _pendingFileTransferId = null;
+        HasPendingFileOffer = false;
+        PendingFileOfferText = string.Empty;
+
+        var success = await UiTaskRunner.RunAsync(
+            () => _swarmCoordinator.AcceptTransferAsync(NodeId, transferId),
+            category: "SwarmFileTransfer",
+            logSink: _logSink,
+            toastService: _toastService,
+            nodeName: DisplayName,
+            nodeId: NodeId);
+
+        if (!success)
+        {
+            _toastService.ShowToast("Transfer Failed", "Failed to accept file transfer offer.", ToastSeverity.Error);
+        }
+    }
+
+    [RelayCommand]
+    private async Task DeclinePendingFileOfferAsync()
+    {
+        if (_pendingFileTransferId.HasValue)
+        {
+            var transferId = _pendingFileTransferId.Value;
+            _pendingFileTransferId = null;
+            HasPendingFileOffer = false;
+            PendingFileOfferText = string.Empty;
+
+            await UiTaskRunner.RunAsync(
+                () => _swarmCoordinator.RejectTransferAsync(NodeId, transferId),
+                category: "SwarmFileTransfer",
+                logSink: _logSink,
+                toastService: _toastService,
+                nodeName: DisplayName,
+                nodeId: NodeId);
+        }
+        else
+        {
+            HasPendingFileOffer = false;
+            PendingFileOfferText = string.Empty;
+        }
+    }
+
+    [RelayCommand]
     private async Task SendMessageAsync()
     {
         if (string.IsNullOrWhiteSpace(ComposeMessageText)) return;
@@ -915,7 +1029,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
 
             if (success)
             {
-                _flightRecorder?.RecordStep(new SendGroupMessageStep(DisplayName, groupTitle, text));
+                _flightRecorder.RecordStep(new SendGroupMessageStep(DisplayName, groupTitle, text));
             }
             return;
         }
@@ -948,11 +1062,11 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
         {
             if (expireSeconds.HasValue && expireSeconds.Value > 0)
             {
-                _flightRecorder?.RecordStep(new SendDisappearingMessageStep(DisplayName, peer.DisplayName, text, expireSeconds.Value));
+                _flightRecorder.RecordStep(new SendDisappearingMessageStep(DisplayName, peer.DisplayName, text, expireSeconds.Value));
             }
             else
             {
-                _flightRecorder?.RecordStep(new SendDirectMessageStep(DisplayName, peer.DisplayName, text));
+                _flightRecorder.RecordStep(new SendDirectMessageStep(DisplayName, peer.DisplayName, text));
             }
         }
     }
@@ -974,7 +1088,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
 
         if (success)
         {
-            _flightRecorder?.RecordStep(new AddReactionStep(DisplayName, peer.DisplayName, item.Content, "👍"));
+            _flightRecorder.RecordStep(new AddReactionStep(DisplayName, peer.DisplayName, item.Content, "👍"));
         }
     }
 
@@ -1005,7 +1119,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
 
         if (success)
         {
-            _flightRecorder?.RecordStep(new EditMessageStep(DisplayName, peer.DisplayName, oldContent, newContent));
+            _flightRecorder.RecordStep(new EditMessageStep(DisplayName, peer.DisplayName, oldContent, newContent));
         }
     }
 
@@ -1027,7 +1141,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
 
         if (success)
         {
-            _flightRecorder?.RecordStep(new DeleteMessageStep(DisplayName, peer.DisplayName, messageContent));
+            _flightRecorder.RecordStep(new DeleteMessageStep(DisplayName, peer.DisplayName, messageContent));
         }
     }
 

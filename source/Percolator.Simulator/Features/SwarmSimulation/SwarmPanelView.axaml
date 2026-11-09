@@ -8,17 +8,83 @@
             BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
             BorderThickness="1"
             CornerRadius="8"
-            Padding="12"
+            Padding="14"
             Margin="6">
-        <StackPanel Spacing="8">
-            <TextBlock Text="🌐 Swarm File Transfer (Phase 9)" FontWeight="Bold" FontSize="14" />
-            <TextBlock Text="SHA-256 Merkle Piece Heatmap &amp; Bitfield Swarm Progress" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-            <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,8,0,0">
-                <Button Content="⏸️ Pause" Command="{Binding PauseTransferCommand}" />
-                <Button Content="▶️ Resume" Command="{Binding ResumeTransferCommand}" />
-                <Button Content="✕ Cancel" Command="{Binding CancelTransferCommand}" />
-                <Button Content="➕ Inject Late Downloader ▼" Command="{Binding InjectLateDownloaderCommand}" />
+        <Grid RowDefinitions="Auto,Auto,Auto,*">
+            <!-- Header -->
+            <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,8">
+                <StackPanel Grid.Column="0" Spacing="2">
+                    <TextBlock Text="{Binding SwarmTitle}" FontWeight="Bold" FontSize="15" />
+                    <TextBlock Text="{Binding FileInfoText}" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                </StackPanel>
+                <Border Grid.Column="1" Background="#263859" CornerRadius="4" Padding="8,4" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding StatusText}" FontSize="11" FontWeight="SemiBold" Foreground="White" />
+                </Border>
+            </Grid>
+
+            <!-- Participant Controls Toolbar (CTL-SWM-01, CTL-SWM-02) -->
+            <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8" Margin="0,4,0,12">
+                <Button Content="⏸️ Pause" Command="{Binding PauseTransferCommand}" Padding="8,4" />
+                <Button Content="▶️ Resume" Command="{Binding ResumeTransferCommand}" Padding="8,4" />
+                <Button Content="✕ Cancel" Command="{Binding CancelTransferCommand}" Padding="8,4" />
+                <Button Content="➕ Inject Late Downloader ▼" Command="{Binding InjectLateDownloaderCommand}" Classes="accent" Padding="8,4" />
             </StackPanel>
-        </StackPanel>
+
+            <Separator Grid.Row="2" Margin="0,0,0,10" />
+
+            <!-- Participant List with Live 30 FPS Piece Heatmaps (CTL-SWM-03) -->
+            <ScrollViewer Grid.Row="3">
+                <ItemsControl ItemsSource="{Binding Participants}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:SwarmParticipantViewModel">
+                            <Border Background="{DynamicResource ControlFillColorDefaultBrush}"
+                                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="6"
+                                    Padding="10"
+                                    Margin="0,0,0,8">
+                                <Grid RowDefinitions="Auto,Auto,Auto">
+                                    <!-- Participant Header -->
+                                    <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,6">
+                                        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding DisplayName}" FontWeight="Bold" FontSize="13" />
+                                            <Border Background="#107C41" CornerRadius="3" Padding="4,1" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding RoleText}" FontSize="10" FontWeight="SemiBold" Foreground="White" />
+                                            </Border>
+                                        </StackPanel>
+                                        <TextBlock Grid.Column="1" Text="{Binding ProgressText}" FontSize="11"
+                                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                                   VerticalAlignment="Center" />
+                                    </Grid>
+
+                                    <!-- Piece Heatmap Legend -->
+                                    <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="12" Margin="0,0,0,6">
+                                        <StackPanel Orientation="Horizontal" Spacing="4">
+                                            <Border Width="8" Height="8" Background="#4CAF50" CornerRadius="1" VerticalAlignment="Center" />
+                                            <TextBlock Text="Verified" FontSize="10" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                        </StackPanel>
+                                        <StackPanel Orientation="Horizontal" Spacing="4">
+                                            <Border Width="8" Height="8" Background="#2196F3" CornerRadius="1" VerticalAlignment="Center" />
+                                            <TextBlock Text="In-Flight" FontSize="10" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                        </StackPanel>
+                                        <StackPanel Orientation="Horizontal" Spacing="4">
+                                            <Border Width="8" Height="8" Background="#2D2D30" CornerRadius="1" VerticalAlignment="Center" />
+                                            <TextBlock Text="Missing" FontSize="10" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                        </StackPanel>
+                                    </StackPanel>
+
+                                    <!-- Piece Heatmap Canvas (CTL-SWM-03) -->
+                                    <vm:SwarmHeatmapControl Grid.Row="2"
+                                                            Height="48"
+                                                            Pieces="{Binding Pieces}"
+                                                            TotalPieces="{Binding TotalChunks}"
+                                                            VerifiedPieces="{Binding CompletedChunks}" />
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+        </Grid>
     </Border>
 </UserControl>

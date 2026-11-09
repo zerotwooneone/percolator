@@ -20,6 +20,9 @@ namespace Percolator.Simulator.Features.Scenarios.Model;
 [JsonDerivedType(typeof(AssertMemberCannotDecryptAssertion), "AssertMemberCannotDecrypt")]
 [JsonDerivedType(typeof(AssertBlindedLocatorResolvedAssertion), "AssertBlindedLocatorResolved")]
 [JsonDerivedType(typeof(AssertNearbyCandidateCountAssertion), "AssertNearbyCandidateCount")]
+[JsonDerivedType(typeof(AssertFileTransferProgressAssertion), "AssertFileTransferProgress")]
+[JsonDerivedType(typeof(AssertFileTransferCompletedAssertion), "AssertFileTransferCompleted")]
+[JsonDerivedType(typeof(AssertFileIntegrityVerifiedAssertion), "AssertFileIntegrityVerified")]
 public abstract record ScenarioAssertionDefinition
 {
     public abstract string DisplayText { get; }
@@ -129,4 +132,23 @@ public sealed record AssertGroupMessageDeliveredAssertion(string PersonaAlias, s
 public sealed record AssertMemberCannotDecryptAssertion(string PersonaAlias, string GroupName, string ExpectedText) : ScenarioAssertionDefinition
 {
     public override string DisplayText => $"Assert Forward Secrecy: '{PersonaAlias}' CANNOT decrypt \"{ExpectedText}\" in '{GroupName}'";
+}
+
+// -----------------------------------------------------------------------------
+// Phase 9 Scenario Assertions: Swarm Transfer & Disk Integrity Verification
+// -----------------------------------------------------------------------------
+
+public sealed record AssertFileTransferProgressAssertion(string PersonaAlias, double MinProgressRatio) : ScenarioAssertionDefinition
+{
+    public override string DisplayText => $"Assert File Transfer Progress on '{PersonaAlias}' >= {MinProgressRatio:P0}";
+}
+
+public sealed record AssertFileTransferCompletedAssertion(string PersonaAlias) : ScenarioAssertionDefinition
+{
+    public override string DisplayText => $"Assert File Transfer Completed on '{PersonaAlias}'";
+}
+
+public sealed record AssertFileIntegrityVerifiedAssertion(string PersonaAlias) : ScenarioAssertionDefinition
+{
+    public override string DisplayText => $"Assert File Integrity (SHA-256) Verified on Disk for '{PersonaAlias}'";
 }

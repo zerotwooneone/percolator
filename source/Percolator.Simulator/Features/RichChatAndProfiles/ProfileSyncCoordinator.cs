@@ -32,20 +32,20 @@ internal sealed class ProfileSyncCoordinator
     private readonly ISimulatorStateBus _stateBus;
     private readonly ISimulatorLogSink _logSink;
     private readonly IStatusToastService _toastService;
-    private readonly IFlightRecorderStateService? _flightRecorder;
+    private readonly IFlightRecorderStateService _flightRecorder;
 
     public ProfileSyncCoordinator(
         ISimulatedWorldStateService worldState,
         ISimulatorStateBus stateBus,
         ISimulatorLogSink logSink,
         IStatusToastService toastService,
-        IFlightRecorderStateService? flightRecorder = null)
+        IFlightRecorderStateService flightRecorder)
     {
         _worldState = worldState ?? throw new ArgumentNullException(nameof(worldState));
         _stateBus = stateBus ?? throw new ArgumentNullException(nameof(stateBus));
         _logSink = logSink ?? throw new ArgumentNullException(nameof(logSink));
         _toastService = toastService ?? throw new ArgumentNullException(nameof(toastService));
-        _flightRecorder = flightRecorder;
+        _flightRecorder = flightRecorder ?? throw new ArgumentNullException(nameof(flightRecorder));
     }
 
     public async Task<bool> RerollProfileAsync(
@@ -102,7 +102,7 @@ internal sealed class ProfileSyncCoordinator
                 Details: chosenName,
                 Payload: host.ProfileRevision));
 
-            _flightRecorder?.RecordStep(new RerollProfileStep(host.DisplayName, chosenName));
+            _flightRecorder.RecordStep(new RerollProfileStep(host.DisplayName, chosenName));
             return true;
         }
         catch (Exception ex)

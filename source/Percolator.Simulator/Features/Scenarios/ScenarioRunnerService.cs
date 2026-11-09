@@ -1,3 +1,4 @@
+using System.IO;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -19,6 +20,7 @@ using Percolator.Simulator.Features.RelayedChat;
 using Percolator.Simulator.Features.RichChatAndProfiles;
 using Percolator.Simulator.Features.Scenarios.Model;
 using Percolator.Simulator.Features.Shell;
+using Percolator.Simulator.Features.SwarmSimulation;
 using Percolator.Apps.Chat.Features.GroupInvitations;
 using Percolator.Domain.Channels.Model;
 using Percolator.Domain.Channels.Ports;
@@ -43,8 +45,10 @@ internal sealed class ScenarioRunnerService
     private readonly ProfileSyncCoordinator _profileCoordinator;
     private readonly GroupChatCoordinator _groupCoordinator;
     private readonly DiscoverySimulationCoordinator _discoveryCoordinator;
-    private readonly IFlightRecorderStateService? _flightRecorder;
+    private readonly SwarmSimulationCoordinator _swarmCoordinator;
+    private readonly IFlightRecorderStateService _flightRecorder;
     private readonly ISelectionStateService? _selectionState;
+    private Guid? _lastSwarmSessionId;
 
     public ScenarioRunnerService(
         ISimulatedWorldStateService worldState,
@@ -59,7 +63,8 @@ internal sealed class ScenarioRunnerService
         ProfileSyncCoordinator profileCoordinator,
         GroupChatCoordinator groupCoordinator,
         DiscoverySimulationCoordinator discoveryCoordinator,
-        IFlightRecorderStateService? flightRecorder = null,
+        SwarmSimulationCoordinator swarmCoordinator,
+        IFlightRecorderStateService flightRecorder,
         ISelectionStateService? selectionState = null)
     {
         _worldState = worldState ?? throw new ArgumentNullException(nameof(worldState));
@@ -74,7 +79,8 @@ internal sealed class ScenarioRunnerService
         _profileCoordinator = profileCoordinator ?? throw new ArgumentNullException(nameof(profileCoordinator));
         _groupCoordinator = groupCoordinator ?? throw new ArgumentNullException(nameof(groupCoordinator));
         _discoveryCoordinator = discoveryCoordinator ?? throw new ArgumentNullException(nameof(discoveryCoordinator));
-        _flightRecorder = flightRecorder;
+        _swarmCoordinator = swarmCoordinator ?? throw new ArgumentNullException(nameof(swarmCoordinator));
+        _flightRecorder = flightRecorder ?? throw new ArgumentNullException(nameof(flightRecorder));
         _selectionState = selectionState;
     }
 
@@ -90,7 +96,7 @@ internal sealed class ScenarioRunnerService
             "Scenario",
             $"=== Starting Scenario Replay: '{scenario.Name}' ({scenario.Steps.Count} steps, {scenario.Assertions.Count} assertions) ==="));
 
-        _flightRecorder?.SetReplayStatus($"Replaying: '{scenario.Name}'...");
+        _flightRecorder.SetReplayStatus($"Replaying: '{scenario.Name}'...");
 
         var errorLogs = new List<SimulatorLogEntry>();
         var allSessionLogs = new List<SimulatorLogEntry>();
@@ -118,6 +124,7 @@ internal sealed class ScenarioRunnerService
         var aliasMap = new Dictionary<string, ISimulatedPersonaHost>(StringComparer.OrdinalIgnoreCase);
         var relayAliasMap = new Dictionary<string, ISimulatedRelayHost>(StringComparer.OrdinalIgnoreCase);
         var groupAliasMap = new Dictionary<string, ChannelId>(StringComparer.OrdinalIgnoreCase);
+        _lastSwarmSessionId = null;
 
         try
         {
@@ -134,7 +141,7 @@ internal sealed class ScenarioRunnerService
                     "Scenario",
                     $"[Step {stepNum}/{scenario.Steps.Count}] {step.DisplayText}"));
 
-                _flightRecorder?.SetReplayStatus($"Step {stepNum}/{scenario.Steps.Count}: {step.DisplayText}");
+                _flightRecorder.SetReplayStatus($"Step {stepNum}/{scenario.Steps.Count}: {step.DisplayText}");
 
                 switch (step)
                 {
@@ -269,6 +276,30 @@ internal sealed class ScenarioRunnerService
                         await ExecuteConnectDiscoveredPeerAsync(connectDiscoveredStep, aliasMap, relayAliasMap, ct);
                         break;
 
+                    case InitiateFileTransferStep initTransferStep:
+                        await ExecuteInitiateFileTransferAsync(initTransferStep, aliasMap, ct);
+                        break;
+
+                    case AcceptFileTransferStep acceptTransferStep:
+                        await ExecuteAcceptFileTransferAsync(acceptTransferStep, aliasMap, ct);
+                        break;
+
+                    case InjectLateDownloaderStep lateJoinerStep:
+                        await ExecuteInjectLateDownloaderAsync(lateJoinerStep, aliasMap, ct);
+                        break;
+
+                    case PauseFileTransferStep pauseStep:
+                        await ExecutePauseFileTransferAsync(pauseStep, ct);
+                        break;
+
+                    case ResumeFileTransferStep resumeStep:
+                        await ExecuteResumeFileTransferAsync(resumeStep, ct);
+                        break;
+
+                    case CancelFileTransferStep cancelStep:
+                        await ExecuteCancelFileTransferAsync(cancelStep, ct);
+                        break;
+
                     default:
                         throw new ScenarioExecutionException($"Unsupported scenario step type: {step.GetType().Name}");
                 }
@@ -287,7 +318,7 @@ internal sealed class ScenarioRunnerService
                     "Scenario",
                     $"[Assert {assertNum}/{scenario.Assertions.Count}] {assertion.DisplayText}"));
 
-                _flightRecorder?.SetReplayStatus($"Verifying {assertNum}/{scenario.Assertions.Count}: {assertion.DisplayText}");
+                _flightRecorder.SetReplayStatus($"Verifying {assertNum}/{scenario.Assertions.Count}: {assertion.DisplayText}");
 
                 switch (assertion)
                 {
@@ -358,6 +389,18 @@ internal sealed class ScenarioRunnerService
                         ExecuteAssertNearbyCandidateCount(nearbyAssert, aliasMap);
                         break;
 
+                    case AssertFileTransferProgressAssertion progressAssert:
+                        await ExecuteAssertFileTransferProgressAsync(progressAssert, aliasMap, ct);
+                        break;
+
+                    case AssertFileTransferCompletedAssertion completedAssert:
+                        await ExecuteAssertFileTransferCompletedAsync(completedAssert, aliasMap, ct);
+                        break;
+
+                    case AssertFileIntegrityVerifiedAssertion integrityAssert:
+                        ExecuteAssertFileIntegrityVerified(integrityAssert, aliasMap);
+                        break;
+
                     default:
                         throw new ScenarioExecutionException($"Unsupported scenario assertion type: {assertion.GetType().Name}");
                 }
@@ -371,7 +414,7 @@ internal sealed class ScenarioRunnerService
                 "Scenario",
                 $"=== Scenario Replay PASSED: '{scenario.Name}' ==="));
 
-            _flightRecorder?.SetReplayStatus($"PASS: '{scenario.Name}'");
+            _flightRecorder.SetReplayStatus($"PASS: '{scenario.Name}'");
         }
         catch (Exception ex)
         {
@@ -384,7 +427,7 @@ internal sealed class ScenarioRunnerService
                 $"=== Scenario Replay FAILED: '{scenario.Name}' - {ex.Message} ===",
                 ex.ToString()));
 
-            _flightRecorder?.SetReplayStatus($"FAILED: {ex.Message}");
+            _flightRecorder.SetReplayStatus($"FAILED: {ex.Message}");
             throw;
         }
     }
@@ -1591,5 +1634,181 @@ internal sealed class ScenarioRunnerService
             return utf8;
         }
         return System.Security.Cryptography.SHA256.HashData(utf8);
+    }
+
+    private async Task ExecuteInitiateFileTransferAsync(
+        InitiateFileTransferStep step,
+        Dictionary<string, ISimulatedPersonaHost> aliasMap,
+        CancellationToken ct)
+    {
+        if (!aliasMap.TryGetValue(step.InitiatorAlias, out var initiator))
+            throw new ScenarioExecutionException($"Initiator persona '{step.InitiatorAlias}' not found.");
+
+        var recipientIds = new List<SimulatedNodeId>();
+        foreach (var rAlias in step.RecipientAliases)
+        {
+            if (!aliasMap.TryGetValue(rAlias, out var recipient))
+                throw new ScenarioExecutionException($"Recipient persona '{rAlias}' not found.");
+            recipientIds.Add(recipient.Id);
+        }
+
+        var sessionId = await _swarmCoordinator.InitiateTransferAsync(initiator.Id, recipientIds, step.PresetSize, ct);
+        _lastSwarmSessionId = sessionId;
+        if (sessionId == Guid.Empty)
+        {
+            throw new ScenarioExecutionException($"Failed to initiate file transfer from '{step.InitiatorAlias}'.");
+        }
+    }
+
+    private async Task ExecuteAcceptFileTransferAsync(
+        AcceptFileTransferStep step,
+        Dictionary<string, ISimulatedPersonaHost> aliasMap,
+        CancellationToken ct)
+    {
+        if (!aliasMap.TryGetValue(step.RecipientAlias, out var recipient))
+            throw new ScenarioExecutionException($"Recipient persona '{step.RecipientAlias}' not found.");
+
+        var swarm = GetTargetSwarm();
+
+        var success = await _swarmCoordinator.AcceptTransferAsync(recipient.Id, swarm.SessionId);
+        if (!success)
+        {
+            throw new ScenarioExecutionException($"Failed to accept file transfer on persona '{step.RecipientAlias}'.");
+        }
+    }
+
+    private async Task ExecuteInjectLateDownloaderAsync(
+        InjectLateDownloaderStep step,
+        Dictionary<string, ISimulatedPersonaHost> aliasMap,
+        CancellationToken ct)
+    {
+        if (!aliasMap.TryGetValue(step.LateJoinerAlias, out var lateJoiner))
+            throw new ScenarioExecutionException($"Late joiner persona '{step.LateJoinerAlias}' not found.");
+
+        var swarm = GetTargetSwarm();
+
+        var success = await _swarmCoordinator.InjectLateDownloaderAsync(swarm.SessionId, lateJoiner.Id, step.ProgressThreshold);
+        if (!success)
+        {
+            throw new ScenarioExecutionException($"Failed to inject late downloader '{step.LateJoinerAlias}'.");
+        }
+    }
+
+    private async Task ExecutePauseFileTransferAsync(
+        PauseFileTransferStep step,
+        CancellationToken ct)
+    {
+        var swarm = GetTargetSwarm();
+
+        await _swarmCoordinator.PauseTransferAsync(swarm.SessionId);
+    }
+
+    private async Task ExecuteResumeFileTransferAsync(
+        ResumeFileTransferStep step,
+        CancellationToken ct)
+    {
+        var swarm = GetTargetSwarm();
+
+        await _swarmCoordinator.ResumeTransferAsync(swarm.SessionId);
+    }
+
+    private async Task ExecuteCancelFileTransferAsync(
+        CancelFileTransferStep step,
+        CancellationToken ct)
+    {
+        var swarm = GetTargetSwarm();
+
+        await _swarmCoordinator.CancelTransferAsync(swarm.SessionId);
+    }
+
+    private async Task ExecuteAssertFileTransferProgressAsync(
+        AssertFileTransferProgressAssertion assertion,
+        Dictionary<string, ISimulatedPersonaHost> aliasMap,
+        CancellationToken ct)
+    {
+        if (!aliasMap.TryGetValue(assertion.PersonaAlias, out var persona))
+            throw new ScenarioAssertionException($"Persona '{assertion.PersonaAlias}' not found.");
+
+        var swarm = GetTargetSwarm();
+
+        var participant = swarm.Participants.FirstOrDefault(p => p.NodeId == persona.Id)
+            ?? throw new ScenarioAssertionException($"Persona '{assertion.PersonaAlias}' is not a participant in swarm.");
+
+        double progress = participant.TotalChunks > 0 ? (double)participant.CompletedChunks / participant.TotalChunks : 0.0;
+        if (progress < assertion.MinProgressRatio)
+        {
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
+
+            await _stateBus.Signals
+                .Where(s => s.NodeId == persona.Id &&
+                            s.Category == SignalCategory.SwarmProgressChanged &&
+                            s.Payload is SwarmChunkProgressSignal sig &&
+                            sig.TotalChunks > 0 &&
+                            ((double)sig.CompletedChunks / sig.TotalChunks) >= assertion.MinProgressRatio)
+                .FirstAsync(cancellationToken: linkedCts.Token);
+        }
+    }
+
+    private async Task ExecuteAssertFileTransferCompletedAsync(
+        AssertFileTransferCompletedAssertion assertion,
+        Dictionary<string, ISimulatedPersonaHost> aliasMap,
+        CancellationToken ct)
+    {
+        if (!aliasMap.TryGetValue(assertion.PersonaAlias, out var persona))
+            throw new ScenarioAssertionException($"Persona '{assertion.PersonaAlias}' not found.");
+
+        var swarm = GetTargetSwarm();
+
+        var participant = swarm.Participants.FirstOrDefault(p => p.NodeId == persona.Id)
+            ?? throw new ScenarioAssertionException($"Persona '{assertion.PersonaAlias}' is not a participant in swarm.");
+
+        if (!participant.IsComplete)
+        {
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
+
+            await _stateBus.Signals
+                .Where(s => s.NodeId == persona.Id && s.Category == SignalCategory.FileTransferCompleted)
+                .FirstAsync(cancellationToken: linkedCts.Token);
+        }
+    }
+
+    private void ExecuteAssertFileIntegrityVerified(
+        AssertFileIntegrityVerifiedAssertion assertion,
+        Dictionary<string, ISimulatedPersonaHost> aliasMap)
+    {
+        if (!aliasMap.TryGetValue(assertion.PersonaAlias, out var persona))
+            throw new ScenarioAssertionException($"Persona '{assertion.PersonaAlias}' not found.");
+
+        var swarm = GetTargetSwarm();
+
+        string targetFilePath = Path.Combine(persona.NodeDownloadsDirectory, swarm.Preset.RelativeFileName);
+        if (!File.Exists(targetFilePath))
+        {
+            throw new ScenarioAssertionException($"Downloaded file not found on disk at '{targetFilePath}'.");
+        }
+
+        using var sha256 = System.Security.Cryptography.SHA256.Create();
+        using var fs = File.OpenRead(targetFilePath);
+        byte[] computedHash = sha256.ComputeHash(fs);
+        string computedHex = Convert.ToHexString(computedHash).ToLowerInvariant();
+
+        if (!string.Equals(computedHex, swarm.Preset.Sha256Hex, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ScenarioAssertionException(
+                $"SHA-256 integrity verification failed for '{assertion.PersonaAlias}'. Expected: {swarm.Preset.Sha256Hex}, Got: {computedHex}");
+        }
+    }
+
+    private ActiveSwarmState GetTargetSwarm()
+    {
+        if (_lastSwarmSessionId.HasValue)
+        {
+            var swarm = _swarmCoordinator.GetSwarm(_lastSwarmSessionId.Value);
+            if (swarm != null) return swarm;
+        }
+        return _swarmCoordinator.GetLatestSwarm()
+            ?? throw new ScenarioExecutionException("No active swarm transfer found.");
     }
 }

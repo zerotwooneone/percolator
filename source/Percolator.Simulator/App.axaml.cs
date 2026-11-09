@@ -12,6 +12,7 @@ using Percolator.Simulator.Features.RichChatAndProfiles;
 using Percolator.Simulator.Features.RelayedChat;
 using Percolator.Simulator.Features.Scenarios;
 using Percolator.Simulator.Features.Shell;
+using Percolator.Simulator.Features.SwarmSimulation;
 using Percolator.Simulator.Features.Topology;
 
 namespace Percolator.Simulator;
@@ -57,6 +58,8 @@ public partial class App : Avalonia.Application
         services.AddSingleton<RelayProvisioningCoordinator>();
         services.AddSingleton<GroupChatCoordinator>();
         services.AddSingleton<DiscoverySimulationCoordinator>();
+        services.AddSingleton<SyntheticFilePresetGenerator>();
+        services.AddSingleton<SwarmSimulationCoordinator>();
         services.AddSingleton<ScenarioRunnerService>();
         services.AddSingleton<PersonaCardDependencies>();
 
@@ -69,6 +72,7 @@ public partial class App : Avalonia.Application
         services.AddTransient<LogDockViewModel>();
         services.AddTransient<MainWindowViewModel>();
         services.AddTransient<GroupPanelViewModel>();
+        services.AddTransient<SwarmPanelViewModel>();
 
         _services = services.BuildServiceProvider();
 

@@ -97,6 +97,28 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
 
+                <!-- Section: Swarms (File Transfers) -->
+                <TextBlock Text="SWARMS (FILE TRANSFERS)" FontWeight="Bold" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,8,0,0" IsVisible="{Binding !!Swarms.Count}" />
+                <ItemsControl ItemsSource="{Binding Swarms}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="shell:SimulatedNodeSummary">
+                            <Border Background="{DynamicResource ControlFillColorDefaultBrush}"
+                                    CornerRadius="6" Padding="8,6" Margin="0,2">
+                                <Grid ColumnDefinitions="*,Auto">
+                                    <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" FontSize="12" />
+                                        <TextBlock Text="{Binding Subtitle}" FontSize="10" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                    </StackPanel>
+                                    <Button Grid.Column="1" Content="📌"
+                                            Padding="4,2"
+                                            ToolTip.Tip="Pin Swarm Heatmap to Workbench"
+                                            Click="OnTogglePinClicked" />
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
                 <!-- Section: Group & Swarm Inspectors CTL-ROS-04, 05 -->
                 <TextBlock Text="INSPECTORS" FontWeight="Bold" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,8,0,0" />
                 <Button Content="👥 Group Channels (Phase 7)"

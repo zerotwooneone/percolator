@@ -9,6 +9,7 @@ using Percolator.Simulator.Features.GroupMessaging;
 using Percolator.Simulator.Features.RelayedChat;
 using Percolator.Simulator.Features.Scenarios;
 using Percolator.Simulator.Features.Scenarios.Model;
+using Percolator.Simulator.Features.SwarmSimulation;
 using Percolator.Simulator.Features.Topology;
 using R3;
 
@@ -22,7 +23,8 @@ internal sealed partial class ContextualActionBarViewModel : ViewModelBase
     private readonly RelayProvisioningCoordinator _relayCoordinator;
     private readonly GroupChatCoordinator _groupCoordinator;
     private readonly ISimulatedWorldStateService _worldState;
-    private readonly IFlightRecorderStateService? _flightRecorder;
+    private readonly SwarmSimulationCoordinator _swarmCoordinator;
+    private readonly IFlightRecorderStateService _flightRecorder;
     private SimulatedNodeSummary? _currentPrimary;
     private SimulatedNodeSummary? _currentSecondary;
 
@@ -42,7 +44,8 @@ internal sealed partial class ContextualActionBarViewModel : ViewModelBase
         RelayProvisioningCoordinator relayCoordinator,
         GroupChatCoordinator groupCoordinator,
         ISimulatedWorldStateService worldState,
-        IFlightRecorderStateService? flightRecorder = null)
+        SwarmSimulationCoordinator swarmCoordinator,
+        IFlightRecorderStateService flightRecorder)
     {
         _selectionState = selectionState ?? throw new ArgumentNullException(nameof(selectionState));
         _toastService = toastService ?? throw new ArgumentNullException(nameof(toastService));
@@ -50,7 +53,8 @@ internal sealed partial class ContextualActionBarViewModel : ViewModelBase
         _relayCoordinator = relayCoordinator ?? throw new ArgumentNullException(nameof(relayCoordinator));
         _groupCoordinator = groupCoordinator ?? throw new ArgumentNullException(nameof(groupCoordinator));
         _worldState = worldState ?? throw new ArgumentNullException(nameof(worldState));
-        _flightRecorder = flightRecorder;
+        _swarmCoordinator = swarmCoordinator ?? throw new ArgumentNullException(nameof(swarmCoordinator));
+        _flightRecorder = flightRecorder ?? throw new ArgumentNullException(nameof(flightRecorder));
 
         Observable.CombineLatest(
             _selectionState.PrimarySelectedNode,
@@ -126,7 +130,7 @@ internal sealed partial class ContextualActionBarViewModel : ViewModelBase
 
         if (success)
         {
-            _flightRecorder?.RecordStep(new InitiateRelayedHandshakeStep(_currentPrimary.DisplayName, _currentSecondary.DisplayName, relay.DisplayName));
+            _flightRecorder.RecordStep(new InitiateRelayedHandshakeStep(_currentPrimary.DisplayName, _currentSecondary.DisplayName, relay.DisplayName));
         }
     }
 
@@ -161,7 +165,7 @@ internal sealed partial class ContextualActionBarViewModel : ViewModelBase
             toastService: _toastService);
 
         var names = personas.Select(p => p.DisplayName).ToList();
-        _flightRecorder?.RecordStep(new RegisterMailboxesStep(relay.DisplayName, names));
+        _flightRecorder.RecordStep(new RegisterMailboxesStep(relay.DisplayName, names));
 
         _toastService.ShowToast("Mailboxes Registered", $"Registered {count} mailboxes on relay '{relay.DisplayName}'.", ToastSeverity.Success);
     }
@@ -197,7 +201,7 @@ internal sealed partial class ContextualActionBarViewModel : ViewModelBase
             toastService: _toastService);
 
         var names = personas.Select(p => p.DisplayName).ToList();
-        _flightRecorder?.RecordStep(new PublishPreKeysStep(relay.DisplayName, names, 25));
+        _flightRecorder.RecordStep(new PublishPreKeysStep(relay.DisplayName, names, 25));
 
         _toastService.ShowToast("PreKeys Published", $"Published 25 OPKs for {count} personas on relay '{relay.DisplayName}'.", ToastSeverity.Success);
     }
@@ -239,10 +243,28 @@ internal sealed partial class ContextualActionBarViewModel : ViewModelBase
         if (channelId != default)
         {
             var memberNames = members.Select(m => m.DisplayName).ToList();
-            _flightRecorder?.RecordStep(new CreateGroupStep(admin.DisplayName, relay.DisplayName, groupName, memberNames));
+            _flightRecorder.RecordStep(new CreateGroupStep(admin.DisplayName, relay.DisplayName, groupName, memberNames));
         }
     }
 
     [RelayCommand]
-    private void SendFilePreset() => _toastService.ShowPlaceholder("Send File Preset", "Phase 9");
+    private async Task SendFilePresetAsync()
+    {
+        if (_currentPrimary is null || _currentSecondary is null)
+        {
+            _toastService.ShowToast(
+                "Selection Required",
+                "Select an Initiator (1°) and Target (2°) persona in the Roster first.",
+                ToastSeverity.Warning);
+            return;
+        }
+
+        var primaryId = _currentPrimary.Id;
+        var secondaryId = _currentSecondary.Id;
+
+        await UiTaskRunner.RunAsync(
+            () => _swarmCoordinator.InitiateTransferAsync(primaryId, new[] { secondaryId }, SyntheticFilePresetGenerator.Preset2Mb),
+            category: "SwarmFileTransfer",
+            toastService: _toastService);
+    }
 }

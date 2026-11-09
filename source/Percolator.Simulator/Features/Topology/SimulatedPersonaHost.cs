@@ -25,6 +25,7 @@ using Percolator.Application2.Profiles;
 using Percolator.Application2.Routing;
 using Percolator.Application2.Services;
 using Percolator.Apps.Chat.DependencyInjection;
+using Percolator.Apps.FileTransfer.DependencyInjection;
 using Percolator.Apps.FileTransfer.Ports;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
@@ -98,6 +99,11 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
     public bool AllowPeerDiscovery { get; set; } = true;
     public bool AutoShareProfile { get; set; } = true;
     public bool AutoAcceptGroupInvites { get; set; } = false;
+    public bool AllowFileTransfers { get; set; } = true;
+    public bool RelayOnlyRouting { get; set; } = false;
+    public bool AutoAcceptFileTransfers { get; set; } = false;
+    public string NodeTempDirectory => _nodeTempDirectory;
+    public string NodeDownloadsDirectory { get; }
     public SimulatedPersonaHost(
         SimulatedNodeId id,
         string displayName,
@@ -119,6 +125,8 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         _masterKeyHandle = MasterKeyHandle.GenerateRandom();
         _nodeTempDirectory = Path.Combine(Path.GetTempPath(), "PercolatorSim", $"node_{Id.Value:N}");
         Directory.CreateDirectory(_nodeTempDirectory);
+        NodeDownloadsDirectory = Path.Combine(_nodeTempDirectory, "Downloads");
+        Directory.CreateDirectory(NodeDownloadsDirectory);
         // Procedural cryptographic identity initialization
         var crypto = new SignalCryptoEngine();
         var (ikPriv, ikPub) = crypto.GenerateEphemeralKeyPair();
@@ -180,8 +188,9 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             services.AddSingleton<IDesktopFileStorage>(
                 _ => new PortableDesktopFileStore(Path.Combine(_nodeTempDirectory, "Partials")));
 #endif
-            // 2. Chat vertical app registration
+            // 2. Chat and FileTransfer vertical app registration
             services.AddChatApp();
+            services.AddFileTransferApp();
             // 3. Node-scoped logger provider routing Percolator logs to multi-sink while suppressing EF Core / Kestrel connection spam
             services.AddLogging(lb =>
             {

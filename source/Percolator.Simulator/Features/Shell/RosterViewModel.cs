@@ -19,6 +19,7 @@ internal sealed partial class RosterViewModel : ViewModelBase
     public ObservableCollection<SimulatedNodeSummary> Personas { get; } = new();
     public ObservableCollection<SimulatedNodeSummary> Relays { get; } = new();
     public ObservableCollection<SimulatedNodeSummary> Groups { get; } = new();
+    public ObservableCollection<SimulatedNodeSummary> Swarms { get; } = new();
 
     public RosterViewModel(
         ISimulatedWorldStateService worldState,
@@ -29,10 +30,11 @@ internal sealed partial class RosterViewModel : ViewModelBase
         _selectionState = selectionState;
         _toastService = toastService;
 
-        // Bind personas, relays, and groups
+        // Bind personas, relays, groups, and swarms
         SyncCollection(_worldState.Personas, Personas);
         SyncCollection(_worldState.Relays, Relays);
         SyncCollection(_worldState.Groups, Groups);
+        SyncCollection(_worldState.ActiveSwarms, Swarms);
     }
 
     private void SyncCollection(IReadOnlyObservableList<SimulatedNodeSummary> source, ObservableCollection<SimulatedNodeSummary> target)
@@ -112,6 +114,15 @@ internal sealed partial class RosterViewModel : ViewModelBase
     [RelayCommand]
     private void SelectSwarm()
     {
-        _toastService.ShowPlaceholder("Swarm Heatmap", "Phase 9");
+        var swarm = _worldState.ActiveSwarms.FirstOrDefault();
+        if (swarm != null)
+        {
+            _worldState.TogglePinCard(swarm);
+            _toastService.ShowToast("Swarm Heatmap", $"Pinned swarm '{swarm.DisplayName}' to workbench.", ToastSeverity.Informational);
+        }
+        else
+        {
+            _toastService.ShowToast("No Active Swarm", "Initiate a file transfer preset from the action bar first.", ToastSeverity.Warning);
+        }
     }
 }

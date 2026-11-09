@@ -75,21 +75,37 @@ internal sealed class SimulatorNotifyingPayloadHandlerDecorator : IAppPayloadHan
         var result = await _inner.HandleInboundAsync(context, ct);
         if (result.IsSuccess)
         {
-            var category = TargetAppId == AppId.Chat
-                ? SignalCategory.ChatTranscriptChanged
-                : SignalCategory.GroupStateChanged;
+            if (TargetAppId == AppId.FileTransferControl)
+            {
+                byte opcode = context.Payload.Length > 0 ? context.Payload.Span[0] : (byte)0;
+                var category = opcode == 1
+                    ? SignalCategory.FileTransferOfferReceived
+                    : SignalCategory.SwarmProgressChanged;
 
-            _stateBus.Publish(new SimulatorStateSignal(
-                _nodeId,
-                category,
-                Details: context.SenderIdentityId.ToString(),
-                Payload: new ChatTranscriptSignalPayload(context.SenderIdentityId),
-                TargetChannelId: context.ChannelId));
+                _stateBus.Publish(new SimulatorStateSignal(
+                    _nodeId,
+                    category,
+                    Details: context.SenderIdentityId.ToString(),
+                    TargetChannelId: context.ChannelId));
+            }
+            else
+            {
+                var category = TargetAppId == AppId.Chat
+                    ? SignalCategory.ChatTranscriptChanged
+                    : SignalCategory.GroupStateChanged;
 
-            _stateBus.Publish(new SimulatorStateSignal(
-                _nodeId,
-                SignalCategory.PendingHandshakeChanged,
-                Details: context.SenderIdentityId.ToString()));
+                _stateBus.Publish(new SimulatorStateSignal(
+                    _nodeId,
+                    category,
+                    Details: context.SenderIdentityId.ToString(),
+                    Payload: new ChatTranscriptSignalPayload(context.SenderIdentityId),
+                    TargetChannelId: context.ChannelId));
+
+                _stateBus.Publish(new SimulatorStateSignal(
+                    _nodeId,
+                    SignalCategory.PendingHandshakeChanged,
+                    Details: context.SenderIdentityId.ToString()));
+            }
         }
 
         return result;

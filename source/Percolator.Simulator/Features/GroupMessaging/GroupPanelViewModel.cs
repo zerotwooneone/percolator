@@ -35,7 +35,7 @@ internal sealed partial class GroupPanelViewModel : ViewModelBase
     private readonly ISimulatedWorldStateService _worldState;
     private readonly GroupChatCoordinator _groupCoordinator;
     private readonly ISimulatorLogSink _logSink;
-    private readonly IFlightRecorderStateService? _flightRecorder;
+    private readonly IFlightRecorderStateService _flightRecorder;
 
     public SimulatedNodeId NodeId { get; }
     public ChannelId ChannelId { get; }
@@ -64,7 +64,7 @@ internal sealed partial class GroupPanelViewModel : ViewModelBase
         ISimulatedWorldStateService worldState,
         GroupChatCoordinator groupCoordinator,
         ISimulatorLogSink logSink,
-        IFlightRecorderStateService? flightRecorder = null)
+        IFlightRecorderStateService flightRecorder)
         : this(
             new SimulatedNodeSummary(SimulatedNodeId.CreateNew(), "Default Group", SimulatedNodeType.Group, "Relay: None"),
             toastService,
@@ -83,7 +83,7 @@ internal sealed partial class GroupPanelViewModel : ViewModelBase
         ISimulatedWorldStateService worldState,
         GroupChatCoordinator groupCoordinator,
         ISimulatorLogSink logSink,
-        IFlightRecorderStateService? flightRecorder = null)
+        IFlightRecorderStateService flightRecorder)
     {
         ArgumentNullException.ThrowIfNull(summary);
         ArgumentNullException.ThrowIfNull(toastService);
@@ -91,6 +91,7 @@ internal sealed partial class GroupPanelViewModel : ViewModelBase
         ArgumentNullException.ThrowIfNull(worldState);
         ArgumentNullException.ThrowIfNull(groupCoordinator);
         ArgumentNullException.ThrowIfNull(logSink);
+        ArgumentNullException.ThrowIfNull(flightRecorder);
 
         NodeId = summary.Id;
         ChannelId = new ChannelId(summary.Id.Value);
@@ -210,7 +211,7 @@ internal sealed partial class GroupPanelViewModel : ViewModelBase
 
         if (success)
         {
-            _flightRecorder?.RecordStep(new AddGroupMemberStep(admin.DisplayName, GroupName, candidate.DisplayName));
+            _flightRecorder.RecordStep(new AddGroupMemberStep(admin.DisplayName, GroupName, candidate.DisplayName));
             RefreshGroupDetails();
         }
     }
@@ -243,7 +244,7 @@ internal sealed partial class GroupPanelViewModel : ViewModelBase
 
         if (success)
         {
-            _flightRecorder?.RecordStep(new EvictGroupMemberStep(admin.DisplayName, GroupName, member.DisplayName));
+            _flightRecorder.RecordStep(new EvictGroupMemberStep(admin.DisplayName, GroupName, member.DisplayName));
             RefreshGroupDetails();
         }
     }
@@ -272,7 +273,7 @@ internal sealed partial class GroupPanelViewModel : ViewModelBase
 
         if (success)
         {
-            _flightRecorder?.RecordStep(new RenameGroupStep(admin.DisplayName, GroupName, newName));
+            _flightRecorder.RecordStep(new RenameGroupStep(admin.DisplayName, GroupName, newName));
             RefreshGroupDetails();
         }
     }
@@ -297,7 +298,7 @@ internal sealed partial class GroupPanelViewModel : ViewModelBase
 
         if (count > 0)
         {
-            _flightRecorder?.RecordStep(new FloodGroupMessagesStep(admin.DisplayName, GroupName, 25));
+            _flightRecorder.RecordStep(new FloodGroupMessagesStep(admin.DisplayName, GroupName, 25));
             _toastService.ShowToast("Group Flood Completed", $"Dispatched {count} group messages via relay ledger.", ToastSeverity.Success);
         }
     }

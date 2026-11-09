@@ -46,7 +46,7 @@ internal sealed class DirectHandshakeOrchestrator
     private readonly IStatusToastService _toastService;
     private readonly ISimulatorLogSink _logSink;
     private readonly ProfileSyncCoordinator _profileCoordinator;
-    private readonly IFlightRecorderStateService? _flightRecorder;
+    private readonly IFlightRecorderStateService _flightRecorder;
 
     public DirectHandshakeOrchestrator(
         ISimulatedWorldStateService worldState,
@@ -54,14 +54,14 @@ internal sealed class DirectHandshakeOrchestrator
         IStatusToastService toastService,
         ISimulatorLogSink logSink,
         ProfileSyncCoordinator profileCoordinator,
-        IFlightRecorderStateService? flightRecorder = null)
+        IFlightRecorderStateService flightRecorder)
     {
         _worldState = worldState ?? throw new ArgumentNullException(nameof(worldState));
         _stateBus = stateBus ?? throw new ArgumentNullException(nameof(stateBus));
         _toastService = toastService ?? throw new ArgumentNullException(nameof(toastService));
         _logSink = logSink ?? throw new ArgumentNullException(nameof(logSink));
         _profileCoordinator = profileCoordinator ?? throw new ArgumentNullException(nameof(profileCoordinator));
-        _flightRecorder = flightRecorder;
+        _flightRecorder = flightRecorder ?? throw new ArgumentNullException(nameof(flightRecorder));
     }
 
     public Task<bool> InitiateDirectHandshakeAsync(
@@ -149,7 +149,7 @@ internal sealed class DirectHandshakeOrchestrator
                     "Handshake",
                     $"Direct handshake invitation sent to '{target.DisplayName}'."));
 
-                _flightRecorder?.RecordStep(new InitiateDirectHandshakeStep(initiator.DisplayName, target.DisplayName));
+                _flightRecorder.RecordStep(new InitiateDirectHandshakeStep(initiator.DisplayName, target.DisplayName));
                 _toastService.ShowToast("Handshake Sent", $"⚡ Direct handshake sent to {target.DisplayName}.", ToastSeverity.Success);
                 return true;
             }
@@ -267,7 +267,7 @@ internal sealed class DirectHandshakeOrchestrator
                     "Handshake",
                     $"Accepted handshake from {senderId}. Double Ratchet session established."));
 
-                _flightRecorder?.RecordStep(new ApprovePendingHandshakeStep(target.DisplayName, senderHost?.DisplayName ?? senderId.ToString()));
+                _flightRecorder.RecordStep(new ApprovePendingHandshakeStep(target.DisplayName, senderHost?.DisplayName ?? senderId.ToString()));
                 _toastService.ShowToast("Handshake Accepted", "✓ Direct secure session established.", ToastSeverity.Success);
 
                 _stateBus.Publish(new SimulatorStateSignal(
@@ -347,7 +347,7 @@ internal sealed class DirectHandshakeOrchestrator
                     "Handshake",
                     $"Rejected handshake from {senderId} (Blocked: {block})."));
 
-                _flightRecorder?.RecordStep(new RejectPendingHandshakeStep(target.DisplayName, senderHost?.DisplayName ?? senderId.ToString(), block));
+                _flightRecorder.RecordStep(new RejectPendingHandshakeStep(target.DisplayName, senderHost?.DisplayName ?? senderId.ToString(), block));
 
                 _toastService.ShowToast(
                     block ? "Handshake Blocked" : "Handshake Rejected",
