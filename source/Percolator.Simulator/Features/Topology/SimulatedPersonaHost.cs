@@ -27,6 +27,7 @@ using Percolator.Application2.Services;
 using Percolator.Apps.Chat.DependencyInjection;
 using Percolator.Apps.FileTransfer.DependencyInjection;
 using Percolator.Apps.FileTransfer.Ports;
+using Percolator.Apps.FileTransfer.Features.IngressControl;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Hosting;
@@ -99,7 +100,23 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
     public bool AllowPeerDiscovery { get; set; } = true;
     public bool AutoShareProfile { get; set; } = true;
     public bool AutoAcceptGroupInvites { get; set; } = false;
-    public bool AllowFileTransfers { get; set; } = true;
+    private bool _allowFileTransfers = false;
+    public bool AllowFileTransfers
+    {
+        get => _allowFileTransfers;
+        set
+        {
+            _allowFileTransfers = value;
+            if (_host != null)
+            {
+                var filter = _host.Services.GetService<FileTransferIngressFilter>();
+                if (filter != null)
+                {
+                    filter.IsEnabled = value;
+                }
+            }
+        }
+    }
     public bool RelayOnlyRouting { get; set; } = false;
     public bool AutoAcceptFileTransfers { get; set; } = false;
     public string NodeTempDirectory => _nodeTempDirectory;
@@ -166,15 +183,16 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
 #endif
         var storageOptions = new VaultStorageOptions
         {
-            BaseDirectory = _nodeTempDirectory
+            BaseDirectory = _nodeTempDirectory,
+            UseEncryption = false
         };
         var builder = Host.CreateDefaultBuilder();
         builder.ConfigureServices((_, services) =>
         {
             // 1. Core infrastructure registration
             services.AddAuthenticatedInfrastructure(_masterKeyHandle, storageOptions);
-            // 1a. Override DbConnectionInterceptor so SQLite operates in plain unencrypted mode (no sqlite3_key / SQLCipher encryption)
-            services.AddSingleton<DbConnectionInterceptor, SimulatorSqlCipherPragmaInterceptor>();
+            services.AddSingleton<INetworkEndpointDiscoveryPort>(_ => new NetworkInterfaceEndpointDiscoveryPort(BoundPort, allowLoopback: true));
+            services.AddSingleton<IRelayMailboxCapabilityStore, InMemoryRelayMailboxCapabilityStore>();
             services.AddSingleton<IDateTimeProvider>(_virtualClock);
 #if WINDOWS
             // 1b. Windows-specific infrastructure overrides (SChannel TLS 1.3 cert provider & NTFS Sparse Desktop File Store)
@@ -210,12 +228,6 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             services.AddScoped<IPayloadSender, OutboundEgressPipeline>();
             services.AddScoped<IGroupKeyDistributionService, GroupKeyDistributionService>();
             services.AddScoped(sp => (SqliteLocalIdentityKeyStore)sp.GetRequiredService<ILocalIdentityKeyStore>());
-            // 4a. Upsert decorator for IRatchetSessionRepository so re-handshaking / crossed handshakes replace the old SessionId row cleanly
-            services.AddScoped<SqliteRatchetSessionRepository>();
-            services.AddScoped<IRatchetSessionRepository>(sp =>
-                new SimulatorRatchetSessionRepositoryDecorator(
-                    sp.GetRequiredService<SqliteRatchetSessionRepository>(),
-                    sp.GetRequiredService<PercolatorDbContext>()));
             // 4b. Simulator-only read-model query services (isolated from core application/domain layers)
             services.AddScoped<ISimulatorChatQueryService, SimulatorChatQueryService>();
             services.AddScoped<ISimulatorRatchetQueryService, SimulatorRatchetQueryService>();
@@ -242,12 +254,6 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                     sp.GetRequiredService<HandshakeService>(),
                     _stateBus,
                     Id));
-            services.AddScoped<ITransportDispatcher>(sp =>
-            {
-                var invoker = sp.GetRequiredService<ITransportClientInvoker>();
-                var routingRepo = sp.GetRequiredService<IPeerMailboxRoutingRepository>();
-                return new SimulatorTransportDispatcher(invoker, routingRepo, _worldState, _logSink, DisplayName);
-            });
             services.AddScoped<OutboxWorker>();
             // 6. Direct Ingress for Kestrel Transport
             services.AddScoped<ISealedEnvelopeUnwrapper>(sp =>
@@ -297,6 +303,23 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             await idKeyStore.SaveKeyAsync(PublicIdentityId, _identityPrivateKey.Span.ToArray(), IdentityPublicKey, ct);
             var preKeyStore = scope.ServiceProvider.GetRequiredService<IPrivatePreKeyStore>();
             await preKeyStore.StoreSignedPreKeyPrivateAsync(PublicIdentityId, DeviceId.Primary, _signedPreKeyPrivate, ct);
+            var capStore = scope.ServiceProvider.GetRequiredService<IRelayMailboxCapabilityStore>();
+            await capStore.RegisterVerifiedAsync(
+                MailboxRoutingToken.ToByteArray(),
+                MailboxDeliveryToken.Memory,
+                MailboxDrainToken.Memory,
+                ownerId: PublicIdentityId,
+                deviceId: DeviceId.Primary,
+                ct: ct);
+            var preKeyRepo = scope.ServiceProvider.GetRequiredService<IRelayPreKeyRepository>();
+            var hostedBundle = RelayHostedPreKeyBundle.Rehydrate(
+                PublicIdentityId,
+                DeviceId.Primary,
+                IdentityPublicKey,
+                SignedPreKeyPublic,
+                SignedPreKeySignature,
+                oneTimePreKeys: null);
+            await preKeyRepo.SaveAsync(hostedBundle, ct);
         }
         // 2. Bind Kestrel transport server on the allocated BoundPort before IHostedService startup
         _transportServer = _host.Services.GetRequiredService<KestrelPeerTransportServer>();
@@ -310,6 +333,11 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         }
         // 3. Start remaining background hosted services
         await _host.StartAsync(ct);
+        var ftFilter = _host.Services.GetService<FileTransferIngressFilter>();
+        if (ftFilter != null)
+        {
+            ftFilter.IsEnabled = _allowFileTransfers;
+        }
         // 3a. Publish initial profile (revision 1) and avatar blind blob
         await PublishProfileAsync(ct);
         // 4. Reactive listener: auto-drain mailbox when relay queue changes

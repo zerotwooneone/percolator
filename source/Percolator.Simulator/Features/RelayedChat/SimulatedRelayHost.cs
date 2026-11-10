@@ -28,6 +28,7 @@ using Percolator.Infrastructure.Security;
 using Percolator.Infrastructure.Common;
 using Percolator.Infrastructure.Transport;
 using Percolator.Infrastructure.Transport.Endpoints;
+using Percolator.Infrastructure.Vault;
 #if WINDOWS
 using Percolator.Infrastructure.Windows.Security;
 #endif
@@ -52,6 +53,7 @@ internal sealed class SimulatorRelayDbContextFactory : IDbContextFactory<Percola
 
 internal sealed class SimulatedRelayHost : ISimulatedRelayHost
 {
+    private readonly MasterKeyHandle _masterKeyHandle = MasterKeyHandle.GenerateRandom();
     private readonly ISimulatorLogSink _logSink;
     private readonly ISimulatorStateBus _stateBus;
     private readonly IVirtualClockStateService _virtualClock;
@@ -137,7 +139,7 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
         var dbPath = Path.Combine(_relayTempDirectory, "relay.db");
         var dbOptions = new DbContextOptionsBuilder<PercolatorDbContext>()
             .UseSqlite($"Data Source={dbPath}")
-            .AddInterceptors(new SimulatorSqlCipherPragmaInterceptor())
+            .AddInterceptors(new SqlCipherPragmaInterceptor(_masterKeyHandle, new VaultStorageOptions { UseEncryption = false }))
             .Options;
 
         var contextFactory = new SimulatorRelayDbContextFactory(dbOptions);
@@ -223,6 +225,7 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
         builder.Services.AddSingleton(rendezvousEndpoint);
 
         _app = builder.Build();
+
         _app.MapGrpcService<UnauthenticatedDeliveryEndpoint>();
         _app.MapGrpcService<AuthenticatedRelayEndpoint>();
         _app.MapGrpcService<AnonymousGroupRelayEndpoint>();
@@ -281,6 +284,8 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
             await _app.DisposeAsync().ConfigureAwait(false);
             _app = null;
         }
+
+        _masterKeyHandle.Dispose();
 
         try
         {

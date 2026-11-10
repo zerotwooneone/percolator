@@ -3,6 +3,7 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
+using Google.Protobuf;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -15,7 +16,10 @@ using Percolator.Domain.Common;
 using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Domain.Security.ValueObjects;
 using Percolator.Infrastructure.Persistence;
+using Percolator.Infrastructure.Protos;
+using Percolator.Infrastructure.Transport;
 using Percolator.Simulator.Features.Logging;
 using Percolator.Simulator.Features.RichChatAndProfiles;
 using Percolator.Simulator.Features.Scenarios;
@@ -88,7 +92,36 @@ internal sealed class DirectHandshakeOrchestrator
 
             try
             {
-                var targetBundle = target.CreatePreKeyBundle();
+                // Register target direct endpoint in initiator's stream registry so TransportDispatcher resolves DirectP2P
+                var initiatorStreamRegistry = initiator.Services.GetRequiredService<IStreamRegistryManagement>();
+                initiatorStreamRegistry.RegisterDirectEndpoint(target.PublicIdentityId, target.BoundEndpoint);
+                var channelFactory = initiator.Services.GetRequiredService<IPeerGrpcChannelFactory>();
+                var channel = channelFactory.GetOrCreateChannel(target.BoundEndpoint);
+                var client = new UnauthenticatedDeliveryService.UnauthenticatedDeliveryServiceClient(channel);
+
+                var fetchRequest = new FetchPreKeyBundleRequest
+                {
+                    RecipientRoutingToken = ByteString.CopyFrom(target.MailboxRoutingToken.ToByteArray()),
+                    DeliveryToken = ByteString.CopyFrom(target.MailboxDeliveryToken.Span)
+                };
+
+                var response = await client.FetchPreKeyBundleAsync(
+                    fetchRequest,
+                    deadline: DateTime.UtcNow.AddSeconds(5),
+                    cancellationToken: ct);
+
+                DhPublicKey? opk = response.OneTimePrekey.IsEmpty
+                    ? null
+                    : DhPublicKey.FromSpan(response.OneTimePrekey.Span);
+
+                var targetBundle = new PreKeyBundle(
+                    target.PublicIdentityId,
+                    DeviceId.Primary,
+                    IdentityKey.FromSpan(response.IdentityKey.Span),
+                    DhPublicKey.FromSpan(response.SignedPrekey.Span),
+                    DeviceLinkProof.FromSpan(response.PrekeySignature.Span),
+                    OneTimePreKey: opk,
+                    OneTimePreKeyId: response.OneTimePrekeyId);
 
                 using var scope = initiator.Services.CreateScope();
                 var handshakeService = scope.ServiceProvider.GetRequiredService<IHandshakeService>();
@@ -115,8 +148,8 @@ internal sealed class DirectHandshakeOrchestrator
                 var directChannel = await channelRepo.GetDirectByIdAsync(channelId, ct);
                 if (directChannel == null)
                 {
-                    var channel = DirectChannel.Create(channelId, initiator.PublicIdentityId, target.PublicIdentityId, timeProvider).Value!;
-                    await channelRepo.SaveDirectAsync(channel, ct);
+                    var channelEntity = DirectChannel.Create(channelId, initiator.PublicIdentityId, target.PublicIdentityId, timeProvider).Value!;
+                    await channelRepo.SaveDirectAsync(channelEntity, ct);
                 }
 
                 var existingContact = await contactRepo.GetByPeerIdAsync(initiator.PublicIdentityId, target.PublicIdentityId, ct);
@@ -182,6 +215,14 @@ internal sealed class DirectHandshakeOrchestrator
 
             try
             {
+                var senderHost = _worldState.FindPersonaHostByIdentity(senderId);
+                if (senderHost != null)
+                {
+                    var targetStreamRegistry = target.Services.GetRequiredService<IStreamRegistryManagement>();
+                    targetStreamRegistry.RegisterDirectEndpoint(senderHost.PublicIdentityId, senderHost.BoundEndpoint);
+
+                }
+
                 using var scope = target.Services.CreateScope();
                 var contactCoord = scope.ServiceProvider.GetRequiredService<IContactRequestCoordinator>();
                 var handshakeService = scope.ServiceProvider.GetRequiredService<IHandshakeService>();
@@ -214,7 +255,6 @@ internal sealed class DirectHandshakeOrchestrator
                 // Flush outbox in case any reply packets were queued
                 await target.FlushOutboxAsync(ct);
 
-                var senderHost = _worldState.FindPersonaHostByIdentity(senderId);
                 if (senderHost != null)
                 {
                     if (senderHost.HomeRelay != null)
