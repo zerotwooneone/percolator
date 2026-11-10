@@ -328,6 +328,119 @@ public sealed class UnauthenticatedDeliveryEndpointTests
     }
 
     [Test]
+    public async Task UploadBlindBlob_Sha256Mismatch_ThrowsInvalidArgument()
+    {
+        byte[] payload = new byte[1024];
+        RandomNumberGenerator.Fill(payload);
+
+        byte[] declaredFakeBlobId = new byte[32];
+        RandomNumberGenerator.Fill(declaredFakeBlobId);
+
+        var chunk = new BlindBlobChunkProto
+        {
+            BlobId = ByteString.CopyFrom(declaredFakeBlobId),
+            ChunkIndex = 0,
+            ChunkData = ByteString.CopyFrom(payload),
+            IsFinalChunk = true
+        };
+
+        var reader = new FakeAsyncStreamReader<BlindBlobChunkProto>(new[] { chunk });
+
+        Func<Task> act = async () =>
+            await _endpoint.UploadBlindBlob(reader, new TestServerCallContext());
+
+        var ex = await act.Should().ThrowAsync<RpcException>();
+        ex.Which.StatusCode.Should().Be(StatusCode.InvalidArgument);
+        ex.Which.Status.Detail.Should().Contain("Uploaded blob SHA-256 digest does not match declared BlobId");
+    }
+
+    [Test]
+    public async Task UploadBlindBlob_Sha256Matches_Succeeds()
+    {
+        byte[] payload = new byte[1024];
+        RandomNumberGenerator.Fill(payload);
+
+        byte[] correctBlobId = SHA256.HashData(payload);
+
+        var chunk = new BlindBlobChunkProto
+        {
+            BlobId = ByteString.CopyFrom(correctBlobId),
+            ChunkIndex = 0,
+            ChunkData = ByteString.CopyFrom(payload),
+            IsFinalChunk = true
+        };
+
+        var reader = new FakeAsyncStreamReader<BlindBlobChunkProto>(new[] { chunk });
+
+        var response = await _endpoint.UploadBlindBlob(reader, new TestServerCallContext());
+        response.Success.Should().BeTrue();
+        response.BlobUri.Should().Contain(Convert.ToHexString(correctBlobId).ToLowerInvariant());
+    }
+
+    [Test]
+    public async Task UploadBlindBlob_ConflictingBlobIdAcrossChunks_ThrowsInvalidArgument()
+    {
+        byte[] payload1 = new byte[512];
+        byte[] payload2 = new byte[512];
+        RandomNumberGenerator.Fill(payload1);
+        RandomNumberGenerator.Fill(payload2);
+
+        byte[] blobId1 = new byte[32];
+        byte[] blobId2 = new byte[32];
+        RandomNumberGenerator.Fill(blobId1);
+        RandomNumberGenerator.Fill(blobId2);
+
+        var chunk1 = new BlindBlobChunkProto
+        {
+            BlobId = ByteString.CopyFrom(blobId1),
+            ChunkIndex = 0,
+            ChunkData = ByteString.CopyFrom(payload1),
+            IsFinalChunk = false
+        };
+
+        var chunk2 = new BlindBlobChunkProto
+        {
+            BlobId = ByteString.CopyFrom(blobId2),
+            ChunkIndex = 1,
+            ChunkData = ByteString.CopyFrom(payload2),
+            IsFinalChunk = true
+        };
+
+        var reader = new FakeAsyncStreamReader<BlindBlobChunkProto>(new[] { chunk1, chunk2 });
+
+        Func<Task> act = async () =>
+            await _endpoint.UploadBlindBlob(reader, new TestServerCallContext());
+
+        var ex = await act.Should().ThrowAsync<RpcException>();
+        ex.Which.StatusCode.Should().Be(StatusCode.InvalidArgument);
+        ex.Which.Status.Detail.Should().Contain("Conflicting Blob ID declared across stream chunks");
+    }
+
+    [Test]
+    public async Task UploadBlindBlob_InvalidBlobIdLength_ThrowsInvalidArgument()
+    {
+        byte[] payload = new byte[512];
+        byte[] invalidBlobId = new byte[16]; // Invalid length (16 instead of 32)
+
+        var chunk = new BlindBlobChunkProto
+        {
+            BlobId = ByteString.CopyFrom(invalidBlobId),
+            ChunkIndex = 0,
+            ChunkData = ByteString.CopyFrom(payload),
+            IsFinalChunk = true
+        };
+
+        var reader = new FakeAsyncStreamReader<BlindBlobChunkProto>(new[] { chunk });
+
+        Func<Task> act = async () =>
+            await _endpoint.UploadBlindBlob(reader, new TestServerCallContext());
+
+        var ex = await act.Should().ThrowAsync<RpcException>();
+        ex.Which.StatusCode.Should().Be(StatusCode.InvalidArgument);
+        ex.Which.Status.Detail.Should().Contain("Blob ID must be exactly 32 bytes (SHA-256)");
+    }
+
+    [Test]
     public async Task FetchPreKeyBundle_InvalidDeliveryToken_RejectsWithoutConsumingOpk()
     {
         var ownerId = PublicIdentityId.New();
@@ -400,5 +513,22 @@ public sealed class UnauthenticatedDeliveryEndpointTests
         // Verify OPK WAS consumed
         var consumedBundle = await _preKeyRepo.GetAsync(ownerId, deviceId);
         consumedBundle!.AvailableOneTimePreKeyCount.Should().Be(0);
+    }
+
+    private sealed class FakeAsyncStreamReader<T> : IAsyncStreamReader<T>
+    {
+        private readonly IEnumerator<T> _enumerator;
+
+        public FakeAsyncStreamReader(IEnumerable<T> items)
+        {
+            _enumerator = items.GetEnumerator();
+        }
+
+        public T Current => _enumerator.Current;
+
+        public Task<bool> MoveNext(CancellationToken cancellationToken)
+        {
+            return Task.FromResult(_enumerator.MoveNext());
+        }
     }
 }

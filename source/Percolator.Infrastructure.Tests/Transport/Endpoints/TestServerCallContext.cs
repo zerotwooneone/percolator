@@ -3,6 +3,7 @@ namespace Percolator.Infrastructure.Tests.Transport.Endpoints;
 using System;
 using System.Collections.Generic;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 using Grpc.Core;
 
@@ -34,18 +35,37 @@ public sealed class TestServerCallContext : ServerCallContext
 
 public sealed class TestServerStreamWriter<T> : IServerStreamWriter<T>
 {
-    public List<T> WrittenMessages { get; } = new();
+    private readonly List<T> _messages = new();
+    private readonly object _lock = new();
+    private readonly Channel<T> _channel = Channel.CreateUnbounded<T>();
+
+    public IReadOnlyList<T> WrittenMessages
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _messages.ToArray();
+            }
+        }
+    }
+
+    public async ValueTask<T> ReadNextAsync(CancellationToken cancellationToken = default)
+    {
+        return await _channel.Reader.ReadAsync(cancellationToken).ConfigureAwait(false);
+    }
+
     public WriteOptions? WriteOptions { get; set; }
 
     public Task WriteAsync(T message)
     {
-        WrittenMessages.Add(message);
+        lock (_lock)
+        {
+            _messages.Add(message);
+        }
+        _channel.Writer.TryWrite(message);
         return Task.CompletedTask;
     }
 
-    public Task WriteAsync(T message, CancellationToken cancellationToken)
-    {
-        WrittenMessages.Add(message);
-        return Task.CompletedTask;
-    }
+    public Task WriteAsync(T message, CancellationToken cancellationToken) => WriteAsync(message);
 }

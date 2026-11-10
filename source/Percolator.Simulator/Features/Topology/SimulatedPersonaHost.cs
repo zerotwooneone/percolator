@@ -249,38 +249,27 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                 return new SimulatorTransportDispatcher(invoker, routingRepo, _worldState, _logSink, DisplayName);
             });
             services.AddScoped<OutboxWorker>();
-            // 6. Direct Ingress Bridge for Kestrel Transport
-            services.AddSingleton<InboundEnvelopeContextHolder>();
-            services.AddScoped<SealedEnvelopeUnwrapper>(sp =>
+            // 6. Direct Ingress for Kestrel Transport
+            services.AddScoped<ISealedEnvelopeUnwrapper>(sp =>
             {
                 var wirePacker = sp.GetRequiredService<ISessionWirePacker>();
                 var time = sp.GetRequiredService<IDateTimeProvider>();
                 return new SealedEnvelopeUnwrapper(wirePacker, time, PublicIdentityId);
             });
-            services.AddScoped<ISealedEnvelopeUnwrapper>(sp =>
-            {
-                var inner = sp.GetRequiredService<SealedEnvelopeUnwrapper>();
-                var holder = sp.GetRequiredService<InboundEnvelopeContextHolder>();
-                return new SimulatorDirectEnvelopeUnwrapper(inner, holder, _logSink, DisplayName);
-            });
-            services.AddScoped<IngressFilterService>();
+            services.AddScoped<IIngressFilterService, IngressFilterService>();
             services.AddScoped<IInboundIngressPipeline>(sp =>
-                new InboundIngressPipeline(
-                    sp.GetRequiredService<IngressFilterService>(),
+            {
+                var inner = new InboundIngressPipeline(
+                    sp.GetRequiredService<IIngressFilterService>(),
                     sp.GetRequiredService<IRatchetSessionRepository>(),
                     sp.GetRequiredService<IGroupReceiverSessionRepository>(),
                     sp.GetRequiredService<IHandshakeService>(),
                     sp.GetRequiredService<ICryptoEngine>(),
                     sp.GetRequiredService<IAppRouter>(),
                     sp.GetRequiredService<IChannelLockService>(),
-                    sp.GetService<IGroupKeyDistributionService>()));
-            services.AddScoped<IIngressFilterService>(sp =>
-            {
-                var inner = sp.GetRequiredService<IngressFilterService>();
-                var holder = sp.GetRequiredService<InboundEnvelopeContextHolder>();
-                var pipeline = sp.GetRequiredService<IInboundIngressPipeline>();
+                    sp.GetService<IGroupKeyDistributionService>());
                 var outboxWorker = sp.GetRequiredService<OutboxWorker>();
-                return new SimulatorIngressDispatchingFilterService(inner, holder, pipeline, _logSink, DisplayName, outboxWorker);
+                return new SimulatorOutboxFlushingIngressPipelineDecorator(inner, outboxWorker, _logSink, DisplayName);
             });
         });
         _host = builder.Build();

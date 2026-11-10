@@ -51,6 +51,7 @@ message RegisterMailboxRequest {
   bytes routing_token = 1;
   bytes authorized_delivery_token = 2;
   bytes drain_token = 3;
+  bytes existing_drain_token = 4;
 }
 
 message RegisterMailboxResponse {

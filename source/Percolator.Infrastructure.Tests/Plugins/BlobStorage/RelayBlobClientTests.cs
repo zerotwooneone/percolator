@@ -134,12 +134,14 @@ public sealed class RelayBlobClientTests
         byte[] downloadedBytes = readMs.ToArray();
         downloadedBytes.Should().Equal(payload);
 
-        // Delete blob
+        // Delete blob returns unsupported error
         var deleteResult = await _directClient.DeleteBlobAsync(relayUri, blobId);
-        deleteResult.IsSuccess.Should().BeTrue();
+        deleteResult.IsSuccess.Should().BeFalse();
+        deleteResult.Error.Should().NotBeNull();
+        deleteResult.Error!.Code.Should().Be("Blob.DeleteUnsupported");
 
-        // Verify blob no longer in store
-        (await _chunkStore.HasBlobAsync(blobId)).Should().BeFalse();
+        // Verify blob still in store
+        (await _chunkStore.HasBlobAsync(blobId)).Should().BeTrue();
     }
 
     [Test]
@@ -252,19 +254,6 @@ public sealed class RelayBlobClientTests
 
             return new AsyncServerStreamingCall<BlindBlobChunkProto>(
                 reader,
-                Task.FromResult(new Metadata()),
-                () => Status.DefaultSuccess,
-                () => new Metadata(),
-                () => { });
-        }
-
-        public override AsyncUnaryCall<BlindBlobDeleteResponseProto> DeleteBlindBlobAsync(
-            BlindBlobDeleteRequestProto request,
-            CallOptions options)
-        {
-            var task = _endpoint.DeleteBlindBlob(request, new TestServerCallContext(options.CancellationToken));
-            return new AsyncUnaryCall<BlindBlobDeleteResponseProto>(
-                task,
                 Task.FromResult(new Metadata()),
                 () => Status.DefaultSuccess,
                 () => new Metadata(),

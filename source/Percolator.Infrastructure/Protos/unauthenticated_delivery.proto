@@ -22,7 +22,6 @@ service UnauthenticatedDeliveryService {
     // Channel-independent blind media blob retrieval and upload
     rpc DownloadBlindBlob (BlindBlobDownloadRequestProto) returns (stream BlindBlobChunkProto);
     rpc UploadBlindBlob (stream BlindBlobChunkProto) returns (BlindBlobUploadResponseProto);
-    rpc DeleteBlindBlob (BlindBlobDeleteRequestProto) returns (BlindBlobDeleteResponseProto);
 }
 
 message SealedEnvelopeProto {
@@ -93,15 +92,6 @@ message BlindBlobUploadResponseProto {
     bool success = 1;
     string error_message = 2;
     string blob_uri = 3;
-}
-
-message BlindBlobDeleteRequestProto {
-    bytes blob_id = 1;
-}
-
-message BlindBlobDeleteResponseProto {
-    bool success = 1;
-    string error_message = 2;
 }
 
 message FetchPreKeyBundleRequest {

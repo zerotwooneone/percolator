@@ -2,6 +2,7 @@ namespace Percolator.Infrastructure.Transport.Endpoints;
 
 using System;
 using System.IO;
+using System.Security.Cryptography;
 using System.Threading.Tasks;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
@@ -363,12 +364,26 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
                 bufferSize: 64 * 1024,
                 FileOptions.DeleteOnClose))
             {
+                using var incrementalHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+
                 while (await requestStream.MoveNext(context.CancellationToken))
                 {
                     var chunk = requestStream.Current;
-                    if (blobIdBytes == null && chunk.BlobId != null && chunk.BlobId.Length == 32)
+                    if (chunk.BlobId != null && !chunk.BlobId.IsEmpty)
                     {
-                        blobIdBytes = chunk.BlobId.ToByteArray();
+                        if (chunk.BlobId.Length != 32)
+                        {
+                            throw new RpcException(new Status(StatusCode.InvalidArgument, "Blob ID must be exactly 32 bytes (SHA-256)."));
+                        }
+
+                        if (blobIdBytes == null)
+                        {
+                            blobIdBytes = chunk.BlobId.ToByteArray();
+                        }
+                        else if (!CryptographicOperations.FixedTimeEquals(blobIdBytes, chunk.BlobId.Span))
+                        {
+                            throw new RpcException(new Status(StatusCode.InvalidArgument, "Conflicting Blob ID declared across stream chunks."));
+                        }
                     }
 
                     totalBytes += chunk.ChunkData.Length;
@@ -377,6 +392,7 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
                         throw new RpcException(new Status(StatusCode.InvalidArgument, "Stream exceeds 100 MB limit."));
                     }
 
+                    incrementalHash.AppendData(chunk.ChunkData.Span);
                     await tempFile.WriteAsync(chunk.ChunkData.Memory, context.CancellationToken);
                     if (chunk.IsFinalChunk)
                     {
@@ -387,6 +403,17 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
                 if (blobIdBytes == null)
                 {
                     throw new RpcException(new Status(StatusCode.InvalidArgument, "Missing or invalid Blob ID in stream chunks."));
+                }
+
+                Span<byte> actualHash = stackalloc byte[32];
+                if (!incrementalHash.TryGetHashAndReset(actualHash, out int bytesWritten) || bytesWritten != 32)
+                {
+                    throw new RpcException(new Status(StatusCode.Internal, "Failed to compute SHA-256 hash."));
+                }
+
+                if (!CryptographicOperations.FixedTimeEquals(actualHash, blobIdBytes))
+                {
+                    throw new RpcException(new Status(StatusCode.InvalidArgument, "Uploaded blob SHA-256 digest does not match declared BlobId."));
                 }
 
                 tempFile.Position = 0;
@@ -404,26 +431,19 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
         {
             if (File.Exists(tempPath))
             {
-                try { File.Delete(tempPath); } catch { }
+                try
+                {
+                    File.Delete(tempPath);
+                }
+                catch (IOException)
+                {
+                    // Best-effort cleanup for temp file
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    // Best-effort cleanup for temp file
+                }
             }
         }
-    }
-
-    public override async Task<BlindBlobDeleteResponseProto> DeleteBlindBlob(
-        BlindBlobDeleteRequestProto request,
-        ServerCallContext context)
-    {
-        if (request.BlobId.Length != 32)
-        {
-            throw new RpcException(new Status(StatusCode.InvalidArgument, "Blob ID must be exactly 32 bytes (SHA-256)."));
-        }
-
-        var blobId = BlobId.FromSha256(request.BlobId.ToByteArray());
-        await _chunkStore.DeleteBlobAsync(blobId, context.CancellationToken);
-
-        return new BlindBlobDeleteResponseProto
-        {
-            Success = true
-        };
     }
 }

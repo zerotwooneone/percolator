@@ -4,6 +4,8 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Security.Cryptography;
+using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
@@ -41,11 +43,17 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
             throw new RpcException(new Status(StatusCode.InvalidArgument, "Routing token, delivery token, and drain token are required."));
         }
 
-        await _capabilityStore.RegisterAsync(
+        var regResult = await _capabilityStore.RegisterVerifiedAsync(
             request.RoutingToken.Memory,
             request.AuthorizedDeliveryToken.Memory,
             request.DrainToken.Memory,
+            request.ExistingDrainToken.Memory,
             ct: context.CancellationToken);
+
+        if (regResult.IsFailure)
+        {
+            throw new RpcException(new Status(StatusCode.PermissionDenied, regResult.Error.Description));
+        }
 
         return new RegisterMailboxResponse { Success = true };
     }
@@ -135,11 +143,71 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
             AuthResult = new AuthResultProto { Authenticated = true }
         });
 
-        // 3. Drain and stream existing envelopes
-        var envelopes = await _capabilityStore.DrainEnvelopesAsync(authResp.RoutingToken.Memory, context.CancellationToken);
-        foreach (var env in envelopes)
+        // 3. Setup live stream & send initial queued envelopes without destroying them prematurely
+        var liveChannel = Channel.CreateUnbounded<QueuedSealedEnvelopeProto>(
+            new UnboundedChannelOptions
+            {
+                SingleWriter = false,
+                SingleReader = true
+            });
+
+        using var subscription = _capabilityStore.SubscribeMailbox(authResp.RoutingToken.Memory, liveChannel.Writer);
+
+        var initialEnvelopes = await _capabilityStore.GetEnvelopesAsync(authResp.RoutingToken.Memory, context.CancellationToken);
+        var initialQueueIds = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var env in initialEnvelopes)
         {
+            initialQueueIds.Add(env.QueueId);
             await responseStream.WriteAsync(new MailboxStreamServerMessage { Envelope = env });
+        }
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(context.CancellationToken);
+
+        var readClientAcksTask = Task.Run(async () =>
+        {
+            while (await requestStream.MoveNext(cts.Token).ConfigureAwait(false))
+            {
+                var msg = requestStream.Current;
+                if (msg.PayloadCase == MailboxStreamClientMessage.PayloadOneofCase.Ack && msg.Ack != null)
+                {
+                    await _capabilityStore.AcknowledgeEnvelopeAsync(
+                        authResp.RoutingToken.Memory,
+                        msg.Ack.QueueId,
+                        cts.Token).ConfigureAwait(false);
+                }
+            }
+        }, cts.Token);
+
+        var writeServerLiveEnvelopesTask = Task.Run(async () =>
+        {
+            while (await liveChannel.Reader.WaitToReadAsync(cts.Token).ConfigureAwait(false))
+            {
+                while (liveChannel.Reader.TryRead(out var liveEnv))
+                {
+                    // Avoid duplicate if envelope was already sent as part of initial offline batch
+                    if (initialQueueIds.Count > 0 && initialQueueIds.Remove(liveEnv.QueueId))
+                    {
+                        continue;
+                    }
+
+                    await responseStream.WriteAsync(
+                        new MailboxStreamServerMessage { Envelope = liveEnv }).ConfigureAwait(false);
+                }
+            }
+        }, cts.Token);
+
+        await Task.WhenAny(readClientAcksTask, writeServerLiveEnvelopesTask).ConfigureAwait(false);
+        cts.Cancel();
+        liveChannel.Writer.TryComplete();
+
+        try
+        {
+            await Task.WhenAll(readClientAcksTask, writeServerLiveEnvelopesTask).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+            // Expected cooperative cancellation on stream completion/closure
         }
     }
 

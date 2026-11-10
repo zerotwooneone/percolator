@@ -204,39 +204,15 @@ public sealed class RelayBlobClient : IRelayBlobClient
         }
     }
 
-    public async ValueTask<DomainResult> DeleteBlobAsync(
+    public ValueTask<DomainResult> DeleteBlobAsync(
         Uri relayUri,
         BlobId blobId,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(relayUri);
 
-        try
-        {
-            var client = GetClient(relayUri);
-            byte[] blobBytes = Convert.FromHexString(blobId.HexDigest);
-            var request = new BlindBlobDeleteRequestProto
-            {
-                BlobId = ByteString.CopyFrom(blobBytes)
-            };
-
-            var response = await client.DeleteBlindBlobAsync(request, cancellationToken: ct);
-            if (!response.Success)
-            {
-                return DomainResult.Failure(new DomainError(
-                    "DELETE_FAILED", response.ErrorMessage ?? "Failed to delete blob from relay."));
-            }
-
-            return DomainResult.Success();
-        }
-        catch (RpcException ex)
-        {
-            return DomainResult.Failure(new DomainError("RPC_ERROR", ex.Status.Detail ?? ex.Message));
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            return DomainResult.Failure(new DomainError("TRANSPORT_ERROR", ex.Message));
-        }
+        return ValueTask.FromResult(DomainResult.Failure(new DomainError(
+            "Blob.DeleteUnsupported", "Remote blind blob deletion is disabled; relay blobs expire automatically via TTL.")));
     }
 
     private UnauthenticatedDeliveryService.UnauthenticatedDeliveryServiceClient GetClient(Uri relayUri)
