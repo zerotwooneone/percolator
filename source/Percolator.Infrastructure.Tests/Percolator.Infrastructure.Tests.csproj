@@ -27,9 +27,9 @@
     <Reference Include="Signal.Interop">
       <HintPath>..\vendor\Signal.Interop\Signal.Interop.dll</HintPath>
     </Reference>
-    <Content Include="..\vendor\Signal.Interop\signal_shim.dll">
+    <Content Include="..\vendor\Signal.Interop\runtimes\**\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <Link>signal_shim.dll</Link>
+      <Link>runtimes\%(RecursiveDir)%(Filename)%(Extension)</Link>
       <Visible>false</Visible>
     </Content>
   </ItemGroup>

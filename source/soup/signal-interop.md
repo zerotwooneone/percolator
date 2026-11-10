@@ -6,19 +6,19 @@ Spec: [soup-spec](../spec/soup-spec.md)
 
 | Property | Value |
 | :--- | :--- |
-| **Component Name** | `Signal.Interop` (Managed C# Wrapper) and `signal_shim.dll` (Native Rust C-ABI Bridge) |
+| **Component Name** | `Signal.Interop` (Managed C# Wrapper) and `signal_shim.dll` / `libsignal_shim.so` (Native Rust C-ABI Bridge) |
 | **Supplier / Maintainer** | `zerotwooneone` (`https://github.com/zerotwooneone/libsignal-csharp`) wrapping upstream Signal Messenger LLC (`libsignal` & `zkgroup`) |
 | **Safety Classification & Rationale** | **Class C** (IEC 62304 Clause 4.3).<br/>*Rationale:* The component provides the core cryptographic engine for Sealed Sender Ed25519 digital signatures, Zero-Knowledge Credential verification via ZkGroup, and SenderKey multi-party group messaging. An unmitigated software failure, unhandled crash, or key-schedule corruption directly results in compromise of secret identity keys, permanent session desynchronization, or unauthorized interception of confidential user communications. |
-| **Approved Version & Hash** | `1.0.0` (Commit: `53c7164b1a26ea75b07a3cb6d48920ae5d7fa0a3`)<br/>`Signal.Interop.dll` SHA-256: `026AAB97675C0CB9B92890C9BA003D147DD0EEA4C769A4902ECCCA556A888572`<br/>`signal_shim.dll` SHA-256: `DD7A7DD276FF6CB9D5235148CACCF871C529AD4B0B60035279147C333E4C4B76` |
+| **Approved Version & Hash** | `1.0.0` (Commit: `53c7164b1a26ea75b07a3cb6d48920ae5d7fa0a3`)<br/>`Signal.Interop.dll` SHA-256: `799932D8C6A3358A10761F324E3765C87062D977889A398CF17552675BAC1949`<br/>`runtimes/win-x64/native/signal_shim.dll` SHA-256: `766CB05EAF94BC5C37AB377447EEB46DA2DB74B6BB7DAEF5A432E2CDF6369963`<br/>`runtimes/linux-x64/native/libsignal_shim.so` SHA-256: `D35D3D71E3C66B5DC0777523EA9C33CA9F180039CBCDCBEE93CCBD721B6F0F94` |
 | **License Model** | GPL-3.0 / AGPL-3.0 |
-| **Delivery & Linking Format** | Pre-compiled managed assembly (`net9.0`) + unmanaged dynamic link library (`signal_shim.dll` via P/Invoke C-ABI) |
+| **Delivery & Linking Format** | Pre-compiled managed assembly (`net9.0`) + unmanaged dynamic link libraries (`runtimes/win-x64/native/signal_shim.dll` and `runtimes/linux-x64/native/libsignal_shim.so` via P/Invoke C-ABI) |
 | **Upstream Repository URL** | `https://github.com/zerotwooneone/libsignal-csharp` |
 
 ## 2. Hardware and Software Prerequisites
 
-- **Supported Operating Systems & Runtimes:** Windows 10/11 64-bit (x64), Microsoft .NET 9.0 Runtime (`net9.0`), and Microsoft Visual C++ 2015–2022 Redistributable (`vcruntime140.dll` / Windows Universal CRT).
+- **Supported Operating Systems & Runtimes:** Windows 10/11 64-bit (x64) with Microsoft Visual C++ 2015–2022 Redistributable (`vcruntime140.dll` / Windows Universal CRT), and Linux 64-bit (x86_64, glibc 2.35+, e.g., Ubuntu 22.04 LTS+); Microsoft .NET 9.0 / .NET 10.0 Runtime.
 - **Hardware Architecture:** x86-64 (AMD64) architecture with 64-bit address space.
-- **Native / Unmanaged Prerequisites:** Native dynamic library `signal_shim.dll` deployed in the application working directory or standard dynamic loader search path; unmanaged heap allocations with standard C allocator (`malloc`/`free`).
+- **Native / Unmanaged Prerequisites:** Native dynamic libraries (`signal_shim.dll` on Windows, `libsignal_shim.so` on Linux) deployed under the `runtimes/{RID}/native/` convention in the application output directory and resolved dynamically by `Signal.Interop.NativeLibraryResolver`; unmanaged heap allocations with standard C allocator (`malloc`/`free`).
 
 ## 3. Specified Functional and Performance Capabilities
 
@@ -50,7 +50,7 @@ Spec: [soup-spec](../spec/soup-spec.md)
    - *Architectural Quarantine Adapter:* `SignalSenderKeyStoreAdapter` in `Percolator.Infrastructure`.
 
 6. **`SOUP-SIGNAL-SAFE-HANDLES` (Deterministic Unmanaged Pointer Lifecycle):** [Verify: StaticAnalysis]
-   All native heap pointers created by `signal_shim.dll` are encapsulated within derived `SafeHandle` instances (`GroupSecretParamsSafeHandle`, `SenderKeyRecordSafeHandle`, `GroupMasterKeySafeHandle`), ensuring zero native memory leaks upon garbage collection or explicit disposal.
+   All native heap pointers created by `signal_shim.dll` / `libsignal_shim.so` are encapsulated within derived `SafeHandle` instances (`GroupSecretParamsSafeHandle`, `SenderKeyRecordSafeHandle`, `GroupMasterKeySafeHandle`), ensuring zero native memory leaks upon garbage collection or explicit disposal.
    - *Architectural Quarantine Adapter:* `Percolator.Infrastructure` cryptographic services.
 
 ### 3.2 Unused and Prohibited Capabilities (FDA OTS Guidance §V.A.2)
@@ -59,8 +59,8 @@ Spec: [soup-spec](../spec/soup-spec.md)
    - *Prohibited Functions:* `SignalCrypto.GenerateServerSecretParams`, `SignalCrypto.GetServerPublicParams`, `SignalCrypto.SerializeServerPublicParams`, `SignalCrypto.DeserializeServerPublicParams`, and `SignalCrypto.IssueAuthCredentialWithPni`.
    - *Quarantine Enforcement:* These functions exist for server-side verification and integration test fixtures. They are strictly excluded from client dependency injection. The client host container never registers or invokes these APIs, ensuring they remain dormant in client runtime binaries.
 2. **Direct P/Invoke and Raw Pointer Exports:**
-   - *Prohibited Functions:* Raw unmanaged C-ABI exports in `signal_shim.dll`.
-   - *Quarantine Enforcement:* The domain and application layers have zero assembly references to `Signal.Interop` or `signal_shim.dll`. All operations are strictly mediated by `ISignalCryptoEngine` and `IZkgroupCryptographyService` interfaces implemented in `Percolator.Infrastructure`.
+   - *Prohibited Functions:* Raw unmanaged C-ABI exports in `signal_shim.dll` / `libsignal_shim.so`.
+   - *Quarantine Enforcement:* The domain and application layers have zero assembly references to `Signal.Interop` or the native shim binaries. All operations are strictly mediated by `ISignalCryptoEngine` and `IZkgroupCryptographyService` interfaces implemented in `Percolator.Infrastructure`.
 
 ## 4. Known Anomalies and Cybersecurity Evaluation
 
@@ -102,5 +102,5 @@ Spec: [soup-spec](../spec/soup-spec.md)
 ## 5. Maintenance and Obsolescence Plan
 
 - **Vulnerability Monitoring Cadence:** The engineering team reviews upstream repositories (`https://github.com/zerotwooneone/libsignal-csharp` and upstream `signalapp/libsignal`) quarterly and monitors GitHub Security Advisories and RustSec databases for reported vulnerabilities.
-- **Patch Qualification & Regression Verification:** Before any updated `Signal.Interop.dll` or `signal_shim.dll` binary is accepted into `vendor/Signal.Interop`, the full solution test suite (`Percolator.Infrastructure.Tests`) must be executed with 100% pass rate, validating key generation, Ed25519 roundtrips, presentation generation/verification, and memory boundary sanitization.
-- **Obsolescence & Deprecation Contingency:** All `Signal.Interop` functionality is quarantined behind `Percolator.Domain` port interfaces (`ISignalCryptoEngine`, `IZkgroupCryptographyService`). In the event that upstream maintenance ceases, the repository retains the complete C-ABI bindings and can recompile `signal_shim` directly from source or replace the infrastructure adapter with another compliant FFI binding without modifying domain core logic.
+- **Patch Qualification & Regression Verification:** Before any updated `Signal.Interop.dll` or native bridge binary (`signal_shim.dll` or `libsignal_shim.so`) is accepted into `vendor/Signal.Interop`, the full solution test suite (`Percolator.Infrastructure.Tests`) must be executed with 100% pass rate, validating key generation, Ed25519 roundtrips, presentation generation/verification, and memory boundary sanitization.
+- **Obsolescence & Deprecation Contingency:** All `Signal.Interop` functionality is quarantined behind `Percolator.Domain` port interfaces (`ISignalCryptoEngine`, `IZkgroupCryptographyService`). In the event that upstream maintenance ceases, the repository retains the complete C-ABI bindings and can recompile `signal_shim` / `libsignal_shim` directly from source or replace the infrastructure adapter with another compliant FFI binding without modifying domain core logic.

@@ -1,8 +1,52 @@
-# Signal.Interop API Surface
+# Signal.Interop (.NET 9)
 
-This section documents the intended *public* API surface of this repository as implemented.
+Cross-platform managed .NET 9 wrapper and native Rust cryptographic bridge for Signal Protocol and Groups V2 (`zkgroup`).
+
+---
+
+## 📦 Consuming `Signal.Interop` in .NET Projects
+
+To reference and consume this vendored library in a .NET project (e.g., `Percolator.Infrastructure.csproj`):
+
+### 1. Directory Structure
+```
+vendor/Signal.Interop/
+├── Signal.Interop.dll
+├── Signal.Interop.pdb
+├── Signal.Interop.deps.json
+├── readme.md
+└── runtimes/
+    ├── win-x64/native/signal_shim.dll
+    └── linux-x64/native/libsignal_shim.so
+```
+
+### 2. Required `.csproj` Configuration
+Add both the managed assembly reference and the multi-platform native assets to your consuming project's `.csproj`:
+
+```xml
+<ItemGroup>
+  <!-- 1. Managed assembly reference -->
+  <Reference Include="Signal.Interop">
+    <HintPath>..\vendor\Signal.Interop\Signal.Interop.dll</HintPath>
+  </Reference>
+
+  <!-- 2. Multi-platform native binaries (Windows & Linux) -->
+  <Content Include="..\vendor\Signal.Interop\runtimes\**\*">
+    <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    <Link>runtimes\%(RecursiveDir)%(Filename)%(Extension)</Link>
+  </Content>
+</ItemGroup>
+```
+
+### 3. Native Library Resolution
+* The native Rust libraries (`signal_shim.dll` on Windows, `libsignal_shim.so` on Linux) reside in the `runtimes/` directory.
+* `Signal.Interop` includes an internal module initializer (`NativeLibraryResolver`) that automatically discovers and loads the correct native binary at runtime based on the running OS.
+* No platform-specific conditionals or manual P/Invoke mappings are required in consumer code.
+
+---
 
 ## C# (.NET 9) API (`Signal.Interop`)
+
 
 Primary entrypoint:
 
