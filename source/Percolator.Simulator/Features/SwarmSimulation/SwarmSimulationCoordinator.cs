@@ -25,6 +25,12 @@ using Percolator.Simulator.Features.Scenarios;
 using Percolator.Simulator.Features.Scenarios.Model;
 using Percolator.Simulator.Features.Shell;
 using Percolator.Simulator.Features.Topology;
+using Microsoft.Extensions.DependencyInjection;
+using Percolator.Application2.Ports;
+using Percolator.Apps.FileTransfer.Features.IngressControl;
+using Percolator.Domain.Channels.ValueObjects;
+using Percolator.Domain.Security.ValueObjects;
+using Percolator.Simulator.Features.DirectChat;
 
 namespace Percolator.Simulator.Features.SwarmSimulation;
 
@@ -221,9 +227,78 @@ internal sealed class SwarmSimulationCoordinator
             return Guid.Empty;
         }
 
+        // Explicit file transfer privacy opt-in
+        initiator.AllowFileTransfers = true;
+        _logSink.Log(new SimulatorLogEntry(
+            DateTimeOffset.UtcNow,
+            LogLevel.Information,
+            initiator.DisplayName,
+            initiator.Id,
+            "PrivacyPolicy",
+            FileTransferIngressFilter.PrivacyNotice));
+
         // 1. Generate deterministic synthetic file on disk
         string presetsDir = Path.Combine(initiator.NodeTempDirectory, "Presets");
         GeneratedFilePreset preset = _presetGenerator.GeneratePreset(presetsDir, presetSize);
+
+        // Discover loopback candidate via INetworkEndpointDiscoveryPort and initiate in-band transfer if ratchet session exists
+        using (var initScope = initiator.Services.CreateScope())
+        {
+            var endpointDiscovery = initScope.ServiceProvider.GetService<INetworkEndpointDiscoveryPort>();
+            if (endpointDiscovery != null)
+            {
+                var candidates = await endpointDiscovery.DiscoverLocalCandidatesAsync(DirectWanPolicy.DisabledByDefault, ct);
+                foreach (var candidate in candidates)
+                {
+                    _logSink.Log(new SimulatorLogEntry(
+                        DateTimeOffset.UtcNow,
+                        LogLevel.Information,
+                        initiator.DisplayName,
+                        initiator.Id,
+                        "EndpointDiscovery",
+                        $"Discovered local loopback candidate: {candidate.Host.Value}:{candidate.Port.Value} (Kind: {candidate.Kind})"));
+                }
+            }
+
+            var ratchetRepo = initScope.ServiceProvider.GetService<IRatchetSessionRepository>();
+            var actionHandler = initScope.ServiceProvider.GetService<IFileTransferActionHandler>();
+            if (ratchetRepo != null && actionHandler != null)
+            {
+                foreach (var r in recipients)
+                {
+                    var session = await ratchetRepo.GetSessionAsync(initiator.PublicIdentityId, r.PublicIdentityId, DeviceId.Primary, ct);
+                    if (session != null)
+                    {
+                        var channelId = ChannelIdUtility.DeterministicFor(initiator.PublicIdentityId, r.PublicIdentityId);
+                        var sourceRoot = RootDirectoryPath.Parse(presetsDir);
+                        var sanitizedPath = SanitizedRelativePath.Parse(preset.RelativeFileName);
+                        var initResult = await actionHandler.InitiateTransferAsync(
+                            channelId,
+                            initiator.PublicIdentityId,
+                            [r.PublicIdentityId],
+                            sourceRoot,
+                            [sanitizedPath],
+                            DirectWanPolicy.DisabledByDefault,
+                            ct: ct);
+
+                        if (initResult.IsSuccess)
+                        {
+                            await initiator.FlushOutboxAsync(ct);
+                        }
+                        else
+                        {
+                            _logSink.Log(new SimulatorLogEntry(
+                                DateTimeOffset.UtcNow,
+                                LogLevel.Warning,
+                                initiator.DisplayName,
+                                initiator.Id,
+                                "SwarmFileTransfer",
+                                $"In-band transfer initiation warning: {initResult.Error!.Description}"));
+                        }
+                    }
+                }
+            }
+        }
 
         // 2. Compute Merkle leaf hashes for all chunks
         const int chunkSize = 128 * 1024; // 128 KB standard chunk
@@ -291,21 +366,9 @@ internal sealed class SwarmSimulationCoordinator
             "SwarmFileTransfer",
             $"Initiated '{presetSize}' file transfer '{preset.RelativeFileName}' ({preset.TotalBytes:N0} bytes, {totalChunks} chunks) with SHA-256 {preset.Sha256Hex}."));
 
-        // Dispatch offers to recipients
+        // Dispatch offers to recipients without cross-host RAM peeking (Anti-Shortcut Rule 2)
         foreach (var r in recipients)
         {
-            if (!r.AllowFileTransfers)
-            {
-                _logSink.Log(new SimulatorLogEntry(
-                    DateTimeOffset.UtcNow,
-                    LogLevel.Warning,
-                    r.DisplayName,
-                    r.Id,
-                    "SwarmFileTransfer",
-                    $"File transfer offer rejected: persona has 'Allow File Transfers' disabled."));
-                continue;
-            }
-
             _stateBus.Publish(new SimulatorStateSignal(
                 r.Id,
                 SignalCategory.FileTransferOfferReceived,
@@ -314,7 +377,12 @@ internal sealed class SwarmSimulationCoordinator
 
             if (r.AutoAcceptFileTransfers)
             {
-                _ = Task.Run(async () => await AcceptTransferAsync(r.Id, sessionId));
+                var capturedMember = r;
+                var capturedSessionId = sessionId;
+                UiTaskRunner.FireAndForget(
+                    () => AcceptTransferAsync(capturedMember.Id, capturedSessionId),
+                    "AutoAcceptFileTransfer",
+                    _logSink);
             }
         }
 
@@ -326,7 +394,7 @@ internal sealed class SwarmSimulationCoordinator
         return sessionId;
     }
 
-    public async Task<bool> AcceptTransferAsync(SimulatedNodeId recipientNodeId, Guid sessionId)
+    public async Task<bool> AcceptTransferAsync(SimulatedNodeId recipientNodeId, Guid sessionId, CancellationToken ct = default)
     {
         if (!_activeSwarms.TryGetValue(sessionId, out var swarm))
         {
@@ -335,6 +403,45 @@ internal sealed class SwarmSimulationCoordinator
 
         var recipient = _worldState.GetPersonaHost(recipientNodeId);
         if (recipient == null) return false;
+
+        recipient.AllowFileTransfers = true;
+        _logSink.Log(new SimulatorLogEntry(
+            DateTimeOffset.UtcNow,
+            LogLevel.Information,
+            recipient.DisplayName,
+            recipient.Id,
+            "PrivacyPolicy",
+            FileTransferIngressFilter.PrivacyNotice));
+
+        using (var recipScope = recipient.Services.CreateScope())
+        {
+            var actionHandler = recipScope.ServiceProvider.GetService<IFileTransferActionHandler>();
+            var sessionRepo = recipScope.ServiceProvider.GetService<ITransferSessionRepository>();
+            if (actionHandler != null && sessionRepo != null)
+            {
+                var transferSessionId = TransferSessionId.FromGuid(sessionId);
+                var existingSession = await sessionRepo.GetSessionByIdAsync(transferSessionId, ct);
+                if (existingSession != null)
+                {
+                    var destinationRoot = RootDirectoryPath.Parse(recipient.NodeDownloadsDirectory);
+                    var acceptResult = await actionHandler.AcceptTransferAsync(transferSessionId, destinationRoot, ct: ct);
+                    if (acceptResult.IsSuccess)
+                    {
+                        await recipient.FlushOutboxAsync(ct);
+                    }
+                    else
+                    {
+                        _logSink.Log(new SimulatorLogEntry(
+                            DateTimeOffset.UtcNow,
+                            LogLevel.Warning,
+                            recipient.DisplayName,
+                            recipient.Id,
+                            "SwarmFileTransfer",
+                            $"In-band transfer acceptance warning: {acceptResult.Error!.Description}"));
+                    }
+                }
+            }
+        }
 
         var participant = swarm.Participants.FirstOrDefault(p => p.NodeId == recipientNodeId);
         if (participant == null)
@@ -443,6 +550,15 @@ internal sealed class SwarmSimulationCoordinator
             if (swarm.LateJoinerInjected) return;
             swarm.LateJoinerInjected = true;
         }
+
+        lateJoiner.AllowFileTransfers = true;
+        _logSink.Log(new SimulatorLogEntry(
+            DateTimeOffset.UtcNow,
+            LogLevel.Information,
+            lateJoiner.DisplayName,
+            lateJoiner.Id,
+            "PrivacyPolicy",
+            FileTransferIngressFilter.PrivacyNotice));
 
         var participant = new ActiveSwarmParticipant(
             lateJoiner.Id,

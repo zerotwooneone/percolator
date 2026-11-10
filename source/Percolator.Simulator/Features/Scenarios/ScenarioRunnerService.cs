@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -1686,7 +1686,7 @@ internal sealed class ScenarioRunnerService
 
         var swarm = GetTargetSwarm();
 
-        var success = await _swarmCoordinator.AcceptTransferAsync(recipient.Id, swarm.SessionId);
+        var success = await _swarmCoordinator.AcceptTransferAsync(recipient.Id, swarm.SessionId, ct);
         if (!success)
         {
             throw new ScenarioExecutionException($"Failed to accept file transfer on persona '{step.RecipientAlias}'.");
