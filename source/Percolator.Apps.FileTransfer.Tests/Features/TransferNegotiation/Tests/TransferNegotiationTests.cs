@@ -1,4 +1,4 @@
-using Percolator.Apps.FileTransfer.Domain.Common;
+﻿using Percolator.Apps.FileTransfer.Domain.Common;
 using Percolator.Apps.FileTransfer.Domain.ManifestManagement;
 using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Features.IngressControl;
@@ -21,6 +21,7 @@ public sealed class TransferNegotiationTests
     private InMemoryDesktopFileStorage _fileStorage = null!;
     private RecordingPayloadSender _payloadSender = null!;
     private RecordingTrackerPort _trackerPort = null!;
+    private InMemoryFilterPolicyRepository _policyRepository = null!;
     private FileTransferActionHandler _handler = null!;
 
     [SetUp]
@@ -31,6 +32,8 @@ public sealed class TransferNegotiationTests
         _fileStorage = new InMemoryDesktopFileStorage();
         _payloadSender = new RecordingPayloadSender();
         _trackerPort = new RecordingTrackerPort();
+        _policyRepository = new InMemoryFilterPolicyRepository();
+        var defaultFilter = new FileTransferIngressFilter(_policyRepository) { IsEnabled = true };
 
         _handler = new FileTransferActionHandler(
             _sessionRepo,
@@ -38,7 +41,8 @@ public sealed class TransferNegotiationTests
             _payloadSender,
             new ProtobufPayloadSerializer(),
             _trackerPort,
-            _clock);
+            _clock,
+            defaultFilter);
     }
 
     [Test]
@@ -294,5 +298,67 @@ public sealed class TransferNegotiationTests
         DomainResult<FileTransferCancelPayload> cancelRoundtrip = serializer.Deserialize<FileTransferCancelPayload>(cancelBytes);
         cancelRoundtrip.IsSuccess.Should().BeTrue();
         cancelRoundtrip.Value.Should().Be(cancel);
+    }
+
+    [Test]
+    public async Task TransferActions_WhenIngressFilterDisabled_RejectsInitiateAndAccept()
+    {
+        var filter = new FileTransferIngressFilter(_policyRepository);
+        filter.IsEnabled.Should().BeFalse();
+        FileTransferIngressFilter.PrivacyNotice.Should().Contain("Direct P2P file transfer uses multi-stream TCP connections");
+
+        var handler = new FileTransferActionHandler(
+            _sessionRepo,
+            _fileStorage,
+            _payloadSender,
+            new ProtobufPayloadSerializer(),
+            _trackerPort,
+            _clock,
+            filter);
+
+        var initiateResult = await handler.InitiateTransferAsync(
+            [PublicIdentityId.New()],
+            RootDirectoryPath.Parse(@"C:\Source"),
+            [SanitizedRelativePath.Parse("test.bin")],
+            DirectWanPolicy.DisabledByDefault);
+
+        initiateResult.IsSuccess.Should().BeFalse();
+        initiateResult.Error.Code.Should().Be(FileTransferIngressFilter.PolicyDisabledErrorCode);
+        initiateResult.Error.Description.Should().Be(FileTransferIngressFilter.PrivacyNotice);
+
+        var acceptResult = await handler.AcceptTransferAsync(
+            TransferSessionId.New(),
+            RootDirectoryPath.Parse(@"C:\Downloads"));
+
+        acceptResult.IsSuccess.Should().BeFalse();
+        acceptResult.Error.Code.Should().Be(FileTransferIngressFilter.PolicyDisabledErrorCode);
+        acceptResult.Error.Description.Should().Be(FileTransferIngressFilter.PrivacyNotice);
+    }
+
+    [Test]
+    public async Task TransferActions_WhenIngressFilterEnabled_PassesPrivacyPolicyCheck()
+    {
+        var filter = new FileTransferIngressFilter(_policyRepository)
+        {
+            IsEnabled = true
+        };
+
+        var handler = new FileTransferActionHandler(
+            _sessionRepo,
+            _fileStorage,
+            _payloadSender,
+            new ProtobufPayloadSerializer(),
+            _trackerPort,
+            _clock,
+            filter);
+
+        var initiateResult = await handler.InitiateTransferAsync(
+            [],
+            RootDirectoryPath.Parse(@"C:\Source"),
+            [SanitizedRelativePath.Parse("test.bin")],
+            DirectWanPolicy.DisabledByDefault);
+
+        initiateResult.IsSuccess.Should().BeFalse();
+        initiateResult.Error.Code.Should().Be("Transfer.NoRecipients");
     }
 }

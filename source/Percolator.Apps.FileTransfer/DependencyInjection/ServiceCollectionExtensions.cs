@@ -1,4 +1,4 @@
-using Microsoft.Extensions.DependencyInjection;
+﻿using Microsoft.Extensions.DependencyInjection;
 using Percolator.Apps.FileTransfer.Features.IngressControl;
 using Percolator.Apps.FileTransfer.Features.MultiStreamEngine;
 using Percolator.Apps.FileTransfer.Features.Storage;
@@ -14,7 +14,8 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddFileTransferApp(this IServiceCollection collection)
     {
         collection.AddSingleton<IAppPlugin, FileTransferPlugin>();
-        collection.AddSingleton<IAppIngressFilter, FileTransferIngressFilter>();
+        collection.AddSingleton<FileTransferIngressFilter>();
+        collection.AddSingleton<IAppIngressFilter>(sp => sp.GetRequiredService<FileTransferIngressFilter>());
         collection.AddSingleton<IAppPayloadHandler, FileTransferPayloadHandler>();
         collection.AddScoped<IFileTransferActionHandler, FileTransferActionHandler>();
         collection.AddScoped<IFileTransferQueryService, FileTransferQueryService>();

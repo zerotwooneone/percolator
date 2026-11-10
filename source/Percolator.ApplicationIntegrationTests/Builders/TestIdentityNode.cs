@@ -1,4 +1,4 @@
-using Percolator.Application2.Delivery;
+﻿using Percolator.Application2.Delivery;
 using Percolator.Application2.Delivery.Ports;
 using Percolator.Application2.Egress;
 using Percolator.Application2.Handshake;
@@ -274,6 +274,7 @@ public sealed class TestIdentityNode
         var discoveryPort = new LoopbackNetworkEndpointDiscoveryPort(LocalEndpointCandidate);
         var trackerPort = new LoopbackDistributedTrackerPort();
         FileTransferQueries = new FileTransferQueryService(_transferSessionRepo);
+        var ingressFilter = new FileTransferIngressFilter(_filterPolicyRepo) { IsEnabled = true };
         FileTransferActions = new FileTransferActionHandler(
             _transferSessionRepo,
             DesktopFileStorage,
@@ -281,6 +282,7 @@ public sealed class TestIdentityNode
             serializer,
             trackerPort,
             TimeProvider,
+            ingressFilter,
             blobStorage: BlobStorage,
             endpointDiscovery: discoveryPort,
             streamPool: StreamPool);

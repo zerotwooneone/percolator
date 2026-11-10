@@ -1,4 +1,4 @@
-using System.Buffers;
+﻿using System.Buffers;
 using System.Security.Cryptography;
 using Percolator.Apps.FileTransfer.Domain.Common;
 using Percolator.Apps.FileTransfer.Domain.ManifestManagement;
@@ -25,6 +25,7 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
     private readonly IBlobStorageService? _blobStorage;
     private readonly INetworkEndpointDiscoveryPort? _endpointDiscovery;
     private readonly ITransferStreamPool? _streamPool;
+    private readonly FileTransferIngressFilter _ingressFilter;
 
     public FileTransferActionHandler(
         ITransferSessionRepository sessionRepository,
@@ -33,6 +34,7 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         IPayloadSerializer serializer,
         IDistributedTrackerPort trackerPort,
         IDateTimeProvider clock,
+        FileTransferIngressFilter ingressFilter,
         IBlobStorageService? blobStorage = null,
         INetworkEndpointDiscoveryPort? endpointDiscovery = null,
         ITransferStreamPool? streamPool = null)
@@ -43,6 +45,7 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         _serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
         _trackerPort = trackerPort ?? throw new ArgumentNullException(nameof(trackerPort));
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
+        _ingressFilter = ingressFilter ?? throw new ArgumentNullException(nameof(ingressFilter));
         _blobStorage = blobStorage;
         _endpointDiscovery = endpointDiscovery;
         _streamPool = streamPool;
@@ -57,6 +60,12 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         SeedRatio? targetSeedRatio = null,
         CancellationToken ct = default)
     {
+        if (!_ingressFilter.IsEnabled)
+        {
+            return ValueTask.FromResult(DomainResult<TransferSessionId>.Failure(
+                new DomainError(FileTransferIngressFilter.PolicyDisabledErrorCode, FileTransferIngressFilter.PrivacyNotice)));
+        }
+
         // Derive a deterministic local initiator distinct from all recipients when not explicitly provided
         PublicIdentityId defaultInitiator = CreateDistinctLocalInitiator(recipients);
         ChannelId defaultChannelId = ChannelId.New();
@@ -84,6 +93,12 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         SeedRatio? targetSeedRatio = null,
         CancellationToken ct = default)
     {
+        if (!_ingressFilter.IsEnabled)
+        {
+            return DomainResult<TransferSessionId>.Failure(
+                new DomainError(FileTransferIngressFilter.PolicyDisabledErrorCode, FileTransferIngressFilter.PrivacyNotice));
+        }
+
         if (recipients == null || recipients.Count == 0)
             return DomainResult<TransferSessionId>.Failure(new DomainError("Transfer.NoRecipients", "Must specify at least one recipient."));
 
@@ -264,6 +279,12 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         SelectedFileIndices? selectedFiles = null,
         CancellationToken ct = default)
     {
+        if (!_ingressFilter.IsEnabled)
+        {
+            return DomainResult.Failure(
+                new DomainError(FileTransferIngressFilter.PolicyDisabledErrorCode, FileTransferIngressFilter.PrivacyNotice));
+        }
+
         TransferSession? session = await _sessionRepository.GetSessionByIdAsync(sessionId, ct);
         if (session == null)
             return DomainResult.Failure(new DomainError("Transfer.NotFound", "Transfer session was not found."));

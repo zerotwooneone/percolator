@@ -1,4 +1,4 @@
-using Percolator.Apps.FileTransfer.Domain.Common;
+﻿using Percolator.Apps.FileTransfer.Domain.Common;
 using Percolator.Apps.FileTransfer.Domain.ManifestManagement;
 using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Features.IngressControl;
@@ -32,10 +32,9 @@ public sealed class IngressControlTests
     [Test]
     public void UT_ING_01_EdgeFilterSilentDiscardWhenPluginDisabled()
     {
-        FileTransferIngressFilter filter = new(_policyRepository)
-        {
-            IsEnabled = false
-        };
+        FileTransferIngressFilter filter = new(_policyRepository);
+        filter.IsEnabled.Should().BeFalse();
+        FileTransferIngressFilter.PrivacyNotice.Should().NotBeNullOrWhiteSpace();
 
         InboundPayloadContext context = new(
             ChannelId.New(),

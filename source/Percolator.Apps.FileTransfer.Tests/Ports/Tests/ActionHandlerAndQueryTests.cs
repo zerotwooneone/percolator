@@ -1,4 +1,4 @@
-using Percolator.Apps.FileTransfer.Domain.Common;
+﻿using Percolator.Apps.FileTransfer.Domain.Common;
 using Percolator.Apps.FileTransfer.Domain.ManifestManagement;
 using Percolator.Apps.FileTransfer.Domain.SwarmCoordination;
 using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
@@ -22,7 +22,8 @@ public sealed class ActionHandlerAndQueryTests
     private InMemoryDesktopFileStorage _fileStorage = null!;
     private RecordingPayloadSender _payloadSender = null!;
     private RecordingTrackerPort _trackerPort = null!;
-    private InMemoryBlobStorageService _blobStorage = null!;
+private InMemoryBlobStorageService _blobStorage = null!;
+    private FileTransferIngressFilter _ingressFilter = null!;
     private FakeNetworkEndpointDiscoveryPort _endpointDiscovery = null!;
     private FakeTransferStreamPool _streamPool = null!;
     private ProtobufPayloadSerializer _serializer = null!;
@@ -42,6 +43,7 @@ public sealed class ActionHandlerAndQueryTests
         _endpointDiscovery = new FakeNetworkEndpointDiscoveryPort();
         _streamPool = new FakeTransferStreamPool();
         _serializer = new ProtobufPayloadSerializer();
+        _ingressFilter = new FileTransferIngressFilter(new InMemoryFilterPolicyRepository()) { IsEnabled = true };
 
         _handler = new FileTransferActionHandler(
             _sessionRepo,
@@ -50,6 +52,7 @@ public sealed class ActionHandlerAndQueryTests
             _serializer,
             _trackerPort,
             _clock,
+            _ingressFilter,
             _blobStorage,
             _endpointDiscovery,
             _streamPool);
@@ -280,6 +283,7 @@ public sealed class ActionHandlerAndQueryTests
             _serializer,
             recipientTracker,
             _clock,
+            _ingressFilter,
             _blobStorage,
             _endpointDiscovery,
             recipientPool);
