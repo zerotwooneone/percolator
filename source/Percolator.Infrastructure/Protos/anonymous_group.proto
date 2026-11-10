@@ -67,7 +67,20 @@ message FetchGroupStateResponse {
   bytes encrypted_roster_blob = 2;
 }
 
+message CreateGroupRequest {
+  bytes conversation_id = 1;
+  bytes encrypted_genesis_blob = 2;
+  repeated bytes initial_routing_tokens = 3;
+  bytes zk_public_params = 4;
+}
+
+message CreateGroupResponse {
+  bool created = 1;
+  uint32 current_epoch = 2;
+}
+
 service AnonymousGroupRelayService {
+  rpc CreateGroup (CreateGroupRequest) returns (CreateGroupResponse);
   rpc SubscribeGroupStream(GroupStreamClientMessage) returns (stream GroupStreamServerMessage);
   rpc DispatchGroupMessage(DispatchGroupMessageRequest) returns (DispatchGroupMessageResponse);
   rpc CommitRosterMutation(CommitRosterMutationRequest) returns (CommitRosterMutationResponse);

@@ -24,6 +24,7 @@ using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Model;
+using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.Infrastructure.Protos;
 using Percolator.Infrastructure.Security;
@@ -106,6 +107,19 @@ internal sealed class GroupChatCoordinator : IDisposable
         {
             var channelRepo = adminScope.ServiceProvider.GetRequiredService<IChannelRepository>();
             await channelRepo.SaveGroupAsync(groupChannel, ct);
+
+            var credRepo = adminScope.ServiceProvider.GetRequiredService<IGroupCredentialsRepository>();
+            var cred = GroupCredentials.CreateGenesis(channelId, GroupMasterKey.FromSpan(new byte[32]), AuthCredentialMacBytes.FromSpan(new byte[64])).Value!;
+            await credRepo.SaveAsync(cred, ct);
+        }
+
+        foreach (var member in members)
+        {
+            if (member.PublicIdentityId == admin.PublicIdentityId) continue;
+            using var memberScope = member.Services.CreateScope();
+            var memberCredRepo = memberScope.ServiceProvider.GetRequiredService<IGroupCredentialsRepository>();
+            var cred = GroupCredentials.CreateGenesis(channelId, GroupMasterKey.FromSpan(new byte[32]), AuthCredentialMacBytes.FromSpan(new byte[64])).Value!;
+            await memberCredRepo.SaveAsync(cred, ct);
         }
 
         // 2. Commit RelayGroupLedger on Relay
@@ -517,7 +531,7 @@ internal sealed class GroupChatCoordinator : IDisposable
                 .Cast<BlindedRoutingToken>()
                 .ToHashSet();
 
-            var mutationResp = await CommitRosterMutationAsync(client, channelId, newTokens, ct);
+            var mutationResp = await CommitRosterMutationAsync(client, channelId, newTokens, admin, ct);
             if (!mutationResp.Committed)
             {
                 _logSink.Log(new SimulatorLogEntry(
@@ -691,7 +705,7 @@ internal sealed class GroupChatCoordinator : IDisposable
                 .Cast<BlindedRoutingToken>()
                 .ToHashSet();
 
-            var mutationResp = await CommitRosterMutationAsync(client, channelId, remainingTokens, ct);
+            var mutationResp = await CommitRosterMutationAsync(client, channelId, remainingTokens, admin, ct);
             if (!mutationResp.Committed)
             {
                 _logSink.Log(new SimulatorLogEntry(
@@ -874,7 +888,7 @@ internal sealed class GroupChatCoordinator : IDisposable
                 .Cast<BlindedRoutingToken>()
                 .ToHashSet();
 
-            var mutationResp = await CommitRosterMutationAsync(client, channelId, activeTokens, ct);
+            var mutationResp = await CommitRosterMutationAsync(client, channelId, activeTokens, admin, ct);
             if (!mutationResp.Committed)
             {
                 _logSink.Log(new SimulatorLogEntry(
@@ -901,19 +915,29 @@ internal sealed class GroupChatCoordinator : IDisposable
         return true;
     }
 
-    private static async Task<CommitRosterMutationResponse> CommitRosterMutationAsync(
+    private async Task<CommitRosterMutationResponse> CommitRosterMutationAsync(
         AnonymousGroupRelayService.AnonymousGroupRelayServiceClient client,
         ChannelId channelId,
         IReadOnlySet<BlindedRoutingToken> tokens,
+        ISimulatedPersonaHost admin,
         CancellationToken ct)
     {
+        using var adminScope = admin.Services.CreateScope();
+        var zkEngine = adminScope.ServiceProvider.GetRequiredService<IZkProofEngine>();
+        var credRepo = adminScope.ServiceProvider.GetRequiredService<IGroupCredentialsRepository>();
+        var cred = await credRepo.GetAsync(channelId, ct);
+        uint currentEpoch = cred?.CurrentEpoch.Value ?? 0;
+
+        byte[] readChallenge = new byte[32];
+        RelayGroupLedger.ComputeReadChallenge(channelId, new EpochNumber(currentEpoch), readChallenge);
+        var readProof = zkEngine.GenerateGroupPresentation(currentEpoch, readChallenge, ReadOnlySpan<byte>.Empty, ReadOnlySpan<byte>.Empty);
+
         var stateResponse = await client.FetchGroupStateAsync(new FetchGroupStateRequest
         {
             ConversationId = ByteString.CopyFrom(channelId.ToByteArray()),
-            ZkPresentationProof = ByteString.Empty
+            ZkPresentationProof = ByteString.CopyFrom(readProof.Span)
         }, cancellationToken: ct);
 
-        var zkEngine = new ZkgroupCryptographyService();
         Span<byte> challenge = stackalloc byte[32];
         var newBlob = EncryptedEntriesBlob.FromSpan(stateResponse.EncryptedRosterBlob.Span);
         RelayGroupLedger.ComputeMutationChallenge(newBlob, tokens, challenge);
@@ -932,7 +956,14 @@ internal sealed class GroupChatCoordinator : IDisposable
             mutationReq.NewRoutingTokens.Add(ByteString.CopyFrom(token.ToByteArray()));
         }
 
-        return await client.CommitRosterMutationAsync(mutationReq, cancellationToken: ct);
+        var response = await client.CommitRosterMutationAsync(mutationReq, cancellationToken: ct);
+        if (response.Committed && cred != null)
+        {
+            cred.UpdateEpoch(new EpochNumber(response.NewEpoch));
+            await credRepo.SaveAsync(cred, ct);
+        }
+
+        return response;
     }
 
     public async Task<IReadOnlyList<ChatMessageItemViewModel>> GetGroupTranscriptAsync(
@@ -1049,14 +1080,29 @@ internal sealed class GroupChatCoordinator : IDisposable
             {
                 using var scope = personaHost.Services.CreateScope();
                 var channelFactory = scope.ServiceProvider.GetRequiredService<IPeerGrpcChannelFactory>();
+                var zkEngine = scope.ServiceProvider.GetRequiredService<IZkProofEngine>();
+                var credRepo = scope.ServiceProvider.GetRequiredService<IGroupCredentialsRepository>();
+                var cred = await credRepo.GetAsync(channelId, ct);
+                uint currentEpoch = cred?.CurrentEpoch.Value ?? 0;
+
                 var grpcChannel = channelFactory.GetOrCreateChannel(relayUri);
                 var client = new AnonymousGroupRelayService.AnonymousGroupRelayServiceClient(grpcChannel);
+
+                byte[] readChallenge = new byte[32];
+                RelayGroupLedger.ComputeReadChallenge(channelId, new EpochNumber(currentEpoch), readChallenge);
+                var readProof = zkEngine.GenerateGroupPresentation(currentEpoch, readChallenge, ReadOnlySpan<byte>.Empty, ReadOnlySpan<byte>.Empty);
+
                 var state = await client.FetchGroupStateAsync(new FetchGroupStateRequest
                 {
                     ConversationId = ByteString.CopyFrom(channelId.ToByteArray()),
-                    ZkPresentationProof = ByteString.Empty
+                    ZkPresentationProof = ByteString.CopyFrom(readProof.Span)
                 }, cancellationToken: ct);
                 epoch = state.CurrentEpoch;
+                if (cred != null && state.CurrentEpoch > cred.CurrentEpoch.Value)
+                {
+                    cred.UpdateEpoch(new EpochNumber((uint)state.CurrentEpoch));
+                    await credRepo.SaveAsync(cred, ct);
+                }
             }
             catch (Exception ex)
             {
@@ -1117,14 +1163,23 @@ internal sealed class GroupChatCoordinator : IDisposable
                 {
                     using var scope = persona.Services.CreateScope();
                     var channelFactory = scope.ServiceProvider.GetRequiredService<IPeerGrpcChannelFactory>();
+                    var zkEngine = scope.ServiceProvider.GetRequiredService<IZkProofEngine>();
+                    var credRepo = scope.ServiceProvider.GetRequiredService<IGroupCredentialsRepository>();
+                    var cred = await credRepo.GetAsync(channelId, token).ConfigureAwait(false);
+                    uint currentEpoch = cred?.CurrentEpoch.Value ?? 0;
+
                     var grpcChannel = channelFactory.GetOrCreateChannel(relayUri);
                     var client = new AnonymousGroupRelayService.AnonymousGroupRelayServiceClient(grpcChannel);
+
+                    byte[] readChallenge = new byte[32];
+                    RelayGroupLedger.ComputeReadChallenge(channelId, new EpochNumber(currentEpoch), readChallenge);
+                    var readProof = zkEngine.GenerateGroupPresentation(currentEpoch, readChallenge, ReadOnlySpan<byte>.Empty, ReadOnlySpan<byte>.Empty);
 
                     var request = new GroupStreamClientMessage
                     {
                         ConversationId = ByteString.CopyFrom(channelId.ToByteArray()),
-                        CurrentEpoch = 0,
-                        ZkPresentationProof = ByteString.Empty,
+                        CurrentEpoch = currentEpoch,
+                        ZkPresentationProof = ByteString.CopyFrom(readProof.Span),
                         SubscriberRoutingToken = ByteString.CopyFrom(persona.MailboxRoutingToken.ToByteArray())
                     };
 
@@ -1166,6 +1221,12 @@ internal sealed class GroupChatCoordinator : IDisposable
                                 persona.Id,
                                 "GroupStream",
                                 $"Received epoch mutation notification (New Epoch: {msg.Mutation.NewEpoch}) for channel {channelId}."));
+
+                            if (cred != null)
+                            {
+                                cred.UpdateEpoch(new EpochNumber(msg.Mutation.NewEpoch));
+                                await credRepo.SaveAsync(cred, token).ConfigureAwait(false);
+                            }
 
                             _stateBus.Publish(new SimulatorStateSignal(persona.Id, SignalCategory.GroupStateChanged, TargetChannelId: channelId));
                         }

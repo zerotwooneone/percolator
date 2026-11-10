@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -343,7 +343,7 @@ internal sealed class ScenarioRunnerService
                         break;
 
                     case AssertLogContainsCodeAssertion logAssert:
-                        ExecuteAssertLogContainsCode(logAssert, allSessionLogs);
+                        await ExecuteAssertLogContainsCodeAsync(logAssert, allSessionLogs, ct);
                         break;
 
                     case AssertMessageExpiredAssertion expiredAssert:
@@ -985,10 +985,26 @@ internal sealed class ScenarioRunnerService
         }
     }
 
-    private static void ExecuteAssertLogContainsCode(
+    private static async Task ExecuteAssertLogContainsCodeAsync(
         AssertLogContainsCodeAssertion assertion,
-        List<SimulatorLogEntry> logs)
+        List<SimulatorLogEntry> logs,
+        CancellationToken ct)
     {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(5);
+        while (DateTimeOffset.UtcNow < deadline && !ct.IsCancellationRequested)
+        {
+            lock (logs)
+            {
+                var found = logs.Any(l =>
+                    (l.Message != null && l.Message.Contains(assertion.ExpectedCode, StringComparison.OrdinalIgnoreCase)) ||
+                    (l.Exception != null && l.Exception.Contains(assertion.ExpectedCode, StringComparison.OrdinalIgnoreCase)));
+
+                if (found) return;
+            }
+
+            await Task.Delay(50, ct);
+        }
+
         lock (logs)
         {
             var found = logs.Any(l =>

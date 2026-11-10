@@ -201,6 +201,38 @@ public sealed class RelayGroupLedger : AggregateRoot<ChannelId>
         return DomainResult.Success();
     }
 
+    public DomainResult VerifyReadPresentation(ZkPresentationBytes proof, IZkProofEngine proofEngine)
+    {
+        if (proofEngine == null)
+        {
+            return DomainResult.Failure(new DomainError("INVALID_PROOF_ENGINE", "ZK proof engine cannot be null."));
+        }
+        if (proof == null)
+        {
+            return DomainResult.Failure(new DomainError("INVALID_ZK_PROOF", "ZK presentation proof cannot be null."));
+        }
+
+        Span<byte> challenge = stackalloc byte[32];
+        ComputeReadChallenge(ChannelId, CurrentEpoch, challenge);
+        if (!proofEngine.VerifyGroupPresentation(CurrentEpoch.Value, proof, challenge, PublicParams))
+        {
+            return DomainResult.Failure(new DomainError("INVALID_ZK_PROOF", "The ZK membership presentation proof is invalid for group state read."));
+        }
+
+        return DomainResult.Success();
+    }
+
+    public static void ComputeReadChallenge(
+        ChannelId channelId,
+        EpochNumber epoch,
+        Span<byte> destination)
+    {
+        Span<byte> buffer = stackalloc byte[20];
+        channelId.TryWriteBytes(buffer[..16]);
+        BinaryPrimitives.WriteUInt32LittleEndian(buffer[16..20], epoch.Value);
+        SHA256.HashData(buffer, destination);
+    }
+
     public static void ComputeDispatchChallenge(
         ReadOnlySpan<byte> envelopeCiphertext,
         Span<byte> destination)

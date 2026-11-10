@@ -206,8 +206,8 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
         var unauthEndpoint = new UnauthenticatedDeliveryEndpoint(profileRepo, _preKeyRepository, chunkStore, _capabilityStore);
         var authEndpoint = new AuthenticatedRelayEndpoint(_capabilityStore, _preKeyRepository, cryptoEngine);
         var timeProvider = new SystemDateTimeProvider();
-        var groupEndpoint = new AnonymousGroupRelayEndpoint(ledgerRepo, zkEngine, _capabilityStore, timeProvider);
-        var nearbyEndpoint = new NearbyDiscoveryEndpoint(_peerDirectory, _capabilityStore, _preKeyRepository, _virtualClock, BoundPort);
+        var groupEndpoint = new AnonymousGroupRelayEndpoint(ledgerRepo, zkEngine, _capabilityStore, timeProvider, RelayIdentityId);
+        var nearbyEndpoint = new NearbyDiscoveryEndpoint(_peerDirectory, _capabilityStore, _preKeyRepository, _virtualClock, BoundPort, cryptoEngine);
         var rendezvousEndpoint = new PrivateRendezvousRelayEndpoint(_rendezvousService);
 
         builder.Services.AddSingleton<IRelayLedgerRepository>(ledgerRepo);

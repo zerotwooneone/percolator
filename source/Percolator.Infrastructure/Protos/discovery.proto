@@ -7,6 +7,9 @@ option csharp_namespace = "Percolator.Infrastructure.Protos";
 message DiscoveryRegistrationProto {
   bytes peer_id = 1;
   int32 visibility = 2;
+  int64 timestamp_unix_ms = 3;
+  bytes signature = 4;
+  bytes identity_key = 5;
 }
 
 message PeerDiscoveryDescriptorProto {

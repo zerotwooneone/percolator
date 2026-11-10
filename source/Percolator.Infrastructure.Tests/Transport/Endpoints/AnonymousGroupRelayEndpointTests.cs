@@ -81,7 +81,7 @@ public sealed class AnonymousGroupRelayEndpointTests
         var zkEngine = new TestZkProofEngine();
         var timeProvider = new FixedTimeProvider();
         var mailboxStore = new InMemoryRelayMailboxCapabilityStore();
-        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider);
+        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, PublicIdentityId.New());
 
         var channelId = ChannelId.New();
         var relayId = PublicIdentityId.New();
@@ -154,7 +154,7 @@ public sealed class AnonymousGroupRelayEndpointTests
         var zkEngine = new TestZkProofEngine();
         var timeProvider = new FixedTimeProvider();
         var mailboxStore = new InMemoryRelayMailboxCapabilityStore();
-        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider);
+        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, PublicIdentityId.New());
 
         var channelId = ChannelId.New();
         var relayId = PublicIdentityId.New();
@@ -193,7 +193,7 @@ public sealed class AnonymousGroupRelayEndpointTests
         var zkEngine = new TestZkProofEngine { ReturnValid = false };
         var timeProvider = new FixedTimeProvider();
         var mailboxStore = new InMemoryRelayMailboxCapabilityStore();
-        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider);
+        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, PublicIdentityId.New());
 
         var channelId = ChannelId.New();
         var relayId = PublicIdentityId.New();
@@ -225,7 +225,7 @@ public sealed class AnonymousGroupRelayEndpointTests
         var zkEngine = new TestZkProofEngine();
         var timeProvider = new FixedTimeProvider();
         var mailboxStore = new InMemoryRelayMailboxCapabilityStore();
-        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider);
+        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, PublicIdentityId.New());
 
         var channelId = ChannelId.New();
         var relayId = PublicIdentityId.New();
@@ -241,7 +241,8 @@ public sealed class AnonymousGroupRelayEndpointTests
         var subRequest = new GroupStreamClientMessage
         {
             ConversationId = ByteString.CopyFrom(channelId.ToByteArray()),
-            CurrentEpoch = 0
+            CurrentEpoch = 0,
+            ZkPresentationProof = ByteString.CopyFrom(new byte[64])
         };
 
         // Start subscription in background
@@ -277,7 +278,7 @@ public sealed class AnonymousGroupRelayEndpointTests
         var zkEngine = new TestZkProofEngine();
         var timeProvider = new FixedTimeProvider();
         var mailboxStore = new InMemoryRelayMailboxCapabilityStore();
-        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider);
+        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, PublicIdentityId.New());
 
         var channelId = ChannelId.New();
         var relayId = PublicIdentityId.New();
@@ -297,7 +298,8 @@ public sealed class AnonymousGroupRelayEndpointTests
         {
             ConversationId = ByteString.CopyFrom(channelId.ToByteArray()),
             CurrentEpoch = 0,
-            SubscriberRoutingToken = ByteString.CopyFrom(tokenOnline.ToByteArray())
+            SubscriberRoutingToken = ByteString.CopyFrom(tokenOnline.ToByteArray()),
+            ZkPresentationProof = ByteString.CopyFrom(new byte[64])
         };
 
         // Start subscription for online member
@@ -336,5 +338,178 @@ public sealed class AnonymousGroupRelayEndpointTests
         // 3. Online member was NOT enqueued to mailbox (received via live stream)
         var onlineEnvelopes = await mailboxStore.DrainEnvelopesAsync(tokenOnline.ToByteArray());
         onlineEnvelopes.Should().BeEmpty();
+    }
+
+    [Test]
+    public async Task CreateGroup_ValidRequest_CreatesGenesisAndSavesLedger()
+    {
+        var repo = new InMemoryLedgerRepo();
+        var zkEngine = new TestZkProofEngine();
+        var timeProvider = new FixedTimeProvider();
+        var mailboxStore = new InMemoryRelayMailboxCapabilityStore();
+        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, PublicIdentityId.New());
+
+        var channelId = ChannelId.New();
+        var token1 = BlindedRoutingToken.New();
+        var request = new CreateGroupRequest
+        {
+            ConversationId = ByteString.CopyFrom(channelId.ToByteArray()),
+            EncryptedGenesisBlob = ByteString.CopyFrom(new byte[128]),
+            ZkPublicParams = ByteString.CopyFrom(new byte[64])
+        };
+        request.InitialRoutingTokens.Add(ByteString.CopyFrom(token1.ToByteArray()));
+
+        var response = await endpoint.CreateGroup(request, new TestServerCallContext());
+        response.Created.Should().BeTrue();
+        response.CurrentEpoch.Should().Be(0);
+
+        var saved = await repo.GetByChannelIdAsync(channelId);
+        saved.Should().NotBeNull();
+        saved!.ChannelId.Should().Be(channelId);
+        saved.CurrentEpoch.Value.Should().Be(0);
+        saved.ActiveRoutingTokens.Should().Contain(token1);
+    }
+
+    [Test]
+    public async Task CreateGroup_InvalidParams_ThrowsInvalidArgument()
+    {
+        var repo = new InMemoryLedgerRepo();
+        var zkEngine = new TestZkProofEngine();
+        var timeProvider = new FixedTimeProvider();
+        var mailboxStore = new InMemoryRelayMailboxCapabilityStore();
+        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, PublicIdentityId.New());
+
+        var invalidIdReq = new CreateGroupRequest
+        {
+            ConversationId = ByteString.CopyFrom(new byte[10]),
+            EncryptedGenesisBlob = ByteString.CopyFrom(new byte[128]),
+            ZkPublicParams = ByteString.CopyFrom(new byte[64])
+        };
+        var act1 = async () => await endpoint.CreateGroup(invalidIdReq, new TestServerCallContext());
+        await act1.Should().ThrowAsync<RpcException>().Where(e => e.StatusCode == StatusCode.InvalidArgument);
+
+        var emptyBlobReq = new CreateGroupRequest
+        {
+            ConversationId = ByteString.CopyFrom(ChannelId.New().ToByteArray()),
+            EncryptedGenesisBlob = ByteString.Empty,
+            ZkPublicParams = ByteString.CopyFrom(new byte[64])
+        };
+        var act2 = async () => await endpoint.CreateGroup(emptyBlobReq, new TestServerCallContext());
+        await act2.Should().ThrowAsync<RpcException>().Where(e => e.StatusCode == StatusCode.InvalidArgument);
+
+        var shortParamsReq = new CreateGroupRequest
+        {
+            ConversationId = ByteString.CopyFrom(ChannelId.New().ToByteArray()),
+            EncryptedGenesisBlob = ByteString.CopyFrom(new byte[128]),
+            ZkPublicParams = ByteString.Empty
+        };
+        var act3 = async () => await endpoint.CreateGroup(shortParamsReq, new TestServerCallContext());
+        await act3.Should().ThrowAsync<RpcException>().Where(e => e.StatusCode == StatusCode.InvalidArgument);
+
+        var badTokenReq = new CreateGroupRequest
+        {
+            ConversationId = ByteString.CopyFrom(ChannelId.New().ToByteArray()),
+            EncryptedGenesisBlob = ByteString.CopyFrom(new byte[128]),
+            ZkPublicParams = ByteString.CopyFrom(new byte[64])
+        };
+        badTokenReq.InitialRoutingTokens.Add(ByteString.CopyFrom(new byte[10])); // Invalid 10-byte token
+        var act4 = async () => await endpoint.CreateGroup(badTokenReq, new TestServerCallContext());
+        await act4.Should().ThrowAsync<RpcException>().Where(e => e.StatusCode == StatusCode.InvalidArgument);
+    }
+
+    [Test]
+    public async Task FetchGroupState_ValidZkProof_ReturnsState()
+    {
+        var repo = new InMemoryLedgerRepo();
+        var zkEngine = new TestZkProofEngine();
+        var timeProvider = new FixedTimeProvider();
+        var mailboxStore = new InMemoryRelayMailboxCapabilityStore();
+        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, PublicIdentityId.New());
+
+        var channelId = ChannelId.New();
+        var relayId = PublicIdentityId.New();
+        var genesisBlob = EncryptedEntriesBlob.FromSpan(new byte[] { 1, 2, 3 });
+        var publicParams = ZkGroupPublicParams.FromSpan(new byte[32]);
+        var token = BlindedRoutingToken.New();
+
+        var genesis = RelayGroupLedger.CreateGenesis(channelId, relayId, genesisBlob, new HashSet<BlindedRoutingToken> { token }, publicParams, timeProvider).Value!;
+        await repo.SaveAsync(genesis);
+
+        var request = new FetchGroupStateRequest
+        {
+            ConversationId = ByteString.CopyFrom(channelId.ToByteArray()),
+            ZkPresentationProof = ByteString.CopyFrom(new byte[64])
+        };
+
+        var response = await endpoint.FetchGroupState(request, new TestServerCallContext());
+        response.CurrentEpoch.Should().Be(0);
+        response.EncryptedRosterBlob.ToByteArray().Should().Equal(new byte[] { 1, 2, 3 });
+    }
+
+    [Test]
+    public async Task FetchGroupState_InvalidZkProof_ThrowsPermissionDenied()
+    {
+        var repo = new InMemoryLedgerRepo();
+        var zkEngine = new TestZkProofEngine { ReturnValid = false };
+        var timeProvider = new FixedTimeProvider();
+        var mailboxStore = new InMemoryRelayMailboxCapabilityStore();
+        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, PublicIdentityId.New());
+
+        var channelId = ChannelId.New();
+        var relayId = PublicIdentityId.New();
+        var genesisBlob = EncryptedEntriesBlob.FromSpan(new byte[] { 1, 2, 3 });
+        var publicParams = ZkGroupPublicParams.FromSpan(new byte[32]);
+
+        var genesis = RelayGroupLedger.CreateGenesis(channelId, relayId, genesisBlob, new HashSet<BlindedRoutingToken> { BlindedRoutingToken.New() }, publicParams, timeProvider).Value!;
+        await repo.SaveAsync(genesis);
+
+        var shortProofReq = new FetchGroupStateRequest
+        {
+            ConversationId = ByteString.CopyFrom(channelId.ToByteArray()),
+            ZkPresentationProof = ByteString.CopyFrom(new byte[32])
+        };
+        var actShort = async () => await endpoint.FetchGroupState(shortProofReq, new TestServerCallContext());
+        await actShort.Should().ThrowAsync<RpcException>().Where(e => e.StatusCode == StatusCode.PermissionDenied);
+
+        var invalidProofReq = new FetchGroupStateRequest
+        {
+            ConversationId = ByteString.CopyFrom(channelId.ToByteArray()),
+            ZkPresentationProof = ByteString.CopyFrom(new byte[64])
+        };
+        var actInvalid = async () => await endpoint.FetchGroupState(invalidProofReq, new TestServerCallContext());
+        await actInvalid.Should().ThrowAsync<RpcException>().Where(e => e.StatusCode == StatusCode.PermissionDenied);
+    }
+
+    [Test]
+    public async Task SubscribeGroupStream_InvalidZkProof_ThrowsPermissionDenied()
+    {
+        var repo = new InMemoryLedgerRepo();
+        var zkEngine = new TestZkProofEngine { ReturnValid = false };
+        var timeProvider = new FixedTimeProvider();
+        var mailboxStore = new InMemoryRelayMailboxCapabilityStore();
+        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, PublicIdentityId.New());
+
+        var channelId = ChannelId.New();
+        var relayId = PublicIdentityId.New();
+        var genesis = RelayGroupLedger.CreateGenesis(channelId, relayId, EncryptedEntriesBlob.FromSpan(new byte[] { 1 }), new HashSet<BlindedRoutingToken> { BlindedRoutingToken.New() }, ZkGroupPublicParams.FromSpan(new byte[32]), timeProvider).Value!;
+        await repo.SaveAsync(genesis);
+
+        var streamWriter = new TestServerStreamWriter<GroupStreamServerMessage>();
+
+        var shortReq = new GroupStreamClientMessage
+        {
+            ConversationId = ByteString.CopyFrom(channelId.ToByteArray()),
+            ZkPresentationProof = ByteString.CopyFrom(new byte[10])
+        };
+        var actShort = async () => await endpoint.SubscribeGroupStream(shortReq, streamWriter, new TestServerCallContext());
+        await actShort.Should().ThrowAsync<RpcException>().Where(e => e.StatusCode == StatusCode.PermissionDenied);
+
+        var invalidReq = new GroupStreamClientMessage
+        {
+            ConversationId = ByteString.CopyFrom(channelId.ToByteArray()),
+            ZkPresentationProof = ByteString.CopyFrom(new byte[64])
+        };
+        var actInvalid = async () => await endpoint.SubscribeGroupStream(invalidReq, streamWriter, new TestServerCallContext());
+        await actInvalid.Should().ThrowAsync<RpcException>().Where(e => e.StatusCode == StatusCode.PermissionDenied);
     }
 }

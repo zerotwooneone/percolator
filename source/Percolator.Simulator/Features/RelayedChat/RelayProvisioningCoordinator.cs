@@ -19,6 +19,7 @@ using Percolator.Domain.Security.ValueObjects;
 using Percolator.Infrastructure.Security;
 using Percolator.Infrastructure.Protos;
 using Percolator.Infrastructure.Transport;
+using Percolator.Infrastructure.Transport.Endpoints;
 using Percolator.PluginSdk;
 using Percolator.Simulator.Features.Logging;
 using Percolator.Simulator.Features.Shell;
@@ -90,13 +91,24 @@ internal sealed class RelayProvisioningCoordinator
             using (var scope = persona.Services.CreateScope())
             {
                 var channelFactory = scope.ServiceProvider.GetRequiredService<IPeerGrpcChannelFactory>();
+                var cryptoEngine = scope.ServiceProvider.GetRequiredService<ICryptoEngine>();
+                var timeProvider = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>();
                 var relayUri = new Uri($"https://127.0.0.1:{relay.BoundPort}");
                 var channel = channelFactory.GetOrCreateChannel(relayUri);
                 var discoveryClient = new NearbyDiscoveryService.NearbyDiscoveryServiceClient(channel);
+
+                int visibility = persona.AllowPeerDiscovery ? 1 : 0;
+                long timestampUnixMs = timeProvider.UtcNow.ToUnixTimeMilliseconds();
+                var payload = DiscoveryWireFraming.BuildVisibilitySignaturePayload(persona.PublicIdentityId, visibility, timestampUnixMs);
+                var signature = cryptoEngine.SignEd25519(persona.IdentityPrivateKey.Span, payload);
+
                 await discoveryClient.RegisterVisibilityAsync(new DiscoveryRegistrationProto
                 {
                     PeerId = ByteString.CopyFrom(persona.PublicIdentityId.ToByteArray()),
-                    Visibility = persona.AllowPeerDiscovery ? 1 : 0
+                    Visibility = visibility,
+                    TimestampUnixMs = timestampUnixMs,
+                    Signature = ByteString.CopyFrom(signature),
+                    IdentityKey = ByteString.CopyFrom(persona.IdentityPublicKey.Span)
                 }, cancellationToken: ct);
             }
 

@@ -9,8 +9,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Percolator.Apps.Discovery.Features.PrivateRendezvous;
 using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Domain.Security.Ports;
 using Percolator.Infrastructure.Protos;
 using Percolator.Infrastructure.Transport;
+using Percolator.Infrastructure.Transport.Endpoints;
 using Percolator.Simulator.Features.DirectChat;
 using Percolator.Simulator.Features.Logging;
 using Percolator.Simulator.Features.RichChatAndProfiles;
@@ -66,14 +68,23 @@ internal sealed class DiscoverySimulationCoordinator
             {
                 using var scope = persona.Services.CreateScope();
                 var channelFactory = scope.ServiceProvider.GetRequiredService<IPeerGrpcChannelFactory>();
+                var cryptoEngine = scope.ServiceProvider.GetRequiredService<ICryptoEngine>();
                 var relayUri = new Uri($"https://127.0.0.1:{persona.HomeRelay.BoundPort}");
                 var channel = channelFactory.GetOrCreateChannel(relayUri);
                 var client = new NearbyDiscoveryService.NearbyDiscoveryServiceClient(channel);
 
+                int visibility = isDiscoverable ? 1 : 0;
+                long timestampUnixMs = _virtualClock.UtcNow.ToUnixTimeMilliseconds();
+                var payload = DiscoveryWireFraming.BuildVisibilitySignaturePayload(persona.PublicIdentityId, visibility, timestampUnixMs);
+                var signature = cryptoEngine.SignEd25519(persona.IdentityPrivateKey.Span, payload);
+
                 await client.RegisterVisibilityAsync(new DiscoveryRegistrationProto
                 {
                     PeerId = ByteString.CopyFrom(persona.PublicIdentityId.ToByteArray()),
-                    Visibility = isDiscoverable ? 1 : 0
+                    Visibility = visibility,
+                    TimestampUnixMs = timestampUnixMs,
+                    Signature = ByteString.CopyFrom(signature),
+                    IdentityKey = ByteString.CopyFrom(persona.IdentityPublicKey.Span)
                 }, cancellationToken: ct).ConfigureAwait(false);
 
                 _logSink.Log(new SimulatorLogEntry(

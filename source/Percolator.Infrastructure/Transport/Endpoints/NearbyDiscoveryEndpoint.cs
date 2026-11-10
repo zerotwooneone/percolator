@@ -1,6 +1,7 @@
 namespace Percolator.Infrastructure.Transport.Endpoints;
 
 using System;
+using System.Security.Cryptography;
 using System.Threading.Tasks;
 using Google.Protobuf;
 using Grpc.Core;
@@ -9,6 +10,7 @@ using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Ports;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Domain.Security.Ports;
 using Percolator.Infrastructure.Protos;
 using Percolator.Infrastructure.Transport;
 using Percolator.PluginSdk;
@@ -20,20 +22,26 @@ public sealed class NearbyDiscoveryEndpoint : NearbyDiscoveryService.NearbyDisco
     private readonly IRelayPreKeyRepository _preKeyRepository;
     private readonly IDateTimeProvider _timeProvider;
     private readonly int _boundPort;
+    private readonly ICryptoEngine _cryptoEngine;
 
     public NearbyDiscoveryEndpoint(
         IRelayPeerDirectory peerDirectory,
         IRelayMailboxCapabilityStore capabilityStore,
         IRelayPreKeyRepository preKeyRepository,
         IDateTimeProvider timeProvider,
-        int boundPort)
+        int boundPort,
+        ICryptoEngine cryptoEngine)
     {
         _peerDirectory = peerDirectory ?? throw new ArgumentNullException(nameof(peerDirectory));
         _capabilityStore = capabilityStore ?? throw new ArgumentNullException(nameof(capabilityStore));
         _preKeyRepository = preKeyRepository ?? throw new ArgumentNullException(nameof(preKeyRepository));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _boundPort = boundPort;
+        _cryptoEngine = cryptoEngine ?? throw new ArgumentNullException(nameof(cryptoEngine));
     }
+
+    public static byte[] BuildVisibilitySignaturePayload(PublicIdentityId peerId, int visibility, long timestampUnixMs)
+        => DiscoveryWireFraming.BuildVisibilitySignaturePayload(peerId, visibility, timestampUnixMs);
 
     public override async Task<NearbyDiscoveryResponseProto> QueryNearby(
         NearbyDiscoveryQueryProto request,
@@ -93,6 +101,48 @@ public sealed class NearbyDiscoveryEndpoint : NearbyDiscoveryService.NearbyDisco
         }
 
         var peerId = PublicIdentityId.FromBytes(request.PeerId.Span);
+
+        if (request.IdentityKey.Length != 32 || request.Signature.Length != 64)
+        {
+            throw new RpcException(new Status(StatusCode.PermissionDenied, "Invalid identity key or signature length."));
+        }
+
+        if (request.TimestampUnixMs <= 0)
+        {
+            throw new RpcException(new Status(StatusCode.PermissionDenied, "Registration timestamp must be positive."));
+        }
+
+        DateTimeOffset registrationTime;
+        try
+        {
+            registrationTime = DateTimeOffset.FromUnixTimeMilliseconds(request.TimestampUnixMs);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            throw new RpcException(new Status(StatusCode.PermissionDenied, "Registration timestamp is outside the valid range."));
+        }
+
+        if (Math.Abs((_timeProvider.UtcNow - registrationTime).TotalMinutes) > 5)
+        {
+            throw new RpcException(new Status(StatusCode.PermissionDenied, "Registration timestamp is outside the acceptable drift window."));
+        }
+
+        var payload = DiscoveryWireFraming.BuildVisibilitySignaturePayload(peerId, request.Visibility, request.TimestampUnixMs);
+        var identityKey = IdentityKey.FromSpan(request.IdentityKey.Span);
+        if (!_cryptoEngine.VerifyEd25519Signature(identityKey, payload, request.Signature.Span))
+        {
+            throw new RpcException(new Status(StatusCode.PermissionDenied, "Invalid visibility registration signature."));
+        }
+
+        var bundles = await _preKeyRepository.GetAllForIdentityAsync(peerId, context.CancellationToken);
+        if (bundles.Count > 0)
+        {
+            if (!CryptographicOperations.FixedTimeEquals(bundles[0].IdentityKey.Span, request.IdentityKey.Span))
+            {
+                throw new RpcException(new Status(StatusCode.PermissionDenied, "Identity key does not match pre-key bundle identity."));
+            }
+        }
+
         var visibility = (PeerDiscoveryVisibility)request.Visibility;
         var nowUtc = _timeProvider.UtcNow;
 
@@ -107,7 +157,7 @@ public sealed class NearbyDiscoveryEndpoint : NearbyDiscoveryService.NearbyDisco
         }
         else
         {
-            var hasPreKey = await _preKeyRepository.HasActivePreKeyAsync(peerId, context.CancellationToken);
+            var hasPreKey = bundles.Count > 0;
             var registration = new RelayPeerRegistration(
                 PeerId: peerId,
                 Visibility: visibility,

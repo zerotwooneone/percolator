@@ -14,6 +14,7 @@ using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Delivery.Ports;
 using Percolator.Domain.Delivery.ValueObjects;
+using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.Infrastructure.Protos;
@@ -29,23 +30,86 @@ public sealed class AnonymousGroupRelayEndpoint : AnonymousGroupRelayService.Ano
     private readonly IZkProofEngine _zkProofEngine;
     private readonly IRelayMailboxCapabilityStore _mailboxStore;
     private readonly IDateTimeProvider _timeProvider;
+    private readonly PublicIdentityId _relayIdentityId;
     private readonly ConcurrentDictionary<ChannelId, ConcurrentDictionary<Guid, GroupSubscriber>> _subscribers = new();
 
     public AnonymousGroupRelayEndpoint(
         IRelayLedgerRepository ledgerRepository,
         IZkProofEngine zkProofEngine,
         IRelayMailboxCapabilityStore mailboxStore,
-        IDateTimeProvider timeProvider)
+        IDateTimeProvider timeProvider,
+        PublicIdentityId relayIdentityId)
     {
         _ledgerRepository = ledgerRepository ?? throw new ArgumentNullException(nameof(ledgerRepository));
         _zkProofEngine = zkProofEngine ?? throw new ArgumentNullException(nameof(zkProofEngine));
         _mailboxStore = mailboxStore ?? throw new ArgumentNullException(nameof(mailboxStore));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
+        _relayIdentityId = relayIdentityId;
     }
 
     private static ChannelId ParseConversationId(ByteString conversationId)
     {
         return ChannelId.FromBytes(conversationId.Span);
+    }
+
+    public override async Task<CreateGroupResponse> CreateGroup(CreateGroupRequest request, ServerCallContext context)
+    {
+        if (request.ConversationId.Length != 16)
+        {
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "Conversation ID must be 16 bytes."));
+        }
+
+        if (request.EncryptedGenesisBlob.IsEmpty)
+        {
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "Encrypted genesis blob cannot be empty."));
+        }
+
+        if (request.ZkPublicParams.Length < 1 || request.ZkPublicParams.Length > 500)
+        {
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "ZkPublicParams must be between 1 and 500 bytes."));
+        }
+
+        var channelId = ParseConversationId(request.ConversationId);
+        var genesisBlob = EncryptedEntriesBlob.FromSpan(request.EncryptedGenesisBlob.Span);
+
+        var tokens = new HashSet<BlindedRoutingToken>();
+        foreach (var tok in request.InitialRoutingTokens)
+        {
+            if (tok.Length != 16)
+            {
+                throw new RpcException(new Status(StatusCode.InvalidArgument, "All initial routing tokens must be exactly 16 bytes."));
+            }
+            tokens.Add(BlindedRoutingToken.FromBytes(tok.Span));
+        }
+
+        if (tokens.Count == 0)
+        {
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "Group genesis must contain at least one valid routing token."));
+        }
+
+        var publicParams = ZkGroupPublicParams.FromSpan(request.ZkPublicParams.Span);
+
+        var createResult = RelayGroupLedger.CreateGenesis(
+            channelId,
+            _relayIdentityId,
+            genesisBlob,
+            tokens,
+            publicParams,
+            _timeProvider);
+
+        if (createResult.IsFailure)
+        {
+            throw new RpcException(new Status(StatusCode.InvalidArgument, createResult.Error!.Description));
+        }
+
+        var ledger = createResult.Value!;
+        await _ledgerRepository.SaveAsync(ledger, context.CancellationToken);
+
+        return new CreateGroupResponse
+        {
+            Created = true,
+            CurrentEpoch = ledger.CurrentEpoch.Value
+        };
     }
 
     public override async Task<FetchGroupStateResponse> FetchGroupState(FetchGroupStateRequest request, ServerCallContext context)
@@ -55,11 +119,23 @@ public sealed class AnonymousGroupRelayEndpoint : AnonymousGroupRelayService.Ano
             throw new RpcException(new Status(StatusCode.InvalidArgument, "Conversation ID must be 16 bytes."));
         }
 
+        if (request.ZkPresentationProof.Length < 64)
+        {
+            throw new RpcException(new Status(StatusCode.PermissionDenied, "INVALID_ZK_PROOF"));
+        }
+
         var channelId = ParseConversationId(request.ConversationId);
         var ledger = await _ledgerRepository.GetByChannelIdAsync(channelId, context.CancellationToken);
         if (ledger == null)
         {
             throw new RpcException(new Status(StatusCode.NotFound, "Group not found."));
+        }
+
+        var proof = ZkPresentationBytes.FromSpan(request.ZkPresentationProof.Span);
+        var verifyResult = ledger.VerifyReadPresentation(proof, _zkProofEngine);
+        if (verifyResult.IsFailure)
+        {
+            throw new RpcException(new Status(StatusCode.PermissionDenied, "INVALID_ZK_PROOF"));
         }
 
         return new FetchGroupStateResponse
@@ -232,11 +308,23 @@ public sealed class AnonymousGroupRelayEndpoint : AnonymousGroupRelayService.Ano
             throw new RpcException(new Status(StatusCode.InvalidArgument, "Conversation ID must be 16 bytes."));
         }
 
+        if (request.ZkPresentationProof.Length < 64)
+        {
+            throw new RpcException(new Status(StatusCode.PermissionDenied, "INVALID_ZK_PROOF"));
+        }
+
         var channelId = ParseConversationId(request.ConversationId);
         var ledger = await _ledgerRepository.GetByChannelIdAsync(channelId, context.CancellationToken);
         if (ledger == null)
         {
             throw new RpcException(new Status(StatusCode.NotFound, "Group not found."));
+        }
+
+        var proof = ZkPresentationBytes.FromSpan(request.ZkPresentationProof.Span);
+        var verifyResult = ledger.VerifyReadPresentation(proof, _zkProofEngine);
+        if (verifyResult.IsFailure)
+        {
+            throw new RpcException(new Status(StatusCode.PermissionDenied, "INVALID_ZK_PROOF"));
         }
 
         var boundedChannel = Channel.CreateBounded<GroupStreamServerMessage>(new BoundedChannelOptions(64)
