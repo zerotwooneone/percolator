@@ -49,5 +49,6 @@ public interface ILocalChunkStore
 
 public interface IChannelRelayResolver
 {
+    void RegisterRelayForChannel(ChannelId channelId, Uri relayUri);
     ValueTask<Uri?> ResolveRelayForChannelAsync(ChannelId channelId, CancellationToken ct = default);
 }

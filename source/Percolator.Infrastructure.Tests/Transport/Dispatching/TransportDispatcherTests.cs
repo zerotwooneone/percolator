@@ -148,6 +148,8 @@ public sealed class TransportDispatcherTests
 
         public void SetRelay(ChannelId channelId, Uri relayUri) => _relays[channelId] = relayUri;
 
+        public void RegisterRelayForChannel(ChannelId channelId, Uri relayUri) => SetRelay(channelId, relayUri);
+
         public ValueTask<Uri?> ResolveRelayForChannelAsync(ChannelId channelId, CancellationToken ct = default)
         {
             _relays.TryGetValue(channelId, out var uri);

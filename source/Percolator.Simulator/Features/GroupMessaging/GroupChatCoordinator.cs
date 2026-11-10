@@ -1,4 +1,4 @@
-using R3;
+﻿using R3;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -47,7 +47,6 @@ internal sealed class GroupChatCoordinator : IDisposable
     private readonly ISimulatorLogSink _logSink;
     private readonly IVirtualClockStateService _virtualClock;
     private readonly ConcurrentDictionary<(SimulatedNodeId, ChannelId), CancellationTokenSource> _streamSubscriptions = new();
-    private readonly ConcurrentDictionary<ChannelId, Uri> _groupRelays = new();
     private bool _disposed;
 
     public GroupChatCoordinator(
@@ -77,7 +76,6 @@ internal sealed class GroupChatCoordinator : IDisposable
         ArgumentNullException.ThrowIfNull(members);
 
         var channelId = ChannelId.New();
-        _groupRelays[channelId] = relay.BoundEndpoint;
 
         _logSink.Log(new SimulatorLogEntry(
             DateTimeOffset.UtcNow,
@@ -109,42 +107,42 @@ internal sealed class GroupChatCoordinator : IDisposable
             await channelRepo.SaveGroupAsync(groupChannel, ct);
 
             var credRepo = adminScope.ServiceProvider.GetRequiredService<IGroupCredentialsRepository>();
-            var cred = GroupCredentials.CreateGenesis(channelId, GroupMasterKey.FromSpan(new byte[32]), AuthCredentialMacBytes.FromSpan(new byte[64])).Value!;
+            var cred = GroupCredentials.CreateGenesis(
+                channelId,
+                GroupMasterKey.FromSpan(new byte[32]),
+                AuthCredentialMacBytes.FromSpan(new byte[64])).Value!;
             await credRepo.SaveAsync(cred, ct);
+
+            var relayResolver = adminScope.ServiceProvider.GetRequiredService<IChannelRelayResolver>();
+            relayResolver.RegisterRelayForChannel(channelId, relay.BoundEndpoint);
+
+            // 2. Provision RelayGroupLedger on Relay over loopback gRPC (Rule 13: Zero in-process transport bypasses)
+            var channelFactory = adminScope.ServiceProvider.GetRequiredService<IPeerGrpcChannelFactory>();
+            var grpcChannel = channelFactory.GetOrCreateChannel(relay.BoundEndpoint);
+            var client = new AnonymousGroupRelayService.AnonymousGroupRelayServiceClient(grpcChannel);
+
+            var createReq = new CreateGroupRequest
+            {
+                ConversationId = ByteString.CopyFrom(channelId.ToByteArray()),
+                EncryptedGenesisBlob = ByteString.CopyFrom(new byte[128]),
+                ZkPublicParams = ByteString.CopyFrom(new byte[64])
+            };
+
+            createReq.InitialRoutingTokens.Add(ByteString.CopyFrom(admin.MailboxRoutingToken.ToByteArray()));
+            foreach (var member in members)
+            {
+                if (member.PublicIdentityId != admin.PublicIdentityId)
+                {
+                    createReq.InitialRoutingTokens.Add(ByteString.CopyFrom(member.MailboxRoutingToken.ToByteArray()));
+                }
+            }
+
+            var createResp = await client.CreateGroupAsync(createReq, cancellationToken: ct);
+            if (!createResp.Created)
+            {
+                throw new InvalidOperationException($"Relay rejected group creation for channel {channelId}.");
+            }
         }
-
-        foreach (var member in members)
-        {
-            if (member.PublicIdentityId == admin.PublicIdentityId) continue;
-            using var memberScope = member.Services.CreateScope();
-            var memberCredRepo = memberScope.ServiceProvider.GetRequiredService<IGroupCredentialsRepository>();
-            var cred = GroupCredentials.CreateGenesis(channelId, GroupMasterKey.FromSpan(new byte[32]), AuthCredentialMacBytes.FromSpan(new byte[64])).Value!;
-            await memberCredRepo.SaveAsync(cred, ct);
-        }
-
-        // 2. Commit RelayGroupLedger on Relay
-        var activeTokens = new HashSet<BlindedRoutingToken> { admin.MailboxRoutingToken };
-        foreach (var member in members)
-        {
-            activeTokens.Add(member.MailboxRoutingToken);
-        }
-
-        var publicParams = ZkGroupPublicParams.FromBytesOwned(new byte[64]);
-        var genesisBlob = EncryptedEntriesBlob.FromSpan(new byte[128]);
-        var ledgerResult = RelayGroupLedger.CreateGenesis(
-            channelId,
-            relay.RelayIdentityId,
-            genesisBlob,
-            activeTokens,
-            publicParams,
-            _virtualClock);
-
-        if (ledgerResult.IsFailure)
-        {
-            throw new InvalidOperationException($"Failed to create relay group ledger: {ledgerResult.Error!.Description}");
-        }
-
-        await relay.ProvisionGroupLedgerAsync(ledgerResult.Value!, ct);
 
         // 3. Admin subscribes to group stream on Relay
         SubscribePersonaToGroup(admin, channelId, relay.BoundEndpoint);
@@ -295,10 +293,23 @@ internal sealed class GroupChatCoordinator : IDisposable
             return false;
         }
 
-        // Subscribe invitee to group stream on relay
+        // Subscribe invitee to group stream on relay and register relay resolver locally (Rule 14: No coordinator backdoors)
         if (Uri.TryCreate(invitation.RelayEndpoint, UriKind.Absolute, out var relayUri))
         {
-            _groupRelays[invitation.TargetGroupChannelId] = relayUri;
+            var relayResolver = scope.ServiceProvider.GetRequiredService<IChannelRelayResolver>();
+            relayResolver.RegisterRelayForChannel(invitation.TargetGroupChannelId, relayUri);
+
+            var credRepo = scope.ServiceProvider.GetRequiredService<IGroupCredentialsRepository>();
+            var existingCred = await credRepo.GetAsync(invitation.TargetGroupChannelId, ct);
+            if (existingCred == null)
+            {
+                var cred = GroupCredentials.CreateGenesis(
+                    invitation.TargetGroupChannelId,
+                    GroupMasterKey.FromSpan(new byte[32]),
+                    AuthCredentialMacBytes.FromSpan(new byte[64])).Value!;
+                await credRepo.SaveAsync(cred, ct);
+            }
+
             SubscribePersonaToGroup(persona, invitation.TargetGroupChannelId, relayUri);
         }
 
@@ -1074,45 +1085,49 @@ internal sealed class GroupChatCoordinator : IDisposable
         }).ToList();
 
         ulong epoch = 0;
-        if (_groupRelays.TryGetValue(channelId, out var relayUri))
+        using (var scope = personaHost.Services.CreateScope())
         {
-            try
+            var relayResolver = scope.ServiceProvider.GetRequiredService<IChannelRelayResolver>();
+            var relayUri = await relayResolver.ResolveRelayForChannelAsync(channelId, ct);
+            if (relayUri != null)
             {
-                using var scope = personaHost.Services.CreateScope();
-                var channelFactory = scope.ServiceProvider.GetRequiredService<IPeerGrpcChannelFactory>();
-                var zkEngine = scope.ServiceProvider.GetRequiredService<IZkProofEngine>();
-                var credRepo = scope.ServiceProvider.GetRequiredService<IGroupCredentialsRepository>();
-                var cred = await credRepo.GetAsync(channelId, ct);
-                uint currentEpoch = cred?.CurrentEpoch.Value ?? 0;
-
-                var grpcChannel = channelFactory.GetOrCreateChannel(relayUri);
-                var client = new AnonymousGroupRelayService.AnonymousGroupRelayServiceClient(grpcChannel);
-
-                byte[] readChallenge = new byte[32];
-                RelayGroupLedger.ComputeReadChallenge(channelId, new EpochNumber(currentEpoch), readChallenge);
-                var readProof = zkEngine.GenerateGroupPresentation(currentEpoch, readChallenge, ReadOnlySpan<byte>.Empty, ReadOnlySpan<byte>.Empty);
-
-                var state = await client.FetchGroupStateAsync(new FetchGroupStateRequest
+                try
                 {
-                    ConversationId = ByteString.CopyFrom(channelId.ToByteArray()),
-                    ZkPresentationProof = ByteString.CopyFrom(readProof.Span)
-                }, cancellationToken: ct);
-                epoch = state.CurrentEpoch;
-                if (cred != null && state.CurrentEpoch > cred.CurrentEpoch.Value)
-                {
-                    cred.UpdateEpoch(new EpochNumber((uint)state.CurrentEpoch));
-                    await credRepo.SaveAsync(cred, ct);
+                    var channelFactory = scope.ServiceProvider.GetRequiredService<IPeerGrpcChannelFactory>();
+                    var zkEngine = scope.ServiceProvider.GetRequiredService<IZkProofEngine>();
+                    var credRepo = scope.ServiceProvider.GetRequiredService<IGroupCredentialsRepository>();
+                    var cred = await credRepo.GetAsync(channelId, ct);
+                    uint currentEpoch = cred?.CurrentEpoch.Value ?? 0;
+
+                    var grpcChannel = channelFactory.GetOrCreateChannel(relayUri);
+                    var client = new AnonymousGroupRelayService.AnonymousGroupRelayServiceClient(grpcChannel);
+
+                    byte[] readChallenge = new byte[32];
+                    RelayGroupLedger.ComputeReadChallenge(channelId, new EpochNumber(currentEpoch), readChallenge);
+                    var readProof = zkEngine.GenerateGroupPresentation(currentEpoch, readChallenge, ReadOnlySpan<byte>.Empty, ReadOnlySpan<byte>.Empty);
+
+                    var state = await client.FetchGroupStateAsync(new FetchGroupStateRequest
+                    {
+                        ConversationId = ByteString.CopyFrom(channelId.ToByteArray()),
+                        ZkPresentationProof = ByteString.CopyFrom(readProof.Span)
+                    }, cancellationToken: ct);
+                    epoch = state.CurrentEpoch;
+                    if (cred != null && state.CurrentEpoch > cred.CurrentEpoch.Value)
+                    {
+                        cred.UpdateEpoch(new EpochNumber((uint)state.CurrentEpoch));
+                        await credRepo.SaveAsync(cred, ct);
+                    }
                 }
-            }
-            catch (Exception ex)
-            {
-                _logSink.Log(new SimulatorLogEntry(
-                    DateTimeOffset.UtcNow,
-                    LogLevel.Debug,
-                    personaHost.DisplayName,
-                    personaHost.Id,
-                    "GroupQuery",
-                    $"Failed to query group epoch via gRPC: {ex.Message}"));
+                catch (Exception ex)
+                {
+                    _logSink.Log(new SimulatorLogEntry(
+                        DateTimeOffset.UtcNow,
+                        LogLevel.Warning,
+                        personaHost.DisplayName,
+                        personaHost.Id,
+                        "GroupQuery",
+                        $"Failed to query group epoch via gRPC: {ex.Message}"));
+                }
             }
         }
 
@@ -1161,19 +1176,28 @@ internal sealed class GroupChatCoordinator : IDisposable
 
                 try
                 {
-                    using var scope = persona.Services.CreateScope();
-                    var channelFactory = scope.ServiceProvider.GetRequiredService<IPeerGrpcChannelFactory>();
-                    var zkEngine = scope.ServiceProvider.GetRequiredService<IZkProofEngine>();
-                    var credRepo = scope.ServiceProvider.GetRequiredService<IGroupCredentialsRepository>();
-                    var cred = await credRepo.GetAsync(channelId, token).ConfigureAwait(false);
-                    uint currentEpoch = cred?.CurrentEpoch.Value ?? 0;
-
-                    var grpcChannel = channelFactory.GetOrCreateChannel(relayUri);
-                    var client = new AnonymousGroupRelayService.AnonymousGroupRelayServiceClient(grpcChannel);
-
+                    AnonymousGroupRelayService.AnonymousGroupRelayServiceClient client;
+                    uint currentEpoch;
                     byte[] readChallenge = new byte[32];
-                    RelayGroupLedger.ComputeReadChallenge(channelId, new EpochNumber(currentEpoch), readChallenge);
-                    var readProof = zkEngine.GenerateGroupPresentation(currentEpoch, readChallenge, ReadOnlySpan<byte>.Empty, ReadOnlySpan<byte>.Empty);
+                    ZkPresentationBytes readProof;
+
+                    using (var initScope = persona.Services.CreateScope())
+                    {
+                        var relayResolver = initScope.ServiceProvider.GetRequiredService<IChannelRelayResolver>();
+                        relayResolver.RegisterRelayForChannel(channelId, relayUri);
+
+                        var channelFactory = initScope.ServiceProvider.GetRequiredService<IPeerGrpcChannelFactory>();
+                        var zkEngine = initScope.ServiceProvider.GetRequiredService<IZkProofEngine>();
+                        var credRepo = initScope.ServiceProvider.GetRequiredService<IGroupCredentialsRepository>();
+                        var cred = await credRepo.GetAsync(channelId, token).ConfigureAwait(false);
+                        currentEpoch = cred?.CurrentEpoch.Value ?? 0;
+
+                        RelayGroupLedger.ComputeReadChallenge(channelId, new EpochNumber(currentEpoch), readChallenge);
+                        readProof = zkEngine.GenerateGroupPresentation(currentEpoch, readChallenge, ReadOnlySpan<byte>.Empty, ReadOnlySpan<byte>.Empty);
+
+                        var grpcChannel = channelFactory.GetOrCreateChannel(relayUri);
+                        client = new AnonymousGroupRelayService.AnonymousGroupRelayServiceClient(grpcChannel);
+                    }
 
                     var request = new GroupStreamClientMessage
                     {
@@ -1222,10 +1246,15 @@ internal sealed class GroupChatCoordinator : IDisposable
                                 "GroupStream",
                                 $"Received epoch mutation notification (New Epoch: {msg.Mutation.NewEpoch}) for channel {channelId}."));
 
-                            if (cred != null)
+                            using (var mutationScope = persona.Services.CreateScope())
                             {
-                                cred.UpdateEpoch(new EpochNumber(msg.Mutation.NewEpoch));
-                                await credRepo.SaveAsync(cred, token).ConfigureAwait(false);
+                                var credRepo = mutationScope.ServiceProvider.GetRequiredService<IGroupCredentialsRepository>();
+                                var memberCred = await credRepo.GetAsync(channelId, token).ConfigureAwait(false);
+                                if (memberCred != null)
+                                {
+                                    memberCred.UpdateEpoch(new EpochNumber(msg.Mutation.NewEpoch));
+                                    await credRepo.SaveAsync(memberCred, token).ConfigureAwait(false);
+                                }
                             }
 
                             _stateBus.Publish(new SimulatorStateSignal(persona.Id, SignalCategory.GroupStateChanged, TargetChannelId: channelId));

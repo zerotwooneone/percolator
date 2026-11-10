@@ -31,5 +31,4 @@ internal interface ISimulatedRelayHost : IAsyncDisposable
 
     Task StartAsync(CancellationToken ct = default);
     Task StopAsync(CancellationToken ct = default);
-    Task ProvisionGroupLedgerAsync(RelayGroupLedger ledger, CancellationToken ct = default);
 }

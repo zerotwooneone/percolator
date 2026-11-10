@@ -21,11 +21,12 @@ using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Delivery.Ports;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Ports;
+using Percolator.Infrastructure.Adapters;
+using Percolator.Infrastructure.Common;
 using Percolator.Infrastructure.Persistence;
 using Percolator.Infrastructure.Persistence.Repositories;
 using Percolator.Infrastructure.Plugins.BlobStorage;
 using Percolator.Infrastructure.Security;
-using Percolator.Infrastructure.Common;
 using Percolator.Infrastructure.Transport;
 using Percolator.Infrastructure.Transport.Endpoints;
 using Percolator.Infrastructure.Vault;
@@ -60,7 +61,6 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
     private readonly string _relayTempDirectory;
     private readonly SimulatorNotifyingRelayCapabilityStoreDecorator _capabilityStore;
     private SimulatorNotifyingRelayPreKeyRepositoryDecorator? _preKeyRepository;
-    private SqliteRelayLedgerRepository? _ledgerRepository;
     private SimulatorRelayQueryService? _queryService;
     private InMemoryRelayPeerDirectory? _peerDirectory;
     private PrivateRendezvousService? _rendezvousService;
@@ -165,13 +165,12 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
         var profileRepo = new SqliteRelayProfileRepository(contextFactory);
         var chunkStore = new LocalFileChunkStore(Path.Combine(_relayTempDirectory, "Chunks"));
         var ledgerRepo = new SqliteRelayLedgerRepository(contextFactory);
-        _ledgerRepository = ledgerRepo;
         var cryptoEngine = new SignalCryptoEngine();
         var zkEngine = new ZkgroupCryptographyService();
 
-        // 2. Initialize Peer Directory and Private Rendezvous services
+        // 2. Initialize Peer Directory and Private Rendezvous services using production PreKeyAvailabilityAdapter
         var admissionGate = new DiscoveryAdmissionGate();
-        var preKeyAvailabilityAdapter = new RelayPreKeyAvailabilityAdapter(_preKeyRepository);
+        var preKeyAvailabilityAdapter = new PreKeyAvailabilityAdapter(_preKeyRepository);
         _peerDirectory = new InMemoryRelayPeerDirectory(
             admissionGate,
             policy: RelayDiscoveryPolicy.Open,
@@ -244,17 +243,6 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
             $"Relay host started and listening on https://127.0.0.1:{BoundPort}"));
     }
 
-    public async Task ProvisionGroupLedgerAsync(RelayGroupLedger ledger, CancellationToken ct = default)
-    {
-        ArgumentNullException.ThrowIfNull(ledger);
-        if (_ledgerRepository == null)
-        {
-            throw new InvalidOperationException("Relay host not started.");
-        }
-
-        await _ledgerRepository.SaveAsync(ledger, ct);
-    }
-
     public async Task StopAsync(CancellationToken ct = default)
     {
         if (!_isRunning || _app == null) return;
@@ -303,20 +291,5 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
     public void Dispose()
     {
         DisposeAsync().AsTask().GetAwaiter().GetResult();
-    }
-
-    private sealed class RelayPreKeyAvailabilityAdapter : IPreKeyAvailabilityPort
-    {
-        private readonly IRelayPreKeyRepository _repo;
-
-        public RelayPreKeyAvailabilityAdapter(IRelayPreKeyRepository repo)
-        {
-            _repo = repo ?? throw new ArgumentNullException(nameof(repo));
-        }
-
-        public async ValueTask<bool> HasActiveSignedPreKeyAsync(PublicIdentityId peerId, CancellationToken ct = default)
-        {
-            return await _repo.HasActivePreKeyAsync(peerId, ct);
-        }
     }
 }

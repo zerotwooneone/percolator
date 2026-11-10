@@ -166,6 +166,7 @@ public sealed class LoopbackChannelRelayResolver : IChannelRelayResolver
     private readonly IChannelRepository _channelRepo;
     private readonly IPeerMailboxRoutingRepository _mailboxRoutingRepo;
     private readonly IDateTimeProvider _timeProvider;
+    private readonly ConcurrentDictionary<ChannelId, Uri> _explicitRelays = new();
 
     public LoopbackChannelRelayResolver(
         InMemoryLoopbackNetworkSwitch networkSwitch,
@@ -179,8 +180,19 @@ public sealed class LoopbackChannelRelayResolver : IChannelRelayResolver
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
     }
 
+    public void RegisterRelayForChannel(ChannelId channelId, Uri relayUri)
+    {
+        ArgumentNullException.ThrowIfNull(relayUri);
+        _explicitRelays[channelId] = relayUri;
+    }
+
     public async ValueTask<Uri?> ResolveRelayForChannelAsync(ChannelId channelId, CancellationToken ct = default)
     {
+        if (_explicitRelays.TryGetValue(channelId, out var explicitUri))
+        {
+            return explicitUri;
+        }
+
         // 1. Direct channel mapping registered on network switch
         if (_networkSwitch.TryGetRelayForChannel(channelId, out var relay) && relay is not null)
         {

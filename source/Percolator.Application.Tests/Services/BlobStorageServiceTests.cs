@@ -240,6 +240,8 @@ public sealed class BlobStorageServiceTests
 
         public void SetRelay(ChannelId channelId, Uri relayUri) => _relays[channelId] = relayUri;
 
+        public void RegisterRelayForChannel(ChannelId channelId, Uri relayUri) => SetRelay(channelId, relayUri);
+
         public ValueTask<Uri?> ResolveRelayForChannelAsync(ChannelId channelId, CancellationToken ct = default) =>
             ValueTask.FromResult(_relays.GetValueOrDefault(channelId));
     }
