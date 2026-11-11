@@ -2,7 +2,7 @@
 
 # Percolator.Desktop Specification Suite
 
-This directory contains the authoritative, non-redundant engineering standards governing presentation, styling, reactivity, and testing across `Percolator.Desktop`.
+This directory contains the authoritative, non-redundant engineering standards, QMS software item requirements, and detailed design governing presentation, styling, reactivity, and testing across `Percolator.Desktop`.
 
 All specifications are governed by [`spec.spec.md`](./spec.spec.md) and adhere to a strict **Add-Only**, **Permanent Prefixed ID** architecture.
 
@@ -10,40 +10,60 @@ All specifications are governed by [`spec.spec.md`](./spec.spec.md) and adhere t
 
 ## 1. Specification Directed Acyclic Graph (DAG)
 
-To preserve Onion Architecture and prevent circular dependencies or specification drift, **specifications form a strict Directed Acyclic Graph (DAG)**. 
+To preserve Onion Architecture and maintain strict bidirectional regulatory traceability (IEC 62304 Clauses 5.3 & 5.4, ISO 13485:7.3, FDA 21 CFR 820.30), **specifications form a strict Directed Acyclic Graph (DAG)**.
 
-A specification may only depend upon and reference specifications lower in its dependency branch.
+Specifications and design documents may only depend upon and reference specifications lower or inward in their dependency branch.
 
 ```mermaid
 flowchart TD
-    Meta["spec.spec.md<br/>(Level 0: Meta-Governance)"]
-
-    subgraph BranchA["Visual Presentation Branch"]
-        Style["Style.spec.md<br/>(Level 1: Tokens & Themes)"]
-        View["View.spec.md<br/>(Level 2: Declarative XAML Layout)"]
-        CB["CodeBehind.spec.md<br/>(Level 3: Imperative View Mechanics)"]
-        Style --> View
-        View --> CB
+    subgraph RepoQMS["Repository QMS Tier (IEC 62304 / ISO 14971)"]
+        SYS["SystemRequirements.md<br/>(SYS-*)"]
     end
 
-    subgraph BranchB["Reactive Logic & Testing Branch"]
-        R3["R3.spec.md<br/>(Level 1: Reactive Streams & State)"]
-        VM["ViewModel.spec.md<br/>(Level 2: Presentation Logic & Tests)"]
-        R3 --> VM
+    subgraph DesktopQMS["Desktop Architecture & Requirements Tier"]
+        DEP["deployable-requirements.md<br/>(Software Item Allocation: DEP-DESKTOP-*)"]
+        DSN["Design.md<br/>(Detailed Design: INV-*, DEC-*)"]
+        SYS --> DEP
+        DEP --> DSN
     end
 
-    Meta --> Style
-    Meta --> R3
-    Meta --> View
-    Meta --> VM
-    Meta --> CB
+    subgraph DesktopStandards["Desktop Engineering Standards Tier (Avalonia 11)"]
+        Meta["spec.spec.md<br/>(Level 0: Meta-Governance)"]
 
+        subgraph BranchA["Visual Presentation Branch"]
+            Style["Style.spec.md<br/>(Level 1: Tokens & Themes)"]
+            View["View.spec.md<br/>(Level 2: Declarative XAML Layout)"]
+            CB["CodeBehind.spec.md<br/>(Level 3: Imperative View Mechanics)"]
+            Style --> View
+            View --> CB
+        end
+
+        subgraph BranchB["Reactive Logic & Testing Branch"]
+            R3["R3.spec.md<br/>(Level 1: Reactive Streams & State)"]
+            VM["ViewModel.spec.md<br/>(Level 2: Presentation Logic & Tests)"]
+            R3 --> VM
+        end
+
+        Meta --> Style
+        Meta --> R3
+        Meta --> View
+        Meta --> VM
+        Meta --> CB
+    end
+
+    DSN -.->|governs logic of| VM
+    DSN -.->|governs mechanics of| CB
+
+    classDef repo fill:#44337a,stroke:#805ad5,stroke-width:2px,color:#fff;
+    classDef qms fill:#234e52,stroke:#319795,stroke-width:2px,color:#fff;
     classDef meta fill:#2d1b69,stroke:#8a2be2,stroke-width:2px,color:#fff;
     classDef foundation fill:#1a365d,stroke:#3182ce,stroke-width:2px,color:#fff;
     classDef logic fill:#1c4532,stroke:#38a169,stroke-width:2px,color:#fff;
     classDef ui fill:#744210,stroke:#d69e2e,stroke-width:2px,color:#fff;
     classDef hook fill:#4a5568,stroke:#718096,stroke-width:2px,color:#fff;
 
+    class SYS repo;
+    class DEP,DSN qms;
     class Meta meta;
     class Style,R3 foundation;
     class VM logic;
@@ -64,6 +84,8 @@ Every specification is assigned a permanent, collision-free prefix. All normativ
 
 | Prefix | Specification File | Authoritative Scope & Domain Responsibility | Governed File Patterns | Allowed Upstream DAG Dependencies |
 | :--- | :--- | :--- | :--- | :--- |
+| `DEP-DESKTOP-` | [`deployable-requirements.md`](./deployable-requirements.md) | Software Item requirements allocating system requirements (`SYS-*`) to the desktop deployable (IEC 62304 Clause 5.3). | Entire `Percolator.Desktop` project | `SystemRequirements.md` |
+| `INV-`, `DEC-` | [`Design.md`](./Design.md) | Software detailed design, architectural invariants, container lifecycle, and localized decisions (IEC 62304 Clause 5.4). | Entire `Percolator.Desktop` project | `deployable-requirements.md`, `design-spec.md` |
 | `META-` | [`spec.spec.md`](./spec.spec.md) | Meta-governance, RFC 2119/8174 conventions, DAG acyclicity, header formatting. | `spec/*.spec.md` | *(None - Root)* |
 | `STYLE-` | [`Style.spec.md`](./Style.spec.md) | ControlThemes, cascading Styles, Fluent v2 tokens, geometry metrics, theme engines. | `Common/Styles/*.axaml`, `App.axaml` | `spec.spec.md` |
 | `VIEW-` | [`View.spec.md`](./View.spec.md) | XAML Views, Windows, UserControls, DataTemplates, layout containers, SplitView drawers. | `Features/**/*.axaml`, `Views/**/*.axaml` | `spec.spec.md`, `Style.spec.md` |
@@ -133,6 +155,8 @@ When updating a specification, audit all downstream files governed by that branc
 
 | If you modify... | Downstream Specs Affected | Production Files Requiring Audit |
 | :--- | :--- | :--- |
+| `deployable-requirements.md` | `Design.md`, `ViewModel.spec.md`, `CodeBehind.spec.md` | All files in `Percolator.Desktop` |
+| `Design.md` | `ViewModel.spec.md`, `CodeBehind.spec.md` | Host lifecycle, stateful services, views |
 | `spec.spec.md` (`META-`) | All specifications | All files in `Percolator.Desktop` |
 | `Style.spec.md` (`STYLE-`) | `View.spec.md`, `CodeBehind.spec.md` | `App.axaml`, `Spacing.axaml`, all `*.axaml` views |
 | `R3.spec.md` (`R3-`) | `ViewModel.spec.md` | `Program.cs`, all `*ViewModel.cs`, state services |

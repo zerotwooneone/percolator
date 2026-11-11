@@ -42,7 +42,7 @@ Spec: [deployable-requirements-spec](../spec/deployable-requirements-spec.md)
 ## 3. Public Contract Invariants
 
 1. **`DEP-INFRA-CONCURRENCY-MODEL` (Adapter Thread-Safety and Lifetime Scoping):** `[Verify: StaticAnalysis]`
-   All cryptographic adapter implementations (`ISignalCryptoEngine`, `IZkgroupCryptographyService`) exposed across public port boundaries must be stateless and reentrant across concurrent threads. Relational database contexts and Stage 1 bootstrap containers must be single-threaded and scoped to an individual session lifecycle, prohibiting unsynchronized concurrent access (IEC 62304 Clause 5.3.2).
+   All cryptographic adapter implementations (`ISignalCryptoEngine`, `IZkgroupCryptographyService`) exposed across public port boundaries must be stateless and reentrant across concurrent threads. Relational database contexts and authenticated session scopes must be single-threaded and scoped to an individual session lifecycle, prohibiting unsynchronized concurrent access (IEC 62304 Clause 5.3.2).
 
 2. **`DEP-INFRA-DEFENSIVE-SPAN-VALIDATION` (Pre-FFI Defensive Span Non-Emptiness):** `[Verify: Unit]`
    All cryptographic adapter entrypoints must validate that destination and source byte spans are non-empty and match exact buffer sizes (32 bytes for keys, 64 bytes for signatures) before transitioning to native Rust FFI code, preventing native status code 1 rejections ([`SOUP-SIGNAL-ANO-EMPTY-SPAN`](../soup/signal-interop.md#4-known-anomalies-and-cybersecurity-evaluation)).
