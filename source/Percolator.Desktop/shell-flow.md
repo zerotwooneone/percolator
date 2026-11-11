@@ -4,161 +4,9 @@ This application is strictly controlled by the QMS system found in `/source/spec
 
 ---
 
-## Screen 1: Vault Setup & Unlock Gate
+## Main Application Shell
 
-Screen 1 serves as the pre-database bootstrap gate. At this point:
-- `PercolatorDbContext` is not available.
-- **Hidden / Offline Invariant (`SYS-PRE-ACTIVATION-STEALTH`)**: The application operates completely offline. Zero network listener sockets are opened, probed, or bound.
-- The window provides standard OS window controls (Close `[X]`, Minimize).
-- **Window Geometry & Transition**: Screen 1 and Screen 2 share a cohesive, centered startup window frame ($480 \times 600\text{ px}$) to eliminate awkward screen resizing or window flashing during unlock.
-
-Depending on whether a vault database exists on disk, Screen 1 presents one of two visual states:
-
-### State 1A: First-Time Vault Setup (`DatabaseSetupStatus.Uninitialized`)
-Displayed on initial application launch or immediately following decoy duress shredding.
-- **Header & Guidance**:
-  - Title: *"Welcome to Percolator"* (uses `Theme="{StaticResource TitleTextBlockStyle}"`)
-  - Subtitle: *"Choose a master password to protect your messages, keys, and contacts on this device."* (uses `Theme="{StaticResource CaptionTextBlockStyle}"` with `Foreground="{DynamicResource TextFillColorSecondaryBrush}"`)
-- **Interactive Controls & Layout**:
-  1. `Master Password` input field:
-     - `TextBox` with `PasswordChar="•"`.
-     - Built-in Fluent password revelation toggle.
-  2. `Confirm Password` input field (`PasswordChar="•"`).
-  3. `[ Create Vault ]` primary accent button:
-     - Uses `Classes="accent"`.
-     - Enabled by default if passwords match.
-     - **Blank Password Confirmation Dialog**:
-       If the user leaves the master password empty and clicks `[ Create Vault ]`:
-       - **Dialog Title**: *"Skip password protection?"*
-       - **Body**: *"Your vault will still be encrypted with a random key, but that key will be accessible without a password. Anyone with access to this computer can open your messages."*
-       - **Actions**: `[ Cancel ]` (secondary), `[ Continue Without Password ]` (primary outline).
-  4. `[+ Add Emergency Duress Passphrase]` (expandable progressive disclosure link):
-     - Explainer text: *"If forced to unlock Percolator under coercion, entering this passphrase will securely erase your data and open an empty decoy vault."*
-     - Input fields: `Duress Passphrase` + `Confirm Duress Passphrase`.
-     - Validation: Cannot match the master password; cannot be whitespace-only if expanded.
-
-### State 1B: Returning User Unlock (`DatabaseSetupStatus.Locked`)
-Displayed on subsequent launches when an initialized vault exists.
-- **Header**: *"Percolator"* / *"Unlock Vault"* (uses `Theme="{StaticResource TitleTextBlockStyle}"`)
-- **Interactive Controls & Layout**:
-  1. `Master Password` input field:
-     - Auto-focused on window presentation.
-     - Masked with `PasswordChar="•"`.
-     - Pressing `Enter` triggers unlock.
-  2. `[ Unlock ]` primary accent button (`Classes="accent"`):
-     - Displays an inline loading spinner while Argon2id key derivation runs.
-- **Auto-Launch Bypass (Single-Persona Streamlining)**:
-  - If the user previously checked *"Always auto-start with this persona"* on Screen 2, and that persona's port is free, successful unlock immediately binds the port and launches directly into Screen 3 (`MainWindow`), bypassing Screen 2.
-  - *Bypass Override*: Holding `Shift` while clicking `[ Unlock ]` (or pressing `Shift+Enter`) always forces Screen 2 to appear.
-- **Emergency Duress Activation**:
-  - If the user enters the configured duress passphrase in the `Master Password` field:
-    1. The real vault encryption key and header are cryptographically shredded in $< 2\text{ ms}$.
-    2. A new random key is generated and encrypted with the duress passphrase.
-    3. An empty, valid decoy SQLite database is initialized.
-    4. The application transitions seamlessly into Screen 2 (Empty Vault State) without any alert badges, error popups, or forensic crash signatures.
-
-### Failure Handling & Recovery (Screen 1)
-- **Incorrect Password**:
-  - Argon2id key derivation completes, but SQLCipher canary query fails (`SQLITE_NOTADB` error `26`).
-  - **Feedback**: The password field shakes subtly; an inline error banner appears below the field: *"Incorrect password. Please try again."* (styled using `Foreground="{DynamicResource SystemFillColorCriticalBrush}"`).
-  - The input text is highlighted for immediate retyping. The application does not crash or exit.
-- **Corrupted Vault File**:
-  - Database header is truncated or unparseable.
-  - **Modal Dialog**: *"Vault Data Damaged"*.
-  - Text: *"The database file could not be opened. It may have been damaged or altered."*
-  - Actions: `[ Open Data Folder ]` (opens file explorer to allow restoring from backup), `[ Exit ]`.
-- **Cryptographic Engine Failure (Smoke Test Failure)**:
-  - Native library bridge fails (`SignalCrypto.TestConnection() != 42`) due to missing OS runtime libraries.
-  - **Modal Dialog**: *"Security Engine Error"*.
-  - Text: *"The native cryptographic library (`signal_shim`) could not be loaded on your system."*
-  - Actions: `[ View Diagnostic Log ]`, `[ Exit ]`.
-
----
-
-## Screen 2: Identity Gate & Port Binding (Privacy Gatekeeper)
-
-Screen 2 is loaded within the startup window frame after the database smoke test passes.
-- **Hidden / Offline Invariant (`SYS-PRE-ACTIVATION-STEALTH`)**: The application **remains hidden from the network** before the user selects personas and confirms activation. Zero Kestrel listeners and zero outbound transport channels are active.
-
-### State 2A: Normal Return (Existing Personas)
-- **Header**: *"Select Active Personas"* (`Theme="{StaticResource SubtitleTextBlockStyle}"`)
-- **Subheader**: *"You are currently hidden from the network. Your selected personas will only come online after you continue."* (`Foreground="{DynamicResource TextFillColorSecondaryBrush}"`)
-- **Persona Cards List**:
-  - Each card represents an independent persona (`SYS-ISOLATED-PERSONAS`):
-    - Configured with `Classes="persona-card"` with smooth `BrushTransition` on border hover.
-    - Checkbox (multi-select enabled).
-    - Persona Avatar (or generated identicon) + Display Name (`Theme="{StaticResource BodyStrongTextBlockStyle}"`).
-    - **Network Port Pill**:
-      - Available: `Port 5100` [Green Dot: Ready, using `SystemFillColorSuccessBrush`].
-      - Auto-Resolved Conflict: `Port 5100 in use → Auto-selected 5101` [Orange Dot, using `SystemFillColorCautionBrush` with explanation tooltip].
-      - `[ ✎ ]` (Edit Port button, using `Theme="{StaticResource TransparentButton}"`): Opens an inline popover with a number field to specify a custom port outside the default range.
-  - Card Context Menu (right-click or `···` kebab menu):
-    - `Edit Profile`: Modifies display name and avatar.
-    - `Delete Persona`: Opens the permanent removal confirmation dialog.
-- **Auto-Launch Preference**:
-  - Below the list, a checkbox appears when 1 persona is selected:
-    `[ ] Always auto-start with this persona on unlock`
-  - Persisted in local desktop settings (`DesktopIdentitySettingsEntity`).
-- **Action Bar**:
-  1. `[ + New Persona ]` secondary button (opens the Add Persona modal).
-  2. `[ Launch Selected Personas → ]` primary accent button (`Classes="accent"`):
-     - Displays count of selected personas (e.g. `[ Launch 2 Selected Personas → ]`).
-     - Disabled if zero personas are checked, or if any selected persona has an unresolved port collision.
-
-### State 2B: Empty Vault (First-Time User or Decoy Duress Vault)
-Displayed when no personas exist in the vault.
-- **Visual Presentation**:
-  - Centered welcome card using `CardBackgroundFillColorDefaultBrush` and `CardStrokeColorDefaultBrush`.
-  - Headline: *"No personas yet"* (`Theme="{StaticResource SubtitleTextBlockStyle}"`).
-  - Body: *"Percolator lets you create separate profiles for different parts of your life."*
-  - **Tip Callout**: *"Tip: Many people create separate personas for Work vs. Personal, or Family vs. Friends."*
-  - Action Button: `[ Create Your First Persona ]` (`Classes="accent"`).
-  - The `[ Launch Selected Personas → ]` button remains hidden until at least one persona is created.
-
-### Persona Management Dialogs (Screen 2)
-
-#### Add Persona Modal
-- Title: *"Create New Persona"*
-- `Display Name` input field (auto-focused, max 32 characters, whitespace-trimmed).
-- Avatar selector: Displays a default generated identicon; includes `[ Choose Picture ]` button to select a local `.png` or `.jpg`.
-- `Network Port` (expandable advanced settings): Displays auto-assigned port (e.g. `5100`).
-- Actions: `[ Cancel ]`, `[ Create Persona ]` (primary accent button, disabled until a display name is entered).
-
-#### Delete Persona Modal (`SYS-ISOLATED-PERSONAS`, `UN-DATA-RETENTION`)
-- Title: *"Permanently Delete Persona?"*
-- Body:
-  *"This action cannot be undone. All private cryptographic keys, direct chat histories, channels, and contacts associated with this persona will be permanently shredded from disk."*
-- **Selectable Persona Name Box**:
-  - Displays the exact persona name in a selectable, highlighted text box so power users can easily select and copy it with keyboard or mouse.
-- **Confirmation Input**:
-  - Text field with prompt: *"Type the persona name to confirm:"*
-- Actions:
-  - `[ Cancel ]` (secondary).
-  - `[ Shred & Delete Persona ]` (destructive button using `Classes="danger"`; disabled until typed text matches the persona name exactly).
-
-### Failure Handling & Recovery (Screen 2)
-- **All Ports in Range Occupied**:
-  - If all ports in the application's default range (`5100`–`5299`) are already in use:
-    - Persona card displays an inline alert pill: `[ Port conflict: All default ports busy ]` (`Foreground="{DynamicResource SystemFillColorCriticalBrush}"`).
-    - Clicking opens the port editor prompting the user to enter any free port $> 1024$.
-    - `[ Launch Selected Personas → ]` remains disabled until valid ports are assigned.
-- **Port Race Condition on Launch**:
-  - If a port was free during initial selection but was claimed by another OS application before `Launch` was pressed:
-    - An inline banner appears: *"Port 5101 was claimed by another application. Re-probing next available port..."*
-    - `IPortReservationService` automatically re-leases the next free port and updates the card.
-- **Zero Personas Selected**:
-  - If the user unchecks all personas, `[ Launch Selected Personas → ]` is disabled and helper text reads: *"Select at least one persona to continue."*
-
-### Transition to Shell
-1. User confirms persona selection.
-2. The application acquires leases for the selected ports via `IPortReservationService` and starts Kestrel transport listeners strictly for the chosen personas.
-3. The startup window closes, and Screen 3 (`MainWindow`) opens, restoring the user's previously saved window position, size, and maximized state.
-
----
-
-## Screen 3: Main Application Shell
-
-Screen 3 is a modern, responsive desktop shell inspired by Discord and Microsoft Teams.
+The main application shell is a modern, responsive desktop shell inspired by Discord and Microsoft Teams.
 
 ### Responsive Design Principles
 - **Window Geometry & Adaptation**:
@@ -167,6 +15,8 @@ Screen 3 is a modern, responsive desktop shell inspired by Discord and Microsoft
   - **Narrow / Compact Screen Adaptation**:
     - When window width $< 1000\text{ px}$, the right-anchored inspector drawer acts as an overlay/drawer with a backdrop dismiss scrim rather than pushing the content area.
     - When window width $< 850\text{ px}$, the Right Sidebar collapses into a slide-out drawer accessible via a hamburger toggle.
+
+---
 
 ### 1. Left Sidebar (Transports / Network Channels)
 - **Top of Left Sidebar: Pending Requests Button**:
@@ -200,6 +50,8 @@ Screen 3 is a modern, responsive desktop shell inspired by Discord and Microsoft
 - **Empty State (Left Sidebar)**:
   - If no direct peers or relays exist (e.g. on fresh install or decoy duress vault), displays a subtle dashed placeholder guiding the user to the `+` button: *"Connect to a peer or relay to start messaging"*.
 
+---
+
 ### 2. Right Sidebar (Chats & Conversations)
 - Displays the list of chats **contextual to the item selected in the Left Sidebar**:
   - **When a Direct Peer is selected**: Exactly one 1-to-1 chat is shown. If no prior chat exists, the chat is created when the user sends or receives the first message.
@@ -216,6 +68,8 @@ Screen 3 is a modern, responsive desktop shell inspired by Discord and Microsoft
   - *Technical limitation*: All members of a group must be reachable on a shared relay.
   - The workflow must detect which peers are already present on the relay; for invitees not yet on the relay, the system orchestrates out-of-band/pairwise relay invitations, awaiting peer join confirmations before dispatching the Groups V2 ZK presentation invitation.
   - Full group invitation and epoch negotiation workflow will be detailed in a dedicated design turn.
+
+---
 
 ### 3. Content Area (Conversation & Messaging Experience)
 - **Header**:
@@ -234,6 +88,8 @@ Screen 3 is a modern, responsive desktop shell inspired by Discord and Microsoft
 - **Volatile Draft & ViewModel Caching**:
   - The desktop application maintains an in-memory `ChatDraftStateService` and an LRU cache of recently active `ChatViewModel` instances.
   - Switching back and forth between chats or sidebars is instantaneous, restoring unsent message drafts, scroll positions, and attachment states from volatile memory without database re-fetching or schema pollution.
+
+---
 
 ### 4. Right-Anchored Profile & Connection Inspector Drawer
 Inspired by Signal Desktop, Microsoft Teams, and Discord, clicking a peer's profile name in the chat header or selecting "View Profile" from a sidebar context menu opens a slide-over panel on the right side of the window.
@@ -260,6 +116,8 @@ Inspired by Signal Desktop, Microsoft Teams, and Discord, clicking a peer's prof
 - **Relay / Group Inspector Variant**:
   - *Relay*: Shows Relay URI, connection status, latency, and active hosted mailboxes.
   - *Group*: Shows Group Name, Avatar, Disappearing Message timer, and **Member Roster** (with Admin / Member badges). Clicking a member opens that peer's profile.
+
+---
 
 ### 5. Identity Area (Bottom of Left Sidebar, Spanning Right Sidebar)
 - **Compact Visual Focus**:
@@ -294,117 +152,4 @@ Inspired by Signal Desktop, Microsoft Teams, and Discord, clicking a peer's prof
   2. Clears all SQLite connection pools (`SqliteConnection.ClearAllPools()`).
   3. Securely zeroizes the master key in memory (`CryptographicOperations.ZeroMemory`).
   4. Disposes the Stage 2 container and closes `MainWindow`.
-  5. Re-opens Screen 1 (`UnlockWindow`) in total network stealth mode.
-
----
-
-## Idiomatic Avalonia & Fluent Theming Architecture
-
-The application strictly adheres to the **Avalonia 11+ / FluentAvalonia 2.1** styling architecture to ensure visual consistency, seamless Light/Dark/High-Contrast variant switching, and native OS desktop fidelity.
-
-### 1. Minimalist Composition Root (`App.axaml`)
-- `FluentAvaloniaTheme` replaces Avalonia's default theme engine and serves as the single source of truth for styles and control themes:
-  ```xml
-  <Application xmlns="https://github.com/avaloniaui"
-               xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-               xmlns:sty="using:FluentAvalonia.Styling"
-               xmlns:local="using:Percolator.Desktop"
-               x:Class="Percolator.Desktop.App"
-               RequestedThemeVariant="Default">
-
-      <Application.DataTemplates>
-          <local:ViewLocator />
-      </Application.DataTemplates>
-
-      <Application.Resources>
-          <ResourceDictionary>
-              <ResourceDictionary.MergedDictionaries>
-                  <ResourceInclude Source="avares://Percolator.Desktop/Common/Styles/Spacing.axaml" />
-              </ResourceDictionary.MergedDictionaries>
-          </ResourceDictionary>
-      </Application.Resources>
-
-      <Application.Styles>
-          <!-- FluentAvalonia v2 Theme Engine (Auto-detects OS Dark/Light & Accent Color) -->
-          <sty:FluentAvaloniaTheme PreferUserAccentColor="True" 
-                                   PreferSystemTheme="True" />
-                                   
-          <!-- Application-specific utility overrides -->
-          <StyleInclude Source="avares://Percolator.Desktop/Common/Styles/CustomStyles.axaml" />
-      </Application.Styles>
-  </Application>
-  ```
-- **Zero Theme Mixing**: `<FluentTheme />` or `<SimpleTheme />` are strictly prohibited alongside `<sty:FluentAvaloniaTheme />` to prevent property leakage and conflicting resource definitions.
-
-### 2. Native Fluent Design Tokens (Zero Arbitrary Color Inventions)
-- The application directly references standard WinUI / Fluent v2 design tokens via `{DynamicResource ...}` so all backgrounds, borders, and typography adapt automatically across Light, Dark, and High-Contrast modes without custom palette maintenance:
-  - **Surfaces & Cards**:
-    - `SolidBackgroundFillColorBaseBrush` (Main window background)
-    - `CardBackgroundFillColorDefaultBrush` (Elevated card surfaces)
-    - `LayerOnAcrylicFillColorDefaultBrush` (Translucent header/navigation layers)
-  - **Borders & Dividers**:
-    - `CardStrokeColorDefaultBrush` (Card outlines)
-    - `DividerStrokeColorDefaultBrush` (Subtle separator lines)
-  - **Typography (Text Brushes & Built-in TextBlock Themes)**:
-    - `TextFillColorPrimaryBrush` (Headings, primary body)
-    - `TextFillColorSecondaryBrush` (Muted hints, subtitles, timestamps)
-    - `TextFillColorTertiaryBrush` (Placeholder / watermark text)
-    - `Theme="{StaticResource TitleTextBlockStyle}"` (28pt SemiBold)
-    - `Theme="{StaticResource SubtitleTextBlockStyle}"` (20pt SemiBold)
-    - `Theme="{StaticResource BodyStrongTextBlockStyle}"` (14pt SemiBold)
-    - `Theme="{StaticResource BodyTextBlockStyle}"` (14pt Regular)
-    - `Theme="{StaticResource CaptionTextBlockStyle}"` (12pt Secondary)
-  - **Accent & Status Colors**:
-    - `AccentFillColorDefaultBrush` (Primary buttons, active indicators)
-    - `SystemFillColorSuccessBrush` (Ready / verified indicators)
-    - `SystemFillColorCautionBrush` (Port collision / warnings)
-    - `SystemFillColorCriticalBrush` (Errors, destructive actions)
-
-### 3. Layout & Geometry Tokens (`Common/Styles/Spacing.axaml`)
-- Centralized immutable metrics matching Windows 11 Fluent v2 layout grids:
-  ```xml
-  <ResourceDictionary xmlns="https://github.com/avaloniaui"
-                      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-      <CornerRadius x:Key="OverlayCornerRadius">8</CornerRadius>
-      <CornerRadius x:Key="CardCornerRadius">6</CornerRadius>
-      <CornerRadius x:Key="ControlCornerRadius">4</CornerRadius>
-  </ResourceDictionary>
-  ```
-
-### 4. Application Modifiers (`Common/Styles/CustomStyles.axaml`)
-- Reusable classes for behaviors unique to Percolator (e.g. destructive actions and smooth card transitions):
-  ```xml
-  <Styles xmlns="https://github.com/avaloniaui"
-          xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-
-      <!-- Destructive Action Button -->
-      <Style Selector="Button.danger">
-          <Setter Property="Background" Value="{DynamicResource SystemFillColorCriticalBrush}" />
-          <Setter Property="Foreground" Value="White" />
-      </Style>
-      <Style Selector="Button.danger:pointerover /template/ ContentPresenter">
-          <Setter Property="Background" Value="{DynamicResource SystemFillColorCriticalBackgroundBrush}" />
-      </Style>
-
-      <!-- Persona Card with Smooth Border Transition -->
-      <Style Selector="Border.persona-card">
-          <Setter Property="Background" Value="{DynamicResource CardBackgroundFillColorDefaultBrush}" />
-          <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeColorDefaultBrush}" />
-          <Setter Property="BorderThickness" Value="1" />
-          <Setter Property="CornerRadius" Value="{StaticResource CardCornerRadius}" />
-          <Setter Property="Padding" Value="16,12" />
-          <Setter Property="Transitions">
-              <Transitions>
-                  <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
-              </Transitions>
-          </Setter>
-      </Style>
-      <Style Selector="Border.persona-card:pointerover">
-          <Setter Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
-      </Style>
-  </Styles>
-  ```
-- **Control Themes for Buttons & Inputs**:
-  - Primary action buttons use `Classes="accent"`.
-  - Icon buttons (kebab menus, edit icons) use `Theme="{StaticResource TransparentButton}"`.
-  - Password inputs use native `PasswordChar="•"` with built-in Fluent reveal mechanics.
+  5. Re-opens the unlock window in total network stealth mode.
