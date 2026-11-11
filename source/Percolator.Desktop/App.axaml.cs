@@ -1,3 +1,5 @@
+// SPECIFICATION GOVERNANCE: Read Percolator.Desktop/spec/CodeBehind.spec.md before modifying this file.
+
 using System;
 using System.Threading.Tasks;
 using Avalonia;

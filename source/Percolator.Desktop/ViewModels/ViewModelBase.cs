@@ -1,3 +1,5 @@
+// SPECIFICATION GOVERNANCE: Read Percolator.Desktop/spec/ViewModel.spec.md before modifying this file.
+
 using System;
 using CommunityToolkit.Mvvm.ComponentModel;
 using R3;
