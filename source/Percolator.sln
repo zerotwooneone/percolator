@@ -78,6 +78,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Infrastructure.T
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Infrastructure.Windows.Tests", "Percolator.Infrastructure.Windows.Tests\Percolator.Infrastructure.Windows.Tests.csproj", "{25EB9979-3B02-431F-ADEB-2222D33F9D23}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Desktop.Tests", "Percolator.Desktop.Tests\Percolator.Desktop.Tests.csproj", "{B2A29BF7-5935-4A11-BADA-6294B61B7F96}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -388,6 +390,18 @@ Global
 		{25EB9979-3B02-431F-ADEB-2222D33F9D23}.Release|x64.Build.0 = Release|Any CPU
 		{25EB9979-3B02-431F-ADEB-2222D33F9D23}.Release|x86.ActiveCfg = Release|Any CPU
 		{25EB9979-3B02-431F-ADEB-2222D33F9D23}.Release|x86.Build.0 = Release|Any CPU
+		{B2A29BF7-5935-4A11-BADA-6294B61B7F96}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B2A29BF7-5935-4A11-BADA-6294B61B7F96}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B2A29BF7-5935-4A11-BADA-6294B61B7F96}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{B2A29BF7-5935-4A11-BADA-6294B61B7F96}.Debug|x64.Build.0 = Debug|Any CPU
+		{B2A29BF7-5935-4A11-BADA-6294B61B7F96}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{B2A29BF7-5935-4A11-BADA-6294B61B7F96}.Debug|x86.Build.0 = Debug|Any CPU
+		{B2A29BF7-5935-4A11-BADA-6294B61B7F96}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B2A29BF7-5935-4A11-BADA-6294B61B7F96}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B2A29BF7-5935-4A11-BADA-6294B61B7F96}.Release|x64.ActiveCfg = Release|Any CPU
+		{B2A29BF7-5935-4A11-BADA-6294B61B7F96}.Release|x64.Build.0 = Release|Any CPU
+		{B2A29BF7-5935-4A11-BADA-6294B61B7F96}.Release|x86.ActiveCfg = Release|Any CPU
+		{B2A29BF7-5935-4A11-BADA-6294B61B7F96}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -418,5 +432,6 @@ Global
 		{C8F0E427-0B1A-439D-9F31-52D4D3A16A99} = {D4096C37-2151-4956-B164-18F7A5736F56}
 		{FC74F5B9-86BC-47EA-94C7-E46F9C55924F} = {1BA0BC13-1FAC-43E6-8485-EB8EA00CD072}
 		{25EB9979-3B02-431F-ADEB-2222D33F9D23} = {1BA0BC13-1FAC-43E6-8485-EB8EA00CD072}
+		{B2A29BF7-5935-4A11-BADA-6294B61B7F96} = {FD9F8435-A340-4CFA-B719-2D0A55E42A43}
 	EndGlobalSection
 EndGlobal
