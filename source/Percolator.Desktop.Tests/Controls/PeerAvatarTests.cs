@@ -1,3 +1,5 @@
+// SPECIFICATION GOVERNANCE: Read Percolator.Desktop/spec/View.spec.md before modifying this file.
+
 using System.Globalization;
 using Avalonia.Media;
 using FluentAssertions;

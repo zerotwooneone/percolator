@@ -1,3 +1,5 @@
+// SPECIFICATION GOVERNANCE: Read Percolator.Desktop/spec/R3.spec.md before modifying this file.
+
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
