@@ -7,15 +7,11 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using Percolator.Application2.Ports;
 using Percolator.Desktop.Common.Services;
 using Percolator.Desktop.Common.Windowing;
-using Percolator.Desktop.Features.IdentityGate.ViewModels;
-using Percolator.Desktop.Features.IdentityGate.Views;
-using Percolator.Desktop.ViewModels;
+using Percolator.Desktop.Features.Shell.ViewModels;
+using Percolator.Desktop.Features.Shell.Views;
 using Percolator.Domain.Common;
-using Percolator.Domain.Identities.Ports;
 using R3;
 
 namespace Percolator.Desktop;
@@ -48,26 +44,15 @@ public partial class App : Avalonia.Application
 
     public override void OnFrameworkInitializationCompleted()
     {
-        // Build and start Microsoft.Extensions.Hosting host
+        // Stage 1 bootstrap container: presentation coordinators only.
+        // No DbContexts, repositories, or network listeners may exist pre-unlock
+        // ([DEP-DESKTOP-TWO-STAGE-CONTAINER-LIFECYCLE], [DEP-DESKTOP-PRE-ACTIVATION-STEALTH]).
         _host = Host.CreateDefaultBuilder()
             .ConfigureServices((_, services) =>
             {
-                // Core Infrastructure & Utilities
                 services.AddSingleton<IDateTimeProvider>(SystemDateTimeProvider.Instance);
-
-                // Privacy & Network Stealth Subsystems
-                services.AddSingleton<INetworkStealthGate, NetworkStealthGate>();
-
-                // Identity & Profile Repositories
-                services.AddSingleton<IDesktopIdentityKeyStore, DesktopLocalIdentityKeyStore>();
-                services.AddSingleton<ILocalIdentityKeyStore>(sp => sp.GetRequiredService<IDesktopIdentityKeyStore>());
-                services.AddSingleton<IIdentityProfileRepository, DesktopIdentityProfileRepository>();
-
-                // Window Lifecycle & Scoping
                 services.AddSingleton<IWindowManager, WindowManager>();
 
-                // ViewModels
-                services.AddTransient<IdentityGateViewModel>();
                 services.AddTransient<MainWindowViewModel>();
             })
             .Build();
@@ -76,12 +61,9 @@ public partial class App : Avalonia.Application
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            // Initial Window is strictly the IdentityGateWindow to enforce total network stealth on launch
-            var identityGateVm = _host.Services.GetRequiredService<IdentityGateViewModel>();
-            desktop.MainWindow = new IdentityGateWindow
-            {
-                DataContext = identityGateVm
-            };
+            // DESK-01: boot directly into the responsive shell frame.
+            // DESK-02..04 will front this with the StartupWindow vault/persona gates.
+            desktop.MainWindow = new MainWindow(_host.Services.GetRequiredService<MainWindowViewModel>());
 
             desktop.Exit += async (_, _) =>
             {

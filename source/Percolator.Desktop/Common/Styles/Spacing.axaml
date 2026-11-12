@@ -1,0 +1,22 @@
+<!-- SPECIFICATION GOVERNANCE: Read Percolator.Desktop/spec/Style.spec.md before modifying this file. -->
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- Centralized geometry tokens ([STYLE-007], [VIEW-006]) -->
+    <CornerRadius x:Key="OverlayCornerRadius">8</CornerRadius>
+    <CornerRadius x:Key="CardCornerRadius">6</CornerRadius>
+    <CornerRadius x:Key="ControlCornerRadius">4</CornerRadius>
+
+    <!-- Centralized padding / margin tokens -->
+    <Thickness x:Key="CardPadding">16,12</Thickness>
+    <Thickness x:Key="OverlayPadding">20</Thickness>
+    <Thickness x:Key="SectionMargin">0,0,0,16</Thickness>
+    <Thickness x:Key="ControlMargin">0,0,0,8</Thickness>
+    <Thickness x:Key="SidebarItemMargin">0,4,0,0</Thickness>
+
+    <!-- Shell layout metrics -->
+    <x:Double x:Key="LeftSidebarWidth">72</x:Double>
+    <x:Double x:Key="RightSidebarWidth">240</x:Double>
+    <x:Double x:Key="InspectorPaneWidth">300</x:Double>
+
+</ResourceDictionary>

@@ -7,10 +7,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Percolator.Desktop.Features.IdentityGate.ViewModels;
-using Percolator.Desktop.Features.IdentityGate.Views;
 using Percolator.Desktop.ViewModels;
-using Percolator.Desktop.Views;
 
 namespace Percolator.Desktop.Common.Windowing;
 
@@ -46,7 +43,7 @@ public sealed class WindowManager : IWindowManager
             try
             {
                 var viewModel = scope.ServiceProvider.GetRequiredService<TViewModel>();
-                var window = CreateWindowForViewModel(viewModel);
+                var window = ResolveWindowByConvention(viewModel);
 
                 window.DataContext = viewModel;
                 _openWindows[vmType] = (window, scope);
@@ -84,7 +81,7 @@ public sealed class WindowManager : IWindowManager
 
         using var scope = _serviceProvider.CreateScope();
         var viewModel = scope.ServiceProvider.GetRequiredService<TViewModel>();
-        var window = CreateWindowForViewModel(viewModel);
+        var window = ResolveWindowByConvention(viewModel);
         window.DataContext = viewModel;
 
         if (window is IDialogWindow<TResult> dialogWindow)
@@ -97,62 +94,10 @@ public sealed class WindowManager : IWindowManager
         return default;
     }
 
-    public void SwitchToMainWindow()
-    {
-        var desktop = DesktopLifetime;
-        if (desktop == null) return;
-
-        _logger.LogInformation("Transitioning shell to MainWindow.");
-
-        var oldMainWindow = desktop.MainWindow;
-
-        var mainWindowViewModel = _serviceProvider.GetRequiredService<MainWindowViewModel>();
-        var newMainWindow = new MainWindow
-        {
-            DataContext = mainWindowViewModel
-        };
-
-        desktop.MainWindow = newMainWindow;
-        newMainWindow.Show();
-
-        oldMainWindow?.Close();
-    }
-
-    public void SwitchToIdentityGate()
-    {
-        var desktop = DesktopLifetime;
-        if (desktop == null) return;
-
-        _logger.LogInformation("Transitioning shell to IdentityGateWindow.");
-
-        var oldMainWindow = desktop.MainWindow;
-
-        var identityGateViewModel = _serviceProvider.GetRequiredService<IdentityGateViewModel>();
-        var identityGateWindow = new IdentityGateWindow
-        {
-            DataContext = identityGateViewModel
-        };
-
-        desktop.MainWindow = identityGateWindow;
-        identityGateWindow.Show();
-
-        oldMainWindow?.Close();
-    }
-
     public Window? GetActiveWindow()
     {
         var desktop = DesktopLifetime;
         return desktop?.Windows.FirstOrDefault(w => w.IsActive) ?? desktop?.MainWindow;
-    }
-
-    private static Window CreateWindowForViewModel(object viewModel)
-    {
-        return viewModel switch
-        {
-            IdentityGateViewModel => new IdentityGateWindow(),
-            MainWindowViewModel => new MainWindow(),
-            _ => ResolveWindowByConvention(viewModel)
-        };
     }
 
     private static Window ResolveWindowByConvention(object viewModel)
@@ -160,12 +105,13 @@ public sealed class WindowManager : IWindowManager
         var vmType = viewModel.GetType();
         var vmName = vmType.FullName ?? vmType.Name;
 
-        // Try replacing "ViewModel" with "Window" or "View"
+        // Convention: Features.X.ViewModels.FooViewModel -> Features.X.Views.FooWindow or FooView
         var windowName = vmName.Replace("ViewModel", "Window").Replace(".ViewModels.", ".Views.");
+        var viewName = vmName.Replace("ViewModel", "View").Replace(".ViewModels.", ".Views.");
         var windowType = Type.GetType(windowName) ??
                          vmType.Assembly.GetType(windowName) ??
-                         Type.GetType(vmName.Replace("ViewModel", "View").Replace(".ViewModels.", ".Views.")) ??
-                         vmType.Assembly.GetType(vmName.Replace("ViewModel", "View").Replace(".ViewModels.", ".Views."));
+                         Type.GetType(viewName) ??
+                         vmType.Assembly.GetType(viewName);
 
         if (windowType != null && typeof(Window).IsAssignableFrom(windowType))
         {

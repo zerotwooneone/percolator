@@ -1,0 +1,200 @@
+<!-- SPECIFICATION GOVERNANCE: Read Percolator.Desktop/spec/View.spec.md before modifying this file. -->
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Percolator.Desktop.Features.Shell.ViewModels"
+        xmlns:ui="using:FluentAvalonia.UI.Controls"
+        xmlns:controls="using:Percolator.Desktop.Common.Controls"
+        x:Class="Percolator.Desktop.Features.Shell.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="Percolator"
+        Width="1200" Height="800"
+        MinWidth="800" MinHeight="600"
+        WindowStartupLocation="CenterScreen">
+
+    <!-- Outer drawer: right-anchored Profile & Connection Inspector ([VIEW-003]).
+         Inline push above 1000px, overlay with light-dismiss scrim below. -->
+    <SplitView x:Name="InspectorSplitView"
+               PanePlacement="Right"
+               OpenPaneLength="{StaticResource InspectorPaneWidth}"
+               DisplayMode="Inline"
+               CompactPaneLength="0"
+               IsPaneOpen="{Binding IsInspectorOpen, Mode=TwoWay}">
+
+        <SplitView.Pane>
+            <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}"
+                    BorderThickness="1,0,0,0"
+                    Padding="{StaticResource CardPadding}">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="Inspector"
+                               Theme="{StaticResource SubtitleTextBlockStyle}" />
+                    <TextBlock Text="Peer profile, safety numbers, and route telemetry appear here."
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                               TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+        </SplitView.Pane>
+
+        <Grid ColumnDefinitions="72,*">
+
+            <!-- Left Sidebar (72px fixed): transports & network channels -->
+            <Border Grid.Column="0"
+                    Background="{DynamicResource LayerFillColorAltBrush}"
+                    BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}"
+                    BorderThickness="0,0,1,0">
+                <Grid RowDefinitions="Auto,*,Auto,Auto" Margin="0,8,0,8">
+
+                    <!-- Pending Requests button with silent indicator light -->
+                    <Button Grid.Row="0"
+                            Classes="shell-icon"
+                            HorizontalAlignment="Center"
+                            ToolTip.Tip="Pending Requests"
+                            Command="{Binding ToggleInspectorCommand}">
+                        <Grid Width="40" Height="40">
+                            <ui:SymbolIcon Symbol="People" FontSize="20" />
+                            <Ellipse Width="10" Height="10"
+                                     Fill="{DynamicResource SystemFillColorCriticalBrush}"
+                                     HorizontalAlignment="Right"
+                                     VerticalAlignment="Top"
+                                     Margin="0,4,4,0"
+                                     IsVisible="{Binding HasPendingRequests}" />
+                        </Grid>
+                    </Button>
+
+                    <!-- Transport channel list (placeholder until DESK-05) -->
+                    <Border Grid.Row="1" Margin="{StaticResource SidebarItemMargin}" />
+
+                    <!-- Add Connection (+) button -->
+                    <Button Grid.Row="2"
+                            Classes="shell-icon"
+                            HorizontalAlignment="Center"
+                            ToolTip.Tip="Add Connection">
+                        <ui:SymbolIcon Symbol="AddFriend" FontSize="20" />
+                    </Button>
+
+                    <!-- Identity area -->
+                    <controls:PeerAvatar Grid.Row="3"
+                                         Margin="0,8,0,0"
+                                         HorizontalAlignment="Center"
+                                         DisplayName="Percolator User"
+                                         IdentityKeyHex="PERCOLATOR-USER"
+                                         AvatarSize="40"
+                                         ShowPresence="False"
+                                         ToolTip.Tip="Active identity" />
+                </Grid>
+            </Border>
+
+            <!-- Right Sidebar (240px): contextual chats. Inline above 850px,
+                 slide-out drawer with hamburger toggle below. -->
+            <SplitView x:Name="ChatsSidebarSplitView"
+                       Grid.Column="1"
+                       PanePlacement="Left"
+                       OpenPaneLength="{StaticResource RightSidebarWidth}"
+                       DisplayMode="Inline"
+                       CompactPaneLength="0"
+                       IsPaneOpen="{Binding IsChatsSidebarOpen, Mode=TwoWay}">
+
+                <SplitView.Pane>
+                    <Border Background="{DynamicResource LayerFillColorAltBrush}"
+                            BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}"
+                            BorderThickness="0,0,1,0">
+                        <Grid RowDefinitions="Auto,*">
+                            <TextBlock Grid.Row="0"
+                                       Text="Chats"
+                                       Theme="{StaticResource SubtitleTextBlockStyle}"
+                                       Margin="{StaticResource CardPadding}" />
+                            <StackPanel Grid.Row="1" Spacing="4" HorizontalAlignment="Center"
+                                        VerticalAlignment="Center" Margin="{StaticResource CardPadding}">
+                                <TextBlock Text="No conversations yet."
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                           TextWrapping="Wrap"
+                                           TextAlignment="Center" />
+                                <TextBlock Text="Send a message to start chatting."
+                                           Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                           TextWrapping="Wrap"
+                                           TextAlignment="Center" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                </SplitView.Pane>
+
+                <!-- Content Area: header, message list placeholder, chat composer -->
+                <Grid RowDefinitions="Auto,*,Auto"
+                      Background="{DynamicResource SolidBackgroundFillColorBaseBrush}">
+
+                    <!-- Content header -->
+                    <Border Grid.Row="0"
+                            BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}"
+                            BorderThickness="0,0,0,1"
+                            Padding="8,4">
+                        <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto">
+                            <Button Grid.Column="0"
+                                    Classes="shell-icon"
+                                    Command="{Binding ToggleChatsSidebarCommand}"
+                                    ToolTip.Tip="Toggle chats sidebar">
+                                <ui:SymbolIcon Symbol="GlobalNavigationButton" FontSize="16" />
+                            </Button>
+
+                            <TextBlock Grid.Column="1"
+                                       Margin="8,0,0,0"
+                                       VerticalAlignment="Center"
+                                       Theme="{StaticResource BodyStrongTextBlockStyle}"
+                                       Text="{Binding ActiveConversationTitle, FallbackValue='Percolator', TargetNullValue='Percolator'}"
+                                       TextTrimming="CharacterEllipsis" />
+
+                            <ComboBox x:Name="ThemeComboBox"
+                                      Grid.Column="3"
+                                      MinWidth="120"
+                                      VerticalAlignment="Center"
+                                      SelectionChanged="ThemeComboBox_OnSelectionChanged">
+                                <ComboBoxItem Content="Dark" />
+                                <ComboBoxItem Content="Light" />
+                                <ComboBoxItem Content="High Contrast" />
+                            </ComboBox>
+
+                            <Button Grid.Column="4"
+                                    Classes="shell-icon"
+                                    Margin="4,0,0,0"
+                                    Command="{Binding ToggleInspectorCommand}"
+                                    ToolTip.Tip="Toggle inspector">
+                                <ui:SymbolIcon Symbol="ContactInfo" FontSize="16" />
+                            </Button>
+                        </Grid>
+                    </Border>
+
+                    <!-- Message list placeholder / welcome empty state -->
+                    <Grid Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <StackPanel Spacing="12" HorizontalAlignment="Center" MaxWidth="420">
+                            <controls:NerdIcon GlyphType="MeshNetwork"
+                                               FontSize="48"
+                                               Foreground="{DynamicResource AccentFillColorDefaultBrush}"
+                                               HorizontalAlignment="Center" />
+                            <TextBlock Text="Welcome to Percolator"
+                                       Theme="{StaticResource TitleTextBlockStyle}"
+                                       HorizontalAlignment="Center" />
+                            <TextBlock Text="Select a peer or relay from the sidebar, or press + to add a connection."
+                                       Theme="{StaticResource BodyTextBlockStyle}"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                       TextWrapping="Wrap"
+                                       TextAlignment="Center" />
+                            <TextBlock Text="Ctrl+K Quick Switcher  •  Ctrl+Shift+L Lock Session"
+                                       Theme="{StaticResource CaptionTextBlockStyle}"
+                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                       HorizontalAlignment="Center" />
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- Chat composer placeholder -->
+                    <Border Grid.Row="2"
+                            Padding="12"
+                            BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}"
+                            BorderThickness="0,1,0,0">
+                        <TextBox IsEnabled="False"
+                                 Watermark="Message composer arrives in DESK-06"
+                                 CornerRadius="{StaticResource ControlCornerRadius}" />
+                    </Border>
+                </Grid>
+            </SplitView>
+        </Grid>
+    </SplitView>
+</Window>

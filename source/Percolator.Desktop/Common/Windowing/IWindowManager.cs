@@ -22,17 +22,6 @@ public interface IWindowManager
     Task<TResult?> ShowDialogAsync<TViewModel, TResult>(Window? owner = null) where TViewModel : ViewModelBase;
 
     /// <summary>
-    /// Switches the application shell from the Identity Gate to the main application window (MainWindow).
-    /// </summary>
-    void SwitchToMainWindow();
-
-    /// <summary>
-    /// Switches the application shell back to the Identity Gate (e.g. on session lock or logout),
-    /// closing the main window and returning to stealth mode.
-    /// </summary>
-    void SwitchToIdentityGate();
-
-    /// <summary>
     /// Returns the currently active top-level window.
     /// </summary>
     Window? GetActiveWindow();

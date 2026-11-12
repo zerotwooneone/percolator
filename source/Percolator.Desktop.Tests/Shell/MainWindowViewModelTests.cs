@@ -1,65 +1,37 @@
 // SPECIFICATION GOVERNANCE: Read Percolator.Desktop/spec/ViewModel.spec.md before modifying this file.
 
-using System.Threading.Tasks;
+using System.Collections.Generic;
 using FluentAssertions;
-using Microsoft.Extensions.Logging.Abstractions;
-using Moq;
 using NUnit.Framework;
-using Percolator.Desktop.Common.Services;
-using Percolator.Desktop.Common.Windowing;
-using Percolator.Desktop.ViewModels;
-using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Desktop.Features.Shell.ViewModels;
 
 namespace Percolator.Desktop.Tests.Shell;
 
 [TestFixture]
 public sealed class MainWindowViewModelTests
 {
-    private NetworkStealthGate _stealthGate = null!;
-    private Mock<IWindowManager> _mockWindowManager = null!;
-
-    [SetUp]
-    public void SetUp()
-    {
-        _stealthGate = new NetworkStealthGate(NullLogger<NetworkStealthGate>.Instance);
-        _mockWindowManager = new Mock<IWindowManager>();
-    }
-
-    [TearDown]
-    public void TearDown()
-    {
-        _stealthGate.Dispose();
-    }
-
+    // The pending-requests indicator light binds HasPendingRequests, which projects
+    // PendingRequestCount > 0. The load-bearing contract is that PropertyChanged fires for
+    // BOTH properties when the count crosses the zero boundary — without
+    // [NotifyPropertyChangedFor] the indicator silently breaks even though the getter stays correct.
     [Test]
-    public async Task UpdatesActiveIdentitiesCount_OnStealthGateChanges()
+    public void PendingRequestCount_NotifiesHasPendingRequests_WhenCrossingZeroBoundary()
     {
-        var id1 = PublicIdentityId.New();
-        var id2 = PublicIdentityId.New();
+        var vm = new MainWindowViewModel();
+        vm.HasPendingRequests.Should().BeFalse();
 
-        var vm = new MainWindowViewModel(_stealthGate, _mockWindowManager.Object);
-        vm.ActiveIdentitiesCount.Should().Be(0);
+        var notified = new List<string?>();
+        vm.PropertyChanged += (_, e) => notified.Add(e.PropertyName);
 
-        await _stealthGate.ActivateAsync([id1, id2]);
-        vm.ActiveIdentitiesCount.Should().Be(2);
-        vm.StatusText.Should().Contain("Network Active (2 Identities)");
+        vm.PendingRequestCount = 2;
+        vm.HasPendingRequests.Should().BeTrue("the indicator light must show staged inbound handshakes");
+        notified.Should().Contain(nameof(MainWindowViewModel.HasPendingRequests),
+            "the indicator binding must be notified when the count leaves zero");
 
-        await _stealthGate.DeactivateAsync();
-        vm.ActiveIdentitiesCount.Should().Be(0);
-        vm.StatusText.Should().Contain("Stealth Mode");
-    }
-
-    [Test]
-    public async Task LockSessionAsync_DeactivatesNetwork_AndSwitchesToIdentityGate()
-    {
-        var id = PublicIdentityId.New();
-        await _stealthGate.ActivateAsync([id]);
-
-        var vm = new MainWindowViewModel(_stealthGate, _mockWindowManager.Object);
-
-        await vm.LockSessionCommand.ExecuteAsync(null);
-
-        _stealthGate.IsStealthActive.Should().BeTrue();
-        _mockWindowManager.Verify(w => w.SwitchToIdentityGate(), Times.Once);
+        notified.Clear();
+        vm.PendingRequestCount = 0;
+        vm.HasPendingRequests.Should().BeFalse();
+        notified.Should().Contain(nameof(MainWindowViewModel.HasPendingRequests),
+            "the indicator binding must be notified when the count returns to zero");
     }
 }
