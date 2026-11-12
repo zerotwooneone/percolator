@@ -184,9 +184,11 @@ public class SqlCipherUnlockTests
         var duressUnlock = await _coordinator.UnlockAsync(duressPass);
         duressUnlock.Should().BeOfType<UnlockResult.DuressActivated>();
 
-        // After duress activation, database files are destroyed
-        File.Exists(_options.HeaderFilePath).Should().BeFalse();
-        _coordinator.Status.Should().Be(DatabaseSetupStatus.Uninitialized);
+        // After duress activation the original vault is destroyed, but a decoy vault keyed by
+        // the duress passphrase takes its place — with a live session — so the wipe is not exposed.
+        File.Exists(_options.HeaderFilePath).Should().BeTrue();
+        File.Exists(_options.DatabaseFilePath).Should().BeTrue();
+        _coordinator.Status.Should().Be(DatabaseSetupStatus.Unlocked);
     }
 
     [Test]
@@ -216,6 +218,43 @@ public class SqlCipherUnlockTests
         // Supplying duress identical to master fails
         var collisionResult = await _coordinator.ConfigureDuressPasswordAsync(masterPass, masterPass);
         collisionResult.IsFailure.Should().BeTrue();
+    }
+
+    [Test]
+    public async Task DuressActivation_RecreatesEmptyVault_KeyedByDuressPassphrase()
+    {
+        var masterPass = VaultPassphrase.Create("RealMasterForDeniability");
+        var duressPass = VaultPassphrase.Create("DuressForDeniability");
+        var initResult = await _coordinator.InitializeAsync(masterPass, duressPass);
+        initResult.IsSuccess.Should().BeTrue();
+        await _coordinator.LockAsync();
+
+        var duressResult = await _coordinator.UnlockAsync(duressPass);
+        duressResult.Should().BeOfType<UnlockResult.DuressActivated>();
+        duressResult.As<UnlockResult.DuressActivated>().Session.Should().NotBeNull(
+            "duress activation must hand back a live session so personas persist into the decoy vault");
+
+        // Deniability: a new header + database must exist so the vault looks intact — without it
+        // the next launch lands on first-time setup, which exposes that a wipe occurred.
+        File.Exists(_options.HeaderFilePath).Should().BeTrue(
+            "duress activation must re-create a header or the next launch exposes the wipe via the setup screen");
+        File.Exists(_options.DatabaseFilePath).Should().BeTrue();
+        _coordinator.Status.Should().Be(DatabaseSetupStatus.Unlocked);
+
+        // Subsequent login with the duress passphrase unlocks the (empty) decoy vault normally.
+        await _coordinator.LockAsync();
+        var relogin = await _coordinator.UnlockAsync(duressPass);
+        relogin.Should().BeOfType<UnlockResult.Success>(
+            "the duress passphrase must keep working — it is now the decoy vault's master passphrase");
+        await _coordinator.LockAsync();
+
+        // The destroyed vault's master passphrase is dead — it must not unlock the decoy.
+        var oldMaster = await _coordinator.UnlockAsync(masterPass);
+        oldMaster.Should().BeOfType<UnlockResult.InvalidCredentials>();
+
+        // And any other wrong passphrase still fails.
+        var wrong = await _coordinator.UnlockAsync(VaultPassphrase.Create("CompletelyWrong"));
+        wrong.Should().BeOfType<UnlockResult.InvalidCredentials>();
     }
 
     private sealed class FailingDatabaseMigrator : IDatabaseMigrator

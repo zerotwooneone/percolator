@@ -82,65 +82,12 @@ public sealed class SqlCipherDatabaseUnlockCoordinator : IDatabaseUnlockCoordina
 
         try
         {
-            // 2. Create encrypted envelope
-            DatabaseHeader header = default!;
-            masterKeyHandle.WithKeySpan(keySpan =>
-            {
-                var envelopeResult = _envelopePacker.CreateEnvelope(masterPassword, duressPassword, keySpan);
-                if (envelopeResult.IsFailure)
-                {
-                    throw new InvalidOperationException(envelopeResult.Error.Description);
-                }
-                header = envelopeResult.Value;
-            });
-
-            // 3. Cold Launch Self-Healing Invariant: Clean up any orphaned ciphertext database files
-            var dbFiles = new[]
-            {
-                _options.DatabaseFilePath,
-                _options.DatabaseFilePath + "-wal",
-                _options.DatabaseFilePath + "-shm"
-            };
-            foreach (var path in dbFiles)
-            {
-                try { if (File.Exists(path)) File.Delete(path); } catch (IOException) { }
-            }
-
-            // 4. Atomically persist header
-            var writeResult = await _headerStorage.WriteHeaderAsync(header, ct).ConfigureAwait(false);
-            if (writeResult.IsFailure)
+            // 2-5. Create envelope, persist header, initialize encrypted database, migrate schema
+            var vaultResult = await CreateFreshVaultAsync(masterPassword, duressPassword, masterKeyHandle, ct).ConfigureAwait(false);
+            if (vaultResult.IsFailure)
             {
                 masterKeyHandle.Dispose();
-                return DomainResult<IAuthenticatedSession>.Failure(writeResult.Error);
-            }
-
-            // 5. Canary Probe & Migration Guard
-            string connectionString = $"Data Source={_options.DatabaseFilePath}";
-            await using (var testConn = new SqliteConnection(connectionString))
-            {
-                await testConn.OpenAsync(ct).ConfigureAwait(false);
-                masterKeyHandle.ApplyKeyToConnection(testConn);
-
-                await using (var initCmd = testConn.CreateCommand())
-                {
-                    initCmd.CommandText = "CREATE TABLE IF NOT EXISTS __percolator_vault (id INTEGER PRIMARY KEY);";
-                    await initCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-                }
-
-                var probeResult = await _canaryProbe.ProbeAsync(testConn, ct).ConfigureAwait(false);
-                if (probeResult != CanaryProbeResult.Verified)
-                {
-                    masterKeyHandle.Dispose();
-                    return DomainResult<IAuthenticatedSession>.Failure(
-                        new DomainError("Vault.CanaryFailed", $"Canary probe failed: {probeResult}"));
-                }
-            }
-
-            var migrationResult = await _migrator.MigrateAsync(masterKeyHandle, ct).ConfigureAwait(false);
-            if (migrationResult.IsFailure)
-            {
-                masterKeyHandle.Dispose();
-                return DomainResult<IAuthenticatedSession>.Failure(migrationResult.Error);
+                return DomainResult<IAuthenticatedSession>.Failure(vaultResult.Error);
             }
 
             // 6. Build Stage 2 Host and transition status
@@ -184,6 +131,32 @@ public sealed class SqlCipherDatabaseUnlockCoordinator : IDatabaseUnlockCoordina
                 CryptographicOperations.ZeroMemory(candidateKey);
                 await LockAsync().ConfigureAwait(false);
                 await _wipeHandler.ExecuteWipeAsync(ct).ConfigureAwait(false);
+
+                // Plausible deniability: immediately re-create a fresh empty vault whose master
+                // slot is keyed by the duress passphrase. Without this, the next launch lands on
+                // first-time setup — an unmistakable tell that the vault was destroyed. The decoy
+                // gets a real authenticated session so personas created during it persist into
+                // the decoy vault — an attacker expects the vault to actually work.
+                var decoyKey = MasterKeyHandle.GenerateRandom();
+                try
+                {
+                    var reinitResult = await CreateFreshVaultAsync(candidatePassword, null, decoyKey, ct)
+                        .ConfigureAwait(false);
+                    if (reinitResult.IsSuccess)
+                    {
+                        var host = _hostFactory.BuildAuthenticatedHost(decoyKey);
+                        _activeKeyHandle = decoyKey;
+                        _activeSession = new AuthenticatedSession(host);
+                        Status = DatabaseSetupStatus.Unlocked;
+                        return new UnlockResult.DuressActivated(_activeSession);
+                    }
+                }
+                catch
+                {
+                    // Fall through to the sessionless decoy path — the wipe already succeeded.
+                }
+
+                decoyKey.Dispose();
                 Status = DatabaseSetupStatus.Uninitialized;
                 return new UnlockResult.DuressActivated();
             }
@@ -239,6 +212,79 @@ public sealed class SqlCipherDatabaseUnlockCoordinator : IDatabaseUnlockCoordina
         {
             CryptographicOperations.ZeroMemory(candidateKey);
         }
+    }
+
+    /// <summary>
+    /// Creates a fresh encrypted vault on disk: builds the header envelope, deletes any orphaned
+    /// database files, persists the header, initializes the encrypted database with its canary
+    /// table, and applies migrations. Shared by first-time initialization and the post-duress-wipe
+    /// decoy vault (master slot keyed by the duress passphrase, no duress slot).
+    /// </summary>
+    private async Task<DomainResult> CreateFreshVaultAsync(
+        VaultPassphrase masterPassword,
+        VaultPassphrase? duressPassword,
+        IMasterKeyHandle masterKeyHandle,
+        CancellationToken ct)
+    {
+        // Create encrypted envelope wrapping the master key
+        DatabaseHeader header = default!;
+        masterKeyHandle.WithKeySpan(keySpan =>
+        {
+            var envelopeResult = _envelopePacker.CreateEnvelope(masterPassword, duressPassword, keySpan);
+            if (envelopeResult.IsFailure)
+            {
+                throw new InvalidOperationException(envelopeResult.Error.Description);
+            }
+            header = envelopeResult.Value;
+        });
+
+        // Cold Launch Self-Healing Invariant: Clean up any orphaned ciphertext database files
+        var dbFiles = new[]
+        {
+            _options.DatabaseFilePath,
+            _options.DatabaseFilePath + "-wal",
+            _options.DatabaseFilePath + "-shm"
+        };
+        foreach (var path in dbFiles)
+        {
+            try { if (File.Exists(path)) File.Delete(path); } catch (IOException) { }
+        }
+
+        // Atomically persist header
+        var writeResult = await _headerStorage.WriteHeaderAsync(header, ct).ConfigureAwait(false);
+        if (writeResult.IsFailure)
+        {
+            return DomainResult.Failure(writeResult.Error);
+        }
+
+        // Canary table + probe, then schema migration
+        string connectionString = $"Data Source={_options.DatabaseFilePath}";
+        await using (var testConn = new SqliteConnection(connectionString))
+        {
+            await testConn.OpenAsync(ct).ConfigureAwait(false);
+            masterKeyHandle.ApplyKeyToConnection(testConn);
+
+            await using (var initCmd = testConn.CreateCommand())
+            {
+                initCmd.CommandText = "CREATE TABLE IF NOT EXISTS __percolator_vault (id INTEGER PRIMARY KEY);";
+                await initCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+
+            var probeResult = await _canaryProbe.ProbeAsync(testConn, ct).ConfigureAwait(false);
+            if (probeResult != CanaryProbeResult.Verified)
+            {
+                return DomainResult.Failure(
+                    new DomainError("Vault.CanaryFailed", $"Canary probe failed: {probeResult}"));
+            }
+        }
+
+        var migrationResult = await _migrator.MigrateAsync(masterKeyHandle, ct).ConfigureAwait(false);
+        if (migrationResult.IsFailure)
+        {
+            return DomainResult.Failure(migrationResult.Error);
+        }
+
+        return DomainResult.Success();
     }
 
     public async Task<DomainResult> ChangeMasterPasswordAsync(

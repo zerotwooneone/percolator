@@ -180,7 +180,7 @@ public sealed class VaultUnlockViewModelTests
             Times.Once,
             "the Shift-override path must always land on the Identity Gate");
         _personas.Verify(
-            d => d.ListAsync(It.IsAny<IAuthenticatedSession?>(), It.IsAny<CancellationToken>()),
+            d => d.ListAsync(It.IsAny<IAuthenticatedSession>(), It.IsAny<CancellationToken>()),
             Times.Never,
             "the Shift-override path must not evaluate auto-start preferences");
     }
@@ -201,22 +201,23 @@ public sealed class VaultUnlockViewModelTests
     }
 
     [Test]
-    public async Task Unlock_DuressActivated_TransitionsToGateSilently_WithNoSessionOrError()
+    public async Task Unlock_DuressActivated_TransitionsToGateWithDecoySession_NoError()
     {
+        var decoySession = new Mock<IAuthenticatedSession>();
         _unlockCoordinator
             .Setup(c => c.UnlockAsync(It.IsAny<VaultPassphrase>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new UnlockResult.DuressActivated());
+            .ReturnsAsync(new UnlockResult.DuressActivated(decoySession.Object));
         _handoff
-            .Setup(h => h.TransitionToGateAsync(null, It.IsAny<CancellationToken>()))
+            .Setup(h => h.TransitionToGateAsync(decoySession.Object, It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         _vm.Password = "duress-phrase";
         await _vm.UnlockCommand.ExecuteAsync(null);
 
         _handoff.Verify(
-            h => h.TransitionToGateAsync(null, It.IsAny<CancellationToken>()),
+            h => h.TransitionToGateAsync(decoySession.Object, It.IsAny<CancellationToken>()),
             Times.Once,
-            "duress must transition to the empty-vault gate with zero error surfacing");
+            "duress must transition to the gate with the decoy-vault session so personas persist");
         _vm.ErrorMessage.Should().BeNull("duress activation must never surface error UI");
         _vm.FailedAttemptNonce.Should().Be(0, "duress must not trigger the failed-attempt shake");
         _vm.IsBusy.Should().BeFalse();

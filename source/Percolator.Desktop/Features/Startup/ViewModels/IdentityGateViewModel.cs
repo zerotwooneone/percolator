@@ -121,6 +121,15 @@ public partial class IdentityGateViewModel : ViewModelBase
     public async Task LoadAsync(IAuthenticatedSession? session, CancellationToken ct = default)
     {
         _session = session;
+        if (session is null)
+        {
+            // Degraded path: only reachable if decoy-vault re-initialization failed after a
+            // duress wipe. With no session there is no vault — show an inert empty gate.
+            _personaList.Clear();
+            RefreshDerivedState();
+            return;
+        }
+
         IsLoading = true;
         try
         {
@@ -201,6 +210,11 @@ public partial class IdentityGateViewModel : ViewModelBase
     [RelayCommand]
     private async Task CreatePersonaAsync(CancellationToken ct)
     {
+        if (_session is null)
+        {
+            return;
+        }
+
         var result = await _windows
             .ShowDialogAsync<CreatePersonaDialogViewModel, PersonaEditorResult?>(
                 vm => vm.InitializeForCreate())
@@ -232,7 +246,7 @@ public partial class IdentityGateViewModel : ViewModelBase
     [RelayCommand]
     private async Task EditPersonaAsync(SelectablePersonaModel? persona, CancellationToken ct)
     {
-        if (persona is null)
+        if (persona is null || _session is null)
         {
             return;
         }
@@ -268,7 +282,7 @@ public partial class IdentityGateViewModel : ViewModelBase
     [RelayCommand]
     private async Task DeletePersonaAsync(SelectablePersonaModel? persona, CancellationToken ct)
     {
-        if (persona is null)
+        if (persona is null || _session is null)
         {
             return;
         }

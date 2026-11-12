@@ -9,6 +9,7 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using NUnit.Framework;
+using Percolator.Application2.Ports;
 using Percolator.Desktop.Common.Services;
 using Percolator.Desktop.Common.Storage;
 using Percolator.Desktop.Common.Windowing;
@@ -21,6 +22,8 @@ namespace Percolator.Desktop.Tests.Startup;
 [TestFixture]
 public sealed class IdentityGateViewModelTests
 {
+    private IAuthenticatedSession _session = null!;
+
     private Mock<IPersonaDirectory> _directory = null!;
     private Mock<IPortReservationService> _ports = null!;
     private Mock<IDesktopSettingsRepository> _settings = null!;
@@ -32,6 +35,7 @@ public sealed class IdentityGateViewModelTests
     [SetUp]
     public void SetUp()
     {
+        _session = Mock.Of<IAuthenticatedSession>();
         _directory = new Mock<IPersonaDirectory>(MockBehavior.Strict);
         _ports = new Mock<IPortReservationService>(MockBehavior.Strict);
         _settings = new Mock<IDesktopSettingsRepository>(MockBehavior.Strict);
@@ -49,9 +53,10 @@ public sealed class IdentityGateViewModelTests
     }
 
     [TearDown]
-    public void TearDown()
+    public async Task TearDown()
     {
         _vm.Dispose();
+        await _session.DisposeAsync();
     }
 
     // The synchronized view implements both IList and IList<T>; go through the generic
@@ -65,7 +70,7 @@ public sealed class IdentityGateViewModelTests
 
     private void ArrangeDirectory(params PersonaDirectoryEntry[] entries) =>
         _directory
-            .Setup(d => d.ListAsync(null, It.IsAny<CancellationToken>()))
+            .Setup(d => d.ListAsync(_session, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<PersonaDirectoryEntry>(entries));
 
     [Test]
@@ -77,7 +82,7 @@ public sealed class IdentityGateViewModelTests
             .Setup(p => p.ProbeAsync(5100, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PortProbeResult(PortProbeStatus.Ready, 5100));
 
-        await _vm.LoadAsync(null);
+        await _vm.LoadAsync(_session);
 
         Personas.Count.Should().Be(1);
         Personas[0].DisplayName.Should().Be("Alice");
@@ -93,7 +98,7 @@ public sealed class IdentityGateViewModelTests
     {
         ArrangeDirectory();
 
-        await _vm.LoadAsync(null);
+        await _vm.LoadAsync(_session);
 
         _vm.HasPersonas.Should().BeFalse();
         _vm.HasEmptyState.Should().BeTrue();
@@ -108,7 +113,7 @@ public sealed class IdentityGateViewModelTests
             .Setup(p => p.ProbeAsync(5100, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PortProbeResult(PortProbeStatus.AutoSelected, 5101));
 
-        await _vm.LoadAsync(null);
+        await _vm.LoadAsync(_session);
 
         var card = Personas[0];
         card.PortStatus.Should().Be(PortStatus.AutoSelected);
@@ -124,7 +129,7 @@ public sealed class IdentityGateViewModelTests
         _ports
             .Setup(p => p.ProbeAsync(5100, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PortProbeResult(PortProbeStatus.Ready, 5100));
-        await _vm.LoadAsync(null);
+        await _vm.LoadAsync(_session);
 
         var card = Personas[0];
         var lease = new Mock<IPortLease>();
@@ -140,7 +145,7 @@ public sealed class IdentityGateViewModelTests
             .Returns(Task.CompletedTask);
         _handoff
             .Setup(h => h.TransitionToMainShellAsync(
-                null,
+                _session,
                 It.Is<IReadOnlyList<PersonaLaunchDescriptor>?>(l =>
                     l != null && l.Count == 1 && l[0].Lease == lease.Object && l[0].RequestedPort == 5100),
                 It.IsAny<CancellationToken>()))
@@ -154,7 +159,7 @@ public sealed class IdentityGateViewModelTests
 
         _handoff.Verify(
             h => h.TransitionToMainShellAsync(
-                null,
+                _session,
                 It.IsAny<IReadOnlyList<PersonaLaunchDescriptor>?>(),
                 It.IsAny<CancellationToken>()),
             Times.Once);
@@ -176,7 +181,7 @@ public sealed class IdentityGateViewModelTests
         _ports
             .Setup(p => p.ProbeAsync(5100, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PortProbeResult(PortProbeStatus.Ready, 5100));
-        await _vm.LoadAsync(null);
+        await _vm.LoadAsync(_session);
 
         var card = Personas[0];
         var lease = new Mock<IPortLease>();
@@ -192,7 +197,7 @@ public sealed class IdentityGateViewModelTests
             .Returns(Task.CompletedTask);
         _handoff
             .Setup(h => h.TransitionToMainShellAsync(
-                null,
+                _session,
                 It.Is<IReadOnlyList<PersonaLaunchDescriptor>?>(l =>
                     l != null && l.Count == 1 && l[0].RequestedPort == 5101),
                 It.IsAny<CancellationToken>()))
@@ -214,7 +219,7 @@ public sealed class IdentityGateViewModelTests
         _ports
             .Setup(p => p.ProbeAsync(5100, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PortProbeResult(PortProbeStatus.Ready, 5100));
-        await _vm.LoadAsync(null);
+        await _vm.LoadAsync(_session);
 
         var card = Personas[0];
         _ports
@@ -244,7 +249,7 @@ public sealed class IdentityGateViewModelTests
         _ports
             .Setup(p => p.ProbeAsync(5100, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PortProbeResult(PortProbeStatus.Ready, 5100));
-        await _vm.LoadAsync(null);
+        await _vm.LoadAsync(_session);
 
         _settings
             .Setup(s => s.GetAllAsync(It.IsAny<CancellationToken>()))
@@ -280,7 +285,7 @@ public sealed class IdentityGateViewModelTests
         _ports
             .Setup(p => p.ProbeAsync(5100, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PortProbeResult(PortProbeStatus.Ready, 5100));
-        await _vm.LoadAsync(null);
+        await _vm.LoadAsync(_session);
 
         var card = Personas[0];
         _windows
@@ -292,7 +297,7 @@ public sealed class IdentityGateViewModelTests
             .ReturnsAsync(true);
         _directory
             .Setup(d => d.ShredAndDeleteAsync(
-                null,
+                _session,
                 It.Is<PublicIdentityId>(id => id.Value == entry.IdentityId),
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
@@ -301,7 +306,7 @@ public sealed class IdentityGateViewModelTests
 
         _directory.Verify(
             d => d.ShredAndDeleteAsync(
-                null,
+                _session,
                 It.Is<PublicIdentityId>(id => id.Value == entry.IdentityId),
                 It.IsAny<CancellationToken>()),
             Times.Once,
@@ -322,7 +327,7 @@ public sealed class IdentityGateViewModelTests
         _ports
             .Setup(p => p.ProbeAsync(5101, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PortProbeResult(PortProbeStatus.Ready, 5101));
-        await _vm.LoadAsync(null);
+        await _vm.LoadAsync(_session);
 
         var firstCard = Personas[0];
         var secondCard = Personas[1];
@@ -364,7 +369,7 @@ public sealed class IdentityGateViewModelTests
         _ports
             .Setup(p => p.ProbeAsync(5100, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PortProbeResult(PortProbeStatus.Ready, 5100));
-        await _vm.LoadAsync(null);
+        await _vm.LoadAsync(_session);
 
         var lease = new Mock<IPortLease>();
         lease.SetupGet(l => l.Port).Returns(5100);
@@ -402,7 +407,7 @@ public sealed class IdentityGateViewModelTests
             .Setup(p => p.ProbeAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((int port, CancellationToken _) =>
                 new PortProbeResult(PortProbeStatus.Ready, port));
-        await _vm.LoadAsync(null);
+        await _vm.LoadAsync(_session);
 
         _settings
             .Setup(s => s.GetAllAsync(It.IsAny<CancellationToken>()))
@@ -436,7 +441,7 @@ public sealed class IdentityGateViewModelTests
         _ports
             .Setup(p => p.ProbeAsync(5100, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PortProbeResult(PortProbeStatus.Ready, 5100));
-        await _vm.LoadAsync(null);
+        await _vm.LoadAsync(_session);
 
         var card = Personas[0];
         card.PortEditorValue = 5150;
@@ -470,7 +475,7 @@ public sealed class IdentityGateViewModelTests
     public async Task CreatePersona_Confirmed_AddsSelectedProbedCard()
     {
         ArrangeDirectory(); // start from empty-vault state
-        await _vm.LoadAsync(null);
+        await _vm.LoadAsync(_session);
 
         var identityId = Guid.NewGuid();
         var created = new PersonaDirectoryEntry(identityId, "Bob", 5100, null, false, 0);
@@ -481,7 +486,7 @@ public sealed class IdentityGateViewModelTests
             .ReturnsAsync(new PersonaEditorResult(new PublicIdentityId(identityId), "Bob", 5100));
         _directory
             .Setup(d => d.CreateAsync(
-                null,
+                _session,
                 It.Is<PublicIdentityId>(id => id.Value == identityId),
                 "Bob",
                 5100,
@@ -495,7 +500,7 @@ public sealed class IdentityGateViewModelTests
 
         _directory.Verify(
             d => d.CreateAsync(
-                null,
+                _session,
                 It.Is<PublicIdentityId>(id => id.Value == identityId),
                 "Bob",
                 5100,

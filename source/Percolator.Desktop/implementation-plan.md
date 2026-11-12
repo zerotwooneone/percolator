@@ -490,9 +490,8 @@ This matrix maps all infrastructure ports and desktop adapters across their owni
 | `INetworkStealthGate` | Desktop Core | `NetworkStealthGate` | Chunk 3 (`[DESK-03]`) |
 | `IPortReservationService` | Desktop Core | `PortReservationService` | Chunk 3 (`[DESK-03]`) |
 | `IDesktopSettingsRepository`| Desktop Storage | `SqliteDesktopSettingsRepository` | Chunk 3 (`[DESK-03]`) |
-| `IDesktopIdentityKeyStore` | Desktop Core | `DesktopLocalIdentityKeyStore` | Chunk 3 (`[DESK-03]`) |
-| `IIdentityProfileRepository` | Domain Identities | `DesktopIdentityProfileRepository` (SQLite) | Chunk 3 (`[DESK-03]`) |
-| `ILocalIdentityKeyStore` | Domain Identities | `DesktopLocalIdentityKeyStore` (SQLite) | Chunk 3 (`[DESK-03]`) |
+| `IIdentityProfileRepository` | Domain Identities | `SqliteIdentityProfileRepository` (session scope) | Chunk 3 (`[DESK-03]`) |
+| `ILocalIdentityKeyStore` | Domain Identities | `SqliteLocalIdentityKeyStore` (session scope) | Chunk 3 (`[DESK-03]`) |
 | `IPeerConnectionStateService` | Desktop Transports | `PeerConnectionStateService` | Chunk 5 (`[DESK-05]`) |
 | `IPeerContactQueryService` | Application Delivery | `SqlPeerContactQueryService` (Infrastructure) | Chunk 5 (`[DESK-05]`) |
 | `IPendingHandshakeRepository`| Domain Delivery | `SqlitePendingHandshakeRepository` | Chunk 5 (`[DESK-05]`) |

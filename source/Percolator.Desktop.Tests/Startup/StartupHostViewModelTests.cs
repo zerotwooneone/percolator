@@ -54,7 +54,7 @@ public sealed class StartupHostViewModelTests
 
         _cryptoProbe.Setup(p => p.TestConnection()).Returns(42);
         _personas
-            .Setup(d => d.ListAsync(It.IsAny<IAuthenticatedSession?>(), It.IsAny<CancellationToken>()))
+            .Setup(d => d.ListAsync(It.IsAny<IAuthenticatedSession>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Array.Empty<PersonaDirectoryEntry>());
 
         _storageOptions = new VaultStorageOptions

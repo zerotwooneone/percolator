@@ -90,9 +90,11 @@ public partial class VaultUnlockViewModel : ViewModelBase
                     await _handoff.TransitionToGateAsync(success.Session, ct).ConfigureAwait(true);
                     break;
 
-                case UnlockResult.DuressActivated:
-                    // Silent decoy transition: Screen 2 empty-vault state, zero error surfacing.
-                    await _handoff.TransitionToGateAsync(null, ct).ConfigureAwait(true);
+                case UnlockResult.DuressActivated duress:
+                    // Silent decoy transition: zero error surfacing. The decoy session (when the
+                    // post-wipe decoy vault was created) lets personas persist into it — a working
+                    // vault is the deniable outcome; a null session falls back to in-memory decoy.
+                    await _handoff.TransitionToGateAsync(duress.Session, ct).ConfigureAwait(true);
                     break;
 
                 default:
