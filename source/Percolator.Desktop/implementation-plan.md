@@ -270,15 +270,23 @@ flowchart TD
   * Modify: `App.axaml.cs` (wire Stage 1 `BootstrapContainer` and Stage 2 `AuthenticatedSession` builder)
   * Extend: `Common/Windowing/IWindowHandoffCoordinator.cs` & `Common/Windowing/WindowHandoffCoordinator.cs` (interface and window-swap/relock shells created by DESK-02; add port leasing, stealth-gate deactivation, geometry restore)
   * Create: `Common/Services/INetworkStealthGate.cs` & `Common/Services/NetworkStealthGate.cs`
+  * **Explicit VM→Window mapping (replace reflection convention)**: `WindowManager.ResolveWindowByConvention` currently resolves dialog windows via `FooViewModel` → `FooWindow`/`FooView` name mangling + `Activator.CreateInstance` — fragile, untrimmed-safe, and silently broken until DESK-03 exercised it. Replace with a registered `IReadOnlyDictionary<Type, Type>` (or equivalent `IDialogRegistry` service) populated at composition root: each dialog ViewModel type maps explicitly to its `Window` type, resolved with compile-time checking and zero reflection — prerequisite for Native AOT and removes the namespace-convention foot-gun entirely.
+  * **Schema versioning (EF Core migrations)**: The DESK-03 wiring fix made `SqlCipherSchemaMigrator`/`SqliteDatabaseMigrator` run at unlock, but with zero EF migration classes it falls back to an idempotent `CREATE ... IF NOT EXISTS` script — which handles *missing* tables yet cannot evolve an existing schema (column adds/drops, index changes). Promote migrations to the primary mechanism:
+    * Create: `Percolator.Infrastructure/Migrations/` baseline via `dotnet ef migrations add InitialSchema` plus a `IDesignTimeDbContextFactory<PercolatorDbContext>` (throwaway unencrypted context for tooling) and the `Microsoft.EntityFrameworkCore.Design` package.
+    * Preserve: the idempotent-create fallback for databases that predate the migrations baseline (no `__EFMigrationsHistory` row) — a one-time bootstrap adoption path so existing vaults are not stranded.
+    * Policy: subsequent model changes must ship a generated migration; the manual `IF NOT EXISTS` path is bootstrap-only, not a schema-evolution story.
 * **Acceptance Criteria**:
   * Stage 1 `BootstrapContainer`: Minimal services (`IWindowManager`, `IWindowHandoffCoordinator`, `ICryptoEngine`, `IDateTimeProvider`, `IDatabaseUnlockCoordinator`, `StartupHostViewModel`). Zero DbContexts, repositories, or network listeners.
   * Stage 2 `AuthenticatedSession`: Instantiated only after successful canary verification, containing `PercolatorDbContext`, connection pools with native `sqlite3_key` interceptor, domain repositories, and hosted services.
   * `TransitionToGateAsync(session)`: Transitions `StartupWindow` from Screen 1 to Screen 2.
   * `TransitionToMainShellAsync(activePersonas)`: Acquires port leases via `IPortReservationService`, binds Kestrel listeners strictly for chosen personas, closes `StartupWindow`, opens `MainWindow`, restoring geometry.
   * `LockSessionAsync()`: Deactivates network listeners via `INetworkStealthGate.DeactivateAsync()`, stops `IHost`, flushes SQLite connection pools (`SqliteConnection.ClearAllPools()`), zeroizes master key span (`CryptographicOperations.ZeroMemory`), disposes `IHost`, closes `MainWindow`, and instantiates fresh `StartupWindow` in State 1B unlock state.
+  * **Versioned schema evolution**: `Database.MigrateAsync()` applies pending EF migrations at unlock inside `SqlCipherSchemaMigrator` before repositories resolve; `__EFMigrationsHistory` records applied versions. A model change that adds/renames/drops a column produces a migration which alters the existing vault table in place without data loss; legacy vaults without `__EFMigrationsHistory` adopt the baseline via the idempotent-create path, then migrate forward.
 * **Verification Gate**:
   * `dotnet test Percolator.Desktop.Tests/Percolator.Desktop.Tests.csproj --filter "FullyQualifiedName~WindowHandoff|FullyQualifiedName~Lifecycle"`
+  * `dotnet test Percolator.Infrastructure.Tests/Percolator.Infrastructure.Tests.csproj --filter "FullyQualifiedName~Migrat"`
   * Verifies complete socket teardown, connection pool flushing, key zeroization, and window swap upon session lock.
+  * Migration regression: a seeded DB containing only `__percolator_vault` gains the full model schema; a seeded older-schema DB gains the new column/index via `ALTER`-style migration while retaining existing rows.
 
 ---
 

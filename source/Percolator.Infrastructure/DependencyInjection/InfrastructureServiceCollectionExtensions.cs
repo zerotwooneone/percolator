@@ -57,7 +57,9 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<IDuressWipeHandler, DuressWipeHandler>();
         services.AddSingleton<IVaultEnvelopePacker, VaultEnvelopePacker>();
         services.AddSingleton<IDatabaseCanaryProbe, DatabaseCanaryProbe>();
-        services.AddSingleton<IDatabaseMigrator, NoOpDatabaseMigrator>();
+        // Real schema migrator — opens a keyed DbContext with the just-verified master key
+        // before any repositories exist ([DEC-CANARY-ERROR26-UNWRAP]).
+        services.AddSingleton<IDatabaseMigrator, SqlCipherSchemaMigrator>();
         services.AddSingleton<IStage2HostFactory, DefaultStage2HostFactory>();
         services.AddSingleton<IDatabaseUnlockCoordinator>(sp => new SqlCipherDatabaseUnlockCoordinator(
             sp.GetRequiredService<IHeaderStorage>(),

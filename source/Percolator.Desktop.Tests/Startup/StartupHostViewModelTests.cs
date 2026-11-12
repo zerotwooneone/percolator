@@ -5,13 +5,13 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using NUnit.Framework;
 using Percolator.Application2.Ports;
 using Percolator.Desktop.Common.Services;
+using Percolator.Desktop.Common.Storage;
 using Percolator.Desktop.Common.Windowing;
 using Percolator.Desktop.Features.Startup.Models;
 using Percolator.Desktop.Features.Startup.ViewModels;
@@ -29,7 +29,11 @@ public sealed class StartupHostViewModelTests
     private Mock<IWindowHandoffCoordinator> _handoff = null!;
     private Mock<IDialogService> _dialogs = null!;
     private Mock<ILauncherService> _launcher = null!;
-    private ServiceProvider _serviceProvider = null!;
+    private Mock<IPersonaDirectory> _personas = null!;
+    private Mock<IPortReservationService> _ports = null!;
+    private Mock<IDesktopSettingsRepository> _settings = null!;
+    private Mock<IIdenticonGenerator> _identicons = null!;
+    private Mock<IWindowManager> _windows = null!;
     private VaultStorageOptions _storageOptions = null!;
 
     [SetUp]
@@ -41,15 +45,17 @@ public sealed class StartupHostViewModelTests
         _handoff = new Mock<IWindowHandoffCoordinator>(MockBehavior.Strict);
         _dialogs = new Mock<IDialogService>(MockBehavior.Strict);
         _launcher = new Mock<ILauncherService>(MockBehavior.Strict);
+        _personas = new Mock<IPersonaDirectory>(MockBehavior.Strict);
+        _ports = new Mock<IPortReservationService>(MockBehavior.Strict);
+        _settings = new Mock<IDesktopSettingsRepository>(MockBehavior.Strict);
+        _identicons = new Mock<IIdenticonGenerator>(MockBehavior.Strict);
+        _windows = new Mock<IWindowManager>(MockBehavior.Strict);
         _appLifetime.Setup(a => a.StopApplication());
 
         _cryptoProbe.Setup(p => p.TestConnection()).Returns(42);
-
-        var services = new ServiceCollection();
-        services.AddTransient(sp => new VaultSetupViewModel(_unlockCoordinator.Object, _handoff.Object, _dialogs.Object));
-        services.AddTransient(sp => new VaultUnlockViewModel(_unlockCoordinator.Object, _handoff.Object));
-        services.AddTransient<IdentityGateViewModel>();
-        _serviceProvider = services.BuildServiceProvider();
+        _personas
+            .Setup(d => d.ListAsync(It.IsAny<IAuthenticatedSession?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<PersonaDirectoryEntry>());
 
         _storageOptions = new VaultStorageOptions
         {
@@ -57,17 +63,23 @@ public sealed class StartupHostViewModelTests
         };
     }
 
-    [TearDown]
-    public void TearDown()
-    {
-        _serviceProvider.Dispose();
-    }
+    private IdentityGateViewModel CreateGateVm() => new(
+        _personas.Object,
+        _ports.Object,
+        _settings.Object,
+        _identicons.Object,
+        _handoff.Object,
+        _windows.Object,
+        NullLogger<IdentityGateViewModel>.Instance);
 
     private StartupHostViewModel CreateVm() => new(
         _unlockCoordinator.Object,
         _cryptoProbe.Object,
         _storageOptions,
-        _serviceProvider,
+        () => new VaultSetupViewModel(_unlockCoordinator.Object, _handoff.Object, _dialogs.Object),
+        () => new VaultUnlockViewModel(
+            _unlockCoordinator.Object, _handoff.Object, _personas.Object, _ports.Object),
+        CreateGateVm,
         _appLifetime.Object,
         _dialogs.Object,
         _launcher.Object,
@@ -160,20 +172,24 @@ public sealed class StartupHostViewModelTests
         var session = new Mock<IAuthenticatedSession>();
         var vm = CreateVm();
 
-        vm.NavigateToGate(session.Object);
+        await vm.NavigateToGateAsync(session.Object);
 
         vm.CurrentScreen.Should().Be(StartupScreen.IdentityGate);
         vm.CurrentViewModel.Should().BeOfType<IdentityGateViewModel>();
         vm.PendingSession.Should().BeSameAs(session.Object,
             "the authenticated session must be parked for the persona launch handoff");
+        _personas.Verify(
+            d => d.ListAsync(session.Object, It.IsAny<CancellationToken>()),
+            Times.Once,
+            "gate navigation must load personas against the authenticated session");
     }
 
     [Test]
-    public void NavigateToUnlock_ClearsParkedSession_AndReturnsToUnlockScreen()
+    public async Task NavigateToUnlock_ClearsParkedSession_AndReturnsToUnlockScreen()
     {
         var session = new Mock<IAuthenticatedSession>();
         var vm = CreateVm();
-        vm.NavigateToGate(session.Object);
+        await vm.NavigateToGateAsync(session.Object);
 
         vm.NavigateToUnlock();
 

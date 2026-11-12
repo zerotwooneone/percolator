@@ -32,4 +32,10 @@ public sealed class DesktopIdentityProfileRepository : IIdentityProfileRepositor
         _profiles[profile.Id] = profile;
         return Task.CompletedTask;
     }
+
+    public Task DeleteAsync(PublicIdentityId id, CancellationToken cancellationToken = default)
+    {
+        _profiles.TryRemove(id, out _);
+        return Task.CompletedTask;
+    }
 }

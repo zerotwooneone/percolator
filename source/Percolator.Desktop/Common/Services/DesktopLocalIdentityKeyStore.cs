@@ -38,4 +38,10 @@ public sealed class DesktopLocalIdentityKeyStore : IDesktopIdentityKeyStore
 
         return Task.FromResult<IdentityKey?>(null);
     }
+
+    public Task DeleteKeyAsync(PublicIdentityId identityId, CancellationToken ct = default)
+    {
+        _keys.TryRemove(identityId, out _);
+        return Task.CompletedTask;
+    }
 }

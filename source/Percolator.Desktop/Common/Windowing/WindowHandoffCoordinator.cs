@@ -11,6 +11,7 @@ using Microsoft.Extensions.Logging;
 using Percolator.Application2.Ports;
 using Percolator.Desktop.Features.Shell.ViewModels;
 using Percolator.Desktop.Features.Shell.Views;
+using Percolator.Desktop.Features.Startup.Models;
 using Percolator.Desktop.Features.Startup.ViewModels;
 using Percolator.Desktop.Features.Startup.Views;
 
@@ -25,6 +26,10 @@ public sealed class WindowHandoffCoordinator : IWindowHandoffCoordinator
     private readonly IServiceProvider _services;
     private readonly IDatabaseUnlockCoordinator _unlockCoordinator;
     private readonly ILogger<WindowHandoffCoordinator> _logger;
+
+    // Port leases acquired at the Identity Gate; held for the persona session lifetime and
+    // released on LockSessionAsync ([INV-DESKTOP-STEALTH-ACTIVATION-GATE]).
+    private readonly List<PersonaLaunchDescriptor> _activePersonas = new();
 
     public WindowHandoffCoordinator(
         IServiceProvider services,
@@ -42,11 +47,11 @@ public sealed class WindowHandoffCoordinator : IWindowHandoffCoordinator
 
     public async Task TransitionToGateAsync(IAuthenticatedSession? session = null, CancellationToken ct = default)
     {
-        await Dispatcher.UIThread.InvokeAsync(() =>
+        await Dispatcher.UIThread.InvokeAsync(async () =>
         {
             if (Desktop.MainWindow is StartupWindow { DataContext: StartupHostViewModel host })
             {
-                host.NavigateToGate(session);
+                await host.NavigateToGateAsync(session);
             }
             else
             {
@@ -56,12 +61,26 @@ public sealed class WindowHandoffCoordinator : IWindowHandoffCoordinator
         });
     }
 
-    public async Task TransitionToMainShellAsync(IAuthenticatedSession session, CancellationToken ct = default)
+    public async Task TransitionToMainShellAsync(
+        IAuthenticatedSession? session,
+        IReadOnlyList<PersonaLaunchDescriptor>? personas = null,
+        CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(session);
-
         // Launches all registered IHostedService background workers in the Stage 2 container.
-        await session.StartAsync(ct).ConfigureAwait(false);
+        // The duress decoy path passes a null session — no services start.
+        if (session is not null)
+        {
+            await session.StartAsync(ct).ConfigureAwait(false);
+        }
+
+        lock (_activePersonas)
+        {
+            _activePersonas.Clear();
+            if (personas is not null)
+            {
+                _activePersonas.AddRange(personas);
+            }
+        }
 
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
@@ -80,6 +99,16 @@ public sealed class WindowHandoffCoordinator : IWindowHandoffCoordinator
     {
         // Flushes pools, zeroizes the key buffer, disposes the authenticated host.
         await _unlockCoordinator.LockAsync().ConfigureAwait(false);
+
+        lock (_activePersonas)
+        {
+            foreach (var persona in _activePersonas)
+            {
+                persona.Lease.Dispose();
+            }
+
+            _activePersonas.Clear();
+        }
 
         await Dispatcher.UIThread.InvokeAsync(() =>
         {

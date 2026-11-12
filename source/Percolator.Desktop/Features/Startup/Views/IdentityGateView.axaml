@@ -2,26 +2,177 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Percolator.Desktop.Features.Startup.ViewModels"
+             xmlns:models="using:Percolator.Desktop.Features.Startup.Models"
+             xmlns:sys="using:System"
              x:Class="Percolator.Desktop.Features.Startup.Views.IdentityGateView"
              x:DataType="vm:IdentityGateViewModel">
 
-    <!-- State 2B (Empty Vault): centered card. Persona selection lands in DESK-03. -->
-    <Grid>
-        <Border Classes="persona-card"
-                Width="340"
-                HorizontalAlignment="Center"
-                VerticalAlignment="Center">
-            <StackPanel Spacing="12">
-                <TextBlock Text="No personas yet"
-                           Theme="{StaticResource SubtitleTextBlockStyle}" />
-                <TextBlock Text="Tip: Many people create separate personas for Work vs. Personal, or Family vs. Friends."
-                           Theme="{StaticResource CaptionTextBlockStyle}"
-                           Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                           TextWrapping="Wrap" />
-                <Button Content="Create Your First Persona"
-                        IsEnabled="False"
-                        HorizontalAlignment="Center" />
-            </StackPanel>
+    <Grid RowDefinitions="Auto,*,Auto" Margin="28,20">
+        <!-- Inline banner: port-conflict / recovery messaging. -->
+        <Border Grid.Row="0"
+                Classes="banner"
+                Margin="0,0,0,12"
+                IsVisible="{Binding HasBanner}">
+            <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Text="{Binding BannerMessage}"
+                           TextWrapping="Wrap"
+                           VerticalAlignment="Center" />
+                <Button Grid.Column="1"
+                        Classes="pill-edit"
+                        Content="✕"
+                        Command="{Binding DismissBannerCommand}"
+                        VerticalAlignment="Center" />
+            </Grid>
         </Border>
+
+        <Panel Grid.Row="1">
+            <!-- State 2A: persona selection cards -->
+            <DockPanel IsVisible="{Binding HasPersonas}">
+                <TextBlock DockPanel.Dock="Top"
+                           Text="Select personas to launch"
+                           Theme="{StaticResource SubtitleTextBlockStyle}"
+                           Margin="0,0,0,12" />
+                <ScrollViewer>
+                    <ItemsControl x:Name="PersonaItems" ItemsSource="{Binding Personas}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="models:SelectablePersonaModel">
+                                <ToggleButton x:Name="PersonaCard"
+                                              Classes="persona-toggle"
+                                              IsChecked="{Binding IsSelected}"
+                                              Margin="0,0,12,12">
+                                    <ToggleButton.ContextMenu>
+                                        <ContextMenu>
+                                            <MenuItem Header="Edit Profile"
+                                                      Command="{Binding $parent[UserControl].((vm:IdentityGateViewModel)DataContext).EditPersonaCommand}"
+                                                      CommandParameter="{Binding}" />
+                                            <MenuItem Header="Delete Persona"
+                                                      Command="{Binding $parent[UserControl].((vm:IdentityGateViewModel)DataContext).DeletePersonaCommand}"
+                                                      CommandParameter="{Binding}" />
+                                        </ContextMenu>
+                                    </ToggleButton.ContextMenu>
+                                    <Border Classes="persona-card" Width="248">
+                                        <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto">
+                                            <Border Grid.RowSpan="2"
+                                                    Classes="identicon-tile"
+                                                    Width="48" Height="48"
+                                                    Margin="0,0,12,0"
+                                                    VerticalAlignment="Top">
+                                                <ItemsControl DataContext="{Binding Avatar}"
+                                                              ItemsSource="{Binding Cells}">
+                                                    <ItemsControl.ItemsPanel>
+                                                        <ItemsPanelTemplate>
+                                                            <UniformGrid Columns="5" />
+                                                        </ItemsPanelTemplate>
+                                                    </ItemsControl.ItemsPanel>
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate x:DataType="sys:Boolean">
+                                                            <Border Margin="1"
+                                                                    CornerRadius="1"
+                                                                    IsVisible="{Binding .}"
+                                                                    Background="{Binding $parent[ItemsControl].((models:AvatarPresentation)DataContext).Color}" />
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                            </Border>
+
+                                            <Grid Grid.Column="1" Grid.Row="0" ColumnDefinitions="Auto,*">
+                                                <CheckBox IsChecked="{Binding IsSelected}"
+                                                          IsHitTestVisible="False"
+                                                          VerticalAlignment="Center" />
+                                                <TextBlock Grid.Column="1"
+                                                           Text="{Binding DisplayName}"
+                                                           FontWeight="SemiBold"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           VerticalAlignment="Center"
+                                                           Margin="4,0,0,0" />
+                                            </Grid>
+
+                                            <StackPanel Grid.Column="1" Grid.Row="1"
+                                                        Orientation="Horizontal"
+                                                        Spacing="4"
+                                                        Margin="0,10,0,0">
+                                                <Border Classes="port-pill"
+                                                        Classes.ready="{Binding IsStatusReady}"
+                                                        Classes.auto="{Binding IsStatusAutoSelected}"
+                                                        Classes.busy="{Binding IsStatusUnavailable}"
+                                                        VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding PortPillText}"
+                                                               FontSize="11" />
+                                                </Border>
+                                                <Button Classes="pill-edit"
+                                                        Content="✎"
+                                                        VerticalAlignment="Center">
+                                                    <Button.Flyout>
+                                                        <Flyout>
+                                                            <StackPanel Spacing="8" MinWidth="180" Margin="12">
+                                                                <TextBlock Text="Preferred port"
+                                                                           Theme="{StaticResource CaptionTextBlockStyle}" />
+                                                                <TextBox Text="{Binding PortEditorValue, Mode=TwoWay}" />
+                                                                <Button Classes="accent"
+                                                                        Content="Apply"
+                                                                        Command="{Binding $parent[UserControl].((vm:IdentityGateViewModel)DataContext).ApplyPortOverrideCommand}"
+                                                                        CommandParameter="{Binding}" />
+                                                            </StackPanel>
+                                                        </Flyout>
+                                                    </Button.Flyout>
+                                                </Button>
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+                                </ToggleButton>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </DockPanel>
+
+            <!-- State 2B: empty-vault call to action -->
+            <Grid IsVisible="{Binding HasEmptyState}">
+                <Border Classes="persona-card"
+                        Width="340"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center">
+                    <StackPanel Spacing="12">
+                        <TextBlock Text="No personas yet"
+                                   Theme="{StaticResource SubtitleTextBlockStyle}" />
+                        <TextBlock Text="Tip: Many people create separate personas for Work vs. Personal, or Family vs. Friends."
+                                   Theme="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   TextWrapping="Wrap" />
+                        <Button Classes="accent"
+                                Content="Create Your First Persona"
+                                Command="{Binding CreatePersonaCommand}"
+                                HorizontalAlignment="Center" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </Panel>
+
+        <!-- Footer: single-persona auto-start flag + launch -->
+        <Grid Grid.Row="2"
+              ColumnDefinitions="*,Auto,Auto"
+              Margin="0,16,0,0"
+              IsVisible="{Binding HasPersonas}">
+            <CheckBox Grid.Column="0"
+                      Content="Always auto-start with this persona on unlock"
+                      IsChecked="{Binding AutoStartRequested}"
+                      IsEnabled="{Binding IsAutoStartApplicable}"
+                      VerticalAlignment="Center" />
+            <Button Grid.Column="1"
+                    Content="+ New Persona"
+                    Command="{Binding CreatePersonaCommand}"
+                    VerticalAlignment="Center"
+                    Margin="12,0,12,0" />
+            <Button Grid.Column="2"
+                    Classes="accent"
+                    Content="Launch Selected Personas →"
+                    Command="{Binding LaunchPersonasCommand}"
+                    VerticalAlignment="Center" />
+        </Grid>
     </Grid>
 </UserControl>

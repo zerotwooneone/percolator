@@ -8,12 +8,15 @@ using Avalonia.Markup.Xaml;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Percolator.Desktop.Common.Services;
+using Percolator.Desktop.Common.Storage;
 using Percolator.Desktop.Common.Windowing;
 using Percolator.Desktop.Features.Shell.ViewModels;
 using Percolator.Desktop.Features.Startup.ViewModels;
 using Percolator.Desktop.Features.Startup.Views;
 using Percolator.Domain.Common;
+using Percolator.Domain.Security.Ports;
 using Percolator.Infrastructure.DependencyInjection;
+using Percolator.Infrastructure.Security;
 using R3;
 
 namespace Percolator.Desktop;
@@ -64,10 +67,27 @@ public partial class App : Avalonia.Application
                 services.AddSingleton<IWindowManager, WindowManager>();
                 services.AddSingleton<IWindowHandoffCoordinator, WindowHandoffCoordinator>();
 
+                // DESK-03: persona gate services. Identity keypairs are created here but only
+                // persist inside the authenticated Stage 2 vault (decoy path is in-memory).
+                services.AddSingleton<ICryptoEngine>(_ => new SignalCryptoEngine());
+                services.AddSingleton<IDesktopSettingsRepository, SqliteDesktopSettingsRepository>();
+                services.AddSingleton<IPortReservationService, PortReservationService>();
+                services.AddSingleton<IIdenticonGenerator, IdenticonGenerator>();
+                services.AddSingleton<DesktopIdentityProfileRepository>();
+                services.AddSingleton<IDesktopIdentityKeyStore, DesktopLocalIdentityKeyStore>();
+                services.AddSingleton<IPersonaDirectory, PersonaDirectoryService>();
+
+                // Child-VM factories injected into StartupHostViewModel ([VM-004], [VM-009]).
+                services.AddSingleton<Func<VaultSetupViewModel>>(sp => sp.GetRequiredService<VaultSetupViewModel>);
+                services.AddSingleton<Func<VaultUnlockViewModel>>(sp => sp.GetRequiredService<VaultUnlockViewModel>);
+                services.AddSingleton<Func<IdentityGateViewModel>>(sp => sp.GetRequiredService<IdentityGateViewModel>);
+
                 services.AddTransient<StartupHostViewModel>();
                 services.AddTransient<VaultSetupViewModel>();
                 services.AddTransient<VaultUnlockViewModel>();
                 services.AddTransient<IdentityGateViewModel>();
+                services.AddTransient<CreatePersonaDialogViewModel>();
+                services.AddTransient<DeletePersonaDialogViewModel>();
                 services.AddTransient<MainWindowViewModel>();
             })
             .Build();

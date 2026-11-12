@@ -11,4 +11,7 @@ namespace Percolator.Desktop.Common.Services;
 public interface IDesktopIdentityKeyStore : ILocalIdentityKeyStore
 {
     Task SaveKeyAsync(PublicIdentityId identityId, byte[] privateKey, IdentityKey publicKey, CancellationToken ct = default);
+
+    /// <summary>Permanently removes the stored identity keypair (persona shred path).</summary>
+    Task DeleteKeyAsync(PublicIdentityId identityId, CancellationToken ct = default);
 }

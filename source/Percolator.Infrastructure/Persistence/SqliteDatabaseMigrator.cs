@@ -2,10 +2,12 @@ namespace Percolator.Infrastructure.Persistence;
 
 using System;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Percolator.Domain.Common;
+using Percolator.Domain.Security.Ports;
 using Percolator.Infrastructure.Vault;
 
 public sealed class SqliteDatabaseMigrator : IDatabaseMigrator
@@ -17,7 +19,12 @@ public sealed class SqliteDatabaseMigrator : IDatabaseMigrator
         _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
     }
 
-    public async Task<DomainResult> MigrateAsync(CancellationToken ct = default)
+    /// <inheritdoc />
+    /// <remarks>
+    /// <paramref name="masterKey"/> is unused: this scoped instance's DbContext is already
+    /// key-pinned through the Stage-2 <see cref="SqlCipherPragmaInterceptor"/>.
+    /// </remarks>
+    public async Task<DomainResult> MigrateAsync(IMasterKeyHandle masterKey, CancellationToken ct = default)
     {
         try
         {
@@ -28,7 +35,16 @@ public sealed class SqliteDatabaseMigrator : IDatabaseMigrator
             }
             else
             {
-                await _dbContext.Database.EnsureCreatedAsync(ct);
+                // EnsureCreated() cannot be used: it no-ops when ANY table exists, and the
+                // vault always contains __percolator_vault written during initialization —
+                // so schema would silently never apply. Generate the model DDL and apply it
+                // idempotently via CREATE ... IF NOT EXISTS instead.
+                var script = _dbContext.Database.GenerateCreateScript();
+                var idempotent = Regex.Replace(
+                    script,
+                    @"CREATE (UNIQUE INDEX|INDEX|TABLE)\s",
+                    "CREATE $1 IF NOT EXISTS ");
+                await _dbContext.Database.ExecuteSqlRawAsync(idempotent, ct);
             }
 
             return DomainResult.Success();

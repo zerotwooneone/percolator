@@ -220,7 +220,7 @@ public class SqlCipherUnlockTests
 
     private sealed class FailingDatabaseMigrator : IDatabaseMigrator
     {
-        public Task<DomainResult> MigrateAsync(CancellationToken ct = default)
+        public Task<DomainResult> MigrateAsync(IMasterKeyHandle masterKey, CancellationToken ct = default)
         {
             return Task.FromResult(DomainResult.Failure(new DomainError("MIGRATION_ERROR", "Simulated migration failure.")));
         }

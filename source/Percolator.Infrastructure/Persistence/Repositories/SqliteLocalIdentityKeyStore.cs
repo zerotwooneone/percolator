@@ -72,4 +72,13 @@ public sealed class SqliteLocalIdentityKeyStore : ILocalIdentityKeyStore
 
         await _dbContext.SaveChangesAsync(ct);
     }
+
+    /// <summary>Permanently removes the stored identity keypair (persona shred path).</summary>
+    public async Task DeleteKeyAsync(PublicIdentityId identityId, CancellationToken ct = default)
+    {
+        var idGuid = identityId.Value;
+        await _dbContext.VaultIdentityKeys
+            .Where(k => k.Id == idGuid)
+            .ExecuteDeleteAsync(ct);
+    }
 }

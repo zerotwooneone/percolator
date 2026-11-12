@@ -136,7 +136,7 @@ public sealed class SqlCipherDatabaseUnlockCoordinator : IDatabaseUnlockCoordina
                 }
             }
 
-            var migrationResult = await _migrator.MigrateAsync(ct).ConfigureAwait(false);
+            var migrationResult = await _migrator.MigrateAsync(masterKeyHandle, ct).ConfigureAwait(false);
             if (migrationResult.IsFailure)
             {
                 masterKeyHandle.Dispose();
@@ -214,7 +214,7 @@ public sealed class SqlCipherDatabaseUnlockCoordinator : IDatabaseUnlockCoordina
                     }
                 }
 
-                var migrationResult = await _migrator.MigrateAsync(ct).ConfigureAwait(false);
+                var migrationResult = await _migrator.MigrateAsync(masterKeyHandle, ct).ConfigureAwait(false);
                 if (migrationResult.IsFailure)
                 {
                     masterKeyHandle.Dispose();

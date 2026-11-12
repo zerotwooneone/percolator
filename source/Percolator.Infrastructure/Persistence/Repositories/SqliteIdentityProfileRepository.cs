@@ -87,4 +87,12 @@ public sealed class SqliteIdentityProfileRepository : IIdentityProfileRepository
 
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
+
+    public async Task DeleteAsync(PublicIdentityId id, CancellationToken cancellationToken = default)
+    {
+        var idGuid = id.Value;
+        await _dbContext.IdentityProfiles
+            .Where(p => p.Id == idGuid)
+            .ExecuteDeleteAsync(cancellationToken);
+    }
 }

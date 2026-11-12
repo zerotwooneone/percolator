@@ -70,7 +70,8 @@ public sealed class WindowManager : IWindowManager
         }
     }
 
-    public async Task<TResult?> ShowDialogAsync<TViewModel, TResult>(Window? owner = null) where TViewModel : ViewModelBase
+    public async Task<TResult?> ShowDialogAsync<TViewModel, TResult>(
+        Action<TViewModel>? configure = null, Window? owner = null) where TViewModel : ViewModelBase
     {
         var desktop = DesktopLifetime;
         var parent = owner ?? desktop?.MainWindow ?? GetActiveWindow();
@@ -81,6 +82,7 @@ public sealed class WindowManager : IWindowManager
 
         using var scope = _serviceProvider.CreateScope();
         var viewModel = scope.ServiceProvider.GetRequiredService<TViewModel>();
+        configure?.Invoke(viewModel);
         var window = ResolveWindowByConvention(viewModel);
         window.DataContext = viewModel;
 
@@ -103,19 +105,26 @@ public sealed class WindowManager : IWindowManager
     private static Window ResolveWindowByConvention(object viewModel)
     {
         var vmType = viewModel.GetType();
-        var vmName = vmType.FullName ?? vmType.Name;
 
-        // Convention: Features.X.ViewModels.FooViewModel -> Features.X.Views.FooWindow or FooView
-        var windowName = vmName.Replace("ViewModel", "Window").Replace(".ViewModels.", ".Views.");
-        var viewName = vmName.Replace("ViewModel", "View").Replace(".ViewModels.", ".Views.");
-        var windowType = Type.GetType(windowName) ??
-                         vmType.Assembly.GetType(windowName) ??
-                         Type.GetType(viewName) ??
-                         vmType.Assembly.GetType(viewName);
+        // Convention: Features.X.ViewModels.FooViewModel -> Features.X.Views.FooWindow or FooView.
+        // Transform only the class-name suffix — a blanket Replace on the full name corrupts
+        // the "ViewModels" namespace segment into a nonexistent "Windows" namespace.
+        var baseName = vmType.Name.EndsWith("ViewModel", StringComparison.Ordinal)
+            ? vmType.Name[..^"ViewModel".Length]
+            : vmType.Name;
+        var viewNamespace = (vmType.Namespace ?? string.Empty).Replace("ViewModels", "Views");
 
-        if (windowType != null && typeof(Window).IsAssignableFrom(windowType))
+        foreach (var candidate in new[]
+                 {
+                     $"{viewNamespace}.{baseName}Window",
+                     $"{viewNamespace}.{baseName}View"
+                 })
         {
-            return (Window)Activator.CreateInstance(windowType)!;
+            var windowType = Type.GetType(candidate) ?? vmType.Assembly.GetType(candidate);
+            if (windowType is not null && typeof(Window).IsAssignableFrom(windowType))
+            {
+                return (Window)Activator.CreateInstance(windowType)!;
+            }
         }
 
         throw new InvalidOperationException($"Could not locate a Window type matching ViewModel {vmType.FullName}");

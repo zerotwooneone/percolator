@@ -6,6 +6,12 @@
              x:Class="Percolator.Desktop.Features.Startup.Views.VaultUnlockView"
              x:DataType="vm:VaultUnlockViewModel">
 
+    <!-- Shift+Enter override: bypasses single-persona auto-start and always shows the
+         Identity Gate ([INV-DESKTOP-STEALTH-ACTIVATION-GATE], [VIEW-009]). -->
+    <UserControl.KeyBindings>
+        <KeyBinding Gesture="Shift+Enter" Command="{Binding ForceGateUnlockCommand}" />
+    </UserControl.KeyBindings>
+
     <Grid RowDefinitions="*,Auto" Margin="32,28">
         <StackPanel Grid.Row="0" Spacing="8">
             <TextBlock Text="Percolator"
@@ -20,7 +26,13 @@
                 <TextBox x:Name="PasswordInput"
                          Watermark="Master password"
                          PasswordChar="•"
-                         Text="{Binding Password, Mode=TwoWay}" />
+                         Text="{Binding Password, Mode=TwoWay}">
+                    <!-- Enter acts as [ Unlock ] while the password box is focused;
+                         Shift+Enter still routes to the force-gate override above. -->
+                    <TextBox.KeyBindings>
+                        <KeyBinding Gesture="Enter" Command="{Binding UnlockCommand}" />
+                    </TextBox.KeyBindings>
+                </TextBox>
             </Border>
 
             <TextBlock Text="{Binding ErrorMessage}"

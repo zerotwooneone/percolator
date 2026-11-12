@@ -1,0 +1,38 @@
+<!-- SPECIFICATION GOVERNANCE: Read Percolator.Desktop/spec/View.spec.md before modifying this file. -->
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Percolator.Desktop.Features.Startup.ViewModels"
+        x:Class="Percolator.Desktop.Features.Startup.Views.DeletePersonaDialogWindow"
+        x:DataType="vm:DeletePersonaDialogViewModel"
+        Title="Delete Persona"
+        Width="420"
+        SizeToContent="Height"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner">
+
+    <StackPanel Margin="24" Spacing="16">
+        <TextBlock Text="Delete persona"
+                   Theme="{StaticResource SubtitleTextBlockStyle}" />
+        <TextBlock Text="This permanently removes the persona's identity profile and its stored private key from the vault. This action cannot be undone."
+                   TextWrapping="Wrap"
+                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+        <TextBlock Text="Type the persona name to confirm:"
+                   TextWrapping="Wrap" />
+        <SelectableTextBlock Text="{Binding PersonaName}"
+                             FontWeight="SemiBold" />
+        <TextBox Watermark="Persona name"
+                 Text="{Binding Confirmation, Mode=TwoWay}" />
+        <Grid ColumnDefinitions="*,*">
+            <Button Grid.Column="0"
+                    Content="Cancel"
+                    Command="{Binding CancelCommand}"
+                    HorizontalAlignment="Stretch"
+                    Margin="0,0,12,0" />
+            <Button Grid.Column="1"
+                    Classes="danger"
+                    Content="Shred &amp; Delete Persona"
+                    Command="{Binding ConfirmDeleteCommand}"
+                    HorizontalAlignment="Stretch" />
+        </Grid>
+    </StackPanel>
+</Window>

@@ -4,7 +4,6 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Percolator.Application2.Ports;
@@ -28,7 +27,9 @@ public partial class StartupHostViewModel : ViewModelBase
     private readonly IDatabaseUnlockCoordinator _unlockCoordinator;
     private readonly INativeCryptoProbe _cryptoProbe;
     private readonly VaultStorageOptions _storageOptions;
-    private readonly IServiceProvider _services;
+    private readonly Func<VaultSetupViewModel> _setupFactory;
+    private readonly Func<VaultUnlockViewModel> _unlockFactory;
+    private readonly Func<IdentityGateViewModel> _gateFactory;
     private readonly IHostApplicationLifetime _appLifetime;
     private readonly IDialogService _dialogs;
     private readonly ILauncherService _launcher;
@@ -56,7 +57,9 @@ public partial class StartupHostViewModel : ViewModelBase
         IDatabaseUnlockCoordinator unlockCoordinator,
         INativeCryptoProbe cryptoProbe,
         VaultStorageOptions storageOptions,
-        IServiceProvider services,
+        Func<VaultSetupViewModel> setupFactory,
+        Func<VaultUnlockViewModel> unlockFactory,
+        Func<IdentityGateViewModel> gateFactory,
         IHostApplicationLifetime appLifetime,
         IDialogService dialogs,
         ILauncherService launcher,
@@ -65,7 +68,9 @@ public partial class StartupHostViewModel : ViewModelBase
         _unlockCoordinator = unlockCoordinator ?? throw new ArgumentNullException(nameof(unlockCoordinator));
         _cryptoProbe = cryptoProbe ?? throw new ArgumentNullException(nameof(cryptoProbe));
         _storageOptions = storageOptions ?? throw new ArgumentNullException(nameof(storageOptions));
-        _services = services ?? throw new ArgumentNullException(nameof(services));
+        _setupFactory = setupFactory ?? throw new ArgumentNullException(nameof(setupFactory));
+        _unlockFactory = unlockFactory ?? throw new ArgumentNullException(nameof(unlockFactory));
+        _gateFactory = gateFactory ?? throw new ArgumentNullException(nameof(gateFactory));
         _appLifetime = appLifetime ?? throw new ArgumentNullException(nameof(appLifetime));
         _dialogs = dialogs ?? throw new ArgumentNullException(nameof(dialogs));
         _launcher = launcher ?? throw new ArgumentNullException(nameof(launcher));
@@ -126,13 +131,17 @@ public partial class StartupHostViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Moves the frame forward to Screen 2 (Identity Gate). Called by
-    /// <c>WindowHandoffCoordinator</c> after unlock, initialize, or duress activation.
+    /// Moves the frame forward to Screen 2 (Identity Gate) and loads its personas.
+    /// Called by <c>WindowHandoffCoordinator</c> after unlock, initialize, or duress activation.
     /// </summary>
-    public void NavigateToGate(IAuthenticatedSession? session = null)
+    public async Task NavigateToGateAsync(IAuthenticatedSession? session = null)
     {
         PendingSession = session;
         NavigateToScreen(StartupScreen.IdentityGate);
+        if (CurrentViewModel is IdentityGateViewModel gate)
+        {
+            await gate.LoadAsync(session).ConfigureAwait(true);
+        }
     }
 
     /// <summary>Returns the frame to the unlock screen (session relock path).</summary>
@@ -146,9 +155,9 @@ public partial class StartupHostViewModel : ViewModelBase
     {
         CurrentViewModel = screen switch
         {
-            StartupScreen.VaultSetup => _services.GetRequiredService<VaultSetupViewModel>(),
-            StartupScreen.VaultUnlock => _services.GetRequiredService<VaultUnlockViewModel>(),
-            StartupScreen.IdentityGate => _services.GetRequiredService<IdentityGateViewModel>(),
+            StartupScreen.VaultSetup => _setupFactory(),
+            StartupScreen.VaultUnlock => _unlockFactory(),
+            StartupScreen.IdentityGate => _gateFactory(),
             _ => null
         };
         CurrentScreen = screen;

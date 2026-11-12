@@ -19,7 +19,10 @@ public interface IWindowManager
     /// <summary>
     /// Shows a modal dialog for the given ViewModel, returning the dialog result upon closure.
     /// </summary>
-    Task<TResult?> ShowDialogAsync<TViewModel, TResult>(Window? owner = null) where TViewModel : ViewModelBase;
+    /// <param name="configure">Optional initializer invoked after the ViewModel resolves but before the window opens.</param>
+    /// <param name="owner">Optional explicit owner; defaults to the active window.</param>
+    Task<TResult?> ShowDialogAsync<TViewModel, TResult>(
+        Action<TViewModel>? configure = null, Window? owner = null) where TViewModel : ViewModelBase;
 
     /// <summary>
     /// Returns the currently active top-level window.

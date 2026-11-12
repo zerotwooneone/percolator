@@ -1,8 +1,10 @@
 // SPECIFICATION GOVERNANCE: Read Percolator.Desktop/spec/CodeBehind.spec.md before modifying this file.
 
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Percolator.Application2.Ports;
+using Percolator.Desktop.Features.Startup.Models;
 
 namespace Percolator.Desktop.Common.Windowing;
 
@@ -23,9 +25,17 @@ public interface IWindowHandoffCoordinator
 
     /// <summary>
     /// Starts the authenticated session's hosted services, swaps <c>StartupWindow</c> for
-    /// <c>MainWindow</c>, and closes the startup frame.
+    /// <c>MainWindow</c>, and closes the startup frame. A <c>null</c> session (duress decoy)
+    /// skips hosted-service startup and opens the empty shell.
     /// </summary>
-    Task TransitionToMainShellAsync(IAuthenticatedSession session, CancellationToken ct = default);
+    /// <param name="personas">
+    /// Launch descriptors acquired at the Identity Gate; the coordinator takes ownership of
+    /// their port leases and releases them on <see cref="LockSessionAsync"/>.
+    /// </param>
+    Task TransitionToMainShellAsync(
+        IAuthenticatedSession? session,
+        IReadOnlyList<PersonaLaunchDescriptor>? personas = null,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Securely relocks: stops the authenticated host, zeroizes keys, closes <c>MainWindow</c>,
