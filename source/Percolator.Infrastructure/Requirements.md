@@ -39,6 +39,15 @@ Spec: [deployable-requirements-spec](../spec/deployable-requirements-spec.md)
 10. **`DEP-INFRA-PREKEY-AVAILABILITY` (Pre-Key Availability Isolation & Bundle Provider):** `[Verify: Integration]`
     The deployable implements `IPreKeyAvailabilityPort` by verifying Signed PreKey presence without reading, popping, or modifying One-Time PreKeys from the relay's hosted pre-key ledger, and isolates One-Time PreKey retrieval and consumption exclusively to `IPreKeyBundleProvider` during explicit session establishment (realizes [`SYS-DISCOVERY-PREKEY-ISOLATION`](../SystemRequirements.md#2-security-privacy-and-risk-control-invariants)).
 
+11. **`DEP-INFRA-DURESS-DECOY-VAULT-LIFECYCLE` (Emergency Wipe & Decoy Vault Re-Initialization):** `[Verify: Integration]`
+    The deployable implements `IDatabaseUnlockCoordinator` such that an emergency-credential match destroys the vault header and database ciphertext and immediately re-initializes an authentic empty vault whose header keys the emergency credential as its primary credential, then establishes a live authenticated session against it so decoy state persists identically to a genuine vault (realizes [`SYS-DECOY-VAULT-DENIABILITY`](../SystemRequirements.md#2-security-privacy-and-risk-control-invariants)).
+
+12. **`DEP-INFRA-LOCAL-STORAGE-CONTAINMENT` (Machine-Local Application Data Roots):** `[Verify: Unit]`
+    The deployable resolves all default storage roots for the vault database, headers, blob caches, and file-transfer partials inside operating-system machine-local user storage scope, and never within OS roaming or directory-synced profile mechanisms (realizes [`SYS-LOCAL-STORAGE-CONTAINMENT`](../SystemRequirements.md#2-security-privacy-and-risk-control-invariants)).
+
+13. **`DEP-INFRA-VAULT-SCHEMA-MIGRATION` (Versioned Vault Schema Evolution):** `[Verify: Integration]`
+    The deployable establishes and upgrades the vault's persisted schema through versioned migrations executed against the authenticated key prior to authenticated-host composition, preserving all existing content across application version upgrades without destructive re-initialization (realizes [`SYS-VAULT-UPGRADE-DATA-PRESERVATION`](../SystemRequirements.md#2-security-privacy-and-risk-control-invariants)).
+
 ## 3. Public Contract Invariants
 
 1. **`DEP-INFRA-CONCURRENCY-MODEL` (Adapter Thread-Safety and Lifetime Scoping):** `[Verify: StaticAnalysis]`
