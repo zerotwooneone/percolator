@@ -52,8 +52,12 @@ public sealed class SqlCipherDatabaseUnlockCoordinator : IDatabaseUnlockCoordina
         var headerResult = await _headerStorage.ReadHeaderAsync(ct).ConfigureAwait(false);
         if (headerResult.IsFailure)
         {
-            Status = DatabaseSetupStatus.Uninitialized;
-            return DatabaseSetupStatus.Uninitialized;
+            // A header that exists on disk but fails to read/parse means damaged, not fresh —
+            // callers must not be offered first-time setup (which would overwrite the vault).
+            Status = File.Exists(_options.HeaderFilePath)
+                ? DatabaseSetupStatus.Damaged
+                : DatabaseSetupStatus.Uninitialized;
+            return Status;
         }
 
         Status = DatabaseSetupStatus.Locked;

@@ -123,42 +123,35 @@ public sealed class StartupHostViewModelTests
     }
 
     [Test]
-    public async Task Initialize_ExistingButUnparseableHeader_ShowsVaultDamagedModal()
+    public async Task Initialize_DamagedHeader_ShowsVaultDamagedModal()
     {
-        // Header file exists on disk yet status resolves Uninitialized → damaged, not fresh.
-        Directory.CreateDirectory(_storageOptions.BaseDirectory);
-        await File.WriteAllTextAsync(_storageOptions.HeaderFilePath, "corrupted-bytes");
-        try
-        {
-            _unlockCoordinator
-                .Setup(c => c.DetermineStatusAsync(It.IsAny<CancellationToken>()))
-                .ReturnsAsync(DatabaseSetupStatus.Uninitialized);
+        // Coordinator reports Damaged when the header exists on disk but cannot be parsed.
+        _unlockCoordinator
+            .Setup(c => c.DetermineStatusAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DatabaseSetupStatus.Damaged);
 
-            var shownRequest = (DialogRequest?)null;
-            _dialogs
-                .Setup(d => d.ShowAsync(It.IsAny<DialogRequest>(), It.IsAny<CancellationToken>()))
-                .Callback<DialogRequest, CancellationToken>((r, _) => shownRequest = r)
-                .ReturnsAsync(DialogResult.Primary);
-            _launcher
-                .Setup(l => l.OpenDirectoryAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(true);
+        var shownRequest = (DialogRequest?)null;
+        _dialogs
+            .Setup(d => d.ShowAsync(It.IsAny<DialogRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<DialogRequest, CancellationToken>((r, _) => shownRequest = r)
+            .ReturnsAsync(DialogResult.Primary);
+        _launcher
+            .Setup(l => l.OpenDirectoryAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
 
-            var vm = CreateVm();
-            await vm.InitializeAsync();
+        var vm = CreateVm();
+        await vm.InitializeAsync();
 
-            shownRequest.Should().NotBeNull();
-            shownRequest!.Title.Should().Be("Vault Data Damaged");
-            shownRequest.PrimaryButtonText.Should().Be("Open Data Folder");
-            _launcher.Verify(
-                l => l.OpenDirectoryAsync(_storageOptions.BaseDirectory, It.IsAny<CancellationToken>()),
-                Times.Once,
-                "choosing 'Open Data Folder' must launch the vault directory before exit");
-            _appLifetime.Verify(a => a.StopApplication(), Times.Once);
-        }
-        finally
-        {
-            Directory.Delete(_storageOptions.BaseDirectory, recursive: true);
-        }
+        shownRequest.Should().NotBeNull();
+        shownRequest!.Title.Should().Be("Vault Data Damaged");
+        shownRequest.PrimaryButtonText.Should().Be("Open Data Folder");
+        _launcher.Verify(
+            l => l.OpenDirectoryAsync(_storageOptions.BaseDirectory, It.IsAny<CancellationToken>()),
+            Times.Once,
+            "choosing 'Open Data Folder' must launch the vault directory before exit");
+        _appLifetime.Verify(a => a.StopApplication(), Times.Once);
+        vm.CurrentScreen.Should().Be(StartupScreen.None,
+            "a damaged vault must never reach first-time setup (which would overwrite it)");
     }
 
     [Test]

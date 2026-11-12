@@ -1,7 +1,6 @@
 // SPECIFICATION GOVERNANCE: Read Percolator.Desktop/spec/ViewModel.spec.md before modifying this file.
 
 using System;
-using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -92,8 +91,7 @@ public partial class StartupHostViewModel : ViewModelBase
                 return;
             }
 
-            // 2. Vault status. A header file that exists on disk but fails to parse
-            //    collapses to Uninitialized — that means damaged, not fresh.
+            // 2. Vault status — Damaged means the header exists but cannot be parsed.
             DatabaseSetupStatus status;
             try
             {
@@ -106,7 +104,7 @@ public partial class StartupHostViewModel : ViewModelBase
                 return;
             }
 
-            if (status == DatabaseSetupStatus.Uninitialized && File.Exists(_storageOptions.HeaderFilePath))
+            if (status == DatabaseSetupStatus.Damaged)
             {
                 _logger.LogError("Vault header exists but could not be parsed.");
                 await HandleStartupErrorAsync(StartupErrorKind.VaultDataDamaged);

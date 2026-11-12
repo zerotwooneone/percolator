@@ -11,6 +11,12 @@ public enum DatabaseSetupStatus
     Uninitialized = 0,
 
     /// <summary>
+    /// Header file exists on disk but could not be parsed. Application must surface the
+    /// damaged-vault error instead of overwriting the vault via first-time setup.
+    /// </summary>
+    Damaged = 3,
+
+    /// <summary>
     /// Database exists and is encrypted on disk. Application requires valid passphrase to unlock.
     /// </summary>
     Locked = 1,

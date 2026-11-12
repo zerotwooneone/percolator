@@ -262,5 +262,6 @@ public sealed class VaultPassphraseTests
         ((int)DatabaseSetupStatus.Uninitialized).Should().Be(0);
         ((int)DatabaseSetupStatus.Locked).Should().Be(1);
         ((int)DatabaseSetupStatus.Unlocked).Should().Be(2);
+        ((int)DatabaseSetupStatus.Damaged).Should().Be(3);
     }
 }

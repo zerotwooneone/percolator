@@ -16,7 +16,9 @@ public interface IDatabaseUnlockCoordinator
 
     /// <summary>
     /// Inspects persistent storage for the presence and validity of the header and database files to determine initial setup state.
-    /// If percolator.header is missing, always returns <see cref="DatabaseSetupStatus.Uninitialized"/>.
+    /// If percolator.header is missing, returns <see cref="DatabaseSetupStatus.Uninitialized"/>; if it exists
+    /// but cannot be read or parsed, returns <see cref="DatabaseSetupStatus.Damaged"/> — callers must NOT
+    /// treat that as first-time setup (initializing would overwrite the damaged vault).
     /// </summary>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The detected <see cref="DatabaseSetupStatus"/>.</returns>
