@@ -20,7 +20,7 @@ public sealed class LocalFileChunkStore : ILocalChunkStore
         long maxCacheQuotaBytes = 5L * 1024 * 1024 * 1024) // 5 GB quota ceiling
     {
         _storageDirectory = storageDirectory ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Percolator",
             "Blobs");
 

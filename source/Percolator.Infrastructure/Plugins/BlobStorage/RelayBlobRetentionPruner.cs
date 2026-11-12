@@ -21,7 +21,7 @@ public sealed class RelayBlobRetentionPruner : BackgroundService
         TimeSpan? checkInterval = null)
     {
         _storageDirectory = storageDirectory ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Percolator",
             "Blobs");
 

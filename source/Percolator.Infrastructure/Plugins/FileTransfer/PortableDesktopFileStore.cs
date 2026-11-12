@@ -23,7 +23,7 @@ public sealed class PortableDesktopFileStore : IDesktopFileStorage
     {
         _boundaryPartialsBaseDirectory = !string.IsNullOrWhiteSpace(partialsBaseDirectory)
             ? partialsBaseDirectory
-            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Percolator", "Partials");
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Percolator", "Partials");
     }
 
     public ValueTask PreAllocateFilesAsync(

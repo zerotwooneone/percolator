@@ -3,7 +3,7 @@ namespace Percolator.Infrastructure.Vault;
 public sealed class VaultStorageOptions
 {
     public string BaseDirectory { get; set; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "Percolator");
 
     public bool UseEncryption { get; set; } = true;
