@@ -1,0 +1,61 @@
+<!-- SPECIFICATION GOVERNANCE: Read Percolator.Desktop/spec/View.spec.md before modifying this file. -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="using:FluentAvalonia.UI.Controls"
+             xmlns:vm="using:Percolator.Desktop.Features.Startup.ViewModels"
+             x:Class="Percolator.Desktop.Features.Startup.Views.VaultSetupView"
+             x:DataType="vm:VaultSetupViewModel">
+
+    <Grid RowDefinitions="*,Auto" Margin="32,28">
+        <!-- Header -->
+        <StackPanel Grid.Row="0" Spacing="8">
+            <TextBlock Text="Welcome to Percolator"
+                       Theme="{StaticResource TitleTextBlockStyle}" />
+            <TextBlock Text="Choose a master password to protect your messages, keys, and contacts on this device."
+                       Theme="{StaticResource CaptionTextBlockStyle}"
+                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                       TextWrapping="Wrap" />
+
+            <!-- Master + confirm password fields -->
+            <TextBox Margin="0,24,0,0"
+                     Watermark="Master password"
+                     PasswordChar="•"
+                     Text="{Binding MasterPassword, Mode=TwoWay}" />
+            <TextBox Margin="0,12,0,0"
+                     Watermark="Confirm password"
+                     PasswordChar="•"
+                     Text="{Binding ConfirmPassword, Mode=TwoWay}" />
+
+            <!-- Progressive disclosure: emergency duress passphrase -->
+            <Button Margin="0,12,0,0"
+                    Content="+ Add Emergency Duress Passphrase"
+                    Command="{Binding ToggleDuressExpandedCommand}"
+                    HorizontalAlignment="Left" />
+            <TextBox Margin="0,12,0,0"
+                     Watermark="Duress passphrase"
+                     PasswordChar="•"
+                     IsVisible="{Binding IsDuressExpanded}"
+                     Text="{Binding DuressPassword, Mode=TwoWay}" />
+
+            <TextBlock Margin="0,12,0,0"
+                       Text="{Binding ErrorMessage}"
+                       Foreground="{DynamicResource SystemFillColorCriticalBrush}"
+                       TextWrapping="Wrap"
+                       IsVisible="{Binding !!ErrorMessage}" />
+        </StackPanel>
+
+        <!-- Primary action -->
+        <Grid Grid.Row="1" ColumnDefinitions="*,Auto">
+            <Button Grid.Column="0"
+                    Content="Continue"
+                    Command="{Binding ContinueCommand}"
+                    IsEnabled="{Binding !IsBusy}"
+                    HorizontalAlignment="Stretch" />
+            <ui:ProgressRing Grid.Column="1"
+                             Margin="8,0,0,0"
+                             Width="28" Height="28"
+                             IsIndeterminate="{Binding IsBusy}"
+                             IsVisible="{Binding IsBusy}" />
+        </Grid>
+    </Grid>
+</UserControl>

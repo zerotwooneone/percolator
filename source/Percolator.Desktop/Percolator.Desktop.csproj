@@ -35,10 +35,23 @@
         <PackageReference Include="Tmds.DBus.Protocol" Version="0.21.3" />
     </ItemGroup>
 
+    <!-- Vendored Signal.Interop for the native signal_shim smoke test ([DEP-DESKTOP-STARTUP-VAULT-AUTHENTICATION]) -->
+    <ItemGroup>
+        <Reference Include="Signal.Interop">
+            <HintPath>..\vendor\Signal.Interop\Signal.Interop.dll</HintPath>
+        </Reference>
+        <Content Include="..\vendor\Signal.Interop\runtimes\**\*">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <Link>runtimes\%(RecursiveDir)%(Filename)%(Extension)</Link>
+            <Visible>false</Visible>
+        </Content>
+    </ItemGroup>
+
     <!-- Project References -->
     <ItemGroup>
         <ProjectReference Include="..\Percolator.Domain\Percolator.Domain.csproj" />
         <ProjectReference Include="..\Percolator.Application\Percolator.Application.csproj" />
+        <ProjectReference Include="..\Percolator.Infrastructure\Percolator.Infrastructure.csproj" />
         <ProjectReference Include="..\Percolator.PluginSdk\Percolator.PluginSdk.csproj" />
         <ProjectReference Include="..\Percolator.Apps.Chat\Percolator.Apps.Chat.csproj" />
         <ProjectReference Include="..\Percolator.Apps.Discovery\Percolator.Apps.Discovery.csproj" />

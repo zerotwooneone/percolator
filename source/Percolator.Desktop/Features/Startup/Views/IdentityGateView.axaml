@@ -1,0 +1,27 @@
+<!-- SPECIFICATION GOVERNANCE: Read Percolator.Desktop/spec/View.spec.md before modifying this file. -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Percolator.Desktop.Features.Startup.ViewModels"
+             x:Class="Percolator.Desktop.Features.Startup.Views.IdentityGateView"
+             x:DataType="vm:IdentityGateViewModel">
+
+    <!-- State 2B (Empty Vault): centered card. Persona selection lands in DESK-03. -->
+    <Grid>
+        <Border Classes="persona-card"
+                Width="340"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center">
+            <StackPanel Spacing="12">
+                <TextBlock Text="No personas yet"
+                           Theme="{StaticResource SubtitleTextBlockStyle}" />
+                <TextBlock Text="Tip: Many people create separate personas for Work vs. Personal, or Family vs. Friends."
+                           Theme="{StaticResource CaptionTextBlockStyle}"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                           TextWrapping="Wrap" />
+                <Button Content="Create Your First Persona"
+                        IsEnabled="False"
+                        HorizontalAlignment="Center" />
+            </StackPanel>
+        </Border>
+    </Grid>
+</UserControl>

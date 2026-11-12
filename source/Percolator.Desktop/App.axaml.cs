@@ -10,8 +10,10 @@ using Microsoft.Extensions.Hosting;
 using Percolator.Desktop.Common.Services;
 using Percolator.Desktop.Common.Windowing;
 using Percolator.Desktop.Features.Shell.ViewModels;
-using Percolator.Desktop.Features.Shell.Views;
+using Percolator.Desktop.Features.Startup.ViewModels;
+using Percolator.Desktop.Features.Startup.Views;
 using Percolator.Domain.Common;
+using Percolator.Infrastructure.DependencyInjection;
 using R3;
 
 namespace Percolator.Desktop;
@@ -44,15 +46,28 @@ public partial class App : Avalonia.Application
 
     public override void OnFrameworkInitializationCompleted()
     {
-        // Stage 1 bootstrap container: presentation coordinators only.
-        // No DbContexts, repositories, or network listeners may exist pre-unlock
+        // Stage 1 bootstrap container: vault unlock infrastructure + presentation coordinators only.
+        // Zero DbContexts, repositories, or network listeners exist pre-unlock
         // ([DEP-DESKTOP-TWO-STAGE-CONTAINER-LIFECYCLE], [DEP-DESKTOP-PRE-ACTIVATION-STEALTH]).
         _host = Host.CreateDefaultBuilder()
             .ConfigureServices((_, services) =>
             {
-                services.AddSingleton<IDateTimeProvider>(SystemDateTimeProvider.Instance);
-                services.AddSingleton<IWindowManager, WindowManager>();
+                // Vault unlock stack: header storage, Argon2id envelope packer, canary probe,
+                // duress wipe handler, IDatabaseUnlockCoordinator (AddBootstrapInfrastructure
+                // also initializes SQLitePCL.Batteries_V2).
+                services.AddBootstrapInfrastructure();
 
+                services.AddSingleton<IDateTimeProvider>(SystemDateTimeProvider.Instance);
+                services.AddSingleton<INativeCryptoProbe, NativeCryptoProbe>();
+                services.AddSingleton<IDialogService, DialogService>();
+                services.AddSingleton<ILauncherService, LauncherService>();
+                services.AddSingleton<IWindowManager, WindowManager>();
+                services.AddSingleton<IWindowHandoffCoordinator, WindowHandoffCoordinator>();
+
+                services.AddTransient<StartupHostViewModel>();
+                services.AddTransient<VaultSetupViewModel>();
+                services.AddTransient<VaultUnlockViewModel>();
+                services.AddTransient<IdentityGateViewModel>();
                 services.AddTransient<MainWindowViewModel>();
             })
             .Build();
@@ -61,9 +76,10 @@ public partial class App : Avalonia.Application
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            // DESK-01: boot directly into the responsive shell frame.
-            // DESK-02..04 will front this with the StartupWindow vault/persona gates.
-            desktop.MainWindow = new MainWindow(_host.Services.GetRequiredService<MainWindowViewModel>());
+            // DESK-02: boot into the unified 480×600 startup frame (vault gate).
+            // The Stage 2 authenticated host and MainWindow launch only after unlock +
+            // persona confirmation ([INV-DESKTOP-TWO-STAGE-HANDOFF]).
+            desktop.MainWindow = new StartupWindow(_host.Services.GetRequiredService<StartupHostViewModel>());
 
             desktop.Exit += async (_, _) =>
             {
