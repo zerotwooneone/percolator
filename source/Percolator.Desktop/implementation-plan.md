@@ -220,7 +220,7 @@ flowchart TD
     * Auto-focused master password field with show/hide toggle.
     * Inline loading spinner during Argon2id key derivation.
     * Error feedback: subtle shake animation and critical inline text (*"Incorrect password. Please try again."*) on native error `26` (`SQLITE_NOTADB`).
-    * Auto-launch preference bypass: If auto-start is enabled for a persona, unlock immediately launches `MainWindow`. Holding `Shift` (or `Shift+Enter`) overrides bypass and forces Screen 2 to appear.
+    * Auto-launch preference bypass *(deferred to DESK-03 — requires `IDesktopSettingsRepository` for the auto-start flag; DESK-02 always transitions to Screen 2 on successful unlock)*: If auto-start is enabled for a persona, unlock immediately launches `MainWindow`. Holding `Shift` (or `Shift+Enter`) overrides bypass and forces Screen 2 to appear.
     * Emergency Duress Activation: Entering duress passphrase cryptographically shreds real header in $< 2\text{ ms}$, creates a valid decoy SQLite DB encrypted with duress key, and transitions smoothly into Screen 2 (State 2B: Empty Vault) with zero error popups or forensic crash signatures.
   * Corrupted Vault Modal: If database header is unparseable or damaged, displays *"Vault Data Damaged"* dialog (*"The database file could not be opened. It may have been damaged or altered."*) with actions `[ Open Data Folder ]` and `[ Exit ]`.
   * Security Engine Error Modal: If native cryptographic smoke test fails (`SignalCrypto.TestConnection() != 42` due to missing VC++ runtimes), displays *"Security Engine Error"* dialog (*"The native cryptographic library (signal_shim) could not be loaded on your system."*) with actions `[ View Diagnostic Log ]` and `[ Exit ]`.
@@ -237,8 +237,8 @@ flowchart TD
 * **Target Deliverables**:
   * Create: `Common/Storage/DesktopIdentitySettingsEntity.cs` (PK `IdentityId`, `PreferredPort`, `LastBoundPort`, `AutoStart`, `SidebarOrder`) & `Common/Storage/IDesktopSettingsRepository.cs` (and SQLite realization)
   * Create: `Common/Services/PortReservationService.cs` (`IPortReservationService` probing range `5100`–`5299`)
-  * Create: `Features/Startup/Views/IdentityGateView.axaml` & `Features/Startup/Views/IdentityGateView.axaml.cs`
-  * Create: `Features/Startup/ViewModels/IdentityGateViewModel.cs`
+  * Extend: `Features/Startup/Views/IdentityGateView.axaml` & `Features/Startup/Views/IdentityGateView.axaml.cs` (shell created by DESK-02 as the State 2B empty-vault duress landing; add persona cards, port pills, context menus)
+  * Extend: `Features/Startup/ViewModels/IdentityGateViewModel.cs` (skeleton created by DESK-02; add persona collection, auto-start flag, launch command)
   * Create: `Features/Startup/Models/SelectablePersonaModel.cs`
   * Create: `Features/Startup/Views/CreatePersonaDialog.axaml` & `Features/Startup/ViewModels/CreatePersonaDialogViewModel.cs`
   * Create: `Features/Startup/Views/DeletePersonaDialog.axaml` & `Features/Startup/ViewModels/DeletePersonaDialogViewModel.cs`
@@ -268,7 +268,7 @@ flowchart TD
 * **Governing Specs**: `[VIEW-009]`, `[CB-001]`, `[CB-002]`, `[CB-009]`, `[VM-003]`, `[VM-004]`, `[VM-007]`, `[VM-010]`, `[R3-001]`, `[R3-014]`
 * **Target Deliverables**:
   * Modify: `App.axaml.cs` (wire Stage 1 `BootstrapContainer` and Stage 2 `AuthenticatedSession` builder)
-  * Create: `Common/Windowing/IWindowHandoffCoordinator.cs` & `Common/Windowing/WindowHandoffCoordinator.cs`
+  * Extend: `Common/Windowing/IWindowHandoffCoordinator.cs` & `Common/Windowing/WindowHandoffCoordinator.cs` (interface and window-swap/relock shells created by DESK-02; add port leasing, stealth-gate deactivation, geometry restore)
   * Create: `Common/Services/INetworkStealthGate.cs` & `Common/Services/NetworkStealthGate.cs`
 * **Acceptance Criteria**:
   * Stage 1 `BootstrapContainer`: Minimal services (`IWindowManager`, `IWindowHandoffCoordinator`, `ICryptoEngine`, `IDateTimeProvider`, `IDatabaseUnlockCoordinator`, `StartupHostViewModel`). Zero DbContexts, repositories, or network listeners.
