@@ -263,7 +263,7 @@ flowchart TD
 ---
 
 ### [DESK-04] Two-Stage DI & Window Handoff Coordinator
-* **QMS Traceability**: `DEP-DESKTOP-TWO-STAGE-CONTAINER-LIFECYCLE`, `DEP-DESKTOP-SESSION-LOCK-ZEROIZATION` (allocates `SYS-SESSION-LOCK-ZEROIZATION`)
+* **QMS Traceability**: `DEP-DESKTOP-TWO-STAGE-CONTAINER-LIFECYCLE`, `DEP-DESKTOP-SESSION-LOCK-ZEROIZATION` (allocates `SYS-SESSION-LOCK-ZEROIZATION`), `DEP-INFRA-VAULT-SCHEMA-MIGRATION` (allocates `SYS-VAULT-UPGRADE-DATA-PRESERVATION`), `DEP-INFRA-DURESS-DECOY-VAULT-LIFECYCLE` (allocates `SYS-DECOY-VAULT-DENIABILITY`), `DEP-INFRA-LOCAL-STORAGE-CONTAINMENT` (allocates `SYS-LOCAL-STORAGE-CONTAINMENT`)
 * **Detailed Design**: `INV-DESKTOP-TWO-STAGE-HANDOFF`, `INV-DESKTOP-STEALTH-ACTIVATION-GATE`
 * **Governing Specs**: `[VIEW-009]`, `[CB-001]`, `[CB-002]`, `[CB-009]`, `[VM-003]`, `[VM-004]`, `[VM-007]`, `[VM-010]`, `[R3-001]`, `[R3-014]`
 * **Target Deliverables**:
@@ -282,11 +282,13 @@ flowchart TD
   * `TransitionToMainShellAsync(activePersonas)`: Acquires port leases via `IPortReservationService`, binds Kestrel listeners strictly for chosen personas, closes `StartupWindow`, opens `MainWindow`, restoring geometry.
   * `LockSessionAsync()`: Deactivates network listeners via `INetworkStealthGate.DeactivateAsync()`, stops `IHost`, flushes SQLite connection pools (`SqliteConnection.ClearAllPools()`), zeroizes master key span (`CryptographicOperations.ZeroMemory`), disposes `IHost`, closes `MainWindow`, and instantiates fresh `StartupWindow` in State 1B unlock state.
   * **Versioned schema evolution**: `Database.MigrateAsync()` applies pending EF migrations at unlock inside `SqlCipherSchemaMigrator` before repositories resolve; `__EFMigrationsHistory` records applied versions. A model change that adds/renames/drops a column produces a migration which alters the existing vault table in place without data loss; legacy vaults without `__EFMigrationsHistory` adopt the baseline via the idempotent-create path, then migrate forward.
+  * **Hazard re-rating**: once the migration regression evidence above is green, update `RiskRegister.md` — flip `HAZ-VAULT-SCHEMA-EVOLUTION-INCOMPATIBILITY` residual status `Identified` → `Controlled` citing the migration control (human approval required per `risk-register-spec` §3.3; the deliverable includes producing the verification evidence for approval, not self-approving).
 * **Verification Gate**:
   * `dotnet test Percolator.Desktop.Tests/Percolator.Desktop.Tests.csproj --filter "FullyQualifiedName~WindowHandoff|FullyQualifiedName~Lifecycle"`
   * `dotnet test Percolator.Infrastructure.Tests/Percolator.Infrastructure.Tests.csproj --filter "FullyQualifiedName~Migrat"`
   * Verifies complete socket teardown, connection pool flushing, key zeroization, and window swap upon session lock.
   * Migration regression: a seeded DB containing only `__percolator_vault` gains the full model schema; a seeded older-schema DB gains the new column/index via `ALTER`-style migration while retaining existing rows.
+  * QMS bookkeeping: `HAZ-VAULT-SCHEMA-EVOLUTION-INCOMPATIBILITY` re-rated to `Controlled` in `RiskRegister.md` after human approval; `SYS-VAULT-UPGRADE-DATA-PRESERVATION` marked verified.
 
 ---
 
