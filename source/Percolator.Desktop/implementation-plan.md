@@ -213,7 +213,7 @@ flowchart TD
     * Master Password + Confirm Password fields (`PasswordChar="•"` with built-in reveal toggle).
     * Expandable `[+ Add Emergency Duress Passphrase]` progressive disclosure link.
     * Validation: Duress cannot match master password; whitespace-only disallowed.
-    * Blank Password Dialog: If password is empty, displays `ContentDialog`: *"Skip password protection? Your vault will still be encrypted with a random key, but that key will be accessible without a password."* with actions `[ Cancel ]` and `[ Continue Without Password ]`.
+    * Blank Password Dialog: If password is empty, presents a confirmation modal via the application's injected dialog service abstraction: *"Skip password protection? Your vault will still be encrypted with a random key, but that key will be accessible without a password."* with actions `[ Cancel ]` and `[ Continue Without Password ]`.
     * Calls `IDatabaseUnlockCoordinator.InitializeAsync(masterPassword, duressPassword, ct)`.
   * State 1B (`VaultUnlockView`):
     * Header: *"Percolator"* / *"Unlock Vault"* (`Theme="{StaticResource TitleTextBlockStyle}"`).
