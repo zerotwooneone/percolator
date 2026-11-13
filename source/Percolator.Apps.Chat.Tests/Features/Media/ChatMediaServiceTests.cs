@@ -1,6 +1,7 @@
 using FluentAssertions;
 using NUnit.Framework;
 using Percolator.Apps.Chat.Features.Media;
+using Percolator.Apps.Chat.Tests.TestDoubles;
 using Percolator.PluginSdk;
 
 namespace Percolator.Apps.Chat.Tests.Features.Media;
@@ -13,7 +14,7 @@ public class ChatMediaServiceTests
     [SetUp]
     public void SetUp()
     {
-        _sut = new ChatMediaService();
+        _sut = new ChatMediaService(new FakeBlobStorageService());
     }
 
     [TestCase(0, true)]

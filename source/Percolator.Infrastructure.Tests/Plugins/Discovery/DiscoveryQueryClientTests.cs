@@ -12,6 +12,7 @@ using NUnit.Framework;
 using Percolator.Apps.Discovery.Features.NearbyPeerDiscovery;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Infrastructure.Common;
 using Percolator.Infrastructure.Protos;
 using Percolator.Infrastructure.Transport;
 using Percolator.PluginSdk;
@@ -144,7 +145,9 @@ public sealed class DiscoveryQueryClientTests
         };
 
         var channelFactory = new PeerGrpcChannelFactory(
-            channelFactory: (uri, opts) => Grpc.Net.Client.GrpcChannel.ForAddress("http://localhost:50051", new Grpc.Net.Client.GrpcChannelOptions
+            new PeerGrpcChannelFactoryOptions(),
+            new SystemDateTimeProvider(),
+            (uri, opts) => Grpc.Net.Client.GrpcChannel.ForAddress("http://localhost:50051", new Grpc.Net.Client.GrpcChannelOptions
             {
                 HttpHandler = new TestHttpMessageHandler()
             }));

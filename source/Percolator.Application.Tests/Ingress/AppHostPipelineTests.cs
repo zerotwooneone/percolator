@@ -81,7 +81,8 @@ public sealed class AppHostPipelineTests
             _senderKeyRepo,
             _groupReceiverRepo,
             _payloadSender,
-            _cryptoEngine);
+            _cryptoEngine,
+            new FakeRoutingCoordinator());
 
         _pipeline = new InboundIngressPipeline(
             _filterService,

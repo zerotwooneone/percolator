@@ -14,7 +14,7 @@ public sealed class StreamRegistryTests
     [Test]
     public async Task BackpressureSaturation_ReturnsBackpressured()
     {
-        var registry = new StreamRegistry();
+        var registry = new StreamRegistry(new StreamRegistryOptions());
         var targetId = PublicIdentityId.New();
 
         // Register stream with small bounded capacity of 2

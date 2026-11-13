@@ -62,7 +62,7 @@ public sealed class SealedEnvelopeUnwrapperTests
         var packer = new ProtobufSessionWirePacker();
         var timeProvider = new FixedTimeProvider();
         var recipientId = PublicIdentityId.New();
-        var unwrapper = new SealedEnvelopeUnwrapper(packer, timeProvider, recipientId);
+        var unwrapper = new SealedEnvelopeUnwrapper(packer, recipientId, timeProvider);
 
         // Case 1: Frame too short (< 82 bytes)
         var shortBytes = new byte[20];
@@ -158,7 +158,7 @@ public sealed class SealedEnvelopeUnwrapperTests
             timeProvider.UtcNow,
             timeProvider.UtcNow.AddHours(1));
 
-        var unwrapper = new SealedEnvelopeUnwrapper(packer, timeProvider, recipientId);
+        var unwrapper = new SealedEnvelopeUnwrapper(packer, recipientId, timeProvider);
         var result = unwrapper.Unwrap(envelope);
 
         result.IsSuccess.Should().BeTrue();

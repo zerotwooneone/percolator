@@ -8,9 +8,9 @@ public sealed class DuressWipeHandler : IDuressWipeHandler
 {
     private readonly VaultStorageOptions _options;
 
-    public DuressWipeHandler(VaultStorageOptions? options = null)
+    public DuressWipeHandler(VaultStorageOptions options)
     {
-        _options = options ?? new VaultStorageOptions();
+        _options = options ?? throw new ArgumentNullException(nameof(options));
     }
 
     public async Task ExecuteWipeAsync(CancellationToken ct = default)

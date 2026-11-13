@@ -79,7 +79,7 @@ public sealed class PeerGrpcChannelFactoryTests
     public void InvalidateChannel_DisposesAndEvictsChannel()
     {
         var uri = new Uri("https://127.0.0.1:5050");
-        using var factory = new PeerGrpcChannelFactory();
+        using var factory = new PeerGrpcChannelFactory(new PeerGrpcChannelFactoryOptions(), new MutableTimeProvider());
 
         var channel1 = factory.GetOrCreateChannel(uri);
         factory.ActiveChannelCount.Should().Be(1);
@@ -99,7 +99,9 @@ public sealed class PeerGrpcChannelFactoryTests
         var uri = new Uri("https://127.0.0.1:5050");
 
         using var factory = new PeerGrpcChannelFactory(
-            channelFactory: (addr, opts) =>
+            new PeerGrpcChannelFactoryOptions(),
+            new MutableTimeProvider(),
+            (addr, opts) =>
             {
                 capturedOptions = opts;
                 return GrpcChannel.ForAddress(addr, opts);

@@ -1157,37 +1157,31 @@ internal sealed class ScenarioRunnerService
 
         using (var scope = observer.Services.CreateScope())
         {
-            var contactRepo = scope.ServiceProvider.GetService<IPeerContactRepository>();
-            if (contactRepo != null)
+            var contactRepo = scope.ServiceProvider.GetRequiredService<IPeerContactRepository>();
+            var contact = await contactRepo.GetByPeerIdAsync(observer.PublicIdentityId, target.PublicIdentityId, ct);
+            if (contact != null)
             {
-                var contact = await contactRepo.GetByPeerIdAsync(observer.PublicIdentityId, target.PublicIdentityId, ct);
-                if (contact != null)
+                if (contact.Nickname.Value == assertion.ExpectedDisplayName && assertion.TargetAlias != assertion.ExpectedDisplayName)
                 {
-                    if (contact.Nickname.Value == assertion.ExpectedDisplayName && assertion.TargetAlias != assertion.ExpectedDisplayName)
-                    {
-                        throw new ScenarioExecutionException(
-                            $"AssertProfileSynced failed: Local contact Nickname on '{assertion.ObserverAlias}' was mutated to '{contact.Nickname.Value}'. Contact nicknames must remain immutable against remote profile syncs.");
-                    }
+                    throw new ScenarioExecutionException(
+                        $"AssertProfileSynced failed: Local contact Nickname on '{assertion.ObserverAlias}' was mutated to '{contact.Nickname.Value}'. Contact nicknames must remain immutable against remote profile syncs.");
                 }
             }
 
-            var chunkStore = scope.ServiceProvider.GetService<ILocalChunkStore>();
-            if (chunkStore != null && profileRecord.AvatarReference != null)
+            var chunkStore = scope.ServiceProvider.GetRequiredService<ILocalChunkStore>();
+            var avatarDeadline = DateTime.UtcNow.AddSeconds(5);
+            var hasAvatar = false;
+            while (DateTime.UtcNow < avatarDeadline)
             {
-                var avatarDeadline = DateTime.UtcNow.AddSeconds(5);
-                var hasAvatar = false;
-                while (DateTime.UtcNow < avatarDeadline)
-                {
-                    hasAvatar = await chunkStore.HasBlobAsync(profileRecord.AvatarReference.Id, ct);
-                    if (hasAvatar) break;
-                    await Task.Delay(100, ct);
-                }
+                hasAvatar = await chunkStore.HasBlobAsync(profileRecord.AvatarReference.Id, ct);
+                if (hasAvatar) break;
+                await Task.Delay(100, ct);
+            }
 
-                if (!hasAvatar)
-                {
-                    throw new ScenarioExecutionException(
-                        $"AssertProfileSynced failed: Avatar blob '{profileRecord.AvatarReference.Id}' was not downloaded to local chunk store on '{assertion.ObserverAlias}'.");
-                }
+            if (!hasAvatar)
+            {
+                throw new ScenarioExecutionException(
+                    $"AssertProfileSynced failed: Avatar blob '{profileRecord.AvatarReference.Id}' was not downloaded to local chunk store on '{assertion.ObserverAlias}'.");
             }
         }
     }

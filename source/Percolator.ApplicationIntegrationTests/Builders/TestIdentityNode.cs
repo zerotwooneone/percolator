@@ -1,4 +1,4 @@
-﻿using Percolator.Application2.Delivery;
+using Percolator.Application2.Delivery;
 using Percolator.Application2.Delivery.Ports;
 using Percolator.Application2.Egress;
 using Percolator.Application2.Handshake;
@@ -9,6 +9,7 @@ using Percolator.Application2.Routing;
 using Percolator.Application2.Services;
 using Percolator.Application2IntegrationTests.Adapters;
 using Percolator.Application2IntegrationTests.Adapters.Queries;
+using Percolator.Application2IntegrationTests.Fakes;
 using Percolator.Application2IntegrationTests.Infrastructure;
 using Percolator.Apps.Chat.Features.GroupInvitations;
 using Percolator.Apps.Chat.Features.Media;
@@ -260,7 +261,7 @@ public sealed class TestIdentityNode
             serializer,
             TimeProvider,
             egressPipeline,
-            unknownGroupCache: null,
+            unknownGroupCache: new InMemoryUnknownGroupMessageCacheRepository(),
             blobStorage: BlobStorage,
             peerProfileRepo: PeerProfileRepo,
             profileDeliveryClient: ProfileDeliveryClient,

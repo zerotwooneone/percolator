@@ -23,7 +23,7 @@ public sealed class InboundIngressPipeline : IInboundIngressPipeline
     private readonly ICryptoEngine _cryptoEngine;
     private readonly IAppRouter _appRouter;
     private readonly IChannelLockService _channelLockService;
-    private readonly IGroupKeyDistributionService? _groupKeyDistributionService;
+    private readonly IGroupKeyDistributionService _groupKeyDistributionService;
 
     public InboundIngressPipeline(
         IIngressFilterService filterService,
@@ -33,7 +33,7 @@ public sealed class InboundIngressPipeline : IInboundIngressPipeline
         ICryptoEngine cryptoEngine,
         IAppRouter appRouter,
         IChannelLockService channelLockService,
-        IGroupKeyDistributionService? groupKeyDistributionService = null)
+        IGroupKeyDistributionService groupKeyDistributionService)
     {
         _filterService = filterService ?? throw new ArgumentNullException(nameof(filterService));
         _sessionRepository = sessionRepository ?? throw new ArgumentNullException(nameof(sessionRepository));
@@ -42,7 +42,7 @@ public sealed class InboundIngressPipeline : IInboundIngressPipeline
         _cryptoEngine = cryptoEngine ?? throw new ArgumentNullException(nameof(cryptoEngine));
         _appRouter = appRouter ?? throw new ArgumentNullException(nameof(appRouter));
         _channelLockService = channelLockService ?? throw new ArgumentNullException(nameof(channelLockService));
-        _groupKeyDistributionService = groupKeyDistributionService;
+        _groupKeyDistributionService = groupKeyDistributionService ?? throw new ArgumentNullException(nameof(groupKeyDistributionService));
     }
 
     public async ValueTask<DomainResult> ProcessInboundAsync(InboundEnvelope envelope, CancellationToken ct = default)
@@ -271,7 +271,7 @@ public sealed class InboundIngressPipeline : IInboundIngressPipeline
         DomainResult dispatchResult;
 
         // Phase 4b: Route SystemControl messages (such as SenderKeyDistribution) or App Payload Handlers
-        if (appId == AppId.SystemControl && _groupKeyDistributionService != null)
+        if (appId == AppId.SystemControl)
         {
             dispatchResult = await _groupKeyDistributionService.ProcessInboundDistributionAsync(appContext, ct);
         }

@@ -157,12 +157,12 @@ public sealed class SealedEnvelopeUnwrapper : ISealedEnvelopeUnwrapper
 
     public SealedEnvelopeUnwrapper(
         ISessionWirePacker wirePacker,
-        IDateTimeProvider? timeProvider = null,
-        PublicIdentityId? recipientId = null)
+        PublicIdentityId recipientId,
+        IDateTimeProvider timeProvider)
     {
         _wirePacker = wirePacker ?? throw new ArgumentNullException(nameof(wirePacker));
-        _timeProvider = timeProvider ?? new DefaultDateTimeProvider();
-        _recipientId = recipientId ?? PublicIdentityId.New();
+        _recipientId = recipientId;
+        _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
     }
 
     public DomainResult<InboundEnvelope> Unwrap(MailboxEnvelope envelope)

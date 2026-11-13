@@ -17,10 +17,10 @@ public sealed class RelayGroupStreamWorker : BackgroundService
 
     public RelayGroupStreamWorker(
         Func<CancellationToken, Task> subscriptionRunner,
-        RelayGroupStreamWorkerOptions? options = null)
+        RelayGroupStreamWorkerOptions options)
     {
         _subscriptionRunner = subscriptionRunner ?? throw new ArgumentNullException(nameof(subscriptionRunner));
-        _options = options ?? new RelayGroupStreamWorkerOptions();
+        _options = options ?? throw new ArgumentNullException(nameof(options));
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

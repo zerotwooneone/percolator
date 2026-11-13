@@ -68,7 +68,7 @@ public static class InfrastructureServiceCollectionExtensions
             sp.GetRequiredService<IDatabaseMigrator>(),
             sp.GetRequiredService<IStage2HostFactory>(),
             sp.GetRequiredService<IDuressWipeHandler>(),
-            sp.GetService<VaultStorageOptions>()));
+            sp.GetRequiredService<VaultStorageOptions>()));
 
         return services;
     }
@@ -105,8 +105,10 @@ public static class InfrastructureServiceCollectionExtensions
 
         // Transport Singletons
         services.AddSingleton<ITransportCertificateProvider, InMemoryTransportCertificateProvider>();
+        services.AddSingleton<PeerGrpcChannelFactoryOptions>();
         services.AddSingleton<IPeerGrpcChannelFactory, PeerGrpcChannelFactory>();
         services.AddSingleton<ITransportClientInvoker, GrpcTransportClientInvoker>();
+        services.AddSingleton<StreamRegistryOptions>();
         services.AddSingleton<StreamRegistry>();
         services.AddSingleton<IStreamRegistry>(sp => sp.GetRequiredService<StreamRegistry>());
         services.AddSingleton<IStreamRegistryManagement>(sp => sp.GetRequiredService<StreamRegistry>());
@@ -117,6 +119,8 @@ public static class InfrastructureServiceCollectionExtensions
         // Storage & Transfer Singletons
         services.AddSingleton<IBlobCryptoService, StreamingAesGcmCryptoService>();
         services.AddSingleton<ILocalChunkStore, LocalFileChunkStore>();
+        // Interim in-memory capability store — Phase 5 replaces this with SqliteRelayMailboxCapabilityStore.
+        services.AddSingleton<IRelayMailboxCapabilityStore, InMemoryRelayMailboxCapabilityStore>();
         services.AddSingleton<IDesktopFileStorage, PortableDesktopFileStore>();
         services.AddSingleton<RelayTransferPipeClient>();
         services.AddSingleton<ITransferStreamPoolFactory, TcpMultiStreamPoolFactory>();
@@ -136,7 +140,7 @@ public static class InfrastructureServiceCollectionExtensions
             sp.GetRequiredService<IDatabaseMigrator>(),
             sp.GetRequiredService<IStage2HostFactory>(),
             sp.GetRequiredService<IDuressWipeHandler>(),
-            sp.GetService<VaultStorageOptions>()));
+            sp.GetRequiredService<VaultStorageOptions>()));
         services.AddSingleton<AuthenticatedSessionHolder>();
         services.AddSingleton<IAuthenticatedSession>(sp =>
         {
@@ -189,7 +193,8 @@ public static class InfrastructureServiceCollectionExtensions
         // 4. Transport & Ingress Scoped Services
         services.AddScoped<IIngressFilterService, IngressFilterService>();
         services.AddScoped<ITransportDispatcher, TransportDispatcher>();
-        services.AddScoped<ISealedEnvelopeUnwrapper, SealedEnvelopeUnwrapper>();
+        // ISealedEnvelopeUnwrapper is per-node: its PublicIdentityId recipientId cannot be resolved from DI.
+        // Composition roots that know the node identity must register a factory (see SimulatedPersonaHost).
         services.AddScoped<IPortReservationService, SqlitePortReservationService>();
         services.AddScoped<UnauthenticatedDeliveryEndpoint>();
 
@@ -231,8 +236,8 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddHostedService<RelayProfileSlotPruner>();
         services.AddHostedService(sp => new DisappearingMessageEvictionWorker(
             sp.GetRequiredService<IServiceScopeFactory>(),
-            sp.GetService<TimeProvider>(),
-            sp.GetService<ILocalChunkStore>()));
+            sp.GetRequiredService<ILocalChunkStore>(),
+            sp.GetService<TimeProvider>()));
         services.AddHostedService(sp => new UnknownGroupMessageCachePruner(
             sp.GetRequiredService<IServiceScopeFactory>(),
             sp.GetService<TimeProvider>()));
@@ -245,12 +250,14 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddHostedService<RelayBlobRetentionPruner>();
         services.AddHostedService<TransferOfferReaperWorker>();
         services.AddHostedService<SwarmEndpointRetentionPruner>();
+        services.AddSingleton<RelayMailboxStreamWorkerOptions>();
+        services.AddSingleton<RelayGroupStreamWorkerOptions>();
         services.AddHostedService(sp => new RelayMailboxStreamWorker(
             sp.GetService<Func<CancellationToken, Task>>() ?? (async ct => await Task.Delay(Timeout.InfiniteTimeSpan, ct)),
-            sp.GetService<RelayMailboxStreamWorkerOptions>()));
+            sp.GetRequiredService<RelayMailboxStreamWorkerOptions>()));
         services.AddHostedService(sp => new RelayGroupStreamWorker(
             sp.GetService<Func<CancellationToken, Task>>() ?? (async ct => await Task.Delay(Timeout.InfiniteTimeSpan, ct)),
-            sp.GetService<RelayGroupStreamWorkerOptions>()));
+            sp.GetRequiredService<RelayGroupStreamWorkerOptions>()));
 
         return services;
     }
@@ -275,8 +282,8 @@ public static class InfrastructureServiceCollectionExtensions
 
         services.AddHostedService(sp => new DisappearingMessageEvictionWorker(
             sp.GetRequiredService<IServiceScopeFactory>(),
-            sp.GetService<TimeProvider>(),
-            sp.GetService<ILocalChunkStore>()));
+            sp.GetRequiredService<ILocalChunkStore>(),
+            sp.GetService<TimeProvider>()));
         services.AddHostedService(sp => new UnknownGroupMessageCachePruner(
             sp.GetRequiredService<IServiceScopeFactory>(),
             sp.GetService<TimeProvider>()));

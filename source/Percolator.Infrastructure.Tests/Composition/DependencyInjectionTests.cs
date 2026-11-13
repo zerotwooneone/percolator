@@ -65,7 +65,7 @@ public sealed class DependencyInjectionTests
     public void All61Ports_ResolveFromContainerWithoutCycles()
     {
         // Arrange
-        var options = Options.Create(new VaultStorageOptions { BaseDirectory = _tempDir });
+        var options = new VaultStorageOptions { BaseDirectory = _tempDir };
         var factory = new Stage2HostFactory(options);
 
         // Act
@@ -128,7 +128,8 @@ public sealed class DependencyInjectionTests
         sp.GetRequiredService<IIngressFilterService>().Should().NotBeNull();
         sp.GetRequiredService<IStreamRegistry>().Should().NotBeNull();
         sp.GetRequiredService<ITransportDispatcher>().Should().NotBeNull();
-        sp.GetRequiredService<ISealedEnvelopeUnwrapper>().Should().NotBeNull();
+        // ISealedEnvelopeUnwrapper is per-node (requires the node's PublicIdentityId) and is
+        // intentionally not DI-registered; composition roots register a factory.
 
         // 8. Discovery & Profile Delivery
         sp.GetRequiredService<INearbyDiscoveryQueryClientPort>().Should().NotBeNull();
@@ -165,7 +166,7 @@ public sealed class DependencyInjectionTests
     public void All12HostedServices_RegisteredAndResolvable()
     {
         // Arrange
-        var options = Options.Create(new VaultStorageOptions { BaseDirectory = _tempDir });
+        var options = new VaultStorageOptions { BaseDirectory = _tempDir };
         var factory = new Stage2HostFactory(options);
 
         // Act
@@ -194,7 +195,7 @@ public sealed class DependencyInjectionTests
     public async Task AuthenticatedHost_HostedServices_StartAndStopGracefully()
     {
         // Arrange
-        var options = Options.Create(new VaultStorageOptions { BaseDirectory = _tempDir });
+        var options = new VaultStorageOptions { BaseDirectory = _tempDir };
         var factory = new Stage2HostFactory(options);
 
         // Act & Assert
@@ -212,7 +213,7 @@ public sealed class DependencyInjectionTests
     public async Task AuthenticatedSession_ResolvedFromContainer_ControlsRealHostLifecycle()
     {
         // Arrange
-        var options = Options.Create(new VaultStorageOptions { BaseDirectory = _tempDir });
+        var options = new VaultStorageOptions { BaseDirectory = _tempDir };
         var factory = new Stage2HostFactory(options);
 
         // Act
@@ -235,7 +236,7 @@ public sealed class DependencyInjectionTests
     public void ChannelRelayResolver_IsSingletonAcrossScopes()
     {
         // Arrange
-        var options = Options.Create(new VaultStorageOptions { BaseDirectory = _tempDir });
+        var options = new VaultStorageOptions { BaseDirectory = _tempDir };
         var factory = new Stage2HostFactory(options);
 
         // Act

@@ -56,11 +56,12 @@ public class ChatPayloadHandlerTests
             _timeProvider,
             _payloadSender,
             _unknownGroupCache,
-            blobStorage: null,
+            blobStorage: new FakeBlobStorageService(),
             _peerProfileRepo,
             _profileDeliveryClient,
             _profileManager,
-            _cryptoEngine);
+            _cryptoEngine,
+            new FakePeerMailboxRoutingRepository());
     }
 
     [Test]
@@ -897,11 +898,12 @@ public class ChatPayloadHandlerTests
             _timeProvider,
             payloadSender,
             _unknownGroupCache,
-            blobStorage: null,
+            blobStorage: new FakeBlobStorageService(),
             _peerProfileRepo,
             _profileDeliveryClient,
             _profileManager,
-            _cryptoEngine);
+            _cryptoEngine,
+            new FakePeerMailboxRoutingRepository());
 
         var msgId = PayloadId.New();
         var msgDto = new ChatMessageDto(

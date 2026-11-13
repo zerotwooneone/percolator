@@ -36,7 +36,8 @@ public sealed class GroupKeyDistributionServiceTests
             _senderRepo,
             _receiverRepo,
             _payloadSender,
-            _cryptoEngine);
+            _cryptoEngine,
+            new FakeRoutingCoordinator());
 
         _channelId = ChannelId.New();
         _senderId = PublicIdentityId.New();

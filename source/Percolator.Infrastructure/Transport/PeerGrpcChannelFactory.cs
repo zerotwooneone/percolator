@@ -40,13 +40,20 @@ public sealed class PeerGrpcChannelFactory : IPeerGrpcChannelFactory
     }
 
     public PeerGrpcChannelFactory(
-        PeerGrpcChannelFactoryOptions? options = null,
-        IDateTimeProvider? timeProvider = null,
-        Func<Uri, GrpcChannelOptions, GrpcChannel>? channelFactory = null)
+        PeerGrpcChannelFactoryOptions options,
+        IDateTimeProvider timeProvider)
+        : this(options, timeProvider, DefaultCreateChannel)
     {
-        _options = options ?? new PeerGrpcChannelFactoryOptions();
-        _timeProvider = timeProvider ?? new DefaultDateTimeProvider();
-        _channelFactory = channelFactory ?? DefaultCreateChannel;
+    }
+
+    internal PeerGrpcChannelFactory(
+        PeerGrpcChannelFactoryOptions options,
+        IDateTimeProvider timeProvider,
+        Func<Uri, GrpcChannelOptions, GrpcChannel> channelFactory)
+    {
+        _options = options ?? throw new ArgumentNullException(nameof(options));
+        _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
+        _channelFactory = channelFactory ?? throw new ArgumentNullException(nameof(channelFactory));
     }
 
     public int ActiveChannelCount
@@ -178,10 +185,5 @@ public sealed class PeerGrpcChannelFactory : IPeerGrpcChannelFactory
 
             _channels.Clear();
         }
-    }
-
-    private sealed class DefaultDateTimeProvider : IDateTimeProvider
-    {
-        public DateTimeOffset UtcNow => DateTimeOffset.UtcNow;
     }
 }

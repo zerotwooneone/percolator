@@ -16,6 +16,7 @@ using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Delivery.Ports;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Infrastructure.Common;
 using Percolator.Infrastructure.Protos;
 using Percolator.Infrastructure.Transport;
 using Percolator.Infrastructure.Transport.Endpoints;
@@ -93,7 +94,7 @@ public sealed class WindowsPeerGrpcTofuRoundTripTests
         server.BoundPort.Should().NotBeNull();
         server.BoundPort!.Value.Value.Should().BeGreaterThan(0);
 
-        using var channelFactory = new PeerGrpcChannelFactory();
+        using var channelFactory = new PeerGrpcChannelFactory(new PeerGrpcChannelFactoryOptions(), new SystemDateTimeProvider());
         var serverUri = new Uri($"https://127.0.0.1:{server.BoundPort.Value.Value}");
         var channel = channelFactory.GetOrCreateChannel(serverUri);
 

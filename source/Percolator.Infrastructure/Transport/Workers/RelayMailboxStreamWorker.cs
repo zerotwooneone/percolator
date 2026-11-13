@@ -21,10 +21,10 @@ public sealed class RelayMailboxStreamWorker : BackgroundService
 
     public RelayMailboxStreamWorker(
         Func<CancellationToken, Task> streamSessionRunner,
-        RelayMailboxStreamWorkerOptions? options = null)
+        RelayMailboxStreamWorkerOptions options)
     {
         _streamSessionRunner = streamSessionRunner ?? throw new ArgumentNullException(nameof(streamSessionRunner));
-        _options = options ?? new RelayMailboxStreamWorkerOptions();
+        _options = options ?? throw new ArgumentNullException(nameof(options));
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

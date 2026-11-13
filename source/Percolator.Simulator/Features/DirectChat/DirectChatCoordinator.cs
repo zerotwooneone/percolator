@@ -71,10 +71,10 @@ internal sealed class DirectChatCoordinator
 
                 // Auto-detect whether to route via DirectP2P or RelayedOneToOne based on peer mailbox routing capability
                 var route = DeliveryRoute.DirectP2P;
-                var routingRepo = scope.ServiceProvider.GetService<IPeerMailboxRoutingRepository>();
-                if (routingRepo != null && recipient.HomeRelay != null)
+                var routingRepo = scope.ServiceProvider.GetRequiredService<IPeerMailboxRoutingRepository>();
+                if (recipient.HomeRelay != null)
                 {
-                    var now = scope.ServiceProvider.GetService<IDateTimeProvider>()?.UtcNow ?? DateTimeOffset.UtcNow;
+                    var now = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>().UtcNow;
                     var bestRoute = await routingRepo.GetBestRouteAsync(recipient.PublicIdentityId, now, ct);
                     if (bestRoute != null)
                     {
@@ -162,8 +162,8 @@ internal sealed class DirectChatCoordinator
             {
                 using var scope = host.Services.CreateScope();
                 var chatQuery = scope.ServiceProvider.GetRequiredService<ISimulatorChatQueryService>();
-                var contactRepo = scope.ServiceProvider.GetService<IPeerContactRepository>();
-                var profileRepo = scope.ServiceProvider.GetService<IPeerProfileRepository>();
+                var contactRepo = scope.ServiceProvider.GetRequiredService<IPeerContactRepository>();
+                var profileRepo = scope.ServiceProvider.GetRequiredService<IPeerProfileRepository>();
 
                 if (peerNodeId.HasValue)
                 {
@@ -174,12 +174,8 @@ internal sealed class DirectChatCoordinator
                         var messages = await chatQuery.GetTranscriptAsync(channelId, ct);
 
                         // Resolve remote peer display name from local observer store (contact nickname first, then synced profile, then fallback)
-                        var contact = contactRepo != null
-                            ? await contactRepo.GetByPeerIdAsync(host.PublicIdentityId, peerHost.PublicIdentityId, ct)
-                            : null;
-                        var profile = profileRepo != null
-                            ? await profileRepo.GetByPeerIdAsync(peerHost.PublicIdentityId, ct)
-                            : null;
+                        var contact = await contactRepo.GetByPeerIdAsync(host.PublicIdentityId, peerHost.PublicIdentityId, ct);
+                        var profile = await profileRepo.GetByPeerIdAsync(peerHost.PublicIdentityId, ct);
 
                         var isExplicitNickname = contact != null &&
                             !string.IsNullOrWhiteSpace(contact.Nickname.Value) &&
@@ -256,10 +252,10 @@ internal sealed class DirectChatCoordinator
                 var chatService = scope.ServiceProvider.GetRequiredService<IChatService>();
 
                 var route = DeliveryRoute.DirectP2P;
-                var routingRepo = scope.ServiceProvider.GetService<IPeerMailboxRoutingRepository>();
-                if (routingRepo != null && sender.HomeRelay != null)
+                var routingRepo = scope.ServiceProvider.GetRequiredService<IPeerMailboxRoutingRepository>();
+                if (sender.HomeRelay != null)
                 {
-                    var now = scope.ServiceProvider.GetService<IDateTimeProvider>()?.UtcNow ?? DateTimeOffset.UtcNow;
+                    var now = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>().UtcNow;
                     var bestRoute = await routingRepo.GetBestRouteAsync(sender.PublicIdentityId, now, ct);
                     if (bestRoute != null)
                     {

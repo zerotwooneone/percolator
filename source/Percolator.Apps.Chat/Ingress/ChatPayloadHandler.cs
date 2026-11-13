@@ -27,13 +27,13 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
     private readonly IPayloadSerializer _serializer;
     private readonly IDateTimeProvider _timeProvider;
     private readonly IPayloadSender _payloadSender;
-    private readonly IUnknownGroupMessageCacheRepository? _unknownGroupCache;
-    private readonly IBlobStorageService? _blobStorage;
-    private readonly IPeerProfileRepository? _peerProfileRepo;
-    private readonly IProfileDeliveryClient? _profileDeliveryClient;
-    private readonly IProfileManager? _profileManager;
-    private readonly ICryptoEngine? _cryptoEngine;
-    private readonly IPeerMailboxRoutingRepository? _peerMailboxRoutingRepo;
+    private readonly IUnknownGroupMessageCacheRepository _unknownGroupCache;
+    private readonly IBlobStorageService _blobStorage;
+    private readonly IPeerProfileRepository _peerProfileRepo;
+    private readonly IProfileDeliveryClient _profileDeliveryClient;
+    private readonly IProfileManager _profileManager;
+    private readonly ICryptoEngine _cryptoEngine;
+    private readonly IPeerMailboxRoutingRepository _peerMailboxRoutingRepo;
 
     public ChatPayloadHandler(
         IChatMessageRepository chatRepo,
@@ -42,13 +42,13 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
         IPayloadSerializer serializer,
         IDateTimeProvider timeProvider,
         IPayloadSender payloadSender,
-        IUnknownGroupMessageCacheRepository? unknownGroupCache = null,
-        IBlobStorageService? blobStorage = null,
-        IPeerProfileRepository? peerProfileRepo = null,
-        IProfileDeliveryClient? profileDeliveryClient = null,
-        IProfileManager? profileManager = null,
-        ICryptoEngine? cryptoEngine = null,
-        IPeerMailboxRoutingRepository? peerMailboxRoutingRepo = null)
+        IUnknownGroupMessageCacheRepository unknownGroupCache,
+        IBlobStorageService blobStorage,
+        IPeerProfileRepository peerProfileRepo,
+        IProfileDeliveryClient profileDeliveryClient,
+        IProfileManager profileManager,
+        ICryptoEngine cryptoEngine,
+        IPeerMailboxRoutingRepository peerMailboxRoutingRepo)
     {
         _chatRepo = chatRepo ?? throw new ArgumentNullException(nameof(chatRepo));
         _channelRepo = channelRepo ?? throw new ArgumentNullException(nameof(channelRepo));
@@ -56,13 +56,13 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
         _serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _payloadSender = payloadSender ?? throw new ArgumentNullException(nameof(payloadSender));
-        _unknownGroupCache = unknownGroupCache;
-        _blobStorage = blobStorage;
-        _peerProfileRepo = peerProfileRepo;
-        _profileDeliveryClient = profileDeliveryClient;
-        _profileManager = profileManager;
-        _cryptoEngine = cryptoEngine;
-        _peerMailboxRoutingRepo = peerMailboxRoutingRepo;
+        _unknownGroupCache = unknownGroupCache ?? throw new ArgumentNullException(nameof(unknownGroupCache));
+        _blobStorage = blobStorage ?? throw new ArgumentNullException(nameof(blobStorage));
+        _peerProfileRepo = peerProfileRepo ?? throw new ArgumentNullException(nameof(peerProfileRepo));
+        _profileDeliveryClient = profileDeliveryClient ?? throw new ArgumentNullException(nameof(profileDeliveryClient));
+        _profileManager = profileManager ?? throw new ArgumentNullException(nameof(profileManager));
+        _cryptoEngine = cryptoEngine ?? throw new ArgumentNullException(nameof(cryptoEngine));
+        _peerMailboxRoutingRepo = peerMailboxRoutingRepo ?? throw new ArgumentNullException(nameof(peerMailboxRoutingRepo));
     }
 
     public async ValueTask<DomainResult> HandleInboundAsync(InboundPayloadContext context, CancellationToken ct = default)
@@ -120,110 +120,103 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
         }
 
         // Conditional Fetch: check if cached profile is up-to-date
-        if (_peerProfileRepo is not null)
+        var cached = await _peerProfileRepo.GetByPeerIdAsync(dto.AuthorId, ct).ConfigureAwait(false);
+        if (cached is not null && cached.Revision >= dto.Revision)
         {
-            var cached = await _peerProfileRepo.GetByPeerIdAsync(dto.AuthorId, ct).ConfigureAwait(false);
-            if (cached is not null && cached.Revision >= dto.Revision)
+            return DomainResult.Success();
+        }
+
+        // Fetch and decrypt profile package via delivery client, profile manager, and crypto engine
+        Uri? fetchEndpointUri = null;
+        if (!string.IsNullOrWhiteSpace(dto.SourceEndpoint))
+        {
+            if (Uri.TryCreate(dto.SourceEndpoint, UriKind.Absolute, out var parsedUri))
             {
-                return DomainResult.Success();
+                fetchEndpointUri = parsedUri;
+            }
+            else if (Uri.TryCreate($"https://{dto.SourceEndpoint}", UriKind.Absolute, out var fallbackUri))
+            {
+                fetchEndpointUri = fallbackUri;
             }
         }
 
-        // Fetch and decrypt profile package if delivery client, manager, and engine are configured
-        if (_profileDeliveryClient is not null && _profileManager is not null && _cryptoEngine is not null && _peerProfileRepo is not null)
+        var locator = BlindedProfileLocator.FromBytes(dto.BlindedLocatorBytes);
+        var fetchResult = await _profileDeliveryClient.FetchProfileAsync(fetchEndpointUri, locator, ct).ConfigureAwait(false);
+        if (fetchResult.IsFailure)
         {
-            Uri? fetchEndpointUri = null;
-            if (!string.IsNullOrWhiteSpace(dto.SourceEndpoint))
+            return DomainResult.Failure(fetchResult.Error);
+        }
+
+        using var profileKey = ProfileKey.FromBytes(dto.ProfileKeyBytes);
+        var decryptResult = _profileManager.DecryptProfile(fetchResult.Value, profileKey, _cryptoEngine, dto.Revision);
+        if (decryptResult.IsFailure)
+        {
+            return DomainResult.Failure(decryptResult.Error);
+        }
+
+        var decrypted = decryptResult.Value;
+        var record = new PeerProfileRecord(
+            dto.AuthorId,
+            decrypted.DisplayName,
+            decrypted.StatusBio,
+            decrypted.AvatarReference,
+            dto.Revision,
+            _timeProvider.UtcNow);
+
+        await _peerProfileRepo.SaveAsync(record, ct).ConfigureAwait(false);
+
+        if (decrypted.AvatarReference != null)
+        {
+            try
             {
-                if (Uri.TryCreate(dto.SourceEndpoint, UriKind.Absolute, out var parsedUri))
-                {
-                    fetchEndpointUri = parsedUri;
-                }
-                else if (Uri.TryCreate($"https://{dto.SourceEndpoint}", UriKind.Absolute, out var fallbackUri))
-                {
-                    fetchEndpointUri = fallbackUri;
-                }
+                await _blobStorage.DownloadBlobAsync(new BlobDownloadRequest(decrypted.AvatarReference), ct: ct).ConfigureAwait(false);
             }
-
-            var locator = BlindedProfileLocator.FromBytes(dto.BlindedLocatorBytes);
-            var fetchResult = await _profileDeliveryClient.FetchProfileAsync(fetchEndpointUri, locator, ct).ConfigureAwait(false);
-            if (fetchResult.IsFailure)
+            catch
             {
-                return DomainResult.Failure(fetchResult.Error);
+                // Non-fatal: avatar blob fetch failure must not reject valid profile capability ingestion
             }
+        }
 
-            using var profileKey = ProfileKey.FromBytes(dto.ProfileKeyBytes);
-            var decryptResult = _profileManager.DecryptProfile(fetchResult.Value, profileKey, _cryptoEngine, dto.Revision);
-            if (decryptResult.IsFailure)
+        // Record multi-source snapshot without remote-provided expiry heuristics
+        var snapshot = new PeerProfileSourceSnapshot(
+            dto.AuthorId,
+            dto.SourceEndpoint ?? (dto.SourceType == ProfileSourceType.DirectP2P ? "direct-p2p" : "relay"),
+            dto.SourceType,
+            decrypted,
+            locator,
+            _timeProvider.UtcNow);
+
+        await _peerProfileRepo.SaveSourceSnapshotAsync(snapshot, ct: ct).ConfigureAwait(false);
+
+        // Sealed Sender Delivery Token Derivation & Storage
+        if (dto.MailboxRoutingTokenBytes.Length == 16)
+        {
+            var routingToken = BlindedRoutingToken.FromGuid(new Guid(dto.MailboxRoutingTokenBytes));
+            if (routingToken.Value != Guid.Empty)
             {
-                return DomainResult.Failure(decryptResult.Error);
-            }
-
-            var decrypted = decryptResult.Value;
-            var record = new PeerProfileRecord(
-                dto.AuthorId,
-                decrypted.DisplayName,
-                decrypted.StatusBio,
-                decrypted.AvatarReference,
-                dto.Revision,
-                _timeProvider.UtcNow);
-
-            await _peerProfileRepo.SaveAsync(record, ct).ConfigureAwait(false);
-
-            if (_blobStorage != null && decrypted.AvatarReference != null)
-            {
-                try
+                IdentityKey? authorPublicKey = null;
+                if (dto.AuthorPublicKeyBytes is not null && dto.AuthorPublicKeyBytes.Length == 32)
                 {
-                    await _blobStorage.DownloadBlobAsync(new BlobDownloadRequest(decrypted.AvatarReference), ct: ct).ConfigureAwait(false);
+                    authorPublicKey = IdentityKey.FromSpan(dto.AuthorPublicKeyBytes);
                 }
-                catch
+
+                if (authorPublicKey is not null && !string.IsNullOrWhiteSpace(dto.SourceEndpoint))
                 {
-                    // Non-fatal: avatar blob fetch failure must not reject valid profile capability ingestion
-                }
-            }
-
-            // Record multi-source snapshot without remote-provided expiry heuristics
-            var snapshot = new PeerProfileSourceSnapshot(
-                dto.AuthorId,
-                dto.SourceEndpoint ?? (dto.SourceType == ProfileSourceType.DirectP2P ? "direct-p2p" : "relay"),
-                dto.SourceType,
-                decrypted,
-                locator,
-                _timeProvider.UtcNow);
-
-            await _peerProfileRepo.SaveSourceSnapshotAsync(snapshot, ct: ct).ConfigureAwait(false);
-
-            // Sealed Sender Delivery Token Derivation & Storage
-            if (_peerMailboxRoutingRepo is not null &&
-                dto.MailboxRoutingTokenBytes.Length == 16)
-            {
-                var routingToken = BlindedRoutingToken.FromGuid(new Guid(dto.MailboxRoutingTokenBytes));
-                if (routingToken.Value != Guid.Empty)
-                {
-                    IdentityKey? authorPublicKey = null;
-                    if (dto.AuthorPublicKeyBytes is not null && dto.AuthorPublicKeyBytes.Length == 32)
+                    RelayEndpoint? relayEndpoint = null;
+                    var endpointResult = RelayEndpoint.Create(dto.SourceEndpoint);
+                    if (endpointResult.IsSuccess)
                     {
-                        authorPublicKey = IdentityKey.FromSpan(dto.AuthorPublicKeyBytes);
+                        relayEndpoint = endpointResult.Value;
                     }
 
-                    if (authorPublicKey is not null && !string.IsNullOrWhiteSpace(dto.SourceEndpoint))
-                    {
-                        RelayEndpoint? relayEndpoint = null;
-                        var endpointResult = RelayEndpoint.Create(dto.SourceEndpoint);
-                        if (endpointResult.IsSuccess)
-                        {
-                            relayEndpoint = endpointResult.Value;
-                        }
-
-                        var deliveryToken = DeliveryToken.DeriveFromProfileKey(authorPublicKey, profileKey, _cryptoEngine);
-                        var capability = new PeerMailboxRoutingCapability(
-                            dto.AuthorId,
-                            routingToken,
-                            deliveryToken,
-                            relayEndpoint,
-                            _timeProvider.UtcNow);
-                        await _peerMailboxRoutingRepo.SaveAsync(capability, ct).ConfigureAwait(false);
-                    }
+                    var deliveryToken = DeliveryToken.DeriveFromProfileKey(authorPublicKey, profileKey, _cryptoEngine);
+                    var capability = new PeerMailboxRoutingCapability(
+                        dto.AuthorId,
+                        routingToken,
+                        deliveryToken,
+                        relayEndpoint,
+                        _timeProvider.UtcNow);
+                    await _peerMailboxRoutingRepo.SaveAsync(capability, ct).ConfigureAwait(false);
                 }
             }
         }
@@ -307,7 +300,7 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
 
                 await _channelRepo.SaveGroupAsync(groupChannel, ct).ConfigureAwait(false);
             }
-            else if (_unknownGroupCache is not null)
+            else
             {
                 ulong receivedAtMs = (ulong)context.ReceivedAtUtc.ToUnixTimeMilliseconds();
                 var unknownRecord = new UnknownGroupMessageRecord(
@@ -351,15 +344,12 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
                 : directChannel.RemotePeerId;
 
             var route = DeliveryRoute.DirectP2P;
-            if (_peerMailboxRoutingRepo is not null)
+            var bestRoute = await _peerMailboxRoutingRepo
+                .GetBestRouteAsync(dto.AuthorId, context.ReceivedAtUtc, ct)
+                .ConfigureAwait(false);
+            if (bestRoute is not null)
             {
-                var bestRoute = await _peerMailboxRoutingRepo
-                    .GetBestRouteAsync(dto.AuthorId, context.ReceivedAtUtc, ct)
-                    .ConfigureAwait(false);
-                if (bestRoute is not null)
-                {
-                    route = DeliveryRoute.RelayedOneToOne;
-                }
+                route = DeliveryRoute.RelayedOneToOne;
             }
 
             var receiptDto = new DeliveryReceiptDto(
@@ -520,7 +510,7 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
 
         await _chatRepo.UpdateAsync(message, ct).ConfigureAwait(false);
 
-        if (_blobStorage is not null && attachmentsToPurge.Count > 0)
+        if (attachmentsToPurge.Count > 0)
         {
             foreach (var attachment in attachmentsToPurge)
             {

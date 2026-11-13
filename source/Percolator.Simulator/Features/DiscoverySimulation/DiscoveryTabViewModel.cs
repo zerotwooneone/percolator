@@ -226,21 +226,21 @@ internal sealed partial class DiscoveryTabViewModel : ViewModelBase
             if (descriptors != null)
             {
                 using var scope = _host.Services.CreateScope();
-                var contactRepo = scope.ServiceProvider.GetService<IPeerContactRepository>();
-                var profileRepo = scope.ServiceProvider.GetService<IPeerProfileRepository>();
+                var contactRepo = scope.ServiceProvider.GetRequiredService<IPeerContactRepository>();
+                var profileRepo = scope.ServiceProvider.GetRequiredService<IPeerProfileRepository>();
 
                 foreach (var d in descriptors)
                 {
                     var peerId = PublicIdentityId.FromBytes(d.PeerId.Span);
                     string name;
-                    var contact = contactRepo != null ? await contactRepo.GetByPeerIdAsync(_host.PublicIdentityId, peerId).ConfigureAwait(false) : null;
+                    var contact = await contactRepo.GetByPeerIdAsync(_host.PublicIdentityId, peerId).ConfigureAwait(false);
                     if (contact != null && !string.IsNullOrWhiteSpace(contact.Nickname.Value) && contact.Nickname.Value != peerId.ToString())
                     {
                         name = contact.Nickname.Value;
                     }
                     else
                     {
-                        var profile = profileRepo != null ? await profileRepo.GetByPeerIdAsync(peerId).ConfigureAwait(false) : null;
+                        var profile = await profileRepo.GetByPeerIdAsync(peerId).ConfigureAwait(false);
                         name = profile?.DisplayName ?? $"Peer-{Convert.ToHexString(d.PeerId.Span)[..6]}";
                     }
 

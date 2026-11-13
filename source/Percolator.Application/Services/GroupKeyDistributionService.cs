@@ -21,20 +21,20 @@ public sealed class GroupKeyDistributionService : IGroupKeyDistributionService
     private readonly IGroupReceiverSessionRepository _receiverSessionRepo;
     private readonly IPayloadSender _payloadSender;
     private readonly ICryptoEngine _cryptoEngine;
-    private readonly IRoutingCoordinator? _routingCoordinator;
+    private readonly IRoutingCoordinator _routingCoordinator;
 
     public GroupKeyDistributionService(
         IGroupSenderKeyRepository senderKeyRepo,
         IGroupReceiverSessionRepository receiverSessionRepo,
         IPayloadSender payloadSender,
         ICryptoEngine cryptoEngine,
-        IRoutingCoordinator? routingCoordinator = null)
+        IRoutingCoordinator routingCoordinator)
     {
         _senderKeyRepo = senderKeyRepo ?? throw new ArgumentNullException(nameof(senderKeyRepo));
         _receiverSessionRepo = receiverSessionRepo ?? throw new ArgumentNullException(nameof(receiverSessionRepo));
         _payloadSender = payloadSender ?? throw new ArgumentNullException(nameof(payloadSender));
         _cryptoEngine = cryptoEngine ?? throw new ArgumentNullException(nameof(cryptoEngine));
-        _routingCoordinator = routingCoordinator;
+        _routingCoordinator = routingCoordinator ?? throw new ArgumentNullException(nameof(routingCoordinator));
     }
 
     public async ValueTask<DomainResult> DistributeSenderKeyAsync(
@@ -94,13 +94,10 @@ public sealed class GroupKeyDistributionService : IGroupKeyDistributionService
             }
 
             var route = DeliveryRoute.DirectP2P;
-            if (_routingCoordinator != null)
+            var resolved = await _routingCoordinator.ResolveRouteAsync(recipient, ct).ConfigureAwait(false);
+            if (resolved.IsSuccess && resolved.Value.Mode == DeliveryRoutingMode.RelayMailbox)
             {
-                var resolved = await _routingCoordinator.ResolveRouteAsync(recipient, ct).ConfigureAwait(false);
-                if (resolved.IsSuccess && resolved.Value.Mode == DeliveryRoutingMode.RelayMailbox)
-                {
-                    route = DeliveryRoute.RelayedOneToOne;
-                }
+                route = DeliveryRoute.RelayedOneToOne;
             }
 
             var outboundContext = new OutboundPayloadContext(

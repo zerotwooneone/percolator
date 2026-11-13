@@ -21,7 +21,7 @@ public sealed class ChatIngressFilter : IAppIngressFilter
         public int Count;
     }
 
-    private readonly IDateTimeProvider? _clock;
+    private readonly IDateTimeProvider _clock;
     private readonly int _maxFramesPerWindow;
     private readonly TimeSpan _rateLimitWindow;
     private readonly ConcurrentDictionary<PublicIdentityId, SenderWindowState> _rateLimits = new();
@@ -30,11 +30,11 @@ public sealed class ChatIngressFilter : IAppIngressFilter
     public bool IsEnabled { get; set; } = true;
 
     public ChatIngressFilter(
-        IDateTimeProvider? clock = null,
+        IDateTimeProvider clock,
         int maxFramesPerWindow = DefaultMaxFramesPerWindow,
         TimeSpan? rateLimitWindow = null)
     {
-        _clock = clock;
+        _clock = clock ?? throw new ArgumentNullException(nameof(clock));
         _maxFramesPerWindow = maxFramesPerWindow > 0 ? maxFramesPerWindow : DefaultMaxFramesPerWindow;
         _rateLimitWindow = rateLimitWindow ?? DefaultRateLimitWindow;
     }
@@ -51,7 +51,7 @@ public sealed class ChatIngressFilter : IAppIngressFilter
             return IngressDecision.DiscardSilently;
         }
 
-        if (!CheckRateLimit(context.SenderIdentityId, context.ReceivedAtUtc))
+        if (!CheckRateLimit(context.SenderIdentityId))
         {
             return IngressDecision.DiscardSilently;
         }
@@ -62,14 +62,14 @@ public sealed class ChatIngressFilter : IAppIngressFilter
     public ValueTask<IngressDecision> EvaluateAsync(InboundPayloadContext context, CancellationToken ct = default) =>
         ValueTask.FromResult(Evaluate(context));
 
-    private bool CheckRateLimit(PublicIdentityId senderId, DateTimeOffset contextTimestampUtc)
+    private bool CheckRateLimit(PublicIdentityId senderId)
     {
         if (!senderId.IsValid)
         {
             return false;
         }
 
-        DateTimeOffset nowUtc = _clock?.UtcNow ?? contextTimestampUtc;
+        DateTimeOffset nowUtc = _clock.UtcNow;
         var state = _rateLimits.GetOrAdd(senderId, _ => new SenderWindowState
         {
             WindowStartUtc = nowUtc,

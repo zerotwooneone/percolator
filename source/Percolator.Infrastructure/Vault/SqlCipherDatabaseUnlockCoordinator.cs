@@ -31,7 +31,7 @@ public sealed class SqlCipherDatabaseUnlockCoordinator : IDatabaseUnlockCoordina
         IDatabaseMigrator migrator,
         IStage2HostFactory hostFactory,
         IDuressWipeHandler wipeHandler,
-        VaultStorageOptions? options = null)
+        VaultStorageOptions options)
     {
         _headerStorage = headerStorage ?? throw new ArgumentNullException(nameof(headerStorage));
         _envelopePacker = envelopePacker ?? throw new ArgumentNullException(nameof(envelopePacker));
@@ -39,7 +39,7 @@ public sealed class SqlCipherDatabaseUnlockCoordinator : IDatabaseUnlockCoordina
         _migrator = migrator ?? throw new ArgumentNullException(nameof(migrator));
         _hostFactory = hostFactory ?? throw new ArgumentNullException(nameof(hostFactory));
         _wipeHandler = wipeHandler ?? throw new ArgumentNullException(nameof(wipeHandler));
-        _options = options ?? new VaultStorageOptions();
+        _options = options ?? throw new ArgumentNullException(nameof(options));
     }
 
     public async Task<DatabaseSetupStatus> DetermineStatusAsync(CancellationToken ct = default)

@@ -16,31 +16,31 @@ public sealed class DisappearingMessageEvictionWorker : BackgroundService
     private readonly IServiceScopeFactory? _scopeFactory;
     private readonly PercolatorDbContext? _directDbContext;
     private readonly TimeProvider _timeProvider;
-    private readonly ILocalChunkStore? _chunkStore;
+    private readonly ILocalChunkStore _chunkStore;
     private readonly TimeSpan _interval;
 
     [ActivatorUtilitiesConstructor]
     public DisappearingMessageEvictionWorker(
         IServiceScopeFactory scopeFactory,
+        ILocalChunkStore chunkStore,
         TimeProvider? timeProvider = null,
-        ILocalChunkStore? chunkStore = null,
         TimeSpan? interval = null)
     {
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _timeProvider = timeProvider ?? TimeProvider.System;
-        _chunkStore = chunkStore;
+        _chunkStore = chunkStore ?? throw new ArgumentNullException(nameof(chunkStore));
         _interval = interval ?? TimeSpan.FromSeconds(30);
     }
 
     public DisappearingMessageEvictionWorker(
         PercolatorDbContext dbContext,
+        ILocalChunkStore chunkStore,
         TimeProvider? timeProvider = null,
-        ILocalChunkStore? chunkStore = null,
         TimeSpan? interval = null)
     {
         _directDbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
         _timeProvider = timeProvider ?? TimeProvider.System;
-        _chunkStore = chunkStore;
+        _chunkStore = chunkStore ?? throw new ArgumentNullException(nameof(chunkStore));
         _interval = interval ?? TimeSpan.FromSeconds(30);
     }
 
@@ -53,14 +53,13 @@ public sealed class DisappearingMessageEvictionWorker : BackgroundService
 
         using var scope = _scopeFactory!.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<PercolatorDbContext>();
-        var chunkStore = scope.ServiceProvider.GetService<ILocalChunkStore>() ?? _chunkStore;
 
-        return await ExecuteSweepOnDbContextAsync(dbContext, chunkStore, ct);
+        return await ExecuteSweepOnDbContextAsync(dbContext, _chunkStore, ct);
     }
 
     private async Task<int> ExecuteSweepOnDbContextAsync(
         PercolatorDbContext dbContext,
-        ILocalChunkStore? chunkStore,
+        ILocalChunkStore chunkStore,
         CancellationToken ct)
     {
         ulong nowMs = (ulong)_timeProvider.GetUtcNow().ToUnixTimeMilliseconds();
@@ -81,7 +80,7 @@ public sealed class DisappearingMessageEvictionWorker : BackgroundService
             .Where(a => expiredIds.Contains(a.MessageId))
             .ToListAsync(ct);
 
-        if (chunkStore != null && attachments.Count > 0)
+        if (attachments.Count > 0)
         {
             foreach (var att in attachments)
             {

@@ -1,3 +1,5 @@
+using Percolator.Infrastructure.Transport;
+
 namespace Percolator.Infrastructure.Tests.Plugins.BlobStorage;
 
 using System;
@@ -44,7 +46,8 @@ public sealed class RelayBlobClientTests
         _endpoint = new UnauthenticatedDeliveryEndpoint(
             new UnauthenticatedDeliveryEndpointTestsFakes.StubProfileRepo(),
             new UnauthenticatedDeliveryEndpointTestsFakes.StubPreKeyRepo(),
-            _chunkStore);
+            _chunkStore,
+            new InMemoryRelayMailboxCapabilityStore());
 
         _directClient = new RelayBlobClient(uri => new DirectEndpointClient(_endpoint));
     }

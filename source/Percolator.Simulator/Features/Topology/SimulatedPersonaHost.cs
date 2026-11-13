@@ -109,11 +109,8 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             _allowFileTransfers = value;
             if (_host != null)
             {
-                var filter = _host.Services.GetService<FileTransferIngressFilter>();
-                if (filter != null)
-                {
-                    filter.IsEnabled = value;
-                }
+                var filter = _host.Services.GetRequiredService<FileTransferIngressFilter>();
+                filter.IsEnabled = value;
             }
         }
     }
@@ -260,7 +257,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             {
                 var wirePacker = sp.GetRequiredService<ISessionWirePacker>();
                 var time = sp.GetRequiredService<IDateTimeProvider>();
-                return new SealedEnvelopeUnwrapper(wirePacker, time, PublicIdentityId);
+                return new SealedEnvelopeUnwrapper(wirePacker, PublicIdentityId, time);
             });
             services.AddScoped<IIngressFilterService, IngressFilterService>();
             services.AddScoped<IInboundIngressPipeline>(sp =>
@@ -273,7 +270,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                     sp.GetRequiredService<ICryptoEngine>(),
                     sp.GetRequiredService<IAppRouter>(),
                     sp.GetRequiredService<IChannelLockService>(),
-                    sp.GetService<IGroupKeyDistributionService>());
+                    sp.GetRequiredService<IGroupKeyDistributionService>());
                 var outboxWorker = sp.GetRequiredService<OutboxWorker>();
                 return new SimulatorOutboxFlushingIngressPipelineDecorator(inner, outboxWorker, _logSink, DisplayName);
             });
@@ -333,11 +330,8 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         }
         // 3. Start remaining background hosted services
         await _host.StartAsync(ct);
-        var ftFilter = _host.Services.GetService<FileTransferIngressFilter>();
-        if (ftFilter != null)
-        {
-            ftFilter.IsEnabled = _allowFileTransfers;
-        }
+        var ftFilter = _host.Services.GetRequiredService<FileTransferIngressFilter>();
+        ftFilter.IsEnabled = _allowFileTransfers;
         // 3a. Publish initial profile (revision 1) and avatar blind blob
         await PublishProfileAsync(ct);
         // 4. Reactive listener: auto-drain mailbox when relay queue changes

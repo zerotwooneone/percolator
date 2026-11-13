@@ -244,57 +244,51 @@ internal sealed class SwarmSimulationCoordinator
         // Discover loopback candidate via INetworkEndpointDiscoveryPort and initiate in-band transfer if ratchet session exists
         using (var initScope = initiator.Services.CreateScope())
         {
-            var endpointDiscovery = initScope.ServiceProvider.GetService<INetworkEndpointDiscoveryPort>();
-            if (endpointDiscovery != null)
+            var endpointDiscovery = initScope.ServiceProvider.GetRequiredService<INetworkEndpointDiscoveryPort>();
+            var candidates = await endpointDiscovery.DiscoverLocalCandidatesAsync(DirectWanPolicy.DisabledByDefault, ct);
+            foreach (var candidate in candidates)
             {
-                var candidates = await endpointDiscovery.DiscoverLocalCandidatesAsync(DirectWanPolicy.DisabledByDefault, ct);
-                foreach (var candidate in candidates)
-                {
-                    _logSink.Log(new SimulatorLogEntry(
-                        DateTimeOffset.UtcNow,
-                        LogLevel.Information,
-                        initiator.DisplayName,
-                        initiator.Id,
-                        "EndpointDiscovery",
-                        $"Discovered local loopback candidate: {candidate.Host.Value}:{candidate.Port.Value} (Kind: {candidate.Kind})"));
-                }
+                _logSink.Log(new SimulatorLogEntry(
+                    DateTimeOffset.UtcNow,
+                    LogLevel.Information,
+                    initiator.DisplayName,
+                    initiator.Id,
+                    "EndpointDiscovery",
+                    $"Discovered local loopback candidate: {candidate.Host.Value}:{candidate.Port.Value} (Kind: {candidate.Kind})"));
             }
 
-            var ratchetRepo = initScope.ServiceProvider.GetService<IRatchetSessionRepository>();
-            var actionHandler = initScope.ServiceProvider.GetService<IFileTransferActionHandler>();
-            if (ratchetRepo != null && actionHandler != null)
+            var ratchetRepo = initScope.ServiceProvider.GetRequiredService<IRatchetSessionRepository>();
+            var actionHandler = initScope.ServiceProvider.GetRequiredService<IFileTransferActionHandler>();
+            foreach (var r in recipients)
             {
-                foreach (var r in recipients)
+                var session = await ratchetRepo.GetSessionAsync(initiator.PublicIdentityId, r.PublicIdentityId, DeviceId.Primary, ct);
+                if (session != null)
                 {
-                    var session = await ratchetRepo.GetSessionAsync(initiator.PublicIdentityId, r.PublicIdentityId, DeviceId.Primary, ct);
-                    if (session != null)
-                    {
-                        var channelId = ChannelIdUtility.DeterministicFor(initiator.PublicIdentityId, r.PublicIdentityId);
-                        var sourceRoot = RootDirectoryPath.Parse(presetsDir);
-                        var sanitizedPath = SanitizedRelativePath.Parse(preset.RelativeFileName);
-                        var initResult = await actionHandler.InitiateTransferAsync(
-                            channelId,
-                            initiator.PublicIdentityId,
-                            [r.PublicIdentityId],
-                            sourceRoot,
-                            [sanitizedPath],
-                            DirectWanPolicy.DisabledByDefault,
-                            ct: ct);
+                    var channelId = ChannelIdUtility.DeterministicFor(initiator.PublicIdentityId, r.PublicIdentityId);
+                    var sourceRoot = RootDirectoryPath.Parse(presetsDir);
+                    var sanitizedPath = SanitizedRelativePath.Parse(preset.RelativeFileName);
+                    var initResult = await actionHandler.InitiateTransferAsync(
+                        channelId,
+                        initiator.PublicIdentityId,
+                        [r.PublicIdentityId],
+                        sourceRoot,
+                        [sanitizedPath],
+                        DirectWanPolicy.DisabledByDefault,
+                        ct: ct);
 
-                        if (initResult.IsSuccess)
-                        {
-                            await initiator.FlushOutboxAsync(ct);
-                        }
-                        else
-                        {
-                            _logSink.Log(new SimulatorLogEntry(
-                                DateTimeOffset.UtcNow,
-                                LogLevel.Warning,
-                                initiator.DisplayName,
-                                initiator.Id,
-                                "SwarmFileTransfer",
-                                $"In-band transfer initiation warning: {initResult.Error!.Description}"));
-                        }
+                    if (initResult.IsSuccess)
+                    {
+                        await initiator.FlushOutboxAsync(ct);
+                    }
+                    else
+                    {
+                        _logSink.Log(new SimulatorLogEntry(
+                            DateTimeOffset.UtcNow,
+                            LogLevel.Warning,
+                            initiator.DisplayName,
+                            initiator.Id,
+                            "SwarmFileTransfer",
+                            $"In-band transfer initiation warning: {initResult.Error!.Description}"));
                     }
                 }
             }
@@ -415,30 +409,27 @@ internal sealed class SwarmSimulationCoordinator
 
         using (var recipScope = recipient.Services.CreateScope())
         {
-            var actionHandler = recipScope.ServiceProvider.GetService<IFileTransferActionHandler>();
-            var sessionRepo = recipScope.ServiceProvider.GetService<ITransferSessionRepository>();
-            if (actionHandler != null && sessionRepo != null)
+            var actionHandler = recipScope.ServiceProvider.GetRequiredService<IFileTransferActionHandler>();
+            var sessionRepo = recipScope.ServiceProvider.GetRequiredService<ITransferSessionRepository>();
+            var transferSessionId = TransferSessionId.FromGuid(sessionId);
+            var existingSession = await sessionRepo.GetSessionByIdAsync(transferSessionId, ct);
+            if (existingSession != null)
             {
-                var transferSessionId = TransferSessionId.FromGuid(sessionId);
-                var existingSession = await sessionRepo.GetSessionByIdAsync(transferSessionId, ct);
-                if (existingSession != null)
+                var destinationRoot = RootDirectoryPath.Parse(recipient.NodeDownloadsDirectory);
+                var acceptResult = await actionHandler.AcceptTransferAsync(transferSessionId, destinationRoot, ct: ct);
+                if (acceptResult.IsSuccess)
                 {
-                    var destinationRoot = RootDirectoryPath.Parse(recipient.NodeDownloadsDirectory);
-                    var acceptResult = await actionHandler.AcceptTransferAsync(transferSessionId, destinationRoot, ct: ct);
-                    if (acceptResult.IsSuccess)
-                    {
-                        await recipient.FlushOutboxAsync(ct);
-                    }
-                    else
-                    {
-                        _logSink.Log(new SimulatorLogEntry(
-                            DateTimeOffset.UtcNow,
-                            LogLevel.Warning,
-                            recipient.DisplayName,
-                            recipient.Id,
-                            "SwarmFileTransfer",
-                            $"In-band transfer acceptance warning: {acceptResult.Error!.Description}"));
-                    }
+                    await recipient.FlushOutboxAsync(ct);
+                }
+                else
+                {
+                    _logSink.Log(new SimulatorLogEntry(
+                        DateTimeOffset.UtcNow,
+                        LogLevel.Warning,
+                        recipient.DisplayName,
+                        recipient.Id,
+                        "SwarmFileTransfer",
+                        $"In-band transfer acceptance warning: {acceptResult.Error!.Description}"));
                 }
             }
         }

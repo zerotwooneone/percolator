@@ -17,21 +17,21 @@ public sealed class DiscoveryPayloadHandler : IAppPayloadHandler
 
     private readonly IRelayPeerDirectory _directory;
     private readonly IPrivateRendezvousService _rendezvousService;
-    private readonly IPayloadSerializer? _serializer;
-    private readonly IPayloadSender? _payloadSender;
+    private readonly IPayloadSerializer _serializer;
+    private readonly IPayloadSender _payloadSender;
     private readonly PublicIdentityId _localNodeIdentityId;
 
     public DiscoveryPayloadHandler(
         IRelayPeerDirectory directory,
         IPrivateRendezvousService rendezvousService,
-        IPayloadSerializer? serializer = null,
-        IPayloadSender? payloadSender = null,
-        PublicIdentityId localNodeIdentityId = default)
+        IPayloadSerializer serializer,
+        IPayloadSender payloadSender,
+        PublicIdentityId localNodeIdentityId)
     {
         _directory = directory ?? throw new ArgumentNullException(nameof(directory));
         _rendezvousService = rendezvousService ?? throw new ArgumentNullException(nameof(rendezvousService));
-        _serializer = serializer;
-        _payloadSender = payloadSender;
+        _serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
+        _payloadSender = payloadSender ?? throw new ArgumentNullException(nameof(payloadSender));
         _localNodeIdentityId = localNodeIdentityId;
     }
 
@@ -60,12 +60,6 @@ public sealed class DiscoveryPayloadHandler : IAppPayloadHandler
         DiscoveryOpcode opcode = (DiscoveryOpcode)context.Payload.Span[0];
         ReadOnlyMemory<byte> body = context.Payload.Slice(1);
 
-        if (_serializer is null)
-        {
-            return DomainResult.Failure(new DomainError(
-                "SERIALIZER_NOT_CONFIGURED", "Payload serializer is required to dispatch wire frames."));
-        }
-
         switch (opcode)
         {
             case DiscoveryOpcode.RegisterVisibility:
@@ -93,16 +87,11 @@ public sealed class DiscoveryPayloadHandler : IAppPayloadHandler
                     return DomainResult.Failure(responseResult.Error);
                 }
 
-                if (_payloadSender is not null)
-                {
-                    return await SendResponseFrameAsync(
-                        context,
-                        DiscoveryOpcode.NearbyResponse,
-                        responseResult.Value,
-                        ct).ConfigureAwait(false);
-                }
-
-                return DomainResult.Success();
+                return await SendResponseFrameAsync(
+                    context,
+                    DiscoveryOpcode.NearbyResponse,
+                    responseResult.Value,
+                    ct).ConfigureAwait(false);
             }
 
             case DiscoveryOpcode.RendezvousPublish:
@@ -130,16 +119,11 @@ public sealed class DiscoveryPayloadHandler : IAppPayloadHandler
                     return DomainResult.Failure(responseResult.Error);
                 }
 
-                if (_payloadSender is not null)
-                {
-                    return await SendResponseFrameAsync(
-                        context,
-                        DiscoveryOpcode.RendezvousResponse,
-                        responseResult.Value,
-                        ct).ConfigureAwait(false);
-                }
-
-                return DomainResult.Success();
+                return await SendResponseFrameAsync(
+                    context,
+                    DiscoveryOpcode.RendezvousResponse,
+                    responseResult.Value,
+                    ct).ConfigureAwait(false);
             }
 
             default:
@@ -283,7 +267,7 @@ public sealed class DiscoveryPayloadHandler : IAppPayloadHandler
         T responsePayload,
         CancellationToken ct)
     {
-        ReadOnlyMemory<byte> serializedBody = _serializer!.Serialize(responsePayload);
+        ReadOnlyMemory<byte> serializedBody = _serializer.Serialize(responsePayload);
         byte[] framed = new byte[1 + serializedBody.Length];
         framed[0] = (byte)responseOpcode;
         serializedBody.Span.CopyTo(framed.AsSpan(1));
@@ -297,6 +281,6 @@ public sealed class DiscoveryPayloadHandler : IAppPayloadHandler
             framed,
             DeliveryRoute.RelayedOneToOne);
 
-        return await _payloadSender!.SendPayloadAsync(outbound, ct).ConfigureAwait(false);
+        return await _payloadSender.SendPayloadAsync(outbound, ct).ConfigureAwait(false);
     }
 }

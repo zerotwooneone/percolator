@@ -163,7 +163,7 @@ internal sealed class ProfileSyncCoordinator
             using var scope = sender.Services.CreateScope();
             var chatService = scope.ServiceProvider.GetRequiredService<IChatService>();
             var cryptoEngine = scope.ServiceProvider.GetRequiredService<ICryptoEngine>();
-            var routingRepo = scope.ServiceProvider.GetService<IPeerMailboxRoutingRepository>();
+            var routingRepo = scope.ServiceProvider.GetRequiredService<IPeerMailboxRoutingRepository>();
             var channelRepo = scope.ServiceProvider.GetRequiredService<IChannelRepository>();
             var timeProvider = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>();
 
@@ -182,7 +182,7 @@ internal sealed class ProfileSyncCoordinator
             }
 
             var route = DeliveryRoute.DirectP2P;
-            if (routingRepo != null && recipient.HomeRelay != null)
+            if (recipient.HomeRelay != null)
             {
                 var now = timeProvider.UtcNow;
                 var bestRoute = await routingRepo.GetBestRouteAsync(recipient.PublicIdentityId, now, ct);

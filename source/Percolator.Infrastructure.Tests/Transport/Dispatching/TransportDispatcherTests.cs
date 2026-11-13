@@ -170,7 +170,7 @@ public sealed class TransportDispatcherTests
         var groupCredsRepo = new MockGroupCredentialsRepository();
         var mailboxRepo = new MockPeerMailboxRoutingRepository();
         var relayResolver = new MockChannelRelayResolver();
-        var streamRegistry = new StreamRegistry();
+        var streamRegistry = new StreamRegistry(new StreamRegistryOptions());
 
         var dispatcher = new TransportDispatcher(
             invoker,
@@ -232,7 +232,7 @@ public sealed class TransportDispatcherTests
         var groupCredsRepo = new MockGroupCredentialsRepository();
         var mailboxRepo = new MockPeerMailboxRoutingRepository();
         var relayResolver = new MockChannelRelayResolver();
-        var streamRegistry = new StreamRegistry();
+        var streamRegistry = new StreamRegistry(new StreamRegistryOptions());
 
         var dispatcher = new TransportDispatcher(
             invoker,
@@ -268,7 +268,7 @@ public sealed class TransportDispatcherTests
         var groupCredsRepo = new MockGroupCredentialsRepository();
         var mailboxRepo = new MockPeerMailboxRoutingRepository();
         var relayResolver = new MockChannelRelayResolver();
-        var streamRegistry = new StreamRegistry();
+        var streamRegistry = new StreamRegistry(new StreamRegistryOptions());
 
         var dispatcher = new TransportDispatcher(
             invoker,
@@ -304,7 +304,7 @@ public sealed class TransportDispatcherTests
         var groupCredsRepo = new MockGroupCredentialsRepository();
         var mailboxRepo = new MockPeerMailboxRoutingRepository();
         var relayResolver = new MockChannelRelayResolver();
-        var streamRegistry = new StreamRegistry();
+        var streamRegistry = new StreamRegistry(new StreamRegistryOptions());
 
         var dispatcher = new TransportDispatcher(
             invoker,

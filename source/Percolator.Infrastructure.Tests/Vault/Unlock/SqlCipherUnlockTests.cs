@@ -40,7 +40,7 @@ public class SqlCipherUnlockTests
         _envelopePacker = new VaultEnvelopePacker(memoryKb: 1024, iterations: 1, parallelism: 1);
         _canaryProbe = new DatabaseCanaryProbe();
         _migrator = new NoOpDatabaseMigrator();
-        _hostFactory = new DefaultStage2HostFactory();
+        _hostFactory = new DefaultStage2HostFactory(_options);
         _wipeHandler = new DuressWipeHandler(_options);
 
         _coordinator = new SqlCipherDatabaseUnlockCoordinator(

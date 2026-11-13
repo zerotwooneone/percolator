@@ -10,11 +10,11 @@ public sealed class ChatMediaService
     public const long InlineThresholdBytes = 32 * 1024; // 32 KB
     public const long MaxAttachmentBytes = 50 * 1024 * 1024; // 50 MB
 
-    private readonly IBlobStorageService? _blobStorage;
+    private readonly IBlobStorageService _blobStorage;
 
-    public ChatMediaService(IBlobStorageService? blobStorage = null)
+    public ChatMediaService(IBlobStorageService blobStorage)
     {
-        _blobStorage = blobStorage;
+        _blobStorage = blobStorage ?? throw new ArgumentNullException(nameof(blobStorage));
     }
 
     public bool IsInlineEligible(long byteSize) => byteSize >= 0 && byteSize <= InlineThresholdBytes;
@@ -106,12 +106,6 @@ public sealed class ChatMediaService
                 "ATTACHMENT_TOO_LARGE", "Attachment exceeds maximum size limit of 50 MB."));
         }
 
-        if (_blobStorage is null)
-        {
-            return DomainResult<MediaAttachmentDto>.Failure(new DomainError(
-                "BLOB_STORAGE_UNAVAILABLE", "Out-of-band blob storage service is not configured."));
-        }
-
         var uploadRequest = new BlobUploadRequest(
             plaintextStream,
             contentType,
@@ -148,12 +142,6 @@ public sealed class ChatMediaService
                 "MISSING_BLOB_REFERENCE", "Attachment does not contain an out-of-band blob reference."));
         }
 
-        if (_blobStorage is null)
-        {
-            return DomainResult<BlobDownloadResult>.Failure(new DomainError(
-                "BLOB_STORAGE_UNAVAILABLE", "Out-of-band blob storage service is not configured."));
-        }
-
         var downloadRequest = new BlobDownloadRequest(attachment.OutOfBandReference, remotePeerId);
         return await _blobStorage.DownloadBlobAsync(downloadRequest, progress, ct).ConfigureAwait(false);
     }
@@ -162,7 +150,7 @@ public sealed class ChatMediaService
         IEnumerable<MediaAttachmentDto>? attachments,
         CancellationToken ct = default)
     {
-        if (_blobStorage is null || attachments is null)
+        if (attachments is null)
         {
             return;
         }

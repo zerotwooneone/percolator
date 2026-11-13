@@ -68,7 +68,7 @@ public sealed class DisappearingMessageEvictionWorkerTests
         var startTime = new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
         var timeProvider = new TestTimeProvider(startTime);
         var chunkStore = new TestChunkStore();
-        var worker = new DisappearingMessageEvictionWorker(testDb.DbContext, timeProvider, chunkStore);
+        var worker = new DisappearingMessageEvictionWorker(testDb.DbContext, chunkStore, timeProvider);
 
         ulong startMs = (ulong)startTime.ToUnixTimeMilliseconds();
         ulong expiryMs = startMs + 30_000UL; // 30 seconds

@@ -33,7 +33,7 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
         IRelayProfileRepository profileRepository,
         IRelayPreKeyRepository preKeyRepository,
         ILocalChunkStore chunkStore,
-        IRelayMailboxCapabilityStore? capabilityStore = null,
+        IRelayMailboxCapabilityStore capabilityStore,
         IIngressFilterService? ingressFilter = null,
         ISealedEnvelopeUnwrapper? unwrapper = null,
         IInboundIngressPipeline? ingressPipeline = null)
@@ -41,7 +41,7 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
         _profileRepository = profileRepository ?? throw new ArgumentNullException(nameof(profileRepository));
         _preKeyRepository = preKeyRepository ?? throw new ArgumentNullException(nameof(preKeyRepository));
         _chunkStore = chunkStore ?? throw new ArgumentNullException(nameof(chunkStore));
-        _capabilityStore = capabilityStore ?? new InMemoryRelayMailboxCapabilityStore();
+        _capabilityStore = capabilityStore ?? throw new ArgumentNullException(nameof(capabilityStore));
         _ingressFilter = ingressFilter;
         _unwrapper = unwrapper;
         _ingressPipeline = ingressPipeline;

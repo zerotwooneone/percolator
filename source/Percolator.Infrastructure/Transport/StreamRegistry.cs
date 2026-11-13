@@ -31,9 +31,9 @@ public sealed class StreamRegistry : IStreamRegistryManagement
     private readonly ConcurrentDictionary<PublicIdentityId, Channel<ReadOnlyMemory<byte>>> _relayStreams = new();
     private readonly ConcurrentDictionary<PublicIdentityId, Uri> _directEndpoints = new();
 
-    public StreamRegistry(StreamRegistryOptions? options = null)
+    public StreamRegistry(StreamRegistryOptions options)
     {
-        _options = options ?? new StreamRegistryOptions();
+        _options = options ?? throw new ArgumentNullException(nameof(options));
     }
 
     public bool HasActiveStream(PublicIdentityId targetId) => _peerStreams.ContainsKey(targetId);

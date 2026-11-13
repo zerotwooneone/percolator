@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Percolator.Application2IntegrationTests.Adapters;
+using Percolator.Application2IntegrationTests.Fakes;
 using Percolator.Apps.Discovery.Features.PrivateRendezvous;
 using Percolator.Apps.Discovery.Features.RelayDirectoryHosting;
 using Percolator.Apps.Discovery.Ingress;
@@ -62,7 +63,7 @@ public sealed class RelayNode
             Directory,
             RendezvousService,
             new TestPayloadSerializer(),
-            null,
+            new FakePayloadSender(),
             RelayIdentityId);
     }
 

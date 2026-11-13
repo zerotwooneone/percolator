@@ -5,6 +5,7 @@ using Percolator.Apps.Discovery.Features.NearbyPeerDiscovery;
 using Percolator.Apps.Discovery.Features.PrivateRendezvous;
 using Percolator.Apps.Discovery.Features.RelayDirectoryHosting;
 using Percolator.Apps.Discovery.Ingress;
+using Percolator.Apps.Discovery.Tests.TestDoubles;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
@@ -36,7 +37,7 @@ public sealed class DiscoveryPayloadHandlerTests
         _serializer = new FakeDiscoverySerializer();
         _payloadSender = new FakePayloadSender();
 
-        _handler = new DiscoveryPayloadHandler(_directory, _rendezvousService, _serializer, _payloadSender);
+        _handler = new DiscoveryPayloadHandler(_directory, _rendezvousService, _serializer, _payloadSender, PublicIdentityId.New());
     }
 
     [Test]
@@ -183,7 +184,7 @@ public sealed class DiscoveryPayloadHandlerTests
     [Test]
     public void DiscoveryIngressFilter_EnforcesPolicyAndRateLimits()
     {
-        var filter = new DiscoveryIngressFilter(_directory, maxRequestsPerWindow: 2);
+        var filter = new DiscoveryIngressFilter(_directory, new FakeDateTimeProvider(), maxRequestsPerWindow: 2);
         var validQueryFrame = new byte[] { (byte)DiscoveryOpcode.NearbyQuery, 0x01 };
 
         var ctx = new InboundPayloadContext(

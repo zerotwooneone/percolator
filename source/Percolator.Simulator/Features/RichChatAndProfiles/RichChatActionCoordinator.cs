@@ -64,10 +64,10 @@ internal sealed class RichChatActionCoordinator
             var chatService = scope.ServiceProvider.GetRequiredService<IChatService>();
 
             var route = DeliveryRoute.DirectP2P;
-            var routingRepo = scope.ServiceProvider.GetService<IPeerMailboxRoutingRepository>();
-            if (routingRepo != null && peer.HomeRelay != null)
+            var routingRepo = scope.ServiceProvider.GetRequiredService<IPeerMailboxRoutingRepository>();
+            if (peer.HomeRelay != null)
             {
-                var now = scope.ServiceProvider.GetService<IDateTimeProvider>()?.UtcNow ?? DateTimeOffset.UtcNow;
+                var now = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>().UtcNow;
                 var bestRoute = await routingRepo.GetBestRouteAsync(peer.PublicIdentityId, now, ct);
                 if (bestRoute != null)
                 {
@@ -155,10 +155,10 @@ internal sealed class RichChatActionCoordinator
             var chatService = scope.ServiceProvider.GetRequiredService<IChatService>();
 
             var route = DeliveryRoute.DirectP2P;
-            var routingRepo = scope.ServiceProvider.GetService<IPeerMailboxRoutingRepository>();
-            if (routingRepo != null && peer.HomeRelay != null)
+            var routingRepo = scope.ServiceProvider.GetRequiredService<IPeerMailboxRoutingRepository>();
+            if (peer.HomeRelay != null)
             {
-                var now = scope.ServiceProvider.GetService<IDateTimeProvider>()?.UtcNow ?? DateTimeOffset.UtcNow;
+                var now = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>().UtcNow;
                 var bestRoute = await routingRepo.GetBestRouteAsync(peer.PublicIdentityId, now, ct);
                 if (bestRoute != null)
                 {
@@ -243,10 +243,10 @@ internal sealed class RichChatActionCoordinator
             var chatService = scope.ServiceProvider.GetRequiredService<IChatService>();
 
             var route = DeliveryRoute.DirectP2P;
-            var routingRepo = scope.ServiceProvider.GetService<IPeerMailboxRoutingRepository>();
-            if (routingRepo != null && peer.HomeRelay != null)
+            var routingRepo = scope.ServiceProvider.GetRequiredService<IPeerMailboxRoutingRepository>();
+            if (peer.HomeRelay != null)
             {
-                var now = scope.ServiceProvider.GetService<IDateTimeProvider>()?.UtcNow ?? DateTimeOffset.UtcNow;
+                var now = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>().UtcNow;
                 var bestRoute = await routingRepo.GetBestRouteAsync(peer.PublicIdentityId, now, ct);
                 if (bestRoute != null)
                 {
