@@ -162,7 +162,7 @@ public sealed class UnauthenticatedDeliveryEndpointTests
         _chunkStore = new InMemoryChunkStore();
         _capabilityStore = new InMemoryRelayMailboxCapabilityStore();
         _endpoint = new UnauthenticatedDeliveryEndpoint(_profileRepo, _preKeyRepo, _chunkStore, _capabilityStore);
-        _cryptoEngine = new SignalCryptoEngine();
+        _cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
     }
 
     [Test]

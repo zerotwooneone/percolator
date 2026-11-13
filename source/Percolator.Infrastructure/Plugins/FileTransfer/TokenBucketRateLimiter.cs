@@ -28,9 +28,9 @@ public sealed class TokenBucketRateLimiter : ITransferRateLimiter
     private readonly ConcurrentDictionary<TransferSessionId, TokenBucketState> _sessionDownloadBuckets = new();
     private readonly ConcurrentDictionary<TransferSessionId, TokenBucketState> _sessionUploadBuckets = new();
 
-    public TokenBucketRateLimiter(TimeProvider? timeProvider = null)
+    public TokenBucketRateLimiter(TimeProvider timeProvider)
     {
-        _timeProvider = timeProvider ?? TimeProvider.System;
+        _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         long now = _timeProvider.GetTimestamp();
         _lastGlobalDownloadTimestamp = now;
         _lastGlobalUploadTimestamp = now;

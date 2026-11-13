@@ -47,7 +47,7 @@ public class BaselineStage2HostFactoryTests
     public void BuildHost_ResolvesDbContextAndFactoryWithKey()
     {
         // Arrange
-        var options = Options.Create(new VaultStorageOptions { BaseDirectory = _tempDir });
+        var options = new VaultStorageOptions { BaseDirectory = _tempDir };
         var factory = new BaselineStage2HostFactory(options);
 
         // Act

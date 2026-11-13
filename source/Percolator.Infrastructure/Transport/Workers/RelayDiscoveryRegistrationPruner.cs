@@ -25,13 +25,13 @@ public sealed class RelayDiscoveryRegistrationPruner : BackgroundService
     [ActivatorUtilitiesConstructor]
     public RelayDiscoveryRegistrationPruner(
         IServiceScopeFactory scopeFactory,
-        TimeProvider? timeProvider = null,
+        TimeProvider timeProvider,
         TimeSpan? registrationTtl = null,
         TimeSpan? entryTtl = null,
         TimeSpan? interval = null)
     {
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
-        _timeProvider = timeProvider ?? TimeProvider.System;
+        _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _registrationTtl = registrationTtl ?? DefaultRegistrationTtl;
         _entryTtl = entryTtl ?? DefaultEntryTtl;
         _interval = interval ?? DefaultInterval;
@@ -39,13 +39,13 @@ public sealed class RelayDiscoveryRegistrationPruner : BackgroundService
 
     public RelayDiscoveryRegistrationPruner(
         PercolatorDbContext dbContext,
-        TimeProvider? timeProvider = null,
+        TimeProvider timeProvider,
         TimeSpan? registrationTtl = null,
         TimeSpan? entryTtl = null,
         TimeSpan? interval = null)
     {
         _directDbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
-        _timeProvider = timeProvider ?? TimeProvider.System;
+        _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _registrationTtl = registrationTtl ?? DefaultRegistrationTtl;
         _entryTtl = entryTtl ?? DefaultEntryTtl;
         _interval = interval ?? DefaultInterval;

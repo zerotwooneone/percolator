@@ -64,7 +64,7 @@ public sealed class AuthenticatedRelayEndpointTests
     {
         var capabilityStore = new InMemoryRelayMailboxCapabilityStore();
         var preKeyRepo = new InMemoryPreKeyRepo();
-        var cryptoEngine = new SignalCryptoEngine();
+        var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
         var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
 
         byte[] privId = new byte[32];
@@ -157,7 +157,7 @@ public sealed class AuthenticatedRelayEndpointTests
     {
         var capabilityStore = new InMemoryRelayMailboxCapabilityStore();
         var preKeyRepo = new InMemoryPreKeyRepo();
-        var cryptoEngine = new SignalCryptoEngine();
+        var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
         var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
 
         var routingToken = new byte[16];
@@ -200,7 +200,7 @@ public sealed class AuthenticatedRelayEndpointTests
     {
         var capabilityStore = new InMemoryRelayMailboxCapabilityStore();
         var preKeyRepo = new InMemoryPreKeyRepo();
-        var cryptoEngine = new SignalCryptoEngine();
+        var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
         var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
 
         var routingToken = new byte[16];
@@ -246,7 +246,7 @@ public sealed class AuthenticatedRelayEndpointTests
     {
         var capabilityStore = new InMemoryRelayMailboxCapabilityStore();
         var preKeyRepo = new InMemoryPreKeyRepo();
-        var cryptoEngine = new SignalCryptoEngine();
+        var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
         var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
 
         var routingToken = new byte[16];
@@ -344,7 +344,7 @@ public sealed class AuthenticatedRelayEndpointTests
     {
         var capabilityStore = new InMemoryRelayMailboxCapabilityStore();
         var preKeyRepo = new InMemoryPreKeyRepo();
-        var cryptoEngine = new SignalCryptoEngine();
+        var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
         var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
 
         var routingToken = new byte[16];

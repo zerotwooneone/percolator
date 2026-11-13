@@ -69,7 +69,7 @@ public partial class App : Avalonia.Application
 
                 // DESK-03: persona gate services. Identity keypairs are created here but only
                 // persist inside the authenticated Stage 2 vault — including the decoy session.
-                services.AddSingleton<ICryptoEngine>(_ => new SignalCryptoEngine());
+                services.AddSingleton<ICryptoEngine>(_ => new SignalCryptoEngine(new CryptographyOptions()));
                 services.AddSingleton<IDesktopSettingsRepository, SqliteDesktopSettingsRepository>();
                 services.AddSingleton<IPortReservationService, PortReservationService>();
                 services.AddSingleton<IIdenticonGenerator, IdenticonGenerator>();

@@ -184,13 +184,13 @@ public sealed class TcpMultiStreamPool : ITransferStreamPool
         TransferSessionId sessionId,
         PublicIdentityId peerId,
         StreamCount targetStreamCount,
-        CallbackEndpointValidator? validator = null,
+        CallbackEndpointValidator validator,
         RelayTransferPipeClient? pipeClient = null)
     {
         _sessionId = sessionId;
         _peerId = peerId;
         _targetStreamCount = targetStreamCount;
-        _validator = validator ?? new CallbackEndpointValidator();
+        _validator = validator ?? throw new ArgumentNullException(nameof(validator));
         _pipeClient = pipeClient;
     }
 
@@ -378,10 +378,10 @@ public sealed class TcpMultiStreamPoolFactory : ITransferStreamPoolFactory
 
     public TcpMultiStreamPoolFactory(
         RelayTransferPipeClient pipeClient,
-        CallbackEndpointValidator? validator = null)
+        CallbackEndpointValidator validator)
     {
         _pipeClient = pipeClient ?? throw new ArgumentNullException(nameof(pipeClient));
-        _validator = validator ?? new CallbackEndpointValidator();
+        _validator = validator ?? throw new ArgumentNullException(nameof(validator));
     }
 
     public ITransferStreamPool CreatePool(TransferSessionId sessionId, PublicIdentityId peerId, StreamCount streamCount)

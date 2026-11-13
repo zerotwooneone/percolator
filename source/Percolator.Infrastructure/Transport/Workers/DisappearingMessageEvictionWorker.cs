@@ -23,11 +23,11 @@ public sealed class DisappearingMessageEvictionWorker : BackgroundService
     public DisappearingMessageEvictionWorker(
         IServiceScopeFactory scopeFactory,
         ILocalChunkStore chunkStore,
-        TimeProvider? timeProvider = null,
+        TimeProvider timeProvider,
         TimeSpan? interval = null)
     {
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
-        _timeProvider = timeProvider ?? TimeProvider.System;
+        _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _chunkStore = chunkStore ?? throw new ArgumentNullException(nameof(chunkStore));
         _interval = interval ?? TimeSpan.FromSeconds(30);
     }
@@ -35,11 +35,11 @@ public sealed class DisappearingMessageEvictionWorker : BackgroundService
     public DisappearingMessageEvictionWorker(
         PercolatorDbContext dbContext,
         ILocalChunkStore chunkStore,
-        TimeProvider? timeProvider = null,
+        TimeProvider timeProvider,
         TimeSpan? interval = null)
     {
         _directDbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
-        _timeProvider = timeProvider ?? TimeProvider.System;
+        _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _chunkStore = chunkStore ?? throw new ArgumentNullException(nameof(chunkStore));
         _interval = interval ?? TimeSpan.FromSeconds(30);
     }

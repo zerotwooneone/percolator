@@ -23,12 +23,12 @@ public sealed class RelayProfileSlotPruner : BackgroundService
     public RelayProfileSlotPruner(
         IDbContextFactory<PercolatorDbContext> contextFactory,
         IEventPublisher eventPublisher,
-        TimeProvider? timeProvider = null,
+        TimeProvider timeProvider,
         TimeSpan? pruneInterval = null)
     {
         _contextFactory = contextFactory ?? throw new ArgumentNullException(nameof(contextFactory));
         _eventPublisher = eventPublisher ?? throw new ArgumentNullException(nameof(eventPublisher));
-        _timeProvider = timeProvider ?? TimeProvider.System;
+        _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _pruneInterval = pruneInterval ?? TimeSpan.FromHours(1);
     }
 

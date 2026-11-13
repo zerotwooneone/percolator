@@ -22,9 +22,9 @@ public sealed class BaselineStage2HostFactory : IStage2HostFactory
 {
     private readonly VaultStorageOptions _options;
 
-    public BaselineStage2HostFactory(IOptions<VaultStorageOptions>? options = null)
+    public BaselineStage2HostFactory(VaultStorageOptions options)
     {
-        _options = options?.Value ?? new VaultStorageOptions();
+        _options = options ?? throw new ArgumentNullException(nameof(options));
     }
 
     public IHost BuildAuthenticatedHost(IMasterKeyHandle masterKeyHandle)
@@ -86,6 +86,7 @@ public sealed class BaselineStage2HostFactory : IStage2HostFactory
             services.AddScoped<IPeerMailboxRoutingRepository, SqlitePeerMailboxRoutingRepository>();
 
             // Background Maintenance Pruners
+            services.AddSingleton(TimeProvider.System);
             services.AddHostedService<OutboxRetentionPruner>();
             services.AddHostedService<RelayPreKeyDirectoryPruner>();
             services.AddHostedService<RelayProfileSlotPruner>();

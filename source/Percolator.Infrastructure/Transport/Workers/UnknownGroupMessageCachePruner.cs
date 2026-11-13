@@ -17,21 +17,21 @@ public sealed class UnknownGroupMessageCachePruner : BackgroundService
     [ActivatorUtilitiesConstructor]
     public UnknownGroupMessageCachePruner(
         IServiceScopeFactory scopeFactory,
-        TimeProvider? timeProvider = null,
+        TimeProvider timeProvider,
         TimeSpan? interval = null)
     {
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
-        _timeProvider = timeProvider ?? TimeProvider.System;
+        _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _interval = interval ?? TimeSpan.FromHours(1);
     }
 
     public UnknownGroupMessageCachePruner(
         IUnknownGroupMessageCacheRepository repository,
-        TimeProvider? timeProvider = null,
+        TimeProvider timeProvider,
         TimeSpan? interval = null)
     {
         _directRepository = repository ?? throw new ArgumentNullException(nameof(repository));
-        _timeProvider = timeProvider ?? TimeProvider.System;
+        _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _interval = interval ?? TimeSpan.FromHours(1);
     }
 

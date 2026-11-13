@@ -1,3 +1,5 @@
+using Percolator.Infrastructure.Common;
+
 namespace Percolator.Infrastructure.Tests.Transport.Dispatching;
 
 using System;
@@ -10,6 +12,7 @@ using Percolator.Domain.Common;
 using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Infrastructure.Common;
 using Percolator.Infrastructure.Transport;
 
 [TestFixture]
@@ -67,7 +70,7 @@ public sealed class IngressFilterServiceTests
             DateTimeOffset.UtcNow);
         repo.AddContact(allowedContact);
 
-        var service = new IngressFilterService(repo);
+        var service = new IngressFilterService(repo, new IngressFilterOptions(), new SystemDateTimeProvider());
 
         // Blocked sender rejection
         var blockedResult = await service.CheckIngressAllowedAsync(recipientId, blockedSenderId);

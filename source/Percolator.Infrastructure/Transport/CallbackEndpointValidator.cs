@@ -17,9 +17,9 @@ public sealed class CallbackEndpointValidator
 {
     private readonly CallbackEndpointValidatorOptions _options;
 
-    public CallbackEndpointValidator(CallbackEndpointValidatorOptions? options = null)
+    public CallbackEndpointValidator(CallbackEndpointValidatorOptions options)
     {
-        _options = options ?? new CallbackEndpointValidatorOptions();
+        _options = options ?? throw new ArgumentNullException(nameof(options));
     }
 
     public async Task<DomainResult<IPEndPoint>> ValidateEndpointAsync(

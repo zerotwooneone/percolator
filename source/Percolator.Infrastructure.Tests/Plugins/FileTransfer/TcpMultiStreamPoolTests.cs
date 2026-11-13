@@ -13,6 +13,7 @@ using Percolator.Apps.FileTransfer.Features.MultiStreamEngine;
 using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Infrastructure.Plugins.FileTransfer;
+using Percolator.Infrastructure.Transport;
 
 [TestFixture]
 public sealed class TcpMultiStreamPoolTests
@@ -180,7 +181,7 @@ public sealed class TcpMultiStreamPoolTests
             return ValueTask.FromResult<Stream>(ms);
         });
 
-        var factory = new TcpMultiStreamPoolFactory(pipeClient: pipeClient);
+        var factory = new TcpMultiStreamPoolFactory(pipeClient: pipeClient, validator: new CallbackEndpointValidator(new CallbackEndpointValidatorOptions()));
         var pool = factory.CreatePool(TransferSessionId.New(), PublicIdentityId.New(), StreamCount.FromInt(4));
 
         var rendezvous = new RelayRendezvousDescriptor(

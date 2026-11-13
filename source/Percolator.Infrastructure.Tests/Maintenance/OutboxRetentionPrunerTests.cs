@@ -22,7 +22,7 @@ public sealed class OutboxRetentionPrunerTests
         using var testDb = new SqliteTestDb();
         var factory = new TestDbContextFactory(testDb);
 
-        var act = () => new OutboxRetentionPruner(factory, null!);
+        var act = () => new OutboxRetentionPruner(factory, null!, TimeProvider.System);
         act.Should().Throw<ArgumentNullException>();
     }
 
@@ -232,7 +232,7 @@ public sealed class OutboxRetentionPrunerTests
         var factory = new TestDbContextFactory(testDb);
 
         var publisher = new FakeEventPublisher();
-        var pruner = new OutboxRetentionPruner(factory, publisher);
+        var pruner = new OutboxRetentionPruner(factory, publisher, TimeProvider.System);
 
         using var cts = new CancellationTokenSource();
         cts.Cancel();

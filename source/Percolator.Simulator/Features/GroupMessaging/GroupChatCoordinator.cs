@@ -1,4 +1,4 @@
-﻿using R3;
+using R3;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -831,7 +831,7 @@ internal sealed class GroupChatCoordinator : IDisposable
         var oldRatchet = await senderKeyRepo.GetSenderKeyRatchetAsync(channelId, authorId, DeviceId.Primary, ct);
         uint nextKeyId = oldRatchet != null ? oldRatchet.KeyId + 1 : 1;
 
-        var crypto = new SignalCryptoEngine();
+        var crypto = new SignalCryptoEngine(new CryptographyOptions());
         var (newSigningPriv, newSigningPub) = crypto.GenerateEphemeralKeyPair();
         var chainBytes = new byte[32];
         RandomNumberGenerator.Fill(chainBytes);

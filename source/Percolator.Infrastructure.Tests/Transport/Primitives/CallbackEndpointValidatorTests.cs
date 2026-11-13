@@ -14,7 +14,7 @@ public sealed class CallbackEndpointValidatorTests
     [SetUp]
     public void SetUp()
     {
-        _validator = new CallbackEndpointValidator();
+        _validator = new CallbackEndpointValidator(new CallbackEndpointValidatorOptions());
     }
 
     [Test]

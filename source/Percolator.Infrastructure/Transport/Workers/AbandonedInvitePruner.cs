@@ -17,21 +17,21 @@ public sealed class AbandonedInvitePruner : BackgroundService
     [ActivatorUtilitiesConstructor]
     public AbandonedInvitePruner(
         IServiceScopeFactory scopeFactory,
-        TimeProvider? timeProvider = null,
+        TimeProvider timeProvider,
         TimeSpan? interval = null)
     {
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
-        _timeProvider = timeProvider ?? TimeProvider.System;
+        _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _interval = interval ?? TimeSpan.FromHours(1);
     }
 
     public AbandonedInvitePruner(
         IGroupInvitationRepository repository,
-        TimeProvider? timeProvider = null,
+        TimeProvider timeProvider,
         TimeSpan? interval = null)
     {
         _directRepository = repository ?? throw new ArgumentNullException(nameof(repository));
-        _timeProvider = timeProvider ?? TimeProvider.System;
+        _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _interval = interval ?? TimeSpan.FromHours(1);
     }
 

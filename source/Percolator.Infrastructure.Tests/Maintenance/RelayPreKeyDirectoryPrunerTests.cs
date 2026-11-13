@@ -21,7 +21,7 @@ public sealed class RelayPreKeyDirectoryPrunerTests
         using var testDb = new SqliteTestDb();
         var factory = new TestDbContextFactory(testDb);
 
-        var act = () => new RelayPreKeyDirectoryPruner(factory, null!);
+        var act = () => new RelayPreKeyDirectoryPruner(factory, null!, TimeProvider.System);
         act.Should().Throw<ArgumentNullException>();
     }
 

@@ -97,6 +97,8 @@ public static class InfrastructureServiceCollectionExtensions
 
         // Platform & Cryptography Singletons
         services.AddSingleton<IDateTimeProvider, SystemDateTimeProvider>();
+        services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<CryptographyOptions>();
         services.AddSingleton<ICryptoEngine, SignalCryptoEngine>();
         services.AddSingleton<IZkProofEngine, ZkgroupCryptographyService>();
         services.AddSingleton<ISessionWirePacker, ProtobufSessionWirePacker>();
@@ -123,6 +125,8 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<IRelayMailboxCapabilityStore, InMemoryRelayMailboxCapabilityStore>();
         services.AddSingleton<IDesktopFileStorage, PortableDesktopFileStore>();
         services.AddSingleton<RelayTransferPipeClient>();
+        services.AddSingleton<CallbackEndpointValidatorOptions>();
+        services.AddSingleton<CallbackEndpointValidator>();
         services.AddSingleton<ITransferStreamPoolFactory, TcpMultiStreamPoolFactory>();
         services.AddSingleton<ITransferRateLimiter, TokenBucketRateLimiter>();
         services.AddSingleton<INetworkEndpointDiscoveryPort, NetworkInterfaceEndpointDiscoveryPort>();
@@ -191,6 +195,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IPeerMailboxRoutingRepository, SqlitePeerMailboxRoutingRepository>();
 
         // 4. Transport & Ingress Scoped Services
+        services.AddSingleton<IngressFilterOptions>();
         services.AddScoped<IIngressFilterService, IngressFilterService>();
         services.AddScoped<ITransportDispatcher, TransportDispatcher>();
         // ISealedEnvelopeUnwrapper is per-node: its PublicIdentityId recipientId cannot be resolved from DI.
@@ -237,16 +242,16 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddHostedService(sp => new DisappearingMessageEvictionWorker(
             sp.GetRequiredService<IServiceScopeFactory>(),
             sp.GetRequiredService<ILocalChunkStore>(),
-            sp.GetService<TimeProvider>()));
+            sp.GetRequiredService<TimeProvider>()));
         services.AddHostedService(sp => new UnknownGroupMessageCachePruner(
             sp.GetRequiredService<IServiceScopeFactory>(),
-            sp.GetService<TimeProvider>()));
+            sp.GetRequiredService<TimeProvider>()));
         services.AddHostedService(sp => new AbandonedInvitePruner(
             sp.GetRequiredService<IServiceScopeFactory>(),
-            sp.GetService<TimeProvider>()));
+            sp.GetRequiredService<TimeProvider>()));
         services.AddHostedService(sp => new RelayDiscoveryRegistrationPruner(
             sp.GetRequiredService<IServiceScopeFactory>(),
-            sp.GetService<TimeProvider>()));
+            sp.GetRequiredService<TimeProvider>()));
         services.AddHostedService<RelayBlobRetentionPruner>();
         services.AddHostedService<TransferOfferReaperWorker>();
         services.AddHostedService<SwarmEndpointRetentionPruner>();
@@ -283,19 +288,20 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddHostedService(sp => new DisappearingMessageEvictionWorker(
             sp.GetRequiredService<IServiceScopeFactory>(),
             sp.GetRequiredService<ILocalChunkStore>(),
-            sp.GetService<TimeProvider>()));
+            sp.GetRequiredService<TimeProvider>()));
         services.AddHostedService(sp => new UnknownGroupMessageCachePruner(
             sp.GetRequiredService<IServiceScopeFactory>(),
-            sp.GetService<TimeProvider>()));
+            sp.GetRequiredService<TimeProvider>()));
         services.AddHostedService(sp => new AbandonedInvitePruner(
             sp.GetRequiredService<IServiceScopeFactory>(),
-            sp.GetService<TimeProvider>()));
+            sp.GetRequiredService<TimeProvider>()));
 
         return services;
     }
 
     public static IServiceCollection AddDiscoveryInfrastructure(this IServiceCollection services)
     {
+        services.AddSingleton(TimeProvider.System);
         services.AddScoped<IDiscoveryAdmissionGate, DiscoveryAdmissionGate>();
         services.AddScoped<IRelayPeerDirectory, SqliteRelayPeerDirectory>();
         services.AddScoped<IPrivateRendezvousService, SqlitePrivateRendezvousService>();
@@ -306,7 +312,7 @@ public static class InfrastructureServiceCollectionExtensions
 
         services.AddHostedService(sp => new RelayDiscoveryRegistrationPruner(
             sp.GetRequiredService<IServiceScopeFactory>(),
-            sp.GetService<TimeProvider>()));
+            sp.GetRequiredService<TimeProvider>()));
 
         return services;
     }
@@ -326,8 +332,11 @@ public static class InfrastructureServiceCollectionExtensions
 
     public static IServiceCollection AddFileTransferInfrastructure(this IServiceCollection services)
     {
+        services.AddSingleton(TimeProvider.System);
         services.AddSingleton<IDesktopFileStorage, PortableDesktopFileStore>();
         services.AddSingleton<RelayTransferPipeClient>();
+        services.AddSingleton<CallbackEndpointValidatorOptions>();
+        services.AddSingleton<CallbackEndpointValidator>();
         services.AddSingleton<ITransferStreamPoolFactory, TcpMultiStreamPoolFactory>();
         services.AddSingleton<ITransferRateLimiter, TokenBucketRateLimiter>();
         services.AddSingleton<INetworkEndpointDiscoveryPort, NetworkInterfaceEndpointDiscoveryPort>();

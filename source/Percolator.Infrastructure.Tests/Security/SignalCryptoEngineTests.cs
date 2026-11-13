@@ -11,7 +11,7 @@ using Signal.Interop;
 [TestFixture]
 public sealed class SignalCryptoEngineTests
 {
-    private readonly SignalCryptoEngine _engine = new();
+    private readonly SignalCryptoEngine _engine = new(new CryptographyOptions());
 
     [Test]
     public void Ed25519_GenerateSignAndVerify_SucceedsAndRejectsTamperedMessage()

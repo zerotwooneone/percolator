@@ -21,7 +21,7 @@ public sealed class RelayProfileSlotPrunerTests
         using var testDb = new SqliteTestDb();
         var factory = new TestDbContextFactory(testDb);
 
-        var act = () => new RelayProfileSlotPruner(factory, null!);
+        var act = () => new RelayProfileSlotPruner(factory, null!, TimeProvider.System);
         act.Should().Throw<ArgumentNullException>();
     }
 

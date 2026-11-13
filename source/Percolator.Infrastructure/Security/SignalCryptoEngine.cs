@@ -20,9 +20,9 @@ public sealed class SignalCryptoEngine : ICryptoEngine
     private const int TagSize = 16;
     private readonly CryptographyOptions _options;
 
-    public SignalCryptoEngine(CryptographyOptions? options = null)
+    public SignalCryptoEngine(CryptographyOptions options)
     {
-        _options = options ?? new CryptographyOptions();
+        _options = options ?? throw new ArgumentNullException(nameof(options));
     }
 
     public (ChainKey NextChainKey, MessageKey DerivedMessageKey) StepRatchet(ChainKey currentChainKey)

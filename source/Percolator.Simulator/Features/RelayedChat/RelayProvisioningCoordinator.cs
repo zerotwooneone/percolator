@@ -33,7 +33,7 @@ internal sealed class RelayProvisioningCoordinator
     private readonly ISimulatorStateBus _stateBus;
     private readonly IStatusToastService _toastService;
     private readonly ISimulatorLogSink _logSink;
-    private readonly SignalCryptoEngine _crypto = new();
+    private readonly SignalCryptoEngine _crypto = new(new CryptographyOptions());
 
     public RelayProvisioningCoordinator(
         ISimulatedWorldStateService worldState,

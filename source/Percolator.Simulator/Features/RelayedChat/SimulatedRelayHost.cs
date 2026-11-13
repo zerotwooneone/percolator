@@ -165,7 +165,7 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
         var profileRepo = new SqliteRelayProfileRepository(contextFactory);
         var chunkStore = new LocalFileChunkStore(Path.Combine(_relayTempDirectory, "Chunks"));
         var ledgerRepo = new SqliteRelayLedgerRepository(contextFactory);
-        var cryptoEngine = new SignalCryptoEngine();
+        var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
         var zkEngine = new ZkgroupCryptographyService();
 
         // 2. Initialize Peer Directory and Private Rendezvous services using production PreKeyAvailabilityAdapter

@@ -142,7 +142,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         NodeDownloadsDirectory = Path.Combine(_nodeTempDirectory, "Downloads");
         Directory.CreateDirectory(NodeDownloadsDirectory);
         // Procedural cryptographic identity initialization
-        var crypto = new SignalCryptoEngine();
+        var crypto = new SignalCryptoEngine(new CryptographyOptions());
         var (ikPriv, ikPub) = crypto.GenerateEphemeralKeyPair();
         _identityPrivateKey = ikPriv;
         IdentityPublicKey = IdentityKey.FromSpan(ikPub.Span);
@@ -357,7 +357,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         ProfileKey.Dispose();
         ProfileKey = ProfileKey.Generate();
         MailboxDeliveryToken.Dispose();
-        MailboxDeliveryToken = DeliveryToken.DeriveFromProfileKey(IdentityPublicKey, ProfileKey, new SignalCryptoEngine());
+        MailboxDeliveryToken = DeliveryToken.DeriveFromProfileKey(IdentityPublicKey, ProfileKey, new SignalCryptoEngine(new CryptographyOptions()));
     }
     public void UpdateProfile(string newDisplayName, byte[] newIdenticonPng)
     {

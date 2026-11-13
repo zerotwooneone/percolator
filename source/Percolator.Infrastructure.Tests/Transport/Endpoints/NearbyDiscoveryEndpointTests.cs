@@ -80,7 +80,7 @@ public sealed class NearbyDiscoveryEndpointTests
     [Test]
     public async Task RegisterVisibility_WithValidSignature_RegistersSuccessfully()
     {
-        var crypto = new SignalCryptoEngine();
+        var crypto = new SignalCryptoEngine(new CryptographyOptions());
         var timeProvider = new FixedTimeProvider();
         var peerDir = new InMemoryRelayPeerDirectory(new DiscoveryAdmissionGate(), RelayDiscoveryPolicy.Open);
         var capabilityStore = new InMemoryRelayMailboxCapabilityStore();
@@ -125,7 +125,7 @@ public sealed class NearbyDiscoveryEndpointTests
     [Test]
     public async Task RegisterVisibility_WithoutPreKeys_Succeeds_ButNotDiscoverableUntilPreKeysPublished()
     {
-        var crypto = new SignalCryptoEngine();
+        var crypto = new SignalCryptoEngine(new CryptographyOptions());
         var timeProvider = new FixedTimeProvider();
         var peerDir = new InMemoryRelayPeerDirectory(new DiscoveryAdmissionGate(), RelayDiscoveryPolicy.Open);
         var capabilityStore = new InMemoryRelayMailboxCapabilityStore();
@@ -161,7 +161,7 @@ public sealed class NearbyDiscoveryEndpointTests
     [Test]
     public async Task RegisterVisibility_TimestampOutOfRange_ThrowsPermissionDenied()
     {
-        var crypto = new SignalCryptoEngine();
+        var crypto = new SignalCryptoEngine(new CryptographyOptions());
         var timeProvider = new FixedTimeProvider();
         var peerDir = new InMemoryRelayPeerDirectory(new DiscoveryAdmissionGate(), RelayDiscoveryPolicy.Open);
         var capabilityStore = new InMemoryRelayMailboxCapabilityStore();
@@ -187,7 +187,7 @@ public sealed class NearbyDiscoveryEndpointTests
     [Test]
     public async Task RegisterVisibility_WithDriftedTimestamp_ThrowsPermissionDenied()
     {
-        var crypto = new SignalCryptoEngine();
+        var crypto = new SignalCryptoEngine(new CryptographyOptions());
         var timeProvider = new FixedTimeProvider();
         var peerDir = new InMemoryRelayPeerDirectory(new DiscoveryAdmissionGate(), RelayDiscoveryPolicy.Open);
         var capabilityStore = new InMemoryRelayMailboxCapabilityStore();
@@ -218,7 +218,7 @@ public sealed class NearbyDiscoveryEndpointTests
     [Test]
     public async Task RegisterVisibility_WithInvalidSignature_ThrowsPermissionDenied()
     {
-        var crypto = new SignalCryptoEngine();
+        var crypto = new SignalCryptoEngine(new CryptographyOptions());
         var timeProvider = new FixedTimeProvider();
         var peerDir = new InMemoryRelayPeerDirectory(new DiscoveryAdmissionGate(), RelayDiscoveryPolicy.Open);
         var capabilityStore = new InMemoryRelayMailboxCapabilityStore();
@@ -246,7 +246,7 @@ public sealed class NearbyDiscoveryEndpointTests
     [Test]
     public async Task RegisterVisibility_WithMismatchedPreKeyIdentity_ThrowsPermissionDenied()
     {
-        var crypto = new SignalCryptoEngine();
+        var crypto = new SignalCryptoEngine(new CryptographyOptions());
         var timeProvider = new FixedTimeProvider();
         var peerDir = new InMemoryRelayPeerDirectory(new DiscoveryAdmissionGate(), RelayDiscoveryPolicy.Open);
         var capabilityStore = new InMemoryRelayMailboxCapabilityStore();
@@ -288,7 +288,7 @@ public sealed class NearbyDiscoveryEndpointTests
     [Test]
     public async Task QueryNearby_ReturnsDiscoverablePeersExceptRequester()
     {
-        var crypto = new SignalCryptoEngine();
+        var crypto = new SignalCryptoEngine(new CryptographyOptions());
         var timeProvider = new FixedTimeProvider();
         var peerDir = new InMemoryRelayPeerDirectory(new DiscoveryAdmissionGate(), RelayDiscoveryPolicy.Open);
         var capabilityStore = new InMemoryRelayMailboxCapabilityStore();

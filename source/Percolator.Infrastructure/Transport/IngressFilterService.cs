@@ -34,12 +34,12 @@ public sealed class IngressFilterService : IIngressFilterService
 
     public IngressFilterService(
         IPeerContactRepository contactRepository,
-        IngressFilterOptions? options = null,
-        IDateTimeProvider? timeProvider = null)
+        IngressFilterOptions options,
+        IDateTimeProvider timeProvider)
     {
         _contactRepository = contactRepository ?? throw new ArgumentNullException(nameof(contactRepository));
-        _options = options ?? new IngressFilterOptions();
-        _timeProvider = timeProvider ?? new DefaultDateTimeProvider();
+        _options = options ?? throw new ArgumentNullException(nameof(options));
+        _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _lastCleanupMinute = (int)(_timeProvider.UtcNow.ToUnixTimeSeconds() / 60);
     }
 
