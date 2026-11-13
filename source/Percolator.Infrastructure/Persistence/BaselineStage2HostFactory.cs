@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using Percolator.Application2.Delivery;
 using Percolator.Application2.Delivery.Ports;
 using Percolator.Application2.Ports;
 using Percolator.Domain.Channels.Ports;
@@ -85,6 +86,8 @@ public sealed class BaselineStage2HostFactory : IStage2HostFactory
             services.AddScoped<IPeerProfileRepository, SqlitePeerProfileRepository>();
             services.AddScoped<IPeerMailboxRoutingRepository, SqlitePeerMailboxRoutingRepository>();
             services.AddScoped<IRelayRegistrationRepository, SqliteRelayRegistrationRepository>();
+            services.AddSingleton<IRelayMailboxProvisioner, NullRelayMailboxProvisioner>();
+            services.AddScoped<IRelayDirectory, RelayDirectoryService>();
 
             // Background Maintenance Pruners
             services.AddSingleton(TimeProvider.System);

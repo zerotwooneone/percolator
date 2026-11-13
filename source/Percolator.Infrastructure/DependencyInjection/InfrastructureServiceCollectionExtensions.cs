@@ -11,6 +11,7 @@ using Microsoft.Extensions.Hosting;
 using Percolator.Application.Ports;
 using Percolator.Application2.Profiles;
 using Percolator.Application2.Services;
+using Percolator.Application2.Delivery;
 using Percolator.Application2.Delivery.Ports;
 using Percolator.Application2.Ports;
 using Percolator.Apps.Chat.Features.GroupInvitations;
@@ -184,6 +185,8 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IPeerContactQueryService, SqlPeerContactQueryService>();
         services.AddScoped<IChannelRepository, SqliteChannelRepository>();
         services.AddScoped<IRelayRegistrationRepository, SqliteRelayRegistrationRepository>();
+        services.AddSingleton<IRelayMailboxProvisioner, NullRelayMailboxProvisioner>();
+        services.AddScoped<IRelayDirectory, RelayDirectoryService>();
 
         services.AddScoped(sp => new SqliteRelayPreKeyRepository(sp.GetRequiredService<PercolatorDbContext>()));
         services.AddScoped<IRelayPreKeyRepository>(sp => sp.GetRequiredService<SqliteRelayPreKeyRepository>());
