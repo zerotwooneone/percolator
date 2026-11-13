@@ -1,5 +1,6 @@
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Hosting;
+using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.Domain.IntegrationTests.TestDoubles;
@@ -58,21 +59,21 @@ public sealed class ScenarioParticipant : IDisposable
         var sig = engine.SignEd25519(idPriv.Span, spkPub.Span);
 
         var store = new InMemoryPrivatePreKeyStore();
-        store.StoreSignedPreKeyPrivateAsync(id, devId, spkPriv).GetAwaiter().GetResult();
+        store.StoreSignedPreKeyAsync(id, devId, spkPriv, spkPub, DeviceLinkProof.FromSpan(sig)).GetAwaiter().GetResult();
 
         var participant = new ScenarioParticipant(
             name, id, devId, idPriv, idPub, spkPriv, spkPub, sig, store);
 
         if (opkPoolSize > 0)
         {
-            var opkList = new List<(uint KeyId, EphemeralPrivateKey Key)>();
+            var opkList = new List<OneTimePreKeyMaterial>();
             for (uint i = 1; i <= opkPoolSize; i++)
             {
                 var (priv, pub) = engine.GenerateEphemeralKeyPair();
                 participant.OneTimePreKeys.Add((i, pub, priv));
-                opkList.Add((i, priv));
+                opkList.Add(new OneTimePreKeyMaterial(i, priv, pub));
             }
-            store.StoreOneTimePreKeysPrivateAsync(id, devId, opkList).GetAwaiter().GetResult();
+            store.StoreOneTimePreKeysAsync(id, devId, opkList).GetAwaiter().GetResult();
         }
 
         return participant;
@@ -92,7 +93,7 @@ public sealed class ScenarioParticipant : IDisposable
         var sig = engine.SignEd25519(IdentityPrivateKey.Span, spkPub.Span);
 
         var store = new InMemoryPrivatePreKeyStore();
-        store.StoreSignedPreKeyPrivateAsync(IdentityId, deviceId, spkPriv).GetAwaiter().GetResult();
+        store.StoreSignedPreKeyAsync(IdentityId, deviceId, spkPriv, spkPub, DeviceLinkProof.FromSpan(sig)).GetAwaiter().GetResult();
 
         var idPrivBytes = IdentityPrivateKey.Span.ToArray();
         var idPrivCopy = EphemeralPrivateKey.FromSpan(idPrivBytes);
@@ -102,14 +103,14 @@ public sealed class ScenarioParticipant : IDisposable
 
         if (opkPoolSize > 0)
         {
-            var opkList = new List<(uint KeyId, EphemeralPrivateKey Key)>();
+            var opkList = new List<OneTimePreKeyMaterial>();
             for (uint i = 1; i <= opkPoolSize; i++)
             {
                 var (priv, pub) = engine.GenerateEphemeralKeyPair();
                 devParticipant.OneTimePreKeys.Add((i, pub, priv));
-                opkList.Add((i, priv));
+                opkList.Add(new OneTimePreKeyMaterial(i, priv, pub));
             }
-            store.StoreOneTimePreKeysPrivateAsync(IdentityId, deviceId, opkList).GetAwaiter().GetResult();
+            store.StoreOneTimePreKeysAsync(IdentityId, deviceId, opkList).GetAwaiter().GetResult();
         }
 
         return devParticipant;

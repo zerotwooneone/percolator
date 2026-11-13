@@ -79,8 +79,8 @@ public sealed class HandshakeService : IHandshakeService
                 new DomainError("NULL_PREKEY_BUNDLE", "Remote pre-key bundle cannot be null."));
         }
 
-        var privateKeyBytes = await _identityKeyStore.GetIdentityPrivateKeyAsync(ownerId, ct);
-        if (privateKeyBytes == null || privateKeyBytes.Length == 0)
+        using var identityPrivateKey = await _identityKeyStore.GetIdentityPrivateKeyAsync(ownerId, ct);
+        if (identityPrivateKey == null)
         {
             return DomainResult<DirectRatchetSession>.Failure(
                 new DomainError("IDENTITY_KEY_NOT_FOUND", "Local identity private key is missing."));
@@ -93,7 +93,7 @@ public sealed class HandshakeService : IHandshakeService
                 new DomainError("IDENTITY_KEY_NOT_FOUND", "Local identity public key is missing."));
         }
 
-        var x3dhResult = X3dhAgreement.Initiate(privateKeyBytes, ownerPublicKey, remoteBundle, _cryptoEngine);
+        var x3dhResult = X3dhAgreement.Initiate(identityPrivateKey.Span, ownerPublicKey, remoteBundle, _cryptoEngine);
         if (!x3dhResult.IsSuccess)
         {
             return DomainResult<DirectRatchetSession>.Failure(x3dhResult.Error!);
@@ -278,8 +278,8 @@ public sealed class HandshakeService : IHandshakeService
                 envelope.RecipientIdentityId, DeviceId.Primary, envelope.OneTimePreKeyId.Value, ct);
         }
 
-        var receiverIdentityPriv = await _identityKeyStore.GetIdentityPrivateKeyAsync(envelope.RecipientIdentityId, ct);
-        if (receiverIdentityPriv == null || receiverIdentityPriv.Length == 0)
+        using var receiverIdentityPriv = await _identityKeyStore.GetIdentityPrivateKeyAsync(envelope.RecipientIdentityId, ct);
+        if (receiverIdentityPriv == null)
         {
             return DomainResult.Failure(new DomainError("IDENTITY_KEY_MISSING", "Receiver identity private key is missing."));
         }
@@ -287,7 +287,7 @@ public sealed class HandshakeService : IHandshakeService
         var opkSpan = oneTimeKeyPriv != null ? oneTimeKeyPriv.Span : ReadOnlySpan<byte>.Empty;
 
         var masterSecretResult = X3dhAgreement.Receive(
-            receiverIdentityPriv,
+            receiverIdentityPriv.Span,
             signedPreKeyPriv.Span,
             opkSpan,
             envelope.SenderIdentityKey,

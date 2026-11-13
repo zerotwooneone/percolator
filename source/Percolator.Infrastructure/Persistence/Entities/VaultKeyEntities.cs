@@ -7,6 +7,7 @@ public sealed class VaultIdentityKeyEntity
     public Guid Id { get; set; }
     public byte[] PrivateKey { get; set; } = Array.Empty<byte>();
     public byte[] PublicKey { get; set; } = Array.Empty<byte>();
+    public byte[] ProfileKey { get; set; } = Array.Empty<byte>();
     public DateTimeOffset CreatedAtUtc { get; set; }
 }
 

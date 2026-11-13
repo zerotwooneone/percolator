@@ -152,20 +152,20 @@ internal sealed class RelayProvisioningCoordinator
 
             // 1. Generate OTPKs
             var otpkList = new List<(uint KeyId, DhPublicKey Key)>();
-            var otpkPrivList = new List<(uint KeyId, EphemeralPrivateKey Key)>();
+            var otpkMaterials = new List<OneTimePreKeyMaterial>();
 
             for (uint i = startId; i < startId + (uint)count; i++)
             {
                 var (priv, pub) = _crypto.GenerateEphemeralKeyPair();
                 otpkList.Add((i, pub));
-                otpkPrivList.Add((i, priv));
+                otpkMaterials.Add(new OneTimePreKeyMaterial(i, priv, pub));
             }
 
             // 2. Store private keys in persona's IPrivatePreKeyStore
             using (var scope = persona.Services.CreateScope())
             {
                 var preKeyStore = scope.ServiceProvider.GetRequiredService<IPrivatePreKeyStore>();
-                await preKeyStore.StoreOneTimePreKeysPrivateAsync(persona.PublicIdentityId, DeviceId.Primary, otpkPrivList, ct);
+                await preKeyStore.StoreOneTimePreKeysAsync(persona.PublicIdentityId, DeviceId.Primary, otpkMaterials, ct);
             }
 
             // 3. Ensure mailbox is registered via gRPC

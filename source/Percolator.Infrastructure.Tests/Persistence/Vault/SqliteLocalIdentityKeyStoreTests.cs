@@ -39,17 +39,38 @@ public class SqliteLocalIdentityKeyStoreTests
         Array.Fill(privBytes, (byte)0x22);
 
         var pubKey = IdentityKey.FromSpan(pubBytes);
+        using var privKey = EphemeralPrivateKey.FromSpan(privBytes);
+        using var profileKey = ProfileKey.Generate();
 
         // Act
-        await _store.SaveKeyAsync(identityId, privBytes, pubKey);
+        await _store.SaveIdentityKeysAsync(identityId, privKey, pubKey, profileKey);
 
         // Assert
         var retrievedPub = await _store.GetIdentityPublicKeyAsync(identityId);
         retrievedPub.Should().NotBeNull();
         retrievedPub!.Span.ToArray().Should().Equal(pubBytes);
 
-        var retrievedPriv = await _store.GetIdentityPrivateKeyAsync(identityId);
+        using var retrievedPriv = await _store.GetIdentityPrivateKeyAsync(identityId);
         retrievedPriv.Should().NotBeNull();
-        retrievedPriv.Should().Equal(privBytes);
+        retrievedPriv!.Span.ToArray().Should().Equal(privBytes);
+
+        var retrievedProfileKey = await _store.GetProfileKeyAsync(identityId);
+        retrievedProfileKey.Should().NotBeNull();
+        retrievedProfileKey!.Span.ToArray().Should().Equal(profileKey.Span.ToArray());
+    }
+
+    [Test]
+    public async Task RotateProfileKeyAsync_ReplacesStoredProfileKey()
+    {
+        var identityId = PublicIdentityId.New();
+        using var privKey = EphemeralPrivateKey.FromSpan(new byte[32]);
+        using var profileKey = ProfileKey.Generate();
+        await _store.SaveIdentityKeysAsync(identityId, privKey, IdentityKey.FromSpan(new byte[32]), profileKey);
+
+        var rotated = await _store.RotateProfileKeyAsync(identityId);
+
+        rotated.Span.ToArray().Should().NotEqual(profileKey.Span.ToArray());
+        var persisted = await _store.GetProfileKeyAsync(identityId);
+        persisted!.Span.ToArray().Should().Equal(rotated.Span.ToArray());
     }
 }

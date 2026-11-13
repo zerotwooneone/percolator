@@ -6,6 +6,7 @@ using Percolator.Application2.Tests.TestDoubles;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.Model;
+using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security;
 using Percolator.Domain.Security.Model;
@@ -74,7 +75,7 @@ public sealed class HandshakeServiceTests
         byte[] alicePub = new byte[32];
         alicePub[0] = 0x0A;
         _aliceIdentityKey = IdentityKey.FromSpan(alicePub);
-        _identityKeyStore.RegisterKey(_aliceId, _alicePrivKey, _aliceIdentityKey);
+        _identityKeyStore.RegisterKey(_aliceId, EphemeralPrivateKey.FromSpan(_alicePrivKey), _aliceIdentityKey);
 
         _bobId = PublicIdentityId.New();
         _bobDeviceId = DeviceId.Primary;
@@ -83,7 +84,7 @@ public sealed class HandshakeServiceTests
         byte[] bobPub = new byte[32];
         bobPub[0] = 0x0B;
         _bobIdentityKey = IdentityKey.FromSpan(bobPub);
-        _identityKeyStore.RegisterKey(_bobId, _bobPrivKey, _bobIdentityKey);
+        _identityKeyStore.RegisterKey(_bobId, EphemeralPrivateKey.FromSpan(_bobPrivKey), _bobIdentityKey);
     }
 
     private PreKeyBundle CreateBobPreKeyBundle(out EphemeralPrivateKey bobSpkPriv, out EphemeralPrivateKey bobOpkPriv)
@@ -239,8 +240,8 @@ public sealed class HandshakeServiceTests
         await _contactRepo.SaveAsync(contact);
 
         var bobBundle = CreateBobPreKeyBundle(out var bobSpkPriv, out var bobOpkPriv);
-        await _preKeyStore.StoreSignedPreKeyPrivateAsync(_bobId, DeviceId.Primary, bobSpkPriv);
-        await _preKeyStore.StoreOneTimePreKeysPrivateAsync(_bobId, DeviceId.Primary, [(42, bobOpkPriv)]);
+        await _preKeyStore.StoreSignedPreKeyAsync(_bobId, DeviceId.Primary, bobSpkPriv, bobBundle.SignedPreKey, bobBundle.SignedPreKeySignature);
+        await _preKeyStore.StoreOneTimePreKeysAsync(_bobId, DeviceId.Primary, [new OneTimePreKeyMaterial(42, bobOpkPriv, bobBundle.OneTimePreKey!)]);
 
         var chatHandler = new FakeAppPayloadHandler(AppId.Chat);
         _appRouter.RegisterHandler(chatHandler);
@@ -300,8 +301,8 @@ public sealed class HandshakeServiceTests
     {
         // Bob pre-keys setup
         var bobBundle = CreateBobPreKeyBundle(out var bobSpkPriv, out var bobOpkPriv);
-        await _preKeyStore.StoreSignedPreKeyPrivateAsync(_bobId, DeviceId.Primary, bobSpkPriv);
-        await _preKeyStore.StoreOneTimePreKeysPrivateAsync(_bobId, DeviceId.Primary, [(42, bobOpkPriv)]);
+        await _preKeyStore.StoreSignedPreKeyAsync(_bobId, DeviceId.Primary, bobSpkPriv, bobBundle.SignedPreKey, bobBundle.SignedPreKeySignature);
+        await _preKeyStore.StoreOneTimePreKeysAsync(_bobId, DeviceId.Primary, [new OneTimePreKeyMaterial(42, bobOpkPriv, bobBundle.OneTimePreKey!)]);
 
         var chatHandler = new FakeAppPayloadHandler(AppId.Chat);
         _appRouter.RegisterHandler(chatHandler);

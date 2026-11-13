@@ -1,3 +1,5 @@
+using Percolator.Domain.Identities.Ports;
+
 namespace Percolator.Infrastructure.Tests.Persistence.Vault;
 
 using System;
@@ -53,7 +55,10 @@ public class SqlitePrivatePreKeyStoreTests
         Array.Fill(privBytes, (byte)0x77);
         var opk = EphemeralPrivateKey.FromSpan(privBytes);
 
-        await _store.StoreOneTimePreKeysPrivateAsync(_ownerId, _deviceId, new[] { (keyId, opk) });
+        await _store.StoreOneTimePreKeysAsync(_ownerId, _deviceId, new[]
+        {
+            new OneTimePreKeyMaterial(keyId, opk, DhPublicKey.FromSpan(new byte[32]))
+        });
 
         // Act - Consume the OPK
         var consumedKey = await _store.TryConsumeOneTimePreKeyPrivateAsync(_ownerId, _deviceId, keyId);
@@ -83,7 +88,10 @@ public class SqlitePrivatePreKeyStoreTests
         var privKey = EphemeralPrivateKey.FromSpan(privBytes);
 
         // Act
-        await _store.StoreSignedPreKeyPrivateAsync(_ownerId, _deviceId, privKey);
+        await _store.StoreSignedPreKeyAsync(
+            _ownerId, _deviceId, privKey,
+            DhPublicKey.FromSpan(new byte[32]),
+            DeviceLinkProof.FromSpan(new byte[64]));
         var retrieved = await _store.GetSignedPreKeyPrivateAsync(_ownerId, _deviceId);
 
         // Assert

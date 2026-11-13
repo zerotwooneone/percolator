@@ -92,6 +92,7 @@ public class PercolatorDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.PublicKey).HasColumnType("BLOB");
             entity.Property(e => e.PrivateKey).HasColumnType("BLOB");
+            entity.Property(e => e.ProfileKey).HasColumnType("BLOB").IsRequired().Metadata.SetValueComparer(byteArrayComparer);
         });
         // 4. Vault Signed Prekeys
         modelBuilder.Entity<VaultSignedPreKeyEntity>(entity =>

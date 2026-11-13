@@ -237,14 +237,14 @@ public sealed class InMemoryPendingHandshakeRepository : IPendingHandshakeReposi
 
 public sealed class InMemoryLocalIdentityKeyStore : ILocalIdentityKeyStore
 {
-    private readonly ConcurrentDictionary<PublicIdentityId, (byte[] PrivateKey, IdentityKey PublicKey)> _keys = new();
+    private readonly ConcurrentDictionary<PublicIdentityId, (EphemeralPrivateKey PrivateKey, IdentityKey PublicKey, ProfileKey ProfileKey)> _keys = new();
 
-    public void RegisterKey(PublicIdentityId id, byte[] privateKey, IdentityKey publicKey)
+    public void RegisterKey(PublicIdentityId id, EphemeralPrivateKey privateKey, IdentityKey publicKey, ProfileKey? profileKey = null)
     {
-        _keys[id] = (privateKey, publicKey);
+        _keys[id] = (privateKey, publicKey, profileKey ?? ProfileKey.Generate());
     }
 
-    public Task<byte[]?> GetIdentityPrivateKeyAsync(PublicIdentityId identityId, CancellationToken ct = default)
+    public Task<EphemeralPrivateKey?> GetIdentityPrivateKeyAsync(PublicIdentityId identityId, CancellationToken ct = default)
     {
         return Task.FromResult(_keys.TryGetValue(identityId, out var entry) ? entry.PrivateKey : null);
     }
@@ -253,20 +253,54 @@ public sealed class InMemoryLocalIdentityKeyStore : ILocalIdentityKeyStore
     {
         return Task.FromResult(_keys.TryGetValue(identityId, out var entry) ? entry.PublicKey : null);
     }
+
+    public Task<ProfileKey?> GetProfileKeyAsync(PublicIdentityId identityId, CancellationToken ct = default)
+    {
+        return Task.FromResult(_keys.TryGetValue(identityId, out var entry) ? entry.ProfileKey : null);
+    }
+
+    public Task SaveIdentityKeysAsync(
+        PublicIdentityId identityId,
+        EphemeralPrivateKey privateKey,
+        IdentityKey publicKey,
+        ProfileKey profileKey,
+        CancellationToken ct = default)
+    {
+        _keys[identityId] = (privateKey, publicKey, profileKey);
+        return Task.CompletedTask;
+    }
+
+    public Task<ProfileKey> RotateProfileKeyAsync(PublicIdentityId identityId, CancellationToken ct = default)
+    {
+        if (!_keys.TryGetValue(identityId, out var entry))
+        {
+            throw new InvalidOperationException($"No identity keys stored for '{identityId.Value}'.");
+        }
+
+        var rotated = ProfileKey.Generate();
+        _keys[identityId] = (entry.PrivateKey, entry.PublicKey, rotated);
+        return Task.FromResult(rotated);
+    }
+
+    public Task DeleteIdentityKeysAsync(PublicIdentityId identityId, CancellationToken ct = default)
+    {
+        _keys.TryRemove(identityId, out _);
+        return Task.CompletedTask;
+    }
 }
 
 public sealed class InMemoryPrivatePreKeyStore : IPrivatePreKeyStore
 {
-    private readonly ConcurrentDictionary<(PublicIdentityId, DeviceId), EphemeralPrivateKey> _signedPreKeys = new();
-    private readonly ConcurrentDictionary<(PublicIdentityId, DeviceId, uint), EphemeralPrivateKey> _oneTimePreKeys = new();
+    private readonly ConcurrentDictionary<(PublicIdentityId, DeviceId), StoredSignedPreKey> _signedPreKeys = new();
+    private readonly ConcurrentDictionary<(PublicIdentityId, DeviceId, uint), OneTimePreKeyMaterial> _oneTimePreKeys = new();
 
     public Task<EphemeralPrivateKey?> GetSignedPreKeyPrivateAsync(
         PublicIdentityId ownerId,
         DeviceId deviceId,
         CancellationToken cancellationToken = default)
     {
-        _signedPreKeys.TryGetValue((ownerId, deviceId), out var key);
-        return Task.FromResult(key);
+        _signedPreKeys.TryGetValue((ownerId, deviceId), out var stored);
+        return Task.FromResult(stored?.PrivateKey);
     }
 
     public Task<EphemeralPrivateKey?> TryConsumeOneTimePreKeyPrivateAsync(
@@ -275,36 +309,60 @@ public sealed class InMemoryPrivatePreKeyStore : IPrivatePreKeyStore
         uint keyId,
         CancellationToken cancellationToken = default)
     {
-        if (_oneTimePreKeys.TryRemove((ownerId, deviceId, keyId), out var key))
+        if (_oneTimePreKeys.TryRemove((ownerId, deviceId, keyId), out var material))
         {
-            return Task.FromResult<EphemeralPrivateKey?>(key);
+            return Task.FromResult<EphemeralPrivateKey?>(material.PrivateKey);
         }
 
         return Task.FromResult<EphemeralPrivateKey?>(null);
     }
 
-    public Task StoreSignedPreKeyPrivateAsync(
+    public Task<StoredSignedPreKey?> GetSignedPreKeyAsync(
+        PublicIdentityId ownerId,
+        DeviceId deviceId,
+        CancellationToken cancellationToken = default)
+    {
+        _signedPreKeys.TryGetValue((ownerId, deviceId), out var stored);
+        return Task.FromResult(stored);
+    }
+
+    public Task StoreSignedPreKeyAsync(
         PublicIdentityId ownerId,
         DeviceId deviceId,
         EphemeralPrivateKey privateKey,
+        DhPublicKey publicKey,
+        DeviceLinkProof signature,
         CancellationToken cancellationToken = default)
     {
-        _signedPreKeys[(ownerId, deviceId)] = privateKey;
+        _signedPreKeys[(ownerId, deviceId)] = new StoredSignedPreKey(privateKey, publicKey, signature);
         return Task.CompletedTask;
     }
 
-    public Task StoreOneTimePreKeysPrivateAsync(
+    public Task StoreOneTimePreKeysAsync(
         PublicIdentityId ownerId,
         DeviceId deviceId,
-        IEnumerable<(uint KeyId, EphemeralPrivateKey Key)> keys,
+        IEnumerable<OneTimePreKeyMaterial> keys,
         CancellationToken cancellationToken = default)
     {
-        foreach (var (keyId, key) in keys)
+        foreach (var material in keys)
         {
-            _oneTimePreKeys[(ownerId, deviceId, keyId)] = key;
+            _oneTimePreKeys[(ownerId, deviceId, material.KeyId)] = material;
         }
 
         return Task.CompletedTask;
+    }
+
+    public Task<uint> GetNextOneTimePreKeyIdAsync(
+        PublicIdentityId ownerId,
+        DeviceId deviceId,
+        CancellationToken cancellationToken = default)
+    {
+        var maxId = _oneTimePreKeys.Keys
+            .Where(k => k.Item1 == ownerId && k.Item2 == deviceId)
+            .Select(k => (uint?)k.Item3)
+            .Max();
+
+        return Task.FromResult((maxId ?? 0u) + 1u);
     }
 }
 

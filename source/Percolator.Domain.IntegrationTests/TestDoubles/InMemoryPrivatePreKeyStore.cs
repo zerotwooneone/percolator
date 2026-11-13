@@ -7,8 +7,8 @@ namespace Percolator.Domain.IntegrationTests.TestDoubles;
 
 public sealed class InMemoryPrivatePreKeyStore : IPrivatePreKeyStore
 {
-    private readonly ConcurrentDictionary<string, EphemeralPrivateKey> _signedPreKeys = new();
-    private readonly ConcurrentDictionary<string, EphemeralPrivateKey> _oneTimePreKeys = new();
+    private readonly ConcurrentDictionary<string, StoredSignedPreKey> _signedPreKeys = new();
+    private readonly ConcurrentDictionary<string, OneTimePreKeyMaterial> _oneTimePreKeys = new();
 
     public Task<EphemeralPrivateKey?> GetSignedPreKeyPrivateAsync(
         PublicIdentityId ownerId,
@@ -16,8 +16,8 @@ public sealed class InMemoryPrivatePreKeyStore : IPrivatePreKeyStore
         CancellationToken cancellationToken = default)
     {
         var key = $"{ownerId}:{deviceId}";
-        _signedPreKeys.TryGetValue(key, out var privKey);
-        return Task.FromResult(privKey);
+        _signedPreKeys.TryGetValue(key, out var stored);
+        return Task.FromResult(stored?.PrivateKey);
     }
 
     public Task<EphemeralPrivateKey?> TryConsumeOneTimePreKeyPrivateAsync(
@@ -27,32 +27,58 @@ public sealed class InMemoryPrivatePreKeyStore : IPrivatePreKeyStore
         CancellationToken cancellationToken = default)
     {
         var key = $"{ownerId}:{deviceId}:{keyId}";
-        _oneTimePreKeys.TryRemove(key, out var privKey);
-        return Task.FromResult(privKey);
+        _oneTimePreKeys.TryRemove(key, out var material);
+        return Task.FromResult(material?.PrivateKey);
     }
 
-    public Task StoreSignedPreKeyPrivateAsync(
+    public Task<StoredSignedPreKey?> GetSignedPreKeyAsync(
         PublicIdentityId ownerId,
         DeviceId deviceId,
-        EphemeralPrivateKey privateKey,
         CancellationToken cancellationToken = default)
     {
         var key = $"{ownerId}:{deviceId}";
-        _signedPreKeys[key] = privateKey;
+        _signedPreKeys.TryGetValue(key, out var stored);
+        return Task.FromResult(stored);
+    }
+
+    public Task StoreSignedPreKeyAsync(
+        PublicIdentityId ownerId,
+        DeviceId deviceId,
+        EphemeralPrivateKey privateKey,
+        DhPublicKey publicKey,
+        DeviceLinkProof signature,
+        CancellationToken cancellationToken = default)
+    {
+        var key = $"{ownerId}:{deviceId}";
+        _signedPreKeys[key] = new StoredSignedPreKey(privateKey, publicKey, signature);
         return Task.CompletedTask;
     }
 
-    public Task StoreOneTimePreKeysPrivateAsync(
+    public Task StoreOneTimePreKeysAsync(
         PublicIdentityId ownerId,
         DeviceId deviceId,
-        IEnumerable<(uint KeyId, EphemeralPrivateKey Key)> keys,
+        IEnumerable<OneTimePreKeyMaterial> keys,
         CancellationToken cancellationToken = default)
     {
-        foreach (var (keyId, key) in keys)
+        foreach (var material in keys)
         {
-            var dictKey = $"{ownerId}:{deviceId}:{keyId}";
-            _oneTimePreKeys[dictKey] = key;
+            var dictKey = $"{ownerId}:{deviceId}:{material.KeyId}";
+            _oneTimePreKeys[dictKey] = material;
         }
         return Task.CompletedTask;
+    }
+
+    public Task<uint> GetNextOneTimePreKeyIdAsync(
+        PublicIdentityId ownerId,
+        DeviceId deviceId,
+        CancellationToken cancellationToken = default)
+    {
+        var prefix = $"{ownerId}:{deviceId}:";
+        var maxId = _oneTimePreKeys.Keys
+            .Where(k => k.StartsWith(prefix, StringComparison.Ordinal))
+            .Select(k => (uint?)uint.Parse(k[prefix.Length..]))
+            .Max();
+
+        return Task.FromResult((maxId ?? 0u) + 1u);
     }
 }

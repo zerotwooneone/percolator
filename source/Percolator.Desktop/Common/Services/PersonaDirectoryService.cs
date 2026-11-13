@@ -13,7 +13,7 @@ using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Ports;
-using Percolator.Infrastructure.Persistence.Repositories;
+using Percolator.Domain.Security.ValueObjects;
 
 namespace Percolator.Desktop.Common.Services;
 
@@ -55,6 +55,7 @@ public sealed class PersonaDirectoryService : IPersonaDirectory
             .ToDictionary(s => s.IdentityId);
 
         return profiles
+            .Where(p => p.Role == IdentityRole.UserPersona)
             .Select(p => ToEntry(p, settings))
             .OrderBy(e => e.SidebarOrder)
             .ThenBy(e => e.DisplayName, StringComparer.Ordinal)
@@ -79,6 +80,7 @@ public sealed class PersonaDirectoryService : IPersonaDirectory
         using var scope = CreateScope(session);
         var profiles = scope.ServiceProvider.GetRequiredService<IIdentityProfileRepository>();
         var keys = scope.ServiceProvider.GetRequiredService<ILocalIdentityKeyStore>();
+        var preKeys = scope.ServiceProvider.GetRequiredService<IPrivatePreKeyStore>();
 
         var profileResult = IdentityProfile.Create(identityId, trimmed, IdentityRole.UserPersona, _time);
         if (profileResult.IsFailure)
@@ -86,16 +88,23 @@ public sealed class PersonaDirectoryService : IPersonaDirectory
             throw new InvalidOperationException(profileResult.Error.Description);
         }
 
-        var (privateKey, publicKey) = _crypto.GenerateEphemeralKeyPair();
+        var (ikPriv, ikPub) = _crypto.GenerateEphemeralKeyPair();
+        var (spkPriv, spkPub) = _crypto.GenerateEphemeralKeyPair();
+        using var profileKey = ProfileKey.Generate();
         try
         {
-            var identityKey = IdentityKey.FromSpan(publicKey.Span);
-            await SaveKeyAsync(keys, identityId, privateKey.Span.ToArray(), identityKey, ct)
+            var identityKey = IdentityKey.FromSpan(ikPub.Span);
+            await keys.SaveIdentityKeysAsync(identityId, ikPriv, identityKey, profileKey, ct)
+                .ConfigureAwait(false);
+
+            var signature = DeviceLinkProof.FromSpan(_crypto.SignEd25519(ikPriv.Span, spkPub.Span));
+            await preKeys.StoreSignedPreKeyAsync(identityId, DeviceId.Primary, spkPriv, spkPub, signature, ct)
                 .ConfigureAwait(false);
         }
         finally
         {
-            privateKey.Dispose();
+            ikPriv.Zeroize();
+            spkPriv.Zeroize();
         }
 
         await profiles.SaveAsync(profileResult.Value!, ct).ConfigureAwait(false);
@@ -148,33 +157,13 @@ public sealed class PersonaDirectoryService : IPersonaDirectory
         var keys = scope.ServiceProvider.GetRequiredService<ILocalIdentityKeyStore>();
         var profiles = scope.ServiceProvider.GetRequiredService<IIdentityProfileRepository>();
 
-        await DeleteKeyAsync(keys, identityId, ct).ConfigureAwait(false);
+        await keys.DeleteIdentityKeysAsync(identityId, ct).ConfigureAwait(false);
         await profiles.DeleteAsync(identityId, ct).ConfigureAwait(false);
         await _settings.DeleteAsync(identityId.Value, ct).ConfigureAwait(false);
     }
 
     private static IServiceScope CreateScope(IAuthenticatedSession session) =>
         session.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-
-    private static Task SaveKeyAsync(
-        ILocalIdentityKeyStore store,
-        PublicIdentityId id,
-        byte[] privateKey,
-        IdentityKey publicKey,
-        CancellationToken ct) => store switch
-        {
-            SqliteLocalIdentityKeyStore sqlite => sqlite.SaveKeyAsync(id, privateKey, publicKey, ct),
-            _ => throw new NotSupportedException($"Key store {store.GetType().Name} cannot persist keys.")
-        };
-
-    private static Task DeleteKeyAsync(
-        ILocalIdentityKeyStore store,
-        PublicIdentityId id,
-        CancellationToken ct) => store switch
-        {
-            SqliteLocalIdentityKeyStore sqlite => sqlite.DeleteKeyAsync(id, ct),
-            _ => Task.CompletedTask
-        };
 
     private PersonaDirectoryEntry ToEntry(
         IdentityProfile profile,

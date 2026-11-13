@@ -33,6 +33,7 @@ using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.Model;
+using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security;
 using Percolator.Domain.Security.Model;
@@ -208,8 +209,8 @@ public sealed class TestIdentityNode
         _ingressFilterService = new InMemoryIngressFilterService();
 
         // Populate local key stores
-        _identityKeyStore.RegisterKey(IdentityId, IdentityPrivateKey.Span.ToArray(), IdentityPublicKey);
-        _preKeyStore.StoreSignedPreKeyPrivateAsync(IdentityId, DeviceId, SignedPreKeyPrivate).GetAwaiter().GetResult();
+        _identityKeyStore.RegisterKey(IdentityId, IdentityPrivateKey, IdentityPublicKey, ProfileKey);
+        _preKeyStore.StoreSignedPreKeyAsync(IdentityId, DeviceId, SignedPreKeyPrivate, SignedPreKeyPublic, SignedPreKeySignature).GetAwaiter().GetResult();
 
         // Wire packing & unwrapping
         var wirePacker = new DefaultSessionWirePacker();
@@ -492,7 +493,7 @@ public sealed class TestIdentityNode
             var (opkPriv, opkPub) = CryptoEngine.GenerateEphemeralKeyPair();
             opk = opkPub;
             opkId = oneTimeKeyId.Value;
-            _preKeyStore.StoreOneTimePreKeysPrivateAsync(IdentityId, DeviceId, [(opkId, opkPriv)]).GetAwaiter().GetResult();
+            _preKeyStore.StoreOneTimePreKeysAsync(IdentityId, DeviceId, [new OneTimePreKeyMaterial(opkId, opkPriv, opkPub)]).GetAwaiter().GetResult();
         }
 
         return new PreKeyBundle(
@@ -517,15 +518,15 @@ public sealed class TestIdentityNode
         ArgumentNullException.ThrowIfNull(relay);
 
         var otpkList = new List<(uint KeyId, DhPublicKey Key)>();
-        var otpkPrivList = new List<(uint KeyId, EphemeralPrivateKey Key)>();
+        var otpkMaterials = new List<OneTimePreKeyMaterial>();
         for (uint i = 1; i <= (uint)oneTimeKeyCount; i++)
         {
             var (priv, pub) = CryptoEngine.GenerateEphemeralKeyPair();
             otpkList.Add((i, pub));
-            otpkPrivList.Add((i, priv));
+            otpkMaterials.Add(new OneTimePreKeyMaterial(i, priv, pub));
         }
 
-        _preKeyStore.StoreOneTimePreKeysPrivateAsync(IdentityId, DeviceId, otpkPrivList).GetAwaiter().GetResult();
+        _preKeyStore.StoreOneTimePreKeysAsync(IdentityId, DeviceId, otpkMaterials).GetAwaiter().GetResult();
 
         var bundle = RelayHostedPreKeyBundle.Create(
             IdentityId,

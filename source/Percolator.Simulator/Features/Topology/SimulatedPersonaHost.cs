@@ -224,7 +224,6 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             services.AddScoped<IRoutingCoordinator, RoutingCoordinator>();
             services.AddScoped<IPayloadSender, OutboundEgressPipeline>();
             services.AddScoped<IGroupKeyDistributionService, GroupKeyDistributionService>();
-            services.AddScoped(sp => (SqliteLocalIdentityKeyStore)sp.GetRequiredService<ILocalIdentityKeyStore>());
             // 4b. Simulator-only read-model query services (isolated from core application/domain layers)
             services.AddScoped<ISimulatorChatQueryService, SimulatorChatQueryService>();
             services.AddScoped<ISimulatorRatchetQueryService, SimulatorRatchetQueryService>();
@@ -296,10 +295,10 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             {
                 await profileRepo.SaveAsync(profileResult.Value, ct);
             }
-            var idKeyStore = (SqliteLocalIdentityKeyStore)scope.ServiceProvider.GetRequiredService<ILocalIdentityKeyStore>();
-            await idKeyStore.SaveKeyAsync(PublicIdentityId, _identityPrivateKey.Span.ToArray(), IdentityPublicKey, ct);
+            var idKeyStore = scope.ServiceProvider.GetRequiredService<ILocalIdentityKeyStore>();
+            await idKeyStore.SaveIdentityKeysAsync(PublicIdentityId, _identityPrivateKey, IdentityPublicKey, ProfileKey, ct);
             var preKeyStore = scope.ServiceProvider.GetRequiredService<IPrivatePreKeyStore>();
-            await preKeyStore.StoreSignedPreKeyPrivateAsync(PublicIdentityId, DeviceId.Primary, _signedPreKeyPrivate, ct);
+            await preKeyStore.StoreSignedPreKeyAsync(PublicIdentityId, DeviceId.Primary, _signedPreKeyPrivate, SignedPreKeyPublic, SignedPreKeySignature, ct);
             var capStore = scope.ServiceProvider.GetRequiredService<IRelayMailboxCapabilityStore>();
             await capStore.RegisterVerifiedAsync(
                 MailboxRoutingToken.ToByteArray(),
