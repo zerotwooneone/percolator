@@ -38,6 +38,12 @@
         </Style>
     </Style>
 
+    <!-- Self-hosted exchange tile: accent outline at rest so users never mistake
+         infrastructure for a chatable persona. Checked state still thickens the ring. -->
+    <Style Selector="Border.persona-card.selfhosted">
+        <Setter Property="BorderBrush" Value="{DynamicResource SystemAccentColor}" />
+    </Style>
+
     <!-- Flat icon-only shell chrome button for sidebars and headers. -->
     <Style Selector="Button.shell-icon">
         <Setter Property="Background" Value="Transparent" />

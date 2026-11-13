@@ -32,6 +32,14 @@ public sealed partial class ExchangeTileViewModel : ViewModelBase
     [ObservableProperty]
     private int _effectivePort;
 
+    /// <summary>Tile caption — settable so manage-surface profile edits refresh in place.</summary>
+    [ObservableProperty]
+    private string _displayName = string.Empty;
+
+    /// <summary>Launch port preference — updated when the profile edit saves a new port.</summary>
+    [ObservableProperty]
+    private int _preferredPort;
+
     /// <summary>The persona avatars currently rendered on the linkage strip (≤ 5).</summary>
     public IReadOnlyList<PersonaAvatarChip> VisibleLinkedPersonas { get; private set; } =
         Array.Empty<PersonaAvatarChip>();
@@ -47,9 +55,9 @@ public sealed partial class ExchangeTileViewModel : ViewModelBase
         ArgumentNullException.ThrowIfNull(avatar);
 
         RelayIdentityId = entry.RelayIdentityId;
-        DisplayName = entry.DisplayName;
+        _displayName = entry.DisplayName;
         Endpoint = entry.Endpoint;
-        PreferredPort = entry.PreferredPort;
+        _preferredPort = entry.PreferredPort;
         IsSelfHosted = entry.IsSelfHosted;
         LinkedPersonaIds = entry.LinkedPersonaIds;
         Avatar = avatar;
@@ -62,9 +70,7 @@ public sealed partial class ExchangeTileViewModel : ViewModelBase
     public AvatarPresentation Avatar { get; }
 
     public Guid RelayIdentityId { get; }
-    public string DisplayName { get; }
     public string Endpoint { get; }
-    public int PreferredPort { get; }
 
     /// <summary>Self-created exchanges get the badge + accent treatment ([INV-DESKTOP-PRESENTATION-MODELS]).</summary>
     public bool IsSelfHosted { get; }
@@ -132,4 +138,6 @@ public sealed partial class ExchangeTileViewModel : ViewModelBase
     }
 
     partial void OnEffectivePortChanged(int value) => OnPropertyChanged(nameof(PortPillText));
+
+    partial void OnPreferredPortChanged(int value) => OnPropertyChanged(nameof(PortPillText));
 }

@@ -34,6 +34,27 @@ public interface IExchangeDirectory
         IReadOnlyList<PublicIdentityId> initialLinkedPersonaIds,
         CancellationToken ct = default);
 
+    /// <summary>
+    /// Registers a remote exchange (vault-local row only — no connection is opened).
+    /// The tile appears offline; launch semantics come from the personas linked to it.
+    /// </summary>
+    Task<ExchangeDirectoryEntry> RegisterRemoteAsync(
+        IAuthenticatedSession session,
+        PublicIdentityId relayIdentityId,
+        string endpoint,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Edits a self-hosted exchange's profile (display name + preferred port). Remote
+    /// exchanges have no editable profile — their name is their endpoint.
+    /// </summary>
+    Task<DomainResult> UpdateSelfHostedProfileAsync(
+        IAuthenticatedSession session,
+        PublicIdentityId relayIdentityId,
+        string displayName,
+        int preferredPort,
+        CancellationToken ct = default);
+
     /// <summary>Links a persona to an exchange — a pure vault-local row write.</summary>
     Task<DomainResult> LinkPersonaAsync(
         IAuthenticatedSession session,

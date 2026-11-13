@@ -14,6 +14,8 @@ using Percolator.Desktop.Common.Storage;
 using Percolator.Desktop.Features.Startup.Models;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.ValueObjects;
+using Percolator.Domain.Identities.Model;
+using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Infrastructure.Transport;
 
@@ -95,6 +97,72 @@ public sealed class ExchangeDirectoryService : IExchangeDirectory
             ct).ConfigureAwait(false);
 
         return ToEntry(result.Value!, new Dictionary<Guid, DesktopIdentitySettingsEntity>());
+    }
+
+    public async Task<ExchangeDirectoryEntry> RegisterRemoteAsync(
+        IAuthenticatedSession session,
+        PublicIdentityId relayIdentityId,
+        string endpoint,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+
+        var endpointResult = RelayEndpoint.Create(endpoint);
+        if (endpointResult.IsFailure)
+        {
+            throw new ArgumentException(endpointResult.Error.Description, nameof(endpoint));
+        }
+
+        using var scope = CreateScope(session);
+        var result = await scope.ServiceProvider
+            .GetRequiredService<IRelayDirectory>()
+            .RegisterRemoteRelayAsync(relayIdentityId, endpointResult.Value!, ct: ct)
+            .ConfigureAwait(false);
+        if (result.IsFailure)
+        {
+            throw new InvalidOperationException(result.Error.Description);
+        }
+
+        return ToEntry(result.Value!, new Dictionary<Guid, DesktopIdentitySettingsEntity>());
+    }
+
+    public async Task<DomainResult> UpdateSelfHostedProfileAsync(
+        IAuthenticatedSession session,
+        PublicIdentityId relayIdentityId,
+        string displayName,
+        int preferredPort,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+
+        var trimmed = (displayName ?? string.Empty).Trim();
+        if (trimmed.Length == 0)
+        {
+            return DomainResult.Failure(new DomainError(
+                "INVALID_DISPLAY_NAME", "Display name cannot be whitespace."));
+        }
+
+        using var scope = CreateScope(session);
+        var profiles = scope.ServiceProvider.GetRequiredService<IIdentityProfileRepository>();
+        var existing = await profiles.GetByIdAsync(relayIdentityId, ct).ConfigureAwait(false);
+        if (existing is null || existing.Role != IdentityRole.RelayHost)
+        {
+            return DomainResult.Failure(new DomainError(
+                "RELAY_NOT_SELF_HOSTED", "Only self-hosted exchanges have an editable profile."));
+        }
+
+        // IdentityProfile has no rename member; rehydrate preserves id/role/state/dates.
+        var renamed = IdentityProfile.Rehydrate(
+            existing.Id, trimmed, existing.Role, existing.State,
+            existing.CreatedAtUtc, existing.DisabledAtUtc);
+        await profiles.SaveAsync(renamed, ct).ConfigureAwait(false);
+
+        var settingsEntity = await _settings.GetAsync(relayIdentityId.Value, ct).ConfigureAwait(false)
+            ?? new DesktopIdentitySettingsEntity(relayIdentityId.Value, preferredPort, null, false, 0);
+        await _settings.SaveAsync(settingsEntity with { PreferredPort = preferredPort }, ct)
+            .ConfigureAwait(false);
+
+        return DomainResult.Success();
     }
 
     public async Task<DomainResult> LinkPersonaAsync(

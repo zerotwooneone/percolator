@@ -32,6 +32,7 @@ public partial class ExchangeManageViewModel : ViewModelBase
 
     private IAuthenticatedSession? _session;
     private Guid _relayIdentityId;
+    private int _preferredPort;
     private bool _suppressToggle;
     private bool _changed;
 
@@ -78,6 +79,7 @@ public partial class ExchangeManageViewModel : ViewModelBase
 
         _session = session;
         _relayIdentityId = exchange.RelayIdentityId;
+        _preferredPort = exchange.PreferredPort;
         _changed = false;
         Result = false;
         ErrorMessage = null;
@@ -157,6 +159,49 @@ public partial class ExchangeManageViewModel : ViewModelBase
             }
         }
 
+        ErrorMessage = null;
+        _changed = true;
+    }
+
+    /// <summary>
+    /// [ Edit profile ] — self-hosted only: display name + preferred port through the
+    /// persona editor dialog ([VM-014]). Remote exchanges have no editable profile.
+    /// </summary>
+    [RelayCommand]
+    private async Task EditProfileAsync(System.Threading.CancellationToken ct)
+    {
+        if (_session is null || !IsSelfHosted)
+        {
+            return;
+        }
+
+        var result = await _windows
+            .ShowDialogAsync<CreatePersonaDialogViewModel, PersonaEditorResult?>(
+                vm => vm.InitializeForEdit(ExchangeDisplayName, _preferredPort, _relayIdentityId))
+            .ConfigureAwait(true);
+        if (result is null)
+        {
+            return;
+        }
+
+        var update = await _exchanges
+            .UpdateSelfHostedProfileAsync(
+                _session,
+                new PublicIdentityId(_relayIdentityId),
+                result.DisplayName,
+                result.PreferredPort,
+                ct)
+            .ConfigureAwait(true);
+        if (update.IsFailure)
+        {
+            _logger.LogWarning("Exchange profile edit failed for {RelayId}: {Error}", _relayIdentityId, update.Error.Description);
+            ErrorMessage = update.Error.Description;
+            return;
+        }
+
+        ExchangeDisplayName = result.DisplayName;
+        _preferredPort = result.PreferredPort;
+        OnPropertyChanged(nameof(ExchangeDisplayName));
         ErrorMessage = null;
         _changed = true;
     }

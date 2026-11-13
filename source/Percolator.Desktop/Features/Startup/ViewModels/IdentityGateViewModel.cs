@@ -469,20 +469,37 @@ public partial class IdentityGateViewModel : ViewModelBase
         IsBusy = true;
         try
         {
-            var entry = await _exchanges
-                .CreateSelfHostedAsync(
-                    _session,
-                    result.RelayIdentityId,
-                    result.DisplayName,
-                    result.PreferredPort,
-                    result.LinkedPersonaIds,
-                    ct)
-                .ConfigureAwait(true);
+            ExchangeDirectoryEntry entry;
+            if (result.IsRemote)
+            {
+                // Remote registration is a vault-local row write — no connection is opened.
+                entry = await _exchanges
+                    .RegisterRemoteAsync(_session, result.RelayIdentityId, result.RemoteEndpoint!, ct)
+                    .ConfigureAwait(true);
+            }
+            else
+            {
+                entry = await _exchanges
+                    .CreateSelfHostedAsync(
+                        _session,
+                        result.RelayIdentityId,
+                        result.DisplayName,
+                        result.PreferredPort,
+                        result.LinkedPersonaIds,
+                        ct)
+                    .ConfigureAwait(true);
+            }
+
             // The tile appears offline and inert — nothing listens until launch selects it.
             var tile = BuildExchangeTile(entry);
             _exchangeList.Add(tile);
             await ProbeExchangeAsync(tile, ct).ConfigureAwait(true);
             RefreshDerivedState();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to create the exchange.");
+            BannerMessage = "The exchange could not be saved.";
         }
         finally
         {
@@ -520,6 +537,13 @@ public partial class IdentityGateViewModel : ViewModelBase
 
         exchange.SetLinkedPersonaIds(entry.LinkedPersonaIds);
         exchange.SetLinkedPersonas(BuildChips(entry.LinkedPersonaIds));
+        exchange.DisplayName = entry.DisplayName;
+        if (exchange.IsSelfHosted && entry.PreferredPort != exchange.PreferredPort)
+        {
+            // Profile edit may have changed the launch port — re-probe the conflict state.
+            exchange.PreferredPort = entry.PreferredPort;
+            await ProbeExchangeAsync(exchange, ct).ConfigureAwait(true);
+        }
     }
 
     /// <summary>Gate context-menu escape hatch — intentionally undiscoverable (right-click only).</summary>

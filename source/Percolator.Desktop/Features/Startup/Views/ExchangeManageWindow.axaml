@@ -68,9 +68,14 @@
                        TextWrapping="Wrap" />
         </Border>
 
-        <Button Classes="accent"
-                Content="Done"
-                Command="{Binding DoneCommand}"
-                HorizontalAlignment="Right" />
+        <Grid ColumnDefinitions="Auto,*,Auto">
+            <Button Content="Edit profile"
+                    Command="{Binding EditProfileCommand}"
+                    IsVisible="{Binding IsSelfHosted}" />
+            <Button Grid.Column="2"
+                    Classes="accent"
+                    Content="Done"
+                    Command="{Binding DoneCommand}" />
+        </Grid>
     </StackPanel>
 </Window>

@@ -293,6 +293,113 @@ public sealed class ExchangeViewModelTests
         await vm.TogglePersonaCommand.ExecutionTask!;
     }
 
+    [Test]
+    public async Task Manage_EditProfile_PersistsRenameAndPort()
+    {
+        var session = Mock.Of<IAuthenticatedSession>();
+        var personas = new[] { Persona("Alice") };
+        var entry = Entry("Hub", port: 5200);
+        var tile = new ExchangeTileViewModel(entry, Array.Empty<PersonaAvatarChip>(), Avatar());
+        var (vm, exchanges, windows) = ManageFixture(personas, tile, session);
+
+        CreatePersonaDialogViewModel? dialog = null;
+        windows
+            .Setup(w => w.ShowDialogAsync<CreatePersonaDialogViewModel, PersonaEditorResult?>(
+                It.IsAny<Action<CreatePersonaDialogViewModel>?>(),
+                It.IsAny<Avalonia.Controls.Window?>()))
+            .Callback<Action<CreatePersonaDialogViewModel>?, Avalonia.Controls.Window?>(
+                (configure, _) =>
+                {
+                    dialog = new CreatePersonaDialogViewModel(new IdenticonGenerator());
+                    configure?.Invoke(dialog);
+                    dialog.DisplayName = "Renamed Hub";
+                    dialog.PreferredPort = 5300;
+                    dialog.SaveCommand.Execute(null);
+                })
+            .ReturnsAsync(() => dialog!.Result);
+        exchanges
+            .Setup(e => e.UpdateSelfHostedProfileAsync(
+                session,
+                It.Is<PublicIdentityId>(r => r.Value == tile.RelayIdentityId),
+                "Renamed Hub",
+                5300,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DomainResult.Success());
+
+        await vm.EditProfileCommand.ExecuteAsync(null);
+
+        exchanges.Verify(e => e.UpdateSelfHostedProfileAsync(
+                session,
+                It.IsAny<PublicIdentityId>(),
+                It.IsAny<string>(),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()),
+            Times.Once,
+            "the rename + port must flow to the vault through the directory");
+        vm.ExchangeDisplayName.Should().Be("Renamed Hub");
+        vm.DoneCommand.Execute(null);
+        vm.Result.Should().BeTrue("a saved profile edit must flag the tile for refresh");
+    }
+
+    // ---- Creation wizard: remote registration mode ----
+
+    [Test]
+    public void Wizard_RemoteMode_ProducesRemoteResult()
+    {
+        var wizard = new ExchangeCreationViewModel(_identicons);
+        wizard.Initialize(new[] { Persona("Alice") });
+        var relayId = Guid.NewGuid();
+
+        wizard.UseRemoteCommand.Execute(null);
+
+        wizard.IsRemoteStep.Should().BeTrue();
+        wizard.IsFramingStep.Should().BeFalse();
+        wizard.FinishCommand.CanExecute(null).Should().BeFalse(
+            "an empty remote form cannot finish");
+
+        wizard.RemoteEndpoint = "relay.example.net:5200";
+        wizard.RemoteRelayId = relayId.ToString();
+        wizard.FinishCommand.Execute(null);
+
+        wizard.Result.Should().NotBeNull();
+        wizard.Result!.IsRemote.Should().BeTrue();
+        wizard.Result!.RemoteEndpoint.Should().Be("relay.example.net:5200");
+        wizard.Result!.RelayIdentityId.Value.Should().Be(relayId);
+        wizard.Result!.LinkedPersonaIds.Should().BeEmpty(
+            "remote registration carries no pre-linked personas — linking is re-editable via manage");
+    }
+
+    [Test]
+    public void Wizard_Remote_InvalidRelayGuid_BlocksFinishAndSurfacesError()
+    {
+        var wizard = new ExchangeCreationViewModel(_identicons);
+        wizard.Initialize(Array.Empty<PersonaDirectoryEntry>());
+        var closed = false;
+        wizard.RequestClose += (_, _) => closed = true;
+        wizard.UseRemoteCommand.Execute(null);
+        wizard.RemoteEndpoint = "relay.example.net:5200";
+        wizard.RemoteRelayId = "not-a-guid";
+
+        wizard.FinishCommand.Execute(null);
+
+        closed.Should().BeFalse("an unparseable relay identity must not produce a result");
+        wizard.Result.Should().BeNull();
+        wizard.RemoteError.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Test]
+    public void Wizard_RemoteMode_BackReturnsToFraming()
+    {
+        var wizard = new ExchangeCreationViewModel(_identicons);
+        wizard.Initialize(Array.Empty<PersonaDirectoryEntry>());
+        wizard.UseRemoteCommand.Execute(null);
+
+        wizard.BackCommand.Execute(null);
+
+        wizard.IsRemoteStep.Should().BeFalse();
+        wizard.IsFramingStep.Should().BeTrue();
+    }
+
     // ---- Gate: onboarding + launch provisioning ----
 
     private sealed class GateFixture

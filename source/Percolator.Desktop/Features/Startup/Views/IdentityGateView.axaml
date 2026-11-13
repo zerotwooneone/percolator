@@ -176,7 +176,9 @@
                                 <ToggleButton Classes="persona-toggle"
                                               IsChecked="{Binding IsSelectedForLaunch}"
                                               Margin="0,0,12,12">
-                                    <Border Classes="persona-card" Width="248">
+                                    <Border Classes="persona-card"
+                                            Classes.selfhosted="{Binding IsSelfHosted}"
+                                            Width="248">
                                         <Grid RowDefinitions="Auto,Auto,Auto">
                                             <Grid ColumnDefinitions="Auto,*,Auto">
                                                 <Border Classes="identicon-tile"

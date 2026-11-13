@@ -32,12 +32,16 @@ public sealed record ExchangeLaunchDescriptor(
 /// <summary>
 /// Result returned by the exchange creation wizard. Linking is explicit opt-in: the wizard
 /// ships with every persona checkbox unchecked ([INV-DESKTOP-PRESENTATION-MODELS]).
+/// When <see cref="IsRemote"/> is set the result carries only <see cref="RelayIdentityId"/>
+/// and <see cref="RemoteEndpoint"/> — remote exchanges have no local profile or port.
 /// </summary>
 public sealed record ExchangeCreationResult(
     PublicIdentityId RelayIdentityId,
     string DisplayName,
     int PreferredPort,
-    IReadOnlyList<PublicIdentityId> LinkedPersonaIds);
+    IReadOnlyList<PublicIdentityId> LinkedPersonaIds,
+    bool IsRemote = false,
+    string? RemoteEndpoint = null);
 
 /// <summary>Compact persona avatar chip shown stacked on an exchange tile's linkage strip.</summary>
 public sealed record PersonaAvatarChip(
