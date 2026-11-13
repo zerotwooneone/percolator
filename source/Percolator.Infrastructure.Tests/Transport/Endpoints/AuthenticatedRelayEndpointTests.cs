@@ -286,6 +286,51 @@ public sealed class AuthenticatedRelayEndpointTests
     }
 
     [Test]
+    public async Task PublishPreKeyBundle_IdenticalRepublish_IsIdempotent_NoDuplicateOpks()
+    {
+        var capabilityStore = new FakeRelayMailboxCapabilityStore();
+        var preKeyRepo = new InMemoryPreKeyRepo();
+        var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
+        var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
+
+        var routingToken = new byte[16];
+        var deliveryToken = new byte[32];
+        var drainToken = new byte[32];
+        RandomNumberGenerator.Fill(routingToken);
+        RandomNumberGenerator.Fill(deliveryToken);
+        RandomNumberGenerator.Fill(drainToken);
+
+        await capabilityStore.RegisterAsync(routingToken, deliveryToken, drainToken);
+
+        byte[] privId = new byte[32];
+        byte[] pubIdBytes = new byte[32];
+        SignalCrypto.GenerateEd25519KeyPair(privId, pubIdBytes);
+        var pubId = IdentityKey.FromSpan(pubIdBytes);
+
+        var deviceId = new DeviceId(1u);
+        var routingTokenVo = BlindedRoutingToken.FromBytes(routingToken);
+
+        var (_, pubSigned) = cryptoEngine.GenerateEphemeralKeyPair();
+        var prekeySig = cryptoEngine.SignEd25519(privId, pubSigned.Span);
+        var opks = new List<(uint, DhPublicKey)>
+        {
+            (1u, cryptoEngine.GenerateEphemeralKeyPair().PublicKey),
+            (2u, cryptoEngine.GenerateEphemeralKeyPair().PublicKey)
+        };
+
+        var request = BuildPublishRequest(
+            routingToken, drainToken, deviceId.Value, pubId, pubSigned, prekeySig, opks);
+
+        // Act: publish the exact same request twice (e.g., client retry after timeout).
+        (await endpoint.PublishPreKeyBundle(request, new TestServerCallContext())).Success.Should().BeTrue();
+        (await endpoint.PublishPreKeyBundle(request, new TestServerCallContext())).Success.Should().BeTrue();
+
+        // Assert: retry must not duplicate OPKs — writes are idempotent per KeyId.
+        var stored = await preKeyRepo.GetAsync(routingTokenVo, deviceId);
+        stored!.AvailableOneTimePreKeyCount.Should().Be(2);
+    }
+
+    [Test]
     public async Task PublishPreKeyBundle_SecondPublishWithDifferentIdentityKey_Rejected()
     {
         var capabilityStore = new FakeRelayMailboxCapabilityStore();
