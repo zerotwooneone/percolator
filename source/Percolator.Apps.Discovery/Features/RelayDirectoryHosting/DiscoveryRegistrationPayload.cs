@@ -1,4 +1,5 @@
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 
 namespace Percolator.Apps.Discovery.Features.RelayDirectoryHosting;
@@ -8,13 +9,21 @@ namespace Percolator.Apps.Discovery.Features.RelayDirectoryHosting;
 /// Invariants:
 /// - Target PeerId must be valid.
 /// - Ingress pipeline ensures this payload was sent by the authenticated session owner (anti-impersonation).
+/// - When discoverable, the peer re-advertises its mailbox tokens so the relay can check
+///   hosted pre-key availability and include the tokens in query responses.
 /// </summary>
 public sealed record DiscoveryRegistrationPayload
 {
     public PublicIdentityId PeerId { get; }
     public PeerDiscoveryVisibility Visibility { get; }
+    public BlindedRoutingToken? RoutingToken { get; }
+    public DeliveryToken? DeliveryToken { get; }
 
-    public DiscoveryRegistrationPayload(PublicIdentityId peerId, PeerDiscoveryVisibility visibility)
+    public DiscoveryRegistrationPayload(
+        PublicIdentityId peerId,
+        PeerDiscoveryVisibility visibility,
+        BlindedRoutingToken? routingToken = null,
+        DeliveryToken? deliveryToken = null)
     {
         if (!peerId.IsValid)
         {
@@ -23,6 +32,8 @@ public sealed record DiscoveryRegistrationPayload
 
         PeerId = peerId;
         Visibility = visibility;
+        RoutingToken = routingToken;
+        DeliveryToken = deliveryToken;
     }
 
     public static DomainResult<DiscoveryRegistrationPayload> Create(

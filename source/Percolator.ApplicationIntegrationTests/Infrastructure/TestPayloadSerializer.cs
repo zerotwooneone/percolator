@@ -9,6 +9,7 @@ using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
 using Percolator.Infrastructure2.Serialization;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.PluginSdk;
 
@@ -33,6 +34,8 @@ public sealed class TestPayloadSerializer : IPayloadSerializer
         options.Converters.Add(new DiscoveryResultLimitJsonConverter());
         options.Converters.Add(new BlindedLocatorJsonConverter());
         options.Converters.Add(new EncryptedRendezvousRouteJsonConverter());
+        options.Converters.Add(new GuidIdJsonConverter<BlindedRoutingToken>());
+        options.Converters.Add(new DeliveryTokenJsonConverter());
         return options;
     }
 
@@ -220,5 +223,17 @@ public sealed class TestPayloadSerializer : IPayloadSerializer
 
         public override void Write(Utf8JsonWriter writer, EncryptedRendezvousRoute value, JsonSerializerOptions options) =>
             writer.WriteBase64StringValue(value.Span);
+    }
+
+    private sealed class DeliveryTokenJsonConverter : JsonConverter<DeliveryToken>
+    {
+        public override DeliveryToken? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            var hex = reader.GetString();
+            return hex is null ? null : DeliveryToken.FromSpan(Convert.FromHexString(hex));
+        }
+
+        public override void Write(Utf8JsonWriter writer, DeliveryToken value, JsonSerializerOptions options) =>
+            writer.WriteStringValue(Convert.ToHexString(value.Memory.Span));
     }
 }

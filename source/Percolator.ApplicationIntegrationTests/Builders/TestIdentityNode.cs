@@ -760,7 +760,7 @@ public sealed class TestIdentityNode
         CancellationToken ct = default)
     {
         await relay.RegisterPeerDiscoveryAsync(IdentityId, visibility, ct).ConfigureAwait(false);
-        var payload = new DiscoveryRegistrationPayload(IdentityId, visibility);
+        var payload = new DiscoveryRegistrationPayload(IdentityId, visibility, MailboxRoutingToken, MailboxDeliveryToken);
         var serializer = new TestPayloadSerializer();
         var body = serializer.Serialize(payload);
         var framed = new byte[1 + body.Length];

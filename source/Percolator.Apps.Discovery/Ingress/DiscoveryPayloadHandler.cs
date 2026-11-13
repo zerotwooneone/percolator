@@ -157,7 +157,12 @@ public sealed class DiscoveryPayloadHandler : IAppPayloadHandler
                 $"Peer '{context.SenderIdentityId}' cannot update discovery visibility for identity '{payload.PeerId}'."));
         }
 
-        var updateResult = await _directory.UpdateVisibilityAsync(payload.PeerId, payload.Visibility, ct: ct).ConfigureAwait(false);
+        var updateResult = await _directory.UpdateVisibilityAsync(
+            payload.PeerId,
+            payload.Visibility,
+            payload.RoutingToken,
+            payload.DeliveryToken,
+            ct).ConfigureAwait(false);
         return updateResult;
     }
 
@@ -206,7 +211,9 @@ public sealed class DiscoveryPayloadHandler : IAppPayloadHandler
 
             descriptors.Add(new PeerDiscoveryDescriptor(
                 reg.PeerId,
-                DeliveryRoute.RelayedOneToOne));
+                DeliveryRoute.RelayedOneToOne,
+                RoutingToken: reg.RoutingToken,
+                DeliveryToken: reg.DeliveryToken));
 
             if (descriptors.Count >= limit.Value)
             {
