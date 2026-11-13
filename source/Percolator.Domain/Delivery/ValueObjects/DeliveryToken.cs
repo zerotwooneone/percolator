@@ -31,6 +31,18 @@ public sealed partial record DeliveryToken : ISensitiveSecret
         return FromSpan(bytes);
     }
 
+    /// <summary>
+    /// Generates a fresh 32-byte cryptographically secure random token.
+    /// Used for relay mailbox drain tokens (Signal's account-auth-password analogue), which are
+    /// random bearer secrets rather than values derived from the ProfileKey.
+    /// </summary>
+    public static DeliveryToken GenerateRandom()
+    {
+        Span<byte> bytes = stackalloc byte[32];
+        RandomNumberGenerator.Fill(bytes);
+        return FromSpan(bytes);
+    }
+
     public void Zeroize()
     {
         if (MemoryMarshal.TryGetArray(_value, out var segment) && segment.Array != null)
