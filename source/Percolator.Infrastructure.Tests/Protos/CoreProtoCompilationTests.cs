@@ -50,9 +50,13 @@ public sealed class CoreProtoCompilationTests
 
         var publishPreKeyReq = new PublishPreKeyBundleRequest
         {
-            PayloadBytes = ByteString.CopyFrom([0xAA, 0xBB]),
-            Signature = ByteString.CopyFrom(new byte[64]),
-            DrainToken = ByteString.CopyFrom(new byte[32])
+            RoutingToken = ByteString.CopyFrom(new byte[16]),
+            DrainToken = ByteString.CopyFrom(new byte[32]),
+            DeviceId = 1,
+            IdentityKey = ByteString.CopyFrom(new byte[32]),
+            SignedPrekeyId = 1,
+            SignedPrekey = ByteString.CopyFrom(new byte[32]),
+            PrekeySignature = ByteString.CopyFrom(new byte[64])
         };
         publishPreKeyReq.ToByteArray().Should().NotBeEmpty();
         publishPreKeyReq.DrainToken.Length.Should().Be(32);

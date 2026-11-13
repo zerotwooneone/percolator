@@ -267,7 +267,8 @@ public class PercolatorDbContext : DbContext
         modelBuilder.Entity<RelayPreKeyEntity>(entity =>
         {
             entity.ToTable("relay_prekeys");
-            entity.HasKey(e => new { e.OwnerIdentityId, e.DeviceId });
+            entity.HasKey(e => new { e.RoutingToken, e.DeviceId });
+            entity.Property(e => e.RoutingToken).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
             entity.Property(e => e.IdentityKey).HasColumnType("BLOB");
             entity.Property(e => e.SignedPreKey).HasColumnType("BLOB");
             entity.Property(e => e.SignedPreKeySignature).HasColumnType("BLOB");
@@ -424,6 +425,8 @@ public class PercolatorDbContext : DbContext
             entity.ToTable("relay_peer_directory");
             entity.HasKey(e => e.PeerId);
             entity.Property(e => e.PeerId).HasColumnType("BLOB");
+            entity.Property(e => e.RoutingToken).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.DeliveryToken).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
             entity.HasIndex(e => e.LastUpdatedAtUtc)
                 .HasDatabaseName("ix_peer_directory_updated");
         });
@@ -517,7 +520,6 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.RoutingToken).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
             entity.Property(e => e.DeliveryToken).HasColumnType("BLOB").IsRequired().Metadata.SetValueComparer(byteArrayComparer);
             entity.Property(e => e.DrainToken).HasColumnType("BLOB").IsRequired().Metadata.SetValueComparer(byteArrayComparer);
-            entity.HasIndex(e => e.OwnerIdentityId);
         });
         modelBuilder.Entity<RelayMailboxAuthorizedTokenEntity>(entity =>
         {

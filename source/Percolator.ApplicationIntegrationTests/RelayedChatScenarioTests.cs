@@ -79,6 +79,7 @@ public sealed class RelayedChatScenarioTests
         var handshakeResult = await alice.HandshakeService.InitiateHandshakeAsync(
             alice.IdentityId,
             DeviceId.Primary,
+            charlie.IdentityId,
             charlieBundle);
 
         handshakeResult.IsSuccess.Should().BeTrue();

@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using FluentAssertions;
 using NUnit.Framework;
 using Percolator.Domain.Delivery.Hosting;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.Infrastructure.Persistence.Repositories;
@@ -34,7 +35,7 @@ public class SqliteRelayPreKeyRepositoryTests
     public async Task SaveAndConsumeBundle_DequeuesOneTimePreKeyAtomically()
     {
         // Arrange
-        var ownerId = PublicIdentityId.New();
+        var routingToken = BlindedRoutingToken.New();
         var deviceId = DeviceId.Primary;
         var identityKey = IdentityKey.FromSpan(new byte[32]);
         var signedPreKey = DhPublicKey.FromSpan(new byte[32]);
@@ -44,7 +45,7 @@ public class SqliteRelayPreKeyRepositoryTests
         var opk2 = (2u, DhPublicKey.FromSpan(new byte[32]));
 
         var bundle = RelayHostedPreKeyBundle.Rehydrate(
-            ownerId,
+            routingToken,
             deviceId,
             identityKey,
             signedPreKey,
@@ -54,7 +55,7 @@ public class SqliteRelayPreKeyRepositoryTests
         // Act - Save bundle
         await _repository.SaveAsync(bundle);
 
-        var loaded = await _repository.GetAsync(ownerId, deviceId);
+        var loaded = await _repository.GetAsync(routingToken, deviceId);
         loaded.Should().NotBeNull();
         loaded!.AvailableOneTimePreKeyCount.Should().Be(2);
 
@@ -69,7 +70,7 @@ public class SqliteRelayPreKeyRepositoryTests
 
         // Assert - Reload in fresh context
         var newRepo = new SqliteRelayPreKeyRepository(_testDb.ContextFactory);
-        var reloaded = await newRepo.GetAsync(ownerId, deviceId);
+        var reloaded = await newRepo.GetAsync(routingToken, deviceId);
 
         reloaded.Should().NotBeNull();
         reloaded!.AvailableOneTimePreKeyCount.Should().Be(1);

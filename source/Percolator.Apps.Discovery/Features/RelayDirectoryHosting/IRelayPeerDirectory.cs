@@ -1,4 +1,5 @@
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 
 namespace Percolator.Apps.Discovery.Features.RelayDirectoryHosting;
@@ -17,6 +18,8 @@ public interface IRelayPeerDirectory
     ValueTask<DomainResult> UpdateVisibilityAsync(
         PublicIdentityId peerId,
         PeerDiscoveryVisibility visibility,
+        BlindedRoutingToken? routingToken = null,
+        DeliveryToken? deliveryToken = null,
         CancellationToken ct = default);
 
     ValueTask<RelayPeerRegistration?> GetPeerAsync(

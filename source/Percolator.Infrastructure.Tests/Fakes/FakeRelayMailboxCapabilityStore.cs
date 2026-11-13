@@ -8,7 +8,6 @@ using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 using Percolator.Domain.Common;
-using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Infrastructure.Protos;
 using Percolator.Infrastructure.Transport;
 
@@ -23,8 +22,6 @@ public sealed class FakeRelayMailboxCapabilityStore : IRelayMailboxCapabilitySto
         public byte[] DeliveryToken { get; set; } = Array.Empty<byte>();
         public List<byte[]> AuthorizedDeliveryTokens { get; } = new();
         public byte[] DrainToken { get; set; } = Array.Empty<byte>();
-        public PublicIdentityId? OwnerId { get; set; }
-        public DeviceId? DeviceId { get; set; }
         public List<QueuedSealedEnvelopeProto> Envelopes { get; } = new();
         public List<ChannelWriter<QueuedSealedEnvelopeProto>> Subscribers { get; } = new();
         public object Lock { get; } = new();
@@ -38,11 +35,9 @@ public sealed class FakeRelayMailboxCapabilityStore : IRelayMailboxCapabilitySto
         ReadOnlyMemory<byte> routingToken,
         ReadOnlyMemory<byte> deliveryToken,
         ReadOnlyMemory<byte> drainToken,
-        PublicIdentityId? ownerId = null,
-        DeviceId? deviceId = null,
         CancellationToken ct = default)
     {
-        var result = RegisterVerifiedInternal(routingToken, deliveryToken, drainToken, default, ownerId, deviceId);
+        var result = RegisterVerifiedInternal(routingToken, deliveryToken, drainToken, default);
         if (result.IsFailure)
         {
             throw new InvalidOperationException(result.Error.Description);
@@ -55,11 +50,9 @@ public sealed class FakeRelayMailboxCapabilityStore : IRelayMailboxCapabilitySto
         ReadOnlyMemory<byte> deliveryToken,
         ReadOnlyMemory<byte> drainToken,
         ReadOnlyMemory<byte> existingDrainToken = default,
-        PublicIdentityId? ownerId = null,
-        DeviceId? deviceId = null,
         CancellationToken ct = default)
     {
-        var result = RegisterVerifiedInternal(routingToken, deliveryToken, drainToken, existingDrainToken, ownerId, deviceId);
+        var result = RegisterVerifiedInternal(routingToken, deliveryToken, drainToken, existingDrainToken);
         return ValueTask.FromResult(result);
     }
 
@@ -67,9 +60,7 @@ public sealed class FakeRelayMailboxCapabilityStore : IRelayMailboxCapabilitySto
         ReadOnlyMemory<byte> routingToken,
         ReadOnlyMemory<byte> deliveryToken,
         ReadOnlyMemory<byte> drainToken,
-        ReadOnlyMemory<byte> existingDrainToken,
-        PublicIdentityId? ownerId,
-        DeviceId? deviceId)
+        ReadOnlyMemory<byte> existingDrainToken)
     {
         var key = ToHexKey(routingToken);
         var entry = _mailboxes.GetOrAdd(key, _ => new MailboxEntry());
@@ -98,60 +89,9 @@ public sealed class FakeRelayMailboxCapabilityStore : IRelayMailboxCapabilitySto
                 entry.AuthorizedDeliveryTokens.RemoveAt(0);
             }
             entry.DrainToken = drainToken.ToArray();
-            if (ownerId.HasValue) entry.OwnerId = ownerId;
-            if (deviceId.HasValue) entry.DeviceId = deviceId;
         }
 
         return DomainResult.Success();
-    }
-
-    public ValueTask AssociateOwnerAsync(
-        ReadOnlyMemory<byte> routingToken,
-        PublicIdentityId ownerId,
-        DeviceId deviceId,
-        CancellationToken ct = default)
-    {
-        var key = ToHexKey(routingToken);
-        var entry = _mailboxes.GetOrAdd(key, _ => new MailboxEntry());
-        lock (entry.Lock)
-        {
-            entry.OwnerId = ownerId;
-            entry.DeviceId = deviceId;
-        }
-        return ValueTask.CompletedTask;
-    }
-
-    public ValueTask<(PublicIdentityId? OwnerId, DeviceId? DeviceId)> GetOwnerAsync(
-        ReadOnlyMemory<byte> routingToken,
-        CancellationToken ct = default)
-    {
-        var key = ToHexKey(routingToken);
-        if (_mailboxes.TryGetValue(key, out var entry))
-        {
-            lock (entry.Lock)
-            {
-                return ValueTask.FromResult((entry.OwnerId, entry.DeviceId));
-            }
-        }
-        return ValueTask.FromResult<(PublicIdentityId?, DeviceId?)>((null, null));
-    }
-
-    public ValueTask<(byte[] RoutingToken, byte[] DeliveryToken)?> GetMailboxTokensByOwnerAsync(
-        PublicIdentityId ownerId,
-        CancellationToken ct = default)
-    {
-        foreach (var kvp in _mailboxes)
-        {
-            var entry = kvp.Value;
-            lock (entry.Lock)
-            {
-                if (entry.OwnerId == ownerId)
-                {
-                    return ValueTask.FromResult<(byte[] RoutingToken, byte[] DeliveryToken)?>((Convert.FromHexString(kvp.Key), entry.DeliveryToken));
-                }
-            }
-        }
-        return ValueTask.FromResult<(byte[] RoutingToken, byte[] DeliveryToken)?>(null);
     }
 
     public ValueTask<bool> VerifyDeliveryTokenAsync(ReadOnlyMemory<byte> routingToken, ReadOnlyMemory<byte> deliveryToken, CancellationToken ct = default)

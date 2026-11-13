@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Delivery.Ports;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.Infrastructure.Persistence.Entities;
@@ -28,43 +29,43 @@ public sealed class SqliteRelayPreKeyRepository : IRelayPreKeyRepository
         return await action(context).ConfigureAwait(false);
     }
 
-    public Task<RelayHostedPreKeyBundle?> GetAsync(PublicIdentityId ownerId, DeviceId deviceId, CancellationToken cancellationToken = default)
+    public Task<RelayHostedPreKeyBundle?> GetAsync(BlindedRoutingToken routingToken, DeviceId deviceId, CancellationToken cancellationToken = default)
     {
-        var ownerGuid = ownerId.Value;
+        var routingBytes = routingToken.ToByteArray();
 
         return WithContextAsync(async dbContext =>
         {
             var entity = await dbContext.RelayPreKeys
                 .AsNoTracking()
-                .FirstOrDefaultAsync(k => k.OwnerIdentityId == ownerGuid && k.DeviceId == deviceId.Value, cancellationToken);
+                .FirstOrDefaultAsync(k => k.RoutingToken == routingBytes && k.DeviceId == deviceId.Value, cancellationToken);
 
             return entity != null ? MapEntityToDomain(entity) : null;
         });
     }
 
-    public Task<IReadOnlyList<RelayHostedPreKeyBundle>> GetAllForIdentityAsync(PublicIdentityId ownerId, CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<RelayHostedPreKeyBundle>> GetAllForMailboxAsync(BlindedRoutingToken routingToken, CancellationToken cancellationToken = default)
     {
-        var ownerGuid = ownerId.Value;
+        var routingBytes = routingToken.ToByteArray();
 
         return WithContextAsync<IReadOnlyList<RelayHostedPreKeyBundle>>(async dbContext =>
         {
             var entities = await dbContext.RelayPreKeys
                 .AsNoTracking()
-                .Where(k => k.OwnerIdentityId == ownerGuid)
+                .Where(k => k.RoutingToken == routingBytes)
                 .ToListAsync(cancellationToken);
 
             return entities.Select(MapEntityToDomain).ToList();
         });
     }
 
-    public Task<bool> HasActivePreKeyAsync(PublicIdentityId ownerId, CancellationToken cancellationToken = default)
+    public Task<bool> HasActivePreKeyAsync(BlindedRoutingToken routingToken, CancellationToken cancellationToken = default)
     {
-        var ownerGuid = ownerId.Value;
+        var routingBytes = routingToken.ToByteArray();
         return WithContextAsync(async dbContext =>
         {
             return await dbContext.RelayPreKeys
                 .AsNoTracking()
-                .AnyAsync(k => k.OwnerIdentityId == ownerGuid, cancellationToken);
+                .AnyAsync(k => k.RoutingToken == routingBytes, cancellationToken);
         });
     }
 
@@ -72,7 +73,7 @@ public sealed class SqliteRelayPreKeyRepository : IRelayPreKeyRepository
     {
         ArgumentNullException.ThrowIfNull(bundle);
 
-        var ownerGuid = bundle.OwnerId.Value;
+        var routingBytes = bundle.RoutingToken.ToByteArray();
         var idKeyBytes = bundle.IdentityKey.Span.ToArray();
         var signedKeyBytes = bundle.SignedPreKey.Span.ToArray();
         var sigBytes = bundle.SignedPreKeySignature.Span.ToArray();
@@ -82,13 +83,13 @@ public sealed class SqliteRelayPreKeyRepository : IRelayPreKeyRepository
         return WithContextAsync(async dbContext =>
         {
             var existing = await dbContext.RelayPreKeys
-                .FirstOrDefaultAsync(k => k.OwnerIdentityId == ownerGuid && k.DeviceId == bundle.DeviceId.Value, cancellationToken);
+                .FirstOrDefaultAsync(k => k.RoutingToken == routingBytes && k.DeviceId == bundle.DeviceId.Value, cancellationToken);
 
             if (existing == null)
             {
                 var entity = new RelayPreKeyEntity
                 {
-                    OwnerIdentityId = ownerGuid,
+                    RoutingToken = routingBytes,
                     DeviceId = bundle.DeviceId.Value,
                     IdentityKey = idKeyBytes,
                     SignedPreKey = signedKeyBytes,
@@ -112,13 +113,13 @@ public sealed class SqliteRelayPreKeyRepository : IRelayPreKeyRepository
         });
     }
 
-    public Task DeleteAsync(PublicIdentityId ownerId, DeviceId deviceId, CancellationToken cancellationToken = default)
+    public Task DeleteAsync(BlindedRoutingToken routingToken, DeviceId deviceId, CancellationToken cancellationToken = default)
     {
-        var ownerGuid = ownerId.Value;
+        var routingBytes = routingToken.ToByteArray();
         return WithContextAsync(async dbContext =>
         {
             var existing = await dbContext.RelayPreKeys
-                .FirstOrDefaultAsync(k => k.OwnerIdentityId == ownerGuid && k.DeviceId == deviceId.Value, cancellationToken);
+                .FirstOrDefaultAsync(k => k.RoutingToken == routingBytes && k.DeviceId == deviceId.Value, cancellationToken);
 
             if (existing != null)
             {
@@ -132,7 +133,7 @@ public sealed class SqliteRelayPreKeyRepository : IRelayPreKeyRepository
 
     private static RelayHostedPreKeyBundle MapEntityToDomain(RelayPreKeyEntity entity)
     {
-        var ownerId = new PublicIdentityId(entity.OwnerIdentityId);
+        var routingToken = BlindedRoutingToken.FromBytes(entity.RoutingToken);
         var deviceId = new DeviceId(entity.DeviceId);
         var idKey = IdentityKey.FromSpan(entity.IdentityKey);
         var signedKey = DhPublicKey.FromSpan(entity.SignedPreKey);
@@ -140,7 +141,7 @@ public sealed class SqliteRelayPreKeyRepository : IRelayPreKeyRepository
         var opks = DeserializeOpks(entity.OneTimePreKeysJson);
 
         return RelayHostedPreKeyBundle.Rehydrate(
-            ownerId,
+            routingToken,
             deviceId,
             idKey,
             signedKey,

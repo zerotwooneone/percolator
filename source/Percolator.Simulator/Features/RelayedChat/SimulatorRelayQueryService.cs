@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Infrastructure.Persistence;
 
@@ -39,38 +40,38 @@ internal sealed class SimulatorRelayQueryService : ISimulatorRelayQueryService
     }
 
     public async Task<int> GetHostedOpkCountAsync(
-        PublicIdentityId ownerId,
+        BlindedRoutingToken routingToken,
         DeviceId deviceId,
         CancellationToken ct = default)
     {
-        var opks = await GetHostedOneTimePreKeysAsync(ownerId, deviceId, ct);
+        var opks = await GetHostedOneTimePreKeysAsync(routingToken, deviceId, ct);
         return opks.Count;
     }
 
     public Task<bool> HasActivePreKeyAsync(
-        PublicIdentityId ownerId,
+        BlindedRoutingToken routingToken,
         CancellationToken ct = default)
     {
-        var ownerGuid = ownerId.Value;
+        var routingBytes = routingToken.ToByteArray();
         return WithContextAsync(async dbContext =>
         {
             return await dbContext.RelayPreKeys
                 .AsNoTracking()
-                .AnyAsync(k => k.OwnerIdentityId == ownerGuid, ct);
+                .AnyAsync(k => k.RoutingToken == routingBytes, ct);
         });
     }
 
     public Task<IReadOnlyList<SimulatorHostedPreKeyReadModel>> GetHostedOneTimePreKeysAsync(
-        PublicIdentityId ownerId,
+        BlindedRoutingToken routingToken,
         DeviceId deviceId,
         CancellationToken ct = default)
     {
-        var ownerGuid = ownerId.Value;
+        var routingBytes = routingToken.ToByteArray();
         return WithContextAsync<IReadOnlyList<SimulatorHostedPreKeyReadModel>>(async dbContext =>
         {
             var entity = await dbContext.RelayPreKeys
                 .AsNoTracking()
-                .FirstOrDefaultAsync(k => k.OwnerIdentityId == ownerGuid && k.DeviceId == deviceId.Value, ct);
+                .FirstOrDefaultAsync(k => k.RoutingToken == routingBytes && k.DeviceId == deviceId.Value, ct);
 
             if (entity == null || string.IsNullOrEmpty(entity.OneTimePreKeysJson))
             {

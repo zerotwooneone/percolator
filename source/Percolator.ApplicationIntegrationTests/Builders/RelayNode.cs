@@ -190,6 +190,15 @@ public sealed class RelayNode
             hasActiveSignedPreKey: true,
             TimeProvider.UtcNow).Value!;
 
+        if (TryGetClientTokens(peerId, out var tokens))
+        {
+            registration = registration with
+            {
+                RoutingToken = tokens.RoutingToken,
+                DeliveryToken = tokens.DeliveryToken
+            };
+        }
+
         return await Directory.RegisterPeerAsync(registration, ct).ConfigureAwait(false);
     }
 
@@ -202,9 +211,9 @@ public sealed class RelayNode
 
     private sealed class RelayPreKeyAvailabilityAdapter(IRelayPreKeyRepository repo) : IPreKeyAvailabilityPort
     {
-        public async ValueTask<bool> HasActiveSignedPreKeyAsync(PublicIdentityId peerId, CancellationToken ct = default)
+        public async ValueTask<bool> HasActiveSignedPreKeyAsync(BlindedRoutingToken routingToken, CancellationToken ct = default)
         {
-            return await repo.HasActivePreKeyAsync(peerId, ct).ConfigureAwait(false);
+            return await repo.HasActivePreKeyAsync(routingToken, ct).ConfigureAwait(false);
         }
     }
 }

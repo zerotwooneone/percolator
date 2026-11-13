@@ -115,7 +115,6 @@ internal sealed class DirectHandshakeOrchestrator
                     : DhPublicKey.FromSpan(response.OneTimePrekey.Span);
 
                 var targetBundle = new PreKeyBundle(
-                    target.PublicIdentityId,
                     DeviceId.Primary,
                     IdentityKey.FromSpan(response.IdentityKey.Span),
                     DhPublicKey.FromSpan(response.SignedPrekey.Span),
@@ -129,6 +128,7 @@ internal sealed class DirectHandshakeOrchestrator
                 var result = await handshakeService.InitiateHandshakeAsync(
                     initiator.PublicIdentityId,
                     DeviceId.Primary,
+                    target.PublicIdentityId,
                     targetBundle,
                     initialAppId: null,
                     initialPayload: null,

@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Delivery.Ports;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Simulator.Features.Shell;
 using Percolator.Simulator.Features.Topology;
@@ -17,7 +18,7 @@ internal sealed class SimulatorNotifyingRelayPreKeyRepositoryDecorator : IRelayP
     private readonly IRelayPreKeyRepository _inner;
     private readonly ISimulatorStateBus _stateBus;
     private readonly SimulatedNodeId _nodeId;
-    private readonly ConcurrentDictionary<(PublicIdentityId, DeviceId), int> _availableOpkCounts = new();
+    private readonly ConcurrentDictionary<(BlindedRoutingToken, DeviceId), int> _availableOpkCounts = new();
 
     public SimulatorNotifyingRelayPreKeyRepositoryDecorator(
         IRelayPreKeyRepository inner,
@@ -30,35 +31,35 @@ internal sealed class SimulatorNotifyingRelayPreKeyRepositoryDecorator : IRelayP
     }
 
     public async Task<RelayHostedPreKeyBundle?> GetAsync(
-        PublicIdentityId ownerId,
+        BlindedRoutingToken routingToken,
         DeviceId deviceId,
         CancellationToken cancellationToken = default)
     {
-        var bundle = await _inner.GetAsync(ownerId, deviceId, cancellationToken);
+        var bundle = await _inner.GetAsync(routingToken, deviceId, cancellationToken);
         if (bundle != null)
         {
-            _availableOpkCounts[(ownerId, deviceId)] = bundle.AvailableOneTimePreKeyCount;
+            _availableOpkCounts[(routingToken, deviceId)] = bundle.AvailableOneTimePreKeyCount;
         }
         return bundle;
     }
 
-    public async Task<IReadOnlyList<RelayHostedPreKeyBundle>> GetAllForIdentityAsync(
-        PublicIdentityId ownerId,
+    public async Task<IReadOnlyList<RelayHostedPreKeyBundle>> GetAllForMailboxAsync(
+        BlindedRoutingToken routingToken,
         CancellationToken cancellationToken = default)
     {
-        var bundles = await _inner.GetAllForIdentityAsync(ownerId, cancellationToken);
+        var bundles = await _inner.GetAllForMailboxAsync(routingToken, cancellationToken);
         foreach (var bundle in bundles)
         {
-            _availableOpkCounts[(bundle.OwnerId, bundle.DeviceId)] = bundle.AvailableOneTimePreKeyCount;
+            _availableOpkCounts[(bundle.RoutingToken, bundle.DeviceId)] = bundle.AvailableOneTimePreKeyCount;
         }
         return bundles;
     }
 
     public Task<bool> HasActivePreKeyAsync(
-        PublicIdentityId ownerId,
+        BlindedRoutingToken routingToken,
         CancellationToken cancellationToken = default)
     {
-        return _inner.HasActivePreKeyAsync(ownerId, cancellationToken);
+        return _inner.HasActivePreKeyAsync(routingToken, cancellationToken);
     }
 
     public async Task SaveAsync(
@@ -68,40 +69,40 @@ internal sealed class SimulatorNotifyingRelayPreKeyRepositoryDecorator : IRelayP
         ArgumentNullException.ThrowIfNull(bundle);
 
         await _inner.SaveAsync(bundle, cancellationToken);
-        _availableOpkCounts[(bundle.OwnerId, bundle.DeviceId)] = bundle.AvailableOneTimePreKeyCount;
+        _availableOpkCounts[(bundle.RoutingToken, bundle.DeviceId)] = bundle.AvailableOneTimePreKeyCount;
 
         _stateBus.Publish(new SimulatorStateSignal(
             _nodeId,
             SignalCategory.HostedPreKeyCountChanged,
-            $"{bundle.OwnerId}:{bundle.AvailableOneTimePreKeyCount}",
-            Payload: new HostedPreKeyCountPayload(bundle.OwnerId, bundle.AvailableOneTimePreKeyCount)));
+            $"{bundle.RoutingToken}:{bundle.AvailableOneTimePreKeyCount}",
+            Payload: new HostedPreKeyCountPayload(bundle.RoutingToken, bundle.AvailableOneTimePreKeyCount)));
     }
 
     public async Task DeleteAsync(
-        PublicIdentityId ownerId,
+        BlindedRoutingToken routingToken,
         DeviceId deviceId,
         CancellationToken cancellationToken = default)
     {
-        await _inner.DeleteAsync(ownerId, deviceId, cancellationToken);
-        _availableOpkCounts.TryRemove((ownerId, deviceId), out _);
+        await _inner.DeleteAsync(routingToken, deviceId, cancellationToken);
+        _availableOpkCounts.TryRemove((routingToken, deviceId), out _);
 
         _stateBus.Publish(new SimulatorStateSignal(
             _nodeId,
             SignalCategory.HostedPreKeyCountChanged,
-            $"{ownerId}:0",
-            Payload: new HostedPreKeyCountPayload(ownerId, 0)));
+            $"{routingToken}:0",
+            Payload: new HostedPreKeyCountPayload(routingToken, 0)));
     }
 
-    public int GetAvailableOpkCount(PublicIdentityId ownerId, DeviceId deviceId)
+    public int GetAvailableOpkCount(BlindedRoutingToken routingToken, DeviceId deviceId)
     {
-        if (_availableOpkCounts.TryGetValue((ownerId, deviceId), out var count))
+        if (_availableOpkCounts.TryGetValue((routingToken, deviceId), out var count))
         {
             return count;
         }
-        var bundle = _inner.GetAsync(ownerId, deviceId).GetAwaiter().GetResult();
+        var bundle = _inner.GetAsync(routingToken, deviceId).GetAwaiter().GetResult();
         if (bundle != null)
         {
-            _availableOpkCounts[(ownerId, deviceId)] = bundle.AvailableOneTimePreKeyCount;
+            _availableOpkCounts[(routingToken, deviceId)] = bundle.AvailableOneTimePreKeyCount;
             return bundle.AvailableOneTimePreKeyCount;
         }
         return 0;

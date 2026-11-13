@@ -8,8 +8,10 @@ message DiscoveryRegistrationProto {
   bytes peer_id = 1;
   int32 visibility = 2;
   int64 timestamp_unix_ms = 3;
-  bytes signature = 4;
+  bytes signature = 4;          // Ed25519 over [PeerId||Visibility||Timestamp||RoutingToken||DeliveryToken]
   bytes identity_key = 5;
+  bytes routing_token = 6;      // 16-byte mailbox routing token advertised when Discoverable
+  bytes delivery_token = 7;     // 32-byte mailbox delivery token advertised when Discoverable
 }
 
 message PeerDiscoveryDescriptorProto {

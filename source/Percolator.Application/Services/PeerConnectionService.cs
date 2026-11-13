@@ -68,6 +68,7 @@ public sealed class PeerConnectionService : IPeerConnectionService
         var handshakeResult = await _handshakeService.InitiateHandshakeAsync(
             _localIdentityId,
             _localDeviceId,
+            targetPeerId,
             bundle,
             ct: ct).ConfigureAwait(false);
 

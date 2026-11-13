@@ -4,7 +4,7 @@ using System;
 
 public sealed class RelayPreKeyEntity
 {
-    public Guid OwnerIdentityId { get; set; }
+    public byte[] RoutingToken { get; set; } = Array.Empty<byte>();   // 16-byte BlindedRoutingToken — PK component
     public uint DeviceId { get; set; }
     public byte[] IdentityKey { get; set; } = Array.Empty<byte>();
     public byte[] SignedPreKey { get; set; } = Array.Empty<byte>();
@@ -45,6 +45,8 @@ public sealed class RelayPeerDirectoryEntity
     public int Visibility { get; set; }
     public bool HasAuthenticatedHandshake { get; set; }
     public bool HasActiveSignedPreKey { get; set; }
+    public byte[]? RoutingToken { get; set; }    // 16-byte mailbox routing token advertised when discoverable
+    public byte[]? DeliveryToken { get; set; }   // 32-byte delivery token advertised when discoverable
     public DateTimeOffset RegisteredAtUtc { get; set; }
     public DateTimeOffset LastUpdatedAtUtc { get; set; }
 }
@@ -80,8 +82,6 @@ public sealed class RelayMailboxCapabilityEntity
     public byte[] RoutingToken { get; set; } = Array.Empty<byte>();   // PK — 16 bytes
     public byte[] DeliveryToken { get; set; } = Array.Empty<byte>();  // 32 bytes
     public byte[] DrainToken { get; set; } = Array.Empty<byte>();     // 32 bytes
-    public Guid? OwnerIdentityId { get; set; }
-    public int? DeviceId { get; set; }
 }
 
 public sealed class RelayMailboxAuthorizedTokenEntity

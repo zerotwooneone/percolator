@@ -4,6 +4,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
@@ -57,34 +58,34 @@ public sealed class UnauthenticatedDeliveryEndpointTests
 
     private sealed class InMemoryPreKeyRepo : IRelayPreKeyRepository
     {
-        private readonly ConcurrentDictionary<(PublicIdentityId, DeviceId), RelayHostedPreKeyBundle> _bundles = new();
+        private readonly ConcurrentDictionary<(BlindedRoutingToken, DeviceId), RelayHostedPreKeyBundle> _bundles = new();
 
-        public Task<RelayHostedPreKeyBundle?> GetAsync(PublicIdentityId ownerId, DeviceId deviceId, CancellationToken cancellationToken = default)
+        public Task<RelayHostedPreKeyBundle?> GetAsync(BlindedRoutingToken routingToken, DeviceId deviceId, CancellationToken cancellationToken = default)
         {
-            _bundles.TryGetValue((ownerId, deviceId), out var bundle);
+            _bundles.TryGetValue((routingToken, deviceId), out var bundle);
             return Task.FromResult(bundle);
         }
 
-        public Task<IReadOnlyList<RelayHostedPreKeyBundle>> GetAllForIdentityAsync(PublicIdentityId ownerId, CancellationToken cancellationToken = default)
+        public Task<IReadOnlyList<RelayHostedPreKeyBundle>> GetAllForMailboxAsync(BlindedRoutingToken routingToken, CancellationToken cancellationToken = default)
         {
-            IReadOnlyList<RelayHostedPreKeyBundle> list = new List<RelayHostedPreKeyBundle>(_bundles.Values);
+            IReadOnlyList<RelayHostedPreKeyBundle> list = _bundles.Values.Where(b => b.RoutingToken == routingToken).ToList();
             return Task.FromResult(list);
         }
 
-        public Task<bool> HasActivePreKeyAsync(PublicIdentityId ownerId, CancellationToken cancellationToken = default)
+        public Task<bool> HasActivePreKeyAsync(BlindedRoutingToken routingToken, CancellationToken cancellationToken = default)
         {
-            return Task.FromResult(_bundles.Count > 0);
+            return Task.FromResult(_bundles.Values.Any(b => b.RoutingToken == routingToken));
         }
 
         public Task SaveAsync(RelayHostedPreKeyBundle bundle, CancellationToken cancellationToken = default)
         {
-            _bundles[(bundle.OwnerId, bundle.DeviceId)] = bundle;
+            _bundles[(bundle.RoutingToken, bundle.DeviceId)] = bundle;
             return Task.CompletedTask;
         }
 
-        public Task DeleteAsync(PublicIdentityId ownerId, DeviceId deviceId, CancellationToken cancellationToken = default)
+        public Task DeleteAsync(BlindedRoutingToken routingToken, DeviceId deviceId, CancellationToken cancellationToken = default)
         {
-            _bundles.TryRemove((ownerId, deviceId), out _);
+            _bundles.TryRemove((routingToken, deviceId), out _);
             return Task.CompletedTask;
         }
     }
@@ -444,7 +445,6 @@ public sealed class UnauthenticatedDeliveryEndpointTests
     [Test]
     public async Task FetchPreKeyBundle_InvalidDeliveryToken_RejectsWithoutConsumingOpk()
     {
-        var ownerId = PublicIdentityId.New();
         var deviceId = new DeviceId(1);
         var routingToken = new byte[16];
         var correctDeliveryToken = new byte[32];
@@ -456,8 +456,10 @@ public sealed class UnauthenticatedDeliveryEndpointTests
         RandomNumberGenerator.Fill(wrongDeliveryToken);
         RandomNumberGenerator.Fill(drainToken);
 
-        // Register mailbox with owner association
-        await _capabilityStore.RegisterAsync(routingToken, correctDeliveryToken, drainToken, ownerId, deviceId);
+        var routingTokenVo = BlindedRoutingToken.FromBytes(routingToken);
+
+        // Register mailbox — bundles are keyed by the routing token, no owner association exists
+        await _capabilityStore.RegisterAsync(routingToken, correctDeliveryToken, drainToken);
 
         byte[] privId = new byte[32];
         byte[] pubIdBytes = new byte[32];
@@ -470,15 +472,13 @@ public sealed class UnauthenticatedDeliveryEndpointTests
         var (_, opkPub) = _cryptoEngine.GenerateEphemeralKeyPair();
         var opks = new List<(uint KeyId, DhPublicKey Key)> { (101u, opkPub) };
 
-        var bundle = RelayHostedPreKeyBundle.Create(
-            ownerId,
+        var bundle = RelayHostedPreKeyBundle.Rehydrate(
+            routingTokenVo,
             deviceId,
             pubId,
             pubSigned,
             DeviceLinkProof.FromSpan(sig),
-            opks,
-            RelayHostingPolicy.Default,
-            _cryptoEngine).Value!;
+            opks);
 
         await _preKeyRepo.SaveAsync(bundle);
         bundle.AvailableOneTimePreKeyCount.Should().Be(1);
@@ -497,7 +497,7 @@ public sealed class UnauthenticatedDeliveryEndpointTests
         ex.Which.StatusCode.Should().Be(StatusCode.PermissionDenied);
 
         // Verify OPK was NOT consumed
-        var storedBundle = await _preKeyRepo.GetAsync(ownerId, deviceId);
+        var storedBundle = await _preKeyRepo.GetAsync(routingTokenVo, deviceId);
         storedBundle!.AvailableOneTimePreKeyCount.Should().Be(1);
 
         // Now fetch with CORRECT delivery token capability
@@ -512,7 +512,7 @@ public sealed class UnauthenticatedDeliveryEndpointTests
         response.OneTimePrekeyId.Should().Be(101u);
 
         // Verify OPK WAS consumed
-        var consumedBundle = await _preKeyRepo.GetAsync(ownerId, deviceId);
+        var consumedBundle = await _preKeyRepo.GetAsync(routingTokenVo, deviceId);
         consumedBundle!.AvailableOneTimePreKeyCount.Should().Be(0);
     }
 

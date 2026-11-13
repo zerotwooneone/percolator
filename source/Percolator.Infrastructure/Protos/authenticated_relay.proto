@@ -72,22 +72,19 @@ message OneTimePreKeyProto {
   bytes public_key = 2;
 }
 
-message PreKeyBundlePayloadProto {
-  bytes owner_identity_id = 1;
-  uint32 device_id = 2;
-  bytes identity_key = 3;
-  uint32 signed_prekey_id = 4;
-  bytes signed_prekey = 5;
-  bytes prekey_signature = 6;
-  repeated OneTimePreKeyProto one_time_prekeys = 7;
-  google.protobuf.Timestamp published_at_utc = 8;
-  bytes routing_token = 9; // mailbox routing token covered by the Ed25519 signature
-}
-
+// Flat, drain-token-authenticated publish matching Signal's PUT /v2/keys.
+// The relay never learns the owner identity — the mailbox routing token is the
+// storage key and the drain token is the only write credential. The only signature
+// is the bundle's own signed-prekey signature, verified by consumers during X3DH.
 message PublishPreKeyBundleRequest {
-  bytes payload_bytes = 1; // Serialized PreKeyBundlePayloadProto wire bytes
-  bytes signature = 2;     // Ed25519 signature over payload_bytes
-  bytes drain_token = 3;   // proves caller owns the mailbox for payload.routing_token
+  bytes routing_token = 1;                  // 16-byte BlindedRoutingToken identifying the mailbox
+  bytes drain_token = 2;                    // 32-byte DeliveryToken proving mailbox ownership
+  uint32 device_id = 3;                     // DeviceId (1 = primary)
+  bytes identity_key = 4;                   // 32-byte Ed25519 public key (pinned on first publish)
+  uint32 signed_prekey_id = 5;              // Signed pre-key ID
+  bytes signed_prekey = 6;                  // 32-byte X25519 signed pre-key public key
+  bytes prekey_signature = 7;               // 64-byte Ed25519(identity_key, signed_prekey) signature
+  repeated OneTimePreKeyProto one_time_prekeys = 8;
 }
 
 message PublishPreKeyBundleResponse {

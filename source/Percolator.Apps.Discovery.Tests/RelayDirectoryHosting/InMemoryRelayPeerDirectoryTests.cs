@@ -3,6 +3,7 @@ using NUnit.Framework;
 using Percolator.Apps.Discovery.Features.RelayDirectoryHosting;
 using Percolator.Apps.Discovery.Ports;
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 
 namespace Percolator.Apps.Discovery.Tests.RelayDirectoryHosting;
@@ -101,23 +102,27 @@ public sealed class InMemoryRelayPeerDirectoryTests
             TimeSpan.FromHours(1));
 
         var peerId = PublicIdentityId.New();
-        preKeyPort.ActivePreKeyPeers.Add(peerId);
+        var routingToken = BlindedRoutingToken.New();
+        preKeyPort.ActivePreKeyPeers.Add(routingToken);
 
         await directory.RegisterPeerAsync(new RelayPeerRegistration(
             peerId,
             PeerDiscoveryVisibility.Discoverable,
             HasAuthenticatedHandshake: true,
-            HasActiveSignedPreKey: true));
+            HasActiveSignedPreKey: true)
+        {
+            RoutingToken = routingToken
+        });
 
         // 1. Initially discoverable because preKeyPort reports active SPK
         (await directory.GetDiscoverablePeersAsync()).Should().ContainSingle(p => p.PeerId == peerId);
 
         // 2. When SPK expires dynamically on the port, peer is excluded
-        preKeyPort.ActivePreKeyPeers.Remove(peerId);
+        preKeyPort.ActivePreKeyPeers.Remove(routingToken);
         (await directory.GetDiscoverablePeersAsync()).Should().BeEmpty();
 
         // 3. When TTL expires, registration is evicted from memory
-        preKeyPort.ActivePreKeyPeers.Add(peerId);
+        preKeyPort.ActivePreKeyPeers.Add(routingToken);
         clock.Advance(TimeSpan.FromHours(2));
         (await directory.GetPeerAsync(peerId)).Should().BeNull();
     }
@@ -190,10 +195,10 @@ public sealed class InMemoryRelayPeerDirectoryTests
 
     private sealed class FakePreKeyAvailabilityPort : IPreKeyAvailabilityPort
     {
-        public HashSet<PublicIdentityId> ActivePreKeyPeers { get; } = new();
+        public HashSet<BlindedRoutingToken> ActivePreKeyPeers { get; } = new();
 
-        public ValueTask<bool> HasActiveSignedPreKeyAsync(PublicIdentityId peerId, CancellationToken ct = default) =>
-            ValueTask.FromResult(ActivePreKeyPeers.Contains(peerId));
+        public ValueTask<bool> HasActiveSignedPreKeyAsync(BlindedRoutingToken routingToken, CancellationToken ct = default) =>
+            ValueTask.FromResult(ActivePreKeyPeers.Contains(routingToken));
     }
 
     private sealed class FakeClock : IDateTimeProvider

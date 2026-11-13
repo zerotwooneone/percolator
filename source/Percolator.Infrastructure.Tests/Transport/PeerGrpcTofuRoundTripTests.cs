@@ -43,19 +43,19 @@ public sealed class PeerGrpcTofuRoundTripTests
 
     private sealed class StubRelayPreKeyRepository : IRelayPreKeyRepository
     {
-        public Task<RelayHostedPreKeyBundle?> GetAsync(PublicIdentityId ownerId, DeviceId deviceId, CancellationToken cancellationToken = default)
+        public Task<RelayHostedPreKeyBundle?> GetAsync(BlindedRoutingToken routingToken, DeviceId deviceId, CancellationToken cancellationToken = default)
             => Task.FromResult<RelayHostedPreKeyBundle?>(null);
 
-        public Task<IReadOnlyList<RelayHostedPreKeyBundle>> GetAllForIdentityAsync(PublicIdentityId ownerId, CancellationToken cancellationToken = default)
+        public Task<IReadOnlyList<RelayHostedPreKeyBundle>> GetAllForMailboxAsync(BlindedRoutingToken routingToken, CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<RelayHostedPreKeyBundle>>(Array.Empty<RelayHostedPreKeyBundle>());
 
-        public Task<bool> HasActivePreKeyAsync(PublicIdentityId ownerId, CancellationToken cancellationToken = default)
+        public Task<bool> HasActivePreKeyAsync(BlindedRoutingToken routingToken, CancellationToken cancellationToken = default)
             => Task.FromResult(false);
 
         public Task SaveAsync(RelayHostedPreKeyBundle bundle, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
 
-        public Task DeleteAsync(PublicIdentityId ownerId, DeviceId deviceId, CancellationToken cancellationToken = default)
+        public Task DeleteAsync(BlindedRoutingToken routingToken, DeviceId deviceId, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
     }
 

@@ -1,5 +1,6 @@
 using NUnit.Framework;
 using Percolator.Domain.Delivery.Hosting;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Tests.TestDoubles;
 
@@ -20,7 +21,7 @@ public sealed class RelayHostedPreKeyBundleTests
     public void Create_And_ConsumeBundle_DispensesOneTimeKeys_AndFallsBackWhenExhausted()
     {
         // Arrange
-        var ownerId = PublicIdentityId.New();
+        var routingToken = BlindedRoutingToken.New();
         var deviceId = DeviceId.Primary;
         var identityKey = IdentityKey.FromSpan(new byte[32]);
         var signedPreKey = DhPublicKey.FromSpan(new byte[32]);
@@ -36,7 +37,7 @@ public sealed class RelayHostedPreKeyBundleTests
 
         // Act: Create hosted bundle
         var createResult = RelayHostedPreKeyBundle.Create(
-            ownerId,
+            routingToken,
             deviceId,
             identityKey,
             signedPreKey,
@@ -75,11 +76,11 @@ public sealed class RelayHostedPreKeyBundleTests
     {
         // Arrange
         var policy = new RelayHostingPolicy(IsAcceptingPreKeys: false);
-        var ownerId = PublicIdentityId.New();
+        var routingToken = BlindedRoutingToken.New();
 
         // Act
         var result = RelayHostedPreKeyBundle.Create(
-            ownerId,
+            routingToken,
             DeviceId.Primary,
             IdentityKey.FromSpan(new byte[32]),
             DhPublicKey.FromSpan(new byte[32]),
@@ -98,7 +99,7 @@ public sealed class RelayHostedPreKeyBundleTests
     {
         // Arrange: Policy with limit of 2 OTPKs
         var policy = new RelayHostingPolicy(IsAcceptingPreKeys: true, MaxOneTimePreKeysPerIdentity: 2);
-        var ownerId = PublicIdentityId.New();
+        var routingToken = BlindedRoutingToken.New();
 
         var oneTimeKeys = new (uint, DhPublicKey)[]
         {
@@ -109,7 +110,7 @@ public sealed class RelayHostedPreKeyBundleTests
 
         // Act
         var result = RelayHostedPreKeyBundle.Create(
-            ownerId,
+            routingToken,
             DeviceId.Primary,
             IdentityKey.FromSpan(new byte[32]),
             DhPublicKey.FromSpan(new byte[32]),
@@ -128,10 +129,10 @@ public sealed class RelayHostedPreKeyBundleTests
     {
         // Arrange: Policy with limit of 2 OTPKs
         var policy = new RelayHostingPolicy(IsAcceptingPreKeys: true, MaxOneTimePreKeysPerIdentity: 2);
-        var ownerId = PublicIdentityId.New();
+        var routingToken = BlindedRoutingToken.New();
 
         var bundle = RelayHostedPreKeyBundle.Create(
-            ownerId,
+            routingToken,
             DeviceId.Primary,
             IdentityKey.FromSpan(new byte[32]),
             DhPublicKey.FromSpan(new byte[32]),

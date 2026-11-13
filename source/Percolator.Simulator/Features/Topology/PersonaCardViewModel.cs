@@ -16,6 +16,7 @@ using Percolator.Apps.Chat.Features.Messaging;
 using Percolator.Domain.Channels.Ports;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Simulator.Features.DirectChat;
@@ -328,20 +329,20 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
                 {
                     if (AutoReplenishPreKeys && _host?.HomeRelay != null)
                     {
-                        PublicIdentityId? ownerId = (signal.Payload as HostedPreKeyCountPayload)?.OwnerId;
+                        BlindedRoutingToken? routingToken = (signal.Payload as HostedPreKeyCountPayload)?.RoutingToken;
                         int? available = (signal.Payload as HostedPreKeyCountPayload)?.AvailableCount;
 
-                        if (!ownerId.HasValue && signal.Details != null && signal.Details.StartsWith(_host.PublicIdentityId.ToString()))
+                        if (!routingToken.HasValue && signal.Details != null && signal.Details.StartsWith(_host.MailboxRoutingToken.ToString()))
                         {
                             var parts = signal.Details.Split(':');
                             if (parts.Length == 2 && int.TryParse(parts[1], out var parsedCount))
                             {
-                                ownerId = _host.PublicIdentityId;
+                                routingToken = _host.MailboxRoutingToken;
                                 available = parsedCount;
                             }
                         }
 
-                        if (ownerId == _host.PublicIdentityId && available.HasValue && available.Value < 5)
+                        if (routingToken == _host.MailboxRoutingToken && available.HasValue && available.Value < 5)
                         {
                             int count = available.Value;
                             UiTaskRunner.FireAndForget(async () =>

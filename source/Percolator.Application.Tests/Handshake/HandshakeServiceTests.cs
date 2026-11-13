@@ -98,7 +98,6 @@ public sealed class HandshakeServiceTests
         var spkSig = _cryptoEngine.SignEd25519(_bobPrivKey, spkPair.PublicKey.Span);
 
         return new PreKeyBundle(
-            _bobId,
             _bobDeviceId,
             _bobIdentityKey,
             spkPair.PublicKey,
@@ -117,6 +116,7 @@ public sealed class HandshakeServiceTests
         var result = await _handshakeService.InitiateHandshakeAsync(
             _aliceId,
             _aliceDeviceId,
+            _bobId,
             bobBundle,
             AppId.Chat,
             "Initial Hello"u8.ToArray());

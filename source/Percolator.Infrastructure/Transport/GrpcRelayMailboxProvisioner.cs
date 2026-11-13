@@ -107,14 +107,12 @@ public sealed class GrpcRelayMailboxProvisioner : IRelayMailboxProvisioner
                 "INVALID_OPK_COUNT", "One-time pre-key count cannot be negative."));
         }
 
-        var privateKey = await _identityKeyStore.GetIdentityPrivateKeyAsync(ownerIdentityId, ct)
-            .ConfigureAwait(false);
         var publicKey = await _identityKeyStore.GetIdentityPublicKeyAsync(ownerIdentityId, ct)
             .ConfigureAwait(false);
         var signedPreKey = await _preKeyStore.GetSignedPreKeyAsync(ownerIdentityId, deviceId, ct)
             .ConfigureAwait(false);
 
-        if (privateKey == null || publicKey == null || signedPreKey == null)
+        if (publicKey == null || signedPreKey == null)
         {
             return DomainResult.Failure(new DomainError(
                 "KEY_MATERIAL_MISSING",
@@ -146,40 +144,26 @@ public sealed class GrpcRelayMailboxProvisioner : IRelayMailboxProvisioner
                 .ConfigureAwait(false);
         }
 
-        var payload = new PreKeyBundlePayloadProto
+        // Flat, drain-token-authenticated publish matching Signal's PUT /v2/keys.
+        // No owner identity and no outer signature — the mailbox routing token is the
+        // storage key and the drain token proves write authorization.
+        var request = new PublishPreKeyBundleRequest
         {
-            OwnerIdentityId = ByteString.CopyFrom(ownerIdentityId.ToByteArray()),
+            RoutingToken = ByteString.CopyFrom(tokens.RoutingToken.ToByteArray()),
+            DrainToken = ByteString.CopyFrom(tokens.DrainToken.Span),
             DeviceId = deviceId.Value,
             IdentityKey = ByteString.CopyFrom(publicKey.Span),
             SignedPrekeyId = SignedPreKeyId,
             SignedPrekey = ByteString.CopyFrom(signedPreKey.PublicKey.Span),
-            PrekeySignature = ByteString.CopyFrom(signedPreKey.Signature.Span),
-            PublishedAtUtc = Timestamp.FromDateTimeOffset(_timeProvider.UtcNow),
-            RoutingToken = ByteString.CopyFrom(tokens.RoutingToken.ToByteArray())
+            PrekeySignature = ByteString.CopyFrom(signedPreKey.Signature.Span)
         };
-        payload.OneTimePrekeys.AddRange(opkProtos);
+        request.OneTimePrekeys.AddRange(opkProtos);
 
         try
         {
-            var payloadBytes = payload.ToByteArray();
-            byte[] signature;
-            try
-            {
-                signature = _cryptoEngine.SignEd25519(privateKey.Span, payloadBytes);
-            }
-            finally
-            {
-                privateKey.Zeroize();
-            }
-
             var client = CreateClient(endpoint);
             var response = await client.PublishPreKeyBundleAsync(
-                new PublishPreKeyBundleRequest
-                {
-                    PayloadBytes = ByteString.CopyFrom(payloadBytes),
-                    Signature = ByteString.CopyFrom(signature),
-                    DrainToken = ByteString.CopyFrom(tokens.DrainToken.Span)
-                },
+                request,
                 cancellationToken: ct).ResponseAsync.ConfigureAwait(false);
 
             return response.Success

@@ -9,6 +9,7 @@ using Microsoft.EntityFrameworkCore;
 using Percolator.Apps.Discovery.Features.RelayDirectoryHosting;
 using Percolator.Apps.Discovery.Ports;
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Infrastructure.Persistence;
 using Percolator.Infrastructure.Persistence.Entities;
@@ -81,10 +82,13 @@ public sealed class SqliteRelayPeerDirectory : IRelayPeerDirectory
             return DomainResult.Success();
         }
 
+        // Availability is keyed by the advertised mailbox routing token, not the
+        // peer identity — a peer that advertises no mailbox cannot have hosted keys.
         bool hasActiveSpk = registration.HasActiveSignedPreKey;
         if (_preKeyAvailabilityPort != null)
         {
-            hasActiveSpk = await _preKeyAvailabilityPort.HasActiveSignedPreKeyAsync(registration.PeerId, ct).ConfigureAwait(false);
+            hasActiveSpk = registration.RoutingToken.HasValue &&
+                await _preKeyAvailabilityPort.HasActiveSignedPreKeyAsync(registration.RoutingToken.Value, ct).ConfigureAwait(false);
         }
 
         var admission = _admissionGate.EvaluateAdmission(
@@ -112,6 +116,8 @@ public sealed class SqliteRelayPeerDirectory : IRelayPeerDirectory
                 Visibility = (int)registration.Visibility,
                 HasAuthenticatedHandshake = true,
                 HasActiveSignedPreKey = hasActiveSpk,
+                RoutingToken = registration.RoutingToken?.ToByteArray(),
+                DeliveryToken = registration.DeliveryToken?.Memory.ToArray(),
                 RegisteredAtUtc = registeredAt,
                 LastUpdatedAtUtc = nowUtc
             };
@@ -123,6 +129,8 @@ public sealed class SqliteRelayPeerDirectory : IRelayPeerDirectory
             existing.Visibility = (int)registration.Visibility;
             existing.HasAuthenticatedHandshake = true;
             existing.HasActiveSignedPreKey = hasActiveSpk;
+            existing.RoutingToken = registration.RoutingToken?.ToByteArray();
+            existing.DeliveryToken = registration.DeliveryToken?.Memory.ToArray();
             existing.LastUpdatedAtUtc = nowUtc;
         }
 
@@ -133,6 +141,8 @@ public sealed class SqliteRelayPeerDirectory : IRelayPeerDirectory
     public async ValueTask<DomainResult> UpdateVisibilityAsync(
         PublicIdentityId peerId,
         PeerDiscoveryVisibility visibility,
+        BlindedRoutingToken? routingToken = null,
+        DeliveryToken? deliveryToken = null,
         CancellationToken ct = default)
     {
         if (!peerId.IsValid)
@@ -163,6 +173,8 @@ public sealed class SqliteRelayPeerDirectory : IRelayPeerDirectory
         else
         {
             existing.Visibility = (int)visibility;
+            existing.RoutingToken = routingToken?.ToByteArray();
+            existing.DeliveryToken = deliveryToken?.Memory.ToArray();
             existing.LastUpdatedAtUtc = nowUtc;
         }
 
@@ -205,7 +217,11 @@ public sealed class SqliteRelayPeerDirectory : IRelayPeerDirectory
             existing.HasAuthenticatedHandshake,
             existing.HasActiveSignedPreKey,
             existing.RegisteredAtUtc,
-            existing.LastUpdatedAtUtc);
+            existing.LastUpdatedAtUtc)
+        {
+            RoutingToken = existing.RoutingToken is { Length: > 0 } rt ? BlindedRoutingToken.FromBytes(rt) : null,
+            DeliveryToken = existing.DeliveryToken is { Length: > 0 } dt ? DeliveryToken.FromSpan(dt) : null
+        };
     }
 
     public async ValueTask<IReadOnlyList<RelayPeerRegistration>> GetDiscoverablePeersAsync(
@@ -240,11 +256,13 @@ public sealed class SqliteRelayPeerDirectory : IRelayPeerDirectory
             }
 
             var peerId = PublicIdentityId.FromBytes(reg.PeerId);
+            var routingToken = reg.RoutingToken is { Length: > 0 } ? BlindedRoutingToken.FromBytes(reg.RoutingToken) : (BlindedRoutingToken?)null;
             bool hasActiveSpk = reg.HasActiveSignedPreKey;
 
             if (_preKeyAvailabilityPort != null)
             {
-                hasActiveSpk = await _preKeyAvailabilityPort.HasActiveSignedPreKeyAsync(peerId, ct).ConfigureAwait(false);
+                hasActiveSpk = routingToken.HasValue &&
+                    await _preKeyAvailabilityPort.HasActiveSignedPreKeyAsync(routingToken.Value, ct).ConfigureAwait(false);
                 if (hasActiveSpk != reg.HasActiveSignedPreKey)
                 {
                     reg.HasActiveSignedPreKey = hasActiveSpk;
@@ -267,7 +285,11 @@ public sealed class SqliteRelayPeerDirectory : IRelayPeerDirectory
                     reg.HasAuthenticatedHandshake,
                     hasActiveSpk,
                     reg.RegisteredAtUtc,
-                    reg.LastUpdatedAtUtc));
+                    reg.LastUpdatedAtUtc)
+                {
+                    RoutingToken = routingToken,
+                    DeliveryToken = reg.DeliveryToken is { Length: > 0 } ? DeliveryToken.FromSpan(reg.DeliveryToken) : null
+                });
             }
         }
 

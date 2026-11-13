@@ -46,7 +46,7 @@ public sealed class RelayPreKeyDirectoryPruner : BackgroundService
             var staleKeys = await context.RelayPreKeys
                 .Where(k => k.UpdatedAtUtc <= cutoffTime)
                 .OrderBy(k => k.UpdatedAtUtc)
-                .Select(k => new { k.OwnerIdentityId, k.DeviceId })
+                .Select(k => new { k.RoutingToken, k.DeviceId })
                 .Take(500)
                 .ToListAsync(ct)
                 .ConfigureAwait(false);
@@ -58,7 +58,7 @@ public sealed class RelayPreKeyDirectoryPruner : BackgroundService
 
             var stubs = staleKeys.Select(k => new RelayPreKeyEntity
             {
-                OwnerIdentityId = k.OwnerIdentityId,
+                RoutingToken = k.RoutingToken,
                 DeviceId = k.DeviceId
             });
             context.RelayPreKeys.RemoveRange(stubs);

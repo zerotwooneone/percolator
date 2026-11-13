@@ -47,7 +47,6 @@ public sealed class X3dhAgreementTests
         var bobOpkPub = DhPublicKey.FromSpan(bobOneTimePreKeyPub);
 
         var bobBundle = new PreKeyBundle(
-            PublicIdentityId.New(),
             DeviceId.Primary,
             bobIdPub,
             bobSpkPub,
@@ -100,7 +99,6 @@ public sealed class X3dhAgreementTests
         bobSignedPreKeyPub.Fill(130);
 
         var bobBundle = new PreKeyBundle(
-            PublicIdentityId.New(),
             DeviceId.Primary,
             IdentityKey.FromSpan(bobIdentityPub),
             DhPublicKey.FromSpan(bobSignedPreKeyPub),
@@ -132,7 +130,6 @@ public sealed class X3dhAgreementTests
         _cryptoEngine.SignaturesAlwaysValid = false;
 
         var bobBundle = new PreKeyBundle(
-            PublicIdentityId.New(),
             DeviceId.Primary,
             IdentityKey.FromSpan(new byte[32]),
             DhPublicKey.FromSpan(new byte[32]),

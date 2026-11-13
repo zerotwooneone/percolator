@@ -9,6 +9,7 @@ using FluentAssertions;
 using NUnit.Framework;
 using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Delivery.Ports;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Infrastructure.Adapters;
 
@@ -19,14 +20,14 @@ public sealed class PreKeyAvailabilityAdapterTests
     {
         public RelayHostedPreKeyBundle? Bundle { get; set; }
 
-        public Task<RelayHostedPreKeyBundle?> GetAsync(PublicIdentityId ownerId, DeviceId deviceId, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Bundle);
+        public Task<RelayHostedPreKeyBundle?> GetAsync(BlindedRoutingToken routingToken, DeviceId deviceId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Bundle != null && Bundle.RoutingToken == routingToken && Bundle.DeviceId == deviceId ? Bundle : null);
 
-        public Task<IReadOnlyList<RelayHostedPreKeyBundle>> GetAllForIdentityAsync(PublicIdentityId ownerId, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<RelayHostedPreKeyBundle>>(Bundle != null ? new[] { Bundle } : Array.Empty<RelayHostedPreKeyBundle>());
+        public Task<IReadOnlyList<RelayHostedPreKeyBundle>> GetAllForMailboxAsync(BlindedRoutingToken routingToken, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<RelayHostedPreKeyBundle>>(Bundle != null && Bundle.RoutingToken == routingToken ? new[] { Bundle } : Array.Empty<RelayHostedPreKeyBundle>());
 
-        public Task<bool> HasActivePreKeyAsync(PublicIdentityId ownerId, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Bundle != null && Bundle.SignedPreKey != null);
+        public Task<bool> HasActivePreKeyAsync(BlindedRoutingToken routingToken, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Bundle != null && Bundle.RoutingToken == routingToken && Bundle.SignedPreKey != null);
 
         public Task SaveAsync(RelayHostedPreKeyBundle bundle, CancellationToken cancellationToken = default)
         {
@@ -34,9 +35,12 @@ public sealed class PreKeyAvailabilityAdapterTests
             return Task.CompletedTask;
         }
 
-        public Task DeleteAsync(PublicIdentityId ownerId, DeviceId deviceId, CancellationToken cancellationToken = default)
+        public Task DeleteAsync(BlindedRoutingToken routingToken, DeviceId deviceId, CancellationToken cancellationToken = default)
         {
-            Bundle = null;
+            if (Bundle != null && Bundle.RoutingToken == routingToken && Bundle.DeviceId == deviceId)
+            {
+                Bundle = null;
+            }
             return Task.CompletedTask;
         }
     }
@@ -44,7 +48,7 @@ public sealed class PreKeyAvailabilityAdapterTests
     [Test]
     public async Task HasActiveSignedPreKey_ChecksPresenceWithoutConsumingOneTimePreKeys()
     {
-        var ownerId = PublicIdentityId.New();
+        var routingToken = BlindedRoutingToken.New();
         var deviceId = DeviceId.Primary;
 
         byte[] idKeyBytes = new byte[32];
@@ -66,14 +70,14 @@ public sealed class PreKeyAvailabilityAdapterTests
             (1u, opk)
         };
 
-        var bundle = RelayHostedPreKeyBundle.Rehydrate(ownerId, deviceId, idKey, spk, sig, otpkList);
+        var bundle = RelayHostedPreKeyBundle.Rehydrate(routingToken, deviceId, idKey, spk, sig, otpkList);
         bundle.AvailableOneTimePreKeyCount.Should().Be(1);
 
         var repo = new TestPreKeyRepository { Bundle = bundle };
         var adapter = new PreKeyAvailabilityAdapter(repo);
 
         // Act
-        bool hasPreKey = await adapter.HasActiveSignedPreKeyAsync(ownerId);
+        bool hasPreKey = await adapter.HasActiveSignedPreKeyAsync(routingToken);
 
         // Assert
         hasPreKey.Should().BeTrue();
@@ -81,7 +85,7 @@ public sealed class PreKeyAvailabilityAdapterTests
 
         // Negative check: when repository has no bundle
         repo.Bundle = null;
-        bool hasNoPreKey = await adapter.HasActiveSignedPreKeyAsync(ownerId);
+        bool hasNoPreKey = await adapter.HasActiveSignedPreKeyAsync(routingToken);
         hasNoPreKey.Should().BeFalse();
     }
 }

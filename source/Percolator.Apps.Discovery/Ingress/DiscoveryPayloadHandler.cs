@@ -157,7 +157,7 @@ public sealed class DiscoveryPayloadHandler : IAppPayloadHandler
                 $"Peer '{context.SenderIdentityId}' cannot update discovery visibility for identity '{payload.PeerId}'."));
         }
 
-        var updateResult = await _directory.UpdateVisibilityAsync(payload.PeerId, payload.Visibility, ct).ConfigureAwait(false);
+        var updateResult = await _directory.UpdateVisibilityAsync(payload.PeerId, payload.Visibility, ct: ct).ConfigureAwait(false);
         return updateResult;
     }
 

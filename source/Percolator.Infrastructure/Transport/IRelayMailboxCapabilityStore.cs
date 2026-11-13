@@ -14,12 +14,13 @@ using System.Threading.Tasks;
 
 using Percolator.Domain.Common;
 
-using Percolator.Domain.Identities.ValueObjects;
-
 using Percolator.Infrastructure.Protos;
 
-
-
+/// <summary>
+/// Token-only mailbox capability store. The relay deliberately never persists an owner
+/// identity — mailboxes, queued envelopes, and delivery authorization are addressed
+/// purely by blinded routing token + bearer tokens.
+/// </summary>
 public interface IRelayMailboxCapabilityStore
 
 {
@@ -31,10 +32,6 @@ public interface IRelayMailboxCapabilityStore
         ReadOnlyMemory<byte> deliveryToken,
 
         ReadOnlyMemory<byte> drainToken,
-
-        PublicIdentityId? ownerId = null,
-
-        DeviceId? deviceId = null,
 
         CancellationToken ct = default);
 
@@ -49,38 +46,6 @@ public interface IRelayMailboxCapabilityStore
         ReadOnlyMemory<byte> drainToken,
 
         ReadOnlyMemory<byte> existingDrainToken = default,
-
-        PublicIdentityId? ownerId = null,
-
-        DeviceId? deviceId = null,
-
-        CancellationToken ct = default);
-
-
-
-    ValueTask AssociateOwnerAsync(
-
-        ReadOnlyMemory<byte> routingToken,
-
-        PublicIdentityId ownerId,
-
-        DeviceId deviceId,
-
-        CancellationToken ct = default);
-
-
-
-    ValueTask<(PublicIdentityId? OwnerId, DeviceId? DeviceId)> GetOwnerAsync(
-
-        ReadOnlyMemory<byte> routingToken,
-
-        CancellationToken ct = default);
-
-
-
-    ValueTask<(byte[] RoutingToken, byte[] DeliveryToken)?> GetMailboxTokensByOwnerAsync(
-
-        PublicIdentityId ownerId,
 
         CancellationToken ct = default);
 

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Delivery.Ports;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 
 namespace Percolator.Application2IntegrationTests.Adapters;
@@ -10,28 +11,28 @@ public sealed class InMemoryRelayPreKeyRepository : IRelayPreKeyRepository
     private readonly ConcurrentDictionary<HostedPreKeyRecordId, RelayHostedPreKeyBundle> _bundles = new();
 
     public Task<RelayHostedPreKeyBundle?> GetAsync(
-        PublicIdentityId ownerId,
+        BlindedRoutingToken routingToken,
         DeviceId deviceId,
         CancellationToken cancellationToken = default)
     {
-        var id = new HostedPreKeyRecordId(ownerId, deviceId);
+        var id = new HostedPreKeyRecordId(routingToken, deviceId);
         _bundles.TryGetValue(id, out var bundle);
         return Task.FromResult(bundle);
     }
 
-    public Task<IReadOnlyList<RelayHostedPreKeyBundle>> GetAllForIdentityAsync(
-        PublicIdentityId ownerId,
+    public Task<IReadOnlyList<RelayHostedPreKeyBundle>> GetAllForMailboxAsync(
+        BlindedRoutingToken routingToken,
         CancellationToken cancellationToken = default)
     {
-        var list = _bundles.Values.Where(b => b.OwnerId == ownerId).ToList();
+        var list = _bundles.Values.Where(b => b.RoutingToken == routingToken).ToList();
         return Task.FromResult<IReadOnlyList<RelayHostedPreKeyBundle>>(list);
     }
 
     public Task<bool> HasActivePreKeyAsync(
-        PublicIdentityId ownerId,
+        BlindedRoutingToken routingToken,
         CancellationToken cancellationToken = default)
     {
-        return Task.FromResult(_bundles.Values.Any(b => b.OwnerId == ownerId));
+        return Task.FromResult(_bundles.Values.Any(b => b.RoutingToken == routingToken));
     }
 
     public Task SaveAsync(RelayHostedPreKeyBundle bundle, CancellationToken cancellationToken = default)
@@ -42,11 +43,11 @@ public sealed class InMemoryRelayPreKeyRepository : IRelayPreKeyRepository
     }
 
     public Task DeleteAsync(
-        PublicIdentityId ownerId,
+        BlindedRoutingToken routingToken,
         DeviceId deviceId,
         CancellationToken cancellationToken = default)
     {
-        var id = new HostedPreKeyRecordId(ownerId, deviceId);
+        var id = new HostedPreKeyRecordId(routingToken, deviceId);
         _bundles.TryRemove(id, out _);
         return Task.CompletedTask;
     }

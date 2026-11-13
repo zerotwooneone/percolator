@@ -1,5 +1,6 @@
 using System;
 using Percolator.Domain.Channels.ValueObjects;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Simulator.Features.Topology;
 
@@ -20,7 +21,7 @@ internal enum SignalCategory
     FileTransferCompleted
 }
 
-internal sealed record HostedPreKeyCountPayload(PublicIdentityId OwnerId, int AvailableCount);
+internal sealed record HostedPreKeyCountPayload(BlindedRoutingToken RoutingToken, int AvailableCount);
 
 internal sealed record HandshakeSignalPayload(PublicIdentityId RemotePeerId, string? Action = null);
 

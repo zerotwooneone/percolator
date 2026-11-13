@@ -1,20 +1,22 @@
 using System.ComponentModel;
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Ports;
 
 namespace Percolator.Domain.Delivery.Hosting;
 
 /// <summary>
-/// Aggregate root representing the pre-key bundle material hosted on a relay for a specific identity and device.
-/// Scoped exclusively to a single device to guarantee sub-millisecond lookups, low memory footprint,
-/// and isolated concurrency without cross-identity lock contention.
+/// Aggregate root representing the pre-key bundle material hosted on a relay for a specific mailbox
+/// (blinded routing token) and device. Scoped exclusively to a single device to guarantee
+/// sub-millisecond lookups, low memory footprint, and isolated concurrency without cross-mailbox
+/// lock contention. The relay never learns which PublicIdentityId owns a bundle.
 /// </summary>
 public sealed class RelayHostedPreKeyBundle : AggregateRoot<HostedPreKeyRecordId>
 {
     public const int MaxOneTimePreKeyCapacity = 100;
-    public override HostedPreKeyRecordId Id => new(OwnerId, DeviceId);
-    public PublicIdentityId OwnerId { get; }
+    public override HostedPreKeyRecordId Id => new(RoutingToken, DeviceId);
+    public BlindedRoutingToken RoutingToken { get; }
     public DeviceId DeviceId { get; }
     public IdentityKey IdentityKey { get; }
     public DhPublicKey SignedPreKey { get; private set; }
@@ -25,13 +27,13 @@ public sealed class RelayHostedPreKeyBundle : AggregateRoot<HostedPreKeyRecordId
     public IReadOnlyCollection<(uint KeyId, DhPublicKey Key)> OneTimePreKeys => _oneTimePreKeys;
 
     private RelayHostedPreKeyBundle(
-        PublicIdentityId ownerId,
+        BlindedRoutingToken routingToken,
         DeviceId deviceId,
         IdentityKey identityKey,
         DhPublicKey signedPreKey,
         DeviceLinkProof signedPreKeySignature)
     {
-        OwnerId = ownerId;
+        RoutingToken = routingToken;
         DeviceId = deviceId;
         IdentityKey = identityKey;
         SignedPreKey = signedPreKey;
@@ -40,20 +42,20 @@ public sealed class RelayHostedPreKeyBundle : AggregateRoot<HostedPreKeyRecordId
 
     [EditorBrowsable(EditorBrowsableState.Never)]
     public static RelayHostedPreKeyBundle Rehydrate(
-        PublicIdentityId ownerId,
+        BlindedRoutingToken routingToken,
         DeviceId deviceId,
         IdentityKey identityKey,
         DhPublicKey signedPreKey,
         DeviceLinkProof signedPreKeySignature,
         IEnumerable<(uint KeyId, DhPublicKey Key)>? oneTimePreKeys = null)
     {
-        if (!ownerId.IsValid) throw new ArgumentException("OwnerId cannot be empty.", nameof(ownerId));
+        if (!routingToken.IsValid) throw new ArgumentException("RoutingToken cannot be empty.", nameof(routingToken));
         if (!deviceId.IsValid) throw new ArgumentException("DeviceId cannot be empty.", nameof(deviceId));
         ArgumentNullException.ThrowIfNull(identityKey);
         ArgumentNullException.ThrowIfNull(signedPreKey);
         ArgumentNullException.ThrowIfNull(signedPreKeySignature);
 
-        var bundle = new RelayHostedPreKeyBundle(ownerId, deviceId, identityKey, signedPreKey, signedPreKeySignature);
+        var bundle = new RelayHostedPreKeyBundle(routingToken, deviceId, identityKey, signedPreKey, signedPreKeySignature);
         if (oneTimePreKeys != null)
         {
             var seenIds = new HashSet<uint>();
@@ -75,7 +77,7 @@ public sealed class RelayHostedPreKeyBundle : AggregateRoot<HostedPreKeyRecordId
     }
 
     public static DomainResult<RelayHostedPreKeyBundle> Create(
-        PublicIdentityId ownerId,
+        BlindedRoutingToken routingToken,
         DeviceId deviceId,
         IdentityKey identityKey,
         DhPublicKey signedPreKey,
@@ -90,10 +92,10 @@ public sealed class RelayHostedPreKeyBundle : AggregateRoot<HostedPreKeyRecordId
                 new DomainError("RELAY_PREKEYS_REJECTED", "Relay is not currently accepting pre-key bundle submissions."));
         }
 
-        if (!ownerId.IsValid || !deviceId.IsValid)
+        if (!routingToken.IsValid || !deviceId.IsValid)
         {
             return DomainResult<RelayHostedPreKeyBundle>.Failure(
-                new DomainError("INVALID_IDENTITY_OR_DEVICE", "Owner identity and device id must be valid."));
+                new DomainError("INVALID_ROUTING_OR_DEVICE", "Routing token and device id must be valid."));
         }
 
         if (identityKey == null || signedPreKey == null || signedPreKeySignature == null)
@@ -108,7 +110,7 @@ public sealed class RelayHostedPreKeyBundle : AggregateRoot<HostedPreKeyRecordId
                 new DomainError("INVALID_PREKEY_SIGNATURE", "Signed prekey signature failed verification against identity key."));
         }
 
-        var bundle = new RelayHostedPreKeyBundle(ownerId, deviceId, identityKey, signedPreKey, signedPreKeySignature);
+        var bundle = new RelayHostedPreKeyBundle(routingToken, deviceId, identityKey, signedPreKey, signedPreKeySignature);
 
         if (oneTimePreKeys != null)
         {
@@ -196,7 +198,6 @@ public sealed class RelayHostedPreKeyBundle : AggregateRoot<HostedPreKeyRecordId
         }
 
         var bundle = new PreKeyBundle(
-            OwnerId,
             DeviceId,
             IdentityKey,
             SignedPreKey,

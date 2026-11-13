@@ -40,7 +40,12 @@ public sealed class LoopbackPreKeyBundleProvider : IPreKeyBundleProvider
             return DomainResult<PreKeyBundle>.Failure(new DomainError("RELAY_NOT_FOUND", "No relay found on network switch."));
         }
 
-        var hostedBundle = await relay.PreKeyRepository.GetAsync(targetPeerId, targetDevice, ct).ConfigureAwait(false);
+        if (!relay.TryGetClientTokens(targetPeerId, out var tokens))
+        {
+            return DomainResult<PreKeyBundle>.Failure(new DomainError("PREKEY_BUNDLE_NOT_FOUND", $"No mailbox registered for peer '{targetPeerId}'."));
+        }
+
+        var hostedBundle = await relay.PreKeyRepository.GetAsync(tokens.RoutingToken, targetDevice, ct).ConfigureAwait(false);
         if (hostedBundle == null)
         {
             return DomainResult<PreKeyBundle>.Failure(new DomainError("PREKEY_BUNDLE_NOT_FOUND", $"No prekey bundle hosted for peer '{targetPeerId}'."));

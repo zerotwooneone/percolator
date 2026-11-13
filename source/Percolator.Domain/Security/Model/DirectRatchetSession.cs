@@ -271,6 +271,7 @@ public sealed class DirectRatchetSession : AggregateRoot<SessionId>, ISensitiveS
     public static DomainResult<DirectRatchetSession> InitiateOutbound(
         PublicIdentityId ownerIdentityId,
         DeviceId ownerDeviceId,
+        PublicIdentityId remotePeerId,
         PreKeyBundle peerBundle,
         ICryptoEngine engine,
         SessionId? sessionId = null)
@@ -283,7 +284,7 @@ public sealed class DirectRatchetSession : AggregateRoot<SessionId>, ISensitiveS
 
         ArgumentNullException.ThrowIfNull(engine);
 
-        if (ownerIdentityId == peerBundle.IdentityId)
+        if (ownerIdentityId == remotePeerId)
         {
             return DomainResult<DirectRatchetSession>.Failure(new DomainError(
                 "SELF_SESSION_NOT_ALLOWED", "Cannot initiate Double Ratchet session with self."));
@@ -312,7 +313,7 @@ public sealed class DirectRatchetSession : AggregateRoot<SessionId>, ISensitiveS
         var session = new DirectRatchetSession(
             ownerIdentityId,
             ownerDeviceId,
-            peerBundle.IdentityId,
+            remotePeerId,
             peerBundle.DeviceId,
             rootKey: nextRoot,
             sendingChainKey: sendingChain,

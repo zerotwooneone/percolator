@@ -1,4 +1,5 @@
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 
 namespace Percolator.Apps.Discovery.Features.RelayDirectoryHosting;
@@ -12,6 +13,10 @@ public sealed record RelayPeerRegistration
     public PeerDiscoveryVisibility Visibility { get; init; }
     public bool HasAuthenticatedHandshake { get; init; }
     public bool HasActiveSignedPreKey { get; init; }
+    /// <summary>Mailbox routing token the peer advertised when registering Discoverable.</summary>
+    public BlindedRoutingToken? RoutingToken { get; init; }
+    /// <summary>Mailbox delivery token the peer advertised when registering Discoverable.</summary>
+    public DeliveryToken? DeliveryToken { get; init; }
     public DateTimeOffset RegisteredAtUtc { get; init; }
     public DateTimeOffset LastUpdatedAtUtc { get; init; }
 

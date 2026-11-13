@@ -97,7 +97,7 @@ internal sealed class RelayProvisioningCoordinator
                 // tokens so (a) owner association happens on the wire rather than through
                 // an in-memory store call, and (b) the peer directory's pre-key admission
                 // gate is satisfied before visibility registration.
-                if (!await relay.QueryService.HasActivePreKeyAsync(persona.PublicIdentityId, ct))
+                if (!await relay.QueryService.HasActivePreKeyAsync(persona.MailboxRoutingToken, ct))
                 {
                     var publishResult = await provisioner.PublishPreKeyBundleAsync(
                         persona.PublicIdentityId, DeviceId.Primary, relayEndpoint, tokens, 0, ct);
@@ -123,7 +123,12 @@ internal sealed class RelayProvisioningCoordinator
 
                 int visibility = persona.AllowPeerDiscovery ? 1 : 0;
                 long timestampUnixMs = timeProvider.UtcNow.ToUnixTimeMilliseconds();
-                var payload = DiscoveryWireFraming.BuildVisibilitySignaturePayload(persona.PublicIdentityId, visibility, timestampUnixMs);
+                // Advertise the mailbox capability tokens only when discoverable; the
+                // signature binds them so the relay cannot substitute its own mailbox.
+                byte[]? routingToken = persona.AllowPeerDiscovery ? persona.MailboxRoutingToken.ToByteArray() : null;
+                byte[]? deliveryToken = persona.AllowPeerDiscovery ? persona.MailboxDeliveryToken.Memory.ToArray() : null;
+                var payload = DiscoveryWireFraming.BuildVisibilitySignaturePayload(
+                    persona.PublicIdentityId, visibility, timestampUnixMs, routingToken, deliveryToken);
                 var signature = cryptoEngine.SignEd25519(persona.IdentityPrivateKey.Span, payload);
 
                 await discoveryClient.RegisterVisibilityAsync(new DiscoveryRegistrationProto
@@ -132,7 +137,9 @@ internal sealed class RelayProvisioningCoordinator
                     Visibility = visibility,
                     TimestampUnixMs = timestampUnixMs,
                     Signature = ByteString.CopyFrom(signature),
-                    IdentityKey = ByteString.CopyFrom(persona.IdentityPublicKey.Span)
+                    IdentityKey = ByteString.CopyFrom(persona.IdentityPublicKey.Span),
+                    RoutingToken = routingToken != null ? ByteString.CopyFrom(routingToken) : ByteString.Empty,
+                    DeliveryToken = deliveryToken != null ? ByteString.CopyFrom(deliveryToken) : ByteString.Empty
                 }, cancellationToken: ct);
             }
 
@@ -311,7 +318,7 @@ internal sealed class RelayProvisioningCoordinator
         try
         {
             // 1. Ensure target has mailbox registered and prekeys published on this relay
-            if (target.HomeRelay == null || !await relay.QueryService.HasActivePreKeyAsync(target.PublicIdentityId, ct))
+            if (target.HomeRelay == null || !await relay.QueryService.HasActivePreKeyAsync(target.MailboxRoutingToken, ct))
             {
                 await PublishPreKeysAsync(target, relay, 25, ct);
             }
@@ -380,6 +387,7 @@ internal sealed class RelayProvisioningCoordinator
                 var hsResult = await handshakeService.InitiateHandshakeAsync(
                     initiator.PublicIdentityId,
                     DeviceId.Primary,
+                    target.PublicIdentityId,
                     remoteBundle,
                     ct: ct);
 

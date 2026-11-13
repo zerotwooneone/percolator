@@ -54,9 +54,8 @@ public sealed class SqliteRelayMailboxCapabilityStoreTests
         var routingToken = RandomBytes(16);
         var deliveryToken = RandomBytes(32);
         var drainToken = RandomBytes(32);
-        var ownerId = PublicIdentityId.New();
 
-        await _store.RegisterVerifiedAsync(routingToken, deliveryToken, drainToken, ownerId: ownerId, deviceId: DeviceId.Primary);
+        await _store.RegisterVerifiedAsync(routingToken, deliveryToken, drainToken);
 
         // A new store instance over a fresh DbContext simulates a process restart.
         var restartedStore = new SqliteRelayMailboxCapabilityStore(_testDb.ContextFactory);
@@ -64,14 +63,9 @@ public sealed class SqliteRelayMailboxCapabilityStoreTests
         (await restartedStore.VerifyDrainTokenAsync(routingToken, drainToken)).Should().BeTrue();
         (await restartedStore.VerifyDeliveryTokenAsync(routingToken, deliveryToken)).Should().BeTrue();
 
-        var owner = await restartedStore.GetOwnerAsync(routingToken);
-        owner.OwnerId.Should().Be(ownerId);
-        owner.DeviceId.Should().Be(DeviceId.Primary);
-
-        var tokens = await restartedStore.GetMailboxTokensByOwnerAsync(ownerId);
-        tokens.Should().NotBeNull();
-        tokens!.Value.RoutingToken.Should().Equal(routingToken);
-        tokens.Value.DeliveryToken.Should().Equal(deliveryToken);
+        var stored = await restartedStore.GetDrainTokenAsync(routingToken);
+        stored.Should().NotBeNull();
+        stored!.Value.ToArray().Should().Equal(drainToken);
     }
 
     [Test]

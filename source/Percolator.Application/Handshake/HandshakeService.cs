@@ -68,6 +68,7 @@ public sealed class HandshakeService : IHandshakeService
     public async ValueTask<DomainResult<DirectRatchetSession>> InitiateHandshakeAsync(
         PublicIdentityId ownerId,
         DeviceId ownerDeviceId,
+        PublicIdentityId remotePeerId,
         PreKeyBundle remoteBundle,
         AppId? initialAppId = null,
         ReadOnlyMemory<byte>? initialPayload = null,
@@ -103,7 +104,7 @@ public sealed class HandshakeService : IHandshakeService
         var sessionResult = DirectRatchetSession.CreateFromX3dhInitiator(
             ownerId,
             ownerDeviceId,
-            remoteBundle.IdentityId,
+            remotePeerId,
             remoteBundle.DeviceId,
             initiatorResult,
             remoteBundle.SignedPreKey,
@@ -172,7 +173,7 @@ public sealed class HandshakeService : IHandshakeService
         var route = new DeliveryRoute(DeliveryRouteType.DirectP2P, null, null);
         if (_routingCoordinator != null)
         {
-            var routeResult = await _routingCoordinator.ResolveRouteAsync(remoteBundle.IdentityId, ct);
+            var routeResult = await _routingCoordinator.ResolveRouteAsync(remotePeerId, ct);
             if (routeResult.IsSuccess)
             {
                 var resolved = routeResult.Value;
@@ -185,7 +186,7 @@ public sealed class HandshakeService : IHandshakeService
         var jobResult = OutboxJob.Create(
             ChannelId.New(),
             ownerId,
-            remoteBundle.IdentityId,
+            remotePeerId,
             route,
             handshakePackage,
             _timeProvider);

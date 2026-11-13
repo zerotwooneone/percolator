@@ -4,6 +4,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -15,6 +16,7 @@ using Percolator.Apps.Discovery.Ports;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Delivery.Ports;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
@@ -29,34 +31,34 @@ public sealed class NearbyDiscoveryEndpointTests
 {
     private sealed class InMemoryPreKeyRepo : IRelayPreKeyRepository
     {
-        private readonly ConcurrentDictionary<(PublicIdentityId, DeviceId), RelayHostedPreKeyBundle> _bundles = new();
+        private readonly ConcurrentDictionary<(BlindedRoutingToken, DeviceId), RelayHostedPreKeyBundle> _bundles = new();
 
-        public Task<RelayHostedPreKeyBundle?> GetAsync(PublicIdentityId ownerId, DeviceId deviceId, CancellationToken cancellationToken = default)
+        public Task<RelayHostedPreKeyBundle?> GetAsync(BlindedRoutingToken routingToken, DeviceId deviceId, CancellationToken cancellationToken = default)
         {
-            _bundles.TryGetValue((ownerId, deviceId), out var bundle);
+            _bundles.TryGetValue((routingToken, deviceId), out var bundle);
             return Task.FromResult(bundle);
         }
 
-        public Task<IReadOnlyList<RelayHostedPreKeyBundle>> GetAllForIdentityAsync(PublicIdentityId ownerId, CancellationToken cancellationToken = default)
+        public Task<IReadOnlyList<RelayHostedPreKeyBundle>> GetAllForMailboxAsync(BlindedRoutingToken routingToken, CancellationToken cancellationToken = default)
         {
-            IReadOnlyList<RelayHostedPreKeyBundle> list = _bundles.Values.Where(b => b.OwnerId == ownerId).ToList();
+            IReadOnlyList<RelayHostedPreKeyBundle> list = _bundles.Values.Where(b => b.RoutingToken == routingToken).ToList();
             return Task.FromResult(list);
         }
 
-        public Task<bool> HasActivePreKeyAsync(PublicIdentityId ownerId, CancellationToken cancellationToken = default)
+        public Task<bool> HasActivePreKeyAsync(BlindedRoutingToken routingToken, CancellationToken cancellationToken = default)
         {
-            return Task.FromResult(_bundles.Values.Any(b => b.OwnerId == ownerId));
+            return Task.FromResult(_bundles.Values.Any(b => b.RoutingToken == routingToken));
         }
 
         public Task SaveAsync(RelayHostedPreKeyBundle bundle, CancellationToken cancellationToken = default)
         {
-            _bundles[(bundle.OwnerId, bundle.DeviceId)] = bundle;
+            _bundles[(bundle.RoutingToken, bundle.DeviceId)] = bundle;
             return Task.CompletedTask;
         }
 
-        public Task DeleteAsync(PublicIdentityId ownerId, DeviceId deviceId, CancellationToken cancellationToken = default)
+        public Task DeleteAsync(BlindedRoutingToken routingToken, DeviceId deviceId, CancellationToken cancellationToken = default)
         {
-            _bundles.TryRemove((ownerId, deviceId), out _);
+            _bundles.TryRemove((routingToken, deviceId), out _);
             return Task.CompletedTask;
         }
     }
@@ -90,9 +92,11 @@ public sealed class NearbyDiscoveryEndpointTests
 
         var peerId = PublicIdentityId.New();
         var (privKey, pubKey) = crypto.GenerateEphemeralKeyPair();
+        var routingToken = BlindedRoutingToken.New();
+        var deliveryTokenBytes = RandomNumberGenerator.GetBytes(32);
 
         var bundle = RelayHostedPreKeyBundle.Rehydrate(
-            peerId,
+            routingToken,
             DeviceId.Primary,
             IdentityKey.FromSpan(pubKey.Span),
             DhPublicKey.FromSpan(new byte[32]),
@@ -102,7 +106,8 @@ public sealed class NearbyDiscoveryEndpointTests
         int visibility = (int)PeerDiscoveryVisibility.Discoverable;
         long timestamp = timeProvider.UtcNow.ToUnixTimeMilliseconds();
 
-        var payload = DiscoveryWireFraming.BuildVisibilitySignaturePayload(peerId, visibility, timestamp);
+        var payload = DiscoveryWireFraming.BuildVisibilitySignaturePayload(
+            peerId, visibility, timestamp, routingToken.ToByteArray(), deliveryTokenBytes);
         var signature = crypto.SignEd25519(privKey.Span, payload);
 
         var request = new DiscoveryRegistrationProto
@@ -111,7 +116,9 @@ public sealed class NearbyDiscoveryEndpointTests
             Visibility = visibility,
             TimestampUnixMs = timestamp,
             IdentityKey = ByteString.CopyFrom(pubKey.Span),
-            Signature = ByteString.CopyFrom(signature)
+            Signature = ByteString.CopyFrom(signature),
+            RoutingToken = ByteString.CopyFrom(routingToken.ToByteArray()),
+            DeliveryToken = ByteString.CopyFrom(deliveryTokenBytes)
         };
 
         var response = await endpoint.RegisterVisibility(request, new TestServerCallContext());
@@ -135,10 +142,13 @@ public sealed class NearbyDiscoveryEndpointTests
 
         var peerId = PublicIdentityId.New();
         var (privKey, pubKey) = crypto.GenerateEphemeralKeyPair();
+        var routingToken = BlindedRoutingToken.New();
+        var deliveryTokenBytes = RandomNumberGenerator.GetBytes(32);
         int visibility = (int)PeerDiscoveryVisibility.Discoverable;
         long timestamp = timeProvider.UtcNow.ToUnixTimeMilliseconds();
 
-        var payload = DiscoveryWireFraming.BuildVisibilitySignaturePayload(peerId, visibility, timestamp);
+        var payload = DiscoveryWireFraming.BuildVisibilitySignaturePayload(
+            peerId, visibility, timestamp, routingToken.ToByteArray(), deliveryTokenBytes);
         var signature = crypto.SignEd25519(privKey.Span, payload);
 
         var request = new DiscoveryRegistrationProto
@@ -147,7 +157,9 @@ public sealed class NearbyDiscoveryEndpointTests
             Visibility = visibility,
             TimestampUnixMs = timestamp,
             IdentityKey = ByteString.CopyFrom(pubKey.Span),
-            Signature = ByteString.CopyFrom(signature)
+            Signature = ByteString.CopyFrom(signature),
+            RoutingToken = ByteString.CopyFrom(routingToken.ToByteArray()),
+            DeliveryToken = ByteString.CopyFrom(deliveryTokenBytes)
         };
 
         var response = await endpoint.RegisterVisibility(request, new TestServerCallContext());
@@ -258,19 +270,23 @@ public sealed class NearbyDiscoveryEndpointTests
         var (legitPriv, legitPub) = crypto.GenerateEphemeralKeyPair();
         var (attackerPriv, attackerPub) = crypto.GenerateEphemeralKeyPair();
 
-        // Relay already holds prekey bundle for legitimate peer
+        var routingToken = BlindedRoutingToken.New();
+        var deliveryTokenBytes = RandomNumberGenerator.GetBytes(32);
+
+        // Relay already holds a prekey bundle for the advertised mailbox, pinned to the legit key
         var bundle = RelayHostedPreKeyBundle.Rehydrate(
-            peerId,
+            routingToken,
             DeviceId.Primary,
             IdentityKey.FromSpan(legitPub.Span),
             DhPublicKey.FromSpan(new byte[32]),
             DeviceLinkProof.FromSpan(new byte[64]));
         await preKeyRepo.SaveAsync(bundle);
 
-        // Attacker attempts to register visibility with their own key
+        // Attacker attempts to register visibility for the same mailbox with their own key
         int visibility = (int)PeerDiscoveryVisibility.Discoverable;
         long timestamp = timeProvider.UtcNow.ToUnixTimeMilliseconds();
-        var payload = DiscoveryWireFraming.BuildVisibilitySignaturePayload(peerId, visibility, timestamp);
+        var payload = DiscoveryWireFraming.BuildVisibilitySignaturePayload(
+            peerId, visibility, timestamp, routingToken.ToByteArray(), deliveryTokenBytes);
         var attackerSig = crypto.SignEd25519(attackerPriv.Span, payload);
 
         var request = new DiscoveryRegistrationProto
@@ -279,7 +295,9 @@ public sealed class NearbyDiscoveryEndpointTests
             Visibility = visibility,
             TimestampUnixMs = timestamp,
             IdentityKey = ByteString.CopyFrom(attackerPub.Span),
-            Signature = ByteString.CopyFrom(attackerSig)
+            Signature = ByteString.CopyFrom(attackerSig),
+            RoutingToken = ByteString.CopyFrom(routingToken.ToByteArray()),
+            DeliveryToken = ByteString.CopyFrom(deliveryTokenBytes)
         };
 
         var act = async () => await endpoint.RegisterVisibility(request, new TestServerCallContext());
@@ -300,16 +318,20 @@ public sealed class NearbyDiscoveryEndpointTests
         var peer2 = PublicIdentityId.New();
         var (priv1, pub1) = crypto.GenerateEphemeralKeyPair();
         var (priv2, pub2) = crypto.GenerateEphemeralKeyPair();
+        var routingToken1 = BlindedRoutingToken.New();
+        var routingToken2 = BlindedRoutingToken.New();
+        var deliveryToken1 = RandomNumberGenerator.GetBytes(32);
+        var deliveryToken2 = RandomNumberGenerator.GetBytes(32);
 
         await preKeyRepo.SaveAsync(RelayHostedPreKeyBundle.Rehydrate(
-            peer1,
+            routingToken1,
             DeviceId.Primary,
             IdentityKey.FromSpan(pub1.Span),
             DhPublicKey.FromSpan(new byte[32]),
             DeviceLinkProof.FromSpan(new byte[64])));
 
         await preKeyRepo.SaveAsync(RelayHostedPreKeyBundle.Rehydrate(
-            peer2,
+            routingToken2,
             DeviceId.Primary,
             IdentityKey.FromSpan(pub2.Span),
             DhPublicKey.FromSpan(new byte[32]),
@@ -318,10 +340,12 @@ public sealed class NearbyDiscoveryEndpointTests
         int visibility = (int)PeerDiscoveryVisibility.Discoverable;
         long timestamp = timeProvider.UtcNow.ToUnixTimeMilliseconds();
 
-        var payload1 = DiscoveryWireFraming.BuildVisibilitySignaturePayload(peer1, visibility, timestamp);
+        var payload1 = DiscoveryWireFraming.BuildVisibilitySignaturePayload(
+            peer1, visibility, timestamp, routingToken1.ToByteArray(), deliveryToken1);
         var sig1 = crypto.SignEd25519(priv1.Span, payload1);
 
-        var payload2 = DiscoveryWireFraming.BuildVisibilitySignaturePayload(peer2, visibility, timestamp);
+        var payload2 = DiscoveryWireFraming.BuildVisibilitySignaturePayload(
+            peer2, visibility, timestamp, routingToken2.ToByteArray(), deliveryToken2);
         var sig2 = crypto.SignEd25519(priv2.Span, payload2);
 
         await endpoint.RegisterVisibility(new DiscoveryRegistrationProto
@@ -330,7 +354,9 @@ public sealed class NearbyDiscoveryEndpointTests
             Visibility = visibility,
             TimestampUnixMs = timestamp,
             IdentityKey = ByteString.CopyFrom(pub1.Span),
-            Signature = ByteString.CopyFrom(sig1)
+            Signature = ByteString.CopyFrom(sig1),
+            RoutingToken = ByteString.CopyFrom(routingToken1.ToByteArray()),
+            DeliveryToken = ByteString.CopyFrom(deliveryToken1)
         }, new TestServerCallContext());
 
         await endpoint.RegisterVisibility(new DiscoveryRegistrationProto
@@ -339,7 +365,9 @@ public sealed class NearbyDiscoveryEndpointTests
             Visibility = visibility,
             TimestampUnixMs = timestamp,
             IdentityKey = ByteString.CopyFrom(pub2.Span),
-            Signature = ByteString.CopyFrom(sig2)
+            Signature = ByteString.CopyFrom(sig2),
+            RoutingToken = ByteString.CopyFrom(routingToken2.ToByteArray()),
+            DeliveryToken = ByteString.CopyFrom(deliveryToken2)
         }, new TestServerCallContext());
 
         var query = new NearbyDiscoveryQueryProto

@@ -301,12 +301,10 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                 MailboxRoutingToken.ToByteArray(),
                 MailboxDeliveryToken.Memory,
                 MailboxDrainToken.Memory,
-                ownerId: PublicIdentityId,
-                deviceId: DeviceId.Primary,
                 ct: ct);
             var preKeyRepo = scope.ServiceProvider.GetRequiredService<IRelayPreKeyRepository>();
             var hostedBundle = RelayHostedPreKeyBundle.Rehydrate(
-                PublicIdentityId,
+                MailboxRoutingToken,
                 DeviceId.Primary,
                 IdentityPublicKey,
                 SignedPreKeyPublic,
@@ -507,7 +505,6 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
     public PreKeyBundle CreatePreKeyBundle(uint? oneTimeKeyId = null)
     {
         return new PreKeyBundle(
-            PublicIdentityId,
             DeviceId.Primary,
             IdentityPublicKey,
             SignedPreKeyPublic,

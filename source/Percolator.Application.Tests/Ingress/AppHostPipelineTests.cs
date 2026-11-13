@@ -106,13 +106,12 @@ public sealed class AppHostPipelineTests
         var bobSignedPreKey = _cryptoEngine.GenerateEphemeralKeyPair();
 
         var bundle = new PreKeyBundle(
-            _bobId,
             _bobDeviceId,
             IdentityKey.FromBytes(new byte[32]),
             bobSignedPreKey.PublicKey,
             DeviceLinkProof.FromBytes(new byte[64]));
 
-        var aliceSession = DirectRatchetSession.InitiateOutbound(_aliceId, _aliceDeviceId, bundle, _cryptoEngine).Value!;
+        var aliceSession = DirectRatchetSession.InitiateOutbound(_aliceId, _aliceDeviceId, _bobId, bundle, _cryptoEngine).Value!;
 
         var bobSession = DirectRatchetSession.InitiateInbound(
             _bobId,

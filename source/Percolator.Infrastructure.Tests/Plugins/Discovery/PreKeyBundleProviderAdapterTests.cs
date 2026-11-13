@@ -23,14 +23,14 @@ public sealed class PreKeyBundleProviderAdapterTests
         public RelayHostedPreKeyBundle? Bundle { get; set; }
         public bool SaveCalled { get; private set; }
 
-        public Task<RelayHostedPreKeyBundle?> GetAsync(PublicIdentityId ownerId, DeviceId deviceId, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Bundle);
+        public Task<RelayHostedPreKeyBundle?> GetAsync(BlindedRoutingToken routingToken, DeviceId deviceId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Bundle != null && Bundle.RoutingToken == routingToken && Bundle.DeviceId == deviceId ? Bundle : null);
 
-        public Task<IReadOnlyList<RelayHostedPreKeyBundle>> GetAllForIdentityAsync(PublicIdentityId ownerId, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<RelayHostedPreKeyBundle>>(Bundle != null ? new[] { Bundle } : Array.Empty<RelayHostedPreKeyBundle>());
+        public Task<IReadOnlyList<RelayHostedPreKeyBundle>> GetAllForMailboxAsync(BlindedRoutingToken routingToken, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<RelayHostedPreKeyBundle>>(Bundle != null && Bundle.RoutingToken == routingToken ? new[] { Bundle } : Array.Empty<RelayHostedPreKeyBundle>());
 
-        public Task<bool> HasActivePreKeyAsync(PublicIdentityId ownerId, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Bundle != null && Bundle.SignedPreKey != null);
+        public Task<bool> HasActivePreKeyAsync(BlindedRoutingToken routingToken, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Bundle != null && Bundle.RoutingToken == routingToken && Bundle.SignedPreKey != null);
 
         public Task SaveAsync(RelayHostedPreKeyBundle bundle, CancellationToken cancellationToken = default)
         {
@@ -39,7 +39,7 @@ public sealed class PreKeyBundleProviderAdapterTests
             return Task.CompletedTask;
         }
 
-        public Task DeleteAsync(PublicIdentityId ownerId, DeviceId deviceId, CancellationToken cancellationToken = default)
+        public Task DeleteAsync(BlindedRoutingToken routingToken, DeviceId deviceId, CancellationToken cancellationToken = default)
         {
             Bundle = null;
             return Task.CompletedTask;
@@ -76,13 +76,14 @@ public sealed class PreKeyBundleProviderAdapterTests
     public async Task FetchConsumableBundleAsync_FromLocalRepository_ConsumesAndSavesBundle()
     {
         var peerId = PublicIdentityId.New();
+        var routingToken = BlindedRoutingToken.New();
         var idKey = IdentityKey.FromSpan(RandomNumberGenerator.GetBytes(32));
         var signedPreKey = DhPublicKey.FromSpan(RandomNumberGenerator.GetBytes(32));
         var sig = DeviceLinkProof.FromSpan(RandomNumberGenerator.GetBytes(64));
         var otpk = DhPublicKey.FromSpan(RandomNumberGenerator.GetBytes(32));
 
         var hostedBundle = RelayHostedPreKeyBundle.Rehydrate(
-            peerId,
+            routingToken,
             DeviceId.Primary,
             idKey,
             signedPreKey,
@@ -90,12 +91,20 @@ public sealed class PreKeyBundleProviderAdapterTests
             new[] { (1u, otpk) });
 
         var repo = new InMemoryPreKeyRepo { Bundle = hostedBundle };
-        var adapter = new PreKeyBundleProviderAdapter(preKeyRepository: repo);
+        var routingRepo = new InMemoryRoutingRepo
+        {
+            Capability = new PeerMailboxRoutingCapability(
+                peerId,
+                routingToken,
+                DeliveryToken.GenerateRandom(),
+                RelayEndpoint.FromHostAndPort("localhost", 50051),
+                LastObservedAtUtc: DateTimeOffset.UtcNow)
+        };
+        var adapter = new PreKeyBundleProviderAdapter(preKeyRepository: repo, routingRepository: routingRepo);
 
         var result = await adapter.FetchConsumableBundleAsync(peerId, DeviceId.Primary);
 
         result.IsSuccess.Should().BeTrue();
-        result.Value.IdentityId.Should().Be(peerId);
         result.Value.IdentityKey.Should().Be(idKey);
         result.Value.OneTimePreKey.Should().Be(otpk);
         repo.SaveCalled.Should().BeTrue();

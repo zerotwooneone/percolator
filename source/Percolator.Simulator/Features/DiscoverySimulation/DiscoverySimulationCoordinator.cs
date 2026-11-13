@@ -75,7 +75,12 @@ internal sealed class DiscoverySimulationCoordinator
 
                 int visibility = isDiscoverable ? 1 : 0;
                 long timestampUnixMs = _virtualClock.UtcNow.ToUnixTimeMilliseconds();
-                var payload = DiscoveryWireFraming.BuildVisibilitySignaturePayload(persona.PublicIdentityId, visibility, timestampUnixMs);
+                // Advertise the mailbox capability tokens only when discoverable; the
+                // signature binds them so the relay cannot substitute its own mailbox.
+                byte[]? routingToken = isDiscoverable ? persona.MailboxRoutingToken.ToByteArray() : null;
+                byte[]? deliveryToken = isDiscoverable ? persona.MailboxDeliveryToken.Memory.ToArray() : null;
+                var payload = DiscoveryWireFraming.BuildVisibilitySignaturePayload(
+                    persona.PublicIdentityId, visibility, timestampUnixMs, routingToken, deliveryToken);
                 var signature = cryptoEngine.SignEd25519(persona.IdentityPrivateKey.Span, payload);
 
                 await client.RegisterVisibilityAsync(new DiscoveryRegistrationProto
@@ -84,7 +89,9 @@ internal sealed class DiscoverySimulationCoordinator
                     Visibility = visibility,
                     TimestampUnixMs = timestampUnixMs,
                     Signature = ByteString.CopyFrom(signature),
-                    IdentityKey = ByteString.CopyFrom(persona.IdentityPublicKey.Span)
+                    IdentityKey = ByteString.CopyFrom(persona.IdentityPublicKey.Span),
+                    RoutingToken = routingToken != null ? ByteString.CopyFrom(routingToken) : ByteString.Empty,
+                    DeliveryToken = deliveryToken != null ? ByteString.CopyFrom(deliveryToken) : ByteString.Empty
                 }, cancellationToken: ct).ConfigureAwait(false);
 
                 _logSink.Log(new SimulatorLogEntry(

@@ -39,18 +39,23 @@ public sealed class PreKeyBundleProviderAdapter : IPreKeyBundleProvider
     {
         var targetDevice = deviceId ?? DeviceId.Primary;
 
-        // 1. Check local prekey repository if configured
-        if (_preKeyRepository != null)
+        // 1. Check local prekey repository if configured — resolve the peer's mailbox
+        // routing token first since hosted bundles are keyed by (routing token, device).
+        if (_preKeyRepository != null && _routingRepository != null)
         {
-            var hostedBundle = await _preKeyRepository.GetAsync(peerId, targetDevice, ct).ConfigureAwait(false);
-            if (hostedBundle != null)
+            var capability = await _routingRepository.GetByPeerIdAsync(peerId, ct).ConfigureAwait(false);
+            if (capability != null)
             {
-                var consumeResult = hostedBundle.ConsumeBundle();
-                if (consumeResult.IsSuccess)
+                var hostedBundle = await _preKeyRepository.GetAsync(capability.RoutingToken, targetDevice, ct).ConfigureAwait(false);
+                if (hostedBundle != null)
                 {
-                    await _preKeyRepository.SaveAsync(hostedBundle, ct).ConfigureAwait(false);
+                    var consumeResult = hostedBundle.ConsumeBundle();
+                    if (consumeResult.IsSuccess)
+                    {
+                        await _preKeyRepository.SaveAsync(hostedBundle, ct).ConfigureAwait(false);
+                    }
+                    return consumeResult;
                 }
-                return consumeResult;
             }
         }
 
@@ -82,7 +87,6 @@ public sealed class PreKeyBundleProviderAdapter : IPreKeyBundleProvider
                         : null;
 
                     var bundle = new PreKeyBundle(
-                        peerId,
                         targetDevice,
                         identityKey,
                         signedPreKey,

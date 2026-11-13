@@ -5,7 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Percolator.Apps.Discovery.Ports;
 using Percolator.Domain.Delivery.Ports;
-using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Domain.Delivery.ValueObjects;
 
 public sealed class PreKeyAvailabilityAdapter : IPreKeyAvailabilityPort
 {
@@ -17,9 +17,9 @@ public sealed class PreKeyAvailabilityAdapter : IPreKeyAvailabilityPort
     }
 
     public async ValueTask<bool> HasActiveSignedPreKeyAsync(
-        PublicIdentityId peerId,
+        BlindedRoutingToken routingToken,
         CancellationToken ct = default)
     {
-        return await _relayPreKeyRepository.HasActivePreKeyAsync(peerId, ct).ConfigureAwait(false);
+        return await _relayPreKeyRepository.HasActivePreKeyAsync(routingToken, ct).ConfigureAwait(false);
     }
 }

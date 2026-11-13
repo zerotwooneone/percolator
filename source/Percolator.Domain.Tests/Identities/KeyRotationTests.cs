@@ -1,4 +1,5 @@
 using NUnit.Framework;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.ValueObjects;
 
@@ -65,7 +66,7 @@ public sealed class KeyRotationTests
     {
         // Arrange
         var initialRotation = _fixedTime;
-        var state = new PreKeyBundleState(_ownerId, DeviceId.Primary, 10, initialRotation);
+        var state = new PreKeyBundleState(BlindedRoutingToken.New(), DeviceId.Primary, 10, initialRotation);
         var newRotationTime = initialRotation.AddDays(7);
 
         // Act

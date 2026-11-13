@@ -497,7 +497,6 @@ public sealed class TestIdentityNode
         }
 
         return new PreKeyBundle(
-            IdentityId,
             DeviceId,
             IdentityPublicKey,
             SignedPreKeyPublic,
@@ -529,7 +528,7 @@ public sealed class TestIdentityNode
         _preKeyStore.StoreOneTimePreKeysAsync(IdentityId, DeviceId, otpkMaterials).GetAwaiter().GetResult();
 
         var bundle = RelayHostedPreKeyBundle.Create(
-            IdentityId,
+            MailboxRoutingToken,
             DeviceId,
             IdentityPublicKey,
             SignedPreKeyPublic,

@@ -161,16 +161,13 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
             throw new RpcException(new Status(StatusCode.PermissionDenied, "Invalid delivery token capability."));
         }
 
-        var (ownerId, deviceId) = await _capabilityStore.GetOwnerAsync(request.RecipientRoutingToken.Memory, context.CancellationToken);
-        if (!ownerId.HasValue || !deviceId.HasValue)
-        {
-            throw new RpcException(new Status(StatusCode.NotFound, "No pre-key bundle associated with recipient routing token."));
-        }
-
-        var bundle = await _preKeyRepository.GetAsync(ownerId.Value, deviceId.Value, context.CancellationToken);
+        // Direct routing-token lookup: the hosted bundle is keyed by the mailbox's
+        // (BlindedRoutingToken, DeviceId) — the relay never resolves an owner identity.
+        var routingToken = BlindedRoutingToken.FromBytes(request.RecipientRoutingToken.ToByteArray());
+        var bundle = await _preKeyRepository.GetAsync(routingToken, DeviceId.Primary, context.CancellationToken);
         if (bundle == null)
         {
-            throw new RpcException(new Status(StatusCode.NotFound, "Pre-key bundle not found for identity."));
+            throw new RpcException(new Status(StatusCode.NotFound, "Pre-key bundle not found for routing token."));
         }
 
         // Consume one-time prekey

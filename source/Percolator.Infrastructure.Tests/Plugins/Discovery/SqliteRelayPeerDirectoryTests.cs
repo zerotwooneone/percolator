@@ -9,6 +9,7 @@ using NUnit.Framework;
 using Percolator.Apps.Discovery.Features.RelayDirectoryHosting;
 using Percolator.Apps.Discovery.Ports;
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Infrastructure.Persistence.Repositories;
 using Percolator.Infrastructure.Tests.Persistence.TestSupport;
@@ -18,11 +19,11 @@ public sealed class SqliteRelayPeerDirectoryTests
 {
     private sealed class DynamicPreKeyAvailabilityPort : IPreKeyAvailabilityPort
     {
-        public HashSet<PublicIdentityId> ActivePreKeys { get; } = new();
+        public HashSet<BlindedRoutingToken> ActivePreKeys { get; } = new();
 
-        public ValueTask<bool> HasActiveSignedPreKeyAsync(PublicIdentityId peerId, CancellationToken ct = default)
+        public ValueTask<bool> HasActiveSignedPreKeyAsync(BlindedRoutingToken routingToken, CancellationToken ct = default)
         {
-            return ValueTask.FromResult(ActivePreKeys.Contains(peerId));
+            return ValueTask.FromResult(ActivePreKeys.Contains(routingToken));
         }
     }
 
@@ -41,6 +42,8 @@ public sealed class SqliteRelayPeerDirectoryTests
 
         var peer1 = PublicIdentityId.New();
         var peer2 = PublicIdentityId.New();
+        var routingToken1 = BlindedRoutingToken.New();
+        var routingToken2 = BlindedRoutingToken.New();
         var now = DateTimeOffset.UtcNow;
 
         // 1. Admission Gate rejection: missing signed prekey
@@ -68,22 +71,28 @@ public sealed class SqliteRelayPeerDirectoryTests
         rejectResult2.Error!.Code.Should().Be("HANDSHAKE_MISSING");
 
         // 3. Valid Registration: Peer1 and Peer2 with active prekeys
-        preKeyPort.ActivePreKeys.Add(peer1);
-        preKeyPort.ActivePreKeys.Add(peer2);
+        preKeyPort.ActivePreKeys.Add(routingToken1);
+        preKeyPort.ActivePreKeys.Add(routingToken2);
 
         var validReg1 = new RelayPeerRegistration(
             peer1,
             PeerDiscoveryVisibility.Discoverable,
             HasAuthenticatedHandshake: true,
             HasActiveSignedPreKey: true,
-            now, now);
+            now, now)
+        {
+            RoutingToken = routingToken1
+        };
 
         var validReg2 = new RelayPeerRegistration(
             peer2,
             PeerDiscoveryVisibility.Discoverable,
             HasAuthenticatedHandshake: true,
             HasActiveSignedPreKey: true,
-            now, now);
+            now, now)
+        {
+            RoutingToken = routingToken2
+        };
 
         (await directory.RegisterPeerAsync(validReg1)).IsSuccess.Should().BeTrue();
         (await directory.RegisterPeerAsync(validReg2)).IsSuccess.Should().BeTrue();
@@ -99,7 +108,10 @@ public sealed class SqliteRelayPeerDirectoryTests
             PeerDiscoveryVisibility.Hidden,
             HasAuthenticatedHandshake: true,
             HasActiveSignedPreKey: true,
-            now, now);
+            now, now)
+        {
+            RoutingToken = routingToken1
+        };
 
         (await directory.RegisterPeerAsync(hiddenReg1)).IsSuccess.Should().BeTrue();
 
@@ -108,7 +120,7 @@ public sealed class SqliteRelayPeerDirectoryTests
         peers[0].PeerId.Should().Be(peer2);
 
         // 5. Dynamic PreKey check: Peer2's Signed PreKey expires/becomes inactive
-        preKeyPort.ActivePreKeys.Remove(peer2);
+        preKeyPort.ActivePreKeys.Remove(routingToken2);
 
         peers = await directory.GetDiscoverablePeersAsync(limit: 50);
         peers.Should().BeEmpty("Peer2 must be dynamically excluded when Signed PreKey is no longer active");

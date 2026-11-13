@@ -36,13 +36,13 @@ public sealed class RelayPreKeyDirectoryPrunerTests
         var publisher = new FakeEventPublisher();
         var pruner = new RelayPreKeyDirectoryPruner(factory, publisher, timeProvider);
 
-        var staleOwnerId = Guid.NewGuid();
-        var activeOwnerId = Guid.NewGuid();
+        var staleToken = Guid.NewGuid().ToByteArray();
+        var activeToken = Guid.NewGuid().ToByteArray();
 
         testDb.DbContext.RelayPreKeys.AddRange(
             new RelayPreKeyEntity
             {
-                OwnerIdentityId = staleOwnerId,
+                RoutingToken = staleToken,
                 DeviceId = 1,
                 IdentityKey = new byte[] { 1 },
                 SignedPreKey = new byte[] { 2 },
@@ -52,7 +52,7 @@ public sealed class RelayPreKeyDirectoryPrunerTests
             },
             new RelayPreKeyEntity
             {
-                OwnerIdentityId = activeOwnerId,
+                RoutingToken = activeToken,
                 DeviceId = 1,
                 IdentityKey = new byte[] { 4 },
                 SignedPreKey = new byte[] { 5 },
@@ -74,8 +74,8 @@ public sealed class RelayPreKeyDirectoryPrunerTests
             .Which.PurgedCount.Should().Be(1);
 
         var remaining = await testDb.DbContext.RelayPreKeys.ToListAsync();
-        remaining.Should().ContainSingle(k => k.OwnerIdentityId == activeOwnerId);
-        remaining.Any(k => k.OwnerIdentityId == staleOwnerId).Should().BeFalse();
+        remaining.Should().ContainSingle(k => k.RoutingToken.SequenceEqual(activeToken));
+        remaining.Any(k => k.RoutingToken.SequenceEqual(staleToken)).Should().BeFalse();
     }
 
     [Test]
@@ -97,7 +97,7 @@ public sealed class RelayPreKeyDirectoryPrunerTests
         {
             staleKeys.Add(new RelayPreKeyEntity
             {
-                OwnerIdentityId = Guid.NewGuid(),
+                RoutingToken = Guid.NewGuid().ToByteArray(),
                 DeviceId = (uint)(i + 1),
                 IdentityKey = new byte[] { 1 },
                 SignedPreKey = new byte[] { 2 },
@@ -112,7 +112,7 @@ public sealed class RelayPreKeyDirectoryPrunerTests
         {
             activeKeys.Add(new RelayPreKeyEntity
             {
-                OwnerIdentityId = Guid.NewGuid(),
+                RoutingToken = Guid.NewGuid().ToByteArray(),
                 DeviceId = (uint)(100000 + i),
                 IdentityKey = new byte[] { 4 },
                 SignedPreKey = new byte[] { 5 },

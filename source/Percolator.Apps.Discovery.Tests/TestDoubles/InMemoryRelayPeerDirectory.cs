@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Percolator.Apps.Discovery.Ports;
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 
 namespace Percolator.Apps.Discovery.Features.RelayDirectoryHosting;
@@ -55,7 +56,8 @@ public sealed class InMemoryRelayPeerDirectory : IRelayPeerDirectory
         bool hasActiveSpk = registration.HasActiveSignedPreKey;
         if (_preKeyAvailabilityPort is not null)
         {
-            hasActiveSpk = await _preKeyAvailabilityPort.HasActiveSignedPreKeyAsync(registration.PeerId, ct).ConfigureAwait(false);
+            hasActiveSpk = registration.RoutingToken.HasValue &&
+                await _preKeyAvailabilityPort.HasActiveSignedPreKeyAsync(registration.RoutingToken.Value, ct).ConfigureAwait(false);
         }
 
         var normalized = registration with
@@ -72,6 +74,8 @@ public sealed class InMemoryRelayPeerDirectory : IRelayPeerDirectory
     public ValueTask<DomainResult> UpdateVisibilityAsync(
         PublicIdentityId peerId,
         PeerDiscoveryVisibility visibility,
+        BlindedRoutingToken? routingToken = null,
+        DeliveryToken? deliveryToken = null,
         CancellationToken ct = default)
     {
         if (!peerId.IsValid)
@@ -89,7 +93,9 @@ public sealed class InMemoryRelayPeerDirectory : IRelayPeerDirectory
                 "PEER_NOT_REGISTERED", $"Peer '{peerId}' has not registered with this directory.")));
         }
 
-        var updated = existing.UpdateVisibility(visibility, nowUtc == DateTimeOffset.UnixEpoch ? existing.LastUpdatedAtUtc : nowUtc);
+        var updated = existing
+            .UpdateVisibility(visibility, nowUtc == DateTimeOffset.UnixEpoch ? existing.LastUpdatedAtUtc : nowUtc)
+            with { RoutingToken = routingToken, DeliveryToken = deliveryToken };
         _registrations[peerId] = updated;
 
         return ValueTask.FromResult(DomainResult.Success());
@@ -131,7 +137,8 @@ public sealed class InMemoryRelayPeerDirectory : IRelayPeerDirectory
             bool hasActiveSpk = reg.HasActiveSignedPreKey;
             if (_preKeyAvailabilityPort is not null)
             {
-                hasActiveSpk = await _preKeyAvailabilityPort.HasActiveSignedPreKeyAsync(reg.PeerId, ct).ConfigureAwait(false);
+                hasActiveSpk = reg.RoutingToken.HasValue &&
+                    await _preKeyAvailabilityPort.HasActiveSignedPreKeyAsync(reg.RoutingToken.Value, ct).ConfigureAwait(false);
                 if (hasActiveSpk != reg.HasActiveSignedPreKey)
                 {
                     _registrations[reg.PeerId] = reg.RefreshPreKeyStatus(hasActiveSpk, nowUtc);

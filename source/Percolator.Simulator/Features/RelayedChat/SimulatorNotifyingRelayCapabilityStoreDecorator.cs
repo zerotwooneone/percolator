@@ -61,11 +61,9 @@ internal sealed class SimulatorNotifyingRelayCapabilityStoreDecorator : IRelayMa
         ReadOnlyMemory<byte> routingToken,
         ReadOnlyMemory<byte> deliveryToken,
         ReadOnlyMemory<byte> drainToken,
-        PublicIdentityId? ownerId = null,
-        DeviceId? deviceId = null,
         CancellationToken ct = default)
     {
-        await _inner.RegisterAsync(routingToken, deliveryToken, drainToken, ownerId, deviceId, ct).ConfigureAwait(false);
+        await _inner.RegisterAsync(routingToken, deliveryToken, drainToken, ct).ConfigureAwait(false);
         _stateBus.Publish(new SimulatorStateSignal(_nodeId, SignalCategory.RelayQueueChanged, "MailboxRegistered"));
     }
 
@@ -74,12 +72,10 @@ internal sealed class SimulatorNotifyingRelayCapabilityStoreDecorator : IRelayMa
         ReadOnlyMemory<byte> deliveryToken,
         ReadOnlyMemory<byte> drainToken,
         ReadOnlyMemory<byte> existingDrainToken = default,
-        PublicIdentityId? ownerId = null,
-        DeviceId? deviceId = null,
         CancellationToken ct = default)
     {
         var result = await _inner.RegisterVerifiedAsync(
-            routingToken, deliveryToken, drainToken, existingDrainToken, ownerId, deviceId, ct).ConfigureAwait(false);
+            routingToken, deliveryToken, drainToken, existingDrainToken, ct).ConfigureAwait(false);
 
         if (result.IsSuccess)
         {
@@ -87,30 +83,6 @@ internal sealed class SimulatorNotifyingRelayCapabilityStoreDecorator : IRelayMa
         }
 
         return result;
-    }
-
-    public async ValueTask AssociateOwnerAsync(
-        ReadOnlyMemory<byte> routingToken,
-        PublicIdentityId ownerId,
-        DeviceId deviceId,
-        CancellationToken ct = default)
-    {
-        await _inner.AssociateOwnerAsync(routingToken, ownerId, deviceId, ct).ConfigureAwait(false);
-        _stateBus.Publish(new SimulatorStateSignal(_nodeId, SignalCategory.RelayQueueChanged, "OwnerAssociated"));
-    }
-
-    public ValueTask<(PublicIdentityId? OwnerId, DeviceId? DeviceId)> GetOwnerAsync(
-        ReadOnlyMemory<byte> routingToken,
-        CancellationToken ct = default)
-    {
-        return _inner.GetOwnerAsync(routingToken, ct);
-    }
-
-    public ValueTask<(byte[] RoutingToken, byte[] DeliveryToken)?> GetMailboxTokensByOwnerAsync(
-        PublicIdentityId ownerId,
-        CancellationToken ct = default)
-    {
-        return _inner.GetMailboxTokensByOwnerAsync(ownerId, ct);
     }
 
     public ValueTask<bool> VerifyDeliveryTokenAsync(

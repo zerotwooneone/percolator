@@ -12,7 +12,6 @@ using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.EntityFrameworkCore;
 using Percolator.Domain.Common;
-using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Infrastructure.Persistence;
 using Percolator.Infrastructure.Persistence.Entities;
 using Percolator.Infrastructure.Protos;
@@ -44,11 +43,9 @@ public sealed class SqliteRelayMailboxCapabilityStore : IRelayMailboxCapabilityS
         ReadOnlyMemory<byte> routingToken,
         ReadOnlyMemory<byte> deliveryToken,
         ReadOnlyMemory<byte> drainToken,
-        PublicIdentityId? ownerId = null,
-        DeviceId? deviceId = null,
         CancellationToken ct = default)
     {
-        var result = await RegisterVerifiedAsync(routingToken, deliveryToken, drainToken, default, ownerId, deviceId, ct)
+        var result = await RegisterVerifiedAsync(routingToken, deliveryToken, drainToken, default, ct)
             .ConfigureAwait(false);
         if (result.IsFailure)
         {
@@ -61,8 +58,6 @@ public sealed class SqliteRelayMailboxCapabilityStore : IRelayMailboxCapabilityS
         ReadOnlyMemory<byte> deliveryToken,
         ReadOnlyMemory<byte> drainToken,
         ReadOnlyMemory<byte> existingDrainToken = default,
-        PublicIdentityId? ownerId = null,
-        DeviceId? deviceId = null,
         CancellationToken ct = default)
     {
         await using var db = _contextFactory.CreateDbContext();
@@ -91,8 +86,6 @@ public sealed class SqliteRelayMailboxCapabilityStore : IRelayMailboxCapabilityS
 
         capability.DeliveryToken = deliveryToken.ToArray();
         capability.DrainToken = drainToken.ToArray();
-        if (ownerId.HasValue) capability.OwnerIdentityId = ownerId.Value.Value;
-        if (deviceId.HasValue) capability.DeviceId = (int)deviceId.Value.Value;
         if (isNew) db.RelayMailboxCapabilities.Add(capability);
 
         var authorizedTokens = await db.RelayMailboxAuthorizedTokens
@@ -118,63 +111,6 @@ public sealed class SqliteRelayMailboxCapabilityStore : IRelayMailboxCapabilityS
 
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
         return DomainResult.Success();
-    }
-
-    public async ValueTask AssociateOwnerAsync(
-        ReadOnlyMemory<byte> routingToken,
-        PublicIdentityId ownerId,
-        DeviceId deviceId,
-        CancellationToken ct = default)
-    {
-        await using var db = _contextFactory.CreateDbContext();
-        var routing = routingToken.ToArray();
-        var capability = await db.RelayMailboxCapabilities
-            .FirstOrDefaultAsync(c => c.RoutingToken == routing, ct)
-            .ConfigureAwait(false);
-
-        if (capability == null)
-        {
-            capability = new RelayMailboxCapabilityEntity { RoutingToken = routing };
-            db.RelayMailboxCapabilities.Add(capability);
-        }
-
-        capability.OwnerIdentityId = ownerId.Value;
-        capability.DeviceId = (int)deviceId.Value;
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
-    }
-
-    public async ValueTask<(PublicIdentityId? OwnerId, DeviceId? DeviceId)> GetOwnerAsync(
-        ReadOnlyMemory<byte> routingToken,
-        CancellationToken ct = default)
-    {
-        await using var db = _contextFactory.CreateDbContext();
-        var routing = routingToken.ToArray();
-        var capability = await db.RelayMailboxCapabilities
-            .AsNoTracking()
-            .FirstOrDefaultAsync(c => c.RoutingToken == routing, ct)
-            .ConfigureAwait(false);
-
-        if (capability == null)
-        {
-            return (null, null);
-        }
-
-        return (
-            capability.OwnerIdentityId.HasValue ? new PublicIdentityId(capability.OwnerIdentityId.Value) : (PublicIdentityId?)null,
-            capability.DeviceId.HasValue ? new DeviceId((uint)capability.DeviceId.Value) : (DeviceId?)null);
-    }
-
-    public async ValueTask<(byte[] RoutingToken, byte[] DeliveryToken)?> GetMailboxTokensByOwnerAsync(
-        PublicIdentityId ownerId,
-        CancellationToken ct = default)
-    {
-        await using var db = _contextFactory.CreateDbContext();
-        var capability = await db.RelayMailboxCapabilities
-            .AsNoTracking()
-            .FirstOrDefaultAsync(c => c.OwnerIdentityId == ownerId.Value, ct)
-            .ConfigureAwait(false);
-
-        return capability == null ? null : (capability.RoutingToken, capability.DeliveryToken);
     }
 
     public async ValueTask<bool> VerifyDeliveryTokenAsync(

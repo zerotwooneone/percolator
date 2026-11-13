@@ -7,6 +7,7 @@ using Google.Protobuf;
 using Grpc.Core;
 using Percolator.Apps.Discovery.Features.RelayDirectoryHosting;
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Delivery.Ports;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
@@ -40,8 +41,13 @@ public sealed class NearbyDiscoveryEndpoint : NearbyDiscoveryService.NearbyDisco
         _cryptoEngine = cryptoEngine ?? throw new ArgumentNullException(nameof(cryptoEngine));
     }
 
-    public static byte[] BuildVisibilitySignaturePayload(PublicIdentityId peerId, int visibility, long timestampUnixMs)
-        => DiscoveryWireFraming.BuildVisibilitySignaturePayload(peerId, visibility, timestampUnixMs);
+    public static byte[] BuildVisibilitySignaturePayload(
+        PublicIdentityId peerId,
+        int visibility,
+        long timestampUnixMs,
+        ReadOnlySpan<byte> routingToken = default,
+        ReadOnlySpan<byte> deliveryToken = default)
+        => DiscoveryWireFraming.BuildVisibilitySignaturePayload(peerId, visibility, timestampUnixMs, routingToken, deliveryToken);
 
     public override async Task<NearbyDiscoveryResponseProto> QueryNearby(
         NearbyDiscoveryQueryProto request,
@@ -78,11 +84,12 @@ public sealed class NearbyDiscoveryEndpoint : NearbyDiscoveryService.NearbyDisco
                 RelayEndpoint = $"https://127.0.0.1:{_boundPort}"
             };
 
-            var tokens = await _capabilityStore.GetMailboxTokensByOwnerAsync(reg.PeerId, context.CancellationToken);
-            if (tokens.HasValue)
+            // Tokens advertised at registration — the directory record is the single
+            // source of truth; no owner-keyed capability lookup exists anymore.
+            if (reg.RoutingToken.HasValue && (reg.DeliveryToken!=null))
             {
-                descriptor.RoutingToken = ByteString.CopyFrom(tokens.Value.RoutingToken);
-                descriptor.DeliveryToken = ByteString.CopyFrom(tokens.Value.DeliveryToken);
+                descriptor.RoutingToken = ByteString.CopyFrom(reg.RoutingToken.Value.ToByteArray());
+                descriptor.DeliveryToken = ByteString.CopyFrom(reg.DeliveryToken.Span);
             }
 
             response.Descriptors.Add(descriptor);
@@ -127,14 +134,33 @@ public sealed class NearbyDiscoveryEndpoint : NearbyDiscoveryService.NearbyDisco
             throw new RpcException(new Status(StatusCode.PermissionDenied, "Registration timestamp is outside the acceptable drift window."));
         }
 
-        var payload = DiscoveryWireFraming.BuildVisibilitySignaturePayload(peerId, request.Visibility, request.TimestampUnixMs);
+        var payload = DiscoveryWireFraming.BuildVisibilitySignaturePayload(
+            peerId,
+            request.Visibility,
+            request.TimestampUnixMs,
+            request.RoutingToken.Span,
+            request.DeliveryToken.Span);
         var identityKey = IdentityKey.FromSpan(request.IdentityKey.Span);
         if (!_cryptoEngine.VerifyEd25519Signature(identityKey, payload, request.Signature.Span))
         {
             throw new RpcException(new Status(StatusCode.PermissionDenied, "Invalid visibility registration signature."));
         }
 
-        var bundles = await _preKeyRepository.GetAllForIdentityAsync(peerId, context.CancellationToken);
+        BlindedRoutingToken? routingToken = null;
+        DeliveryToken? deliveryToken = null;
+        if (request.RoutingToken.Length == 16 && request.DeliveryToken.Length == 32)
+        {
+            routingToken = BlindedRoutingToken.FromBytes(request.RoutingToken.ToByteArray());
+            deliveryToken = DeliveryToken.FromSpan(request.DeliveryToken.Span);
+        }
+
+        // Pre-key availability is checked against the advertised mailbox routing token.
+        // The identity-key pin still authenticates the published bundle's key — the
+        // directory just no longer keys that lookup by the peer's public identity.
+        IReadOnlyList<RelayHostedPreKeyBundle> bundles =
+            routingToken.HasValue
+                ? await _preKeyRepository.GetAllForMailboxAsync(routingToken.Value, context.CancellationToken)
+                : Array.Empty<RelayHostedPreKeyBundle>();
         if (bundles.Count > 0)
         {
             if (!CryptographicOperations.FixedTimeEquals(bundles[0].IdentityKey.Span, request.IdentityKey.Span))
@@ -149,7 +175,12 @@ public sealed class NearbyDiscoveryEndpoint : NearbyDiscoveryService.NearbyDisco
         var existing = await _peerDirectory.GetPeerAsync(peerId, context.CancellationToken);
         if (existing != null)
         {
-            var updateResult = await _peerDirectory.UpdateVisibilityAsync(peerId, visibility, context.CancellationToken);
+            var updateResult = await _peerDirectory.UpdateVisibilityAsync(
+                peerId,
+                visibility,
+                routingToken,
+                deliveryToken,
+                context.CancellationToken);
             if (!updateResult.IsSuccess)
             {
                 throw new RpcException(new Status(StatusCode.Internal, updateResult.Error.Description));
@@ -164,7 +195,11 @@ public sealed class NearbyDiscoveryEndpoint : NearbyDiscoveryService.NearbyDisco
                 HasAuthenticatedHandshake: true,
                 HasActiveSignedPreKey: hasPreKey,
                 RegisteredAtUtc: nowUtc,
-                LastUpdatedAtUtc: nowUtc);
+                LastUpdatedAtUtc: nowUtc)
+            {
+                RoutingToken = routingToken,
+                DeliveryToken = deliveryToken
+            };
 
             var regResult = await _peerDirectory.RegisterPeerAsync(registration, context.CancellationToken);
             if (!regResult.IsSuccess)

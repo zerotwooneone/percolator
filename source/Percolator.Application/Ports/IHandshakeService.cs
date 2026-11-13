@@ -12,6 +12,7 @@ public interface IHandshakeService
     ValueTask<DomainResult<DirectRatchetSession>> InitiateHandshakeAsync(
         PublicIdentityId ownerId,
         DeviceId ownerDeviceId,
+        PublicIdentityId remotePeerId,
         PreKeyBundle remoteBundle,
         AppId? initialAppId = null,
         ReadOnlyMemory<byte>? initialPayload = null,

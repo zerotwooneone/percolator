@@ -1,7 +1,6 @@
 namespace Percolator.Infrastructure.Transport.Endpoints;
 
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Cryptography;
@@ -14,6 +13,7 @@ using Grpc.Core;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Delivery.Ports;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
@@ -25,7 +25,6 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
     private readonly IRelayMailboxCapabilityStore _capabilityStore;
     private readonly IRelayPreKeyRepository _preKeyRepository;
     private readonly ICryptoEngine _cryptoEngine;
-    private readonly ConcurrentDictionary<(PublicIdentityId, DeviceId), DateTimeOffset> _publishedTimestamps = new();
 
     public AuthenticatedRelayEndpoint(
         IRelayMailboxCapabilityStore capabilityStore,
@@ -214,75 +213,39 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
 
     public override async Task<PublishPreKeyBundleResponse> PublishPreKeyBundle(PublishPreKeyBundleRequest request, ServerCallContext context)
     {
-        if (request.PayloadBytes.IsEmpty || request.Signature.IsEmpty)
+        // Flattened request: storage is keyed by (routing_token, device_id). The relay
+        // never learns the owner's public identity — authorization is the drain token,
+        // key-material integrity is the bundle's own signed-prekey signature verified
+        // inside RelayHostedPreKeyBundle.Create/UpdateSignedPreKey.
+        if (request.RoutingToken.Length != 16 ||
+            request.DrainToken.Length != 32 ||
+            request.DeviceId == 0 ||
+            request.IdentityKey.Length != 32 ||
+            request.SignedPrekey.Length != 32 ||
+            request.PrekeySignature.Length != 64)
         {
             return new PublishPreKeyBundleResponse { Success = false };
         }
 
-        PreKeyBundlePayloadProto payload;
-        try
-        {
-            payload = PreKeyBundlePayloadProto.Parser.ParseFrom(request.PayloadBytes.Span);
-        }
-        catch
-        {
-            return new PublishPreKeyBundleResponse { Success = false };
-        }
-
-        if (payload.OwnerIdentityId.Length != 16 || payload.IdentityKey.Length != 32 || payload.SignedPrekey.Length != 32)
+        // Mailbox ownership: a valid drain token for routing_token is required —
+        // the drain token is the only credential that authorizes overwriting this
+        // mailbox's hosted bundle.
+        bool drainValid = await _capabilityStore.VerifyDrainTokenAsync(
+            request.RoutingToken.Memory,
+            request.DrainToken.Memory,
+            context.CancellationToken);
+        if (!drainValid)
         {
             return new PublishPreKeyBundleResponse { Success = false };
         }
 
-        var ownerId = PublicIdentityId.FromBytes(payload.OwnerIdentityId.Span);
-        var deviceId = new DeviceId(payload.DeviceId);
-        var publishedAtUtc = payload.PublishedAtUtc.ToDateTimeOffset();
+        var routingToken = BlindedRoutingToken.FromBytes(request.RoutingToken.ToByteArray());
+        var deviceId = new DeviceId(request.DeviceId);
 
-        // Mailbox ownership verification (when routing_token or drain_token is supplied):
-        // the caller proves ownership of the registered mailbox for routing_token.
-        if (!payload.RoutingToken.IsEmpty || !request.DrainToken.IsEmpty)
-        {
-            if (payload.RoutingToken.Length != 16 || request.DrainToken.Length != 32)
-            {
-                return new PublishPreKeyBundleResponse { Success = false };
-            }
-
-            bool drainValid = await _capabilityStore.VerifyDrainTokenAsync(
-                payload.RoutingToken.Memory,
-                request.DrainToken.Memory,
-                context.CancellationToken);
-            if (!drainValid)
-            {
-                return new PublishPreKeyBundleResponse { Success = false };
-            }
-        }
-
-        // Rollback / Replay protection: reject only strictly-older published_at values.
-        // Equal timestamps are legitimate: clock granularity (and virtual clocks) can emit
-        // the same instant across back-to-back publishes, and replaying an identical
-        // signed payload is idempotent. Drain-token verification still gates the write.
-        if (_publishedTimestamps.TryGetValue((ownerId, deviceId), out var lastPublished))
-        {
-            if (publishedAtUtc < lastPublished)
-            {
-                return new PublishPreKeyBundleResponse { Success = false };
-            }
-        }
-
-        // Verify Ed25519 signature over payload_bytes
-        var identityKey = IdentityKey.FromSpan(payload.IdentityKey.Span);
-        bool sigValid = _cryptoEngine.VerifyEd25519Signature(
-            identityKey,
-            request.PayloadBytes.Span,
-            request.Signature.Span);
-
-        if (!sigValid)
-        {
-            return new PublishPreKeyBundleResponse { Success = false };
-        }
+        var identityKey = IdentityKey.FromSpan(request.IdentityKey.Span);
 
         var opks = new List<(uint KeyId, DhPublicKey Key)>();
-        foreach (var opk in payload.OneTimePrekeys)
+        foreach (var opk in request.OneTimePrekeys)
         {
             if (opk.PublicKey.Length == 32)
             {
@@ -290,16 +253,16 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
             }
         }
 
-        var signedPreKey = DhPublicKey.FromSpan(payload.SignedPrekey.Span);
-        var signedPreKeySignature = DeviceLinkProof.FromSpan(payload.PrekeySignature.Span);
+        var signedPreKey = DhPublicKey.FromSpan(request.SignedPrekey.Span);
+        var signedPreKeySignature = DeviceLinkProof.FromSpan(request.PrekeySignature.Span);
 
         // Server-side OPK replenishment: an existing bundle gains only new KeyIds and a
         // rotated signed prekey; a missing bundle is created wholesale.
-        var existing = await _preKeyRepository.GetAsync(ownerId, deviceId, context.CancellationToken);
+        var existing = await _preKeyRepository.GetAsync(routingToken, deviceId, context.CancellationToken);
         if (existing == null)
         {
             var bundleResult = RelayHostedPreKeyBundle.Create(
-                ownerId,
+                routingToken,
                 deviceId,
                 identityKey,
                 signedPreKey,
@@ -342,19 +305,6 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
 
             await _preKeyRepository.SaveAsync(existing, context.CancellationToken);
         }
-
-        // Wire owner association: binds the mailbox routing token to this owner/device so
-        // FetchPreKeyBundle resolves the bundle via the capability store.
-        if (payload.RoutingToken.Length == 16)
-        {
-            await _capabilityStore.AssociateOwnerAsync(
-                payload.RoutingToken.Memory,
-                ownerId,
-                deviceId,
-                context.CancellationToken);
-        }
-
-        _publishedTimestamps[(ownerId, deviceId)] = publishedAtUtc;
 
         return new PublishPreKeyBundleResponse { Success = true };
     }

@@ -1,24 +1,25 @@
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Hosting;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 
 namespace Percolator.Domain.Identities.Model;
 
 public sealed class PreKeyBundleState : AggregateRoot<HostedPreKeyRecordId>
 {
-    public override HostedPreKeyRecordId Id => new(OwnerIdentityId, DeviceId);
-    public PublicIdentityId OwnerIdentityId { get; }
+    public override HostedPreKeyRecordId Id => new(RoutingToken, DeviceId);
+    public BlindedRoutingToken RoutingToken { get; }
     public DeviceId DeviceId { get; }
     public uint AvailableOneTimePreKeysCount { get; private set; }
     public DateTimeOffset SignedPreKeyCreatedAtUtc { get; private set; }
 
     public PreKeyBundleState(
-        PublicIdentityId ownerIdentityId,
+        BlindedRoutingToken routingToken,
         DeviceId deviceId,
         uint availableOneTimePreKeysCount,
         DateTimeOffset signedPreKeyCreatedAtUtc)
     {
-        OwnerIdentityId = ownerIdentityId;
+        RoutingToken = routingToken;
         DeviceId = deviceId;
         AvailableOneTimePreKeysCount = availableOneTimePreKeysCount;
         SignedPreKeyCreatedAtUtc = signedPreKeyCreatedAtUtc;

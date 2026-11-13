@@ -30,6 +30,7 @@ internal sealed class SimulatorNotifyingHandshakeDecorator : IHandshakeService
     public async ValueTask<DomainResult<DirectRatchetSession>> InitiateHandshakeAsync(
         PublicIdentityId ownerId,
         DeviceId ownerDeviceId,
+        PublicIdentityId remotePeerId,
         PreKeyBundle remoteBundle,
         AppId? initialAppId = null,
         ReadOnlyMemory<byte>? initialPayload = null,
@@ -38,6 +39,7 @@ internal sealed class SimulatorNotifyingHandshakeDecorator : IHandshakeService
         var result = await _inner.InitiateHandshakeAsync(
             ownerId,
             ownerDeviceId,
+            remotePeerId,
             remoteBundle,
             initialAppId,
             initialPayload,
@@ -48,8 +50,8 @@ internal sealed class SimulatorNotifyingHandshakeDecorator : IHandshakeService
             _stateBus.Publish(new SimulatorStateSignal(
                 _nodeId,
                 SignalCategory.RatchetSessionChanged,
-                Details: remoteBundle.IdentityId.ToString(),
-                Payload: new HandshakeSignalPayload(remoteBundle.IdentityId, "Initiate")));
+                Details: remotePeerId.ToString(),
+                Payload: new HandshakeSignalPayload(remotePeerId, "Initiate")));
         }
 
         return result;

@@ -1,5 +1,6 @@
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Hosting;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.ValueObjects;
@@ -22,6 +23,7 @@ public sealed class ScenarioParticipant : IDisposable
     public DhPublicKey SignedPreKeyPublic { get; }
     public byte[] SignedPreKeySignature { get; }
     public InMemoryPrivatePreKeyStore PreKeyStore { get; }
+    public BlindedRoutingToken RoutingToken { get; }
     public List<(uint KeyId, DhPublicKey PublicKey, EphemeralPrivateKey PrivateKey)> OneTimePreKeys { get; } = new();
 
     public ScenarioParticipant(
@@ -33,8 +35,10 @@ public sealed class ScenarioParticipant : IDisposable
         EphemeralPrivateKey signedPreKeyPrivate,
         DhPublicKey signedPreKeyPublic,
         byte[] signedPreKeySignature,
-        InMemoryPrivatePreKeyStore preKeyStore)
+        InMemoryPrivatePreKeyStore preKeyStore,
+        BlindedRoutingToken? routingToken = null)
     {
+        RoutingToken = routingToken ?? BlindedRoutingToken.New();
         Name = name;
         IdentityId = identityId;
         DeviceId = deviceId;
@@ -99,7 +103,7 @@ public sealed class ScenarioParticipant : IDisposable
         var idPrivCopy = EphemeralPrivateKey.FromSpan(idPrivBytes);
 
         var devParticipant = new ScenarioParticipant(
-            $"{Name} ({deviceName})", IdentityId, deviceId, idPrivCopy, IdentityPublicKey, spkPriv, spkPub, sig, store);
+            $"{Name} ({deviceName})", IdentityId, deviceId, idPrivCopy, IdentityPublicKey, spkPriv, spkPub, sig, store, RoutingToken);
 
         if (opkPoolSize > 0)
         {
@@ -131,7 +135,6 @@ public sealed class ScenarioParticipant : IDisposable
         }
 
         return new PreKeyBundle(
-            IdentityId,
             DeviceId,
             IdentityPublicKey,
             SignedPreKeyPublic,
@@ -149,7 +152,7 @@ public sealed class ScenarioParticipant : IDisposable
     {
         var opkPubs = OneTimePreKeys.Select(k => (k.KeyId, k.PublicKey)).ToList();
         return RelayHostedPreKeyBundle.Create(
-            IdentityId,
+            RoutingToken,
             DeviceId,
             IdentityPublicKey,
             SignedPreKeyPublic,

@@ -963,7 +963,7 @@ internal sealed class ScenarioRunnerService
         if (!aliasMap.TryGetValue(assertion.PersonaAlias, out var persona))
             throw new ScenarioExecutionException($"Persona '{assertion.PersonaAlias}' not found in scenario.");
 
-        var actualCount = await relay.QueryService.GetHostedOpkCountAsync(persona.PublicIdentityId, DeviceId.Primary, ct);
+        var actualCount = await relay.QueryService.GetHostedOpkCountAsync(persona.MailboxRoutingToken, DeviceId.Primary, ct);
 
         if (actualCount != assertion.ExpectedCount)
         {
