@@ -20,6 +20,7 @@ using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.Infrastructure.Protos;
 using Percolator.Infrastructure.Transport;
+using Percolator.Infrastructure.Tests.Fakes;
 using Percolator.Infrastructure.Transport.Endpoints;
 
 [TestFixture]
@@ -80,7 +81,7 @@ public sealed class AnonymousGroupRelayEndpointTests
         var repo = new InMemoryLedgerRepo();
         var zkEngine = new TestZkProofEngine();
         var timeProvider = new FixedTimeProvider();
-        var mailboxStore = new InMemoryRelayMailboxCapabilityStore();
+        var mailboxStore = new FakeRelayMailboxCapabilityStore();
         var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, PublicIdentityId.New());
 
         var channelId = ChannelId.New();
@@ -153,7 +154,7 @@ public sealed class AnonymousGroupRelayEndpointTests
         var repo = new InMemoryLedgerRepo();
         var zkEngine = new TestZkProofEngine();
         var timeProvider = new FixedTimeProvider();
-        var mailboxStore = new InMemoryRelayMailboxCapabilityStore();
+        var mailboxStore = new FakeRelayMailboxCapabilityStore();
         var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, PublicIdentityId.New());
 
         var channelId = ChannelId.New();
@@ -192,7 +193,7 @@ public sealed class AnonymousGroupRelayEndpointTests
         var repo = new InMemoryLedgerRepo();
         var zkEngine = new TestZkProofEngine { ReturnValid = false };
         var timeProvider = new FixedTimeProvider();
-        var mailboxStore = new InMemoryRelayMailboxCapabilityStore();
+        var mailboxStore = new FakeRelayMailboxCapabilityStore();
         var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, PublicIdentityId.New());
 
         var channelId = ChannelId.New();
@@ -224,7 +225,7 @@ public sealed class AnonymousGroupRelayEndpointTests
         var repo = new InMemoryLedgerRepo();
         var zkEngine = new TestZkProofEngine();
         var timeProvider = new FixedTimeProvider();
-        var mailboxStore = new InMemoryRelayMailboxCapabilityStore();
+        var mailboxStore = new FakeRelayMailboxCapabilityStore();
         var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, PublicIdentityId.New());
 
         var channelId = ChannelId.New();
@@ -277,7 +278,7 @@ public sealed class AnonymousGroupRelayEndpointTests
         var repo = new InMemoryLedgerRepo();
         var zkEngine = new TestZkProofEngine();
         var timeProvider = new FixedTimeProvider();
-        var mailboxStore = new InMemoryRelayMailboxCapabilityStore();
+        var mailboxStore = new FakeRelayMailboxCapabilityStore();
         var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, PublicIdentityId.New());
 
         var channelId = ChannelId.New();
@@ -346,7 +347,7 @@ public sealed class AnonymousGroupRelayEndpointTests
         var repo = new InMemoryLedgerRepo();
         var zkEngine = new TestZkProofEngine();
         var timeProvider = new FixedTimeProvider();
-        var mailboxStore = new InMemoryRelayMailboxCapabilityStore();
+        var mailboxStore = new FakeRelayMailboxCapabilityStore();
         var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, PublicIdentityId.New());
 
         var channelId = ChannelId.New();
@@ -376,7 +377,7 @@ public sealed class AnonymousGroupRelayEndpointTests
         var repo = new InMemoryLedgerRepo();
         var zkEngine = new TestZkProofEngine();
         var timeProvider = new FixedTimeProvider();
-        var mailboxStore = new InMemoryRelayMailboxCapabilityStore();
+        var mailboxStore = new FakeRelayMailboxCapabilityStore();
         var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, PublicIdentityId.New());
 
         var invalidIdReq = new CreateGroupRequest
@@ -423,7 +424,7 @@ public sealed class AnonymousGroupRelayEndpointTests
         var repo = new InMemoryLedgerRepo();
         var zkEngine = new TestZkProofEngine();
         var timeProvider = new FixedTimeProvider();
-        var mailboxStore = new InMemoryRelayMailboxCapabilityStore();
+        var mailboxStore = new FakeRelayMailboxCapabilityStore();
         var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, PublicIdentityId.New());
 
         var channelId = ChannelId.New();
@@ -452,7 +453,7 @@ public sealed class AnonymousGroupRelayEndpointTests
         var repo = new InMemoryLedgerRepo();
         var zkEngine = new TestZkProofEngine { ReturnValid = false };
         var timeProvider = new FixedTimeProvider();
-        var mailboxStore = new InMemoryRelayMailboxCapabilityStore();
+        var mailboxStore = new FakeRelayMailboxCapabilityStore();
         var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, PublicIdentityId.New());
 
         var channelId = ChannelId.New();
@@ -486,7 +487,7 @@ public sealed class AnonymousGroupRelayEndpointTests
         var repo = new InMemoryLedgerRepo();
         var zkEngine = new TestZkProofEngine { ReturnValid = false };
         var timeProvider = new FixedTimeProvider();
-        var mailboxStore = new InMemoryRelayMailboxCapabilityStore();
+        var mailboxStore = new FakeRelayMailboxCapabilityStore();
         var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, PublicIdentityId.New());
 
         var channelId = ChannelId.New();

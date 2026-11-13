@@ -24,6 +24,7 @@ using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Infrastructure.DependencyInjection;
 using Percolator.Infrastructure.Plugins.BlobStorage;
 using Percolator.Infrastructure.Protos;
+using Percolator.Infrastructure.Tests.Fakes;
 using Percolator.Infrastructure.Tests.Transport.Endpoints;
 using Percolator.Infrastructure.Transport.Endpoints;
 using Percolator.PluginSdk;
@@ -47,7 +48,7 @@ public sealed class RelayBlobClientTests
             new UnauthenticatedDeliveryEndpointTestsFakes.StubProfileRepo(),
             new UnauthenticatedDeliveryEndpointTestsFakes.StubPreKeyRepo(),
             _chunkStore,
-            new InMemoryRelayMailboxCapabilityStore());
+            new FakeRelayMailboxCapabilityStore());
 
         _directClient = new RelayBlobClient(uri => new DirectEndpointClient(_endpoint));
     }

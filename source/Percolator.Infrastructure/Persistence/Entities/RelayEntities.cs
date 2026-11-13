@@ -56,3 +56,46 @@ public sealed class RelayRendezvousEntryEntity
     public string? RouteDescriptor { get; set; }
     public DateTimeOffset PublishedAtUtc { get; set; }
 }
+
+public sealed class RelayRegistrationEntity
+{
+    public Guid RelayIdentityId { get; set; }
+    public string Endpoint { get; set; } = string.Empty;
+    public byte[]? PinnedCertificateSha256 { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+}
+
+public sealed class RelayMailboxBindingEntity
+{
+    public Guid RelayIdentityId { get; set; }
+    public Guid OwnerIdentityId { get; set; }
+    public byte[] RoutingToken { get; set; } = Array.Empty<byte>();
+    public byte[] DrainToken { get; set; } = Array.Empty<byte>();
+    public byte[]? PreviousDrainToken { get; set; }
+    public DateTimeOffset LinkedAtUtc { get; set; }
+}
+
+public sealed class RelayMailboxCapabilityEntity
+{
+    public byte[] RoutingToken { get; set; } = Array.Empty<byte>();   // PK — 16 bytes
+    public byte[] DeliveryToken { get; set; } = Array.Empty<byte>();  // 32 bytes
+    public byte[] DrainToken { get; set; } = Array.Empty<byte>();     // 32 bytes
+    public Guid? OwnerIdentityId { get; set; }
+    public int? DeviceId { get; set; }
+}
+
+public sealed class RelayMailboxAuthorizedTokenEntity
+{
+    public byte[] RoutingToken { get; set; } = Array.Empty<byte>();   // composite PK {RoutingToken, Ordinal}
+    public int Ordinal { get; set; }                                  // ring-buffer position (cap 10)
+    public byte[] DeliveryToken { get; set; } = Array.Empty<byte>();
+}
+
+public sealed class RelayQueuedEnvelopeEntity
+{
+    public string QueueId { get; set; } = string.Empty;               // PK
+    public byte[] RoutingToken { get; set; } = Array.Empty<byte>();   // FK → capability, indexed
+    public long Ordinal { get; set; }                                 // app-assigned enqueue order (max+1 at insert; permuted by ShuffleQueue)
+    public byte[] EnvelopePayload { get; set; } = Array.Empty<byte>();
+    public DateTimeOffset EnqueuedAtUtc { get; set; }
+}

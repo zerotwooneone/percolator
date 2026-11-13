@@ -84,6 +84,7 @@ public sealed class BaselineStage2HostFactory : IStage2HostFactory
             services.AddScoped<IRelayLedgerRepository>(sp => sp.GetRequiredService<SqliteRelayLedgerRepository>());
             services.AddScoped<IPeerProfileRepository, SqlitePeerProfileRepository>();
             services.AddScoped<IPeerMailboxRoutingRepository, SqlitePeerMailboxRoutingRepository>();
+            services.AddScoped<IRelayRegistrationRepository, SqliteRelayRegistrationRepository>();
 
             // Background Maintenance Pruners
             services.AddSingleton(TimeProvider.System);

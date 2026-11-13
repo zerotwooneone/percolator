@@ -20,6 +20,7 @@ using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.Infrastructure.Protos;
 using Percolator.Infrastructure.Security;
+using Percolator.Infrastructure.Tests.Fakes;
 using Percolator.Infrastructure.Transport;
 using Percolator.Infrastructure.Transport.Endpoints;
 
@@ -70,7 +71,7 @@ public sealed class NearbyDiscoveryEndpointTests
     {
         var timeProvider = new FixedTimeProvider();
         var peerDir = new InMemoryRelayPeerDirectory(new DiscoveryAdmissionGate(), RelayDiscoveryPolicy.Open);
-        var capabilityStore = new InMemoryRelayMailboxCapabilityStore();
+        var capabilityStore = new FakeRelayMailboxCapabilityStore();
         var preKeyRepo = new InMemoryPreKeyRepo();
 
         var act = () => new NearbyDiscoveryEndpoint(peerDir, capabilityStore, preKeyRepo, timeProvider, 20600, null!);
@@ -83,7 +84,7 @@ public sealed class NearbyDiscoveryEndpointTests
         var crypto = new SignalCryptoEngine(new CryptographyOptions());
         var timeProvider = new FixedTimeProvider();
         var peerDir = new InMemoryRelayPeerDirectory(new DiscoveryAdmissionGate(), RelayDiscoveryPolicy.Open);
-        var capabilityStore = new InMemoryRelayMailboxCapabilityStore();
+        var capabilityStore = new FakeRelayMailboxCapabilityStore();
         var preKeyRepo = new InMemoryPreKeyRepo();
         var endpoint = new NearbyDiscoveryEndpoint(peerDir, capabilityStore, preKeyRepo, timeProvider, 20600, crypto);
 
@@ -128,7 +129,7 @@ public sealed class NearbyDiscoveryEndpointTests
         var crypto = new SignalCryptoEngine(new CryptographyOptions());
         var timeProvider = new FixedTimeProvider();
         var peerDir = new InMemoryRelayPeerDirectory(new DiscoveryAdmissionGate(), RelayDiscoveryPolicy.Open);
-        var capabilityStore = new InMemoryRelayMailboxCapabilityStore();
+        var capabilityStore = new FakeRelayMailboxCapabilityStore();
         var preKeyRepo = new InMemoryPreKeyRepo();
         var endpoint = new NearbyDiscoveryEndpoint(peerDir, capabilityStore, preKeyRepo, timeProvider, 20600, crypto);
 
@@ -164,7 +165,7 @@ public sealed class NearbyDiscoveryEndpointTests
         var crypto = new SignalCryptoEngine(new CryptographyOptions());
         var timeProvider = new FixedTimeProvider();
         var peerDir = new InMemoryRelayPeerDirectory(new DiscoveryAdmissionGate(), RelayDiscoveryPolicy.Open);
-        var capabilityStore = new InMemoryRelayMailboxCapabilityStore();
+        var capabilityStore = new FakeRelayMailboxCapabilityStore();
         var preKeyRepo = new InMemoryPreKeyRepo();
         var endpoint = new NearbyDiscoveryEndpoint(peerDir, capabilityStore, preKeyRepo, timeProvider, 20600, crypto);
 
@@ -190,7 +191,7 @@ public sealed class NearbyDiscoveryEndpointTests
         var crypto = new SignalCryptoEngine(new CryptographyOptions());
         var timeProvider = new FixedTimeProvider();
         var peerDir = new InMemoryRelayPeerDirectory(new DiscoveryAdmissionGate(), RelayDiscoveryPolicy.Open);
-        var capabilityStore = new InMemoryRelayMailboxCapabilityStore();
+        var capabilityStore = new FakeRelayMailboxCapabilityStore();
         var preKeyRepo = new InMemoryPreKeyRepo();
         var endpoint = new NearbyDiscoveryEndpoint(peerDir, capabilityStore, preKeyRepo, timeProvider, 20600, crypto);
 
@@ -221,7 +222,7 @@ public sealed class NearbyDiscoveryEndpointTests
         var crypto = new SignalCryptoEngine(new CryptographyOptions());
         var timeProvider = new FixedTimeProvider();
         var peerDir = new InMemoryRelayPeerDirectory(new DiscoveryAdmissionGate(), RelayDiscoveryPolicy.Open);
-        var capabilityStore = new InMemoryRelayMailboxCapabilityStore();
+        var capabilityStore = new FakeRelayMailboxCapabilityStore();
         var preKeyRepo = new InMemoryPreKeyRepo();
         var endpoint = new NearbyDiscoveryEndpoint(peerDir, capabilityStore, preKeyRepo, timeProvider, 20600, crypto);
 
@@ -249,7 +250,7 @@ public sealed class NearbyDiscoveryEndpointTests
         var crypto = new SignalCryptoEngine(new CryptographyOptions());
         var timeProvider = new FixedTimeProvider();
         var peerDir = new InMemoryRelayPeerDirectory(new DiscoveryAdmissionGate(), RelayDiscoveryPolicy.Open);
-        var capabilityStore = new InMemoryRelayMailboxCapabilityStore();
+        var capabilityStore = new FakeRelayMailboxCapabilityStore();
         var preKeyRepo = new InMemoryPreKeyRepo();
         var endpoint = new NearbyDiscoveryEndpoint(peerDir, capabilityStore, preKeyRepo, timeProvider, 20600, crypto);
 
@@ -291,7 +292,7 @@ public sealed class NearbyDiscoveryEndpointTests
         var crypto = new SignalCryptoEngine(new CryptographyOptions());
         var timeProvider = new FixedTimeProvider();
         var peerDir = new InMemoryRelayPeerDirectory(new DiscoveryAdmissionGate(), RelayDiscoveryPolicy.Open);
-        var capabilityStore = new InMemoryRelayMailboxCapabilityStore();
+        var capabilityStore = new FakeRelayMailboxCapabilityStore();
         var preKeyRepo = new InMemoryPreKeyRepo();
         var endpoint = new NearbyDiscoveryEndpoint(peerDir, capabilityStore, preKeyRepo, timeProvider, 20600, crypto);
 

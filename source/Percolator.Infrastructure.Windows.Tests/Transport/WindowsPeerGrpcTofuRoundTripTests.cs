@@ -21,6 +21,7 @@ using Percolator.Infrastructure.Protos;
 using Percolator.Infrastructure.Transport;
 using Percolator.Infrastructure.Transport.Endpoints;
 using Percolator.Infrastructure.Windows.Security;
+using Percolator.Infrastructure.Windows.Tests.Fakes;
 using Percolator.PluginSdk;
 
 [TestFixture]
@@ -80,7 +81,7 @@ public sealed class WindowsPeerGrpcTofuRoundTripTests
         services.AddSingleton<IRelayProfileRepository, StubRelayProfileRepository>();
         services.AddSingleton<IRelayPreKeyRepository, StubRelayPreKeyRepository>();
         services.AddSingleton<ILocalChunkStore, StubLocalChunkStore>();
-        services.AddSingleton<IRelayMailboxCapabilityStore, InMemoryRelayMailboxCapabilityStore>();
+        services.AddSingleton<IRelayMailboxCapabilityStore, FakeRelayMailboxCapabilityStore>();
         services.AddSingleton<UnauthenticatedDeliveryEndpoint>();
 
         var serviceProvider = services.BuildServiceProvider();

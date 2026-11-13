@@ -59,7 +59,7 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
     private readonly ISimulatorStateBus _stateBus;
     private readonly IVirtualClockStateService _virtualClock;
     private readonly string _relayTempDirectory;
-    private readonly SimulatorNotifyingRelayCapabilityStoreDecorator _capabilityStore;
+    private SimulatorNotifyingRelayCapabilityStoreDecorator? _capabilityStore;
     private SimulatorNotifyingRelayPreKeyRepositoryDecorator? _preKeyRepository;
     private SimulatorRelayQueryService? _queryService;
     private InMemoryRelayPeerDirectory? _peerDirectory;
@@ -75,14 +75,14 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
     public IServiceProvider Services => _app?.Services ?? throw new InvalidOperationException("Relay host not started.");
     public PublicIdentityId RelayIdentityId => new(Id.Value);
 
-    public IRelayMailboxCapabilityStore MailboxStore => _capabilityStore;
+    public IRelayMailboxCapabilityStore MailboxStore => _capabilityStore ?? throw new InvalidOperationException("Relay host not started.");
     public ISimulatorRelayQueryService QueryService => _queryService ?? throw new InvalidOperationException("Relay host not started.");
     public IRelayPreKeyRepository PreKeyRepository => _preKeyRepository ?? throw new InvalidOperationException("Relay host not started.");
-    public IRelayQueueChaosController ChaosController => _capabilityStore;
+    public IRelayQueueChaosController ChaosController => _capabilityStore ?? throw new InvalidOperationException("Relay host not started.");
     public IRelayPeerDirectory PeerDirectory => _peerDirectory ?? throw new InvalidOperationException("Relay host not started.");
     public IPrivateRendezvousService RendezvousService => _rendezvousService ?? throw new InvalidOperationException("Relay host not started.");
 
-    public int TotalHeldEnvelopeCount => _capabilityStore.TotalEnvelopeCount;
+    public int TotalHeldEnvelopeCount => _capabilityStore?.TotalEnvelopeCount ?? 0;
     public int TotalHostedOpkCount => _preKeyRepository?.GetTotalHostedOpkCount() ?? 0;
 
     public SimulatedRelayHost(
@@ -102,8 +102,6 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
 
         _relayTempDirectory = Path.Combine(Path.GetTempPath(), "PercolatorSim", $"relay_{Id.Value:N}");
         Directory.CreateDirectory(_relayTempDirectory);
-
-        _capabilityStore = new SimulatorNotifyingRelayCapabilityStoreDecorator(_stateBus, Id);
     }
 
     public async Task StartAsync(CancellationToken ct = default)
@@ -156,6 +154,12 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
                 // Tables already created
             }
         }
+
+        _capabilityStore = new SimulatorNotifyingRelayCapabilityStoreDecorator(
+            _stateBus,
+            Id,
+            new SqliteRelayMailboxCapabilityStore(contextFactory),
+            contextFactory);
 
         _queryService = new SimulatorRelayQueryService(contextFactory);
 

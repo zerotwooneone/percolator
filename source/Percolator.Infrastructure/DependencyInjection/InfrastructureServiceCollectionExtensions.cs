@@ -121,8 +121,7 @@ public static class InfrastructureServiceCollectionExtensions
         // Storage & Transfer Singletons
         services.AddSingleton<IBlobCryptoService, StreamingAesGcmCryptoService>();
         services.AddSingleton<ILocalChunkStore, LocalFileChunkStore>();
-        // Interim in-memory capability store — Phase 5 replaces this with SqliteRelayMailboxCapabilityStore.
-        services.AddSingleton<IRelayMailboxCapabilityStore, InMemoryRelayMailboxCapabilityStore>();
+        services.AddSingleton<IRelayMailboxCapabilityStore, SqliteRelayMailboxCapabilityStore>();
         services.AddSingleton<IDesktopFileStorage, PortableDesktopFileStore>();
         services.AddSingleton<RelayTransferPipeClient>();
         services.AddSingleton<CallbackEndpointValidatorOptions>();
@@ -184,6 +183,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IPeerContactRepository, SqlitePeerContactRepository>();
         services.AddScoped<IPeerContactQueryService, SqlPeerContactQueryService>();
         services.AddScoped<IChannelRepository, SqliteChannelRepository>();
+        services.AddScoped<IRelayRegistrationRepository, SqliteRelayRegistrationRepository>();
 
         services.AddScoped(sp => new SqliteRelayPreKeyRepository(sp.GetRequiredService<PercolatorDbContext>()));
         services.AddScoped<IRelayPreKeyRepository>(sp => sp.GetRequiredService<SqliteRelayPreKeyRepository>());

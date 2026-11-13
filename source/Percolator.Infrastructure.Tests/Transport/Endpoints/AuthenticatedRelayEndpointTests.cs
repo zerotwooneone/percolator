@@ -18,6 +18,7 @@ using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.Infrastructure.Protos;
 using Percolator.Infrastructure.Security;
+using Percolator.Infrastructure.Tests.Fakes;
 using Percolator.Infrastructure.Transport;
 using Percolator.Infrastructure.Transport.Endpoints;
 using Signal.Interop;
@@ -62,7 +63,7 @@ public sealed class AuthenticatedRelayEndpointTests
     [Test]
     public async Task PublishPreKeyBundle_StaleTimestamp_RejectsRollbackReplay()
     {
-        var capabilityStore = new InMemoryRelayMailboxCapabilityStore();
+        var capabilityStore = new FakeRelayMailboxCapabilityStore();
         var preKeyRepo = new InMemoryPreKeyRepo();
         var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
         var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
@@ -155,7 +156,7 @@ public sealed class AuthenticatedRelayEndpointTests
     [Test]
     public async Task RegisterMailbox_ExistingRoutingTokenWithWrongDrainToken_ThrowsPermissionDenied()
     {
-        var capabilityStore = new InMemoryRelayMailboxCapabilityStore();
+        var capabilityStore = new FakeRelayMailboxCapabilityStore();
         var preKeyRepo = new InMemoryPreKeyRepo();
         var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
         var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
@@ -198,7 +199,7 @@ public sealed class AuthenticatedRelayEndpointTests
     [Test]
     public async Task RegisterMailbox_ExistingRoutingTokenWithCorrectExistingDrainToken_Succeeds()
     {
-        var capabilityStore = new InMemoryRelayMailboxCapabilityStore();
+        var capabilityStore = new FakeRelayMailboxCapabilityStore();
         var preKeyRepo = new InMemoryPreKeyRepo();
         var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
         var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
@@ -244,7 +245,7 @@ public sealed class AuthenticatedRelayEndpointTests
     [Test]
     public async Task ConnectMailboxStream_StreamsLiveEnvelopes_AndAcknowledgesViaClient()
     {
-        var capabilityStore = new InMemoryRelayMailboxCapabilityStore();
+        var capabilityStore = new FakeRelayMailboxCapabilityStore();
         var preKeyRepo = new InMemoryPreKeyRepo();
         var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
         var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
@@ -313,7 +314,7 @@ public sealed class AuthenticatedRelayEndpointTests
         envMsg.QueueId.Should().Be("q-12345");
 
         // Verify envelope is currently in store
-        capabilityStore.TotalEnvelopeCount.Should().Be(1);
+        (await capabilityStore.GetEnvelopesAsync(routingToken)).Count.Should().Be(1);
 
         // 6. Send ACK from client
         await clientChannel.Writer.WriteAsync(new MailboxStreamClientMessage
@@ -327,12 +328,12 @@ public sealed class AuthenticatedRelayEndpointTests
 
         // Await ACK processing with bounded timeout
         using var ackTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        while (capabilityStore.TotalEnvelopeCount > 0 && !ackTimeout.IsCancellationRequested)
+        while ((await capabilityStore.GetEnvelopesAsync(routingToken)).Count > 0 && !ackTimeout.IsCancellationRequested)
         {
             await Task.Yield();
         }
 
-        capabilityStore.TotalEnvelopeCount.Should().Be(0);
+        (await capabilityStore.GetEnvelopesAsync(routingToken)).Count.Should().Be(0);
 
         // 7. Complete client stream to shut down cleanly
         clientChannel.Writer.Complete();
@@ -342,7 +343,7 @@ public sealed class AuthenticatedRelayEndpointTests
     [Test]
     public async Task ConnectMailboxStream_ClientDisconnectsWithoutAck_RetainsOfflineEnvelopesInStore()
     {
-        var capabilityStore = new InMemoryRelayMailboxCapabilityStore();
+        var capabilityStore = new FakeRelayMailboxCapabilityStore();
         var preKeyRepo = new InMemoryPreKeyRepo();
         var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
         var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
@@ -364,7 +365,7 @@ public sealed class AuthenticatedRelayEndpointTests
             EnqueuedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow)
         };
         await capabilityStore.EnqueueEnvelopeAsync(routingToken, preEnqueued);
-        capabilityStore.TotalEnvelopeCount.Should().Be(1);
+        (await capabilityStore.GetEnvelopesAsync(routingToken)).Count.Should().Be(1);
 
         var clientChannel = Channel.CreateUnbounded<MailboxStreamClientMessage>();
         var serverWriter = new TestServerStreamWriter<MailboxStreamServerMessage>();
@@ -406,7 +407,7 @@ public sealed class AuthenticatedRelayEndpointTests
         await streamTask;
 
         // 4. Verify envelope is STILL retained in the capability store for at-least-once delivery
-        capabilityStore.TotalEnvelopeCount.Should().Be(1);
+        (await capabilityStore.GetEnvelopesAsync(routingToken)).Count.Should().Be(1);
         var stored = await capabilityStore.GetEnvelopesAsync(routingToken);
         stored.Should().ContainSingle(e => e.QueueId == "q-offline-01");
     }

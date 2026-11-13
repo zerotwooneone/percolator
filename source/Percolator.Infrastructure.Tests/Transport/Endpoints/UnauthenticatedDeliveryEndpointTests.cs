@@ -23,6 +23,7 @@ using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.Infrastructure.Protos;
 using Percolator.Infrastructure.Security;
+using Percolator.Infrastructure.Tests.Fakes;
 using Percolator.Infrastructure.Transport;
 using Percolator.Infrastructure.Transport.Endpoints;
 using Percolator.PluginSdk;
@@ -150,7 +151,7 @@ public sealed class UnauthenticatedDeliveryEndpointTests
     private InMemoryProfileRepo _profileRepo = null!;
     private InMemoryPreKeyRepo _preKeyRepo = null!;
     private InMemoryChunkStore _chunkStore = null!;
-    private InMemoryRelayMailboxCapabilityStore _capabilityStore = null!;
+    private FakeRelayMailboxCapabilityStore _capabilityStore = null!;
     private UnauthenticatedDeliveryEndpoint _endpoint = null!;
     private SignalCryptoEngine _cryptoEngine = null!;
 
@@ -160,7 +161,7 @@ public sealed class UnauthenticatedDeliveryEndpointTests
         _profileRepo = new InMemoryProfileRepo();
         _preKeyRepo = new InMemoryPreKeyRepo();
         _chunkStore = new InMemoryChunkStore();
-        _capabilityStore = new InMemoryRelayMailboxCapabilityStore();
+        _capabilityStore = new FakeRelayMailboxCapabilityStore();
         _endpoint = new UnauthenticatedDeliveryEndpoint(_profileRepo, _preKeyRepo, _chunkStore, _capabilityStore);
         _cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
     }

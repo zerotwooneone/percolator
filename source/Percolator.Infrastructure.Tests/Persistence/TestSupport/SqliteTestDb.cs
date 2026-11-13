@@ -11,6 +11,7 @@ public sealed class SqliteTestDb : IDisposable
     public SqliteConnection Connection { get; }
     public MasterKeyHandle MasterKeyHandle { get; }
     public PercolatorDbContext DbContext { get; }
+    public IDbContextFactory<PercolatorDbContext> ContextFactory { get; }
 
     public SqliteTestDb()
     {
@@ -25,6 +26,8 @@ public sealed class SqliteTestDb : IDisposable
 
         DbContext = new PercolatorDbContext(options);
         DbContext.Database.EnsureCreated();
+
+        ContextFactory = new TestDbContextFactory(Connection);
     }
 
     public PercolatorDbContext CreateNewContext()
@@ -41,5 +44,21 @@ public sealed class SqliteTestDb : IDisposable
         DbContext.Dispose();
         Connection.Dispose();
         MasterKeyHandle.Dispose();
+    }
+
+    private sealed class TestDbContextFactory : IDbContextFactory<PercolatorDbContext>
+    {
+        private readonly SqliteConnection _connection;
+
+        public TestDbContextFactory(SqliteConnection connection) => _connection = connection;
+
+        public PercolatorDbContext CreateDbContext()
+        {
+            var options = new DbContextOptionsBuilder<PercolatorDbContext>()
+                .UseSqlite(_connection)
+                .Options;
+
+            return new PercolatorDbContext(options);
+        }
     }
 }

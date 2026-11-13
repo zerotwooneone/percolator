@@ -53,6 +53,11 @@ public class PercolatorDbContext : DbContext
     // Chunk 4.2 Discovery & Rendezvous Entities
     public DbSet<RelayPeerDirectoryEntity> RelayPeerDirectory => Set<RelayPeerDirectoryEntity>();
     public DbSet<RelayRendezvousEntryEntity> RelayRendezvousEntries => Set<RelayRendezvousEntryEntity>();
+    public DbSet<RelayRegistrationEntity> RelayRegistrations => Set<RelayRegistrationEntity>();
+    public DbSet<RelayMailboxBindingEntity> RelayMailboxBindings => Set<RelayMailboxBindingEntity>();
+    public DbSet<RelayMailboxCapabilityEntity> RelayMailboxCapabilities => Set<RelayMailboxCapabilityEntity>();
+    public DbSet<RelayMailboxAuthorizedTokenEntity> RelayMailboxAuthorizedTokens => Set<RelayMailboxAuthorizedTokenEntity>();
+    public DbSet<RelayQueuedEnvelopeEntity> RelayQueuedEnvelopes => Set<RelayQueuedEnvelopeEntity>();
     // Chunk 4.4 File Transfer Entities
     public DbSet<TransferSessionEntity> TransferSessions => Set<TransferSessionEntity>();
     public DbSet<ManifestFileEntity> ManifestFiles => Set<ManifestFileEntity>();
@@ -482,6 +487,60 @@ public class PercolatorDbContext : DbContext
             entity.ToTable("ft_filter_policies");
             entity.HasKey(e => e.OwnerId);
             entity.Property(e => e.OwnerId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+        });
+        // 39. Relay Registrations (Phase 3)
+        modelBuilder.Entity<RelayRegistrationEntity>(entity =>
+        {
+            entity.ToTable("relay_registrations");
+            entity.HasKey(e => e.RelayIdentityId);
+            entity.Property(e => e.Endpoint).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.PinnedCertificateSha256).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+        });
+        modelBuilder.Entity<RelayMailboxBindingEntity>(entity =>
+        {
+            entity.ToTable("relay_mailbox_bindings");
+            entity.HasKey(e => new { e.RelayIdentityId, e.OwnerIdentityId });
+            entity.HasIndex(e => e.OwnerIdentityId);
+            entity.Property(e => e.RoutingToken).HasColumnType("BLOB").IsRequired().Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.DrainToken).HasColumnType("BLOB").IsRequired().Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.PreviousDrainToken).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.HasOne<RelayRegistrationEntity>()
+                .WithMany()
+                .HasForeignKey(e => e.RelayIdentityId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+        // 40. Relay Mailbox Capabilities (Phase 3)
+        modelBuilder.Entity<RelayMailboxCapabilityEntity>(entity =>
+        {
+            entity.ToTable("relay_mailbox_capabilities");
+            entity.HasKey(e => e.RoutingToken);
+            entity.Property(e => e.RoutingToken).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.DeliveryToken).HasColumnType("BLOB").IsRequired().Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.DrainToken).HasColumnType("BLOB").IsRequired().Metadata.SetValueComparer(byteArrayComparer);
+            entity.HasIndex(e => e.OwnerIdentityId);
+        });
+        modelBuilder.Entity<RelayMailboxAuthorizedTokenEntity>(entity =>
+        {
+            entity.ToTable("relay_mailbox_authorized_tokens");
+            entity.HasKey(e => new { e.RoutingToken, e.Ordinal });
+            entity.Property(e => e.RoutingToken).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.DeliveryToken).HasColumnType("BLOB").IsRequired().Metadata.SetValueComparer(byteArrayComparer);
+            entity.HasOne<RelayMailboxCapabilityEntity>()
+                .WithMany()
+                .HasForeignKey(e => e.RoutingToken)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<RelayQueuedEnvelopeEntity>(entity =>
+        {
+            entity.ToTable("relay_queued_envelopes");
+            entity.HasKey(e => e.QueueId);
+            entity.Property(e => e.RoutingToken).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.EnvelopePayload).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.HasIndex(e => new { e.RoutingToken, e.Ordinal }).IsUnique();
+            entity.HasOne<RelayMailboxCapabilityEntity>()
+                .WithMany()
+                .HasForeignKey(e => e.RoutingToken)
+                .OnDelete(DeleteBehavior.Cascade);
         });
         // Apply snake_case naming convention to all columns
         foreach (var entity in modelBuilder.Model.GetEntityTypes())

@@ -19,6 +19,7 @@ using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Infrastructure.Common;
 using Percolator.Infrastructure.Protos;
+using Percolator.Infrastructure.Tests.Fakes;
 using Percolator.Infrastructure.Transport;
 using Percolator.Infrastructure.Transport.Endpoints;
 using Percolator.PluginSdk;
@@ -80,7 +81,7 @@ public sealed class PeerGrpcTofuRoundTripTests
         services.AddSingleton<IRelayProfileRepository, StubRelayProfileRepository>();
         services.AddSingleton<IRelayPreKeyRepository, StubRelayPreKeyRepository>();
         services.AddSingleton<ILocalChunkStore, StubLocalChunkStore>();
-        services.AddSingleton<IRelayMailboxCapabilityStore, InMemoryRelayMailboxCapabilityStore>();
+        services.AddSingleton<IRelayMailboxCapabilityStore, FakeRelayMailboxCapabilityStore>();
         services.AddSingleton<UnauthenticatedDeliveryEndpoint>();
 
         var serviceProvider = services.BuildServiceProvider();

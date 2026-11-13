@@ -189,7 +189,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             // 1. Core infrastructure registration
             services.AddAuthenticatedInfrastructure(_masterKeyHandle, storageOptions);
             services.AddSingleton<INetworkEndpointDiscoveryPort>(_ => new NetworkInterfaceEndpointDiscoveryPort(BoundPort, allowLoopback: true));
-            services.AddSingleton<IRelayMailboxCapabilityStore, InMemoryRelayMailboxCapabilityStore>();
+            services.AddSingleton<IRelayMailboxCapabilityStore, SqliteRelayMailboxCapabilityStore>();
             services.AddSingleton<IDateTimeProvider>(_virtualClock);
 #if WINDOWS
             // 1b. Windows-specific infrastructure overrides (SChannel TLS 1.3 cert provider & NTFS Sparse Desktop File Store)

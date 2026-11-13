@@ -9,6 +9,8 @@ using Percolator.Domain.Channels.Model;
 using Percolator.Domain.Channels.Ports;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.Model;
+using Percolator.Domain.Delivery.Ports;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.Ports;
@@ -660,4 +662,40 @@ public sealed class InMemoryPeerMailboxRoutingRepository : IPeerMailboxRoutingRe
         return Task.CompletedTask;
     }
 
+}
+
+public sealed class InMemoryRelayRegistrationRepository : IRelayRegistrationRepository
+{
+    private readonly ConcurrentDictionary<PublicIdentityId, RelayRegistration> _registrations = new();
+
+    public Task<RelayRegistration?> GetByIdAsync(PublicIdentityId relayIdentityId, CancellationToken ct = default)
+    {
+        _registrations.TryGetValue(relayIdentityId, out var registration);
+        return Task.FromResult(registration);
+    }
+
+    public Task<IReadOnlyList<RelayRegistration>> GetAllAsync(CancellationToken ct = default)
+    {
+        return Task.FromResult<IReadOnlyList<RelayRegistration>>(_registrations.Values.ToList());
+    }
+
+    public Task<IReadOnlyList<RelayRegistration>> GetByOwnerIdentityAsync(PublicIdentityId ownerIdentityId, CancellationToken ct = default)
+    {
+        var matches = _registrations.Values
+            .Where(r => r.Bindings.Any(b => b.OwnerIdentityId == ownerIdentityId))
+            .ToList();
+        return Task.FromResult<IReadOnlyList<RelayRegistration>>(matches);
+    }
+
+    public Task SaveAsync(RelayRegistration registration, CancellationToken ct = default)
+    {
+        _registrations[registration.Id] = registration;
+        return Task.CompletedTask;
+    }
+
+    public Task DeleteAsync(PublicIdentityId relayIdentityId, CancellationToken ct = default)
+    {
+        _registrations.TryRemove(relayIdentityId, out _);
+        return Task.CompletedTask;
+    }
 }
