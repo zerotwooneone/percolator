@@ -4,6 +4,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -89,7 +90,7 @@ public sealed class PeerGrpcTofuRoundTripTests
 
         await using var server = new KestrelPeerTransportServer(certProvider, serviceProvider);
 
-        await server.StartAsync(new PortNumber(0));
+        await server.StartAsync(IPAddress.Loopback, new PortNumber(0));
 
         server.IsRunning.Should().BeTrue();
         server.BoundPort.Should().NotBeNull();

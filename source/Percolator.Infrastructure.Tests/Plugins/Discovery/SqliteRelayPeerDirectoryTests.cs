@@ -34,7 +34,7 @@ public sealed class SqliteRelayPeerDirectoryTests
         var preKeyPort = new DynamicPreKeyAvailabilityPort();
 
         var directory = new SqliteRelayPeerDirectory(
-            testDb.DbContext,
+            testDb.ContextFactory,
             gate,
             policy: RelayDiscoveryPolicy.Open,
             preKeyAvailabilityPort: preKeyPort);

@@ -24,7 +24,7 @@ public sealed class SqlitePrivateRendezvousServiceTests
     public async Task PublishAndResolve_MatchesBlindedLocatorAndEnforces100QueryCap()
     {
         using var testDb = new SqliteTestDb();
-        var service = new SqlitePrivateRendezvousService(testDb.DbContext);
+        var service = new SqlitePrivateRendezvousService(testDb.ContextFactory);
 
         var publisherId = PublicIdentityId.New();
         var epoch = new DiscoveryEpoch(20000);

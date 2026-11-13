@@ -3,6 +3,7 @@ namespace Percolator.Infrastructure.Tests.Transport.Endpoints;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.IO;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Channels;
@@ -12,8 +13,11 @@ using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using NUnit.Framework;
+using Percolator.Application2.Ports;
+using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Delivery.Ports;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.Infrastructure.Protos;
@@ -21,6 +25,7 @@ using Percolator.Infrastructure.Security;
 using Percolator.Infrastructure.Tests.Fakes;
 using Percolator.Infrastructure.Transport;
 using Percolator.Infrastructure.Transport.Endpoints;
+using Percolator.PluginSdk;
 using Signal.Interop;
 
 [TestFixture]
@@ -58,6 +63,254 @@ public sealed class AuthenticatedRelayEndpointTests
             _bundles.TryRemove((ownerId, deviceId), out _);
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class InMemoryProfileRepo : IRelayProfileRepository
+    {
+        public ValueTask<RelayHostedProfileSlot?> GetSlotAsync(BlindedProfileLocator locator, CancellationToken ct = default)
+            => ValueTask.FromResult<RelayHostedProfileSlot?>(null);
+
+        public ValueTask<DomainResult> SaveSlotAsync(RelayHostedProfileSlot slot, CancellationToken ct = default)
+            => ValueTask.FromResult(DomainResult.Success());
+
+        public ValueTask<DomainResult> DeleteSlotAsync(BlindedProfileLocator locator, ProfileWriteToken writeToken, CancellationToken ct = default)
+            => ValueTask.FromResult(DomainResult.Success());
+    }
+
+    private sealed class InMemoryChunkStore : ILocalChunkStore
+    {
+        public ValueTask<bool> HasBlobAsync(BlobId blobId, CancellationToken ct = default)
+            => ValueTask.FromResult(false);
+
+        public ValueTask<Stream> OpenReadAsync(BlobId blobId, CancellationToken ct = default)
+            => throw new FileNotFoundException();
+
+        public ValueTask SaveBlobAsync(BlobId blobId, Stream contentStream, CancellationToken ct = default)
+            => ValueTask.CompletedTask;
+
+        public ValueTask DeleteBlobAsync(BlobId blobId, CancellationToken ct = default)
+            => ValueTask.CompletedTask;
+    }
+
+    private static PublishPreKeyBundleRequest BuildPublishRequest(
+        SignalCryptoEngine cryptoEngine,
+        byte[] privateIdentityKey,
+        PublicIdentityId ownerId,
+        uint deviceId,
+        IdentityKey identityKey,
+        DhPublicKey signedPreKey,
+        byte[] prekeySignature,
+        IReadOnlyList<(uint KeyId, DhPublicKey Key)> opks,
+        DateTimeOffset publishedAtUtc,
+        byte[]? routingToken = null,
+        byte[]? drainToken = null)
+    {
+        var payload = new PreKeyBundlePayloadProto
+        {
+            OwnerIdentityId = ByteString.CopyFrom(ownerId.ToByteArray()),
+            DeviceId = deviceId,
+            IdentityKey = ByteString.CopyFrom(identityKey.Span),
+            SignedPrekeyId = 1,
+            SignedPrekey = ByteString.CopyFrom(signedPreKey.Span),
+            PrekeySignature = ByteString.CopyFrom(prekeySignature),
+            PublishedAtUtc = Timestamp.FromDateTimeOffset(publishedAtUtc)
+        };
+        foreach (var (keyId, key) in opks)
+        {
+            payload.OneTimePrekeys.Add(new OneTimePreKeyProto
+            {
+                KeyId = keyId,
+                PublicKey = ByteString.CopyFrom(key.Span)
+            });
+        }
+        if (routingToken != null)
+        {
+            payload.RoutingToken = ByteString.CopyFrom(routingToken);
+        }
+
+        byte[] payloadBytes = payload.ToByteArray();
+        byte[] signature = cryptoEngine.SignEd25519(privateIdentityKey, payloadBytes);
+
+        var request = new PublishPreKeyBundleRequest
+        {
+            PayloadBytes = ByteString.CopyFrom(payloadBytes),
+            Signature = ByteString.CopyFrom(signature)
+        };
+        if (drainToken != null)
+        {
+            request.DrainToken = ByteString.CopyFrom(drainToken);
+        }
+        return request;
+    }
+
+    [Test]
+    public async Task PublishPreKeyBundle_WithValidRoutingAndDrainTokens_AssociatesOwnerForFetch()
+    {
+        var capabilityStore = new FakeRelayMailboxCapabilityStore();
+        var preKeyRepo = new InMemoryPreKeyRepo();
+        var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
+        var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
+        var unauthEndpoint = new UnauthenticatedDeliveryEndpoint(
+            new InMemoryProfileRepo(), preKeyRepo, new InMemoryChunkStore(), capabilityStore);
+
+        var routingToken = new byte[16];
+        var deliveryToken = new byte[32];
+        var drainToken = new byte[32];
+        RandomNumberGenerator.Fill(routingToken);
+        RandomNumberGenerator.Fill(deliveryToken);
+        RandomNumberGenerator.Fill(drainToken);
+
+        // Mailbox is registered but has NO owner association yet.
+        await capabilityStore.RegisterAsync(routingToken, deliveryToken, drainToken);
+
+        byte[] privId = new byte[32];
+        byte[] pubIdBytes = new byte[32];
+        SignalCrypto.GenerateEd25519KeyPair(privId, pubIdBytes);
+        var pubId = IdentityKey.FromSpan(pubIdBytes);
+
+        var ownerId = PublicIdentityId.New();
+        var deviceId = 1u;
+
+        var (_, pubSigned) = cryptoEngine.GenerateEphemeralKeyPair();
+        var prekeySig = cryptoEngine.SignEd25519(privId, pubSigned.Span);
+        var (_, opkPub) = cryptoEngine.GenerateEphemeralKeyPair();
+
+        var request = BuildPublishRequest(
+            cryptoEngine,
+            privId,
+            ownerId,
+            deviceId,
+            pubId,
+            pubSigned,
+            prekeySig,
+            new List<(uint, DhPublicKey)> { (7u, opkPub) },
+            DateTimeOffset.UtcNow,
+            routingToken,
+            drainToken);
+
+        var response = await endpoint.PublishPreKeyBundle(request, new TestServerCallContext());
+        response.Success.Should().BeTrue();
+
+        // Owner association was wired by the publish itself — no manual AssociateOwnerAsync.
+        var (resolvedOwner, resolvedDevice) = await capabilityStore.GetOwnerAsync(routingToken);
+        resolvedOwner.Should().Be(ownerId);
+        resolvedDevice.Should().Be(new DeviceId(deviceId));
+
+        var fetch = await unauthEndpoint.FetchPreKeyBundle(
+            new FetchPreKeyBundleRequest
+            {
+                RecipientRoutingToken = ByteString.CopyFrom(routingToken),
+                DeliveryToken = ByteString.CopyFrom(deliveryToken)
+            },
+            new TestServerCallContext());
+
+        fetch.OneTimePrekeyId.Should().Be(7u);
+    }
+
+    [Test]
+    public async Task PublishPreKeyBundle_WithMismatchedDrainToken_RejectedAndDoesNotAssociate()
+    {
+        var capabilityStore = new FakeRelayMailboxCapabilityStore();
+        var preKeyRepo = new InMemoryPreKeyRepo();
+        var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
+        var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
+
+        var routingToken = new byte[16];
+        var deliveryToken = new byte[32];
+        var drainToken = new byte[32];
+        var wrongDrainToken = new byte[32];
+        RandomNumberGenerator.Fill(routingToken);
+        RandomNumberGenerator.Fill(deliveryToken);
+        RandomNumberGenerator.Fill(drainToken);
+        RandomNumberGenerator.Fill(wrongDrainToken);
+
+        await capabilityStore.RegisterAsync(routingToken, deliveryToken, drainToken);
+
+        byte[] privId = new byte[32];
+        byte[] pubIdBytes = new byte[32];
+        SignalCrypto.GenerateEd25519KeyPair(privId, pubIdBytes);
+        var pubId = IdentityKey.FromSpan(pubIdBytes);
+
+        var ownerId = PublicIdentityId.New();
+        var (_, pubSigned) = cryptoEngine.GenerateEphemeralKeyPair();
+        var prekeySig = cryptoEngine.SignEd25519(privId, pubSigned.Span);
+
+        var request = BuildPublishRequest(
+            cryptoEngine,
+            privId,
+            ownerId,
+            1u,
+            pubId,
+            pubSigned,
+            prekeySig,
+            new List<(uint, DhPublicKey)>(),
+            DateTimeOffset.UtcNow,
+            routingToken,
+            wrongDrainToken);
+
+        var response = await endpoint.PublishPreKeyBundle(request, new TestServerCallContext());
+        response.Success.Should().BeFalse();
+
+        var (resolvedOwner, _) = await capabilityStore.GetOwnerAsync(routingToken);
+        resolvedOwner.Should().BeNull();
+        (await preKeyRepo.GetAsync(ownerId, new DeviceId(1u))).Should().BeNull();
+    }
+
+    [Test]
+    public async Task PublishPreKeyBundle_SecondPublish_ReplenishesOnlyNewOneTimePreKeys()
+    {
+        var capabilityStore = new FakeRelayMailboxCapabilityStore();
+        var preKeyRepo = new InMemoryPreKeyRepo();
+        var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
+        var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
+
+        byte[] privId = new byte[32];
+        byte[] pubIdBytes = new byte[32];
+        SignalCrypto.GenerateEd25519KeyPair(privId, pubIdBytes);
+        var pubId = IdentityKey.FromSpan(pubIdBytes);
+
+        var ownerId = PublicIdentityId.New();
+        var deviceId = new DeviceId(1u);
+        var now = DateTimeOffset.UtcNow;
+
+        var (_, pubSigned1) = cryptoEngine.GenerateEphemeralKeyPair();
+        var prekeySig1 = cryptoEngine.SignEd25519(privId, pubSigned1.Span);
+
+        // First publish: 25 OPKs (KeyIds 1-25).
+        var firstOpks = new List<(uint, DhPublicKey)>();
+        for (uint i = 1; i <= 25; i++)
+        {
+            firstOpks.Add((i, cryptoEngine.GenerateEphemeralKeyPair().PublicKey));
+        }
+
+        var request1 = BuildPublishRequest(
+            cryptoEngine, privId, ownerId, deviceId.Value, pubId, pubSigned1, prekeySig1,
+            firstOpks, now);
+        (await endpoint.PublishPreKeyBundle(request1, new TestServerCallContext())).Success.Should().BeTrue();
+
+        // Consume one OPK — relay now holds 24.
+        var hosted = await preKeyRepo.GetAsync(ownerId, deviceId);
+        hosted!.ConsumeBundle().IsSuccess.Should().BeTrue();
+        hosted.AvailableOneTimePreKeyCount.Should().Be(24);
+        await preKeyRepo.SaveAsync(hosted);
+
+        // Second publish: rotated signed pre-key + 25 fresh OPKs (KeyIds 26-50).
+        var (_, pubSigned2) = cryptoEngine.GenerateEphemeralKeyPair();
+        var prekeySig2 = cryptoEngine.SignEd25519(privId, pubSigned2.Span);
+        var secondOpks = new List<(uint, DhPublicKey)>();
+        for (uint i = 26; i <= 50; i++)
+        {
+            secondOpks.Add((i, cryptoEngine.GenerateEphemeralKeyPair().PublicKey));
+        }
+
+        var request2 = BuildPublishRequest(
+            cryptoEngine, privId, ownerId, deviceId.Value, pubId, pubSigned2, prekeySig2,
+            secondOpks, now.AddMinutes(1));
+        (await endpoint.PublishPreKeyBundle(request2, new TestServerCallContext())).Success.Should().BeTrue();
+
+        var replenished = await preKeyRepo.GetAsync(ownerId, deviceId);
+        replenished!.AvailableOneTimePreKeyCount.Should().Be(49);
+        replenished.SignedPreKey.Span.ToArray().Should().Equal(pubSigned2.Span.ToArray());
     }
 
     [Test]

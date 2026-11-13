@@ -79,11 +79,49 @@ internal sealed class RelayProvisioningCoordinator
                 }
             }
 
-            await relay.MailboxStore.AssociateOwnerAsync(
-                persona.MailboxRoutingToken.ToByteArray(),
-                persona.PublicIdentityId,
-                DeviceId.Primary,
-                ct);
+            // Publish the persona's signed pre-key bundle over gRPC with the mailbox
+            // tokens so (a) owner association happens on the wire rather than through
+            // the in-memory AssociateOwnerAsync shortcut, and (b) the peer directory's
+            // pre-key admission gate is satisfied before visibility registration.
+            if (!await relay.QueryService.HasActivePreKeyAsync(persona.PublicIdentityId, ct))
+            {
+                using (var scope = persona.Services.CreateScope())
+                {
+                    var channelFactory = scope.ServiceProvider.GetRequiredService<IPeerGrpcChannelFactory>();
+                    var relayUri = new Uri($"https://127.0.0.1:{relay.BoundPort}");
+                    var channel = channelFactory.GetOrCreateChannel(relayUri);
+                    var client = new AuthenticatedRelayService.AuthenticatedRelayServiceClient(channel);
+
+                    var payload = new PreKeyBundlePayloadProto
+                    {
+                        OwnerIdentityId = ByteString.CopyFrom(persona.PublicIdentityId.ToByteArray()),
+                        DeviceId = DeviceId.Primary.Value,
+                        IdentityKey = ByteString.CopyFrom(persona.IdentityPublicKey.Span),
+                        SignedPrekeyId = 1,
+                        SignedPrekey = ByteString.CopyFrom(persona.SignedPreKeyPublic.Span),
+                        PrekeySignature = ByteString.CopyFrom(persona.SignedPreKeySignature.Span),
+                        PublishedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow),
+                        RoutingToken = ByteString.CopyFrom(persona.MailboxRoutingToken.ToByteArray())
+                    };
+
+                    byte[] payloadBytes = payload.ToByteArray();
+                    byte[] signature = _crypto.SignEd25519(persona.IdentityPrivateKey.Span, payloadBytes);
+
+                    var publishResponse = await client.PublishPreKeyBundleAsync(
+                        new PublishPreKeyBundleRequest
+                        {
+                            PayloadBytes = ByteString.CopyFrom(payloadBytes),
+                            Signature = ByteString.CopyFrom(signature),
+                            DrainToken = ByteString.CopyFrom(persona.MailboxDrainToken.Span)
+                        },
+                        cancellationToken: ct);
+                    if (!publishResponse.Success)
+                    {
+                        _toastService.ShowToast("Publish Error", "Relay rejected initial PreKey bundle publication.", ToastSeverity.Error);
+                        return false;
+                    }
+                }
+            }
 
             persona.HomeRelay = relay;
             await persona.PublishProfileAsync(ct);

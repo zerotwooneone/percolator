@@ -51,9 +51,11 @@ public sealed class CoreProtoCompilationTests
         var publishPreKeyReq = new PublishPreKeyBundleRequest
         {
             PayloadBytes = ByteString.CopyFrom([0xAA, 0xBB]),
-            Signature = ByteString.CopyFrom(new byte[64])
+            Signature = ByteString.CopyFrom(new byte[64]),
+            DrainToken = ByteString.CopyFrom(new byte[32])
         };
         publishPreKeyReq.ToByteArray().Should().NotBeEmpty();
+        publishPreKeyReq.DrainToken.Length.Should().Be(32);
 
         // 3. Anonymous Group
         var groupMsgReq = new DispatchGroupMessageRequest

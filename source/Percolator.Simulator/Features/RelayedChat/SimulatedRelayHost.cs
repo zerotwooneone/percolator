@@ -62,8 +62,8 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
     private SimulatorNotifyingRelayCapabilityStoreDecorator? _capabilityStore;
     private SimulatorNotifyingRelayPreKeyRepositoryDecorator? _preKeyRepository;
     private SimulatorRelayQueryService? _queryService;
-    private InMemoryRelayPeerDirectory? _peerDirectory;
-    private PrivateRendezvousService? _rendezvousService;
+    private IRelayPeerDirectory? _peerDirectory;
+    private IPrivateRendezvousService? _rendezvousService;
     private WebApplication? _app;
     private bool _isRunning;
     private bool _disposed;
@@ -175,14 +175,16 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
         // 2. Initialize Peer Directory and Private Rendezvous services using production PreKeyAvailabilityAdapter
         var admissionGate = new DiscoveryAdmissionGate();
         var preKeyAvailabilityAdapter = new PreKeyAvailabilityAdapter(_preKeyRepository);
-        _peerDirectory = new InMemoryRelayPeerDirectory(
+        _peerDirectory = new SqliteRelayPeerDirectory(
+            contextFactory,
             admissionGate,
             policy: RelayDiscoveryPolicy.Open,
             preKeyAvailabilityPort: preKeyAvailabilityAdapter,
             clock: _virtualClock,
             registrationTtl: TimeSpan.FromHours(24));
 
-        _rendezvousService = new PrivateRendezvousService(
+        _rendezvousService = new SqlitePrivateRendezvousService(
+            contextFactory,
             clock: _virtualClock,
             entryTtl: TimeSpan.FromHours(48));
 

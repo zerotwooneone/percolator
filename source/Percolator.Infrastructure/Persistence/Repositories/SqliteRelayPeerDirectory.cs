@@ -17,7 +17,7 @@ public sealed class SqliteRelayPeerDirectory : IRelayPeerDirectory
 {
     public static readonly TimeSpan DefaultRegistrationTtl = TimeSpan.FromHours(24);
 
-    private readonly PercolatorDbContext _dbContext;
+    private readonly IDbContextFactory<PercolatorDbContext> _contextFactory;
     private readonly IDiscoveryAdmissionGate _admissionGate;
     private readonly IPreKeyAvailabilityPort? _preKeyAvailabilityPort;
     private readonly IDateTimeProvider? _clock;
@@ -26,14 +26,14 @@ public sealed class SqliteRelayPeerDirectory : IRelayPeerDirectory
     public RelayDiscoveryPolicy Policy { get; set; }
 
     public SqliteRelayPeerDirectory(
-        PercolatorDbContext dbContext,
+        IDbContextFactory<PercolatorDbContext> contextFactory,
         IDiscoveryAdmissionGate admissionGate,
         RelayDiscoveryPolicy policy = RelayDiscoveryPolicy.Disabled,
         IPreKeyAvailabilityPort? preKeyAvailabilityPort = null,
         IDateTimeProvider? clock = null,
         TimeSpan? registrationTtl = null)
     {
-        _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+        _contextFactory = contextFactory ?? throw new ArgumentNullException(nameof(contextFactory));
         _admissionGate = admissionGate ?? throw new ArgumentNullException(nameof(admissionGate));
         Policy = policy;
         _preKeyAvailabilityPort = preKeyAvailabilityPort;
@@ -59,6 +59,8 @@ public sealed class SqliteRelayPeerDirectory : IRelayPeerDirectory
                 "HANDSHAKE_MISSING", "Peer must have an authenticated handshake with the relay before registering."));
         }
 
+        await using var db = await _contextFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
+
         DateTimeOffset nowUtc = _clock?.UtcNow ?? (registration.LastUpdatedAtUtc == DateTimeOffset.UnixEpoch ? DateTimeOffset.UtcNow : registration.LastUpdatedAtUtc);
         byte[] peerIdBytes = registration.PeerId.ToByteArray();
 
@@ -66,14 +68,14 @@ public sealed class SqliteRelayPeerDirectory : IRelayPeerDirectory
         // and succeeds without running admission gating (which is only for discoverability listing).
         if (registration.Visibility == PeerDiscoveryVisibility.Hidden)
         {
-            var existingRecord = await _dbContext.RelayPeerDirectory
+            var existingRecord = await db.RelayPeerDirectory
                 .FirstOrDefaultAsync(e => e.PeerId == peerIdBytes, ct)
                 .ConfigureAwait(false);
 
             if (existingRecord != null)
             {
-                _dbContext.RelayPeerDirectory.Remove(existingRecord);
-                await _dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
+                db.RelayPeerDirectory.Remove(existingRecord);
+                await db.SaveChangesAsync(ct).ConfigureAwait(false);
             }
 
             return DomainResult.Success();
@@ -97,7 +99,7 @@ public sealed class SqliteRelayPeerDirectory : IRelayPeerDirectory
             return admission;
         }
 
-        var existing = await _dbContext.RelayPeerDirectory
+        var existing = await db.RelayPeerDirectory
             .FirstOrDefaultAsync(e => e.PeerId == peerIdBytes, ct)
             .ConfigureAwait(false);
 
@@ -114,7 +116,7 @@ public sealed class SqliteRelayPeerDirectory : IRelayPeerDirectory
                 LastUpdatedAtUtc = nowUtc
             };
 
-            await _dbContext.RelayPeerDirectory.AddAsync(entity, ct).ConfigureAwait(false);
+            await db.RelayPeerDirectory.AddAsync(entity, ct).ConfigureAwait(false);
         }
         else
         {
@@ -124,7 +126,7 @@ public sealed class SqliteRelayPeerDirectory : IRelayPeerDirectory
             existing.LastUpdatedAtUtc = nowUtc;
         }
 
-        await _dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
         return DomainResult.Success();
     }
 
@@ -139,9 +141,10 @@ public sealed class SqliteRelayPeerDirectory : IRelayPeerDirectory
                 "INVALID_PEER_ID", "Peer identifier must be valid and non-empty."));
         }
 
+        await using var db = await _contextFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
         DateTimeOffset nowUtc = _clock?.UtcNow ?? DateTimeOffset.UtcNow;
         byte[] peerIdBytes = peerId.ToByteArray();
-        var existing = await _dbContext.RelayPeerDirectory
+        var existing = await db.RelayPeerDirectory
             .FirstOrDefaultAsync(e => e.PeerId == peerIdBytes, ct)
             .ConfigureAwait(false);
 
@@ -155,7 +158,7 @@ public sealed class SqliteRelayPeerDirectory : IRelayPeerDirectory
 
         if (visibility == PeerDiscoveryVisibility.Hidden)
         {
-            _dbContext.RelayPeerDirectory.Remove(existing);
+            db.RelayPeerDirectory.Remove(existing);
         }
         else
         {
@@ -163,7 +166,7 @@ public sealed class SqliteRelayPeerDirectory : IRelayPeerDirectory
             existing.LastUpdatedAtUtc = nowUtc;
         }
 
-        await _dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
         return DomainResult.Success();
     }
 
@@ -176,10 +179,11 @@ public sealed class SqliteRelayPeerDirectory : IRelayPeerDirectory
             return null;
         }
 
+        await using var db = await _contextFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
         DateTimeOffset nowUtc = _clock?.UtcNow ?? DateTimeOffset.UtcNow;
         byte[] peerIdBytes = peerId.ToByteArray();
 
-        var existing = await _dbContext.RelayPeerDirectory
+        var existing = await db.RelayPeerDirectory
             .FirstOrDefaultAsync(e => e.PeerId == peerIdBytes, ct)
             .ConfigureAwait(false);
 
@@ -188,10 +192,10 @@ public sealed class SqliteRelayPeerDirectory : IRelayPeerDirectory
             return null;
         }
 
-        if (nowUtc - existing.LastUpdatedAtUtc > _registrationTtl)
+        if (nowUtc - existing.LastUpdatedAtUtc >= _registrationTtl)
         {
-            _dbContext.RelayPeerDirectory.Remove(existing);
-            await _dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
+            db.RelayPeerDirectory.Remove(existing);
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
             return null;
         }
 
@@ -213,12 +217,13 @@ public sealed class SqliteRelayPeerDirectory : IRelayPeerDirectory
             return Array.Empty<RelayPeerRegistration>();
         }
 
+        await using var db = await _contextFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
         DateTimeOffset nowUtc = _clock?.UtcNow ?? DateTimeOffset.UtcNow;
         DateTimeOffset minUpdated = nowUtc - _registrationTtl;
         int fetchBatchSize = limit.HasValue ? Math.Clamp(limit.Value * 2, 20, 200) : 100;
 
-        var candidates = await _dbContext.RelayPeerDirectory
-            .Where(e => e.Visibility == (int)PeerDiscoveryVisibility.Discoverable && e.LastUpdatedAtUtc >= minUpdated)
+        var candidates = await db.RelayPeerDirectory
+            .Where(e => e.Visibility == (int)PeerDiscoveryVisibility.Discoverable && e.LastUpdatedAtUtc > minUpdated)
             .OrderBy(e => e.LastUpdatedAtUtc)
             .Take(fetchBatchSize)
             .ToListAsync(ct)
@@ -268,7 +273,7 @@ public sealed class SqliteRelayPeerDirectory : IRelayPeerDirectory
 
         if (changed)
         {
-            await _dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
         }
 
         return results;

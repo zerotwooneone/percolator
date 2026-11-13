@@ -81,11 +81,13 @@ message PreKeyBundlePayloadProto {
   bytes prekey_signature = 6;
   repeated OneTimePreKeyProto one_time_prekeys = 7;
   google.protobuf.Timestamp published_at_utc = 8;
+  bytes routing_token = 9; // mailbox routing token covered by the Ed25519 signature
 }
 
 message PublishPreKeyBundleRequest {
   bytes payload_bytes = 1; // Serialized PreKeyBundlePayloadProto wire bytes
   bytes signature = 2;     // Ed25519 signature over payload_bytes
+  bytes drain_token = 3;   // proves caller owns the mailbox for payload.routing_token
 }
 
 message PublishPreKeyBundleResponse {

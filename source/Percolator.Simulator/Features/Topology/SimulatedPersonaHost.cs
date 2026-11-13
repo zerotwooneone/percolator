@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
@@ -321,7 +322,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         _transportServer = _host.Services.GetRequiredService<KestrelPeerTransportServer>();
         if (!_transportServer.IsRunning)
         {
-            await _transportServer.StartAsync(new PortNumber(BoundPort), ct);
+            await _transportServer.StartAsync(IPAddress.Loopback, new PortNumber(BoundPort), ct: ct);
         }
         if (_transportServer.BoundPort.HasValue)
         {
@@ -779,7 +780,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             {
                 if (_transportServer is not null && !_transportServer.IsRunning)
                 {
-                    await _transportServer.StartAsync(new PortNumber(BoundPort), ct).ConfigureAwait(false);
+                    await _transportServer.StartAsync(IPAddress.Loopback, new PortNumber(BoundPort), ct: ct).ConfigureAwait(false);
                     _logSink.Log(new SimulatorLogEntry(
                         DateTimeOffset.UtcNow,
                         LogLevel.Information,

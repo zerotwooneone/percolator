@@ -7,7 +7,6 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Delivery.Ports;
 using Percolator.Domain.Identities.ValueObjects;
@@ -16,14 +15,7 @@ using Percolator.Infrastructure.Persistence.Entities;
 
 public sealed class SqliteRelayPreKeyRepository : IRelayPreKeyRepository
 {
-    private readonly IDbContextFactory<PercolatorDbContext>? _contextFactory;
-    private readonly PercolatorDbContext? _dbContext;
-
-    [ActivatorUtilitiesConstructor]
-    public SqliteRelayPreKeyRepository(PercolatorDbContext dbContext)
-    {
-        _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
-    }
+    private readonly IDbContextFactory<PercolatorDbContext> _contextFactory;
 
     public SqliteRelayPreKeyRepository(IDbContextFactory<PercolatorDbContext> contextFactory)
     {
@@ -32,13 +24,8 @@ public sealed class SqliteRelayPreKeyRepository : IRelayPreKeyRepository
 
     private async Task<TResult> WithContextAsync<TResult>(Func<PercolatorDbContext, Task<TResult>> action)
     {
-        if (_contextFactory != null)
-        {
-            await using var context = await _contextFactory.CreateDbContextAsync().ConfigureAwait(false);
-            return await action(context).ConfigureAwait(false);
-        }
-
-        return await action(_dbContext!).ConfigureAwait(false);
+        await using var context = await _contextFactory.CreateDbContextAsync().ConfigureAwait(false);
+        return await action(context).ConfigureAwait(false);
     }
 
     public Task<RelayHostedPreKeyBundle?> GetAsync(PublicIdentityId ownerId, DeviceId deviceId, CancellationToken cancellationToken = default)

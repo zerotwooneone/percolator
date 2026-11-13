@@ -51,8 +51,13 @@ public sealed class KestrelPeerTransportServer : IPeerTransportServer, IHostedSe
         _logger = logger;
     }
 
-    public async Task StartAsync(PortNumber? preferredPort = null, CancellationToken ct = default)
+    public async Task StartAsync(
+        IPAddress bindAddress,
+        PortNumber? preferredPort = null,
+        bool mapRelayEndpoints = false,
+        CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(bindAddress);
         WebApplication app;
         lock (_lock)
         {
@@ -69,7 +74,7 @@ public sealed class KestrelPeerTransportServer : IPeerTransportServer, IHostedSe
 
             builder.WebHost.ConfigureKestrel(options =>
             {
-                options.Listen(IPAddress.Loopback, requestedPort, listenOptions =>
+                options.Listen(bindAddress, requestedPort, listenOptions =>
                 {
                     listenOptions.Protocols = HttpProtocols.Http2;
                     listenOptions.UseHttps(cert, httpsOptions =>
@@ -85,8 +90,22 @@ public sealed class KestrelPeerTransportServer : IPeerTransportServer, IHostedSe
             builder.Services.AddSingleton<IGrpcServiceActivator<UnauthenticatedDeliveryEndpoint>>(
                 new ParentContainerServiceActivator<UnauthenticatedDeliveryEndpoint>(_serviceProvider));
 
+            if (mapRelayEndpoints)
+            {
+                builder.Services.AddSingleton<IGrpcServiceActivator<AuthenticatedRelayEndpoint>>(
+                    new ParentContainerServiceActivator<AuthenticatedRelayEndpoint>(_serviceProvider));
+                builder.Services.AddSingleton<IGrpcServiceActivator<PrivateRendezvousRelayEndpoint>>(
+                    new ParentContainerServiceActivator<PrivateRendezvousRelayEndpoint>(_serviceProvider));
+            }
+
             app = builder.Build();
             app.MapGrpcService<UnauthenticatedDeliveryEndpoint>();
+
+            if (mapRelayEndpoints)
+            {
+                app.MapGrpcService<AuthenticatedRelayEndpoint>();
+                app.MapGrpcService<PrivateRendezvousRelayEndpoint>();
+            }
 
             _app = app;
             _isRunning = true;
@@ -137,7 +156,7 @@ public sealed class KestrelPeerTransportServer : IPeerTransportServer, IHostedSe
 
     Task IHostedService.StartAsync(CancellationToken cancellationToken)
     {
-        return StartAsync(preferredPort: null, ct: cancellationToken);
+        return StartAsync(IPAddress.Loopback, ct: cancellationToken);
     }
 
     Task IHostedService.StopAsync(CancellationToken cancellationToken)

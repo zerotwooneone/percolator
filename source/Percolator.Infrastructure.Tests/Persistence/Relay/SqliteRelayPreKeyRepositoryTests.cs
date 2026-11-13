@@ -21,7 +21,7 @@ public class SqliteRelayPreKeyRepositoryTests
     public void SetUp()
     {
         _testDb = new SqliteTestDb();
-        _repository = new SqliteRelayPreKeyRepository(_testDb.DbContext);
+        _repository = new SqliteRelayPreKeyRepository(_testDb.ContextFactory);
     }
 
     [TearDown]
@@ -68,8 +68,7 @@ public class SqliteRelayPreKeyRepositoryTests
         await _repository.SaveAsync(loaded);
 
         // Assert - Reload in fresh context
-        using var newContext = _testDb.CreateNewContext();
-        var newRepo = new SqliteRelayPreKeyRepository(newContext);
+        var newRepo = new SqliteRelayPreKeyRepository(_testDb.ContextFactory);
         var reloaded = await newRepo.GetAsync(ownerId, deviceId);
 
         reloaded.Should().NotBeNull();

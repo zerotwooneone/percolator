@@ -18,18 +18,18 @@ public sealed class SqlitePrivateRendezvousService : IPrivateRendezvousService
     public const int MaxQueryLocators = 100;
     public static readonly TimeSpan DefaultEntryTtl = TimeSpan.FromHours(48);
 
-    private readonly PercolatorDbContext _dbContext;
+    private readonly IDbContextFactory<PercolatorDbContext> _contextFactory;
     private readonly IDateTimeProvider? _clock;
     private readonly TimeSpan _entryTtl;
     private readonly int _maxEntries;
 
     public SqlitePrivateRendezvousService(
-        PercolatorDbContext dbContext,
+        IDbContextFactory<PercolatorDbContext> contextFactory,
         IDateTimeProvider? clock = null,
         TimeSpan? entryTtl = null,
         int maxEntries = DefaultMaxEntries)
     {
-        _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+        _contextFactory = contextFactory ?? throw new ArgumentNullException(nameof(contextFactory));
         _clock = clock;
         _entryTtl = entryTtl ?? DefaultEntryTtl;
         _maxEntries = maxEntries > 0 ? maxEntries : DefaultMaxEntries;
@@ -80,15 +80,16 @@ public sealed class SqlitePrivateRendezvousService : IPrivateRendezvousService
                 "INVALID_ENCRYPTED_ROUTE", "Encrypted rendezvous route is invalid."));
         }
 
+        await using var db = await _contextFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
         DateTimeOffset nowUtc = _clock?.UtcNow ?? DateTimeOffset.UtcNow;
         byte[] locBytes = locator.Span.ToArray();
-        var existing = await _dbContext.RelayRendezvousEntries
+        var existing = await db.RelayRendezvousEntries
             .FirstOrDefaultAsync(e => e.BlindedLocator == locBytes, ct)
             .ConfigureAwait(false);
 
         if (existing == null)
         {
-            int currentCount = await _dbContext.RelayRendezvousEntries.CountAsync(ct).ConfigureAwait(false);
+            int currentCount = await db.RelayRendezvousEntries.CountAsync(ct).ConfigureAwait(false);
             if (currentCount >= _maxEntries)
             {
                 return DomainResult.Failure(new DomainError(
@@ -103,7 +104,7 @@ public sealed class SqlitePrivateRendezvousService : IPrivateRendezvousService
                 PublishedAtUtc = nowUtc
             };
 
-            await _dbContext.RelayRendezvousEntries.AddAsync(entity, ct).ConfigureAwait(false);
+            await db.RelayRendezvousEntries.AddAsync(entity, ct).ConfigureAwait(false);
         }
         else
         {
@@ -112,7 +113,7 @@ public sealed class SqlitePrivateRendezvousService : IPrivateRendezvousService
             existing.PublishedAtUtc = nowUtc;
         }
 
-        await _dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
         return DomainResult.Success();
     }
 
@@ -133,15 +134,16 @@ public sealed class SqlitePrivateRendezvousService : IPrivateRendezvousService
             return DomainResult.Failure(routeCheck.Error);
         }
 
+        await using var db = await _contextFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
         DateTimeOffset nowUtc = _clock?.UtcNow ?? DateTimeOffset.UtcNow;
         byte[] locBytes = locator.Span.ToArray();
-        var existing = await _dbContext.RelayRendezvousEntries
+        var existing = await db.RelayRendezvousEntries
             .FirstOrDefaultAsync(e => e.BlindedLocator == locBytes, ct)
             .ConfigureAwait(false);
 
         if (existing == null)
         {
-            int currentCount = await _dbContext.RelayRendezvousEntries.CountAsync(ct).ConfigureAwait(false);
+            int currentCount = await db.RelayRendezvousEntries.CountAsync(ct).ConfigureAwait(false);
             if (currentCount >= _maxEntries)
             {
                 return DomainResult.Failure(new DomainError(
@@ -156,7 +158,7 @@ public sealed class SqlitePrivateRendezvousService : IPrivateRendezvousService
                 PublishedAtUtc = nowUtc
             };
 
-            await _dbContext.RelayRendezvousEntries.AddAsync(entity, ct).ConfigureAwait(false);
+            await db.RelayRendezvousEntries.AddAsync(entity, ct).ConfigureAwait(false);
         }
         else
         {
@@ -165,7 +167,7 @@ public sealed class SqlitePrivateRendezvousService : IPrivateRendezvousService
             existing.PublishedAtUtc = nowUtc;
         }
 
-        await _dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
         return DomainResult.Success();
     }
 
@@ -178,6 +180,7 @@ public sealed class SqlitePrivateRendezvousService : IPrivateRendezvousService
             return Array.Empty<BlindedRendezvousMatch>();
         }
 
+        await using var db = await _contextFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
         DateTimeOffset nowUtc = _clock?.UtcNow ?? DateTimeOffset.UtcNow;
         int maxToInspect = Math.Min(locators.Count, MaxQueryLocators);
         DateTimeOffset minPublished = nowUtc - _entryTtl;
@@ -192,9 +195,9 @@ public sealed class SqlitePrivateRendezvousService : IPrivateRendezvousService
             }
 
             byte[] locBytes = loc.Span.ToArray();
-            var entry = await _dbContext.RelayRendezvousEntries
+            var entry = await db.RelayRendezvousEntries
                 .AsNoTracking()
-                .FirstOrDefaultAsync(e => e.BlindedLocator == locBytes && e.PublishedAtUtc >= minPublished, ct)
+                .FirstOrDefaultAsync(e => e.BlindedLocator == locBytes && e.PublishedAtUtc > minPublished, ct)
                 .ConfigureAwait(false);
 
             if (entry != null)

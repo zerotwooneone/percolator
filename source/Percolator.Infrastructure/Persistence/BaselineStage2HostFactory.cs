@@ -16,6 +16,7 @@ using Percolator.Domain.Security.Ports;
 using Percolator.Infrastructure.Events;
 using Percolator.Infrastructure.Maintenance;
 using Percolator.Infrastructure.Persistence.Repositories;
+using Percolator.Infrastructure.Transport;
 using Percolator.Infrastructure.Vault;
 using Percolator.PluginSdk;
 
@@ -77,7 +78,7 @@ public sealed class BaselineStage2HostFactory : IStage2HostFactory
             services.AddScoped<IPeerContactQueryService, SqlPeerContactQueryService>();
             services.AddScoped<IChannelRepository, SqliteChannelRepository>();
 
-            services.AddScoped(sp => new SqliteRelayPreKeyRepository(sp.GetRequiredService<PercolatorDbContext>()));
+            services.AddScoped(sp => new SqliteRelayPreKeyRepository(sp.GetRequiredService<IDbContextFactory<PercolatorDbContext>>()));
             services.AddScoped<IRelayPreKeyRepository>(sp => sp.GetRequiredService<SqliteRelayPreKeyRepository>());
             services.AddScoped(sp => new SqliteRelayProfileRepository(sp.GetRequiredService<PercolatorDbContext>()));
             services.AddScoped<IRelayProfileRepository>(sp => sp.GetRequiredService<SqliteRelayProfileRepository>());
@@ -86,7 +87,7 @@ public sealed class BaselineStage2HostFactory : IStage2HostFactory
             services.AddScoped<IPeerProfileRepository, SqlitePeerProfileRepository>();
             services.AddScoped<IPeerMailboxRoutingRepository, SqlitePeerMailboxRoutingRepository>();
             services.AddScoped<IRelayRegistrationRepository, SqliteRelayRegistrationRepository>();
-            services.AddSingleton<IRelayMailboxProvisioner, NullRelayMailboxProvisioner>();
+            services.AddScoped<IRelayMailboxProvisioner, GrpcRelayMailboxProvisioner>();
             services.AddScoped<IRelayDirectory, RelayDirectoryService>();
 
             // Background Maintenance Pruners

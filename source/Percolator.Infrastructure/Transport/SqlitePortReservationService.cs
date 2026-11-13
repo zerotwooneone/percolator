@@ -20,12 +20,19 @@ public sealed class SqlitePortReservationService : IPortReservationService
 
     public SqlitePortReservationService(
         IDbContextFactory<PercolatorDbContext> contextFactory,
+        IDateTimeProvider timeProvider)
+        : this(contextFactory, timeProvider, DefaultProbePort)
+    {
+    }
+
+    internal SqlitePortReservationService(
+        IDbContextFactory<PercolatorDbContext> contextFactory,
         IDateTimeProvider timeProvider,
-        Func<int, bool>? socketProber = null)
+        Func<int, bool> socketProber)
     {
         _contextFactory = contextFactory ?? throw new ArgumentNullException(nameof(contextFactory));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
-        _socketProber = socketProber ?? DefaultProbePort;
+        _socketProber = socketProber ?? throw new ArgumentNullException(nameof(socketProber));
     }
 
     public async Task<DomainResult<PortLease>> AcquirePortLeaseAsync(PortRange range, CancellationToken ct = default)

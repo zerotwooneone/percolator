@@ -3,6 +3,7 @@ namespace Percolator.Infrastructure.Transport.Endpoints;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Channels;
@@ -237,6 +238,25 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
         var deviceId = new DeviceId(payload.DeviceId);
         var publishedAtUtc = payload.PublishedAtUtc.ToDateTimeOffset();
 
+        // Mailbox ownership verification (when routing_token or drain_token is supplied):
+        // the caller proves ownership of the registered mailbox for routing_token.
+        if (!payload.RoutingToken.IsEmpty || !request.DrainToken.IsEmpty)
+        {
+            if (payload.RoutingToken.Length != 16 || request.DrainToken.Length != 32)
+            {
+                return new PublishPreKeyBundleResponse { Success = false };
+            }
+
+            bool drainValid = await _capabilityStore.VerifyDrainTokenAsync(
+                payload.RoutingToken.Memory,
+                request.DrainToken.Memory,
+                context.CancellationToken);
+            if (!drainValid)
+            {
+                return new PublishPreKeyBundleResponse { Success = false };
+            }
+        }
+
         // Rollback / Replay protection: enforce strictly newer published_at timestamp
         if (_publishedTimestamps.TryGetValue((ownerId, deviceId), out var lastPublished))
         {
@@ -267,22 +287,70 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
             }
         }
 
-        var bundleResult = RelayHostedPreKeyBundle.Create(
-            ownerId,
-            deviceId,
-            identityKey,
-            DhPublicKey.FromSpan(payload.SignedPrekey.Span),
-            DeviceLinkProof.FromSpan(payload.PrekeySignature.Span),
-            opks,
-            RelayHostingPolicy.Default,
-            _cryptoEngine);
+        var signedPreKey = DhPublicKey.FromSpan(payload.SignedPrekey.Span);
+        var signedPreKeySignature = DeviceLinkProof.FromSpan(payload.PrekeySignature.Span);
 
-        if (bundleResult.IsFailure)
+        // Server-side OPK replenishment: an existing bundle gains only new KeyIds and a
+        // rotated signed prekey; a missing bundle is created wholesale.
+        var existing = await _preKeyRepository.GetAsync(ownerId, deviceId, context.CancellationToken);
+        if (existing == null)
         {
-            return new PublishPreKeyBundleResponse { Success = false };
+            var bundleResult = RelayHostedPreKeyBundle.Create(
+                ownerId,
+                deviceId,
+                identityKey,
+                signedPreKey,
+                signedPreKeySignature,
+                opks,
+                RelayHostingPolicy.Default,
+                _cryptoEngine);
+
+            if (bundleResult.IsFailure)
+            {
+                return new PublishPreKeyBundleResponse { Success = false };
+            }
+
+            await _preKeyRepository.SaveAsync(bundleResult.Value!, context.CancellationToken);
+        }
+        else
+        {
+            if (!CryptographicOperations.FixedTimeEquals(existing.IdentityKey.Span, identityKey.Span))
+            {
+                return new PublishPreKeyBundleResponse { Success = false };
+            }
+
+            var updateSpk = existing.UpdateSignedPreKey(
+                signedPreKey,
+                signedPreKeySignature,
+                RelayHostingPolicy.Default,
+                _cryptoEngine);
+            if (updateSpk.IsFailure)
+            {
+                return new PublishPreKeyBundleResponse { Success = false };
+            }
+
+            var existingKeyIds = new HashSet<uint>(existing.OneTimePreKeys.Select(k => k.KeyId));
+            var newOpks = opks.Where(k => !existingKeyIds.Contains(k.KeyId)).ToList();
+            var replenish = existing.ReplenishOneTimePreKeys(newOpks, RelayHostingPolicy.Default);
+            if (replenish.IsFailure)
+            {
+                return new PublishPreKeyBundleResponse { Success = false };
+            }
+
+            await _preKeyRepository.SaveAsync(existing, context.CancellationToken);
         }
 
-        await _preKeyRepository.SaveAsync(bundleResult.Value!, context.CancellationToken);
+        // Wire owner association: binds the mailbox routing token to this owner/device so
+        // FetchPreKeyBundle resolves the bundle via the capability store.
+        if (payload.RoutingToken.Length == 16)
+        {
+            await _capabilityStore.AssociateOwnerAsync(
+                payload.RoutingToken.Memory,
+                ownerId,
+                deviceId,
+                context.CancellationToken);
+        }
+
         _publishedTimestamps[(ownerId, deviceId)] = publishedAtUtc;
 
         return new PublishPreKeyBundleResponse { Success = true };

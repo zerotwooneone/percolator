@@ -185,10 +185,10 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IPeerContactQueryService, SqlPeerContactQueryService>();
         services.AddScoped<IChannelRepository, SqliteChannelRepository>();
         services.AddScoped<IRelayRegistrationRepository, SqliteRelayRegistrationRepository>();
-        services.AddSingleton<IRelayMailboxProvisioner, NullRelayMailboxProvisioner>();
+        services.AddScoped<IRelayMailboxProvisioner, GrpcRelayMailboxProvisioner>();
         services.AddScoped<IRelayDirectory, RelayDirectoryService>();
 
-        services.AddScoped(sp => new SqliteRelayPreKeyRepository(sp.GetRequiredService<PercolatorDbContext>()));
+        services.AddScoped(sp => new SqliteRelayPreKeyRepository(sp.GetRequiredService<IDbContextFactory<PercolatorDbContext>>()));
         services.AddScoped<IRelayPreKeyRepository>(sp => sp.GetRequiredService<SqliteRelayPreKeyRepository>());
         services.AddScoped(sp => new SqliteRelayProfileRepository(sp.GetRequiredService<PercolatorDbContext>()));
         services.AddScoped<IRelayProfileRepository>(sp => sp.GetRequiredService<SqliteRelayProfileRepository>());
@@ -205,6 +205,8 @@ public static class InfrastructureServiceCollectionExtensions
         // Composition roots that know the node identity must register a factory (see SimulatedPersonaHost).
         services.AddScoped<IPortReservationService, SqlitePortReservationService>();
         services.AddScoped<UnauthenticatedDeliveryEndpoint>();
+        services.AddScoped<AuthenticatedRelayEndpoint>();
+        services.AddScoped<PrivateRendezvousRelayEndpoint>();
 
         // 5. Vertical Plugins
         // Chat
