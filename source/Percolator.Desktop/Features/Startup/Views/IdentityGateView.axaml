@@ -8,6 +8,13 @@
              x:DataType="vm:IdentityGateViewModel">
 
     <Grid RowDefinitions="Auto,*,Auto" Margin="28,20">
+        <Grid.ContextMenu>
+            <ContextMenu>
+                <MenuItem Header="Disable onboarding"
+                          Command="{Binding DisableOnboardingCommand}"
+                          IsVisible="{Binding IsOnboardingActive}" />
+            </ContextMenu>
+        </Grid.ContextMenu>
         <!-- Inline banner: port-conflict / recovery messaging. -->
         <Border Grid.Row="0"
                 Classes="banner"
@@ -25,15 +32,15 @@
             </Grid>
         </Border>
 
-        <Panel Grid.Row="1">
+        <ScrollViewer Grid.Row="1">
+            <StackPanel>
             <!-- State 2A: persona selection cards -->
             <DockPanel IsVisible="{Binding HasPersonas}">
                 <TextBlock DockPanel.Dock="Top"
                            Text="Select personas to launch"
                            Theme="{StaticResource SubtitleTextBlockStyle}"
                            Margin="0,0,0,12" />
-                <ScrollViewer>
-                    <ItemsControl x:Name="PersonaItems" ItemsSource="{Binding Personas}">
+                <ItemsControl x:Name="PersonaItems" ItemsSource="{Binding Personas}">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
                                 <WrapPanel />
@@ -128,7 +135,6 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
-                </ScrollViewer>
             </DockPanel>
 
             <!-- State 2B: empty-vault call to action -->
@@ -151,7 +157,159 @@
                     </StackPanel>
                 </Border>
             </Grid>
-        </Panel>
+
+            <!-- Exchanges group — same tile-grid geometry, below Personas. The hollow `+`
+                 tile is always present: ghosted while onboarding is active. -->
+            <StackPanel Margin="0,20,0,0">
+                <TextBlock Text="Exchanges"
+                           Theme="{StaticResource SubtitleTextBlockStyle}"
+                           Margin="0,0,0,12" />
+                <WrapPanel>
+                    <ItemsControl ItemsSource="{Binding Exchanges}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:ExchangeTileViewModel">
+                                <ToggleButton Classes="persona-toggle"
+                                              IsChecked="{Binding IsSelectedForLaunch}"
+                                              Margin="0,0,12,12">
+                                    <Border Classes="persona-card" Width="248">
+                                        <Grid RowDefinitions="Auto,Auto,Auto">
+                                            <Grid ColumnDefinitions="Auto,*,Auto">
+                                                <Border Classes="identicon-tile"
+                                                        Width="32" Height="32"
+                                                        Margin="0,0,10,0"
+                                                        VerticalAlignment="Center">
+                                                    <ItemsControl DataContext="{Binding Avatar}"
+                                                                  ItemsSource="{Binding Cells}">
+                                                        <ItemsControl.ItemsPanel>
+                                                            <ItemsPanelTemplate>
+                                                                <UniformGrid Columns="5" />
+                                                            </ItemsPanelTemplate>
+                                                        </ItemsControl.ItemsPanel>
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate x:DataType="sys:Boolean">
+                                                                <Border Margin="1"
+                                                                        CornerRadius="1"
+                                                                        IsVisible="{Binding .}"
+                                                                        Background="{Binding $parent[ItemsControl].((models:AvatarPresentation)DataContext).Color}" />
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </Border>
+                                                <TextBlock Grid.Column="1"
+                                                           Text="{Binding DisplayName}"
+                                                           FontWeight="SemiBold"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           VerticalAlignment="Center" />
+                                                <Button Grid.Column="2"
+                                                        Classes="pill-edit"
+                                                        Content="⚙"
+                                                        VerticalAlignment="Center"
+                                                        ToolTip.Tip="Manage exchange"
+                                                        Command="{Binding $parent[UserControl].((vm:IdentityGateViewModel)DataContext).ManageExchangeCommand}"
+                                                        CommandParameter="{Binding}" />
+                                            </Grid>
+
+                                            <!-- Linkage strip: stacked persona avatar chips, +N overflow. -->
+                                            <StackPanel Grid.Row="1"
+                                                        Orientation="Horizontal"
+                                                        Spacing="-14"
+                                                        Margin="0,8,0,0"
+                                                        IsVisible="{Binding HasLinkedPersonas}">
+                                                <ItemsControl ItemsSource="{Binding VisibleLinkedPersonas}">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate x:DataType="models:PersonaAvatarChip">
+                                                            <Border Classes="identicon-tile"
+                                                                    Width="24" Height="24"
+                                                                    ToolTip.Tip="{Binding DisplayName}">
+                                                                <ItemsControl DataContext="{Binding Avatar}"
+                                                                              ItemsSource="{Binding Cells}">
+                                                                    <ItemsControl.ItemsPanel>
+                                                                        <ItemsPanelTemplate>
+                                                                            <UniformGrid Columns="5" />
+                                                                        </ItemsPanelTemplate>
+                                                                    </ItemsControl.ItemsPanel>
+                                                                    <ItemsControl.ItemTemplate>
+                                                                        <DataTemplate x:DataType="sys:Boolean">
+                                                                            <Border Margin="1"
+                                                                                    IsVisible="{Binding .}"
+                                                                                    Background="{Binding $parent[ItemsControl].((models:AvatarPresentation)DataContext).Color}" />
+                                                                        </DataTemplate>
+                                                                    </ItemsControl.ItemTemplate>
+                                                                </ItemsControl>
+                                                            </Border>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                                <Border Classes="port-pill"
+                                                        Padding="4,1"
+                                                        VerticalAlignment="Center"
+                                                        Margin="4,0,0,0"
+                                                        IsVisible="{Binding HasLinkedOverflow}">
+                                                    <TextBlock FontSize="10"
+                                                               Text="{Binding OverflowLinkedPersonaCount, StringFormat='+{0}'}" />
+                                                </Border>
+                                            </StackPanel>
+
+                                            <StackPanel Grid.Row="2"
+                                                        Orientation="Horizontal"
+                                                        Spacing="4"
+                                                        Margin="0,8,0,0">
+                                                <Border Classes="port-pill"
+                                                        Padding="6,1"
+                                                        VerticalAlignment="Center"
+                                                        IsVisible="{Binding IsSelfHosted}">
+                                                    <TextBlock Text="self-hosted" FontSize="11" />
+                                                </Border>
+                                                <Border Classes="port-pill"
+                                                        Classes.ready="{Binding IsStatusReady}"
+                                                        Classes.auto="{Binding IsStatusAutoSelected}"
+                                                        Classes.busy="{Binding IsStatusUnavailable}"
+                                                        VerticalAlignment="Center"
+                                                        IsVisible="{Binding IsSelfHosted}">
+                                                    <TextBlock Text="{Binding PortPillText}"
+                                                               FontSize="11" />
+                                                </Border>
+                                                <Border Classes="port-pill"
+                                                        Padding="6,1"
+                                                        VerticalAlignment="Center"
+                                                        IsVisible="{Binding !IsSelfHosted}">
+                                                    <TextBlock Text="remote" FontSize="11" />
+                                                </Border>
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+                                </ToggleButton>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <!-- Hollow `+` tile — visible but inert while onboarding is active. -->
+                    <Button Width="120" Height="120"
+                            Margin="0,0,12,12"
+                            Classes.ghosted="{Binding IsOnboardingActive}"
+                            IsEnabled="{Binding IsExchangeCreateEnabled}"
+                            ToolTip.Tip="{Binding ExchangeCreateTooltip}"
+                            Command="{Binding CreateExchangeCommand}">
+                        <Button.Styles>
+                            <Style Selector="Button.ghosted">
+                                <Setter Property="Opacity" Value="0.45" />
+                            </Style>
+                        </Button.Styles>
+                        <TextBlock Text="+"
+                                   FontSize="36"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    </Button>
+                </WrapPanel>
+            </StackPanel>
+            </StackPanel>
+        </ScrollViewer>
 
         <!-- Footer: single-persona auto-start flag + launch -->
         <Grid Grid.Row="2"

@@ -1,0 +1,35 @@
+<!-- SPECIFICATION GOVERNANCE: Read Percolator.Desktop/spec/View.spec.md before modifying this file. -->
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Percolator.Desktop.Features.Startup.ViewModels"
+        x:Class="Percolator.Desktop.Features.Startup.Views.StopUsingExchangeDialogWindow"
+        x:DataType="vm:StopUsingExchangeDialogViewModel"
+        Title="Stop using this Exchange?"
+        Width="440"
+        SizeToContent="Height"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner">
+
+    <StackPanel Margin="24" Spacing="16">
+        <TextBlock Text="Stop using this Exchange?"
+                   Theme="{StaticResource SubtitleTextBlockStyle}" />
+        <TextBlock Text="{Binding Message}"
+                   TextWrapping="Wrap"
+                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+        <CheckBox Content="Also empty this mailbox's stored envelopes"
+                  IsChecked="{Binding PurgeQueuedEnvelopes}"
+                  IsVisible="{Binding CanPurgeQueue}" />
+        <Grid ColumnDefinitions="*,*">
+            <Button Grid.Column="0"
+                    Content="Cancel"
+                    Command="{Binding CancelCommand}"
+                    HorizontalAlignment="Stretch"
+                    Margin="0,0,12,0" />
+            <Button Grid.Column="1"
+                    Classes="danger"
+                    Content="Stop using"
+                    Command="{Binding StopUsingCommand}"
+                    HorizontalAlignment="Stretch" />
+        </Grid>
+    </StackPanel>
+</Window>

@@ -30,6 +30,7 @@ public sealed class StartupHostViewModelTests
     private Mock<IDialogService> _dialogs = null!;
     private Mock<ILauncherService> _launcher = null!;
     private Mock<IPersonaDirectory> _personas = null!;
+    private Mock<IExchangeDirectory> _exchanges = null!;
     private Mock<IPortReservationService> _ports = null!;
     private Mock<IDesktopSettingsRepository> _settings = null!;
     private Mock<IIdenticonGenerator> _identicons = null!;
@@ -46,6 +47,7 @@ public sealed class StartupHostViewModelTests
         _dialogs = new Mock<IDialogService>(MockBehavior.Strict);
         _launcher = new Mock<ILauncherService>(MockBehavior.Strict);
         _personas = new Mock<IPersonaDirectory>(MockBehavior.Strict);
+        _exchanges = new Mock<IExchangeDirectory>(MockBehavior.Strict);
         _ports = new Mock<IPortReservationService>(MockBehavior.Strict);
         _settings = new Mock<IDesktopSettingsRepository>(MockBehavior.Strict);
         _identicons = new Mock<IIdenticonGenerator>(MockBehavior.Strict);
@@ -56,6 +58,12 @@ public sealed class StartupHostViewModelTests
         _personas
             .Setup(d => d.ListAsync(It.IsAny<IAuthenticatedSession>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Array.Empty<PersonaDirectoryEntry>());
+        _exchanges
+            .Setup(e => e.ListAsync(It.IsAny<IAuthenticatedSession>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<ExchangeDirectoryEntry>());
+        _settings
+            .Setup(s => s.GetAppSettingAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string?)null);
 
         _storageOptions = new VaultStorageOptions
         {
@@ -65,6 +73,7 @@ public sealed class StartupHostViewModelTests
 
     private IdentityGateViewModel CreateGateVm() => new(
         _personas.Object,
+        _exchanges.Object,
         _ports.Object,
         _settings.Object,
         _identicons.Object,

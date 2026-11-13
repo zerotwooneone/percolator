@@ -15,6 +15,7 @@ using Percolator.Desktop.Common.Storage;
 using Percolator.Desktop.Common.Windowing;
 using Percolator.Desktop.Features.Startup.Models;
 using Percolator.Desktop.Features.Startup.ViewModels;
+using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
 
 namespace Percolator.Desktop.Tests.Startup;
@@ -25,6 +26,7 @@ public sealed class IdentityGateViewModelTests
     private IAuthenticatedSession _session = null!;
 
     private Mock<IPersonaDirectory> _directory = null!;
+    private Mock<IExchangeDirectory> _exchanges = null!;
     private Mock<IPortReservationService> _ports = null!;
     private Mock<IDesktopSettingsRepository> _settings = null!;
     private readonly IIdenticonGenerator _identicons = new IdenticonGenerator();
@@ -37,13 +39,33 @@ public sealed class IdentityGateViewModelTests
     {
         _session = Mock.Of<IAuthenticatedSession>();
         _directory = new Mock<IPersonaDirectory>(MockBehavior.Strict);
+        _exchanges = new Mock<IExchangeDirectory>(MockBehavior.Strict);
         _ports = new Mock<IPortReservationService>(MockBehavior.Strict);
         _settings = new Mock<IDesktopSettingsRepository>(MockBehavior.Strict);
         _handoff = new Mock<IWindowHandoffCoordinator>(MockBehavior.Strict);
         _windows = new Mock<IWindowManager>(MockBehavior.Strict);
 
+        // Defaults exercised by every LoadAsync/launch — individual tests override.
+        _exchanges
+            .Setup(e => e.ListAsync(It.IsAny<IAuthenticatedSession>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<ExchangeDirectoryEntry>());
+        _exchanges
+            .Setup(e => e.ProvisionLinkedMailboxesAsync(
+                It.IsAny<IAuthenticatedSession>(),
+                It.IsAny<IEnumerable<PublicIdentityId>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DomainResult.Success());
+        _settings
+            .Setup(s => s.GetAppSettingAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string?)null);
+        _settings
+            .Setup(s => s.SetAppSettingAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
         _vm = new IdentityGateViewModel(
             _directory.Object,
+            _exchanges.Object,
             _ports.Object,
             _settings.Object,
             _identicons,
@@ -148,6 +170,7 @@ public sealed class IdentityGateViewModelTests
                 _session,
                 It.Is<IReadOnlyList<PersonaLaunchDescriptor>?>(l =>
                     l != null && l.Count == 1 && l[0].Lease == lease.Object && l[0].RequestedPort == 5100),
+                It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>?>(),
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
@@ -161,6 +184,7 @@ public sealed class IdentityGateViewModelTests
             h => h.TransitionToMainShellAsync(
                 _session,
                 It.IsAny<IReadOnlyList<PersonaLaunchDescriptor>?>(),
+                It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>?>(),
                 It.IsAny<CancellationToken>()),
             Times.Once);
         _settings.Verify(
@@ -200,6 +224,7 @@ public sealed class IdentityGateViewModelTests
                 _session,
                 It.Is<IReadOnlyList<PersonaLaunchDescriptor>?>(l =>
                     l != null && l.Count == 1 && l[0].RequestedPort == 5101),
+                It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>?>(),
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
@@ -235,6 +260,7 @@ public sealed class IdentityGateViewModelTests
             h => h.TransitionToMainShellAsync(
                 It.IsAny<Application2.Ports.IAuthenticatedSession?>(),
                 It.IsAny<IReadOnlyList<PersonaLaunchDescriptor>?>(),
+                It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>?>(),
                 It.IsAny<CancellationToken>()),
             Times.Never);
         _vm.LaunchPersonasCommand.CanExecute(null).Should().BeFalse(
@@ -357,6 +383,7 @@ public sealed class IdentityGateViewModelTests
             h => h.TransitionToMainShellAsync(
                 It.IsAny<Application2.Ports.IAuthenticatedSession?>(),
                 It.IsAny<IReadOnlyList<PersonaLaunchDescriptor>?>(),
+                It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>?>(),
                 It.IsAny<CancellationToken>()),
             Times.Never);
     }
@@ -386,6 +413,7 @@ public sealed class IdentityGateViewModelTests
             .Setup(h => h.TransitionToMainShellAsync(
                 It.IsAny<Application2.Ports.IAuthenticatedSession?>(),
                 It.IsAny<IReadOnlyList<PersonaLaunchDescriptor>?>(),
+                It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>?>(),
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("simulated handoff failure"));
 

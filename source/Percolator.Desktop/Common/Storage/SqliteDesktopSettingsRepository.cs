@@ -101,6 +101,36 @@ public sealed class SqliteDesktopSettingsRepository : IDesktopSettingsRepository
         await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
+    public async Task<string?> GetAppSettingAsync(string key, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        await EnsureTableAsync(ct).ConfigureAwait(false);
+        await using var connection = await OpenAsync(ct).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT SettingValue FROM AppSettings WHERE SettingKey = $key";
+        command.Parameters.AddWithValue("$key", key);
+
+        var result = await command.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        return result as string;
+    }
+
+    public async Task SetAppSettingAsync(string key, string value, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        ArgumentNullException.ThrowIfNull(value);
+        await EnsureTableAsync(ct).ConfigureAwait(false);
+        await using var connection = await OpenAsync(ct).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            """
+            INSERT INTO AppSettings (SettingKey, SettingValue) VALUES ($key, $value)
+            ON CONFLICT(SettingKey) DO UPDATE SET SettingValue = $value
+            """;
+        command.Parameters.AddWithValue("$key", key);
+        command.Parameters.AddWithValue("$value", value);
+        await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
     private async Task<SqliteConnection> OpenAsync(CancellationToken ct)
     {
         var connection = new SqliteConnection(_connectionString);
@@ -123,5 +153,15 @@ public sealed class SqliteDesktopSettingsRepository : IDesktopSettingsRepository
             )
             """;
         await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+
+        await using var appSettingsCommand = connection.CreateCommand();
+        appSettingsCommand.CommandText =
+            """
+            CREATE TABLE IF NOT EXISTS AppSettings (
+                SettingKey TEXT PRIMARY KEY,
+                SettingValue TEXT NOT NULL
+            )
+            """;
+        await appSettingsCommand.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 }

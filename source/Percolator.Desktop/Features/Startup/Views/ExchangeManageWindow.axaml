@@ -1,0 +1,76 @@
+<!-- SPECIFICATION GOVERNANCE: Read Percolator.Desktop/spec/View.spec.md before modifying this file. -->
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Percolator.Desktop.Features.Startup.ViewModels"
+        xmlns:models="using:Percolator.Desktop.Features.Startup.Models"
+        xmlns:sys="using:System"
+        x:Class="Percolator.Desktop.Features.Startup.Views.ExchangeManageWindow"
+        x:DataType="vm:ExchangeManageViewModel"
+        Title="Manage Exchange"
+        Width="460"
+        SizeToContent="Height"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner">
+
+    <StackPanel Margin="24" Spacing="16">
+        <StackPanel Orientation="Horizontal" Spacing="8">
+            <TextBlock Text="{Binding ExchangeDisplayName}"
+                       Theme="{StaticResource SubtitleTextBlockStyle}" />
+            <Border Classes="port-pill"
+                    Padding="6,1"
+                    VerticalAlignment="Center"
+                    IsVisible="{Binding IsSelfHosted}">
+                <TextBlock Text="self-hosted" FontSize="11" />
+            </Border>
+        </StackPanel>
+
+        <TextBlock Text="Linked personas will route offline delivery through this exchange. Linking only records membership on this device — nothing is sent."
+                   TextWrapping="Wrap"
+                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+        <ScrollViewer MaxHeight="260">
+            <ItemsControl ItemsSource="{Binding Personas}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="models:LinkablePersonaModel">
+                        <CheckBox IsChecked="{Binding IsLinked}"
+                                  Margin="0,4">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Border Classes="identicon-tile" Width="20" Height="20">
+                                    <ItemsControl DataContext="{Binding Avatar}"
+                                                  ItemsSource="{Binding Cells}">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <UniformGrid Columns="5" />
+                                            </ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="sys:Boolean">
+                                                <Border Margin="1"
+                                                        IsVisible="{Binding .}"
+                                                        Background="{Binding $parent[ItemsControl].((models:AvatarPresentation)DataContext).Color}" />
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </Border>
+                                <TextBlock Text="{Binding DisplayName}"
+                                           VerticalAlignment="Center" />
+                            </StackPanel>
+                        </CheckBox>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+
+        <Border Classes="banner"
+                Padding="8"
+                IsVisible="{Binding ErrorMessage, Converter={x:Static ObjectConverters.IsNotNull}}">
+            <TextBlock Text="{Binding ErrorMessage}"
+                       TextWrapping="Wrap" />
+        </Border>
+
+        <Button Classes="accent"
+                Content="Done"
+                Command="{Binding DoneCommand}"
+                HorizontalAlignment="Right" />
+    </StackPanel>
+</Window>

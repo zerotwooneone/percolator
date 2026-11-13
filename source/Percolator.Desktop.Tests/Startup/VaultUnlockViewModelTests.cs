@@ -89,6 +89,7 @@ public sealed class VaultUnlockViewModelTests
             h => h.TransitionToMainShellAsync(
                 It.IsAny<IAuthenticatedSession>(),
                 It.IsAny<IReadOnlyList<PersonaLaunchDescriptor>?>(),
+                It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>?>(),
                 It.IsAny<CancellationToken>()),
             Times.Never);
     }
@@ -115,6 +116,7 @@ public sealed class VaultUnlockViewModelTests
                 session.Object,
                 It.Is<IReadOnlyList<PersonaLaunchDescriptor>?>(l =>
                     l != null && l.Count == 1 && l[0].Lease == lease.Object && l[0].RequestedPort == 5100),
+                It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>?>(),
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
@@ -125,6 +127,7 @@ public sealed class VaultUnlockViewModelTests
             h => h.TransitionToMainShellAsync(
                 session.Object,
                 It.IsAny<IReadOnlyList<PersonaLaunchDescriptor>?>(),
+                It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>?>(),
                 It.IsAny<CancellationToken>()),
             Times.Once,
             "a sole auto-start persona must skip the gate and launch straight into the shell");
@@ -244,6 +247,7 @@ public sealed class VaultUnlockViewModelTests
             .Setup(h => h.TransitionToMainShellAsync(
                 session.Object,
                 It.IsAny<IReadOnlyList<PersonaLaunchDescriptor>?>(),
+                It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>?>(),
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("simulated handoff failure"));
 
@@ -308,6 +312,7 @@ public sealed class VaultUnlockViewModelTests
                 session.Object,
                 It.Is<IReadOnlyList<PersonaLaunchDescriptor>?>(l =>
                     l != null && l.Count == 1 && l[0].RequestedPort == 5101),
+                It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>?>(),
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 

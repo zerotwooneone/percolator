@@ -32,9 +32,14 @@ public interface IWindowHandoffCoordinator
     /// Launch descriptors acquired at the Identity Gate; the coordinator takes ownership of
     /// their port leases and releases them on <see cref="LockSessionAsync"/>.
     /// </param>
+    /// <param name="exchanges">
+    /// Self-hosted exchange descriptors acquired at the Identity Gate; their port leases
+    /// are held and released with the persona leases on <see cref="LockSessionAsync"/>.
+    /// </param>
     Task TransitionToMainShellAsync(
         IAuthenticatedSession? session,
         IReadOnlyList<PersonaLaunchDescriptor>? personas = null,
+        IReadOnlyList<ExchangeLaunchDescriptor>? exchanges = null,
         CancellationToken ct = default);
 
     /// <summary>

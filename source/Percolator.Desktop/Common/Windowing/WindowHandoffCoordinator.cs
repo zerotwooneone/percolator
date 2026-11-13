@@ -30,6 +30,7 @@ public sealed class WindowHandoffCoordinator : IWindowHandoffCoordinator
     // Port leases acquired at the Identity Gate; held for the persona session lifetime and
     // released on LockSessionAsync ([INV-DESKTOP-STEALTH-ACTIVATION-GATE]).
     private readonly List<PersonaLaunchDescriptor> _activePersonas = new();
+    private readonly List<ExchangeLaunchDescriptor> _activeExchanges = new();
 
     public WindowHandoffCoordinator(
         IServiceProvider services,
@@ -64,6 +65,7 @@ public sealed class WindowHandoffCoordinator : IWindowHandoffCoordinator
     public async Task TransitionToMainShellAsync(
         IAuthenticatedSession? session,
         IReadOnlyList<PersonaLaunchDescriptor>? personas = null,
+        IReadOnlyList<ExchangeLaunchDescriptor>? exchanges = null,
         CancellationToken ct = default)
     {
         // Launches all registered IHostedService background workers in the Stage 2 container.
@@ -79,6 +81,12 @@ public sealed class WindowHandoffCoordinator : IWindowHandoffCoordinator
             if (personas is not null)
             {
                 _activePersonas.AddRange(personas);
+            }
+
+            _activeExchanges.Clear();
+            if (exchanges is not null)
+            {
+                _activeExchanges.AddRange(exchanges);
             }
         }
 
@@ -107,7 +115,13 @@ public sealed class WindowHandoffCoordinator : IWindowHandoffCoordinator
                 persona.Lease.Dispose();
             }
 
+            foreach (var exchange in _activeExchanges)
+            {
+                exchange.Lease.Dispose();
+            }
+
             _activePersonas.Clear();
+            _activeExchanges.Clear();
         }
 
         await Dispatcher.UIThread.InvokeAsync(() =>

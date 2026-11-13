@@ -74,6 +74,7 @@ public partial class App : Avalonia.Application
                 services.AddSingleton<IPortReservationService, PortReservationService>();
                 services.AddSingleton<IIdenticonGenerator, IdenticonGenerator>();
                 services.AddSingleton<IPersonaDirectory, PersonaDirectoryService>();
+                services.AddSingleton<IExchangeDirectory, ExchangeDirectoryService>();
 
                 // Child-VM factories injected into StartupHostViewModel ([VM-004], [VM-009]).
                 services.AddSingleton<Func<VaultSetupViewModel>>(sp => sp.GetRequiredService<VaultSetupViewModel>);
@@ -86,6 +87,9 @@ public partial class App : Avalonia.Application
                 services.AddTransient<IdentityGateViewModel>();
                 services.AddTransient<CreatePersonaDialogViewModel>();
                 services.AddTransient<DeletePersonaDialogViewModel>();
+                services.AddTransient<ExchangeCreationViewModel>();
+                services.AddTransient<ExchangeManageViewModel>();
+                services.AddTransient<StopUsingExchangeDialogViewModel>();
                 services.AddTransient<MainWindowViewModel>();
             })
             .Build();

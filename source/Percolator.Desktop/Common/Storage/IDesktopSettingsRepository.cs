@@ -18,4 +18,10 @@ public interface IDesktopSettingsRepository
     Task SaveAsync(DesktopIdentitySettingsEntity entity, CancellationToken ct = default);
 
     Task DeleteAsync(Guid identityId, CancellationToken ct = default);
+
+    /// <summary>Reads a vault-global UI flag (e.g. the Exchange onboarding gate); <c>null</c> when unset.</summary>
+    Task<string?> GetAppSettingAsync(string key, CancellationToken ct = default);
+
+    /// <summary>Persists a vault-global UI flag. Values are presentation state only — never secrets.</summary>
+    Task SetAppSettingAsync(string key, string value, CancellationToken ct = default);
 }

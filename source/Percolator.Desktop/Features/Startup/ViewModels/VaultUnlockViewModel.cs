@@ -134,7 +134,7 @@ public partial class VaultUnlockViewModel : ViewModelBase
                 try
                 {
                     await _handoff
-                        .TransitionToMainShellAsync(session, new[] { descriptor }, ct)
+                        .TransitionToMainShellAsync(session, new[] { descriptor }, ct: ct)
                         .ConfigureAwait(true);
                     return;
                 }
