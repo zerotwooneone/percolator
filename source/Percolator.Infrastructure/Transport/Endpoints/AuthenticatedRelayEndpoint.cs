@@ -257,10 +257,13 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
             }
         }
 
-        // Rollback / Replay protection: enforce strictly newer published_at timestamp
+        // Rollback / Replay protection: reject only strictly-older published_at values.
+        // Equal timestamps are legitimate: clock granularity (and virtual clocks) can emit
+        // the same instant across back-to-back publishes, and replaying an identical
+        // signed payload is idempotent. Drain-token verification still gates the write.
         if (_publishedTimestamps.TryGetValue((ownerId, deviceId), out var lastPublished))
         {
-            if (publishedAtUtc <= lastPublished)
+            if (publishedAtUtc < lastPublished)
             {
                 return new PublishPreKeyBundleResponse { Success = false };
             }

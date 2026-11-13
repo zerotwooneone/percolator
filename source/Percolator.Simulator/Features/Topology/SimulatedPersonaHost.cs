@@ -5,8 +5,6 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
-using Google.Protobuf;
-using Grpc.Core;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
@@ -71,8 +69,6 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
     private readonly SemaphoreSlim _listeningGate = new(1, 1);
     private readonly SemaphoreSlim _drainGate = new(1, 1);
     private readonly SemaphoreSlim _outboxGate = new(1, 1);
-    private readonly object _opkIdLock = new();
-    private uint _nextOpkId = 1;
     private readonly string _nodeTempDirectory;
     private readonly EphemeralPrivateKey _identityPrivateKey;
     private readonly EphemeralPrivateKey _signedPreKeyPrivate;
@@ -355,7 +351,20 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
     public void RotateProfileKey()
     {
         ProfileKey.Dispose();
-        ProfileKey = ProfileKey.Generate();
+        if (_host != null)
+        {
+            // Persist the rotation in the identity key store so GetMailboxTokensAsync and
+            // DeliveryToken.DeriveFromProfileKey consumers observe the same key material.
+            using var scope = _host.Services.CreateScope();
+            ProfileKey = scope.ServiceProvider
+                .GetRequiredService<ILocalIdentityKeyStore>()
+                .RotateProfileKeyAsync(PublicIdentityId)
+                .GetAwaiter().GetResult();
+        }
+        else
+        {
+            ProfileKey = ProfileKey.Generate();
+        }
         MailboxDeliveryToken.Dispose();
         MailboxDeliveryToken = DeliveryToken.DeriveFromProfileKey(IdentityPublicKey, ProfileKey, new SignalCryptoEngine(new CryptographyOptions()));
     }
@@ -450,17 +459,15 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             }
             if (HomeRelay != null)
             {
-                var channelFactory = scope.ServiceProvider.GetRequiredService<IPeerGrpcChannelFactory>();
-                var relayUri = new Uri($"https://127.0.0.1:{HomeRelay.BoundPort}");
-                var channel = channelFactory.GetOrCreateChannel(relayUri);
-                var client = new AuthenticatedRelayService.AuthenticatedRelayServiceClient(channel);
-                var regReq = new RegisterMailboxRequest
+                var provisioner = scope.ServiceProvider.GetRequiredService<IRelayMailboxProvisioner>();
+                var relayEndpoint = RelayEndpoint.FromHostAndPort("127.0.0.1", HomeRelay.BoundPort);
+                var mailboxTokens = new MailboxTokenTriad(MailboxRoutingToken, MailboxDeliveryToken, MailboxDrainToken);
+                var provisionResult = await provisioner.ProvisionMailboxAsync(
+                    PublicIdentityId, HomeRelay.RelayIdentityId, relayEndpoint, mailboxTokens, ct).ConfigureAwait(false);
+                if (provisionResult.IsFailure)
                 {
-                    RoutingToken = ByteString.CopyFrom(MailboxRoutingToken.ToByteArray()),
-                    AuthorizedDeliveryToken = ByteString.CopyFrom(MailboxDeliveryToken.Span),
-                    DrainToken = ByteString.CopyFrom(MailboxDrainToken.Span)
-                };
-                await client.RegisterMailboxAsync(regReq, cancellationToken: ct).ConfigureAwait(false);
+                    return DomainResult.Failure(provisionResult.Error);
+                }
             }
             // Also save locally in IRelayProfileRepository for direct P2P queries
             var localProfileRepo = scope.ServiceProvider.GetRequiredService<IRelayProfileRepository>();
@@ -495,16 +502,6 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                 "ProfileSync",
                 $"Failed to publish profile: {ex.Message}"));
             return DomainResult.Failure(new DomainError("PROFILE_PUBLISH_FAILED", ex.Message));
-        }
-    }
-    public uint AllocateNextOpkIdRange(int count)
-    {
-        if (count <= 0) throw new ArgumentOutOfRangeException(nameof(count), "Count must be positive.");
-        lock (_opkIdLock)
-        {
-            uint start = _nextOpkId;
-            _nextOpkId += (uint)count;
-            return start;
         }
     }
     public PreKeyBundle CreatePreKeyBundle(uint? oneTimeKeyId = null)
@@ -569,21 +566,11 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                 return 0;
             }
             using var scope = _host.Services.CreateScope();
-            var channelFactory = scope.ServiceProvider.GetRequiredService<IPeerGrpcChannelFactory>();
-            var relayUri = new Uri($"https://127.0.0.1:{HomeRelay.BoundPort}");
-            var channel = channelFactory.GetOrCreateChannel(relayUri);
-            var client = new AuthenticatedRelayService.AuthenticatedRelayServiceClient(channel);
-            var drainRequest = new DrainMailboxRequest
-            {
-                RoutingToken = ByteString.CopyFrom(MailboxRoutingToken.ToByteArray()),
-                DrainToken = ByteString.CopyFrom(MailboxDrainToken.Span)
-            };
-            DrainMailboxResponse drainResponse;
-            try
-            {
-                drainResponse = await client.DrainMailboxAsync(drainRequest, cancellationToken: ct);
-            }
-            catch (RpcException ex)
+            var provisioner = scope.ServiceProvider.GetRequiredService<IRelayMailboxProvisioner>();
+            var relayEndpoint = RelayEndpoint.FromHostAndPort("127.0.0.1", HomeRelay.BoundPort);
+            var mailboxTokens = new MailboxTokenTriad(MailboxRoutingToken, MailboxDeliveryToken, MailboxDrainToken);
+            var drainResult = await provisioner.DrainMailboxOnceAsync(PublicIdentityId, relayEndpoint, mailboxTokens, ct);
+            if (drainResult.IsFailure)
             {
                 _logSink.Log(new SimulatorLogEntry(
                     DateTimeOffset.UtcNow,
@@ -591,74 +578,10 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                     DisplayName,
                     Id,
                     "MailboxDrain",
-                    $"gRPC error draining relay mailbox: {ex.Status.Detail ?? ex.Message}"));
+                    $"Mailbox drain failed: {drainResult.Error.Code} - {drainResult.Error.Description}"));
                 return 0;
             }
-            var drained = drainResponse.Envelopes;
-            if (drained.Count == 0) return 0;
-            var unwrapper = scope.ServiceProvider.GetRequiredService<ISealedEnvelopeUnwrapper>();
-            var ingress = scope.ServiceProvider.GetRequiredService<IInboundIngressPipeline>();
-            int processed = 0;
-            foreach (var queued in drained)
-            {
-                try
-                {
-                    var sealedEnv = SealedEnvelopeProto.Parser.ParseFrom(queued.EnvelopePayload);
-                    var decodeCheck = SealedWireFraming.Decode(sealedEnv.EncryptedPackage.Memory);
-                    if (decodeCheck.IsSuccess && decodeCheck.Value.SenderId == PublicIdentityId)
-                    {
-                        continue;
-                    }
-                    var mailboxEnvelope = new MailboxEnvelope(
-                        EnvelopeId.New(),
-                        MailboxRoutingToken,
-                        sealedEnv.EncryptedPackage.Memory,
-                        DateTimeOffset.UtcNow,
-                        DateTimeOffset.UtcNow.AddDays(7));
-                    var unwrapResult = unwrapper.Unwrap(mailboxEnvelope);
-                    if (unwrapResult.IsSuccess)
-                    {
-                        var ingressResult = await ingress.ProcessInboundAsync(unwrapResult.Value!, ct);
-                        if (ingressResult.IsSuccess)
-                        {
-                            processed++;
-                        }
-                        else
-                        {
-                            var logLevel = ingressResult.Error.Code == "EXPIRED_OR_DUPLICATE_MESSAGE"
-                                ? LogLevel.Debug
-                                : LogLevel.Warning;
-                            _logSink.Log(new SimulatorLogEntry(
-                                DateTimeOffset.UtcNow,
-                                logLevel,
-                                DisplayName,
-                                Id,
-                                "MailboxDrain",
-                                $"Ingress failed for drained envelope: {ingressResult.Error.Code} - {ingressResult.Error.Description}"));
-                        }
-                    }
-                    else
-                    {
-                        _logSink.Log(new SimulatorLogEntry(
-                            DateTimeOffset.UtcNow,
-                            LogLevel.Warning,
-                            DisplayName,
-                            Id,
-                            "MailboxDrain",
-                            $"Unwrap failed for drained envelope (Tamper/Corruption detected): {unwrapResult.Error.Code} - {unwrapResult.Error.Description}"));
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logSink.Log(new SimulatorLogEntry(
-                        DateTimeOffset.UtcNow,
-                        LogLevel.Warning,
-                        DisplayName,
-                        Id,
-                        "MailboxDrain",
-                        $"Error processing drained envelope (Replay/Tamper): {ex.Message}"));
-                }
-            }
+            int processed = drainResult.Value;
             if (processed > 0)
             {
                 await _outboxGate.WaitAsync(ct).ConfigureAwait(false);
