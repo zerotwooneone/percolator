@@ -18,7 +18,7 @@ public sealed class TransferSessionCoordinator
     private readonly ChunkPipelineScheduler _scheduler;
     private readonly DiskChunkAssembler _assembler;
     private readonly IDateTimeProvider _clock;
-    private readonly ITransferRateLimiter? _rateLimiter;
+    private readonly ITransferRateLimiter _rateLimiter;
     private readonly object _sessionSync = new();
     private readonly Dictionary<PublicIdentityId, int> _peerOffenses = [];
 
@@ -28,12 +28,12 @@ public sealed class TransferSessionCoordinator
         ChunkPipelineScheduler scheduler,
         DiskChunkAssembler assembler,
         IDateTimeProvider clock,
-        ITransferRateLimiter? rateLimiter = null)
+        ITransferRateLimiter rateLimiter)
     {
         _scheduler = scheduler;
         _assembler = assembler;
         _clock = clock;
-        _rateLimiter = rateLimiter;
+        _rateLimiter = rateLimiter ?? throw new ArgumentNullException(nameof(rateLimiter));
     }
 
     public int GetPeerOffenses(PublicIdentityId peerId)
@@ -101,10 +101,7 @@ public sealed class TransferSessionCoordinator
             int length = (int)Math.Min((long)chunkSize.Bytes, Math.Max(0, remainingBytes));
             ChunkByteLength actualLength = ChunkByteLength.FromBytes(length);
 
-            if (_rateLimiter != null)
-            {
-                await _rateLimiter.ThrottleUploadAsync(session.Id, TransferByteLength.FromBytes(length), ct);
-            }
+            await _rateLimiter.ThrottleUploadAsync(session.Id, TransferByteLength.FromBytes(length), ct);
 
             IReadOnlyList<FileChunkSlice> slices = ChunkBoundaryCalculator.CalculateSlices(session.Manifest, chunkIdx, actualLength);
             rentedPlaintext = ArrayPool<byte>.Shared.Rent(length);
@@ -178,10 +175,7 @@ public sealed class TransferSessionCoordinator
         }
 
         int plaintextLength = chunkFrame.Data.Length - ChunkCryptoService.TagSizeBytes;
-        if (_rateLimiter != null)
-        {
-            await _rateLimiter.ThrottleDownloadAsync(session.Id, TransferByteLength.FromBytes(plaintextLength), ct);
-        }
+        await _rateLimiter.ThrottleDownloadAsync(session.Id, TransferByteLength.FromBytes(plaintextLength), ct);
 
         byte[] rentedPlaintext = ArrayPool<byte>.Shared.Rent(Math.Max(1, plaintextLength));
         try

@@ -290,7 +290,7 @@ public sealed class TestIdentityNode
 
         var scheduler = new ChunkPipelineScheduler();
         var assembler = new DiskChunkAssembler(DesktopFileStorage);
-        FileTransferCoordinator = new TransferSessionCoordinator(scheduler, assembler, TimeProvider);
+        FileTransferCoordinator = new TransferSessionCoordinator(scheduler, assembler, TimeProvider, NullTransferRateLimiter.Instance);
 
         var fileTransferHandler = new FileTransferPayloadHandler(
             _transferSessionRepo,

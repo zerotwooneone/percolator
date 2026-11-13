@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection;
 using Percolator.Apps.FileTransfer.Features.IngressControl;
 using Percolator.Apps.FileTransfer.Features.MultiStreamEngine;
 using Percolator.Apps.FileTransfer.Features.Storage;
@@ -25,6 +25,9 @@ public static class ServiceCollectionExtensions
         collection.AddScoped<SwarmCoordinator>();
         collection.AddScoped<EndgameCoordinator>();
         collection.AddScoped<ITransferOfferReaperService, TransferOfferReaperService>();
+        // Null Object default: nodes resolve a connected pool per session via ITransferStreamPoolFactory;
+        // handlers that run before any pool exists get the no-op pool (connect/broadcast are no-ops).
+        collection.AddSingleton<ITransferStreamPool>(NullTransferStreamPool.Instance);
 
         return collection;
     }

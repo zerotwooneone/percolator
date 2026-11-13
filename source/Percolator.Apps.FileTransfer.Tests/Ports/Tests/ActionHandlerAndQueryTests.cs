@@ -1,4 +1,4 @@
-﻿using Percolator.Apps.FileTransfer.Domain.Common;
+using Percolator.Apps.FileTransfer.Domain.Common;
 using Percolator.Apps.FileTransfer.Domain.ManifestManagement;
 using Percolator.Apps.FileTransfer.Domain.SwarmCoordination;
 using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
@@ -207,7 +207,8 @@ private InMemoryBlobStorageService _blobStorage = null!;
             policyRepo,
             _serializer,
             _clock,
-            _blobStorage);
+            _blobStorage,
+            _streamPool);
 
         var inboundCtx = new InboundPayloadContext(
             channelId,
@@ -255,7 +256,7 @@ private InMemoryBlobStorageService _blobStorage = null!;
         {
             Policy = FileTransferFilterPolicy.DefaultPermissive(recipientId)
         };
-        var payloadHandler = new FileTransferPayloadHandler(recipientRepo, policyRepo, _serializer, _clock, _blobStorage);
+        var payloadHandler = new FileTransferPayloadHandler(recipientRepo, policyRepo, _serializer, _clock, _blobStorage, new FakeTransferStreamPool());
         await payloadHandler.HandleInboundAsync(new InboundPayloadContext(
             channelId,
             senderId,

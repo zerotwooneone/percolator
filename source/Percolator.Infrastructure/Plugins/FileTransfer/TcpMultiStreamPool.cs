@@ -164,7 +164,7 @@ public sealed class TcpMultiStreamPool : ITransferStreamPool
     private readonly PublicIdentityId _peerId;
     private readonly StreamCount _targetStreamCount;
     private readonly CallbackEndpointValidator _validator;
-    private readonly RelayTransferPipeClient? _pipeClient;
+    private readonly RelayTransferPipeClient _pipeClient;
     private readonly List<ITransferStream> _streams = new();
     private readonly SemaphoreSlim _poolLock = new(1, 1);
     private int _disposed;
@@ -185,13 +185,13 @@ public sealed class TcpMultiStreamPool : ITransferStreamPool
         PublicIdentityId peerId,
         StreamCount targetStreamCount,
         CallbackEndpointValidator validator,
-        RelayTransferPipeClient? pipeClient = null)
+        RelayTransferPipeClient pipeClient)
     {
         _sessionId = sessionId;
         _peerId = peerId;
         _targetStreamCount = targetStreamCount;
         _validator = validator ?? throw new ArgumentNullException(nameof(validator));
-        _pipeClient = pipeClient;
+        _pipeClient = pipeClient ?? throw new ArgumentNullException(nameof(pipeClient));
     }
 
     public async ValueTask ConnectDirectAsync(
@@ -268,11 +268,6 @@ public sealed class TcpMultiStreamPool : ITransferStreamPool
     {
         ArgumentNullException.ThrowIfNull(rendezvous);
         ThrowIfDisposed();
-
-        if (_pipeClient == null)
-        {
-            throw new InvalidOperationException("RelayTransferPipeClient is required to connect via relay pipe.");
-        }
 
         await _poolLock.WaitAsync(ct).ConfigureAwait(false);
         try

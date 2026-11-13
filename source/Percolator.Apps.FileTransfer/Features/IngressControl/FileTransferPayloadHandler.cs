@@ -17,8 +17,8 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
     private readonly IFileTransferFilterPolicyRepository _policyRepository;
     private readonly IPayloadSerializer _serializer;
     private readonly IDateTimeProvider _clock;
-    private readonly IBlobStorageService? _blobStorage;
-    private readonly ITransferStreamPool? _streamPool;
+    private readonly IBlobStorageService _blobStorage;
+    private readonly ITransferStreamPool _streamPool;
 
     public AppId TargetAppId => AppId.FileTransferControl;
 
@@ -27,15 +27,15 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
         IFileTransferFilterPolicyRepository policyRepository,
         IPayloadSerializer serializer,
         IDateTimeProvider clock,
-        IBlobStorageService? blobStorage = null,
-        ITransferStreamPool? streamPool = null)
+        IBlobStorageService blobStorage,
+        ITransferStreamPool streamPool)
     {
         _sessionRepository = sessionRepository ?? throw new ArgumentNullException(nameof(sessionRepository));
         _policyRepository = policyRepository ?? throw new ArgumentNullException(nameof(policyRepository));
         _serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
-        _blobStorage = blobStorage;
-        _streamPool = streamPool;
+        _blobStorage = blobStorage ?? throw new ArgumentNullException(nameof(blobStorage));
+        _streamPool = streamPool ?? throw new ArgumentNullException(nameof(streamPool));
     }
 
     public async ValueTask<DomainResult> HandleInboundAsync(InboundPayloadContext context, CancellationToken ct = default)
@@ -119,8 +119,7 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
         }
 
         if (offer.Manifest.Kind == ManifestDistributionKind.RemoteBlob &&
-            offer.Manifest.BlobDescriptor != null &&
-            _blobStorage != null)
+            offer.Manifest.BlobDescriptor != null)
         {
             ManifestBlobDescriptor blob = offer.Manifest.BlobDescriptor;
             var reference = new BlobReference
@@ -186,21 +185,18 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
 
         await _sessionRepository.SaveSessionAsync(session, ct);
 
-        if (_streamPool != null)
-        {
-            TransferSessionTransportContext? transportContext = await _sessionRepository.GetTransportContextAsync(accept.TransferSessionId, ct);
-            DirectWanPolicy wanPolicy = transportContext?.WanPolicy ?? DirectWanPolicy.DisabledByDefault;
+        TransferSessionTransportContext? transportContext = await _sessionRepository.GetTransportContextAsync(accept.TransferSessionId, ct);
+        DirectWanPolicy wanPolicy = transportContext?.WanPolicy ?? DirectWanPolicy.DisabledByDefault;
 
-            IReadOnlyList<DirectEndpointCandidate> filteredCandidates = accept.RoutingPreference == TransportRoutingPreference.RelayOnly
-                ? []
-                : PexRateLimiter.FilterAndDeduplicate(accept.ReceiverCandidates, wanPolicy, transportContext?.DirectCandidates);
+        IReadOnlyList<DirectEndpointCandidate> filteredCandidates = accept.RoutingPreference == TransportRoutingPreference.RelayOnly
+            ? []
+            : PexRateLimiter.FilterAndDeduplicate(accept.ReceiverCandidates, wanPolicy, transportContext?.DirectCandidates);
 
-            await FileTransferActionHandler.ConnectDirectWithRelayFallbackAsync(
-                _streamPool,
-                filteredCandidates,
-                transportContext?.RelayRendezvous,
-                ct);
-        }
+        await FileTransferActionHandler.ConnectDirectWithRelayFallbackAsync(
+            _streamPool,
+            filteredCandidates,
+            transportContext?.RelayRendezvous,
+            ct);
 
         return DomainResult.Success();
     }

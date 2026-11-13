@@ -18,7 +18,7 @@ public sealed class ChatService : IChatService
     private readonly IPayloadSender _payloadSender;
     private readonly IPayloadSerializer _serializer;
     private readonly IDateTimeProvider _timeProvider;
-    private readonly IBlobStorageService? _blobStorage;
+    private readonly IBlobStorageService _blobStorage;
 
     public ChatService(
         IChatMessageRepository chatRepo,
@@ -26,14 +26,14 @@ public sealed class ChatService : IChatService
         IPayloadSender payloadSender,
         IPayloadSerializer serializer,
         IDateTimeProvider timeProvider,
-        IBlobStorageService? blobStorage = null)
+        IBlobStorageService blobStorage)
     {
         _chatRepo = chatRepo ?? throw new ArgumentNullException(nameof(chatRepo));
         _channelRepo = channelRepo ?? throw new ArgumentNullException(nameof(channelRepo));
         _payloadSender = payloadSender ?? throw new ArgumentNullException(nameof(payloadSender));
         _serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
-        _blobStorage = blobStorage;
+        _blobStorage = blobStorage ?? throw new ArgumentNullException(nameof(blobStorage));
     }
 
     public async ValueTask<DomainResult<PayloadId>> SendMessageAsync(SendMessageCommand command, CancellationToken ct = default)
@@ -264,7 +264,7 @@ public sealed class ChatService : IChatService
 
         await _chatRepo.UpdateAsync(message, ct).ConfigureAwait(false);
 
-        if (_blobStorage is not null && attachmentsToPurge.Count > 0)
+        if (attachmentsToPurge.Count > 0)
         {
             foreach (var attachment in attachmentsToPurge)
             {

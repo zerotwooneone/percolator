@@ -1,4 +1,4 @@
-﻿using System.Buffers;
+using System.Buffers;
 using System.Security.Cryptography;
 using Percolator.Apps.FileTransfer.Domain.Common;
 using Percolator.Apps.FileTransfer.Domain.ManifestManagement;
@@ -22,9 +22,9 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
     private readonly IPayloadSerializer _serializer;
     private readonly IDistributedTrackerPort _trackerPort;
     private readonly IDateTimeProvider _clock;
-    private readonly IBlobStorageService? _blobStorage;
-    private readonly INetworkEndpointDiscoveryPort? _endpointDiscovery;
-    private readonly ITransferStreamPool? _streamPool;
+    private readonly IBlobStorageService _blobStorage;
+    private readonly INetworkEndpointDiscoveryPort _endpointDiscovery;
+    private readonly ITransferStreamPool _streamPool;
     private readonly FileTransferIngressFilter _ingressFilter;
 
     public FileTransferActionHandler(
@@ -35,9 +35,9 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         IDistributedTrackerPort trackerPort,
         IDateTimeProvider clock,
         FileTransferIngressFilter ingressFilter,
-        IBlobStorageService? blobStorage = null,
-        INetworkEndpointDiscoveryPort? endpointDiscovery = null,
-        ITransferStreamPool? streamPool = null)
+        IBlobStorageService blobStorage,
+        INetworkEndpointDiscoveryPort endpointDiscovery,
+        ITransferStreamPool streamPool)
     {
         _sessionRepository = sessionRepository ?? throw new ArgumentNullException(nameof(sessionRepository));
         _fileStorage = fileStorage ?? throw new ArgumentNullException(nameof(fileStorage));
@@ -46,9 +46,9 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         _trackerPort = trackerPort ?? throw new ArgumentNullException(nameof(trackerPort));
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
         _ingressFilter = ingressFilter ?? throw new ArgumentNullException(nameof(ingressFilter));
-        _blobStorage = blobStorage;
-        _endpointDiscovery = endpointDiscovery;
-        _streamPool = streamPool;
+        _blobStorage = blobStorage ?? throw new ArgumentNullException(nameof(blobStorage));
+        _endpointDiscovery = endpointDiscovery ?? throw new ArgumentNullException(nameof(endpointDiscovery));
+        _streamPool = streamPool ?? throw new ArgumentNullException(nameof(streamPool));
     }
 
     public ValueTask<DomainResult<TransferSessionId>> InitiateTransferAsync(
@@ -180,14 +180,10 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
             ? TransferSession.CreateOutgoing1to1(sessionId, localInitiator, recipients[0], manifest, enforcedSeedRatio, _clock)
             : TransferSession.CreateOutgoingMultiPeer(sessionId, localInitiator, recipients, manifest, enforcedSeedRatio, _clock);
 
-        IReadOnlyList<DirectEndpointCandidate> rawCandidates = _endpointDiscovery != null
-            ? await _endpointDiscovery.DiscoverLocalCandidatesAsync(wanPolicy, ct)
-            : [];
+        IReadOnlyList<DirectEndpointCandidate> rawCandidates = await _endpointDiscovery.DiscoverLocalCandidatesAsync(wanPolicy, ct);
         IReadOnlyList<DirectEndpointCandidate> candidates = PexRateLimiter.FilterAndDeduplicate(rawCandidates, wanPolicy);
 
-        RelayRendezvousDescriptor? relayRendezvous = _endpointDiscovery != null
-            ? await _endpointDiscovery.AllocateRelayRendezvousAsync(sessionId, ct)
-            : null;
+        RelayRendezvousDescriptor? relayRendezvous = await _endpointDiscovery.AllocateRelayRendezvousAsync(sessionId, ct);
 
         // Announce as Seeder to the swarm tracker (BitTorrent swarm bootstrap)
         SwarmRendezvousId rendezvousId = SwarmRendezvousId.Derive(sessionKey);
@@ -214,7 +210,7 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         {
             manifestDist = ManifestDistribution.FromInline(InlineManifestData.FromSpan(serializedManifest.Span));
         }
-        else if (_blobStorage != null)
+        else
         {
             using MemoryStream manifestStream = new(serializedManifest.ToArray(), writable: false);
             var uploadRequest = new BlobUploadRequest(
@@ -233,15 +229,6 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
                 ChunkHash.FromBytes(blobRef.CiphertextSha256),
                 TotalBundleBytes.FromBytes(serializedManifest.Length),
                 RelayPipeEndpointUri.Parse(blobRef.RelayEndpointUri ?? "https://relay.percolator.net/pipes")));
-        }
-        else
-        {
-            byte[] sha256 = SHA256.HashData(serializedManifest.Span);
-            manifestDist = ManifestDistribution.FromBlob(new ManifestBlobDescriptor(
-                BlobId.FromSha256(sha256),
-                ChunkHash.FromBytes(sha256),
-                TotalBundleBytes.FromBytes(serializedManifest.Length),
-                RelayPipeEndpointUri.Parse("https://relay.percolator.net/pipes")));
         }
 
         FileTransferOfferPayload offerPayload = new(
@@ -347,9 +334,7 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         TransferSessionTransportContext? transportContext = await _sessionRepository.GetTransportContextAsync(sessionId, ct);
         DirectWanPolicy wanPolicy = transportContext?.WanPolicy ?? DirectWanPolicy.DisabledByDefault;
 
-        IReadOnlyList<DirectEndpointCandidate> rawReceiverCandidates = _endpointDiscovery != null
-            ? await _endpointDiscovery.DiscoverLocalCandidatesAsync(wanPolicy, ct)
-            : [];
+        IReadOnlyList<DirectEndpointCandidate> rawReceiverCandidates = await _endpointDiscovery.DiscoverLocalCandidatesAsync(wanPolicy, ct);
         IReadOnlyList<DirectEndpointCandidate> receiverCandidates = PexRateLimiter.FilterAndDeduplicate(rawReceiverCandidates, wanPolicy);
 
         ChannelId channelId = transportContext?.ChannelId ?? ChannelId.FromGuid(sessionId.Value);
@@ -372,7 +357,7 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
                 ct);
 
             // Establish out-of-band multi-stream connection (croc-style direct P2P with blind relay fallback)
-            if (_streamPool != null && !session.IsDownloadComplete)
+            if (!session.IsDownloadComplete)
             {
                 List<DirectEndpointCandidate> combinedDirect = [.. transportContext.DirectCandidates];
                 foreach (var tc in PexRateLimiter.FilterAndDeduplicate(trackerCandidates, wanPolicy, receiverCandidates))

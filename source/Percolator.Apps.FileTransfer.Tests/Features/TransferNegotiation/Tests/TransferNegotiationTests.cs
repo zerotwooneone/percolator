@@ -1,4 +1,4 @@
-﻿using Percolator.Apps.FileTransfer.Domain.Common;
+using Percolator.Apps.FileTransfer.Domain.Common;
 using Percolator.Apps.FileTransfer.Domain.ManifestManagement;
 using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Features.IngressControl;
@@ -42,7 +42,10 @@ public sealed class TransferNegotiationTests
             new ProtobufPayloadSerializer(),
             _trackerPort,
             _clock,
-            defaultFilter);
+            defaultFilter,
+            new InMemoryBlobStorageService(),
+            new FakeNetworkEndpointDiscoveryPort(),
+            new FakeTransferStreamPool());
     }
 
     [Test]
@@ -314,7 +317,10 @@ public sealed class TransferNegotiationTests
             new ProtobufPayloadSerializer(),
             _trackerPort,
             _clock,
-            filter);
+            filter,
+            new InMemoryBlobStorageService(),
+            new FakeNetworkEndpointDiscoveryPort(),
+            new FakeTransferStreamPool());
 
         var initiateResult = await handler.InitiateTransferAsync(
             [PublicIdentityId.New()],
@@ -350,7 +356,10 @@ public sealed class TransferNegotiationTests
             new ProtobufPayloadSerializer(),
             _trackerPort,
             _clock,
-            filter);
+            filter,
+            new InMemoryBlobStorageService(),
+            new FakeNetworkEndpointDiscoveryPort(),
+            new FakeTransferStreamPool());
 
         var initiateResult = await handler.InitiateTransferAsync(
             [],
