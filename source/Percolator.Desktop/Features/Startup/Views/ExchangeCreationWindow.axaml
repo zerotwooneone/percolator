@@ -25,29 +25,12 @@
             <TextBlock Text="An exchange is a post-office for offline personas: it holds sealed envelopes and hands them back when a persona comes online. Running your own is optional — most users never need it."
                        TextWrapping="Wrap"
                        Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-            <Button Content="Or add an existing exchange someone else runs →"
-                    Command="{Binding UseRemoteCommand}"
-                    HorizontalAlignment="Left" />
-        </StackPanel>
-
-        <!-- Remote registration: endpoint + relay identity shared out-of-band. A pure
-             vault-local row write — no connection is opened from the gate. -->
-        <StackPanel IsVisible="{Binding IsRemoteStep}" Spacing="12">
-            <TextBlock Text="Adding an exchange records it in your vault — nothing is sent. The exchange operator shares its relay identity and address out-of-band."
+            <!-- Discoverability only — remote registration needs operator details shared
+                 while you're online, so it lives in the post-launch shell, not the gate. -->
+            <TextBlock Text="Using an exchange someone else runs? Go online with a persona and add it from there."
+                       Theme="{StaticResource CaptionTextBlockStyle}"
                        TextWrapping="Wrap"
                        Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-            <TextBlock Text="Exchange address (host:port or URI)"
-                       Theme="{StaticResource CaptionTextBlockStyle}" />
-            <TextBox Text="{Binding RemoteEndpoint, Mode=TwoWay}" />
-            <TextBlock Text="Relay identity (GUID)"
-                       Theme="{StaticResource CaptionTextBlockStyle}" />
-            <TextBox Text="{Binding RemoteRelayId, Mode=TwoWay}" />
-            <Border Classes="banner"
-                    Padding="8"
-                    IsVisible="{Binding RemoteError, Converter={x:Static ObjectConverters.IsNotNull}}">
-                <TextBlock Text="{Binding RemoteError}"
-                           TextWrapping="Wrap" />
-            </Border>
         </StackPanel>
 
         <!-- Step 2: display name + avatar + preferred port (mirrors persona creation). -->
@@ -137,7 +120,7 @@
             <Button Grid.Column="3"
                     Content="Next"
                     Command="{Binding NextCommand}"
-                    IsVisible="{Binding ShowNext}"
+                    IsVisible="{Binding !IsLinkingStep}"
                     Margin="0,0,8,0" />
             <Button Grid.Column="4"
                     Classes="accent"

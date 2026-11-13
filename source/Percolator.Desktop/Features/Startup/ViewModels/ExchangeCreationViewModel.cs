@@ -45,44 +45,21 @@ public partial class ExchangeCreationViewModel : ViewModelBase
     [NotifyPropertyChangedFor(nameof(IsProfileStep))]
     [NotifyPropertyChangedFor(nameof(IsLinkingStep))]
     [NotifyPropertyChangedFor(nameof(CurrentStepLabel))]
-    [NotifyPropertyChangedFor(nameof(ShowNext))]
     [NotifyCanExecuteChangedFor(nameof(NextCommand))]
     [NotifyCanExecuteChangedFor(nameof(BackCommand))]
     private int _currentStep;
 
-    /// <summary>
-    /// Remote-registration mode replaces the wizard steps with a single endpoint + relay
-    /// identity form — a vault-local row write, no connection is opened.
-    /// </summary>
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsFramingStep))]
-    [NotifyPropertyChangedFor(nameof(IsProfileStep))]
-    [NotifyPropertyChangedFor(nameof(IsLinkingStep))]
-    [NotifyPropertyChangedFor(nameof(IsRemoteStep))]
-    [NotifyPropertyChangedFor(nameof(CurrentStepLabel))]
-    [NotifyPropertyChangedFor(nameof(ShowNext))]
-    [NotifyCanExecuteChangedFor(nameof(NextCommand))]
-    [NotifyCanExecuteChangedFor(nameof(BackCommand))]
-    [NotifyCanExecuteChangedFor(nameof(FinishCommand))]
-    private bool _isRemoteMode;
-
-    public bool IsFramingStep => !IsRemoteMode && CurrentStep == 0;
-    public bool IsProfileStep => !IsRemoteMode && CurrentStep == 1;
-    public bool IsLinkingStep => !IsRemoteMode && CurrentStep == 2;
-    public bool IsRemoteStep => IsRemoteMode;
-
-    /// <summary>Remote mode has no Next — it is a single form.</summary>
-    public bool ShowNext => !IsRemoteMode && !IsLinkingStep;
+    public bool IsFramingStep => CurrentStep == 0;
+    public bool IsProfileStep => CurrentStep == 1;
+    public bool IsLinkingStep => CurrentStep == 2;
 
     /// <summary>Step caption shown in the dialog header.</summary>
-    public string CurrentStepLabel => IsRemoteMode
-        ? "Add an existing exchange"
-        : CurrentStep switch
-        {
-            0 => "Run your own post-office",
-            1 => "Exchange profile",
-            _ => "Link personas (optional)"
-        };
+    public string CurrentStepLabel => CurrentStep switch
+    {
+        0 => "Run your own post-office",
+        1 => "Exchange profile",
+        _ => "Link personas (optional)"
+    };
 
     /// <summary>The deliberate self-selection framing + honest uptime warning (step 1).</summary>
     public string FramingMessage =>
@@ -111,24 +88,6 @@ public partial class ExchangeCreationViewModel : ViewModelBase
     [NotifyCanExecuteChangedFor(nameof(FinishCommand))]
     private int _preferredPort = ExchangeDirectoryService.DefaultPreferredPort;
 
-    /// <summary>Remote form: network address of the exchange (host:port or URI).</summary>
-    [ObservableProperty]
-    [NotWhitespace(ErrorMessage = "Endpoint is required.")]
-    [NotifyDataErrorInfo]
-    [NotifyCanExecuteChangedFor(nameof(FinishCommand))]
-    private string _remoteEndpoint = string.Empty;
-
-    /// <summary>Remote form: relay identity GUID shared out-of-band by the operator.</summary>
-    [ObservableProperty]
-    [NotWhitespace(ErrorMessage = "Relay identity is required.")]
-    [NotifyDataErrorInfo]
-    [NotifyCanExecuteChangedFor(nameof(FinishCommand))]
-    private string _remoteRelayId = string.Empty;
-
-    /// <summary>Inline error surfaced when the remote form fails validation.</summary>
-    [ObservableProperty]
-    private string? _remoteError;
-
     /// <summary>Personas offered for linking — all unchecked by default (explicit opt-in).</summary>
     public IReadOnlyList<LinkablePersonaModel> LinkablePersonas { get; private set; } =
         Array.Empty<LinkablePersonaModel>();
@@ -143,10 +102,6 @@ public partial class ExchangeCreationViewModel : ViewModelBase
         Avatar = AvatarPresentation.FromIdenticon(_identicons.Generate(_candidateId.Value));
         DisplayName = string.Empty;
         PreferredPort = ExchangeDirectoryService.DefaultPreferredPort;
-        IsRemoteMode = false;
-        RemoteEndpoint = string.Empty;
-        RemoteRelayId = string.Empty;
-        RemoteError = null;
         // Eager validation: an untouched empty name must block Next/Finish on the profile step.
         ValidateAllProperties();
         LinkablePersonas = personas
@@ -171,49 +126,15 @@ public partial class ExchangeCreationViewModel : ViewModelBase
     private void Next() => CurrentStep++;
 
     [RelayCommand(CanExecute = nameof(CanGoBack))]
-    private void Back()
-    {
-        if (IsRemoteMode)
-        {
-            IsRemoteMode = false;
-            return;
-        }
-
-        CurrentStep--;
-    }
-
-    /// <summary>Framing-step escape: switch to the remote-registration form.</summary>
-    [RelayCommand]
-    private void UseRemote() => IsRemoteMode = true;
+    private void Back() => CurrentStep--;
 
     /// <summary>
     /// Finish is available once the profile step validates — the linking step is optional
-    /// and skippable, so it is not required to reach step three first. In remote mode the
-    /// relay identity must parse as a GUID before the result is produced.
+    /// and skippable, so it is not required to reach step three first.
     /// </summary>
     [RelayCommand(CanExecute = nameof(CanFinish))]
     private void Finish()
     {
-        if (IsRemoteMode)
-        {
-            RemoteError = null;
-            if (!Guid.TryParse(RemoteRelayId.Trim(), out var remoteId))
-            {
-                RemoteError = "Relay identity must be a GUID — the exchange operator shares it out-of-band.";
-                return;
-            }
-
-            Result = new ExchangeCreationResult(
-                new PublicIdentityId(remoteId),
-                string.Empty,
-                0,
-                Array.Empty<PublicIdentityId>(),
-                IsRemote: true,
-                RemoteEndpoint: RemoteEndpoint.Trim());
-            RequestClose?.Invoke(this, EventArgs.Empty);
-            return;
-        }
-
         Result = new ExchangeCreationResult(
             _candidateId,
             DisplayName.Trim(),
@@ -233,12 +154,9 @@ public partial class ExchangeCreationViewModel : ViewModelBase
     }
 
     private bool CanGoNext() =>
-        !IsRemoteMode && CurrentStep < 2 && (CurrentStep == 0 || !HasErrors);
+        CurrentStep < 2 && (CurrentStep == 0 || !HasErrors);
 
-    private bool CanGoBack() => IsRemoteMode || CurrentStep > 0;
+    private bool CanGoBack() => CurrentStep > 0;
 
-    private bool CanFinish() =>
-        IsRemoteMode
-            ? !string.IsNullOrWhiteSpace(RemoteEndpoint) && !string.IsNullOrWhiteSpace(RemoteRelayId)
-            : CurrentStep >= 1 && !HasErrors;
+    private bool CanFinish() => CurrentStep >= 1 && !HasErrors;
 }

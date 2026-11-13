@@ -341,65 +341,6 @@ public sealed class ExchangeViewModelTests
         vm.Result.Should().BeTrue("a saved profile edit must flag the tile for refresh");
     }
 
-    // ---- Creation wizard: remote registration mode ----
-
-    [Test]
-    public void Wizard_RemoteMode_ProducesRemoteResult()
-    {
-        var wizard = new ExchangeCreationViewModel(_identicons);
-        wizard.Initialize(new[] { Persona("Alice") });
-        var relayId = Guid.NewGuid();
-
-        wizard.UseRemoteCommand.Execute(null);
-
-        wizard.IsRemoteStep.Should().BeTrue();
-        wizard.IsFramingStep.Should().BeFalse();
-        wizard.FinishCommand.CanExecute(null).Should().BeFalse(
-            "an empty remote form cannot finish");
-
-        wizard.RemoteEndpoint = "relay.example.net:5200";
-        wizard.RemoteRelayId = relayId.ToString();
-        wizard.FinishCommand.Execute(null);
-
-        wizard.Result.Should().NotBeNull();
-        wizard.Result!.IsRemote.Should().BeTrue();
-        wizard.Result!.RemoteEndpoint.Should().Be("relay.example.net:5200");
-        wizard.Result!.RelayIdentityId.Value.Should().Be(relayId);
-        wizard.Result!.LinkedPersonaIds.Should().BeEmpty(
-            "remote registration carries no pre-linked personas — linking is re-editable via manage");
-    }
-
-    [Test]
-    public void Wizard_Remote_InvalidRelayGuid_BlocksFinishAndSurfacesError()
-    {
-        var wizard = new ExchangeCreationViewModel(_identicons);
-        wizard.Initialize(Array.Empty<PersonaDirectoryEntry>());
-        var closed = false;
-        wizard.RequestClose += (_, _) => closed = true;
-        wizard.UseRemoteCommand.Execute(null);
-        wizard.RemoteEndpoint = "relay.example.net:5200";
-        wizard.RemoteRelayId = "not-a-guid";
-
-        wizard.FinishCommand.Execute(null);
-
-        closed.Should().BeFalse("an unparseable relay identity must not produce a result");
-        wizard.Result.Should().BeNull();
-        wizard.RemoteError.Should().NotBeNullOrWhiteSpace();
-    }
-
-    [Test]
-    public void Wizard_RemoteMode_BackReturnsToFraming()
-    {
-        var wizard = new ExchangeCreationViewModel(_identicons);
-        wizard.Initialize(Array.Empty<PersonaDirectoryEntry>());
-        wizard.UseRemoteCommand.Execute(null);
-
-        wizard.BackCommand.Execute(null);
-
-        wizard.IsRemoteStep.Should().BeFalse();
-        wizard.IsFramingStep.Should().BeTrue();
-    }
-
     // ---- Gate: onboarding + launch provisioning ----
 
     private sealed class GateFixture
@@ -510,6 +451,27 @@ public sealed class ExchangeViewModelTests
 
         f.Vm.IsOnboardingActive.Should().BeFalse();
         f.Vm.IsExchangeCreateEnabled.Should().BeTrue();
+    }
+
+    [Test]
+    public async Task Gate_CompletedOnboarding_NotifiesExchangeCreateEnabled()
+    {
+        var f = GateFixture.Create();
+        f.Settings
+            .Setup(s => s.GetAppSettingAsync(
+                IdentityGateViewModel.OnboardingCompletedKey,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync("1");
+        var fired = new List<string?>();
+        f.Vm.PropertyChanged += (_, e) => fired.Add(e.PropertyName);
+
+        await f.Vm.LoadAsync(f.Session);
+
+        // _session assignment is silent and IsOnboardingActive=false is a no-op on a
+        // returning vault — without an explicit notification the + tile keeps its
+        // initially-bound IsEnabled=false forever.
+        fired.Should().Contain(nameof(IdentityGateViewModel.IsExchangeCreateEnabled));
+        f.Vm.CreateExchangeCommand.CanExecute(null).Should().BeTrue();
     }
 
     [Test]

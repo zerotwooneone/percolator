@@ -469,26 +469,15 @@ public partial class IdentityGateViewModel : ViewModelBase
         IsBusy = true;
         try
         {
-            ExchangeDirectoryEntry entry;
-            if (result.IsRemote)
-            {
-                // Remote registration is a vault-local row write — no connection is opened.
-                entry = await _exchanges
-                    .RegisterRemoteAsync(_session, result.RelayIdentityId, result.RemoteEndpoint!, ct)
-                    .ConfigureAwait(true);
-            }
-            else
-            {
-                entry = await _exchanges
-                    .CreateSelfHostedAsync(
-                        _session,
-                        result.RelayIdentityId,
-                        result.DisplayName,
-                        result.PreferredPort,
-                        result.LinkedPersonaIds,
-                        ct)
-                    .ConfigureAwait(true);
-            }
+            var entry = await _exchanges
+                .CreateSelfHostedAsync(
+                    _session,
+                    result.RelayIdentityId,
+                    result.DisplayName,
+                    result.PreferredPort,
+                    result.LinkedPersonaIds,
+                    ct)
+                .ConfigureAwait(true);
 
             // The tile appears offline and inert — nothing listens until launch selects it.
             var tile = BuildExchangeTile(entry);
@@ -622,6 +611,13 @@ public partial class IdentityGateViewModel : ViewModelBase
         OnPropertyChanged(nameof(HasPersonas));
         OnPropertyChanged(nameof(HasEmptyState));
         OnPropertyChanged(nameof(HasExchanges));
+        // _session is a plain field — its assignment in LoadAsync raises no notification,
+        // and IsOnboardingActive/IsBusy only notify when their value actually changes. A
+        // vault with onboarding already complete would otherwise leave the `+` tile bound
+        // to a stale IsEnabled=false forever.
+        OnPropertyChanged(nameof(IsExchangeCreateEnabled));
+        OnPropertyChanged(nameof(ExchangeCreateTooltip));
+        CreateExchangeCommand.NotifyCanExecuteChanged();
         OnPersonaStateChanged();
     }
 
