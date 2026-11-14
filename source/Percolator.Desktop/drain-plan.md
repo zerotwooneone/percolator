@@ -60,7 +60,7 @@ public interface IActiveIdentitySet
 
 ---
 
-### DRAIN-02 ⬜ — Transport port split & stream session contract
+### DRAIN-02 ✅ — Transport port split & stream session contract
 
 **Files:**
 - Create `Percolator.Domain/Delivery/ValueObjects/QueuedMailboxEnvelope.cs`
@@ -119,6 +119,11 @@ public interface IRelayMailboxProvisioner
 - Remove `DrainMailboxOnceAsync` and `StopMailboxStreamAsync` from `IRelayMailboxProvisioner` and `NullRelayMailboxProvisioner`.
 - `NullRelayMailboxClient.OpenMailboxStreamAsync` returns `DomainError("PROVISIONER_UNAVAILABLE", ...)`.
 
+**Shipped notes (as implemented):**
+- `DrainMailboxOnceAsync` was removed from the interface but remains on the concrete `GrpcRelayMailboxProvisioner` — `SimulatedPersonaHost.DrainMailboxAsync` bridges to it via a temporary `is GrpcRelayMailboxProvisioner` cast until DRAIN-09 migrates that path. `StopMailboxStreamAsync` was removed everywhere.
+- `GetPreKeyStatusAsync` on `GrpcRelayMailboxProvisioner` returns `RELAY_PREKEY_STATUS_UNAVAILABLE` until the DRAIN-10 status RPC exists.
+- `RelayPreKeyStatus` lives in `IRelayMailboxProvisioner.cs` alongside `MailboxTokenTriad`.
+
 **QMS:** `INV-PURE-DOMAIN-PORTS`, `INV-ADAPTER-HYDRATION-BOUNDARY`, `DEP-INFRA-MAILBOX-RETRIEVAL`.
 
 ---
@@ -141,7 +146,8 @@ public interface IRelayMailboxProvisioner
 8. `DisposeAsync`: call `RequestStream.CompleteAsync()` (best-effort), cancel pump CTS, await pump completion, drain remaining items from channel and call `CryptographicOperations.ZeroMemory(MemoryMarshal.AsBytes(item.Envelope.Ciphertext.Span))` on backing arrays, dispose duplex call.
 
 **`GrpcRelayMailboxProvisioner` changes:**
-- Remove `IServiceScopeFactory` constructor parameter, `DrainMailboxOnceAsync`, and `StopMailboxStreamAsync`.
+- `StopMailboxStreamAsync` was already removed in DRAIN-02 — nothing to do here.
+- `DrainMailboxOnceAsync` stays on the concrete class (simulator bridge until DRAIN-09), so the `IServiceScopeFactory` and `IDateTimeProvider` ctor parameters must remain; they are removed in DRAIN-09 instead.
 - Register `AddSingleton<IRelayMailboxClient, GrpcRelayMailboxClient>()` in `AddTransportInfrastructure`.
 
 **QMS:** `DEP-INFRA-NATIVE-FAULT-TRANSLATION`, `DEP-INFRA-VOLATILE-ZEROIZATION`, `DEP-INFRA-MAILBOX-RETRIEVAL`.
@@ -316,7 +322,7 @@ public sealed record DrainSchedulerOptions
 - Modify `Percolator.Application/Delivery/DrainScheduler.cs`
 
 - Change default `oneTimePreKeyCount` in `RelayDirectoryService.ProvisionLinkedMailboxesAsync` and `IRelayMailboxProvisioner.PublishPreKeyBundleAsync` from `25` to `100` (matches `RelayHostedPreKeyBundle.MaxOneTimePreKeyCapacity = 100` and Signal's batch size).
-- In `DrainScheduler.SuperviseTargetAsync` step 1: on the first connect for a `MailboxDrainTarget` within the session, call `ProvisionMailboxAsync`; if the target has no relay-side bundle yet (`GetPreKeyStatusAsync` returns `OneTimePreKeyCount == 0 && SignedPreKeyId == 0`), call `PublishPreKeyBundleAsync(..., newOneTimePreKeyCount: 100)`. This guarantees `VaultUnlockViewModel.TryAutoStartLaunchAsync` (which bypasses `IdentityGateViewModel.LaunchPersonasAsync`) provisions and publishes identically to the gate path.
+- In `DrainScheduler.SuperviseTargetAsync` step 1: on the first connect for a `MailboxDrainTarget` within the session, call `ProvisionMailboxAsync`; if the target has no relay-side bundle yet (`GetPreKeyStatusAsync` returns `OneTimePreKeyCount == 0 && SignedPreKeyId == 0`), call `PublishPreKeyBundleAsync(..., newOneTimePreKeyCount: 100)`. Until DRAIN-10 adds the status RPC, `GetPreKeyStatusAsync` fails with `RELAY_PREKEY_STATUS_UNAVAILABLE` — treat a failure as unknown bundle state and publish anyway (publication merges OPKs idempotently). This guarantees `VaultUnlockViewModel.TryAutoStartLaunchAsync` (which bypasses `IdentityGateViewModel.LaunchPersonasAsync`) provisions and publishes identically to the gate path.
 
 **QMS:** `SYS-ASYNC-SESSION-INIT`, `HAZ-PREKEY-POOL-STARVATION`.
 
@@ -341,10 +347,11 @@ public sealed record DrainSchedulerOptions
 **Files:**
 - Modify `Percolator.Infrastructure/Protos/authenticated_relay.proto` (delete `rpc DrainMailbox`, `DrainMailboxRequest`, `DrainMailboxResponse`)
 - Modify `Percolator.Infrastructure/Transport/Endpoints/AuthenticatedRelayEndpoint.cs` (delete `DrainMailbox` override)
+- Modify `Percolator.Infrastructure/Transport/GrpcRelayMailboxProvisioner.cs` (delete `DrainMailboxOnceAsync` — kept since DRAIN-02 as the simulator bridge — plus `_scopeFactory`, `_timeProvider`, `EnvelopeExpiryWindow`, and now-unused usings)
 - Modify `Percolator.Infrastructure/Transport/IRelayMailboxCapabilityStore.cs` (rename `DrainEnvelopesAsync` → `PurgeMailboxAsync(ReadOnlyMemory<byte> routingToken, CancellationToken ct = default)` returning `ValueTask<int>`)
 - Modify `Percolator.Infrastructure/Persistence/Repositories/SqliteRelayMailboxCapabilityStore.cs` (`PurgeMailboxAsync` uses `ExecuteDeleteAsync` directly without materializing payloads)
 - Modify `Percolator.Desktop/Common/Services/ExchangeDirectoryService.cs` (`UnlinkPersonaAsync` L195: call `_capabilities.PurgeMailboxAsync`)
-- Modify `Percolator.Simulator/Features/Topology/SimulatedPersonaHost.cs` (`DrainMailboxAsync`: open stream via `IRelayMailboxClient`, read available envelopes with short idle timeout, run `MailboxDrainService.ReceiveAsync` per envelope, dispose session)
+- Modify `Percolator.Simulator/Features/Topology/SimulatedPersonaHost.cs` (`DrainMailboxAsync`: open stream via `IRelayMailboxClient`, read available envelopes with short idle timeout, run `MailboxDrainService.ReceiveAsync` per envelope, dispose session; removes the DRAIN-02 temporary `is GrpcRelayMailboxProvisioner` bridge)
 - Modify `Percolator.Infrastructure.Tests/Fakes/FakeRelayMailboxCapabilityStore.cs`, `Percolator.Infrastructure.Windows.Tests/Fakes/FakeRelayMailboxCapabilityStore.cs`, `Percolator.Infrastructure.Tests/Persistence/SqliteRelayMailboxCapabilityStoreTests.cs`, `Percolator.Infrastructure.Tests/Transport/Endpoints/AuthenticatedRelayEndpointTests.cs`, `Percolator.Infrastructure.Tests/Protos/CoreProtoCompilationTests.cs`
 
 - Note: `RelayMailboxQueue` (in-memory domain aggregate) and `TestIdentityNode.DrainMailboxAsync` remain unchanged — they back in-memory `Percolator.ApplicationIntegrationTests` and do not touch gRPC or SQLite.
@@ -386,6 +393,8 @@ message GetPreKeyStatusResponse {
 // In service AuthenticatedRelayService:
 rpc GetPreKeyStatus(GetPreKeyStatusRequest) returns (GetPreKeyStatusResponse);
 ```
+
+- Server handler: drain-token authenticated; `found=false` when no hosted bundle exists for the routing token + device. Replace the `RELAY_PREKEY_STATUS_UNAVAILABLE` stub added in DRAIN-02 inside `GrpcRelayMailboxProvisioner.GetPreKeyStatusAsync` with the real call; map `found=false` to `Success(new RelayPreKeyStatus(0, 0))`.
 
 **2. End-to-end `SignedPreKeyId` & multi-SPK retention (Signal parity):**
 - `VaultSignedPreKeyEntity`: change PK from `(OwnerIdentityId, DeviceId)` to `(OwnerIdentityId, DeviceId, KeyId)`; add `uint KeyId { get; set; } = 1;`, `bool IsCurrent { get; set; } = true;`.

@@ -11,6 +11,14 @@ public sealed record MailboxTokenTriad(
     DeliveryToken DrainToken,
     DeliveryToken? PreviousDrainToken = null);
 
+/// <summary>Relay-side hosted pre-key bundle snapshot for maintenance decisions.</summary>
+public sealed record RelayPreKeyStatus(uint OneTimePreKeyCount, uint SignedPreKeyId);
+
+/// <summary>
+/// Mailbox registration and hosted pre-key publication against a relay. Envelope
+/// retrieval lives on <see cref="IRelayMailboxClient"/> — a provisioner performs
+/// one-shot, drain-token-authenticated writes only.
+/// </summary>
 public interface IRelayMailboxProvisioner
 {
     Task<DomainResult> ProvisionMailboxAsync(
@@ -25,17 +33,12 @@ public interface IRelayMailboxProvisioner
         DeviceId deviceId,
         RelayEndpoint endpoint,
         MailboxTokenTriad tokens,
-        int newOneTimePreKeyCount = 25,
+        int newOneTimePreKeyCount = 100,
         CancellationToken ct = default);
 
-    Task<DomainResult<int>> DrainMailboxOnceAsync(
-        PublicIdentityId ownerIdentityId,
+    Task<DomainResult<RelayPreKeyStatus>> GetPreKeyStatusAsync(
         RelayEndpoint endpoint,
         MailboxTokenTriad tokens,
-        CancellationToken ct = default);
-
-    Task StopMailboxStreamAsync(
-        PublicIdentityId ownerIdentityId,
-        PublicIdentityId relayIdentityId,
+        DeviceId deviceId,
         CancellationToken ct = default);
 }

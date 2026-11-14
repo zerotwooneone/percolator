@@ -260,14 +260,19 @@ public sealed class GrpcRelayMailboxProvisioner : IRelayMailboxProvisioner
         return DomainResult<int>.Success(processed);
     }
 
-    public Task StopMailboxStreamAsync(
-        Domain.Identities.PublicIdentityId ownerIdentityId,
-        Domain.Identities.PublicIdentityId relayIdentityId,
+    public Task<DomainResult<RelayPreKeyStatus>> GetPreKeyStatusAsync(
+        RelayEndpoint endpoint,
+        MailboxTokenTriad tokens,
+        DeviceId deviceId,
         CancellationToken ct = default)
     {
-        // This provisioner performs one-shot RPCs only and holds no live mailbox stream;
-        // there is nothing to tear down.
-        return Task.CompletedTask;
+        // The GetPreKeyStatus relay RPC is introduced with the prekey-maintenance
+        // ticket; until the wire contract exists there is no honest source of
+        // counts — report unavailable rather than fabricate (anti-stub discipline).
+        return Task.FromResult(DomainResult<RelayPreKeyStatus>.Failure(
+            new DomainError(
+                "RELAY_PREKEY_STATUS_UNAVAILABLE",
+                "Relay pre-key status is unavailable until the status RPC exists.")));
     }
 
     private AuthenticatedRelayService.AuthenticatedRelayServiceClient CreateClient(RelayEndpoint endpoint)

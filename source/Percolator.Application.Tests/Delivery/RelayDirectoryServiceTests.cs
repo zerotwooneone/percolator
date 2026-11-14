@@ -99,25 +99,19 @@ public sealed class RelayDirectoryServiceTests
             DeviceId deviceId,
             RelayEndpoint endpoint,
             MailboxTokenTriad tokens,
-            int newOneTimePreKeyCount = 25,
+            int newOneTimePreKeyCount = 100,
             CancellationToken ct = default)
         {
             Publications.Add((ownerIdentityId, deviceId, endpoint, tokens, newOneTimePreKeyCount));
             return Task.FromResult(PublishResult ?? DomainResult.Success());
         }
 
-        public Task<DomainResult<int>> DrainMailboxOnceAsync(
-            PublicIdentityId ownerIdentityId,
+        public Task<DomainResult<RelayPreKeyStatus>> GetPreKeyStatusAsync(
             RelayEndpoint endpoint,
             MailboxTokenTriad tokens,
+            DeviceId deviceId,
             CancellationToken ct = default)
-            => Task.FromResult(DomainResult<int>.Success(0));
-
-        public Task StopMailboxStreamAsync(
-            PublicIdentityId ownerIdentityId,
-            PublicIdentityId relayIdentityId,
-            CancellationToken ct = default)
-            => Task.CompletedTask;
+            => Task.FromResult(DomainResult<RelayPreKeyStatus>.Success(new RelayPreKeyStatus(0, 0)));
     }
 
     private InMemoryRelayRegistrationRepository _relayRepository = null!;

@@ -568,7 +568,20 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             var provisioner = scope.ServiceProvider.GetRequiredService<IRelayMailboxProvisioner>();
             var relayEndpoint = RelayEndpoint.FromHostAndPort("127.0.0.1", HomeRelay.BoundPort);
             var mailboxTokens = new MailboxTokenTriad(MailboxRoutingToken, MailboxDeliveryToken, MailboxDrainToken);
-            var drainResult = await provisioner.DrainMailboxOnceAsync(PublicIdentityId, relayEndpoint, mailboxTokens, ct);
+            // Temporary bridge: unary drain lives only on the concrete provisioner until
+            // this path migrates to the streaming IRelayMailboxClient surface.
+            if (provisioner is not GrpcRelayMailboxProvisioner grpcProvisioner)
+            {
+                _logSink.Log(new SimulatorLogEntry(
+                    DateTimeOffset.UtcNow,
+                    LogLevel.Error,
+                    DisplayName,
+                    Id,
+                    "MailboxDrain",
+                    "Mailbox drain unavailable: no gRPC provisioner bound."));
+                return 0;
+            }
+            var drainResult = await grpcProvisioner.DrainMailboxOnceAsync(PublicIdentityId, relayEndpoint, mailboxTokens, ct);
             if (drainResult.IsFailure)
             {
                 _logSink.Log(new SimulatorLogEntry(
