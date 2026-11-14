@@ -196,6 +196,8 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IRelayLedgerRepository>(sp => sp.GetRequiredService<SqliteRelayLedgerRepository>());
         services.AddScoped<IPeerProfileRepository, SqlitePeerProfileRepository>();
         services.AddScoped<IPeerMailboxRoutingRepository, SqlitePeerMailboxRoutingRepository>();
+        // Vault-stored launch/app settings — singleton over the pooled context factory.
+        services.AddSingleton<IVaultSettingsStore, SqliteVaultSettingsStore>();
 
         // 4. Transport & Ingress Scoped Services
         services.AddSingleton<IngressFilterOptions>();
