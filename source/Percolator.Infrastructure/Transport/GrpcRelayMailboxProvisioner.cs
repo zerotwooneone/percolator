@@ -27,7 +27,7 @@ using Percolator.Infrastructure.Protos;
 /// </summary>
 public sealed class GrpcRelayMailboxProvisioner : IRelayMailboxProvisioner
 {
-    private const uint SignedPreKeyId = 1;
+    private const uint LocalSignedPreKeyId = 1;
     private static readonly TimeSpan EnvelopeExpiryWindow = TimeSpan.FromDays(7);
 
     private readonly IPeerGrpcChannelFactory _channelFactory;
@@ -154,7 +154,7 @@ public sealed class GrpcRelayMailboxProvisioner : IRelayMailboxProvisioner
             DrainToken = ByteString.CopyFrom(tokens.DrainToken.Span),
             DeviceId = deviceId.Value,
             IdentityKey = ByteString.CopyFrom(publicKey.Span),
-            SignedPrekeyId = SignedPreKeyId,
+            SignedPrekeyId = LocalSignedPreKeyId,
             SignedPrekey = ByteString.CopyFrom(signedPreKey.PublicKey.Span),
             PrekeySignature = ByteString.CopyFrom(signedPreKey.Signature.Span)
         };

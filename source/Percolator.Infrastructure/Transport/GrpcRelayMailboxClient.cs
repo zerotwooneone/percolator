@@ -141,14 +141,14 @@ public sealed class GrpcRelayMailboxClient : IRelayMailboxClient
 
         public IAsyncEnumerable<QueuedMailboxEnvelope> Envelopes => _channel.Reader.ReadAllAsync();
 
-        public async Task<DomainResult> AcknowledgeAsync(string queueId, CancellationToken ct = default)
+        public async Task<DomainResult> AcknowledgeAsync(MailboxQueueId queueId, CancellationToken ct = default)
         {
             await _writeGate.WaitAsync(ct).ConfigureAwait(false);
             try
             {
                 await _call.RequestStream.WriteAsync(new MailboxStreamClientMessage
                 {
-                    Ack = new MailboxAckProto { QueueId = queueId, Acknowledged = true }
+                    Ack = new MailboxAckProto { QueueId = queueId.Value, Acknowledged = true }
                 }, ct).ConfigureAwait(false);
                 return DomainResult.Success();
             }
@@ -198,10 +198,17 @@ public sealed class GrpcRelayMailboxClient : IRelayMailboxClient
                     var expiry = ClampExpiry(sealedEnv.ExpiresAtUtc?.ToDateTimeOffset(), now);
                     var ciphertext = sealedEnv.EncryptedPackage.ToByteArray();
 
+                    var queueId = MailboxQueueId.Create(msg.Envelope.QueueId);
+                    if (queueId.IsFailure)
+                    {
+                        // Unparseable relay key — we could never ack it; drop and continue.
+                        continue;
+                    }
+
                     var envelope = new MailboxEnvelope(
                         EnvelopeId.New(), routingToken, ciphertext, enqueuedAt, expiry);
                     await _channel.Writer.WriteAsync(
-                        new QueuedMailboxEnvelope(msg.Envelope.QueueId, envelope),
+                        new QueuedMailboxEnvelope(queueId.Value!, envelope),
                         _pumpCts.Token).ConfigureAwait(false);
                 }
             }

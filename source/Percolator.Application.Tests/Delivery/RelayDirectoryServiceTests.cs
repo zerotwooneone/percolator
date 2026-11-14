@@ -111,7 +111,7 @@ public sealed class RelayDirectoryServiceTests
             MailboxTokenTriad tokens,
             DeviceId deviceId,
             CancellationToken ct = default)
-            => Task.FromResult(DomainResult<RelayPreKeyStatus>.Success(new RelayPreKeyStatus(0, 0)));
+            => Task.FromResult(DomainResult<RelayPreKeyStatus>.Success(new RelayPreKeyStatus(false, 0, new SignedPreKeyId(0))));
     }
 
     private InMemoryRelayRegistrationRepository _relayRepository = null!;

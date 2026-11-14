@@ -14,7 +14,7 @@ public interface IMailboxStreamSession : IAsyncDisposable
     IAsyncEnumerable<QueuedMailboxEnvelope> Envelopes { get; }
 
     /// <summary>Deletes <paramref name="queueId"/> from the relay queue after durable local persistence.</summary>
-    Task<DomainResult> AcknowledgeAsync(string queueId, CancellationToken ct = default);
+    Task<DomainResult> AcknowledgeAsync(MailboxQueueId queueId, CancellationToken ct = default);
 }
 
 /// <summary>
