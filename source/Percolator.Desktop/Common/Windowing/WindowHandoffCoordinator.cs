@@ -9,11 +9,13 @@ using Avalonia.Threading;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Ports;
+using Percolator.Application.Session;
 using Percolator.Desktop.Features.Shell.ViewModels;
 using Percolator.Desktop.Features.Shell.Views;
 using Percolator.Desktop.Features.Startup.Models;
 using Percolator.Desktop.Features.Startup.ViewModels;
 using Percolator.Desktop.Features.Startup.Views;
+using Percolator.Domain.Identities;
 
 namespace Percolator.Desktop.Common.Windowing;
 

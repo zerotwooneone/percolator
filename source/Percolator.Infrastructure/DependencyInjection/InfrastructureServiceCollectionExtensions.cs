@@ -2,6 +2,7 @@ using Percolator.Application.Delivery;
 using Percolator.Application.Delivery.Ports;
 using Percolator.Application.Profiles;
 using Percolator.Application.Services;
+using Percolator.Application.Session;
 using Percolator.PluginSdk.Profiles;
 
 namespace Percolator.Infrastructure.DependencyInjection;
@@ -125,6 +126,10 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<IEventBus>(sp => sp.GetRequiredService<InMemoryEventBus>());
         services.AddSingleton<IEventPublisher>(sp => sp.GetRequiredService<InMemoryEventBus>());
         services.AddSingleton<IEventSubscriber>(sp => sp.GetRequiredService<InMemoryEventBus>());
+
+        // Active-persona registry — seeded by the composition root before StartAsync so
+        // hosted workers observe a populated set on their first reconciliation.
+        services.AddSingleton<IActiveIdentitySet, ActiveIdentitySet>();
 
         // Platform & Cryptography Singletons
         services.AddSingleton<IDateTimeProvider, SystemDateTimeProvider>();

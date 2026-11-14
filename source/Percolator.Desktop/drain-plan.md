@@ -27,7 +27,7 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started
 
 ## Tickets
 
-### DRAIN-01 ⬜ — Active-identity registry & handoff seam
+### DRAIN-01 ✅ — Active-identity registry & handoff seam
 
 **Files:**
 - Create `Percolator.Application/Session/IActiveIdentitySet.cs`

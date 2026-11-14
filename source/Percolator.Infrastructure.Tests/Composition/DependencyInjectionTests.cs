@@ -15,6 +15,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using NUnit.Framework;
 using Percolator.Application.Ports;
+using Percolator.Application.Session;
 using Percolator.Apps.Chat.Features.GroupInvitations;
 using Percolator.Apps.Chat.Features.Messaging;
 using Percolator.Apps.Chat.Ingress;
@@ -159,6 +160,9 @@ public sealed class DependencyInjectionTests
         sp.GetRequiredService<IPortReservationService>().Should().NotBeNull();
         sp.GetRequiredService<IPrivateRendezvousService>().Should().NotBeNull();
         sp.GetRequiredService<IProfileMetadataSerializer>().Should().NotBeNull();
+
+        // 12. Session State
+        sp.GetRequiredService<IActiveIdentitySet>().Should().NotBeNull();
     }
 
     [Test]
