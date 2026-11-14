@@ -162,9 +162,10 @@ public sealed class IdentityGateViewModelTests
             .ReturnsAsync(lease.Object);
         _settings
             .Setup(s => s.GetAsync(entry.IdentityId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((DesktopIdentitySettingsEntity?)null);
+            .ReturnsAsync((IdentityLaunchSettings?)null);
         _settings
-            .Setup(s => s.SaveAsync(It.IsAny<DesktopIdentitySettingsEntity>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.SaveAsync(
+                It.IsAny<Guid>(), It.IsAny<IdentityLaunchSettings>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         _handoff
             .Setup(h => h.TransitionToMainShellAsync(
@@ -190,8 +191,8 @@ public sealed class IdentityGateViewModelTests
             Times.Once);
         _settings.Verify(
             s => s.SaveAsync(
-                It.Is<DesktopIdentitySettingsEntity>(e =>
-                    e.IdentityId == entry.IdentityId && e.LastBoundPort == 5100),
+                entry.IdentityId,
+                It.Is<IdentityLaunchSettings>(e => e.LastBoundPort == 5100),
                 It.IsAny<CancellationToken>()),
             Times.Once,
             "the bound port must persist so the next launch prefers it");
@@ -216,9 +217,10 @@ public sealed class IdentityGateViewModelTests
             .ReturnsAsync(lease.Object);
         _settings
             .Setup(s => s.GetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((DesktopIdentitySettingsEntity?)null);
+            .ReturnsAsync((IdentityLaunchSettings?)null);
         _settings
-            .Setup(s => s.SaveAsync(It.IsAny<DesktopIdentitySettingsEntity>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.SaveAsync(
+                It.IsAny<Guid>(), It.IsAny<IdentityLaunchSettings>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         _handoff
             .Setup(h => h.TransitionToMainShellAsync(
@@ -280,14 +282,15 @@ public sealed class IdentityGateViewModelTests
 
         _settings
             .Setup(s => s.GetAllAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<DesktopIdentitySettingsEntity>
+            .ReturnsAsync(new List<(PublicIdentityId, IdentityLaunchSettings)>
             {
-                new(entry.IdentityId, 5100, null, false, 0)
+                (new PublicIdentityId(entry.IdentityId), new IdentityLaunchSettings(5100, null, false, 0))
             });
-        var saves = new List<DesktopIdentitySettingsEntity>();
+        var saves = new List<(Guid IdentityId, IdentityLaunchSettings Settings)>();
         _settings
-            .Setup(s => s.SaveAsync(It.IsAny<DesktopIdentitySettingsEntity>(), It.IsAny<CancellationToken>()))
-            .Callback<DesktopIdentitySettingsEntity, CancellationToken>((e, _) => saves.Add(e))
+            .Setup(s => s.SaveAsync(
+                It.IsAny<Guid>(), It.IsAny<IdentityLaunchSettings>(), It.IsAny<CancellationToken>()))
+            .Callback<Guid, IdentityLaunchSettings, CancellationToken>((id, s, _) => saves.Add((id, s)))
             .Returns(Task.CompletedTask);
 
         Personas[0].IsSelected = true;
@@ -297,11 +300,11 @@ public sealed class IdentityGateViewModelTests
         // The persist pipeline is async (ObservePropertyChanged → SelectAwait) — wait for the
         // condition rather than a fixed delay.
         SpinWait.SpinUntil(
-                () => saves.Any(e => e.IdentityId == entry.IdentityId && e.AutoStart),
+                () => saves.Any(e => e.IdentityId == entry.IdentityId && e.Settings.AutoStart),
                 TimeSpan.FromSeconds(5))
             .Should().BeTrue(
                 "the single-persona auto-start checkbox must persist through the settings store");
-        saves.Count(e => e.IdentityId == entry.IdentityId && e.AutoStart).Should().Be(1);
+        saves.Count(e => e.IdentityId == entry.IdentityId && e.Settings.AutoStart).Should().Be(1);
     }
 
     [Test]
@@ -366,9 +369,10 @@ public sealed class IdentityGateViewModelTests
             .ReturnsAsync((IPortLease?)null);
         _settings
             .Setup(s => s.GetAsync(alice.IdentityId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((DesktopIdentitySettingsEntity?)null);
+            .ReturnsAsync((IdentityLaunchSettings?)null);
         _settings
-            .Setup(s => s.SaveAsync(It.IsAny<DesktopIdentitySettingsEntity>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.SaveAsync(
+                It.IsAny<Guid>(), It.IsAny<IdentityLaunchSettings>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         firstCard.IsSelected = true;
@@ -404,9 +408,10 @@ public sealed class IdentityGateViewModelTests
             .ReturnsAsync(lease.Object);
         _settings
             .Setup(s => s.GetAsync(entry.IdentityId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((DesktopIdentitySettingsEntity?)null);
+            .ReturnsAsync((IdentityLaunchSettings?)null);
         _settings
-            .Setup(s => s.SaveAsync(It.IsAny<DesktopIdentitySettingsEntity>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.SaveAsync(
+                It.IsAny<Guid>(), It.IsAny<IdentityLaunchSettings>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         _handoff
             .Setup(h => h.TransitionToMainShellAsync(
@@ -438,26 +443,27 @@ public sealed class IdentityGateViewModelTests
 
         _settings
             .Setup(s => s.GetAllAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<DesktopIdentitySettingsEntity>
+            .ReturnsAsync(new List<(PublicIdentityId, IdentityLaunchSettings)>
             {
-                new(alice.IdentityId, 5100, null, false, 0),
-                new(bob.IdentityId, 5101, null, true, 1) // Bob already auto-starts
+                (new PublicIdentityId(alice.IdentityId), new IdentityLaunchSettings(5100, null, false, 0)),
+                (new PublicIdentityId(bob.IdentityId), new IdentityLaunchSettings(5101, null, true, 1)) // Bob already auto-starts
             });
-        var saves = new List<DesktopIdentitySettingsEntity>();
+        var saves = new List<(Guid IdentityId, IdentityLaunchSettings Settings)>();
         _settings
-            .Setup(s => s.SaveAsync(It.IsAny<DesktopIdentitySettingsEntity>(), It.IsAny<CancellationToken>()))
-            .Callback<DesktopIdentitySettingsEntity, CancellationToken>((e, _) => saves.Add(e))
+            .Setup(s => s.SaveAsync(
+                It.IsAny<Guid>(), It.IsAny<IdentityLaunchSettings>(), It.IsAny<CancellationToken>()))
+            .Callback<Guid, IdentityLaunchSettings, CancellationToken>((id, s, _) => saves.Add((id, s)))
             .Returns(Task.CompletedTask);
 
         Personas[0].IsSelected = true; // Alice is the single selection
         _vm.AutoStartRequested = true;
 
         SpinWait.SpinUntil(
-                () => saves.Any(e => e.IdentityId == bob.IdentityId && !e.AutoStart),
+                () => saves.Any(e => e.IdentityId == bob.IdentityId && !e.Settings.AutoStart),
                 TimeSpan.FromSeconds(5))
             .Should().BeTrue(
                 "enabling auto-start on one persona must clear the flag on all others (single-flag invariant)");
-        saves.Any(e => e.IdentityId == alice.IdentityId && e.AutoStart).Should().BeTrue();
+        saves.Any(e => e.IdentityId == alice.IdentityId && e.Settings.AutoStart).Should().BeTrue();
     }
 
     [Test]
@@ -475,9 +481,10 @@ public sealed class IdentityGateViewModelTests
         card.IsPortEditorOpen = true;
         _settings
             .Setup(s => s.GetAsync(entry.IdentityId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new DesktopIdentitySettingsEntity(entry.IdentityId, 5100, null, false, 0));
+            .ReturnsAsync(new IdentityLaunchSettings(5100, null, false, 0));
         _settings
-            .Setup(s => s.SaveAsync(It.IsAny<DesktopIdentitySettingsEntity>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.SaveAsync(
+                It.IsAny<Guid>(), It.IsAny<IdentityLaunchSettings>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         _ports
             .Setup(p => p.ProbeAsync(5150, It.IsAny<CancellationToken>()))
@@ -487,8 +494,8 @@ public sealed class IdentityGateViewModelTests
 
         _settings.Verify(
             s => s.SaveAsync(
-                It.Is<DesktopIdentitySettingsEntity>(e =>
-                    e.IdentityId == entry.IdentityId && e.PreferredPort == 5150),
+                entry.IdentityId,
+                It.Is<IdentityLaunchSettings>(e => e.PreferredPort == 5150),
                 It.IsAny<CancellationToken>()),
             Times.Once,
             "the inline port editor must persist the new preference");

@@ -14,6 +14,9 @@ public sealed record IdentityLaunchSettings(int PreferredPort, int? LastBoundPor
 /// <summary>Vault-global app-setting keys — Application-owned constants; no magic strings in ViewModels.</summary>
 public static class VaultSettingKeys
 {
+    /// <summary>The stored value convention for a set boolean flag.</summary>
+    public const string FlagSetValue = "1";
+
     /// <summary>Set once the first successful persona launch completes; gates the `+` Exchange tile.</summary>
     public const string OnboardingCompleted = "Gate.OnboardingCompleted";
 

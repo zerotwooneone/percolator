@@ -32,11 +32,6 @@ namespace Percolator.Desktop.Features.Startup.ViewModels;
 /// </summary>
 public partial class IdentityGateViewModel : ViewModelBase
 {
-    /// <summary>Vault-global flag marking first-run setup complete; unlocks the Exchange `+` tile.</summary>
-    public const string OnboardingCompletedKey = "Gate.OnboardingCompleted";
-
-    private const string FlagSetValue = "1";
-
     private readonly IPersonaDirectory _directory;
     private readonly IExchangeDirectory _exchanges;
     private readonly IPortReservationService _ports;
@@ -184,9 +179,9 @@ public partial class IdentityGateViewModel : ViewModelBase
             // The Exchange `+` tile stays ghosted until the first successful launch marks
             // setup complete or the context-menu escape hatch disables onboarding.
             var onboardingFlag = await _settings
-                .GetAppSettingAsync(OnboardingCompletedKey, ct)
+                .GetAppSettingAsync(VaultSettingKeys.OnboardingCompleted, ct)
                 .ConfigureAwait(true);
-            IsOnboardingActive = onboardingFlag != FlagSetValue;
+            IsOnboardingActive = onboardingFlag != VaultSettingKeys.FlagSetValue;
 
             _exchangeList.Clear();
             var exchangeEntries = await _exchanges.ListAsync(ct).ConfigureAwait(true);
@@ -318,7 +313,7 @@ public partial class IdentityGateViewModel : ViewModelBase
             // First successful launch finishes onboarding — the `+` Exchange tile unlocks
             // on every subsequent gate visit.
             await _settings
-                .SetAppSettingAsync(OnboardingCompletedKey, FlagSetValue, ct)
+                .SetAppSettingAsync(VaultSettingKeys.OnboardingCompleted, VaultSettingKeys.FlagSetValue, ct)
                 .ConfigureAwait(true);
             IsOnboardingActive = false;
         }
@@ -522,7 +517,7 @@ public partial class IdentityGateViewModel : ViewModelBase
     private async Task DisableOnboardingAsync(CancellationToken ct)
     {
         await _settings
-            .SetAppSettingAsync(OnboardingCompletedKey, FlagSetValue, ct)
+            .SetAppSettingAsync(VaultSettingKeys.OnboardingCompleted, VaultSettingKeys.FlagSetValue, ct)
             .ConfigureAwait(true);
         IsOnboardingActive = false;
     }
@@ -650,15 +645,15 @@ public partial class IdentityGateViewModel : ViewModelBase
     private async Task PersistPortPreferenceAsync(Guid identityId, int port, CancellationToken ct)
     {
         var entity = await _settings.GetAsync(identityId, ct).ConfigureAwait(false)
-            ?? new DesktopIdentitySettingsEntity(identityId, port, null, false, 0);
-        await _settings.SaveAsync(entity with { PreferredPort = port }, ct).ConfigureAwait(false);
+            ?? new IdentityLaunchSettings(port, null, false, 0);
+        await _settings.SaveAsync(identityId, entity with { PreferredPort = port }, ct).ConfigureAwait(false);
     }
 
     private async Task PersistBoundPortAsync(Guid identityId, int port, CancellationToken ct)
     {
         var entity = await _settings.GetAsync(identityId, ct).ConfigureAwait(false)
-            ?? new DesktopIdentitySettingsEntity(identityId, port, port, false, 0);
-        await _settings.SaveAsync(entity with { LastBoundPort = port }, ct).ConfigureAwait(false);
+            ?? new IdentityLaunchSettings(port, port, false, 0);
+        await _settings.SaveAsync(identityId, entity with { LastBoundPort = port }, ct).ConfigureAwait(false);
     }
 
     private async Task PersistAutoStartAsync(bool enabled, CancellationToken ct)
@@ -671,20 +666,23 @@ public partial class IdentityGateViewModel : ViewModelBase
 
         var all = await _settings.GetAllAsync(ct).ConfigureAwait(false);
         var hasTarget = false;
-        foreach (var entity in all)
+        foreach (var (identityId, settings) in all)
         {
-            var desired = entity.IdentityId == target.IdentityId && enabled;
-            hasTarget |= entity.IdentityId == target.IdentityId;
-            if (entity.AutoStart != desired)
+            var desired = identityId.Value == target.IdentityId && enabled;
+            hasTarget |= identityId.Value == target.IdentityId;
+            if (settings.AutoStart != desired)
             {
-                await _settings.SaveAsync(entity with { AutoStart = desired }, ct).ConfigureAwait(false);
+                await _settings
+                    .SaveAsync(identityId.Value, settings with { AutoStart = desired }, ct)
+                    .ConfigureAwait(false);
             }
         }
 
         if (!hasTarget)
         {
             await _settings.SaveAsync(
-                new DesktopIdentitySettingsEntity(target.IdentityId, target.PreferredPort, null, enabled, all.Count),
+                target.IdentityId,
+                new IdentityLaunchSettings(target.PreferredPort, null, enabled, all.Count),
                 ct).ConfigureAwait(false);
         }
     }

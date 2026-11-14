@@ -418,8 +418,8 @@ public sealed class ExchangeViewModelTests
         await f.Vm.DisableOnboardingCommand.ExecuteAsync(null);
 
         f.Settings.Verify(s => s.SetAppSettingAsync(
-                IdentityGateViewModel.OnboardingCompletedKey,
-                "1",
+                VaultSettingKeys.OnboardingCompleted,
+                VaultSettingKeys.FlagSetValue,
                 It.IsAny<CancellationToken>()),
             Times.Once);
         f.Vm.IsOnboardingActive.Should().BeFalse();
@@ -432,7 +432,7 @@ public sealed class ExchangeViewModelTests
         var f = GateFixture.Create();
         f.Settings
             .Setup(s => s.GetAppSettingAsync(
-                IdentityGateViewModel.OnboardingCompletedKey,
+                VaultSettingKeys.OnboardingCompleted,
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync("1");
 
@@ -448,7 +448,7 @@ public sealed class ExchangeViewModelTests
         var f = GateFixture.Create();
         f.Settings
             .Setup(s => s.GetAppSettingAsync(
-                IdentityGateViewModel.OnboardingCompletedKey,
+                VaultSettingKeys.OnboardingCompleted,
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync("1");
         var fired = new List<string?>();
@@ -493,9 +493,10 @@ public sealed class ExchangeViewModelTests
             .ReturnsAsync(exchangeLease.Object);
         f.Settings
             .Setup(s => s.GetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((DesktopIdentitySettingsEntity?)null);
+            .ReturnsAsync((IdentityLaunchSettings?)null);
         f.Settings
-            .Setup(s => s.SaveAsync(It.IsAny<DesktopIdentitySettingsEntity>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.SaveAsync(
+                It.IsAny<Guid>(), It.IsAny<IdentityLaunchSettings>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         f.Exchanges
             .Setup(e => e.StartSelfHostedEndpointAsync(
@@ -542,8 +543,8 @@ public sealed class ExchangeViewModelTests
                 It.IsAny<CancellationToken>()),
             Times.Once);
         f.Settings.Verify(s => s.SetAppSettingAsync(
-                IdentityGateViewModel.OnboardingCompletedKey,
-                "1",
+                VaultSettingKeys.OnboardingCompleted,
+                VaultSettingKeys.FlagSetValue,
                 It.IsAny<CancellationToken>()),
             Times.Once,
             "a successful launch completes onboarding");

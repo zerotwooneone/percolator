@@ -59,7 +59,7 @@ public sealed class ExchangeDirectoryService : IExchangeDirectory
     {
         var relays = await _directory.ListAsync(ct).ConfigureAwait(false);
         var settings = (await _settings.GetAllAsync(ct).ConfigureAwait(false))
-            .ToDictionary(s => s.IdentityId);
+            .ToDictionary(s => s.IdentityId, s => s.Settings);
 
         return relays.Select(r => ToEntry(r, settings)).ToList();
     }
@@ -95,10 +95,11 @@ public sealed class ExchangeDirectoryService : IExchangeDirectory
         var order = existing?.SidebarOrder
             ?? (await _settings.GetAllAsync(ct).ConfigureAwait(false)).Count;
         await _settings.SaveAsync(
-            new DesktopIdentitySettingsEntity(relayIdentityId.Value, preferredPort, null, false, order),
+            relayIdentityId.Value,
+            new IdentityLaunchSettings(preferredPort, null, false, order),
             ct).ConfigureAwait(false);
 
-        return ToEntry(result.Value!, new Dictionary<Guid, DesktopIdentitySettingsEntity>());
+        return ToEntry(result.Value!, new Dictionary<PublicIdentityId, IdentityLaunchSettings>());
     }
 
     public async Task<ExchangeDirectoryEntry> RegisterRemoteAsync(
@@ -120,7 +121,7 @@ public sealed class ExchangeDirectoryService : IExchangeDirectory
             throw new InvalidOperationException(result.Error.Description);
         }
 
-        return ToEntry(result.Value!, new Dictionary<Guid, DesktopIdentitySettingsEntity>());
+        return ToEntry(result.Value!, new Dictionary<PublicIdentityId, IdentityLaunchSettings>());
     }
 
     public async Task<DomainResult> UpdateSelfHostedProfileAsync(
@@ -150,8 +151,11 @@ public sealed class ExchangeDirectoryService : IExchangeDirectory
         await _profiles.SaveAsync(renamed, ct).ConfigureAwait(false);
 
         var settingsEntity = await _settings.GetAsync(relayIdentityId.Value, ct).ConfigureAwait(false)
-            ?? new DesktopIdentitySettingsEntity(relayIdentityId.Value, preferredPort, null, false, 0);
-        await _settings.SaveAsync(settingsEntity with { PreferredPort = preferredPort }, ct)
+            ?? new IdentityLaunchSettings(preferredPort, null, false, 0);
+        await _settings.SaveAsync(
+                relayIdentityId.Value,
+                settingsEntity with { PreferredPort = preferredPort },
+                ct)
             .ConfigureAwait(false);
 
         return DomainResult.Success();
@@ -240,12 +244,12 @@ public sealed class ExchangeDirectoryService : IExchangeDirectory
 
     private static ExchangeDirectoryEntry ToEntry(
         RelayDirectoryEntry relay,
-        IReadOnlyDictionary<Guid, DesktopIdentitySettingsEntity> settings) =>
+        IReadOnlyDictionary<PublicIdentityId, IdentityLaunchSettings> settings) =>
         new(
             relay.RelayIdentityId.Value,
             relay.DisplayName,
             relay.Endpoint.Value,
-            settings.TryGetValue(relay.RelayIdentityId.Value, out var entity)
+            settings.TryGetValue(relay.RelayIdentityId, out var entity)
                 ? entity.PreferredPort
                 : relay.Endpoint.Port ?? DefaultPreferredPort,
             relay.IsLocalRelayHost,

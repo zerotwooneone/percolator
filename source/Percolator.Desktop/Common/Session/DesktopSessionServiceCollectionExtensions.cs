@@ -26,9 +26,9 @@ internal static class DesktopSessionServiceCollectionExtensions
         // Session-bound Desktop services + VMs.
         services.AddTransient<IExchangeDirectory, ExchangeDirectoryService>();
         services.AddTransient<IPersonaDirectory, PersonaDirectoryService>();
-        // Moved here from the Stage-1 container; STOR-03 swaps the impl to
-        // VaultDesktopSettingsRepository.
-        services.AddSingleton<IDesktopSettingsRepository, SqliteDesktopSettingsRepository>();
+        // Vault-backed launch settings — personas and relay hosts share the one encrypted
+        // identity_settings table via IVaultSettingsStore (STOR-03).
+        services.AddSingleton<IDesktopSettingsRepository, VaultDesktopSettingsRepository>();
         services.AddTransient<IdentityGateViewModel>();
         services.AddTransient<MainWindowViewModel>();     // resolved at the WIN-02 seam
         services.AddTransient<ExchangeManageViewModel>();

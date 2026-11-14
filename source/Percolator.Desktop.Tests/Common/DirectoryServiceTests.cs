@@ -79,9 +79,9 @@ public sealed class DirectoryServiceTests
             });
         settings
             .Setup(s => s.GetAllAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<DesktopIdentitySettingsEntity>
+            .ReturnsAsync(new List<(PublicIdentityId, IdentityLaunchSettings)>
             {
-                new(bobId.Value, 5200, 5201, true, 0)
+                (bobId, new IdentityLaunchSettings(5200, 5201, true, 0))
             });
 
         var entries = await svc.ListAsync();
@@ -194,9 +194,9 @@ public sealed class DirectoryServiceTests
             });
         settings
             .Setup(s => s.GetAllAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<DesktopIdentitySettingsEntity>
+            .ReturnsAsync(new List<(PublicIdentityId, IdentityLaunchSettings)>
             {
-                new(relayId.Value, 5300, null, false, 2)
+                (relayId, new IdentityLaunchSettings(5300, null, false, 2))
             });
 
         var entries = await svc.ListAsync();

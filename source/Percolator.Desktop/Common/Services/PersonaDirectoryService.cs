@@ -54,7 +54,7 @@ public sealed class PersonaDirectoryService : IPersonaDirectory
     {
         var profiles = await _profiles.GetAllAsync(ct).ConfigureAwait(false);
         var settings = (await _settings.GetAllAsync(ct).ConfigureAwait(false))
-            .ToDictionary(s => s.IdentityId);
+            .ToDictionary(s => s.IdentityId, s => s.Settings);
 
         return profiles
             .Where(p => p.Role == IdentityRole.UserPersona)
@@ -106,9 +106,8 @@ public sealed class PersonaDirectoryService : IPersonaDirectory
         var existingSettings = await _settings.GetAsync(identityId.Value, ct).ConfigureAwait(false);
         var order = existingSettings?.SidebarOrder
             ?? (await _settings.GetAllAsync(ct).ConfigureAwait(false)).Count;
-        var settingsEntity = new DesktopIdentitySettingsEntity(
-            identityId.Value, preferredPort, null, false, order);
-        await _settings.SaveAsync(settingsEntity, ct).ConfigureAwait(false);
+        var settingsEntity = new IdentityLaunchSettings(preferredPort, null, false, order);
+        await _settings.SaveAsync(identityId.Value, settingsEntity, ct).ConfigureAwait(false);
 
         return new PersonaDirectoryEntry(
             identityId.Value, trimmed, preferredPort, null, false, order);
@@ -146,10 +145,10 @@ public sealed class PersonaDirectoryService : IPersonaDirectory
 
     private PersonaDirectoryEntry ToEntry(
         IdentityProfile profile,
-        Dictionary<Guid, DesktopIdentitySettingsEntity> settings)
+        IReadOnlyDictionary<PublicIdentityId, IdentityLaunchSettings> settings)
     {
         var index = profile.Id.Value;
-        var entity = settings.TryGetValue(index, out var s) ? s : null;
+        var entity = settings.TryGetValue(profile.Id, out var s) ? s : null;
         return new PersonaDirectoryEntry(
             index,
             profile.DisplayName,
