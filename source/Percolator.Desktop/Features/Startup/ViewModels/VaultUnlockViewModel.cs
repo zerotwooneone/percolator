@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Extensions.DependencyInjection;
 using Percolator.Application.Ports;
 using Percolator.Desktop.Common.Services;
 using Percolator.Desktop.Common.Windowing;
@@ -25,7 +26,6 @@ public partial class VaultUnlockViewModel : ViewModelBase
 {
     private readonly IDatabaseUnlockCoordinator _unlockCoordinator;
     private readonly IWindowHandoffCoordinator _handoff;
-    private readonly IPersonaDirectory _personas;
     private readonly IPortReservationService _ports;
 
     [ObservableProperty]
@@ -47,12 +47,10 @@ public partial class VaultUnlockViewModel : ViewModelBase
     public VaultUnlockViewModel(
         IDatabaseUnlockCoordinator unlockCoordinator,
         IWindowHandoffCoordinator handoff,
-        IPersonaDirectory personas,
         IPortReservationService ports)
     {
         _unlockCoordinator = unlockCoordinator ?? throw new ArgumentNullException(nameof(unlockCoordinator));
         _handoff = handoff ?? throw new ArgumentNullException(nameof(handoff));
-        _personas = personas ?? throw new ArgumentNullException(nameof(personas));
         _ports = ports ?? throw new ArgumentNullException(nameof(ports));
     }
 
@@ -131,7 +129,10 @@ public partial class VaultUnlockViewModel : ViewModelBase
     /// </summary>
     private async Task TryAutoStartLaunchAsync(IAuthenticatedSession session, CancellationToken ct)
     {
-        var entries = await _personas.ListAsync(session, ct).ConfigureAwait(true);
+        // Post-unlock seam resolution: the persona directory cannot exist in the Stage-1
+        // container — it ctor-injects vault repositories from the authenticated session.
+        var personas = session.Services.GetRequiredService<IPersonaDirectory>();
+        var entries = await personas.ListAsync(ct).ConfigureAwait(true);
         var autoStart = entries.Count(e => e.AutoStart) == 1
             ? entries.First(e => e.AutoStart)
             : null;

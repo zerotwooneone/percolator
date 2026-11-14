@@ -9,9 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Percolator.Desktop.Common.Services;
 using Percolator.Desktop.Common.Session;
-using Percolator.Desktop.Common.Storage;
 using Percolator.Desktop.Common.Windowing;
-using Percolator.Desktop.Features.Shell.ViewModels;
 using Percolator.Desktop.Features.Startup.ViewModels;
 using Percolator.Desktop.Features.Startup.Views;
 using Percolator.Domain.Common;
@@ -70,33 +68,26 @@ public partial class App : Avalonia.Application
 
                 // DESK-03: persona gate services. Identity keypairs are created here but only
                 // persist inside the authenticated Stage 2 vault — including the decoy session.
+                // The persona/exchange facades, settings repository, and gate/dialog VMs moved
+                // into the session container (CTX-03, AddDesktopSessionServices).
                 services.AddSingleton<ICryptoEngine>(_ => new SignalCryptoEngine(new CryptographyOptions()));
-                services.AddSingleton<IDesktopSettingsRepository, SqliteDesktopSettingsRepository>();
                 services.AddSingleton<IPortReservationService, PortReservationService>();
                 services.AddSingleton<IIdenticonGenerator, IdenticonGenerator>();
-                services.AddSingleton<IPersonaDirectory, PersonaDirectoryService>();
-                services.AddSingleton<IExchangeDirectory, ExchangeDirectoryService>();
 
                 // CTX-02: Stage-2 session composition is executable-owned. The coordinator
                 // resolves this factory and gets the session back — no Infra-side host factory.
                 services.AddSingleton<Application.Ports.ISessionHostFactory, DesktopStage2SessionFactory>();
 
                 // Child-VM factories injected into StartupHostViewModel ([VM-004], [VM-009]).
+                // The IdentityGate factory is gone — NavigateToGateAsync resolves the gate VM
+                // from session.Services at the composition seam (CTX-03).
                 services.AddSingleton<Func<VaultSetupViewModel>>(sp => sp.GetRequiredService<VaultSetupViewModel>);
                 services.AddSingleton<Func<VaultUnlockViewModel>>(sp => sp.GetRequiredService<VaultUnlockViewModel>);
-                services.AddSingleton<Func<IdentityGateViewModel>>(sp => sp.GetRequiredService<IdentityGateViewModel>);
                 services.AddSingleton<Func<StartupHostViewModel>>(sp => sp.GetRequiredService<StartupHostViewModel>);
 
                 services.AddTransient<StartupHostViewModel>();
                 services.AddTransient<VaultSetupViewModel>();
                 services.AddTransient<VaultUnlockViewModel>();
-                services.AddTransient<IdentityGateViewModel>();
-                services.AddTransient<CreatePersonaDialogViewModel>();
-                services.AddTransient<DeletePersonaDialogViewModel>();
-                services.AddTransient<ExchangeCreationViewModel>();
-                services.AddTransient<ExchangeManageViewModel>();
-                services.AddTransient<StopUsingExchangeDialogViewModel>();
-                services.AddTransient<MainWindowViewModel>();
             })
             .Build();
 

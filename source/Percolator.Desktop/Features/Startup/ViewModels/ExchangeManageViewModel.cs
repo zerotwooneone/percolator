@@ -7,7 +7,6 @@ using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
-using Percolator.Application.Ports;
 using Percolator.Desktop.Common.Services;
 using Percolator.Desktop.Common.Windowing;
 using Percolator.Desktop.Features.Startup.Models;
@@ -31,7 +30,7 @@ public partial class ExchangeManageViewModel : ViewModelBase
     private readonly IIdenticonGenerator _identicons;
     private readonly ILogger<ExchangeManageViewModel> _logger;
 
-    private IAuthenticatedSession? _session;
+    private bool _initialized;
     private Guid _relayIdentityId;
     private int _preferredPort;
     private bool _suppressToggle;
@@ -70,15 +69,13 @@ public partial class ExchangeManageViewModel : ViewModelBase
 
     /// <summary>Seeds the surface for the given exchange tile and current persona roster.</summary>
     public void Initialize(
-        IAuthenticatedSession session,
         ExchangeTileViewModel exchange,
         IReadOnlyList<PersonaDirectoryEntry> personas)
     {
-        ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(exchange);
         ArgumentNullException.ThrowIfNull(personas);
 
-        _session = session;
+        _initialized = true;
         _relayIdentityId = exchange.RelayIdentityId;
         _preferredPort = exchange.PreferredPort;
         _changed = false;
@@ -108,7 +105,7 @@ public partial class ExchangeManageViewModel : ViewModelBase
     [RelayCommand]
     private async Task TogglePersonaAsync(LinkablePersonaModel? persona, System.Threading.CancellationToken ct)
     {
-        if (persona is null || _session is null || _suppressToggle)
+        if (persona is null || !_initialized || _suppressToggle)
         {
             return;
         }
@@ -116,7 +113,7 @@ public partial class ExchangeManageViewModel : ViewModelBase
         if (persona.IsLinked)
         {
             var result = await _exchanges
-                .LinkPersonaAsync(_session, new PublicIdentityId(_relayIdentityId), new PublicIdentityId(persona.PersonaId), ct)
+                .LinkPersonaAsync(new PublicIdentityId(_relayIdentityId), new PublicIdentityId(persona.PersonaId), ct)
                 .ConfigureAwait(true);
             if (result.IsFailure)
             {
@@ -145,7 +142,6 @@ public partial class ExchangeManageViewModel : ViewModelBase
 
             var result = await _exchanges
                 .UnlinkPersonaAsync(
-                    _session,
                     new PublicIdentityId(_relayIdentityId),
                     new PublicIdentityId(persona.PersonaId),
                     purgeQueuedEnvelopes: IsSelfHosted && dialog?.PurgeQueuedEnvelopes == true,
@@ -171,7 +167,7 @@ public partial class ExchangeManageViewModel : ViewModelBase
     [RelayCommand]
     private async Task EditProfileAsync(System.Threading.CancellationToken ct)
     {
-        if (_session is null || !IsSelfHosted)
+        if (!_initialized || !IsSelfHosted)
         {
             return;
         }
@@ -187,7 +183,6 @@ public partial class ExchangeManageViewModel : ViewModelBase
 
         var update = await _exchanges
             .UpdateSelfHostedProfileAsync(
-                _session,
                 new PublicIdentityId(_relayIdentityId),
                 result.DisplayName,
                 result.PreferredPort,

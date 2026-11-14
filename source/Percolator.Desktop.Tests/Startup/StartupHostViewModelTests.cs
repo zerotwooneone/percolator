@@ -57,10 +57,10 @@ public sealed class StartupHostViewModelTests
 
         _cryptoProbe.Setup(p => p.TestConnection()).Returns(42);
         _personas
-            .Setup(d => d.ListAsync(It.IsAny<IAuthenticatedSession>(), It.IsAny<CancellationToken>()))
+            .Setup(d => d.ListAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(Array.Empty<PersonaDirectoryEntry>());
         _exchanges
-            .Setup(e => e.ListAsync(It.IsAny<IAuthenticatedSession>(), It.IsAny<CancellationToken>()))
+            .Setup(e => e.ListAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(Array.Empty<ExchangeDirectoryEntry>());
         _settings
             .Setup(s => s.GetAppSettingAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -82,14 +82,27 @@ public sealed class StartupHostViewModelTests
         _windows.Object,
         NullLogger<IdentityGateViewModel>.Instance);
 
+    /// <summary>
+    /// A session whose <see cref="IAuthenticatedSession.Services"/> resolves the gate VM —
+    /// NavigateToGateAsync uses this composition seam now that the Stage-1 factory is gone.
+    /// </summary>
+    private Mock<IAuthenticatedSession> CreateSession()
+    {
+        var services = new Mock<IServiceProvider>();
+        services
+            .Setup(p => p.GetService(typeof(IdentityGateViewModel)))
+            .Returns(CreateGateVm());
+        var session = new Mock<IAuthenticatedSession>();
+        session.SetupGet(s => s.Services).Returns(services.Object);
+        return session;
+    }
+
     private StartupHostViewModel CreateVm() => new(
         _unlockCoordinator.Object,
         _cryptoProbe.Object,
         _storageOptions,
         () => new VaultSetupViewModel(_unlockCoordinator.Object, _handoff.Object, _dialogs.Object),
-        () => new VaultUnlockViewModel(
-            _unlockCoordinator.Object, _handoff.Object, _personas.Object, _ports.Object),
-        CreateGateVm,
+        () => new VaultUnlockViewModel(_unlockCoordinator.Object, _handoff.Object, _ports.Object),
         _appLifetime.Object,
         _dialogs.Object,
         _launcher.Object,
@@ -179,7 +192,7 @@ public sealed class StartupHostViewModelTests
     [Test]
     public async Task NavigateToGate_ShowsIdentityGate_AndParksSession()
     {
-        var session = new Mock<IAuthenticatedSession>();
+        var session = CreateSession();
         var vm = CreateVm();
 
         await vm.NavigateToGateAsync(session.Object);
@@ -189,15 +202,15 @@ public sealed class StartupHostViewModelTests
         vm.PendingSession.Should().BeSameAs(session.Object,
             "the authenticated session must be parked for the persona launch handoff");
         _personas.Verify(
-            d => d.ListAsync(session.Object, It.IsAny<CancellationToken>()),
+            d => d.ListAsync(It.IsAny<CancellationToken>()),
             Times.Once,
-            "gate navigation must load personas against the authenticated session");
+            "gate navigation must load personas through the session-bound directory");
     }
 
     [Test]
     public async Task NavigateToUnlock_ClearsParkedSession_AndReturnsToUnlockScreen()
     {
-        var session = new Mock<IAuthenticatedSession>();
+        var session = CreateSession();
         var vm = CreateVm();
         await vm.NavigateToGateAsync(session.Object);
 

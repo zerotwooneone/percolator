@@ -3,7 +3,6 @@
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using Percolator.Application.Ports;
 using Percolator.Desktop.Features.Startup.Models;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
@@ -20,15 +19,13 @@ namespace Percolator.Desktop.Common.Services;
 public interface IExchangeDirectory
 {
     /// <summary>Lists exchanges merged with their linked personas and saved port preferences.</summary>
-    Task<IReadOnlyList<ExchangeDirectoryEntry>> ListAsync(
-        IAuthenticatedSession session, CancellationToken ct = default);
+    Task<IReadOnlyList<ExchangeDirectoryEntry>> ListAsync(CancellationToken ct = default);
 
     /// <summary>
     /// Creates a self-hosted exchange: relay-host identity profile + registration in the vault,
     /// with the optionally pre-linked personas. The tile appears offline — nothing listens yet.
     /// </summary>
     Task<ExchangeDirectoryEntry> CreateSelfHostedAsync(
-        IAuthenticatedSession session,
         PublicIdentityId relayIdentityId,
         string displayName,
         int preferredPort,
@@ -40,7 +37,6 @@ public interface IExchangeDirectory
     /// The tile appears offline; launch semantics come from the personas linked to it.
     /// </summary>
     Task<ExchangeDirectoryEntry> RegisterRemoteAsync(
-        IAuthenticatedSession session,
         PublicIdentityId relayIdentityId,
         string endpoint,
         CancellationToken ct = default);
@@ -50,7 +46,6 @@ public interface IExchangeDirectory
     /// exchanges have no editable profile — their name is their endpoint.
     /// </summary>
     Task<DomainResult> UpdateSelfHostedProfileAsync(
-        IAuthenticatedSession session,
         PublicIdentityId relayIdentityId,
         string displayName,
         int preferredPort,
@@ -58,7 +53,6 @@ public interface IExchangeDirectory
 
     /// <summary>Links a persona to an exchange — a pure vault-local row write.</summary>
     Task<DomainResult> LinkPersonaAsync(
-        IAuthenticatedSession session,
         PublicIdentityId relayIdentityId,
         PublicIdentityId personaId,
         CancellationToken ct = default);
@@ -69,7 +63,6 @@ public interface IExchangeDirectory
     /// relay-side queue lives in this same vault and is drained locally first.
     /// </summary>
     Task<DomainResult> UnlinkPersonaAsync(
-        IAuthenticatedSession session,
         PublicIdentityId relayIdentityId,
         PublicIdentityId personaId,
         bool purgeQueuedEnvelopes,
@@ -81,7 +74,6 @@ public interface IExchangeDirectory
     /// already running.
     /// </summary>
     Task<int?> StartSelfHostedEndpointAsync(
-        IAuthenticatedSession session,
         ExchangeLaunchDescriptor exchange,
         CancellationToken ct = default);
 
@@ -90,7 +82,6 @@ public interface IExchangeDirectory
     /// exchange it is linked to. Aggregates failures rather than aborting the launch.
     /// </summary>
     Task<DomainResult> ProvisionLinkedMailboxesAsync(
-        IAuthenticatedSession session,
         IEnumerable<PublicIdentityId> personaIds,
         CancellationToken ct = default);
 }

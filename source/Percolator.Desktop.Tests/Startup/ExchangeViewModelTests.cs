@@ -146,8 +146,7 @@ public sealed class ExchangeViewModelTests
         Mock<IExchangeDirectory> exchanges,
         Mock<IWindowManager> windows) ManageFixture(
             IReadOnlyList<PersonaDirectoryEntry> personas,
-            ExchangeTileViewModel tile,
-            IAuthenticatedSession session)
+            ExchangeTileViewModel tile)
     {
         var exchanges = new Mock<IExchangeDirectory>(MockBehavior.Strict);
         var windows = new Mock<IWindowManager>(MockBehavior.Strict);
@@ -156,18 +155,17 @@ public sealed class ExchangeViewModelTests
             windows.Object,
             new IdenticonGenerator(),
             NullLogger<ExchangeManageViewModel>.Instance);
-        vm.Initialize(session, tile, personas);
+        vm.Initialize(tile, personas);
         return (vm, exchanges, windows);
     }
 
     [Test]
     public async Task Manage_CheckingPersona_LinksImmediately()
     {
-        var session = Mock.Of<IAuthenticatedSession>();
         var personas = new[] { Persona("Alice"), Persona("Bob") };
         var entry = Entry("Hub", linkedPersonas: personas[0].IdentityId);
         var tile = new ExchangeTileViewModel(entry, Array.Empty<PersonaAvatarChip>(), Avatar());
-        var (vm, exchanges, _) = ManageFixture(personas, tile, session);
+        var (vm, exchanges, _) = ManageFixture(personas, tile);
 
         vm.Personas[0].IsLinked.Should().BeTrue("already-linked personas arrive checked");
         vm.Personas[1].IsLinked.Should().BeFalse();
@@ -175,7 +173,6 @@ public sealed class ExchangeViewModelTests
 
         exchanges
             .Setup(e => e.LinkPersonaAsync(
-                session,
                 It.Is<PublicIdentityId>(r => r.Value == tile.RelayIdentityId),
                 It.Is<PublicIdentityId>(p => p.Value == personas[1].IdentityId),
                 It.IsAny<CancellationToken>()))
@@ -185,7 +182,6 @@ public sealed class ExchangeViewModelTests
         await vm.TogglePersonaCommand.ExecutionTask!;
 
         exchanges.Verify(e => e.LinkPersonaAsync(
-                session,
                 It.IsAny<PublicIdentityId>(),
                 It.Is<PublicIdentityId>(p => p.Value == personas[1].IdentityId),
                 It.IsAny<CancellationToken>()),
@@ -196,11 +192,10 @@ public sealed class ExchangeViewModelTests
     [Test]
     public async Task Manage_UncheckingConfirmed_UnlinksWithPurge_WhenSelfHosted()
     {
-        var session = Mock.Of<IAuthenticatedSession>();
         var personas = new[] { Persona("Alice") };
         var entry = Entry("Hub", linkedPersonas: personas[0].IdentityId);
         var tile = new ExchangeTileViewModel(entry, Array.Empty<PersonaAvatarChip>(), Avatar());
-        var (vm, exchanges, windows) = ManageFixture(personas, tile, session);
+        var (vm, exchanges, windows) = ManageFixture(personas, tile);
 
         windows
             .Setup(w => w.ShowDialogAsync<StopUsingExchangeDialogViewModel, bool>(
@@ -218,7 +213,6 @@ public sealed class ExchangeViewModelTests
             .ReturnsAsync(true);
         exchanges
             .Setup(e => e.UnlinkPersonaAsync(
-                session,
                 It.Is<PublicIdentityId>(r => r.Value == tile.RelayIdentityId),
                 It.Is<PublicIdentityId>(p => p.Value == personas[0].IdentityId),
                 true,
@@ -229,7 +223,6 @@ public sealed class ExchangeViewModelTests
         await vm.TogglePersonaCommand.ExecutionTask!;
 
         exchanges.Verify(e => e.UnlinkPersonaAsync(
-                session,
                 It.IsAny<PublicIdentityId>(),
                 It.Is<PublicIdentityId>(p => p.Value == personas[0].IdentityId),
                 true,
@@ -242,11 +235,10 @@ public sealed class ExchangeViewModelTests
     [Test]
     public async Task Manage_UncheckingCancelled_RevertsCheckbox_WithoutUnlink()
     {
-        var session = Mock.Of<IAuthenticatedSession>();
         var personas = new[] { Persona("Alice") };
         var entry = Entry("Hub", selfHosted: false, linkedPersonas: personas[0].IdentityId);
         var tile = new ExchangeTileViewModel(entry, Array.Empty<PersonaAvatarChip>(), Avatar());
-        var (vm, exchanges, windows) = ManageFixture(personas, tile, session);
+        var (vm, exchanges, windows) = ManageFixture(personas, tile);
 
         windows
             .Setup(w => w.ShowDialogAsync<StopUsingExchangeDialogViewModel, bool>(
@@ -258,7 +250,6 @@ public sealed class ExchangeViewModelTests
         await vm.TogglePersonaCommand.ExecutionTask!;
 
         exchanges.Verify(e => e.UnlinkPersonaAsync(
-                It.IsAny<IAuthenticatedSession>(),
                 It.IsAny<PublicIdentityId>(),
                 It.IsAny<PublicIdentityId>(),
                 It.IsAny<bool>(),
@@ -271,11 +262,10 @@ public sealed class ExchangeViewModelTests
     [Test]
     public async Task Manage_UncheckingNonSelfHosted_NeverOffersQueuePurge()
     {
-        var session = Mock.Of<IAuthenticatedSession>();
         var personas = new[] { Persona("Alice") };
         var entry = Entry("Remote", selfHosted: false, linkedPersonas: personas[0].IdentityId);
         var tile = new ExchangeTileViewModel(entry, Array.Empty<PersonaAvatarChip>(), Avatar());
-        var (vm, _, windows) = ManageFixture(personas, tile, session);
+        var (vm, _, windows) = ManageFixture(personas, tile);
 
         windows
             .Setup(w => w.ShowDialogAsync<StopUsingExchangeDialogViewModel, bool>(
@@ -298,11 +288,10 @@ public sealed class ExchangeViewModelTests
     [Test]
     public async Task Manage_EditProfile_PersistsRenameAndPort()
     {
-        var session = Mock.Of<IAuthenticatedSession>();
         var personas = new[] { Persona("Alice") };
         var entry = Entry("Hub", port: 5200);
         var tile = new ExchangeTileViewModel(entry, Array.Empty<PersonaAvatarChip>(), Avatar());
-        var (vm, exchanges, windows) = ManageFixture(personas, tile, session);
+        var (vm, exchanges, windows) = ManageFixture(personas, tile);
 
         CreatePersonaDialogViewModel? dialog = null;
         windows
@@ -321,7 +310,6 @@ public sealed class ExchangeViewModelTests
             .ReturnsAsync(() => dialog!.Result);
         exchanges
             .Setup(e => e.UpdateSelfHostedProfileAsync(
-                session,
                 It.Is<PublicIdentityId>(r => r.Value == tile.RelayIdentityId),
                 "Renamed Hub",
                 5300,
@@ -331,7 +319,6 @@ public sealed class ExchangeViewModelTests
         await vm.EditProfileCommand.ExecuteAsync(null);
 
         exchanges.Verify(e => e.UpdateSelfHostedProfileAsync(
-                session,
                 It.IsAny<PublicIdentityId>(),
                 It.IsAny<string>(),
                 It.IsAny<int>(),
@@ -372,10 +359,10 @@ public sealed class ExchangeViewModelTests
             var windows = new Mock<IWindowManager>(MockBehavior.Strict);
 
             directory
-                .Setup(d => d.ListAsync(session, It.IsAny<CancellationToken>()))
+                .Setup(d => d.ListAsync(It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new List<PersonaDirectoryEntry>());
             exchanges
-                .Setup(e => e.ListAsync(session, It.IsAny<CancellationToken>()))
+                .Setup(e => e.ListAsync(It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new List<ExchangeDirectoryEntry>());
             settings
                 .Setup(s => s.GetAppSettingAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -483,10 +470,10 @@ public sealed class ExchangeViewModelTests
         var persona = Persona("Alice");
         var exchange = Entry("Hub", port: 5200);
         f.Directory
-            .Setup(d => d.ListAsync(f.Session, It.IsAny<CancellationToken>()))
+            .Setup(d => d.ListAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<PersonaDirectoryEntry> { persona });
         f.Exchanges
-            .Setup(e => e.ListAsync(f.Session, It.IsAny<CancellationToken>()))
+            .Setup(e => e.ListAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<ExchangeDirectoryEntry> { exchange });
         f.Ports
             .Setup(p => p.ProbeAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
@@ -512,14 +499,12 @@ public sealed class ExchangeViewModelTests
             .Returns(Task.CompletedTask);
         f.Exchanges
             .Setup(e => e.StartSelfHostedEndpointAsync(
-                f.Session,
                 It.Is<ExchangeLaunchDescriptor>(d =>
                     d.RelayIdentityId == exchange.RelayIdentityId && d.RequestedPort == 5200),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(5200);
         f.Exchanges
             .Setup(e => e.ProvisionLinkedMailboxesAsync(
-                f.Session,
                 It.Is<IEnumerable<PublicIdentityId>>(ids =>
                     ids.Count() == 1 && ids.First().Value == persona.IdentityId),
                 It.IsAny<CancellationToken>()))
@@ -540,13 +525,11 @@ public sealed class ExchangeViewModelTests
         await f.Vm.LaunchPersonasCommand.ExecuteAsync(null);
 
         f.Exchanges.Verify(e => e.StartSelfHostedEndpointAsync(
-                f.Session,
                 It.Is<ExchangeLaunchDescriptor>(d => d.RelayIdentityId == exchange.RelayIdentityId),
                 It.IsAny<CancellationToken>()),
             Times.Once,
             "selected self-hosted exchanges must map relay endpoints before handoff");
         f.Exchanges.Verify(e => e.ProvisionLinkedMailboxesAsync(
-                f.Session,
                 It.Is<IEnumerable<PublicIdentityId>>(ids =>
                     ids.Single().Value == persona.IdentityId),
                 It.IsAny<CancellationToken>()),

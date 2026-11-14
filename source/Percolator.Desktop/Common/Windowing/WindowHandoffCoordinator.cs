@@ -23,7 +23,6 @@ namespace Percolator.Desktop.Common.Windowing;
 /// </summary>
 public sealed class WindowHandoffCoordinator : IWindowHandoffCoordinator
 {
-    private readonly IServiceProvider _services;
     private readonly IDatabaseUnlockCoordinator _unlockCoordinator;
     private readonly Func<StartupHostViewModel> _startupHostFactory;
     private readonly ILogger<WindowHandoffCoordinator> _logger;
@@ -34,12 +33,10 @@ public sealed class WindowHandoffCoordinator : IWindowHandoffCoordinator
     private readonly List<ExchangeLaunchDescriptor> _activeExchanges = new();
 
     public WindowHandoffCoordinator(
-        IServiceProvider services,
         IDatabaseUnlockCoordinator unlockCoordinator,
         Func<StartupHostViewModel> startupHostFactory,
         ILogger<WindowHandoffCoordinator> logger)
     {
-        _services = services ?? throw new ArgumentNullException(nameof(services));
         _unlockCoordinator = unlockCoordinator ?? throw new ArgumentNullException(nameof(unlockCoordinator));
         _startupHostFactory = startupHostFactory ?? throw new ArgumentNullException(nameof(startupHostFactory));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -94,7 +91,8 @@ public sealed class WindowHandoffCoordinator : IWindowHandoffCoordinator
             var desktop = Desktop;
             var previous = desktop.MainWindow;
 
-            var mainWindow = new MainWindow(_services.GetRequiredService<MainWindowViewModel>());
+            // Composition seam: the shell VM lives in the authenticated session container.
+            var mainWindow = new MainWindow(session.Services.GetRequiredService<MainWindowViewModel>());
             desktop.MainWindow = mainWindow;
             mainWindow.Show();
 

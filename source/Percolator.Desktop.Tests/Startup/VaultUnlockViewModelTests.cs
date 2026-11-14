@@ -33,7 +33,22 @@ public sealed class VaultUnlockViewModelTests
         _personas = new Mock<IPersonaDirectory>(MockBehavior.Strict);
         _ports = new Mock<IPortReservationService>(MockBehavior.Strict);
         _vm = new VaultUnlockViewModel(
-            _unlockCoordinator.Object, _handoff.Object, _personas.Object, _ports.Object);
+            _unlockCoordinator.Object, _handoff.Object, _ports.Object);
+    }
+
+    /// <summary>
+    /// A session whose <see cref="IAuthenticatedSession.Services"/> resolves the persona
+    /// directory — the VM reaches it at the post-unlock seam, not via its constructor.
+    /// </summary>
+    private Mock<IAuthenticatedSession> CreateSession()
+    {
+        var services = new Mock<IServiceProvider>();
+        services
+            .Setup(p => p.GetService(typeof(IPersonaDirectory)))
+            .Returns(_personas.Object);
+        var session = new Mock<IAuthenticatedSession>();
+        session.SetupGet(s => s.Services).Returns(services.Object);
+        return session;
     }
 
     [TearDown]
@@ -45,12 +60,12 @@ public sealed class VaultUnlockViewModelTests
     [Test]
     public async Task Unlock_MasterSuccess_WithoutAutoStart_TransitionsToGateWithSession()
     {
-        var session = new Mock<IAuthenticatedSession>();
+        var session = CreateSession();
         _unlockCoordinator
             .Setup(c => c.UnlockAsync(It.IsAny<VaultPassphrase>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new UnlockResult.Success(session.Object));
         _personas
-            .Setup(d => d.ListAsync(session.Object, It.IsAny<CancellationToken>()))
+            .Setup(d => d.ListAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<PersonaDirectoryEntry>
             {
                 new(System.Guid.NewGuid(), "Alice", 5100, null, false, 0)
@@ -98,7 +113,7 @@ public sealed class VaultUnlockViewModelTests
     [Test]
     public async Task Unlock_MasterSuccess_WithAutoStart_LeasesPort_AndLaunchesShell()
     {
-        var session = new Mock<IAuthenticatedSession>();
+        var session = CreateSession();
         var lease = new Mock<IPortLease>();
         lease.SetupGet(l => l.Port).Returns(5100);
         var persona = new PersonaDirectoryEntry(System.Guid.NewGuid(), "Alice", 5100, null, true, 0);
@@ -107,7 +122,7 @@ public sealed class VaultUnlockViewModelTests
             .Setup(c => c.UnlockAsync(It.IsAny<VaultPassphrase>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new UnlockResult.Success(session.Object));
         _personas
-            .Setup(d => d.ListAsync(session.Object, It.IsAny<CancellationToken>()))
+            .Setup(d => d.ListAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<PersonaDirectoryEntry> { persona });
         _ports
             .Setup(p => p.AcquireAsync(persona.PreferredPort, It.IsAny<CancellationToken>()))
@@ -140,14 +155,14 @@ public sealed class VaultUnlockViewModelTests
     [Test]
     public async Task Unlock_MasterSuccess_AutoStartPortUnavailable_FallsBackToGate()
     {
-        var session = new Mock<IAuthenticatedSession>();
+        var session = CreateSession();
         var persona = new PersonaDirectoryEntry(System.Guid.NewGuid(), "Alice", 5100, null, true, 0);
 
         _unlockCoordinator
             .Setup(c => c.UnlockAsync(It.IsAny<VaultPassphrase>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new UnlockResult.Success(session.Object));
         _personas
-            .Setup(d => d.ListAsync(session.Object, It.IsAny<CancellationToken>()))
+            .Setup(d => d.ListAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<PersonaDirectoryEntry> { persona });
         _ports
             .Setup(p => p.AcquireAsync(persona.PreferredPort, It.IsAny<CancellationToken>()))
@@ -168,7 +183,7 @@ public sealed class VaultUnlockViewModelTests
     [Test]
     public async Task ForceGateUnlock_WithAutoStart_SkipsAutoStart_AndTransitionsToGate()
     {
-        var session = new Mock<IAuthenticatedSession>();
+        var session = CreateSession();
         _unlockCoordinator
             .Setup(c => c.UnlockAsync(It.IsAny<VaultPassphrase>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new UnlockResult.Success(session.Object));
@@ -184,7 +199,7 @@ public sealed class VaultUnlockViewModelTests
             Times.Once,
             "the Shift-override path must always land on the Identity Gate");
         _personas.Verify(
-            d => d.ListAsync(It.IsAny<IAuthenticatedSession>(), It.IsAny<CancellationToken>()),
+            d => d.ListAsync(It.IsAny<CancellationToken>()),
             Times.Never,
             "the Shift-override path must not evaluate auto-start preferences");
     }
@@ -251,7 +266,7 @@ public sealed class VaultUnlockViewModelTests
     [Test]
     public async Task Unlock_AutoStartHandoffThrows_DisposesLease()
     {
-        var session = new Mock<IAuthenticatedSession>();
+        var session = CreateSession();
         var lease = new Mock<IPortLease>();
         lease.SetupGet(l => l.Port).Returns(5100);
         var persona = new PersonaDirectoryEntry(System.Guid.NewGuid(), "Alice", 5100, null, true, 0);
@@ -260,7 +275,7 @@ public sealed class VaultUnlockViewModelTests
             .Setup(c => c.UnlockAsync(It.IsAny<VaultPassphrase>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new UnlockResult.Success(session.Object));
         _personas
-            .Setup(d => d.ListAsync(session.Object, It.IsAny<CancellationToken>()))
+            .Setup(d => d.ListAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<PersonaDirectoryEntry> { persona });
         _ports
             .Setup(p => p.AcquireAsync(persona.PreferredPort, It.IsAny<CancellationToken>()))
@@ -284,12 +299,12 @@ public sealed class VaultUnlockViewModelTests
     [Test]
     public async Task Unlock_TwoAutoStartPersonas_FallsBackToGate()
     {
-        var session = new Mock<IAuthenticatedSession>();
+        var session = CreateSession();
         _unlockCoordinator
             .Setup(c => c.UnlockAsync(It.IsAny<VaultPassphrase>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new UnlockResult.Success(session.Object));
         _personas
-            .Setup(d => d.ListAsync(session.Object, It.IsAny<CancellationToken>()))
+            .Setup(d => d.ListAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<PersonaDirectoryEntry>
             {
                 new(System.Guid.NewGuid(), "Alice", 5100, null, true, 0),
@@ -314,7 +329,7 @@ public sealed class VaultUnlockViewModelTests
     [Test]
     public async Task Unlock_AutoStart_PrefersLastBoundPortOverPreferred()
     {
-        var session = new Mock<IAuthenticatedSession>();
+        var session = CreateSession();
         var lease = new Mock<IPortLease>();
         lease.SetupGet(l => l.Port).Returns(5101);
         // LastBoundPort=5101 was persisted by the previous launch — auto-start should try it first.
@@ -324,7 +339,7 @@ public sealed class VaultUnlockViewModelTests
             .Setup(c => c.UnlockAsync(It.IsAny<VaultPassphrase>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new UnlockResult.Success(session.Object));
         _personas
-            .Setup(d => d.ListAsync(session.Object, It.IsAny<CancellationToken>()))
+            .Setup(d => d.ListAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<PersonaDirectoryEntry> { persona });
         _ports
             .Setup(p => p.AcquireAsync(5101, It.IsAny<CancellationToken>()))

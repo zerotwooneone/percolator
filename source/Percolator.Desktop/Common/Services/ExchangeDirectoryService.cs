@@ -6,7 +6,6 @@ using System.Linq;
 using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.Extensions.DependencyInjection;
 using Percolator.Application.Delivery.Ports;
 using Percolator.Application.Ports;
 using Percolator.Desktop.Common.Storage;
@@ -22,11 +21,11 @@ using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 namespace Percolator.Desktop.Common.Services;
 
 /// <summary>
-/// Default <see cref="IExchangeDirectory"/>: opens a DI scope on the authenticated session
-/// and drives exchange operations through the vault's relay directory. Gate-time link,
-/// unlink, and create operations are pure vault writes — zero wire traffic
-/// ([DEP-DESKTOP-PRE-ACTIVATION-STEALTH]). Launch-time operations (endpoint start,
-/// mailbox provisioning) are the only calls that can reach the network.
+/// Default <see cref="IExchangeDirectory"/>: resolved from the authenticated session
+/// container, so the vault's relay directory and transport arrive as constructor
+/// dependencies. Gate-time link, unlink, and create operations are pure vault writes —
+/// zero wire traffic ([DEP-DESKTOP-PRE-ACTIVATION-STEALTH]). Launch-time operations
+/// (endpoint start, mailbox provisioning) are the only calls that can reach the network.
 /// </summary>
 public sealed class ExchangeDirectoryService : IExchangeDirectory
 {
@@ -35,23 +34,30 @@ public sealed class ExchangeDirectoryService : IExchangeDirectory
 
     private const string SelfHostedBindHost = "127.0.0.1";
 
+    private readonly IRelayDirectory _directory;
+    private readonly IIdentityProfileRepository _profiles;
+    private readonly IRelayMailboxCapabilityStore _capabilities;
+    private readonly IPeerTransportServer _transport;
     private readonly IDesktopSettingsRepository _settings;
 
-    public ExchangeDirectoryService(IDesktopSettingsRepository settings)
+    public ExchangeDirectoryService(
+        IRelayDirectory directory,
+        IIdentityProfileRepository profiles,
+        IRelayMailboxCapabilityStore capabilities,
+        IPeerTransportServer transport,
+        IDesktopSettingsRepository settings)
     {
+        _directory = directory ?? throw new ArgumentNullException(nameof(directory));
+        _profiles = profiles ?? throw new ArgumentNullException(nameof(profiles));
+        _capabilities = capabilities ?? throw new ArgumentNullException(nameof(capabilities));
+        _transport = transport ?? throw new ArgumentNullException(nameof(transport));
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
     }
 
     public async Task<IReadOnlyList<ExchangeDirectoryEntry>> ListAsync(
-        IAuthenticatedSession session, CancellationToken ct = default)
+        CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(session);
-
-        using var scope = CreateScope(session);
-        var relays = await scope.ServiceProvider
-            .GetRequiredService<IRelayDirectory>()
-            .ListAsync(ct)
-            .ConfigureAwait(false);
+        var relays = await _directory.ListAsync(ct).ConfigureAwait(false);
         var settings = (await _settings.GetAllAsync(ct).ConfigureAwait(false))
             .ToDictionary(s => s.IdentityId);
 
@@ -59,14 +65,12 @@ public sealed class ExchangeDirectoryService : IExchangeDirectory
     }
 
     public async Task<ExchangeDirectoryEntry> CreateSelfHostedAsync(
-        IAuthenticatedSession session,
         PublicIdentityId relayIdentityId,
         string displayName,
         int preferredPort,
         IReadOnlyList<PublicIdentityId> initialLinkedPersonaIds,
         CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(initialLinkedPersonaIds);
 
         var trimmed = (displayName ?? string.Empty).Trim();
@@ -77,9 +81,7 @@ public sealed class ExchangeDirectoryService : IExchangeDirectory
 
         var endpoint = RelayEndpoint.FromHostAndPort(SelfHostedBindHost, preferredPort);
 
-        using var scope = CreateScope(session);
-        var directory = scope.ServiceProvider.GetRequiredService<IRelayDirectory>();
-        var result = await directory
+        var result = await _directory
             .CreateLocalRelayHostAsync(relayIdentityId, trimmed, endpoint, initialLinkedPersonaIds, ct)
             .ConfigureAwait(false);
         if (result.IsFailure)
@@ -100,22 +102,17 @@ public sealed class ExchangeDirectoryService : IExchangeDirectory
     }
 
     public async Task<ExchangeDirectoryEntry> RegisterRemoteAsync(
-        IAuthenticatedSession session,
         PublicIdentityId relayIdentityId,
         string endpoint,
         CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(session);
-
         var endpointResult = RelayEndpoint.Create(endpoint);
         if (endpointResult.IsFailure)
         {
             throw new ArgumentException(endpointResult.Error.Description, nameof(endpoint));
         }
 
-        using var scope = CreateScope(session);
-        var result = await scope.ServiceProvider
-            .GetRequiredService<IRelayDirectory>()
+        var result = await _directory
             .RegisterRemoteRelayAsync(relayIdentityId, endpointResult.Value!, ct: ct)
             .ConfigureAwait(false);
         if (result.IsFailure)
@@ -127,14 +124,11 @@ public sealed class ExchangeDirectoryService : IExchangeDirectory
     }
 
     public async Task<DomainResult> UpdateSelfHostedProfileAsync(
-        IAuthenticatedSession session,
         PublicIdentityId relayIdentityId,
         string displayName,
         int preferredPort,
         CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(session);
-
         var trimmed = (displayName ?? string.Empty).Trim();
         if (trimmed.Length == 0)
         {
@@ -142,9 +136,7 @@ public sealed class ExchangeDirectoryService : IExchangeDirectory
                 "INVALID_DISPLAY_NAME", "Display name cannot be whitespace."));
         }
 
-        using var scope = CreateScope(session);
-        var profiles = scope.ServiceProvider.GetRequiredService<IIdentityProfileRepository>();
-        var existing = await profiles.GetByIdAsync(relayIdentityId, ct).ConfigureAwait(false);
+        var existing = await _profiles.GetByIdAsync(relayIdentityId, ct).ConfigureAwait(false);
         if (existing is null || existing.Role != IdentityRole.RelayHost)
         {
             return DomainResult.Failure(new DomainError(
@@ -155,7 +147,7 @@ public sealed class ExchangeDirectoryService : IExchangeDirectory
         var renamed = IdentityProfile.Rehydrate(
             existing.Id, trimmed, existing.Role, existing.State,
             existing.CreatedAtUtc, existing.DisabledAtUtc);
-        await profiles.SaveAsync(renamed, ct).ConfigureAwait(false);
+        await _profiles.SaveAsync(renamed, ct).ConfigureAwait(false);
 
         var settingsEntity = await _settings.GetAsync(relayIdentityId.Value, ct).ConfigureAwait(false)
             ?? new DesktopIdentitySettingsEntity(relayIdentityId.Value, preferredPort, null, false, 0);
@@ -166,93 +158,71 @@ public sealed class ExchangeDirectoryService : IExchangeDirectory
     }
 
     public async Task<DomainResult> LinkPersonaAsync(
-        IAuthenticatedSession session,
         PublicIdentityId relayIdentityId,
         PublicIdentityId personaId,
         CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(session);
-
-        using var scope = CreateScope(session);
-        var result = await scope.ServiceProvider
-            .GetRequiredService<IRelayDirectory>()
+        var result = await _directory
             .LinkIdentityAsync(relayIdentityId, personaId, ct: ct)
             .ConfigureAwait(false);
         return result.IsFailure ? DomainResult.Failure(result.Error) : DomainResult.Success();
     }
 
     public async Task<DomainResult> UnlinkPersonaAsync(
-        IAuthenticatedSession session,
         PublicIdentityId relayIdentityId,
         PublicIdentityId personaId,
         bool purgeQueuedEnvelopes,
         CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(session);
-
-        using var scope = CreateScope(session);
-        var directory = scope.ServiceProvider.GetRequiredService<IRelayDirectory>();
-
         if (purgeQueuedEnvelopes)
         {
             // Self-hosted exchange: the relay queue lives in this same vault — purge is
             // verifiable local deletion. Tokens must be read before the binding is removed.
-            var tokensResult = await directory
+            var tokensResult = await _directory
                 .GetMailboxTokensAsync(personaId, relayIdentityId, ct)
                 .ConfigureAwait(false);
             if (tokensResult.IsSuccess && tokensResult.Value is { } tokens)
             {
-                var capabilities = scope.ServiceProvider
-                    .GetRequiredService<IRelayMailboxCapabilityStore>();
-                await capabilities
+                await _capabilities
                     .DrainEnvelopesAsync(tokens.RoutingToken.ToByteArray(), ct)
                     .ConfigureAwait(false);
             }
         }
 
-        return await directory
+        return await _directory
             .UnlinkIdentityAsync(relayIdentityId, personaId, ct)
             .ConfigureAwait(false);
     }
 
     public async Task<int?> StartSelfHostedEndpointAsync(
-        IAuthenticatedSession session,
         ExchangeLaunchDescriptor exchange,
         CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(exchange);
 
-        using var scope = CreateScope(session);
-        var transport = scope.ServiceProvider.GetRequiredService<IPeerTransportServer>();
-        if (transport.IsRunning)
+        if (_transport.IsRunning)
         {
             // The session owns a single transport singleton — a second self-hosted exchange
             // shares the already-bound listener rather than failing the launch.
-            return transport.BoundPort?.Value;
+            return _transport.BoundPort?.Value;
         }
 
-        await transport
+        await _transport
             .StartAsync(IPAddress.Loopback, new PortNumber(exchange.RequestedPort), mapRelayEndpoints: true, ct)
             .ConfigureAwait(false);
-        return transport.BoundPort?.Value;
+        return _transport.BoundPort?.Value;
     }
 
     public async Task<DomainResult> ProvisionLinkedMailboxesAsync(
-        IAuthenticatedSession session,
         IEnumerable<PublicIdentityId> personaIds,
         CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(personaIds);
-
-        using var scope = CreateScope(session);
-        var directory = scope.ServiceProvider.GetRequiredService<IRelayDirectory>();
 
         var failures = new List<string>();
         foreach (var personaId in personaIds)
         {
-            var result = await directory
+            var result = await _directory
                 .ProvisionLinkedMailboxesAsync(personaId, ct)
                 .ConfigureAwait(false);
             if (result.IsFailure)
@@ -267,9 +237,6 @@ public sealed class ExchangeDirectoryService : IExchangeDirectory
                 "MAILBOX_PROVISION_FAILED",
                 $"Mailbox provisioning failed for {failures.Count} persona(s): {string.Join("; ", failures)}"));
     }
-
-    private static IServiceScope CreateScope(IAuthenticatedSession session) =>
-        session.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
 
     private static ExchangeDirectoryEntry ToEntry(
         RelayDirectoryEntry relay,

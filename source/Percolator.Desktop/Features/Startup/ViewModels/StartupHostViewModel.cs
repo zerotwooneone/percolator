@@ -4,6 +4,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Ports;
@@ -29,7 +30,6 @@ public partial class StartupHostViewModel : ViewModelBase
     private readonly VaultStorageOptions _storageOptions;
     private readonly Func<VaultSetupViewModel> _setupFactory;
     private readonly Func<VaultUnlockViewModel> _unlockFactory;
-    private readonly Func<IdentityGateViewModel> _gateFactory;
     private readonly IHostApplicationLifetime _appLifetime;
     private readonly IDialogService _dialogs;
     private readonly ILauncherService _launcher;
@@ -59,7 +59,6 @@ public partial class StartupHostViewModel : ViewModelBase
         VaultStorageOptions storageOptions,
         Func<VaultSetupViewModel> setupFactory,
         Func<VaultUnlockViewModel> unlockFactory,
-        Func<IdentityGateViewModel> gateFactory,
         IHostApplicationLifetime appLifetime,
         IDialogService dialogs,
         ILauncherService launcher,
@@ -70,7 +69,6 @@ public partial class StartupHostViewModel : ViewModelBase
         _storageOptions = storageOptions ?? throw new ArgumentNullException(nameof(storageOptions));
         _setupFactory = setupFactory ?? throw new ArgumentNullException(nameof(setupFactory));
         _unlockFactory = unlockFactory ?? throw new ArgumentNullException(nameof(unlockFactory));
-        _gateFactory = gateFactory ?? throw new ArgumentNullException(nameof(gateFactory));
         _appLifetime = appLifetime ?? throw new ArgumentNullException(nameof(appLifetime));
         _dialogs = dialogs ?? throw new ArgumentNullException(nameof(dialogs));
         _launcher = launcher ?? throw new ArgumentNullException(nameof(launcher));
@@ -138,11 +136,11 @@ public partial class StartupHostViewModel : ViewModelBase
     public async Task NavigateToGateAsync(IAuthenticatedSession session)
     {
         PendingSession = session;
-        NavigateToScreen(StartupScreen.IdentityGate);
-        if (CurrentViewModel is IdentityGateViewModel gate)
-        {
-            await gate.LoadAsync(session).ConfigureAwait(true);
-        }
+        // Composition seam: the gate VM lives in the authenticated session container —
+        // it ctor-injects the session-bound facades, so the Stage-1 factory is gone.
+        CurrentViewModel = session.Services.GetRequiredService<IdentityGateViewModel>();
+        CurrentScreen = StartupScreen.IdentityGate;
+        await ((IdentityGateViewModel)CurrentViewModel).LoadAsync(session).ConfigureAwait(true);
     }
 
     /// <summary>Returns the frame to the unlock screen (session relock path).</summary>
@@ -158,7 +156,6 @@ public partial class StartupHostViewModel : ViewModelBase
         {
             StartupScreen.VaultSetup => _setupFactory(),
             StartupScreen.VaultUnlock => _unlockFactory(),
-            StartupScreen.IdentityGate => _gateFactory(),
             _ => null
         };
         CurrentScreen = screen;

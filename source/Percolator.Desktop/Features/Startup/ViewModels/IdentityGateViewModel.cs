@@ -172,7 +172,7 @@ public partial class IdentityGateViewModel : ViewModelBase
         IsLoading = true;
         try
         {
-            var entries = await _directory.ListAsync(session, ct).ConfigureAwait(true);
+            var entries = await _directory.ListAsync(ct).ConfigureAwait(true);
             _personaList.Clear();
             foreach (var entry in entries)
             {
@@ -189,7 +189,7 @@ public partial class IdentityGateViewModel : ViewModelBase
             IsOnboardingActive = onboardingFlag != FlagSetValue;
 
             _exchangeList.Clear();
-            var exchangeEntries = await _exchanges.ListAsync(session, ct).ConfigureAwait(true);
+            var exchangeEntries = await _exchanges.ListAsync(ct).ConfigureAwait(true);
             foreach (var exchangeEntry in exchangeEntries)
             {
                 var tile = BuildExchangeTile(exchangeEntry);
@@ -283,7 +283,7 @@ public partial class IdentityGateViewModel : ViewModelBase
                     try
                     {
                         await _exchanges
-                            .StartSelfHostedEndpointAsync(_session, descriptor, ct)
+                            .StartSelfHostedEndpointAsync(descriptor, ct)
                             .ConfigureAwait(true);
                     }
                     catch (Exception ex)
@@ -302,7 +302,7 @@ public partial class IdentityGateViewModel : ViewModelBase
                 // Best effort: unreachable exchanges surface as a banner; mailboxes
                 // re-provision on the next launch.
                 var provision = await _exchanges
-                    .ProvisionLinkedMailboxesAsync(_session, selectedPersonaIds, ct)
+                    .ProvisionLinkedMailboxesAsync(selectedPersonaIds, ct)
                     .ConfigureAwait(true);
                 if (provision.IsFailure)
                 {
@@ -352,7 +352,7 @@ public partial class IdentityGateViewModel : ViewModelBase
         try
         {
             var entry = await _directory
-                .CreateAsync(_session, result.IdentityId.Value, result.DisplayName, result.PreferredPort, ct)
+                .CreateAsync(result.IdentityId.Value, result.DisplayName, result.PreferredPort, ct)
                 .ConfigureAwait(true);
             var model = BuildModel(entry);
             model.IsSelected = true;
@@ -388,7 +388,7 @@ public partial class IdentityGateViewModel : ViewModelBase
         try
         {
             await _directory
-                .RenameAsync(_session, new PublicIdentityId(persona.IdentityId), result.DisplayName, ct)
+                .RenameAsync(new PublicIdentityId(persona.IdentityId), result.DisplayName, ct)
                 .ConfigureAwait(true);
             await PersistPortPreferenceAsync(persona.IdentityId, result.PreferredPort, ct).ConfigureAwait(true);
 
@@ -424,7 +424,7 @@ public partial class IdentityGateViewModel : ViewModelBase
         try
         {
             await _directory
-                .ShredAndDeleteAsync(_session, new PublicIdentityId(persona.IdentityId), ct)
+                .ShredAndDeleteAsync(new PublicIdentityId(persona.IdentityId), ct)
                 .ConfigureAwait(true);
             _personaList.Remove(persona);
             RefreshDerivedState();
@@ -454,7 +454,6 @@ public partial class IdentityGateViewModel : ViewModelBase
         {
             var entry = await _exchanges
                 .CreateSelfHostedAsync(
-                    _session,
                     result.RelayIdentityId,
                     result.DisplayName,
                     result.PreferredPort,
@@ -491,14 +490,14 @@ public partial class IdentityGateViewModel : ViewModelBase
         var personas = _personaList.Select(ToPersonaEntry).ToList();
         var changed = await _windows
             .ShowDialogAsync<ExchangeManageViewModel, bool>(
-                vm => vm.Initialize(_session, exchange, personas))
+                vm => vm.Initialize(exchange, personas))
             .ConfigureAwait(true);
         if (changed != true)
         {
             return;
         }
 
-        var fresh = await _exchanges.ListAsync(_session, ct).ConfigureAwait(true);
+        var fresh = await _exchanges.ListAsync(ct).ConfigureAwait(true);
         var entry = fresh.FirstOrDefault(e => e.RelayIdentityId == exchange.RelayIdentityId);
         if (entry is null)
         {

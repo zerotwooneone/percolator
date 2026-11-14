@@ -49,11 +49,10 @@ public sealed class IdentityGateViewModelTests
 
         // Defaults exercised by every LoadAsync/launch — individual tests override.
         _exchanges
-            .Setup(e => e.ListAsync(It.IsAny<IAuthenticatedSession>(), It.IsAny<CancellationToken>()))
+            .Setup(e => e.ListAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(Array.Empty<ExchangeDirectoryEntry>());
         _exchanges
             .Setup(e => e.ProvisionLinkedMailboxesAsync(
-                It.IsAny<IAuthenticatedSession>(),
                 It.IsAny<IEnumerable<PublicIdentityId>>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(DomainResult.Success());
@@ -94,7 +93,7 @@ public sealed class IdentityGateViewModelTests
 
     private void ArrangeDirectory(params PersonaDirectoryEntry[] entries) =>
         _directory
-            .Setup(d => d.ListAsync(_session, It.IsAny<CancellationToken>()))
+            .Setup(d => d.ListAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<PersonaDirectoryEntry>(entries));
 
     [Test]
@@ -325,7 +324,6 @@ public sealed class IdentityGateViewModelTests
             .ReturnsAsync(true);
         _directory
             .Setup(d => d.ShredAndDeleteAsync(
-                _session,
                 It.Is<PublicIdentityId>(id => id.Value == entry.IdentityId),
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
@@ -334,7 +332,6 @@ public sealed class IdentityGateViewModelTests
 
         _directory.Verify(
             d => d.ShredAndDeleteAsync(
-                _session,
                 It.Is<PublicIdentityId>(id => id.Value == entry.IdentityId),
                 It.IsAny<CancellationToken>()),
             Times.Once,
@@ -516,7 +513,6 @@ public sealed class IdentityGateViewModelTests
             .ReturnsAsync(new PersonaEditorResult(new PublicIdentityId(identityId), "Bob", 5100));
         _directory
             .Setup(d => d.CreateAsync(
-                _session,
                 It.Is<PublicIdentityId>(id => id.Value == identityId),
                 "Bob",
                 5100,
@@ -530,7 +526,6 @@ public sealed class IdentityGateViewModelTests
 
         _directory.Verify(
             d => d.CreateAsync(
-                _session,
                 It.Is<PublicIdentityId>(id => id.Value == identityId),
                 "Bob",
                 5100,
