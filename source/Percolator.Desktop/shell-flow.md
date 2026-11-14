@@ -9,12 +9,8 @@ This application is strictly controlled by the QMS system found in `/source/spec
 The main application shell is a modern, responsive desktop shell inspired by Discord and Microsoft Teams.
 
 ### Responsive Design Principles
-- **Window Geometry & Adaptation**:
+- **Window Geometry**:
   - Minimum supported window size: $800 \times 600\text{ px}$. Default target: $1200 \times 800\text{ px}$.
-  - The shell remembers and restores window dimensions, monitor coordinates, and maximized state across restarts.
-  - **Narrow / Compact Screen Adaptation**:
-    - When window width $< 1000\text{ px}$, the right-anchored inspector drawer acts as an overlay/drawer with a backdrop dismiss scrim rather than pushing the content area.
-    - When window width $< 850\text{ px}$, the Right Sidebar collapses into a slide-out drawer accessible via a hamburger toggle.
 
 ---
 
@@ -33,7 +29,7 @@ The main application shell is a modern, responsive desktop shell inspired by Dis
     - Each relay displays a distinct relay icon / badge.
     - **Zero Technical Clutter**: Do not show IP addresses, ports, or protocol strings in the sidebar list.
     - **Hover Tooltip**: Hovering the mouse over an item displays the remote peer or relay display name in a clean tooltip (like Discord's server list).
-    - **Reordering**: Users can drag and drop items up and down the list; sort order is persisted in the local desktop database.
+    - **Reordering**: Users can drag and drop items up and down the list; sort order is persisted.
     - **Right-Click Context Menu**:
       - *Direct Peer*: "View Profile" (opens the right-anchored inspector drawer), "Mute", "Remove Connection".
       - *Relay*: "Relay Details" (opens the right-anchored inspector drawer), "Reconnect", "Remove Relay".
@@ -59,7 +55,7 @@ The main application shell is a modern, responsive desktop shell inspired by Dis
 - **Visual Presentation**:
   - Displays conversation name, avatar, unread message badge count, and last message timestamp/snippet.
   - **Zero Technical Clutter**: Do not display route labels like `(Relayed 1-on-1)` in the list items.
-  - Drag-and-drop reordering with database-persisted positions.
+  - Drag-and-drop reordering with persisted positions.
   - **Right-Click Context Menu**: Allows actions related to the chat item ("View Details", "Mute Notifications", "Clear History", "Leave Group").
   - Clicking an item loads that conversation into the Content Area.
 - **Empty State (Right Sidebar)**:
@@ -148,8 +144,5 @@ Inspired by Signal Desktop, Microsoft Teams, and Discord, clicking a peer's prof
 ## Session Locking & Teardown (`UN-SESSION-LOCK`, `SYS-LOCK-TEARDOWN-AND-ZEROIZATION`)
 
 - A "Lock Session" action in the shell menu or system tray executes immediate teardown:
-  1. Tears down all active Kestrel listener sockets and disconnects all relay streams.
-  2. Clears all SQLite connection pools (`SqliteConnection.ClearAllPools()`).
-  3. Securely zeroizes the master key in memory (`CryptographicOperations.ZeroMemory`).
-  4. Disposes the Stage 2 container and closes `MainWindow`.
-  5. Re-opens the unlock window in total network stealth mode.
+  - The unlock window re-appears in total network stealth mode and `MainWindow` closes.
+  - Session teardown clears all active Kestrel listener sockets and relay streams, clears all SQLite connection pools (`SqliteConnection.ClearAllPools()`), securely zeroizes the master key in memory (`CryptographicOperations.ZeroMemory`), and disposes the Stage 2 container.
