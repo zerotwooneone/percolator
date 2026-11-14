@@ -22,6 +22,9 @@ public static class VaultSettingKeys
 
     /// <summary>The identity that was active when the last shell session ended.</summary>
     public const string LastActiveIdentityId = "Gate.LastActiveIdentityId";
+
+    /// <summary>JSON-serialized <c>ShellWindowGeometry</c> — position, size, and window state (WIN-02).</summary>
+    public const string ShellWindowGeometry = "Shell.Window.Geometry";
 }
 
 /// <summary>

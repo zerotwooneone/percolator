@@ -35,6 +35,11 @@
         <PackageReference Include="Tmds.DBus.Protocol" Version="0.21.3" />
     </ItemGroup>
 
+    <!-- InternalsVisibleTo for unit-testing internal facades/helpers (WIN-02 geometry store + math). -->
+    <ItemGroup>
+        <InternalsVisibleTo Include="Percolator.Desktop.Tests" />
+    </ItemGroup>
+
     <!-- Vendored Signal.Interop for the native signal_shim smoke test ([DEP-DESKTOP-STARTUP-VAULT-AUTHENTICATION]) -->
     <ItemGroup>
         <Reference Include="Signal.Interop">

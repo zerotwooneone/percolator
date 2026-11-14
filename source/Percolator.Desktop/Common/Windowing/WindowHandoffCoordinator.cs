@@ -32,6 +32,11 @@ public sealed class WindowHandoffCoordinator : IWindowHandoffCoordinator
     private readonly List<PersonaLaunchDescriptor> _activePersonas = new();
     private readonly List<ExchangeLaunchDescriptor> _activeExchanges = new();
 
+    // Armed when the shell is constructed so LockSessionAsync can await the window's
+    // Closed event — the Closing geometry save must land before session teardown (WIN-02).
+    private TaskCompletionSource _shellClosed =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     public WindowHandoffCoordinator(
         IDatabaseUnlockCoordinator unlockCoordinator,
         Func<StartupHostViewModel> startupHostFactory,
@@ -86,13 +91,24 @@ public sealed class WindowHandoffCoordinator : IWindowHandoffCoordinator
             }
         }
 
-        await Dispatcher.UIThread.InvokeAsync(() =>
+        await Dispatcher.UIThread.InvokeAsync(async () =>
         {
             var desktop = Desktop;
             var previous = desktop.MainWindow;
 
-            // Composition seam: the shell VM lives in the authenticated session container.
-            var mainWindow = new MainWindow(session.Services.GetRequiredService<MainWindowViewModel>());
+            // Composition seam: the shell VM + geometry store live in the session container.
+            var geometryStore = session.Services.GetRequiredService<IShellWindowGeometryStore>();
+            var mainWindow = new MainWindow(
+                session.Services.GetRequiredService<MainWindowViewModel>(),
+                geometryStore);
+
+            // Restore before Show — absent/corrupt record keeps the XAML CenterScreen default.
+            var geometry = await geometryStore.LoadAsync(ct).ConfigureAwait(true);
+            mainWindow.ApplyGeometry(geometry);
+
+            _shellClosed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            mainWindow.Closed += (_, _) => _shellClosed.TrySetResult();
+
             desktop.MainWindow = mainWindow;
             mainWindow.Show();
 
@@ -102,6 +118,38 @@ public sealed class WindowHandoffCoordinator : IWindowHandoffCoordinator
 
     public async Task LockSessionAsync(CancellationToken ct = default)
     {
+        // WIN-02 close ordering: the geometry store dies with the session container, so the
+        // shell's Closing save must land BEFORE LockAsync tears the session down. Show the
+        // startup frame first (keeps the app alive under OnLastWindowClose), close the
+        // shell, and await its Closed event — the async-close save completes while the
+        // session is still live.
+        Task? shellClosed = null;
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            var desktop = Desktop;
+            var previous = desktop.MainWindow;
+
+            // Fresh transient host VM guarantees no passphrase/state residue after lock.
+            var hostViewModel = _startupHostFactory();
+            var startupWindow = new StartupWindow(hostViewModel);
+            desktop.MainWindow = startupWindow;
+            startupWindow.Show();
+
+            if (previous is not null && !ReferenceEquals(previous, startupWindow))
+            {
+                previous.Close();
+                if (previous is MainWindow)
+                {
+                    shellClosed = _shellClosed.Task;
+                }
+            }
+        });
+
+        if (shellClosed is not null)
+        {
+            await shellClosed.ConfigureAwait(false);
+        }
+
         // Flushes pools, zeroizes the key buffer, disposes the authenticated host.
         await _unlockCoordinator.LockAsync().ConfigureAwait(false);
 
@@ -120,22 +168,5 @@ public sealed class WindowHandoffCoordinator : IWindowHandoffCoordinator
             _activePersonas.Clear();
             _activeExchanges.Clear();
         }
-
-        await Dispatcher.UIThread.InvokeAsync(() =>
-        {
-            var desktop = Desktop;
-            var previous = desktop.MainWindow;
-
-            // Fresh transient host VM guarantees no passphrase/state residue after lock.
-            var hostViewModel = _startupHostFactory();
-            var startupWindow = new StartupWindow(hostViewModel);
-            desktop.MainWindow = startupWindow;
-            startupWindow.Show();
-
-            if (previous is not null && !ReferenceEquals(previous, startupWindow))
-            {
-                previous.Close();
-            }
-        });
     }
 }

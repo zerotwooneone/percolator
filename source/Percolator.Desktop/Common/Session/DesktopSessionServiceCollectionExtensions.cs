@@ -29,6 +29,8 @@ internal static class DesktopSessionServiceCollectionExtensions
         // Vault-backed launch settings — personas and relay hosts share the one encrypted
         // identity_settings table via IVaultSettingsStore (STOR-03).
         services.AddSingleton<IDesktopSettingsRepository, VaultDesktopSettingsRepository>();
+        // WIN-02: shell geometry rides the same store — JSON in the vault's app_settings.
+        services.AddSingleton<IShellWindowGeometryStore, VaultShellWindowGeometryStore>();
         services.AddTransient<IdentityGateViewModel>();
         services.AddTransient<MainWindowViewModel>();     // resolved at the WIN-02 seam
         services.AddTransient<ExchangeManageViewModel>();
