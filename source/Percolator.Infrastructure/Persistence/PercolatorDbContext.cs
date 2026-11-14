@@ -64,6 +64,8 @@ public class PercolatorDbContext : DbContext
     public DbSet<TransferBitfieldEntity> TransferBitfields => Set<TransferBitfieldEntity>();
     public DbSet<SwarmEndpointEntity> SwarmEndpoints => Set<SwarmEndpointEntity>();
     public DbSet<FilterPolicyEntity> FilterPolicies => Set<FilterPolicyEntity>();
+    public DbSet<IdentitySettingsEntity> IdentitySettings => Set<IdentitySettingsEntity>();
+    public DbSet<AppSettingEntity> AppSettings => Set<AppSettingEntity>();
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -543,6 +545,20 @@ public class PercolatorDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(e => e.RoutingToken)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+        // 41. Identity Settings (vault-stored launch preferences, personas + relay hosts)
+        modelBuilder.Entity<IdentitySettingsEntity>(entity =>
+        {
+            entity.ToTable("identity_settings");
+            entity.HasKey(e => e.IdentityId);
+            entity.Property(e => e.IdentityId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+        });
+        // 42. App Settings (vault-global key/value)
+        modelBuilder.Entity<AppSettingEntity>(entity =>
+        {
+            entity.ToTable("app_settings");
+            entity.HasKey(e => e.SettingKey);
+            entity.Property(e => e.SettingValue).IsRequired();
         });
         // Apply snake_case naming convention to all columns
         foreach (var entity in modelBuilder.Model.GetEntityTypes())

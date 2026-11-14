@@ -70,4 +70,35 @@ public class SqliteDatabaseMigratorTests
         var count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
         count.Should().Be(1, "model tables must be created even when non-model tables already exist");
     }
+
+    [Test]
+    public async Task MigrateAsync_CreatesVaultSettingsTables_AndIsIdempotent()
+    {
+        // STOR-01: the plaintext desktop-settings store moves into the encrypted vault as
+        // EF entities; the no-migrations DDL path must create the new tables on unlock
+        // (existing vaults) and on fresh-vault initialization, and re-running must be safe.
+        SQLitePCL.Batteries_V2.Init();
+        using var conn = new SqliteConnection("Data Source=:memory:");
+        conn.Open();
+
+        var options = new DbContextOptionsBuilder<PercolatorDbContext>()
+            .UseSqlite(conn)
+            .Options;
+
+        using var dbContext = new PercolatorDbContext(options);
+        var migrator = new SqliteDatabaseMigrator(dbContext);
+
+        (await migrator.MigrateAsync(masterKey: null!)).IsSuccess.Should().BeTrue();
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT count(*) FROM sqlite_master
+            WHERE type = 'table' AND name IN ('identity_settings', 'app_settings');
+            """;
+        Convert.ToInt32(await cmd.ExecuteScalarAsync()).Should().Be(2,
+            "both vault-settings tables must be created by the model-DDL path");
+
+        // Second run — the CREATE ... IF NOT EXISTS rewrite must make this a no-op.
+        (await migrator.MigrateAsync(masterKey: null!)).IsSuccess.Should().BeTrue();
+    }
 }
