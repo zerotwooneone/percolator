@@ -87,7 +87,7 @@ Percolator.Desktop/
 │   ├── Converters/                       # IdentityHashToBrushConverter, RouteToColorConverter
 │   ├── Navigation/                       # INavigationService.cs, NavigationService.cs
 │   ├── Services/                         # NetworkStealthGate, PortReservationService, SystemDateTimeProvider
-│   ├── Storage/                          # DesktopIdentitySettingsEntity.cs, IDesktopSettingsRepository.cs
+│   ├── Storage/                          # IDesktopSettingsRepository.cs, VaultDesktopSettingsRepository.cs
 │   ├── Styles/                           # Spacing.axaml, CustomStyles.axaml
 │   └── Windowing/                        # IWindowManager.cs, WindowManager.cs, IWindowHandoffCoordinator.cs, WindowHandoffCoordinator.cs
 ├── Features/
@@ -235,7 +235,7 @@ flowchart TD
 * **Detailed Design**: `INV-DESKTOP-STEALTH-ACTIVATION-GATE`, `INV-DESKTOP-PRESENTATION-MODELS`
 * **Governing Specs**: `[STYLE-002]`, `[STYLE-006]`, `[VIEW-001]`, `[VIEW-004]`, `[CB-001]`, `[CB-004]`, `[CB-008]`, `[VM-001]`, `[VM-002]`, `[VM-003]`, `[VM-005]`, `[VM-006]`, `[VM-010]`, `[VM-013]`, `[VM-014]`, `[R3-004]`, `[R3-005]`
 * **Target Deliverables**:
-  * Create: `Common/Storage/DesktopIdentitySettingsEntity.cs` (PK `IdentityId`, `PreferredPort`, `LastBoundPort`, `AutoStart`, `SidebarOrder`) & `Common/Storage/IDesktopSettingsRepository.cs` (and SQLite realization)
+  * Create: `Common/Storage/IDesktopSettingsRepository.cs` + vault-backed `VaultDesktopSettingsRepository` over `IVaultSettingsStore` (Stage-2; rows are `IdentityLaunchSettings` records — `PreferredPort`, `LastBoundPort`, `AutoStart`, `SidebarOrder` — keyed by `PublicIdentityId` inside the encrypted vault)
   * Create: `Common/Services/PortReservationService.cs` (`IPortReservationService` probing range `5100`–`5299`)
   * Extend: `Features/Startup/Views/IdentityGateView.axaml` & `Features/Startup/Views/IdentityGateView.axaml.cs` (shell created by DESK-02 as the State 2B empty-vault duress landing; add persona cards, port pills, context menus)
   * Extend: `Features/Startup/ViewModels/IdentityGateViewModel.cs` (skeleton created by DESK-02; add persona collection, auto-start flag, launch command)
@@ -311,7 +311,7 @@ flowchart TD
 * **Acceptance Criteria**:
   * Left Sidebar ($72\text{ px}$ fixed):
     * Top Pending Requests Button: Unobtrusive icon button with subtle notification light. **Inbound Connection Silence Invariant**: Zero OS toasts, popups, or audio pings on unsolicited inbound handshakes.
-    * Middle Transport Channels List: Direct peer profile picture (or identicon) and relay badges. Zero technical clutter (no IP addresses, ports, or protocol strings in the list). Mouse hover shows remote display name in clean tooltip. Reorderable via drag-and-drop (persisted in `DesktopIdentitySettingsEntity`). Right-click context menus: *"View Profile"*, *"Mute"*, *"Remove Connection"* / *"Relay Details"*, *"Reconnect"*.
+    * Middle Transport Channels List: Direct peer profile picture (or identicon) and relay badges. Zero technical clutter (no IP addresses, ports, or protocol strings in the list). Mouse hover shows remote display name in clean tooltip. Reorderable via drag-and-drop (persisted via `IDesktopSettingsRepository` as `IdentityLaunchSettings` inside the encrypted vault). Right-click context menus: *"View Profile"*, *"Mute"*, *"Remove Connection"* / *"Relay Details"*, *"Reconnect"*.
     * Bottom Add Connection (`+`) Button: Prominent `+` button opening `AddConnectionDialog.axaml`: Tab 1 (*Connect Outbound* - peer endpoint or relay URI, validates connectivity and initiates handshake), Tab 2 (*Share My Invitation* - generates and displays active identity's out-of-band invitation URL and QR code).
     * Identity Area: Profile picture, local display name truncated with ellipsis (`...`). Unread indicator acts as anchor for **Active Identity Switcher Flyout** to switch shell context to another active persona.
   * Pending Requests Panel: Displays requester display name and fingerprint preview with `Accept`, `Reject`, and `Burn` (permanent blacklist) actions.
@@ -435,7 +435,7 @@ flowchart TD
   * Global Quick-Switcher (`Ctrl+K` / `Ctrl+P`): Centered modal Command Palette (`QuickSwitcherDialog.axaml`). Fuzzy-search navigation across direct peers, relays, group chats, and commands (*"Add Connection"*, *"Lock Session"*). Selecting an item switches transport and conversation focus immediately.
   * System Tray Integration (`TrayIcon`): Cross-platform system tray icon configured in `App.axaml`. Context menu: *"Open Percolator"*, *"Lock Session (Stealth)"*, *"Exit"*. Minimize-to-tray on close when enabled in settings.
   * Desktop Notifications Bridge: Cross-platform in-app notification toasts (`FluentAvalonia.UI.Controls.InfoBar` banner). Platform bridge: WinRT Toast notifications on Windows, D-Bus notifications on Linux, Notification Center on macOS. **Inbound Handshake Silence Invariant Enforcement**: Inbound unsolicited handshakes never fire OS toasts or audio. Only messages in established chats or system security alerts trigger toasts.
-  * Window State Preservation: Persist window position, width, height, and maximized state across restarts in `DesktopIdentitySettingsEntity`.
+  * Window State Preservation: Persist window position, width, height, and maximized state across restarts via `IShellWindowGeometryStore` (Stage-2 facade over `IVaultSettingsStore`, `VaultSettingKeys.ShellWindowGeometry` app-setting).
 * **Verification Gate**:
   * Pressing `Ctrl+K` opens Quick-Switcher; fuzzy searching a peer and hitting Enter navigates directly to that conversation.
   * Closing window with "Minimize to tray" enabled hides window to notification area without terminating background services.
@@ -491,7 +491,9 @@ This matrix maps all infrastructure ports and desktop adapters across their owni
 | `IWindowManager` | Desktop Shell | `WindowManager` | Chunk 1 (`[DESK-01]`) |
 | `INetworkStealthGate` | Desktop Core | `NetworkStealthGate` | Chunk 3 (`[DESK-03]`) |
 | `IPortReservationService` | Desktop Core | `PortReservationService` | Chunk 3 (`[DESK-03]`) |
-| `IDesktopSettingsRepository`| Desktop Storage | `SqliteDesktopSettingsRepository` | Chunk 3 (`[DESK-03]`) |
+| `IDesktopSettingsRepository`| Desktop Storage | `VaultDesktopSettingsRepository` (Stage-2) | Chunk 3 (`[DESK-03]`) |
+| `IVaultSettingsStore` | Application Ports | `SqliteVaultSettingsStore` (Stage-2) | Chunk 3 (`[DESK-03]`) |
+| `IShellWindowGeometryStore` | Desktop Windowing | `VaultShellWindowGeometryStore` (Stage-2) | Chunk 4 (`[DESK-04]`) |
 | `IIdentityProfileRepository` | Domain Identities | `SqliteIdentityProfileRepository` (session scope) | Chunk 3 (`[DESK-03]`) |
 | `ILocalIdentityKeyStore` | Domain Identities | `SqliteLocalIdentityKeyStore` (session scope) | Chunk 3 (`[DESK-03]`) |
 | `IPeerConnectionStateService` | Desktop Transports | `PeerConnectionStateService` | Chunk 5 (`[DESK-05]`) |
