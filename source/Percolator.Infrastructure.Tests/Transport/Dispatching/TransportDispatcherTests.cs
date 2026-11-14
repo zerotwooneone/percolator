@@ -1,3 +1,7 @@
+using Percolator.Application.Delivery;
+using Percolator.Application.Ports;
+using Percolator.PluginSdk.Profiles;
+
 namespace Percolator.Infrastructure.Tests.Transport.Dispatching;
 
 using System;
@@ -8,8 +12,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using NUnit.Framework;
-using Percolator.Application2.Delivery;
-using Percolator.Application2.Ports;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.ValueObjects;
@@ -20,7 +22,7 @@ using Percolator.Domain.Security.ValueObjects;
 using Percolator.Infrastructure.Protos;
 using Percolator.Infrastructure.Transport;
 using Percolator.PluginSdk;
-using DeliveryRoute = Percolator.Application2.Delivery.DeliveryRoute;
+using DeliveryRoute = DeliveryRoute;
 
 [TestFixture]
 public sealed class TransportDispatcherTests
@@ -106,11 +108,11 @@ public sealed class TransportDispatcherTests
 
     private sealed class MockPeerMailboxRoutingRepository : IPeerMailboxRoutingRepository
     {
-        private readonly ConcurrentDictionary<PublicIdentityId, PeerMailboxRoutingCapability> _routes = new();
+        private readonly ConcurrentDictionary<Domain.Identities.PublicIdentityId, PeerMailboxRoutingCapability> _routes = new();
 
-        public void SetRoute(PublicIdentityId peerId, PeerMailboxRoutingCapability capability) => _routes[peerId] = capability;
+        public void SetRoute(Domain.Identities.PublicIdentityId peerId, PeerMailboxRoutingCapability capability) => _routes[peerId] = capability;
 
-        public Task<PeerMailboxRoutingCapability?> GetByPeerIdAsync(PublicIdentityId peerId, CancellationToken ct = default)
+        public Task<PeerMailboxRoutingCapability?> GetByPeerIdAsync(Domain.Identities.PublicIdentityId peerId, CancellationToken ct = default)
         {
             _routes.TryGetValue(peerId, out var capability);
             return Task.FromResult(capability);
@@ -122,7 +124,7 @@ public sealed class TransportDispatcherTests
             return Task.CompletedTask;
         }
 
-        public Task<IReadOnlyList<PeerMailboxRoutingCapability>> GetRoutesForPeerAsync(PublicIdentityId peerId, CancellationToken ct = default)
+        public Task<IReadOnlyList<PeerMailboxRoutingCapability>> GetRoutesForPeerAsync(Domain.Identities.PublicIdentityId peerId, CancellationToken ct = default)
         {
             if (_routes.TryGetValue(peerId, out var capability))
             {
@@ -131,15 +133,15 @@ public sealed class TransportDispatcherTests
             return Task.FromResult<IReadOnlyList<PeerMailboxRoutingCapability>>(Array.Empty<PeerMailboxRoutingCapability>());
         }
 
-        public Task<PeerMailboxRoutingCapability?> GetBestRouteAsync(PublicIdentityId peerId, DateTimeOffset nowUtc, CancellationToken ct = default)
+        public Task<PeerMailboxRoutingCapability?> GetBestRouteAsync(Domain.Identities.PublicIdentityId peerId, DateTimeOffset nowUtc, CancellationToken ct = default)
         {
             _routes.TryGetValue(peerId, out var capability);
             return Task.FromResult(capability);
         }
 
-        public Task RecordBackpressureAsync(PublicIdentityId peerId, RelayEndpoint relayEndpoint, TimeSpan retryAfter, DateTimeOffset nowUtc, CancellationToken ct = default) => Task.CompletedTask;
+        public Task RecordBackpressureAsync(Domain.Identities.PublicIdentityId peerId, RelayEndpoint relayEndpoint, TimeSpan retryAfter, DateTimeOffset nowUtc, CancellationToken ct = default) => Task.CompletedTask;
 
-        public Task RecordSuccessAsync(PublicIdentityId peerId, RelayEndpoint relayEndpoint, DateTimeOffset nowUtc, CancellationToken ct = default) => Task.CompletedTask;
+        public Task RecordSuccessAsync(Domain.Identities.PublicIdentityId peerId, RelayEndpoint relayEndpoint, DateTimeOffset nowUtc, CancellationToken ct = default) => Task.CompletedTask;
     }
 
     private sealed class MockChannelRelayResolver : IChannelRelayResolver
@@ -183,8 +185,8 @@ public sealed class TransportDispatcherTests
         var timeProvider = new FixedTimeProvider();
 
         var channelId = ChannelId.New();
-        var ownerId = PublicIdentityId.New();
-        var recipientId = PublicIdentityId.New();
+        var ownerId = Domain.Identities.PublicIdentityId.New();
+        var recipientId = Domain.Identities.PublicIdentityId.New();
         var payload = Encoding.UTF8.GetBytes("EncryptedPayloadData");
 
         var directUri = new Uri("https://peer.example.com:5000");
@@ -244,8 +246,8 @@ public sealed class TransportDispatcherTests
 
         var timeProvider = new FixedTimeProvider();
         var channelId = ChannelId.New();
-        var ownerId = PublicIdentityId.New();
-        var recipientId = PublicIdentityId.New();
+        var ownerId = Domain.Identities.PublicIdentityId.New();
+        var recipientId = Domain.Identities.PublicIdentityId.New();
         var payload = Encoding.UTF8.GetBytes("DirectStreamPayload");
 
         var registeredUri = new Uri("https://127.0.0.1:54321");
@@ -280,8 +282,8 @@ public sealed class TransportDispatcherTests
 
         var timeProvider = new FixedTimeProvider();
         var channelId = ChannelId.New();
-        var ownerId = PublicIdentityId.New();
-        var recipientId = PublicIdentityId.New();
+        var ownerId = Domain.Identities.PublicIdentityId.New();
+        var recipientId = Domain.Identities.PublicIdentityId.New();
         var payload = Encoding.UTF8.GetBytes("DirectStreamPayload");
 
         var registeredUri = new Uri("https://127.0.0.1:54321");
@@ -317,8 +319,8 @@ public sealed class TransportDispatcherTests
         var timeProvider = new FixedTimeProvider();
 
         var channelId = ChannelId.New();
-        var ownerId = PublicIdentityId.New();
-        var recipientId = PublicIdentityId.New();
+        var ownerId = Domain.Identities.PublicIdentityId.New();
+        var recipientId = Domain.Identities.PublicIdentityId.New();
         var payload = Encoding.UTF8.GetBytes("EncryptedGroupMessage");
 
         var relayEndpoint = RelayEndpoint.Create("https://group-relay.example.com:443").Value!;

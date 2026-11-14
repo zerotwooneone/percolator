@@ -11,11 +11,12 @@ using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
-using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Domain.Identities;
 using Percolator.Infrastructure2.Protos;
 using Percolator.PluginSdk;
+using Percolator.PluginSdk.Profiles;
 
-namespace Percolator.Infrastructure2.Serialization;
+namespace Percolator.Infrastructure.Serialization;
 
 public sealed class ProtobufPayloadSerializer : IPayloadSerializer
 {
@@ -451,19 +452,19 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
     {
         PayloadId id = PayloadId.FromBytes(proto.Id.Span);
         ChannelId channelId = ChannelId.FromBytes(proto.ChannelId.Span);
-        PublicIdentityId authorId = PublicIdentityId.FromBytes(proto.AuthorId.Span);
+        PublicIdentityId authorId = Domain.Identities.PublicIdentityId.FromBytes(proto.AuthorId.Span);
 
         ReplyContextDto? replyContext = proto.ReplyContext != null
             ? new ReplyContextDto(
                 PayloadId.FromBytes(proto.ReplyContext.ParentPayloadId.Span),
-                PublicIdentityId.FromBytes(proto.ReplyContext.ParentAuthorId.Span))
+                Domain.Identities.PublicIdentityId.FromBytes(proto.ReplyContext.ParentAuthorId.Span))
             : null;
 
         List<MentionDto> mentions = new(proto.Mentions.Count);
         foreach (MentionProto m in proto.Mentions)
         {
             mentions.Add(new MentionDto(
-                PublicIdentityId.FromBytes(m.IdentityId.Span),
+                Domain.Identities.PublicIdentityId.FromBytes(m.IdentityId.Span),
                 m.StartOffset,
                 m.Length));
         }
@@ -538,7 +539,7 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
         foreach (MentionProto m in proto.NewMentions)
         {
             mentions.Add(new MentionDto(
-                PublicIdentityId.FromBytes(m.IdentityId.Span),
+                Domain.Identities.PublicIdentityId.FromBytes(m.IdentityId.Span),
                 m.StartOffset,
                 m.Length));
         }
@@ -546,7 +547,7 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
         return new MessageEditDto(
             PayloadId.FromBytes(proto.TargetPayloadId.Span),
             ChannelId.FromBytes(proto.ChannelId.Span),
-            PublicIdentityId.FromBytes(proto.AuthorId.Span),
+            Domain.Identities.PublicIdentityId.FromBytes(proto.AuthorId.Span),
             proto.NewContent,
             mentions,
             proto.EditedAtUnixMs);
@@ -565,7 +566,7 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
         new(
             PayloadId.FromBytes(proto.TargetPayloadId.Span),
             ChannelId.FromBytes(proto.ChannelId.Span),
-            PublicIdentityId.FromBytes(proto.RequestedBy.Span),
+            Domain.Identities.PublicIdentityId.FromBytes(proto.RequestedBy.Span),
             proto.DeletedAtUnixMs);
 
     private static ReactionUpdateProto ToReactionProto(ReactionUpdateDto dto) =>
@@ -583,7 +584,7 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
         new(
             PayloadId.FromBytes(proto.TargetPayloadId.Span),
             ChannelId.FromBytes(proto.ChannelId.Span),
-            PublicIdentityId.FromBytes(proto.AuthorId.Span),
+            Domain.Identities.PublicIdentityId.FromBytes(proto.AuthorId.Span),
             proto.Emoji,
             (ReactionAction)proto.Action,
             proto.TimestampUnixMs);
@@ -600,7 +601,7 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
     private static ReadReceiptDto FromReadReceiptProto(ReadReceiptProto proto) =>
         new(
             ChannelId.FromBytes(proto.ChannelId.Span),
-            PublicIdentityId.FromBytes(proto.ReaderId.Span),
+            Domain.Identities.PublicIdentityId.FromBytes(proto.ReaderId.Span),
             PayloadId.FromBytes(proto.UpToPayloadId.Span),
             proto.ReadAtUnixMs);
 
@@ -616,7 +617,7 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
     private static DeliveryReceiptDto FromDeliveryReceiptProto(DeliveryReceiptProto proto) =>
         new(
             ChannelId.FromBytes(proto.ChannelId.Span),
-            PublicIdentityId.FromBytes(proto.DelivererId.Span),
+            Domain.Identities.PublicIdentityId.FromBytes(proto.DelivererId.Span),
             PayloadId.FromBytes(proto.UpToPayloadId.Span),
             proto.DeliveredAtUnixMs);
 
@@ -636,7 +637,7 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
             ChannelId.FromBytes(proto.ChannelId.Span),
             (SystemNoticeType)proto.NoticeType,
             proto.AffectedIdentity is { IsEmpty: false }
-                ? PublicIdentityId.FromBytes(proto.AffectedIdentity.Span)
+                ? Domain.Identities.PublicIdentityId.FromBytes(proto.AffectedIdentity.Span)
                 : null,
             proto.TimestampUnixMs);
 
@@ -672,14 +673,14 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
         List<PublicIdentityId>? members = null;
         if (proto.MemberIds.Count > 0)
         {
-            members = proto.MemberIds.Select(m => PublicIdentityId.FromBytes(m.Span)).ToList();
+            members = proto.MemberIds.Select(m => Domain.Identities.PublicIdentityId.FromBytes(m.Span)).ToList();
         }
 
         return new(
             new InvitationId(proto.InvitationId),
             ChannelId.FromBytes(proto.TargetGroupChannelId.Span),
             proto.GroupName,
-            PublicIdentityId.FromBytes(proto.InviterId.Span),
+            Domain.Identities.PublicIdentityId.FromBytes(proto.InviterId.Span),
             proto.HasRelayEndpoint ? proto.RelayEndpoint : null,
             proto.ExpiresAtUnixMs,
             members);
@@ -699,7 +700,7 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
         new(
             new InvitationId(proto.InvitationId),
             ChannelId.FromBytes(proto.TargetGroupChannelId.Span),
-            PublicIdentityId.FromBytes(proto.ResponderId.Span),
+            Domain.Identities.PublicIdentityId.FromBytes(proto.ResponderId.Span),
             proto.Accepted,
             proto.RespondedAtUnixMs);
 
@@ -733,7 +734,7 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
     private static ProfileCapabilityDto FromProfileCapabilityProto(ProfileCapabilityProto proto) =>
         new(
             ChannelId.FromBytes(proto.ChannelId.Span),
-            PublicIdentityId.FromBytes(proto.AuthorId.Span),
+            Domain.Identities.PublicIdentityId.FromBytes(proto.AuthorId.Span),
             proto.ProfileKeyBytes.ToByteArray(),
             proto.BlindedLocatorBytes.ToByteArray(),
             proto.MailboxRoutingTokenBytes.ToByteArray(),

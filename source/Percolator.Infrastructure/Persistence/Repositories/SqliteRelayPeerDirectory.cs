@@ -139,7 +139,7 @@ public sealed class SqliteRelayPeerDirectory : IRelayPeerDirectory
     }
 
     public async ValueTask<DomainResult> UpdateVisibilityAsync(
-        PublicIdentityId peerId,
+        Domain.Identities.PublicIdentityId peerId,
         PeerDiscoveryVisibility visibility,
         BlindedRoutingToken? routingToken = null,
         DeliveryToken? deliveryToken = null,
@@ -183,7 +183,7 @@ public sealed class SqliteRelayPeerDirectory : IRelayPeerDirectory
     }
 
     public async ValueTask<RelayPeerRegistration?> GetPeerAsync(
-        PublicIdentityId peerId,
+        Domain.Identities.PublicIdentityId peerId,
         CancellationToken ct = default)
     {
         if (!peerId.IsValid)
@@ -255,7 +255,7 @@ public sealed class SqliteRelayPeerDirectory : IRelayPeerDirectory
                 break;
             }
 
-            var peerId = PublicIdentityId.FromBytes(reg.PeerId);
+            var peerId = Domain.Identities.PublicIdentityId.FromBytes(reg.PeerId);
             var routingToken = reg.RoutingToken is { Length: > 0 } ? BlindedRoutingToken.FromBytes(reg.RoutingToken) : (BlindedRoutingToken?)null;
             bool hasActiveSpk = reg.HasActiveSignedPreKey;
 

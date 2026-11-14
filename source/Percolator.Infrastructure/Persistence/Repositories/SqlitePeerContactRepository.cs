@@ -20,7 +20,7 @@ public sealed class SqlitePeerContactRepository : IPeerContactRepository
         _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
     }
 
-    public async Task<PeerContact?> GetByPeerIdAsync(PublicIdentityId ownerId, PublicIdentityId remotePeerId, CancellationToken cancellationToken = default)
+    public async Task<PeerContact?> GetByPeerIdAsync(Domain.Identities.PublicIdentityId ownerId, Domain.Identities.PublicIdentityId remotePeerId, CancellationToken cancellationToken = default)
     {
         var ownerGuid = ownerId.Value;
         var remoteGuid = remotePeerId.Value;
@@ -58,7 +58,7 @@ public sealed class SqlitePeerContactRepository : IPeerContactRepository
             devices);
     }
 
-    public async Task<IReadOnlyList<PeerContact>> GetAllForOwnerAsync(PublicIdentityId ownerId, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<PeerContact>> GetAllForOwnerAsync(Domain.Identities.PublicIdentityId ownerId, CancellationToken cancellationToken = default)
     {
         var ownerGuid = ownerId.Value;
 
@@ -79,7 +79,7 @@ public sealed class SqlitePeerContactRepository : IPeerContactRepository
         var result = new List<PeerContact>(entities.Count);
         foreach (var entity in entities)
         {
-            var peerId = new PublicIdentityId(entity.RemotePeerId);
+            var peerId = new Domain.Identities.PublicIdentityId(entity.RemotePeerId);
             var pubKey = entity.PrimaryPublicKey != null && entity.PrimaryPublicKey.Length == 32
                 ? IdentityKey.FromSpan(entity.PrimaryPublicKey)
                 : null;

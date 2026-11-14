@@ -101,7 +101,7 @@ public sealed class SqlUnknownGroupMessageCacheRepository : IUnknownGroupMessage
         return new UnknownGroupMessageRecord(
             PayloadId.FromGuid(entity.Id),
             ChannelId.FromGuid(entity.ChannelId),
-            PublicIdentityId.FromBytes(entity.AuthorId),
+            Domain.Identities.PublicIdentityId.FromBytes(entity.AuthorId),
             entity.EncryptedPayload,
             entity.ReceivedAtUnixMs,
             entity.ExpiresAtUnixMs);

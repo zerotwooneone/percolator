@@ -1,19 +1,17 @@
 using System.Buffers.Binary;
-using Percolator.Application2.Handshake;
-using Percolator.Application2.Ingress;
-using Percolator.Application2.Ports;
-using Percolator.Application2.Profiles;
-using Percolator.Application2.Services;
-using Percolator.Application2.Tests.TestDoubles;
+using Percolator.Application.Handshake;
+using Percolator.Application.Ingress;
+using Percolator.Application.Profiles;
+using Percolator.Application.Services;
+using Percolator.Application.Tests.TestDoubles;
 using Percolator.Domain.Channels.ValueObjects;
-using Percolator.Domain.Common;
-using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Model;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.PluginSdk;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
-namespace Percolator.Application2.Tests.Ingress;
+namespace Percolator.Application.Tests.Ingress;
 
 [TestFixture]
 public sealed class AppHostPipelineTests

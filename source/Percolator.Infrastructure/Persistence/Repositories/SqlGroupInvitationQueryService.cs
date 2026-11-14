@@ -32,7 +32,7 @@ public sealed class SqlGroupInvitationQueryService : IGroupInvitationQueryServic
                 new InvitationId(e.Id),
                 ChannelId.FromGuid(e.TargetGroupChannelId),
                 e.GroupName,
-                PublicIdentityId.FromBytes(e.InviterId),
+                Domain.Identities.PublicIdentityId.FromBytes(e.InviterId),
                 e.ExpiresAtUnixMs,
                 (GroupInvitationStatus)e.Status)).ToList();
     }

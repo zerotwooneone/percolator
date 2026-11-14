@@ -16,6 +16,7 @@ using Percolator.Simulator.Features.Scenarios.Model;
 using Percolator.Simulator.Features.Shell;
 using Percolator.Simulator.Features.Topology;
 using R3;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Simulator.Features.GroupMessaging;
 

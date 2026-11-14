@@ -52,7 +52,7 @@ public sealed class SqliteFilterPolicyRepository : IFileTransferFilterPolicyRepo
         await _dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
-    public async ValueTask<FileTransferFilterPolicy> GetPolicyAsync(PublicIdentityId ownerId, CancellationToken ct = default)
+    public async ValueTask<FileTransferFilterPolicy> GetPolicyAsync(Domain.Identities.PublicIdentityId ownerId, CancellationToken ct = default)
     {
         byte[] ownerBytes = ownerId.ToByteArray();
         FilterPolicyEntity? entity = await _dbContext.FilterPolicies
@@ -65,7 +65,7 @@ public sealed class SqliteFilterPolicyRepository : IFileTransferFilterPolicyRepo
             return FileTransferFilterPolicy.DefaultPermissive(ownerId);
         }
 
-        HashSet<PublicIdentityId> blockedPeers = new();
+        HashSet<Domain.Identities.PublicIdentityId> blockedPeers = new();
         if (!string.IsNullOrEmpty(entity.BlockedPeersJson))
         {
             var peerGuids = JsonSerializer.Deserialize<List<string>>(entity.BlockedPeersJson);
@@ -75,7 +75,7 @@ public sealed class SqliteFilterPolicyRepository : IFileTransferFilterPolicyRepo
                 {
                     if (Guid.TryParse(guidStr, out Guid g))
                     {
-                        blockedPeers.Add(PublicIdentityId.FromGuid(g));
+                        blockedPeers.Add(Domain.Identities.PublicIdentityId.FromGuid(g));
                     }
                 }
             }

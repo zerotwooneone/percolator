@@ -1,3 +1,5 @@
+using Percolator.PluginSdk.Profiles;
+
 namespace Percolator.Infrastructure.Tests.Plugins.Discovery;
 
 using System;
@@ -67,19 +69,19 @@ public sealed class DiscoveryQueryClientTests
             return Task.CompletedTask;
         }
 
-        public Task<PeerMailboxRoutingCapability?> GetByPeerIdAsync(PublicIdentityId peerId, CancellationToken ct = default) =>
+        public Task<PeerMailboxRoutingCapability?> GetByPeerIdAsync(Domain.Identities.PublicIdentityId peerId, CancellationToken ct = default) =>
             Task.FromResult(Capability != null && Capability.PeerId == peerId ? Capability : null);
 
-        public Task<IReadOnlyList<PeerMailboxRoutingCapability>> GetRoutesForPeerAsync(PublicIdentityId peerId, CancellationToken ct = default) =>
+        public Task<IReadOnlyList<PeerMailboxRoutingCapability>> GetRoutesForPeerAsync(Domain.Identities.PublicIdentityId peerId, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<PeerMailboxRoutingCapability>>(Capability != null && Capability.PeerId == peerId ? new[] { Capability } : Array.Empty<PeerMailboxRoutingCapability>());
 
-        public Task<PeerMailboxRoutingCapability?> GetBestRouteAsync(PublicIdentityId peerId, DateTimeOffset nowUtc, CancellationToken ct = default) =>
+        public Task<PeerMailboxRoutingCapability?> GetBestRouteAsync(Domain.Identities.PublicIdentityId peerId, DateTimeOffset nowUtc, CancellationToken ct = default) =>
             Task.FromResult(Capability != null && Capability.PeerId == peerId ? Capability : null);
 
-        public Task RecordBackpressureAsync(PublicIdentityId peerId, RelayEndpoint relayEndpoint, TimeSpan retryAfter, DateTimeOffset nowUtc, CancellationToken ct = default) =>
+        public Task RecordBackpressureAsync(Domain.Identities.PublicIdentityId peerId, RelayEndpoint relayEndpoint, TimeSpan retryAfter, DateTimeOffset nowUtc, CancellationToken ct = default) =>
             Task.CompletedTask;
 
-        public Task RecordSuccessAsync(PublicIdentityId peerId, RelayEndpoint relayEndpoint, DateTimeOffset nowUtc, CancellationToken ct = default) =>
+        public Task RecordSuccessAsync(Domain.Identities.PublicIdentityId peerId, RelayEndpoint relayEndpoint, DateTimeOffset nowUtc, CancellationToken ct = default) =>
             Task.CompletedTask;
     }
 
@@ -87,9 +89,9 @@ public sealed class DiscoveryQueryClientTests
     public async Task NearbyQuery_SerializesRequesterIdAndClampsCountTo100()
     {
         var invoker = new TestCallInvoker();
-        var requester = PublicIdentityId.New();
-        var targetRelay = PublicIdentityId.New();
-        var peerB = PublicIdentityId.New();
+        var requester = Domain.Identities.PublicIdentityId.New();
+        var targetRelay = Domain.Identities.PublicIdentityId.New();
+        var peerB = Domain.Identities.PublicIdentityId.New();
 
         invoker.ResponseHandler = query =>
         {
@@ -122,9 +124,9 @@ public sealed class DiscoveryQueryClientTests
     [Test]
     public async Task NearbyQuery_WithChannelFactoryAndRoutingRepository_QueriesResolvedRelay()
     {
-        var requester = PublicIdentityId.New();
-        var relayId = PublicIdentityId.New();
-        var peerB = PublicIdentityId.New();
+        var requester = Domain.Identities.PublicIdentityId.New();
+        var relayId = Domain.Identities.PublicIdentityId.New();
+        var peerB = Domain.Identities.PublicIdentityId.New();
 
         var routingRepo = new TestRoutingRepository
         {

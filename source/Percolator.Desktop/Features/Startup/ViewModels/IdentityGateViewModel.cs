@@ -10,7 +10,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
 using ObservableCollections;
-using Percolator.Application2.Ports;
+using Percolator.Application.Ports;
 using Percolator.Desktop.Common.Services;
 using Percolator.Desktop.Common.Storage;
 using Percolator.Desktop.Common.Windowing;
@@ -18,6 +18,8 @@ using Percolator.Desktop.Features.Startup.Models;
 using Percolator.Desktop.ViewModels;
 using Percolator.Domain.Identities.ValueObjects;
 using R3;
+using IPortReservationService = Percolator.Desktop.Common.Services.IPortReservationService;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Desktop.Features.Startup.ViewModels;
 

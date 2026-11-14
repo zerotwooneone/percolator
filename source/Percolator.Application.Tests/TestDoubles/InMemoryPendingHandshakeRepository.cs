@@ -1,8 +1,8 @@
-using Percolator.Application2.Ingress;
-using Percolator.Application2.Ports;
-using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Application.Ingress;
+using Percolator.Application.Ports;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
-namespace Percolator.Application2.Tests.TestDoubles;
+namespace Percolator.Application.Tests.TestDoubles;
 
 public sealed class InMemoryPendingHandshakeRepository : IPendingHandshakeRepository
 {

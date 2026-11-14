@@ -3,9 +3,9 @@ using System.Security.Cryptography;
 using Percolator.Domain.Common;
 using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
-using Percolator.PluginSdk;
+using Percolator.PluginSdk.Profiles;
 
-namespace Percolator.Application2.Profiles;
+namespace Percolator.Application.Profiles;
 
 public sealed class ProfileManager : IProfileManager
 {

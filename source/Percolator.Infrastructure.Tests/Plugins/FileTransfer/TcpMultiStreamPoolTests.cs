@@ -26,7 +26,7 @@ public sealed class TcpMultiStreamPoolTests
             StreamAuthToken.Generate(),
             TransferSessionId.New(),
             StreamIndex.FromInt(2),
-            PublicIdentityId.New());
+            Domain.Identities.PublicIdentityId.New());
         var decodedHandshake = (HandshakeFrame)RoundtripFrame(handshake);
         decodedHandshake.AuthToken.Span.SequenceEqual(handshake.AuthToken.Span).Should().BeTrue();
         decodedHandshake.SessionId.Should().Be(handshake.SessionId);
@@ -142,7 +142,7 @@ public sealed class TcpMultiStreamPoolTests
             forgedToken,
             TransferSessionId.New(),
             StreamIndex.FromInt(0),
-            PublicIdentityId.New());
+            Domain.Identities.PublicIdentityId.New());
 
         (byte opcode, byte[] payload) = SwarmFrameCodec.Encode(handshake);
         byte[] header = new byte[5];
@@ -182,7 +182,7 @@ public sealed class TcpMultiStreamPoolTests
         });
 
         var factory = new TcpMultiStreamPoolFactory(pipeClient: pipeClient, validator: new CallbackEndpointValidator(new CallbackEndpointValidatorOptions()));
-        var pool = factory.CreatePool(TransferSessionId.New(), PublicIdentityId.New(), StreamCount.FromInt(4));
+        var pool = factory.CreatePool(TransferSessionId.New(), Domain.Identities.PublicIdentityId.New(), StreamCount.FromInt(4));
 
         var rendezvous = new RelayRendezvousDescriptor(
             RelayPipeEndpointUri.Parse("https://relay.test.net/pipes"),

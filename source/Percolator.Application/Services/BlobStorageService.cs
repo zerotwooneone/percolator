@@ -1,9 +1,9 @@
-using Percolator.Application2.Ports;
+using Percolator.Application.Ports;
 using Percolator.Domain.Channels.Ports;
 using Percolator.Domain.Common;
 using Percolator.PluginSdk;
 
-namespace Percolator.Application2.Services;
+namespace Percolator.Application.Services;
 
 public sealed class BlobStorageService : IBlobStorageService
 {

@@ -18,7 +18,7 @@ public class SqlitePrivatePreKeyStoreTests
 {
     private SqliteTestDb _testDb = null!;
     private SqlitePrivatePreKeyStore _store = null!;
-    private PublicIdentityId _ownerId;
+    private Domain.Identities.PublicIdentityId _ownerId;
     private DeviceId _deviceId;
 
     [SetUp]
@@ -26,7 +26,7 @@ public class SqlitePrivatePreKeyStoreTests
     {
         _testDb = new SqliteTestDb();
         _store = new SqlitePrivatePreKeyStore(_testDb.DbContext);
-        _ownerId = PublicIdentityId.New();
+        _ownerId = Domain.Identities.PublicIdentityId.New();
         _deviceId = DeviceId.Primary;
 
         // Satisfy foreign key to vault_identity_keys

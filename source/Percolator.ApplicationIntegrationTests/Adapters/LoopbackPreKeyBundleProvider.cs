@@ -1,10 +1,11 @@
-using Percolator.Application2.Ports;
+using Percolator.Application.Ports;
 using Percolator.Application2IntegrationTests.Builders;
 using Percolator.Application2IntegrationTests.Infrastructure;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Model;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Application2IntegrationTests.Adapters;
 

@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Apps.Discovery.Features.PrivateRendezvous;
 

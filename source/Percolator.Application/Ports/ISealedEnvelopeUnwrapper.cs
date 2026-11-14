@@ -1,8 +1,8 @@
-using Percolator.Application2.Ingress;
+using Percolator.Application.Ingress;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.ValueObjects;
 
-namespace Percolator.Application2.Ports;
+namespace Percolator.Application.Ports;
 
 public interface ISealedEnvelopeUnwrapper
 {

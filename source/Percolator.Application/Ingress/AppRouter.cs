@@ -1,7 +1,7 @@
 using Percolator.Domain.Common;
 using Percolator.PluginSdk;
 
-namespace Percolator.Application2.Ingress;
+namespace Percolator.Application.Ingress;
 
 public interface IAppRouter
 {

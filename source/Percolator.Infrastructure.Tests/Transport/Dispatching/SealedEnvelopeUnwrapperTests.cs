@@ -1,10 +1,11 @@
+using Percolator.Application.Ingress;
+
 namespace Percolator.Infrastructure.Tests.Transport.Dispatching;
 
 using System;
 using System.Security.Cryptography;
 using FluentAssertions;
 using NUnit.Framework;
-using Percolator.Application2.Ingress;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.ValueObjects;
@@ -25,7 +26,7 @@ public sealed class SealedEnvelopeUnwrapperTests
     public void Encode_EncryptsHeaderMetadata_DoesNotExposeSenderOrChannelIdInCleartext()
     {
         var channelId = ChannelId.New();
-        var senderId = PublicIdentityId.New();
+        var senderId = Domain.Identities.PublicIdentityId.New();
         var deviceId = new DeviceId(77);
         var payload = new byte[] { 10, 20, 30, 40, 50 };
 
@@ -61,7 +62,7 @@ public sealed class SealedEnvelopeUnwrapperTests
     {
         var packer = new ProtobufSessionWirePacker();
         var timeProvider = new FixedTimeProvider();
-        var recipientId = PublicIdentityId.New();
+        var recipientId = Domain.Identities.PublicIdentityId.New();
         var unwrapper = new SealedEnvelopeUnwrapper(packer, recipientId, timeProvider);
 
         // Case 1: Frame too short (< 82 bytes)
@@ -96,7 +97,7 @@ public sealed class SealedEnvelopeUnwrapperTests
         var validFrame = SealedWireFraming.Encode(
             WireFrameKind.DirectRatchet,
             ChannelId.New(),
-            PublicIdentityId.New(),
+            Domain.Identities.PublicIdentityId.New(),
             new DeviceId(1),
             new byte[10]);
 
@@ -118,7 +119,7 @@ public sealed class SealedEnvelopeUnwrapperTests
         var corruptInner = SealedWireFraming.Encode(
             WireFrameKind.DirectRatchet,
             ChannelId.New(),
-            PublicIdentityId.New(),
+            Domain.Identities.PublicIdentityId.New(),
             new DeviceId(1),
             new byte[] { 0xFF, 0xFE, 0xFD }); // invalid protobuf
 
@@ -139,8 +140,8 @@ public sealed class SealedEnvelopeUnwrapperTests
     {
         var packer = new ProtobufSessionWirePacker();
         var timeProvider = new FixedTimeProvider();
-        var recipientId = PublicIdentityId.New();
-        var senderId = PublicIdentityId.New();
+        var recipientId = Domain.Identities.PublicIdentityId.New();
+        var senderId = Domain.Identities.PublicIdentityId.New();
         var channelId = ChannelId.New();
         var deviceId = new DeviceId(42);
 

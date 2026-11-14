@@ -1,10 +1,11 @@
 using System.Collections.Concurrent;
+using Percolator.Apps.Discovery.Features.RelayDirectoryHosting;
 using Percolator.Apps.Discovery.Ports;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.ValueObjects;
-using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Domain.Identities;
 
-namespace Percolator.Apps.Discovery.Features.RelayDirectoryHosting;
+namespace Percolator.Apps.Discovery.Tests.TestDoubles;
 
 public sealed class InMemoryRelayPeerDirectory : IRelayPeerDirectory
 {

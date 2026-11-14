@@ -1,10 +1,10 @@
 using System.ComponentModel;
-using Percolator.Application2.Delivery.Events;
+using Percolator.Application.Delivery.Events;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
-using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Domain.Identities;
 
-namespace Percolator.Application2.Delivery;
+namespace Percolator.Application.Delivery;
 
 public sealed class OutboxJob : AggregateRoot<Guid>
 {

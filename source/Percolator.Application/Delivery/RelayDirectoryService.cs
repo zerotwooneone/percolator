@@ -1,9 +1,5 @@
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
-using Percolator.Application2.Delivery.Ports;
-using Percolator.Application2.Ports;
+using Percolator.Application.Delivery.Ports;
+using Percolator.Application.Ports;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Model;
 using Percolator.Domain.Delivery.Ports;
@@ -13,8 +9,9 @@ using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
-namespace Percolator.Application2.Delivery;
+namespace Percolator.Application.Delivery;
 
 /// <summary>
 /// Driving service behind the Desktop "Exchanges" surface: manages <see cref="RelayRegistration"/>

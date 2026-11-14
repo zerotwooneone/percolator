@@ -1,3 +1,5 @@
+using Percolator.Application.Delivery;
+
 namespace Percolator.Infrastructure.Tests.Composition;
 
 using System;
@@ -45,7 +47,7 @@ public sealed class ArchitectureBoundaryTests
         var assembliesToScan = new[]
         {
             typeof(Percolator.Domain.Channels.Model.DirectChannel).Assembly,
-            typeof(Percolator.Application2.Delivery.OutboxJob).Assembly,
+            typeof(OutboxJob).Assembly,
             typeof(Percolator.Apps.FileTransfer.Domain.TransferNegotiation.TransferSession).Assembly
         };
 

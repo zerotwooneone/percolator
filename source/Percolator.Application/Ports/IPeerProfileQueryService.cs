@@ -1,6 +1,6 @@
-using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Domain.Identities;
 
-namespace Percolator.Application2.Ports;
+namespace Percolator.Application.Ports;
 
 /// <summary>
 /// CQRS read model representing a decrypted peer profile for UI presentation and queries.

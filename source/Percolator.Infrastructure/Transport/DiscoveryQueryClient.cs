@@ -1,3 +1,5 @@
+using Percolator.PluginSdk.Profiles;
+
 namespace Percolator.Infrastructure.Transport;
 
 using System;
@@ -35,8 +37,8 @@ public sealed class DiscoveryQueryClient : INearbyDiscoveryQueryClientPort
     }
 
     public async Task<IReadOnlyList<PeerDiscoveryDescriptor>> SendNearbyQueryAsync(
-        PublicIdentityId requesterId,
-        PublicIdentityId targetPeerOrRelayId,
+        Domain.Identities.PublicIdentityId requesterId,
+        Domain.Identities.PublicIdentityId targetPeerOrRelayId,
         DiscoveryResultLimit limit,
         CancellationToken ct = default)
     {
@@ -82,7 +84,7 @@ public sealed class DiscoveryQueryClient : INearbyDiscoveryQueryClientPort
                     continue;
                 }
 
-                var peerId = PublicIdentityId.FromBytes(d.PeerId.Span);
+                var peerId = Domain.Identities.PublicIdentityId.FromBytes(d.PeerId.Span);
                 var route = (DeliveryRoute)d.Route;
 
                 RelayEndpoint? relayEndpoint = null;
@@ -120,7 +122,7 @@ public sealed class DiscoveryQueryClient : INearbyDiscoveryQueryClientPort
                     continue;
                 }
 
-                var peerId = PublicIdentityId.FromBytes(peerBytes.Span);
+                var peerId = Domain.Identities.PublicIdentityId.FromBytes(peerBytes.Span);
                 results.Add(new PeerDiscoveryDescriptor(
                     peerId,
                     DeliveryRoute.RelayedOneToOne));

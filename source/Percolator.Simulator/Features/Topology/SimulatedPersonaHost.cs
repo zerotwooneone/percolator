@@ -13,16 +13,15 @@ using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Percolator.Application.Delivery;
+using Percolator.Application.Delivery.Ports;
+using Percolator.Application.Egress;
+using Percolator.Application.Handshake;
+using Percolator.Application.Ingress;
 using Percolator.Application.Ports;
-using Percolator.Application2.Delivery;
-using Percolator.Application2.Delivery.Ports;
-using Percolator.Application2.Egress;
-using Percolator.Application2.Handshake;
-using Percolator.Application2.Ingress;
-using Percolator.Application2.Ports;
-using Percolator.Application2.Profiles;
-using Percolator.Application2.Routing;
-using Percolator.Application2.Services;
+using Percolator.Application.Profiles;
+using Percolator.Application.Routing;
+using Percolator.Application.Services;
 using Percolator.Apps.Chat.DependencyInjection;
 using Percolator.Apps.FileTransfer.DependencyInjection;
 using Percolator.Apps.FileTransfer.Ports;
@@ -52,11 +51,14 @@ using Percolator.Infrastructure.Windows.Storage;
 #endif
 using Percolator.Simulator.Features.RichChatAndProfiles;
 using Percolator.PluginSdk;
+using Percolator.PluginSdk.Profiles;
 using Percolator.Simulator.Features.DirectChat;
 using Percolator.Simulator.Features.Logging;
 using Percolator.Simulator.Features.RelayedChat;
 using Percolator.Simulator.Features.Shell;
 using R3;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
+
 namespace Percolator.Simulator.Features.Topology;
 internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
 {
@@ -143,7 +145,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         var (ikPriv, ikPub) = crypto.GenerateEphemeralKeyPair();
         _identityPrivateKey = ikPriv;
         IdentityPublicKey = IdentityKey.FromSpan(ikPub.Span);
-        PublicIdentityId = PublicIdentityId.New();
+        PublicIdentityId = Domain.Identities.PublicIdentityId.New();
         var (spkPriv, spkPub) = crypto.GenerateEphemeralKeyPair();
         _signedPreKeyPrivate = spkPriv;
         SignedPreKeyPublic = spkPub;

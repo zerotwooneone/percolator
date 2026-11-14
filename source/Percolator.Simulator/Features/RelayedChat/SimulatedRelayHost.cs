@@ -37,6 +37,7 @@ using Percolator.Simulator.Features.Logging;
 using Percolator.Simulator.Features.RichChatAndProfiles;
 using Percolator.Simulator.Features.Shell;
 using Percolator.Simulator.Features.Topology;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Simulator.Features.RelayedChat;
 

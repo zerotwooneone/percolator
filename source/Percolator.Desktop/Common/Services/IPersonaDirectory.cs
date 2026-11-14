@@ -1,9 +1,10 @@
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using Percolator.Application2.Ports;
+using Percolator.Application.Ports;
 using Percolator.Desktop.Features.Startup.Models;
 using Percolator.Domain.Identities.ValueObjects;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Desktop.Common.Services;
 

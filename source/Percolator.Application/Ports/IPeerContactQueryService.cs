@@ -1,7 +1,8 @@
 using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.ValueObjects;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
-namespace Percolator.Application2.Ports;
+namespace Percolator.Application.Ports;
 
 public sealed record PeerContactSummaryReadModel(
     PublicIdentityId IdentityId,

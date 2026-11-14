@@ -37,7 +37,7 @@ public class SqliteRelayLedgerRepositoryTests
     {
         // Arrange
         var channelId = ChannelId.New();
-        var relayId = PublicIdentityId.New();
+        var relayId = Domain.Identities.PublicIdentityId.New();
         var epoch = new EpochNumber(1);
         var rosterBlob = EncryptedEntriesBlob.FromSpan(new byte[64]);
         var publicParams = ZkGroupPublicParams.FromSpan(new byte[32]);

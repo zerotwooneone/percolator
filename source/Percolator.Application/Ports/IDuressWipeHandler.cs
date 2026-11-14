@@ -1,4 +1,4 @@
-namespace Percolator.Application2.Ports;
+namespace Percolator.Application.Ports;
 
 /// <summary>
 /// Driven port for instant emergency cryptographic shredding and secure data destruction under coercion.

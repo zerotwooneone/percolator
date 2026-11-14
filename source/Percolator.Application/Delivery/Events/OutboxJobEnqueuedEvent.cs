@@ -1,7 +1,7 @@
 using Percolator.Domain.Common;
-using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Domain.Identities;
 
-namespace Percolator.Application2.Delivery.Events;
+namespace Percolator.Application.Delivery.Events;
 
 public sealed record OutboxJobEnqueuedEvent(
     Guid JobId,

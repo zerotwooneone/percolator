@@ -22,7 +22,7 @@ public readonly record struct ContactNickname : IEquatable<ContactNickname>
         Value = value;
     }
 
-    public static ContactNickname Create(string? rawInput, PublicIdentityId fallbackIdentityId)
+    public static ContactNickname Create(string? rawInput, Identities.PublicIdentityId fallbackIdentityId)
     {
         var sanitized = Sanitize(rawInput);
         if (string.IsNullOrEmpty(sanitized))

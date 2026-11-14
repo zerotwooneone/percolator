@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Infrastructure.Persistence;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Simulator.Features.DirectChat;
 

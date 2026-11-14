@@ -68,7 +68,7 @@ public sealed class SqliteRelayLedgerRepository : IRelayLedgerRepository
 
             return RelayGroupLedger.Rehydrate(
                 channelId,
-                new PublicIdentityId(entity.RelayIdentityId),
+                new Domain.Identities.PublicIdentityId(entity.RelayIdentityId),
                 new EpochNumber(entity.CurrentEpoch),
                 rosterBlob,
                 tokens,
@@ -77,7 +77,7 @@ public sealed class SqliteRelayLedgerRepository : IRelayLedgerRepository
         });
     }
 
-    public Task<IReadOnlyList<RelayGroupLedger>> GetAllForRelayAsync(PublicIdentityId relayIdentityId, CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<RelayGroupLedger>> GetAllForRelayAsync(Domain.Identities.PublicIdentityId relayIdentityId, CancellationToken cancellationToken = default)
     {
         var relayGuid = relayIdentityId.Value;
 

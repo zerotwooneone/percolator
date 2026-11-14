@@ -1,10 +1,11 @@
+using Percolator.Application.Delivery;
+
 namespace Percolator.Infrastructure.Tests.Persistence.Outbox;
 
 using System;
 using System.Threading.Tasks;
 using FluentAssertions;
 using NUnit.Framework;
-using Percolator.Application2.Delivery;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
@@ -36,7 +37,7 @@ public class SqlOutboxQueryServiceTests
     public async Task GetOutboxSummary_ProjectsLightweightModel()
     {
         // Arrange
-        var ownerId = PublicIdentityId.New();
+        var ownerId = Domain.Identities.PublicIdentityId.New();
         var channelId = ChannelId.New();
         var route = new DeliveryRoute(DeliveryRouteType.DirectP2P, null, null);
 

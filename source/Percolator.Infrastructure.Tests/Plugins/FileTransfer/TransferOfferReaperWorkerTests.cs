@@ -37,7 +37,7 @@ public sealed class TransferOfferReaperWorkerTests
     public async Task StaleOffers_OlderThan24h_Reaped()
     {
         var sessionId = TransferSessionId.New();
-        var initiatorId = PublicIdentityId.New();
+        var initiatorId = Domain.Identities.PublicIdentityId.New();
 
         byte[] payload = new byte[1024];
         RandomNumberGenerator.Fill(payload);

@@ -1,8 +1,8 @@
 using System.Collections.Concurrent;
-using Percolator.Domain.Identities.ValueObjects;
-using Percolator.PluginSdk;
+using Percolator.PluginSdk.Profiles;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
-namespace Percolator.Application2.Tests.TestDoubles;
+namespace Percolator.Application.Tests.TestDoubles;
 
 public sealed class InMemoryPeerProfileRepository : IPeerProfileRepository
 {

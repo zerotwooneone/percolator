@@ -1,6 +1,6 @@
-using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Domain.Identities;
 
-namespace Percolator.Application2.Delivery.Ports;
+namespace Percolator.Application.Delivery.Ports;
 
 public interface IOutboxRepository
 {

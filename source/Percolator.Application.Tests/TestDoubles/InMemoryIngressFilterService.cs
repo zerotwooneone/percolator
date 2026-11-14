@@ -1,8 +1,8 @@
-using Percolator.Application2.Ports;
+using Percolator.Application.Ports;
 using Percolator.Domain.Common;
-using Percolator.Domain.Identities.ValueObjects;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
-namespace Percolator.Application2.Tests.TestDoubles;
+namespace Percolator.Application.Tests.TestDoubles;
 
 public sealed class InMemoryIngressFilterService : IIngressFilterService
 {

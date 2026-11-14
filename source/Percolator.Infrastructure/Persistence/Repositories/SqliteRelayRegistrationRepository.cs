@@ -22,7 +22,7 @@ public sealed class SqliteRelayRegistrationRepository : IRelayRegistrationReposi
     }
 
     public async Task<RelayRegistration?> GetByIdAsync(
-        PublicIdentityId relayIdentityId,
+        Domain.Identities.PublicIdentityId relayIdentityId,
         CancellationToken ct = default)
     {
         var entity = await _dbContext.RelayRegistrations
@@ -49,7 +49,7 @@ public sealed class SqliteRelayRegistrationRepository : IRelayRegistrationReposi
     }
 
     public async Task<IReadOnlyList<RelayRegistration>> GetByOwnerIdentityAsync(
-        PublicIdentityId ownerIdentityId,
+        Domain.Identities.PublicIdentityId ownerIdentityId,
         CancellationToken ct = default)
     {
         var relayIds = await _dbContext.RelayMailboxBindings
@@ -134,7 +134,7 @@ public sealed class SqliteRelayRegistrationRepository : IRelayRegistrationReposi
         await _dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
-    public async Task DeleteAsync(PublicIdentityId relayIdentityId, CancellationToken ct = default)
+    public async Task DeleteAsync(Domain.Identities.PublicIdentityId relayIdentityId, CancellationToken ct = default)
     {
         await _dbContext.RelayRegistrations
             .Where(r => r.RelayIdentityId == relayIdentityId.Value)
@@ -151,14 +151,14 @@ public sealed class SqliteRelayRegistrationRepository : IRelayRegistrationReposi
             .ConfigureAwait(false);
 
         var bindings = bindingRows.Select(b => new RelayMailboxBinding(
-            new PublicIdentityId(b.OwnerIdentityId),
+            new Domain.Identities.PublicIdentityId(b.OwnerIdentityId),
             BlindedRoutingToken.FromBytes(b.RoutingToken),
             DeliveryToken.FromSpan(b.DrainToken),
             b.LinkedAtUtc,
             b.PreviousDrainToken == null ? null : DeliveryToken.FromSpan(b.PreviousDrainToken)));
 
         return RelayRegistration.Rehydrate(
-            new PublicIdentityId(entity.RelayIdentityId),
+            new Domain.Identities.PublicIdentityId(entity.RelayIdentityId),
             RelayEndpoint.Create(entity.Endpoint).Value!,
             entity.PinnedCertificateSha256 == null ? null : CertificatePin.FromSpan(entity.PinnedCertificateSha256),
             entity.CreatedAtUtc,

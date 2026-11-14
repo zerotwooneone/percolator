@@ -1,6 +1,6 @@
-namespace Percolator.Infrastructure.Vault;
+using Percolator.Application.Ports;
 
-using Percolator.Application2.Ports;
+namespace Percolator.Infrastructure.Vault;
 
 internal sealed class AuthenticatedSessionHolder
 {

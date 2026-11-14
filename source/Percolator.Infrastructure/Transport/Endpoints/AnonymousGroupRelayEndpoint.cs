@@ -30,7 +30,7 @@ public sealed class AnonymousGroupRelayEndpoint : AnonymousGroupRelayService.Ano
     private readonly IZkProofEngine _zkProofEngine;
     private readonly IRelayMailboxCapabilityStore _mailboxStore;
     private readonly IDateTimeProvider _timeProvider;
-    private readonly PublicIdentityId _relayIdentityId;
+    private readonly Domain.Identities.PublicIdentityId _relayIdentityId;
     private readonly ConcurrentDictionary<ChannelId, ConcurrentDictionary<Guid, GroupSubscriber>> _subscribers = new();
 
     public AnonymousGroupRelayEndpoint(
@@ -38,7 +38,7 @@ public sealed class AnonymousGroupRelayEndpoint : AnonymousGroupRelayService.Ano
         IZkProofEngine zkProofEngine,
         IRelayMailboxCapabilityStore mailboxStore,
         IDateTimeProvider timeProvider,
-        PublicIdentityId relayIdentityId)
+        Domain.Identities.PublicIdentityId relayIdentityId)
     {
         _ledgerRepository = ledgerRepository ?? throw new ArgumentNullException(nameof(ledgerRepository));
         _zkProofEngine = zkProofEngine ?? throw new ArgumentNullException(nameof(zkProofEngine));

@@ -1,6 +1,4 @@
-using FluentAssertions;
-using NUnit.Framework;
-using Percolator.Application2.Ports;
+using Percolator.Application.Ports;
 using Percolator.Application.Tests.TestDoubles;
 
 namespace Percolator.Application.Tests.Ports;

@@ -36,7 +36,7 @@ public sealed class SqlitePrivateRendezvousService : IPrivateRendezvousService
     }
 
     public BlindedLocator DeriveLocator(
-        PublicIdentityId peerId,
+        Domain.Identities.PublicIdentityId peerId,
         ReadOnlySpan<byte> sharedSecret,
         DiscoveryEpoch epoch)
     {
@@ -44,13 +44,13 @@ public sealed class SqlitePrivateRendezvousService : IPrivateRendezvousService
     }
 
     public BlindedLocator DeriveLocator(
-        PublicIdentityId peerId,
+        Domain.Identities.PublicIdentityId peerId,
         RendezvousSharedSecret sharedSecret,
         DiscoveryEpoch epoch) =>
         DeriveLocator(peerId, sharedSecret.Span, epoch);
 
     public IReadOnlyList<BlindedLocator> DeriveLocatorWindow(
-        PublicIdentityId peerId,
+        Domain.Identities.PublicIdentityId peerId,
         ReadOnlySpan<byte> sharedSecret,
         DiscoveryEpoch currentEpoch)
     {
@@ -58,7 +58,7 @@ public sealed class SqlitePrivateRendezvousService : IPrivateRendezvousService
     }
 
     public IReadOnlyList<BlindedLocator> DeriveLocatorWindow(
-        PublicIdentityId peerId,
+        Domain.Identities.PublicIdentityId peerId,
         RendezvousSharedSecret sharedSecret,
         DiscoveryEpoch currentEpoch) =>
         DeriveLocatorWindow(peerId, sharedSecret.Span, currentEpoch);

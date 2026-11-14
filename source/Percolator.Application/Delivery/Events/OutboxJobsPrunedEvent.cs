@@ -1,6 +1,6 @@
-namespace Percolator.Application2.Delivery.Events;
+using Percolator.Application.Ports;
 
-using Percolator.Application2.Ports;
+namespace Percolator.Application.Delivery.Events;
 
 public sealed record OutboxJobsPrunedEvent(
     Guid EventId,

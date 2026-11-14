@@ -2,7 +2,6 @@ using System.Collections.Concurrent;
 using System.Threading.Channels;
 using Percolator.Apps.FileTransfer.Features.MultiStreamEngine;
 using Percolator.Apps.FileTransfer.Ports;
-using Percolator.Application2.Ports;
 using Percolator.Application2IntegrationTests.Builders;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
@@ -10,6 +9,7 @@ using Percolator.Domain.Delivery.Ports;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.PluginSdk;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Application2IntegrationTests.Infrastructure;
 

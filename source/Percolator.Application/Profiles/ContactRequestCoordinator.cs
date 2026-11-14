@@ -2,8 +2,9 @@ using Percolator.Domain.Common;
 using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Identities.ValueObjects;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
-namespace Percolator.Application2.Profiles;
+namespace Percolator.Application.Profiles;
 
 public interface IContactRequestCoordinator
 {

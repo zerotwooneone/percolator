@@ -1,7 +1,5 @@
 using FluentAssertions;
 using NUnit.Framework;
-using Percolator.Application2.Delivery.Ports;
-using Percolator.Application2.Ports;
 using Percolator.Application2IntegrationTests.Builders;
 using Percolator.Application2IntegrationTests.Infrastructure;
 using Percolator.Apps.Chat.Features.Messaging;
@@ -14,6 +12,7 @@ using Percolator.Domain.Security;
 using Percolator.Domain.Security.Model;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.PluginSdk;
+using Percolator.PluginSdk.Profiles;
 using DeliveryRoute = Percolator.PluginSdk.DeliveryRoute;
 
 namespace Percolator.Application2IntegrationTests;

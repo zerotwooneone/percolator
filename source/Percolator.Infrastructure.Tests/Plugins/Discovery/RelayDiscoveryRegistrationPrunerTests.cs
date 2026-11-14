@@ -31,8 +31,8 @@ public sealed class RelayDiscoveryRegistrationPrunerTests
 
         var pruner = new RelayDiscoveryRegistrationPruner(testDb.DbContext, timeProvider);
 
-        var stalePeerId = PublicIdentityId.New();
-        var freshPeerId = PublicIdentityId.New();
+        var stalePeerId = Domain.Identities.PublicIdentityId.New();
+        var freshPeerId = Domain.Identities.PublicIdentityId.New();
 
         // 1. Insert directory entries: stale (>24h) and fresh (<24h)
         testDb.DbContext.RelayPeerDirectory.Add(new RelayPeerDirectoryEntity

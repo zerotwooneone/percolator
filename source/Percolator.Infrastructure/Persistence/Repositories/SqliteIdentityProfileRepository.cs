@@ -20,7 +20,7 @@ public sealed class SqliteIdentityProfileRepository : IIdentityProfileRepository
         _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
     }
 
-    public async Task<IdentityProfile?> GetByIdAsync(PublicIdentityId id, CancellationToken cancellationToken = default)
+    public async Task<IdentityProfile?> GetByIdAsync(Domain.Identities.PublicIdentityId id, CancellationToken cancellationToken = default)
     {
         var idGuid = id.Value;
         var entity = await _dbContext.IdentityProfiles
@@ -33,7 +33,7 @@ public sealed class SqliteIdentityProfileRepository : IIdentityProfileRepository
         }
 
         return IdentityProfile.Rehydrate(
-            new PublicIdentityId(entity.Id),
+            new Domain.Identities.PublicIdentityId(entity.Id),
             entity.DisplayName,
             (IdentityRole)entity.Role,
             (IdentityState)entity.State,
@@ -48,7 +48,7 @@ public sealed class SqliteIdentityProfileRepository : IIdentityProfileRepository
             .ToListAsync(cancellationToken);
 
         return entities.Select(entity => IdentityProfile.Rehydrate(
-            new PublicIdentityId(entity.Id),
+            new Domain.Identities.PublicIdentityId(entity.Id),
             entity.DisplayName,
             (IdentityRole)entity.Role,
             (IdentityState)entity.State,
@@ -88,7 +88,7 @@ public sealed class SqliteIdentityProfileRepository : IIdentityProfileRepository
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task DeleteAsync(PublicIdentityId id, CancellationToken cancellationToken = default)
+    public async Task DeleteAsync(Domain.Identities.PublicIdentityId id, CancellationToken cancellationToken = default)
     {
         var idGuid = id.Value;
         await _dbContext.IdentityProfiles

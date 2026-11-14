@@ -1,8 +1,9 @@
 using System.Text;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
-namespace Percolator.Application2.Profiles;
+namespace Percolator.Application.Profiles;
 
 public enum InvitationKind
 {
@@ -242,7 +243,7 @@ public sealed record InvitationLink
         }
 
         var span = bytes.AsSpan();
-        var peerId = PublicIdentityId.FromBytes(span.Slice(1, 16));
+        var peerId = Domain.Identities.PublicIdentityId.FromBytes(span.Slice(1, 16));
         var deviceId = new DeviceId(BitConverter.ToUInt32(span.Slice(17, 4)));
         var ik = IdentityKey.FromSpan(span.Slice(21, 32));
         var routingToken = BlindedRoutingToken.FromBytes(span.Slice(53, 16));

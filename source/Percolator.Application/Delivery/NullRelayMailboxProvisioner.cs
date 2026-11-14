@@ -1,11 +1,10 @@
-using System.Threading;
-using System.Threading.Tasks;
-using Percolator.Application2.Delivery.Ports;
+using Percolator.Application.Delivery.Ports;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
-namespace Percolator.Application2.Delivery;
+namespace Percolator.Application.Delivery;
 
 /// <summary>
 /// Placeholder <see cref="IRelayMailboxProvisioner"/> used until the gRPC provisioner is wired.

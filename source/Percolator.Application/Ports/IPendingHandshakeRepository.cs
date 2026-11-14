@@ -1,7 +1,7 @@
-using Percolator.Application2.Ingress;
-using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Application.Ingress;
+using Percolator.Domain.Identities;
 
-namespace Percolator.Application2.Ports;
+namespace Percolator.Application.Ports;
 
 /// <summary>
 /// Infrastructure port for storing inbound handshake envelopes that are awaiting user contact approval.

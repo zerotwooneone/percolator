@@ -1,3 +1,7 @@
+using Percolator.Application.Delivery.Ports;
+using Percolator.Application.Ingress;
+using Percolator.Application.Ports;
+
 namespace Percolator.Infrastructure.Transport;
 
 using System;
@@ -8,9 +12,6 @@ using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using Microsoft.Extensions.DependencyInjection;
-using Percolator.Application2.Delivery.Ports;
-using Percolator.Application2.Ingress;
-using Percolator.Application2.Ports;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.Ports;
@@ -58,8 +59,8 @@ public sealed class GrpcRelayMailboxProvisioner : IRelayMailboxProvisioner
     }
 
     public async Task<DomainResult> ProvisionMailboxAsync(
-        PublicIdentityId ownerIdentityId,
-        PublicIdentityId relayIdentityId,
+        Domain.Identities.PublicIdentityId ownerIdentityId,
+        Domain.Identities.PublicIdentityId relayIdentityId,
         RelayEndpoint endpoint,
         MailboxTokenTriad tokens,
         CancellationToken ct = default)
@@ -94,7 +95,7 @@ public sealed class GrpcRelayMailboxProvisioner : IRelayMailboxProvisioner
     }
 
     public async Task<DomainResult> PublishPreKeyBundleAsync(
-        PublicIdentityId ownerIdentityId,
+        Domain.Identities.PublicIdentityId ownerIdentityId,
         DeviceId deviceId,
         RelayEndpoint endpoint,
         MailboxTokenTriad tokens,
@@ -187,7 +188,7 @@ public sealed class GrpcRelayMailboxProvisioner : IRelayMailboxProvisioner
     }
 
     public async Task<DomainResult<int>> DrainMailboxOnceAsync(
-        PublicIdentityId ownerIdentityId,
+        Domain.Identities.PublicIdentityId ownerIdentityId,
         RelayEndpoint endpoint,
         MailboxTokenTriad tokens,
         CancellationToken ct = default)
@@ -257,8 +258,8 @@ public sealed class GrpcRelayMailboxProvisioner : IRelayMailboxProvisioner
     }
 
     public Task StopMailboxStreamAsync(
-        PublicIdentityId ownerIdentityId,
-        PublicIdentityId relayIdentityId,
+        Domain.Identities.PublicIdentityId ownerIdentityId,
+        Domain.Identities.PublicIdentityId relayIdentityId,
         CancellationToken ct = default)
     {
         // This provisioner performs one-shot RPCs only and holds no live mailbox stream;

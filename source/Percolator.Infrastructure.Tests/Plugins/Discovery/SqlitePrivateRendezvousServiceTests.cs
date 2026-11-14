@@ -26,7 +26,7 @@ public sealed class SqlitePrivateRendezvousServiceTests
         using var testDb = new SqliteTestDb();
         var service = new SqlitePrivateRendezvousService(testDb.ContextFactory);
 
-        var publisherId = PublicIdentityId.New();
+        var publisherId = Domain.Identities.PublicIdentityId.New();
         var epoch = new DiscoveryEpoch(20000);
         var route = new RelayRouteDescriptor("relay://primary.percolator.net:443");
 

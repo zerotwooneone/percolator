@@ -1,6 +1,6 @@
 using Percolator.Domain.Channels.ValueObjects;
 
-namespace Percolator.Application2.Ports;
+namespace Percolator.Application.Ports;
 
 /// <summary>
 /// Provides asynchronous keyed locking scoped by channel or session ID,

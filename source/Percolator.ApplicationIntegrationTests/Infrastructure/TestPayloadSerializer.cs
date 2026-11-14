@@ -6,12 +6,13 @@ using Percolator.Apps.Discovery.Features.PrivateRendezvous;
 using Percolator.Apps.Chat.Features.GroupInvitations;
 using Percolator.Apps.FileTransfer.Domain.ManifestManagement;
 using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
-using Percolator.Infrastructure2.Serialization;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Infrastructure.Serialization;
 using Percolator.PluginSdk;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Application2IntegrationTests.Infrastructure;
 

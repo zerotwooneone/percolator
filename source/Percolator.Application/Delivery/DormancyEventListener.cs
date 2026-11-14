@@ -1,8 +1,8 @@
-using Percolator.Application2.Delivery.Ports;
+using Percolator.Application.Delivery.Ports;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.Events;
 
-namespace Percolator.Application2.Delivery;
+namespace Percolator.Application.Delivery;
 
 public sealed class DormancyEventListener
 {

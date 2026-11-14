@@ -1,3 +1,6 @@
+using Percolator.Application.Delivery;
+using Percolator.Application.Delivery.Ports;
+
 namespace Percolator.Infrastructure.Persistence.Repositories;
 
 using System;
@@ -6,8 +9,6 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
-using Percolator.Application2.Delivery;
-using Percolator.Application2.Delivery.Ports;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
@@ -47,8 +48,8 @@ public sealed class SqlOutboxQueryService : IOutboxQueryService
         return summaries.Select(s => new OutboxJobSummaryReadModel(
             s.Id,
             new ChannelId(s.ChannelId),
-            new PublicIdentityId(s.OwnerIdentityId),
-            s.RecipientId.HasValue ? new PublicIdentityId(s.RecipientId.Value) : null,
+            new Domain.Identities.PublicIdentityId(s.OwnerIdentityId),
+            s.RecipientId.HasValue ? new Domain.Identities.PublicIdentityId(s.RecipientId.Value) : null,
             (DeliveryRouteType)s.DeliveryRouteType,
             (OutboxStatus)s.Status,
             s.RetryCount,
@@ -83,8 +84,8 @@ public sealed class SqlOutboxQueryService : IOutboxQueryService
         return summaries.Select(s => new OutboxJobSummaryReadModel(
             s.Id,
             new ChannelId(s.ChannelId),
-            new PublicIdentityId(s.OwnerIdentityId),
-            s.RecipientId.HasValue ? new PublicIdentityId(s.RecipientId.Value) : null,
+            new Domain.Identities.PublicIdentityId(s.OwnerIdentityId),
+            s.RecipientId.HasValue ? new Domain.Identities.PublicIdentityId(s.RecipientId.Value) : null,
             (DeliveryRouteType)s.DeliveryRouteType,
             (OutboxStatus)s.Status,
             s.RetryCount,
@@ -121,8 +122,8 @@ public sealed class SqlOutboxQueryService : IOutboxQueryService
         return new OutboxJobSummaryReadModel(
             summary.Id,
             new ChannelId(summary.ChannelId),
-            new PublicIdentityId(summary.OwnerIdentityId),
-            summary.RecipientId.HasValue ? new PublicIdentityId(summary.RecipientId.Value) : null,
+            new Domain.Identities.PublicIdentityId(summary.OwnerIdentityId),
+            summary.RecipientId.HasValue ? new Domain.Identities.PublicIdentityId(summary.RecipientId.Value) : null,
             (DeliveryRouteType)summary.DeliveryRouteType,
             (OutboxStatus)summary.Status,
             summary.RetryCount,
@@ -131,7 +132,7 @@ public sealed class SqlOutboxQueryService : IOutboxQueryService
             summary.NextAttemptAtUtc);
     }
 
-    public async Task<IReadOnlyList<OutboxJobSummaryReadModel>> GetJobsForOwnerAsync(PublicIdentityId ownerId, CancellationToken ct = default)
+    public async Task<IReadOnlyList<OutboxJobSummaryReadModel>> GetJobsForOwnerAsync(Domain.Identities.PublicIdentityId ownerId, CancellationToken ct = default)
     {
         var ownerGuid = ownerId.Value;
         var summaries = await _dbContext.OpsOutboxJobs
@@ -156,8 +157,8 @@ public sealed class SqlOutboxQueryService : IOutboxQueryService
         return summaries.Select(s => new OutboxJobSummaryReadModel(
             s.Id,
             new ChannelId(s.ChannelId),
-            new PublicIdentityId(s.OwnerIdentityId),
-            s.RecipientId.HasValue ? new PublicIdentityId(s.RecipientId.Value) : null,
+            new Domain.Identities.PublicIdentityId(s.OwnerIdentityId),
+            s.RecipientId.HasValue ? new Domain.Identities.PublicIdentityId(s.RecipientId.Value) : null,
             (DeliveryRouteType)s.DeliveryRouteType,
             (OutboxStatus)s.Status,
             s.RetryCount,

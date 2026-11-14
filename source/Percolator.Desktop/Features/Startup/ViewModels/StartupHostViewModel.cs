@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Percolator.Application2.Ports;
+using Percolator.Application.Ports;
 using Percolator.Desktop.Common.Services;
 using Percolator.Desktop.Features.Startup.Models;
 using Percolator.Desktop.ViewModels;

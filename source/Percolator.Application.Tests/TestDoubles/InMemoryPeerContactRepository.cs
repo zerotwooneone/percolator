@@ -1,8 +1,8 @@
 using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.Ports;
-using Percolator.Domain.Identities.ValueObjects;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
-namespace Percolator.Application2.Tests.TestDoubles;
+namespace Percolator.Application.Tests.TestDoubles;
 
 public sealed class InMemoryPeerContactRepository : IPeerContactRepository
 {

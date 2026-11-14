@@ -1,3 +1,6 @@
+using Percolator.Application.Ports;
+using Percolator.PluginSdk.Profiles;
+
 namespace Percolator.Infrastructure.Adapters;
 
 using System;
@@ -5,7 +8,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Google.Protobuf;
 using Grpc.Core;
-using Percolator.Application2.Ports;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Ports;
 using Percolator.Domain.Delivery.ValueObjects;
@@ -32,7 +34,7 @@ public sealed class PreKeyBundleProviderAdapter : IPreKeyBundleProvider
     }
 
     public async Task<DomainResult<PreKeyBundle>> FetchConsumableBundleAsync(
-        PublicIdentityId peerId,
+        Domain.Identities.PublicIdentityId peerId,
         DeviceId? deviceId = null,
         RelayEndpoint? relayEndpoint = null,
         CancellationToken ct = default)

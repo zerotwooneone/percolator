@@ -1,11 +1,12 @@
-using Percolator.Application2.Ports;
+using Percolator.Application.Ports;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
+using Percolator.Domain.Identities;
 using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.PluginSdk;
 
-namespace Percolator.Application2.Ingress;
+namespace Percolator.Application.Ingress;
 
 public interface IInboundIngressPipeline
 {
@@ -234,7 +235,7 @@ public sealed class InboundIngressPipeline : IInboundIngressPipeline
 
     private async ValueTask<DomainResult> DispatchPlaintextAsync(
         ChannelId channelId,
-        Domain.Identities.ValueObjects.PublicIdentityId senderId,
+        PublicIdentityId senderId,
         Domain.Identities.ValueObjects.DeviceId senderDeviceId,
         byte[] plaintext,
         DateTimeOffset receivedAtUtc,

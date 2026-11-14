@@ -1,3 +1,5 @@
+using Percolator.Application.Ports;
+
 namespace Percolator.Infrastructure.Persistence.Repositories;
 
 using System;
@@ -6,7 +8,6 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
-using Percolator.Application2.Ports;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
@@ -25,7 +26,7 @@ public sealed class SqliteGroupReceiverSessionRepository : IGroupReceiverSession
 
     public async Task<GroupReceiverSession?> GetReceiverSessionAsync(
         ChannelId channelId,
-        PublicIdentityId authorId,
+        Domain.Identities.PublicIdentityId authorId,
         DeviceId authorDeviceId,
         CancellationToken ct = default)
     {

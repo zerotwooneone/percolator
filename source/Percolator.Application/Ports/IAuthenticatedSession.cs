@@ -1,4 +1,4 @@
-namespace Percolator.Application2.Ports;
+namespace Percolator.Application.Ports;
 
 /// <summary>
 /// Represents an active, authenticated post-unlock session holding the Stage 2 container

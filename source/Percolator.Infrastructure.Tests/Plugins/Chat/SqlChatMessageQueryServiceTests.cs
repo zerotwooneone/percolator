@@ -21,7 +21,7 @@ public sealed class SqlChatMessageQueryServiceTests
         var queryService = new SqlChatMessageQueryService(testDb.DbContext);
 
         var channelId = ChannelId.New();
-        var authorId = PublicIdentityId.New();
+        var authorId = Domain.Identities.PublicIdentityId.New();
 
         // Seed 10 messages with timestamps 1000 to 1009
         for (ulong i = 0; i < 10; i++)

@@ -5,7 +5,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Percolator.Application.Ports;
-using Percolator.Application2.Ports;
 using Percolator.Desktop.Common.Storage;
 using Percolator.Desktop.Features.Startup.Models;
 using Percolator.Domain.Common;
@@ -14,6 +13,7 @@ using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Desktop.Common.Services;
 

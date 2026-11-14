@@ -3,6 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Percolator.Domain.Delivery.Model;
 using Percolator.Domain.Identities.ValueObjects;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Domain.Delivery.Ports;
 

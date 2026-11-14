@@ -35,7 +35,7 @@ public class SqliteGroupSenderKeyRepositoryTests
     {
         // Arrange
         var channelId = ChannelId.New();
-        var authorId = PublicIdentityId.New();
+        var authorId = Domain.Identities.PublicIdentityId.New();
         var deviceId = DeviceId.Primary;
 
         byte[] chainBytes = new byte[32];

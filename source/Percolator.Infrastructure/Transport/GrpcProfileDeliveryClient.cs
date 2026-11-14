@@ -1,3 +1,5 @@
+using Percolator.PluginSdk.Profiles;
+
 namespace Percolator.Infrastructure.Transport;
 
 using System;

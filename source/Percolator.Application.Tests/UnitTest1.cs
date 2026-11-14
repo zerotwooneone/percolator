@@ -1,4 +1,4 @@
-﻿namespace Percolator.Application2.Tests;
+﻿namespace Percolator.Application.Tests;
 
 public class Tests
 {

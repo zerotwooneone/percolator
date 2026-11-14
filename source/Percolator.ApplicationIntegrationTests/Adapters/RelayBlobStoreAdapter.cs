@@ -1,5 +1,5 @@
 using System.Collections.Concurrent;
-using Percolator.Application2.Ports;
+using Percolator.Application.Ports;
 using Percolator.Application2IntegrationTests.Builders;
 using Percolator.Application2IntegrationTests.Infrastructure;
 using Percolator.Domain.Channels.Ports;
@@ -7,6 +7,8 @@ using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.PluginSdk;
+using Percolator.PluginSdk.Profiles;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Application2IntegrationTests.Adapters;
 

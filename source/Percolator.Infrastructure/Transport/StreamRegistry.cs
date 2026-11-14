@@ -1,3 +1,5 @@
+using Percolator.Application.Ports;
+
 namespace Percolator.Infrastructure.Transport;
 
 using System;
@@ -5,7 +7,6 @@ using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
-using Percolator.Application2.Ports;
 using Percolator.Domain.Identities.ValueObjects;
 
 public sealed class StreamRegistryOptions
@@ -15,48 +16,48 @@ public sealed class StreamRegistryOptions
 
 public interface IStreamRegistryManagement : IStreamRegistry
 {
-    ChannelReader<ReadOnlyMemory<byte>> RegisterStream(PublicIdentityId targetId, int? capacity = null);
-    ChannelReader<ReadOnlyMemory<byte>> RegisterRelayStream(PublicIdentityId relayId, int? capacity = null);
-    void UnregisterStream(PublicIdentityId targetId);
-    void UnregisterRelayStream(PublicIdentityId relayId);
-    void RegisterDirectEndpoint(PublicIdentityId targetId, Uri directEndpoint);
-    void UnregisterDirectEndpoint(PublicIdentityId targetId);
-    Uri? GetDirectEndpoint(PublicIdentityId targetId);
+    ChannelReader<ReadOnlyMemory<byte>> RegisterStream(Domain.Identities.PublicIdentityId targetId, int? capacity = null);
+    ChannelReader<ReadOnlyMemory<byte>> RegisterRelayStream(Domain.Identities.PublicIdentityId relayId, int? capacity = null);
+    void UnregisterStream(Domain.Identities.PublicIdentityId targetId);
+    void UnregisterRelayStream(Domain.Identities.PublicIdentityId relayId);
+    void RegisterDirectEndpoint(Domain.Identities.PublicIdentityId targetId, Uri directEndpoint);
+    void UnregisterDirectEndpoint(Domain.Identities.PublicIdentityId targetId);
+    Uri? GetDirectEndpoint(Domain.Identities.PublicIdentityId targetId);
 }
 
 public sealed class StreamRegistry : IStreamRegistryManagement
 {
     private readonly StreamRegistryOptions _options;
-    private readonly ConcurrentDictionary<PublicIdentityId, Channel<ReadOnlyMemory<byte>>> _peerStreams = new();
-    private readonly ConcurrentDictionary<PublicIdentityId, Channel<ReadOnlyMemory<byte>>> _relayStreams = new();
-    private readonly ConcurrentDictionary<PublicIdentityId, Uri> _directEndpoints = new();
+    private readonly ConcurrentDictionary<Domain.Identities.PublicIdentityId, Channel<ReadOnlyMemory<byte>>> _peerStreams = new();
+    private readonly ConcurrentDictionary<Domain.Identities.PublicIdentityId, Channel<ReadOnlyMemory<byte>>> _relayStreams = new();
+    private readonly ConcurrentDictionary<Domain.Identities.PublicIdentityId, Uri> _directEndpoints = new();
 
     public StreamRegistry(StreamRegistryOptions options)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
     }
 
-    public bool HasActiveStream(PublicIdentityId targetId) => _peerStreams.ContainsKey(targetId);
+    public bool HasActiveStream(Domain.Identities.PublicIdentityId targetId) => _peerStreams.ContainsKey(targetId);
 
-    public bool HasActiveRelayStream(PublicIdentityId relayId) => _relayStreams.ContainsKey(relayId);
+    public bool HasActiveRelayStream(Domain.Identities.PublicIdentityId relayId) => _relayStreams.ContainsKey(relayId);
 
-    public void RegisterDirectEndpoint(PublicIdentityId targetId, Uri directEndpoint)
+    public void RegisterDirectEndpoint(Domain.Identities.PublicIdentityId targetId, Uri directEndpoint)
     {
         ArgumentNullException.ThrowIfNull(directEndpoint);
         _directEndpoints[targetId] = directEndpoint;
     }
 
-    public void UnregisterDirectEndpoint(PublicIdentityId targetId)
+    public void UnregisterDirectEndpoint(Domain.Identities.PublicIdentityId targetId)
     {
         _directEndpoints.TryRemove(targetId, out _);
     }
 
-    public Uri? GetDirectEndpoint(PublicIdentityId targetId)
+    public Uri? GetDirectEndpoint(Domain.Identities.PublicIdentityId targetId)
     {
         return _directEndpoints.TryGetValue(targetId, out var uri) ? uri : null;
     }
 
-    public ChannelReader<ReadOnlyMemory<byte>> RegisterStream(PublicIdentityId targetId, int? capacity = null)
+    public ChannelReader<ReadOnlyMemory<byte>> RegisterStream(Domain.Identities.PublicIdentityId targetId, int? capacity = null)
     {
         int cap = capacity ?? _options.DefaultQueueCapacity;
         var channel = Channel.CreateBounded<ReadOnlyMemory<byte>>(new BoundedChannelOptions(cap)
@@ -68,7 +69,7 @@ public sealed class StreamRegistry : IStreamRegistryManagement
         return channel.Reader;
     }
 
-    public ChannelReader<ReadOnlyMemory<byte>> RegisterRelayStream(PublicIdentityId relayId, int? capacity = null)
+    public ChannelReader<ReadOnlyMemory<byte>> RegisterRelayStream(Domain.Identities.PublicIdentityId relayId, int? capacity = null)
     {
         int cap = capacity ?? _options.DefaultQueueCapacity;
         var channel = Channel.CreateBounded<ReadOnlyMemory<byte>>(new BoundedChannelOptions(cap)
@@ -80,7 +81,7 @@ public sealed class StreamRegistry : IStreamRegistryManagement
         return channel.Reader;
     }
 
-    public void UnregisterStream(PublicIdentityId targetId)
+    public void UnregisterStream(Domain.Identities.PublicIdentityId targetId)
     {
         _directEndpoints.TryRemove(targetId, out _);
         if (_peerStreams.TryRemove(targetId, out var channel))
@@ -89,7 +90,7 @@ public sealed class StreamRegistry : IStreamRegistryManagement
         }
     }
 
-    public void UnregisterRelayStream(PublicIdentityId relayId)
+    public void UnregisterRelayStream(Domain.Identities.PublicIdentityId relayId)
     {
         if (_relayStreams.TryRemove(relayId, out var channel))
         {
@@ -98,7 +99,7 @@ public sealed class StreamRegistry : IStreamRegistryManagement
     }
 
     public ValueTask<StreamWriteResult> TryWriteAsync(
-        PublicIdentityId targetId,
+        Domain.Identities.PublicIdentityId targetId,
         ReadOnlyMemory<byte> framedPayload,
         CancellationToken ct = default)
     {

@@ -6,12 +6,13 @@ using System.Threading.Tasks;
 using FluentAssertions;
 using Moq;
 using NUnit.Framework;
-using Percolator.Application2.Ports;
+using Percolator.Application.Ports;
 using Percolator.Desktop.Common.Services;
 using Percolator.Desktop.Common.Windowing;
 using Percolator.Desktop.Features.Startup.Models;
 using Percolator.Desktop.Features.Startup.ViewModels;
 using Percolator.Domain.Security.ValueObjects;
+using IPortReservationService = Percolator.Desktop.Common.Services.IPortReservationService;
 
 namespace Percolator.Desktop.Tests.Startup;
 

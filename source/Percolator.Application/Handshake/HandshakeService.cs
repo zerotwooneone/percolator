@@ -1,10 +1,9 @@
-using System.Security.Cryptography;
-using Percolator.Application2.Delivery;
-using Percolator.Application2.Delivery.Ports;
-using Percolator.Application2.Ingress;
-using Percolator.Application2.Ports;
-using Percolator.Application2.Profiles;
-using Percolator.Application2.Routing;
+using Percolator.Application.Delivery;
+using Percolator.Application.Delivery.Ports;
+using Percolator.Application.Ingress;
+using Percolator.Application.Ports;
+using Percolator.Application.Profiles;
+using Percolator.Application.Routing;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.Model;
@@ -15,9 +14,10 @@ using Percolator.Domain.Security.Model;
 using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.PluginSdk;
-using DeliveryRoute = Percolator.Application2.Delivery.DeliveryRoute;
+using DeliveryRoute = Percolator.Application.Delivery.DeliveryRoute;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
-namespace Percolator.Application2.Handshake;
+namespace Percolator.Application.Handshake;
 
 public sealed class HandshakeService : IHandshakeService
 {

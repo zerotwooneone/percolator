@@ -1,3 +1,8 @@
+using Percolator.Application.Delivery;
+using Percolator.Application.Delivery.Ports;
+using Percolator.Application.Ports;
+using Percolator.PluginSdk.Profiles;
+
 namespace Percolator.Infrastructure.Persistence;
 
 using System;
@@ -6,9 +11,6 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
-using Percolator.Application2.Delivery;
-using Percolator.Application2.Delivery.Ports;
-using Percolator.Application2.Ports;
 using Percolator.Domain.Channels.Ports;
 using Percolator.Domain.Delivery.Ports;
 using Percolator.Domain.Identities.Ports;

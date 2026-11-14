@@ -1,3 +1,6 @@
+using Percolator.Application.Delivery;
+using Percolator.Application.Delivery.Events;
+
 namespace Percolator.Infrastructure.Tests.Maintenance;
 
 using System;
@@ -7,8 +10,6 @@ using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using NUnit.Framework;
-using Percolator.Application2.Delivery;
-using Percolator.Application2.Delivery.Events;
 using Percolator.Infrastructure.Maintenance;
 using Percolator.Infrastructure.Persistence.Entities;
 using Percolator.Infrastructure.Tests.Persistence.TestSupport;

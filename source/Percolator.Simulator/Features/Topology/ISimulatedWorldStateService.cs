@@ -7,6 +7,7 @@ using ObservableCollections;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Simulator.Features.RelayedChat;
 using Percolator.Simulator.Features.Shell;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Simulator.Features.Topology;
 

@@ -27,7 +27,7 @@ public sealed class SqlChatMessageRepositoryTests
 
         var msgId = PayloadId.New();
         var channelId = ChannelId.New();
-        var authorId = PublicIdentityId.New();
+        var authorId = Domain.Identities.PublicIdentityId.New();
 
         byte[] rawKey = new byte[32];
         for (int i = 0; i < 32; i++) rawKey[i] = (byte)(i + 1);
@@ -123,7 +123,7 @@ public sealed class SqlChatMessageRepositoryTests
 
         var msgId = PayloadId.New();
         var channelId = ChannelId.New();
-        var authorId = PublicIdentityId.New();
+        var authorId = Domain.Identities.PublicIdentityId.New();
 
         // 1. Add message initially without delivery or read timestamps
         var message = new ChatMessage(

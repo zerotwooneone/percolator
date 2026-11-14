@@ -87,7 +87,7 @@ public sealed class SqlChatMessageQueryService : IChatMessageQueryService
             ReplyContextDto? replyContext = entity.ReplyParentId.HasValue && entity.ReplyAuthorId != null && entity.ReplyAuthorId.Length == 16
                 ? new ReplyContextDto(
                     PayloadId.FromGuid(entity.ReplyParentId.Value),
-                    PublicIdentityId.FromBytes(entity.ReplyAuthorId))
+                    Domain.Identities.PublicIdentityId.FromBytes(entity.ReplyAuthorId))
                 : null;
 
             mentionsByMessage.TryGetValue(entity.Id, out var msgMentions);
@@ -99,7 +99,7 @@ public sealed class SqlChatMessageQueryService : IChatMessageQueryService
                     if (m.IdentityId.Length == 16)
                     {
                         mentionDtos.Add(new MentionDto(
-                            PublicIdentityId.FromBytes(m.IdentityId),
+                            Domain.Identities.PublicIdentityId.FromBytes(m.IdentityId),
                             m.StartOffset,
                             m.Length));
                     }
@@ -183,7 +183,7 @@ public sealed class SqlChatMessageQueryService : IChatMessageQueryService
             result.Add(new ChatMessageReadModel(
                 PayloadId.FromGuid(entity.Id),
                 ChannelId.FromGuid(entity.ChannelId),
-                PublicIdentityId.FromBytes(entity.AuthorId),
+                Domain.Identities.PublicIdentityId.FromBytes(entity.AuthorId),
                 entity.TimestampUnixMs,
                 entity.Content,
                 mentionDtos,
@@ -213,7 +213,7 @@ public sealed class SqlChatMessageQueryService : IChatMessageQueryService
                 g.Key,
                 g.Count(),
                 g.Where(r => r.ReactorId.Length == 16)
-                 .Select(r => PublicIdentityId.FromBytes(r.ReactorId))
+                 .Select(r => Domain.Identities.PublicIdentityId.FromBytes(r.ReactorId))
                  .ToList(),
                 HasReactedByCurrentUser: false))
             .ToList();

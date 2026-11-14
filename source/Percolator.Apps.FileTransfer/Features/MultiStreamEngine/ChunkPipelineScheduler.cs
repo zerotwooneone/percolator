@@ -1,5 +1,6 @@
 using Percolator.Apps.FileTransfer.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Apps.FileTransfer.Features.MultiStreamEngine;
 

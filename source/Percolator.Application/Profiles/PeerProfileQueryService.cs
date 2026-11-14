@@ -1,8 +1,8 @@
-using Percolator.Application2.Ports;
-using Percolator.Domain.Identities.ValueObjects;
-using Percolator.PluginSdk;
+using Percolator.Application.Ports;
+using Percolator.Domain.Identities;
+using Percolator.PluginSdk.Profiles;
 
-namespace Percolator.Application2.Profiles;
+namespace Percolator.Application.Profiles;
 
 public sealed class PeerProfileQueryService : IPeerProfileQueryService
 {

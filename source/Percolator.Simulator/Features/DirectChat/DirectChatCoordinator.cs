@@ -14,6 +14,7 @@ using Percolator.Domain.Delivery.Ports;
 using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.PluginSdk;
+using Percolator.PluginSdk.Profiles;
 using Percolator.Simulator.Features.Logging;
 using Percolator.Simulator.Features.Shell;
 using Percolator.Simulator.Features.Topology;

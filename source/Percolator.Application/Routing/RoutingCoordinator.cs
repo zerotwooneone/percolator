@@ -1,10 +1,10 @@
-using Percolator.Application2.Ports;
+using Percolator.Application.Ports;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.ValueObjects;
-using Percolator.Domain.Identities.ValueObjects;
-using Percolator.PluginSdk;
+using Percolator.Domain.Identities;
+using Percolator.PluginSdk.Profiles;
 
-namespace Percolator.Application2.Routing;
+namespace Percolator.Application.Routing;
 
 public enum DeliveryRoutingMode
 {

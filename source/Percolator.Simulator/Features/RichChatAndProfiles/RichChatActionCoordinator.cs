@@ -13,6 +13,7 @@ using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Ports;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.PluginSdk;
+using Percolator.PluginSdk.Profiles;
 using Percolator.Simulator.Features.DirectChat;
 using Percolator.Simulator.Features.Logging;
 using Percolator.Simulator.Features.Shell;

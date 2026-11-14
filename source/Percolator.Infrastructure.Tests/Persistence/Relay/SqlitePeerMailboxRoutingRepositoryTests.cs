@@ -1,3 +1,5 @@
+using Percolator.PluginSdk.Profiles;
+
 namespace Percolator.Infrastructure.Tests.Persistence.Relay;
 
 using System;
@@ -34,7 +36,7 @@ public class SqlitePeerMailboxRoutingRepositoryTests
     public async Task UpdateRouting_PersistsEndpoint()
     {
         // Arrange
-        var peerId = PublicIdentityId.New();
+        var peerId = Domain.Identities.PublicIdentityId.New();
         var routingToken = BlindedRoutingToken.New();
         var deliveryToken = DeliveryToken.FromSpan(new byte[32]);
         var relayEndpoint = RelayEndpoint.Parse("relay://relay.example.com:8443");

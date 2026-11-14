@@ -1,10 +1,10 @@
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.ValueObjects;
-using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Domain.Identities;
 using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
 
-namespace Percolator.PluginSdk;
+namespace Percolator.PluginSdk.Profiles;
 
 /// <summary>
 /// Identifies the network source type through which a peer profile was observed.

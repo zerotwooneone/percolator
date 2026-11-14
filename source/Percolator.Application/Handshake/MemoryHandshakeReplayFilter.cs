@@ -1,9 +1,8 @@
 using System.Collections.Concurrent;
-using Percolator.Application2.Ports;
+using Percolator.Application.Ports;
 using Percolator.Domain.Identities.ValueObjects;
-using Percolator.Domain.Security.ValueObjects;
 
-namespace Percolator.Application2.Handshake;
+namespace Percolator.Application.Handshake;
 
 /// <summary>
 /// In-memory sliding-window cache for tracking recently observed handshake ephemeral keys.

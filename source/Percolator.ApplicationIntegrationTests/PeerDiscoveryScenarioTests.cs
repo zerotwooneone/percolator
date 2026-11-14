@@ -1,7 +1,6 @@
 using System.Security.Cryptography;
 using FluentAssertions;
 using NUnit.Framework;
-using Percolator.Application2.Delivery.Ports;
 using Percolator.Application2IntegrationTests.Builders;
 using Percolator.Application2IntegrationTests.Infrastructure;
 using Percolator.Apps.Chat.Features.Messaging;
@@ -17,6 +16,7 @@ using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.PluginSdk;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Application2IntegrationTests;
 

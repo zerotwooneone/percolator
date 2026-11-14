@@ -37,14 +37,14 @@ public sealed class SqliteChannelRepository : IChannelRepository
 
         return DirectChannel.Rehydrate(
             id,
-            new PublicIdentityId(entity.OwnerIdentityId.Value),
-            new PublicIdentityId(entity.RemotePeerId.Value),
+            new Domain.Identities.PublicIdentityId(entity.OwnerIdentityId.Value),
+            new Domain.Identities.PublicIdentityId(entity.RemotePeerId.Value),
             entity.CreatedAtUtc,
             entity.LastActivityUtc,
             payloads);
     }
 
-    public async Task<DirectChannel?> GetDirectByPeerAsync(PublicIdentityId ownerId, PublicIdentityId remotePeerId, CancellationToken cancellationToken = default)
+    public async Task<DirectChannel?> GetDirectByPeerAsync(Domain.Identities.PublicIdentityId ownerId, Domain.Identities.PublicIdentityId remotePeerId, CancellationToken cancellationToken = default)
     {
         var ownerGuid = ownerId.Value;
         var remoteGuid = remotePeerId.Value;
@@ -91,7 +91,7 @@ public sealed class SqliteChannelRepository : IChannelRepository
             .ToListAsync(cancellationToken);
 
         var members = memberEntities.Select(m => new ChannelMember(
-            new PublicIdentityId(m.MemberIdentityId),
+            new Domain.Identities.PublicIdentityId(m.MemberIdentityId),
             (ChannelRole)m.Role,
             m.JoinedAtUtc)).ToList();
 
@@ -108,7 +108,7 @@ public sealed class SqliteChannelRepository : IChannelRepository
             payloads);
     }
 
-    public async Task<IReadOnlyList<GroupChannel>> GetAllGroupsForOwnerAsync(PublicIdentityId ownerId, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<GroupChannel>> GetAllGroupsForOwnerAsync(Domain.Identities.PublicIdentityId ownerId, CancellationToken cancellationToken = default)
     {
         var ownerGuid = ownerId.Value;
 
@@ -133,7 +133,7 @@ public sealed class SqliteChannelRepository : IChannelRepository
                 .ToListAsync(cancellationToken);
 
             var members = memberEntities.Select(m => new ChannelMember(
-                new PublicIdentityId(m.MemberIdentityId),
+                new Domain.Identities.PublicIdentityId(m.MemberIdentityId),
                 (ChannelRole)m.Role,
                 m.JoinedAtUtc)).ToList();
 
@@ -268,7 +268,7 @@ public sealed class SqliteChannelRepository : IChannelRepository
         return entities.Select(p => new ChannelPayload(
             new PayloadId(p.Id),
             new ChannelId(p.ChannelId),
-            new PublicIdentityId(p.AuthorId),
+            new Domain.Identities.PublicIdentityId(p.AuthorId),
             new DeviceId(p.AuthorDeviceId),
             p.EncryptedPayload,
             p.SentAtUtc)).ToList();

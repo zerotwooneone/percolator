@@ -129,16 +129,16 @@ public sealed class SqlFileTransferQueryService : IFileTransferQueryService
             downloadedBytes = entity.TotalSizeBytes;
         }
 
-        PublicIdentityId initiatorId = PublicIdentityId.FromBytes(entity.InitiatorId);
+        Domain.Identities.PublicIdentityId initiatorId = Domain.Identities.PublicIdentityId.FromBytes(entity.InitiatorId);
         TransferTopology topology = entity.TopologyType switch
         {
             1 => new TransferTopology.OneToOne(
                 initiatorId,
-                PublicIdentityId.FromGuid(Guid.Parse(JsonSerializer.Deserialize<List<string>>(entity.RecipientsJson)![0]))),
+                Domain.Identities.PublicIdentityId.FromGuid(Guid.Parse(JsonSerializer.Deserialize<List<string>>(entity.RecipientsJson)![0]))),
             2 => new TransferTopology.MultiPeer(
                 initiatorId,
                 JsonSerializer.Deserialize<List<string>>(entity.RecipientsJson)!
-                    .Select(s => PublicIdentityId.FromGuid(Guid.Parse(s)))
+                    .Select(s => Domain.Identities.PublicIdentityId.FromGuid(Guid.Parse(s)))
                     .ToList()),
             _ => new TransferTopology.IncomingStaged(initiatorId)
         };

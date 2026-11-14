@@ -12,7 +12,6 @@ using Google.Protobuf;
 using Microsoft.Extensions.DependencyInjection;
 using NUnit.Framework;
 using Percolator.Application.Ports;
-using Percolator.Application2.Ports;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Delivery.Ports;

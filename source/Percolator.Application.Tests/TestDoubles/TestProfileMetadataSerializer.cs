@@ -1,8 +1,9 @@
 using System.Text;
 using Percolator.Domain.Common;
 using Percolator.PluginSdk;
+using Percolator.PluginSdk.Profiles;
 
-namespace Percolator.Application2.Tests.TestDoubles;
+namespace Percolator.Application.Tests.TestDoubles;
 
 public sealed class TestProfileMetadataSerializer : IProfileMetadataSerializer
 {

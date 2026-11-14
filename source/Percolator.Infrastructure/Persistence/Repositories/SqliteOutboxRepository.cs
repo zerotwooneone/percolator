@@ -1,3 +1,6 @@
+using Percolator.Application.Delivery;
+using Percolator.Application.Delivery.Ports;
+
 namespace Percolator.Infrastructure.Persistence.Repositories;
 using System;
 using System.Collections.Generic;
@@ -6,8 +9,6 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
-using Percolator.Application2.Delivery;
-using Percolator.Application2.Delivery.Ports;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
@@ -27,7 +28,7 @@ public sealed class SqliteOutboxRepository : IOutboxRepository
             .FirstOrDefaultAsync(j => j.Id == id, ct);
         return entity != null ? MapEntityToDomain(entity) : null;
     }
-    public async Task<IReadOnlyList<OutboxJob>> GetPendingJobsForOwnerAsync(PublicIdentityId ownerId, CancellationToken ct = default)
+    public async Task<IReadOnlyList<OutboxJob>> GetPendingJobsForOwnerAsync(Domain.Identities.PublicIdentityId ownerId, CancellationToken ct = default)
     {
         var ownerGuid = ownerId.Value;
         var entities = await _dbContext.OpsOutboxJobs
@@ -99,9 +100,9 @@ public sealed class SqliteOutboxRepository : IOutboxRepository
     private static OutboxJob MapEntityToDomain(OpsOutboxJobEntity entity)
     {
         var channelId = new ChannelId(entity.ChannelId);
-        var ownerId = new PublicIdentityId(entity.OwnerIdentityId);
-        PublicIdentityId? recipientId = entity.RecipientId.HasValue
-            ? new PublicIdentityId(entity.RecipientId.Value)
+        var ownerId = new Domain.Identities.PublicIdentityId(entity.OwnerIdentityId);
+        Domain.Identities.PublicIdentityId? recipientId = entity.RecipientId.HasValue
+            ? new Domain.Identities.PublicIdentityId(entity.RecipientId.Value)
             : null;
         var route = DeserializeRoute(entity.DeliveryRouteType, entity.DeliveryRouteJson);
         return OutboxJob.Rehydrate(

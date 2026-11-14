@@ -46,8 +46,8 @@ public sealed class SqliteTransferSessionRepositoryTests
     public async Task RoundTrip_RehydratesManifestAndSessionAccurately()
     {
         var sessionId = TransferSessionId.New();
-        var initiatorId = PublicIdentityId.New();
-        var recipientId = PublicIdentityId.New();
+        var initiatorId = Domain.Identities.PublicIdentityId.New();
+        var recipientId = Domain.Identities.PublicIdentityId.New();
 
         byte[] chunk0 = new byte[65536];
         byte[] chunk1 = new byte[32768];
@@ -132,8 +132,8 @@ public sealed class SqliteTransferSessionRepositoryTests
     [Test]
     public async Task FilterPolicyRepository_SaveAndGet_PersistsBlockedPeersAndRelays()
     {
-        var ownerId = PublicIdentityId.New();
-        var blockedPeer = PublicIdentityId.New();
+        var ownerId = Domain.Identities.PublicIdentityId.New();
+        var blockedPeer = Domain.Identities.PublicIdentityId.New();
         var blockedRelay = RelayPipeEndpointUri.Parse("https://malicious.relay.net/pipes");
 
         var policy = FileTransferFilterPolicy.DefaultPermissive(ownerId)
@@ -148,7 +148,7 @@ public sealed class SqliteTransferSessionRepositoryTests
         var loaded = await readRepo.GetPolicyAsync(ownerId);
         loaded.OwnerId.Should().Be(ownerId);
         loaded.EvaluatePeer(blockedPeer).Should().Be(PeerFilterDecision.Blocked);
-        loaded.EvaluatePeer(PublicIdentityId.New()).Should().Be(PeerFilterDecision.Allowed);
+        loaded.EvaluatePeer(Domain.Identities.PublicIdentityId.New()).Should().Be(PeerFilterDecision.Allowed);
         loaded.EvaluateRelay(blockedRelay).Should().Be(RelayFilterDecision.Blocked);
         loaded.EvaluateRelay(RelayPipeEndpointUri.Parse("https://trusted.relay.net/pipes")).Should().Be(RelayFilterDecision.Allowed);
     }
@@ -158,8 +158,8 @@ public sealed class SqliteTransferSessionRepositoryTests
     {
         var key = TransferKey.Generate();
         var rendezvousId = SwarmRendezvousId.Derive(key);
-        var peer1 = PublicIdentityId.New();
-        var peer2 = PublicIdentityId.New();
+        var peer1 = Domain.Identities.PublicIdentityId.New();
+        var peer2 = Domain.Identities.PublicIdentityId.New();
 
         var candidates1 = new List<DirectEndpointCandidate>
         {

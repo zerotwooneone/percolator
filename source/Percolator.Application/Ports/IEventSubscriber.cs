@@ -1,4 +1,4 @@
-namespace Percolator.Application2.Ports;
+namespace Percolator.Application.Ports;
 
 public interface IEventSubscriber
 {

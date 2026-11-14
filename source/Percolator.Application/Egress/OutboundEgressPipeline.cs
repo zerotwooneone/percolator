@@ -1,6 +1,6 @@
-using Percolator.Application2.Delivery;
-using Percolator.Application2.Delivery.Ports;
-using Percolator.Application2.Ports;
+using Percolator.Application.Delivery;
+using Percolator.Application.Delivery.Ports;
+using Percolator.Application.Ports;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Ports;
@@ -8,7 +8,7 @@ using Percolator.Domain.Security.ValueObjects;
 using Percolator.PluginSdk;
 using PluginRoute = Percolator.PluginSdk.DeliveryRoute;
 
-namespace Percolator.Application2.Egress;
+namespace Percolator.Application.Egress;
 
 public sealed class OutboundEgressPipeline : IPayloadSender
 {

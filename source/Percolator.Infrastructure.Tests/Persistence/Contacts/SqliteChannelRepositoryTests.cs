@@ -35,8 +35,8 @@ public class SqliteChannelRepositoryTests
     {
         // Arrange
         var channelId = ChannelId.New();
-        var adminId = PublicIdentityId.New();
-        var memberId = PublicIdentityId.New();
+        var adminId = Domain.Identities.PublicIdentityId.New();
+        var memberId = Domain.Identities.PublicIdentityId.New();
         var now = DateTimeOffset.UtcNow;
 
         var members = new List<ChannelMember>
@@ -78,8 +78,8 @@ public class SqliteChannelRepositoryTests
     {
         // Arrange
         var channelId = ChannelId.New();
-        var ownerId = PublicIdentityId.New();
-        var peerId = PublicIdentityId.New();
+        var ownerId = Domain.Identities.PublicIdentityId.New();
+        var peerId = Domain.Identities.PublicIdentityId.New();
         var now = DateTimeOffset.UtcNow;
 
         var payload = new ChannelPayload(

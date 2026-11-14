@@ -11,7 +11,6 @@ using Grpc.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Ports;
-using Percolator.Application2.Ports;
 using Percolator.Apps.Chat.Features.GroupInvitations;
 using Percolator.Apps.Chat.Features.Messaging;
 using Percolator.Domain.Channels.Model;
@@ -36,6 +35,7 @@ using Percolator.Simulator.Features.RelayedChat;
 using Percolator.Simulator.Features.RichChatAndProfiles;
 using Percolator.Simulator.Features.Shell;
 using Percolator.Simulator.Features.Topology;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Simulator.Features.GroupMessaging;
 

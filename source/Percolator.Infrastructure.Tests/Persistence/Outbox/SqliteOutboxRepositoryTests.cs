@@ -1,3 +1,5 @@
+using Percolator.Application.Delivery;
+
 namespace Percolator.Infrastructure.Tests.Persistence.Outbox;
 
 using System;
@@ -5,7 +7,6 @@ using System.Text;
 using System.Threading.Tasks;
 using FluentAssertions;
 using NUnit.Framework;
-using Percolator.Application2.Delivery;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
@@ -39,7 +40,7 @@ public class SqliteOutboxRepositoryTests
         // Arrange
         var jobId = Guid.NewGuid();
         var channelId = ChannelId.New();
-        var ownerId = PublicIdentityId.New();
+        var ownerId = Domain.Identities.PublicIdentityId.New();
         var route = new DeliveryRoute(DeliveryRouteType.DirectP2P, new Uri("http://localhost:5000"), null);
         byte[] payload = Encoding.UTF8.GetBytes("EncryptedPayloadBlob");
 
@@ -90,7 +91,7 @@ public class SqliteOutboxRepositoryTests
     public async Task GetDuePendingJobsAsync_ReturnsOnlyDuePendingJobs_OrderedByNextAttempt()
     {
         // Arrange
-        var ownerId = PublicIdentityId.New();
+        var ownerId = Domain.Identities.PublicIdentityId.New();
         var channelId = ChannelId.New();
         var route = new DeliveryRoute(DeliveryRouteType.DirectP2P, null, null);
         var now = DateTimeOffset.UtcNow;
@@ -141,7 +142,7 @@ public class SqliteOutboxRepositoryTests
         // Arrange
         var jobId = Guid.NewGuid();
         var channelId = ChannelId.New();
-        var ownerId = PublicIdentityId.New();
+        var ownerId = Domain.Identities.PublicIdentityId.New();
         var route = new DeliveryRoute(DeliveryRouteType.DirectP2P, null, null);
         byte[] payload = Encoding.UTF8.GetBytes("SensibleSecretPayloadData");
 

@@ -1,3 +1,6 @@
+using Percolator.Application.Ingress;
+using Percolator.Application.Ports;
+
 namespace Percolator.Infrastructure.Persistence.Repositories;
 
 using System;
@@ -5,8 +8,6 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
-using Percolator.Application2.Ingress;
-using Percolator.Application2.Ports;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.Infrastructure.Persistence.Entities;
@@ -20,7 +21,7 @@ public sealed class SqlitePendingHandshakeRepository : IPendingHandshakeReposito
         _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
     }
 
-    public async Task SavePendingHandshakeAsync(PublicIdentityId recipientId, PublicIdentityId senderId, InboundHandshakeEnvelope envelope, CancellationToken ct = default)
+    public async Task SavePendingHandshakeAsync(Domain.Identities.PublicIdentityId recipientId, Domain.Identities.PublicIdentityId senderId, InboundHandshakeEnvelope envelope, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(envelope);
 
@@ -51,7 +52,7 @@ public sealed class SqlitePendingHandshakeRepository : IPendingHandshakeReposito
         await _dbContext.SaveChangesAsync(ct);
     }
 
-    public async Task<InboundHandshakeEnvelope?> GetPendingHandshakeAsync(PublicIdentityId recipientId, PublicIdentityId senderId, CancellationToken ct = default)
+    public async Task<InboundHandshakeEnvelope?> GetPendingHandshakeAsync(Domain.Identities.PublicIdentityId recipientId, Domain.Identities.PublicIdentityId senderId, CancellationToken ct = default)
     {
         var recipientGuid = recipientId.Value;
         var senderGuid = senderId.Value;
@@ -68,7 +69,7 @@ public sealed class SqlitePendingHandshakeRepository : IPendingHandshakeReposito
         return DeserializeEnvelope(recipientId, senderId, entity.EnvelopePayload);
     }
 
-    public async Task DeletePendingHandshakeAsync(PublicIdentityId recipientId, PublicIdentityId senderId, CancellationToken ct = default)
+    public async Task DeletePendingHandshakeAsync(Domain.Identities.PublicIdentityId recipientId, Domain.Identities.PublicIdentityId senderId, CancellationToken ct = default)
     {
         var recipientGuid = recipientId.Value;
         var senderGuid = senderId.Value;
@@ -105,7 +106,7 @@ public sealed class SqlitePendingHandshakeRepository : IPendingHandshakeReposito
         return ms.ToArray();
     }
 
-    private static InboundHandshakeEnvelope DeserializeEnvelope(PublicIdentityId recipientId, PublicIdentityId senderId, byte[] data)
+    private static InboundHandshakeEnvelope DeserializeEnvelope(Domain.Identities.PublicIdentityId recipientId, Domain.Identities.PublicIdentityId senderId, byte[] data)
     {
         using var ms = new MemoryStream(data);
         using var reader = new BinaryReader(ms);

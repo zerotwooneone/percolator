@@ -1,6 +1,7 @@
 using System.Threading;
 using System.Threading.Tasks;
 using Percolator.Domain.Identities.ValueObjects;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Simulator.Features.Topology;
 

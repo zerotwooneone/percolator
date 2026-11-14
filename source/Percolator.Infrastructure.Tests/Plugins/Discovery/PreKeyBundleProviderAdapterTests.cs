@@ -1,3 +1,5 @@
+using Percolator.PluginSdk.Profiles;
+
 namespace Percolator.Infrastructure.Tests.Plugins.Discovery;
 
 using System;
@@ -56,26 +58,26 @@ public sealed class PreKeyBundleProviderAdapterTests
             return Task.CompletedTask;
         }
 
-        public Task<PeerMailboxRoutingCapability?> GetByPeerIdAsync(PublicIdentityId peerId, CancellationToken ct = default) =>
+        public Task<PeerMailboxRoutingCapability?> GetByPeerIdAsync(Domain.Identities.PublicIdentityId peerId, CancellationToken ct = default) =>
             Task.FromResult(Capability != null && Capability.PeerId == peerId ? Capability : null);
 
-        public Task<IReadOnlyList<PeerMailboxRoutingCapability>> GetRoutesForPeerAsync(PublicIdentityId peerId, CancellationToken ct = default) =>
+        public Task<IReadOnlyList<PeerMailboxRoutingCapability>> GetRoutesForPeerAsync(Domain.Identities.PublicIdentityId peerId, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<PeerMailboxRoutingCapability>>(Capability != null && Capability.PeerId == peerId ? new[] { Capability } : Array.Empty<PeerMailboxRoutingCapability>());
 
-        public Task<PeerMailboxRoutingCapability?> GetBestRouteAsync(PublicIdentityId peerId, DateTimeOffset nowUtc, CancellationToken ct = default) =>
+        public Task<PeerMailboxRoutingCapability?> GetBestRouteAsync(Domain.Identities.PublicIdentityId peerId, DateTimeOffset nowUtc, CancellationToken ct = default) =>
             Task.FromResult(Capability != null && Capability.PeerId == peerId ? Capability : null);
 
-        public Task RecordBackpressureAsync(PublicIdentityId peerId, RelayEndpoint relayEndpoint, TimeSpan retryAfter, DateTimeOffset nowUtc, CancellationToken ct = default) =>
+        public Task RecordBackpressureAsync(Domain.Identities.PublicIdentityId peerId, RelayEndpoint relayEndpoint, TimeSpan retryAfter, DateTimeOffset nowUtc, CancellationToken ct = default) =>
             Task.CompletedTask;
 
-        public Task RecordSuccessAsync(PublicIdentityId peerId, RelayEndpoint relayEndpoint, DateTimeOffset nowUtc, CancellationToken ct = default) =>
+        public Task RecordSuccessAsync(Domain.Identities.PublicIdentityId peerId, RelayEndpoint relayEndpoint, DateTimeOffset nowUtc, CancellationToken ct = default) =>
             Task.CompletedTask;
     }
 
     [Test]
     public async Task FetchConsumableBundleAsync_FromLocalRepository_ConsumesAndSavesBundle()
     {
-        var peerId = PublicIdentityId.New();
+        var peerId = Domain.Identities.PublicIdentityId.New();
         var routingToken = BlindedRoutingToken.New();
         var idKey = IdentityKey.FromSpan(RandomNumberGenerator.GetBytes(32));
         var signedPreKey = DhPublicKey.FromSpan(RandomNumberGenerator.GetBytes(32));
@@ -114,7 +116,7 @@ public sealed class PreKeyBundleProviderAdapterTests
     [Test]
     public async Task FetchConsumableBundleAsync_WhenPeerNotFound_ReturnsFailure()
     {
-        var peerId = PublicIdentityId.New();
+        var peerId = Domain.Identities.PublicIdentityId.New();
         var repo = new InMemoryPreKeyRepo();
         var adapter = new PreKeyBundleProviderAdapter(preKeyRepository: repo);
 
@@ -127,7 +129,7 @@ public sealed class PreKeyBundleProviderAdapterTests
     [Test]
     public async Task FetchConsumableBundleAsync_WhenRemoteWithoutRoutingTokens_ReturnsNotFound()
     {
-        var peerId = PublicIdentityId.New();
+        var peerId = Domain.Identities.PublicIdentityId.New();
         var routingRepo = new InMemoryRoutingRepo(); // empty
         var adapter = new PreKeyBundleProviderAdapter(
             routingRepository: routingRepo);

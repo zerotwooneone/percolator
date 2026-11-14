@@ -3,6 +3,7 @@ using Percolator.Domain.Identities.Events;
 using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Tests.TestDoubles;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Domain.Tests.Identities;
 

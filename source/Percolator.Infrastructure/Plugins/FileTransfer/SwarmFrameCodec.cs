@@ -92,7 +92,7 @@ public static class SwarmFrameCodec
         var authToken = StreamAuthToken.FromSpan(payload.Slice(0, 32));
         var sessionId = TransferSessionId.FromBytes(payload.Slice(32, 16));
         var streamIndex = StreamIndex.FromInt(BinaryPrimitives.ReadInt32BigEndian(payload.Slice(48, 4)));
-        var senderPeerId = PublicIdentityId.FromBytes(payload.Slice(52, 16));
+        var senderPeerId = Domain.Identities.PublicIdentityId.FromBytes(payload.Slice(52, 16));
 
         return new HandshakeFrame(authToken, sessionId, streamIndex, senderPeerId);
     }

@@ -1,12 +1,13 @@
-using Percolator.Application2.Delivery;
-using Percolator.Application2.Delivery.Ports;
-using Percolator.Application2.Ports;
+using Percolator.Application.Delivery;
+using Percolator.Application.Delivery.Ports;
+using Percolator.Application.Ports;
 using Percolator.Apps.Chat.Features.GroupInvitations;
 using Percolator.Apps.Chat.Features.Messaging;
 using Percolator.Apps.Chat.Features.Reactions;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.ValueObjects;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Application2IntegrationTests.Adapters.Queries;
 

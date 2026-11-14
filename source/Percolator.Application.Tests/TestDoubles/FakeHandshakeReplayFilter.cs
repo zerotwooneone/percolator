@@ -1,8 +1,7 @@
-using Percolator.Application2.Ports;
+using Percolator.Application.Ports;
 using Percolator.Domain.Identities.ValueObjects;
-using Percolator.Domain.Security.ValueObjects;
 
-namespace Percolator.Application2.Tests.TestDoubles;
+namespace Percolator.Application.Tests.TestDoubles;
 
 public sealed class FakeHandshakeReplayFilter : IHandshakeReplayFilter
 {

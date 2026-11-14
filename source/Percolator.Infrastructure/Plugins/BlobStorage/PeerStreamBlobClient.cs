@@ -1,10 +1,11 @@
+using Percolator.Application.Ports;
+
 namespace Percolator.Infrastructure.Plugins.BlobStorage;
 
 using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using Percolator.Application2.Ports;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.PluginSdk;
@@ -20,7 +21,7 @@ public sealed class PeerStreamBlobClient : IPeerStreamBlobClient
     }
 
     public async ValueTask<DomainResult<Stream>> RequestBlobFromPeerAsync(
-        PublicIdentityId peerId,
+        Domain.Identities.PublicIdentityId peerId,
         BlobId blobId,
         IProgress<TransferProgress>? progress = null,
         CancellationToken ct = default)

@@ -1,7 +1,9 @@
 using FluentAssertions;
 using NUnit.Framework;
 using Percolator.Apps.Discovery.Features.PrivateRendezvous;
+using Percolator.Apps.Discovery.Tests.TestDoubles;
 using Percolator.Domain.Identities.ValueObjects;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Apps.Discovery.Tests.PrivateRendezvous;
 

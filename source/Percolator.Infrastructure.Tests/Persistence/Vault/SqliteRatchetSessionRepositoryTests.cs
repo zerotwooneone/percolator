@@ -34,8 +34,8 @@ public class SqliteRatchetSessionRepositoryTests
     public async Task SaveAndLoad_PreservesKeysAndState()
     {
         // Arrange
-        var ownerId = PublicIdentityId.New();
-        var remoteId = PublicIdentityId.New();
+        var ownerId = Domain.Identities.PublicIdentityId.New();
+        var remoteId = Domain.Identities.PublicIdentityId.New();
         var ownerDevice = DeviceId.Primary;
         var remoteDevice = new DeviceId(2);
 
@@ -90,8 +90,8 @@ public class SqliteRatchetSessionRepositoryTests
     public async Task SaveSessionAsync_SupersededSession_ReplacesPreviousSessionOnSameRouteWithoutUniqueConstraintViolation()
     {
         // Arrange
-        var ownerId = PublicIdentityId.New();
-        var remoteId = PublicIdentityId.New();
+        var ownerId = Domain.Identities.PublicIdentityId.New();
+        var remoteId = Domain.Identities.PublicIdentityId.New();
         var ownerDevice = DeviceId.Primary;
         var remoteDevice = new DeviceId(2);
 

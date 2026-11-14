@@ -6,7 +6,6 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
-    <RootNamespace>Percolator.Application2.Tests</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>

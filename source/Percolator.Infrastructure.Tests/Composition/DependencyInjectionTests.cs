@@ -1,3 +1,6 @@
+using Percolator.Application.Delivery.Ports;
+using Percolator.PluginSdk.Profiles;
+
 namespace Percolator.Infrastructure.Tests.Composition;
 
 using System;
@@ -12,8 +15,6 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using NUnit.Framework;
 using Percolator.Application.Ports;
-using Percolator.Application2.Delivery.Ports;
-using Percolator.Application2.Ports;
 using Percolator.Apps.Chat.Features.GroupInvitations;
 using Percolator.Apps.Chat.Features.Messaging;
 using Percolator.Apps.Chat.Ingress;

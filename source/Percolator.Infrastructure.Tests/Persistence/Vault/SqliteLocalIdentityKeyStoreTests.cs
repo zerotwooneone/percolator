@@ -32,7 +32,7 @@ public class SqliteLocalIdentityKeyStoreTests
     public async Task StoreAndRetrieveIdentity_MatchesKey()
     {
         // Arrange
-        var identityId = PublicIdentityId.New();
+        var identityId = Domain.Identities.PublicIdentityId.New();
         byte[] pubBytes = new byte[32];
         Array.Fill(pubBytes, (byte)0x11);
         byte[] privBytes = new byte[32];
@@ -62,7 +62,7 @@ public class SqliteLocalIdentityKeyStoreTests
     [Test]
     public async Task RotateProfileKeyAsync_ReplacesStoredProfileKey()
     {
-        var identityId = PublicIdentityId.New();
+        var identityId = Domain.Identities.PublicIdentityId.New();
         using var privKey = EphemeralPrivateKey.FromSpan(new byte[32]);
         using var profileKey = ProfileKey.Generate();
         await _store.SaveIdentityKeysAsync(identityId, privKey, IdentityKey.FromSpan(new byte[32]), profileKey);

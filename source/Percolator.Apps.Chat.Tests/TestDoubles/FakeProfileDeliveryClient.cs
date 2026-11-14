@@ -2,6 +2,7 @@ using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.PluginSdk;
+using Percolator.PluginSdk.Profiles;
 
 namespace Percolator.Apps.Chat.Tests.TestDoubles;
 

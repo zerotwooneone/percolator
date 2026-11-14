@@ -1,16 +1,15 @@
-using Percolator.Application2.Delivery;
-using Percolator.Application2.Egress;
-using Percolator.Application2.Ports;
-using Percolator.Application2.Tests.TestDoubles;
+using Percolator.Application.Delivery;
+using Percolator.Application.Egress;
+using Percolator.Application.Tests.TestDoubles;
 using Percolator.Domain.Channels.ValueObjects;
-using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Model;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.PluginSdk;
 using PluginRoute = Percolator.PluginSdk.DeliveryRoute;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
-namespace Percolator.Application2.Tests.Delivery;
+namespace Percolator.Application.Tests.Delivery;
 
 [TestFixture]
 public sealed class EgressPipelineTests

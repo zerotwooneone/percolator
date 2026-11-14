@@ -1,16 +1,14 @@
-using FluentAssertions;
-using NUnit.Framework;
-using Percolator.Application2.Ports;
-using Percolator.Application2.Services;
-using Percolator.Application2.Tests.TestDoubles;
+using Percolator.Application.Ports;
+using Percolator.Application.Services;
+using Percolator.Application.Tests.TestDoubles;
 using Percolator.Domain.Channels.Model;
 using Percolator.Domain.Channels.Ports;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
-using Percolator.Domain.Identities.ValueObjects;
 using Percolator.PluginSdk;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
-namespace Percolator.Application2.Tests.Services;
+namespace Percolator.Application.Tests.Services;
 
 [TestFixture]
 public sealed class BlobStorageServiceTests

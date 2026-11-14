@@ -9,6 +9,7 @@ using NUnit.Framework;
 using Percolator.Desktop.Common.Services;
 using Percolator.Domain.Identities.ValueObjects;
 using R3;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Desktop.Tests.StealthMode;
 

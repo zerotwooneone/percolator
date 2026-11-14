@@ -1,7 +1,7 @@
-using Percolator.Application2.Services;
+using Percolator.Application.Services;
 using Percolator.Domain.Channels.ValueObjects;
 
-namespace Percolator.Application2.Tests.Services;
+namespace Percolator.Application.Tests.Services;
 
 [TestFixture]
 public sealed class KeyedSemaphoreLockServiceTests

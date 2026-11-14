@@ -20,7 +20,7 @@ public sealed class SqlConversationListQueryService : IConversationListQueryServ
     }
 
     public async Task<IReadOnlyList<ConversationSummaryReadModel>> GetConversationsAsync(
-        PublicIdentityId currentUserId,
+        Domain.Identities.PublicIdentityId currentUserId,
         ulong currentTimestampMs,
         CancellationToken ct = default)
     {
@@ -112,8 +112,8 @@ public sealed class SqlConversationListQueryService : IConversationListQueryServ
                             m.AuthorId != currentUserBytes)
                 .CountAsync(ct);
 
-            PublicIdentityId? lastAuthorId = latest.AuthorId.Length == 16
-                ? PublicIdentityId.FromBytes(latest.AuthorId)
+            Domain.Identities.PublicIdentityId? lastAuthorId = latest.AuthorId.Length == 16
+                ? Domain.Identities.PublicIdentityId.FromBytes(latest.AuthorId)
                 : null;
 
             summaries.Add(new ConversationSummaryReadModel(

@@ -40,8 +40,8 @@ public sealed class SqliteRelayPeerDirectoryTests
             policy: RelayDiscoveryPolicy.Open,
             preKeyAvailabilityPort: preKeyPort);
 
-        var peer1 = PublicIdentityId.New();
-        var peer2 = PublicIdentityId.New();
+        var peer1 = Domain.Identities.PublicIdentityId.New();
+        var peer2 = Domain.Identities.PublicIdentityId.New();
         var routingToken1 = BlindedRoutingToken.New();
         var routingToken2 = BlindedRoutingToken.New();
         var now = DateTimeOffset.UtcNow;

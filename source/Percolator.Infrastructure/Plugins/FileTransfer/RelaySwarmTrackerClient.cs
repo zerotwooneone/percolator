@@ -25,7 +25,7 @@ public sealed class RelaySwarmTrackerClient : IDistributedTrackerPort
 
     public async ValueTask<IReadOnlyList<DirectEndpointCandidate>> AnnounceAsync(
         SwarmRendezvousId rendezvousId,
-        PublicIdentityId memberId,
+        Domain.Identities.PublicIdentityId memberId,
         IReadOnlyList<DirectEndpointCandidate> candidates,
         SwarmPeerRole role,
         CancellationToken ct = default)
@@ -109,7 +109,7 @@ public sealed class RelaySwarmTrackerClient : IDistributedTrackerPort
 
     public async ValueTask UnregisterAsync(
         SwarmRendezvousId rendezvousId,
-        PublicIdentityId memberId,
+        Domain.Identities.PublicIdentityId memberId,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(rendezvousId);

@@ -1,10 +1,11 @@
+using Percolator.Application.Ports;
+
 namespace Percolator.Infrastructure.Persistence.Repositories;
 
 using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
-using Percolator.Application2.Ports;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.Infrastructure.Persistence.Entities;
@@ -18,7 +19,7 @@ public sealed class SqliteLocalIdentityKeyStore : ILocalIdentityKeyStore
         _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
     }
 
-    public async Task<EphemeralPrivateKey?> GetIdentityPrivateKeyAsync(PublicIdentityId identityId, CancellationToken ct = default)
+    public async Task<EphemeralPrivateKey?> GetIdentityPrivateKeyAsync(Domain.Identities.PublicIdentityId identityId, CancellationToken ct = default)
     {
         var idGuid = identityId.Value;
         var entity = await _dbContext.VaultIdentityKeys
@@ -33,7 +34,7 @@ public sealed class SqliteLocalIdentityKeyStore : ILocalIdentityKeyStore
         return EphemeralPrivateKey.FromSpan(entity.PrivateKey);
     }
 
-    public async Task<IdentityKey?> GetIdentityPublicKeyAsync(PublicIdentityId identityId, CancellationToken ct = default)
+    public async Task<IdentityKey?> GetIdentityPublicKeyAsync(Domain.Identities.PublicIdentityId identityId, CancellationToken ct = default)
     {
         var idGuid = identityId.Value;
         var entity = await _dbContext.VaultIdentityKeys
@@ -48,7 +49,7 @@ public sealed class SqliteLocalIdentityKeyStore : ILocalIdentityKeyStore
         return IdentityKey.FromSpan(entity.PublicKey);
     }
 
-    public async Task<ProfileKey?> GetProfileKeyAsync(PublicIdentityId identityId, CancellationToken ct = default)
+    public async Task<ProfileKey?> GetProfileKeyAsync(Domain.Identities.PublicIdentityId identityId, CancellationToken ct = default)
     {
         var idGuid = identityId.Value;
         var entity = await _dbContext.VaultIdentityKeys
@@ -64,7 +65,7 @@ public sealed class SqliteLocalIdentityKeyStore : ILocalIdentityKeyStore
     }
 
     public async Task SaveIdentityKeysAsync(
-        PublicIdentityId identityId,
+        Domain.Identities.PublicIdentityId identityId,
         EphemeralPrivateKey privateKey,
         IdentityKey publicKey,
         ProfileKey profileKey,
@@ -104,7 +105,7 @@ public sealed class SqliteLocalIdentityKeyStore : ILocalIdentityKeyStore
         await _dbContext.SaveChangesAsync(ct);
     }
 
-    public async Task<ProfileKey> RotateProfileKeyAsync(PublicIdentityId identityId, CancellationToken ct = default)
+    public async Task<ProfileKey> RotateProfileKeyAsync(Domain.Identities.PublicIdentityId identityId, CancellationToken ct = default)
     {
         var idGuid = identityId.Value;
         var existing = await _dbContext.VaultIdentityKeys
@@ -118,7 +119,7 @@ public sealed class SqliteLocalIdentityKeyStore : ILocalIdentityKeyStore
     }
 
     /// <summary>Permanently removes the stored identity keypair (persona shred path).</summary>
-    public async Task DeleteIdentityKeysAsync(PublicIdentityId identityId, CancellationToken ct = default)
+    public async Task DeleteIdentityKeysAsync(Domain.Identities.PublicIdentityId identityId, CancellationToken ct = default)
     {
         var idGuid = identityId.Value;
         await _dbContext.VaultIdentityKeys

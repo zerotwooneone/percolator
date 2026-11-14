@@ -329,7 +329,7 @@ public sealed class SqlChatMessageRepository : IChatMessageRepository
         ReplyContextDto? replyContext = entity.ReplyParentId.HasValue && entity.ReplyAuthorId != null && entity.ReplyAuthorId.Length == 16
             ? new ReplyContextDto(
                 PayloadId.FromGuid(entity.ReplyParentId.Value),
-                PublicIdentityId.FromBytes(entity.ReplyAuthorId))
+                Domain.Identities.PublicIdentityId.FromBytes(entity.ReplyAuthorId))
             : null;
 
         var mentions = new List<MentionDto>(mentionEntities.Count);
@@ -338,7 +338,7 @@ public sealed class SqlChatMessageRepository : IChatMessageRepository
             if (m.IdentityId.Length == 16)
             {
                 mentions.Add(new MentionDto(
-                    PublicIdentityId.FromBytes(m.IdentityId),
+                    Domain.Identities.PublicIdentityId.FromBytes(m.IdentityId),
                     m.StartOffset,
                     m.Length));
             }
@@ -411,8 +411,8 @@ public sealed class SqlChatMessageRepository : IChatMessageRepository
                 outOfBand));
         }
 
-        PublicIdentityId? deletedBy = entity.DeletedBy != null && entity.DeletedBy.Length == 16
-            ? PublicIdentityId.FromBytes(entity.DeletedBy)
+        Domain.Identities.PublicIdentityId? deletedBy = entity.DeletedBy != null && entity.DeletedBy.Length == 16
+            ? Domain.Identities.PublicIdentityId.FromBytes(entity.DeletedBy)
             : null;
 
         var chatReactions = new List<ChatReaction>(reactionEntities.Count);
@@ -422,7 +422,7 @@ public sealed class SqlChatMessageRepository : IChatMessageRepository
             if (emojiResult.IsSuccess && r.ReactorId.Length == 16)
             {
                 chatReactions.Add(new ChatReaction(
-                    PublicIdentityId.FromBytes(r.ReactorId),
+                    Domain.Identities.PublicIdentityId.FromBytes(r.ReactorId),
                     emojiResult.Value,
                     r.TimestampUnixMs));
             }
@@ -431,7 +431,7 @@ public sealed class SqlChatMessageRepository : IChatMessageRepository
         return new ChatMessage(
             PayloadId.FromGuid(entity.Id),
             ChannelId.FromGuid(entity.ChannelId),
-            PublicIdentityId.FromBytes(entity.AuthorId),
+            Domain.Identities.PublicIdentityId.FromBytes(entity.AuthorId),
             entity.TimestampUnixMs,
             entity.Content,
             mentions,

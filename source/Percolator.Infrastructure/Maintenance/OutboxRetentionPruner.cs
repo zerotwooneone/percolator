@@ -1,3 +1,7 @@
+using Percolator.Application.Delivery;
+using Percolator.Application.Delivery.Events;
+using Percolator.Application.Ports;
+
 namespace Percolator.Infrastructure.Maintenance;
 
 using System;
@@ -6,9 +10,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
-using Percolator.Application2.Delivery;
-using Percolator.Application2.Delivery.Events;
-using Percolator.Application2.Ports;
 using Percolator.Infrastructure.Persistence;
 
 public sealed class OutboxRetentionPruner : BackgroundService

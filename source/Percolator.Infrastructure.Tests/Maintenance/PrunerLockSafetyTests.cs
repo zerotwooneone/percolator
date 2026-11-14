@@ -1,3 +1,5 @@
+using Percolator.Application.Delivery;
+
 namespace Percolator.Infrastructure.Tests.Maintenance;
 
 using System;
@@ -10,7 +12,6 @@ using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using NUnit.Framework;
-using Percolator.Application2.Delivery;
 using Percolator.Infrastructure.Maintenance;
 using Percolator.Infrastructure.Persistence;
 using Percolator.Infrastructure.Persistence.Entities;

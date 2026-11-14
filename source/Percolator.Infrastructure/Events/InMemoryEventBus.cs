@@ -6,7 +6,7 @@ using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
-using Percolator.Application2.Ports;
+using Percolator.Application.Ports;
 
 namespace Percolator.Infrastructure.Events;
 

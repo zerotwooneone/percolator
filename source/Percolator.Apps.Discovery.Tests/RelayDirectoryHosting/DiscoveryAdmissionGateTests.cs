@@ -2,6 +2,7 @@ using FluentAssertions;
 using NUnit.Framework;
 using Percolator.Apps.Discovery.Features.RelayDirectoryHosting;
 using Percolator.Domain.Identities.ValueObjects;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Apps.Discovery.Tests.RelayDirectoryHosting;
 

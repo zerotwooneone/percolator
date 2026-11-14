@@ -1,7 +1,7 @@
-using Percolator.Application2.Handshake;
+using Percolator.Application.Handshake;
 using Percolator.Domain.Identities.ValueObjects;
 
-namespace Percolator.Application2.Tests.Handshake;
+namespace Percolator.Application.Tests.Handshake;
 
 [TestFixture]
 public sealed class MemoryHandshakeReplayFilterTests

@@ -9,6 +9,7 @@ using Percolator.Desktop.Common.Validation;
 using Percolator.Desktop.Features.Startup.Models;
 using Percolator.Desktop.ViewModels;
 using Percolator.Domain.Identities.ValueObjects;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Desktop.Features.Startup.ViewModels;
 

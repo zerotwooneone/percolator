@@ -1,7 +1,7 @@
 using System.Buffers.Binary;
 using System.Security.Cryptography;
-using Percolator.Application2.Ports;
-using Percolator.Application2.Routing;
+using Percolator.Application.Ports;
+using Percolator.Application.Routing;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
@@ -9,8 +9,9 @@ using Percolator.Domain.Security.Model;
 using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.PluginSdk;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
-namespace Percolator.Application2.Services;
+namespace Percolator.Application.Services;
 
 public sealed class GroupKeyDistributionService : IGroupKeyDistributionService
 {

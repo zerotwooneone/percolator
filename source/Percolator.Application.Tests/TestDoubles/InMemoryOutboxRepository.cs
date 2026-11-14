@@ -1,8 +1,8 @@
-using Percolator.Application2.Delivery;
-using Percolator.Application2.Delivery.Ports;
-using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Application.Delivery;
+using Percolator.Application.Delivery.Ports;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
-namespace Percolator.Application2.Tests.TestDoubles;
+namespace Percolator.Application.Tests.TestDoubles;
 
 public sealed class InMemoryOutboxRepository : IOutboxRepository
 {

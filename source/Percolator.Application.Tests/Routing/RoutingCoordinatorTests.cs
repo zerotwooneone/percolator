@@ -1,14 +1,10 @@
-using FluentAssertions;
-using NUnit.Framework;
-using Percolator.Application2.Ports;
-using Percolator.Application2.Routing;
-using Percolator.Application2.Tests.TestDoubles;
-using Percolator.Domain.Common;
+using Percolator.Application.Routing;
+using Percolator.Application.Tests.TestDoubles;
 using Percolator.Domain.Delivery.ValueObjects;
-using Percolator.Domain.Identities.ValueObjects;
-using Percolator.PluginSdk;
+using Percolator.PluginSdk.Profiles;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
-namespace Percolator.Application2.Tests.Routing;
+namespace Percolator.Application.Tests.Routing;
 
 public sealed class TestPeerMailboxRoutingRepository : IPeerMailboxRoutingRepository
 {

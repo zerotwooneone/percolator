@@ -36,7 +36,7 @@ public sealed class AnonymousGroupRelayEndpointTests
             return Task.FromResult(ledger);
         }
 
-        public Task<IReadOnlyList<RelayGroupLedger>> GetAllForRelayAsync(PublicIdentityId relayIdentityId, CancellationToken cancellationToken = default)
+        public Task<IReadOnlyList<RelayGroupLedger>> GetAllForRelayAsync(Domain.Identities.PublicIdentityId relayIdentityId, CancellationToken cancellationToken = default)
         {
             IReadOnlyList<RelayGroupLedger> list = _ledgers.Values.Where(l => l.RelayIdentityId == relayIdentityId).ToList();
             return Task.FromResult(list);
@@ -82,10 +82,10 @@ public sealed class AnonymousGroupRelayEndpointTests
         var zkEngine = new TestZkProofEngine();
         var timeProvider = new FixedTimeProvider();
         var mailboxStore = new FakeRelayMailboxCapabilityStore();
-        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, PublicIdentityId.New());
+        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, Domain.Identities.PublicIdentityId.New());
 
         var channelId = ChannelId.New();
-        var relayId = PublicIdentityId.New();
+        var relayId = Domain.Identities.PublicIdentityId.New();
         var genesisBlob = EncryptedEntriesBlob.FromSpan(new byte[] { 1, 2, 3 });
         var publicParams = ZkGroupPublicParams.FromSpan(new byte[32]);
         var token1 = BlindedRoutingToken.New();
@@ -155,10 +155,10 @@ public sealed class AnonymousGroupRelayEndpointTests
         var zkEngine = new TestZkProofEngine();
         var timeProvider = new FixedTimeProvider();
         var mailboxStore = new FakeRelayMailboxCapabilityStore();
-        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, PublicIdentityId.New());
+        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, Domain.Identities.PublicIdentityId.New());
 
         var channelId = ChannelId.New();
-        var relayId = PublicIdentityId.New();
+        var relayId = Domain.Identities.PublicIdentityId.New();
         var genesisBlob = EncryptedEntriesBlob.FromSpan(new byte[] { 1, 2, 3 });
         var publicParams = ZkGroupPublicParams.FromSpan(new byte[32]);
         var token1 = BlindedRoutingToken.New();
@@ -194,10 +194,10 @@ public sealed class AnonymousGroupRelayEndpointTests
         var zkEngine = new TestZkProofEngine { ReturnValid = false };
         var timeProvider = new FixedTimeProvider();
         var mailboxStore = new FakeRelayMailboxCapabilityStore();
-        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, PublicIdentityId.New());
+        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, Domain.Identities.PublicIdentityId.New());
 
         var channelId = ChannelId.New();
-        var relayId = PublicIdentityId.New();
+        var relayId = Domain.Identities.PublicIdentityId.New();
         var genesisBlob = EncryptedEntriesBlob.FromSpan(new byte[] { 1, 2, 3 });
         var publicParams = ZkGroupPublicParams.FromSpan(new byte[32]);
 
@@ -226,10 +226,10 @@ public sealed class AnonymousGroupRelayEndpointTests
         var zkEngine = new TestZkProofEngine();
         var timeProvider = new FixedTimeProvider();
         var mailboxStore = new FakeRelayMailboxCapabilityStore();
-        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, PublicIdentityId.New());
+        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, Domain.Identities.PublicIdentityId.New());
 
         var channelId = ChannelId.New();
-        var relayId = PublicIdentityId.New();
+        var relayId = Domain.Identities.PublicIdentityId.New();
         var genesisBlob = EncryptedEntriesBlob.FromSpan(new byte[] { 1, 2, 3 });
         var publicParams = ZkGroupPublicParams.FromSpan(new byte[32]);
 
@@ -279,10 +279,10 @@ public sealed class AnonymousGroupRelayEndpointTests
         var zkEngine = new TestZkProofEngine();
         var timeProvider = new FixedTimeProvider();
         var mailboxStore = new FakeRelayMailboxCapabilityStore();
-        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, PublicIdentityId.New());
+        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, Domain.Identities.PublicIdentityId.New());
 
         var channelId = ChannelId.New();
-        var relayId = PublicIdentityId.New();
+        var relayId = Domain.Identities.PublicIdentityId.New();
         var genesisBlob = EncryptedEntriesBlob.FromSpan(new byte[] { 1, 2, 3 });
         var publicParams = ZkGroupPublicParams.FromSpan(new byte[32]);
         var tokenOnline = BlindedRoutingToken.New();
@@ -348,7 +348,7 @@ public sealed class AnonymousGroupRelayEndpointTests
         var zkEngine = new TestZkProofEngine();
         var timeProvider = new FixedTimeProvider();
         var mailboxStore = new FakeRelayMailboxCapabilityStore();
-        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, PublicIdentityId.New());
+        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, Domain.Identities.PublicIdentityId.New());
 
         var channelId = ChannelId.New();
         var token1 = BlindedRoutingToken.New();
@@ -378,7 +378,7 @@ public sealed class AnonymousGroupRelayEndpointTests
         var zkEngine = new TestZkProofEngine();
         var timeProvider = new FixedTimeProvider();
         var mailboxStore = new FakeRelayMailboxCapabilityStore();
-        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, PublicIdentityId.New());
+        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, Domain.Identities.PublicIdentityId.New());
 
         var invalidIdReq = new CreateGroupRequest
         {
@@ -425,10 +425,10 @@ public sealed class AnonymousGroupRelayEndpointTests
         var zkEngine = new TestZkProofEngine();
         var timeProvider = new FixedTimeProvider();
         var mailboxStore = new FakeRelayMailboxCapabilityStore();
-        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, PublicIdentityId.New());
+        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, Domain.Identities.PublicIdentityId.New());
 
         var channelId = ChannelId.New();
-        var relayId = PublicIdentityId.New();
+        var relayId = Domain.Identities.PublicIdentityId.New();
         var genesisBlob = EncryptedEntriesBlob.FromSpan(new byte[] { 1, 2, 3 });
         var publicParams = ZkGroupPublicParams.FromSpan(new byte[32]);
         var token = BlindedRoutingToken.New();
@@ -454,10 +454,10 @@ public sealed class AnonymousGroupRelayEndpointTests
         var zkEngine = new TestZkProofEngine { ReturnValid = false };
         var timeProvider = new FixedTimeProvider();
         var mailboxStore = new FakeRelayMailboxCapabilityStore();
-        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, PublicIdentityId.New());
+        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, Domain.Identities.PublicIdentityId.New());
 
         var channelId = ChannelId.New();
-        var relayId = PublicIdentityId.New();
+        var relayId = Domain.Identities.PublicIdentityId.New();
         var genesisBlob = EncryptedEntriesBlob.FromSpan(new byte[] { 1, 2, 3 });
         var publicParams = ZkGroupPublicParams.FromSpan(new byte[32]);
 
@@ -488,10 +488,10 @@ public sealed class AnonymousGroupRelayEndpointTests
         var zkEngine = new TestZkProofEngine { ReturnValid = false };
         var timeProvider = new FixedTimeProvider();
         var mailboxStore = new FakeRelayMailboxCapabilityStore();
-        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, PublicIdentityId.New());
+        var endpoint = new AnonymousGroupRelayEndpoint(repo, zkEngine, mailboxStore, timeProvider, Domain.Identities.PublicIdentityId.New());
 
         var channelId = ChannelId.New();
-        var relayId = PublicIdentityId.New();
+        var relayId = Domain.Identities.PublicIdentityId.New();
         var genesis = RelayGroupLedger.CreateGenesis(channelId, relayId, EncryptedEntriesBlob.FromSpan(new byte[] { 1 }), new HashSet<BlindedRoutingToken> { BlindedRoutingToken.New() }, ZkGroupPublicParams.FromSpan(new byte[32]), timeProvider).Value!;
         await repo.SaveAsync(genesis);
 

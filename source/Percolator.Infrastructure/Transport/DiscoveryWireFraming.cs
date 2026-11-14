@@ -23,7 +23,7 @@ public static class DiscoveryWireFraming
     /// registers Hidden (or omits tokens) the token region is all zeroes.
     /// </summary>
     public static byte[] BuildVisibilitySignaturePayload(
-        PublicIdentityId peerId,
+        Domain.Identities.PublicIdentityId peerId,
         int visibility,
         long timestampUnixMs,
         ReadOnlySpan<byte> routingToken = default,

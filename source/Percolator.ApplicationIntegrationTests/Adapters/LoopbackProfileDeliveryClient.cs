@@ -4,6 +4,7 @@ using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.PluginSdk;
+using Percolator.PluginSdk.Profiles;
 
 namespace Percolator.Application2IntegrationTests.Adapters;
 

@@ -8,7 +8,7 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Threading;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Percolator.Application2.Ports;
+using Percolator.Application.Ports;
 using Percolator.Desktop.Features.Shell.ViewModels;
 using Percolator.Desktop.Features.Shell.Views;
 using Percolator.Desktop.Features.Startup.Models;

@@ -32,8 +32,8 @@ public class SqlitePeerContactRepositoryTests
     public async Task SaveContact_UpdatesTrustLevelAndTimestamps()
     {
         // Arrange
-        var ownerId = PublicIdentityId.New();
-        var peerId = PublicIdentityId.New();
+        var ownerId = Domain.Identities.PublicIdentityId.New();
+        var peerId = Domain.Identities.PublicIdentityId.New();
         var nickname = ContactNickname.Create("Alice", peerId);
 
         var contact = PeerContact.Rehydrate(

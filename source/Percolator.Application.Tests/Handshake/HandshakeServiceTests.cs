@@ -1,10 +1,7 @@
-using Percolator.Application2.Handshake;
-using Percolator.Application2.Ingress;
-using Percolator.Application2.Ports;
-using Percolator.Application2.Profiles;
-using Percolator.Application2.Tests.TestDoubles;
-using Percolator.Domain.Channels.ValueObjects;
-using Percolator.Domain.Common;
+using Percolator.Application.Handshake;
+using Percolator.Application.Ingress;
+using Percolator.Application.Profiles;
+using Percolator.Application.Tests.TestDoubles;
 using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Identities.ValueObjects;
@@ -12,8 +9,9 @@ using Percolator.Domain.Security;
 using Percolator.Domain.Security.Model;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.PluginSdk;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
-namespace Percolator.Application2.Tests.Handshake;
+namespace Percolator.Application.Tests.Handshake;
 
 [TestFixture]
 public sealed class HandshakeServiceTests

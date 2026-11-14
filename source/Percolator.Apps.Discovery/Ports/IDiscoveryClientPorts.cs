@@ -1,5 +1,6 @@
 using Percolator.Apps.Discovery.Features.NearbyPeerDiscovery;
 using Percolator.Domain.Identities.ValueObjects;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Apps.Discovery.Ports;
 

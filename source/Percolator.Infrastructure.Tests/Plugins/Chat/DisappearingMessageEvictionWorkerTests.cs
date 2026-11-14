@@ -1,3 +1,5 @@
+using Percolator.Application.Ports;
+
 namespace Percolator.Infrastructure.Tests.Plugins.Chat;
 
 using System;
@@ -8,7 +10,6 @@ using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using NUnit.Framework;
-using Percolator.Application2.Ports;
 using Percolator.Apps.Chat.Features.Media;
 using Percolator.Apps.Chat.Features.Messaging;
 using Percolator.Domain.Channels.ValueObjects;
@@ -74,7 +75,7 @@ public sealed class DisappearingMessageEvictionWorkerTests
         ulong expiryMs = startMs + 30_000UL; // 30 seconds
 
         var channelId = ChannelId.New();
-        var authorId = PublicIdentityId.New();
+        var authorId = Domain.Identities.PublicIdentityId.New();
         var expiredMsgId = PayloadId.New();
         var normalMsgId = PayloadId.New();
 

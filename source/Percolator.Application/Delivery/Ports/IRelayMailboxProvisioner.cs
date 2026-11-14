@@ -1,10 +1,9 @@
-using System.Threading;
-using System.Threading.Tasks;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
-namespace Percolator.Application2.Delivery.Ports;
+namespace Percolator.Application.Delivery.Ports;
 
 public sealed record MailboxTokenTriad(
     BlindedRoutingToken RoutingToken,

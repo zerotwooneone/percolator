@@ -1,7 +1,6 @@
 using Percolator.Domain.Common;
-using Percolator.PluginSdk;
 
-namespace Percolator.Application2.Ports;
+namespace Percolator.Application.Ports;
 
 public readonly record struct EncryptedBlobPackage(
     Stream CiphertextStream,

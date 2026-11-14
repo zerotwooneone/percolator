@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using Percolator.Desktop.Common.Services;
 using Percolator.Domain.Identities.ValueObjects;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Desktop.Features.Startup.Models;
 

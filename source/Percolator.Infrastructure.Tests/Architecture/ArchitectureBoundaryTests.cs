@@ -1,3 +1,5 @@
+using Percolator.Application.Delivery;
+
 namespace Percolator.Infrastructure.Tests.Architecture;
 
 using System;
@@ -6,7 +8,6 @@ using System.Linq;
 using System.Reflection;
 using FluentAssertions;
 using NUnit.Framework;
-using Percolator.Application2.Delivery;
 using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
 using Percolator.Domain.Channels.Model;
 using Percolator.Domain.Channels.ValueObjects;
@@ -81,11 +82,11 @@ public sealed class ArchitectureBoundaryTests
     [Test]
     public void IdentityProfile_Rehydrate_EnforcesStructuralInvariants()
     {
-        var validId = PublicIdentityId.New();
+        var validId = Domain.Identities.PublicIdentityId.New();
         var now = DateTimeOffset.UtcNow;
 
         // Empty ID throws
-        Action actEmptyId = () => IdentityProfile.Rehydrate(new PublicIdentityId(Guid.Empty), "Alice", IdentityRole.UserPersona, IdentityState.Active, now);
+        Action actEmptyId = () => IdentityProfile.Rehydrate(new Domain.Identities.PublicIdentityId(Guid.Empty), "Alice", IdentityRole.UserPersona, IdentityState.Active, now);
         actEmptyId.Should().Throw<ArgumentException>();
 
         // Empty display name throws
@@ -104,8 +105,8 @@ public sealed class ArchitectureBoundaryTests
     [Test]
     public void PeerContact_Rehydrate_EnforcesStructuralInvariants()
     {
-        var ownerId = PublicIdentityId.New();
-        var remoteId = PublicIdentityId.New();
+        var ownerId = Domain.Identities.PublicIdentityId.New();
+        var remoteId = Domain.Identities.PublicIdentityId.New();
         var nickname = ContactNickname.Create("Bob", remoteId);
         var now = DateTimeOffset.UtcNow;
         var identityKey = IdentityKey.FromSpan(new byte[32]);
@@ -115,7 +116,7 @@ public sealed class ArchitectureBoundaryTests
         actSelf.Should().Throw<ArgumentException>();
 
         // Empty owner ID throws
-        Action actEmptyOwner = () => PeerContact.Rehydrate(new PublicIdentityId(Guid.Empty), remoteId, nickname, PeerTrustLevel.Verified, ContactState.Active, now, null, identityKey);
+        Action actEmptyOwner = () => PeerContact.Rehydrate(new Domain.Identities.PublicIdentityId(Guid.Empty), remoteId, nickname, PeerTrustLevel.Verified, ContactState.Active, now, null, identityKey);
         actEmptyOwner.Should().Throw<ArgumentException>();
 
         // Exceeding max registered devices throws
@@ -128,8 +129,8 @@ public sealed class ArchitectureBoundaryTests
     public void DirectChannel_Rehydrate_EnforcesStructuralInvariants()
     {
         var channelId = ChannelId.New();
-        var ownerId = PublicIdentityId.New();
-        var remoteId = PublicIdentityId.New();
+        var ownerId = Domain.Identities.PublicIdentityId.New();
+        var remoteId = Domain.Identities.PublicIdentityId.New();
         var now = DateTimeOffset.UtcNow;
 
         // Self channel throws
@@ -148,7 +149,7 @@ public sealed class ArchitectureBoundaryTests
     public void GroupChannel_Rehydrate_EnforcesStructuralInvariants()
     {
         var channelId = ChannelId.New();
-        var creatorId = PublicIdentityId.New();
+        var creatorId = Domain.Identities.PublicIdentityId.New();
         var now = DateTimeOffset.UtcNow;
 
         // Empty members throws
@@ -171,7 +172,7 @@ public sealed class ArchitectureBoundaryTests
     public void OutboxJob_Rehydrate_EnforcesStructuralInvariants()
     {
         var channelId = ChannelId.New();
-        var ownerId = PublicIdentityId.New();
+        var ownerId = Domain.Identities.PublicIdentityId.New();
         var now = DateTimeOffset.UtcNow;
         var route = new DeliveryRoute(DeliveryRouteType.DirectP2P, new Uri("https://127.0.0.1:5000"), null);
 

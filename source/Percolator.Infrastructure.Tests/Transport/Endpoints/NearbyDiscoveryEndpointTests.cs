@@ -90,7 +90,7 @@ public sealed class NearbyDiscoveryEndpointTests
         var preKeyRepo = new InMemoryPreKeyRepo();
         var endpoint = new NearbyDiscoveryEndpoint(peerDir, capabilityStore, preKeyRepo, timeProvider, 20600, crypto);
 
-        var peerId = PublicIdentityId.New();
+        var peerId = Domain.Identities.PublicIdentityId.New();
         var (privKey, pubKey) = crypto.GenerateEphemeralKeyPair();
         var routingToken = BlindedRoutingToken.New();
         var deliveryTokenBytes = RandomNumberGenerator.GetBytes(32);
@@ -140,7 +140,7 @@ public sealed class NearbyDiscoveryEndpointTests
         var preKeyRepo = new InMemoryPreKeyRepo();
         var endpoint = new NearbyDiscoveryEndpoint(peerDir, capabilityStore, preKeyRepo, timeProvider, 20600, crypto);
 
-        var peerId = PublicIdentityId.New();
+        var peerId = Domain.Identities.PublicIdentityId.New();
         var (privKey, pubKey) = crypto.GenerateEphemeralKeyPair();
         var routingToken = BlindedRoutingToken.New();
         var deliveryTokenBytes = RandomNumberGenerator.GetBytes(32);
@@ -181,7 +181,7 @@ public sealed class NearbyDiscoveryEndpointTests
         var preKeyRepo = new InMemoryPreKeyRepo();
         var endpoint = new NearbyDiscoveryEndpoint(peerDir, capabilityStore, preKeyRepo, timeProvider, 20600, crypto);
 
-        var peerId = PublicIdentityId.New();
+        var peerId = Domain.Identities.PublicIdentityId.New();
         var (privKey, pubKey) = crypto.GenerateEphemeralKeyPair();
 
         var request = new DiscoveryRegistrationProto
@@ -207,7 +207,7 @@ public sealed class NearbyDiscoveryEndpointTests
         var preKeyRepo = new InMemoryPreKeyRepo();
         var endpoint = new NearbyDiscoveryEndpoint(peerDir, capabilityStore, preKeyRepo, timeProvider, 20600, crypto);
 
-        var peerId = PublicIdentityId.New();
+        var peerId = Domain.Identities.PublicIdentityId.New();
         var (privKey, pubKey) = crypto.GenerateEphemeralKeyPair();
         int visibility = (int)PeerDiscoveryVisibility.Discoverable;
         long driftedTimestamp = timeProvider.UtcNow.AddMinutes(-10).ToUnixTimeMilliseconds();
@@ -238,7 +238,7 @@ public sealed class NearbyDiscoveryEndpointTests
         var preKeyRepo = new InMemoryPreKeyRepo();
         var endpoint = new NearbyDiscoveryEndpoint(peerDir, capabilityStore, preKeyRepo, timeProvider, 20600, crypto);
 
-        var peerId = PublicIdentityId.New();
+        var peerId = Domain.Identities.PublicIdentityId.New();
         var (_, pubKey) = crypto.GenerateEphemeralKeyPair();
         int visibility = (int)PeerDiscoveryVisibility.Discoverable;
         long timestamp = timeProvider.UtcNow.ToUnixTimeMilliseconds();
@@ -266,7 +266,7 @@ public sealed class NearbyDiscoveryEndpointTests
         var preKeyRepo = new InMemoryPreKeyRepo();
         var endpoint = new NearbyDiscoveryEndpoint(peerDir, capabilityStore, preKeyRepo, timeProvider, 20600, crypto);
 
-        var peerId = PublicIdentityId.New();
+        var peerId = Domain.Identities.PublicIdentityId.New();
         var (legitPriv, legitPub) = crypto.GenerateEphemeralKeyPair();
         var (attackerPriv, attackerPub) = crypto.GenerateEphemeralKeyPair();
 
@@ -314,8 +314,8 @@ public sealed class NearbyDiscoveryEndpointTests
         var preKeyRepo = new InMemoryPreKeyRepo();
         var endpoint = new NearbyDiscoveryEndpoint(peerDir, capabilityStore, preKeyRepo, timeProvider, 20600, crypto);
 
-        var peer1 = PublicIdentityId.New();
-        var peer2 = PublicIdentityId.New();
+        var peer1 = Domain.Identities.PublicIdentityId.New();
+        var peer2 = Domain.Identities.PublicIdentityId.New();
         var (priv1, pub1) = crypto.GenerateEphemeralKeyPair();
         var (priv2, pub2) = crypto.GenerateEphemeralKeyPair();
         var routingToken1 = BlindedRoutingToken.New();

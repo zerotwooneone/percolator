@@ -1,6 +1,6 @@
 using Percolator.Domain.Delivery.ValueObjects;
 
-namespace Percolator.Application2.Delivery;
+namespace Percolator.Application.Delivery;
 
 public enum DeliveryRouteType
 {

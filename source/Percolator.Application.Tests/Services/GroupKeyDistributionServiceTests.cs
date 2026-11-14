@@ -1,13 +1,14 @@
 using System.Buffers.Binary;
-using Percolator.Application2.Services;
-using Percolator.Application2.Tests.TestDoubles;
+using Percolator.Application.Services;
+using Percolator.Application.Tests.TestDoubles;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Model;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.PluginSdk;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
-namespace Percolator.Application2.Tests.Services;
+namespace Percolator.Application.Tests.Services;
 
 [TestFixture]
 public sealed class GroupKeyDistributionServiceTests

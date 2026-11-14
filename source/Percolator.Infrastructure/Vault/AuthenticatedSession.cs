@@ -1,7 +1,8 @@
+using Percolator.Application.Ports;
+
 namespace Percolator.Infrastructure.Vault;
 
 using Microsoft.Extensions.Hosting;
-using Percolator.Application2.Ports;
 
 public sealed class AuthenticatedSession : IAuthenticatedSession
 {

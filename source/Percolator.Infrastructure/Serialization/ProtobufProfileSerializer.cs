@@ -2,8 +2,9 @@ using Google.Protobuf;
 using Percolator.Domain.Common;
 using Percolator.Infrastructure2.Protos;
 using Percolator.PluginSdk;
+using Percolator.PluginSdk.Profiles;
 
-namespace Percolator.Infrastructure2.Serialization;
+namespace Percolator.Infrastructure.Serialization;
 
 public sealed class ProtobufProfileSerializer : IProfileMetadataSerializer
 {

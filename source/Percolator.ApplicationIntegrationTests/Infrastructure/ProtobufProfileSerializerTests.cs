@@ -1,8 +1,9 @@
 using FluentAssertions;
 using NUnit.Framework;
 using Percolator.Domain.Common;
-using Percolator.Infrastructure2.Serialization;
+using Percolator.Infrastructure.Serialization;
 using Percolator.PluginSdk;
+using Percolator.PluginSdk.Profiles;
 
 namespace Percolator.Application2IntegrationTests.Infrastructure;
 

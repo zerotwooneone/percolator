@@ -1,9 +1,8 @@
-using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Model;
-using Percolator.Domain.Security.ValueObjects;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
-namespace Percolator.Application2.Ports;
+namespace Percolator.Application.Ports;
 
 public interface IRatchetSessionRepository
 {

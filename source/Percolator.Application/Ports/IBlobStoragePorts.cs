@@ -1,9 +1,9 @@
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
-using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Domain.Identities;
 using Percolator.PluginSdk;
 
-namespace Percolator.Application2.Ports;
+namespace Percolator.Application.Ports;
 
 public interface IRelayBlobClient
 {

@@ -161,7 +161,7 @@ public sealed class TcpTransferStream : ITransferStream
 public sealed class TcpMultiStreamPool : ITransferStreamPool
 {
     private readonly TransferSessionId _sessionId;
-    private readonly PublicIdentityId _peerId;
+    private readonly Domain.Identities.PublicIdentityId _peerId;
     private readonly StreamCount _targetStreamCount;
     private readonly CallbackEndpointValidator _validator;
     private readonly RelayTransferPipeClient _pipeClient;
@@ -182,7 +182,7 @@ public sealed class TcpMultiStreamPool : ITransferStreamPool
 
     public TcpMultiStreamPool(
         TransferSessionId sessionId,
-        PublicIdentityId peerId,
+        Domain.Identities.PublicIdentityId peerId,
         StreamCount targetStreamCount,
         CallbackEndpointValidator validator,
         RelayTransferPipeClient pipeClient)
@@ -379,12 +379,12 @@ public sealed class TcpMultiStreamPoolFactory : ITransferStreamPoolFactory
         _validator = validator ?? throw new ArgumentNullException(nameof(validator));
     }
 
-    public ITransferStreamPool CreatePool(TransferSessionId sessionId, PublicIdentityId peerId, StreamCount streamCount)
+    public ITransferStreamPool CreatePool(TransferSessionId sessionId, Domain.Identities.PublicIdentityId peerId, StreamCount streamCount)
     {
         return new TcpMultiStreamPool(sessionId, peerId, streamCount, _validator, _pipeClient);
     }
 
-    public ITransferStreamPool CreatePool(TransferSessionId sessionId, PublicIdentityId peerId)
+    public ITransferStreamPool CreatePool(TransferSessionId sessionId, Domain.Identities.PublicIdentityId peerId)
     {
         return CreatePool(sessionId, peerId, StreamCount.Default);
     }

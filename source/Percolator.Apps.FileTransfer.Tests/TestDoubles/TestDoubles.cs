@@ -11,6 +11,7 @@ using Percolator.Apps.FileTransfer.Ports;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.PluginSdk;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Apps.FileTransfer.Tests.TestDoubles;
 

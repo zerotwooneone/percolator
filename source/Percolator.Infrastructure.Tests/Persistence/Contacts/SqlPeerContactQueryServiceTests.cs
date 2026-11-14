@@ -34,9 +34,9 @@ public class SqlPeerContactQueryServiceTests
     public async Task GetContacts_ProjectsSummaryList()
     {
         // Arrange
-        var ownerId = PublicIdentityId.New();
-        var peer1 = PublicIdentityId.New();
-        var peer2 = PublicIdentityId.New();
+        var ownerId = Domain.Identities.PublicIdentityId.New();
+        var peer1 = Domain.Identities.PublicIdentityId.New();
+        var peer2 = Domain.Identities.PublicIdentityId.New();
 
         var contact1 = PeerContact.Rehydrate(
             ownerId, peer1, ContactNickname.Create("Bob", peer1),

@@ -8,6 +8,7 @@ using Percolator.Domain.Delivery.Ports;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Infrastructure.Transport;
 using Percolator.Simulator.Features.Topology;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Simulator.Features.RelayedChat;
 

@@ -9,6 +9,7 @@ using Percolator.Domain.Security.Model;
 using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.Domain.IntegrationTests.TestDoubles;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Domain.IntegrationTests.Builders;
 

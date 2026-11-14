@@ -40,7 +40,7 @@ public sealed class SqliteGroupReceiverSessionRepositoryTests
     {
         // Arrange
         var channelId = ChannelId.New();
-        var authorId = PublicIdentityId.New();
+        var authorId = Domain.Identities.PublicIdentityId.New();
         var deviceId = new DeviceId(2);
 
         var chainBytes = new byte[32];
@@ -79,7 +79,7 @@ public sealed class SqliteGroupReceiverSessionRepositoryTests
     {
         // Arrange
         var channelId = ChannelId.New();
-        var authorId = PublicIdentityId.New();
+        var authorId = Domain.Identities.PublicIdentityId.New();
         var deviceId = new DeviceId(1);
 
         var chainBytes = new byte[32];

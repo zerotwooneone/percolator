@@ -1,3 +1,5 @@
+using Percolator.Application.Ports;
+
 namespace Percolator.Infrastructure.Persistence.Repositories;
 
 using System;
@@ -6,7 +8,6 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
-using Percolator.Application2.Ports;
 using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.ValueObjects;
 
@@ -19,7 +20,7 @@ public sealed class SqlPeerContactQueryService : IPeerContactQueryService
         _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
     }
 
-    public async Task<IReadOnlyList<PeerContactSummaryReadModel>> GetContactSummariesAsync(PublicIdentityId ownerId, CancellationToken ct = default)
+    public async Task<IReadOnlyList<PeerContactSummaryReadModel>> GetContactSummariesAsync(Domain.Identities.PublicIdentityId ownerId, CancellationToken ct = default)
     {
         var ownerGuid = ownerId.Value;
 
@@ -43,7 +44,7 @@ public sealed class SqlPeerContactQueryService : IPeerContactQueryService
         {
             var isOnline = c.LastSeenAtUtc.HasValue && (now - c.LastSeenAtUtc.Value).TotalMinutes < 5;
             return new PeerContactSummaryReadModel(
-                new PublicIdentityId(c.RemotePeerId),
+                new Domain.Identities.PublicIdentityId(c.RemotePeerId),
                 c.Nickname,
                 (PeerTrustLevel)c.TrustLevel,
                 (ContactState)c.State,
@@ -52,7 +53,7 @@ public sealed class SqlPeerContactQueryService : IPeerContactQueryService
         }).ToList();
     }
 
-    public async Task<PeerContactDetailReadModel?> GetContactDetailAsync(PublicIdentityId ownerId, PublicIdentityId contactId, CancellationToken ct = default)
+    public async Task<PeerContactDetailReadModel?> GetContactDetailAsync(Domain.Identities.PublicIdentityId ownerId, Domain.Identities.PublicIdentityId contactId, CancellationToken ct = default)
     {
         var ownerGuid = ownerId.Value;
         var contactGuid = contactId.Value;

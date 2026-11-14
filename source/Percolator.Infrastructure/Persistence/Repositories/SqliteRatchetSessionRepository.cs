@@ -1,3 +1,5 @@
+using Percolator.Application.Ports;
+
 namespace Percolator.Infrastructure.Persistence.Repositories;
 
 using System;
@@ -7,7 +9,6 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
-using Percolator.Application2.Ports;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Model;
@@ -24,8 +25,8 @@ public sealed class SqliteRatchetSessionRepository : IRatchetSessionRepository
     }
 
     public async Task<DirectRatchetSession?> GetSessionAsync(
-        PublicIdentityId ownerId,
-        PublicIdentityId remotePeerId,
+        Domain.Identities.PublicIdentityId ownerId,
+        Domain.Identities.PublicIdentityId remotePeerId,
         DeviceId remoteDeviceId,
         CancellationToken ct = default)
     {
@@ -56,9 +57,9 @@ public sealed class SqliteRatchetSessionRepository : IRatchetSessionRepository
         var sessionId = SessionId.Parse(entity.SessionId, null);
 
         return DirectRatchetSession.Rehydrate(
-            new PublicIdentityId(entity.OwnerIdentityId),
+            new Domain.Identities.PublicIdentityId(entity.OwnerIdentityId),
             new DeviceId(entity.OwnerDeviceId),
-            new PublicIdentityId(entity.RemotePeerId),
+            new Domain.Identities.PublicIdentityId(entity.RemotePeerId),
             new DeviceId(entity.RemoteDeviceId),
             rootKey,
             sendKey,

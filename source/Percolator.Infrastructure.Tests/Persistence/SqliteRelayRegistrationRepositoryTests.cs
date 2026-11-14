@@ -33,7 +33,7 @@ public sealed class SqliteRelayRegistrationRepositoryTests
     private static RelayRegistration NewRegistration(CertificatePin? pin = null)
     {
         return RelayRegistration.Create(
-            PublicIdentityId.New(),
+            Domain.Identities.PublicIdentityId.New(),
             RelayEndpoint.FromHostAndPort("127.0.0.1", 9000),
             pin,
             new SystemDateTimeProvider()).Value!;
@@ -69,7 +69,7 @@ public sealed class SqliteRelayRegistrationRepositoryTests
     public async Task GetByIdAsync_UnknownRelay_ReturnsNull()
     {
         var repo = new SqliteRelayRegistrationRepository(_testDb.DbContext);
-        var loaded = await repo.GetByIdAsync(PublicIdentityId.New());
+        var loaded = await repo.GetByIdAsync(Domain.Identities.PublicIdentityId.New());
         loaded.Should().BeNull();
     }
 
@@ -77,7 +77,7 @@ public sealed class SqliteRelayRegistrationRepositoryTests
     public async Task SaveAsync_LinkRotateUnlink_PersistsBindingLifecycle()
     {
         var registration = NewRegistration();
-        var ownerId = PublicIdentityId.New();
+        var ownerId = Domain.Identities.PublicIdentityId.New();
         var time = new SystemDateTimeProvider();
 
         registration.LinkIdentity(ownerId, time).IsSuccess.Should().BeTrue();
@@ -119,13 +119,13 @@ public sealed class SqliteRelayRegistrationRepositoryTests
     [Test]
     public async Task GetByOwnerIdentityAsync_ReturnsOnlyMatchingRelays()
     {
-        var ownerId = PublicIdentityId.New();
+        var ownerId = Domain.Identities.PublicIdentityId.New();
         var time = new SystemDateTimeProvider();
 
         var matching = NewRegistration();
         matching.LinkIdentity(ownerId, time);
         var unrelated = NewRegistration();
-        unrelated.LinkIdentity(PublicIdentityId.New(), time);
+        unrelated.LinkIdentity(Domain.Identities.PublicIdentityId.New(), time);
 
         var writeRepo = new SqliteRelayRegistrationRepository(_testDb.DbContext);
         await writeRepo.SaveAsync(matching);
@@ -158,7 +158,7 @@ public sealed class SqliteRelayRegistrationRepositoryTests
     public async Task DeleteAsync_RemovesRegistrationAndBindings()
     {
         var registration = NewRegistration();
-        registration.LinkIdentity(PublicIdentityId.New(), new SystemDateTimeProvider());
+        registration.LinkIdentity(Domain.Identities.PublicIdentityId.New(), new SystemDateTimeProvider());
 
         var writeRepo = new SqliteRelayRegistrationRepository(_testDb.DbContext);
         await writeRepo.SaveAsync(registration);
@@ -166,7 +166,7 @@ public sealed class SqliteRelayRegistrationRepositoryTests
 
         var readRepo = NewRepoOnNewContext();
         (await readRepo.GetByIdAsync(registration.Id)).Should().BeNull();
-        (await readRepo.GetByOwnerIdentityAsync(registration.Bindings.FirstOrDefault()?.OwnerIdentityId ?? PublicIdentityId.New()))
+        (await readRepo.GetByOwnerIdentityAsync(registration.Bindings.FirstOrDefault()?.OwnerIdentityId ?? Domain.Identities.PublicIdentityId.New()))
             .Should().BeEmpty();
     }
 }

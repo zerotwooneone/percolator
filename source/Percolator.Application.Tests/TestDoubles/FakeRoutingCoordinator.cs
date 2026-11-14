@@ -1,8 +1,8 @@
-using Percolator.Application2.Routing;
+using Percolator.Application.Routing;
 using Percolator.Domain.Common;
-using Percolator.Domain.Identities.ValueObjects;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
-namespace Percolator.Application2.Tests.TestDoubles;
+namespace Percolator.Application.Tests.TestDoubles;
 
 /// <summary>
 /// Routing coordinator stub that always resolves peers as directly reachable.

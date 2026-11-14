@@ -1,7 +1,7 @@
-namespace Percolator.Application2.Ports;
-
 using Percolator.Domain.Common;
 using Percolator.Domain.Security.ValueObjects;
+
+namespace Percolator.Application.Ports;
 
 /// <summary>
 /// Primary driving application port for encrypted database lifecycle, master key derivation,

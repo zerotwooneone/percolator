@@ -1,3 +1,7 @@
+using Percolator.Application.Delivery.Ports;
+using Percolator.Application.Ports;
+using Percolator.PluginSdk.Profiles;
+
 namespace Percolator.Infrastructure.Tests.Persistence.Core;
 
 using System;
@@ -8,8 +12,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using NUnit.Framework;
-using Percolator.Application2.Delivery.Ports;
-using Percolator.Application2.Ports;
 using Percolator.Domain.Channels.Ports;
 using Percolator.Domain.Delivery.Ports;
 using Percolator.Domain.Identities.Ports;

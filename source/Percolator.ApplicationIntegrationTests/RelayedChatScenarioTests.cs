@@ -1,7 +1,6 @@
 using FluentAssertions;
 using NUnit.Framework;
-using Percolator.Application2.Delivery.Ports;
-using Percolator.Application2.Profiles;
+using Percolator.Application.Profiles;
 using Percolator.Application2IntegrationTests.Builders;
 using Percolator.Application2IntegrationTests.Infrastructure;
 using Percolator.Apps.Chat.Features.Messaging;

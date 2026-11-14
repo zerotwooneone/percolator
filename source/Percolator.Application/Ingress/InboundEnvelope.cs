@@ -1,8 +1,9 @@
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.ValueObjects;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
-namespace Percolator.Application2.Ingress;
+namespace Percolator.Application.Ingress;
 
 public abstract record InboundEnvelope(
     ChannelId ChannelId,

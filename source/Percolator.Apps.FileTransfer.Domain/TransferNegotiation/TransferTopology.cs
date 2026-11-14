@@ -1,4 +1,4 @@
-using Percolator.Domain.Identities.ValueObjects;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
 
@@ -17,7 +17,7 @@ public abstract record TransferTopology
     {
         public PublicIdentityId RecipientId { get; }
 
-        public OneToOne(PublicIdentityId initiatorId, PublicIdentityId recipientId) 
+        public OneToOne(PublicIdentityId initiatorId, PublicIdentityId recipientId)
             : base(initiatorId)
         {
             RecipientId = recipientId;
@@ -31,7 +31,7 @@ public abstract record TransferTopology
     {
         public IReadOnlyList<PublicIdentityId> Recipients { get; }
 
-        public MultiPeer(PublicIdentityId initiatorId, IReadOnlyList<PublicIdentityId> recipients) 
+        public MultiPeer(PublicIdentityId initiatorId, IReadOnlyList<PublicIdentityId> recipients)
             : base(initiatorId)
         {
             ArgumentNullException.ThrowIfNull(recipients);
@@ -51,7 +51,7 @@ public abstract record TransferTopology
 
     public sealed record IncomingStaged : TransferTopology
     {
-        public IncomingStaged(PublicIdentityId initiatorId) 
+        public IncomingStaged(PublicIdentityId initiatorId)
             : base(initiatorId)
         {
         }

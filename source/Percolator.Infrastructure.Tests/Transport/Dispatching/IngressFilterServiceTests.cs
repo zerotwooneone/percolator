@@ -20,20 +20,20 @@ public sealed class IngressFilterServiceTests
 {
     private sealed class InMemoryContactRepository : IPeerContactRepository
     {
-        private readonly Dictionary<(PublicIdentityId, PublicIdentityId), PeerContact> _contacts = new();
+        private readonly Dictionary<(Domain.Identities.PublicIdentityId, Domain.Identities.PublicIdentityId), PeerContact> _contacts = new();
 
         public void AddContact(PeerContact contact)
         {
             _contacts[(contact.OwnerIdentityId, contact.RemotePeerId)] = contact;
         }
 
-        public Task<PeerContact?> GetByPeerIdAsync(PublicIdentityId ownerId, PublicIdentityId remotePeerId, CancellationToken cancellationToken = default)
+        public Task<PeerContact?> GetByPeerIdAsync(Domain.Identities.PublicIdentityId ownerId, Domain.Identities.PublicIdentityId remotePeerId, CancellationToken cancellationToken = default)
         {
             _contacts.TryGetValue((ownerId, remotePeerId), out var contact);
             return Task.FromResult(contact);
         }
 
-        public Task<IReadOnlyList<PeerContact>> GetAllForOwnerAsync(PublicIdentityId ownerId, CancellationToken cancellationToken = default)
+        public Task<IReadOnlyList<PeerContact>> GetAllForOwnerAsync(Domain.Identities.PublicIdentityId ownerId, CancellationToken cancellationToken = default)
         {
             IReadOnlyList<PeerContact> list = new List<PeerContact>(_contacts.Values);
             return Task.FromResult(list);
@@ -50,9 +50,9 @@ public sealed class IngressFilterServiceTests
     public async Task BlockedSender_RejectsEnvelopeBeforeCrypto()
     {
         var repo = new InMemoryContactRepository();
-        var recipientId = PublicIdentityId.New();
-        var blockedSenderId = PublicIdentityId.New();
-        var allowedSenderId = PublicIdentityId.New();
+        var recipientId = Domain.Identities.PublicIdentityId.New();
+        var blockedSenderId = Domain.Identities.PublicIdentityId.New();
+        var allowedSenderId = Domain.Identities.PublicIdentityId.New();
 
         var blockedContact = new PeerContact(
             recipientId,
@@ -82,7 +82,7 @@ public sealed class IngressFilterServiceTests
         allowedResult.IsSuccess.Should().BeTrue();
 
         // Unknown sender (not in contacts) success by default
-        var unknownSenderId = PublicIdentityId.New();
+        var unknownSenderId = Domain.Identities.PublicIdentityId.New();
         var unknownResult = await service.CheckIngressAllowedAsync(recipientId, unknownSenderId);
         unknownResult.IsSuccess.Should().BeTrue();
     }

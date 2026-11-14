@@ -1,10 +1,12 @@
+using Percolator.Infrastructure.Serialization;
+using Percolator.PluginSdk.Profiles;
+
 namespace Percolator.Infrastructure.Tests.Packaging;
 
 using System;
 using FluentAssertions;
 using NUnit.Framework;
 using Percolator.Domain.Common;
-using Percolator.Infrastructure2.Serialization;
 using Percolator.PluginSdk;
 
 [TestFixture]

@@ -1,12 +1,12 @@
-using Percolator.Application2.Delivery;
-using Percolator.Application2.Delivery.Ports;
-using Percolator.Application2.Egress;
-using Percolator.Application2.Handshake;
-using Percolator.Application2.Ingress;
-using Percolator.Application2.Ports;
-using Percolator.Application2.Profiles;
-using Percolator.Application2.Routing;
-using Percolator.Application2.Services;
+using Percolator.Application.Delivery;
+using Percolator.Application.Delivery.Ports;
+using Percolator.Application.Egress;
+using Percolator.Application.Handshake;
+using Percolator.Application.Ingress;
+using Percolator.Application.Ports;
+using Percolator.Application.Profiles;
+using Percolator.Application.Routing;
+using Percolator.Application.Services;
 using Percolator.Application2IntegrationTests.Adapters;
 using Percolator.Application2IntegrationTests.Adapters.Queries;
 using Percolator.Application2IntegrationTests.Fakes;
@@ -39,8 +39,11 @@ using Percolator.Domain.Security;
 using Percolator.Domain.Security.Model;
 using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
-using Percolator.Infrastructure2.Serialization;
+using Percolator.Infrastructure.Serialization;
 using Percolator.PluginSdk;
+using Percolator.PluginSdk.Profiles;
+using PortNumber = Percolator.Apps.FileTransfer.Features.TransferNegotiation.PortNumber;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Application2IntegrationTests.Builders;
 

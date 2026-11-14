@@ -1,9 +1,10 @@
+using Percolator.Application.Ingress;
+using Percolator.Application.Ports;
+
 namespace Percolator.Infrastructure.Serialization;
 
 using System;
 using Google.Protobuf;
-using Percolator.Application2.Ingress;
-using Percolator.Application2.Ports;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
@@ -62,8 +63,8 @@ public sealed class ProtobufSessionWirePacker : ISessionWirePacker
 
     public DomainResult<InboundDirectEnvelope> UnpackDirectRatchetMessage(
         ChannelId channelId,
-        PublicIdentityId recipientId,
-        PublicIdentityId senderId,
+        Domain.Identities.PublicIdentityId recipientId,
+        Domain.Identities.PublicIdentityId senderId,
         DeviceId senderDeviceId,
         ReadOnlyMemory<byte> wireBytes,
         DateTimeOffset receivedAtUtc)
@@ -102,8 +103,8 @@ public sealed class ProtobufSessionWirePacker : ISessionWirePacker
 
     public DomainResult<InboundGroupEnvelope> UnpackGroupMessage(
         ChannelId channelId,
-        PublicIdentityId recipientId,
-        PublicIdentityId authorId,
+        Domain.Identities.PublicIdentityId recipientId,
+        Domain.Identities.PublicIdentityId authorId,
         DeviceId authorDeviceId,
         ReadOnlyMemory<byte> wireBytes,
         DateTimeOffset receivedAtUtc)
@@ -136,8 +137,8 @@ public sealed class ProtobufSessionWirePacker : ISessionWirePacker
     }
 
     public DomainResult<InboundHandshakeEnvelope> UnpackHandshakeMessage(
-        PublicIdentityId recipientId,
-        PublicIdentityId senderId,
+        Domain.Identities.PublicIdentityId recipientId,
+        Domain.Identities.PublicIdentityId senderId,
         DeviceId senderDeviceId,
         ReadOnlyMemory<byte> wireBytes,
         DateTimeOffset receivedAtUtc)

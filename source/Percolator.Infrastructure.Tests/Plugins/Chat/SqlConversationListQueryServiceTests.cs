@@ -22,8 +22,8 @@ public sealed class SqlConversationListQueryServiceTests
         var convQueryService = new SqlConversationListQueryService(testDb.DbContext);
 
         var channelId = ChannelId.New();
-        var currentUserId = PublicIdentityId.New();
-        var peerId = PublicIdentityId.New();
+        var currentUserId = Domain.Identities.PublicIdentityId.New();
+        var peerId = Domain.Identities.PublicIdentityId.New();
 
         testDb.DbContext.ChatChannels.Add(new ChatChannelEntity
         {

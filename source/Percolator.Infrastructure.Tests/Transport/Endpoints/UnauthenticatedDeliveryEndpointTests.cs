@@ -1,3 +1,6 @@
+using Percolator.Application.Ingress;
+using Percolator.Application.Ports;
+
 namespace Percolator.Infrastructure.Tests.Transport.Endpoints;
 
 using System;
@@ -12,8 +15,6 @@ using FluentAssertions;
 using Google.Protobuf;
 using Grpc.Core;
 using NUnit.Framework;
-using Percolator.Application2.Ingress;
-using Percolator.Application2.Ports;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Hosting;
@@ -195,8 +196,8 @@ public sealed class UnauthenticatedDeliveryEndpointTests
 
         var expectedEnvelope = new InboundGroupEnvelope(
             ChannelId.New(),
-            PublicIdentityId.New(),
-            PublicIdentityId.New(),
+            Domain.Identities.PublicIdentityId.New(),
+            Domain.Identities.PublicIdentityId.New(),
             DeviceId.Primary,
             0,
             new byte[] { 1, 2, 3, 4 },
@@ -237,8 +238,8 @@ public sealed class UnauthenticatedDeliveryEndpointTests
 
         unwrapper.ReturnEnvelope = new InboundGroupEnvelope(
             ChannelId.New(),
-            PublicIdentityId.New(),
-            PublicIdentityId.New(),
+            Domain.Identities.PublicIdentityId.New(),
+            Domain.Identities.PublicIdentityId.New(),
             DeviceId.Primary,
             0,
             new byte[] { 1, 2, 3, 4 },

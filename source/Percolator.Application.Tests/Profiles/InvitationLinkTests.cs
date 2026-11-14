@@ -1,10 +1,9 @@
-using FluentAssertions;
-using NUnit.Framework;
-using Percolator.Application2.Profiles;
+using Percolator.Application.Profiles;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
-namespace Percolator.Application2.Tests.Profiles;
+namespace Percolator.Application.Tests.Profiles;
 
 [TestFixture]
 public sealed class InvitationLinkTests

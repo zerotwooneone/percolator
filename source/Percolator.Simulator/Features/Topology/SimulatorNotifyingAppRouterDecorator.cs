@@ -1,7 +1,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using Percolator.Application2.Ingress;
+using Percolator.Application.Ingress;
 using Percolator.Domain.Common;
 using Percolator.PluginSdk;
 using Percolator.Simulator.Features.Shell;

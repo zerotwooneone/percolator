@@ -8,6 +8,7 @@ using CommunityToolkit.Mvvm.Input;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Simulator.Features.Shell;
 using Percolator.Simulator.Features.Topology;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Simulator.Features.DiscoverySimulation;
 

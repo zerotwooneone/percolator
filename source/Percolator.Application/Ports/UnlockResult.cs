@@ -1,4 +1,4 @@
-namespace Percolator.Application2.Ports;
+namespace Percolator.Application.Ports;
 
 /// <summary>
 /// A polymorphic discriminated union representing the outcome of a vault unlock attempt.

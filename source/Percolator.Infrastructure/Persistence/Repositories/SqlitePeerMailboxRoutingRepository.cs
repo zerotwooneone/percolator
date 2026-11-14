@@ -1,3 +1,5 @@
+using Percolator.PluginSdk.Profiles;
+
 namespace Percolator.Infrastructure.Persistence.Repositories;
 
 using System;
@@ -21,7 +23,7 @@ public sealed class SqlitePeerMailboxRoutingRepository : IPeerMailboxRoutingRepo
         _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
     }
 
-    public async Task<PeerMailboxRoutingCapability?> GetByPeerIdAsync(PublicIdentityId peerId, CancellationToken ct = default)
+    public async Task<PeerMailboxRoutingCapability?> GetByPeerIdAsync(Domain.Identities.PublicIdentityId peerId, CancellationToken ct = default)
     {
         var peerGuid = peerId.Value;
 
@@ -35,7 +37,7 @@ public sealed class SqlitePeerMailboxRoutingRepository : IPeerMailboxRoutingRepo
         return entity != null ? MapEntityToDomain(entity) : null;
     }
 
-    public async Task<IReadOnlyList<PeerMailboxRoutingCapability>> GetRoutesForPeerAsync(PublicIdentityId peerId, CancellationToken ct = default)
+    public async Task<IReadOnlyList<PeerMailboxRoutingCapability>> GetRoutesForPeerAsync(Domain.Identities.PublicIdentityId peerId, CancellationToken ct = default)
     {
         var peerGuid = peerId.Value;
 
@@ -48,7 +50,7 @@ public sealed class SqlitePeerMailboxRoutingRepository : IPeerMailboxRoutingRepo
         return entities.Select(MapEntityToDomain).ToList();
     }
 
-    public async Task<PeerMailboxRoutingCapability?> GetBestRouteAsync(PublicIdentityId peerId, DateTimeOffset nowUtc, CancellationToken ct = default)
+    public async Task<PeerMailboxRoutingCapability?> GetBestRouteAsync(Domain.Identities.PublicIdentityId peerId, DateTimeOffset nowUtc, CancellationToken ct = default)
     {
         var peerGuid = peerId.Value;
 
@@ -126,7 +128,7 @@ public sealed class SqlitePeerMailboxRoutingRepository : IPeerMailboxRoutingRepo
     }
 
     public async Task RecordBackpressureAsync(
-        PublicIdentityId peerId,
+        Domain.Identities.PublicIdentityId peerId,
         RelayEndpoint relayEndpoint,
         TimeSpan retryAfter,
         DateTimeOffset nowUtc,
@@ -149,7 +151,7 @@ public sealed class SqlitePeerMailboxRoutingRepository : IPeerMailboxRoutingRepo
     }
 
     public async Task RecordSuccessAsync(
-        PublicIdentityId peerId,
+        Domain.Identities.PublicIdentityId peerId,
         RelayEndpoint relayEndpoint,
         DateTimeOffset nowUtc,
         CancellationToken ct = default)
@@ -173,7 +175,7 @@ public sealed class SqlitePeerMailboxRoutingRepository : IPeerMailboxRoutingRepo
 
     private static PeerMailboxRoutingCapability MapEntityToDomain(PeerMailboxRoutingEntity entity)
     {
-        var peerId = new PublicIdentityId(entity.PeerId);
+        var peerId = new Domain.Identities.PublicIdentityId(entity.PeerId);
         var routingToken = new BlindedRoutingToken(entity.RoutingToken);
         var deliveryToken = DeliveryToken.FromSpan(entity.DeliveryToken);
         var relayEndpoint = !string.IsNullOrEmpty(entity.RelayEndpoint) ? RelayEndpoint.Parse(entity.RelayEndpoint) : null;

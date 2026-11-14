@@ -20,7 +20,7 @@ public sealed class SqlitePrivatePreKeyStore : IPrivatePreKeyStore
     }
 
     public async Task<EphemeralPrivateKey?> GetSignedPreKeyPrivateAsync(
-        PublicIdentityId ownerId,
+        Domain.Identities.PublicIdentityId ownerId,
         DeviceId deviceId,
         CancellationToken cancellationToken = default)
     {
@@ -38,7 +38,7 @@ public sealed class SqlitePrivatePreKeyStore : IPrivatePreKeyStore
     }
 
     public async Task<EphemeralPrivateKey?> TryConsumeOneTimePreKeyPrivateAsync(
-        PublicIdentityId ownerId,
+        Domain.Identities.PublicIdentityId ownerId,
         DeviceId deviceId,
         uint keyId,
         CancellationToken cancellationToken = default)
@@ -64,7 +64,7 @@ public sealed class SqlitePrivatePreKeyStore : IPrivatePreKeyStore
     }
 
     public async Task<StoredSignedPreKey?> GetSignedPreKeyAsync(
-        PublicIdentityId ownerId,
+        Domain.Identities.PublicIdentityId ownerId,
         DeviceId deviceId,
         CancellationToken cancellationToken = default)
     {
@@ -85,7 +85,7 @@ public sealed class SqlitePrivatePreKeyStore : IPrivatePreKeyStore
     }
 
     public async Task StoreSignedPreKeyAsync(
-        PublicIdentityId ownerId,
+        Domain.Identities.PublicIdentityId ownerId,
         DeviceId deviceId,
         EphemeralPrivateKey privateKey,
         DhPublicKey publicKey,
@@ -128,7 +128,7 @@ public sealed class SqlitePrivatePreKeyStore : IPrivatePreKeyStore
     }
 
     public async Task StoreOneTimePreKeysAsync(
-        PublicIdentityId ownerId,
+        Domain.Identities.PublicIdentityId ownerId,
         DeviceId deviceId,
         IEnumerable<OneTimePreKeyMaterial> keys,
         CancellationToken cancellationToken = default)
@@ -172,7 +172,7 @@ public sealed class SqlitePrivatePreKeyStore : IPrivatePreKeyStore
     }
 
     public async Task<uint> GetNextOneTimePreKeyIdAsync(
-        PublicIdentityId ownerId,
+        Domain.Identities.PublicIdentityId ownerId,
         DeviceId deviceId,
         CancellationToken cancellationToken = default)
     {

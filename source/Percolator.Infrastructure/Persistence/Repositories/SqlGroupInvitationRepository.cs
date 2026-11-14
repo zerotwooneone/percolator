@@ -108,13 +108,13 @@ public sealed class SqlGroupInvitationRepository : IGroupInvitationRepository
 
     private static PendingGroupInvitation ToDomainModel(ChatGroupInvitationEntity entity)
     {
-        List<PublicIdentityId>? initialMembers = null;
+        List<Domain.Identities.PublicIdentityId>? initialMembers = null;
         if (entity.InitialMembersBytes != null && entity.InitialMembersBytes.Length >= 16)
         {
-            initialMembers = new List<PublicIdentityId>();
+            initialMembers = new List<Domain.Identities.PublicIdentityId>();
             for (int i = 0; i <= entity.InitialMembersBytes.Length - 16; i += 16)
             {
-                initialMembers.Add(PublicIdentityId.FromBytes(entity.InitialMembersBytes.AsSpan(i, 16)));
+                initialMembers.Add(Domain.Identities.PublicIdentityId.FromBytes(entity.InitialMembersBytes.AsSpan(i, 16)));
             }
         }
 
@@ -122,7 +122,7 @@ public sealed class SqlGroupInvitationRepository : IGroupInvitationRepository
             new InvitationId(entity.Id),
             ChannelId.FromGuid(entity.TargetGroupChannelId),
             entity.GroupName,
-            PublicIdentityId.FromBytes(entity.InviterId),
+            Domain.Identities.PublicIdentityId.FromBytes(entity.InviterId),
             entity.RelayEndpoint,
             entity.ExpiresAtUnixMs,
             (GroupInvitationStatus)entity.Status,

@@ -42,7 +42,7 @@ public sealed class NearbyDiscoveryEndpoint : NearbyDiscoveryService.NearbyDisco
     }
 
     public static byte[] BuildVisibilitySignaturePayload(
-        PublicIdentityId peerId,
+        Domain.Identities.PublicIdentityId peerId,
         int visibility,
         long timestampUnixMs,
         ReadOnlySpan<byte> routingToken = default,
@@ -56,12 +56,12 @@ public sealed class NearbyDiscoveryEndpoint : NearbyDiscoveryService.NearbyDisco
         int limit = request.RequestedLimit > 0 ? request.RequestedLimit : 10;
         var peers = await _peerDirectory.GetDiscoverablePeersAsync(limit, context.CancellationToken);
 
-        PublicIdentityId? requesterId = null;
+        Domain.Identities.PublicIdentityId? requesterId = null;
         if (request.RequesterId != null && (request.RequesterId.Length == 16 || request.RequesterId.Length == 32))
         {
             try
             {
-                requesterId = PublicIdentityId.FromBytes(request.RequesterId.Span);
+                requesterId = Domain.Identities.PublicIdentityId.FromBytes(request.RequesterId.Span);
             }
             catch { }
         }
@@ -107,7 +107,7 @@ public sealed class NearbyDiscoveryEndpoint : NearbyDiscoveryService.NearbyDisco
             throw new RpcException(new Status(StatusCode.InvalidArgument, "Peer ID must be 16 or 32 bytes."));
         }
 
-        var peerId = PublicIdentityId.FromBytes(request.PeerId.Span);
+        var peerId = Domain.Identities.PublicIdentityId.FromBytes(request.PeerId.Span);
 
         if (request.IdentityKey.Length != 32 || request.Signature.Length != 64)
         {

@@ -8,8 +8,9 @@ using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Tests.TestDoubles;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
-using Percolator.Infrastructure2.Serialization;
+using Percolator.Infrastructure.Serialization;
 using Percolator.PluginSdk;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Apps.FileTransfer.Tests.Features.TransferNegotiation.Tests;
 

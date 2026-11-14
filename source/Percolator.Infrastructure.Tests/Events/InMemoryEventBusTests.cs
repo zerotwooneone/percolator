@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging.Abstractions;
-using Percolator.Application2.Ports;
+using Percolator.Application.Ports;
 using Percolator.Infrastructure.Events;
 
 namespace Percolator.Infrastructure.Tests.Events;

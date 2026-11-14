@@ -1,13 +1,14 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using Percolator.Application2.Ingress;
-using Percolator.Application2.Ports;
+using Percolator.Application.Ingress;
+using Percolator.Application.Ports;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Model;
 using Percolator.PluginSdk;
 using Percolator.Simulator.Features.Shell;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Simulator.Features.Topology;
 

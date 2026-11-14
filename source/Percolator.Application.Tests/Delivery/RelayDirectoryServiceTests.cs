@@ -1,13 +1,6 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
-using FluentAssertions;
-using NUnit.Framework;
-using Percolator.Application2.Delivery;
-using Percolator.Application2.Delivery.Ports;
-using Percolator.Application2.Tests.TestDoubles;
+using Percolator.Application.Delivery;
+using Percolator.Application.Delivery.Ports;
+using Percolator.Application.Tests.TestDoubles;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Model;
 using Percolator.Domain.Delivery.Ports;
@@ -16,8 +9,9 @@ using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.ValueObjects;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
-namespace Percolator.Application2.Tests.Delivery;
+namespace Percolator.Application.Tests.Delivery;
 
 [TestFixture]
 public sealed class RelayDirectoryServiceTests

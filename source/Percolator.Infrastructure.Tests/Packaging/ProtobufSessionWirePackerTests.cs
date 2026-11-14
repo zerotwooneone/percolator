@@ -24,8 +24,8 @@ public sealed class ProtobufSessionWirePackerTests
         packed.Length.Should().BeGreaterThan(0);
 
         var channelId = new ChannelId(Guid.NewGuid());
-        var recipientId = new PublicIdentityId(Guid.NewGuid());
-        var senderId = new PublicIdentityId(Guid.NewGuid());
+        var recipientId = new Domain.Identities.PublicIdentityId(Guid.NewGuid());
+        var senderId = new Domain.Identities.PublicIdentityId(Guid.NewGuid());
         var senderDeviceId = new DeviceId(1);
         var now = DateTimeOffset.UtcNow;
 
@@ -61,8 +61,8 @@ public sealed class ProtobufSessionWirePackerTests
         var packed = _packer.PackGroupMessage(channelId, iteration, signature, ciphertext);
         packed.Length.Should().BeGreaterThan(0);
 
-        var recipientId = new PublicIdentityId(Guid.NewGuid());
-        var authorId = new PublicIdentityId(Guid.NewGuid());
+        var recipientId = new Domain.Identities.PublicIdentityId(Guid.NewGuid());
+        var authorId = new Domain.Identities.PublicIdentityId(Guid.NewGuid());
         var authorDeviceId = new DeviceId(2);
         var now = DateTimeOffset.UtcNow;
 

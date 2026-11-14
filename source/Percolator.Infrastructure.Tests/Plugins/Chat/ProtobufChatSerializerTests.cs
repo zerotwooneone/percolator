@@ -1,3 +1,5 @@
+using Percolator.Infrastructure.Serialization;
+
 namespace Percolator.Infrastructure.Tests.Plugins.Chat;
 
 using System;
@@ -8,7 +10,6 @@ using Percolator.Apps.Chat.Features.Media;
 using Percolator.Apps.Chat.Features.Messaging;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
-using Percolator.Infrastructure2.Serialization;
 using Percolator.PluginSdk;
 
 [TestFixture]
@@ -23,7 +24,7 @@ public sealed class ProtobufChatSerializerTests
         var smallMsg = new ChatMessageDto(
             PayloadId.New(),
             ChannelId.New(),
-            PublicIdentityId.New(),
+            Domain.Identities.PublicIdentityId.New(),
             1700000000000UL,
             "Hello secure world",
             Array.Empty<MentionDto>(),
@@ -54,7 +55,7 @@ public sealed class ProtobufChatSerializerTests
         var largeMsg = new ChatMessageDto(
             PayloadId.New(),
             ChannelId.New(),
-            PublicIdentityId.New(),
+            Domain.Identities.PublicIdentityId.New(),
             1700000000000UL,
             largeContent,
             Array.Empty<MentionDto>(),
@@ -81,13 +82,13 @@ public sealed class ProtobufChatSerializerTests
     public void ReplyContext_ExcludesQuoteSnippetFromWire()
     {
         var parentId = PayloadId.New();
-        var authorId = PublicIdentityId.New();
+        var authorId = Domain.Identities.PublicIdentityId.New();
         var replyContext = new ReplyContextDto(parentId, authorId);
 
         var msg = new ChatMessageDto(
             PayloadId.New(),
             ChannelId.New(),
-            PublicIdentityId.New(),
+            Domain.Identities.PublicIdentityId.New(),
             1700000000000UL,
             "Replying without quoted snippet text on wire",
             Array.Empty<MentionDto>(),
@@ -110,7 +111,7 @@ public sealed class ProtobufChatSerializerTests
     public void DeliveryReceiptDto_RoundTripsThroughProtobufSerialization()
     {
         var channelId = ChannelId.New();
-        var delivererId = PublicIdentityId.New();
+        var delivererId = Domain.Identities.PublicIdentityId.New();
         var upToPayloadId = PayloadId.New();
         ulong deliveredAtMs = 1700000000000UL;
 

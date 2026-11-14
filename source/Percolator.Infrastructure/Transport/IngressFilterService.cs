@@ -1,3 +1,5 @@
+using Percolator.Application.Ports;
+
 namespace Percolator.Infrastructure.Transport;
 
 using System;
@@ -5,7 +7,6 @@ using System.Collections.Concurrent;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Percolator.Application2.Ports;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.Ports;
@@ -23,7 +24,7 @@ public sealed class IngressFilterService : IIngressFilterService
     private readonly IPeerContactRepository _contactRepository;
     private readonly IngressFilterOptions _options;
     private readonly IDateTimeProvider _timeProvider;
-    private readonly ConcurrentDictionary<PublicIdentityId, RateLimitTracker> _rateLimiters = new();
+    private readonly ConcurrentDictionary<Domain.Identities.PublicIdentityId, RateLimitTracker> _rateLimiters = new();
     private int _lastCleanupMinute;
 
     private sealed class RateLimitTracker
@@ -44,8 +45,8 @@ public sealed class IngressFilterService : IIngressFilterService
     }
 
     public async ValueTask<DomainResult> CheckIngressAllowedAsync(
-        PublicIdentityId recipientId,
-        PublicIdentityId senderId,
+        Domain.Identities.PublicIdentityId recipientId,
+        Domain.Identities.PublicIdentityId senderId,
         CancellationToken ct = default)
     {
         // 1. Check contact trust level

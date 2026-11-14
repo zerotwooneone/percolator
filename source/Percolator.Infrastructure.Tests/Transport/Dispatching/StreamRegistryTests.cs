@@ -1,10 +1,11 @@
+using Percolator.Application.Ports;
+
 namespace Percolator.Infrastructure.Tests.Transport.Dispatching;
 
 using System;
 using System.Threading.Tasks;
 using FluentAssertions;
 using NUnit.Framework;
-using Percolator.Application2.Ports;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Infrastructure.Transport;
 
@@ -15,7 +16,7 @@ public sealed class StreamRegistryTests
     public async Task BackpressureSaturation_ReturnsBackpressured()
     {
         var registry = new StreamRegistry(new StreamRegistryOptions());
-        var targetId = PublicIdentityId.New();
+        var targetId = Domain.Identities.PublicIdentityId.New();
 
         // Register stream with small bounded capacity of 2
         var reader = registry.RegisterStream(targetId, capacity: 2);

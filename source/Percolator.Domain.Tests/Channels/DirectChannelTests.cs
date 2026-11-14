@@ -3,6 +3,7 @@ using Percolator.Domain.Channels.Model;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Tests.TestDoubles;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Domain.Tests.Channels;
 

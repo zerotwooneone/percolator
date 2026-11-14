@@ -1,14 +1,11 @@
-using FluentAssertions;
-using NUnit.Framework;
-using Percolator.Application2.Ports;
-using Percolator.Application2.Profiles;
-using Percolator.Application2.Tests.TestDoubles;
-using Percolator.Domain.Delivery.ValueObjects;
-using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Application.Profiles;
+using Percolator.Application.Tests.TestDoubles;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.PluginSdk;
+using Percolator.PluginSdk.Profiles;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
-namespace Percolator.Application2.Tests.Profiles;
+namespace Percolator.Application.Tests.Profiles;
 
 [TestFixture]
 public sealed class ProfileSecurityAndQueryTests

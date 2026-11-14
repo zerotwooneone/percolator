@@ -1,3 +1,9 @@
+using Percolator.Application.Delivery;
+using Percolator.Application.Delivery.Ports;
+using Percolator.Application.Profiles;
+using Percolator.Application.Services;
+using Percolator.PluginSdk.Profiles;
+
 namespace Percolator.Infrastructure.DependencyInjection;
 
 using System;
@@ -9,11 +15,6 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Percolator.Application.Ports;
-using Percolator.Application2.Profiles;
-using Percolator.Application2.Services;
-using Percolator.Application2.Delivery;
-using Percolator.Application2.Delivery.Ports;
-using Percolator.Application2.Ports;
 using Percolator.Apps.Chat.Features.GroupInvitations;
 using Percolator.Apps.Chat.Features.Messaging;
 using Percolator.Apps.Chat.Ingress;
@@ -37,7 +38,6 @@ using Percolator.Infrastructure.Plugins.BlobStorage;
 using Percolator.Infrastructure.Plugins.FileTransfer;
 using Percolator.Infrastructure.Security;
 using Percolator.Infrastructure.Serialization;
-using Percolator.Infrastructure2.Serialization;
 using Percolator.Infrastructure.Transport;
 using Percolator.Infrastructure.Transport.Endpoints;
 using Percolator.Infrastructure.Transport.Workers;

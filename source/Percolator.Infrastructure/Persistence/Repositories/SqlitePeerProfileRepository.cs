@@ -1,3 +1,5 @@
+using Percolator.PluginSdk.Profiles;
+
 namespace Percolator.Infrastructure.Persistence.Repositories;
 
 using System;
@@ -21,7 +23,7 @@ public sealed class SqlitePeerProfileRepository : IPeerProfileRepository
         _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
     }
 
-    public async Task<PeerProfileRecord?> GetByPeerIdAsync(PublicIdentityId peerId, CancellationToken ct = default)
+    public async Task<PeerProfileRecord?> GetByPeerIdAsync(Domain.Identities.PublicIdentityId peerId, CancellationToken ct = default)
     {
         var peerGuid = peerId.Value;
 
@@ -82,7 +84,7 @@ public sealed class SqlitePeerProfileRepository : IPeerProfileRepository
         await _dbContext.SaveChangesAsync(ct);
     }
 
-    public async Task<IReadOnlyList<PeerProfileSourceSnapshot>> GetSourceSnapshotsAsync(PublicIdentityId peerId, CancellationToken ct = default)
+    public async Task<IReadOnlyList<PeerProfileSourceSnapshot>> GetSourceSnapshotsAsync(Domain.Identities.PublicIdentityId peerId, CancellationToken ct = default)
     {
         var peerGuid = peerId.Value;
 

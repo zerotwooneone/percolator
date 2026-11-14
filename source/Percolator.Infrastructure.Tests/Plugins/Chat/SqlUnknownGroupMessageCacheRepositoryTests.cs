@@ -21,7 +21,7 @@ public sealed class SqlUnknownGroupMessageCacheRepositoryTests
         var repo = new SqlUnknownGroupMessageCacheRepository(testDb.DbContext);
 
         var channelId = ChannelId.New();
-        var authorId = PublicIdentityId.New();
+        var authorId = Domain.Identities.PublicIdentityId.New();
         byte[] payloadBytes = new byte[] { 1, 2, 3, 4 };
 
         // 1. Insert 505 envelopes exceeding the 500 cap

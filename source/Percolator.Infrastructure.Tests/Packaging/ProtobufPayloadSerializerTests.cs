@@ -1,3 +1,5 @@
+using Percolator.Infrastructure.Serialization;
+
 namespace Percolator.Infrastructure.Tests.Packaging;
 
 using System;
@@ -5,7 +7,6 @@ using FluentAssertions;
 using NUnit.Framework;
 using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
-using Percolator.Infrastructure2.Serialization;
 
 [TestFixture]
 public sealed class ProtobufPayloadSerializerTests

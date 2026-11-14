@@ -9,7 +9,7 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using NUnit.Framework;
-using Percolator.Application2.Ports;
+using Percolator.Application.Ports;
 using Percolator.Desktop.Common.Services;
 using Percolator.Desktop.Common.Storage;
 using Percolator.Desktop.Common.Windowing;
@@ -17,6 +17,8 @@ using Percolator.Desktop.Features.Startup.Models;
 using Percolator.Desktop.Features.Startup.ViewModels;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
+using IPortReservationService = Percolator.Desktop.Common.Services.IPortReservationService;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Desktop.Tests.Startup;
 
@@ -258,7 +260,7 @@ public sealed class IdentityGateViewModelTests
         _vm.BannerMessage.Should().NotBeNullOrEmpty();
         _handoff.Verify(
             h => h.TransitionToMainShellAsync(
-                It.IsAny<Application2.Ports.IAuthenticatedSession?>(),
+                It.IsAny<IAuthenticatedSession?>(),
                 It.IsAny<IReadOnlyList<PersonaLaunchDescriptor>?>(),
                 It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>?>(),
                 It.IsAny<CancellationToken>()),
@@ -381,7 +383,7 @@ public sealed class IdentityGateViewModelTests
         secondCard.PortStatus.Should().Be(PortStatus.Unavailable);
         _handoff.Verify(
             h => h.TransitionToMainShellAsync(
-                It.IsAny<Application2.Ports.IAuthenticatedSession?>(),
+                It.IsAny<IAuthenticatedSession?>(),
                 It.IsAny<IReadOnlyList<PersonaLaunchDescriptor>?>(),
                 It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>?>(),
                 It.IsAny<CancellationToken>()),
@@ -411,7 +413,7 @@ public sealed class IdentityGateViewModelTests
             .Returns(Task.CompletedTask);
         _handoff
             .Setup(h => h.TransitionToMainShellAsync(
-                It.IsAny<Application2.Ports.IAuthenticatedSession?>(),
+                It.IsAny<IAuthenticatedSession?>(),
                 It.IsAny<IReadOnlyList<PersonaLaunchDescriptor>?>(),
                 It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>?>(),
                 It.IsAny<CancellationToken>()))

@@ -1,7 +1,7 @@
 using Percolator.Domain.Common;
 using Percolator.PluginSdk;
 
-namespace Percolator.Application2.Tests.TestDoubles;
+namespace Percolator.Application.Tests.TestDoubles;
 
 public sealed class FakeAppPayloadHandler : IAppPayloadHandler
 {

@@ -1,11 +1,12 @@
+using Percolator.Application.Ingress;
+using Percolator.Application.Ports;
+
 namespace Percolator.Infrastructure.Transport;
 
 using System;
 using System.Buffers.Binary;
 using System.Security.Cryptography;
 using Google.Protobuf;
-using Percolator.Application2.Ingress;
-using Percolator.Application2.Ports;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.ValueObjects;
@@ -32,7 +33,7 @@ public static class SealedWireFraming
     public static byte[] Encode(
         WireFrameKind kind,
         ChannelId channelId,
-        PublicIdentityId senderId,
+        Domain.Identities.PublicIdentityId senderId,
         DeviceId senderDeviceId,
         ReadOnlyMemory<byte> packedWireBytes)
     {
@@ -81,19 +82,19 @@ public static class SealedWireFraming
         return output;
     }
 
-    public static DomainResult<(WireFrameKind Kind, ChannelId ChannelId, PublicIdentityId SenderId, DeviceId SenderDeviceId, ReadOnlyMemory<byte> PackedWireBytes)> Decode(
+    public static DomainResult<(WireFrameKind Kind, ChannelId ChannelId, Domain.Identities.PublicIdentityId SenderId, DeviceId SenderDeviceId, ReadOnlyMemory<byte> PackedWireBytes)> Decode(
         ReadOnlyMemory<byte> frameBytes)
     {
         if (frameBytes.Length < HeaderSize)
         {
-            return DomainResult<(WireFrameKind, ChannelId, PublicIdentityId, DeviceId, ReadOnlyMemory<byte>)>.Failure(
+            return DomainResult<(WireFrameKind, ChannelId, Domain.Identities.PublicIdentityId, DeviceId, ReadOnlyMemory<byte>)>.Failure(
                 new DomainError("FRAME_TOO_SHORT", $"Frame length {frameBytes.Length} is shorter than required header size {HeaderSize}."));
         }
 
         var span = frameBytes.Span;
         if (span[0] != SealedMagicByte)
         {
-            return DomainResult<(WireFrameKind, ChannelId, PublicIdentityId, DeviceId, ReadOnlyMemory<byte>)>.Failure(
+            return DomainResult<(WireFrameKind, ChannelId, Domain.Identities.PublicIdentityId, DeviceId, ReadOnlyMemory<byte>)>.Failure(
                 new DomainError("UNKNOWN_FRAME_KIND", $"Unknown sealed frame magic byte: 0x{span[0]:X2}. Expected 0x{SealedMagicByte:X2}."));
         }
 
@@ -117,7 +118,7 @@ public static class SealedWireFraming
         }
         catch (CryptographicException)
         {
-            return DomainResult<(WireFrameKind, ChannelId, PublicIdentityId, DeviceId, ReadOnlyMemory<byte>)>.Failure(
+            return DomainResult<(WireFrameKind, ChannelId, Domain.Identities.PublicIdentityId, DeviceId, ReadOnlyMemory<byte>)>.Failure(
                 new DomainError("FRAME_TRUNCATED", "Sealed frame authentication failed or frame was truncated/corrupted."));
         }
         finally
@@ -128,23 +129,23 @@ public static class SealedWireFraming
         var kind = (WireFrameKind)plaintext[0];
         if (kind is not (WireFrameKind.DirectRatchet or WireFrameKind.GroupBroadcast or WireFrameKind.X3dhHandshake))
         {
-            return DomainResult<(WireFrameKind, ChannelId, PublicIdentityId, DeviceId, ReadOnlyMemory<byte>)>.Failure(
+            return DomainResult<(WireFrameKind, ChannelId, Domain.Identities.PublicIdentityId, DeviceId, ReadOnlyMemory<byte>)>.Failure(
                 new DomainError("UNKNOWN_FRAME_KIND", $"Unknown WireFrameKind byte: 0x{plaintext[0]:X2}."));
         }
 
         var channelId = ChannelId.FromBytes(plaintext.AsSpan(1, 16));
-        var senderId = PublicIdentityId.FromBytes(plaintext.AsSpan(17, 16));
+        var senderId = Domain.Identities.PublicIdentityId.FromBytes(plaintext.AsSpan(17, 16));
         uint deviceVal = BinaryPrimitives.ReadUInt32LittleEndian(plaintext.AsSpan(33, 4));
         uint payloadLength = BinaryPrimitives.ReadUInt32LittleEndian(plaintext.AsSpan(49, 4));
 
         if (InnerHeaderSize + payloadLength > plaintext.Length)
         {
-            return DomainResult<(WireFrameKind, ChannelId, PublicIdentityId, DeviceId, ReadOnlyMemory<byte>)>.Failure(
+            return DomainResult<(WireFrameKind, ChannelId, Domain.Identities.PublicIdentityId, DeviceId, ReadOnlyMemory<byte>)>.Failure(
                 new DomainError("FRAME_TRUNCATED", $"Frame payload length {payloadLength} exceeds available bytes {plaintext.Length - InnerHeaderSize}."));
         }
 
         var packedPayload = new ReadOnlyMemory<byte>(plaintext, InnerHeaderSize, (int)payloadLength);
-        return DomainResult<(WireFrameKind, ChannelId, PublicIdentityId, DeviceId, ReadOnlyMemory<byte>)>.Success(
+        return DomainResult<(WireFrameKind, ChannelId, Domain.Identities.PublicIdentityId, DeviceId, ReadOnlyMemory<byte>)>.Success(
             (kind, channelId, senderId, new DeviceId(deviceVal), packedPayload));
     }
 }
@@ -153,11 +154,11 @@ public sealed class SealedEnvelopeUnwrapper : ISealedEnvelopeUnwrapper
 {
     private readonly ISessionWirePacker _wirePacker;
     private readonly IDateTimeProvider _timeProvider;
-    private readonly PublicIdentityId _recipientId;
+    private readonly Domain.Identities.PublicIdentityId _recipientId;
 
     public SealedEnvelopeUnwrapper(
         ISessionWirePacker wirePacker,
-        PublicIdentityId recipientId,
+        Domain.Identities.PublicIdentityId recipientId,
         IDateTimeProvider timeProvider)
     {
         _wirePacker = wirePacker ?? throw new ArgumentNullException(nameof(wirePacker));
@@ -204,7 +205,7 @@ public sealed class SealedEnvelopeUnwrapper : ISealedEnvelopeUnwrapper
 
     public DomainResult<InboundEnvelope> UnwrapFrame(
         ReadOnlyMemory<byte> frameBytes,
-        PublicIdentityId recipientId,
+        Domain.Identities.PublicIdentityId recipientId,
         DateTimeOffset receivedAtUtc)
     {
         try

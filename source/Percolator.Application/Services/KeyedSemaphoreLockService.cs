@@ -1,8 +1,8 @@
 using System.Collections.Concurrent;
-using Percolator.Application2.Ports;
+using Percolator.Application.Ports;
 using Percolator.Domain.Channels.ValueObjects;
 
-namespace Percolator.Application2.Services;
+namespace Percolator.Application.Services;
 
 /// <summary>
 /// In-process default implementation of IChannelLockService using keyed semaphores.

@@ -1,9 +1,8 @@
-using System.Threading;
-using System.Threading.Tasks;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.ValueObjects;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
-namespace Percolator.Application2.Ports;
+namespace Percolator.Application.Ports;
 
 /// <summary>
 /// Port for the local identity key material (identity keypair + profile key) held in the

@@ -1,11 +1,10 @@
-using Percolator.Application2.Delivery;
-using Percolator.Application2.Tests.TestDoubles;
+using Percolator.Application.Delivery;
+using Percolator.Application.Tests.TestDoubles;
 using Percolator.Domain.Channels.ValueObjects;
-using Percolator.Domain.Common;
 using Percolator.Domain.Identities.Events;
-using Percolator.Domain.Identities.ValueObjects;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
-namespace Percolator.Application2.Tests.Delivery;
+namespace Percolator.Application.Tests.Delivery;
 
 [TestFixture]
 public sealed class OutboxWorkerTests

@@ -3,7 +3,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Percolator.Application2.Delivery;
 using Percolator.Apps.Chat.Features.Messaging;
 using Percolator.Apps.Discovery.Features.PrivateRendezvous;
 using Percolator.Simulator.Features.Logging;
