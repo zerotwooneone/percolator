@@ -84,7 +84,7 @@ public sealed class VaultUnlockViewModelTests
         _vm.FailedAttemptNonce.Should().Be(previousNonce + 1,
             "the view's shake animation triggers off the nonce increment");
         _handoff.Verify(
-            h => h.TransitionToGateAsync(It.IsAny<IAuthenticatedSession?>(), It.IsAny<CancellationToken>()),
+            h => h.TransitionToGateAsync(It.IsAny<IAuthenticatedSession>(), It.IsAny<CancellationToken>()),
             Times.Never);
         _handoff.Verify(
             h => h.TransitionToMainShellAsync(
@@ -133,7 +133,7 @@ public sealed class VaultUnlockViewModelTests
             Times.Once,
             "a sole auto-start persona must skip the gate and launch straight into the shell");
         _handoff.Verify(
-            h => h.TransitionToGateAsync(It.IsAny<IAuthenticatedSession?>(), It.IsAny<CancellationToken>()),
+            h => h.TransitionToGateAsync(It.IsAny<IAuthenticatedSession>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -225,6 +225,27 @@ public sealed class VaultUnlockViewModelTests
         _vm.ErrorMessage.Should().BeNull("duress activation must never surface error UI");
         _vm.FailedAttemptNonce.Should().Be(0, "duress must not trigger the failed-attempt shake");
         _vm.IsBusy.Should().BeFalse();
+    }
+
+    [Test]
+    public async Task Unlock_CoordinatorThrows_SurfacesGenericUnlockFailure()
+    {
+        _unlockCoordinator
+            .Setup(c => c.UnlockAsync(It.IsAny<VaultPassphrase>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Decoy vault initialization failed."));
+
+        _vm.Password = "duress-phrase";
+        await _vm.UnlockCommand.ExecuteAsync(null);
+
+        _vm.ErrorMessage.Should().Be("The vault could not be unlocked. Please try again.",
+            "a decoy-init failure must surface as a generic unlock failure");
+        _vm.FailedAttemptNonce.Should().Be(0,
+            "a generic failure must not increment the failed-attempt shake nonce — " +
+            "it is indistinguishable from a credential rejection to observers");
+        _vm.IsBusy.Should().BeFalse();
+        _handoff.Verify(
+            h => h.TransitionToGateAsync(It.IsAny<IAuthenticatedSession>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Test]

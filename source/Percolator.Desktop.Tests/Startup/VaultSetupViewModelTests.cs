@@ -195,7 +195,7 @@ public sealed class VaultSetupViewModelTests
 
         _vm.ErrorMessage.Should().Be("Canary probe failed");
         _handoff.Verify(
-            h => h.TransitionToGateAsync(It.IsAny<IAuthenticatedSession?>(), It.IsAny<CancellationToken>()),
+            h => h.TransitionToGateAsync(It.IsAny<IAuthenticatedSession>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 }

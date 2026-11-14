@@ -34,8 +34,9 @@ public sealed class UnlockResultTests
     [Test]
     public void DuressActivated_EvaluatesRecordEquality()
     {
-        var result1 = new UnlockResult.DuressActivated();
-        var result2 = new UnlockResult.DuressActivated();
+        var session = new FakeAuthenticatedSession();
+        var result1 = new UnlockResult.DuressActivated(session);
+        var result2 = new UnlockResult.DuressActivated(session);
 
         result1.Should().Be(result2);
         (result1 == result2).Should().BeTrue();
@@ -56,7 +57,7 @@ public sealed class UnlockResultTests
     {
         var session = new FakeAuthenticatedSession();
         UnlockResult success = new UnlockResult.Success(session);
-        UnlockResult duress = new UnlockResult.DuressActivated();
+        UnlockResult duress = new UnlockResult.DuressActivated(session);
         UnlockResult invalid = new UnlockResult.InvalidCredentials();
 
         success.Should().NotBe(duress);
@@ -71,7 +72,7 @@ public sealed class UnlockResultTests
         var results = new UnlockResult[]
         {
             new UnlockResult.Success(session),
-            new UnlockResult.DuressActivated(),
+            new UnlockResult.DuressActivated(session),
             new UnlockResult.InvalidCredentials()
         };
 

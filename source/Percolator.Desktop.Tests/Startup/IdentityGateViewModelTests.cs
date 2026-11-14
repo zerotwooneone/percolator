@@ -260,7 +260,7 @@ public sealed class IdentityGateViewModelTests
         _vm.BannerMessage.Should().NotBeNullOrEmpty();
         _handoff.Verify(
             h => h.TransitionToMainShellAsync(
-                It.IsAny<IAuthenticatedSession?>(),
+                It.IsAny<IAuthenticatedSession>(),
                 It.IsAny<IReadOnlyList<PersonaLaunchDescriptor>?>(),
                 It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>?>(),
                 It.IsAny<CancellationToken>()),
@@ -383,7 +383,7 @@ public sealed class IdentityGateViewModelTests
         secondCard.PortStatus.Should().Be(PortStatus.Unavailable);
         _handoff.Verify(
             h => h.TransitionToMainShellAsync(
-                It.IsAny<IAuthenticatedSession?>(),
+                It.IsAny<IAuthenticatedSession>(),
                 It.IsAny<IReadOnlyList<PersonaLaunchDescriptor>?>(),
                 It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>?>(),
                 It.IsAny<CancellationToken>()),
@@ -413,7 +413,7 @@ public sealed class IdentityGateViewModelTests
             .Returns(Task.CompletedTask);
         _handoff
             .Setup(h => h.TransitionToMainShellAsync(
-                It.IsAny<IAuthenticatedSession?>(),
+                It.IsAny<IAuthenticatedSession>(),
                 It.IsAny<IReadOnlyList<PersonaLaunchDescriptor>?>(),
                 It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>?>(),
                 It.IsAny<CancellationToken>()))

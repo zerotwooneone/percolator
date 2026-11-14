@@ -18,15 +18,15 @@ public interface IWindowHandoffCoordinator
     /// Navigates the open <c>StartupWindow</c> forward to Screen 2 (Identity Gate).
     /// </summary>
     /// <param name="session">
-    /// The authenticated Stage 2 session produced by vault unlock/initialize, if any.
-    /// Parked on the startup host until personas launch the shell (duress passes <c>null</c>).
+    /// The authenticated Stage 2 session produced by vault unlock/initialize — always
+    /// present, including the duress decoy (a real session or the unlock fails).
+    /// Parked on the startup host until personas launch the shell.
     /// </param>
-    Task TransitionToGateAsync(IAuthenticatedSession? session = null, CancellationToken ct = default);
+    Task TransitionToGateAsync(IAuthenticatedSession session, CancellationToken ct = default);
 
     /// <summary>
     /// Starts the authenticated session's hosted services, swaps <c>StartupWindow</c> for
-    /// <c>MainWindow</c>, and closes the startup frame. A <c>null</c> session (duress decoy)
-    /// skips hosted-service startup and opens the empty shell.
+    /// <c>MainWindow</c>, and closes the startup frame.
     /// </summary>
     /// <param name="personas">
     /// Launch descriptors acquired at the Identity Gate; the coordinator takes ownership of
@@ -37,7 +37,7 @@ public interface IWindowHandoffCoordinator
     /// are held and released with the persona leases on <see cref="LockSessionAsync"/>.
     /// </param>
     Task TransitionToMainShellAsync(
-        IAuthenticatedSession? session,
+        IAuthenticatedSession session,
         IReadOnlyList<PersonaLaunchDescriptor>? personas = null,
         IReadOnlyList<ExchangeLaunchDescriptor>? exchanges = null,
         CancellationToken ct = default);

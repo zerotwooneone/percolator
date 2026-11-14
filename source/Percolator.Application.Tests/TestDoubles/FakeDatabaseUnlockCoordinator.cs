@@ -119,7 +119,8 @@ public sealed class FakeDatabaseUnlockCoordinator : IDatabaseUnlockCoordinator
             }
 
             Status = DatabaseSetupStatus.Uninitialized;
-            return new UnlockResult.DuressActivated();
+            _activeSession = new FakeAuthenticatedSession();
+            return new UnlockResult.DuressActivated(_activeSession);
         }
 
         return new UnlockResult.InvalidCredentials();

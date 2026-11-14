@@ -132,9 +132,10 @@ public partial class StartupHostViewModel : ViewModelBase
 
     /// <summary>
     /// Moves the frame forward to Screen 2 (Identity Gate) and loads its personas.
-    /// Called by <c>WindowHandoffCoordinator</c> after unlock, initialize, or duress activation.
+    /// Called by <c>WindowHandoffCoordinator</c> after unlock, initialize, or duress
+    /// activation — the session is always real; decoy-vault failure never reaches here.
     /// </summary>
-    public async Task NavigateToGateAsync(IAuthenticatedSession? session = null)
+    public async Task NavigateToGateAsync(IAuthenticatedSession session)
     {
         PendingSession = session;
         NavigateToScreen(StartupScreen.IdentityGate);

@@ -25,6 +25,7 @@ public sealed class WindowHandoffCoordinator : IWindowHandoffCoordinator
 {
     private readonly IServiceProvider _services;
     private readonly IDatabaseUnlockCoordinator _unlockCoordinator;
+    private readonly Func<StartupHostViewModel> _startupHostFactory;
     private readonly ILogger<WindowHandoffCoordinator> _logger;
 
     // Port leases acquired at the Identity Gate; held for the persona session lifetime and
@@ -35,10 +36,12 @@ public sealed class WindowHandoffCoordinator : IWindowHandoffCoordinator
     public WindowHandoffCoordinator(
         IServiceProvider services,
         IDatabaseUnlockCoordinator unlockCoordinator,
+        Func<StartupHostViewModel> startupHostFactory,
         ILogger<WindowHandoffCoordinator> logger)
     {
         _services = services ?? throw new ArgumentNullException(nameof(services));
         _unlockCoordinator = unlockCoordinator ?? throw new ArgumentNullException(nameof(unlockCoordinator));
+        _startupHostFactory = startupHostFactory ?? throw new ArgumentNullException(nameof(startupHostFactory));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -46,7 +49,7 @@ public sealed class WindowHandoffCoordinator : IWindowHandoffCoordinator
         Avalonia.Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime
         ?? throw new InvalidOperationException("Desktop application lifetime is not available.");
 
-    public async Task TransitionToGateAsync(IAuthenticatedSession? session = null, CancellationToken ct = default)
+    public async Task TransitionToGateAsync(IAuthenticatedSession session, CancellationToken ct = default)
     {
         await Dispatcher.UIThread.InvokeAsync(async () =>
         {
@@ -63,17 +66,13 @@ public sealed class WindowHandoffCoordinator : IWindowHandoffCoordinator
     }
 
     public async Task TransitionToMainShellAsync(
-        IAuthenticatedSession? session,
+        IAuthenticatedSession session,
         IReadOnlyList<PersonaLaunchDescriptor>? personas = null,
         IReadOnlyList<ExchangeLaunchDescriptor>? exchanges = null,
         CancellationToken ct = default)
     {
         // Launches all registered IHostedService background workers in the Stage 2 container.
-        // The duress decoy path passes a null session — no services start.
-        if (session is not null)
-        {
-            await session.StartAsync(ct).ConfigureAwait(false);
-        }
+        await session.StartAsync(ct).ConfigureAwait(false);
 
         lock (_activePersonas)
         {
@@ -130,7 +129,7 @@ public sealed class WindowHandoffCoordinator : IWindowHandoffCoordinator
             var previous = desktop.MainWindow;
 
             // Fresh transient host VM guarantees no passphrase/state residue after lock.
-            var hostViewModel = _services.GetRequiredService<StartupHostViewModel>();
+            var hostViewModel = _startupHostFactory();
             var startupWindow = new StartupWindow(hostViewModel);
             desktop.MainWindow = startupWindow;
             startupWindow.Show();

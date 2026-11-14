@@ -258,6 +258,46 @@ public class SqlCipherUnlockTests
         wrong.Should().BeOfType<UnlockResult.InvalidCredentials>();
     }
 
+    [Test]
+    public async Task DuressActivation_WhenDecoyHostBuildFails_PropagatesAsUnlockFailure()
+    {
+        var conditionalFactory = new ConditionalThrowingStage2HostFactory(_hostFactory);
+        var coordinator = new SqlCipherDatabaseUnlockCoordinator(
+            _headerStorage,
+            _envelopePacker,
+            _canaryProbe,
+            _migrator,
+            conditionalFactory,
+            _wipeHandler,
+            _options);
+
+        var masterPass = VaultPassphrase.Create("MasterBeforeDuress");
+        var duressPass = VaultPassphrase.Create("DuressTriggersThrow");
+        (await coordinator.InitializeAsync(masterPass, duressPass)).IsSuccess.Should().BeTrue();
+        await coordinator.LockAsync();
+
+        conditionalFactory.Throw = true;
+
+        var act = async () => await coordinator.UnlockAsync(duressPass);
+        await act.Should().ThrowAsync<InvalidOperationException>(
+            "decoy-vault initialization failure must surface as an unlock failure — " +
+            "there is no sessionless DuressActivated");
+    }
+
+    private sealed class ConditionalThrowingStage2HostFactory : IStage2HostFactory
+    {
+        private readonly IStage2HostFactory _inner;
+
+        public ConditionalThrowingStage2HostFactory(IStage2HostFactory inner) => _inner = inner;
+
+        public bool Throw { get; set; }
+
+        public IHost BuildAuthenticatedHost(IMasterKeyHandle masterKeyHandle) =>
+            Throw
+                ? throw new InvalidOperationException("Simulated host build failure.")
+                : _inner.BuildAuthenticatedHost(masterKeyHandle);
+    }
+
     private sealed class FailingDatabaseMigrator : IDatabaseMigrator
     {
         public Task<DomainResult> MigrateAsync(IMasterKeyHandle masterKey, CancellationToken ct = default)

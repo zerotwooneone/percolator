@@ -48,7 +48,10 @@ public partial class IdentityGateViewModel : ViewModelBase
 
     private readonly ObservableList<SelectablePersonaModel> _personaList = new();
     private readonly ObservableList<ExchangeTileViewModel> _exchangeList = new();
-    private IAuthenticatedSession? _session;
+
+    // Assigned by LoadAsync before the VM is shown — the gate only exists post-unlock and
+    // the session is always real (decoy-init failure surfaces as a generic unlock failure).
+    private IAuthenticatedSession _session = null!;
     private bool _suppressAutoStartPersist;
 
     [ObservableProperty]
@@ -144,7 +147,7 @@ public partial class IdentityGateViewModel : ViewModelBase
     public int SelectedExchangeCount => _exchangeList.Count(e => e.IsSelectedForLaunch);
 
     /// <summary>The `+` Exchange tile stays inert while the onboarding gate is active.</summary>
-    public bool IsExchangeCreateEnabled => _session is not null && !IsOnboardingActive && !IsBusy;
+    public bool IsExchangeCreateEnabled => !IsOnboardingActive && !IsBusy;
 
     /// <summary>`+` tile affordance text — "finish setup" affordance while onboarding is active.</summary>
     public string ExchangeCreateTooltip =>
@@ -160,21 +163,12 @@ public partial class IdentityGateViewModel : ViewModelBase
     public bool HasBanner => BannerMessage is not null;
 
     /// <summary>
-    /// Populates the gate after unlock. Called by <c>StartupHostViewModel.NavigateToGateAsync</c>;
-    /// <paramref name="session"/> is <c>null</c> on the duress decoy path.
+    /// Populates the gate after unlock. Called by <c>StartupHostViewModel.NavigateToGateAsync</c>
+    /// with the authenticated session — always non-null, including the duress decoy.
     /// </summary>
-    public async Task LoadAsync(IAuthenticatedSession? session, CancellationToken ct = default)
+    public async Task LoadAsync(IAuthenticatedSession session, CancellationToken ct = default)
     {
         _session = session;
-        if (session is null)
-        {
-            // Degraded path: only reachable if decoy-vault re-initialization failed after a
-            // duress wipe. With no session there is no vault — show an inert empty gate.
-            _personaList.Clear();
-            RefreshDerivedState();
-            return;
-        }
-
         IsLoading = true;
         try
         {
@@ -280,7 +274,7 @@ public partial class IdentityGateViewModel : ViewModelBase
                 await PersistBoundPortAsync(exchange.RelayIdentityId, lease.Port, ct).ConfigureAwait(true);
             }
 
-            if (_session is not null && exchangeDescriptors.Count > 0)
+            if (exchangeDescriptors.Count > 0)
             {
                 // Relay endpoints must be mapped before the handoff starts the session host —
                 // the hosted transport no-ops once running, so the first StartAsync wins.
@@ -300,23 +294,20 @@ public partial class IdentityGateViewModel : ViewModelBase
                 }
             }
 
-            if (_session is not null)
+            var selectedPersonaIds = descriptors
+                .Select(d => new PublicIdentityId(d.IdentityId))
+                .ToList();
+            if (selectedPersonaIds.Count > 0)
             {
-                var selectedPersonaIds = descriptors
-                    .Select(d => new PublicIdentityId(d.IdentityId))
-                    .ToList();
-                if (selectedPersonaIds.Count > 0)
+                // Best effort: unreachable exchanges surface as a banner; mailboxes
+                // re-provision on the next launch.
+                var provision = await _exchanges
+                    .ProvisionLinkedMailboxesAsync(_session, selectedPersonaIds, ct)
+                    .ConfigureAwait(true);
+                if (provision.IsFailure)
                 {
-                    // Best effort: unreachable exchanges surface as a banner; mailboxes
-                    // re-provision on the next launch.
-                    var provision = await _exchanges
-                        .ProvisionLinkedMailboxesAsync(_session, selectedPersonaIds, ct)
-                        .ConfigureAwait(true);
-                    if (provision.IsFailure)
-                    {
-                        _logger.LogWarning("Mailbox provisioning incomplete: {Error}", provision.Error.Description);
-                        BannerMessage = "Some mailboxes could not be provisioned; they will retry on the next launch.";
-                    }
+                    _logger.LogWarning("Mailbox provisioning incomplete: {Error}", provision.Error.Description);
+                    BannerMessage = "Some mailboxes could not be provisioned; they will retry on the next launch.";
                 }
             }
 
@@ -348,11 +339,6 @@ public partial class IdentityGateViewModel : ViewModelBase
     [RelayCommand]
     private async Task CreatePersonaAsync(CancellationToken ct)
     {
-        if (_session is null)
-        {
-            return;
-        }
-
         var result = await _windows
             .ShowDialogAsync<CreatePersonaDialogViewModel, PersonaEditorResult?>(
                 vm => vm.InitializeForCreate())
@@ -384,7 +370,7 @@ public partial class IdentityGateViewModel : ViewModelBase
     [RelayCommand]
     private async Task EditPersonaAsync(SelectablePersonaModel? persona, CancellationToken ct)
     {
-        if (persona is null || _session is null)
+        if (persona is null)
         {
             return;
         }
@@ -420,7 +406,7 @@ public partial class IdentityGateViewModel : ViewModelBase
     [RelayCommand]
     private async Task DeletePersonaAsync(SelectablePersonaModel? persona, CancellationToken ct)
     {
-        if (persona is null || _session is null)
+        if (persona is null)
         {
             return;
         }
@@ -453,11 +439,6 @@ public partial class IdentityGateViewModel : ViewModelBase
     [RelayCommand(CanExecute = nameof(IsExchangeCreateEnabled))]
     private async Task CreateExchangeAsync(CancellationToken ct)
     {
-        if (_session is null)
-        {
-            return;
-        }
-
         var personas = _personaList.Select(ToPersonaEntry).ToList();
         var result = await _windows
             .ShowDialogAsync<ExchangeCreationViewModel, ExchangeCreationResult?>(
@@ -502,7 +483,7 @@ public partial class IdentityGateViewModel : ViewModelBase
     [RelayCommand]
     private async Task ManageExchangeAsync(ExchangeTileViewModel? exchange, CancellationToken ct)
     {
-        if (exchange is null || _session is null)
+        if (exchange is null)
         {
             return;
         }

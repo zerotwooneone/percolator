@@ -143,23 +143,26 @@ public sealed class SqlCipherDatabaseUnlockCoordinator : IDatabaseUnlockCoordina
                 {
                     var reinitResult = await CreateFreshVaultAsync(candidatePassword, null, decoyKey, ct)
                         .ConfigureAwait(false);
-                    if (reinitResult.IsSuccess)
+                    if (reinitResult.IsFailure)
                     {
-                        var host = _hostFactory.BuildAuthenticatedHost(decoyKey);
-                        _activeKeyHandle = decoyKey;
-                        _activeSession = new AuthenticatedSession(host);
-                        Status = DatabaseSetupStatus.Unlocked;
-                        return new UnlockResult.DuressActivated(_activeSession);
+                        throw new InvalidOperationException(
+                            $"Decoy vault initialization failed: {reinitResult.Error.Description}");
                     }
+
+                    var host = _hostFactory.BuildAuthenticatedHost(decoyKey);
+                    var session = new AuthenticatedSession(host);
+                    _activeKeyHandle = decoyKey;
+                    _activeSession = session;
+                    Status = DatabaseSetupStatus.Unlocked;
+                    return new UnlockResult.DuressActivated(session);
                 }
                 catch
                 {
-                    // Fall through to the sessionless decoy path — the wipe already succeeded.
+                    // The wipe already succeeded — decoy initialization failure is an unlock
+                    // failure, not a sessionless decoy. Dispose the key and let it propagate.
+                    decoyKey.Dispose();
+                    throw;
                 }
-
-                decoyKey.Dispose();
-                Status = DatabaseSetupStatus.Uninitialized;
-                return new UnlockResult.DuressActivated();
             }
 
             if (trialResult.Outcome != SlotTrialOutcome.MasterUnlocked)

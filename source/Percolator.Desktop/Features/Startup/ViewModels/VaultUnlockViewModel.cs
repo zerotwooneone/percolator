@@ -80,7 +80,20 @@ public partial class VaultUnlockViewModel : ViewModelBase
         var candidate = VaultPassphrase.Create(Password);
         try
         {
-            var result = await _unlockCoordinator.UnlockAsync(candidate, ct).ConfigureAwait(true);
+            UnlockResult result;
+            try
+            {
+                result = await _unlockCoordinator.UnlockAsync(candidate, ct).ConfigureAwait(true);
+            }
+            catch (Exception)
+            {
+                // Decoy-vault re-initialization failure (and any other coordinator fault)
+                // surfaces as a generic unlock failure — never InvalidCredentials, which
+                // would confirm the candidate matched the duress slot.
+                ErrorMessage = "The vault could not be unlocked. Please try again.";
+                return;
+            }
+
             switch (result)
             {
                 case UnlockResult.Success success when !forceGate:
@@ -92,9 +105,9 @@ public partial class VaultUnlockViewModel : ViewModelBase
                     break;
 
                 case UnlockResult.DuressActivated duress:
-                    // Silent decoy transition: zero error surfacing. The decoy session (when the
-                    // post-wipe decoy vault was created) lets personas persist into it — a working
-                    // vault is the deniable outcome; a null session falls back to in-memory decoy.
+                    // Silent decoy transition: zero error surfacing. The decoy session lets
+                    // personas persist into the post-wipe decoy vault — a working vault is
+                    // the deniable outcome.
                     await _handoff.TransitionToGateAsync(duress.Session, ct).ConfigureAwait(true);
                     break;
 

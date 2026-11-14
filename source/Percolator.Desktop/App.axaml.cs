@@ -80,6 +80,7 @@ public partial class App : Avalonia.Application
                 services.AddSingleton<Func<VaultSetupViewModel>>(sp => sp.GetRequiredService<VaultSetupViewModel>);
                 services.AddSingleton<Func<VaultUnlockViewModel>>(sp => sp.GetRequiredService<VaultUnlockViewModel>);
                 services.AddSingleton<Func<IdentityGateViewModel>>(sp => sp.GetRequiredService<IdentityGateViewModel>);
+                services.AddSingleton<Func<StartupHostViewModel>>(sp => sp.GetRequiredService<StartupHostViewModel>);
 
                 services.AddTransient<StartupHostViewModel>();
                 services.AddTransient<VaultSetupViewModel>();
