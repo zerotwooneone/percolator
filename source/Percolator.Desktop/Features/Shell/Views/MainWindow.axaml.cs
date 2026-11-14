@@ -12,13 +12,22 @@ namespace Percolator.Desktop.Features.Shell.Views;
 
 public partial class MainWindow : Window
 {
+    private const double InspectorDrawerBreakpointDip = 1000;
+    private const double SidebarDrawerBreakpointDip = 850;
+
     private bool _chatsWasNarrow;
+
+    // The chats-pane state to restore when the inline column returns. Updated by
+    // OnChatsSidebarPropertyChanged while the drawer is up, so user intent while
+    // narrow (hamburger open/close, scrim dismiss) always wins on widening.
+    private bool _sidebarOpenBeforeCollapse = true;
 
     public MainWindow()
     {
         InitializeComponent();
         Loaded += OnLoaded;
         SizeChanged += OnSizeChanged;
+        ChatsSidebarSplitView.PropertyChanged += OnChatsSidebarPropertyChanged;
     }
 
     // Complies with [CB-002] (constructor injection; parameterless ctor reserved for the XAML previewer)
@@ -43,24 +52,48 @@ public partial class MainWindow : Window
     private void ApplyResponsiveLayout(double width)
     {
         // <1000px: inspector becomes an overlay drawer with light-dismiss scrim.
-        InspectorSplitView.DisplayMode = width < 1000
+        // Its open state crosses both edges untouched — scrim dismiss already
+        // writes back through the two-way IsPaneOpen binding.
+        InspectorSplitView.DisplayMode = width < InspectorDrawerBreakpointDip
             ? SplitViewDisplayMode.Overlay
             : SplitViewDisplayMode.Inline;
 
         // <850px: right sidebar collapses into a slide-out drawer.
-        var narrow = width < 850;
+        var narrow = width < SidebarDrawerBreakpointDip;
         if (narrow == _chatsWasNarrow)
         {
             return;
         }
 
-        _chatsWasNarrow = narrow;
-        ChatsSidebarSplitView.DisplayMode = narrow
-            ? SplitViewDisplayMode.Overlay
-            : SplitViewDisplayMode.Inline;
+        if (narrow)
+        {
+            // Inline → Overlay: remember the pane state, then auto-close the drawer.
+            // _chatsWasNarrow stays false until after the write so the pane tracker
+            // doesn't record our own close as user intent.
+            _sidebarOpenBeforeCollapse = ChatsSidebarSplitView.IsPaneOpen;
+            ChatsSidebarSplitView.DisplayMode = SplitViewDisplayMode.Overlay;
+            ChatsSidebarSplitView.IsPaneOpen = false;
+            _chatsWasNarrow = true;
+        }
+        else
+        {
+            // Overlay → Inline: restore the last tracked intent — pre-collapse state,
+            // or whatever the user left the drawer in while narrow — instead of
+            // force-reopening a pane the user explicitly closed.
+            _chatsWasNarrow = false;
+            ChatsSidebarSplitView.DisplayMode = SplitViewDisplayMode.Inline;
+            ChatsSidebarSplitView.IsPaneOpen = _sidebarOpenBeforeCollapse;
+        }
+    }
 
-        // Close the pane when collapsing to overlay; restore it when the inline column returns.
-        ChatsSidebarSplitView.IsPaneOpen = !narrow;
+    private void OnChatsSidebarPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
+    {
+        // Only reachable while the drawer is up (our own writes run with
+        // _chatsWasNarrow already cleared/not-yet-set, so they are ignored here).
+        if (_chatsWasNarrow && e.Property == SplitView.IsPaneOpenProperty)
+        {
+            _sidebarOpenBeforeCollapse = ChatsSidebarSplitView.IsPaneOpen;
+        }
     }
 
     // Complies with [CB-001] (theme switching is a pure view mechanic)
