@@ -56,6 +56,8 @@ public interface IActiveIdentitySet
 - Register `AddSingleton<IActiveIdentitySet, ActiveIdentitySet>()` in `AddSessionCoreInfrastructure`.
 - `WindowHandoffCoordinator.TransitionToMainShellAsync`: before `await session.StartAsync(ct)` (currently L77), resolve `session.Services.GetRequiredService<IActiveIdentitySet>()` and call `Add(new PublicIdentityId(d.IdentityId))` for each `PersonaLaunchDescriptor`.
 
+**Shipped notes (as implemented):** Desktop seeding only — `SimulatedPersonaHost` seeding + `_isListening` bridge is deferred to DRAIN-06 (sim hosts compose `AddAuthenticatedInfrastructure`, so they inherit the scheduler once the set is populated).
+
 **QMS:** `INV-DESKTOP-TWO-STAGE-HANDOFF`, `DEP-DESKTOP-PERSONA-ISOLATION`, `INV-APP-EVENT-BUS-DECOUPLING`, `DEC-EXECUTABLE-SESSION-COMPOSITION`.
 
 ---
@@ -128,7 +130,7 @@ public interface IRelayMailboxProvisioner
 
 ---
 
-### DRAIN-03 ⬜ — `GrpcRelayMailboxClient` & provisioner separation
+### DRAIN-03 ✅ — `GrpcRelayMailboxClient` & provisioner separation
 
 **Files:**
 - Create `Percolator.Infrastructure/Transport/GrpcRelayMailboxClient.cs`
@@ -149,6 +151,11 @@ public interface IRelayMailboxProvisioner
 - `StopMailboxStreamAsync` was already removed in DRAIN-02 — nothing to do here.
 - `DrainMailboxOnceAsync` stays on the concrete class (simulator bridge until DRAIN-09), so the `IServiceScopeFactory` and `IDateTimeProvider` ctor parameters must remain; they are removed in DRAIN-09 instead.
 - Register `AddSingleton<IRelayMailboxClient, GrpcRelayMailboxClient>()` in `AddTransportInfrastructure`.
+
+**Shipped notes (as implemented):**
+- `AuthResultProto` carries `reason` (not `error_message`); `RELAY_AUTH_FAILED` reports it.
+- `GrpcMailboxStreamSession` is a private nested class inside `GrpcRelayMailboxClient.cs`; zeroization uses `MemoryMarshal.AsMemory(item.Envelope.Ciphertext)` since `MailboxEnvelope.Ciphertext` is `ReadOnlyMemory<byte>` (the plan's `AsBytes` sketch doesn't compile against it). `SealedEnvelopeProto.ExpiresAtUtc` is clamped to `now + 7 days` (`EnvelopeExpiryWindow`).
+- `StopMailboxStreamAsync`/`DrainMailboxOnceAsync` disposition unchanged: `DrainMailboxOnceAsync` still lives on the concrete `GrpcRelayMailboxProvisioner` until DRAIN-09.
 
 **QMS:** `DEP-INFRA-NATIVE-FAULT-TRANSLATION`, `DEP-INFRA-VOLATILE-ZEROIZATION`, `DEP-INFRA-MAILBOX-RETRIEVAL`.
 
@@ -178,6 +185,7 @@ public interface ISealedEnvelopeUnwrapper
 - `SealedEnvelopeUnwrapper(ISessionWirePacker wirePacker, IDateTimeProvider timeProvider)`: remove `_recipientId` field and ctor parameter; pass `recipientId` argument directly into `UnwrapFrame(rawPayload, recipientId, _timeProvider.UtcNow)`. Delete unused private `DefaultDateTimeProvider`.
 - Register `AddScoped<ISealedEnvelopeUnwrapper, SealedEnvelopeUnwrapper>()` in `AddTransportInfrastructure`.
 - `UnauthenticatedDeliveryEndpoint`: accept optional `PublicIdentityId? localRecipientId = null` ctor parameter; invoke `_envelopeUnwrapper.UnwrapDirect(request.EncryptedPackage.Memory, _localRecipientId.Value)` when non-null.
+- `SimulatedPersonaHost`: delete the per-node `ISealedEnvelopeUnwrapper` factory registration (~L254–259: `new SealedEnvelopeUnwrapper(wirePacker, PublicIdentityId, time)`) — the `AddTransportInfrastructure` scoped registration replaces it, so the sim shares the same registration as Desktop.
 
 **QMS:** `INV-ADAPTER-HYDRATION-BOUNDARY`, `DEP-DESKTOP-PERSONA-ISOLATION`.
 
@@ -271,6 +279,7 @@ public sealed class MailboxDrainService
 - Delete `Percolator.Infrastructure.Tests/Transport/Workers/RelayMailboxStreamWorkerTests.cs`
 - Modify `Percolator.Infrastructure/DependencyInjection/InfrastructureServiceCollectionExtensions.cs`
 - Modify `Percolator.Infrastructure.Tests/Composition/DependencyInjectionTests.cs`
+- Modify `Percolator.Simulator/Features/Topology/SimulatedPersonaHost.cs` (simulator drain-parity wiring — see below)
 
 **Contracts:**
 
@@ -310,6 +319,12 @@ public sealed record DrainSchedulerOptions
   8. On stream fault / auth failure: increment target failure count, compute `backoff = min(MaxBackoff, InitialBackoff * pow(BackoffMultiplier, failures - 1))`, re-enqueue with `dueAt = now + backoff`.
 - `RelayMailboxDrainHost : BackgroundService`: `ExecuteAsync(CancellationToken stoppingToken) => _scheduler.RunAsync(stoppingToken);`.
 - Remove `RelayMailboxStreamWorker` and its optional `Func<CancellationToken, Task>` fallback registration. Update `DependencyInjectionTests` expected hosted-service type list (`typeof(RelayMailboxStreamWorker)` → `typeof(RelayMailboxDrainHost)`).
+
+**Simulator wiring (Option A — sim runs the same scheduler as Desktop):**
+- `SimulatedPersonaHost.StartAsync`: resolve `IActiveIdentitySet` from `_host.Services` and `Add(PublicIdentityId)` before `await _host.StartAsync(ct)` (mirrors `TransitionToMainShellAsync` ordering — set populated before hosted services run).
+- When `HomeRelay` is assigned (and once at start if already set): ensure a `RelayRegistration` exists via `IRelayDirectory.RegisterRemoteRelayAsync(HomeRelay.RelayIdentityId, RelayEndpoint.FromHostAndPort("127.0.0.1", HomeRelay.BoundPort))` (skip if `GetByIdAsync` already returns one), then `LinkIdentityAsync(HomeRelay.RelayIdentityId, PublicIdentityId, MailboxRoutingToken, MailboxDrainToken)` — passing the sim's own tokens keeps `GetMailboxTokensAsync` aligned with what `ProvisionMailboxAsync` registered relay-side.
+- Subscribe `_isListening` changes → `IActiveIdentitySet.Add`/`Remove(PublicIdentityId)`: paused personas go offline (scheduler cancels the stream, relay retains mail, pending-ingress spool replays on resume).
+- `DrainMailboxAsync` remains the pull-now API for coordinators — it coexists with the scheduler; both write through the same pending-ingress spool, which dedupes by `(OwnerIdentityId, QueueId)`.
 
 **QMS:** `SYS-PRE-ACTIVATION-STEALTH`, `DEP-DESKTOP-PRE-ACTIVATION-STEALTH`, `INV-DESKTOP-STEALTH-ACTIVATION-GATE`, `SYS-ASYNC-STORE-AND-FORWARD`, `DEP-INFRA-CONCURRENCY-MODEL`, `SYS-BOUNDED-RELAY-QUOTAS`, `HAZ-INGRESS-RESOURCE-EXHAUSTION`, `SYS-LOCK-TEARDOWN-AND-ZEROIZATION`, `DEP-DESKTOP-SESSION-LOCK-ZEROIZATION`, `HAZ-POST-LOCK-MEMORY-RESIDUE`.
 
@@ -351,7 +366,7 @@ public sealed record DrainSchedulerOptions
 - Modify `Percolator.Infrastructure/Transport/IRelayMailboxCapabilityStore.cs` (rename `DrainEnvelopesAsync` → `PurgeMailboxAsync(ReadOnlyMemory<byte> routingToken, CancellationToken ct = default)` returning `ValueTask<int>`)
 - Modify `Percolator.Infrastructure/Persistence/Repositories/SqliteRelayMailboxCapabilityStore.cs` (`PurgeMailboxAsync` uses `ExecuteDeleteAsync` directly without materializing payloads)
 - Modify `Percolator.Desktop/Common/Services/ExchangeDirectoryService.cs` (`UnlinkPersonaAsync` L195: call `_capabilities.PurgeMailboxAsync`)
-- Modify `Percolator.Simulator/Features/Topology/SimulatedPersonaHost.cs` (`DrainMailboxAsync`: open stream via `IRelayMailboxClient`, read available envelopes with short idle timeout, run `MailboxDrainService.ReceiveAsync` per envelope, dispose session; removes the DRAIN-02 temporary `is GrpcRelayMailboxProvisioner` bridge)
+- Modify `Percolator.Simulator/Features/Topology/SimulatedPersonaHost.cs` (`DrainMailboxAsync`: open stream via `IRelayMailboxClient`, read available envelopes with short idle timeout, run `MailboxDrainService.ReceiveAsync` per envelope, dispose session; removes the DRAIN-02 temporary `is GrpcRelayMailboxProvisioner` bridge). Pull-now path stays for coordinators alongside the DRAIN-06 scheduler — deduped by the pending-ingress spool.
 - Modify `Percolator.Infrastructure.Tests/Fakes/FakeRelayMailboxCapabilityStore.cs`, `Percolator.Infrastructure.Windows.Tests/Fakes/FakeRelayMailboxCapabilityStore.cs`, `Percolator.Infrastructure.Tests/Persistence/SqliteRelayMailboxCapabilityStoreTests.cs`, `Percolator.Infrastructure.Tests/Transport/Endpoints/AuthenticatedRelayEndpointTests.cs`, `Percolator.Infrastructure.Tests/Protos/CoreProtoCompilationTests.cs`
 
 - Note: `RelayMailboxQueue` (in-memory domain aggregate) and `TestIdentityNode.DrainMailboxAsync` remain unchanged — they back in-memory `Percolator.ApplicationIntegrationTests` and do not touch gRPC or SQLite.

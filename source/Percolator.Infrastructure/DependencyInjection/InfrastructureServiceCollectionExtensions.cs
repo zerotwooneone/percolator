@@ -235,6 +235,7 @@ public static class InfrastructureServiceCollectionExtensions
         // Session-bound: opens one scope per mailbox drain to resolve the per-node
         // ISealedEnvelopeUnwrapper/IInboundIngressPipeline (CTX-02 lifetime audit).
         services.AddSingleton<IRelayMailboxProvisioner, GrpcRelayMailboxProvisioner>();
+        services.AddSingleton<IRelayMailboxClient, GrpcRelayMailboxClient>();
 
         // Transport & ingress scoped services
         services.AddSingleton<IngressFilterOptions>();
