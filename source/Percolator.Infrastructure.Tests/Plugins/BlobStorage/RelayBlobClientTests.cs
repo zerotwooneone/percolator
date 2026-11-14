@@ -12,15 +12,20 @@ using System.Threading.Tasks;
 using FluentAssertions;
 using Google.Protobuf;
 using Grpc.Core;
+using Grpc.Net.Client;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using NUnit.Framework;
+using Percolator.Domain.Channels.Model;
+using Percolator.Domain.Channels.Ports;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Delivery.Ports;
 using Percolator.Domain.Delivery.ValueObjects;
+using Percolator.Domain.Identities;
 using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Infrastructure.Common;
 using Percolator.Infrastructure.DependencyInjection;
 using Percolator.Infrastructure.Plugins.BlobStorage;
 using Percolator.Infrastructure.Protos;
@@ -153,6 +158,14 @@ public sealed class RelayBlobClientTests
     {
         var services = new ServiceCollection();
         services.AddBlobStorageInfrastructure();
+        // Out-of-slice deps ctor-injected by the blob slice's services — registered by the
+        // vault-persistence (IChannelRepository), transport (IStreamRegistry,
+        // IPeerGrpcChannelFactory), and bootstrap (IDateTimeProvider) slices, which this
+        // isolated-slice test intentionally omits; stub them for ValidateOnBuild.
+        services.AddScoped<IChannelRepository, StubChannelRepository>();
+        services.AddSingleton<IStreamRegistry, StubStreamRegistry>();
+        services.AddSingleton<IPeerGrpcChannelFactory, StubPeerGrpcChannelFactory>();
+        services.AddSingleton<IDateTimeProvider, SystemDateTimeProvider>();
         var provider = services.BuildServiceProvider(new ServiceProviderOptions
         {
             ValidateScopes = true,
@@ -168,6 +181,61 @@ public sealed class RelayBlobClientTests
 
         var hostedServices = provider.GetServices<IHostedService>();
         hostedServices.Should().ContainSingle(s => s is RelayBlobRetentionPruner);
+    }
+
+    /// <summary>DI-validation stand-in — the real port is registered by the transport slice.</summary>
+    private sealed class StubStreamRegistry : IStreamRegistry
+    {
+        public bool HasActiveStream(PublicIdentityId targetId) => false;
+
+        public bool HasActiveRelayStream(PublicIdentityId relayId) => false;
+
+        public ValueTask<StreamWriteResult> TryWriteAsync(
+            PublicIdentityId targetId, ReadOnlyMemory<byte> framedPayload, CancellationToken ct = default) =>
+            new(StreamWriteResult.Closed("DI-validation stub"));
+    }
+
+    /// <summary>DI-validation stand-in — the real port is registered by the transport slice.</summary>
+    private sealed class StubPeerGrpcChannelFactory : IPeerGrpcChannelFactory
+    {
+        public GrpcChannel GetOrCreateChannel(Uri address) =>
+            throw new NotSupportedException("DI-validation stub only.");
+
+        public void InvalidateChannel(Uri address)
+        {
+        }
+
+        public int EvictIdleChannels() => 0;
+
+        public int ActiveChannelCount => 0;
+
+        public void Dispose()
+        {
+        }
+    }
+
+    /// <summary>DI-validation stand-in — the real port is registered by the vault-persistence slice.</summary>
+    private sealed class StubChannelRepository : IChannelRepository
+    {
+        public Task<DirectChannel?> GetDirectByIdAsync(ChannelId id, CancellationToken cancellationToken = default) =>
+            Task.FromResult<DirectChannel?>(null);
+
+        public Task<DirectChannel?> GetDirectByPeerAsync(
+            PublicIdentityId ownerId, PublicIdentityId remotePeerId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<DirectChannel?>(null);
+
+        public Task<GroupChannel?> GetGroupByIdAsync(ChannelId id, CancellationToken cancellationToken = default) =>
+            Task.FromResult<GroupChannel?>(null);
+
+        public Task<IReadOnlyList<GroupChannel>> GetAllGroupsForOwnerAsync(
+            PublicIdentityId ownerId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<GroupChannel>>(Array.Empty<GroupChannel>());
+
+        public Task SaveDirectAsync(DirectChannel channel, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public Task SaveGroupAsync(GroupChannel channel, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
     }
 
     private sealed class FakeOversizedStream : MemoryStream
