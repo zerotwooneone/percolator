@@ -160,6 +160,74 @@ public sealed class DirectoryServiceTests
             "the desktop launch-settings row must leave with the persona");
     }
 
+    [Test]
+    public async Task PersonaShredAndDelete_SettingsRowIsGone()
+    {
+        // STOR-04 parity: the shred must reach the vault's identity_settings row — assert
+        // state (the row is gone afterward) through a real repository over an in-memory
+        // store, not just an interaction verify.
+        var fakeSettings = new FakeDesktopSettingsRepository();
+        var keys = new Mock<ILocalIdentityKeyStore>(MockBehavior.Strict);
+        var profiles = new Mock<IIdentityProfileRepository>(MockBehavior.Strict);
+        keys
+            .Setup(k => k.DeleteIdentityKeysAsync(It.IsAny<PublicIdentityId>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        profiles
+            .Setup(p => p.DeleteAsync(It.IsAny<PublicIdentityId>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var svc = new PersonaDirectoryService(
+            profiles.Object, keys.Object,
+            new Mock<IPrivatePreKeyStore>(MockBehavior.Strict).Object,
+            new Mock<ICryptoEngine>(MockBehavior.Strict).Object,
+            Time,
+            fakeSettings);
+
+        var id = new PublicIdentityId(Guid.NewGuid());
+        await fakeSettings.SaveAsync(id.Value, new IdentityLaunchSettings(5100, 5101, true, 2));
+        (await fakeSettings.GetAsync(id.Value)).Should().NotBeNull();
+
+        await svc.ShredAndDeleteAsync(id);
+
+        (await fakeSettings.GetAsync(id.Value)).Should().BeNull(
+            "a shredded persona must not leave its launch-settings row behind in the vault");
+    }
+
+    /// <summary>Minimal in-memory <see cref="IDesktopSettingsRepository"/> for state assertions.</summary>
+    private sealed class FakeDesktopSettingsRepository : IDesktopSettingsRepository
+    {
+        private readonly Dictionary<Guid, IdentityLaunchSettings> _rows = new();
+        private readonly Dictionary<string, string> _appSettings = new();
+
+        public Task<IdentityLaunchSettings?> GetAsync(Guid identityId, CancellationToken ct = default) =>
+            Task.FromResult(_rows.TryGetValue(identityId, out var s) ? s : null);
+
+        public Task<IReadOnlyList<(PublicIdentityId IdentityId, IdentityLaunchSettings Settings)>> GetAllAsync(
+            CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<(PublicIdentityId, IdentityLaunchSettings)>>(
+                _rows.Select(kv => (new PublicIdentityId(kv.Key), kv.Value)).ToList());
+
+        public Task SaveAsync(Guid identityId, IdentityLaunchSettings settings, CancellationToken ct = default)
+        {
+            _rows[identityId] = settings;
+            return Task.CompletedTask;
+        }
+
+        public Task DeleteAsync(Guid identityId, CancellationToken ct = default)
+        {
+            _rows.Remove(identityId);
+            return Task.CompletedTask;
+        }
+
+        public Task<string?> GetAppSettingAsync(string key, CancellationToken ct = default) =>
+            Task.FromResult(_appSettings.TryGetValue(key, out var v) ? v : null);
+
+        public Task SetAppSettingAsync(string key, string value, CancellationToken ct = default)
+        {
+            _appSettings[key] = value;
+            return Task.CompletedTask;
+        }
+    }
+
     // ---- ExchangeDirectoryService ----
 
     private static ExchangeDirectoryService ExchangeService(

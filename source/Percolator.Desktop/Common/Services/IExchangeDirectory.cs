@@ -12,8 +12,8 @@ namespace Percolator.Desktop.Common.Services;
 
 /// <summary>
 /// Presentation-facing exchange (relay) facade ([VM-004], [VM-006]): ViewModels stay free of
-/// session internals. Every operation runs inside a scope on the authenticated session so all
-/// link/unlink state lands in the encrypted vault — the gate performs zero wire traffic
+/// session internals. Implementations resolve from the authenticated session container, so
+/// all link/unlink state lands in the encrypted vault — the gate performs zero wire traffic
 /// ([DEP-DESKTOP-PRE-ACTIVATION-STEALTH]).
 /// </summary>
 public interface IExchangeDirectory
@@ -61,6 +61,12 @@ public interface IExchangeDirectory
     /// "Stop using this exchange" — a pure vault-local row delete. When
     /// <paramref name="purgeQueuedEnvelopes"/> is set and the exchange is self-hosted, the
     /// relay-side queue lives in this same vault and is drained locally first.
+    /// <para>
+    /// The exchange's own <c>identity_settings</c> row (preferred port) deliberately survives
+    /// the unlink — it persists for the life of the relay registration so re-linking keeps
+    /// the launch preference (STOR-04). When a delete-exchange feature lands, it must call
+    /// <c>IDesktopSettingsRepository.DeleteAsync</c> inside the same operation.
+    /// </para>
     /// </summary>
     Task<DomainResult> UnlinkPersonaAsync(
         PublicIdentityId relayIdentityId,
