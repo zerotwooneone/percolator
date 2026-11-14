@@ -172,6 +172,11 @@ public sealed class ExchangeDirectoryService : IExchangeDirectory
         return result.IsFailure ? DomainResult.Failure(result.Error) : DomainResult.Success();
     }
 
+    // Settings-row decision: UnlinkPersonaAsync removes only the persona↔relay mailbox
+    // binding — the relay's identity_settings row (PreferredPort/SidebarOrder) persists for
+    // the life of the relay registration so re-linking keeps its launch preferences. A future
+    // delete-exchange feature MUST call _settings.DeleteAsync(relayIdentityId.Value, ct)
+    // inside the same operation.
     public async Task<DomainResult> UnlinkPersonaAsync(
         PublicIdentityId relayIdentityId,
         PublicIdentityId personaId,
