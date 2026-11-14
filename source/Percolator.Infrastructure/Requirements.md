@@ -48,6 +48,9 @@ Spec: [deployable-requirements-spec](../spec/deployable-requirements-spec.md)
 13. **`DEP-INFRA-VAULT-SCHEMA-MIGRATION` (Versioned Vault Schema Evolution):** `[Verify: Integration]`
     The deployable establishes and upgrades the vault's persisted schema through versioned migrations executed against the authenticated key prior to authenticated-host composition, preserving all existing content across application version upgrades without destructive re-initialization (realizes [`SYS-VAULT-UPGRADE-DATA-PRESERVATION`](../SystemRequirements.md#2-security-privacy-and-risk-control-invariants)).
 
+14. **`DEP-INFRA-MAILBOX-RETRIEVAL` (Acknowledged Stream Retrieval & Durable Pending Ingress):** `[Verify: Integration]`
+    The deployable implements `IRelayMailboxClient` to retrieve sealed envelopes from untrusted relay mailboxes over an authenticated streaming session emitting per-envelope acknowledgements, and implements `IPendingIngressStore` to durably persist each received encrypted envelope inside the vault before its acknowledgement is emitted, retaining records for ordered replay until ingress processing reaches a terminal outcome (realizes [`SYS-ASYNC-STORE-AND-FORWARD`](../SystemRequirements.md#1-functional-system-capabilities) and [`SYS-ATOMIC-STATE-PERSISTENCE`](../SystemRequirements.md#2-security-privacy-and-risk-control-invariants)).
+
 ## 3. Public Contract Invariants
 
 1. **`DEP-INFRA-CONCURRENCY-MODEL` (Adapter Thread-Safety and Lifetime Scoping):** `[Verify: StaticAnalysis]`
