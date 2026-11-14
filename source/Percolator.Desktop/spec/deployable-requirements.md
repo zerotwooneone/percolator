@@ -43,6 +43,9 @@ Spec: [deployable-requirements-spec](../../spec/deployable-requirements-spec.md)
 10. **`DEP-DESKTOP-PEER-BLOCK-UI-SILENCE` (Peer Block UI Indistinguishability & Visual Cleansing):** `[Verify: Integration]`
     The deployable shall immediately suppress all visual badges, audio alerts, and desktop notifications originating from blocked identities, rendering the blocked peer indistinguishable from an offline contact with zero UI presence leakage (realizes [`SYS-BLOCK-WIRE-INDISTINGUISHABILITY`](../../SystemRequirements.md#2-security-privacy-and-risk-control-invariants)).
 
+11. **`DEP-DESKTOP-VAULT-ONLY-PERSISTENCE` (Vault-Exclusive Desktop State Persistence):** `[Verify: StaticAnalysis]`
+    The deployable shall persist all UI preferences, persona launch settings, and presentation state exclusively inside the authenticated encrypted vault database via the inward `IVaultSettingsStore` port, and shall never create, open, or read secondary plaintext database or settings files within the vault storage directory (realizes [`SYS-AT-REST-VAULT-ENCRYPTION`](../../SystemRequirements.md#2-security-privacy-and-risk-control-invariants) and [`SYS-DECOY-VAULT-DENIABILITY`](../../SystemRequirements.md#2-security-privacy-and-risk-control-invariants)).
+
 ---
 
 ## 3. Public Contract Invariants
