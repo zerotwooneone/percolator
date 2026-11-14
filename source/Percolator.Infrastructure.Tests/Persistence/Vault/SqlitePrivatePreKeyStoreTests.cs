@@ -25,7 +25,7 @@ public class SqlitePrivatePreKeyStoreTests
     public async Task SetUp()
     {
         _testDb = new SqliteTestDb();
-        _store = new SqlitePrivatePreKeyStore(_testDb.DbContext);
+        _store = new SqlitePrivatePreKeyStore(_testDb.ContextFactory);
         _ownerId = Domain.Identities.PublicIdentityId.New();
         _deviceId = DeviceId.Primary;
 

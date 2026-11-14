@@ -22,7 +22,7 @@ using Percolator.Infrastructure.Transport;
 using Percolator.Infrastructure.Vault;
 using Percolator.PluginSdk;
 
-public sealed class BaselineStage2HostFactory : IStage2HostFactory
+public sealed class BaselineStage2HostFactory
 {
     private readonly VaultStorageOptions _options;
 

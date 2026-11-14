@@ -11,19 +11,21 @@ using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Infrastructure.Persistence.Entities;
 
+/// <summary>Singleton over the pooled context factory — creates/disposes a context per call.</summary>
 public sealed class SqliteIdentityProfileRepository : IIdentityProfileRepository
 {
-    private readonly PercolatorDbContext _dbContext;
+    private readonly IDbContextFactory<PercolatorDbContext> _dbFactory;
 
-    public SqliteIdentityProfileRepository(PercolatorDbContext dbContext)
+    public SqliteIdentityProfileRepository(IDbContextFactory<PercolatorDbContext> dbFactory)
     {
-        _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+        _dbFactory = dbFactory ?? throw new ArgumentNullException(nameof(dbFactory));
     }
 
     public async Task<IdentityProfile?> GetByIdAsync(Domain.Identities.PublicIdentityId id, CancellationToken cancellationToken = default)
     {
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
         var idGuid = id.Value;
-        var entity = await _dbContext.IdentityProfiles
+        var entity = await db.IdentityProfiles
             .AsNoTracking()
             .FirstOrDefaultAsync(p => p.Id == idGuid, cancellationToken);
 
@@ -43,7 +45,8 @@ public sealed class SqliteIdentityProfileRepository : IIdentityProfileRepository
 
     public async Task<IReadOnlyList<IdentityProfile>> GetAllAsync(CancellationToken cancellationToken = default)
     {
-        var entities = await _dbContext.IdentityProfiles
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
+        var entities = await db.IdentityProfiles
             .AsNoTracking()
             .ToListAsync(cancellationToken);
 
@@ -60,8 +63,9 @@ public sealed class SqliteIdentityProfileRepository : IIdentityProfileRepository
     {
         ArgumentNullException.ThrowIfNull(profile);
 
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
         var idGuid = profile.Id.Value;
-        var existing = await _dbContext.IdentityProfiles
+        var existing = await db.IdentityProfiles
             .FirstOrDefaultAsync(p => p.Id == idGuid, cancellationToken);
 
         if (existing == null)
@@ -75,7 +79,7 @@ public sealed class SqliteIdentityProfileRepository : IIdentityProfileRepository
                 CreatedAtUtc = profile.CreatedAtUtc,
                 DisabledAtUtc = profile.DisabledAtUtc
             };
-            await _dbContext.IdentityProfiles.AddAsync(entity, cancellationToken);
+            await db.IdentityProfiles.AddAsync(entity, cancellationToken);
         }
         else
         {
@@ -85,13 +89,14 @@ public sealed class SqliteIdentityProfileRepository : IIdentityProfileRepository
             existing.DisabledAtUtc = profile.DisabledAtUtc;
         }
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     public async Task DeleteAsync(Domain.Identities.PublicIdentityId id, CancellationToken cancellationToken = default)
     {
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
         var idGuid = id.Value;
-        await _dbContext.IdentityProfiles
+        await db.IdentityProfiles
             .Where(p => p.Id == idGuid)
             .ExecuteDeleteAsync(cancellationToken);
     }

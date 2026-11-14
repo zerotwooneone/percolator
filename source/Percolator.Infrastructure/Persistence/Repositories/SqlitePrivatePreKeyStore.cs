@@ -10,13 +10,14 @@ using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.Infrastructure.Persistence.Entities;
 
+/// <summary>Singleton over the pooled context factory — creates/disposes a context per call.</summary>
 public sealed class SqlitePrivatePreKeyStore : IPrivatePreKeyStore
 {
-    private readonly PercolatorDbContext _dbContext;
+    private readonly IDbContextFactory<PercolatorDbContext> _dbFactory;
 
-    public SqlitePrivatePreKeyStore(PercolatorDbContext dbContext)
+    public SqlitePrivatePreKeyStore(IDbContextFactory<PercolatorDbContext> dbFactory)
     {
-        _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+        _dbFactory = dbFactory ?? throw new ArgumentNullException(nameof(dbFactory));
     }
 
     public async Task<EphemeralPrivateKey?> GetSignedPreKeyPrivateAsync(
@@ -24,8 +25,9 @@ public sealed class SqlitePrivatePreKeyStore : IPrivatePreKeyStore
         DeviceId deviceId,
         CancellationToken cancellationToken = default)
     {
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
         var ownerGuid = ownerId.Value;
-        var entity = await _dbContext.VaultSignedPreKeys
+        var entity = await db.VaultSignedPreKeys
             .AsNoTracking()
             .FirstOrDefaultAsync(k => k.OwnerIdentityId == ownerGuid && k.DeviceId == deviceId.Value, cancellationToken);
 
@@ -43,8 +45,9 @@ public sealed class SqlitePrivatePreKeyStore : IPrivatePreKeyStore
         uint keyId,
         CancellationToken cancellationToken = default)
     {
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
         var ownerGuid = ownerId.Value;
-        var entity = await _dbContext.VaultOneTimePreKeys
+        var entity = await db.VaultOneTimePreKeys
             .FirstOrDefaultAsync(k => k.OwnerIdentityId == ownerGuid && k.DeviceId == deviceId.Value && k.KeyId == keyId, cancellationToken);
 
         if (entity == null || entity.IsConsumed || entity.PrivateKey.Length == 0)
@@ -59,7 +62,7 @@ public sealed class SqlitePrivatePreKeyStore : IPrivatePreKeyStore
         entity.ConsumedAtUtc = DateTimeOffset.UtcNow;
         entity.PrivateKey = Array.Empty<byte>();
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         return privateKey;
     }
 
@@ -68,8 +71,9 @@ public sealed class SqlitePrivatePreKeyStore : IPrivatePreKeyStore
         DeviceId deviceId,
         CancellationToken cancellationToken = default)
     {
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
         var ownerGuid = ownerId.Value;
-        var entity = await _dbContext.VaultSignedPreKeys
+        var entity = await db.VaultSignedPreKeys
             .AsNoTracking()
             .FirstOrDefaultAsync(k => k.OwnerIdentityId == ownerGuid && k.DeviceId == deviceId.Value, cancellationToken);
 
@@ -101,7 +105,8 @@ public sealed class SqlitePrivatePreKeyStore : IPrivatePreKeyStore
         var pubBytes = publicKey.Span.ToArray();
         var sigBytes = signature.Span.ToArray();
 
-        var existing = await _dbContext.VaultSignedPreKeys
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
+        var existing = await db.VaultSignedPreKeys
             .FirstOrDefaultAsync(k => k.OwnerIdentityId == ownerGuid && k.DeviceId == deviceId.Value, cancellationToken);
 
         if (existing == null)
@@ -115,7 +120,7 @@ public sealed class SqlitePrivatePreKeyStore : IPrivatePreKeyStore
                 Signature = sigBytes,
                 CreatedAtUtc = DateTimeOffset.UtcNow
             };
-            await _dbContext.VaultSignedPreKeys.AddAsync(entity, cancellationToken);
+            await db.VaultSignedPreKeys.AddAsync(entity, cancellationToken);
         }
         else
         {
@@ -124,7 +129,7 @@ public sealed class SqlitePrivatePreKeyStore : IPrivatePreKeyStore
             existing.Signature = sigBytes;
         }
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     public async Task StoreOneTimePreKeysAsync(
@@ -138,11 +143,12 @@ public sealed class SqlitePrivatePreKeyStore : IPrivatePreKeyStore
         var ownerGuid = ownerId.Value;
         var now = DateTimeOffset.UtcNow;
 
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
         foreach (var material in keys)
         {
             var privBytes = material.PrivateKey.Span.ToArray();
             var pubBytes = material.PublicKey.Span.ToArray();
-            var existing = await _dbContext.VaultOneTimePreKeys
+            var existing = await db.VaultOneTimePreKeys
                 .FirstOrDefaultAsync(k => k.OwnerIdentityId == ownerGuid && k.DeviceId == deviceId.Value && k.KeyId == material.KeyId, cancellationToken);
 
             if (existing == null)
@@ -157,7 +163,7 @@ public sealed class SqlitePrivatePreKeyStore : IPrivatePreKeyStore
                     IsConsumed = false,
                     CreatedAtUtc = now
                 };
-                await _dbContext.VaultOneTimePreKeys.AddAsync(entity, cancellationToken);
+                await db.VaultOneTimePreKeys.AddAsync(entity, cancellationToken);
             }
             else
             {
@@ -168,7 +174,7 @@ public sealed class SqlitePrivatePreKeyStore : IPrivatePreKeyStore
             }
         }
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     public async Task<uint> GetNextOneTimePreKeyIdAsync(
@@ -176,9 +182,10 @@ public sealed class SqlitePrivatePreKeyStore : IPrivatePreKeyStore
         DeviceId deviceId,
         CancellationToken cancellationToken = default)
     {
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
         var ownerGuid = ownerId.Value;
         // Include consumed rows so KeyIds are monotonically increasing and never reused.
-        var maxId = await _dbContext.VaultOneTimePreKeys
+        var maxId = await db.VaultOneTimePreKeys
             .Where(k => k.OwnerIdentityId == ownerGuid && k.DeviceId == deviceId.Value)
             .MaxAsync(k => (uint?)k.KeyId, cancellationToken);
 

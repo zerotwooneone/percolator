@@ -61,19 +61,25 @@ public static class InfrastructureServiceCollectionExtensions
         // Real schema migrator — opens a keyed DbContext with the just-verified master key
         // before any repositories exist ([DEC-CANARY-ERROR26-UNWRAP]).
         services.AddSingleton<IDatabaseMigrator, SqlCipherSchemaMigrator>();
-        services.AddSingleton<IStage2HostFactory, DefaultStage2HostFactory>();
+        // ISessionHostFactory is executable-owned (Desktop registers DesktopStage2SessionFactory);
+        // resolving the coordinator without one fails fast at resolution — intended.
         services.AddSingleton<IDatabaseUnlockCoordinator>(sp => new SqlCipherDatabaseUnlockCoordinator(
             sp.GetRequiredService<IHeaderStorage>(),
             sp.GetRequiredService<IVaultEnvelopePacker>(),
             sp.GetRequiredService<IDatabaseCanaryProbe>(),
             sp.GetRequiredService<IDatabaseMigrator>(),
-            sp.GetRequiredService<IStage2HostFactory>(),
+            sp.GetRequiredService<ISessionHostFactory>(),
             sp.GetRequiredService<IDuressWipeHandler>(),
             sp.GetRequiredService<VaultStorageOptions>()));
 
         return services;
     }
 
+    /// <summary>
+    /// Thin aggregator over the session-composition slices — kept so test/simulator hosts
+    /// keep a one-line composition. The Desktop executable composes the same slices inside
+    /// <see cref="ISessionHostFactory"/> plus its own session registrations.
+    /// </summary>
     public static IServiceCollection AddAuthenticatedInfrastructure(
         this IServiceCollection services,
         IMasterKeyHandle masterKeyHandle,
@@ -83,9 +89,33 @@ public static class InfrastructureServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(masterKeyHandle);
         options ??= new VaultStorageOptions();
 
+        services.AddSessionCoreInfrastructure(masterKeyHandle, options);
+        services.AddVaultPersistenceInfrastructure();
+        services.AddTransportInfrastructure();
+        services.AddSessionLifecycleInfrastructure();
+        services.AddChatInfrastructure();
+        services.AddDiscoveryInfrastructure();
+        services.AddBlobStorageInfrastructure();
+        services.AddFileTransferInfrastructure();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Master key, vault options, connection interceptor, event bus, and platform/crypto
+    /// singletons. The only parameterized slice — the rest read these registered
+    /// singletons via <c>sp</c>.
+    /// </summary>
+    public static IServiceCollection AddSessionCoreInfrastructure(
+        this IServiceCollection services,
+        IMasterKeyHandle masterKeyHandle,
+        VaultStorageOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(masterKeyHandle);
+        ArgumentNullException.ThrowIfNull(options);
+
         SQLitePCL.Batteries_V2.Init();
 
-        // 1. Core Singletons
         services.AddSingleton(masterKeyHandle);
         services.AddSingleton(options);
         services.AddSingleton<DbConnectionInterceptor, SqlCipherPragmaInterceptor>();
@@ -106,6 +136,84 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<IPayloadSerializer, ProtobufPayloadSerializer>();
         services.AddSingleton<IProfileMetadataSerializer, ProtobufProfileSerializer>();
 
+        return services;
+    }
+
+    /// <summary>
+    /// Keyed EF Core context factory, ambient scoped context, migrator, repositories &
+    /// query services, vault-backed stores, and the repository-maintenance workers.
+    /// Ports ctor-injected into session-long-lived objects are singletons over
+    /// <see cref="IDbContextFactory{PercolatorDbContext}"/> (CTX-02 lifetime audit);
+    /// handler-only ports stay scoped to keep inbound pipelines transaction-correct.
+    /// </summary>
+    public static IServiceCollection AddVaultPersistenceInfrastructure(this IServiceCollection services)
+    {
+        // EF Core SQLCipher DbContext pooling — VaultStorageOptions resolved via sp so the
+        // slice is composition-root-agnostic (no captured locals).
+        services.AddDbContextFactory<PercolatorDbContext>((sp, dbOptions) =>
+        {
+            var interceptor = sp.GetRequiredService<DbConnectionInterceptor>();
+            var options = sp.GetRequiredService<VaultStorageOptions>();
+            dbOptions.UseSqlite($"Data Source={options.DatabaseFilePath};Mode=ReadWriteCreate")
+                .AddInterceptors(interceptor);
+        });
+
+        // Ambient scoped context — handler/inbound pipelines only; UI paths take the factory.
+        services.AddScoped(sp =>
+        {
+            var factory = sp.GetRequiredService<IDbContextFactory<PercolatorDbContext>>();
+            return factory.CreateDbContext();
+        });
+
+        services.AddScoped<IDatabaseMigrator, SqliteDatabaseMigrator>();
+
+        // Session-bound facade ports — ctor-injected into session objects, so singletons
+        // over the pooled context factory (never an ambient scoped context).
+        services.AddSingleton<IIdentityProfileRepository, SqliteIdentityProfileRepository>();
+        services.AddSingleton<ILocalIdentityKeyStore, SqliteLocalIdentityKeyStore>();
+        services.AddSingleton<IPrivatePreKeyStore, SqlitePrivatePreKeyStore>();
+        services.AddSingleton<IRelayRegistrationRepository, SqliteRelayRegistrationRepository>();
+        services.AddSingleton<IRelayDirectory, RelayDirectoryService>();
+        services.AddSingleton<IRelayMailboxCapabilityStore, SqliteRelayMailboxCapabilityStore>();
+        services.AddSingleton<IVaultSettingsStore, SqliteVaultSettingsStore>();
+
+        // Handler-only repositories & CQRS query services — resolved inside scopes.
+        services.AddScoped<IRatchetSessionRepository, SqliteRatchetSessionRepository>();
+        services.AddScoped<IGroupSenderKeyRepository, SqliteGroupSenderKeyRepository>();
+        services.AddScoped<IGroupReceiverSessionRepository, SqliteGroupReceiverSessionRepository>();
+        services.AddScoped<IGroupCredentialsRepository, SqliteGroupCredentialsRepository>();
+        services.AddScoped<IPendingHandshakeRepository, SqlitePendingHandshakeRepository>();
+
+        services.AddScoped<IOutboxRepository, SqliteOutboxRepository>();
+        services.AddScoped<IOutboxQueryService, SqlOutboxQueryService>();
+
+        services.AddScoped<IPeerContactRepository, SqlitePeerContactRepository>();
+        services.AddScoped<IPeerContactQueryService, SqlPeerContactQueryService>();
+        services.AddScoped<IChannelRepository, SqliteChannelRepository>();
+
+        services.AddScoped(sp => new SqliteRelayPreKeyRepository(sp.GetRequiredService<IDbContextFactory<PercolatorDbContext>>()));
+        services.AddScoped<IRelayPreKeyRepository>(sp => sp.GetRequiredService<SqliteRelayPreKeyRepository>());
+        services.AddScoped(sp => new SqliteRelayProfileRepository(sp.GetRequiredService<PercolatorDbContext>()));
+        services.AddScoped<IRelayProfileRepository>(sp => sp.GetRequiredService<SqliteRelayProfileRepository>());
+        services.AddScoped(sp => new SqliteRelayLedgerRepository(sp.GetRequiredService<PercolatorDbContext>()));
+        services.AddScoped<IRelayLedgerRepository>(sp => sp.GetRequiredService<SqliteRelayLedgerRepository>());
+        services.AddScoped<IPeerProfileRepository, SqlitePeerProfileRepository>();
+        services.AddScoped<IPeerMailboxRoutingRepository, SqlitePeerMailboxRoutingRepository>();
+
+        // Repository-maintenance workers
+        services.AddHostedService<OutboxRetentionPruner>();
+        services.AddHostedService<RelayPreKeyDirectoryPruner>();
+        services.AddHostedService<RelayProfileSlotPruner>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Transport singletons, the singleton mailbox provisioner, ingress/dispatcher scoped
+    /// services, relay endpoints, and the mailbox/group stream workers.
+    /// </summary>
+    public static IServiceCollection AddTransportInfrastructure(this IServiceCollection services)
+    {
         // Transport Singletons
         services.AddSingleton<ITransportCertificateProvider, InMemoryTransportCertificateProvider>();
         services.AddSingleton<PeerGrpcChannelFactoryOptions>();
@@ -119,87 +227,11 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<IPeerTransportServer>(sp => sp.GetRequiredService<KestrelPeerTransportServer>());
         services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<KestrelPeerTransportServer>());
 
-        // Storage & Transfer Singletons
-        services.AddSingleton<IBlobCryptoService, StreamingAesGcmCryptoService>();
-        services.AddSingleton<ILocalChunkStore, LocalFileChunkStore>();
-        services.AddSingleton<IRelayMailboxCapabilityStore, SqliteRelayMailboxCapabilityStore>();
-        services.AddSingleton<IDesktopFileStorage, PortableDesktopFileStore>();
-        services.AddSingleton<RelayTransferPipeClient>();
-        services.AddSingleton<CallbackEndpointValidatorOptions>();
-        services.AddSingleton<CallbackEndpointValidator>();
-        services.AddSingleton<ITransferStreamPoolFactory, TcpMultiStreamPoolFactory>();
-        services.AddSingleton<ITransferRateLimiter, TokenBucketRateLimiter>();
-        services.AddSingleton<INetworkEndpointDiscoveryPort, NetworkInterfaceEndpointDiscoveryPort>();
+        // Session-bound: opens one scope per mailbox drain to resolve the per-node
+        // ISealedEnvelopeUnwrapper/IInboundIngressPipeline (CTX-02 lifetime audit).
+        services.AddSingleton<IRelayMailboxProvisioner, GrpcRelayMailboxProvisioner>();
 
-        // Vault Lifecycle Singletons
-        services.AddSingleton<IHeaderStorage, ProtobufHeaderStorage>();
-        services.AddSingleton<IDuressWipeHandler, DuressWipeHandler>();
-        services.AddSingleton<IVaultEnvelopePacker, VaultEnvelopePacker>();
-        services.AddSingleton<IDatabaseCanaryProbe, DatabaseCanaryProbe>();
-        services.AddSingleton<IStage2HostFactory, Stage2HostFactory>();
-        services.AddScoped<IDatabaseUnlockCoordinator>(sp => new SqlCipherDatabaseUnlockCoordinator(
-            sp.GetRequiredService<IHeaderStorage>(),
-            sp.GetRequiredService<IVaultEnvelopePacker>(),
-            sp.GetRequiredService<IDatabaseCanaryProbe>(),
-            sp.GetRequiredService<IDatabaseMigrator>(),
-            sp.GetRequiredService<IStage2HostFactory>(),
-            sp.GetRequiredService<IDuressWipeHandler>(),
-            sp.GetRequiredService<VaultStorageOptions>()));
-        services.AddSingleton<AuthenticatedSessionHolder>();
-        services.AddSingleton<IAuthenticatedSession>(sp =>
-        {
-            var holder = sp.GetRequiredService<AuthenticatedSessionHolder>();
-            return holder.Session ?? throw new InvalidOperationException("Authenticated session has not yet been bound to the host.");
-        });
-
-        // 2. EF Core SQLCipher DbContext Pooling
-        services.AddDbContextFactory<PercolatorDbContext>((sp, dbOptions) =>
-        {
-            var interceptor = sp.GetRequiredService<DbConnectionInterceptor>();
-            dbOptions.UseSqlite($"Data Source={options.DatabaseFilePath};Mode=ReadWriteCreate")
-                .AddInterceptors(interceptor);
-        });
-
-        services.AddScoped(sp =>
-        {
-            var factory = sp.GetRequiredService<IDbContextFactory<PercolatorDbContext>>();
-            return factory.CreateDbContext();
-        });
-
-        services.AddScoped<IDatabaseMigrator, SqliteDatabaseMigrator>();
-
-        // 3. Repositories & CQRS Query Services
-        services.AddScoped<IIdentityProfileRepository, SqliteIdentityProfileRepository>();
-        services.AddScoped<ILocalIdentityKeyStore, SqliteLocalIdentityKeyStore>();
-        services.AddScoped<IPrivatePreKeyStore, SqlitePrivatePreKeyStore>();
-        services.AddScoped<IRatchetSessionRepository, SqliteRatchetSessionRepository>();
-        services.AddScoped<IGroupSenderKeyRepository, SqliteGroupSenderKeyRepository>();
-        services.AddScoped<IGroupReceiverSessionRepository, SqliteGroupReceiverSessionRepository>();
-        services.AddScoped<IGroupCredentialsRepository, SqliteGroupCredentialsRepository>();
-        services.AddScoped<IPendingHandshakeRepository, SqlitePendingHandshakeRepository>();
-
-        services.AddScoped<IOutboxRepository, SqliteOutboxRepository>();
-        services.AddScoped<IOutboxQueryService, SqlOutboxQueryService>();
-
-        services.AddScoped<IPeerContactRepository, SqlitePeerContactRepository>();
-        services.AddScoped<IPeerContactQueryService, SqlPeerContactQueryService>();
-        services.AddScoped<IChannelRepository, SqliteChannelRepository>();
-        services.AddScoped<IRelayRegistrationRepository, SqliteRelayRegistrationRepository>();
-        services.AddScoped<IRelayMailboxProvisioner, GrpcRelayMailboxProvisioner>();
-        services.AddScoped<IRelayDirectory, RelayDirectoryService>();
-
-        services.AddScoped(sp => new SqliteRelayPreKeyRepository(sp.GetRequiredService<IDbContextFactory<PercolatorDbContext>>()));
-        services.AddScoped<IRelayPreKeyRepository>(sp => sp.GetRequiredService<SqliteRelayPreKeyRepository>());
-        services.AddScoped(sp => new SqliteRelayProfileRepository(sp.GetRequiredService<PercolatorDbContext>()));
-        services.AddScoped<IRelayProfileRepository>(sp => sp.GetRequiredService<SqliteRelayProfileRepository>());
-        services.AddScoped(sp => new SqliteRelayLedgerRepository(sp.GetRequiredService<PercolatorDbContext>()));
-        services.AddScoped<IRelayLedgerRepository>(sp => sp.GetRequiredService<SqliteRelayLedgerRepository>());
-        services.AddScoped<IPeerProfileRepository, SqlitePeerProfileRepository>();
-        services.AddScoped<IPeerMailboxRoutingRepository, SqlitePeerMailboxRoutingRepository>();
-        // Vault-stored launch/app settings — singleton over the pooled context factory.
-        services.AddSingleton<IVaultSettingsStore, SqliteVaultSettingsStore>();
-
-        // 4. Transport & Ingress Scoped Services
+        // Transport & ingress scoped services
         services.AddSingleton<IngressFilterOptions>();
         services.AddScoped<IIngressFilterService, IngressFilterService>();
         services.AddScoped<ITransportDispatcher, TransportDispatcher>();
@@ -210,58 +242,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<AuthenticatedRelayEndpoint>();
         services.AddScoped<PrivateRendezvousRelayEndpoint>();
 
-        // 5. Vertical Plugins
-        // Chat
-        services.AddScoped<IChatMessageRepository, SqlChatMessageRepository>();
-        services.AddScoped<IChatMessageQueryService, SqlChatMessageQueryService>();
-        services.AddScoped<IConversationListQueryService, SqlConversationListQueryService>();
-        services.AddScoped<IGroupInvitationRepository, SqlGroupInvitationRepository>();
-        services.AddScoped<IGroupInvitationQueryService, SqlGroupInvitationQueryService>();
-        services.AddScoped<IUnknownGroupMessageCacheRepository, SqlUnknownGroupMessageCacheRepository>();
-
-        // Discovery
-        services.AddScoped<IDiscoveryAdmissionGate, DiscoveryAdmissionGate>();
-        services.AddScoped<IRelayPeerDirectory, SqliteRelayPeerDirectory>();
-        services.AddScoped<IPrivateRendezvousService, SqlitePrivateRendezvousService>();
-        services.AddScoped<INearbyDiscoveryQueryClientPort, DiscoveryQueryClient>();
-        services.AddScoped<IPreKeyAvailabilityPort, PreKeyAvailabilityAdapter>();
-        services.AddScoped<IPreKeyBundleProvider, PreKeyBundleProviderAdapter>();
-        services.AddScoped<IProfileDeliveryClient, GrpcProfileDeliveryClient>();
-        services.AddScoped<IProfileManager, ProfileManager>();
-
-        // Blob Storage
-        services.AddScoped<IBlobStorageService, BlobStorageService>();
-        services.AddScoped<IRelayBlobClient, RelayBlobClient>();
-        services.AddScoped<IPeerStreamBlobClient, PeerStreamBlobClient>();
-        services.AddSingleton<IChannelRelayResolver, ChannelRelayResolver>();
-
-        // File Transfer
-        services.AddScoped<IDistributedTrackerPort, RelaySwarmTrackerClient>();
-        services.AddScoped<ITransferSessionRepository, SqliteTransferSessionRepository>();
-        services.AddScoped<IFileTransferFilterPolicyRepository, SqliteFilterPolicyRepository>();
-        services.AddScoped<IFileTransferQueryService, SqlFileTransferQueryService>();
-        services.AddScoped<ITransferOfferReaperService, TransferOfferReaperService>();
-
-        // 6. Background Hosted Services (All 12)
-        services.AddHostedService<OutboxRetentionPruner>();
-        services.AddHostedService<RelayPreKeyDirectoryPruner>();
-        services.AddHostedService<RelayProfileSlotPruner>();
-        services.AddHostedService(sp => new DisappearingMessageEvictionWorker(
-            sp.GetRequiredService<IServiceScopeFactory>(),
-            sp.GetRequiredService<ILocalChunkStore>(),
-            sp.GetRequiredService<TimeProvider>()));
-        services.AddHostedService(sp => new UnknownGroupMessageCachePruner(
-            sp.GetRequiredService<IServiceScopeFactory>(),
-            sp.GetRequiredService<TimeProvider>()));
-        services.AddHostedService(sp => new AbandonedInvitePruner(
-            sp.GetRequiredService<IServiceScopeFactory>(),
-            sp.GetRequiredService<TimeProvider>()));
-        services.AddHostedService(sp => new RelayDiscoveryRegistrationPruner(
-            sp.GetRequiredService<IServiceScopeFactory>(),
-            sp.GetRequiredService<TimeProvider>()));
-        services.AddHostedService<RelayBlobRetentionPruner>();
-        services.AddHostedService<TransferOfferReaperWorker>();
-        services.AddHostedService<SwarmEndpointRetentionPruner>();
+        // Mailbox/group stream workers
         services.AddSingleton<RelayMailboxStreamWorkerOptions>();
         services.AddSingleton<RelayGroupStreamWorkerOptions>();
         services.AddHostedService(sp => new RelayMailboxStreamWorker(
@@ -270,6 +251,21 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddHostedService(sp => new RelayGroupStreamWorker(
             sp.GetService<Func<CancellationToken, Task>>() ?? (async ct => await Task.Delay(Timeout.InfiniteTimeSpan, ct)),
             sp.GetRequiredService<RelayGroupStreamWorkerOptions>()));
+
+        return services;
+    }
+
+    /// <summary>
+    /// Vault-lifecycle primitives needed inside the session container. The Stage-1-only
+    /// pieces (ISessionHostFactory, IDatabaseUnlockCoordinator) deliberately stay out —
+    /// resolving them in-session would recurse into host composition.
+    /// </summary>
+    public static IServiceCollection AddSessionLifecycleInfrastructure(this IServiceCollection services)
+    {
+        services.AddSingleton<IHeaderStorage, ProtobufHeaderStorage>();
+        services.AddSingleton<IDuressWipeHandler, DuressWipeHandler>();
+        services.AddSingleton<IVaultEnvelopePacker, VaultEnvelopePacker>();
+        services.AddSingleton<IDatabaseCanaryProbe, DatabaseCanaryProbe>();
 
         return services;
     }
@@ -316,6 +312,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IPreKeyAvailabilityPort, PreKeyAvailabilityAdapter>();
         services.AddScoped<IPreKeyBundleProvider, PreKeyBundleProviderAdapter>();
         services.AddScoped<IProfileDeliveryClient, GrpcProfileDeliveryClient>();
+        services.AddScoped<IProfileManager, ProfileManager>();
 
         services.AddHostedService(sp => new RelayDiscoveryRegistrationPruner(
             sp.GetRequiredService<IServiceScopeFactory>(),
@@ -328,6 +325,7 @@ public static class InfrastructureServiceCollectionExtensions
     {
         services.AddSingleton<IBlobCryptoService, StreamingAesGcmCryptoService>();
         services.AddSingleton<ILocalChunkStore, LocalFileChunkStore>();
+        services.AddScoped<IBlobStorageService, BlobStorageService>();
         services.AddScoped<IRelayBlobClient, RelayBlobClient>();
         services.AddScoped<IPeerStreamBlobClient, PeerStreamBlobClient>();
         services.AddSingleton<IChannelRelayResolver, ChannelRelayResolver>();

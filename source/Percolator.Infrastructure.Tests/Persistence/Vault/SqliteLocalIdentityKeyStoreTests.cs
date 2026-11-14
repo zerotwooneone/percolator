@@ -19,7 +19,7 @@ public class SqliteLocalIdentityKeyStoreTests
     public void SetUp()
     {
         _testDb = new SqliteTestDb();
-        _store = new SqliteLocalIdentityKeyStore(_testDb.DbContext);
+        _store = new SqliteLocalIdentityKeyStore(_testDb.ContextFactory);
     }
 
     [TearDown]

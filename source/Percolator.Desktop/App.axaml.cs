@@ -8,6 +8,7 @@ using Avalonia.Markup.Xaml;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Percolator.Desktop.Common.Services;
+using Percolator.Desktop.Common.Session;
 using Percolator.Desktop.Common.Storage;
 using Percolator.Desktop.Common.Windowing;
 using Percolator.Desktop.Features.Shell.ViewModels;
@@ -75,6 +76,10 @@ public partial class App : Avalonia.Application
                 services.AddSingleton<IIdenticonGenerator, IdenticonGenerator>();
                 services.AddSingleton<IPersonaDirectory, PersonaDirectoryService>();
                 services.AddSingleton<IExchangeDirectory, ExchangeDirectoryService>();
+
+                // CTX-02: Stage-2 session composition is executable-owned. The coordinator
+                // resolves this factory and gets the session back — no Infra-side host factory.
+                services.AddSingleton<Application.Ports.ISessionHostFactory, DesktopStage2SessionFactory>();
 
                 // Child-VM factories injected into StartupHostViewModel ([VM-004], [VM-009]).
                 services.AddSingleton<Func<VaultSetupViewModel>>(sp => sp.GetRequiredService<VaultSetupViewModel>);

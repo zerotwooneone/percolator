@@ -34,7 +34,7 @@ public sealed class GrpcRelayMailboxProvisioner : IRelayMailboxProvisioner
     private readonly ILocalIdentityKeyStore _identityKeyStore;
     private readonly IPrivatePreKeyStore _preKeyStore;
     private readonly ICryptoEngine _cryptoEngine;
-    private readonly IServiceProvider _serviceProvider;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly IDateTimeProvider _timeProvider;
 
     public GrpcRelayMailboxProvisioner(
@@ -42,7 +42,7 @@ public sealed class GrpcRelayMailboxProvisioner : IRelayMailboxProvisioner
         ILocalIdentityKeyStore identityKeyStore,
         IPrivatePreKeyStore preKeyStore,
         ICryptoEngine cryptoEngine,
-        IServiceProvider serviceProvider,
+        IServiceScopeFactory scopeFactory,
         IDateTimeProvider timeProvider)
     {
         _channelFactory = channelFactory ?? throw new ArgumentNullException(nameof(channelFactory));
@@ -51,10 +51,10 @@ public sealed class GrpcRelayMailboxProvisioner : IRelayMailboxProvisioner
         _cryptoEngine = cryptoEngine ?? throw new ArgumentNullException(nameof(cryptoEngine));
         // ISealedEnvelopeUnwrapper and IInboundIngressPipeline are per-node services
         // registered only by composition roots that know the node identity. They are
-        // resolved lazily inside DrainMailboxOnceAsync so that hosts without a local
-        // node identity can still construct this provisioner (required for
+        // resolved lazily inside a per-drain scope in DrainMailboxOnceAsync so that hosts
+        // without a local node identity can still construct this provisioner (required for
         // ValidateOnBuild composition checks).
-        _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+        _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
     }
 
@@ -212,8 +212,11 @@ public sealed class GrpcRelayMailboxProvisioner : IRelayMailboxProvisioner
                 $"Mailbox drain RPC failed: {ex.Status.Detail ?? ex.Message}"));
         }
 
-        var unwrapper = _serviceProvider.GetRequiredService<ISealedEnvelopeUnwrapper>();
-        var ingress = _serviceProvider.GetRequiredService<IInboundIngressPipeline>();
+        // One scope per drain: the per-node unwrapper/pipeline are scoped registrations
+        // owned by the composition root, not resolvable from a singleton.
+        using var drainScope = _scopeFactory.CreateScope();
+        var unwrapper = drainScope.ServiceProvider.GetRequiredService<ISealedEnvelopeUnwrapper>();
+        var ingress = drainScope.ServiceProvider.GetRequiredService<IInboundIngressPipeline>();
 
         var processed = 0;
         foreach (var queued in drainResponse.Envelopes)

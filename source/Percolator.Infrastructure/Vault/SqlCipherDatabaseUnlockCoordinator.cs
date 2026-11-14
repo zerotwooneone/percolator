@@ -16,7 +16,7 @@ public sealed class SqlCipherDatabaseUnlockCoordinator : IDatabaseUnlockCoordina
     private readonly IVaultEnvelopePacker _envelopePacker;
     private readonly IDatabaseCanaryProbe _canaryProbe;
     private readonly IDatabaseMigrator _migrator;
-    private readonly IStage2HostFactory _hostFactory;
+    private readonly ISessionHostFactory _hostFactory;
     private readonly IDuressWipeHandler _wipeHandler;
     private readonly VaultStorageOptions _options;
 
@@ -30,7 +30,7 @@ public sealed class SqlCipherDatabaseUnlockCoordinator : IDatabaseUnlockCoordina
         IVaultEnvelopePacker envelopePacker,
         IDatabaseCanaryProbe canaryProbe,
         IDatabaseMigrator migrator,
-        IStage2HostFactory hostFactory,
+        ISessionHostFactory hostFactory,
         IDuressWipeHandler wipeHandler,
         VaultStorageOptions options)
     {
@@ -91,10 +91,10 @@ public sealed class SqlCipherDatabaseUnlockCoordinator : IDatabaseUnlockCoordina
                 return DomainResult<IAuthenticatedSession>.Failure(vaultResult.Error);
             }
 
-            // 6. Build Stage 2 Host and transition status
-            var host = _hostFactory.BuildAuthenticatedHost(masterKeyHandle);
+            // 6. Build Stage 2 session and transition status
+            var session = _hostFactory.CreateSession(masterKeyHandle);
             _activeKeyHandle = masterKeyHandle;
-            _activeSession = new AuthenticatedSession(host);
+            _activeSession = session;
             Status = DatabaseSetupStatus.Unlocked;
 
             return DomainResult<IAuthenticatedSession>.Success(_activeSession);
@@ -149,8 +149,7 @@ public sealed class SqlCipherDatabaseUnlockCoordinator : IDatabaseUnlockCoordina
                             $"Decoy vault initialization failed: {reinitResult.Error.Description}");
                     }
 
-                    var host = _hostFactory.BuildAuthenticatedHost(decoyKey);
-                    var session = new AuthenticatedSession(host);
+                    var session = _hostFactory.CreateSession(decoyKey);
                     _activeKeyHandle = decoyKey;
                     _activeSession = session;
                     Status = DatabaseSetupStatus.Unlocked;
@@ -198,9 +197,9 @@ public sealed class SqlCipherDatabaseUnlockCoordinator : IDatabaseUnlockCoordina
                     return new UnlockResult.InvalidCredentials();
                 }
 
-                var host = _hostFactory.BuildAuthenticatedHost(masterKeyHandle);
+                var session = _hostFactory.CreateSession(masterKeyHandle);
                 _activeKeyHandle = masterKeyHandle;
-                _activeSession = new AuthenticatedSession(host);
+                _activeSession = session;
                 Status = DatabaseSetupStatus.Unlocked;
 
                 return new UnlockResult.Success(_activeSession);

@@ -10,19 +10,21 @@ using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.Infrastructure.Persistence.Entities;
 
+/// <summary>Singleton over the pooled context factory — creates/disposes a context per call.</summary>
 public sealed class SqliteLocalIdentityKeyStore : ILocalIdentityKeyStore
 {
-    private readonly PercolatorDbContext _dbContext;
+    private readonly IDbContextFactory<PercolatorDbContext> _dbFactory;
 
-    public SqliteLocalIdentityKeyStore(PercolatorDbContext dbContext)
+    public SqliteLocalIdentityKeyStore(IDbContextFactory<PercolatorDbContext> dbFactory)
     {
-        _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+        _dbFactory = dbFactory ?? throw new ArgumentNullException(nameof(dbFactory));
     }
 
     public async Task<EphemeralPrivateKey?> GetIdentityPrivateKeyAsync(Domain.Identities.PublicIdentityId identityId, CancellationToken ct = default)
     {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var idGuid = identityId.Value;
-        var entity = await _dbContext.VaultIdentityKeys
+        var entity = await db.VaultIdentityKeys
             .AsNoTracking()
             .FirstOrDefaultAsync(k => k.Id == idGuid, ct);
 
@@ -36,8 +38,9 @@ public sealed class SqliteLocalIdentityKeyStore : ILocalIdentityKeyStore
 
     public async Task<IdentityKey?> GetIdentityPublicKeyAsync(Domain.Identities.PublicIdentityId identityId, CancellationToken ct = default)
     {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var idGuid = identityId.Value;
-        var entity = await _dbContext.VaultIdentityKeys
+        var entity = await db.VaultIdentityKeys
             .AsNoTracking()
             .FirstOrDefaultAsync(k => k.Id == idGuid, ct);
 
@@ -51,8 +54,9 @@ public sealed class SqliteLocalIdentityKeyStore : ILocalIdentityKeyStore
 
     public async Task<ProfileKey?> GetProfileKeyAsync(Domain.Identities.PublicIdentityId identityId, CancellationToken ct = default)
     {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var idGuid = identityId.Value;
-        var entity = await _dbContext.VaultIdentityKeys
+        var entity = await db.VaultIdentityKeys
             .AsNoTracking()
             .FirstOrDefaultAsync(k => k.Id == idGuid, ct);
 
@@ -80,7 +84,8 @@ public sealed class SqliteLocalIdentityKeyStore : ILocalIdentityKeyStore
         var pubBytes = publicKey.Span.ToArray();
         var profileBytes = profileKey.Span.ToArray();
 
-        var existing = await _dbContext.VaultIdentityKeys
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var existing = await db.VaultIdentityKeys
             .FirstOrDefaultAsync(k => k.Id == idGuid, ct);
 
         if (existing == null)
@@ -93,7 +98,7 @@ public sealed class SqliteLocalIdentityKeyStore : ILocalIdentityKeyStore
                 ProfileKey = profileBytes,
                 CreatedAtUtc = DateTimeOffset.UtcNow
             };
-            await _dbContext.VaultIdentityKeys.AddAsync(entity, ct);
+            await db.VaultIdentityKeys.AddAsync(entity, ct);
         }
         else
         {
@@ -102,27 +107,29 @@ public sealed class SqliteLocalIdentityKeyStore : ILocalIdentityKeyStore
             existing.ProfileKey = profileBytes;
         }
 
-        await _dbContext.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
     }
 
     public async Task<ProfileKey> RotateProfileKeyAsync(Domain.Identities.PublicIdentityId identityId, CancellationToken ct = default)
     {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var idGuid = identityId.Value;
-        var existing = await _dbContext.VaultIdentityKeys
+        var existing = await db.VaultIdentityKeys
             .FirstOrDefaultAsync(k => k.Id == idGuid, ct)
             ?? throw new InvalidOperationException($"No identity keys stored for '{identityId.Value}'.");
 
         var rotated = ProfileKey.Generate();
         existing.ProfileKey = rotated.Span.ToArray();
-        await _dbContext.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return rotated;
     }
 
     /// <summary>Permanently removes the stored identity keypair (persona shred path).</summary>
     public async Task DeleteIdentityKeysAsync(Domain.Identities.PublicIdentityId identityId, CancellationToken ct = default)
     {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var idGuid = identityId.Value;
-        await _dbContext.VaultIdentityKeys
+        await db.VaultIdentityKeys
             .Where(k => k.Id == idGuid)
             .ExecuteDeleteAsync(ct);
     }

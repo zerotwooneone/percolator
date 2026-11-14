@@ -12,30 +12,33 @@ using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Infrastructure.Persistence.Entities;
 
+/// <summary>Singleton over the pooled context factory — creates/disposes a context per call.</summary>
 public sealed class SqliteRelayRegistrationRepository : IRelayRegistrationRepository
 {
-    private readonly PercolatorDbContext _dbContext;
+    private readonly IDbContextFactory<PercolatorDbContext> _dbFactory;
 
-    public SqliteRelayRegistrationRepository(PercolatorDbContext dbContext)
+    public SqliteRelayRegistrationRepository(IDbContextFactory<PercolatorDbContext> dbFactory)
     {
-        _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+        _dbFactory = dbFactory ?? throw new ArgumentNullException(nameof(dbFactory));
     }
 
     public async Task<RelayRegistration?> GetByIdAsync(
         Domain.Identities.PublicIdentityId relayIdentityId,
         CancellationToken ct = default)
     {
-        var entity = await _dbContext.RelayRegistrations
+        await using var db = await _dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
+        var entity = await db.RelayRegistrations
             .AsNoTracking()
             .FirstOrDefaultAsync(r => r.RelayIdentityId == relayIdentityId.Value, ct)
             .ConfigureAwait(false);
 
-        return entity == null ? null : await MapAsync(entity, ct).ConfigureAwait(false);
+        return entity == null ? null : await MapAsync(db, entity, ct).ConfigureAwait(false);
     }
 
     public async Task<IReadOnlyList<RelayRegistration>> GetAllAsync(CancellationToken ct = default)
     {
-        var entities = await _dbContext.RelayRegistrations
+        await using var db = await _dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
+        var entities = await db.RelayRegistrations
             .AsNoTracking()
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -43,7 +46,7 @@ public sealed class SqliteRelayRegistrationRepository : IRelayRegistrationReposi
         var registrations = new List<RelayRegistration>(entities.Count);
         foreach (var entity in entities)
         {
-            registrations.Add(await MapAsync(entity, ct).ConfigureAwait(false));
+            registrations.Add(await MapAsync(db, entity, ct).ConfigureAwait(false));
         }
         return registrations;
     }
@@ -52,7 +55,8 @@ public sealed class SqliteRelayRegistrationRepository : IRelayRegistrationReposi
         Domain.Identities.PublicIdentityId ownerIdentityId,
         CancellationToken ct = default)
     {
-        var relayIds = await _dbContext.RelayMailboxBindings
+        await using var db = await _dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
+        var relayIds = await db.RelayMailboxBindings
             .Where(b => b.OwnerIdentityId == ownerIdentityId.Value)
             .Select(b => b.RelayIdentityId)
             .Distinct()
@@ -64,7 +68,7 @@ public sealed class SqliteRelayRegistrationRepository : IRelayRegistrationReposi
             return Array.Empty<RelayRegistration>();
         }
 
-        var entities = await _dbContext.RelayRegistrations
+        var entities = await db.RelayRegistrations
             .AsNoTracking()
             .Where(r => relayIds.Contains(r.RelayIdentityId))
             .ToListAsync(ct)
@@ -73,7 +77,7 @@ public sealed class SqliteRelayRegistrationRepository : IRelayRegistrationReposi
         var registrations = new List<RelayRegistration>(entities.Count);
         foreach (var entity in entities)
         {
-            registrations.Add(await MapAsync(entity, ct).ConfigureAwait(false));
+            registrations.Add(await MapAsync(db, entity, ct).ConfigureAwait(false));
         }
         return registrations;
     }
@@ -82,21 +86,22 @@ public sealed class SqliteRelayRegistrationRepository : IRelayRegistrationReposi
     {
         ArgumentNullException.ThrowIfNull(registration);
 
-        var entity = await _dbContext.RelayRegistrations
+        await using var db = await _dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
+        var entity = await db.RelayRegistrations
             .FirstOrDefaultAsync(r => r.RelayIdentityId == registration.Id.Value, ct)
             .ConfigureAwait(false);
 
         if (entity == null)
         {
             entity = new RelayRegistrationEntity { RelayIdentityId = registration.Id.Value };
-            _dbContext.RelayRegistrations.Add(entity);
+            db.RelayRegistrations.Add(entity);
         }
 
         entity.Endpoint = registration.Endpoint.Value;
         entity.PinnedCertificateSha256 = registration.PinnedCertificate?.Span.ToArray();
         entity.CreatedAtUtc = registration.CreatedAtUtc;
 
-        var existing = await _dbContext.RelayMailboxBindings
+        var existing = await db.RelayMailboxBindings
             .Where(b => b.RelayIdentityId == registration.Id.Value)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -104,7 +109,7 @@ public sealed class SqliteRelayRegistrationRepository : IRelayRegistrationReposi
         var currentOwners = registration.Bindings.Select(b => b.OwnerIdentityId.Value).ToHashSet();
         foreach (var stale in existing.Where(b => !currentOwners.Contains(b.OwnerIdentityId)))
         {
-            _dbContext.RelayMailboxBindings.Remove(stale);
+            db.RelayMailboxBindings.Remove(stale);
         }
 
         foreach (var binding in registration.Bindings)
@@ -112,7 +117,7 @@ public sealed class SqliteRelayRegistrationRepository : IRelayRegistrationReposi
             var row = existing.FirstOrDefault(b => b.OwnerIdentityId == binding.OwnerIdentityId.Value);
             if (row == null)
             {
-                _dbContext.RelayMailboxBindings.Add(new RelayMailboxBindingEntity
+                db.RelayMailboxBindings.Add(new RelayMailboxBindingEntity
                 {
                     RelayIdentityId = registration.Id.Value,
                     OwnerIdentityId = binding.OwnerIdentityId.Value,
@@ -131,20 +136,21 @@ public sealed class SqliteRelayRegistrationRepository : IRelayRegistrationReposi
             }
         }
 
-        await _dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
     public async Task DeleteAsync(Domain.Identities.PublicIdentityId relayIdentityId, CancellationToken ct = default)
     {
-        await _dbContext.RelayRegistrations
+        await using var db = await _dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
+        await db.RelayRegistrations
             .Where(r => r.RelayIdentityId == relayIdentityId.Value)
             .ExecuteDeleteAsync(ct)
             .ConfigureAwait(false);
     }
 
-    private async Task<RelayRegistration> MapAsync(RelayRegistrationEntity entity, CancellationToken ct)
+    private static async Task<RelayRegistration> MapAsync(PercolatorDbContext db, RelayRegistrationEntity entity, CancellationToken ct)
     {
-        var bindingRows = await _dbContext.RelayMailboxBindings
+        var bindingRows = await db.RelayMailboxBindings
             .AsNoTracking()
             .Where(b => b.RelayIdentityId == entity.RelayIdentityId)
             .ToListAsync(ct)

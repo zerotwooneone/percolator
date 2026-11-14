@@ -74,15 +74,14 @@ public sealed class DependencyInjectionTests
         using var scope = host.Services.CreateScope();
         var sp = scope.ServiceProvider;
 
-        // Assert: 61 Ports
+        // Assert: session ports. Post-CTX-02 the unlock coordinator, the session itself,
+        // and the session factory are Stage-1 (executable) owned and intentionally absent.
         // 1. Core Cryptography & Platform
         sp.GetRequiredService<ICryptoEngine>().Should().NotBeNull();
         sp.GetRequiredService<IZkProofEngine>().Should().NotBeNull();
         sp.GetRequiredService<IDateTimeProvider>().Should().NotBeNull();
 
         // 2. Vault Lifecycle
-        sp.GetRequiredService<IDatabaseUnlockCoordinator>().Should().NotBeNull();
-        sp.GetRequiredService<IAuthenticatedSession>().Should().NotBeNull();
         sp.GetRequiredService<IMasterKeyHandle>().Should().NotBeNull();
         sp.GetRequiredService<IDuressWipeHandler>().Should().NotBeNull();
         sp.GetRequiredService<IHeaderStorage>().Should().NotBeNull();
@@ -160,7 +159,6 @@ public sealed class DependencyInjectionTests
         sp.GetRequiredService<IPortReservationService>().Should().NotBeNull();
         sp.GetRequiredService<IPrivateRendezvousService>().Should().NotBeNull();
         sp.GetRequiredService<IProfileMetadataSerializer>().Should().NotBeNull();
-        sp.GetRequiredService<IStage2HostFactory>().Should().NotBeNull();
     }
 
     [Test]
@@ -211,19 +209,18 @@ public sealed class DependencyInjectionTests
     }
 
     [Test]
-    public async Task AuthenticatedSession_ResolvedFromContainer_ControlsRealHostLifecycle()
+    public async Task AuthenticatedSession_FromFactory_ControlsRealHostLifecycle()
     {
         // Arrange
         var options = new VaultStorageOptions { BaseDirectory = _tempDir };
         var factory = new Stage2HostFactory(options);
 
-        // Act
-        using var host = factory.BuildAuthenticatedHost(_keyHandle);
-        var session = host.Services.GetRequiredService<IAuthenticatedSession>();
+        // Act — CTX-02: the factory returns the session wrapping its own host.
+        await using var session = factory.CreateSession(_keyHandle);
 
         // Assert
         session.Should().NotBeNull();
-        session.Services.Should().BeSameAs(host.Services);
+        session.Services.Should().NotBeNull();
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         var startAction = async () => await session.StartAsync(cts.Token);

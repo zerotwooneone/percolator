@@ -39,8 +39,9 @@ public sealed class SqliteRelayRegistrationRepositoryTests
             new SystemDateTimeProvider()).Value!;
     }
 
+    // Every repo call creates its own context via the factory — no ambient context needed.
     private SqliteRelayRegistrationRepository NewRepoOnNewContext() =>
-        new(_testDb.CreateNewContext());
+        new(_testDb.ContextFactory);
 
     [Test]
     public async Task SaveAsync_ThenGetByIdAsync_RoundTripsRegistration()
@@ -50,7 +51,7 @@ public sealed class SqliteRelayRegistrationRepositoryTests
         var pin = CertificatePin.FromSpan(pinBytes);
         var registration = NewRegistration(pin);
 
-        var writeRepo = new SqliteRelayRegistrationRepository(_testDb.DbContext);
+        var writeRepo = new SqliteRelayRegistrationRepository(_testDb.ContextFactory);
         await writeRepo.SaveAsync(registration);
 
         var readRepo = NewRepoOnNewContext();
@@ -68,7 +69,7 @@ public sealed class SqliteRelayRegistrationRepositoryTests
     [Test]
     public async Task GetByIdAsync_UnknownRelay_ReturnsNull()
     {
-        var repo = new SqliteRelayRegistrationRepository(_testDb.DbContext);
+        var repo = new SqliteRelayRegistrationRepository(_testDb.ContextFactory);
         var loaded = await repo.GetByIdAsync(Domain.Identities.PublicIdentityId.New());
         loaded.Should().BeNull();
     }
@@ -83,7 +84,7 @@ public sealed class SqliteRelayRegistrationRepositoryTests
         registration.LinkIdentity(ownerId, time).IsSuccess.Should().BeTrue();
         var linked = registration.Bindings.Single();
 
-        var writeRepo = new SqliteRelayRegistrationRepository(_testDb.DbContext);
+        var writeRepo = new SqliteRelayRegistrationRepository(_testDb.ContextFactory);
         await writeRepo.SaveAsync(registration);
 
         var readRepo = NewRepoOnNewContext();
@@ -127,7 +128,7 @@ public sealed class SqliteRelayRegistrationRepositoryTests
         var unrelated = NewRegistration();
         unrelated.LinkIdentity(Domain.Identities.PublicIdentityId.New(), time);
 
-        var writeRepo = new SqliteRelayRegistrationRepository(_testDb.DbContext);
+        var writeRepo = new SqliteRelayRegistrationRepository(_testDb.ContextFactory);
         await writeRepo.SaveAsync(matching);
         await writeRepo.SaveAsync(unrelated);
 
@@ -144,7 +145,7 @@ public sealed class SqliteRelayRegistrationRepositoryTests
         var first = NewRegistration();
         var second = NewRegistration();
 
-        var writeRepo = new SqliteRelayRegistrationRepository(_testDb.DbContext);
+        var writeRepo = new SqliteRelayRegistrationRepository(_testDb.ContextFactory);
         await writeRepo.SaveAsync(first);
         await writeRepo.SaveAsync(second);
 
@@ -160,7 +161,7 @@ public sealed class SqliteRelayRegistrationRepositoryTests
         var registration = NewRegistration();
         registration.LinkIdentity(Domain.Identities.PublicIdentityId.New(), new SystemDateTimeProvider());
 
-        var writeRepo = new SqliteRelayRegistrationRepository(_testDb.DbContext);
+        var writeRepo = new SqliteRelayRegistrationRepository(_testDb.ContextFactory);
         await writeRepo.SaveAsync(registration);
         await writeRepo.DeleteAsync(registration.Id);
 

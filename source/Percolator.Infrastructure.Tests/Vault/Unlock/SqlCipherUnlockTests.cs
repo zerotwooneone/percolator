@@ -8,6 +8,7 @@ using Microsoft.Extensions.Hosting;
 using Percolator.Domain.Common;
 using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
+using Percolator.Infrastructure.Persistence;
 using Percolator.Infrastructure.Vault;
 
 [TestFixture]
@@ -19,7 +20,7 @@ public class SqlCipherUnlockTests
     private VaultEnvelopePacker _envelopePacker = null!;
     private DatabaseCanaryProbe _canaryProbe = null!;
     private NoOpDatabaseMigrator _migrator = null!;
-    private DefaultStage2HostFactory _hostFactory = null!;
+    private Stage2HostFactory _hostFactory = null!;
     private DuressWipeHandler _wipeHandler = null!;
     private SqlCipherDatabaseUnlockCoordinator _coordinator = null!;
 
@@ -41,7 +42,7 @@ public class SqlCipherUnlockTests
         _envelopePacker = new VaultEnvelopePacker(memoryKb: 1024, iterations: 1, parallelism: 1);
         _canaryProbe = new DatabaseCanaryProbe();
         _migrator = new NoOpDatabaseMigrator();
-        _hostFactory = new DefaultStage2HostFactory(_options);
+        _hostFactory = new Stage2HostFactory(_options);
         _wipeHandler = new DuressWipeHandler(_options);
 
         _coordinator = new SqlCipherDatabaseUnlockCoordinator(
@@ -261,7 +262,7 @@ public class SqlCipherUnlockTests
     [Test]
     public async Task DuressActivation_WhenDecoyHostBuildFails_PropagatesAsUnlockFailure()
     {
-        var conditionalFactory = new ConditionalThrowingStage2HostFactory(_hostFactory);
+        var conditionalFactory = new ConditionalThrowingSessionFactory(_hostFactory);
         var coordinator = new SqlCipherDatabaseUnlockCoordinator(
             _headerStorage,
             _envelopePacker,
@@ -284,18 +285,18 @@ public class SqlCipherUnlockTests
             "there is no sessionless DuressActivated");
     }
 
-    private sealed class ConditionalThrowingStage2HostFactory : IStage2HostFactory
+    private sealed class ConditionalThrowingSessionFactory : ISessionHostFactory
     {
-        private readonly IStage2HostFactory _inner;
+        private readonly ISessionHostFactory _inner;
 
-        public ConditionalThrowingStage2HostFactory(IStage2HostFactory inner) => _inner = inner;
+        public ConditionalThrowingSessionFactory(ISessionHostFactory inner) => _inner = inner;
 
         public bool Throw { get; set; }
 
-        public IHost BuildAuthenticatedHost(IMasterKeyHandle masterKeyHandle) =>
+        public IAuthenticatedSession CreateSession(IMasterKeyHandle masterKey) =>
             Throw
                 ? throw new InvalidOperationException("Simulated host build failure.")
-                : _inner.BuildAuthenticatedHost(masterKeyHandle);
+                : _inner.CreateSession(masterKey);
     }
 
     private sealed class FailingDatabaseMigrator : IDatabaseMigrator
