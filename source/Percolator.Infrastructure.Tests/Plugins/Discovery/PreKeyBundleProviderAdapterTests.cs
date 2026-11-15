@@ -90,6 +90,7 @@ public sealed class PreKeyBundleProviderAdapterTests
             idKey,
             signedPreKey,
             sig,
+            SignedPreKeyId.First,
             new[] { (1u, otpk) });
 
         var repo = new InMemoryPreKeyRepo { Bundle = hostedBundle };

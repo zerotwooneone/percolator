@@ -483,6 +483,7 @@ public sealed class UnauthenticatedDeliveryEndpointTests
             pubId,
             pubSigned,
             DeviceLinkProof.FromSpan(sig),
+            SignedPreKeyId.First,
             opks);
 
         await _preKeyRepo.SaveAsync(bundle);

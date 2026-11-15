@@ -140,6 +140,7 @@ public sealed class ScenarioParticipant : IDisposable
             IdentityPublicKey,
             SignedPreKeyPublic,
             DeviceLinkProof.FromSpan(SignedPreKeySignature),
+            SignedPreKeyId.First,
             opkPub,
             keyId);
     }
@@ -158,6 +159,7 @@ public sealed class ScenarioParticipant : IDisposable
             IdentityPublicKey,
             SignedPreKeyPublic,
             DeviceLinkProof.FromSpan(SignedPreKeySignature),
+            SignedPreKeyId.First,
             opkPubs,
             policy ?? RelayHostingPolicy.Default,
             engine).Value!;

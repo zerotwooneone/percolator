@@ -261,7 +261,7 @@ public class DirectRatchetSessionTests
         var (bobSignedPreKeyPriv, bobSignedPreKeyPub) = _engine.GenerateEphemeralKeyPair();
         var bobIdentityKey = IdentityKey.FromSpan(new byte[32]);
         var bobProof = DeviceLinkProof.FromSpan(new byte[64]);
-        var bobBundle = new PreKeyBundle(_device1, bobIdentityKey, bobSignedPreKeyPub, bobProof);
+        var bobBundle = new PreKeyBundle(_device1, bobIdentityKey, bobSignedPreKeyPub, bobProof, SignedPreKeyId.First);
 
         // 2. Alice initiates outbound session
         var aliceResult = DirectRatchetSession.InitiateOutbound(_aliceId, _device1, _bobId, bobBundle, _engine);
@@ -298,7 +298,7 @@ public class DirectRatchetSessionTests
         var (_, bobSignedPreKeyPub) = _engine.GenerateEphemeralKeyPair();
         var bobIdentityKey = IdentityKey.FromSpan(new byte[32]);
         var forgedProof = DeviceLinkProof.FromSpan(new byte[64]);
-        var bobBundle = new PreKeyBundle(_device1, bobIdentityKey, bobSignedPreKeyPub, forgedProof);
+        var bobBundle = new PreKeyBundle(_device1, bobIdentityKey, bobSignedPreKeyPub, forgedProof, SignedPreKeyId.First);
 
         var result = DirectRatchetSession.InitiateOutbound(_aliceId, _device1, _bobId, bobBundle, _engine);
 

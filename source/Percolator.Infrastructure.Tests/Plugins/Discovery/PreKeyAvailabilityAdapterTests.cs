@@ -70,7 +70,7 @@ public sealed class PreKeyAvailabilityAdapterTests
             (1u, opk)
         };
 
-        var bundle = RelayHostedPreKeyBundle.Rehydrate(routingToken, deviceId, idKey, spk, sig, otpkList);
+        var bundle = RelayHostedPreKeyBundle.Rehydrate(routingToken, deviceId, idKey, spk, sig, SignedPreKeyId.First, otpkList);
         bundle.AvailableOneTimePreKeyCount.Should().Be(1);
 
         var repo = new TestPreKeyRepository { Bundle = bundle };

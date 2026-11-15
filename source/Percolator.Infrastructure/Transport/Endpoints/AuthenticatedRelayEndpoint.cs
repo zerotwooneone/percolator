@@ -223,6 +223,7 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
             request.DrainToken.Length != 32 ||
             request.DeviceId == 0 ||
             request.IdentityKey.Length != 32 ||
+            request.SignedPrekeyId == 0 ||
             request.SignedPrekey.Length != 32 ||
             request.PrekeySignature.Length != 64)
         {
@@ -262,6 +263,7 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
 
         var signedPreKey = DhPublicKey.FromSpan(request.SignedPrekey.Span);
         var signedPreKeySignature = DeviceLinkProof.FromSpan(request.PrekeySignature.Span);
+        var signedPreKeyId = new SignedPreKeyId(request.SignedPrekeyId);
 
         // Server-side OPK replenishment: an existing bundle gains only new KeyIds and a
         // rotated signed prekey; a missing bundle is created wholesale.
@@ -274,6 +276,7 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
                 identityKey,
                 signedPreKey,
                 signedPreKeySignature,
+                signedPreKeyId,
                 opks,
                 RelayHostingPolicy.Default,
                 _cryptoEngine);
@@ -295,6 +298,7 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
             var updateSpk = existing.UpdateSignedPreKey(
                 signedPreKey,
                 signedPreKeySignature,
+                signedPreKeyId,
                 RelayHostingPolicy.Default,
                 _cryptoEngine);
             if (updateSpk.IsFailure)
@@ -314,6 +318,43 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
         }
 
         return new PublishPreKeyBundleResponse { Success = true };
+    }
+
+    public override async Task<GetPreKeyStatusResponse> GetPreKeyStatus(GetPreKeyStatusRequest request, ServerCallContext context)
+    {
+        if (request.RoutingToken.Length != 16 ||
+            request.DrainToken.Length != 32 ||
+            request.DeviceId == 0)
+        {
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "Routing token, drain token, and device id are required."));
+        }
+
+        var routingToken = BlindedRoutingToken.FromBytes(request.RoutingToken.ToByteArray());
+        bool drainValid = await _capabilityStore.VerifyDrainTokenAsync(
+            routingToken,
+            DeliveryToken.FromSpan(request.DrainToken.Span),
+            context.CancellationToken);
+        if (!drainValid)
+        {
+            throw new RpcException(new Status(StatusCode.PermissionDenied, "Invalid drain token capability."));
+        }
+
+        var bundle = await _preKeyRepository.GetAsync(
+            routingToken,
+            new DeviceId(request.DeviceId),
+            context.CancellationToken);
+
+        if (bundle == null)
+        {
+            return new GetPreKeyStatusResponse { Found = false };
+        }
+
+        return new GetPreKeyStatusResponse
+        {
+            Found = true,
+            OneTimePrekeyCount = (uint)bundle.AvailableOneTimePreKeyCount,
+            SignedPrekeyId = bundle.SignedPreKeyId.Value
+        };
     }
 
     private static QueuedSealedEnvelopeProto ToProto(RelayQueuedEnvelopeRecord record) => new()

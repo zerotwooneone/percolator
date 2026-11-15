@@ -120,6 +120,7 @@ internal sealed class DirectHandshakeOrchestrator
                     IdentityKey.FromSpan(response.IdentityKey.Span),
                     DhPublicKey.FromSpan(response.SignedPrekey.Span),
                     DeviceLinkProof.FromSpan(response.PrekeySignature.Span),
+                    response.SignedPrekeyId == 0 ? SignedPreKeyId.First : new SignedPreKeyId(response.SignedPrekeyId),
                     OneTimePreKey: opk,
                     OneTimePreKeyId: response.OneTimePrekeyId);
 

@@ -82,8 +82,23 @@ message PublishPreKeyBundleResponse {
   bool success = 1;
 }
 
+// Drain-token-authenticated hosted bundle status — lets a publisher decide
+// whether to seed, top up one-time prekeys, or republish a rotated signed prekey.
+message GetPreKeyStatusRequest {
+  bytes routing_token = 1;
+  bytes drain_token = 2;
+  uint32 device_id = 3;
+}
+
+message GetPreKeyStatusResponse {
+  bool found = 1;
+  uint32 one_time_prekey_count = 2;
+  uint32 signed_prekey_id = 3;
+}
+
 service AuthenticatedRelayService {
   rpc ConnectMailboxStream(stream MailboxStreamClientMessage) returns (stream MailboxStreamServerMessage);
   rpc RegisterMailbox(RegisterMailboxRequest) returns (RegisterMailboxResponse);
   rpc PublishPreKeyBundle(PublishPreKeyBundleRequest) returns (PublishPreKeyBundleResponse);
+  rpc GetPreKeyStatus(GetPreKeyStatusRequest) returns (GetPreKeyStatusResponse);
 }

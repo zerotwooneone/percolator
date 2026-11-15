@@ -98,4 +98,107 @@ public class SqlitePrivatePreKeyStoreTests
         retrieved.Should().NotBeNull();
         retrieved!.Span.ToArray().Should().Equal(privBytes);
     }
+
+    [Test]
+    public async Task StoreSignedPreKey_Twice_AssignsMonotonicIds_AndDemotesPreviousCurrent()
+    {
+        var first = await _store.StoreSignedPreKeyAsync(
+            _ownerId, _deviceId,
+            EphemeralPrivateKey.FromSpan(new byte[32]),
+            DhPublicKey.FromSpan(new byte[32]),
+            DeviceLinkProof.FromSpan(new byte[64]));
+
+        var secondPrivBytes = new byte[32];
+        Array.Fill(secondPrivBytes, (byte)0x99);
+        var second = await _store.StoreSignedPreKeyAsync(
+            _ownerId, _deviceId,
+            EphemeralPrivateKey.FromSpan(secondPrivBytes),
+            DhPublicKey.FromSpan(new byte[32]),
+            DeviceLinkProof.FromSpan(new byte[64]));
+
+        first.Value.Should().Be(1u);
+        second.Value.Should().Be(2u);
+
+        // GetSignedPreKeyAsync returns the current generation (second).
+        var current = await _store.GetSignedPreKeyAsync(_ownerId, _deviceId);
+        current.Should().NotBeNull();
+        current!.KeyId.Value.Should().Be(2u);
+
+        // Default private lookup returns the current (second) generation's key.
+        var retrieved = await _store.GetSignedPreKeyPrivateAsync(_ownerId, _deviceId);
+        retrieved.Should().NotBeNull();
+        retrieved!.Span.ToArray().Should().Equal(secondPrivBytes);
+    }
+
+    [Test]
+    public async Task GetSignedPreKeyPrivate_ByKeyId_ReturnsThatGeneration()
+    {
+        var gen1Priv = new byte[32];
+        Array.Fill(gen1Priv, (byte)0x11);
+        var gen2Priv = new byte[32];
+        Array.Fill(gen2Priv, (byte)0x22);
+
+        await _store.StoreSignedPreKeyAsync(
+            _ownerId, _deviceId,
+            EphemeralPrivateKey.FromSpan(gen1Priv),
+            DhPublicKey.FromSpan(new byte[32]),
+            DeviceLinkProof.FromSpan(new byte[64]));
+        await _store.StoreSignedPreKeyAsync(
+            _ownerId, _deviceId,
+            EphemeralPrivateKey.FromSpan(gen2Priv),
+            DhPublicKey.FromSpan(new byte[32]),
+            DeviceLinkProof.FromSpan(new byte[64]));
+
+        var gen1 = await _store.GetSignedPreKeyPrivateAsync(
+            _ownerId, _deviceId, new SignedPreKeyId(1));
+        gen1.Should().NotBeNull();
+        gen1!.Span.ToArray().Should().Equal(gen1Priv);
+
+        var unknown = await _store.GetSignedPreKeyPrivateAsync(
+            _ownerId, _deviceId, new SignedPreKeyId(77));
+        unknown.Should().BeNull();
+    }
+
+    [Test]
+    public async Task PruneSignedPreKeys_RemovesAgedGenerations_ButRetainsMinimum_AndNeverCurrent()
+    {
+        // Five generations: ids 1..5, current = 5.
+        for (int i = 0; i < 5; i++)
+        {
+            await _store.StoreSignedPreKeyAsync(
+                _ownerId, _deviceId,
+                EphemeralPrivateKey.FromSpan(new byte[32]),
+                DhPublicKey.FromSpan(new byte[32]),
+                DeviceLinkProof.FromSpan(new byte[64]));
+        }
+
+        // Everything is "old" relative to a future cutoff; minRetainedCount=2 keeps
+        // the two newest (4, 5 — and 5 is current anyway).
+        var deleted = await _store.PruneSignedPreKeysAsync(
+            _ownerId, _deviceId, DateTimeOffset.UtcNow.AddMinutes(1), minRetainedCount: 2);
+
+        deleted.Should().Be(3);
+        (await _store.GetSignedPreKeyPrivateAsync(_ownerId, _deviceId, new SignedPreKeyId(1))).Should().BeNull();
+        (await _store.GetSignedPreKeyPrivateAsync(_ownerId, _deviceId, new SignedPreKeyId(2))).Should().BeNull();
+        (await _store.GetSignedPreKeyPrivateAsync(_ownerId, _deviceId, new SignedPreKeyId(3))).Should().BeNull();
+        (await _store.GetSignedPreKeyPrivateAsync(_ownerId, _deviceId, new SignedPreKeyId(4))).Should().NotBeNull();
+        (await _store.GetSignedPreKeyPrivateAsync(_ownerId, _deviceId, new SignedPreKeyId(5))).Should().NotBeNull();
+    }
+
+    [Test]
+    public async Task CountAvailableOneTimePreKeys_ExcludesConsumedKeys()
+    {
+        await _store.StoreOneTimePreKeysAsync(_ownerId, _deviceId, new[]
+        {
+            new OneTimePreKeyMaterial(1u, EphemeralPrivateKey.FromSpan(new byte[32]), DhPublicKey.FromSpan(new byte[32])),
+            new OneTimePreKeyMaterial(2u, EphemeralPrivateKey.FromSpan(new byte[32]), DhPublicKey.FromSpan(new byte[32])),
+            new OneTimePreKeyMaterial(3u, EphemeralPrivateKey.FromSpan(new byte[32]), DhPublicKey.FromSpan(new byte[32]))
+        });
+
+        (await _store.CountAvailableOneTimePreKeysAsync(_ownerId, _deviceId)).Should().Be(3);
+
+        await _store.TryConsumeOneTimePreKeyPrivateAsync(_ownerId, _deviceId, 1u);
+
+        (await _store.CountAvailableOneTimePreKeysAsync(_ownerId, _deviceId)).Should().Be(2);
+    }
 }

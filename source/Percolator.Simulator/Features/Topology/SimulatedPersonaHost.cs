@@ -311,6 +311,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                 IdentityPublicKey,
                 SignedPreKeyPublic,
                 SignedPreKeySignature,
+                SignedPreKeyId.First,
                 oneTimePreKeys: null);
             await preKeyRepo.SaveAsync(hostedBundle, ct);
         }
@@ -533,6 +534,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             IdentityPublicKey,
             SignedPreKeyPublic,
             SignedPreKeySignature,
+            SignedPreKeyId.First,
             OneTimePreKey: null,
             OneTimePreKeyId: 0);
     }

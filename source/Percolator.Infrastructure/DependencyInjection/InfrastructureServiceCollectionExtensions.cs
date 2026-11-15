@@ -258,7 +258,7 @@ public static class InfrastructureServiceCollectionExtensions
         // contributed by the vertical app registrations (AddChatApp/AddFileTransferApp).
         services.AddSingleton<IChannelLockService, KeyedSemaphoreLockService>();
         services.AddSingleton<IHandshakeReplayFilter, MemoryHandshakeReplayFilter>();
-        services.AddSingleton<IPreKeyMaintenanceService, NullPreKeyMaintenanceService>();
+        services.AddSingleton<IPreKeyMaintenanceService, PreKeyMaintenanceService>();
         services.AddScoped<IContactRequestCoordinator, ContactRequestCoordinator>();
         services.AddScoped<IRoutingCoordinator, RoutingCoordinator>();
         services.AddScoped<IPayloadSender, OutboundEgressPipeline>();

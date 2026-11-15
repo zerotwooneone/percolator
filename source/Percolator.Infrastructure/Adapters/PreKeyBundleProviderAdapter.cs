@@ -93,6 +93,7 @@ public sealed class PreKeyBundleProviderAdapter : IPreKeyBundleProvider
                         identityKey,
                         signedPreKey,
                         prekeySig,
+                        response.SignedPrekeyId == 0 ? SignedPreKeyId.First : new SignedPreKeyId(response.SignedPrekeyId),
                         otpk,
                         response.OneTimePrekeyId);
 

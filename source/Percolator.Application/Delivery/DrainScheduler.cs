@@ -280,6 +280,7 @@ public sealed class DrainScheduler
             var relayDirectory = scope.ServiceProvider.GetRequiredService<IRelayDirectory>();
             var mailboxClient = scope.ServiceProvider.GetRequiredService<IRelayMailboxClient>();
             var provisioner = scope.ServiceProvider.GetRequiredService<IRelayMailboxProvisioner>();
+            var preKeyMaintenance = scope.ServiceProvider.GetRequiredService<IPreKeyMaintenanceService>();
 
             // DRAIN-07 provision-on-connect: the relay-side mailbox must exist before
             // the stream opens. Failure lands in the shared fault path (backoff +
@@ -290,6 +291,25 @@ public sealed class DrainScheduler
             {
                 throw new InvalidOperationException(
                     $"Mailbox provisioning failed for {target.RelayIdentityId.Value}: {ensured.Error.Code} {ensured.Error.Description}");
+            }
+
+            // DRAIN-10: throttled hosted-prekey evaluation (status check, SPK
+            // rotation, OPK top-up). A maintenance fault must not take down drain
+            // supervision — the envelope stream is the primary path.
+            try
+            {
+                await preKeyMaintenance.EvaluateAsync(target, forced: false, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Pre-key maintenance evaluation failed for {Relay}; drain continues.",
+                    target.RelayIdentityId.Value);
             }
 
             // Tokens are resolved fresh per connect — never cached across reconnects.

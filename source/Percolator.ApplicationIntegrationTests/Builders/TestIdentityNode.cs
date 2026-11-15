@@ -504,6 +504,7 @@ public sealed class TestIdentityNode
             IdentityPublicKey,
             SignedPreKeyPublic,
             SignedPreKeySignature,
+            SignedPreKeyId.First,
             opk,
             opkId);
     }
@@ -536,6 +537,7 @@ public sealed class TestIdentityNode
             IdentityPublicKey,
             SignedPreKeyPublic,
             SignedPreKeySignature,
+            SignedPreKeyId.First,
             otpkList,
             relay.Policy,
             CryptoEngine).Value!;

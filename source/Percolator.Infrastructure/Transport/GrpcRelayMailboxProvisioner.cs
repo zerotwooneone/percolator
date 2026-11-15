@@ -23,8 +23,6 @@ using Percolator.Infrastructure.Protos;
 /// </summary>
 public sealed class GrpcRelayMailboxProvisioner : IRelayMailboxProvisioner
 {
-    private const uint LocalSignedPreKeyId = 1;
-
     // OPK key ids are allocated read-modify-write (max+1); concurrent publishes for
     // the same owner would collide on vault_onetime_prekeys' unique key, so the
     // allocate-generate-store stretch runs under this gate. Publishes are rare and
@@ -157,7 +155,7 @@ public sealed class GrpcRelayMailboxProvisioner : IRelayMailboxProvisioner
                 DrainToken = ByteString.CopyFrom(tokens.DrainToken.Span),
                 DeviceId = deviceId.Value,
                 IdentityKey = ByteString.CopyFrom(publicKey.Span),
-                SignedPrekeyId = LocalSignedPreKeyId,
+                SignedPrekeyId = signedPreKey.KeyId.Value,
                 SignedPrekey = ByteString.CopyFrom(signedPreKey.PublicKey.Span),
                 PrekeySignature = ByteString.CopyFrom(signedPreKey.Signature.Span)
             };
@@ -191,19 +189,36 @@ public sealed class GrpcRelayMailboxProvisioner : IRelayMailboxProvisioner
         }
     }
 
-    public Task<DomainResult<RelayPreKeyStatus>> GetPreKeyStatusAsync(
+    public async Task<DomainResult<RelayPreKeyStatus>> GetPreKeyStatusAsync(
         DeviceId deviceId,
         RelayEndpoint endpoint,
         MailboxTokenTriad tokens,
         CancellationToken ct = default)
     {
-        // The GetPreKeyStatus relay RPC is introduced with the prekey-maintenance
-        // ticket; until the wire contract exists there is no honest source of
-        // counts — report unavailable rather than fabricate (anti-stub discipline).
-        return Task.FromResult(DomainResult<RelayPreKeyStatus>.Failure(
-            new DomainError(
-                "RELAY_PREKEY_STATUS_UNAVAILABLE",
-                "Relay pre-key status is unavailable until the status RPC exists.")));
+        var request = new GetPreKeyStatusRequest
+        {
+            RoutingToken = ByteString.CopyFrom(tokens.RoutingToken.ToByteArray()),
+            DrainToken = ByteString.CopyFrom(tokens.DrainToken.Span),
+            DeviceId = deviceId.Value
+        };
+
+        try
+        {
+            var client = CreateClient(endpoint);
+            var response = await client.GetPreKeyStatusAsync(request, cancellationToken: ct)
+                .ResponseAsync.ConfigureAwait(false);
+
+            var status = response.Found
+                ? new RelayPreKeyStatus(true, response.OneTimePrekeyCount, new SignedPreKeyId(response.SignedPrekeyId))
+                : new RelayPreKeyStatus(false, 0, new SignedPreKeyId(0));
+            return DomainResult<RelayPreKeyStatus>.Success(status);
+        }
+        catch (RpcException ex)
+        {
+            return DomainResult<RelayPreKeyStatus>.Failure(new DomainError(
+                "RELAY_PREKEY_STATUS_FAILED",
+                $"Pre-key status RPC failed: {ex.Status.Detail ?? ex.Message}"));
+        }
     }
 
     private AuthenticatedRelayService.AuthenticatedRelayServiceClient CreateClient(RelayEndpoint endpoint)

@@ -146,7 +146,7 @@ public sealed class HandshakeService : IHandshakeService
 
         // Assemble handshake outbox package
         byte[] handshakePackage;
-        uint signedPreKeyId = 1;
+        uint signedPreKeyId = remoteBundle.SignedPreKeyId.Value;
         uint? oneTimePreKeyId = remoteBundle.OneTimePreKey != null ? remoteBundle.OneTimePreKeyId : null;
 
         var header = new HandshakeHeader(
@@ -265,7 +265,10 @@ public sealed class HandshakeService : IHandshakeService
         CancellationToken ct)
     {
         var signedPreKeyPriv = await _preKeyStore.GetSignedPreKeyPrivateAsync(
-            envelope.RecipientIdentityId, DeviceId.Primary, ct);
+            envelope.RecipientIdentityId,
+            DeviceId.Primary,
+            new SignedPreKeyId(envelope.SignedPreKeyId),
+            ct);
 
         if (signedPreKeyPriv == null)
         {

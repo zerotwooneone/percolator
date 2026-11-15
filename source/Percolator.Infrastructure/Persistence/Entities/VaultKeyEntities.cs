@@ -15,6 +15,8 @@ public sealed class VaultSignedPreKeyEntity
 {
     public Guid OwnerIdentityId { get; set; }
     public uint DeviceId { get; set; }
+    public uint KeyId { get; set; } = 1;
+    public bool IsCurrent { get; set; } = true;
     public byte[] PrivateKey { get; set; } = Array.Empty<byte>();
     public byte[] PublicKey { get; set; } = Array.Empty<byte>();
     public byte[] Signature { get; set; } = Array.Empty<byte>();

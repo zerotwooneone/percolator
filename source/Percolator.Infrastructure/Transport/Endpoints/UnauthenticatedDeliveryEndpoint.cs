@@ -188,7 +188,7 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
             IdentityKey = ByteString.CopyFrom(consumed.IdentityKey.Span),
             SignedPrekey = ByteString.CopyFrom(consumed.SignedPreKey.Span),
             PrekeySignature = ByteString.CopyFrom(consumed.SignedPreKeySignature.Span),
-            SignedPrekeyId = 1
+            SignedPrekeyId = consumed.SignedPreKeyId.Value
         };
 
         if (consumed.OneTimePreKey != null)

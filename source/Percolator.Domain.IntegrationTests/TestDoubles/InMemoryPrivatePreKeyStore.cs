@@ -9,15 +9,29 @@ namespace Percolator.Domain.IntegrationTests.TestDoubles;
 public sealed class InMemoryPrivatePreKeyStore : IPrivatePreKeyStore
 {
     private readonly ConcurrentDictionary<string, StoredSignedPreKey> _signedPreKeys = new();
+    private readonly ConcurrentDictionary<string, uint> _currentSignedPreKeyIds = new();
     private readonly ConcurrentDictionary<string, OneTimePreKeyMaterial> _oneTimePreKeys = new();
+
+    private static string OwnerKey(PublicIdentityId ownerId, DeviceId deviceId) => $"{ownerId}:{deviceId}";
+    private static string SpkKey(PublicIdentityId ownerId, DeviceId deviceId, uint keyId) => $"{ownerId}:{deviceId}:{keyId}";
 
     public Task<EphemeralPrivateKey?> GetSignedPreKeyPrivateAsync(
         PublicIdentityId ownerId,
         DeviceId deviceId,
+        SignedPreKeyId? signedPreKeyId = null,
         CancellationToken cancellationToken = default)
     {
-        var key = $"{ownerId}:{deviceId}";
-        _signedPreKeys.TryGetValue(key, out var stored);
+        uint keyId;
+        if (signedPreKeyId.HasValue)
+        {
+            keyId = signedPreKeyId.Value.Value;
+        }
+        else if (!_currentSignedPreKeyIds.TryGetValue(OwnerKey(ownerId, deviceId), out keyId))
+        {
+            return Task.FromResult<EphemeralPrivateKey?>(null);
+        }
+
+        _signedPreKeys.TryGetValue(SpkKey(ownerId, deviceId, keyId), out var stored);
         return Task.FromResult(stored?.PrivateKey);
     }
 
@@ -37,12 +51,15 @@ public sealed class InMemoryPrivatePreKeyStore : IPrivatePreKeyStore
         DeviceId deviceId,
         CancellationToken cancellationToken = default)
     {
-        var key = $"{ownerId}:{deviceId}";
-        _signedPreKeys.TryGetValue(key, out var stored);
+        StoredSignedPreKey? stored = null;
+        if (_currentSignedPreKeyIds.TryGetValue(OwnerKey(ownerId, deviceId), out var keyId))
+        {
+            _signedPreKeys.TryGetValue(SpkKey(ownerId, deviceId, keyId), out stored);
+        }
         return Task.FromResult(stored);
     }
 
-    public Task StoreSignedPreKeyAsync(
+    public Task<SignedPreKeyId> StoreSignedPreKeyAsync(
         PublicIdentityId ownerId,
         DeviceId deviceId,
         EphemeralPrivateKey privateKey,
@@ -50,9 +67,61 @@ public sealed class InMemoryPrivatePreKeyStore : IPrivatePreKeyStore
         DeviceLinkProof signature,
         CancellationToken cancellationToken = default)
     {
-        var key = $"{ownerId}:{deviceId}";
-        _signedPreKeys[key] = new StoredSignedPreKey(privateKey, publicKey, signature);
-        return Task.CompletedTask;
+        var ownerKey = OwnerKey(ownerId, deviceId);
+        var prefix = $"{ownerKey}:";
+        var nextKeyId = _signedPreKeys.Keys
+            .Where(k => k.StartsWith(prefix, StringComparison.Ordinal))
+            .Select(k => uint.Parse(k[prefix.Length..]))
+            .DefaultIfEmpty(0u)
+            .Max() + 1u;
+
+        _signedPreKeys[SpkKey(ownerId, deviceId, nextKeyId)] =
+            new StoredSignedPreKey(new SignedPreKeyId(nextKeyId), privateKey, publicKey, signature, DateTimeOffset.UtcNow);
+        _currentSignedPreKeyIds[ownerKey] = nextKeyId;
+        return Task.FromResult(new SignedPreKeyId(nextKeyId));
+    }
+
+    public Task<int> PruneSignedPreKeysAsync(
+        PublicIdentityId ownerId,
+        DeviceId deviceId,
+        DateTimeOffset olderThanUtc,
+        int minRetainedCount = 3,
+        CancellationToken cancellationToken = default)
+    {
+        var ownerKey = OwnerKey(ownerId, deviceId);
+        var prefix = $"{ownerKey}:";
+        _currentSignedPreKeyIds.TryGetValue(ownerKey, out var currentKeyId);
+
+        var generations = _signedPreKeys
+            .Where(kv => kv.Key.StartsWith(prefix, StringComparison.Ordinal))
+            .Select(kv => (KeyId: uint.Parse(kv.Key[prefix.Length..]), Record: kv.Value))
+            .OrderByDescending(g => g.KeyId)
+            .ToList();
+
+        var candidates = generations
+            .Where(g => g.KeyId != currentKeyId && g.Record.CreatedAtUtc < olderThanUtc)
+            .ToList();
+        var retained = generations.Count - candidates.Count;
+        var toDelete = candidates
+            .OrderBy(g => g.KeyId)
+            .Take(Math.Max(0, candidates.Count - Math.Max(0, minRetainedCount - retained)))
+            .ToList();
+
+        foreach (var g in toDelete)
+        {
+            _signedPreKeys.TryRemove(SpkKey(ownerId, deviceId, g.KeyId), out _);
+        }
+        return Task.FromResult(toDelete.Count);
+    }
+
+    public Task<int> CountAvailableOneTimePreKeysAsync(
+        PublicIdentityId ownerId,
+        DeviceId deviceId,
+        CancellationToken cancellationToken = default)
+    {
+        var prefix = $"{ownerId}:{deviceId}:";
+        var count = _oneTimePreKeys.Keys.Count(k => k.StartsWith(prefix, StringComparison.Ordinal));
+        return Task.FromResult(count);
     }
 
     public Task StoreOneTimePreKeysAsync(

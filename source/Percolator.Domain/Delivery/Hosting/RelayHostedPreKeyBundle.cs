@@ -21,6 +21,7 @@ public sealed class RelayHostedPreKeyBundle : AggregateRoot<HostedPreKeyRecordId
     public IdentityKey IdentityKey { get; }
     public DhPublicKey SignedPreKey { get; private set; }
     public DeviceLinkProof SignedPreKeySignature { get; private set; }
+    public SignedPreKeyId SignedPreKeyId { get; private set; }
 
     private readonly Queue<(uint KeyId, DhPublicKey Key)> _oneTimePreKeys = new();
     public int AvailableOneTimePreKeyCount => _oneTimePreKeys.Count;
@@ -31,13 +32,15 @@ public sealed class RelayHostedPreKeyBundle : AggregateRoot<HostedPreKeyRecordId
         DeviceId deviceId,
         IdentityKey identityKey,
         DhPublicKey signedPreKey,
-        DeviceLinkProof signedPreKeySignature)
+        DeviceLinkProof signedPreKeySignature,
+        SignedPreKeyId signedPreKeyId)
     {
         RoutingToken = routingToken;
         DeviceId = deviceId;
         IdentityKey = identityKey;
         SignedPreKey = signedPreKey;
         SignedPreKeySignature = signedPreKeySignature;
+        SignedPreKeyId = signedPreKeyId;
     }
 
     [EditorBrowsable(EditorBrowsableState.Never)]
@@ -47,6 +50,7 @@ public sealed class RelayHostedPreKeyBundle : AggregateRoot<HostedPreKeyRecordId
         IdentityKey identityKey,
         DhPublicKey signedPreKey,
         DeviceLinkProof signedPreKeySignature,
+        SignedPreKeyId signedPreKeyId,
         IEnumerable<(uint KeyId, DhPublicKey Key)>? oneTimePreKeys = null)
     {
         if (!routingToken.IsValid) throw new ArgumentException("RoutingToken cannot be empty.", nameof(routingToken));
@@ -55,7 +59,7 @@ public sealed class RelayHostedPreKeyBundle : AggregateRoot<HostedPreKeyRecordId
         ArgumentNullException.ThrowIfNull(signedPreKey);
         ArgumentNullException.ThrowIfNull(signedPreKeySignature);
 
-        var bundle = new RelayHostedPreKeyBundle(routingToken, deviceId, identityKey, signedPreKey, signedPreKeySignature);
+        var bundle = new RelayHostedPreKeyBundle(routingToken, deviceId, identityKey, signedPreKey, signedPreKeySignature, signedPreKeyId);
         if (oneTimePreKeys != null)
         {
             var seenIds = new HashSet<uint>();
@@ -82,6 +86,7 @@ public sealed class RelayHostedPreKeyBundle : AggregateRoot<HostedPreKeyRecordId
         IdentityKey identityKey,
         DhPublicKey signedPreKey,
         DeviceLinkProof signedPreKeySignature,
+        SignedPreKeyId signedPreKeyId,
         IEnumerable<(uint KeyId, DhPublicKey Key)> oneTimePreKeys,
         RelayHostingPolicy policy,
         ICryptoEngine cryptoEngine)
@@ -110,7 +115,7 @@ public sealed class RelayHostedPreKeyBundle : AggregateRoot<HostedPreKeyRecordId
                 new DomainError("INVALID_PREKEY_SIGNATURE", "Signed prekey signature failed verification against identity key."));
         }
 
-        var bundle = new RelayHostedPreKeyBundle(routingToken, deviceId, identityKey, signedPreKey, signedPreKeySignature);
+        var bundle = new RelayHostedPreKeyBundle(routingToken, deviceId, identityKey, signedPreKey, signedPreKeySignature, signedPreKeyId);
 
         if (oneTimePreKeys != null)
         {
@@ -133,6 +138,7 @@ public sealed class RelayHostedPreKeyBundle : AggregateRoot<HostedPreKeyRecordId
     public DomainResult UpdateSignedPreKey(
         DhPublicKey signedPreKey,
         DeviceLinkProof signedPreKeySignature,
+        SignedPreKeyId signedPreKeyId,
         RelayHostingPolicy policy,
         ICryptoEngine cryptoEngine)
     {
@@ -156,6 +162,7 @@ public sealed class RelayHostedPreKeyBundle : AggregateRoot<HostedPreKeyRecordId
 
         SignedPreKey = signedPreKey;
         SignedPreKeySignature = signedPreKeySignature;
+        SignedPreKeyId = signedPreKeyId;
         return DomainResult.Success();
     }
 
@@ -211,6 +218,7 @@ public sealed class RelayHostedPreKeyBundle : AggregateRoot<HostedPreKeyRecordId
             IdentityKey,
             SignedPreKey,
             SignedPreKeySignature,
+            SignedPreKeyId,
             oneTimeKey?.Key,
             oneTimeKey?.KeyId ?? 0);
 

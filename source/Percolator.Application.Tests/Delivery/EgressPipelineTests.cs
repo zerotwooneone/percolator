@@ -66,7 +66,8 @@ public sealed class EgressPipelineTests
             _bobDeviceId,
             IdentityKey.FromBytes(new byte[32]),
             bobSignedPreKey.PublicKey,
-            DeviceLinkProof.FromBytes(new byte[64]));
+            DeviceLinkProof.FromBytes(new byte[64]),
+            SignedPreKeyId.First);
 
         var aliceSession = DirectRatchetSession.InitiateOutbound(_aliceId, _aliceDeviceId, _bobId, bundle, _cryptoEngine).Value!;
         await _sessionRepo.SaveSessionAsync(aliceSession);

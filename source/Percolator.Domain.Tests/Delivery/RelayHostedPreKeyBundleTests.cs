@@ -42,6 +42,7 @@ public sealed class RelayHostedPreKeyBundleTests
             identityKey,
             signedPreKey,
             signature,
+            SignedPreKeyId.First,
             oneTimeKeys,
             RelayHostingPolicy.Default,
             _cryptoEngine);
@@ -85,6 +86,7 @@ public sealed class RelayHostedPreKeyBundleTests
             IdentityKey.FromSpan(new byte[32]),
             DhPublicKey.FromSpan(new byte[32]),
             DeviceLinkProof.FromSpan(new byte[64]),
+            SignedPreKeyId.First,
             [],
             policy,
             _cryptoEngine);
@@ -115,6 +117,7 @@ public sealed class RelayHostedPreKeyBundleTests
             IdentityKey.FromSpan(new byte[32]),
             DhPublicKey.FromSpan(new byte[32]),
             DeviceLinkProof.FromSpan(new byte[64]),
+            SignedPreKeyId.First,
             oneTimeKeys,
             policy,
             _cryptoEngine);
@@ -137,6 +140,7 @@ public sealed class RelayHostedPreKeyBundleTests
             IdentityKey.FromSpan(new byte[32]),
             DhPublicKey.FromSpan(new byte[32]),
             DeviceLinkProof.FromSpan(new byte[64]),
+            SignedPreKeyId.First,
             [(1u, DhPublicKey.FromSpan(new byte[32]))],
             policy,
             _cryptoEngine).Value;
@@ -166,6 +170,7 @@ public sealed class RelayHostedPreKeyBundleTests
             IdentityKey.FromSpan(new byte[32]),
             DhPublicKey.FromSpan(new byte[32]),
             DeviceLinkProof.FromSpan(new byte[64]),
+            SignedPreKeyId.First,
             [(1u, DhPublicKey.FromSpan(new byte[32]))],
             policy,
             _cryptoEngine).Value;

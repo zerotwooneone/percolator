@@ -51,6 +51,7 @@ public sealed class X3dhAgreementTests
             bobIdPub,
             bobSpkPub,
             DeviceLinkProof.FromSpan(new byte[64]),
+            SignedPreKeyId.First,
             bobOpkPub,
             OneTimePreKeyId: 42);
 
@@ -103,6 +104,7 @@ public sealed class X3dhAgreementTests
             IdentityKey.FromSpan(bobIdentityPub),
             DhPublicKey.FromSpan(bobSignedPreKeyPub),
             DeviceLinkProof.FromSpan(new byte[64]),
+            SignedPreKeyId.First,
             OneTimePreKey: null,
             OneTimePreKeyId: 0);
 
@@ -133,7 +135,8 @@ public sealed class X3dhAgreementTests
             DeviceId.Primary,
             IdentityKey.FromSpan(new byte[32]),
             DhPublicKey.FromSpan(new byte[32]),
-            DeviceLinkProof.FromSpan(new byte[64]));
+            DeviceLinkProof.FromSpan(new byte[64]),
+            SignedPreKeyId.First);
 
         // Act
         var result = X3dhAgreement.Initiate(new byte[32], IdentityKey.FromSpan(new byte[32]), bobBundle, _cryptoEngine);

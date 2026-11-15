@@ -74,6 +74,7 @@ public sealed class DrainSchedulerTests
             [typeof(IRelayDirectory)] = _directory,
             [typeof(IRelayMailboxClient)] = _mailboxClient,
             [typeof(IRelayMailboxProvisioner)] = _provisioner,
+            [typeof(IPreKeyMaintenanceService)] = new NullPreKeyMaintenanceService(),
             [typeof(MailboxDrainService)] = drainService,
         });
 

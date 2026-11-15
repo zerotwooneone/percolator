@@ -50,6 +50,7 @@ public class SqliteRelayPreKeyRepositoryTests
             identityKey,
             signedPreKey,
             signature,
+            SignedPreKeyId.First,
             new[] { opk1, opk2 });
 
         // Act - Save bundle

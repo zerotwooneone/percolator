@@ -100,6 +100,7 @@ public sealed class HandshakeServiceTests
             _bobIdentityKey,
             spkPair.PublicKey,
             DeviceLinkProof.FromBytes(spkSig),
+            SignedPreKeyId.First,
             OneTimePreKeyId: 42,
             OneTimePreKey: opkPair.PublicKey);
     }

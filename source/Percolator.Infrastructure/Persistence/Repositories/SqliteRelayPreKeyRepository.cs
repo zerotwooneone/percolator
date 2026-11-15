@@ -94,6 +94,7 @@ public sealed class SqliteRelayPreKeyRepository : IRelayPreKeyRepository
                     IdentityKey = idKeyBytes,
                     SignedPreKey = signedKeyBytes,
                     SignedPreKeySignature = sigBytes,
+                    SignedPreKeyId = bundle.SignedPreKeyId.Value,
                     OneTimePreKeysJson = opkJson,
                     UpdatedAtUtc = now
                 };
@@ -104,6 +105,7 @@ public sealed class SqliteRelayPreKeyRepository : IRelayPreKeyRepository
                 existing.IdentityKey = idKeyBytes;
                 existing.SignedPreKey = signedKeyBytes;
                 existing.SignedPreKeySignature = sigBytes;
+                existing.SignedPreKeyId = bundle.SignedPreKeyId.Value;
                 existing.OneTimePreKeysJson = opkJson;
                 existing.UpdatedAtUtc = now;
             }
@@ -146,6 +148,7 @@ public sealed class SqliteRelayPreKeyRepository : IRelayPreKeyRepository
             idKey,
             signedKey,
             sig,
+            new SignedPreKeyId(entity.SignedPreKeyId == 0 ? 1u : entity.SignedPreKeyId),
             opks);
     }
 

@@ -23,13 +23,22 @@ public sealed class SqlitePrivatePreKeyStore : IPrivatePreKeyStore
     public async Task<EphemeralPrivateKey?> GetSignedPreKeyPrivateAsync(
         Domain.Identities.PublicIdentityId ownerId,
         DeviceId deviceId,
+        SignedPreKeyId? signedPreKeyId = null,
         CancellationToken cancellationToken = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
         var ownerGuid = ownerId.Value;
-        var entity = await db.VaultSignedPreKeys
-            .AsNoTracking()
-            .FirstOrDefaultAsync(k => k.OwnerIdentityId == ownerGuid && k.DeviceId == deviceId.Value, cancellationToken);
+        var entity = signedPreKeyId.HasValue
+            ? await db.VaultSignedPreKeys
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    k => k.OwnerIdentityId == ownerGuid && k.DeviceId == deviceId.Value && k.KeyId == signedPreKeyId.Value.Value,
+                    cancellationToken)
+            : await db.VaultSignedPreKeys
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    k => k.OwnerIdentityId == ownerGuid && k.DeviceId == deviceId.Value && k.IsCurrent,
+                    cancellationToken);
 
         if (entity == null || entity.PrivateKey.Length == 0)
         {
@@ -75,7 +84,9 @@ public sealed class SqlitePrivatePreKeyStore : IPrivatePreKeyStore
         var ownerGuid = ownerId.Value;
         var entity = await db.VaultSignedPreKeys
             .AsNoTracking()
-            .FirstOrDefaultAsync(k => k.OwnerIdentityId == ownerGuid && k.DeviceId == deviceId.Value, cancellationToken);
+            .FirstOrDefaultAsync(
+                k => k.OwnerIdentityId == ownerGuid && k.DeviceId == deviceId.Value && k.IsCurrent,
+                cancellationToken);
 
         if (entity == null || entity.PrivateKey.Length == 0 || entity.PublicKey.Length == 0 || entity.Signature.Length == 0)
         {
@@ -83,12 +94,14 @@ public sealed class SqlitePrivatePreKeyStore : IPrivatePreKeyStore
         }
 
         return new StoredSignedPreKey(
+            new SignedPreKeyId(entity.KeyId),
             EphemeralPrivateKey.FromSpan(entity.PrivateKey),
             DhPublicKey.FromSpan(entity.PublicKey),
-            DeviceLinkProof.FromSpan(entity.Signature));
+            DeviceLinkProof.FromSpan(entity.Signature),
+            entity.CreatedAtUtc);
     }
 
-    public async Task StoreSignedPreKeyAsync(
+    public async Task<SignedPreKeyId> StoreSignedPreKeyAsync(
         Domain.Identities.PublicIdentityId ownerId,
         DeviceId deviceId,
         EphemeralPrivateKey privateKey,
@@ -101,35 +114,89 @@ public sealed class SqlitePrivatePreKeyStore : IPrivatePreKeyStore
         ArgumentNullException.ThrowIfNull(signature);
 
         var ownerGuid = ownerId.Value;
-        var privBytes = privateKey.Span.ToArray();
-        var pubBytes = publicKey.Span.ToArray();
-        var sigBytes = signature.Span.ToArray();
 
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
-        var existing = await db.VaultSignedPreKeys
-            .FirstOrDefaultAsync(k => k.OwnerIdentityId == ownerGuid && k.DeviceId == deviceId.Value, cancellationToken);
 
-        if (existing == null)
-        {
-            var entity = new VaultSignedPreKeyEntity
-            {
-                OwnerIdentityId = ownerGuid,
-                DeviceId = deviceId.Value,
-                PrivateKey = privBytes,
-                PublicKey = pubBytes,
-                Signature = sigBytes,
-                CreatedAtUtc = DateTimeOffset.UtcNow
-            };
-            await db.VaultSignedPreKeys.AddAsync(entity, cancellationToken);
-        }
-        else
-        {
-            existing.PrivateKey = privBytes;
-            existing.PublicKey = pubBytes;
-            existing.Signature = sigBytes;
-        }
+        // Newest-wins: the stored key gets the next monotonically increasing id and
+        // becomes current; every prior generation is demoted but retained until the
+        // retention prune so in-flight handshakes keep decrypting.
+        var nextKeyId = (await db.VaultSignedPreKeys
+                .Where(k => k.OwnerIdentityId == ownerGuid && k.DeviceId == deviceId.Value)
+                .MaxAsync(k => (uint?)k.KeyId, cancellationToken) ?? 0u) + 1u;
 
+        await db.VaultSignedPreKeys
+            .Where(k => k.OwnerIdentityId == ownerGuid && k.DeviceId == deviceId.Value && k.IsCurrent)
+            .ExecuteUpdateAsync(u => u.SetProperty(k => k.IsCurrent, false), cancellationToken);
+
+        var entity = new VaultSignedPreKeyEntity
+        {
+            OwnerIdentityId = ownerGuid,
+            DeviceId = deviceId.Value,
+            KeyId = nextKeyId,
+            IsCurrent = true,
+            PrivateKey = privateKey.Span.ToArray(),
+            PublicKey = publicKey.Span.ToArray(),
+            Signature = signature.Span.ToArray(),
+            CreatedAtUtc = DateTimeOffset.UtcNow
+        };
+        await db.VaultSignedPreKeys.AddAsync(entity, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
+
+        return new SignedPreKeyId(nextKeyId);
+    }
+
+    public async Task<int> PruneSignedPreKeysAsync(
+        Domain.Identities.PublicIdentityId ownerId,
+        DeviceId deviceId,
+        DateTimeOffset olderThanUtc,
+        int minRetainedCount = 3,
+        CancellationToken cancellationToken = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
+        var ownerGuid = ownerId.Value;
+
+        var generations = await db.VaultSignedPreKeys
+            .Where(k => k.OwnerIdentityId == ownerGuid && k.DeviceId == deviceId.Value)
+            .OrderByDescending(k => k.KeyId)
+            .ToListAsync(cancellationToken);
+
+        // Retain at least the newest minRetainedCount generations and always the
+        // current one; everything older than the retention window is pruned.
+        var candidates = generations
+            .Where(k => !k.IsCurrent && k.CreatedAtUtc < olderThanUtc)
+            .ToList();
+        var retained = generations.Count - candidates.Count;
+        var toDelete = candidates
+            .OrderBy(k => k.KeyId) // oldest first — the newest candidates stay retained
+            .Take(Math.Max(0, candidates.Count - Math.Max(0, minRetainedCount - retained)))
+            .ToList();
+
+        if (toDelete.Count > 0)
+        {
+            var deleteKeyIds = toDelete.Select(k => k.KeyId).ToList();
+            // Zeroize via UPDATE before the DELETE — EF issues DELETE-only on
+            // Remove, so clearing the tracked entities would never reach the
+            // file and freed cells would keep private-key bytes.
+            await db.VaultSignedPreKeys
+                .Where(k => k.OwnerIdentityId == ownerGuid && k.DeviceId == deviceId.Value && deleteKeyIds.Contains(k.KeyId))
+                .ExecuteUpdateAsync(s => s.SetProperty(e => e.PrivateKey, new byte[0]), cancellationToken);
+            db.VaultSignedPreKeys.RemoveRange(toDelete);
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        return toDelete.Count;
+    }
+
+    public async Task<int> CountAvailableOneTimePreKeysAsync(
+        Domain.Identities.PublicIdentityId ownerId,
+        DeviceId deviceId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
+        var ownerGuid = ownerId.Value;
+        return await db.VaultOneTimePreKeys
+            .Where(k => k.OwnerIdentityId == ownerGuid && k.DeviceId == deviceId.Value && !k.IsConsumed)
+            .CountAsync(cancellationToken);
     }
 
     public async Task StoreOneTimePreKeysAsync(

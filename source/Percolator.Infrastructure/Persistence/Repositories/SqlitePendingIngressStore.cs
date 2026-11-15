@@ -113,7 +113,13 @@ public sealed class SqlitePendingIngressStore : IPendingIngressStore
             return;
         }
 
+        // Zeroize the tracked copy AND the stored row — EF issues DELETE-only on
+        // Remove, so without the UPDATE the freed cell keeps the ciphertext.
         CryptographicOperations.ZeroMemory(entity.Ciphertext);
+        await _dbContext.OpsPendingIngressEnvelopes
+            .Where(e => e.OwnerIdentityId == ownerGuid && e.QueueId == queueId.Value)
+            .ExecuteUpdateAsync(s => s.SetProperty(e => e.Ciphertext, new byte[0]), ct)
+            .ConfigureAwait(false);
         _dbContext.OpsPendingIngressEnvelopes.Remove(entity);
         await _dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
     }

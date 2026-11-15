@@ -105,7 +105,8 @@ public class PercolatorDbContext : DbContext
         modelBuilder.Entity<VaultSignedPreKeyEntity>(entity =>
         {
             entity.ToTable("vault_signed_prekeys");
-            entity.HasKey(e => new { e.OwnerIdentityId, e.DeviceId });
+            entity.HasKey(e => new { e.OwnerIdentityId, e.DeviceId, e.KeyId });
+            entity.HasIndex(e => new { e.OwnerIdentityId, e.DeviceId, e.IsCurrent });
             entity.Property(e => e.PublicKey).HasColumnType("BLOB");
             entity.Property(e => e.Signature).HasColumnType("BLOB");
             entity.Property(e => e.PrivateKey).HasColumnType("BLOB");

@@ -9,6 +9,7 @@ public sealed class RelayPreKeyEntity
     public byte[] IdentityKey { get; set; } = Array.Empty<byte>();
     public byte[] SignedPreKey { get; set; } = Array.Empty<byte>();
     public byte[] SignedPreKeySignature { get; set; } = Array.Empty<byte>();
+    public uint SignedPreKeyId { get; set; } = 1;
     public string OneTimePreKeysJson { get; set; } = string.Empty;
     public DateTimeOffset UpdatedAtUtc { get; set; }
 }

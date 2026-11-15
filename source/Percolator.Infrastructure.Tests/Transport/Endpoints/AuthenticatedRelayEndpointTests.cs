@@ -961,6 +961,126 @@ public sealed class AuthenticatedRelayEndpointTests
             => _inner.AcknowledgeEnvelopeAsync(routingToken, queueId, ct);
     }
 
+    [Test]
+    public async Task GetPreKeyStatus_ValidDrainToken_ReturnsBundleStats()
+    {
+        var capabilityStore = new FakeRelayMailboxCapabilityStore();
+        var preKeyRepo = new InMemoryPreKeyRepo();
+        var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
+        var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
+
+        var routingToken = new byte[16];
+        var deliveryToken = new byte[32];
+        var drainToken = new byte[32];
+        RandomNumberGenerator.Fill(routingToken);
+        RandomNumberGenerator.Fill(deliveryToken);
+        RandomNumberGenerator.Fill(drainToken);
+        await capabilityStore.RegisterAsync(Rt(routingToken), Dt(deliveryToken), Dt(drainToken));
+
+        var (_, opkPub) = cryptoEngine.GenerateEphemeralKeyPair();
+        await preKeyRepo.SaveAsync(RelayHostedPreKeyBundle.Rehydrate(
+            Rt(routingToken),
+            DeviceId.Primary,
+            IdentityKey.FromSpan(new byte[32]),
+            DhPublicKey.FromSpan(new byte[32]),
+            DeviceLinkProof.FromSpan(new byte[64]),
+            SignedPreKeyId.First,
+            new List<(uint, DhPublicKey)> { (1u, opkPub), (2u, opkPub) }));
+
+        var response = await endpoint.GetPreKeyStatus(
+            new GetPreKeyStatusRequest
+            {
+                RoutingToken = ByteString.CopyFrom(routingToken),
+                DrainToken = ByteString.CopyFrom(drainToken),
+                DeviceId = DeviceId.Primary.Value
+            },
+            new TestServerCallContext());
+
+        response.Found.Should().BeTrue();
+        response.OneTimePrekeyCount.Should().Be(2u);
+        response.SignedPrekeyId.Should().Be(1u);
+    }
+
+    [Test]
+    public async Task GetPreKeyStatus_NoBundle_ReturnsFoundFalse()
+    {
+        var capabilityStore = new FakeRelayMailboxCapabilityStore();
+        var preKeyRepo = new InMemoryPreKeyRepo();
+        var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
+        var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
+
+        var routingToken = new byte[16];
+        var deliveryToken = new byte[32];
+        var drainToken = new byte[32];
+        RandomNumberGenerator.Fill(routingToken);
+        RandomNumberGenerator.Fill(deliveryToken);
+        RandomNumberGenerator.Fill(drainToken);
+        await capabilityStore.RegisterAsync(Rt(routingToken), Dt(deliveryToken), Dt(drainToken));
+
+        var response = await endpoint.GetPreKeyStatus(
+            new GetPreKeyStatusRequest
+            {
+                RoutingToken = ByteString.CopyFrom(routingToken),
+                DrainToken = ByteString.CopyFrom(drainToken),
+                DeviceId = DeviceId.Primary.Value
+            },
+            new TestServerCallContext());
+
+        response.Found.Should().BeFalse();
+    }
+
+    [Test]
+    public async Task GetPreKeyStatus_WrongDrainToken_ThrowsPermissionDenied()
+    {
+        var capabilityStore = new FakeRelayMailboxCapabilityStore();
+        var preKeyRepo = new InMemoryPreKeyRepo();
+        var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
+        var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
+
+        var routingToken = new byte[16];
+        var deliveryToken = new byte[32];
+        var drainToken = new byte[32];
+        var wrongToken = new byte[32];
+        RandomNumberGenerator.Fill(routingToken);
+        RandomNumberGenerator.Fill(deliveryToken);
+        RandomNumberGenerator.Fill(drainToken);
+        RandomNumberGenerator.Fill(wrongToken);
+        await capabilityStore.RegisterAsync(Rt(routingToken), Dt(deliveryToken), Dt(drainToken));
+
+        Func<Task> act = async () => await endpoint.GetPreKeyStatus(
+            new GetPreKeyStatusRequest
+            {
+                RoutingToken = ByteString.CopyFrom(routingToken),
+                DrainToken = ByteString.CopyFrom(wrongToken),
+                DeviceId = DeviceId.Primary.Value
+            },
+            new TestServerCallContext());
+
+        var ex = await act.Should().ThrowAsync<RpcException>();
+        ex.Which.StatusCode.Should().Be(StatusCode.PermissionDenied);
+    }
+
+    [Test]
+    public async Task GetPreKeyStatus_MalformedRequest_ThrowsInvalidArgument()
+    {
+        var capabilityStore = new FakeRelayMailboxCapabilityStore();
+        var preKeyRepo = new InMemoryPreKeyRepo();
+        var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
+        var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
+
+        Func<Task> act = async () => await endpoint.GetPreKeyStatus(
+            new GetPreKeyStatusRequest
+            {
+                RoutingToken = ByteString.CopyFrom(new byte[4]),
+                DrainToken = ByteString.CopyFrom(new byte[32]),
+                DeviceId = 1
+            },
+            new TestServerCallContext());
+
+        var ex = await act.Should().ThrowAsync<RpcException>();
+        ex.Which.StatusCode.Should().Be(StatusCode.InvalidArgument);
+    }
+
     private sealed class ChannelAsyncStreamReader<T> : IAsyncStreamReader<T>
     {
         private readonly ChannelReader<T> _reader;

@@ -538,6 +538,13 @@ public interface IPrivatePreKeyStore
 
 **Verify:** `PreKeyMaintenanceServiceTests` (12h throttle vs forced evaluation, top-up `<= 35` → `100`, 48h SPK rotation + 7d/min-3 prune, SPK-mismatch republish) + `AuthenticatedRelayEndpointTests` (`GetPreKeyStatus` auth & counts) + updated `IPrivatePreKeyStore` test doubles compile.
 
+**Outcome / deviations:**
+- Verified: `dotnet build` green; all unit suites pass (incl. new `PreKeyMaintenanceServiceTests`, `GetPreKeyStatus` endpoint tests, multi-SPK `SqlitePrivatePreKeyStoreTests`); `--replay Scenarios`: ALL 8 SCENARIOS PASSED.
+- `PreKeyBundle.SignedPreKeyId` is a **required** positional parameter (not defaulted as spec'd); wire-side callers normalize `signed_prekey_id == 0` → `SignedPreKeyId.First` for legacy bundles.
+- `lastChecked` is recorded only after the status RPC reaches the relay (spec step 5 recorded unconditionally) — token/status failures retry on the next evaluation rather than being throttled away.
+- `SqliteDatabaseMigrator` gained `ApplyPreKeySchemaUpgradesAsync` — the first ALTER-path for existing vaults (`relay_prekeys.SignedPreKeyId` column; `vault_signed_prekeys` rebuilt with composite PK). Future schema changes to existing DBs follow this guarded pattern.
+- **Pre-delete zeroization requires UPDATE-then-DELETE**: EF issues `DELETE`-only on `Remove`, so clearing tracked entity bytes never reaches the file — freed cells kept ciphertext/keys. Both `PruneSignedPreKeysAsync` and `SqlitePendingIngressStore.DeleteAsync` now `ExecuteUpdate` the payload to empty before `Remove` (tracked copy also zeroed). Any future delete-with-zeroization must follow the same two-step.
+
 **QMS:** `HAZ-PREKEY-POOL-STARVATION`, `SYS-ATOMIC-STATE-PERSISTENCE`, `DEP-INFRA-VOLATILE-ZEROIZATION`.
 
 ---

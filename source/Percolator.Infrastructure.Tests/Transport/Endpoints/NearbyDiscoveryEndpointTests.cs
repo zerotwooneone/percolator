@@ -100,7 +100,8 @@ public sealed class NearbyDiscoveryEndpointTests
             DeviceId.Primary,
             IdentityKey.FromSpan(pubKey.Span),
             DhPublicKey.FromSpan(new byte[32]),
-            DeviceLinkProof.FromSpan(new byte[64]));
+            DeviceLinkProof.FromSpan(new byte[64]),
+            SignedPreKeyId.First);
         await preKeyRepo.SaveAsync(bundle);
 
         int visibility = (int)PeerDiscoveryVisibility.Discoverable;
@@ -279,7 +280,8 @@ public sealed class NearbyDiscoveryEndpointTests
             DeviceId.Primary,
             IdentityKey.FromSpan(legitPub.Span),
             DhPublicKey.FromSpan(new byte[32]),
-            DeviceLinkProof.FromSpan(new byte[64]));
+            DeviceLinkProof.FromSpan(new byte[64]),
+            SignedPreKeyId.First);
         await preKeyRepo.SaveAsync(bundle);
 
         // Attacker attempts to register visibility for the same mailbox with their own key
@@ -328,14 +330,16 @@ public sealed class NearbyDiscoveryEndpointTests
             DeviceId.Primary,
             IdentityKey.FromSpan(pub1.Span),
             DhPublicKey.FromSpan(new byte[32]),
-            DeviceLinkProof.FromSpan(new byte[64])));
+            DeviceLinkProof.FromSpan(new byte[64]),
+            SignedPreKeyId.First));
 
         await preKeyRepo.SaveAsync(RelayHostedPreKeyBundle.Rehydrate(
             routingToken2,
             DeviceId.Primary,
             IdentityKey.FromSpan(pub2.Span),
             DhPublicKey.FromSpan(new byte[32]),
-            DeviceLinkProof.FromSpan(new byte[64])));
+            DeviceLinkProof.FromSpan(new byte[64]),
+            SignedPreKeyId.First));
 
         int visibility = (int)PeerDiscoveryVisibility.Discoverable;
         long timestamp = timeProvider.UtcNow.ToUnixTimeMilliseconds();

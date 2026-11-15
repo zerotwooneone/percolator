@@ -13,5 +13,6 @@ public sealed record PreKeyBundle(
     IdentityKey IdentityKey,
     DhPublicKey SignedPreKey,
     DeviceLinkProof SignedPreKeySignature,
+    SignedPreKeyId SignedPreKeyId,
     DhPublicKey? OneTimePreKey = null,
     uint OneTimePreKeyId = 0);
