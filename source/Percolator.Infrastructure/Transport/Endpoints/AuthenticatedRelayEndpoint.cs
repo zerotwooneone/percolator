@@ -143,12 +143,16 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
             AuthResult = new AuthResultProto { Authenticated = true }
         });
 
-        // 3. Setup live stream & send initial queued envelopes without destroying them prematurely
-        var liveChannel = Channel.CreateUnbounded<QueuedSealedEnvelopeProto>(
-            new UnboundedChannelOptions
+        // 3. Setup live stream & send initial queued envelopes without destroying them prematurely.
+        // The live channel is bounded (HAZ-INGRESS-RESOURCE-EXHAUSTION): the capability
+        // store persists before notifying subscribers, so a full channel drops only the
+        // live notification — the envelope still arrives on the next connect's replay.
+        var liveChannel = Channel.CreateBounded<QueuedSealedEnvelopeProto>(
+            new BoundedChannelOptions(256)
             {
                 SingleWriter = false,
-                SingleReader = true
+                SingleReader = true,
+                FullMode = BoundedChannelFullMode.Wait
             });
 
         using var subscription = _capabilityStore.SubscribeMailbox(authResp.RoutingToken.Memory, liveChannel.Writer);
@@ -169,7 +173,10 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
             while (await requestStream.MoveNext(cts.Token).ConfigureAwait(false))
             {
                 var msg = requestStream.Current;
-                if (msg.PayloadCase == MailboxStreamClientMessage.PayloadOneofCase.Ack && msg.Ack != null)
+                if (msg.PayloadCase == MailboxStreamClientMessage.PayloadOneofCase.Ack &&
+                    msg.Ack != null &&
+                    msg.Ack.Acknowledged &&
+                    !string.IsNullOrEmpty(msg.Ack.QueueId))
                 {
                     await _capabilityStore.AcknowledgeEnvelopeAsync(
                         authResp.RoutingToken.Memory,
@@ -244,10 +251,15 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
 
         var identityKey = IdentityKey.FromSpan(request.IdentityKey.Span);
 
+        // Collapse duplicate KeyIds within the batch — the merge below only filters
+        // against already-hosted ids, so a duplicated id would otherwise enqueue the
+        // same key twice and ConsumeBundle could serve a consumed id to a second
+        // fetcher. Keep the first occurrence.
         var opks = new List<(uint KeyId, DhPublicKey Key)>();
+        var seenKeyIds = new HashSet<uint>();
         foreach (var opk in request.OneTimePrekeys)
         {
-            if (opk.PublicKey.Length == 32)
+            if (opk.PublicKey.Length == 32 && seenKeyIds.Add(opk.KeyId))
             {
                 opks.Add((opk.KeyId, DhPublicKey.FromSpan(opk.PublicKey.Span)));
             }

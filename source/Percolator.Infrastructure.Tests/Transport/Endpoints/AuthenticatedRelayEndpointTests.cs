@@ -636,6 +636,339 @@ public sealed class AuthenticatedRelayEndpointTests
         stored.Should().ContainSingle(e => e.QueueId == "q-offline-01");
     }
 
+    [Test]
+    public async Task ConnectMailboxStream_EnvelopeArrivingDuringInitialReplay_DeliveredExactlyOnce()
+    {
+        var inner = new FakeRelayMailboxCapabilityStore();
+        // Hold the initial snapshot open so an enqueue lands in BOTH the live channel
+        // (subscription is already registered) and the eventual snapshot — the exact
+        // window the initialQueueIds filter exists to close.
+        var capabilityStore = new GatedSnapshotCapabilityStore(inner);
+        var preKeyRepo = new InMemoryPreKeyRepo();
+        var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
+        var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
+
+        var routingToken = new byte[16];
+        var deliveryToken = new byte[32];
+        var drainToken = new byte[32];
+        RandomNumberGenerator.Fill(routingToken);
+        RandomNumberGenerator.Fill(deliveryToken);
+        RandomNumberGenerator.Fill(drainToken);
+        await inner.RegisterAsync(routingToken, deliveryToken, drainToken);
+
+        capabilityStore.Arm();
+
+        var clientChannel = Channel.CreateUnbounded<MailboxStreamClientMessage>();
+        var serverWriter = new TestServerStreamWriter<MailboxStreamServerMessage>();
+        var serverContext = new TestServerCallContext();
+        var reader = new ChannelAsyncStreamReader<MailboxStreamClientMessage>(clientChannel.Reader);
+        var streamTask = Task.Run(async () =>
+            await endpoint.ConnectMailboxStream(reader, serverWriter, serverContext));
+
+        using var stepTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        var challengeMsg = await serverWriter.ReadNextAsync(stepTimeout.Token);
+        using var hmac = new HMACSHA256(drainToken);
+        byte[] challengeHmac = hmac.ComputeHash(challengeMsg.AuthChallenge.Nonce.ToByteArray());
+        await clientChannel.Writer.WriteAsync(new MailboxStreamClientMessage
+        {
+            AuthResponse = new AuthResponseProto
+            {
+                RoutingToken = ByteString.CopyFrom(routingToken),
+                ChallengeHmac = ByteString.CopyFrom(challengeHmac)
+            }
+        });
+        var authResultMsg = await serverWriter.ReadNextAsync(stepTimeout.Token);
+        authResultMsg.AuthResult.Authenticated.Should().BeTrue();
+
+        // Enqueue inside the snapshot window: persisted AND live-notified.
+        await inner.EnqueueEnvelopeAsync(routingToken, new QueuedSealedEnvelopeProto
+        {
+            QueueId = "q-race",
+            EnvelopePayload = ByteString.CopyFrom(new byte[] { 1 }),
+            EnqueuedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow)
+        });
+
+        // Release the snapshot — "q-race" appears in both the initial batch and the
+        // live channel; the endpoint must deliver it exactly once.
+        capabilityStore.Release();
+
+        var firstEnvelope = await serverWriter.ReadNextAsync(stepTimeout.Token);
+        firstEnvelope.Envelope.QueueId.Should().Be("q-race");
+
+        // No duplicate copy should follow.
+        using var shortTimeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
+        Func<Task> act = async () => await serverWriter.ReadNextAsync(shortTimeout.Token);
+        await act.Should().ThrowAsync<OperationCanceledException>(
+            "the live-channel copy of an already-replayed envelope must be suppressed");
+
+        clientChannel.Writer.Complete();
+        await streamTask;
+    }
+
+    [Test]
+    public async Task ConnectMailboxStream_LiveEnqueueFloodBeyondCapacity_NoEnvelopeLost()
+    {
+        var capabilityStore = new FakeRelayMailboxCapabilityStore();
+        var preKeyRepo = new InMemoryPreKeyRepo();
+        var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
+        var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
+
+        var routingToken = new byte[16];
+        var deliveryToken = new byte[32];
+        var drainToken = new byte[32];
+        RandomNumberGenerator.Fill(routingToken);
+        RandomNumberGenerator.Fill(deliveryToken);
+        RandomNumberGenerator.Fill(drainToken);
+        await capabilityStore.RegisterAsync(routingToken, deliveryToken, drainToken);
+
+        const int floodCount = 300; // beyond the 256-item live channel bound
+
+        var clientChannel = Channel.CreateUnbounded<MailboxStreamClientMessage>();
+        var serverWriter = new TestServerStreamWriter<MailboxStreamServerMessage>();
+        var serverContext = new TestServerCallContext();
+        var reader = new ChannelAsyncStreamReader<MailboxStreamClientMessage>(clientChannel.Reader);
+        var streamTask = Task.Run(async () =>
+            await endpoint.ConnectMailboxStream(reader, serverWriter, serverContext));
+
+        using var stepTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        var challengeMsg = await serverWriter.ReadNextAsync(stepTimeout.Token);
+        using var hmac = new HMACSHA256(drainToken);
+        await clientChannel.Writer.WriteAsync(new MailboxStreamClientMessage
+        {
+            AuthResponse = new AuthResponseProto
+            {
+                RoutingToken = ByteString.CopyFrom(routingToken),
+                ChallengeHmac = ByteString.CopyFrom(hmac.ComputeHash(challengeMsg.AuthChallenge.Nonce.ToByteArray()))
+            }
+        });
+        var authResultMsg = await serverWriter.ReadNextAsync(stepTimeout.Token);
+        authResultMsg.AuthResult.Authenticated.Should().BeTrue();
+
+        for (var i = 0; i < floodCount; i++)
+        {
+            await capabilityStore.EnqueueEnvelopeAsync(routingToken, new QueuedSealedEnvelopeProto
+            {
+                QueueId = $"q-flood-{i}",
+                EnvelopePayload = ByteString.CopyFrom(new byte[] { 1 }),
+                EnqueuedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow)
+            });
+        }
+
+        // The bounded live channel may drop notifications under flood, but every
+        // envelope is persisted first — nothing is lost from the store.
+        clientChannel.Writer.Complete();
+        await streamTask;
+        (await capabilityStore.GetEnvelopesAsync(routingToken)).Count.Should().Be(floodCount);
+
+        // A reconnect's initial replay delivers all of them, exactly once each.
+        var clientChannel2 = Channel.CreateUnbounded<MailboxStreamClientMessage>();
+        var serverWriter2 = new TestServerStreamWriter<MailboxStreamServerMessage>();
+        var reader2 = new ChannelAsyncStreamReader<MailboxStreamClientMessage>(clientChannel2.Reader);
+        var streamTask2 = Task.Run(async () =>
+            await endpoint.ConnectMailboxStream(reader2, serverWriter2, serverContext));
+
+        var challengeMsg2 = await serverWriter2.ReadNextAsync(stepTimeout.Token);
+        await clientChannel2.Writer.WriteAsync(new MailboxStreamClientMessage
+        {
+            AuthResponse = new AuthResponseProto
+            {
+                RoutingToken = ByteString.CopyFrom(routingToken),
+                ChallengeHmac = ByteString.CopyFrom(hmac.ComputeHash(challengeMsg2.AuthChallenge.Nonce.ToByteArray()))
+            }
+        });
+        var authResultMsg2 = await serverWriter2.ReadNextAsync(stepTimeout.Token);
+        authResultMsg2.AuthResult.Authenticated.Should().BeTrue();
+
+        var replayed = new HashSet<string>(StringComparer.Ordinal);
+        for (var i = 0; i < floodCount; i++)
+        {
+            var msg = await serverWriter2.ReadNextAsync(stepTimeout.Token);
+            replayed.Add(msg.Envelope.QueueId).Should()
+                .BeTrue($"queue id {msg.Envelope.QueueId} must not be delivered twice");
+        }
+        replayed.Should().HaveCount(floodCount);
+
+        clientChannel2.Writer.Complete();
+        await streamTask2;
+    }
+
+    [Test]
+    public async Task ConnectMailboxStream_MalformedAcks_DoNotDeleteEnvelopes()
+    {
+        var capabilityStore = new FakeRelayMailboxCapabilityStore();
+        var preKeyRepo = new InMemoryPreKeyRepo();
+        var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
+        var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
+
+        var routingToken = new byte[16];
+        var deliveryToken = new byte[32];
+        var drainToken = new byte[32];
+        RandomNumberGenerator.Fill(routingToken);
+        RandomNumberGenerator.Fill(deliveryToken);
+        RandomNumberGenerator.Fill(drainToken);
+        await capabilityStore.RegisterAsync(routingToken, deliveryToken, drainToken);
+
+        var clientChannel = Channel.CreateUnbounded<MailboxStreamClientMessage>();
+        var serverWriter = new TestServerStreamWriter<MailboxStreamServerMessage>();
+        var serverContext = new TestServerCallContext();
+        var reader = new ChannelAsyncStreamReader<MailboxStreamClientMessage>(clientChannel.Reader);
+        var streamTask = Task.Run(async () =>
+            await endpoint.ConnectMailboxStream(reader, serverWriter, serverContext));
+
+        using var stepTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        var challengeMsg = await serverWriter.ReadNextAsync(stepTimeout.Token);
+        using var hmac = new HMACSHA256(drainToken);
+        await clientChannel.Writer.WriteAsync(new MailboxStreamClientMessage
+        {
+            AuthResponse = new AuthResponseProto
+            {
+                RoutingToken = ByteString.CopyFrom(routingToken),
+                ChallengeHmac = ByteString.CopyFrom(hmac.ComputeHash(challengeMsg.AuthChallenge.Nonce.ToByteArray()))
+            }
+        });
+        var authResultMsg = await serverWriter.ReadNextAsync(stepTimeout.Token);
+        authResultMsg.AuthResult.Authenticated.Should().BeTrue();
+
+        await capabilityStore.EnqueueEnvelopeAsync(routingToken, new QueuedSealedEnvelopeProto
+        {
+            QueueId = "q-ack-target",
+            EnvelopePayload = ByteString.CopyFrom(new byte[] { 9 }),
+            EnqueuedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow)
+        });
+        var liveMsg = await serverWriter.ReadNextAsync(stepTimeout.Token);
+        liveMsg.Envelope.QueueId.Should().Be("q-ack-target");
+
+        // Negative ack and empty-queue-id ack are both ignored.
+        await clientChannel.Writer.WriteAsync(new MailboxStreamClientMessage
+        {
+            Ack = new MailboxAckProto { QueueId = "q-ack-target", Acknowledged = false }
+        });
+        await clientChannel.Writer.WriteAsync(new MailboxStreamClientMessage
+        {
+            Ack = new MailboxAckProto { QueueId = "", Acknowledged = true }
+        });
+
+        // Give the ack loop a beat, then confirm the envelope survived.
+        await Task.Delay(200);
+        (await capabilityStore.GetEnvelopesAsync(routingToken))
+            .Should().ContainSingle(e => e.QueueId == "q-ack-target");
+
+        // A well-formed ack still removes it.
+        await clientChannel.Writer.WriteAsync(new MailboxStreamClientMessage
+        {
+            Ack = new MailboxAckProto { QueueId = "q-ack-target", Acknowledged = true }
+        });
+        using var ackTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        while ((await capabilityStore.GetEnvelopesAsync(routingToken)).Count > 0 && !ackTimeout.IsCancellationRequested)
+        {
+            await Task.Yield();
+        }
+        (await capabilityStore.GetEnvelopesAsync(routingToken)).Should().BeEmpty();
+
+        clientChannel.Writer.Complete();
+        await streamTask;
+    }
+
+    [Test]
+    public async Task PublishPreKeyBundle_DuplicateKeyIdsWithinBatch_CollapsedToUnique()
+    {
+        var capabilityStore = new FakeRelayMailboxCapabilityStore();
+        var preKeyRepo = new InMemoryPreKeyRepo();
+        var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
+        var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
+
+        var routingToken = new byte[16];
+        var deliveryToken = new byte[32];
+        var drainToken = new byte[32];
+        RandomNumberGenerator.Fill(routingToken);
+        RandomNumberGenerator.Fill(deliveryToken);
+        RandomNumberGenerator.Fill(drainToken);
+        await capabilityStore.RegisterAsync(routingToken, deliveryToken, drainToken);
+
+        byte[] privId = new byte[32];
+        byte[] pubIdBytes = new byte[32];
+        SignalCrypto.GenerateEd25519KeyPair(privId, pubIdBytes);
+        var pubId = IdentityKey.FromSpan(pubIdBytes);
+
+        var (_, pubSigned) = cryptoEngine.GenerateEphemeralKeyPair();
+        var prekeySig = cryptoEngine.SignEd25519(privId, pubSigned.Span);
+
+        // Malformed batch: KeyId 7 appears twice.
+        var opks = new List<(uint, DhPublicKey)>
+        {
+            (7u, cryptoEngine.GenerateEphemeralKeyPair().PublicKey),
+            (7u, cryptoEngine.GenerateEphemeralKeyPair().PublicKey),
+            (8u, cryptoEngine.GenerateEphemeralKeyPair().PublicKey)
+        };
+
+        var request = BuildPublishRequest(
+            routingToken, drainToken, 1u, pubId, pubSigned, prekeySig, opks);
+        var response = await endpoint.PublishPreKeyBundle(request, new TestServerCallContext());
+        response.Success.Should().BeTrue();
+
+        var stored = await preKeyRepo.GetAsync(BlindedRoutingToken.FromBytes(routingToken), DeviceId.Primary);
+        stored!.AvailableOneTimePreKeyCount.Should().Be(2,
+            "duplicate KeyIds inside one batch collapse to a single hosted key");
+
+        // The surviving id-7 key is the FIRST occurrence — the same id served to a
+        // second fetcher must never be a consumed-then-republished duplicate.
+        stored.OneTimePreKeys.Select(k => k.KeyId).Should().BeEquivalentTo(new uint[] { 7u, 8u });
+    }
+
+    /// <summary>
+    /// Wraps a capability store and holds <see cref="IRelayMailboxCapabilityStore.GetEnvelopesAsync"/>
+    /// until <see cref="Release"/> — lets a test enqueue inside the initial-snapshot window
+    /// after the stream's live subscription is already registered.
+    /// </summary>
+    private sealed class GatedSnapshotCapabilityStore : IRelayMailboxCapabilityStore
+    {
+        private readonly IRelayMailboxCapabilityStore _inner;
+        private TaskCompletionSource _gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public GatedSnapshotCapabilityStore(IRelayMailboxCapabilityStore inner) => _inner = inner;
+
+        public void Arm() => _gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public void Release() => _gate.TrySetResult();
+
+        public async ValueTask<IReadOnlyList<QueuedSealedEnvelopeProto>> GetEnvelopesAsync(
+            ReadOnlyMemory<byte> routingToken, CancellationToken ct = default)
+        {
+            await _gate.Task.WaitAsync(ct);
+            return await _inner.GetEnvelopesAsync(routingToken, ct);
+        }
+
+        public ValueTask RegisterAsync(ReadOnlyMemory<byte> routingToken, ReadOnlyMemory<byte> deliveryToken, ReadOnlyMemory<byte> drainToken, CancellationToken ct = default)
+            => _inner.RegisterAsync(routingToken, deliveryToken, drainToken, ct);
+
+        public ValueTask<DomainResult> RegisterVerifiedAsync(ReadOnlyMemory<byte> routingToken, ReadOnlyMemory<byte> deliveryToken, ReadOnlyMemory<byte> drainToken, ReadOnlyMemory<byte> existingDrainToken = default, CancellationToken ct = default)
+            => _inner.RegisterVerifiedAsync(routingToken, deliveryToken, drainToken, existingDrainToken, ct);
+
+        public ValueTask<bool> VerifyDeliveryTokenAsync(ReadOnlyMemory<byte> routingToken, ReadOnlyMemory<byte> deliveryToken, CancellationToken ct = default)
+            => _inner.VerifyDeliveryTokenAsync(routingToken, deliveryToken, ct);
+
+        public ValueTask<bool> VerifyDrainTokenAsync(ReadOnlyMemory<byte> routingToken, ReadOnlyMemory<byte> drainToken, CancellationToken ct = default)
+            => _inner.VerifyDrainTokenAsync(routingToken, drainToken, ct);
+
+        public ValueTask<ReadOnlyMemory<byte>?> GetDrainTokenAsync(ReadOnlyMemory<byte> routingToken, CancellationToken ct = default)
+            => _inner.GetDrainTokenAsync(routingToken, ct);
+
+        public ValueTask EnqueueEnvelopeAsync(ReadOnlyMemory<byte> routingToken, QueuedSealedEnvelopeProto envelope, CancellationToken ct = default)
+            => _inner.EnqueueEnvelopeAsync(routingToken, envelope, ct);
+
+        public ValueTask<IReadOnlyList<QueuedSealedEnvelopeProto>> DrainEnvelopesAsync(ReadOnlyMemory<byte> routingToken, CancellationToken ct = default)
+            => _inner.DrainEnvelopesAsync(routingToken, ct);
+
+        public IDisposable SubscribeMailbox(ReadOnlyMemory<byte> routingToken, ChannelWriter<QueuedSealedEnvelopeProto> writer)
+            => _inner.SubscribeMailbox(routingToken, writer);
+
+        public ValueTask<bool> AcknowledgeEnvelopeAsync(ReadOnlyMemory<byte> routingToken, string queueId, CancellationToken ct = default)
+            => _inner.AcknowledgeEnvelopeAsync(routingToken, queueId, ct);
+    }
+
     private sealed class ChannelAsyncStreamReader<T> : IAsyncStreamReader<T>
     {
         private readonly ChannelReader<T> _reader;

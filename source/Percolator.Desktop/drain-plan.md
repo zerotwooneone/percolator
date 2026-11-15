@@ -403,7 +403,7 @@ public sealed record MailboxBindingChangedEvent(
 
 ---
 
-### DRAIN-08 ⬜ — `ConnectMailboxStream` server hardening
+### DRAIN-08 ✅ — `ConnectMailboxStream` server hardening
 
 **Files:**
 - Modify `Percolator.Infrastructure/Transport/Endpoints/AuthenticatedRelayEndpoint.cs`
@@ -415,6 +415,12 @@ public sealed record MailboxBindingChangedEvent(
 4. Dedupe `OneTimePrekeyProto.KeyId` within the incoming `PublishPreKeyBundleRequest` batch — the existing filter only rejects ids already hosted, so a malformed publish enqueues the same key id twice and `ConsumeBundle` could serve a consumed id to a second fetcher. Self-harm only (the publisher owns the bundle), but it's a cheap endpoint check: reject or collapse duplicate ids before calling `PublishHostedBundle`/`ReplenishHostedBundle`.
 
 **Verify:** `AuthenticatedRelayEndpointTests` — bounded live-channel backpressure, concurrent enqueue during initial replay delivered once, `Acknowledged = false` / empty `queue_id` ignored, batch containing duplicate `key_id`s rejected/deduped.
+
+**Outcome / deviations:**
+- **Shipped as spec'd** except: the spec's `FullMode = Wait` backpressure does not engage — all capability-store implementations (`SqliteRelayMailboxCapabilityStore`, both fakes, the simulator decorator) notify subscribers via `writer.TryWrite`, which never waits. A full channel therefore drops only the *live notification*; every envelope is persisted before notify, so dropped pushes redeliver on the next connect's initial replay. `WriteAsync` backpressure was deliberately rejected — it would block `EnqueueEnvelopeAsync` (publisher path) on an unrelated stalled drain stream. The bound caps unbounded memory growth (`HAZ-INGRESS-RESOURCE-EXHAUSTION`); the store remains the authoritative queue.
+- Item 2 was already satisfied in the shipped code (snapshot populate+replay completes before `liveReadTask` starts); the gated-snapshot test now locks the invariant.
+- Item 4 shipped as *collapse-keep-first* rather than reject (consistent with idempotent merge semantics).
+- Tests added: `EnvelopeArrivingDuringInitialReplay_DeliveredExactlyOnce` (gated snapshot decorator), `LiveEnqueueFloodBeyondCapacity_NoEnvelopeLost` (300 > 256 bound, full redelivery on reconnect), `MalformedAcks_DoNotDeleteEnvelopes`, `PublishPreKeyBundle_DuplicateKeyIdsWithinBatch_CollapsedToUnique`. Endpoint tests 13/13; Infrastructure.Tests 268/268.
 
 **QMS:** `DEC-BOUNDED-CHANNEL-EVENT-BUS`, `HAZ-INGRESS-RESOURCE-EXHAUSTION`.
 
