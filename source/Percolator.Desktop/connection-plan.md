@@ -45,7 +45,7 @@ Implementation Gate: UNLOCKED
 
 ## Tickets
 
-### CONN-01 ⬜ Multi-Interface Network Listener Binding (`0.0.0.0` / `IPAddress.Any` - IPv4 Only)
+### CONN-01 ⬛ Multi-Interface Network Listener Binding (`0.0.0.0` / `IPAddress.Any` - IPv4 Only)
 
 - **IPv4 Mandate:** Sockets bind strictly to IPv4 `IPAddress.Any` (`0.0.0.0`). Dual-stack IPv6 binding is explicitly excluded to preserve route predictability and avoid unauthenticated IPv6 metadata leakage.
 
@@ -86,7 +86,7 @@ Implementation Gate: UNLOCKED
   - Command: `dotnet test Percolator.Infrastructure.Tests --filter "FullyQualifiedName~KestrelPeerTransportServer"`
   - Command: `dotnet run --project Percolator.Simulator --framework net10.0-windows10.0.19041.0 -- --replay Scenarios`
 
-- **QMS:** `DEP-DESKTOP-PRE-ACTIVATION-STEALTH`, `INV-DESKTOP-STEALTH-ACTIVATION-GATE`, `SYS-PRE-ACTIVATION-STEALTH`
+- **QMS:** [`DEP-DESKTOP-PRE-ACTIVATION-STEALTH`], [`INV-DESKTOP-STEALTH-ACTIVATION-GATE`], [`SYS-PRE-ACTIVATION-STEALTH`]
 
 ---
 
@@ -162,7 +162,7 @@ Implementation Gate: UNLOCKED
   - Command: `dotnet test Percolator.Infrastructure.Tests --filter "FullyQualifiedName~CertificateProvider"`
   - Command: `dotnet run --project Percolator.Simulator --framework net10.0-windows10.0.19041.0 -- --replay Scenarios`
 
-- **QMS:** `SYS-MUTUAL-AUTHENTICATED-WIRE-TRANSPORT`, `HAZ-TRANSPORT-SPOOFING`
+- **QMS:** [`SYS-MUTUAL-AUTHENTICATED-WIRE-TRANSPORT`], [`HAZ-TRANSPORT-SPOOFING`]
 
 ---
 
@@ -247,7 +247,7 @@ Implementation Gate: UNLOCKED
   - Command: `dotnet test Percolator.Application.Tests --filter "FullyQualifiedName~PeerInvitationCodec"`
   - Command: `dotnet test Percolator.Infrastructure.Tests --filter "FullyQualifiedName~SqliteVaultSettingsStoreTests"`
 
-- **QMS:** `DEP-DESKTOP-OUT-OF-BAND-VERIFICATION`, `SYS-OUT-OF-BAND-SECURITY-CODE`
+- **QMS:** [`DEP-DESKTOP-OUT-OF-BAND-VERIFICATION`], [`SYS-OUT-OF-BAND-SECURITY-CODE`]
 
 ---
 
@@ -303,7 +303,7 @@ Implementation Gate: UNLOCKED
   - Command: `dotnet test Percolator.Application.Tests --filter "FullyQualifiedName~PeerConnectionService"`
   - Command: `dotnet run --project Percolator.Simulator --framework net10.0-windows10.0.19041.0 -- --replay Scenarios`
 
-- **QMS:** `SYS-CONTACT-CONSENT-GATE`, `SYS-DIRECT-CONTACT-REQUEST-OUTBOX`, `INV-UNSOLICITED-CONNECTION-SILENCE`
+- **QMS:** [`SYS-CONTACT-CONSENT-GATE`], [`SYS-DIRECT-CONTACT-REQUEST-OUTBOX`], [`INV-UNSOLICITED-CONNECTION-SILENCE`]
 
 ---
 
@@ -323,7 +323,7 @@ Implementation Gate: UNLOCKED
   - Command: `dotnet test Percolator.ApplicationIntegrationTests --filter "FullyQualifiedName~RelayedChat"`
   - Command: `dotnet run --project Percolator.Simulator --framework net10.0-windows10.0.19041.0 -- --replay Scenarios`
 
-- **QMS:** `SYS-DISCOVERY-PREKEY-ISOLATION`, `SYS-SEALED-SENDER-CAPABILITY-GATING`
+- **QMS:** [`SYS-DISCOVERY-PREKEY-ISOLATION`], [`SYS-SEALED-SENDER-CAPABILITY-GATING`]
 
 ---
 
@@ -372,7 +372,7 @@ Implementation Gate: UNLOCKED
   - Command: `dotnet test Percolator.Simulator.Tests --filter "FullyQualifiedName~Chaos"`
   - Command: `dotnet run --project Percolator.Simulator --framework net10.0-windows10.0.19041.0 -- --replay Scenarios`
 
-- **QMS:** `DEP-DESKTOP-SEGREGATION-ROLE`, `SYS-BLOCK-WIRE-INDISTINGUISHABILITY`
+- **QMS:** [`DEP-DESKTOP-SEGREGATION-ROLE`], [`SYS-BLOCK-WIRE-INDISTINGUISHABILITY`]
 
 ---
 
@@ -424,7 +424,7 @@ Implementation Gate: UNLOCKED
   - `Percolator.Desktop.Tests/Features/Transports/AddConnectionDialogViewModelTests.cs`
   - Command: `dotnet test Percolator.Desktop.Tests --filter "FullyQualifiedName~AddConnectionDialogViewModelTests"`
 
-- **QMS:** `DEP-DESKTOP-UNSOLICITED-CONSENT-GATE`, `SYS-PRE-ACTIVATION-STEALTH`, `SYS-DISCOVERY-PREKEY-ISOLATION`
+- **QMS:** [`DEP-DESKTOP-UNSOLICITED-CONSENT-GATE`], [`SYS-PRE-ACTIVATION-STEALTH`], [`SYS-DISCOVERY-PREKEY-ISOLATION`]
 
 ---
 
@@ -471,7 +471,7 @@ Implementation Gate: UNLOCKED
   - `Percolator.Desktop.Tests/Features/Transports/OutboundPendingRetryWorkerTests.cs`
   - Command: `dotnet test Percolator.Desktop.Tests --filter "FullyQualifiedName~OutboundPending"`
 
-- **QMS:** `DEP-DESKTOP-UNSOLICITED-CONSENT-GATE`, `SYS-CONTACT-CONSENT-GATE`
+- **QMS:** [`DEP-DESKTOP-UNSOLICITED-CONSENT-GATE`], [`SYS-CONTACT-CONSENT-GATE`]
 
 ---
 
@@ -503,13 +503,13 @@ Implementation Gate: UNLOCKED
      - Actions:
        - **Accept**: Invokes `IHandshakeService.CompletePendingHandshakeAsync(recipientId, senderId, ct)`, derives master session key and ratchet session, creates active 1-to-1 DM in the Right Sidebar, and clears the request from the pending list.
        - **Reject**: Silently deletes pending handshake via `IPendingHandshakeRepository.DeletePendingHandshakeAsync` and updates contact state to dismissed without notifying sender.
-       - **Block** (formerly "Burn"): Permanently blacklists the peer ID and route per `SYS-BLOCK-WIRE-INDISTINGUISHABILITY` (future packets drop silently with zero TCP/wire feedback).
+       - **Block** (formerly "Burn"): Permanently blacklists the peer ID and route per [`SYS-BLOCK-WIRE-INDISTINGUISHABILITY`] (future packets drop silently with zero TCP/wire feedback).
 
 - **Verify:**
   - `Percolator.Desktop.Tests/Features/Transports/PendingRequestsPanelViewModelTests.cs`
   - Command: `dotnet test Percolator.Desktop.Tests --filter "FullyQualifiedName~PendingRequestsPanel"`
 
-- **QMS:** `DEP-DESKTOP-UNSOLICITED-CONSENT-GATE`, `SYS-CONTACT-CONSENT-GATE`, `SYS-BLOCK-WIRE-INDISTINGUISHABILITY`, `INV-UNSOLICITED-CONNECTION-SILENCE`
+- **QMS:** [`DEP-DESKTOP-UNSOLICITED-CONSENT-GATE`], [`SYS-CONTACT-CONSENT-GATE`], [`SYS-BLOCK-WIRE-INDISTINGUISHABILITY`], [`INV-UNSOLICITED-CONNECTION-SILENCE`]
 
 ---
 
@@ -559,7 +559,7 @@ Implementation Gate: UNLOCKED
   - `Percolator.Desktop.Tests/Features/Transports/ShareInvitationDialogViewModelTests.cs`
   - Command: `dotnet test Percolator.Desktop.Tests --filter "FullyQualifiedName~ShareInvitationDialog"`
 
-- **QMS:** `DEP-DESKTOP-OUT-OF-BAND-VERIFICATION`, `SYS-OUT-OF-BAND-SECURITY-CODE`
+- **QMS:** [`DEP-DESKTOP-OUT-OF-BAND-VERIFICATION`], [`SYS-OUT-OF-BAND-SECURITY-CODE`]
 
 ---
 
@@ -584,4 +584,4 @@ Implementation Gate: UNLOCKED
   - Command: `dotnet test Percolator.ApplicationIntegrationTests --filter "FullyQualifiedName~DesktopSimulatorInteroperability"`
   - Command: `dotnet run --project Percolator.Simulator --framework net10.0-windows10.0.19041.0 -- --replay Scenarios`
 
-- **QMS:** `SYS-CONTACT-CONSENT-GATE`, `SYS-PRE-ACTIVATION-STEALTH`, `SYS-BLOCK-WIRE-INDISTINGUISHABILITY`, `DEP-DESKTOP-UNSOLICITED-CONSENT-GATE`
+- **QMS:** [`SYS-CONTACT-CONSENT-GATE`], [`SYS-PRE-ACTIVATION-STEALTH`], [`SYS-BLOCK-WIRE-INDISTINGUISHABILITY`], [`DEP-DESKTOP-UNSOLICITED-CONSENT-GATE`]

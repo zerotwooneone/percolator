@@ -236,6 +236,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<StreamRegistry>();
         services.AddSingleton<IStreamRegistry>(sp => sp.GetRequiredService<StreamRegistry>());
         services.AddSingleton<IStreamRegistryManagement>(sp => sp.GetRequiredService<StreamRegistry>());
+        services.AddSingleton<PeerTransportServerOptions>();
         services.AddSingleton<KestrelPeerTransportServer>();
         services.AddSingleton<IPeerTransportServer>(sp => sp.GetRequiredService<KestrelPeerTransportServer>());
         services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<KestrelPeerTransportServer>());
@@ -384,7 +385,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<IDesktopFileStorage, PortableDesktopFileStore>();
         services.AddSingleton<RelayTransferPipeClient>();
-        services.AddSingleton<CallbackEndpointValidatorOptions>();
+        services.AddSingleton(new CallbackEndpointValidatorOptions { AllowLan = true, AllowLoopback = true });
         services.AddSingleton<CallbackEndpointValidator>();
         services.AddSingleton<ITransferStreamPoolFactory, TcpMultiStreamPoolFactory>();
         services.AddSingleton<ITransferRateLimiter, TokenBucketRateLimiter>();

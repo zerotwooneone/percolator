@@ -217,7 +217,7 @@ public sealed class ExchangeDirectoryService : IExchangeDirectory
         }
 
         await _transport
-            .StartAsync(IPAddress.Loopback, new PortNumber(exchange.RequestedPort), mapRelayEndpoints: true, ct)
+            .StartAsync(IPAddress.Any, new PortNumber(exchange.RequestedPort), mapRelayEndpoints: true, ct)
             .ConfigureAwait(false);
         return _transport.BoundPort?.Value;
     }

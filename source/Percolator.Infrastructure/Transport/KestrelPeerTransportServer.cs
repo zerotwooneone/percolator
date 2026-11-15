@@ -21,6 +21,7 @@ public sealed class KestrelPeerTransportServer : IPeerTransportServer, IHostedSe
 {
     private readonly ITransportCertificateProvider _certificateProvider;
     private readonly IServiceProvider _serviceProvider;
+    private readonly PeerTransportServerOptions _options;
     private readonly ILogger<KestrelPeerTransportServer>? _logger;
     private readonly object _lock = new();
 
@@ -40,24 +41,31 @@ public sealed class KestrelPeerTransportServer : IPeerTransportServer, IHostedSe
     }
 
     public PortNumber? BoundPort { get; private set; }
+    public IPAddress? BoundAddress { get; private set; }
 
     public KestrelPeerTransportServer(
         ITransportCertificateProvider certificateProvider,
         IServiceProvider serviceProvider,
+        PeerTransportServerOptions options,
         ILogger<KestrelPeerTransportServer>? logger = null)
     {
         _certificateProvider = certificateProvider ?? throw new ArgumentNullException(nameof(certificateProvider));
         _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+        _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger;
     }
 
     public async Task StartAsync(
-        IPAddress bindAddress,
+        IPAddress? bindAddress = null,
         PortNumber? preferredPort = null,
         bool mapRelayEndpoints = false,
         CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(bindAddress);
+        var targetBindAddress = bindAddress ?? _options.BindAddress;
+        ArgumentNullException.ThrowIfNull(targetBindAddress);
+
+        var cert = await _certificateProvider.GetOrCreateServerCertificateAsync(ct).ConfigureAwait(false);
+
         WebApplication app;
         lock (_lock)
         {
@@ -70,11 +78,9 @@ public sealed class KestrelPeerTransportServer : IPeerTransportServer, IHostedSe
             var requestedPort = preferredPort?.Value ?? 0;
             var builder = WebApplication.CreateBuilder();
 
-            var cert = _certificateProvider.GetOrCreateServerCertificateAsync(ct).AsTask().GetAwaiter().GetResult();
-
             builder.WebHost.ConfigureKestrel(options =>
             {
-                options.Listen(bindAddress, requestedPort, listenOptions =>
+                options.Listen(targetBindAddress, requestedPort, listenOptions =>
                 {
                     listenOptions.Protocols = HttpProtocols.Http2;
                     listenOptions.UseHttps(cert, httpsOptions =>
@@ -108,21 +114,45 @@ public sealed class KestrelPeerTransportServer : IPeerTransportServer, IHostedSe
             }
 
             _app = app;
-            _isRunning = true;
         }
 
-        await app.StartAsync(ct).ConfigureAwait(false);
-
-        var server = app.Services.GetService<IServer>();
-        var addressFeature = server?.Features.Get<IServerAddressesFeature>();
-        if (addressFeature != null)
+        try
         {
-            foreach (var address in addressFeature.Addresses)
+            await app.StartAsync(ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            lock (_lock)
             {
-                if (Uri.TryCreate(address, UriKind.Absolute, out var uri))
+                _app = null;
+                _isRunning = false;
+                BoundPort = null;
+                BoundAddress = null;
+            }
+            await app.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+
+        lock (_lock)
+        {
+            _isRunning = true;
+            BoundAddress = targetBindAddress;
+
+            var server = app.Services.GetService<IServer>();
+            var addressFeature = server?.Features.Get<IServerAddressesFeature>();
+            if (addressFeature != null)
+            {
+                foreach (var address in addressFeature.Addresses)
                 {
-                    BoundPort = new PortNumber(uri.Port);
-                    break;
+                    if (Uri.TryCreate(address, UriKind.Absolute, out var uri))
+                    {
+                        BoundPort = new PortNumber(uri.Port);
+                        if (IPAddress.TryParse(uri.Host, out var parsedIp))
+                        {
+                            BoundAddress = parsedIp;
+                        }
+                        break;
+                    }
                 }
             }
         }
@@ -142,6 +172,7 @@ public sealed class KestrelPeerTransportServer : IPeerTransportServer, IHostedSe
             _app = null;
             _isRunning = false;
             BoundPort = null;
+            BoundAddress = null;
         }
 
         try
@@ -156,7 +187,7 @@ public sealed class KestrelPeerTransportServer : IPeerTransportServer, IHostedSe
 
     Task IHostedService.StartAsync(CancellationToken cancellationToken)
     {
-        return StartAsync(IPAddress.Loopback, ct: cancellationToken);
+        return StartAsync(_options.BindAddress, ct: cancellationToken);
     }
 
     Task IHostedService.StopAsync(CancellationToken cancellationToken)

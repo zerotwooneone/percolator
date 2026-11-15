@@ -9,8 +9,9 @@ public interface IPeerTransportServer : IAsyncDisposable
 {
     bool IsRunning { get; }
     PortNumber? BoundPort { get; }
+    IPAddress? BoundAddress { get; }
     Task StartAsync(
-        IPAddress bindAddress,
+        IPAddress? bindAddress = null,
         PortNumber? preferredPort = null,
         bool mapRelayEndpoints = false,
         CancellationToken ct = default);

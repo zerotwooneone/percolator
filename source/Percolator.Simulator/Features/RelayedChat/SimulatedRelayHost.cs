@@ -194,7 +194,7 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
 
         builder.WebHost.ConfigureKestrel(options =>
         {
-            options.Listen(IPAddress.Loopback, BoundPort, listenOptions =>
+            options.Listen(IPAddress.Any, BoundPort, listenOptions =>
             {
                 listenOptions.Protocols = HttpProtocols.Http2;
                 listenOptions.UseHttps(cert, httpsOptions =>

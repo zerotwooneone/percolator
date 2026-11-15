@@ -123,7 +123,7 @@ public sealed class PeerGrpcTofuRoundTripTests
         var serviceProvider = services.BuildServiceProvider();
         var certProvider = serviceProvider.GetRequiredService<ITransportCertificateProvider>();
 
-        await using var server = new KestrelPeerTransportServer(certProvider, serviceProvider);
+        await using var server = new KestrelPeerTransportServer(certProvider, serviceProvider, new PeerTransportServerOptions());
 
         await server.StartAsync(IPAddress.Loopback, new PortNumber(0));
 
