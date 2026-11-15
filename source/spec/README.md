@@ -81,6 +81,12 @@ The meta-specifications define the required schema, rules, validation tags, and 
 | [`decision-register-spec.md`](decision-register-spec.md) | **System Architecture Decisions**: Architectural Decision Records (ADRs) evaluating tradeoffs, SOUP selections, and mitigations. | `DEC-*` |
 | [`soup-spec.md`](soup-spec.md) | **Third-Party Software (SOUP)**: Provenance, license, known anomalies, isolation wrappers, and risk management. | `SOUP-*` |
 
+### 3.1 Process Specifications (Outside the Traceability DAG)
+
+| Meta-Specification | Scope & Role | Governed Identifiers |
+| :--- | :--- | :--- |
+| [`implementation-plan-spec.md`](implementation-plan-spec.md) | **Implementation Plans**: Transient executable work orders (`<feature>-plan.md`) decomposing features into verified tickets. Not a QMS record — references QMS identifiers only. | None (transient) |
+
 ---
 
 ## 4. Repository Implementing Documents
