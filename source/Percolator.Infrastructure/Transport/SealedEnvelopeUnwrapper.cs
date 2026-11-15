@@ -165,7 +165,32 @@ public sealed class SealedEnvelopeUnwrapper : ISealedEnvelopeUnwrapper
 
     public DomainResult<InboundEnvelope> Unwrap(MailboxEnvelope envelope, Domain.Identities.PublicIdentityId recipientId)
     {
-        return UnwrapDirect(envelope.Ciphertext, recipientId);
+        try
+        {
+            ReadOnlyMemory<byte> rawPayload = envelope.Ciphertext;
+
+            if (rawPayload.Length > 0 && rawPayload.Span[0] != SealedWireFraming.SealedMagicByte)
+            {
+                try
+                {
+                    var proto = SealedEnvelopeProto.Parser.ParseFrom(rawPayload.Span);
+                    if (proto != null && !proto.EncryptedPackage.IsEmpty)
+                    {
+                        rawPayload = proto.EncryptedPackage.Memory;
+                    }
+                }
+                catch (InvalidProtocolBufferException)
+                {
+                    // Not a protobuf wrapper, proceed with raw bytes
+                }
+            }
+
+            return UnwrapFrame(rawPayload, recipientId, envelope.EnqueuedAtUtc);
+        }
+        catch (Exception ex)
+        {
+            return DomainResult<InboundEnvelope>.Failure(new DomainError("CORRUPTED_ENVELOPE", ex.Message));
+        }
     }
 
     public DomainResult<InboundEnvelope> UnwrapDirect(ReadOnlyMemory<byte> payloadBytes, Domain.Identities.PublicIdentityId recipientId)

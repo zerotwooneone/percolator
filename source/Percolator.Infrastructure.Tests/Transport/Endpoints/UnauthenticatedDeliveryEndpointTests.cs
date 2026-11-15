@@ -150,6 +150,17 @@ public sealed class UnauthenticatedDeliveryEndpointTests
         }
     }
 
+    private sealed class MockIngressFilterService : IIngressFilterService
+    {
+        public DomainResult ReturnResult { get; set; } = DomainResult.Success();
+
+        public ValueTask<DomainResult> CheckIngressAllowedAsync(
+            Domain.Identities.PublicIdentityId recipientId,
+            Domain.Identities.PublicIdentityId senderId,
+            CancellationToken ct = default) =>
+            ValueTask.FromResult(ReturnResult);
+    }
+
     private InMemoryProfileRepo _profileRepo = null!;
     private InMemoryPreKeyRepo _preKeyRepo = null!;
     private InMemoryChunkStore _chunkStore = null!;
@@ -164,12 +175,12 @@ public sealed class UnauthenticatedDeliveryEndpointTests
         _preKeyRepo = new InMemoryPreKeyRepo();
         _chunkStore = new InMemoryChunkStore();
         _capabilityStore = new FakeRelayMailboxCapabilityStore();
-        _endpoint = new UnauthenticatedDeliveryEndpoint(_profileRepo, _preKeyRepo, _chunkStore, _capabilityStore);
+        _endpoint = UnauthenticatedDeliveryEndpoint.ForRelay(_profileRepo, _preKeyRepo, _chunkStore, _capabilityStore);
         _cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
     }
 
     [Test]
-    public async Task DeliverDirect_ValidEnvelope_ReturnsSuccessAck()
+    public async Task DeliverDirect_OnRelayEndpointWithoutLocalRecipient_ReturnsFailedAck()
     {
         var request = new SealedEnvelopeProto
         {
@@ -177,7 +188,8 @@ public sealed class UnauthenticatedDeliveryEndpointTests
         };
 
         var ack = await _endpoint.DeliverDirect(request, new TestServerCallContext());
-        ack.Success.Should().BeTrue();
+        ack.Success.Should().BeFalse();
+        ack.ErrorMessage.Should().Be("Direct delivery is not supported on this endpoint.");
     }
 
     [Test]
@@ -185,12 +197,13 @@ public sealed class UnauthenticatedDeliveryEndpointTests
     {
         var unwrapper = new MockEnvelopeUnwrapper();
         var pipeline = new MockIngressPipeline();
+        var filter = new MockIngressFilterService();
         var endpoint = new UnauthenticatedDeliveryEndpoint(
             _profileRepo,
             _preKeyRepo,
             _chunkStore,
             _capabilityStore,
-            ingressFilter: null,
+            ingressFilter: filter,
             unwrapper: unwrapper,
             ingressPipeline: pipeline,
             localRecipientId: Domain.Identities.PublicIdentityId.New());
@@ -221,6 +234,47 @@ public sealed class UnauthenticatedDeliveryEndpointTests
     }
 
     [Test]
+    public async Task DeliverDirect_IngressFilterRejection_ReturnsFailedAck()
+    {
+        var unwrapper = new MockEnvelopeUnwrapper();
+        var pipeline = new MockIngressPipeline();
+        var filter = new MockIngressFilterService
+        {
+            ReturnResult = DomainResult.Failure(new DomainError("BLOCKED", "Sender is blocked."))
+        };
+        var endpoint = new UnauthenticatedDeliveryEndpoint(
+            _profileRepo,
+            _preKeyRepo,
+            _chunkStore,
+            _capabilityStore,
+            ingressFilter: filter,
+            unwrapper: unwrapper,
+            ingressPipeline: pipeline,
+            localRecipientId: Domain.Identities.PublicIdentityId.New());
+
+        unwrapper.ReturnEnvelope = new InboundGroupEnvelope(
+            ChannelId.New(),
+            Domain.Identities.PublicIdentityId.New(),
+            Domain.Identities.PublicIdentityId.New(),
+            DeviceId.Primary,
+            0,
+            new byte[] { 1, 2, 3, 4 },
+            Array.Empty<byte>(),
+            DateTimeOffset.UtcNow);
+
+        var request = new SealedEnvelopeProto
+        {
+            EncryptedPackage = ByteString.CopyFrom(new byte[] { 0x53, 1, 2, 3 })
+        };
+
+        var ack = await endpoint.DeliverDirect(request, new TestServerCallContext());
+
+        ack.Success.Should().BeFalse();
+        ack.ErrorMessage.Should().Be("Sender is blocked.");
+        pipeline.LastProcessedEnvelope.Should().BeNull();
+    }
+
+    [Test]
     public async Task DeliverDirect_PipelineFailure_ReturnsFailedAck()
     {
         var unwrapper = new MockEnvelopeUnwrapper();
@@ -233,7 +287,7 @@ public sealed class UnauthenticatedDeliveryEndpointTests
             _preKeyRepo,
             _chunkStore,
             _capabilityStore,
-            ingressFilter: null,
+            ingressFilter: new MockIngressFilterService(),
             unwrapper: unwrapper,
             ingressPipeline: pipeline,
             localRecipientId: Domain.Identities.PublicIdentityId.New());
@@ -269,7 +323,7 @@ public sealed class UnauthenticatedDeliveryEndpointTests
             _preKeyRepo,
             _chunkStore,
             _capabilityStore,
-            ingressFilter: null,
+            ingressFilter: new MockIngressFilterService(),
             unwrapper: unwrapper,
             ingressPipeline: pipeline,
             localRecipientId: Domain.Identities.PublicIdentityId.New());

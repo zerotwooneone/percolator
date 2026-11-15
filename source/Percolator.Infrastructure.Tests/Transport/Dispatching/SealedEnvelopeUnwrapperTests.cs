@@ -5,6 +5,7 @@ namespace Percolator.Infrastructure.Tests.Transport.Dispatching;
 using System;
 using System.Security.Cryptography;
 using FluentAssertions;
+using Google.Protobuf;
 using NUnit.Framework;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
@@ -172,6 +173,85 @@ public sealed class SealedEnvelopeUnwrapperTests
         direct.SenderDeviceId.Should().Be(deviceId);
         direct.Header.Counter.Should().Be(5);
         direct.Ciphertext.ToArray().Should().Equal(ciphertext);
+    }
+
+    [Test]
+    public void Unwrap_MailboxEnvelope_PreservesEnqueuedAtUtcAsReceivedAtUtc()
+    {
+        var packer = new ProtobufSessionWirePacker();
+        var timeProvider = new FixedTimeProvider();
+        var recipientId = Domain.Identities.PublicIdentityId.New();
+        var senderId = Domain.Identities.PublicIdentityId.New();
+        var channelId = ChannelId.New();
+        var deviceId = new DeviceId(42);
+
+        var dhKey = DhPublicKey.FromSpan(new byte[32]);
+        var header = new RatchetHeader(dhKey, 1, 0);
+        var ciphertext = new byte[] { 0xAA, 0xBB };
+
+        var packedPayload = packer.PackDirectRatchetMessage(header, ciphertext);
+        var frame = SealedWireFraming.Encode(WireFrameKind.DirectRatchet, channelId, senderId, deviceId, packedPayload);
+
+        var historicalEnqueuedAt = timeProvider.UtcNow.AddDays(-2);
+        var envelope = new MailboxEnvelope(
+            EnvelopeId.New(),
+            BlindedRoutingToken.New(),
+            frame,
+            historicalEnqueuedAt,
+            timeProvider.UtcNow.AddDays(5));
+
+        var unwrapper = new SealedEnvelopeUnwrapper(packer, timeProvider);
+        var result = unwrapper.Unwrap(envelope, recipientId);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value!.ReceivedAtUtc.Should().Be(historicalEnqueuedAt,
+            "Unwrapped mailbox envelope must preserve the relay enqueued timestamp");
+    }
+
+    [Test]
+    public void UnwrapDirect_WrappedInSealedEnvelopeProto_UnpacksCorrectly()
+    {
+        var packer = new ProtobufSessionWirePacker();
+        var timeProvider = new FixedTimeProvider();
+        var recipientId = Domain.Identities.PublicIdentityId.New();
+        var senderId = Domain.Identities.PublicIdentityId.New();
+        var channelId = ChannelId.New();
+        var deviceId = new DeviceId(10);
+
+        var dhKey = DhPublicKey.FromSpan(new byte[32]);
+        var header = new RatchetHeader(dhKey, 0, 0);
+        var ciphertext = new byte[] { 0x11, 0x22 };
+
+        var packedPayload = packer.PackDirectRatchetMessage(header, ciphertext);
+        var frame = SealedWireFraming.Encode(WireFrameKind.DirectRatchet, channelId, senderId, deviceId, packedPayload);
+
+        var proto = new Google.Protobuf.WellKnownTypes.Empty(); // or SealedEnvelopeProto
+        var sealedProto = new Percolator.Infrastructure.Protos.SealedEnvelopeProto
+        {
+            EncryptedPackage = Google.Protobuf.ByteString.CopyFrom(frame)
+        };
+        var protoBytes = sealedProto.ToByteArray();
+
+        var unwrapper = new SealedEnvelopeUnwrapper(packer, timeProvider);
+        var result = unwrapper.UnwrapDirect(protoBytes, recipientId);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Should().BeOfType<InboundDirectEnvelope>();
+        result.Value!.SenderIdentityId.Should().Be(senderId);
+    }
+
+    [Test]
+    public void Constructor_WithNullWirePacker_ThrowsArgumentNullException()
+    {
+        var act = () => new SealedEnvelopeUnwrapper(null!, new FixedTimeProvider());
+        act.Should().Throw<ArgumentNullException>().WithParameterName("wirePacker");
+    }
+
+    [Test]
+    public void Constructor_WithNullTimeProvider_ThrowsArgumentNullException()
+    {
+        var act = () => new SealedEnvelopeUnwrapper(new ProtobufSessionWirePacker(), null!);
+        act.Should().Throw<ArgumentNullException>().WithParameterName("timeProvider");
     }
 
     private static bool ContainsSubsequence(ReadOnlySpan<byte> haystack, ReadOnlySpan<byte> needle)

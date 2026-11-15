@@ -211,7 +211,7 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
             lb.SetMinimumLevel(LogLevel.Warning);
         });
 
-        var unauthEndpoint = new UnauthenticatedDeliveryEndpoint(profileRepo, _preKeyRepository, chunkStore, _capabilityStore);
+        var unauthEndpoint = UnauthenticatedDeliveryEndpoint.ForRelay(profileRepo, _preKeyRepository, chunkStore, _capabilityStore);
         var authEndpoint = new AuthenticatedRelayEndpoint(_capabilityStore, _preKeyRepository, cryptoEngine);
         var timeProvider = new SystemDateTimeProvider();
         var groupEndpoint = new AnonymousGroupRelayEndpoint(ledgerRepo, zkEngine, _capabilityStore, timeProvider, RelayIdentityId);

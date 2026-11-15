@@ -31,24 +31,53 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
     private readonly IInboundIngressPipeline? _ingressPipeline;
     private readonly PublicIdentityId? _localRecipientId;
 
+    /// <summary>
+    /// Primary constructor for persona hosts supporting direct delivery and relay endpoints.
+    /// </summary>
     public UnauthenticatedDeliveryEndpoint(
         IRelayProfileRepository profileRepository,
         IRelayPreKeyRepository preKeyRepository,
         ILocalChunkStore chunkStore,
         IRelayMailboxCapabilityStore capabilityStore,
-        IIngressFilterService? ingressFilter = null,
-        ISealedEnvelopeUnwrapper? unwrapper = null,
-        IInboundIngressPipeline? ingressPipeline = null,
+        IIngressFilterService ingressFilter,
+        ISealedEnvelopeUnwrapper unwrapper,
+        IInboundIngressPipeline ingressPipeline,
         PublicIdentityId? localRecipientId = null)
     {
         _profileRepository = profileRepository ?? throw new ArgumentNullException(nameof(profileRepository));
         _preKeyRepository = preKeyRepository ?? throw new ArgumentNullException(nameof(preKeyRepository));
         _chunkStore = chunkStore ?? throw new ArgumentNullException(nameof(chunkStore));
         _capabilityStore = capabilityStore ?? throw new ArgumentNullException(nameof(capabilityStore));
-        _ingressFilter = ingressFilter;
-        _unwrapper = unwrapper;
-        _ingressPipeline = ingressPipeline;
+        _ingressFilter = ingressFilter ?? throw new ArgumentNullException(nameof(ingressFilter));
+        _unwrapper = unwrapper ?? throw new ArgumentNullException(nameof(unwrapper));
+        _ingressPipeline = ingressPipeline ?? throw new ArgumentNullException(nameof(ingressPipeline));
         _localRecipientId = localRecipientId;
+    }
+
+    /// <summary>
+    /// Factory for standalone relay hosts that do not support direct peer-to-peer delivery.
+    /// </summary>
+    public static UnauthenticatedDeliveryEndpoint ForRelay(
+        IRelayProfileRepository profileRepository,
+        IRelayPreKeyRepository preKeyRepository,
+        ILocalChunkStore chunkStore,
+        IRelayMailboxCapabilityStore capabilityStore) =>
+        new(profileRepository, preKeyRepository, chunkStore, capabilityStore);
+
+    private UnauthenticatedDeliveryEndpoint(
+        IRelayProfileRepository profileRepository,
+        IRelayPreKeyRepository preKeyRepository,
+        ILocalChunkStore chunkStore,
+        IRelayMailboxCapabilityStore capabilityStore)
+    {
+        _profileRepository = profileRepository ?? throw new ArgumentNullException(nameof(profileRepository));
+        _preKeyRepository = preKeyRepository ?? throw new ArgumentNullException(nameof(preKeyRepository));
+        _chunkStore = chunkStore ?? throw new ArgumentNullException(nameof(chunkStore));
+        _capabilityStore = capabilityStore ?? throw new ArgumentNullException(nameof(capabilityStore));
+        _ingressFilter = null;
+        _unwrapper = null;
+        _ingressPipeline = null;
+        _localRecipientId = null;
     }
 
     public override async Task<DeliveryAckProto> DeliverDirect(SealedEnvelopeProto request, ServerCallContext context)
@@ -62,49 +91,52 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
             };
         }
 
-        if (_unwrapper != null && _localRecipientId is { } localRecipientId)
+        if (_localRecipientId is not { } localRecipientId || _unwrapper == null || _ingressPipeline == null)
         {
-            var unwrapResult = _unwrapper.UnwrapDirect(request.EncryptedPackage.Memory, localRecipientId);
+            return new DeliveryAckProto
+            {
+                Success = false,
+                ErrorMessage = "Direct delivery is not supported on this endpoint."
+            };
+        }
 
-            if (!unwrapResult.IsSuccess)
+        var unwrapResult = _unwrapper.UnwrapDirect(request.EncryptedPackage.Memory, localRecipientId);
+
+        if (!unwrapResult.IsSuccess)
+        {
+            return new DeliveryAckProto
+            {
+                Success = false,
+                ErrorMessage = unwrapResult.Error!.Description
+            };
+        }
+
+        var envelope = unwrapResult.Value!;
+        if (_ingressFilter != null)
+        {
+            var filterResult = await _ingressFilter.CheckIngressAllowedAsync(
+                envelope.RecipientIdentityId,
+                envelope.SenderIdentityId,
+                context.CancellationToken);
+
+            if (filterResult.IsFailure)
             {
                 return new DeliveryAckProto
                 {
                     Success = false,
-                    ErrorMessage = unwrapResult.Error!.Description
+                    ErrorMessage = filterResult.Error!.Description
                 };
             }
+        }
 
-            var envelope = unwrapResult.Value!;
-            if (_ingressFilter != null)
+        var ingressResult = await _ingressPipeline.ProcessInboundAsync(envelope, context.CancellationToken);
+        if (ingressResult.IsFailure && ingressResult.Error.Code != "EXPIRED_OR_DUPLICATE_MESSAGE")
+        {
+            return new DeliveryAckProto
             {
-                var filterResult = await _ingressFilter.CheckIngressAllowedAsync(
-                    envelope.RecipientIdentityId,
-                    envelope.SenderIdentityId,
-                    context.CancellationToken);
-
-                if (filterResult.IsFailure)
-                {
-                    return new DeliveryAckProto
-                    {
-                        Success = false,
-                        ErrorMessage = filterResult.Error!.Description
-                    };
-                }
-            }
-
-            if (_ingressPipeline != null)
-            {
-                var ingressResult = await _ingressPipeline.ProcessInboundAsync(envelope, context.CancellationToken);
-                if (ingressResult.IsFailure && ingressResult.Error.Code != "EXPIRED_OR_DUPLICATE_MESSAGE")
-                {
-                    return new DeliveryAckProto
-                    {
-                        Success = false,
-                        ErrorMessage = ingressResult.Error.Description
-                    };
-                }
-            }
+                Success = false,
+                ErrorMessage = ingressResult.Error.Description
+            };
         }
 
         return new DeliveryAckProto

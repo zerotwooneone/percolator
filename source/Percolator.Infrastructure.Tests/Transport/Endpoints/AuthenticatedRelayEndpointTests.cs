@@ -133,7 +133,7 @@ public sealed class AuthenticatedRelayEndpointTests
         var preKeyRepo = new InMemoryPreKeyRepo();
         var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
         var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
-        var unauthEndpoint = new UnauthenticatedDeliveryEndpoint(
+        var unauthEndpoint = UnauthenticatedDeliveryEndpoint.ForRelay(
             new InMemoryProfileRepo(), preKeyRepo, new InMemoryChunkStore(), capabilityStore);
 
         var routingToken = new byte[16];

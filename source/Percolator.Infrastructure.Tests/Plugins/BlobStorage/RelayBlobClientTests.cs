@@ -49,7 +49,7 @@ public sealed class RelayBlobClientTests
         Directory.CreateDirectory(_tempDirectory);
         _chunkStore = new LocalFileChunkStore(_tempDirectory, maxBlobSizeBytes: 10 * 1024 * 1024, maxCacheQuotaBytes: 50 * 1024 * 1024);
 
-        _endpoint = new UnauthenticatedDeliveryEndpoint(
+        _endpoint = UnauthenticatedDeliveryEndpoint.ForRelay(
             new UnauthenticatedDeliveryEndpointTestsFakes.StubProfileRepo(),
             new UnauthenticatedDeliveryEndpointTestsFakes.StubPreKeyRepo(),
             _chunkStore,

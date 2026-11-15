@@ -11,6 +11,7 @@ using FluentAssertions;
 using Google.Protobuf;
 using Microsoft.Extensions.DependencyInjection;
 using NUnit.Framework;
+using Percolator.Application.Ingress;
 using Percolator.Application.Ports;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Hosting;
@@ -73,6 +74,37 @@ public sealed class PeerGrpcTofuRoundTripTests
             => ValueTask.CompletedTask;
     }
 
+    private sealed class StubIngressFilterService : IIngressFilterService
+    {
+        public ValueTask<DomainResult> CheckIngressAllowedAsync(
+            Domain.Identities.PublicIdentityId recipientId,
+            Domain.Identities.PublicIdentityId senderId,
+            CancellationToken ct = default) =>
+            ValueTask.FromResult(DomainResult.Success());
+    }
+
+    private sealed class StubEnvelopeUnwrapper : ISealedEnvelopeUnwrapper
+    {
+        public DomainResult<InboundEnvelope> Unwrap(MailboxEnvelope envelope, Domain.Identities.PublicIdentityId recipientId)
+            => UnwrapDirect(envelope.Ciphertext, recipientId);
+
+        public DomainResult<InboundEnvelope> UnwrapDirect(ReadOnlyMemory<byte> payloadBytes, Domain.Identities.PublicIdentityId recipientId)
+            => DomainResult<InboundEnvelope>.Success(new InboundDirectEnvelope(
+                Domain.Channels.ValueObjects.ChannelId.New(),
+                recipientId,
+                Domain.Identities.PublicIdentityId.New(),
+                DeviceId.Primary,
+                new Domain.Security.ValueObjects.RatchetHeader(Domain.Identities.ValueObjects.DhPublicKey.FromSpan(new byte[32]), 0, 0),
+                payloadBytes.ToArray(),
+                DateTimeOffset.UtcNow));
+    }
+
+    private sealed class StubIngressPipeline : Percolator.Application.Ingress.IInboundIngressPipeline
+    {
+        public ValueTask<DomainResult> ProcessInboundAsync(InboundEnvelope envelope, CancellationToken ct = default)
+            => ValueTask.FromResult(DomainResult.Success());
+    }
+
     [Test]
     public async Task KestrelPeerTransportServer_AcceptsClientConnectionOverTofuTls13()
     {
@@ -82,6 +114,10 @@ public sealed class PeerGrpcTofuRoundTripTests
         services.AddSingleton<IRelayPreKeyRepository, StubRelayPreKeyRepository>();
         services.AddSingleton<ILocalChunkStore, StubLocalChunkStore>();
         services.AddSingleton<IRelayMailboxCapabilityStore, FakeRelayMailboxCapabilityStore>();
+        services.AddSingleton<IIngressFilterService, StubIngressFilterService>();
+        services.AddSingleton<ISealedEnvelopeUnwrapper, StubEnvelopeUnwrapper>();
+        services.AddSingleton<Percolator.Application.Ingress.IInboundIngressPipeline, StubIngressPipeline>();
+        services.AddSingleton(typeof(Domain.Identities.PublicIdentityId?), _ => Domain.Identities.PublicIdentityId.New());
         services.AddSingleton<UnauthenticatedDeliveryEndpoint>();
 
         var serviceProvider = services.BuildServiceProvider();
