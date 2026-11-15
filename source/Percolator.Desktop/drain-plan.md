@@ -424,7 +424,7 @@ public sealed record MailboxBindingChangedEvent(
 
 ---
 
-### DRAIN-09 ⬜ — Remove destructive unary `DrainMailbox` & migrate callers
+### DRAIN-09 ✅ — Remove destructive unary `DrainMailbox` & migrate callers
 
 **Files:**
 - Modify `Percolator.Infrastructure/Protos/authenticated_relay.proto` (delete `rpc DrainMailbox`, `DrainMailboxRequest`, `DrainMailboxResponse`)
@@ -439,6 +439,16 @@ public sealed record MailboxBindingChangedEvent(
 - Note: `RelayMailboxQueue` (in-memory domain aggregate) and `TestIdentityNode.DrainMailboxAsync` remain unchanged — they back in-memory `Percolator.ApplicationIntegrationTests` and do not touch gRPC or SQLite.
 
 **Verify:** unit tests + full scenario suite (`--replay Scenarios`) — sim `DrainMailboxAsync` is re-bridged here.
+
+**Outcome / deviations (verified 2026-11-15):**
+- `dotnet build Percolator.sln`: 0 errors; `dotnet test`: all suites pass (12 assemblies, 1,059 tests, 0 failures); `--replay Scenarios`: ALL 8 SCENARIOS PASSED.
+- `IRelayMailboxCapabilityStore` now lives in `Percolator.Domain.Delivery.Ports`; `DrainEnvelopesAsync` is replaced by `PurgeMailboxAsync(BlindedRoutingToken, CancellationToken) -> ValueTask<int>` — SQLite path uses `ExecuteDeleteAsync` and never materializes payloads.
+- New VO `Percolator.Domain.Delivery.ValueObjects.RelayQueuedEnvelopeRecord(MailboxQueueId, ReadOnlyMemory<byte>, DateTimeOffset)` carries queue entries inside the domain boundary; `QueuedSealedEnvelopeProto` stays on the wire only — `AuthenticatedRelayEndpoint.ConnectMailboxStream` maps record→proto, and both enqueue call sites (`UnauthenticatedDeliveryEndpoint.EnqueueMailbox`, `AnonymousGroupRelayEndpoint`) map proto→record.
+- Wire validation hardened at the boundary: `RegisterMailbox` now requires exactly 16/32/32-byte tokens (was `IsEmpty`-only), and `EnqueueMailbox`/`FetchPreKeyBundle` validate token lengths before VO construction. `ConnectMailboxStream` treats a wrong-length routing token as auth failure; ACKs with unparsable queue ids are ignored.
+- `GrpcRelayMailboxProvisioner` dropped `DrainMailboxOnceAsync`, `_scopeFactory`, `_timeProvider`, `EnvelopeExpiryWindow` — ctor is now `(IPeerGrpcChannelFactory, ILocalIdentityKeyStore, IPrivatePreKeyStore, ICryptoEngine)`.
+- Simulator decorator signals `MailboxPurged` (was `EnvelopesDrained`) and only when count > 0; stream/spool drain-completion semantics unchanged.
+- `CoreProtoCompilationTests` needed no changes (never referenced the drain messages); `AnonymousGroupRelayEndpointTests` inspect held envelopes via `GetEnvelopesAsync` instead of the removed drain.
+- `Subscriber` dictionaries key on `BlindedRoutingToken` directly (the `[GuidId]` VO has structural equality) — hex-string keys removed; `TryWrite` notification contract preserved per DRAIN-08.
 
 **QMS:** `HAZ-CRASH-STATE-DESYNC`, `DEC-PENDING-INGRESS-SPOOL`.
 

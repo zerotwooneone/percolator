@@ -463,7 +463,8 @@ public sealed class UnauthenticatedDeliveryEndpointTests
         var routingTokenVo = BlindedRoutingToken.FromBytes(routingToken);
 
         // Register mailbox — bundles are keyed by the routing token, no owner association exists
-        await _capabilityStore.RegisterAsync(routingToken, correctDeliveryToken, drainToken);
+        await _capabilityStore.RegisterAsync(
+            routingTokenVo, DeliveryToken.FromSpan(correctDeliveryToken), DeliveryToken.FromSpan(drainToken));
 
         byte[] privId = new byte[32];
         byte[] pubIdBytes = new byte[32];

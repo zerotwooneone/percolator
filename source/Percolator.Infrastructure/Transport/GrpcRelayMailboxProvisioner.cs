@@ -1,5 +1,4 @@
 using Percolator.Application.Delivery.Ports;
-using Percolator.Application.Ingress;
 using Percolator.Application.Ports;
 
 namespace Percolator.Infrastructure.Transport;
@@ -9,9 +8,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Google.Protobuf;
-using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
-using Microsoft.Extensions.DependencyInjection;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.Ports;
@@ -21,14 +18,12 @@ using Percolator.Infrastructure.Protos;
 
 /// <summary>
 /// Production <see cref="IRelayMailboxProvisioner"/> that talks to a relay host over the
-/// authenticated relay gRPC surface: mailbox registration, signed pre-key bundle
-/// publication (with routing-token owner association), and one-shot mailbox drains that
-/// feed unwrapped envelopes into the inbound ingress pipeline.
+/// authenticated relay gRPC surface: mailbox registration and signed pre-key bundle
+/// publication (with routing-token owner association).
 /// </summary>
 public sealed class GrpcRelayMailboxProvisioner : IRelayMailboxProvisioner
 {
     private const uint LocalSignedPreKeyId = 1;
-    private static readonly TimeSpan EnvelopeExpiryWindow = TimeSpan.FromDays(7);
 
     // OPK key ids are allocated read-modify-write (max+1); concurrent publishes for
     // the same owner would collide on vault_onetime_prekeys' unique key, so the
@@ -40,28 +35,17 @@ public sealed class GrpcRelayMailboxProvisioner : IRelayMailboxProvisioner
     private readonly ILocalIdentityKeyStore _identityKeyStore;
     private readonly IPrivatePreKeyStore _preKeyStore;
     private readonly ICryptoEngine _cryptoEngine;
-    private readonly IServiceScopeFactory _scopeFactory;
-    private readonly IDateTimeProvider _timeProvider;
 
     public GrpcRelayMailboxProvisioner(
         IPeerGrpcChannelFactory channelFactory,
         ILocalIdentityKeyStore identityKeyStore,
         IPrivatePreKeyStore preKeyStore,
-        ICryptoEngine cryptoEngine,
-        IServiceScopeFactory scopeFactory,
-        IDateTimeProvider timeProvider)
+        ICryptoEngine cryptoEngine)
     {
         _channelFactory = channelFactory ?? throw new ArgumentNullException(nameof(channelFactory));
         _identityKeyStore = identityKeyStore ?? throw new ArgumentNullException(nameof(identityKeyStore));
         _preKeyStore = preKeyStore ?? throw new ArgumentNullException(nameof(preKeyStore));
         _cryptoEngine = cryptoEngine ?? throw new ArgumentNullException(nameof(cryptoEngine));
-        // ISealedEnvelopeUnwrapper and IInboundIngressPipeline are per-node services
-        // registered only by composition roots that know the node identity. They are
-        // resolved lazily inside a per-drain scope in DrainMailboxOnceAsync so that hosts
-        // without a local node identity can still construct this provisioner (required for
-        // ValidateOnBuild composition checks).
-        _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
-        _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
     }
 
     public async Task<DomainResult> ProvisionMailboxAsync(
@@ -205,79 +189,6 @@ public sealed class GrpcRelayMailboxProvisioner : IRelayMailboxProvisioner
                 material.PrivateKey.Dispose();
             }
         }
-    }
-
-    public async Task<DomainResult<int>> DrainMailboxOnceAsync(
-        Domain.Identities.PublicIdentityId ownerIdentityId,
-        RelayEndpoint endpoint,
-        MailboxTokenTriad tokens,
-        CancellationToken ct = default)
-    {
-        var client = CreateClient(endpoint);
-        DrainMailboxResponse drainResponse;
-        try
-        {
-            drainResponse = await client.DrainMailboxAsync(
-                new DrainMailboxRequest
-                {
-                    RoutingToken = ByteString.CopyFrom(tokens.RoutingToken.ToByteArray()),
-                    DrainToken = ByteString.CopyFrom(tokens.DrainToken.Span)
-                },
-                cancellationToken: ct).ResponseAsync.ConfigureAwait(false);
-        }
-        catch (RpcException ex)
-        {
-            return DomainResult<int>.Failure(new DomainError(
-                "RELAY_DRAIN_FAILED",
-                $"Mailbox drain RPC failed: {ex.Status.Detail ?? ex.Message}"));
-        }
-
-        // One scope per drain: the per-node unwrapper/pipeline are scoped registrations
-        // owned by the composition root, not resolvable from a singleton.
-        using var drainScope = _scopeFactory.CreateScope();
-        var unwrapper = drainScope.ServiceProvider.GetRequiredService<ISealedEnvelopeUnwrapper>();
-        var ingress = drainScope.ServiceProvider.GetRequiredService<IInboundIngressPipeline>();
-
-        var processed = 0;
-        foreach (var queued in drainResponse.Envelopes)
-        {
-            try
-            {
-                var sealedEnv = SealedEnvelopeProto.Parser.ParseFrom(queued.EnvelopePayload);
-                var decodeCheck = SealedWireFraming.Decode(sealedEnv.EncryptedPackage.Memory);
-                if (decodeCheck.IsSuccess && decodeCheck.Value.SenderId == ownerIdentityId)
-                {
-                    // Skip self-echoes: envelopes we sent to ourselves through the mailbox.
-                    continue;
-                }
-
-                var mailboxEnvelope = new MailboxEnvelope(
-                    EnvelopeId.New(),
-                    tokens.RoutingToken,
-                    sealedEnv.EncryptedPackage.Memory,
-                    _timeProvider.UtcNow,
-                    _timeProvider.UtcNow + EnvelopeExpiryWindow);
-
-                var unwrapResult = unwrapper.Unwrap(mailboxEnvelope, ownerIdentityId);
-                if (!unwrapResult.IsSuccess)
-                {
-                    continue;
-                }
-
-                var ingressResult = await ingress.ProcessInboundAsync(unwrapResult.Value!, ct)
-                    .ConfigureAwait(false);
-                if (ingressResult.IsSuccess)
-                {
-                    processed++;
-                }
-            }
-            catch (Exception)
-            {
-                // Malformed/corrupt envelope — skip it; the rest of the drain continues.
-            }
-        }
-
-        return DomainResult<int>.Success(processed);
     }
 
     public Task<DomainResult<RelayPreKeyStatus>> GetPreKeyStatusAsync(

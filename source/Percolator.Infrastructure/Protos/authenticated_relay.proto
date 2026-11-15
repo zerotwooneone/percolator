@@ -58,15 +58,6 @@ message RegisterMailboxResponse {
   bool success = 1;
 }
 
-message DrainMailboxRequest {
-  bytes routing_token = 1;
-  bytes drain_token = 2;
-}
-
-message DrainMailboxResponse {
-  repeated QueuedSealedEnvelopeProto envelopes = 1;
-}
-
 message OneTimePreKeyProto {
   uint32 key_id = 1;
   bytes public_key = 2;
@@ -94,6 +85,5 @@ message PublishPreKeyBundleResponse {
 service AuthenticatedRelayService {
   rpc ConnectMailboxStream(stream MailboxStreamClientMessage) returns (stream MailboxStreamServerMessage);
   rpc RegisterMailbox(RegisterMailboxRequest) returns (RegisterMailboxResponse);
-  rpc DrainMailbox(DrainMailboxRequest) returns (DrainMailboxResponse);
   rpc PublishPreKeyBundle(PublishPreKeyBundleRequest) returns (PublishPreKeyBundleResponse);
 }

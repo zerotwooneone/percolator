@@ -8,6 +8,8 @@ using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.EntityFrameworkCore;
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.Ports;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Infrastructure.Persistence;
 using Percolator.Infrastructure.Persistence.Entities;
@@ -58,9 +60,9 @@ internal sealed class SimulatorNotifyingRelayCapabilityStoreDecorator : IRelayMa
     }
 
     public async ValueTask RegisterAsync(
-        ReadOnlyMemory<byte> routingToken,
-        ReadOnlyMemory<byte> deliveryToken,
-        ReadOnlyMemory<byte> drainToken,
+        BlindedRoutingToken routingToken,
+        DeliveryToken deliveryToken,
+        DeliveryToken drainToken,
         CancellationToken ct = default)
     {
         await _inner.RegisterAsync(routingToken, deliveryToken, drainToken, ct).ConfigureAwait(false);
@@ -68,10 +70,10 @@ internal sealed class SimulatorNotifyingRelayCapabilityStoreDecorator : IRelayMa
     }
 
     public async ValueTask<DomainResult> RegisterVerifiedAsync(
-        ReadOnlyMemory<byte> routingToken,
-        ReadOnlyMemory<byte> deliveryToken,
-        ReadOnlyMemory<byte> drainToken,
-        ReadOnlyMemory<byte> existingDrainToken = default,
+        BlindedRoutingToken routingToken,
+        DeliveryToken deliveryToken,
+        DeliveryToken drainToken,
+        DeliveryToken? existingDrainToken = null,
         CancellationToken ct = default)
     {
         var result = await _inner.RegisterVerifiedAsync(
@@ -86,66 +88,66 @@ internal sealed class SimulatorNotifyingRelayCapabilityStoreDecorator : IRelayMa
     }
 
     public ValueTask<bool> VerifyDeliveryTokenAsync(
-        ReadOnlyMemory<byte> routingToken,
-        ReadOnlyMemory<byte> deliveryToken,
+        BlindedRoutingToken routingToken,
+        DeliveryToken deliveryToken,
         CancellationToken ct = default)
     {
         return _inner.VerifyDeliveryTokenAsync(routingToken, deliveryToken, ct);
     }
 
     public ValueTask<bool> VerifyDrainTokenAsync(
-        ReadOnlyMemory<byte> routingToken,
-        ReadOnlyMemory<byte> drainToken,
+        BlindedRoutingToken routingToken,
+        DeliveryToken drainToken,
         CancellationToken ct = default)
     {
         return _inner.VerifyDrainTokenAsync(routingToken, drainToken, ct);
     }
 
-    public ValueTask<ReadOnlyMemory<byte>?> GetDrainTokenAsync(
-        ReadOnlyMemory<byte> routingToken,
+    public ValueTask<DeliveryToken?> GetDrainTokenAsync(
+        BlindedRoutingToken routingToken,
         CancellationToken ct = default)
     {
         return _inner.GetDrainTokenAsync(routingToken, ct);
     }
 
     public async ValueTask EnqueueEnvelopeAsync(
-        ReadOnlyMemory<byte> routingToken,
-        QueuedSealedEnvelopeProto envelope,
+        BlindedRoutingToken routingToken,
+        RelayQueuedEnvelopeRecord envelope,
         CancellationToken ct = default)
     {
         await _inner.EnqueueEnvelopeAsync(routingToken, envelope, ct).ConfigureAwait(false);
         _stateBus.Publish(new SimulatorStateSignal(_nodeId, SignalCategory.RelayQueueChanged, "EnvelopeEnqueued"));
     }
 
-    public ValueTask<IReadOnlyList<QueuedSealedEnvelopeProto>> GetEnvelopesAsync(
-        ReadOnlyMemory<byte> routingToken,
+    public ValueTask<IReadOnlyList<RelayQueuedEnvelopeRecord>> GetEnvelopesAsync(
+        BlindedRoutingToken routingToken,
         CancellationToken ct = default)
     {
         return _inner.GetEnvelopesAsync(routingToken, ct);
     }
 
-    public async ValueTask<IReadOnlyList<QueuedSealedEnvelopeProto>> DrainEnvelopesAsync(
-        ReadOnlyMemory<byte> routingToken,
+    public async ValueTask<int> PurgeMailboxAsync(
+        BlindedRoutingToken routingToken,
         CancellationToken ct = default)
     {
-        var drained = await _inner.DrainEnvelopesAsync(routingToken, ct).ConfigureAwait(false);
-        if (drained.Count > 0)
+        var purged = await _inner.PurgeMailboxAsync(routingToken, ct).ConfigureAwait(false);
+        if (purged > 0)
         {
-            _stateBus.Publish(new SimulatorStateSignal(_nodeId, SignalCategory.RelayQueueChanged, "EnvelopesDrained"));
+            _stateBus.Publish(new SimulatorStateSignal(_nodeId, SignalCategory.RelayQueueChanged, "MailboxPurged"));
         }
-        return drained;
+        return purged;
     }
 
     public IDisposable SubscribeMailbox(
-        ReadOnlyMemory<byte> routingToken,
-        ChannelWriter<QueuedSealedEnvelopeProto> writer)
+        BlindedRoutingToken routingToken,
+        ChannelWriter<RelayQueuedEnvelopeRecord> writer)
     {
         return _inner.SubscribeMailbox(routingToken, writer);
     }
 
     public async ValueTask<bool> AcknowledgeEnvelopeAsync(
-        ReadOnlyMemory<byte> routingToken,
-        string queueId,
+        BlindedRoutingToken routingToken,
+        MailboxQueueId queueId,
         CancellationToken ct = default)
     {
         bool acknowledged = await _inner.AcknowledgeEnvelopeAsync(routingToken, queueId, ct).ConfigureAwait(false);

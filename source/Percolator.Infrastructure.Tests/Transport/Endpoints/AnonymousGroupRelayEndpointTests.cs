@@ -331,13 +331,13 @@ public sealed class AnonymousGroupRelayEndpointTests
             m.Broadcast.SenderKeyIteration == 42);
 
         // 2. Offline member had envelope enqueued to mailbox
-        var offlineEnvelopes = await mailboxStore.DrainEnvelopesAsync(tokenOffline.ToByteArray());
+        var offlineEnvelopes = await mailboxStore.GetEnvelopesAsync(tokenOffline);
         offlineEnvelopes.Should().HaveCount(1);
-        var sealedEnv = SealedEnvelopeProto.Parser.ParseFrom(offlineEnvelopes[0].EnvelopePayload);
+        var sealedEnv = SealedEnvelopeProto.Parser.ParseFrom(offlineEnvelopes[0].EnvelopePayload.ToArray());
         sealedEnv.EncryptedPackage.ToByteArray().Should().Equal(payloadBytes);
 
         // 3. Online member was NOT enqueued to mailbox (received via live stream)
-        var onlineEnvelopes = await mailboxStore.DrainEnvelopesAsync(tokenOnline.ToByteArray());
+        var onlineEnvelopes = await mailboxStore.GetEnvelopesAsync(tokenOnline);
         onlineEnvelopes.Should().BeEmpty();
     }
 

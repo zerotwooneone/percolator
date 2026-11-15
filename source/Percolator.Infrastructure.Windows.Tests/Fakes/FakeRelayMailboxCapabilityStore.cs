@@ -8,8 +8,8 @@ using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 using Percolator.Domain.Common;
-using Percolator.Infrastructure.Protos;
-using Percolator.Infrastructure.Transport;
+using Percolator.Domain.Delivery.Ports;
+using Percolator.Domain.Delivery.ValueObjects;
 
 /// <summary>
 /// Minimal in-memory <see cref="IRelayMailboxCapabilityStore"/> test double.
@@ -24,22 +24,20 @@ public sealed class FakeRelayMailboxCapabilityStore : IRelayMailboxCapabilitySto
         public byte[] DeliveryToken { get; set; } = Array.Empty<byte>();
         public List<byte[]> AuthorizedDeliveryTokens { get; } = new();
         public byte[] DrainToken { get; set; } = Array.Empty<byte>();
-        public List<QueuedSealedEnvelopeProto> Envelopes { get; } = new();
-        public List<ChannelWriter<QueuedSealedEnvelopeProto>> Subscribers { get; } = new();
+        public List<RelayQueuedEnvelopeRecord> Envelopes { get; } = new();
+        public List<ChannelWriter<RelayQueuedEnvelopeRecord>> Subscribers { get; } = new();
         public object Lock { get; } = new();
     }
 
-    private readonly ConcurrentDictionary<string, MailboxEntry> _mailboxes = new();
-
-    private static string ToHexKey(ReadOnlyMemory<byte> token) => Convert.ToHexString(token.Span).ToLowerInvariant();
+    private readonly ConcurrentDictionary<BlindedRoutingToken, MailboxEntry> _mailboxes = new();
 
     public ValueTask RegisterAsync(
-        ReadOnlyMemory<byte> routingToken,
-        ReadOnlyMemory<byte> deliveryToken,
-        ReadOnlyMemory<byte> drainToken,
+        BlindedRoutingToken routingToken,
+        DeliveryToken deliveryToken,
+        DeliveryToken drainToken,
         CancellationToken ct = default)
     {
-        var result = RegisterVerifiedInternal(routingToken, deliveryToken, drainToken, default);
+        var result = RegisterVerifiedInternal(routingToken, deliveryToken, drainToken, null);
         if (result.IsFailure)
         {
             throw new InvalidOperationException(result.Error.Description);
@@ -48,10 +46,10 @@ public sealed class FakeRelayMailboxCapabilityStore : IRelayMailboxCapabilitySto
     }
 
     public ValueTask<DomainResult> RegisterVerifiedAsync(
-        ReadOnlyMemory<byte> routingToken,
-        ReadOnlyMemory<byte> deliveryToken,
-        ReadOnlyMemory<byte> drainToken,
-        ReadOnlyMemory<byte> existingDrainToken = default,
+        BlindedRoutingToken routingToken,
+        DeliveryToken deliveryToken,
+        DeliveryToken drainToken,
+        DeliveryToken? existingDrainToken = null,
         CancellationToken ct = default)
     {
         var result = RegisterVerifiedInternal(routingToken, deliveryToken, drainToken, existingDrainToken);
@@ -59,13 +57,12 @@ public sealed class FakeRelayMailboxCapabilityStore : IRelayMailboxCapabilitySto
     }
 
     private DomainResult RegisterVerifiedInternal(
-        ReadOnlyMemory<byte> routingToken,
-        ReadOnlyMemory<byte> deliveryToken,
-        ReadOnlyMemory<byte> drainToken,
-        ReadOnlyMemory<byte> existingDrainToken)
+        BlindedRoutingToken routingToken,
+        DeliveryToken deliveryToken,
+        DeliveryToken drainToken,
+        DeliveryToken? existingDrainToken)
     {
-        var key = ToHexKey(routingToken);
-        var entry = _mailboxes.GetOrAdd(key, _ => new MailboxEntry());
+        var entry = _mailboxes.GetOrAdd(routingToken, _ => new MailboxEntry());
         lock (entry.Lock)
         {
             if (entry.DrainToken.Length > 0)
@@ -73,7 +70,7 @@ public sealed class FakeRelayMailboxCapabilityStore : IRelayMailboxCapabilitySto
                 bool drainTokenMatches = drainToken.Length == entry.DrainToken.Length &&
                     CryptographicOperations.FixedTimeEquals(entry.DrainToken, drainToken.Span);
 
-                bool existingDrainTokenMatches = !existingDrainToken.IsEmpty &&
+                bool existingDrainTokenMatches = existingDrainToken != null &&
                     existingDrainToken.Length == entry.DrainToken.Length &&
                     CryptographicOperations.FixedTimeEquals(entry.DrainToken, existingDrainToken.Span);
 
@@ -96,10 +93,9 @@ public sealed class FakeRelayMailboxCapabilityStore : IRelayMailboxCapabilitySto
         return DomainResult.Success();
     }
 
-    public ValueTask<bool> VerifyDeliveryTokenAsync(ReadOnlyMemory<byte> routingToken, ReadOnlyMemory<byte> deliveryToken, CancellationToken ct = default)
+    public ValueTask<bool> VerifyDeliveryTokenAsync(BlindedRoutingToken routingToken, DeliveryToken deliveryToken, CancellationToken ct = default)
     {
-        var key = ToHexKey(routingToken);
-        if (!_mailboxes.TryGetValue(key, out var entry))
+        if (!_mailboxes.TryGetValue(routingToken, out var entry))
         {
             return ValueTask.FromResult(false);
         }
@@ -126,10 +122,9 @@ public sealed class FakeRelayMailboxCapabilityStore : IRelayMailboxCapabilitySto
         return ValueTask.FromResult(false);
     }
 
-    public ValueTask<bool> VerifyDrainTokenAsync(ReadOnlyMemory<byte> routingToken, ReadOnlyMemory<byte> drainToken, CancellationToken ct = default)
+    public ValueTask<bool> VerifyDrainTokenAsync(BlindedRoutingToken routingToken, DeliveryToken drainToken, CancellationToken ct = default)
     {
-        var key = ToHexKey(routingToken);
-        if (!_mailboxes.TryGetValue(key, out var entry))
+        if (!_mailboxes.TryGetValue(routingToken, out var entry))
         {
             return ValueTask.FromResult(false);
         }
@@ -146,27 +141,25 @@ public sealed class FakeRelayMailboxCapabilityStore : IRelayMailboxCapabilitySto
         return ValueTask.FromResult(false);
     }
 
-    public ValueTask<ReadOnlyMemory<byte>?> GetDrainTokenAsync(ReadOnlyMemory<byte> routingToken, CancellationToken ct = default)
+    public ValueTask<DeliveryToken?> GetDrainTokenAsync(BlindedRoutingToken routingToken, CancellationToken ct = default)
     {
-        var key = ToHexKey(routingToken);
-        if (_mailboxes.TryGetValue(key, out var entry))
+        if (_mailboxes.TryGetValue(routingToken, out var entry))
         {
             lock (entry.Lock)
             {
                 if (entry.DrainToken.Length > 0)
                 {
-                    return ValueTask.FromResult<ReadOnlyMemory<byte>?>(entry.DrainToken);
+                    return ValueTask.FromResult<DeliveryToken?>(DeliveryToken.FromSpan(entry.DrainToken));
                 }
             }
         }
 
-        return ValueTask.FromResult<ReadOnlyMemory<byte>?>(null);
+        return ValueTask.FromResult<DeliveryToken?>(null);
     }
 
-    public ValueTask EnqueueEnvelopeAsync(ReadOnlyMemory<byte> routingToken, QueuedSealedEnvelopeProto envelope, CancellationToken ct = default)
+    public ValueTask EnqueueEnvelopeAsync(BlindedRoutingToken routingToken, RelayQueuedEnvelopeRecord envelope, CancellationToken ct = default)
     {
-        var key = ToHexKey(routingToken);
-        var entry = _mailboxes.GetOrAdd(key, _ => new MailboxEntry());
+        var entry = _mailboxes.GetOrAdd(routingToken, _ => new MailboxEntry());
         lock (entry.Lock)
         {
             entry.Envelopes.Add(envelope);
@@ -178,41 +171,38 @@ public sealed class FakeRelayMailboxCapabilityStore : IRelayMailboxCapabilitySto
         return ValueTask.CompletedTask;
     }
 
-    public ValueTask<IReadOnlyList<QueuedSealedEnvelopeProto>> GetEnvelopesAsync(ReadOnlyMemory<byte> routingToken, CancellationToken ct = default)
+    public ValueTask<IReadOnlyList<RelayQueuedEnvelopeRecord>> GetEnvelopesAsync(BlindedRoutingToken routingToken, CancellationToken ct = default)
     {
-        var key = ToHexKey(routingToken);
-        if (!_mailboxes.TryGetValue(key, out var entry))
+        if (!_mailboxes.TryGetValue(routingToken, out var entry))
         {
-            return ValueTask.FromResult<IReadOnlyList<QueuedSealedEnvelopeProto>>(Array.Empty<QueuedSealedEnvelopeProto>());
+            return ValueTask.FromResult<IReadOnlyList<RelayQueuedEnvelopeRecord>>(Array.Empty<RelayQueuedEnvelopeRecord>());
         }
 
         lock (entry.Lock)
         {
-            return ValueTask.FromResult<IReadOnlyList<QueuedSealedEnvelopeProto>>(entry.Envelopes.ToArray());
+            return ValueTask.FromResult<IReadOnlyList<RelayQueuedEnvelopeRecord>>(entry.Envelopes.ToArray());
         }
     }
 
-    public ValueTask<IReadOnlyList<QueuedSealedEnvelopeProto>> DrainEnvelopesAsync(ReadOnlyMemory<byte> routingToken, CancellationToken ct = default)
+    public ValueTask<int> PurgeMailboxAsync(BlindedRoutingToken routingToken, CancellationToken ct = default)
     {
-        var key = ToHexKey(routingToken);
-        if (!_mailboxes.TryGetValue(key, out var entry))
+        if (!_mailboxes.TryGetValue(routingToken, out var entry))
         {
-            return ValueTask.FromResult<IReadOnlyList<QueuedSealedEnvelopeProto>>(Array.Empty<QueuedSealedEnvelopeProto>());
+            return ValueTask.FromResult(0);
         }
 
         lock (entry.Lock)
         {
-            var drained = entry.Envelopes.ToArray();
+            var purged = entry.Envelopes.Count;
             entry.Envelopes.Clear();
-            return ValueTask.FromResult<IReadOnlyList<QueuedSealedEnvelopeProto>>(drained);
+            return ValueTask.FromResult(purged);
         }
     }
 
-    public IDisposable SubscribeMailbox(ReadOnlyMemory<byte> routingToken, ChannelWriter<QueuedSealedEnvelopeProto> writer)
+    public IDisposable SubscribeMailbox(BlindedRoutingToken routingToken, ChannelWriter<RelayQueuedEnvelopeRecord> writer)
     {
         ArgumentNullException.ThrowIfNull(writer);
-        var key = ToHexKey(routingToken);
-        var entry = _mailboxes.GetOrAdd(key, _ => new MailboxEntry());
+        var entry = _mailboxes.GetOrAdd(routingToken, _ => new MailboxEntry());
         lock (entry.Lock)
         {
             entry.Subscribers.Add(writer);
@@ -227,10 +217,9 @@ public sealed class FakeRelayMailboxCapabilityStore : IRelayMailboxCapabilitySto
         });
     }
 
-    public ValueTask<bool> AcknowledgeEnvelopeAsync(ReadOnlyMemory<byte> routingToken, string queueId, CancellationToken ct = default)
+    public ValueTask<bool> AcknowledgeEnvelopeAsync(BlindedRoutingToken routingToken, MailboxQueueId queueId, CancellationToken ct = default)
     {
-        var key = ToHexKey(routingToken);
-        if (_mailboxes.TryGetValue(key, out var entry))
+        if (_mailboxes.TryGetValue(routingToken, out var entry))
         {
             lock (entry.Lock)
             {

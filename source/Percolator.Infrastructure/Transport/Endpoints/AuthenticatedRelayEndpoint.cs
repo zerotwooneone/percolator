@@ -18,7 +18,6 @@ using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.Infrastructure.Protos;
-using Percolator.Infrastructure.Transport;
 
 public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.AuthenticatedRelayServiceBase
 {
@@ -38,16 +37,21 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
 
     public override async Task<RegisterMailboxResponse> RegisterMailbox(RegisterMailboxRequest request, ServerCallContext context)
     {
-        if (request.RoutingToken.IsEmpty || request.AuthorizedDeliveryToken.IsEmpty || request.DrainToken.IsEmpty)
+        if (request.RoutingToken.Length != 16 ||
+            request.AuthorizedDeliveryToken.Length != 32 ||
+            request.DrainToken.Length != 32 ||
+            (request.ExistingDrainToken.Length != 0 && request.ExistingDrainToken.Length != 32))
         {
             throw new RpcException(new Status(StatusCode.InvalidArgument, "Routing token, delivery token, and drain token are required."));
         }
 
         var regResult = await _capabilityStore.RegisterVerifiedAsync(
-            request.RoutingToken.Memory,
-            request.AuthorizedDeliveryToken.Memory,
-            request.DrainToken.Memory,
-            request.ExistingDrainToken.Memory,
+            BlindedRoutingToken.FromBytes(request.RoutingToken.ToByteArray()),
+            DeliveryToken.FromSpan(request.AuthorizedDeliveryToken.Span),
+            DeliveryToken.FromSpan(request.DrainToken.Span),
+            request.ExistingDrainToken.IsEmpty
+                ? null
+                : DeliveryToken.FromSpan(request.ExistingDrainToken.Span),
             ct: context.CancellationToken);
 
         if (regResult.IsFailure)
@@ -56,29 +60,6 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
         }
 
         return new RegisterMailboxResponse { Success = true };
-    }
-
-    public override async Task<DrainMailboxResponse> DrainMailbox(DrainMailboxRequest request, ServerCallContext context)
-    {
-        if (request.RoutingToken.IsEmpty || request.DrainToken.IsEmpty)
-        {
-            throw new RpcException(new Status(StatusCode.InvalidArgument, "Routing token and drain token are required."));
-        }
-
-        bool isAuthorized = await _capabilityStore.VerifyDrainTokenAsync(
-            request.RoutingToken.Memory,
-            request.DrainToken.Memory,
-            context.CancellationToken);
-
-        if (!isAuthorized)
-        {
-            throw new RpcException(new Status(StatusCode.PermissionDenied, "Invalid drain token."));
-        }
-
-        var envelopes = await _capabilityStore.DrainEnvelopesAsync(request.RoutingToken.Memory, context.CancellationToken);
-        var response = new DrainMailboxResponse();
-        response.Envelopes.AddRange(envelopes);
-        return response;
     }
 
     public override async Task ConnectMailboxStream(
@@ -115,8 +96,18 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
         }
 
         var authResp = clientMessage.AuthResponse;
-        var drainToken = await _capabilityStore.GetDrainTokenAsync(authResp.RoutingToken.Memory, context.CancellationToken);
-        if (!drainToken.HasValue)
+        if (authResp.RoutingToken.Length != 16)
+        {
+            await responseStream.WriteAsync(new MailboxStreamServerMessage
+            {
+                AuthResult = new AuthResultProto { Authenticated = false, Reason = "Mailbox not found" }
+            });
+            return;
+        }
+
+        var routingToken = BlindedRoutingToken.FromBytes(authResp.RoutingToken.ToByteArray());
+        var drainToken = await _capabilityStore.GetDrainTokenAsync(routingToken, context.CancellationToken);
+        if (drainToken == null)
         {
             await responseStream.WriteAsync(new MailboxStreamServerMessage
             {
@@ -126,7 +117,7 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
         }
 
         // Verify HMAC-SHA256(drainToken, nonce)
-        using var hmac = new HMACSHA256(drainToken.Value.ToArray());
+        using var hmac = new HMACSHA256(drainToken.Span.ToArray());
         byte[] expectedHmac = hmac.ComputeHash(nonce);
 
         if (!CryptographicOperations.FixedTimeEquals(expectedHmac, authResp.ChallengeHmac.Span))
@@ -147,7 +138,7 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
         // The live channel is bounded (HAZ-INGRESS-RESOURCE-EXHAUSTION): the capability
         // store persists before notifying subscribers, so a full channel drops only the
         // live notification — the envelope still arrives on the next connect's replay.
-        var liveChannel = Channel.CreateBounded<QueuedSealedEnvelopeProto>(
+        var liveChannel = Channel.CreateBounded<RelayQueuedEnvelopeRecord>(
             new BoundedChannelOptions(256)
             {
                 SingleWriter = false,
@@ -155,15 +146,15 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
                 FullMode = BoundedChannelFullMode.Wait
             });
 
-        using var subscription = _capabilityStore.SubscribeMailbox(authResp.RoutingToken.Memory, liveChannel.Writer);
+        using var subscription = _capabilityStore.SubscribeMailbox(routingToken, liveChannel.Writer);
 
-        var initialEnvelopes = await _capabilityStore.GetEnvelopesAsync(authResp.RoutingToken.Memory, context.CancellationToken);
-        var initialQueueIds = new HashSet<string>(StringComparer.Ordinal);
+        var initialEnvelopes = await _capabilityStore.GetEnvelopesAsync(routingToken, context.CancellationToken);
+        var initialQueueIds = new HashSet<MailboxQueueId>();
 
         foreach (var env in initialEnvelopes)
         {
             initialQueueIds.Add(env.QueueId);
-            await responseStream.WriteAsync(new MailboxStreamServerMessage { Envelope = env });
+            await responseStream.WriteAsync(new MailboxStreamServerMessage { Envelope = ToProto(env) });
         }
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(context.CancellationToken);
@@ -178,10 +169,14 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
                     msg.Ack.Acknowledged &&
                     !string.IsNullOrEmpty(msg.Ack.QueueId))
                 {
-                    await _capabilityStore.AcknowledgeEnvelopeAsync(
-                        authResp.RoutingToken.Memory,
-                        msg.Ack.QueueId,
-                        cts.Token).ConfigureAwait(false);
+                    var ackQueueId = MailboxQueueId.Create(msg.Ack.QueueId);
+                    if (ackQueueId.IsSuccess)
+                    {
+                        await _capabilityStore.AcknowledgeEnvelopeAsync(
+                            routingToken,
+                            ackQueueId.Value!,
+                            cts.Token).ConfigureAwait(false);
+                    }
                 }
             }
         }, cts.Token);
@@ -199,7 +194,7 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
                     }
 
                     await responseStream.WriteAsync(
-                        new MailboxStreamServerMessage { Envelope = liveEnv }).ConfigureAwait(false);
+                        new MailboxStreamServerMessage { Envelope = ToProto(liveEnv) }).ConfigureAwait(false);
                 }
             }
         }, cts.Token);
@@ -237,16 +232,16 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
         // Mailbox ownership: a valid drain token for routing_token is required —
         // the drain token is the only credential that authorizes overwriting this
         // mailbox's hosted bundle.
+        var routingToken = BlindedRoutingToken.FromBytes(request.RoutingToken.ToByteArray());
         bool drainValid = await _capabilityStore.VerifyDrainTokenAsync(
-            request.RoutingToken.Memory,
-            request.DrainToken.Memory,
+            routingToken,
+            DeliveryToken.FromSpan(request.DrainToken.Span),
             context.CancellationToken);
         if (!drainValid)
         {
             return new PublishPreKeyBundleResponse { Success = false };
         }
 
-        var routingToken = BlindedRoutingToken.FromBytes(request.RoutingToken.ToByteArray());
         var deviceId = new DeviceId(request.DeviceId);
 
         var identityKey = IdentityKey.FromSpan(request.IdentityKey.Span);
@@ -320,4 +315,11 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
 
         return new PublishPreKeyBundleResponse { Success = true };
     }
+
+    private static QueuedSealedEnvelopeProto ToProto(RelayQueuedEnvelopeRecord record) => new()
+    {
+        QueueId = record.QueueId.Value,
+        EnvelopePayload = ByteString.CopyFrom(record.EnvelopePayload.Span),
+        EnqueuedAtUtc = Timestamp.FromDateTimeOffset(record.EnqueuedAtUtc)
+    };
 }

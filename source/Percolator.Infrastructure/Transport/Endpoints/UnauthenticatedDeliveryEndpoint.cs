@@ -17,7 +17,6 @@ using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.Infrastructure.Protos;
-using Percolator.Infrastructure.Transport;
 using Percolator.PluginSdk;
 using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
@@ -116,14 +115,15 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
 
     public override async Task<EnqueueAckProto> EnqueueMailbox(SealedEnvelopeProto request, ServerCallContext context)
     {
-        if (request.RecipientRoutingToken.IsEmpty || request.DeliveryToken.IsEmpty)
+        if (request.RecipientRoutingToken.Length != 16 || request.DeliveryToken.Length != 32)
         {
             throw new RpcException(new Status(StatusCode.InvalidArgument, "Recipient routing token and delivery token are required."));
         }
 
+        var routingToken = BlindedRoutingToken.FromBytes(request.RecipientRoutingToken.ToByteArray());
         bool isAuthorized = await _capabilityStore.VerifyDeliveryTokenAsync(
-            request.RecipientRoutingToken.Memory,
-            request.DeliveryToken.Memory,
+            routingToken,
+            DeliveryToken.FromSpan(request.DeliveryToken.Span),
             context.CancellationToken);
 
         if (!isAuthorized)
@@ -131,14 +131,12 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
             throw new RpcException(new Status(StatusCode.PermissionDenied, "Invalid delivery token capability."));
         }
 
-        var queued = new QueuedSealedEnvelopeProto
-        {
-            QueueId = Guid.NewGuid().ToString("N"),
-            EnvelopePayload = request.ToByteString(),
-            EnqueuedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow)
-        };
+        var queued = new RelayQueuedEnvelopeRecord(
+            MailboxQueueId.Parse(Guid.NewGuid().ToString("N")),
+            request.ToByteArray(),
+            DateTimeOffset.UtcNow);
 
-        await _capabilityStore.EnqueueEnvelopeAsync(request.RecipientRoutingToken.Memory, queued, context.CancellationToken);
+        await _capabilityStore.EnqueueEnvelopeAsync(routingToken, queued, context.CancellationToken);
 
         return new EnqueueAckProto
         {
@@ -149,15 +147,16 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
 
     public override async Task<FetchPreKeyBundleResponse> FetchPreKeyBundle(FetchPreKeyBundleRequest request, ServerCallContext context)
     {
-        if (request.RecipientRoutingToken.IsEmpty || request.DeliveryToken.IsEmpty)
+        if (request.RecipientRoutingToken.Length != 16 || request.DeliveryToken.Length != 32)
         {
             throw new RpcException(new Status(StatusCode.InvalidArgument, "Routing token and delivery token are required."));
         }
 
         // Anonymous capability gating: verify delivery token in constant time
+        var routingToken = BlindedRoutingToken.FromBytes(request.RecipientRoutingToken.ToByteArray());
         bool isAuthorized = await _capabilityStore.VerifyDeliveryTokenAsync(
-            request.RecipientRoutingToken.Memory,
-            request.DeliveryToken.Memory,
+            routingToken,
+            DeliveryToken.FromSpan(request.DeliveryToken.Span),
             context.CancellationToken);
 
         if (!isAuthorized)
@@ -168,7 +167,6 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
 
         // Direct routing-token lookup: the hosted bundle is keyed by the mailbox's
         // (BlindedRoutingToken, DeviceId) — the relay never resolves an owner identity.
-        var routingToken = BlindedRoutingToken.FromBytes(request.RecipientRoutingToken.ToByteArray());
         var bundle = await _preKeyRepository.GetAsync(routingToken, DeviceId.Primary, context.CancellationToken);
         if (bundle == null)
         {

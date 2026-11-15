@@ -13,7 +13,6 @@ using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Ports;
 using Percolator.Infrastructure.Protos;
-using Percolator.Infrastructure.Transport;
 using Percolator.PluginSdk;
 
 public sealed class NearbyDiscoveryEndpoint : NearbyDiscoveryService.NearbyDiscoveryServiceBase

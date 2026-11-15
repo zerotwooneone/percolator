@@ -7,12 +7,9 @@ using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 using FluentAssertions;
-using Google.Protobuf;
-using Google.Protobuf.WellKnownTypes;
 using NUnit.Framework;
-using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Infrastructure.Persistence.Repositories;
-using Percolator.Infrastructure.Protos;
 using Percolator.Infrastructure.Tests.Persistence.TestSupport;
 
 [TestFixture]
@@ -41,19 +38,17 @@ public sealed class SqliteRelayMailboxCapabilityStoreTests
         return bytes;
     }
 
-    private static QueuedSealedEnvelopeProto Envelope(string queueId, byte payloadByte) => new()
-    {
-        QueueId = queueId,
-        EnvelopePayload = ByteString.CopyFrom(payloadByte, 0, 1),
-        EnqueuedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow)
-    };
+    private static RelayQueuedEnvelopeRecord Envelope(string queueId, byte payloadByte) => new(
+        MailboxQueueId.Parse(queueId),
+        new byte[] { payloadByte },
+        DateTimeOffset.UtcNow);
 
     [Test]
     public async Task Register_StatePersistsAcrossStoreInstances()
     {
-        var routingToken = RandomBytes(16);
-        var deliveryToken = RandomBytes(32);
-        var drainToken = RandomBytes(32);
+        var routingToken = BlindedRoutingToken.New();
+        var deliveryToken = DeliveryToken.GenerateRandom();
+        var drainToken = DeliveryToken.GenerateRandom();
 
         await _store.RegisterVerifiedAsync(routingToken, deliveryToken, drainToken);
 
@@ -65,17 +60,17 @@ public sealed class SqliteRelayMailboxCapabilityStoreTests
 
         var stored = await restartedStore.GetDrainTokenAsync(routingToken);
         stored.Should().NotBeNull();
-        stored!.Value.ToArray().Should().Equal(drainToken);
+        stored!.Span.ToArray().Should().Equal(drainToken.Span.ToArray());
     }
 
     [Test]
     public async Task RegisterVerifiedAsync_WrongDrainTokenOnExistingMailbox_ReturnsOwnershipMismatch()
     {
-        var routingToken = RandomBytes(16);
-        var drainToken = RandomBytes(32);
-        await _store.RegisterVerifiedAsync(routingToken, RandomBytes(32), drainToken);
+        var routingToken = BlindedRoutingToken.New();
+        var drainToken = DeliveryToken.GenerateRandom();
+        await _store.RegisterVerifiedAsync(routingToken, DeliveryToken.GenerateRandom(), drainToken);
 
-        var result = await _store.RegisterVerifiedAsync(routingToken, RandomBytes(32), RandomBytes(32));
+        var result = await _store.RegisterVerifiedAsync(routingToken, DeliveryToken.GenerateRandom(), DeliveryToken.GenerateRandom());
 
         result.IsFailure.Should().BeTrue();
         result.Error.Code.Should().Be("MAILBOX_OWNERSHIP_MISMATCH");
@@ -87,11 +82,11 @@ public sealed class SqliteRelayMailboxCapabilityStoreTests
     [Test]
     public async Task RegisterVerifiedAsync_ExistingDrainToken_RotatesTokens()
     {
-        var routingToken = RandomBytes(16);
-        var deliveryToken1 = RandomBytes(32);
-        var drainToken1 = RandomBytes(32);
-        var deliveryToken2 = RandomBytes(32);
-        var drainToken2 = RandomBytes(32);
+        var routingToken = BlindedRoutingToken.New();
+        var deliveryToken1 = DeliveryToken.GenerateRandom();
+        var drainToken1 = DeliveryToken.GenerateRandom();
+        var deliveryToken2 = DeliveryToken.GenerateRandom();
+        var drainToken2 = DeliveryToken.GenerateRandom();
 
         await _store.RegisterVerifiedAsync(routingToken, deliveryToken1, drainToken1);
 
@@ -107,9 +102,9 @@ public sealed class SqliteRelayMailboxCapabilityStoreTests
     [Test]
     public async Task VerifyDeliveryTokenAsync_HonoursAuthorizedTokenRing_WithCapTen()
     {
-        var routingToken = RandomBytes(16);
-        var drainToken = RandomBytes(32);
-        var deliveryTokens = Enumerable.Range(0, 12).Select(_ => RandomBytes(32)).ToArray();
+        var routingToken = BlindedRoutingToken.New();
+        var drainToken = DeliveryToken.GenerateRandom();
+        var deliveryTokens = Enumerable.Range(0, 12).Select(_ => DeliveryToken.GenerateRandom()).ToArray();
 
         foreach (var token in deliveryTokens)
         {
@@ -126,10 +121,10 @@ public sealed class SqliteRelayMailboxCapabilityStoreTests
     }
 
     [Test]
-    public async Task EnqueueGetDrainAck_EnvelopeLifecycle_PersistsAcrossInstances()
+    public async Task EnqueueGetPurgeAck_EnvelopeLifecycle_PersistsAcrossInstances()
     {
-        var routingToken = RandomBytes(16);
-        await _store.RegisterAsync(routingToken, RandomBytes(32), RandomBytes(32));
+        var routingToken = BlindedRoutingToken.New();
+        await _store.RegisterAsync(routingToken, DeliveryToken.GenerateRandom(), DeliveryToken.GenerateRandom());
 
         var first = Envelope("q-1", 0x11);
         var second = Envelope("q-2", 0x22);
@@ -138,33 +133,34 @@ public sealed class SqliteRelayMailboxCapabilityStoreTests
 
         var restartedStore = new SqliteRelayMailboxCapabilityStore(_testDb.ContextFactory);
         var held = await restartedStore.GetEnvelopesAsync(routingToken);
-        held.Select(e => e.QueueId).Should().Equal("q-1", "q-2");
-        held[0].EnvelopePayload.ToByteArray().Should().Equal(first.EnvelopePayload.ToByteArray());
+        held.Select(e => e.QueueId.Value).Should().Equal("q-1", "q-2");
+        held[0].EnvelopePayload.ToArray().Should().Equal(first.EnvelopePayload.ToArray());
 
-        (await restartedStore.AcknowledgeEnvelopeAsync(routingToken, "q-1")).Should().BeTrue();
-        (await restartedStore.GetEnvelopesAsync(routingToken)).Select(e => e.QueueId).Should().Equal("q-2");
+        (await restartedStore.AcknowledgeEnvelopeAsync(routingToken, MailboxQueueId.Parse("q-1"))).Should().BeTrue();
+        (await restartedStore.GetEnvelopesAsync(routingToken)).Select(e => e.QueueId.Value).Should().Equal("q-2");
 
-        var drained = await restartedStore.DrainEnvelopesAsync(routingToken);
-        drained.Select(e => e.QueueId).Should().Equal("q-2");
+        // Purge deletes without materializing payloads and returns the removed count.
+        (await restartedStore.PurgeMailboxAsync(routingToken)).Should().Be(1);
         (await restartedStore.GetEnvelopesAsync(routingToken)).Should().BeEmpty();
+        (await restartedStore.PurgeMailboxAsync(routingToken)).Should().Be(0);
     }
 
     [Test]
     public async Task AcknowledgeEnvelopeAsync_UnknownQueueId_ReturnsFalse()
     {
-        var routingToken = RandomBytes(16);
-        await _store.RegisterAsync(routingToken, RandomBytes(32), RandomBytes(32));
+        var routingToken = BlindedRoutingToken.New();
+        await _store.RegisterAsync(routingToken, DeliveryToken.GenerateRandom(), DeliveryToken.GenerateRandom());
 
-        (await _store.AcknowledgeEnvelopeAsync(routingToken, "missing")).Should().BeFalse();
+        (await _store.AcknowledgeEnvelopeAsync(routingToken, MailboxQueueId.Parse("missing"))).Should().BeFalse();
     }
 
     [Test]
     public async Task SubscribeMailbox_Enqueue_NotifiesSubscribers()
     {
-        var routingToken = RandomBytes(16);
-        await _store.RegisterAsync(routingToken, RandomBytes(32), RandomBytes(32));
+        var routingToken = BlindedRoutingToken.New();
+        await _store.RegisterAsync(routingToken, DeliveryToken.GenerateRandom(), DeliveryToken.GenerateRandom());
 
-        var channel = Channel.CreateUnbounded<QueuedSealedEnvelopeProto>();
+        var channel = Channel.CreateUnbounded<RelayQueuedEnvelopeRecord>();
         using var subscription = _store.SubscribeMailbox(routingToken, channel.Writer);
 
         var envelope = Envelope("q-live", 0x33);
@@ -172,20 +168,20 @@ public sealed class SqliteRelayMailboxCapabilityStoreTests
 
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         var received = await channel.Reader.ReadAsync(timeout.Token);
-        received.QueueId.Should().Be("q-live");
+        received.QueueId.Value.Should().Be("q-live");
     }
 
     [Test]
     public async Task GetDrainTokenAsync_ReturnsPersistedToken()
     {
-        var routingToken = RandomBytes(16);
-        var drainToken = RandomBytes(32);
-        await _store.RegisterAsync(routingToken, RandomBytes(32), drainToken);
+        var routingToken = BlindedRoutingToken.New();
+        var drainToken = DeliveryToken.GenerateRandom();
+        await _store.RegisterAsync(routingToken, DeliveryToken.GenerateRandom(), drainToken);
 
         var restartedStore = new SqliteRelayMailboxCapabilityStore(_testDb.ContextFactory);
         var stored = await restartedStore.GetDrainTokenAsync(routingToken);
 
         stored.Should().NotBeNull();
-        stored!.Value.ToArray().Should().Equal(drainToken);
+        stored!.Span.ToArray().Should().Equal(drainToken.Span.ToArray());
     }
 }

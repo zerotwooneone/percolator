@@ -283,14 +283,12 @@ public sealed class AnonymousGroupRelayEndpoint : AnonymousGroupRelayService.Ano
                         ExpiresAtUtc = Timestamp.FromDateTimeOffset(_timeProvider.UtcNow.AddDays(7))
                     };
 
-                    var queued = new QueuedSealedEnvelopeProto
-                    {
-                        QueueId = Guid.NewGuid().ToString("N"),
-                        EnvelopePayload = sealedEnvelope.ToByteString(),
-                        EnqueuedAtUtc = Timestamp.FromDateTimeOffset(_timeProvider.UtcNow)
-                    };
+                    var queued = new RelayQueuedEnvelopeRecord(
+                        MailboxQueueId.Parse(Guid.NewGuid().ToString("N")),
+                        sealedEnvelope.ToByteArray(),
+                        _timeProvider.UtcNow);
 
-                    await _mailboxStore.EnqueueEnvelopeAsync(token.ToByteArray(), queued, context.CancellationToken);
+                    await _mailboxStore.EnqueueEnvelopeAsync(token, queued, context.CancellationToken);
                 }
             }
         }

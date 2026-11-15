@@ -300,9 +300,9 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             await preKeyStore.StoreSignedPreKeyAsync(PublicIdentityId, DeviceId.Primary, _signedPreKeyPrivate, SignedPreKeyPublic, SignedPreKeySignature, ct);
             var capStore = scope.ServiceProvider.GetRequiredService<IRelayMailboxCapabilityStore>();
             await capStore.RegisterVerifiedAsync(
-                MailboxRoutingToken.ToByteArray(),
-                MailboxDeliveryToken.Memory,
-                MailboxDrainToken.Memory,
+                MailboxRoutingToken,
+                MailboxDeliveryToken,
+                MailboxDrainToken,
                 ct: ct);
             var preKeyRepo = scope.ServiceProvider.GetRequiredService<IRelayPreKeyRepository>();
             var hostedBundle = RelayHostedPreKeyBundle.Rehydrate(

@@ -8,14 +8,12 @@ using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
-using Google.Protobuf;
-using Google.Protobuf.WellKnownTypes;
 using Microsoft.EntityFrameworkCore;
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.Ports;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Infrastructure.Persistence;
 using Percolator.Infrastructure.Persistence.Entities;
-using Percolator.Infrastructure.Protos;
-using Percolator.Infrastructure.Transport;
 
 /// <summary>
 /// SQLite-backed relay mailbox capability store. Persists routing-token → capability
@@ -29,7 +27,7 @@ public sealed class SqliteRelayMailboxCapabilityStore : IRelayMailboxCapabilityS
     private const int AuthorizedTokenRingCapacity = 10;
 
     private readonly IDbContextFactory<PercolatorDbContext> _contextFactory;
-    private readonly ConcurrentDictionary<string, List<ChannelWriter<QueuedSealedEnvelopeProto>>> _subscribers = new();
+    private readonly ConcurrentDictionary<BlindedRoutingToken, List<ChannelWriter<RelayQueuedEnvelopeRecord>>> _subscribers = new();
     private readonly SemaphoreSlim _enqueueLock = new(1, 1);
 
     public SqliteRelayMailboxCapabilityStore(IDbContextFactory<PercolatorDbContext> contextFactory)
@@ -37,15 +35,13 @@ public sealed class SqliteRelayMailboxCapabilityStore : IRelayMailboxCapabilityS
         _contextFactory = contextFactory ?? throw new ArgumentNullException(nameof(contextFactory));
     }
 
-    private static string ToHexKey(ReadOnlyMemory<byte> token) => Convert.ToHexString(token.Span).ToLowerInvariant();
-
     public async ValueTask RegisterAsync(
-        ReadOnlyMemory<byte> routingToken,
-        ReadOnlyMemory<byte> deliveryToken,
-        ReadOnlyMemory<byte> drainToken,
+        BlindedRoutingToken routingToken,
+        DeliveryToken deliveryToken,
+        DeliveryToken drainToken,
         CancellationToken ct = default)
     {
-        var result = await RegisterVerifiedAsync(routingToken, deliveryToken, drainToken, default, ct)
+        var result = await RegisterVerifiedAsync(routingToken, deliveryToken, drainToken, null, ct)
             .ConfigureAwait(false);
         if (result.IsFailure)
         {
@@ -54,14 +50,14 @@ public sealed class SqliteRelayMailboxCapabilityStore : IRelayMailboxCapabilityS
     }
 
     public async ValueTask<DomainResult> RegisterVerifiedAsync(
-        ReadOnlyMemory<byte> routingToken,
-        ReadOnlyMemory<byte> deliveryToken,
-        ReadOnlyMemory<byte> drainToken,
-        ReadOnlyMemory<byte> existingDrainToken = default,
+        BlindedRoutingToken routingToken,
+        DeliveryToken deliveryToken,
+        DeliveryToken drainToken,
+        DeliveryToken? existingDrainToken = null,
         CancellationToken ct = default)
     {
         await using var db = _contextFactory.CreateDbContext();
-        var routing = routingToken.ToArray();
+        var routing = routingToken.ToByteArray();
         var capability = await db.RelayMailboxCapabilities
             .FirstOrDefaultAsync(c => c.RoutingToken == routing, ct)
             .ConfigureAwait(false);
@@ -73,7 +69,7 @@ public sealed class SqliteRelayMailboxCapabilityStore : IRelayMailboxCapabilityS
             bool drainTokenMatches = drainToken.Length == capability.DrainToken.Length &&
                 CryptographicOperations.FixedTimeEquals(capability.DrainToken, drainToken.Span);
 
-            bool existingDrainTokenMatches = !existingDrainToken.IsEmpty &&
+            bool existingDrainTokenMatches = existingDrainToken != null &&
                 existingDrainToken.Length == capability.DrainToken.Length &&
                 CryptographicOperations.FixedTimeEquals(capability.DrainToken, existingDrainToken.Span);
 
@@ -114,12 +110,12 @@ public sealed class SqliteRelayMailboxCapabilityStore : IRelayMailboxCapabilityS
     }
 
     public async ValueTask<bool> VerifyDeliveryTokenAsync(
-        ReadOnlyMemory<byte> routingToken,
-        ReadOnlyMemory<byte> deliveryToken,
+        BlindedRoutingToken routingToken,
+        DeliveryToken deliveryToken,
         CancellationToken ct = default)
     {
         await using var db = _contextFactory.CreateDbContext();
-        var routing = routingToken.ToArray();
+        var routing = routingToken.ToByteArray();
         var capability = await db.RelayMailboxCapabilities
             .AsNoTracking()
             .FirstOrDefaultAsync(c => c.RoutingToken == routing, ct)
@@ -156,12 +152,12 @@ public sealed class SqliteRelayMailboxCapabilityStore : IRelayMailboxCapabilityS
     }
 
     public async ValueTask<bool> VerifyDrainTokenAsync(
-        ReadOnlyMemory<byte> routingToken,
-        ReadOnlyMemory<byte> drainToken,
+        BlindedRoutingToken routingToken,
+        DeliveryToken drainToken,
         CancellationToken ct = default)
     {
         await using var db = _contextFactory.CreateDbContext();
-        var routing = routingToken.ToArray();
+        var routing = routingToken.ToByteArray();
         var capability = await db.RelayMailboxCapabilities
             .AsNoTracking()
             .FirstOrDefaultAsync(c => c.RoutingToken == routing, ct)
@@ -177,12 +173,12 @@ public sealed class SqliteRelayMailboxCapabilityStore : IRelayMailboxCapabilityS
             CryptographicOperations.FixedTimeEquals(capability.DrainToken, drainToken.Span);
     }
 
-    public async ValueTask<ReadOnlyMemory<byte>?> GetDrainTokenAsync(
-        ReadOnlyMemory<byte> routingToken,
+    public async ValueTask<DeliveryToken?> GetDrainTokenAsync(
+        BlindedRoutingToken routingToken,
         CancellationToken ct = default)
     {
         await using var db = _contextFactory.CreateDbContext();
-        var routing = routingToken.ToArray();
+        var routing = routingToken.ToByteArray();
         var capability = await db.RelayMailboxCapabilities
             .AsNoTracking()
             .FirstOrDefaultAsync(c => c.RoutingToken == routing, ct)
@@ -193,22 +189,22 @@ public sealed class SqliteRelayMailboxCapabilityStore : IRelayMailboxCapabilityS
             return null;
         }
 
-        return capability.DrainToken;
+        return DeliveryToken.FromSpan(capability.DrainToken);
     }
 
     public async ValueTask EnqueueEnvelopeAsync(
-        ReadOnlyMemory<byte> routingToken,
-        QueuedSealedEnvelopeProto envelope,
+        BlindedRoutingToken routingToken,
+        RelayQueuedEnvelopeRecord envelope,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(envelope);
-        var routing = routingToken.ToArray();
+        var routing = routingToken.ToByteArray();
         var entity = new RelayQueuedEnvelopeEntity
         {
-            QueueId = envelope.QueueId,
+            QueueId = envelope.QueueId.Value,
             RoutingToken = routing,
-            EnvelopePayload = envelope.EnvelopePayload.ToByteArray(),
-            EnqueuedAtUtc = envelope.EnqueuedAtUtc?.ToDateTimeOffset() ?? DateTimeOffset.UtcNow
+            EnvelopePayload = envelope.EnvelopePayload.ToArray(),
+            EnqueuedAtUtc = envelope.EnqueuedAtUtc
         };
 
         await _enqueueLock.WaitAsync(ct).ConfigureAwait(false);
@@ -232,12 +228,12 @@ public sealed class SqliteRelayMailboxCapabilityStore : IRelayMailboxCapabilityS
         NotifySubscribers(routingToken, envelope);
     }
 
-    public async ValueTask<IReadOnlyList<QueuedSealedEnvelopeProto>> GetEnvelopesAsync(
-        ReadOnlyMemory<byte> routingToken,
+    public async ValueTask<IReadOnlyList<RelayQueuedEnvelopeRecord>> GetEnvelopesAsync(
+        BlindedRoutingToken routingToken,
         CancellationToken ct = default)
     {
         await using var db = _contextFactory.CreateDbContext();
-        var routing = routingToken.ToArray();
+        var routing = routingToken.ToByteArray();
         var rows = await db.RelayQueuedEnvelopes
             .AsNoTracking()
             .Where(e => e.RoutingToken == routing)
@@ -245,34 +241,27 @@ public sealed class SqliteRelayMailboxCapabilityStore : IRelayMailboxCapabilityS
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        return rows.Select(ToProto).ToList();
+        return rows.Select(ToRecord).ToList();
     }
 
-    public async ValueTask<IReadOnlyList<QueuedSealedEnvelopeProto>> DrainEnvelopesAsync(
-        ReadOnlyMemory<byte> routingToken,
+    public async ValueTask<int> PurgeMailboxAsync(
+        BlindedRoutingToken routingToken,
         CancellationToken ct = default)
     {
         await using var db = _contextFactory.CreateDbContext();
-        var routing = routingToken.ToArray();
-        var rows = await db.RelayQueuedEnvelopes
+        var routing = routingToken.ToByteArray();
+        return await db.RelayQueuedEnvelopes
             .Where(e => e.RoutingToken == routing)
-            .OrderBy(e => e.Ordinal)
-            .ToListAsync(ct)
+            .ExecuteDeleteAsync(ct)
             .ConfigureAwait(false);
-
-        var drained = rows.Select(ToProto).ToList();
-        db.RelayQueuedEnvelopes.RemoveRange(rows);
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
-        return drained;
     }
 
     public IDisposable SubscribeMailbox(
-        ReadOnlyMemory<byte> routingToken,
-        ChannelWriter<QueuedSealedEnvelopeProto> writer)
+        BlindedRoutingToken routingToken,
+        ChannelWriter<RelayQueuedEnvelopeRecord> writer)
     {
         ArgumentNullException.ThrowIfNull(writer);
-        var key = ToHexKey(routingToken);
-        var writers = _subscribers.GetOrAdd(key, _ => new List<ChannelWriter<QueuedSealedEnvelopeProto>>());
+        var writers = _subscribers.GetOrAdd(routingToken, _ => new List<ChannelWriter<RelayQueuedEnvelopeRecord>>());
         lock (writers)
         {
             writers.Add(writer);
@@ -288,28 +277,27 @@ public sealed class SqliteRelayMailboxCapabilityStore : IRelayMailboxCapabilityS
     }
 
     public async ValueTask<bool> AcknowledgeEnvelopeAsync(
-        ReadOnlyMemory<byte> routingToken,
-        string queueId,
+        BlindedRoutingToken routingToken,
+        MailboxQueueId queueId,
         CancellationToken ct = default)
     {
         await using var db = _contextFactory.CreateDbContext();
-        var routing = routingToken.ToArray();
+        var routing = routingToken.ToByteArray();
         var removed = await db.RelayQueuedEnvelopes
-            .Where(e => e.QueueId == queueId && e.RoutingToken == routing)
+            .Where(e => e.QueueId == queueId.Value && e.RoutingToken == routing)
             .ExecuteDeleteAsync(ct)
             .ConfigureAwait(false);
         return removed > 0;
     }
 
-    private void NotifySubscribers(ReadOnlyMemory<byte> routingToken, QueuedSealedEnvelopeProto envelope)
+    private void NotifySubscribers(BlindedRoutingToken routingToken, RelayQueuedEnvelopeRecord envelope)
     {
-        var key = ToHexKey(routingToken);
-        if (!_subscribers.TryGetValue(key, out var writers))
+        if (!_subscribers.TryGetValue(routingToken, out var writers))
         {
             return;
         }
 
-        ChannelWriter<QueuedSealedEnvelopeProto>[] snapshot;
+        ChannelWriter<RelayQueuedEnvelopeRecord>[] snapshot;
         lock (writers)
         {
             snapshot = writers.ToArray();
@@ -321,12 +309,10 @@ public sealed class SqliteRelayMailboxCapabilityStore : IRelayMailboxCapabilityS
         }
     }
 
-    private static QueuedSealedEnvelopeProto ToProto(RelayQueuedEnvelopeEntity entity) => new()
-    {
-        QueueId = entity.QueueId,
-        EnvelopePayload = ByteString.CopyFrom(entity.EnvelopePayload),
-        EnqueuedAtUtc = Timestamp.FromDateTimeOffset(entity.EnqueuedAtUtc)
-    };
+    private static RelayQueuedEnvelopeRecord ToRecord(RelayQueuedEnvelopeEntity entity) => new(
+        MailboxQueueId.Parse(entity.QueueId),
+        entity.EnvelopePayload,
+        entity.EnqueuedAtUtc);
 
     private sealed class Subscription : IDisposable
     {

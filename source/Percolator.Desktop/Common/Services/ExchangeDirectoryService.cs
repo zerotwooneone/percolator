@@ -15,7 +15,7 @@ using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Identities.ValueObjects;
-using Percolator.Infrastructure.Transport;
+using Percolator.Domain.Delivery.Ports;
 using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Desktop.Common.Services;
@@ -193,7 +193,7 @@ public sealed class ExchangeDirectoryService : IExchangeDirectory
             if (tokensResult.IsSuccess && tokensResult.Value is { } tokens)
             {
                 await _capabilities
-                    .DrainEnvelopesAsync(tokens.RoutingToken.ToByteArray(), ct)
+                    .PurgeMailboxAsync(tokens.RoutingToken, ct)
                     .ConfigureAwait(false);
             }
         }

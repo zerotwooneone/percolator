@@ -18,8 +18,8 @@ using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Domain.Delivery.Ports;
 using Percolator.Domain.Security.Ports;
-using Percolator.Infrastructure.Transport;
 using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Desktop.Tests.Common;
@@ -330,7 +330,7 @@ public sealed class DirectoryServiceTests
 
         result.IsSuccess.Should().BeTrue();
         capabilities.Verify(
-            c => c.DrainEnvelopesAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()),
+            c => c.PurgeMailboxAsync(It.IsAny<BlindedRoutingToken>(), It.IsAny<CancellationToken>()),
             Times.Never,
             "a non-purge unlink is a pure binding row delete");
         directory.Verify(
