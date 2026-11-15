@@ -1,6 +1,6 @@
 # Mailbox Drain — Implementation Plan
 
-Spec: [implementation-plan-spec](../spec/implementation-plan.spec.md)
+Spec: [implementation-plan-spec](../spec/implementation-plan.spec.md) — read this spec before modifying this document.
 
 Status legend: ✅ done · 🚧 in progress · ⬜ not started
 

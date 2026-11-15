@@ -47,6 +47,7 @@ Before a ticket is committed to the plan (and during any plan revision), sweep f
 5. **DI registrations are code.** Registration calls appear verbatim in tickets (`services.AddScoped<ISealedEnvelopeUnwrapper, SealedEnvelopeUnwrapper>()`), including non-obvious mechanics (e.g., nullable service types require the `Type`-based `AddScoped(Type, factory)` overload — the generic `AddScoped<TService>` is `class`-constrained).
 6. **Failure taxonomy.** Domain and application failures return `DomainResult<T>`/`DomainError` with stable error codes — never thrown exceptions; exceptions are reserved for infrastructure faults (I/O, transport, programming errors). Tickets name the error codes a path produces.
 7. **Test adapters obey the same architecture.** Integration-test adapters and fakes implement the same port contracts; a contract change lists them in the ticket's **Files** block.
+8. **Read-side goes through query services, not repositories.** Read-only access (list/projection queries, status reads, data fetched to display or dispatch) **MUST** flow through a dedicated query-service port (`I*QueryService`) — never a domain repository or store port introduced or consumed solely for the read. Repository ports load aggregates for mutation; a ticket whose use case only reads names the query service it injects or creates one. Reads inside a port's own mutation lifecycle are exempt (e.g., a spool's scan-then-delete scan), because the port already owns that data.
 
 ---
 
@@ -87,7 +88,7 @@ Before a ticket is committed to the plan (and during any plan revision), sweep f
 An implementing plan **MUST** use this skeleton. Section explanations are not repeated inside the plan.
 
 ### `# <Feature> — Implementation Plan`
-`Spec: [implementation-plan-spec](<relative-path>/spec/implementation-plan.spec.md)` on the line directly under the title — the same back-link every spec-governed document in this repo carries. Then the one-line status legend (`✅ done · 🚧 in progress · ⬜ not started`) followed by any plan-wide verification conventions (e.g., the simulator rule in §7.2).
+`Spec: [implementation-plan-spec](<relative-path>/spec/implementation-plan.spec.md) — read this spec before modifying this document.` on the line directly under the title — the same back-link every spec-governed document in this repo carries, extended with the read-before-editing instruction shown. The instruction is part of the required backlink text, not optional commentary: it makes the link a conformance gate, so anyone editing the plan is directed to read this spec first. Then the one-line status legend (`✅ done · 🚧 in progress · ⬜ not started`) followed by any plan-wide verification conventions (e.g., the simulator rule in §7.2).
 
 ### `## Architecture`
 An inventory table of every type the plan introduces or relocates — `Layer | Type | Location | Lifetime` — so readers get the target shape before reading tickets.
