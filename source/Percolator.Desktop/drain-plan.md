@@ -450,7 +450,7 @@ public sealed record MailboxBindingChangedEvent(
 
 ---
 
-### DRAIN-10 ⬜ — Prekey status RPC, OPK low-watermark replenishment & 48h SPK rotation
+### DRAIN-10 ✅ — Prekey status RPC, OPK low-watermark replenishment & 48h SPK rotation
 
 **Files:**
 - Modify `Percolator.Infrastructure/Protos/authenticated_relay.proto`
@@ -550,7 +550,7 @@ public interface IPrivatePreKeyStore
 
 ---
 
-### DRAIN-11 ⬜ — `MailboxBindingChangedEvent` publish on link/unlink
+### DRAIN-11 ✅ — `MailboxBindingChangedEvent` publish on link/unlink
 
 **Files:**
 - Modify `Percolator.Application/Delivery/RelayDirectoryService.cs`
@@ -559,6 +559,13 @@ public interface IPrivatePreKeyStore
 - The `IEventPublisher` ctor injection and all three publish sites (`LinkIdentityAsync`, `UnlinkIdentityAsync`, `CreateLocalRelayHostAsync` per initial owner) **shipped in DRAIN-06** — the scheduler could not see post-activation links without them and scenario runs proved it (binding changes previously reached the scheduler only via the 60s periodic tick). Remaining work here is test coverage only: assert `MailboxBindingChangedEvent` published with correct `Kind` (`Linked`/`Unlinked`) on each site in `RelayDirectoryServiceTests` (a `FakeEventPublisher` exists under `TestDoubles`).
 
 **Verify:** `RelayDirectoryServiceTests` — event published with correct `Kind` on `LinkIdentityAsync`, `UnlinkIdentityAsync`, and per initial owner in `CreateLocalRelayHostAsync`.
+
+**Outcome:** Publish sites shipped in DRAIN-06; review found they emitted events (and `SaveAsync` writes) on *unchanged* bindings — fixed upstream in `RelayDirectoryService`:
+- `LinkIdentityAsync` and `UnlinkIdentityAsync` compare binding presence before/after the (documented idempotent/no-op) domain calls — save + publish only fire when a binding was actually added/removed. Re-link and unlink-of-unlinked now emit nothing.
+- `CreateLocalRelayHostAsync` dedups `initialLinkedOwnerIds` — a repeated owner id no longer yields two `Linked` events / a dup `LinkedOwnerIdentityIds` entry.
+- **Contract pinned**: `MailboxBindingChangedEvent` = *fact that a binding changed*, never an idempotent hint. Consumers may treat `Unlinked` as a delta (binding gone), not just a wake-up. `DrainScheduler` today only `Wake()`s on any `Kind` — unaffected.
+- Tests: 5 new in `RelayDirectoryServiceTests` (per-owner Linked on create, Linked on link, Linked→Unlinked ordering, no event on re-link, no event on unlink-of-unlinked) + no-event guard on `LinkIdentityAsync_UnknownRelay`. 19 passing; Application.Tests 155, ApplicationIntegrationTests 19 — all green.
+- Residual: `RelayRegistration.RotateDrainToken` mutates a binding with no event — no production caller today; if token rotation becomes observable to consumers, `Kind` needs a `TokensRotated` variant.
 
 **QMS:** `INV-APP-EVENT-BUS-DECOUPLING`.
 

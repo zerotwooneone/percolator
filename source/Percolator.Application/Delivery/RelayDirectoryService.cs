@@ -123,7 +123,11 @@ public sealed class RelayDirectoryService : IRelayDirectory
                 return DomainResult<RelayDirectoryEntry>.Failure(linkResult.Error);
             }
 
-            linkedOwners.Add(ownerId);
+            // Dedup: a repeated owner id must not produce a second event/entry.
+            if (!linkedOwners.Contains(ownerId))
+            {
+                linkedOwners.Add(ownerId);
+            }
         }
 
         await _relayRepository.SaveAsync(registration, ct).ConfigureAwait(false);
@@ -179,16 +183,20 @@ public sealed class RelayDirectoryService : IRelayDirectory
                 new DomainError("RELAY_NOT_FOUND", "No relay registration exists for the given relay identity."));
         }
 
+        var wasLinked = registration.Bindings.Any(b => b.OwnerIdentityId == ownerIdentityId);
         var linkResult = registration.LinkIdentity(ownerIdentityId, _timeProvider, routingToken, drainToken);
         if (linkResult.IsFailure)
         {
             return linkResult;
         }
 
-        await _relayRepository.SaveAsync(registration, ct).ConfigureAwait(false);
-        await _eventPublisher.PublishAsync(
-            new MailboxBindingChangedEvent(ownerIdentityId, relayIdentityId, MailboxBindingChangeKind.Linked),
-            ct).ConfigureAwait(false);
+        if (!wasLinked)
+        {
+            await _relayRepository.SaveAsync(registration, ct).ConfigureAwait(false);
+            await _eventPublisher.PublishAsync(
+                new MailboxBindingChangedEvent(ownerIdentityId, relayIdentityId, MailboxBindingChangeKind.Linked),
+                ct).ConfigureAwait(false);
+        }
         return linkResult;
     }
 
@@ -204,16 +212,22 @@ public sealed class RelayDirectoryService : IRelayDirectory
                 new DomainError("RELAY_NOT_FOUND", "No relay registration exists for the given relay identity."));
         }
 
+        var wasLinked = registration.Bindings.Any(b => b.OwnerIdentityId == ownerIdentityId);
         var unlinkResult = registration.UnlinkIdentity(ownerIdentityId);
         if (unlinkResult.IsFailure)
         {
             return unlinkResult;
         }
 
-        await _relayRepository.SaveAsync(registration, ct).ConfigureAwait(false);
-        await _eventPublisher.PublishAsync(
-            new MailboxBindingChangedEvent(ownerIdentityId, relayIdentityId, MailboxBindingChangeKind.Unlinked),
-            ct).ConfigureAwait(false);
+        // UnlinkIdentity is a documented no-op for absent bindings — emit the
+        // event (and the write) only when a binding was actually removed.
+        if (wasLinked)
+        {
+            await _relayRepository.SaveAsync(registration, ct).ConfigureAwait(false);
+            await _eventPublisher.PublishAsync(
+                new MailboxBindingChangedEvent(ownerIdentityId, relayIdentityId, MailboxBindingChangeKind.Unlinked),
+                ct).ConfigureAwait(false);
+        }
         return DomainResult.Success();
     }
 

@@ -1,4 +1,5 @@
 using Percolator.Application.Delivery;
+using Percolator.Application.Delivery.Events;
 using Percolator.Application.Delivery.Ports;
 using Percolator.Application.Tests.TestDoubles;
 using Percolator.Domain.Common;
@@ -121,6 +122,7 @@ public sealed class RelayDirectoryServiceTests
     private ApplicationTestCryptoEngine _cryptoEngine = null!;
     private TestDateTimeProvider _timeProvider = null!;
     private RecordingRelayMailboxProvisioner _provisioner = null!;
+    private FakeEventPublisher _eventPublisher = null!;
     private RelayDirectoryService _service = null!;
 
     [SetUp]
@@ -133,6 +135,7 @@ public sealed class RelayDirectoryServiceTests
         _cryptoEngine = new ApplicationTestCryptoEngine();
         _timeProvider = new TestDateTimeProvider();
         _provisioner = new RecordingRelayMailboxProvisioner();
+        _eventPublisher = new FakeEventPublisher();
         _service = new RelayDirectoryService(
             _relayRepository,
             _profileRepository,
@@ -141,7 +144,7 @@ public sealed class RelayDirectoryServiceTests
             _cryptoEngine,
             _timeProvider,
             _provisioner,
-            new FakeEventPublisher());
+            _eventPublisher);
     }
 
     private static RelayEndpoint NewEndpoint(int port) => RelayEndpoint.FromHostAndPort("127.0.0.1", port);
@@ -182,6 +185,88 @@ public sealed class RelayDirectoryServiceTests
         registration.Should().NotBeNull();
         registration!.Endpoint.Value.Should().Be("127.0.0.1:5100");
         registration.Bindings.Select(b => b.OwnerIdentityId).Should().BeEquivalentTo(new[] { owner1, owner2 });
+    }
+
+    [Test]
+    public async Task CreateLocalRelayHostAsync_PublishesLinkedEventPerInitialOwner()
+    {
+        var relayId = PublicIdentityId.New();
+        var owner1 = PublicIdentityId.New();
+        var owner2 = PublicIdentityId.New();
+
+        var result = await _service.CreateLocalRelayHostAsync(
+            relayId, "My Relay", NewEndpoint(5100), new[] { owner1, owner2 });
+
+        result.IsSuccess.Should().BeTrue();
+        var events = _eventPublisher.PublishedEvents.OfType<MailboxBindingChangedEvent>().ToList();
+        events.Should().HaveCount(2);
+        events.Should().OnlyContain(e =>
+            e.Kind == MailboxBindingChangeKind.Linked && e.RelayIdentityId == relayId);
+        events.Select(e => e.OwnerIdentityId).Should().BeEquivalentTo(new[] { owner1, owner2 });
+    }
+
+    [Test]
+    public async Task LinkIdentityAsync_PublishesLinkedEvent()
+    {
+        var ownerId = PublicIdentityId.New();
+        var relayId = PublicIdentityId.New();
+        await _service.RegisterRemoteRelayAsync(relayId, NewEndpoint(5200));
+
+        var link = await _service.LinkIdentityAsync(relayId, ownerId);
+
+        link.IsSuccess.Should().BeTrue();
+        _eventPublisher.PublishedEvents.OfType<MailboxBindingChangedEvent>()
+            .Should().ContainSingle()
+            .Which.Should().BeEquivalentTo(new MailboxBindingChangedEvent(
+                ownerId, relayId, MailboxBindingChangeKind.Linked),
+                o => o.Excluding(e => e.EventId).Excluding(e => e.OccurredOnUtc));
+    }
+
+    [Test]
+    public async Task UnlinkIdentityAsync_PublishesUnlinkedEventAfterLinked()
+    {
+        var ownerId = PublicIdentityId.New();
+        var relayId = PublicIdentityId.New();
+        await _service.RegisterRemoteRelayAsync(relayId, NewEndpoint(5200));
+        await _service.LinkIdentityAsync(relayId, ownerId);
+
+        var unlink = await _service.UnlinkIdentityAsync(relayId, ownerId);
+
+        unlink.IsSuccess.Should().BeTrue();
+        _eventPublisher.PublishedEvents.OfType<MailboxBindingChangedEvent>()
+            .Select(e => (e.OwnerIdentityId, e.RelayIdentityId, e.Kind))
+            .Should().Equal(
+                (ownerId, relayId, MailboxBindingChangeKind.Linked),
+                (ownerId, relayId, MailboxBindingChangeKind.Unlinked));
+    }
+
+    [Test]
+    public async Task LinkIdentityAsync_AlreadyLinked_PublishesNoSecondEvent()
+    {
+        var ownerId = PublicIdentityId.New();
+        var relayId = PublicIdentityId.New();
+        await _service.RegisterRemoteRelayAsync(relayId, NewEndpoint(5200));
+        await _service.LinkIdentityAsync(relayId, ownerId);
+
+        var relink = await _service.LinkIdentityAsync(relayId, ownerId);
+
+        relink.IsSuccess.Should().BeTrue("re-link is idempotent");
+        _eventPublisher.PublishedEvents.OfType<MailboxBindingChangedEvent>()
+            .Should().ContainSingle("the binding did not change on the second link");
+    }
+
+    [Test]
+    public async Task UnlinkIdentityAsync_OwnerNotLinked_PublishesNoEvent()
+    {
+        var ownerId = PublicIdentityId.New();
+        var relayId = PublicIdentityId.New();
+        await _service.RegisterRemoteRelayAsync(relayId, NewEndpoint(5200));
+
+        var unlink = await _service.UnlinkIdentityAsync(relayId, ownerId);
+
+        unlink.IsSuccess.Should().BeTrue("unlink of an absent binding is a no-op success");
+        _eventPublisher.PublishedEvents.OfType<MailboxBindingChangedEvent>()
+            .Should().BeEmpty("no binding changed, so no event is a fact");
     }
 
     [Test]
@@ -284,6 +369,7 @@ public sealed class RelayDirectoryServiceTests
 
         result.IsFailure.Should().BeTrue();
         result.Error.Code.Should().Be("RELAY_NOT_FOUND");
+        _eventPublisher.PublishedEvents.Should().BeEmpty("failed links publish no binding event");
     }
 
     [Test]
@@ -406,7 +492,7 @@ public sealed class RelayDirectoryServiceTests
             _cryptoEngine,
             _timeProvider,
             new NullRelayMailboxProvisioner(),
-            new FakeEventPublisher());
+            _eventPublisher);
 
         var result = await service.ProvisionLinkedMailboxesAsync(ownerId);
 
