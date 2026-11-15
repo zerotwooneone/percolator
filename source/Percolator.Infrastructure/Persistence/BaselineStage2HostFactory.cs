@@ -12,11 +12,14 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Percolator.Domain.Channels.Ports;
+using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Ports;
 using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Security.Ports;
+using Percolator.Infrastructure.Common;
 using Percolator.Infrastructure.Events;
 using Percolator.Infrastructure.Maintenance;
+using Percolator.Infrastructure.Security;
 using Percolator.Infrastructure.Persistence.Repositories;
 using Percolator.Infrastructure.Transport;
 using Percolator.Infrastructure.Vault;
@@ -91,6 +94,13 @@ public sealed class BaselineStage2HostFactory
             services.AddScoped<IRelayRegistrationRepository, SqliteRelayRegistrationRepository>();
             services.AddScoped<IRelayMailboxProvisioner, GrpcRelayMailboxProvisioner>();
             services.AddScoped<IRelayDirectory, RelayDirectoryService>();
+
+            // Platform singletons required by the two services above.
+            services.AddSingleton<IDateTimeProvider, SystemDateTimeProvider>();
+            services.AddSingleton<CryptographyOptions>();
+            services.AddSingleton<ICryptoEngine, SignalCryptoEngine>();
+            services.AddSingleton<PeerGrpcChannelFactoryOptions>();
+            services.AddSingleton<IPeerGrpcChannelFactory, PeerGrpcChannelFactory>();
 
             // Background Maintenance Pruners
             services.AddSingleton(TimeProvider.System);
