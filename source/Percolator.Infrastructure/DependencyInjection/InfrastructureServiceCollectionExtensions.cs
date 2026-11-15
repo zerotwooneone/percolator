@@ -1,6 +1,10 @@
 using Percolator.Application.Delivery;
 using Percolator.Application.Delivery.Ports;
+using Percolator.Application.Egress;
+using Percolator.Application.Handshake;
+using Percolator.Application.Ingress;
 using Percolator.Application.Profiles;
+using Percolator.Application.Routing;
 using Percolator.Application.Services;
 using Percolator.Application.Session;
 using Percolator.PluginSdk.Profiles;
@@ -188,6 +192,9 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IGroupReceiverSessionRepository, SqliteGroupReceiverSessionRepository>();
         services.AddScoped<IGroupCredentialsRepository, SqliteGroupCredentialsRepository>();
         services.AddScoped<IPendingHandshakeRepository, SqlitePendingHandshakeRepository>();
+        // Mailbox persist-then-ack spool (DRAIN-05) — ambient scoped context like the
+        // other handler-only repositories; resolved inside drain scopes.
+        services.AddScoped<IPendingIngressStore, SqlitePendingIngressStore>();
 
         services.AddScoped<IOutboxRepository, SqliteOutboxRepository>();
         services.AddScoped<IOutboxQueryService, SqlOutboxQueryService>();
@@ -244,6 +251,36 @@ public static class InfrastructureServiceCollectionExtensions
         // ISealedEnvelopeUnwrapper is recipient-parameterized since DRAIN-04 — shared by
         // every persona; callers pass the recipient PublicIdentityId per call.
         services.AddScoped<ISealedEnvelopeUnwrapper, SealedEnvelopeUnwrapper>();
+
+        // Inbound ingress chain + mailbox drain (DRAIN-05). Sim hosts re-register the
+        // same services after this slice with their decorators — last registration wins,
+        // so per-host overrides still apply. IAppPayloadHandler/IAppIngressFilter are
+        // contributed by the vertical app registrations (AddChatApp/AddFileTransferApp).
+        services.AddSingleton<IChannelLockService, KeyedSemaphoreLockService>();
+        services.AddSingleton<IHandshakeReplayFilter, MemoryHandshakeReplayFilter>();
+        services.AddSingleton<IPreKeyMaintenanceService, NullPreKeyMaintenanceService>();
+        services.AddScoped<IContactRequestCoordinator, ContactRequestCoordinator>();
+        services.AddScoped<IRoutingCoordinator, RoutingCoordinator>();
+        services.AddScoped<IPayloadSender, OutboundEgressPipeline>();
+        services.AddScoped<IGroupKeyDistributionService, GroupKeyDistributionService>();
+        services.AddScoped<AppRouter>();
+        services.AddScoped<IAppRouter>(sp =>
+        {
+            var router = sp.GetRequiredService<AppRouter>();
+            foreach (var handler in sp.GetServices<IAppPayloadHandler>())
+            {
+                router.RegisterHandler(handler);
+            }
+            foreach (var filter in sp.GetServices<IAppIngressFilter>())
+            {
+                router.RegisterFilter(filter);
+            }
+            return router;
+        });
+        services.AddScoped<IHandshakeService, HandshakeService>();
+        services.AddScoped<IInboundIngressPipeline, InboundIngressPipeline>();
+        services.AddScoped<MailboxDrainService>();
+
         services.AddScoped<IPortReservationService, SqlitePortReservationService>();
         services.AddScoped<UnauthenticatedDeliveryEndpoint>();
         services.AddScoped<AuthenticatedRelayEndpoint>();

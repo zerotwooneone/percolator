@@ -20,14 +20,24 @@ public sealed class OpsOutboxJobEntity
     public string? LastError { get; set; }
 }
 
-public sealed class OpsInboundQueueEntity
+/// <summary>
+/// Persist-then-ack spool row for relayed mailbox envelopes (DEC-PENDING-INGRESS-SPOOL).
+/// Holds ciphertext only — plaintext never reaches this table.
+/// </summary>
+public sealed class OpsPendingIngressEnvelopeEntity
 {
-    public Guid Id { get; set; }
-    public Guid SenderId { get; set; }
-    public int AppId { get; set; }
-    public byte[] RawPayload { get; set; } = Array.Empty<byte>();
-    public DateTimeOffset ReceivedAtUtc { get; set; }
-    public DateTimeOffset? ProcessedAtUtc { get; set; }
+    /// <summary>PK AUTOINCREMENT — preserves relay receive order for replay scans.</summary>
+    public long SequenceNumber { get; set; }
+    public Guid OwnerIdentityId { get; set; }
+    /// <summary>Opaque relay-assigned ack key (<c>MailboxQueueId.Value</c>) — the (OwnerIdentityId, QueueId) dedup key.</summary>
+    public string QueueId { get; set; } = string.Empty;
+    public byte[] RoutingToken { get; set; } = Array.Empty<byte>();
+    public byte[] Ciphertext { get; set; } = Array.Empty<byte>();
+    public DateTimeOffset EnqueuedAtUtc { get; set; }
+    public DateTimeOffset ExpiresAtUtc { get; set; }
+    public int Attempts { get; set; }
+    public string? LastErrorCode { get; set; }
+    public string? LastErrorDescription { get; set; }
 }
 
 public sealed class OpsReservedPortEntity

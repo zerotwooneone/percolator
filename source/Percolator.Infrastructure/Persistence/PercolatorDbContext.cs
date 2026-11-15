@@ -29,7 +29,7 @@ public class PercolatorDbContext : DbContext
     public DbSet<VaultGroupCredentialsEntity> VaultGroupCredentials => Set<VaultGroupCredentialsEntity>();
     public DbSet<VaultPendingHandshakeEntity> VaultPendingHandshakes => Set<VaultPendingHandshakeEntity>();
     public DbSet<OpsOutboxJobEntity> OpsOutboxJobs => Set<OpsOutboxJobEntity>();
-    public DbSet<OpsInboundQueueEntity> OpsInboundQueue => Set<OpsInboundQueueEntity>();
+    public DbSet<OpsPendingIngressEnvelopeEntity> OpsPendingIngressEnvelopes => Set<OpsPendingIngressEnvelopeEntity>();
     public DbSet<OpsReservedPortEntity> OpsReservedPorts => Set<OpsReservedPortEntity>();
     public DbSet<PeerContactEntity> PeerContacts => Set<PeerContactEntity>();
     public DbSet<PeerContactDeviceEntity> PeerContactDevices => Set<PeerContactDeviceEntity>();
@@ -192,14 +192,19 @@ public class PercolatorDbContext : DbContext
             entity.HasIndex(e => new { e.Status, e.CreatedAtUtc })
                 .HasDatabaseName("ix_ops_outbox_retention");
         });
-        // 12. Ops Inbound Queue
-        modelBuilder.Entity<OpsInboundQueueEntity>(entity =>
+        // 12. Ops Pending Ingress — persist-then-ack mailbox drain spool
+        modelBuilder.Entity<OpsPendingIngressEnvelopeEntity>(entity =>
         {
-            entity.ToTable("ops_inbound_queue");
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.RawPayload).HasColumnType("BLOB");
-            entity.HasIndex(e => e.ProcessedAtUtc)
-                .HasDatabaseName("ix_ops_inbound_unprocessed");
+            entity.ToTable("ops_pending_ingress");
+            entity.HasKey(e => e.SequenceNumber);
+            entity.Property(e => e.QueueId).HasMaxLength(128).IsRequired();
+            entity.Property(e => e.RoutingToken).HasColumnType("BLOB");
+            entity.Property(e => e.Ciphertext).HasColumnType("BLOB");
+            entity.HasIndex(e => new { e.OwnerIdentityId, e.QueueId })
+                .IsUnique()
+                .HasDatabaseName("ix_ops_pending_ingress_dedup");
+            entity.HasIndex(e => new { e.OwnerIdentityId, e.SequenceNumber })
+                .HasDatabaseName("ix_ops_pending_ingress_owner_order");
         });
         // 13. Ops Reserved Ports
         modelBuilder.Entity<OpsReservedPortEntity>(entity =>

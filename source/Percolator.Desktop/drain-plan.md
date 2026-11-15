@@ -204,7 +204,7 @@ public interface ISealedEnvelopeUnwrapper
 
 ---
 
-### DRAIN-05 ⬜ — `IPendingIngressStore` & `MailboxDrainService` (Signal persist-then-ack)
+### DRAIN-05 ✅ — `IPendingIngressStore` & `MailboxDrainService` (Signal persist-then-ack)
 
 **Files:**
 - Create `Percolator.Domain/Delivery/ValueObjects/PendingIngressRecord.cs`
@@ -214,6 +214,9 @@ public interface ISealedEnvelopeUnwrapper
 - Modify `Percolator.Infrastructure/Persistence/PercolatorDbContext.cs`
 - Create `Percolator.Application/Delivery/MailboxDrainTarget.cs`
 - Create `Percolator.Application/Delivery/MailboxDrainService.cs`
+- Create `Percolator.Application/Delivery/Ports/IPreKeyMaintenanceService.cs` (forward port — DRAIN-10 implements it)
+- Create `Percolator.Application/Delivery/NullPreKeyMaintenanceService.cs`
+- Modify `Percolator.Application/Percolator.Application.csproj` (`Microsoft.Extensions.Logging.Abstractions` for `ILogger`)
 - Modify `Percolator.Infrastructure/DependencyInjection/InfrastructureServiceCollectionExtensions.cs`
 - Create `Percolator.Application.Tests/Delivery/MailboxDrainServiceTests.cs`
 - Create `Percolator.Infrastructure.Tests/Persistence/SqlitePendingIngressStoreTests.cs`
@@ -256,7 +259,8 @@ public sealed record PendingIngressRecord(
 
 public interface IPendingIngressStore
 {
-    Task UpsertAsync(PublicIdentityId ownerId, QueuedMailboxEnvelope envelope, CancellationToken ct = default);
+    // Returns the canonical stored record — a dedup hit keeps the pre-existing row's Attempts
+    Task<PendingIngressRecord> UpsertAsync(PublicIdentityId ownerId, QueuedMailboxEnvelope envelope, CancellationToken ct = default);
     Task<IReadOnlyList<PendingIngressRecord>> ListByOwnerAsync(PublicIdentityId ownerId, CancellationToken ct = default);
     Task DeleteAsync(PublicIdentityId ownerId, MailboxQueueId queueId, CancellationToken ct = default);
     Task RecordTransientFailureAsync(PublicIdentityId ownerId, MailboxQueueId queueId, DomainError error, CancellationToken ct = default);
@@ -294,7 +298,7 @@ public sealed class MailboxDrainService
    - Exception (excluding `OperationCanceledException` when `ct.IsCancellationRequested`): call `RecordTransientFailureAsync`; if `attempts + 1 >= MaxAttempts`, `DeleteAsync` and log error.
 5. `SqlitePendingIngressStore.DeleteAsync` overwrites `Ciphertext` with zeros before row removal (`CryptographicOperations.ZeroMemory`).
 
-**Verify:** `MailboxDrainServiceTests` (persist-before-ack ordering, no-ack on persist failure, terminal `DomainError` → delete, transient retry to `MaxAttempts = 5`, expiry drop, self-echo delete, OPK-consumed trigger) + `SqlitePendingIngressStoreTests` (`(OwnerIdentityId, QueueId)` upsert dedup, `SequenceNumber` ordering, `Ciphertext` zeroization on delete, attempt increment).
+**Verified:** shipped — `MailboxDrainServiceTests` 15/15, `SqlitePendingIngressStoreTests` 9/9, full `Percolator.Infrastructure.Tests` 265/265, `dotnet build Percolator.sln` clean. Deviations from the spec text above: `UpsertAsync` returns `Task<PendingIngressRecord>` (the canonical stored record, so the retry budget enforces persisted attempts on dedup hits); `ProcessPersistedAsync` takes the `PendingIngressRecord`, not the raw envelope; `ReplayPendingAsync` counts resolved (left-spool) records; `EnvelopeId` is not persisted — a fresh one is generated on rehydration (local metadata only; dedup key is `QueueId`); `SqlitePendingIngressStore` uses the ambient scoped `PercolatorDbContext` like the other handler-only repositories. The inbound ingress chain (`IChannelLockService`→`KeyedSemaphoreLockService`, `IHandshakeReplayFilter`→`MemoryHandshakeReplayFilter`, `IContactRequestCoordinator`, `IRoutingCoordinator`, `IPayloadSender`→`OutboundEgressPipeline`, `IGroupKeyDistributionService`, `AppRouter`/`IAppRouter` enumerable factory, `IHandshakeService`, `IInboundIngressPipeline`) moved into shared `AddTransportInfrastructure` so `MailboxDrainService` resolves — sim's later per-host registrations still win (last-registration-wins). `IPreKeyMaintenanceService` shipped as a forward port; a `NullPreKeyMaintenanceService` singleton backs it until DRAIN-10.
 
 **QMS:** `SYS-RESULT-DRIVEN-INGRESS`, `DEC-RESULT-ORIENTED-HOTPATH`, `INV-CHANNEL-SERIALIZATION-GATE`, `SYS-ATOMIC-STATE-PERSISTENCE`, `SYS-ASYNC-STORE-AND-FORWARD`, `DEP-INFRA-MAILBOX-RETRIEVAL`, `DEC-PENDING-INGRESS-SPOOL`, `INV-PLAINTEXT-ZEROIZATION`, `DEP-INFRA-VOLATILE-ZEROIZATION`, `HAZ-CRASH-STATE-DESYNC`.
 
@@ -345,7 +349,7 @@ public sealed record MailboxBindingChangedEvent(
   3. For each added target: enqueue into FIFO due-queue with `dueAt = now`.
 - Admission loop: while `activeSessions.Count < MaxConcurrentSessions` and the earliest due target has `dueAt <= now`, dequeue and start `SuperviseTargetAsync(target, targetCts.Token)`.
 - `SuperviseTargetAsync`:
-  1. Track first activation per target per session (`HashSet<MailboxDrainTarget>`) — this is the hook point where DRAIN-07 adds ensure-provisioned and DRAIN-10 adds `PreKeyMaintenanceService.EvaluateAsync(target, forced: false)`; neither exists yet, so DRAIN-06 only records activation.
+  1. Track first activation per target per session (`HashSet<MailboxDrainTarget>`) — this is the hook point where DRAIN-07 adds ensure-provisioned and DRAIN-10 adds `IPreKeyMaintenanceService.EvaluateAsync(target, forced: false)` (the port shipped in DRAIN-05 backed by `NullPreKeyMaintenanceService`); the real service doesn't exist yet, so DRAIN-06 only records activation.
   2. Create scope → resolve `IRelayDirectory`, `IRelayMailboxClient`, `MailboxDrainService`.
   3. Run `await drainService.ReplayPendingAsync(target, ct)`.
   4. Resolve fresh `MailboxTokenTriad` via `relayDirectory.GetMailboxTokensAsync(target.OwnerIdentityId, target.RelayIdentityId, ct)` (never cached across reconnects).
@@ -362,6 +366,8 @@ public sealed record MailboxBindingChangedEvent(
 - Subscribe `_isListening` changes → `IActiveIdentitySet.Add`/`Remove(PublicIdentityId)`: paused personas go offline (scheduler cancels the stream, relay retains mail, pending-ingress spool replays on resume).
 - `DrainMailboxAsync` remains the pull-now API for coordinators — it coexists with the scheduler; both write through the same pending-ingress spool, which dedupes by `(OwnerIdentityId, QueueId)`.
 - Preserve the `services.AddScoped(typeof(PublicIdentityId?), _ => PublicIdentityId)` registration (added in DRAIN-04 — the Type-based overload is required since `AddScoped<TService>` is `class`-constrained): it feeds `UnauthenticatedDeliveryEndpoint.localRecipientId`, and without it `DeliverDirect` silently skips unwrap→ingress on persona hosts.
+
+**Desktop handler composition (DRAIN-05 outcome):** `IInboundIngressPipeline` and the `AppRouter` enumerable factory already resolve from shared `AddTransportInfrastructure`, but Desktop sessions still register **no** `IAppPayloadHandler`/`IAppIngressFilter` — `AddDesktopSessionServices` never calls `AddChatApp`/`AddFileTransferApp` — so every drained payload would terminal-delete as unhandled. Composing the app verticals is part of this ticket's Desktop verification; note `FileTransferPayloadHandler` is `AddSingleton` while ctor-injecting scoped repos (`ITransferSessionRepository`, `IFileTransferFilterPolicyRepository`), which trips `ValidateScopes = true` on the session host — re-register the handler (or the app slice) scoped on Desktop rather than calling `AddFileTransferApp` verbatim.
 
 **Verify:** `DrainSchedulerTests` (event + timer reconcile diff, FIFO admission at `MaxConcurrentSessions`, graceful `MaxSessionAge` rotation mid-envelope, per-target exponential backoff isolation, persona-deactivation teardown) + `DependencyInjectionTests` (hosted-service swap) + full scenario suite (`--replay Scenarios`) — sim wiring changes.
 
@@ -433,7 +439,7 @@ public sealed record MailboxBindingChangedEvent(
 - Modify `Percolator.Infrastructure/Adapters/PreKeyBundleProviderAdapter.cs`
 - Modify `Percolator.Application/Handshake/HandshakeService.cs`
 - Modify `Percolator.Infrastructure/Transport/GrpcRelayMailboxProvisioner.cs`
-- Create `Percolator.Application/Delivery/PreKeyMaintenanceService.cs`
+- Create `Percolator.Application/Delivery/PreKeyMaintenanceService.cs` (implements `IPreKeyMaintenanceService` — the port shipped in DRAIN-05; replace the `NullPreKeyMaintenanceService` singleton registration in `AddTransportInfrastructure`)
 - Create `Percolator.Application.Tests/Delivery/PreKeyMaintenanceServiceTests.cs`
 - Modify all in-memory `IPrivatePreKeyStore` test doubles (`Percolator.Application.Tests`, `Percolator.Domain.IntegrationTests`, `Percolator.ApplicationIntegrationTests`)
 
