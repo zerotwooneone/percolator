@@ -93,7 +93,7 @@ internal sealed class RelayProvisioningCoordinator
                 }
 
                 var publishResult = await provisioner.PublishPreKeyBundleAsync(
-                    persona.PublicIdentityId, DeviceId.Primary, relayEndpoint, tokensResult.Value!, 0, ct);
+                    persona.PublicIdentityId, DeviceId.Primary, relayEndpoint, tokensResult.Value!, 0u, ct);
                 if (publishResult.IsFailure)
                 {
                     _toastService.ShowToast("Publish Error", "Relay rejected initial PreKey bundle publication.", ToastSeverity.Error);
@@ -199,7 +199,7 @@ internal sealed class RelayProvisioningCoordinator
                 }
 
                 var publishResult = await provisioner.PublishPreKeyBundleAsync(
-                    persona.PublicIdentityId, DeviceId.Primary, relayEndpoint, tokensResult.Value!, count, ct);
+                    persona.PublicIdentityId, DeviceId.Primary, relayEndpoint, tokensResult.Value!, (uint)count, ct);
                 if (publishResult.IsFailure)
                 {
                     _logSink.Log(new SimulatorLogEntry(

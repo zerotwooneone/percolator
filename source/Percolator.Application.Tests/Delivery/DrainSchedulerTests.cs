@@ -400,7 +400,7 @@ public sealed class DrainSchedulerTests
     public async Task FirstConnect_BundleNotFound_PublishesPreKeyBundle()
     {
         _provisioner.StatusOverride = DomainResult<RelayPreKeyStatus>.Success(
-            new RelayPreKeyStatus(false, 0, new SignedPreKeyId(0)));
+            new RelayPreKeyStatus(false, 0, SignedPreKeyId.None));
 
         _active.Add(OwnerA);
         _directory.AddEntry(Entry(Relay1, 5001, OwnerA));
@@ -600,7 +600,7 @@ public sealed class DrainSchedulerTests
     {
         private readonly object _gate = new();
         private readonly List<(PublicIdentityId OwnerId, PublicIdentityId RelayId)> _provisions = new();
-        private readonly List<(PublicIdentityId OwnerId, DeviceId DeviceId, int OpkCount)> _publications = new();
+        private readonly List<(PublicIdentityId OwnerId, DeviceId DeviceId, uint OpkCount)> _publications = new();
         private int _statusCalls;
 
         public DomainResult<RelayPreKeyStatus>? StatusOverride { get; set; }
@@ -615,7 +615,7 @@ public sealed class DrainSchedulerTests
             get { lock (_gate) { return _publications.Count; } }
         }
 
-        public List<(PublicIdentityId OwnerId, DeviceId DeviceId, int OpkCount)> Publications()
+        public List<(PublicIdentityId OwnerId, DeviceId DeviceId, uint OpkCount)> Publications()
         {
             lock (_gate) { return _publications.ToList(); }
         }
@@ -630,7 +630,7 @@ public sealed class DrainSchedulerTests
 
         public Task<DomainResult> PublishPreKeyBundleAsync(
             PublicIdentityId ownerIdentityId, DeviceId deviceId, RelayEndpoint endpoint,
-            MailboxTokenTriad tokens, int newOneTimePreKeyCount = 100, CancellationToken ct = default)
+            MailboxTokenTriad tokens, uint newOneTimePreKeyCount, CancellationToken ct = default)
         {
             lock (_gate) { _publications.Add((ownerIdentityId, deviceId, newOneTimePreKeyCount)); }
             return Task.FromResult(DomainResult.Success());

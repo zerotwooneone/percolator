@@ -28,7 +28,7 @@ public sealed class NullRelayMailboxProvisioner : IRelayMailboxProvisioner
         DeviceId deviceId,
         RelayEndpoint endpoint,
         MailboxTokenTriad tokens,
-        int newOneTimePreKeyCount = 100,
+        uint newOneTimePreKeyCount,
         CancellationToken ct = default)
         => Task.FromResult(Unavailable());
 

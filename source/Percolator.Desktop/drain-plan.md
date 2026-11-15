@@ -92,8 +92,15 @@ public interface IActiveIdentitySet
 - Create `Percolator.Domain/Delivery/ValueObjects/QueuedMailboxEnvelope.cs`
 - Create `Percolator.Domain/Delivery/ValueObjects/MailboxQueueId.cs`
 - Create `Percolator.Domain/Identities/ValueObjects/SignedPreKeyId.cs`
+- Create `Percolator.Application/Delivery/Ports/MailboxTokenTriad.cs`
+- Create `Percolator.Application/Delivery/Ports/RelayPreKeyStatus.cs`
+- Create `Percolator.Application/Delivery/Ports/IMailboxStreamSession.cs`
 - Create `Percolator.Application/Delivery/Ports/IRelayMailboxClient.cs`
 - Create `Percolator.Application/Delivery/NullRelayMailboxClient.cs`
+- Create `Percolator.Domain.Tests/Delivery/MailboxQueueIdTests.cs`
+- Create `Percolator.Domain.Tests/Identities/SignedPreKeyIdTests.cs`
+- Create `Percolator.Application.Tests/Delivery/NullRelayMailboxClientTests.cs`
+- Create `Percolator.Application.Tests/Delivery/NullRelayMailboxProvisionerTests.cs`
 - Modify `Percolator.Application/Delivery/Ports/IRelayMailboxProvisioner.cs`
 - Modify `Percolator.Application/Delivery/NullRelayMailboxProvisioner.cs`
 - Modify `Percolator.Application.Tests/Delivery/RelayDirectoryServiceTests.cs`
@@ -104,6 +111,12 @@ public interface IActiveIdentitySet
 public sealed record QueuedMailboxEnvelope(MailboxQueueId QueueId, MailboxEnvelope Envelope);
 
 public sealed record RelayPreKeyStatus(bool Found, uint OneTimePreKeyCount, SignedPreKeyId SignedPreKeyId);
+
+public sealed record MailboxTokenTriad(
+    BlindedRoutingToken RoutingToken,
+    DeliveryToken DeliveryToken,
+    DeliveryToken DrainToken,
+    DeliveryToken? PreviousDrainToken = null);
 
 public interface IMailboxStreamSession : IAsyncDisposable
 {
@@ -133,23 +146,26 @@ public interface IRelayMailboxProvisioner
         DeviceId deviceId,
         RelayEndpoint endpoint,
         MailboxTokenTriad tokens,
-        int newOneTimePreKeyCount = 100,
+        uint newOneTimePreKeyCount,
         CancellationToken ct = default);
 
     Task<DomainResult<RelayPreKeyStatus>> GetPreKeyStatusAsync(
+        DeviceId deviceId,
         RelayEndpoint endpoint,
         MailboxTokenTriad tokens,
-        DeviceId deviceId,
         CancellationToken ct = default);
 }
 ```
 
 - Remove `DrainMailboxOnceAsync` and `StopMailboxStreamAsync` from `IRelayMailboxProvisioner` and `NullRelayMailboxProvisioner`.
-- `NullRelayMailboxClient.OpenMailboxStreamAsync` returns `DomainError("PROVISIONER_UNAVAILABLE", ...)`.
+- `NullRelayMailboxClient.OpenMailboxStreamAsync` returns `DomainError("RELAY_MAILBOX_CLIENT_UNAVAILABLE", ...)`.
+- Single-type-per-file hexagonal separation: `MailboxTokenTriad`, `RelayPreKeyStatus`, and `IMailboxStreamSession` reside in dedicated port files.
+- `SignedPreKeyId.None` defines the standard invalid/unfound sentinel (`Value == 0`, `IsValid == false`).
+- `newOneTimePreKeyCount` is typed `uint` across ports, eliminating signed/unsigned cast friction with `RelayPreKeyStatus.OneTimePreKeyCount`.
 
-**Verified:** shipped — `DrainMailboxOnceAsync` stays on concrete `GrpcRelayMailboxProvisioner` until DRAIN-09 (`SimulatedPersonaHost` bridges via `is GrpcRelayMailboxProvisioner`); `GetPreKeyStatusAsync` returns `RELAY_PREKEY_STATUS_UNAVAILABLE` until DRAIN-10 (publish-on-failure policy spec'd in DRAIN-07); `RelayPreKeyStatus` shipped with `Found` + `SignedPreKeyId` (the `(0,0)` sentinel was ambiguous) — DRAIN-10 reflects that shape; `QueuedMailboxEnvelope.QueueId`/`AcknowledgeAsync` take `MailboxQueueId`, not the Guid-backed `RelayMailboxQueue` aggregate id.
+**Verified:** Shipped & verified with unit test suite (`dotnet test Percolator.sln`) covering domain VOs, null client/provisioner deterministic errors, and full 8-scenario simulator suite (`dotnet run --project Percolator.Simulator\Percolator.Simulator.csproj -f net10.0-windows10.0.19041.0 -- --replay Percolator.Simulator\Scenarios`).
 
-**QMS:** `INV-PURE-DOMAIN-PORTS`, `INV-ADAPTER-HYDRATION-BOUNDARY`, `DEP-INFRA-MAILBOX-RETRIEVAL`.
+**QMS:** `INV-PURE-DOMAIN-PORTS`, `INV-ADAPTER-HYDRATION-BOUNDARY`, `DEP-INFRA-MAILBOX-RETRIEVAL`, `ANTI-SHORTCUT-ZERO-TOLERANCE`.
 
 ---
 

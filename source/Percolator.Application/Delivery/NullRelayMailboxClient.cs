@@ -6,7 +6,7 @@ namespace Percolator.Application.Delivery;
 
 /// <summary>
 /// Placeholder <see cref="IRelayMailboxClient"/> for hosts with no transport adapter.
-/// Stream opens report <c>PROVISIONER_UNAVAILABLE</c> so callers fail deterministically.
+/// Stream opens report <c>RELAY_MAILBOX_CLIENT_UNAVAILABLE</c> so callers fail deterministically.
 /// </summary>
 public sealed class NullRelayMailboxClient : IRelayMailboxClient
 {
@@ -15,5 +15,5 @@ public sealed class NullRelayMailboxClient : IRelayMailboxClient
         MailboxTokenTriad tokens,
         CancellationToken ct = default)
         => Task.FromResult(DomainResult<IMailboxStreamSession>.Failure(
-            new DomainError("PROVISIONER_UNAVAILABLE", "No relay mailbox client is configured.")));
+            new DomainError("RELAY_MAILBOX_CLIENT_UNAVAILABLE", "No relay mailbox client is configured.")));
 }

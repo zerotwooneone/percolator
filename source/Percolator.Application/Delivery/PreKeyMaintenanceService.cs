@@ -20,9 +20,9 @@ namespace Percolator.Application.Delivery;
 public sealed class PreKeyMaintenanceService : IPreKeyMaintenanceService
 {
     /// <summary>Hosted OPK pool size at-or-below which a top-up publish runs.</summary>
-    public const int LowWatermark = 35;
+    public const uint LowWatermark = 35;
     /// <summary>Desired hosted OPK pool size after a top-up.</summary>
-    public const int TargetPoolSize = 100;
+    public const uint TargetPoolSize = 100;
     /// <summary>Minimum age between non-forced status checks for one drain target.</summary>
     public static readonly TimeSpan StatusCheckInterval = TimeSpan.FromHours(12);
     /// <summary>Signed-prekey rotation age.</summary>
@@ -176,8 +176,8 @@ public sealed class PreKeyMaintenanceService : IPreKeyMaintenanceService
                 status.SignedPreKeyId != currentKeyId)
             {
                 var toGenerate = status.OneTimePreKeyCount <= LowWatermark
-                    ? TargetPoolSize - (int)status.OneTimePreKeyCount
-                    : 0;
+                    ? TargetPoolSize - status.OneTimePreKeyCount
+                    : 0u;
 
                 var published = await _provisioner
                     .PublishPreKeyBundleAsync(

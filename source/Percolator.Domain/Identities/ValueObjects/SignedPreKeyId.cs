@@ -7,6 +7,7 @@ namespace Percolator.Domain.Identities.ValueObjects;
 public readonly record struct SignedPreKeyId(uint Value) : IEquatable<SignedPreKeyId>
 {
     public static SignedPreKeyId First => new(1);
+    public static SignedPreKeyId None => new(0);
 
     public bool IsValid => Value > 0;
 

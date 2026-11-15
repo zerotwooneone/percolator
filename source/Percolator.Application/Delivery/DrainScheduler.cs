@@ -342,7 +342,7 @@ public sealed class DrainScheduler
                     if (status.IsFailure || !status.Value!.Found)
                     {
                         var published = await provisioner.PublishPreKeyBundleAsync(
-                            target.OwnerIdentityId, DeviceId.Primary, target.Endpoint, tokens.Value!, ct: ct).ConfigureAwait(false);
+                            target.OwnerIdentityId, DeviceId.Primary, target.Endpoint, tokens.Value!, 100u, ct: ct).ConfigureAwait(false);
                         if (published.IsFailure)
                         {
                             throw new InvalidOperationException(

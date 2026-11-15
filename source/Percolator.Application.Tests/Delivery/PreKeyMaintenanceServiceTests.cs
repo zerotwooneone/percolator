@@ -96,7 +96,7 @@ public sealed class PreKeyMaintenanceServiceTests
     public async Task EvaluateAsync_BundleNotFound_PublishesFullPool()
     {
         _provisioner.StatusOverride = DomainResult<RelayPreKeyStatus>.Success(
-            new RelayPreKeyStatus(false, 0, new SignedPreKeyId(0)));
+            new RelayPreKeyStatus(false, 0, SignedPreKeyId.None));
 
         await _service.EvaluateAsync(_target, forced: true);
 
@@ -198,7 +198,7 @@ public sealed class PreKeyMaintenanceServiceTests
     private sealed class FakeProvisioner : IRelayMailboxProvisioner
     {
         public int StatusCalls { get; private set; }
-        public List<(PublicIdentityId Owner, DeviceId Device, int OpkCount)> Publications { get; } = new();
+        public List<(PublicIdentityId Owner, DeviceId Device, uint OpkCount)> Publications { get; } = new();
         public DomainResult<RelayPreKeyStatus>? StatusOverride { get; set; }
         public DomainResult? PublishOverride { get; set; }
 
@@ -209,7 +209,7 @@ public sealed class PreKeyMaintenanceServiceTests
 
         public Task<DomainResult> PublishPreKeyBundleAsync(
             PublicIdentityId ownerIdentityId, DeviceId deviceId, RelayEndpoint endpoint,
-            MailboxTokenTriad tokens, int newOneTimePreKeyCount = 100, CancellationToken ct = default)
+            MailboxTokenTriad tokens, uint newOneTimePreKeyCount, CancellationToken ct = default)
         {
             Publications.Add((ownerIdentityId, deviceId, newOneTimePreKeyCount));
             return Task.FromResult(PublishOverride ?? DomainResult.Success());

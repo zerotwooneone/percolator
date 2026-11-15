@@ -80,7 +80,7 @@ public sealed class RelayDirectoryServiceTests
     private sealed class RecordingRelayMailboxProvisioner : IRelayMailboxProvisioner
     {
         public List<(PublicIdentityId OwnerId, PublicIdentityId RelayId, RelayEndpoint Endpoint, MailboxTokenTriad Tokens)> Provisions { get; } = new();
-        public List<(PublicIdentityId OwnerId, DeviceId DeviceId, RelayEndpoint Endpoint, MailboxTokenTriad Tokens, int OpkCount)> Publications { get; } = new();
+        public List<(PublicIdentityId OwnerId, DeviceId DeviceId, RelayEndpoint Endpoint, MailboxTokenTriad Tokens, uint OpkCount)> Publications { get; } = new();
         public DomainResult? ProvisionResult { get; set; }
         public DomainResult? PublishResult { get; set; }
 
@@ -100,7 +100,7 @@ public sealed class RelayDirectoryServiceTests
             DeviceId deviceId,
             RelayEndpoint endpoint,
             MailboxTokenTriad tokens,
-            int newOneTimePreKeyCount = 100,
+            uint newOneTimePreKeyCount,
             CancellationToken ct = default)
         {
             Publications.Add((ownerIdentityId, deviceId, endpoint, tokens, newOneTimePreKeyCount));
@@ -112,7 +112,7 @@ public sealed class RelayDirectoryServiceTests
             RelayEndpoint endpoint,
             MailboxTokenTriad tokens,
             CancellationToken ct = default)
-            => Task.FromResult(DomainResult<RelayPreKeyStatus>.Success(new RelayPreKeyStatus(false, 0, new SignedPreKeyId(0))));
+            => Task.FromResult(DomainResult<RelayPreKeyStatus>.Success(new RelayPreKeyStatus(false, 0, SignedPreKeyId.None)));
     }
 
     private InMemoryRelayRegistrationRepository _relayRepository = null!;

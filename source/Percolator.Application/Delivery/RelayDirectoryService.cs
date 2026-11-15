@@ -343,7 +343,7 @@ public sealed class RelayDirectoryService : IRelayDirectory
             }
 
             var publishResult = await _provisioner
-                .PublishPreKeyBundleAsync(ownerIdentityId, DeviceId.Primary, registration.Endpoint, tokens, ct: ct)
+                .PublishPreKeyBundleAsync(ownerIdentityId, DeviceId.Primary, registration.Endpoint, tokens, 100u, ct: ct)
                 .ConfigureAwait(false);
             if (publishResult.IsFailure)
             {

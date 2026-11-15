@@ -87,14 +87,9 @@ public sealed class GrpcRelayMailboxProvisioner : IRelayMailboxProvisioner
         DeviceId deviceId,
         RelayEndpoint endpoint,
         MailboxTokenTriad tokens,
-        int newOneTimePreKeyCount = 100,
+        uint newOneTimePreKeyCount,
         CancellationToken ct = default)
     {
-        if (newOneTimePreKeyCount < 0)
-        {
-            return DomainResult.Failure(new DomainError(
-                "INVALID_OPK_COUNT", "One-time pre-key count cannot be negative."));
-        }
 
         var publicKey = await _identityKeyStore.GetIdentityPublicKeyAsync(ownerIdentityId, ct)
             .ConfigureAwait(false);
@@ -112,10 +107,10 @@ public sealed class GrpcRelayMailboxProvisioner : IRelayMailboxProvisioner
         // allocation gate — see _opkAllocationGate's comment. The outer finally
         // covers the whole method so a faulted generate/store can't leave private
         // key material undisposed.
-        var generated = new List<OneTimePreKeyMaterial>(newOneTimePreKeyCount);
+        var generated = new List<OneTimePreKeyMaterial>((int)newOneTimePreKeyCount);
         try
         {
-            var opkProtos = new List<OneTimePreKeyProto>(newOneTimePreKeyCount);
+            var opkProtos = new List<OneTimePreKeyProto>((int)newOneTimePreKeyCount);
             if (newOneTimePreKeyCount > 0)
             {
                 await _opkAllocationGate.WaitAsync(ct).ConfigureAwait(false);
@@ -210,7 +205,7 @@ public sealed class GrpcRelayMailboxProvisioner : IRelayMailboxProvisioner
 
             var status = response.Found
                 ? new RelayPreKeyStatus(true, response.OneTimePrekeyCount, new SignedPreKeyId(response.SignedPrekeyId))
-                : new RelayPreKeyStatus(false, 0, new SignedPreKeyId(0));
+                : new RelayPreKeyStatus(false, 0, SignedPreKeyId.None);
             return DomainResult<RelayPreKeyStatus>.Success(status);
         }
         catch (RpcException ex)
