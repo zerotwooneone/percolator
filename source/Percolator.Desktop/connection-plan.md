@@ -45,12 +45,15 @@ Implementation Gate: UNLOCKED
 
 ## Tickets
 
-### CONN-01 ⬜ Multi-Interface Network Listener Binding (`0.0.0.0` / `IPAddress.Any`)
+### CONN-01 ⬜ Multi-Interface Network Listener Binding (`0.0.0.0` / `IPAddress.Any` - IPv4 Only)
+
+- **IPv4 Mandate:** Sockets bind strictly to IPv4 `IPAddress.Any` (`0.0.0.0`). Dual-stack IPv6 binding is explicitly excluded to preserve route predictability and avoid unauthenticated IPv6 metadata leakage.
 
 - **Files:**
   - `Create`: `Percolator.Infrastructure/Transport/PeerTransportServerOptions.cs`
   - `Modify`: `Percolator.Infrastructure/Transport/KestrelPeerTransportServer.cs` (~L20, inject `PeerTransportServerOptions`; ~L54, default `bindAddress` to `_options.BindAddress`; ~L157 in `IHostedService.StartAsync`, pass `_options.BindAddress`)
   - `Modify`: `Percolator.Infrastructure/DependencyInjection/InfrastructureServiceCollectionExtensions.cs` (~L239, register `PeerTransportServerOptions`; ~L387, configure `CallbackEndpointValidatorOptions` with `AllowLan = true` and `AllowLoopback = true`)
+  - `Modify`: `Percolator.Desktop/Common/Services/ExchangeDirectoryService.cs` (~L220, replace `IPAddress.Loopback` with `IPAddress.Any` when binding exchange listener)
   - `Modify`: `Percolator.Simulator/Features/RelayedChat/SimulatedRelayHost.cs` (~L197, replace `options.Listen(IPAddress.Loopback, BoundPort, ...)` with `options.Listen(IPAddress.Any, BoundPort, ...)`)
   - `Modify`: `Percolator.Simulator/Features/Topology/SimulatedPersonaHost.cs` (~L323 and ~L772, replace `_transportServer.StartAsync(IPAddress.Loopback, ...)` with `_transportServer.StartAsync(IPAddress.Any, ...)`)
 
@@ -427,11 +430,13 @@ Implementation Gate: UNLOCKED
 
 ### CONN-08 ⬜ Desktop Outbound-Pending Direct Connection State & Background Retry Service
 
+- **Retry & Cancellation Policy:** The retry loop continues indefinitely with exponential backoff (5s, 15s, 30s, capped at 60s) while the persona session is active, until either the connection successfully completes or the user cancels the request.
+
 - **Files:**
   - `Create`: `Percolator.Desktop/Features/Transports/Models/OutboundPendingConnectionModel.cs`
   - `Create`: `Percolator.Desktop/Features/Transports/Services/IOutboundPendingRetryWorker.cs`
   - `Create`: `Percolator.Desktop/Features/Transports/Services/OutboundPendingRetryWorker.cs`
-  - `Modify`: `Percolator.Desktop/Features/Transports/Services/PeerConnectionStateService.cs` (track pending outbound peers)
+  - `Modify`: `Percolator.Desktop/Features/Transports/Services/PeerConnectionStateService.cs` (track and cancel pending outbound peers)
 
 - **Contracts:**
   ```csharp
@@ -450,8 +455,17 @@ Implementation Gate: UNLOCKED
   3. When selected in the Content Area:
      - Header displays an informational banner: *"Waiting for peer to come online. Messages will be queued once connected."*
      - The message composer is disabled (`IsEnabled = false`).
-  4. `OutboundPendingRetryWorker` runs as a hosted background service, periodically polling endpoints (with exponential backoff: 5s, 15s, 30s, capped at 60s).
-  5. Upon successful handshake completion, transitions item from pending list to active conversation list, activates composer, and clears the pending banner.
+     - An inline action button `[ Cancel Request ]` is rendered directly inside the banner.
+  4. **User Cancellation Mechanics:**
+     - A user can cancel an outbound request via two distinct paths:
+       - **Context Menu:** Right-clicking the pending DM conversation item in the Right Sidebar opens a context menu with `[ Cancel Connection Request ]`.
+       - **Banner Button:** Clicking the inline `[ Cancel Request ]` button on the content banner.
+     - Executing cancellation invokes `PeerConnectionStateService.CancelOutboundRequest(peerId)`:
+       - Signals cancellation on the `CancellationTokenSource` assigned to that peer's retry task in `OutboundPendingRetryWorker`.
+       - Removes the record from `PendingOutboundConnections`.
+       - If currently selected in the Content Area, navigates the content frame back to the welcome state.
+  5. `OutboundPendingRetryWorker` runs as a hosted background service, periodically polling endpoints (with exponential backoff: 5s, 15s, 30s, capped at 60s). It continues indefinitely until connected or cancelled.
+  6. Upon successful handshake completion, transitions item from pending list to active conversation list, activates composer, and clears the pending banner.
 
 - **Verify:**
   - `Percolator.Desktop.Tests/Features/Transports/OutboundPendingRetryWorkerTests.cs`
@@ -483,11 +497,12 @@ Implementation Gate: UNLOCKED
   1. The `[Pending Requests]` button is anchored at the bottom of the Left Sidebar rail, positioned strictly above the user's avatar to ensure pending request spam does not distract the user.
   2. Displays a subtle notification indicator/count badge when unsolicited inbound handshakes are pending.
   3. **Inbound Connection Silence (`INV-UNSOLICITED-CONNECTION-SILENCE`, `SYS-CONTACT-CONSENT-GATE`):** Zero OS toasts, audio pings, or unsolicited modal popups. Inbound requests are strictly isolated from the Direct Messages list.
-  4. Clicking opens the `PendingRequestsPanelView`:
+  4. `PendingRequestsPanelViewModel` queries inbound requests using the CQRS read port `IPeerContactQueryService.GetContactSummariesAsync(activePersonaId)`, filtering contacts where `c.State == ContactState.PendingApproval`.
+  5. Clicking opens the `PendingRequestsPanelView`:
      - Displays requester display name and cryptographic fingerprint preview (`4a8f...b12e`).
      - Actions:
-       - **Accept**: Completes X3DH / Double Ratchet session, creates active 1-to-1 DM in the Right Sidebar, and removes request from pending list.
-       - **Reject**: Silently dismisses the request without informing the sender.
+       - **Accept**: Invokes `IHandshakeService.CompletePendingHandshakeAsync(recipientId, senderId, ct)`, derives master session key and ratchet session, creates active 1-to-1 DM in the Right Sidebar, and clears the request from the pending list.
+       - **Reject**: Silently deletes pending handshake via `IPendingHandshakeRepository.DeletePendingHandshakeAsync` and updates contact state to dismissed without notifying sender.
        - **Block** (formerly "Burn"): Permanently blacklists the peer ID and route per `SYS-BLOCK-WIRE-INDISTINGUISHABILITY` (future packets drop silently with zero TCP/wire feedback).
 
 - **Verify:**
