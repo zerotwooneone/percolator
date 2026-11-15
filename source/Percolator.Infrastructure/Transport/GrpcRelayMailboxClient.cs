@@ -24,24 +24,30 @@ public sealed class GrpcRelayMailboxClient : IRelayMailboxClient
 {
     private static readonly TimeSpan EnvelopeExpiryWindow = TimeSpan.FromDays(7);
 
-    private readonly IPeerGrpcChannelFactory? _channelFactory;
-    private readonly AuthenticatedRelayService.AuthenticatedRelayServiceClient? _directClient;
+    private readonly Func<RelayEndpoint, AuthenticatedRelayService.AuthenticatedRelayServiceClient> _clientFactory;
     private readonly IDateTimeProvider _timeProvider;
 
     public GrpcRelayMailboxClient(
         IPeerGrpcChannelFactory channelFactory,
         IDateTimeProvider timeProvider)
+        : this(
+            endpoint =>
+            {
+                ArgumentNullException.ThrowIfNull(endpoint);
+                return new AuthenticatedRelayService.AuthenticatedRelayServiceClient(
+                    channelFactory.GetOrCreateChannel(new Uri($"https://{endpoint.Value}")));
+            },
+            timeProvider)
     {
-        _channelFactory = channelFactory ?? throw new ArgumentNullException(nameof(channelFactory));
-        _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
+        ArgumentNullException.ThrowIfNull(channelFactory);
     }
 
-    /// <summary>Test seam: bypasses the channel factory with a direct client (mirrors GrpcProfileDeliveryClient).</summary>
+    /// <summary>Internal constructor for injecting a custom client factory (e.g. test invokers).</summary>
     internal GrpcRelayMailboxClient(
-        AuthenticatedRelayService.AuthenticatedRelayServiceClient directClient,
+        Func<RelayEndpoint, AuthenticatedRelayService.AuthenticatedRelayServiceClient> clientFactory,
         IDateTimeProvider timeProvider)
     {
-        _directClient = directClient ?? throw new ArgumentNullException(nameof(directClient));
+        _clientFactory = clientFactory ?? throw new ArgumentNullException(nameof(clientFactory));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
     }
 
@@ -50,12 +56,15 @@ public sealed class GrpcRelayMailboxClient : IRelayMailboxClient
         MailboxTokenTriad tokens,
         CancellationToken ct = default)
     {
-        var client = _directClient ?? new AuthenticatedRelayService.AuthenticatedRelayServiceClient(
-            _channelFactory!.GetOrCreateChannel(new Uri($"https://{endpoint.Value}")));
-        var call = client.ConnectMailboxStream(cancellationToken: ct);
+        ArgumentNullException.ThrowIfNull(endpoint);
+        ArgumentNullException.ThrowIfNull(tokens);
 
+        AsyncDuplexStreamingCall<MailboxStreamClientMessage, MailboxStreamServerMessage>? call = null;
         try
         {
+            var client = _clientFactory(endpoint);
+            call = client.ConnectMailboxStream(cancellationToken: ct);
+
             // 1. Server sends the nonce challenge first.
             if (!await call.ResponseStream.MoveNext(ct).ConfigureAwait(false))
             {
@@ -104,12 +113,22 @@ public sealed class GrpcRelayMailboxClient : IRelayMailboxClient
         }
         catch (RpcException ex)
         {
-            call.Dispose();
+            call?.Dispose();
             return Failure("STREAM_OPEN_FAILED", ex.Status.Detail ?? ex.Message);
         }
         catch (InvalidOperationException ex)
         {
-            call.Dispose();
+            call?.Dispose();
+            return Failure("STREAM_OPEN_FAILED", ex.Message);
+        }
+        catch (UriFormatException ex)
+        {
+            call?.Dispose();
+            return Failure("STREAM_OPEN_FAILED", ex.Message);
+        }
+        catch (ArgumentException ex)
+        {
+            call?.Dispose();
             return Failure("STREAM_OPEN_FAILED", ex.Message);
         }
     }
@@ -153,6 +172,8 @@ public sealed class GrpcRelayMailboxClient : IRelayMailboxClient
 
         public async Task<DomainResult> AcknowledgeAsync(MailboxQueueId queueId, CancellationToken ct = default)
         {
+            ArgumentNullException.ThrowIfNull(queueId);
+
             await _writeGate.WaitAsync(ct).ConfigureAwait(false);
             try
             {
@@ -180,6 +201,7 @@ public sealed class GrpcRelayMailboxClient : IRelayMailboxClient
 
         private async Task PumpAsync(BlindedRoutingToken routingToken, IDateTimeProvider timeProvider)
         {
+            Exception? fault = null;
             try
             {
                 while (await _call.ResponseStream.MoveNext(_pumpCts.Token).ConfigureAwait(false))
@@ -224,19 +246,33 @@ public sealed class GrpcRelayMailboxClient : IRelayMailboxClient
             }
             catch (OperationCanceledException) when (_pumpCts.IsCancellationRequested)
             {
-                // Dispose path — expected.
+                // Dispose path — expected clean teardown.
             }
-            catch (RpcException)
+            catch (RpcException ex) when (_pumpCts.IsCancellationRequested || ex.StatusCode == StatusCode.Cancelled)
             {
-                // Stream fault — the channel completes; the supervisor reconnects with backoff.
+                // Dispose path or cancelled call — expected clean teardown.
             }
-            catch (InvalidOperationException)
+            catch (RpcException ex)
             {
-                // Disposed/completed request stream torn down under us.
+                // Stream fault — propagate to channel writer so reader/supervisor observes failure and retries.
+                fault = ex;
+            }
+            catch (InvalidOperationException ex)
+            {
+                // Disposed/completed request stream torn down under us or transport fault.
+                if (!_pumpCts.IsCancellationRequested)
+                {
+                    fault = ex;
+                }
+            }
+            catch (Exception ex)
+            {
+                // Unexpected transport or parsing fault.
+                fault = ex;
             }
             finally
             {
-                _channel.Writer.TryComplete();
+                _channel.Writer.TryComplete(fault);
             }
         }
 

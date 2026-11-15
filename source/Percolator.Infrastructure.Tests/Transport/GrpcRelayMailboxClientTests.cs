@@ -48,11 +48,16 @@ public sealed class GrpcRelayMailboxClientTests
     {
         private readonly Queue<MailboxStreamServerMessage> _messages;
         private readonly bool _blockAtEnd;
+        private readonly Exception? _faultAfterMessages;
 
-        public ScriptedResponseStreamReader(IEnumerable<MailboxStreamServerMessage> messages, bool blockAtEnd)
+        public ScriptedResponseStreamReader(
+            IEnumerable<MailboxStreamServerMessage> messages,
+            bool blockAtEnd,
+            Exception? faultAfterMessages = null)
         {
             _messages = new Queue<MailboxStreamServerMessage>(messages);
             _blockAtEnd = blockAtEnd;
+            _faultAfterMessages = faultAfterMessages;
         }
 
         public MailboxStreamServerMessage Current { get; private set; } = null!;
@@ -63,6 +68,11 @@ public sealed class GrpcRelayMailboxClientTests
             {
                 Current = _messages.Dequeue();
                 return true;
+            }
+
+            if (_faultAfterMessages != null)
+            {
+                throw _faultAfterMessages;
             }
 
             if (_blockAtEnd)
@@ -86,12 +96,13 @@ public sealed class GrpcRelayMailboxClientTests
         public RecordingRequestStreamWriter RequestWriter { get; } = new();
         public List<MailboxStreamServerMessage> Script { get; } = new();
         public bool BlockAtEnd { get; set; } = true;
+        public Exception? FaultAfterMessages { get; set; }
 
         public override AsyncDuplexStreamingCall<TRequest, TResponse> AsyncDuplexStreamingCall<TRequest, TResponse>(
             Method<TRequest, TResponse> method, string? host, CallOptions options)
         {
             var writer = (IClientStreamWriter<TRequest>)(object)RequestWriter;
-            var reader = (IAsyncStreamReader<TResponse>)(object)new ScriptedResponseStreamReader(Script, BlockAtEnd);
+            var reader = (IAsyncStreamReader<TResponse>)(object)new ScriptedResponseStreamReader(Script, BlockAtEnd, FaultAfterMessages);
             return new AsyncDuplexStreamingCall<TRequest, TResponse>(
                 writer,
                 reader,
@@ -140,7 +151,7 @@ public sealed class GrpcRelayMailboxClientTests
     };
 
     private static GrpcRelayMailboxClient CreateClient(TestMailboxCallInvoker invoker)
-        => new(new AuthenticatedRelayService.AuthenticatedRelayServiceClient(invoker), new FixedTimeProvider());
+        => new(_ => new AuthenticatedRelayService.AuthenticatedRelayServiceClient(invoker), new FixedTimeProvider());
 
     private static (MailboxTokenTriad Tokens, byte[] DrainBytes) CreateTokens()
     {
@@ -277,4 +288,74 @@ public sealed class GrpcRelayMailboxClientTests
 
         invoker.RequestWriter.Completed.Should().BeTrue();
     }
+
+    [Test]
+    public async Task Session_WhenServerStreamFaults_EnvelopesThrowsRpcException()
+    {
+        var invoker = new TestMailboxCallInvoker { BlockAtEnd = false };
+        invoker.Script.Add(Challenge(new byte[32]));
+        invoker.Script.Add(AuthResult(authenticated: true));
+        invoker.FaultAfterMessages = new RpcException(new Status(StatusCode.Unavailable, "relay disconnected"));
+
+        var (tokens, _) = CreateTokens();
+        var client = CreateClient(invoker);
+        var openResult = await client.OpenMailboxStreamAsync(Endpoint, tokens);
+        await using var session = openResult.Value!;
+
+        var act = async () =>
+        {
+            await foreach (var _ in session.Envelopes)
+            {
+            }
+        };
+
+        var exception = await act.Should().ThrowAsync<RpcException>();
+        exception.Which.Status.Detail.Should().Be("relay disconnected");
+    }
+
+    [Test]
+    public void Constructor_WithNullChannelFactory_ThrowsArgumentNullException()
+    {
+        var act = () => new GrpcRelayMailboxClient((IPeerGrpcChannelFactory)null!, new FixedTimeProvider());
+        act.Should().Throw<ArgumentNullException>().WithParameterName("channelFactory");
+    }
+
+    [Test]
+    public void Constructor_WithNullTimeProvider_ThrowsArgumentNullException()
+    {
+        var act = () => new GrpcRelayMailboxClient(
+            _ => new AuthenticatedRelayService.AuthenticatedRelayServiceClient(new TestMailboxCallInvoker()),
+            null!);
+        act.Should().Throw<ArgumentNullException>().WithParameterName("timeProvider");
+    }
+
+    [Test]
+    public async Task OpenMailboxStreamAsync_NullArguments_ThrowsArgumentNullException()
+    {
+        var (tokens, _) = CreateTokens();
+        var client = CreateClient(new TestMailboxCallInvoker());
+
+        var actEndpoint = () => client.OpenMailboxStreamAsync(null!, tokens);
+        await actEndpoint.Should().ThrowAsync<ArgumentNullException>().WithParameterName("endpoint");
+
+        var actTokens = () => client.OpenMailboxStreamAsync(Endpoint, null!);
+        await actTokens.Should().ThrowAsync<ArgumentNullException>().WithParameterName("tokens");
+    }
+
+    [Test]
+    public async Task AcknowledgeAsync_NullQueueId_ThrowsArgumentNullException()
+    {
+        var invoker = new TestMailboxCallInvoker();
+        invoker.Script.Add(Challenge(new byte[32]));
+        invoker.Script.Add(AuthResult(authenticated: true));
+
+        var (tokens, _) = CreateTokens();
+        var client = CreateClient(invoker);
+        var openResult = await client.OpenMailboxStreamAsync(Endpoint, tokens);
+        await using var session = openResult.Value!;
+
+        var act = () => session.AcknowledgeAsync(null!);
+        await act.Should().ThrowAsync<ArgumentNullException>().WithParameterName("queueId");
+    }
 }
+
