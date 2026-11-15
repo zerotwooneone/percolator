@@ -189,7 +189,7 @@ public sealed class DependencyInjectionTests
             typeof(RelayBlobRetentionPruner),
             typeof(TransferOfferReaperWorker),
             typeof(SwarmEndpointRetentionPruner),
-            typeof(RelayMailboxStreamWorker),
+            typeof(RelayMailboxDrainHost),
             typeof(RelayGroupStreamWorker)
         ]);
     }

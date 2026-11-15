@@ -3,11 +3,16 @@ namespace Percolator.Desktop.Common.Session;
 using System;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Percolator.Apps.Chat.DependencyInjection;
+using Percolator.Apps.FileTransfer;
+using Percolator.Apps.FileTransfer.Features.IngressControl;
+using Percolator.Apps.FileTransfer.Ports;
 using Percolator.Desktop.Common.Services;
 using Percolator.Desktop.Common.Storage;
 using Percolator.Desktop.Common.Windowing;
 using Percolator.Desktop.Features.Shell.ViewModels;
 using Percolator.Desktop.Features.Startup.ViewModels;
+using Percolator.PluginSdk;
 
 /// <summary>
 /// Session-container registrations owned by the Desktop executable (CTX-03). Session-bound
@@ -38,6 +43,20 @@ internal static class DesktopSessionServiceCollectionExtensions
         services.AddTransient<CreatePersonaDialogViewModel>();
         services.AddTransient<DeletePersonaDialogViewModel>();
         services.AddTransient<StopUsingExchangeDialogViewModel>();
+
+        // App-payload dispatch surface for the mailbox drain (DRAIN-06): without these,
+        // the shared IAppRouter registers no handlers and drained payloads die as
+        // unhandled terminal rejections. AddChatApp is verbatim-safe (all lifetimes
+        // consistent); file transfer is composed manually because AddFileTransferApp
+        // registers FileTransferPayloadHandler/FileTransferIngressFilter as singletons
+        // with scoped repo deps (captive under this host's ValidateScopes), and the
+        // filter's IsEnabled default of false would discard every FT payload.
+        services.AddChatApp();
+        services.AddSingleton<IAppPlugin, FileTransferPlugin>();
+        services.AddScoped<IAppPayloadHandler, FileTransferPayloadHandler>();
+        // Null Object default from AddFileTransferApp — pool connection is a session
+        // UX concern, not required for mailbox ingress.
+        services.AddSingleton<ITransferStreamPool>(NullTransferStreamPool.Instance);
 
         // Session-bound window manager: window scopes come off the SESSION root — no
         // provider parameter on Show/ShowDialogAsync and zero call-site changes (the

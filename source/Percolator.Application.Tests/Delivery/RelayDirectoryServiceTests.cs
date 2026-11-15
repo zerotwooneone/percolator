@@ -140,7 +140,8 @@ public sealed class RelayDirectoryServiceTests
             _preKeyStore,
             _cryptoEngine,
             _timeProvider,
-            _provisioner);
+            _provisioner,
+            new FakeEventPublisher());
     }
 
     private static RelayEndpoint NewEndpoint(int port) => RelayEndpoint.FromHostAndPort("127.0.0.1", port);
@@ -321,7 +322,8 @@ public sealed class RelayDirectoryServiceTests
             _preKeyStore,
             _cryptoEngine,
             _timeProvider,
-            new NullRelayMailboxProvisioner());
+            new NullRelayMailboxProvisioner(),
+            new FakeEventPublisher());
 
         var result = await service.ProvisionLinkedMailboxesAsync(ownerId);
 

@@ -22,6 +22,7 @@ using Percolator.Application.Ports;
 using Percolator.Application.Profiles;
 using Percolator.Application.Routing;
 using Percolator.Application.Services;
+using Percolator.Application.Session;
 using Percolator.Apps.Chat.DependencyInjection;
 using Percolator.Apps.FileTransfer.DependencyInjection;
 using Percolator.Apps.FileTransfer.Ports;
@@ -77,6 +78,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
     private IHost? _host;
     private KestrelPeerTransportServer? _transportServer;
     private IDisposable? _relayQueueSubscription;
+    private IDisposable? _activeIdentitySubscription;
     private bool _disposed;
     public SimulatedNodeId Id { get; }
     public string DisplayName { get; private set; }
@@ -93,7 +95,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
     public BlindedRoutingToken MailboxRoutingToken { get; }
     public DeliveryToken MailboxDeliveryToken { get; private set; }
     public DeliveryToken MailboxDrainToken { get; }
-    public ISimulatedRelayHost? HomeRelay { get; set; }
+    public ISimulatedRelayHost? HomeRelay { get; private set; }
     public ProfileKey ProfileKey { get; private set; }
     public uint ProfileRevision { get; private set; } = 1;
     public bool AllowPeerDiscovery { get; set; } = true;
@@ -322,7 +324,29 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         {
             BoundPort = _transportServer.BoundPort.Value.Value;
         }
-        // 3. Start remaining background hosted services
+        // 3. Populate IActiveIdentitySet before hosted services start so the drain
+        // scheduler's first reconciliation sees this persona; bridge IsListening so a
+        // paused persona leaves the active set (scheduler cancels its stream).
+        var activeIdentities = _host.Services.GetRequiredService<IActiveIdentitySet>();
+        if (_isListening.CurrentValue)
+        {
+            activeIdentities.Add(PublicIdentityId);
+        }
+        _activeIdentitySubscription = IsListening.Subscribe(listening =>
+        {
+            if (listening)
+            {
+                activeIdentities.Add(PublicIdentityId);
+            }
+            else
+            {
+                activeIdentities.Remove(PublicIdentityId);
+            }
+        });
+        if (HomeRelay != null)
+        {
+            await AssignHomeRelayAsync(HomeRelay, ct);
+        }
         await _host.StartAsync(ct);
         var ftFilter = _host.Services.GetRequiredService<FileTransferIngressFilter>();
         ftFilter.IsEnabled = _allowFileTransfers;
@@ -563,57 +587,65 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                 return 0;
             }
             using var scope = _host.Services.CreateScope();
-            var provisioner = scope.ServiceProvider.GetRequiredService<IRelayMailboxProvisioner>();
+            var scheduler = scope.ServiceProvider.GetRequiredService<DrainScheduler>();
+            var store = scope.ServiceProvider.GetRequiredService<IPendingIngressStore>();
             var relayEndpoint = RelayEndpoint.FromHostAndPort("127.0.0.1", HomeRelay.BoundPort);
-            var mailboxTokens = new MailboxTokenTriad(MailboxRoutingToken, MailboxDeliveryToken, MailboxDrainToken);
-            // Temporary bridge: unary drain lives only on the concrete provisioner until
-            // this path migrates to the streaming IRelayMailboxClient surface.
-            if (provisioner is not GrpcRelayMailboxProvisioner grpcProvisioner)
+            var target = new MailboxDrainTarget(PublicIdentityId, HomeRelay.RelayIdentityId, relayEndpoint);
+
+            // The DRAIN-06 scheduler stream owns the relay queue AND the pending-ingress
+            // spool: this is a drain-completion wait, purely observational — any
+            // ProcessPersistedAsync call here would race the stream's in-flight
+            // ReceiveAsync on the same row and double-process it (SKIPPED_KEY_NOT_FOUND
+            // + AssertZeroErrors failures). Wait until the session is established and
+            // the spool is empty and stable, then flush the outbox (ingress processing
+            // can queue replies) and refresh views.
+            var deadline = DateTimeOffset.UtcNow.AddSeconds(15);
+            var stableSince = DateTimeOffset.MinValue;
+            while (!ct.IsCancellationRequested)
             {
-                _logSink.Log(new SimulatorLogEntry(
-                    DateTimeOffset.UtcNow,
-                    LogLevel.Error,
-                    DisplayName,
-                    Id,
-                    "MailboxDrain",
-                    "Mailbox drain unavailable: no gRPC provisioner bound."));
-                return 0;
-            }
-            var drainResult = await grpcProvisioner.DrainMailboxOnceAsync(PublicIdentityId, relayEndpoint, mailboxTokens, ct);
-            if (drainResult.IsFailure)
-            {
-                _logSink.Log(new SimulatorLogEntry(
-                    DateTimeOffset.UtcNow,
-                    LogLevel.Error,
-                    DisplayName,
-                    Id,
-                    "MailboxDrain",
-                    $"Mailbox drain failed: {drainResult.Error.Code} - {drainResult.Error.Description}"));
-                return 0;
-            }
-            int processed = drainResult.Value;
-            if (processed > 0)
-            {
-                await _outboxGate.WaitAsync(ct).ConfigureAwait(false);
-                try
+                var pending = await store.ListByOwnerAsync(PublicIdentityId, ct).ConfigureAwait(false);
+                if (pending.Count == 0 && scheduler.HasEstablishedSession(target))
                 {
-                    var outboxWorker = scope.ServiceProvider.GetRequiredService<OutboxWorker>();
-                    await outboxWorker.ProcessBatchAsync(50, ct);
+                    if (stableSince == DateTimeOffset.MinValue)
+                    {
+                        stableSince = DateTimeOffset.UtcNow;
+                    }
+                    else if (DateTimeOffset.UtcNow - stableSince >= TimeSpan.FromMilliseconds(200))
+                    {
+                        break;
+                    }
                 }
-                finally
+                else
                 {
-                    try { _outboxGate.Release(); } catch (ObjectDisposedException) { }
+                    stableSince = DateTimeOffset.MinValue;
                 }
-                _stateBus.Publish(new SimulatorStateSignal(
-                    Id,
-                    SignalCategory.ChatTranscriptChanged,
-                    DisplayName));
-                _stateBus.Publish(new SimulatorStateSignal(
-                    Id,
-                    SignalCategory.GroupStateChanged,
-                    DisplayName));
+
+                if (DateTimeOffset.UtcNow > deadline)
+                {
+                    break;
+                }
+                await Task.Delay(25, ct).ConfigureAwait(false);
             }
-            return processed;
+
+            await _outboxGate.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                var outboxWorker = scope.ServiceProvider.GetRequiredService<OutboxWorker>();
+                await outboxWorker.ProcessBatchAsync(50, ct);
+            }
+            finally
+            {
+                try { _outboxGate.Release(); } catch (ObjectDisposedException) { }
+            }
+            _stateBus.Publish(new SimulatorStateSignal(
+                Id,
+                SignalCategory.ChatTranscriptChanged,
+                DisplayName));
+            _stateBus.Publish(new SimulatorStateSignal(
+                Id,
+                SignalCategory.GroupStateChanged,
+                DisplayName));
+            return 0;
         }
         catch (ObjectDisposedException) when (_disposed)
         {
@@ -696,6 +728,27 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         }
         return DomainResult.Success();
     }
+    public async Task AssignHomeRelayAsync(ISimulatedRelayHost relay, CancellationToken ct = default)
+    {
+        HomeRelay = relay;
+        if (_host is null)
+        {
+            return;
+        }
+
+        using var scope = _host.Services.CreateScope();
+        var relayDirectory = scope.ServiceProvider.GetRequiredService<IRelayDirectory>();
+        var relayEndpoint = RelayEndpoint.FromHostAndPort("127.0.0.1", relay.BoundPort);
+        // Skip registration when the relay is already known; the registration alone
+        // carries no bindings, so LinkIdentityAsync is always the goal.
+        var entries = await relayDirectory.ListAsync(ct).ConfigureAwait(false);
+        if (entries.All(e => e.RelayIdentityId != relay.RelayIdentityId))
+        {
+            await relayDirectory.RegisterRemoteRelayAsync(relay.RelayIdentityId, relayEndpoint, ct: ct).ConfigureAwait(false);
+        }
+        await relayDirectory.LinkIdentityAsync(
+            relay.RelayIdentityId, PublicIdentityId, MailboxRoutingToken, MailboxDrainToken, ct).ConfigureAwait(false);
+    }
     public async Task SetListeningAsync(bool isListening, CancellationToken ct = default)
     {
         try
@@ -755,6 +808,12 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
     }
     public async ValueTask StopAsync(CancellationToken ct = default)
     {
+        _activeIdentitySubscription?.Dispose();
+        _activeIdentitySubscription = null;
+        if (_host is not null)
+        {
+            _host.Services.GetService<IActiveIdentitySet>()?.Remove(PublicIdentityId);
+        }
         _relayQueueSubscription?.Dispose();
         _relayQueueSubscription = null;
         if (_transportServer is not null && _transportServer.IsRunning)

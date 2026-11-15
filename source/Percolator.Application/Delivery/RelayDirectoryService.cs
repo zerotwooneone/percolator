@@ -1,3 +1,4 @@
+using Percolator.Application.Delivery.Events;
 using Percolator.Application.Delivery.Ports;
 using Percolator.Application.Ports;
 using Percolator.Domain.Common;
@@ -27,6 +28,7 @@ public sealed class RelayDirectoryService : IRelayDirectory
     private readonly ICryptoEngine _cryptoEngine;
     private readonly IDateTimeProvider _timeProvider;
     private readonly IRelayMailboxProvisioner _provisioner;
+    private readonly IEventPublisher _eventPublisher;
 
     public RelayDirectoryService(
         IRelayRegistrationRepository relayRepository,
@@ -35,7 +37,8 @@ public sealed class RelayDirectoryService : IRelayDirectory
         IPrivatePreKeyStore preKeyStore,
         ICryptoEngine cryptoEngine,
         IDateTimeProvider timeProvider,
-        IRelayMailboxProvisioner provisioner)
+        IRelayMailboxProvisioner provisioner,
+        IEventPublisher eventPublisher)
     {
         _relayRepository = relayRepository;
         _profileRepository = profileRepository;
@@ -44,6 +47,7 @@ public sealed class RelayDirectoryService : IRelayDirectory
         _cryptoEngine = cryptoEngine;
         _timeProvider = timeProvider;
         _provisioner = provisioner;
+        _eventPublisher = eventPublisher;
     }
 
     public async Task<IReadOnlyList<RelayDirectoryEntry>> ListAsync(CancellationToken ct = default)
@@ -117,6 +121,12 @@ public sealed class RelayDirectoryService : IRelayDirectory
         }
 
         await _relayRepository.SaveAsync(registration, ct).ConfigureAwait(false);
+        foreach (var ownerId in linkedOwners)
+        {
+            await _eventPublisher.PublishAsync(
+                new MailboxBindingChangedEvent(ownerId, relayIdentityId, MailboxBindingChangeKind.Linked),
+                ct).ConfigureAwait(false);
+        }
 
         return DomainResult<RelayDirectoryEntry>.Success(new RelayDirectoryEntry(
             relayIdentityId,
@@ -170,6 +180,9 @@ public sealed class RelayDirectoryService : IRelayDirectory
         }
 
         await _relayRepository.SaveAsync(registration, ct).ConfigureAwait(false);
+        await _eventPublisher.PublishAsync(
+            new MailboxBindingChangedEvent(ownerIdentityId, relayIdentityId, MailboxBindingChangeKind.Linked),
+            ct).ConfigureAwait(false);
         return linkResult;
     }
 
@@ -192,6 +205,9 @@ public sealed class RelayDirectoryService : IRelayDirectory
         }
 
         await _relayRepository.SaveAsync(registration, ct).ConfigureAwait(false);
+        await _eventPublisher.PublishAsync(
+            new MailboxBindingChangedEvent(ownerIdentityId, relayIdentityId, MailboxBindingChangeKind.Unlinked),
+            ct).ConfigureAwait(false);
         return DomainResult.Success();
     }
 

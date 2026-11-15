@@ -110,7 +110,7 @@ internal sealed class RelayProvisioningCoordinator
                 }
             }
 
-            persona.HomeRelay = relay;
+            await persona.AssignHomeRelayAsync(relay, ct);
             await persona.PublishProfileAsync(ct);
 
             using (var scope = persona.Services.CreateScope())

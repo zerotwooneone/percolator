@@ -287,11 +287,10 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<PrivateRendezvousRelayEndpoint>();
 
         // Mailbox/group stream workers
-        services.AddSingleton<RelayMailboxStreamWorkerOptions>();
+        services.AddSingleton<DrainSchedulerOptions>();
+        services.AddSingleton<DrainScheduler>();
         services.AddSingleton<RelayGroupStreamWorkerOptions>();
-        services.AddHostedService(sp => new RelayMailboxStreamWorker(
-            sp.GetService<Func<CancellationToken, Task>>() ?? (async ct => await Task.Delay(Timeout.InfiniteTimeSpan, ct)),
-            sp.GetRequiredService<RelayMailboxStreamWorkerOptions>()));
+        services.AddHostedService<RelayMailboxDrainHost>();
         services.AddHostedService(sp => new RelayGroupStreamWorker(
             sp.GetService<Func<CancellationToken, Task>>() ?? (async ct => await Task.Delay(Timeout.InfiniteTimeSpan, ct)),
             sp.GetRequiredService<RelayGroupStreamWorkerOptions>()));

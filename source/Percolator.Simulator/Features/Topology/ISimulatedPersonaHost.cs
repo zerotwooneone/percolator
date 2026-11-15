@@ -29,7 +29,7 @@ internal interface ISimulatedPersonaHost : IAsyncDisposable
     BlindedRoutingToken MailboxRoutingToken { get; }
     DeliveryToken MailboxDeliveryToken { get; }
     DeliveryToken MailboxDrainToken { get; }
-    ISimulatedRelayHost? HomeRelay { get; set; }
+    ISimulatedRelayHost? HomeRelay { get; }
 
     ProfileKey ProfileKey { get; }
     uint ProfileRevision { get; }
@@ -49,6 +49,12 @@ internal interface ISimulatedPersonaHost : IAsyncDisposable
 
     ReadOnlyReactiveProperty<bool> IsListening { get; }
     Task SetListeningAsync(bool isListening, CancellationToken ct = default);
+
+    /// <summary>
+    /// Assigns <see cref="HomeRelay"/> and records the binding in the relay directory
+    /// (register-remote + link) so the drain scheduler sees it.
+    /// </summary>
+    Task AssignHomeRelayAsync(ISimulatedRelayHost relay, CancellationToken ct = default);
 
     PreKeyBundle CreatePreKeyBundle(uint? oneTimeKeyId = null);
     Task<DomainResult> FlushOutboxAsync(CancellationToken ct = default);
