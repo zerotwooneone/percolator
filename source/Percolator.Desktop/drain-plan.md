@@ -1,8 +1,12 @@
 # Mailbox Drain — Implementation Plan
 
+Spec: [implementation-plan-spec](../spec/implementation-plan.spec.md)
+
 Status legend: ✅ done · 🚧 in progress · ⬜ not started
 
 Verification convention: any ticket that modifies `Percolator.Simulator` must run the full scenario suite before being marked done — `dotnet run --framework net10.0-windows10.0.19041.0 -- --replay Scenarios` (from `Percolator.Simulator/`, or `--project` from `source/`; use `net10.0` on non-Windows). See `Percolator.Simulator/README.md`.
+
+Plan-wide QMS: `SYS-SEALED-SENDER-CAPABILITY-GATING`, `SYS-BLINDED-RELAY-ENVELOPES`, `INV-PAYLOAD-OPACITY`.
 
 ## Architecture
 
@@ -11,11 +15,17 @@ Verification convention: any ticket that modifies `Percolator.Simulator` must ru
 | Domain VO | `QueuedMailboxEnvelope(MailboxQueueId QueueId, MailboxEnvelope Envelope)` | `Percolator.Domain/Delivery/ValueObjects/` | — |
 | Domain VO | `MailboxQueueId` (opaque relay-assigned ack key), `SignedPreKeyId` | `Percolator.Domain/Delivery/ValueObjects/`, `…/Identities/ValueObjects/` | — |
 | Domain VO | `PendingIngressRecord(MailboxQueueId QueueId, QueuedMailboxEnvelope Queued, int Attempts, DomainError? LastError)` | `Percolator.Domain/Delivery/ValueObjects/` | — |
+| Domain VO | `RelayQueuedEnvelopeRecord(MailboxQueueId QueueId, ReadOnlyMemory<byte> EnvelopePayload, DateTimeOffset EnqueuedAtUtc)` | `Percolator.Domain/Delivery/ValueObjects/` | — |
 | Domain Port | `IPendingIngressStore` | `Percolator.Domain/Delivery/Ports/` | scoped |
+| Domain Port | `IRelayMailboxCapabilityStore` (relocated from Infra in DRAIN-09) | `Percolator.Domain/Delivery/Ports/` | scoped |
 | App Port | `IActiveIdentitySet` | `Percolator.Application/Session/` | session singleton |
 | App Events | `PersonaActivatedEvent`, `PersonaDeactivatedEvent`, `MailboxBindingChangedEvent` | `Percolator.Application/Session/Events/`, `…/Delivery/Events/` | — |
 | App Service | `ActiveIdentitySet` | `Percolator.Application/Session/` | session singleton |
 | App Port | `IRelayMailboxClient`, `IMailboxStreamSession` | `Percolator.Application/Delivery/Ports/` | — |
+| App Null | `NullRelayMailboxClient` | `Percolator.Application/Delivery/` | singleton |
+| App Record | `MailboxDrainTarget(PublicIdentityId OwnerIdentityId, PublicIdentityId RelayIdentityId, RelayEndpoint Endpoint)` | `Percolator.Application/Delivery/` | — |
+| App Record | `RelayPreKeyStatus(bool Found, uint OneTimePreKeyCount, SignedPreKeyId)` | `Percolator.Application/Delivery/Ports/` | — |
+| Domain Record | `StoredSignedPreKey(KeyId, PrivateKey, PublicKey, Signature, CreatedAtUtc)` | `Percolator.Domain/Identities/Ports/` | — |
 | App Port | `IRelayMailboxProvisioner` (Provision + Publish + `GetPreKeyStatusAsync`) | `Percolator.Application/Delivery/Ports/` | — |
 | App Service | `MailboxDrainService` | `Percolator.Application/Delivery/` | scoped |
 | App Service | `DrainScheduler`, `DrainSchedulerOptions` | `Percolator.Application/Delivery/` | session singleton |
@@ -23,6 +33,7 @@ Verification convention: any ticket that modifies `Percolator.Simulator` must ru
 | Adapter | `SqlitePendingIngressStore` | `Percolator.Infrastructure/Persistence/Repositories/` | scoped |
 | Adapter | `GrpcRelayMailboxClient` | `Percolator.Infrastructure/Transport/` | singleton |
 | Adapter | `GrpcRelayMailboxProvisioner` | `Percolator.Infrastructure/Transport/` | singleton |
+| Adapter Entity | `OpsPendingIngressEnvelopeEntity` | `Percolator.Infrastructure/Persistence/Entities/` | — |
 | Adapter | `RelayMailboxDrainHost : BackgroundService` | `Percolator.Infrastructure/Transport/Workers/` | hosted |
 | Seam | `WindowHandoffCoordinator.TransitionToMainShellAsync` | `Percolator.Desktop/Common/Windowing/` | — |
 
@@ -59,7 +70,7 @@ public interface IActiveIdentitySet
 - Register `AddSingleton<IActiveIdentitySet, ActiveIdentitySet>()` in `AddSessionCoreInfrastructure`.
 - `WindowHandoffCoordinator.TransitionToMainShellAsync`: before `await session.StartAsync(ct)` (currently L77), resolve `session.Services.GetRequiredService<IActiveIdentitySet>()` and call `Add(new PublicIdentityId(d.IdentityId))` for each `PersonaLaunchDescriptor`.
 
-**Shipped notes (as implemented):** Desktop seeding only — `SimulatedPersonaHost` seeding + `_isListening` bridge is deferred to DRAIN-06 (sim hosts compose `AddAuthenticatedInfrastructure`, so they inherit the scheduler once the set is populated).
+**Verified:** shipped — sim `IActiveIdentitySet` seeding + `_isListening` bridge was deferred and is now spec'd in DRAIN-06 (sim hosts compose `AddAuthenticatedInfrastructure`, so they inherit the scheduler once the set is populated).
 
 **QMS:** `INV-DESKTOP-TWO-STAGE-HANDOFF`, `DEP-DESKTOP-PERSONA-ISOLATION`, `INV-APP-EVENT-BUS-DECOUPLING`, `DEC-EXECUTABLE-SESSION-COMPOSITION`.
 
@@ -126,11 +137,7 @@ public interface IRelayMailboxProvisioner
 - Remove `DrainMailboxOnceAsync` and `StopMailboxStreamAsync` from `IRelayMailboxProvisioner` and `NullRelayMailboxProvisioner`.
 - `NullRelayMailboxClient.OpenMailboxStreamAsync` returns `DomainError("PROVISIONER_UNAVAILABLE", ...)`.
 
-**Shipped notes (as implemented):**
-- `DrainMailboxOnceAsync` was removed from the interface but remains on the concrete `GrpcRelayMailboxProvisioner` — `SimulatedPersonaHost.DrainMailboxAsync` bridges to it via a temporary `is GrpcRelayMailboxProvisioner` cast until DRAIN-09 migrates that path. `StopMailboxStreamAsync` was removed everywhere.
-- `GetPreKeyStatusAsync` on `GrpcRelayMailboxProvisioner` returns `RELAY_PREKEY_STATUS_UNAVAILABLE` until the DRAIN-10 status RPC exists.
-- `RelayPreKeyStatus` lives in `IRelayMailboxProvisioner.cs` alongside `MailboxTokenTriad`; post-review it gained `bool Found` (the `(0,0)` sentinel was ambiguous — a found bundle can legitimately have 0 OPKs) and uses the `SignedPreKeyId` VO.
-- `QueueId` semantics split: `QueuedMailboxEnvelope.QueueId`/`AcknowledgeAsync` take `MailboxQueueId` (opaque relay-assigned string key), not the Guid-backed `QueueId` aggregate id used by `RelayMailboxQueue`.
+**Verified:** shipped — `DrainMailboxOnceAsync` stays on concrete `GrpcRelayMailboxProvisioner` until DRAIN-09 (`SimulatedPersonaHost` bridges via `is GrpcRelayMailboxProvisioner`); `GetPreKeyStatusAsync` returns `RELAY_PREKEY_STATUS_UNAVAILABLE` until DRAIN-10 (publish-on-failure policy spec'd in DRAIN-07); `RelayPreKeyStatus` shipped with `Found` + `SignedPreKeyId` (the `(0,0)` sentinel was ambiguous) — DRAIN-10 reflects that shape; `QueuedMailboxEnvelope.QueueId`/`AcknowledgeAsync` take `MailboxQueueId`, not the Guid-backed `RelayMailboxQueue` aggregate id.
 
 **QMS:** `INV-PURE-DOMAIN-PORTS`, `INV-ADAPTER-HYDRATION-BOUNDARY`, `DEP-INFRA-MAILBOX-RETRIEVAL`.
 
@@ -145,24 +152,20 @@ public interface IRelayMailboxProvisioner
 
 **`GrpcRelayMailboxClient(IPeerGrpcChannelFactory channelFactory, IDateTimeProvider timeProvider)` (singleton):**
 1. Open `AuthenticatedRelayServiceClient.ConnectMailboxStream(cancellationToken: ct)`.
-2. Read `AuthChallengeProto` from `ResponseStream` (16-byte `nonce`).
+2. Read `AuthChallengeProto` from `ResponseStream` (32-byte `nonce`).
 3. Compute `HMACSHA256.HashData(tokens.DrainToken.Span, challenge.Nonce.Span)`; write `MailboxStreamClientMessage { AuthResponse = new AuthResponseProto { RoutingToken = ByteString.CopyFrom(tokens.RoutingToken.ToByteArray()), ChallengeHmac = ByteString.CopyFrom(hmac) } }`.
 4. Read `AuthResultProto`; if `!Authenticated`, dispose call and return `DomainError("RELAY_AUTH_FAILED", ErrorMessage)`.
 5. Return `GrpcMailboxStreamSession` owning the `AsyncDuplexStreamingCall`, a `Channel.CreateBounded<QueuedMailboxEnvelope>(new BoundedChannelOptions(256) { SingleWriter = true, SingleReader = true, FullMode = BoundedChannelFullMode.Wait })`, a pump `Task`, and a `SemaphoreSlim(1, 1)` write gate.
-6. Pump loop: for each `MailboxStreamServerMessage` with `PayloadCase == Envelope`, parse `SealedEnvelopeProto.Parser.ParseFrom(msg.Envelope.EnvelopePayload.Span)`; construct `MailboxEnvelope(EnvelopeId.New(), tokens.RoutingToken, sealedProto.EncryptedPackage.ToByteArray(), msg.Envelope.EnqueuedAtUtc.ToDateTimeOffset(), ClampExpiry(sealedProto.ExpiresAtUtc, now))` wrapped in `QueuedMailboxEnvelope(msg.Envelope.QueueId, mailboxEnvelope)`; write to bounded channel.
-7. `AcknowledgeAsync(string queueId, CancellationToken ct)`: acquire write gate, call `RequestStream.WriteAsync(new MailboxStreamClientMessage { Ack = new MailboxAckProto { QueueId = queueId, Acknowledged = true } }, ct)`. Translate `RpcException` → `DomainError("STREAM_ACK_FAILED", ex.Status.Detail)`.
-8. `DisposeAsync`: call `RequestStream.CompleteAsync()` (best-effort), cancel pump CTS, await pump completion, drain remaining items from channel and call `CryptographicOperations.ZeroMemory(MemoryMarshal.AsBytes(item.Envelope.Ciphertext.Span))` on backing arrays, dispose duplex call.
+6. Pump loop: for each `MailboxStreamServerMessage` with `PayloadCase == Envelope`, parse `SealedEnvelopeProto.Parser.ParseFrom(msg.Envelope.EnvelopePayload.Span)`; parse `MailboxQueueId.Create(msg.Envelope.QueueId)` — drop envelopes whose id fails to parse (un-ackable); construct `MailboxEnvelope(EnvelopeId.New(), tokens.RoutingToken, sealedProto.EncryptedPackage.ToByteArray(), msg.Envelope.EnqueuedAtUtc.ToDateTimeOffset(), ClampExpiry(sealedProto.ExpiresAtUtc, now))` wrapped in `QueuedMailboxEnvelope(queueId, mailboxEnvelope)`; write to bounded channel.
+7. `AcknowledgeAsync(MailboxQueueId queueId, CancellationToken ct)`: acquire write gate, call `RequestStream.WriteAsync(new MailboxStreamClientMessage { Ack = new MailboxAckProto { QueueId = queueId.Value, Acknowledged = true } }, ct)`. Translate `RpcException` → `DomainError("STREAM_ACK_FAILED", ex.Status.Detail)`.
+8. `DisposeAsync`: call `RequestStream.CompleteAsync()` (best-effort), cancel pump CTS, await pump completion, drain remaining items from channel and call `CryptographicOperations.ZeroMemory(MemoryMarshal.AsMemory(item.Envelope.Ciphertext).Span)` on backing arrays, dispose duplex call.
 
 **`GrpcRelayMailboxProvisioner` changes:**
 - `StopMailboxStreamAsync` was already removed in DRAIN-02 — nothing to do here.
 - `DrainMailboxOnceAsync` stays on the concrete class (simulator bridge until DRAIN-09), so the `IServiceScopeFactory` and `IDateTimeProvider` ctor parameters must remain; they are removed in DRAIN-09 instead.
 - Register `AddSingleton<IRelayMailboxClient, GrpcRelayMailboxClient>()` in `AddTransportInfrastructure`.
 
-**Shipped notes (as implemented):**
-- `AuthResultProto` carries `reason` (not `error_message`); `RELAY_AUTH_FAILED` reports it.
-- `GrpcMailboxStreamSession` is a private nested class inside `GrpcRelayMailboxClient.cs`; zeroization uses `MemoryMarshal.AsMemory(item.Envelope.Ciphertext)` since `MailboxEnvelope.Ciphertext` is `ReadOnlyMemory<byte>` (the plan's `AsBytes` sketch doesn't compile against it). `SealedEnvelopeProto.ExpiresAtUtc` is clamped to `now + 7 days` (`EnvelopeExpiryWindow`).
-- `StopMailboxStreamAsync`/`DrainMailboxOnceAsync` disposition unchanged: `DrainMailboxOnceAsync` still lives on the concrete `GrpcRelayMailboxProvisioner` until DRAIN-09.
-- Server nonce is 32 bytes (step 2's "16-byte" was stale); the pump parses each wire `queue_id` via `MailboxQueueId.Create` and drops envelopes whose id it could never ack.
+**Verified:** shipped — steps corrected in place for nonce size, `queue_id` parse-drop, and `AsMemory` zeroization. `AuthResultProto.reason` feeds `RELAY_AUTH_FAILED`; `GrpcMailboxStreamSession` is a private nested class; expiry clamped to `now + EnvelopeExpiryWindow` (7d). `DrainMailboxOnceAsync` stays on the concrete provisioner until DRAIN-09. Test backfill landed in DRAIN-04 (`GrpcRelayMailboxClientTests`).
 
 **QMS:** `DEP-INFRA-NATIVE-FAULT-TRANSLATION`, `DEP-INFRA-VOLATILE-ZEROIZATION`, `DEP-INFRA-MAILBOX-RETRIEVAL`.
 
@@ -209,6 +212,7 @@ public interface ISealedEnvelopeUnwrapper
 - Create `Percolator.Infrastructure/Persistence/Repositories/SqlitePendingIngressStore.cs`
 - Modify `Percolator.Infrastructure/Persistence/Entities/OpsEntities.cs` (replace unused `OpsInboundQueueEntity` with `OpsPendingIngressEnvelopeEntity`)
 - Modify `Percolator.Infrastructure/Persistence/PercolatorDbContext.cs`
+- Create `Percolator.Application/Delivery/MailboxDrainTarget.cs`
 - Create `Percolator.Application/Delivery/MailboxDrainService.cs`
 - Modify `Percolator.Infrastructure/DependencyInjection/InfrastructureServiceCollectionExtensions.cs`
 - Create `Percolator.Application.Tests/Delivery/MailboxDrainServiceTests.cs`
@@ -239,6 +243,11 @@ public sealed class OpsPendingIngressEnvelopeEntity
 **Port & service contracts:**
 
 ```csharp
+public sealed record MailboxDrainTarget(
+    PublicIdentityId OwnerIdentityId,
+    PublicIdentityId RelayIdentityId,
+    RelayEndpoint Endpoint);
+
 public sealed record PendingIngressRecord(
     MailboxQueueId QueueId,
     QueuedMailboxEnvelope Queued,
@@ -285,6 +294,8 @@ public sealed class MailboxDrainService
    - Exception (excluding `OperationCanceledException` when `ct.IsCancellationRequested`): call `RecordTransientFailureAsync`; if `attempts + 1 >= MaxAttempts`, `DeleteAsync` and log error.
 5. `SqlitePendingIngressStore.DeleteAsync` overwrites `Ciphertext` with zeros before row removal (`CryptographicOperations.ZeroMemory`).
 
+**Verify:** `MailboxDrainServiceTests` (persist-before-ack ordering, no-ack on persist failure, terminal `DomainError` → delete, transient retry to `MaxAttempts = 5`, expiry drop, self-echo delete, OPK-consumed trigger) + `SqlitePendingIngressStoreTests` (`(OwnerIdentityId, QueueId)` upsert dedup, `SequenceNumber` ordering, `Ciphertext` zeroization on delete, attempt increment).
+
 **QMS:** `SYS-RESULT-DRIVEN-INGRESS`, `DEC-RESULT-ORIENTED-HOTPATH`, `INV-CHANNEL-SERIALIZATION-GATE`, `SYS-ATOMIC-STATE-PERSISTENCE`, `SYS-ASYNC-STORE-AND-FORWARD`, `DEP-INFRA-MAILBOX-RETRIEVAL`, `DEC-PENDING-INGRESS-SPOOL`, `INV-PLAINTEXT-ZEROIZATION`, `DEP-INFRA-VOLATILE-ZEROIZATION`, `HAZ-CRASH-STATE-DESYNC`.
 
 ---
@@ -292,8 +303,8 @@ public sealed class MailboxDrainService
 ### DRAIN-06 ⬜ — `DrainScheduler` & `RelayMailboxDrainHost`
 
 **Files:**
-- Create `Percolator.Application/Delivery/MailboxDrainTarget.cs`
 - Create `Percolator.Application/Delivery/DrainSchedulerOptions.cs`
+- Create `Percolator.Application/Delivery/Events/MailboxBindingChangedEvent.cs` (moved forward from DRAIN-11 — the scheduler subscribes to it)
 - Create `Percolator.Application/Delivery/DrainScheduler.cs`
 - Create `Percolator.Infrastructure/Transport/Workers/RelayMailboxDrainHost.cs`
 - Delete `Percolator.Infrastructure/Transport/Workers/RelayMailboxStreamWorker.cs`
@@ -306,11 +317,6 @@ public sealed class MailboxDrainService
 **Contracts:**
 
 ```csharp
-public sealed record MailboxDrainTarget(
-    PublicIdentityId OwnerIdentityId,
-    PublicIdentityId RelayIdentityId,
-    RelayEndpoint Endpoint);
-
 public sealed record DrainSchedulerOptions
 {
     public int MaxConcurrentSessions { get; init; } = 64;
@@ -320,6 +326,14 @@ public sealed record DrainSchedulerOptions
     public TimeSpan MaxBackoff { get; init; } = TimeSpan.FromSeconds(60);
     public double BackoffMultiplier { get; init; } = 2.0;
 }
+
+public enum MailboxBindingChangeKind { Linked, Unlinked }
+
+public sealed record MailboxBindingChangedEvent(
+    PublicIdentityId OwnerIdentityId,
+    PublicIdentityId RelayIdentityId,
+    MailboxBindingChangeKind Kind) : IApplicationEvent;
+// MailboxDrainTarget defined in DRAIN-05.
 ```
 
 **`DrainScheduler` mechanics:**
@@ -331,7 +345,7 @@ public sealed record DrainSchedulerOptions
   3. For each added target: enqueue into FIFO due-queue with `dueAt = now`.
 - Admission loop: while `activeSessions.Count < MaxConcurrentSessions` and the earliest due target has `dueAt <= now`, dequeue and start `SuperviseTargetAsync(target, targetCts.Token)`.
 - `SuperviseTargetAsync`:
-  1. On first activation of `target` in this session, run ensure-provisioned (DRAIN-07) and trigger `PreKeyMaintenanceService.EvaluateAsync(target, forced: false)` (DRAIN-10).
+  1. Track first activation per target per session (`HashSet<MailboxDrainTarget>`) — this is the hook point where DRAIN-07 adds ensure-provisioned and DRAIN-10 adds `PreKeyMaintenanceService.EvaluateAsync(target, forced: false)`; neither exists yet, so DRAIN-06 only records activation.
   2. Create scope → resolve `IRelayDirectory`, `IRelayMailboxClient`, `MailboxDrainService`.
   3. Run `await drainService.ReplayPendingAsync(target, ct)`.
   4. Resolve fresh `MailboxTokenTriad` via `relayDirectory.GetMailboxTokensAsync(target.OwnerIdentityId, target.RelayIdentityId, ct)` (never cached across reconnects).
@@ -342,14 +356,14 @@ public sealed record DrainSchedulerOptions
 - `RelayMailboxDrainHost : BackgroundService`: `ExecuteAsync(CancellationToken stoppingToken) => _scheduler.RunAsync(stoppingToken);`.
 - Remove `RelayMailboxStreamWorker` and its optional `Func<CancellationToken, Task>` fallback registration. Update `DependencyInjectionTests` expected hosted-service type list (`typeof(RelayMailboxStreamWorker)` → `typeof(RelayMailboxDrainHost)`).
 
-**Simulator wiring (Option A — sim runs the same scheduler as Desktop):**
+**Simulator wiring** (decision: sim runs the same scheduler as Desktop — rejected pull-only sim drain, which would leave the scheduler uncovered by scenarios):
 - `SimulatedPersonaHost.StartAsync`: resolve `IActiveIdentitySet` from `_host.Services` and `Add(PublicIdentityId)` before `await _host.StartAsync(ct)` (mirrors `TransitionToMainShellAsync` ordering — set populated before hosted services run).
 - When `HomeRelay` is assigned (and once at start if already set): ensure a `RelayRegistration` exists via `IRelayDirectory.RegisterRemoteRelayAsync(HomeRelay.RelayIdentityId, RelayEndpoint.FromHostAndPort("127.0.0.1", HomeRelay.BoundPort))` (skip if `GetByIdAsync` already returns one), then `LinkIdentityAsync(HomeRelay.RelayIdentityId, PublicIdentityId, MailboxRoutingToken, MailboxDrainToken)` — passing the sim's own tokens keeps `GetMailboxTokensAsync` aligned with what `ProvisionMailboxAsync` registered relay-side.
 - Subscribe `_isListening` changes → `IActiveIdentitySet.Add`/`Remove(PublicIdentityId)`: paused personas go offline (scheduler cancels the stream, relay retains mail, pending-ingress spool replays on resume).
 - `DrainMailboxAsync` remains the pull-now API for coordinators — it coexists with the scheduler; both write through the same pending-ingress spool, which dedupes by `(OwnerIdentityId, QueueId)`.
 - Preserve the `services.AddScoped(typeof(PublicIdentityId?), _ => PublicIdentityId)` registration (added in DRAIN-04 — the Type-based overload is required since `AddScoped<TService>` is `class`-constrained): it feeds `UnauthenticatedDeliveryEndpoint.localRecipientId`, and without it `DeliverDirect` silently skips unwrap→ingress on persona hosts.
 
-**Verify:** unit tests + full scenario suite (`--replay Scenarios`) — sim wiring changes.
+**Verify:** `DrainSchedulerTests` (event + timer reconcile diff, FIFO admission at `MaxConcurrentSessions`, graceful `MaxSessionAge` rotation mid-envelope, per-target exponential backoff isolation, persona-deactivation teardown) + `DependencyInjectionTests` (hosted-service swap) + full scenario suite (`--replay Scenarios`) — sim wiring changes.
 
 **QMS:** `SYS-PRE-ACTIVATION-STEALTH`, `DEP-DESKTOP-PRE-ACTIVATION-STEALTH`, `INV-DESKTOP-STEALTH-ACTIVATION-GATE`, `SYS-ASYNC-STORE-AND-FORWARD`, `DEP-INFRA-CONCURRENCY-MODEL`, `SYS-BOUNDED-RELAY-QUOTAS`, `HAZ-INGRESS-RESOURCE-EXHAUSTION`, `SYS-LOCK-TEARDOWN-AND-ZEROIZATION`, `DEP-DESKTOP-SESSION-LOCK-ZEROIZATION`, `HAZ-POST-LOCK-MEMORY-RESIDUE`.
 
@@ -363,6 +377,8 @@ public sealed record DrainSchedulerOptions
 
 - Change default `oneTimePreKeyCount` in `RelayDirectoryService.ProvisionLinkedMailboxesAsync` and `IRelayMailboxProvisioner.PublishPreKeyBundleAsync` from `25` to `100` (matches `RelayHostedPreKeyBundle.MaxOneTimePreKeyCapacity = 100` and Signal's batch size).
 - In `DrainScheduler.SuperviseTargetAsync` step 1: on the first connect for a `MailboxDrainTarget` within the session, call `ProvisionMailboxAsync`; if the target has no relay-side bundle yet (`GetPreKeyStatusAsync` returns `Found == false`), call `PublishPreKeyBundleAsync(..., newOneTimePreKeyCount: 100)`. Until DRAIN-10 adds the status RPC, `GetPreKeyStatusAsync` fails with `RELAY_PREKEY_STATUS_UNAVAILABLE` — treat a failure as unknown bundle state and publish anyway (publication merges OPKs idempotently). This guarantees `VaultUnlockViewModel.TryAutoStartLaunchAsync` (which bypasses `IdentityGateViewModel.LaunchPersonasAsync`) provisions and publishes identically to the gate path.
+
+**Verify:** `DrainSchedulerTests` — first-connect ensure-provisioned publishes when `Found == false` and when `GetPreKeyStatusAsync` fails, skips when `Found`.
 
 **QMS:** `SYS-ASYNC-SESSION-INIT`, `HAZ-PREKEY-POOL-STARVATION`.
 
@@ -378,6 +394,8 @@ public sealed record DrainSchedulerOptions
 2. Fix data race on `initialQueueIds`: populate the `HashSet<string>` completely from `queuedEnvelopes` *before* starting `liveReadTask` (keeping the subscription registered before `GetEnvelopesAsync` so no live enqueue is missed, while `initialQueueIds` is immutable by the time `liveReadTask` reads it).
 3. In the ACK loop (L199): only invoke `AcknowledgeEnvelopeAsync` when `msg.Ack.Acknowledged && !string.IsNullOrEmpty(msg.Ack.QueueId)`.
 
+**Verify:** `AuthenticatedRelayEndpointTests` — bounded live-channel backpressure, concurrent enqueue during initial replay delivered once, `Acknowledged = false` / empty `queue_id` ignored.
+
 **QMS:** `DEC-BOUNDED-CHANNEL-EVENT-BUS`, `HAZ-INGRESS-RESOURCE-EXHAUSTION`.
 
 ---
@@ -391,7 +409,7 @@ public sealed record DrainSchedulerOptions
 - Move `Percolator.Infrastructure/Transport/IRelayMailboxCapabilityStore.cs` → `Percolator.Domain/Delivery/Ports/IRelayMailboxCapabilityStore.cs` — it is consumed by `ExchangeDirectoryService`/`SimulatedPersonaHost` and is a Domain port, not an infra detail. De-proto its contract at the same time: `EnqueueEnvelopeAsync`/`GetEnvelopesAsync`/`DrainEnvelopesAsync`/`SubscribeMailbox` replace `QueuedSealedEnvelopeProto` with a new `RelayQueuedEnvelopeRecord(MailboxQueueId QueueId, ReadOnlyMemory<byte> EnvelopePayload, DateTimeOffset EnqueuedAtUtc)` VO; token params become `BlindedRoutingToken`/`DeliveryToken`; `string queueId` becomes `MailboxQueueId`; `DrainEnvelopesAsync` → `PurgeMailboxAsync(BlindedRoutingToken routingToken, CancellationToken ct = default)` returning `ValueTask<int>`. `SqliteRelayMailboxCapabilityStore` and `AuthenticatedRelayEndpoint` map proto↔VO at the gRPC boundary.
 - Modify `Percolator.Infrastructure/Persistence/Repositories/SqliteRelayMailboxCapabilityStore.cs` (`PurgeMailboxAsync` uses `ExecuteDeleteAsync` directly without materializing payloads)
 - Modify `Percolator.Desktop/Common/Services/ExchangeDirectoryService.cs` (`UnlinkPersonaAsync` L195: call `_capabilities.PurgeMailboxAsync`)
-- Modify `Percolator.Simulator/Features/Topology/SimulatedPersonaHost.cs` (`DrainMailboxAsync`: open stream via `IRelayMailboxClient`, read available envelopes with short idle timeout, run `MailboxDrainService.ReceiveAsync` per envelope, dispose session; removes the DRAIN-02 temporary `is GrpcRelayMailboxProvisioner` bridge). Pull-now path stays for coordinators alongside the DRAIN-06 scheduler — deduped by the pending-ingress spool. Preserve the `PublicIdentityId?` scoped registration — `UnauthenticatedDeliveryEndpoint.localRecipientId` resolves from it and `DeliverDirect` silently skips ingress without it.
+- Modify `Percolator.Simulator/Features/Topology/SimulatedPersonaHost.cs` (`DrainMailboxAsync`: open stream via `IRelayMailboxClient`, read available envelopes with short idle timeout, run `MailboxDrainService.ReceiveAsync` per envelope, dispose session; removes the DRAIN-02 temporary `is GrpcRelayMailboxProvisioner` bridge). Pull-now path stays for coordinators alongside the DRAIN-06 scheduler — deduped by the pending-ingress spool. Preserve the `PublicIdentityId?` scoped registration (constraint spec'd in DRAIN-06).
 - Modify `Percolator.Infrastructure.Tests/Fakes/FakeRelayMailboxCapabilityStore.cs`, `Percolator.Infrastructure.Windows.Tests/Fakes/FakeRelayMailboxCapabilityStore.cs`, `Percolator.Infrastructure.Tests/Persistence/SqliteRelayMailboxCapabilityStoreTests.cs`, `Percolator.Infrastructure.Tests/Transport/Endpoints/AuthenticatedRelayEndpointTests.cs`, `Percolator.Infrastructure.Tests/Protos/CoreProtoCompilationTests.cs`
 
 - Note: `RelayMailboxQueue` (in-memory domain aggregate) and `TestIdentityNode.DrainMailboxAsync` remain unchanged — they back in-memory `Percolator.ApplicationIntegrationTests` and do not touch gRPC or SQLite.
@@ -443,7 +461,7 @@ rpc GetPreKeyStatus(GetPreKeyStatusRequest) returns (GetPreKeyStatusResponse);
 - `VaultSignedPreKeyEntity`: change PK from `(OwnerIdentityId, DeviceId)` to `(OwnerIdentityId, DeviceId, KeyId)`; add `uint KeyId { get; set; } = 1;`, `bool IsCurrent { get; set; } = true;`.
 - `RelayPreKeyEntity`: add `uint SignedPreKeyId { get; set; } = 1;`.
 - `RelayHostedPreKeyBundle`: add `SignedPreKeyId SignedPreKeyId { get; private set; }` (passed to `Create`, `Rehydrate`, and `UpdateSignedPreKey(SignedPreKeyId signedPreKeyId, ...)`).
-- `PreKeyBundle`: add `SignedPreKeyId SignedPreKeyId` parameter (default `SignedPreKeyId.First`); `UnauthenticatedDeliveryEndpoint.FetchPreKeyBundle` sets `SignedPrekeyId = consumed.SignedPreKeyId` (replaces hardcoded `1`); `PreKeyBundleProviderAdapter` maps `response.SignedPrekeyId`; `HandshakeService.InitiateHandshakeAsync` L149 uses `remoteBundle.SignedPreKeyId` (replaces hardcoded `1`); `HandshakeService.ProcessActiveInvitationAsync` L267 resolves the private key by `envelope.SignedPreKeyId`.
+- `PreKeyBundle`: add `SignedPreKeyId SignedPreKeyId` parameter (default `SignedPreKeyId.First` — key id 1; add the `First` static to the DRAIN-02 VO if absent); `UnauthenticatedDeliveryEndpoint.FetchPreKeyBundle` sets `SignedPrekeyId = consumed.SignedPreKeyId` (replaces hardcoded `1`); `PreKeyBundleProviderAdapter` maps `response.SignedPrekeyId`; `HandshakeService.InitiateHandshakeAsync` L149 uses `remoteBundle.SignedPreKeyId` (replaces hardcoded `1`); `HandshakeService.ProcessActiveInvitationAsync` L267 resolves the private key by `envelope.SignedPreKeyId`.
 - `IPrivatePreKeyStore`:
 
 ```csharp
@@ -483,70 +501,21 @@ public interface IPrivatePreKeyStore
   4. If `!status.Found` or `status.OneTimePreKeyCount <= LowWatermark` or `status.SignedPreKeyId != currentSpk.KeyId`: compute `toGenerate = status.OneTimePreKeyCount <= LowWatermark ? (int)(TargetPoolSize - status.OneTimePreKeyCount) : 0`; call `_provisioner.PublishPreKeyBundleAsync(owner, DeviceId.Primary, target.Endpoint, tokens, toGenerate, ct)`.
   5. Record `lastChecked[target] = now`.
 
+**Verify:** `PreKeyMaintenanceServiceTests` (12h throttle vs forced evaluation, top-up `<= 35` → `100`, 48h SPK rotation + 7d/min-3 prune, SPK-mismatch republish) + `AuthenticatedRelayEndpointTests` (`GetPreKeyStatus` auth & counts) + updated `IPrivatePreKeyStore` test doubles compile.
+
 **QMS:** `HAZ-PREKEY-POOL-STARVATION`, `SYS-ATOMIC-STATE-PERSISTENCE`, `DEP-INFRA-VOLATILE-ZEROIZATION`.
 
 ---
 
-### DRAIN-11 ⬜ — `MailboxBindingChangedEvent` on link/unlink
+### DRAIN-11 ⬜ — `MailboxBindingChangedEvent` publish on link/unlink
 
 **Files:**
-- Create `Percolator.Application/Delivery/Events/MailboxBindingChangedEvent.cs`
 - Modify `Percolator.Application/Delivery/RelayDirectoryService.cs`
 - Modify `Percolator.Application.Tests/Delivery/RelayDirectoryServiceTests.cs`
 
-```csharp
-public enum MailboxBindingChangeKind { Linked, Unlinked }
+- Inject a required `IEventPublisher eventPublisher` into `RelayDirectoryService` (no optional default — a missing registration must fail fast at composition rather than silently drop the reconcile triggers DRAIN-06 depends on); publish `MailboxBindingChangedEvent` (type + `MailboxBindingChangeKind` defined in DRAIN-06) after `_relayRepository.SaveAsync` in `LinkIdentityAsync`, `UnlinkIdentityAsync`, and `CreateLocalRelayHostAsync` (for each initial linked owner).
 
-public sealed record MailboxBindingChangedEvent(
-    PublicIdentityId OwnerIdentityId,
-    PublicIdentityId RelayIdentityId,
-    MailboxBindingChangeKind Kind) : IApplicationEvent;
-```
-
-- Inject a required `IEventPublisher eventPublisher` into `RelayDirectoryService` (no optional default — a missing registration must fail fast at composition rather than silently drop the reconcile triggers DRAIN-06 depends on); publish after `_relayRepository.SaveAsync` in `LinkIdentityAsync`, `UnlinkIdentityAsync`, and `CreateLocalRelayHostAsync` (for each initial linked owner).
+**Verify:** `RelayDirectoryServiceTests` — event published with correct `Kind` on `LinkIdentityAsync`, `UnlinkIdentityAsync`, and per initial owner in `CreateLocalRelayHostAsync`.
 
 **QMS:** `INV-APP-EVENT-BUS-DECOUPLING`.
-
----
-
-## Execution Order
-
-1. **DRAIN-01** — Registry, events, handoff seam ordering.
-2. **DRAIN-02, DRAIN-03, DRAIN-04** — Port split, `GrpcRelayMailboxClient`, recipient-parameterized unwrapper.
-3. **DRAIN-05, DRAIN-06, DRAIN-07** — `IPendingIngressStore` + `MailboxDrainService`, `DrainScheduler` + `RelayMailboxDrainHost`, first-connect provisioning.
-4. **DRAIN-08** — Server-side stream bounded channel, `initialQueueIds` race fix, ACK guard.
-5. **DRAIN-09** — Delete unary `DrainMailbox` RPC, rename `DrainEnvelopesAsync` → `PurgeMailboxAsync`, migrate `SimulatedPersonaHost` and `ExchangeDirectoryService`.
-6. **DRAIN-10, DRAIN-11** — `GetPreKeyStatus` RPC, `SignedPreKeyId` end-to-end wiring + multi-SPK retention, `PreKeyMaintenanceService`, `MailboxBindingChangedEvent`.
-
----
-
-## Verification
-
-| Suite / Target | Coverage |
-|---|---|
-| `ActiveIdentitySetTests` | Idempotent `Add`/`Remove`, mutate-before-publish snapshot ordering. |
-| `GrpcRelayMailboxClientTests` | Challenge/HMAC auth, `RELAY_AUTH_FAILED` mapping, bounded channel ordering, serialized `AcknowledgeAsync`, buffer zeroization on `DisposeAsync`. |
-| `SqlitePendingIngressStoreTests` | `(OwnerIdentityId, QueueId)` upsert deduplication, `SequenceNumber` ordering, `Ciphertext` zeroization on delete, attempt increment. |
-| `MailboxDrainServiceTests` | Persist-before-ack ordering, no-ack on persist failure, terminal `DomainError` deletion, transient exception retry up to `MaxAttempts = 5`, expiry drop, self-echo deletion, OPK-consumed maintenance trigger. |
-| `DrainSchedulerTests` | Event + timer reconciliation diff, FIFO admission at `MaxConcurrentSessions`, graceful `MaxSessionAge` rotation after in-flight envelope, per-target exponential backoff isolation, persona deactivation teardown. |
-| `PreKeyMaintenanceServiceTests` | 12h throttle vs forced evaluation, top-up math at `<= 35` to `100`, 48h SPK rotation + 7d/min-3 pruning, SPK mismatch republish. |
-| `AuthenticatedRelayEndpointTests` | Bounded live channel backpressure, concurrent enqueue during initial replay delivered once, `GetPreKeyStatus` auth & counts, `Acknowledged = false` ignored. |
-| `DependencyInjectionTests` | Stage-2 container builds with `ValidateScopes` + `ValidateOnBuild`; `RelayMailboxDrainHost` registered; no `RelayMailboxStreamWorker` or `Func<CancellationToken, Task>` fallback. |
-
----
-
-## QMS Traceability
-
-| Ticket | Realized Requirements / Invariants / Controlled Hazards |
-|---|---|
-| DRAIN-01 | `INV-DESKTOP-TWO-STAGE-HANDOFF`, `DEP-DESKTOP-PERSONA-ISOLATION`, `INV-APP-EVENT-BUS-DECOUPLING`, `DEC-EXECUTABLE-SESSION-COMPOSITION` |
-| DRAIN-02, DRAIN-03 | `INV-PURE-DOMAIN-PORTS`, `INV-ADAPTER-HYDRATION-BOUNDARY`, `DEP-INFRA-NATIVE-FAULT-TRANSLATION`, `DEP-INFRA-VOLATILE-ZEROIZATION`, `DEP-INFRA-MAILBOX-RETRIEVAL` |
-| DRAIN-04 | `INV-ADAPTER-HYDRATION-BOUNDARY`, `DEP-DESKTOP-PERSONA-ISOLATION` |
-| DRAIN-05 | `SYS-RESULT-DRIVEN-INGRESS`, `DEC-RESULT-ORIENTED-HOTPATH`, `INV-CHANNEL-SERIALIZATION-GATE`, `SYS-ATOMIC-STATE-PERSISTENCE`, `SYS-ASYNC-STORE-AND-FORWARD`, `DEP-INFRA-MAILBOX-RETRIEVAL`, `DEC-PENDING-INGRESS-SPOOL`, `INV-PLAINTEXT-ZEROIZATION`, `DEP-INFRA-VOLATILE-ZEROIZATION`, `HAZ-CRASH-STATE-DESYNC` |
-| DRAIN-06 | `SYS-PRE-ACTIVATION-STEALTH`, `DEP-DESKTOP-PRE-ACTIVATION-STEALTH`, `INV-DESKTOP-STEALTH-ACTIVATION-GATE`, `SYS-ASYNC-STORE-AND-FORWARD`, `DEP-INFRA-CONCURRENCY-MODEL`, `SYS-BOUNDED-RELAY-QUOTAS`, `HAZ-INGRESS-RESOURCE-EXHAUSTION`, `SYS-LOCK-TEARDOWN-AND-ZEROIZATION`, `DEP-DESKTOP-SESSION-LOCK-ZEROIZATION`, `HAZ-POST-LOCK-MEMORY-RESIDUE` |
-| DRAIN-07, DRAIN-10 | `SYS-ASYNC-SESSION-INIT`, `HAZ-PREKEY-POOL-STARVATION`, `SYS-ATOMIC-STATE-PERSISTENCE`, `DEP-INFRA-VOLATILE-ZEROIZATION` |
-| DRAIN-08 | `DEC-BOUNDED-CHANNEL-EVENT-BUS`, `HAZ-INGRESS-RESOURCE-EXHAUSTION` |
-| DRAIN-09 | `HAZ-CRASH-STATE-DESYNC`, `DEC-PENDING-INGRESS-SPOOL` |
-| DRAIN-11 | `INV-APP-EVENT-BUS-DECOUPLING` |
-| All | `SYS-SEALED-SENDER-CAPABILITY-GATING`, `SYS-BLINDED-RELAY-ENVELOPES`, `INV-PAYLOAD-OPACITY` |
 

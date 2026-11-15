@@ -87,7 +87,7 @@ Before a ticket is committed to the plan (and during any plan revision), sweep f
 An implementing plan **MUST** use this skeleton. Section explanations are not repeated inside the plan.
 
 ### `# <Feature> — Implementation Plan`
-One-line status legend (`✅ done · 🚧 in progress · ⬜ not started`) followed by any plan-wide verification conventions (e.g., the simulator rule in §7.2).
+`Spec: [implementation-plan-spec](<relative-path>/spec/implementation-plan.spec.md)` on the line directly under the title — the same back-link every spec-governed document in this repo carries. Then the one-line status legend (`✅ done · 🚧 in progress · ⬜ not started`) followed by any plan-wide verification conventions (e.g., the simulator rule in §7.2).
 
 ### `## Architecture`
 An inventory table of every type the plan introduces or relocates — `Layer | Type | Location | Lifetime` — so readers get the target shape before reading tickets.
