@@ -32,7 +32,9 @@ public sealed class InMemoryPrivatePreKeyStore : IPrivatePreKeyStore
         }
 
         _signedPreKeys.TryGetValue(SpkKey(ownerId, deviceId, keyId), out var stored);
-        return Task.FromResult(stored?.PrivateKey);
+        // Shared generation — return an owned clone; callers Dispose() after use
+        // and must not zeroize the retained generation.
+        return Task.FromResult(stored == null ? null : EphemeralPrivateKey.FromSpan(stored.PrivateKey.Span));
     }
 
     public Task<EphemeralPrivateKey?> TryConsumeOneTimePreKeyPrivateAsync(
@@ -56,7 +58,10 @@ public sealed class InMemoryPrivatePreKeyStore : IPrivatePreKeyStore
         {
             _signedPreKeys.TryGetValue(SpkKey(ownerId, deviceId, keyId), out stored);
         }
-        return Task.FromResult(stored);
+        return Task.FromResult(stored == null ? null : stored with
+        {
+            PrivateKey = EphemeralPrivateKey.FromSpan(stored.PrivateKey.Span)
+        });
     }
 
     public Task<SignedPreKeyId> StoreSignedPreKeyAsync(
@@ -76,7 +81,7 @@ public sealed class InMemoryPrivatePreKeyStore : IPrivatePreKeyStore
             .Max() + 1u;
 
         _signedPreKeys[SpkKey(ownerId, deviceId, nextKeyId)] =
-            new StoredSignedPreKey(new SignedPreKeyId(nextKeyId), privateKey, publicKey, signature, DateTimeOffset.UtcNow);
+            new StoredSignedPreKey(new SignedPreKeyId(nextKeyId), EphemeralPrivateKey.FromSpan(privateKey.Span), publicKey, signature, DateTimeOffset.UtcNow);
         _currentSignedPreKeyIds[ownerKey] = nextKeyId;
         return Task.FromResult(new SignedPreKeyId(nextKeyId));
     }
@@ -133,7 +138,12 @@ public sealed class InMemoryPrivatePreKeyStore : IPrivatePreKeyStore
         foreach (var material in keys)
         {
             var dictKey = $"{ownerId}:{deviceId}:{material.KeyId}";
-            _oneTimePreKeys[dictKey] = material;
+            // Clone the private half — publishers Dispose() generated materials
+            // after storing, which would otherwise zero the stored key.
+            _oneTimePreKeys[dictKey] = new OneTimePreKeyMaterial(
+                material.KeyId,
+                EphemeralPrivateKey.FromSpan(material.PrivateKey.Span),
+                material.PublicKey);
         }
         return Task.CompletedTask;
     }

@@ -245,12 +245,17 @@ public sealed class InMemoryLocalIdentityKeyStore : ILocalIdentityKeyStore
 
     public void RegisterKey(PublicIdentityId id, EphemeralPrivateKey privateKey, IdentityKey publicKey, ProfileKey? profileKey = null)
     {
-        _keys[id] = (privateKey, publicKey, profileKey ?? ProfileKey.Generate());
+        // Clone on store: callers may Dispose() their instance (e.g. maintenance
+        // `using`), which must not zeroize the stored copy — the sqlite store
+        // copies bytes on every access.
+        _keys[id] = (EphemeralPrivateKey.FromSpan(privateKey.Span), publicKey, profileKey ?? ProfileKey.Generate());
     }
 
     public Task<EphemeralPrivateKey?> GetIdentityPrivateKeyAsync(PublicIdentityId identityId, CancellationToken ct = default)
     {
-        return Task.FromResult(_keys.TryGetValue(identityId, out var entry) ? entry.PrivateKey : null);
+        return Task.FromResult(_keys.TryGetValue(identityId, out var entry)
+            ? EphemeralPrivateKey.FromSpan(entry.PrivateKey.Span)
+            : null);
     }
 
     public Task<IdentityKey?> GetIdentityPublicKeyAsync(PublicIdentityId identityId, CancellationToken ct = default)
@@ -270,7 +275,7 @@ public sealed class InMemoryLocalIdentityKeyStore : ILocalIdentityKeyStore
         ProfileKey profileKey,
         CancellationToken ct = default)
     {
-        _keys[identityId] = (privateKey, publicKey, profileKey);
+        _keys[identityId] = (EphemeralPrivateKey.FromSpan(privateKey.Span), publicKey, profileKey);
         return Task.CompletedTask;
     }
 
@@ -316,7 +321,9 @@ public sealed class InMemoryPrivatePreKeyStore : IPrivatePreKeyStore
         }
 
         _signedPreKeys.TryGetValue((ownerId, deviceId, keyId), out var stored);
-        return Task.FromResult(stored?.PrivateKey);
+        // Shared generation — return an owned clone; callers Dispose() after use
+        // (handshake responder) and must not zeroize the retained generation.
+        return Task.FromResult(stored == null ? null : EphemeralPrivateKey.FromSpan(stored.PrivateKey.Span));
     }
 
     public Task<EphemeralPrivateKey?> TryConsumeOneTimePreKeyPrivateAsync(
@@ -343,7 +350,10 @@ public sealed class InMemoryPrivatePreKeyStore : IPrivatePreKeyStore
         {
             _signedPreKeys.TryGetValue((ownerId, deviceId, keyId), out stored);
         }
-        return Task.FromResult(stored);
+        return Task.FromResult(stored == null ? null : stored with
+        {
+            PrivateKey = EphemeralPrivateKey.FromSpan(stored.PrivateKey.Span)
+        });
     }
 
     public Task<SignedPreKeyId> StoreSignedPreKeyAsync(
@@ -361,7 +371,7 @@ public sealed class InMemoryPrivatePreKeyStore : IPrivatePreKeyStore
             .Max() + 1u;
 
         _signedPreKeys[(ownerId, deviceId, nextKeyId)] =
-            new StoredSignedPreKey(new SignedPreKeyId(nextKeyId), privateKey, publicKey, signature, DateTimeOffset.UtcNow);
+            new StoredSignedPreKey(new SignedPreKeyId(nextKeyId), EphemeralPrivateKey.FromSpan(privateKey.Span), publicKey, signature, DateTimeOffset.UtcNow);
         _currentSignedPreKeyIds[(ownerId, deviceId)] = nextKeyId;
         return Task.FromResult(new SignedPreKeyId(nextKeyId));
     }
@@ -414,7 +424,13 @@ public sealed class InMemoryPrivatePreKeyStore : IPrivatePreKeyStore
     {
         foreach (var material in keys)
         {
-            _oneTimePreKeys[(ownerId, deviceId, material.KeyId)] = material;
+            // Clone the private half — publishers Dispose() generated materials
+            // after storing (allocation gate path), which would otherwise zero
+            // every hosted OPK private key in this double.
+            _oneTimePreKeys[(ownerId, deviceId, material.KeyId)] = new OneTimePreKeyMaterial(
+                material.KeyId,
+                EphemeralPrivateKey.FromSpan(material.PrivateKey.Span),
+                material.PublicKey);
         }
 
         return Task.CompletedTask;

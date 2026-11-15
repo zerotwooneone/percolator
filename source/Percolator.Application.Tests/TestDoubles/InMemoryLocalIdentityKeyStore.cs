@@ -13,14 +13,17 @@ public sealed class InMemoryLocalIdentityKeyStore : ILocalIdentityKeyStore
     {
         var pub = publicKey ?? IdentityKey.FromSpan(new byte[32]);
         var profile = profileKey ?? ProfileKey.Generate();
-        _keys[id] = (privateKey, pub, profile);
+        // Clone on store: callers may Dispose() their instance (e.g. maintenance
+        // `using`), which must not zeroize the stored copy — the sqlite store
+        // copies bytes on every access.
+        _keys[id] = (EphemeralPrivateKey.FromSpan(privateKey.Span), pub, profile);
     }
 
     public Task<EphemeralPrivateKey?> GetIdentityPrivateKeyAsync(PublicIdentityId identityId, CancellationToken ct = default)
     {
         if (_keys.TryGetValue(identityId, out var entry))
         {
-            return Task.FromResult<EphemeralPrivateKey?>(entry.PrivateKey);
+            return Task.FromResult<EphemeralPrivateKey?>(EphemeralPrivateKey.FromSpan(entry.PrivateKey.Span));
         }
         return Task.FromResult<EphemeralPrivateKey?>(null);
     }
@@ -46,7 +49,7 @@ public sealed class InMemoryLocalIdentityKeyStore : ILocalIdentityKeyStore
         ProfileKey profileKey,
         CancellationToken ct = default)
     {
-        _keys[identityId] = (privateKey, publicKey, profileKey);
+        _keys[identityId] = (EphemeralPrivateKey.FromSpan(privateKey.Span), publicKey, profileKey);
         return Task.CompletedTask;
     }
 

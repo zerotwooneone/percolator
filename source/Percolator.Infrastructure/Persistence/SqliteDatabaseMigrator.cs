@@ -47,11 +47,6 @@ public sealed class SqliteDatabaseMigrator : IDatabaseMigrator
                 await _dbContext.Database.ExecuteSqlRawAsync(idempotent, ct);
             }
 
-            // DRAIN-10 schema upgrade — the CREATE-IF-NOT-EXISTS path never alters
-            // pre-existing tables, so the two prekey changes need guarded rewrites:
-            // a new column on relay_prekeys and a new composite PK on vault_signed_prekeys.
-            await ApplyPreKeySchemaUpgradesAsync(ct);
-
             return DomainResult.Success();
         }
         catch (Exception ex)
