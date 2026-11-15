@@ -157,10 +157,6 @@ public sealed class MailboxDrainService
         }
         catch (Exception ex)
         {
-            var transientError = new DomainError("INGRESS_TRANSIENT_FAILURE", ex.Message);
-            await _pendingStore.RecordTransientFailureAsync(ownerId, queueId, transientError, ct)
-                .ConfigureAwait(false);
-
             if (record.Attempts + 1 >= MaxAttempts)
             {
                 _logger.LogError(ex,
@@ -169,6 +165,10 @@ public sealed class MailboxDrainService
                 await _pendingStore.DeleteAsync(ownerId, queueId, ct).ConfigureAwait(false);
                 return DomainResult.Success();
             }
+
+            var transientError = new DomainError("INGRESS_TRANSIENT_FAILURE", ex.Message);
+            await _pendingStore.RecordTransientFailureAsync(ownerId, queueId, transientError, ct)
+                .ConfigureAwait(false);
 
             return DomainResult.Failure(transientError);
         }

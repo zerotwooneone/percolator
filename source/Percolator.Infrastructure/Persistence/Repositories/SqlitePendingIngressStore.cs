@@ -34,6 +34,11 @@ public sealed class SqlitePendingIngressStore : IPendingIngressStore
         QueuedMailboxEnvelope envelope,
         CancellationToken ct = default)
     {
+        if (!ownerId.IsValid)
+        {
+            throw new ArgumentException("Owner identity ID must be valid.", nameof(ownerId));
+        }
+
         ArgumentNullException.ThrowIfNull(envelope);
 
         var ownerGuid = ownerId.Value;
@@ -86,6 +91,11 @@ public sealed class SqlitePendingIngressStore : IPendingIngressStore
         PublicIdentityId ownerId,
         CancellationToken ct = default)
     {
+        if (!ownerId.IsValid)
+        {
+            throw new ArgumentException("Owner identity ID must be valid.", nameof(ownerId));
+        }
+
         var ownerGuid = ownerId.Value;
         var rows = await _dbContext.OpsPendingIngressEnvelopes
             .AsNoTracking()
@@ -102,6 +112,11 @@ public sealed class SqlitePendingIngressStore : IPendingIngressStore
         MailboxQueueId queueId,
         CancellationToken ct = default)
     {
+        if (!ownerId.IsValid)
+        {
+            throw new ArgumentException("Owner identity ID must be valid.", nameof(ownerId));
+        }
+
         ArgumentNullException.ThrowIfNull(queueId);
 
         var ownerGuid = ownerId.Value;
@@ -130,6 +145,11 @@ public sealed class SqlitePendingIngressStore : IPendingIngressStore
         DomainError error,
         CancellationToken ct = default)
     {
+        if (!ownerId.IsValid)
+        {
+            throw new ArgumentException("Owner identity ID must be valid.", nameof(ownerId));
+        }
+
         ArgumentNullException.ThrowIfNull(queueId);
 
         var ownerGuid = ownerId.Value;

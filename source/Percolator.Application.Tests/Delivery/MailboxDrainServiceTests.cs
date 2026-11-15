@@ -52,17 +52,17 @@ public sealed class MailboxDrainServiceTests
     [TearDown]
     public async Task TearDown() => await _session.DisposeAsync();
 
-    private static QueuedMailboxEnvelope Queued(string queueId, DateTimeOffset? expiresAt = null) =>
+    private QueuedMailboxEnvelope Queued(string queueId, DateTimeOffset? expiresAt = null) =>
         new(
             MailboxQueueId.Parse(queueId),
             new MailboxEnvelope(
                 EnvelopeId.New(),
                 BlindedRoutingToken.New(),
                 new byte[] { 1, 2, 3, 4 },
-                DateTimeOffset.UtcNow.AddMinutes(-5),
-                expiresAt ?? DateTimeOffset.UtcNow.AddDays(1)));
+                _timeProvider.UtcNow.AddMinutes(-5),
+                expiresAt ?? _timeProvider.UtcNow.AddDays(1)));
 
-    private static InboundHandshakeEnvelope Handshake(PublicIdentityId sender, uint? opkId) =>
+    private InboundHandshakeEnvelope Handshake(PublicIdentityId sender, uint? opkId) =>
         new(
             RecipientIdentityId: Owner,
             SenderIdentityId: sender,
@@ -72,7 +72,7 @@ public sealed class MailboxDrainServiceTests
             SignedPreKeyId: 1,
             OneTimePreKeyId: opkId,
             EncryptedPayload: new byte[] { 9, 9 },
-            ReceivedAtUtc: DateTimeOffset.UtcNow);
+            ReceivedAtUtc: _timeProvider.UtcNow);
 
     [Test]
     public async Task ReceiveAsync_PersistsBeforeAck_ThenProcessesAndDeletes()
@@ -199,12 +199,36 @@ public sealed class MailboxDrainServiceTests
             await _store.RecordTransientFailureAsync(Owner, queued.QueueId, new DomainError("E", "x"));
         }
 
+        _callOrder.Clear();
         _ingress.Fault = new InvalidOperationException("still broken");
 
         var result = await _service.ReceiveAsync(_target, queued, _session);
 
         result.IsSuccess.Should().BeTrue();
+        _callOrder.Should().Equal("upsert", "ack", "delete");
+        _callOrder.Should().NotContain("fail");
         _store.ListAll(Owner).Should().BeEmpty();
+    }
+
+    [Test]
+    public void MailboxDrainTarget_InvalidParameters_Throws()
+    {
+        var validId = PublicIdentityId.New();
+        var validEndpoint = RelayEndpoint.FromHostAndPort("127.0.0.1", 5000);
+
+        Assert.Throws<ArgumentException>(() => new MailboxDrainTarget(default, validId, validEndpoint));
+        Assert.Throws<ArgumentException>(() => new MailboxDrainTarget(validId, default, validEndpoint));
+        Assert.Throws<ArgumentNullException>(() => new MailboxDrainTarget(validId, validId, null!));
+    }
+
+    [Test]
+    public void PendingIngressRecord_InvalidParameters_Throws()
+    {
+        var queued = Queued("q-1");
+
+        Assert.Throws<ArgumentNullException>(() => new PendingIngressRecord(null!, queued, 0, null));
+        Assert.Throws<ArgumentNullException>(() => new PendingIngressRecord(queued.QueueId, null!, 0, null));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new PendingIngressRecord(queued.QueueId, queued, -1, null));
     }
 
     [Test]

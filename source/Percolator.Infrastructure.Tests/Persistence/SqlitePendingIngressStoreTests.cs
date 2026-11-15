@@ -183,4 +183,23 @@ public sealed class SqlitePendingIngressStoreTests
 
         await act.Should().NotThrowAsync();
     }
+
+    [Test]
+    public async Task StoreMethods_WithInvalidOwnerId_ThrowArgumentException()
+    {
+        var queued = Queued("q-1");
+        var invalidOwner = default(PublicIdentityId);
+
+        await FluentActions.Invoking(() => _store.UpsertAsync(invalidOwner, queued))
+            .Should().ThrowAsync<ArgumentException>();
+
+        await FluentActions.Invoking(() => _store.ListByOwnerAsync(invalidOwner))
+            .Should().ThrowAsync<ArgumentException>();
+
+        await FluentActions.Invoking(() => _store.DeleteAsync(invalidOwner, queued.QueueId))
+            .Should().ThrowAsync<ArgumentException>();
+
+        await FluentActions.Invoking(() => _store.RecordTransientFailureAsync(invalidOwner, queued.QueueId, new DomainError("E", "x")))
+            .Should().ThrowAsync<ArgumentException>();
+    }
 }
