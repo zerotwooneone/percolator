@@ -380,16 +380,24 @@ public sealed record MailboxBindingChangedEvent(
 
 ---
 
-### DRAIN-07 ⬜ — Ensure-provisioned on first target connect
+### DRAIN-07 ✅ — Ensure-provisioned on first target connect + first-connect prekey seed
 
 **Files:**
-- Modify `Percolator.Application/Delivery/RelayDirectoryService.cs`
-- Modify `Percolator.Application/Delivery/DrainScheduler.cs`
+- Modified `Percolator.Application/Delivery/Ports/IRelayDirectory.cs` — added `EnsureMailboxProvisionedAsync(relayIdentityId, ownerIdentityId, ct)`.
+- Modified `Percolator.Application/Delivery/RelayDirectoryService.cs` — `EnsureMailboxProvisionedAsync` impl (RELAY_NOT_FOUND / missing-binding errors, 24h `ProvisioningFreshnessWindow` skip, `ProvisionMailboxAsync` + `MarkMailboxProvisioned` + save); `ProvisionLinkedMailboxesAsync` count `25` → `100`.
+- Modified `Percolator.Domain/Delivery/Model/RelayMailboxBinding.cs` + `RelayRegistration.cs` — `MailboxProvisionedUtc` + `MarkMailboxProvisioned`.
+- Modified `Percolator.Infrastructure/Persistence/Entities/RelayEntities.cs` + `Repositories/SqliteRelayRegistrationRepository.cs` — timestamp mapping.
+- Modified `Percolator.Application/Delivery/DrainScheduler.cs` — supervisor order: `EnsureMailboxProvisionedAsync` → `GetMailboxTokensAsync` → first-connect prekey block → `ReplayPendingAsync` → stream.
+- Modified `Percolator.Infrastructure/Transport/GrpcRelayMailboxProvisioner.cs` — impl default `newOneTimePreKeyCount` → `100`; `_opkAllocationGate` `SemaphoreSlim` serializes `GetNextOneTimePreKeyIdAsync` → generate → `StoreOneTimePreKeysAsync` (concurrent supervisors previously collided on `vault_onetime_prekeys` UNIQUE — scenario replay caught it).
+- Modified `Percolator.Domain/Delivery/Hosting/RelayHostedPreKeyBundle.cs` — `ReplenishOneTimePreKeys` is newest-wins within the cap: overflow evicts oldest unconsumed keys (a full bucket must not wedge the bundle at a stale key set — publishers allocate fresh ids per batch); a single batch exceeding the cap still returns `PREKEY_QUOTA_EXCEEDED`.
+- Modified `Percolator.Simulator/Features/RelayedChat/RelayProvisioningCoordinator.cs` — awaits `EnsureMailboxProvisionedAsync` before the prekey admission gate + visibility registration; initial signed-prekey publication (0 OPKs) retained for peer-directory admission.
+- Modified `Percolator.Simulator/Scenarios/02-relayed-stealth-and-chat.json` (`24` → `99`), `03-prekey-depletion.json` (`49` → `100`) — hosted-OPK expectations rebased onto the seeded bucket.
 
-- Change default `oneTimePreKeyCount` in `RelayDirectoryService.ProvisionLinkedMailboxesAsync` and `IRelayMailboxProvisioner.PublishPreKeyBundleAsync` from `25` to `100` (matches `RelayHostedPreKeyBundle.MaxOneTimePreKeyCapacity = 100` and Signal's batch size).
-- In `DrainScheduler.SuperviseTargetAsync` step 1: on the first connect for a `MailboxDrainTarget` within the session, call `ProvisionMailboxAsync`; if the target has no relay-side bundle yet (`GetPreKeyStatusAsync` returns `Found == false`), call `PublishPreKeyBundleAsync(..., newOneTimePreKeyCount: 100)`. Until DRAIN-10 adds the status RPC, `GetPreKeyStatusAsync` fails with `RELAY_PREKEY_STATUS_UNAVAILABLE` — treat a failure as unknown bundle state and publish anyway (publication merges OPKs idempotently). This guarantees `VaultUnlockViewModel.TryAutoStartLaunchAsync` (which bypasses `IdentityGateViewModel.LaunchPersonasAsync`) provisions and publishes identically to the gate path.
+- `IRelayMailboxProvisioner.PublishPreKeyBundleAsync` interface default was already `100`; all publish sites now use it (interface default, impl default, `ProvisionLinkedMailboxesAsync` explicit arg).
+- Supervisor first-connect block (`_firstActivationSeen` per target): `GetPreKeyStatusAsync` → publish 100 OPKs when `Found == false` **or** when the status call fails (`RELAY_PREKEY_STATUS_UNAVAILABLE` until DRAIN-10 lands the RPC — failure = unknown bundle state, publish anyway; the merge is idempotent). Publish failure unmarks the target so the backoff retry re-runs the seed. This guarantees `VaultUnlockViewModel.TryAutoStartLaunchAsync` provisions and publishes identically to the gate path.
+- `EnsureMailboxProvisionedAsync` is a **durable** provision boundary (persisted `MailboxProvisionedUtc`, 24h freshness), stronger than the per-session call originally spec'd — safe across restarts and repeated supervisor connects.
 
-**Verify:** `DrainSchedulerTests` — first-connect ensure-provisioned publishes when `Found == false` and when `GetPreKeyStatusAsync` fails, skips when `Found`.
+**Verified:** `DrainSchedulerTests` — ensure-order/retry/rotation + first-connect publishes on `Found == false` and on status failure, skips on `Found`, status checked only on first connect across rotation; `RelayDirectoryServiceTests` — ensure errors/fresh-skip/stale-reprovision/retry + bulk count 100; `RelayHostedPreKeyBundleTests` — evict-oldest + oversized-batch rejection. Domain.Tests 206/206, Application.Tests 139/139, Infrastructure.Tests 264/264, **scenario suite 8/8**. Two defects found by replay and fixed: (1) concurrent `PublishPreKeyBundleAsync` OPK-id collision → allocation gate; (2) seeded bucket overflowing merge publishes → evict-oldest replenish.
 
 **QMS:** `SYS-ASYNC-SESSION-INIT`, `HAZ-PREKEY-POOL-STARVATION`.
 
@@ -404,8 +412,9 @@ public sealed record MailboxBindingChangedEvent(
 1. Replace `Channel.CreateUnbounded<QueuedSealedEnvelopeProto>()` at L150 with `Channel.CreateBounded<QueuedSealedEnvelopeProto>(new BoundedChannelOptions(256) { SingleReader = true, SingleWriter = false, FullMode = BoundedChannelFullMode.Wait })`.
 2. Fix data race on `initialQueueIds`: populate the `HashSet<string>` completely from `queuedEnvelopes` *before* starting `liveReadTask` (keeping the subscription registered before `GetEnvelopesAsync` so no live enqueue is missed, while `initialQueueIds` is immutable by the time `liveReadTask` reads it).
 3. In the ACK loop (L199): only invoke `AcknowledgeEnvelopeAsync` when `msg.Ack.Acknowledged && !string.IsNullOrEmpty(msg.Ack.QueueId)`.
+4. Dedupe `OneTimePrekeyProto.KeyId` within the incoming `PublishPreKeyBundleRequest` batch — the existing filter only rejects ids already hosted, so a malformed publish enqueues the same key id twice and `ConsumeBundle` could serve a consumed id to a second fetcher. Self-harm only (the publisher owns the bundle), but it's a cheap endpoint check: reject or collapse duplicate ids before calling `PublishHostedBundle`/`ReplenishHostedBundle`.
 
-**Verify:** `AuthenticatedRelayEndpointTests` — bounded live-channel backpressure, concurrent enqueue during initial replay delivered once, `Acknowledged = false` / empty `queue_id` ignored.
+**Verify:** `AuthenticatedRelayEndpointTests` — bounded live-channel backpressure, concurrent enqueue during initial replay delivered once, `Acknowledged = false` / empty `queue_id` ignored, batch containing duplicate `key_id`s rejected/deduped.
 
 **QMS:** `DEC-BOUNDED-CHANNEL-EVENT-BUS`, `HAZ-INGRESS-RESOURCE-EXHAUSTION`.
 
@@ -467,6 +476,11 @@ rpc GetPreKeyStatus(GetPreKeyStatusRequest) returns (GetPreKeyStatusResponse);
 ```
 
 - Server handler: drain-token authenticated; `found=false` when no hosted bundle exists for the routing token + device. Replace the `RELAY_PREKEY_STATUS_UNAVAILABLE` stub added in DRAIN-02 inside `GrpcRelayMailboxProvisioner.GetPreKeyStatusAsync` with the real call; map `found=false` to `Success(new RelayPreKeyStatus(false, 0, new SignedPreKeyId(0)))`; `found=true` maps `signed_prekey_id` into the `SignedPreKeyId` VO (shipped in DRAIN-02).
+
+**DRAIN-07 shipped outcomes that affect this ticket:**
+- `DrainScheduler`'s first-connect block already calls `GetPreKeyStatusAsync` and treats failure as publish — once the real RPC lands the seed starts skipping when `Found` with **no scheduler change**; verify the existing `DrainSchedulerTests` still pass and adjust the status-failure test expectations only if the stub is removed.
+- `RelayHostedPreKeyBundle.ReplenishOneTimePreKeys` is **newest-wins within the cap** since DRAIN-07 (overflow evicts oldest unconsumed keys; only a single batch > cap returns `PREKEY_QUOTA_EXCEEDED`). `PreKeyMaintenanceService` top-up publishes therefore can't be wedged by a full bucket — `toGenerate` may be published as-is without headroom math.
+- `GrpcRelayMailboxProvisioner._opkAllocationGate` (`SemaphoreSlim`) serializes `GetNextOneTimePreKeyIdAsync` → generate → `StoreOneTimePreKeysAsync` since DRAIN-07; replenishment publishes share the same path and are already safe from OPK-id collisions. If a per-owner/device gate is preferred over the instance-wide one, swap it in the provisioner — `IPrivatePreKeyStore` keeps its split allocate/store shape.
 
 **2. End-to-end `SignedPreKeyId` & multi-SPK retention (Signal parity):**
 - `VaultSignedPreKeyEntity`: change PK from `(OwnerIdentityId, DeviceId)` to `(OwnerIdentityId, DeviceId, KeyId)`; add `uint KeyId { get; set; } = 1;`, `bool IsCurrent { get; set; } = true;`.
