@@ -63,7 +63,7 @@ public sealed class SealedEnvelopeUnwrapperTests
         var packer = new ProtobufSessionWirePacker();
         var timeProvider = new FixedTimeProvider();
         var recipientId = Domain.Identities.PublicIdentityId.New();
-        var unwrapper = new SealedEnvelopeUnwrapper(packer, recipientId, timeProvider);
+        var unwrapper = new SealedEnvelopeUnwrapper(packer, timeProvider);
 
         // Case 1: Frame too short (< 82 bytes)
         var shortBytes = new byte[20];
@@ -75,7 +75,7 @@ public sealed class SealedEnvelopeUnwrapperTests
             timeProvider.UtcNow,
             timeProvider.UtcNow.AddHours(1));
 
-        var res1 = unwrapper.Unwrap(envelopeShort);
+        var res1 = unwrapper.Unwrap(envelopeShort, recipientId);
         res1.IsFailure.Should().BeTrue();
         res1.Error!.Code.Should().Be("FRAME_TOO_SHORT");
 
@@ -89,7 +89,7 @@ public sealed class SealedEnvelopeUnwrapperTests
             timeProvider.UtcNow,
             timeProvider.UtcNow.AddHours(1));
 
-        var res2 = unwrapper.Unwrap(envelopeUnknownKind);
+        var res2 = unwrapper.Unwrap(envelopeUnknownKind, recipientId);
         res2.IsFailure.Should().BeTrue();
         res2.Error!.Code.Should().Be("UNKNOWN_FRAME_KIND");
 
@@ -111,7 +111,7 @@ public sealed class SealedEnvelopeUnwrapperTests
             timeProvider.UtcNow,
             timeProvider.UtcNow.AddHours(1));
 
-        var res3 = unwrapper.Unwrap(envelopeTruncated);
+        var res3 = unwrapper.Unwrap(envelopeTruncated, recipientId);
         res3.IsFailure.Should().BeTrue();
         res3.Error!.Code.Should().Be("FRAME_TRUNCATED");
 
@@ -130,7 +130,7 @@ public sealed class SealedEnvelopeUnwrapperTests
             timeProvider.UtcNow,
             timeProvider.UtcNow.AddHours(1));
 
-        var res4 = unwrapper.Unwrap(envelopeCorruptedInner);
+        var res4 = unwrapper.Unwrap(envelopeCorruptedInner, recipientId);
         res4.IsFailure.Should().BeTrue();
         // Returns failure gracefully without throwing
     }
@@ -159,8 +159,8 @@ public sealed class SealedEnvelopeUnwrapperTests
             timeProvider.UtcNow,
             timeProvider.UtcNow.AddHours(1));
 
-        var unwrapper = new SealedEnvelopeUnwrapper(packer, recipientId, timeProvider);
-        var result = unwrapper.Unwrap(envelope);
+        var unwrapper = new SealedEnvelopeUnwrapper(packer, timeProvider);
+        var result = unwrapper.Unwrap(envelope, recipientId);
 
         result.IsSuccess.Should().BeTrue();
         result.Value.Should().BeOfType<InboundDirectEnvelope>();

@@ -11,27 +11,24 @@ namespace Percolator.Application2IntegrationTests.Adapters;
 public sealed class SealedEnvelopeUnwrapper : ISealedEnvelopeUnwrapper
 {
     private readonly ISessionWirePacker _wirePacker;
-    private readonly PublicIdentityId _recipientId;
     private readonly IDateTimeProvider _timeProvider;
 
     public SealedEnvelopeUnwrapper(
         ISessionWirePacker wirePacker,
-        PublicIdentityId recipientId,
         IDateTimeProvider timeProvider)
     {
         _wirePacker = wirePacker ?? throw new ArgumentNullException(nameof(wirePacker));
-        _recipientId = recipientId;
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
     }
 
-    public DomainResult<InboundEnvelope> Unwrap(MailboxEnvelope envelope)
+    public DomainResult<InboundEnvelope> Unwrap(MailboxEnvelope envelope, PublicIdentityId recipientId)
     {
-        return UnwrapFrame(envelope.Ciphertext, _recipientId, _timeProvider.UtcNow);
+        return UnwrapFrame(envelope.Ciphertext, recipientId, _timeProvider.UtcNow);
     }
 
-    public DomainResult<InboundEnvelope> UnwrapDirect(ReadOnlyMemory<byte> frameBytes)
+    public DomainResult<InboundEnvelope> UnwrapDirect(ReadOnlyMemory<byte> frameBytes, PublicIdentityId recipientId)
     {
-        return UnwrapFrame(frameBytes, _recipientId, _timeProvider.UtcNow);
+        return UnwrapFrame(frameBytes, recipientId, _timeProvider.UtcNow);
     }
 
     public DomainResult<InboundEnvelope> UnwrapFrame(

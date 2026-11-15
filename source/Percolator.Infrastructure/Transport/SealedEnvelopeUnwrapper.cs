@@ -154,24 +154,21 @@ public sealed class SealedEnvelopeUnwrapper : ISealedEnvelopeUnwrapper
 {
     private readonly ISessionWirePacker _wirePacker;
     private readonly IDateTimeProvider _timeProvider;
-    private readonly Domain.Identities.PublicIdentityId _recipientId;
 
     public SealedEnvelopeUnwrapper(
         ISessionWirePacker wirePacker,
-        Domain.Identities.PublicIdentityId recipientId,
         IDateTimeProvider timeProvider)
     {
         _wirePacker = wirePacker ?? throw new ArgumentNullException(nameof(wirePacker));
-        _recipientId = recipientId;
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
     }
 
-    public DomainResult<InboundEnvelope> Unwrap(MailboxEnvelope envelope)
+    public DomainResult<InboundEnvelope> Unwrap(MailboxEnvelope envelope, Domain.Identities.PublicIdentityId recipientId)
     {
-        return UnwrapDirect(envelope.Ciphertext);
+        return UnwrapDirect(envelope.Ciphertext, recipientId);
     }
 
-    public DomainResult<InboundEnvelope> UnwrapDirect(ReadOnlyMemory<byte> payloadBytes)
+    public DomainResult<InboundEnvelope> UnwrapDirect(ReadOnlyMemory<byte> payloadBytes, Domain.Identities.PublicIdentityId recipientId)
     {
         try
         {
@@ -195,7 +192,7 @@ public sealed class SealedEnvelopeUnwrapper : ISealedEnvelopeUnwrapper
                 }
             }
 
-            return UnwrapFrame(rawPayload, _recipientId, _timeProvider.UtcNow);
+            return UnwrapFrame(rawPayload, recipientId, _timeProvider.UtcNow);
         }
         catch (Exception ex)
         {
@@ -258,10 +255,5 @@ public sealed class SealedEnvelopeUnwrapper : ISealedEnvelopeUnwrapper
         {
             return DomainResult<InboundEnvelope>.Failure(new DomainError("CORRUPTED_FRAME", ex.Message));
         }
-    }
-
-    private sealed class DefaultDateTimeProvider : IDateTimeProvider
-    {
-        public DateTimeOffset UtcNow => DateTimeOffset.UtcNow;
     }
 }

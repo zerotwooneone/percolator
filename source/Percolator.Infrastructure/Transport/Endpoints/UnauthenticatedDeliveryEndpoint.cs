@@ -19,6 +19,7 @@ using Percolator.Domain.Security.ValueObjects;
 using Percolator.Infrastructure.Protos;
 using Percolator.Infrastructure.Transport;
 using Percolator.PluginSdk;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliveryService.UnauthenticatedDeliveryServiceBase
 {
@@ -29,6 +30,7 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
     private readonly IIngressFilterService? _ingressFilter;
     private readonly ISealedEnvelopeUnwrapper? _unwrapper;
     private readonly IInboundIngressPipeline? _ingressPipeline;
+    private readonly PublicIdentityId? _localRecipientId;
 
     public UnauthenticatedDeliveryEndpoint(
         IRelayProfileRepository profileRepository,
@@ -37,7 +39,8 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
         IRelayMailboxCapabilityStore capabilityStore,
         IIngressFilterService? ingressFilter = null,
         ISealedEnvelopeUnwrapper? unwrapper = null,
-        IInboundIngressPipeline? ingressPipeline = null)
+        IInboundIngressPipeline? ingressPipeline = null,
+        PublicIdentityId? localRecipientId = null)
     {
         _profileRepository = profileRepository ?? throw new ArgumentNullException(nameof(profileRepository));
         _preKeyRepository = preKeyRepository ?? throw new ArgumentNullException(nameof(preKeyRepository));
@@ -46,6 +49,7 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
         _ingressFilter = ingressFilter;
         _unwrapper = unwrapper;
         _ingressPipeline = ingressPipeline;
+        _localRecipientId = localRecipientId;
     }
 
     public override async Task<DeliveryAckProto> DeliverDirect(SealedEnvelopeProto request, ServerCallContext context)
@@ -59,9 +63,9 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
             };
         }
 
-        if (_unwrapper != null)
+        if (_unwrapper != null && _localRecipientId is { } localRecipientId)
         {
-            var unwrapResult = _unwrapper.UnwrapDirect(request.EncryptedPackage.Memory);
+            var unwrapResult = _unwrapper.UnwrapDirect(request.EncryptedPackage.Memory, localRecipientId);
 
             if (!unwrapResult.IsSuccess)
             {

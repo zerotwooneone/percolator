@@ -238,7 +238,7 @@ public sealed class GrpcRelayMailboxProvisioner : IRelayMailboxProvisioner
                     _timeProvider.UtcNow,
                     _timeProvider.UtcNow + EnvelopeExpiryWindow);
 
-                var unwrapResult = unwrapper.Unwrap(mailboxEnvelope);
+                var unwrapResult = unwrapper.Unwrap(mailboxEnvelope, ownerIdentityId);
                 if (!unwrapResult.IsSuccess)
                 {
                     continue;

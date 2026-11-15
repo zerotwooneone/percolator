@@ -251,12 +251,10 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                     Id));
             services.AddScoped<OutboxWorker>();
             // 6. Direct Ingress for Kestrel Transport
-            services.AddScoped<ISealedEnvelopeUnwrapper>(sp =>
-            {
-                var wirePacker = sp.GetRequiredService<ISessionWirePacker>();
-                var time = sp.GetRequiredService<IDateTimeProvider>();
-                return new SealedEnvelopeUnwrapper(wirePacker, PublicIdentityId, time);
-            });
+            // DRAIN-04: ISealedEnvelopeUnwrapper is shared (AddTransportInfrastructure,
+            // recipient-parameterized). Registering PublicIdentityId? supplies
+            // UnauthenticatedDeliveryEndpoint.localRecipientId for DeliverDirect ingress.
+            services.AddScoped(typeof(PublicIdentityId?), _ => PublicIdentityId);
             services.AddScoped<IIngressFilterService, IngressFilterService>();
             services.AddScoped<IInboundIngressPipeline>(sp =>
             {
@@ -659,7 +657,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             framedPayload,
             DateTimeOffset.UtcNow,
             DateTimeOffset.UtcNow.AddDays(7));
-        var unwrapResult = unwrapper.Unwrap(mailboxEnvelope);
+        var unwrapResult = unwrapper.Unwrap(mailboxEnvelope, PublicIdentityId);
         if (unwrapResult.IsFailure)
         {
             _logSink.Log(new SimulatorLogEntry(

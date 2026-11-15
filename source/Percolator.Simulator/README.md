@@ -30,3 +30,23 @@ To connect `Percolator.Desktop` to simulated nodes on localhost, enable the deve
 ```
 
 Or pass the CLI argument `--allow-localhost`.
+
+---
+
+## Running Scenarios
+
+The headless scenario runner (`ScenarioCliRunner`) executes JSON scenarios from `Scenarios/` without the Avalonia UI and returns exit code `0` only when every scenario passes.
+
+Run **all** scenarios (regression suite — required after any `Percolator.Simulator` change):
+
+```powershell
+dotnet run --framework net10.0-windows10.0.19041.0 -- --replay Scenarios
+```
+
+Use `net10.0` instead of `net10.0-windows10.0.19041.0` on non-Windows hosts.
+
+Run a single scenario:
+
+```powershell
+dotnet run --framework net10.0-windows10.0.19041.0 -- --replay Scenarios/01-direct-handshake-and-chat.json
+```

@@ -241,8 +241,9 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<IngressFilterOptions>();
         services.AddScoped<IIngressFilterService, IngressFilterService>();
         services.AddScoped<ITransportDispatcher, TransportDispatcher>();
-        // ISealedEnvelopeUnwrapper is per-node: its PublicIdentityId recipientId cannot be resolved from DI.
-        // Composition roots that know the node identity must register a factory (see SimulatedPersonaHost).
+        // ISealedEnvelopeUnwrapper is recipient-parameterized since DRAIN-04 — shared by
+        // every persona; callers pass the recipient PublicIdentityId per call.
+        services.AddScoped<ISealedEnvelopeUnwrapper, SealedEnvelopeUnwrapper>();
         services.AddScoped<IPortReservationService, SqlitePortReservationService>();
         services.AddScoped<UnauthenticatedDeliveryEndpoint>();
         services.AddScoped<AuthenticatedRelayEndpoint>();

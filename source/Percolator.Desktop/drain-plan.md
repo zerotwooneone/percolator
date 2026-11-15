@@ -2,6 +2,8 @@
 
 Status legend: ✅ done · 🚧 in progress · ⬜ not started
 
+Verification convention: any ticket that modifies `Percolator.Simulator` must run the full scenario suite before being marked done — `dotnet run --framework net10.0-windows10.0.19041.0 -- --replay Scenarios` (from `Percolator.Simulator/`, or `--project` from `source/`; use `net10.0` on non-Windows). See `Percolator.Simulator/README.md`.
+
 ## Architecture
 
 | Layer | Type | Location | Lifetime |
@@ -166,7 +168,7 @@ public interface IRelayMailboxProvisioner
 
 ---
 
-### DRAIN-04 ⬜ — Recipient-parameterized `ISealedEnvelopeUnwrapper`
+### DRAIN-04 ✅ — Recipient-parameterized `ISealedEnvelopeUnwrapper`
 
 **Files:**
 - Modify `Percolator.Application/Ports/ISealedEnvelopeUnwrapper.cs`
@@ -192,6 +194,14 @@ public interface ISealedEnvelopeUnwrapper
 - Register `AddScoped<ISealedEnvelopeUnwrapper, SealedEnvelopeUnwrapper>()` in `AddTransportInfrastructure`.
 - `UnauthenticatedDeliveryEndpoint`: accept optional `PublicIdentityId? localRecipientId = null` ctor parameter; invoke `_envelopeUnwrapper.UnwrapDirect(request.EncryptedPackage.Memory, _localRecipientId.Value)` when non-null.
 - `SimulatedPersonaHost`: delete the per-node `ISealedEnvelopeUnwrapper` factory registration (~L254–259: `new SealedEnvelopeUnwrapper(wirePacker, PublicIdentityId, time)`) — the `AddTransportInfrastructure` scoped registration replaces it, so the sim shares the same registration as Desktop.
+
+**Shipped notes (DRAIN-04):**
+- `DeliverDirect` gates the whole unwrap→filter→pipeline path on `localRecipientId` being non-null, not just on an unwrapper being resolvable — relay-only hosts (no local persona) keep the skip path now that the unwrapper is registered everywhere. `SimulatedPersonaHost` supplies it via `services.AddScoped(typeof(PublicIdentityId?), _ => PublicIdentityId)` — a nullable service type can't use the generic `AddScoped<TService>` overload (`TService : class`); the Type-based overload registers `Nullable<PublicIdentityId>` and the boxed struct unboxes into the endpoint's optional parameter. Any future persona-host composition that maps `UnauthenticatedDeliveryEndpoint` must register `PublicIdentityId?` the same way or `DeliverDirect` will silently skip ingress.
+- `UnwrapFrame` stays public on both unwrapper classes — `TestIdentityNode.ReceiveWireBytesAsync` calls it on the adapter.
+- `GrpcRelayMailboxClient` gained an `internal` direct-client ctor (mirrors `GrpcProfileDeliveryClient._directClient`) as the test seam; `Percolator.Infrastructure` already has `InternalsVisibleTo` for the test project.
+- `GrpcRelayMailboxClientTests` (DRAIN-03 backfill) ships 6 tests via a `CallInvoker`/`IAsyncStreamReader`/`IClientStreamWriter` fake: auth-response HMAC over the nonce, `RELAY_AUTH_FAILED` mapping, envelope yield, unparseable `queue_id` drop, serialized `AcknowledgeAsync` writes, and request-stream completion on dispose. Channel zeroization is exercised by `DisposeAsync` but not directly asserted (buffer is internal).
+- `DependencyInjectionTests` now asserts `ISealedEnvelopeUnwrapper`/`IRelayMailboxClient` resolve. Verified: `dotnet test Percolator.Infrastructure.Tests` (affected fixtures, 25 passed) and `Percolator.ApplicationIntegrationTests` (19 passed).
+- Full scenario suite run post-merge (`--replay Scenarios`): all 8 scenarios passed.
 
 **QMS:** `INV-ADAPTER-HYDRATION-BOUNDARY`, `DEP-DESKTOP-PERSONA-ISOLATION`.
 
@@ -344,6 +354,8 @@ public sealed record DrainSchedulerOptions
 - Subscribe `_isListening` changes → `IActiveIdentitySet.Add`/`Remove(PublicIdentityId)`: paused personas go offline (scheduler cancels the stream, relay retains mail, pending-ingress spool replays on resume).
 - `DrainMailboxAsync` remains the pull-now API for coordinators — it coexists with the scheduler; both write through the same pending-ingress spool, which dedupes by `(OwnerIdentityId, QueueId)`.
 
+**Verify:** unit tests + full scenario suite (`--replay Scenarios`) — sim wiring changes.
+
 **QMS:** `SYS-PRE-ACTIVATION-STEALTH`, `DEP-DESKTOP-PRE-ACTIVATION-STEALTH`, `INV-DESKTOP-STEALTH-ACTIVATION-GATE`, `SYS-ASYNC-STORE-AND-FORWARD`, `DEP-INFRA-CONCURRENCY-MODEL`, `SYS-BOUNDED-RELAY-QUOTAS`, `HAZ-INGRESS-RESOURCE-EXHAUSTION`, `SYS-LOCK-TEARDOWN-AND-ZEROIZATION`, `DEP-DESKTOP-SESSION-LOCK-ZEROIZATION`, `HAZ-POST-LOCK-MEMORY-RESIDUE`.
 
 ---
@@ -388,6 +400,8 @@ public sealed record DrainSchedulerOptions
 - Modify `Percolator.Infrastructure.Tests/Fakes/FakeRelayMailboxCapabilityStore.cs`, `Percolator.Infrastructure.Windows.Tests/Fakes/FakeRelayMailboxCapabilityStore.cs`, `Percolator.Infrastructure.Tests/Persistence/SqliteRelayMailboxCapabilityStoreTests.cs`, `Percolator.Infrastructure.Tests/Transport/Endpoints/AuthenticatedRelayEndpointTests.cs`, `Percolator.Infrastructure.Tests/Protos/CoreProtoCompilationTests.cs`
 
 - Note: `RelayMailboxQueue` (in-memory domain aggregate) and `TestIdentityNode.DrainMailboxAsync` remain unchanged — they back in-memory `Percolator.ApplicationIntegrationTests` and do not touch gRPC or SQLite.
+
+**Verify:** unit tests + full scenario suite (`--replay Scenarios`) — sim `DrainMailboxAsync` is re-bridged here.
 
 **QMS:** `HAZ-CRASH-STATE-DESYNC`, `DEC-PENDING-INGRESS-SPOOL`.
 

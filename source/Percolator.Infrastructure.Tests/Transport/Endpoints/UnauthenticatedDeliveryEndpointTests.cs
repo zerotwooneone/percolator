@@ -129,7 +129,7 @@ public sealed class UnauthenticatedDeliveryEndpointTests
     {
         public InboundEnvelope? ReturnEnvelope { get; set; }
 
-        public DomainResult<InboundEnvelope> Unwrap(MailboxEnvelope envelope)
+        public DomainResult<InboundEnvelope> Unwrap(MailboxEnvelope envelope, Domain.Identities.PublicIdentityId recipientId)
         {
             if (ReturnEnvelope != null)
             {
@@ -139,7 +139,7 @@ public sealed class UnauthenticatedDeliveryEndpointTests
             return DomainResult<InboundEnvelope>.Failure(new DomainError("UNWRAP_FAILED", "Failed to unwrap sealed frame."));
         }
 
-        public DomainResult<InboundEnvelope> UnwrapDirect(ReadOnlyMemory<byte> payloadBytes)
+        public DomainResult<InboundEnvelope> UnwrapDirect(ReadOnlyMemory<byte> payloadBytes, Domain.Identities.PublicIdentityId recipientId)
         {
             if (ReturnEnvelope != null)
             {
@@ -192,7 +192,8 @@ public sealed class UnauthenticatedDeliveryEndpointTests
             _capabilityStore,
             ingressFilter: null,
             unwrapper: unwrapper,
-            ingressPipeline: pipeline);
+            ingressPipeline: pipeline,
+            localRecipientId: Domain.Identities.PublicIdentityId.New());
 
         var expectedEnvelope = new InboundGroupEnvelope(
             ChannelId.New(),
@@ -234,7 +235,8 @@ public sealed class UnauthenticatedDeliveryEndpointTests
             _capabilityStore,
             ingressFilter: null,
             unwrapper: unwrapper,
-            ingressPipeline: pipeline);
+            ingressPipeline: pipeline,
+            localRecipientId: Domain.Identities.PublicIdentityId.New());
 
         unwrapper.ReturnEnvelope = new InboundGroupEnvelope(
             ChannelId.New(),
@@ -269,7 +271,8 @@ public sealed class UnauthenticatedDeliveryEndpointTests
             _capabilityStore,
             ingressFilter: null,
             unwrapper: unwrapper,
-            ingressPipeline: pipeline);
+            ingressPipeline: pipeline,
+            localRecipientId: Domain.Identities.PublicIdentityId.New());
 
         var request = new SealedEnvelopeProto
         {

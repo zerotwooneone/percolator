@@ -24,7 +24,8 @@ public sealed class GrpcRelayMailboxClient : IRelayMailboxClient
 {
     private static readonly TimeSpan EnvelopeExpiryWindow = TimeSpan.FromDays(7);
 
-    private readonly IPeerGrpcChannelFactory _channelFactory;
+    private readonly IPeerGrpcChannelFactory? _channelFactory;
+    private readonly AuthenticatedRelayService.AuthenticatedRelayServiceClient? _directClient;
     private readonly IDateTimeProvider _timeProvider;
 
     public GrpcRelayMailboxClient(
@@ -35,13 +36,22 @@ public sealed class GrpcRelayMailboxClient : IRelayMailboxClient
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
     }
 
+    /// <summary>Test seam: bypasses the channel factory with a direct client (mirrors GrpcProfileDeliveryClient).</summary>
+    internal GrpcRelayMailboxClient(
+        AuthenticatedRelayService.AuthenticatedRelayServiceClient directClient,
+        IDateTimeProvider timeProvider)
+    {
+        _directClient = directClient ?? throw new ArgumentNullException(nameof(directClient));
+        _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
+    }
+
     public async Task<DomainResult<IMailboxStreamSession>> OpenMailboxStreamAsync(
         RelayEndpoint endpoint,
         MailboxTokenTriad tokens,
         CancellationToken ct = default)
     {
-        var channel = _channelFactory.GetOrCreateChannel(new Uri($"https://{endpoint.Value}"));
-        var client = new AuthenticatedRelayService.AuthenticatedRelayServiceClient(channel);
+        var client = _directClient ?? new AuthenticatedRelayService.AuthenticatedRelayServiceClient(
+            _channelFactory!.GetOrCreateChannel(new Uri($"https://{endpoint.Value}")));
         var call = client.ConnectMailboxStream(cancellationToken: ct);
 
         try

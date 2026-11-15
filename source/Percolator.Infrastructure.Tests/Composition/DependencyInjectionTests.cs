@@ -129,8 +129,8 @@ public sealed class DependencyInjectionTests
         sp.GetRequiredService<IIngressFilterService>().Should().NotBeNull();
         sp.GetRequiredService<IStreamRegistry>().Should().NotBeNull();
         sp.GetRequiredService<ITransportDispatcher>().Should().NotBeNull();
-        // ISealedEnvelopeUnwrapper is per-node (requires the node's PublicIdentityId) and is
-        // intentionally not DI-registered; composition roots register a factory.
+        sp.GetRequiredService<ISealedEnvelopeUnwrapper>().Should().NotBeNull();
+        sp.GetRequiredService<IRelayMailboxClient>().Should().NotBeNull();
 
         // 8. Discovery & Profile Delivery
         sp.GetRequiredService<INearbyDiscoveryQueryClientPort>().Should().NotBeNull();

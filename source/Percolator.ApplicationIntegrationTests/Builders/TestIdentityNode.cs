@@ -217,7 +217,7 @@ public sealed class TestIdentityNode
 
         // Wire packing & unwrapping
         var wirePacker = new DefaultSessionWirePacker();
-        _envelopeUnwrapper = new SealedEnvelopeUnwrapper(wirePacker, IdentityId, TimeProvider);
+        _envelopeUnwrapper = new SealedEnvelopeUnwrapper(wirePacker, TimeProvider);
 
         // Networking adapters
         StreamRegistry = new LoopbackStreamRegistry(IdentityId, DeviceId, _networkSwitch, _channelRepo);
@@ -558,7 +558,7 @@ public sealed class TestIdentityNode
         int processed = 0;
         foreach (var envelope in drainResult.Value!)
         {
-            var unwrapResult = _envelopeUnwrapper.Unwrap(envelope);
+            var unwrapResult = _envelopeUnwrapper.Unwrap(envelope, IdentityId);
             if (unwrapResult.IsSuccess)
             {
                 var res = await IngressPipeline.ProcessInboundAsync(unwrapResult.Value!).ConfigureAwait(false);
