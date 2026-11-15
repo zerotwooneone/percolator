@@ -1,6 +1,13 @@
+using System;
+using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 using Percolator.Application.Ports;
 using Percolator.Application.Session.Events;
+using Percolator.Application.Session.Ports;
 using Percolator.Domain.Identities;
 
 namespace Percolator.Application.Session;
@@ -13,17 +20,59 @@ namespace Percolator.Application.Session;
 public sealed class ActiveIdentitySet : IActiveIdentitySet
 {
     private readonly IEventPublisher _publisher;
+    private readonly ILogger<ActiveIdentitySet> _logger;
     private readonly object _gate = new();
     private readonly HashSet<PublicIdentityId> _active = new();
     private IReadOnlyCollection<PublicIdentityId> _current = Array.Empty<PublicIdentityId>();
 
-    public ActiveIdentitySet(IEventPublisher publisher)
+    public ActiveIdentitySet(IEventPublisher publisher, ILogger<ActiveIdentitySet> logger)
     {
-        ArgumentNullException.ThrowIfNull(publisher);
-        _publisher = publisher;
+        _publisher = publisher ?? throw new ArgumentNullException(nameof(publisher));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     public IReadOnlyCollection<PublicIdentityId> Current => _current;
+
+    public bool Contains(PublicIdentityId identityId)
+    {
+        lock (_gate)
+        {
+            return _active.Contains(identityId);
+        }
+    }
+
+    public async ValueTask<bool> AddAsync(PublicIdentityId identityId, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            if (!_active.Add(identityId))
+            {
+                return false;
+            }
+
+            _current = _active.ToImmutableArray();
+        }
+
+        // Await publish outside the lock so subscriber operations do not hold the mutation gate
+        await _publisher.PublishAsync(new PersonaActivatedEvent(identityId), ct).ConfigureAwait(false);
+        return true;
+    }
+
+    public async ValueTask<bool> RemoveAsync(PublicIdentityId identityId, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            if (!_active.Remove(identityId))
+            {
+                return false;
+            }
+
+            _current = _active.ToImmutableArray();
+        }
+
+        await _publisher.PublishAsync(new PersonaDeactivatedEvent(identityId), ct).ConfigureAwait(false);
+        return true;
+    }
 
     public bool Add(PublicIdentityId identityId)
     {
@@ -37,10 +86,9 @@ public sealed class ActiveIdentitySet : IActiveIdentitySet
             _current = _active.ToImmutableArray();
         }
 
-        // Publish outside the lock so a slow subscriber cannot block registry mutation.
-        // Dispatch is fire-and-forget: the synchronous contract cannot await, and
-        // InMemoryEventBus routes subscriber faults to registered fault handlers.
-        _ = _publisher.PublishAsync(new PersonaActivatedEvent(identityId));
+        // Non-blocking fire-and-forget for synchronous caller compatibility (e.g. reactive streams).
+        // Dispatches via Task with explicit error logging rather than unobserved ValueTask discard.
+        _ = SafePublishAsync(new PersonaActivatedEvent(identityId));
         return true;
     }
 
@@ -56,7 +104,19 @@ public sealed class ActiveIdentitySet : IActiveIdentitySet
             _current = _active.ToImmutableArray();
         }
 
-        _ = _publisher.PublishAsync(new PersonaDeactivatedEvent(identityId));
+        _ = SafePublishAsync(new PersonaDeactivatedEvent(identityId));
         return true;
+    }
+
+    private async Task SafePublishAsync<TEvent>(TEvent @event) where TEvent : IApplicationEvent
+    {
+        try
+        {
+            await _publisher.PublishAsync(@event).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Background dispatch failed for event {EventType}", typeof(TEvent).Name);
+        }
     }
 }

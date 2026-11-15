@@ -16,6 +16,7 @@ using Microsoft.Extensions.Options;
 using NUnit.Framework;
 using Percolator.Application.Ports;
 using Percolator.Application.Session;
+using Percolator.Application.Session.Ports;
 using Percolator.Apps.Chat.Features.GroupInvitations;
 using Percolator.Apps.Chat.Features.Messaging;
 using Percolator.Apps.Chat.Ingress;

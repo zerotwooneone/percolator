@@ -43,7 +43,7 @@ public sealed class ExchangeViewModelTests
             linkedPersonas.ToList());
 
     private static PersonaDirectoryEntry Persona(string name) =>
-        new(Guid.NewGuid(), name, 5100, null, false, 0);
+        new(PublicIdentityId.New(), name, 5100, null, false, 0);
 
     // ---- Tile ----
 
@@ -122,7 +122,7 @@ public sealed class ExchangeViewModelTests
         wizard.Result.Should().NotBeNull();
         wizard.Result!.DisplayName.Should().Be("My Post-Office");
         wizard.Result.LinkedPersonaIds.Should().ContainSingle()
-            .Which.Value.Should().Be(personas[1].IdentityId);
+            .Which.Should().Be(personas[1].IdentityId);
     }
 
     [Test]
@@ -163,7 +163,7 @@ public sealed class ExchangeViewModelTests
     public async Task Manage_CheckingPersona_LinksImmediately()
     {
         var personas = new[] { Persona("Alice"), Persona("Bob") };
-        var entry = Entry("Hub", linkedPersonas: personas[0].IdentityId);
+        var entry = Entry("Hub", linkedPersonas: personas[0].IdentityId.Value);
         var tile = new ExchangeTileViewModel(entry, Array.Empty<PersonaAvatarChip>(), Avatar());
         var (vm, exchanges, _) = ManageFixture(personas, tile);
 
@@ -174,7 +174,7 @@ public sealed class ExchangeViewModelTests
         exchanges
             .Setup(e => e.LinkPersonaAsync(
                 It.Is<PublicIdentityId>(r => r.Value == tile.RelayIdentityId),
-                It.Is<PublicIdentityId>(p => p.Value == personas[1].IdentityId),
+                It.Is<PublicIdentityId>(p => p == personas[1].IdentityId),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(DomainResult.Success());
 
@@ -183,7 +183,7 @@ public sealed class ExchangeViewModelTests
 
         exchanges.Verify(e => e.LinkPersonaAsync(
                 It.IsAny<PublicIdentityId>(),
-                It.Is<PublicIdentityId>(p => p.Value == personas[1].IdentityId),
+                It.Is<PublicIdentityId>(p => p == personas[1].IdentityId),
                 It.IsAny<CancellationToken>()),
             Times.Once);
         vm.Personas[1].IsLinked.Should().BeTrue();
@@ -193,7 +193,7 @@ public sealed class ExchangeViewModelTests
     public async Task Manage_UncheckingConfirmed_UnlinksWithPurge_WhenSelfHosted()
     {
         var personas = new[] { Persona("Alice") };
-        var entry = Entry("Hub", linkedPersonas: personas[0].IdentityId);
+        var entry = Entry("Hub", linkedPersonas: personas[0].IdentityId.Value);
         var tile = new ExchangeTileViewModel(entry, Array.Empty<PersonaAvatarChip>(), Avatar());
         var (vm, exchanges, windows) = ManageFixture(personas, tile);
 
@@ -214,7 +214,7 @@ public sealed class ExchangeViewModelTests
         exchanges
             .Setup(e => e.UnlinkPersonaAsync(
                 It.Is<PublicIdentityId>(r => r.Value == tile.RelayIdentityId),
-                It.Is<PublicIdentityId>(p => p.Value == personas[0].IdentityId),
+                It.Is<PublicIdentityId>(p => p == personas[0].IdentityId),
                 true,
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(DomainResult.Success());
@@ -224,7 +224,7 @@ public sealed class ExchangeViewModelTests
 
         exchanges.Verify(e => e.UnlinkPersonaAsync(
                 It.IsAny<PublicIdentityId>(),
-                It.Is<PublicIdentityId>(p => p.Value == personas[0].IdentityId),
+                It.Is<PublicIdentityId>(p => p == personas[0].IdentityId),
                 true,
                 It.IsAny<CancellationToken>()),
             Times.Once,
@@ -236,7 +236,7 @@ public sealed class ExchangeViewModelTests
     public async Task Manage_UncheckingCancelled_RevertsCheckbox_WithoutUnlink()
     {
         var personas = new[] { Persona("Alice") };
-        var entry = Entry("Hub", selfHosted: false, linkedPersonas: personas[0].IdentityId);
+        var entry = Entry("Hub", selfHosted: false, linkedPersonas: personas[0].IdentityId.Value);
         var tile = new ExchangeTileViewModel(entry, Array.Empty<PersonaAvatarChip>(), Avatar());
         var (vm, exchanges, windows) = ManageFixture(personas, tile);
 
@@ -263,7 +263,7 @@ public sealed class ExchangeViewModelTests
     public async Task Manage_UncheckingNonSelfHosted_NeverOffersQueuePurge()
     {
         var personas = new[] { Persona("Alice") };
-        var entry = Entry("Remote", selfHosted: false, linkedPersonas: personas[0].IdentityId);
+        var entry = Entry("Remote", selfHosted: false, linkedPersonas: personas[0].IdentityId.Value);
         var tile = new ExchangeTileViewModel(entry, Array.Empty<PersonaAvatarChip>(), Avatar());
         var (vm, _, windows) = ManageFixture(personas, tile);
 
@@ -507,15 +507,15 @@ public sealed class ExchangeViewModelTests
         f.Exchanges
             .Setup(e => e.ProvisionLinkedMailboxesAsync(
                 It.Is<IEnumerable<PublicIdentityId>>(ids =>
-                    ids.Count() == 1 && ids.First().Value == persona.IdentityId),
+                    ids.Count() == 1 && ids.First() == persona.IdentityId),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(DomainResult.Success());
         f.Handoff
             .Setup(h => h.TransitionToMainShellAsync(
                 f.Session,
-                It.IsAny<IReadOnlyList<PersonaLaunchDescriptor>?>(),
-                It.Is<IReadOnlyList<ExchangeLaunchDescriptor>?>(l =>
-                    l != null && l.Count == 1 && l[0].Lease == exchangeLease.Object),
+                It.IsAny<IReadOnlyList<PersonaLaunchDescriptor>>(),
+                It.Is<IReadOnlyList<ExchangeLaunchDescriptor>>(l =>
+                    l.Count == 1 && l[0].Lease == exchangeLease.Object),
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
@@ -532,14 +532,14 @@ public sealed class ExchangeViewModelTests
             "selected self-hosted exchanges must map relay endpoints before handoff");
         f.Exchanges.Verify(e => e.ProvisionLinkedMailboxesAsync(
                 It.Is<IEnumerable<PublicIdentityId>>(ids =>
-                    ids.Single().Value == persona.IdentityId),
+                    ids.Single() == persona.IdentityId),
                 It.IsAny<CancellationToken>()),
             Times.Once,
             "selected personas must provision mailboxes at launch");
         f.Handoff.Verify(h => h.TransitionToMainShellAsync(
                 f.Session,
-                It.IsAny<IReadOnlyList<PersonaLaunchDescriptor>?>(),
-                It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>?>(),
+                It.IsAny<IReadOnlyList<PersonaLaunchDescriptor>>(),
+                It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>>(),
                 It.IsAny<CancellationToken>()),
             Times.Once);
         f.Settings.Verify(s => s.SetAppSettingAsync(

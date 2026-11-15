@@ -11,6 +11,7 @@ using Percolator.Desktop.Common.Services;
 using Percolator.Desktop.Common.Windowing;
 using Percolator.Desktop.Features.Startup.Models;
 using Percolator.Desktop.Features.Startup.ViewModels;
+using Percolator.Domain.Identities;
 using Percolator.Domain.Security.ValueObjects;
 using IPortReservationService = Percolator.Desktop.Common.Services.IPortReservationService;
 
@@ -68,7 +69,7 @@ public sealed class VaultUnlockViewModelTests
             .Setup(d => d.ListAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<PersonaDirectoryEntry>
             {
-                new(System.Guid.NewGuid(), "Alice", 5100, null, false, 0)
+                new(PublicIdentityId.New(), "Alice", 5100, null, false, 0)
             });
         _handoff
             .Setup(h => h.TransitionToGateAsync(session.Object, It.IsAny<CancellationToken>()))
@@ -104,8 +105,8 @@ public sealed class VaultUnlockViewModelTests
         _handoff.Verify(
             h => h.TransitionToMainShellAsync(
                 It.IsAny<IAuthenticatedSession>(),
-                It.IsAny<IReadOnlyList<PersonaLaunchDescriptor>?>(),
-                It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>?>(),
+                It.IsAny<IReadOnlyList<PersonaLaunchDescriptor>>(),
+                It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>>(),
                 It.IsAny<CancellationToken>()),
             Times.Never);
     }
@@ -116,7 +117,7 @@ public sealed class VaultUnlockViewModelTests
         var session = CreateSession();
         var lease = new Mock<IPortLease>();
         lease.SetupGet(l => l.Port).Returns(5100);
-        var persona = new PersonaDirectoryEntry(System.Guid.NewGuid(), "Alice", 5100, null, true, 0);
+        var persona = new PersonaDirectoryEntry(PublicIdentityId.New(), "Alice", 5100, null, true, 0);
 
         _unlockCoordinator
             .Setup(c => c.UnlockAsync(It.IsAny<VaultPassphrase>(), It.IsAny<CancellationToken>()))
@@ -130,9 +131,9 @@ public sealed class VaultUnlockViewModelTests
         _handoff
             .Setup(h => h.TransitionToMainShellAsync(
                 session.Object,
-                It.Is<IReadOnlyList<PersonaLaunchDescriptor>?>(l =>
-                    l != null && l.Count == 1 && l[0].Lease == lease.Object && l[0].RequestedPort == 5100),
-                It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>?>(),
+                It.Is<IReadOnlyList<PersonaLaunchDescriptor>>(l =>
+                    l.Count == 1 && l[0].Lease == lease.Object && l[0].RequestedPort == 5100),
+                It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>>(),
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
@@ -142,8 +143,8 @@ public sealed class VaultUnlockViewModelTests
         _handoff.Verify(
             h => h.TransitionToMainShellAsync(
                 session.Object,
-                It.IsAny<IReadOnlyList<PersonaLaunchDescriptor>?>(),
-                It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>?>(),
+                It.IsAny<IReadOnlyList<PersonaLaunchDescriptor>>(),
+                It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>>(),
                 It.IsAny<CancellationToken>()),
             Times.Once,
             "a sole auto-start persona must skip the gate and launch straight into the shell");
@@ -156,7 +157,7 @@ public sealed class VaultUnlockViewModelTests
     public async Task Unlock_MasterSuccess_AutoStartPortUnavailable_FallsBackToGate()
     {
         var session = CreateSession();
-        var persona = new PersonaDirectoryEntry(System.Guid.NewGuid(), "Alice", 5100, null, true, 0);
+        var persona = new PersonaDirectoryEntry(PublicIdentityId.New(), "Alice", 5100, null, true, 0);
 
         _unlockCoordinator
             .Setup(c => c.UnlockAsync(It.IsAny<VaultPassphrase>(), It.IsAny<CancellationToken>()))
@@ -269,7 +270,7 @@ public sealed class VaultUnlockViewModelTests
         var session = CreateSession();
         var lease = new Mock<IPortLease>();
         lease.SetupGet(l => l.Port).Returns(5100);
-        var persona = new PersonaDirectoryEntry(System.Guid.NewGuid(), "Alice", 5100, null, true, 0);
+        var persona = new PersonaDirectoryEntry(PublicIdentityId.New(), "Alice", 5100, null, true, 0);
 
         _unlockCoordinator
             .Setup(c => c.UnlockAsync(It.IsAny<VaultPassphrase>(), It.IsAny<CancellationToken>()))
@@ -283,8 +284,8 @@ public sealed class VaultUnlockViewModelTests
         _handoff
             .Setup(h => h.TransitionToMainShellAsync(
                 session.Object,
-                It.IsAny<IReadOnlyList<PersonaLaunchDescriptor>?>(),
-                It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>?>(),
+                It.IsAny<IReadOnlyList<PersonaLaunchDescriptor>>(),
+                It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>>(),
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("simulated handoff failure"));
 
@@ -307,8 +308,8 @@ public sealed class VaultUnlockViewModelTests
             .Setup(d => d.ListAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<PersonaDirectoryEntry>
             {
-                new(System.Guid.NewGuid(), "Alice", 5100, null, true, 0),
-                new(System.Guid.NewGuid(), "Bob", 5101, null, true, 1)
+                new(PublicIdentityId.New(), "Alice", 5100, null, true, 0),
+                new(PublicIdentityId.New(), "Bob", 5101, null, true, 1)
             });
         _handoff
             .Setup(h => h.TransitionToGateAsync(session.Object, It.IsAny<CancellationToken>()))
@@ -333,7 +334,7 @@ public sealed class VaultUnlockViewModelTests
         var lease = new Mock<IPortLease>();
         lease.SetupGet(l => l.Port).Returns(5101);
         // LastBoundPort=5101 was persisted by the previous launch — auto-start should try it first.
-        var persona = new PersonaDirectoryEntry(System.Guid.NewGuid(), "Alice", 5100, 5101, true, 0);
+        var persona = new PersonaDirectoryEntry(PublicIdentityId.New(), "Alice", 5100, 5101, true, 0);
 
         _unlockCoordinator
             .Setup(c => c.UnlockAsync(It.IsAny<VaultPassphrase>(), It.IsAny<CancellationToken>()))
@@ -347,9 +348,9 @@ public sealed class VaultUnlockViewModelTests
         _handoff
             .Setup(h => h.TransitionToMainShellAsync(
                 session.Object,
-                It.Is<IReadOnlyList<PersonaLaunchDescriptor>?>(l =>
-                    l != null && l.Count == 1 && l[0].RequestedPort == 5101),
-                It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>?>(),
+                It.Is<IReadOnlyList<PersonaLaunchDescriptor>>(l =>
+                    l.Count == 1 && l[0].RequestedPort == 5101),
+                It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>>(),
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 

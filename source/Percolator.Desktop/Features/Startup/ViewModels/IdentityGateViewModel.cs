@@ -240,7 +240,7 @@ public partial class IdentityGateViewModel : ViewModelBase
 
                 descriptors.Add(new PersonaLaunchDescriptor(
                     persona.IdentityId, persona.DisplayName, lease.Port, lease));
-                await PersistBoundPortAsync(persona.IdentityId, lease.Port, ct).ConfigureAwait(true);
+                await PersistBoundPortAsync(persona.IdentityId.Value, lease.Port, ct).ConfigureAwait(true);
             }
 
             foreach (var exchange in _exchangeList
@@ -290,7 +290,7 @@ public partial class IdentityGateViewModel : ViewModelBase
             }
 
             var selectedPersonaIds = descriptors
-                .Select(d => new PublicIdentityId(d.IdentityId))
+                .Select(d => d.IdentityId)
                 .ToList();
             if (selectedPersonaIds.Count > 0)
             {
@@ -383,9 +383,9 @@ public partial class IdentityGateViewModel : ViewModelBase
         try
         {
             await _directory
-                .RenameAsync(new PublicIdentityId(persona.IdentityId), result.DisplayName, ct)
+                .RenameAsync(persona.IdentityId, result.DisplayName, ct)
                 .ConfigureAwait(true);
-            await PersistPortPreferenceAsync(persona.IdentityId, result.PreferredPort, ct).ConfigureAwait(true);
+            await PersistPortPreferenceAsync(persona.IdentityId.Value, result.PreferredPort, ct).ConfigureAwait(true);
 
             persona.DisplayName = result.DisplayName;
             persona.PreferredPort = result.PreferredPort;
@@ -419,7 +419,7 @@ public partial class IdentityGateViewModel : ViewModelBase
         try
         {
             await _directory
-                .ShredAndDeleteAsync(new PublicIdentityId(persona.IdentityId), ct)
+                .ShredAndDeleteAsync(persona.IdentityId, ct)
                 .ConfigureAwait(true);
             _personaList.Remove(persona);
             RefreshDerivedState();
@@ -533,7 +533,7 @@ public partial class IdentityGateViewModel : ViewModelBase
 
         persona.IsPortEditorOpen = false;
         persona.PreferredPort = persona.PortEditorValue;
-        await PersistPortPreferenceAsync(persona.IdentityId, persona.PreferredPort, ct).ConfigureAwait(true);
+        await PersistPortPreferenceAsync(persona.IdentityId.Value, persona.PreferredPort, ct).ConfigureAwait(true);
         await ProbeCardAsync(persona, ct).ConfigureAwait(true);
     }
 
@@ -560,7 +560,7 @@ public partial class IdentityGateViewModel : ViewModelBase
         linkedIds
             .Select(id => new PersonaAvatarChip(
                 id,
-                _personaList.FirstOrDefault(p => p.IdentityId == id)?.DisplayName
+                _personaList.FirstOrDefault(p => p.IdentityId.Value == id)?.DisplayName
                     ?? id.ToString("N")[..8],
                 AvatarPresentation.FromIdenticon(_identicons.Generate(id))))
             .ToList();
@@ -668,8 +668,8 @@ public partial class IdentityGateViewModel : ViewModelBase
         var hasTarget = false;
         foreach (var (identityId, settings) in all)
         {
-            var desired = identityId.Value == target.IdentityId && enabled;
-            hasTarget |= identityId.Value == target.IdentityId;
+            var desired = identityId.Value == target.IdentityId.Value && enabled;
+            hasTarget |= identityId.Value == target.IdentityId.Value;
             if (settings.AutoStart != desired)
             {
                 await _settings
@@ -681,7 +681,7 @@ public partial class IdentityGateViewModel : ViewModelBase
         if (!hasTarget)
         {
             await _settings.SaveAsync(
-                target.IdentityId,
+                target.IdentityId.Value,
                 new IdentityLaunchSettings(target.PreferredPort, null, enabled, all.Count),
                 ct).ConfigureAwait(false);
         }

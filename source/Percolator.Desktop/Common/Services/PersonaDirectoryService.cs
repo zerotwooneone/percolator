@@ -110,7 +110,7 @@ public sealed class PersonaDirectoryService : IPersonaDirectory
         await _settings.SaveAsync(identityId.Value, settingsEntity, ct).ConfigureAwait(false);
 
         return new PersonaDirectoryEntry(
-            identityId.Value, trimmed, preferredPort, null, false, order);
+            identityId, trimmed, preferredPort, null, false, order);
     }
 
     public async Task RenameAsync(
@@ -147,10 +147,9 @@ public sealed class PersonaDirectoryService : IPersonaDirectory
         IdentityProfile profile,
         IReadOnlyDictionary<PublicIdentityId, IdentityLaunchSettings> settings)
     {
-        var index = profile.Id.Value;
         var entity = settings.TryGetValue(profile.Id, out var s) ? s : null;
         return new PersonaDirectoryEntry(
-            index,
+            profile.Id,
             profile.DisplayName,
             entity?.PreferredPort ?? DefaultPreferredPort,
             entity?.LastBoundPort,

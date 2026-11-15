@@ -89,7 +89,7 @@ public sealed class IdentityGateViewModelTests
 
     private static PersonaDirectoryEntry Entry(
         string name, int port, bool autoStart = false, int? lastBound = null) =>
-        new(Guid.NewGuid(), name, port, lastBound, autoStart, 0);
+        new(PublicIdentityId.New(), name, port, lastBound, autoStart, 0);
 
     private void ArrangeDirectory(params PersonaDirectoryEntry[] entries) =>
         _directory
@@ -161,7 +161,7 @@ public sealed class IdentityGateViewModelTests
             .Setup(p => p.AcquireAsync(5100, It.IsAny<CancellationToken>()))
             .ReturnsAsync(lease.Object);
         _settings
-            .Setup(s => s.GetAsync(entry.IdentityId, It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetAsync(entry.IdentityId.Value, It.IsAny<CancellationToken>()))
             .ReturnsAsync((IdentityLaunchSettings?)null);
         _settings
             .Setup(s => s.SaveAsync(
@@ -170,9 +170,9 @@ public sealed class IdentityGateViewModelTests
         _handoff
             .Setup(h => h.TransitionToMainShellAsync(
                 _session,
-                It.Is<IReadOnlyList<PersonaLaunchDescriptor>?>(l =>
-                    l != null && l.Count == 1 && l[0].Lease == lease.Object && l[0].RequestedPort == 5100),
-                It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>?>(),
+                It.Is<IReadOnlyList<PersonaLaunchDescriptor>>(l =>
+                    l.Count == 1 && l[0].Lease == lease.Object && l[0].RequestedPort == 5100),
+                It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>>(),
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
@@ -185,13 +185,13 @@ public sealed class IdentityGateViewModelTests
         _handoff.Verify(
             h => h.TransitionToMainShellAsync(
                 _session,
-                It.IsAny<IReadOnlyList<PersonaLaunchDescriptor>?>(),
-                It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>?>(),
+                It.IsAny<IReadOnlyList<PersonaLaunchDescriptor>>(),
+                It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>>(),
                 It.IsAny<CancellationToken>()),
             Times.Once);
         _settings.Verify(
             s => s.SaveAsync(
-                entry.IdentityId,
+                entry.IdentityId.Value,
                 It.Is<IdentityLaunchSettings>(e => e.LastBoundPort == 5100),
                 It.IsAny<CancellationToken>()),
             Times.Once,
@@ -225,9 +225,9 @@ public sealed class IdentityGateViewModelTests
         _handoff
             .Setup(h => h.TransitionToMainShellAsync(
                 _session,
-                It.Is<IReadOnlyList<PersonaLaunchDescriptor>?>(l =>
-                    l != null && l.Count == 1 && l[0].RequestedPort == 5101),
-                It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>?>(),
+                It.Is<IReadOnlyList<PersonaLaunchDescriptor>>(l =>
+                    l.Count == 1 && l[0].RequestedPort == 5101),
+                It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>>(),
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
@@ -262,8 +262,8 @@ public sealed class IdentityGateViewModelTests
         _handoff.Verify(
             h => h.TransitionToMainShellAsync(
                 It.IsAny<IAuthenticatedSession>(),
-                It.IsAny<IReadOnlyList<PersonaLaunchDescriptor>?>(),
-                It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>?>(),
+                It.IsAny<IReadOnlyList<PersonaLaunchDescriptor>>(),
+                It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>>(),
                 It.IsAny<CancellationToken>()),
             Times.Never);
         _vm.LaunchPersonasCommand.CanExecute(null).Should().BeFalse(
@@ -284,7 +284,7 @@ public sealed class IdentityGateViewModelTests
             .Setup(s => s.GetAllAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<(PublicIdentityId, IdentityLaunchSettings)>
             {
-                (new PublicIdentityId(entry.IdentityId), new IdentityLaunchSettings(5100, null, false, 0))
+                (entry.IdentityId, new IdentityLaunchSettings(5100, null, false, 0))
             });
         var saves = new List<(Guid IdentityId, IdentityLaunchSettings Settings)>();
         _settings
@@ -300,11 +300,11 @@ public sealed class IdentityGateViewModelTests
         // The persist pipeline is async (ObservePropertyChanged → SelectAwait) — wait for the
         // condition rather than a fixed delay.
         SpinWait.SpinUntil(
-                () => saves.Any(e => e.IdentityId == entry.IdentityId && e.Settings.AutoStart),
+                () => saves.Any(e => e.IdentityId == entry.IdentityId.Value && e.Settings.AutoStart),
                 TimeSpan.FromSeconds(5))
             .Should().BeTrue(
                 "the single-persona auto-start checkbox must persist through the settings store");
-        saves.Count(e => e.IdentityId == entry.IdentityId && e.Settings.AutoStart).Should().Be(1);
+        saves.Count(e => e.IdentityId == entry.IdentityId.Value && e.Settings.AutoStart).Should().Be(1);
     }
 
     [Test]
@@ -327,7 +327,7 @@ public sealed class IdentityGateViewModelTests
             .ReturnsAsync(true);
         _directory
             .Setup(d => d.ShredAndDeleteAsync(
-                It.Is<PublicIdentityId>(id => id.Value == entry.IdentityId),
+                It.Is<PublicIdentityId>(id => id == entry.IdentityId),
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
@@ -335,7 +335,7 @@ public sealed class IdentityGateViewModelTests
 
         _directory.Verify(
             d => d.ShredAndDeleteAsync(
-                It.Is<PublicIdentityId>(id => id.Value == entry.IdentityId),
+                It.Is<PublicIdentityId>(id => id == entry.IdentityId),
                 It.IsAny<CancellationToken>()),
             Times.Once,
             "deletion must shred the key material, profile, and settings atomically");
@@ -368,7 +368,7 @@ public sealed class IdentityGateViewModelTests
             .Setup(p => p.AcquireAsync(5101, It.IsAny<CancellationToken>()))
             .ReturnsAsync((IPortLease?)null);
         _settings
-            .Setup(s => s.GetAsync(alice.IdentityId, It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetAsync(alice.IdentityId.Value, It.IsAny<CancellationToken>()))
             .ReturnsAsync((IdentityLaunchSettings?)null);
         _settings
             .Setup(s => s.SaveAsync(
@@ -385,8 +385,8 @@ public sealed class IdentityGateViewModelTests
         _handoff.Verify(
             h => h.TransitionToMainShellAsync(
                 It.IsAny<IAuthenticatedSession>(),
-                It.IsAny<IReadOnlyList<PersonaLaunchDescriptor>?>(),
-                It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>?>(),
+                It.IsAny<IReadOnlyList<PersonaLaunchDescriptor>>(),
+                It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>>(),
                 It.IsAny<CancellationToken>()),
             Times.Never);
     }
@@ -407,7 +407,7 @@ public sealed class IdentityGateViewModelTests
             .Setup(p => p.AcquireAsync(5100, It.IsAny<CancellationToken>()))
             .ReturnsAsync(lease.Object);
         _settings
-            .Setup(s => s.GetAsync(entry.IdentityId, It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetAsync(entry.IdentityId.Value, It.IsAny<CancellationToken>()))
             .ReturnsAsync((IdentityLaunchSettings?)null);
         _settings
             .Setup(s => s.SaveAsync(
@@ -416,8 +416,8 @@ public sealed class IdentityGateViewModelTests
         _handoff
             .Setup(h => h.TransitionToMainShellAsync(
                 It.IsAny<IAuthenticatedSession>(),
-                It.IsAny<IReadOnlyList<PersonaLaunchDescriptor>?>(),
-                It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>?>(),
+                It.IsAny<IReadOnlyList<PersonaLaunchDescriptor>>(),
+                It.IsAny<IReadOnlyList<ExchangeLaunchDescriptor>>(),
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("simulated handoff failure"));
 
@@ -445,8 +445,8 @@ public sealed class IdentityGateViewModelTests
             .Setup(s => s.GetAllAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<(PublicIdentityId, IdentityLaunchSettings)>
             {
-                (new PublicIdentityId(alice.IdentityId), new IdentityLaunchSettings(5100, null, false, 0)),
-                (new PublicIdentityId(bob.IdentityId), new IdentityLaunchSettings(5101, null, true, 1)) // Bob already auto-starts
+                (alice.IdentityId, new IdentityLaunchSettings(5100, null, false, 0)),
+                (bob.IdentityId, new IdentityLaunchSettings(5101, null, true, 1)) // Bob already auto-starts
             });
         var saves = new List<(Guid IdentityId, IdentityLaunchSettings Settings)>();
         _settings
@@ -459,11 +459,11 @@ public sealed class IdentityGateViewModelTests
         _vm.AutoStartRequested = true;
 
         SpinWait.SpinUntil(
-                () => saves.Any(e => e.IdentityId == bob.IdentityId && !e.Settings.AutoStart),
+                () => saves.Any(e => e.IdentityId == bob.IdentityId.Value && !e.Settings.AutoStart),
                 TimeSpan.FromSeconds(5))
             .Should().BeTrue(
                 "enabling auto-start on one persona must clear the flag on all others (single-flag invariant)");
-        saves.Any(e => e.IdentityId == alice.IdentityId && e.Settings.AutoStart).Should().BeTrue();
+        saves.Any(e => e.IdentityId == alice.IdentityId.Value && e.Settings.AutoStart).Should().BeTrue();
     }
 
     [Test]
@@ -480,7 +480,7 @@ public sealed class IdentityGateViewModelTests
         card.PortEditorValue = 5150;
         card.IsPortEditorOpen = true;
         _settings
-            .Setup(s => s.GetAsync(entry.IdentityId, It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetAsync(entry.IdentityId.Value, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new IdentityLaunchSettings(5100, null, false, 0));
         _settings
             .Setup(s => s.SaveAsync(
@@ -494,7 +494,7 @@ public sealed class IdentityGateViewModelTests
 
         _settings.Verify(
             s => s.SaveAsync(
-                entry.IdentityId,
+                entry.IdentityId.Value,
                 It.Is<IdentityLaunchSettings>(e => e.PreferredPort == 5150),
                 It.IsAny<CancellationToken>()),
             Times.Once,
@@ -511,16 +511,16 @@ public sealed class IdentityGateViewModelTests
         ArrangeDirectory(); // start from empty-vault state
         await _vm.LoadAsync(_session);
 
-        var identityId = Guid.NewGuid();
+        var identityId = PublicIdentityId.New();
         var created = new PersonaDirectoryEntry(identityId, "Bob", 5100, null, false, 0);
         _windows
             .Setup(w => w.ShowDialogAsync<CreatePersonaDialogViewModel, PersonaEditorResult?>(
                 It.IsAny<Action<CreatePersonaDialogViewModel>?>(),
                 It.IsAny<Avalonia.Controls.Window?>()))
-            .ReturnsAsync(new PersonaEditorResult(new PublicIdentityId(identityId), "Bob", 5100));
+            .ReturnsAsync(new PersonaEditorResult(identityId, "Bob", 5100));
         _directory
             .Setup(d => d.CreateAsync(
-                It.Is<PublicIdentityId>(id => id.Value == identityId),
+                It.Is<PublicIdentityId>(id => id == identityId),
                 "Bob",
                 5100,
                 It.IsAny<CancellationToken>()))
@@ -533,7 +533,7 @@ public sealed class IdentityGateViewModelTests
 
         _directory.Verify(
             d => d.CreateAsync(
-                It.Is<PublicIdentityId>(id => id.Value == identityId),
+                It.Is<PublicIdentityId>(id => id == identityId),
                 "Bob",
                 5100,
                 It.IsAny<CancellationToken>()),

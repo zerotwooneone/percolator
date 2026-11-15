@@ -142,7 +142,7 @@ public partial class ExchangeCreationViewModel : ViewModelBase
             PreferredPort,
             LinkablePersonas
                 .Where(p => p.IsLinked)
-                .Select(p => new PublicIdentityId(p.PersonaId))
+                .Select(p => p.PersonaId)
                 .ToList());
         RequestClose?.Invoke(this, EventArgs.Empty);
     }

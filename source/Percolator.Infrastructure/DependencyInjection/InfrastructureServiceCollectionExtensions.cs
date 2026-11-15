@@ -7,6 +7,7 @@ using Percolator.Application.Profiles;
 using Percolator.Application.Routing;
 using Percolator.Application.Services;
 using Percolator.Application.Session;
+using Percolator.Application.Session.Ports;
 using Percolator.PluginSdk.Profiles;
 
 namespace Percolator.Infrastructure.DependencyInjection;

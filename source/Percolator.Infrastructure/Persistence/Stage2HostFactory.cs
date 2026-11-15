@@ -24,7 +24,9 @@ public sealed class Stage2HostFactory : ISessionHostFactory
 
     public IAuthenticatedSession CreateSession(IMasterKeyHandle masterKey)
     {
-        return new AuthenticatedSession(BuildAuthenticatedHost(masterKey));
+        var host = BuildAuthenticatedHost(masterKey);
+        var logger = host.Services.GetRequiredService<Microsoft.Extensions.Logging.ILogger<AuthenticatedSession>>();
+        return new AuthenticatedSession(host, logger);
     }
 
     public IHost BuildAuthenticatedHost(IMasterKeyHandle masterKeyHandle)

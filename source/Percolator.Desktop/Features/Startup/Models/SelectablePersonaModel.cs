@@ -3,6 +3,7 @@
 using System;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Percolator.Desktop.Common.Services;
+using Percolator.Domain.Identities;
 
 namespace Percolator.Desktop.Features.Startup.Models;
 
@@ -24,7 +25,7 @@ public enum PortStatus
 /// the read projection consumed by the Identity Gate ([VM-006]).
 /// </summary>
 public sealed record PersonaDirectoryEntry(
-    Guid IdentityId,
+    PublicIdentityId IdentityId,
     string DisplayName,
     int PreferredPort,
     int? LastBoundPort,
@@ -36,7 +37,7 @@ public sealed record PersonaDirectoryEntry(
 /// coordinator at launch ([INV-DESKTOP-TWO-STAGE-HANDOFF]).
 /// </summary>
 public sealed record PersonaLaunchDescriptor(
-    Guid IdentityId,
+    PublicIdentityId IdentityId,
     string DisplayName,
     int RequestedPort,
     IPortLease Lease);
@@ -90,7 +91,7 @@ public sealed partial class SelectablePersonaModel : ObservableObject
         _notifyChanged = notifyChanged ?? (_ => { });
     }
 
-    public Guid IdentityId { get; }
+    public PublicIdentityId IdentityId { get; }
     public int? LastBoundPort { get; }
     public bool AutoStart { get; }
 

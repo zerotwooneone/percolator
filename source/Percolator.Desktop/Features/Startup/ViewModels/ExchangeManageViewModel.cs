@@ -86,7 +86,7 @@ public partial class ExchangeManageViewModel : ViewModelBase
         OnPropertyChanged(nameof(ExchangeDisplayName));
         OnPropertyChanged(nameof(IsSelfHosted));
 
-        var linked = new HashSet<Guid>(exchange.LinkedPersonaIds);
+        var linked = new HashSet<PublicIdentityId>(exchange.LinkedPersonaIds.Select(id => new PublicIdentityId(id)));
         Personas = personas
             .Select(p => new LinkablePersonaModel(
                 p.IdentityId,
@@ -113,7 +113,7 @@ public partial class ExchangeManageViewModel : ViewModelBase
         if (persona.IsLinked)
         {
             var result = await _exchanges
-                .LinkPersonaAsync(new PublicIdentityId(_relayIdentityId), new PublicIdentityId(persona.PersonaId), ct)
+                .LinkPersonaAsync(new PublicIdentityId(_relayIdentityId), persona.PersonaId, ct)
                 .ConfigureAwait(true);
             if (result.IsFailure)
             {
@@ -143,7 +143,7 @@ public partial class ExchangeManageViewModel : ViewModelBase
             var result = await _exchanges
                 .UnlinkPersonaAsync(
                     new PublicIdentityId(_relayIdentityId),
-                    new PublicIdentityId(persona.PersonaId),
+                    persona.PersonaId,
                     purgeQueuedEnvelopes: IsSelfHosted && dialog?.PurgeQueuedEnvelopes == true,
                     ct)
                 .ConfigureAwait(true);
@@ -174,7 +174,7 @@ public partial class ExchangeManageViewModel : ViewModelBase
 
         var result = await _windows
             .ShowDialogAsync<CreatePersonaDialogViewModel, PersonaEditorResult?>(
-                vm => vm.InitializeForEdit(ExchangeDisplayName, _preferredPort, _relayIdentityId))
+                vm => vm.InitializeForEdit(ExchangeDisplayName, _preferredPort, new PublicIdentityId(_relayIdentityId)))
             .ConfigureAwait(true);
         if (result is null)
         {

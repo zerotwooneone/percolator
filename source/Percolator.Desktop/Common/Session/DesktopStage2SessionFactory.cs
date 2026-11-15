@@ -1,6 +1,7 @@
 namespace Percolator.Desktop.Common.Session;
 
 using System;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Percolator.Application.Ports;
 using Percolator.Domain.Security.Ports;
@@ -51,6 +52,7 @@ public sealed class DesktopStage2SessionFactory : ISessionHostFactory
         });
 
         var host = builder.Build();
-        return new AuthenticatedSession(host);
+        var logger = host.Services.GetRequiredService<Microsoft.Extensions.Logging.ILogger<AuthenticatedSession>>();
+        return new AuthenticatedSession(host, logger);
     }
 }

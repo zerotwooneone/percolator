@@ -76,10 +76,10 @@ public partial class CreatePersonaDialogViewModel : ViewModelBase
     }
 
     /// <summary>Edit mode: the existing identity pins the identicon; only name and port are editable.</summary>
-    public void InitializeForEdit(string displayName, int preferredPort, Guid identityId)
+    public void InitializeForEdit(string displayName, int preferredPort, PublicIdentityId identityId)
     {
         _isEdit = true;
-        _candidateId = new PublicIdentityId(identityId);
+        _candidateId = identityId;
         Title = "Edit Profile";
         PrimaryText = "Save Changes";
         CanRerollAvatar = false;

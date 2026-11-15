@@ -38,8 +38,8 @@ public interface IWindowHandoffCoordinator
     /// </param>
     Task TransitionToMainShellAsync(
         IAuthenticatedSession session,
-        IReadOnlyList<PersonaLaunchDescriptor>? personas = null,
-        IReadOnlyList<ExchangeLaunchDescriptor>? exchanges = null,
+        IReadOnlyList<PersonaLaunchDescriptor> personas,
+        IReadOnlyList<ExchangeLaunchDescriptor> exchanges,
         CancellationToken ct = default);
 
     /// <summary>

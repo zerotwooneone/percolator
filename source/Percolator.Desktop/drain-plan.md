@@ -18,7 +18,7 @@ Plan-wide QMS: `SYS-SEALED-SENDER-CAPABILITY-GATING`, `SYS-BLINDED-RELAY-ENVELOP
 | Domain VO | `RelayQueuedEnvelopeRecord(MailboxQueueId QueueId, ReadOnlyMemory<byte> EnvelopePayload, DateTimeOffset EnqueuedAtUtc)` | `Percolator.Domain/Delivery/ValueObjects/` | — |
 | Domain Port | `IPendingIngressStore` | `Percolator.Domain/Delivery/Ports/` | scoped |
 | Domain Port | `IRelayMailboxCapabilityStore` (relocated from Infra in DRAIN-09) | `Percolator.Domain/Delivery/Ports/` | scoped |
-| App Port | `IActiveIdentitySet` | `Percolator.Application/Session/` | session singleton |
+| App Port | `IActiveIdentitySet` | `Percolator.Application/Session/Ports/` | session singleton |
 | App Events | `PersonaActivatedEvent`, `PersonaDeactivatedEvent`, `MailboxBindingChangedEvent` | `Percolator.Application/Session/Events/`, `…/Delivery/Events/` | — |
 | App Service | `ActiveIdentitySet` | `Percolator.Application/Session/` | session singleton |
 | App Port | `IRelayMailboxClient`, `IMailboxStreamSession` | `Percolator.Application/Delivery/Ports/` | — |
@@ -44,12 +44,15 @@ Plan-wide QMS: `SYS-SEALED-SENDER-CAPABILITY-GATING`, `SYS-BLINDED-RELAY-ENVELOP
 ### DRAIN-01 ✅ — Active-identity registry & handoff seam
 
 **Files:**
-- Create `Percolator.Application/Session/IActiveIdentitySet.cs`
+- Create `Percolator.Application/Session/Ports/IActiveIdentitySet.cs`
 - Create `Percolator.Application/Session/ActiveIdentitySet.cs`
 - Create `Percolator.Application/Session/Events/PersonaActivatedEvent.cs`
 - Create `Percolator.Application/Session/Events/PersonaDeactivatedEvent.cs`
+- Create `Percolator.Desktop.Tests/Windowing/WindowHandoffCoordinatorTests.cs`
 - Modify `Percolator.Infrastructure/DependencyInjection/InfrastructureServiceCollectionExtensions.cs` (`AddSessionCoreInfrastructure`)
-- Modify `Percolator.Desktop/Common/Windowing/WindowHandoffCoordinator.cs` (`TransitionToMainShellAsync`)
+- Modify `Percolator.Desktop/Common/Windowing/IWindowHandoffCoordinator.cs` & `WindowHandoffCoordinator.cs` (`TransitionToMainShellAsync`)
+- Modify `Percolator.Infrastructure/Vault/AuthenticatedSession.cs` (injected `ILogger`, eliminated bare catch)
+- Refactor `PersonaLaunchDescriptor`, `PersonaDirectoryEntry`, `SelectablePersonaModel` to eliminate primitive obsession (`PublicIdentityId`)
 
 **Contracts:**
 
@@ -57,22 +60,29 @@ Plan-wide QMS: `SYS-SEALED-SENDER-CAPABILITY-GATING`, `SYS-BLINDED-RELAY-ENVELOP
 public sealed record PersonaActivatedEvent(PublicIdentityId IdentityId) : IApplicationEvent;
 public sealed record PersonaDeactivatedEvent(PublicIdentityId IdentityId) : IApplicationEvent;
 
+namespace Percolator.Application.Session.Ports;
+
 public interface IActiveIdentitySet
 {
     IReadOnlyCollection<PublicIdentityId> Current { get; }
+    bool Contains(PublicIdentityId identityId);
+    ValueTask<bool> AddAsync(PublicIdentityId identityId, CancellationToken ct = default);
+    ValueTask<bool> RemoveAsync(PublicIdentityId identityId, CancellationToken ct = default);
     bool Add(PublicIdentityId identityId);
     bool Remove(PublicIdentityId identityId);
 }
 ```
 
 **Implementation:**
-- `ActiveIdentitySet(IEventPublisher publisher)`: lock-guarded `HashSet<PublicIdentityId>`. `Add`/`Remove` mutate the set under lock, snapshot `Current` to an immutable array, release the lock, then invoke `_publisher.Publish(new PersonaActivatedEvent(identityId))` / `PersonaDeactivatedEvent`. Returns `false` without publishing when state is unchanged.
+- `ActiveIdentitySet(IEventPublisher publisher, ILogger<ActiveIdentitySet> logger)`: lock-guarded `HashSet<PublicIdentityId>`. Async methods `AddAsync`/`RemoveAsync` await `_publisher.PublishAsync` deterministically; non-blocking synchronous overloads dispatch background publishing safely logging errors via `ILogger` without unhandled task discards.
 - Register `AddSingleton<IActiveIdentitySet, ActiveIdentitySet>()` in `AddSessionCoreInfrastructure`.
-- `WindowHandoffCoordinator.TransitionToMainShellAsync`: before `await session.StartAsync(ct)` (currently L77), resolve `session.Services.GetRequiredService<IActiveIdentitySet>()` and call `Add(new PublicIdentityId(d.IdentityId))` for each `PersonaLaunchDescriptor`.
+- Clean hexagonal architecture: port located strictly in `Percolator.Application.Session.Ports`.
+- `WindowHandoffCoordinator.TransitionToMainShellAsync`: takes non-nullable `IReadOnlyList<PersonaLaunchDescriptor>` and `IReadOnlyList<ExchangeLaunchDescriptor>`. Before `await session.StartAsync(ct)`, resolves `session.Services.GetRequiredService<IActiveIdentitySet>()` and awaits `AddAsync(descriptor.IdentityId, ct)` for each persona.
+- `WindowHandoffCoordinatorTests`: covers ordering (active set seeded before `session.StartAsync()`), parameter validation, and socket lease disposal on session lock.
 
-**Verified:** shipped — sim `IActiveIdentitySet` seeding + `_isListening` bridge was deferred and is now spec'd in DRAIN-06 (sim hosts compose `AddAuthenticatedInfrastructure`, so they inherit the scheduler once the set is populated).
+**Verified:** Shipped & verified with unit test suite (`dotnet test Percolator.sln`) and full 8-scenario simulator suite (`dotnet run --project Percolator.Simulator\Percolator.Simulator.csproj -f net10.0-windows10.0.19041.0 -- --replay Percolator.Simulator\Scenarios`).
 
-**QMS:** `INV-DESKTOP-TWO-STAGE-HANDOFF`, `DEP-DESKTOP-PERSONA-ISOLATION`, `INV-APP-EVENT-BUS-DECOUPLING`, `DEC-EXECUTABLE-SESSION-COMPOSITION`.
+**QMS:** `INV-DESKTOP-TWO-STAGE-HANDOFF`, `DEP-DESKTOP-PERSONA-ISOLATION`, `INV-APP-EVENT-BUS-DECOUPLING`, `DEC-EXECUTABLE-SESSION-COMPOSITION`, `ANTI-SHORTCUT-ZERO-TOLERANCE`.
 
 ---
 

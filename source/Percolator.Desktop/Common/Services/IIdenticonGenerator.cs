@@ -1,5 +1,4 @@
-using System;
-using System.Collections.Generic;
+using Percolator.Domain.Identities;
 
 namespace Percolator.Desktop.Common.Services;
 
@@ -17,4 +16,5 @@ public sealed record IdenticonModel(IReadOnlyList<bool> Cells, byte Red, byte Gr
 public interface IIdenticonGenerator
 {
     IdenticonModel Generate(Guid seed);
+    IdenticonModel Generate(PublicIdentityId seed);
 }

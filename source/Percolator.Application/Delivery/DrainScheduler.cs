@@ -6,6 +6,7 @@ using Percolator.Application.Delivery.Ports;
 using Percolator.Application.Ports;
 using Percolator.Application.Session;
 using Percolator.Application.Session.Events;
+using Percolator.Application.Session.Ports;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
 

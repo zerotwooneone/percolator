@@ -1,6 +1,7 @@
 // SPECIFICATION GOVERNANCE: Read Percolator.Desktop/spec/CodeBehind.spec.md before modifying this file.
 
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Controls;
@@ -9,7 +10,7 @@ using Avalonia.Threading;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Ports;
-using Percolator.Application.Session;
+using Percolator.Application.Session.Ports;
 using Percolator.Desktop.Features.Shell.ViewModels;
 using Percolator.Desktop.Features.Shell.Views;
 using Percolator.Desktop.Features.Startup.Models;
@@ -49,73 +50,92 @@ public sealed class WindowHandoffCoordinator : IWindowHandoffCoordinator
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    private static IClassicDesktopStyleApplicationLifetime Desktop =>
-        Avalonia.Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime
-        ?? throw new InvalidOperationException("Desktop application lifetime is not available.");
-
     public async Task TransitionToGateAsync(IAuthenticatedSession session, CancellationToken ct = default)
     {
-        await Dispatcher.UIThread.InvokeAsync(async () =>
+        ArgumentNullException.ThrowIfNull(session);
+
+        if (Avalonia.Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            if (Desktop.MainWindow is StartupWindow { DataContext: StartupHostViewModel host })
+            await Dispatcher.UIThread.InvokeAsync(async () =>
             {
-                await host.NavigateToGateAsync(session);
-            }
-            else
-            {
-                _logger.LogWarning(
-                    "TransitionToGateAsync invoked without an open StartupWindow host; navigation skipped.");
-            }
-        });
+                if (desktop.MainWindow is StartupWindow { DataContext: StartupHostViewModel host })
+                {
+                    await host.NavigateToGateAsync(session);
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "TransitionToGateAsync invoked without an open StartupWindow host; navigation skipped.");
+                }
+            });
+        }
+        else
+        {
+            _logger.LogWarning(
+                "TransitionToGateAsync invoked without an available desktop application lifetime; navigation skipped.");
+        }
     }
 
     public async Task TransitionToMainShellAsync(
         IAuthenticatedSession session,
-        IReadOnlyList<PersonaLaunchDescriptor>? personas = null,
-        IReadOnlyList<ExchangeLaunchDescriptor>? exchanges = null,
+        IReadOnlyList<PersonaLaunchDescriptor> personas,
+        IReadOnlyList<ExchangeLaunchDescriptor> exchanges,
         CancellationToken ct = default)
     {
-        // Launches all registered IHostedService background workers in the Stage 2 container.
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(personas);
+        ArgumentNullException.ThrowIfNull(exchanges);
+
+        // 1. Seed active personas in IActiveIdentitySet BEFORE session.StartAsync so
+        // hosted workers (DrainScheduler / RelayMailboxDrainHost) observe a populated set.
+        var activeIdentities = session.Services.GetRequiredService<IActiveIdentitySet>();
+        foreach (var persona in personas)
+        {
+            await activeIdentities.AddAsync(persona.IdentityId, ct).ConfigureAwait(false);
+        }
+
+        // 2. Launches all registered IHostedService background workers in the Stage 2 container.
         await session.StartAsync(ct).ConfigureAwait(false);
 
         lock (_activePersonas)
         {
             _activePersonas.Clear();
-            if (personas is not null)
-            {
-                _activePersonas.AddRange(personas);
-            }
+            _activePersonas.AddRange(personas);
 
             _activeExchanges.Clear();
-            if (exchanges is not null)
-            {
-                _activeExchanges.AddRange(exchanges);
-            }
+            _activeExchanges.AddRange(exchanges);
         }
 
-        await Dispatcher.UIThread.InvokeAsync(async () =>
+        if (Avalonia.Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            var desktop = Desktop;
-            var previous = desktop.MainWindow;
+            await Dispatcher.UIThread.InvokeAsync(async () =>
+            {
+                var previous = desktop.MainWindow;
 
-            // Composition seam: the shell VM + geometry store live in the session container.
-            var geometryStore = session.Services.GetRequiredService<IShellWindowGeometryStore>();
-            var mainWindow = new MainWindow(
-                session.Services.GetRequiredService<MainWindowViewModel>(),
-                geometryStore);
+                // Composition seam: the shell VM + geometry store live in the session container.
+                var geometryStore = session.Services.GetRequiredService<IShellWindowGeometryStore>();
+                var mainWindow = new MainWindow(
+                    session.Services.GetRequiredService<MainWindowViewModel>(),
+                    geometryStore);
 
-            // Restore before Show — absent/corrupt record keeps the XAML CenterScreen default.
-            var geometry = await geometryStore.LoadAsync(ct).ConfigureAwait(true);
-            mainWindow.ApplyGeometry(geometry);
+                // Restore before Show — absent/corrupt record keeps the XAML CenterScreen default.
+                var geometry = await geometryStore.LoadAsync(ct).ConfigureAwait(true);
+                mainWindow.ApplyGeometry(geometry);
 
-            _shellClosed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            mainWindow.Closed += (_, _) => _shellClosed.TrySetResult();
+                _shellClosed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                mainWindow.Closed += (_, _) => _shellClosed.TrySetResult();
 
-            desktop.MainWindow = mainWindow;
-            mainWindow.Show();
+                desktop.MainWindow = mainWindow;
+                mainWindow.Show();
 
-            previous?.Close();
-        });
+                previous?.Close();
+            });
+        }
+        else
+        {
+            _logger.LogWarning(
+                "TransitionToMainShellAsync invoked without an available desktop application lifetime; UI window display skipped.");
+        }
     }
 
     public async Task LockSessionAsync(CancellationToken ct = default)
@@ -126,26 +146,33 @@ public sealed class WindowHandoffCoordinator : IWindowHandoffCoordinator
         // shell, and await its Closed event — the async-close save completes while the
         // session is still live.
         Task? shellClosed = null;
-        await Dispatcher.UIThread.InvokeAsync(() =>
+        if (Avalonia.Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            var desktop = Desktop;
-            var previous = desktop.MainWindow;
-
-            // Fresh transient host VM guarantees no passphrase/state residue after lock.
-            var hostViewModel = _startupHostFactory();
-            var startupWindow = new StartupWindow(hostViewModel);
-            desktop.MainWindow = startupWindow;
-            startupWindow.Show();
-
-            if (previous is not null && !ReferenceEquals(previous, startupWindow))
+            await Dispatcher.UIThread.InvokeAsync(() =>
             {
-                previous.Close();
-                if (previous is MainWindow)
+                var previous = desktop.MainWindow;
+
+                // Fresh transient host VM guarantees no passphrase/state residue after lock.
+                var hostViewModel = _startupHostFactory();
+                var startupWindow = new StartupWindow(hostViewModel);
+                desktop.MainWindow = startupWindow;
+                startupWindow.Show();
+
+                if (previous is not null && !ReferenceEquals(previous, startupWindow))
                 {
-                    shellClosed = _shellClosed.Task;
+                    previous.Close();
+                    if (previous is MainWindow)
+                    {
+                        shellClosed = _shellClosed.Task;
+                    }
                 }
-            }
-        });
+            });
+        }
+        else
+        {
+            _logger.LogWarning(
+                "LockSessionAsync invoked without an available desktop application lifetime; UI window navigation skipped.");
+        }
 
         if (shellClosed is not null)
         {

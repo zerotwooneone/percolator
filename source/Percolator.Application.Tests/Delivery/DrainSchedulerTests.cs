@@ -7,6 +7,7 @@ using Percolator.Application.Delivery.Ports;
 using Percolator.Application.Ingress;
 using Percolator.Application.Ports;
 using Percolator.Application.Session;
+using Percolator.Application.Session.Ports;
 using Percolator.Application.Tests.TestDoubles;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Model;
@@ -59,7 +60,7 @@ public sealed class DrainSchedulerTests
             MaxBackoff = TimeSpan.FromSeconds(5),
             BackoffMultiplier = 2.0,
         };
-        _active = new ActiveIdentitySet(_bus);
+        _active = new ActiveIdentitySet(_bus, NullLogger<ActiveIdentitySet>.Instance);
 
         var drainService = new MailboxDrainService(
             _store,

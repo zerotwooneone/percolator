@@ -2,6 +2,7 @@
 
 using System;
 using CommunityToolkit.Mvvm.ComponentModel;
+using Percolator.Domain.Identities;
 
 namespace Percolator.Desktop.Features.Startup.Models;
 
@@ -18,7 +19,7 @@ public sealed partial class LinkablePersonaModel : ObservableObject
     private bool _isLinked;
 
     public LinkablePersonaModel(
-        Guid personaId,
+        PublicIdentityId personaId,
         string displayName,
         AvatarPresentation avatar,
         bool isLinked = false,
@@ -31,7 +32,7 @@ public sealed partial class LinkablePersonaModel : ObservableObject
         _notifyChanged = notifyChanged;
     }
 
-    public Guid PersonaId { get; }
+    public PublicIdentityId PersonaId { get; }
     public string DisplayName { get; }
     public AvatarPresentation Avatar { get; }
 

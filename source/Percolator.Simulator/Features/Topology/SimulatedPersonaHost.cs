@@ -23,6 +23,7 @@ using Percolator.Application.Profiles;
 using Percolator.Application.Routing;
 using Percolator.Application.Services;
 using Percolator.Application.Session;
+using Percolator.Application.Session.Ports;
 using Percolator.Apps.Chat.DependencyInjection;
 using Percolator.Apps.FileTransfer.DependencyInjection;
 using Percolator.Apps.FileTransfer.Ports;
@@ -331,7 +332,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         var activeIdentities = _host.Services.GetRequiredService<IActiveIdentitySet>();
         if (_isListening.CurrentValue)
         {
-            activeIdentities.Add(PublicIdentityId);
+            await activeIdentities.AddAsync(PublicIdentityId, ct).ConfigureAwait(false);
         }
         _activeIdentitySubscription = IsListening.Subscribe(listening =>
         {
@@ -812,9 +813,9 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
     {
         _activeIdentitySubscription?.Dispose();
         _activeIdentitySubscription = null;
-        if (_host is not null)
+        if (_host is not null && _host.Services.GetService<IActiveIdentitySet>() is { } activeSet)
         {
-            _host.Services.GetService<IActiveIdentitySet>()?.Remove(PublicIdentityId);
+            await activeSet.RemoveAsync(PublicIdentityId, ct).ConfigureAwait(false);
         }
         _relayQueueSubscription?.Dispose();
         _relayQueueSubscription = null;

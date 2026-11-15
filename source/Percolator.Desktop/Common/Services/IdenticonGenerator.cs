@@ -1,6 +1,5 @@
-using System;
-using System.Collections.Generic;
 using System.Security.Cryptography;
+using Percolator.Domain.Identities;
 
 namespace Percolator.Desktop.Common.Services;
 
@@ -11,6 +10,8 @@ namespace Percolator.Desktop.Common.Services;
 /// </summary>
 public sealed class IdenticonGenerator : IIdenticonGenerator
 {
+    public IdenticonModel Generate(PublicIdentityId seed) => Generate(seed.Value);
+
     public IdenticonModel Generate(Guid seed)
     {
         var hash = SHA256.HashData(seed.ToByteArray());
