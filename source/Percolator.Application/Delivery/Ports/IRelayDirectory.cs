@@ -40,6 +40,15 @@ public interface IRelayDirectory
         PublicIdentityId ownerIdentityId,
         PublicIdentityId relayIdentityId,
         CancellationToken ct = default);
+    /// <summary>
+    /// Provision-on-connect: ensures the owner's mailbox exists relay-side, stamping
+    /// the binding's provisioned timestamp. Idempotent — skips the provisioning RPC
+    /// while the binding's mark is inside the freshness window.
+    /// </summary>
+    Task<DomainResult> EnsureMailboxProvisionedAsync(
+        PublicIdentityId relayIdentityId,
+        PublicIdentityId ownerIdentityId,
+        CancellationToken ct = default);
     Task<DomainResult> ProvisionLinkedMailboxesAsync(
         PublicIdentityId ownerIdentityId,
         CancellationToken ct = default);

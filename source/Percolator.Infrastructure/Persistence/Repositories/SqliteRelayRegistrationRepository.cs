@@ -161,7 +161,8 @@ public sealed class SqliteRelayRegistrationRepository : IRelayRegistrationReposi
             BlindedRoutingToken.FromBytes(b.RoutingToken),
             DeliveryToken.FromSpan(b.DrainToken),
             b.LinkedAtUtc,
-            b.PreviousDrainToken == null ? null : DeliveryToken.FromSpan(b.PreviousDrainToken)));
+            b.PreviousDrainToken == null ? null : DeliveryToken.FromSpan(b.PreviousDrainToken),
+            b.MailboxProvisionedUtc));
 
         return RelayRegistration.Rehydrate(
             new Domain.Identities.PublicIdentityId(entity.RelayIdentityId),

@@ -75,6 +75,7 @@ public sealed class RelayMailboxBindingEntity
     public byte[] DrainToken { get; set; } = Array.Empty<byte>();
     public byte[]? PreviousDrainToken { get; set; }
     public DateTimeOffset LinkedAtUtc { get; set; }
+    public DateTimeOffset? MailboxProvisionedUtc { get; set; }
 }
 
 public sealed class RelayMailboxCapabilityEntity

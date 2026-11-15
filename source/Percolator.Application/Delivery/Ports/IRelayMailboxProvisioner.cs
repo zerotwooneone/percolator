@@ -44,8 +44,8 @@ public interface IRelayMailboxProvisioner
         CancellationToken ct = default);
 
     Task<DomainResult<RelayPreKeyStatus>> GetPreKeyStatusAsync(
+        DeviceId deviceId,
         RelayEndpoint endpoint,
         MailboxTokenTriad tokens,
-        DeviceId deviceId,
         CancellationToken ct = default);
 }

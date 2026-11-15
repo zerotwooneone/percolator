@@ -51,66 +51,56 @@ internal sealed class RelayProvisioningCoordinator
 
         try
         {
-            using (var scope = persona.Services.CreateScope())
+            // AssignHomeRelayAsync owns registration + linking (it skips re-registering
+            // an already-known relay, preserving the binding's provisioned mark that
+            // an unconditional RegisterRemoteRelayAsync would clobber).
+            await persona.AssignHomeRelayAsync(relay, ct);
+
+            // Provision-on-connect is the drain scheduler's boundary (DRAIN-07). The
+            // coordinator still awaits the same ensure here: the prekey gate and
+            // visibility registration below require the mailbox capability to exist
+            // relay-side, and the scheduler's call is idempotent against the mark.
+            using (var ensureScope = persona.Services.CreateScope())
             {
-                var relayDirectory = scope.ServiceProvider.GetRequiredService<IRelayDirectory>();
-                var provisioner = scope.ServiceProvider.GetRequiredService<IRelayMailboxProvisioner>();
+                var directory = ensureScope.ServiceProvider.GetRequiredService<IRelayDirectory>();
+                var ensured = await directory.EnsureMailboxProvisionedAsync(
+                    relay.RelayIdentityId, persona.PublicIdentityId, ct);
+                if (ensured.IsFailure)
+                {
+                    _toastService.ShowToast("Registration Failed",
+                        $"Relay rejected mailbox registration: {ensured.Error.Description}", ToastSeverity.Error);
+                    return false;
+                }
+            }
+
+            // The relay's peer-directory admission gate rejects visibility registration
+            // for candidates with no active signed prekey — publish the initial bundle
+            // (0 OPKs) when absent. This is the discovery gate, not mailbox provisioning;
+            // OPK replenishment stays in the explicit PublishPreKeys step.
+            if (!await relay.QueryService.HasActivePreKeyAsync(persona.MailboxRoutingToken, ct))
+            {
+                using var gateScope = persona.Services.CreateScope();
+                var gateDirectory = gateScope.ServiceProvider.GetRequiredService<IRelayDirectory>();
+                var provisioner = gateScope.ServiceProvider.GetRequiredService<IRelayMailboxProvisioner>();
                 var relayEndpoint = RelayEndpoint.FromHostAndPort("127.0.0.1", relay.BoundPort);
 
-                var registerResult = await relayDirectory.RegisterRemoteRelayAsync(
-                    relay.RelayIdentityId, relayEndpoint, ct: ct);
-                if (registerResult.IsFailure)
-                {
-                    _toastService.ShowToast("Registration Failed", registerResult.Error.Description, ToastSeverity.Error);
-                    return false;
-                }
-
-                var linkResult = await relayDirectory.LinkIdentityAsync(
-                    relay.RelayIdentityId,
-                    persona.PublicIdentityId,
-                    persona.MailboxRoutingToken,
-                    persona.MailboxDrainToken,
-                    ct);
-                if (linkResult.IsFailure)
-                {
-                    _toastService.ShowToast("Registration Failed", linkResult.Error.Description, ToastSeverity.Error);
-                    return false;
-                }
-
-                var tokensResult = await relayDirectory.GetMailboxTokensAsync(
+                var tokensResult = await gateDirectory.GetMailboxTokensAsync(
                     persona.PublicIdentityId, relay.RelayIdentityId, ct);
                 if (tokensResult.IsFailure)
                 {
                     _toastService.ShowToast("Registration Failed", tokensResult.Error.Description, ToastSeverity.Error);
                     return false;
                 }
-                var tokens = tokensResult.Value!;
 
-                var provisionResult = await provisioner.ProvisionMailboxAsync(
-                    persona.PublicIdentityId, relay.RelayIdentityId, relayEndpoint, tokens, ct);
-                if (provisionResult.IsFailure)
+                var publishResult = await provisioner.PublishPreKeyBundleAsync(
+                    persona.PublicIdentityId, DeviceId.Primary, relayEndpoint, tokensResult.Value!, 0, ct);
+                if (publishResult.IsFailure)
                 {
-                    _toastService.ShowToast("Registration Failed", "Relay rejected mailbox registration.", ToastSeverity.Error);
+                    _toastService.ShowToast("Publish Error", "Relay rejected initial PreKey bundle publication.", ToastSeverity.Error);
                     return false;
-                }
-
-                // Publish the persona's signed pre-key bundle over gRPC with the mailbox
-                // tokens so (a) owner association happens on the wire rather than through
-                // an in-memory store call, and (b) the peer directory's pre-key admission
-                // gate is satisfied before visibility registration.
-                if (!await relay.QueryService.HasActivePreKeyAsync(persona.MailboxRoutingToken, ct))
-                {
-                    var publishResult = await provisioner.PublishPreKeyBundleAsync(
-                        persona.PublicIdentityId, DeviceId.Primary, relayEndpoint, tokens, 0, ct);
-                    if (publishResult.IsFailure)
-                    {
-                        _toastService.ShowToast("Publish Error", "Relay rejected initial PreKey bundle publication.", ToastSeverity.Error);
-                        return false;
-                    }
                 }
             }
 
-            await persona.AssignHomeRelayAsync(relay, ct);
             await persona.PublishProfileAsync(ct);
 
             using (var scope = persona.Services.CreateScope())
@@ -171,7 +161,7 @@ internal sealed class RelayProvisioningCoordinator
     public async Task<bool> PublishPreKeysAsync(
         ISimulatedPersonaHost persona,
         ISimulatedRelayHost relay,
-        int count = 25,
+        int count,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(persona);
@@ -267,7 +257,7 @@ internal sealed class RelayProvisioningCoordinator
     public async Task<int> BulkPublishPreKeysAsync(
         IEnumerable<ISimulatedPersonaHost> personas,
         ISimulatedRelayHost relay,
-        int opkCount = 25,
+        int opkCount,
         CancellationToken ct = default)
     {
         int count = 0;

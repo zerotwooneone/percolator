@@ -30,6 +30,12 @@ public sealed class GrpcRelayMailboxProvisioner : IRelayMailboxProvisioner
     private const uint LocalSignedPreKeyId = 1;
     private static readonly TimeSpan EnvelopeExpiryWindow = TimeSpan.FromDays(7);
 
+    // OPK key ids are allocated read-modify-write (max+1); concurrent publishes for
+    // the same owner would collide on vault_onetime_prekeys' unique key, so the
+    // allocate-generate-store stretch runs under this gate. Publishes are rare and
+    // the critical section is short, so a single process-wide gate suffices.
+    private readonly SemaphoreSlim _opkAllocationGate = new(1, 1);
+
     private readonly IPeerGrpcChannelFactory _channelFactory;
     private readonly ILocalIdentityKeyStore _identityKeyStore;
     private readonly IPrivatePreKeyStore _preKeyStore;
@@ -99,7 +105,7 @@ public sealed class GrpcRelayMailboxProvisioner : IRelayMailboxProvisioner
         DeviceId deviceId,
         RelayEndpoint endpoint,
         MailboxTokenTriad tokens,
-        int newOneTimePreKeyCount = 25,
+        int newOneTimePreKeyCount = 100,
         CancellationToken ct = default)
     {
         if (newOneTimePreKeyCount < 0)
@@ -120,63 +126,77 @@ public sealed class GrpcRelayMailboxProvisioner : IRelayMailboxProvisioner
                 "Local identity or signed pre-key material is unavailable for publishing."));
         }
 
-        // Generate and persist the requested batch of fresh OPKs.
+        // Generate and persist the requested batch of fresh OPKs under the
+        // allocation gate — see _opkAllocationGate's comment. The outer finally
+        // covers the whole method so a faulted generate/store can't leave private
+        // key material undisposed.
         var generated = new List<OneTimePreKeyMaterial>(newOneTimePreKeyCount);
-        var opkProtos = new List<OneTimePreKeyProto>(newOneTimePreKeyCount);
-        if (newOneTimePreKeyCount > 0)
-        {
-            uint startId = await _preKeyStore
-                .GetNextOneTimePreKeyIdAsync(ownerIdentityId, deviceId, ct)
-                .ConfigureAwait(false);
-
-            for (var i = 0; i < newOneTimePreKeyCount; i++)
-            {
-                var (opkPrivate, opkPublic) = _cryptoEngine.GenerateEphemeralKeyPair();
-                var keyId = startId + (uint)i;
-                generated.Add(new OneTimePreKeyMaterial(keyId, opkPrivate, opkPublic));
-                opkProtos.Add(new OneTimePreKeyProto
-                {
-                    KeyId = keyId,
-                    PublicKey = ByteString.CopyFrom(opkPublic.Span)
-                });
-            }
-
-            await _preKeyStore.StoreOneTimePreKeysAsync(ownerIdentityId, deviceId, generated, ct)
-                .ConfigureAwait(false);
-        }
-
-        // Flat, drain-token-authenticated publish matching Signal's PUT /v2/keys.
-        // No owner identity and no outer signature — the mailbox routing token is the
-        // storage key and the drain token proves write authorization.
-        var request = new PublishPreKeyBundleRequest
-        {
-            RoutingToken = ByteString.CopyFrom(tokens.RoutingToken.ToByteArray()),
-            DrainToken = ByteString.CopyFrom(tokens.DrainToken.Span),
-            DeviceId = deviceId.Value,
-            IdentityKey = ByteString.CopyFrom(publicKey.Span),
-            SignedPrekeyId = LocalSignedPreKeyId,
-            SignedPrekey = ByteString.CopyFrom(signedPreKey.PublicKey.Span),
-            PrekeySignature = ByteString.CopyFrom(signedPreKey.Signature.Span)
-        };
-        request.OneTimePrekeys.AddRange(opkProtos);
-
         try
         {
-            var client = CreateClient(endpoint);
-            var response = await client.PublishPreKeyBundleAsync(
-                request,
-                cancellationToken: ct).ResponseAsync.ConfigureAwait(false);
+            var opkProtos = new List<OneTimePreKeyProto>(newOneTimePreKeyCount);
+            if (newOneTimePreKeyCount > 0)
+            {
+                await _opkAllocationGate.WaitAsync(ct).ConfigureAwait(false);
+                try
+                {
+                    uint startId = await _preKeyStore
+                        .GetNextOneTimePreKeyIdAsync(ownerIdentityId, deviceId, ct)
+                        .ConfigureAwait(false);
 
-            return response.Success
-                ? DomainResult.Success()
-                : DomainResult.Failure(new DomainError(
-                    "RELAY_PUBLISH_REJECTED", "Relay rejected the published pre-key bundle."));
-        }
-        catch (RpcException ex)
-        {
-            return DomainResult.Failure(new DomainError(
-                "RELAY_PUBLISH_FAILED",
-                $"Pre-key bundle publish RPC failed: {ex.Status.Detail ?? ex.Message}"));
+                    for (var i = 0; i < newOneTimePreKeyCount; i++)
+                    {
+                        var (opkPrivate, opkPublic) = _cryptoEngine.GenerateEphemeralKeyPair();
+                        var keyId = startId + (uint)i;
+                        generated.Add(new OneTimePreKeyMaterial(keyId, opkPrivate, opkPublic));
+                        opkProtos.Add(new OneTimePreKeyProto
+                        {
+                            KeyId = keyId,
+                            PublicKey = ByteString.CopyFrom(opkPublic.Span)
+                        });
+                    }
+
+                    await _preKeyStore.StoreOneTimePreKeysAsync(ownerIdentityId, deviceId, generated, ct)
+                        .ConfigureAwait(false);
+                }
+                finally
+                {
+                    _opkAllocationGate.Release();
+                }
+            }
+
+            // Flat, drain-token-authenticated publish matching Signal's PUT /v2/keys.
+            // No owner identity and no outer signature — the mailbox routing token is the
+            // storage key and the drain token proves write authorization.
+            var request = new PublishPreKeyBundleRequest
+            {
+                RoutingToken = ByteString.CopyFrom(tokens.RoutingToken.ToByteArray()),
+                DrainToken = ByteString.CopyFrom(tokens.DrainToken.Span),
+                DeviceId = deviceId.Value,
+                IdentityKey = ByteString.CopyFrom(publicKey.Span),
+                SignedPrekeyId = LocalSignedPreKeyId,
+                SignedPrekey = ByteString.CopyFrom(signedPreKey.PublicKey.Span),
+                PrekeySignature = ByteString.CopyFrom(signedPreKey.Signature.Span)
+            };
+            request.OneTimePrekeys.AddRange(opkProtos);
+
+            try
+            {
+                var client = CreateClient(endpoint);
+                var response = await client.PublishPreKeyBundleAsync(
+                    request,
+                    cancellationToken: ct).ResponseAsync.ConfigureAwait(false);
+
+                return response.Success
+                    ? DomainResult.Success()
+                    : DomainResult.Failure(new DomainError(
+                        "RELAY_PUBLISH_REJECTED", "Relay rejected the published pre-key bundle."));
+            }
+            catch (RpcException ex)
+            {
+                return DomainResult.Failure(new DomainError(
+                    "RELAY_PUBLISH_FAILED",
+                    $"Pre-key bundle publish RPC failed: {ex.Status.Detail ?? ex.Message}"));
+            }
         }
         finally
         {
@@ -261,9 +281,9 @@ public sealed class GrpcRelayMailboxProvisioner : IRelayMailboxProvisioner
     }
 
     public Task<DomainResult<RelayPreKeyStatus>> GetPreKeyStatusAsync(
+        DeviceId deviceId,
         RelayEndpoint endpoint,
         MailboxTokenTriad tokens,
-        DeviceId deviceId,
         CancellationToken ct = default)
     {
         // The GetPreKeyStatus relay RPC is introduced with the prekey-maintenance

@@ -107,9 +107,9 @@ public sealed class RelayDirectoryServiceTests
         }
 
         public Task<DomainResult<RelayPreKeyStatus>> GetPreKeyStatusAsync(
+            DeviceId deviceId,
             RelayEndpoint endpoint,
             MailboxTokenTriad tokens,
-            DeviceId deviceId,
             CancellationToken ct = default)
             => Task.FromResult(DomainResult<RelayPreKeyStatus>.Success(new RelayPreKeyStatus(false, 0, new SignedPreKeyId(0))));
     }
@@ -302,9 +302,92 @@ public sealed class RelayDirectoryServiceTests
         result.IsSuccess.Should().BeTrue();
         _provisioner.Provisions.Select(p => p.RelayId).Should().BeEquivalentTo(new[] { relay1, relay2 });
         _provisioner.Publications.Should().HaveCount(2);
-        _provisioner.Publications.Should().OnlyContain(p => p.DeviceId == DeviceId.Primary && p.OpkCount == 25);
+        _provisioner.Publications.Should().OnlyContain(p => p.DeviceId == DeviceId.Primary && p.OpkCount == 100);
         _provisioner.Publications.Select(p => p.Tokens.RoutingToken)
             .Should().BeEquivalentTo(_provisioner.Provisions.Select(p => p.Tokens.RoutingToken));
+    }
+
+    [Test]
+    public async Task EnsureMailboxProvisionedAsync_UnknownRelay_FailsWithRelayNotFound()
+    {
+        var result = await _service.EnsureMailboxProvisionedAsync(
+            PublicIdentityId.New(), PublicIdentityId.New());
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("RELAY_NOT_FOUND");
+        _provisioner.Provisions.Should().BeEmpty();
+    }
+
+    [Test]
+    public async Task EnsureMailboxProvisionedAsync_OwnerNotLinked_FailsWithBindingNotFound()
+    {
+        var ownerId = RegisterIdentityWithKeys();
+        var relayId = PublicIdentityId.New();
+        await _service.RegisterRemoteRelayAsync(relayId, NewEndpoint(5200));
+
+        var result = await _service.EnsureMailboxProvisionedAsync(relayId, ownerId);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("MAILBOX_BINDING_NOT_FOUND");
+        _provisioner.Provisions.Should().BeEmpty();
+    }
+
+    [Test]
+    public async Task EnsureMailboxProvisionedAsync_ProvisionsThenSkipsWithinFreshnessWindow()
+    {
+        var ownerId = RegisterIdentityWithKeys();
+        var relayId = PublicIdentityId.New();
+        await _service.RegisterRemoteRelayAsync(relayId, NewEndpoint(5200));
+        await _service.LinkIdentityAsync(relayId, ownerId);
+
+        var first = await _service.EnsureMailboxProvisionedAsync(relayId, ownerId);
+        first.IsSuccess.Should().BeTrue();
+        _provisioner.Provisions.Should().ContainSingle().Which.RelayId.Should().Be(relayId);
+
+        var binding = (await _relayRepository.GetByIdAsync(relayId))!.Bindings.Single();
+        binding.MailboxProvisionedUtc.Should().Be(_timeProvider.UtcNow);
+
+        var second = await _service.EnsureMailboxProvisionedAsync(relayId, ownerId);
+        second.IsSuccess.Should().BeTrue();
+        _provisioner.Provisions.Should().ContainSingle("the mark is inside the 24h freshness window");
+    }
+
+    [Test]
+    public async Task EnsureMailboxProvisionedAsync_StaleMark_Reprovisions()
+    {
+        var ownerId = RegisterIdentityWithKeys();
+        var relayId = PublicIdentityId.New();
+        await _service.RegisterRemoteRelayAsync(relayId, NewEndpoint(5200));
+        await _service.LinkIdentityAsync(relayId, ownerId);
+
+        await _service.EnsureMailboxProvisionedAsync(relayId, ownerId);
+        _timeProvider.UtcNow += TimeSpan.FromHours(25);
+
+        var second = await _service.EnsureMailboxProvisionedAsync(relayId, ownerId);
+
+        second.IsSuccess.Should().BeTrue();
+        _provisioner.Provisions.Should().HaveCount(2, "a mark older than 24h rotates");
+    }
+
+    [Test]
+    public async Task EnsureMailboxProvisionedAsync_ProvisionFailure_LeavesMarkUnset()
+    {
+        var ownerId = RegisterIdentityWithKeys();
+        var relayId = PublicIdentityId.New();
+        await _service.RegisterRemoteRelayAsync(relayId, NewEndpoint(5200));
+        await _service.LinkIdentityAsync(relayId, ownerId);
+        _provisioner.ProvisionResult = DomainResult.Failure(new DomainError("PROVISION", "relay refused"));
+
+        var result = await _service.EnsureMailboxProvisionedAsync(relayId, ownerId);
+
+        result.IsFailure.Should().BeTrue();
+        var binding = (await _relayRepository.GetByIdAsync(relayId))!.Bindings.Single();
+        binding.MailboxProvisionedUtc.Should().BeNull("a failed provision must not mark the binding");
+
+        _provisioner.ProvisionResult = null;
+        var retry = await _service.EnsureMailboxProvisionedAsync(relayId, ownerId);
+        retry.IsSuccess.Should().BeTrue("retry provisions again after failure");
+        _provisioner.Provisions.Should().HaveCount(2);
     }
 
     [Test]

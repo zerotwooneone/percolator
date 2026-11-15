@@ -21,6 +21,12 @@ namespace Percolator.Application.Delivery;
 /// </summary>
 public sealed class RelayDirectoryService : IRelayDirectory
 {
+    /// <summary>
+    /// A provisioned mark newer than this window counts as still-provisioned; older
+    /// marks trigger one re-provisioning RPC (24h rotation).
+    /// </summary>
+    private static readonly TimeSpan ProvisioningFreshnessWindow = TimeSpan.FromHours(24);
+
     private readonly IRelayRegistrationRepository _relayRepository;
     private readonly IIdentityProfileRepository _profileRepository;
     private readonly ILocalIdentityKeyStore _identityKeyStore;
@@ -211,6 +217,58 @@ public sealed class RelayDirectoryService : IRelayDirectory
         return DomainResult.Success();
     }
 
+    public async Task<DomainResult> EnsureMailboxProvisionedAsync(
+        PublicIdentityId relayIdentityId,
+        PublicIdentityId ownerIdentityId,
+        CancellationToken ct = default)
+    {
+        var registration = await _relayRepository.GetByIdAsync(relayIdentityId, ct).ConfigureAwait(false);
+        if (registration is null)
+        {
+            // Absent registration is a wiring error, not a first-connect case — the
+            // provisioning RPC does not create the registration row.
+            return DomainResult.Failure(
+                new DomainError("RELAY_NOT_FOUND", "No relay registration exists for the given relay identity."));
+        }
+
+        var binding = registration.Bindings.FirstOrDefault(b => b.OwnerIdentityId == ownerIdentityId);
+        if (binding is null)
+        {
+            return DomainResult.Failure(
+                new DomainError("MAILBOX_BINDING_NOT_FOUND", "Owner identity is not linked to the given relay."));
+        }
+
+        var now = _timeProvider.UtcNow;
+        if (binding.MailboxProvisionedUtc is { } provisionedUtc &&
+            now - provisionedUtc < ProvisioningFreshnessWindow)
+        {
+            return DomainResult.Success();
+        }
+
+        var tokensResult = await GetMailboxTokensAsync(ownerIdentityId, relayIdentityId, ct).ConfigureAwait(false);
+        if (tokensResult.IsFailure)
+        {
+            return DomainResult.Failure(tokensResult.Error);
+        }
+
+        var provisionResult = await _provisioner
+            .ProvisionMailboxAsync(ownerIdentityId, relayIdentityId, registration.Endpoint, tokensResult.Value!, ct)
+            .ConfigureAwait(false);
+        if (provisionResult.IsFailure)
+        {
+            return DomainResult.Failure(provisionResult.Error);
+        }
+
+        var markResult = registration.MarkMailboxProvisioned(ownerIdentityId, _timeProvider);
+        if (markResult.IsFailure)
+        {
+            return markResult;
+        }
+
+        await _relayRepository.SaveAsync(registration, ct).ConfigureAwait(false);
+        return DomainResult.Success();
+    }
+
     public async Task<DomainResult<MailboxTokenTriad>> GetMailboxTokensAsync(
         PublicIdentityId ownerIdentityId,
         PublicIdentityId relayIdentityId,
@@ -271,7 +329,7 @@ public sealed class RelayDirectoryService : IRelayDirectory
             }
 
             var publishResult = await _provisioner
-                .PublishPreKeyBundleAsync(ownerIdentityId, DeviceId.Primary, registration.Endpoint, tokens, 25, ct)
+                .PublishPreKeyBundleAsync(ownerIdentityId, DeviceId.Primary, registration.Endpoint, tokens, ct: ct)
                 .ConfigureAwait(false);
             if (publishResult.IsFailure)
             {

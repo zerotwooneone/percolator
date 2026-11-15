@@ -7,6 +7,7 @@ using Percolator.Application.Ports;
 using Percolator.Application.Session;
 using Percolator.Application.Session.Events;
 using Percolator.Domain.Common;
+using Percolator.Domain.Identities.ValueObjects;
 
 namespace Percolator.Application.Delivery;
 
@@ -14,7 +15,8 @@ namespace Percolator.Application.Delivery;
 /// Reconciles the active-persona mailbox bindings from <see cref="IRelayDirectory"/>
 /// against running drain streams, then supervises one
 /// <see cref="MailboxDrainService"/> stream per <see cref="MailboxDrainTarget"/>:
-/// spool replay → fresh token resolution → streaming drain with persist-then-ack.
+/// mailbox ensure-provisioned → fresh token resolution → first-connect prekey seed
+/// → spool replay → streaming drain with persist-then-ack.
 /// Session-cap admission, per-target exponential backoff, and a periodic
 /// <see cref="DrainSchedulerOptions.MaxSessionAge"/> rotation bound reconnect cost
 /// and token staleness. Event-bus reconcile triggers keep the loop event-driven
@@ -273,23 +275,21 @@ public sealed class DrainScheduler
         var normalEnd = false;
         try
         {
-            // First activation hook: DRAIN-07 adds ensure-provisioned here and
-            // DRAIN-10 adds IPreKeyMaintenanceService.EvaluateAsync(target, forced: false).
-            lock (_gate)
-            {
-                _firstActivationSeen.Add(target);
-            }
-
             using var scope = _scopeFactory.CreateScope();
             var drainService = scope.ServiceProvider.GetRequiredService<MailboxDrainService>();
             var relayDirectory = scope.ServiceProvider.GetRequiredService<IRelayDirectory>();
             var mailboxClient = scope.ServiceProvider.GetRequiredService<IRelayMailboxClient>();
+            var provisioner = scope.ServiceProvider.GetRequiredService<IRelayMailboxProvisioner>();
 
-            var replay = await drainService.ReplayPendingAsync(target, ct).ConfigureAwait(false);
-            if (replay.IsFailure)
+            // DRAIN-07 provision-on-connect: the relay-side mailbox must exist before
+            // the stream opens. Failure lands in the shared fault path (backoff +
+            // requeue). DRAIN-10 adds IPreKeyMaintenanceService.EvaluateAsync here.
+            var ensured = await relayDirectory.EnsureMailboxProvisionedAsync(
+                target.RelayIdentityId, target.OwnerIdentityId, ct).ConfigureAwait(false);
+            if (ensured.IsFailure)
             {
                 throw new InvalidOperationException(
-                    $"Pending-ingress replay failed for {target.RelayIdentityId.Value}: {replay.Error.Code} {replay.Error.Description}");
+                    $"Mailbox provisioning failed for {target.RelayIdentityId.Value}: {ensured.Error.Code} {ensured.Error.Description}");
             }
 
             // Tokens are resolved fresh per connect — never cached across reconnects.
@@ -299,6 +299,53 @@ public sealed class DrainScheduler
             {
                 throw new InvalidOperationException(
                     $"Mailbox token resolution failed for {target.RelayIdentityId.Value}: {tokens.Error.Code} {tokens.Error.Description}");
+            }
+
+            // DRAIN-07: first connect per session also seeds the hosted bundle —
+            // personas launched through the auto-start path never ran the gate
+            // launch's provision+publish. Until DRAIN-10's status RPC lands,
+            // GetPreKeyStatusAsync reports RELAY_PREKEY_STATUS_UNAVAILABLE — treat
+            // a failed check as unknown bundle state and publish anyway; relay-side
+            // publication merges OPKs idempotently.
+            var firstConnect = false;
+            lock (_gate)
+            {
+                firstConnect = _firstActivationSeen.Add(target);
+            }
+            if (firstConnect)
+            {
+                try
+                {
+                    var status = await provisioner.GetPreKeyStatusAsync(
+                        DeviceId.Primary, target.Endpoint, tokens.Value!, ct).ConfigureAwait(false);
+                    if (status.IsFailure || !status.Value!.Found)
+                    {
+                        var published = await provisioner.PublishPreKeyBundleAsync(
+                            target.OwnerIdentityId, DeviceId.Primary, target.Endpoint, tokens.Value!, ct: ct).ConfigureAwait(false);
+                        if (published.IsFailure)
+                        {
+                            throw new InvalidOperationException(
+                                $"PreKey bundle publication failed for {target.RelayIdentityId.Value}: {published.Error.Code} {published.Error.Description}");
+                        }
+                    }
+                }
+                catch
+                {
+                    // Unmark on any failure — a faulted seed must not permanently
+                    // skip the publish path; the backoff retry re-runs the block.
+                    lock (_gate)
+                    {
+                        _firstActivationSeen.Remove(target);
+                    }
+                    throw;
+                }
+            }
+
+            var replay = await drainService.ReplayPendingAsync(target, ct).ConfigureAwait(false);
+            if (replay.IsFailure)
+            {
+                throw new InvalidOperationException(
+                    $"Pending-ingress replay failed for {target.RelayIdentityId.Value}: {replay.Error.Code} {replay.Error.Description}");
             }
 
             using var sessionCts = CancellationTokenSource.CreateLinkedTokenSource(ct);

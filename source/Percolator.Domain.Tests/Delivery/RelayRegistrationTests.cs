@@ -155,6 +155,33 @@ public sealed class RelayRegistrationTests
     }
 
     [Test]
+    public void MarkMailboxProvisioned_LinkedOwner_StampsProvisionedUtc_PreservesTokens()
+    {
+        var registration = CreateRegistration();
+        var ownerId = PublicIdentityId.New();
+        var binding = registration.LinkIdentity(ownerId, _timeProvider).Value!;
+
+        var result = registration.MarkMailboxProvisioned(ownerId, _timeProvider);
+
+        Assert.That(result.IsSuccess, Is.True);
+        var marked = registration.Bindings.Single(b => b.OwnerIdentityId == ownerId);
+        Assert.That(marked.MailboxProvisionedUtc, Is.EqualTo(_timeProvider.UtcNow));
+        Assert.That(marked.DrainToken.Span.ToArray(), Is.EqualTo(binding.DrainToken.Span.ToArray()));
+        Assert.That(marked.RoutingToken.ToByteArray(), Is.EqualTo(binding.RoutingToken.ToByteArray()));
+    }
+
+    [Test]
+    public void MarkMailboxProvisioned_NotLinked_Fails()
+    {
+        var registration = CreateRegistration();
+
+        var result = registration.MarkMailboxProvisioned(PublicIdentityId.New(), _timeProvider);
+
+        Assert.That(result.IsFailure, Is.True);
+        Assert.That(result.Error.Code, Is.EqualTo("MAILBOX_BINDING_NOT_FOUND"));
+    }
+
+    [Test]
     public void UpdateEndpoint_UpdatesEndpointOnly_PreservesPin()
     {
         var registration = CreateRegistration();

@@ -64,7 +64,7 @@
       "$type": "AssertHostedOpkCount",
       "relayAlias": "Relay-1",
       "personaAlias": "Bob",
-      "expectedCount": 24
+      "expectedCount": 99
     },
     {
       "$type": "AssertMailboxQueueDepth",

@@ -148,6 +148,24 @@ public sealed class RelayRegistration : AggregateRoot<PublicIdentityId>
     }
 
     /// <summary>
+    /// Stamps the linked identity's binding as relay-side provisioned. Callers compare
+    /// <see cref="RelayMailboxBinding.MailboxProvisionedUtc"/> against their freshness
+    /// window to keep provisioning idempotent across reconnects.
+    /// </summary>
+    public DomainResult MarkMailboxProvisioned(PublicIdentityId ownerIdentityId, IDateTimeProvider timeProvider)
+    {
+        var index = _bindings.FindIndex(b => b.OwnerIdentityId == ownerIdentityId);
+        if (index < 0)
+        {
+            return DomainResult.Failure(
+                new DomainError("MAILBOX_BINDING_NOT_FOUND", "Identity is not linked to this relay."));
+        }
+
+        _bindings[index] = _bindings[index] with { MailboxProvisionedUtc = timeProvider.UtcNow };
+        return DomainResult.Success();
+    }
+
+    /// <summary>
     /// Updates the relay's network endpoint only. The certificate pin is unchanged;
     /// use <see cref="SetCertificatePin"/> or <see cref="ClearCertificatePin"/> to modify it.
     /// </summary>

@@ -175,10 +175,19 @@ public sealed class RelayHostedPreKeyBundle : AggregateRoot<HostedPreKeyRecordId
         }
 
         var incoming = newPreKeys as IReadOnlyCollection<(uint KeyId, DhPublicKey Key)> ?? newPreKeys.ToList();
-        if (_oneTimePreKeys.Count + incoming.Count > policy.MaxOneTimePreKeysPerIdentity)
+        if (incoming.Count > policy.MaxOneTimePreKeysPerIdentity)
         {
             return DomainResult.Failure(
                 new DomainError("PREKEY_QUOTA_EXCEEDED", $"Cannot exceed max limit of {policy.MaxOneTimePreKeysPerIdentity} one-time prekeys."));
+        }
+
+        // Newest-wins within the cap: publishers allocate fresh key ids per batch,
+        // so rejecting a replenish on a full bucket would wedge the bundle at a
+        // stale key set. Evict the oldest unconsumed keys instead — the cap still
+        // bounds total hosted keys, and consumption order is FIFO either way.
+        while (_oneTimePreKeys.Count + incoming.Count > policy.MaxOneTimePreKeysPerIdentity)
+        {
+            _oneTimePreKeys.Dequeue();
         }
 
         foreach (var key in incoming)

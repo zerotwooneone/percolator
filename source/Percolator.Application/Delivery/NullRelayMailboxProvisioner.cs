@@ -33,9 +33,9 @@ public sealed class NullRelayMailboxProvisioner : IRelayMailboxProvisioner
         => Task.FromResult(Unavailable());
 
     public Task<DomainResult<RelayPreKeyStatus>> GetPreKeyStatusAsync(
+        DeviceId deviceId,
         RelayEndpoint endpoint,
         MailboxTokenTriad tokens,
-        DeviceId deviceId,
         CancellationToken ct = default)
         => Task.FromResult(DomainResult<RelayPreKeyStatus>.Failure(
             new DomainError("PROVISIONER_UNAVAILABLE", "No relay mailbox provisioner is configured.")));

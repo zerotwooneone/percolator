@@ -25,6 +25,7 @@ public sealed class DrainSchedulerTests
     private FakeRelayDirectory _directory = null!;
     private FakeMailboxClient _mailboxClient = null!;
     private RecordingIngressStore _store = null!;
+    private FakeMailboxProvisioner _provisioner = null!;
     private FakeServiceProvider _scopeProvider = null!;
     private TestDateTimeProvider _time = null!;
     private DrainSchedulerOptions _options = null!;
@@ -44,10 +45,10 @@ public sealed class DrainSchedulerTests
     public void SetUp()
     {
         _bus = new FakeEventBus();
-        _active = new ActiveIdentitySet(_bus);
         _directory = new FakeRelayDirectory();
         _mailboxClient = new FakeMailboxClient();
         _store = new RecordingIngressStore();
+        _provisioner = new FakeMailboxProvisioner();
         _time = new TestDateTimeProvider();
         _options = new DrainSchedulerOptions
         {
@@ -58,6 +59,7 @@ public sealed class DrainSchedulerTests
             MaxBackoff = TimeSpan.FromSeconds(5),
             BackoffMultiplier = 2.0,
         };
+        _active = new ActiveIdentitySet(_bus);
 
         var drainService = new MailboxDrainService(
             _store,
@@ -71,6 +73,7 @@ public sealed class DrainSchedulerTests
         {
             [typeof(IRelayDirectory)] = _directory,
             [typeof(IRelayMailboxClient)] = _mailboxClient,
+            [typeof(IRelayMailboxProvisioner)] = _provisioner,
             [typeof(MailboxDrainService)] = drainService,
         });
 
@@ -320,6 +323,159 @@ public sealed class DrainSchedulerTests
         await run;
     }
 
+    [Test]
+    public async Task EnsureProvisioned_RunsBeforeStreamOpen()
+    {
+        _active.Add(OwnerA);
+        _directory.AddEntry(Entry(Relay1, 5001, OwnerA));
+
+        using var cts = new CancellationTokenSource();
+        var run = _scheduler.RunAsync(cts.Token);
+
+        await WaitForAsync(() => _mailboxClient.Opened.Count == 1, "stream opened");
+
+        _directory.EnsureCallCount.Should().Be(1);
+        _directory.EnsureTimes()[0].Should().BeBefore(_mailboxClient.OpenTimesFor(5001)[0],
+            "provision-on-connect precedes the stream open");
+
+        cts.Cancel();
+        await run;
+    }
+
+    [Test]
+    public async Task EnsureProvisionedFailure_RequeuesWithBackoff_AndNoStream()
+    {
+        _options = _options with { InitialBackoff = TimeSpan.FromMilliseconds(40) };
+        // Live clock: backoff requeue times must elapse in real time.
+        _scheduler = new DrainScheduler(
+            _active, _bus, _scopeProvider, new LiveDateTimeProvider(), _options, NullLogger<DrainScheduler>.Instance);
+
+        var calls = 0;
+        _directory.EnsureOverride = _ => Interlocked.Increment(ref calls) <= 2
+            ? DomainResult.Failure(new DomainError("PROVISION_FAILED", "relay refused"))
+            : DomainResult.Success();
+
+        _active.Add(OwnerA);
+        _directory.AddEntry(Entry(Relay1, 5001, OwnerA));
+
+        using var cts = new CancellationTokenSource();
+        var run = _scheduler.RunAsync(cts.Token);
+
+        await WaitForAsync(() => _directory.EnsureCallCount >= 3, "provision retried");
+        await WaitForAsync(() => _mailboxClient.Opened.Count == 1, "stream opens after provision succeeds");
+
+        var attempts = _directory.EnsureTimes();
+        attempts.Should().HaveCountGreaterThanOrEqualTo(3);
+        (attempts[1] - attempts[0]).Should().BeGreaterThanOrEqualTo(
+            TimeSpan.FromMilliseconds(30), "failed provision retries respect InitialBackoff");
+
+        cts.Cancel();
+        await run;
+    }
+
+    [Test]
+    public async Task EnsureProvisioned_CalledPerConnect_AcrossSessionRotation()
+    {
+        _options = _options with { MaxSessionAge = TimeSpan.FromMilliseconds(60) };
+        _scheduler = new DrainScheduler(
+            _active, _bus, _scopeProvider, _time, _options, NullLogger<DrainScheduler>.Instance);
+
+        _active.Add(OwnerA);
+        _directory.AddEntry(Entry(Relay1, 5001, OwnerA));
+
+        using var cts = new CancellationTokenSource();
+        var run = _scheduler.RunAsync(cts.Token);
+
+        await WaitForAsync(() => _mailboxClient.Opened.Count >= 2, "rotation reconnects");
+        _directory.EnsureCallCount.Should().BeGreaterThanOrEqualTo(2,
+            "every connect re-checks the provisioned mark; idempotency lives in the service");
+
+        cts.Cancel();
+        await run;
+    }
+
+    [Test]
+    public async Task FirstConnect_BundleNotFound_PublishesPreKeyBundle()
+    {
+        _provisioner.StatusOverride = DomainResult<RelayPreKeyStatus>.Success(
+            new RelayPreKeyStatus(false, 0, new SignedPreKeyId(0)));
+
+        _active.Add(OwnerA);
+        _directory.AddEntry(Entry(Relay1, 5001, OwnerA));
+
+        using var cts = new CancellationTokenSource();
+        var run = _scheduler.RunAsync(cts.Token);
+
+        await WaitForAsync(() => _mailboxClient.Opened.Count == 1, "stream opened");
+
+        _provisioner.Publications().Should().ContainSingle()
+            .Which.OpkCount.Should().Be(100, "first-connect seeds a full OPK batch");
+
+        cts.Cancel();
+        await run;
+    }
+
+    [Test]
+    public async Task FirstConnect_StatusCheckFails_PublishesAnyway()
+    {
+        _provisioner.StatusOverride = DomainResult<RelayPreKeyStatus>.Failure(
+            new DomainError("RELAY_PREKEY_STATUS_UNAVAILABLE", "status RPC not implemented"));
+
+        _active.Add(OwnerA);
+        _directory.AddEntry(Entry(Relay1, 5001, OwnerA));
+
+        using var cts = new CancellationTokenSource();
+        var run = _scheduler.RunAsync(cts.Token);
+
+        await WaitForAsync(() => _mailboxClient.Opened.Count == 1, "stream opened");
+
+        _provisioner.Publications().Should().ContainSingle(
+            "a failed status check means unknown bundle state — publish merges OPKs idempotently");
+
+        cts.Cancel();
+        await run;
+    }
+
+    [Test]
+    public async Task FirstConnect_BundleFound_SkipsPublish()
+    {
+        _active.Add(OwnerA);
+        _directory.AddEntry(Entry(Relay1, 5001, OwnerA));
+
+        using var cts = new CancellationTokenSource();
+        var run = _scheduler.RunAsync(cts.Token);
+
+        await WaitForAsync(() => _mailboxClient.Opened.Count == 1, "stream opened");
+
+        _provisioner.StatusCallCount.Should().Be(1);
+        _provisioner.PublicationCount.Should().Be(0, "a found bundle needs no seeding");
+
+        cts.Cancel();
+        await run;
+    }
+
+    [Test]
+    public async Task PrekeySeed_ChecksOnlyOnFirstConnect()
+    {
+        _options = _options with { MaxSessionAge = TimeSpan.FromMilliseconds(60) };
+        _scheduler = new DrainScheduler(
+            _active, _bus, _scopeProvider, _time, _options, NullLogger<DrainScheduler>.Instance);
+
+        _active.Add(OwnerA);
+        _directory.AddEntry(Entry(Relay1, 5001, OwnerA));
+
+        using var cts = new CancellationTokenSource();
+        var run = _scheduler.RunAsync(cts.Token);
+
+        await WaitForAsync(() => _mailboxClient.Opened.Count >= 2, "rotation reconnects");
+
+        _provisioner.StatusCallCount.Should().Be(1,
+            "the bundle seed runs once per session, not per connect");
+
+        cts.Cancel();
+        await run;
+    }
+
     // ---------- test doubles ----------
 
     private sealed class FakeEventBus : IEventBus
@@ -364,6 +520,26 @@ public sealed class DrainSchedulerTests
     {
         public List<RelayDirectoryEntry> Entries { get; } = new();
         public int TokenCalls { get; private set; }
+        private readonly List<(PublicIdentityId RelayId, PublicIdentityId OwnerId, DateTimeOffset At)> _ensureCalls = new();
+        public Func<(PublicIdentityId RelayId, PublicIdentityId OwnerId), DomainResult>? EnsureOverride { get; set; }
+
+        public int EnsureCallCount
+        {
+            get { lock (_ensureCalls) { return _ensureCalls.Count; } }
+        }
+
+        public List<DateTimeOffset> EnsureTimes()
+        {
+            lock (_ensureCalls) { return _ensureCalls.Select(c => c.At).ToList(); }
+        }
+
+        public Task<DomainResult> EnsureMailboxProvisionedAsync(
+            PublicIdentityId relayIdentityId, PublicIdentityId ownerIdentityId, CancellationToken ct = default)
+        {
+            lock (_ensureCalls) { _ensureCalls.Add((relayIdentityId, ownerIdentityId, DateTimeOffset.UtcNow)); }
+            var result = EnsureOverride?.Invoke((relayIdentityId, ownerIdentityId)) ?? DomainResult.Success();
+            return Task.FromResult(result);
+        }
 
         public void AddEntry(RelayDirectoryEntry entry)
         {
@@ -416,6 +592,55 @@ public sealed class DrainSchedulerTests
         public Task<DomainResult> ProvisionLinkedMailboxesAsync(
             PublicIdentityId ownerIdentityId, CancellationToken ct = default) =>
             throw new NotSupportedException();
+    }
+
+    private sealed class FakeMailboxProvisioner : IRelayMailboxProvisioner
+    {
+        private readonly object _gate = new();
+        private readonly List<(PublicIdentityId OwnerId, PublicIdentityId RelayId)> _provisions = new();
+        private readonly List<(PublicIdentityId OwnerId, DeviceId DeviceId, int OpkCount)> _publications = new();
+        private int _statusCalls;
+
+        public DomainResult<RelayPreKeyStatus>? StatusOverride { get; set; }
+
+        public int StatusCallCount
+        {
+            get { lock (_gate) { return _statusCalls; } }
+        }
+
+        public int PublicationCount
+        {
+            get { lock (_gate) { return _publications.Count; } }
+        }
+
+        public List<(PublicIdentityId OwnerId, DeviceId DeviceId, int OpkCount)> Publications()
+        {
+            lock (_gate) { return _publications.ToList(); }
+        }
+
+        public Task<DomainResult> ProvisionMailboxAsync(
+            PublicIdentityId ownerIdentityId, PublicIdentityId relayIdentityId,
+            RelayEndpoint endpoint, MailboxTokenTriad tokens, CancellationToken ct = default)
+        {
+            lock (_gate) { _provisions.Add((ownerIdentityId, relayIdentityId)); }
+            return Task.FromResult(DomainResult.Success());
+        }
+
+        public Task<DomainResult> PublishPreKeyBundleAsync(
+            PublicIdentityId ownerIdentityId, DeviceId deviceId, RelayEndpoint endpoint,
+            MailboxTokenTriad tokens, int newOneTimePreKeyCount = 100, CancellationToken ct = default)
+        {
+            lock (_gate) { _publications.Add((ownerIdentityId, deviceId, newOneTimePreKeyCount)); }
+            return Task.FromResult(DomainResult.Success());
+        }
+
+        public Task<DomainResult<RelayPreKeyStatus>> GetPreKeyStatusAsync(
+            DeviceId deviceId, RelayEndpoint endpoint, MailboxTokenTriad tokens, CancellationToken ct = default)
+        {
+            lock (_gate) { _statusCalls++; }
+            return Task.FromResult(StatusOverride
+                ?? DomainResult<RelayPreKeyStatus>.Success(new RelayPreKeyStatus(true, 50, new SignedPreKeyId(1))));
+        }
     }
 
     private sealed class FakeMailboxClient : IRelayMailboxClient

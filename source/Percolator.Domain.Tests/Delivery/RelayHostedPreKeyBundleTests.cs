@@ -125,7 +125,7 @@ public sealed class RelayHostedPreKeyBundleTests
     }
 
     [Test]
-    public void ReplenishOneTimePreKeys_WhenQuotaExceeded_ReturnsQuotaExceededError()
+    public void ReplenishOneTimePreKeys_OverCapacity_EvictsOldestWithinCap()
     {
         // Arrange: Policy with limit of 2 OTPKs
         var policy = new RelayHostingPolicy(IsAcceptingPreKeys: true, MaxOneTimePreKeysPerIdentity: 2);
@@ -141,9 +141,40 @@ public sealed class RelayHostedPreKeyBundleTests
             policy,
             _cryptoEngine).Value;
 
-        // Act: Replenish 2 more (total 3, exceeds limit of 2)
+        // Act: Replenish 2 more (total 3, exceeds limit of 2) — the oldest
+        // unconsumed key (id 1) evicts so the newest keys are hosted.
         var result = bundle.ReplenishOneTimePreKeys(
             [(2u, DhPublicKey.FromSpan(new byte[32])), (3u, DhPublicKey.FromSpan(new byte[32]))],
+            policy);
+
+        // Assert
+        Assert.That(result.IsSuccess, Is.True);
+        Assert.That(bundle.AvailableOneTimePreKeyCount, Is.EqualTo(2));
+        Assert.That(bundle.OneTimePreKeys.Select(k => k.KeyId), Is.EqualTo(new[] { 2u, 3u }));
+    }
+
+    [Test]
+    public void ReplenishOneTimePreKeys_BatchLargerThanCap_ReturnsQuotaExceededError()
+    {
+        // Arrange: Policy with limit of 2 OTPKs
+        var policy = new RelayHostingPolicy(IsAcceptingPreKeys: true, MaxOneTimePreKeysPerIdentity: 2);
+        var routingToken = BlindedRoutingToken.New();
+
+        var bundle = RelayHostedPreKeyBundle.Create(
+            routingToken,
+            DeviceId.Primary,
+            IdentityKey.FromSpan(new byte[32]),
+            DhPublicKey.FromSpan(new byte[32]),
+            DeviceLinkProof.FromSpan(new byte[64]),
+            [(1u, DhPublicKey.FromSpan(new byte[32]))],
+            policy,
+            _cryptoEngine).Value;
+
+        // Act: a single incoming batch that alone exceeds the cap still rejects.
+        var result = bundle.ReplenishOneTimePreKeys(
+            [(2u, DhPublicKey.FromSpan(new byte[32])),
+             (3u, DhPublicKey.FromSpan(new byte[32])),
+             (4u, DhPublicKey.FromSpan(new byte[32]))],
             policy);
 
         // Assert

@@ -15,4 +15,5 @@ public sealed record RelayMailboxBinding(
     BlindedRoutingToken RoutingToken,
     DeliveryToken DrainToken,
     DateTimeOffset LinkedAtUtc,
-    DeliveryToken? PreviousDrainToken = null);
+    DeliveryToken? PreviousDrainToken = null,
+    DateTimeOffset? MailboxProvisionedUtc = null);
