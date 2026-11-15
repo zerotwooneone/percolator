@@ -441,14 +441,10 @@ public sealed record MailboxBindingChangedEvent(
 **Verify:** unit tests + full scenario suite (`--replay Scenarios`) — sim `DrainMailboxAsync` is re-bridged here.
 
 **Outcome / deviations (verified 2026-11-15):**
-- `dotnet build Percolator.sln`: 0 errors; `dotnet test`: all suites pass (12 assemblies, 1,059 tests, 0 failures); `--replay Scenarios`: ALL 8 SCENARIOS PASSED.
-- `IRelayMailboxCapabilityStore` now lives in `Percolator.Domain.Delivery.Ports`; `DrainEnvelopesAsync` is replaced by `PurgeMailboxAsync(BlindedRoutingToken, CancellationToken) -> ValueTask<int>` — SQLite path uses `ExecuteDeleteAsync` and never materializes payloads.
-- New VO `Percolator.Domain.Delivery.ValueObjects.RelayQueuedEnvelopeRecord(MailboxQueueId, ReadOnlyMemory<byte>, DateTimeOffset)` carries queue entries inside the domain boundary; `QueuedSealedEnvelopeProto` stays on the wire only — `AuthenticatedRelayEndpoint.ConnectMailboxStream` maps record→proto, and both enqueue call sites (`UnauthenticatedDeliveryEndpoint.EnqueueMailbox`, `AnonymousGroupRelayEndpoint`) map proto→record.
-- Wire validation hardened at the boundary: `RegisterMailbox` now requires exactly 16/32/32-byte tokens (was `IsEmpty`-only), and `EnqueueMailbox`/`FetchPreKeyBundle` validate token lengths before VO construction. `ConnectMailboxStream` treats a wrong-length routing token as auth failure; ACKs with unparsable queue ids are ignored.
-- `GrpcRelayMailboxProvisioner` dropped `DrainMailboxOnceAsync`, `_scopeFactory`, `_timeProvider`, `EnvelopeExpiryWindow` — ctor is now `(IPeerGrpcChannelFactory, ILocalIdentityKeyStore, IPrivatePreKeyStore, ICryptoEngine)`.
-- Simulator decorator signals `MailboxPurged` (was `EnvelopesDrained`) and only when count > 0; stream/spool drain-completion semantics unchanged.
-- `CoreProtoCompilationTests` needed no changes (never referenced the drain messages); `AnonymousGroupRelayEndpointTests` inspect held envelopes via `GetEnvelopesAsync` instead of the removed drain.
-- `Subscriber` dictionaries key on `BlindedRoutingToken` directly (the `[GuidId]` VO has structural equality) — hex-string keys removed; `TryWrite` notification contract preserved per DRAIN-08.
+- `dotnet build Percolator.sln`: 0 errors; `dotnet test`: 12 assemblies, 1,059 tests, 0 failures; `--replay Scenarios`: ALL 8 PASSED.
+- Behavior change beyond spec — malformed token lengths now fail fast: `RegisterMailbox`/`EnqueueMailbox`/`FetchPreKeyBundle` require exact 16/32-byte tokens (`InvalidArgument`; were `IsEmpty`-only checks), `ConnectMailboxStream` treats a wrong-length routing token as auth failure, and unparsable ACK queue ids are ignored. Required by VO construction — `FromBytes`/`FromSpan` throw on wrong length.
+- Spec'd files needing no change: `CoreProtoCompilationTests` (never referenced the drain messages). `AnonymousGroupRelayEndpointTests` inspect held envelopes via `GetEnvelopesAsync` — the destructive read no longer exists.
+- Simulator decorator signal renamed `EnvelopesDrained` → `MailboxPurged`, emitted only when count > 0.
 
 **QMS:** `HAZ-CRASH-STATE-DESYNC`, `DEC-PENDING-INGRESS-SPOOL`.
 
@@ -489,7 +485,7 @@ message GetPreKeyStatusResponse {
 rpc GetPreKeyStatus(GetPreKeyStatusRequest) returns (GetPreKeyStatusResponse);
 ```
 
-- Server handler: drain-token authenticated; `found=false` when no hosted bundle exists for the routing token + device. Replace the `RELAY_PREKEY_STATUS_UNAVAILABLE` stub added in DRAIN-02 inside `GrpcRelayMailboxProvisioner.GetPreKeyStatusAsync` with the real call; map `found=false` to `Success(new RelayPreKeyStatus(false, 0, new SignedPreKeyId(0)))`; `found=true` maps `signed_prekey_id` into the `SignedPreKeyId` VO (shipped in DRAIN-02).
+- Server handler: drain-token authenticated; `found=false` when no hosted bundle exists for the routing token + device. Follow the DRAIN-09 boundary convention: length-validate wire tokens (16-byte routing / 32-byte drain → `InvalidArgument`), construct `BlindedRoutingToken`/`DeliveryToken`, then `VerifyDrainTokenAsync(BlindedRoutingToken, DeliveryToken)` on the domain port. Replace the `RELAY_PREKEY_STATUS_UNAVAILABLE` stub added in DRAIN-02 inside `GrpcRelayMailboxProvisioner.GetPreKeyStatusAsync` with the real call; map `found=false` to `Success(new RelayPreKeyStatus(false, 0, new SignedPreKeyId(0)))`; `found=true` maps `signed_prekey_id` into the `SignedPreKeyId` VO (shipped in DRAIN-02).
 
 **DRAIN-07 shipped outcomes that affect this ticket:**
 - `DrainScheduler`'s first-connect block already calls `GetPreKeyStatusAsync` and treats failure as publish — once the real RPC lands the seed starts skipping when `Found` with **no scheduler change**; verify the existing `DrainSchedulerTests` still pass and adjust the status-failure test expectations only if the stub is removed.
