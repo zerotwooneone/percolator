@@ -475,7 +475,7 @@ Implementation Gate: UNLOCKED
 
 ---
 
-### CONN-09 ⬜ Desktop Inbound Pending Requests Panel (`[Pending Requests]`)
+### CONN-09 ⬛ Desktop Inbound Pending Requests Panel (`[Pending Requests]`)
 
 - **Files:**
   - `Create`: `Percolator.Desktop/Features/Transports/Views/PendingRequestsPanelView.axaml` & `Percolator.Desktop/Features/Transports/Views/PendingRequestsPanelView.axaml.cs`

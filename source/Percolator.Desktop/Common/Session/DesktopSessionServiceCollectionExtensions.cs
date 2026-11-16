@@ -46,6 +46,7 @@ internal static class DesktopSessionServiceCollectionExtensions
         services.AddTransient<DeletePersonaDialogViewModel>();
         services.AddTransient<StopUsingExchangeDialogViewModel>();
         services.AddTransient<AddConnectionDialogViewModel>();
+        services.AddTransient<PendingRequestsPanelViewModel>();
 
         // Outbound pending connection retry and state services (CONN-08)
         services.AddSingleton<OutboundPendingRetryWorker>();
