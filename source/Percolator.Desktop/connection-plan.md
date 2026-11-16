@@ -90,7 +90,7 @@ Implementation Gate: UNLOCKED
 
 ---
 
-### CONN-02 ⬜ Dynamic Routable LAN Endpoint Resolution & Certificate SAN Expansion
+### CONN-02 ⬛ Dynamic Routable LAN Endpoint Resolution & Certificate SAN Expansion
 
 - **Files:**
   - `Create`: `Percolator.Infrastructure/Transport/TransportCertificateSanBuilder.cs`

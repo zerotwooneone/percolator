@@ -25,6 +25,11 @@ public sealed class InMemoryTransportCertificateProviderTests
         sanExtension.Should().NotBeNull();
         var dnsNames = sanExtension!.EnumerateDnsNames().ToList();
         dnsNames.Should().Contain("localhost");
+        dnsNames.Should().Contain(System.Net.Dns.GetHostName());
+
+        var ips = sanExtension.EnumerateIPAddresses().ToList();
+        ips.Should().Contain(System.Net.IPAddress.Loopback);
+        ips.Should().Contain(System.Net.IPAddress.IPv6Loopback);
     }
 
     [Test]

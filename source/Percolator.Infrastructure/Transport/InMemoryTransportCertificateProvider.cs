@@ -74,9 +74,7 @@ public sealed class InMemoryTransportCertificateProvider : ITransportCertificate
         req.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(eku, false));
 
         var sanBuilder = new SubjectAlternativeNameBuilder();
-        sanBuilder.AddIpAddress(IPAddress.Loopback);
-        sanBuilder.AddIpAddress(IPAddress.IPv6Loopback);
-        sanBuilder.AddDnsName("localhost");
+        TransportCertificateSanBuilder.PopulateSan(sanBuilder);
         req.CertificateExtensions.Add(sanBuilder.Build());
 
         return req.CreateSelfSigned(

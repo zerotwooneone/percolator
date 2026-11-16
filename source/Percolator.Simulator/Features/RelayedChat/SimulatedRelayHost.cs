@@ -15,7 +15,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Percolator.Apps.Discovery.Features.PrivateRendezvous;
 using Percolator.Apps.Discovery.Features.RelayDirectoryHosting;
+using System.Linq;
 using Percolator.Apps.Discovery.Ports;
+using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Delivery.Ports;
@@ -72,7 +74,7 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
     public SimulatedNodeId Id { get; }
     public string DisplayName { get; }
     public int BoundPort { get; private set; }
-    public Uri BoundEndpoint => new($"https://127.0.0.1:{BoundPort}");
+    public Uri BoundEndpoint { get; private set; }
     public IServiceProvider Services => _app?.Services ?? throw new InvalidOperationException("Relay host not started.");
     public PublicIdentityId RelayIdentityId => new(Id.Value);
 
@@ -97,6 +99,7 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
         Id = id;
         DisplayName = displayName;
         BoundPort = port;
+        BoundEndpoint = new Uri($"https://127.0.0.1:{BoundPort}");
         _logSink = logSink ?? throw new ArgumentNullException(nameof(logSink));
         _stateBus = stateBus ?? throw new ArgumentNullException(nameof(stateBus));
         _virtualClock = virtualClock ?? throw new ArgumentNullException(nameof(virtualClock));
@@ -240,6 +243,20 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
 
         await _app.StartAsync(ct);
         _isRunning = true;
+
+        try
+        {
+            var discovery = new Percolator.Infrastructure.Plugins.FileTransfer.NetworkInterfaceEndpointDiscoveryPort(BoundPort, allowLoopback: true);
+            var candidates = await discovery.DiscoverLocalCandidatesAsync(Percolator.Apps.FileTransfer.Features.TransferNegotiation.DirectWanPolicy.DisabledByDefault, ct);
+            var primaryLan = candidates.FirstOrDefault(c => c.Kind == Percolator.Apps.FileTransfer.Features.TransferNegotiation.DirectCandidateKind.DirectLan && IPAddress.TryParse(c.Host.Value, out var ip) && !IPAddress.IsLoopback(ip))
+                             ?? candidates.FirstOrDefault();
+            var host = primaryLan?.Host.Value ?? "127.0.0.1";
+            BoundEndpoint = new Uri($"https://{host}:{BoundPort}");
+        }
+        catch (Exception)
+        {
+            BoundEndpoint = new Uri($"https://127.0.0.1:{BoundPort}");
+        }
 
         _logSink.Log(new SimulatorLogEntry(
             DateTimeOffset.UtcNow,

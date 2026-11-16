@@ -26,6 +26,7 @@ using Percolator.Application.Session;
 using Percolator.Application.Session.Ports;
 using Percolator.Apps.Chat.DependencyInjection;
 using Percolator.Apps.FileTransfer.DependencyInjection;
+using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Ports;
 using Percolator.Apps.FileTransfer.Features.IngressControl;
 using Percolator.Domain.Channels.ValueObjects;
@@ -84,7 +85,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
     public SimulatedNodeId Id { get; }
     public string DisplayName { get; private set; }
     public int BoundPort { get; private set; }
-    public Uri BoundEndpoint => new($"https://127.0.0.1:{BoundPort}");
+    public Uri BoundEndpoint { get; private set; }
     public byte[] IdenticonPng { get; private set; }
     public IServiceProvider Services => _host?.Services ?? throw new InvalidOperationException("Host not started.");
     public ReadOnlyReactiveProperty<bool> IsListening => _isListening;
@@ -134,6 +135,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         DisplayName = displayName;
         IdenticonPng = identiconPng;
         BoundPort = port;
+        BoundEndpoint = new Uri($"https://127.0.0.1:{BoundPort}");
         _logSink = logSink ?? throw new ArgumentNullException(nameof(logSink));
         _stateBus = stateBus ?? throw new ArgumentNullException(nameof(stateBus));
         _worldState = worldState ?? throw new ArgumentNullException(nameof(worldState));
@@ -325,6 +327,20 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         if (_transportServer.BoundPort.HasValue)
         {
             BoundPort = _transportServer.BoundPort.Value.Value;
+        }
+
+        try
+        {
+            var discovery = _host.Services.GetRequiredService<INetworkEndpointDiscoveryPort>();
+            var candidates = await discovery.DiscoverLocalCandidatesAsync(Percolator.Apps.FileTransfer.Features.TransferNegotiation.DirectWanPolicy.DisabledByDefault, ct);
+            var primaryLan = candidates.FirstOrDefault(c => c.Kind == Percolator.Apps.FileTransfer.Features.TransferNegotiation.DirectCandidateKind.DirectLan && IPAddress.TryParse(c.Host.Value, out var ip) && !IPAddress.IsLoopback(ip))
+                             ?? candidates.FirstOrDefault();
+            var host = primaryLan?.Host.Value ?? "127.0.0.1";
+            BoundEndpoint = new Uri($"https://{host}:{BoundPort}");
+        }
+        catch (Exception)
+        {
+            BoundEndpoint = new Uri($"https://127.0.0.1:{BoundPort}");
         }
         // 3. Populate IActiveIdentitySet before hosted services start so the drain
         // scheduler's first reconciliation sees this persona; bridge IsListening so a

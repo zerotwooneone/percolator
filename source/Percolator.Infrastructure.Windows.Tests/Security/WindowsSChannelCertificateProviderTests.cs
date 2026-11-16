@@ -3,6 +3,7 @@ namespace Percolator.Infrastructure.Windows.Tests.Security;
 using System;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Security.Cryptography.X509Certificates;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -52,6 +53,11 @@ public sealed class WindowsSChannelCertificateProviderTests
         sanExtension.Should().NotBeNull();
         var dnsNames = sanExtension!.EnumerateDnsNames().ToList();
         dnsNames.Should().Contain("localhost");
+        dnsNames.Should().Contain(Dns.GetHostName());
+
+        var ips = sanExtension.EnumerateIPAddresses().ToList();
+        ips.Should().Contain(IPAddress.Loopback);
+        ips.Should().Contain(IPAddress.IPv6Loopback);
 
         var pfxFiles = Directory.GetFiles(_testTempDir, "*.pfx");
         pfxFiles.Should().BeEmpty();

@@ -114,9 +114,7 @@ public sealed class WindowsSChannelCertificateProvider : ITransportCertificatePr
         request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(eku, false));
 
         var sanBuilder = new SubjectAlternativeNameBuilder();
-        sanBuilder.AddDnsName("localhost");
-        sanBuilder.AddIpAddress(IPAddress.Loopback);
-        sanBuilder.AddIpAddress(IPAddress.IPv6Loopback);
+        TransportCertificateSanBuilder.PopulateSan(sanBuilder);
         request.CertificateExtensions.Add(sanBuilder.Build());
 
         var notBefore = DateTimeOffset.UtcNow.AddHours(-1);
