@@ -4,6 +4,7 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Percolator.Simulator.Features.Chaos;
 using Percolator.Simulator.Features.DirectChat;
 using Percolator.Simulator.Features.DiscoverySimulation;
 using Percolator.Simulator.Features.GroupMessaging;
@@ -41,6 +42,7 @@ public partial class App : Avalonia.Application
 
         // 2. Shared Stateful Services
         services.AddSingleton<ISimulatorStateBus, SimulatorStateBus>();
+        services.AddSingleton<ISimulatorChaosController, SimulatorChaosController>();
         services.AddSingleton<ISelectionStateService, SelectionStateService>();
         services.AddSingleton<ISimulatedWorldStateService, SimulatedWorldStateService>();
         services.AddSingleton<IStatusToastService, StatusToastService>();

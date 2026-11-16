@@ -327,7 +327,7 @@ Implementation Gate: UNLOCKED
 
 ---
 
-### CONN-06 ⬜ Non-Invasive Simulator Chaos & Fault Injection via Decorators
+### CONN-06 ⬛ Non-Invasive Simulator Chaos & Fault Injection via Decorators
 
 - **Files:**
   - `Create`: `Percolator.Simulator/Features/Chaos/ISimulatorChaosController.cs`

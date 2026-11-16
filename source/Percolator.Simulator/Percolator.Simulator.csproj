@@ -47,4 +47,8 @@
   <ItemGroup Condition="$(TargetFramework.StartsWith('net10.0-windows'))">
     <ProjectReference Include="..\Percolator.Infrastructure.Windows\Percolator.Infrastructure.Windows.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Percolator.Simulator.Tests" />
+  </ItemGroup>
 </Project>

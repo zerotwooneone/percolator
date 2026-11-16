@@ -56,6 +56,7 @@ using Percolator.Infrastructure.Windows.Storage;
 using Percolator.Simulator.Features.RichChatAndProfiles;
 using Percolator.PluginSdk;
 using Percolator.PluginSdk.Profiles;
+using Percolator.Simulator.Features.Chaos;
 using Percolator.Simulator.Features.DirectChat;
 using Percolator.Simulator.Features.Logging;
 using Percolator.Simulator.Features.RelayedChat;
@@ -71,6 +72,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
     private readonly ISimulatorStateBus _stateBus;
     private readonly ISimulatedWorldStateService _worldState;
     private readonly IVirtualClockStateService _virtualClock;
+    private readonly ISimulatorChaosController _chaosController;
     private readonly ReactiveProperty<bool> _isListening = new(true);
     private readonly SemaphoreSlim _listeningGate = new(1, 1);
     private readonly SemaphoreSlim _drainGate = new(1, 1);
@@ -130,7 +132,8 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         ISimulatorLogSink logSink,
         ISimulatorStateBus stateBus,
         ISimulatedWorldStateService worldState,
-        IVirtualClockStateService virtualClock)
+        IVirtualClockStateService virtualClock,
+        ISimulatorChaosController chaosController)
     {
         Id = id;
         DisplayName = displayName;
@@ -141,6 +144,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         _stateBus = stateBus ?? throw new ArgumentNullException(nameof(stateBus));
         _worldState = worldState ?? throw new ArgumentNullException(nameof(worldState));
         _virtualClock = virtualClock ?? throw new ArgumentNullException(nameof(virtualClock));
+        _chaosController = chaosController ?? throw new ArgumentNullException(nameof(chaosController));
         _masterKeyHandle = MasterKeyHandle.GenerateRandom();
         _nodeTempDirectory = Path.Combine(Path.GetTempPath(), "PercolatorSim", $"node_{Id.Value:N}");
         Directory.CreateDirectory(_nodeTempDirectory);
@@ -263,6 +267,13 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                 new SimulatorNotifyingHandshakeDecorator(
                     sp.GetRequiredService<HandshakeService>(),
                     _stateBus,
+                    Id));
+            // Decorate IPendingIngressStore for non-invasive chaos & fault injection
+            services.AddScoped<SqlitePendingIngressStore>();
+            services.AddScoped<IPendingIngressStore>(sp =>
+                new ChaosPendingIngressStoreDecorator(
+                    sp.GetRequiredService<SqlitePendingIngressStore>(),
+                    _chaosController,
                     Id));
             services.AddScoped<OutboxWorker>();
             // 6. Direct Ingress for Kestrel Transport

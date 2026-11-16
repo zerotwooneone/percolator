@@ -35,6 +35,7 @@ using Percolator.Infrastructure.Vault;
 #if WINDOWS
 using Percolator.Infrastructure.Windows.Security;
 #endif
+using Percolator.Simulator.Features.Chaos;
 using Percolator.Simulator.Features.Logging;
 using Percolator.Simulator.Features.RichChatAndProfiles;
 using Percolator.Simulator.Features.Shell;
@@ -61,8 +62,10 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
     private readonly ISimulatorLogSink _logSink;
     private readonly ISimulatorStateBus _stateBus;
     private readonly IVirtualClockStateService _virtualClock;
+    private readonly ISimulatorChaosController _chaosController;
     private readonly string _relayTempDirectory;
     private SimulatorNotifyingRelayCapabilityStoreDecorator? _capabilityStore;
+    private IRelayMailboxCapabilityStore? _chaosCapabilityStore;
     private SimulatorNotifyingRelayPreKeyRepositoryDecorator? _preKeyRepository;
     private SimulatorRelayQueryService? _queryService;
     private IRelayPeerDirectory? _peerDirectory;
@@ -78,7 +81,7 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
     public IServiceProvider Services => _app?.Services ?? throw new InvalidOperationException("Relay host not started.");
     public PublicIdentityId RelayIdentityId => new(Id.Value);
 
-    public IRelayMailboxCapabilityStore MailboxStore => _capabilityStore ?? throw new InvalidOperationException("Relay host not started.");
+    public IRelayMailboxCapabilityStore MailboxStore => _chaosCapabilityStore ?? throw new InvalidOperationException("Relay host not started.");
     public ISimulatorRelayQueryService QueryService => _queryService ?? throw new InvalidOperationException("Relay host not started.");
     public IRelayPreKeyRepository PreKeyRepository => _preKeyRepository ?? throw new InvalidOperationException("Relay host not started.");
     public IRelayQueueChaosController ChaosController => _capabilityStore ?? throw new InvalidOperationException("Relay host not started.");
@@ -94,7 +97,8 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
         int port,
         ISimulatorLogSink logSink,
         ISimulatorStateBus stateBus,
-        IVirtualClockStateService virtualClock)
+        IVirtualClockStateService virtualClock,
+        ISimulatorChaosController chaosController)
     {
         Id = id;
         DisplayName = displayName;
@@ -103,6 +107,7 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
         _logSink = logSink ?? throw new ArgumentNullException(nameof(logSink));
         _stateBus = stateBus ?? throw new ArgumentNullException(nameof(stateBus));
         _virtualClock = virtualClock ?? throw new ArgumentNullException(nameof(virtualClock));
+        _chaosController = chaosController ?? throw new ArgumentNullException(nameof(chaosController));
 
         _relayTempDirectory = Path.Combine(Path.GetTempPath(), "PercolatorSim", $"relay_{Id.Value:N}");
         Directory.CreateDirectory(_relayTempDirectory);
@@ -165,6 +170,11 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
             new SqliteRelayMailboxCapabilityStore(contextFactory),
             contextFactory);
 
+        _chaosCapabilityStore = new ChaosRelayMailboxCapabilityStoreDecorator(
+            _capabilityStore,
+            _chaosController,
+            Id);
+
         _queryService = new SimulatorRelayQueryService(contextFactory);
 
         var sqlitePreKeyRepo = new SqliteRelayPreKeyRepository(contextFactory);
@@ -214,16 +224,16 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
             lb.SetMinimumLevel(LogLevel.Warning);
         });
 
-        var unauthEndpoint = UnauthenticatedDeliveryEndpoint.ForRelay(profileRepo, _preKeyRepository, chunkStore, _capabilityStore);
-        var authEndpoint = new AuthenticatedRelayEndpoint(_capabilityStore, _preKeyRepository, cryptoEngine);
+        var unauthEndpoint = UnauthenticatedDeliveryEndpoint.ForRelay(profileRepo, _preKeyRepository, chunkStore, _chaosCapabilityStore);
+        var authEndpoint = new AuthenticatedRelayEndpoint(_chaosCapabilityStore, _preKeyRepository, cryptoEngine);
         var timeProvider = new SystemDateTimeProvider();
-        var groupEndpoint = new AnonymousGroupRelayEndpoint(ledgerRepo, zkEngine, _capabilityStore, timeProvider, RelayIdentityId);
-        var nearbyEndpoint = new NearbyDiscoveryEndpoint(_peerDirectory, _capabilityStore, _preKeyRepository, _virtualClock, BoundPort, cryptoEngine);
+        var groupEndpoint = new AnonymousGroupRelayEndpoint(ledgerRepo, zkEngine, _chaosCapabilityStore, timeProvider, RelayIdentityId);
+        var nearbyEndpoint = new NearbyDiscoveryEndpoint(_peerDirectory, _chaosCapabilityStore, _preKeyRepository, _virtualClock, BoundPort, cryptoEngine);
         var rendezvousEndpoint = new PrivateRendezvousRelayEndpoint(_rendezvousService);
 
         builder.Services.AddSingleton<IRelayLedgerRepository>(ledgerRepo);
         builder.Services.AddSingleton<IRelayPreKeyRepository>(_preKeyRepository);
-        builder.Services.AddSingleton<IRelayMailboxCapabilityStore>(_capabilityStore);
+        builder.Services.AddSingleton<IRelayMailboxCapabilityStore>(_chaosCapabilityStore);
         builder.Services.AddSingleton<IDbContextFactory<PercolatorDbContext>>(contextFactory);
         builder.Services.AddSingleton<IRelayPeerDirectory>(_peerDirectory);
         builder.Services.AddSingleton<IPrivateRendezvousService>(_rendezvousService);
