@@ -428,7 +428,7 @@ Implementation Gate: UNLOCKED
 
 ---
 
-### CONN-08 ⬜ Desktop Outbound-Pending Direct Connection State & Background Retry Service
+### CONN-08 ⬛ Desktop Outbound-Pending Direct Connection State & Background Retry Service
 
 - **Retry & Cancellation Policy:** The retry loop continues indefinitely with exponential backoff (5s, 15s, 30s, capped at 60s) while the persona session is active, until either the connection successfully completes or the user cancels the request.
 

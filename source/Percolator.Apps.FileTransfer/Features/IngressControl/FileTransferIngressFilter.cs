@@ -1,4 +1,4 @@
-﻿using Percolator.Apps.FileTransfer.Ports;
+using Percolator.Apps.FileTransfer.Ports;
 using Percolator.PluginSdk;
 
 namespace Percolator.Apps.FileTransfer.Features.IngressControl;

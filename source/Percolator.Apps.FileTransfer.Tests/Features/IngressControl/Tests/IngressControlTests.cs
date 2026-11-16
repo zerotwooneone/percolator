@@ -1,4 +1,4 @@
-﻿using Percolator.Apps.FileTransfer.Domain.Common;
+using Percolator.Apps.FileTransfer.Domain.Common;
 using Percolator.Apps.FileTransfer.Domain.ManifestManagement;
 using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Features.IngressControl;

@@ -12,6 +12,7 @@ using Percolator.Desktop.Common.Storage;
 using Percolator.Desktop.Common.Windowing;
 using Percolator.Desktop.Features.Shell.ViewModels;
 using Percolator.Desktop.Features.Startup.ViewModels;
+using Percolator.Desktop.Features.Transports.Services;
 using Percolator.Desktop.Features.Transports.ViewModels;
 using Percolator.PluginSdk;
 
@@ -45,6 +46,12 @@ internal static class DesktopSessionServiceCollectionExtensions
         services.AddTransient<DeletePersonaDialogViewModel>();
         services.AddTransient<StopUsingExchangeDialogViewModel>();
         services.AddTransient<AddConnectionDialogViewModel>();
+
+        // Outbound pending connection retry and state services (CONN-08)
+        services.AddSingleton<OutboundPendingRetryWorker>();
+        services.AddSingleton<IOutboundPendingRetryWorker>(sp => sp.GetRequiredService<OutboundPendingRetryWorker>());
+        services.AddHostedService(sp => sp.GetRequiredService<OutboundPendingRetryWorker>());
+        services.AddSingleton<IPeerConnectionStateService, PeerConnectionStateService>();
 
         // App-payload dispatch surface for the mailbox drain (DRAIN-06): without these,
         // the shared IAppRouter registers no handlers and drained payloads die as
