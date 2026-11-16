@@ -51,6 +51,7 @@ internal static class DesktopSessionServiceCollectionExtensions
         services.AddSingleton<IQrCodeGenerator, QrCodeGenerator>();
 
         // Outbound pending connection retry and state services (CONN-08)
+        services.AddSingleton<IPeerConnectionService, DesktopPeerConnectionService>();
         services.AddSingleton<OutboundPendingRetryWorker>();
         services.AddSingleton<IOutboundPendingRetryWorker>(sp => sp.GetRequiredService<OutboundPendingRetryWorker>());
         services.AddHostedService(sp => sp.GetRequiredService<OutboundPendingRetryWorker>());
