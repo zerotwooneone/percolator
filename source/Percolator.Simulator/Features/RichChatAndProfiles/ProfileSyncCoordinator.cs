@@ -200,7 +200,7 @@ internal sealed class ProfileSyncCoordinator
 
             if (sender.HomeRelay != null)
             {
-                sourceEndpoint = $"https://127.0.0.1:{sender.HomeRelay.BoundPort}";
+                sourceEndpoint = sender.HomeRelay.BoundEndpoint.ToString();
                 mailboxRoutingToken = sender.MailboxRoutingToken;
                 sourceType = ProfileSourceType.Relay;
             }

@@ -87,7 +87,7 @@ internal sealed class RelayProvisioningCoordinator
                 using var gateScope = persona.Services.CreateScope();
                 var gateDirectory = gateScope.ServiceProvider.GetRequiredService<IRelayDirectory>();
                 var provisioner = gateScope.ServiceProvider.GetRequiredService<IRelayMailboxProvisioner>();
-                var relayEndpoint = RelayEndpoint.FromHostAndPort("127.0.0.1", relay.BoundPort);
+                var relayEndpoint = RelayEndpoint.FromHostAndPort(relay.BoundEndpoint.Host, relay.BoundPort);
 
                 var tokensResult = await gateDirectory.GetMailboxTokensAsync(
                     persona.PublicIdentityId, relay.RelayIdentityId, ct);
@@ -107,37 +107,6 @@ internal sealed class RelayProvisioningCoordinator
             }
 
             await persona.PublishProfileAsync(ct);
-
-            using (var scope = persona.Services.CreateScope())
-            {
-                var channelFactory = scope.ServiceProvider.GetRequiredService<IPeerGrpcChannelFactory>();
-                var cryptoEngine = scope.ServiceProvider.GetRequiredService<ICryptoEngine>();
-                var timeProvider = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>();
-                var relayUri = new Uri($"https://127.0.0.1:{relay.BoundPort}");
-                var channel = channelFactory.GetOrCreateChannel(relayUri);
-                var discoveryClient = new NearbyDiscoveryService.NearbyDiscoveryServiceClient(channel);
-
-                int visibility = persona.AllowPeerDiscovery ? 1 : 0;
-                long timestampUnixMs = timeProvider.UtcNow.ToUnixTimeMilliseconds();
-                // Advertise the mailbox capability tokens only when discoverable; the
-                // signature binds them so the relay cannot substitute its own mailbox.
-                byte[]? routingToken = persona.AllowPeerDiscovery ? persona.MailboxRoutingToken.ToByteArray() : null;
-                byte[]? deliveryToken = persona.AllowPeerDiscovery ? persona.MailboxDeliveryToken.Memory.ToArray() : null;
-                var payload = DiscoveryWireFraming.BuildVisibilitySignaturePayload(
-                    persona.PublicIdentityId, visibility, timestampUnixMs, routingToken, deliveryToken);
-                var signature = cryptoEngine.SignEd25519(persona.IdentityPrivateKey.Span, payload);
-
-                await discoveryClient.RegisterVisibilityAsync(new DiscoveryRegistrationProto
-                {
-                    PeerId = ByteString.CopyFrom(persona.PublicIdentityId.ToByteArray()),
-                    Visibility = visibility,
-                    TimestampUnixMs = timestampUnixMs,
-                    Signature = ByteString.CopyFrom(signature),
-                    IdentityKey = ByteString.CopyFrom(persona.IdentityPublicKey.Span),
-                    RoutingToken = routingToken != null ? ByteString.CopyFrom(routingToken) : ByteString.Empty,
-                    DeliveryToken = deliveryToken != null ? ByteString.CopyFrom(deliveryToken) : ByteString.Empty
-                }, cancellationToken: ct);
-            }
 
             _logSink.Log(new SimulatorLogEntry(
                 DateTimeOffset.UtcNow,
@@ -186,7 +155,7 @@ internal sealed class RelayProvisioningCoordinator
             {
                 var relayDirectory = scope.ServiceProvider.GetRequiredService<IRelayDirectory>();
                 var provisioner = scope.ServiceProvider.GetRequiredService<IRelayMailboxProvisioner>();
-                var relayEndpoint = RelayEndpoint.FromHostAndPort("127.0.0.1", relay.BoundPort);
+                var relayEndpoint = RelayEndpoint.FromHostAndPort(relay.BoundEndpoint.Host, relay.BoundPort);
 
                 var tokensResult = await relayDirectory.GetMailboxTokensAsync(
                     persona.PublicIdentityId, relay.RelayIdentityId, ct);
@@ -327,7 +296,7 @@ internal sealed class RelayProvisioningCoordinator
 
             // 3. Save the initiator's routing capability for the target FIRST so the
             // pre-key provider can resolve the delivery capability from storage.
-            var relayEndpoint = RelayEndpoint.FromHostAndPort("127.0.0.1", relay.BoundPort);
+            var relayEndpoint = RelayEndpoint.FromHostAndPort(relay.BoundEndpoint.Host, relay.BoundPort);
 
             using (var scope = initiator.Services.CreateScope())
             {

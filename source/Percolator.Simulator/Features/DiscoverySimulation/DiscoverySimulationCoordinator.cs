@@ -70,7 +70,7 @@ internal sealed class DiscoverySimulationCoordinator
                 using var scope = persona.Services.CreateScope();
                 var channelFactory = scope.ServiceProvider.GetRequiredService<IPeerGrpcChannelFactory>();
                 var cryptoEngine = scope.ServiceProvider.GetRequiredService<ICryptoEngine>();
-                var relayUri = new Uri($"https://127.0.0.1:{persona.HomeRelay.BoundPort}");
+                var relayUri = persona.HomeRelay.BoundEndpoint;
                 var channel = channelFactory.GetOrCreateChannel(relayUri);
                 var client = new NearbyDiscoveryService.NearbyDiscoveryServiceClient(channel);
 
@@ -138,12 +138,12 @@ internal sealed class DiscoverySimulationCoordinator
         var epoch = new DiscoveryEpoch(_virtualClock.CurrentDiscoveryEpoch);
         var locator = BlindedLocator.Derive(persona.PublicIdentityId, sharedSecret, epoch);
         var descriptor = string.IsNullOrWhiteSpace(routeDescriptor)
-            ? $"https://127.0.0.1:{persona.BoundPort}"
+            ? persona.BoundEndpoint.ToString()
             : routeDescriptor;
 
         using var scope = persona.Services.CreateScope();
         var channelFactory = scope.ServiceProvider.GetRequiredService<IPeerGrpcChannelFactory>();
-        var relayUri = new Uri($"https://127.0.0.1:{relay.BoundPort}");
+        var relayUri = relay.BoundEndpoint;
         var channel = channelFactory.GetOrCreateChannel(relayUri);
         var client = new PrivateRendezvousRelayService.PrivateRendezvousRelayServiceClient(channel);
 
@@ -185,7 +185,7 @@ internal sealed class DiscoverySimulationCoordinator
 
         using var scope = persona.Services.CreateScope();
         var channelFactory = scope.ServiceProvider.GetRequiredService<IPeerGrpcChannelFactory>();
-        var relayUri = new Uri($"https://127.0.0.1:{relay.BoundPort}");
+        var relayUri = relay.BoundEndpoint;
         var channel = channelFactory.GetOrCreateChannel(relayUri);
         var client = new PrivateRendezvousRelayService.PrivateRendezvousRelayServiceClient(channel);
 
@@ -227,7 +227,7 @@ internal sealed class DiscoverySimulationCoordinator
 
         using var scope = persona.Services.CreateScope();
         var channelFactory = scope.ServiceProvider.GetRequiredService<IPeerGrpcChannelFactory>();
-        var relayUri = new Uri($"https://127.0.0.1:{relay.BoundPort}");
+        var relayUri = relay.BoundEndpoint;
         var channel = channelFactory.GetOrCreateChannel(relayUri);
         var client = new NearbyDiscoveryService.NearbyDiscoveryServiceClient(channel);
 
@@ -274,7 +274,9 @@ internal sealed class DiscoverySimulationCoordinator
             if (!string.IsNullOrWhiteSpace(relayEndpoint))
             {
                 var relayHost = _worldState.GetAllRelayHosts()
-                    .FirstOrDefault(r => $"https://127.0.0.1:{r.BoundPort}" == relayEndpoint || r.BoundPort.ToString() == relayEndpoint);
+                    .FirstOrDefault(r => r.BoundEndpoint.ToString().TrimEnd('/') == relayEndpoint.TrimEnd('/') ||
+                                         $"https://{r.BoundEndpoint.Host}:{r.BoundPort}" == relayEndpoint ||
+                                         r.BoundPort.ToString() == relayEndpoint);
                 if (relayHost != null)
                 {
                     return await _relayCoordinator.InitiateRelayedHandshakeAsync(initiator.Id, targetHost.Id, relayHost.Id, ct).ConfigureAwait(false);

@@ -307,7 +307,7 @@ Implementation Gate: UNLOCKED
 
 ---
 
-### CONN-05 ⬜ Eliminate Relay Provisioning Duplication & Hardcoded Loopback
+### CONN-05 ⬛ Eliminate Relay Provisioning Duplication & Hardcoded Loopback
 
 - **Files:**
   - `Modify`: `Percolator.Simulator/Features/RelayedChat/RelayProvisioningCoordinator.cs` (~L85, replace `"127.0.0.1"` with `relay.BoundEndpoint.Host`; ~L111, replace `"127.0.0.1"` with `relay.BoundEndpoint.Host`; ~L184, replace `"127.0.0.1"` with `relay.BoundEndpoint.Host`; ~L106-135, eliminate duplicate manual gRPC call to `NearbyDiscoveryServiceClient`)

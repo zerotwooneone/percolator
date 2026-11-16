@@ -450,11 +450,9 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             var avatarPkg = encAvatarResult.Value;
             var avatarBlobId = BlobId.FromSha256(avatarPkg.CiphertextSha256);
             // Determine target upload endpoint
-            var targetRelayUri = HomeRelay != null
-                ? new Uri($"https://127.0.0.1:{HomeRelay.BoundPort}")
-                : (_worldState.GetAllRelayHosts().FirstOrDefault() is { } r
-                    ? new Uri($"https://127.0.0.1:{r.BoundPort}")
-                    : BoundEndpoint);
+            var targetRelayUri = HomeRelay?.BoundEndpoint
+                ?? _worldState.GetAllRelayHosts().FirstOrDefault()?.BoundEndpoint
+                ?? BoundEndpoint;
             // 2. Upload avatar blind blob via IRelayBlobClient (UploadBlindBlob over gRPC)
             var uploadBlobResult = await blobClient.UploadBlobAsync(
                 targetRelayUri,
@@ -510,7 +508,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             if (HomeRelay != null)
             {
                 var provisioner = scope.ServiceProvider.GetRequiredService<IRelayMailboxProvisioner>();
-                var relayEndpoint = RelayEndpoint.FromHostAndPort("127.0.0.1", HomeRelay.BoundPort);
+                var relayEndpoint = RelayEndpoint.FromHostAndPort(HomeRelay.BoundEndpoint.Host, HomeRelay.BoundPort);
                 var mailboxTokens = new MailboxTokenTriad(MailboxRoutingToken, MailboxDeliveryToken, MailboxDrainToken);
                 var provisionResult = await provisioner.ProvisionMailboxAsync(
                     PublicIdentityId, HomeRelay.RelayIdentityId, relayEndpoint, mailboxTokens, ct).ConfigureAwait(false);
@@ -618,7 +616,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             using var scope = _host.Services.CreateScope();
             var scheduler = scope.ServiceProvider.GetRequiredService<DrainScheduler>();
             var store = scope.ServiceProvider.GetRequiredService<IPendingIngressStore>();
-            var relayEndpoint = RelayEndpoint.FromHostAndPort("127.0.0.1", HomeRelay.BoundPort);
+            var relayEndpoint = RelayEndpoint.FromHostAndPort(HomeRelay.BoundEndpoint.Host, HomeRelay.BoundPort);
             var target = new MailboxDrainTarget(PublicIdentityId, HomeRelay.RelayIdentityId, relayEndpoint);
 
             // The DRAIN-06 scheduler stream owns the relay queue AND the pending-ingress
@@ -767,7 +765,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
 
         using var scope = _host.Services.CreateScope();
         var relayDirectory = scope.ServiceProvider.GetRequiredService<IRelayDirectory>();
-        var relayEndpoint = RelayEndpoint.FromHostAndPort("127.0.0.1", relay.BoundPort);
+        var relayEndpoint = RelayEndpoint.FromHostAndPort(relay.BoundEndpoint.Host, relay.BoundPort);
         // Skip registration when the relay is already known; the registration alone
         // carries no bindings, so LinkIdentityAsync is always the goal.
         var entries = await relayDirectory.ListAsync(ct).ConfigureAwait(false);

@@ -1572,7 +1572,7 @@ internal sealed class ScenarioRunnerService
         string? relayEndpoint = null;
         if (!string.IsNullOrWhiteSpace(step.RelayAlias) && relayAliasMap.TryGetValue(step.RelayAlias, out var relay))
         {
-            relayEndpoint = $"https://127.0.0.1:{relay.BoundPort}";
+            relayEndpoint = relay.BoundEndpoint.ToString();
         }
 
         var candidateListening = candidate.IsListening.CurrentValue;
