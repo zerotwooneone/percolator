@@ -3,6 +3,7 @@ using Percolator.Application.Delivery.Ports;
 using Percolator.Application.Egress;
 using Percolator.Application.Handshake;
 using Percolator.Application.Ingress;
+using Percolator.Application.Invitations;
 using Percolator.Application.Profiles;
 using Percolator.Application.Routing;
 using Percolator.Application.Services;
@@ -145,6 +146,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<ISessionWirePacker, ProtobufSessionWirePacker>();
         services.AddSingleton<IPayloadSerializer, ProtobufPayloadSerializer>();
         services.AddSingleton<IProfileMetadataSerializer, ProtobufProfileSerializer>();
+        services.AddSingleton<IPeerInvitationCodec, PeerInvitationCodec>();
 
         return services;
     }

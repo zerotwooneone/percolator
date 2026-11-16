@@ -46,8 +46,9 @@ public sealed class RoutingCoordinator : IRoutingCoordinator
         PublicIdentityId targetPeerId,
         CancellationToken ct = default)
     {
-        // 1. Check if we already have an active open direct stream to peer
-        if (_streamRegistry.HasActiveStream(targetPeerId))
+        // 1. Check if we already have an active open direct stream or registered direct endpoint to peer
+        if (_streamRegistry.HasActiveStream(targetPeerId) ||
+            (_streamRegistry is IStreamRegistryManagement mgmt && mgmt.GetDirectEndpoint(targetPeerId) != null))
         {
             return DomainResult<ResolvedDeliveryRoute>.Success(
                 new ResolvedDeliveryRoute(DeliveryRoutingMode.DirectPeer, targetPeerId));

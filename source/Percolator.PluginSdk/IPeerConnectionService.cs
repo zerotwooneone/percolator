@@ -27,4 +27,12 @@ public interface IPeerConnectionService
         DeviceId? targetDeviceId = null,
         RelayEndpoint? relayEndpoint = null,
         CancellationToken ct = default);
+
+    Task<DomainResult<PeerConnectionResult>> ConnectToDirectPeerAsync(
+        PublicIdentityId targetPeerId,
+        BlindedRoutingToken routingToken,
+        DeliveryToken deliveryToken,
+        Uri directEndpoint,
+        DeviceId? targetDeviceId = null,
+        CancellationToken ct = default);
 }

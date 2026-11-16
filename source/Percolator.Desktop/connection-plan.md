@@ -166,7 +166,7 @@ Implementation Gate: UNLOCKED
 
 ---
 
-### CONN-03 ⬜ Out-of-Band Invitation Codec & Port Range Settings
+### CONN-03 ⬛ Out-of-Band Invitation Codec & Port Range Settings
 
 - **Zero Data Migration Mandate:** Existing SQLite files will not be migrated or preserved. Recreating tables or resetting database files is expected. Zero EF migration scripts or backwards-compatibility shims are permitted.
 
@@ -251,7 +251,7 @@ Implementation Gate: UNLOCKED
 
 ---
 
-### CONN-04 ⬜ Eliminate Direct Handshake Duplication & Anti-Shortcut Cross-Host Peeking
+### CONN-04 ⬛ Eliminate Direct Handshake Duplication & Anti-Shortcut Cross-Host Peeking
 
 - **Files:**
   - `Modify`: `Percolator.PluginSdk/IPeerConnectionService.cs` (~L23, add overload/method `ConnectToDirectPeerAsync`)

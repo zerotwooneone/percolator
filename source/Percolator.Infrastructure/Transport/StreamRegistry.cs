@@ -14,16 +14,6 @@ public sealed class StreamRegistryOptions
     public int DefaultQueueCapacity { get; set; } = 1000;
 }
 
-public interface IStreamRegistryManagement : IStreamRegistry
-{
-    ChannelReader<ReadOnlyMemory<byte>> RegisterStream(Domain.Identities.PublicIdentityId targetId, int? capacity = null);
-    ChannelReader<ReadOnlyMemory<byte>> RegisterRelayStream(Domain.Identities.PublicIdentityId relayId, int? capacity = null);
-    void UnregisterStream(Domain.Identities.PublicIdentityId targetId);
-    void UnregisterRelayStream(Domain.Identities.PublicIdentityId relayId);
-    void RegisterDirectEndpoint(Domain.Identities.PublicIdentityId targetId, Uri directEndpoint);
-    void UnregisterDirectEndpoint(Domain.Identities.PublicIdentityId targetId);
-    Uri? GetDirectEndpoint(Domain.Identities.PublicIdentityId targetId);
-}
 
 public sealed class StreamRegistry : IStreamRegistryManagement
 {

@@ -20,6 +20,7 @@ using Percolator.Domain.Security.ValueObjects;
 using Percolator.Infrastructure.Persistence;
 using Percolator.Infrastructure.Protos;
 using Percolator.Infrastructure.Transport;
+using Percolator.PluginSdk;
 using Percolator.Simulator.Features.Logging;
 using Percolator.Simulator.Features.RichChatAndProfiles;
 using Percolator.Simulator.Features.Scenarios;
@@ -93,67 +94,26 @@ internal sealed class DirectHandshakeOrchestrator
 
             try
             {
-                // Register target direct endpoint in initiator's stream registry so TransportDispatcher resolves DirectP2P
-                var initiatorStreamRegistry = initiator.Services.GetRequiredService<IStreamRegistryManagement>();
-                initiatorStreamRegistry.RegisterDirectEndpoint(target.PublicIdentityId, target.BoundEndpoint);
-                var channelFactory = initiator.Services.GetRequiredService<IPeerGrpcChannelFactory>();
-                var channel = channelFactory.GetOrCreateChannel(target.BoundEndpoint);
-                var client = new UnauthenticatedDeliveryService.UnauthenticatedDeliveryServiceClient(channel);
-
-                var fetchRequest = new FetchPreKeyBundleRequest
-                {
-                    RecipientRoutingToken = ByteString.CopyFrom(target.MailboxRoutingToken.ToByteArray()),
-                    DeliveryToken = ByteString.CopyFrom(target.MailboxDeliveryToken.Span)
-                };
-
-                var response = await client.FetchPreKeyBundleAsync(
-                    fetchRequest,
-                    deadline: DateTime.UtcNow.AddSeconds(5),
-                    cancellationToken: ct);
-
-                DhPublicKey? opk = response.OneTimePrekey.IsEmpty
-                    ? null
-                    : DhPublicKey.FromSpan(response.OneTimePrekey.Span);
-
-                var targetBundle = new PreKeyBundle(
-                    DeviceId.Primary,
-                    IdentityKey.FromSpan(response.IdentityKey.Span),
-                    DhPublicKey.FromSpan(response.SignedPrekey.Span),
-                    DeviceLinkProof.FromSpan(response.PrekeySignature.Span),
-                    response.SignedPrekeyId == 0 ? SignedPreKeyId.First : new SignedPreKeyId(response.SignedPrekeyId),
-                    OneTimePreKey: opk,
-                    OneTimePreKeyId: response.OneTimePrekeyId);
-
                 using var scope = initiator.Services.CreateScope();
-                var handshakeService = scope.ServiceProvider.GetRequiredService<IHandshakeService>();
+                var connectionService = scope.ServiceProvider.GetRequiredService<IPeerConnectionService>();
 
-                var result = await handshakeService.InitiateHandshakeAsync(
-                    initiator.PublicIdentityId,
-                    DeviceId.Primary,
+                var connectResult = await connectionService.ConnectToDirectPeerAsync(
                     target.PublicIdentityId,
-                    targetBundle,
-                    initialAppId: null,
-                    initialPayload: null,
-                    ct: ct);
+                    target.MailboxRoutingToken,
+                    target.MailboxDeliveryToken,
+                    target.BoundEndpoint,
+                    DeviceId.Primary,
+                    ct).ConfigureAwait(false);
 
-                if (!result.IsSuccess)
+                if (!connectResult.IsSuccess)
                 {
-                    _toastService.ShowToast("Handshake Failed", result.Error.Description, ToastSeverity.Error);
+                    _toastService.ShowToast("Handshake Failed", connectResult.Error.Description, ToastSeverity.Error);
                     return false;
                 }
 
-                // Ensure channel and contact exist on initiator side
-                var channelId = ChannelIdUtility.DeterministicFor(initiator.PublicIdentityId, target.PublicIdentityId);
-                var channelRepo = scope.ServiceProvider.GetRequiredService<IChannelRepository>();
+                // Ensure contact exists on initiator side
                 var contactRepo = scope.ServiceProvider.GetRequiredService<IPeerContactRepository>();
                 var timeProvider = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>();
-                var directChannel = await channelRepo.GetDirectByIdAsync(channelId, ct);
-                if (directChannel == null)
-                {
-                    var channelEntity = DirectChannel.Create(channelId, initiator.PublicIdentityId, target.PublicIdentityId, timeProvider).Value!;
-                    await channelRepo.SaveDirectAsync(channelEntity, ct);
-                }
-
                 var existingContact = await contactRepo.GetByPeerIdAsync(initiator.PublicIdentityId, target.PublicIdentityId, ct);
                 if (existingContact == null)
                 {
@@ -163,7 +123,7 @@ internal sealed class DirectHandshakeOrchestrator
                         ContactNickname.Create(null, target.PublicIdentityId),
                         PeerTrustLevel.Tofu,
                         timeProvider.UtcNow,
-                        targetBundle.IdentityKey,
+                        target.IdentityPublicKey,
                         ContactState.Active);
                     await contactRepo.SaveAsync(newContact, ct);
                 }
@@ -263,33 +223,6 @@ internal sealed class DirectHandshakeOrchestrator
                     {
                         await senderHost.DrainMailboxAsync(ct);
                     }
-
-                    // Ensure sender also has the channel and active contact created
-                    using var senderScope = senderHost.Services.CreateScope();
-                    var senderChannelRepo = senderScope.ServiceProvider.GetRequiredService<IChannelRepository>();
-                    var senderContactRepo = senderScope.ServiceProvider.GetRequiredService<IPeerContactRepository>();
-                    var senderTimeProvider = senderScope.ServiceProvider.GetRequiredService<IDateTimeProvider>();
-                    var sc = await senderChannelRepo.GetDirectByIdAsync(channelId, ct);
-                    if (sc == null)
-                    {
-                        var channel = DirectChannel.Create(channelId, senderId, target.PublicIdentityId, senderTimeProvider).Value!;
-                        await senderChannelRepo.SaveDirectAsync(channel, ct);
-                    }
-
-                    var senderContact = await senderContactRepo.GetByPeerIdAsync(senderId, target.PublicIdentityId, ct);
-                    if (senderContact == null)
-                    {
-                        var newContact = new PeerContact(
-                            senderId,
-                            target.PublicIdentityId,
-                            ContactNickname.Create(null, target.PublicIdentityId),
-                            PeerTrustLevel.Tofu,
-                            senderTimeProvider.UtcNow,
-                            target.IdentityPublicKey,
-                            ContactState.Active);
-                        await senderContactRepo.SaveAsync(newContact, ct);
-                    }
-                    await senderHost.FlushOutboxAsync(ct);
 
                     _stateBus.Publish(new SimulatorStateSignal(
                         senderHost.Id,

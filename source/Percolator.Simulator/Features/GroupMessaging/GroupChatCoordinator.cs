@@ -173,7 +173,10 @@ internal sealed class GroupChatCoordinator : IDisposable
                 if (member.PublicIdentityId == admin.PublicIdentityId) continue;
 
                 var directChannelId = ChannelIdUtility.DeterministicFor(admin.PublicIdentityId, member.PublicIdentityId);
-                var route = member.HomeRelay != null ? DeliveryRoute.RelayedOneToOne : DeliveryRoute.DirectP2P;
+                var streamRegistry = adminScope.ServiceProvider.GetRequiredService<IStreamRegistryManagement>();
+                var route = (streamRegistry.GetDirectEndpoint(member.PublicIdentityId) == null && member.HomeRelay != null)
+                    ? DeliveryRoute.RelayedOneToOne
+                    : DeliveryRoute.DirectP2P;
 
                 var allMemberIds = members.Select(m => m.PublicIdentityId).Append(admin.PublicIdentityId).Distinct().ToList();
                 var inviteDto = new GroupInvitationDto(
@@ -270,7 +273,10 @@ internal sealed class GroupChatCoordinator : IDisposable
         }
 
         var directChannelId = ChannelIdUtility.DeterministicFor(persona.PublicIdentityId, invitation.InviterId);
-        var route = persona.HomeRelay != null ? DeliveryRoute.RelayedOneToOne : DeliveryRoute.DirectP2P;
+        var streamRegistry = scope.ServiceProvider.GetRequiredService<IStreamRegistryManagement>();
+        var route = (streamRegistry.GetDirectEndpoint(invitation.InviterId) == null && persona.HomeRelay != null)
+            ? DeliveryRoute.RelayedOneToOne
+            : DeliveryRoute.DirectP2P;
 
         var inviteService = scope.ServiceProvider.GetRequiredService<GroupInvitationService>();
         var acceptResult = await inviteService.AcceptInvitationAsync(
@@ -569,7 +575,10 @@ internal sealed class GroupChatCoordinator : IDisposable
             {
                 var existingHost = _worldState.FindPersonaHostByIdentity(existingMemberId);
                 var directChannelId = ChannelIdUtility.DeterministicFor(admin.PublicIdentityId, existingMemberId);
-                var route = existingHost?.HomeRelay != null ? DeliveryRoute.RelayedOneToOne : DeliveryRoute.DirectP2P;
+                var streamRegistry = adminScope.ServiceProvider.GetRequiredService<IStreamRegistryManagement>();
+                var route = (streamRegistry.GetDirectEndpoint(existingMemberId) == null && existingHost?.HomeRelay != null)
+                    ? DeliveryRoute.RelayedOneToOne
+                    : DeliveryRoute.DirectP2P;
 
                 await payloadSender.SendPayloadAsync(new OutboundPayloadContext(
                     directChannelId,
@@ -599,12 +608,17 @@ internal sealed class GroupChatCoordinator : IDisposable
                 expiryMs,
                 allMemberIds);
 
+            var adminStreamRegistry = adminScope.ServiceProvider.GetRequiredService<IStreamRegistryManagement>();
+            var inviteRoute = (adminStreamRegistry.GetDirectEndpoint(newMember.PublicIdentityId) == null && newMember.HomeRelay != null)
+                ? DeliveryRoute.RelayedOneToOne
+                : DeliveryRoute.DirectP2P;
+
             await inviteService.SendInvitationAsync(
                 inviteDto,
                 directInviteChannelId,
                 newMember.PublicIdentityId,
                 DeviceId.Primary,
-                newMember.HomeRelay != null ? DeliveryRoute.RelayedOneToOne : DeliveryRoute.DirectP2P,
+                inviteRoute,
                 ct);
 
             await admin.FlushOutboxAsync(ct);
@@ -749,7 +763,10 @@ internal sealed class GroupChatCoordinator : IDisposable
             {
                 var targetHost = _worldState.FindPersonaHostByIdentity(targetId);
                 var directChannelId = ChannelIdUtility.DeterministicFor(admin.PublicIdentityId, targetId);
-                var route = targetHost?.HomeRelay != null ? DeliveryRoute.RelayedOneToOne : DeliveryRoute.DirectP2P;
+                var streamRegistry = adminScope.ServiceProvider.GetRequiredService<IStreamRegistryManagement>();
+                var route = (streamRegistry.GetDirectEndpoint(targetId) == null && targetHost?.HomeRelay != null)
+                    ? DeliveryRoute.RelayedOneToOne
+                    : DeliveryRoute.DirectP2P;
 
                 await payloadSender.SendPayloadAsync(new OutboundPayloadContext(
                     directChannelId,

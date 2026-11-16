@@ -12,10 +12,15 @@ using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Ports;
+using Percolator.Domain.Channels.Model;
+using Percolator.Domain.Channels.Ports;
+using Percolator.Domain.Identities.Model;
+using Percolator.Domain.Identities.Ports;
 using Percolator.Infrastructure.Protos;
 using Percolator.Infrastructure.Transport;
 using Percolator.PluginSdk;
 using Percolator.PluginSdk.Profiles;
+using Percolator.Simulator.Features.DirectChat;
 using Percolator.Simulator.Features.Logging;
 using Percolator.Simulator.Features.Shell;
 using Percolator.Simulator.Features.Topology;
@@ -386,6 +391,33 @@ internal sealed class RelayProvisioningCoordinator
                 {
                     _toastService.ShowToast("Handshake Failed", hsResult.Error.Description, ToastSeverity.Error);
                     return false;
+                }
+
+                // Ensure DirectChannel exists on initiator
+                var channelRepo = scope.ServiceProvider.GetRequiredService<IChannelRepository>();
+                var timeProvider = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>();
+                var channelId = ChannelIdUtility.DeterministicFor(initiator.PublicIdentityId, target.PublicIdentityId);
+                var directChannel = await channelRepo.GetDirectByIdAsync(channelId, ct);
+                if (directChannel == null)
+                {
+                    var channel = DirectChannel.Create(channelId, initiator.PublicIdentityId, target.PublicIdentityId, timeProvider).Value!;
+                    await channelRepo.SaveDirectAsync(channel, ct);
+                }
+
+                // Ensure contact exists on initiator
+                var contactRepo = scope.ServiceProvider.GetRequiredService<IPeerContactRepository>();
+                var existingContact = await contactRepo.GetByPeerIdAsync(initiator.PublicIdentityId, target.PublicIdentityId, ct);
+                if (existingContact == null)
+                {
+                    var newContact = new PeerContact(
+                        initiator.PublicIdentityId,
+                        target.PublicIdentityId,
+                        ContactNickname.Create(null, target.PublicIdentityId),
+                        PeerTrustLevel.Tofu,
+                        timeProvider.UtcNow,
+                        target.IdentityPublicKey,
+                        ContactState.Active);
+                    await contactRepo.SaveAsync(newContact, ct);
                 }
             }
 

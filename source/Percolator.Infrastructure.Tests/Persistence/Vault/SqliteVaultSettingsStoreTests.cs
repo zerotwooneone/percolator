@@ -134,4 +134,67 @@ public sealed class SqliteVaultSettingsStoreTests
         var act = async () => await _store.SaveAsync(id, new IdentityLaunchSettings(5100, -1, false, 0));
         act.Should().ThrowAsync<ArgumentOutOfRangeException>();
     }
+
+    [Test]
+    public async Task SaveAsync_WithPortRange_RoundTripsAccurately()
+    {
+        var id = new PublicIdentityId(Guid.NewGuid());
+        var settings = new IdentityLaunchSettings(
+            PreferredPort: 5100,
+            LastBoundPort: 5105,
+            AutoStart: true,
+            SidebarOrder: 1,
+            PortRangeStart: 5100,
+            PortRangeEnd: 5200);
+
+        await _store.SaveAsync(id, settings);
+        var loaded = await _store.GetAsync(id);
+
+        loaded.Should().NotBeNull();
+        loaded.Should().Be(settings);
+        loaded!.PortRangeStart.Should().Be(5100);
+        loaded.PortRangeEnd.Should().Be(5200);
+    }
+
+    [Test]
+    public void SaveAsync_PortRangeStartOutOfRange_Throws()
+    {
+        var id = new PublicIdentityId(Guid.NewGuid());
+        var act = async () => await _store.SaveAsync(id, new IdentityLaunchSettings(5100, null, false, 0, PortRangeStart: 0, PortRangeEnd: 5200));
+        act.Should().ThrowAsync<ArgumentOutOfRangeException>();
+    }
+
+    [Test]
+    public void SaveAsync_PortRangeEndOutOfRange_Throws()
+    {
+        var id = new PublicIdentityId(Guid.NewGuid());
+        var act = async () => await _store.SaveAsync(id, new IdentityLaunchSettings(5100, null, false, 0, PortRangeStart: 5100, PortRangeEnd: 70000));
+        act.Should().ThrowAsync<ArgumentOutOfRangeException>();
+    }
+
+    [Test]
+    public void SaveAsync_PortRangeStartGreaterThanEnd_Throws()
+    {
+        var id = new PublicIdentityId(Guid.NewGuid());
+        var act = async () => await _store.SaveAsync(id, new IdentityLaunchSettings(5100, null, false, 0, PortRangeStart: 5300, PortRangeEnd: 5200));
+        act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Test]
+    public void SaveAsync_PortRangeStartWithoutEnd_Throws()
+    {
+        var id = new PublicIdentityId(Guid.NewGuid());
+        var act = async () => await _store.SaveAsync(id, new IdentityLaunchSettings(5100, null, false, 0, PortRangeStart: 5100, PortRangeEnd: null));
+        act.Should().ThrowAsync<ArgumentException>()
+            .WithMessage("*Both PortRangeStart and PortRangeEnd must be specified together*");
+    }
+
+    [Test]
+    public void SaveAsync_PortRangeEndWithoutStart_Throws()
+    {
+        var id = new PublicIdentityId(Guid.NewGuid());
+        var act = async () => await _store.SaveAsync(id, new IdentityLaunchSettings(5100, null, false, 0, PortRangeStart: null, PortRangeEnd: 5200));
+        act.Should().ThrowAsync<ArgumentException>()
+            .WithMessage("*Both PortRangeStart and PortRangeEnd must be specified together*");
+    }
 }

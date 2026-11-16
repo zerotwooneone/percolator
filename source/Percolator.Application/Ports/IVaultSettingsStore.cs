@@ -9,7 +9,13 @@ using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 /// Per-identity launch preferences persisted inside the encrypted vault. Keyed by
 /// <see cref="PublicIdentityId"/> so personas and relay hosts share one table.
 /// </summary>
-public sealed record IdentityLaunchSettings(int PreferredPort, int? LastBoundPort, bool AutoStart, int SidebarOrder);
+public sealed record IdentityLaunchSettings(
+    int PreferredPort,
+    int? LastBoundPort,
+    bool AutoStart,
+    int SidebarOrder,
+    int? PortRangeStart = null,
+    int? PortRangeEnd = null);
 
 /// <summary>Vault-global app-setting keys — Application-owned constants; no magic strings in ViewModels.</summary>
 public static class VaultSettingKeys

@@ -110,6 +110,21 @@ public sealed class RoutingCoordinatorTests
     }
 
     [Test]
+    public async Task ResolveRoute_WhenPeerHasDirectEndpointRegistered_SelectsDirect()
+    {
+        // Arrange
+        _streamRegistry.RegisterDirectEndpoint(_peerId, new Uri("https://192.168.1.100:5100"));
+
+        // Act
+        var result = await _coordinator.ResolveRouteAsync(_peerId);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.Value!.Mode.Should().Be(DeliveryRoutingMode.DirectPeer);
+        result.Value!.TargetPeerId.Should().Be(_peerId);
+    }
+
+    [Test]
     public async Task ResolveRoute_WhenNoStreamButRelayRouteExists_SelectsRelay()
     {
         // Arrange

@@ -29,6 +29,7 @@ using Percolator.Apps.FileTransfer.DependencyInjection;
 using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Ports;
 using Percolator.Apps.FileTransfer.Features.IngressControl;
+using Percolator.Domain.Channels.Ports;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Hosting;
@@ -228,6 +229,15 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             services.AddScoped<IRoutingCoordinator, RoutingCoordinator>();
             services.AddScoped<IPayloadSender, OutboundEgressPipeline>();
             services.AddScoped<IGroupKeyDistributionService, GroupKeyDistributionService>();
+            services.AddScoped<IPeerConnectionService>(sp => new PeerConnectionService(
+                PublicIdentityId,
+                DeviceId.Primary,
+                sp.GetRequiredService<IPreKeyBundleProvider>(),
+                sp.GetRequiredService<IHandshakeService>(),
+                sp.GetRequiredService<IChannelRepository>(),
+                sp.GetRequiredService<IDateTimeProvider>(),
+                sp.GetRequiredService<IStreamRegistryManagement>(),
+                sp.GetRequiredService<IPeerMailboxRoutingRepository>()));
             // 4b. Simulator-only read-model query services (isolated from core application/domain layers)
             services.AddScoped<ISimulatorChatQueryService, SimulatorChatQueryService>();
             services.AddScoped<ISimulatorRatchetQueryService, SimulatorRatchetQueryService>();

@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Threading.Channels;
 using Percolator.Application.Ports;
 using Percolator.Application2IntegrationTests.Infrastructure;
 using Percolator.Domain.Channels.Ports;
@@ -7,12 +9,13 @@ using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Application2IntegrationTests.Adapters;
 
-public sealed class LoopbackStreamRegistry : IStreamRegistry
+public sealed class LoopbackStreamRegistry : IStreamRegistryManagement
 {
     private readonly PublicIdentityId _localIdentityId;
     private readonly DeviceId _localDeviceId;
     private readonly InMemoryLoopbackNetworkSwitch _networkSwitch;
     private readonly IChannelRepository _channelRepository;
+    private readonly ConcurrentDictionary<PublicIdentityId, Uri> _directEndpoints = new();
 
     public LoopbackStreamRegistry(
         PublicIdentityId localIdentityId,
@@ -79,4 +82,23 @@ public sealed class LoopbackStreamRegistry : IStreamRegistry
 
         return StreamWriteResult.Success();
     }
+
+    public ChannelReader<ReadOnlyMemory<byte>> RegisterStream(PublicIdentityId targetId, int? capacity = null) =>
+        throw new NotSupportedException("RegisterStream is not supported in LoopbackStreamRegistry.");
+
+    public ChannelReader<ReadOnlyMemory<byte>> RegisterRelayStream(PublicIdentityId relayId, int? capacity = null) =>
+        throw new NotSupportedException("RegisterRelayStream is not supported in LoopbackStreamRegistry.");
+
+    public void UnregisterStream(PublicIdentityId targetId) { }
+
+    public void UnregisterRelayStream(PublicIdentityId relayId) { }
+
+    public void RegisterDirectEndpoint(PublicIdentityId targetId, Uri directEndpoint) =>
+        _directEndpoints[targetId] = directEndpoint;
+
+    public void UnregisterDirectEndpoint(PublicIdentityId targetId) =>
+        _directEndpoints.TryRemove(targetId, out _);
+
+    public Uri? GetDirectEndpoint(PublicIdentityId targetId) =>
+        _directEndpoints.TryGetValue(targetId, out var ep) ? ep : null;
 }

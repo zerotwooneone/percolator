@@ -106,7 +106,7 @@ public sealed class TestIdentityNode
     public GroupInvitationService GroupInvitationService { get; }
     public OutboxWorker OutboxWorker { get; }
     public InboundIngressPipeline IngressPipeline { get; }
-    public IStreamRegistry StreamRegistry { get; }
+    public LoopbackStreamRegistry StreamRegistry { get; }
     public ITransportDispatcher TransportDispatcher { get; }
     public RoutingCoordinator RoutingCoordinator { get; }
 
@@ -354,7 +354,9 @@ public sealed class TestIdentityNode
             PreKeyBundleProvider,
             HandshakeService,
             _channelRepo,
-            TimeProvider);
+            TimeProvider,
+            StreamRegistry,
+            PeerMailboxRoutingRepo);
 
         var discoveryClient = new LoopbackNearbyDiscoveryQueryClient(_networkSwitch);
         NearbyDiscovery = new NearbyPeerDiscoveryWorkflow(discoveryClient, PeerConnectionService);

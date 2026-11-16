@@ -61,15 +61,16 @@ public sealed class PreKeyBundleProviderAdapter : IPreKeyBundleProvider
             }
         }
 
-        // 2. If remote relay endpoint is specified and channel factory & routing repository are configured
-        if (relayEndpoint != null && _channelFactory != null && _routingRepository != null)
+        // 2. If channel factory & routing repository are configured
+        if (_channelFactory != null && _routingRepository != null)
         {
             try
             {
                 var routingCapability = await _routingRepository.GetByPeerIdAsync(peerId, ct).ConfigureAwait(false);
-                if (routingCapability != null)
+                var effectiveEndpoint = relayEndpoint ?? routingCapability?.RelayEndpoint;
+                if (routingCapability != null && effectiveEndpoint != null)
                 {
-                    var uri = ToUri(relayEndpoint);
+                    var uri = ToUri(effectiveEndpoint);
                     var channel = _channelFactory.GetOrCreateChannel(uri);
                     var client = new UnauthenticatedDeliveryService.UnauthenticatedDeliveryServiceClient(channel);
 

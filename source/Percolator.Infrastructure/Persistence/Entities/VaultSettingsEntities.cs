@@ -15,6 +15,8 @@ public sealed class IdentitySettingsEntity
     public int? LastBoundPort { get; set; }
     public bool AutoStart { get; set; }
     public int SidebarOrder { get; set; }
+    public int? PortRangeStart { get; set; }
+    public int? PortRangeEnd { get; set; }
 }
 
 /// <summary>Vault-global application setting (key/value).</summary>

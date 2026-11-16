@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Percolator.Application.Ports;
 using Percolator.Apps.Chat.Features.Messaging;
 using Percolator.Apps.Chat.Features.Reactions;
 using Percolator.Domain.Channels.Model;
@@ -64,10 +65,11 @@ internal sealed class RichChatActionCoordinator
             using var scope = actor.Services.CreateScope();
             var chatService = scope.ServiceProvider.GetRequiredService<IChatService>();
 
+            var streamRegistry = scope.ServiceProvider.GetRequiredService<IStreamRegistryManagement>();
             var route = DeliveryRoute.DirectP2P;
-            var routingRepo = scope.ServiceProvider.GetRequiredService<IPeerMailboxRoutingRepository>();
-            if (peer.HomeRelay != null)
+            if (streamRegistry.GetDirectEndpoint(peer.PublicIdentityId) == null && peer.HomeRelay != null)
             {
+                var routingRepo = scope.ServiceProvider.GetRequiredService<IPeerMailboxRoutingRepository>();
                 var now = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>().UtcNow;
                 var bestRoute = await routingRepo.GetBestRouteAsync(peer.PublicIdentityId, now, ct);
                 if (bestRoute != null)
@@ -155,10 +157,11 @@ internal sealed class RichChatActionCoordinator
             using var scope = author.Services.CreateScope();
             var chatService = scope.ServiceProvider.GetRequiredService<IChatService>();
 
+            var streamRegistry = scope.ServiceProvider.GetRequiredService<IStreamRegistryManagement>();
             var route = DeliveryRoute.DirectP2P;
-            var routingRepo = scope.ServiceProvider.GetRequiredService<IPeerMailboxRoutingRepository>();
-            if (peer.HomeRelay != null)
+            if (streamRegistry.GetDirectEndpoint(peer.PublicIdentityId) == null && peer.HomeRelay != null)
             {
+                var routingRepo = scope.ServiceProvider.GetRequiredService<IPeerMailboxRoutingRepository>();
                 var now = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>().UtcNow;
                 var bestRoute = await routingRepo.GetBestRouteAsync(peer.PublicIdentityId, now, ct);
                 if (bestRoute != null)
@@ -243,10 +246,11 @@ internal sealed class RichChatActionCoordinator
             using var scope = requestedBy.Services.CreateScope();
             var chatService = scope.ServiceProvider.GetRequiredService<IChatService>();
 
+            var streamRegistry = scope.ServiceProvider.GetRequiredService<IStreamRegistryManagement>();
             var route = DeliveryRoute.DirectP2P;
-            var routingRepo = scope.ServiceProvider.GetRequiredService<IPeerMailboxRoutingRepository>();
-            if (peer.HomeRelay != null)
+            if (streamRegistry.GetDirectEndpoint(peer.PublicIdentityId) == null && peer.HomeRelay != null)
             {
+                var routingRepo = scope.ServiceProvider.GetRequiredService<IPeerMailboxRoutingRepository>();
                 var now = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>().UtcNow;
                 var bestRoute = await routingRepo.GetBestRouteAsync(peer.PublicIdentityId, now, ct);
                 if (bestRoute != null)

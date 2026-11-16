@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Percolator.Application.Ports;
 using Percolator.Apps.Chat.Features.Messaging;
 using Percolator.Apps.Chat.Features.Profiles;
 using Percolator.Domain.Common;
@@ -181,8 +182,9 @@ internal sealed class ProfileSyncCoordinator
                 return false;
             }
 
+            var streamRegistry = scope.ServiceProvider.GetRequiredService<IStreamRegistryManagement>();
             var route = DeliveryRoute.DirectP2P;
-            if (recipient.HomeRelay != null)
+            if (streamRegistry.GetDirectEndpoint(recipient.PublicIdentityId) == null && recipient.HomeRelay != null)
             {
                 var now = timeProvider.UtcNow;
                 var bestRoute = await routingRepo.GetBestRouteAsync(recipient.PublicIdentityId, now, ct);

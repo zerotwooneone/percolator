@@ -65,6 +65,23 @@ public sealed class SqliteVaultSettingsStore : IVaultSettingsStore
             ValidatePort(nameof(settings.LastBoundPort), lastBound);
         }
 
+        if (settings.PortRangeStart.HasValue != settings.PortRangeEnd.HasValue)
+        {
+            throw new ArgumentException("Both PortRangeStart and PortRangeEnd must be specified together, or both must be null.", nameof(settings));
+        }
+        if (settings.PortRangeStart is { } rangeStart)
+        {
+            ValidatePort(nameof(settings.PortRangeStart), rangeStart);
+        }
+        if (settings.PortRangeEnd is { } rangeEnd)
+        {
+            ValidatePort(nameof(settings.PortRangeEnd), rangeEnd);
+        }
+        if (settings.PortRangeStart is { } rStart && settings.PortRangeEnd is { } rEnd && rStart > rEnd)
+        {
+            throw new ArgumentException("PortRangeStart must be less than or equal to PortRangeEnd.", nameof(settings));
+        }
+
         var key = identityId.Value.ToByteArray();
         await using var db = await _contextFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
         var entity = await db.IdentitySettings
@@ -80,6 +97,8 @@ public sealed class SqliteVaultSettingsStore : IVaultSettingsStore
         entity.LastBoundPort = settings.LastBoundPort;
         entity.AutoStart = settings.AutoStart;
         entity.SidebarOrder = settings.SidebarOrder;
+        entity.PortRangeStart = settings.PortRangeStart;
+        entity.PortRangeEnd = settings.PortRangeEnd;
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
@@ -123,7 +142,7 @@ public sealed class SqliteVaultSettingsStore : IVaultSettingsStore
     }
 
     private static IdentityLaunchSettings Map(IdentitySettingsEntity entity) =>
-        new(entity.PreferredPort, entity.LastBoundPort, entity.AutoStart, entity.SidebarOrder);
+        new(entity.PreferredPort, entity.LastBoundPort, entity.AutoStart, entity.SidebarOrder, entity.PortRangeStart, entity.PortRangeEnd);
 
     private static void ValidatePort(string paramName, int port)
     {
