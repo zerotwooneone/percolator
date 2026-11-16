@@ -1,0 +1,137 @@
+<!-- SPECIFICATION GOVERNANCE: Read Percolator.Desktop/spec/View.spec.md before modifying this file. -->
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Percolator.Desktop.Features.Transports.ViewModels"
+        x:Class="Percolator.Desktop.Features.Transports.Views.AddConnectionDialog"
+        x:DataType="vm:AddConnectionDialogViewModel"
+        Title="Add Connection"
+        Width="500"
+        SizeToContent="Height"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner">
+
+    <Grid RowDefinitions="*,Auto" Margin="24">
+        <TabControl Grid.Row="0" SelectedIndex="{Binding SelectedTabIndex}" Margin="0,0,0,16">
+            <!-- Tab 1: Connect to Peer (Direct P2P) -->
+            <TabItem Header="Connect to Peer">
+                <StackPanel Spacing="16" Margin="0,16,0,0">
+                    <TextBlock Text="Enter a peer invitation to establish a direct P2P connection."
+                               TextWrapping="Wrap"
+                               Opacity="0.8" />
+
+                    <!-- UI Prefix Affordance -->
+                    <Grid ColumnDefinitions="Auto,*,Auto">
+                        <Border Grid.Column="0"
+                                Background="{DynamicResource SurfaceSubtleBrush}"
+                                BorderBrush="{DynamicResource ControlBorderBrush}"
+                                BorderThickness="1,1,0,1"
+                                CornerRadius="4,0,0,4"
+                                Padding="10,0"
+                                VerticalAlignment="Stretch">
+                            <TextBlock Text="percolator://"
+                                       VerticalAlignment="Center"
+                                       Foreground="{DynamicResource TextMutedBrush}"
+                                       FontFamily="Consolas,Menlo,monospace" />
+                        </Border>
+
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding PeerInvitationInput, Mode=TwoWay}"
+                                 Watermark="invite?id=... or base64 token"
+                                 CornerRadius="0"
+                                 VerticalAlignment="Stretch" />
+
+                        <Button Grid.Column="2"
+                                Content="Paste"
+                                Command="{Binding PasteClipboardCommand}"
+                                CornerRadius="0,4,4,0"
+                                VerticalAlignment="Stretch" />
+                    </Grid>
+
+                    <!-- Progressive Feedback during probing -->
+                    <StackPanel Spacing="8" IsVisible="{Binding IsProbing}">
+                        <ProgressBar IsIndeterminate="True" Height="4" />
+                        <TextBlock Text="{Binding ProbeStatusText}"
+                                   HorizontalAlignment="Center"
+                                   FontStyle="Italic"
+                                   Opacity="0.8" />
+                    </StackPanel>
+
+                    <!-- Error message -->
+                    <TextBlock Text="{Binding ErrorMessage}"
+                               Foreground="#FF5555"
+                               TextWrapping="Wrap"
+                               IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+
+                    <Button Content="Connect"
+                            Command="{Binding SubmitPeerConnectionCommand}"
+                            Classes="accent"
+                            HorizontalAlignment="Stretch"
+                            IsEnabled="{Binding !IsProbing}" />
+                </StackPanel>
+            </TabItem>
+
+            <!-- Tab 2: Add Relay -->
+            <TabItem Header="Add Relay">
+                <StackPanel Spacing="16" Margin="0,16,0,0">
+                    <TextBlock Text="Add a relay endpoint to bind to your persona for store-and-forward delivery."
+                               TextWrapping="Wrap"
+                               Opacity="0.8" />
+
+                    <!-- UI Prefix Affordance -->
+                    <Grid ColumnDefinitions="Auto,*">
+                        <Border Grid.Column="0"
+                                Background="{DynamicResource SurfaceSubtleBrush}"
+                                BorderBrush="{DynamicResource ControlBorderBrush}"
+                                BorderThickness="1,1,0,1"
+                                CornerRadius="4,0,0,4"
+                                Padding="10,0"
+                                VerticalAlignment="Stretch">
+                            <TextBlock Text="relay://"
+                                       VerticalAlignment="Center"
+                                       Foreground="{DynamicResource TextMutedBrush}"
+                                       FontFamily="Consolas,Menlo,monospace" />
+                        </Border>
+
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding RelayEndpointInput, Mode=TwoWay}"
+                                 Watermark="host:port (e.g. 127.0.0.1:5100)"
+                                 CornerRadius="0,4,4,0"
+                                 VerticalAlignment="Stretch" />
+                    </Grid>
+
+                    <!-- Prekey Seeding Opt-In (unchecked by default per SYS-PRE-ACTIVATION-STEALTH) -->
+                    <CheckBox Content="Publish prekey bundle to relay for offline messaging"
+                              IsChecked="{Binding SeedPreKeysToRelay, Mode=TwoWay}" />
+
+                    <!-- Progressive Feedback during probing -->
+                    <StackPanel Spacing="8" IsVisible="{Binding IsProbing}">
+                        <ProgressBar IsIndeterminate="True" Height="4" />
+                        <TextBlock Text="{Binding ProbeStatusText}"
+                                   HorizontalAlignment="Center"
+                                   FontStyle="Italic"
+                                   Opacity="0.8" />
+                    </StackPanel>
+
+                    <!-- Error message -->
+                    <TextBlock Text="{Binding ErrorMessage}"
+                               Foreground="#FF5555"
+                               TextWrapping="Wrap"
+                               IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+
+                    <Button Content="Add Relay"
+                            Command="{Binding SubmitRelayConnectionCommand}"
+                            Classes="accent"
+                            HorizontalAlignment="Stretch"
+                            IsEnabled="{Binding !IsProbing}" />
+                </StackPanel>
+            </TabItem>
+        </TabControl>
+
+        <!-- Footer -->
+        <Button Grid.Row="1"
+                Content="Cancel"
+                Command="{Binding CancelCommand}"
+                HorizontalAlignment="Right"
+                Width="100" />
+    </Grid>
+</Window>

@@ -376,7 +376,7 @@ Implementation Gate: UNLOCKED
 
 ---
 
-### CONN-07 ⬜ Desktop Add Connection Dialog (`+` Modal) & Progressive Feedback
+### CONN-07 ⬛ Desktop Add Connection Dialog (`+` Modal) & Progressive Feedback
 
 - **Files:**
   - `Create`: `Percolator.Desktop/Features/Transports/Views/AddConnectionDialog.axaml` & `Percolator.Desktop/Features/Transports/Views/AddConnectionDialog.axaml.cs`

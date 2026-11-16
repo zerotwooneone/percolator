@@ -60,6 +60,7 @@ public partial class App : Avalonia.Application
                 services.AddBootstrapInfrastructure();
 
                 services.AddSingleton<IDateTimeProvider>(SystemDateTimeProvider.Instance);
+                services.AddSingleton(TimeProvider.System);
                 services.AddSingleton<INativeCryptoProbe, NativeCryptoProbe>();
                 services.AddSingleton<IDialogService, DialogService>();
                 services.AddSingleton<ILauncherService, LauncherService>();
@@ -73,6 +74,7 @@ public partial class App : Avalonia.Application
                 services.AddSingleton<ICryptoEngine>(_ => new SignalCryptoEngine(new CryptographyOptions()));
                 services.AddSingleton<IPortReservationService, PortReservationService>();
                 services.AddSingleton<IIdenticonGenerator, IdenticonGenerator>();
+                services.AddSingleton<IClipboardService, AvaloniaClipboardService>();
 
                 // CTX-02: Stage-2 session composition is executable-owned. The coordinator
                 // resolves this factory and gets the session back — no Infra-side host factory.

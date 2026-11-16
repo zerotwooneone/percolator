@@ -117,7 +117,8 @@ public sealed class WindowManager : IWindowManager
         foreach (var candidate in new[]
                  {
                      $"{viewNamespace}.{baseName}Window",
-                     $"{viewNamespace}.{baseName}View"
+                     $"{viewNamespace}.{baseName}View",
+                     $"{viewNamespace}.{baseName}"
                  })
         {
             var windowType = Type.GetType(candidate) ?? vmType.Assembly.GetType(candidate);

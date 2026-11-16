@@ -12,6 +12,7 @@ using Percolator.Desktop.Common.Storage;
 using Percolator.Desktop.Common.Windowing;
 using Percolator.Desktop.Features.Shell.ViewModels;
 using Percolator.Desktop.Features.Startup.ViewModels;
+using Percolator.Desktop.Features.Transports.ViewModels;
 using Percolator.PluginSdk;
 
 /// <summary>
@@ -43,6 +44,7 @@ internal static class DesktopSessionServiceCollectionExtensions
         services.AddTransient<CreatePersonaDialogViewModel>();
         services.AddTransient<DeletePersonaDialogViewModel>();
         services.AddTransient<StopUsingExchangeDialogViewModel>();
+        services.AddTransient<AddConnectionDialogViewModel>();
 
         // App-payload dispatch surface for the mailbox drain (DRAIN-06): without these,
         // the shared IAppRouter registers no handlers and drained payloads die as
@@ -73,6 +75,8 @@ internal static class DesktopSessionServiceCollectionExtensions
         services.AddSingleton(_ => stage1.GetRequiredService<IIdenticonGenerator>());
         // Desktop socket-probe port — not the Application-layer port reservation service.
         services.AddSingleton(_ => stage1.GetRequiredService<IPortReservationService>());
+        services.AddSingleton(_ => stage1.GetRequiredService<IClipboardService>());
+        services.AddSingleton(_ => stage1.GetRequiredService<TimeProvider>());
 
         return services;
     }
