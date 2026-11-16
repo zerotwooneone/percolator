@@ -513,7 +513,7 @@ Implementation Gate: UNLOCKED
 
 ---
 
-### CONN-10 ⬜ Desktop Share My Invitation Dialog & Port Range Privacy Selector
+### CONN-10 ⬛ Desktop Share My Invitation Dialog & Port Range Privacy Selector
 
 - **Files:**
   - `Create`: `Percolator.Desktop/Features/Transports/Views/ShareInvitationDialog.axaml` & `Percolator.Desktop/Features/Transports/Views/ShareInvitationDialog.axaml.cs`

@@ -1,0 +1,216 @@
+// SPECIFICATION GOVERNANCE: Read Percolator.Desktop/spec/ViewModel.spec.md before modifying this file.
+// SPECIFICATION GOVERNANCE: Read Percolator.Desktop/spec/R3.spec.md before modifying this file.
+
+using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using Microsoft.Extensions.Logging;
+using Percolator.Application.Invitations;
+using Percolator.Desktop.Common.Services;
+using Percolator.Desktop.ViewModels;
+using Percolator.Domain.Delivery.ValueObjects;
+using Percolator.Domain.Identities;
+using Percolator.Domain.Identities.ValueObjects;
+
+namespace Percolator.Desktop.Features.Transports.ViewModels;
+
+/// <summary>
+/// Preset options for controlling direct P2P port range disclosure in generated invitations ([CONN-10]).
+/// Balances probe latency against port enumeration privacy.
+/// </summary>
+public enum PortRangePrivacyPreset
+{
+    /// <summary>Omits port from invitation; recipient probes the standard 5100-5299 range.</summary>
+    DefaultRange = 0,
+
+    /// <summary>Embeds a discrete user-specified port range (e.g. 5100-5120).</summary>
+    CustomRange = 1,
+
+    /// <summary>Pins the invitation directly to the persona's currently bound listening port.</summary>
+    SinglePort = 2
+}
+
+/// <summary>
+/// ViewModel managing the "Share My Invitation" dialog.
+/// Encodes local identity metadata, cryptographic routing tokens, and customized port ranges
+/// into <c>percolator://invite?...</c> URIs and QR code image bytes.
+/// </summary>
+public sealed partial class ShareInvitationDialogViewModel : ViewModelBase
+{
+    private readonly IPeerInvitationCodec _invitationCodec;
+    private readonly IClipboardService _clipboardService;
+    private readonly IQrCodeGenerator _qrCodeGenerator;
+    private readonly ILogger<ShareInvitationDialogViewModel> _logger;
+
+    private PublicIdentityId? _identityId;
+    private BlindedRoutingToken? _routingToken;
+    private DeliveryToken? _deliveryToken;
+    private IReadOnlyList<string> _endpointHosts = Array.Empty<string>();
+    private int _boundPort = 5100;
+
+    public ShareInvitationDialogViewModel(
+        IPeerInvitationCodec invitationCodec,
+        IClipboardService clipboardService,
+        IQrCodeGenerator qrCodeGenerator,
+        ILogger<ShareInvitationDialogViewModel> logger)
+    {
+        _invitationCodec = invitationCodec ?? throw new ArgumentNullException(nameof(invitationCodec));
+        _clipboardService = clipboardService ?? throw new ArgumentNullException(nameof(clipboardService));
+        _qrCodeGenerator = qrCodeGenerator ?? throw new ArgumentNullException(nameof(qrCodeGenerator));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    public event EventHandler? RequestClose;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsCustomRangeVisible))]
+    private PortRangePrivacyPreset _selectedPrivacyPreset = PortRangePrivacyPreset.DefaultRange;
+
+    [ObservableProperty]
+    private int _customRangeMin = 5100;
+
+    [ObservableProperty]
+    private int _customRangeMax = 5120;
+
+    [ObservableProperty]
+    private string _invitationUrl = string.Empty;
+
+    [ObservableProperty]
+    private byte[]? _qrCodePngBytes;
+
+    [ObservableProperty]
+    private string? _statusMessage;
+
+    [ObservableProperty]
+    private string? _errorMessage;
+
+    /// <summary>True when custom port range input controls should be displayed.</summary>
+    public bool IsCustomRangeVisible => SelectedPrivacyPreset == PortRangePrivacyPreset.CustomRange;
+
+    /// <summary>Two-way bound boolean property for DefaultRange radio selection ([VM-015]).</summary>
+    public bool IsDefaultRangePreset
+    {
+        get => SelectedPrivacyPreset == PortRangePrivacyPreset.DefaultRange;
+        set { if (value) SelectedPrivacyPreset = PortRangePrivacyPreset.DefaultRange; }
+    }
+
+    /// <summary>Two-way bound boolean property for CustomRange radio selection ([VM-015]).</summary>
+    public bool IsCustomRangePreset
+    {
+        get => SelectedPrivacyPreset == PortRangePrivacyPreset.CustomRange;
+        set { if (value) SelectedPrivacyPreset = PortRangePrivacyPreset.CustomRange; }
+    }
+
+    /// <summary>Two-way bound boolean property for SinglePort radio selection ([VM-015]).</summary>
+    public bool IsSinglePortPreset
+    {
+        get => SelectedPrivacyPreset == PortRangePrivacyPreset.SinglePort;
+        set { if (value) SelectedPrivacyPreset = PortRangePrivacyPreset.SinglePort; }
+    }
+
+    /// <summary>Currently bound listening port for the active persona.</summary>
+    public int BoundPort => _boundPort;
+
+    partial void OnSelectedPrivacyPresetChanged(PortRangePrivacyPreset value)
+    {
+        OnPropertyChanged(nameof(IsDefaultRangePreset));
+        OnPropertyChanged(nameof(IsCustomRangePreset));
+        OnPropertyChanged(nameof(IsSinglePortPreset));
+        OnPropertyChanged(nameof(IsCustomRangeVisible));
+        UpdateInvitationPayload();
+    }
+    partial void OnCustomRangeMinChanged(int value) => UpdateInvitationPayload();
+    partial void OnCustomRangeMaxChanged(int value) => UpdateInvitationPayload();
+
+    /// <summary>
+    /// Initializes the dialog with active persona parameters and generates the initial invitation.
+    /// </summary>
+    public void Initialize(
+        PublicIdentityId identityId,
+        BlindedRoutingToken routingToken,
+        DeliveryToken deliveryToken,
+        IReadOnlyList<string> endpointHosts,
+        int boundPort)
+    {
+        _identityId = identityId;
+        _routingToken = routingToken;
+        _deliveryToken = deliveryToken;
+        _endpointHosts = endpointHosts ?? throw new ArgumentNullException(nameof(endpointHosts));
+        _boundPort = boundPort;
+
+        OnPropertyChanged(nameof(BoundPort));
+        UpdateInvitationPayload();
+    }
+
+    /// <summary>
+    /// Re-encodes the invitation URL and QR code based on the current privacy preset and range settings.
+    /// </summary>
+    [RelayCommand]
+    public void UpdateInvitationPayload()
+    {
+        if (_identityId == null || _routingToken == null || _deliveryToken == null)
+        {
+            return;
+        }
+
+        try
+        {
+            PortRange? portRange = SelectedPrivacyPreset switch
+            {
+                PortRangePrivacyPreset.DefaultRange => null,
+                PortRangePrivacyPreset.CustomRange => new PortRange(
+                    Math.Clamp(Math.Min(CustomRangeMin, CustomRangeMax), 1, 65535),
+                    Math.Clamp(Math.Max(CustomRangeMin, CustomRangeMax), 1, 65535)),
+                PortRangePrivacyPreset.SinglePort => PortRange.Single(Math.Clamp(_boundPort, 1, 65535)),
+                _ => null
+            };
+
+            var payload = new PeerInvitationPayload(
+                _identityId.Value,
+                _routingToken.Value,
+                _deliveryToken,
+                _endpointHosts,
+                portRange);
+
+            InvitationUrl = _invitationCodec.Encode(payload);
+            QrCodePngBytes = _qrCodeGenerator.GeneratePngBytes(InvitationUrl);
+            ErrorMessage = null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to encode peer invitation payload");
+            ErrorMessage = "Failed to generate invitation.";
+        }
+    }
+
+    /// <summary>
+    /// Copies the generated invitation URL to the system clipboard.
+    /// </summary>
+    [RelayCommand]
+    public async Task CopyInvitationUrlAsync()
+    {
+        if (string.IsNullOrWhiteSpace(InvitationUrl)) return;
+
+        try
+        {
+            await _clipboardService.SetTextAsync(InvitationUrl).ConfigureAwait(true);
+            StatusMessage = "Invitation link copied to clipboard!";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to copy invitation URL to clipboard");
+            ErrorMessage = "Could not copy to clipboard.";
+        }
+    }
+
+    /// <summary>
+    /// Requests dismissal of the dialog window.
+    /// </summary>
+    [RelayCommand]
+    private void Close()
+    {
+        RequestClose?.Invoke(this, EventArgs.Empty);
+    }
+}

@@ -1,0 +1,133 @@
+<!-- SPECIFICATION GOVERNANCE: Read Percolator.Desktop/spec/View.spec.md before modifying this file. -->
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Percolator.Desktop.Features.Transports.ViewModels"
+        xmlns:ui="using:FluentAvalonia.UI.Controls"
+        x:Class="Percolator.Desktop.Features.Transports.Views.ShareInvitationDialog"
+        x:DataType="vm:ShareInvitationDialogViewModel"
+        Title="Share My Invitation"
+        Width="520"
+        SizeToContent="Height"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner">
+
+    <Grid RowDefinitions="*,Auto" Margin="24">
+        <StackPanel Grid.Row="0" Spacing="16">
+            <!-- Header -->
+            <StackPanel Spacing="4">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <ui:SymbolIcon Symbol="Share" FontSize="20" Foreground="{DynamicResource AccentFillColorDefaultBrush}" />
+                    <TextBlock Text="Share My Invitation"
+                               Theme="{StaticResource SubtitleTextBlockStyle}"
+                               VerticalAlignment="Center" />
+                </StackPanel>
+                <TextBlock Text="Share your direct P2P connection invitation via link or QR code."
+                           Theme="{StaticResource CaptionTextBlockStyle}"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                           TextWrapping="Wrap" />
+            </StackPanel>
+
+            <!-- QR Code Presentation Area -->
+            <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="{StaticResource CardCornerRadius}"
+                    Padding="16"
+                    HorizontalAlignment="Center">
+                <Image x:Name="QrCodeImage"
+                       Width="200"
+                       Height="200"
+                       Stretch="Uniform" />
+            </Border>
+
+            <!-- Port Range Privacy Selector -->
+            <Border Background="{DynamicResource LayerFillColorAltBrush}"
+                    BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="{StaticResource ControlCornerRadius}"
+                    Padding="12">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="Port Range Privacy"
+                               Theme="{StaticResource BodyStrongTextBlockStyle}" />
+                    <TextBlock Text="Configure how much listening port information is revealed in your invitation code."
+                               Theme="{StaticResource CaptionTextBlockStyle}"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                               TextWrapping="Wrap" />
+
+                    <!-- Presets Selection -->
+                    <StackPanel Spacing="6" Margin="0,4,0,0">
+                        <RadioButton GroupName="PrivacyPreset"
+                                     Content="Default Range (omit port; probes 5100-5299 for maximum privacy)"
+                                     IsChecked="{Binding IsDefaultRangePreset, Mode=TwoWay}" />
+
+                        <RadioButton GroupName="PrivacyPreset"
+                                     Content="Custom Range (specify discrete port probing boundary)"
+                                     IsChecked="{Binding IsCustomRangePreset, Mode=TwoWay}" />
+
+                        <!-- Custom Range Inputs (visible only when CustomRange is selected) -->
+                        <Grid ColumnDefinitions="*,Auto,*"
+                              IsVisible="{Binding IsCustomRangeVisible}"
+                              Margin="24,4,0,4">
+                            <NumericUpDown Grid.Column="0"
+                                           Minimum="1"
+                                           Maximum="65535"
+                                           Value="{Binding CustomRangeMin}"
+                                           FormatString="0"
+                                           Watermark="Min Port" />
+                            <TextBlock Grid.Column="1"
+                                       Text="to"
+                                       VerticalAlignment="Center"
+                                       Margin="8,0" />
+                            <NumericUpDown Grid.Column="2"
+                                           Minimum="1"
+                                           Maximum="65535"
+                                           Value="{Binding CustomRangeMax}"
+                                           FormatString="0"
+                                           Watermark="Max Port" />
+                        </Grid>
+
+                        <RadioButton GroupName="PrivacyPreset"
+                                     Content="Pinned Single Port (fastest connection, reveals exact bound port)"
+                                     IsChecked="{Binding IsSinglePortPreset, Mode=TwoWay}" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- Invitation URL Box -->
+            <Grid ColumnDefinitions="*,Auto">
+                <TextBox Grid.Column="0"
+                         Text="{Binding InvitationUrl}"
+                         IsReadOnly="True"
+                         FontFamily="Consolas,Menlo,monospace"
+                         FontSize="12"
+                         CornerRadius="4,0,0,4" />
+
+                <Button Grid.Column="1"
+                        Classes="accent"
+                        Content="Copy Link"
+                        Command="{Binding CopyInvitationUrlCommand}"
+                        CornerRadius="0,4,4,0" />
+            </Grid>
+
+            <!-- Status / Confirmation message -->
+            <TextBlock Text="{Binding StatusMessage}"
+                       Foreground="{DynamicResource SystemFillColorSuccessBrush}"
+                       Theme="{StaticResource CaptionTextBlockStyle}"
+                       IsVisible="{Binding StatusMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+
+            <!-- Error message -->
+            <TextBlock Text="{Binding ErrorMessage}"
+                       Foreground="{DynamicResource SystemFillColorCriticalBrush}"
+                       Theme="{StaticResource CaptionTextBlockStyle}"
+                       IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+        </StackPanel>
+
+        <!-- Footer -->
+        <Button Grid.Row="1"
+                Content="Done"
+                Command="{Binding CloseCommand}"
+                HorizontalAlignment="Right"
+                Width="100"
+                Margin="0,16,0,0" />
+    </Grid>
+</Window>

@@ -29,6 +29,7 @@ public sealed class SqliteRelayMailboxCapabilityStore : IRelayMailboxCapabilityS
     private readonly IDbContextFactory<PercolatorDbContext> _contextFactory;
     private readonly ConcurrentDictionary<BlindedRoutingToken, List<ChannelWriter<RelayQueuedEnvelopeRecord>>> _subscribers = new();
     private readonly SemaphoreSlim _enqueueLock = new(1, 1);
+    private readonly SemaphoreSlim _registerLock = new(1, 1);
 
     public SqliteRelayMailboxCapabilityStore(IDbContextFactory<PercolatorDbContext> contextFactory)
     {
@@ -56,57 +57,65 @@ public sealed class SqliteRelayMailboxCapabilityStore : IRelayMailboxCapabilityS
         DeliveryToken? existingDrainToken = null,
         CancellationToken ct = default)
     {
-        await using var db = _contextFactory.CreateDbContext();
-        var routing = routingToken.ToByteArray();
-        var capability = await db.RelayMailboxCapabilities
-            .FirstOrDefaultAsync(c => c.RoutingToken == routing, ct)
-            .ConfigureAwait(false);
-        var isNew = capability == null;
-        capability ??= new RelayMailboxCapabilityEntity { RoutingToken = routing };
-
-        if (capability.DrainToken.Length > 0)
+        await _registerLock.WaitAsync(ct).ConfigureAwait(false);
+        try
         {
-            bool drainTokenMatches = drainToken.Length == capability.DrainToken.Length &&
-                CryptographicOperations.FixedTimeEquals(capability.DrainToken, drainToken.Span);
+            await using var db = _contextFactory.CreateDbContext();
+            var routing = routingToken.ToByteArray();
+            var capability = await db.RelayMailboxCapabilities
+                .FirstOrDefaultAsync(c => c.RoutingToken == routing, ct)
+                .ConfigureAwait(false);
+            var isNew = capability == null;
+            capability ??= new RelayMailboxCapabilityEntity { RoutingToken = routing };
 
-            bool existingDrainTokenMatches = existingDrainToken != null &&
-                existingDrainToken.Length == capability.DrainToken.Length &&
-                CryptographicOperations.FixedTimeEquals(capability.DrainToken, existingDrainToken.Span);
-
-            if (!drainTokenMatches && !existingDrainTokenMatches)
+            if (capability.DrainToken.Length > 0)
             {
-                return DomainResult.Failure(new DomainError(
-                    "MAILBOX_OWNERSHIP_MISMATCH", "Cannot overwrite existing mailbox without valid drain token."));
+                bool drainTokenMatches = drainToken.Length == capability.DrainToken.Length &&
+                    CryptographicOperations.FixedTimeEquals(capability.DrainToken, drainToken.Span);
+
+                bool existingDrainTokenMatches = existingDrainToken != null &&
+                    existingDrainToken.Length == capability.DrainToken.Length &&
+                    CryptographicOperations.FixedTimeEquals(capability.DrainToken, existingDrainToken.Span);
+
+                if (!drainTokenMatches && !existingDrainTokenMatches)
+                {
+                    return DomainResult.Failure(new DomainError(
+                        "MAILBOX_OWNERSHIP_MISMATCH", "Cannot overwrite existing mailbox without valid drain token."));
+                }
             }
+
+            capability.DeliveryToken = deliveryToken.ToArray();
+            capability.DrainToken = drainToken.ToArray();
+            if (isNew) db.RelayMailboxCapabilities.Add(capability);
+
+            var authorizedTokens = await db.RelayMailboxAuthorizedTokens
+                .Where(t => t.RoutingToken == routing)
+                .OrderBy(t => t.Ordinal)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+
+            // Keep the newest AuthorizedTokenRingCapacity tokens (the one being inserted counts toward the cap).
+            var overflow = authorizedTokens.Count - (AuthorizedTokenRingCapacity - 1);
+            if (overflow > 0)
+            {
+                db.RelayMailboxAuthorizedTokens.RemoveRange(authorizedTokens.Take(overflow));
+            }
+
+            var nextOrdinal = authorizedTokens.Count > 0 ? authorizedTokens.Max(t => t.Ordinal) + 1 : 0;
+            db.RelayMailboxAuthorizedTokens.Add(new RelayMailboxAuthorizedTokenEntity
+            {
+                RoutingToken = routing,
+                Ordinal = nextOrdinal,
+                DeliveryToken = deliveryToken.ToArray()
+            });
+
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            return DomainResult.Success();
         }
-
-        capability.DeliveryToken = deliveryToken.ToArray();
-        capability.DrainToken = drainToken.ToArray();
-        if (isNew) db.RelayMailboxCapabilities.Add(capability);
-
-        var authorizedTokens = await db.RelayMailboxAuthorizedTokens
-            .Where(t => t.RoutingToken == routing)
-            .OrderBy(t => t.Ordinal)
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
-
-        // Keep the newest AuthorizedTokenRingCapacity tokens (the one being inserted counts toward the cap).
-        var overflow = authorizedTokens.Count - (AuthorizedTokenRingCapacity - 1);
-        if (overflow > 0)
+        finally
         {
-            db.RelayMailboxAuthorizedTokens.RemoveRange(authorizedTokens.Take(overflow));
+            _registerLock.Release();
         }
-
-        var nextOrdinal = authorizedTokens.Count > 0 ? authorizedTokens.Max(t => t.Ordinal) + 1 : 0;
-        db.RelayMailboxAuthorizedTokens.Add(new RelayMailboxAuthorizedTokenEntity
-        {
-            RoutingToken = routing,
-            Ordinal = nextOrdinal,
-            DeliveryToken = deliveryToken.ToArray()
-        });
-
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
-        return DomainResult.Success();
     }
 
     public async ValueTask<bool> VerifyDeliveryTokenAsync(

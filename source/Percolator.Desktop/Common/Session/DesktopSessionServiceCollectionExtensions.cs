@@ -47,6 +47,8 @@ internal static class DesktopSessionServiceCollectionExtensions
         services.AddTransient<StopUsingExchangeDialogViewModel>();
         services.AddTransient<AddConnectionDialogViewModel>();
         services.AddTransient<PendingRequestsPanelViewModel>();
+        services.AddTransient<ShareInvitationDialogViewModel>();
+        services.AddSingleton<IQrCodeGenerator, QrCodeGenerator>();
 
         // Outbound pending connection retry and state services (CONN-08)
         services.AddSingleton<OutboundPendingRetryWorker>();
