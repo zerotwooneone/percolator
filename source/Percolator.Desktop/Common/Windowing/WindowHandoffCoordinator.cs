@@ -11,6 +11,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Ports;
 using Percolator.Application.Session.Ports;
+using Percolator.Desktop.Common.Services;
+using Percolator.Desktop.Features.Shell.Models;
 using Percolator.Desktop.Features.Shell.ViewModels;
 using Percolator.Desktop.Features.Shell.Views;
 using Percolator.Desktop.Features.Startup.Models;
@@ -92,6 +94,16 @@ public sealed class WindowHandoffCoordinator : IWindowHandoffCoordinator
         foreach (var persona in personas)
         {
             await activeIdentities.AddAsync(persona.IdentityId, ct).ConfigureAwait(false);
+        }
+
+        // Seed active personas presentation models in ICurrentPersonaService
+        if (session.Services.GetService<ICurrentPersonaService>() is { } personaService && personas.Count > 0)
+        {
+            personaService.InitializeActivePersonas(
+                personas.Select(p => new ActivePersonaModel(
+                    p.IdentityId,
+                    p.DisplayName,
+                    p.Lease.Port)));
         }
 
         // 2. Launches all registered IHostedService background workers in the Stage 2 container.

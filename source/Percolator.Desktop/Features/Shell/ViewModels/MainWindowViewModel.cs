@@ -1,18 +1,37 @@
 // SPECIFICATION GOVERNANCE: Read Percolator.Desktop/spec/ViewModel.spec.md before modifying this file.
+// SPECIFICATION GOVERNANCE: Read Percolator.Desktop/spec/R3.spec.md before modifying this file.
 
+using System;
+using System.Linq;
+using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Percolator.Application.Ports;
+using Percolator.Application.Session.Ports;
+using Percolator.Desktop.Common.Services;
+using Percolator.Desktop.Common.Windowing;
+using Percolator.Desktop.Features.Shell.Models;
+using Percolator.Desktop.Features.Transports.Models;
+using Percolator.Desktop.Features.Transports.ViewModels;
 using Percolator.Desktop.ViewModels;
+using Percolator.Domain.Delivery.ValueObjects;
+using Percolator.Domain.Identities;
+using Percolator.Domain.Identities.Model;
+using Percolator.Domain.Identities.ValueObjects;
+using R3;
 
 namespace Percolator.Desktop.Features.Shell.ViewModels;
 
 /// <summary>
-/// ViewModel for the DESK-01 responsive 3-pane shell frame. Owns transient shell-view state
-/// (drawer open/closed, pending-request indicator). Conversation, transport, and network
-/// state arrive in later chunks via stateful UI services.
+/// ViewModel for the DESK-01 / CONN-11 responsive 3-pane shell frame. Owns transient shell-view state
+/// (drawer open/closed, pending-request indicator) and Left Sidebar dialog orchestration.
 /// </summary>
-public partial class MainWindowViewModel : ViewModelBase
+public sealed partial class MainWindowViewModel : ViewModelBase
 {
+    private readonly IWindowManager _windowManager;
+    private readonly IPeerContactQueryService _contactQueryService;
+    private readonly ICurrentPersonaService _currentPersonaService;
+
     /// <summary>
     /// Two-way bound to the right-anchored inspector <c>SplitView.IsPaneOpen</c>.
     /// </summary>
@@ -41,6 +60,84 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty]
     private string _activeConversationTitle = string.Empty;
 
+    /// <summary>
+    /// Currently focused persona snapshot driving shell views and dialog orchestration
+    /// (INV-DESKTOP-PRESENTATION-MODELS, VM-006).
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasCurrentPersona))]
+    private ActivePersonaModel? _currentPersona;
+
+    /// <summary>True when a valid persona is currently active in the shell.</summary>
+    public bool HasCurrentPersona => CurrentPersona != null && CurrentPersona.IdentityId.IsValid;
+
+    public MainWindowViewModel(
+        IWindowManager windowManager,
+        IPeerContactQueryService contactQueryService,
+        ICurrentPersonaService currentPersonaService)
+    {
+        _windowManager = windowManager ?? throw new ArgumentNullException(nameof(windowManager));
+        _contactQueryService = contactQueryService ?? throw new ArgumentNullException(nameof(contactQueryService));
+        _currentPersonaService = currentPersonaService ?? throw new ArgumentNullException(nameof(currentPersonaService));
+
+        _currentPersona = _currentPersonaService.CurrentPersona;
+
+        _currentPersonaService.CurrentPersonaChanged
+            .Subscribe(p => CurrentPersona = p)
+            .AddTo(ref Bag);
+    }
+
+    partial void OnCurrentPersonaChanged(ActivePersonaModel? value)
+    {
+        _ = RefreshPendingCountAsync();
+    }
+
+    [RelayCommand]
+    private async Task OpenAddConnectionAsync()
+    {
+        if (CurrentPersona is not { } persona) return;
+
+        await _windowManager.ShowDialogAsync<AddConnectionDialogViewModel, OutboundConnectionStatus>(
+            configure: vm => vm.Initialize(persona.IdentityId));
+    }
+
+    [RelayCommand]
+    private async Task OpenPendingRequestsAsync()
+    {
+        if (CurrentPersona is not { } persona) return;
+
+        await _windowManager.ShowDialogAsync<PendingRequestsPanelViewModel, object>(configure: vm =>
+        {
+            _ = vm.InitializeAsync(persona.IdentityId);
+        });
+        await RefreshPendingCountAsync();
+    }
+
+    [RelayCommand]
+    private async Task OpenShareInvitationAsync()
+    {
+        if (CurrentPersona is not { } persona) return;
+
+        var routingToken = BlindedRoutingToken.New();
+        var deliveryToken = DeliveryToken.GenerateRandom();
+
+        await _windowManager.ShowDialogAsync<ShareInvitationDialogViewModel, object>(configure: vm =>
+        {
+            vm.Initialize(
+                identityId: persona.IdentityId,
+                routingToken: routingToken,
+                deliveryToken: deliveryToken,
+                endpointHosts: new[] { "127.0.0.1" },
+                boundPort: persona.BoundPort);
+        });
+    }
+
+    [RelayCommand]
+    private void SelectDirectMessages()
+    {
+        // Selects Direct Messages context in Right Sidebar
+    }
+
     [RelayCommand]
     private void ToggleInspector()
     {
@@ -51,5 +148,18 @@ public partial class MainWindowViewModel : ViewModelBase
     private void ToggleChatsSidebar()
     {
         IsChatsSidebarOpen = !IsChatsSidebarOpen;
+    }
+
+    [RelayCommand]
+    public async Task RefreshPendingCountAsync()
+    {
+        if (CurrentPersona is not { } persona || !persona.IdentityId.IsValid)
+        {
+            PendingRequestCount = 0;
+            return;
+        }
+
+        var contacts = await _contactQueryService.GetContactSummariesAsync(persona.IdentityId);
+        PendingRequestCount = contacts.Count(c => c.State == ContactState.PendingApproval);
     }
 }

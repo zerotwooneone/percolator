@@ -3,6 +3,7 @@ namespace Percolator.Desktop.Common.Session;
 using System;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Percolator.Application.Ports;
 using Percolator.Apps.Chat.DependencyInjection;
 using Percolator.Apps.FileTransfer;
 using Percolator.Apps.FileTransfer.Features.IngressControl;
@@ -14,6 +15,7 @@ using Percolator.Desktop.Features.Shell.ViewModels;
 using Percolator.Desktop.Features.Startup.ViewModels;
 using Percolator.Desktop.Features.Transports.Services;
 using Percolator.Desktop.Features.Transports.ViewModels;
+using Percolator.Infrastructure.Persistence.Repositories;
 using Percolator.PluginSdk;
 
 /// <summary>
@@ -49,6 +51,7 @@ internal static class DesktopSessionServiceCollectionExtensions
         services.AddTransient<PendingRequestsPanelViewModel>();
         services.AddTransient<ShareInvitationDialogViewModel>();
         services.AddSingleton<IQrCodeGenerator, QrCodeGenerator>();
+        services.AddSingleton<ICurrentPersonaService, CurrentPersonaService>();
 
         // Outbound pending connection retry and state services (CONN-08)
         services.AddSingleton<IPeerConnectionService, DesktopPeerConnectionService>();
@@ -56,6 +59,10 @@ internal static class DesktopSessionServiceCollectionExtensions
         services.AddSingleton<IOutboundPendingRetryWorker>(sp => sp.GetRequiredService<OutboundPendingRetryWorker>());
         services.AddHostedService(sp => sp.GetRequiredService<OutboundPendingRetryWorker>());
         services.AddSingleton<IPeerConnectionStateService, PeerConnectionStateService>();
+
+        // Inbound contact query service singleton facade (CONN-11)
+        services.AddScoped<SqlPeerContactQueryService>();
+        services.AddSingleton<IPeerContactQueryService, DesktopPeerContactQueryService>();
 
         // App-payload dispatch surface for the mailbox drain (DRAIN-06): without these,
         // the shared IAppRouter registers no handlers and drained payloads die as
@@ -85,7 +92,7 @@ internal static class DesktopSessionServiceCollectionExtensions
         services.AddSingleton(_ => stage1.GetRequiredService<IWindowHandoffCoordinator>());
         services.AddSingleton(_ => stage1.GetRequiredService<IIdenticonGenerator>());
         // Desktop socket-probe port — not the Application-layer port reservation service.
-        services.AddSingleton(_ => stage1.GetRequiredService<IPortReservationService>());
+        services.AddSingleton(_ => stage1.GetRequiredService<Percolator.Desktop.Common.Services.IPortReservationService>());
         services.AddSingleton(_ => stage1.GetRequiredService<IClipboardService>());
         services.AddSingleton(_ => stage1.GetRequiredService<TimeProvider>());
 

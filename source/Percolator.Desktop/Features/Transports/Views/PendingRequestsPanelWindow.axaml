@@ -1,0 +1,14 @@
+<!-- SPECIFICATION GOVERNANCE: Read Percolator.Desktop/spec/View.spec.md before modifying this file. -->
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Percolator.Desktop.Features.Transports.ViewModels"
+        xmlns:views="using:Percolator.Desktop.Features.Transports.Views"
+        x:Class="Percolator.Desktop.Features.Transports.Views.PendingRequestsPanelWindow"
+        x:DataType="vm:PendingRequestsPanelViewModel"
+        Title="Pending Connection Requests"
+        Width="480" Height="560"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner">
+
+    <views:PendingRequestsPanelView />
+</Window>

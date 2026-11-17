@@ -102,7 +102,7 @@ Created `ShareInvitationDialog` and `ShareInvitationDialogViewModel` to generate
 
 ---
 
-### CONN-11 ⬜ Desktop Shell Realignment & Navigation Rail Dialog Orchestration (`shell-flow.md`)
+### CONN-11 ✅ Desktop Shell Realignment & Navigation Rail Dialog Orchestration (`shell-flow.md`)
 
 - **Specification Governance:** Strictly enforces layout, ordering, and privacy invariants from `Percolator.Desktop/shell-flow.md`. Wires the Left Sidebar navigation rail to open `AddConnectionDialog`, `PendingRequestsPanelWindow`, and `ShareInvitationDialog` via `IWindowManager.ShowDialogAsync`.
 

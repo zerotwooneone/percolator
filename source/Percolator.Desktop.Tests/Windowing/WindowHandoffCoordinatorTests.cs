@@ -12,6 +12,7 @@ using Percolator.Application.Session;
 using Percolator.Application.Session.Ports;
 using Percolator.Desktop.Common.Services;
 using Percolator.Desktop.Common.Windowing;
+using Percolator.Desktop.Features.Shell.Models;
 using Percolator.Desktop.Features.Startup.Models;
 using Percolator.Desktop.Features.Startup.ViewModels;
 using Percolator.Domain.Identities;
@@ -55,10 +56,14 @@ public sealed class WindowHandoffCoordinatorTests
         var callOrder = new List<string>();
         var session = new Mock<IAuthenticatedSession>(MockBehavior.Strict);
 
+        var personaService = new Mock<ICurrentPersonaService>();
         var serviceProvider = new Mock<IServiceProvider>(MockBehavior.Strict);
         serviceProvider
             .Setup(sp => sp.GetService(typeof(IActiveIdentitySet)))
             .Returns(activeSet);
+        serviceProvider
+            .Setup(sp => sp.GetService(typeof(ICurrentPersonaService)))
+            .Returns(personaService.Object);
 
         session.SetupGet(s => s.Services).Returns(serviceProvider.Object);
         session
@@ -76,6 +81,7 @@ public sealed class WindowHandoffCoordinatorTests
 
         // Assert
         activeSet.Current.Should().Contain(personaId);
+        personaService.Verify(p => p.InitializeActivePersonas(It.Is<IEnumerable<ActivePersonaModel>>(list => list.Any(m => m.IdentityId == personaId && m.BoundPort == 5100))), Times.Once);
         callOrder.Should().ContainSingle().Which.Should().Be("StartAsync");
     }
 

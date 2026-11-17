@@ -213,4 +213,10 @@ public sealed partial class ShareInvitationDialogViewModel : ViewModelBase
     {
         RequestClose?.Invoke(this, EventArgs.Empty);
     }
+
+    protected override void DisposeCore()
+    {
+        _deliveryToken?.Dispose();
+        base.DisposeCore();
+    }
 }

@@ -11,6 +11,7 @@ using NUnit.Framework;
 using Percolator.Desktop.Common.Services;
 using Percolator.Desktop.Common.Session;
 using Percolator.Desktop.Common.Windowing;
+using Percolator.Desktop.Features.Shell.ViewModels;
 using Percolator.Desktop.Features.Transports.Services;
 using Percolator.Desktop.Features.Transports.ViewModels;
 using Percolator.Domain.Security.Model;
@@ -78,5 +79,11 @@ public sealed class DesktopStage2SessionFactoryTests
 
         var outboundWorker = session.Services.GetRequiredService<OutboundPendingRetryWorker>();
         outboundWorker.Should().NotBeNull();
+
+        var mainWindowVm = session.Services.GetRequiredService<MainWindowViewModel>();
+        mainWindowVm.Should().NotBeNull();
+
+        var currentPersonaService = session.Services.GetRequiredService<ICurrentPersonaService>();
+        currentPersonaService.Should().NotBeNull();
     }
 }

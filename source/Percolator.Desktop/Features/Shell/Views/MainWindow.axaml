@@ -42,14 +42,35 @@
                     Background="{DynamicResource LayerFillColorAltBrush}"
                     BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}"
                     BorderThickness="0,0,1,0">
-                <Grid RowDefinitions="Auto,*,Auto,Auto" Margin="0,8,0,8">
+                <Grid RowDefinitions="Auto,*,Auto,Auto,Auto" Margin="0,8,0,8">
 
-                    <!-- Pending Requests button with silent indicator light -->
+                    <!-- Row 0: Direct Messages button (switches to DMs) -->
                     <Button Grid.Row="0"
                             Classes="shell-icon"
                             HorizontalAlignment="Center"
+                            ToolTip.Tip="Direct Messages"
+                            Command="{Binding SelectDirectMessagesCommand}">
+                        <ui:SymbolIcon Symbol="Message" FontSize="20" />
+                    </Button>
+
+                    <!-- Row 1: Transport channel list / relays (placeholder until DESK-05) -->
+                    <Border Grid.Row="1" Margin="{StaticResource SidebarItemMargin}" />
+
+                    <!-- Row 2: Add Connection (+) button -->
+                    <Button Grid.Row="2"
+                            Classes="shell-icon"
+                            HorizontalAlignment="Center"
+                            ToolTip.Tip="Add Connection"
+                            Command="{Binding OpenAddConnectionCommand}">
+                        <ui:SymbolIcon Symbol="AddFriend" FontSize="20" />
+                    </Button>
+
+                    <!-- Row 3: Pending Requests button with silent indicator light -->
+                    <Button Grid.Row="3"
+                            Classes="shell-icon"
+                            HorizontalAlignment="Center"
                             ToolTip.Tip="Pending Requests"
-                            Command="{Binding ToggleInspectorCommand}">
+                            Command="{Binding OpenPendingRequestsCommand}">
                         <Grid Width="40" Height="40">
                             <ui:SymbolIcon Symbol="People" FontSize="20" />
                             <Ellipse Width="10" Height="10"
@@ -61,26 +82,18 @@
                         </Grid>
                     </Button>
 
-                    <!-- Transport channel list (placeholder until DESK-05) -->
-                    <Border Grid.Row="1" Margin="{StaticResource SidebarItemMargin}" />
-
-                    <!-- Add Connection (+) button -->
-                    <Button Grid.Row="2"
+                    <!-- Row 4: Identity area & Share My Invitation -->
+                    <Button Grid.Row="4"
                             Classes="shell-icon"
+                            Margin="0,8,0,0"
                             HorizontalAlignment="Center"
-                            ToolTip.Tip="Add Connection">
-                        <ui:SymbolIcon Symbol="AddFriend" FontSize="20" />
+                            ToolTip.Tip="Active Identity (Click to Share Invitation)"
+                            Command="{Binding OpenShareInvitationCommand}">
+                        <controls:PeerAvatar DisplayName="Percolator User"
+                                             IdentityKeyHex="PERCOLATOR-USER"
+                                             AvatarSize="40"
+                                             ShowPresence="False" />
                     </Button>
-
-                    <!-- Identity area -->
-                    <controls:PeerAvatar Grid.Row="3"
-                                         Margin="0,8,0,0"
-                                         HorizontalAlignment="Center"
-                                         DisplayName="Percolator User"
-                                         IdentityKeyHex="PERCOLATOR-USER"
-                                         AvatarSize="40"
-                                         ShowPresence="False"
-                                         ToolTip.Tip="Active identity" />
                 </Grid>
             </Border>
 

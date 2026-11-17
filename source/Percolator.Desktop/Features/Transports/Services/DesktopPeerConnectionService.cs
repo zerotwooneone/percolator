@@ -28,18 +28,18 @@ namespace Percolator.Desktop.Features.Transports.Services;
 public sealed class DesktopPeerConnectionService : IPeerConnectionService
 {
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly IActiveIdentitySet _activeIdentitySet;
+    private readonly ICurrentPersonaService _currentPersonaService;
     private readonly IStreamRegistryManagement _streamRegistry;
     private readonly IDateTimeProvider _timeProvider;
 
     public DesktopPeerConnectionService(
         IServiceScopeFactory scopeFactory,
-        IActiveIdentitySet activeIdentitySet,
+        ICurrentPersonaService currentPersonaService,
         IStreamRegistryManagement streamRegistry,
         IDateTimeProvider timeProvider)
     {
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
-        _activeIdentitySet = activeIdentitySet ?? throw new ArgumentNullException(nameof(activeIdentitySet));
+        _currentPersonaService = currentPersonaService ?? throw new ArgumentNullException(nameof(currentPersonaService));
         _streamRegistry = streamRegistry ?? throw new ArgumentNullException(nameof(streamRegistry));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
     }
@@ -90,10 +90,9 @@ public sealed class DesktopPeerConnectionService : IPeerConnectionService
 
     private async Task<PublicIdentityId?> ResolveActiveIdentityAsync(IServiceScope scope, CancellationToken ct)
     {
-        var active = _activeIdentitySet.Current.FirstOrDefault();
-        if (active.IsValid)
+        if (_currentPersonaService.CurrentPersona is { } current && current.IdentityId.IsValid)
         {
-            return active;
+            return current.IdentityId;
         }
 
         var personaDirectory = scope.ServiceProvider.GetRequiredService<IPersonaDirectory>();
