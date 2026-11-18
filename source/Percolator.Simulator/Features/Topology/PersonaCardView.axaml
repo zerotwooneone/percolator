@@ -65,6 +65,98 @@
                     </DropDownButton.Flyout>
                 </DropDownButton>
 
+                <!-- CONN-12: Direct Peer Interop Flyouts -->
+                <DropDownButton Content="📋 Share Invite ▼">
+                    <DropDownButton.Flyout>
+                        <Flyout Placement="Bottom">
+                            <StackPanel DataContext="{Binding InvitationExport}" Spacing="8" MinWidth="280" Margin="4">
+                                <TextBlock Text="Share Invitation" FontWeight="Bold" FontSize="12" />
+
+                                <TextBlock Text="Host Candidate:" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                <ComboBox ItemsSource="{Binding AvailableHostKinds}"
+                                          SelectedItem="{Binding SelectedHostKind}"
+                                          HorizontalAlignment="Stretch" />
+
+                                <StackPanel Spacing="4" IsVisible="{Binding IsCustomHostVisible}">
+                                    <TextBlock Text="Custom Host / IP:" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                    <TextBox Text="{Binding CustomHostInput}" Watermark="e.g. 192.168.1.50 or myhost.local" />
+                                </StackPanel>
+
+                                <TextBlock Text="Port Privacy Preset:" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                <ComboBox ItemsSource="{Binding AvailablePortPresets}"
+                                          SelectedItem="{Binding SelectedPortPreset}"
+                                          HorizontalAlignment="Stretch" />
+
+                                <StackPanel Spacing="4" IsVisible="{Binding IsCustomPortVisible}">
+                                    <TextBlock Text="Port Range (Min - Max):" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                    <Grid ColumnDefinitions="*,Auto,*">
+                                        <NumericUpDown Grid.Column="0" Value="{Binding CustomPortMin}" Minimum="1" Maximum="65535" FormatString="0" />
+                                        <TextBlock Grid.Column="1" Text=" - " VerticalAlignment="Center" Margin="4,0" />
+                                        <NumericUpDown Grid.Column="2" Value="{Binding CustomPortMax}" Minimum="1" Maximum="65535" FormatString="0" />
+                                    </Grid>
+                                </StackPanel>
+
+                                <TextBlock Text="Generated URL:" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                <TextBox Text="{Binding GeneratedInvitationUrl}" IsReadOnly="True" FontSize="10" />
+
+                                <Button Content="📋 Copy Invitation URL"
+                                        Command="{Binding CopyInvitationUrlCommand}"
+                                        HorizontalAlignment="Stretch"
+                                        HorizontalContentAlignment="Center"
+                                        Classes="accent" />
+                            </StackPanel>
+                        </Flyout>
+                    </DropDownButton.Flyout>
+                </DropDownButton>
+
+                <DropDownButton Content="🔗 Connect Peer ▼">
+                    <DropDownButton.Flyout>
+                        <Flyout Placement="Bottom">
+                            <StackPanel DataContext="{Binding ConnectPeer}" Spacing="8" MinWidth="280" Margin="4">
+                                <TextBlock Text="Connect to Peer" FontWeight="Bold" FontSize="12" />
+
+                                <TextBlock Text="Target Mode:" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                <ComboBox ItemsSource="{Binding AvailableTargetKinds}"
+                                          SelectedItem="{Binding TargetKind}"
+                                          HorizontalAlignment="Stretch" />
+
+                                <!-- In-World Simulated Node Selection -->
+                                <StackPanel Spacing="4" IsVisible="{Binding IsInWorldMode}">
+                                    <TextBlock Text="Select In-World Persona:" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                    <ComboBox ItemsSource="{Binding AvailableInWorldPersonas}"
+                                              SelectedItem="{Binding SelectedInWorldTarget}"
+                                              HorizontalAlignment="Stretch">
+                                        <ComboBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding DisplayName}" />
+                                            </DataTemplate>
+                                        </ComboBox.ItemTemplate>
+                                    </ComboBox>
+                                </StackPanel>
+
+                                <!-- External Invitation Code -->
+                                <StackPanel Spacing="4" IsVisible="{Binding IsExternalMode}">
+                                    <TextBlock Text="Paste Invitation Code / URL:" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                    <TextBox Text="{Binding ExternalInvitationInput}" Watermark="percolator://invite?..." />
+                                </StackPanel>
+
+                                <TextBlock Text="{Binding ErrorMessage}"
+                                           Foreground="{DynamicResource SystemFillColorCriticalBrush}"
+                                           FontSize="11"
+                                           TextWrapping="Wrap"
+                                           IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+
+                                <Button Content="🔗 Connect"
+                                        Command="{Binding ConnectCommand}"
+                                        IsEnabled="{Binding !IsConnecting}"
+                                        HorizontalAlignment="Stretch"
+                                        HorizontalContentAlignment="Center"
+                                        Classes="accent" />
+                            </StackPanel>
+                        </Flyout>
+                    </DropDownButton.Flyout>
+                </DropDownButton>
+
                 <!-- CTL-PER-13: Relay Bar -->
                 <Button Content="📬 Register Relay" Command="{Binding RegisterRelayCommand}" />
                 <Button Content="🔑 Publish PreKeys" Command="{Binding PublishPreKeysCommand}" />

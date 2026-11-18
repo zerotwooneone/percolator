@@ -160,6 +160,8 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
     public ObservableCollection<ChatMessageItemViewModel> ChatMessages { get; } = new();
 
     public DiscoveryTabViewModel? DiscoveryTab { get; }
+    public PersonaInvitationExportFlyoutViewModel? InvitationExport { get; }
+    public PersonaConnectPeerFlyoutViewModel? ConnectPeer { get; }
 
     public PersonaCardViewModel(
         SimulatedNodeSummary summary,
@@ -209,6 +211,10 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
 
         if (host is not null)
         {
+            InvitationExport = new PersonaInvitationExportFlyoutViewModel(host, deps.InvitationCodec, _toastService);
+            var peerConnectionService = new SimulatedPeerConnectionService(host);
+            ConnectPeer = new PersonaConnectPeerFlyoutViewModel(host, _worldState, deps.InvitationCodec, peerConnectionService, _toastService);
+
             _isListening = host.IsListening.CurrentValue;
             _autoShareProfile = host.AutoShareProfile;
             _autoAcceptGroupInvites = host.AutoAcceptGroupInvites;

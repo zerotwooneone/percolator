@@ -1,4 +1,5 @@
 using System;
+using Percolator.Application.Invitations;
 using Percolator.Simulator.Features.DirectChat;
 using Percolator.Simulator.Features.DiscoverySimulation;
 using Percolator.Simulator.Features.GroupMessaging;
@@ -29,6 +30,7 @@ internal sealed class PersonaCardDependencies
     public DiscoverySimulationCoordinator DiscoveryCoordinator { get; }
     public IVirtualClockStateService VirtualClock { get; }
     public SwarmSimulationCoordinator SwarmCoordinator { get; }
+    public IPeerInvitationCodec InvitationCodec { get; }
 
     public PersonaCardDependencies(
         IStatusToastService toastService,
@@ -46,7 +48,8 @@ internal sealed class PersonaCardDependencies
         DiscoverySimulationCoordinator discoveryCoordinator,
         IVirtualClockStateService virtualClock,
         SwarmSimulationCoordinator swarmCoordinator,
-        IFlightRecorderStateService flightRecorder)
+        IFlightRecorderStateService flightRecorder,
+        IPeerInvitationCodec invitationCodec)
     {
         ToastService = toastService ?? throw new ArgumentNullException(nameof(toastService));
         StateBus = stateBus ?? throw new ArgumentNullException(nameof(stateBus));
@@ -64,5 +67,6 @@ internal sealed class PersonaCardDependencies
         VirtualClock = virtualClock ?? throw new ArgumentNullException(nameof(virtualClock));
         SwarmCoordinator = swarmCoordinator ?? throw new ArgumentNullException(nameof(swarmCoordinator));
         FlightRecorder = flightRecorder ?? throw new ArgumentNullException(nameof(flightRecorder));
+        InvitationCodec = invitationCodec ?? throw new ArgumentNullException(nameof(invitationCodec));
     }
 }

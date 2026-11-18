@@ -42,6 +42,8 @@ internal sealed partial class RelayCardViewModel : ViewModelBase
 
     public ObservableCollection<HeldEnvelopeItemViewModel> HeldEnvelopes { get; } = new();
 
+    public RelayEndpointExportFlyoutViewModel? EndpointExport { get; }
+
     public RelayCardViewModel(
         SimulatedNodeSummary summary,
         IStatusToastService toastService,
@@ -59,6 +61,7 @@ internal sealed partial class RelayCardViewModel : ViewModelBase
 
         if (_host != null)
         {
+            EndpointExport = new RelayEndpointExportFlyoutViewModel(_host, _toastService);
             _heldEnvelopeCount = _host.TotalHeldEnvelopeCount;
             _hostedOpkCount = _host.TotalHostedOpkCount;
             RefreshHeldEnvelopes();

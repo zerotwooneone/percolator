@@ -206,7 +206,7 @@ Created `ShareInvitationDialog` and `ShareInvitationDialogViewModel` to generate
 
 ---
 
-### CONN-12 ⬜ Simulator Dual-Mode Peer & Relay Interoperability (In-World & External with IP Override)
+### CONN-12 ✅ Simulator Dual-Mode Peer & Relay Interoperability (In-World & External with IP Override)
 
 - **Specification Governance:** Refactors the Simulator topology UI so that personas and relays can seamlessly interoperate both internally (between simulated nodes in the same world) and externally (across real TCP/TLS sockets to `Percolator.Desktop` or another network host), with customizable IP address and port configuration.
 

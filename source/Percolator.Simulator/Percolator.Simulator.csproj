@@ -50,5 +50,6 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Percolator.Simulator.Tests" />
+    <InternalsVisibleTo Include="DynamicProxyGenAssembly2" />
   </ItemGroup>
 </Project>

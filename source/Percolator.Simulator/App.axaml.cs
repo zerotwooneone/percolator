@@ -4,6 +4,7 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Percolator.Application.Invitations;
 using Percolator.Simulator.Features.Chaos;
 using Percolator.Simulator.Features.DirectChat;
 using Percolator.Simulator.Features.DiscoverySimulation;
@@ -48,6 +49,7 @@ public partial class App : Avalonia.Application
         services.AddSingleton<IStatusToastService, StatusToastService>();
         services.AddSingleton<IFlightRecorderStateService, FlightRecorderStateService>();
         services.AddSingleton<IVirtualClockStateService, VirtualClockStateService>();
+        services.AddSingleton<IPeerInvitationCodec, PeerInvitationCodec>();
         services.AddSingleton<RichChatActionCoordinator>();
         services.AddSingleton<ProfileSyncCoordinator>();
         services.AddSingleton<ISimulatedNodeFactory, SimulatedNodeFactory>();
